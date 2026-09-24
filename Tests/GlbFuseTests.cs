@@ -805,6 +805,44 @@ public class GlbFuseTests
         Assert.All(faces, f => Assert.Equal(1, full[f]));
     }
 
+    // ---- double-sided by duplication (2026-09-24, SMS Wespe's gun) ----
+    static List<HashSet<uint>> OutputFaceSets(byte[] glb, string node)
+    {
+        var g = Read(glb); var sets = new List<HashSet<uint>>();
+        foreach (JObject prim in g.Primitives(g.Node(node)))
+        {
+            var idx = g.Indices((int)prim["indices"]);
+            for (int t = 0; t + 2 < idx.Length; t += 3) sets.Add(new HashSet<uint> { idx[t], idx[t + 1], idx[t + 2] });
+        }
+        return sets;
+    }
+
+    [Fact]
+    public void A_part_doubled_for_two_sidedness_is_fused_as_two_copies_not_one_soup()
+    {
+        // The gun: every face twice, wound both ways, each copy with its own vertices. Welded together the copies made
+        // every edge a four-face edge: no partners, every face its own sheet, each judged alone - and then both copies
+        // landed on one output index triple, which Blender's importer collapses to one at random. Kept apart, each copy
+        // is one sheet judged whole, and the output carries both on their own vertices.
+        var up = Quad("Plate", 0, 4, 0, 4, 1);                   // a 4 x 4 plate at z = 1 facing +Z ...
+        var down = Quad("Plate", 0, 4, 0, 4, 1, inward: true);   // ... and the same plate again, wound the other way, its own 4 vertices
+        var hull = Box("Hull", 6, -1, -1, -3, inward: false);    // something for the belly axis
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, up, down), new[] { 1, 2 }, 0.0);
+        Assert.Equal(4, r.OutputTriangles);
+        Assert.Contains(r.Details, d => d.StartsWith("twins: 2 face(s)", StringComparison.Ordinal));
+        // two sheets of two faces - not four sheets of one
+        Assert.Equal(2, r.IslandLines.Count(l => l.TrimStart().StartsWith("2 faces", StringComparison.Ordinal)));
+        Assert.DoesNotContain(r.IslandLines, l => l.TrimStart().StartsWith("1 faces", StringComparison.Ordinal));
+        // and no two output faces share a vertex set: nothing for an importer to drop
+        var sets = OutputFaceSets(r.Bytes, "Plate_Fused");
+        for (int i = 0; i < sets.Count; i++) for (int j = i + 1; j < sets.Count; j++) Assert.False(sets[i].SetEquals(sets[j]));
+        // a plate that is NOT doubled is untouched
+        Assert.DoesNotContain(GlbDisconnectedParts.FuseNodes(BuildGlb(hull, up), new[] { 1 }, 0.0).Details, d => d.StartsWith("twins:", StringComparison.Ordinal));
+        // and a same-way duplicate (a z-fighting copy) is not a twin: welded as before, no line
+        var again = Quad("Plate", 0, 4, 0, 4, 1);
+        Assert.DoesNotContain(GlbDisconnectedParts.FuseNodes(BuildGlb(hull, up, again), new[] { 1, 2 }, 0.0).Details, d => d.StartsWith("twins:", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void A_level_plate_authored_facing_down_is_left_to_the_evidence()
     {

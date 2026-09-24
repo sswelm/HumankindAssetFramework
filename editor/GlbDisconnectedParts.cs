@@ -1370,6 +1370,51 @@ public static class GlbDisconnectedParts
         }
         result.IslandsBefore = Islands(WeldClasses(rounding), out _, out _, out _, out _).Count;   // coincident positions only: what the source already connects
         int[] classes = WeldClasses(weld);
+        // DOUBLE-SIDED BY DUPLICATION (2026-09-24, SMS Wespe's gun). A part that carries every face TWICE, wound both
+        // ways, each copy with its own vertices - 6,000 of the gun's 6,053 faces. Welded by position, the two copies
+        // share every class, so every edge becomes a FOUR-face edge, no face has a partner, the sheet walk pairs nothing
+        // (62,928 sheets for 68,974 faces), and each face is judged alone by the radial score - the copies come out with
+        // scrambled windings. Then the emission shares output vertices where attributes agree, both copies land on one
+        // index triple, and Blender's importer - every Lab probe and every bake runs through it - drops duplicate
+        // polygons, keeping one copy at random. Renders: a clean solid before the fuse, holes through the reinforce and
+        // breech after. The cure is to keep the copies apart, as the source had them: a face whose three classes match
+        // another's WITH THE OPPOSITE ORIENTATION is the second copy, and its vertices get classes of their own (offset
+        // past every real class; classes are only ever compared and used as keys). Each copy is then its own manifold
+        // sheet, judged whole, emitted on its own vertices. Same-way duplicates (a z-fighting copy) are left welded: an
+        // importer dropping one of those loses nothing. A vertex used by BOTH a second-copy face and an unpaired face
+        // stays welded, so a copy that shares vertices with its neighbour is not torn from it.
+        {
+            var byTriple = new Dictionary<(int, int, int), List<int>>();
+            for (int f = 0; f < faceCount; f++)
+            {
+                int a = classes[tris[f * 3]], b = classes[tris[f * 3 + 1]], c = classes[tris[f * 3 + 2]];
+                if (a == b || b == c || a == c) continue;   // collapsed or needle: no face to pair with
+                var key = SortedTriple(a, b, c);
+                if (!byTriple.TryGetValue(key, out var l)) byTriple.Add(key, l = new List<int>());
+                l.Add(f);
+            }
+            var secondFace = new bool[faceCount]; int twinFaces = 0;
+            foreach (var group in byTriple.Values)
+            {
+                if (group.Count < 2) continue;
+                int first = group[0]; bool o0 = ClassOrientation(classes, tris, first);
+                foreach (int g in group.Skip(1)) if (ClassOrientation(classes, tris, g) != o0) { secondFace[g] = true; twinFaces++; }
+            }
+            if (twinFaces > 0)
+            {
+                var onlySecond = new bool[pos.Count]; var touched = new bool[pos.Count];
+                for (int f = 0; f < faceCount; f++) for (int c = 0; c < 3; c++)
+                {
+                    int v = tris[f * 3 + c];
+                    if (!touched[v]) { touched[v] = true; onlySecond[v] = secondFace[f]; }
+                    else if (!secondFace[f]) onlySecond[v] = false;
+                }
+                int split = 0;
+                for (int v = 0; v < pos.Count; v++) if (onlySecond[v]) { classes[v] += pos.Count; split++; }
+                result.Details.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "twins: {0} face(s) coincide with another face wound the other way (a part double-sided by duplication); the second copy keeps its own {1} vertices, so each copy is judged and emitted whole", twinFaces, split));
+            }
+        }
         Mark("weld");   // both weld passes (the coincident-only count above and the real one) are charged here, where they run
         // ONE position per welded class. Connectivity is by class, but output vertices are emitted separately wherever
         // UV, normal or material differ, and each kept its own authored position: two plates 0.01 apart across a UV
@@ -2169,6 +2214,23 @@ public static class GlbDisconnectedParts
         Result result = FuseNodes(File.ReadAllBytes(inputPath), nodeIndices, weldFraction);
         if (result.Changed) File.WriteAllBytes(outputPath, result.Bytes);
         return result;
+    }
+
+    static (int, int, int) SortedTriple(int a, int b, int c)
+    {
+        if (a > b) { int t = a; a = b; b = t; }
+        if (b > c) { int t = b; b = c; c = t; }
+        if (a > b) { int t = a; a = b; b = t; }
+        return (a, b, c);
+    }
+
+    // Is the face's class cycle an even permutation of its sorted triple? Two faces on the same three classes with
+    // different answers are wound the opposite way round.
+    static bool ClassOrientation(int[] classes, IList<int> tris, int f)
+    {
+        int a = classes[tris[f * 3]], b = classes[tris[f * 3 + 1]], c = classes[tris[f * 3 + 2]];
+        int inversions = (a > b ? 1 : 0) + (a > c ? 1 : 0) + (b > c ? 1 : 0);
+        return (inversions & 1) == 0;
     }
 
     sealed class FusePrimitive

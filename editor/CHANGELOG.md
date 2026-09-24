@@ -5,6 +5,23 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Fuser: a part that is double-sided by duplication is fused as two copies, not one soup** (user: "an issue
+  with the fused gun that becomes visible in the Vehicle Lab", SMS Wespe). The gun carries every face twice, wound
+  both ways, each copy with its own vertices — 6,000 of its 6,053 faces. Welded by position the two copies shared
+  every vertex class, so every edge was a *four*-face edge: no face had a partner, the sheet walk paired nothing
+  (62,928 sheets for 68,974 faces), each face was judged alone by the radial score, and the copies came out with
+  scrambled windings. Then both copies landed on one output index triple, and Blender's importer — every Lab probe
+  and every bake runs through it — drops duplicate polygons and kept one copy at random (9,033 of the gun's 14,463
+  faces). Rendered: a clean solid before the fuse, holes through the reinforce and breech after. A face whose three
+  welded classes match another's with the *opposite* orientation is now the second copy and keeps vertices of its
+  own, as the source had them; each copy is one manifold sheet judged whole and emitted on its own vertices (the
+  gun: 5,430 duplicate index sets → 53). Same-way duplicates stay welded — an importer dropping one of those loses
+  nothing — and a vertex shared with an unpaired face stays welded so a copy is never torn from its neighbour. The
+  report says how many twins it found. Measured per face in six directions against master: the Wespe's
+  see-through faces 6,188 → 3,024 over 42,691 changed; the frigate and paddle steamer byte-identical; the Romanic
+  and Teutonic a dozen invisible faces. Test: two coincident plates wound both ways fuse to two sheets of two faces,
+  never four of one, with no two output faces on one vertex set; a plain plate and a same-way duplicate are untouched.
+
 - **Vehicle Lab: a Shroud role with its own reduce dial** (user request). The standing rigging — shrouds, stays,
   ratlines — is the densest geometry on a sailing ship and wants a harder cut than the running rigging, and it must
   *not* ride the Sail bone the way Rigging can (it holds the mast up). Same soup-pass reduction as Rigging (no weld;
