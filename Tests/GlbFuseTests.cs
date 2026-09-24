@@ -866,6 +866,28 @@ public class GlbFuseTests
     }
 
     [Fact]
+    public void A_nearby_face_in_front_does_not_hide_a_doubled_pair_behind_it()
+    {
+        // Second review of PR #82, P2: within a welded-class group every face was compared only with the group's FIRST
+        // face. Put a nearby, non-coincident plate first and the coincident opposite pair behind it was never
+        // recognised: three quads, 12 vertices welded to 4, one copy rewound, duplicate faces left for the importer.
+        var near = Quad("Plate", 0, 4, 0, 4, 1.05f);                // in front, within the weld, NOT coincident
+        var up = Quad("Plate", 0, 4, 0, 4, 1f);                     // the doubled pair, coincident, wound both ways
+        var down = Quad("Plate", 0, 4, 0, 4, 1f, inward: true);
+        var hull = Box("Hull", 6, -1, -1, -3, inward: false);
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, near, up, down), new[] { 1, 2, 3 }, 0.02);
+        Assert.Contains(r.Details, d => d.StartsWith("twins: 2 face(s)", StringComparison.Ordinal));
+        var sets = OutputFaceSets(r.Bytes, "Plate_Fused"); var normals = FusedNormals(r, "Plate_Fused");
+        Assert.Equal(6, sets.Count);
+        // The near plate and the pair's up copy are 0.05 apart under a 0.2 weld: the weld collapses them onto one face,
+        // the same way round, and an importer dropping one of THOSE loses nothing. What must never happen is two faces
+        // on one vertex set wound OPPOSITE ways - that is the pair collapsed, one side lost.
+        for (int i = 0; i < sets.Count; i++) for (int j = i + 1; j < sets.Count; j++)
+            if (sets[i].SetEquals(sets[j])) Assert.True(normals[i][2] * normals[j][2] > 0, "a doubled pair collapsed onto one vertex set: one side lost");
+        Assert.True(normals.Count(n => n[2] < -0.9) >= 2, "the down copy of the pair is still down");
+    }
+
+    [Fact]
     public void A_level_plate_authored_facing_down_is_left_to_the_evidence()
     {
         // The rule is one-sided on purpose. The frigate carries two 11.4 x 5.2 zero-thickness plates over its boat

@@ -35,6 +35,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   within a non-zero weld radius passed as twins, were un-welded and exempted from the winding rules; every corner must
   now sit within a millionth of the model of the other face's. And the winding is restored *before* the counts, so
   `FacesRewound` and the per-part line describe the output. Both tested; byte-identical on all five ships.
+  **Second review (P2):** within a welded-class group faces were paired only with the group's *first* face, so a
+  nearby non-coincident face in front hid the genuine pair behind it (three quads welded to four vertices, one copy
+  rewound). Faces now pair by coincidence with any earlier face in their group. Tested; byte-identical on all five ships.
 
 - **Vehicle Lab: a Shroud role with its own reduce dial** (user request). The standing rigging — shrouds, stays,
   ratlines — is the densest geometry on a sailing ship and wants a harder cut than the running rigging, and it must

@@ -1410,13 +1410,25 @@ public static class GlbDisconnectedParts
                 }
                 return true;
             }
+            // Pair by coincidence WITHIN the group, every face against every earlier one (second review of PR #82, P2):
+            // comparing only against the group's first face let a nearby, non-coincident face in front hide the genuine
+            // pair behind it - three quads, 12 vertices, welded to 4, one copy rewound, duplicate faces left for the
+            // importer. A face that already is somebody's second copy is not paired again.
             var secondFace = new bool[faceCount]; int twinFaces = 0;
             foreach (var group in byTriple.Values)
             {
                 if (group.Count < 2) continue;
-                int first = group[0]; bool o0 = ClassOrientation(classes, tris, first);
-                foreach (int g in group.Skip(1))
-                    if (ClassOrientation(classes, tris, g) != o0 && Coincident(first, g)) { secondFace[g] = true; twinFace[g] = true; twinFace[first] = true; twinFaces++; }
+                for (int gi = 1; gi < group.Count; gi++)
+                {
+                    int g = group[gi]; if (secondFace[g]) continue;
+                    bool og = ClassOrientation(classes, tris, g);
+                    for (int fi = 0; fi < gi; fi++)
+                    {
+                        int f = group[fi];
+                        if (secondFace[f] || ClassOrientation(classes, tris, f) == og || !Coincident(f, g)) continue;
+                        secondFace[g] = true; twinFace[g] = true; twinFace[f] = true; twinFaces++; break;
+                    }
+                }
             }
             if (twinFaces > 0)
             {
