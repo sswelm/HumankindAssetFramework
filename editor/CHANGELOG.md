@@ -22,6 +22,27 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   master the fixed fuse changes 158 faces on the Wespe, 31 on the frigate, 6 on the Romanic, 26 on the Teutonic and
   none on the paddle steamer; every non-Wespe cluster censuses identically before and after. Test: a wall facing
   the hull's axis with a skewed opposite skin (48 twins in front / 32 behind) was reversed whole; both now keep.
+  **Second cut** (user: "it still seems to look transparent", after regrouping): the deck plating round the hatch
+  came out as a 96-face sheet, 48 twins in front / 48 behind, whose signed volume read a confident −0.70 — half of
+  it is one copy and half the other, so the cones agree on a sign that means nothing — and the volume rule, asked
+  before the twin evidence, reversed it whole: 146 ray cells of deck see-through from above. An undecided double
+  wall is now asked before the volume (a decided vote still defers to it, as the tie-breaker note says). Test: a
+  U-shaped double wall with volume agreement −1.00 and a 32 / 48 vote, reversed on master, kept now. And the rest
+  of that deck belonged to the 10,713-face hull sheet, which was *kept* — the parity walk itself had turned the
+  plating, as the smaller side of a 2-colouring: a 255-face minority. Measured from far outside the model, 22 of
+  those faces are exposed on their authored front (the deck strip round the hatch) and 6 on their back; the 89
+  majority faces across the seam are all exposed on their authored front. Both sides are right as authored, and
+  what joins them is a game rip's join — a deck welded to the bottom edge of the wall above it, a deck top abutting
+  a ceiling in one plane — which no winding satisfies and which the size rule "satisfied" by turning the smaller
+  region. No local reading of the seam tells a join from an error (a deck meeting a ceiling in one plane looks
+  exactly like a reversed patch; a seam classifier was tried and measured wrong), so the fuse now uses the evidence
+  the census uses: the view from above. Before a parity class is recoloured, every level face of both classes is
+  asked whether anything of the whole model sits above it (a vertical ray against every mesh node of the file — the
+  group alone read 57 ceilings as exposed whose decks belong to other groups); the recolouring
+  that leaves the most exposed faces showing their front wins, and on a tie the size rule stands. A reversed patch
+  shows its back to the sky and is turned as before; the deck strip shows its front and stays. The report says so
+  per sheet and in a Details line. Tests: a floor welded to the bottom edges of four outward walls stays up; a
+  reversed quad in a flat strip is still turned.
 
 - **Model Fuser: a part that is double-sided by duplication is fused as two copies, not one soup** (user: "an issue
   with the fused gun that becomes visible in the Vehicle Lab", SMS Wespe). The gun carries every face twice, wound

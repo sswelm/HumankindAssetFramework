@@ -1162,7 +1162,7 @@ public static class GlbDisconnectedParts
         public double Weld, WeldFraction, Longest; public int MadeConsistent, OpenJudged, OpenReversed, ClosedReversed, FaceCount, CollapsedFaces, NotOrientable;
         public string LargestIslands, StitchedLine, RewoundByPart, Timing, FrameLine;
         public string MirroredLine;   // the mirrored-part check's verdicts (null unless the check ran with the option on)
-        public string TwinsLine, TwinsRestoredLine, AsAuthoredLine;   // doubled-face diagnostics (null unless found) - appended AFTER the summary, which the Workshop shows as Details[0] (review of PR #82, P3)
+        public string TwinsLine, TwinsRestoredLine, AsAuthoredLine, FromAboveLine;   // doubled-face diagnostics (null unless found) - appended AFTER the summary, which the Workshop shows as Details[0] (review of PR #82, P3)
         public int MirroredJudgedUndo, MirroredJudgedKeep, MirroredParts;   // this group's evidence, pooled across the run by FuseGroups
         public IList<int> NodeIndices; public string FusedName; public bool CheckMirrored;   // enough to re-plan the group once the run's verdict is known
         public bool Empty;   // no triangles: nothing to append, the sources keep their meshes, Result.Changed stays false
@@ -1650,8 +1650,73 @@ public static class GlbDisconnectedParts
         // two faces that geometrically CONTINUE each other at a junction was tried and rejected the same day: the
         // Romanic's Object_4 alone went from 0 to 3 non-orientable sheets (its inner and outer skins meet its decks at
         // three-face rims, and a continuation pair there closes odd cycles); a branch at a junction starts its own sheet.
+        // FROM ABOVE (2026-09-24, the Wespe's deck plating round the hatch): is anything of the MODEL above a face's
+        // centroid? Every mesh node of the file is an occluder (the group's own faces included), as the belly sampler
+        // reads every node - measured on the ship, the group alone read 57 ceilings as "exposed" whose decks belong to
+        // other groups. A column grid over (x, z), built on first use; a vertical ray from the model's top, Möller-
+        // Trumbore per candidate; the face itself and a copy coincident with it (a doubled surface) are not occluders.
+        Dictionary<long, List<int>> columns = null; var occluders = new List<Vec3>(); double columnCell = 1, modelTop = 0;
+        void EnsureOccluders()
+        {
+            if (columns != null) return;
+            columns = new Dictionary<long, List<int>>();
+            var lo = new[] { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity }; var hi = new[] { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
+            try
+            {
+                for (int ni = 0; ni < nodes.Count; ni++)
+                {
+                    var node = nodes[ni] as JObject; if (node?["mesh"] == null) continue;
+                    int mi = node.Value<int>("mesh"); if (mi < 0 || mi >= meshes.Count) continue;
+                    var pl = (meshes[mi] as JObject)?["primitives"] as JArray; if (pl == null) continue;
+                    double[] world = NodeWorldMatrix(nodes, ni);
+                    foreach (JObject prim in TrianglePrimitives(pl))
+                    {
+                        var attrs = prim["attributes"] as JObject; if (attrs?["POSITION"] == null) continue;
+                        int posAcc = attrs.Value<int>("POSITION"); int vertCount = reader.Count(posAcc);
+                        int idxAcc = prim["indices"] == null ? -1 : prim.Value<int>("indices");
+                        int faceN = (idxAcc < 0 ? vertCount : reader.Count(idxAcc)) / 3;
+                        for (int f = 0; f < faceN; f++)
+                        {
+                            uint i0 = idxAcc < 0 ? (uint)(f * 3) : reader.Index(idxAcc, (uint)(f * 3)), i1 = idxAcc < 0 ? (uint)(f * 3 + 1) : reader.Index(idxAcc, (uint)(f * 3 + 1)), i2 = idxAcc < 0 ? (uint)(f * 3 + 2) : reader.Index(idxAcc, (uint)(f * 3 + 2));
+                            if (i0 >= vertCount || i1 >= vertCount || i2 >= vertCount) continue;
+                            Vec3 a = XForm(world, reader.Position(posAcc, i0)), b = XForm(world, reader.Position(posAcc, i1)), c = XForm(world, reader.Position(posAcc, i2));
+                            occluders.Add(a); occluders.Add(b); occluders.Add(c);
+                            UpdateBounds(lo, hi, a); UpdateBounds(lo, hi, b); UpdateBounds(lo, hi, c);
+                        }
+                    }
+                }
+            }
+            catch (Exception) { occluders.Clear(); }
+            if (occluders.Count == 0) { modelTop = mx[1]; return; }
+            modelTop = hi[1];
+            columnCell = Math.Max(Math.Max(hi[0] - lo[0], hi[2] - lo[2]) / 256.0, 1e-9);
+            for (int t = 0; t < occluders.Count; t += 3)
+            {
+                Vec3 a = occluders[t], b = occluders[t + 1], c = occluders[t + 2];
+                long x0 = (long)Math.Floor(Math.Min(a.X, Math.Min(b.X, c.X)) / columnCell), x1 = (long)Math.Floor(Math.Max(a.X, Math.Max(b.X, c.X)) / columnCell);
+                long z0 = (long)Math.Floor(Math.Min(a.Z, Math.Min(b.Z, c.Z)) / columnCell), z1 = (long)Math.Floor(Math.Max(a.Z, Math.Max(b.Z, c.Z)) / columnCell);
+                x1 = Math.Min(x1, x0 + 64); z1 = Math.Min(z1, z0 + 64);   // a triangle a quarter of the model wide is capped: a stray sliver cannot shade everything
+                for (long x = x0; x <= x1; x++) for (long z = z0; z <= z1; z++)
+                { long key = (x << 32) ^ (z & 0xffffffffL); if (!columns.TryGetValue(key, out List<int> l)) columns.Add(key, l = new List<int>()); l.Add(t); }
+            }
+        }
+        bool ExposedFromAbove(int f)
+        {
+            EnsureOccluders();
+            Vec3 c = FScale(FAdd(FAdd(P(f, 0), P(f, 1)), P(f, 2)), 1.0 / 3.0);
+            double top = modelTop + columnCell, tf = top - c.Y; if (tf <= 0) return true;
+            var o = new Vec3 { X = c.X, Y = top, Z = c.Z }; var d = new Vec3 { X = 0, Y = -1, Z = 0 };
+            long key = ((long)Math.Floor(c.X / columnCell) << 32) ^ ((long)Math.Floor(c.Z / columnCell) & 0xffffffffL);
+            if (!columns.TryGetValue(key, out List<int> l)) return true;
+            foreach (int t in l)
+            {
+                double hit = RayTriangle(o, d, occluders[t], occluders[t + 1], occluders[t + 2]);
+                if (hit > 0 && hit < tf - 1e-6 * Math.Max(1.0, tf)) return false;
+            }
+            return true;
+        }
         var flip = new bool[faceCount];
-        int islandsMadeConsistent = 0, islandsNotOrientable = 0, asAuthoredSheets = 0;
+        int islandsMadeConsistent = 0, islandsNotOrientable = 0, asAuthoredSheets = 0, fromAboveKept = 0, majorityTurned = 0;
         bool DirOf(int face, long key) { for (int e = 0; e < 3; e++) if (fEdgeKeys[face * 3 + e] == key) return fEdgeDir[face * 3 + e]; return false; }
         long PairKey(int f, int g) => f < g ? ((long)f << 32) | (uint)g : ((long)g << 32) | (uint)f;
         Vec3 P(int f, int corner) => pos[tris[f * 3 + corner]];
@@ -1780,8 +1845,48 @@ public static class GlbDisconnectedParts
             else if (ones > 0 && ones < isl.Count)
             {
                 int minor = ones * 2 <= isl.Count ? 1 : 0;
-                foreach (int f in isl) if (parityOf[f] == minor) flip[f] = true;
-                islandsMadeConsistent++;
+                // SEEN FROM ABOVE BEFORE RECOLOURED (2026-09-24, the Wespe's deck plating round the hatch, after the
+                // user's regrouping): the hull sheet, 10,713 faces, 2-colourable, walked to a 255-face minority that
+                // the size rule turned whole - the deck strip round the hatch among them, 146 ray cells of deck
+                // see-through from above. Measured from far outside the model, 22 of the 255 are exposed on their
+                // authored front (the deck strip) and 6 on their back; the 89 majority faces across the seam are all
+                // exposed on their authored front. Both sides are right as authored; what joins them is a game rip's
+                // join (a deck welded to the bottom edge of the wall above it, a deck top abutting a ceiling in one
+                // plane), which no winding satisfies and which the size rule "satisfied" by turning the smaller side.
+                // No local reading of the seam tells a join from an error - a deck top meeting a ceiling in one plane
+                // looks exactly like a reversed patch (a seam classifier was tried and measured wrong) - so the
+                // evidence is the one the census uses: the view from above, against the WHOLE model. Every level face
+                // of both classes is asked whether anything sits above it; the recolouring that leaves the most
+                // exposed faces showing their front wins, and on a tie the size rule stands. A reversed patch in a
+                // plate shows its back to the sky and is turned as before; a deck welded to the walls above it shows
+                // its front and stays. The majority is only counted while it is small enough to ask (its faces are
+                // assumed right otherwise, as the size rule always assumed).
+                int minFront = 0, minBack = 0, majFront = 0, majBack = 0;
+                bool askMajority = isl.Count - (minor == 1 ? ones : isl.Count - ones) <= 6000;
+                foreach (int f in isl)
+                {
+                    bool minority = parityOf[f] == minor; if (!minority && !askMajority) continue;
+                    Vec3 nf = FaceNormal(f); double nl = FLen(nf); if (nl < 1e-12 || Math.Abs(nf.Y) < 0.5 * nl) continue;
+                    if (!ExposedFromAbove(f)) continue;
+                    if (nf.Y > 0) { if (minority) minFront++; else majFront++; } else { if (minority) minBack++; else majBack++; }
+                }
+                int keep = minFront + majFront, turnMinority = minBack + majFront, turnMajority = minFront + majBack;
+                if (turnMinority >= keep && turnMinority >= turnMajority)
+                {
+                    foreach (int f in isl) if (parityOf[f] == minor) flip[f] = true;
+                    islandsMadeConsistent++;
+                }
+                else if (turnMajority > keep)
+                {
+                    foreach (int f in isl) if (parityOf[f] != minor) flip[f] = true;
+                    islandsMadeConsistent++; majorityTurned++;
+                    islandConflict[ii] += string.Format(System.Globalization.CultureInfo.InvariantCulture, " — seen from above the MAJORITY shows its back ({0} down-facing exposed against {1} up-facing in the minority): the majority is turned", majBack, minFront);
+                }
+                else
+                {
+                    fromAboveKept++;
+                    islandConflict[ii] += string.Format(System.Globalization.CultureInfo.InvariantCulture, " — seen from above the minority shows its front ({0} up-facing exposed, {1} down-facing): a join, not an error, left as authored", minFront, minBack);
+                }
             }
         }
 
@@ -2029,10 +2134,13 @@ public static class GlbDisconnectedParts
                 double floorMargin = 0.05 * Math.Max(0.0, bellyY - floorY);
                 bool deckFacingUp = (upness > 0.8 && floorFaceY > floorY + floorMargin) || (upness > 0.5 && floorFaceY > bellyY);
                 bool doubleWall = partnered * 2 >= isl.Count && partnered > 0;   // twinned on most faces; doubleSkin is this AND a decided vote
-                if (volumeConfident && (volume >= 0 || !deckFacingUp)) reverse = volume < 0 && !enclosed;
+                // the undecided double wall is asked FIRST, ahead of the volume: its volume is as much noise as its
+                // score (the deck plating round the Wespe's hatch, 96 faces, 48 twins in front / 48 behind, read a
+                // confident -0.70 and was reversed whole - see below)
+                if (doubleWall && !doubleSkin) asAuthored = true;
+                else if (volumeConfident && (volume >= 0 || !deckFacingUp)) reverse = volume < 0 && !enclosed;
                 else if (doubleSkin) reverse = twinInFront > twinBehind;
                 else if (deckFacingUp) reverse = false;         // a deck, already facing up: nothing to correct
-                else if (doubleWall) asAuthored = true;         // a double wall, undecided: left as authored, see below
                 else reverse = score < -0.25;
                 if (reverse) openReversed++;
             }
@@ -2048,6 +2156,13 @@ public static class GlbDisconnectedParts
             // The radial score judges a SINGLE skin, and parity a surface with ONE right side; a sheet the twin
             // evidence already describes as double-walled is neither. Its author saw the skin that is visible, and
             // the source, which is the reference, renders it. So every face keeps its authored winding.
+            // And the VOLUME is no better a judge of it (the same day, the user's regrouping): the deck plating round
+            // the hatch came out as a 96-face sheet, 48 twins in front / 48 behind, whose signed volume read a
+            // confident -0.70 - half of it is one copy and half the other, wound opposite ways, so the cones agree
+            // on a sign that means nothing - and the volume rule, which comes first for a single skin, reversed it
+            // whole: 146 ray cells of deck see-through from above. An undecided double wall is asked before the
+            // volume. A DECIDED vote (doubleSkin) still goes to the volume first, as the tie-breaker note says: from
+            // inside a gap, air between two solids looks like a skin, and those all vote one way.
             if (asAuthored)
             {
                 foreach (int f in isl) flip[f] = false;
@@ -2071,6 +2186,8 @@ public static class GlbDisconnectedParts
         // is actually turned in the output.
         int twinsRestored = 0;
         for (int f = 0; f < faceCount; f++) if (twinFace[f] && flip[f]) { flip[f] = false; twinsRestored++; }
+        if (fromAboveKept + majorityTurned > 0) plan.FromAboveLine = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+            "from above: {0} sheet(s) whose parity minority shows its authored front to the sky keep their authored winding, {1} had the majority turned instead - a join is not a winding error", fromAboveKept, majorityTurned);
         if (asAuthoredSheets > 0) plan.AsAuthoredLine = string.Format(System.Globalization.CultureInfo.InvariantCulture,
             "double walls: {0} sheet(s) twinned on most faces with an undecided vote keep their authored winding - the radial score and the parity walk judge single skins", asAuthoredSheets);
         if (twinsRestored > 0) plan.TwinsRestoredLine = string.Format(System.Globalization.CultureInfo.InvariantCulture,
@@ -2248,6 +2365,7 @@ public static class GlbDisconnectedParts
         if (plan.TwinsLine != null) result.Details.Add(plan.TwinsLine);                   // after everything the tests pin by index
         if (plan.TwinsRestoredLine != null) result.Details.Add(plan.TwinsRestoredLine);
         if (plan.AsAuthoredLine != null) result.Details.Add(plan.AsAuthoredLine);
+        if (plan.FromAboveLine != null) result.Details.Add(plan.FromAboveLine);
     }
 
     // REMOVE (2026-09-18, user: "an easy way to mark a unit for removal with the Del key"): the marked nodes lose their
@@ -2283,6 +2401,16 @@ public static class GlbDisconnectedParts
         Result result = FuseNodes(File.ReadAllBytes(inputPath), nodeIndices, weldFraction);
         if (result.Changed) File.WriteAllBytes(outputPath, result.Bytes);
         return result;
+    }
+
+    // Möller-Trumbore: the distance along `d` from `o` to the triangle, or -1 when the ray misses it
+    static double RayTriangle(Vec3 o, Vec3 d, Vec3 v0, Vec3 v1, Vec3 v2)
+    {
+        Vec3 e1 = FSub(v1, v0), e2 = FSub(v2, v0), p = FCross(d, e2); double det = FDot(e1, p);
+        if (Math.Abs(det) < 1e-12) return -1; double inv = 1.0 / det;
+        Vec3 tv = FSub(o, v0); double u = FDot(tv, p) * inv; if (u < -1e-9 || u > 1 + 1e-9) return -1;
+        Vec3 q = FCross(tv, e1); double v = FDot(d, q) * inv; if (v < -1e-9 || u + v > 1 + 1e-9) return -1;
+        return FDot(e2, q) * inv;
     }
 
     static (int, int, int) SortedTriple(int a, int b, int c)
