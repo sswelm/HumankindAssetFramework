@@ -422,7 +422,9 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   per-face volumes agree and there is real thickness — and never a *deck*: a level sheet already facing up above the
   hull's floor, or facing up on balance above the belly line, is a deck however negative its volume reads, because a
   deck with a rim is a tray and a tray seen from above is the same surface as a box wound inside out), a *flat* sheet
-  (deck, bulwark) by the inside-out score against the hull's belly axis. Every sheet's report line now carries its
+  (deck, bulwark) by the inside-out score against the hull's belly axis. A part *double-sided by duplication* (every
+  face twice, wound both ways) is kept as two copies through the weld, so each is judged and emitted whole — welded
+  together they made four-face edges everywhere and an importer then dropped one copy at random. Every sheet's report line now carries its
   levelness (`level +1.00` = every face up) and height, which is what makes a wrong verdict traceable. Welded vertices share one position even where a UV seam or hard edge keeps them separate;
   vertex colours, further UV sets and custom attributes ride along and keep their own seams too (tangents are the
   one thing dropped — the importer recomputes them from the new winding); and a mirrored instance (a node with negative scale, the usual "other half" of a symmetric hull) is read with the

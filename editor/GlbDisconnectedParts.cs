@@ -1162,6 +1162,7 @@ public static class GlbDisconnectedParts
         public double Weld, WeldFraction, Longest; public int MadeConsistent, OpenJudged, OpenReversed, ClosedReversed, FaceCount, CollapsedFaces, NotOrientable;
         public string LargestIslands, StitchedLine, RewoundByPart, Timing, FrameLine;
         public string MirroredLine;   // the mirrored-part check's verdicts (null unless the check ran with the option on)
+        public string TwinsLine, TwinsRestoredLine;   // doubled-face diagnostics (null unless found) - appended AFTER the summary, which the Workshop shows as Details[0] (review of PR #82, P3)
         public int MirroredJudgedUndo, MirroredJudgedKeep, MirroredParts;   // this group's evidence, pooled across the run by FuseGroups
         public IList<int> NodeIndices; public string FusedName; public bool CheckMirrored;   // enough to re-plan the group once the run's verdict is known
         public bool Empty;   // no triangles: nothing to append, the sources keep their meshes, Result.Changed stays false
@@ -1370,6 +1371,81 @@ public static class GlbDisconnectedParts
         }
         result.IslandsBefore = Islands(WeldClasses(rounding), out _, out _, out _, out _).Count;   // coincident positions only: what the source already connects
         int[] classes = WeldClasses(weld);
+        // DOUBLE-SIDED BY DUPLICATION (2026-09-24, SMS Wespe's gun). A part that carries every face TWICE, wound both
+        // ways, each copy with its own vertices - 6,000 of the gun's 6,053 faces. Welded by position, the two copies
+        // share every class, so every edge becomes a FOUR-face edge, no face has a partner, the sheet walk pairs nothing
+        // (62,928 sheets for 68,974 faces), and each face is judged alone by the radial score - the copies come out with
+        // scrambled windings. Then the emission shares output vertices where attributes agree, both copies land on one
+        // index triple, and Blender's importer - every Lab probe and every bake runs through it - drops duplicate
+        // polygons, keeping one copy at random. Renders: a clean solid before the fuse, holes through the reinforce and
+        // breech after. The cure is to keep the copies apart, as the source had them: a face whose three classes match
+        // another's WITH THE OPPOSITE ORIENTATION is the second copy, and its vertices get classes of their own (offset
+        // past every real class; classes are only ever compared and used as keys). Each copy is then its own manifold
+        // sheet, judged whole, emitted on its own vertices. Same-way duplicates (a z-fighting copy) are left welded: an
+        // importer dropping one of those loses nothing. A vertex used by BOTH a second-copy face and an unpaired face
+        // stays welded, so a copy that shares vertices with its neighbour is not torn from it.
+        var twinFace = new bool[faceCount];   // BOTH copies of every opposite-wound coincident pair: authored two-sided, never turned (see the flip stage)
+        {
+            var byTriple = new Dictionary<(int, int, int), List<int>>();
+            for (int f = 0; f < faceCount; f++)
+            {
+                int a = classes[tris[f * 3]], b = classes[tris[f * 3 + 1]], c = classes[tris[f * 3 + 2]];
+                if (a == b || b == c || a == c) continue;   // collapsed or needle: no face to pair with
+                var key = SortedTriple(a, b, c);
+                if (!byTriple.TryGetValue(key, out var l)) byTriple.Add(key, l = new List<int>());
+                l.Add(f);
+            }
+            // ...and COINCIDE (review of PR #82, P2): the classes say "within the weld radius", which at a non-zero weld
+            // is not the same thing - a thin plate's two skins 0.05 apart under a 0.08 weld share every class, wound the
+            // opposite way, and are not a doubled face but the very seam the weld was asked to close. A twin is a copy
+            // at the SAME position: every corner of one within `rounding` (a millionth of the model) of a corner of the
+            // other. `pos` still holds the authored positions here; the class centroids are applied below.
+            double coincide2 = rounding * rounding;
+            bool Coincident(int fa, int fb)
+            {
+                for (int cb = 0; cb < 3; cb++)
+                {
+                    Vec3 q = pos[tris[fb * 3 + cb]]; bool hit = false;
+                    for (int ca = 0; ca < 3 && !hit; ca++) hit = FDist2(pos[tris[fa * 3 + ca]], q) <= coincide2;
+                    if (!hit) return false;
+                }
+                return true;
+            }
+            // Pair by coincidence WITHIN the group, every face against every earlier one (second review of PR #82, P2):
+            // comparing only against the group's first face let a nearby, non-coincident face in front hide the genuine
+            // pair behind it - three quads, 12 vertices, welded to 4, one copy rewound, duplicate faces left for the
+            // importer. A face that already is somebody's second copy is not paired again.
+            var secondFace = new bool[faceCount]; int twinFaces = 0;
+            foreach (var group in byTriple.Values)
+            {
+                if (group.Count < 2) continue;
+                for (int gi = 1; gi < group.Count; gi++)
+                {
+                    int g = group[gi]; if (secondFace[g]) continue;
+                    bool og = ClassOrientation(classes, tris, g);
+                    for (int fi = 0; fi < gi; fi++)
+                    {
+                        int f = group[fi];
+                        if (secondFace[f] || ClassOrientation(classes, tris, f) == og || !Coincident(f, g)) continue;
+                        secondFace[g] = true; twinFace[g] = true; twinFace[f] = true; twinFaces++; break;
+                    }
+                }
+            }
+            if (twinFaces > 0)
+            {
+                var onlySecond = new bool[pos.Count]; var touched = new bool[pos.Count];
+                for (int f = 0; f < faceCount; f++) for (int c = 0; c < 3; c++)
+                {
+                    int v = tris[f * 3 + c];
+                    if (!touched[v]) { touched[v] = true; onlySecond[v] = secondFace[f]; }
+                    else if (!secondFace[f]) onlySecond[v] = false;
+                }
+                int split = 0;
+                for (int v = 0; v < pos.Count; v++) if (onlySecond[v]) { classes[v] += pos.Count; split++; }
+                plan.TwinsLine = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "twins: {0} face(s) coincide with another face wound the other way (a part double-sided by duplication); the second copy keeps its own {1} vertices, so each copy is judged and emitted whole", twinFaces, split);
+            }
+        }
         Mark("weld");   // both weld passes (the coincident-only count above and the real one) are charged here, where they run
         // ONE position per welded class. Connectivity is by class, but output vertices are emitted separately wherever
         // UV, normal or material differ, and each kept its own authored position: two plates 0.01 apart across a UV
@@ -1964,6 +2040,20 @@ public static class GlbDisconnectedParts
                 partnered > 0 ? string.Format(System.Globalization.CultureInfo.InvariantCulture, ", double skin {0:0}% twinned ({1} twin in front / {2} behind, at {3:0.00} of reach, {4:0.00} straight)", 100.0 * partnered / isl.Count, twinInFront, twinBehind, twinDist[ii], twinStraight[ii]) : "", upness, islandY);
         }
         Mark("direction");
+        // TWINS KEEP THEIR AUTHORED WINDING (2026-09-24, the Wespe's gun, second cut). Kept apart, the two copies were
+        // still judged as two sheets - and each copy is only MOSTLY one way: at the reinforce ring, where the surface
+        // folds back into the barrel, the outward face belongs to the other copy than everywhere else, and the parity
+        // walk sees that fold as consistent. Reversing copy B whole (volume -0.92) turned its ring faces in beside copy
+        // A's, and the ring's underside vanished from below. But an authored opposite pair IS already two-sided: one
+        // face each way at every position, whichever copy holds which. No reversal can improve it and any reversal of
+        // one copy alone breaks it. So a twin face keeps exactly the winding it was authored with - consistency pass
+        // and direction verdict both undone - and the part renders as its source did, which is the reference.
+        // Done HERE, before any count is taken (review of PR #82, P3): FacesRewound and the per-part line count what
+        // is actually turned in the output.
+        int twinsRestored = 0;
+        for (int f = 0; f < faceCount; f++) if (twinFace[f] && flip[f]) { flip[f] = false; twinsRestored++; }
+        if (twinsRestored > 0) plan.TwinsRestoredLine = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+            "twins: {0} face(s) of doubled pairs had been turned by the winding passes and keep their authored winding instead - a pair wound both ways is already two-sided", twinsRestored);
         foreach (bool b in flip) if (b) result.FacesRewound++;
         // per PART: how many of its faces were turned — the reader's question after "why does my port side still render
         // inside out" is which part the pass left alone (2026-09-18, the Romanic's group D)
@@ -2134,6 +2224,8 @@ public static class GlbDisconnectedParts
         result.Details.Add("timing: " + plan.Timing + "; write " + writeClock.ElapsedMilliseconds.ToString(inv) + " ms");
         result.Details.Add(plan.FrameLine);
         if (plan.MirroredLine != null) result.Details.Add(plan.MirroredLine);   // last: tests pin the earlier lines by index
+        if (plan.TwinsLine != null) result.Details.Add(plan.TwinsLine);                   // after everything the tests pin by index
+        if (plan.TwinsRestoredLine != null) result.Details.Add(plan.TwinsRestoredLine);
     }
 
     // REMOVE (2026-09-18, user: "an easy way to mark a unit for removal with the Del key"): the marked nodes lose their
@@ -2169,6 +2261,23 @@ public static class GlbDisconnectedParts
         Result result = FuseNodes(File.ReadAllBytes(inputPath), nodeIndices, weldFraction);
         if (result.Changed) File.WriteAllBytes(outputPath, result.Bytes);
         return result;
+    }
+
+    static (int, int, int) SortedTriple(int a, int b, int c)
+    {
+        if (a > b) { int t = a; a = b; b = t; }
+        if (b > c) { int t = b; b = c; c = t; }
+        if (a > b) { int t = a; a = b; b = t; }
+        return (a, b, c);
+    }
+
+    // Is the face's class cycle an even permutation of its sorted triple? Two faces on the same three classes with
+    // different answers are wound the opposite way round.
+    static bool ClassOrientation(int[] classes, IList<int> tris, int f)
+    {
+        int a = classes[tris[f * 3]], b = classes[tris[f * 3 + 1]], c = classes[tris[f * 3 + 2]];
+        int inversions = (a > b ? 1 : 0) + (a > c ? 1 : 0) + (b > c ? 1 : 0);
+        return (inversions & 1) == 0;
     }
 
     sealed class FusePrimitive

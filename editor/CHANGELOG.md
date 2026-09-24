@@ -5,6 +5,41 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Fuser: a part that is double-sided by duplication is fused as two copies, not one soup** (user: "an issue
+  with the fused gun that becomes visible in the Vehicle Lab", SMS Wespe). The gun carries every face twice, wound
+  both ways, each copy with its own vertices — 6,000 of its 6,053 faces. Welded by position the two copies shared
+  every vertex class, so every edge was a *four*-face edge: no face had a partner, the sheet walk paired nothing
+  (62,928 sheets for 68,974 faces), each face was judged alone by the radial score, and the copies came out with
+  scrambled windings. Then both copies landed on one output index triple, and Blender's importer — every Lab probe
+  and every bake runs through it — drops duplicate polygons and kept one copy at random (9,033 of the gun's 14,463
+  faces). Rendered: a clean solid before the fuse, holes through the reinforce and breech after. A face whose three
+  welded classes match another's with the *opposite* orientation is now the second copy and keeps vertices of its
+  own, as the source had them; each copy is one manifold sheet judged whole and emitted on its own vertices (the
+  gun: 5,430 duplicate index sets → 53). Same-way duplicates stay welded — an importer dropping one of those loses
+  nothing — and a vertex shared with an unpaired face stays welded so a copy is never torn from its neighbour. The
+  report says how many twins it found. Measured per face in six directions against master: the Wespe's
+  see-through faces 6,188 → 3,024 over 42,691 changed; the frigate and paddle steamer byte-identical; the Romanic
+  and Teutonic a dozen invisible faces. Test: two coincident plates wound both ways fuse to two sheets of two faces,
+  never four of one, with no two output faces on one vertex set; a plain plate and a same-way duplicate are untouched.
+  **Second cut** (user: "still issues on the barrel compared to the original"): kept apart, the two copies were still
+  *judged* as two sheets, and each copy is only mostly one way — at the reinforce ring, where the surface folds back
+  into the barrel, the outward face belongs to the other copy than everywhere else, and the parity walk sees the fold
+  as consistent. Reversing copy B whole turned its ring faces in beside copy A's, and the ring's underside vanished
+  from below. An authored opposite pair is *already* two-sided, one face each way at every position, so no reversal
+  can improve it and any reversal of one copy breaks it: twin faces now keep exactly their authored winding. The gun
+  box measured from six directions, counting a hit solid if *any* face there faces the ray: identical to the source,
+  zero cells gained or lost. Whole ship on that honest measure: Wespe 847 see-through cells on master → 767 (source
+  646); Romanic 9 → 9. (A naive census that trusts the ray's first hit reads authored pairs as coin flips and
+  claimed the opposite; it is not the measure.)
+  **Review (P2, P3):** a twin must *coincide* — the first cut compared welded classes, so a thin plate's two skins
+  within a non-zero weld radius passed as twins, were un-welded and exempted from the winding rules; every corner must
+  now sit within a millionth of the model of the other face's. And the winding is restored *before* the counts, so
+  `FacesRewound` and the per-part line describe the output. Both tested; byte-identical on all five ships.
+  **Second review (P2):** within a welded-class group faces were paired only with the group's *first* face, so a
+  nearby non-coincident face in front hid the genuine pair behind it (three quads welded to four vertices, one copy
+  rewound). Faces now pair by coincidence with any earlier face in their group. Tested; byte-identical on all five ships.
+  **(P3)** The twin lines follow the fuse summary in the report instead of displacing it as the Workshop's status line.
+
 - **Vehicle Lab: a Shroud role with its own reduce dial** (user request). The standing rigging — shrouds, stays,
   ratlines — is the densest geometry on a sailing ship and wants a harder cut than the running rigging, and it must
   *not* ride the Sail bone the way Rigging can (it holds the mast up). Same soup-pass reduction as Rigging (no weld;
