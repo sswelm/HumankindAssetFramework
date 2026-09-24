@@ -43,6 +43,20 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   shows its back to the sky and is turned as before; the deck strip shows its front and stays. The report says so
   per sheet and in a Details line. Tests: a floor welded to the bottom edges of four outward walls stays up; a
   reversed quad in a flat strip is still turned.
+  **Fourth cut** (user: "I still see through the walls", the stern companionway, group G, on master too): a 47-face
+  open well — walls facing into the well, floor and steps facing up, as the source has it — whose cones about its
+  own centroid read a confident −0.85, so the volume rule reversed it whole: walls into the deck, floor down,
+  3,733 ray cells see-through and the stairs visible through the wall. The same evidence now guards the reversal: an
+  open sheet that already shows up-facing faces to the sky, three to one against backs, is not reversed, an up-facing face
+  counting only when the hull lies beneath it (an upturned boat's bottom sees the sky exactly as a well's floor
+  does; the deck exemption stays as it is). Stern box, honest census: 3,733 cells see-through on master → 32, all
+  pre-existing. Whole ship: 893 → 69. And the parity rule's other half — turning the *majority* when it shows its
+  backs — was measured wrong on the frigate's boats (an open boat shows its backs to the sky as authored) and is
+  gone: the minority is only ever kept. And a minority kept that way is not turned with its sheet when the
+  direction pass reverses it (the Teutonic's group T: on master the two wrongs cancelled; with the join kept, the
+  reversal turned the kept faces down) — the reversal skips it and the veto counts only what the reversal would
+  turn. Tests: a well of four inward walls and an up-facing floor is kept; an inside-out box with an up-facing lip
+  kept as a join is reversed with the lip left up.
 
 - **Model Fuser: a part that is double-sided by duplication is fused as two copies, not one soup** (user: "an issue
   with the fused gun that becomes visible in the Vehicle Lab", SMS Wespe). The gun carries every face twice, wound

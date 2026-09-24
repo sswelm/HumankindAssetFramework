@@ -991,7 +991,7 @@ public class GlbFuseTests
         // rule turned the deck (the smaller side) face down. Seen from above, the deck shows its authored front, so
         // it is a join, not an error, and the sheet is left as authored. Here: four outward walls from y 0 to 10 and
         // a floor at y 0 facing up, sharing the walls' bottom edges.
-        var hull = Box("Hull", 400, -200, -50, -200, inward: false);
+        var hull = Box("Hull", 400, -200, -450, -200, inward: false);   // the frame BENEATH: the floor sees the sky and has the hull below it
         var walls = Wall("Tub", new (float x, float z)[] { (0f, 0f), (0f, 10f), (10f, 10f), (10f, 0f), (0f, 0f) }, 0, 10, 1, new[] { 1, 1, 1, 1 }, flip: false);   // facing OUT (measured: flip:true faced in)
         var floor = Level("Tub", 0, 10, 0, 10, 0, down: false);
         var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, walls, floor), new[] { 1, 2 }, 0.0);
@@ -1017,6 +1017,51 @@ public class GlbFuseTests
         Assert.DoesNotContain(r.Details, d => d.StartsWith("from above:", StringComparison.Ordinal));
         Assert.Equal(2, r.FacesRewound);
         Assert.All(FusedNormals(r, "Plate_Fused"), n => Assert.True(n[1] > 0, "every quad faces up"));
+    }
+
+    [Fact]
+    public void An_open_well_that_shows_its_floor_to_the_sky_is_not_reversed_by_its_volume()
+    {
+        // The Wespe's stern companionway: four walls facing into the well and a floor facing up, open at the top - as
+        // the source has it, and as a well is seen. Its cones about its own centroid all point inward (volume
+        // agreement -1.00), so the volume rule reversed it whole: walls into the deck, floor down, the stairs visible
+        // through the wall. Seen from above it shows its floor and no backs; the reversal is vetoed.
+        var hull = Box("Hull", 400, -200, -450, -200, inward: false);   // the frame BENEATH: the floor sees the sky and has the hull below it
+        var walls = Wall("Well", new (float x, float z)[] { (0f, 0f), (0f, 10f), (10f, 10f), (10f, 0f), (0f, 0f) }, 0, 10, 1, new[] { 1, 1, 1, 1 }, flip: true);   // facing IN
+        var floor = Level("Well", 0, 10, 0, 10, 0, down: false);
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, walls, floor), new[] { 1, 2 }, 0.0);
+        string sheets = r.Details.First(d => d.StartsWith("largest islands:", StringComparison.Ordinal));
+        Assert.Contains("volume agreement -1.00", sheets);
+        Assert.Contains("kept (seen from above it shows 2 up-facing faces and 0 backs: a reversal would turn them down)", sheets);
+        Assert.Contains(r.Details, d => d.Contains("1 reversal(s) of an open sheet vetoed"));
+        Assert.Equal(0, r.FacesRewound);
+        foreach (var (c, n) in FusedFaces(r, "Well_Fused"))
+        {
+            if (Math.Abs(c[1]) < 1e-3) Assert.True(n[1] > 0, "the floor still faces up");
+            else Assert.True(n[0] * (c[0] - 5) + n[2] * (c[2] - 5) < 0, "the wall at " + c[0] + "," + c[2] + " still faces into the well");
+        }
+    }
+
+    [Fact]
+    public void A_join_minority_kept_by_the_view_from_above_is_not_turned_when_its_sheet_is_reversed()
+    {
+        // The Teutonic's group T: a 144-face sheet whose parity minority was kept (32 up-facing faces to the sky), then
+        // reversed whole by the direction pass, which turned the kept faces down. Here: four walls facing IN (an
+        // inside-out box the volume rule reverses) and a lip at the top of one wall extending inward and facing up -
+        // inconsistent with the inward wall, so the parity minority, and shown to the sky, so kept. The reversal turns
+        // the walls out and leaves the lip up.
+        var hull = Box("Hull", 400, -200, -450, -200, inward: false);   // the frame beneath
+        var walls = Wall("Tub", new (float x, float z)[] { (0f, 0f), (0f, 10f), (10f, 10f), (10f, 0f), (0f, 0f) }, 0, 10, 1, new[] { 1, 1, 1, 1 }, flip: true);   // facing IN
+        var lip = Level("Tub", 0, 2, 0, 10, 10, down: false);           // at the top of the x = 0 wall, extending inward, facing up
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, walls, lip), new[] { 1, 2 }, 0.0);
+        string sheets = r.Details.First(d => d.StartsWith("largest islands:", StringComparison.Ordinal));
+        Assert.Contains("seen from above the minority shows its front (2 up-facing exposed, 0 down-facing)", sheets);
+        Assert.Contains("reversed whole", sheets);
+        foreach (var (c, n) in FusedFaces(r, "Tub_Fused"))
+        {
+            if (Math.Abs(c[1] - 10) < 1e-3) Assert.True(n[1] > 0, "the lip still faces up");
+            else Assert.True(n[0] * (c[0] - 5) + n[2] * (c[2] - 5) > 0, "the wall at " + c[0] + "," + c[2] + " now faces out");
+        }
     }
 
     [Fact]
