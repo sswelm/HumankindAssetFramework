@@ -837,6 +837,9 @@ public class GlbFuseTests
         // flat sheet at this height - an authored opposite pair is already two-sided (the Wespe's reinforce ring)
         var normals = FusedNormals(r, "Plate_Fused");
         Assert.Equal(2, normals.Count(n => n[2] > 0.9)); Assert.Equal(2, normals.Count(n => n[2] < -0.9));
+        // the counts describe the OUTPUT (review of PR #82, P3): nothing is turned, so nothing is reported turned
+        Assert.Equal(0, r.FacesRewound);
+        Assert.Contains(r.Details, d => d.StartsWith("rewound by part: Plate 0/2; Plate 0/2", StringComparison.Ordinal));
         // and no two output faces share a vertex set: nothing for an importer to drop
         var sets = OutputFaceSets(r.Bytes, "Plate_Fused");
         for (int i = 0; i < sets.Count; i++) for (int j = i + 1; j < sets.Count; j++) Assert.False(sets[i].SetEquals(sets[j]));
@@ -845,6 +848,21 @@ public class GlbFuseTests
         // and a same-way duplicate (a z-fighting copy) is not a twin: welded as before, no line
         var again = Quad("Plate", 0, 4, 0, 4, 1);
         Assert.DoesNotContain(GlbDisconnectedParts.FuseNodes(BuildGlb(hull, up, again), new[] { 1, 2 }, 0.0).Details, d => d.StartsWith("twins:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Two_skins_within_the_weld_radius_are_a_seam_to_weld_not_a_doubled_face()
+    {
+        // Review of PR #82, P2: the twin test compared welded CLASSES, so any opposite-wound faces within the weld
+        // radius passed as twins - a thin plate's two skins 0.05 apart under a wider weld were un-welded and exempted
+        // from the winding rules, defeating the weld that was asked for. A twin must COINCIDE.
+        var top = Quad("Plate", 0, 4, 0, 4, 1.05f, inward: true);   // two skins 0.05 apart, facing EACH OTHER (into the material)
+        var bottom = Quad("Plate", 0, 4, 0, 4, 1f);
+        var hull = Box("Hull", 6, -1, -1, -3, inward: false);
+        // weld fraction 0.02 of the model's length (~10) is ~0.2: wider than the 0.05 gap, so the skins share every class
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, top, bottom), new[] { 1, 2 }, 0.02);
+        Assert.DoesNotContain(r.Details, d => d.StartsWith("twins:", StringComparison.Ordinal));
+        Assert.Equal(1, r.IslandsAfter);                        // the weld did its job: one welded island, judged by the ordinary rules
     }
 
     [Fact]

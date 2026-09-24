@@ -31,6 +31,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   zero cells gained or lost. Whole ship on that honest measure: Wespe 847 see-through cells on master → 767 (source
   646); Romanic 9 → 9. (A naive census that trusts the ray's first hit reads authored pairs as coin flips and
   claimed the opposite; it is not the measure.)
+  **Review (P2, P3):** a twin must *coincide* — the first cut compared welded classes, so a thin plate's two skins
+  within a non-zero weld radius passed as twins, were un-welded and exempted from the winding rules; every corner must
+  now sit within a millionth of the model of the other face's. And the winding is restored *before* the counts, so
+  `FacesRewound` and the per-part line describe the output. Both tested; byte-identical on all five ships.
 
 - **Vehicle Lab: a Shroud role with its own reduce dial** (user request). The standing rigging — shrouds, stays,
   ratlines — is the densest geometry on a sailing ship and wants a harder cut than the running rigging, and it must
