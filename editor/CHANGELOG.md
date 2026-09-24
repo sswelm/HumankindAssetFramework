@@ -21,6 +21,16 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   see-through faces 6,188 → 3,024 over 42,691 changed; the frigate and paddle steamer byte-identical; the Romanic
   and Teutonic a dozen invisible faces. Test: two coincident plates wound both ways fuse to two sheets of two faces,
   never four of one, with no two output faces on one vertex set; a plain plate and a same-way duplicate are untouched.
+  **Second cut** (user: "still issues on the barrel compared to the original"): kept apart, the two copies were still
+  *judged* as two sheets, and each copy is only mostly one way — at the reinforce ring, where the surface folds back
+  into the barrel, the outward face belongs to the other copy than everywhere else, and the parity walk sees the fold
+  as consistent. Reversing copy B whole turned its ring faces in beside copy A's, and the ring's underside vanished
+  from below. An authored opposite pair is *already* two-sided, one face each way at every position, so no reversal
+  can improve it and any reversal of one copy breaks it: twin faces now keep exactly their authored winding. The gun
+  box measured from six directions, counting a hit solid if *any* face there faces the ray: identical to the source,
+  zero cells gained or lost. Whole ship on that honest measure: Wespe 847 see-through cells on master → 767 (source
+  646); Romanic 9 → 9. (A naive census that trusts the ray's first hit reads authored pairs as coin flips and
+  claimed the opposite; it is not the measure.)
 
 - **Vehicle Lab: a Shroud role with its own reduce dial** (user request). The standing rigging — shrouds, stays,
   ratlines — is the densest geometry on a sailing ship and wants a harder cut than the running rigging, and it must

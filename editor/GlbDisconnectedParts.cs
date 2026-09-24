@@ -1383,6 +1383,7 @@ public static class GlbDisconnectedParts
         // sheet, judged whole, emitted on its own vertices. Same-way duplicates (a z-fighting copy) are left welded: an
         // importer dropping one of those loses nothing. A vertex used by BOTH a second-copy face and an unpaired face
         // stays welded, so a copy that shares vertices with its neighbour is not torn from it.
+        var twinFace = new bool[faceCount];   // BOTH copies of every opposite-wound coincident pair: authored two-sided, never turned (see the flip stage)
         {
             var byTriple = new Dictionary<(int, int, int), List<int>>();
             for (int f = 0; f < faceCount; f++)
@@ -1398,7 +1399,7 @@ public static class GlbDisconnectedParts
             {
                 if (group.Count < 2) continue;
                 int first = group[0]; bool o0 = ClassOrientation(classes, tris, first);
-                foreach (int g in group.Skip(1)) if (ClassOrientation(classes, tris, g) != o0) { secondFace[g] = true; twinFaces++; }
+                foreach (int g in group.Skip(1)) if (ClassOrientation(classes, tris, g) != o0) { secondFace[g] = true; twinFace[g] = true; twinFace[first] = true; twinFaces++; }
             }
             if (twinFaces > 0)
             {
@@ -2042,6 +2043,18 @@ public static class GlbDisconnectedParts
             largestIslands = "largest islands: " + string.Join("; ", rows);
         }
 
+        // TWINS KEEP THEIR AUTHORED WINDING (2026-09-24, the Wespe's gun, second cut). Kept apart, the two copies were
+        // still judged as two sheets - and each copy is only MOSTLY one way: at the reinforce ring, where the surface
+        // folds back into the barrel, the outward face belongs to the other copy than everywhere else, and the parity
+        // walk sees that fold as consistent. Reversing copy B whole (volume -0.92) turned its ring faces in beside copy
+        // A's, and the ring's underside vanished from below. But an authored opposite pair IS already two-sided: one
+        // face each way at every position, whichever copy holds which. No reversal can improve it and any reversal of
+        // one copy alone breaks it. So a twin face keeps exactly the winding it was authored with - consistency pass
+        // and direction verdict both undone - and the part renders as its source did, which is the reference.
+        int twinsRestored = 0;
+        for (int f = 0; f < faceCount; f++) if (twinFace[f] && flip[f]) { flip[f] = false; twinsRestored++; }
+        if (twinsRestored > 0) result.Details.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+            "twins: {0} face(s) of doubled pairs had been turned by the winding passes and keep their authored winding instead - a pair wound both ways is already two-sided", twinsRestored));
         Mark("report");
         // 6) vertex normals follow the final winding
         var incident = new List<int>[pos.Count];

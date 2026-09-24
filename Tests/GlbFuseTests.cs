@@ -833,6 +833,10 @@ public class GlbFuseTests
         // two sheets of two faces - not four sheets of one
         Assert.Equal(2, r.IslandLines.Count(l => l.TrimStart().StartsWith("2 faces", StringComparison.Ordinal)));
         Assert.DoesNotContain(r.IslandLines, l => l.TrimStart().StartsWith("1 faces", StringComparison.Ordinal));
+        // both copies keep their AUTHORED winding: two faces up, two down, whatever the direction rules thought of a
+        // flat sheet at this height - an authored opposite pair is already two-sided (the Wespe's reinforce ring)
+        var normals = FusedNormals(r, "Plate_Fused");
+        Assert.Equal(2, normals.Count(n => n[2] > 0.9)); Assert.Equal(2, normals.Count(n => n[2] < -0.9));
         // and no two output faces share a vertex set: nothing for an importer to drop
         var sets = OutputFaceSets(r.Bytes, "Plate_Fused");
         for (int i = 0; i < sets.Count; i++) for (int j = i + 1; j < sets.Count; j++) Assert.False(sets[i].SetEquals(sets[j]));
