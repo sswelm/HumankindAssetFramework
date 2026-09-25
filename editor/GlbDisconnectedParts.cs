@@ -450,6 +450,24 @@ public static class GlbDisconnectedParts
     // PartInfo, yet its _Part_NNN children must find it to inherit its ⊕ letter (WorkshopRules.TransferLetters).
     // Every node's name as the FILE has it, by index (null when nameless) - the names a sidecar written before the
     // unique renaming carries (review of PR #85, P1).
+    /// <summary>
+    /// The rig a file carries, from its JSON alone: how many skins, the joint count of the largest, how many meshes,
+    /// and how many nodes render one. The Bake Tests validate a Vehicle Lab output by THESE (review of PR #90: the
+    /// row read the bone count off the script's log, so an export that lost the armature after that line passed).
+    /// </summary>
+    public static void RigSummary(byte[] source, out int skins, out int joints, out int meshes, out int meshNodes)
+    {
+        if (source == null) throw new ArgumentNullException(nameof(source));
+        JObject root = Parse(source).Root;
+        JArray skinArray = root["skins"] as JArray ?? new JArray();
+        skins = skinArray.Count; joints = 0;
+        foreach (JToken skin in skinArray)
+            joints = Math.Max(joints, ((skin as JObject)?["joints"] as JArray)?.Count ?? 0);
+        meshes = (root["meshes"] as JArray)?.Count ?? 0;
+        JArray nodes = root["nodes"] as JArray ?? new JArray();
+        meshNodes = nodes.OfType<JObject>().Count(n => n["mesh"] != null);
+    }
+
     public static List<KeyValuePair<int, string>> NodeNames(byte[] source)
     {
         if (source == null) throw new ArgumentNullException(nameof(source));

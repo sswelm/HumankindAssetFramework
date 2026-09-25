@@ -798,6 +798,20 @@ public static class BakeGoldenRules
     static List<string> Norm(IEnumerable<string> lines) =>
         (lines ?? new string[0]).Select(l => (l ?? "").TrimEnd('\r', ' ', '\t')).Where(l => l.Length > 0).ToList();
 
+    /// The Workshop row's fuse group: the parts (index, triangles) that FIT a triangle budget, largest first - a part
+    /// over the remaining budget is skipped and the smaller ones still fill it, so the group has several parts
+    /// whenever several fit (review of PR #90: taking the first part regardless made a single-part fuse of any hull
+    /// over the budget, and could take far longer than advertised). When no part fits at all, the smallest one alone.
+    public static List<int> FuseSelection(IEnumerable<KeyValuePair<int, int>> partsByIndexAndTriangles, int budget)
+    {
+        var parts = (partsByIndexAndTriangles ?? new KeyValuePair<int, int>[0]).ToList();
+        var picked = new List<int>(); long sum = 0;
+        foreach (var p in parts.OrderByDescending(p => p.Value).ThenBy(p => p.Key))
+            if (sum + p.Value <= budget) { picked.Add(p.Key); sum += p.Value; }
+        if (picked.Count == 0 && parts.Count > 0) picked.Add(parts.OrderBy(p => p.Value).ThenBy(p => p.Key).First().Key);
+        return picked;
+    }
+
     /// The Vehicle Lab rows' REPRESENTATIVE recipes: for each feature, in this order - oars, a gun, wheels, sails, a
     /// rotor (main or tail), tracks - the first recipe (in the given order) marking it that is not already picked.
     /// `rolesOf` gives the role names a recipe marks (VehicleLabWindow.ReadRecipe).

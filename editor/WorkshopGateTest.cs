@@ -146,8 +146,9 @@ public static class WorkshopGateTest
         BakeTestRunnerWindow.Progress.ThrowIfCancelled();
 
         // ---- fuse: the largest nodes up to the triangle budget, into one shell, at weld 0 (the Workshop's default)
-        var group = FuseGroup(usable);
-        var job = new GlbDisconnectedParts.FuseJob { NodeIndices = group.Select(p => p.NodeIndex).ToList(), Name = "Fused_T_" + name, CheckMirrored = false };
+        var picked = BakeGoldenRules.FuseSelection(usable.Select(p => new KeyValuePair<int, int>(p.NodeIndex, p.Triangles)), FuseTriangleBudget);
+        var group = usable.Where(p => picked.Contains(p.NodeIndex)).ToList();
+        var job = new GlbDisconnectedParts.FuseJob { NodeIndices = picked, Name = "Fused_T_" + name, CheckMirrored = false };
         byte[] fused; List<GlbDisconnectedParts.Result> results;
         try { fused = GlbDisconnectedParts.FuseGroups(bytes, new[] { job }, 0, out results); }
         catch (InvalidDataException ex) when (ex.Message.IndexOf("skinned", StringComparison.OrdinalIgnoreCase) >= 0)
@@ -159,21 +160,11 @@ public static class WorkshopGateTest
         var shell = fusedParts.FirstOrDefault(p => p.NodeName == job.Name);
         if (shell == null) problems.Add("the fused shell is missing from the output");
         else if (shell.Triangles != r.OutputTriangles) problems.Add($"the shell has {shell.Triangles} triangles, the fuse reported {r.OutputTriangles}");
-        snap.Add($"FUSE parts={group.Count} tris={r.SourceTriangles}->{r.OutputTriangles} verts={r.VerticesBefore}->{r.VerticesAfter} islands={r.IslandsBefore}->{r.IslandsAfter} rewound={r.FacesRewound}");
+        // a one-part group is reported as such: the multi-part join is what a fuse is for, and this file could not offer it inside the budget
+        snap.Add($"FUSE parts={group.Count}{(group.Count == 1 && usable.Count > 1 ? " (single: no two parts fit the budget)" : "")} tris={r.SourceTriangles}->{r.OutputTriangles} verts={r.VerticesBefore}->{r.VerticesAfter} islands={r.IslandsBefore}->{r.IslandsAfter} rewound={r.FacesRewound}");
     }
 
     internal const int FuseTriangleBudget = 150000;
-    // the fuse group: the largest parts, in triangle order, until the budget is crossed (the crossing part included; always at least one)
-    internal static List<GlbDisconnectedParts.PartInfo> FuseGroup(List<GlbDisconnectedParts.PartInfo> usable)
-    {
-        var group = new List<GlbDisconnectedParts.PartInfo>(); long sum = 0;
-        foreach (var p in usable.OrderByDescending(p => p.Triangles).ThenBy(p => p.NodeIndex))
-        {
-            if (group.Count > 0 && sum >= FuseTriangleBudget) break;
-            group.Add(p); sum += p.Triangles;
-        }
-        return group;
-    }
 
     static bool IsCutChild(string n) => n != null && System.Text.RegularExpressions.Regex.IsMatch(n, @"_Part_\d{3}$");
 }

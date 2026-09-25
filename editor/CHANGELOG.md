@@ -22,7 +22,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   an armature under 256 bones, and diffs the run's summary lines (bones, clusters, clip frames, reduce tiers) against
   `Tools/lab_golden/<recipe>.txt`. A missing golden is captured (reported, not a pass); delete it to re-bless an
   intended change; a mismatch leaves a candidate next to the report. The pure half (the snapshot filter, the diff,
-  the representative pick) is unit-tested.
+  the representative pick) is unit-tested. **Review:** the Lab rows validate the output GLB itself — a skin with
+  joints and a rendered mesh, read from the file (an export that lost the armature after the log line would have
+  matched the golden); the Workshop row's fuse group is the parts that FIT the budget, largest first (a hull over
+  the budget no longer makes a single-part fuse that takes minutes); the representatives are picked only among
+  recipes whose source is on disk, the rest listed as not representable. Tested.
 
 - **Vehicle Lab: a Window role with its own reduce dial** (user: "add the reducable part type Window"). Glazing -
   portholes, bridge windows, windshields, skylights - is a role of its own with a **Window reduce (%)** slider in

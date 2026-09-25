@@ -6,7 +6,8 @@
 // runs (VehicleLabWindow.GenerateHeadless: a window instance with no dialogs, no preview, every file under
 // Logs/bake_tests/lab and nothing under Assets/) on the saved recipes, and per recipe:
 //   1. require the script's own completion marker and the output GLB (the Generate button's success rule),
-//   2. require the armature within Amplitude's 256-bone cap,
+//   2. require the armature within Amplitude's 256-bone cap, and the OUTPUT GLB ITSELF to carry a skin with joints
+//      and a mesh (GlbDisconnectedParts.RigSummary - the log line alone would pass an export that lost the rig),
 //   3. diff the run's deterministic summary lines (BakeGoldenRules.LabSnapshotLines: every "VEHICLE ..." line but the
 //      timings, the output path cut off) against a blessed golden, Tools/lab_golden/<recipe>.txt — the deploy row's
 //      golden-master idea. A missing golden is captured from the run and reported as such (not a pass); to re-bless
@@ -45,8 +46,14 @@ public static class VehicleLabGateTest
         if (!Directory.Exists(recipesDir)) return Skip("no Vehicle Lab recipes (" + RecipesDir + ") — nothing to generate.");
         var recipes = Directory.GetFiles(recipesDir, "*.json").OrderBy(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase).ToList();
         if (recipes.Count == 0) return Skip("no Vehicle Lab recipes (" + RecipesDir + ") — nothing to generate.");
+        var missing = new List<string>();
         if (representatives)
         {
+            // only recipes whose source is on disk can represent a feature (review of PR #90: an unavailable first oar
+            // recipe was picked, skipped, and the feature went untested while a later oar recipe would have run)
+            var available = recipes.Where(p => VehicleLabWindow.ReadRecipe(p, out string src, out _) && !string.IsNullOrWhiteSpace(src) && File.Exists(src)).ToList();
+            missing = recipes.Except(available).Select(Path.GetFileNameWithoutExtension).ToList();
+            recipes = available;
             var byName = recipes.ToDictionary(p => Path.GetFileNameWithoutExtension(p), p => p, StringComparer.OrdinalIgnoreCase);
             var picked = BakeGoldenRules.Representatives(byName.Keys.OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList(),
                 n => VehicleLabWindow.ReadRecipe(byName[n], out _, out var roles) ? roles : new HashSet<string>());
@@ -58,6 +65,7 @@ public static class VehicleLabGateTest
         Directory.CreateDirectory(workDir);
         int pass = 0, fail = 0, skip = 0;
         var lines = new List<string>();
+        if (missing.Count > 0) lines.Add($"not representable (source model missing): {string.Join(", ", missing)}");
         string current = null;
         try
         {
@@ -78,6 +86,14 @@ public static class VehicleLabGateTest
                     int bones = BakeGoldenRules.ArmatureBones(snap);
                     if (bones < 0) { lines.Add($"FAIL {name} ({took}) — the run printed no armature line"); fail++; continue; }
                     if (bones > 256) { lines.Add($"FAIL {name} ({took}) — {bones} bones, over Amplitude's 256"); fail++; continue; }
+                    // the file itself, not the log: a skin with joints and a rendered mesh must be in the GLB the bake will read
+                    int skins, joints, meshes, meshNodes;
+                    try { GlbDisconnectedParts.RigSummary(File.ReadAllBytes(outGlb), out skins, out joints, out meshes, out meshNodes); }
+                    catch (Exception ex) { lines.Add($"FAIL {name} ({took}) — the output GLB does not parse: {ex.Message}"); fail++; continue; }
+                    if (skins == 0 || joints == 0) { lines.Add($"FAIL {name} ({took}) — the output GLB carries no skin/joints (the log said {bones} bones)"); fail++; continue; }
+                    if (meshNodes == 0) { lines.Add($"FAIL {name} ({took}) — the output GLB renders no mesh"); fail++; continue; }
+                    if (joints > 256) { lines.Add($"FAIL {name} ({took}) — {joints} joints in the output GLB, over Amplitude's 256"); fail++; continue; }
+                    snap = snap.Concat(new[] { $"GLB skins={skins} joints={joints} meshes={meshes} meshNodes={meshNodes}" }).ToArray();
                     string goldFile = Path.Combine(goldDir, name + ".txt");
                     if (!File.Exists(goldFile))
                     {

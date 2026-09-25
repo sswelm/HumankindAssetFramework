@@ -51,6 +51,59 @@ public class BakeGoldenRulesTests
     }
 
     [Fact]
+    public void The_fuse_selection_fills_the_budget_with_the_parts_that_fit_largest_first()
+    {
+        var parts = new[] { P(0, 120), P(1, 90), P(2, 50), P(3, 40), P(4, 5) };
+        Assert.Equal(new[] { 0, 2, 4 }, BakeGoldenRules.FuseSelection(parts, 200));         // after the 120 hull: 90 and 40 do not fit, 50 and 5 do
+        Assert.Equal(new[] { 0, 4 }, BakeGoldenRules.FuseSelection(parts, 150));            // the hull leaves room for the 5 alone
+        Assert.Equal(new[] { 4 }, BakeGoldenRules.FuseSelection(parts, 3));                // nothing fits: the smallest alone
+        Assert.Equal(new[] { 0, 1, 2, 3, 4 }, BakeGoldenRules.FuseSelection(parts, 1000));
+        Assert.Empty(BakeGoldenRules.FuseSelection(null, 100));
+        Assert.Equal(new[] { 7, 8 }, BakeGoldenRules.FuseSelection(new[] { P(8, 10), P(7, 10) }, 20));   // ties by index
+    }
+    static KeyValuePair<int, int> P(int index, int tris) => new KeyValuePair<int, int>(index, tris);
+
+    [Fact]
+    public void A_glbs_rig_is_read_from_its_json_skins_joints_meshes_and_mesh_nodes()
+    {
+        var rigged = new Newtonsoft.Json.Linq.JObject
+        {
+            ["asset"] = new Newtonsoft.Json.Linq.JObject { ["version"] = "2.0" },
+            ["nodes"] = new Newtonsoft.Json.Linq.JArray(
+                new Newtonsoft.Json.Linq.JObject { ["name"] = "Hull", ["mesh"] = 0, ["skin"] = 0 },
+                new Newtonsoft.Json.Linq.JObject { ["name"] = "Root" }, new Newtonsoft.Json.Linq.JObject { ["name"] = "Wheel_00" },
+                new Newtonsoft.Json.Linq.JObject { ["name"] = "Turret", ["mesh"] = 1 }),
+            ["meshes"] = new Newtonsoft.Json.Linq.JArray(new Newtonsoft.Json.Linq.JObject { ["primitives"] = new Newtonsoft.Json.Linq.JArray() }, new Newtonsoft.Json.Linq.JObject { ["primitives"] = new Newtonsoft.Json.Linq.JArray() }),
+            ["skins"] = new Newtonsoft.Json.Linq.JArray(
+                new Newtonsoft.Json.Linq.JObject { ["joints"] = new Newtonsoft.Json.Linq.JArray(1, 2) },
+                new Newtonsoft.Json.Linq.JObject { ["joints"] = new Newtonsoft.Json.Linq.JArray(1) }),
+        };
+        GlbDisconnectedParts.RigSummary(Glb(rigged), out int skins, out int joints, out int meshes, out int meshNodes);
+        Assert.Equal((2, 2, 2, 2), (skins, joints, meshes, meshNodes));
+        var bare = new Newtonsoft.Json.Linq.JObject
+        {
+            ["asset"] = new Newtonsoft.Json.Linq.JObject { ["version"] = "2.0" },
+            ["nodes"] = new Newtonsoft.Json.Linq.JArray(new Newtonsoft.Json.Linq.JObject { ["name"] = "Hull", ["mesh"] = 0 }),
+            ["meshes"] = new Newtonsoft.Json.Linq.JArray(new Newtonsoft.Json.Linq.JObject { ["primitives"] = new Newtonsoft.Json.Linq.JArray() }),
+        };
+        GlbDisconnectedParts.RigSummary(Glb(bare), out skins, out joints, out meshes, out meshNodes);
+        Assert.Equal((0, 0, 1, 1), (skins, joints, meshes, meshNodes));   // an export that lost its armature reads as no skin, no joints
+    }
+    // a JSON-only GLB (empty BIN chunk): enough for the JSON readers
+    static byte[] Glb(Newtonsoft.Json.Linq.JObject root)
+    {
+        byte[] json = System.Text.Encoding.UTF8.GetBytes(root.ToString(Newtonsoft.Json.Formatting.None));
+        int jsonLength = (json.Length + 3) & ~3;
+        byte[] glb = new byte[12 + 8 + jsonLength + 8];
+        void U(int at, uint v) { Buffer.BlockCopy(BitConverter.GetBytes(v), 0, glb, at, 4); }
+        U(0, 0x46546C67); U(4, 2); U(8, (uint)glb.Length); U(12, (uint)jsonLength); U(16, 0x4E4F534A);
+        Buffer.BlockCopy(json, 0, glb, 20, json.Length);
+        for (int i = json.Length; i < jsonLength; i++) glb[20 + i] = 0x20;
+        U(20 + jsonLength, 0); U(24 + jsonLength, 0x004E4942);
+        return glb;
+    }
+
+    [Fact]
     public void The_representatives_are_the_first_recipe_per_feature_each_counted_once()
     {
         var roles = new Dictionary<string, ISet<string>>
