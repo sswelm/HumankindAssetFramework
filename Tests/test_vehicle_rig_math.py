@@ -11,7 +11,7 @@ import unittest
 SCRIPT = Path(__file__).parents[1] / "editor" / "Tools~" / "vehicle_rig.py"
 SOURCE = SCRIPT.read_text(encoding="utf-8")
 TREE = ast.parse(SOURCE, filename=str(SCRIPT))
-PURE_NAMES = {"_fitted_cycle_count", "_oar_recovery_metrics", "_merge2_scale"}
+PURE_NAMES = {"_fitted_cycle_count", "_oar_recovery_metrics", "_merge2_scale", "_tagged_reduce_pct"}
 PURE_DEFS = [node for node in TREE.body if isinstance(node, ast.FunctionDef) and node.name in PURE_NAMES]
 if {node.name for node in PURE_DEFS} != PURE_NAMES:
     raise RuntimeError("Vehicle Lab pure helper contract changed; update this test deliberately")
@@ -76,6 +76,20 @@ class VehicleRigMathTests(unittest.TestCase):
         sx, sy, sz, bad = parse("nan,inf,abc")
         self.assertEqual((1.0, 1.0, 1.0), (sx, sy, sz))
         self.assertEqual(3, len(bad))
+
+    def test_gunreduce_tag_is_the_percent_alone_clamped_and_absent_at_zero(self):
+        """gunreduce=<percent> (2026-09-25): the Gun parts already travel positionally, so the tag carries the percent
+        alone. Absent -> 0.0 (the dial at 0 sends nothing); clamped to 0..95 like every other tier; a value that is
+        not a finite number is refused (the script turns that into a VEHICLE ERROR, never a silent skip)."""
+        pct = NAMESPACE["_tagged_reduce_pct"]
+        self.assertEqual(0.0, pct(["rig", "a.glb", "shroudreduce=@x.txt|50"], "gunreduce"))
+        self.assertEqual(35.5, pct(["rig", "gunreduce=35.5", "flagfold=0"], "gunreduce"))
+        self.assertEqual(95.0, pct(["gunreduce=120"], "gunreduce"))
+        self.assertEqual(0.0, pct(["gunreduce=-4"], "gunreduce"))
+        self.assertEqual(50.0, pct(["gunreduce=50", "shroudreduce=@x.txt|20"], "gunreduce"))
+        for bad in ("gunreduce=", "gunreduce=abc", "gunreduce=nan", "gunreduce=inf", "gunreduce=@guns.txt|50"):
+            with self.assertRaises(ValueError, msg=bad):
+                pct([bad], "gunreduce")
 
     def test_merge2_scale_rejects_a_wrong_component_count(self):
         parse = NAMESPACE["_merge2_scale"]

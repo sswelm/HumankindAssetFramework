@@ -146,6 +146,7 @@ public class VehicleLabWindow : EditorWindow
     [SerializeField] float preserveReducePct = 0f; // Preserve role: 0 = byte-identical (the promise); >0 opts reduction in
     [SerializeField] float detailReducePct = 0f;   // Detail role: a plain reduction tier for ornament/trim geometry
     [SerializeField] float shroudReducePct = 0f;   // Shroud role: the standing rigging's own soup-pass dial (0 = untouched, like every tier added since Detail)
+    [SerializeField] float gunReducePct = 0f;      // Gun role (2026-09-25, user: "add Gun part type as a reducable group"): a weld tier like Wheel, 0 = untouched
     [SerializeField] float defaultReducePct = 0f;  // Default role (2026-09-19): the catch-all — every part still unmarked, cut like Body
     // SAIL IDLE FOLD (2026-09-09, vanilla parity): at idle the canvas FOLDS at the yard — visible brailed-up
     // cloth like the vanilla triaconter's — instead of flipping below the keel. Rotation-only by construction
@@ -381,6 +382,7 @@ public class VehicleLabWindow : EditorWindow
         public float preserveReducePct = 0f;   // Preserve-role decimation percentage (absent-key 0 == byte-identical, the old promise)
         public float detailReducePct = 0f;     // Detail-role decimation percentage (absent-key 0 == the do-nothing default)
         public float shroudReducePct = 0f;     // Shroud-role decimation percentage (absent-key 0 == the do-nothing default)
+        public float gunReducePct = 0f;        // Gun-role decimation percentage (absent-key 0 == the do-nothing default)
         public float defaultReducePct = 0f;    // Default-role decimation percentage (absent-key 0 == the do-nothing default)
         public bool sailFoldIdle = false;      // idle sail FOLDS at the yard instead of hiding below the keel (absent-key false == the legacy strike)
         public int sailFoldFrames = 12;        // Furl clip span in fold mode — lets Pre/After-move PLAY the gather (absent-key 12)
@@ -862,13 +864,14 @@ public class VehicleLabWindow : EditorWindow
                 int nPre = ActiveParts.Count(p => p.role == Role.Preserve);
                 int nDet = ActiveParts.Count(p => p.role == Role.Detail);
                 int nShr = ActiveParts.Count(p => p.role == Role.Shroud);
+                int nGun = ActiveParts.Count(p => p.role == Role.Gun);
                 int nDef = ActiveParts.Count(p => p.role == Role.Default);
                 string facingSummary = (doubleSided ? "2-sided" : null);
                 if (fixInsideOut) facingSummary = facingSummary == null ? "winding fix" : facingSummary + " · winding fix";
                 // Only tiers with parts marked make the header — five always-on entries would drown it.
                 string reduceSummary = null;
                 void Tier(int n, string label, float pct) { if (n > 0) reduceSummary = (reduceSummary == null ? "" : reduceSummary + " · ") + $"{n} {label} @ {pct:0}%"; }
-                Tier(nDef, "default", defaultReducePct); Tier(nRig, "rigging", riggingReducePct); Tier(nShr, "shroud", shroudReducePct); Tier(nStr, "structure", structureReducePct); Tier(nBod, "body", bodyReducePct); Tier(nOar, "oar", oarReducePct); Tier(nSail, "sail", sailReducePct); Tier(nRud, "rudder", rudderReducePct); Tier(nWhl, "wheel", wheelReducePct); Tier(nFlp, "flip", flipReducePct); Tier(nPre, "preserve", preserveReducePct); Tier(nDet, "detail", detailReducePct);
+                Tier(nDef, "default", defaultReducePct); Tier(nRig, "rigging", riggingReducePct); Tier(nShr, "shroud", shroudReducePct); Tier(nStr, "structure", structureReducePct); Tier(nBod, "body", bodyReducePct); Tier(nOar, "oar", oarReducePct); Tier(nSail, "sail", sailReducePct); Tier(nRud, "rudder", rudderReducePct); Tier(nWhl, "wheel", wheelReducePct); Tier(nFlp, "flip", flipReducePct); Tier(nPre, "preserve", preserveReducePct); Tier(nDet, "detail", detailReducePct); Tier(nGun, "gun", gunReducePct);
                 if (Section(ref foldReduce, "Vertices control — facing & density at the source",
                         facingSummary == null && reduceSummary == null ? "geometry exported as authored"
                             : facingSummary == null ? reduceSummary
@@ -905,6 +908,13 @@ public class VehicleLabWindow : EditorWindow
                             "sailing ship and usually want a harder cut than the running rigging. Shroud parts never ride the Sail " +
                             "bone: they hold the mast up and stay standing while the canvas gathers. 0 = untouched."),
                             shroudReducePct, 0f, 95f);
+                    using (new EditorGUI.DisabledScope(nGun == 0))
+                        gunReducePct = EditorGUILayout.Slider(new GUIContent("Gun reduce (%)",
+                            "The Gun parts' own reduction tier (the barrel assembly on the Gun bone). CAD barrels, breeches and " +
+                            "muzzle brakes are turned from dense rings for what reads as a tube at game distance. Seams welded " +
+                            "within each material, then collapse, at Generate (the dial counts welded vertices), before the Gun " +
+                            "bone is measured, so the recoil and the muzzle tip still come from the reduced tube. 0 = untouched."),
+                            gunReducePct, 0f, 95f);
                     using (new EditorGUI.DisabledScope(nStr == 0))
                         structureReducePct = EditorGUILayout.Slider(new GUIContent("Structure reduce (%)",
                             "The SECOND reduction tier: small-but-dense DETAIL geometry (railings, a carved bow figure) that " +
@@ -1295,7 +1305,7 @@ public class VehicleLabWindow : EditorWindow
                 || TierActive(Role.Sail, sailReducePct) || TierActive(Role.Rudder, rudderReducePct)
                 || TierActive(Role.Wheel, wheelReducePct) || TierActive(Role.Flip, flipReducePct)
                 || TierActive(Role.Preserve, preserveReducePct) || TierActive(Role.Detail, detailReducePct)
-                || TierActive(Role.Default, defaultReducePct) || TierActive(Role.Shroud, shroudReducePct));
+                || TierActive(Role.Default, defaultReducePct) || TierActive(Role.Shroud, shroudReducePct) || TierActive(Role.Gun, gunReducePct));
             bool wantSailFold = sailFoldIdle && list.Any(x => x.role == Role.Sail);
             bool fastSailFold = FastPath && wantSailFold;
             bool hasModel2 = !string.IsNullOrWhiteSpace(srcFile2);   // a merge is real geometry work: two static hulls may need no spinner at all
@@ -1310,7 +1320,7 @@ public class VehicleLabWindow : EditorWindow
             // the section silently did nothing on this path since it existed).
             if (FastPath && (doubleSided || fixInsideOut || riggingReducePct > 0f || structureReducePct > 0f || bodyReducePct > 0f
                              || oarReducePct > 0f || sailReducePct > 0f || rudderReducePct > 0f || wheelReducePct > 0f
-                             || flipReducePct > 0f || preserveReducePct > 0f || detailReducePct > 0f || defaultReducePct > 0f || shroudReducePct > 0f))
+                             || flipReducePct > 0f || preserveReducePct > 0f || detailReducePct > 0f || defaultReducePct > 0f || shroudReducePct > 0f || gunReducePct > 0f))
                 EditorGUILayout.HelpBox("Vertices control (Double-sided, Fix inside-out, and every reduce dial) does not run " +
                     "on the source-skeleton fast path — rigfast exports the source geometry as-is. Disable Use source " +
                     "skeleton for facing fixes or reduction.", MessageType.Info);
@@ -1676,7 +1686,7 @@ public class VehicleLabWindow : EditorWindow
             report.Add(("— Statistics (probe verts; projected = after the source-reduce dials) —", null));
             float DialFor(Role r) => r == Role.Rigging ? riggingReducePct : r == Role.Structure ? structureReducePct
                                    : r == Role.Body ? bodyReducePct : r == Role.Oar ? oarReducePct : r == Role.Sail ? sailReducePct
-                                   : r == Role.Rudder ? rudderReducePct : r == Role.Wheel ? wheelReducePct : r == Role.Flip ? flipReducePct : r == Role.Preserve ? preserveReducePct : r == Role.Detail ? detailReducePct : r == Role.Default ? defaultReducePct : r == Role.Shroud ? shroudReducePct : 0f;
+                                   : r == Role.Rudder ? rudderReducePct : r == Role.Wheel ? wheelReducePct : r == Role.Flip ? flipReducePct : r == Role.Preserve ? preserveReducePct : r == Role.Detail ? detailReducePct : r == Role.Default ? defaultReducePct : r == Role.Shroud ? shroudReducePct : r == Role.Gun ? gunReducePct : 0f;
             long totalV = 0, totalProj = 0;
             foreach (var grp in vlist.Where(p => p.role != Role.Ignore).GroupBy(p => p.role).OrderByDescending(g => g.Sum(p => (long)p.verts)))
             {
@@ -1762,7 +1772,7 @@ public class VehicleLabWindow : EditorWindow
         // stroke into the next model) — reset to the live defaults, same values as a fresh window.
         doubleSided = false; fixInsideOut = false;
         oarSweepDeg = 24f; oarDipDeg = 18f; oarFrames = 24; oarBladeRollDeg = 0f; oarLiftDeg = 0f; oarRakeDeg = 0f; oarPivotPct = 30f; oarLengthPct = 100f;
-        riggingReducePct = 75f; structureReducePct = 50f; bodyReducePct = 0f; oarReducePct = 0f; sailReducePct = 0f; rudderReducePct = 0f; wheelReducePct = 0f; flipReducePct = 0f; preserveReducePct = 0f; defaultReducePct = 0f; detailReducePct = 0f; shroudReducePct = 0f; sailFoldIdle = false; sailFoldFrames = 12; sailFoldAngleDeg = 270f; sailFoldReverse = false; sailFoldSag = 0f; flagFoldOn = false; flagFoldDeg = 0f; flagFoldFrames = 12; srcFile2 = ""; model2Off = Vector3.zero; model2Rot = Vector3.zero; model2Scale = Vector3.one; model1Bright = 1f; model2Bright = 1f;
+        riggingReducePct = 75f; structureReducePct = 50f; bodyReducePct = 0f; oarReducePct = 0f; sailReducePct = 0f; rudderReducePct = 0f; wheelReducePct = 0f; flipReducePct = 0f; preserveReducePct = 0f; defaultReducePct = 0f; detailReducePct = 0f; shroudReducePct = 0f; gunReducePct = 0f; sailFoldIdle = false; sailFoldFrames = 12; sailFoldAngleDeg = 270f; sailFoldReverse = false; sailFoldSag = 0f; flagFoldOn = false; flagFoldDeg = 0f; flagFoldFrames = 12; srcFile2 = ""; model2Off = Vector3.zero; model2Rot = Vector3.zero; model2Scale = Vector3.one; model1Bright = 1f; model2Bright = 1f;
         // …and the pre-0.5.4 generation dials the reset had ALWAYS skipped (review round 2): a tuned trail
         // spread, gun trunnion, recoil or tail-rotor trim silently carried into the next model too.
         spinEnabled = true; trailSpreadDeg = 35f; trailFrames = 12; gunPivot = 0.5f; gunDeployElev = 0f;
@@ -1890,7 +1900,7 @@ public class VehicleLabWindow : EditorWindow
         srcFile = srcFile, outGlb = outGlb, frames = frames, axisChoice = axisChoice, minVerts = minVerts, degrees = degrees,
         parts = parts, boneParts = boneParts, useSourceRig = useSourceRig, treadAdvCells = treadAdvCells, treadCellsPerLink = treadCellsPerLink,
         // orientation + tread isolation + wave rock — the rest of what the bake command consumes
-        tracksStatic = tracksStatic, spinEnabled = spinEnabled, doubleSided = doubleSided, fixInsideOut = fixInsideOut, oarSweepDeg = oarSweepDeg, oarDipDeg = oarDipDeg, oarFrames = oarFrames, oarBladeRollDeg = oarBladeRollDeg, oarLiftDeg = oarLiftDeg, oarRakeDeg = oarRakeDeg, oarPivotPct = oarPivotPct, oarLengthPct = oarLengthPct, riggingReducePct = riggingReducePct, structureReducePct = structureReducePct, bodyReducePct = bodyReducePct, oarReducePct = oarReducePct, sailReducePct = sailReducePct, rudderReducePct = rudderReducePct, wheelReducePct = wheelReducePct, flipReducePct = flipReducePct, preserveReducePct = preserveReducePct, detailReducePct = detailReducePct, defaultReducePct = defaultReducePct, shroudReducePct = shroudReducePct, sailFoldIdle = sailFoldIdle, sailFoldFrames = sailFoldFrames, sailFoldAngleDeg = sailFoldAngleDeg, sailFoldReverse = sailFoldReverse, sailFoldSag = sailFoldSag, flagFoldOn = flagFoldOn, flagFoldDeg = flagFoldDeg, flagFoldFrames = flagFoldFrames, srcFile2 = srcFile2, model2Off = model2Off, model2Rot = model2Rot, model2Scale = 1f, model2ScaleXYZ = model2Scale, model1Bright = model1Bright, model2Bright = model2Bright, tailAxisChoice = tailAxisChoice, tailYawAdj = tailYawAdj, tailPitchAdj = tailPitchAdj, modelRot = modelRot, waveEnabled = waveEnabled,
+        tracksStatic = tracksStatic, spinEnabled = spinEnabled, doubleSided = doubleSided, fixInsideOut = fixInsideOut, oarSweepDeg = oarSweepDeg, oarDipDeg = oarDipDeg, oarFrames = oarFrames, oarBladeRollDeg = oarBladeRollDeg, oarLiftDeg = oarLiftDeg, oarRakeDeg = oarRakeDeg, oarPivotPct = oarPivotPct, oarLengthPct = oarLengthPct, riggingReducePct = riggingReducePct, structureReducePct = structureReducePct, bodyReducePct = bodyReducePct, oarReducePct = oarReducePct, sailReducePct = sailReducePct, rudderReducePct = rudderReducePct, wheelReducePct = wheelReducePct, flipReducePct = flipReducePct, preserveReducePct = preserveReducePct, detailReducePct = detailReducePct, defaultReducePct = defaultReducePct, shroudReducePct = shroudReducePct, gunReducePct = gunReducePct, sailFoldIdle = sailFoldIdle, sailFoldFrames = sailFoldFrames, sailFoldAngleDeg = sailFoldAngleDeg, sailFoldReverse = sailFoldReverse, sailFoldSag = sailFoldSag, flagFoldOn = flagFoldOn, flagFoldDeg = flagFoldDeg, flagFoldFrames = flagFoldFrames, srcFile2 = srcFile2, model2Off = model2Off, model2Rot = model2Rot, model2Scale = 1f, model2ScaleXYZ = model2Scale, model1Bright = model1Bright, model2Bright = model2Bright, tailAxisChoice = tailAxisChoice, tailYawAdj = tailYawAdj, tailPitchAdj = tailPitchAdj, modelRot = modelRot, waveEnabled = waveEnabled,
         trailSpreadDeg = trailSpreadDeg, trailFrames = trailFrames, gunPivot = gunPivot, gunDeployElev = gunDeployElev, recoilDist = recoilDist, recoilFrames = recoilFrames, recoilLead = recoilLead,
         rockDegrees = rockDegrees, rockFrames = rockFrames, rockAxisChoice = rockAxisChoice, rockHeading = rockHeading,
         rockPitchDeg = rockPitchDeg, rockRollCycles = rockRollCycles, rockPitchCycles = rockPitchCycles, rockPitchPhase = rockPitchPhase,
@@ -2001,7 +2011,7 @@ public class VehicleLabWindow : EditorWindow
             oarLengthPct = r.oarLengthPct;         // DTO initializer 100 — an absent key cannot crush the oars
             riggingReducePct = r.riggingReducePct; structureReducePct = r.structureReducePct;
             bodyReducePct = r.bodyReducePct;   // DTO initializer 0 = do-nothing
-            oarReducePct = r.oarReducePct; sailReducePct = r.sailReducePct; rudderReducePct = r.rudderReducePct; wheelReducePct = r.wheelReducePct; flipReducePct = r.flipReducePct; defaultReducePct = r.defaultReducePct; shroudReducePct = r.shroudReducePct; preserveReducePct = r.preserveReducePct; detailReducePct = r.detailReducePct;   // same: absent-key 0 == untouched (Preserve: byte-identical)
+            oarReducePct = r.oarReducePct; sailReducePct = r.sailReducePct; rudderReducePct = r.rudderReducePct; wheelReducePct = r.wheelReducePct; flipReducePct = r.flipReducePct; defaultReducePct = r.defaultReducePct; shroudReducePct = r.shroudReducePct; gunReducePct = r.gunReducePct; preserveReducePct = r.preserveReducePct; detailReducePct = r.detailReducePct;   // same: absent-key 0 == untouched (Preserve: byte-identical)
             sailFoldIdle = r.sailFoldIdle;   // absent-key false == the legacy strike below the keel
             sailFoldFrames = r.sailFoldFrames <= 0 ? 12 : r.sailFoldFrames; sailFoldAngleDeg = r.sailFoldAngleDeg <= 0f ? 270f : r.sailFoldAngleDeg;   // absent-key: initializer defaults; <=0 guards a hand-edited file
             sailFoldReverse = r.sailFoldReverse;   // absent-key false == the drill-verified default direction
@@ -2246,7 +2256,7 @@ public class VehicleLabWindow : EditorWindow
         string axis = axisChoice == 0 ? "AUTO" : AxisOptions[axisChoice];
         string tailAxis = tailAxisChoice == 0 ? "AUTO" : AxisOptions[tailAxisChoice];
         var inv = System.Globalization.CultureInfo.InvariantCulture;
-        if (!RunBlender($"{(fast ? "rigfast" : "rig")} \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {(spinEnabled ? degrees : 0f).ToString("0.#", inv)} \"@{ignoreFile}\" \"@{tracksFile}\" \"@{gunsFile}\" {treadAdvCells} 1 1 {treadCellsPerLink.ToString("0.##", inv)} {(tracksStatic || !spinEnabled ? "1" : "0")} {(waveEnabled ? rockDegrees : 0f).ToString("0.##", inv)} {rockFrames} {(rockAxisChoice == 1 ? "X" : rockAxisChoice == 2 ? "Y" : "AUTO")} {rockHeading.ToString("0.##", inv)} {(waveEnabled ? rockPitchDeg : 0f).ToString("0.##", inv)} {rockPitchCycles} \"{modelRot.x.ToString("0.##", inv)},{modelRot.y.ToString("0.##", inv)},{modelRot.z.ToString("0.##", inv)}\" {rockPitchPhase.ToString("0.##", inv)} {rockRollCycles} \"@{rotorsFile}\" \"@{tailrotorsFile}\" {tailAxis} {tailYawAdj.ToString("0.##", inv)} {tailPitchAdj.ToString("0.##", inv)} \"@{trailsFile}\" {trailSpreadDeg.ToString("0.##", inv)} {trailFrames} {gunPivot.ToString("0.###", inv)} {gunDeployElev.ToString("0.##", inv)} \"@{muzzlesFile}\" \"@{cradlesFile}\" {recoilDist.ToString("0.###", inv)} {recoilFrames} {recoilLead} {(doubleSided ? "1" : "0")} \"@{oarsFile}\" {oarSweepDeg.ToString("0.##", inv)} {oarDipDeg.ToString("0.##", inv)} {oarFrames} {(fixInsideOut ? "1" : "0")} {oarBladeRollDeg.ToString("0.##", inv)} \"@{sailsFile}\" \"@{riggingFile}\" {riggingReducePct.ToString("0.#", inv)} \"@{structureFile}\" {structureReducePct.ToString("0.#", inv)} \"@{bodiesFile}\" {bodyReducePct.ToString("0.#", inv)} \"@{flagsFile}\" {oarLiftDeg.ToString("0.##", inv)} {oarRakeDeg.ToString("0.##", inv)} {oarPivotPct.ToString("0.#", inv)} {oarLengthPct.ToString("0.#", inv)} \"@{ruddersFile}\" {oarReducePct.ToString("0.#", inv)} {sailReducePct.ToString("0.#", inv)} \"@{preserveFile}\" {rudderReducePct.ToString("0.#", inv)} {wheelReducePct.ToString("0.#", inv)} \"@{flipFile}\" {flipReducePct.ToString("0.#", inv)} {preserveReducePct.ToString("0.#", inv)} \"@{detailFile}\" {detailReducePct.ToString("0.#", inv)} {(sailFoldIdle ? "1" : "0")} {Mathf.Max(1, sailFoldFrames)} {sailFoldAngleDeg.ToString("0.#", inv)} {(sailFoldReverse ? "1" : "0")} {sailFoldSag.ToString("0.##", inv)}{Merge2Arg()}{BrightArg()}{FlagFoldArg()}{DefaultReduceArg(defaultFile)}{ShroudReduceArg(shroudFile)}{PartTxArg(projRoot, prevDir, baseName)}", out string stdout)) return;   // argv[41]: double-sided; argv[42..45]: oar parts, sweep, dip, frames; argv[46]: inside-out fix; argv[47]: blade roll; argv[48]: sail parts; argv[49..50]: rigging parts, reduce %; argv[51..52]: structure parts, reduce %; argv[53..54]: body parts, reduce %; argv[55]: flag parts; argv[61..62]: oar reduce %, sail reduce %; argv[63]: preserve parts; argv[64]: rudder reduce %; argv[65]: wheel reduce %; argv[66..67]: flip parts, reduce %; argv[68]: preserve reduce %; argv[69..70]: detail parts, reduce %; argv[71..75]: fold sail at idle, fold frames, curl total, curl reverse, sag
+        if (!RunBlender($"{(fast ? "rigfast" : "rig")} \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {(spinEnabled ? degrees : 0f).ToString("0.#", inv)} \"@{ignoreFile}\" \"@{tracksFile}\" \"@{gunsFile}\" {treadAdvCells} 1 1 {treadCellsPerLink.ToString("0.##", inv)} {(tracksStatic || !spinEnabled ? "1" : "0")} {(waveEnabled ? rockDegrees : 0f).ToString("0.##", inv)} {rockFrames} {(rockAxisChoice == 1 ? "X" : rockAxisChoice == 2 ? "Y" : "AUTO")} {rockHeading.ToString("0.##", inv)} {(waveEnabled ? rockPitchDeg : 0f).ToString("0.##", inv)} {rockPitchCycles} \"{modelRot.x.ToString("0.##", inv)},{modelRot.y.ToString("0.##", inv)},{modelRot.z.ToString("0.##", inv)}\" {rockPitchPhase.ToString("0.##", inv)} {rockRollCycles} \"@{rotorsFile}\" \"@{tailrotorsFile}\" {tailAxis} {tailYawAdj.ToString("0.##", inv)} {tailPitchAdj.ToString("0.##", inv)} \"@{trailsFile}\" {trailSpreadDeg.ToString("0.##", inv)} {trailFrames} {gunPivot.ToString("0.###", inv)} {gunDeployElev.ToString("0.##", inv)} \"@{muzzlesFile}\" \"@{cradlesFile}\" {recoilDist.ToString("0.###", inv)} {recoilFrames} {recoilLead} {(doubleSided ? "1" : "0")} \"@{oarsFile}\" {oarSweepDeg.ToString("0.##", inv)} {oarDipDeg.ToString("0.##", inv)} {oarFrames} {(fixInsideOut ? "1" : "0")} {oarBladeRollDeg.ToString("0.##", inv)} \"@{sailsFile}\" \"@{riggingFile}\" {riggingReducePct.ToString("0.#", inv)} \"@{structureFile}\" {structureReducePct.ToString("0.#", inv)} \"@{bodiesFile}\" {bodyReducePct.ToString("0.#", inv)} \"@{flagsFile}\" {oarLiftDeg.ToString("0.##", inv)} {oarRakeDeg.ToString("0.##", inv)} {oarPivotPct.ToString("0.#", inv)} {oarLengthPct.ToString("0.#", inv)} \"@{ruddersFile}\" {oarReducePct.ToString("0.#", inv)} {sailReducePct.ToString("0.#", inv)} \"@{preserveFile}\" {rudderReducePct.ToString("0.#", inv)} {wheelReducePct.ToString("0.#", inv)} \"@{flipFile}\" {flipReducePct.ToString("0.#", inv)} {preserveReducePct.ToString("0.#", inv)} \"@{detailFile}\" {detailReducePct.ToString("0.#", inv)} {(sailFoldIdle ? "1" : "0")} {Mathf.Max(1, sailFoldFrames)} {sailFoldAngleDeg.ToString("0.#", inv)} {(sailFoldReverse ? "1" : "0")} {sailFoldSag.ToString("0.##", inv)}{Merge2Arg()}{BrightArg()}{FlagFoldArg()}{DefaultReduceArg(defaultFile)}{ShroudReduceArg(shroudFile)}{GunReduceArg()}{PartTxArg(projRoot, prevDir, baseName)}", out string stdout)) return;   // argv[41]: double-sided; argv[42..45]: oar parts, sweep, dip, frames; argv[46]: inside-out fix; argv[47]: blade roll; argv[48]: sail parts; argv[49..50]: rigging parts, reduce %; argv[51..52]: structure parts, reduce %; argv[53..54]: body parts, reduce %; argv[55]: flag parts; argv[61..62]: oar reduce %, sail reduce %; argv[63]: preserve parts; argv[64]: rudder reduce %; argv[65]: wheel reduce %; argv[66..67]: flip parts, reduce %; argv[68]: preserve reduce %; argv[69..70]: detail parts, reduce %; argv[71..75]: fold sail at idle, fold frames, curl total, curl reverse, sag
         // SUCCESS = THE SCRIPT'S OWN FINAL MARKER (the documented Blender trap: it exits 0 even when the python
         // script crashes mid-way — without this gate a half-run printed a fake "DONE" with no file on disk).
         string done = stdout.Split('\n').FirstOrDefault(l => l.Contains("VEHICLE RIG DONE"));
@@ -2343,6 +2353,14 @@ public class VehicleLabWindow : EditorWindow
         if (shroudReducePct <= 0f) return "";
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         return $" \"shroudreduce=@{namesFile}|{shroudReducePct.ToString("0.#", inv)}\"";
+    }
+    // GUN (2026-09-25): gunreduce=<percent>, absent while the dial is 0. No names file: the Gun parts already travel
+    // positionally as "@guns.txt" (argv[11]), and the script reduces that list before it measures the Gun bone.
+    string GunReduceArg()
+    {
+        if (gunReducePct <= 0f) return "";
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        return $" \"gunreduce={gunReducePct.ToString("0.#", inv)}\"";
     }
 
     string FlagFoldArg()
