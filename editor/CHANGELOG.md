@@ -11,7 +11,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   with the groupings (Save groups, and every Fuse writes it) as a "#name|F|deck" line that every earlier reader
   ignores, comes back with the letters on load, and names the fused shell — Fused_F_deck instead of
   Fused_F_<first part>. The names are cleared with the rows when another file is probed. Test: the line round-trips
-  by letter, malformed lines are skipped, the resolver still reads the letters, and the shell name.
+  by letter, malformed lines are skipped, the resolver still reads the letters, and the shell name. **Review:** the
+  fused output's own groupings sidecar carries the names too, so a named group keeps its name when the fused file
+  is reopened in the Fuser. Tested.
 
 - **Model Cutter: Tear — Split, plus a cut wherever the other side of the ship has the welded object separate**
   (user: "the split command only really splits parts that are not connected; we need a method that can separate

@@ -421,6 +421,22 @@ public static class WorkshopRules
         return "Fused_" + letter + "_" + (g.Length > 0 ? g : firstPart);
     }
 
+    // the "#name|letter|name" lines for the letters a set of sidecar lines carries (review of PR #87: the fused
+    // output's sidecar wrote the letters alone, and a named group lost its name when the fused file was reopened)
+    public static List<string> GroupNameLinesFor(IEnumerable<string> lines, Func<string, string> nameOf)
+    {
+        var letters = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (string raw in lines ?? new string[0])
+        {
+            string line = raw?.Trim() ?? ""; int bar = line.IndexOf('|');
+            if (line.StartsWith("#", StringComparison.Ordinal) || bar != 1) continue;
+            letters.Add(line.Substring(0, 1));
+        }
+        var outLines = new List<string>();
+        foreach (string l in letters) { string nm = nameOf?.Invoke(l); if (!string.IsNullOrWhiteSpace(nm)) outLines.Add(GroupNameLine(l, nm)); }
+        return outLines;
+    }
+
     public static string SidecarLine(string letter, string name, int nodeIndex) =>
         letter + "|" + nodeIndex.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" + name;
 

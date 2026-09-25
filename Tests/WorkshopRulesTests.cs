@@ -28,6 +28,9 @@ public class WorkshopRulesTests
         Assert.Equal("Fused_F_fore_deck", WorkshopRules.ShellName("F", " fore  deck ", "Material2_2_Part_003"));
         Assert.Equal("Fused_F_Material2_2_Part_003", WorkshopRules.ShellName("F", "", "Material2_2_Part_003"));
         Assert.Equal("Fused_F_a_b", WorkshopRules.ShellName("F", "a|b", "x"));
+        // the fused output's sidecar carries the names of the letters it writes, and only those (review of PR #87)
+        var forOutput = WorkshopRules.GroupNameLinesFor(new[] { WorkshopRules.SidecarHeader, "F|9|Fused_F_deck", "G|10|Fused_G_x" }, l => l == "F" ? "deck" : l == "H" ? "hidden" : null);
+        Assert.Equal(new[] { "#name|F|deck" }, forOutput);
     }
 
     [Fact]

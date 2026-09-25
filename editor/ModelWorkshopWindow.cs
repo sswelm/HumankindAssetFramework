@@ -1279,7 +1279,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 var byLetter = new Dictionary<string, KeyValuePair<int, string>>();
                 for (int gi = 0; gi < groups.Count; gi++) byLetter[groups[gi].Key] = new KeyValuePair<int, string>(results[gi].FusedNodeIndex, results[gi].FusedNodeName);
                 var outLines = WorkshopRules.FusedOutputSidecarLines(groups.Select(g => new KeyValuePair<string, IList<KeyValuePair<int, string>>>(g.Key, g.Select(r => new KeyValuePair<int, string>(r.nodeIndex, r.node)).ToList())), byLetter);
-                if (outSidecar != null) { if (outLines.Count > 0) File.WriteAllLines(outSidecar, new[] { WorkshopRules.SidecarHeader }.Concat(outLines)); else if (File.Exists(outSidecar)) File.Delete(outSidecar); }
+                if (outSidecar != null) { if (outLines.Count > 0) File.WriteAllLines(outSidecar, new[] { WorkshopRules.SidecarHeader }.Concat(WorkshopRules.GroupNameLinesFor(outLines, GroupName)).Concat(outLines)); else if (File.Exists(outSidecar)) File.Delete(outSidecar); }   // the groups' names ride along (review of PR #87)
             }
             catch (Exception e) { Debug.LogWarning("[Workshop] could not write the output's fuse groupings sidecar: " + e.Message); }
             string reportPath = outGlb + ".fuse-report.txt";
