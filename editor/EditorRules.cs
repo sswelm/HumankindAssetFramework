@@ -474,6 +474,19 @@ public static class WorkshopRules
         return idx - 1;   // -1 when the list held only this row
     }
 
+    // THE SCROLL THAT KEEPS A ROW IN VIEW (2026-09-25, user: "when you have selected a part while a filter is active,
+    // and then disable the filter, I expect the selected part to remain selected and in the window"): the highlight did
+    // survive a filter change, but the list kept its old scroll offset over a differently ordered list, so the
+    // highlighted row landed anywhere. The ↑/↓ keys already scrolled by the rows' measured rects; the same arithmetic,
+    // pure: a row above the view scrolls to sit a margin below the top, one below the view a margin above the bottom,
+    // one already in view leaves the scroll alone. Rect and scroll are in list-content space.
+    public static float RevealScroll(float rowMin, float rowMax, float scrollY, float viewHeight, float margin = 8f)
+    {
+        if (rowMin < scrollY + margin) return Math.Max(0f, rowMin - margin);
+        if (rowMax > scrollY + viewHeight - margin) return Math.Max(0f, rowMax - viewHeight + margin);
+        return scrollY;
+    }
+
     // THE MIRROR OF A PART (2026-09-18, user: "a button to find the mirror item"): the SS Romanic's port fittings are
     // separate nodes under a mirrored chain, and marking one letter per side meant hunting every twin by eye. A twin is
     // the part whose world box is this part's box reflected across the model's centreline: every bound within 3 % of
