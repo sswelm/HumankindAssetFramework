@@ -5,6 +5,12 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Vehicle Lab: a Gun section** (user: "I cannot set this value, why is it in deploy anyway?"). The Gun pivot,
+  the deploy raise and the recoil dials moved out of *Deploy — trails opening, sails furling* into their own
+  *Gun — pivot, deploy raise & recoil* section, and nothing in it is greyed out any more: the pivot is a recipe value
+  the Animation Lab's pivot preview names, so it is always editable, with a note saying when it takes effect
+  (Generate places the bone, Bake ships it) and what to mark when no gun part is marked yet.
+
 - **Animation Lab: an Elevation slider in the preview** (user: "I have no idea if the elevation axis is the correct
   one, so in the preview could you add a slider that allows me to raise the turret from min to max"). With a *Gun
   elevation — max* dialled, the preview row gains an **Elevation** slider (0 = resting, right end = the max) that
