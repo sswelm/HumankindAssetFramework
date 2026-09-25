@@ -5,6 +5,32 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Cutter: Tear — separate a welded part along its sharp seams** (user: "the split command only really splits
+  parts that are not connected; we need a method that can separate them even when they are connected" — the
+  Wespe's davits, welded into the deck part, intersect the paddle wheels in the final model). Split welds every
+  coincident vertex and separates what is left disconnected, so a game rip's objects, welded together wherever
+  they touch, stay one part. But an object boundary is almost always a *seam* in the file — the artist's UV or
+  hard-edge split, kept as duplicated vertices — and a seam where the faces also meet sharply is where one object
+  ends and the next begins — and, where the other side of the ship has the same objects as separate parts (user:
+  "it could look at mirror parts when available, because on the mirror side it is separated correctly"), the
+  mirror is the better witness: every face of the torn part is mirrored across the centreline and labelled by the
+  nearest other part within 1 % of the model, and the part is cut wherever the label changes, through welded
+  vertices as well. Elsewhere Tear (the row popup, or the T key) welds coincident vertices only across seams
+  flatter than "Tear at seams sharper than (°)" (45 by default: a funnel stays one piece across its UV seam, a
+  funnel meeting a deck at 90° comes apart), then glues every piece smaller than "Tear: glue pieces smaller than
+  (%)" of the part's surface (1 % by default) back onto the neighbour it shares the longest seam with, so a box's
+  faces reassemble and a coaming stays with its deck, never across two mirror labels. Edges that share vertex
+  indices never tear on the seam rule. Lossless, like Split: the pieces become _Part_NNN children, the report says
+  how many faces the mirror named, and the mark travels in the marks sidecar as T. Tests: a 90° seam tears, the
+  same fold with shared vertices and a 10° seam do not; a small flap is glued back, a full-size wing is not; a
+  davit welded into a deck comes off where the mirror side has it separate.
+  Measured on the Wespe's split file: the 44,080-face deck part (29 islands, the davits welded in) tears into 240
+  pieces in 2 s, 25,791 faces named by the mirror, and the starboard davit's arm comes off as one 2,188-face piece
+  with its tackle blocks beside it — mark them Delete and the paddle wheels are clear. On the way, the whole-file
+  samplers (the belly frame, the fuse's view from above, the mirror templates) now skip a file's line and point
+  primitives instead of giving up: the Wespe's source file carries rigging lines, and the mirror could not be read
+  until they did.
+
 - **Model Fuser: a double wall with an undecided twin vote keeps its authored winding** (user: "another see-through
   fuse issue next in the stairs leading below", SMS Wespe). The companionway is doubled the way the gun was — every
   face has an opposite partner a quarter of the reach away — but the copies are not coincident, so the twin rule

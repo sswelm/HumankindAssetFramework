@@ -38,6 +38,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         public int islands;      // 1 = nothing to split (row disabled)
         public string blocked;   // non-null = the analyzer's reason this part cannot be split
         public bool split;       // the checkbox (Split)
+        public bool tear;        // TEAR (2026-09-25): the part is torn along its sharp seams into pieces - for a welded part Split cannot separate; T key or the row popup
         public bool delete;      // MARKED FOR DELETION (2026-09-18): the part loses its mesh in the output — Delete key or the row popup, in both windows; exclusive with split and fuse
         public string fuse = ""; // FUSE GROUP letter A..Z (2026-09-15; A..H until 09-16): rows sharing a letter fuse into one shell each; "" = none
         public int verts;        // for the list filters (2026-09-16): vertex count and the world bbox (min/max null = unmeasured, never hidden)
@@ -47,7 +48,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
     static GUIStyle WrappedButton => wrappedButton ?? (wrappedButton = new GUIStyle(GUI.skin.button) { wordWrap = true });   // built lazily: GUI.skin exists only inside OnGUI
     static readonly string[] FuseLabels = new[] { "–" }.Concat(Enumerable.Range(0, 26).Select(i => "⊕" + (char)('A' + i))).Concat(new[] { "✕ Delete" }).ToArray();   // the Fuser's row popup: no group, A–Z (was A–H; user 2026-09-16: a ship has more than eight boats), or marked for deletion; keys A–Z set it, – / 0 / Backspace clear
     const int DeleteEntry = 27;   // FuseLabels index of "✕ Delete"
-    static readonly string[] SplitLabels = { "–", "Split", "Delete" }, WholeLabels = { "–", "Delete" };   // the Splitter's row popup (a whole part cannot be split)
+    static readonly string[] SplitLabels = { "–", "Split", "Tear", "Delete" }, WholeLabels = { "–", "Tear", "Delete" };   // the Splitter's row popup (a whole part cannot be split, but it can be torn)
 
     [SerializeField] string srcFile = "";
     [SerializeField] string outGlb = "";
@@ -68,6 +69,8 @@ public abstract class ModelWorkshopWindow : EditorWindow
     [SerializeField] float maxPartSize = 1e9f;
     [SerializeField] float minHeight = -1e9f, maxHeight = 1e9f, minWidth = -1e9f, maxWidth = 1e9f;   // clamped into the model's span each frame: a fresh model hides nothing
     [SerializeField] int showOnly = 0;
+    [SerializeField] float tearAngle = 45f;   // Tear: a seam sharper than this separates pieces (degrees between the faces' planes)
+    [SerializeField] float tearGluePct = 1f;  // Tear: a piece smaller than this % of the part's surface is glued to its longest-seam neighbour
     [SerializeField] float minFlatPct = 0f;   // 0 = off — hide parts whose LEVEL-surface share (% of area within 30° of horizontal) is below this: the Lab's deck finder, brought over 2026-09-18 ("group D is still missing part of the deck")
     Dictionary<int, float> flatShare; GameObject flatShareFor;   // per-NODE level-surface share over the preview meshes (the preview is one object per node since 2026-09-19 — no name aliasing needed)
     [SerializeField] string showOnlyLetter = "";   // "Show only" can also be ONE fuse group (user 2026-09-16): the popup lists every letter in use after the fixed kinds
@@ -199,6 +202,17 @@ public abstract class ModelWorkshopWindow : EditorWindow
             "accurate to about one grid cell. 0 = pure topology. Release the slider and the counts recount (no Blender re-run)."),
             mergePct, 0f, 10f);
         if (!Mathf.Approximately(newMergePct, mergePct)) { mergePct = newMergePct; analyzePending = rows.Count > 0; }
+        if (!Fusing)
+        {
+            // TEAR'S TWO DIALS (2026-09-25): where a seam counts as an object boundary, and how small a piece is glued back
+            tearAngle = EditorGUILayout.Slider(new GUIContent("Tear at seams sharper than (°)",
+                "Tear separates a part along its SEAMS (edges where the file duplicates the vertices - a UV or hard-edge split) " +
+                "where the faces also meet at more than this angle. A funnel's UV seam is flat and stays; a funnel meeting a deck " +
+                "at 90° comes apart. Edges that share vertices never tear."), tearAngle, 5f, 120f);
+            tearGluePct = EditorGUILayout.Slider(new GUIContent("Tear: glue pieces smaller than (%)",
+                "After the tear, a piece smaller than this % of the part's surface is glued back onto the neighbour it shares the " +
+                "longest seam with - a box's faces reassemble, a coaming stays with its deck. 0 = keep every piece."), tearGluePct, 0f, 20f);
+        }
         // DEFERRED recount (review find 2026-09-06): running Analyze mid-OnGUI replaced `rows` between IMGUI's
         // Layout and event passes (control-count mismatch exceptions), and doing it per drag-tick re-parsed the
         // whole GLB on every mouse move (seconds per tick on a real ship). Recount once, on the first Layout
@@ -319,7 +333,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 if (Fusing && !string.IsNullOrEmpty(showOnlyLetter) && r.fuse != showOnlyLetter) return false;
                 switch (showOnly)
                 {
-                    case 1: if (!r.split) return false; break;
+                    case 1: if (!r.split && !r.tear) return false; break;
                     case 2: if (string.IsNullOrEmpty(r.fuse)) return false; break;
                     case 3: if (!string.IsNullOrEmpty(r.fuse)) return false; break;
                     case 4: if (r.islands <= 1 || r.blocked != null) return false; break;
@@ -354,7 +368,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             // was the complaint. The Workshop has no role hotkeys, so the letters are free here.
             EditorGUILayout.LabelField(Fusing
                 ? "  Keys:  ↑/↓ = previous/next part   ·   A–Z = fuse group of the highlighted part (⊕ column)   ·   Delete = mark for deletion   ·   – / 0 / Backspace = no mark"
-                : "  Keys:  ↑/↓ = previous/next part   ·   Insert = mark for split   ·   Delete = mark for deletion   ·   Space = toggle split   ·   – / 0 / Backspace = no mark", EditorStyles.wordWrappedMiniLabel);
+                : "  Keys:  ↑/↓ = previous/next part   ·   Insert = mark for split   ·   T = mark for tear   ·   Delete = mark for deletion   ·   Space = toggle split   ·   – / 0 / Backspace = no mark", EditorStyles.wordWrappedMiniLabel);
             var ev = Event.current;
             if (ev.type == EventType.KeyDown && shown.Count > 0 && !EditorGUIUtility.editingTextField)
             {
@@ -379,14 +393,21 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 // clears the other marks (a deleted part is neither split nor fused); Insert marks for split in the Splitter
                 else if (idx >= 0 && ev.keyCode == KeyCode.Delete)
                 {
-                    Row d = shown[idx]; d.delete = !d.delete; if (d.delete) { d.split = false; d.fuse = ""; }
+                    Row d = shown[idx]; d.delete = !d.delete; if (d.delete) { d.split = false; d.tear = false; d.fuse = ""; }
                     AdvanceIfHidden(idx);
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
                 }
                 else if (!Fusing && idx >= 0 && ev.keyCode == KeyCode.Insert && shown[idx].blocked == null && shown[idx].islands > 1)
                 {
-                    shown[idx].split = true; shown[idx].delete = false;
+                    shown[idx].split = true; shown[idx].tear = false; shown[idx].delete = false;
+                    AdvanceIfHidden(idx);
+                    GUIUtility.keyboardControl = 0;
+                    ev.Use(); Repaint();
+                }
+                else if (!Fusing && idx >= 0 && ev.keyCode == KeyCode.T && shown[idx].blocked == null)   // TEAR (2026-09-25): the T key, any part
+                {
+                    shown[idx].tear = true; shown[idx].split = false; shown[idx].delete = false;
                     AdvanceIfHidden(idx);
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
@@ -413,16 +434,17 @@ public abstract class ModelWorkshopWindow : EditorWindow
             for (int ri = 0; ri < shown.Count; ri++)
                 using (new EditorGUILayout.HorizontalScope())
                 {
-                    Row r = shown[ri]; bool splitBefore = r.split, deleteBefore = r.delete; string fuseBefore = r.fuse;
+                    Row r = shown[ri]; bool splitBefore = r.split, tearBefore = r.tear, deleteBefore = r.delete; string fuseBefore = r.fuse;
                     if (!Fusing)
                     {
                         // the Splitter's mark: nothing, Split (a part with more than one island), or Delete — a popup, as the user asked
                         // for the same reach by mouse as by key (2026-09-18); the analyzer's skipped parts can still be deleted
                         bool canSplit = r.islands > 1 && r.blocked == null;
                         string[] labels = canSplit ? SplitLabels : WholeLabels;
-                        int si = r.delete ? labels.Length - 1 : r.split && canSplit ? 1 : 0;
+                        int tearEntry = labels.Length - 2;   // "Tear" sits just before "Delete" in both label sets
+                        int si = r.delete ? labels.Length - 1 : r.tear && r.blocked == null ? tearEntry : r.split && canSplit ? 1 : 0;
                         int sj = EditorGUILayout.Popup(si, labels, GUILayout.Width(64));
-                        if (sj != si) { r.delete = sj == labels.Length - 1; r.split = canSplit && sj == 1; }
+                        if (sj != si) { r.delete = sj == labels.Length - 1; r.tear = r.blocked == null && sj == tearEntry; r.split = canSplit && sj == 1; }
                     }
                     // FUSE GROUP (2026-09-15): an independent per-row mark — rows sharing a letter fuse into one welded shell each; or Delete
                     else
@@ -432,7 +454,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                             int fj = EditorGUILayout.Popup(fi, FuseLabels, GUILayout.Width(62));
                             if (fj != fi) { r.delete = fj == DeleteEntry; r.fuse = fj <= 0 || fj == DeleteEntry ? "" : ((char)('A' + fj - 1)).ToString(); }
                         }
-                    if (r.nodeIndex == selectedIdx && (r.split != splitBefore || r.fuse != fuseBefore || r.delete != deleteBefore)) advanceFrom = ri;   // the mouse path of the A–Z / Space keys
+                    if (r.nodeIndex == selectedIdx && (r.split != splitBefore || r.tear != tearBefore || r.fuse != fuseBefore || r.delete != deleteBefore)) advanceFrom = ri;   // the mouse path of the A–Z / Space keys
                     bool isSel = selectedIdx == r.nodeIndex;
                     string label = r.blocked != null ? $"{(isSel ? "◉ " : "")}{r.node}   — skipped: {r.blocked}{(r.delete ? "   ✕ deleted in the output" : "")}"
                                  : Fusing ? $"{(isSel ? "◉ " : "")}{r.node}   ({r.tris:N0} tris, {r.islands:N0} island{(r.islands == 1 ? "" : "s")}{SizeOf(r)}){(r.delete ? "   ✕ deleted in the output" : "")}"
@@ -1079,7 +1101,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         try
         {
             string path = MarksSidecarPath(glb); if (path == null) return;
-            var lines = rows.Where(r => (r.split || r.delete) && !string.IsNullOrEmpty(r.node)).Select(r => WorkshopRules.SidecarLine(r.delete ? "X" : "S", r.node, r.nodeIndex)).ToArray();
+            var lines = rows.Where(r => (r.split || r.tear || r.delete) && !string.IsNullOrEmpty(r.node)).Select(r => WorkshopRules.SidecarLine(r.delete ? "X" : r.tear ? "T" : "S", r.node, r.nodeIndex)).ToArray();
             if (lines.Length == 0) { if (File.Exists(path)) File.Delete(path); return; }
             File.WriteAllLines(path, new[] { WorkshopRules.SidecarHeader }.Concat(lines));
         }
@@ -1098,8 +1120,9 @@ public abstract class ModelWorkshopWindow : EditorWindow
             foreach (var r in target)
             {
                 if (!marks.TryGetValue(r.nodeIndex, out string mark)) continue;
-                if (mark == "X") { r.delete = true; r.split = false; r.fuse = ""; applied++; }
-                else if (mark == "S" && r.islands > 1 && r.blocked == null) { r.split = true; r.delete = false; applied++; }
+                if (mark == "X") { r.delete = true; r.split = false; r.tear = false; r.fuse = ""; applied++; }
+                else if (mark == "S" && r.islands > 1 && r.blocked == null) { r.split = true; r.tear = false; r.delete = false; applied++; }
+                else if (mark == "T" && r.blocked == null) { r.tear = true; r.split = false; r.delete = false; applied++; }
             }
             foreach (string q in problems) Debug.LogWarning("[Workshop] marks sidecar: " + q);
             refused = problems.Count;
@@ -1254,10 +1277,14 @@ public abstract class ModelWorkshopWindow : EditorWindow
             EditorUtility.DisplayProgressBar("Model Workshop", "Splitting checked parts…", 0.4f);
             GlbDisconnectedParts.GuardPaths(srcFile, outGlb);   // SplitFile used to guard; this path writes the bytes itself
             var picked = new HashSet<int>(rows.Where(r => r.split).Select(r => r.nodeIndex));
+            var toTear = new HashSet<int>(rows.Where(r => r.tear).Select(r => r.nodeIndex));
             var toDelete = new HashSet<int>(rows.Where(r => r.delete).Select(r => r.nodeIndex));
             byte[] bytes = File.ReadAllBytes(srcFile);
             GlbDisconnectedParts.Result result = picked.Count > 0 ? GlbDisconnectedParts.Split(bytes, picked, mergePct / 100.0) : null;
             if (result != null && result.Changed) bytes = result.Bytes;
+            // TEAR (2026-09-25), after the split: both only append nodes, so the marked indices still name their parts
+            GlbDisconnectedParts.Result torn = toTear.Count > 0 ? GlbDisconnectedParts.Tear(bytes, toTear, tearAngle, tearGluePct / 100.0) : null;
+            if (torn != null && torn.Changed) bytes = torn.Bytes;
             string deletedLine = null;
             if (toDelete.Count > 0)   // after the split: the split only appends, so the marked indices still name their nodes
             {
@@ -1265,14 +1292,16 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 foreach (var w in rr.Warnings) Debug.LogWarning("[Workshop] delete: " + w);
                 if (rr.Changed) { bytes = rr.Bytes; deletedLine = rr.Details[0]; }
             }
-            if ((result == null || !result.Changed) && deletedLine == null) { status = "Nothing changed — the checked parts produced no split and nothing was deleted (see warnings in the console)."; return; }
+            if ((result == null || !result.Changed) && (torn == null || !torn.Changed) && deletedLine == null) { status = "Nothing changed — the checked parts produced no split, no tear and nothing was deleted (see warnings in the console)."; return; }
             File.WriteAllBytes(outGlb, bytes);
             WriteMarksSidecar(srcFile);   // the checks and deletion marks, next to the source: the first Probe of it restores them
             if (result != null) foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
             WriteFuseSidecarForOutput(outGlb);   // the ⊕ letters travel with the output, passed down to the _Part_NNN children
             status = (result != null && result.Changed ? $"Split done: {result.NodesSplit} part(s) → {result.ChildPartsCreated} sub-parts, {result.SourceTriangles:N0} triangles preserved." : "Split: nothing checked.")
+                   + (torn != null && torn.Changed ? $" Tear: {torn.NodesSplit} part(s) → {torn.ChildPartsCreated} pieces." : torn != null ? " Tear: nothing came apart (no seam sharper than the angle, or every piece glued back)." : "")
                    + (deletedLine != null ? " " + deletedLine + "." : "") + $"\n{outGlb}\nNext: open it in the Vehicle Lab, Probe parts, and mark the junk islands Ignore.";
             if (result != null) Debug.Log($"[Workshop] {string.Join(" | ", result.Details)}");
+            if (torn != null) { foreach (var w in torn.Warnings) Debug.LogWarning("[Workshop] tear: " + w); Debug.Log($"[Workshop] tear: {string.Join(" | ", torn.Details)}"); }
         }
         catch (Exception e) { status = "Split failed (source untouched): " + e.Message; Debug.LogException(e); }
         finally { EditorUtility.ClearProgressBar(); }
