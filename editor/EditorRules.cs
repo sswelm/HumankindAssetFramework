@@ -869,4 +869,42 @@ public static class AnimationLabRules
     /// positive rotation about the gun bone's pitch axis points the muzzle down in the engine's frame, so a positive
     /// max must apply a negative angle to raise it; a negative max flips, as in the game).
     public static float ElevationAngle(float gunElevMax, float fraction) => -gunElevMax * Math.Min(1f, Math.Max(0f, fraction));
+
+    /// THE GUN'S SPAN, the way vehicle_rig.py measures it for its "Gun pivot" dial (2026-09-26, user: "the pivot point
+    /// is not correct, so could you give me a slider which allows me to configure the pivot point along the length of
+    /// the gun"): the two extreme points of the gun's vertices along the bbox's LONGEST axis, the breech being the end
+    /// nearer the bone's parent (a barrel points away from its own mount). Points are in the gun bone's own frame
+    /// (x,y,z); `parent` is the parent bone's origin in that frame. False when fewer than two points are given.
+    public static bool GunSpan(IList<double[]> points, double[] parent, out double[] breech, out double[] muzzle)
+    {
+        breech = muzzle = null;
+        if (points == null || points.Count < 2) return false;
+        var min = new[] { double.MaxValue, double.MaxValue, double.MaxValue };
+        var max = new[] { double.MinValue, double.MinValue, double.MinValue };
+        foreach (var p in points) for (int i = 0; i < 3; i++) { if (p[i] < min[i]) min[i] = p[i]; if (p[i] > max[i]) max[i] = p[i]; }
+        int axis = 0;
+        for (int i = 1; i < 3; i++) if (max[i] - min[i] > max[axis] - min[axis]) axis = i;
+        double[] lo = null, hi = null;
+        foreach (var p in points) { if (lo == null || p[axis] < lo[axis]) lo = p; if (hi == null || p[axis] > hi[axis]) hi = p; }
+        if (hi[axis] - lo[axis] <= 1e-9) return false;
+        breech = hi; muzzle = lo;
+        if (parent != null && Dist(muzzle, parent) < Dist(breech, parent)) { breech = lo; muzzle = hi; }
+        return true;
+    }
+
+    /// Where a point sits along breech->muzzle, as the fraction the Vehicle Lab's dial speaks: 0 at the breech, 1 at
+    /// the muzzle (the projection onto the segment, unclamped so an origin outside the span reads as such).
+    public static double PivotFraction(double[] point, double[] breech, double[] muzzle)
+    {
+        double dx = muzzle[0] - breech[0], dy = muzzle[1] - breech[1], dz = muzzle[2] - breech[2];
+        double len2 = dx * dx + dy * dy + dz * dz;
+        if (len2 <= 1e-18) return 0.5;
+        return ((point[0] - breech[0]) * dx + (point[1] - breech[1]) * dy + (point[2] - breech[2]) * dz) / len2;
+    }
+
+    /// The point at a fraction of breech->muzzle.
+    public static double[] PivotPoint(double[] breech, double[] muzzle, double fraction) =>
+        new[] { breech[0] + (muzzle[0] - breech[0]) * fraction, breech[1] + (muzzle[1] - breech[1]) * fraction, breech[2] + (muzzle[2] - breech[2]) * fraction };
+
+    static double Dist(double[] a, double[] b) => Math.Sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2]));
 }
