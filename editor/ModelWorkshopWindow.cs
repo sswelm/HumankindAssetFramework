@@ -32,7 +32,8 @@ public abstract class ModelWorkshopWindow : EditorWindow
     class Row
     {
         public int nodeIndex;    // the STABLE identity Split filters on (names can be null or duplicated)
-        public string node;      // display name
+        public string node;      // display name - unique among the rows (see UniqueBytes)
+        public string fileName;  // the name the FILE gives the node, which a sidecar written before the unique renaming carries (review of PR #85, P1)
         public string mesh;
         public int tris;
         public int islands;      // 1 = nothing to split (row disabled)
@@ -233,7 +234,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             if (!Fusing)
                 using (new EditorGUILayout.HorizontalScope())
                 {
-                    if (GUILayout.Button("Check all splittable", GUILayout.Width(140))) foreach (var r in rows) r.split = r.islands > 1 && r.blocked == null;
+                    if (GUILayout.Button("Check all splittable", GUILayout.Width(140))) foreach (var r in rows) { r.split = r.islands > 1 && r.blocked == null; if (r.split) r.tear = false; }   // a Split check replaces a Tear mark (review of PR #85, P2)
                     if (GUILayout.Button("Uncheck all", GUILayout.Width(100))) foreach (var r in rows) { r.split = false; r.tear = false; }
                     hideWhole = EditorGUILayout.ToggleLeft(new GUIContent("Hide already-whole parts",
                         "Hide the rows with a single island — there is nothing to split in them, they only pad the list."), hideWhole, GUILayout.Width(180));
@@ -410,7 +411,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 }
                 else if (!Fusing && idx >= 0 && ev.keyCode == KeyCode.Space && shown[idx].blocked == null && shown[idx].islands > 1)
                 {
-                    shown[idx].split = !shown[idx].split; if (shown[idx].split) shown[idx].delete = false;
+                    shown[idx].split = !shown[idx].split; if (shown[idx].split) { shown[idx].delete = false; shown[idx].tear = false; }
                     AdvanceIfHidden(idx);
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
@@ -670,8 +671,9 @@ public abstract class ModelWorkshopWindow : EditorWindow
         if (firstLoad) ResetFilters();   // a model probed into the window starts fully visible (see ResetFilters)
         try
         {
+            var fileNames = GlbDisconnectedParts.NodeNames(File.ReadAllBytes(srcFile)).ToDictionary(kv => kv.Key, kv => kv.Value);
             rows = GlbDisconnectedParts.Analyze(UniqueBytes(srcFile), mergePct / 100.0)
-                .Select(p => new Row { nodeIndex = p.NodeIndex, node = p.NodeName, mesh = p.MeshName, tris = p.Triangles, islands = p.Islands, blocked = p.Blocked, split = kept.Contains(p.NodeIndex), tear = keptTear.Contains(p.NodeIndex), delete = keptDelete.Contains(p.NodeIndex),
+                .Select(p => new Row { nodeIndex = p.NodeIndex, node = p.NodeName, fileName = fileNames.TryGetValue(p.NodeIndex, out string fn) ? fn : p.NodeName, mesh = p.MeshName, tris = p.Triangles, islands = p.Islands, blocked = p.Blocked, split = kept.Contains(p.NodeIndex), tear = keptTear.Contains(p.NodeIndex), delete = keptDelete.Contains(p.NodeIndex),
                                        fuse = keptFuse.TryGetValue(p.NodeIndex, out string kf) ? kf : "",
                                        verts = p.Vertices, min = p.Min?.Select(d => (float)d).ToArray(), max = p.Max?.Select(d => (float)d).ToArray() })
                 .OrderBy(r => NaturalPrefix(r.node), StringComparer.OrdinalIgnoreCase)
@@ -1126,7 +1128,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             string path = MarksSidecarPath(srcFile);
             if (path == null || !File.Exists(path)) return 0;
             var problems = new List<string>();
-            var marks = WorkshopRules.ResolveFuseSidecar(File.ReadAllLines(path), target.Select(r => new KeyValuePair<int, string>(r.nodeIndex, r.node)).ToList(), problems);
+            var marks = WorkshopRules.ResolveFuseSidecar(WorkshopRules.MigrateSidecarNames(File.ReadAllLines(path), target.Select(r => (r.nodeIndex, r.fileName, r.node)).ToList()), target.Select(r => new KeyValuePair<int, string>(r.nodeIndex, r.node)).ToList(), problems);
             int applied = 0;
             foreach (var r in target)
             {
@@ -1183,7 +1185,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             string path = FuseSidecarPath(srcFile);
             if (path == null || !File.Exists(path)) return 0;
             var problems = new List<string>();
-            var letters = WorkshopRules.ResolveFuseSidecar(File.ReadAllLines(path), target.Select(r => new KeyValuePair<int, string>(r.nodeIndex, r.node)).ToList(), problems);
+            var letters = WorkshopRules.ResolveFuseSidecar(WorkshopRules.MigrateSidecarNames(File.ReadAllLines(path), target.Select(r => (r.nodeIndex, r.fileName, r.node)).ToList()), target.Select(r => new KeyValuePair<int, string>(r.nodeIndex, r.node)).ToList(), problems);
             foreach (var r in target) if (letters.TryGetValue(r.nodeIndex, out string letter)) r.fuse = letter;
             foreach (string p in problems) Debug.LogWarning("[Workshop] fuse groupings sidecar: " + p);
             refused = problems.Count;
@@ -1288,7 +1290,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             EditorUtility.DisplayProgressBar("Model Workshop", "Splitting checked parts…", 0.4f);
             GlbDisconnectedParts.GuardPaths(srcFile, outGlb);   // SplitFile used to guard; this path writes the bytes itself
             var picked = new HashSet<int>(rows.Where(r => r.split).Select(r => r.nodeIndex));
-            var toTear = new HashSet<int>(rows.Where(r => r.tear).Select(r => r.nodeIndex));
+            var toTear = new HashSet<int>(rows.Where(r => r.tear && !r.split).Select(r => r.nodeIndex));   // Split runs first and takes the mesh: a row checked for Split is never torn as well
             var toDelete = new HashSet<int>(rows.Where(r => r.delete).Select(r => r.nodeIndex));
             byte[] bytes = File.ReadAllBytes(srcFile);
             string renamedLine = null;   // unique names FIRST: the rows were probed with them, and the children take theirs from them

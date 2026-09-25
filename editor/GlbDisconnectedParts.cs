@@ -448,6 +448,17 @@ public static class GlbDisconnectedParts
 
     // Every node's parent index (-1 at a root), meshless nodes included — a split parent has no mesh and is not a
     // PartInfo, yet its _Part_NNN children must find it to inherit its ⊕ letter (WorkshopRules.TransferLetters).
+    // Every node's name as the FILE has it, by index (null when nameless) - the names a sidecar written before the
+    // unique renaming carries (review of PR #85, P1).
+    public static List<KeyValuePair<int, string>> NodeNames(byte[] source)
+    {
+        if (source == null) throw new ArgumentNullException(nameof(source));
+        JArray nodes = Parse(source).Root["nodes"] as JArray ?? new JArray();
+        var table = new List<KeyValuePair<int, string>>(nodes.Count);
+        for (int i = 0; i < nodes.Count; i++) table.Add(new KeyValuePair<int, string>(i, (string)(nodes[i] as JObject)?["name"]));
+        return table;
+    }
+
     public static List<KeyValuePair<int, int>> NodeParents(byte[] source)
     {
         if (source == null) throw new ArgumentNullException(nameof(source));

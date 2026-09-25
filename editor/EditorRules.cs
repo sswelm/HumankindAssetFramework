@@ -330,6 +330,32 @@ public static class WorkshopRules
     // where the name is unique among the rows. Anything else is refused and named, never guessed.
     public const string SidecarHeader = "#fuse-groups v2";
 
+    // SIDECARS WRITTEN BEFORE THE UNIQUE RENAMING (review of PR #85, P1): a v2 line names its part as the file did -
+    // "B|2|Deck" - and against the renamed rows (node 2 is now Deck_3) the resolver cannot match index 2, falls back
+    // to the one row still called Deck, and the B line overwrites A at node 0 while node 2 loses its mark. So before
+    // resolving, every line whose index still carries the name the FILE gives it is rewritten to the row's unique
+    // name; a line whose name matches neither is left for the resolver to refuse. v1 lines (no index) and comments
+    // pass through. `parts`: (node index, the file's name, the unique name) per row.
+    public static string[] MigrateSidecarNames(IEnumerable<string> lines, IList<(int index, string fileName, string name)> parts)
+    {
+        var fileNameAt = new Dictionary<int, string>(); var nameAt = new Dictionary<int, string>();
+        foreach (var p in parts) { fileNameAt[p.index] = p.fileName; nameAt[p.index] = p.name; }
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        var outLines = new List<string>();
+        foreach (string raw in lines ?? new string[0])
+        {
+            string line = raw?.Trim() ?? "";
+            int firstBar = line.IndexOf('|'), secondBar = firstBar >= 0 ? line.IndexOf('|', firstBar + 1) : -1;
+            if (line.StartsWith("#", StringComparison.Ordinal) || firstBar <= 0 || secondBar < 0) { outLines.Add(raw); continue; }
+            string letter = line.Substring(0, firstBar), indexText = line.Substring(firstBar + 1, secondBar - firstBar - 1).Trim(), name = line.Substring(secondBar + 1);
+            if (!int.TryParse(indexText, System.Globalization.NumberStyles.Integer, inv, out int index)) { outLines.Add(raw); continue; }
+            if (fileNameAt.TryGetValue(index, out string fileName) && nameAt.TryGetValue(index, out string unique) && fileName == name && unique != name && unique != null)
+                outLines.Add(letter + "|" + indexText + "|" + unique);
+            else outLines.Add(raw);
+        }
+        return outLines.ToArray();
+    }
+
     public static string SidecarLine(string letter, string name, int nodeIndex) =>
         letter + "|" + nodeIndex.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" + name;
 

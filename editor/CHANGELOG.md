@@ -38,6 +38,12 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   Split, Tear or Fuse makes takes its name from them (Material2_3_Part_001), and the output carries them. The
   source file is never touched and node indices do not change; a file already unique is read as it is. Test: two
   "Deck" parts and an existing "Deck_2" — the second Deck becomes Deck_3, a second pass changes nothing.
+  **Review (P1, P2):** a sidecar written before the renaming names its parts as the file did, and against the
+  renamed rows the resolver fell back by name — "B|2|Deck" landed on the one row still called Deck, at node 0,
+  and node 2 lost its mark. Sidecar lines now migrate to the rows' unique names before they are resolved (a line
+  whose index still carries the file's name takes the unique one; the rest pass through). And a Split check now
+  replaces a Tear mark everywhere ("Check all splittable", the Space key, the operation itself): Split runs first
+  and takes the mesh, so a row checked for both was torn into nothing. Tested.
 
 - **Vehicle Lab: the classification follows the cut** (user: "I'm getting tired of having to reclassify all the
   time after a split"). A re-Probe keeps roles by part name, so a part the Cutter made from another — X_Part_001,
