@@ -30,6 +30,13 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   samplers (the belly frame, the fuse's view from above, the mirror templates) now skip a file's line and point
   primitives instead of giving up: the Wespe's source file carries rigging lines, and the mirror could not be read
   until they did.
+- **Model Workshop: the highlighted part stays in view when the filter changes** (user: "when you have selected a
+  part while a filter is active, and then disable the filter, I expect the selected part to remain selected and in
+  the window"). The highlight did survive a filter change, but the list kept the old scroll offset over a
+  differently ordered list, so the highlighted row landed anywhere — usually off-screen. The shown list's identity
+  is now checked at every repaint, and when it changes with the highlighted row still shown, the list scrolls to
+  that row exactly as the ↑/↓ keys do (the same arithmetic, now a pure rule with tests). A mark that hides the
+  highlighted row still advances it to its neighbour in the same slot, as before.
 
 - **Model Fuser: a double wall with an undecided twin vote keeps its authored winding** (user: "another see-through
   fuse issue next in the stairs leading below", SMS Wespe). The companionway is doubled the way the gun was — every
