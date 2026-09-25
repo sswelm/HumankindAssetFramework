@@ -101,6 +101,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
     bool analyzePending;   // slider moved: recount on the first Layout pass after the drag releases
     [SerializeField] Vector2 scroll;
     readonly List<Rect> rowRects = new List<Rect>();   // per shown row, measured at Repaint: the ↑/↓ keys keep the highlight in view by these, not by an assumed row height
+    [NonSerialized] int shownSignature;                // the shown list's identity (which rows, in which order) at the last Repaint: a change reveals the highlighted row
     float listViewHeight = 330f;
     [SerializeField] Vector2 windowScroll;   // the WHOLE window: header + list (≤330) + preview (600) + Split/Fuse controls overflow a short window, and the Fuse row was cut off with no way to reach it (user 2026-09-16)
     string status = "Pick a GLB and press Probe parts.";
@@ -443,6 +444,22 @@ public abstract class ModelWorkshopWindow : EditorWindow
                     if (Event.current.type == EventType.Repaint) rowRects.Add(GUILayoutUtility.GetLastRect());   // the row's real rect in scroll-content space (see the ↑/↓ handler)
                 }
             EditorGUILayout.EndScrollView();
+            // THE HIGHLIGHT STAYS IN VIEW WHEN THE LIST CHANGES (2026-09-25, user: a part selected under a filter should
+            // remain selected AND in the window when the filter is dropped): the highlight did survive, but the scroll
+            // offset was the old list's and the row landed anywhere. The shown list's identity is hashed at every Repaint,
+            // after the rows' rects are measured; when it differs from the last one and the highlighted row is shown, the
+            // list scrolls to it exactly as the ↑/↓ keys do. A mark that hides the highlighted row advances it to the
+            // neighbour in the same slot (AdvanceIfHidden), which is already in view: a no-op here.
+            if (Event.current.type == EventType.Repaint)
+            {
+                int sig = 17; foreach (Row r in shown) sig = unchecked(sig * 31 + r.nodeIndex);
+                if (sig != shownSignature)
+                {
+                    shownSignature = sig;
+                    int selShown = shown.FindIndex(x => x.nodeIndex == selectedIdx);
+                    if (selShown >= 0) { RevealRow(selShown); Repaint(); }
+                }
+            }
             if (advanceFrom >= 0) AdvanceIfHidden(advanceFrom);
 
             // ---- plane cut: for the selected part, connected or not — the escape hatch when island
@@ -862,12 +879,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // are shorter, and an assumed 22 px per row drifted the highlight out of view past ~100 rows — user 2026-09-16)
     void RevealRow(int idx)
     {
-        if (idx < rowRects.Count)
-        {
-            Rect rr = rowRects[idx];
-            if (rr.yMin < scroll.y + 8f) scroll.y = Mathf.Max(0f, rr.yMin - 8f);
-            else if (rr.yMax > scroll.y + listViewHeight - 8f) scroll.y = rr.yMax - listViewHeight + 8f;
-        }
+        if (idx < rowRects.Count) { Rect rr = rowRects[idx]; scroll.y = WorkshopRules.RevealScroll(rr.yMin, rr.yMax, scroll.y, listViewHeight); }
         else scroll.y = Mathf.Max(0f, idx * 22f - 120f);   // no rects measured yet (first frame): the old estimate
     }
 

@@ -187,6 +187,19 @@ public class WorkshopRulesTests
         Assert.Equal(-1, WorkshopRules.NextHighlight(5, 5));   // out of range
     }
 
+    [Fact]
+    public void The_list_scrolls_to_keep_the_highlighted_row_in_view()
+    {
+        // rows 22 tall, a 330-tall view; a row above the view lands a margin below the top, one below lands a margin
+        // above the bottom, one in view leaves the scroll alone, and nothing scrolls above zero
+        Assert.Equal(0f, WorkshopRules.RevealScroll(0, 22, 500, 330));            // the first row, from far down: top
+        Assert.Equal(22 * 41 - 330 + 8f, WorkshopRules.RevealScroll(22 * 40, 22 * 41, 0, 330));   // row 40, below the view: a margin above the bottom
+        Assert.Equal(50 - 8f, WorkshopRules.RevealScroll(50, 72, 500, 330));      // a row above the view: a margin below the top
+        Assert.Equal(22 * 30f, WorkshopRules.RevealScroll(22 * 40, 22 * 41, 22 * 30, 330));   // row 40 with the view at row 30: in view, unchanged
+        Assert.Equal(100f, WorkshopRules.RevealScroll(150, 172, 100, 330));       // already in view: unchanged
+        Assert.Equal(100f, WorkshopRules.RevealScroll(100 + 8, 130, 100, 330));   // exactly at the margin: unchanged
+    }
+
     static float[] V(float x, float y, float z) => new[] { x, y, z };
 
     [Fact]
