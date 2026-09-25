@@ -5,6 +5,16 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Animation Lab: an Elevation slider in the preview** (user: "I have no idea if the elevation axis is the correct
+  one, so in the preview could you add a slider that allows me to raise the turret from min to max"). With a *Gun
+  elevation — max* dialled, the preview row gains an **Elevation** slider (0 = resting, right end = the max) that
+  turns the bone the game will turn — the Turret bone if set, else the Gun bone, found by the runtime's substring
+  rule — about the chosen Elevation axis by the runtime's angle (negated, so a positive max raises), composed onto
+  the playing clip every frame as the game's BoneRotation layer composes onto the pose; the bone's rest rotation is
+  restored before each sample so nothing accumulates. It loads the first baked role when no clip is in the preview
+  (the rest-pose draw list has no bones), and names the bone and axis it turns next to the slider. A sideways swing
+  means the wrong axis; a dip means flipping the sign of the max. The bone pick and the angle are unit-tested.
+
 - **Bake Tests: the Model Workshop and the Vehicle Lab have rows** (user: "could you add fuse and split and extra
   generate test to the bake test"). Neither tool was exercised by any row: the Workshop's split/tear/fuse ran only on
   synthetic fixtures in the C# suite, and nothing automated ran `vehicle_rig.py` end to end. Three rows now:

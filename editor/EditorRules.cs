@@ -840,3 +840,33 @@ public static class BakeGoldenRules
         return picked;
     }
 }
+
+// ANIMATION LAB RULES (2026-09-26, user: "I have no idea if the elevation axis is the correct one, so in the preview
+// could you add a slider that allows me to raise the turret from min to max"): the pure half of the Lab's elevation
+// preview - which bone the runtime will elevate, and by how much - so the preview cannot disagree with the game on
+// the part that can be reasoned about.
+public static class AnimationLabRules
+{
+    /// The bone the runtime elevates: the Turret bone when one is set, else the Gun (muzzle) bone. Empty = none.
+    public static string ElevationBoneName(string turretBone, string muzzleBone) =>
+        !string.IsNullOrWhiteSpace(turretBone) ? turretBone.Trim() : (muzzleBone ?? "").Trim();
+
+    /// The runtime resolves the bone by SUBSTRING, case-insensitive, first match in the skeleton's bone order
+    /// (Patches/UniversalInject.Pose.cs, ApplyGunElevation). The preview walks the same rule over the preview rig's
+    /// transform names, in the order given; an exact name wins over a longer name that merely contains it, so
+    /// "Gun" picks "b012_Gun" over "b013_GunShield" when both are there. null when nothing matches.
+    public static string PickElevationBone(IEnumerable<string> boneNames, string configured)
+    {
+        string want = (configured ?? "").Trim();
+        if (want.Length == 0) return null;
+        var names = (boneNames ?? new string[0]).Where(n => !string.IsNullOrEmpty(n)).ToList();
+        string exact = names.FirstOrDefault(n => string.Equals(n, want, StringComparison.OrdinalIgnoreCase))
+                    ?? names.FirstOrDefault(n => n.Length > want.Length && n.EndsWith("_" + want, StringComparison.OrdinalIgnoreCase));   // the bake's b###_<orig> rename
+        return exact ?? names.FirstOrDefault(n => n.IndexOf(want, StringComparison.OrdinalIgnoreCase) >= 0);
+    }
+
+    /// The angle the runtime writes for a fraction of the configured max: NEGATED, as ApplyGunElevation does (a
+    /// positive rotation about the gun bone's pitch axis points the muzzle down in the engine's frame, so a positive
+    /// max must apply a negative angle to raise it; a negative max flips, as in the game).
+    public static float ElevationAngle(float gunElevMax, float fraction) => -gunElevMax * Math.Min(1f, Math.Max(0f, fraction));
+}

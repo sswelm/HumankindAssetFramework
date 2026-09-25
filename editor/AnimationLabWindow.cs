@@ -65,6 +65,15 @@ public class AnimationLabWindow : EditorWindow
     [SerializeField] float fitAnimSpeed = 1f;
     float fitAnimT; double fitAnimTick;
     List<(string label, string dir)> fitRoles; string fitRolesFor;   // role clips that actually exist, cached per resource
+    // ELEVATION PREVIEW (2026-09-26, user: "I have no idea if the elevation axis is the correct one"): a slider that
+    // raises the gun in this preview from 0 to the configured max, applied the way the runtime applies it - the same
+    // bone (Turret bone else Gun bone, matched by substring), the same local axis (gunElevAxis), the same negated
+    // angle (AnimationLabRules.ElevationAngle) - composed onto the sampled clip pose every frame, exactly as the
+    // game's BoneRotation layer multiplies into the clip's pose. Needs the skinned instance, so it loads the first
+    // baked role when no clip is playing. The base rotation is restored before each sample so a bone the clip does
+    // not animate never accumulates.
+    [SerializeField] float fitElevFrac;      // 0 = resting, 1 = the configured max
+    Transform fitElevBone; string fitElevBoneFor = ""; Quaternion fitElevBase; string fitElevNote = "";
     static readonly (string label, string dir)[] FitAnimRoleDirs = {
         // "Idle / main clip" is the REFERENCE (anim/ — a flag/sail rig's deliberately DEPLOYED rest frame);
         // the Idle stance override bakes to anim_idle/ and is what the game actually plays at idle — without
@@ -204,6 +213,24 @@ public class AnimationLabWindow : EditorWindow
     {
         if (fitAnimInst != null) { DestroyImmediate(fitAnimInst); fitAnimInst = null; }
         fitAnimClip = null; fitAnimBoundsValid = false;
+        fitElevBone = null; fitElevBoneFor = "";
+    }
+
+    // The bone the elevation slider turns: the runtime's rule (Turret bone else Gun bone, substring match) over the
+    // preview instance's transforms - resolved once per instance and configured name, its rest rotation kept.
+    void ResolveElevBone()
+    {
+        string want = cur == null ? "" : AnimationLabRules.ElevationBoneName(cur.turretBone, cur.muzzleBone);
+        string key = fitAnimInst.GetInstanceID() + "|" + want;
+        if (fitElevBoneFor == key) return;
+        fitElevBoneFor = key; fitElevBone = null; fitElevNote = "";
+        if (want.Length == 0) { fitElevNote = "no Turret or Gun bone set"; return; }
+        var all = fitAnimInst.GetComponentsInChildren<Transform>(true).Where(t => t != fitAnimInst.transform).ToList();
+        string pick = AnimationLabRules.PickElevationBone(all.Select(t => t.name), want);
+        if (pick == null) { fitElevNote = $"no bone in the preview rig contains '{want}'"; return; }
+        fitElevBone = all.First(t => t.name == pick);
+        fitElevBase = fitElevBone.localRotation;
+        fitElevNote = $"bone '{pick}'";
     }
 
     void DestroyFitPreview()
@@ -322,6 +349,8 @@ public class AnimationLabWindow : EditorWindow
         // PLAY THE CLIP: advance and sample BEFORE the camera framing below (it frames the posed instance).
         if (fitAnimInst != null)
         {
+            ResolveElevBone();
+            if (fitElevBone != null) fitElevBone.localRotation = fitElevBase;   // the rest; the clip overrides it below when it animates this bone
             if (fitAnimClip != null && fitAnimClip.length > 0.01f)
             {
                 double now = EditorApplication.timeSinceStartup;
@@ -329,6 +358,12 @@ public class AnimationLabWindow : EditorWindow
                 fitAnimTick = now;
                 if (fitAnimPlaying) fitAnimT = Mathf.Repeat(fitAnimT + dt * fitAnimSpeed, fitAnimClip.length);
                 fitAnimClip.SampleAnimation(fitAnimInst, fitAnimT);
+            }
+            // THE ELEVATION, composed onto whatever the clip left: a rotation about the bone's own axis, the runtime's angle
+            if (fitElevBone != null && cur != null && cur.gunElevMax != 0f && fitElevFrac > 0f)
+            {
+                var axis = cur.gunElevAxis == 1 ? Vector3.up : cur.gunElevAxis == 2 ? Vector3.forward : Vector3.right;
+                fitElevBone.localRotation = fitElevBone.localRotation * Quaternion.AngleAxis(AnimationLabRules.ElevationAngle(cur.gunElevMax, fitElevFrac), axis);
             }
             // LIVE Position offset on the animated instance too. The static rest-pose path applies liveOff to its
             // draw matrices, but a PLAYING clip renders this instance through the camera, which liveOff never
@@ -1381,6 +1416,32 @@ public class AnimationLabWindow : EditorWindow
                         EditorGUIUtility.labelWidth = lw;
                     }
                 }
+                // THE ELEVATION SLIDER (2026-09-26): raise the gun here, from resting to the configured max, applied as the
+                // runtime applies it (bone, axis, negated angle) - the check for "is the elevation axis the right one?"
+                // that used to need a relaunch. Shown once an elevation is dialled; it loads the first baked role when
+                // no clip is in the preview, since the rest-pose draw list has no bones to turn.
+                if (cur != null && cur.gunElevMax != 0f)
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        float was = fitElevFrac;
+                        float lwE = EditorGUIUtility.labelWidth; EditorGUIUtility.labelWidth = 96;
+                        fitElevFrac = EditorGUILayout.Slider(new GUIContent("Elevation",
+                            "Raise the gun in this preview from resting (0) to 'Gun elevation — max' (the right end), on the bone " +
+                            "and the axis the game will use: the Turret bone if set, else the Gun bone, turned about the Elevation " +
+                            "axis by the runtime's angle (negated, so a positive max raises). If the barrel swings sideways, pick " +
+                            "another axis; if it dips, flip the sign of the max. Composed onto the playing clip, as in the game."),
+                            fitElevFrac, 0f, 1f, GUILayout.Width(300));
+                        EditorGUIUtility.labelWidth = lwE;
+                        if (!Mathf.Approximately(was, fitElevFrac))
+                        {
+                            if (fitAnimInst == null && roles.Count > 0) BuildAnimPreview(roles[0].dir);   // the skinned instance is what turns
+                            Repaint();
+                        }
+                        string angle = FormattableString.Invariant($"{AnimationLabRules.ElevationAngle(cur.gunElevMax, fitElevFrac):0.#}° of {-cur.gunElevMax:0.#}°");
+                        GUILayout.Label(fitAnimInst == null ? "(pick a clip, or move the slider, to see it)"
+                                      : fitElevBone != null ? $"{angle} · {fitElevNote} · axis {cur.gunElevAxis} ({(cur.gunElevAxis == 1 ? "Y" : cur.gunElevAxis == 2 ? "Z" : "X")})"
+                                      : "cannot elevate: " + fitElevNote, EditorStyles.miniLabel);
+                    }
                 EditorGUIUtility.labelWidth = lwRow;
             }
             var rect = GUILayoutUtility.GetRect(200, 360, GUILayout.ExpandWidth(true));
