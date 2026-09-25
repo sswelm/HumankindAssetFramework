@@ -89,7 +89,7 @@ axle disagreement, unpaired wheels, turret outliers, and visible interior geomet
 | **Rotor** | Main rotor group; fused to one hub and spun about the mast axis. |
 | **Tail rotor** (`L`) | Tail fan group; fused to one hub with its own lateral axle and trim controls. |
 | **Caterpillar** (`C`) | Tread loop; enables the path-instanced rigid-link controls. |
-| **Gun** (`G`) | Barrel assembly on the Gun bone; rides the Turret when one exists. |
+| **Gun** (`G`) | Barrel assembly on the Gun bone; rides the Turret when one exists. Optional **Gun reduce (%)** dial (CAD barrels are turned from dense rings for what reads as a tube; welded within each material, then collapsed, before the Gun bone is measured). |
 | **Cradle** | Gun support that elevates with the tube but remains fixed during recoil. |
 | **Muzzle** | Muzzle brake/flash-hider; refines the measured muzzle end and follows the tube (`Gun`, or `Barrel` when recoil creates that split). |
 | **Trail** | Split-trail arm; receives a body-end hinge and the generated `Deploy` action. |

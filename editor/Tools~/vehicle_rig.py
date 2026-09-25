@@ -931,6 +931,26 @@ if _sharg:
         shroud_reduce = min(95.0, max(0.0, float(_shpct)))
     except Exception as _e:
         print("VEHICLE ERROR: malformed shroudreduce argument: %s (%s)" % (_sharg, _e)); sys.exit(1)
+# GUN (2026-09-25, user: "add Gun part type as a reducable group"): the barrel assembly as a reduce tier of its own.
+# A WELD tier like Wheel/Body (the tube is solid geometry, not rope soup), on the gun_names the Lab already sends
+# positionally at argv[11] - so the tag carries the percent alone. Runs in the tier loop, BEFORE the Gun bone is
+# measured from those parts, so breech, muzzle tip and recoil span come from the reduced tube. Absent while the
+# dial is 0; malformed = hard error, like the other tags.
+#   gunreduce=<percent>
+def _tagged_reduce_pct(argv, tag):
+    """The percent of a percent-only reduce tag ("<tag>=<percent>"), clamped to 0..95; 0.0 when the tag is absent.
+    Raises ValueError for a value that is not a finite number (the caller makes that a VEHICLE ERROR)."""
+    _arg = next((a for a in argv if a.startswith(tag + "=")), None)
+    if _arg is None:
+        return 0.0
+    _pct = float(_arg[len(tag) + 1:])
+    if _pct != _pct or _pct in (float("inf"), float("-inf")):
+        raise ValueError("not a finite percent: %r" % _arg)
+    return min(95.0, max(0.0, _pct))
+try:
+    gun_reduce = _tagged_reduce_pct(argv, "gunreduce")
+except Exception as _e:
+    print("VEHICLE ERROR: malformed gunreduce argument: %s" % _e); sys.exit(1)
 # SAIL IDLE FOLD (argv[71], 2026-09-09, vanilla-parity request): "1" = at idle the canvas FOLDS at the yard
 # (visible bundled sail, like the vanilla triaconter's brailed-up cloth) instead of the 180-degree strike below
 # the keel. ROTATION-ONLY by construction: the canvas is band-skinned to a Sail->SailF1->SailF2 chain and the
@@ -1350,7 +1370,7 @@ _lap("prep")
 _by_name = {}
 for _o in objs:
     _by_name.setdefault(_o.name, _o)   # first wins, matching find_opt's linear-scan order
-for _rlabel, _rnames, _rpct in (("DEFAULT", default_names, default_reduce), ("RIGGING", rigging_names, rigging_reduce), ("SHROUD", shroud_names, shroud_reduce), ("STRUCTURE", structure_names, structure_reduce), ("BODY", body_names, body_reduce), ("OAR", oar_names, oar_reduce), ("SAIL", sail_names, sail_reduce), ("RUDDER", rudder_names, rudder_reduce), ("WHEEL", wheel_names, wheel_reduce), ("FLIP", flip_names, flip_reduce), ("PRESERVE", preserve_names, preserve_reduce), ("DETAIL", detail_names, detail_reduce)):
+for _rlabel, _rnames, _rpct in (("DEFAULT", default_names, default_reduce), ("RIGGING", rigging_names, rigging_reduce), ("SHROUD", shroud_names, shroud_reduce), ("STRUCTURE", structure_names, structure_reduce), ("BODY", body_names, body_reduce), ("OAR", oar_names, oar_reduce), ("SAIL", sail_names, sail_reduce), ("RUDDER", rudder_names, rudder_reduce), ("WHEEL", wheel_names, wheel_reduce), ("GUN", gun_names, gun_reduce), ("FLIP", flip_names, flip_reduce), ("PRESERVE", preserve_names, preserve_reduce), ("DETAIL", detail_names, detail_reduce)):
     if not _rnames or _rpct <= 0.5:
         continue
     try:

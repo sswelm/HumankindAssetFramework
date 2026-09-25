@@ -5,6 +5,15 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Vehicle Lab: Gun is a reduce tier** (user: "add Gun part type as a reducable group"). A **Gun reduce (%)** slider
+  in Vertices control, enabled while Gun parts are marked, counted in the reduce summary, in the Verify projection,
+  saved and loaded with the recipe (absent key = 0 = untouched). A weld tier like Wheel/Body (seams welded within
+  each material, then collapse), not the rope soup pass, applied to the parts the Lab already sends as the gun list,
+  before the script measures the Gun bone from them - so the breech, the muzzle tip and the recoil span come from
+  the reduced tube. Reaches the rig script as a tagged `gunreduce=<percent>`, absent while the dial is 0, so an
+  older script and a newer Lab still run together; a malformed value is a hard error like the other tags. Test: the
+  tag's percent, clamped 0..95, absent at 0, refused when not a finite number.
+
 - **Model Fuser: a fuse group can be named** (user: "when you have selected a group, it should be possible to name
   the group in an additional field, which also gets visible in the combo list"). With "Show only" on one group, a
   "Group ⊕F name" field appears; the name shows in the "Show only" list ("Group ⊕F — deck (3 parts)"), is saved
