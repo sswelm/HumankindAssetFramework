@@ -23,7 +23,8 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   merge, 25 islands, into 87 — in both the starboard davit's arm comes off as one 2,048-face piece with its tackle
   blocks beside it, and the other davits along the side the same way. Tests: a davit welded into a deck comes off
   where the mirror side has it separate, not where the mirror side is welded too, not without a mirror; a part's
-  own islands stay the islands Split would make, plus the cut. On the way, the whole-file samplers (the belly
+  own islands stay the islands Split would make, plus the cut. A Tear mark survives a re-Probe and is saved and
+  loaded with the marks sidecar like a Split check (user: "it appears Tear is not saved"). On the way, the whole-file samplers (the belly
   frame, the fuse's view from above) skip a file's line and point primitives instead of giving up: the Wespe's
   source file carries rigging lines.
 

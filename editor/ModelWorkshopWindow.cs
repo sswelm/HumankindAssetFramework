@@ -225,7 +225,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         if (rows.Count > 0)
         {
             int splittable = rows.Count(r => r.islands > 1 && r.blocked == null);
-            int chosen = rows.Count(r => r.split);
+            int chosen = rows.Count(r => r.split || r.tear);   // a Tear mark is a mark: it is saved, and it keeps the Save button live
             int deleted = rows.Count(r => r.delete);
             EditorGUILayout.LabelField(Fusing
                 ? $"Parts ({rows.Count} node(s)) — click a row to highlight it below; give the parts of one shell the same ⊕ letter:"
@@ -234,7 +234,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 using (new EditorGUILayout.HorizontalScope())
                 {
                     if (GUILayout.Button("Check all splittable", GUILayout.Width(140))) foreach (var r in rows) r.split = r.islands > 1 && r.blocked == null;
-                    if (GUILayout.Button("Uncheck all", GUILayout.Width(100))) foreach (var r in rows) r.split = false;
+                    if (GUILayout.Button("Uncheck all", GUILayout.Width(100))) foreach (var r in rows) { r.split = false; r.tear = false; }
                     hideWhole = EditorGUILayout.ToggleLeft(new GUIContent("Hide already-whole parts",
                         "Hide the rows with a single island — there is nothing to split in them, they only pad the list."), hideWhole, GUILayout.Width(180));
                     if (GUILayout.Button(new GUIContent("Show all", "Every list filter back to 'hide nothing' — the sliders, 'Show only' and this toggle. Marks are kept. (A file probed into the window for the first time starts this way.)"), GUILayout.Width(70)))
@@ -653,6 +653,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         // kept-state keyed by NODE INDEX (review round 2): keying by name re-checked every duplicate namesake.
         var kept = new HashSet<int>(rows.Where(r => r.split).Select(r => r.nodeIndex));
         var keptDelete = new HashSet<int>(rows.Where(r => r.delete).Select(r => r.nodeIndex));   // the deletion marks survive a re-Probe as the checks do
+        var keptTear = new HashSet<int>(rows.Where(r => r.tear).Select(r => r.nodeIndex));       // and the Tear marks (2026-09-25, user: "it appears Tear is not saved" - a re-Probe dropped them)
         bool firstLoad = rows.Count == 0 || !SamePath(probedFile, srcFile);   // the marks sidecar is read once, when a file comes into the window
         // FUSE LETTERS survive too (2026-09-15, user: "it doesn't seem to be able to save the groupings, only the
         // checkboxes"): the merge slider re-analyzes and used to rebuild every row blank. Same key. And a re-Probe of a
@@ -670,14 +671,14 @@ public abstract class ModelWorkshopWindow : EditorWindow
         try
         {
             rows = GlbDisconnectedParts.Analyze(UniqueBytes(srcFile), mergePct / 100.0)
-                .Select(p => new Row { nodeIndex = p.NodeIndex, node = p.NodeName, mesh = p.MeshName, tris = p.Triangles, islands = p.Islands, blocked = p.Blocked, split = kept.Contains(p.NodeIndex), delete = keptDelete.Contains(p.NodeIndex),
+                .Select(p => new Row { nodeIndex = p.NodeIndex, node = p.NodeName, mesh = p.MeshName, tris = p.Triangles, islands = p.Islands, blocked = p.Blocked, split = kept.Contains(p.NodeIndex), tear = keptTear.Contains(p.NodeIndex), delete = keptDelete.Contains(p.NodeIndex),
                                        fuse = keptFuse.TryGetValue(p.NodeIndex, out string kf) ? kf : "",
                                        verts = p.Vertices, min = p.Min?.Select(d => (float)d).ToArray(), max = p.Max?.Select(d => (float)d).ToArray() })
                 .OrderBy(r => NaturalPrefix(r.node), StringComparer.OrdinalIgnoreCase)
                 .ThenBy(r => NaturalNumber(r.node))
                 .ThenBy(r => r.node, StringComparer.OrdinalIgnoreCase).ToList();
             if (keptFuse.Count == 0 && initialLoad) ApplyFuseSidecar(rows, out _);
-            if (firstLoad && kept.Count == 0 && keptDelete.Count == 0) ApplyMarksSidecar(rows, out _);
+            if (firstLoad && kept.Count == 0 && keptTear.Count == 0 && keptDelete.Count == 0) ApplyMarksSidecar(rows, out _);
             foreach (var r in rows) if (r.islands <= 1 || r.blocked != null) r.split = false;   // no longer splittable at this distance
             int multi = rows.Count(r => r.islands > 1 && r.blocked == null);
             probedFile = srcFile;   // the rows now describe THIS file (the source-switch hygiene above keys on it)
