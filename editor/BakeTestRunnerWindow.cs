@@ -148,7 +148,8 @@ public class BakeTestRunnerWindow : EditorWindow
                 what = "Runs the Vehicle Lab's Generate — the SAME code the button runs, headless: no dialogs, no " +
                        "preview, everything under Logs/bake_tests/lab and nothing under Assets/ — on the first saved " +
                        "recipe that marks oars, a gun, wheels, sails, a rotor and tracks. Requires the rig script's " +
-                       "completion marker and the output GLB, an armature within the 256-bone cap, and diffs the run's " +
+                       "completion marker and an output GLB with a rigged mesh (positions, joints, weights, a skin) within " +
+                       "the 256-joint cap, and diffs the run's " +
                        "summary lines (bones, wheel clusters, clip frames, every reduce tier's vertex counts) against a " +
                        "blessed golden (Tools/lab_golden/<recipe>.txt; the first run captures it). A lost bone or a " +
                        "changed reduction fails here without anyone reading the log.",
