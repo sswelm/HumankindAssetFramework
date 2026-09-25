@@ -1129,7 +1129,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             string path = MarksSidecarPath(srcFile);
             if (path == null || !File.Exists(path)) return 0;
             var problems = new List<string>();
-            var marks = WorkshopRules.ResolveFuseSidecar(WorkshopRules.MigrateSidecarNames(File.ReadAllLines(path), target.Select(r => (r.nodeIndex, r.fileName, r.node)).ToList()), target.Select(r => new KeyValuePair<int, string>(r.nodeIndex, r.node)).ToList(), problems);
+            var marks = WorkshopRules.ResolveFuseSidecar(WorkshopRules.MigrateSidecarNames(File.ReadAllLines(path), target.Select(r => (r.nodeIndex, r.fileName, r.node)).ToList(), problems), target.Select(r => new KeyValuePair<int, string>(r.nodeIndex, r.node)).ToList(), problems);
             int applied = 0;
             foreach (var r in target)
             {
@@ -1186,7 +1186,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             string path = FuseSidecarPath(srcFile);
             if (path == null || !File.Exists(path)) return 0;
             var problems = new List<string>();
-            var letters = WorkshopRules.ResolveFuseSidecar(WorkshopRules.MigrateSidecarNames(File.ReadAllLines(path), target.Select(r => (r.nodeIndex, r.fileName, r.node)).ToList()), target.Select(r => new KeyValuePair<int, string>(r.nodeIndex, r.node)).ToList(), problems);
+            var letters = WorkshopRules.ResolveFuseSidecar(WorkshopRules.MigrateSidecarNames(File.ReadAllLines(path), target.Select(r => (r.nodeIndex, r.fileName, r.node)).ToList(), problems), target.Select(r => new KeyValuePair<int, string>(r.nodeIndex, r.node)).ToList(), problems);
             foreach (var r in target) if (letters.TryGetValue(r.nodeIndex, out string letter)) r.fuse = letter;
             foreach (string p in problems) Debug.LogWarning("[Workshop] fuse groupings sidecar: " + p);
             refused = problems.Count;

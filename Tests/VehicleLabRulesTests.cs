@@ -13,11 +13,11 @@ namespace HumankindAssetFramework.Tests
         [Fact]
     public void A_cut_part_finds_its_parents_nearest_first()
     {
-        Assert.Equal(new[] { "Material2_3_Part_001", "Material2_3", "Material2" }, VehicleLabRules.ParentNames("Material2_3_Part_001_2").ToArray());
+        Assert.Equal(new[] { "Material2_3" }, VehicleLabRules.ParentNames("Material2_3_Part_001").ToArray());
         Assert.Equal(new[] { "Hull" }, VehicleLabRules.ParentNames("Hull_CutA").ToArray());
         Assert.Equal(new[] { "Hull_CutB", "Hull" }, VehicleLabRules.ParentNames("Hull_CutB_Part_002").ToArray());
         Assert.Empty(VehicleLabRules.ParentNames("Material2"));     // no tail to peel: "2" is part of the name
-        Assert.Equal(new[] { "Hull" }, VehicleLabRules.ParentNames("Hull_7").ToArray());   // a uniqueness suffix alone
+        Assert.Empty(VehicleLabRules.ParentNames("Hull_2"));      // a bare number is no ancestry: Hull and Hull_2 may be two parts (review of PR #85, third round)
         Assert.Empty(VehicleLabRules.ParentNames(""));
     }
 

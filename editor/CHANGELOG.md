@@ -45,14 +45,19 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   replaces a Tear mark everywhere ("Check all splittable", the Space key, the operation itself): Split runs first
   and takes the mesh, so a row checked for both was torn into nothing. Tested. **Second round:** the legacy
   sidecar layout (name in the middle, index last) migrates the same way, and the "no mark" keys (–, 0, Backspace)
-  clear a Tear mark too. Tested.
+  clear a Tear mark too. Tested. **Third round:** a sidecar line whose name the file gives to several nodes is
+  settled by its index or refused with a reason ("A|Deck" without an index, "B|9|Deck" with node 9 no Deck),
+  never handed to the one row still called Deck after the renaming; and a bare _number tail is no ancestry for
+  the Lab's role inheritance — Hull and Hull_2 may be two parts, and Hull_2 would have taken Hull's role, an
+  Ignore among them. Only the Cutter's own tails (_Part_NNN, _CutA, _CutB) inherit. Tested.
 
 - **Vehicle Lab: the classification follows the cut** (user: "I'm getting tired of having to reclassify all the
   time after a split"). A re-Probe keeps roles by part name, so a part the Cutter made from another — X_Part_001,
   X_CutA, or X_3 after the unique renaming — used to come back as Default and had to be classified again. Now a
-  part with no role of its own takes the role kept under its nearest ancestor name (Material2_3_Part_001_2 →
-  Material2_3_Part_001 → Material2_3 → Material2): load the model's recipe, switch to the cut file, Probe, and the
-  pieces carry their parent's classification. Test: the ancestor names, nearest first, and the names that have none.
+  part with no role of its own takes the role kept under its nearest ancestor name (Material2_3_Part_001 →
+  Material2_3; Hull_CutB_Part_002 → Hull_CutB → Hull): load the model's recipe, switch to the cut file, Probe, and
+  the pieces carry their parent's classification. Test: the ancestor names, nearest first, and the names that have
+  none.
 
 - **Model Workshop: the highlighted part stays in view when the filter changes** (user: "when you have selected a
   part while a filter is active, and then disable the filter, I expect the selected part to remain selected and in
