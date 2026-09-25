@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Text;
 using Newtonsoft.Json.Linq;
 using Xunit;
@@ -886,6 +887,198 @@ public class GlbFuseTests
         for (int i = 0; i < sets.Count; i++) for (int j = i + 1; j < sets.Count; j++)
             if (sets[i].SetEquals(sets[j])) Assert.True(normals[i][2] * normals[j][2] > 0, "a doubled pair collapsed onto one vertex set: one side lost");
         Assert.True(normals.Count(n => n[2] < -0.9) >= 2, "the down copy of the pair is still down");
+    }
+
+    // A vertical wall along a polyline path in the XZ plane, from y0 to y1 in ny rows, `cells` quads per segment. Wound so
+    // the geometric normal is the path's left-hand side (-dz, 0, dx) - walk the path clockwise seen from above and the
+    // wall faces the enclosed side; `flip` turns it the other way. One connected strip: a single island, a single sheet.
+    static Part Wall(string name, (float x, float z)[] path, float y0, float y1, int ny, int[] cells, bool flip)
+    {
+        var P = new List<float>(); var I = new List<int>();
+        var cols = new List<(float x, float z)>();
+        for (int k = 0; k + 1 < path.Length; k++)
+            for (int i = 0; i < cells[k]; i++) cols.Add((path[k].x + (path[k + 1].x - path[k].x) * i / cells[k], path[k].z + (path[k + 1].z - path[k].z) * i / cells[k]));
+        cols.Add(path[path.Length - 1]);
+        for (int j = 0; j <= ny; j++) foreach (var c in cols) { P.Add(c.x); P.Add(y0 + (y1 - y0) * j / ny); P.Add(c.z); }
+        int W = cols.Count;
+        for (int j = 0; j < ny; j++) for (int i = 0; i + 1 < W; i++)
+        {
+            int a = j * W + i, b = a + 1, c = a + W + 1, d = a + W;
+            if (flip) I.AddRange(new[] { a, c, b, a, d, c }); else I.AddRange(new[] { a, b, c, a, c, d });
+        }
+        return new Part { Name = name, Positions = P.ToArray(), Indices = I.ToArray() };
+    }
+
+    // every output face of a node as (centroid, geometric normal)
+    static List<(double[] c, double[] n)> FusedFaces(GlbDisconnectedParts.Result r, string node)
+    {
+        var g = Read(r.Bytes); var prim = (JObject)g.Primitives(g.Node(node))[0];
+        float[] p = g.Floats(((JObject)prim["attributes"]).Value<int>("POSITION"), 3);
+        uint[] ix = g.Indices(prim.Value<int>("indices"));
+        var normals = FaceNormals(g, prim); var res = new List<(double[], double[])>();
+        for (int t = 0; t < ix.Length; t += 3)
+            res.Add((new[] { (p[ix[t] * 3] + p[ix[t + 1] * 3] + p[ix[t + 2] * 3]) / 3.0, (p[ix[t] * 3 + 1] + p[ix[t + 1] * 3 + 1] + p[ix[t + 2] * 3 + 1]) / 3.0, (p[ix[t] * 3 + 2] + p[ix[t + 1] * 3 + 2] + p[ix[t + 2] * 3 + 2]) / 3.0 }, normals[t / 3]));
+        return res;
+    }
+
+    [Fact]
+    public void A_double_wall_with_an_indecisive_twin_vote_is_left_as_authored()
+    {
+        // The Wespe's companionway (2026-09-24): the stairwell's wall faces the well, and a hidden skin faces away just
+        // outside it - but the skin is slightly SKEWED, so along part of the wall it sits behind the visible one and
+        // along the rest in front: a twin vote of 33 in front / 44 behind, short of 70/30. The sheet then fell to the
+        // radial score, which reads a wall facing the hull's axis as inside out (-0.27 on the ship, -0.97 here), and
+        // turned the visible skin whole: the stairwell showed the hull's insides from above. A mostly-twinned sheet
+        // with an undecided vote is now left as authored: the radial score judges single skins, and this is not one.
+        var hull = Box("Hull", 400, -200, -50, -200, inward: false);            // the frame: two cubes end to end, length along Z
+        var hull2 = Box("Hull", 400, -200, -50, 200, inward: false);            // -> width axis X, side centre 0, belly 50
+        // the visible wall: the plane x = 120 from z 40 to 120, facing -X (the hull's axis); 10 columns x 4 rows = 80 faces
+        var visible = Wall("Well", new (float x, float z)[] { (120f, 40f), (120f, 120f) }, 30, 90, 4, new[] { 10 }, flip: false);
+        // the hidden skin: facing +X, 0.3 outside the wall at z = 40 and crossing it at 42 % of the way (0.286 inside at z = 120)
+        var hidden = Wall("Well", new (float x, float z)[] { (120.3f, 40f), (120.3f - 0.3f / 0.42f, 120f) }, 30, 90, 4, new[] { 10 }, flip: true);
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, hull2, visible, hidden), new[] { 2, 3 }, 0.0);
+        // both sheets read double-skinned with a 60/40 vote (planar, so no volume to judge by), and neither is turned
+        string sheets = r.Details.First(d => d.StartsWith("largest islands:", StringComparison.Ordinal));
+        Assert.Contains("inside-out score -0.9", sheets);
+        Assert.Equal(2, Regex.Matches(sheets, Regex.Escape("double skin 100% twinned (48 twin in front / 32 behind")).Count);
+        Assert.DoesNotContain("reversed whole", sheets);
+        Assert.Equal(2, Regex.Matches(sheets, "double wall, kept as authored").Count);
+        Assert.Contains(r.Details, d => d.StartsWith("double walls: 2 sheet(s)", StringComparison.Ordinal));
+        Assert.Equal(0, r.FacesRewound);
+        // every face of the visible wall (exactly on x = 120) still faces the axis; every face of the skin still faces away
+        var faces = FusedFaces(r, "Well_Fused");
+        Assert.Equal(160, faces.Count);
+        foreach (var (c, n) in faces)
+        {
+            bool onTheWall = Math.Abs(c[0] - 120) < 1e-3;
+            Assert.True(onTheWall ? n[0] < 0 : n[0] > 0, "face at x " + c[0] + ", z " + c[2] + " was turned");
+        }
+    }
+
+    [Fact]
+    public void A_double_wall_with_a_confident_volume_and_an_undecided_vote_is_still_left_as_authored()
+    {
+        // The deck plating round the Wespe's hatch after the user's regrouping: a 96-face sheet, 48 twins in front /
+        // 48 behind, whose signed volume read a confident -0.70 (half of it is one copy, half the other) - and the
+        // volume rule, asked before the twin evidence, reversed it whole. Here: a U-shaped wall facing the well and a
+        // hidden skin facing away, offset so it sits in front on one leg and behind on the other two (32 / 48); the
+        // U's cones all agree, volume agreement -1.00, thickness far above the gate. Reversed on master; kept now.
+        var hull = Box("Hull", 400, -200, -50, -200, inward: false);
+        var hull2 = Box("Hull", 400, -200, -50, 200, inward: false);
+        var path = new (float x, float z)[] { (120f, 40f), (120f, 120f), (-120f, 120f), (-120f, 40f) };   // clockwise from above: faces the well
+        var visible = Wall("Well", path, 20, 100, 4, new[] { 4, 2, 4 }, flip: false);                     // right 32, back 16, left 32 faces
+        var hidden = Wall("Well", path.Select(q => (q.x + 0.3f, q.z + 0.3f)).ToArray(), 20, 100, 4, new[] { 4, 2, 4 }, flip: true);
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, hull2, visible, hidden), new[] { 2, 3 }, 0.0);
+        string sheets = r.Details.First(d => d.StartsWith("largest islands:", StringComparison.Ordinal));
+        Assert.Contains("volume agreement -1.00", sheets);
+        Assert.Equal(2, Regex.Matches(sheets, Regex.Escape("double skin 100% twinned (32 twin in front / 48 behind")).Count);
+        Assert.DoesNotContain("reversed whole", sheets);
+        Assert.Equal(0, r.FacesRewound);
+        // every visible face (on the authored path) still faces the well's centre; every hidden face still faces away
+        foreach (var (c, n) in FusedFaces(r, "Well_Fused"))
+        {
+            bool authoredVisible = Math.Abs(Math.Abs(c[0]) - 120) < 1e-3 || Math.Abs(c[2] - 120) < 1e-3;
+            double toWell = n[0] * (0 - c[0]) + n[2] * (80 - c[2]);
+            Assert.True(authoredVisible ? toWell > 0 : toWell < 0, "face at x " + c[0] + ", z " + c[2] + " was turned");
+        }
+    }
+
+    [Fact]
+    public void A_deck_joined_to_the_walls_above_it_shows_its_front_to_the_sky_and_is_not_recoloured()
+    {
+        // The Wespe's deck plating round the hatch: welded to the bottom edge of the walls above it, an up-facing deck
+        // walks those edges the SAME way as the outward walls - no winding satisfies a game rip's join - and the size
+        // rule turned the deck (the smaller side) face down. Seen from above, the deck shows its authored front, so
+        // it is a join, not an error, and the sheet is left as authored. Here: four outward walls from y 0 to 10 and
+        // a floor at y 0 facing up, sharing the walls' bottom edges.
+        var hull = Box("Hull", 400, -200, -450, -200, inward: false);   // the frame BENEATH: the floor sees the sky and has the hull below it
+        var walls = Wall("Tub", new (float x, float z)[] { (0f, 0f), (0f, 10f), (10f, 10f), (10f, 0f), (0f, 0f) }, 0, 10, 1, new[] { 1, 1, 1, 1 }, flip: false);   // facing OUT (measured: flip:true faced in)
+        var floor = Level("Tub", 0, 10, 0, 10, 0, down: false);
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, walls, floor), new[] { 1, 2 }, 0.0);
+        Assert.Contains(r.Details, d => d.StartsWith("from above: 1 sheet(s)", StringComparison.Ordinal));
+        Assert.Contains(r.Details, d => d.Contains("seen from above the minority shows its front (2 up-facing exposed, 0 down-facing)"));
+        Assert.Equal(0, r.FacesRewound);
+        foreach (var (c, n) in FusedFaces(r, "Tub_Fused"))
+        {
+            if (Math.Abs(c[1]) < 1e-3) Assert.True(n[1] > 0, "the floor still faces up");
+            else Assert.True(n[0] * (c[0] - 5) + n[2] * (c[2] - 5) > 0, "the wall at " + c[0] + "," + c[2] + " still faces out");
+        }
+    }
+
+    [Fact]
+    public void A_reversed_patch_in_a_plate_is_still_recoloured()
+    {
+        // The rule above must not shelter a genuine error: a strip of quads in one plane with one quad wound the other
+        // way shows that quad's BACK to the sky, and the parity walk still turns it.
+        var hull = Box("Hull", 400, -200, -50, -200, inward: false);
+        var parts = new List<Part> { hull };
+        for (int i = 0; i < 5; i++) parts.Add(Level("Plate", i, i + 1, 0, 1, 300, down: i == 2));   // the middle quad faces down
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(parts.ToArray()), new[] { 1, 2, 3, 4, 5 }, 0.0);
+        Assert.DoesNotContain(r.Details, d => d.StartsWith("from above:", StringComparison.Ordinal));
+        Assert.Equal(2, r.FacesRewound);
+        Assert.All(FusedNormals(r, "Plate_Fused"), n => Assert.True(n[1] > 0, "every quad faces up"));
+    }
+
+    [Fact]
+    public void An_open_well_that_shows_its_floor_to_the_sky_is_not_reversed_by_its_volume()
+    {
+        // The Wespe's stern companionway: four walls facing into the well and a floor facing up, open at the top - as
+        // the source has it, and as a well is seen. Its cones about its own centroid all point inward (volume
+        // agreement -1.00), so the volume rule reversed it whole: walls into the deck, floor down, the stairs visible
+        // through the wall. Seen from above it shows its floor and no backs; the reversal is vetoed.
+        var hull = Box("Hull", 400, -200, -450, -200, inward: false);   // the frame BENEATH: the floor sees the sky and has the hull below it
+        var walls = Wall("Well", new (float x, float z)[] { (0f, 0f), (0f, 10f), (10f, 10f), (10f, 0f), (0f, 0f) }, 0, 10, 1, new[] { 1, 1, 1, 1 }, flip: true);   // facing IN
+        var floor = Level("Well", 0, 10, 0, 10, 0, down: false);
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, walls, floor), new[] { 1, 2 }, 0.0);
+        string sheets = r.Details.First(d => d.StartsWith("largest islands:", StringComparison.Ordinal));
+        Assert.Contains("volume agreement -1.00", sheets);
+        Assert.Contains("kept (seen from above it shows 2 up-facing faces and 0 backs: a reversal would turn them down)", sheets);
+        Assert.Contains(r.Details, d => d.Contains("1 reversal(s) of an open sheet vetoed"));
+        Assert.Equal(0, r.FacesRewound);
+        foreach (var (c, n) in FusedFaces(r, "Well_Fused"))
+        {
+            if (Math.Abs(c[1]) < 1e-3) Assert.True(n[1] > 0, "the floor still faces up");
+            else Assert.True(n[0] * (c[0] - 5) + n[2] * (c[2] - 5) < 0, "the wall at " + c[0] + "," + c[2] + " still faces into the well");
+        }
+    }
+
+    [Fact]
+    public void A_join_minority_kept_by_the_view_from_above_is_not_turned_when_its_sheet_is_reversed()
+    {
+        // The Teutonic's group T: a 144-face sheet whose parity minority was kept (32 up-facing faces to the sky), then
+        // reversed whole by the direction pass, which turned the kept faces down. Here: four walls facing IN (an
+        // inside-out box the volume rule reverses) and a lip at the top of one wall extending inward and facing up -
+        // inconsistent with the inward wall, so the parity minority, and shown to the sky, so kept. The reversal turns
+        // the walls out and leaves the lip up.
+        var hull = Box("Hull", 400, -200, -450, -200, inward: false);   // the frame beneath
+        var walls = Wall("Tub", new (float x, float z)[] { (0f, 0f), (0f, 10f), (10f, 10f), (10f, 0f), (0f, 0f) }, 0, 10, 1, new[] { 1, 1, 1, 1 }, flip: true);   // facing IN
+        var lip = Level("Tub", 0, 2, 0, 10, 10, down: false);           // at the top of the x = 0 wall, extending inward, facing up
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, walls, lip), new[] { 1, 2 }, 0.0);
+        string sheets = r.Details.First(d => d.StartsWith("largest islands:", StringComparison.Ordinal));
+        Assert.Contains("seen from above the minority shows its front (2 up-facing exposed, 0 down-facing)", sheets);
+        Assert.Contains("reversed whole", sheets);
+        foreach (var (c, n) in FusedFaces(r, "Tub_Fused"))
+        {
+            if (Math.Abs(c[1] - 10) < 1e-3) Assert.True(n[1] > 0, "the lip still faces up");
+            else Assert.True(n[0] * (c[0] - 5) + n[2] * (c[2] - 5) > 0, "the wall at " + c[0] + "," + c[2] + " now faces out");
+        }
+    }
+
+    [Fact]
+    public void A_welded_face_is_not_shaded_by_its_own_pre_weld_copy()
+    {
+        // Review of PR #83, P2: the occluders were read from the file at their authored positions while the faces
+        // were asked at their WELDED positions, so a weld that moved a face left its pre-weld copy above it, shading
+        // it. The well again, its floor 0.005 above the walls' feet under a 0.01 weld: the seam welds halfway, the
+        // whole floor moves down 0.0025, and its own authored quad then sat above its welded centroid - "not
+        // exposed", no veto, the well reversed. The group's own faces now come from the welded geometry.
+        var hull = Box("Hull", 400, -200, -450, -200, inward: false);
+        var walls = Wall("Well", new (float x, float z)[] { (0f, 0f), (0f, 10f), (10f, 10f), (10f, 0f), (0f, 0f) }, 0, 10, 1, new[] { 1, 1, 1, 1 }, flip: true);   // facing IN
+        var floor = Level("Well", 0, 10, 0, 10, 0.005f, down: false);
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, walls, floor), new[] { 1, 2 }, 0.001);   // weld 0.01 of a 10-unit group
+        string sheets = r.Details.First(d => d.StartsWith("largest islands:", StringComparison.Ordinal));
+        Assert.Contains("a reversal would turn them down", sheets);
+        Assert.All(FusedFaces(r, "Well_Fused").Where(fc => fc.c[1] < 0.5), fc => Assert.True(fc.n[1] > 0, "the floor still faces up"));
     }
 
     [Fact]

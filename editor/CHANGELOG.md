@@ -5,6 +5,63 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Fuser: a double wall with an undecided twin vote keeps its authored winding** (user: "another see-through
+  fuse issue next in the stairs leading below", SMS Wespe). The companionway is doubled the way the gun was — every
+  face has an opposite partner a quarter of the reach away — but the copies are not coincident, so the twin rule
+  does not see them, and as on the gun's ring the copies swap roles at the fold: the landing's up-facing faces belong
+  to the copy that faces the well on the walls. Two passes then went wrong at once. The parity walk read each copy
+  as inconsistent at the fold and turned 38 of its 77 faces, and the twin vote (33 in front / 44 behind, short of
+  the 70/30 it needs) fell through to the radial score, −0.27 against the −0.25 line, which turned the sheet whole:
+  walls facing into the deck, the hull's insides visible from above. The radial score judges a *single* skin and
+  the parity walk a surface with *one* right side; a sheet the twin evidence already describes as double-walled is
+  neither, and its source, which is the reference, renders it. An open sheet twinned on most faces whose vote is
+  undecided now keeps every face as authored — parity flips included (keeping the sheet but not the flips left the
+  landing facing down: 49 ray cells, measured). Its report line reads "double wall, kept as authored" and a Details
+  line counts such sheets. Measured with the honest per-ray census over the stairwell box: 230 cells solid in the
+  source and see-through on master → 1 (on another part); the ship's other changed clusters 6/5/6 → 0. Against
+  master the fixed fuse changes 158 faces on the Wespe, 31 on the frigate, 6 on the Romanic, 26 on the Teutonic and
+  none on the paddle steamer; every non-Wespe cluster censuses identically before and after. Test: a wall facing
+  the hull's axis with a skewed opposite skin (48 twins in front / 32 behind) was reversed whole; both now keep.
+  **Second cut** (user: "it still seems to look transparent", after regrouping): the deck plating round the hatch
+  came out as a 96-face sheet, 48 twins in front / 48 behind, whose signed volume read a confident −0.70 — half of
+  it is one copy and half the other, so the cones agree on a sign that means nothing — and the volume rule, asked
+  before the twin evidence, reversed it whole: 146 ray cells of deck see-through from above. An undecided double
+  wall is now asked before the volume (a decided vote still defers to it, as the tie-breaker note says). Test: a
+  U-shaped double wall with volume agreement −1.00 and a 32 / 48 vote, reversed on master, kept now. And the rest
+  of that deck belonged to the 10,713-face hull sheet, which was *kept* — the parity walk itself had turned the
+  plating, as the smaller side of a 2-colouring: a 255-face minority. Measured from far outside the model, 22 of
+  those faces are exposed on their authored front (the deck strip round the hatch) and 6 on their back; the 89
+  majority faces across the seam are all exposed on their authored front. Both sides are right as authored, and
+  what joins them is a game rip's join — a deck welded to the bottom edge of the wall above it, a deck top abutting
+  a ceiling in one plane — which no winding satisfies and which the size rule "satisfied" by turning the smaller
+  region. No local reading of the seam tells a join from an error (a deck meeting a ceiling in one plane looks
+  exactly like a reversed patch; a seam classifier was tried and measured wrong), so the fuse now uses the evidence
+  the census uses: the view from above. Before a parity class is recoloured, every level face of both classes is
+  asked whether anything of the whole model sits above it (a vertical ray against every mesh node of the file — the
+  group alone read 57 ceilings as exposed whose decks belong to other groups); the recolouring
+  that leaves the most exposed faces showing their front wins, and on a tie the size rule stands. A reversed patch
+  shows its back to the sky and is turned as before; the deck strip shows its front and stays. The report says so
+  per sheet and in a Details line. Tests: a floor welded to the bottom edges of four outward walls stays up; a
+  reversed quad in a flat strip is still turned.
+  **Fourth cut** (user: "I still see through the walls", the stern companionway, group G, on master too): a 47-face
+  open well — walls facing into the well, floor and steps facing up, as the source has it — whose cones about its
+  own centroid read a confident −0.85, so the volume rule reversed it whole: walls into the deck, floor down,
+  3,733 ray cells see-through and the stairs visible through the wall. The same evidence now guards the reversal: an
+  open sheet that already shows up-facing faces to the sky, three to one against backs, is not reversed, an up-facing face
+  counting only when the hull lies beneath it (an upturned boat's bottom sees the sky exactly as a well's floor
+  does; the deck exemption stays as it is). Stern box, honest census: 3,733 cells see-through on master → 32, all
+  pre-existing. Whole ship: 893 → 69. And the parity rule's other half — turning the *majority* when it shows its
+  backs — was measured wrong on the frigate's boats (an open boat shows its backs to the sky as authored) and is
+  gone: the minority is only ever kept. And a minority kept that way is not turned with its sheet when the
+  direction pass reverses it (the Teutonic's group T: on master the two wrongs cancelled; with the join kept, the
+  reversal turned the kept faces down) — the reversal skips it and the veto counts only what the reversal would
+  turn. Tests: a well of four inward walls and an up-facing floor is kept; an inside-out box with an up-facing lip
+  kept as a join is reversed with the lip left up.
+  **Review (P2):** the occluders were read from the file at their authored positions while faces were asked at
+  their welded positions, so a weld that moved a face left its pre-weld copy above it, shading it (a 0.005 seam
+  under a 0.01 weld turned a well's floor). The group's own faces now come from the welded geometry, the face
+  itself excluded; other nodes still from the file. Tested; byte-identical on all five ships at weld 0.
+
 - **Model Fuser: a part that is double-sided by duplication is fused as two copies, not one soup** (user: "an issue
   with the fused gun that becomes visible in the Vehicle Lab", SMS Wespe). The gun carries every face twice, wound
   both ways, each copy with its own vertices — 6,000 of its 6,053 faces. Welded by position the two copies shared
