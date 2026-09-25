@@ -2258,12 +2258,16 @@ public class VehicleLabWindow : EditorWindow
         // argument (the positional block is full at argv[75]), so an older script and a newer Lab still run together.
         string defaultFile = Path.Combine(projRoot, prevDir, baseName + "_default.txt").Replace('\\', '/');
         if (defaultReducePct > 0f) File.WriteAllLines(defaultFile, src.Where(p => p.role == Role.Default).Select(p => p.name).ToArray());   // only when the dial asks: an undecided model lists thousands of names
-        // SHROUD (2026-09-21): the standing rigging's own soup-pass tier — tagged like defaultreduce=, absent at 0.
+        // SHROUD (2026-09-21): the standing rigging's own soup-pass tier — tagged like defaultreduce=. The names file is
+        // written and sent at EVERY dial setting (review of PR #89): the script's artifact purge protects a marked part
+        // only when its name reaches the script, and a sphere-shaped part still called Icosphere would otherwise be
+        // deleted at 0 % despite the mark. (Default keeps its "only when the dial asks": unmarked parts have no mark to
+        // protect, and an undecided model lists thousands of names.)
         string shroudFile = Path.Combine(projRoot, prevDir, baseName + "_shroud.txt").Replace('\\', '/');
-        if (shroudReducePct > 0f) File.WriteAllLines(shroudFile, src.Where(p => p.role == Role.Shroud).Select(p => p.name).ToArray());
-        // WINDOW (2026-09-25): glazing's own weld tier - tagged like shroudreduce=, absent at 0.
+        File.WriteAllLines(shroudFile, src.Where(p => p.role == Role.Shroud).Select(p => p.name).ToArray());
+        // WINDOW (2026-09-25): glazing's own weld tier - tagged like shroudreduce=, the names always sent (see above).
         string windowFile = Path.Combine(projRoot, prevDir, baseName + "_window.txt").Replace('\\', '/');
-        if (windowReducePct > 0f) File.WriteAllLines(windowFile, src.Where(p => p.role == Role.Window).Select(p => p.name).ToArray());
+        File.WriteAllLines(windowFile, src.Where(p => p.role == Role.Window).Select(p => p.name).ToArray());
         // DETAIL (2026-09-08): a plain reduction tier of its own — welds to the hull like Body.
         string detailFile = Path.Combine(projRoot, prevDir, baseName + "_detail.txt").Replace('\\', '/');
         File.WriteAllLines(detailFile, src.Where(p => p.role == Role.Detail).Select(p => p.name).ToArray());
@@ -2361,10 +2365,11 @@ public class VehicleLabWindow : EditorWindow
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         return $" \"defaultreduce=@{namesFile}|{defaultReducePct.ToString("0.#", inv)}\"";
     }
-    // Same shape for the Shroud tier: shroudreduce=@<names file>|<percent>, absent while the dial is 0.
+    // Same shape for the Shroud tier: shroudreduce=@<names file>|<percent>. Sent at every dial setting (percent 0 when
+    // the dial is off) so the marked names always reach the script's artifact purge (review of PR #89); an older
+    // script ignores the tag, a newer one skips the tier at 0.
     string ShroudReduceArg(string namesFile)
     {
-        if (shroudReducePct <= 0f) return "";
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         return $" \"shroudreduce=@{namesFile}|{shroudReducePct.ToString("0.#", inv)}\"";
     }
@@ -2376,10 +2381,9 @@ public class VehicleLabWindow : EditorWindow
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         return $" \"gunreduce={gunReducePct.ToString("0.#", inv)}\"";
     }
-    // WINDOW (2026-09-25): windowreduce=@<names file>|<percent>, the Shroud shape (Window parts travel nowhere else), absent at 0.
+    // WINDOW (2026-09-25): windowreduce=@<names file>|<percent>, the Shroud shape (Window parts travel nowhere else), sent at every dial setting.
     string WindowReduceArg(string namesFile)
     {
-        if (windowReducePct <= 0f) return "";
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         return $" \"windowreduce=@{namesFile}|{windowReducePct.ToString("0.#", inv)}\"";
     }

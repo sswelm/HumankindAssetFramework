@@ -919,7 +919,8 @@ if _dfarg:
 # soup pass as RIGGING (no weld: dissolve + collapse, ropes thin to lines), its own percentage because ratlines are
 # the densest geometry on a sailing ship and want a harder cut than the running rigging. Deliberately NOT in the
 # rigging_on_sail set below: a shroud holds the mast up, so it stays standing while the canvas gathers. Tagged like
-# defaultreduce= (the positional block is full); absent while the dial is 0.
+# defaultreduce= (the positional block is full). Sent at every dial setting since PR #89 (percent 0 when the dial is
+# off): the names must reach _role_marked below, or a marked part still called Icosphere is purged as an artifact.
 #   shroudreduce=@<names file>|<percent>
 shroud_names = []
 shroud_reduce = 0.0
@@ -953,7 +954,8 @@ except Exception as _e:
     print("VEHICLE ERROR: malformed gunreduce argument: %s" % _e); sys.exit(1)
 # WINDOW (2026-09-25, user: "add the reducable part type Window"): glazing - portholes, bridge windows, windshields -
 # as a WELD tier of its own (a pane is a sheet, not rope soup). Its parts travel nowhere else, so the tag carries the
-# names file like shroudreduce=. Absent while the dial is 0; malformed = hard error, like the other tags.
+# names file like shroudreduce=, sent at every dial setting so the names reach _role_marked (review of PR #89: at 0 %
+# an empty list let the artifact purge delete a marked Icosphere-named pane). Malformed = hard error, like the other tags.
 #   windowreduce=@<names file>|<percent>
 def _tagged_names_pct(argv, tag):
     """A "<tag>=<names>|<percent>" reduce tag: (names text, percent clamped 0..95), or ("", 0.0) when the tag is absent.
