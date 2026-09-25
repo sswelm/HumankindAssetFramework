@@ -450,6 +450,51 @@ public static class GlbDisconnectedParts
     // PartInfo, yet its _Part_NNN children must find it to inherit its ⊕ letter (WorkshopRules.TransferLetters).
     // Every node's name as the FILE has it, by index (null when nameless) - the names a sidecar written before the
     // unique renaming carries (review of PR #85, P1).
+    /// <summary>
+    /// The rig a file carries, from its JSON alone: how many skins, the joint count of the largest, how many meshes,
+    /// how many nodes render one, and how many of those are RIGGED - a node whose mesh has a primitive with
+    /// non-empty POSITION, JOINTS_0 and WEIGHTS_0 accessors, bound to a skin that exists and has joints. The Bake
+    /// Tests validate a Vehicle Lab output by the rigged count (review of PR #90, three rounds: the row read the bone
+    /// count off the script's log; then counted skins and mesh nodes separately, so a static mesh beside an unused
+    /// skin passed; then took positions alone, so a mesh that lost its vertex weights passed).
+    /// </summary>
+    public static void RigSummary(byte[] source, out int skins, out int joints, out int meshes, out int meshNodes, out int riggedMeshNodes)
+    {
+        if (source == null) throw new ArgumentNullException(nameof(source));
+        JObject root = Parse(source).Root;
+        JArray skinArray = root["skins"] as JArray ?? new JArray();
+        JArray meshArray = root["meshes"] as JArray ?? new JArray();
+        JArray accessors = root["accessors"] as JArray ?? new JArray();
+        skins = skinArray.Count; joints = 0;
+        foreach (JToken skin in skinArray)
+            joints = Math.Max(joints, ((skin as JObject)?["joints"] as JArray)?.Count ?? 0);
+        meshes = meshArray.Count;
+        JArray nodes = root["nodes"] as JArray ?? new JArray();
+        meshNodes = 0; riggedMeshNodes = 0;
+        foreach (JObject node in nodes.OfType<JObject>())
+        {
+            if (node["mesh"] == null) continue;
+            meshNodes++;
+            int meshIndex = node["mesh"].Type == JTokenType.Integer ? (int)node["mesh"] : -1;
+            int skinIndex = node["skin"] != null && node["skin"].Type == JTokenType.Integer ? (int)node["skin"] : -1;
+            if (skinIndex < 0 || skinIndex >= skinArray.Count || ((((skinArray[skinIndex] as JObject)?["joints"]) as JArray)?.Count ?? 0) == 0) continue;
+            if (meshIndex < 0 || meshIndex >= meshArray.Count) continue;
+            bool NonEmpty(JObject attributes, string name)
+            {
+                JToken t = attributes?[name];
+                int acc = t != null && t.Type == JTokenType.Integer ? (int)t : -1;
+                return acc >= 0 && acc < accessors.Count && (((accessors[acc] as JObject)?["count"])?.Value<int>() ?? 0) > 0;
+            }
+            bool rigged = false;
+            foreach (JObject prim in (((meshArray[meshIndex] as JObject)?["primitives"]) as JArray ?? new JArray()).OfType<JObject>())
+            {
+                var attributes = prim["attributes"] as JObject;
+                if (NonEmpty(attributes, "POSITION") && NonEmpty(attributes, "JOINTS_0") && NonEmpty(attributes, "WEIGHTS_0")) { rigged = true; break; }
+            }
+            if (rigged) riggedMeshNodes++;
+        }
+    }
+
     public static List<KeyValuePair<int, string>> NodeNames(byte[] source)
     {
         if (source == null) throw new ArgumentNullException(nameof(source));

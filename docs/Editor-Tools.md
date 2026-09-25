@@ -523,6 +523,14 @@ everything that finished. The rows:
   per-option invariant.
 - **Conversion** (litmus rig / real registry rigs / deploy golden diff) — asserts raw-rig conversion invariants
   (scale==1, parent<child index, rotation-only curves) and the deploy-convert golden bone snapshots.
+- **Model Workshop** (every recipe's source) — on every GLB a Vehicle Lab recipe names as its source, in memory:
+  splits every multi-island part, tears the smallest multi-island part, fuses the largest parts (up to 150k
+  triangles) into one shell; no triangle lost, every split child one island, unique names, the fused shell present
+  with its reported count; then a golden diff of the counts (`Tools/workshop_golden/<file>.txt`, captured on the
+  first run, deleted to re-bless). About six minutes on the current recipes.
+- **Vehicle Lab** (representative recipes / every recipe) — runs the Lab's Generate headlessly (the same code as the
+  button; everything under `Logs/bake_tests/lab`, nothing under `Assets/`) and diffs the rig script's summary lines
+  (bones, clusters, clip frames, reduce tiers) against `Tools/lab_golden/<recipe>.txt`, captured on the first run.
 
 Run before committing baker/pipeline changes. See [Testing.md](Testing.md) and [Factory-Manual.md](Factory-Manual.md) §11.
 

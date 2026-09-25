@@ -127,6 +127,39 @@ public class BakeTestRunnerWindow : EditorWindow
                        "regressions the invariant checks can't (the crossed-legs class of bug). NO overlap with the two " +
                        "rows above — they SKIP deploy-convert models entirely.",
                 run = ConversionGateTest.RunDeployGoldenSection },
+
+            // THE WORKSHOP AND THE VEHICLE LAB (2026-09-25, user: "could you add fuse and split and extra generate test
+            // to the bake test"): the two tools no row exercised - split/tear/fuse on real ships, and the Lab's Generate.
+            new TestRow { name = "Does the Model Workshop still split, tear and fuse? (every recipe's source)", quick = true, on = true,
+                cost = "in-memory Workshop passes over every Vehicle Lab recipe's source GLB — no Blender, minutes",
+                what = "Runs the Workshop's split (every multi-island part; no merge, and the 1% default), a tear (the " +
+                       "smallest multi-island part — a tear costs minutes on a large one) and a fuse of the largest parts " +
+                       "up to 150k triangles into one shell, on every GLB a Vehicle Lab recipe names as its source, in " +
+                       "memory (nothing on disk is touched), and checks: no " +
+                       "triangle is lost by a split or a tear, every split child is one island, node names stay unique, " +
+                       "the fused shell is in the output with the reported triangle count and kept at least half the " +
+                       "triangles. Then diffs the counts — parts, islands, children, welded vertices, faces rewound — " +
+                       "against a blessed golden (Tools/workshop_golden/<file>.txt; the first run captures it). A " +
+                       "rewound-faces count that moves on a ship nobody touched is a direction-pass regression.",
+                run = WorkshopGateTest.RunSection },
+
+            new TestRow { name = "Does the Vehicle Lab still generate? (representative recipes)", quick = true, on = true, needsBlender = true, group = "lab",
+                cost = "one Blender rig run per representative recipe (up to six) — minutes",
+                what = "Runs the Vehicle Lab's Generate — the SAME code the button runs, headless: no dialogs, no " +
+                       "preview, everything under Logs/bake_tests/lab and nothing under Assets/ — on the first saved " +
+                       "recipe that marks oars, a gun, wheels, sails, a rotor and tracks. Requires the rig script's " +
+                       "completion marker and the output GLB, an armature within the 256-bone cap, and diffs the run's " +
+                       "summary lines (bones, wheel clusters, clip frames, every reduce tier's vertex counts) against a " +
+                       "blessed golden (Tools/lab_golden/<recipe>.txt; the first run captures it). A lost bone or a " +
+                       "changed reduction fails here without anyone reading the log.",
+                run = VehicleLabGateTest.RunRepresentativesSection },
+
+            new TestRow { name = "Does every Vehicle Lab recipe still generate? (every recipe)", needsBlender = true, group = "lab", thorough = true,
+                cost = "one Blender rig run per saved recipe — slow",
+                what = "The same check as the row above on EVERY saved recipe (Assets/FactorySource/VehicleLab/Recipes), " +
+                       "not just the representatives. Mutually exclusive with that row. Run before a release, or after " +
+                       "touching vehicle_rig.py.",
+                run = VehicleLabGateTest.RunAllSection },
         };
     }
 
