@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Xunit;
@@ -11,6 +12,34 @@ public class WorkshopRulesTests
         var l = new List<KeyValuePair<int, string>>();
         foreach (var (i, n) in rows) l.Add(new KeyValuePair<int, string>(i, n));
         return l;
+    }
+
+    [Fact]
+    public void A_sidecar_written_before_the_unique_renaming_follows_the_renamed_parts()
+    {
+        // review of PR #85, P1: the file names nodes 0 and 2 both "Deck"; the rows call node 2 "Deck_3". Lines that name
+        // a part as the file did move to the unique name; a v1 line, a comment and a line that fits neither name pass through
+        var parts = new List<(int, string, string)> { (0, "Deck", "Deck"), (2, "Deck", "Deck_3"), (5, "Mast", "Mast") };
+        string[] lines = { WorkshopRules.SidecarHeader, "A|0|Deck", "B|2|Deck", "X|5|Mast", "C|2|Other", "D|Deck", "E|9|Deck" };
+        var refusedLines = new List<string>();
+        string[] migrated = WorkshopRules.MigrateSidecarNames(lines, parts, refusedLines);
+        // "D|Deck" (no index) and "E|9|Deck" (node 9 is no Deck) name a part the file has twice: refused, not left for the
+        // resolver to hand to the one row still called Deck (review of PR #85, third round)
+        Assert.Equal(new[] { WorkshopRules.SidecarHeader, "A|0|Deck", "B|2|Deck_3", "X|5|Mast", "C|2|Other" }, migrated);
+        Assert.Equal(2, refusedLines.Count);
+        Assert.Contains(refusedLines, q => q.StartsWith("'Deck' names 2 parts in the file and no node index is given", StringComparison.Ordinal));
+        Assert.Contains(refusedLines, q => q.StartsWith("'Deck' names 2 parts in the file and node 9 is not one of them", StringComparison.Ordinal));
+        // and the resolver, which used to fall back by name onto node 0 for the B line, now marks node 2
+        var problems = new List<string>();
+        var got = WorkshopRules.ResolveFuseSidecar(new[] { WorkshopRules.SidecarHeader, "A|0|Deck", "B|2|Deck_3", "X|5|Mast" }, parts.Select(p => new KeyValuePair<int, string>(p.Item1, p.Item3)).ToList(), problems);
+        Assert.Equal("A", got[0]); Assert.Equal("B", got[2]); Assert.Equal("X", got[5]);
+        Assert.Empty(WorkshopRules.MigrateSidecarNames(null, parts));
+        // the legacy layout, name in the middle, index last (no v2 header): the same migration; a line without an index passes through
+        var legacyRefused = new List<string>();
+        Assert.Equal(new[] { "A|Deck|0", "B|Deck_3|2", "C|Other|2" }, WorkshopRules.MigrateSidecarNames(new[] { "A|Deck|0", "B|Deck|2", "D|Deck", "C|Other|2" }, parts, legacyRefused));
+        Assert.Single(legacyRefused);
+        var legacy = WorkshopRules.ResolveFuseSidecar(new[] { "A|Deck|0", "B|Deck_3|2" }, parts.Select(p => new KeyValuePair<int, string>(p.Item1, p.Item3)).ToList(), problems);
+        Assert.Equal("A", legacy[0]); Assert.Equal("B", legacy[2]);
     }
 
     [Fact]

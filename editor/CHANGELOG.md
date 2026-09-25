@@ -5,6 +5,60 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Cutter: Tear — Split, plus a cut wherever the other side of the ship has the welded object separate**
+  (user: "the split command only really splits parts that are not connected; we need a method that can separate
+  them even when they are connected" — the Wespe's davits, welded into the deck part, intersect the paddle wheels
+  in the final model; "it could look at mirror parts when available, because on the mirror side it is separated
+  correctly"; and, after a first cut that also tore along sharp seams: "it created way too many extra parts, at
+  most I expected 33 extra parts" — the island count). Tear (the row popup, or the T key) makes the same islands as
+  Split, under the same Merge slider, and cuts a welded island only where the mirror says so: every face is
+  mirrored across the centreline and labelled by the nearest island there within 0.1 % of the model — its own
+  island first (a deck spanning both sides mirrors onto itself and is never cut), else any other island of any
+  part — and the island is cut wherever the label changes, through welded vertices as well. Nothing else is cut.
+  Pieces small in both surface and face count (under 2 % of the island's) are glued back onto their longest-cut
+  neighbour — the deck under a fitting, labelled by the fitting where the mirror deck has a hole; a davit is a thin
+  arm of many faces and stays. Lossless, like Split: the pieces become _Part_NNN children, the mark travels in the
+  marks sidecar as T, and the report says which mirror islands claimed what. Measured on the Wespe: the split
+  file's 44,080-face deck part, 29 islands, tears into 66 pieces in 3 s, and the unsplit 63,741-face part at 2 %
+  merge, 25 islands, into 87 — in both the starboard davit's arm comes off as one 2,048-face piece with its tackle
+  blocks beside it, and the other davits along the side the same way. Tests: a davit welded into a deck comes off
+  where the mirror side has it separate, not where the mirror side is welded too, not without a mirror; a part's
+  own islands stay the islands Split would make, plus the cut. A Tear mark survives a re-Probe and is saved and
+  loaded with the marks sidecar like a Split check (user: "it appears Tear is not saved"). On the way, the whole-file samplers (the belly
+  frame, the fuse's view from above) skip a file's line and point primitives instead of giving up: the Wespe's
+  source file carries rigging lines.
+
+- **Model Workshop: every part has a unique name from the moment it is probed** (user: "all parts need to get a
+  unique name so that after cutting they don't start to conflict" — "give all parts that are not unique a unique
+  name so that any part split up or torn up will remain unique"). A game rip names every part after its material;
+  the Wespe has ten nodes called "Material2", and everything that names a part — the Lab's roles, the sidecars'
+  name+index lines, a recipe — then fits several at once. The Cutter and the Fuser now read the file with every
+  duplicate made unique first — Material2, Material2_2, Material2_3 … in node order, never colliding with a name
+  already in the file — so the list shows those names, marks and letters are kept under them, every child a
+  Split, Tear or Fuse makes takes its name from them (Material2_3_Part_001), and the output carries them. The
+  source file is never touched and node indices do not change; a file already unique is read as it is. Test: two
+  "Deck" parts and an existing "Deck_2" — the second Deck becomes Deck_3, a second pass changes nothing.
+  **Review (P1, P2):** a sidecar written before the renaming names its parts as the file did, and against the
+  renamed rows the resolver fell back by name — "B|2|Deck" landed on the one row still called Deck, at node 0,
+  and node 2 lost its mark. Sidecar lines now migrate to the rows' unique names before they are resolved (a line
+  whose index still carries the file's name takes the unique one; the rest pass through). And a Split check now
+  replaces a Tear mark everywhere ("Check all splittable", the Space key, the operation itself): Split runs first
+  and takes the mesh, so a row checked for both was torn into nothing. Tested. **Second round:** the legacy
+  sidecar layout (name in the middle, index last) migrates the same way, and the "no mark" keys (–, 0, Backspace)
+  clear a Tear mark too. Tested. **Third round:** a sidecar line whose name the file gives to several nodes is
+  settled by its index or refused with a reason ("A|Deck" without an index, "B|9|Deck" with node 9 no Deck),
+  never handed to the one row still called Deck after the renaming; and a bare _number tail is no ancestry for
+  the Lab's role inheritance — Hull and Hull_2 may be two parts, and Hull_2 would have taken Hull's role, an
+  Ignore among them. Only the Cutter's own tails (_Part_NNN, _CutA, _CutB) inherit. Tested.
+
+- **Vehicle Lab: the classification follows the cut** (user: "I'm getting tired of having to reclassify all the
+  time after a split"). A re-Probe keeps roles by part name, so a part the Cutter made from another — X_Part_001,
+  X_CutA, or X_3 after the unique renaming — used to come back as Default and had to be classified again. Now a
+  part with no role of its own takes the role kept under its nearest ancestor name (Material2_3_Part_001 →
+  Material2_3; Hull_CutB_Part_002 → Hull_CutB → Hull): load the model's recipe, switch to the cut file, Probe, and
+  the pieces carry their parent's classification. Test: the ancestor names, nearest first, and the names that have
+  none.
+
 - **Model Workshop: the highlighted part stays in view when the filter changes** (user: "when you have selected a
   part while a filter is active, and then disable the filter, I expect the selected part to remain selected and in
   the window"). The highlight did survive a filter change, but the list kept the old scroll offset over a

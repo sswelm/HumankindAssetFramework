@@ -1081,6 +1081,70 @@ public class GlbFuseTests
         Assert.All(FusedFaces(r, "Well_Fused").Where(fc => fc.c[1] < 0.5), fc => Assert.True(fc.n[1] > 0, "the floor still faces up"));
     }
 
+    // The Wespe's davits: a deck of three quads with a plate rising from its middle edge, sharing vertices (no seam to
+    // tear at, one island). The mirror side, x < 0, is passed in as separate parts.
+    static Part WeldedDeckWithDavit(string name) => new Part { Name = name, Positions = new float[] {
+            0, 0, 0,  10, 0, 0,  10, 0, 10,  0, 0, 10,  10, 0, 20,  0, 0, 20,  10, 0, 30,  0, 0, 30,   // the deck, x 0..10, z 0..30
+            10, 10, 10,  10, 10, 20 },                                                                  // the davit, sharing vertices 2 and 4
+        Indices = new[] { 0, 2, 1,  0, 3, 2,  3, 4, 2,  3, 5, 4,  5, 6, 4,  5, 7, 6,   2, 4, 9,  2, 9, 8 } };
+    static readonly float[] MirrorDeck = { 0, 0, 0,  -10, 0, 0,  -10, 0, 10,  0, 0, 10,  -10, 0, 20,  0, 0, 20,  -10, 0, 30,  0, 0, 30 };
+    static readonly int[] MirrorDeckIdx = { 0, 1, 2,  0, 2, 3,  3, 2, 4,  3, 4, 5,  5, 4, 6,  5, 6, 7 };
+    static Part MirrorDavit() => new Part { Name = "DavitM", Positions = new float[] { -10, 0, 10,  -10, 0, 20,  -10, 10, 10,  -10, 10, 20 }, Indices = new[] { 0, 1, 3,  0, 3, 2 } };
+
+    [Fact]
+    public void Tear_cuts_a_welded_part_where_its_mirror_side_is_separate_parts()
+    {
+        // the mirror side as two parts, deck and davit: the welded part is cut into the same two, through the shared vertices
+        var deckMirror = new Part { Name = "DeckM", Positions = MirrorDeck, Indices = MirrorDeckIdx };
+        var r = GlbDisconnectedParts.Tear(BuildGlb(WeldedDeckWithDavit("Deck"), deckMirror, MirrorDavit()), new HashSet<int> { 0 }, 0);
+        Assert.Equal(1, r.NodesSplit); Assert.Equal(2, r.ChildPartsCreated);
+        Assert.Contains(r.Details, d => d.StartsWith("tear 'DeckMesh': 1 island(s), 1 cut by the mirror into 2 piece(s) (8 of 8 faces named by another island", StringComparison.Ordinal));
+        // without a mirror side, nothing comes apart
+        Assert.False(GlbDisconnectedParts.Tear(BuildGlb(WeldedDeckWithDavit("Deck")), new HashSet<int> { 0 }, 0).Changed);
+    }
+
+    [Fact]
+    public void Tear_does_not_cut_where_the_mirror_side_is_welded_too()
+    {
+        // the mirror side as ONE welded part (deck and davit sharing vertices, one island): every face mirrors onto the
+        // same island, and Tear is Split - one island, nothing to do
+        var mirror = new Part { Name = "DeckM", Positions = new float[] {
+            0, 0, 0,  -10, 0, 0,  -10, 0, 10,  0, 0, 10,  -10, 0, 20,  0, 0, 20,  -10, 0, 30,  0, 0, 30,  -10, 10, 10,  -10, 10, 20 },
+            Indices = new[] { 0, 1, 2,  0, 2, 3,  3, 2, 4,  3, 4, 5,  5, 4, 6,  5, 6, 7,   2, 9, 4,  2, 8, 9 } };
+        Assert.False(GlbDisconnectedParts.Tear(BuildGlb(WeldedDeckWithDavit("Deck"), mirror), new HashSet<int> { 0 }, 0).Changed);
+    }
+
+    [Fact]
+    public void Tear_keeps_the_islands_of_the_part_and_adds_only_the_mirror_cut()
+    {
+        // the welded deck-with-davit plus a separate island (a hatch cover above the deck) in ONE part, and the mirror
+        // side as deck + davit: three pieces - the two islands as Split would make them, and the davit cut off
+        var welded = WeldedDeckWithDavit("Deck");
+        var P = welded.Positions.Concat(new float[] { 2, 5, 2,  8, 5, 2,  8, 5, 8,  2, 5, 8 }).ToArray();
+        var I = welded.Indices.Concat(new[] { 10, 12, 11,  10, 13, 12 }).ToArray();
+        var twoIslands = new Part { Name = "Deck", Positions = P, Indices = I };
+        var deckMirror = new Part { Name = "DeckM", Positions = MirrorDeck, Indices = MirrorDeckIdx };
+        var r = GlbDisconnectedParts.Tear(BuildGlb(twoIslands, deckMirror, MirrorDavit()), new HashSet<int> { 0 }, 0);
+        Assert.Equal(3, r.ChildPartsCreated);
+        // and Split alone makes two
+        Assert.Equal(2, GlbDisconnectedParts.Split(BuildGlb(twoIslands, deckMirror, MirrorDavit()), new HashSet<int> { 0 }, 0).ChildPartsCreated);
+    }
+
+    [Fact]
+    public void Every_part_leaves_the_cutter_with_a_unique_name()
+    {
+        // three parts, two of them "Deck": the first keeps its name, the second becomes Deck_2 (no collision with the
+        // existing Deck_2 either), the Mast is untouched; a file already unique is left alone
+        var glb = BuildGlb(Level("Deck", 0, 1, 0, 1, 0, false), Level("Mast", 0, 1, 0, 1, 1, false), Level("Deck", 0, 1, 0, 1, 2, false), Level("Deck_2", 0, 1, 0, 1, 3, false));
+        var r = GlbDisconnectedParts.UniqueNodeNames(glb);
+        Assert.True(r.Changed);
+        Assert.Equal(1, r.NodesSplit);
+        Assert.Contains(r.Details, d => d.StartsWith("Renamed 1 part(s) to unique names: Deck -> Deck_3", StringComparison.Ordinal));
+        var names = GlbDisconnectedParts.Analyze(r.Bytes).Select(p => p.NodeName).ToList();
+        Assert.Equal(new[] { "Deck", "Mast", "Deck_3", "Deck_2" }, names);
+        Assert.False(GlbDisconnectedParts.UniqueNodeNames(r.Bytes).Changed);
+    }
+
     [Fact]
     public void A_level_plate_authored_facing_down_is_left_to_the_evidence()
     {

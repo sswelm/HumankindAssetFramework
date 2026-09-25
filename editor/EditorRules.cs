@@ -156,6 +156,29 @@ public static class NaturalOrder
 /// <summary>Vehicle Lab decisions over the Blender probe's stdout contract (VehicleLabWindow calls these; VehicleLabRulesTests locks them).</summary>
 public static class VehicleLabRules
 {
+    // THE PARENT NAMES OF A CUT PART (2026-09-25): the Cutter names what it makes after what it cut - X_Part_001
+    // (Split, Tear), X_CutA / X_CutB (the plane cut) - so a part's ancestors are found by peeling those tails, one
+    // at a time, nearest first: Material2_3_Part_001 -> Material2_3. A role kept under any of them is the part's to
+    // inherit. A bare _<number> tail is NOT ancestry (review of PR #85, third round): the Cutter's unique renaming
+    // makes one, but so does an author who names two parts Hull and Hull_2, and a suffix alone cannot tell them
+    // apart - Hull_2 would have taken Hull's role, an Ignore among them, and vanished from the output.
+    public static IEnumerable<string> ParentNames(string name)
+    {
+        if (string.IsNullOrEmpty(name)) yield break;
+        string cur = name;
+        for (int guard = 0; guard < 16; guard++)
+        {
+            string next = null;   // the specific tails before the bare number: a greedy "(.*)_\d+" would peel "_001" off "_Part_001"
+            foreach (string tail in new[] { @"^(.+)_Part_\d{3}$", @"^(.+)_Cut[AB]$" })
+            {
+                var m1 = System.Text.RegularExpressions.Regex.Match(cur, tail);
+                if (m1.Success) { next = m1.Groups[1].Value; break; }
+            }
+            if (string.IsNullOrEmpty(next) || next == cur) yield break;
+            yield return next; cur = next;
+        }
+    }
+
     public sealed class PartRow
     {
         public string Kind;                       // "PART" or "RIGBONE"
@@ -308,6 +331,60 @@ public static class WorkshopRules
     // the index; a line applies to the row at its index when that row still carries the name, otherwise by name
     // where the name is unique among the rows. Anything else is refused and named, never guessed.
     public const string SidecarHeader = "#fuse-groups v2";
+
+    // SIDECARS WRITTEN BEFORE THE UNIQUE RENAMING (review of PR #85, P1): a v2 line names its part as the file did -
+    // "B|2|Deck" - and against the renamed rows (node 2 is now Deck_3) the resolver cannot match index 2, falls back
+    // to the one row still called Deck, and the B line overwrites A at node 0 while node 2 loses its mark. So before
+    // resolving, every line whose index still carries the name the FILE gives it is rewritten to the row's unique
+    // name; a line whose name matches neither is left for the resolver to refuse. v1 lines (no index) and comments
+    // pass through. `parts`: (node index, the file's name, the unique name) per row.
+    // A name the FILE gives to several nodes is settled by the line's index or not at all (review of PR #85, third
+    // round): a name-only legacy line "A|Deck", or "B|9|Deck" with node 9 not a Deck, was refused as ambiguous
+    // against the file's names and would be taken by the one row still called Deck after the renaming. Such lines
+    // are dropped here with a reason in `refused`; a name the file gives to one node passes through untouched.
+    public static string[] MigrateSidecarNames(IEnumerable<string> lines, IList<(int index, string fileName, string name)> parts, List<string> refused = null)
+    {
+        var fileNameAt = new Dictionary<int, string>(); var nameAt = new Dictionary<int, string>(); var fileCount = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var p in parts) { fileNameAt[p.index] = p.fileName; nameAt[p.index] = p.name; if (p.fileName != null) fileCount[p.fileName] = fileCount.TryGetValue(p.fileName, out int c) ? c + 1 : 1; }
+        bool Shared(string name) => name != null && fileCount.TryGetValue(name, out int c) && c > 1;
+        string Refuse(string name, string where) { refused?.Add("'" + name + "' names " + fileCount[name] + " parts in the file and " + where + " — mark them by hand"); return null; }
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        var outLines = new List<string>(); bool v2 = false;
+        bool Renamed(int index, string name, out string unique)
+        {
+            unique = null;
+            return fileNameAt.TryGetValue(index, out string fileName) && nameAt.TryGetValue(index, out unique) && fileName == name && unique != null && unique != name;
+        }
+        foreach (string raw in lines ?? new string[0])
+        {
+            string line = raw?.Trim() ?? "";
+            if (line.StartsWith("#", StringComparison.Ordinal)) { if (line == SidecarHeader) v2 = true; outLines.Add(raw); continue; }
+            int firstBar = line.IndexOf('|');
+            if (firstBar <= 0) { outLines.Add(raw); continue; }
+            string letter = line.Substring(0, firstBar), remainder = line.Substring(firstBar + 1);
+            if (v2)
+            {
+                // "<letter>|<index>|<name>"
+                int secondBar = remainder.IndexOf('|');
+                string name = secondBar > 0 ? remainder.Substring(secondBar + 1) : remainder.Trim();   // no second bar: a name-only line, which a shared name makes ambiguous
+                int index = -1; bool hasIndex = secondBar > 0 && int.TryParse(remainder.Substring(0, secondBar).Trim(), System.Globalization.NumberStyles.Integer, inv, out index);
+                if (hasIndex && Renamed(index, name, out string unique)) { outLines.Add(letter + "|" + remainder.Substring(0, secondBar) + "|" + unique); continue; }
+                if (Shared(name) && !(hasIndex && fileNameAt.TryGetValue(index, out string at) && at == name)) { Refuse(name, hasIndex ? "node " + index.ToString(inv) + " is not one of them" : "no node index is given"); continue; }
+            }
+            else
+            {
+                // the legacy layout, "<letter>|<name>|<index>" (review of PR #85, second round: these passed through and
+                // the legacy resolver then found the now unique name at the wrong node); "<letter>|<name>" has no index to go by
+                int lastBar = remainder.LastIndexOf('|');
+                int index = -1; bool hasIndex = lastBar > 0 && int.TryParse(remainder.Substring(lastBar + 1).Trim(), System.Globalization.NumberStyles.Integer, inv, out index);
+                string name = hasIndex ? remainder.Substring(0, lastBar).Trim() : remainder.Trim();
+                if (hasIndex && Renamed(index, name, out string unique)) { outLines.Add(letter + "|" + unique + "|" + remainder.Substring(lastBar + 1)); continue; }
+                if (Shared(name) && !(hasIndex && fileNameAt.TryGetValue(index, out string at) && at == name)) { Refuse(name, hasIndex ? "node " + index.ToString(inv) + " is not one of them" : "no node index is given"); continue; }
+            }
+            outLines.Add(raw);
+        }
+        return outLines.ToArray();
+    }
 
     public static string SidecarLine(string letter, string name, int nodeIndex) =>
         letter + "|" + nodeIndex.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" + name;

@@ -196,6 +196,7 @@ public static class GlbDisconnectedParts
         public JObject Mesh;
         public List<Component> Components;
         public int TriangleCount;
+        public string TearNote;   // Tear's report line for this mesh (null for Split)
         public readonly List<int> NewMeshIndices = new List<int>();
     }
 
@@ -447,6 +448,17 @@ public static class GlbDisconnectedParts
 
     // Every node's parent index (-1 at a root), meshless nodes included — a split parent has no mesh and is not a
     // PartInfo, yet its _Part_NNN children must find it to inherit its ⊕ letter (WorkshopRules.TransferLetters).
+    // Every node's name as the FILE has it, by index (null when nameless) - the names a sidecar written before the
+    // unique renaming carries (review of PR #85, P1).
+    public static List<KeyValuePair<int, string>> NodeNames(byte[] source)
+    {
+        if (source == null) throw new ArgumentNullException(nameof(source));
+        JArray nodes = Parse(source).Root["nodes"] as JArray ?? new JArray();
+        var table = new List<KeyValuePair<int, string>>(nodes.Count);
+        for (int i = 0; i < nodes.Count; i++) table.Add(new KeyValuePair<int, string>(i, (string)(nodes[i] as JObject)?["name"]));
+        return table;
+    }
+
     public static List<KeyValuePair<int, int>> NodeParents(byte[] source)
     {
         if (source == null) throw new ArgumentNullException(nameof(source));
@@ -471,11 +483,227 @@ public static class GlbDisconnectedParts
     // for callers that have them; Analyze's PartInfo.NodeIndex feeds this overload.
     public static Result Split(byte[] source, ISet<int> onlyNodeIndices, double mergeFraction) => SplitCore(source, null, onlyNodeIndices, mergeFraction);
 
+    // TEAR (2026-09-25, user: "the split command only really splits parts that are not connected; we need a method that
+    // can separate them even when they are connected" - the Wespe's davits, welded into the deck part, intersect the
+    // paddle wheels in the final model; and "it could look at mirror parts when available, because on the mirror side
+    // it is separated correctly"; and, after a first cut that tore along sharp seams as well: "it created way too many
+    // extra parts, at most I expected 33 extra parts" - the island count). So Tear is Split plus ONE more cut: the
+    // islands are the same islands, under the same merge slider, and a welded island is cut only where the other side
+    // of the ship has that object as a separate island. Every face is mirrored across the model's centreline and
+    // labelled by the nearest island there within `MirrorTolerance` of the model - its own island first (a deck that
+    // spans both sides mirrors onto itself and is never cut), else another island of any part, else nothing - and
+    // the island is cut wherever the label changes, through welded vertices as well. Nothing else is cut: no seam
+    // rule, no angle. Pieces smaller than `GlueFraction` of the island's surface are glued onto the neighbour they
+    // share the longest cut with - the deck under a fitting, labelled by the fitting where the mirror deck has a hole
+    // (measured: 159 pieces from 25 islands with those kept apart); a davit is 5 % of its island and stays. Lossless,
+    // like Split: the pieces become _Part_NNN children of the part.
+    public sealed class TearOptions { public double GlueFraction = 0.02; public double MirrorTolerance = 0.001; }   // fractions of the model's longest extent (tolerance) and of the island's surface (glue); 0.5 % tolerance pepper-labelled a deck round a davit's foot, 0.1 % gave the davit whole
+    public static Result Tear(byte[] source, ISet<int> onlyNodeIndices, double mergeFraction, double glueFraction = 0.02, double mirrorTolerance = 0.001)
+        => SplitCore(source, null, onlyNodeIndices, mergeFraction, new TearOptions { GlueFraction = glueFraction, MirrorTolerance = mirrorTolerance });
+
+    // The mirror templates: every ISLAND of every mesh node (the torn part's own included), in world space, in a grid
+    // for nearest-surface queries. Template ids are dense; (node, island) -> id lets a torn island find itself.
+    sealed class TearTemplates
+    {
+        public readonly List<Vec3> Tris = new List<Vec3>(); public readonly List<int> IdOf = new List<int>();
+        public readonly Dictionary<(int node, int island), int> IdOfIsland = new Dictionary<(int, int), int>();
+        public readonly List<string> NameOf = new List<string>();
+        public readonly Dictionary<long, List<int>> Cells = new Dictionary<long, List<int>>();
+        public double Cell = 1, Tol = 0; public int WidthAxis = 0; public double CentreW = 0;
+        static long Key(long x, long y, long z) => (x & 0x1FFFFF) | ((y & 0x1FFFFF) << 21) | ((z & 0x1FFFFF) << 42);
+        public void Index()
+        {
+            for (int t = 0; t < IdOf.Count; t++)
+            {
+                Vec3 a = Tris[t * 3], b = Tris[t * 3 + 1], c = Tris[t * 3 + 2];
+                long x0 = (long)Math.Floor(Math.Min(a.X, Math.Min(b.X, c.X)) / Cell), x1 = (long)Math.Floor(Math.Max(a.X, Math.Max(b.X, c.X)) / Cell);
+                long y0 = (long)Math.Floor(Math.Min(a.Y, Math.Min(b.Y, c.Y)) / Cell), y1 = (long)Math.Floor(Math.Max(a.Y, Math.Max(b.Y, c.Y)) / Cell);
+                long z0 = (long)Math.Floor(Math.Min(a.Z, Math.Min(b.Z, c.Z)) / Cell), z1 = (long)Math.Floor(Math.Max(a.Z, Math.Max(b.Z, c.Z)) / Cell);
+                if (x1 - x0 > 64 || y1 - y0 > 64 || z1 - z0 > 64) continue;   // a stray sliver spanning the model is no template
+                for (long x = x0; x <= x1; x++) for (long y = y0; y <= y1; y++) for (long z = z0; z <= z1; z++)
+                { long k = Key(x, y, z); if (!Cells.TryGetValue(k, out List<int> l)) Cells.Add(k, l = new List<int>()); l.Add(t); }
+            }
+        }
+        // the island whose surface lies nearest the MIRROR of `p` within Tol; `self` wins a near-tie (a doubled deck of
+        // another part must not cut a deck that mirrors onto itself) but not a clear loss (a separate davit on the far
+        // side lies ON the mirror point, the own island's railing a unit away - measured on the Wespe's split file, where
+        // "self first" kept the davit welded); -1 when none
+        public int Label(Vec3 p, int self)
+        {
+            var m = new Vec3 { X = p.X, Y = p.Y, Z = p.Z };
+            if (WidthAxis == 0) m.X = 2 * CentreW - m.X; else m.Z = 2 * CentreW - m.Z;
+            long cx = (long)Math.Floor(m.X / Cell), cy = (long)Math.Floor(m.Y / Cell), cz = (long)Math.Floor(m.Z / Cell);
+            int best = -1; double bestD = Tol * Tol, selfD = double.PositiveInfinity;   // squared
+            for (long dx = -1; dx <= 1; dx++) for (long dy = -1; dy <= 1; dy++) for (long dz = -1; dz <= 1; dz++)
+            {
+                if (!Cells.TryGetValue(Key(cx + dx, cy + dy, cz + dz), out List<int> l)) continue;
+                foreach (int t in l)
+                {
+                    Vec3 q = ClosestPointOnTriangle(m, Tris[t * 3], Tris[t * 3 + 1], Tris[t * 3 + 2]);
+                    double d = FDist2(q, m);
+                    if (IdOf[t] == self) { if (d < selfD) selfD = d; }
+                    else if (d < bestD) { bestD = d; best = IdOf[t]; }
+                }
+            }
+            if (selfD > Tol * Tol) return best;
+            if (best < 0) return self;
+            return Math.Sqrt(selfD) <= Math.Sqrt(bestD) + 0.2 * Tol ? self : best;
+        }
+    }
+    static TearTemplates BuildTearTemplates(JArray nodes, JArray meshes, Accessors reader, double mergeFraction, Result result, double tolFraction)
+    {
+        var tt = new TearTemplates();
+        var lo = new[] { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity }; var hi = new[] { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
+        var planOfMesh = new Dictionary<int, MeshPlan>();
+        for (int ni = 0; ni < nodes.Count; ni++)
+        {
+            var node = nodes[ni] as JObject; if (node?["mesh"] == null) continue;
+            int mi = node.Value<int>("mesh"); if (mi < 0 || mi >= meshes.Count) continue;
+            var mesh = meshes[mi] as JObject; if (mesh == null) continue;
+            MeshPlan plan;
+            if (!planOfMesh.TryGetValue(mi, out plan))
+            {
+                try { plan = AnalyzeMesh(mi, mesh, reader, keepSingle: true, mergeFraction: mergeFraction); }
+                catch (Exception e) when (e is InvalidDataException || e is OverflowException) { plan = null; }
+                planOfMesh.Add(mi, plan);
+            }
+            if (plan == null) continue;
+            double[] world = NodeWorldMatrix(nodes, ni);
+            var primitives = mesh["primitives"] as JArray;
+            for (int ci = 0; ci < plan.Components.Count; ci++)
+            {
+                int id = tt.NameOf.Count; tt.NameOf.Add(((string)node["name"] ?? ("node " + ni)) + " island " + (ci + 1)); tt.IdOfIsland[(ni, ci)] = id;
+                foreach (var kv in plan.Components[ci].Indices)
+                {
+                    var prim = primitives[kv.Key] as JObject; int posAcc = ((JObject)prim["attributes"]).Value<int>("POSITION");
+                    List<uint> ix = kv.Value;
+                    for (int t = 0; t + 2 < ix.Count; t += 3)
+                    {
+                        Vec3 a = XForm(world, reader.Position(posAcc, ix[t])), b = XForm(world, reader.Position(posAcc, ix[t + 1])), c = XForm(world, reader.Position(posAcc, ix[t + 2]));
+                        tt.Tris.Add(a); tt.Tris.Add(b); tt.Tris.Add(c); tt.IdOf.Add(id);
+                        UpdateBounds(lo, hi, a); UpdateBounds(lo, hi, b); UpdateBounds(lo, hi, c);
+                    }
+                }
+            }
+        }
+        if (tt.IdOf.Count == 0) { result.Warnings.Add("tear: no mesh part to mirror; nothing cut beyond the islands"); return null; }
+        ModelBelly(nodes, meshes, reader, new List<Vec3>(), out int lengthAxis, out int widthAxis, out double centreW, out double bellyY, out double floorY);
+        tt.WidthAxis = widthAxis; tt.CentreW = centreW;
+        double longest = Math.Max(hi[0] - lo[0], Math.Max(hi[1] - lo[1], hi[2] - lo[2]));
+        tt.Tol = Math.Max(longest * tolFraction, 1e-9); tt.Cell = Math.Max(longest / 128.0, 2 * tt.Tol);
+        tt.Index();
+        return tt;
+    }
+
+    // THE CUT: every island of the plan is relabelled face by face against the mirror and cut where the label changes.
+    static void TearComponents(MeshPlan plan, int nodeIndex, JArray primitives, Accessors reader, double[] world, TearTemplates tt, TearOptions tear)
+    {
+        var output = new List<Component>(); int cut = 0, labelledFaces = 0, faces = 0, glued = 0;
+        var claims = new Dictionary<int, int>();   // template id -> pieces it claimed
+        for (int ci = 0; ci < plan.Components.Count; ci++)
+        {
+            Component comp = plan.Components[ci];
+            int self = tt.IdOfIsland.TryGetValue((nodeIndex, ci), out int sid) ? sid : -2;
+            // the island's faces: (primitive, three indices, three positions), a label each
+            var fPrim = new List<int>(); var fIdx = new List<uint[]>(); var fPos = new List<Vec3[]>(); var label = new List<int>();
+            foreach (var kv in comp.Indices)
+            {
+                int posAcc = ((JObject)((JObject)primitives[kv.Key])["attributes"]).Value<int>("POSITION"); List<uint> ix = kv.Value;
+                for (int t = 0; t + 2 < ix.Count; t += 3)
+                {
+                    var p = new[] { reader.Position(posAcc, ix[t]), reader.Position(posAcc, ix[t + 1]), reader.Position(posAcc, ix[t + 2]) };
+                    fPrim.Add(kv.Key); fIdx.Add(new[] { ix[t], ix[t + 1], ix[t + 2] }); fPos.Add(p);
+                    int lb = tt.Label(XForm(world, FScale(FAdd(FAdd(p[0], p[1]), p[2]), 1.0 / 3.0)), self);
+                    label.Add(lb == self ? -1 : lb); if (lb >= 0 && lb != self) labelledFaces++;
+                }
+            }
+            faces += label.Count;
+            if (label.Count == 0 || label.All(l => l < 0)) { output.Add(comp); continue; }   // nothing the mirror names: the island as it is
+            // edges by position, within the island; faces joined when their labels agree
+            double diag = 0; for (int a = 0; a < 3; a++) diag += (comp.Max[a] - comp.Min[a]) * (comp.Max[a] - comp.Min[a]);
+            double eps = Math.Max(Math.Sqrt(diag) * 1e-7, 1e-9);
+            PositionKey KeyOf(Vec3 p) => new PositionKey { X = (long)Math.Round((p.X - comp.Min[0]) / eps), Y = (long)Math.Round((p.Y - comp.Min[1]) / eps), Z = (long)Math.Round((p.Z - comp.Min[2]) / eps) };
+            var edges = new Dictionary<(PositionKey, PositionKey), List<int>>();
+            var fd = new DisjointSet(); for (int f = 0; f < label.Count; f++) fd.Add();
+            for (int f = 0; f < label.Count; f++)
+                for (int e = 0; e < 3; e++)
+                {
+                    PositionKey ka = KeyOf(fPos[f][e]), kb = KeyOf(fPos[f][(e + 1) % 3]);
+                    int cmp = ka.X != kb.X ? ka.X.CompareTo(kb.X) : ka.Y != kb.Y ? ka.Y.CompareTo(kb.Y) : ka.Z.CompareTo(kb.Z);
+                    if (cmp == 0) continue;
+                    var ek = cmp < 0 ? (ka, kb) : (kb, ka);
+                    if (!edges.TryGetValue(ek, out List<int> l)) edges.Add(ek, l = new List<int>());
+                    l.Add(f);
+                }
+            var torn = new List<(int fa, int fb, double length)>();
+            foreach (var kv in edges)
+            {
+                List<int> l = kv.Value; if (l.Count < 2) continue;
+                for (int i = 0; i < l.Count; i++) for (int j = i + 1; j < l.Count; j++)
+                {
+                    if (label[l[i]] == label[l[j]]) fd.Union(l[i], l[j]);
+                    else torn.Add((l[i], l[j], Math.Sqrt(Math.Max(0, (kv.Key.Item2.X - kv.Key.Item1.X) * (kv.Key.Item2.X - kv.Key.Item1.X) + (kv.Key.Item2.Y - kv.Key.Item1.Y) * (kv.Key.Item2.Y - kv.Key.Item1.Y) + (kv.Key.Item2.Z - kv.Key.Item1.Z) * (kv.Key.Item2.Z - kv.Key.Item1.Z))) * eps));
+                }
+            }
+            // pieces, their areas and labels; the glue
+            var pieceOf = new Dictionary<int, int>(); var area = new List<double>(); var pieceLabel = new List<int>(); double total = 0;
+            var pieceFaces = new List<List<int>>();   // a piece is SMALL when both its area and its face count are under the fraction: a davit is a thin arm of many small faces (4.6 % of the faces, under 2 % of the area) and was glued into the deck on area alone
+            for (int f = 0; f < label.Count; f++)
+            {
+                int r = fd.Find(f);
+                if (!pieceOf.TryGetValue(r, out int pi)) { pi = area.Count; pieceOf.Add(r, pi); area.Add(0); pieceLabel.Add(label[f]); pieceFaces.Add(new List<int>()); }
+                double a = 0.5 * FLen(FCross(FSub(fPos[f][1], fPos[f][0]), FSub(fPos[f][2], fPos[f][0]))); area[pi] += a; total += a; pieceFaces[pi].Add(f);
+            }
+            var pd = new DisjointSet(); for (int i = 0; i < area.Count; i++) pd.Add();
+            if (tear.GlueFraction > 0 && area.Count > 1)
+                for (int round = 0; round < area.Count; round++)
+                {
+                    var rootArea = new Dictionary<int, double>(); var rootFaces = new Dictionary<int, int>(); var rootLabel = new Dictionary<int, int>(); var seam = new Dictionary<(int, int), double>();
+                    for (int i = 0; i < area.Count; i++) { int r = pd.Find(i); rootArea[r] = rootArea.TryGetValue(r, out double ra) ? ra + area[i] : area[i]; rootFaces[r] = rootFaces.TryGetValue(r, out int rf) ? rf + pieceFaces[i].Count : pieceFaces[i].Count; if (!rootLabel.ContainsKey(r) || rootLabel[r] < 0) rootLabel[r] = pieceLabel[i]; }
+                    foreach (var (fa, fb, length) in torn)
+                    {
+                        int ra = pd.Find(pieceOf[fd.Find(fa)]), rb = pd.Find(pieceOf[fd.Find(fb)]); if (ra == rb) continue;
+                        var k = ra < rb ? (ra, rb) : (rb, ra); seam[k] = seam.TryGetValue(k, out double sl) ? sl + length : length;
+                    }
+                    int small = -1; double smallArea = double.PositiveInfinity;
+                    foreach (var kv in rootArea) if (kv.Value < tear.GlueFraction * total && rootFaces[kv.Key] < tear.GlueFraction * label.Count && kv.Value < smallArea && seam.Keys.Any(k => k.Item1 == kv.Key || k.Item2 == kv.Key)) { small = kv.Key; smallArea = kv.Value; }
+                    if (small < 0) break;
+                    int into = -1; double best = -1;
+                    foreach (var kv in seam) { int other = kv.Key.Item1 == small ? kv.Key.Item2 : kv.Key.Item2 == small ? kv.Key.Item1 : -1; if (other >= 0 && kv.Value > best) { best = kv.Value; into = other; } }
+                    pd.Union(small, into); glued++;
+                }
+            // the output pieces of this island
+            var outOf = new Dictionary<int, Component>();
+            for (int i = 0; i < area.Count; i++)
+            {
+                int r = pd.Find(i);
+                if (!outOf.TryGetValue(r, out Component oc)) { oc = new Component(); outOf.Add(r, oc); }
+                foreach (int f in pieceFaces[i])
+                {
+                    if (!oc.Indices.TryGetValue(fPrim[f], out List<uint> list)) oc.Indices.Add(fPrim[f], list = new List<uint>());
+                    list.AddRange(fIdx[f]); oc.TriangleCount++;
+                    foreach (Vec3 p in fPos[f]) { UpdateBounds(oc.Min, oc.Max, p); oc.Points.Add(p); }
+                }
+            }
+            foreach (Component oc in outOf.Values) { oc.FirstTriangle = comp.FirstTriangle; output.Add(oc); }
+            if (outOf.Count > 1)
+            {
+                cut++;
+                foreach (var kv in outOf) { int lb = rootLabelOf(kv.Key); if (lb >= 0) claims[lb] = claims.TryGetValue(lb, out int n) ? n + 1 : 1; }
+            }
+            int rootLabelOf(int root) { int lb = -1; for (int i = 0; i < area.Count; i++) if (pd.Find(i) == root && pieceLabel[i] >= 0) { lb = pieceLabel[i]; break; } return lb; }
+        }
+        plan.TearNote = string.Format(System.Globalization.CultureInfo.InvariantCulture, "tear '{0}': {1} island(s), {2} cut by the mirror into {3} piece(s) ({4} of {5} faces named by another island, {6} small piece(s) glued back){7}",
+            plan.Name, plan.Components.Count, cut, output.Count - (plan.Components.Count - cut), labelledFaces, faces, glued,
+            claims.Count > 0 ? "; by mirror island: " + string.Join(", ", claims.OrderByDescending(kv => kv.Value).Take(10).Select(kv => tt.NameOf[kv.Key] + " x" + kv.Value)) : "");
+        plan.Components = output.OrderBy(c => c.Min[0]).ThenBy(c => c.Min[1]).ThenBy(c => c.Min[2]).ThenBy(c => c.FirstTriangle).ToList();
+    }
+
     // onlyNodeNames/onlyNodeIndices: when non-null, ONLY matching nodes are split (the Model Workshop's
     // selective mode — a hull keeps its junk-free parts whole while the one island-soup part is exploded).
     // Original meshes are never removed, so a mesh shared with an unselected node keeps rendering there.
     // mergeFraction: islands within this fraction of a mesh's own diagonal fuse into one part (0 = topology only).
-    static Result SplitCore(byte[] source, ISet<string> onlyNodeNames, ISet<int> onlyNodeIndices, double mergeFraction)
+    static Result SplitCore(byte[] source, ISet<string> onlyNodeNames, ISet<int> onlyNodeIndices, double mergeFraction, TearOptions tear = null)
     {
         if (source == null) throw new ArgumentNullException(nameof(source));
         Document document = Parse(source);
@@ -499,6 +727,7 @@ public static class GlbDisconnectedParts
                                             : onlyNodeNames == null || onlyNodeNames.Contains((string)nd["name"]);
         var referencedMeshes = new SortedSet<int>();
         var instancedMeshes = new HashSet<int>();
+        var firstNodeOfMesh = new Dictionary<int, int>();   // Tear: the node whose world matrix places the mesh for the mirror query
         for (int ni = 0; ni < nodes.Count; ni++)
         {
             var node = nodes[ni] as JObject;
@@ -506,10 +735,12 @@ public static class GlbDisconnectedParts
             if (!Selected(ni, node)) continue;
             int meshIndex = node.Value<int>("mesh");
             referencedMeshes.Add(meshIndex);
+            if (!firstNodeOfMesh.ContainsKey(meshIndex)) firstNodeOfMesh.Add(meshIndex, ni);
             if (node["extensions"]?["EXT_mesh_gpu_instancing"] != null) instancedMeshes.Add(meshIndex);
         }
 
         var plans = new Dictionary<int, MeshPlan>();
+        TearTemplates templates = tear != null ? BuildTearTemplates(nodes, meshes, reader, mergeFraction, result, tear.MirrorTolerance) : null;
         foreach (int meshIndex in referencedMeshes)
         {
             if (meshIndex < 0 || meshIndex >= meshes.Count)
@@ -521,7 +752,13 @@ public static class GlbDisconnectedParts
             }
             try
             {
-                MeshPlan plan = AnalyzeMesh(meshIndex, (JObject)meshes[meshIndex], reader, keepSingle: false, mergeFraction: mergeFraction);
+                MeshPlan plan = AnalyzeMesh(meshIndex, (JObject)meshes[meshIndex], reader, keepSingle: tear != null, mergeFraction: mergeFraction);
+                if (plan != null && tear != null && templates != null)
+                {
+                    TearComponents(plan, firstNodeOfMesh[meshIndex], (JArray)meshes[meshIndex]["primitives"], reader, NodeWorldMatrix(nodes, firstNodeOfMesh[meshIndex]), templates, tear);
+                    result.Details.Add(plan.TearNote);
+                }
+                if (plan != null && tear != null && plan.Components.Count <= 1) plan = null;   // one island, nothing the mirror cut: nothing to do
                 if (plan != null) plans.Add(meshIndex, plan);
             }
             catch (Exception ex) when (ex is InvalidDataException || ex is OverflowException)
@@ -1675,7 +1912,7 @@ public static class GlbDisconnectedParts
                     int mi = node.Value<int>("mesh"); if (mi < 0 || mi >= meshes.Count) continue;
                     var pl = (meshes[mi] as JObject)?["primitives"] as JArray; if (pl == null) continue;
                     double[] world = NodeWorldMatrix(nodes, ni);
-                    foreach (JObject prim in TrianglePrimitives(pl))
+                    foreach (JObject prim in TrianglesOnly(pl))
                     {
                         var attrs = prim["attributes"] as JObject; if (attrs?["POSITION"] == null) continue;
                         int posAcc = attrs.Value<int>("POSITION"); int vertCount = reader.Count(posAcc);
@@ -2411,6 +2648,34 @@ public static class GlbDisconnectedParts
     // mesh — exactly what a fused source loses — and keep their transforms and children; nothing is renumbered, so every
     // other mark (a ⊕ letter, a Split check) still finds its node in the output. The mesh data itself stays in the file
     // as an orphan the bake never reads; no compaction is attempted. A node without a mesh is reported, not an error.
+    // UNIQUE PART NAMES (2026-09-25, user: "in the model cutter all parts need to get a unique name so that after
+    // cutting they don't start to conflict"): a game rip names every part after its material - the Wespe has ten
+    // nodes called "Material2" - and everything downstream that names a part (the Lab's rows and roles, the sidecars'
+    // name+index lines, a recipe) then fits several. Every mesh node leaves the Cutter with a name no other node has:
+    // the first of a name keeps it, the next become Material2_2, Material2_3 ... in node order, never colliding with a
+    // name already in the file. Names only; nothing else in the file moves, and a file already unique is untouched.
+    public static Result UniqueNodeNames(byte[] source)
+    {
+        if (source == null) throw new ArgumentNullException(nameof(source));
+        Document document = Parse(source);
+        JArray nodes = document.Root["nodes"] as JArray ?? new JArray();
+        var taken = new HashSet<string>(nodes.OfType<JObject>().Select(n => (string)n["name"]).Where(n => !string.IsNullOrEmpty(n)));
+        var seen = new HashSet<string>(); var renamed = new List<string>(); var result = new Result();
+        foreach (JObject node in nodes.OfType<JObject>())
+        {
+            string name = (string)node["name"];
+            if (string.IsNullOrEmpty(name) || node["mesh"] == null) continue;   // only parts; a nameless or meshless node stays as it is
+            if (seen.Add(name)) continue;                                        // the first of a name keeps it
+            string fresh = UniqueName(name, taken); taken.Add(fresh); seen.Add(fresh);
+            node["name"] = fresh; renamed.Add(name + " -> " + fresh);
+        }
+        result.NodesSplit = renamed.Count;
+        if (renamed.Count == 0) return result;   // Changed == false, Bytes null: the caller keeps what it had
+        result.Details.Add("Renamed " + renamed.Count + " part(s) to unique names: " + string.Join(", ", renamed.Take(12)) + (renamed.Count > 12 ? ", ..." : ""));
+        result.Bytes = Write(document);
+        return result;
+    }
+
     public static Result RemoveMeshes(byte[] source, ISet<int> nodeIndices)
     {
         if (source == null) throw new ArgumentNullException(nameof(source));
@@ -2542,7 +2807,7 @@ public static class GlbDisconnectedParts
                 var node = nodes[ni] as JObject; if (node?["mesh"] == null) continue;
                 int mi = node.Value<int>("mesh"); if (mi < 0 || mi >= meshes.Count) continue;
                 var pl = (meshes[mi] as JObject)?["primitives"] as JArray; if (pl == null) continue;
-                foreach (JObject prim in TrianglePrimitives(pl))
+                foreach (JObject prim in TrianglesOnly(pl))
                 {
                     var attrs = prim["attributes"] as JObject; if (attrs?["POSITION"] == null) continue;
                     prims.Add(new KeyValuePair<int, JObject>(ni, prim));
@@ -2694,6 +2959,22 @@ public static class GlbDisconnectedParts
     }
 
     // The primitive walk both plane-cut entry points share; also re-checks the splitter's safety gates.
+    // The whole-file samplers (the belly frame, the fuse's occluders) read every mesh node and want the triangles of
+    // a file that also carries lines or points: a rigging line is no reason to lose the model (2026-09-25, the Wespe's
+    // source file: "Only TRIANGLES primitives" from a whole-file read had the belly sampler fall back to the group's
+    // own vertices).
+    static IEnumerable<JObject> TrianglesOnly(JArray primitives)
+    {
+        foreach (JToken token in primitives)
+        {
+            if (!(token is JObject primitive)) continue;
+            if ((primitive.Value<int?>("mode") ?? 4) != 4) continue;
+            if (primitive["extensions"]?["KHR_draco_mesh_compression"] != null) continue;
+            if (!(primitive["attributes"] is JObject attributes) || attributes["POSITION"] == null) continue;
+            yield return primitive;
+        }
+    }
+
     static IEnumerable<JObject> TrianglePrimitives(JArray primitives)
     {
         foreach (JToken token in primitives)

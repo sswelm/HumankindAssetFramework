@@ -1474,7 +1474,13 @@ public class VehicleLabWindow : EditorWindow
             bool rigBone = row.Kind == "RIGBONE";
             if (!rigBone && keptPlace.TryGetValue(p.name, out var kp)) { p.offset = kp.off; p.scale = kp.scl; }
             var keptMap = rigBone ? keptBones : kept;
+            // THE CLASSIFICATION FOLLOWS THE CUT (2026-09-25, user: "I'm getting tired of having to reclassify all the
+            // time after a split"): a part the Cutter made from another - X_Part_001, X_CutA, or X_3 after the unique
+            // renaming - takes X's role when X has one and this part has none of its own (VehicleLabRules.ParentNames).
+            Role? inherited = null;
+            foreach (string ancestor in VehicleLabRules.ParentNames(p.name)) if (keptMap.TryGetValue(ancestor, out var ar)) { inherited = ar; break; }
             p.role = keptMap.TryGetValue(p.name, out var kr) ? kr
+                   : inherited.HasValue ? inherited.Value
                    : low.Contains("tail") && (low.Contains("rotor") || low.Contains("prop")) ? Role.TailRotor  // "tail rotor" before the generic rotor guess
                    : low.Contains("fantail") || low.Contains("fenestron") ? Role.TailRotor
                    : low.Contains("oar") ? Role.Oar   // before the generic "blade" -> Rotor guess: an oar blade contains "blade"

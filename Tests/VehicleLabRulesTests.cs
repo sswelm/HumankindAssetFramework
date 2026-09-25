@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Collections.Generic;
 using Xunit;
 
@@ -10,6 +11,17 @@ namespace HumankindAssetFramework.Tests
     {
         // ---- per-part placement lines (2026-09-20): name|ox,oy,oz|sx,sy,sz, split from the RIGHT on both sides ----
         [Fact]
+    public void A_cut_part_finds_its_parents_nearest_first()
+    {
+        Assert.Equal(new[] { "Material2_3" }, VehicleLabRules.ParentNames("Material2_3_Part_001").ToArray());
+        Assert.Equal(new[] { "Hull" }, VehicleLabRules.ParentNames("Hull_CutA").ToArray());
+        Assert.Equal(new[] { "Hull_CutB", "Hull" }, VehicleLabRules.ParentNames("Hull_CutB_Part_002").ToArray());
+        Assert.Empty(VehicleLabRules.ParentNames("Material2"));     // no tail to peel: "2" is part of the name
+        Assert.Empty(VehicleLabRules.ParentNames("Hull_2"));      // a bare number is no ancestry: Hull and Hull_2 may be two parts (review of PR #85, third round)
+        Assert.Empty(VehicleLabRules.ParentNames(""));
+    }
+
+    [Fact]
         public void Placement_line_round_trips_and_keeps_a_pipe_in_the_name()
         {
             string line = VehicleLabRules.PartPlacementLine("Fused_F|boat", 0f, -1.25f, 0.5f, 1f, 1f, 0.75f);

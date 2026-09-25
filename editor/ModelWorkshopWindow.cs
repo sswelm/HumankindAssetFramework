@@ -32,12 +32,14 @@ public abstract class ModelWorkshopWindow : EditorWindow
     class Row
     {
         public int nodeIndex;    // the STABLE identity Split filters on (names can be null or duplicated)
-        public string node;      // display name
+        public string node;      // display name - unique among the rows (see UniqueBytes)
+        public string fileName;  // the name the FILE gives the node, which a sidecar written before the unique renaming carries (review of PR #85, P1)
         public string mesh;
         public int tris;
         public int islands;      // 1 = nothing to split (row disabled)
         public string blocked;   // non-null = the analyzer's reason this part cannot be split
         public bool split;       // the checkbox (Split)
+        public bool tear;        // TEAR (2026-09-25): Split, plus a cut wherever the other side of the ship has the welded object as a separate island; T key or the row popup
         public bool delete;      // MARKED FOR DELETION (2026-09-18): the part loses its mesh in the output — Delete key or the row popup, in both windows; exclusive with split and fuse
         public string fuse = ""; // FUSE GROUP letter A..Z (2026-09-15; A..H until 09-16): rows sharing a letter fuse into one shell each; "" = none
         public int verts;        // for the list filters (2026-09-16): vertex count and the world bbox (min/max null = unmeasured, never hidden)
@@ -47,7 +49,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
     static GUIStyle WrappedButton => wrappedButton ?? (wrappedButton = new GUIStyle(GUI.skin.button) { wordWrap = true });   // built lazily: GUI.skin exists only inside OnGUI
     static readonly string[] FuseLabels = new[] { "–" }.Concat(Enumerable.Range(0, 26).Select(i => "⊕" + (char)('A' + i))).Concat(new[] { "✕ Delete" }).ToArray();   // the Fuser's row popup: no group, A–Z (was A–H; user 2026-09-16: a ship has more than eight boats), or marked for deletion; keys A–Z set it, – / 0 / Backspace clear
     const int DeleteEntry = 27;   // FuseLabels index of "✕ Delete"
-    static readonly string[] SplitLabels = { "–", "Split", "Delete" }, WholeLabels = { "–", "Delete" };   // the Splitter's row popup (a whole part cannot be split)
+    static readonly string[] SplitLabels = { "–", "Split", "Tear", "Delete" }, WholeLabels = { "–", "Tear", "Delete" };   // the Splitter's row popup (a whole part cannot be split, but it can be torn)
 
     [SerializeField] string srcFile = "";
     [SerializeField] string outGlb = "";
@@ -224,7 +226,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         if (rows.Count > 0)
         {
             int splittable = rows.Count(r => r.islands > 1 && r.blocked == null);
-            int chosen = rows.Count(r => r.split);
+            int chosen = rows.Count(r => r.split || r.tear);   // a Tear mark is a mark: it is saved, and it keeps the Save button live
             int deleted = rows.Count(r => r.delete);
             EditorGUILayout.LabelField(Fusing
                 ? $"Parts ({rows.Count} node(s)) — click a row to highlight it below; give the parts of one shell the same ⊕ letter:"
@@ -232,8 +234,8 @@ public abstract class ModelWorkshopWindow : EditorWindow
             if (!Fusing)
                 using (new EditorGUILayout.HorizontalScope())
                 {
-                    if (GUILayout.Button("Check all splittable", GUILayout.Width(140))) foreach (var r in rows) r.split = r.islands > 1 && r.blocked == null;
-                    if (GUILayout.Button("Uncheck all", GUILayout.Width(100))) foreach (var r in rows) r.split = false;
+                    if (GUILayout.Button("Check all splittable", GUILayout.Width(140))) foreach (var r in rows) { r.split = r.islands > 1 && r.blocked == null; if (r.split) r.tear = false; }   // a Split check replaces a Tear mark (review of PR #85, P2)
+                    if (GUILayout.Button("Uncheck all", GUILayout.Width(100))) foreach (var r in rows) { r.split = false; r.tear = false; }
                     hideWhole = EditorGUILayout.ToggleLeft(new GUIContent("Hide already-whole parts",
                         "Hide the rows with a single island — there is nothing to split in them, they only pad the list."), hideWhole, GUILayout.Width(180));
                     if (GUILayout.Button(new GUIContent("Show all", "Every list filter back to 'hide nothing' — the sliders, 'Show only' and this toggle. Marks are kept. (A file probed into the window for the first time starts this way.)"), GUILayout.Width(70)))
@@ -320,7 +322,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 if (Fusing && !string.IsNullOrEmpty(showOnlyLetter) && r.fuse != showOnlyLetter) return false;
                 switch (showOnly)
                 {
-                    case 1: if (!r.split) return false; break;
+                    case 1: if (!r.split && !r.tear) return false; break;
                     case 2: if (string.IsNullOrEmpty(r.fuse)) return false; break;
                     case 3: if (!string.IsNullOrEmpty(r.fuse)) return false; break;
                     case 4: if (r.islands <= 1 || r.blocked != null) return false; break;
@@ -355,7 +357,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             // was the complaint. The Workshop has no role hotkeys, so the letters are free here.
             EditorGUILayout.LabelField(Fusing
                 ? "  Keys:  ↑/↓ = previous/next part   ·   A–Z = fuse group of the highlighted part (⊕ column)   ·   Delete = mark for deletion   ·   – / 0 / Backspace = no mark"
-                : "  Keys:  ↑/↓ = previous/next part   ·   Insert = mark for split   ·   Delete = mark for deletion   ·   Space = toggle split   ·   – / 0 / Backspace = no mark", EditorStyles.wordWrappedMiniLabel);
+                : "  Keys:  ↑/↓ = previous/next part   ·   Insert = mark for split   ·   T = mark for tear   ·   Delete = mark for deletion   ·   Space = toggle split   ·   – / 0 / Backspace = no mark", EditorStyles.wordWrappedMiniLabel);
             var ev = Event.current;
             if (ev.type == EventType.KeyDown && shown.Count > 0 && !EditorGUIUtility.editingTextField)
             {
@@ -380,14 +382,21 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 // clears the other marks (a deleted part is neither split nor fused); Insert marks for split in the Splitter
                 else if (idx >= 0 && ev.keyCode == KeyCode.Delete)
                 {
-                    Row d = shown[idx]; d.delete = !d.delete; if (d.delete) { d.split = false; d.fuse = ""; }
+                    Row d = shown[idx]; d.delete = !d.delete; if (d.delete) { d.split = false; d.tear = false; d.fuse = ""; }
                     AdvanceIfHidden(idx);
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
                 }
                 else if (!Fusing && idx >= 0 && ev.keyCode == KeyCode.Insert && shown[idx].blocked == null && shown[idx].islands > 1)
                 {
-                    shown[idx].split = true; shown[idx].delete = false;
+                    shown[idx].split = true; shown[idx].tear = false; shown[idx].delete = false;
+                    AdvanceIfHidden(idx);
+                    GUIUtility.keyboardControl = 0;
+                    ev.Use(); Repaint();
+                }
+                else if (!Fusing && idx >= 0 && ev.keyCode == KeyCode.T && shown[idx].blocked == null)   // TEAR (2026-09-25): the T key, any part
+                {
+                    shown[idx].tear = true; shown[idx].split = false; shown[idx].delete = false;
                     AdvanceIfHidden(idx);
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
@@ -395,6 +404,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 else if (idx >= 0 && (ev.keyCode == KeyCode.Alpha0 || ev.keyCode == KeyCode.Keypad0 || ev.keyCode == KeyCode.Minus || ev.keyCode == KeyCode.KeypadMinus || ev.keyCode == KeyCode.Backspace))   // '-' too: it is what the popup shows for "no mark" (user 2026-09-16)
                 {
                     if (Fusing) shown[idx].fuse = ""; else shown[idx].split = false;
+                    shown[idx].tear = false;   // "no mark" means no Tear mark either (review of PR #85, second round)
                     shown[idx].delete = false;
                     AdvanceIfHidden(idx);
                     GUIUtility.keyboardControl = 0;
@@ -402,7 +412,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 }
                 else if (!Fusing && idx >= 0 && ev.keyCode == KeyCode.Space && shown[idx].blocked == null && shown[idx].islands > 1)
                 {
-                    shown[idx].split = !shown[idx].split; if (shown[idx].split) shown[idx].delete = false;
+                    shown[idx].split = !shown[idx].split; if (shown[idx].split) { shown[idx].delete = false; shown[idx].tear = false; }
                     AdvanceIfHidden(idx);
                     GUIUtility.keyboardControl = 0;
                     ev.Use(); Repaint();
@@ -414,16 +424,17 @@ public abstract class ModelWorkshopWindow : EditorWindow
             for (int ri = 0; ri < shown.Count; ri++)
                 using (new EditorGUILayout.HorizontalScope())
                 {
-                    Row r = shown[ri]; bool splitBefore = r.split, deleteBefore = r.delete; string fuseBefore = r.fuse;
+                    Row r = shown[ri]; bool splitBefore = r.split, tearBefore = r.tear, deleteBefore = r.delete; string fuseBefore = r.fuse;
                     if (!Fusing)
                     {
                         // the Splitter's mark: nothing, Split (a part with more than one island), or Delete — a popup, as the user asked
                         // for the same reach by mouse as by key (2026-09-18); the analyzer's skipped parts can still be deleted
                         bool canSplit = r.islands > 1 && r.blocked == null;
                         string[] labels = canSplit ? SplitLabels : WholeLabels;
-                        int si = r.delete ? labels.Length - 1 : r.split && canSplit ? 1 : 0;
+                        int tearEntry = labels.Length - 2;   // "Tear" sits just before "Delete" in both label sets
+                        int si = r.delete ? labels.Length - 1 : r.tear && r.blocked == null ? tearEntry : r.split && canSplit ? 1 : 0;
                         int sj = EditorGUILayout.Popup(si, labels, GUILayout.Width(64));
-                        if (sj != si) { r.delete = sj == labels.Length - 1; r.split = canSplit && sj == 1; }
+                        if (sj != si) { r.delete = sj == labels.Length - 1; r.tear = r.blocked == null && sj == tearEntry; r.split = canSplit && sj == 1; }
                     }
                     // FUSE GROUP (2026-09-15): an independent per-row mark — rows sharing a letter fuse into one welded shell each; or Delete
                     else
@@ -433,7 +444,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                             int fj = EditorGUILayout.Popup(fi, FuseLabels, GUILayout.Width(62));
                             if (fj != fi) { r.delete = fj == DeleteEntry; r.fuse = fj <= 0 || fj == DeleteEntry ? "" : ((char)('A' + fj - 1)).ToString(); }
                         }
-                    if (r.nodeIndex == selectedIdx && (r.split != splitBefore || r.fuse != fuseBefore || r.delete != deleteBefore)) advanceFrom = ri;   // the mouse path of the A–Z / Space keys
+                    if (r.nodeIndex == selectedIdx && (r.split != splitBefore || r.tear != tearBefore || r.fuse != fuseBefore || r.delete != deleteBefore)) advanceFrom = ri;   // the mouse path of the A–Z / Space keys
                     bool isSel = selectedIdx == r.nodeIndex;
                     string label = r.blocked != null ? $"{(isSel ? "◉ " : "")}{r.node}   — skipped: {r.blocked}{(r.delete ? "   ✕ deleted in the output" : "")}"
                                  : Fusing ? $"{(isSel ? "◉ " : "")}{r.node}   ({r.tris:N0} tris, {r.islands:N0} island{(r.islands == 1 ? "" : "s")}{SizeOf(r)}){(r.delete ? "   ✕ deleted in the output" : "")}"
@@ -644,6 +655,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         // kept-state keyed by NODE INDEX (review round 2): keying by name re-checked every duplicate namesake.
         var kept = new HashSet<int>(rows.Where(r => r.split).Select(r => r.nodeIndex));
         var keptDelete = new HashSet<int>(rows.Where(r => r.delete).Select(r => r.nodeIndex));   // the deletion marks survive a re-Probe as the checks do
+        var keptTear = new HashSet<int>(rows.Where(r => r.tear).Select(r => r.nodeIndex));       // and the Tear marks (2026-09-25, user: "it appears Tear is not saved" - a re-Probe dropped them)
         bool firstLoad = rows.Count == 0 || !SamePath(probedFile, srcFile);   // the marks sidecar is read once, when a file comes into the window
         // FUSE LETTERS survive too (2026-09-15, user: "it doesn't seem to be able to save the groupings, only the
         // checkboxes"): the merge slider re-analyzes and used to rebuild every row blank. Same key. And a re-Probe of a
@@ -660,15 +672,16 @@ public abstract class ModelWorkshopWindow : EditorWindow
         if (firstLoad) ResetFilters();   // a model probed into the window starts fully visible (see ResetFilters)
         try
         {
-            rows = GlbDisconnectedParts.Analyze(File.ReadAllBytes(srcFile), mergePct / 100.0)
-                .Select(p => new Row { nodeIndex = p.NodeIndex, node = p.NodeName, mesh = p.MeshName, tris = p.Triangles, islands = p.Islands, blocked = p.Blocked, split = kept.Contains(p.NodeIndex), delete = keptDelete.Contains(p.NodeIndex),
+            var fileNames = GlbDisconnectedParts.NodeNames(File.ReadAllBytes(srcFile)).ToDictionary(kv => kv.Key, kv => kv.Value);
+            rows = GlbDisconnectedParts.Analyze(UniqueBytes(srcFile), mergePct / 100.0)
+                .Select(p => new Row { nodeIndex = p.NodeIndex, node = p.NodeName, fileName = fileNames.TryGetValue(p.NodeIndex, out string fn) ? fn : p.NodeName, mesh = p.MeshName, tris = p.Triangles, islands = p.Islands, blocked = p.Blocked, split = kept.Contains(p.NodeIndex), tear = keptTear.Contains(p.NodeIndex), delete = keptDelete.Contains(p.NodeIndex),
                                        fuse = keptFuse.TryGetValue(p.NodeIndex, out string kf) ? kf : "",
                                        verts = p.Vertices, min = p.Min?.Select(d => (float)d).ToArray(), max = p.Max?.Select(d => (float)d).ToArray() })
                 .OrderBy(r => NaturalPrefix(r.node), StringComparer.OrdinalIgnoreCase)
                 .ThenBy(r => NaturalNumber(r.node))
                 .ThenBy(r => r.node, StringComparer.OrdinalIgnoreCase).ToList();
             if (keptFuse.Count == 0 && initialLoad) ApplyFuseSidecar(rows, out _);
-            if (firstLoad && kept.Count == 0 && keptDelete.Count == 0) ApplyMarksSidecar(rows, out _);
+            if (firstLoad && kept.Count == 0 && keptTear.Count == 0 && keptDelete.Count == 0) ApplyMarksSidecar(rows, out _);
             foreach (var r in rows) if (r.islands <= 1 || r.blocked != null) r.split = false;   // no longer splittable at this distance
             int multi = rows.Count(r => r.islands > 1 && r.blocked == null);
             probedFile = srcFile;   // the rows now describe THIS file (the source-switch hygiene above keys on it)
@@ -1085,13 +1098,24 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // X (delete) for letters, so the same resolver reads it by node index and name. Written by Save marks and by every
     // Split, Plane cut and Fuse; read at the first Probe of a file (a re-Probe keeps the marks in memory, as the Fuser
     // keeps its letters). Both windows read and write it: a deletion marked in the Fuser reaches the Splitter.
+    // UNIQUE NAMES FIRST (2026-09-25, user: "give all parts that are not unique a unique name so that any part split up
+    // or torn up will remain unique"): the file is read with every duplicate part name made unique - Material2,
+    // Material2_2, Material2_3 ... in node order - so the list shows those names, the marks and letters are kept
+    // under them, and every child a Split, Tear or Fuse makes takes its name from them. The source file on disk is
+    // never touched; node indices do not change.
+    static byte[] UniqueBytes(string path)
+    {
+        byte[] bytes = File.ReadAllBytes(path);
+        var un = GlbDisconnectedParts.UniqueNodeNames(bytes);
+        return un.Changed ? un.Bytes : bytes;
+    }
     static string MarksSidecarPath(string glb) => string.IsNullOrEmpty(glb) ? null : glb + ".marks.txt";
     void WriteMarksSidecar(string glb)
     {
         try
         {
             string path = MarksSidecarPath(glb); if (path == null) return;
-            var lines = rows.Where(r => (r.split || r.delete) && !string.IsNullOrEmpty(r.node)).Select(r => WorkshopRules.SidecarLine(r.delete ? "X" : "S", r.node, r.nodeIndex)).ToArray();
+            var lines = rows.Where(r => (r.split || r.tear || r.delete) && !string.IsNullOrEmpty(r.node)).Select(r => WorkshopRules.SidecarLine(r.delete ? "X" : r.tear ? "T" : "S", r.node, r.nodeIndex)).ToArray();
             if (lines.Length == 0) { if (File.Exists(path)) File.Delete(path); return; }
             File.WriteAllLines(path, new[] { WorkshopRules.SidecarHeader }.Concat(lines));
         }
@@ -1105,13 +1129,14 @@ public abstract class ModelWorkshopWindow : EditorWindow
             string path = MarksSidecarPath(srcFile);
             if (path == null || !File.Exists(path)) return 0;
             var problems = new List<string>();
-            var marks = WorkshopRules.ResolveFuseSidecar(File.ReadAllLines(path), target.Select(r => new KeyValuePair<int, string>(r.nodeIndex, r.node)).ToList(), problems);
+            var marks = WorkshopRules.ResolveFuseSidecar(WorkshopRules.MigrateSidecarNames(File.ReadAllLines(path), target.Select(r => (r.nodeIndex, r.fileName, r.node)).ToList(), problems), target.Select(r => new KeyValuePair<int, string>(r.nodeIndex, r.node)).ToList(), problems);
             int applied = 0;
             foreach (var r in target)
             {
                 if (!marks.TryGetValue(r.nodeIndex, out string mark)) continue;
-                if (mark == "X") { r.delete = true; r.split = false; r.fuse = ""; applied++; }
-                else if (mark == "S" && r.islands > 1 && r.blocked == null) { r.split = true; r.delete = false; applied++; }
+                if (mark == "X") { r.delete = true; r.split = false; r.tear = false; r.fuse = ""; applied++; }
+                else if (mark == "S" && r.islands > 1 && r.blocked == null) { r.split = true; r.tear = false; r.delete = false; applied++; }
+                else if (mark == "T" && r.blocked == null) { r.tear = true; r.split = false; r.delete = false; applied++; }
             }
             foreach (string q in problems) Debug.LogWarning("[Workshop] marks sidecar: " + q);
             refused = problems.Count;
@@ -1161,7 +1186,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             string path = FuseSidecarPath(srcFile);
             if (path == null || !File.Exists(path)) return 0;
             var problems = new List<string>();
-            var letters = WorkshopRules.ResolveFuseSidecar(File.ReadAllLines(path), target.Select(r => new KeyValuePair<int, string>(r.nodeIndex, r.node)).ToList(), problems);
+            var letters = WorkshopRules.ResolveFuseSidecar(WorkshopRules.MigrateSidecarNames(File.ReadAllLines(path), target.Select(r => (r.nodeIndex, r.fileName, r.node)).ToList(), problems), target.Select(r => new KeyValuePair<int, string>(r.nodeIndex, r.node)).ToList(), problems);
             foreach (var r in target) if (letters.TryGetValue(r.nodeIndex, out string letter)) r.fuse = letter;
             foreach (string p in problems) Debug.LogWarning("[Workshop] fuse groupings sidecar: " + p);
             refused = problems.Count;
@@ -1184,7 +1209,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         try
         {
             var groups = rows.Where(r => !string.IsNullOrEmpty(r.fuse)).GroupBy(r => r.fuse).OrderBy(g => g.Key).ToList();
-            byte[] bytes = File.ReadAllBytes(srcFile);
+            byte[] bytes = UniqueBytes(srcFile);   // the names the rows were probed with
             var lines = new List<string>(); int done = 0;
             var report = new List<WorkshopRules.FuseGroupReport>();   // the evidence goes to a file, not the status box (711 parts in six groups made the status unreadable — user 2026-09-16)
             List<GlbDisconnectedParts.Result> results = null;   // one per group, in letter order; the output sidecar below names each shell from them
@@ -1266,10 +1291,16 @@ public abstract class ModelWorkshopWindow : EditorWindow
             EditorUtility.DisplayProgressBar("Model Workshop", "Splitting checked parts…", 0.4f);
             GlbDisconnectedParts.GuardPaths(srcFile, outGlb);   // SplitFile used to guard; this path writes the bytes itself
             var picked = new HashSet<int>(rows.Where(r => r.split).Select(r => r.nodeIndex));
+            var toTear = new HashSet<int>(rows.Where(r => r.tear && !r.split).Select(r => r.nodeIndex));   // Split runs first and takes the mesh: a row checked for Split is never torn as well
             var toDelete = new HashSet<int>(rows.Where(r => r.delete).Select(r => r.nodeIndex));
             byte[] bytes = File.ReadAllBytes(srcFile);
+            string renamedLine = null;   // unique names FIRST: the rows were probed with them, and the children take theirs from them
+            { var un = GlbDisconnectedParts.UniqueNodeNames(bytes); if (un.Changed) { bytes = un.Bytes; renamedLine = un.Details[0]; } }
             GlbDisconnectedParts.Result result = picked.Count > 0 ? GlbDisconnectedParts.Split(bytes, picked, mergePct / 100.0) : null;
             if (result != null && result.Changed) bytes = result.Bytes;
+            // TEAR (2026-09-25), after the split: both only append nodes, so the marked indices still name their parts
+            GlbDisconnectedParts.Result torn = toTear.Count > 0 ? GlbDisconnectedParts.Tear(bytes, toTear, mergePct / 100.0) : null;
+            if (torn != null && torn.Changed) bytes = torn.Bytes;
             string deletedLine = null;
             if (toDelete.Count > 0)   // after the split: the split only appends, so the marked indices still name their nodes
             {
@@ -1277,14 +1308,16 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 foreach (var w in rr.Warnings) Debug.LogWarning("[Workshop] delete: " + w);
                 if (rr.Changed) { bytes = rr.Bytes; deletedLine = rr.Details[0]; }
             }
-            if ((result == null || !result.Changed) && deletedLine == null) { status = "Nothing changed — the checked parts produced no split and nothing was deleted (see warnings in the console)."; return; }
+            if ((result == null || !result.Changed) && (torn == null || !torn.Changed) && deletedLine == null && renamedLine == null) { status = "Nothing changed — the checked parts produced no split, no tear, nothing was deleted and every part already had a unique name (see warnings in the console)."; return; }
             File.WriteAllBytes(outGlb, bytes);
             WriteMarksSidecar(srcFile);   // the checks and deletion marks, next to the source: the first Probe of it restores them
             if (result != null) foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
             WriteFuseSidecarForOutput(outGlb);   // the ⊕ letters travel with the output, passed down to the _Part_NNN children
             status = (result != null && result.Changed ? $"Split done: {result.NodesSplit} part(s) → {result.ChildPartsCreated} sub-parts, {result.SourceTriangles:N0} triangles preserved." : "Split: nothing checked.")
-                   + (deletedLine != null ? " " + deletedLine + "." : "") + $"\n{outGlb}\nNext: open it in the Vehicle Lab, Probe parts, and mark the junk islands Ignore.";
+                   + (torn != null && torn.Changed ? $" Tear: {torn.NodesSplit} part(s) → {torn.ChildPartsCreated} pieces." : torn != null ? " Tear: nothing came apart (the mirror side has no separate island where this part is welded)." : "")
+                   + (deletedLine != null ? " " + deletedLine + "." : "") + (renamedLine != null ? " " + renamedLine + "." : "") + $"\n{outGlb}\nNext: open it in the Vehicle Lab, Probe parts, and mark the junk islands Ignore.";
             if (result != null) Debug.Log($"[Workshop] {string.Join(" | ", result.Details)}");
+            if (torn != null) { foreach (var w in torn.Warnings) Debug.LogWarning("[Workshop] tear: " + w); Debug.Log($"[Workshop] tear: {string.Join(" | ", torn.Details)}"); }
         }
         catch (Exception e) { status = "Split failed (source untouched): " + e.Message; Debug.LogException(e); }
         finally { EditorUtility.ClearProgressBar(); }
