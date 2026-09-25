@@ -15,7 +15,8 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   (the rest-pose draw list has no bones), and names the bone and axis it turns next to the slider. A sideways swing
   means the wrong axis; a dip means flipping the sign of the max. The bone pick and the angle are unit-tested.
   **Pivot** (user: "the pivot point is not correct, so could you give me a slider which allows me to configure the
-  pivot point along the length of the gun"): a second slider previews the elevation about any point of the
+  pivot point along the length of the gun"): a *Pivot* slider under the Elevation axis setting (user: "put it below
+  the elevation axis") previews the elevation about any point of the
   breech→muzzle span — the span measured on the vertices skinned to the gun bone, in the bone's frame, the breech
   the end nearer the parent bone, exactly the rig script's rule for its own "Gun pivot" — by shifting the bone so
   that point stays put. The game turns the bone about its origin, which only the Vehicle Lab's Generate places, so
