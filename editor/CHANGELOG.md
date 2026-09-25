@@ -27,6 +27,15 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   frame, the fuse's view from above) skip a file's line and point primitives instead of giving up: the Wespe's
   source file carries rigging lines.
 
+- **Model Cutter: every part leaves the Cutter with a unique name** (user: "all parts need to get a unique name so
+  that after cutting they don't start to conflict"). A game rip names every part after its material — the Wespe
+  has ten nodes called "Material2" — and everything downstream that names a part (the Lab's rows and roles, the
+  sidecars' name+index lines, a recipe) then fits several. On every Split, Tear or Delete the output's mesh nodes
+  are renamed where they collide: the first of a name keeps it, the next become Material2_2, Material2_3 … in node
+  order, never colliding with a name already in the file. Names only; the status says what was renamed, and a file
+  that is already unique leaves the Cutter unchanged. Test: two "Deck" parts and an existing "Deck_2" — the second
+  Deck becomes Deck_3, the rest keep their names, and the result is left alone on a second pass.
+
 - **Model Workshop: the highlighted part stays in view when the filter changes** (user: "when you have selected a
   part while a filter is active, and then disable the filter, I expect the selected part to remain selected and in
   the window"). The highlight did survive a filter change, but the list kept the old scroll offset over a

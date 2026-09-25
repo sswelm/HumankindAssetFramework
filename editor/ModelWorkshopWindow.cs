@@ -1291,14 +1291,20 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 foreach (var w in rr.Warnings) Debug.LogWarning("[Workshop] delete: " + w);
                 if (rr.Changed) { bytes = rr.Bytes; deletedLine = rr.Details[0]; }
             }
-            if ((result == null || !result.Changed) && (torn == null || !torn.Changed) && deletedLine == null) { status = "Nothing changed — the checked parts produced no split, no tear and nothing was deleted (see warnings in the console)."; return; }
+            // UNIQUE NAMES (2026-09-25): whatever else happened, every part leaves the Cutter with a name of its own
+            string renamedLine = null;
+            {
+                var un = GlbDisconnectedParts.UniqueNodeNames(bytes);
+                if (un.Changed) { bytes = un.Bytes; renamedLine = un.Details[0]; }
+            }
+            if ((result == null || !result.Changed) && (torn == null || !torn.Changed) && deletedLine == null && renamedLine == null) { status = "Nothing changed — the checked parts produced no split, no tear, nothing was deleted and every part already had a unique name (see warnings in the console)."; return; }
             File.WriteAllBytes(outGlb, bytes);
             WriteMarksSidecar(srcFile);   // the checks and deletion marks, next to the source: the first Probe of it restores them
             if (result != null) foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
             WriteFuseSidecarForOutput(outGlb);   // the ⊕ letters travel with the output, passed down to the _Part_NNN children
             status = (result != null && result.Changed ? $"Split done: {result.NodesSplit} part(s) → {result.ChildPartsCreated} sub-parts, {result.SourceTriangles:N0} triangles preserved." : "Split: nothing checked.")
                    + (torn != null && torn.Changed ? $" Tear: {torn.NodesSplit} part(s) → {torn.ChildPartsCreated} pieces." : torn != null ? " Tear: nothing came apart (the mirror side has no separate island where this part is welded)." : "")
-                   + (deletedLine != null ? " " + deletedLine + "." : "") + $"\n{outGlb}\nNext: open it in the Vehicle Lab, Probe parts, and mark the junk islands Ignore.";
+                   + (deletedLine != null ? " " + deletedLine + "." : "") + (renamedLine != null ? " " + renamedLine + "." : "") + $"\n{outGlb}\nNext: open it in the Vehicle Lab, Probe parts, and mark the junk islands Ignore.";
             if (result != null) Debug.Log($"[Workshop] {string.Join(" | ", result.Details)}");
             if (torn != null) { foreach (var w in torn.Warnings) Debug.LogWarning("[Workshop] tear: " + w); Debug.Log($"[Workshop] tear: {string.Join(" | ", torn.Details)}"); }
         }

@@ -2637,6 +2637,34 @@ public static class GlbDisconnectedParts
     // mesh — exactly what a fused source loses — and keep their transforms and children; nothing is renumbered, so every
     // other mark (a ⊕ letter, a Split check) still finds its node in the output. The mesh data itself stays in the file
     // as an orphan the bake never reads; no compaction is attempted. A node without a mesh is reported, not an error.
+    // UNIQUE PART NAMES (2026-09-25, user: "in the model cutter all parts need to get a unique name so that after
+    // cutting they don't start to conflict"): a game rip names every part after its material - the Wespe has ten
+    // nodes called "Material2" - and everything downstream that names a part (the Lab's rows and roles, the sidecars'
+    // name+index lines, a recipe) then fits several. Every mesh node leaves the Cutter with a name no other node has:
+    // the first of a name keeps it, the next become Material2_2, Material2_3 ... in node order, never colliding with a
+    // name already in the file. Names only; nothing else in the file moves, and a file already unique is untouched.
+    public static Result UniqueNodeNames(byte[] source)
+    {
+        if (source == null) throw new ArgumentNullException(nameof(source));
+        Document document = Parse(source);
+        JArray nodes = document.Root["nodes"] as JArray ?? new JArray();
+        var taken = new HashSet<string>(nodes.OfType<JObject>().Select(n => (string)n["name"]).Where(n => !string.IsNullOrEmpty(n)));
+        var seen = new HashSet<string>(); var renamed = new List<string>(); var result = new Result();
+        foreach (JObject node in nodes.OfType<JObject>())
+        {
+            string name = (string)node["name"];
+            if (string.IsNullOrEmpty(name) || node["mesh"] == null) continue;   // only parts; a nameless or meshless node stays as it is
+            if (seen.Add(name)) continue;                                        // the first of a name keeps it
+            string fresh = UniqueName(name, taken); taken.Add(fresh); seen.Add(fresh);
+            node["name"] = fresh; renamed.Add(name + " -> " + fresh);
+        }
+        result.NodesSplit = renamed.Count;
+        if (renamed.Count == 0) return result;   // Changed == false, Bytes null: the caller keeps what it had
+        result.Details.Add("Renamed " + renamed.Count + " part(s) to unique names: " + string.Join(", ", renamed.Take(12)) + (renamed.Count > 12 ? ", ..." : ""));
+        result.Bytes = Write(document);
+        return result;
+    }
+
     public static Result RemoveMeshes(byte[] source, ISet<int> nodeIndices)
     {
         if (source == null) throw new ArgumentNullException(nameof(source));

@@ -1131,6 +1131,21 @@ public class GlbFuseTests
     }
 
     [Fact]
+    public void Every_part_leaves_the_cutter_with_a_unique_name()
+    {
+        // three parts, two of them "Deck": the first keeps its name, the second becomes Deck_2 (no collision with the
+        // existing Deck_2 either), the Mast is untouched; a file already unique is left alone
+        var glb = BuildGlb(Level("Deck", 0, 1, 0, 1, 0, false), Level("Mast", 0, 1, 0, 1, 1, false), Level("Deck", 0, 1, 0, 1, 2, false), Level("Deck_2", 0, 1, 0, 1, 3, false));
+        var r = GlbDisconnectedParts.UniqueNodeNames(glb);
+        Assert.True(r.Changed);
+        Assert.Equal(1, r.NodesSplit);
+        Assert.Contains(r.Details, d => d.StartsWith("Renamed 1 part(s) to unique names: Deck -> Deck_3", StringComparison.Ordinal));
+        var names = GlbDisconnectedParts.Analyze(r.Bytes).Select(p => p.NodeName).ToList();
+        Assert.Equal(new[] { "Deck", "Mast", "Deck_3", "Deck_2" }, names);
+        Assert.False(GlbDisconnectedParts.UniqueNodeNames(r.Bytes).Changed);
+    }
+
+    [Fact]
     public void A_level_plate_authored_facing_down_is_left_to_the_evidence()
     {
         // The rule is one-sided on purpose. The frigate carries two 11.4 x 5.2 zero-thickness plates over its boat
