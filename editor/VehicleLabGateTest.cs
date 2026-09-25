@@ -6,10 +6,12 @@
 // runs (VehicleLabWindow.GenerateHeadless: a window instance with no dialogs, no preview, every file under
 // Logs/bake_tests/lab and nothing under Assets/) on the saved recipes, and per recipe:
 //   1. require the script's own completion marker and the output GLB (the Generate button's success rule),
-//   2. require the armature within Amplitude's 256-bone cap, and the OUTPUT GLB ITSELF to carry a RIGGED mesh - a
-//      mesh node with positions, joint indices and weights, bound to a skin with joints (GlbDisconnectedParts.
-//      RigSummary; the log line alone would pass an export that lost the rig, a skin counted apart from the meshes
-//      would pass an unused one, positions alone would pass a mesh that lost its weights),
+//   2. require the OUTPUT GLB ITSELF to carry a RIGGED mesh - a mesh node with positions, joint indices and weights,
+//      bound to a skin with joints - within Amplitude's 256-joint cap (GlbDisconnectedParts.RigSummary; the log line
+//      alone would pass an export that lost the rig, a skin counted apart from the meshes would pass an unused one,
+//      positions alone would pass a mesh that lost its weights). The script's "VEHICLE armature: N bones" line is
+//      printed by the tracked-vehicle path only (the first live run: 19 of 20 recipes "printed no armature line"),
+//      so the bone count comes from the file, and the line is a datum in the golden where it exists,
 //   3. diff the run's deterministic summary lines (BakeGoldenRules.LabSnapshotLines: every "VEHICLE ..." line but the
 //      timings, the output path cut off) against a blessed golden, Tools/lab_golden/<recipe>.txt — the deploy row's
 //      golden-master idea. A missing golden is captured from the run and reported as such (not a pass); to re-bless
@@ -85,26 +87,25 @@ public static class VehicleLabGateTest
                 {
                     if (!ok) { lines.Add($"FAIL {name} ({took}) — Generate did not complete: {FirstLine(status)}"); fail++; continue; }
                     var snap = BakeGoldenRules.LabSnapshotLines(stdout);
-                    int bones = BakeGoldenRules.ArmatureBones(snap);
-                    if (bones < 0) { lines.Add($"FAIL {name} ({took}) — the run printed no armature line"); fail++; continue; }
-                    if (bones > 256) { lines.Add($"FAIL {name} ({took}) — {bones} bones, over Amplitude's 256"); fail++; continue; }
-                    // the file itself, not the log: a skin with joints and a rendered mesh must be in the GLB the bake will read
+                    int bones = BakeGoldenRules.ArmatureBones(snap);   // the tracked-vehicle path's line; -1 elsewhere, and the file decides
+                    // the file itself, not the log: a rigged mesh must be in the GLB the bake will read
                     int skins, joints, meshes, meshNodes, rigged;
                     try { GlbDisconnectedParts.RigSummary(File.ReadAllBytes(outGlb), out skins, out joints, out meshes, out meshNodes, out rigged); }
                     catch (Exception ex) { lines.Add($"FAIL {name} ({took}) — the output GLB does not parse: {ex.Message}"); fail++; continue; }
-                    if (rigged == 0) { lines.Add($"FAIL {name} ({took}) — the output GLB has no mesh with positions, joints and weights bound to a skin with joints ({skins} skin(s), {joints} joint(s), {meshNodes} mesh node(s); the log said {bones} bones)"); fail++; continue; }
+                    if (rigged == 0) { lines.Add($"FAIL {name} ({took}) — the output GLB has no mesh with positions, joints and weights bound to a skin with joints ({skins} skin(s), {joints} joint(s), {meshNodes} mesh node(s){(bones >= 0 ? $"; the log said {bones} bones" : "")})"); fail++; continue; }
                     if (joints > 256) { lines.Add($"FAIL {name} ({took}) — {joints} joints in the output GLB, over Amplitude's 256"); fail++; continue; }
+                    if (bones >= 0 && bones != joints) { lines.Add($"FAIL {name} ({took}) — the log said {bones} bones but the output GLB's skin has {joints} joints"); fail++; continue; }
                     snap = snap.Concat(new[] { $"GLB skins={skins} joints={joints} meshes={meshes} meshNodes={meshNodes} rigged={rigged}" }).ToArray();
                     string goldFile = Path.Combine(goldDir, name + ".txt");
                     if (!File.Exists(goldFile))
                     {
                         Directory.CreateDirectory(goldDir);
                         File.WriteAllLines(goldFile, snap);
-                        lines.Add($"CAPTURED {name} ({took}, {bones} bones) — no golden yet; this run's {snap.Length} summary line(s) are now {GoldenDir}/{name}.txt (not a pass — run again to verify)");
+                        lines.Add($"CAPTURED {name} ({took}, {joints} joints) — no golden yet; this run's {snap.Length} summary line(s) are now {GoldenDir}/{name}.txt (not a pass — run again to verify)");
                         skip++; continue;
                     }
                     string diff = BakeGoldenRules.Diff(File.ReadAllLines(goldFile), snap);
-                    if (diff == null) { lines.Add($"PASS {name} ({took}, {bones} bones, golden match)"); pass++; }
+                    if (diff == null) { lines.Add($"PASS {name} ({took}, {joints} joints, golden match)"); pass++; }
                     else
                     {
                         File.WriteAllLines(Path.Combine(workDir, name + ".candidate.txt"), snap);

@@ -31,7 +31,12 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   so a static mesh beside an unused skin fails; and the fuse picker seeds the group with the largest PAIR that
   fits when the largest-first fill ends with one part (100/90/60 at 150 fuses 90+60, not 100 alone). Tested.
   **Third round:** a rigged mesh node also needs non-empty JOINTS_0 and WEIGHTS_0 on the primitive — an export that
-  dropped the vertex weights kept its positions and its skin and passed. Tested.
+  dropped the vertex weights kept its positions and its skin and passed. Tested. **First live run (user: "several
+  tests failed"):** 19 of 20 recipes failed with "the run printed no armature line" — the script prints that line
+  on the tracked-vehicle path only. The rows no longer require it: the joint count comes from the output GLB's
+  skin, and where the line IS printed it must agree with the file. The Workshop and Bredley failures were goldens
+  captured by an earlier build of the rows (before the fuse-selection and GLB-line fixes); those goldens were
+  deleted for recapture — a golden captured before a row's own rule changed is stale by definition.
 
 - **Vehicle Lab: a Window role with its own reduce dial** (user: "add the reducable part type Window"). Glazing -
   portholes, bridge windows, windshields, skylights - is a role of its own with a **Window reduce (%)** slider in
