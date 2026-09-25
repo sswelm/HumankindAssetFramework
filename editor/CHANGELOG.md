@@ -5,31 +5,28 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
-- **Model Cutter: Tear — separate a welded part along its sharp seams** (user: "the split command only really splits
-  parts that are not connected; we need a method that can separate them even when they are connected" — the
-  Wespe's davits, welded into the deck part, intersect the paddle wheels in the final model). Split welds every
-  coincident vertex and separates what is left disconnected, so a game rip's objects, welded together wherever
-  they touch, stay one part. But an object boundary is almost always a *seam* in the file — the artist's UV or
-  hard-edge split, kept as duplicated vertices — and a seam where the faces also meet sharply is where one object
-  ends and the next begins — and, where the other side of the ship has the same objects as separate parts (user:
-  "it could look at mirror parts when available, because on the mirror side it is separated correctly"), the
-  mirror is the better witness: every face of the torn part is mirrored across the centreline and labelled by the
-  nearest other part within 1 % of the model, and the part is cut wherever the label changes, through welded
-  vertices as well. Elsewhere Tear (the row popup, or the T key) welds coincident vertices only across seams
-  flatter than "Tear at seams sharper than (°)" (45 by default: a funnel stays one piece across its UV seam, a
-  funnel meeting a deck at 90° comes apart), then glues every piece smaller than "Tear: glue pieces smaller than
-  (%)" of the part's surface (1 % by default) back onto the neighbour it shares the longest seam with, so a box's
-  faces reassemble and a coaming stays with its deck, never across two mirror labels. Edges that share vertex
-  indices never tear on the seam rule. Lossless, like Split: the pieces become _Part_NNN children, the report says
-  how many faces the mirror named, and the mark travels in the marks sidecar as T. Tests: a 90° seam tears, the
-  same fold with shared vertices and a 10° seam do not; a small flap is glued back, a full-size wing is not; a
-  davit welded into a deck comes off where the mirror side has it separate.
-  Measured on the Wespe's split file: the 44,080-face deck part (29 islands, the davits welded in) tears into 240
-  pieces in 2 s, 25,791 faces named by the mirror, and the starboard davit's arm comes off as one 2,188-face piece
-  with its tackle blocks beside it — mark them Delete and the paddle wheels are clear. On the way, the whole-file
-  samplers (the belly frame, the fuse's view from above, the mirror templates) now skip a file's line and point
-  primitives instead of giving up: the Wespe's source file carries rigging lines, and the mirror could not be read
-  until they did.
+- **Model Cutter: Tear — Split, plus a cut wherever the other side of the ship has the welded object separate**
+  (user: "the split command only really splits parts that are not connected; we need a method that can separate
+  them even when they are connected" — the Wespe's davits, welded into the deck part, intersect the paddle wheels
+  in the final model; "it could look at mirror parts when available, because on the mirror side it is separated
+  correctly"; and, after a first cut that also tore along sharp seams: "it created way too many extra parts, at
+  most I expected 33 extra parts" — the island count). Tear (the row popup, or the T key) makes the same islands as
+  Split, under the same Merge slider, and cuts a welded island only where the mirror says so: every face is
+  mirrored across the centreline and labelled by the nearest island there within 0.1 % of the model — its own
+  island first (a deck spanning both sides mirrors onto itself and is never cut), else any other island of any
+  part — and the island is cut wherever the label changes, through welded vertices as well. Nothing else is cut.
+  Pieces small in both surface and face count (under 2 % of the island's) are glued back onto their longest-cut
+  neighbour — the deck under a fitting, labelled by the fitting where the mirror deck has a hole; a davit is a thin
+  arm of many faces and stays. Lossless, like Split: the pieces become _Part_NNN children, the mark travels in the
+  marks sidecar as T, and the report says which mirror islands claimed what. Measured on the Wespe: the split
+  file's 44,080-face deck part, 29 islands, tears into 66 pieces in 3 s, and the unsplit 63,741-face part at 2 %
+  merge, 25 islands, into 87 — in both the starboard davit's arm comes off as one 2,048-face piece with its tackle
+  blocks beside it, and the other davits along the side the same way. Tests: a davit welded into a deck comes off
+  where the mirror side has it separate, not where the mirror side is welded too, not without a mirror; a part's
+  own islands stay the islands Split would make, plus the cut. On the way, the whole-file samplers (the belly
+  frame, the fuse's view from above) skip a file's line and point primitives instead of giving up: the Wespe's
+  source file carries rigging lines.
+
 - **Model Workshop: the highlighted part stays in view when the filter changes** (user: "when you have selected a
   part while a filter is active, and then disable the filter, I expect the selected part to remain selected and in
   the window"). The highlight did survive a filter change, but the list kept the old scroll offset over a

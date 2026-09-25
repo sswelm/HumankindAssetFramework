@@ -38,7 +38,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         public int islands;      // 1 = nothing to split (row disabled)
         public string blocked;   // non-null = the analyzer's reason this part cannot be split
         public bool split;       // the checkbox (Split)
-        public bool tear;        // TEAR (2026-09-25): the part is torn along its sharp seams into pieces - for a welded part Split cannot separate; T key or the row popup
+        public bool tear;        // TEAR (2026-09-25): Split, plus a cut wherever the other side of the ship has the welded object as a separate island; T key or the row popup
         public bool delete;      // MARKED FOR DELETION (2026-09-18): the part loses its mesh in the output — Delete key or the row popup, in both windows; exclusive with split and fuse
         public string fuse = ""; // FUSE GROUP letter A..Z (2026-09-15; A..H until 09-16): rows sharing a letter fuse into one shell each; "" = none
         public int verts;        // for the list filters (2026-09-16): vertex count and the world bbox (min/max null = unmeasured, never hidden)
@@ -69,8 +69,6 @@ public abstract class ModelWorkshopWindow : EditorWindow
     [SerializeField] float maxPartSize = 1e9f;
     [SerializeField] float minHeight = -1e9f, maxHeight = 1e9f, minWidth = -1e9f, maxWidth = 1e9f;   // clamped into the model's span each frame: a fresh model hides nothing
     [SerializeField] int showOnly = 0;
-    [SerializeField] float tearAngle = 45f;   // Tear: a seam sharper than this separates pieces (degrees between the faces' planes)
-    [SerializeField] float tearGluePct = 1f;  // Tear: a piece smaller than this % of the part's surface is glued to its longest-seam neighbour
     [SerializeField] float minFlatPct = 0f;   // 0 = off — hide parts whose LEVEL-surface share (% of area within 30° of horizontal) is below this: the Lab's deck finder, brought over 2026-09-18 ("group D is still missing part of the deck")
     Dictionary<int, float> flatShare; GameObject flatShareFor;   // per-NODE level-surface share over the preview meshes (the preview is one object per node since 2026-09-19 — no name aliasing needed)
     [SerializeField] string showOnlyLetter = "";   // "Show only" can also be ONE fuse group (user 2026-09-16): the popup lists every letter in use after the fixed kinds
@@ -203,17 +201,6 @@ public abstract class ModelWorkshopWindow : EditorWindow
             "accurate to about one grid cell. 0 = pure topology. Release the slider and the counts recount (no Blender re-run)."),
             mergePct, 0f, 10f);
         if (!Mathf.Approximately(newMergePct, mergePct)) { mergePct = newMergePct; analyzePending = rows.Count > 0; }
-        if (!Fusing)
-        {
-            // TEAR'S TWO DIALS (2026-09-25): where a seam counts as an object boundary, and how small a piece is glued back
-            tearAngle = EditorGUILayout.Slider(new GUIContent("Tear at seams sharper than (°)",
-                "Tear separates a part along its SEAMS (edges where the file duplicates the vertices - a UV or hard-edge split) " +
-                "where the faces also meet at more than this angle. A funnel's UV seam is flat and stays; a funnel meeting a deck " +
-                "at 90° comes apart. Edges that share vertices never tear."), tearAngle, 5f, 120f);
-            tearGluePct = EditorGUILayout.Slider(new GUIContent("Tear: glue pieces smaller than (%)",
-                "After the tear, a piece smaller than this % of the part's surface is glued back onto the neighbour it shares the " +
-                "longest seam with - a box's faces reassemble, a coaming stays with its deck. 0 = keep every piece."), tearGluePct, 0f, 20f);
-        }
         // DEFERRED recount (review find 2026-09-06): running Analyze mid-OnGUI replaced `rows` between IMGUI's
         // Layout and event passes (control-count mismatch exceptions), and doing it per drag-tick re-parsed the
         // whole GLB on every mouse move (seconds per tick on a real ship). Recount once, on the first Layout
@@ -1295,7 +1282,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             GlbDisconnectedParts.Result result = picked.Count > 0 ? GlbDisconnectedParts.Split(bytes, picked, mergePct / 100.0) : null;
             if (result != null && result.Changed) bytes = result.Bytes;
             // TEAR (2026-09-25), after the split: both only append nodes, so the marked indices still name their parts
-            GlbDisconnectedParts.Result torn = toTear.Count > 0 ? GlbDisconnectedParts.Tear(bytes, toTear, tearAngle, tearGluePct / 100.0) : null;
+            GlbDisconnectedParts.Result torn = toTear.Count > 0 ? GlbDisconnectedParts.Tear(bytes, toTear, mergePct / 100.0) : null;
             if (torn != null && torn.Changed) bytes = torn.Bytes;
             string deletedLine = null;
             if (toDelete.Count > 0)   // after the split: the split only appends, so the marked indices still name their nodes
@@ -1310,7 +1297,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             if (result != null) foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
             WriteFuseSidecarForOutput(outGlb);   // the ⊕ letters travel with the output, passed down to the _Part_NNN children
             status = (result != null && result.Changed ? $"Split done: {result.NodesSplit} part(s) → {result.ChildPartsCreated} sub-parts, {result.SourceTriangles:N0} triangles preserved." : "Split: nothing checked.")
-                   + (torn != null && torn.Changed ? $" Tear: {torn.NodesSplit} part(s) → {torn.ChildPartsCreated} pieces." : torn != null ? " Tear: nothing came apart (no seam sharper than the angle, or every piece glued back)." : "")
+                   + (torn != null && torn.Changed ? $" Tear: {torn.NodesSplit} part(s) → {torn.ChildPartsCreated} pieces." : torn != null ? " Tear: nothing came apart (the mirror side has no separate island where this part is welded)." : "")
                    + (deletedLine != null ? " " + deletedLine + "." : "") + $"\n{outGlb}\nNext: open it in the Vehicle Lab, Probe parts, and mark the junk islands Ignore.";
             if (result != null) Debug.Log($"[Workshop] {string.Join(" | ", result.Details)}");
             if (torn != null) { foreach (var w in torn.Warnings) Debug.LogWarning("[Workshop] tear: " + w); Debug.Log($"[Workshop] tear: {string.Join(" | ", torn.Details)}"); }

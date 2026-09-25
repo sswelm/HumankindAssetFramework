@@ -1081,68 +1081,53 @@ public class GlbFuseTests
         Assert.All(FusedFaces(r, "Well_Fused").Where(fc => fc.c[1] < 0.5), fc => Assert.True(fc.n[1] > 0, "the floor still faces up"));
     }
 
-    // A plate in the XZ plane (x 0..10, z 0..10, facing up) and a second plate hinged on its x = 10 edge, swung up by
-    // `angleDeg`, `width` wide. The hinge is a SEAM (the second plate duplicates the two hinge vertices) unless
-    // `shareIndices`, which reuses them - the welded hard chine Tear must never separate.
-    static Part Hinged(string name, float angleDeg, float width, bool shareIndices)
-    {
-        float c = (float)Math.Cos(angleDeg * Math.PI / 180), s = (float)Math.Sin(angleDeg * Math.PI / 180);
-        var P = new List<float> { 0, 0, 0,  10, 0, 0,  10, 0, 10,  0, 0, 10 };
-        var I = new List<int> { 0, 2, 1,  0, 3, 2 };
-        int h0 = 1, h1 = 2;
-        if (!shareIndices) { P.AddRange(new float[] { 10, 0, 0,  10, 0, 10 }); h0 = 4; h1 = 5; }
-        int f0 = P.Count / 3; P.AddRange(new[] { 10 + width * c, width * s, 10,  10 + width * c, width * s, 0 });
-        I.AddRange(new[] { h0, h1, f0,  h0, f0, f0 + 1 });
-        return new Part { Name = name, Positions = P.ToArray(), Indices = I.ToArray() };
-    }
-
-    [Fact]
-    public void Tear_separates_a_sharp_seam_and_leaves_a_flat_one_and_a_shared_edge_alone()
-    {
-        // a seam at 90 degrees: two pieces
-        var r = GlbDisconnectedParts.Tear(BuildGlb(Hinged("Plate", 90, 10, shareIndices: false)), new HashSet<int> { 0 }, 45, 0);
-        Assert.Equal(1, r.NodesSplit); Assert.Equal(2, r.ChildPartsCreated);
-        // the same fold with the hinge vertices SHARED is a welded chine, never a seam
-        r = GlbDisconnectedParts.Tear(BuildGlb(Hinged("Plate", 90, 10, shareIndices: true)), new HashSet<int> { 0 }, 45, 0);
-        Assert.False(r.Changed);
-        // a seam at 10 degrees is a UV or normal split inside one object: welded, one piece
-        r = GlbDisconnectedParts.Tear(BuildGlb(Hinged("Plate", 10, 10, shareIndices: false)), new HashSet<int> { 0 }, 45, 0);
-        Assert.False(r.Changed);
-        // and Split, which welds every coincident vertex, sees one island in all three
-        Assert.False(GlbDisconnectedParts.Split(BuildGlb(Hinged("Plate", 90, 10, shareIndices: false)), new HashSet<int> { 0 }, 0).Changed);
-    }
+    // The Wespe's davits: a deck of three quads with a plate rising from its middle edge, sharing vertices (no seam to
+    // tear at, one island). The mirror side, x < 0, is passed in as separate parts.
+    static Part WeldedDeckWithDavit(string name) => new Part { Name = name, Positions = new float[] {
+            0, 0, 0,  10, 0, 0,  10, 0, 10,  0, 0, 10,  10, 0, 20,  0, 0, 20,  10, 0, 30,  0, 0, 30,   // the deck, x 0..10, z 0..30
+            10, 10, 10,  10, 10, 20 },                                                                  // the davit, sharing vertices 2 and 4
+        Indices = new[] { 0, 2, 1,  0, 3, 2,  3, 4, 2,  3, 5, 4,  5, 6, 4,  5, 7, 6,   2, 4, 9,  2, 9, 8 } };
+    static readonly float[] MirrorDeck = { 0, 0, 0,  -10, 0, 0,  -10, 0, 10,  0, 0, 10,  -10, 0, 20,  0, 0, 20,  -10, 0, 30,  0, 0, 30 };
+    static readonly int[] MirrorDeckIdx = { 0, 1, 2,  0, 2, 3,  3, 2, 4,  3, 4, 5,  5, 4, 6,  5, 6, 7 };
+    static Part MirrorDavit() => new Part { Name = "DavitM", Positions = new float[] { -10, 0, 10,  -10, 0, 20,  -10, 10, 10,  -10, 10, 20 }, Indices = new[] { 0, 1, 3,  0, 3, 2 } };
 
     [Fact]
     public void Tear_cuts_a_welded_part_where_its_mirror_side_is_separate_parts()
     {
-        // The Wespe's davits: welded into the deck part by shared vertices (no seam to tear at), while the other side
-        // of the ship has the deck and the davit as separate parts. Every face of the welded part is mirrored across
-        // the centreline and labelled by the nearest part there; the label changes at the davit's foot, and the part
-        // is cut there - through the shared vertices.
-        var welded = new Part { Name = "Deck", Positions = new float[] {
-            0, 0, 0,  10, 0, 0,  10, 0, 10,  0, 0, 10,  10, 0, 20,  0, 0, 20,  10, 0, 30,  0, 0, 30,   // a deck of three quads, x 0..10, z 0..30
-            10, 10, 10,  10, 10, 20 },                                                                  // the davit: a plate up from the edge z 10..20, sharing vertices 2 and 4
-            Indices = new[] { 0, 2, 1,  0, 3, 2,  3, 4, 2,  3, 5, 4,  5, 6, 4,  5, 7, 6,   2, 4, 9,  2, 9, 8 } };
-        var deckMirror = new Part { Name = "DeckM", Positions = new float[] { 0, 0, 0,  -10, 0, 0,  -10, 0, 10,  0, 0, 10,  -10, 0, 20,  0, 0, 20,  -10, 0, 30,  0, 0, 30 },
-            Indices = new[] { 0, 1, 2,  0, 2, 3,  3, 2, 4,  3, 4, 5,  5, 4, 6,  5, 6, 7 } };
-        var davitMirror = new Part { Name = "DavitM", Positions = new float[] { -10, 0, 10,  -10, 0, 20,  -10, 10, 10,  -10, 10, 20 }, Indices = new[] { 0, 1, 3,  0, 3, 2 } };
-        // with the mirror side present: two pieces, the deck and the davit
-        var r = GlbDisconnectedParts.Tear(BuildGlb(welded, deckMirror, davitMirror), new HashSet<int> { 0 }, 45, 0.01);
+        // the mirror side as two parts, deck and davit: the welded part is cut into the same two, through the shared vertices
+        var deckMirror = new Part { Name = "DeckM", Positions = MirrorDeck, Indices = MirrorDeckIdx };
+        var r = GlbDisconnectedParts.Tear(BuildGlb(WeldedDeckWithDavit("Deck"), deckMirror, MirrorDavit()), new HashSet<int> { 0 }, 0);
         Assert.Equal(1, r.NodesSplit); Assert.Equal(2, r.ChildPartsCreated);
-        Assert.Contains(r.Details, d => d.StartsWith("tear 'DeckMesh': 8 face(s), 8 matched a mirror part", StringComparison.Ordinal));
-        // without it, the welded edge is no seam and nothing comes apart
-        Assert.False(GlbDisconnectedParts.Tear(BuildGlb(welded), new HashSet<int> { 0 }, 45, 0.01).Changed);
+        Assert.Contains(r.Details, d => d.StartsWith("tear 'DeckMesh': 1 island(s), 1 cut by the mirror into 2 piece(s) (8 of 8 faces named by another island", StringComparison.Ordinal));
+        // without a mirror side, nothing comes apart
+        Assert.False(GlbDisconnectedParts.Tear(BuildGlb(WeldedDeckWithDavit("Deck")), new HashSet<int> { 0 }, 0).Changed);
     }
 
     [Fact]
-    public void Tear_glues_a_small_piece_back_onto_its_longest_seam_neighbour()
+    public void Tear_does_not_cut_where_the_mirror_side_is_welded_too()
     {
-        // a 10 x 0.5 flap at 90 degrees on a 10 x 10 plate: 4.8 % of the surface - torn off at glue 0, glued back at 10 %
-        var glb = BuildGlb(Hinged("Plate", 90, 0.5f, shareIndices: false));
-        Assert.Equal(2, GlbDisconnectedParts.Tear(glb, new HashSet<int> { 0 }, 45, 0).ChildPartsCreated);
-        Assert.False(GlbDisconnectedParts.Tear(glb, new HashSet<int> { 0 }, 45, 0.10).Changed);
-        // a full-size wing (48 % of the surface) is a piece of its own at the same glue
-        Assert.Equal(2, GlbDisconnectedParts.Tear(BuildGlb(Hinged("Plate", 90, 10, shareIndices: false)), new HashSet<int> { 0 }, 45, 0.10).ChildPartsCreated);
+        // the mirror side as ONE welded part (deck and davit sharing vertices, one island): every face mirrors onto the
+        // same island, and Tear is Split - one island, nothing to do
+        var mirror = new Part { Name = "DeckM", Positions = new float[] {
+            0, 0, 0,  -10, 0, 0,  -10, 0, 10,  0, 0, 10,  -10, 0, 20,  0, 0, 20,  -10, 0, 30,  0, 0, 30,  -10, 10, 10,  -10, 10, 20 },
+            Indices = new[] { 0, 1, 2,  0, 2, 3,  3, 2, 4,  3, 4, 5,  5, 4, 6,  5, 6, 7,   2, 9, 4,  2, 8, 9 } };
+        Assert.False(GlbDisconnectedParts.Tear(BuildGlb(WeldedDeckWithDavit("Deck"), mirror), new HashSet<int> { 0 }, 0).Changed);
+    }
+
+    [Fact]
+    public void Tear_keeps_the_islands_of_the_part_and_adds_only_the_mirror_cut()
+    {
+        // the welded deck-with-davit plus a separate island (a hatch cover above the deck) in ONE part, and the mirror
+        // side as deck + davit: three pieces - the two islands as Split would make them, and the davit cut off
+        var welded = WeldedDeckWithDavit("Deck");
+        var P = welded.Positions.Concat(new float[] { 2, 5, 2,  8, 5, 2,  8, 5, 8,  2, 5, 8 }).ToArray();
+        var I = welded.Indices.Concat(new[] { 10, 12, 11,  10, 13, 12 }).ToArray();
+        var twoIslands = new Part { Name = "Deck", Positions = P, Indices = I };
+        var deckMirror = new Part { Name = "DeckM", Positions = MirrorDeck, Indices = MirrorDeckIdx };
+        var r = GlbDisconnectedParts.Tear(BuildGlb(twoIslands, deckMirror, MirrorDavit()), new HashSet<int> { 0 }, 0);
+        Assert.Equal(3, r.ChildPartsCreated);
+        // and Split alone makes two
+        Assert.Equal(2, GlbDisconnectedParts.Split(BuildGlb(twoIslands, deckMirror, MirrorDavit()), new HashSet<int> { 0 }, 0).ChildPartsCreated);
     }
 
     [Fact]
