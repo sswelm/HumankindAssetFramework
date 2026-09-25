@@ -30,6 +30,8 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   counts RIGGED mesh nodes — a mesh with a non-empty POSITION accessor bound to a skin that exists and has joints —
   so a static mesh beside an unused skin fails; and the fuse picker seeds the group with the largest PAIR that
   fits when the largest-first fill ends with one part (100/90/60 at 150 fuses 90+60, not 100 alone). Tested.
+  **Third round:** a rigged mesh node also needs non-empty JOINTS_0 and WEIGHTS_0 on the primitive — an export that
+  dropped the vertex weights kept its positions and its skin and passed. Tested.
 
 - **Vehicle Lab: a Window role with its own reduce dial** (user: "add the reducable part type Window"). Glazing -
   portholes, bridge windows, windshields, skylights - is a role of its own with a **Window reduce (%)** slider in

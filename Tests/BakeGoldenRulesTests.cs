@@ -78,9 +78,12 @@ public class BakeGoldenRulesTests
                 new Newtonsoft.Json.Linq.JObject { ["name"] = "Root" }, new Newtonsoft.Json.Linq.JObject { ["name"] = "Wheel_00" },
                 new Newtonsoft.Json.Linq.JObject { ["name"] = "Turret", ["mesh"] = 1 }),
             ["meshes"] = new Newtonsoft.Json.Linq.JArray(
-                new Newtonsoft.Json.Linq.JObject { ["primitives"] = new Newtonsoft.Json.Linq.JArray(new Newtonsoft.Json.Linq.JObject { ["attributes"] = new Newtonsoft.Json.Linq.JObject { ["POSITION"] = 0 } }) },
-                new Newtonsoft.Json.Linq.JObject { ["primitives"] = new Newtonsoft.Json.Linq.JArray(new Newtonsoft.Json.Linq.JObject { ["attributes"] = new Newtonsoft.Json.Linq.JObject { ["POSITION"] = 0 } }) }),
-            ["accessors"] = new Newtonsoft.Json.Linq.JArray(new Newtonsoft.Json.Linq.JObject { ["count"] = 36, ["type"] = "VEC3", ["componentType"] = 5126 }),
+                new Newtonsoft.Json.Linq.JObject { ["primitives"] = new Newtonsoft.Json.Linq.JArray(new Newtonsoft.Json.Linq.JObject { ["attributes"] = new Newtonsoft.Json.Linq.JObject { ["POSITION"] = 0, ["JOINTS_0"] = 1, ["WEIGHTS_0"] = 2 } }) },
+                new Newtonsoft.Json.Linq.JObject { ["primitives"] = new Newtonsoft.Json.Linq.JArray(new Newtonsoft.Json.Linq.JObject { ["attributes"] = new Newtonsoft.Json.Linq.JObject { ["POSITION"] = 0, ["JOINTS_0"] = 1, ["WEIGHTS_0"] = 2 } }) }),
+            ["accessors"] = new Newtonsoft.Json.Linq.JArray(
+                new Newtonsoft.Json.Linq.JObject { ["count"] = 36, ["type"] = "VEC3", ["componentType"] = 5126 },
+                new Newtonsoft.Json.Linq.JObject { ["count"] = 36, ["type"] = "VEC4", ["componentType"] = 5123 },
+                new Newtonsoft.Json.Linq.JObject { ["count"] = 36, ["type"] = "VEC4", ["componentType"] = 5126 }),
             ["skins"] = new Newtonsoft.Json.Linq.JArray(
                 new Newtonsoft.Json.Linq.JObject { ["joints"] = new Newtonsoft.Json.Linq.JArray(1, 2) },
                 new Newtonsoft.Json.Linq.JObject { ["joints"] = new Newtonsoft.Json.Linq.JArray(1) }),
@@ -100,6 +103,19 @@ public class BakeGoldenRulesTests
         ((Newtonsoft.Json.Linq.JObject)badSkin["nodes"][0])["skin"] = 5;
         GlbDisconnectedParts.RigSummary(Glb(badSkin), out _, out _, out _, out _, out int rigged4);
         Assert.Equal(0, rigged4);
+        // an export that dropped the vertex weights (third review): positions and a skin, but no JOINTS_0/WEIGHTS_0, or empty ones
+        var noWeights = (Newtonsoft.Json.Linq.JObject)rigged.DeepClone();
+        ((Newtonsoft.Json.Linq.JObject)noWeights["meshes"][0]["primitives"][0]["attributes"]).Remove("WEIGHTS_0");
+        GlbDisconnectedParts.RigSummary(Glb(noWeights), out _, out _, out _, out _, out int rigged5);
+        Assert.Equal(0, rigged5);
+        var noJoints = (Newtonsoft.Json.Linq.JObject)rigged.DeepClone();
+        ((Newtonsoft.Json.Linq.JObject)noJoints["meshes"][0]["primitives"][0]["attributes"]).Remove("JOINTS_0");
+        GlbDisconnectedParts.RigSummary(Glb(noJoints), out _, out _, out _, out _, out int rigged6);
+        Assert.Equal(0, rigged6);
+        var emptyWeights = (Newtonsoft.Json.Linq.JObject)rigged.DeepClone();
+        ((Newtonsoft.Json.Linq.JObject)emptyWeights["accessors"][2])["count"] = 0;
+        GlbDisconnectedParts.RigSummary(Glb(emptyWeights), out _, out _, out _, out _, out int rigged7);
+        Assert.Equal(0, rigged7);
         var bare = new Newtonsoft.Json.Linq.JObject
         {
             ["asset"] = new Newtonsoft.Json.Linq.JObject { ["version"] = "2.0" },
