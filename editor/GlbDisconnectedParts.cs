@@ -1651,20 +1651,26 @@ public static class GlbDisconnectedParts
         // Romanic's Object_4 alone went from 0 to 3 non-orientable sheets (its inner and outer skins meet its decks at
         // three-face rims, and a continuation pair there closes odd cycles); a branch at a junction starts its own sheet.
         // FROM ABOVE (2026-09-24, the Wespe's deck plating round the hatch): is anything of the MODEL above a face's
-        // centroid? Every mesh node of the file is an occluder (the group's own faces included), as the belly sampler
-        // reads every node - measured on the ship, the group alone read 57 ceilings as "exposed" whose decks belong to
-        // other groups. A column grid over (x, z), built on first use; a vertical ray from the model's top, Möller-
-        // Trumbore per candidate; the face itself and a copy coincident with it (a doubled surface) are not occluders.
+        // centroid? Every mesh node of the file is an occluder, as the belly sampler reads every node - measured on
+        // the ship, the group alone read 57 ceilings as "exposed" whose decks belong to other groups. The group's
+        // OWN faces come from the welded geometry (`pos`, the class centroids), never from the file (review of PR
+        // #83, P2): a weld moves a face, and its pre-weld copy read from the file sat above the welded face and
+        // shaded it - a 0.005 seam under a 0.01 weld turned a well's floor. A column grid over (x, z), built on first
+        // use; a vertical ray from the model's top, Möller-Trumbore per candidate; the face itself and a copy
+        // coincident with it (a doubled surface) are not occluders. Entries >= 0 index `occluders` (other nodes,
+        // three corners each); entries < 0 are the group's own faces, -1 - f.
         Dictionary<long, List<int>> columns = null; var occluders = new List<Vec3>(); double columnCell = 1, modelTop = 0, modelBottom = 0;
         void EnsureOccluders()
         {
             if (columns != null) return;
             columns = new Dictionary<long, List<int>>();
             var lo = new[] { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity }; var hi = new[] { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
+            var fusedNodes = new HashSet<int>(picked);
             try
             {
                 for (int ni = 0; ni < nodes.Count; ni++)
                 {
+                    if (fusedNodes.Contains(ni)) continue;   // the group's faces are added below, welded
                     var node = nodes[ni] as JObject; if (node?["mesh"] == null) continue;
                     int mi = node.Value<int>("mesh"); if (mi < 0 || mi >= meshes.Count) continue;
                     var pl = (meshes[mi] as JObject)?["primitives"] as JArray; if (pl == null) continue;
@@ -1687,18 +1693,19 @@ public static class GlbDisconnectedParts
                 }
             }
             catch (Exception) { occluders.Clear(); }
-            if (occluders.Count == 0) { modelTop = mx[1]; modelBottom = mn[1]; return; }
+            for (int f = 0; f < faceCount; f++) for (int c = 0; c < 3; c++) UpdateBounds(lo, hi, P(f, c));
             modelTop = hi[1]; modelBottom = lo[1];
             columnCell = Math.Max(Math.Max(hi[0] - lo[0], hi[2] - lo[2]) / 256.0, 1e-9);
-            for (int t = 0; t < occluders.Count; t += 3)
+            void Register(int id, Vec3 a, Vec3 b, Vec3 c)
             {
-                Vec3 a = occluders[t], b = occluders[t + 1], c = occluders[t + 2];
                 long x0 = (long)Math.Floor(Math.Min(a.X, Math.Min(b.X, c.X)) / columnCell), x1 = (long)Math.Floor(Math.Max(a.X, Math.Max(b.X, c.X)) / columnCell);
                 long z0 = (long)Math.Floor(Math.Min(a.Z, Math.Min(b.Z, c.Z)) / columnCell), z1 = (long)Math.Floor(Math.Max(a.Z, Math.Max(b.Z, c.Z)) / columnCell);
-                if (x1 - x0 > 256 || z1 - z0 > 256) continue;   // wider than the model: a stray sliver, not an occluder
+                if (x1 - x0 > 256 || z1 - z0 > 256) return;   // wider than the model: a stray sliver, not an occluder
                 for (long x = x0; x <= x1; x++) for (long z = z0; z <= z1; z++)
-                { long key = (x << 32) ^ (z & 0xffffffffL); if (!columns.TryGetValue(key, out List<int> l)) columns.Add(key, l = new List<int>()); l.Add(t); }
+                { long key = (x << 32) ^ (z & 0xffffffffL); if (!columns.TryGetValue(key, out List<int> l)) columns.Add(key, l = new List<int>()); l.Add(id); }
             }
+            for (int t = 0; t < occluders.Count; t += 3) Register(t, occluders[t], occluders[t + 1], occluders[t + 2]);
+            for (int f = 0; f < faceCount; f++) Register(-1 - f, P(f, 0), P(f, 1), P(f, 2));
         }
         // ...and from BELOW, the same column upward from the model's bottom: what tells a well's floor (the hull
         // beneath it) from an upturned boat's bottom (nothing beneath it) - both face up and both see the sky.
@@ -1713,7 +1720,9 @@ public static class GlbDisconnectedParts
             if (!columns.TryGetValue(key, out List<int> l)) return true;
             foreach (int t in l)
             {
-                double hit = RayTriangle(o, d, occluders[t], occluders[t + 1], occluders[t + 2]);
+                double hit;
+                if (t >= 0) hit = RayTriangle(o, d, occluders[t], occluders[t + 1], occluders[t + 2]);
+                else { int g = -1 - t; if (g == f) continue; hit = RayTriangle(o, d, P(g, 0), P(g, 1), P(g, 2)); }
                 if (hit > 0 && hit < tf - 1e-6 * Math.Max(1.0, tf)) return false;
             }
             return true;

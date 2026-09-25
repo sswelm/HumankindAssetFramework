@@ -57,6 +57,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   reversal turned the kept faces down) — the reversal skips it and the veto counts only what the reversal would
   turn. Tests: a well of four inward walls and an up-facing floor is kept; an inside-out box with an up-facing lip
   kept as a join is reversed with the lip left up.
+  **Review (P2):** the occluders were read from the file at their authored positions while faces were asked at
+  their welded positions, so a weld that moved a face left its pre-weld copy above it, shading it (a 0.005 seam
+  under a 0.01 weld turned a well's floor). The group's own faces now come from the welded geometry, the face
+  itself excluded; other nodes still from the file. Tested; byte-identical on all five ships at weld 0.
 
 - **Model Fuser: a part that is double-sided by duplication is fused as two copies, not one soup** (user: "an issue
   with the fused gun that becomes visible in the Vehicle Lab", SMS Wespe). The gun carries every face twice, wound

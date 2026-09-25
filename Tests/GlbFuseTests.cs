@@ -1065,6 +1065,23 @@ public class GlbFuseTests
     }
 
     [Fact]
+    public void A_welded_face_is_not_shaded_by_its_own_pre_weld_copy()
+    {
+        // Review of PR #83, P2: the occluders were read from the file at their authored positions while the faces
+        // were asked at their WELDED positions, so a weld that moved a face left its pre-weld copy above it, shading
+        // it. The well again, its floor 0.005 above the walls' feet under a 0.01 weld: the seam welds halfway, the
+        // whole floor moves down 0.0025, and its own authored quad then sat above its welded centroid - "not
+        // exposed", no veto, the well reversed. The group's own faces now come from the welded geometry.
+        var hull = Box("Hull", 400, -200, -450, -200, inward: false);
+        var walls = Wall("Well", new (float x, float z)[] { (0f, 0f), (0f, 10f), (10f, 10f), (10f, 0f), (0f, 0f) }, 0, 10, 1, new[] { 1, 1, 1, 1 }, flip: true);   // facing IN
+        var floor = Level("Well", 0, 10, 0, 10, 0.005f, down: false);
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, walls, floor), new[] { 1, 2 }, 0.001);   // weld 0.01 of a 10-unit group
+        string sheets = r.Details.First(d => d.StartsWith("largest islands:", StringComparison.Ordinal));
+        Assert.Contains("a reversal would turn them down", sheets);
+        Assert.All(FusedFaces(r, "Well_Fused").Where(fc => fc.c[1] < 0.5), fc => Assert.True(fc.n[1] > 0, "the floor still faces up"));
+    }
+
+    [Fact]
     public void A_level_plate_authored_facing_down_is_left_to_the_evidence()
     {
         // The rule is one-sided on purpose. The frigate carries two 11.4 x 5.2 zero-thickness plates over its boat
