@@ -11,7 +11,7 @@ import unittest
 SCRIPT = Path(__file__).parents[1] / "editor" / "Tools~" / "vehicle_rig.py"
 SOURCE = SCRIPT.read_text(encoding="utf-8")
 TREE = ast.parse(SOURCE, filename=str(SCRIPT))
-PURE_NAMES = {"_fitted_cycle_count", "_oar_recovery_metrics", "_merge2_scale", "_tagged_reduce_pct"}
+PURE_NAMES = {"_fitted_cycle_count", "_oar_recovery_metrics", "_merge2_scale", "_tagged_reduce_pct", "_tagged_names_pct"}
 PURE_DEFS = [node for node in TREE.body if isinstance(node, ast.FunctionDef) and node.name in PURE_NAMES]
 if {node.name for node in PURE_DEFS} != PURE_NAMES:
     raise RuntimeError("Vehicle Lab pure helper contract changed; update this test deliberately")
@@ -90,6 +90,20 @@ class VehicleRigMathTests(unittest.TestCase):
         for bad in ("gunreduce=", "gunreduce=abc", "gunreduce=nan", "gunreduce=inf", "gunreduce=@guns.txt|50"):
             with self.assertRaises(ValueError, msg=bad):
                 pct([bad], "gunreduce")
+
+    def test_windowreduce_tag_carries_the_names_file_and_the_percent(self):
+        """windowreduce=@<names file>|<percent> (2026-09-25): the Window parts travel nowhere else, so the tag carries
+        both. Absent -> ("", 0.0); the names text is everything before the LAST '|' (a part name may hold one); the
+        percent is clamped 0..95; a missing '|' or a non-finite percent is refused (a VEHICLE ERROR in the script)."""
+        tag = NAMESPACE["_tagged_names_pct"]
+        self.assertEqual(("", 0.0), tag(["rig", "gunreduce=50", "shroudreduce=@s.txt|20"], "windowreduce"))
+        self.assertEqual(("@C:/p/x_window.txt", 40.0), tag(["rig", "windowreduce=@C:/p/x_window.txt|40", "flagfold=0"], "windowreduce"))
+        self.assertEqual(("@a|b.txt", 95.0), tag(["windowreduce=@a|b.txt|120"], "windowreduce"))
+        self.assertEqual(("", 0.0), tag(["windowreduce=|-3"], "windowreduce"))
+        self.assertEqual(("@s.txt", 20.0), tag(["windowreduce=@w.txt|10", "shroudreduce=@s.txt|20"], "shroudreduce"))
+        for bad in ("windowreduce=", "windowreduce=@w.txt", "windowreduce=@w.txt|", "windowreduce=@w.txt|abc", "windowreduce=@w.txt|nan", "windowreduce=@w.txt|inf"):
+            with self.assertRaises(ValueError, msg=bad):
+                tag([bad], "windowreduce")
 
     def test_merge2_scale_rejects_a_wrong_component_count(self):
         parse = NAMESPACE["_merge2_scale"]

@@ -951,6 +951,30 @@ try:
     gun_reduce = _tagged_reduce_pct(argv, "gunreduce")
 except Exception as _e:
     print("VEHICLE ERROR: malformed gunreduce argument: %s" % _e); sys.exit(1)
+# WINDOW (2026-09-25, user: "add the reducable part type Window"): glazing - portholes, bridge windows, windshields -
+# as a WELD tier of its own (a pane is a sheet, not rope soup). Its parts travel nowhere else, so the tag carries the
+# names file like shroudreduce=. Absent while the dial is 0; malformed = hard error, like the other tags.
+#   windowreduce=@<names file>|<percent>
+def _tagged_names_pct(argv, tag):
+    """A "<tag>=<names>|<percent>" reduce tag: (names text, percent clamped 0..95), or ("", 0.0) when the tag is absent.
+    The names text is what precedes the LAST '|' (a part name may hold one), for the caller's namelist(). Raises
+    ValueError when the '|' is missing or the percent is not a finite number (the caller makes that a VEHICLE ERROR)."""
+    _arg = next((a for a in argv if a.startswith(tag + "=")), None)
+    if _arg is None:
+        return "", 0.0
+    _rest = _arg[len(tag) + 1:]
+    if "|" not in _rest:
+        raise ValueError("no '|' between the names and the percent: %r" % _arg)
+    _names, _pct_text = _rest.rsplit("|", 1)
+    _pct = float(_pct_text)
+    if _pct != _pct or _pct in (float("inf"), float("-inf")):
+        raise ValueError("not a finite percent: %r" % _arg)
+    return _names, min(95.0, max(0.0, _pct))
+try:
+    _wnames, window_reduce = _tagged_names_pct(argv, "windowreduce")
+    window_names = namelist(_wnames) if _wnames.strip() else []
+except Exception as _e:
+    print("VEHICLE ERROR: malformed windowreduce argument: %s" % _e); sys.exit(1)
 # SAIL IDLE FOLD (argv[71], 2026-09-09, vanilla-parity request): "1" = at idle the canvas FOLDS at the yard
 # (visible bundled sail, like the vanilla triaconter's brailed-up cloth) instead of the 180-degree strike below
 # the keel. ROTATION-ONLY by construction: the canvas is band-skinned to a Sail->SailF1->SailF2 chain and the
@@ -1183,7 +1207,7 @@ if mode == "rigfast":
 _role_marked = set()
 for _rl in (wheel_names, turret_names, track_names, gun_names, rotor_names, tailrotor_names, trail_names,
             muzzle_names, cradle_names, oar_names, sail_names, rigging_names, structure_names, body_names,
-            flag_names, rudder_names, preserve_names, flip_names, detail_names, shroud_names):
+            flag_names, rudder_names, preserve_names, flip_names, detail_names, shroud_names, window_names):
     _role_marked.update(_rl)
 for _fo in mesh_objects():
     # the import-time Icosphere purge is conservative (skips skinned ones); on THIS path all skinning is
@@ -1370,7 +1394,7 @@ _lap("prep")
 _by_name = {}
 for _o in objs:
     _by_name.setdefault(_o.name, _o)   # first wins, matching find_opt's linear-scan order
-for _rlabel, _rnames, _rpct in (("DEFAULT", default_names, default_reduce), ("RIGGING", rigging_names, rigging_reduce), ("SHROUD", shroud_names, shroud_reduce), ("STRUCTURE", structure_names, structure_reduce), ("BODY", body_names, body_reduce), ("OAR", oar_names, oar_reduce), ("SAIL", sail_names, sail_reduce), ("RUDDER", rudder_names, rudder_reduce), ("WHEEL", wheel_names, wheel_reduce), ("GUN", gun_names, gun_reduce), ("FLIP", flip_names, flip_reduce), ("PRESERVE", preserve_names, preserve_reduce), ("DETAIL", detail_names, detail_reduce)):
+for _rlabel, _rnames, _rpct in (("DEFAULT", default_names, default_reduce), ("RIGGING", rigging_names, rigging_reduce), ("SHROUD", shroud_names, shroud_reduce), ("STRUCTURE", structure_names, structure_reduce), ("BODY", body_names, body_reduce), ("OAR", oar_names, oar_reduce), ("SAIL", sail_names, sail_reduce), ("RUDDER", rudder_names, rudder_reduce), ("WHEEL", wheel_names, wheel_reduce), ("GUN", gun_names, gun_reduce), ("WINDOW", window_names, window_reduce), ("FLIP", flip_names, flip_reduce), ("PRESERVE", preserve_names, preserve_reduce), ("DETAIL", detail_names, detail_reduce)):
     if not _rnames or _rpct <= 0.5:
         continue
     try:

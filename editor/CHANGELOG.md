@@ -5,6 +5,16 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Vehicle Lab: a Window role with its own reduce dial** (user: "add the reducable part type Window"). Glazing -
+  portholes, bridge windows, windshields, skylights - is a role of its own with a **Window reduce (%)** slider in
+  Vertices control (enabled while Window parts are marked, in the reduce summary, the Verify projection, the recipe;
+  absent key = 0 = untouched), a Show-only filter, and `window` / `windshield` / `windscreen` / `glass` guessed from
+  part names. A weld tier like Detail (seams welded within each material, then collapse). Appended last in the role
+  list, so every saved recipe's roles keep their numbers. Reaches the rig script as a tagged
+  `windowreduce=@file|percent`, absent while the dial is 0, so an older script and a newer Lab still run together; a
+  malformed tag is a hard error. Test: the tag's names text and percent, absent at 0, clamped 0..95, a '|' inside a
+  part name kept, a missing '|' or a non-finite percent refused.
+
 - **Vehicle Lab: Gun is a reduce tier** (user: "add Gun part type as a reducable group"). A **Gun reduce (%)** slider
   in Vertices control, enabled while Gun parts are marked, counted in the reduce summary, in the Verify projection,
   saved and loaded with the recipe (absent key = 0 = untouched). A weld tier like Wheel/Body (seams welded within
