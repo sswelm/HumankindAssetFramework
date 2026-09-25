@@ -156,6 +156,27 @@ public static class NaturalOrder
 /// <summary>Vehicle Lab decisions over the Blender probe's stdout contract (VehicleLabWindow calls these; VehicleLabRulesTests locks them).</summary>
 public static class VehicleLabRules
 {
+    // THE PARENT NAMES OF A CUT PART (2026-09-25): the Cutter names what it makes after what it cut - X_Part_001
+    // (Split, Tear), X_CutA / X_CutB (the plane cut) - and makes duplicate names unique with _2, _3 ... So a part's
+    // ancestors are found by peeling those tails, one at a time, nearest first: Material2_3_Part_001_2 ->
+    // Material2_3_Part_001 -> Material2_3 -> Material2. A role kept under any of them is the part's to inherit.
+    public static IEnumerable<string> ParentNames(string name)
+    {
+        if (string.IsNullOrEmpty(name)) yield break;
+        string cur = name;
+        for (int guard = 0; guard < 16; guard++)
+        {
+            string next = null;   // the specific tails before the bare number: a greedy "(.*)_\d+" would peel "_001" off "_Part_001"
+            foreach (string tail in new[] { @"^(.+)_Part_\d{3}$", @"^(.+)_Cut[AB]$", @"^(.+)_\d+$" })
+            {
+                var m1 = System.Text.RegularExpressions.Regex.Match(cur, tail);
+                if (m1.Success) { next = m1.Groups[1].Value; break; }
+            }
+            if (string.IsNullOrEmpty(next) || next == cur) yield break;
+            yield return next; cur = next;
+        }
+    }
+
     public sealed class PartRow
     {
         public string Kind;                       // "PART" or "RIGBONE"

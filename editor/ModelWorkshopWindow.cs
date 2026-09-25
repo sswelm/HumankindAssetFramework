@@ -669,7 +669,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         if (firstLoad) ResetFilters();   // a model probed into the window starts fully visible (see ResetFilters)
         try
         {
-            rows = GlbDisconnectedParts.Analyze(File.ReadAllBytes(srcFile), mergePct / 100.0)
+            rows = GlbDisconnectedParts.Analyze(UniqueBytes(srcFile), mergePct / 100.0)
                 .Select(p => new Row { nodeIndex = p.NodeIndex, node = p.NodeName, mesh = p.MeshName, tris = p.Triangles, islands = p.Islands, blocked = p.Blocked, split = kept.Contains(p.NodeIndex), delete = keptDelete.Contains(p.NodeIndex),
                                        fuse = keptFuse.TryGetValue(p.NodeIndex, out string kf) ? kf : "",
                                        verts = p.Vertices, min = p.Min?.Select(d => (float)d).ToArray(), max = p.Max?.Select(d => (float)d).ToArray() })
@@ -1094,6 +1094,17 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // X (delete) for letters, so the same resolver reads it by node index and name. Written by Save marks and by every
     // Split, Plane cut and Fuse; read at the first Probe of a file (a re-Probe keeps the marks in memory, as the Fuser
     // keeps its letters). Both windows read and write it: a deletion marked in the Fuser reaches the Splitter.
+    // UNIQUE NAMES FIRST (2026-09-25, user: "give all parts that are not unique a unique name so that any part split up
+    // or torn up will remain unique"): the file is read with every duplicate part name made unique - Material2,
+    // Material2_2, Material2_3 ... in node order - so the list shows those names, the marks and letters are kept
+    // under them, and every child a Split, Tear or Fuse makes takes its name from them. The source file on disk is
+    // never touched; node indices do not change.
+    static byte[] UniqueBytes(string path)
+    {
+        byte[] bytes = File.ReadAllBytes(path);
+        var un = GlbDisconnectedParts.UniqueNodeNames(bytes);
+        return un.Changed ? un.Bytes : bytes;
+    }
     static string MarksSidecarPath(string glb) => string.IsNullOrEmpty(glb) ? null : glb + ".marks.txt";
     void WriteMarksSidecar(string glb)
     {
@@ -1194,7 +1205,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         try
         {
             var groups = rows.Where(r => !string.IsNullOrEmpty(r.fuse)).GroupBy(r => r.fuse).OrderBy(g => g.Key).ToList();
-            byte[] bytes = File.ReadAllBytes(srcFile);
+            byte[] bytes = UniqueBytes(srcFile);   // the names the rows were probed with
             var lines = new List<string>(); int done = 0;
             var report = new List<WorkshopRules.FuseGroupReport>();   // the evidence goes to a file, not the status box (711 parts in six groups made the status unreadable — user 2026-09-16)
             List<GlbDisconnectedParts.Result> results = null;   // one per group, in letter order; the output sidecar below names each shell from them
@@ -1279,6 +1290,8 @@ public abstract class ModelWorkshopWindow : EditorWindow
             var toTear = new HashSet<int>(rows.Where(r => r.tear).Select(r => r.nodeIndex));
             var toDelete = new HashSet<int>(rows.Where(r => r.delete).Select(r => r.nodeIndex));
             byte[] bytes = File.ReadAllBytes(srcFile);
+            string renamedLine = null;   // unique names FIRST: the rows were probed with them, and the children take theirs from them
+            { var un = GlbDisconnectedParts.UniqueNodeNames(bytes); if (un.Changed) { bytes = un.Bytes; renamedLine = un.Details[0]; } }
             GlbDisconnectedParts.Result result = picked.Count > 0 ? GlbDisconnectedParts.Split(bytes, picked, mergePct / 100.0) : null;
             if (result != null && result.Changed) bytes = result.Bytes;
             // TEAR (2026-09-25), after the split: both only append nodes, so the marked indices still name their parts
@@ -1290,12 +1303,6 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 var rr = GlbDisconnectedParts.RemoveMeshes(bytes, toDelete);
                 foreach (var w in rr.Warnings) Debug.LogWarning("[Workshop] delete: " + w);
                 if (rr.Changed) { bytes = rr.Bytes; deletedLine = rr.Details[0]; }
-            }
-            // UNIQUE NAMES (2026-09-25): whatever else happened, every part leaves the Cutter with a name of its own
-            string renamedLine = null;
-            {
-                var un = GlbDisconnectedParts.UniqueNodeNames(bytes);
-                if (un.Changed) { bytes = un.Bytes; renamedLine = un.Details[0]; }
             }
             if ((result == null || !result.Changed) && (torn == null || !torn.Changed) && deletedLine == null && renamedLine == null) { status = "Nothing changed — the checked parts produced no split, no tear, nothing was deleted and every part already had a unique name (see warnings in the console)."; return; }
             File.WriteAllBytes(outGlb, bytes);

@@ -27,14 +27,23 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   frame, the fuse's view from above) skip a file's line and point primitives instead of giving up: the Wespe's
   source file carries rigging lines.
 
-- **Model Cutter: every part leaves the Cutter with a unique name** (user: "all parts need to get a unique name so
-  that after cutting they don't start to conflict"). A game rip names every part after its material — the Wespe
-  has ten nodes called "Material2" — and everything downstream that names a part (the Lab's rows and roles, the
-  sidecars' name+index lines, a recipe) then fits several. On every Split, Tear or Delete the output's mesh nodes
-  are renamed where they collide: the first of a name keeps it, the next become Material2_2, Material2_3 … in node
-  order, never colliding with a name already in the file. Names only; the status says what was renamed, and a file
-  that is already unique leaves the Cutter unchanged. Test: two "Deck" parts and an existing "Deck_2" — the second
-  Deck becomes Deck_3, the rest keep their names, and the result is left alone on a second pass.
+- **Model Workshop: every part has a unique name from the moment it is probed** (user: "all parts need to get a
+  unique name so that after cutting they don't start to conflict" — "give all parts that are not unique a unique
+  name so that any part split up or torn up will remain unique"). A game rip names every part after its material;
+  the Wespe has ten nodes called "Material2", and everything that names a part — the Lab's roles, the sidecars'
+  name+index lines, a recipe — then fits several at once. The Cutter and the Fuser now read the file with every
+  duplicate made unique first — Material2, Material2_2, Material2_3 … in node order, never colliding with a name
+  already in the file — so the list shows those names, marks and letters are kept under them, every child a
+  Split, Tear or Fuse makes takes its name from them (Material2_3_Part_001), and the output carries them. The
+  source file is never touched and node indices do not change; a file already unique is read as it is. Test: two
+  "Deck" parts and an existing "Deck_2" — the second Deck becomes Deck_3, a second pass changes nothing.
+
+- **Vehicle Lab: the classification follows the cut** (user: "I'm getting tired of having to reclassify all the
+  time after a split"). A re-Probe keeps roles by part name, so a part the Cutter made from another — X_Part_001,
+  X_CutA, or X_3 after the unique renaming — used to come back as Default and had to be classified again. Now a
+  part with no role of its own takes the role kept under its nearest ancestor name (Material2_3_Part_001_2 →
+  Material2_3_Part_001 → Material2_3 → Material2): load the model's recipe, switch to the cut file, Probe, and the
+  pieces carry their parent's classification. Test: the ancestor names, nearest first, and the names that have none.
 
 - **Model Workshop: the highlighted part stays in view when the filter changes** (user: "when you have selected a
   part while a filter is active, and then disable the filter, I expect the selected part to remain selected and in
