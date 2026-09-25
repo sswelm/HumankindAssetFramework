@@ -592,6 +592,8 @@ set up. Blender is auto-detected under Program Files; a winget/Steam/portable in
 | *Do the Blender + animation options work? (real rigs)* | **Yes** | SKIP — `"Blender was not found"` |
 | *Is rig conversion still correct? (control rig)* | **Yes** | SKIP — names Blender (or, pre-0.4.0, the missing scripts) |
 | *every converted model* / *golden snapshot* | **Yes** | SKIP — and also skip while no such models exist in your pack |
+| *Does the Model Workshop still split, tear and fuse?* | **No** | runs in full on every recipe's source GLB (SKIP while no Vehicle Lab recipe names a `.glb`) |
+| *Does the Vehicle Lab still generate?* (representatives / every recipe) | **Yes** | SKIP — and also skip while you have no saved recipes |
 
 The same boundary applies to **baking itself**: a static model at `targetTris 0` with no strip-parts — including the
 whole projectile path — needs **no Blender at all**, from `.glb`, `.gltf`, or `.obj`. Tri-reduction, part-stripping,

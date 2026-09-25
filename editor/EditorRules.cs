@@ -10,6 +10,7 @@
 // facts, the kernel decides.
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 /// <summary>Bake-pipeline decisions (UniversalBaker calls these; BakerRulesTests locks them).</summary>
 public static class BakerRules
@@ -740,5 +741,76 @@ public static class WorkshopRules
                 return baseName.Substring(0, at) + suffix + (n + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
         return baseName + suffix;
+    }
+}
+
+// BAKE TESTS' GOLDEN RULES (2026-09-25, user: "could you add fuse and split and extra generate test to the bake test"):
+// the pure half of the Model Workshop and Vehicle Lab rows in Tools > HAF > Bake Tests - what a rig run's snapshot is,
+// how two snapshots compare, which recipes are the representatives - so the part that DECIDES is unit-tested and the
+// Unity-facing part (WorkshopGateTest, VehicleLabGateTest) only runs and reports.
+public static class BakeGoldenRules
+{
+    /// The deterministic lines of a Vehicle Lab rig run: every line the script prints starting "VEHICLE" except the
+    /// timing lines, with the output path cut off the RIG DONE line (the Bake Tests write to a throwaway path).
+    /// Trailing whitespace and CR dropped. Never null.
+    public static string[] LabSnapshotLines(string stdout)
+    {
+        var keep = new List<string>();
+        foreach (string raw in (stdout ?? "").Replace("\r\n", "\n").Split('\n'))
+        {
+            string line = raw.TrimEnd();
+            if (!line.StartsWith("VEHICLE", StringComparison.Ordinal) || line.StartsWith("VEHICLE timing:", StringComparison.Ordinal)) continue;
+            if (line.StartsWith("VEHICLE RIG DONE", StringComparison.Ordinal))
+            {
+                int arrow = line.LastIndexOf(" -> ", StringComparison.Ordinal);
+                if (arrow > 0) line = line.Substring(0, arrow);
+            }
+            keep.Add(line);
+        }
+        return keep.ToArray();
+    }
+
+    /// The bone total from "VEHICLE armature: N bones total ...", or -1 when no such line is there.
+    public static int ArmatureBones(IEnumerable<string> lines)
+    {
+        foreach (string line in lines ?? new string[0])
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(line ?? "", @"^VEHICLE armature: (\d+) bones");
+            if (m.Success && int.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int n)) return n;
+        }
+        return -1;
+    }
+
+    /// null when the two snapshots are the same lines (trailing whitespace, CR and empty lines ignored); otherwise one
+    /// sentence naming the FIRST difference - its line number, the expected and the actual text - and the line-count
+    /// delta when the two differ in length.
+    public static string Diff(IEnumerable<string> golden, IEnumerable<string> got)
+    {
+        var g = Norm(golden); var t = Norm(got);
+        string counts = g.Count != t.Count ? $" ({g.Count} golden line(s), {t.Count} now)" : "";
+        int n = Math.Min(g.Count, t.Count);
+        for (int i = 0; i < n; i++)
+            if (g[i] != t[i]) return $"line {i + 1}: expected '{g[i]}' but got '{t[i]}'" + counts;
+        if (g.Count > t.Count) return $"line {n + 1}: expected '{g[n]}' but the run ended" + counts;
+        if (t.Count > g.Count) return $"line {n + 1}: unexpected '{t[n]}'" + counts;
+        return null;
+    }
+    static List<string> Norm(IEnumerable<string> lines) =>
+        (lines ?? new string[0]).Select(l => (l ?? "").TrimEnd('\r', ' ', '\t')).Where(l => l.Length > 0).ToList();
+
+    /// The Vehicle Lab rows' REPRESENTATIVE recipes: for each feature, in this order - oars, a gun, wheels, sails, a
+    /// rotor (main or tail), tracks - the first recipe (in the given order) marking it that is not already picked.
+    /// `rolesOf` gives the role names a recipe marks (VehicleLabWindow.ReadRecipe).
+    public static List<string> Representatives(IEnumerable<string> recipes, Func<string, ISet<string>> rolesOf)
+    {
+        var order = (recipes ?? new string[0]).ToList();
+        var roles = order.ToDictionary(r => r, r => rolesOf(r) ?? new HashSet<string>());
+        var picked = new List<string>();
+        foreach (var feature in new[] { new[] { "Oar" }, new[] { "Gun" }, new[] { "Wheel" }, new[] { "Sail" }, new[] { "Rotor", "TailRotor" }, new[] { "Caterpillar" } })
+        {
+            string hit = order.FirstOrDefault(r => !picked.Contains(r) && feature.Any(f => roles[r].Contains(f)));
+            if (hit != null) picked.Add(hit);
+        }
+        return picked;
     }
 }

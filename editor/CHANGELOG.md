@@ -5,6 +5,25 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Bake Tests: the Model Workshop and the Vehicle Lab have rows** (user: "could you add fuse and split and extra
+  generate test to the bake test"). Neither tool was exercised by any row: the Workshop's split/tear/fuse ran only on
+  synthetic fixtures in the C# suite, and nothing automated ran `vehicle_rig.py` end to end. Three rows now:
+  *Does the Model Workshop still split, tear and fuse?* takes every Vehicle Lab recipe's source GLB in memory
+  (nothing on disk touched), splits every multi-island node (no merge, and the 1 % default), tears the smallest
+  multi-island node, fuses the largest nodes up to 150k triangles into one shell, and checks no triangle is lost,
+  every split child is one island, node names stay unique, the shell is in the output with its reported count and
+  kept at least half the triangles; then a golden diff of the counts (`Tools/workshop_golden/<file>.txt`). Drilled
+  outside Unity on all 18 recipe sources: every invariant holds, about six minutes in all; a tear of EVERY node was
+  cut from the row after it took 374 s on the frigate alone (a tear labels every vertex against every island's
+  mirror — the largest node alone 215 s, the smallest 3 s). *Does the Vehicle Lab still generate?* runs Generate
+  headlessly — the SAME Vehicleize the button runs, in a window instance that is never shown: no dialogs, no
+  preview, no clipboard, every file under `Logs/bake_tests/lab` — on the representatives (the first recipe marking
+  oars, a gun, wheels, sails, a rotor, tracks) or on every recipe, requires the completion marker, the output GLB and
+  an armature under 256 bones, and diffs the run's summary lines (bones, clusters, clip frames, reduce tiers) against
+  `Tools/lab_golden/<recipe>.txt`. A missing golden is captured (reported, not a pass); delete it to re-bless an
+  intended change; a mismatch leaves a candidate next to the report. The pure half (the snapshot filter, the diff,
+  the representative pick) is unit-tested.
+
 - **Vehicle Lab: a Window role with its own reduce dial** (user: "add the reducable part type Window"). Glazing -
   portholes, bridge windows, windshields, skylights - is a role of its own with a **Window reduce (%)** slider in
   Vertices control (enabled while Window parts are marked, in the reduce summary, the Verify projection, the recipe;

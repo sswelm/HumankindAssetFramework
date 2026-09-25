@@ -421,6 +421,14 @@ public class VehicleLabWindow : EditorWindow
     const string RecipesDir = "Assets/FactorySource/VehicleLab/Recipes";
     static readonly string[] AxisOptions = { "Auto (thinnest extent = axle, per wheel)", "X", "Y", "Z" };
     string status = "";
+    // BAKE TESTS (2026-09-25, user: "add fuse and split and extra generate test to the bake test"): a headless instance
+    // drives the SAME Vehicleize the Generate button runs - no dialogs, no preview, no clipboard, every file under a
+    // project-relative work dir outside Assets/ - and hands the rig script's stdout back for the golden diff
+    // (VehicleLabGateTest). Nothing else reads these.
+    bool headless;
+    string headlessDir = "";      // project-relative (like PrevDir's Assets/ path): the names files, the preview FBX, the output
+    string lastStdout = "";       // the last Blender run's stdout, for the headless caller
+    string PrevDir => headless ? headlessDir : "Assets/FactorySource/VehicleLab";
     string lastOutGlb = "";
 
     // turntable preview state
@@ -1462,7 +1470,7 @@ public class VehicleLabWindow : EditorWindow
         var newParts = new List<Part>(); var newBoneParts = new List<Part>();
         // probe also exports a preview FBX of the SPLIT model, so part rows can zoom/highlight in the turntable
         string projRoot = Directory.GetParent(Application.dataPath).FullName;
-        string prevDir = "Assets/FactorySource/VehicleLab";
+        string prevDir = PrevDir;   // Assets/FactorySource/VehicleLab, or the Bake Tests' work dir while headless
         Directory.CreateDirectory(Path.Combine(projRoot, prevDir));
         string prevRel = prevDir + "/" + Path.GetFileNameWithoutExtension(srcFile) + "_probe.fbx";
         string prevFull = Path.Combine(projRoot, prevRel).Replace('\\', '/');
@@ -2169,7 +2177,7 @@ public class VehicleLabWindow : EditorWindow
         }
         // OVERWRITE GUARD: the output path is explicit and user-owned — an existing file (e.g. a HAND-MADE rig like
         // the original Ehrhardt_Spin.glb) is never clobbered without an explicit yes.
-        if (File.Exists(outGlb) && !EditorUtility.DisplayDialog("Overwrite existing file?",
+        if (!headless && File.Exists(outGlb) && !EditorUtility.DisplayDialog("Overwrite existing file?",
                 $"'{outGlb}' already exists.\n\nOverwrite it? (If this is a hand-made rig, pick a different output path instead.)",
                 "Overwrite", "Cancel"))
         { status = "Cancelled — pick a different Output GLB path."; return; }
@@ -2177,7 +2185,7 @@ public class VehicleLabWindow : EditorWindow
         string baseName = Path.GetFileNameWithoutExtension(outGlb);
         lastOutGlb = outGlb.Replace('\\', '/');
         string projRoot = Directory.GetParent(Application.dataPath).FullName;
-        string prevDir = "Assets/FactorySource/VehicleLab";
+        string prevDir = PrevDir;   // Assets/FactorySource/VehicleLab, or the Bake Tests' work dir while headless
         Directory.CreateDirectory(Path.Combine(projRoot, prevDir));
         string prevRel = prevDir + "/" + baseName + "_preview.fbx";
         string prevFull = Path.Combine(projRoot, prevRel).Replace('\\', '/');
@@ -2284,11 +2292,14 @@ public class VehicleLabWindow : EditorWindow
             Debug.LogError("[VehicleLab] rig run did not complete. Full output:\n" + stdout);
             return;
         }
-        AssetDatabase.ImportAsset(prevRel, ImportAssetOptions.ForceUpdate);
-        var imp = AssetImporter.GetAtPath(prevRel) as ModelImporter;
-        if (imp != null && (imp.animationType != ModelImporterAnimationType.Generic || !imp.importAnimation))
-        { imp.animationType = ModelImporterAnimationType.Generic; imp.importAnimation = true; imp.SaveAndReimport(); }
-        BuildPreview(prevRel);
+        if (!headless)   // the preview is the window's; a Bake Tests run has no window and writes nothing under Assets/
+        {
+            AssetDatabase.ImportAsset(prevRel, ImportAssetOptions.ForceUpdate);
+            var imp = AssetImporter.GetAtPath(prevRel) as ModelImporter;
+            if (imp != null && (imp.animationType != ModelImporterAnimationType.Generic || !imp.importAnimation))
+            { imp.animationType = ModelImporterAnimationType.Generic; imp.importAnimation = true; imp.SaveAndReimport(); }
+            BuildPreview(prevRel);
+        }
         // surface the BONE TOTAL prominently (user request): the budget lines are the difference between a
         // clean unit and the 256-wall / twitch-ceiling diseases — they were buried in the Console until now
         string bones = stdout.Split('\n').FirstOrDefault(l => l.Contains("VEHICLE armature:"))?.Trim() ?? "";
@@ -2308,7 +2319,7 @@ public class VehicleLabWindow : EditorWindow
                      || l.Contains("*** WARNING") || l.Contains("DEPLOY gun: SKIPPED"))
             .Select(l => l.Trim()));
         status = $"DONE → {lastOutGlb}\n{bones}\n{hybrid}\n{done}\n{muzzle}\n\nNext: Factory ▸ Browse this GLB, Size as usual; " + bakeRecipe;
-        EditorGUIUtility.systemCopyBuffer = lastOutGlb;   // ready to paste into the Factory's Browse field
+        if (!headless) EditorGUIUtility.systemCopyBuffer = lastOutGlb;   // ready to paste into the Factory's Browse field
     }
 
     // The SECOND-MODEL merge argument — TAGGED (merge2=path|off|rot|sx,sy,sz), scanned by the rig script rather
@@ -2395,6 +2406,48 @@ public class VehicleLabWindow : EditorWindow
         return $" \"flagfold={flagFoldDeg.ToString("0.#", inv)}|{Mathf.Max(1, flagFoldFrames)}\"";
     }
 
+    // THE BAKE TESTS' ENTRY (2026-09-25): the saved recipe's source model and the roles it marks, by name - the
+    // representative pick and the Workshop row read them without a window (the DTO is private to this one).
+    internal static bool ReadRecipe(string recipePath, out string srcFile, out HashSet<string> roles)
+    {
+        srcFile = ""; roles = new HashSet<string>(StringComparer.Ordinal);
+        try
+        {
+            var r = JsonUtility.FromJson<Recipe>(File.ReadAllText(recipePath));
+            if (r == null || r.parts == null) return false;
+            srcFile = (r.srcFile ?? "").Trim();
+            var active = r.useSourceRig && r.boneParts != null && r.boneParts.Count > 0 ? r.boneParts : r.parts;
+            foreach (var p in active) roles.Add(p.role.ToString());
+            return true;
+        }
+        catch { return false; }
+    }
+
+    // Generate, headless: load the recipe into a window instance that is never shown, point its output at
+    // <project>/<workDirRel>/<recipe>_Spin.glb, run the SAME Vehicleize the button runs, hand back the rig script's
+    // stdout and the status line. True when the script's completion marker and the file both arrived (the button's
+    // own success rule). A cancel from the Bake Tests' bar propagates as OperationCanceledException.
+    internal static bool GenerateHeadless(string recipePath, string workDirRel, out string stdout, out string statusText, out string outGlbPath)
+    {
+        stdout = ""; statusText = ""; outGlbPath = "";
+        var w = CreateInstance<VehicleLabWindow>();
+        try
+        {
+            w.headless = true; w.headlessDir = (workDirRel ?? "Logs/bake_tests/lab").Replace('\\', '/').TrimEnd('/');
+            w.LoadRecipeFromPath(recipePath);
+            if (!w.recipeReadThisSession) { statusText = w.status; return false; }
+            string projRoot = Directory.GetParent(Application.dataPath).FullName;
+            Directory.CreateDirectory(Path.Combine(projRoot, w.headlessDir));
+            outGlbPath = Path.Combine(projRoot, w.headlessDir, Path.GetFileNameWithoutExtension(recipePath) + "_Spin.glb").Replace('\\', '/');
+            try { if (File.Exists(outGlbPath)) File.Delete(outGlbPath); } catch { }
+            w.outGlb = outGlbPath;
+            w.Vehicleize();
+            stdout = w.lastStdout; statusText = w.status;
+            return w.status.StartsWith("DONE", StringComparison.Ordinal) && File.Exists(outGlbPath);
+        }
+        finally { try { w.DestroyPreview(); } catch { } DestroyImmediate(w); }
+    }
+
     bool RunBlender(string args, out string stdout)
     {
         stdout = "";
@@ -2403,7 +2456,7 @@ public class VehicleLabWindow : EditorWindow
         if (!File.Exists(script)) { status = "Tools/vehicle_rig.py missing."; return false; }
         try
         {
-            EditorUtility.DisplayProgressBar("Vehicle Lab", "Running Blender…", 0.4f);
+            if (!headless) EditorUtility.DisplayProgressBar("Vehicle Lab", "Running Blender…", 0.4f);   // headless: the Bake Tests' own bar is up
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var p = new System.Diagnostics.Process();
             p.StartInfo.FileName = UniversalBaker.FindBlender();
@@ -2412,6 +2465,7 @@ public class VehicleLabWindow : EditorWindow
             p.StartInfo.RedirectStandardOutput = true; p.StartInfo.RedirectStandardError = true;
             p.Start();
             if (!UniversalBaker.RunBounded(p, 300000, out stdout, out string stderr)) { status = "Blender timed out (5 min)."; return false; }
+            lastStdout = stdout;
             if (stdout.Contains("VEHICLE ERROR"))
             { status = stdout.Split('\n').FirstOrDefault(l => l.Contains("VEHICLE ERROR")) ?? "Blender step failed."; Debug.LogError("[VehicleLab]\n" + stdout + "\n--- stderr ---\n" + stderr); return false; }
             sw.Stop();
@@ -2424,8 +2478,9 @@ public class VehicleLabWindow : EditorWindow
             Debug.Log($"[VehicleLab] {headline}   ({sw.Elapsed.TotalSeconds:0.0}s)\n" + string.Join("\n", lines));
             return true;
         }
+        catch (OperationCanceledException) when (headless) { throw; }   // a Bake Tests cancel (RunBounded killed the step) passes through to the runner
         catch (Exception e) { status = "Blender run failed: " + e.Message; return false; }
-        finally { EditorUtility.ClearProgressBar(); }
+        finally { if (!headless) EditorUtility.ClearProgressBar(); }
     }
 
     // ---- turntable preview: the imported preview FBX rendered as a REAL instance (AddSingleGO — Law 4: never
