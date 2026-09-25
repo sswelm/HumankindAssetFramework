@@ -393,6 +393,50 @@ public static class WorkshopRules
         return outLines.ToArray();
     }
 
+    // GROUP NAMES (2026-09-25, user: "when you have selected a group, it should be possible to name the group in an
+    // additional field, which also gets visible in the combo list"): a fuse group's name rides in the groupings
+    // sidecar as "#name|F|deck" - a comment to every reader before this one, so an old window ignores it - and names
+    // the fused shell: Fused_F_deck instead of Fused_F_<first part>.
+    public static string GroupNameLine(string letter, string name) => "#name|" + letter + "|" + (name ?? "").Trim();
+    public static Dictionary<string, string> ParseGroupNames(IEnumerable<string> lines)
+    {
+        var names = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (string raw in lines ?? new string[0])
+        {
+            string line = raw?.Trim() ?? "";
+            if (!line.StartsWith("#name|", StringComparison.Ordinal)) continue;
+            string rest = line.Substring("#name|".Length); int bar = rest.IndexOf('|');
+            if (bar != 1) continue;
+            string letter = rest.Substring(0, 1), name = rest.Substring(bar + 1).Trim();
+            if (letter[0] < 'A' || letter[0] > 'Z' || name.Length == 0) continue;
+            names[letter] = name;
+        }
+        return names;
+    }
+    // the fused shell's name: the group's name when it has one (spaces to underscores, no '|'), else the first part's
+    public static string ShellName(string letter, string groupName, string firstPart)
+    {
+        string g = (groupName ?? "").Trim().Replace('|', '_');
+        g = System.Text.RegularExpressions.Regex.Replace(g, @"\s+", "_");
+        return "Fused_" + letter + "_" + (g.Length > 0 ? g : firstPart);
+    }
+
+    // the "#name|letter|name" lines for the letters a set of sidecar lines carries (review of PR #87: the fused
+    // output's sidecar wrote the letters alone, and a named group lost its name when the fused file was reopened)
+    public static List<string> GroupNameLinesFor(IEnumerable<string> lines, Func<string, string> nameOf)
+    {
+        var letters = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (string raw in lines ?? new string[0])
+        {
+            string line = raw?.Trim() ?? ""; int bar = line.IndexOf('|');
+            if (line.StartsWith("#", StringComparison.Ordinal) || bar != 1) continue;
+            letters.Add(line.Substring(0, 1));
+        }
+        var outLines = new List<string>();
+        foreach (string l in letters) { string nm = nameOf?.Invoke(l); if (!string.IsNullOrWhiteSpace(nm)) outLines.Add(GroupNameLine(l, nm)); }
+        return outLines;
+    }
+
     public static string SidecarLine(string letter, string name, int nodeIndex) =>
         letter + "|" + nodeIndex.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" + name;
 

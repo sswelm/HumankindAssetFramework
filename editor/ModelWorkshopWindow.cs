@@ -73,6 +73,14 @@ public abstract class ModelWorkshopWindow : EditorWindow
     [SerializeField] float minFlatPct = 0f;   // 0 = off — hide parts whose LEVEL-surface share (% of area within 30° of horizontal) is below this: the Lab's deck finder, brought over 2026-09-18 ("group D is still missing part of the deck")
     Dictionary<int, float> flatShare; GameObject flatShareFor;   // per-NODE level-surface share over the preview meshes (the preview is one object per node since 2026-09-19 — no name aliasing needed)
     [SerializeField] string showOnlyLetter = "";   // "Show only" can also be ONE fuse group (user 2026-09-16): the popup lists every letter in use after the fixed kinds
+    [Serializable] class GroupLabel { public string letter, name; }
+    [SerializeField] List<GroupLabel> groupLabels = new List<GroupLabel>();   // GROUP NAMES (2026-09-25): letter -> the user's name for the group; saved in the groupings sidecar, shown in the combo, on the fused shell
+    string GroupName(string letter) => groupLabels.FirstOrDefault(g => g.letter == letter)?.name ?? "";
+    void SetGroupName(string letter, string name)
+    {
+        groupLabels.RemoveAll(g => g.letter == letter);
+        if (!string.IsNullOrWhiteSpace(name)) groupLabels.Add(new GroupLabel { letter = letter, name = name.Trim() });
+    }
     static readonly string[] ShowOnlyOptions = { "None (all parts)", "Checked for Split", "In a fuse group", "Not in a fuse group", "More than one island", "Already whole", "Skipped by the analyzer", "Marked for deletion" };
     // DISTANCE MERGE (2026-09-06, the 602-island rope): topology alone shreds segmented geometry into hundreds
     // of 3-vert parts millimetres apart. Islands within this % of a part's own diagonal count as ONE part, so
@@ -170,7 +178,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             if (GUILayout.Button("…", GUILayout.Width(28)))
             {
                 string p = EditorUtility.OpenFilePanel("Choose the source GLB", string.IsNullOrEmpty(srcFile) ? "D:/3DModels" : Path.GetDirectoryName(srcFile), "glb");
-                if (!string.IsNullOrEmpty(p)) { srcFile = p.Replace('\\', '/'); outGlbAuto = true; rows.Clear(); DestroyPreview(); }
+                if (!string.IsNullOrEmpty(p)) { srcFile = p.Replace('\\', '/'); outGlbAuto = true; rows.Clear(); groupLabels.Clear(); DestroyPreview(); }
             }
         }
         // AUTO-DERIVED OUTPUT that TRACKS the source (external review of PR #22, 2026-09-07): the old
@@ -215,7 +223,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         // the recount above (clearing `rows` mid-pass is the control-count exception this window documents).
         if (rows.Count > 0 && Event.current.type == EventType.Layout && GUIUtility.hotControl == 0 && !SamePath(srcFile, probedFile))
         {
-            rows.Clear(); outGlbAuto = true; selectedIdx = -1; selectedRow = ""; DestroyPreview();
+            rows.Clear(); groupLabels.Clear(); outGlbAuto = true; selectedIdx = -1; selectedRow = ""; DestroyPreview();
             status = "Source file changed — press Probe parts to analyze the new file.";
         }
 
@@ -310,12 +318,21 @@ public abstract class ModelWorkshopWindow : EditorWindow
             // each window lists its own kinds (the Splitter: checked / islands; the Fuser: groups / islands, then every letter in use)
             int[] kinds = Fusing ? new[] { 0, 2, 3, 7, 4, 5, 6 } : new[] { 0, 1, 7, 4, 5, 6 };
             if (Array.IndexOf(kinds, showOnly) < 0) showOnly = 0;
-            var showOptions = kinds.Select(k => ShowOnlyOptions[k]).Concat(Fusing ? lettersInUse.Select(l => $"Group ⊕{l}  ({rows.Count(r => r.fuse == l)} part(s))") : Enumerable.Empty<string>()).ToArray();
+            var showOptions = kinds.Select(k => ShowOnlyOptions[k]).Concat(Fusing ? lettersInUse.Select(l => $"Group ⊕{l}{(GroupName(l).Length > 0 ? " — " + GroupName(l) : "")}  ({rows.Count(r => r.fuse == l)} part(s))") : Enumerable.Empty<string>()).ToArray();
             int showIdx = Fusing && !string.IsNullOrEmpty(showOnlyLetter) && lettersInUse.Contains(showOnlyLetter) ? kinds.Length + lettersInUse.IndexOf(showOnlyLetter) : Array.IndexOf(kinds, showOnly);
             int picked = EditorGUILayout.Popup(new GUIContent("Show only", Fusing ? "Filter the list to one kind of row, or to ONE fuse group (every letter in use is listed). Marks on hidden rows are kept."
                                                                                   : "Filter the list to one kind of row. Checks on hidden rows are kept."), showIdx, showOptions);
             if (picked >= kinds.Length) { showOnly = 0; showOnlyLetter = lettersInUse[picked - kinds.Length]; }
             else { showOnly = kinds[picked]; showOnlyLetter = ""; }
+            // THE GROUP'S NAME (2026-09-25, user: "when you have selected a group, it should be possible to name the group in
+            // an additional field, which also gets visible in the combo list"): shown while "Show only" is one group; saved
+            // with the groupings (Save groups, and every Fuse), shown in the combo, and it names the fused shell
+            if (Fusing && !string.IsNullOrEmpty(showOnlyLetter))
+            {
+                string was = GroupName(showOnlyLetter);
+                string now = EditorGUILayout.TextField(new GUIContent($"Group ⊕{showOnlyLetter} name", "A name for this group: shown in the 'Show only' list, saved with the groupings, and the fused shell is named after it (Fused_" + showOnlyLetter + "_<name>). Leave empty for the first part's name."), was);
+                if (now != was) SetGroupName(showOnlyLetter, now);
+            }
             bool Passes(Row r)
             {
                 if (!Fusing && hideWhole && r.islands <= 1 && r.blocked == null) return false;   // the Splitter's toggle; the Fuser has no use for island counts
@@ -1151,7 +1168,8 @@ public abstract class ModelWorkshopWindow : EditorWindow
             string path = FuseSidecarPath(glb); if (path == null) return;
             var lines = rows.Where(r => !string.IsNullOrEmpty(r.fuse) && !string.IsNullOrEmpty(r.node)).Select(r => WorkshopRules.SidecarLine(r.fuse, r.node, r.nodeIndex)).ToArray();
             if (lines.Length == 0) { if (File.Exists(path)) File.Delete(path); return; }
-            File.WriteAllLines(path, new[] { WorkshopRules.SidecarHeader }.Concat(lines));   // v2: header, then letter|index|name (the name last, so a '|' in it is nothing to guess)
+            var named = GroupNameLines(rows.Select(r => r.fuse));
+            File.WriteAllLines(path, new[] { WorkshopRules.SidecarHeader }.Concat(named).Concat(lines));   // v2: header, then #name|letter|name for the named groups in use, then letter|index|name (the name last, so a '|' in it is nothing to guess)
         }
         catch (Exception e) { Debug.LogWarning("[Workshop] could not write the fuse groupings sidecar: " + e.Message); }
     }
@@ -1172,12 +1190,15 @@ public abstract class ModelWorkshopWindow : EditorWindow
             var nameOf = parts.ToDictionary(q => q.NodeIndex, q => q.NodeName);
             var lines = transferred.OrderBy(kv => kv.Key).Where(kv => nameOf.ContainsKey(kv.Key)).Select(kv => WorkshopRules.SidecarLine(kv.Value, nameOf[kv.Key], kv.Key)).ToArray();
             if (lines.Length == 0) { if (File.Exists(path)) File.Delete(path); return; }
-            File.WriteAllLines(path, new[] { WorkshopRules.SidecarHeader }.Concat(lines));
+            File.WriteAllLines(path, new[] { WorkshopRules.SidecarHeader }.Concat(GroupNameLines(transferred.Values)).Concat(lines));
         }
         catch (Exception e) { Debug.LogWarning("[Workshop] could not write the output's fuse groupings sidecar: " + e.Message); }
     }
     // Marks `target` from the sidecar; returns how many rows got a letter, `refused` = lines that fit no single row
     // (each already logged as a warning). Rows the file does not mention are left as they are.
+    // the "#name|letter|name" lines for the named groups among `lettersInUse`, in letter order
+    IEnumerable<string> GroupNameLines(IEnumerable<string> lettersInUse) =>
+        lettersInUse.Where(l => !string.IsNullOrEmpty(l)).Distinct().OrderBy(l => l).Where(l => GroupName(l).Length > 0).Select(l => WorkshopRules.GroupNameLine(l, GroupName(l)));
     int ApplyFuseSidecar(List<Row> target, out int refused)
     {
         refused = 0;
@@ -1186,6 +1207,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             string path = FuseSidecarPath(srcFile);
             if (path == null || !File.Exists(path)) return 0;
             var problems = new List<string>();
+            foreach (var kv in WorkshopRules.ParseGroupNames(File.ReadAllLines(path))) SetGroupName(kv.Key, kv.Value);   // the groups' names come back with their letters
             var letters = WorkshopRules.ResolveFuseSidecar(WorkshopRules.MigrateSidecarNames(File.ReadAllLines(path), target.Select(r => (r.nodeIndex, r.fileName, r.node)).ToList(), problems), target.Select(r => new KeyValuePair<int, string>(r.nodeIndex, r.node)).ToList(), problems);
             foreach (var r in target) if (letters.TryGetValue(r.nodeIndex, out string letter)) r.fuse = letter;
             foreach (string p in problems) Debug.LogWarning("[Workshop] fuse groupings sidecar: " + p);
@@ -1220,7 +1242,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 // fused parts are appended in the same order chaining would, so node indices and names come out the same
                 // the group letter leads the fused part's name — "Fused_B_Object_54" — so the Lab's list shows at a glance which
                 // group a shell came from and the fused parts sort together (user 2026-09-17)
-                var jobs = groups.Select(g => new GlbDisconnectedParts.FuseJob { NodeIndices = g.Select(r => r.nodeIndex).ToList(), Name = "Fused_" + g.Key + "_" + g.First().node, CheckMirrored = checkMirrored }).ToList();   // row order: the first becomes the fused part's name
+                var jobs = groups.Select(g => new GlbDisconnectedParts.FuseJob { NodeIndices = g.Select(r => r.nodeIndex).ToList(), Name = WorkshopRules.ShellName(g.Key, GroupName(g.Key), g.First().node), CheckMirrored = checkMirrored }).ToList();   // the group's name when it has one, else the first row's
                 int total = jobs.Count; string letters = string.Join(" ", groups.Select(g => "⊕" + g.Key));
                 EditorUtility.DisplayProgressBar("Model Workshop", $"Fusing {total} group(s) in parallel: {letters}…", 0.2f);
                 byte[] fused = GlbDisconnectedParts.FuseGroups(bytes, jobs, weldPermille / 1000.0, out results,
@@ -1257,7 +1279,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 var byLetter = new Dictionary<string, KeyValuePair<int, string>>();
                 for (int gi = 0; gi < groups.Count; gi++) byLetter[groups[gi].Key] = new KeyValuePair<int, string>(results[gi].FusedNodeIndex, results[gi].FusedNodeName);
                 var outLines = WorkshopRules.FusedOutputSidecarLines(groups.Select(g => new KeyValuePair<string, IList<KeyValuePair<int, string>>>(g.Key, g.Select(r => new KeyValuePair<int, string>(r.nodeIndex, r.node)).ToList())), byLetter);
-                if (outSidecar != null) { if (outLines.Count > 0) File.WriteAllLines(outSidecar, new[] { WorkshopRules.SidecarHeader }.Concat(outLines)); else if (File.Exists(outSidecar)) File.Delete(outSidecar); }
+                if (outSidecar != null) { if (outLines.Count > 0) File.WriteAllLines(outSidecar, new[] { WorkshopRules.SidecarHeader }.Concat(WorkshopRules.GroupNameLinesFor(outLines, GroupName)).Concat(outLines)); else if (File.Exists(outSidecar)) File.Delete(outSidecar); }   // the groups' names ride along (review of PR #87)
             }
             catch (Exception e) { Debug.LogWarning("[Workshop] could not write the output's fuse groupings sidecar: " + e.Message); }
             string reportPath = outGlb + ".fuse-report.txt";
