@@ -15,6 +15,22 @@ public class WorkshopRulesTests
     }
 
     [Fact]
+    public void A_group_name_rides_in_the_sidecar_as_a_comment_and_names_the_shell()
+    {
+        // "#name|F|deck" is a comment to every earlier reader (the resolver skips '#'), and comes back by letter
+        Assert.Equal("#name|F|deck", WorkshopRules.GroupNameLine("F", "  deck "));
+        var names = WorkshopRules.ParseGroupNames(new[] { WorkshopRules.SidecarHeader, "#name|F|deck", "#name|G|fore deck", "#name|f|bad", "#name|H|", "#name|IJ|two", "A|0|Deck" });
+        Assert.Equal(new Dictionary<string, string> { ["F"] = "deck", ["G"] = "fore deck" }, names);
+        var problems = new List<string>();
+        var letters = WorkshopRules.ResolveFuseSidecar(new[] { WorkshopRules.SidecarHeader, "#name|F|deck", "F|0|Deck" }, new List<KeyValuePair<int, string>> { new KeyValuePair<int, string>(0, "Deck") }, problems);
+        Assert.Equal("F", letters[0]); Assert.Empty(problems);
+        // the shell: the group's name, spaces to underscores, else the first part
+        Assert.Equal("Fused_F_fore_deck", WorkshopRules.ShellName("F", " fore  deck ", "Material2_2_Part_003"));
+        Assert.Equal("Fused_F_Material2_2_Part_003", WorkshopRules.ShellName("F", "", "Material2_2_Part_003"));
+        Assert.Equal("Fused_F_a_b", WorkshopRules.ShellName("F", "a|b", "x"));
+    }
+
+    [Fact]
     public void A_sidecar_written_before_the_unique_renaming_follows_the_renamed_parts()
     {
         // review of PR #85, P1: the file names nodes 0 and 2 both "Deck"; the rows call node 2 "Deck_3". Lines that name
