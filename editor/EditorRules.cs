@@ -378,7 +378,14 @@ public static class WorkshopRules
                 int lastBar = remainder.LastIndexOf('|');
                 int index = -1; bool hasIndex = lastBar > 0 && int.TryParse(remainder.Substring(lastBar + 1).Trim(), System.Globalization.NumberStyles.Integer, inv, out index);
                 string name = hasIndex ? remainder.Substring(0, lastBar).Trim() : remainder.Trim();
-                if (hasIndex && Renamed(index, name, out string unique)) { outLines.Add(letter + "|" + unique + "|" + remainder.Substring(lastBar + 1)); continue; }
+                if (hasIndex && Renamed(index, name, out string unique))
+                {
+                    // BOTH readings fit (review of PR #85, fourth round): "A|Hull|3" beside two Hulls AND a part literally
+                    // named "Hull|3" - the resolver has always refused that line as ambiguous, and it is left exactly as
+                    // it is for the resolver to do so; settling the first reading here would hand it to node 3
+                    if (fileCount.ContainsKey(remainder.Trim())) { outLines.Add(raw); continue; }
+                    outLines.Add(letter + "|" + unique + "|" + remainder.Substring(lastBar + 1)); continue;
+                }
                 if (Shared(name) && !(hasIndex && fileNameAt.TryGetValue(index, out string at) && at == name)) { Refuse(name, hasIndex ? "node " + index.ToString(inv) + " is not one of them" : "no node index is given"); continue; }
             }
             outLines.Add(raw);

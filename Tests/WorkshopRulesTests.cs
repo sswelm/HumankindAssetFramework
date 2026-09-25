@@ -40,6 +40,15 @@ public class WorkshopRulesTests
         Assert.Single(legacyRefused);
         var legacy = WorkshopRules.ResolveFuseSidecar(new[] { "A|Deck|0", "B|Deck_3|2" }, parts.Select(p => new KeyValuePair<int, string>(p.Item1, p.Item3)).ToList(), problems);
         Assert.Equal("A", legacy[0]); Assert.Equal("B", legacy[2]);
+        // a part literally named "Hull|3" beside two Hulls (review of PR #85, fourth round): "A|Hull|3" reads two ways, the
+        // migration leaves it alone, and the resolver refuses it as it always did
+        var twoReadings = new List<(int, string, string)> { (0, "Hull", "Hull"), (3, "Hull", "Hull_2"), (5, "Hull|3", "Hull|3") };
+        var stillAmbiguous = new List<string>();
+        Assert.Equal(new[] { "A|Hull|3" }, WorkshopRules.MigrateSidecarNames(new[] { "A|Hull|3" }, twoReadings, stillAmbiguous));
+        Assert.Empty(stillAmbiguous);
+        var refusedByResolver = new List<string>();
+        Assert.Empty(WorkshopRules.ResolveFuseSidecar(new[] { "A|Hull|3" }, twoReadings.Select(q => new KeyValuePair<int, string>(q.Item1, q.Item3)).ToList(), refusedByResolver));
+        Assert.Single(refusedByResolver);
     }
 
     [Fact]

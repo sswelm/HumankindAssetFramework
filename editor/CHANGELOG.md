@@ -49,7 +49,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   settled by its index or refused with a reason ("A|Deck" without an index, "B|9|Deck" with node 9 no Deck),
   never handed to the one row still called Deck after the renaming; and a bare _number tail is no ancestry for
   the Lab's role inheritance — Hull and Hull_2 may be two parts, and Hull_2 would have taken Hull's role, an
-  Ignore among them. Only the Cutter's own tails (_Part_NNN, _CutA, _CutB) inherit. Tested.
+  Ignore among them. Only the Cutter's own tails (_Part_NNN, _CutA, _CutB) inherit. Tested. **Fourth round:** a
+  legacy line that reads two ways ("A|Hull|3" beside two Hulls and a part literally named "Hull|3") is left
+  alone for the resolver to refuse as ambiguous, as it always did. Tested.
 
 - **Vehicle Lab: the classification follows the cut** (user: "I'm getting tired of having to reclassify all the
   time after a split"). A re-Probe keeps roles by part name, so a part the Cutter made from another — X_Part_001,
