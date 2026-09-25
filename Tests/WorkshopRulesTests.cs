@@ -27,6 +27,10 @@ public class WorkshopRulesTests
         var got = WorkshopRules.ResolveFuseSidecar(new[] { WorkshopRules.SidecarHeader, "A|0|Deck", "B|2|Deck_3", "X|5|Mast" }, parts.Select(p => new KeyValuePair<int, string>(p.Item1, p.Item3)).ToList(), problems);
         Assert.Equal("A", got[0]); Assert.Equal("B", got[2]); Assert.Equal("X", got[5]);
         Assert.Empty(WorkshopRules.MigrateSidecarNames(null, parts));
+        // the legacy layout, name in the middle, index last (no v2 header): the same migration; a line without an index passes through
+        Assert.Equal(new[] { "A|Deck|0", "B|Deck_3|2", "D|Deck", "C|Other|2" }, WorkshopRules.MigrateSidecarNames(new[] { "A|Deck|0", "B|Deck|2", "D|Deck", "C|Other|2" }, parts));
+        var legacy = WorkshopRules.ResolveFuseSidecar(new[] { "A|Deck|0", "B|Deck_3|2" }, parts.Select(p => new KeyValuePair<int, string>(p.Item1, p.Item3)).ToList(), problems);
+        Assert.Equal("A", legacy[0]); Assert.Equal("B", legacy[2]);
     }
 
     [Fact]

@@ -43,7 +43,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   and node 2 lost its mark. Sidecar lines now migrate to the rows' unique names before they are resolved (a line
   whose index still carries the file's name takes the unique one; the rest pass through). And a Split check now
   replaces a Tear mark everywhere ("Check all splittable", the Space key, the operation itself): Split runs first
-  and takes the mesh, so a row checked for both was torn into nothing. Tested.
+  and takes the mesh, so a row checked for both was torn into nothing. Tested. **Second round:** the legacy
+  sidecar layout (name in the middle, index last) migrates the same way, and the "no mark" keys (–, 0, Backspace)
+  clear a Tear mark too. Tested.
 
 - **Vehicle Lab: the classification follows the cut** (user: "I'm getting tired of having to reclassify all the
   time after a split"). A re-Probe keeps roles by part name, so a part the Cutter made from another — X_Part_001,

@@ -404,6 +404,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 else if (idx >= 0 && (ev.keyCode == KeyCode.Alpha0 || ev.keyCode == KeyCode.Keypad0 || ev.keyCode == KeyCode.Minus || ev.keyCode == KeyCode.KeypadMinus || ev.keyCode == KeyCode.Backspace))   // '-' too: it is what the popup shows for "no mark" (user 2026-09-16)
                 {
                     if (Fusing) shown[idx].fuse = ""; else shown[idx].split = false;
+                    shown[idx].tear = false;   // "no mark" means no Tear mark either (review of PR #85, second round)
                     shown[idx].delete = false;
                     AdvanceIfHidden(idx);
                     GUIUtility.keyboardControl = 0;

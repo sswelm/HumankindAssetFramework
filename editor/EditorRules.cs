@@ -341,17 +341,37 @@ public static class WorkshopRules
         var fileNameAt = new Dictionary<int, string>(); var nameAt = new Dictionary<int, string>();
         foreach (var p in parts) { fileNameAt[p.index] = p.fileName; nameAt[p.index] = p.name; }
         var inv = System.Globalization.CultureInfo.InvariantCulture;
-        var outLines = new List<string>();
+        var outLines = new List<string>(); bool v2 = false;
+        bool Renamed(int index, string name, out string unique)
+        {
+            unique = null;
+            return fileNameAt.TryGetValue(index, out string fileName) && nameAt.TryGetValue(index, out unique) && fileName == name && unique != null && unique != name;
+        }
         foreach (string raw in lines ?? new string[0])
         {
             string line = raw?.Trim() ?? "";
-            int firstBar = line.IndexOf('|'), secondBar = firstBar >= 0 ? line.IndexOf('|', firstBar + 1) : -1;
-            if (line.StartsWith("#", StringComparison.Ordinal) || firstBar <= 0 || secondBar < 0) { outLines.Add(raw); continue; }
-            string letter = line.Substring(0, firstBar), indexText = line.Substring(firstBar + 1, secondBar - firstBar - 1).Trim(), name = line.Substring(secondBar + 1);
-            if (!int.TryParse(indexText, System.Globalization.NumberStyles.Integer, inv, out int index)) { outLines.Add(raw); continue; }
-            if (fileNameAt.TryGetValue(index, out string fileName) && nameAt.TryGetValue(index, out string unique) && fileName == name && unique != name && unique != null)
-                outLines.Add(letter + "|" + indexText + "|" + unique);
-            else outLines.Add(raw);
+            if (line.StartsWith("#", StringComparison.Ordinal)) { if (line == SidecarHeader) v2 = true; outLines.Add(raw); continue; }
+            int firstBar = line.IndexOf('|');
+            if (firstBar <= 0) { outLines.Add(raw); continue; }
+            string letter = line.Substring(0, firstBar), remainder = line.Substring(firstBar + 1);
+            if (v2)
+            {
+                // "<letter>|<index>|<name>"
+                int secondBar = remainder.IndexOf('|');
+                if (secondBar > 0 && int.TryParse(remainder.Substring(0, secondBar).Trim(), System.Globalization.NumberStyles.Integer, inv, out int index)
+                    && Renamed(index, remainder.Substring(secondBar + 1), out string unique))
+                { outLines.Add(letter + "|" + remainder.Substring(0, secondBar) + "|" + unique); continue; }
+            }
+            else
+            {
+                // the legacy layout, "<letter>|<name>|<index>" (review of PR #85, second round: these passed through and
+                // the legacy resolver then found the now unique name at the wrong node); "<letter>|<name>" has no index to go by
+                int lastBar = remainder.LastIndexOf('|');
+                if (lastBar > 0 && int.TryParse(remainder.Substring(lastBar + 1).Trim(), System.Globalization.NumberStyles.Integer, inv, out int index)
+                    && Renamed(index, remainder.Substring(0, lastBar).Trim(), out string unique))
+                { outLines.Add(letter + "|" + unique + "|" + remainder.Substring(lastBar + 1)); continue; }
+            }
+            outLines.Add(raw);
         }
         return outLines.ToArray();
     }
