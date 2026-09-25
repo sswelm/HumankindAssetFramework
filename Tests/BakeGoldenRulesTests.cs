@@ -57,6 +57,10 @@ public class BakeGoldenRulesTests
         Assert.Equal(new[] { 0, 2, 4 }, BakeGoldenRules.FuseSelection(parts, 200));         // after the 120 hull: 90 and 40 do not fit, 50 and 5 do
         Assert.Equal(new[] { 0, 4 }, BakeGoldenRules.FuseSelection(parts, 150));            // the hull leaves room for the 5 alone
         Assert.Equal(new[] { 4 }, BakeGoldenRules.FuseSelection(parts, 3));                // nothing fits: the smallest alone
+        // the second review's case: the largest alone would leave no partner, but a pair fits - the pair wins
+        Assert.Equal(new[] { 1, 2 }, BakeGoldenRules.FuseSelection(new[] { P(0, 100), P(1, 90), P(2, 60) }, 150));
+        Assert.Equal(new[] { 0, 3, 4 }, BakeGoldenRules.FuseSelection(new[] { P(0, 100), P(1, 90), P(2, 60), P(3, 30), P(4, 20) }, 150));   // 100 keeps partners here
+        Assert.Equal(new[] { 0 }, BakeGoldenRules.FuseSelection(new[] { P(0, 100), P(1, 90), P(2, 60) }, 120));   // no pair fits: the largest fill stands
         Assert.Equal(new[] { 0, 1, 2, 3, 4 }, BakeGoldenRules.FuseSelection(parts, 1000));
         Assert.Empty(BakeGoldenRules.FuseSelection(null, 100));
         Assert.Equal(new[] { 7, 8 }, BakeGoldenRules.FuseSelection(new[] { P(8, 10), P(7, 10) }, 20));   // ties by index
@@ -73,21 +77,37 @@ public class BakeGoldenRulesTests
                 new Newtonsoft.Json.Linq.JObject { ["name"] = "Hull", ["mesh"] = 0, ["skin"] = 0 },
                 new Newtonsoft.Json.Linq.JObject { ["name"] = "Root" }, new Newtonsoft.Json.Linq.JObject { ["name"] = "Wheel_00" },
                 new Newtonsoft.Json.Linq.JObject { ["name"] = "Turret", ["mesh"] = 1 }),
-            ["meshes"] = new Newtonsoft.Json.Linq.JArray(new Newtonsoft.Json.Linq.JObject { ["primitives"] = new Newtonsoft.Json.Linq.JArray() }, new Newtonsoft.Json.Linq.JObject { ["primitives"] = new Newtonsoft.Json.Linq.JArray() }),
+            ["meshes"] = new Newtonsoft.Json.Linq.JArray(
+                new Newtonsoft.Json.Linq.JObject { ["primitives"] = new Newtonsoft.Json.Linq.JArray(new Newtonsoft.Json.Linq.JObject { ["attributes"] = new Newtonsoft.Json.Linq.JObject { ["POSITION"] = 0 } }) },
+                new Newtonsoft.Json.Linq.JObject { ["primitives"] = new Newtonsoft.Json.Linq.JArray(new Newtonsoft.Json.Linq.JObject { ["attributes"] = new Newtonsoft.Json.Linq.JObject { ["POSITION"] = 0 } }) }),
+            ["accessors"] = new Newtonsoft.Json.Linq.JArray(new Newtonsoft.Json.Linq.JObject { ["count"] = 36, ["type"] = "VEC3", ["componentType"] = 5126 }),
             ["skins"] = new Newtonsoft.Json.Linq.JArray(
                 new Newtonsoft.Json.Linq.JObject { ["joints"] = new Newtonsoft.Json.Linq.JArray(1, 2) },
                 new Newtonsoft.Json.Linq.JObject { ["joints"] = new Newtonsoft.Json.Linq.JArray(1) }),
         };
-        GlbDisconnectedParts.RigSummary(Glb(rigged), out int skins, out int joints, out int meshes, out int meshNodes);
-        Assert.Equal((2, 2, 2, 2), (skins, joints, meshes, meshNodes));
+        GlbDisconnectedParts.RigSummary(Glb(rigged), out int skins, out int joints, out int meshes, out int meshNodes, out int rigged1);
+        Assert.Equal((2, 2, 2, 2, 1), (skins, joints, meshes, meshNodes, rigged1));   // the Hull is rigged; the Turret has no skin
+        // a static mesh beside an unused skin is NOT rigged (second review), nor is a skinned node whose mesh has no positions
+        var unused = (Newtonsoft.Json.Linq.JObject)rigged.DeepClone();
+        ((Newtonsoft.Json.Linq.JObject)unused["nodes"][0]).Remove("skin");
+        GlbDisconnectedParts.RigSummary(Glb(unused), out skins, out joints, out meshes, out meshNodes, out int rigged2);
+        Assert.Equal((2, 2, 0), (skins, joints, rigged2));
+        var empty = (Newtonsoft.Json.Linq.JObject)rigged.DeepClone();
+        ((Newtonsoft.Json.Linq.JObject)empty["accessors"][0])["count"] = 0;
+        GlbDisconnectedParts.RigSummary(Glb(empty), out _, out _, out _, out _, out int rigged3);
+        Assert.Equal(0, rigged3);
+        var badSkin = (Newtonsoft.Json.Linq.JObject)rigged.DeepClone();
+        ((Newtonsoft.Json.Linq.JObject)badSkin["nodes"][0])["skin"] = 5;
+        GlbDisconnectedParts.RigSummary(Glb(badSkin), out _, out _, out _, out _, out int rigged4);
+        Assert.Equal(0, rigged4);
         var bare = new Newtonsoft.Json.Linq.JObject
         {
             ["asset"] = new Newtonsoft.Json.Linq.JObject { ["version"] = "2.0" },
             ["nodes"] = new Newtonsoft.Json.Linq.JArray(new Newtonsoft.Json.Linq.JObject { ["name"] = "Hull", ["mesh"] = 0 }),
             ["meshes"] = new Newtonsoft.Json.Linq.JArray(new Newtonsoft.Json.Linq.JObject { ["primitives"] = new Newtonsoft.Json.Linq.JArray() }),
         };
-        GlbDisconnectedParts.RigSummary(Glb(bare), out skins, out joints, out meshes, out meshNodes);
-        Assert.Equal((0, 0, 1, 1), (skins, joints, meshes, meshNodes));   // an export that lost its armature reads as no skin, no joints
+        GlbDisconnectedParts.RigSummary(Glb(bare), out skins, out joints, out meshes, out meshNodes, out int rigged0);
+        Assert.Equal((0, 0, 1, 1, 0), (skins, joints, meshes, meshNodes, rigged0));   // an export that lost its armature reads as no skin, no joints, nothing rigged
     }
     // a JSON-only GLB (empty BIN chunk): enough for the JSON readers
     static byte[] Glb(Newtonsoft.Json.Linq.JObject root)

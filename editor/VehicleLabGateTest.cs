@@ -6,8 +6,9 @@
 // runs (VehicleLabWindow.GenerateHeadless: a window instance with no dialogs, no preview, every file under
 // Logs/bake_tests/lab and nothing under Assets/) on the saved recipes, and per recipe:
 //   1. require the script's own completion marker and the output GLB (the Generate button's success rule),
-//   2. require the armature within Amplitude's 256-bone cap, and the OUTPUT GLB ITSELF to carry a skin with joints
-//      and a mesh (GlbDisconnectedParts.RigSummary - the log line alone would pass an export that lost the rig),
+//   2. require the armature within Amplitude's 256-bone cap, and the OUTPUT GLB ITSELF to carry a RIGGED mesh - a
+//      mesh node with geometry bound to a skin with joints (GlbDisconnectedParts.RigSummary; the log line alone
+//      would pass an export that lost the rig, and a skin counted apart from the meshes would pass an unused one),
 //   3. diff the run's deterministic summary lines (BakeGoldenRules.LabSnapshotLines: every "VEHICLE ..." line but the
 //      timings, the output path cut off) against a blessed golden, Tools/lab_golden/<recipe>.txt — the deploy row's
 //      golden-master idea. A missing golden is captured from the run and reported as such (not a pass); to re-bless
@@ -87,13 +88,12 @@ public static class VehicleLabGateTest
                     if (bones < 0) { lines.Add($"FAIL {name} ({took}) — the run printed no armature line"); fail++; continue; }
                     if (bones > 256) { lines.Add($"FAIL {name} ({took}) — {bones} bones, over Amplitude's 256"); fail++; continue; }
                     // the file itself, not the log: a skin with joints and a rendered mesh must be in the GLB the bake will read
-                    int skins, joints, meshes, meshNodes;
-                    try { GlbDisconnectedParts.RigSummary(File.ReadAllBytes(outGlb), out skins, out joints, out meshes, out meshNodes); }
+                    int skins, joints, meshes, meshNodes, rigged;
+                    try { GlbDisconnectedParts.RigSummary(File.ReadAllBytes(outGlb), out skins, out joints, out meshes, out meshNodes, out rigged); }
                     catch (Exception ex) { lines.Add($"FAIL {name} ({took}) — the output GLB does not parse: {ex.Message}"); fail++; continue; }
-                    if (skins == 0 || joints == 0) { lines.Add($"FAIL {name} ({took}) — the output GLB carries no skin/joints (the log said {bones} bones)"); fail++; continue; }
-                    if (meshNodes == 0) { lines.Add($"FAIL {name} ({took}) — the output GLB renders no mesh"); fail++; continue; }
+                    if (rigged == 0) { lines.Add($"FAIL {name} ({took}) — the output GLB has no mesh with geometry bound to a skin with joints ({skins} skin(s), {joints} joint(s), {meshNodes} mesh node(s); the log said {bones} bones)"); fail++; continue; }
                     if (joints > 256) { lines.Add($"FAIL {name} ({took}) — {joints} joints in the output GLB, over Amplitude's 256"); fail++; continue; }
-                    snap = snap.Concat(new[] { $"GLB skins={skins} joints={joints} meshes={meshes} meshNodes={meshNodes}" }).ToArray();
+                    snap = snap.Concat(new[] { $"GLB skins={skins} joints={joints} meshes={meshes} meshNodes={meshNodes} rigged={rigged}" }).ToArray();
                     string goldFile = Path.Combine(goldDir, name + ".txt");
                     if (!File.Exists(goldFile))
                     {

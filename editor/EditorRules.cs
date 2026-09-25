@@ -802,14 +802,26 @@ public static class BakeGoldenRules
     /// over the remaining budget is skipped and the smaller ones still fill it, so the group has several parts
     /// whenever several fit (review of PR #90: taking the first part regardless made a single-part fuse of any hull
     /// over the budget, and could take far longer than advertised). When no part fits at all, the smallest one alone.
+    /// A multi-part group whenever ANY two parts fit together (second review: 100/90/60 at a budget of 150 picked the
+    /// 100 alone while 90+60 was a two-part fuse inside the budget): when the largest-first fill ends with one part,
+    /// the largest pair that fits seeds the group and the rest fill in.
     public static List<int> FuseSelection(IEnumerable<KeyValuePair<int, int>> partsByIndexAndTriangles, int budget)
     {
-        var parts = (partsByIndexAndTriangles ?? new KeyValuePair<int, int>[0]).ToList();
-        var picked = new List<int>(); long sum = 0;
-        foreach (var p in parts.OrderByDescending(p => p.Value).ThenBy(p => p.Key))
-            if (sum + p.Value <= budget) { picked.Add(p.Key); sum += p.Value; }
-        if (picked.Count == 0 && parts.Count > 0) picked.Add(parts.OrderBy(p => p.Value).ThenBy(p => p.Key).First().Key);
-        return picked;
+        var sorted = (partsByIndexAndTriangles ?? new KeyValuePair<int, int>[0]).OrderByDescending(p => p.Value).ThenBy(p => p.Key).ToList();
+        List<int> Fill(IList<KeyValuePair<int, int>> seed)
+        {
+            var picked = seed.Select(p => p.Key).ToList(); long sum = seed.Sum(p => (long)p.Value);
+            foreach (var p in sorted)
+                if (!picked.Contains(p.Key) && sum + p.Value <= budget) { picked.Add(p.Key); sum += p.Value; }
+            return picked;
+        }
+        var result = Fill(new KeyValuePair<int, int>[0]);
+        if (result.Count < 2 && sorted.Count > 1)
+            for (int i = 0; i < sorted.Count && result.Count < 2; i++)
+                for (int j = i + 1; j < sorted.Count; j++)
+                    if ((long)sorted[i].Value + sorted[j].Value <= budget) { result = Fill(new[] { sorted[i], sorted[j] }); break; }
+        if (result.Count == 0 && sorted.Count > 0) result.Add(sorted[sorted.Count - 1].Key);   // nothing fits: the smallest alone
+        return result;
     }
 
     /// The Vehicle Lab rows' REPRESENTATIVE recipes: for each feature, in this order - oars, a gun, wheels, sails, a

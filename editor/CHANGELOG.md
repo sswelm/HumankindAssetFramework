@@ -26,7 +26,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   joints and a rendered mesh, read from the file (an export that lost the armature after the log line would have
   matched the golden); the Workshop row's fuse group is the parts that FIT the budget, largest first (a hull over
   the budget no longer makes a single-part fuse that takes minutes); the representatives are picked only among
-  recipes whose source is on disk, the rest listed as not representable. Tested.
+  recipes whose source is on disk, the rest listed as not representable. Tested. **Second round:** the GLB check
+  counts RIGGED mesh nodes — a mesh with a non-empty POSITION accessor bound to a skin that exists and has joints —
+  so a static mesh beside an unused skin fails; and the fuse picker seeds the group with the largest PAIR that
+  fits when the largest-first fill ends with one part (100/90/60 at 150 fuses 90+60, not 100 alone). Tested.
 
 - **Vehicle Lab: a Window role with its own reduce dial** (user: "add the reducable part type Window"). Glazing -
   portholes, bridge windows, windshields, skylights - is a role of its own with a **Window reduce (%)** slider in
