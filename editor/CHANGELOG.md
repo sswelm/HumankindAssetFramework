@@ -30,10 +30,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   turned; the deck under a deck turned; the deck over an inside-out hull bottom turned; nothing beneath turned, and
   no invented floor in the line; a doubled and a mirrored surface beneath still read as ground). MEASURED, per-ray
   census over the fighting top, cells solid in the source and see-through in the fuse: **1,622 → 52** over six
-  directions, and **733 → 0** from below. Swept over five ships' every group: what it now keeps elsewhere is small and genuinely
-  thin (4 to 24 faces, a ceiling 0 to 0.5 above, a floor 1.1 to 20.9 beneath) and the ships' renders from above and
-  below are unchanged; the Teutonic's two large sheets that an earlier form of the rule held down (684 and 185
-  faces) go back to master's verdict.
+  directions, and **733 → 0** from below. Swept over five ships, every group, against master: **10 of 102
+  groups change, and every one of them is a group that keeps an underside** — nothing else moves. The largest
+  change outside the Svea is the Teutonic's group X, 788 fewer faces turned, and a ray census over that group is
+  identical to master's cell for cell: what the rule keeps there is a doubled surface whose facing no ray can see,
+  so the output simply stays closer to the source.
 
 - **Vehicle Lab: a Gun section** (user: "I cannot set this value, why is it in deploy anyway?"). The Gun pivot,
   the deploy raise and the recoil dials moved out of *Deploy — trails opening, sails furling* into their own
