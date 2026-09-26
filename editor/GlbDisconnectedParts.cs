@@ -1444,7 +1444,7 @@ public static class GlbDisconnectedParts
         public double Weld, WeldFraction, Longest; public int MadeConsistent, OpenJudged, OpenReversed, ClosedReversed, FaceCount, CollapsedFaces, NotOrientable;
         public string LargestIslands, StitchedLine, RewoundByPart, Timing, FrameLine;
         public string MirroredLine;   // the mirrored-part check's verdicts (null unless the check ran with the option on)
-        public string TwinsLine, TwinsRestoredLine, AsAuthoredLine, FromAboveLine;   // doubled-face diagnostics (null unless found) - appended AFTER the summary, which the Workshop shows as Details[0] (review of PR #82, P3)
+        public string TwinsLine, TwinsRestoredLine, AsAuthoredLine, FromAboveLine, UndersideLine;   // doubled-face diagnostics (null unless found) - appended AFTER the summary, which the Workshop shows as Details[0] (review of PR #82, P3)
         public int MirroredJudgedUndo, MirroredJudgedKeep, MirroredParts;   // this group's evidence, pooled across the run by FuseGroups
         public IList<int> NodeIndices; public string FusedName; public bool CheckMirrored;   // enough to re-plan the group once the run's verdict is known
         public bool Empty;   // no triangles: nothing to append, the sources keep their meshes, Result.Changed stays false
@@ -1991,30 +1991,43 @@ public static class GlbDisconnectedParts
         }
         // ...and from BELOW, the same column upward from the model's bottom: what tells a well's floor (the hull
         // beneath it) from an upturned boat's bottom (nothing beneath it) - both face up and both see the sky.
-        bool ExposedFromAbove(int f) => Exposed(f, true);
-        bool Exposed(int f, bool fromAbove)
+        // THE COLUMN, walked ONCE (2026-09-26, review of PR #93). Two walkers over the same grid with epsilons
+        // anchored at opposite ends of the ray could disagree about the same thin gap; this is the only one. From the
+        // face's own centroid, straight up or down: the distance to the nearest thing (+inf when the column holds
+        // nothing that way) and whether that thing SHOWS ITS FRONT to the ray - a floor seen from above, a ceiling
+        // seen from below - as against its back, the inside of a hull's bottom plating.
+        //   * DISTANCE ONLY, never which way the thing faces (review of PR #93, second round). Reading the hit's
+        //     winding was tried and is a trap from both ends: the group's own faces carry whatever the passes have
+        //     done to them so far, so the answer depends on which sheet was judged first; and reading them as
+        //     AUTHORED instead is wrong wherever the source itself is miswound - measured on the Svea, whose deck
+        //     under the mast is authored upside down and which the pass corrects (386 see-through cells against 54).
+        //     A surface doubled by duplication and a mirrored instance both stop mattering for the same reason.
+        //   * `skip` is the sheet being judged: a sheet is not evidence about what lies under it.
+        double Column(int f, bool upward, HashSet<int> skip)
         {
             EnsureOccluders();
             Vec3 c = FScale(FAdd(FAdd(P(f, 0), P(f, 1)), P(f, 2)), 1.0 / 3.0);
-            double top = fromAbove ? modelTop + columnCell : modelBottom - columnCell, tf = fromAbove ? top - c.Y : c.Y - top; if (tf <= 0) return true;
-            var o = new Vec3 { X = c.X, Y = top, Z = c.Z }; var d = new Vec3 { X = 0, Y = fromAbove ? -1 : 1, Z = 0 };
+            var d = new Vec3 { X = 0, Y = upward ? 1 : -1, Z = 0 };
             long key = ((long)Math.Floor(c.X / columnCell) << 32) ^ ((long)Math.Floor(c.Z / columnCell) & 0xffffffffL);
-            if (!columns.TryGetValue(key, out List<int> l)) return true;
+            if (!columns.TryGetValue(key, out List<int> l)) return double.PositiveInfinity;
+            double best = double.PositiveInfinity, skin = 1e-6 * Math.Max(1.0, modelTop - modelBottom);
             foreach (int t in l)
             {
                 double hit;
-                if (t >= 0) hit = RayTriangle(o, d, occluders[t], occluders[t + 1], occluders[t + 2]);
-                else { int g = -1 - t; if (g == f) continue; hit = RayTriangle(o, d, P(g, 0), P(g, 1), P(g, 2)); }
-                if (hit > 0 && hit < tf - 1e-6 * Math.Max(1.0, tf)) return false;
+                if (t >= 0) hit = RayTriangle(c, d, occluders[t], occluders[t + 1], occluders[t + 2]);
+                else { int g = -1 - t; if (g == f || (skip != null && skip.Contains(g))) continue; hit = RayTriangle(c, d, P(g, 0), P(g, 1), P(g, 2)); }
+                if (hit > skin && hit < best) best = hit;
             }
-            return true;
+            return best;
         }
+        bool ExposedFromAbove(int f) => Exposed(f, true);
+        bool Exposed(int f, bool fromAbove) => double.IsPositiveInfinity(Column(f, fromAbove, null));
         var flip = new bool[faceCount];
-        int islandsMadeConsistent = 0, islandsNotOrientable = 0, asAuthoredSheets = 0, fromAboveKept = 0, reversalsVetoed = 0;
+        int islandsMadeConsistent = 0, islandsNotOrientable = 0, asAuthoredSheets = 0, fromAboveKept = 0, reversalsVetoed = 0, undersidesKept = 0;
         bool DirOf(int face, long key) { for (int e = 0; e < 3; e++) if (fEdgeKeys[face * 3 + e] == key) return fEdgeDir[face * 3 + e]; return false; }
         long PairKey(int f, int g) => f < g ? ((long)f << 32) | (uint)g : ((long)g << 32) | (uint)f;
         Vec3 P(int f, int corner) => pos[tris[f * 3 + corner]];
-        Vec3 FaceNormal(int f)   // area-weighted, with the CURRENT winding (authored while `flip` is still all false)
+        Vec3 FaceNormal(int f)   // area-weighted, with whatever the passes have done to the winding so far
         {
             Vec3 n = FCross(FSub(P(f, 1), P(f, 0)), FSub(P(f, 2), P(f, 0)));
             return flip[f] ? FScale(n, -1.0) : n;
@@ -2429,7 +2442,69 @@ public static class GlbDisconnectedParts
                 else if (volumeConfident && (volume >= 0 || !deckFacingUp)) reverse = volume < 0 && !enclosed;
                 else if (doubleSkin) reverse = twinInFront > twinBehind;
                 else if (deckFacingUp) reverse = false;         // a deck, already facing up: nothing to correct
-                else reverse = score < -0.25;
+                else
+                {
+                    reverse = score < -0.25;
+                    // AN UNDERSIDE (2026-09-26, HMS Svea's fighting top, user: "the crow's nest is transparent from
+                    // below after the fuse"). The radial score asks "does this face point away from the hull's belly
+                    // line", and every face high above that line that points DOWN answers no: the flared underside of
+                    // the mast top - 742 faces, all facing down, split into 660 sheets of one or two faces at the exact
+                    // weld - scored -1.00 apiece and was reversed whole (351 faces turned up; measured on the fuse, and
+                    // a wider weld turned more, not fewer). But what makes it an underside is plain in the geometry:
+                    // the platform's floor lies a few units ABOVE it and the deck lies far BENEATH it, and a face is
+                    // seen from the side with the room. So before a down-facing sheet above the belly is turned on the
+                    // score alone, its down-facing faces are asked what is above and below them, along the column:
+                    // a ceiling close above and at least three times that much air beneath is an underside, and it
+                    // keeps its authored facing. A FLOOR MUST ACTUALLY BE THERE (review of PR #93, and an outside
+                    // reviewer's, independently): an empty column beneath reads as +inf, which cleared a "three times
+                    // as much air" test trivially and kept a wrongly wound sheet cantilevered past the hull - and the
+                    // report then printed a floor distance nothing had been hit at. No floor, no underside.
+                    // AND WHAT IT LANDS ON MUST BE ABOVE THE BELLY LINE (the Teutonic's
+                    // promenade deck, the same day's drill): a deck authored facing down under a higher deck also has a
+                    // ceiling close above and room below it - but that room is the hull's INSIDE. The ray down from it
+                    // lands on the bottom plating, and that plating is read as authored: its back on a hull wound the
+                    // right way, its FRONT on one wound inside out or on the inner skin of a double hull (the Teutonic's
+                    // group U: 185 faces kept on a "floor 9.9 beneath" that was the hull's bottom). What a hull's bottom
+                    // always is, is LOW: at the model's floor, below the belly line by construction. The deck under the
+                    // Svea's flare lies far above it. So the thing beneath must show its front AND lie above the belly
+                    // line, or the sheet is a deck and the score turns it, as master did (684 faces on the Teutonic's
+                    // X, see-through from above with the distance test alone). Deliberately one-sided and narrow: a
+                    // deck authored facing down has the sky above it (no ceiling), an inside-out hull bottom faces up,
+                    // side plating is not level - all still go through the score exactly as before. Faces are sampled
+                    // evenly, at most 64 of them.
+                    // THE GATES STAY WHERE THE GEOMETRY PUT THEM (review of PR #93, measured). Two tightenings were
+                    // tried and reverted, because a mast top's flare is a shallow CONE: its faces point down and
+                    // outward together, so neither the sheet nor the face reads as level by the 0.5 gate deckFacingUp
+                    // uses, and the platform above the lower part of the flare is tens of units up. Asking for 0.5
+                    // cost 142 of the Svea's 226 recovered ray cells and a ceiling bounded to a fiftieth of the
+                    // model's height cost another 44; the rule's real guard is what lies beneath, which costs nothing.
+                    if (reverse && upness < -0.3 && islandY > bellyY)
+                    {
+                        var own = new HashSet<int>(isl);   // a stepped underside must not see its own lower faces beneath it
+                        int keepVotes = 0, turnVotes = 0, insideBelow = 0, noFloor = 0, stride = (isl.Count + 63) / 64;
+                        double aboveSum = 0, belowSum = 0;
+                        for (int k = 0; k < isl.Count; k += stride)
+                        {
+                            int f = isl[k]; Vec3 nf = FaceNormal(f); double nl = FLen(nf);
+                            if (nl < 1e-12 || nf.Y > -0.3 * nl) continue;
+                            double above = Column(f, true, own), below = Column(f, false, own);
+                            if (double.IsPositiveInfinity(above)) { turnVotes++; continue; }   // nothing over it: a deck wound down, not an underside
+                            if (double.IsPositiveInfinity(below)) { noFloor++; turnVotes++; continue; }               // nothing beneath at all: no evidence either way, and never an underside
+                            double landingY = (P(f, 0).Y + P(f, 1).Y + P(f, 2).Y) / 3.0 - below;
+                            if (landingY <= bellyY) { insideBelow++; turnVotes++; continue; }                         // it lands on the hull's bottom, which is low by construction: a deck, not an underside
+                            if (below >= 3.0 * above) { keepVotes++; aboveSum += above; belowSum += below; } else turnVotes++;
+                        }
+                        if (keepVotes > 0 && keepVotes >= 2 * turnVotes)
+                        {
+                            reverse = false; reversalVetoed = true; undersidesKept++;
+                            vetoNote = string.Format(System.Globalization.CultureInfo.InvariantCulture, " (an underside: {0} of {1} down-facing faces have a ceiling {2:0.#} above and a floor {3:0.#} beneath)", keepVotes, keepVotes + turnVotes, aboveSum / keepVotes, belowSum / keepVotes);
+                        }
+                        else if (noFloor > 0 && noFloor >= insideBelow)
+                            vetoNote = string.Format(System.Globalization.CultureInfo.InvariantCulture, " (not an underside: {0} of {1} down-facing faces have nothing beneath them)", noFloor, keepVotes + turnVotes);
+                        else if (insideBelow > 0)
+                            vetoNote = string.Format(System.Globalization.CultureInfo.InvariantCulture, " (not an underside: {0} of {1} down-facing faces have the hull's inside beneath them)", insideBelow, keepVotes + turnVotes);
+                    }
+                }
                 // SEEN FROM ABOVE BEFORE REVERSED (2026-09-24, the Wespe's stern companionway, group G): a 47-face
                 // open well - walls facing into the well, floor and steps facing up, as the source has it - whose
                 // cones about its own centroid read a confident -0.85, and the volume rule reversed it whole: walls
@@ -2491,7 +2566,7 @@ public static class GlbDisconnectedParts
             }
             if (reverse) foreach (int f in isl) { if (joinMinor[ii] >= 0 && parityOf[f] == joinMinor[ii]) continue; flip[f] = !flip[f]; }
             islandRule[ii] = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0}, volume agreement {1:+0.00;-0.00} thickness {2:+0.0000;-0.0000}, inside-out score {3:+0.00;-0.00}, level {6:+0.00;-0.00} at y {7:0.##}{5}: {4}",
-                closed ? "closed" : "open", agreement, thickness, score, notOrientable[ii] ? "not judged" : reverse ? "reversed whole" : asAuthored ? "double wall, kept as authored" : reversalVetoed ? "kept" + vetoNote : "kept",
+                closed ? "closed" : "open", agreement, thickness, score, notOrientable[ii] ? "not judged" : reverse ? "reversed whole" + vetoNote : asAuthored ? "double wall, kept as authored" : reversalVetoed ? "kept" + vetoNote : "kept",
                 partnered > 0 ? string.Format(System.Globalization.CultureInfo.InvariantCulture, ", double skin {0:0}% twinned ({1} twin in front / {2} behind, at {3:0.00} of reach, {4:0.00} straight)", 100.0 * partnered / isl.Count, twinInFront, twinBehind, twinDist[ii], twinStraight[ii]) : "", upness, islandY);
         }
         Mark("direction");
@@ -2509,6 +2584,8 @@ public static class GlbDisconnectedParts
         for (int f = 0; f < faceCount; f++) if (twinFace[f] && flip[f]) { flip[f] = false; twinsRestored++; }
         if (fromAboveKept + reversalsVetoed > 0) plan.FromAboveLine = string.Format(System.Globalization.CultureInfo.InvariantCulture,
             "from above: {0} sheet(s) whose parity minority shows its authored front to the sky keep their authored winding - a join is not a winding error; {1} reversal(s) of an open sheet vetoed because the sheet already shows more fronts than backs to the sky", fromAboveKept, reversalsVetoed);
+        if (undersidesKept > 0) plan.UndersideLine = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+            "undersides: {0} down-facing sheet(s) above the belly line keep their authored facing - a ceiling close above and air beneath is what an underside looks like, not an inside-out skin", undersidesKept);
         if (asAuthoredSheets > 0) plan.AsAuthoredLine = string.Format(System.Globalization.CultureInfo.InvariantCulture,
             "double walls: {0} sheet(s) twinned on most faces with an undecided vote keep their authored winding - the radial score and the parity walk judge single skins", asAuthoredSheets);
         if (twinsRestored > 0) plan.TwinsRestoredLine = string.Format(System.Globalization.CultureInfo.InvariantCulture,
@@ -2687,6 +2764,7 @@ public static class GlbDisconnectedParts
         if (plan.TwinsRestoredLine != null) result.Details.Add(plan.TwinsRestoredLine);
         if (plan.AsAuthoredLine != null) result.Details.Add(plan.AsAuthoredLine);
         if (plan.FromAboveLine != null) result.Details.Add(plan.FromAboveLine);
+        if (plan.UndersideLine != null) result.Details.Add(plan.UndersideLine);
     }
 
     // REMOVE (2026-09-18, user: "an easy way to mark a unit for removal with the Del key"): the marked nodes lose their

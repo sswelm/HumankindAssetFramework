@@ -5,6 +5,37 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Fuser: an underside keeps its facing** (user: "het kraaiennest is transparant vanaf de onderkant na fusie",
+  HMS Svea's fighting top). The flared underside of the mast top — 742 faces, all authored facing down, high above
+  the belly line — came out of the fuse with 351 of them turned up, see-through from below. The direction pass's last
+  resort, the radial score, calls every face high above the belly that points down "inside-out", and at the exact
+  weld the flare fell into 660 sheets of one or two faces, each scored -1.00 and reversed whole (a wider weld turned
+  more, not fewer: the sheet is wrong by that rule at any size). What makes it an underside is in the geometry: the
+  platform's floor a few units above, the deck far beneath. So before a down-facing sheet above the belly is turned
+  on the score alone, its faces are asked what lies above and below them along the column; a ceiling close above
+  and at least three times that much air beneath keeps the sheet as authored — and what the air ends on must be
+  ABOVE THE BELLY LINE: the same day's drill on the Teutonic found a promenade deck authored facing down under a
+  higher deck, which the distance test alone kept down (684 faces see-through from above, where master had turned
+  it up); the room under a deck ends on the hull's bottom, which is below the belly line by construction, and the
+  deck under a real underside is far above it. Reading which WAY that surface faces was tried and abandoned in
+  review: the group's own faces carry whatever the passes have already done to them, so the verdict would depend on
+  which sheet was judged first, and reading them as authored instead is wrong wherever the source itself is
+  miswound — the Svea's deck under the mast is authored upside down, and asking it cost 332 of the recovered ray
+  cells. Distances only, so a surface doubled by duplication and a mirrored instance both stop mattering. One-sided and narrow: a deck wound down has the sky above it and is still turned, an inside-out
+  hull bottom faces up, side plating is not level — all go through the score as before. The island line says "kept
+  (an underside: N of M down-facing faces have a ceiling D above and a floor D beneath)" or "reversed whole (not an
+  underside: …)", and the summary counts the undersides. A sheet with NOTHING beneath it is not an underside either
+  (found in review twice over): an empty column read as infinitely deep air, cleared the ratio for free, and the
+  report then printed a floor distance nothing had been hit at. Tested (the underside kept; the sky-above sheet
+  turned; the deck under a deck turned; the deck over an inside-out hull bottom turned; nothing beneath turned, and
+  no invented floor in the line; a doubled and a mirrored surface beneath still read as ground). MEASURED, per-ray
+  census over the fighting top, cells solid in the source and see-through in the fuse: **1,622 → 52** over six
+  directions, and **733 → 0** from below. Swept over five ships, every group, against master: **10 of 102
+  groups change, and every one of them is a group that keeps an underside** — nothing else moves. The largest
+  change outside the Svea is the Teutonic's group X, 788 fewer faces turned, and a ray census over that group is
+  identical to master's cell for cell: what the rule keeps there is a doubled surface whose facing no ray can see,
+  so the output simply stays closer to the source.
+
 - **Vehicle Lab: a Gun section** (user: "I cannot set this value, why is it in deploy anyway?"). The Gun pivot,
   the deploy raise and the recoil dials moved out of *Deploy — trails opening, sails furling* into their own
   *Gun — pivot, deploy raise & recoil* section, and nothing in it is greyed out any more: the pivot is a recipe value
