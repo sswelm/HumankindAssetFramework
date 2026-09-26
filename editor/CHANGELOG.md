@@ -5,6 +5,15 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Workshop: a cut carries its marks to the output** (user: "when I cut up a part, I end up losing all
+  configurations on it, so whenever I make a cut it should also copy the configuration so I don't have to start from
+  scratch"). The ⊕ group letters have travelled with a cut output since 2026-09-16; the Split, Tear and Delete checks
+  did not. Only the source kept them, so opening the output meant marking everything again — worst on a plane cut,
+  which leaves every other part's checks untouched and unspent. They ride along now the same way: a part that
+  survives the cut keeps its own check, and the pieces a cut creates inherit the check of the part they came from
+  (`WorkshopRules.TransferLetters`, already the letters' rule and already tested). Written beside the output as
+  `<output>.glb.marks.txt`, which the first Probe of that file reads.
+
 - **Model Fuser: an underside keeps its facing** (user: "het kraaiennest is transparant vanaf de onderkant na fusie",
   HMS Svea's fighting top). The flared underside of the mast top — 742 faces, all authored facing down, high above
   the belly line — came out of the fuse with 351 of them turned up, see-through from below. The direction pass's last

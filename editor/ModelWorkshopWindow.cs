@@ -980,6 +980,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             string deletedLine = ApplyDeletionsTo(outGlb);   // the marks for deletion, on the written output (the cut only appends)
             WriteMarksSidecar(srcFile);
             WriteFuseSidecarForOutput(outGlb);   // the ⊕ letters travel with the output, passed down to the _CutA/_CutB children (user 2026-09-16; review of 0097bd5)
+            WriteMarksSidecarForOutput(outGlb);   // …and so do the Split/Tear/Delete checks (user 2026-09-26)
             status = $"Plane cut done: {result.Details.FirstOrDefault()}{(deletedLine != null ? " " + deletedLine + "." : "")}\n{outGlb}\nNext: open it in the Vehicle Lab — or cut again by pointing Source GLB at this output and re-Probing (your ⊕ letters travel with it).";
         }
         catch (Exception e) { status = "Plane cut failed (source untouched): " + e.Message; Debug.LogException(e); }
@@ -1194,6 +1195,30 @@ public abstract class ModelWorkshopWindow : EditorWindow
         }
         catch (Exception e) { Debug.LogWarning("[Workshop] could not write the output's fuse groupings sidecar: " + e.Message); }
     }
+    // THE MARKS TRAVEL WITH THE OUTPUT TOO (2026-09-26, user: "when I cut up a part I end up losing all configurations
+    // on it, so whenever I make a cut it should also copy the configuration so I don't have to start from scratch").
+    // The ⊕ letters have travelled since 2026-09-16; the Split/Tear/Delete checks did not, and only the SOURCE kept
+    // them - so opening the output meant marking it all again, worst on a plane cut, which leaves every other part's
+    // checks untouched and unspent. Same passing-down as the letters: a part that survives keeps its own check, and
+    // the pieces a cut creates inherit the check of the part they came from.
+    void WriteMarksSidecarForOutput(string outputGlb)
+    {
+        try
+        {
+            string path = MarksSidecarPath(outputGlb); if (path == null) return;
+            var codes = rows.Where(r => r.split || r.tear || r.delete).ToDictionary(r => r.nodeIndex, r => r.delete ? "X" : r.tear ? "T" : "S");
+            if (codes.Count == 0) { if (File.Exists(path)) File.Delete(path); return; }
+            var parts = GlbDisconnectedParts.Analyze(File.ReadAllBytes(outputGlb));
+            var table = GlbDisconnectedParts.NodeParents(File.ReadAllBytes(outputGlb));
+            int firstNewNode = GlbDisconnectedParts.NodeParents(File.ReadAllBytes(srcFile)).Count;   // the operation only appends
+            var transferred = WorkshopRules.TransferLetters(codes, table, new HashSet<int>(parts.Select(q => q.NodeIndex)), firstNewNode);
+            var nameOf = parts.ToDictionary(q => q.NodeIndex, q => q.NodeName);
+            var lines = transferred.OrderBy(kv => kv.Key).Where(kv => nameOf.ContainsKey(kv.Key)).Select(kv => WorkshopRules.SidecarLine(kv.Value, nameOf[kv.Key], kv.Key)).ToArray();
+            if (lines.Length == 0) { if (File.Exists(path)) File.Delete(path); return; }
+            File.WriteAllLines(path, new[] { WorkshopRules.SidecarHeader }.Concat(lines));
+        }
+        catch (Exception e) { Debug.LogWarning("[Workshop] could not write the output's marks sidecar: " + e.Message); }
+    }
     // Marks `target` from the sidecar; returns how many rows got a letter, `refused` = lines that fit no single row
     // (each already logged as a warning). Rows the file does not mention are left as they are.
     // the "#name|letter|name" lines for the named groups among `lettersInUse`, in letter order
@@ -1335,6 +1360,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             WriteMarksSidecar(srcFile);   // the checks and deletion marks, next to the source: the first Probe of it restores them
             if (result != null) foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
             WriteFuseSidecarForOutput(outGlb);   // the ⊕ letters travel with the output, passed down to the _Part_NNN children
+            WriteMarksSidecarForOutput(outGlb);   // …and so do the Split/Tear/Delete checks (user 2026-09-26)
             status = (result != null && result.Changed ? $"Split done: {result.NodesSplit} part(s) → {result.ChildPartsCreated} sub-parts, {result.SourceTriangles:N0} triangles preserved." : "Split: nothing checked.")
                    + (torn != null && torn.Changed ? $" Tear: {torn.NodesSplit} part(s) → {torn.ChildPartsCreated} pieces." : torn != null ? " Tear: nothing came apart (the mirror side has no separate island where this part is welded)." : "")
                    + (deletedLine != null ? " " + deletedLine + "." : "") + (renamedLine != null ? " " + renamedLine + "." : "") + $"\n{outGlb}\nNext: open it in the Vehicle Lab, Probe parts, and mark the junk islands Ignore.";
