@@ -979,7 +979,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
             string deletedLine = ApplyDeletionsTo(outGlb);   // the marks for deletion, on the written output (the cut only appends)
             WriteMarksSidecar(srcFile);
-            WriteFuseSidecarForOutput(outGlb);   // the ⊕ letters travel with the output, passed down to the _CutA/_CutB children (user 2026-09-16; review of 0097bd5)
+            WriteSidecarsForOutput(outGlb);   // the ⊕ letters and the marks travel with the output, passed down to the _CutA/_CutB children (users 2026-09-16 and 2026-09-26; review of 0097bd5)
             status = $"Plane cut done: {result.Details.FirstOrDefault()}{(deletedLine != null ? " " + deletedLine + "." : "")}\n{outGlb}\nNext: open it in the Vehicle Lab — or cut again by pointing Source GLB at this output and re-Probing (your ⊕ letters travel with it).";
         }
         catch (Exception e) { status = "Plane cut failed (source untouched): " + e.Message; Debug.LogException(e); }
@@ -1173,26 +1173,46 @@ public abstract class ModelWorkshopWindow : EditorWindow
         }
         catch (Exception e) { Debug.LogWarning("[Workshop] could not write the fuse groupings sidecar: " + e.Message); }
     }
-    // The sidecar for a SPLIT or CUT output: the letters of the rows in memory, passed down to the new _Part_NNN / _CutA
-    // children in the output (the split parent is meshless there and would resolve to nothing — review of 0097bd5).
-    void WriteFuseSidecarForOutput(string outputGlb)
+    // THE SIDECARS FOR A SPLIT OR CUT OUTPUT, from ONE parse: the ⊕ letters and the Split/Tear/Delete checks of the
+    // rows in memory, each passed down to the new _Part_NNN / _CutA children (the split parent is meshless there and
+    // would resolve to nothing — review of 0097bd5). The marks joined the letters on 2026-09-26 (user: "when I cut up
+    // a part I end up losing all configurations on it"); they were written by a second method that re-read the output
+    // and re-analysed its geometry a few lines after this one had (review of PR #94 — seconds on a 36 MB ship, and
+    // every byte of it read twice). The output is read once here and the source once, and both files come out of the
+    // same tables.
+    void WriteSidecarsForOutput(string outputGlb)
     {
         try
         {
-            string path = FuseSidecarPath(outputGlb); if (path == null) return;
+            string lettersPath = FuseSidecarPath(outputGlb), marksPath = MarksSidecarPath(outputGlb);
             var letters = rows.Where(r => !string.IsNullOrEmpty(r.fuse)).ToDictionary(r => r.nodeIndex, r => r.fuse);
-            if (letters.Count == 0) { if (File.Exists(path)) File.Delete(path); return; }
-            var parts = GlbDisconnectedParts.Analyze(File.ReadAllBytes(outputGlb));
+            var codes = rows.Where(r => r.split || r.tear || r.delete).ToDictionary(r => r.nodeIndex, r => r.delete ? "X" : r.tear ? "T" : "S");
+            if (letters.Count == 0 && codes.Count == 0)
+            {
+                foreach (string p in new[] { lettersPath, marksPath }) if (p != null && File.Exists(p)) File.Delete(p);
+                return;
+            }
+            byte[] outBytes = File.ReadAllBytes(outputGlb);
+            var parts = GlbDisconnectedParts.Analyze(outBytes);
             // every node's parent (the split parent is meshless, so the analyzer does not list it — read the hierarchy directly)
-            var table = GlbDisconnectedParts.NodeParents(File.ReadAllBytes(outputGlb));
+            var table = GlbDisconnectedParts.NodeParents(outBytes);
             int firstNewNode = GlbDisconnectedParts.NodeParents(File.ReadAllBytes(srcFile)).Count;   // the operation only appends: nodes past the source's count are the ones it created
-            var transferred = WorkshopRules.TransferLetters(letters, table, new HashSet<int>(parts.Select(q => q.NodeIndex)), firstNewNode);
+            var meshNodes = new HashSet<int>(parts.Select(q => q.NodeIndex));
             var nameOf = parts.ToDictionary(q => q.NodeIndex, q => q.NodeName);
-            var lines = transferred.OrderBy(kv => kv.Key).Where(kv => nameOf.ContainsKey(kv.Key)).Select(kv => WorkshopRules.SidecarLine(kv.Value, nameOf[kv.Key], kv.Key)).ToArray();
-            if (lines.Length == 0) { if (File.Exists(path)) File.Delete(path); return; }
-            File.WriteAllLines(path, new[] { WorkshopRules.SidecarHeader }.Concat(GroupNameLines(transferred.Values)).Concat(lines));
+            void Write(string path, IDictionary<int, string> source, bool withGroupNames)
+            {
+                if (path == null) return;
+                if (source.Count == 0) { if (File.Exists(path)) File.Delete(path); return; }
+                var transferred = WorkshopRules.TransferLetters(source, table, meshNodes, firstNewNode);
+                var lines = transferred.OrderBy(kv => kv.Key).Where(kv => nameOf.ContainsKey(kv.Key)).Select(kv => WorkshopRules.SidecarLine(kv.Value, nameOf[kv.Key], kv.Key)).ToArray();
+                if (lines.Length == 0) { if (File.Exists(path)) File.Delete(path); return; }
+                var head = withGroupNames ? new[] { WorkshopRules.SidecarHeader }.Concat(GroupNameLines(transferred.Values)) : new[] { WorkshopRules.SidecarHeader };
+                File.WriteAllLines(path, head.Concat(lines));
+            }
+            Write(lettersPath, letters, true);
+            Write(marksPath, codes, false);
         }
-        catch (Exception e) { Debug.LogWarning("[Workshop] could not write the output's fuse groupings sidecar: " + e.Message); }
+        catch (Exception e) { Debug.LogWarning("[Workshop] could not write the output's sidecars: " + e.Message); }
     }
     // Marks `target` from the sidecar; returns how many rows got a letter, `refused` = lines that fit no single row
     // (each already logged as a warning). Rows the file does not mention are left as they are.
@@ -1334,7 +1354,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             File.WriteAllBytes(outGlb, bytes);
             WriteMarksSidecar(srcFile);   // the checks and deletion marks, next to the source: the first Probe of it restores them
             if (result != null) foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
-            WriteFuseSidecarForOutput(outGlb);   // the ⊕ letters travel with the output, passed down to the _Part_NNN children
+            WriteSidecarsForOutput(outGlb);   // the ⊕ letters and the marks travel with the output, passed down to the _Part_NNN children
             status = (result != null && result.Changed ? $"Split done: {result.NodesSplit} part(s) → {result.ChildPartsCreated} sub-parts, {result.SourceTriangles:N0} triangles preserved." : "Split: nothing checked.")
                    + (torn != null && torn.Changed ? $" Tear: {torn.NodesSplit} part(s) → {torn.ChildPartsCreated} pieces." : torn != null ? " Tear: nothing came apart (the mirror side has no separate island where this part is welded)." : "")
                    + (deletedLine != null ? " " + deletedLine + "." : "") + (renamedLine != null ? " " + renamedLine + "." : "") + $"\n{outGlb}\nNext: open it in the Vehicle Lab, Probe parts, and mark the junk islands Ignore.";
