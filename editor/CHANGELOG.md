@@ -50,7 +50,13 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   midpoint the next time it is generated, and the Vehicle Lab's tooltip says so. And the pivot safeguard is an
   **identity** check against the rig's Gun bone (`Gun` or the bake's `b012_Gun`) rather than a substring test, which
   had accepted `b005_GunMount` — the bone the runtime's first-match rule actually picks when it sorts first — and a
-  configured `GunTurret`, and then advised a pivot for a bone Gun pivot cannot place. Tested.
+  configured `GunTurret`, and then advised a pivot for a bone Gun pivot cannot place. Tested. **Fourth round:** that
+  identity check accepts any single-letter index prefix, not just `b###_` — a model with donor sockets bakes its
+  bones as `A###_` so every real bone sorts ahead of the donor names, and the `b`-only form withheld a pivot preview
+  that was perfectly valid. The 0.5 change was measured against this pack rather than left as a worry: three of the
+  four gun recipes sit at the default, none of them marks a cradle, so for each the assembly and the tube are the
+  same geometry and the trunnion moves by well under a thousandth of the tube (the gunboat: 0.4996 → 0.5000). The
+  one tuned recipe is at 0.25 and never took the special case.
 
 - **Bake Tests: the Model Workshop and the Vehicle Lab have rows** (user: "could you add fuse and split and extra
   generate test to the bake test"). Neither tool was exercised by any row: the Workshop's split/tear/fuse ran only on

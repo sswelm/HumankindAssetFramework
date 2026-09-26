@@ -48,9 +48,11 @@ public class AnimationLabRulesTests
         Assert.True(AnimationLabRules.IsRigBone("Gun", "Gun"));
         Assert.True(AnimationLabRules.IsRigBone("b012_Gun", "Gun"));       // the bake's b###_<orig> rename
         Assert.True(AnimationLabRules.IsRigBone("b7_gun", "Gun"));
+        Assert.True(AnimationLabRules.IsRigBone("A012_Gun", "Gun"));       // a model with donor sockets renames with 'A###_' so real bones sort first
         Assert.False(AnimationLabRules.IsRigBone("b005_GunMount", "Gun"));
         Assert.False(AnimationLabRules.IsRigBone("GunTurret", "Gun"));
         Assert.False(AnimationLabRules.IsRigBone("b013_GunShield", "Gun"));
+        Assert.False(AnimationLabRules.IsRigBone("A005_GunMount", "Gun"));
         Assert.False(AnimationLabRules.IsRigBone("Turret", "Gun"));
         Assert.False(AnimationLabRules.IsRigBone("bxx_Gun", "Gun"));       // the prefix is digits, nothing else
         Assert.False(AnimationLabRules.IsRigBone("", "Gun"));

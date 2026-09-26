@@ -858,15 +858,17 @@ public static class AnimationLabRules
     public static bool NameNeedsTrimming(string configured) =>
         !string.IsNullOrEmpty(configured) && configured != configured.Trim();
 
-    /// True when a baked bone IS the rig's bone of that name. The bake renames "Gun" to "b012_Gun", so an exact name
-    /// or that prefix counts and a longer name that merely CONTAINS it does not (second review of PR #92: the pivot
-    /// safeguard tested for the substring, so it accepted "b005_GunMount" — which is what the runtime's first-match
-    /// rule picks when it comes first — and "GunTurret", and then advised a pivot for a bone Gun pivot cannot place).
+    /// True when a baked bone IS the rig's bone of that name. The bake renames "Gun" to "b012_Gun" — or to "A012_Gun"
+    /// on a model with donor sockets, which need every real bone to sort ahead of the donor names (rig_anim.py picks
+    /// the letter) — so an exact name or ANY single-letter index prefix counts, and a longer name that merely
+    /// CONTAINS the rig name does not. Two review rounds of PR #92 landed here: the substring test accepted
+    /// "b005_GunMount", which is what the runtime's first-match rule picks when it sorts first, and "GunTurret";
+    /// then a "b"-only prefix refused the socketed "A012_Gun" and withheld a pivot preview that was perfectly valid.
     public static bool IsRigBone(string bakedName, string rigName)
     {
         if (string.IsNullOrEmpty(bakedName) || string.IsNullOrEmpty(rigName)) return false;
         if (string.Equals(bakedName, rigName, StringComparison.OrdinalIgnoreCase)) return true;
-        var m = System.Text.RegularExpressions.Regex.Match(bakedName, @"^b\d+_(.+)$");
+        var m = System.Text.RegularExpressions.Regex.Match(bakedName, @"^[A-Za-z]\d+_(.+)$");
         return m.Success && string.Equals(m.Groups[1].Value, rigName, StringComparison.OrdinalIgnoreCase);
     }
 
