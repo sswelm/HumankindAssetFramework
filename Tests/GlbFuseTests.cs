@@ -1075,6 +1075,71 @@ public class GlbFuseTests
     }
 
     [Fact]
+    public void A_down_facing_sheet_with_nothing_beneath_it_is_not_an_underside()
+    {
+        // Review of PR #93, found twice independently: an empty column beneath reads as +inf, which cleared the
+        // "three times as much air beneath" test for free and kept a wrongly wound sheet cantilevered past the hull
+        // - and the report printed a floor distance nothing had been hit at. No floor, no underside.
+        var hull = Box("Hull", 400, -200, -450, -200, inward: false);
+        var roof = Level("Sponson", 300, 320, 0, 20, 100, down: false);   // the ceiling over it, well outboard of the hull
+        var under = Level("Sponson", 302, 318, 2, 18, 99, down: true);    // authored facing down, and nothing at all beneath
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, roof, under), new[] { 1, 2 }, 0.0);
+        string sheets = r.Details.First(d => d.StartsWith("largest islands:", StringComparison.Ordinal));
+        Assert.Contains("reversed whole (not an underside: 2 of 2 down-facing faces have nothing beneath them)", sheets);
+        Assert.DoesNotContain("a floor", sheets);
+        Assert.DoesNotContain(r.Details, d => d.StartsWith("undersides:", StringComparison.Ordinal));
+        Assert.All(FusedNormals(r, "Sponson_Fused"), n => Assert.True(n[1] > 0, "turned up"));
+    }
+
+    [Fact]
+    public void A_floor_doubled_by_duplication_beneath_an_underside_still_reads_as_a_floor()
+    {
+        // Review of PR #93: both copies of a doubled surface return the same distance, so a first-hit answer is
+        // decided by whichever the column list holds first - an order that follows the file. Either copy facing the
+        // ray makes it a floor. The deck here is authored twice, one face each way, and is NOT in the group.
+        var hull = Box("Hull", 400, -200, -450, -200, inward: false);
+        var deckUp = Level("Deck", -20, 30, -20, 30, 0, down: false);
+        var deckDown = Level("Deck", -20, 30, -20, 30, 0, down: true);    // the same quad, wound the other way
+        var ceiling = Level("Top", 0, 10, 0, 10, 100, down: false);
+        var under = Level("Top", 1, 9, 1, 9, 99, down: true);
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, deckUp, deckDown, ceiling, under), new[] { 3, 4 }, 0.0);
+        string sheets = r.Details.First(d => d.StartsWith("largest islands:", StringComparison.Ordinal));
+        Assert.Contains("an underside: 2 of 2 down-facing faces have a ceiling 1 above and a floor 99 beneath", sheets);
+        Assert.Equal(0, r.FacesRewound);
+    }
+
+    [Fact]
+    public void A_mirrored_floor_beneath_an_underside_is_read_with_the_winding_it_renders()
+    {
+        // Review of PR #93: an occluder node with a negative determinant draws its triangles reversed, and the gather
+        // swaps their corners for exactly that reason - the occluder build did not, because until the underside rule
+        // no occluder's winding was ever read. A mirrored deck beneath would report its front as a back and turn a
+        // genuine underside up.
+        var hull = Box("Hull", 400, -200, -450, -200, inward: false);
+        var deck = Level("Deck", -20, 30, -30, 20, 0, down: false);       // authored facing UP under a MIRRORED node: the
+        deck.Scale = new double[] { 1, 1, -1 };                            // transform reverses its winding, the renderer reverses the front face back, so it renders facing up
+        var ceiling = Level("Top", 0, 10, 0, 10, 100, down: false);
+        var under = Level("Top", 1, 9, 1, 9, 99, down: true);
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, deck, ceiling, under), new[] { 2, 3 }, 0.0);
+        string sheets = r.Details.First(d => d.StartsWith("largest islands:", StringComparison.Ordinal));
+        Assert.Contains("an underside: 2 of 2 down-facing faces have a ceiling 1 above and a floor 99 beneath", sheets);
+        Assert.Equal(0, r.FacesRewound);
+    }
+
+    [Fact]
+    public void Two_undersides_are_both_kept_and_counted()
+    {
+        var hull = Box("Hull", 400, -200, -450, -200, inward: false);
+        var ceilingA = Level("A", 0, 10, 0, 10, 100, down: false);
+        var underA = Level("A", 1, 9, 1, 9, 99, down: true);
+        var ceilingB = Level("B", 40, 50, 0, 10, 100, down: false);
+        var underB = Level("B", 41, 49, 1, 9, 99, down: true);
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, ceilingA, underA, ceilingB, underB), new[] { 1, 2, 3, 4 }, 0.0);
+        Assert.Contains(r.Details, d => d.StartsWith("undersides: 2 down-facing sheet(s)", StringComparison.Ordinal));
+        Assert.Equal(0, r.FacesRewound);
+    }
+
+    [Fact]
     public void A_sheet_authored_facing_down_with_only_sky_above_is_still_turned()
     {
         // The one-sidedness of the rule above: the same down-facing sheet with nothing over it is a deck wound the

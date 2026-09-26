@@ -13,19 +13,24 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   more, not fewer: the sheet is wrong by that rule at any size). What makes it an underside is in the geometry: the
   platform's floor a few units above, the deck far beneath. So before a down-facing sheet above the belly is turned
   on the score alone, its faces are asked what lies above and below them along the column; a ceiling close above
-  and at least three times that much air beneath keeps the sheet as authored — and the air beneath must end on a
-  FLOOR, an up-facing face ABOVE THE BELLY LINE: the same day's drill on the Teutonic found a promenade deck
-  authored facing down under a higher deck, which the distance test alone kept down (684 faces see-through from
-  above, where master had turned it up); the ray down from a deck lands on the hull's bottom plating, the ray down
-  from the flare on the deck's face — and since that plating shows its front too on an inside-out or double hull
-  (185 more faces on the Teutonic), what settles it is height: a hull's bottom is below the belly line by
-  construction, the deck under an underside far above it. One-sided and narrow: a deck wound down has the sky above it and is still turned, an inside-out
+  and at least three times that much air beneath keeps the sheet as authored — and what the air ends on must be
+  ABOVE THE BELLY LINE: the same day's drill on the Teutonic found a promenade deck authored facing down under a
+  higher deck, which the distance test alone kept down (684 faces see-through from above, where master had turned
+  it up); the room under a deck ends on the hull's bottom, which is below the belly line by construction, and the
+  deck under a real underside is far above it. Reading which WAY that surface faces was tried and abandoned in
+  review: the group's own faces carry whatever the passes have already done to them, so the verdict would depend on
+  which sheet was judged first, and reading them as authored instead is wrong wherever the source itself is
+  miswound — the Svea's deck under the mast is authored upside down, and asking it cost 332 of the recovered ray
+  cells. Distances only, so a surface doubled by duplication and a mirrored instance both stop mattering. One-sided and narrow: a deck wound down has the sky above it and is still turned, an inside-out
   hull bottom faces up, side plating is not level — all go through the score as before. The island line says "kept
   (an underside: N of M down-facing faces have a ceiling D above and a floor D beneath)" or "reversed whole (not an
-  underside: …)", and the summary counts the undersides. Tested (the underside kept, the sky-above sheet turned, the
-  deck under a deck turned, the deck over an inside-out hull bottom turned). MEASURED, per-ray census over the
-  fighting top, cells solid in the source and see-through in the fuse: **1,622 → 54** over six directions, and
-  **733 → 2** from below. Swept over five ships' every group: what it now keeps elsewhere is small and genuinely
+  underside: …)", and the summary counts the undersides. A sheet with NOTHING beneath it is not an underside either
+  (found in review twice over): an empty column read as infinitely deep air, cleared the ratio for free, and the
+  report then printed a floor distance nothing had been hit at. Tested (the underside kept; the sky-above sheet
+  turned; the deck under a deck turned; the deck over an inside-out hull bottom turned; nothing beneath turned, and
+  no invented floor in the line; a doubled and a mirrored surface beneath still read as ground). MEASURED, per-ray
+  census over the fighting top, cells solid in the source and see-through in the fuse: **1,622 → 52** over six
+  directions, and **733 → 0** from below. Swept over five ships' every group: what it now keeps elsewhere is small and genuinely
   thin (4 to 24 faces, a ceiling 0 to 0.5 above, a floor 1.1 to 20.9 beneath) and the ships' renders from above and
   below are unchanged; the Teutonic's two large sheets that an earlier form of the rule held down (684 and 185
   faces) go back to master's verdict.

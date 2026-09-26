@@ -435,10 +435,12 @@ searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideReg
   hull's floor, or facing up on balance above the belly line, is a deck however negative its volume reads, because a
   deck with a rim is a tray and a tray seen from above is the same surface as a box wound inside out), a *flat* sheet
   (deck, bulwark) by the inside-out score against the hull's belly axis — except an *underside*: a down-facing
-  sheet above the belly line whose faces have a ceiling close above them and, at least three times as far below,
-  a floor that is itself above the belly line (HMS Svea's fighting top, whose flared underside the score called
-  inside-out and turned up, see-through from below; a deck wound the wrong way has the sky above it, and the room
-  under a deck ends on the hull's bottom, which is low by construction). A part *double-sided by duplication* (every
+  sheet above the belly line whose faces have something close above them and, at least three times as far below,
+  either nothing at all or a surface that is itself above the belly line (HMS Svea's fighting top, whose flared
+  underside the score called inside-out and turned up, see-through from below; a deck wound the wrong way has the
+  sky above it, and the room under a deck ends on the hull's bottom, which is low by construction). Only distances
+  are read, never which way the thing above or below faces: a group's own faces carry whatever the passes have
+  already done to them, and the source's own winding is what is in question. A part *double-sided by duplication* (every
   face twice, wound both ways) is kept as two copies through the weld, so each is judged and emitted whole — welded
   together they made four-face edges everywhere and an importer then dropped one copy at random. Every sheet's report line now carries its
   levelness (`level +1.00` = every face up) and height, which is what makes a wrong verdict traceable. Welded vertices share one position even where a UV seam or hard edge keeps them separate;

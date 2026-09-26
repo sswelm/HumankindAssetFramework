@@ -1991,33 +1991,21 @@ public static class GlbDisconnectedParts
         }
         // ...and from BELOW, the same column upward from the model's bottom: what tells a well's floor (the hull
         // beneath it) from an upturned boat's bottom (nothing beneath it) - both face up and both see the sky.
-        bool ExposedFromAbove(int f) => Exposed(f, true);
-        bool Exposed(int f, bool fromAbove)
+        // THE COLUMN, walked ONCE (2026-09-26, review of PR #93). Two walkers over the same grid with epsilons
+        // anchored at opposite ends of the ray could disagree about the same thin gap; this is the only one. From the
+        // face's own centroid, straight up or down: the distance to the nearest thing (+inf when the column holds
+        // nothing that way) and whether that thing SHOWS ITS FRONT to the ray - a floor seen from above, a ceiling
+        // seen from below - as against its back, the inside of a hull's bottom plating.
+        //   * DISTANCE ONLY, never which way the thing faces (review of PR #93, second round). Reading the hit's
+        //     winding was tried and is a trap from both ends: the group's own faces carry whatever the passes have
+        //     done to them so far, so the answer depends on which sheet was judged first; and reading them as
+        //     AUTHORED instead is wrong wherever the source itself is miswound - measured on the Svea, whose deck
+        //     under the mast is authored upside down and which the pass corrects (386 see-through cells against 54).
+        //     A surface doubled by duplication and a mirrored instance both stop mattering for the same reason.
+        //   * `skip` is the sheet being judged: a sheet is not evidence about what lies under it.
+        double Column(int f, bool upward, HashSet<int> skip)
         {
             EnsureOccluders();
-            Vec3 c = FScale(FAdd(FAdd(P(f, 0), P(f, 1)), P(f, 2)), 1.0 / 3.0);
-            double top = fromAbove ? modelTop + columnCell : modelBottom - columnCell, tf = fromAbove ? top - c.Y : c.Y - top; if (tf <= 0) return true;
-            var o = new Vec3 { X = c.X, Y = top, Z = c.Z }; var d = new Vec3 { X = 0, Y = fromAbove ? -1 : 1, Z = 0 };
-            long key = ((long)Math.Floor(c.X / columnCell) << 32) ^ ((long)Math.Floor(c.Z / columnCell) & 0xffffffffL);
-            if (!columns.TryGetValue(key, out List<int> l)) return true;
-            foreach (int t in l)
-            {
-                double hit;
-                if (t >= 0) hit = RayTriangle(o, d, occluders[t], occluders[t + 1], occluders[t + 2]);
-                else { int g = -1 - t; if (g == f) continue; hit = RayTriangle(o, d, P(g, 0), P(g, 1), P(g, 2)); }
-                if (hit > 0 && hit < tf - 1e-6 * Math.Max(1.0, tf)) return false;
-            }
-            return true;
-        }
-        // HOW FAR IS THE NEAREST THING ABOVE OR BELOW A FACE, AND WHICH WAY DOES IT FACE (2026-09-26, HMS Svea's
-        // fighting top): the same column, a ray from the face's own centroid straight up or down, the distance to the
-        // first hit - +inf when nothing is there - and whether that hit shows its FRONT to the ray (its authored normal
-        // points back at the face: a floor seen from above, a ceiling seen from below) or its back (the inside of a
-        // hull's bottom plating seen from within). Coincident copies of the face (a surface doubled by duplication)
-        // sit at distance zero and are skipped.
-        double FreeRun(int f, bool upward, out bool hitFront)
-        {
-            EnsureOccluders(); hitFront = false;
             Vec3 c = FScale(FAdd(FAdd(P(f, 0), P(f, 1)), P(f, 2)), 1.0 / 3.0);
             var d = new Vec3 { X = 0, Y = upward ? 1 : -1, Z = 0 };
             long key = ((long)Math.Floor(c.X / columnCell) << 32) ^ ((long)Math.Floor(c.Z / columnCell) & 0xffffffffL);
@@ -2025,19 +2013,21 @@ public static class GlbDisconnectedParts
             double best = double.PositiveInfinity, skin = 1e-6 * Math.Max(1.0, modelTop - modelBottom);
             foreach (int t in l)
             {
-                double hit; Vec3 n;
-                if (t >= 0) { hit = RayTriangle(c, d, occluders[t], occluders[t + 1], occluders[t + 2]); n = FCross(FSub(occluders[t + 1], occluders[t]), FSub(occluders[t + 2], occluders[t])); }
-                else { int g = -1 - t; if (g == f) continue; hit = RayTriangle(c, d, P(g, 0), P(g, 1), P(g, 2)); n = FaceNormal(g); }
-                if (hit > skin && hit < best) { best = hit; hitFront = FDot(n, d) < 0; }
+                double hit;
+                if (t >= 0) hit = RayTriangle(c, d, occluders[t], occluders[t + 1], occluders[t + 2]);
+                else { int g = -1 - t; if (g == f || (skip != null && skip.Contains(g))) continue; hit = RayTriangle(c, d, P(g, 0), P(g, 1), P(g, 2)); }
+                if (hit > skin && hit < best) best = hit;
             }
             return best;
         }
+        bool ExposedFromAbove(int f) => Exposed(f, true);
+        bool Exposed(int f, bool fromAbove) => double.IsPositiveInfinity(Column(f, fromAbove, null));
         var flip = new bool[faceCount];
         int islandsMadeConsistent = 0, islandsNotOrientable = 0, asAuthoredSheets = 0, fromAboveKept = 0, reversalsVetoed = 0, undersidesKept = 0;
         bool DirOf(int face, long key) { for (int e = 0; e < 3; e++) if (fEdgeKeys[face * 3 + e] == key) return fEdgeDir[face * 3 + e]; return false; }
         long PairKey(int f, int g) => f < g ? ((long)f << 32) | (uint)g : ((long)g << 32) | (uint)f;
         Vec3 P(int f, int corner) => pos[tris[f * 3 + corner]];
-        Vec3 FaceNormal(int f)   // area-weighted, with the CURRENT winding (authored while `flip` is still all false)
+        Vec3 FaceNormal(int f)   // area-weighted, with whatever the passes have done to the winding so far
         {
             Vec3 n = FCross(FSub(P(f, 1), P(f, 0)), FSub(P(f, 2), P(f, 0)));
             return flip[f] ? FScale(n, -1.0) : n;
@@ -2465,7 +2455,11 @@ public static class GlbDisconnectedParts
                     // seen from the side with the room. So before a down-facing sheet above the belly is turned on the
                     // score alone, its down-facing faces are asked what is above and below them, along the column:
                     // a ceiling close above and at least three times that much air beneath is an underside, and it
-                    // keeps its authored facing. AIR BENEATH MEANS A FLOOR BENEATH, ABOVE THE BELLY LINE (the Teutonic's
+                    // keeps its authored facing. A FLOOR MUST ACTUALLY BE THERE (review of PR #93, and an outside
+                    // reviewer's, independently): an empty column beneath reads as +inf, which cleared a "three times
+                    // as much air" test trivially and kept a wrongly wound sheet cantilevered past the hull - and the
+                    // report then printed a floor distance nothing had been hit at. No floor, no underside.
+                    // AND WHAT IT LANDS ON MUST BE ABOVE THE BELLY LINE (the Teutonic's
                     // promenade deck, the same day's drill): a deck authored facing down under a higher deck also has a
                     // ceiling close above and room below it - but that room is the hull's INSIDE. The ray down from it
                     // lands on the bottom plating, and that plating is read as authored: its back on a hull wound the
@@ -2478,26 +2472,36 @@ public static class GlbDisconnectedParts
                     // deck authored facing down has the sky above it (no ceiling), an inside-out hull bottom faces up,
                     // side plating is not level - all still go through the score exactly as before. Faces are sampled
                     // evenly, at most 64 of them.
+                    // THE GATES STAY WHERE THE GEOMETRY PUT THEM (review of PR #93, measured). Two tightenings were
+                    // tried and reverted, because a mast top's flare is a shallow CONE: its faces point down and
+                    // outward together, so neither the sheet nor the face reads as level by the 0.5 gate deckFacingUp
+                    // uses, and the platform above the lower part of the flare is tens of units up. Asking for 0.5
+                    // cost 142 of the Svea's 226 recovered ray cells and a ceiling bounded to a fiftieth of the
+                    // model's height cost another 44; the rule's real guard is what lies beneath, which costs nothing.
                     if (reverse && upness < -0.3 && islandY > bellyY)
                     {
-                        int keepVotes = 0, turnVotes = 0, insideBelow = 0, stride = Math.Max(1, isl.Count / 64);
+                        var own = new HashSet<int>(isl);   // a stepped underside must not see its own lower faces beneath it
+                        int keepVotes = 0, turnVotes = 0, insideBelow = 0, noFloor = 0, stride = (isl.Count + 63) / 64;
                         double aboveSum = 0, belowSum = 0;
                         for (int k = 0; k < isl.Count; k += stride)
                         {
                             int f = isl[k]; Vec3 nf = FaceNormal(f); double nl = FLen(nf);
                             if (nl < 1e-12 || nf.Y > -0.3 * nl) continue;
-                            double above = FreeRun(f, true, out bool _), below = FreeRun(f, false, out bool floorBelow);
+                            double above = Column(f, true, own), below = Column(f, false, own);
                             if (double.IsPositiveInfinity(above)) { turnVotes++; continue; }   // nothing over it: a deck wound down, not an underside
+                            if (double.IsPositiveInfinity(below)) { noFloor++; turnVotes++; continue; }               // nothing beneath at all: no evidence either way, and never an underside
                             double landingY = (P(f, 0).Y + P(f, 1).Y + P(f, 2).Y) / 3.0 - below;
-                            if (!double.IsPositiveInfinity(below) && (!floorBelow || landingY <= bellyY)) { insideBelow++; turnVotes++; continue; }   // the hull's inside beneath (its bottom, or a back face): a deck, not an underside
-                            if (below >= 3.0 * above) { keepVotes++; aboveSum += above; belowSum += Math.Min(below, modelTop - modelBottom); } else turnVotes++;
+                            if (landingY <= bellyY) { insideBelow++; turnVotes++; continue; }                         // it lands on the hull's bottom, which is low by construction: a deck, not an underside
+                            if (below >= 3.0 * above) { keepVotes++; aboveSum += above; belowSum += below; } else turnVotes++;
                         }
                         if (keepVotes > 0 && keepVotes >= 2 * turnVotes)
                         {
                             reverse = false; reversalVetoed = true; undersidesKept++;
                             vetoNote = string.Format(System.Globalization.CultureInfo.InvariantCulture, " (an underside: {0} of {1} down-facing faces have a ceiling {2:0.#} above and a floor {3:0.#} beneath)", keepVotes, keepVotes + turnVotes, aboveSum / keepVotes, belowSum / keepVotes);
                         }
-                        else if (insideBelow > 0 && insideBelow * 2 >= keepVotes + turnVotes)
+                        else if (noFloor > 0 && noFloor >= insideBelow)
+                            vetoNote = string.Format(System.Globalization.CultureInfo.InvariantCulture, " (not an underside: {0} of {1} down-facing faces have nothing beneath them)", noFloor, keepVotes + turnVotes);
+                        else if (insideBelow > 0)
                             vetoNote = string.Format(System.Globalization.CultureInfo.InvariantCulture, " (not an underside: {0} of {1} down-facing faces have the hull's inside beneath them)", insideBelow, keepVotes + turnVotes);
                     }
                 }
