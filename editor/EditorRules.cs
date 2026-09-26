@@ -840,3 +840,113 @@ public static class BakeGoldenRules
         return picked;
     }
 }
+
+// ANIMATION LAB RULES (2026-09-26, user: "I have no idea if the elevation axis is the correct one, so in the preview
+// could you add a slider that allows me to raise the turret from min to max"): the pure half of the Lab's elevation
+// preview - which bone the runtime will elevate, and by how much - so the preview cannot disagree with the game on
+// the part that can be reasoned about.
+public static class AnimationLabRules
+{
+    /// The bone the runtime elevates: the Turret bone when one is set, else the Gun (muzzle) bone. NOT trimmed, and
+    /// tested with IsNullOrEmpty, exactly as ApplyGunElevation reads them (review of PR #92: trimming here made a name
+    /// with a stray space preview as working and fail in the game with "gun bone not found" - the very failure this
+    /// preview exists to catch).
+    public static string ElevationBoneName(string turretBone, string muzzleBone) =>
+        !string.IsNullOrEmpty(turretBone) ? turretBone : (muzzleBone ?? "");
+
+    /// True when a configured bone name only matches once something trims it: the game will not find it.
+    public static bool NameNeedsTrimming(string configured) =>
+        !string.IsNullOrEmpty(configured) && configured != configured.Trim();
+
+    /// True when a baked bone IS the rig's bone of that name. The bake renames "Gun" to "b012_Gun" — or to "A012_Gun"
+    /// on a model with donor sockets, which need every real bone to sort ahead of the donor names (rig_anim.py picks
+    /// the letter) — so an exact name or ANY single-letter index prefix counts, and a longer name that merely
+    /// CONTAINS the rig name does not. Two review rounds of PR #92 landed here: the substring test accepted
+    /// "b005_GunMount", which is what the runtime's first-match rule picks when it sorts first, and "GunTurret";
+    /// then a "b"-only prefix refused the socketed "A012_Gun" and withheld a pivot preview that was perfectly valid.
+    public static bool IsRigBone(string bakedName, string rigName)
+    {
+        if (string.IsNullOrEmpty(bakedName) || string.IsNullOrEmpty(rigName)) return false;
+        if (string.Equals(bakedName, rigName, StringComparison.OrdinalIgnoreCase)) return true;
+        var m = System.Text.RegularExpressions.Regex.Match(bakedName, @"^[A-Za-z]\d+_(.+)$");
+        return m.Success && string.Equals(m.Groups[1].Value, rigName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// The runtime takes the FIRST bone whose name contains the configured one, case-insensitive, walking the
+    /// skeleton's bone array - which the conversion sorts by name, and the bake's b###_ prefix makes that the rig's
+    /// own order (Patches/UniversalInject.Pose.cs, ApplyGunElevation). The preview must land on the SAME bone, so it
+    /// walks the rig's names in ordinal order and takes the first hit. It must NOT prefer an exact match: with
+    /// "b005_GunShield" before "b012_Gun", preferring the exact name turned the barrel here and the shield in the
+    /// game, which is exactly backwards for a preview meant to prove the configuration (review of PR #92).
+    public static string PickElevationBone(IEnumerable<string> boneNames, string configured)
+    {
+        if (string.IsNullOrEmpty(configured)) return null;
+        return (boneNames ?? new string[0]).Where(n => !string.IsNullOrEmpty(n))
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .FirstOrDefault(n => n.IndexOf(configured, StringComparison.OrdinalIgnoreCase) >= 0);
+    }
+
+    /// The angle the runtime writes for a fraction of the configured max: NEGATED, as ApplyGunElevation does (a
+    /// positive rotation about the gun bone's pitch axis points the muzzle down in the engine's frame, so a positive
+    /// max must apply a negative angle to raise it; a negative max flips, as in the game).
+    public static float ElevationAngle(float gunElevMax, float fraction) => -gunElevMax * Math.Min(1f, Math.Max(0f, fraction));
+
+    /// THE GUN'S SPAN, as the RIGGER measured it — parsed from the "VEHICLE GUNSPAN ..." line vehicle_rig.py prints at
+    /// Generate and the Vehicle Lab keeps beside the output GLB as &lt;glb&gt;.gun.txt (2026-09-26, review of PR #92; the
+    /// editor used to re-derive it and got a different set of vertices and a different rule at the 0.5 default).
+    /// Bone-local SOURCE units: the breech and the muzzle relative to the bone's head — so the head, and therefore the
+    /// rig's own pivot, is the origin — plus the whole assembly's extent along that direction, which is what lets the
+    /// editor recover the bake's scale by measuring the same extent on the baked rig. False when the text is not
+    /// that line, or carries a field it cannot read.
+    public static bool ParseGunSpan(string text, out string bone, out double[] breech, out double[] muzzle, out double extent)
+    {
+        bone = null; breech = null; muzzle = null; extent = 0;
+        foreach (string raw in (text ?? "").Replace("\r\n", "\n").Split('\n'))
+        {
+            string line = raw.Trim();
+            if (!line.StartsWith("VEHICLE GUNSPAN", StringComparison.Ordinal)) continue;
+            string b = SpanField(line, "bone="), br = SpanField(line, "breech="), mz = SpanField(line, "muzzle="), ex = SpanField(line, "extent=");
+            if (string.IsNullOrEmpty(b) || !SpanTriple(br, out breech) || !SpanTriple(mz, out muzzle)
+                || !SpanNumber(ex, out extent) || extent <= 0 || SpanLength(breech, muzzle) <= 1e-9)
+            { bone = null; breech = null; muzzle = null; extent = 0; return false; }
+            bone = b;
+            return true;
+        }
+        return false;
+    }
+    static string SpanField(string line, string key)
+    {
+        int i = line.IndexOf(key, StringComparison.Ordinal);
+        if (i < 0) return null;
+        int start = i + key.Length, end = line.IndexOf(' ', start);
+        return end < 0 ? line.Substring(start) : line.Substring(start, end - start);
+    }
+    static bool SpanNumber(string s, out double v) =>
+        double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out v)
+        && !double.IsNaN(v) && !double.IsInfinity(v);
+    static double SpanLength(double[] a, double[] b) =>
+        Math.Sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2]));
+    static bool SpanTriple(string s, out double[] v)
+    {
+        v = null;
+        var parts = (s ?? "").Split(',');
+        if (parts.Length != 3) return false;
+        var o = new double[3];
+        for (int i = 0; i < 3; i++) if (!SpanNumber(parts[i], out o[i])) return false;
+        v = o; return true;
+    }
+
+    /// Where a point sits along breech->muzzle, as the fraction the Vehicle Lab's dial speaks: 0 at the breech, 1 at
+    /// the muzzle (the projection onto the segment, unclamped so an origin outside the span reads as such).
+    public static double PivotFraction(double[] point, double[] breech, double[] muzzle)
+    {
+        double dx = muzzle[0] - breech[0], dy = muzzle[1] - breech[1], dz = muzzle[2] - breech[2];
+        double len2 = dx * dx + dy * dy + dz * dz;
+        if (len2 <= 1e-18) return 0.5;
+        return ((point[0] - breech[0]) * dx + (point[1] - breech[1]) * dy + (point[2] - breech[2]) * dz) / len2;
+    }
+
+    /// The point at a fraction of breech->muzzle.
+    public static double[] PivotPoint(double[] breech, double[] muzzle, double fraction) =>
+        new[] { breech[0] + (muzzle[0] - breech[0]) * fraction, breech[1] + (muzzle[1] - breech[1]) * fraction, breech[2] + (muzzle[2] - breech[2]) * fraction };
+}

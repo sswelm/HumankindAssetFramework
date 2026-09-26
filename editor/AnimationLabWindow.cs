@@ -9,6 +9,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using UnityEditor;
 using UnityEditor.IMGUI.Controls;
@@ -65,6 +66,26 @@ public class AnimationLabWindow : EditorWindow
     [SerializeField] float fitAnimSpeed = 1f;
     float fitAnimT; double fitAnimTick;
     List<(string label, string dir)> fitRoles; string fitRolesFor;   // role clips that actually exist, cached per resource
+    // ELEVATION PREVIEW (2026-09-26, user: "I have no idea if the elevation axis is the correct one"): a slider that
+    // raises the gun in this preview from 0 to the configured max, applied the way the runtime applies it - the same
+    // bone (Turret bone else Gun bone, matched by substring), the same local axis (gunElevAxis), the same negated
+    // angle (AnimationLabRules.ElevationAngle) - composed onto the sampled clip pose every frame, exactly as the
+    // game's BoneRotation layer multiplies into the clip's pose. Needs the skinned instance, so it loads the first
+    // baked role when no clip is playing. The base rotation is restored before each sample so a bone the clip does
+    // not animate never accumulates.
+    [SerializeField] float fitElevFrac;      // 0 = resting, 1 = the configured max
+    Transform fitElevBone; string fitElevBoneFor = ""; Quaternion fitElevBase; Vector3 fitElevBasePos; string fitElevNote = "";
+    // THE PIVOT (2026-09-26, user: "the pivot point is not correct, so could you give me a slider which allows me to
+    // configure the pivot point along the length of the gun"). The game turns the bone about its ORIGIN, and the
+    // origin is where the Vehicle Lab's "Gun pivot" dial put it at Generate time - there is no runtime pivot. This
+    // slider previews the elevation about any point of the breech->muzzle span, measured here the way the rig script
+    // measures it (AnimationLabRules.GunSpan on the vertices skinned to the bone, in the bone's frame), by shifting
+    // the bone's position to compensate (rotation about d = rotation about the origin plus the translation d - R d),
+    // and reports the fraction to dial into the Vehicle Lab. The rig's current pivot is read off the same span.
+    [SerializeField] float fitPivotFrac = -1f;   // -1 = not yet taken from the rig
+    Vector3 fitPivotBreech, fitPivotMuzzle; float fitPivotRig = -1f; bool fitPivotKnown;
+    string fitPivotNote = "", fitPivotFor = "";   // why there is no pivot preview; and whose pivot fitPivotFrac is (never carried into the next model)
+    Dictionary<string, (Quaternion rot, Vector3 pos)> fitRestPose;   // the PREFAB's rest transforms: the live instance holds a sampled (and possibly elevated) pose
     static readonly (string label, string dir)[] FitAnimRoleDirs = {
         // "Idle / main clip" is the REFERENCE (anim/ — a flag/sail rig's deliberately DEPLOYED rest frame);
         // the Idle stance override bakes to anim_idle/ and is what the game actually plays at idle — without
@@ -166,6 +187,12 @@ public class AnimationLabWindow : EditorWindow
         if (fitPRU == null) fitPRU = new PreviewRenderUtility();
         fitAnimInst = Instantiate(prefab);
         fitAnimInst.hideFlags = HideFlags.HideAndDontSave;
+        // THE REST POSE, from the asset (review of PR #92): the elevation restores the bone to this every frame, and
+        // reading it off the live instance meant a bone resolved mid-playback - or while the Elevation slider was up -
+        // captured a sampled, elevated pose as "rest" for good.
+        fitRestPose = new Dictionary<string, (Quaternion, Vector3)>(StringComparer.Ordinal);
+        foreach (var t in prefab.GetComponentsInChildren<Transform>(true))
+            if (!fitRestPose.ContainsKey(t.name)) fitRestPose[t.name] = (t.localRotation, t.localPosition);
         // Wear the SAME skin as the rest-pose preview: the model's baked atlas material, plus the atlas-UV
         // substitute meshes of a multi-material bake (matched by vertex count, like LoadFitPreview). A substitute
         // is only accepted when it carries the SAME skinning data — a UV clone without bind poses would render
@@ -204,6 +231,118 @@ public class AnimationLabWindow : EditorWindow
     {
         if (fitAnimInst != null) { DestroyImmediate(fitAnimInst); fitAnimInst = null; }
         fitAnimClip = null; fitAnimBoundsValid = false;
+        fitElevBone = null; fitElevBoneFor = ""; fitPivotKnown = false; fitRestPose = null;
+    }
+
+    // What the pivot row says under the slider: why there is no preview, or the number to dial.
+    string PivotNote()
+    {
+        if (fitAnimInst == null) return "Drag to load the baked preview and turn the gun about this point.";
+        if (!fitPivotKnown) return "Pivot preview off: " + (fitPivotNote.Length > 0 ? fitPivotNote : fitElevNote);
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        return Mathf.Abs(fitPivotFrac - fitPivotRig) > 0.005f
+            ? string.Format(inv, "Previewing {0:0.00} of the rig's measured breech→muzzle span; the rig turns at {1:0.00}. To make it real: Vehicle Lab ▸ Gun pivot = {0:0.00}, Generate, then Bake here.", fitPivotFrac, fitPivotRig)
+            : string.Format(inv, "{0:0.00} of the rig's measured breech→muzzle span — the rig's own pivot.", fitPivotFrac);
+    }
+
+    // The bone the elevation slider turns: the runtime's rule (Turret bone else Gun bone, substring match) over the
+    // preview instance's transforms - resolved once per instance and configured name, its rest rotation kept.
+    void ResolveElevBone()
+    {
+        string want = cur == null ? "" : AnimationLabRules.ElevationBoneName(cur.turretBone, cur.muzzleBone);
+        string key = fitAnimInst.GetInstanceID() + "|" + want;
+        if (fitElevBoneFor == key) return;
+        if (fitElevBone != null) { fitElevBone.localRotation = fitElevBase; fitElevBone.localPosition = fitElevBasePos; }   // put the one we are leaving back first
+        fitElevBoneFor = key; fitElevBone = null; fitElevNote = ""; fitPivotKnown = false;
+        if (want.Length == 0) { fitElevNote = "no Turret or Gun bone set"; return; }
+        var all = fitAnimInst.GetComponentsInChildren<Transform>(true).Where(t => t != fitAnimInst.transform).ToList();
+        string pick = AnimationLabRules.PickElevationBone(all.Select(t => t.name), want);
+        if (pick == null)
+        {
+            fitElevNote = AnimationLabRules.NameNeedsTrimming(want)
+                ? $"'{want}' has a leading or trailing space — the game will not find it either"
+                : $"no bone in the preview rig contains '{want}'";
+            return;
+        }
+        fitElevBone = all.First(t => t.name == pick);
+        if (fitRestPose != null && fitRestPose.TryGetValue(pick, out var rest)) { fitElevBase = rest.rot; fitElevBasePos = rest.pos; }
+        else { fitElevBase = fitElevBone.localRotation; fitElevBasePos = fitElevBone.localPosition; }
+        fitElevNote = $"bone '{pick}'";
+        LoadGunSpan();
+    }
+
+    // The breech->muzzle span, from the RIGGER's own measurement (Vehicle Lab ▸ Generate writes it beside the output
+    // GLB as <glb>.gun.txt). The editor used to re-derive it from the vertices skinned to the bone, which is a
+    // different set and a different rule — the cradle welds to the bone but is out of the span, a marked brake pins
+    // the tip, recoil parks the tube on its own bone, and at exactly 0.5 the rig leaves the head at the assembly's
+    // bbox centre — so the number it advised could not be dialled (review of PR #92). All that is read now; the only
+    // thing still measured here is the BAKE'S SCALE, as the ratio between the assembly extent on the baked rig and
+    // the same extent the rigger recorded. The head is the bone's origin, so the rig's own pivot falls out of it.
+    void LoadGunSpan()
+    {
+        fitPivotKnown = false; fitPivotRig = -1f; fitPivotNote = "";
+        if (fitElevBone == null) return;
+        string res = (cur?.resourceName ?? "").Trim();
+        if (fitPivotFor != res) { fitPivotFor = res; fitPivotFrac = -1f; }   // one model's pivot must never open on the next
+        string glb = (cur?.modelFile ?? "").Trim();
+        string sidecar = glb.Length > 0 ? glb + ".gun.txt" : null;
+        if (sidecar == null || !File.Exists(sidecar))
+        { fitPivotNote = "no measured gun span beside the model — Generate the rig in the Vehicle Lab once and it writes one"; return; }
+        string bone; double[] breech, muzzle; double extent;
+        try { if (!AnimationLabRules.ParseGunSpan(File.ReadAllText(sidecar), out bone, out breech, out muzzle, out extent)) { fitPivotNote = "the measured gun span beside the model does not parse — re-Generate the rig"; return; } }
+        catch (Exception ex) { fitPivotNote = "could not read the measured gun span: " + ex.Message; return; }
+        // THE TURRET CASE (review of PR #92): with a Turret bone set the elevation turns the TURRET, and Vehicle Lab's
+        // Gun pivot only places the Gun bone — so previewing a pivot here would advise a dial that cannot move it.
+        if (!AnimationLabRules.IsRigBone(fitElevBone.name, bone))
+        { fitPivotNote = $"the elevation turns '{fitElevBone.name}', not the {bone} bone the span was measured on — Vehicle Lab ▸ Gun pivot does not move this bone, so there is no pivot to dial"; return; }
+        var b = new Vector3((float)breech[0], (float)breech[1], (float)breech[2]);
+        var m = new Vector3((float)muzzle[0], (float)muzzle[1], (float)muzzle[2]);
+        var dir = (m - b).normalized;
+        float measured = AssemblyExtentAlong(dir);
+        if (measured <= 1e-6f)
+        { fitPivotNote = "no geometry rides the gun bone in this baked rig — nothing to turn about a pivot"; return; }
+        float scale = measured / (float)extent;
+        fitPivotBreech = b * scale; fitPivotMuzzle = m * scale;
+        fitPivotRig = (float)AnimationLabRules.PivotFraction(new double[3], breech, muzzle);
+        fitPivotKnown = true;
+        if (fitPivotFrac < 0f) fitPivotFrac = fitPivotRig;
+    }
+
+    // The extent, along `dir` in the elevation bone's rest frame, of every vertex the elevation carries: those skinned
+    // to the bone AND to any bone beneath it, because recoil parks the tube on a Barrel bone under Gun and the rigger
+    // measured the whole assembly. The elevation bone's bind pose maps mesh space into its rest frame for ANY vertex
+    // (every bind pose shares that mesh space), and the assembly is rigid at rest, so one matrix does for all of them.
+    float AssemblyExtentAlong(Vector3 dir)
+    {
+        var under = new HashSet<Transform>(fitElevBone.GetComponentsInChildren<Transform>(true));
+        float lo = float.MaxValue, hi = float.MinValue;
+        foreach (var smr in fitAnimInst.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+        {
+            var mesh = smr.sharedMesh;
+            if (mesh == null || smr.bones == null) continue;
+            int self = Array.IndexOf(smr.bones, fitElevBone);
+            if (self < 0 || self >= mesh.bindposes.Length) continue;
+            var mine = new bool[smr.bones.Length];
+            bool any = false;
+            for (int i = 0; i < smr.bones.Length; i++) { mine[i] = smr.bones[i] != null && under.Contains(smr.bones[i]); any |= mine[i]; }
+            if (!any) continue;
+            var bind = mesh.bindposes[self];
+            var verts = mesh.vertices; var weights = mesh.boneWeights;
+            if (weights == null || weights.Length != verts.Length) continue;
+            for (int i = 0; i < verts.Length; i++)
+            {
+                var w = weights[i];
+                float mineW = (w.boneIndex0 < mine.Length && mine[w.boneIndex0] ? w.weight0 : 0f)
+                            + (w.boneIndex1 < mine.Length && mine[w.boneIndex1] ? w.weight1 : 0f)
+                            + (w.boneIndex2 < mine.Length && mine[w.boneIndex2] ? w.weight2 : 0f)
+                            + (w.boneIndex3 < mine.Length && mine[w.boneIndex3] ? w.weight3 : 0f);
+                if (mineW < 0.5f) continue;
+                float d = Vector3.Dot(bind.MultiplyPoint3x4(verts[i]), dir);
+                if (d < lo) lo = d;
+                if (d > hi) hi = d;
+            }
+        }
+        return hi > lo ? hi - lo : 0f;
     }
 
     void DestroyFitPreview()
@@ -322,6 +461,8 @@ public class AnimationLabWindow : EditorWindow
         // PLAY THE CLIP: advance and sample BEFORE the camera framing below (it frames the posed instance).
         if (fitAnimInst != null)
         {
+            ResolveElevBone();
+            if (fitElevBone != null) { fitElevBone.localRotation = fitElevBase; fitElevBone.localPosition = fitElevBasePos; }   // the rest; the clip overrides it below when it animates this bone
             if (fitAnimClip != null && fitAnimClip.length > 0.01f)
             {
                 double now = EditorApplication.timeSinceStartup;
@@ -329,6 +470,20 @@ public class AnimationLabWindow : EditorWindow
                 fitAnimTick = now;
                 if (fitAnimPlaying) fitAnimT = Mathf.Repeat(fitAnimT + dt * fitAnimSpeed, fitAnimClip.length);
                 fitAnimClip.SampleAnimation(fitAnimInst, fitAnimT);
+            }
+            // THE ELEVATION, composed onto whatever the clip left: a rotation about the bone's own axis, the runtime's angle -
+            // about the PIVOT the slider asks for, by moving the bone so that point stays put (d - R d, in the bone's frame)
+            if (fitElevBone != null && cur != null && cur.gunElevMax != 0f && fitElevFrac > 0f)
+            {
+                var axis = cur.gunElevAxis == 1 ? Vector3.up : cur.gunElevAxis == 2 ? Vector3.forward : Vector3.right;
+                var R = Quaternion.AngleAxis(AnimationLabRules.ElevationAngle(cur.gunElevMax, fitElevFrac), axis);
+                var baseRot = fitElevBone.localRotation;
+                if (fitPivotKnown && fitPivotFrac >= 0f && Mathf.Abs(fitPivotFrac - fitPivotRig) > 1e-4f)
+                {
+                    var d = Vector3.Lerp(fitPivotBreech, fitPivotMuzzle, fitPivotFrac);
+                    fitElevBone.localPosition = fitElevBone.localPosition + baseRot * (d - R * d);
+                }
+                fitElevBone.localRotation = baseRot * R;
             }
             // LIVE Position offset on the animated instance too. The static rest-pose path applies liveOff to its
             // draw matrices, but a PLAYING clip renders this instance through the camera, which liveOff never
@@ -1044,6 +1199,34 @@ public class AnimationLabWindow : EditorWindow
                     cur.gunElevAxis,
                     new[] { new GUIContent("Axis 0 (X)"), new GUIContent("Axis 1 (Y)"), new GUIContent("Axis 2 (Z)") },
                     new[] { 0, 1, 2 });
+            // THE PIVOT (2026-09-26, user: "put it below the elevation axis"): where along the gun the elevation turns.
+            // Fixed at Generate - the game turns the bone about its origin, which the Vehicle Lab's "Gun pivot" placed -
+            // so this slider PREVIEWS any pivot on the model above and names the number to dial there. Dragging it
+            // loads the first baked role into the preview when no clip is playing (the rest-pose draw has no bones).
+            if (cur.gunElevMax != 0f)
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    float shown = fitPivotFrac >= 0f ? fitPivotFrac : (fitPivotRig >= 0f ? fitPivotRig : 0.5f);
+                    float now = EditorGUILayout.Slider(new GUIContent("   Pivot (breech→muzzle, preview)",
+                        "Where along the gun the elevation turns, as the Vehicle Lab's 'Gun pivot' counts it: 0 = the breech " +
+                        "end, 1 = the muzzle, on the span the RIG measured at Generate (kept beside the output GLB) — the tube " +
+                        "alone, brake-pinned at the tip, cradle excluded, exactly as the dial counts it. FIXED AT GENERATE: " +
+                        "the game turns the bone about its origin, which the Vehicle Lab placed. This slider previews any " +
+                        "pivot on the model below and names the number to dial into Vehicle Lab > Gun pivot before Generate " +
+                        "and Bake."), shown, 0f, 1f);
+                    if (!Mathf.Approximately(now, shown))
+                    {
+                        fitPivotFrac = now;
+                        if (fitAnimInst == null) { var rolesP = FitRoles(); if (rolesP.Count > 0) BuildAnimPreview(rolesP[0].dir); }
+                        Repaint();
+                    }
+                    using (new EditorGUI.DisabledScope(!fitPivotKnown))
+                        if (GUILayout.Button(new GUIContent("Rig's", "Back to where the rig actually turns"), GUILayout.Width(44)))
+                        { fitPivotFrac = fitPivotRig; Repaint(); }   // never clamped: a rig whose head sits outside its own span must still be reachable
+                }
+                EditorGUILayout.HelpBox(PivotNote(), MessageType.None);
+            }
             // THE TIMING OF THE MOVE, foldable so it stays out of the way once dialled — four timing fields under a
             // dial most models leave at 0 is a lot of permanent vertical space. All RUNTIME: Save, no bake.
             if (cur.gunElevMax != 0f)
@@ -1381,6 +1564,32 @@ public class AnimationLabWindow : EditorWindow
                         EditorGUIUtility.labelWidth = lw;
                     }
                 }
+                // THE ELEVATION SLIDER (2026-09-26): raise the gun here, from resting to the configured max, applied as the
+                // runtime applies it (bone, axis, negated angle) - the check for "is the elevation axis the right one?"
+                // that used to need a relaunch. Shown once an elevation is dialled; it loads the first baked role when
+                // no clip is in the preview, since the rest-pose draw list has no bones to turn.
+                if (cur != null && cur.gunElevMax != 0f)
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        float was = fitElevFrac;
+                        float lwE = EditorGUIUtility.labelWidth; EditorGUIUtility.labelWidth = 96;
+                        fitElevFrac = EditorGUILayout.Slider(new GUIContent("Elevation",
+                            "Raise the gun in this preview from resting (0) to 'Gun elevation — max' (the right end), on the bone " +
+                            "and the axis the game will use: the Turret bone if set, else the Gun bone, turned about the Elevation " +
+                            "axis by the runtime's angle (negated, so a positive max raises). If the barrel swings sideways, pick " +
+                            "another axis; if it dips, flip the sign of the max. Composed onto the playing clip, as in the game."),
+                            fitElevFrac, 0f, 1f, GUILayout.Width(300));
+                        EditorGUIUtility.labelWidth = lwE;
+                        if (!Mathf.Approximately(was, fitElevFrac))
+                        {
+                            if (fitAnimInst == null && roles.Count > 0) BuildAnimPreview(roles[0].dir);   // the skinned instance is what turns
+                            Repaint();
+                        }
+                        string angle = FormattableString.Invariant($"{AnimationLabRules.ElevationAngle(cur.gunElevMax, fitElevFrac):0.#}° of {-cur.gunElevMax:0.#}°");
+                        GUILayout.Label(fitAnimInst == null ? "(pick a clip, or move the slider, to see it)"
+                                      : fitElevBone != null ? $"{angle} · {fitElevNote} · axis {cur.gunElevAxis} ({(cur.gunElevAxis == 1 ? "Y" : cur.gunElevAxis == 2 ? "Z" : "X")})"
+                                      : "cannot elevate: " + fitElevNote, EditorStyles.miniLabel);
+                    }
                 EditorGUIUtility.labelWidth = lwRow;
             }
             var rect = GUILayoutUtility.GetRect(200, 360, GUILayout.ExpandWidth(true));

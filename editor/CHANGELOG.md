@@ -5,6 +5,59 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Vehicle Lab: a Gun section** (user: "I cannot set this value, why is it in deploy anyway?"). The Gun pivot,
+  the deploy raise and the recoil dials moved out of *Deploy — trails opening, sails furling* into their own
+  *Gun — pivot, deploy raise & recoil* section, and nothing in it is greyed out any more: the pivot is a recipe value
+  the Animation Lab's pivot preview names, so it is always editable, with a note saying when it takes effect
+  (Generate places the bone, Bake ships it) and what to mark when no gun part is marked yet.
+
+- **Animation Lab: an Elevation slider in the preview** (user: "I have no idea if the elevation axis is the correct
+  one, so in the preview could you add a slider that allows me to raise the turret from min to max"). With a *Gun
+  elevation — max* dialled, the preview row gains an **Elevation** slider (0 = resting, right end = the max) that
+  turns the bone the game will turn — the Turret bone if set, else the Gun bone, found by the runtime's substring
+  rule — about the chosen Elevation axis by the runtime's angle (negated, so a positive max raises), composed onto
+  the playing clip every frame as the game's BoneRotation layer composes onto the pose; the bone's rest rotation is
+  restored before each sample so nothing accumulates. It loads the first baked role when no clip is in the preview
+  (the rest-pose draw list has no bones), and names the bone and axis it turns next to the slider. A sideways swing
+  means the wrong axis; a dip means flipping the sign of the max. The bone pick and the angle are unit-tested.
+  **Pivot** (user: "the pivot point is not correct, so could you give me a slider which allows me to configure the
+  pivot point along the length of the gun"): a *Pivot* slider under the Elevation axis setting (user: "put it below
+  the elevation axis") previews the elevation about any point of the
+  breech→muzzle span — the span measured on the vertices skinned to the gun bone, in the bone's frame, the breech
+  the end nearer the parent bone, exactly the rig script's rule for its own "Gun pivot" — by shifting the bone so
+  that point stays put. The game turns the bone about its origin, which only the Vehicle Lab's Generate places, so
+  the slider starts at the rig's current pivot (read off the same span) and names the number to dial into Vehicle
+  Lab ▸ Gun pivot before Generate and Bake. Span, fraction and point are unit-tested.
+  **Review (two rounds, mine and an external one):** the editor no longer re-derives the span at all — it re-derived
+  a different set of vertices and a different rule, so the number it advised could not be dialled. The rigger now
+  publishes its own measurement (`VEHICLE GUNSPAN bone=… breech=… muzzle=… extent=…`, bone-local source units) and
+  the Vehicle Lab keeps it beside the output GLB as `<glb>.gun.txt`; the editor reads it and measures only the
+  bake's scale, as the ratio of the assembly extent on the baked rig to the recorded one. That fixes four wrong
+  numbers at once: a marked **cradle** welds to the gun bone but is excluded from the span, a marked **brake** pins
+  the tip instead of the bounding-box extreme, **recoil** parks the tube on its own bone under Gun, and at exactly
+  **0.5** the rig leaves the head at the assembly's bbox centre rather than the span's midpoint (drilled on the
+  gunboat: dialling 0.36 reads back as 0.3600, the 0.5 default as 0.4996). With a **Turret** bone set the pivot
+  preview is withheld and says why — the elevation turns the turret and Gun pivot cannot move it. Also: the bone
+  pick now takes the **first substring match in the rig's own order**, as the runtime does, instead of preferring an
+  exact name (with `b005_GunShield` before `b012_Gun` the preview turned the barrel and the game the shield); bone
+  names are **no longer trimmed**, so a stray space fails here exactly as it fails in the game, and says so; the
+  bone's rest pose is read from the **prefab**, so resolving a bone mid-playback can no longer capture an elevated
+  pose as its rest; the pivot fraction is **cleared between models**; and the *Rig's* button no longer clamps.
+  **Third round:** the rigger no longer treats exactly **0.5** specially — it used to skip the slide there and leave
+  the head at the whole assembly's bounding-box centre, so the one value the preview could not reproduce was the
+  default one. `gun_pivot` now always places the head that far along the tube, which is what the dial claims at both
+  of its other ends; a gun left at 0.5 (an untuned gun by definition) moves from the assembly's centre to the tube's
+  midpoint the next time it is generated, and the Vehicle Lab's tooltip says so. And the pivot safeguard is an
+  **identity** check against the rig's Gun bone (`Gun` or the bake's `b012_Gun`) rather than a substring test, which
+  had accepted `b005_GunMount` — the bone the runtime's first-match rule actually picks when it sorts first — and a
+  configured `GunTurret`, and then advised a pivot for a bone Gun pivot cannot place. Tested. **Fourth round:** that
+  identity check accepts any single-letter index prefix, not just `b###_` — a model with donor sockets bakes its
+  bones as `A###_` so every real bone sorts ahead of the donor names, and the `b`-only form withheld a pivot preview
+  that was perfectly valid. The 0.5 change was measured against this pack rather than left as a worry: three of the
+  four gun recipes sit at the default, none of them marks a cradle, so for each the assembly and the tube are the
+  same geometry and the trunnion moves by well under a thousandth of the tube (the gunboat: 0.4996 → 0.5000). The
+  one tuned recipe is at 0.25 and never took the special case.
+
 - **Bake Tests: the Model Workshop and the Vehicle Lab have rows** (user: "could you add fuse and split and extra
   generate test to the bake test"). Neither tool was exercised by any row: the Workshop's split/tear/fuse ran only on
   synthetic fixtures in the C# suite, and nothing automated ran `vehicle_rig.py` end to end. Three rows now:

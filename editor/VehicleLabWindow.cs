@@ -224,7 +224,7 @@ public class VehicleLabWindow : EditorWindow
     const int RockFps = 24;                       // Blender's scene fps — the clip's real-time length
     // The two motion sections fold independently (Sound Studio pattern): a model is almost always EITHER a wheeled
     // vehicle OR a floating one, so ~10 permanently-irrelevant rows were on screen at all times.
-    [SerializeField] bool foldSpin = true, foldWave = false, foldOrient = false, foldTrails = false, foldOars = false, foldReduce = false, foldParts = true, foldModel2 = false;
+    [SerializeField] bool foldSpin = true, foldWave = false, foldOrient = false, foldTrails = false, foldGun = false, foldOars = false, foldReduce = false, foldParts = true, foldModel2 = false;
     // SECOND MODEL (2026-09-12, "combine 2 3d models and merge"): an optional second source imported into the
     // SAME Blender scene before the probe — its parts arrive with a "B_" prefix and are marked/reduced/rigged
     // like any others. Offset/rotation/scale place it against the first model (two sources rarely agree on
@@ -1097,95 +1097,114 @@ public class VehicleLabWindow : EditorWindow
                             "the game plays the fold at move start/stop, waiting for it like the howitzer's trails."),
                             Mathf.Max(1, flagFoldFrames), 1, 60);
                 }
-                // GUN PIVOT lives here rather than with the trails because it is the same kind of knob: where a
-                // moving part actually turns. The runtime elevation (Animation Lab ▸ "Gun elevation — max") rotates
-                // the Gun bone about ITS OWN ORIGIN, so this IS the trunnion.
-                using (new EditorGUI.DisabledScope(ActiveParts.Count(p => p.role == Role.Gun || p.role == Role.Muzzle || p.role == Role.Cradle) == 0))
-                {
-                    gunPivot = EditorGUILayout.Slider(new GUIContent("Gun pivot (breech→muzzle)",
-                        "Where the Gun bone sits along the gun assembly — and therefore where the barrel ELEVATES " +
-                        "from. 0 = the breech end, 1 = the muzzle, 0.5 = the assembly's centre (the historical " +
-                        "placement, kept as the default so existing rigs regenerate unchanged). A real gun pivots at " +
-                        "its trunnions: ~0.4 on the M114. Too far forward and the breech swings down through the " +
-                        "carriage when the gun elevates."), gunPivot, 0f, 1f);
-                    gunDeployElev = EditorGUILayout.Slider(new GUIContent("Gun raise on deploy (deg)",
-                        "Degrees the gun elevates ACROSS the Deploy clip — same frames as the trail spread, because " +
-                        "a towed gun travels clamped level over its closed trails and only comes up once they are " +
-                        "planted. Every use the state machine makes of Deploy carries it: unfold raises, the " +
-                        "reversed clip lowers it back onto the travel lock before the unit rolls, the held last " +
-                        "frame keeps it up. Composes with the Animation Lab's runtime 'Gun elevation — max', which " +
-                        "writes a separate channel — dial that one against this raised base, not against level. " +
-                        "0 = leave the gun level. Needs trails: the Deploy clip is what carries it."),
-                        gunDeployElev, 0f, 45f);
-                    if (gunDeployElev != 0f && ActiveParts.Count(p => p.role == Role.Trail) == 0)
-                        EditorGUILayout.HelpBox("No trails marked — there is no Deploy clip to carry the raise, so " +
-                            "this is doing nothing. Mark the trail arms (T) first.", MessageType.Warning);
-                    // MUZZLE marking is optional, so say what it is FOR rather than leaving the role a mystery in
-                    // the dropdown — and say plainly that it is not a bone, which is the thing to get wrong.
-                    // The three gun roles all weld to the ONE Gun bone, so the dropdown alone cannot explain why they
-                    // are separate. Say what each one is FOR — the differences only appear in the span and, later,
-                    // in recoil.
-                    int nM = ActiveParts.Count(p => p.role == Role.Muzzle), nC = ActiveParts.Count(p => p.role == Role.Cradle);
-                    EditorGUILayout.HelpBox(
-                        "Gun · Cradle · Muzzle all weld to the one Gun bone — they elevate together about the " +
-                        "trunnions. They differ in what else they mean:\n" +
-                        "• Gun — the tube itself. Defines the breech→muzzle span the pivot above slides along, and " +
-                        "it is the part that will KICK BACK when recoil is authored.\n" +
-                        "• Cradle — the frame that holds the tube (trunnions, recoil cylinders, the trough it slides " +
-                        "in). Kept OUT of the span, because a cradle stops well short of the muzzle and would " +
-                        "otherwise shrink it. It is what STAYS while the barrel recoils.\n" +
-                        "• Muzzle — a separately-modelled brake or flash hider. Pins the tip exactly instead of " +
-                        "guessing at the gun bbox's far extreme, and the run reports the measured fire origin for " +
-                        "the Animation Lab's Muzzle offset. Skip it if the brake is modelled INTO the barrel mesh."
-                        + (nM + nC > 0 ? $"\n\nMarked: {nC} cradle, {nM} muzzle." : ""), MessageType.None);
-
-                    // RECOIL — the one motion that needs Gun and Cradle on SEPARATE bones, so it lives with them.
-                    recoilDist = EditorGUILayout.Slider(new GUIContent("Recoil (fraction of tube)",
-                        "How far the tube kicks back when the gun fires, as a fraction of its OWN length — so the " +
-                        "dial means the same thing on any model at any scale. 0 = off, and off means no Barrel bone " +
-                        "is created at all, so a gun that never recoils costs nothing.\n\n" +
-                        "AN ELEVATED GUN WANTS LESS. Sliding back down a raised bore drives the breech DOWN as well " +
-                        "as back, so the stroke a level gun can afford will bury the breech in the ground at 45°. " +
-                        "Real howitzers solve this with variable recoil — a shorter stroke the higher they elevate. " +
-                        "The ~0.3 quoted for an M114 is its LOW-elevation stroke; on the 45° M114 rig, 0.15 is " +
-                        "about the ceiling. The run measures the actual clearance and warns you.\n\n" +
-                        "This is the only motion that needs the tube and the cradle on SEPARATE bones — mark them " +
-                        "Gun and Cradle above, or the whole assembly slides together."), recoilDist, 0f, 0.6f);
-                    using (new EditorGUI.DisabledScope(recoilDist <= 0f))
-                        recoilLead = EditorGUILayout.IntSlider(new GUIContent("Recoil lead-in (frames)",
-                            "Frames the gun holds STILL at the start of the Recoil clip, before the kick. The engine " +
-                            "starts the attack clip on its own strike clock — an estimate that can fire while the gun " +
-                            "is still slewing onto the target — and the front of this clip is the one part of that " +
-                            "timing under our control. Raise it until the kick visibly lands AFTER the turn. " +
-                            "24 fps, so 24 = one second of hold. 0 = kick immediately."), recoilLead, 0, 96);
-                    using (new EditorGUI.DisabledScope(recoilDist <= 0f))
-                        recoilFrames = EditorGUILayout.IntSlider(new GUIContent("Recoil frames",
-                            "Length of the 'Recoil' clip at 24 fps. The kick takes the first ~15% and the ride " +
-                            "forward gets the rest — that asymmetry is what reads as a shot, so it is derived " +
-                            "rather than left to be set wrong. A gun kicks back in a blink and the recuperator eases it home " +
-                            "over about a second, so ~16-36 frames is the realistic range. (The proven M114 attack " +
-                            "clip is 157 frames, but that is its whole fire cycle — slam, slide home, reload, aiming " +
-                            "raise — not the kick.)"), recoilFrames, 3, 160);
-                    if (recoilDist > 0f)
-                    {
-                        int nG = ActiveParts.Count(p => p.role == Role.Gun);
-                        if (nG == 0)
-                            EditorGUILayout.HelpBox("Recoil needs Gun parts — nothing is marked Gun, so there is no " +
-                                "tube to slide.", MessageType.Warning);
-                        else if (nC == 0)
-                            EditorGUILayout.HelpBox("No Cradle marked: the whole gun assembly will slide back " +
-                                "together, mount and all. Mark the frame that holds the tube as Cradle so it stays.",
-                                MessageType.Warning);
-                        EditorGUILayout.HelpBox("Recoil is a TRANSLATION. Tick Animation Lab ▸ Keep bone " +
-                            "translations, or the bake discards it and the gun will not move at all — the clip bake " +
-                            "is rotation-only by default. Assign 'Recoil' to the Attack clip.", MessageType.Info);
-                    }
-                }
                 using (new EditorGUI.DisabledScope(ActiveParts.Count(p => p.role == Role.Trail) == 0))
                 {
                     EditorGUILayout.HelpBox("Assign after baking: Idle/reference = Deploy · Idle stance = Deploy[" +
                         trailFrames + ".." + trailFrames + "] · Movement = Spin · After-move = Deploy · Pre-move = Deploy[" +
                         trailFrames + "..0]", MessageType.None);
+                }
+            }
+
+            // GUN — pivot, deploy raise, recoil (2026-09-26, user: "I cannot set this value, why is it in deploy anyway?"):
+            // the gun's own section. The pivot used to sit inside Deploy, greyed out until a gun role was marked; it is a
+            // recipe value that the Animation Lab's pivot preview now names, so it is always editable here, and the note
+            // below says when it takes effect. The deploy raise still rides the Deploy clip (it says so).
+            int nGunParts = ActiveParts.Count(p => p.role == Role.Gun || p.role == Role.Muzzle || p.role == Role.Cradle);
+            if (Section(ref foldGun, "Gun — pivot, deploy raise & recoil",
+                    nGunParts == 0 ? "no gun parts marked"
+                        : string.Join(" · ", new[] {
+                            $"pivot {gunPivot:0.00}",
+                            gunDeployElev != 0f ? $"raise +{gunDeployElev:0.#}° on deploy" : null,
+                            recoilDist > 0f ? $"recoil {recoilDist:0.##} of tube" : null }.Where(x => x != null))))
+            {
+                // THE PIVOT: the Gun bone's origin, and so where the runtime elevation turns (Animation Lab > Gun elevation
+                // rotates the bone about ITS OWN ORIGIN). Always editable: the Animation Lab's Pivot slider previews the
+                // effect on the baked model and names the value to dial here; Generate places the bone, Bake ships it.
+                gunPivot = EditorGUILayout.Slider(new GUIContent("Gun pivot (breech→muzzle)",
+                    "Where the Gun bone sits along the gun assembly — and therefore where the barrel ELEVATES " +
+                    "from, measured along the TUBE: 0 = the breech end, 1 = the muzzle, 0.5 = halfway along it. " +
+                    "(Until 2026-09-26 exactly 0.5 meant something else — the whole assembly's bounding-box centre, " +
+                    "cradle included — so a gun left at the default moves slightly the next time it is generated.) " +
+                    "A real gun pivots at " +
+                    "its trunnions: ~0.4 on the M114. Too far forward and the breech swings down through the " +
+                    "carriage when the gun elevates."), gunPivot, 0f, 1f);
+                if (nGunParts == 0)
+                    EditorGUILayout.HelpBox("No Gun, Muzzle or Cradle part is marked yet — the value is kept in the recipe and " +
+                    "places the Gun bone as soon as one is. Mark the barrel Gun (G) in the parts list above.", MessageType.None);
+                else
+                    EditorGUILayout.HelpBox("Takes effect at Generate (the bone is placed there), then Bake in the Animation Lab. " +
+                    "To find the value: Animation Lab > Pivot (breech→muzzle, preview) turns the baked model about any point and names it.", MessageType.None);
+                gunDeployElev = EditorGUILayout.Slider(new GUIContent("Gun raise on deploy (deg)",
+                    "Degrees the gun elevates ACROSS the Deploy clip — same frames as the trail spread, because " +
+                    "a towed gun travels clamped level over its closed trails and only comes up once they are " +
+                    "planted. Every use the state machine makes of Deploy carries it: unfold raises, the " +
+                    "reversed clip lowers it back onto the travel lock before the unit rolls, the held last " +
+                    "frame keeps it up. Composes with the Animation Lab's runtime 'Gun elevation — max', which " +
+                    "writes a separate channel — dial that one against this raised base, not against level. " +
+                    "0 = leave the gun level. Needs trails: the Deploy clip is what carries it."),
+                    gunDeployElev, 0f, 45f);
+                if (gunDeployElev != 0f && ActiveParts.Count(p => p.role == Role.Trail) == 0)
+                    EditorGUILayout.HelpBox("No trails marked — there is no Deploy clip to carry the raise, so " +
+                        "this is doing nothing. Mark the trail arms (T) first.", MessageType.Warning);
+                // MUZZLE marking is optional, so say what it is FOR rather than leaving the role a mystery in
+                // the dropdown — and say plainly that it is not a bone, which is the thing to get wrong.
+                // The three gun roles all weld to the ONE Gun bone, so the dropdown alone cannot explain why they
+                // are separate. Say what each one is FOR — the differences only appear in the span and, later,
+                // in recoil.
+                int nM = ActiveParts.Count(p => p.role == Role.Muzzle), nC = ActiveParts.Count(p => p.role == Role.Cradle);
+                EditorGUILayout.HelpBox(
+                    "Gun · Cradle · Muzzle all weld to the one Gun bone — they elevate together about the " +
+                    "trunnions. They differ in what else they mean:\n" +
+                    "• Gun — the tube itself. Defines the breech→muzzle span the pivot above slides along, and " +
+                    "it is the part that will KICK BACK when recoil is authored.\n" +
+                    "• Cradle — the frame that holds the tube (trunnions, recoil cylinders, the trough it slides " +
+                    "in). Kept OUT of the span, because a cradle stops well short of the muzzle and would " +
+                    "otherwise shrink it. It is what STAYS while the barrel recoils.\n" +
+                    "• Muzzle — a separately-modelled brake or flash hider. Pins the tip exactly instead of " +
+                    "guessing at the gun bbox's far extreme, and the run reports the measured fire origin for " +
+                    "the Animation Lab's Muzzle offset. Skip it if the brake is modelled INTO the barrel mesh."
+                    + (nM + nC > 0 ? $"\n\nMarked: {nC} cradle, {nM} muzzle." : ""), MessageType.None);
+
+                // RECOIL — the one motion that needs Gun and Cradle on SEPARATE bones, so it lives with them.
+                recoilDist = EditorGUILayout.Slider(new GUIContent("Recoil (fraction of tube)",
+                    "How far the tube kicks back when the gun fires, as a fraction of its OWN length — so the " +
+                    "dial means the same thing on any model at any scale. 0 = off, and off means no Barrel bone " +
+                    "is created at all, so a gun that never recoils costs nothing.\n\n" +
+                    "AN ELEVATED GUN WANTS LESS. Sliding back down a raised bore drives the breech DOWN as well " +
+                    "as back, so the stroke a level gun can afford will bury the breech in the ground at 45°. " +
+                    "Real howitzers solve this with variable recoil — a shorter stroke the higher they elevate. " +
+                    "The ~0.3 quoted for an M114 is its LOW-elevation stroke; on the 45° M114 rig, 0.15 is " +
+                    "about the ceiling. The run measures the actual clearance and warns you.\n\n" +
+                    "This is the only motion that needs the tube and the cradle on SEPARATE bones — mark them " +
+                    "Gun and Cradle above, or the whole assembly slides together."), recoilDist, 0f, 0.6f);
+                using (new EditorGUI.DisabledScope(recoilDist <= 0f))
+                    recoilLead = EditorGUILayout.IntSlider(new GUIContent("Recoil lead-in (frames)",
+                        "Frames the gun holds STILL at the start of the Recoil clip, before the kick. The engine " +
+                        "starts the attack clip on its own strike clock — an estimate that can fire while the gun " +
+                        "is still slewing onto the target — and the front of this clip is the one part of that " +
+                        "timing under our control. Raise it until the kick visibly lands AFTER the turn. " +
+                        "24 fps, so 24 = one second of hold. 0 = kick immediately."), recoilLead, 0, 96);
+                using (new EditorGUI.DisabledScope(recoilDist <= 0f))
+                    recoilFrames = EditorGUILayout.IntSlider(new GUIContent("Recoil frames",
+                        "Length of the 'Recoil' clip at 24 fps. The kick takes the first ~15% and the ride " +
+                        "forward gets the rest — that asymmetry is what reads as a shot, so it is derived " +
+                        "rather than left to be set wrong. A gun kicks back in a blink and the recuperator eases it home " +
+                        "over about a second, so ~16-36 frames is the realistic range. (The proven M114 attack " +
+                        "clip is 157 frames, but that is its whole fire cycle — slam, slide home, reload, aiming " +
+                        "raise — not the kick.)"), recoilFrames, 3, 160);
+                if (recoilDist > 0f)
+                {
+                    int nG = ActiveParts.Count(p => p.role == Role.Gun);
+                    if (nG == 0)
+                        EditorGUILayout.HelpBox("Recoil needs Gun parts — nothing is marked Gun, so there is no " +
+                            "tube to slide.", MessageType.Warning);
+                    else if (nC == 0)
+                        EditorGUILayout.HelpBox("No Cradle marked: the whole gun assembly will slide back " +
+                            "together, mount and all. Mark the frame that holds the tube as Cradle so it stays.",
+                            MessageType.Warning);
+                    EditorGUILayout.HelpBox("Recoil is a TRANSLATION. Tick Animation Lab ▸ Keep bone " +
+                        "translations, or the bake discards it and the gun will not move at all — the clip bake " +
+                        "is rotation-only by default. Assign 'Recoil' to the Attack clip.", MessageType.Info);
                 }
             }
 
@@ -2292,6 +2311,16 @@ public class VehicleLabWindow : EditorWindow
             Debug.LogError("[VehicleLab] rig run did not complete. Full output:\n" + stdout);
             return;
         }
+        // THE GUN SPAN SIDECAR (2026-09-26, review of PR #92): the rigger's own breech/muzzle measurement, kept beside
+        // the output so the Animation Lab's pivot preview reads it instead of re-deriving a span that disagrees.
+        try
+        {
+            string spanLine = stdout.Split('\n').FirstOrDefault(l => l.StartsWith("VEHICLE GUNSPAN", StringComparison.Ordinal))?.Trim();
+            string spanFile = lastOutGlb + ".gun.txt";
+            if (!string.IsNullOrEmpty(spanLine)) File.WriteAllText(spanFile, spanLine + "\n");
+            else if (File.Exists(spanFile)) File.Delete(spanFile);   // no gun in this rig any more: a stale span would lie
+        }
+        catch (Exception spanEx) { Debug.LogWarning("[VehicleLab] could not write the gun span sidecar: " + spanEx.Message); }
         if (!headless)   // the preview is the window's; a Bake Tests run has no window and writes nothing under Assets/
         {
             AssetDatabase.ImportAsset(prevRel, ImportAssetOptions.ForceUpdate);
