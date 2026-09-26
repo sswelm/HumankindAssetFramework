@@ -2309,6 +2309,16 @@ public class VehicleLabWindow : EditorWindow
             Debug.LogError("[VehicleLab] rig run did not complete. Full output:\n" + stdout);
             return;
         }
+        // THE GUN SPAN SIDECAR (2026-09-26, review of PR #92): the rigger's own breech/muzzle measurement, kept beside
+        // the output so the Animation Lab's pivot preview reads it instead of re-deriving a span that disagrees.
+        try
+        {
+            string spanLine = stdout.Split('\n').FirstOrDefault(l => l.StartsWith("VEHICLE GUNSPAN", StringComparison.Ordinal))?.Trim();
+            string spanFile = lastOutGlb + ".gun.txt";
+            if (!string.IsNullOrEmpty(spanLine)) File.WriteAllText(spanFile, spanLine + "\n");
+            else if (File.Exists(spanFile)) File.Delete(spanFile);   // no gun in this rig any more: a stale span would lie
+        }
+        catch (Exception spanEx) { Debug.LogWarning("[VehicleLab] could not write the gun span sidecar: " + spanEx.Message); }
         if (!headless)   // the preview is the window's; a Bake Tests run has no window and writes nothing under Assets/
         {
             AssetDatabase.ImportAsset(prevRel, ImportAssetOptions.ForceUpdate);

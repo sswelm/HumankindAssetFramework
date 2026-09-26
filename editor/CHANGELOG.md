@@ -28,6 +28,21 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   that point stays put. The game turns the bone about its origin, which only the Vehicle Lab's Generate places, so
   the slider starts at the rig's current pivot (read off the same span) and names the number to dial into Vehicle
   Lab ▸ Gun pivot before Generate and Bake. Span, fraction and point are unit-tested.
+  **Review (two rounds, mine and an external one):** the editor no longer re-derives the span at all — it re-derived
+  a different set of vertices and a different rule, so the number it advised could not be dialled. The rigger now
+  publishes its own measurement (`VEHICLE GUNSPAN bone=… breech=… muzzle=… extent=…`, bone-local source units) and
+  the Vehicle Lab keeps it beside the output GLB as `<glb>.gun.txt`; the editor reads it and measures only the
+  bake's scale, as the ratio of the assembly extent on the baked rig to the recorded one. That fixes four wrong
+  numbers at once: a marked **cradle** welds to the gun bone but is excluded from the span, a marked **brake** pins
+  the tip instead of the bounding-box extreme, **recoil** parks the tube on its own bone under Gun, and at exactly
+  **0.5** the rig leaves the head at the assembly's bbox centre rather than the span's midpoint (drilled on the
+  gunboat: dialling 0.36 reads back as 0.3600, the 0.5 default as 0.4996). With a **Turret** bone set the pivot
+  preview is withheld and says why — the elevation turns the turret and Gun pivot cannot move it. Also: the bone
+  pick now takes the **first substring match in the rig's own order**, as the runtime does, instead of preferring an
+  exact name (with `b005_GunShield` before `b012_Gun` the preview turned the barrel and the game the shield); bone
+  names are **no longer trimmed**, so a stray space fails here exactly as it fails in the game, and says so; the
+  bone's rest pose is read from the **prefab**, so resolving a bone mid-playback can no longer capture an elevated
+  pose as its rest; the pivot fraction is **cleared between models**; and the *Rig's* button no longer clamps.
 
 - **Bake Tests: the Model Workshop and the Vehicle Lab have rows** (user: "could you add fuse and split and extra
   generate test to the bake test"). Neither tool was exercised by any row: the Workshop's split/tear/fuse ran only on

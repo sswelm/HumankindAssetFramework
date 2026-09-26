@@ -1702,6 +1702,27 @@ if gun_names or muzzle_names or cradle_names:
         if cradle_names:
             print("VEHICLE CRADLE %d part(s) welded to the Gun bone (elevates with the tube; excluded from the "
                   "breech->muzzle span, and it is what will STAY when the barrel recoils)" % len(cradle_names))
+        # THE SPAN, PUBLISHED FOR THE ANIMATION LAB'S PIVOT PREVIEW (2026-09-26, review of PR #92). The editor used
+        # to re-derive this from the vertices skinned to the Gun bone, which is a DIFFERENT set and a different rule:
+        # the cradle welds to the bone but is deliberately out of the span, a marked brake pins the tip instead of
+        # the bbox extreme, with recoil the tube moves to the Barrel bone entirely, and at exactly 0.5 the head stays
+        # at the assembly's bbox centre rather than the span's midpoint. So the number the editor advised could not
+        # be dialled. It reads this line instead. BONE-LOCAL source units: this rigger's bones rest at identity, so
+        # bone-local is world minus the head, which survives the bake up to its uniform scale. `extent` is the whole
+        # assembly's span along the same direction - the editor measures that on the baked rig and the ratio IS the
+        # bake's scale, so it never has to know it.
+        _asm = []
+        for _an in gun_names:
+            _ao = find(_an)
+            if _ao is not None:
+                _asm += [_ao.matrix_world @ _v.co for _v in _ao.data.vertices]
+        _bl = _breech - gc
+        _ml = _muzzle - gc
+        if (_ml - _bl).length > 1e-9 and _asm:
+            _dn = (_ml - _bl).normalized()
+            _pr = [(p - gc).dot(_dn) for p in _asm]
+            print("VEHICLE GUNSPAN bone=Gun breech=%.6f,%.6f,%.6f muzzle=%.6f,%.6f,%.6f extent=%.6f"
+                  % (_bl.x, _bl.y, _bl.z, _ml.x, _ml.y, _ml.z, max(_pr) - min(_pr)))
     eb = arm_data.edit_bones.new("Gun")
     eb.head = gc
     eb.tail = gc + Vector((0, 0, max(0.05, max(gs) * 0.25)))

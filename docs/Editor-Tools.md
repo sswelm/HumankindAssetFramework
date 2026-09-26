@@ -233,10 +233,13 @@ The deploy block's **Wheel bones (roll while moving)** + axle axis / loop frames
 > gains an **Elevation** slider that raises the gun from resting to the max on the bone and axis the game will use
 > (Turret bone if set, else Gun bone; the runtime's negated angle), composed onto the playing clip. Sideways swing =
 > wrong axis; a dip = flip the sign of the max. It loads the first baked role when no clip is in the preview. A
-> **Pivot** slider under the *Elevation axis* setting previews the elevation about any point of the breech→muzzle span (measured on the
-> vertices skinned to the gun bone, the rig script's own rule) and names the number to dial into the Vehicle Lab's
-> *Gun pivot* — the game turns the bone about its origin, which only Generate places, so the preview is the finder
-> and Generate + Bake is the fix.
+> **Pivot** slider under the *Elevation axis* setting previews the elevation about any point of the breech→muzzle
+> span and names the number to dial into the Vehicle Lab's *Gun pivot* — the game turns the bone about its origin,
+> which only Generate places, so the preview is the finder and Generate + Bake is the fix. The span is the one the
+> **rig measured** at Generate (`VEHICLE GUNSPAN`, kept beside the output GLB as `<glb>.gun.txt`): the tube alone,
+> brake-pinned at the tip, cradle excluded, so the fraction shown is the fraction the dial takes. Without that file
+> — an older rig, or a hand-made GLB — the slider says so instead of guessing. With a Turret bone set it says so
+> too: the elevation turns the turret, and *Gun pivot* cannot move it.
 
 > **This does not replace HAF's runtime `gunElevMax`** (Animation Lab ▸ *Gun elevation — max*) — that writes a
 > `BoneRotation` slot, a channel the clip pose never touches, so the two **compose**: the clip sets the base firing
