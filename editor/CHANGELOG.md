@@ -12,7 +12,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   which leaves every other part's checks untouched and unspent. They ride along now the same way: a part that
   survives the cut keeps its own check, and the pieces a cut creates inherit the check of the part they came from
   (`WorkshopRules.TransferLetters`, already the letters' rule and already tested). Written beside the output as
-  `<output>.glb.marks.txt`, which the first Probe of that file reads.
+  `<output>.glb.marks.txt`, which the first Probe of that file reads. **Review:** both sidecars come out of ONE parse
+  of the output — the first cut of this wrote the marks from a second read and a second full geometry analysis, a few
+  lines after the letters had done exactly that, which on a 36 MB ship is seconds and every byte read twice.
 
 - **Model Fuser: an underside keeps its facing** (user: "het kraaiennest is transparant vanaf de onderkant na fusie",
   HMS Svea's fighting top). The flared underside of the mast top — 742 faces, all authored facing down, high above
