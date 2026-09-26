@@ -1122,8 +1122,10 @@ public class VehicleLabWindow : EditorWindow
                 // effect on the baked model and names the value to dial here; Generate places the bone, Bake ships it.
                 gunPivot = EditorGUILayout.Slider(new GUIContent("Gun pivot (breech→muzzle)",
                     "Where the Gun bone sits along the gun assembly — and therefore where the barrel ELEVATES " +
-                    "from. 0 = the breech end, 1 = the muzzle, 0.5 = the assembly's centre (the historical " +
-                    "placement, kept as the default so existing rigs regenerate unchanged). A real gun pivots at " +
+                    "from, measured along the TUBE: 0 = the breech end, 1 = the muzzle, 0.5 = halfway along it. " +
+                    "(Until 2026-09-26 exactly 0.5 meant something else — the whole assembly's bounding-box centre, " +
+                    "cradle included — so a gun left at the default moves slightly the next time it is generated.) " +
+                    "A real gun pivots at " +
                     "its trunnions: ~0.4 on the M114. Too far forward and the breech swings down through the " +
                     "carriage when the gun elevates."), gunPivot, 0f, 1f);
                 if (nGunParts == 0)

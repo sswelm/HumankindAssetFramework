@@ -293,7 +293,7 @@ public class AnimationLabWindow : EditorWindow
         catch (Exception ex) { fitPivotNote = "could not read the measured gun span: " + ex.Message; return; }
         // THE TURRET CASE (review of PR #92): with a Turret bone set the elevation turns the TURRET, and Vehicle Lab's
         // Gun pivot only places the Gun bone — so previewing a pivot here would advise a dial that cannot move it.
-        if (fitElevBone.name.IndexOf(bone, StringComparison.OrdinalIgnoreCase) < 0)
+        if (!AnimationLabRules.IsRigBone(fitElevBone.name, bone))
         { fitPivotNote = $"the elevation turns '{fitElevBone.name}', not the {bone} bone the span was measured on — Vehicle Lab ▸ Gun pivot does not move this bone, so there is no pivot to dial"; return; }
         var b = new Vector3((float)breech[0], (float)breech[1], (float)breech[2]);
         var m = new Vector3((float)muzzle[0], (float)muzzle[1], (float)muzzle[2]);

@@ -1654,10 +1654,10 @@ if gun_names or muzzle_names or cradle_names:
     gun_names = tube_names + [c for c in cradle_names if c not in tube_names]       # ...+ the cradle: one bone
     gc, gs = _combined_bbox(gun_names)
     # GUN PIVOT (2026-08-22): the runtime elevation (gunElevMax) rotates this bone about ITS OWN ORIGIN, so where
-    # the head sits IS the trunnion. At the bbox centre — the historical placement, still the default — the tube
-    # see-saws about its middle and the breech swings down through the carriage (measured on the M114: 76-unit
-    # tube, breech 38 units behind the centre, ~16 units of dip at 25°). `gun_pivot` slides the head along the
-    # assembly's LONG axis: 0 = the breech end, 1 = the muzzle, 0.5 = the bbox centre (unchanged behaviour).
+    # the head sits IS the trunnion. At the middle the tube see-saws and the breech swings down through the
+    # carriage (measured on the M114: 76-unit tube, breech 38 units behind the centre, ~16 units of dip at 25°).
+    # `gun_pivot` slides the head along the TUBE's breech->muzzle span: 0 = the breech end, 1 = the muzzle,
+    # 0.5 = halfway along the tube.
     # The M114's trunnion measures ~0.4. Only the head moves; the tail stays as it was, so a rig that already
     # dials muzzleOffset/socketBones against this bone keeps its frame.
     _gpts = []
@@ -1687,8 +1687,12 @@ if gun_names or muzzle_names or cradle_names:
                 _muzzle = max(_mpts, key=lambda p: (p - _breech).length)
                 print("VEHICLE MUZZLE %d part(s) -> tip=(%.2f, %.2f, %.2f) (welded to the Gun bone: a brake elevates and recoils with the tube)"
                       % (len(muzzle_names), _muzzle.x, _muzzle.y, _muzzle.z))
-        if abs(gun_pivot - 0.5) > 1e-4:
-            gc = _breech + (_muzzle - _breech) * gun_pivot
+        # ONE MEANING FOR THE DIAL (2026-09-26, second review of PR #92). This used to skip the slide at exactly 0.5
+        # and leave the head at the WHOLE ASSEMBLY's bbox centre — a different point as soon as a cradle hangs behind
+        # the tube — so the one value the Animation Lab's pivot preview could not reproduce was the default one. A gun
+        # still at 0.5 is an untuned gun by definition; regenerating it moves the trunnion from the assembly's centre
+        # to the tube's midpoint, which is what the dial has always claimed 0.5 means at both of its other ends.
+        gc = _breech + (_muzzle - _breech) * gun_pivot
         gun_axis = (gc.copy(), _muzzle.copy())            # (trunnion, muzzle tip) — the deploy elevation needs both
         gun_bore = (_breech.copy(), _muzzle.copy())       # the WHOLE tube: what "fraction of tube length" measures
         print("VEHICLE gun pivot %.2f -> head=(%.2f, %.2f, %.2f) (breech (%.2f, %.2f, %.2f) .. muzzle (%.2f, %.2f, %.2f))"

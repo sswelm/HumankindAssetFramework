@@ -858,6 +858,18 @@ public static class AnimationLabRules
     public static bool NameNeedsTrimming(string configured) =>
         !string.IsNullOrEmpty(configured) && configured != configured.Trim();
 
+    /// True when a baked bone IS the rig's bone of that name. The bake renames "Gun" to "b012_Gun", so an exact name
+    /// or that prefix counts and a longer name that merely CONTAINS it does not (second review of PR #92: the pivot
+    /// safeguard tested for the substring, so it accepted "b005_GunMount" — which is what the runtime's first-match
+    /// rule picks when it comes first — and "GunTurret", and then advised a pivot for a bone Gun pivot cannot place).
+    public static bool IsRigBone(string bakedName, string rigName)
+    {
+        if (string.IsNullOrEmpty(bakedName) || string.IsNullOrEmpty(rigName)) return false;
+        if (string.Equals(bakedName, rigName, StringComparison.OrdinalIgnoreCase)) return true;
+        var m = System.Text.RegularExpressions.Regex.Match(bakedName, @"^b\d+_(.+)$");
+        return m.Success && string.Equals(m.Groups[1].Value, rigName, StringComparison.OrdinalIgnoreCase);
+    }
+
     /// The runtime takes the FIRST bone whose name contains the configured one, case-insensitive, walking the
     /// skeleton's bone array - which the conversion sorts by name, and the bake's b###_ prefix makes that the rig's
     /// own order (Patches/UniversalInject.Pose.cs, ApplyGunElevation). The preview must land on the SAME bone, so it

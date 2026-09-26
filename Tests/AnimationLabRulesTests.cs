@@ -41,6 +41,24 @@ public class AnimationLabRulesTests
     }
 
     [Fact]
+    public void The_riggers_bone_is_matched_by_identity_not_by_substring()
+    {
+        // The pivot advice is only valid for the bone the rig's Gun pivot places. A substring test let the runtime's
+        // first match ("b005_GunMount") and a configured "GunTurret" pass as the Gun bone (second review of PR #92).
+        Assert.True(AnimationLabRules.IsRigBone("Gun", "Gun"));
+        Assert.True(AnimationLabRules.IsRigBone("b012_Gun", "Gun"));       // the bake's b###_<orig> rename
+        Assert.True(AnimationLabRules.IsRigBone("b7_gun", "Gun"));
+        Assert.False(AnimationLabRules.IsRigBone("b005_GunMount", "Gun"));
+        Assert.False(AnimationLabRules.IsRigBone("GunTurret", "Gun"));
+        Assert.False(AnimationLabRules.IsRigBone("b013_GunShield", "Gun"));
+        Assert.False(AnimationLabRules.IsRigBone("Turret", "Gun"));
+        Assert.False(AnimationLabRules.IsRigBone("bxx_Gun", "Gun"));       // the prefix is digits, nothing else
+        Assert.False(AnimationLabRules.IsRigBone("", "Gun"));
+        Assert.False(AnimationLabRules.IsRigBone(null, "Gun"));
+        Assert.False(AnimationLabRules.IsRigBone("Gun", null));
+    }
+
+    [Fact]
     public void The_angle_is_the_runtimes_negated_fraction_of_the_max()
     {
         Assert.Equal(-30f, AnimationLabRules.ElevationAngle(30f, 1f));

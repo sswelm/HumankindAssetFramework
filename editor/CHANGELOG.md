@@ -43,6 +43,14 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   names are **no longer trimmed**, so a stray space fails here exactly as it fails in the game, and says so; the
   bone's rest pose is read from the **prefab**, so resolving a bone mid-playback can no longer capture an elevated
   pose as its rest; the pivot fraction is **cleared between models**; and the *Rig's* button no longer clamps.
+  **Third round:** the rigger no longer treats exactly **0.5** specially — it used to skip the slide there and leave
+  the head at the whole assembly's bounding-box centre, so the one value the preview could not reproduce was the
+  default one. `gun_pivot` now always places the head that far along the tube, which is what the dial claims at both
+  of its other ends; a gun left at 0.5 (an untuned gun by definition) moves from the assembly's centre to the tube's
+  midpoint the next time it is generated, and the Vehicle Lab's tooltip says so. And the pivot safeguard is an
+  **identity** check against the rig's Gun bone (`Gun` or the bake's `b012_Gun`) rather than a substring test, which
+  had accepted `b005_GunMount` — the bone the runtime's first-match rule actually picks when it sorts first — and a
+  configured `GunTurret`, and then advised a pivot for a bone Gun pivot cannot place. Tested.
 
 - **Bake Tests: the Model Workshop and the Vehicle Lab have rows** (user: "could you add fuse and split and extra
   generate test to the bake test"). Neither tool was exercised by any row: the Workshop's split/tear/fuse ran only on
