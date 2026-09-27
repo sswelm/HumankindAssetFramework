@@ -1253,11 +1253,6 @@ public abstract class ModelWorkshopWindow : EditorWindow
             string lettersPath = FuseSidecarPath(outputGlb), marksPath = MarksSidecarPath(outputGlb);
             var letters = rows.Where(r => !string.IsNullOrEmpty(r.fuse)).ToDictionary(r => r.nodeIndex, r => r.fuse);
             var codes = rows.Where(r => r.split || r.tear || r.delete).ToDictionary(r => r.nodeIndex, r => r.delete ? "X" : r.tear ? "T" : "S");
-            if (letters.Count == 0 && codes.Count == 0)
-            {
-                foreach (string p in new[] { lettersPath, marksPath }) if (p != null && File.Exists(p)) File.Delete(p);
-                return;
-            }
             byte[] outBytes = File.ReadAllBytes(outputGlb);
             var parts = GlbDisconnectedParts.Analyze(outBytes);
             // every node's parent (the split parent is meshless, so the analyzer does not list it — read the hierarchy directly)
@@ -1265,18 +1260,46 @@ public abstract class ModelWorkshopWindow : EditorWindow
             int firstNewNode = GlbDisconnectedParts.NodeParents(File.ReadAllBytes(srcFile)).Count;   // the operation only appends: nodes past the source's count are the ones it created
             var meshNodes = new HashSet<int>(parts.Select(q => q.NodeIndex));
             var nameOf = parts.ToDictionary(q => q.NodeIndex, q => q.NodeName);
+            // the output's own parts, for reading a sidecar that is already lying beside it (below)
+            var outTriples = parts.Select(q => (q.NodeIndex, q.NodeName, q.NodeName)).ToList();
+            var outPairs = parts.Select(q => new KeyValuePair<int, string>(q.NodeIndex, q.NodeName)).ToList();
+            int keptTotal = 0;
+            // WHAT IS ALREADY THERE WINS (2026-09-27, user: "when I split salegs_revenge.glb and then probe it in the
+            // fusion, none of my previous configuration seem to have survived"). The sidecars handed DOWN from the
+            // source were written over the ones already beside the output, and a source with none of its own deleted
+            // them outright: re-splitting the original over an existing split wiped 345 group letters and 564 deletion
+            // marks made on that split, because the original carries no groups at all. The two are not the same work.
+            // A Splitter's marks say WHICH PARTS TO CUT; the letters and marks beside the output are what was decided
+            // about the PIECES, in the Fuser, afterwards. A re-cut of the same source reproduces the same pieces under
+            // the same names, so that work still fits: it is read back against the new output (by name, the resolver
+            // the Probe uses) and kept, and what comes down from the source only fills the parts it does not name.
             void Write(string path, IDictionary<int, string> source, bool withGroupNames)
             {
                 if (path == null) return;
-                if (source.Count == 0) { if (File.Exists(path)) File.Delete(path); return; }
-                var transferred = WorkshopRules.TransferLetters(source, table, meshNodes, firstNewNode);
-                var lines = transferred.OrderBy(kv => kv.Key).Where(kv => nameOf.ContainsKey(kv.Key)).Select(kv => WorkshopRules.SidecarLine(kv.Value, nameOf[kv.Key], kv.Key)).ToArray();
+                var merged = new Dictionary<int, string>();
+                var oldNames = new Dictionary<string, string>(StringComparer.Ordinal);
+                if (File.Exists(path))
+                {
+                    var problems = new List<string>();
+                    string[] had = File.ReadAllLines(path);
+                    foreach (var kv in WorkshopRules.ResolveFuseSidecar(WorkshopRules.MigrateSidecarNames(had, outTriples, problems), outPairs, problems)) merged[kv.Key] = kv.Value;
+                    if (withGroupNames) oldNames = WorkshopRules.ParseGroupNames(had);
+                    keptTotal += merged.Count;
+                    foreach (string q in problems) Debug.LogWarning("[Workshop] the output's own " + (withGroupNames ? "groupings" : "marks") + " sidecar: " + q);
+                }
+                foreach (var kv in WorkshopRules.TransferLetters(source, table, meshNodes, firstNewNode))
+                    if (!merged.ContainsKey(kv.Key)) merged[kv.Key] = kv.Value;   // the source's, only where the output had nothing to say
+                var lines = merged.OrderBy(kv => kv.Key).Where(kv => nameOf.ContainsKey(kv.Key)).Select(kv => WorkshopRules.SidecarLine(kv.Value, nameOf[kv.Key], kv.Key)).ToArray();
                 if (lines.Length == 0) { if (File.Exists(path)) File.Delete(path); return; }
-                var head = withGroupNames ? new[] { WorkshopRules.SidecarHeader }.Concat(GroupNameLines(transferred.Values)) : new[] { WorkshopRules.SidecarHeader };
+                string NameFor(string letter) => GroupName(letter).Length > 0 ? GroupName(letter) : oldNames.TryGetValue(letter, out string nm) ? nm : "";
+                var head = withGroupNames
+                    ? new[] { WorkshopRules.SidecarHeader }.Concat(merged.Values.Where(l => !string.IsNullOrEmpty(l)).Distinct().OrderBy(l => l).Where(l => NameFor(l).Length > 0).Select(l => WorkshopRules.GroupNameLine(l, NameFor(l))))
+                    : new[] { WorkshopRules.SidecarHeader };
                 File.WriteAllLines(path, head.Concat(lines));
             }
             Write(lettersPath, letters, true);
             Write(marksPath, codes, false);
+            if (keptTotal > 0) status += $"\nKept {keptTotal} letter(s)/mark(s) already saved beside the output — a re-cut of the same source makes the same pieces, so what was decided about them still fits.";
         }
         catch (Exception e) { Debug.LogWarning("[Workshop] could not write the output's sidecars: " + e.Message); }
     }

@@ -5,6 +5,20 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Workshop: a re-cut keeps what was decided about the pieces** (user: "when I split salegs_revenge.glb and
+  then probe it in the fusion, none of my previous configuration seem to have survived"). Since 2026-09-16 a cut
+  hands its own marks down to the output; it wrote them straight over the sidecars already lying beside that output,
+  and a source with nothing of its own deleted them outright. Re-splitting the original over an existing split
+  therefore wiped **345 group letters and 564 deletion marks** made on that split — because the original carries no
+  groups at all, so the letters sidecar was removed and the marks became 842 inherited `S`.
+
+  The two are not the same work. A Splitter's marks say WHICH PARTS TO CUT; the letters and marks beside the output
+  are what was decided about the PIECES, in the Fuser, afterwards. And a re-cut of the same source reproduces the
+  same pieces under the same names, so that work still fits: the sidecar already beside the output is read back
+  against the new output (by name, through the resolver a Probe uses), kept, and what comes down from the source now
+  fills only the parts it does not name. The group names ride along. A sidecar is deleted only when nothing is left
+  that names a part of the new file, and the status says how many entries were kept.
+
 - **Model Factory: a per-unit correction to the water level** (user: "in many cases the water level in game does not
   correspond correctly with the preview, I think we need a custom slider to adjust the water level"). The pack's
   `waterLevel` is ONE number — how far the game's water surface sits above a baked model's origin — calibrated once
