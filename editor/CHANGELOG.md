@@ -25,6 +25,16 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   and nothing said so. When the window holds no letters at all and the file beside it does, the status now counts
   them and names the button that reads them back.
 
+  **Review**, three findings, all fixed. *A name is not proof*: the merge resolved the old sidecar against the new
+  file by name without asking whether it was even the same model, so cutting an unrelated model to the same output
+  path could hand a part called `Object_1` the first model's delete mark. A sidecar now states the source it was
+  written from (`#from|<file name>`, beside `#name` in its head) and is kept only for another cut of that source;
+  one written before that line existed is judged on how much of it still fits, since most of it naming parts of the
+  new file is what a re-cut looks like and an unrelated model shares a handful of generic names at best. *A kept
+  group keeps its own name*: the window's name for a letter is the SOURCE's name for it, and the output's group A is
+  not the source's group A — a group renamed after the split had that renaming replaced on every re-cut. And the
+  promised "Kept …" note *never appeared*: it was appended to a status line both callers then overwrote.
+
 - **Model Factory: a per-unit correction to the water level** (user: "in many cases the water level in game does not
   correspond correctly with the preview, I think we need a custom slider to adjust the water level"). The pack's
   `waterLevel` is ONE number — how far the game's water surface sits above a baked model's origin — calibrated once

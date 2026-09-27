@@ -360,6 +360,41 @@ public class WorkshopRulesTests
     }
 
     [Fact]
+    public void A_sidecar_beside_an_output_is_kept_only_for_another_cut_of_the_same_source()
+    {
+        // Outside review of PR #99, P1: the merge resolves the sidecar already beside the output against the NEW file
+        // by name, and a name is not proof on its own — cut one model to out.glb, cut an unrelated one to the same
+        // path, and a part called "Object_1" would inherit the first model's delete mark.
+        Assert.True(WorkshopRules.SidecarStillFits("hull.glb", "hull.glb", 345, 345));
+        Assert.True(WorkshopRules.SidecarStillFits("Hull.GLB", " hull.glb ", 345, 3));    // the same source: the count is not asked
+        Assert.False(WorkshopRules.SidecarStillFits("hull.glb", "tank.glb", 345, 344));   // another source: no amount of name overlap buys it in
+        // written before the line existed: judged on how much of it still fits
+        Assert.True(WorkshopRules.SidecarStillFits("", "tank.glb", 345, 345));
+        Assert.True(WorkshopRules.SidecarStillFits("", "tank.glb", 10, 5));
+        Assert.False(WorkshopRules.SidecarStillFits("", "tank.glb", 345, 3));             // a handful of generic names is what an unrelated model shares
+        Assert.False(WorkshopRules.SidecarStillFits("", "tank.glb", 0, 0));
+        Assert.False(WorkshopRules.SidecarStillFits("hull.glb", "hull.glb", 345, 0));     // nothing of it names a part of this file
+    }
+
+    [Fact]
+    public void The_source_line_round_trips_and_the_readers_step_over_it()
+    {
+        // it lives in the head beside #name, so every reader of these files must ignore it
+        var lines = new[] { WorkshopRules.SidecarHeader, WorkshopRules.SidecarFromLine("salegs_revenge.glb"),
+                            WorkshopRules.GroupNameLine("A", "Anker"), WorkshopRules.SidecarLine("A", "Hull", 3) };
+        Assert.Equal("salegs_revenge.glb", WorkshopRules.ParseSidecarFrom(lines));
+        Assert.Equal("", WorkshopRules.ParseSidecarFrom(new[] { WorkshopRules.SidecarHeader }));
+        var names = WorkshopRules.ParseGroupNames(lines);
+        Assert.Single(names);
+        Assert.Equal("Anker", names["A"]);
+        var problems = new List<string>();
+        var letters = WorkshopRules.ResolveFuseSidecar(lines, Rows((3, "Hull")), problems);
+        Assert.Empty(problems);
+        Assert.Equal("A", letters[3]);
+        Assert.Single(letters);
+    }
+
+    [Fact]
     public void The_fuse_report_lists_every_island_when_given_them()
     {
         var g = new WorkshopRules.FuseGroupReport { Letter = "A", Changed = true, PartNames = new[] { "P" }, Warnings = new string[0],

@@ -1044,8 +1044,8 @@ public abstract class ModelWorkshopWindow : EditorWindow
             foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
             string deletedLine = ApplyDeletionsTo(outGlb);   // the marks for deletion, on the written output (the cut only appends)
             WriteMarksSidecar(srcFile);
-            WriteSidecarsForOutput(outGlb);   // the ⊕ letters and the marks travel with the output, passed down to the _CutA/_CutB children (users 2026-09-16 and 2026-09-26; review of 0097bd5)
-            status = $"Plane cut done: {result.Details.FirstOrDefault()}{(deletedLine != null ? " " + deletedLine + "." : "")}\n{outGlb}\nNext: open it in the Vehicle Lab — or cut again by pointing Source GLB at this output and re-Probing (your ⊕ letters travel with it).";
+            string keptNote = WriteSidecarsForOutput(outGlb);   // the ⊕ letters and the marks travel with the output, passed down to the _CutA/_CutB children (users 2026-09-16 and 2026-09-26; review of 0097bd5)
+            status = $"Plane cut done: {result.Details.FirstOrDefault()}{(deletedLine != null ? " " + deletedLine + "." : "")}{keptNote}\n{outGlb}\nNext: open it in the Vehicle Lab — or cut again by pointing Source GLB at this output and re-Probing (your ⊕ letters travel with it).";
         }
         catch (Exception e) { status = "Plane cut failed (source untouched): " + e.Message; Debug.LogException(e); }
         finally { EditorUtility.ClearProgressBar(); }
@@ -1258,8 +1258,11 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // and re-analysed its geometry a few lines after this one had (review of PR #94 — seconds on a 36 MB ship, and
     // every byte of it read twice). The output is read once here and the source once, and both files come out of the
     // same tables.
-    void WriteSidecarsForOutput(string outputGlb)
+    // …and returns what it kept, for the caller's status line: the caller sets `status` AFTER this runs, so a note
+    // written here was overwritten before anyone saw it (outside review of PR #99, P3).
+    string WriteSidecarsForOutput(string outputGlb)
     {
+        string note = "";
         try
         {
             string lettersPath = FuseSidecarPath(outputGlb), marksPath = MarksSidecarPath(outputGlb);
@@ -1285,6 +1288,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             // about the PIECES, in the Fuser, afterwards. A re-cut of the same source reproduces the same pieces under
             // the same names, so that work still fits: it is read back against the new output (by name, the resolver
             // the Probe uses) and kept, and what comes down from the source only fills the parts it does not name.
+            string sourceName = Path.GetFileName(srcFile ?? "");
             void Write(string path, IDictionary<int, string> source, bool withGroupNames)
             {
                 if (path == null) return;
@@ -1294,26 +1298,39 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 {
                     var problems = new List<string>();
                     string[] had = File.ReadAllLines(path);
-                    foreach (var kv in WorkshopRules.ResolveFuseSidecar(WorkshopRules.MigrateSidecarNames(had, outTriples, problems), outPairs, problems)) merged[kv.Key] = kv.Value;
-                    if (withGroupNames) oldNames = WorkshopRules.ParseGroupNames(had);
-                    keptTotal += merged.Count;
-                    foreach (string q in problems) Debug.LogWarning("[Workshop] the output's own " + (withGroupNames ? "groupings" : "marks") + " sidecar: " + q);
+                    var was = WorkshopRules.ResolveFuseSidecar(WorkshopRules.MigrateSidecarNames(had, outTriples, problems), outPairs, problems);
+                    int entries = had.Count(l => !string.IsNullOrWhiteSpace(l) && !l.StartsWith("#", StringComparison.Ordinal));
+                    // …only when it is THIS source's work (WorkshopRules.SidecarStillFits): a name is not proof on its own
+                    if (WorkshopRules.SidecarStillFits(WorkshopRules.ParseSidecarFrom(had), sourceName, entries, was.Count))
+                    {
+                        foreach (var kv in was) merged[kv.Key] = kv.Value;
+                        if (withGroupNames) oldNames = WorkshopRules.ParseGroupNames(had);
+                        keptTotal += merged.Count;
+                        foreach (string q in problems) Debug.LogWarning("[Workshop] the output's own " + (withGroupNames ? "groupings" : "marks") + " sidecar: " + q);
+                    }
+                    else if (entries > 0)
+                        Debug.LogWarning($"[Workshop] the {(withGroupNames ? "groupings" : "marks")} beside '{Path.GetFileName(path)}' were written from another model ({entries} entr(ies), {was.Count} of them naming a part of this one) — replaced rather than merged.");
                 }
                 foreach (var kv in WorkshopRules.TransferLetters(source, table, meshNodes, firstNewNode))
                     if (!merged.ContainsKey(kv.Key)) merged[kv.Key] = kv.Value;   // the source's, only where the output had nothing to say
                 var lines = merged.OrderBy(kv => kv.Key).Where(kv => nameOf.ContainsKey(kv.Key)).Select(kv => WorkshopRules.SidecarLine(kv.Value, nameOf[kv.Key], kv.Key)).ToArray();
                 if (lines.Length == 0) { if (File.Exists(path)) File.Delete(path); return; }
-                string NameFor(string letter) => GroupName(letter).Length > 0 ? GroupName(letter) : oldNames.TryGetValue(letter, out string nm) ? nm : "";
-                var head = withGroupNames
-                    ? new[] { WorkshopRules.SidecarHeader }.Concat(merged.Values.Where(l => !string.IsNullOrEmpty(l)).Distinct().OrderBy(l => l).Where(l => NameFor(l).Length > 0).Select(l => WorkshopRules.GroupNameLine(l, NameFor(l))))
-                    : new[] { WorkshopRules.SidecarHeader };
+                // the KEPT group's own name stands (outside review of PR #99, P2): the window's name is the SOURCE's
+                // name for that letter, and the output's group A is not the source's group A — a group renamed after
+                // the split would have had that renaming replaced on every re-cut. The window names only the letters
+                // the source contributed.
+                string NameFor(string letter) => oldNames.TryGetValue(letter, out string nm) && nm.Length > 0 ? nm : GroupName(letter);
+                var head = new[] { WorkshopRules.SidecarHeader, WorkshopRules.SidecarFromLine(sourceName) }.Concat(withGroupNames
+                    ? merged.Values.Where(l => !string.IsNullOrEmpty(l)).Distinct().OrderBy(l => l).Where(l => NameFor(l).Length > 0).Select(l => WorkshopRules.GroupNameLine(l, NameFor(l)))
+                    : Enumerable.Empty<string>());
                 File.WriteAllLines(path, head.Concat(lines));
             }
             Write(lettersPath, letters, true);
             Write(marksPath, codes, false);
-            if (keptTotal > 0) status += $"\nKept {keptTotal} letter(s)/mark(s) already saved beside the output — a re-cut of the same source makes the same pieces, so what was decided about them still fits.";
+            if (keptTotal > 0) note = $" Kept {keptTotal} letter(s)/mark(s) already saved beside the output — a re-cut of the same source makes the same pieces, so what was decided about them still fits.";
         }
         catch (Exception e) { Debug.LogWarning("[Workshop] could not write the output's sidecars: " + e.Message); }
+        return note;
     }
     // Marks `target` from the sidecar; returns how many rows got a letter, `refused` = lines that fit no single row
     // (each already logged as a warning). Rows the file does not mention are left as they are.
@@ -1457,10 +1474,10 @@ public abstract class ModelWorkshopWindow : EditorWindow
             File.WriteAllBytes(outGlb, bytes);
             WriteMarksSidecar(srcFile);   // the checks and deletion marks, next to the source: the first Probe of it restores them
             if (result != null) foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
-            WriteSidecarsForOutput(outGlb);   // the ⊕ letters and the marks travel with the output, passed down to the _Part_NNN children
+            string keptNote = WriteSidecarsForOutput(outGlb);   // the ⊕ letters and the marks travel with the output, passed down to the _Part_NNN children
             status = (result != null && result.Changed ? $"Split done: {result.NodesSplit} part(s) → {result.ChildPartsCreated} sub-parts, {result.SourceTriangles:N0} triangles preserved." : "Split: nothing checked.")
                    + (torn != null && torn.Changed ? $" Tear: {torn.NodesSplit} part(s) → {torn.ChildPartsCreated} pieces." : torn != null ? " Tear: nothing came apart (the mirror side has no separate island where this part is welded)." : "")
-                   + (deletedLine != null ? " " + deletedLine + "." : "") + (renamedLine != null ? " " + renamedLine + "." : "") + $"\n{outGlb}\nNext: open it in the Vehicle Lab, Probe parts, and mark the junk islands Ignore.";
+                   + (deletedLine != null ? " " + deletedLine + "." : "") + (renamedLine != null ? " " + renamedLine + "." : "") + keptNote + $"\n{outGlb}\nNext: open it in the Vehicle Lab, Probe parts, and mark the junk islands Ignore.";
             if (result != null) Debug.Log($"[Workshop] {string.Join(" | ", result.Details)}");
             if (torn != null) { foreach (var w in torn.Warnings) Debug.LogWarning("[Workshop] tear: " + w); Debug.Log($"[Workshop] tear: {string.Join(" | ", torn.Details)}"); }
         }

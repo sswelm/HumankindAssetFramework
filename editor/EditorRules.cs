@@ -475,6 +475,36 @@ public static class WorkshopRules
                ".\nThey describe the parts of the file being replaced, so the new output gets the marks its own source hands down instead.";
     }
 
+    /// <summary>The source a sidecar was written from, stated in its own head: "#from|&lt;file name&gt;".</summary>
+    public const string SidecarFromPrefix = "#from|";
+    public static string SidecarFromLine(string sourceName) => SidecarFromPrefix + (sourceName ?? "").Trim();
+    public static string ParseSidecarFrom(IEnumerable<string> lines)
+    {
+        foreach (string raw in lines ?? new string[0])
+        {
+            string line = (raw ?? "").Trim();
+            if (line.StartsWith(SidecarFromPrefix, StringComparison.Ordinal)) return line.Substring(SidecarFromPrefix.Length).Trim();
+        }
+        return "";
+    }
+
+    /// <summary>
+    /// May the sidecar already lying beside an output be KEPT when that output is written again? (Outside review of
+    /// PR #99, P1.) The merge that keeps it resolves it against the new file BY NAME, and a name is not proof of
+    /// anything on its own: cut one model to out.glb, cut an unrelated one to the same path, and a part called
+    /// `Object_1` would inherit the first model's delete mark. So the sidecar states the source it was written from,
+    /// and it is kept only for another cut of that same source.
+    /// A sidecar written before that line existed states nothing, and is judged on how much of it still fits: most
+    /// of its entries naming parts of the new file is what a re-cut of the same source looks like (the ship this came
+    /// from: 345 of 345), while an unrelated model shares a handful of generic names at best.
+    /// </summary>
+    public static bool SidecarStillFits(string statedSource, string sourceName, int entries, int resolved)
+    {
+        if (entries <= 0 || resolved <= 0) return false;
+        if (!string.IsNullOrEmpty(statedSource)) return string.Equals(statedSource, (sourceName ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
+        return resolved * 2 >= entries;
+    }
+
     public static string SidecarLine(string letter, string name, int nodeIndex) =>
         letter + "|" + nodeIndex.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" + name;
 
