@@ -5,6 +5,55 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Fuser: the same answer, six times sooner** (user: "fusing the Saleg's Revenge took a long time, could you
+  look if we could speed it up?"). The ship's 21 groups — 361 parts, 4.7 million faces — took **578 seconds**; they
+  now take **94**, and the largest group on its own falls from 557 s to 53. Nothing about what the fuse decides has
+  changed: every line of all 21 groups' reports is identical to the old ones, and the fused file comes out byte for
+  byte the same.
+
+  A fuse is as long as its largest group, and that group spent its time in two passes with one piece of machinery
+  under both. All three were measured rather than guessed:
+
+  - **Asking each face what lies a hair's breadth in front of it or behind it** took 412 of those 557 seconds. The
+    reach is half a percent of the model and a ship is dense at that size, so the search looked at 43 billion
+    candidates across three million faces — 14,470 apiece — and read each one's centroid, radius and normal through
+    its index, four cache misses a candidate. Those numbers are now packed alongside each grid cell in the order the
+    cell is walked, so the rejection (which throws out 96.6 % of them) reads straight down memory, and every face's
+    question is asked on its own core. 412 s → 19.7 s. Per SHEET was tried first and measured worthless — 50.4 s
+    against 52 s on one thread, for fourteen times the processor time — because the sheets are wildly uneven and one
+    of them holds most of a group.
+  - **Judging the sheets** — which way each surface faces — took another 80 s, on one core, with seven idle. A sheet
+    reads finished tables and writes only its own faces, so they are judged at once. 80 s → 1.1 s.
+  - **The column walk** underneath both ("is anything above this face, is anything beneath it") ran a full
+    Möller-Trumbore intersection against every triangle in a cell a 256th of the model wide: 930,000 queries, 4,220
+    candidates each, 3.9 billion ray tests. A vertical ray answers three comparisons before it needs the intersection
+    at all; each triangle now also sits in the finest of a ladder of grids that it fits inside, rather than all of
+    them in one coarse one; and a face that is asked the same question twice is answered from the first time.
+
+  All four are rejections and rearrangements around tests that are untouched — the ray test, the exact twin test and
+  every verdict rule still decide, on the same numbers, in the same order.
+
+  **Review** — two findings, both fixed, both measured:
+
+  - *The packed filter's slack was read off the model's SIZE.* A float's error is a fraction of the magnitude it
+    holds, not of the model's extent: two skins 0.02 apart at y = 2^30 land on floats 128 apart, because what is
+    representable up there are multiples of 128 — and a slack taken from a ten-unit pair of skins is a thousand times
+    too small to cover it, so the pair was thrown out before the exact test ever saw it and read as un-twinned. A
+    model placed far from the origin by a node transform could therefore have come out with a different winding. The
+    slack is now read off the coordinates the group actually occupies as well as its extent, and a fixture at 2^30
+    (`A_double_skin_far_from_the_origin_is_judged_the_same_as_one_at_it`) pins it — it fails on the first cut.
+  - *Every group built the whole file's occluder index, whether or not it asked anything of it.* The first cut built
+    it up front to keep the lazy build off the worker threads. But reading every mesh node of the file and
+    transforming its triangles is ten seconds and hundreds of megabytes on a big ship, and a group whose sheets are
+    all closed and consistently wound never walks a column at all: on the Steam Frigate's 23 groups this turned
+    master's 112 s of stage time into 129 s. It is built on first use again, behind a lock, with the finished array
+    published last — 89.6 s.
+
+  The fused file is byte for byte master's on all six ships measured (the Saleg's Revenge, HMS Svea, SMS Wespe, RMS
+  Teutonic, SS Romanic and the Confederate frigate), every one of them is faster than master, and the peak memory of
+  the biggest run is unchanged (16.5 GB against master's 16.6 — the fuse holds the whole model per group, which is
+  master's shape and the next thing worth attacking).
+
 - **Model Workshop: a cut carries its marks to the output** (user: "when I cut up a part, I end up losing all
   configurations on it, so whenever I make a cut it should also copy the configuration so I don't have to start from
   scratch"). The ⊕ group letters have travelled with a cut output since 2026-09-16; the Split, Tear and Delete checks
