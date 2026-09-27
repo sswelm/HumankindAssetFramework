@@ -505,12 +505,14 @@ public static class ModelRegistry
     // an empty result must show the key in the raw text: every file the editor writes carries it, and a source
     // without one is a broken edit, not an empty pack (review of PR #100: `{}` wiped every model via SaveStatics).
     // Newtonsoft only runs on an empty result, so the polled Load() of a real pack pays nothing for it.
-    static RegistryFile ParseSource(string json, out string why)
+    static RegistryFile ParseSource(string json, out string why) => ParseRegistry(json, SourcePath, out why);
+
+    static RegistryFile ParseRegistry(string json, string path, out string why)
     {
         why = null;
         RegistryFile f;
         try { f = JsonUtility.FromJson<RegistryFile>(json); }
-        catch (Exception e) { why = Pinpoint(SourcePath) ?? e.Message; return null; }
+        catch (Exception e) { why = Pinpoint(path) ?? e.Message; return null; }
         if (f == null) { why = "the file is empty or not a JSON object"; return null; }
         if (f.models == null || f.models.Count == 0)
         {
@@ -621,15 +623,21 @@ public static class ModelRegistry
         }
         if (file == null) file = new RegistryFile();
         if (keepDiskModels) models = file.models ?? new List<ModelDef>();
-        if (keepDiskModels && models.Count == 0 && DeployedModelCount() > 0)
+        if (keepDiskModels && models.Count == 0)
         {
-            // A well-formed but EMPTY source beside a deployed copy that still has models: every editor Save writes
-            // both, so the source was emptied outside the editor (models cut out mid-edit). A statics-only save must
-            // never be the thing that makes the wipe permanent.
-            Debug.LogError($"[Factory] not saving: the registry source '{SourcePath}' holds no models but the deployed copy " +
-                           $"still has {DeployedModelCount()}. Restore them (the Model Factory's recovery, or git) and save again. " +
-                           "If the pack really is empty now, delete the deployed copy (the next Load recreates it from the source).");
-            return false;
+            // A well-formed but EMPTY source: every editor Save writes both copies, so a deployed copy that still has
+            // models means the source was emptied outside the editor (models cut out mid-edit). A statics-only save must
+            // never be the thing that makes the wipe permanent — and a deployed copy it can't READ may still hold them,
+            // so that refuses too (review of #100: "unreadable" used to count as "empty" and let the wipe through).
+            int deployed = DeployedModelCount(out var deployedWhy);
+            if (deployed != 0)
+            {
+                Debug.LogError($"[Factory] not saving: the registry source '{SourcePath}' holds no models, and " +
+                               (deployed > 0 ? $"the deployed copy still has {deployed}. Restore them (the Model Factory's recovery, or git) and save again. "
+                                             : $"the deployed copy '{RegistryPath}' can't be checked ({deployedWhy}), so it may still hold them. Close whatever holds it (the game?) and save again. ") +
+                               "If the pack really is empty now, delete the deployed copy (the next Load recreates it from the source).");
+                return false;
+            }
         }
         SortByName(models);   // write BOTH the live registry and the backup alphabetically, so the order is stable across bakes
         file.models = models;
@@ -686,11 +694,14 @@ public static class ModelRegistry
     // (ModelRegistry.EraGrid/UnitScales/…) before calling. An unreadable source refuses (returns false).
     public static bool SaveStatics() => Save(null, true);
 
-    // Models in the deployed copy; 0 when it is absent or unreadable (no evidence either way).
-    static int DeployedModelCount()
+    // Models in the deployed copy: 0 only when it is ABSENT or provably empty; -1 when it exists but can't be read or
+    // fails the same shape rule as the source (locked by the game, half-written, `{}`) — no evidence of an empty pack.
+    static int DeployedModelCount(out string why)
     {
-        try { return File.Exists(RegistryPath) ? JsonUtility.FromJson<RegistryFile>(File.ReadAllText(RegistryPath))?.models?.Count ?? 0 : 0; }
-        catch { return 0; }
+        why = null;
+        if (!File.Exists(RegistryPath)) return 0;
+        try { var d = ParseRegistry(File.ReadAllText(RegistryPath), RegistryPath, out why); return d == null ? -1 : d.models.Count; }
+        catch (Exception e) { why = e.Message; return -1; }
     }
 
     public static bool Upsert(ModelDef def)
