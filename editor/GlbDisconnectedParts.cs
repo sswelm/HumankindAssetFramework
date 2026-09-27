@@ -1436,6 +1436,12 @@ public static class GlbDisconnectedParts
         return bytes;
     }
 
+    // AS MANY WORKERS AS THE MACHINE HAS, AND NO MORE (2026-09-27). The passes below wait on memory as much as on
+    // arithmetic, and the thread pool reads a body that is slow because it is stalled as a body that is blocked: left
+    // to itself it kept injecting threads - forty of them on a sixteen-thread machine - which on this work only adds
+    // cache pressure. Measured on the Saleg's Revenge.
+    static readonly System.Threading.Tasks.ParallelOptions FuseParallel = new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount) };
+
     sealed class FusePlan
     {
         public readonly Result Result = new Result();
@@ -1941,11 +1947,21 @@ public static class GlbDisconnectedParts
         // use; a vertical ray from the model's top, Möller-Trumbore per candidate; the face itself and a copy
         // coincident with it (a doubled surface) are not occluders. Entries >= 0 index `occluders` (other nodes,
         // three corners each); entries < 0 are the group's own faces, -1 - f.
-        Dictionary<long, List<int>> columns = null; var occluders = new List<Vec3>(); double columnCell = 1, modelTop = 0, modelBottom = 0;
+        // A LADDER OF GRIDS, NOT ONE (2026-09-27, the Saleg's Revenge). One grid a 256th of the model across means a
+        // cell metres wide on a ship, holding every triangle stacked at that spot: the walk below examined 4,220
+        // candidates per query, 3.9 billion ray tests in one group. A triangle is registered instead in the FINEST
+        // grid whose cell it still fits inside, so it lands in at most four cells wherever it sits on the ladder, and
+        // a query reads one cell per rung. The candidate set is the same superset it always was - every triangle whose
+        // footprint covers the ray is in the cell the ray lands in - so the answer does not change; there is simply far
+        // less of the model in the way of the question.
+        const int ColumnLevels = 7;   // the coarsest is master's 256th of the model, the finest a 16,384th
+        Dictionary<long, List<int>>[] columns = null; var columnCells = new double[ColumnLevels];
+        var occluders = new List<Vec3>(); double columnCell = 1, modelTop = 0, modelBottom = 0;
         void EnsureOccluders()
         {
             if (columns != null) return;
-            columns = new Dictionary<long, List<int>>();
+            var grids = new Dictionary<long, List<int>>[ColumnLevels];
+            for (int k = 0; k < ColumnLevels; k++) grids[k] = new Dictionary<long, List<int>>();
             var lo = new[] { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity }; var hi = new[] { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
             var fusedNodes = new HashSet<int>(picked);
             try
@@ -1978,16 +1994,24 @@ public static class GlbDisconnectedParts
             for (int f = 0; f < faceCount; f++) for (int c = 0; c < 3; c++) UpdateBounds(lo, hi, P(f, c));
             modelTop = hi[1]; modelBottom = lo[1];
             columnCell = Math.Max(Math.Max(hi[0] - lo[0], hi[2] - lo[2]) / 256.0, 1e-9);
+            for (int k = 0; k < ColumnLevels; k++) columnCells[k] = columnCell / (1 << k);
             void Register(int id, Vec3 a, Vec3 b, Vec3 c)
             {
-                long x0 = (long)Math.Floor(Math.Min(a.X, Math.Min(b.X, c.X)) / columnCell), x1 = (long)Math.Floor(Math.Max(a.X, Math.Max(b.X, c.X)) / columnCell);
-                long z0 = (long)Math.Floor(Math.Min(a.Z, Math.Min(b.Z, c.Z)) / columnCell), z1 = (long)Math.Floor(Math.Max(a.Z, Math.Max(b.Z, c.Z)) / columnCell);
-                if (x1 - x0 > 256 || z1 - z0 > 256) return;   // wider than the model: a stray sliver, not an occluder
+                double mnX = Math.Min(a.X, Math.Min(b.X, c.X)), mxX = Math.Max(a.X, Math.Max(b.X, c.X));
+                double mnZ = Math.Min(a.Z, Math.Min(b.Z, c.Z)), mxZ = Math.Max(a.Z, Math.Max(b.Z, c.Z));
+                int lev = ColumnLevels - 1;   // the finest rung whose cell the triangle still fits inside (level 0 takes the rest)
+                while (lev > 0 && (mxX - mnX > columnCells[lev] || mxZ - mnZ > columnCells[lev])) lev--;
+                double cell = columnCells[lev];
+                long x0 = (long)Math.Floor(mnX / cell), x1 = (long)Math.Floor(mxX / cell);
+                long z0 = (long)Math.Floor(mnZ / cell), z1 = (long)Math.Floor(mxZ / cell);
+                if (lev == 0 && (x1 - x0 > 256 || z1 - z0 > 256)) return;   // wider than the model: a stray sliver, not an occluder
+                Dictionary<long, List<int>> grid = grids[lev];
                 for (long x = x0; x <= x1; x++) for (long z = z0; z <= z1; z++)
-                { long key = (x << 32) ^ (z & 0xffffffffL); if (!columns.TryGetValue(key, out List<int> l)) columns.Add(key, l = new List<int>()); l.Add(id); }
+                { long key = (x << 32) ^ (z & 0xffffffffL); if (!grid.TryGetValue(key, out List<int> l)) grid.Add(key, l = new List<int>()); l.Add(id); }
             }
             for (int t = 0; t < occluders.Count; t += 3) Register(t, occluders[t], occluders[t + 1], occluders[t + 2]);
             for (int f = 0; f < faceCount; f++) Register(-1 - f, P(f, 0), P(f, 1), P(f, 2));
+            columns = grids;   // published last: the walkers take its being non-null as "built"
         }
         // ...and from BELOW, the same column upward from the model's bottom: what tells a well's floor (the hull
         // beneath it) from an upturned boat's bottom (nothing beneath it) - both face up and both see the sky.
@@ -2008,20 +2032,60 @@ public static class GlbDisconnectedParts
             EnsureOccluders();
             Vec3 c = FScale(FAdd(FAdd(P(f, 0), P(f, 1)), P(f, 2)), 1.0 / 3.0);
             var d = new Vec3 { X = 0, Y = upward ? 1 : -1, Z = 0 };
-            long key = ((long)Math.Floor(c.X / columnCell) << 32) ^ ((long)Math.Floor(c.Z / columnCell) & 0xffffffffL);
-            if (!columns.TryGetValue(key, out List<int> l)) return double.PositiveInfinity;
             double best = double.PositiveInfinity, skin = 1e-6 * Math.Max(1.0, modelTop - modelBottom);
-            foreach (int t in l)
+            for (int k = 0; k < ColumnLevels; k++)
             {
-                double hit;
-                if (t >= 0) hit = RayTriangle(c, d, occluders[t], occluders[t + 1], occluders[t + 2]);
-                else { int g = -1 - t; if (g == f || (skip != null && skip.Contains(g))) continue; hit = RayTriangle(c, d, P(g, 0), P(g, 1), P(g, 2)); }
-                if (hit > skin && hit < best) best = hit;
+                double cell = columnCells[k];
+                long key = ((long)Math.Floor(c.X / cell) << 32) ^ ((long)Math.Floor(c.Z / cell) & 0xffffffffL);
+                if (!columns[k].TryGetValue(key, out List<int> l)) continue;
+                foreach (int t in l)
+                {
+                    Vec3 a, b, cc;
+                    if (t >= 0) { a = occluders[t]; b = occluders[t + 1]; cc = occluders[t + 2]; }
+                    else { int g = -1 - t; if (g == f || (skip != null && skip.Contains(g))) continue; a = P(g, 0); b = P(g, 1); cc = P(g, 2); }
+                    if (!InColumn(a, b, cc, c, upward, skin, best)) continue;
+                    double hit = RayTriangle(c, d, a, b, cc);
+                    if (hit > skin && hit < best) best = hit;
+                }
             }
             return best;
         }
+        // CAN THIS CANDIDATE POSSIBLY ANSWER? (2026-09-27, the Saleg's Revenge: 930,000 queries in one group, each
+        // walking 4,220 candidates - 3.9 billion ray tests.) A column cell is a 256th of the model, which on a ship is
+        // metres across and holds every triangle stacked at that spot, and the walk ran a full Moeller-Trumbore
+        // against each one. The ray here is
+        // VERTICAL, so three comparisons answer what the ray test answers, exactly and far cheaper:
+        //   * the ray misses everything whose x/z box does not contain the ray's x/z;
+        //   * going up, a hit beyond the skin needs the triangle to reach above the origin (down: below it);
+        //   * and a candidate that cannot start before the nearest hit so far cannot improve on it.
+        // Rejection only - whatever survives still goes through the same ray test, so the answer is the one master
+        // gives, to the bit.
+        // The bounds are widened by the skin before they reject anything: the ray test carries its own slack (a
+        // barycentric 1e-9, and a t that is not computed as a subtraction of heights), and a filter is only sound
+        // while it is looser than what it stands in front of. The skin is a millionth of the model and a cell is a
+        // 256th of it, so the widening costs no rejections worth counting.
+        static bool InColumn(Vec3 a, Vec3 b, Vec3 cc, Vec3 c, bool upward, double skin, double best)
+        {
+            if (c.X < Math.Min(a.X, Math.Min(b.X, cc.X)) - skin || c.X > Math.Max(a.X, Math.Max(b.X, cc.X)) + skin) return false;
+            if (c.Z < Math.Min(a.Z, Math.Min(b.Z, cc.Z)) - skin || c.Z > Math.Max(a.Z, Math.Max(b.Z, cc.Z)) + skin) return false;
+            double loY = Math.Min(a.Y, Math.Min(b.Y, cc.Y)), hiY = Math.Max(a.Y, Math.Max(b.Y, cc.Y));
+            if (upward) return hiY > c.Y && (double.IsPositiveInfinity(best) || loY - c.Y <= best + skin);
+            return loY < c.Y && (double.IsPositiveInfinity(best) || c.Y - hiY <= best + skin);
+        }
         bool ExposedFromAbove(int f) => Exposed(f, true);
-        bool Exposed(int f, bool fromAbove) => double.IsPositiveInfinity(Column(f, fromAbove, null));
+        // …AND EVERY FACE IS ASKED ONCE. The parity pass asks the minority faces of a two-coloured sheet what they show
+        // the sky, and the direction pass asks the faces of a sheet it is about to reverse the same thing - the same
+        // faces, twice over, and the positions do not move between them (the passes change winding, which this walk
+        // stopped reading in PR #93). A byte per face per direction; a race in the parallel pass below can only
+        // recompute the same answer.
+        var exposedMemo = new sbyte[2 * faceCount];   // 0 = not asked, 1 = exposed, -1 = something in the way
+        bool Exposed(int f, bool fromAbove)
+        {
+            int at = fromAbove ? f : faceCount + f;
+            sbyte v = exposedMemo[at];
+            if (v == 0) exposedMemo[at] = v = double.IsPositiveInfinity(Column(f, fromAbove, null)) ? (sbyte)1 : (sbyte)-1;
+            return v > 0;
+        }
         var flip = new bool[faceCount];
         int islandsMadeConsistent = 0, islandsNotOrientable = 0, asAuthoredSheets = 0, fromAboveKept = 0, reversalsVetoed = 0, undersidesKept = 0;
         bool DirOf(int face, long key) { for (int e = 0; e < 3; e++) if (fEdgeKeys[face * 3 + e] == key) return fEdgeDir[face * 3 + e]; return false; }
@@ -2220,7 +2284,11 @@ public static class GlbDisconnectedParts
         // not a skin. The twin rule then turned the roof over (its own inside-out score read +0.55, plainly outward).
         // Half the reach keeps every skin and loses every neighbour; a deck and the ceiling below it sit at 1.4 %+.
         double twinReach = longest * 0.005, twinCell;
+        float twinPad = (float)(longest * 1e-5);   // what a float costs at the model's size: the packed test is widened by it, so it stays looser than the exact one
         var twinCells = new Dictionary<PositionKey, List<int>>();
+        // …and the same cells packed for the search: seven floats a candidate, its centroid, its corner radius and
+        // its unit normal, in the order the cell is walked (see the packing below).
+        var twinPacked = new Dictionary<PositionKey, float[]>();
         var twinCentres = new Vec3[faceCount];
         // per face, once: its unit normal (null when degenerate) and the radius of its corners about the centroid — a
         // candidate whose centroid lies farther than reach + its radius cannot hold a point within reach, and is skipped
@@ -2233,7 +2301,21 @@ public static class GlbDisconnectedParts
             Vec3 a = P(f, 0), b = P(f, 1), cc = P(f, 2), cen = FScale(FAdd(FAdd(a, b), cc), 1.0 / 3.0);
             twinRadius[f] = Math.Max(FLen(FSub(a, cen)), Math.Max(FLen(FSub(b, cen)), FLen(FSub(cc, cen))));
         }
-        var twinSeen = new int[faceCount];   // stamp: twinSeen[g] == f + 1 when g was already tested for face f
+        // EVERY FACE'S TWIN IS ITS OWN QUESTION, SO THEY ARE ASKED AT ONCE (2026-09-27, the Saleg's Revenge: 21
+        // groups, 12 minutes). Asking each face which face lies a hair's breadth in front of it or behind it is by far
+        // the longest thing the fuse does - 412 of the 557 seconds the largest group took on its own - because the
+        // reach is half a percent of the model and a ship is dense at that size: 43 billion candidates over three
+        // million faces, 14,470 apiece.
+        // Each face's answer is read out of the finished grid and depends on nothing another face decides, so they are
+        // asked on every core - PER FACE, not per sheet. Per sheet was tried first and gained NOTHING (50.4 s against
+        // 52 s on one thread, for fourteen times the processor time): the sheets are wildly uneven, one of them holds
+        // most of a group, and eleven workers sat waiting on the twelfth. Per face it is 412 s -> 19.7 s.
+        // The answers are kept per face and the statistics gathered from them afterwards, in sheet order, so the sums
+        // are added up in exactly the order one thread would have added them.
+        var twinBest = new double[faceCount]; var twinProj = new double[faceCount]; var twinBestG = new int[faceCount];
+        // stamp: seen[g] == f + 1 when g was already tested for face f. One array per worker, borrowed from a bag: a
+        // stamp array shared between threads would be a write to the same cache line for every candidate.
+        var twinSeenPool = new System.Collections.Concurrent.ConcurrentBag<int[]>();
         {
             var sizes = new List<double>(faceCount);
             for (int f = 0; f < faceCount; f++)
@@ -2252,6 +2334,26 @@ public static class GlbDisconnectedParts
                 for (long x = lo.X; x <= x1; x++) for (long y = lo.Y; y <= y1; y++) for (long z = lo.Z; z <= z1; z++)
                 { var k = new PositionKey { X = x, Y = y, Z = z }; if (!twinCells.TryGetValue(k, out List<int> l)) twinCells.Add(k, l = new List<int>()); l.Add(f); }
             }
+            // THE CELL'S CANDIDATES, SIDE BY SIDE (2026-09-27, the Saleg's Revenge: 43 billion candidates in one
+            // group, and the longest thing the fuse did). Two questions throw almost every candidate out - could any
+            // point of it lie within reach, and does it face the other way - and both were answered by reaching into
+            // three-million-entry arrays through the candidate's index: four cache misses per candidate, the loop
+            // waiting on memory rather than on arithmetic. The same numbers are packed here in the order the cell is
+            // walked, so the throwing-out reads straight down memory and only what survives it is looked up. In
+            // float, and widened by what a float costs at the model's size, so it can only ever let a candidate
+            // THROUGH to the exact tests, which are untouched and still decide.
+            foreach (KeyValuePair<PositionKey, List<int>> kv in twinCells)
+            {
+                List<int> l = kv.Value; var packed = new float[l.Count * 7];
+                for (int j = 0; j < l.Count; j++)
+                {
+                    int g = l[j]; Vec3 tc = twinCentres[g]; Vec3 tu = twinUnit[g] ?? default(Vec3);
+                    packed[j * 7] = (float)tc.X; packed[j * 7 + 1] = (float)tc.Y; packed[j * 7 + 2] = (float)tc.Z;
+                    packed[j * 7 + 3] = (float)twinRadius[g];
+                    packed[j * 7 + 4] = (float)tu.X; packed[j * 7 + 5] = (float)tu.Y; packed[j * 7 + 6] = (float)tu.Z;   // (0,0,0) for a degenerate face: the dot below then rejects it, as the null check does
+                }
+                twinPacked.Add(kv.Key, packed);
+            }
         }
         Mark("belly+twin grid");
         // the twin statistics of every island, measured BEFORE any direction flip (an island turned earlier in the loop
@@ -2269,21 +2371,28 @@ public static class GlbDisconnectedParts
             foreach (int f in sheets[ii]) for (int c = 0; c < 3; c++) UpdateBounds(islandLo[ii], islandHi[ii], P(f, c));
         }
         var enclosingIsland = new int[sheets.Count];   // the island holding the twins behind, when one island holds ≥ 90 % of them and its box contains this one; else -1
-        for (int ii = 0; ii < sheets.Count; ii++)
+        void TwinOfFace(int f, int[] twinSeen)
         {
-            int partnered = 0, twinInFront = 0, twinBehind = 0;
-            double distSum = 0, straightSum = 0;
-            var behindBy = new Dictionary<int, int>();   // twin island -> twins-behind count
-            foreach (int f in sheets[ii])
-            {
-                if (twinUnit[f] == null) continue; Vec3 nf = twinUnit[f].Value;
-                Vec3 c = twinCentres[f]; PositionKey k = CellOf(c, twinCell); double best = double.PositiveInfinity; double proj = 0; int bestG = -1;
+            twinBestG[f] = -1;
+            if (twinUnit[f] == null) return;
+            Vec3 nf = twinUnit[f].Value;
+            Vec3 c = twinCentres[f]; PositionKey k = CellOf(c, twinCell); double best = double.PositiveInfinity; double proj = 0; int bestG = -1;
                 int stamp = f + 1;
+                float cxF = (float)c.X, cyF = (float)c.Y, czF = (float)c.Z;
+                float nxF = (float)nf.X, nyF = (float)nf.Y, nzF = (float)nf.Z, reachF = (float)twinReach;
                 for (long dx = -1; dx <= 1; dx++) for (long dy = -1; dy <= 1; dy++) for (long dz = -1; dz <= 1; dz++)
                 {
-                    if (!twinCells.TryGetValue(new PositionKey { X = k.X + dx, Y = k.Y + dy, Z = k.Z + dz }, out List<int> l)) continue;
-                    foreach (int g in l)
+                    var cellKey = new PositionKey { X = k.X + dx, Y = k.Y + dy, Z = k.Z + dz };
+                    if (!twinCells.TryGetValue(cellKey, out List<int> l)) continue;
+                    float[] packed = twinPacked[cellKey];
+                    for (int j = 0; j < l.Count; j++)
                     {
+                        int o = j * 7;
+                        float pdx = packed[o] - cxF, pdy = packed[o + 1] - cyF, pdz = packed[o + 2] - czF;
+                        float plim = reachF + packed[o + 3] + twinPad;
+                        if (pdx * pdx + pdy * pdy + pdz * pdz > plim * plim) continue;         // nothing of it can lie within reach
+                        if (nxF * packed[o + 4] + nyF * packed[o + 5] + nzF * packed[o + 6] > -0.94f) continue;   // not facing back at this face (the exact -0.95 decides below; this only lets more through)
+                        int g = l[j];
                         if (g == f || twinSeen[g] == stamp) continue;
                         twinSeen[g] = stamp;
                         if (twinUnit[g] == null) continue;
@@ -2298,8 +2407,23 @@ public static class GlbDisconnectedParts
                         if (dist < best) { best = dist; proj = along; bestG = g; }
                     }
                 }
-                if (!double.IsPositiveInfinity(best))
+            twinBest[f] = best; twinProj[f] = proj; twinBestG[f] = double.IsPositiveInfinity(best) ? -1 : bestG;
+        }
+        System.Threading.Tasks.Parallel.For(0, faceCount, FuseParallel,
+            () => { int[] seen; return twinSeenPool.TryTake(out seen) ? seen : new int[faceCount]; },
+            (f, loop, seen) => { TwinOfFace(f, seen); return seen; },
+            seen => twinSeenPool.Add(seen));
+        for (int ii = 0; ii < sheets.Count; ii++)
+        {
+            int partnered = 0, twinInFront = 0, twinBehind = 0;
+            double distSum = 0, straightSum = 0;
+            var behindBy = new Dictionary<int, int>();   // twin island -> twins-behind count
+            foreach (int f in sheets[ii])
+            {
+                int bestG = twinBestG[f];
+                if (bestG >= 0)
                 {
+                    double best = twinBest[f], proj = twinProj[f];
                     partnered++; distSum += best / twinReach; straightSum += Math.Abs(proj) / best;
                     if (proj > 0) twinInFront++;
                     else { twinBehind++; int ti = islandOf[bestG]; behindBy[ti] = behindBy.TryGetValue(ti, out int bc) ? bc + 1 : 1; }
@@ -2320,7 +2444,15 @@ public static class GlbDisconnectedParts
                 }
             }
         }
-        for (int ii = 0; ii < sheets.Count; ii++)
+        Mark("twin stats");
+        // EVERY SHEET IS JUDGED ON ITS OWN, SO THEY ARE JUDGED AT ONCE (2026-09-27, the Saleg's Revenge: the group of
+        // 87 parts spent 80 s of its 557 here, while the other twenty groups were long finished and seven cores sat
+        // idle - a fuse is as long as its largest group). A sheet reads its own faces' winding and the shared,
+        // finished tables (the twin statistics, measured before any flip; the parity colours; the column grid), and
+        // writes its own faces' flips, its own report line and six run counters. Nothing it writes is read by another
+        // sheet: the column walk stopped reading winding in PR #93, which is what makes the sheets independent. The
+        // counters are per sheet, so the totals do not depend on the order they arrive in. 80 s -> 1.1 s.
+        void JudgeSheet(int ii)
         {
             List<int> isl = sheets[ii];
             // a sheet's boundary is every face-edge without a partner: the rim, and the junctions where this sheet is the
@@ -2396,10 +2528,10 @@ public static class GlbDisconnectedParts
             // …and the one thing twin evidence MAY do against a confident volume is VETO a reversal: a closed cavity
             // shell (the inner skin of a hollow solid) has a negative volume yet every twin BEHIND it — it already faces
             // away from the material, and turning it would point it into the wall (review of e595844).
-            else if (closed) { reverse = volume < 0 && !enclosed; if (reverse) closedReversed++; }
+            else if (closed) { reverse = volume < 0 && !enclosed; if (reverse) System.Threading.Interlocked.Increment(ref closedReversed); }
             else
             {
-                openJudged++;
+                System.Threading.Interlocked.Increment(ref openJudged);
                 bool volumeConfident = Math.Abs(agreement) > 0.5 && Math.Abs(thickness) > VolumeThicknessGate;
                 // THE LAST RESORT, and where a deck used to be lost (2026-09-20). The radial score asks "does this
                 // point away from the hull's belly line", which is right for plating and wrong for a deck BELOW that
@@ -2496,7 +2628,7 @@ public static class GlbDisconnectedParts
                         }
                         if (keepVotes > 0 && keepVotes >= 2 * turnVotes)
                         {
-                            reverse = false; reversalVetoed = true; undersidesKept++;
+                            reverse = false; reversalVetoed = true; System.Threading.Interlocked.Increment(ref undersidesKept);
                             vetoNote = string.Format(System.Globalization.CultureInfo.InvariantCulture, " (an underside: {0} of {1} down-facing faces have a ceiling {2:0.#} above and a floor {3:0.#} beneath)", keepVotes, keepVotes + turnVotes, aboveSum / keepVotes, belowSum / keepVotes);
                         }
                         else if (noFloor > 0 && noFloor >= insideBelow)
@@ -2536,9 +2668,9 @@ public static class GlbDisconnectedParts
                     // DECISIVE, three to one: the frigate's 6,559-face gun-deck sheet read 358 up-facing against 332
                     // backs and the veto kept it where master's reversal had been the better call (measured, +5 cells);
                     // the well read 15 against 0. A near-even vote is no evidence and the verdict above stands.
-                    if (upExposed >= 3 * downExposed && upExposed > 0) { reverse = false; reversalVetoed = true; reversalsVetoed++; vetoNote = string.Format(System.Globalization.CultureInfo.InvariantCulture, " (seen from above it shows {0} up-facing faces and {1} backs: a reversal would turn them down)", upExposed, downExposed); }
+                    if (upExposed >= 3 * downExposed && upExposed > 0) { reverse = false; reversalVetoed = true; System.Threading.Interlocked.Increment(ref reversalsVetoed); vetoNote = string.Format(System.Globalization.CultureInfo.InvariantCulture, " (seen from above it shows {0} up-facing faces and {1} backs: a reversal would turn them down)", upExposed, downExposed); }
                 }
-                if (reverse) openReversed++;
+                if (reverse) System.Threading.Interlocked.Increment(ref openReversed);
             }
             // A DOUBLE WALL WITH AN UNDECIDED VOTE IS LEFT AS AUTHORED, parity flips included (2026-09-24, the Wespe's
             // companionway). The stairwell is doubled the way the gun was (every face has an opposite partner a
@@ -2562,13 +2694,15 @@ public static class GlbDisconnectedParts
             if (asAuthored)
             {
                 foreach (int f in isl) flip[f] = false;
-                asAuthoredSheets++;
+                System.Threading.Interlocked.Increment(ref asAuthoredSheets);
             }
             if (reverse) foreach (int f in isl) { if (joinMinor[ii] >= 0 && parityOf[f] == joinMinor[ii]) continue; flip[f] = !flip[f]; }
             islandRule[ii] = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0}, volume agreement {1:+0.00;-0.00} thickness {2:+0.0000;-0.0000}, inside-out score {3:+0.00;-0.00}, level {6:+0.00;-0.00} at y {7:0.##}{5}: {4}",
                 closed ? "closed" : "open", agreement, thickness, score, notOrientable[ii] ? "not judged" : reverse ? "reversed whole" + vetoNote : asAuthored ? "double wall, kept as authored" : reversalVetoed ? "kept" + vetoNote : "kept",
                 partnered > 0 ? string.Format(System.Globalization.CultureInfo.InvariantCulture, ", double skin {0:0}% twinned ({1} twin in front / {2} behind, at {3:0.00} of reach, {4:0.00} straight)", 100.0 * partnered / isl.Count, twinInFront, twinBehind, twinDist[ii], twinStraight[ii]) : "", upness, islandY);
         }
+        EnsureOccluders();   // built here, once, where it is still single-threaded: the walkers below share it
+        System.Threading.Tasks.Parallel.For(0, sheets.Count, FuseParallel, JudgeSheet);
         Mark("direction");
         // TWINS KEEP THEIR AUTHORED WINDING (2026-09-24, the Wespe's gun, second cut). Kept apart, the two copies were
         // still judged as two sheets - and each copy is only MOSTLY one way: at the reinforce ring, where the surface
