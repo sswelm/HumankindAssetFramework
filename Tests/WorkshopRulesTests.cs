@@ -382,6 +382,12 @@ public class WorkshopRulesTests
         Assert.Equal(WorkshopRules.SplitSettings(1, new[] { 5, 3 }, new[] { 12 }), WorkshopRules.SplitSettings(1.0, new[] { 3, 5 }, new[] { 12 }));
         Assert.NotEqual(WorkshopRules.SplitSettings(1, new[] { 3, 5 }, null), WorkshopRules.SplitSettings(1, new[] { 3, 5, 6 }, null));
         Assert.NotEqual(WorkshopRules.SplitSettings(1, new[] { 3 }, null), WorkshopRules.SplitSettings(2, new[] { 3 }, null));
+        // EXACT, NOT AS DISPLAYED (fifth round): a plane rounded to four decimals let two cuts a hair apart share an
+        // identity while a face lay between them; the doubles the cut used are what is hashed
+        Assert.NotEqual(WorkshopRules.CutSettings(28, 0, 1, 0.300004, 45), WorkshopRules.CutSettings(28, 0, 1, 0.300006, 45));
+        Assert.NotEqual(WorkshopRules.CutSettings(28, 0, 1, 0.3, 45.004), WorkshopRules.CutSettings(28, 0, 1, 0.3, 45.006));
+        Assert.NotEqual(WorkshopRules.SplitSettings(1.0004, new[] { 3 }, null), WorkshopRules.SplitSettings(1.0006, new[] { 3 }, null));
+        Assert.Equal(WorkshopRules.CutSettings(28, 0, 1, 0.1 + 0.2, 45), WorkshopRules.CutSettings(28, 0, 1, 0.1 + 0.2, 45));   // the same double is the same string
         // the marker carries the name for the reader and the identity for the rule; older markers carry no identity
         Assert.Equal(ShaA, WorkshopRules.StatedIdentity(WorkshopRules.ParseSidecarFrom(new[] { WorkshopRules.SidecarFromLine("ship.glb", ShaA) })));
         Assert.Equal("", WorkshopRules.StatedIdentity("ship.glb"));          // first cut of this branch: a name

@@ -505,11 +505,16 @@ public static class WorkshopRules
         }
     }
 
-    /// <summary>What decides the pieces a Split makes: the merge distance and which parts are split or torn.</summary>
+    /// <summary>
+    /// What decides the pieces a Split makes: the merge distance and which parts are split or torn. Numbers are
+    /// written round-trip ("R"), never as they display: a plane rounded to four decimals let two different cuts share
+    /// one identity while a face lay between them, and old marks were then kept without a question for different
+    /// pieces (outside review of PR #99, fifth round).
+    /// </summary>
     public static string SplitSettings(double mergePct, IEnumerable<int> split, IEnumerable<int> tear)
     {
         var inv = System.Globalization.CultureInfo.InvariantCulture;
-        return "split;merge=" + mergePct.ToString("0.###", inv)
+        return "split;merge=" + mergePct.ToString("R", inv)
              + ";S=" + string.Join(",", (split ?? new int[0]).OrderBy(i => i).Select(i => i.ToString(inv)))
              + ";T=" + string.Join(",", (tear ?? new int[0]).OrderBy(i => i).Select(i => i.ToString(inv)));
     }
@@ -519,7 +524,7 @@ public static class WorkshopRules
     {
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         return "cut;node=" + nodeIndex.ToString(inv) + ";rule=" + rule.ToString(inv) + ";axis=" + axis.ToString(inv)
-             + ";at=" + planeValue.ToString("0.####", inv) + ";tilt=" + tiltDeg.ToString("0.##", inv);
+             + ";at=" + planeValue.ToString("R", inv) + ";tilt=" + tiltDeg.ToString("R", inv);   // round-trip: the exact doubles the cut used
     }
 
     /// <summary>The identity a stated source carries: its last field, when that is a SHA-1; else "" (older markers stated a name, or a name and a size, and those prove nothing).</summary>

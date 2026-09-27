@@ -1056,6 +1056,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             // the ⊕ letters and the marks travel with the output, passed down to the _CutA/_CutB children (users 2026-09-16 and 2026-09-26; review of 0097bd5) — agreed BEFORE anything is written
             var plan = PlanOutputSidecars(bytes, outGlb, WorkshopRules.CutSettings(cutGeo.NodeIndex, cutRule, cutAxis, plane, cutTiltDeg));
             if (plan == null) { status = "Plane cut cancelled — nothing was written; the output on disk and the work beside it are as they were."; return; }
+            if (plan.Error != null) { status = "Plane cut stopped before writing: the letters and marks for the output could not be planned (" + plan.Error + "). Nothing was written — writing the output without them would have left the old sidecars beside a file they no longer describe."; return; }
             File.WriteAllBytes(outGlb, bytes);
             WriteMarksSidecar(srcFile);
             string keptNote = CommitOutputSidecars(plan);
@@ -1285,7 +1286,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // "keep what fits, or replace?" used to arrive after the new GLB had already overwritten the old one, with no way
     // to say "neither, stop" - so a user facing uncertain matches could neither stop the overwrite nor get the old
     // output back. Both cuts now hold their result in memory, ask first, and write nothing at all on Cancel.
-    sealed class SidecarPlan { public string LettersPath, MarksPath; public string[] Letters, Marks; public int Kept; public bool Skip; }
+    sealed class SidecarPlan { public string LettersPath, MarksPath; public string[] Letters, Marks; public int Kept; public string Error; }   // Error set = the plan could not be made, and the caller must write NOTHING
 
     // null = the user cancelled: the caller writes NOTHING. `settings` is what decided the pieces (WorkshopRules.SplitSettings /
     // CutSettings) - part of the identity, because the same source cut differently makes different pieces under the same names.
@@ -1385,14 +1386,20 @@ public abstract class ModelWorkshopWindow : EditorWindow
             plan.Marks = Compose(marksPath, codes, false);
             plan.Kept = keptTotal;
         }
-        catch (Exception e) { Debug.LogWarning("[Workshop] could not plan the output's sidecars: " + e.Message + " — the ones on disk are left as they are"); plan.Skip = true; }
+        catch (Exception e)
+        {
+            // NOT a success (outside review of PR #99, fifth round): writing the output anyway would leave the OLD
+            // sidecars beside a NEW file, whose node indices they no longer describe - the very bug this PR opened
+            // with. The caller stops before the write, and says why.
+            Debug.LogException(e); plan.Error = e.Message;
+        }
         return plan;
     }
 
     // the plan, written once the output itself is on disk; returns the caller's status note
     string CommitOutputSidecars(SidecarPlan plan)
     {
-        if (plan == null || plan.Skip) return "";
+        if (plan == null || plan.Error != null) return "";
         try
         {
             foreach (var pair in new[] { (plan.LettersPath, plan.Letters), (plan.MarksPath, plan.Marks) })
@@ -1547,6 +1554,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             // the ⊕ letters and the marks travel with the output, passed down to the _Part_NNN children — agreed BEFORE anything is written
             var plan = PlanOutputSidecars(bytes, outGlb, WorkshopRules.SplitSettings(mergePct, picked, toTear));
             if (plan == null) { status = "Split cancelled — nothing was written; the output on disk and the work beside it are as they were."; return; }
+            if (plan.Error != null) { status = "Split stopped before writing: the letters and marks for the output could not be planned (" + plan.Error + "). Nothing was written — writing the output without them would have left the old sidecars beside a file they no longer describe."; return; }
             File.WriteAllBytes(outGlb, bytes);
             WriteMarksSidecar(srcFile);   // the checks and deletion marks, next to the source: the first Probe of it restores them
             if (result != null) foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);

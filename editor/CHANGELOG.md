@@ -65,6 +65,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   their result in memory, plan the sidecars first, ask with a Cancel that writes nothing at all, and only then write
   the output.
 
+  **Review, fifth round.** *A planning failure was reported as success*: the caller wrote the new output and left the
+  old sidecars beside it — the exact bug this entry opened with. It now stops before the write, writes nothing, and
+  says why. And *the settings were hashed as they display, not as they are*: a plane rounded to four decimals let two
+  cuts a hair apart share one identity while a face lay between them. The exact doubles the cut used are hashed.
+
 - **Model Factory: a per-unit correction to the water level** (user: "in many cases the water level in game does not
   correspond correctly with the preview, I think we need a custom slider to adjust the water level"). The pack's
   `waterLevel` is ONE number — how far the game's water surface sits above a baked model's origin — calibrated once
