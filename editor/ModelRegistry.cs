@@ -22,6 +22,15 @@ public class ModelDef : Haf.Schema.HafModelSchema
     public string modelFile = "";
     public Vector3 rotation;            // rotation offset (deg)
     public float size = 5f;             // world length of the model's longest axis
+    // WHERE THIS UNIT'S WATER REALLY IS (2026-09-27, user: "in many cases the water level in game does not
+    // correspond correctly with the preview"). `waterLevel` is one number for the pack — the height of the game's
+    // water surface above a baked model's origin, calibrated once on a cruiser. It does not hold for every unit: HAF
+    // repoints a mesh into a DONOR unit, and the game floats that donor where it floats it, so a ship dialled to sit
+    // right in game reads as riding high or low against the standard plane in the preview. This is that unit's
+    // correction to the plane, in world units, added to the pack's water level. PREVIEW ONLY: it moves the water the
+    // preview draws and the keel/top readout measured against it, never the model. What sinks the model is still
+    // `position.z`. Zero means the pack standard holds for this unit, which is the usual case.
+    public float waterOffset = 0f;      // PREVIEW ONLY: this unit's correction to the pack's water level (see above)
     public int normalsMode = 1;         // 0 KeepModel, 1 Recalculate, 2 Faceted
     public float smoothingAngle = 20f;
     public int convertGrid = 0;         // GLB->OBJ: 0 = faithful (preserve UV seams), >0 = decimate

@@ -118,7 +118,8 @@ public class ModelFactoryWindow : EditorWindow
     // CONFIGURATION (RegistryFile.waterLevel — versioned, dual-written, backed up; user call after the dial
     // experiment: one source of truth, unmodifiable from the UI, part of HAF configuration). Refreshed by every
     // registry Load(); changing it is a deliberate pack.json edit + recalibration of every vessel's Z.
-    static float PreviewWaterY => ModelRegistry.WaterLevel;
+    // …and this unit's correction to it, when the game floats its donor somewhere else (ModelDef.waterOffset).
+    float PreviewWaterY => ModelRegistry.WaterLevel + (cur != null ? cur.waterOffset : 0f);
     float PreviewPlaneY => previewWater ? PreviewWaterY : -0.02f;
 
     Material previewGroundMat;
@@ -667,9 +668,14 @@ public class ModelFactoryWindow : EditorWindow
             if (previewGrounded)
                 previewCombat = GUILayout.Toggle(previewCombat, new GUIContent("In combat",
                     "Preview the unit at its BATTLE-LOCKED height: the Combat height offset (Flight character section) applied on top of everything else — the position the unit eases to during a battle. Calibrate a submarine so only the periscope clears the waterline."), GUILayout.Width(78));
-            if (previewWater)
+            if (previewWater && cur != null)
+            {
                 EditorGUILayout.LabelField(new GUIContent($"water @ {PreviewWaterY:0.00}",
-                    "The HAF water standard: where the game's water surface sits above the model origin (mean + wave allowance, calibrated in-game 2026-08-18). A fixed code constant — every vessel's Z is calibrated against it."), GUILayout.Width(85));
+                    $"Where this preview draws the game's water surface above the model origin: the pack's water standard ({ModelRegistry.WaterLevel:0.00}, mean + wave allowance, calibrated in-game 2026-08-18) plus this unit's own correction."), GUILayout.Width(78));
+                cur.waterOffset = EditorGUILayout.Slider(new GUIContent("",
+                    "THIS UNIT's correction to the water standard, in world units. The standard is one number for the pack, and it does not hold for every unit: HAF repoints a mesh into a donor, and the game floats that donor where it floats it — so a ship dialled to sit right in game can read as riding high against the standard plane here. Slide until the preview's waterline matches what you see in game, and the preview tells the truth for this unit from then on. It moves the WATER, never the model: what sinks the model is Position offset Z. 0 = the standard holds."),
+                    cur.waterOffset, -1f, 1f, GUILayout.Width(120));
+            }
             if (GUILayout.Button(new GUIContent("Center", "Re-center the view on the model (resets pan + zoom; keeps the orbit angle)"), GUILayout.Width(60)))
             { previewPan = Vector2.zero; previewZoom = 1.4f; Repaint(); }
         }
@@ -2115,7 +2121,7 @@ public class ModelFactoryWindow : EditorWindow
         JsonUtility.FromJsonOverwrite(JsonUtility.ToJson(regE), cur);         // cur := the saved entry IN PLACE (every field preserved, no reference swap)
         // …then re-apply ONLY the fields the Factory owns, from the form:
         cur.resourceName = form.resourceName; cur.pawnDescription = form.pawnDescription; cur.modelFile = form.modelFile;
-        cur.rotation = form.rotation; cur.position = form.position; cur.size = form.size;
+        cur.rotation = form.rotation; cur.position = form.position; cur.size = form.size; cur.waterOffset = form.waterOffset;
         cur.normalsMode = form.normalsMode; cur.smoothingAngle = form.smoothingAngle; cur.convertGrid = form.convertGrid;
         cur.reuseExtracted = form.reuseExtracted; cur.doubleSided = form.doubleSided; cur.windingFix = form.windingFix; cur.multiMesh = form.multiMesh; cur.heightUV = form.heightUV;
         cur.albedoBrightness = form.albedoBrightness; cur.albedoSaturation = form.albedoSaturation; cur.keepBlack = form.keepBlack;
