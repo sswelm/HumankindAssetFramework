@@ -359,6 +359,103 @@ public class WorkshopRulesTests
         Assert.Contains("508 mark(s)", WorkshopRules.OverwriteWarning("out.glb", 508, 0));
     }
 
+    const string ShaA = "da39a3ee5e6b4b0d3255bfef95601890afd80709";   // SHA-1 of nothing at all: a known 40-hex identity
+    const string ShaB = "2fd4e1c67a2d28fced849ee1bb76e7391b93eb12";
+
+    [Fact]
+    public void The_source_identity_is_the_bytes_and_nothing_else()
+    {
+        // Outside review of PR #99, three rounds: a name is not an identity (two directories can each hold a
+        // ship.glb), and neither is a name plus a size (two files can share one, an edit can leave one unchanged).
+        Assert.Equal("", WorkshopRules.SourceIdentity(null, "x"));
+        Assert.Equal(40, WorkshopRules.SourceIdentity(new byte[0], "").Length);
+        Assert.NotEqual(WorkshopRules.SourceIdentity(new byte[] { 1, 2, 3 }, "s"), WorkshopRules.SourceIdentity(new byte[] { 1, 2, 4 }, "s"));   // same size, different bytes
+        Assert.Equal(WorkshopRules.SourceIdentity(new byte[] { 7, 7 }, "s"), WorkshopRules.SourceIdentity(new byte[] { 7, 7 }, "s"));
+        // …AND THE SETTINGS THAT MADE THE PIECES (fourth round): Hull_CutA keeps its name when the plane moves from
+        // 30 % to 70 %, so the same bytes cut differently are not the same pieces - and not "Same"
+        var hull = new byte[] { 9, 9, 9 };
+        string at30 = WorkshopRules.CutSettings(28, 0, 1, 0.30, 45), at70 = WorkshopRules.CutSettings(28, 0, 1, 0.70, 45);
+        Assert.NotEqual(WorkshopRules.SourceIdentity(hull, at30), WorkshopRules.SourceIdentity(hull, at70));
+        Assert.Equal(WorkshopRules.SidecarFit.Unknown, WorkshopRules.JudgeSidecar("hull.glb|" + WorkshopRules.SourceIdentity(hull, at30), WorkshopRules.SourceIdentity(hull, at70), 10, 10));
+        Assert.Equal(WorkshopRules.SidecarFit.Same, WorkshopRules.JudgeSidecar("hull.glb|" + WorkshopRules.SourceIdentity(hull, at30), WorkshopRules.SourceIdentity(hull, at30), 10, 10));
+        // a split's pieces follow the merge distance and the checked parts, in any order
+        Assert.Equal(WorkshopRules.SplitSettings(1, new[] { 5, 3 }, new[] { 12 }), WorkshopRules.SplitSettings(1.0, new[] { 3, 5 }, new[] { 12 }));
+        Assert.NotEqual(WorkshopRules.SplitSettings(1, new[] { 3, 5 }, null), WorkshopRules.SplitSettings(1, new[] { 3, 5, 6 }, null));
+        Assert.NotEqual(WorkshopRules.SplitSettings(1, new[] { 3 }, null), WorkshopRules.SplitSettings(2, new[] { 3 }, null));
+        // EXACT, NOT AS DISPLAYED (fifth round): a plane rounded to four decimals let two cuts a hair apart share an
+        // identity while a face lay between them; the doubles the cut used are what is hashed
+        Assert.NotEqual(WorkshopRules.CutSettings(28, 0, 1, 0.300004, 45), WorkshopRules.CutSettings(28, 0, 1, 0.300006, 45));
+        Assert.NotEqual(WorkshopRules.CutSettings(28, 0, 1, 0.3, 45.004), WorkshopRules.CutSettings(28, 0, 1, 0.3, 45.006));
+        Assert.NotEqual(WorkshopRules.SplitSettings(1.0004, new[] { 3 }, null), WorkshopRules.SplitSettings(1.0006, new[] { 3 }, null));
+        Assert.Equal(WorkshopRules.CutSettings(28, 0, 1, 0.1 + 0.2, 45), WorkshopRules.CutSettings(28, 0, 1, 0.1 + 0.2, 45));   // the same double is the same string
+        // the marker carries the name for the reader and the identity for the rule; older markers carry no identity
+        Assert.Equal(ShaA, WorkshopRules.StatedIdentity(WorkshopRules.ParseSidecarFrom(new[] { WorkshopRules.SidecarFromLine("ship.glb", ShaA) })));
+        Assert.Equal("", WorkshopRules.StatedIdentity("ship.glb"));          // first cut of this branch: a name
+        Assert.Equal("", WorkshopRules.StatedIdentity("ship.glb|232590124"));   // second cut: a name and a size
+        Assert.Equal("", WorkshopRules.StatedIdentity(""));
+    }
+
+    [Fact]
+    public void A_sidecar_beside_an_output_is_kept_when_proven_and_asked_about_otherwise()
+    {
+        // the merge resolves the old sidecar against the NEW file by name, and a name proves nothing on its own — cut
+        // one model to out.glb, cut an unrelated one to the same path, and "Object_1" inherits the first's delete mark
+        Assert.Equal(WorkshopRules.SidecarFit.Same, WorkshopRules.JudgeSidecar("ship.glb|" + ShaA, ShaA, 345, 345));
+        Assert.Equal(WorkshopRules.SidecarFit.Same, WorkshopRules.JudgeSidecar("moved.glb|" + ShaA.ToUpperInvariant(), ShaA, 345, 3));   // renamed, moved, few pieces left: still the same bytes, still proven
+        // NOT proven is a QUESTION, never a threshold (third round: 4 valid decisions of 10 were thrown out one way,
+        // generic names let through the other): another identity, an older marker, or none at all all ask
+        Assert.Equal(WorkshopRules.SidecarFit.Unknown, WorkshopRules.JudgeSidecar("ship.glb|" + ShaB, ShaA, 345, 345));   // re-exported, or another ship.glb - the user knows which
+        Assert.Equal(WorkshopRules.SidecarFit.Unknown, WorkshopRules.JudgeSidecar("ship.glb|" + ShaB, ShaA, 10, 4));      // four of ten still fit: not discarded for them
+        Assert.Equal(WorkshopRules.SidecarFit.Unknown, WorkshopRules.JudgeSidecar("ship.glb|232590124", ShaA, 345, 345));
+        Assert.Equal(WorkshopRules.SidecarFit.Unknown, WorkshopRules.JudgeSidecar("", ShaA, 345, 345));
+        Assert.Equal(WorkshopRules.SidecarFit.Unknown, WorkshopRules.JudgeSidecar("", ShaA, 345, 1));                    // one generic name: still their call, with "1 of 345" in front of them
+        // nothing to keep needs no question
+        Assert.Equal(WorkshopRules.SidecarFit.Nothing, WorkshopRules.JudgeSidecar("ship.glb|" + ShaA, ShaA, 345, 0));
+        Assert.Equal(WorkshopRules.SidecarFit.Nothing, WorkshopRules.JudgeSidecar("", ShaA, 0, 0));
+        // and the question carries the counts and the origin
+        string q = WorkshopRules.KeepOrReplaceQuestion("ship.glb|" + ShaB, "salegs_revenge.glb", 345, 345, 909, 4);
+        Assert.Contains("written from 'ship.glb'", q);
+        Assert.Contains("this cut is from 'salegs_revenge.glb'", q);
+        Assert.Contains("345 of 345 group letter(s)", q);
+        Assert.Contains("4 of 909 mark(s)", q);
+        Assert.Contains("written before the source was recorded", WorkshopRules.KeepOrReplaceQuestion("", "x.glb", 0, 0, 10, 4));
+        Assert.DoesNotContain("group letter", WorkshopRules.KeepOrReplaceQuestion("", "x.glb", 0, 0, 10, 4));
+    }
+
+    [Fact]
+    public void The_source_marker_survives_an_ordinary_save_of_the_sidecar()
+    {
+        // Outside review of PR #99, second round: Split/Cut stamped the marker, and the ordinary "Save groups" /
+        // "Save marks" paths rewrote the file without it — so editing the split output in the Fuser erased the
+        // provenance, and the next re-cut fell back to judging the sidecar on name overlap alone.
+        var written = new[] { WorkshopRules.SidecarHeader, WorkshopRules.SidecarFromLine("salegs_revenge.glb", ShaA),
+                              WorkshopRules.SidecarLine("A", "Hull", 3) };
+        string kept = WorkshopRules.SidecarFromKept(written);                 // what a Save must carry over
+        Assert.Equal("salegs_revenge.glb|" + ShaA, kept);
+        var saved = new[] { WorkshopRules.SidecarHeader, WorkshopRules.SidecarFromPrefix + kept,
+                            WorkshopRules.SidecarLine("A", "Hull", 3), WorkshopRules.SidecarLine("B", "Deck", 4) };
+        Assert.Equal(WorkshopRules.SidecarFit.Same, WorkshopRules.JudgeSidecar(WorkshopRules.ParseSidecarFrom(saved), ShaA, 2, 2));
+        Assert.Equal("", WorkshopRules.SidecarFromKept(new[] { WorkshopRules.SidecarHeader }));   // a hand-made file states nothing, and stays that way
+    }
+
+    [Fact]
+    public void The_source_line_round_trips_and_the_readers_step_over_it()
+    {
+        // it lives in the head beside #name, so every reader of these files must ignore it
+        var lines = new[] { WorkshopRules.SidecarHeader, WorkshopRules.SidecarFromLine("salegs_revenge.glb", ShaA),
+                            WorkshopRules.GroupNameLine("A", "Anker"), WorkshopRules.SidecarLine("A", "Hull", 3) };
+        Assert.Equal("salegs_revenge.glb|" + ShaA, WorkshopRules.ParseSidecarFrom(lines));
+        Assert.Equal("", WorkshopRules.ParseSidecarFrom(new[] { WorkshopRules.SidecarHeader }));
+        var names = WorkshopRules.ParseGroupNames(lines);
+        Assert.Single(names);
+        Assert.Equal("Anker", names["A"]);
+        var problems = new List<string>();
+        var letters = WorkshopRules.ResolveFuseSidecar(lines, Rows((3, "Hull")), problems);
+        Assert.Empty(problems);
+        Assert.Equal("A", letters[3]);
+        Assert.Single(letters);
+    }
+
     [Fact]
     public void The_fuse_report_lists_every_island_when_given_them()
     {

@@ -5,6 +5,78 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Workshop: a re-cut keeps what was decided about the pieces** (user: "when I split salegs_revenge.glb and
+  then probe it in the fusion, none of my previous configuration seem to have survived"). Since 2026-09-16 a cut
+  hands its own marks down to the output; it wrote them straight over the sidecars already lying beside that output,
+  and a source with nothing of its own deleted them outright. Re-splitting the original over an existing split
+  therefore wiped **345 group letters and 564 deletion marks** made on that split — because the original carries no
+  groups at all, so the letters sidecar was removed and the marks became 842 inherited `S`.
+
+  The two are not the same work. A Splitter's marks say WHICH PARTS TO CUT; the letters and marks beside the output
+  are what was decided about the PIECES, in the Fuser, afterwards. And a re-cut of the same source reproduces the
+  same pieces under the same names, so that work still fits: the sidecar already beside the output is read back
+  against the new output (by name, through the resolver a Probe uses), kept, and what comes down from the source now
+  fills only the parts it does not name. The group names ride along. A sidecar is deleted only when nothing is left
+  that names a part of the new file, and the status says how many entries were kept.
+
+  **And the Probe says when there are groups on disk it is not reading** (same user, minutes later: "my work is back,
+  I still see no groups when I do a probe"). A re-Probe deliberately keeps what the window holds, so that a clear the
+  user meant stays cleared — which also means a sidecar restored or appearing since the file was loaded is not read,
+  and nothing said so. When the window holds no letters at all and the file beside it does, the status now counts
+  them and names the button that reads them back.
+
+  **Review**, three findings, all fixed. *A name is not proof*: the merge resolved the old sidecar against the new
+  file by name without asking whether it was even the same model, so cutting an unrelated model to the same output
+  path could hand a part called `Object_1` the first model's delete mark. A sidecar now states the source it was
+  written from (`#from|<file name>`, beside `#name` in its head) and is kept only for another cut of that source;
+  one written before that line existed is judged on how much of it still fits, since most of it naming parts of the
+  new file is what a re-cut looks like and an unrelated model shares a handful of generic names at best. *A kept
+  group keeps its own name*: the window's name for a letter is the SOURCE's name for it, and the output's group A is
+  not the source's group A — a group renamed after the split had that renaming replaced on every re-cut. And the
+  promised "Kept …" note *never appeared*: it was appended to a status line both callers then overwrote.
+
+  **Review, second round**, three more. *The marker had to survive ordinary use*: Split and Cut stamped it, and the
+  everyday "Save groups" / "Save marks" paths rewrote the sidecar without it, so editing the split output in the
+  Fuser erased the provenance and the next re-cut fell back to name overlap alone — both writers carry over the line
+  the file already had. *A name is not an identity either*: two directories can each hold a `ship.glb`, so the marker
+  states the source's byte length as well (`#from|ship.glb|232590124`) — which, unlike a path, survives the folder
+  being moved; a same-named source of a different size falls back to the overlap rule, so re-exporting a model costs
+  nothing while an unrelated namesake is thrown out. And *only the letters that actually survived keep their old
+  name*: every old `#name` line was loaded once anything was retained, so an old group A with no surviving part
+  handed its name to a brand-new A the source had just contributed.
+
+  **Review, third round** — and the end of guessing. A name plus a size is still not an identity (two files can share
+  one; an edit can leave one unchanged), and the 50 % rule that stood in for it threw out four valid decisions of ten
+  one way while letting generic names through the other. Both are gone. The marker now states **SHA-1 over the
+  source's bytes** (`#from|salegs_revenge.glb|27f3e66e…`): the bytes are the model, the cut has already read every
+  one of them, and hashing 230 MB is a fraction of what the cut costs. A sidecar whose identity is this source's is
+  kept, proven; one with nothing that names a part is ignored; and everything else — no identity recorded, an older
+  marker, or another identity, which is *either* this model re-exported *or* an unrelated one sharing some names, and
+  no number tells those apart — is a **question put to you once**, for both files, with the real counts: "345 of 345
+  group letters and 4 of 909 marks still name a part of the new output — keep what fits, or replace?" The overwrite
+  dialog says the same in advance instead of promising a loss that may not happen.
+
+  **Review, fourth round.** *The source's bytes are the model, not the pieces*: `Hull_CutA` keeps its name when the
+  plane moves from 30 % to 70 %, so an old delete mark could take a substantially different piece without a word.
+  The identity now covers the settings that made the pieces as well — for a split the merge distance and which parts
+  were split or torn, for a plane cut the part, rule, axis, plane and tilt — so the same source cut differently is
+  the question, like a re-export. And *the question came after the output had already been overwritten*, with no
+  Cancel, so a user facing uncertain matches could neither stop it nor get the old output back. Both cuts now hold
+  their result in memory, plan the sidecars first, ask with a Cancel that writes nothing at all, and only then write
+  the output.
+
+  **Review, fifth round.** *A planning failure was reported as success*: the caller wrote the new output and left the
+  old sidecars beside it — the exact bug this entry opened with. It now stops before the write, writes nothing, and
+  says why. And *the settings were hashed as they display, not as they are*: a plane rounded to four decimals let two
+  cuts a hair apart share one identity while a face lay between them. The exact doubles the cut used are hashed.
+
+  **Review, sixth round.** *A sidecar that could not be written after the GLB had been* — read-only, say — left the
+  old sidecar beside the new file and the caller reporting success: the same gap as the planning failure, one step
+  later. Every sidecar is now staged to `<path>.new` before a byte of the output is on disk, which proves the folder
+  writable and catches a read-only target in time to write nothing; the output is written; then each staged file
+  takes its place. Should that last step still fail, the stale sidecar is removed so nothing describes the replaced
+  file's nodes, and the status reports a failure — never "Kept …".
+
 - **Model Factory: a per-unit correction to the water level** (user: "in many cases the water level in game does not
   correspond correctly with the preview, I think we need a custom slider to adjust the water level"). The pack's
   `waterLevel` is ONE number — how far the game's water surface sits above a baked model's origin — calibrated once

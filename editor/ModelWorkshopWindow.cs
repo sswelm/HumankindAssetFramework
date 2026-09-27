@@ -759,7 +759,13 @@ public abstract class ModelWorkshopWindow : EditorWindow
             foreach (var r in rows) if (r.islands <= 1 || r.blocked != null) r.split = false;   // no longer splittable at this distance
             int multi = rows.Count(r => r.islands > 1 && r.blocked == null);
             probedFile = srcFile; probedStamp = stamp;   // the rows now describe THIS file, this version of it (the source-switch hygiene above keys on both)
+            // …AND SAY SO WHEN THERE ARE GROUPS ON DISK AND NONE IN THE WINDOW (2026-09-27, user: "my work is back, I
+            // still see no groups when I do a probe"). A re-Probe deliberately keeps what the window holds, so a
+            // deliberate clear stays cleared (review of 0a8b56e) — which also means a sidecar that appeared since,
+            // or was restored, is not read. "Load groups" is the way back, and nothing said so.
+            int onDisk = Fusing && rows.All(r => string.IsNullOrEmpty(r.fuse)) ? SidecarEntries(FuseSidecarPath(srcFile)) : 0;
             status = (rewritten ? "This file was rewritten since it was last probed, so the checks and letters in the window were dropped — they named nodes of the old file — and the marks saved beside the new one were read instead. " : "")
+                   + (onDisk > 0 ? $"{onDisk} group letter(s) are saved beside this file and no row in the window carries one — press 'Load groups' to read them back (a re-Probe keeps what the window holds, so a deliberate clear stays cleared). " : "")
                    + (multi == 0 ? "Every part is a single attached island (at this merge distance) — nothing to split."
                    : $"{rows.Count} part(s); {multi} hold more than one island at merge distance {mergePct:0.#}%. Check the ones hiding junk; raise the slider if a part still shreds into fragments.");
             Repaint();
@@ -1031,15 +1037,33 @@ public abstract class ModelWorkshopWindow : EditorWindow
         try
         {
             EditorUtility.DisplayProgressBar("Model Workshop", "Cutting…", 0.4f);
+            GlbDisconnectedParts.GuardPaths(srcFile, outGlb);   // the file entry points used to guard; this path writes the bytes itself
+            double plane = CutPlaneValue();
             var result = cutRule == 0
-                ? GlbDisconnectedParts.CutFileByPlane(srcFile, outGlb, cutGeo.NodeIndex, cutAxis, CutPlaneValue())
-                : GlbDisconnectedParts.CutFileByFacing(srcFile, outGlb, cutGeo.NodeIndex, cutAxis, cutTiltDeg, CutPlaneValue());
+                ? GlbDisconnectedParts.CutNodeByPlane(File.ReadAllBytes(srcFile), cutGeo.NodeIndex, cutAxis, plane)
+                : GlbDisconnectedParts.CutNodeByFacing(File.ReadAllBytes(srcFile), cutGeo.NodeIndex, cutAxis, cutTiltDeg, plane);
             if (!result.Changed) { status = "Nothing changed — the cut leaves every triangle on one side."; return; }
             foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
-            string deletedLine = ApplyDeletionsTo(outGlb);   // the marks for deletion, on the written output (the cut only appends)
+            byte[] bytes = result.Bytes;
+            string deletedLine = null;
+            var toDelete = new HashSet<int>(rows.Where(r => r.delete).Select(r => r.nodeIndex));   // the marks for deletion, on the output (the cut only appends)
+            if (toDelete.Count > 0)
+            {
+                var rr = GlbDisconnectedParts.RemoveMeshes(bytes, toDelete);
+                foreach (var w in rr.Warnings) Debug.LogWarning("[Workshop] delete: " + w);
+                if (rr.Changed) { bytes = rr.Bytes; deletedLine = rr.Details[0]; }
+            }
+            // the ⊕ letters and the marks travel with the output, passed down to the _CutA/_CutB children (users 2026-09-16 and 2026-09-26; review of 0097bd5) — agreed BEFORE anything is written
+            var plan = PlanOutputSidecars(bytes, outGlb, WorkshopRules.CutSettings(cutGeo.NodeIndex, cutRule, cutAxis, plane, cutTiltDeg));
+            if (plan == null) { status = "Plane cut cancelled — nothing was written; the output on disk and the work beside it are as they were."; return; }
+            if (plan.Error != null) { status = "Plane cut stopped before writing: the letters and marks for the output could not be planned (" + plan.Error + "). Nothing was written — writing the output without them would have left the old sidecars beside a file they no longer describe."; return; }
+            string staged = StageOutputSidecars(plan);
+            if (staged != null) { status = "Plane cut stopped before writing: the letters and marks could not be written beside the output (" + staged + "). Nothing was written."; return; }
+            File.WriteAllBytes(outGlb, bytes);
             WriteMarksSidecar(srcFile);
-            WriteSidecarsForOutput(outGlb);   // the ⊕ letters and the marks travel with the output, passed down to the _CutA/_CutB children (users 2026-09-16 and 2026-09-26; review of 0097bd5)
-            status = $"Plane cut done: {result.Details.FirstOrDefault()}{(deletedLine != null ? " " + deletedLine + "." : "")}\n{outGlb}\nNext: open it in the Vehicle Lab — or cut again by pointing Source GLB at this output and re-Probing (your ⊕ letters travel with it).";
+            string keptNote = CommitOutputSidecars(plan, out string sidecarFailure);
+            if (sidecarFailure != null) { status = "Plane cut wrote the output, but " + sidecarFailure + "\n" + outGlb; return; }
+            status = $"Plane cut done: {result.Details.FirstOrDefault()}{(deletedLine != null ? " " + deletedLine + "." : "")}{keptNote}\n{outGlb}\nNext: open it in the Vehicle Lab — or cut again by pointing Source GLB at this output and re-Probing (your ⊕ letters travel with it).";
         }
         catch (Exception e) { status = "Plane cut failed (source untouched): " + e.Message; Debug.LogException(e); }
         finally { EditorUtility.ClearProgressBar(); }
@@ -1186,8 +1210,23 @@ public abstract class ModelWorkshopWindow : EditorWindow
         return un.Changed ? un.Bytes : bytes;
     }
     static string MarksSidecarPath(string glb) => string.IsNullOrEmpty(glb) ? null : glb + ".marks.txt";
+    // The head of a sidecar being rewritten in place: the version line, and the "#from" the file already carried.
+    // Neither window knows what produced the file it has open, and dropping the line on an ordinary Save would leave
+    // the next re-cut to judge the sidecar on name overlap alone (outside review of PR #99, second round).
+    static IEnumerable<string> SidecarHead(string path)
+    {
+        string from = "";
+        try { if (File.Exists(path)) from = WorkshopRules.SidecarFromKept(File.ReadAllLines(path)); } catch { }
+        return from.Length > 0 ? new[] { WorkshopRules.SidecarHeader, WorkshopRules.SidecarFromPrefix + from } : new[] { WorkshopRules.SidecarHeader };
+    }
     // …and what an overwrite of it would take with it (WorkshopRules.OverwriteWarning): the sidecars beside a file
     // belong to THAT file's parts, so a new output at the same path cannot keep them
+    // how many entries a sidecar holds (its comment lines are not entries) — for the hints above, a few KB read
+    static int SidecarEntries(string path)
+    {
+        try { return path != null && File.Exists(path) ? File.ReadAllLines(path).Count(l => !string.IsNullOrWhiteSpace(l) && !l.StartsWith("#", StringComparison.Ordinal)) : 0; }
+        catch { return 0; }
+    }
     static string OverwriteWarning(string glb)
     {
         int Lines(string p) { try { return p != null && File.Exists(p) ? File.ReadAllLines(p).Count(l => !string.IsNullOrWhiteSpace(l) && !l.StartsWith("#", StringComparison.Ordinal)) : 0; } catch { return 0; } }
@@ -1200,7 +1239,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             string path = MarksSidecarPath(glb); if (path == null) return;
             var lines = rows.Where(r => (r.split || r.tear || r.delete) && !string.IsNullOrEmpty(r.node)).Select(r => WorkshopRules.SidecarLine(r.delete ? "X" : r.tear ? "T" : "S", r.node, r.nodeIndex)).ToArray();
             if (lines.Length == 0) { if (File.Exists(path)) File.Delete(path); return; }
-            File.WriteAllLines(path, new[] { WorkshopRules.SidecarHeader }.Concat(lines));
+            File.WriteAllLines(path, SidecarHead(path).Concat(lines));
         }
         catch (Exception e) { Debug.LogWarning("[Workshop] could not write the marks sidecar: " + e.Message); }
     }
@@ -1235,7 +1274,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             var lines = rows.Where(r => !string.IsNullOrEmpty(r.fuse) && !string.IsNullOrEmpty(r.node)).Select(r => WorkshopRules.SidecarLine(r.fuse, r.node, r.nodeIndex)).ToArray();
             if (lines.Length == 0) { if (File.Exists(path)) File.Delete(path); return; }
             var named = GroupNameLines(rows.Select(r => r.fuse));
-            File.WriteAllLines(path, new[] { WorkshopRules.SidecarHeader }.Concat(named).Concat(lines));   // v2: header, then #name|letter|name for the named groups in use, then letter|index|name (the name last, so a '|' in it is nothing to guess)
+            File.WriteAllLines(path, SidecarHead(path).Concat(named).Concat(lines));   // v2: header, then #name|letter|name for the named groups in use, then letter|index|name (the name last, so a '|' in it is nothing to guess)
         }
         catch (Exception e) { Debug.LogWarning("[Workshop] could not write the fuse groupings sidecar: " + e.Message); }
     }
@@ -1246,39 +1285,175 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // and re-analysed its geometry a few lines after this one had (review of PR #94 — seconds on a 36 MB ship, and
     // every byte of it read twice). The output is read once here and the source once, and both files come out of the
     // same tables.
-    void WriteSidecarsForOutput(string outputGlb)
+    // PLANNED BEFORE THE OUTPUT IS WRITTEN, COMMITTED AFTER (outside review of PR #99, fourth round): the question
+    // "keep what fits, or replace?" used to arrive after the new GLB had already overwritten the old one, with no way
+    // to say "neither, stop" - so a user facing uncertain matches could neither stop the overwrite nor get the old
+    // output back. Both cuts now hold their result in memory, ask first, and write nothing at all on Cancel.
+    sealed class SidecarPlan { public string LettersPath, MarksPath; public string[] Letters, Marks; public int Kept; public string Error; }   // Error set = the plan could not be made, and the caller must write NOTHING
+
+    // null = the user cancelled: the caller writes NOTHING. `settings` is what decided the pieces (WorkshopRules.SplitSettings /
+    // CutSettings) - part of the identity, because the same source cut differently makes different pieces under the same names.
+    SidecarPlan PlanOutputSidecars(byte[] outBytes, string outputGlb, string settings)
     {
+        var plan = new SidecarPlan();
         try
         {
             string lettersPath = FuseSidecarPath(outputGlb), marksPath = MarksSidecarPath(outputGlb);
             var letters = rows.Where(r => !string.IsNullOrEmpty(r.fuse)).ToDictionary(r => r.nodeIndex, r => r.fuse);
             var codes = rows.Where(r => r.split || r.tear || r.delete).ToDictionary(r => r.nodeIndex, r => r.delete ? "X" : r.tear ? "T" : "S");
-            if (letters.Count == 0 && codes.Count == 0)
-            {
-                foreach (string p in new[] { lettersPath, marksPath }) if (p != null && File.Exists(p)) File.Delete(p);
-                return;
-            }
-            byte[] outBytes = File.ReadAllBytes(outputGlb);
+            plan.LettersPath = lettersPath; plan.MarksPath = marksPath;
             var parts = GlbDisconnectedParts.Analyze(outBytes);
             // every node's parent (the split parent is meshless, so the analyzer does not list it — read the hierarchy directly)
             var table = GlbDisconnectedParts.NodeParents(outBytes);
-            int firstNewNode = GlbDisconnectedParts.NodeParents(File.ReadAllBytes(srcFile)).Count;   // the operation only appends: nodes past the source's count are the ones it created
+            byte[] srcBytes = File.ReadAllBytes(srcFile);
+            int firstNewNode = GlbDisconnectedParts.NodeParents(srcBytes).Count;   // the operation only appends: nodes past the source's count are the ones it created
             var meshNodes = new HashSet<int>(parts.Select(q => q.NodeIndex));
             var nameOf = parts.ToDictionary(q => q.NodeIndex, q => q.NodeName);
-            void Write(string path, IDictionary<int, string> source, bool withGroupNames)
+            // the output's own parts, for reading a sidecar that is already lying beside it (below)
+            var outTriples = parts.Select(q => (q.NodeIndex, q.NodeName, q.NodeName)).ToList();
+            var outPairs = parts.Select(q => new KeyValuePair<int, string>(q.NodeIndex, q.NodeName)).ToList();
+            int keptTotal = 0;
+            // WHAT IS ALREADY THERE WINS (2026-09-27, user: "when I split salegs_revenge.glb and then probe it in the
+            // fusion, none of my previous configuration seem to have survived"). The sidecars handed DOWN from the
+            // source were written over the ones already beside the output, and a source with none of its own deleted
+            // them outright: re-splitting the original over an existing split wiped 345 group letters and 564 deletion
+            // marks made on that split, because the original carries no groups at all. The two are not the same work.
+            // A Splitter's marks say WHICH PARTS TO CUT; the letters and marks beside the output are what was decided
+            // about the PIECES, in the Fuser, afterwards. A re-cut of the same source reproduces the same pieces under
+            // the same names, so that work still fits: it is read back against the new output (by name, the resolver
+            // the Probe uses) and kept, and what comes down from the source only fills the parts it does not name.
+            string sourceName = Path.GetFileName(srcFile ?? "");
+            string sourceIdentity = WorkshopRules.SourceIdentity(srcBytes, settings);   // the bytes are the model, the settings are the pieces (WorkshopRules.SourceIdentity)
+            // WHAT ALREADY LIES BESIDE THE OUTPUT, read and judged before anything is written: proven this source's
+            // (kept), nothing that names a part (ignored), or neither — and "neither" is a question, asked ONCE for
+            // both files with the real counts in front of the user, never a threshold guessed for them (review of PR
+            // #99, third round: a 50 % rule threw out four valid decisions of ten one way and let generic names
+            // through the other).
+            var found = new Dictionary<string, (string[] had, Dictionary<int, string> was, int entries, WorkshopRules.SidecarFit fit)>();
+            foreach (string path in new[] { lettersPath, marksPath })
             {
-                if (path == null) return;
-                if (source.Count == 0) { if (File.Exists(path)) File.Delete(path); return; }
-                var transferred = WorkshopRules.TransferLetters(source, table, meshNodes, firstNewNode);
-                var lines = transferred.OrderBy(kv => kv.Key).Where(kv => nameOf.ContainsKey(kv.Key)).Select(kv => WorkshopRules.SidecarLine(kv.Value, nameOf[kv.Key], kv.Key)).ToArray();
-                if (lines.Length == 0) { if (File.Exists(path)) File.Delete(path); return; }
-                var head = withGroupNames ? new[] { WorkshopRules.SidecarHeader }.Concat(GroupNameLines(transferred.Values)) : new[] { WorkshopRules.SidecarHeader };
-                File.WriteAllLines(path, head.Concat(lines));
+                if (path == null || !File.Exists(path)) continue;
+                var problems = new List<string>();
+                string[] had = File.ReadAllLines(path);
+                var was = WorkshopRules.ResolveFuseSidecar(WorkshopRules.MigrateSidecarNames(had, outTriples, problems), outPairs, problems);
+                int entries = had.Count(l => !string.IsNullOrWhiteSpace(l) && !l.StartsWith("#", StringComparison.Ordinal));
+                found[path] = (had, was, entries, WorkshopRules.JudgeSidecar(WorkshopRules.ParseSidecarFrom(had), sourceIdentity, entries, was.Count));
+                foreach (string q in problems) Debug.LogWarning("[Workshop] the output's own " + (path == lettersPath ? "groupings" : "marks") + " sidecar: " + q);
             }
-            Write(lettersPath, letters, true);
-            Write(marksPath, codes, false);
+            bool keepUnknown = false;
+            if (found.Values.Any(f => f.fit == WorkshopRules.SidecarFit.Unknown))
+            {
+                found.TryGetValue(lettersPath ?? "", out var L); found.TryGetValue(marksPath ?? "", out var K);
+                string stated = L.had != null ? WorkshopRules.ParseSidecarFrom(L.had) : K.had != null ? WorkshopRules.ParseSidecarFrom(K.had) : "";
+                EditorUtility.ClearProgressBar();   // a question under a progress bar reads as a hang
+                int choice = EditorUtility.DisplayDialogComplex("Saved work beside the output",
+                    WorkshopRules.KeepOrReplaceQuestion(stated, sourceName, L.entries, L.was?.Count ?? 0, K.entries, K.was?.Count ?? 0) + "\n\nCancel writes nothing: the output on disk and the work beside it stay as they are.",
+                    "Keep what fits", "Cancel", "Replace");   // 0 keep, 1 cancel, 2 replace
+                if (choice == 1) return null;
+                keepUnknown = choice == 0;
+            }
+            string[] Compose(string path, IDictionary<int, string> source, bool withGroupNames)   // null = nothing to write (the file goes)
+            {
+                if (path == null) return null;
+                var merged = new Dictionary<int, string>();
+                var oldNames = new Dictionary<string, string>(StringComparer.Ordinal);
+                var keptLetters = new HashSet<string>(StringComparer.Ordinal);   // the letters this sidecar actually carried over
+                if (found.TryGetValue(path, out var f))
+                {
+                    if (f.fit == WorkshopRules.SidecarFit.Same || (f.fit == WorkshopRules.SidecarFit.Unknown && keepUnknown))
+                    {
+                        foreach (var kv in f.was) merged[kv.Key] = kv.Value;
+                        foreach (string l in f.was.Values) if (!string.IsNullOrEmpty(l)) keptLetters.Add(l);
+                        if (withGroupNames) oldNames = WorkshopRules.ParseGroupNames(f.had);
+                        keptTotal += merged.Count;
+                    }
+                    else if (f.entries > 0)
+                        Debug.LogWarning($"[Workshop] the {(withGroupNames ? "groupings" : "marks")} beside '{Path.GetFileName(path)}' ({f.entries} entr(ies), {f.was.Count} naming a part of this output) were replaced by what the source hands down" + (f.fit == WorkshopRules.SidecarFit.Unknown ? " — your call in the dialog." : "."));
+                }
+                foreach (var kv in WorkshopRules.TransferLetters(source, table, meshNodes, firstNewNode))
+                    if (!merged.ContainsKey(kv.Key)) merged[kv.Key] = kv.Value;   // the source's, only where the output had nothing to say
+                var lines = merged.OrderBy(kv => kv.Key).Where(kv => nameOf.ContainsKey(kv.Key)).Select(kv => WorkshopRules.SidecarLine(kv.Value, nameOf[kv.Key], kv.Key)).ToArray();
+                if (lines.Length == 0) return null;
+                // the KEPT group's own name stands (outside review of PR #99, P2): the window's name is the SOURCE's
+                // name for that letter, and the output's group A is not the source's group A — a group renamed after
+                // the split would have had that renaming replaced on every re-cut. Only the letters that actually
+                // SURVIVED keep the old name, too: loading every old #name line meant an old A with no surviving part
+                // handed its name to a brand-new A the source had just contributed (same review, second round).
+                string NameFor(string letter) => keptLetters.Contains(letter) && oldNames.TryGetValue(letter, out string nm) && nm.Length > 0 ? nm : GroupName(letter);
+                var head = new[] { WorkshopRules.SidecarHeader, WorkshopRules.SidecarFromLine(sourceName, sourceIdentity) }.Concat(withGroupNames
+                    ? merged.Values.Where(l => !string.IsNullOrEmpty(l)).Distinct().OrderBy(l => l).Where(l => NameFor(l).Length > 0).Select(l => WorkshopRules.GroupNameLine(l, NameFor(l)))
+                    : Enumerable.Empty<string>());
+                return head.Concat(lines).ToArray();
+            }
+            plan.Letters = Compose(lettersPath, letters, true);
+            plan.Marks = Compose(marksPath, codes, false);
+            plan.Kept = keptTotal;
         }
-        catch (Exception e) { Debug.LogWarning("[Workshop] could not write the output's sidecars: " + e.Message); }
+        catch (Exception e)
+        {
+            // NOT a success (outside review of PR #99, fifth round): writing the output anyway would leave the OLD
+            // sidecars beside a NEW file, whose node indices they no longer describe - the very bug this PR opened
+            // with. The caller stops before the write, and says why.
+            Debug.LogException(e); plan.Error = e.Message;
+        }
+        return plan;
+    }
+
+    // STAGED BEFORE THE OUTPUT, MOVED INTO PLACE AFTER (outside review of PR #99, sixth round): a sidecar that could
+    // not be written after the GLB had been - read-only, say - left the OLD sidecar beside the NEW file and the
+    // caller reporting success. So every sidecar is first written to <path>.new, which proves the folder writable and
+    // catches a read-only target before a byte of the output is on disk; the output is written; then each staged
+    // file takes its place. Should that last step still fail, the stale sidecar is removed so nothing describes the
+    // replaced file's nodes, and the caller reports a FAILURE, never "Kept …".
+    static string Staged(string path) => path + ".new";
+    string StageOutputSidecars(SidecarPlan plan)   // null = staged; else why not, with nothing written
+    {
+        if (plan == null || plan.Error != null) return plan?.Error ?? "no plan";
+        var done = new List<string>();
+        try
+        {
+            foreach (var pair in new[] { (plan.LettersPath, plan.Letters), (plan.MarksPath, plan.Marks) })
+            {
+                if (pair.Item1 == null) continue;
+                if (File.Exists(pair.Item1) && (File.GetAttributes(pair.Item1) & FileAttributes.ReadOnly) != 0)
+                    throw new IOException(Path.GetFileName(pair.Item1) + " is read-only and could be neither replaced nor removed");
+                if (pair.Item2 == null) continue;   // nothing to write: the file goes at commit, and it is writable
+                File.WriteAllLines(Staged(pair.Item1), pair.Item2); done.Add(Staged(pair.Item1));
+            }
+            return null;
+        }
+        catch (Exception e)
+        {
+            foreach (string t in done) try { File.Delete(t); } catch { }
+            return e.Message;
+        }
+    }
+
+    // the staged plan, moved into place once the output itself is on disk; returns the caller's status note, and a
+    // failure the caller MUST report as one
+    string CommitOutputSidecars(SidecarPlan plan, out string failure)
+    {
+        failure = null;
+        if (plan == null || plan.Error != null) return "";
+        var stale = new List<string>();
+        foreach (var pair in new[] { (plan.LettersPath, plan.Letters), (plan.MarksPath, plan.Marks) })
+        {
+            if (pair.Item1 == null) continue;
+            try
+            {
+                if (pair.Item2 == null) { if (File.Exists(pair.Item1)) File.Delete(pair.Item1); }
+                else { File.Copy(Staged(pair.Item1), pair.Item1, true); File.Delete(Staged(pair.Item1)); }
+            }
+            catch (Exception e)
+            {
+                Debug.LogException(e);
+                try { File.Delete(Staged(pair.Item1)); } catch { }
+                bool removed = true; try { if (File.Exists(pair.Item1)) File.Delete(pair.Item1); } catch { removed = false; }
+                stale.Add(Path.GetFileName(pair.Item1) + " (" + e.Message + (removed ? "; the old one was removed, so nothing stale describes the new file" : "; the OLD one is still there and describes the REPLACED file - do not trust its marks") + ")");
+            }
+        }
+        if (stale.Count > 0) { failure = "its sidecars could not be written: " + string.Join("; ", stale) + ". Mark the output again before fusing it."; return ""; }
+        return plan.Kept > 0 ? $" Kept {plan.Kept} letter(s)/mark(s) already saved beside the output — the same source cut the same way makes the same pieces, so what was decided about them still fits." : "";
     }
     // Marks `target` from the sidecar; returns how many rows got a letter, `refused` = lines that fit no single row
     // (each already logged as a warning). Rows the file does not mention are left as they are.
@@ -1419,13 +1594,20 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 if (rr.Changed) { bytes = rr.Bytes; deletedLine = rr.Details[0]; }
             }
             if ((result == null || !result.Changed) && (torn == null || !torn.Changed) && deletedLine == null && renamedLine == null) { status = "Nothing changed — the checked parts produced no split, no tear, nothing was deleted and every part already had a unique name (see warnings in the console)."; return; }
+            // the ⊕ letters and the marks travel with the output, passed down to the _Part_NNN children — agreed BEFORE anything is written
+            var plan = PlanOutputSidecars(bytes, outGlb, WorkshopRules.SplitSettings(mergePct, picked, toTear));
+            if (plan == null) { status = "Split cancelled — nothing was written; the output on disk and the work beside it are as they were."; return; }
+            if (plan.Error != null) { status = "Split stopped before writing: the letters and marks for the output could not be planned (" + plan.Error + "). Nothing was written — writing the output without them would have left the old sidecars beside a file they no longer describe."; return; }
+            string staged = StageOutputSidecars(plan);
+            if (staged != null) { status = "Split stopped before writing: the letters and marks could not be written beside the output (" + staged + "). Nothing was written."; return; }
             File.WriteAllBytes(outGlb, bytes);
             WriteMarksSidecar(srcFile);   // the checks and deletion marks, next to the source: the first Probe of it restores them
             if (result != null) foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
-            WriteSidecarsForOutput(outGlb);   // the ⊕ letters and the marks travel with the output, passed down to the _Part_NNN children
+            string keptNote = CommitOutputSidecars(plan, out string sidecarFailure);
+            if (sidecarFailure != null) { status = "Split wrote the output, but " + sidecarFailure + "\n" + outGlb; return; }
             status = (result != null && result.Changed ? $"Split done: {result.NodesSplit} part(s) → {result.ChildPartsCreated} sub-parts, {result.SourceTriangles:N0} triangles preserved." : "Split: nothing checked.")
                    + (torn != null && torn.Changed ? $" Tear: {torn.NodesSplit} part(s) → {torn.ChildPartsCreated} pieces." : torn != null ? " Tear: nothing came apart (the mirror side has no separate island where this part is welded)." : "")
-                   + (deletedLine != null ? " " + deletedLine + "." : "") + (renamedLine != null ? " " + renamedLine + "." : "") + $"\n{outGlb}\nNext: open it in the Vehicle Lab, Probe parts, and mark the junk islands Ignore.";
+                   + (deletedLine != null ? " " + deletedLine + "." : "") + (renamedLine != null ? " " + renamedLine + "." : "") + keptNote + $"\n{outGlb}\nNext: open it in the Vehicle Lab, Probe parts, and mark the junk islands Ignore.";
             if (result != null) Debug.Log($"[Workshop] {string.Join(" | ", result.Details)}");
             if (torn != null) { foreach (var w in torn.Warnings) Debug.LogWarning("[Workshop] tear: " + w); Debug.Log($"[Workshop] tear: {string.Join(" | ", torn.Details)}"); }
         }

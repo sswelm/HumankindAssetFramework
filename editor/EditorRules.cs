@@ -471,8 +471,123 @@ public static class WorkshopRules
         var lost = new List<string>();
         if (marks > 0) lost.Add(marks + " mark(s) (Split, Tear and Delete)");
         if (letters > 0) lost.Add(letters + " group letter(s)");
-        return s + "\n\nThe work saved beside this file goes with it: " + string.Join(" and ", lost) +
-               ".\nThey describe the parts of the file being replaced, so the new output gets the marks its own source hands down instead.";
+        return s + "\n\nWork is saved beside this file: " + string.Join(" and ", lost) +
+               ".\nWritten from this same source, it is kept for every piece that still exists. Otherwise you will be asked whether what still fits should be kept or replaced by what this source hands down.";
+    }
+
+    /// <summary>The source a sidecar was written from, stated in its own head: "#from|&lt;file name&gt;".</summary>
+    public const string SidecarFromPrefix = "#from|";
+    /// <summary>
+    /// The source stated as "&lt;file name&gt;|&lt;identity&gt;", the identity being SHA-1 over the source's bytes
+    /// (SourceIdentity). A name is not an identity - two directories can each hold a `ship.glb` - and neither is a
+    /// name plus a size, which two files can share and an edit can leave unchanged (outside review of PR #99, three
+    /// rounds). The bytes are the model; the cut has already read every one of them, and hashing 230 MB is a fraction
+    /// of what the cut itself costs. The name rides along for the human reading the file.
+    /// </summary>
+    public static string SidecarFromLine(string sourceName, string identity) =>
+        SidecarFromPrefix + (sourceName ?? "").Trim() + "|" + (identity ?? "").Trim();
+
+    /// <summary>
+    /// SHA-1 over the source's bytes AND the settings of the cut that made the pieces. The bytes alone are the model,
+    /// not the pieces: `Hull_CutA` keeps its name when the plane moves from 30 % to 70 %, and an old delete mark
+    /// would then take a substantially different piece without a word (outside review of PR #99, fourth round). So
+    /// the same source cut with other settings is not "Same" - it is the question, like a re-export.
+    /// </summary>
+    public static string SourceIdentity(byte[] bytes, string settings)
+    {
+        if (bytes == null) return "";
+        using (var sha = System.Security.Cryptography.SHA1.Create())
+        {
+            byte[] tail = System.Text.Encoding.UTF8.GetBytes("\n" + (settings ?? ""));
+            sha.TransformBlock(bytes, 0, bytes.Length, null, 0);
+            sha.TransformFinalBlock(tail, 0, tail.Length);
+            return BitConverter.ToString(sha.Hash).Replace("-", "").ToLowerInvariant();
+        }
+    }
+
+    /// <summary>
+    /// What decides the pieces a Split makes: the merge distance and which parts are split or torn. Numbers are
+    /// written round-trip ("R"), never as they display: a plane rounded to four decimals let two different cuts share
+    /// one identity while a face lay between them, and old marks were then kept without a question for different
+    /// pieces (outside review of PR #99, fifth round).
+    /// </summary>
+    public static string SplitSettings(double mergePct, IEnumerable<int> split, IEnumerable<int> tear)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        return "split;merge=" + mergePct.ToString("R", inv)
+             + ";S=" + string.Join(",", (split ?? new int[0]).OrderBy(i => i).Select(i => i.ToString(inv)))
+             + ";T=" + string.Join(",", (tear ?? new int[0]).OrderBy(i => i).Select(i => i.ToString(inv)));
+    }
+
+    /// <summary>What decides the pieces a plane cut makes: the part, the rule, the axis, where the plane sits, the tilt.</summary>
+    public static string CutSettings(int nodeIndex, int rule, int axis, double planeValue, double tiltDeg)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        return "cut;node=" + nodeIndex.ToString(inv) + ";rule=" + rule.ToString(inv) + ";axis=" + axis.ToString(inv)
+             + ";at=" + planeValue.ToString("R", inv) + ";tilt=" + tiltDeg.ToString("R", inv);   // round-trip: the exact doubles the cut used
+    }
+
+    /// <summary>The identity a stated source carries: its last field, when that is a SHA-1; else "" (older markers stated a name, or a name and a size, and those prove nothing).</summary>
+    public static string StatedIdentity(string statedSource)
+    {
+        int bar = (statedSource ?? "").LastIndexOf('|');
+        string last = bar >= 0 ? statedSource.Substring(bar + 1).Trim() : "";
+        return last.Length == 40 && last.All(Uri.IsHexDigit) ? last : "";
+    }
+
+    /// <summary>
+    /// The `#from` of a sidecar being REWRITTEN in place: the Fuser and the Splitter save the letters and marks of
+    /// the file they have open, and neither knows what produced it — so they carry the line the file already had
+    /// rather than dropping it (outside review of PR #99: an ordinary Save erased the marker, and the next re-cut
+    /// fell back to the name-overlap rule). Empty when there was none, which is what a hand-made sidecar has.
+    /// </summary>
+    public static string SidecarFromKept(IEnumerable<string> existingLines) => ParseSidecarFrom(existingLines);
+    public static string ParseSidecarFrom(IEnumerable<string> lines)
+    {
+        foreach (string raw in lines ?? new string[0])
+        {
+            string line = (raw ?? "").Trim();
+            if (line.StartsWith(SidecarFromPrefix, StringComparison.Ordinal)) return line.Substring(SidecarFromPrefix.Length).Trim();
+        }
+        return "";
+    }
+
+    public enum SidecarFit { Nothing, Same, Unknown }
+
+    /// <summary>
+    /// May the sidecar already lying beside an output be KEPT when that output is written again? The merge that keeps
+    /// it resolves it against the new file BY NAME, and a name proves nothing on its own: cut one model to out.glb,
+    /// cut an unrelated one to the same path, and a part called `Object_1` inherits the first model's delete mark
+    /// (outside review of PR #99). So the sidecar states the identity of the source it was written from, and:
+    ///   * Same    - that identity is this source's bytes: keep everything that still names a part. Proven.
+    ///   * Nothing - it holds no entries, or none of them names a part of the new file: nothing to keep.
+    ///   * Unknown - anything else: no identity stated (written before there was one), an older marker that stated a
+    ///               name or a size, or another identity - which is EITHER this model re-exported, whose pieces still
+    ///               carry their names and whose work must not be lost, OR an unrelated model that happens to share
+    ///               some names. No number tells those two apart: a threshold on how much of it fits was tried and
+    ///               threw out four valid decisions of ten in one direction while letting generic names through in
+    ///               the other (the review's third round). So Unknown is a question for the user, asked once with the
+    ///               real counts in front of them (KeepOrReplaceQuestion), not a guess made for them.
+    /// </summary>
+    public static SidecarFit JudgeSidecar(string statedSource, string identity, int entries, int resolved)
+    {
+        if (entries <= 0 || resolved <= 0) return SidecarFit.Nothing;
+        string stated = StatedIdentity(statedSource);
+        return stated.Length > 0 && !string.IsNullOrEmpty(identity) && string.Equals(stated, identity.Trim(), StringComparison.OrdinalIgnoreCase) ? SidecarFit.Same : SidecarFit.Unknown;
+    }
+
+    /// <summary>The question put to the user for an Unknown fit: what is there, where it came from, how much of it still names a part of the new output.</summary>
+    public static string KeepOrReplaceQuestion(string statedSource, string sourceName, int letterEntries, int lettersResolved, int markEntries, int marksResolved)
+    {
+        int bar = (statedSource ?? "").IndexOf('|');
+        string statedName = bar > 0 ? statedSource.Substring(0, bar).Trim() : (statedSource ?? "").Trim();
+        string origin = statedName.Length > 0 ? "were written from '" + statedName + "'" : "were written before the source was recorded";
+        var fits = new List<string>();
+        if (letterEntries > 0) fits.Add(lettersResolved + " of " + letterEntries + " group letter(s)");
+        if (markEntries > 0) fits.Add(marksResolved + " of " + markEntries + " mark(s) (Split, Tear and Delete)");
+        return "The sidecars beside this output " + origin + ", and this cut is from '" + (sourceName ?? "").Trim() + "' - not confirmed to be the same model.\n\n"
+             + "Of what is saved there, " + string.Join(" and ", fits) + " still name a part of the new output.\n\n"
+             + "Keep what fits (the same model re-cut or re-exported makes the same pieces under the same names), or replace it all with what this source hands down?";
     }
 
     public static string SidecarLine(string letter, string name, int nodeIndex) =>
