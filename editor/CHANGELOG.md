@@ -70,6 +70,13 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   says why. And *the settings were hashed as they display, not as they are*: a plane rounded to four decimals let two
   cuts a hair apart share one identity while a face lay between them. The exact doubles the cut used are hashed.
 
+  **Review, sixth round.** *A sidecar that could not be written after the GLB had been* — read-only, say — left the
+  old sidecar beside the new file and the caller reporting success: the same gap as the planning failure, one step
+  later. Every sidecar is now staged to `<path>.new` before a byte of the output is on disk, which proves the folder
+  writable and catches a read-only target in time to write nothing; the output is written; then each staged file
+  takes its place. Should that last step still fail, the stale sidecar is removed so nothing describes the replaced
+  file's nodes, and the status reports a failure — never "Kept …".
+
 - **Model Factory: a per-unit correction to the water level** (user: "in many cases the water level in game does not
   correspond correctly with the preview, I think we need a custom slider to adjust the water level"). The pack's
   `waterLevel` is ONE number — how far the game's water surface sits above a baked model's origin — calibrated once

@@ -1057,9 +1057,12 @@ public abstract class ModelWorkshopWindow : EditorWindow
             var plan = PlanOutputSidecars(bytes, outGlb, WorkshopRules.CutSettings(cutGeo.NodeIndex, cutRule, cutAxis, plane, cutTiltDeg));
             if (plan == null) { status = "Plane cut cancelled — nothing was written; the output on disk and the work beside it are as they were."; return; }
             if (plan.Error != null) { status = "Plane cut stopped before writing: the letters and marks for the output could not be planned (" + plan.Error + "). Nothing was written — writing the output without them would have left the old sidecars beside a file they no longer describe."; return; }
+            string staged = StageOutputSidecars(plan);
+            if (staged != null) { status = "Plane cut stopped before writing: the letters and marks could not be written beside the output (" + staged + "). Nothing was written."; return; }
             File.WriteAllBytes(outGlb, bytes);
             WriteMarksSidecar(srcFile);
-            string keptNote = CommitOutputSidecars(plan);
+            string keptNote = CommitOutputSidecars(plan, out string sidecarFailure);
+            if (sidecarFailure != null) { status = "Plane cut wrote the output, but " + sidecarFailure + "\n" + outGlb; return; }
             status = $"Plane cut done: {result.Details.FirstOrDefault()}{(deletedLine != null ? " " + deletedLine + "." : "")}{keptNote}\n{outGlb}\nNext: open it in the Vehicle Lab — or cut again by pointing Source GLB at this output and re-Probing (your ⊕ letters travel with it).";
         }
         catch (Exception e) { status = "Plane cut failed (source untouched): " + e.Message; Debug.LogException(e); }
@@ -1396,20 +1399,60 @@ public abstract class ModelWorkshopWindow : EditorWindow
         return plan;
     }
 
-    // the plan, written once the output itself is on disk; returns the caller's status note
-    string CommitOutputSidecars(SidecarPlan plan)
+    // STAGED BEFORE THE OUTPUT, MOVED INTO PLACE AFTER (outside review of PR #99, sixth round): a sidecar that could
+    // not be written after the GLB had been - read-only, say - left the OLD sidecar beside the NEW file and the
+    // caller reporting success. So every sidecar is first written to <path>.new, which proves the folder writable and
+    // catches a read-only target before a byte of the output is on disk; the output is written; then each staged
+    // file takes its place. Should that last step still fail, the stale sidecar is removed so nothing describes the
+    // replaced file's nodes, and the caller reports a FAILURE, never "Kept …".
+    static string Staged(string path) => path + ".new";
+    string StageOutputSidecars(SidecarPlan plan)   // null = staged; else why not, with nothing written
     {
-        if (plan == null || plan.Error != null) return "";
+        if (plan == null || plan.Error != null) return plan?.Error ?? "no plan";
+        var done = new List<string>();
         try
         {
             foreach (var pair in new[] { (plan.LettersPath, plan.Letters), (plan.MarksPath, plan.Marks) })
             {
                 if (pair.Item1 == null) continue;
+                if (File.Exists(pair.Item1) && (File.GetAttributes(pair.Item1) & FileAttributes.ReadOnly) != 0)
+                    throw new IOException(Path.GetFileName(pair.Item1) + " is read-only and could be neither replaced nor removed");
+                if (pair.Item2 == null) continue;   // nothing to write: the file goes at commit, and it is writable
+                File.WriteAllLines(Staged(pair.Item1), pair.Item2); done.Add(Staged(pair.Item1));
+            }
+            return null;
+        }
+        catch (Exception e)
+        {
+            foreach (string t in done) try { File.Delete(t); } catch { }
+            return e.Message;
+        }
+    }
+
+    // the staged plan, moved into place once the output itself is on disk; returns the caller's status note, and a
+    // failure the caller MUST report as one
+    string CommitOutputSidecars(SidecarPlan plan, out string failure)
+    {
+        failure = null;
+        if (plan == null || plan.Error != null) return "";
+        var stale = new List<string>();
+        foreach (var pair in new[] { (plan.LettersPath, plan.Letters), (plan.MarksPath, plan.Marks) })
+        {
+            if (pair.Item1 == null) continue;
+            try
+            {
                 if (pair.Item2 == null) { if (File.Exists(pair.Item1)) File.Delete(pair.Item1); }
-                else File.WriteAllLines(pair.Item1, pair.Item2);
+                else { File.Copy(Staged(pair.Item1), pair.Item1, true); File.Delete(Staged(pair.Item1)); }
+            }
+            catch (Exception e)
+            {
+                Debug.LogException(e);
+                try { File.Delete(Staged(pair.Item1)); } catch { }
+                bool removed = true; try { if (File.Exists(pair.Item1)) File.Delete(pair.Item1); } catch { removed = false; }
+                stale.Add(Path.GetFileName(pair.Item1) + " (" + e.Message + (removed ? "; the old one was removed, so nothing stale describes the new file" : "; the OLD one is still there and describes the REPLACED file - do not trust its marks") + ")");
             }
         }
-        catch (Exception e) { Debug.LogWarning("[Workshop] could not write the output's sidecars: " + e.Message); }
+        if (stale.Count > 0) { failure = "its sidecars could not be written: " + string.Join("; ", stale) + ". Mark the output again before fusing it."; return ""; }
         return plan.Kept > 0 ? $" Kept {plan.Kept} letter(s)/mark(s) already saved beside the output — the same source cut the same way makes the same pieces, so what was decided about them still fits." : "";
     }
     // Marks `target` from the sidecar; returns how many rows got a letter, `refused` = lines that fit no single row
@@ -1555,10 +1598,13 @@ public abstract class ModelWorkshopWindow : EditorWindow
             var plan = PlanOutputSidecars(bytes, outGlb, WorkshopRules.SplitSettings(mergePct, picked, toTear));
             if (plan == null) { status = "Split cancelled — nothing was written; the output on disk and the work beside it are as they were."; return; }
             if (plan.Error != null) { status = "Split stopped before writing: the letters and marks for the output could not be planned (" + plan.Error + "). Nothing was written — writing the output without them would have left the old sidecars beside a file they no longer describe."; return; }
+            string staged = StageOutputSidecars(plan);
+            if (staged != null) { status = "Split stopped before writing: the letters and marks could not be written beside the output (" + staged + "). Nothing was written."; return; }
             File.WriteAllBytes(outGlb, bytes);
             WriteMarksSidecar(srcFile);   // the checks and deletion marks, next to the source: the first Probe of it restores them
             if (result != null) foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
-            string keptNote = CommitOutputSidecars(plan);
+            string keptNote = CommitOutputSidecars(plan, out string sidecarFailure);
+            if (sidecarFailure != null) { status = "Split wrote the output, but " + sidecarFailure + "\n" + outGlb; return; }
             status = (result != null && result.Changed ? $"Split done: {result.NodesSplit} part(s) → {result.ChildPartsCreated} sub-parts, {result.SourceTriangles:N0} triangles preserved." : "Split: nothing checked.")
                    + (torn != null && torn.Changed ? $" Tear: {torn.NodesSplit} part(s) → {torn.ChildPartsCreated} pieces." : torn != null ? " Tear: nothing came apart (the mirror side has no separate island where this part is welded)." : "")
                    + (deletedLine != null ? " " + deletedLine + "." : "") + (renamedLine != null ? " " + renamedLine + "." : "") + keptNote + $"\n{outGlb}\nNext: open it in the Vehicle Lab, Probe parts, and mark the junk islands Ignore.";
