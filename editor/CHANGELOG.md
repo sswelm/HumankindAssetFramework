@@ -5,6 +5,23 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Factory: a per-unit correction to the water level** (user: "in many cases the water level in game does not
+  correspond correctly with the preview, I think we need a custom slider to adjust the water level"). The pack's
+  `waterLevel` is ONE number — how far the game's water surface sits above a baked model's origin — calibrated once
+  in 2026-08-18 against a cruiser, and every vessel's Z is dialled against it. It does not hold for every unit: HAF
+  repoints a mesh into a DONOR unit, and the game floats that donor where it floats it. So a ship dialled to sit
+  right in game reads as riding high against the standard plane in the preview, and the preview stops being able to
+  predict anything. Measured on the Steam Ship of the Line before building this: the registry says `z -0.30`, the
+  last bake logged `offset=(0.00, -0.40, -0.30)`, and the preview's keel readout of `-0.46u vs waterline` follows
+  exactly from those two — the preview, the registry and the bake all agree with each other, and the game does not.
+
+  So the slider moves the **water**, not the model: `ModelDef.waterOffset`, world units, added to the pack standard,
+  shown beside the preview's water readout. Slide it until the preview's waterline matches what the game shows, and
+  the preview tells the truth for that unit from then on. It is stored per entry (so the calibration travels with the
+  pack, as the 2026-08-18 decision wanted: no machine-local copy that could shadow the standard), it is preview-only
+  (it never reaches `BakeConfig`, so no bake moves), and 0 — the default, and the usual case — means the pack's
+  standard holds. What sinks the model is still `Position offset (Z = waterline)`.
+
 - **Model Workshop: a file rewritten under the window is a new file** (user: "I marked Material2_27 for split and
   when I moved to the model fuser I expected Material2_27_Part_001 to be ungrouped because it is a new part, instead
   it was marked with the wrong group or deleted, as if it got shifted somehow"). It had been shifted. The checks, the
