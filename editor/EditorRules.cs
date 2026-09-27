@@ -477,7 +477,21 @@ public static class WorkshopRules
 
     /// <summary>The source a sidecar was written from, stated in its own head: "#from|&lt;file name&gt;".</summary>
     public const string SidecarFromPrefix = "#from|";
-    public static string SidecarFromLine(string sourceName) => SidecarFromPrefix + (sourceName ?? "").Trim();
+    /// <summary>
+    /// The source stated as "&lt;file name&gt;|&lt;byte length&gt;". Two directories can each hold a `ship.glb`, and a
+    /// name alone would let one model's decisions land on the other's parts (outside review of PR #99, second round);
+    /// the length tells them apart and, unlike a path, survives the folder being moved or renamed.
+    /// </summary>
+    public static string SidecarFromLine(string sourceName, long sourceLength) =>
+        SidecarFromPrefix + (sourceName ?? "").Trim() + "|" + sourceLength.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// The `#from` of a sidecar being REWRITTEN in place: the Fuser and the Splitter save the letters and marks of
+    /// the file they have open, and neither knows what produced it — so they carry the line the file already had
+    /// rather than dropping it (outside review of PR #99: an ordinary Save erased the marker, and the next re-cut
+    /// fell back to the name-overlap rule). Empty when there was none, which is what a hand-made sidecar has.
+    /// </summary>
+    public static string SidecarFromKept(IEnumerable<string> existingLines) => ParseSidecarFrom(existingLines);
     public static string ParseSidecarFrom(IEnumerable<string> lines)
     {
         foreach (string raw in lines ?? new string[0])
@@ -498,11 +512,18 @@ public static class WorkshopRules
     /// of its entries naming parts of the new file is what a re-cut of the same source looks like (the ship this came
     /// from: 345 of 345), while an unrelated model shares a handful of generic names at best.
     /// </summary>
-    public static bool SidecarStillFits(string statedSource, string sourceName, int entries, int resolved)
+    public static bool SidecarStillFits(string statedSource, string sourceName, long sourceLength, int entries, int resolved)
     {
         if (entries <= 0 || resolved <= 0) return false;
-        if (!string.IsNullOrEmpty(statedSource)) return string.Equals(statedSource, (sourceName ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
-        return resolved * 2 >= entries;
+        if (string.IsNullOrEmpty(statedSource)) return resolved * 2 >= entries;   // written before the line existed
+        int bar = statedSource.LastIndexOf('|');
+        string statedName = bar > 0 ? statedSource.Substring(0, bar) : statedSource;
+        if (!string.Equals(statedName.Trim(), (sourceName ?? "").Trim(), StringComparison.OrdinalIgnoreCase)) return false;   // another model entirely
+        // the same NAME: the same file if it is also the same size. A different size is either another model that
+        // happens to share the name — which the overlap then throws out — or this one re-exported, whose pieces still
+        // carry their names and whose work should not be lost over a changed byte count.
+        return bar > 0 && long.TryParse(statedSource.Substring(bar + 1).Trim(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out long had) && had == sourceLength
+            || resolved * 2 >= entries;
     }
 
     public static string SidecarLine(string letter, string name, int nodeIndex) =>

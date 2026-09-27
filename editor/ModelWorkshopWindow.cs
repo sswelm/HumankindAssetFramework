@@ -1192,6 +1192,15 @@ public abstract class ModelWorkshopWindow : EditorWindow
         return un.Changed ? un.Bytes : bytes;
     }
     static string MarksSidecarPath(string glb) => string.IsNullOrEmpty(glb) ? null : glb + ".marks.txt";
+    // The head of a sidecar being rewritten in place: the version line, and the "#from" the file already carried.
+    // Neither window knows what produced the file it has open, and dropping the line on an ordinary Save would leave
+    // the next re-cut to judge the sidecar on name overlap alone (outside review of PR #99, second round).
+    static IEnumerable<string> SidecarHead(string path)
+    {
+        string from = "";
+        try { if (File.Exists(path)) from = WorkshopRules.SidecarFromKept(File.ReadAllLines(path)); } catch { }
+        return from.Length > 0 ? new[] { WorkshopRules.SidecarHeader, WorkshopRules.SidecarFromPrefix + from } : new[] { WorkshopRules.SidecarHeader };
+    }
     // …and what an overwrite of it would take with it (WorkshopRules.OverwriteWarning): the sidecars beside a file
     // belong to THAT file's parts, so a new output at the same path cannot keep them
     // how many entries a sidecar holds (its comment lines are not entries) — for the hints above, a few KB read
@@ -1212,7 +1221,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             string path = MarksSidecarPath(glb); if (path == null) return;
             var lines = rows.Where(r => (r.split || r.tear || r.delete) && !string.IsNullOrEmpty(r.node)).Select(r => WorkshopRules.SidecarLine(r.delete ? "X" : r.tear ? "T" : "S", r.node, r.nodeIndex)).ToArray();
             if (lines.Length == 0) { if (File.Exists(path)) File.Delete(path); return; }
-            File.WriteAllLines(path, new[] { WorkshopRules.SidecarHeader }.Concat(lines));
+            File.WriteAllLines(path, SidecarHead(path).Concat(lines));
         }
         catch (Exception e) { Debug.LogWarning("[Workshop] could not write the marks sidecar: " + e.Message); }
     }
@@ -1247,7 +1256,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             var lines = rows.Where(r => !string.IsNullOrEmpty(r.fuse) && !string.IsNullOrEmpty(r.node)).Select(r => WorkshopRules.SidecarLine(r.fuse, r.node, r.nodeIndex)).ToArray();
             if (lines.Length == 0) { if (File.Exists(path)) File.Delete(path); return; }
             var named = GroupNameLines(rows.Select(r => r.fuse));
-            File.WriteAllLines(path, new[] { WorkshopRules.SidecarHeader }.Concat(named).Concat(lines));   // v2: header, then #name|letter|name for the named groups in use, then letter|index|name (the name last, so a '|' in it is nothing to guess)
+            File.WriteAllLines(path, SidecarHead(path).Concat(named).Concat(lines));   // v2: header, then #name|letter|name for the named groups in use, then letter|index|name (the name last, so a '|' in it is nothing to guess)
         }
         catch (Exception e) { Debug.LogWarning("[Workshop] could not write the fuse groupings sidecar: " + e.Message); }
     }
@@ -1289,11 +1298,13 @@ public abstract class ModelWorkshopWindow : EditorWindow
             // the same names, so that work still fits: it is read back against the new output (by name, the resolver
             // the Probe uses) and kept, and what comes down from the source only fills the parts it does not name.
             string sourceName = Path.GetFileName(srcFile ?? "");
+            long sourceLength = 0; try { sourceLength = new FileInfo(srcFile).Length; } catch { }
             void Write(string path, IDictionary<int, string> source, bool withGroupNames)
             {
                 if (path == null) return;
                 var merged = new Dictionary<int, string>();
                 var oldNames = new Dictionary<string, string>(StringComparer.Ordinal);
+                var keptLetters = new HashSet<string>(StringComparer.Ordinal);   // the letters this sidecar actually carried over
                 if (File.Exists(path))
                 {
                     var problems = new List<string>();
@@ -1301,9 +1312,10 @@ public abstract class ModelWorkshopWindow : EditorWindow
                     var was = WorkshopRules.ResolveFuseSidecar(WorkshopRules.MigrateSidecarNames(had, outTriples, problems), outPairs, problems);
                     int entries = had.Count(l => !string.IsNullOrWhiteSpace(l) && !l.StartsWith("#", StringComparison.Ordinal));
                     // …only when it is THIS source's work (WorkshopRules.SidecarStillFits): a name is not proof on its own
-                    if (WorkshopRules.SidecarStillFits(WorkshopRules.ParseSidecarFrom(had), sourceName, entries, was.Count))
+                    if (WorkshopRules.SidecarStillFits(WorkshopRules.ParseSidecarFrom(had), sourceName, sourceLength, entries, was.Count))
                     {
                         foreach (var kv in was) merged[kv.Key] = kv.Value;
+                        foreach (string l in was.Values) if (!string.IsNullOrEmpty(l)) keptLetters.Add(l);
                         if (withGroupNames) oldNames = WorkshopRules.ParseGroupNames(had);
                         keptTotal += merged.Count;
                         foreach (string q in problems) Debug.LogWarning("[Workshop] the output's own " + (withGroupNames ? "groupings" : "marks") + " sidecar: " + q);
@@ -1317,10 +1329,11 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 if (lines.Length == 0) { if (File.Exists(path)) File.Delete(path); return; }
                 // the KEPT group's own name stands (outside review of PR #99, P2): the window's name is the SOURCE's
                 // name for that letter, and the output's group A is not the source's group A — a group renamed after
-                // the split would have had that renaming replaced on every re-cut. The window names only the letters
-                // the source contributed.
-                string NameFor(string letter) => oldNames.TryGetValue(letter, out string nm) && nm.Length > 0 ? nm : GroupName(letter);
-                var head = new[] { WorkshopRules.SidecarHeader, WorkshopRules.SidecarFromLine(sourceName) }.Concat(withGroupNames
+                // the split would have had that renaming replaced on every re-cut. Only the letters that actually
+                // SURVIVED keep the old name, too: loading every old #name line meant an old A with no surviving part
+                // handed its name to a brand-new A the source had just contributed (same review, second round).
+                string NameFor(string letter) => keptLetters.Contains(letter) && oldNames.TryGetValue(letter, out string nm) && nm.Length > 0 ? nm : GroupName(letter);
+                var head = new[] { WorkshopRules.SidecarHeader, WorkshopRules.SidecarFromLine(sourceName, sourceLength) }.Concat(withGroupNames
                     ? merged.Values.Where(l => !string.IsNullOrEmpty(l)).Distinct().OrderBy(l => l).Where(l => NameFor(l).Length > 0).Select(l => WorkshopRules.GroupNameLine(l, NameFor(l)))
                     : Enumerable.Empty<string>());
                 File.WriteAllLines(path, head.Concat(lines));

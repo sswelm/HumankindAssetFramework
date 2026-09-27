@@ -35,6 +35,16 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   not the source's group A — a group renamed after the split had that renaming replaced on every re-cut. And the
   promised "Kept …" note *never appeared*: it was appended to a status line both callers then overwrote.
 
+  **Review, second round**, three more. *The marker had to survive ordinary use*: Split and Cut stamped it, and the
+  everyday "Save groups" / "Save marks" paths rewrote the sidecar without it, so editing the split output in the
+  Fuser erased the provenance and the next re-cut fell back to name overlap alone — both writers carry over the line
+  the file already had. *A name is not an identity either*: two directories can each hold a `ship.glb`, so the marker
+  states the source's byte length as well (`#from|ship.glb|232590124`) — which, unlike a path, survives the folder
+  being moved; a same-named source of a different size falls back to the overlap rule, so re-exporting a model costs
+  nothing while an unrelated namesake is thrown out. And *only the letters that actually survived keep their old
+  name*: every old `#name` line was loaded once anything was retained, so an old group A with no surviving part
+  handed its name to a brand-new A the source had just contributed.
+
 - **Model Factory: a per-unit correction to the water level** (user: "in many cases the water level in game does not
   correspond correctly with the preview, I think we need a custom slider to adjust the water level"). The pack's
   `waterLevel` is ONE number — how far the game's water surface sits above a baked model's origin — calibrated once

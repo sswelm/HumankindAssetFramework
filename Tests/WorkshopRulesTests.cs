@@ -365,24 +365,44 @@ public class WorkshopRulesTests
         // Outside review of PR #99, P1: the merge resolves the sidecar already beside the output against the NEW file
         // by name, and a name is not proof on its own — cut one model to out.glb, cut an unrelated one to the same
         // path, and a part called "Object_1" would inherit the first model's delete mark.
-        Assert.True(WorkshopRules.SidecarStillFits("hull.glb", "hull.glb", 345, 345));
-        Assert.True(WorkshopRules.SidecarStillFits("Hull.GLB", " hull.glb ", 345, 3));    // the same source: the count is not asked
-        Assert.False(WorkshopRules.SidecarStillFits("hull.glb", "tank.glb", 345, 344));   // another source: no amount of name overlap buys it in
+        Assert.True(WorkshopRules.SidecarStillFits("hull.glb|900", "hull.glb", 900, 345, 345));
+        Assert.True(WorkshopRules.SidecarStillFits("Hull.GLB|900", " hull.glb ", 900, 345, 3));    // the same file: the count is not asked
+        Assert.False(WorkshopRules.SidecarStillFits("hull.glb|900", "tank.glb", 900, 345, 344));   // another model: no amount of name overlap buys it in
+        // TWO DIRECTORIES CAN EACH HOLD A ship.glb (same review, second round): the name alone let one model's
+        // decisions land on the other's parts, so the size is stated too — and unlike a path it survives a move.
+        Assert.False(WorkshopRules.SidecarStillFits("ship.glb|900", "ship.glb", 4242, 345, 3));    // same name, another size, and almost nothing fits: not this model
+        Assert.True(WorkshopRules.SidecarStillFits("ship.glb|900", "ship.glb", 4242, 345, 345));   // …but re-exporting the source must not cost the work
         // written before the line existed: judged on how much of it still fits
-        Assert.True(WorkshopRules.SidecarStillFits("", "tank.glb", 345, 345));
-        Assert.True(WorkshopRules.SidecarStillFits("", "tank.glb", 10, 5));
-        Assert.False(WorkshopRules.SidecarStillFits("", "tank.glb", 345, 3));             // a handful of generic names is what an unrelated model shares
-        Assert.False(WorkshopRules.SidecarStillFits("", "tank.glb", 0, 0));
-        Assert.False(WorkshopRules.SidecarStillFits("hull.glb", "hull.glb", 345, 0));     // nothing of it names a part of this file
+        Assert.True(WorkshopRules.SidecarStillFits("", "tank.glb", 7, 345, 345));
+        Assert.True(WorkshopRules.SidecarStillFits("", "tank.glb", 7, 10, 5));
+        Assert.False(WorkshopRules.SidecarStillFits("", "tank.glb", 7, 345, 3));           // a handful of generic names is what an unrelated model shares
+        Assert.False(WorkshopRules.SidecarStillFits("", "tank.glb", 7, 0, 0));
+        Assert.False(WorkshopRules.SidecarStillFits("hull.glb|900", "hull.glb", 900, 345, 0));     // nothing of it names a part of this file
+    }
+
+    [Fact]
+    public void The_source_marker_survives_an_ordinary_save_of_the_sidecar()
+    {
+        // Outside review of PR #99, second round: Split/Cut stamped the marker, and the ordinary "Save groups" /
+        // "Save marks" paths rewrote the file without it — so editing the split output in the Fuser erased the
+        // provenance, and the next re-cut fell back to judging the sidecar on name overlap alone.
+        var written = new[] { WorkshopRules.SidecarHeader, WorkshopRules.SidecarFromLine("salegs_revenge.glb", 232590124),
+                              WorkshopRules.SidecarLine("A", "Hull", 3) };
+        string kept = WorkshopRules.SidecarFromKept(written);                 // what a Save must carry over
+        Assert.Equal("salegs_revenge.glb|232590124", kept);
+        var saved = new[] { WorkshopRules.SidecarHeader, WorkshopRules.SidecarFromPrefix + kept,
+                            WorkshopRules.SidecarLine("A", "Hull", 3), WorkshopRules.SidecarLine("B", "Deck", 4) };
+        Assert.True(WorkshopRules.SidecarStillFits(WorkshopRules.ParseSidecarFrom(saved), "salegs_revenge.glb", 232590124, 2, 2));
+        Assert.Equal("", WorkshopRules.SidecarFromKept(new[] { WorkshopRules.SidecarHeader }));   // a hand-made file states nothing, and stays that way
     }
 
     [Fact]
     public void The_source_line_round_trips_and_the_readers_step_over_it()
     {
         // it lives in the head beside #name, so every reader of these files must ignore it
-        var lines = new[] { WorkshopRules.SidecarHeader, WorkshopRules.SidecarFromLine("salegs_revenge.glb"),
+        var lines = new[] { WorkshopRules.SidecarHeader, WorkshopRules.SidecarFromLine("salegs_revenge.glb", 232590124),
                             WorkshopRules.GroupNameLine("A", "Anker"), WorkshopRules.SidecarLine("A", "Hull", 3) };
-        Assert.Equal("salegs_revenge.glb", WorkshopRules.ParseSidecarFrom(lines));
+        Assert.Equal("salegs_revenge.glb|232590124", WorkshopRules.ParseSidecarFrom(lines));
         Assert.Equal("", WorkshopRules.ParseSidecarFrom(new[] { WorkshopRules.SidecarHeader }));
         var names = WorkshopRules.ParseGroupNames(lines);
         Assert.Single(names);
