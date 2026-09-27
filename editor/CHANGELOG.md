@@ -27,7 +27,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   whichever parts now sat at those indices and written the wrong shell. The window watches the file instead: the
   moment what is at the path stops being what was probed, the rows go (on the Layout pass, at most twice a second,
   reading a directory entry rather than the GLB), and each of those entry points asks the same question again for the
-  moment in between. And the group NAMES go with the letters: they are read from the file's sidecar and were only
+  moment in between — asked of what was PROBED, not of the rows, because the rows are not the only state built from
+  that file: the plane cut holds a part's geometry and node index of its own, and a probe that threw leaves the rows
+  empty with that geometry alive. And the group NAMES go with the letters: they are read from the file's sidecar and were only
   ever added to, so a group the new file leaves unnamed kept the old file's name — on the fused shell and in the
   sidecar the next Fuse writes.
 

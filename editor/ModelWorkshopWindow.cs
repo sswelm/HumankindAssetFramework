@@ -177,7 +177,10 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // checks: a refusal naming what to do, rather than a wrong output.
     bool RowsDescribeTheFile(string verb)
     {
-        if (rows.Count == 0) return true;   // nothing to misapply
+        // keyed on what was PROBED, not on the rows: they are not the only state built from that file - the plane
+        // cut holds a part's geometry and node index of its own, and a probe that threw leaves the rows empty with
+        // that geometry alive. Nothing probed at all is the only case with nothing to misapply.
+        if (string.IsNullOrEmpty(probedFile)) return true;
         if (WorkshopRules.RowsStillDescribe(probedFile, probedStamp, srcFile, StampOf(srcFile))) return true;
         status = verb + " refused: the rows in the window name parts of another file, or of this path before it was rewritten. Press Probe first — the marks saved beside the file will be read.";
         return false;
