@@ -155,8 +155,37 @@ public abstract class ModelWorkshopWindow : EditorWindow
 
     void OnDisable() => DestroyPreview();
 
+    // P1 OF THE REVIEW OF PR #97: the stamp check in Analyze() decides what a re-Probe shows, and an operation
+    // started WITHOUT one never reached it — Fuse, Split and Cut work from the rows in the window, whose node indices
+    // are indices into the file that was probed. So the window watches the file instead: when what is at the path
+    // stops being what was probed, the rows go, here, before any button can be pressed on them. Twice a second at
+    // most, and it reads a directory entry, not the GLB.
+    double lastStampCheck;
+    void DropRowsIfTheFileChanged()
+    {
+        if (Event.current != null && Event.current.type != EventType.Layout) return;   // IMGUI counts controls: the rows may only change on the Layout pass, or the repaint that follows draws a different list
+        if (rows.Count == 0 || string.IsNullOrEmpty(probedFile) || !SamePath(probedFile, srcFile)) return;   // another source is the Probe button's business
+        if (EditorApplication.timeSinceStartup - lastStampCheck < 0.5) return;
+        lastStampCheck = EditorApplication.timeSinceStartup;
+        if (WorkshopRules.RowsStillDescribe(probedFile, probedStamp, srcFile, StampOf(srcFile))) return;
+        rows.Clear(); groupLabels.Clear(); selectedIdx = -1; selectedRow = ""; DestroyPreview();
+        status = "This file has been rewritten since it was probed — by the Splitter, or from outside — so the rows were dropped: their node indices named parts of the file that used to be here. Probe it again, and the marks saved beside the new one will be read.";
+        Repaint();
+    }
+
+    // …and the same question at each entry point that writes from the rows, for the moment between two of those
+    // checks: a refusal naming what to do, rather than a wrong output.
+    bool RowsDescribeTheFile(string verb)
+    {
+        if (rows.Count == 0) return true;   // nothing to misapply
+        if (WorkshopRules.RowsStillDescribe(probedFile, probedStamp, srcFile, StampOf(srcFile))) return true;
+        status = verb + " refused: the rows in the window name parts of another file, or of this path before it was rewritten. Press Probe first — the marks saved beside the file will be read.";
+        return false;
+    }
+
     void OnGUI()
     {
+        DropRowsIfTheFileChanged();
         windowScroll = EditorGUILayout.BeginScrollView(windowScroll, GUIStyle.none, GUI.skin.verticalScrollbar);   // vertical only: a bar appears when the window is shorter than its content, and no long line can push the window wide; the preview keeps its scroll-wheel zoom (it Use()s the event first)
         if (Fusing)
         {
@@ -253,8 +282,11 @@ public abstract class ModelWorkshopWindow : EditorWindow
                     using (new EditorGUI.DisabledScope(chosen == 0 && deleted == 0 && !marksOnDisk))   // with no marks AND a file on disk, saving means "clear it"
                         if (GUILayout.Button(new GUIContent("Save marks", $"Writes the Split checks and deletion marks to {Path.GetFileName(srcFile)}.marks.txt next to the source (a Split writes it too); the first Probe of the file reads it back."), GUILayout.Width(90)))
                         {
-                            WriteMarksSidecar(srcFile);
-                            status = chosen == 0 && deleted == 0 ? $"Marks cleared: {MarksSidecarPath(srcFile)} removed" : $"Marks saved: {MarksSidecarPath(srcFile)}";
+                            if (RowsDescribeTheFile("Save marks"))
+                            {
+                                WriteMarksSidecar(srcFile);
+                                status = chosen == 0 && deleted == 0 ? $"Marks cleared: {MarksSidecarPath(srcFile)} removed" : $"Marks saved: {MarksSidecarPath(srcFile)}";
+                            }
                         }
                     using (new EditorGUI.DisabledScope(!marksOnDisk))
                         if (GUILayout.Button(new GUIContent("Load marks", "Reads the Split checks and deletion marks back from the sidecar next to the source, by part name and node index."), GUILayout.Width(90)))
@@ -622,8 +654,11 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 using (new EditorGUI.DisabledScope(fusedRows == 0 && !sidecarExists))   // with no letters AND a sidecar on disk, saving means "clear it" (review of 0a8b56e)
                     if (GUILayout.Button(new GUIContent("Save groups", $"Writes the ⊕ letters to {Path.GetFileName(srcFile)}.fuse.txt next to the source (a Fuse writes it too); the first Probe of a file restores them from there. With no letters marked this removes the file."), GUILayout.Width(100)))
                     {
-                        WriteFuseSidecar(srcFile); WriteMarksSidecar(srcFile);   // the deletion marks ride along in their own sidecar
-                        status = (fusedRows == 0 ? $"Groupings cleared: {FuseSidecarPath(srcFile)} removed" : $"Groupings saved: {FuseSidecarPath(srcFile)}") + (deleted > 0 ? $"; {deleted} deletion mark(s) saved: {MarksSidecarPath(srcFile)}" : "");
+                        if (RowsDescribeTheFile("Save groups"))
+                        {
+                            WriteFuseSidecar(srcFile); WriteMarksSidecar(srcFile);   // the deletion marks ride along in their own sidecar
+                            status = (fusedRows == 0 ? $"Groupings cleared: {FuseSidecarPath(srcFile)} removed" : $"Groupings saved: {FuseSidecarPath(srcFile)}") + (deleted > 0 ? $"; {deleted} deletion mark(s) saved: {MarksSidecarPath(srcFile)}" : "");
+                        }
                     }
                 using (new EditorGUI.DisabledScope(!File.Exists(FuseSidecarPath(srcFile) ?? "")))
                     if (GUILayout.Button(new GUIContent("Load groups", "Reads the ⊕ letters back from the sidecar next to the source, by part name and node index (a name shared by several parts is refused unless the index settles it)."), GUILayout.Width(100)))
@@ -684,6 +719,11 @@ public abstract class ModelWorkshopWindow : EditorWindow
         string stamp = StampOf(srcFile);
         bool sameFile = rows.Count > 0 && WorkshopRules.RowsStillDescribe(probedFile, probedStamp, srcFile, stamp);
         bool rewritten = rows.Count > 0 && SamePath(probedFile, srcFile) && !sameFile;   // …and say so: the marks did not vanish, the file did
+        // P2 OF THE REVIEW OF PR #97: the ⊕ letters go on a fresh load, and their NAMES must go with them. They are
+        // the file's groups' names, read from its sidecar; ApplyFuseSidecar below adds the ones it finds and removes
+        // none, so a group the new file leaves unnamed kept the old file's name — on the fused shell and in the
+        // sidecar the next Fuse writes.
+        if (!sameFile) groupLabels.Clear();
         var kept = new HashSet<int>(sameFile ? rows.Where(r => r.split).Select(r => r.nodeIndex) : Enumerable.Empty<int>());
         var keptDelete = new HashSet<int>(sameFile ? rows.Where(r => r.delete).Select(r => r.nodeIndex) : Enumerable.Empty<int>());   // the deletion marks survive a re-Probe as the checks do
         var keptTear = new HashSet<int>(sameFile ? rows.Where(r => r.tear).Select(r => r.nodeIndex) : Enumerable.Empty<int>());       // and the Tear marks (2026-09-25, user: "it appears Tear is not saved" - a re-Probe dropped them)
@@ -983,6 +1023,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
 
     void DoPlaneCut()
     {
+        if (!RowsDescribeTheFile("Cut")) return;
         if (File.Exists(outGlb) && !EditorUtility.DisplayDialog("Overwrite existing file?", OverwriteWarning(outGlb), "Overwrite", "Cancel")) return;
         try
         {
@@ -1267,6 +1308,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
     void FuseMarked()
     {
         const string verb = "Fuse";
+        if (!RowsDescribeTheFile(verb)) return;
         try { GlbDisconnectedParts.GuardPaths(srcFile, outGlb); }   // the file entry points refuse output == source; this path writes the bytes itself, so it asks the same guard
         catch (Exception e) { status = verb + " refused (source untouched): " + e.Message; return; }
         if (File.Exists(outGlb) && !EditorUtility.DisplayDialog("Overwrite existing file?", OverwriteWarning(outGlb), "Overwrite", "Cancel")) return;
@@ -1349,6 +1391,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
 
     void SplitChecked()
     {
+        if (!RowsDescribeTheFile("Split")) return;
         if (File.Exists(outGlb) && !EditorUtility.DisplayDialog("Overwrite existing file?", OverwriteWarning(outGlb), "Overwrite", "Cancel")) return;
         try
         {

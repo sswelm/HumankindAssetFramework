@@ -22,6 +22,15 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   describe *that file's* parts, so a new output at the same path cannot keep them — but the dialog now names them
   ("508 mark(s) (Split, Tear and Delete) and 22 group letter(s)") before anything is written.
 
+  **Review:** two more ways the old rows reached the new file. A stamp checked only when Probe is pressed leaves the
+  rows in the window live, and Fuse, Split, Cut and both Save buttons work from them — a Fuse would have grouped
+  whichever parts now sat at those indices and written the wrong shell. The window watches the file instead: the
+  moment what is at the path stops being what was probed, the rows go (on the Layout pass, at most twice a second,
+  reading a directory entry rather than the GLB), and each of those entry points asks the same question again for the
+  moment in between. And the group NAMES go with the letters: they are read from the file's sidecar and were only
+  ever added to, so a group the new file leaves unnamed kept the old file's name — on the fused shell and in the
+  sidecar the next Fuse writes.
+
 - **Model Fuser: the same answer, six times sooner** (user: "fusing the Saleg's Revenge took a long time, could you
   look if we could speed it up?"). The ship's 21 groups — 361 parts, 4.7 million faces — took **578 seconds**; they
   now take **94**, and the largest group on its own falls from 557 s to 53. Nothing about what the fuse decides has
