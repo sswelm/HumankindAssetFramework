@@ -452,6 +452,7 @@ public static class ModelRegistry
             }
             var json = File.ReadAllText(SourcePath);
             var data = JsonUtility.FromJson<RegistryFile>(json);
+            if (data == null) throw new FormatException("the file is empty or not a JSON object");   // same verdict Save() reaches — not "a pack with no models"
             lastLoadCorrupt = false; corruptLogged = false;
             UnitScales = data?.unitScales ?? new List<UnitScaleRule>();
             WaterLevel = data != null ? data.waterLevel : 0.16f;
@@ -550,7 +551,11 @@ public static class ModelRegistry
 
     // Returns true if the registry was written. False = nothing was saved (corrupt-guard tripped, or the atomic write
     // hit a transient lock) — the caller should surface that instead of assuming success.
-    public static bool Save(List<ModelDef> models)
+    public static bool Save(List<ModelDef> models) => Save(models, false);
+
+    // keepDiskModels = write the models exactly as THIS read of the source holds them (SaveStatics). One read serves
+    // both the merge base and the kept models, so a file that turns unreadable between two reads can't slip through.
+    static bool Save(List<ModelDef> models, bool keepDiskModels)
     {
         if (lastLoadCorrupt)
         {
@@ -558,15 +563,43 @@ public static class ModelRegistry
                            "Fix or delete it and press Refresh first — refusing to overwrite it and lose your models.");
             return false;
         }
-        SortByName(models);   // write BOTH the live registry and the backup alphabetically, so the order is stable across bakes
         // MERGE onto the current on-disk file instead of rebuilding from defaults: preserve the pack HEADER
         // (schemaVersion/modId/dependsOn/loadAfter/overrides — no window edits these, so they must survive every Save),
         // and preserve the scale/era/threshold arrays whenever this session hasn't Load()ed them (the session statics
-        // are empty right after a domain reload; writing them then would silently wipe Resize/Era-Lab data). A fresh /
-        // absent / unreadable file falls back to RegistryFile defaults, so a first-ever Save still writes a valid pack.
+        // are empty right after a domain reload; writing them then would silently wipe Resize/Era-Lab data). An ABSENT
+        // file falls back to RegistryFile defaults, so a first-ever Save still writes a valid pack.
         RegistryFile file = null;
-        try { if (File.Exists(SourcePath)) file = JsonUtility.FromJson<RegistryFile>(File.ReadAllText(SourcePath)); } catch { }   // merge base = the SOURCE (the collapse: deployed is derived)
+        if (File.Exists(SourcePath))   // merge base = the SOURCE (the collapse: deployed is derived)
+        {
+            // A source that EXISTS but won't parse (conflict markers, a half-finished hand edit) refuses the Save. The
+            // lastLoadCorrupt guard only remembers the previous Load(); a SaveStatics caller never Load()s, and it used
+            // to read an unreadable source as "no models" and write models: [] to both copies.
+            string why = null;
+            try
+            {
+                file = JsonUtility.FromJson<RegistryFile>(File.ReadAllText(SourcePath));
+                if (file == null) why = "the file is empty or not a JSON object";
+            }
+            catch (Exception e) { why = Pinpoint(SourcePath) ?? e.Message; }
+            if (why != null)
+            {
+                lastLoadCorrupt = true; LastCorruptDetail = why;   // the Factory's recovery banner; the next Load() preserves the evidence
+                Debug.LogError($"[Factory] not saving: the registry source '{SourcePath}' is unreadable right now — {why}. " +
+                               "Refusing to overwrite it; fix it (or use the Model Factory's recovery) and save again.");
+                return false;
+            }
+        }
+        else if (keepDiskModels && File.Exists(RegistryPath))
+        {
+            // No source but a deployed copy: the models live THERE, and writing "the source's models" would write none.
+            // Load() adopts the deployed copy; this path must not pre-empt that with an empty list.
+            Debug.LogError($"[Factory] not saving: the registry source '{SourcePath}' is missing but a deployed copy exists. " +
+                           "Open the Model Factory (or press Refresh) so it adopts the deployed models, then save again.");
+            return false;
+        }
         if (file == null) file = new RegistryFile();
+        if (keepDiskModels) models = file.models ?? new List<ModelDef>();
+        SortByName(models);   // write BOTH the live registry and the backup alphabetically, so the order is stable across bakes
         file.models = models;
         if (loaded)   // the statics reflect the on-disk state (+ any Lab edits this session) — authoritative
         {
@@ -615,19 +648,11 @@ public static class ModelRegistry
         return true;
     }
 
-    // Read ONLY the models array from the on-disk file, WITHOUT touching the session statics — so a Lab that owns the
-    // statics (not the models) can save without clobbering a model edit made in another window with its own stale
-    // snapshot. Empty on a missing/unreadable file.
-    static List<ModelDef> LoadModelsOnly()
-    {
-        try { if (File.Exists(SourcePath)) return JsonUtility.FromJson<RegistryFile>(File.ReadAllText(SourcePath))?.models ?? new List<ModelDef>(); } catch { }   // the collapse: read the SOURCE
-        return new List<ModelDef>();
-    }
-
     // Save the era/scale STATICS only, preserving the on-disk MODELS (re-read fresh so a concurrent model edit/bake in
-    // another window isn't reverted by a stale snapshot). For a Lab that owns only the statics (the Global Era Lab).
-    // The caller must have already assigned the current statics (ModelRegistry.EraGrid/UnitScales/…) before calling.
-    public static bool SaveStatics() => Save(LoadModelsOnly());
+    // another window isn't reverted by a stale snapshot), WITHOUT touching the session statics. For a Lab that owns
+    // only the statics (the Global Era Lab). The caller must have already assigned the current statics
+    // (ModelRegistry.EraGrid/UnitScales/…) before calling. An unreadable source refuses (returns false).
+    public static bool SaveStatics() => Save(null, true);
 
     public static bool Upsert(ModelDef def)
     {
