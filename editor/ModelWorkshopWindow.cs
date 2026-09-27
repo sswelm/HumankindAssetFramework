@@ -1281,7 +1281,8 @@ public abstract class ModelWorkshopWindow : EditorWindow
             var parts = GlbDisconnectedParts.Analyze(outBytes);
             // every node's parent (the split parent is meshless, so the analyzer does not list it — read the hierarchy directly)
             var table = GlbDisconnectedParts.NodeParents(outBytes);
-            int firstNewNode = GlbDisconnectedParts.NodeParents(File.ReadAllBytes(srcFile)).Count;   // the operation only appends: nodes past the source's count are the ones it created
+            byte[] srcBytes = File.ReadAllBytes(srcFile);
+            int firstNewNode = GlbDisconnectedParts.NodeParents(srcBytes).Count;   // the operation only appends: nodes past the source's count are the ones it created
             var meshNodes = new HashSet<int>(parts.Select(q => q.NodeIndex));
             var nameOf = parts.ToDictionary(q => q.NodeIndex, q => q.NodeName);
             // the output's own parts, for reading a sidecar that is already lying beside it (below)
@@ -1298,30 +1299,49 @@ public abstract class ModelWorkshopWindow : EditorWindow
             // the same names, so that work still fits: it is read back against the new output (by name, the resolver
             // the Probe uses) and kept, and what comes down from the source only fills the parts it does not name.
             string sourceName = Path.GetFileName(srcFile ?? "");
-            long sourceLength = 0; try { sourceLength = new FileInfo(srcFile).Length; } catch { }
+            string sourceIdentity = WorkshopRules.SourceIdentity(srcBytes);   // the bytes ARE the model (WorkshopRules.SidecarFromLine)
+            // WHAT ALREADY LIES BESIDE THE OUTPUT, read and judged before anything is written: proven this source's
+            // (kept), nothing that names a part (ignored), or neither — and "neither" is a question, asked ONCE for
+            // both files with the real counts in front of the user, never a threshold guessed for them (review of PR
+            // #99, third round: a 50 % rule threw out four valid decisions of ten one way and let generic names
+            // through the other).
+            var found = new Dictionary<string, (string[] had, Dictionary<int, string> was, int entries, WorkshopRules.SidecarFit fit)>();
+            foreach (string path in new[] { lettersPath, marksPath })
+            {
+                if (path == null || !File.Exists(path)) continue;
+                var problems = new List<string>();
+                string[] had = File.ReadAllLines(path);
+                var was = WorkshopRules.ResolveFuseSidecar(WorkshopRules.MigrateSidecarNames(had, outTriples, problems), outPairs, problems);
+                int entries = had.Count(l => !string.IsNullOrWhiteSpace(l) && !l.StartsWith("#", StringComparison.Ordinal));
+                found[path] = (had, was, entries, WorkshopRules.JudgeSidecar(WorkshopRules.ParseSidecarFrom(had), sourceIdentity, entries, was.Count));
+                foreach (string q in problems) Debug.LogWarning("[Workshop] the output's own " + (path == lettersPath ? "groupings" : "marks") + " sidecar: " + q);
+            }
+            bool keepUnknown = false;
+            if (found.Values.Any(f => f.fit == WorkshopRules.SidecarFit.Unknown))
+            {
+                found.TryGetValue(lettersPath ?? "", out var L); found.TryGetValue(marksPath ?? "", out var K);
+                string stated = L.had != null ? WorkshopRules.ParseSidecarFrom(L.had) : K.had != null ? WorkshopRules.ParseSidecarFrom(K.had) : "";
+                EditorUtility.ClearProgressBar();   // a question under a progress bar reads as a hang
+                keepUnknown = EditorUtility.DisplayDialog("Saved work beside the output",
+                    WorkshopRules.KeepOrReplaceQuestion(stated, sourceName, L.entries, L.was?.Count ?? 0, K.entries, K.was?.Count ?? 0), "Keep what fits", "Replace");
+            }
             void Write(string path, IDictionary<int, string> source, bool withGroupNames)
             {
                 if (path == null) return;
                 var merged = new Dictionary<int, string>();
                 var oldNames = new Dictionary<string, string>(StringComparer.Ordinal);
                 var keptLetters = new HashSet<string>(StringComparer.Ordinal);   // the letters this sidecar actually carried over
-                if (File.Exists(path))
+                if (found.TryGetValue(path, out var f))
                 {
-                    var problems = new List<string>();
-                    string[] had = File.ReadAllLines(path);
-                    var was = WorkshopRules.ResolveFuseSidecar(WorkshopRules.MigrateSidecarNames(had, outTriples, problems), outPairs, problems);
-                    int entries = had.Count(l => !string.IsNullOrWhiteSpace(l) && !l.StartsWith("#", StringComparison.Ordinal));
-                    // …only when it is THIS source's work (WorkshopRules.SidecarStillFits): a name is not proof on its own
-                    if (WorkshopRules.SidecarStillFits(WorkshopRules.ParseSidecarFrom(had), sourceName, sourceLength, entries, was.Count))
+                    if (f.fit == WorkshopRules.SidecarFit.Same || (f.fit == WorkshopRules.SidecarFit.Unknown && keepUnknown))
                     {
-                        foreach (var kv in was) merged[kv.Key] = kv.Value;
-                        foreach (string l in was.Values) if (!string.IsNullOrEmpty(l)) keptLetters.Add(l);
-                        if (withGroupNames) oldNames = WorkshopRules.ParseGroupNames(had);
+                        foreach (var kv in f.was) merged[kv.Key] = kv.Value;
+                        foreach (string l in f.was.Values) if (!string.IsNullOrEmpty(l)) keptLetters.Add(l);
+                        if (withGroupNames) oldNames = WorkshopRules.ParseGroupNames(f.had);
                         keptTotal += merged.Count;
-                        foreach (string q in problems) Debug.LogWarning("[Workshop] the output's own " + (withGroupNames ? "groupings" : "marks") + " sidecar: " + q);
                     }
-                    else if (entries > 0)
-                        Debug.LogWarning($"[Workshop] the {(withGroupNames ? "groupings" : "marks")} beside '{Path.GetFileName(path)}' were written from another model ({entries} entr(ies), {was.Count} of them naming a part of this one) — replaced rather than merged.");
+                    else if (f.entries > 0)
+                        Debug.LogWarning($"[Workshop] the {(withGroupNames ? "groupings" : "marks")} beside '{Path.GetFileName(path)}' ({f.entries} entr(ies), {f.was.Count} naming a part of this output) were replaced by what the source hands down" + (f.fit == WorkshopRules.SidecarFit.Unknown ? " — your call in the dialog." : "."));
                 }
                 foreach (var kv in WorkshopRules.TransferLetters(source, table, meshNodes, firstNewNode))
                     if (!merged.ContainsKey(kv.Key)) merged[kv.Key] = kv.Value;   // the source's, only where the output had nothing to say
@@ -1333,7 +1353,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 // SURVIVED keep the old name, too: loading every old #name line meant an old A with no surviving part
                 // handed its name to a brand-new A the source had just contributed (same review, second round).
                 string NameFor(string letter) => keptLetters.Contains(letter) && oldNames.TryGetValue(letter, out string nm) && nm.Length > 0 ? nm : GroupName(letter);
-                var head = new[] { WorkshopRules.SidecarHeader, WorkshopRules.SidecarFromLine(sourceName, sourceLength) }.Concat(withGroupNames
+                var head = new[] { WorkshopRules.SidecarHeader, WorkshopRules.SidecarFromLine(sourceName, sourceIdentity) }.Concat(withGroupNames
                     ? merged.Values.Where(l => !string.IsNullOrEmpty(l)).Distinct().OrderBy(l => l).Where(l => NameFor(l).Length > 0).Select(l => WorkshopRules.GroupNameLine(l, NameFor(l)))
                     : Enumerable.Empty<string>());
                 File.WriteAllLines(path, head.Concat(lines));

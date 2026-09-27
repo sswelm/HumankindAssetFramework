@@ -45,6 +45,17 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   name*: every old `#name` line was loaded once anything was retained, so an old group A with no surviving part
   handed its name to a brand-new A the source had just contributed.
 
+  **Review, third round** — and the end of guessing. A name plus a size is still not an identity (two files can share
+  one; an edit can leave one unchanged), and the 50 % rule that stood in for it threw out four valid decisions of ten
+  one way while letting generic names through the other. Both are gone. The marker now states **SHA-1 over the
+  source's bytes** (`#from|salegs_revenge.glb|27f3e66e…`): the bytes are the model, the cut has already read every
+  one of them, and hashing 230 MB is a fraction of what the cut costs. A sidecar whose identity is this source's is
+  kept, proven; one with nothing that names a part is ignored; and everything else — no identity recorded, an older
+  marker, or another identity, which is *either* this model re-exported *or* an unrelated one sharing some names, and
+  no number tells those apart — is a **question put to you once**, for both files, with the real counts: "345 of 345
+  group letters and 4 of 909 marks still name a part of the new output — keep what fits, or replace?" The overwrite
+  dialog says the same in advance instead of promising a loss that may not happen.
+
 - **Model Factory: a per-unit correction to the water level** (user: "in many cases the water level in game does not
   correspond correctly with the preview, I think we need a custom slider to adjust the water level"). The pack's
   `waterLevel` is ONE number — how far the game's water surface sits above a baked model's origin — calibrated once
