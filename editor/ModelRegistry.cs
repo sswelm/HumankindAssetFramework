@@ -613,32 +613,31 @@ public static class ModelRegistry
                 return false;
             }
         }
-        else if (keepDiskModels && File.Exists(RegistryPath))
+        bool sourceMissing = file == null;
+        if (sourceMissing) file = new RegistryFile();
+        if (file.models.Count == 0)
         {
-            // No source but a deployed copy: the models live THERE, and writing "the source's models" would write none.
-            // Load() adopts the deployed copy; this path must not pre-empt that with an empty list.
-            Debug.LogError($"[Factory] not saving: the registry source '{SourcePath}' is missing but a deployed copy exists. " +
-                           "Open the Model Factory (or press Refresh) so it adopts the deployed models, then save again.");
-            return false;
-        }
-        if (file == null) file = new RegistryFile();
-        if (keepDiskModels) models = file.models ?? new List<ModelDef>();
-        if (keepDiskModels && models.Count == 0)
-        {
-            // A well-formed but EMPTY source: every editor Save writes both copies, so a deployed copy that still has
-            // models means the source was emptied outside the editor (models cut out mid-edit). A statics-only save must
-            // never be the thing that makes the wipe permanent — and a deployed copy it can't READ may still hold them,
-            // so that refuses too (review of #100: "unreadable" used to count as "empty" and let the wipe through).
+            // THE SOURCE HOLDS NO MODELS (empty, or absent) — for EVERY save, not just statics (review of #100: a Factory
+            // bake Upsert()s onto the empty list it loaded and wrote a one-model registry over 37). Every editor Save
+            // writes both copies, so a deployed copy that still has models means the source was emptied outside the
+            // editor (models cut out mid-edit) — no save may make that wipe permanent. A deployed copy that can't be
+            // READ may still hold them, so that refuses too ("unreadable" once counted as "empty"). What stays allowed:
+            // a first bake into a fresh pack (neither copy exists) and Remove() of the last model (the source still
+            // holds it when that save runs).
             int deployed = DeployedModelCount(out var deployedWhy);
             if (deployed != 0)
             {
-                Debug.LogError($"[Factory] not saving: the registry source '{SourcePath}' holds no models, and " +
-                               (deployed > 0 ? $"the deployed copy still has {deployed}. Restore them (the Model Factory's recovery, or git) and save again. "
+                Debug.LogError($"[Factory] not saving: the registry source '{SourcePath}' " +
+                               (sourceMissing ? "is missing" : "holds no models") + ", and " +
+                               (deployed > 0 ? $"the deployed copy still has {deployed}. " +
+                                               (sourceMissing ? "Open the Model Factory (or press Refresh) so it adopts them, then save again. "
+                                                              : "Restore them (the Model Factory's recovery, or git) and save again. ")
                                              : $"the deployed copy '{RegistryPath}' can't be checked ({deployedWhy}), so it may still hold them. Close whatever holds it (the game?) and save again. ") +
                                "If the pack really is empty now, delete the deployed copy (the next Load recreates it from the source).");
                 return false;
             }
         }
+        if (keepDiskModels) models = file.models;
         SortByName(models);   // write BOTH the live registry and the backup alphabetically, so the order is stable across bakes
         file.models = models;
         if (loaded)   // the statics reflect the on-disk state (+ any Lab edits this session) — authoritative
