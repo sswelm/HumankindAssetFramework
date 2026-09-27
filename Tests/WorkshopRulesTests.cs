@@ -327,6 +327,39 @@ public class WorkshopRulesTests
     }
 
     [Fact]
+    public void Rows_carry_over_a_reprobe_only_while_the_file_at_the_path_is_the_same_file()
+    {
+        // 2026-09-27, user: "I marked Material2_27 for split and when I moved to the model fuser I expected
+        // Material2_27_Part_001 to be ungrouped because it is a new part, instead it was marked with the wrong group
+        // or deleted, as if it got shifted somehow". The checks, deletion marks and group letters cross a re-probe by
+        // NODE INDEX. The Splitter had just rewritten the Fuser's source in place, so the path matched, the marks were
+        // carried over, and index 626 - one part in the old file - was the first piece of another in the new one.
+        const string path = "D:/ships/salegs_revenge_split.glb";
+        Assert.True(WorkshopRules.RowsStillDescribe(path, "231713668@1", path, "231713668@1"));            // untouched: the rows still describe it
+        Assert.False(WorkshopRules.RowsStillDescribe(path, "231713668@1", path, "232590124@2"));           // rewritten in place: they do not
+        Assert.False(WorkshopRules.RowsStillDescribe(path, "231713668@1", path, "231713668@2"));           // same length, later write: still a different file
+        Assert.False(WorkshopRules.RowsStillDescribe(path, "231713668@1", "D:/ships/other.glb", "9@1"));   // another file altogether
+        Assert.False(WorkshopRules.RowsStillDescribe(path, "231713668@1", path, ""));                      // unreadable or gone: treat as changed
+        Assert.False(WorkshopRules.RowsStillDescribe("", "", path, "231713668@1"));                        // nothing probed yet
+        // the path itself is the OS's: slashes and case do not make it another file
+        Assert.True(WorkshopRules.RowsStillDescribe("D:/ships/A.glb", "7@1", "D:\\ships\\a.glb", "7@1"));
+    }
+
+    [Fact]
+    public void The_overwrite_dialog_names_the_work_saved_beside_the_file()
+    {
+        // 2026-09-27: re-splitting the original over an existing split output replaced that output's sidecars — 508
+        // deletion marks and 108 checks — and the dialog had said only "Overwrite existing file?".
+        Assert.Equal("out.glb", WorkshopRules.OverwriteWarning("out.glb", 0, 0));   // nothing saved beside it: the path alone
+        string both = WorkshopRules.OverwriteWarning("out.glb", 508, 22);
+        Assert.StartsWith("out.glb", both);
+        Assert.Contains("508 mark(s) (Split, Tear and Delete)", both);
+        Assert.Contains("22 group letter(s)", both);
+        Assert.DoesNotContain("0 group letter(s)", WorkshopRules.OverwriteWarning("out.glb", 508, 0));
+        Assert.Contains("508 mark(s)", WorkshopRules.OverwriteWarning("out.glb", 508, 0));
+    }
+
+    [Fact]
     public void The_fuse_report_lists_every_island_when_given_them()
     {
         var g = new WorkshopRules.FuseGroupReport { Letter = "A", Changed = true, PartNames = new[] { "P" }, Warnings = new string[0],

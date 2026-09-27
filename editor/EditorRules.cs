@@ -438,6 +438,43 @@ public static class WorkshopRules
         return outLines;
     }
 
+    /// <summary>
+    /// Two paths naming the same file (slashes and case are the OS's business, not the user's).
+    /// </summary>
+    public static bool SamePath(string a, string b) =>
+        string.Equals((a ?? "").Replace('\\', '/').Trim(), (b ?? "").Replace('\\', '/').Trim(), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Do the rows a window is holding still describe the file it is about to probe? (2026-09-27, user: "I marked
+    /// Material2_27 for split and in the Fuser the new parts were marked with the wrong group or deleted, as if it
+    /// got shifted somehow".) The checks, the deletion marks and the group letters are carried across a re-probe by
+    /// NODE INDEX, and a node index is an index INTO A FILE. The Splitter had just rewritten the Fuser's source in
+    /// place; the path had not changed, so the Fuser laid the old file's marks over the new file's nodes - index 626
+    /// had been one part and was now the first piece of another. Same path is therefore not enough: the file at it
+    /// must be the same file, which a stamp of its length and write time answers for a 230 MB ship without reading a
+    /// byte of it. An empty stamp (the file is gone, or could not be read) counts as changed.
+    /// </summary>
+    public static bool RowsStillDescribe(string probedPath, string probedStamp, string path, string stamp) =>
+        SamePath(probedPath, path) && !string.IsNullOrEmpty(stamp) && string.Equals(probedStamp, stamp, StringComparison.Ordinal);
+
+    /// <summary>
+    /// What an overwrite of <paramref name="outputGlb"/> takes with it, for the confirmation dialog: the marks and
+    /// the group letters saved BESIDE it are the file's, not the window's, and a new output at the same path replaces
+    /// them. (2026-09-27: a re-split of the original over an existing split output replaced 508 deletion marks and
+    /// 108 checks with the ones inherited from the source, and the dialog had said only "Overwrite existing file?".)
+    /// <paramref name="marks"/> and <paramref name="letters"/> are the line counts of the two sidecars, or 0 for none.
+    /// </summary>
+    public static string OverwriteWarning(string outputGlb, int marks, int letters)
+    {
+        string s = outputGlb;
+        if (marks <= 0 && letters <= 0) return s;
+        var lost = new List<string>();
+        if (marks > 0) lost.Add(marks + " mark(s) (Split, Tear and Delete)");
+        if (letters > 0) lost.Add(letters + " group letter(s)");
+        return s + "\n\nThe work saved beside this file goes with it: " + string.Join(" and ", lost) +
+               ".\nThey describe the parts of the file being replaced, so the new output gets the marks its own source hands down instead.";
+    }
+
     public static string SidecarLine(string letter, string name, int nodeIndex) =>
         letter + "|" + nodeIndex.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" + name;
 
