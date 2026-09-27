@@ -451,8 +451,8 @@ public static class ModelRegistry
                 }
             }
             var json = File.ReadAllText(SourcePath);
-            var data = JsonUtility.FromJson<RegistryFile>(json);
-            if (data == null) throw new FormatException("the file is empty or not a JSON object");   // same verdict Save() reaches — not "a pack with no models"
+            var data = ParseSource(json, out var why);
+            if (data == null) throw new SourceUnreadable(why);   // same verdict Save() reaches — not "a pack with no models"
             lastLoadCorrupt = false; corruptLogged = false;
             UnitScales = data?.unitScales ?? new List<UnitScaleRule>();
             WaterLevel = data != null ? data.waterLevel : 0.16f;
@@ -470,7 +470,7 @@ public static class ModelRegistry
             // JsonUtility's exceptions carry no location — re-parse with Newtonsoft purely for diagnosis, whose
             // JsonReaderException names the exact line and column of the missing comma/bracket.
             lastLoadCorrupt = true;
-            LastCorruptDetail = Pinpoint(SourcePath) ?? e.Message;
+            LastCorruptDetail = e is SourceUnreadable ? e.Message : Pinpoint(SourcePath) ?? e.Message;
             // LOG ONCE per corruption (drill finding 2026-08-19: every window polls Load(), so this line spammed
             // the Console dozens of times for one broken file — the red banner is the persistent surface, the log
             // is the event record). Reset when the corruption clears (successful load or recovery).
@@ -499,6 +499,32 @@ public static class ModelRegistry
         catch (Newtonsoft.Json.JsonReaderException jre) { return $"line {jre.LineNumber}, position {jre.LinePosition}: {jre.Message}"; }
         catch (Exception ex) { return ex.Message; }
     }
+
+    // THE SOURCE'S VERDICT, shared by Load() and Save() so they never disagree about the same bytes. Null + why =
+    // unreadable. JsonUtility can't tell `{}` from `"models": []` (RegistryFile.models defaults to an empty list), so
+    // an empty result must show the key in the raw text: every file the editor writes carries it, and a source
+    // without one is a broken edit, not an empty pack (review of PR #100: `{}` wiped every model via SaveStatics).
+    // Newtonsoft only runs on an empty result, so the polled Load() of a real pack pays nothing for it.
+    static RegistryFile ParseSource(string json, out string why)
+    {
+        why = null;
+        RegistryFile f;
+        try { f = JsonUtility.FromJson<RegistryFile>(json); }
+        catch (Exception e) { why = Pinpoint(SourcePath) ?? e.Message; return null; }
+        if (f == null) { why = "the file is empty or not a JSON object"; return null; }
+        if (f.models == null || f.models.Count == 0)
+        {
+            bool hasArray;
+            try { hasArray = Newtonsoft.Json.Linq.JObject.Parse(json)["models"] is Newtonsoft.Json.Linq.JArray; }
+            catch { hasArray = false; }
+            if (!hasArray) { why = "it has no \"models\" array (every pack.json carries one, even an empty pack)"; return null; }
+            f.models = f.models ?? new List<ModelDef>();
+        }
+        return f;
+    }
+
+    // A verdict ParseSource already worded — Load()'s catch must not replace it with Pinpoint's "Newtonsoft parses it".
+    class SourceUnreadable : Exception { public SourceUnreadable(string why) : base(why) { } }
 
     // Both recovery paths share the same safety contract: the candidate is VALIDATED (must parse and hold >=1
     // model) BEFORE it overwrites the source; the corrupt file is already preserved timestamped; success clears
@@ -574,14 +600,10 @@ public static class ModelRegistry
             // A source that EXISTS but won't parse (conflict markers, a half-finished hand edit) refuses the Save. The
             // lastLoadCorrupt guard only remembers the previous Load(); a SaveStatics caller never Load()s, and it used
             // to read an unreadable source as "no models" and write models: [] to both copies.
-            string why = null;
-            try
-            {
-                file = JsonUtility.FromJson<RegistryFile>(File.ReadAllText(SourcePath));
-                if (file == null) why = "the file is empty or not a JSON object";
-            }
-            catch (Exception e) { why = Pinpoint(SourcePath) ?? e.Message; }
-            if (why != null)
+            string why;
+            try { file = ParseSource(File.ReadAllText(SourcePath), out why); }
+            catch (Exception e) { file = null; why = e.Message; }   // the read itself failed (locked mid-rename)
+            if (file == null)
             {
                 lastLoadCorrupt = true; LastCorruptDetail = why;   // the Factory's recovery banner; the next Load() preserves the evidence
                 Debug.LogError($"[Factory] not saving: the registry source '{SourcePath}' is unreadable right now — {why}. " +
@@ -599,6 +621,16 @@ public static class ModelRegistry
         }
         if (file == null) file = new RegistryFile();
         if (keepDiskModels) models = file.models ?? new List<ModelDef>();
+        if (keepDiskModels && models.Count == 0 && DeployedModelCount() > 0)
+        {
+            // A well-formed but EMPTY source beside a deployed copy that still has models: every editor Save writes
+            // both, so the source was emptied outside the editor (models cut out mid-edit). A statics-only save must
+            // never be the thing that makes the wipe permanent.
+            Debug.LogError($"[Factory] not saving: the registry source '{SourcePath}' holds no models but the deployed copy " +
+                           $"still has {DeployedModelCount()}. Restore them (the Model Factory's recovery, or git) and save again. " +
+                           "If the pack really is empty now, delete the deployed copy (the next Load recreates it from the source).");
+            return false;
+        }
         SortByName(models);   // write BOTH the live registry and the backup alphabetically, so the order is stable across bakes
         file.models = models;
         if (loaded)   // the statics reflect the on-disk state (+ any Lab edits this session) — authoritative
@@ -653,6 +685,13 @@ public static class ModelRegistry
     // only the statics (the Global Era Lab). The caller must have already assigned the current statics
     // (ModelRegistry.EraGrid/UnitScales/…) before calling. An unreadable source refuses (returns false).
     public static bool SaveStatics() => Save(null, true);
+
+    // Models in the deployed copy; 0 when it is absent or unreadable (no evidence either way).
+    static int DeployedModelCount()
+    {
+        try { return File.Exists(RegistryPath) ? JsonUtility.FromJson<RegistryFile>(File.ReadAllText(RegistryPath))?.models?.Count ?? 0 : 0; }
+        catch { return 0; }
+    }
 
     public static bool Upsert(ModelDef def)
     {
