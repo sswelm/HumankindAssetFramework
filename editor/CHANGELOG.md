@@ -5,6 +5,23 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Workshop: a file rewritten under the window is a new file** (user: "I marked Material2_27 for split and
+  when I moved to the model fuser I expected Material2_27_Part_001 to be ungrouped because it is a new part, instead
+  it was marked with the wrong group or deleted, as if it got shifted somehow"). It had been shifted. The checks, the
+  deletion marks and the ⊕ letters cross a re-Probe by NODE INDEX — which is an index *into a file* — and the only
+  thing asked before carrying them over was whether the path had changed. The Splitter had just written a fresh split
+  of the original over `salegs_revenge_split.glb`, the path the Fuser was holding; the Fuser saw the same path, kept
+  its rows' marks, and laid them over the new file's nodes. Node 626 had been one part and was now the first piece of
+  another, and the marks saved beside the new file (842 of them) were never read, because the window thought it
+  already had them. The rows now carry over only while the path AND the file at it are unchanged — a stamp of its
+  length and write time, which costs a directory entry rather than a read of a 230 MB ship — and the status line says
+  so when they are dropped, since the marks did not vanish, the file did.
+
+  **And the overwrite dialog says what goes with the file.** The same run replaced that output's sidecars: 508
+  deletion marks and 108 checks, gone, with nothing said but "Overwrite existing file?". The sidecars beside a file
+  describe *that file's* parts, so a new output at the same path cannot keep them — but the dialog now names them
+  ("508 mark(s) (Split, Tear and Delete) and 22 group letter(s)") before anything is written.
+
 - **Model Fuser: the same answer, six times sooner** (user: "fusing the Saleg's Revenge took a long time, could you
   look if we could speed it up?"). The ship's 21 groups — 361 parts, 4.7 million faces — took **578 seconds**; they
   now take **94**, and the largest group on its own falls from 557 s to 53. Nothing about what the fuse decides has
