@@ -33,6 +33,27 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   All four are rejections and rearrangements around tests that are untouched — the ray test, the exact twin test and
   every verdict rule still decide, on the same numbers, in the same order.
 
+  **Review** — two findings, both fixed, both measured:
+
+  - *The packed filter's slack was read off the model's SIZE.* A float's error is a fraction of the magnitude it
+    holds, not of the model's extent: two skins 0.02 apart at y = 2^30 land on floats 128 apart, because what is
+    representable up there are multiples of 128 — and a slack taken from a ten-unit pair of skins is a thousand times
+    too small to cover it, so the pair was thrown out before the exact test ever saw it and read as un-twinned. A
+    model placed far from the origin by a node transform could therefore have come out with a different winding. The
+    slack is now read off the coordinates the group actually occupies as well as its extent, and a fixture at 2^30
+    (`A_double_skin_far_from_the_origin_is_judged_the_same_as_one_at_it`) pins it — it fails on the first cut.
+  - *Every group built the whole file's occluder index, whether or not it asked anything of it.* The first cut built
+    it up front to keep the lazy build off the worker threads. But reading every mesh node of the file and
+    transforming its triangles is ten seconds and hundreds of megabytes on a big ship, and a group whose sheets are
+    all closed and consistently wound never walks a column at all: on the Steam Frigate's 23 groups this turned
+    master's 112 s of stage time into 129 s. It is built on first use again, behind a lock, with the finished array
+    published last — 89.6 s.
+
+  The fused file is byte for byte master's on all six ships measured (the Saleg's Revenge, HMS Svea, SMS Wespe, RMS
+  Teutonic, SS Romanic and the Confederate frigate), every one of them is faster than master, and the peak memory of
+  the biggest run is unchanged (16.5 GB against master's 16.6 — the fuse holds the whole model per group, which is
+  master's shape and the next thing worth attacking).
+
 - **Model Workshop: a cut carries its marks to the output** (user: "when I cut up a part, I end up losing all
   configurations on it, so whenever I make a cut it should also copy the configuration so I don't have to start from
   scratch"). The ⊕ group letters have travelled with a cut output since 2026-09-16; the Split, Tear and Delete checks

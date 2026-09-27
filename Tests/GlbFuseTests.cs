@@ -1515,6 +1515,26 @@ public class GlbFuseTests
     }
 
     [Fact]
+    public void A_double_skin_far_from_the_origin_is_judged_the_same_as_one_at_it()
+    {
+        // Outside review of PR #96 (P1). The twin search throws most candidates out through a float copy of their
+        // centroids, and a float's error is a fraction of the MAGNITUDE it holds: two heights 0.02 apart at y = 2^30
+        // land on floats 128 apart, because the representable values up there are multiples of 128. A slack taken
+        // from the model's SIZE (a ten-unit pair of skins) is a thousand times too small to cover that, and the pair
+        // is thrown out before the exact test ever sees it - the skins then read as un-twinned and keep a winding
+        // the twin rule would have turned. The pair here is the one the fixture below judges, on a node that places
+        // it far out and straddling a float boundary (its two skins round to 2^30 and 2^30 + 128), and the verdict
+        // must be the one it gets at the origin.
+        const double far = 1073741824.0 + 55.99;   // 2^30 + 55.99: the skins at +8.00 and +8.02 straddle 2^30 + 64
+        var hull = Box("Hull", 6, 0, 0, 0, inward: false); hull.Translation = new double[] { 0, far, 0 };
+        var top = new Part { Name = "Top", Translation = new double[] { 0, far, 0 }, Positions = new float[] { 0, 8.02f, 0,  10, 8.02f, 0,  10, 8.02f, 10,  0, 8.02f, 10 }, Indices = new[] { 0, 1, 2, 0, 2, 3 } };
+        var bottom = new Part { Name = "Bottom", Translation = new double[] { 0, far, 0 }, Positions = new float[] { 0, 8, 0,  10, 8, 0,  10, 8, 10,  0, 8, 10 }, Indices = new[] { 0, 2, 1, 0, 3, 2 } };
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, top, bottom), new[] { 1, 2 }, 0.0);
+        Assert.Contains("double skin 100% twinned", r.Details[1]);
+        Assert.True(r.FacesRewound == 4, "both skins must turn, as they do at the origin — " + r.Details[1]);
+    }
+
+    [Fact]
     public void A_double_skinned_solid_is_judged_by_which_side_its_other_skin_lies_on()
     {
         // 2026-09-17, the SS Romanic: a hull built as two skins 2 cm apart with opposite normals, wound inside-out as a

@@ -1957,9 +1957,22 @@ public static class GlbDisconnectedParts
         const int ColumnLevels = 7;   // the coarsest is master's 256th of the model, the finest a 16,384th
         Dictionary<long, List<int>>[] columns = null; var columnCells = new double[ColumnLevels];
         var occluders = new List<Vec3>(); double columnCell = 1, modelTop = 0, modelBottom = 0;
-        void EnsureOccluders()
+        // BUILT ON FIRST USE, AND ONLY THEN (outside review of PR #96). Reading every mesh node of the file and
+        // transforming its triangles is not cheap - on a 230 MB ship it is ten seconds and hundreds of megabytes - and
+        // a group whose sheets are all closed and consistently wound never asks the column a thing. A first cut of the
+        // parallel pass below built the index up front to keep the lazy build off the worker threads, which made every
+        // group pay for it whether or not it asked: measured on the Steam Frigate's 23 groups, 112 s of stage time
+        // became 129 s. Lazily still, then, behind a lock, with the finished array published last so a thread that
+        // sees it non-null sees everything the build wrote.
+        object columnsGate = new object();
+        Dictionary<long, List<int>>[] EnsureOccluders()
         {
-            if (columns != null) return;
+            var built = System.Threading.Volatile.Read(ref columns);
+            if (built != null) return built;
+            lock (columnsGate) { if (columns == null) BuildOccluders(); return columns; }
+        }
+        void BuildOccluders()
+        {
             var grids = new Dictionary<long, List<int>>[ColumnLevels];
             for (int k = 0; k < ColumnLevels; k++) grids[k] = new Dictionary<long, List<int>>();
             var lo = new[] { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity }; var hi = new[] { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
@@ -2011,7 +2024,7 @@ public static class GlbDisconnectedParts
             }
             for (int t = 0; t < occluders.Count; t += 3) Register(t, occluders[t], occluders[t + 1], occluders[t + 2]);
             for (int f = 0; f < faceCount; f++) Register(-1 - f, P(f, 0), P(f, 1), P(f, 2));
-            columns = grids;   // published last: the walkers take its being non-null as "built"
+            System.Threading.Volatile.Write(ref columns, grids);   // published last: a thread that sees this sees the whole build
         }
         // ...and from BELOW, the same column upward from the model's bottom: what tells a well's floor (the hull
         // beneath it) from an upturned boat's bottom (nothing beneath it) - both face up and both see the sky.
@@ -2029,7 +2042,7 @@ public static class GlbDisconnectedParts
         //   * `skip` is the sheet being judged: a sheet is not evidence about what lies under it.
         double Column(int f, bool upward, HashSet<int> skip)
         {
-            EnsureOccluders();
+            Dictionary<long, List<int>>[] grids = EnsureOccluders();
             Vec3 c = FScale(FAdd(FAdd(P(f, 0), P(f, 1)), P(f, 2)), 1.0 / 3.0);
             var d = new Vec3 { X = 0, Y = upward ? 1 : -1, Z = 0 };
             double best = double.PositiveInfinity, skin = 1e-6 * Math.Max(1.0, modelTop - modelBottom);
@@ -2037,7 +2050,7 @@ public static class GlbDisconnectedParts
             {
                 double cell = columnCells[k];
                 long key = ((long)Math.Floor(c.X / cell) << 32) ^ ((long)Math.Floor(c.Z / cell) & 0xffffffffL);
-                if (!columns[k].TryGetValue(key, out List<int> l)) continue;
+                if (!grids[k].TryGetValue(key, out List<int> l)) continue;
                 foreach (int t in l)
                 {
                     Vec3 a, b, cc;
@@ -2284,7 +2297,16 @@ public static class GlbDisconnectedParts
         // not a skin. The twin rule then turned the roof over (its own inside-out score read +0.55, plainly outward).
         // Half the reach keeps every skin and loses every neighbour; a deck and the ceiling below it sit at 1.4 %+.
         double twinReach = longest * 0.005, twinCell;
-        float twinPad = (float)(longest * 1e-5);   // what a float costs at the model's size: the packed test is widened by it, so it stays looser than the exact one
+        // WHAT A FLOAT COSTS *HERE* (outside review of PR #96, P1). The packed test below is only sound while it is
+        // looser than the exact one behind it, and a float's error is a fraction of the MAGNITUDE it holds, not of the
+        // model's size: two centroids 0.02 apart at x = 100,000,004 land on the same float 8 apart, and a pad taken
+        // from a ten-unit model would throw the pair out before the exact test ever saw it. So the slack is read off
+        // the coordinates the group actually occupies as well as its extent - about a fiftieth of a float's step at
+        // that magnitude, which leaves the filter untouched on a model near the origin and, on one placed far from
+        // it, widens until it rejects nothing and the exact test decides everything, which is the safe way to fail.
+        double twinFar = 0;
+        for (int c = 0; c < 3; c++) twinFar = Math.Max(twinFar, Math.Max(Math.Abs(mn[c]), Math.Abs(mx[c])));
+        float twinPad = (float)((longest + twinFar) * 1e-5);
         var twinCells = new Dictionary<PositionKey, List<int>>();
         // …and the same cells packed for the search: seven floats a candidate, its centroid, its corner radius and
         // its unit normal, in the order the cell is walked (see the packing below).
@@ -2701,7 +2723,6 @@ public static class GlbDisconnectedParts
                 closed ? "closed" : "open", agreement, thickness, score, notOrientable[ii] ? "not judged" : reverse ? "reversed whole" + vetoNote : asAuthored ? "double wall, kept as authored" : reversalVetoed ? "kept" + vetoNote : "kept",
                 partnered > 0 ? string.Format(System.Globalization.CultureInfo.InvariantCulture, ", double skin {0:0}% twinned ({1} twin in front / {2} behind, at {3:0.00} of reach, {4:0.00} straight)", 100.0 * partnered / isl.Count, twinInFront, twinBehind, twinDist[ii], twinStraight[ii]) : "", upness, islandY);
         }
-        EnsureOccluders();   // built here, once, where it is still single-threaded: the walkers below share it
         System.Threading.Tasks.Parallel.For(0, sheets.Count, FuseParallel, JudgeSheet);
         Mark("direction");
         // TWINS KEEP THEIR AUTHORED WINDING (2026-09-24, the Wespe's gun, second cut). Kept apart, the two copies were
