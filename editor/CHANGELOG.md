@@ -19,6 +19,12 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   fills only the parts it does not name. The group names ride along. A sidecar is deleted only when nothing is left
   that names a part of the new file, and the status says how many entries were kept.
 
+  **And the Probe says when there are groups on disk it is not reading** (same user, minutes later: "my work is back,
+  I still see no groups when I do a probe"). A re-Probe deliberately keeps what the window holds, so that a clear the
+  user meant stays cleared — which also means a sidecar restored or appearing since the file was loaded is not read,
+  and nothing said so. When the window holds no letters at all and the file beside it does, the status now counts
+  them and names the button that reads them back.
+
 - **Model Factory: a per-unit correction to the water level** (user: "in many cases the water level in game does not
   correspond correctly with the preview, I think we need a custom slider to adjust the water level"). The pack's
   `waterLevel` is ONE number — how far the game's water surface sits above a baked model's origin — calibrated once

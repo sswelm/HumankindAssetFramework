@@ -759,7 +759,13 @@ public abstract class ModelWorkshopWindow : EditorWindow
             foreach (var r in rows) if (r.islands <= 1 || r.blocked != null) r.split = false;   // no longer splittable at this distance
             int multi = rows.Count(r => r.islands > 1 && r.blocked == null);
             probedFile = srcFile; probedStamp = stamp;   // the rows now describe THIS file, this version of it (the source-switch hygiene above keys on both)
+            // …AND SAY SO WHEN THERE ARE GROUPS ON DISK AND NONE IN THE WINDOW (2026-09-27, user: "my work is back, I
+            // still see no groups when I do a probe"). A re-Probe deliberately keeps what the window holds, so a
+            // deliberate clear stays cleared (review of 0a8b56e) — which also means a sidecar that appeared since,
+            // or was restored, is not read. "Load groups" is the way back, and nothing said so.
+            int onDisk = Fusing && rows.All(r => string.IsNullOrEmpty(r.fuse)) ? SidecarEntries(FuseSidecarPath(srcFile)) : 0;
             status = (rewritten ? "This file was rewritten since it was last probed, so the checks and letters in the window were dropped — they named nodes of the old file — and the marks saved beside the new one were read instead. " : "")
+                   + (onDisk > 0 ? $"{onDisk} group letter(s) are saved beside this file and no row in the window carries one — press 'Load groups' to read them back (a re-Probe keeps what the window holds, so a deliberate clear stays cleared). " : "")
                    + (multi == 0 ? "Every part is a single attached island (at this merge distance) — nothing to split."
                    : $"{rows.Count} part(s); {multi} hold more than one island at merge distance {mergePct:0.#}%. Check the ones hiding junk; raise the slider if a part still shreds into fragments.");
             Repaint();
@@ -1188,6 +1194,12 @@ public abstract class ModelWorkshopWindow : EditorWindow
     static string MarksSidecarPath(string glb) => string.IsNullOrEmpty(glb) ? null : glb + ".marks.txt";
     // …and what an overwrite of it would take with it (WorkshopRules.OverwriteWarning): the sidecars beside a file
     // belong to THAT file's parts, so a new output at the same path cannot keep them
+    // how many entries a sidecar holds (its comment lines are not entries) — for the hints above, a few KB read
+    static int SidecarEntries(string path)
+    {
+        try { return path != null && File.Exists(path) ? File.ReadAllLines(path).Count(l => !string.IsNullOrWhiteSpace(l) && !l.StartsWith("#", StringComparison.Ordinal)) : 0; }
+        catch { return 0; }
+    }
     static string OverwriteWarning(string glb)
     {
         int Lines(string p) { try { return p != null && File.Exists(p) ? File.ReadAllLines(p).Count(l => !string.IsNullOrWhiteSpace(l) && !l.StartsWith("#", StringComparison.Ordinal)) : 0; } catch { return 0; } }
