@@ -56,6 +56,15 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   group letters and 4 of 909 marks still name a part of the new output — keep what fits, or replace?" The overwrite
   dialog says the same in advance instead of promising a loss that may not happen.
 
+  **Review, fourth round.** *The source's bytes are the model, not the pieces*: `Hull_CutA` keeps its name when the
+  plane moves from 30 % to 70 %, so an old delete mark could take a substantially different piece without a word.
+  The identity now covers the settings that made the pieces as well — for a split the merge distance and which parts
+  were split or torn, for a plane cut the part, rule, axis, plane and tilt — so the same source cut differently is
+  the question, like a re-export. And *the question came after the output had already been overwritten*, with no
+  Cancel, so a user facing uncertain matches could neither stop it nor get the old output back. Both cuts now hold
+  their result in memory, plan the sidecars first, ask with a Cancel that writes nothing at all, and only then write
+  the output.
+
 - **Model Factory: a per-unit correction to the water level** (user: "in many cases the water level in game does not
   correspond correctly with the preview, I think we need a custom slider to adjust the water level"). The pack's
   `waterLevel` is ONE number — how far the game's water surface sits above a baked model's origin — calibrated once

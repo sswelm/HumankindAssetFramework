@@ -487,11 +487,39 @@ public static class WorkshopRules
     public static string SidecarFromLine(string sourceName, string identity) =>
         SidecarFromPrefix + (sourceName ?? "").Trim() + "|" + (identity ?? "").Trim();
 
-    public static string SourceIdentity(byte[] bytes)
+    /// <summary>
+    /// SHA-1 over the source's bytes AND the settings of the cut that made the pieces. The bytes alone are the model,
+    /// not the pieces: `Hull_CutA` keeps its name when the plane moves from 30 % to 70 %, and an old delete mark
+    /// would then take a substantially different piece without a word (outside review of PR #99, fourth round). So
+    /// the same source cut with other settings is not "Same" - it is the question, like a re-export.
+    /// </summary>
+    public static string SourceIdentity(byte[] bytes, string settings)
     {
         if (bytes == null) return "";
         using (var sha = System.Security.Cryptography.SHA1.Create())
-            return BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", "").ToLowerInvariant();
+        {
+            byte[] tail = System.Text.Encoding.UTF8.GetBytes("\n" + (settings ?? ""));
+            sha.TransformBlock(bytes, 0, bytes.Length, null, 0);
+            sha.TransformFinalBlock(tail, 0, tail.Length);
+            return BitConverter.ToString(sha.Hash).Replace("-", "").ToLowerInvariant();
+        }
+    }
+
+    /// <summary>What decides the pieces a Split makes: the merge distance and which parts are split or torn.</summary>
+    public static string SplitSettings(double mergePct, IEnumerable<int> split, IEnumerable<int> tear)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        return "split;merge=" + mergePct.ToString("0.###", inv)
+             + ";S=" + string.Join(",", (split ?? new int[0]).OrderBy(i => i).Select(i => i.ToString(inv)))
+             + ";T=" + string.Join(",", (tear ?? new int[0]).OrderBy(i => i).Select(i => i.ToString(inv)));
+    }
+
+    /// <summary>What decides the pieces a plane cut makes: the part, the rule, the axis, where the plane sits, the tilt.</summary>
+    public static string CutSettings(int nodeIndex, int rule, int axis, double planeValue, double tiltDeg)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        return "cut;node=" + nodeIndex.ToString(inv) + ";rule=" + rule.ToString(inv) + ";axis=" + axis.ToString(inv)
+             + ";at=" + planeValue.ToString("0.####", inv) + ";tilt=" + tiltDeg.ToString("0.##", inv);
     }
 
     /// <summary>The identity a stated source carries: its last field, when that is a SHA-1; else "" (older markers stated a name, or a name and a size, and those prove nothing).</summary>

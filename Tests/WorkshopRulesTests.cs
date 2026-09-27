@@ -367,10 +367,21 @@ public class WorkshopRulesTests
     {
         // Outside review of PR #99, three rounds: a name is not an identity (two directories can each hold a
         // ship.glb), and neither is a name plus a size (two files can share one, an edit can leave one unchanged).
-        Assert.Equal(ShaA, WorkshopRules.SourceIdentity(new byte[0]));
-        Assert.Equal("", WorkshopRules.SourceIdentity(null));
-        Assert.NotEqual(WorkshopRules.SourceIdentity(new byte[] { 1, 2, 3 }), WorkshopRules.SourceIdentity(new byte[] { 1, 2, 4 }));   // same size, different bytes
-        Assert.Equal(WorkshopRules.SourceIdentity(new byte[] { 7, 7 }), WorkshopRules.SourceIdentity(new byte[] { 7, 7 }));
+        Assert.Equal("", WorkshopRules.SourceIdentity(null, "x"));
+        Assert.Equal(40, WorkshopRules.SourceIdentity(new byte[0], "").Length);
+        Assert.NotEqual(WorkshopRules.SourceIdentity(new byte[] { 1, 2, 3 }, "s"), WorkshopRules.SourceIdentity(new byte[] { 1, 2, 4 }, "s"));   // same size, different bytes
+        Assert.Equal(WorkshopRules.SourceIdentity(new byte[] { 7, 7 }, "s"), WorkshopRules.SourceIdentity(new byte[] { 7, 7 }, "s"));
+        // …AND THE SETTINGS THAT MADE THE PIECES (fourth round): Hull_CutA keeps its name when the plane moves from
+        // 30 % to 70 %, so the same bytes cut differently are not the same pieces - and not "Same"
+        var hull = new byte[] { 9, 9, 9 };
+        string at30 = WorkshopRules.CutSettings(28, 0, 1, 0.30, 45), at70 = WorkshopRules.CutSettings(28, 0, 1, 0.70, 45);
+        Assert.NotEqual(WorkshopRules.SourceIdentity(hull, at30), WorkshopRules.SourceIdentity(hull, at70));
+        Assert.Equal(WorkshopRules.SidecarFit.Unknown, WorkshopRules.JudgeSidecar("hull.glb|" + WorkshopRules.SourceIdentity(hull, at30), WorkshopRules.SourceIdentity(hull, at70), 10, 10));
+        Assert.Equal(WorkshopRules.SidecarFit.Same, WorkshopRules.JudgeSidecar("hull.glb|" + WorkshopRules.SourceIdentity(hull, at30), WorkshopRules.SourceIdentity(hull, at30), 10, 10));
+        // a split's pieces follow the merge distance and the checked parts, in any order
+        Assert.Equal(WorkshopRules.SplitSettings(1, new[] { 5, 3 }, new[] { 12 }), WorkshopRules.SplitSettings(1.0, new[] { 3, 5 }, new[] { 12 }));
+        Assert.NotEqual(WorkshopRules.SplitSettings(1, new[] { 3, 5 }, null), WorkshopRules.SplitSettings(1, new[] { 3, 5, 6 }, null));
+        Assert.NotEqual(WorkshopRules.SplitSettings(1, new[] { 3 }, null), WorkshopRules.SplitSettings(2, new[] { 3 }, null));
         // the marker carries the name for the reader and the identity for the rule; older markers carry no identity
         Assert.Equal(ShaA, WorkshopRules.StatedIdentity(WorkshopRules.ParseSidecarFrom(new[] { WorkshopRules.SidecarFromLine("ship.glb", ShaA) })));
         Assert.Equal("", WorkshopRules.StatedIdentity("ship.glb"));          // first cut of this branch: a name
