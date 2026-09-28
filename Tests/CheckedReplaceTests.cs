@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Xunit;
@@ -68,6 +69,23 @@ public class CheckedReplaceTests : IDisposable
         Assert.Contains(Path.GetFileName(kept), note);                           // and said, on every write, until someone looks
         Assert.Equal(new[] { Path.GetFileName(kept) }, Beside());
         Assert.Equal(new[] { kept }, CheckedReplace.Preserved(P));
+    }
+
+    [Fact]
+    public void A_failed_conflict_restore_reports_an_unresolved_source_and_preserves_the_other_version()
+    {
+        // State immediately after the first replace: our C is active and the other editor's B was displaced.
+        // A reader that opens C before the rollback blocks File.Replace on Windows.
+        File.WriteAllText(P, "C");
+        string displaced = P + ".displaced-20260928_223001-deadbeef.json";
+        File.WriteAllText(displaced, "B");
+        var notes = new List<string>();
+        using (new FileStream(P, FileMode.Open, FileAccess.Read, FileShare.Read))
+            Assert.Equal(CheckedReplace.Outcome.Unresolved,
+                         CheckedReplace.RestoreDisplaced(P, displaced, "C", notes));
+        Assert.Equal("C", File.ReadAllText(P));
+        Assert.Equal("B", File.ReadAllText(displaced));
+        Assert.Contains(notes, n => n.Contains("could not be confirmed back in place"));
     }
 
     [Fact]

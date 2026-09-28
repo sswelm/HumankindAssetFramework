@@ -864,6 +864,13 @@ public static class ModelRegistry
                                  "That version is back in place and nothing of this save was written. Reload, then save again.");
                 return false;
             }
+            if (outcome == CheckedReplace.Outcome.Unresolved)
+            {
+                Debug.LogError($"[Factory] registry save could not finish restoring another writer's version at '{SourcePath}'. " +
+                               "The source may now contain this save or another version; the deployed copy was not changed. " +
+                               "Inspect the source and the preserved copies named above, then reload before saving again.");
+                return false;
+            }
             EditorPrefs.SetString(PrefLastWrite, Fingerprint(json));   // the editor's own write — see PrefLastWrite
             if (keepDiskModels)
             {

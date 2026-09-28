@@ -19,12 +19,13 @@ using System.Linq;
 
 public static class CheckedReplace
 {
-    public enum Outcome { Written, Conflict }
+    public enum Outcome { Written, Conflict, Unresolved }
 
     /// <summary>
     /// Write <paramref name="text"/> to <paramref name="path"/> atomically (via a unique temp file), provided the file
     /// still holds <paramref name="readBefore"/> — the text the caller read and judged; null = the file did not exist.
-    /// Conflict = somebody else wrote it in between: their version is back in place and nothing of this write remains.
+    /// Conflict = somebody else wrote it in between and their version was restored. Unresolved = the restore failed;
+    /// the active source may contain either version, so the caller must not claim that nothing was written.
     /// <paramref name="note"/> is non-null when something needs saying even so: a copy kept, and where — including
     /// copies earlier writes left, which may hold another editor's changes and are never deleted here.
     /// Throws when the write itself fails (a lock); the file is then left as it was.
@@ -86,13 +87,20 @@ public static class CheckedReplace
         if (was == readBefore) { TryDelete(displaced); return Outcome.Written; }
 
         // CONFLICT: the other writer's version goes back in place, and whatever that restore displaces is looked at too
+        return RestoreDisplaced(path, displaced, text, notes);
+    }
+
+    // Kept as a separate step so a test can lock the active file after the first replace and exercise a failed
+    // restore deterministically. A failed restore is not a settled conflict: the active source is unknown.
+    internal static Outcome RestoreDisplaced(string path, string displaced, string text, List<string> notes)
+    {
         string refused = Unique(path, "refused");
         try { File.Replace(displaced, path, refused); }
         catch (Exception e)
         {
             if (!File.Exists(path) && File.Exists(displaced)) { try { File.Move(displaced, path); } catch { } }
-            notes.Add($"the other version could not be put back ({e.Message}); it is kept as '{Path.GetFileName(File.Exists(displaced) ? displaced : path)}'");
-            return Outcome.Conflict;
+            notes.Add($"the other version could not be confirmed back in place ({e.Message}); inspect the source and any preserved copies before saving again");
+            return Outcome.Unresolved;
         }
         string back = null;
         try { back = File.ReadAllText(refused); } catch { }
