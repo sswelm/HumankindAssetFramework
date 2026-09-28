@@ -1,9 +1,11 @@
 using System;
 using System.IO;
+using System.Linq;
 using Xunit;
 
-// The registry source's write, checked by what it displaced (outside review of PR #100, fifth round): a file another
-// editor replaced between Save's read and its replace used to be overwritten unseen. Driven against real files.
+// The registry source's write, checked by what it displaced (outside review of PR #100, fifth and sixth rounds): a
+// file another editor replaced between Save's read and its replace used to be overwritten unseen, and a copy kept by
+// an interrupted write must never be deleted by the next. Driven against real files.
 public class CheckedReplaceTests : IDisposable
 {
     readonly string dir = Path.Combine(Path.GetTempPath(), "haf_checkedreplace_" + Guid.NewGuid().ToString("N"));
@@ -12,12 +14,7 @@ public class CheckedReplaceTests : IDisposable
     public CheckedReplaceTests() { Directory.CreateDirectory(dir); }
     public void Dispose() { try { Directory.Delete(dir, true); } catch { } }
 
-    void NoLeftovers()
-    {
-        Assert.False(File.Exists(P + ".tmp"));
-        Assert.False(File.Exists(P + ".displaced"));
-        Assert.False(File.Exists(P + ".refused"));
-    }
+    string[] Beside() => Directory.GetFiles(dir).Select(Path.GetFileName).Where(n => n != "pack.json").OrderBy(n => n).ToArray();
 
     [Fact]
     public void An_unchanged_file_is_replaced_and_nothing_is_left_beside_it()
@@ -27,7 +24,7 @@ public class CheckedReplaceTests : IDisposable
         Assert.Equal(CheckedReplace.Outcome.Written, CheckedReplace.Write(P, read, "C", out var note));
         Assert.Equal("C", File.ReadAllText(P));
         Assert.Null(note);
-        NoLeftovers();
+        Assert.Empty(Beside());
     }
 
     [Fact]
@@ -41,7 +38,7 @@ public class CheckedReplaceTests : IDisposable
         Assert.Equal(CheckedReplace.Outcome.Conflict, CheckedReplace.Write(P, read, "C", out var note));
         Assert.Equal("B", File.ReadAllText(P));
         Assert.Null(note);
-        NoLeftovers();
+        Assert.Empty(Beside());
     }
 
     [Fact]
@@ -54,17 +51,23 @@ public class CheckedReplaceTests : IDisposable
         File.WriteAllText(P, "B");
         Assert.Equal(CheckedReplace.Outcome.Conflict, CheckedReplace.Write(P, null, "C", out _));
         Assert.Equal("B", File.ReadAllText(P));
-        NoLeftovers();
+        Assert.Empty(Beside());
     }
 
     [Fact]
-    public void A_leftover_from_an_interrupted_write_does_not_block_the_next()
+    public void A_copy_an_interrupted_write_kept_survives_the_next_write_and_is_named()
     {
-        File.WriteAllText(P, "A");
-        File.WriteAllText(P + ".displaced", "stale");
-        Assert.Equal(CheckedReplace.Outcome.Written, CheckedReplace.Write(P, "A", "C", out _));
-        Assert.Equal("C", File.ReadAllText(P));
-        NoLeftovers();
+        // sixth round: the editor stopped after the replace but before the comparison, so the displaced copy may be the
+        // only copy of another writer's changes. The next write used to clear that (fixed) name first.
+        File.WriteAllText(P, "C0");
+        string kept = P + ".displaced-20260928_223000-deadbeef.json";
+        File.WriteAllText(kept, "B, the other editor's changes");
+        Assert.Equal(CheckedReplace.Outcome.Written, CheckedReplace.Write(P, "C0", "C1", out var note));
+        Assert.Equal("C1", File.ReadAllText(P));
+        Assert.Equal("B, the other editor's changes", File.ReadAllText(kept));   // never deleted by a later write
+        Assert.Contains(Path.GetFileName(kept), note);                           // and said, on every write, until someone looks
+        Assert.Equal(new[] { Path.GetFileName(kept) }, Beside());
+        Assert.Equal(new[] { kept }, CheckedReplace.Preserved(P));
     }
 
     [Fact]
@@ -75,6 +78,6 @@ public class CheckedReplaceTests : IDisposable
         using (new FileStream(P, FileMode.Open, FileAccess.Read, FileShare.Read))
             Assert.ThrowsAny<IOException>(() => CheckedReplace.Write(P, "A", "C", out _));
         Assert.Equal("A", File.ReadAllText(P));
-        NoLeftovers();
+        Assert.Empty(Beside());
     }
 }
