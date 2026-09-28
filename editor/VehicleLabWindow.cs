@@ -2266,6 +2266,13 @@ public class VehicleLabWindow : EditorWindow
             status = "Flip (winding surgery) doesn't run on the fast path. Disable Use source skeleton to flip mesh parts.";
             return;
         }
+        // SOURCE GUARD (review 2026-09-27): the dialog below is an ordinary overwrite prompt, so a yes on it let Generate
+        // write the rig over the RAW MODEL — an Output GLB browsed to the source, or a recipe whose outGlb equals it —
+        // and neither route (vehicle_rig.py, BlenderVehicleRig) has a same-file check of its own. The Workshop already
+        // refuses output == source outright (GuardPaths: "the source GLB is never overwritten"); the Lab now asks the
+        // same comparison, for both models, before either route runs.
+        string sourceRefusal = VehicleLabRules.SourceGuardRefusal(srcFile, srcFile2, outGlb);
+        if (sourceRefusal != null) { status = sourceRefusal; return; }
         // OVERWRITE GUARD: the output path is explicit and user-owned — an existing file (e.g. a HAND-MADE rig like
         // the original Ehrhardt_Spin.glb) is never clobbered without an explicit yes.
         if (!headless && File.Exists(outGlb) && !EditorUtility.DisplayDialog("Overwrite existing file?",

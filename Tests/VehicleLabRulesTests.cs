@@ -198,5 +198,24 @@ namespace HumankindAssetFramework.Tests
             // Vector3 absent from a JsonUtility recipe can also arrive as (0,0,0) if the initializer is ever lost
             Assert.Equal(new[] { 0.01f, 0.01f, 0.01f }, VehicleLabRules.Model2ScaleOnLoad(0.01f, 0f, 0f, 0f));
         }
+
+        // ---- the source guard (review 2026-09-27): Generate never writes over a source model ----
+        [Fact]
+        public void Generate_refuses_an_output_that_is_a_source_model()
+        {
+            string raw = "C:/Models/tank.glb", second = "C:/Models/turret.glb";
+            Assert.Contains("raw model itself", VehicleLabRules.SourceGuardRefusal(raw, second, "C:/Models/tank.glb"));
+            Assert.Contains("raw model itself", VehicleLabRules.SourceGuardRefusal(raw, "", @"c:\models\TANK.glb"));   // the same file, spelled differently
+            Assert.Contains("second model itself", VehicleLabRules.SourceGuardRefusal(raw, second, "C:/Models/sub/../turret.glb"));
+        }
+
+        [Fact]
+        public void Generate_lets_a_new_output_through()
+        {
+            Assert.Null(VehicleLabRules.SourceGuardRefusal("C:/Models/tank.glb", "", "C:/Models/tank_rig.glb"));
+            Assert.Null(VehicleLabRules.SourceGuardRefusal("C:/Models/tank.glb", null, ""));                  // no output yet: the run says so
+            Assert.Null(VehicleLabRules.SourceGuardRefusal("C:/Models/tank.glb", "  ", "C:/Models/tank_rig.glb"));   // no second model
+            Assert.Null(VehicleLabRules.SourceGuardRefusal("C:/Models/ta\0nk.glb", "", "C:/Models/tank_rig.glb"));  // malformed: not this guard's verdict
+        }
     }
 }

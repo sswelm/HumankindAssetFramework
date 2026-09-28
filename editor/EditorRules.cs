@@ -700,6 +700,26 @@ public static class NaturalOrder
 /// <summary>Vehicle Lab decisions over the Blender probe's stdout contract (VehicleLabWindow calls these; VehicleLabRulesTests locks them).</summary>
 public static class VehicleLabRules
 {
+    // THE SOURCE GUARD (review 2026-09-27): Generate's Output GLB is never one of its source models - the raw one or the
+    // second (merged) one. The comparison is GlbDisconnectedParts.GuardPaths' (full paths, case-insensitive), repeated
+    // here because the drills compile these rules without the GLB core. Returns the Lab's refusal, or null. A malformed
+    // path is not this guard's verdict: the run reports it.
+    public static string SourceGuardRefusal(string raw, string second, string outGlb)
+    {
+        if (string.IsNullOrWhiteSpace(outGlb)) return null;
+        foreach (string source in new[] { raw, second })
+        {
+            if (string.IsNullOrWhiteSpace(source)) continue;
+            bool same;
+            try { same = string.Equals(System.IO.Path.GetFullPath(source), System.IO.Path.GetFullPath(outGlb), StringComparison.OrdinalIgnoreCase); }
+            catch (Exception) { continue; }
+            if (same)
+                return $"Refused — the Output GLB is the {(source == raw ? "raw" : "second")} model itself ('{source}'). " +
+                       "Pick a new output path; a source model is never overwritten.";
+        }
+        return null;
+    }
+
     // THE PARENT NAMES OF A CUT PART (2026-09-25): the Cutter names what it makes after what it cut - X_Part_001
     // (Split, Tear), X_CutA / X_CutB (the plane cut) - so a part's ancestors are found by peeling those tails, one
     // at a time, nearest first: Material2_3_Part_001 -> Material2_3. A role kept under any of them is the part's to
