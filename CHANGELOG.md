@@ -10,6 +10,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **A RESIZE NO LONGER SHRINKS AGAIN ON EVERY SAVE-LOAD (2026-10-31; written 2026-09-28).** The Resize/era record of what factor is
+  already baked into a vanilla unit's vertices (`meshApplied`) is keyed by buffers that outlive a session: the Fx
+  content layer is process-lived. The hand-written reset had kept it on purpose ("meshApplied deliberately KEPT").
+  The 2026-08-21 session-state registry then tagged it `[SessionScoped]`, so every re-arm forgot the factor while
+  the vertices kept it, and the next session applied the rule on top: ×0.8, then ×0.64, then ×0.512 per save-load
+  in one process. It is `[ProcessLived]` again. Keeping it is safe because the record checks itself: a rebuilt
+  buffer brings back a vanilla first vertex, the stored probe no longer matches, and the scale restarts from 1. A
+  test pins the declaration, and keeps the descriptor side per session. *Found by the 2026-09-27 critical review;
+  the code path and the git history are confirmed, the compounding has not been watched in a game.*
+
 - **THE PARITY DRILLS LEFT THE PUSH (2026-10-30; user: "for pushes to github it should no longer use any blender!!! ...
   it should only be part of the bake test").** Replacing Blender by its record (10-28) still tied every push to Blender:
   the record went stale with every change to a script or the oracle itself, and asked for a 20-minute refresh with

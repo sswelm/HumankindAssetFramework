@@ -115,6 +115,21 @@ namespace HumankindAssetFramework.Tests
             Assert.Contains(district, n => n.EndsWith(".trackedDistricts"));
         }
 
+        [Fact]
+        public void TheRegression_MeshScaleRecord_SurvivesTheReArm()
+        {
+            // The Resize record keys vertex buffers that OUTLIVE a session (the Fx content layer is process-lived). The
+            // 2026-08-21 sweep tagged it [SessionScoped], so every re-arm forgot the factor already baked in and the next
+            // session scaled the persisted vertices again: a x0.8 rule became x0.64, then x0.512, per save-load.
+            var f = typeof(UniversalInject).GetField("meshApplied", BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.NotNull(f);
+            Assert.NotNull(f.GetCustomAttribute<ProcessLivedAttribute>());
+            Assert.DoesNotContain(SessionState.Registered(SessionScope.Model), n => n.EndsWith(".meshApplied"));
+            // …while the descriptor side stays per session: descriptor ids re-resolve, and a new id is what tells the
+            // re-scale to take the bbox to the full target once.
+            Assert.Contains(SessionState.Registered(SessionScope.Model), n => n.EndsWith(".descApplied"));
+        }
+
         // A fixture assembly-of-one: the test assembly's own holder proves Reset really calls Clear(), skips nulls and
         // leaves Manual / ProcessLived fields alone.
         static class Holder

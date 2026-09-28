@@ -299,7 +299,11 @@ namespace HumankindAssetFramework
         // of trusting a stale bookkeeping entry. That closes both failure modes at once: double-scaling a buffer
         // that persisted, and silently under-scaling one that was rebuilt.
         struct MeshScale { public float factor; public UnityEngine.Vector3 probe; }
-        [SessionScoped] static readonly Dictionary<long, MeshScale> meshApplied = new Dictionary<long, MeshScale>();   // (layer<<32)|meshIndex
+        // PROCESS-LIVED, NOT SESSION-SCOPED (review 2026-09-27): the 2026-08-21 registry sweep tagged this [SessionScoped],
+        // so every re-arm cleared it — the exact double-scale the paragraph above warns about (x0.8 -> x0.64 -> x0.512 on
+        // each save-load in one process). The first-vertex probe is what makes keeping it safe across a rebuilt buffer.
+        [ProcessLived("records the factor baked into the Fx vertex buffers, which outlive a session; self-verifying via the first-vertex probe")]
+        static readonly Dictionary<long, MeshScale> meshApplied = new Dictionary<long, MeshScale>();   // (layer<<32)|meshIndex
         [SessionScoped] static readonly Dictionary<int, float> descApplied = new Dictionary<int, float>();             // descriptor -> current target (session-scoped)
 
         // ── THE WORLD'S ERA (2026-07-29) ─────────────────────────────────────────────────────────────────────────
