@@ -19,7 +19,36 @@ using System.Linq;
 
 public static class CheckedReplace
 {
-    public enum Outcome { Written, Conflict, Unresolved }
+    // Unchanged: Apply only — the change found nothing to write (Write never returns it)
+    public enum Outcome { Written, Conflict, Unresolved, Unchanged }
+
+    /// <summary>
+    /// READ, CHANGE, CHECKED WRITE — for a registry whose edits are OPERATIONS on one entry (a recipe added, replaced,
+    /// removed), not snapshots of the whole file (outside review of PR #101). <paramref name="change"/> gets the file's
+    /// current text (null = no file) and returns the new text, or null when there is nothing to write (it says why
+    /// itself, if it refused). On a conflict the file is read again and the change applied to the OTHER writer's
+    /// version, up to <paramref name="attempts"/> times, so an entry another writer added meanwhile is kept and this
+    /// change still lands. A missing file is looked at twice, <paramref name="settleMs"/> apart, before it counts as
+    /// absent: an editor saving by rename moves the file aside for an instant. A failed read or change throws, with the
+    /// file untouched; the outcome of the last write is returned otherwise (Unresolved stops at once).
+    /// </summary>
+    public static Outcome Apply(string path, Func<string, string> change, int attempts, out string note, int settleMs = 250)
+    {
+        var notes = new List<string>();
+        var outcome = Outcome.Conflict;
+        for (int attempt = 0; attempt < Math.Max(1, attempts); attempt++)
+        {
+            if (!File.Exists(path) && settleMs > 0) System.Threading.Thread.Sleep(settleMs);
+            string current = File.Exists(path) ? File.ReadAllText(path) : null;
+            string next = change(current);
+            if (next == null) { outcome = Outcome.Unchanged; break; }
+            outcome = Write(path, current, next, out string n);
+            if (n != null && !notes.Contains(n)) notes.Add(n);
+            if (outcome != Outcome.Conflict) break;
+        }
+        note = notes.Count > 0 ? string.Join("; ", notes) : null;
+        return outcome;
+    }
 
     /// <summary>
     /// Write <paramref name="text"/> to <paramref name="path"/> atomically (via a unique temp file), provided the file
