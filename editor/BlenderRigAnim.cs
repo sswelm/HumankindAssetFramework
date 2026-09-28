@@ -884,7 +884,7 @@ public static class BlenderRigAnim
     //   * bpy.data.actions.remove(a): every object holding it loses its action (animation_data stays).
     //   * Action.frame_range: the first and the last key frame over every fcurve of every slot; (0, 0) without a key.
     //   * scene.frame_start/end = int(round(v)): Python's round of the float32 range (half to even).
-    //   * The bone cap (over 240 bones): edit mode entered and left per pass (ED_armature_to_edit / from_edit) - the
+    //   * The bone cap (over 126 bones): edit mode entered and left per pass (ED_armature_to_edit / from_edit) - the
     //     survivors' edit bones are the ones the importer made, so their rest matrices come out the same; a removed
     //     bone's curves and vertex groups stay behind.
     //   * modifier_apply on an Armature modifier: BKE_armature_deform_coords_with_mesh with the linear mixer and vertex
@@ -939,9 +939,9 @@ public static class BlenderRigAnim
         if (s.Fallback != null || s.Exits) return;
         var ad = s.Armature; var armObj = ad.Object; var rig = s.Rig; var names = s.Names;
         armObj.HasAnimationData = true;   // animation_data_create()
-        // ---- the bone cap: over 240 bones, zero-weight leaf bones removed pass by pass (an edit-mode round trip each; the
+        // ---- the bone cap: over 126 bones, zero-weight leaf bones removed pass by pass (an edit-mode round trip each; the
         // survivors' rest stands: the same edit bones give the same matrices), their curves and vertex groups left behind
-        if (ad.BoneNodes.Count > 240)
+        if (ad.BoneNodes.Count > 126)
         {
             var weighted = new HashSet<string>(StringComparer.Ordinal);
             foreach (var mo in s.Objects.Where(x => x.Type == "MESH" && x.Mesh.ArmatureModifier == armObj.Name))
@@ -951,7 +951,7 @@ public static class BlenderRigAnim
                             // Python compares the stored float to a double: nominal 0.001f is above 0.001, not equal.
                             if (mo.Mesh.DefWeight[v][i] > 0.001 && mo.Mesh.DefNr[v][i] < mo.Mesh.Groups.Count) weighted.Add(mo.Mesh.Groups[mo.Mesh.DefNr[v][i]]);
             int removed = 0;
-            while (ad.BoneNodes.Count > 240)
+            while (ad.BoneNodes.Count > 126)
             {
                 var leaves = ad.BoneNodes.Where(b => !ad.BoneNodes.Any(c => ad.Rest.Parent[c] == b) && !weighted.Contains(names.BoneOfJoint[b])).ToList();
                 if (leaves.Count == 0) { Note(s, "the bone cap stopped at weighted bones and their ancestors"); break; }
@@ -961,7 +961,7 @@ public static class BlenderRigAnim
                     ad.BoneNodes.Remove(b); ad.Rest.Bones.Remove(b); ad.PoseProps.Remove(b); ad.PoseMats.Remove(b); removed++;
                 }
             }
-            s.Logs3.Add("RIGANIM bone-cap: removed " + removed + " zero-weight leaf bones -> " + ad.BoneNodes.Count + " bones (Amplitude 256-bone GPU limit; weighted bones untouched)");
+            s.Logs3.Add("RIGANIM bone-cap: removed " + removed + " zero-weight leaf bones -> " + ad.BoneNodes.Count + " bones (budget 126: bone indices break past 127; weighted bones untouched)");
             Note(s, "the bone cap: zero-weight leaves removed");
         }
 
@@ -1975,6 +1975,10 @@ public static class BlenderRigAnim
             else { s.Logs4.Add("RIGANIM placement: already centred and grounded"); Note(s, "the placement found it centred"); }
         }
         else { s.Logs4.Add("RIGANIM placement: SKIPPED (no armature or no vertices) — the file's own placement is kept"); Note(s, "the placement skipped"); }
+        // the wall, checked on the finished rig (the script's check before its export): the cap removes zero-weight leaves
+        // only and the sockets come after it, so a rig can still stand past the index-127 wall - said out loud
+        if (s.Armature != null && s.Armature.BoneNodes.Count > 126)
+            s.Logs4.Add("RIGANIM WARNING: " + s.Armature.BoneNodes.Count + " bones after every cull and socket — past the 126-bone budget. Bone indices break past 127 in-game: the verts weighted to the last bones collapse or spike (the mech's 222-bone wings). Merge or remove bones at the source.");
         // the scene as the next evaluation leaves it: an object hung from a bone follows the bones the placement moved
         EvaluateFrame(s, s.FrameCurrent);
     }

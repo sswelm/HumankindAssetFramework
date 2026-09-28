@@ -48,6 +48,7 @@ Stage 3 (step (d), part d1: the frame every rig shares):
                      WARNs); a body part named Mesh_Wheel_00 (the wheel group renamed Mesh_Wheel_00.001); an animated part joined
   fx_r_axis          the axle forced to Z; the wave on with a one-frame cycle (no RootHull)
   fx_r_many          101 clusters (the last bone Wheel_100); a 0.1-wide wheel on the 0.05 length floor; a hundred tied sizes
+  fx_r_wall          130 clusters: a finished rig past the 126-bone budget prints the *** WARNING (the bone-index wall)
   fx_r_missing_wheel a wheel name the scene has not: find()'s VEHICLE ERROR and exit in stage 3 (EXIT:3:)
 Stage 3 (step (d), part d2: the sail, rigging on the sail, the flag):
   fx_r_sail          an upright canvas grid under the sail fold (all four bands; the quarter-height rise and drop), a sail part also a
@@ -475,6 +476,12 @@ def main(out):
         r.node("W%03d" % i, mesh=r.mesh("W%03d" % i, at=(3.0 * i, 0.0, 0.0), size=0.1 if i == 0 else 0.5, material=ma))
     r.node("Hull", mesh=r.mesh("Hull", at=(0.0, 3.0, 0.0), size=2.0, material=ma))
     recipe(out, "fx_r_many", r.write(models, "fx_r_many"), [("W%03d" % i, 1, {}) for i in range(101)] + [("Hull", 0, {})])
+    # fx_r_wall (2026-10-31): 130 clusters + Root = 131 bones, past the 126-bone budget - the finished rig says so (*** WARNING)
+    r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
+    for i in range(130):
+        r.node("W%03d" % i, mesh=r.mesh("W%03d" % i, at=(3.0 * i, 0.0, 0.0), size=0.5, material=ma))
+    r.node("Hull", mesh=r.mesh("Hull", at=(0.0, 3.0, 0.0), size=2.0, material=ma))
+    recipe(out, "fx_r_wall", r.write(models, "fx_r_wall"), [("W%03d" % i, 1, {}) for i in range(130)] + [("Hull", 0, {})])
     # fx_r_missing_wheel: a wheel name the scene has not - find()'s VEHICLE ERROR and exit in stage 3
     r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
     r.node("Hull\u00a0Gap\u200bX", mesh=r.mesh("Hull\u00a0Gap\u200bX", material=ma)); r.node("Tire", mesh=r.mesh("Tire", at=(3.0, 0.0, 0.0), material=ma))

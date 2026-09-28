@@ -416,6 +416,7 @@ static class VehicleRigDrill
         ("a FLIP applied at export", d => d.AllLogs.Any(l => l.StartsWith("VEHICLE FLIP applied:"))),
         ("double-sided at export", d => d.AllLogs.Any(l => l.StartsWith("VEHICLE double-sided"))),
         ("a WARN line", d => d.AllLogs.Any(l => l.StartsWith("VEHICLE WARN:"))),
+        ("the bone-index wall: a finished rig past the budget (*** WARNING)", d => d.AllLogs.Any(l => l.StartsWith("VEHICLE *** WARNING:") && l.Contains("past the 126-bone budget"))),
         ("the script's exit (a VEHICLE ERROR)", d => d.Exit == "1"),
         ("the script died", d => d.Died != null),
         ("all five stages ran", d => d.Stages.Count == 5),

@@ -580,6 +580,7 @@ public static class UniversalBaker
                     }
                     var inProc = BlenderRigAnimInProcess.Run(cfg.modelFile, glbFull, RigAnimArgv(cfg, target, albedoOut, keepMats), RigCheckpoint);
                     foreach (var line in inProc.Log) Debug.Log("[rig_anim] " + line.Trim());
+                    foreach (var w in inProc.Log.Where(l => l.Contains("RIGANIM WARN"))) Debug.LogWarning("[Factory] " + w.Trim());   // as on the Blender route: the script's own warnings raised
                     if (inProc.Written)
                     {
                         if (inProc.AlbedoBytes != null && !WriteAlbedoPng(inProc, out string albErr)) return Fail($"{name}: the rig slim's albedo could not be written - {albErr}");
@@ -1837,6 +1838,10 @@ public static class UniversalBaker
                 { Debug.LogError($"[Factory] a bake sub-process timed out (~{ProcTimeoutMs / 1000}s) and was killed (stuck process or over-heavy model)."); return false; }
                 if (!string.IsNullOrWhiteSpace(o)) Debug.Log("[rig_anim] " + o.Trim());
                 if (!string.IsNullOrWhiteSpace(e)) Debug.LogWarning("[rig_anim] " + e.Trim());
+                // The script's own warnings (the bone-index wall, a grounding that lifted the model a quarter of its
+                // height) rode inside the info-level dump above, i.e. nowhere anyone reads — raise each one.
+                foreach (string w in (o ?? "").Split('\n').Where(l => l.Contains("RIGANIM WARN")))
+                    Debug.LogWarning("[Factory] " + w.Trim());
                 if (p.ExitCode != 0 || !File.Exists(outFbx))
                 {
                     // Surface the ACTUAL reason in the error itself — the RIGANIM ERROR line was buried in the
