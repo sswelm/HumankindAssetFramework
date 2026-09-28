@@ -356,8 +356,39 @@ public static class ModelRegistry
         catch (Exception e) { Debug.LogWarning("[Factory] registry collapse migration failed (will retry next load): " + e.Message); }
     }
 
-    // Keep the deployed ARTIFACT in step: recreate it when missing (fresh/reinstalled game), warn ONCE when it
-    // was hand-edited (the next Save overwrites it — the old habit points at the wrong file now).
+    // WHAT THE EDITOR ITSELF LAST WROTE (review of #100). The empty-source guard in Save() infers "emptied outside the
+    // editor" from a source with no models beside a deployed copy with some — but the editor empties the source itself
+    // (Remove() of the last model), and if the deploy of THAT write failed (the game held the file) the two copies
+    // disagree for an innocent reason, and every later save refused. The source's fingerprint, recorded on every write,
+    // tells the editor's own empty source from a hand-emptied one; the PENDING fingerprint marks a deploy that failed,
+    // so the next Load() can finish it. Per machine (EditorPrefs), like the deployed copy it describes.
+    static string PrefLastWrite => "HAF.Registry.LastWrite|" + SourcePath;
+    static string PrefPendingDeploy => "HAF.Registry.PendingDeploy|" + SourcePath;
+    static bool pendingRetryWarned;   // a locked artifact fails the retry on every Load() poll — say so once
+
+    static string Fingerprint(string json)
+    {
+        using (var sha = System.Security.Cryptography.SHA256.Create())
+            return BitConverter.ToString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(json ?? "")));
+    }
+
+    // Atomic write of the deployed ARTIFACT; throws on failure (the callers word the consequence).
+    static void WriteArtifact(string json)
+    {
+        Directory.CreateDirectory(PackLiveDir);
+        var tmp = RegistryPath + ".tmp";
+        try
+        {
+            File.WriteAllText(tmp, json);
+            if (File.Exists(RegistryPath)) File.Replace(tmp, RegistryPath, null);
+            else File.Move(tmp, RegistryPath);
+        }
+        catch { try { File.Delete(tmp); } catch { } throw; }
+    }
+
+    // Keep the deployed ARTIFACT in step: recreate it when missing (fresh/reinstalled game), FINISH a deploy that a
+    // Save() couldn't complete, and warn ONCE when it was hand-edited (the next Save overwrites it — the old habit
+    // points at the wrong file now).
     static void SyncArtifact(string sourceJson)
     {
         try
@@ -366,8 +397,32 @@ public static class ModelRegistry
             {
                 Directory.CreateDirectory(PackLiveDir);
                 File.WriteAllText(RegistryPath, sourceJson);
+                EditorPrefs.DeleteKey(PrefPendingDeploy);
                 Debug.Log($"[Factory] deployed registry artifact recreated from the project source → {RegistryPath}");
                 return;
+            }
+            string pending = EditorPrefs.GetString(PrefPendingDeploy, "");
+            if (pending != "")
+            {
+                if (File.ReadAllText(RegistryPath) == sourceJson) EditorPrefs.DeleteKey(PrefPendingDeploy);   // it caught up
+                else if (pending == Fingerprint(sourceJson))
+                {
+                    // The source is still exactly what the failed Save wrote: this difference is OUR unfinished deploy,
+                    // not a hand-edit — finish it.
+                    try
+                    {
+                        WriteArtifact(sourceJson);
+                        EditorPrefs.DeleteKey(PrefPendingDeploy);
+                        pendingRetryWarned = false;
+                        Debug.Log($"[Factory] finished a deploy an earlier save couldn't complete → {RegistryPath}");
+                    }
+                    catch (Exception re)
+                    {
+                        if (!pendingRetryWarned) { pendingRetryWarned = true; Debug.LogWarning($"[Factory] the deployed copy is still out of date (the last save couldn't refresh it: {re.Message}); retrying on every load until it can."); }
+                    }
+                    return;
+                }
+                else EditorPrefs.DeleteKey(PrefPendingDeploy);   // the source changed since (git, a hand-edit): that deploy is moot
             }
             if (!artifactDriftWarned && File.ReadAllText(RegistryPath) != sourceJson)
             {
@@ -430,12 +485,16 @@ public static class ModelRegistry
                         try
                         {
                             var dep = File.ReadAllText(RegistryPath);
-                            var d = JsonUtility.FromJson<RegistryFile>(dep);
-                            if (d?.models != null && d.models.Count > 0)
+                            // ANY readable pack, not only one with models (review of #100): an empty pack's modId,
+                            // dependencies, scale rules and era settings live only here too, and a save onto defaults
+                            // would erase them. The shape rule keeps a broken `{}` from passing for a pack.
+                            var d = ParseRegistry(dep, RegistryPath, out var depWhy);
+                            if (d == null) Debug.LogWarning($"[Factory] the project registry source is missing and the deployed artifact '{RegistryPath}' is unreadable ({depWhy}) — nothing to adopt; saves refuse until one of them is readable.");
+                            else
                             {
                                 Directory.CreateDirectory(PackRepoDir);
                                 File.WriteAllText(SourcePath, dep);
-                                Debug.Log($"[Factory] project registry source was missing — adopted {d.models.Count} model(s) from the deployed artifact ({RegistryPath}).");
+                                Debug.Log($"[Factory] project registry source was missing — adopted the deployed artifact ({d.models.Count} model(s), {RegistryPath}).");
                                 UnitScales = d.unitScales ?? new List<UnitScaleRule>();
                                 WaterLevel = d.waterLevel;
                                 CaptureWrapper(d);
@@ -594,16 +653,20 @@ public static class ModelRegistry
         // MERGE onto the current on-disk file instead of rebuilding from defaults: preserve the pack HEADER
         // (schemaVersion/modId/dependsOn/loadAfter/overrides — no window edits these, so they must survive every Save),
         // and preserve the scale/era/threshold arrays whenever this session hasn't Load()ed them (the session statics
-        // are empty right after a domain reload; writing them then would silently wipe Resize/Era-Lab data). An ABSENT
-        // file falls back to RegistryFile defaults, so a first-ever Save still writes a valid pack.
+        // are empty right after a domain reload; writing them then would silently wipe Resize/Era-Lab data). With NO
+        // source the deployed copy is the only surviving one and becomes the base (see below); with neither, RegistryFile
+        // defaults, so a first-ever Save still writes a valid pack.
         RegistryFile file = null;
-        if (File.Exists(SourcePath))   // merge base = the SOURCE (the collapse: deployed is derived)
+        string sourceText = null;
+        bool sourceExists = File.Exists(SourcePath);
+        if (!sourceExists) { System.Threading.Thread.Sleep(250); sourceExists = File.Exists(SourcePath); }   // an external editor's save-by-rename, as in Load()
+        if (sourceExists)   // merge base = the SOURCE (the collapse: deployed is derived)
         {
             // A source that EXISTS but won't parse (conflict markers, a half-finished hand edit) refuses the Save. The
             // lastLoadCorrupt guard only remembers the previous Load(); a SaveStatics caller never Load()s, and it used
             // to read an unreadable source as "no models" and write models: [] to both copies.
             string why;
-            try { file = ParseSource(File.ReadAllText(SourcePath), out why); }
+            try { sourceText = File.ReadAllText(SourcePath); file = ParseSource(sourceText, out why); }
             catch (Exception e) { file = null; why = e.Message; }   // the read itself failed (locked mid-rename)
             if (file == null)
             {
@@ -613,25 +676,37 @@ public static class ModelRegistry
                 return false;
             }
         }
-        bool sourceMissing = file == null;
-        if (sourceMissing) file = new RegistryFile();
-        if (file.models.Count == 0)
+        else if (File.Exists(RegistryPath))
         {
-            // THE SOURCE HOLDS NO MODELS (empty, or absent) — for EVERY save, not just statics (review of #100: a Factory
-            // bake Upsert()s onto the empty list it loaded and wrote a one-model registry over 37). Every editor Save
-            // writes both copies, so a deployed copy that still has models means the source was emptied outside the
-            // editor (models cut out mid-edit) — no save may make that wipe permanent. A deployed copy that can't be
-            // READ may still hold them, so that refuses too ("unreadable" once counted as "empty"). What stays allowed:
-            // a first bake into a fresh pack (neither copy exists) and Remove() of the last model (the source still
-            // holds it when that save runs).
+            // NO SOURCE, but a deployed copy: it is the only surviving copy — of the models AND of the pack's modId,
+            // dependencies, scale rules and era settings, even when it holds no models (review of #100: a default base
+            // erased an empty pack's configuration). Build on it, exactly as Load() adopts it; unreadable refuses.
+            string why;
+            try { file = ParseRegistry(File.ReadAllText(RegistryPath), RegistryPath, out why); }
+            catch (Exception e) { file = null; why = e.Message; }
+            if (file == null)
+            {
+                Debug.LogError($"[Factory] not saving: the registry source '{SourcePath}' is missing and the deployed copy " +
+                               $"'{RegistryPath}' can't be read ({why}) — it may be the only copy of this pack. Close whatever holds it (the game?) and save again.");
+                return false;
+            }
+            Debug.Log($"[Factory] the registry source was missing — this save builds on the deployed copy ({file.models.Count} model(s), its pack settings kept).");
+        }
+        if (file == null) file = new RegistryFile();
+        if (sourceExists && file.models.Count == 0 && Fingerprint(sourceText) != EditorPrefs.GetString(PrefLastWrite, ""))
+        {
+            // THE SOURCE HOLDS NO MODELS, and the editor didn't write it that way — for EVERY save, not just statics
+            // (review of #100: a Factory bake Upsert()s onto the empty list it loaded and wrote a one-model registry over
+            // 37). Every editor Save writes both copies, so a deployed copy that still has models means the source was
+            // emptied outside the editor (models cut out mid-edit) — no save may make that wipe permanent. A deployed copy
+            // that can't be READ may still hold them, so that refuses too ("unreadable" once counted as "empty"). An empty
+            // source the editor wrote ITSELF (Remove() of the last model) passes by its fingerprint, even when its deploy
+            // failed and the deployed copy is stale (review of #100: that once blocked every later save).
             int deployed = DeployedModelCount(out var deployedWhy);
             if (deployed != 0)
             {
-                Debug.LogError($"[Factory] not saving: the registry source '{SourcePath}' " +
-                               (sourceMissing ? "is missing" : "holds no models") + ", and " +
-                               (deployed > 0 ? $"the deployed copy still has {deployed}. " +
-                                               (sourceMissing ? "Open the Model Factory (or press Refresh) so it adopts them, then save again. "
-                                                              : "Restore them (the Model Factory's recovery, or git) and save again. ")
+                Debug.LogError($"[Factory] not saving: the registry source '{SourcePath}' holds no models, and " +
+                               (deployed > 0 ? $"the deployed copy still has {deployed}. Restore them (the Model Factory's recovery, or git) and save again. "
                                              : $"the deployed copy '{RegistryPath}' can't be checked ({deployedWhy}), so it may still hold them. Close whatever holds it (the game?) and save again. ") +
                                "If the pack really is empty now, delete the deployed copy (the next Load recreates it from the source).");
                 return false;
@@ -658,6 +733,7 @@ public static class ModelRegistry
             File.WriteAllText(tmp, json);
             if (File.Exists(SourcePath)) File.Replace(tmp, SourcePath, null);
             else File.Move(tmp, SourcePath);
+            EditorPrefs.SetString(PrefLastWrite, Fingerprint(json));   // the editor's own write — see PrefLastWrite
         }
         catch (Exception e)
         {
@@ -668,17 +744,16 @@ public static class ModelRegistry
         }
         // 2) Refresh the DEPLOYED ARTIFACT (what the running game reads) — atomically too. A failure here does not
         //    fail the Save (the source of truth is safe) but it is LOUD: the game keeps loading the stale artifact
-        //    until the next successful Save/Load regenerates it.
+        //    until the next successful Save/Load regenerates it — the PENDING fingerprint is what lets a Load() finish it.
         try
         {
-            Directory.CreateDirectory(PackLiveDir);
-            var tmp2 = RegistryPath + ".tmp";
-            File.WriteAllText(tmp2, json);
-            if (File.Exists(RegistryPath)) File.Replace(tmp2, RegistryPath, null);
-            else File.Move(tmp2, RegistryPath);
+            WriteArtifact(json);
+            EditorPrefs.DeleteKey(PrefPendingDeploy);
         }
         catch (Exception e)
         {
+            EditorPrefs.SetString(PrefPendingDeploy, Fingerprint(json));
+            pendingRetryWarned = false;
             Debug.LogWarning($"[Factory] deployed-artifact refresh FAILED ({e.Message}) — the registry SOURCE saved fine, " +
                              $"but the GAME will keep loading the stale copy at '{RegistryPath}' until a Save/Load succeeds " +
                              "(is the game running and holding the file?).");
