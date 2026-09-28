@@ -192,7 +192,11 @@ public class SoundWindow : EditorWindow
                 if (GUILayout.Button("Clear", GUILayout.Width(52)))
                 {
                     m.soundStartFile = m.soundFile = m.soundStopFile = m.soundIdleFile = m.soundAttackFile = m.soundDeathFile = m.soundBattleFile = ""; m.engineSound = false; m.engineStartEvent = m.engineStopEvent = ""; m.silenceDonorAudio = false;
-                    ModelRegistry.Upsert(m); registryCache = null; status = "Cleared audio on '" + m.pawnDescription + "'."; GUIUtility.ExitGUI();
+                    bool ok = ModelRegistry.Upsert(m);
+                    registryCache = null;   // re-read either way: `m` was cleared in place, and on a refused save the disk still holds its audio
+                    status = ok ? "Cleared audio on '" + m.pawnDescription + "'."
+                                : "Clear FAILED — '" + m.pawnDescription + "' keeps its audio (registry save refused, see the Console).";
+                    GUIUtility.ExitGUI();
                 }
                 EditorGUILayout.LabelField($"{m.pawnDescription}  [{DescribeAudio(m)}]");
             }

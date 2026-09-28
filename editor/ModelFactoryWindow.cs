@@ -2109,7 +2109,10 @@ public class ModelFactoryWindow : EditorWindow
     {
         string oldKey = LoadedResourceKey();
         if (string.IsNullOrEmpty(oldKey) || oldKey == cur.resourceName) return "";
-        ModelRegistry.Remove(oldKey);
+        // Remove() is false both when the save was refused and when there was nothing to remove — only the first
+        // leaves a duplicate, so ask the registry which one it was instead of claiming success.
+        if (!ModelRegistry.Remove(oldKey) && ModelRegistry.Load().Any(x => x.resourceName == oldKey))
+            return $"  ⚠ Renamed from '{oldKey}', but the old registry entry could NOT be removed (see the Console) — both entries exist until you Remove '{oldKey}'.";
         return $"  (Renamed from '{oldKey}' — old registry entry removed.)";
     }
 
