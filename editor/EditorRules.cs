@@ -84,6 +84,27 @@ public static class RegistryRules
     public static bool ShowRecoveryControls(bool corrupt, bool locked) => corrupt && !locked;
 }
 
+/// <summary>
+/// WHICH VERSION OF THE REGISTRY'S STATICS THE SESSION HOLDS (outside review of PR #100, third round). SaveStatics is
+/// the one save not fed by a fresh Load(): it writes the era grid and scale rules the session holds over whatever the
+/// file holds now. A Lab loads version A; another window, git or a hand edit replaces the file with B; the Lab's
+/// refresh is caught by a lock and changes nothing; the file comes back readable - and SaveStatics wrote A's grid over
+/// B. So the session remembers the print of the statics it last loaded or wrote, and SaveStatics may write only over a
+/// file whose statics still carry that print. A print of the statics alone, not of the whole file: a model baked in the
+/// Factory changes the file without touching the grid, and must not lock the Era Lab out.
+/// </summary>
+public sealed class StaticsVersion
+{
+    string held = "";
+    /// <summary>A Load() that really read the statics from a file: the session now holds that version.</summary>
+    public void Loaded(string print) => held = print ?? "";
+    /// <summary>A save that wrote the session's statics: the file now holds what the session holds.</summary>
+    public void Saved(string print) => held = print ?? "";
+    /// <summary>May the session's statics be written over a file whose statics carry <paramref name="diskPrint"/>?</summary>
+    public bool MaySaveOver(string diskPrint) => held.Length > 0 && held == (diskPrint ?? "");
+    public bool Held => held.Length > 0;
+}
+
 /// <summary>Bake-pipeline decisions (UniversalBaker calls these; BakerRulesTests locks them).</summary>
 public static class BakerRules
 {

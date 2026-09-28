@@ -293,6 +293,17 @@ public static class ModelRegistry
     // silently wiped all Resize-Lab / Era-Lab data). While false, Save() preserves those arrays from the on-disk file.
     static bool loaded;
 
+    // …and WHICH version of the statics that is (StaticsVersion, review of PR #100): the print of the statics as last
+    // loaded or written. SaveStatics may only write over a file whose statics still carry it.
+    static readonly StaticsVersion staticsVersion = new StaticsVersion();
+    [Serializable] class StaticsSnapshot { public List<UnitScaleRule> unitScales; public List<EraScaleRow> eraGrid; public bool eraGridEnabled; public List<FormationThreshold> formationThresholds; }
+    static string StaticsPrint(List<UnitScaleRule> scales, List<EraScaleRow> grid, bool gridEnabled, List<FormationThreshold> thresholds) =>
+        Fingerprint(JsonUtility.ToJson(new StaticsSnapshot {
+            unitScales = scales ?? new List<UnitScaleRule>(), eraGrid = grid ?? new List<EraScaleRow>(),
+            eraGridEnabled = gridEnabled, formationThresholds = thresholds ?? new List<FormationThreshold>() }));
+    static string StaticsPrint(RegistryFile f) => StaticsPrint(f.unitScales, f.eraGrid, f.eraGridEnabled, f.formationThresholds);
+    static string SessionStaticsPrint() => StaticsPrint(UnitScales, EraGrid, EraGridEnabled, FormationThresholds);
+
     // RESIZE LAB rules — the registry file's `unitScales` array, captured at every Load and written back on
     // every Save (same session-static pattern as the pack header fields). The Lab edits this list directly.
     public static List<UnitScaleRule> UnitScales = new List<UnitScaleRule>();
@@ -544,13 +555,13 @@ public static class ModelRegistry
                                 EraGrid = d.eraGrid ?? new List<EraScaleRow>();
                                 EraGridEnabled = d.eraGridEnabled;
                                 FormationThresholds = d.formationThresholds ?? new List<FormationThreshold>();
-                                loaded = true;   // the statics now reflect the adopted pack
+                                loaded = true; staticsVersion.Loaded(SessionStaticsPrint());   // the statics now reflect the adopted pack
                                 return Migrate(SortByName(d.models), dep);
                             }
                         }
                         catch (Exception be) { Debug.LogWarning($"[Factory] the deployed artifact '{RegistryPath}' is unreadable ({be.Message}) — treating as absent."); }
                     }
-                    else loaded = true;   // no source and no deployed copy: a first-ever pack, and the statics in memory are its truth
+                    else { loaded = true; staticsVersion.Loaded(StaticsPrint(new RegistryFile())); }   // no source and no deployed copy: a first-ever pack - the statics in memory are its truth, and the "file" a save builds on is RegistryFile's defaults
                     return new List<ModelDef>();
                 }
             }
@@ -577,7 +588,7 @@ public static class ModelRegistry
             EraGrid = data?.eraGrid ?? new List<EraScaleRow>();
             EraGridEnabled = data == null || data.eraGridEnabled;
             FormationThresholds = data?.formationThresholds ?? new List<FormationThreshold>();
-            loaded = true;   // the statics now reflect the file
+            loaded = true; staticsVersion.Loaded(SessionStaticsPrint());   // the statics now reflect the file, and this is their version
             SyncArtifact(json);   // deployed copy recreated if missing; hand-edit there warned about once
             return Migrate(SortByName(data?.models ?? new List<ModelDef>()), json);
         }
@@ -799,6 +810,15 @@ public static class ModelRegistry
                            "If the pack really is empty now, delete the deployed copy (the next Load recreates it from the source).");
             return false;
         }
+        if (keepDiskModels && !staticsVersion.MaySaveOver(StaticsPrint(file)))
+        {
+            // THE FILE'S ERA AND SCALE SETTINGS ARE NOT THE ONES THIS SESSION HOLDS (review of PR #100, third round): another
+            // window, git or a hand edit changed them since the Lab loaded - possibly while a refresh of the Lab was caught
+            // by a lock and kept the old ones. Writing now would put the older settings over the newer.
+            Debug.LogWarning("[Factory] not saving: the era/scale settings in the registry changed since this Lab loaded them (another window, git, or a hand edit). " +
+                             "Writing now would put the older settings over the newer ones. Reload the Lab, redo the change, and save again.");
+            return false;
+        }
         if (keepDiskModels) models = file.models;
         SortByName(models);   // write BOTH the live registry and the backup alphabetically, so the order is stable across bakes
         file.models = models;
@@ -821,6 +841,7 @@ public static class ModelRegistry
             if (File.Exists(SourcePath)) File.Replace(tmp, SourcePath, null);
             else File.Move(tmp, SourcePath);
             EditorPrefs.SetString(PrefLastWrite, Fingerprint(json));   // the editor's own write — see PrefLastWrite
+            if (loaded) staticsVersion.Saved(StaticsPrint(file));   // the file's statics are now the session's — the next SaveStatics may follow this one
         }
         catch (Exception e)
         {

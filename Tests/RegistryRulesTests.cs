@@ -89,4 +89,25 @@ public class RegistryRulesTests
         Assert.False(RegistryRules.ShowRecoveryControls(false, true));
         Assert.False(RegistryRules.ShowRecoveryControls(false, false));
     }
+
+    [Fact]
+    public void Statics_are_written_only_over_the_version_the_session_holds()
+    {
+        // outside review of PR #100, third round, the sequence exactly: the Lab loads version A; an external save replaces
+        // the pack with B; the Lab's refresh is caught by a lock and changes nothing; the file is readable again - and
+        // SaveStatics used to write A's grid over B.
+        var v = new StaticsVersion();
+        Assert.False(v.MaySaveOver("A"));                 // nothing loaded this session: nothing trustworthy to write
+        v.Loaded("A");
+        Assert.True(v.MaySaveOver("A"));
+        // external save: the file now holds B; the refresh that should have seen it was caught by a lock - no Loaded() call
+        Assert.False(v.MaySaveOver("B"));                 // refused: A over B is the lost update
+        v.Loaded("B");                                    // a successful reload
+        Assert.True(v.MaySaveOver("B"));
+        // the Lab saves C; its next save follows its own write
+        v.Saved("C");
+        Assert.True(v.MaySaveOver("C"));
+        Assert.False(v.MaySaveOver("B"));
+        Assert.False(v.MaySaveOver(null));
+    }
 }
