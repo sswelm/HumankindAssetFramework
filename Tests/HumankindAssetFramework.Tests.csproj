@@ -24,6 +24,8 @@
     <Compile Include="..\editor\EditorRules.cs" Link="EditorRules.cs" />
     <!-- The multi-mesh split's estimator + BSP partition (2026-09-14): the quad ceiling that the Bremen depends on. -->
     <Compile Include="..\editor\QuadEstimate.cs" Link="QuadEstimate.cs" />
+    <!-- The registry source's write, checked by what it displaced (review of PR #100): driven against real files. -->
+    <Compile Include="..\editor\CheckedReplace.cs" Link="CheckedReplace.cs" />
   </ItemGroup>
 
   <!-- compile-time references the TEST code uses directly -->
