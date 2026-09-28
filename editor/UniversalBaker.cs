@@ -69,21 +69,52 @@ public struct BakeResult
 {
     public bool ok; public string error; public string skeletonGuid, atlasGuid, clipGuid; public Vector3 bbox;
     public string rigRoute, rigRouteNote;   // ANIMATED only (step (h)): "blender", "csharp", or "csharp-fallback" with the port's reason in the note
+    public bool commitFailed;   // the bake itself succeeded, but the caller's commit (the registry write) did not — the outputs were rolled back...
+    public bool commitUnsettled;   // ...unless the save could not be settled (the source MAY hold it): then the new outputs are kept and this says so
     public string clipMoveGuid, clipAfterGuid, clipAttackGuid, clipCombatGuid, clipPreMoveGuid, clipIdleGuid, clipIdleAltGuid, clipIdleAlt2Guid;   // STATE-DRIVEN only: the per-role ClipCollection GUIDs ("" when not baked)
 }
 
 public static class UniversalBaker
 {
-    public static BakeResult Build(BakeConfig cfg)
+    public static BakeResult Build(BakeConfig cfg) => Build(cfg, null);
+
+    // THE REGISTRY WRITE IS PART OF THE BAKE (review 2026-09-27; the district path got the same fix in PR #77). The
+    // backup used to be discarded the moment the bake succeeded — BEFORE the caller's Upsert. A save that then failed
+    // (a transient lock on pack.json: File.Replace's "unable to remove the replaced file", seen 2026-09-27) kept the
+    // NEW assets while the registry kept the OLD entry, whose GUIDs name the assets the bake had just replaced: the
+    // unit was dead in-game after the next build. `commit` runs INSIDE the rollback — a Refused save (or a throw) restores
+    // the previous outputs and reports commitFailed; an Unknown one (ModelRegistry.Save: a replace that could not be
+    // settled, so the source MAY hold this save) keeps the new outputs, because rolling them back could strand an entry
+    // that names them, and reports commitUnsettled (BakerRules.AfterCommit). Null = no commit (props, projectiles,
+    // districts, the bake tests).
+    public static BakeResult Build(BakeConfig cfg, Func<BakeResult, RegistryRules.SaveOutcome> commit)
     {
         LastPrepSourceTris = -1;   // per-BUILD, not per-prep: a no-reduce bake must not inherit the previous bake's source count
-        // E5: snapshot the existing baked outputs BEFORE the (delete-first) bake, and restore them if it fails, so a
-        // partway-failed re-bake can't leave the registry pointing at now-deleted assets. Success path is unchanged.
+        return Transact(cfg, commit, BuildInner);
+    }
+
+    // E5: snapshot the existing baked outputs BEFORE the (delete-first) bake, and restore them if it — or the commit
+    // after it — fails, so a partway-failed re-bake can't leave the registry pointing at now-deleted assets.
+    static BakeResult Transact(BakeConfig cfg, Func<BakeResult, RegistryRules.SaveOutcome> commit, Func<BakeConfig, BakeResult> inner)
+    {
         var backup = BackupOutputs(cfg.resourceName);
         BakeResult r;
-        try { r = BuildInner(cfg); }
+        try { r = inner(cfg); }
         catch (OperationCanceledException) { RestoreOutputs(backup); throw; }   // a bake-test cancel: roll back exactly like a failure, but the RUNNER must see the cancel, not a failed bake (review of 8cff051)
         catch (Exception e) { Debug.LogError("[Factory] " + e); r = new BakeResult { ok = false, error = e.Message }; }
+        if (r.ok && commit != null)
+        {
+            RegistryRules.SaveOutcome outcome;
+            try { outcome = commit(r); }
+            catch (Exception e) { Debug.LogError("[Factory] " + cfg.resourceName + ": the registry write threw: " + e); outcome = RegistryRules.SaveOutcome.Refused; }
+            var verdict = BakerRules.AfterCommit(outcome);
+            if (verdict != BakerRules.CommitVerdict.Committed)
+            {
+                r.ok = false; r.commitFailed = true; r.commitUnsettled = verdict == BakerRules.CommitVerdict.Unsettled;
+                r.error = BakerRules.CommitError(verdict);
+            }
+            if (r.commitUnsettled) { DiscardBackup(backup); return r; }   // the new outputs stay (see above)
+        }
         if (r.ok) DiscardBackup(backup); else RestoreOutputs(backup);
         return r;
     }
@@ -93,16 +124,8 @@ public static class UniversalBaker
     // bone strip, export albedo), Unity imports the FBX, then we bake an Amplitude Skeleton (from the FBX) and a
     // ClipCollection (from the folder) via the same reflected editor methods the SDK inspector uses. Returns skel + clip
     // + atlas guids for the registry ("clip" makes the runtime drive the pawn's pose onto our animation).
-    public static BakeResult BuildAnimated(BakeConfig cfg)
-    {
-        var backup = BackupOutputs(cfg.resourceName);   // E5: same rollback protection on the animated path
-        BakeResult r;
-        try { r = BuildAnimatedInner(cfg); }
-        catch (OperationCanceledException) { RestoreOutputs(backup); throw; }   // as in Build: a cancel rolls back and propagates
-        catch (Exception e) { Debug.LogError("[Factory] " + e); r = new BakeResult { ok = false, error = e.Message }; }
-        if (r.ok) DiscardBackup(backup); else RestoreOutputs(backup);
-        return r;
-    }
+    public static BakeResult BuildAnimated(BakeConfig cfg) => BuildAnimated(cfg, null);
+    public static BakeResult BuildAnimated(BakeConfig cfg, Func<BakeResult, RegistryRules.SaveOutcome> commit) => Transact(cfg, commit, BuildAnimatedInner);   // E5 + the commit, as in Build
 
     // ---- E5: re-bake rollback protection --------------------------------------------------------------------------
     // Both bake paths DELETE the model's baked outputs before the fallible steps (Blender, glbconv, the Amplitude

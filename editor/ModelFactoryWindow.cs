@@ -2111,6 +2111,26 @@ public class ModelFactoryWindow : EditorWindow
             || (cur.modelFile ?? "") != (e.modelFile ?? "");
     }
 
+    // The baked GUIDs, written back into the entry — SHARED by the Factory, the Animation Lab and the CLI (three copies
+    // until 2026-09-28, and one of them already drifted once: the Factory shipped a dead idle-override GUID the Lab
+    // captured). Static models carry {0,0,0,0} clips; the role clips exist only on the state-driven path.
+    internal static void ApplyBakeGuids(ModelDef d, BakeConfig cfg, BakeResult r)
+    {
+        bool sd = cfg.animated && cfg.animStateDriven;
+        int[] Role(string guid) => sd && !string.IsNullOrEmpty(guid) ? ModelRegistry.ParseGuid(guid) : new int[4];
+        d.skel = ModelRegistry.ParseGuid(r.skeletonGuid);
+        d.atlas = ModelRegistry.ParseGuid(r.atlasGuid);
+        d.clip = cfg.animated ? ModelRegistry.ParseGuid(r.clipGuid) : new int[4];
+        d.clipMove = sd ? ModelRegistry.ParseGuid(r.clipMoveGuid) : new int[4];
+        d.clipAfter = Role(r.clipAfterGuid);
+        d.clipAttack = Role(r.clipAttackGuid);
+        d.clipCombat = Role(r.clipCombatGuid);
+        d.clipPreMove = Role(r.clipPreMoveGuid);
+        d.clipIdle = Role(r.clipIdleGuid);
+        d.clipIdleAlt = Role(r.clipIdleAltGuid);
+        d.clipIdleAlt2 = Role(r.clipIdleAlt2Guid);
+    }
+
     // Map a registry ModelDef to a BakeConfig. SHARED so the bake smoke test (BakeSmokeTest.cs) bakes through the exact
     // same config path as the Bake button — a parallel copy would silently drift from what ships.
     internal static BakeConfig ConfigFor(ModelDef cur) => new BakeConfig
@@ -2429,35 +2449,28 @@ public class ModelFactoryWindow : EditorWindow
             cfg.reuseExtracted = !AnimatedSlimInputsChanged(cur);
             if (!cfg.reuseExtracted) Debug.Log("[Factory] " + cur.resourceName + ": Blender-step settings changed — re-slimming (automatic).");
         }
-        var r = cfg.animated ? UniversalBaker.BuildAnimated(cfg) : UniversalBaker.Build(cfg);
-        if (!r.ok) { cur = JsonUtility.FromJson<ModelDef>(formSnapshot); status = "Bake FAILED (settings kept): " + r.error; return; }
-        cur.skel = ModelRegistry.ParseGuid(r.skeletonGuid);
-        cur.atlas = ModelRegistry.ParseGuid(r.atlasGuid);
-        cur.clip = cfg.animated ? ModelRegistry.ParseGuid(r.clipGuid) : new int[4];   // static models carry {0,0,0,0}
-        cur.clipMove = cfg.animated && cfg.animStateDriven ? ModelRegistry.ParseGuid(r.clipMoveGuid) : new int[4];
-        cur.clipAfter = cfg.animated && cfg.animStateDriven && !string.IsNullOrEmpty(r.clipAfterGuid) ? ModelRegistry.ParseGuid(r.clipAfterGuid) : new int[4];
-        cur.clipAttack = cfg.animated && cfg.animStateDriven && !string.IsNullOrEmpty(r.clipAttackGuid) ? ModelRegistry.ParseGuid(r.clipAttackGuid) : new int[4];
-        cur.clipCombat = cfg.animated && cfg.animStateDriven && !string.IsNullOrEmpty(r.clipCombatGuid) ? ModelRegistry.ParseGuid(r.clipCombatGuid) : new int[4];
-        cur.clipPreMove = cfg.animated && cfg.animStateDriven && !string.IsNullOrEmpty(r.clipPreMoveGuid) ? ModelRegistry.ParseGuid(r.clipPreMoveGuid) : new int[4];
-        cur.clipIdle = cfg.animated && cfg.animStateDriven && !string.IsNullOrEmpty(r.clipIdleGuid) ? ModelRegistry.ParseGuid(r.clipIdleGuid) : new int[4];   // was DROPPED — a Factory bake shipped a dead idle-override GUID (the "forgot to deploy" trap); mirrors the Lab's capture
-        cur.clipIdleAlt = cfg.animated && cfg.animStateDriven && !string.IsNullOrEmpty(r.clipIdleAltGuid) ? ModelRegistry.ParseGuid(r.clipIdleAltGuid) : new int[4];
-        cur.clipIdleAlt2 = cfg.animated && cfg.animStateDriven && !string.IsNullOrEmpty(r.clipIdleAlt2Guid) ? ModelRegistry.ParseGuid(r.clipIdleAlt2Guid) : new int[4];
-        bool saved = ModelRegistry.Upsert(cur);
-        if (saved) { formDiffersFromRegistry = false; loadedName = cur.resourceName; browseUnitFixGuess = -1; }   // form is now the saved truth; a just-persisted Browse unit-fix guess DISARMS here — waiting for the next rebase to notice left a window where it could overwrite a newer Lab-saved value (external review of PR #22)
-        bakedNotShipped = ShipStatus.IsBakedNotShipped(loadedName);   // a fresh bake is always newer than the build — show the ship notice immediately
-        string renameNote = saved ? FinishRename() : "";
-        RefreshList();
-        selected = System.Array.IndexOf(existing, cur.resourceName); if (selected < 0) selected = 0;
-        if (!saved)
+        // The registry write rides INSIDE the bake's rollback (UniversalBaker.Transact): a save that fails puts the
+        // previous assets back, so the entry still on disk keeps naming assets that exist.
+        Func<BakeResult, RegistryRules.SaveOutcome> commit = res => { ApplyBakeGuids(cur, cfg, res); return ModelRegistry.UpsertOutcome(cur); };
+        var r = cfg.animated ? UniversalBaker.BuildAnimated(cfg, commit) : UniversalBaker.Build(cfg, commit);
+        if (!r.ok)
         {
-            // The asset baked, but writing the registry entry failed (Save logged why). Say so plainly instead of a false
-            // "Baked ✓" — otherwise the user assumes it's registered when the plugin will never see it. Re-bake retries.
-            status = $"Baked '{cur.resourceName}', but the REGISTRY SAVE FAILED (see Console). The asset is baked; close " +
-                     "whatever's locking haf_models.json (AV / indexer / the running game) and re-bake to write the entry.";
-            Debug.LogError("[Factory] " + status);
-            LoadPreview(cur.resourceName, forceReimport: true);
+            cur = JsonUtility.FromJson<ModelDef>(formSnapshot);   // the form drops the rolled-back bake's GUIDs, keeps the settings
+            if (r.commitFailed)
+            {
+                status = $"'{cur.resourceName}': {r.error}." + (r.commitUnsettled ? "" :
+                         " Close whatever's locking pack.json (AV / indexer / the running game) and re-bake.");
+                Debug.LogError("[Factory] " + status);
+                LoadPreview(cur.resourceName, forceReimport: true);   // the model now on disk: the restored one, or the kept one when unsettled
+            }
+            else status = "Bake FAILED (settings kept): " + r.error;
             return;
         }
+        formDiffersFromRegistry = false; loadedName = cur.resourceName; browseUnitFixGuess = -1;   // form is now the saved truth; a just-persisted Browse unit-fix guess DISARMS here — waiting for the next rebase to notice left a window where it could overwrite a newer Lab-saved value (external review of PR #22)
+        bakedNotShipped = ShipStatus.IsBakedNotShipped(loadedName);   // a fresh bake is always newer than the build — show the ship notice immediately
+        string renameNote = FinishRename();
+        RefreshList();
+        selected = System.Array.IndexOf(existing, cur.resourceName); if (selected < 0) selected = 0;
         status = (cfg.animated
             ? $"Baked ANIMATED '{cur.resourceName}' -> '{cur.pawnDescription}'\nskeleton {r.skeletonGuid}\nclip {r.clipGuid}\nNow rebuild the mod + relaunch."
             : $"Baked '{cur.resourceName}' -> '{cur.pawnDescription}'  (raw bbox {r.bbox})\nskeleton {r.skeletonGuid}\nNow rebuild the mod + relaunch.") + renameNote;

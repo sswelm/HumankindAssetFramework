@@ -1696,27 +1696,23 @@ public class AnimationLabWindow : EditorWindow
         // changed; the 'Reuse extracted' checkbox only protects the hand-edited extracted texture (cfg.keepTexture).
         cfg.reuseExtracted = !ModelFactoryWindow.AnimatedSlimInputsChanged(cur);
         if (!cfg.reuseExtracted) Debug.Log("[AnimLab] " + cur.resourceName + ": Blender-step settings changed — re-slimming (automatic).");
-        var r = UniversalBaker.BuildAnimated(cfg);
-        if (!r.ok) { cur = JsonUtility.FromJson<ModelDef>(formSnapshot); status = "Bake FAILED (settings kept): " + r.error; Debug.LogError("[AnimLab] " + r.error); return; }
-        cur.skel = ModelRegistry.ParseGuid(r.skeletonGuid);
-        cur.atlas = ModelRegistry.ParseGuid(r.atlasGuid);
-        cur.clip = ModelRegistry.ParseGuid(r.clipGuid);
-        cur.clipMove = cur.animStateDriven ? ModelRegistry.ParseGuid(r.clipMoveGuid) : new int[4];
-        cur.clipAfter = cur.animStateDriven && !string.IsNullOrEmpty(r.clipAfterGuid) ? ModelRegistry.ParseGuid(r.clipAfterGuid) : new int[4];
-        cur.clipAttack = cur.animStateDriven && !string.IsNullOrEmpty(r.clipAttackGuid) ? ModelRegistry.ParseGuid(r.clipAttackGuid) : new int[4];
-        cur.clipCombat = cur.animStateDriven && !string.IsNullOrEmpty(r.clipCombatGuid) ? ModelRegistry.ParseGuid(r.clipCombatGuid) : new int[4];
-        cur.clipPreMove = cur.animStateDriven && !string.IsNullOrEmpty(r.clipPreMoveGuid) ? ModelRegistry.ParseGuid(r.clipPreMoveGuid) : new int[4];
-        cur.clipIdle = cur.animStateDriven && !string.IsNullOrEmpty(r.clipIdleGuid) ? ModelRegistry.ParseGuid(r.clipIdleGuid) : new int[4];
-        cur.clipIdleAlt = cur.animStateDriven && !string.IsNullOrEmpty(r.clipIdleAltGuid) ? ModelRegistry.ParseGuid(r.clipIdleAltGuid) : new int[4];
-        cur.clipIdleAlt2 = cur.animStateDriven && !string.IsNullOrEmpty(r.clipIdleAlt2Guid) ? ModelRegistry.ParseGuid(r.clipIdleAlt2Guid) : new int[4];
-        bool saved = ModelRegistry.Upsert(cur);
-        if (saved) formDiffersFromRegistry = false;   // form is now the saved truth
+        // The registry write rides INSIDE the bake's rollback, as in the Factory: a failed save restores the previous assets.
+        var r = UniversalBaker.BuildAnimated(cfg, res => { ModelFactoryWindow.ApplyBakeGuids(cur, cfg, res); return ModelRegistry.UpsertOutcome(cur); });
+        if (!r.ok)
+        {
+            cur = JsonUtility.FromJson<ModelDef>(formSnapshot);   // the form drops the rolled-back bake's GUIDs, keeps the settings
+            status = r.commitFailed
+                ? $"'{cur.resourceName}': {r.error}." + (r.commitUnsettled ? "" : " Close whatever's locking pack.json and re-bake.")
+                : "Bake FAILED (settings kept): " + r.error;
+            Debug.LogError("[AnimLab] " + status);
+            if (r.commitFailed) { ModelFactoryWindow.ReloadPreviews(); BuildFitPreview(); }   // show the model now on disk (restored, or kept when unsettled)
+            return;
+        }
+        formDiffersFromRegistry = false;   // form is now the saved truth
         RefreshList();
         ModelFactoryWindow.ReloadPreviews();   // give the Factory tab its preview back (fresh from this bake)
         BuildFitPreview();                     // and OUR preview: combined (hand prop) or plain model — fresh from this bake, never stale
-        status = saved
-            ? $"Baked ANIMATED '{cur.resourceName}' -> '{cur.pawnDescription}'\nskeleton {r.skeletonGuid}\nclip {r.clipGuid}{(cur.animStateDriven ? $"\nmove clip {r.clipMoveGuid}{(string.IsNullOrEmpty(r.clipAfterGuid) ? "" : $"  after clip {r.clipAfterGuid}")}{(string.IsNullOrEmpty(r.clipAttackGuid) ? "" : $"  attack clip {r.clipAttackGuid}")}{(string.IsNullOrEmpty(r.clipCombatGuid) ? "" : $"  combat clip {r.clipCombatGuid}")}" : "")}\nRebuild the mod + relaunch."
-            : $"Baked '{cur.resourceName}', but the REGISTRY SAVE FAILED (see Console). Close whatever's locking haf_models.json and re-bake.";
+        status = $"Baked ANIMATED '{cur.resourceName}' -> '{cur.pawnDescription}'\nskeleton {r.skeletonGuid}\nclip {r.clipGuid}{(cur.animStateDriven ? $"\nmove clip {r.clipMoveGuid}{(string.IsNullOrEmpty(r.clipAfterGuid) ? "" : $"  after clip {r.clipAfterGuid}")}{(string.IsNullOrEmpty(r.clipAttackGuid) ? "" : $"  attack clip {r.clipAttackGuid}")}{(string.IsNullOrEmpty(r.clipCombatGuid) ? "" : $"  combat clip {r.clipCombatGuid}")}" : "")}\nRebuild the mod + relaunch.";
         Debug.Log("[AnimLab] " + status);
     }
 
