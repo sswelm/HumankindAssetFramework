@@ -225,6 +225,45 @@ public class CheckedReplaceTests : IDisposable
         Assert.Empty(Beside());
     }
 
+    // ---- third round: a registry without a .meta is still known when git tracks it
+
+    void Git(string args)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo("git", args)
+        { WorkingDirectory = dir, UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (var v in new[] { "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE" }) psi.EnvironmentVariables.Remove(v);   // the push hook sets them
+        using (var proc = System.Diagnostics.Process.Start(psi))
+        {
+            string err = proc.StandardError.ReadToEnd(); proc.WaitForExit();
+            Assert.True(proc.ExitCode == 0, "git " + args + ": " + err);
+        }
+    }
+
+    [Fact]
+    public void A_missing_file_git_tracks_existed_even_without_a_meta_and_git_rm_clears_it()
+    {
+        Git("init -q");
+        File.WriteAllText(P, "{ \"props\": [] }");
+        Assert.Null(CheckedReplace.ExistedBefore(P));                       // present: not missing
+        Assert.False(CheckedReplace.GitTracks(P));                          // untracked
+        Git("add pack.json");
+        Assert.True(CheckedReplace.GitTracks(P));
+        File.Delete(P);                                                     // moved aside by another program (no .meta at all)
+        Assert.Equal("git tracks it", CheckedReplace.ExistedBefore(P));
+        File.WriteAllText(P + ".meta", "guid: x");
+        Assert.Equal("Unity still has its .meta", CheckedReplace.ExistedBefore(P));   // the cheaper evidence first
+        File.Delete(P + ".meta");
+        Git("rm -q --cached pack.json");                                    // a deliberate deletion, staged
+        Assert.Null(CheckedReplace.ExistedBefore(P));                       // nothing says it existed: a bake may create it
+    }
+
+    [Fact]
+    public void Outside_a_repository_git_is_no_evidence_either_way()
+    {
+        Assert.False(CheckedReplace.GitTracks(P));
+        Assert.Null(CheckedReplace.ExistedBefore(P));
+    }
+
     [Fact]
     public void A_write_that_fails_leaves_the_file_as_it_was()
     {

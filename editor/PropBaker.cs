@@ -124,7 +124,8 @@ public static class PropRegistry
     // quietWithoutFile = a missing file is no news to this caller (the migration runs on every window open).
     static SaveResult Change(string name, bool mayCreate, Func<List<PropDef>, bool> apply, bool quietWithoutFile = false)
     {
-        bool refused = false, missingKnown = false, noFile = false;
+        bool refused = false, noFile = false;
+        string existed = null;   // why a missing file is known to have existed (CheckedReplace.ExistedBefore)
         CheckedReplace.Outcome outcome;
         string note;
         try
@@ -132,9 +133,9 @@ public static class PropRegistry
             System.IO.Directory.CreateDirectory("Assets/Databases");
             outcome = CheckedReplace.Apply(PathJson, text =>
             {
-                refused = missingKnown = noFile = false;   // each attempt decides afresh
+                refused = noFile = false; existed = null;   // each attempt decides afresh
                 if (text == null && !mayCreate) { noFile = true; return null; }
-                if (text == null && CheckedReplace.MissingButKnown(PathJson)) { missingKnown = true; return null; }
+                if (text == null && (existed = CheckedReplace.ExistedBefore(PathJson)) != null) return null;
                 var l = Parse(text);
                 if (l == null) { refused = true; return null; }   // unreadable: said by Parse, and never written over
                 if (!apply(l)) return null;                        // nothing to change
@@ -157,10 +158,12 @@ public static class PropRegistry
                                  (CheckedReplace.MissingButKnown(PathJson) ? $" ({MissingKnown})." : "."));
             return SaveResult.NotSaved;
         }
-        if (missingKnown)
+        if (existed != null)
         {
-            Debug.LogWarning($"[Props] not saving '{name}': {PathJson} {MissingKnown} — then save again. " +
-                             "Creating it now could leave a one-recipe registry where the real one belongs.");
+            Debug.LogWarning($"[Props] not saving '{name}': {PathJson} is missing, but {existed}, so it existed — another program may be saving it " +
+                             "(it comes back by itself; then save again). Creating it now could leave a one-recipe registry where the real one belongs. " +
+                             "If you deleted it on purpose: " + (existed.StartsWith("git") ? "commit the deletion (git rm), then save again."
+                                                                                        : "delete haf_props.json.meta too, or let Unity refresh, then save again."));
             return SaveResult.NotSaved;
         }
         if (refused)

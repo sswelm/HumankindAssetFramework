@@ -31,7 +31,7 @@ public static class CheckedReplace
     /// change still lands. A missing file is looked at twice, <paramref name="settleMs"/> apart, so an editor saving by
     /// rename usually has it back before the change sees it - but a wait PROVES nothing (review of PR #101, second
     /// round: a longer gap still read as "no file"). Whether a missing file may be created is the change's to decide,
-    /// and MissingButKnown is the evidence. A failed read or change throws, and nothing of this change was written
+    /// and ExistedBefore is the evidence. A failed read or change throws, and nothing of this change was written
     /// (after a conflict the file holds the other writer's version); the outcome of the last write is returned
     /// otherwise (Unresolved stops at once).
     /// </summary>
@@ -60,6 +60,44 @@ public static class CheckedReplace
     /// PR #101, second round). Unity removes the .meta of a file it saw deleted, so a deliberate deletion clears this.
     /// </summary>
     public static bool MissingButKnown(string path) => !File.Exists(path) && File.Exists(path + ".meta");
+
+    /// <summary>
+    /// Why a MISSING file is known to have existed, or null when nothing says so: its Unity .meta is still there, or git
+    /// tracks it (review of PR #101, third round: a registry without a .meta, moved aside for longer than the settle,
+    /// was still created over). Asks git, so it is for the write path only, never for a repaint. A deliberate deletion
+    /// clears both: Unity removes the .meta of a file it saw go, and `git rm` takes it out of the index. When git can't
+    /// be asked (not installed, not a repository) that is no evidence either way, and only the .meta counts.
+    /// </summary>
+    public static string ExistedBefore(string path)
+    {
+        if (File.Exists(path)) return null;
+        if (File.Exists(path + ".meta")) return "Unity still has its .meta";
+        return GitTracks(path) ? "git tracks it" : null;
+    }
+
+    /// <summary>Is <paramref name="path"/> in its git repository's index? false when git can't say.</summary>
+    public static bool GitTracks(string path)
+    {
+        try
+        {
+            string full = Path.GetFullPath(path);
+            var psi = new System.Diagnostics.ProcessStartInfo("git", $"ls-files --error-unmatch -- \"{Path.GetFileName(full)}\"")
+            {
+                WorkingDirectory = Path.GetDirectoryName(full),
+                UseShellExecute = false, CreateNoWindow = true,
+                RedirectStandardOutput = true, RedirectStandardError = true,
+            };
+            // a git hook's environment points git at ITS repository, whatever the working directory says
+            foreach (var v in new[] { "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE" }) psi.EnvironmentVariables.Remove(v);
+            using (var p = System.Diagnostics.Process.Start(psi))
+            {
+                p.StandardOutput.ReadToEndAsync(); p.StandardError.ReadToEndAsync();   // drain, so a full pipe can't hang it
+                if (!p.WaitForExit(5000)) { try { p.Kill(); } catch { } return false; }
+                return p.ExitCode == 0;
+            }
+        }
+        catch { return false; }
+    }
 
     /// <summary>
     /// Write <paramref name="text"/> to <paramref name="path"/> atomically (via a unique temp file), provided the file
