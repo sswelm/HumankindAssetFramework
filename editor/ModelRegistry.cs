@@ -280,6 +280,12 @@ public static class ModelRegistry
     // set, so a corrupt / half-edited registry is never silently overwritten with a fresh (empty) list —
     // which would wipe every baked model's settings.
     static bool lastLoadCorrupt;
+    // …and set when the last Load() could not READ the source at all - another program had it open, or was replacing
+    // it (review of PR #100, P1). NOT corruption: nothing is wrong with the file and nothing needs recovering, so it
+    // never raises the recovery banner, whose "Restore last commit" is a `git checkout` that discards uncommitted work.
+    // But the list that Load() returned is empty for want of a read, so Save() refuses while it is set, exactly as for
+    // corruption - an Upsert onto that list would write one model over the whole pack. Cleared by the next Load().
+    static bool lastLoadLocked;
 
     // Set true once THIS session's Load() has observed the on-disk registry, so the session-static
     // UnitScales/EraGrid/FormationThresholds below reflect reality. A domain reload (recompile) resets it to false
@@ -365,11 +371,12 @@ public static class ModelRegistry
     static string PrefLastWrite => "HAF.Registry.LastWrite|" + SourcePath;
     static string PrefPendingDeploy => "HAF.Registry.PendingDeploy|" + SourcePath;
     static bool pendingRetryWarned;   // a locked artifact fails the retry on every Load() poll — say so once
+    static double lastPendingAttempt = -1; static int pendingFailures;   // RegistryRules.PendingRetryDue: 2, 4, 8, 16 s, then every 30 s
 
     static string Fingerprint(string json)
     {
         using (var sha = System.Security.Cryptography.SHA256.Create())
-            return BitConverter.ToString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(json ?? "")));
+            return BitConverter.ToString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(RegistryRules.FingerprintText(json))));   // CRLF/LF-blind: git rewriting the source is not a hand-emptying
     }
 
     // Atomic write of the deployed ARTIFACT; throws on failure (the callers word the consequence).
@@ -404,7 +411,14 @@ public static class ModelRegistry
             string pending = EditorPrefs.GetString(PrefPendingDeploy, "");
             if (pending != "")
             {
-                if (File.ReadAllText(RegistryPath) == sourceJson) EditorPrefs.DeleteKey(PrefPendingDeploy);   // it caught up
+                // NOT ON EVERY POLL (review of PR #100, P4): Load() runs whenever a window refreshes, and a game holding
+                // the file failed the retry every time - a full read of the deployed copy and a full temp write into the
+                // game's config folder, per repaint. Until the next attempt is due, the pending deploy explains the
+                // difference and there is nothing to check.
+                double now = EditorApplication.timeSinceStartup;
+                if (!RegistryRules.PendingRetryDue(now, lastPendingAttempt, pendingFailures)) return;
+                lastPendingAttempt = now;
+                if (File.ReadAllText(RegistryPath) == sourceJson) { EditorPrefs.DeleteKey(PrefPendingDeploy); pendingFailures = 0; lastPendingAttempt = -1; }   // it caught up
                 else if (pending == Fingerprint(sourceJson))
                 {
                     // The source is still exactly what the failed Save wrote: this difference is OUR unfinished deploy,
@@ -413,16 +427,17 @@ public static class ModelRegistry
                     {
                         WriteArtifact(sourceJson);
                         EditorPrefs.DeleteKey(PrefPendingDeploy);
-                        pendingRetryWarned = false;
+                        pendingRetryWarned = false; pendingFailures = 0; lastPendingAttempt = -1;
                         Debug.Log($"[Factory] finished a deploy an earlier save couldn't complete → {RegistryPath}");
                     }
                     catch (Exception re)
                     {
-                        if (!pendingRetryWarned) { pendingRetryWarned = true; Debug.LogWarning($"[Factory] the deployed copy is still out of date (the last save couldn't refresh it: {re.Message}); retrying on every load until it can."); }
+                        pendingFailures++;
+                        if (!pendingRetryWarned) { pendingRetryWarned = true; Debug.LogWarning($"[Factory] the deployed copy is still out of date (the last save couldn't refresh it: {re.Message}); retrying — every 2 s at first, backing off to every 30 s — until it can."); }
                     }
                     return;
                 }
-                else EditorPrefs.DeleteKey(PrefPendingDeploy);   // the source changed since (git, a hand-edit): that deploy is moot
+                else { EditorPrefs.DeleteKey(PrefPendingDeploy); pendingFailures = 0; lastPendingAttempt = -1; }   // the source changed since (git, a hand-edit): that deploy is moot
             }
             if (!artifactDriftWarned && File.ReadAllText(RegistryPath) != sourceJson)
             {
@@ -468,6 +483,7 @@ public static class ModelRegistry
     {
         try
         {
+            lastLoadLocked = false;   // every Load() decides it afresh (see the field)
             loaded = true;   // this session has now observed the on-disk registry (see the `loaded` field) — the corrupt path below leaves Save() guarded by lastLoadCorrupt regardless
             MigrateToSingleSourceOnce();
             if (!File.Exists(SourcePath))
@@ -509,7 +525,14 @@ public static class ModelRegistry
                     return new List<ModelDef>();
                 }
             }
-            var json = File.ReadAllText(SourcePath);
+            string json;
+            try { json = File.ReadAllText(SourcePath); }
+            catch (Exception re) when (RegistryRules.IsTransientRead(re))
+            {
+                // could not READ it (open elsewhere, mid-replace): see lastLoadLocked. Not the corrupt path below.
+                lastLoadLocked = true; LastLockDetail = re.Message;
+                return new List<ModelDef>();   // Save() refuses while lastLoadLocked, so this empty list can never be written
+            }
             var data = ParseSource(json, out var why);
             if (data == null) throw new SourceUnreadable(why);   // same verdict Save() reaches — not "a pack with no models"
             lastLoadCorrupt = false; corruptLogged = false;
@@ -548,6 +571,8 @@ public static class ModelRegistry
 
     // ---- CORRUPT-SOURCE RECOVERY (2026-08-19, user design: "not only a try/catch but recovery functionality") ----
     public static bool LastLoadCorrupt => lastLoadCorrupt;
+    public static bool LastLoadLocked => lastLoadLocked;   // the Factory's plain warning — no recovery buttons (see the field)
+    public static string LastLockDetail = "";
     public static string LastCorruptDetail = "";
     static bool corruptLogged;   // one Console error per corruption, not per Load() poll (drill finding)
 
@@ -575,10 +600,7 @@ public static class ModelRegistry
         if (f == null) { why = "the file is empty or not a JSON object"; return null; }
         if (f.models == null || f.models.Count == 0)
         {
-            bool hasArray;
-            try { hasArray = Newtonsoft.Json.Linq.JObject.Parse(json)["models"] is Newtonsoft.Json.Linq.JArray; }
-            catch { hasArray = false; }
-            if (!hasArray) { why = "it has no \"models\" array (every pack.json carries one, even an empty pack)"; return null; }
+            if (!RegistryRules.HasModelsArray(json)) { why = "it has no \"models\" array (every pack.json carries one, even an empty pack)"; return null; }
             f.models = f.models ?? new List<ModelDef>();
         }
         return f;
@@ -650,6 +672,12 @@ public static class ModelRegistry
                            "Fix or delete it and press Refresh first — refusing to overwrite it and lose your models.");
             return false;
         }
+        if (lastLoadLocked)
+        {
+            Debug.LogWarning($"[Factory] not saving: the last load couldn't read the registry source ({LastLockDetail}), so the list this save " +
+                             "would write came from a read that failed. Nothing was changed — refresh (or wait for the next refresh), then save again.");
+            return false;
+        }
         // MERGE onto the current on-disk file instead of rebuilding from defaults: preserve the pack HEADER
         // (schemaVersion/modId/dependsOn/loadAfter/overrides — no window edits these, so they must survive every Save),
         // and preserve the scale/era/threshold arrays whenever this session hasn't Load()ed them (the session statics
@@ -665,9 +693,17 @@ public static class ModelRegistry
             // A source that EXISTS but won't parse (conflict markers, a half-finished hand edit) refuses the Save. The
             // lastLoadCorrupt guard only remembers the previous Load(); a SaveStatics caller never Load()s, and it used
             // to read an unreadable source as "no models" and write models: [] to both copies.
-            string why;
-            try { sourceText = File.ReadAllText(SourcePath); file = ParseSource(sourceText, out why); }
-            catch (Exception e) { file = null; why = e.Message; }   // the read itself failed (locked mid-rename)
+            // …but a source that could not be READ at all is not corrupt (review of PR #100, P1): another program has
+            // it open, or is replacing it. This save refuses and changes nothing; it does NOT raise the recovery banner,
+            // whose "Restore last commit" would git-checkout away every uncommitted edit of a file with nothing wrong in it.
+            try { sourceText = File.ReadAllText(SourcePath); }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Factory] not saving: the registry source '{SourcePath}' can't be read right now ({e.Message}) — " +
+                                 "another program has it open or is replacing it. Nothing was changed; save again in a moment.");
+                return false;
+            }
+            file = ParseSource(sourceText, out string why);
             if (file == null)
             {
                 lastLoadCorrupt = true; LastCorruptDetail = why;   // the Factory's recovery banner; the next Load() preserves the evidence
@@ -693,7 +729,11 @@ public static class ModelRegistry
             Debug.Log($"[Factory] the registry source was missing — this save builds on the deployed copy ({file.models.Count} model(s), its pack settings kept).");
         }
         if (file == null) file = new RegistryFile();
-        if (sourceExists && file.models.Count == 0 && Fingerprint(sourceText) != EditorPrefs.GetString(PrefLastWrite, ""))
+        bool writtenByEditor = sourceText != null && Fingerprint(sourceText) == EditorPrefs.GetString(PrefLastWrite, "");
+        int deployed = 0; string deployedWhy = null;
+        if (sourceExists && file.models.Count == 0 && !writtenByEditor) deployed = DeployedModelCount(out deployedWhy);   // read the deployed copy only when it can decide anything
+        var verdict = RegistryRules.JudgeEmptySource(sourceExists, file.models.Count, writtenByEditor, deployed);
+        if (verdict != RegistryRules.EmptySourceVerdict.Allow)
         {
             // THE SOURCE HOLDS NO MODELS, and the editor didn't write it that way — for EVERY save, not just statics
             // (review of #100: a Factory bake Upsert()s onto the empty list it loaded and wrote a one-model registry over
@@ -702,15 +742,12 @@ public static class ModelRegistry
             // that can't be READ may still hold them, so that refuses too ("unreadable" once counted as "empty"). An empty
             // source the editor wrote ITSELF (Remove() of the last model) passes by its fingerprint, even when its deploy
             // failed and the deployed copy is stale (review of #100: that once blocked every later save).
-            int deployed = DeployedModelCount(out var deployedWhy);
-            if (deployed != 0)
-            {
-                Debug.LogError($"[Factory] not saving: the registry source '{SourcePath}' holds no models, and " +
-                               (deployed > 0 ? $"the deployed copy still has {deployed}. Restore them (the Model Factory's recovery, or git) and save again. "
-                                             : $"the deployed copy '{RegistryPath}' can't be checked ({deployedWhy}), so it may still hold them. Close whatever holds it (the game?) and save again. ") +
-                               "If the pack really is empty now, delete the deployed copy (the next Load recreates it from the source).");
-                return false;
-            }
+            Debug.LogError($"[Factory] not saving: the registry source '{SourcePath}' holds no models, and " +
+                           (verdict == RegistryRules.EmptySourceVerdict.RefuseDeployedHasModels
+                               ? $"the deployed copy still has {deployed}. Restore them (the Model Factory's recovery, or git) and save again. "
+                               : $"the deployed copy '{RegistryPath}' can't be checked ({deployedWhy}), so it may still hold them. Close whatever holds it (the game?) and save again. ") +
+                           "If the pack really is empty now, delete the deployed copy (the next Load recreates it from the source).");
+            return false;
         }
         if (keepDiskModels) models = file.models;
         SortByName(models);   // write BOTH the live registry and the backup alphabetically, so the order is stable across bakes
@@ -749,11 +786,12 @@ public static class ModelRegistry
         {
             WriteArtifact(json);
             EditorPrefs.DeleteKey(PrefPendingDeploy);
+            pendingFailures = 0; lastPendingAttempt = -1;
         }
         catch (Exception e)
         {
             EditorPrefs.SetString(PrefPendingDeploy, Fingerprint(json));
-            pendingRetryWarned = false;
+            pendingRetryWarned = false; pendingFailures = 0; lastPendingAttempt = EditorApplication.timeSinceStartup;   // the first retry is due in 2 s
             Debug.LogWarning($"[Factory] deployed-artifact refresh FAILED ({e.Message}) — the registry SOURCE saved fine, " +
                              $"but the GAME will keep loading the stale copy at '{RegistryPath}' until a Save/Load succeeds " +
                              "(is the game running and holding the file?).");

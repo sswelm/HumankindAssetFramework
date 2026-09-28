@@ -12,6 +12,61 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
+/// <summary>
+/// Registry save/load decisions (ModelRegistry calls these; RegistryRulesTests locks them). Extracted in review of
+/// PR #100: they guard a pack of 37 models against being written over with an empty list, and the only proof they
+/// worked was a one-off manual drill that three later commits never re-ran. A guard like that rots silently.
+/// </summary>
+public static class RegistryRules
+{
+    /// <summary>
+    /// Does the raw pack text carry a "models" ARRAY? JsonUtility reads `{}` and `"models": []` alike (the list field
+    /// defaults to empty), so an empty parse proves nothing on its own: every pack.json the editor writes carries the
+    /// key, and a source without it is a broken edit, not an empty pack.
+    /// </summary>
+    public static bool HasModelsArray(string json)
+    {
+        try { return Newtonsoft.Json.Linq.JObject.Parse(json ?? "")["models"] is Newtonsoft.Json.Linq.JArray; }
+        catch { return false; }
+    }
+
+    public enum EmptySourceVerdict { Allow, RefuseDeployedHasModels, RefuseDeployedUnreadable }
+
+    /// <summary>
+    /// May a save go ahead when the SOURCE holds no models? Only when the editor itself wrote it that way (the last
+    /// model removed), or when nothing else could still hold them. Every editor save writes both copies, so a deployed
+    /// copy that still has models means the source was emptied outside the editor, and a deployed copy that cannot be
+    /// READ is no evidence of an empty pack. `deployedModels`: -1 = exists but unreadable, 0 = absent or provably empty.
+    /// </summary>
+    public static EmptySourceVerdict JudgeEmptySource(bool sourceExists, int sourceModels, bool writtenByEditor, int deployedModels)
+    {
+        if (!sourceExists || sourceModels > 0 || writtenByEditor) return EmptySourceVerdict.Allow;
+        if (deployedModels > 0) return EmptySourceVerdict.RefuseDeployedHasModels;
+        if (deployedModels < 0) return EmptySourceVerdict.RefuseDeployedUnreadable;
+        return EmptySourceVerdict.Allow;
+    }
+
+    /// <summary>
+    /// The text the editor's-own-write fingerprint is taken of: line endings normalized. The source is git-tracked,
+    /// and git's autocrlf rewriting it on a checkout is not somebody else emptying it (review of PR #100, P3).
+    /// </summary>
+    public static string FingerprintText(string json) => (json ?? "").Replace("\r\n", "\n");
+
+    /// <summary>
+    /// A deploy the game held the file against is retried from Load(), which every window polls. Backing off keeps a
+    /// running game's config folder from being written to on every repaint: 2, 4, 8, 16 s, then every 30 s.
+    /// </summary>
+    public static double PendingRetryDelay(int failures) => Math.Min(30.0, 2.0 * Math.Pow(2, Math.Max(0, Math.Min(failures, 8))));
+    public static bool PendingRetryDue(double now, double lastAttempt, int failures) => lastAttempt < 0 || now - lastAttempt >= PendingRetryDelay(failures);
+
+    /// <summary>
+    /// A file that could not be READ right now (another program has it open, or is replacing it) - as against one that
+    /// was read and is broken. Only the second is corruption; calling the first "corrupt" put a one-click
+    /// `git checkout -- pack.json` in front of the user for a file with nothing wrong in it (review of PR #100, P1).
+    /// </summary>
+    public static bool IsTransientRead(Exception e) => e is System.IO.IOException || e is UnauthorizedAccessException;
+}
+
 /// <summary>Bake-pipeline decisions (UniversalBaker calls these; BakerRulesTests locks them).</summary>
 public static class BakerRules
 {

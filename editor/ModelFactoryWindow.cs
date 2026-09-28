@@ -956,6 +956,12 @@ public class ModelFactoryWindow : EditorWindow
                 { EditorUtility.RevealInFinder(ModelRegistry.SourcePath); }
             }
         }
+        // A SOURCE THAT COULD NOT BE READ is not a corrupt one (review of PR #100, P1): a plain warning, and deliberately
+        // no recovery buttons - "Restore last commit" is a git checkout, and nothing here needs restoring.
+        if (!ModelRegistry.LastLoadCorrupt && ModelRegistry.LastLoadLocked)
+            EditorGUILayout.HelpBox("The registry source can't be read right now — " + ModelRegistry.LastLockDetail + "\n" +
+                "Another program has it open or is replacing it (an editor saving, git, a sync tool). Nothing is wrong with the file and nothing " +
+                "needs recovering: saving is paused until it can be read, and the next refresh tries again by itself.", MessageType.Warning);
         // ENTRY-STATE COHERENCE banner (the Lab's, ported): loud choice, never a silent resync in either direction.
         if (formDiffersFromRegistry)
         {
