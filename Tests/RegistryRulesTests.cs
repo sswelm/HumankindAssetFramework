@@ -63,13 +63,30 @@ public class RegistryRulesTests
     }
 
     [Fact]
-    public void A_file_that_could_not_be_read_is_not_a_file_that_is_broken()
+    public void A_file_that_could_not_be_read_is_not_a_file_that_is_broken_and_the_two_kinds_are_told_apart()
     {
-        // only the second may raise the recovery banner, whose "Restore last commit" is a git checkout
-        Assert.True(RegistryRules.IsTransientRead(new IOException("being used by another process")));
-        Assert.True(RegistryRules.IsTransientRead(new FileNotFoundException("gone mid-rename")));
-        Assert.True(RegistryRules.IsTransientRead(new UnauthorizedAccessException("pending delete")));
-        Assert.False(RegistryRules.IsTransientRead(new ArgumentException("JSON parse error")));
-        Assert.False(RegistryRules.IsTransientRead(new InvalidOperationException()));
+        // only a file that was READ and is broken may raise the recovery banner, whose "Restore last commit" is a git checkout
+        Assert.Equal(RegistryRules.ReadFailure.Locked, RegistryRules.ClassifyReadFailure(new IOException("being used by another process")));
+        Assert.Equal(RegistryRules.ReadFailure.Locked, RegistryRules.ClassifyReadFailure(new FileNotFoundException("gone mid-rename")));
+        Assert.Equal(RegistryRules.ReadFailure.AccessDenied, RegistryRules.ClassifyReadFailure(new UnauthorizedAccessException("denied")));
+        Assert.Equal(RegistryRules.ReadFailure.NotARead, RegistryRules.ClassifyReadFailure(new ArgumentException("JSON parse error")));
+        Assert.Equal(RegistryRules.ReadFailure.NotARead, RegistryRules.ClassifyReadFailure(new InvalidOperationException()));
+        // and the advice is true for each (second round: "nothing is wrong, it retries by itself" was untrue for a permissions denial)
+        string locked = RegistryRules.ReadFailureAdvice(RegistryRules.ReadFailure.Locked), denied = RegistryRules.ReadFailureAdvice(RegistryRules.ReadFailure.AccessDenied);
+        Assert.Contains("tries again by itself", locked);
+        Assert.DoesNotContain("tries again by itself", denied);
+        Assert.Contains("permissions", denied);
+        Assert.Contains("will not clear by itself", denied);
+    }
+
+    [Fact]
+    public void The_recovery_controls_never_show_while_the_file_cannot_be_read()
+    {
+        // outside review of PR #100, second round: a repaired source caught briefly locked kept "Restore last commit" —
+        // a git checkout — one click from discarding that uncommitted repair. A lock takes precedence.
+        Assert.True(RegistryRules.ShowRecoveryControls(true, false));
+        Assert.False(RegistryRules.ShowRecoveryControls(true, true));
+        Assert.False(RegistryRules.ShowRecoveryControls(false, true));
+        Assert.False(RegistryRules.ShowRecoveryControls(false, false));
     }
 }

@@ -942,7 +942,7 @@ public class ModelFactoryWindow : EditorWindow
         // CORRUPT-SOURCE RECOVERY banner (2026-08-19, user design): a hand-edit broke the registry source — the
         // fault is PINPOINTED (line/column via Newtonsoft) and recovery is ONE CLICK, each path validated before
         // it writes and the broken file already preserved timestamped. Save stays locked until recovered.
-        if (ModelRegistry.LastLoadCorrupt)
+        if (RegistryRules.ShowRecoveryControls(ModelRegistry.LastLoadCorrupt, ModelRegistry.LastLoadLocked))   // never while the file can't be read (see the rule)
         {
             EditorGUILayout.HelpBox("REGISTRY SOURCE IS CORRUPT — " + ModelRegistry.LastCorruptDetail + "\n" +
                 "The broken file is preserved beside the source; Save/Bake are locked so nothing can be wiped. Recover:", MessageType.Error);
@@ -956,12 +956,13 @@ public class ModelFactoryWindow : EditorWindow
                 { EditorUtility.RevealInFinder(ModelRegistry.SourcePath); }
             }
         }
-        // A SOURCE THAT COULD NOT BE READ is not a corrupt one (review of PR #100, P1): a plain warning, and deliberately
-        // no recovery buttons - "Restore last commit" is a git checkout, and nothing here needs restoring.
-        if (!ModelRegistry.LastLoadCorrupt && ModelRegistry.LastLoadLocked)
+        // A SOURCE THAT COULD NOT BE READ is not a corrupt one (review of PR #100): a plain warning, deliberately without
+        // recovery buttons - "Restore last commit" is a git checkout - and it takes PRECEDENCE over an earlier corrupt
+        // verdict, which was about bytes nobody can see now (the file may have been repaired since). The advice says what
+        // is true for the kind of failure: a lock clears by itself, access denied may not.
+        if (ModelRegistry.LastLoadLocked)
             EditorGUILayout.HelpBox("The registry source can't be read right now — " + ModelRegistry.LastLockDetail + "\n" +
-                "Another program has it open or is replacing it (an editor saving, git, a sync tool). Nothing is wrong with the file and nothing " +
-                "needs recovering: saving is paused until it can be read, and the next refresh tries again by itself.", MessageType.Warning);
+                ModelRegistry.LastLockAdvice + " Saving is paused until it can be read; nothing can be recovered from a file that can't be seen.", MessageType.Warning);
         // ENTRY-STATE COHERENCE banner (the Lab's, ported): loud choice, never a silent resync in either direction.
         if (formDiffersFromRegistry)
         {

@@ -60,11 +60,28 @@ public static class RegistryRules
     public static bool PendingRetryDue(double now, double lastAttempt, int failures) => lastAttempt < 0 || now - lastAttempt >= PendingRetryDelay(failures);
 
     /// <summary>
-    /// A file that could not be READ right now (another program has it open, or is replacing it) - as against one that
-    /// was read and is broken. Only the second is corruption; calling the first "corrupt" put a one-click
-    /// `git checkout -- pack.json` in front of the user for a file with nothing wrong in it (review of PR #100, P1).
+    /// Why a file could not be READ - as against one that was read and is broken. Only the second is corruption;
+    /// calling the first "corrupt" put a one-click `git checkout -- pack.json` in front of the user for a file with
+    /// nothing wrong in it (review of PR #100, P1). Two kinds, because they are not equally temporary (second round):
+    /// a lock (IOException - another program has it open, or is replacing it) clears by itself, while access denied
+    /// is either a file mid-delete, which also clears, or its permissions, which never do on their own.
     /// </summary>
-    public static bool IsTransientRead(Exception e) => e is System.IO.IOException || e is UnauthorizedAccessException;
+    public enum ReadFailure { NotARead, Locked, AccessDenied }
+    public static ReadFailure ClassifyReadFailure(Exception e) =>
+        e is UnauthorizedAccessException ? ReadFailure.AccessDenied : e is System.IO.IOException ? ReadFailure.Locked : ReadFailure.NotARead;
+
+    /// <summary>What the user is told about a read that failed - true for every case the kind covers, and no more.</summary>
+    public static string ReadFailureAdvice(ReadFailure kind) => kind == ReadFailure.AccessDenied
+        ? "Windows refuses read access to it: either its permissions, or it is being deleted. If a program is replacing it, this clears on the next refresh; if it persists, check the file's permissions - that will not clear by itself."
+        : "Another program has it open or is replacing it (an editor saving, git, a sync tool); the next refresh tries again by itself.";
+
+    /// <summary>
+    /// The recovery controls ("Restore last deploy", "Restore last commit" - a git checkout) only for a source that was
+    /// READ and found broken, never while it cannot be read at all: an earlier corrupt verdict is about bytes nobody can
+    /// see right now, and the file may have been repaired since - its fix uncommitted, one click from being checked out
+    /// away (outside review of PR #100, second round). A lock takes precedence until the file can be read again.
+    /// </summary>
+    public static bool ShowRecoveryControls(bool corrupt, bool locked) => corrupt && !locked;
 }
 
 /// <summary>Bake-pipeline decisions (UniversalBaker calls these; BakerRulesTests locks them).</summary>
