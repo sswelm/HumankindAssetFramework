@@ -44,8 +44,17 @@ public static class PropRegistry
         string json;
         try { json = System.IO.File.Exists(PathJson) ? System.IO.File.ReadAllText(PathJson) : null; }
         catch (Exception e) { return Fault($"it can't be read right now ({e.Message}) — another program has it open"); }
+        if (json == null && CheckedReplace.MissingButKnown(PathJson))
+        {
+            // shown, not logged: an editor's save-by-rename passes through this state on every save
+            Unreadable = MissingKnown;
+            return null;
+        }
         return Parse(json);
     }
+
+    const string MissingKnown = "it is missing, but Unity still has its .meta, so it existed — another program may be saving it (it comes back by itself). " +
+                                "If you deleted it on purpose, delete haf_props.json.meta too, or let Unity refresh";
 
     // The verdict on one text as read (null = no file: no recipes yet).
     static List<PropDef> Parse(string json)
@@ -87,7 +96,7 @@ public static class PropRegistry
     // as it was, or holds another writer's version. Unknown = a failed rollback left it undecided (see the Console).
     public enum SaveResult { Saved, NotSaved, Unknown }
 
-    public static SaveResult Upsert(PropDef d) => Change(d.resourceName, l =>
+    public static SaveResult Upsert(PropDef d) => Change(d.resourceName, true, l =>
     {
         int i = l.FindIndex(x => x.resourceName == d.resourceName);
         if (i >= 0) l[i] = d; else l.Add(d);
@@ -95,23 +104,27 @@ public static class PropRegistry
     });
 
     // The Prop Lab's one-shot migration: add the form's recipe only if the registry lacks it — decided on the file as
-    // read at write time, not on the Load() that prompted it (which may have caught an editor's save-by-rename gap).
-    public static SaveResult AddIfMissing(PropDef d) => Change(d.resourceName, l =>
+    // read at write time, not on the Load() that prompted it. It NEVER creates the file (review of PR #101, second
+    // round): an automatic step can't tell a new registry from one another program has moved aside for a moment, and
+    // guessing wrong leaves a one-recipe file in its place. The next bake creates a registry that really is new.
+    public static SaveResult AddIfMissing(PropDef d) => Change(d.resourceName, false, quietWithoutFile: true, apply: l =>
     {
         if (l.Any(x => x.resourceName == d.resourceName)) return false;
         l.Add(d);
         return true;
     });
 
-    public static SaveResult Remove(string name) => Change(name, l => l.RemoveAll(x => x.resourceName == name) > 0);
+    public static SaveResult Remove(string name) => Change(name, false, l => l.RemoveAll(x => x.resourceName == name) > 0);
 
     // EVERY change is an operation on the file as it is AT WRITE TIME (review of PR #101): read, apply, and a checked
     // write that re-applies on a conflict (CheckedReplace.Apply). A recipe another writer added between the read and
     // the write is kept; a missing file is looked at twice before it counts as absent; and the write's result is the
     // file's, whatever the asset import does afterwards.
-    static SaveResult Change(string name, Func<List<PropDef>, bool> apply)
+    // mayCreate = this change may create a missing file (an explicit bake) — and even then not one Unity still knows.
+    // quietWithoutFile = a missing file is no news to this caller (the migration runs on every window open).
+    static SaveResult Change(string name, bool mayCreate, Func<List<PropDef>, bool> apply, bool quietWithoutFile = false)
     {
-        bool refused = false;
+        bool refused = false, missingKnown = false, noFile = false;
         CheckedReplace.Outcome outcome;
         string note;
         try
@@ -119,7 +132,9 @@ public static class PropRegistry
             System.IO.Directory.CreateDirectory("Assets/Databases");
             outcome = CheckedReplace.Apply(PathJson, text =>
             {
-                refused = false;
+                refused = missingKnown = noFile = false;   // each attempt decides afresh
+                if (text == null && !mayCreate) { noFile = true; return null; }
+                if (text == null && CheckedReplace.MissingButKnown(PathJson)) { missingKnown = true; return null; }
                 var l = Parse(text);
                 if (l == null) { refused = true; return null; }   // unreadable: said by Parse, and never written over
                 if (!apply(l)) return null;                        // nothing to change
@@ -128,11 +143,26 @@ public static class PropRegistry
         }
         catch (Exception e)
         {
-            // a failed read or write: CheckedReplace leaves the file as it was
-            Debug.LogError($"[Props] not saving '{name}': {PathJson} could not be read or written ({e.Message}). The file is as it was.");
+            // CheckedReplace throws only when nothing of this change was written (after a conflict the file holds the
+            // other writer's version, so not "as it was")
+            Debug.LogError($"[Props] not saving '{name}': {PathJson} could not be read or written ({e.Message}). Nothing of this save was written.");
             return SaveResult.NotSaved;
         }
         if (note != null) Debug.LogWarning($"[Props] {PathJson}: {note}.");
+        if (noFile)
+        {
+            // nothing to change in a file that isn't there, and only a bake creates one
+            if (!quietWithoutFile)
+                Debug.LogWarning($"[Props] not saving '{name}': {PathJson} is missing" +
+                                 (CheckedReplace.MissingButKnown(PathJson) ? $" ({MissingKnown})." : "."));
+            return SaveResult.NotSaved;
+        }
+        if (missingKnown)
+        {
+            Debug.LogWarning($"[Props] not saving '{name}': {PathJson} {MissingKnown} — then save again. " +
+                             "Creating it now could leave a one-recipe registry where the real one belongs.");
+            return SaveResult.NotSaved;
+        }
         if (refused)
         {
             Debug.LogError($"[Props] not saving '{name}': {PathJson} is unreadable ({Unreadable}). Refusing to overwrite it and lose the other recipes.");

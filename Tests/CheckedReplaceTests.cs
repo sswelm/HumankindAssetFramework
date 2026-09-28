@@ -175,6 +175,56 @@ public class CheckedReplaceTests : IDisposable
         Assert.Empty(Beside());
     }
 
+    // ---- second round of the PR #101 review: every end of a write says what is on disk
+
+    [Fact]
+    public void A_missing_file_whose_unity_meta_remains_is_known_not_new()
+    {
+        Assert.False(CheckedReplace.MissingButKnown(P));          // no file, no .meta: a registry that really is new
+        File.WriteAllText(P + ".meta", "guid: x");
+        Assert.True(CheckedReplace.MissingButKnown(P));           // moved aside by another program, or deleted outside Unity
+        File.WriteAllText(P, "a");
+        Assert.False(CheckedReplace.MissingButKnown(P));          // present: not missing at all
+    }
+
+    [Fact]
+    public void A_committed_write_is_reported_written_even_when_listing_the_kept_copies_fails()
+    {
+        File.WriteAllText(P, "A");
+        var list = CheckedReplace.ListPreserved;
+        try
+        {
+            CheckedReplace.ListPreserved = _ => throw new UnauthorizedAccessException("listing denied");
+            Assert.Equal(CheckedReplace.Outcome.Written, CheckedReplace.Write(P, "A", "C", out var note));
+            Assert.Equal("C", File.ReadAllText(P));
+            Assert.Contains("listing denied", note);
+        }
+        finally { CheckedReplace.ListPreserved = list; }
+        Assert.Empty(Beside());
+    }
+
+    [Fact]
+    public void A_replace_that_moved_the_file_aside_and_could_not_put_it_back_is_not_reported_as_it_was()
+    {
+        // the state after ReplaceFile failed half way: the original sits under the backup name. A directory where the
+        // file belongs makes the put-back fail deterministically.
+        string displaced = P + ".displaced-20260929_010000-deadbeef.json";
+        File.WriteAllText(displaced, "A, the original");
+        Directory.CreateDirectory(P);
+        var notes = new List<string>();
+        Assert.False(CheckedReplace.PutBackAfterFailedReplace(P, displaced, new IOException("replace failed"), notes));
+        Assert.Equal("A, the original", File.ReadAllText(displaced));   // intact, and named
+        Assert.Contains(notes, n => n.Contains(Path.GetFileName(displaced)) && n.Contains("rename it back"));
+        Directory.Delete(P);
+
+        // and when the put-back works, it IS as it was
+        notes.Clear();
+        Assert.True(CheckedReplace.PutBackAfterFailedReplace(P, displaced, new IOException("replace failed"), notes));
+        Assert.Equal("A, the original", File.ReadAllText(P));
+        Assert.Empty(notes);
+        Assert.Empty(Beside());
+    }
+
     [Fact]
     public void A_write_that_fails_leaves_the_file_as_it_was()
     {
