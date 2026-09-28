@@ -31,36 +31,88 @@ public static class PropRegistry
     [Serializable] class PropFile { public List<PropDef> props = new List<PropDef>(); }
     const string PathJson = "Assets/Databases/haf_props.json";
 
-    public static List<PropDef> Load()
+    // Why the file on disk can't be read right now ("" = it can). The window shows it, so an unreadable file doesn't
+    // pass for "no recipes yet".
+    public static string Unreadable { get; private set; } = "";
+
+    // null = the file EXISTS but can't be read — never the same as "no recipes yet". That confusion wiped every recipe:
+    // Upsert added one prop to the empty list an unreadable file loaded as, and wrote it back (the same defect as the
+    // model registry's, PR #100). An empty result must show the "props" array in the raw text: JsonUtility reads `{}`
+    // as an empty list, and every file this class writes carries the key.
+    static List<PropDef> Read()
     {
+        if (!System.IO.File.Exists(PathJson)) { Unreadable = ""; return new List<PropDef>(); }
+        string why = null, json = null;
+        List<PropDef> props = null;
         try
         {
-            if (System.IO.File.Exists(PathJson))
-                return JsonUtility.FromJson<PropFile>(System.IO.File.ReadAllText(PathJson))?.props ?? new List<PropDef>();
+            json = System.IO.File.ReadAllText(PathJson);
+            props = JsonUtility.FromJson<PropFile>(json)?.props;
+            if ((props == null || props.Count == 0) && !(Newtonsoft.Json.Linq.JObject.Parse(json)["props"] is Newtonsoft.Json.Linq.JArray))
+            { why = "it has no \"props\" array"; props = null; }
         }
-        catch (Exception e) { Debug.LogError("[Props] haf_props.json unreadable: " + e.Message); }
-        return new List<PropDef>();
+        catch (Exception e) { why = Pinpoint(json) ?? e.Message; props = null; }
+        if (props != null) { Unreadable = ""; return props; }
+        if (Unreadable != why) Debug.LogError($"[Props] {PathJson} is unreadable — {why}. Recipes won't save until it is fixed (git has every committed version)."); // once per fault: the window calls Load() every repaint
+        Unreadable = why;
+        return null;
     }
 
-    public static void Upsert(PropDef d)
+    // JsonUtility's exceptions carry no location; Newtonsoft's reader names the line and column.
+    static string Pinpoint(string json)
     {
-        var l = Load();
+        if (json == null) return null;
+        try { Newtonsoft.Json.Linq.JObject.Parse(json); return null; }
+        catch (Newtonsoft.Json.JsonReaderException jre) { return $"line {jre.LineNumber}, position {jre.LinePosition}: {jre.Message}"; }
+        catch (Exception ex) { return ex.Message; }
+    }
+
+    public static List<PropDef> Load() => Read() ?? new List<PropDef>();
+
+    // Returns true if the recipe was written. False = an unreadable file (left untouched) or a failed write.
+    public static bool Upsert(PropDef d)
+    {
+        var l = Read();
+        if (l == null) return Refuse(d.resourceName);
         int i = l.FindIndex(x => x.resourceName == d.resourceName);
         if (i >= 0) l[i] = d; else l.Add(d);
-        Save(l);
+        return Save(l);
     }
 
-    public static void Remove(string name) { var l = Load(); l.RemoveAll(x => x.resourceName == name); Save(l); }
+    public static bool Remove(string name)
+    {
+        var l = Read();
+        if (l == null) return Refuse(name);
+        l.RemoveAll(x => x.resourceName == name);
+        return Save(l);
+    }
 
-    static void Save(List<PropDef> l)
+    static bool Refuse(string name)
+    {
+        Debug.LogError($"[Props] not saving '{name}': {PathJson} is unreadable ({Unreadable}). Refusing to overwrite it and lose the other recipes.");
+        return false;
+    }
+
+    static bool Save(List<PropDef> l)
     {
         try
         {
             System.IO.Directory.CreateDirectory("Assets/Databases");
-            System.IO.File.WriteAllText(PathJson, JsonUtility.ToJson(new PropFile { props = l }, true));
+            // Temp file + swap, so an interrupted or locked write can't leave a truncated file (which the next Upsert
+            // would then refuse — better than losing it, but never necessary).
+            string tmp = PathJson + ".tmp";
+            System.IO.File.WriteAllText(tmp, JsonUtility.ToJson(new PropFile { props = l }, true));
+            if (System.IO.File.Exists(PathJson)) System.IO.File.Replace(tmp, PathJson, null);
+            else System.IO.File.Move(tmp, PathJson);
             AssetDatabase.ImportAsset(PathJson);
+            return true;
         }
-        catch (Exception e) { Debug.LogError("[Props] haf_props.json save failed: " + e.Message); }
+        catch (Exception e)
+        {
+            try { System.IO.File.Delete(PathJson + ".tmp"); } catch { }   // under Assets/, Unity would import a leftover
+            Debug.LogError("[Props] haf_props.json save failed: " + e.Message);
+            return false;
+        }
     }
 }
 
@@ -275,11 +327,17 @@ public class PropBakerWindow : EditorWindow
                 if (GUILayout.Button(new GUIContent("Remove", "Forget this prop's saved recipe. Baked assets are NOT deleted."), GUILayout.Width(60))
                     && EditorUtility.DisplayDialog("Remove prop recipe", $"Forget the saved settings for '{resourceName}'?\nBaked assets stay in Assets/Resources.", "Remove", "Cancel"))
                 {
-                    PropRegistry.Remove(resourceName);
-                    resourceName = ""; modelFile = ""; status = ""; DestroyPreview();
+                    if (PropRegistry.Remove(resourceName))
+                    {
+                        resourceName = ""; modelFile = ""; status = ""; DestroyPreview();
+                    }
+                    else status = $"Remove FAILED — '{resourceName}' is still saved (see the Console).";
                     GUI.FocusControl(null);
                 }
         }
+        if (PropRegistry.Unreadable != "")
+            EditorGUILayout.HelpBox("haf_props.json is unreadable — " + PropRegistry.Unreadable + "\nThe recipe list is empty only because of that; " +
+                                    "nothing will be saved over it until it is fixed (git has every committed version).", MessageType.Error);
         resourceName = EditorGUILayout.TextField("Resource name", resourceName);
         using (new EditorGUILayout.HorizontalScope())
         {
@@ -471,9 +529,10 @@ public class PropBakerWindow : EditorWindow
                  "(collection GUID copied to clipboard)";
         EditorGUIUtility.systemCopyBuffer = mcGuid;
         // Persist this prop's recipe so 'Edit existing' can bring it back (and the Animation Lab picker lists it).
-        PropRegistry.Upsert(new PropDef { resourceName = resourceName, modelFile = modelFile, materialGuid = materialGuid,
-                                          size = size, rotation = rotation,
-                                          posOffset = posOffset, targetTris = targetTris });
+        if (!PropRegistry.Upsert(new PropDef { resourceName = resourceName, modelFile = modelFile, materialGuid = materialGuid,
+                                               size = size, rotation = rotation,
+                                               posOffset = posOffset, targetTris = targetTris }))
+            status += "\n⚠ the prop baked, but its recipe was NOT saved (see the Console).";
         Debug.Log("[Props] " + status);
         LoadPreview(resourceName, forceReimport: true);   // show the just-baked prop in the dialog
         ModelFactoryWindow.ReloadPreviews();              // give the Factory tab its preview back
