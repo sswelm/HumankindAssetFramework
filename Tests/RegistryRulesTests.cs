@@ -110,4 +110,18 @@ public class RegistryRulesTests
         Assert.False(v.MaySaveOver("B"));
         Assert.False(v.MaySaveOver(null));
     }
+
+    [Fact]
+    public void Each_window_holds_its_own_version_and_another_windows_refresh_does_not_advance_it()
+    {
+        // fourth round: a session-wide token was advanced by ANY window's Load() while the Era Lab still showed A,
+        // and then let A's grid go over B. The Lab's version is the Lab's.
+        var eraLab = new StaticsVersion();
+        var factory = new StaticsVersion();
+        eraLab.Loaded("A");
+        factory.Loaded("B");                              // the file changed to B, and the Factory refreshed
+        Assert.False(eraLab.MaySaveOver("B"));            // the Era Lab still shows A: refused
+        Assert.True(factory.MaySaveOver("B"));
+        Assert.False(new StaticsVersion().MaySaveOver(""));   // a window that copied nothing (never loaded: "") writes nothing
+    }
 }

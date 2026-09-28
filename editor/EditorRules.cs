@@ -85,13 +85,14 @@ public static class RegistryRules
 }
 
 /// <summary>
-/// WHICH VERSION OF THE REGISTRY'S STATICS THE SESSION HOLDS (outside review of PR #100, third round). SaveStatics is
-/// the one save not fed by a fresh Load(): it writes the era grid and scale rules the session holds over whatever the
-/// file holds now. A Lab loads version A; another window, git or a hand edit replaces the file with B; the Lab's
-/// refresh is caught by a lock and changes nothing; the file comes back readable - and SaveStatics wrote A's grid over
-/// B. So the session remembers the print of the statics it last loaded or wrote, and SaveStatics may write only over a
-/// file whose statics still carry that print. A print of the statics alone, not of the whole file: a model baked in the
-/// Factory changes the file without touching the grid, and must not lock the Era Lab out.
+/// WHICH VERSION OF THE ERA SETTINGS A WINDOW HOLDS (outside review of PR #100, third and fourth rounds). SaveStatics is
+/// the one save not fed by a fresh Load(): it writes the grid the Era Lab shows over whatever the file holds now. A Lab
+/// loads version A; another window, git or a hand edit replaces the file with B; the Lab's refresh is caught by a lock
+/// and changes nothing - and SaveStatics wrote A's grid over B. So the WINDOW keeps the print of the settings it copied
+/// (or last wrote), and SaveStatics may write only over a file whose settings still carry that print. One per window,
+/// never one per session: a session-wide token was advanced by ANY window's Load() while the Era Lab still showed A,
+/// and then passed A over B. A print of the era settings alone, not of the whole file: a model baked in the Factory
+/// changes the file without touching the grid, and must not lock the Era Lab out.
 /// </summary>
 public sealed class StaticsVersion
 {

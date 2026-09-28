@@ -56,6 +56,7 @@ public class GlobalEraLabWindow : EditorWindow
     List<FormationThreshold> thresholds;    // second table: swap formation as an aged unit shrinks
     string[] formationNames;                // Pick list: ENC formation entries + vanilla names
     bool gridEnabled = true;                // registry `eraGridEnabled`: unchecked = grid kept but ignored at runtime
+    readonly StaticsVersion eraVersion = new StaticsVersion();   // WHICH version of the era settings this window copied (review of PR #100) — see StaticsVersion
     bool dirty;
     string status = "";
 
@@ -90,6 +91,7 @@ public class GlobalEraLabWindow : EditorWindow
     void Reload()
     {
         models = ModelRegistry.Load();                       // also (re)fills ModelRegistry.EraGrid
+        eraVersion.Loaded(ModelRegistry.EraSettingsVersion); // the version of what is copied below — this window's, not the session's
         grid = new float[EraNames.Length, EraNames.Length];
         for (int r = FirstUnitEra; r <= LastUnitEra; r++)
             for (int c = FirstNowEra; c <= LastNowEra; c++)
@@ -215,14 +217,15 @@ public class GlobalEraLabWindow : EditorWindow
                             row.scales.Add(c >= FirstNowEra && c > r ? grid[r, c] : 1f);   // plugin can read cell[era] directly
                         rows.Add(row);
                     }
-                    ModelRegistry.EraGrid = rows;   // (below) SaveStatics re-reads models from disk so this Lab's stale model snapshot can't revert a bake/edit made in another window
-                    ModelRegistry.EraGridEnabled = gridEnabled;
                     // thresholds are stored ASCENDING so the runtime can take the first match without sorting
                     thresholds = thresholds.Where(t => !string.IsNullOrWhiteSpace(t.formation)).OrderBy(t => t.threshold).ToList();
-                    ModelRegistry.FormationThresholds = thresholds;
-                    bool ok = ModelRegistry.SaveStatics();   // era/threshold statics only — preserves the on-disk models (this Lab never edits them)
+                    // Passed, not assigned to the session statics first: a refused save must leave the session untouched,
+                    // or another window's save writes the refused grid anyway (review of PR #100). SaveStatics re-reads
+                    // the models from disk, so this Lab's stale model snapshot can't revert a bake/edit made elsewhere.
+                    var saveThresholds = thresholds.Select(t => new FormationThreshold { threshold = t.threshold, formation = t.formation, note = t.note }).ToList();
+                    bool ok = ModelRegistry.SaveStatics(rows, gridEnabled, saveThresholds, eraVersion);
                     status = ok ? $"Saved a {LastUnitEra - FirstUnitEra + 1}x{LastNowEra - FirstNowEra + 1} grid ({(gridEnabled ? "applied" : "IGNORED at runtime")}) + {thresholds.Count} formation threshold(s). Relaunch the game to apply."
-                                : "Save FAILED — see the Console (registry locked or corrupt).";
+                                : "Save FAILED — see the Console (registry locked or corrupt, or changed since this Lab loaded it: Reload).";
                     dirty = !ok;
                 }
             if (GUILayout.Button("Reload", GUILayout.Width(70), GUILayout.Height(30))) Reload();

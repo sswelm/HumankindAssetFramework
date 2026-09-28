@@ -293,16 +293,18 @@ public static class ModelRegistry
     // silently wiped all Resize-Lab / Era-Lab data). While false, Save() preserves those arrays from the on-disk file.
     static bool loaded;
 
-    // …and WHICH version of the statics that is (StaticsVersion, review of PR #100): the print of the statics as last
-    // loaded or written. SaveStatics may only write over a file whose statics still carry it.
-    static readonly StaticsVersion staticsVersion = new StaticsVersion();
-    [Serializable] class StaticsSnapshot { public List<UnitScaleRule> unitScales; public List<EraScaleRow> eraGrid; public bool eraGridEnabled; public List<FormationThreshold> formationThresholds; }
-    static string StaticsPrint(List<UnitScaleRule> scales, List<EraScaleRow> grid, bool gridEnabled, List<FormationThreshold> thresholds) =>
-        Fingerprint(JsonUtility.ToJson(new StaticsSnapshot {
-            unitScales = scales ?? new List<UnitScaleRule>(), eraGrid = grid ?? new List<EraScaleRow>(),
-            eraGridEnabled = gridEnabled, formationThresholds = thresholds ?? new List<FormationThreshold>() }));
-    static string StaticsPrint(RegistryFile f) => StaticsPrint(f.unitScales, f.eraGrid, f.eraGridEnabled, f.formationThresholds);
-    static string SessionStaticsPrint() => StaticsPrint(UnitScales, EraGrid, EraGridEnabled, FormationThresholds);
+    // …and WHICH version of the era settings a window copied out of them is the WINDOW's to keep (StaticsVersion,
+    // outside review of PR #100, fourth round: a session-wide token was advanced by any window's Load() while the Era
+    // Lab still showed the grid it had copied earlier). EraSettingsVersion is the print of the session's era settings
+    // at this instant - read right after a Load(), the version of exactly what a window copies out of them next; ""
+    // when this session never loaded them.
+    [Serializable] class EraSnapshot { public List<EraScaleRow> eraGrid; public bool eraGridEnabled; public List<FormationThreshold> formationThresholds; }
+    static string EraPrint(List<EraScaleRow> grid, bool gridEnabled, List<FormationThreshold> thresholds) =>
+        Fingerprint(JsonUtility.ToJson(new EraSnapshot {
+            eraGrid = grid ?? new List<EraScaleRow>(), eraGridEnabled = gridEnabled,
+            formationThresholds = thresholds ?? new List<FormationThreshold>() }));
+    static string EraPrint(RegistryFile f) => EraPrint(f.eraGrid, f.eraGridEnabled, f.formationThresholds);
+    public static string EraSettingsVersion => loaded ? EraPrint(EraGrid, EraGridEnabled, FormationThresholds) : "";
 
     // RESIZE LAB rules — the registry file's `unitScales` array, captured at every Load and written back on
     // every Save (same session-static pattern as the pack header fields). The Lab edits this list directly.
@@ -555,13 +557,13 @@ public static class ModelRegistry
                                 EraGrid = d.eraGrid ?? new List<EraScaleRow>();
                                 EraGridEnabled = d.eraGridEnabled;
                                 FormationThresholds = d.formationThresholds ?? new List<FormationThreshold>();
-                                loaded = true; staticsVersion.Loaded(SessionStaticsPrint());   // the statics now reflect the adopted pack
+                                loaded = true;   // the statics now reflect the adopted pack
                                 return Migrate(SortByName(d.models), dep);
                             }
                         }
                         catch (Exception be) { Debug.LogWarning($"[Factory] the deployed artifact '{RegistryPath}' is unreadable ({be.Message}) — treating as absent."); }
                     }
-                    else { loaded = true; staticsVersion.Loaded(StaticsPrint(new RegistryFile())); }   // no source and no deployed copy: a first-ever pack - the statics in memory are its truth, and the "file" a save builds on is RegistryFile's defaults
+                    else loaded = true;   // no source and no deployed copy: a first-ever pack, and the statics in memory are its truth
                     return new List<ModelDef>();
                 }
             }
@@ -588,7 +590,7 @@ public static class ModelRegistry
             EraGrid = data?.eraGrid ?? new List<EraScaleRow>();
             EraGridEnabled = data == null || data.eraGridEnabled;
             FormationThresholds = data?.formationThresholds ?? new List<FormationThreshold>();
-            loaded = true; staticsVersion.Loaded(SessionStaticsPrint());   // the statics now reflect the file, and this is their version
+            loaded = true;   // the statics now reflect the file
             SyncArtifact(json);   // deployed copy recreated if missing; hand-edit there warned about once
             return Migrate(SortByName(data?.models ?? new List<ModelDef>()), json);
         }
@@ -708,12 +710,17 @@ public static class ModelRegistry
 
     // Returns true if the registry was written. False = nothing was saved (corrupt-guard tripped, or the atomic write
     // hit a transient lock) — the caller should surface that instead of assuming success.
-    public static bool Save(List<ModelDef> models) => Save(models, false);
+    public static bool Save(List<ModelDef> models) => Save(models, null);
 
-    // keepDiskModels = write the models exactly as THIS read of the source holds them (SaveStatics). One read serves
-    // both the merge base and the kept models, so a file that turns unreadable between two reads can't slip through.
-    static bool Save(List<ModelDef> models, bool keepDiskModels)
+    // What SaveStatics writes: the Era Lab's own settings, and the version of them that window holds.
+    sealed class EraEdit { public List<EraScaleRow> grid; public bool enabled; public List<FormationThreshold> thresholds; public StaticsVersion held; }
+
+    // era != null = SaveStatics: write the models exactly as THIS read of the source holds them (keepDiskModels). One
+    // read serves both the merge base and the kept models, so a file that turns unreadable between two reads can't
+    // slip through.
+    static bool Save(List<ModelDef> models, EraEdit era)
     {
+        bool keepDiskModels = era != null;
         if (lastLoadCorrupt)
         {
             Debug.LogError("[Factory] not saving: the existing registry was unreadable (see the .corrupt.json backup). " +
@@ -810,19 +817,29 @@ public static class ModelRegistry
                            "If the pack really is empty now, delete the deployed copy (the next Load recreates it from the source).");
             return false;
         }
-        if (keepDiskModels && !staticsVersion.MaySaveOver(StaticsPrint(file)))
+        if (keepDiskModels && (era.held == null || !era.held.MaySaveOver(EraPrint(file))))
         {
-            // THE FILE'S ERA AND SCALE SETTINGS ARE NOT THE ONES THIS SESSION HOLDS (review of PR #100, third round): another
-            // window, git or a hand edit changed them since the Lab loaded - possibly while a refresh of the Lab was caught
-            // by a lock and kept the old ones. Writing now would put the older settings over the newer.
-            Debug.LogWarning("[Factory] not saving: the era/scale settings in the registry changed since this Lab loaded them (another window, git, or a hand edit). " +
+            // THE FILE'S ERA SETTINGS ARE NOT THE ONES THIS ERA LAB COPIED (review of PR #100, third and fourth rounds):
+            // another window, git or a hand edit changed them since the Lab loaded - possibly while the Lab's refresh
+            // was caught by a lock, or while another window's Load() refreshed the session but not this Lab's grid.
+            // Writing now would put the older settings over the newer.
+            Debug.LogWarning("[Factory] not saving: the era settings in the registry changed since this Era Lab loaded them (another window, git, or a hand edit). " +
                              "Writing now would put the older settings over the newer ones. Reload the Lab, redo the change, and save again.");
             return false;
         }
         if (keepDiskModels) models = file.models;
         SortByName(models);   // write BOTH the live registry and the backup alphabetically, so the order is stable across bakes
         file.models = models;
-        if (loaded)   // the statics reflect the on-disk state (+ any Lab edits this session) — authoritative
+        if (keepDiskModels)
+        {
+            // THE ERA LAB'S OWN SETTINGS, and nothing else from the session (review of PR #100, fourth round): the unit
+            // scales stay exactly as this read found them - the session's may be older than the file (a refresh lost to
+            // a lock), and the Era Lab never edits them.
+            file.eraGrid = era.grid ?? new List<EraScaleRow>();
+            file.eraGridEnabled = era.enabled;
+            file.formationThresholds = era.thresholds ?? new List<FormationThreshold>();
+        }
+        else if (loaded)   // the statics reflect the on-disk state (+ any Lab edits this session) — authoritative
         {
             file.unitScales = UnitScales ?? new List<UnitScaleRule>();
             file.eraGrid = EraGrid ?? new List<EraScaleRow>();
@@ -841,7 +858,15 @@ public static class ModelRegistry
             if (File.Exists(SourcePath)) File.Replace(tmp, SourcePath, null);
             else File.Move(tmp, SourcePath);
             EditorPrefs.SetString(PrefLastWrite, Fingerprint(json));   // the editor's own write — see PrefLastWrite
-            if (loaded) staticsVersion.Saved(StaticsPrint(file));   // the file's statics are now the session's — the next SaveStatics may follow this one
+            if (keepDiskModels)
+            {
+                // Only NOW does the session take the Era Lab's settings: a refused save leaves the session untouched, so a
+                // later save from another window can't write a grid this guard refused. The window's version follows its
+                // own write - printed from the written bytes as the next read will parse them.
+                var written = JsonUtility.FromJson<RegistryFile>(json);
+                UnitScales = written.unitScales; EraGrid = written.eraGrid; EraGridEnabled = written.eraGridEnabled; FormationThresholds = written.formationThresholds;
+                era.held.Saved(EraPrint(written));
+            }
         }
         catch (Exception e)
         {
@@ -871,11 +896,13 @@ public static class ModelRegistry
         return true;
     }
 
-    // Save the era/scale STATICS only, preserving the on-disk MODELS (re-read fresh so a concurrent model edit/bake in
-    // another window isn't reverted by a stale snapshot), WITHOUT touching the session statics. For a Lab that owns
-    // only the statics (the Global Era Lab). The caller must have already assigned the current statics
-    // (ModelRegistry.EraGrid/UnitScales/…) before calling. An unreadable source refuses (returns false).
-    public static bool SaveStatics() => Save(null, true);
+    // Save the Era Lab's settings only - the era grid, its switch and the formation thresholds - preserving everything
+    // else on disk exactly as read, the models included (re-read fresh so a concurrent model edit/bake in another window
+    // isn't reverted by a stale snapshot). `held` is the version of the settings the calling window copied
+    // (EraSettingsVersion right after its Load()); the save refuses unless the file still carries it, and advances it
+    // on success. The session statics change only when the save succeeds. An unreadable source refuses (returns false).
+    public static bool SaveStatics(List<EraScaleRow> eraGrid, bool eraGridEnabled, List<FormationThreshold> thresholds, StaticsVersion held) =>
+        Save(null, new EraEdit { grid = eraGrid, enabled = eraGridEnabled, thresholds = thresholds, held = held });
 
     // Models in the deployed copy: 0 only when it is ABSENT or provably empty; -1 when it exists but can't be read or
     // fails the same shape rule as the source (locked by the game, half-written, `{}`) — no evidence of an empty pack.
