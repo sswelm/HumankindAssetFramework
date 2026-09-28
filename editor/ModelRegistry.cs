@@ -853,10 +853,17 @@ public static class ModelRegistry
         try
         {
             Directory.CreateDirectory(PackRepoDir);
-            var tmp = SourcePath + ".tmp";
-            File.WriteAllText(tmp, json);
-            if (File.Exists(SourcePath)) File.Replace(tmp, SourcePath, null);
-            else File.Move(tmp, SourcePath);
+            // …and only over the text this save read and judged (CheckedReplace, review of PR #100, fifth round): another
+            // editor replacing the file between that read and this write used to be overwritten unseen. The replace
+            // reports what it displaced; anything but `sourceText` puts the other version back and refuses.
+            var outcome = CheckedReplace.Write(SourcePath, sourceText, json, out string replaceNote);
+            if (replaceNote != null) Debug.LogWarning($"[Factory] registry source: {replaceNote}.");
+            if (outcome == CheckedReplace.Outcome.Conflict)
+            {
+                Debug.LogWarning($"[Factory] not saving: the registry source '{SourcePath}' changed while this save was writing it (another editor, git, a sync tool). " +
+                                 "That version is back in place and nothing of this save was written. Reload, then save again.");
+                return false;
+            }
             EditorPrefs.SetString(PrefLastWrite, Fingerprint(json));   // the editor's own write — see PrefLastWrite
             if (keepDiskModels)
             {
