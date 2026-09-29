@@ -222,6 +222,57 @@ public sealed class BackgroundCheck
     public void Forget() { answer = null; answeredAt = double.NaN; }
 }
 
+/// <summary>
+/// THE FACTORY'S REMOVE SNAPSHOT: where it may live and what it may be called (outside review of PR #102, fourth round).
+/// The snapshot folder was `&lt;backup root&gt;/_removed_&lt;stamp&gt;_&lt;resource name&gt;`, with the name straight from the
+/// registry's JSON — nothing at bake time keeps path separators or `..` out of it — and the cleanup after a remove that
+/// didn't happen deleted that folder recursively. A name built to escape the root resolved from `D:\HAF_Backups` to
+/// `D:\target`. So the folder name is SANITISED here (no separators, no invalid characters, never empty), and nothing is
+/// ever deleted unless the resolved path is a direct child of the resolved root that carries the snapshot prefix.
+/// Pure: paths in, verdicts out; no I/O.
+/// </summary>
+public static class BackupRules
+{
+    public const string RemovedPrefix = "_removed_";
+    /// <summary>The marker a snapshot carries while its removal is NOT proven to have happened (see the Factory).</summary>
+    public const string AttemptedMarker = "removal-not-done.txt";
+
+    /// <summary>The snapshot folder's name: the prefix, the stamp, and the resource name made safe as ONE path segment.</summary>
+    public static string SnapshotFolderName(string stamp, string resourceName) => RemovedPrefix + stamp + "_" + SafeSegment(resourceName);
+
+    /// <summary>
+    /// <paramref name="name"/> as a single path segment: separators and the characters no file system accepts become
+    /// `_`; leading and trailing dots and spaces go (Windows drops them, and `..` is a parent); empty becomes `_`.
+    /// </summary>
+    public static string SafeSegment(string name)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (char c in name ?? "")
+            sb.Append(c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|' || c < ' ' ? '_' : c);
+        string s = sb.ToString().Trim(' ', '.');
+        return s.Length == 0 ? "_" : s;
+    }
+
+    /// <summary>
+    /// May <paramref name="dir"/> be deleted as a remove snapshot of <paramref name="root"/>? Only when, RESOLVED (so
+    /// `..` and separators in either have been applied), it is a direct child of the root and its name carries the
+    /// snapshot prefix. Anything else — the root itself, a parent, a sibling, a grandchild — is not this Factory's to delete.
+    /// </summary>
+    public static bool IsRemovedSnapshotInside(string root, string dir)
+    {
+        if (string.IsNullOrWhiteSpace(root) || string.IsNullOrWhiteSpace(dir)) return false;
+        string fullRoot, fullDir;
+        try { fullRoot = Full(root); fullDir = Full(dir); } catch { return false; }
+        string parent = System.IO.Path.GetDirectoryName(fullDir);
+        if (parent == null) return false;
+        return string.Equals(Trim(parent), fullRoot, StringComparison.OrdinalIgnoreCase)
+            && System.IO.Path.GetFileName(fullDir).StartsWith(RemovedPrefix, StringComparison.Ordinal);
+    }
+
+    static string Full(string p) => Trim(System.IO.Path.GetFullPath(p));
+    static string Trim(string p) => p.TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
+}
+
 /// <summary>Bake-pipeline decisions (UniversalBaker calls these; BakerRulesTests locks them).</summary>
 public static class BakerRules
 {

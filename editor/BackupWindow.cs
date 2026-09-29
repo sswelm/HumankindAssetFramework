@@ -230,7 +230,10 @@ public class BackupWindow : EditorWindow
         if (del.Count > 0 && (showDel = EditorGUILayout.Foldout(showDel, $"Delete-guard snapshots ({del.Count}) — assets copied before a deletion", true)))
             foreach (var b in del.OrderByDescending(x => TsOf(NameOf(x)))) BackupRow(b, AssetOf(NameOf(b), "_deleted"), RowMode.GroupRestore);
         if (rem.Count > 0 && (showRem = EditorGUILayout.Foldout(showRem, $"Factory remove snapshots ({rem.Count}) — one-click full restore (baked assets + registry entry)", true)))
-            foreach (var b in rem.OrderByDescending(x => TsOf(NameOf(x)))) BackupRow(b, AssetOf(NameOf(b), "_removed"), RowMode.RemovedRestore);
+            foreach (var b in rem.OrderByDescending(x => TsOf(NameOf(x))))
+                // a snapshot whose removal is NOT proven to have happened says so (BackupRules.AttemptedMarker, review of
+                // PR #102): its entry and files may still be live, and Restore asks before overwriting them
+                BackupRow(b, AssetOf(NameOf(b), "_removed") + (File.Exists(Path.Combine(b, BackupRules.AttemptedMarker)) ? "  ·  NOT proven removed — the entry may still be live; Restore asks first" : ""), RowMode.RemovedRestore);
         EditorGUILayout.EndScrollView();
     }
 
@@ -251,8 +254,8 @@ public class BackupWindow : EditorWindow
             {
                 if (GUILayout.Button(new GUIContent("Restore", "Copy this backup's TICKED groups back over the originals. Guarded: your current state is snapshotted first (_prerestore), files you added since are never deleted, and only missing/changed files are written (identical ones untouched)."), GUILayout.Width(64))) { DoRestore(b); GUIUtility.ExitGUI(); }
             }
-            else if (GUILayout.Button(new GUIContent("Restore", "FULL restore of this removed model: its baked assets are copied back AND its registry entry is re-added (dual-written like any save). The Model Factory's Undo-remove button does exactly this."), GUILayout.Width(64)))
-            { status = RestoreRemovedSnapshot(b, out _); sizeCache.Clear(); GUIUtility.ExitGUI(); }
+            else if (GUILayout.Button(new GUIContent("Restore", "FULL restore of this removed model: its baked assets are copied back AND its registry entry is re-added (dual-written like any save). If the entry is still in the registry, you are asked before it is overwritten."), GUILayout.Width(64)))
+            { status = RestoreRemovedSnapshot(b, out _, askBeforeOverwritingLive: true); sizeCache.Clear(); GUIUtility.ExitGUI(); }
             if (GUILayout.Button(new GUIContent("Delete", "Permanently delete this backup folder (asks first). Live project files are untouched."), GUILayout.Width(60))) { DeleteBackup(b); GUIUtility.ExitGUI(); }
         }
     }
@@ -260,7 +263,12 @@ public class BackupWindow : EditorWindow
     // FULL restore of a Factory _removed_ snapshot (2026-08-17, user: "the intuitive click is the removed row
     // itself, in the Restore & Backup dialog"): baked files copied back additively, then the registry entry
     // re-added via ModelRegistry.Upsert (dual-written like any save). Shared with the Factory's Undo button.
-    internal static string RestoreRemovedSnapshot(string snapDir, out string resourceName)
+    // THE ENTRY MAY STILL BE LIVE (review of PR #102, fourth round): a snapshot of a removal that did not go through,
+    // or an entry baked or restored again since. Restoring would put this OLDER copy over the live entry and its baked
+    // files. The registry decides, at restore time - never the snapshot's name or its marker: a registry that can't be
+    // read refuses, a live entry refuses unless the caller may ask (the Backup window's row does; the Factory's Undo
+    // button never overwrites), and the person answers a dialog that names what would be overwritten.
+    internal static string RestoreRemovedSnapshot(string snapDir, out string resourceName, bool askBeforeOverwritingLive)
     {
         resourceName = null;
         try
@@ -269,6 +277,22 @@ public class BackupWindow : EditorWindow
             if (!File.Exists(ej)) return $"Restore FAILED: no entry.json in {Path.GetFileName(snapDir)} — not a Factory remove snapshot.";
             var def = JsonUtility.FromJson<ModelDef>(File.ReadAllText(ej));
             if (def == null || string.IsNullOrEmpty(def.resourceName)) return "Restore FAILED: snapshot entry unreadable.";
+            bool live = ModelRegistry.Load().Any(m => m.resourceName == def.resourceName);
+            if (ModelRegistry.LastLoadFailed)
+                return $"Restore REFUSED: the registry {ModelRegistry.LastLoadProblem}, so it can't be confirmed that '{def.resourceName}' is absent. Nothing was restored.";
+            if (live)
+            {
+                bool attempted = File.Exists(Path.Combine(snapDir, BackupRules.AttemptedMarker));
+                if (!askBeforeOverwritingLive || Application.isBatchMode)
+                    return $"Restore REFUSED: '{def.resourceName}' is still in the registry — restoring would overwrite the live entry and its baked files with the copy from " +
+                           $"{TsOf(Path.GetFileName(snapDir))}. Nothing was restored. (Tools ▸ HAF ▸ Backup and Restore can overwrite it deliberately.)";
+                if (!EditorUtility.DisplayDialog("Overwrite the live entry?",
+                        $"'{def.resourceName}' is still in the registry. " +
+                        (attempted ? "This snapshot is from a removal that did not go through." : "It was baked or restored again since this snapshot was taken.") +
+                        $"\n\nRestoring overwrites the live entry AND its baked files with the copy from {TsOf(Path.GetFileName(snapDir))}. Compare them first (Reveal).",
+                        "Overwrite", "Cancel"))
+                    return "Restore cancelled — nothing was restored.";
+            }
             int files = 0;
             foreach (var f in Directory.GetFiles(snapDir))
             {
