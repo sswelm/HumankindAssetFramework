@@ -277,17 +277,20 @@ public class BackupWindow : EditorWindow
             if (!File.Exists(ej)) return $"Restore FAILED: no entry.json in {Path.GetFileName(snapDir)} — not a Factory remove snapshot.";
             var def = JsonUtility.FromJson<ModelDef>(File.ReadAllText(ej));
             if (def == null || string.IsNullOrEmpty(def.resourceName)) return "Restore FAILED: snapshot entry unreadable.";
-            bool live = ModelRegistry.Load().Any(m => m.resourceName == def.resourceName);
+            // CASE-INSENSITIVE, like the Upsert that would replace it (fifth round): the registry keys entries the way
+            // the file system does, so a live 'tank' IS what a restored 'Tank' overwrites - an ordinal compare missed it.
+            var liveEntry = ModelRegistry.Load().FirstOrDefault(m => string.Equals(m.resourceName, def.resourceName, StringComparison.OrdinalIgnoreCase));
             if (ModelRegistry.LastLoadFailed)
                 return $"Restore REFUSED: the registry {ModelRegistry.LastLoadProblem}, so it can't be confirmed that '{def.resourceName}' is absent. Nothing was restored.";
-            if (live)
+            if (liveEntry != null)
             {
+                string liveName = liveEntry.resourceName == def.resourceName ? $"'{def.resourceName}'" : $"'{liveEntry.resourceName}' (the same key as '{def.resourceName}')";
                 bool attempted = File.Exists(Path.Combine(snapDir, BackupRules.AttemptedMarker));
                 if (!askBeforeOverwritingLive || Application.isBatchMode)
-                    return $"Restore REFUSED: '{def.resourceName}' is still in the registry — restoring would overwrite the live entry and its baked files with the copy from " +
+                    return $"Restore REFUSED: {liveName} is still in the registry — restoring would overwrite the live entry and its baked files with the copy from " +
                            $"{TsOf(Path.GetFileName(snapDir))}. Nothing was restored. (Tools ▸ HAF ▸ Backup and Restore can overwrite it deliberately.)";
                 if (!EditorUtility.DisplayDialog("Overwrite the live entry?",
-                        $"'{def.resourceName}' is still in the registry. " +
+                        $"{liveName} is still in the registry. " +
                         (attempted ? "This snapshot is from a removal that did not go through." : "It was baked or restored again since this snapshot was taken.") +
                         $"\n\nRestoring overwrites the live entry AND its baked files with the copy from {TsOf(Path.GetFileName(snapDir))}. Compare them first (Reveal).",
                         "Overwrite", "Cancel"))
@@ -297,7 +300,7 @@ public class BackupWindow : EditorWindow
             foreach (var f in Directory.GetFiles(snapDir))
             {
                 string leaf = Path.GetFileName(f);
-                if (leaf == "entry.json" || leaf == "manifest.txt") continue;
+                if (BackupRules.IsSnapshotMetadata(leaf)) continue;   // the snapshot's own bookkeeping, the attempt marker included - never into Assets/Resources
                 File.Copy(f, Path.Combine("Assets/Resources", leaf), true); files++;
             }
             if (files > 0) AssetDatabase.Refresh();

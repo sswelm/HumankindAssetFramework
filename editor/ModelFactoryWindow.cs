@@ -900,7 +900,10 @@ public class ModelFactoryWindow : EditorWindow
                             // fourth round): the name comes straight from the registry's JSON, and one with separators or
                             // `..` in it used to build a path outside the backup root - and then be deleted recursively.
                             string backupRoot = EditorPrefs.GetString("HAF.Backup.Dest", "D:/HAF_Backups");
-                            string undoDir = Path.Combine(backupRoot, BackupRules.SnapshotFolderName(DateTime.Now.ToString("yyyy-MM-dd_HHmmss"), name));
+                            // …and a folder that does not exist yet (fifth round): the stamp is to the second and safe names can
+                            // collide, and a second remove writing into the first one's folder - then cleaning it up - erased
+                            // the first one's undo. This click deletes only the folder it created.
+                            string undoDir = BackupRules.UniqueFolder(backupRoot, BackupRules.SnapshotFolderName(DateTime.Now.ToString("yyyy-MM-dd_HHmmss"), name), Directory.Exists);
                             try
                             {
                                 var defSnap = ModelRegistry.Load().FirstOrDefault(d => d.resourceName == name);

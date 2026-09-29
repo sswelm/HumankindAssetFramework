@@ -38,6 +38,37 @@ public class BackupRulesTests
     }
 
     [Fact]
+    public void Two_removes_never_share_a_snapshot_folder()
+    {
+        // fifth round: the stamp is to the second and "a/b" and "a_b" sanitise alike, so a second remove wrote into the
+        // first one's folder - and its cleanup, after a refused save, deleted the first one's undo
+        string root = Path.Combine(Path.GetTempPath(), "HAF_Backups");
+        var taken = new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+        string name = BackupRules.SnapshotFolderName("2026-09-29_120000", "a/b");
+        Assert.Equal(name, BackupRules.SnapshotFolderName("2026-09-29_120000", "a_b"));   // the collision
+        string first = BackupRules.UniqueFolder(root, name, taken.Contains);
+        Assert.Equal(Path.Combine(root, name), first);                                     // the first free name is the plain one
+        taken.Add(first);
+        string second = BackupRules.UniqueFolder(root, name, taken.Contains);
+        Assert.NotEqual(first, second);
+        Assert.Equal(Path.Combine(root, name + "-2"), second);
+        taken.Add(second);
+        Assert.Equal(Path.Combine(root, name + "-3"), BackupRules.UniqueFolder(root, name, taken.Contains));
+        Assert.True(BackupRules.IsRemovedSnapshotInside(root, second));                    // still a snapshot the cleanup may delete
+    }
+
+    [Fact]
+    public void A_snapshots_own_bookkeeping_is_never_copied_back_as_a_baked_file()
+    {
+        Assert.True(BackupRules.IsSnapshotMetadata("entry.json"));
+        Assert.True(BackupRules.IsSnapshotMetadata("manifest.txt"));
+        Assert.True(BackupRules.IsSnapshotMetadata(BackupRules.AttemptedMarker));            // fifth round: it landed in Assets/Resources
+        Assert.True(BackupRules.IsSnapshotMetadata("ENTRY.JSON"));
+        Assert.False(BackupRules.IsSnapshotMetadata("Tank_Skeleton.asset"));
+        Assert.False(BackupRules.IsSnapshotMetadata("Tank_Atlas.png"));
+    }
+
+    [Fact]
     public void Only_a_snapshot_directly_inside_the_root_may_be_deleted()
     {
         string root = Path.Combine(Path.GetTempPath(), "HAF_Backups");

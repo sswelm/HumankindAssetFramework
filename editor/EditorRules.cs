@@ -241,6 +241,28 @@ public static class BackupRules
     public static string SnapshotFolderName(string stamp, string resourceName) => RemovedPrefix + stamp + "_" + SafeSegment(resourceName);
 
     /// <summary>
+    /// A folder under <paramref name="root"/> that does NOT exist yet (fifth round): the stamp is to the second and the
+    /// safe name can collide ("a/b" and "a_b"), so two removes could share one folder — and the cleanup after the
+    /// second, refused, one deleted the first one's undo. The first free name wins; a taken one gets -2, -3, …
+    /// <paramref name="exists"/> is the caller's directory test, so this stays pure.
+    /// </summary>
+    public static string UniqueFolder(string root, string folderName, Func<string, bool> exists)
+    {
+        string candidate = System.IO.Path.Combine(root, folderName);
+        for (int n = 2; exists(candidate); n++) candidate = System.IO.Path.Combine(root, folderName + "-" + n);
+        return candidate;
+    }
+
+    /// <summary>
+    /// A file in a remove snapshot that is the snapshot's OWN bookkeeping, never a baked output to copy back (fifth
+    /// round: the attempt marker was copied into Assets/Resources by a restore).
+    /// </summary>
+    public static bool IsSnapshotMetadata(string fileName) =>
+        string.Equals(fileName, "entry.json", StringComparison.OrdinalIgnoreCase)
+     || string.Equals(fileName, "manifest.txt", StringComparison.OrdinalIgnoreCase)
+     || string.Equals(fileName, AttemptedMarker, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     /// <paramref name="name"/> as a single path segment: separators and the characters no file system accepts become
     /// `_`; leading and trailing dots and spaces go (Windows drops them, and `..` is a parent); empty becomes `_`.
     /// </summary>
