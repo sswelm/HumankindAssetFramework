@@ -41,20 +41,55 @@ public class BackupRulesTests
     public void Two_removes_never_share_a_snapshot_folder()
     {
         // fifth round: the stamp is to the second and "a/b" and "a_b" sanitise alike, so a second remove wrote into the
-        // first one's folder - and its cleanup, after a refused save, deleted the first one's undo
+        // first one's folder - and its cleanup, after a refused save, deleted the first one's undo. The reserve callback
+        // is atomic (here: a set's Add, which is false when the name is taken).
         string root = Path.Combine(Path.GetTempPath(), "HAF_Backups");
         var taken = new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
         string name = BackupRules.SnapshotFolderName("2026-09-29_120000", "a/b");
         Assert.Equal(name, BackupRules.SnapshotFolderName("2026-09-29_120000", "a_b"));   // the collision
-        string first = BackupRules.UniqueFolder(root, name, taken.Contains);
+        string first = BackupRules.ReserveFolder(root, name, taken.Add);
         Assert.Equal(Path.Combine(root, name), first);                                     // the first free name is the plain one
-        taken.Add(first);
-        string second = BackupRules.UniqueFolder(root, name, taken.Contains);
+        string second = BackupRules.ReserveFolder(root, name, taken.Add);
         Assert.NotEqual(first, second);
         Assert.Equal(Path.Combine(root, name + "-2"), second);
-        taken.Add(second);
-        Assert.Equal(Path.Combine(root, name + "-3"), BackupRules.UniqueFolder(root, name, taken.Contains));
+        Assert.Equal(Path.Combine(root, name + "-3"), BackupRules.ReserveFolder(root, name, taken.Add));
         Assert.True(BackupRules.IsRemovedSnapshotInside(root, second));                    // still a snapshot the cleanup may delete
+        Assert.Throws<IOException>(() => BackupRules.ReserveFolder(root, name, _ => false));   // a root nothing can be reserved in: said, not looped forever
+    }
+
+    [Fact]
+    public void Reserving_a_folder_is_atomic_on_a_real_file_system()
+    {
+        // sixth round: "exists, then create" let two editors pick the same free name. The reservation renames a private
+        // temp folder into place, which fails when the name is taken - one winner, whoever asks first.
+        string root = Path.Combine(Path.GetTempPath(), "haf_reserve_" + System.Guid.NewGuid().ToString("N"));
+        try
+        {
+            string want = Path.Combine(root, "_removed_2026-09-29_120000_Tank");
+            Assert.True(CheckedReplace.TryReserveFolder(want));                            // the root did not even exist: made, and the folder reserved
+            Assert.True(Directory.Exists(want));
+            Assert.Empty(Directory.GetFileSystemEntries(want));
+            Assert.False(CheckedReplace.TryReserveFolder(want));                           // the second editor: taken
+            Assert.Empty(Directory.GetDirectories(root, "_tmp_*"));                        // and its temp folder is gone
+            // through the rule: the second remove of the same name lands on -2, on disk
+            string name = Path.GetFileName(want);
+            Assert.Equal(want + "-2", BackupRules.ReserveFolder(root, name, CheckedReplace.TryReserveFolder));
+            Assert.True(Directory.Exists(want + "-2"));
+            File.WriteAllText(Path.Combine(root, "_removed_x_File"), "a file, not a folder");
+            Assert.False(CheckedReplace.TryReserveFolder(Path.Combine(root, "_removed_x_File")));   // a file in the way is "taken" too
+        }
+        finally { try { Directory.Delete(root, true); } catch { } }
+    }
+
+    [Fact]
+    public void Only_a_plain_name_may_locate_files()
+    {
+        // sixth round: the output copy uses the raw name in the source AND destination path
+        Assert.True(BackupRules.IsPlainName("Tank"));
+        Assert.True(BackupRules.IsPlainName("Era6_Common_StealthCorvettes_01"));
+        Assert.True(BackupRules.IsPlainName("a..b"));                                      // dots inside one segment are just a name
+        foreach (var hostile in new[] { @"..\..\target", "../../target", @"\..\..\target", "/target", "a/b", @"a\b", "..", ".", "", null, "Tank.", " Tank", "a:b", "a*b" })
+            Assert.False(BackupRules.IsPlainName(hostile), hostile ?? "<null>");
     }
 
     [Fact]

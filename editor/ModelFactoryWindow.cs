@@ -900,16 +900,25 @@ public class ModelFactoryWindow : EditorWindow
                             // fourth round): the name comes straight from the registry's JSON, and one with separators or
                             // `..` in it used to build a path outside the backup root - and then be deleted recursively.
                             string backupRoot = EditorPrefs.GetString("HAF.Backup.Dest", "D:/HAF_Backups");
-                            // …and a folder that does not exist yet (fifth round): the stamp is to the second and safe names can
-                            // collide, and a second remove writing into the first one's folder - then cleaning it up - erased
-                            // the first one's undo. This click deletes only the folder it created.
-                            string undoDir = BackupRules.UniqueFolder(backupRoot, BackupRules.SnapshotFolderName(DateTime.Now.ToString("yyyy-MM-dd_HHmmss"), name), Directory.Exists);
+                            // A NAME WITH PATH COMPONENTS IS NOT REMOVED AT ALL (sixth round): the output copy and sweep build
+                            // Assets/Resources paths from the name as it is, and `..\..\target` reached outside the backup
+                            // root. Such an entry is fixed by hand in pack.json, never touched by name here.
+                            if (!BackupRules.IsPlainName(name))
+                            {
+                                status = $"Remove ABORTED — '{name}' contains path characters, so its files can't be located safely. Edit the entry's resourceName in pack.json by hand, then retry. Nothing was removed.";
+                                GUIUtility.ExitGUI();
+                            }
+                            // …and a folder RESERVED for this click alone (fifth and sixth rounds): the stamp is to the second
+                            // and safe names can collide, and "exists, then create" let two editors pick the same free name -
+                            // then one's refused remove cleaned up the other's undo. TryReserveFolder is atomic: a private
+                            // temp folder renamed into place, and the rename fails when the name is taken.
+                            string undoDir = null;
                             try
                             {
                                 var defSnap = ModelRegistry.Load().FirstOrDefault(d => d.resourceName == name);
                                 if (ModelRegistry.LastLoadFailed) { status = $"Remove ABORTED — the registry {ModelRegistry.LastLoadProblem}. Nothing was removed."; GUIUtility.ExitGUI(); }
                                 if (defSnap == null) { status = $"Remove ABORTED — '{name}' not found in the registry (refresh and retry)."; GUIUtility.ExitGUI(); }
-                                Directory.CreateDirectory(undoDir);
+                                undoDir = BackupRules.ReserveFolder(backupRoot, BackupRules.SnapshotFolderName(DateTime.Now.ToString("yyyy-MM-dd_HHmmss"), name), CheckedReplace.TryReserveFolder);
                                 // ATTEMPTED FIRST, REMOVED ONLY WHEN PROVEN: the snapshot carries a marker from the start, and only
                                 // a remove that happened takes it off. A refused save, an unsettled one, a crash half way, a
                                 // cleanup that fails - all leave the marker, and the Backup window shows such a snapshot as a
@@ -924,6 +933,8 @@ public class ModelFactoryWindow : EditorWindow
                             catch (ExitGUIException) { throw; }   // the ABORTED exits above, not a failed snapshot: keep their status
                             catch (Exception ex)
                             {
+                                // a folder this click reserved but could not fill is its own to delete: nothing was removed
+                                if (undoDir != null && BackupRules.IsRemovedSnapshotInside(backupRoot, undoDir)) { try { Directory.Delete(undoDir, true); } catch { } }
                                 status = $"Remove ABORTED — could not take the undo snapshot ({ex.Message}). Nothing was removed.";
                                 GUIUtility.ExitGUI();
                             }

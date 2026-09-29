@@ -241,15 +241,30 @@ public static class BackupRules
     public static string SnapshotFolderName(string stamp, string resourceName) => RemovedPrefix + stamp + "_" + SafeSegment(resourceName);
 
     /// <summary>
-    /// A folder under <paramref name="root"/> that does NOT exist yet (fifth round): the stamp is to the second and the
-    /// safe name can collide ("a/b" and "a_b"), so two removes could share one folder — and the cleanup after the
-    /// second, refused, one deleted the first one's undo. The first free name wins; a taken one gets -2, -3, …
-    /// <paramref name="exists"/> is the caller's directory test, so this stays pure.
+    /// Is <paramref name="name"/> usable in a file path AS IT IS — one segment, never a parent, never empty (sixth
+    /// round)? The Factory's Remove passed the registry's raw name to the output copy, which uses it in the source
+    /// AND the destination path: `..\..\target` resolved the copy's destination outside the backup root and could
+    /// overwrite a file there. Sanitising the snapshot's folder name protected nothing on that path; the name itself
+    /// must be plain, or nothing is done by it.
     /// </summary>
-    public static string UniqueFolder(string root, string folderName, Func<string, bool> exists)
+    public static bool IsPlainName(string name) => !string.IsNullOrEmpty(name) && SafeSegment(name) == name;
+
+    /// <summary>
+    /// A folder under <paramref name="root"/> RESERVED for this caller alone (fifth and sixth rounds): the stamp is to
+    /// the second and safe names collide ("a/b", "a_b"), so two removes could share one folder — and the cleanup after
+    /// the second, refused, one deleted the first one's undo. "Exists, then create" was not enough either: two editors
+    /// could both find the same name free. <paramref name="reserve"/> is the caller's ATOMIC create-if-absent
+    /// (CheckedReplace.TryReserveFolder): true = that path is now the caller's. The first candidate won is returned:
+    /// the plain name, then -2, -3, … Pure: the I/O is the callback's.
+    /// </summary>
+    public static string ReserveFolder(string root, string folderName, Func<string, bool> reserve)
     {
         string candidate = System.IO.Path.Combine(root, folderName);
-        for (int n = 2; exists(candidate); n++) candidate = System.IO.Path.Combine(root, folderName + "-" + n);
+        for (int n = 2; !reserve(candidate); n++)
+        {
+            if (n > 1000) throw new System.IO.IOException($"could not reserve a folder named '{folderName}' under '{root}' in 1000 attempts");
+            candidate = System.IO.Path.Combine(root, folderName + "-" + n);
+        }
         return candidate;
     }
 

@@ -247,7 +247,12 @@ public class ShipStatusWindow : EditorWindow
                             "The delete-guard snapshots every file first, so this is restorable from the Backup & Restore window.",
                             "Delete", "Cancel"))
                         {
-                            foreach (var n in names) UniversalBaker.SweepAllOutputs(n);
+                            foreach (var n in names)
+                            {
+                                // a name with path characters is never used to locate files (BackupRules, review of PR #102): said and skipped, the rest still swept
+                                if (!BackupRules.IsPlainName(n)) { Debug.LogWarning($"[ShipStatus] '{n}' contains path characters — its outputs were NOT deleted; fix the entry's resourceName by hand."); continue; }
+                                UniversalBaker.SweepAllOutputs(n);
+                            }
                             AssetDatabase.Refresh();
                             Scan();
                             ModelFactoryWindow.RefreshAllOpen();   // an open Factory showing an un-baked entry must find out now, not on the next reload
