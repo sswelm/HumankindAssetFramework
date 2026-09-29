@@ -913,12 +913,18 @@ public class ModelFactoryWindow : EditorWindow
                             }
                             var result = ModelRegistry.RemoveEntry(name);
                             bool removed = result == RegistryRules.RemoveResult.Removed;
-                            // The undo points at this snapshot only once the remove MAY have happened (review of PR #102):
-                            // after a refused one, "Undo remove" would offer to restore an entry that was never taken
-                            // away. An unsettled one may have removed it, so the undo is offered then too - restoring an
-                            // entry that is still there puts back the same entry.
+                            // "Undo remove" is offered ONLY after a remove that happened (review of PR #102). Not after a
+                            // refused one - it would restore an entry never taken away. And not after an unsettled one
+                            // (third round): another writer's NEWER version may be the active one, and the undo overwrites
+                            // the baked files and upserts this older snapshot over it. That case is the user's to judge -
+                            // the status names the snapshot and the Backup window's manual Restore.
                             bool unknown = result == RegistryRules.RemoveResult.Unknown;
-                            if (removed || unknown) { lastRemovedName = name; lastRemovedSnap = undoDir; }
+                            if (removed) { lastRemovedName = name; lastRemovedSnap = undoDir; }
+                            // A snapshot of a remove that certainly did NOT happen is not kept: the Backup window would list
+                            // it as a removed model with a Restore button - the same stale overwrite, one click away. It is
+                            // this click's own copy, and the entry and files are still live. After an unsettled remove it
+                            // stays: it may be the only copy of the entry.
+                            if (!removed && !unknown) { try { Directory.Delete(undoDir, true); } catch { } }
                             // sel = 0 too: the popup-apply below reads a stale `sel` as a "selection change" and
                             // reloads existing[sel] on the SHRUNKEN list. Everything else — form reset, preview
                             // clear, coherence flag — is the FUNNEL's job (SelectEntry -> OnSelectResource): the
@@ -927,7 +933,8 @@ public class ModelFactoryWindow : EditorWindow
                             status = removed ? $"Removed '{name}' from the registry."
                                    : result == RegistryRules.RemoveResult.NotPresent ? $"'{name}' was not in the registry — nothing removed."
                                    : unknown ? $"Remove could NOT be confirmed — the registry may or may not still hold '{name}' (see the Console). " +
-                                               "Its files were not deleted; 'Undo remove' is offered in case the entry did go."
+                                               "Its files were not deleted. Check the list once it refreshes: if the entry is gone and shouldn't be, its snapshot is " +
+                                               $"'{Path.GetFileName(undoDir)}' in Tools ▸ HAF ▸ Backup and Restore — compare before restoring, that Restore also copies the baked files back."
                                    : $"Remove FAILED — nothing was removed and no files were deleted (see the Console).";
                             // Curated asset cleanup (2026-07-27, the lost-portrait lesson): delete the BAKED outputs via
                             // the exact whitelist ONLY — never a name wildcard, because unit-side files share the prefix
