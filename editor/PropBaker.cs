@@ -44,17 +44,38 @@ public static class PropRegistry
         string json;
         try { json = System.IO.File.Exists(PathJson) ? System.IO.File.ReadAllText(PathJson) : null; }
         catch (Exception e) { return Fault($"it can't be read right now ({e.Message}) — another program has it open"); }
-        if (json == null && CheckedReplace.MissingButKnown(PathJson))
+        if (json != null) gitAskedAt = -1;   // present: the next time it goes missing, git is asked afresh
+        else
         {
-            // shown, not logged: an editor's save-by-rename passes through this state on every save
-            Unreadable = MissingKnown;
-            return null;
+            // The SAME evidence the write path uses (review of PR #101, fourth round: the window checked only the .meta,
+            // so a tracked registry without one showed as "no recipes" while a save was rightly refused). The .meta is
+            // looked at live; git is asked at most every 5 s, because this runs on every repaint.
+            string ev = System.IO.File.Exists(PathJson + ".meta") ? "Unity still has its .meta" : GitSaysCached();
+            if (ev != null)
+            {
+                Unreadable = MissingText(ev);   // shown, not logged: an editor's save-by-rename passes through this state on every save
+                return null;
+            }
         }
         return Parse(json);
     }
 
-    const string MissingKnown = "it is missing, but Unity still has its .meta, so it existed — another program may be saving it (it comes back by itself). " +
-                                "If you deleted it on purpose, delete haf_props.json.meta too, or let Unity refresh";
+    static string gitSaid; static double gitAskedAt = -1;
+    static string GitSaysCached()
+    {
+        double now = EditorApplication.timeSinceStartup;
+        if (gitAskedAt < 0 || now - gitAskedAt > 5)
+        {
+            gitSaid = CheckedReplace.GitTracks(PathJson) ? "git tracks it" : null;
+            gitAskedAt = now;
+        }
+        return gitSaid;
+    }
+
+    // What a missing file known to have existed means, and what to do about a deliberate deletion — per evidence.
+    static string MissingText(string evidence) =>
+        $"it is missing, but {evidence}, so it existed — another program may be saving it (it comes back by itself). If you deleted it on purpose, " +
+        (evidence.StartsWith("git") ? "commit the deletion (git rm)" : "delete haf_props.json.meta too, or let Unity refresh");
 
     // The verdict on one text as read (null = no file: no recipes yet).
     static List<PropDef> Parse(string json)
@@ -106,7 +127,7 @@ public static class PropRegistry
     // The Prop Lab's one-shot migration: add the form's recipe only if the registry lacks it — decided on the file as
     // read at write time, not on the Load() that prompted it. It NEVER creates the file (review of PR #101, second
     // round): an automatic step can't tell a new registry from one another program has moved aside for a moment, and
-    // guessing wrong leaves a one-recipe file in its place. The next bake creates a registry that really is new.
+    // guessing wrong leaves a one-recipe file in its place. Only a bake creates one, and only once the user says so.
     public static SaveResult AddIfMissing(PropDef d) => Change(d.resourceName, false, quietWithoutFile: true, apply: l =>
     {
         if (l.Any(x => x.resourceName == d.resourceName)) return false;
@@ -120,12 +141,15 @@ public static class PropRegistry
     // write that re-applies on a conflict (CheckedReplace.Apply). A recipe another writer added between the read and
     // the write is kept; a missing file is looked at twice before it counts as absent; and the write's result is the
     // file's, whatever the asset import does afterwards.
-    // mayCreate = this change may create a missing file (an explicit bake) — and even then not one Unity still knows.
+    // mayCreate = this change may create a missing file (an explicit bake) — never one known to have existed, and only
+    // once the user says so (below).
     // quietWithoutFile = a missing file is no news to this caller (the migration runs on every window open).
     static SaveResult Change(string name, bool mayCreate, Func<List<PropDef>, bool> apply, bool quietWithoutFile = false)
     {
         bool refused = false, noFile = false;
         string existed = null;   // why a missing file is known to have existed (CheckedReplace.ExistedBefore)
+        bool? create = null;     // the user's answer to "create a new registry?" — asked once per change
+        string declined = null;  // why a new registry was not created
         CheckedReplace.Outcome outcome;
         string note;
         try
@@ -133,9 +157,24 @@ public static class PropRegistry
             System.IO.Directory.CreateDirectory("Assets/Databases");
             outcome = CheckedReplace.Apply(PathJson, text =>
             {
-                refused = noFile = false; existed = null;   // each attempt decides afresh
+                refused = noFile = false; existed = declined = null;   // each attempt decides afresh
                 if (text == null && !mayCreate) { noFile = true; return null; }
                 if (text == null && (existed = CheckedReplace.ExistedBefore(PathJson)) != null) return null;
+                if (text == null)
+                {
+                    // NOTHING ON DISK SAYS WHETHER A REGISTRY EXISTED (review of PR #101, fourth round: one with no .meta
+                    // and not in git, moved aside by another program's save, was still created over). Absence can't be
+                    // proven, so the person decides - and the seconds a dialog takes are also time for a save-by-rename
+                    // to finish: a file that is back by then is applied to, never overwritten (File.Move refuses it).
+                    if (create == null)
+                        create = Application.isBatchMode ? false : EditorUtility.DisplayDialog("Create haf_props.json?",
+                            $"The prop recipe registry ({PathJson}) doesn't exist.\n\n" +
+                            $"If this is a new project, create it now, holding only '{name}'.\n\n" +
+                            "If you do have a recipe registry and another program (a text editor, git, a sync tool) is saving it right now, " +
+                            "cancel and bake again in a moment: creating it now would put a one-recipe file in its place.",
+                            "Create", "Cancel");
+                    if (create == false) { declined = Application.isBatchMode ? "batch mode can't ask whether to create it" : "you chose not to create it"; return null; }
+                }
                 var l = Parse(text);
                 if (l == null) { refused = true; return null; }   // unreadable: said by Parse, and never written over
                 if (!apply(l)) return null;                        // nothing to change
@@ -154,16 +193,22 @@ public static class PropRegistry
         {
             // nothing to change in a file that isn't there, and only a bake creates one
             if (!quietWithoutFile)
-                Debug.LogWarning($"[Props] not saving '{name}': {PathJson} is missing" +
-                                 (CheckedReplace.MissingButKnown(PathJson) ? $" ({MissingKnown})." : "."));
+            {
+                string ev = CheckedReplace.ExistedBefore(PathJson);
+                Debug.LogWarning($"[Props] not saving '{name}': {PathJson} " + (ev != null ? MissingText(ev) + "." : "is missing."));
+            }
             return SaveResult.NotSaved;
         }
         if (existed != null)
         {
-            Debug.LogWarning($"[Props] not saving '{name}': {PathJson} is missing, but {existed}, so it existed — another program may be saving it " +
-                             "(it comes back by itself; then save again). Creating it now could leave a one-recipe registry where the real one belongs. " +
-                             "If you deleted it on purpose: " + (existed.StartsWith("git") ? "commit the deletion (git rm), then save again."
-                                                                                        : "delete haf_props.json.meta too, or let Unity refresh, then save again."));
+            Debug.LogWarning($"[Props] not saving '{name}': {PathJson} {MissingText(existed)}, then save again. " +
+                             "Creating it now could leave a one-recipe registry where the real one belongs.");
+            return SaveResult.NotSaved;
+        }
+        if (declined != null)
+        {
+            Debug.LogWarning($"[Props] not saving '{name}': {PathJson} doesn't exist, and a new one was not created ({declined})." +
+                             (Application.isBatchMode ? "" : " Bake again to be asked again."));
             return SaveResult.NotSaved;
         }
         if (refused)
