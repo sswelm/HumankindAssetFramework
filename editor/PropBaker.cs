@@ -46,10 +46,14 @@ public static class PropRegistry
     // as an empty list, and every file this class writes carries the key.
     static List<PropDef> Read()
     {
+        // Every look decides BOTH of the window's warnings (review of PR #101, seventh round: a read caught by a lock
+        // returned before Unsure was reset, so "the registry is missing" stayed up beside "it can't be read"). Unsure is
+        // reset before anything can return; Unreadable is assigned on every exit instead (Fault, MissingText, the unknown
+        // branch, Parse) - not reset here, because Fault compares with it to log each fault once, not per repaint.
+        Unsure = "";
         string json;
         try { json = System.IO.File.Exists(PathJson) ? System.IO.File.ReadAllText(PathJson) : null; }
         catch (Exception e) { return Fault($"it can't be read right now ({e.Message}) — another program has it open"); }
-        Unsure = "";
         if (json != null) gitCheck.Forget();   // present: the next time it goes missing, git is asked afresh
         else
         {
@@ -100,10 +104,12 @@ public static class PropRegistry
         $"it is missing, but {evidence}, so it existed — another program may be saving it (it comes back by itself). If you deleted it on purpose, " +
         (evidence.StartsWith("git") ? "commit the deletion (git rm)" : "delete haf_props.json.meta too, or let Unity refresh");
 
-    // The verdict on one text as read (null = no file: no recipes yet).
+    // The verdict on one text as read (null = no file: no recipes yet). A text that WAS read ends any doubt about
+    // whether the file exists — also when the write path read it, not only the window's Read().
     static List<PropDef> Parse(string json)
     {
         if (json == null) { Unreadable = ""; return new List<PropDef>(); }
+        Unsure = "";
         string why = null;
         List<PropDef> props = null;
         try
