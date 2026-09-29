@@ -899,25 +899,31 @@ public class ModelFactoryWindow : EditorWindow
                             try
                             {
                                 var defSnap = ModelRegistry.Load().FirstOrDefault(d => d.resourceName == name);
+                                if (ModelRegistry.LastLoadFailed) { status = $"Remove ABORTED — the registry {ModelRegistry.LastLoadProblem}. Nothing was removed."; GUIUtility.ExitGUI(); }
                                 if (defSnap == null) { status = $"Remove ABORTED — '{name}' not found in the registry (refresh and retry)."; GUIUtility.ExitGUI(); }
                                 Directory.CreateDirectory(undoDir);
                                 File.WriteAllText(Path.Combine(undoDir, "entry.json"), JsonUtility.ToJson(defSnap, true));
                                 if (choice == 0) UniversalBaker.CopyAllOutputs(name, undoDir);
-                                lastRemovedName = name; lastRemovedSnap = undoDir;
                             }
+                            catch (ExitGUIException) { throw; }   // the ABORTED exits above, not a failed snapshot: keep their status
                             catch (Exception ex)
                             {
                                 status = $"Remove ABORTED — could not take the undo snapshot ({ex.Message}). Nothing was removed.";
                                 GUIUtility.ExitGUI();
                             }
-                            bool removed = ModelRegistry.Remove(name);
+                            var result = ModelRegistry.RemoveEntry(name);
+                            bool removed = result == RegistryRules.RemoveResult.Removed;
+                            // The undo points at this snapshot only once the remove HAPPENED (review of PR #102): after a
+                            // refused one, "Undo remove" would offer to restore an entry that was never taken away.
+                            if (removed) { lastRemovedName = name; lastRemovedSnap = undoDir; }
                             // sel = 0 too: the popup-apply below reads a stale `sel` as a "selection change" and
                             // reloads existing[sel] on the SHRUNKEN list. Everything else — form reset, preview
                             // clear, coherence flag — is the FUNNEL's job (SelectEntry -> OnSelectResource): the
                             // 08-16..18 stale-window family were each one of these surfaces forgotten at one site.
                             sel = 0; RefreshList(); SelectEntry(0);
                             status = removed ? $"Removed '{name}' from the registry."
-                                             : $"'{name}' was not in the registry — nothing removed.";
+                                   : result == RegistryRules.RemoveResult.NotPresent ? $"'{name}' was not in the registry — nothing removed."
+                                   : $"Remove FAILED — '{name}' is still in the registry and its files were not deleted (see the Console).";
                             // Curated asset cleanup (2026-07-27, the lost-portrait lesson): delete the BAKED outputs via
                             // the exact whitelist ONLY — never a name wildcard, because unit-side files share the prefix
                             // (a manual 'rm <name>*' once deleted the AntiTank Halftrack's card portrait '<name>512.png'
@@ -2116,11 +2122,19 @@ public class ModelFactoryWindow : EditorWindow
     {
         string oldKey = LoadedResourceKey();
         if (string.IsNullOrEmpty(oldKey) || oldKey == cur.resourceName) return "";
-        // Remove() is false both when the save was refused and when there was nothing to remove — only the first
-        // leaves a duplicate, so ask the registry which one it was instead of claiming success.
-        if (!ModelRegistry.Remove(oldKey) && ModelRegistry.Load().Any(x => x.resourceName == oldKey))
-            return $"  ⚠ Renamed from '{oldKey}', but the old registry entry could NOT be removed (see the Console) — both entries exist until you Remove '{oldKey}'.";
-        return $"  (Renamed from '{oldKey}' — old registry entry removed.)";
+        // The registry says WHICH of three it was (review of PR #102): re-reading to check could not tell "gone" from a
+        // read that failed, which returns the same empty list — and then claimed "removed" while both entries remained.
+        switch (ModelRegistry.RemoveEntry(oldKey))
+        {
+            case RegistryRules.RemoveResult.Removed:
+                return $"  (Renamed from '{oldKey}' — old registry entry removed.)";
+            case RegistryRules.RemoveResult.NotPresent:
+                // a case-only rename ("Tank" -> "tank") was already replaced by the save's case-insensitive Upsert
+                return $"  (Renamed from '{oldKey}' — no old registry entry remains.)";
+            default:
+                return $"  ⚠ Renamed from '{oldKey}', but the old registry entry could NOT be removed or checked (see the Console) — " +
+                       $"both entries may exist; once the registry can be read, Remove '{oldKey}' if it is still listed.";
+        }
     }
 
     void RebaseLabOwnedOnRegistry()

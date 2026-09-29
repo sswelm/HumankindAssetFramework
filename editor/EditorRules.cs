@@ -82,6 +82,54 @@ public static class RegistryRules
     /// away (outside review of PR #100, second round). A lock takes precedence until the file can be read again.
     /// </summary>
     public static bool ShowRecoveryControls(bool corrupt, bool locked) => corrupt && !locked;
+
+    /// <summary>What a Remove did (review of PR #102): "it wasn't there" and "the read or the save failed" were one `false`.</summary>
+    public enum RemoveResult { Removed, NotPresent, Failed }
+
+    /// <summary>
+    /// The verdict of a Remove. A read that FAILED returns an empty list, so "not found" in it proves nothing: that is
+    /// Failed, and nothing is saved. Only a read that worked may say NotPresent; a found entry is Removed only if the
+    /// save that drops it went through. <paramref name="save"/> is called only when there is something to save.
+    /// </summary>
+    public static RemoveResult JudgeRemove(bool readFailed, bool found, Func<bool> save) =>
+        readFailed ? RemoveResult.Failed
+      : !found ? RemoveResult.NotPresent
+      : save() ? RemoveResult.Removed : RemoveResult.Failed;
+}
+
+/// <summary>
+/// A WINDOW'S CACHE OF A SLOW READ THAT CAN FAIL (review of PR #102). The windows cache the registry because reading it
+/// is slow - but a read that failed returns an empty list, and caching THAT showed "no entries" until the window
+/// regained focus, however long ago the file became readable again. Only a read that worked is kept. A failed one is
+/// returned for now, with ReadFailed set so the window can say why its list is empty, and read again once
+/// <c>retryAfter</c> seconds have passed (a failing read can be slow too: the registry's sleeps on a missing file).
+/// </summary>
+public sealed class ReadCache<T> where T : class
+{
+    readonly Func<T> read;
+    readonly Func<bool> readFailed;
+    readonly double retryAfter;
+    T kept, lastFailed;
+    double failedAt;
+
+    /// <param name="read">the read</param><param name="readFailed">asked right after it: did that read fail?</param>
+    public ReadCache(Func<T> read, Func<bool> readFailed, double retryAfter) { this.read = read; this.readFailed = readFailed; this.retryAfter = retryAfter; }
+
+    public bool ReadFailed { get; private set; }
+
+    public T Get(double now)
+    {
+        if (kept != null) { ReadFailed = false; return kept; }
+        if (lastFailed != null && now - failedAt < retryAfter) return lastFailed;   // ReadFailed stays true
+        var value = read();
+        ReadFailed = readFailed();
+        if (ReadFailed) { lastFailed = value; failedAt = now; }
+        else { kept = value; lastFailed = null; }
+        return value;
+    }
+
+    /// <summary>Read again on the next Get (after a save, or when the window regains focus).</summary>
+    public void Drop() { kept = null; lastFailed = null; }
 }
 
 /// <summary>

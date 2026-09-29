@@ -286,6 +286,10 @@ public static class ModelRegistry
     // But the list that Load() returned is empty for want of a read, so Save() refuses while it is set, exactly as for
     // corruption - an Upsert onto that list would write one model over the whole pack. Cleared by the next Load().
     static bool lastLoadLocked;
+    // …and set when the source is MISSING and the deployed copy exists but can't be read: Load() then returns an empty
+    // list with neither flag above, which read as "a pack with no models" (review of PR #102). Saves already refuse in
+    // this state (Save's own read); this lets a CALLER tell it apart too. Cleared by the next Load().
+    static bool lastLoadNoCopy;
 
     // Set true once THIS session's Load() has observed the on-disk registry, so the session-static
     // UnitScales/EraGrid/FormationThresholds below reflect reality. A domain reload (recompile) resets it to false
@@ -520,7 +524,7 @@ public static class ModelRegistry
     {
         try
         {
-            lastLoadLocked = false;   // every Load() decides it afresh (see the field)
+            lastLoadLocked = false; lastLoadNoCopy = false;   // every Load() decides them afresh (see the fields)
             // `loaded` is set BELOW, only where this Load actually refreshed the statics from a file (review of PR #100).
             // Set up here, as it was, a read that FAILED marked the post-reload statics authoritative while they were
             // still empty — harmless while every save waited on the failure flags, and a wipe of the pack's era grid and
@@ -545,7 +549,11 @@ public static class ModelRegistry
                             // dependencies, scale rules and era settings live only here too, and a save onto defaults
                             // would erase them. The shape rule keeps a broken `{}` from passing for a pack.
                             var d = ParseRegistry(dep, RegistryPath, out var depWhy);
-                            if (d == null) Debug.LogWarning($"[Factory] the project registry source is missing and the deployed artifact '{RegistryPath}' is unreadable ({depWhy}) — nothing to adopt; saves refuse until one of them is readable.");
+                            if (d == null)
+                            {
+                                lastLoadNoCopy = true;   // the empty list below is for want of a copy, not a pack with no models
+                                Debug.LogWarning($"[Factory] the project registry source is missing and the deployed artifact '{RegistryPath}' is unreadable ({depWhy}) — nothing to adopt; saves refuse until one of them is readable.");
+                            }
                             else
                             {
                                 Directory.CreateDirectory(PackRepoDir);
@@ -561,7 +569,11 @@ public static class ModelRegistry
                                 return Migrate(SortByName(d.models), dep);
                             }
                         }
-                        catch (Exception be) { Debug.LogWarning($"[Factory] the deployed artifact '{RegistryPath}' is unreadable ({be.Message}) — treating as absent."); }
+                        catch (Exception be)
+                        {
+                            lastLoadNoCopy = true;   // nothing was read or adopted: the empty list below is not a pack
+                            Debug.LogWarning($"[Factory] the deployed artifact '{RegistryPath}' could not be read or adopted ({be.Message}) — nothing loaded.");
+                        }
                     }
                     else loaded = true;   // no source and no deployed copy: a first-ever pack, and the statics in memory are its truth
                     return new List<ModelDef>();
@@ -621,6 +633,31 @@ public static class ModelRegistry
     // ---- CORRUPT-SOURCE RECOVERY (2026-08-19, user design: "not only a try/catch but recovery functionality") ----
     public static bool LastLoadCorrupt => lastLoadCorrupt;
     public static bool LastLoadLocked => lastLoadLocked;   // the Factory's plain warning — no recovery buttons (see the field)
+
+    // Did the last Load() fail to READ the registry — so its empty list proves nothing? (review of PR #102: callers took
+    // that empty list for "no entries" - a rename reported its old entry removed, the Sound Lab cached "no units".)
+    public static bool LastLoadFailed => lastLoadCorrupt || lastLoadLocked || lastLoadNoCopy;
+    public static string LastLoadProblem =>
+        lastLoadCorrupt ? "it is unreadable — " + LastCorruptDetail + " (the Model Factory offers recovery)"
+      : lastLoadLocked ? "it can't be read right now — " + LastLockDetail
+      : lastLoadNoCopy ? "the source is missing and the deployed copy can't be read"
+      : "";
+
+    /// <summary>
+    /// A WINDOW'S CACHED COPY OF THE REGISTRY (review of PR #102). Windows cache Load() because it reads and parses the
+    /// file (and sleeps 250 ms on a missing one) - but a Load that FAILED returns an empty list, and caching it showed
+    /// "no entries" until the window regained focus, however long ago the read recovered. Only a load that read the
+    /// registry is kept; a failed one is shown for now (with ReadFailed set, so the window can say why the list is
+    /// empty) and asked again at most once a second on later repaints.
+    /// </summary>
+    public sealed class Cache   // the registry over ReadCache, which holds the rule (and its tests)
+    {
+        readonly ReadCache<List<ModelDef>> cache = new ReadCache<List<ModelDef>>(Load, () => LastLoadFailed, 1.0);
+        public bool ReadFailed => cache.ReadFailed;
+        public List<ModelDef> Get() => cache.Get(EditorApplication.timeSinceStartup);
+        /// <summary>Read the registry again on the next Get (after a save, or when the window regains focus).</summary>
+        public void Drop() => cache.Drop();
+    }
     public static string LastLockDetail = "";
     public static string LastLockAdvice = "";   // RegistryRules.ReadFailureAdvice — a lock and access denied are not equally temporary
     public static string LastCorruptDetail = "";
@@ -953,13 +990,17 @@ public static class ModelRegistry
 
     // Remove a model from the registry by resource name. Returns true if something was removed. The baked skeleton/atlas
     // assets are left in the project (harmless); this just stops the plugin injecting that model.
-    public static bool Remove(string resourceName)
+    public static bool Remove(string resourceName) => RemoveEntry(resourceName) == RegistryRules.RemoveResult.Removed;
+
+    // What a Remove did (review of PR #102): `false` from Remove meant both "it wasn't there" and "the read or the save
+    // failed", and a caller that re-read to tell them apart got the same empty list from a failed read - a rename then
+    // said "old registry entry removed" while both entries remained. The verdict is RegistryRules.JudgeRemove.
+    public static RegistryRules.RemoveResult RemoveEntry(string resourceName)
     {
         var list = Load();
-        int before = list.Count;
-        list.RemoveAll(m => m.resourceName == resourceName);
-        if (list.Count == before) return false;
-        return Save(list);
+        bool failed = LastLoadFailed;
+        bool found = list.RemoveAll(m => m.resourceName == resourceName) > 0;
+        return RegistryRules.JudgeRemove(failed, found, () => Save(list));
     }
 
     public static int[] ParseGuid(string csv)
