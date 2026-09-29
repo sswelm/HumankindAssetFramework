@@ -31,36 +31,238 @@ public static class PropRegistry
     [Serializable] class PropFile { public List<PropDef> props = new List<PropDef>(); }
     const string PathJson = "Assets/Databases/haf_props.json";
 
-    public static List<PropDef> Load()
+    // Why the file on disk can't be read right now ("" = it can). The window shows it, so an unreadable file doesn't
+    // pass for "no recipes yet".
+    public static string Unreadable { get; private set; } = "";
+
+    // Why it can't be TOLD whether a missing file existed ("" = it can): git hasn't answered yet, or couldn't. The
+    // window shows it, so a list that is empty for want of an answer doesn't pass for "no recipes yet" either (review
+    // of PR #101, sixth round). Not an error: a bake asks before creating anything.
+    public static string Unsure { get; private set; } = "";
+
+    // null = the file EXISTS but can't be read — never the same as "no recipes yet". That confusion wiped every recipe:
+    // Upsert added one prop to the empty list an unreadable file loaded as, and wrote it back (the same defect as the
+    // model registry's, PR #100). An empty result must show the "props" array in the raw text: JsonUtility reads `{}`
+    // as an empty list, and every file this class writes carries the key.
+    static List<PropDef> Read()
     {
+        // Every look decides BOTH of the window's warnings (review of PR #101, seventh round: a read caught by a lock
+        // returned before Unsure was reset, so "the registry is missing" stayed up beside "it can't be read"). Unsure is
+        // reset before anything can return; Unreadable is assigned on every exit instead (Fault, MissingText, the unknown
+        // branch, Parse) - not reset here, because Fault compares with it to log each fault once, not per repaint.
+        Unsure = "";
+        string json;
+        try { json = System.IO.File.Exists(PathJson) ? System.IO.File.ReadAllText(PathJson) : null; }
+        catch (Exception e) { return Fault($"it can't be read right now ({e.Message}) — another program has it open"); }
+        if (json != null) gitCheck.Forget();   // present: the next time it goes missing, git is asked afresh
+        else
+        {
+            // The SAME evidence the write path uses (review of PR #101, fourth round: the window checked only the .meta,
+            // so a tracked registry without one showed as "no recipes" while a save was rightly refused). The .meta is
+            // looked at live; git in the background (below), because this runs on every repaint. Three outcomes, and
+            // only git's "no" reads as "no registry yet" (sixth round).
+            bool meta = System.IO.File.Exists(PathJson + ".meta");
+            bool? tracked = meta ? (bool?)null : GitSaysCached();
+            string ev = meta ? "Unity still has its .meta" : tracked == true ? "git tracks it" : null;
+            if (ev != null)
+            {
+                Unreadable = MissingText(ev);   // shown, not logged: an editor's save-by-rename passes through this state on every save
+                return null;
+            }
+            if (tracked == null)
+            {
+                Unreadable = "";   // nothing was read: an older fault no longer applies
+                Unsure = "whether a registry existed can't be told: git " + (gitCheck.Pending ? "hasn't answered yet" : "didn't answer (not installed, or too slow)");
+                return null;
+            }
+        }
+        return Parse(json);
+    }
+
+    // Git for the WINDOW, off the editor thread (review of PR #101, fifth round: asked on repaint, git could block the
+    // editor for up to its 5 s timeout, and again on the next repaint). The repaint takes the latest answer that has
+    // arrived and never waits; the window repaints once when a new one lands. Until the first does, the window says it
+    // doesn't know yet (Unsure) rather than showing no recipes (sixth round). The write path still asks git
+    // itself, synchronously: a bake has to know before it decides, and it is an explicit action that takes seconds.
+    static readonly string FullPathJson = System.IO.Path.GetFullPath(PathJson);   // resolved here, on the editor thread
+    static readonly BackgroundCheck gitCheck = new BackgroundCheck(() => CheckedReplace.GitTracks(FullPathJson), 5);
+    static bool? GitSaysCached()
+    {
+        bool? tracked = gitCheck.Latest(EditorApplication.timeSinceStartup, out bool started);
+        if (started) EditorApplication.update += RepaintWhenGitAnswers;
+        return tracked;
+    }
+    static void RepaintWhenGitAnswers()
+    {
+        if (gitCheck.Pending) return;
+        EditorApplication.update -= RepaintWhenGitAnswers;
+        foreach (var w in Resources.FindObjectsOfTypeAll<PropBakerWindow>()) w.Repaint();   // its next repaint takes the answer
+    }
+
+    // What a missing file known to have existed means, and what to do about a deliberate deletion — per evidence.
+    static string MissingText(string evidence) =>
+        $"it is missing, but {evidence}, so it existed — another program may be saving it (it comes back by itself). If you deleted it on purpose, " +
+        (evidence.StartsWith("git") ? "commit the deletion (git rm)" : "delete haf_props.json.meta too, or let Unity refresh");
+
+    // The verdict on one text as read (null = no file: no recipes yet). A text that WAS read ends any doubt about
+    // whether the file exists — also when the write path read it, not only the window's Read().
+    static List<PropDef> Parse(string json)
+    {
+        if (json == null) { Unreadable = ""; return new List<PropDef>(); }
+        Unsure = "";
+        string why = null;
+        List<PropDef> props = null;
         try
         {
-            if (System.IO.File.Exists(PathJson))
-                return JsonUtility.FromJson<PropFile>(System.IO.File.ReadAllText(PathJson))?.props ?? new List<PropDef>();
+            props = JsonUtility.FromJson<PropFile>(json)?.props;
+            if ((props == null || props.Count == 0) && !(Newtonsoft.Json.Linq.JObject.Parse(json)["props"] is Newtonsoft.Json.Linq.JArray))
+            { why = "it has no \"props\" array"; props = null; }
         }
-        catch (Exception e) { Debug.LogError("[Props] haf_props.json unreadable: " + e.Message); }
-        return new List<PropDef>();
+        catch (Exception e) { why = Pinpoint(json) ?? e.Message; props = null; }
+        if (props != null) { Unreadable = ""; return props; }
+        return Fault(why);
     }
 
-    public static void Upsert(PropDef d)
+    static List<PropDef> Fault(string why)
     {
-        var l = Load();
+        if (Unreadable != why) Debug.LogError($"[Props] {PathJson} is unreadable — {why}. Recipes won't save until it is fixed (git has every committed version)."); // once per fault: the window calls Load() every repaint
+        Unreadable = why;
+        return null;
+    }
+
+    // JsonUtility's exceptions carry no location; Newtonsoft's reader names the line and column.
+    static string Pinpoint(string json)
+    {
+        if (json == null) return null;
+        try { Newtonsoft.Json.Linq.JObject.Parse(json); return null; }
+        catch (Newtonsoft.Json.JsonReaderException jre) { return $"line {jre.LineNumber}, position {jre.LinePosition}: {jre.Message}"; }
+        catch (Exception ex) { return ex.Message; }
+    }
+
+    public static List<PropDef> Load() => Read() ?? new List<PropDef>();
+
+    // What a change did, as far as the file on disk is concerned (review of PR #101: a bool could not say "it may
+    // have been written"). Saved = the file now holds the change (or already did). NotSaved = it doesn't: the file is
+    // as it was, or holds another writer's version. Unknown = a failed rollback left it undecided (see the Console).
+    public enum SaveResult { Saved, NotSaved, Unknown }
+
+    public static SaveResult Upsert(PropDef d) => Change(d.resourceName, true, l =>
+    {
         int i = l.FindIndex(x => x.resourceName == d.resourceName);
         if (i >= 0) l[i] = d; else l.Add(d);
-        Save(l);
-    }
+        return true;
+    });
 
-    public static void Remove(string name) { var l = Load(); l.RemoveAll(x => x.resourceName == name); Save(l); }
-
-    static void Save(List<PropDef> l)
+    // The Prop Lab's one-shot migration: add the form's recipe only if the registry lacks it — decided on the file as
+    // read at write time, not on the Load() that prompted it. It NEVER creates the file (review of PR #101, second
+    // round): an automatic step can't tell a new registry from one another program has moved aside for a moment, and
+    // guessing wrong leaves a one-recipe file in its place. Only a bake creates one, and only once the user says so.
+    public static SaveResult AddIfMissing(PropDef d) => Change(d.resourceName, false, quietWithoutFile: true, apply: l =>
     {
+        if (l.Any(x => x.resourceName == d.resourceName)) return false;
+        l.Add(d);
+        return true;
+    });
+
+    public static SaveResult Remove(string name) => Change(name, false, l => l.RemoveAll(x => x.resourceName == name) > 0);
+
+    // EVERY change is an operation on the file as it is AT WRITE TIME (review of PR #101): read, apply, and a checked
+    // write that re-applies on a conflict (CheckedReplace.Apply). A recipe another writer added between the read and
+    // the write is kept; a missing file is looked at twice before it counts as absent; and the write's result is the
+    // file's, whatever the asset import does afterwards.
+    // mayCreate = this change may create a missing file (an explicit bake) — never one known to have existed, and only
+    // once the user says so (below).
+    // quietWithoutFile = a missing file is no news to this caller (the migration runs on every window open).
+    static SaveResult Change(string name, bool mayCreate, Func<List<PropDef>, bool> apply, bool quietWithoutFile = false)
+    {
+        bool refused = false, noFile = false;
+        string existed = null;   // why a missing file is known to have existed (CheckedReplace.ExistedBefore)
+        bool? create = null;     // the user's answer to "create a new registry?" — asked once per change
+        string declined = null;  // why a new registry was not created
+        CheckedReplace.Outcome outcome;
+        string note;
         try
         {
             System.IO.Directory.CreateDirectory("Assets/Databases");
-            System.IO.File.WriteAllText(PathJson, JsonUtility.ToJson(new PropFile { props = l }, true));
-            AssetDatabase.ImportAsset(PathJson);
+            outcome = CheckedReplace.Apply(PathJson, text =>
+            {
+                refused = noFile = false; existed = declined = null;   // each attempt decides afresh
+                if (text == null && !mayCreate) { noFile = true; return null; }
+                if (text == null && (existed = CheckedReplace.ExistedBefore(PathJson)) != null) return null;
+                if (text == null)
+                {
+                    // NOTHING ON DISK SAYS WHETHER A REGISTRY EXISTED (review of PR #101, fourth round: one with no .meta
+                    // and not in git, moved aside by another program's save, was still created over). Absence can't be
+                    // proven, so the person decides - and the seconds a dialog takes are also time for a save-by-rename
+                    // to finish: a file that is back by then is applied to, never overwritten (File.Move refuses it).
+                    if (create == null)
+                        create = Application.isBatchMode ? false : EditorUtility.DisplayDialog("Create haf_props.json?",
+                            $"The prop recipe registry ({PathJson}) doesn't exist.\n\n" +
+                            $"If this is a new project, create it now, holding only '{name}'.\n\n" +
+                            "If you do have a recipe registry and another program (a text editor, git, a sync tool) is saving it right now, " +
+                            "cancel and bake again in a moment: creating it now would put a one-recipe file in its place.",
+                            "Create", "Cancel");
+                    if (create == false) { declined = Application.isBatchMode ? "batch mode can't ask whether to create it" : "you chose not to create it"; return null; }
+                }
+                var l = Parse(text);
+                if (l == null) { refused = true; return null; }   // unreadable: said by Parse, and never written over
+                if (!apply(l)) return null;                        // nothing to change
+                return JsonUtility.ToJson(new PropFile { props = l }, true);
+            }, 3, out note);
         }
-        catch (Exception e) { Debug.LogError("[Props] haf_props.json save failed: " + e.Message); }
+        catch (Exception e)
+        {
+            // CheckedReplace throws only when nothing of this change was written (after a conflict the file holds the
+            // other writer's version, so not "as it was")
+            Debug.LogError($"[Props] not saving '{name}': {PathJson} could not be read or written ({e.Message}). Nothing of this save was written.");
+            return SaveResult.NotSaved;
+        }
+        if (note != null) Debug.LogWarning($"[Props] {PathJson}: {note}.");
+        if (noFile)
+        {
+            // nothing to change in a file that isn't there, and only a bake creates one
+            if (!quietWithoutFile)
+            {
+                string ev = CheckedReplace.ExistedBefore(PathJson);
+                Debug.LogWarning($"[Props] not saving '{name}': {PathJson} " + (ev != null ? MissingText(ev) + "." : "is missing."));
+            }
+            return SaveResult.NotSaved;
+        }
+        if (existed != null)
+        {
+            Debug.LogWarning($"[Props] not saving '{name}': {PathJson} {MissingText(existed)}, then save again. " +
+                             "Creating it now could leave a one-recipe registry where the real one belongs.");
+            return SaveResult.NotSaved;
+        }
+        if (declined != null)
+        {
+            Debug.LogWarning($"[Props] not saving '{name}': {PathJson} doesn't exist, and a new one was not created ({declined})." +
+                             (Application.isBatchMode ? "" : " Bake again to be asked again."));
+            return SaveResult.NotSaved;
+        }
+        if (refused)
+        {
+            Debug.LogError($"[Props] not saving '{name}': {PathJson} is unreadable ({Unreadable}). Refusing to overwrite it and lose the other recipes.");
+            return SaveResult.NotSaved;
+        }
+        switch (outcome)
+        {
+            case CheckedReplace.Outcome.Unchanged:
+                return SaveResult.Saved;   // the file already says what this change would have
+            case CheckedReplace.Outcome.Conflict:
+                Debug.LogWarning($"[Props] not saving '{name}': {PathJson} kept changing while this save tried to apply it (another editor, git, a sync tool). " +
+                                 "That version is in place and nothing of this save was written. Try again.");
+                return SaveResult.NotSaved;
+            case CheckedReplace.Outcome.Unresolved:
+                Debug.LogError($"[Props] saving '{name}' could not finish restoring another writer's version of {PathJson}. It may now hold this save or that version; " +
+                               "inspect it and the copies named above before saving again.");
+                return SaveResult.Unknown;
+        }
+        // WRITTEN. What Unity makes of the new file afterwards is not the save's result (review of PR #101: an import
+        // error used to turn a committed Remove into "still saved").
+        try { AssetDatabase.ImportAsset(PathJson); }
+        catch (Exception e) { Debug.LogWarning($"[Props] {PathJson} was saved, but Unity's import of it failed ({e.Message}); it re-imports on the next refresh."); }
+        return SaveResult.Saved;
     }
 }
 
@@ -115,8 +317,8 @@ public class PropBakerWindow : EditorWindow
         // MIGRATION (one-shot): the form predates the recipe registry — seed it with the current (last-baked)
         // settings so 'Edit existing' starts populated (the Sling) instead of empty.
         if (!string.IsNullOrEmpty(resourceName) && !string.IsNullOrEmpty(modelFile)
-            && !PropRegistry.Load().Any(d => d.resourceName == resourceName))
-            PropRegistry.Upsert(new PropDef { resourceName = resourceName, modelFile = modelFile, materialGuid = materialGuid,
+            && !PropRegistry.Load().Any(d => d.resourceName == resourceName))   // cheap filter; AddIfMissing decides on the file itself
+            PropRegistry.AddIfMissing(new PropDef { resourceName = resourceName, modelFile = modelFile, materialGuid = materialGuid,
                                               size = size, rotation = rotation,
                                               posOffset = posOffset, targetTris = targetTris });
     }
@@ -275,11 +477,23 @@ public class PropBakerWindow : EditorWindow
                 if (GUILayout.Button(new GUIContent("Remove", "Forget this prop's saved recipe. Baked assets are NOT deleted."), GUILayout.Width(60))
                     && EditorUtility.DisplayDialog("Remove prop recipe", $"Forget the saved settings for '{resourceName}'?\nBaked assets stay in Assets/Resources.", "Remove", "Cancel"))
                 {
-                    PropRegistry.Remove(resourceName);
-                    resourceName = ""; modelFile = ""; status = ""; DestroyPreview();
+                    var removed = PropRegistry.Remove(resourceName);
+                    if (removed == PropRegistry.SaveResult.Saved)
+                    {
+                        resourceName = ""; modelFile = ""; status = ""; DestroyPreview();
+                    }
+                    else status = removed == PropRegistry.SaveResult.Unknown
+                        ? $"Remove of '{resourceName}' could not be confirmed — haf_props.json may or may not still hold it (see the Console)."
+                        : $"Remove FAILED — nothing was written for '{resourceName}' (see the Console).";
                     GUI.FocusControl(null);
                 }
         }
+        if (PropRegistry.Unreadable != "")
+            EditorGUILayout.HelpBox("haf_props.json is unreadable — " + PropRegistry.Unreadable + "\nThe recipe list is empty only because of that; " +
+                                    "nothing will be saved over it until it is fixed (git has every committed version).", MessageType.Error);
+        if (PropRegistry.Unsure != "")
+            EditorGUILayout.HelpBox("haf_props.json is missing, and " + PropRegistry.Unsure + ".\nThe recipe list is empty because the file is missing, " +
+                                    "not because there are no recipes. A bake asks before creating a new registry.", MessageType.Warning);
         resourceName = EditorGUILayout.TextField("Resource name", resourceName);
         using (new EditorGUILayout.HorizontalScope())
         {
@@ -471,9 +685,11 @@ public class PropBakerWindow : EditorWindow
                  "(collection GUID copied to clipboard)";
         EditorGUIUtility.systemCopyBuffer = mcGuid;
         // Persist this prop's recipe so 'Edit existing' can bring it back (and the Animation Lab picker lists it).
-        PropRegistry.Upsert(new PropDef { resourceName = resourceName, modelFile = modelFile, materialGuid = materialGuid,
-                                          size = size, rotation = rotation,
-                                          posOffset = posOffset, targetTris = targetTris });
+        var saved = PropRegistry.Upsert(new PropDef { resourceName = resourceName, modelFile = modelFile, materialGuid = materialGuid,
+                                                      size = size, rotation = rotation,
+                                                      posOffset = posOffset, targetTris = targetTris });
+        if (saved == PropRegistry.SaveResult.NotSaved) status += "\n⚠ the prop baked, but its recipe was NOT saved (see the Console).";
+        else if (saved == PropRegistry.SaveResult.Unknown) status += "\n⚠ the prop baked, but saving its recipe could not be confirmed (see the Console).";
         Debug.Log("[Props] " + status);
         LoadPreview(resourceName, forceReimport: true);   // show the just-baked prop in the dialog
         ModelFactoryWindow.ReloadPreviews();              // give the Factory tab its preview back

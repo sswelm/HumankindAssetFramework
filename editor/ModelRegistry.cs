@@ -866,8 +866,8 @@ public static class ModelRegistry
             }
             if (outcome == CheckedReplace.Outcome.Unresolved)
             {
-                Debug.LogError($"[Factory] registry save could not finish restoring another writer's version at '{SourcePath}'. " +
-                               "The source may now contain this save or another version; the deployed copy was not changed. " +
+                Debug.LogError($"[Factory] registry save could not be settled at '{SourcePath}' (the note above says why: another writer's version could not be put back, or a failed write could not put the source back). " +
+                               "The source may now hold this save, another version, or be missing; the deployed copy was not changed. " +
                                "Inspect the source and the preserved copies named above, then reload before saving again.");
                 return false;
             }
