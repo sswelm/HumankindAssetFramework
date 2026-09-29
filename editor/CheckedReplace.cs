@@ -66,17 +66,23 @@ public static class CheckedReplace
     /// tracks it (review of PR #101, third round: a registry without a .meta, moved aside for longer than the settle,
     /// was still created over). Asks git, so it is for the write path only, never for a repaint. A deliberate deletion
     /// clears both: Unity removes the .meta of a file it saw go, and `git rm` takes it out of the index. When git can't
-    /// be asked (not installed, not a repository) that is no evidence either way, and only the .meta counts.
+    /// be asked (not installed, no answer in time) that is no evidence either way, and only the .meta counts — the
+    /// write path's caller asks the person in that case (the Prop Lab's "Create haf_props.json?").
     /// </summary>
     public static string ExistedBefore(string path)
     {
         if (File.Exists(path)) return null;
         if (File.Exists(path + ".meta")) return "Unity still has its .meta";
-        return GitTracks(path) ? "git tracks it" : null;
+        return GitTracks(path) == true ? "git tracks it" : null;
     }
 
-    /// <summary>Is <paramref name="path"/> in its git repository's index? false when git can't say.</summary>
-    public static bool GitTracks(string path)
+    /// <summary>
+    /// Is <paramref name="path"/> in its git repository's index? true = yes; false = git ANSWERED no (not in the index,
+    /// or no repository there, so nothing could have tracked it); null = git could not be asked or didn't answer in 5 s.
+    /// Three answers, not two (review of PR #101, sixth round): "couldn't ask" is not "not tracked", and the window
+    /// showed a tracked registry as an empty one while git was slow or down.
+    /// </summary>
+    public static bool? GitTracks(string path)
     {
         try
         {
@@ -89,14 +95,20 @@ public static class CheckedReplace
             };
             // a git hook's environment points git at ITS repository, whatever the working directory says
             foreach (var v in new[] { "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE" }) psi.EnvironmentVariables.Remove(v);
+            psi.EnvironmentVariables["LC_ALL"] = "C";   // "not a git repository" is read below; a translated git says it otherwise
             using (var p = System.Diagnostics.Process.Start(psi))
             {
-                p.StandardOutput.ReadToEndAsync(); p.StandardError.ReadToEndAsync();   // drain, so a full pipe can't hang it
-                if (!p.WaitForExit(5000)) { try { p.Kill(); } catch { } return false; }
-                return p.ExitCode == 0;
+                p.StandardOutput.ReadToEndAsync();   // drain, so a full pipe can't hang it
+                var err = p.StandardError.ReadToEndAsync();
+                if (!p.WaitForExit(5000)) { try { p.Kill(); } catch { } return null; }
+                if (p.ExitCode == 0) return true;
+                if (p.ExitCode == 1) return false;   // --error-unmatch: git answered, not in the index
+                string said = err.Wait(1000) ? err.Result : "";
+                if (said.IndexOf("not a git repository", StringComparison.OrdinalIgnoreCase) >= 0) return false;   // nothing there could track it
+                return null;   // any other failure: git didn't say
             }
         }
-        catch { return false; }
+        catch { return null; }   // git not installed, or couldn't start: it didn't say
     }
 
     /// <summary>

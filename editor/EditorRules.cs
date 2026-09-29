@@ -110,31 +110,34 @@ public sealed class StaticsVersion
 /// A YES/NO CHECK TOO SLOW FOR A REPAINT (git: up to its 5 s timeout), run off the calling thread (review of PR #101,
 /// fifth round). The Prop Lab asked git synchronously on repaint, and stamped its cache BEFORE the call, so a call
 /// that timed out left the cache already expired and the next repaint blocked again. Here a caller never waits: it
-/// gets the latest answer that has ARRIVED (false until the first does), a new check starts only when none is
-/// running, and the age that decides a re-check is counted from when the answer arrived, not from when it was asked.
+/// gets the latest answer that has ARRIVED, a new check starts only when none is running, and the age that decides a
+/// re-check is counted from when the answer arrived, not from when it was asked.
+/// THREE answers (sixth round): true, false, and null = NOT KNOWN — no answer has arrived yet, or the check couldn't
+/// tell (returned null, threw). "Not known" is never reported as "no": the window showed a tracked registry as an
+/// empty one while the first git lookup was running or had timed out.
 /// </summary>
 public sealed class BackgroundCheck
 {
-    readonly Func<bool> check;
+    readonly Func<bool?> check;
     readonly double maxAge;
-    System.Threading.Tasks.Task<bool> running;
-    bool answer;
+    System.Threading.Tasks.Task<bool?> running;
+    bool? answer;
     double answeredAt = double.NaN;
 
-    public BackgroundCheck(Func<bool> check, double maxAgeSeconds) { this.check = check; maxAge = maxAgeSeconds; }
+    public BackgroundCheck(Func<bool?> check, double maxAgeSeconds) { this.check = check; maxAge = maxAgeSeconds; }
 
     /// <summary>
-    /// The latest answer, without waiting. <paramref name="now"/> is the caller's clock in seconds. Starts a check when
-    /// none is running and there is no answer yet, or the last one arrived more than maxAge ago; <paramref name="started"/>
-    /// says so (the caller may want to repaint once it lands). A check that throws answers false.
+    /// The latest answer, without waiting; null when none is known. <paramref name="now"/> is the caller's clock in
+    /// seconds. Starts a check when none is running and there is no answer yet, or the last one arrived more than
+    /// maxAge ago; <paramref name="started"/> says so (the caller may want to repaint once it lands).
     /// </summary>
-    public bool Latest(double now, out bool started)
+    public bool? Latest(double now, out bool started)
     {
         started = false;
         if (running != null)
         {
             if (!running.IsCompleted) return answer;
-            answer = running.Status == System.Threading.Tasks.TaskStatus.RanToCompletion && running.Result;
+            answer = running.Status == System.Threading.Tasks.TaskStatus.RanToCompletion ? running.Result : null;   // threw: not known
             answeredAt = now;   // it has arrived: the age counts from here
             running = null;
         }
@@ -150,7 +153,7 @@ public sealed class BackgroundCheck
     public bool Pending => running != null && !running.IsCompleted;
 
     /// <summary>Drop the answer: the next Latest asks afresh (a running check still lands).</summary>
-    public void Forget() { answer = false; answeredAt = double.NaN; }
+    public void Forget() { answer = null; answeredAt = double.NaN; }
 }
 
 /// <summary>Bake-pipeline decisions (UniversalBaker calls these; BakerRulesTests locks them).</summary>

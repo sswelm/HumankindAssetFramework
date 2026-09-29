@@ -35,6 +35,11 @@ public static class PropRegistry
     // pass for "no recipes yet".
     public static string Unreadable { get; private set; } = "";
 
+    // Why it can't be TOLD whether a missing file existed ("" = it can): git hasn't answered yet, or couldn't. The
+    // window shows it, so a list that is empty for want of an answer doesn't pass for "no recipes yet" either (review
+    // of PR #101, sixth round). Not an error: a bake asks before creating anything.
+    public static string Unsure { get; private set; } = "";
+
     // null = the file EXISTS but can't be read — never the same as "no recipes yet". That confusion wiped every recipe:
     // Upsert added one prop to the empty list an unreadable file loaded as, and wrote it back (the same defect as the
     // model registry's, PR #100). An empty result must show the "props" array in the raw text: JsonUtility reads `{}`
@@ -44,16 +49,26 @@ public static class PropRegistry
         string json;
         try { json = System.IO.File.Exists(PathJson) ? System.IO.File.ReadAllText(PathJson) : null; }
         catch (Exception e) { return Fault($"it can't be read right now ({e.Message}) — another program has it open"); }
+        Unsure = "";
         if (json != null) gitCheck.Forget();   // present: the next time it goes missing, git is asked afresh
         else
         {
             // The SAME evidence the write path uses (review of PR #101, fourth round: the window checked only the .meta,
             // so a tracked registry without one showed as "no recipes" while a save was rightly refused). The .meta is
-            // looked at live; git in the background (below), because this runs on every repaint.
-            string ev = System.IO.File.Exists(PathJson + ".meta") ? "Unity still has its .meta" : GitSaysCached();
+            // looked at live; git in the background (below), because this runs on every repaint. Three outcomes, and
+            // only git's "no" reads as "no registry yet" (sixth round).
+            bool meta = System.IO.File.Exists(PathJson + ".meta");
+            bool? tracked = meta ? (bool?)null : GitSaysCached();
+            string ev = meta ? "Unity still has its .meta" : tracked == true ? "git tracks it" : null;
             if (ev != null)
             {
                 Unreadable = MissingText(ev);   // shown, not logged: an editor's save-by-rename passes through this state on every save
+                return null;
+            }
+            if (tracked == null)
+            {
+                Unreadable = "";   // nothing was read: an older fault no longer applies
+                Unsure = "whether a registry existed can't be told: git " + (gitCheck.Pending ? "hasn't answered yet" : "didn't answer (not installed, or too slow)");
                 return null;
             }
         }
@@ -62,16 +77,16 @@ public static class PropRegistry
 
     // Git for the WINDOW, off the editor thread (review of PR #101, fifth round: asked on repaint, git could block the
     // editor for up to its 5 s timeout, and again on the next repaint). The repaint takes the latest answer that has
-    // arrived and never waits; the window repaints once when a new one lands. Until the first does (~0.1-0.2 s) a
-    // missing file without a .meta shows as no recipes, as before this check existed. The write path still asks git
+    // arrived and never waits; the window repaints once when a new one lands. Until the first does, the window says it
+    // doesn't know yet (Unsure) rather than showing no recipes (sixth round). The write path still asks git
     // itself, synchronously: a bake has to know before it decides, and it is an explicit action that takes seconds.
     static readonly string FullPathJson = System.IO.Path.GetFullPath(PathJson);   // resolved here, on the editor thread
     static readonly BackgroundCheck gitCheck = new BackgroundCheck(() => CheckedReplace.GitTracks(FullPathJson), 5);
-    static string GitSaysCached()
+    static bool? GitSaysCached()
     {
-        bool tracked = gitCheck.Latest(EditorApplication.timeSinceStartup, out bool started);
+        bool? tracked = gitCheck.Latest(EditorApplication.timeSinceStartup, out bool started);
         if (started) EditorApplication.update += RepaintWhenGitAnswers;
-        return tracked ? "git tracks it" : null;
+        return tracked;
     }
     static void RepaintWhenGitAnswers()
     {
@@ -470,6 +485,9 @@ public class PropBakerWindow : EditorWindow
         if (PropRegistry.Unreadable != "")
             EditorGUILayout.HelpBox("haf_props.json is unreadable — " + PropRegistry.Unreadable + "\nThe recipe list is empty only because of that; " +
                                     "nothing will be saved over it until it is fixed (git has every committed version).", MessageType.Error);
+        if (PropRegistry.Unsure != "")
+            EditorGUILayout.HelpBox("haf_props.json is missing, and " + PropRegistry.Unsure + ".\nThe recipe list is empty because the file is missing, " +
+                                    "not because there are no recipes. A bake asks before creating a new registry.", MessageType.Warning);
         resourceName = EditorGUILayout.TextField("Resource name", resourceName);
         using (new EditorGUILayout.HorizontalScope())
         {

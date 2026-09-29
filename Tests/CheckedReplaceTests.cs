@@ -245,9 +245,9 @@ public class CheckedReplaceTests : IDisposable
         Git("init -q");
         File.WriteAllText(P, "{ \"props\": [] }");
         Assert.Null(CheckedReplace.ExistedBefore(P));                       // present: not missing
-        Assert.False(CheckedReplace.GitTracks(P));                          // untracked
+        Assert.Equal((bool?)false, CheckedReplace.GitTracks(P));            // untracked: git ANSWERED no (exit 1)
         Git("add pack.json");
-        Assert.True(CheckedReplace.GitTracks(P));
+        Assert.Equal((bool?)true, CheckedReplace.GitTracks(P));
         File.Delete(P);                                                     // moved aside by another program (no .meta at all)
         Assert.Equal("git tracks it", CheckedReplace.ExistedBefore(P));
         File.WriteAllText(P + ".meta", "guid: x");
@@ -258,9 +258,11 @@ public class CheckedReplaceTests : IDisposable
     }
 
     [Fact]
-    public void Outside_a_repository_git_is_no_evidence_either_way()
+    public void Outside_a_repository_git_answers_no_rather_than_not_knowing()
     {
-        Assert.False(CheckedReplace.GitTracks(P));
+        // the temp folder is in no repository: git exits 128 "not a git repository" - nothing there could have tracked
+        // the file, which is an answer (false), not a failure to ask (null, sixth round)
+        Assert.Equal((bool?)false, CheckedReplace.GitTracks(P));
         Assert.Null(CheckedReplace.ExistedBefore(P));
     }
 
