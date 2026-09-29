@@ -95,7 +95,9 @@ public class ModelFactoryWindow : EditorWindow
     // adds the Factory-side proof: select + LOAD the restored entry (drill: "I expect it to be selected again").
     void UndoRemove()
     {
-        status = BackupWindow.RestoreRemovedSnapshot(lastRemovedSnap, out var restoredName);
+        // never over a live entry: this button exists only after a remove that happened, and if the entry is back since
+        // (re-baked, restored from the Backup window) the older snapshot must not overwrite it (review of PR #102)
+        status = BackupWindow.RestoreRemovedSnapshot(lastRemovedSnap, out var restoredName, askBeforeOverwritingLive: false);
         RefreshList();
         if (!string.IsNullOrEmpty(restoredName))
         {
@@ -894,30 +896,95 @@ public class ModelFactoryWindow : EditorWindow
                             // entry's JSON + (when deleting files) the exact baked-output whitelist are copied to
                             // <backup root>/_removed_<ts>_<name>/ BEFORE anything is touched. If the snapshot can't
                             // be taken, the remove is ABORTED (never destroy what can't be restored).
-                            string undoDir = Path.Combine(EditorPrefs.GetString("HAF.Backup.Dest", "D:/HAF_Backups"),
-                                "_removed_" + DateTime.Now.ToString("yyyy-MM-dd_HHmmss") + "_" + name);
+                            // The folder name is the resource name made safe as ONE segment (BackupRules, review of PR #102,
+                            // fourth round): the name comes straight from the registry's JSON, and one with separators or
+                            // `..` in it used to build a path outside the backup root - and then be deleted recursively.
+                            string backupRoot = EditorPrefs.GetString("HAF.Backup.Dest", "D:/HAF_Backups");
+                            // A NAME WITH PATH COMPONENTS IS NOT REMOVED AT ALL (sixth round): the output copy and sweep build
+                            // Assets/Resources paths from the name as it is, and `..\..\target` reached outside the backup
+                            // root. Such an entry is fixed by hand in pack.json, never touched by name here.
+                            if (!BackupRules.IsPlainName(name))
+                            {
+                                status = $"Remove ABORTED — '{name}' contains path characters, so its files can't be located safely. Edit the entry's resourceName in pack.json by hand, then retry. Nothing was removed.";
+                                GUIUtility.ExitGUI();
+                            }
+                            // …and a folder RESERVED for this click alone (fifth and sixth rounds): the stamp is to the second
+                            // and safe names can collide, and "exists, then create" let two editors pick the same free name -
+                            // then one's refused remove cleaned up the other's undo. TryReserveFolder is atomic: a private
+                            // temp folder renamed into place, and the rename fails when the name is taken.
+                            string undoDir = null;
                             try
                             {
                                 var defSnap = ModelRegistry.Load().FirstOrDefault(d => d.resourceName == name);
+                                if (ModelRegistry.LastLoadFailed) { status = $"Remove ABORTED — the registry {ModelRegistry.LastLoadProblem}. Nothing was removed."; GUIUtility.ExitGUI(); }
                                 if (defSnap == null) { status = $"Remove ABORTED — '{name}' not found in the registry (refresh and retry)."; GUIUtility.ExitGUI(); }
-                                Directory.CreateDirectory(undoDir);
+                                undoDir = BackupRules.ReserveFolder(backupRoot, BackupRules.SnapshotFolderName(DateTime.Now.ToString("yyyy-MM-dd_HHmmss"), name), CheckedReplace.TryReserveFolder);
+                                // ATTEMPTED FIRST, REMOVED ONLY WHEN PROVEN: the snapshot carries a marker from the start, and only
+                                // a remove that happened takes it off. A refused save, an unsettled one, a crash half way, a
+                                // cleanup that fails - all leave the marker, and the Backup window shows such a snapshot as a
+                                // removal that did not happen rather than as a removed model with a one-click Restore.
+                                File.WriteAllText(Path.Combine(undoDir, BackupRules.AttemptedMarker),
+                                    $"The removal of '{name}' this snapshot was taken for is NOT proven to have happened.\n" +
+                                    "The entry and its baked files may still be live; restoring this copy over them would overwrite newer work.\n" +
+                                    "The Model Factory removes this file only after the registry save that dropped the entry went through.\n");
                                 File.WriteAllText(Path.Combine(undoDir, "entry.json"), JsonUtility.ToJson(defSnap, true));
                                 if (choice == 0) UniversalBaker.CopyAllOutputs(name, undoDir);
-                                lastRemovedName = name; lastRemovedSnap = undoDir;
                             }
+                            catch (ExitGUIException) { throw; }   // the ABORTED exits above, not a failed snapshot: keep their status
                             catch (Exception ex)
                             {
+                                // a folder this click reserved but could not fill is its own to delete: nothing was removed
+                                if (undoDir != null && BackupRules.IsRemovedSnapshotInside(backupRoot, undoDir)) { try { Directory.Delete(undoDir, true); } catch { } }
                                 status = $"Remove ABORTED — could not take the undo snapshot ({ex.Message}). Nothing was removed.";
                                 GUIUtility.ExitGUI();
                             }
-                            bool removed = ModelRegistry.Remove(name);
+                            var result = ModelRegistry.RemoveEntry(name);
+                            bool removed = result == RegistryRules.RemoveResult.Removed;
+                            // "Undo remove" is offered ONLY after a remove that happened (review of PR #102). Not after a
+                            // refused one - it would restore an entry never taken away. And not after an unsettled one
+                            // (third round): another writer's NEWER version may be the active one, and the undo overwrites
+                            // the baked files and upserts this older snapshot over it. That case is the user's to judge -
+                            // the status names the snapshot and the Backup window's manual Restore.
+                            bool unknown = result == RegistryRules.RemoveResult.Unknown;
+                            string cleanup = "";   // what became of the snapshot when that is not the obvious thing
+                            if (removed)
+                            {
+                                lastRemovedName = name; lastRemovedSnap = undoDir;
+                                // proven removed: the marker comes off, and the snapshot IS a removed model's now
+                                try { File.Delete(Path.Combine(undoDir, BackupRules.AttemptedMarker)); }
+                                catch (Exception ex) { cleanup = $" Its undo snapshot still carries the 'not proven removed' marker ({ex.Message}); the Backup window says so, and Restore checks the registry either way."; }
+                            }
+                            else if (!unknown)
+                            {
+                                // Certainly NOT removed: this click's own copy, and the entry and files are still live, so the
+                                // snapshot goes - but ONLY a folder that resolves to a snapshot directly inside the backup root
+                                // (BackupRules; a name built to escape the root resolved outside it), and if it can't go, it keeps
+                                // its marker and the status says where it is. After an unsettled remove it stays: it may be the
+                                // only copy of the entry.
+                                if (!BackupRules.IsRemovedSnapshotInside(backupRoot, undoDir))
+                                    cleanup = $" Its snapshot '{Path.GetFileName(undoDir)}' was NOT deleted — it does not resolve to a snapshot inside the backup root; it keeps its 'not proven removed' marker.";
+                                else
+                                {
+                                    try { Directory.Delete(undoDir, true); }
+                                    catch (Exception ex)
+                                    {
+                                        cleanup = $" Its snapshot '{Path.GetFileName(undoDir)}' could not be deleted ({ex.Message}); it keeps its 'not proven removed' marker — " +
+                                                  "the Backup window shows it as a removal that did not happen, and Restore refuses to overwrite the live entry without asking.";
+                                    }
+                                }
+                            }
                             // sel = 0 too: the popup-apply below reads a stale `sel` as a "selection change" and
                             // reloads existing[sel] on the SHRUNKEN list. Everything else — form reset, preview
                             // clear, coherence flag — is the FUNNEL's job (SelectEntry -> OnSelectResource): the
                             // 08-16..18 stale-window family were each one of these surfaces forgotten at one site.
                             sel = 0; RefreshList(); SelectEntry(0);
                             status = removed ? $"Removed '{name}' from the registry."
-                                             : $"'{name}' was not in the registry — nothing removed.";
+                                   : result == RegistryRules.RemoveResult.NotPresent ? $"'{name}' was not in the registry — nothing removed."
+                                   : unknown ? $"Remove could NOT be confirmed — the registry may or may not still hold '{name}' (see the Console). " +
+                                               "Its files were not deleted. Check the list once it refreshes: if the entry is gone and shouldn't be, its snapshot is " +
+                                               $"'{Path.GetFileName(undoDir)}' in Tools ▸ HAF ▸ Backup and Restore — compare before restoring, that Restore also copies the baked files back."
+                                   : $"Remove FAILED — nothing was removed and no files were deleted (see the Console).";
+                            status += cleanup;
                             // Curated asset cleanup (2026-07-27, the lost-portrait lesson): delete the BAKED outputs via
                             // the exact whitelist ONLY — never a name wildcard, because unit-side files share the prefix
                             // (a manual 'rm <name>*' once deleted the AntiTank Halftrack's card portrait '<name>512.png'
@@ -2116,8 +2183,20 @@ public class ModelFactoryWindow : EditorWindow
     {
         string oldKey = LoadedResourceKey();
         if (string.IsNullOrEmpty(oldKey) || oldKey == cur.resourceName) return "";
-        ModelRegistry.Remove(oldKey);
-        return $"  (Renamed from '{oldKey}' — old registry entry removed.)";
+        // The registry says WHAT happened (review of PR #102): re-reading to check could not tell "gone" from a read that
+        // failed, which returns the same empty list — and then claimed "removed" while both entries remained. Failed and
+        // Unknown (an unsettled save) both leave it open whether the old entry is still there, so both say "may".
+        switch (ModelRegistry.RemoveEntry(oldKey))
+        {
+            case RegistryRules.RemoveResult.Removed:
+                return $"  (Renamed from '{oldKey}' — old registry entry removed.)";
+            case RegistryRules.RemoveResult.NotPresent:
+                // a case-only rename ("Tank" -> "tank") was already replaced by the save's case-insensitive Upsert
+                return $"  (Renamed from '{oldKey}' — no old registry entry remains.)";
+            default:
+                return $"  ⚠ Renamed from '{oldKey}', but the old registry entry could NOT be removed or checked (see the Console) — " +
+                       $"both entries may exist; once the registry can be read, Remove '{oldKey}' if it is still listed.";
+        }
     }
 
     void RebaseLabOwnedOnRegistry()

@@ -82,6 +82,72 @@ public static class RegistryRules
     /// away (outside review of PR #100, second round). A lock takes precedence until the file can be read again.
     /// </summary>
     public static bool ShowRecoveryControls(bool corrupt, bool locked) => corrupt && !locked;
+
+    /// <summary>
+    /// What a registry save did (review of PR #102, second round). Refused = NOTHING was written: the file is as it was.
+    /// Unknown = a contested write could not be settled, so the file may hold this save or another version - a caller
+    /// may not describe the disk then. `false` from the bool API is either.
+    /// </summary>
+    public enum SaveOutcome { Saved, Refused, Unknown }
+
+    /// <summary>
+    /// What a Remove did (review of PR #102): "it wasn't there" and "the read or the save failed" were one `false`.
+    /// Failed = nothing was written; Unknown = the save could not be settled (SaveOutcome.Unknown).
+    /// </summary>
+    public enum RemoveResult { Removed, NotPresent, Failed, Unknown }
+
+    /// <summary>
+    /// The verdict of a Remove. A read that FAILED returns an empty list, so "not found" in it proves nothing: that is
+    /// Failed, and nothing is saved. Only a read that worked may say NotPresent; a found entry is Removed only if the
+    /// save that drops it went through, and Unknown if it could not be settled. <paramref name="save"/> is called only
+    /// when there is something to save.
+    /// </summary>
+    public static RemoveResult JudgeRemove(bool readFailed, bool found, Func<SaveOutcome> save)
+    {
+        if (readFailed) return RemoveResult.Failed;
+        if (!found) return RemoveResult.NotPresent;
+        switch (save())
+        {
+            case SaveOutcome.Saved: return RemoveResult.Removed;
+            case SaveOutcome.Unknown: return RemoveResult.Unknown;
+            default: return RemoveResult.Failed;
+        }
+    }
+}
+
+/// <summary>
+/// A WINDOW'S CACHE OF A SLOW READ THAT CAN FAIL (review of PR #102). The windows cache the registry because reading it
+/// is slow - but a read that failed returns an empty list, and caching THAT showed "no entries" until the window
+/// regained focus, however long ago the file became readable again. Only a read that worked is kept. A failed one is
+/// returned for now, with ReadFailed set so the window can say why its list is empty, and read again once
+/// <c>retryAfter</c> seconds have passed (a failing read can be slow too: the registry's sleeps on a missing file).
+/// </summary>
+public sealed class ReadCache<T> where T : class
+{
+    readonly Func<T> read;
+    readonly Func<bool> readFailed;
+    readonly double retryAfter;
+    T kept, lastFailed;
+    double failedAt;
+
+    /// <param name="read">the read</param><param name="readFailed">asked right after it: did that read fail?</param>
+    public ReadCache(Func<T> read, Func<bool> readFailed, double retryAfter) { this.read = read; this.readFailed = readFailed; this.retryAfter = retryAfter; }
+
+    public bool ReadFailed { get; private set; }
+
+    public T Get(double now)
+    {
+        if (kept != null) { ReadFailed = false; return kept; }
+        if (lastFailed != null && now - failedAt < retryAfter) return lastFailed;   // ReadFailed stays true
+        var value = read();
+        ReadFailed = readFailed();
+        if (ReadFailed) { lastFailed = value; failedAt = now; }
+        else { kept = value; lastFailed = null; }
+        return value;
+    }
+
+    /// <summary>Read again on the next Get (after a save, or when the window regains focus).</summary>
+    public void Drop() { kept = null; lastFailed = null; }
 }
 
 /// <summary>
@@ -154,6 +220,94 @@ public sealed class BackgroundCheck
 
     /// <summary>Drop the answer: the next Latest asks afresh (a running check still lands).</summary>
     public void Forget() { answer = null; answeredAt = double.NaN; }
+}
+
+/// <summary>
+/// THE FACTORY'S REMOVE SNAPSHOT: where it may live and what it may be called (outside review of PR #102, fourth round).
+/// The snapshot folder was `&lt;backup root&gt;/_removed_&lt;stamp&gt;_&lt;resource name&gt;`, with the name straight from the
+/// registry's JSON — nothing at bake time keeps path separators or `..` out of it — and the cleanup after a remove that
+/// didn't happen deleted that folder recursively. A name built to escape the root resolved from `D:\HAF_Backups` to
+/// `D:\target`. So the folder name is SANITISED here (no separators, no invalid characters, never empty), and nothing is
+/// ever deleted unless the resolved path is a direct child of the resolved root that carries the snapshot prefix.
+/// Pure: paths in, verdicts out; no I/O.
+/// </summary>
+public static class BackupRules
+{
+    public const string RemovedPrefix = "_removed_";
+    /// <summary>The marker a snapshot carries while its removal is NOT proven to have happened (see the Factory).</summary>
+    public const string AttemptedMarker = "removal-not-done.txt";
+
+    /// <summary>The snapshot folder's name: the prefix, the stamp, and the resource name made safe as ONE path segment.</summary>
+    public static string SnapshotFolderName(string stamp, string resourceName) => RemovedPrefix + stamp + "_" + SafeSegment(resourceName);
+
+    /// <summary>
+    /// Is <paramref name="name"/> usable in a file path AS IT IS — one segment, never a parent, never empty (sixth
+    /// round)? The Factory's Remove passed the registry's raw name to the output copy, which uses it in the source
+    /// AND the destination path: `..\..\target` resolved the copy's destination outside the backup root and could
+    /// overwrite a file there. Sanitising the snapshot's folder name protected nothing on that path; the name itself
+    /// must be plain, or nothing is done by it.
+    /// </summary>
+    public static bool IsPlainName(string name) => !string.IsNullOrEmpty(name) && SafeSegment(name) == name;
+
+    /// <summary>
+    /// A folder under <paramref name="root"/> RESERVED for this caller alone (fifth and sixth rounds): the stamp is to
+    /// the second and safe names collide ("a/b", "a_b"), so two removes could share one folder — and the cleanup after
+    /// the second, refused, one deleted the first one's undo. "Exists, then create" was not enough either: two editors
+    /// could both find the same name free. <paramref name="reserve"/> is the caller's ATOMIC create-if-absent
+    /// (CheckedReplace.TryReserveFolder): true = that path is now the caller's. The first candidate won is returned:
+    /// the plain name, then -2, -3, … Pure: the I/O is the callback's.
+    /// </summary>
+    public static string ReserveFolder(string root, string folderName, Func<string, bool> reserve)
+    {
+        string candidate = System.IO.Path.Combine(root, folderName);
+        for (int n = 2; !reserve(candidate); n++)
+        {
+            if (n > 1000) throw new System.IO.IOException($"could not reserve a folder named '{folderName}' under '{root}' in 1000 attempts");
+            candidate = System.IO.Path.Combine(root, folderName + "-" + n);
+        }
+        return candidate;
+    }
+
+    /// <summary>
+    /// A file in a remove snapshot that is the snapshot's OWN bookkeeping, never a baked output to copy back (fifth
+    /// round: the attempt marker was copied into Assets/Resources by a restore).
+    /// </summary>
+    public static bool IsSnapshotMetadata(string fileName) =>
+        string.Equals(fileName, "entry.json", StringComparison.OrdinalIgnoreCase)
+     || string.Equals(fileName, "manifest.txt", StringComparison.OrdinalIgnoreCase)
+     || string.Equals(fileName, AttemptedMarker, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// <paramref name="name"/> as a single path segment: separators and the characters no file system accepts become
+    /// `_`; leading and trailing dots and spaces go (Windows drops them, and `..` is a parent); empty becomes `_`.
+    /// </summary>
+    public static string SafeSegment(string name)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (char c in name ?? "")
+            sb.Append(c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|' || c < ' ' ? '_' : c);
+        string s = sb.ToString().Trim(' ', '.');
+        return s.Length == 0 ? "_" : s;
+    }
+
+    /// <summary>
+    /// May <paramref name="dir"/> be deleted as a remove snapshot of <paramref name="root"/>? Only when, RESOLVED (so
+    /// `..` and separators in either have been applied), it is a direct child of the root and its name carries the
+    /// snapshot prefix. Anything else — the root itself, a parent, a sibling, a grandchild — is not this Factory's to delete.
+    /// </summary>
+    public static bool IsRemovedSnapshotInside(string root, string dir)
+    {
+        if (string.IsNullOrWhiteSpace(root) || string.IsNullOrWhiteSpace(dir)) return false;
+        string fullRoot, fullDir;
+        try { fullRoot = Full(root); fullDir = Full(dir); } catch { return false; }
+        string parent = System.IO.Path.GetDirectoryName(fullDir);
+        if (parent == null) return false;
+        return string.Equals(Trim(parent), fullRoot, StringComparison.OrdinalIgnoreCase)
+            && System.IO.Path.GetFileName(fullDir).StartsWith(RemovedPrefix, StringComparison.Ordinal);
+    }
+
+    static string Full(string p) => Trim(System.IO.Path.GetFullPath(p));
+    static string Trim(string p) => p.TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
 }
 
 /// <summary>Bake-pipeline decisions (UniversalBaker calls these; BakerRulesTests locks them).</summary>

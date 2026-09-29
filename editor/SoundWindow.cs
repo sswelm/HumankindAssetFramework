@@ -34,10 +34,11 @@ public class SoundWindow : EditorWindow
 
     // Registry cached across repaints: ModelRegistry.Load() reads+parses pack.json (and 250ms-sleeps on a MISSING file),
     // so calling it inside OnGUI dropped a new adopter's window to ~4fps. Refreshed on enable/focus and after each save,
-    // so a bake/edit made in another window is still picked up when this one regains focus.
-    List<ModelDef> registryCache;
-    void OnEnable()  => registryCache = ModelRegistry.Load();
-    void OnFocus()   => registryCache = ModelRegistry.Load();
+    // so a bake/edit made in another window is still picked up when this one regains focus. A load that FAILED is never
+    // kept (ModelRegistry.Cache, review of PR #102): its empty list stood in for "no units with audio" until refocus.
+    readonly ModelRegistry.Cache registry = new ModelRegistry.Cache();
+    void OnEnable()  => registry.Drop();
+    void OnFocus()   => registry.Drop();
 
     // The pack's sounds folder that the running game reads (deployed under haf_packs/<your pack>/sounds). Apply also mirrors
     // each WAV into the git-tracked repo source (PackRepoDir/sounds) so the pack ships self-contained — see CopyWav.
@@ -66,7 +67,10 @@ public class SoundWindow : EditorWindow
             EditorGUILayout.SelectableLabel(SoundsDir, EditorStyles.miniLabel, GUILayout.Height(EditorGUIUtility.singleLineHeight));
         }
 
-        var all = registryCache ?? (registryCache = ModelRegistry.Load());
+        var all = registry.Get();
+        if (registry.ReadFailed)
+            EditorGUILayout.HelpBox("The registry " + (ModelRegistry.LastLoadProblem != "" ? ModelRegistry.LastLoadProblem : "can't be read right now") +
+                                    ".\nThe lists below are empty only because of that; they fill in by themselves once it can be read.", MessageType.Warning);
 
         // --- pawn ---
         EditorGUILayout.LabelField("Pawn", EditorStyles.boldLabel);
@@ -184,15 +188,33 @@ public class SoundWindow : EditorWindow
         EditorGUILayout.LabelField("Units with audio", EditorStyles.boldLabel);
         scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.ExpandHeight(true));   // fill the window's remaining space (was a fixed 150px strip with its own scrollbar)
         var withAudio = all.Where(HasAudio).ToList();
-        if (withAudio.Count == 0) EditorGUILayout.LabelField("  (none yet)", EditorStyles.miniLabel);
+        if (withAudio.Count == 0) EditorGUILayout.LabelField(registry.ReadFailed ? "  (the registry can't be read — see above)" : "  (none yet)", EditorStyles.miniLabel);
         foreach (var m in withAudio)
             using (new EditorGUILayout.HorizontalScope())
             {
                 if (GUILayout.Button("Edit", GUILayout.Width(46))) { LoadForPawn(m.pawnDescription, all); GUIUtility.ExitGUI(); }
                 if (GUILayout.Button("Clear", GUILayout.Width(52)))
                 {
-                    m.soundStartFile = m.soundFile = m.soundStopFile = m.soundIdleFile = m.soundAttackFile = m.soundDeathFile = m.soundBattleFile = ""; m.engineSound = false; m.engineStartEvent = m.engineStopEvent = ""; m.silenceDonorAudio = false;
-                    ModelRegistry.Upsert(m); registryCache = null; status = "Cleared audio on '" + m.pawnDescription + "'."; GUIUtility.ExitGUI();
+                    // Clear a FRESH copy from disk, never the cached `m` (review of PR #102): clearing the cache in place
+                    // showed "cleared" on a refused save, and upserting a cached copy wrote back whatever another window
+                    // changed on that entry since this one loaded. The status says only what the save's OUTCOME
+                    // guarantees (second round: an unsettled write may have left either version), and the list is
+                    // re-read whatever happened - it is the list, not the status, that shows what the registry holds.
+                    var def = ModelRegistry.Load().FirstOrDefault(x => x.resourceName == m.resourceName);
+                    if (ModelRegistry.LastLoadFailed)
+                        status = "Clear FAILED — the registry " + ModelRegistry.LastLoadProblem + "; nothing was written.";
+                    else if (def == null)
+                        status = "'" + m.resourceName + "' is no longer in the registry — nothing to clear.";
+                    else
+                    {
+                        def.soundStartFile = def.soundFile = def.soundStopFile = def.soundIdleFile = def.soundAttackFile = def.soundDeathFile = def.soundBattleFile = ""; def.engineSound = false; def.engineStartEvent = def.engineStopEvent = ""; def.silenceDonorAudio = false;
+                        var outcome = ModelRegistry.UpsertOutcome(def);
+                        status = outcome == RegistryRules.SaveOutcome.Saved ? "Cleared audio on '" + m.pawnDescription + "'."
+                               : outcome == RegistryRules.SaveOutcome.Refused ? "Clear FAILED — the registry save was refused; nothing was written (see the Console)."
+                               : "Clear could NOT be confirmed — the registry may hold the cleared or the previous audio for '" + m.pawnDescription + "' (see the Console).";
+                    }
+                    registry.Drop();   // every outcome: a cached list may be older than the disk (second round)
+                    GUIUtility.ExitGUI();
                 }
                 EditorGUILayout.LabelField($"{m.pawnDescription}  [{DescribeAudio(m)}]");
             }
@@ -492,10 +514,11 @@ public class SoundWindow : EditorWindow
             def.engineStopEvent = engineSound ? (engineStop ?? "").Trim() : "";
             def.silenceDonorAudio = silenceDonor;
 
-            bool ok = ModelRegistry.Upsert(def);
-            if (ok) registryCache = ModelRegistry.Load();   // refresh the cached list so the saved entry shows immediately
-            status = ok ? $"Saved audio for '{def.pawnDescription}' ({DescribeAudio(def)}).\nRelaunch (or reload a save) to hear it."
-                        : "Registry save FAILED — see the Console.";
+            var outcome = ModelRegistry.UpsertOutcome(def);
+            registry.Drop();   // re-read on the next repaint, whatever happened: the list shows what the registry holds
+            status = outcome == RegistryRules.SaveOutcome.Saved ? $"Saved audio for '{def.pawnDescription}' ({DescribeAudio(def)}).\nRelaunch (or reload a save) to hear it."
+                   : outcome == RegistryRules.SaveOutcome.Refused ? "Registry save FAILED — nothing was written (see the Console)."
+                   : "Registry save could NOT be confirmed — it may or may not hold this audio (see the Console).";
         }
         catch (Exception e) { status = "Failed: " + e.Message; }
     }

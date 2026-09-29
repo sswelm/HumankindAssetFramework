@@ -229,4 +229,22 @@ public static class CheckedReplace
     }
 
     static void TryDelete(string p) { try { if (File.Exists(p)) File.Delete(p); } catch { } }
+
+    /// <summary>
+    /// ATOMIC create-if-absent for a folder (review of PR #102, sixth round): a private temp folder is renamed into
+    /// place, and a rename fails when the name is taken — so two editors reserving the same name get exactly one winner.
+    /// "Exists, then create" let both pick it, and one's refused remove then deleted the other's undo. true = the path is
+    /// now this caller's folder, empty; false = the name was taken. Throws when the parent can't be written at all.
+    /// </summary>
+    public static bool TryReserveFolder(string path)
+    {
+        string full = Path.GetFullPath(path);
+        string parent = Path.GetDirectoryName(full);
+        Directory.CreateDirectory(parent);
+        string temp = Path.Combine(parent, "_tmp_" + Guid.NewGuid().ToString("N"));   // "_tmp_": the Backup window lists no such folder
+        Directory.CreateDirectory(temp);
+        try { Directory.Move(temp, full); return true; }
+        catch (IOException) when (Directory.Exists(full) || File.Exists(full)) { try { Directory.Delete(temp); } catch { } return false; }
+        catch { try { Directory.Delete(temp); } catch { } throw; }
+    }
 }

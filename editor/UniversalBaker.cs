@@ -153,6 +153,9 @@ public static class UniversalBaker
     // Halftrack's card portrait '<name>512.png' died to a manual 'rm <name>*' on 2026-07-27 — magenta unit card).
     internal static void SweepAllOutputs(string name)
     {
+        // PLAIN NAMES ONLY (review of PR #102, sixth round): these paths are built from the name as it is, and a name with
+        // path components would reach outside Assets/Resources. A registry entry can carry any name; the file system can't.
+        if (!BackupRules.IsPlainName(name)) throw new ArgumentException($"'{name}' is not a plain resource name (path characters) - refusing to delete files by it");
         // A district entry with the same resourceName LAYERS on these outputs by design (its bake reads the model's
         // _Atlas and overwrites _Atlas/_NormalAtlas/_RoughAtlas with processed versions), so sweeping them is
         // sometimes exactly right (a re-bake rebuilds them raw) — but never silently.
@@ -172,6 +175,7 @@ public static class UniversalBaker
     // recovery must not depend on a manual backup happening to exist). Returns the number of files copied.
     internal static int CopyAllOutputs(string name, string destDir)
     {
+        if (!BackupRules.IsPlainName(name)) throw new ArgumentException($"'{name}' is not a plain resource name (path characters) - refusing to copy files by it");   // see SweepAllOutputs
         int n = 0;
         string res = ResourcesFull();
         foreach (var s in OutputSuffixes)
