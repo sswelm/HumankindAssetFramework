@@ -44,12 +44,12 @@ public static class PropRegistry
         string json;
         try { json = System.IO.File.Exists(PathJson) ? System.IO.File.ReadAllText(PathJson) : null; }
         catch (Exception e) { return Fault($"it can't be read right now ({e.Message}) — another program has it open"); }
-        if (json != null) gitAskedAt = -1;   // present: the next time it goes missing, git is asked afresh
+        if (json != null) gitCheck.Forget();   // present: the next time it goes missing, git is asked afresh
         else
         {
             // The SAME evidence the write path uses (review of PR #101, fourth round: the window checked only the .meta,
             // so a tracked registry without one showed as "no recipes" while a save was rightly refused). The .meta is
-            // looked at live; git is asked at most every 5 s, because this runs on every repaint.
+            // looked at live; git in the background (below), because this runs on every repaint.
             string ev = System.IO.File.Exists(PathJson + ".meta") ? "Unity still has its .meta" : GitSaysCached();
             if (ev != null)
             {
@@ -60,16 +60,24 @@ public static class PropRegistry
         return Parse(json);
     }
 
-    static string gitSaid; static double gitAskedAt = -1;
+    // Git for the WINDOW, off the editor thread (review of PR #101, fifth round: asked on repaint, git could block the
+    // editor for up to its 5 s timeout, and again on the next repaint). The repaint takes the latest answer that has
+    // arrived and never waits; the window repaints once when a new one lands. Until the first does (~0.1-0.2 s) a
+    // missing file without a .meta shows as no recipes, as before this check existed. The write path still asks git
+    // itself, synchronously: a bake has to know before it decides, and it is an explicit action that takes seconds.
+    static readonly string FullPathJson = System.IO.Path.GetFullPath(PathJson);   // resolved here, on the editor thread
+    static readonly BackgroundCheck gitCheck = new BackgroundCheck(() => CheckedReplace.GitTracks(FullPathJson), 5);
     static string GitSaysCached()
     {
-        double now = EditorApplication.timeSinceStartup;
-        if (gitAskedAt < 0 || now - gitAskedAt > 5)
-        {
-            gitSaid = CheckedReplace.GitTracks(PathJson) ? "git tracks it" : null;
-            gitAskedAt = now;
-        }
-        return gitSaid;
+        bool tracked = gitCheck.Latest(EditorApplication.timeSinceStartup, out bool started);
+        if (started) EditorApplication.update += RepaintWhenGitAnswers;
+        return tracked ? "git tracks it" : null;
+    }
+    static void RepaintWhenGitAnswers()
+    {
+        if (gitCheck.Pending) return;
+        EditorApplication.update -= RepaintWhenGitAnswers;
+        foreach (var w in Resources.FindObjectsOfTypeAll<PropBakerWindow>()) w.Repaint();   // its next repaint takes the answer
     }
 
     // What a missing file known to have existed means, and what to do about a deliberate deletion — per evidence.
