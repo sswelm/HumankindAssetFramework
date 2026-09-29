@@ -9,19 +9,29 @@ public class RegistryReadFailureTests
     public void A_remove_is_a_removal_only_when_the_read_worked_and_the_save_went_through()
     {
         int saves = 0;
-        bool Save(bool result) { saves++; return result; }
+        RegistryRules.SaveOutcome Save(RegistryRules.SaveOutcome result) { saves++; return result; }
+        var saved = RegistryRules.SaveOutcome.Saved;
 
         // the reported case: the read failed, so the entry is "not found" in an empty list - that proves nothing
-        Assert.Equal(RegistryRules.RemoveResult.Failed, RegistryRules.JudgeRemove(true, false, () => Save(true)));
-        Assert.Equal(RegistryRules.RemoveResult.Failed, RegistryRules.JudgeRemove(true, true, () => Save(true)));
+        Assert.Equal(RegistryRules.RemoveResult.Failed, RegistryRules.JudgeRemove(true, false, () => Save(saved)));
+        Assert.Equal(RegistryRules.RemoveResult.Failed, RegistryRules.JudgeRemove(true, true, () => Save(saved)));
         Assert.Equal(0, saves);                                               // and nothing is written from it
         // a read that worked may say it isn't there
-        Assert.Equal(RegistryRules.RemoveResult.NotPresent, RegistryRules.JudgeRemove(false, false, () => Save(true)));
+        Assert.Equal(RegistryRules.RemoveResult.NotPresent, RegistryRules.JudgeRemove(false, false, () => Save(saved)));
         Assert.Equal(0, saves);
         // found: removed only if the save went through
-        Assert.Equal(RegistryRules.RemoveResult.Removed, RegistryRules.JudgeRemove(false, true, () => Save(true)));
-        Assert.Equal(RegistryRules.RemoveResult.Failed, RegistryRules.JudgeRemove(false, true, () => Save(false)));
+        Assert.Equal(RegistryRules.RemoveResult.Removed, RegistryRules.JudgeRemove(false, true, () => Save(saved)));
+        Assert.Equal(RegistryRules.RemoveResult.Failed, RegistryRules.JudgeRemove(false, true, () => Save(RegistryRules.SaveOutcome.Refused)));
         Assert.Equal(2, saves);
+    }
+
+    [Fact]
+    public void An_unsettled_save_is_neither_a_removal_nor_a_refusal()
+    {
+        // second round: Save() is false for a contested write it could not settle, which may have left EITHER version.
+        // "Remove FAILED - still in the registry" described a disk state nobody knew.
+        Assert.Equal(RegistryRules.RemoveResult.Unknown, RegistryRules.JudgeRemove(false, true, () => RegistryRules.SaveOutcome.Unknown));
+        Assert.NotEqual(RegistryRules.RemoveResult.Failed, RegistryRules.JudgeRemove(false, true, () => RegistryRules.SaveOutcome.Unknown));
     }
 
     // a fake registry: what the next read returns, and whether it fails

@@ -197,21 +197,23 @@ public class SoundWindow : EditorWindow
                 {
                     // Clear a FRESH copy from disk, never the cached `m` (review of PR #102): clearing the cache in place
                     // showed "cleared" on a refused save, and upserting a cached copy wrote back whatever another window
-                    // changed on that entry since this one loaded. On success the cache is re-read; on failure it is
-                    // still exactly right - the disk still holds the audio.
+                    // changed on that entry since this one loaded. The status says only what the save's OUTCOME
+                    // guarantees (second round: an unsettled write may have left either version), and the list is
+                    // re-read whatever happened - it is the list, not the status, that shows what the registry holds.
                     var def = ModelRegistry.Load().FirstOrDefault(x => x.resourceName == m.resourceName);
                     if (ModelRegistry.LastLoadFailed)
-                        status = "Clear FAILED — the registry " + ModelRegistry.LastLoadProblem + "; '" + m.pawnDescription + "' keeps its audio.";
+                        status = "Clear FAILED — the registry " + ModelRegistry.LastLoadProblem + "; nothing was written.";
                     else if (def == null)
-                    { status = "'" + m.resourceName + "' is no longer in the registry — nothing to clear."; registry.Drop(); }
+                        status = "'" + m.resourceName + "' is no longer in the registry — nothing to clear.";
                     else
                     {
                         def.soundStartFile = def.soundFile = def.soundStopFile = def.soundIdleFile = def.soundAttackFile = def.soundDeathFile = def.soundBattleFile = ""; def.engineSound = false; def.engineStartEvent = def.engineStopEvent = ""; def.silenceDonorAudio = false;
-                        bool ok = ModelRegistry.Upsert(def);
-                        if (ok) registry.Drop();
-                        status = ok ? "Cleared audio on '" + m.pawnDescription + "'."
-                                    : "Clear FAILED — '" + m.pawnDescription + "' keeps its audio (registry save refused, see the Console).";
+                        var outcome = ModelRegistry.UpsertOutcome(def);
+                        status = outcome == RegistryRules.SaveOutcome.Saved ? "Cleared audio on '" + m.pawnDescription + "'."
+                               : outcome == RegistryRules.SaveOutcome.Refused ? "Clear FAILED — the registry save was refused; nothing was written (see the Console)."
+                               : "Clear could NOT be confirmed — the registry may hold the cleared or the previous audio for '" + m.pawnDescription + "' (see the Console).";
                     }
+                    registry.Drop();   // every outcome: a cached list may be older than the disk (second round)
                     GUIUtility.ExitGUI();
                 }
                 EditorGUILayout.LabelField($"{m.pawnDescription}  [{DescribeAudio(m)}]");
@@ -512,10 +514,11 @@ public class SoundWindow : EditorWindow
             def.engineStopEvent = engineSound ? (engineStop ?? "").Trim() : "";
             def.silenceDonorAudio = silenceDonor;
 
-            bool ok = ModelRegistry.Upsert(def);
-            if (ok) registry.Drop();   // re-read on the next repaint so the saved entry shows (a failed re-read is not kept)
-            status = ok ? $"Saved audio for '{def.pawnDescription}' ({DescribeAudio(def)}).\nRelaunch (or reload a save) to hear it."
-                        : "Registry save FAILED — see the Console.";
+            var outcome = ModelRegistry.UpsertOutcome(def);
+            registry.Drop();   // re-read on the next repaint, whatever happened: the list shows what the registry holds
+            status = outcome == RegistryRules.SaveOutcome.Saved ? $"Saved audio for '{def.pawnDescription}' ({DescribeAudio(def)}).\nRelaunch (or reload a save) to hear it."
+                   : outcome == RegistryRules.SaveOutcome.Refused ? "Registry save FAILED — nothing was written (see the Console)."
+                   : "Registry save could NOT be confirmed — it may or may not hold this audio (see the Console).";
         }
         catch (Exception e) { status = "Failed: " + e.Message; }
     }

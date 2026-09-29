@@ -913,9 +913,12 @@ public class ModelFactoryWindow : EditorWindow
                             }
                             var result = ModelRegistry.RemoveEntry(name);
                             bool removed = result == RegistryRules.RemoveResult.Removed;
-                            // The undo points at this snapshot only once the remove HAPPENED (review of PR #102): after a
-                            // refused one, "Undo remove" would offer to restore an entry that was never taken away.
-                            if (removed) { lastRemovedName = name; lastRemovedSnap = undoDir; }
+                            // The undo points at this snapshot only once the remove MAY have happened (review of PR #102):
+                            // after a refused one, "Undo remove" would offer to restore an entry that was never taken
+                            // away. An unsettled one may have removed it, so the undo is offered then too - restoring an
+                            // entry that is still there puts back the same entry.
+                            bool unknown = result == RegistryRules.RemoveResult.Unknown;
+                            if (removed || unknown) { lastRemovedName = name; lastRemovedSnap = undoDir; }
                             // sel = 0 too: the popup-apply below reads a stale `sel` as a "selection change" and
                             // reloads existing[sel] on the SHRUNKEN list. Everything else — form reset, preview
                             // clear, coherence flag — is the FUNNEL's job (SelectEntry -> OnSelectResource): the
@@ -923,7 +926,9 @@ public class ModelFactoryWindow : EditorWindow
                             sel = 0; RefreshList(); SelectEntry(0);
                             status = removed ? $"Removed '{name}' from the registry."
                                    : result == RegistryRules.RemoveResult.NotPresent ? $"'{name}' was not in the registry — nothing removed."
-                                   : $"Remove FAILED — '{name}' is still in the registry and its files were not deleted (see the Console).";
+                                   : unknown ? $"Remove could NOT be confirmed — the registry may or may not still hold '{name}' (see the Console). " +
+                                               "Its files were not deleted; 'Undo remove' is offered in case the entry did go."
+                                   : $"Remove FAILED — nothing was removed and no files were deleted (see the Console).";
                             // Curated asset cleanup (2026-07-27, the lost-portrait lesson): delete the BAKED outputs via
                             // the exact whitelist ONLY — never a name wildcard, because unit-side files share the prefix
                             // (a manual 'rm <name>*' once deleted the AntiTank Halftrack's card portrait '<name>512.png'
@@ -2122,8 +2127,9 @@ public class ModelFactoryWindow : EditorWindow
     {
         string oldKey = LoadedResourceKey();
         if (string.IsNullOrEmpty(oldKey) || oldKey == cur.resourceName) return "";
-        // The registry says WHICH of three it was (review of PR #102): re-reading to check could not tell "gone" from a
-        // read that failed, which returns the same empty list — and then claimed "removed" while both entries remained.
+        // The registry says WHAT happened (review of PR #102): re-reading to check could not tell "gone" from a read that
+        // failed, which returns the same empty list — and then claimed "removed" while both entries remained. Failed and
+        // Unknown (an unsettled save) both leave it open whether the old entry is still there, so both say "may".
         switch (ModelRegistry.RemoveEntry(oldKey))
         {
             case RegistryRules.RemoveResult.Removed:

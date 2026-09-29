@@ -83,18 +83,36 @@ public static class RegistryRules
     /// </summary>
     public static bool ShowRecoveryControls(bool corrupt, bool locked) => corrupt && !locked;
 
-    /// <summary>What a Remove did (review of PR #102): "it wasn't there" and "the read or the save failed" were one `false`.</summary>
-    public enum RemoveResult { Removed, NotPresent, Failed }
+    /// <summary>
+    /// What a registry save did (review of PR #102, second round). Refused = NOTHING was written: the file is as it was.
+    /// Unknown = a contested write could not be settled, so the file may hold this save or another version - a caller
+    /// may not describe the disk then. `false` from the bool API is either.
+    /// </summary>
+    public enum SaveOutcome { Saved, Refused, Unknown }
+
+    /// <summary>
+    /// What a Remove did (review of PR #102): "it wasn't there" and "the read or the save failed" were one `false`.
+    /// Failed = nothing was written; Unknown = the save could not be settled (SaveOutcome.Unknown).
+    /// </summary>
+    public enum RemoveResult { Removed, NotPresent, Failed, Unknown }
 
     /// <summary>
     /// The verdict of a Remove. A read that FAILED returns an empty list, so "not found" in it proves nothing: that is
     /// Failed, and nothing is saved. Only a read that worked may say NotPresent; a found entry is Removed only if the
-    /// save that drops it went through. <paramref name="save"/> is called only when there is something to save.
+    /// save that drops it went through, and Unknown if it could not be settled. <paramref name="save"/> is called only
+    /// when there is something to save.
     /// </summary>
-    public static RemoveResult JudgeRemove(bool readFailed, bool found, Func<bool> save) =>
-        readFailed ? RemoveResult.Failed
-      : !found ? RemoveResult.NotPresent
-      : save() ? RemoveResult.Removed : RemoveResult.Failed;
+    public static RemoveResult JudgeRemove(bool readFailed, bool found, Func<SaveOutcome> save)
+    {
+        if (readFailed) return RemoveResult.Failed;
+        if (!found) return RemoveResult.NotPresent;
+        switch (save())
+        {
+            case SaveOutcome.Saved: return RemoveResult.Removed;
+            case SaveOutcome.Unknown: return RemoveResult.Unknown;
+            default: return RemoveResult.Failed;
+        }
+    }
 }
 
 /// <summary>

@@ -182,7 +182,7 @@ public class RetextureWindow : EditorWindow
                         {
                             var def = ModelRegistry.Load().FirstOrDefault(x => x.resourceName == m.resourceName);
                             if (ModelRegistry.LastLoadFailed)   // said, not silent (review of PR #102)
-                                status = "Clear FAILED — the registry " + ModelRegistry.LastLoadProblem + "; '" + m.resourceName + "' keeps its overrides.";
+                                status = "Clear FAILED — the registry " + ModelRegistry.LastLoadProblem + "; nothing was written.";
                             else if (def == null)
                                 status = "'" + m.resourceName + "' is no longer in the registry — nothing to clear.";
                             else
@@ -191,9 +191,11 @@ public class RetextureWindow : EditorWindow
                                 def.engineSound = false; def.engineStartEvent = ""; def.engineStopEvent = "";
                                 def.soundFile = ""; def.soundStartFile = ""; def.soundStopFile = "";
                                 def.soundVolume = 1f; def.soundStartVolume = 1f; def.soundStopVolume = 1f;
-                                status = ModelRegistry.Upsert(def)
-                                    ? "Cleared the overrides on '" + m.resourceName + "' (model entry kept)."
-                                    : "Clear FAILED — see the Console.";
+                                // only what the save's OUTCOME guarantees (review of PR #102, second round)
+                                var outcome = ModelRegistry.UpsertOutcome(def);
+                                status = outcome == RegistryRules.SaveOutcome.Saved ? "Cleared the overrides on '" + m.resourceName + "' (model entry kept)."
+                                       : outcome == RegistryRules.SaveOutcome.Refused ? "Clear FAILED — the registry save was refused; nothing was written (see the Console)."
+                                       : "Clear could NOT be confirmed — the registry may hold the cleared or the previous overrides for '" + m.resourceName + "' (see the Console).";
                             }
                         }
                     }
@@ -203,7 +205,8 @@ public class RetextureWindow : EditorWindow
                         var removed = ModelRegistry.RemoveEntry(m.resourceName);
                         status = removed == RegistryRules.RemoveResult.Removed ? "Removed '" + m.resourceName + "'."
                                : removed == RegistryRules.RemoveResult.NotPresent ? "'" + m.resourceName + "' was no longer in the registry — nothing removed."
-                               : "Remove FAILED — '" + m.resourceName + "' is still in the registry (see the Console).";
+                               : removed == RegistryRules.RemoveResult.Failed ? "Remove FAILED — nothing was removed (see the Console)."
+                               : "Remove could NOT be confirmed — the registry may or may not still hold '" + m.resourceName + "' (see the Console).";
                     }
                     registry.Drop();   // re-read on the next repaint; a failed re-read is not kept
                     GUIUtility.ExitGUI();
@@ -353,11 +356,13 @@ public class RetextureWindow : EditorWindow
                 status = "Nothing to apply — browse a Replacement PNG or set a Desaturate/RGB adjustment.";
                 return;
             }
-            bool ok = ModelRegistry.Upsert(def);
-            if (ok) { editedEntry = def.resourceName; registry.Drop(); }   // the form now matches the entry — no dialog on a re-Apply; re-read the list so it shows the save
-            status = ok
+            var outcome = ModelRegistry.UpsertOutcome(def);
+            if (outcome == RegistryRules.SaveOutcome.Saved) editedEntry = def.resourceName;   // the form now matches the entry — no dialog on a re-Apply
+            registry.Drop();   // re-read on the next repaint, whatever happened: the list shows what the registry holds
+            status = outcome == RegistryRules.SaveOutcome.Saved
                 ? $"Saved '{def.resourceName}' → {def.pawnDescription}  ({Describe(def)}).\nRelaunch the game (or reload a save) to see it."
-                : "Registry save FAILED — see the Console.";
+                : outcome == RegistryRules.SaveOutcome.Refused ? "Registry save FAILED — nothing was written (see the Console)."
+                : "Registry save could NOT be confirmed — it may or may not hold this override (see the Console).";
         }
         catch (Exception e) { status = "Failed: " + e.Message; }
     }

@@ -747,22 +747,25 @@ public static class ModelRegistry
 
     // Returns true if the registry was written. False = nothing was saved (corrupt-guard tripped, or the atomic write
     // hit a transient lock) — the caller should surface that instead of assuming success.
-    public static bool Save(List<ModelDef> models) => Save(models, null);
+    public static bool Save(List<ModelDef> models) => Save(models, null) == RegistryRules.SaveOutcome.Saved;
 
     // What SaveStatics writes: the Era Lab's own settings, and the version of them that window holds.
     sealed class EraEdit { public List<EraScaleRow> grid; public bool enabled; public List<FormationThreshold> thresholds; public StaticsVersion held; }
 
+    // WHAT a save did (review of PR #102, second round): Refused = nothing was written, the file is as it was; Unknown =
+    // a contested write could not be settled, and the source may hold either version (CheckedReplace.Unresolved). The
+    // bool wrappers call both `false`, so a caller that says what the disk holds must ask for the outcome.
     // era != null = SaveStatics: write the models exactly as THIS read of the source holds them (keepDiskModels). One
     // read serves both the merge base and the kept models, so a file that turns unreadable between two reads can't
     // slip through.
-    static bool Save(List<ModelDef> models, EraEdit era)
+    static RegistryRules.SaveOutcome Save(List<ModelDef> models, EraEdit era)
     {
         bool keepDiskModels = era != null;
         if (lastLoadCorrupt)
         {
             Debug.LogError("[Factory] not saving: the existing registry was unreadable (see the .corrupt.json backup). " +
                            "Fix or delete it and press Refresh first — refusing to overwrite it and lose your models.");
-            return false;
+            return RegistryRules.SaveOutcome.Refused;
         }
         if (lastLoadLocked && !keepDiskModels)
         {
@@ -771,7 +774,7 @@ public static class ModelRegistry
             // lock flag left by an earlier poll must not hold it up (review of PR #100).
             Debug.LogWarning($"[Factory] not saving: the last load couldn't read the registry source ({LastLockDetail}), so the list this save " +
                              "would write came from a read that failed. Nothing was changed — refresh (or wait for the next refresh), then save again.");
-            return false;
+            return RegistryRules.SaveOutcome.Refused;
         }
         if (keepDiskModels && !loaded)
         {
@@ -780,7 +783,7 @@ public static class ModelRegistry
             // era grid and scale rules, and keeping the disk's instead would report success for edits never written.
             Debug.LogWarning("[Factory] not saving: this Lab's settings were never loaded from the registry this session (the load couldn't read it), " +
                              "so there is nothing trustworthy to write. Refresh once the registry can be read, then save again.");
-            return false;
+            return RegistryRules.SaveOutcome.Refused;
         }
         // MERGE onto the current on-disk file instead of rebuilding from defaults: preserve the pack HEADER
         // (schemaVersion/modId/dependsOn/loadAfter/overrides — no window edits these, so they must survive every Save),
@@ -805,7 +808,7 @@ public static class ModelRegistry
             {
                 lastLoadLocked = true; LastLockDetail = e.Message; LastLockAdvice = RegistryRules.ReadFailureAdvice(RegistryRules.ClassifyReadFailure(e));   // the Factory's plain warning
                 Debug.LogWarning($"[Factory] not saving: the registry source '{SourcePath}' can't be read right now ({e.Message}). {LastLockAdvice} Nothing was changed.");
-                return false;
+                return RegistryRules.SaveOutcome.Refused;
             }
             file = ParseSource(sourceText, out string why);
             if (file == null)
@@ -814,7 +817,7 @@ public static class ModelRegistry
                 lastLoadLocked = false;   // it was just read, so whatever lock an earlier poll saw is over
                 Debug.LogError($"[Factory] not saving: the registry source '{SourcePath}' is unreadable right now — {why}. " +
                                "Refusing to overwrite it; fix it (or use the Model Factory's recovery) and save again.");
-                return false;
+                return RegistryRules.SaveOutcome.Refused;
             }
         }
         else if (File.Exists(RegistryPath))
@@ -829,7 +832,7 @@ public static class ModelRegistry
             {
                 Debug.LogError($"[Factory] not saving: the registry source '{SourcePath}' is missing and the deployed copy " +
                                $"'{RegistryPath}' can't be read ({why}) — it may be the only copy of this pack. Close whatever holds it (the game?) and save again.");
-                return false;
+                return RegistryRules.SaveOutcome.Refused;
             }
             Debug.Log($"[Factory] the registry source was missing — this save builds on the deployed copy ({file.models.Count} model(s), its pack settings kept).");
         }
@@ -852,7 +855,7 @@ public static class ModelRegistry
                                ? $"the deployed copy still has {deployed}. Restore them (the Model Factory's recovery, or git) and save again. "
                                : $"the deployed copy '{RegistryPath}' can't be checked ({deployedWhy}), so it may still hold them. Close whatever holds it (the game?) and save again. ") +
                            "If the pack really is empty now, delete the deployed copy (the next Load recreates it from the source).");
-            return false;
+            return RegistryRules.SaveOutcome.Refused;
         }
         if (keepDiskModels && (era.held == null || !era.held.MaySaveOver(EraPrint(file))))
         {
@@ -862,7 +865,7 @@ public static class ModelRegistry
             // Writing now would put the older settings over the newer.
             Debug.LogWarning("[Factory] not saving: the era settings in the registry changed since this Era Lab loaded them (another window, git, or a hand edit). " +
                              "Writing now would put the older settings over the newer ones. Reload the Lab, redo the change, and save again.");
-            return false;
+            return RegistryRules.SaveOutcome.Refused;
         }
         if (keepDiskModels) models = file.models;
         SortByName(models);   // write BOTH the live registry and the backup alphabetically, so the order is stable across bakes
@@ -899,14 +902,14 @@ public static class ModelRegistry
             {
                 Debug.LogWarning($"[Factory] not saving: the registry source '{SourcePath}' changed while this save was writing it (another editor, git, a sync tool). " +
                                  "That version is back in place and nothing of this save was written. Reload, then save again.");
-                return false;
+                return RegistryRules.SaveOutcome.Refused;
             }
             if (outcome == CheckedReplace.Outcome.Unresolved)
             {
                 Debug.LogError($"[Factory] registry save could not be settled at '{SourcePath}' (the note above says why: another writer's version could not be put back, or a failed write could not put the source back). " +
                                "The source may now hold this save, another version, or be missing; the deployed copy was not changed. " +
                                "Inspect the source and the preserved copies named above, then reload before saving again.");
-                return false;
+                return RegistryRules.SaveOutcome.Unknown;
             }
             EditorPrefs.SetString(PrefLastWrite, Fingerprint(json));   // the editor's own write — see PrefLastWrite
             if (keepDiskModels)
@@ -924,7 +927,7 @@ public static class ModelRegistry
             Debug.LogError($"[Factory] registry write FAILED — the model baked but its entry was NOT saved to " +
                            $"'{SourcePath}' ({e.Message}). Close whatever's locking it (AV, search indexer) and re-bake; " +
                            "the previous source is intact (git history has every committed version).");
-            return false;
+            return RegistryRules.SaveOutcome.Refused;
         }
         // 2) Refresh the DEPLOYED ARTIFACT (what the running game reads) — atomically too. A failure here does not
         //    fail the Save (the source of truth is safe) but it is LOUD: the game keeps loading the stale artifact
@@ -944,7 +947,7 @@ public static class ModelRegistry
                              "(is the game running and holding the file?).");
         }
         AssetDatabase.Refresh();
-        return true;
+        return RegistryRules.SaveOutcome.Saved;
     }
 
     // Save the Era Lab's settings only - the era grid, its switch and the formation thresholds - preserving everything
@@ -953,7 +956,7 @@ public static class ModelRegistry
     // (EraSettingsVersion right after its Load()); the save refuses unless the file still carries it, and advances it
     // on success. The session statics change only when the save succeeds. An unreadable source refuses (returns false).
     public static bool SaveStatics(List<EraScaleRow> eraGrid, bool eraGridEnabled, List<FormationThreshold> thresholds, StaticsVersion held) =>
-        Save(null, new EraEdit { grid = eraGrid, enabled = eraGridEnabled, thresholds = thresholds, held = held });
+        Save(null, new EraEdit { grid = eraGrid, enabled = eraGridEnabled, thresholds = thresholds, held = held }) == RegistryRules.SaveOutcome.Saved;
 
     // Models in the deployed copy: 0 only when it is ABSENT or provably empty; -1 when it exists but can't be read or
     // fails the same shape rule as the source (locked by the game, half-written, `{}`) — no evidence of an empty pack.
@@ -965,7 +968,10 @@ public static class ModelRegistry
         catch (Exception e) { why = e.Message; return -1; }
     }
 
-    public static bool Upsert(ModelDef def)
+    public static bool Upsert(ModelDef def) => UpsertOutcome(def) == RegistryRules.SaveOutcome.Saved;
+
+    // Upsert, saying WHAT it did (see SaveOutcome): for a caller that tells the user what the registry now holds.
+    public static RegistryRules.SaveOutcome UpsertOutcome(ModelDef def)
     {
         // NORMALIZE at the one choke point every write path passes (2026-09-12): attackRepeats floors at 1 —
         // the schema default and the validator's rule. The old "Make static" clear wrote 0, and an entry round-
@@ -985,7 +991,7 @@ public static class ModelRegistry
         // silently overwriting the other. No shipped pack has case-duplicate names, so nothing is merged by this.
         list.RemoveAll(m => string.Equals(m.resourceName, def.resourceName, StringComparison.OrdinalIgnoreCase));
         list.Add(def);
-        return Save(list);
+        return Save(list, null);
     }
 
     // Remove a model from the registry by resource name. Returns true if something was removed. The baked skeleton/atlas
@@ -1000,7 +1006,7 @@ public static class ModelRegistry
         var list = Load();
         bool failed = LastLoadFailed;
         bool found = list.RemoveAll(m => m.resourceName == resourceName) > 0;
-        return RegistryRules.JudgeRemove(failed, found, () => Save(list));
+        return RegistryRules.JudgeRemove(failed, found, () => Save(list, null));
     }
 
     public static int[] ParseGuid(string csv)
