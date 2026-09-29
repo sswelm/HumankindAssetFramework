@@ -12,6 +12,150 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
+/// <summary>
+/// Registry save/load decisions (ModelRegistry calls these; RegistryRulesTests locks them). Extracted in review of
+/// PR #100: they guard a pack of 37 models against being written over with an empty list, and the only proof they
+/// worked was a one-off manual drill that three later commits never re-ran. A guard like that rots silently.
+/// </summary>
+public static class RegistryRules
+{
+    /// <summary>
+    /// Does the raw pack text carry a "models" ARRAY? JsonUtility reads `{}` and `"models": []` alike (the list field
+    /// defaults to empty), so an empty parse proves nothing on its own: every pack.json the editor writes carries the
+    /// key, and a source without it is a broken edit, not an empty pack.
+    /// </summary>
+    public static bool HasModelsArray(string json)
+    {
+        try { return Newtonsoft.Json.Linq.JObject.Parse(json ?? "")["models"] is Newtonsoft.Json.Linq.JArray; }
+        catch { return false; }
+    }
+
+    public enum EmptySourceVerdict { Allow, RefuseDeployedHasModels, RefuseDeployedUnreadable }
+
+    /// <summary>
+    /// May a save go ahead when the SOURCE holds no models? Only when the editor itself wrote it that way (the last
+    /// model removed), or when nothing else could still hold them. Every editor save writes both copies, so a deployed
+    /// copy that still has models means the source was emptied outside the editor, and a deployed copy that cannot be
+    /// READ is no evidence of an empty pack. `deployedModels`: -1 = exists but unreadable, 0 = absent or provably empty.
+    /// </summary>
+    public static EmptySourceVerdict JudgeEmptySource(bool sourceExists, int sourceModels, bool writtenByEditor, int deployedModels)
+    {
+        if (!sourceExists || sourceModels > 0 || writtenByEditor) return EmptySourceVerdict.Allow;
+        if (deployedModels > 0) return EmptySourceVerdict.RefuseDeployedHasModels;
+        if (deployedModels < 0) return EmptySourceVerdict.RefuseDeployedUnreadable;
+        return EmptySourceVerdict.Allow;
+    }
+
+    /// <summary>
+    /// The text the editor's-own-write fingerprint is taken of: line endings normalized. The source is git-tracked,
+    /// and git's autocrlf rewriting it on a checkout is not somebody else emptying it (review of PR #100, P3).
+    /// </summary>
+    public static string FingerprintText(string json) => (json ?? "").Replace("\r\n", "\n");
+
+    /// <summary>
+    /// A deploy the game held the file against is retried from Load(), which every window polls. Backing off keeps a
+    /// running game's config folder from being written to on every repaint: 2, 4, 8, 16 s, then every 30 s.
+    /// </summary>
+    public static double PendingRetryDelay(int failures) => Math.Min(30.0, 2.0 * Math.Pow(2, Math.Max(0, Math.Min(failures, 8))));
+    public static bool PendingRetryDue(double now, double lastAttempt, int failures) => lastAttempt < 0 || now - lastAttempt >= PendingRetryDelay(failures);
+
+    /// <summary>
+    /// Why a file could not be READ - as against one that was read and is broken. Only the second is corruption;
+    /// calling the first "corrupt" put a one-click `git checkout -- pack.json` in front of the user for a file with
+    /// nothing wrong in it (review of PR #100, P1). Two kinds, because they are not equally temporary (second round):
+    /// a lock (IOException - another program has it open, or is replacing it) clears by itself, while access denied
+    /// is either a file mid-delete, which also clears, or its permissions, which never do on their own.
+    /// </summary>
+    public enum ReadFailure { NotARead, Locked, AccessDenied }
+    public static ReadFailure ClassifyReadFailure(Exception e) =>
+        e is UnauthorizedAccessException ? ReadFailure.AccessDenied : e is System.IO.IOException ? ReadFailure.Locked : ReadFailure.NotARead;
+
+    /// <summary>What the user is told about a read that failed - true for every case the kind covers, and no more.</summary>
+    public static string ReadFailureAdvice(ReadFailure kind) => kind == ReadFailure.AccessDenied
+        ? "Windows refuses read access to it: either its permissions, or it is being deleted. If a program is replacing it, this clears on the next refresh; if it persists, check the file's permissions - that will not clear by itself."
+        : "Another program has it open or is replacing it (an editor saving, git, a sync tool); the next refresh tries again by itself.";
+
+    /// <summary>
+    /// The recovery controls ("Restore last deploy", "Restore last commit" - a git checkout) only for a source that was
+    /// READ and found broken, never while it cannot be read at all: an earlier corrupt verdict is about bytes nobody can
+    /// see right now, and the file may have been repaired since - its fix uncommitted, one click from being checked out
+    /// away (outside review of PR #100, second round). A lock takes precedence until the file can be read again.
+    /// </summary>
+    public static bool ShowRecoveryControls(bool corrupt, bool locked) => corrupt && !locked;
+}
+
+/// <summary>
+/// WHICH VERSION OF THE ERA SETTINGS A WINDOW HOLDS (outside review of PR #100, third and fourth rounds). SaveStatics is
+/// the one save not fed by a fresh Load(): it writes the grid the Era Lab shows over whatever the file holds now. A Lab
+/// loads version A; another window, git or a hand edit replaces the file with B; the Lab's refresh is caught by a lock
+/// and changes nothing - and SaveStatics wrote A's grid over B. So the WINDOW keeps the print of the settings it copied
+/// (or last wrote), and SaveStatics may write only over a file whose settings still carry that print. One per window,
+/// never one per session: a session-wide token was advanced by ANY window's Load() while the Era Lab still showed A,
+/// and then passed A over B. A print of the era settings alone, not of the whole file: a model baked in the Factory
+/// changes the file without touching the grid, and must not lock the Era Lab out.
+/// </summary>
+public sealed class StaticsVersion
+{
+    string held = "";
+    /// <summary>A Load() that really read the statics from a file: the session now holds that version.</summary>
+    public void Loaded(string print) => held = print ?? "";
+    /// <summary>A save that wrote the session's statics: the file now holds what the session holds.</summary>
+    public void Saved(string print) => held = print ?? "";
+    /// <summary>May the session's statics be written over a file whose statics carry <paramref name="diskPrint"/>?</summary>
+    public bool MaySaveOver(string diskPrint) => held.Length > 0 && held == (diskPrint ?? "");
+    public bool Held => held.Length > 0;
+}
+
+/// <summary>
+/// A YES/NO CHECK TOO SLOW FOR A REPAINT (git: up to its 5 s timeout), run off the calling thread (review of PR #101,
+/// fifth round). The Prop Lab asked git synchronously on repaint, and stamped its cache BEFORE the call, so a call
+/// that timed out left the cache already expired and the next repaint blocked again. Here a caller never waits: it
+/// gets the latest answer that has ARRIVED, a new check starts only when none is running, and the age that decides a
+/// re-check is counted from when the answer arrived, not from when it was asked.
+/// THREE answers (sixth round): true, false, and null = NOT KNOWN — no answer has arrived yet, or the check couldn't
+/// tell (returned null, threw). "Not known" is never reported as "no": the window showed a tracked registry as an
+/// empty one while the first git lookup was running or had timed out.
+/// </summary>
+public sealed class BackgroundCheck
+{
+    readonly Func<bool?> check;
+    readonly double maxAge;
+    System.Threading.Tasks.Task<bool?> running;
+    bool? answer;
+    double answeredAt = double.NaN;
+
+    public BackgroundCheck(Func<bool?> check, double maxAgeSeconds) { this.check = check; maxAge = maxAgeSeconds; }
+
+    /// <summary>
+    /// The latest answer, without waiting; null when none is known. <paramref name="now"/> is the caller's clock in
+    /// seconds. Starts a check when none is running and there is no answer yet, or the last one arrived more than
+    /// maxAge ago; <paramref name="started"/> says so (the caller may want to repaint once it lands).
+    /// </summary>
+    public bool? Latest(double now, out bool started)
+    {
+        started = false;
+        if (running != null)
+        {
+            if (!running.IsCompleted) return answer;
+            answer = running.Status == System.Threading.Tasks.TaskStatus.RanToCompletion ? running.Result : null;   // threw: not known
+            answeredAt = now;   // it has arrived: the age counts from here
+            running = null;
+        }
+        if (double.IsNaN(answeredAt) || now - answeredAt > maxAge)
+        {
+            running = System.Threading.Tasks.Task.Run(check);
+            started = true;
+        }
+        return answer;
+    }
+
+    /// <summary>A check is running and its answer hasn't been taken yet.</summary>
+    public bool Pending => running != null && !running.IsCompleted;
+
+    /// <summary>Drop the answer: the next Latest asks afresh (a running check still lands).</summary>
+    public void Forget() { answer = null; answeredAt = double.NaN; }
+}
+
 /// <summary>Bake-pipeline decisions (UniversalBaker calls these; BakerRulesTests locks them).</summary>
 public static class BakerRules
 {

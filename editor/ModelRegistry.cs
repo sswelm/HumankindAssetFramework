@@ -280,12 +280,31 @@ public static class ModelRegistry
     // set, so a corrupt / half-edited registry is never silently overwritten with a fresh (empty) list —
     // which would wipe every baked model's settings.
     static bool lastLoadCorrupt;
+    // …and set when the last Load() could not READ the source at all - another program had it open, or was replacing
+    // it (review of PR #100, P1). NOT corruption: nothing is wrong with the file and nothing needs recovering, so it
+    // never raises the recovery banner, whose "Restore last commit" is a `git checkout` that discards uncommitted work.
+    // But the list that Load() returned is empty for want of a read, so Save() refuses while it is set, exactly as for
+    // corruption - an Upsert onto that list would write one model over the whole pack. Cleared by the next Load().
+    static bool lastLoadLocked;
 
     // Set true once THIS session's Load() has observed the on-disk registry, so the session-static
     // UnitScales/EraGrid/FormationThresholds below reflect reality. A domain reload (recompile) resets it to false
     // AND empties those statics — so a Save() reached before a fresh Load() must NOT write the empty statics (that
     // silently wiped all Resize-Lab / Era-Lab data). While false, Save() preserves those arrays from the on-disk file.
     static bool loaded;
+
+    // …and WHICH version of the era settings a window copied out of them is the WINDOW's to keep (StaticsVersion,
+    // outside review of PR #100, fourth round: a session-wide token was advanced by any window's Load() while the Era
+    // Lab still showed the grid it had copied earlier). EraSettingsVersion is the print of the session's era settings
+    // at this instant - read right after a Load(), the version of exactly what a window copies out of them next; ""
+    // when this session never loaded them.
+    [Serializable] class EraSnapshot { public List<EraScaleRow> eraGrid; public bool eraGridEnabled; public List<FormationThreshold> formationThresholds; }
+    static string EraPrint(List<EraScaleRow> grid, bool gridEnabled, List<FormationThreshold> thresholds) =>
+        Fingerprint(JsonUtility.ToJson(new EraSnapshot {
+            eraGrid = grid ?? new List<EraScaleRow>(), eraGridEnabled = gridEnabled,
+            formationThresholds = thresholds ?? new List<FormationThreshold>() }));
+    static string EraPrint(RegistryFile f) => EraPrint(f.eraGrid, f.eraGridEnabled, f.formationThresholds);
+    public static string EraSettingsVersion => loaded ? EraPrint(EraGrid, EraGridEnabled, FormationThresholds) : "";
 
     // RESIZE LAB rules — the registry file's `unitScales` array, captured at every Load and written back on
     // every Save (same session-static pattern as the pack header fields). The Lab edits this list directly.
@@ -333,6 +352,7 @@ public static class ModelRegistry
 
     const string PrefCollapsed = "HAF.Registry.SingleSource";   // one-time per-machine migration marker
     static bool artifactDriftWarned;   // warn once per domain load, not per Load() call (RefreshList polls)
+    static bool artifactReadWarned;    // the deployed copy could not even be READ to compare (an exclusive holder) — said once, not per poll
 
     // One-time migration: until the marker is set, the DEPLOYED copy is still the historical authority — adopt
     // it into the project file if they differ (covers a machine whose last session predates the collapse).
@@ -356,8 +376,40 @@ public static class ModelRegistry
         catch (Exception e) { Debug.LogWarning("[Factory] registry collapse migration failed (will retry next load): " + e.Message); }
     }
 
-    // Keep the deployed ARTIFACT in step: recreate it when missing (fresh/reinstalled game), warn ONCE when it
-    // was hand-edited (the next Save overwrites it — the old habit points at the wrong file now).
+    // WHAT THE EDITOR ITSELF LAST WROTE (review of #100). The empty-source guard in Save() infers "emptied outside the
+    // editor" from a source with no models beside a deployed copy with some — but the editor empties the source itself
+    // (Remove() of the last model), and if the deploy of THAT write failed (the game held the file) the two copies
+    // disagree for an innocent reason, and every later save refused. The source's fingerprint, recorded on every write,
+    // tells the editor's own empty source from a hand-emptied one; the PENDING fingerprint marks a deploy that failed,
+    // so the next Load() can finish it. Per machine (EditorPrefs), like the deployed copy it describes.
+    static string PrefLastWrite => "HAF.Registry.LastWrite|" + SourcePath;
+    static string PrefPendingDeploy => "HAF.Registry.PendingDeploy|" + SourcePath;
+    static bool pendingRetryWarned;   // a locked artifact fails the retry on every Load() poll — say so once
+    static double lastPendingAttempt = -1; static int pendingFailures;   // RegistryRules.PendingRetryDue: 2, 4, 8, 16 s, then every 30 s
+
+    static string Fingerprint(string json)
+    {
+        using (var sha = System.Security.Cryptography.SHA256.Create())
+            return BitConverter.ToString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(RegistryRules.FingerprintText(json))));   // CRLF/LF-blind: git rewriting the source is not a hand-emptying
+    }
+
+    // Atomic write of the deployed ARTIFACT; throws on failure (the callers word the consequence).
+    static void WriteArtifact(string json)
+    {
+        Directory.CreateDirectory(PackLiveDir);
+        var tmp = RegistryPath + ".tmp";
+        try
+        {
+            File.WriteAllText(tmp, json);
+            if (File.Exists(RegistryPath)) File.Replace(tmp, RegistryPath, null);
+            else File.Move(tmp, RegistryPath);
+        }
+        catch { try { File.Delete(tmp); } catch { } throw; }
+    }
+
+    // Keep the deployed ARTIFACT in step: recreate it when missing (fresh/reinstalled game), FINISH a deploy that a
+    // Save() couldn't complete, and warn ONCE when it was hand-edited (the next Save overwrites it — the old habit
+    // points at the wrong file now).
     static void SyncArtifact(string sourceJson)
     {
         try
@@ -366,10 +418,65 @@ public static class ModelRegistry
             {
                 Directory.CreateDirectory(PackLiveDir);
                 File.WriteAllText(RegistryPath, sourceJson);
+                EditorPrefs.DeleteKey(PrefPendingDeploy);
                 Debug.Log($"[Factory] deployed registry artifact recreated from the project source → {RegistryPath}");
                 return;
             }
-            if (!artifactDriftWarned && File.ReadAllText(RegistryPath) != sourceJson)
+            string pending = EditorPrefs.GetString(PrefPendingDeploy, "");
+            if (pending != "")
+            {
+                // NOT ON EVERY POLL (review of PR #100, P4): Load() runs whenever a window refreshes, and a game holding
+                // the file failed the retry every time - a full read of the deployed copy and a full temp write into the
+                // game's config folder, per repaint. Until the next attempt is due, the pending deploy explains the
+                // difference and there is nothing to check.
+                double now = EditorApplication.timeSinceStartup;
+                if (!RegistryRules.PendingRetryDue(now, lastPendingAttempt, pendingFailures)) return;
+                lastPendingAttempt = now;
+                string deployedNow;
+                try { deployedNow = File.ReadAllText(RegistryPath); }
+                catch (Exception re)
+                {
+                    // AN EXCLUSIVE HOLDER denies the READ as well as the replace (measured: a plain reader, share Read or
+                    // ReadWrite, blocks only the replace; share None - a scanner, a sync tool - blocks both). That is a failed
+                    // attempt like any other: count it, back off, say it once. Outside this catch it reached the outer
+                    // handler instead, which logged every attempt and never grew the delay past 2 s (review of PR #100).
+                    pendingFailures++;
+                    if (!pendingRetryWarned) { pendingRetryWarned = true; Debug.LogWarning($"[Factory] the deployed copy is still out of date and can't even be read right now ({re.Message}) — another program holds it exclusively; retrying, every 2 s at first, backing off to every 30 s."); }
+                    return;
+                }
+                if (deployedNow == sourceJson) { EditorPrefs.DeleteKey(PrefPendingDeploy); pendingFailures = 0; lastPendingAttempt = -1; }   // it caught up
+                else if (pending == Fingerprint(sourceJson))
+                {
+                    // The source is still exactly what the failed Save wrote: this difference is OUR unfinished deploy,
+                    // not a hand-edit — finish it.
+                    try
+                    {
+                        WriteArtifact(sourceJson);
+                        EditorPrefs.DeleteKey(PrefPendingDeploy);
+                        pendingRetryWarned = false; pendingFailures = 0; lastPendingAttempt = -1;
+                        Debug.Log($"[Factory] finished a deploy an earlier save couldn't complete → {RegistryPath}");
+                    }
+                    catch (Exception re)
+                    {
+                        pendingFailures++;
+                        if (!pendingRetryWarned) { pendingRetryWarned = true; Debug.LogWarning($"[Factory] the deployed copy is still out of date (the last save couldn't refresh it: {re.Message}); retrying — every 2 s at first, backing off to every 30 s — until it can."); }
+                    }
+                    return;
+                }
+                else { EditorPrefs.DeleteKey(PrefPendingDeploy); pendingFailures = 0; lastPendingAttempt = -1; }   // the source changed since (git, a hand-edit): that deploy is moot
+            }
+            string deployedText = null;
+            if (!artifactDriftWarned)
+            {
+                // the same exclusive holder, with no deploy pending: a read that fails is said once, not on every poll
+                try { deployedText = File.ReadAllText(RegistryPath); artifactReadWarned = false; }
+                catch (Exception re)
+                {
+                    if (!artifactReadWarned) { artifactReadWarned = true; Debug.LogWarning($"[Factory] the deployed copy '{RegistryPath}' can't be read to compare it with the source ({re.Message}) — another program holds it exclusively. Checked again on later loads; said once."); }
+                    return;
+                }
+            }
+            if (!artifactDriftWarned && deployedText != sourceJson)
             {
                 artifactDriftWarned = true;
                 Debug.LogWarning("[Factory] the DEPLOYED pack.json differs from the project source. Since the 2026-08-19 collapse the deployed copy is a BUILD ARTIFACT — a hand-edit there is ignored by the editor and overwritten on the next Save. Edit the source instead: " + SourcePath);
@@ -413,7 +520,11 @@ public static class ModelRegistry
     {
         try
         {
-            loaded = true;   // this session has now observed the on-disk registry (see the `loaded` field) — the corrupt path below leaves Save() guarded by lastLoadCorrupt regardless
+            lastLoadLocked = false;   // every Load() decides it afresh (see the field)
+            // `loaded` is set BELOW, only where this Load actually refreshed the statics from a file (review of PR #100).
+            // Set up here, as it was, a read that FAILED marked the post-reload statics authoritative while they were
+            // still empty — harmless while every save waited on the failure flags, and a wipe of the pack's era grid and
+            // scale rules once SaveStatics stopped waiting on the lock flag.
             MigrateToSingleSourceOnce();
             if (!File.Exists(SourcePath))
             {
@@ -430,28 +541,48 @@ public static class ModelRegistry
                         try
                         {
                             var dep = File.ReadAllText(RegistryPath);
-                            var d = JsonUtility.FromJson<RegistryFile>(dep);
-                            if (d?.models != null && d.models.Count > 0)
+                            // ANY readable pack, not only one with models (review of #100): an empty pack's modId,
+                            // dependencies, scale rules and era settings live only here too, and a save onto defaults
+                            // would erase them. The shape rule keeps a broken `{}` from passing for a pack.
+                            var d = ParseRegistry(dep, RegistryPath, out var depWhy);
+                            if (d == null) Debug.LogWarning($"[Factory] the project registry source is missing and the deployed artifact '{RegistryPath}' is unreadable ({depWhy}) — nothing to adopt; saves refuse until one of them is readable.");
+                            else
                             {
                                 Directory.CreateDirectory(PackRepoDir);
                                 File.WriteAllText(SourcePath, dep);
-                                Debug.Log($"[Factory] project registry source was missing — adopted {d.models.Count} model(s) from the deployed artifact ({RegistryPath}).");
+                                Debug.Log($"[Factory] project registry source was missing — adopted the deployed artifact ({d.models.Count} model(s), {RegistryPath}).");
                                 UnitScales = d.unitScales ?? new List<UnitScaleRule>();
                                 WaterLevel = d.waterLevel;
                                 CaptureWrapper(d);
                                 EraGrid = d.eraGrid ?? new List<EraScaleRow>();
                                 EraGridEnabled = d.eraGridEnabled;
                                 FormationThresholds = d.formationThresholds ?? new List<FormationThreshold>();
+                                loaded = true;   // the statics now reflect the adopted pack
                                 return Migrate(SortByName(d.models), dep);
                             }
                         }
                         catch (Exception be) { Debug.LogWarning($"[Factory] the deployed artifact '{RegistryPath}' is unreadable ({be.Message}) — treating as absent."); }
                     }
+                    else loaded = true;   // no source and no deployed copy: a first-ever pack, and the statics in memory are its truth
                     return new List<ModelDef>();
                 }
             }
-            var json = File.ReadAllText(SourcePath);
-            var data = JsonUtility.FromJson<RegistryFile>(json);
+            string json;
+            try { json = File.ReadAllText(SourcePath); }
+            catch (Exception re) when (RegistryRules.ClassifyReadFailure(re) != RegistryRules.ReadFailure.NotARead)
+            {
+                // could not READ it: see lastLoadLocked. Not the corrupt path below — and it SUPERSEDES an earlier
+                // corrupt verdict (outside review of PR #100, second round): that verdict was about bytes this Load could
+                // not see, the file may have been repaired since, and leaving lastLoadCorrupt up kept "Restore last
+                // commit" — a git checkout — one click from discarding that uncommitted repair. Clearing it frees no save:
+                // Load-fed saves refuse on lastLoadLocked, and SaveStatics judges the bytes with its own read.
+                // corruptLogged stays: a file still broken when it can be read again is not logged and copied twice.
+                lastLoadLocked = true; lastLoadCorrupt = false;
+                LastLockDetail = re.Message; LastLockAdvice = RegistryRules.ReadFailureAdvice(RegistryRules.ClassifyReadFailure(re));
+                return new List<ModelDef>();   // a Load-fed save refuses while lastLoadLocked, so this empty list can never be written
+            }
+            var data = ParseSource(json, out var why);
+            if (data == null) throw new SourceUnreadable(why);   // same verdict Save() reaches — not "a pack with no models"
             lastLoadCorrupt = false; corruptLogged = false;
             UnitScales = data?.unitScales ?? new List<UnitScaleRule>();
             WaterLevel = data != null ? data.waterLevel : 0.16f;
@@ -459,6 +590,7 @@ public static class ModelRegistry
             EraGrid = data?.eraGrid ?? new List<EraScaleRow>();
             EraGridEnabled = data == null || data.eraGridEnabled;
             FormationThresholds = data?.formationThresholds ?? new List<FormationThreshold>();
+            loaded = true;   // the statics now reflect the file
             SyncArtifact(json);   // deployed copy recreated if missing; hand-edit there warned about once
             return Migrate(SortByName(data?.models ?? new List<ModelDef>()), json);
         }
@@ -469,7 +601,7 @@ public static class ModelRegistry
             // JsonUtility's exceptions carry no location — re-parse with Newtonsoft purely for diagnosis, whose
             // JsonReaderException names the exact line and column of the missing comma/bracket.
             lastLoadCorrupt = true;
-            LastCorruptDetail = Pinpoint(SourcePath) ?? e.Message;
+            LastCorruptDetail = e is SourceUnreadable ? e.Message : Pinpoint(SourcePath) ?? e.Message;
             // LOG ONCE per corruption (drill finding 2026-08-19: every window polls Load(), so this line spammed
             // the Console dozens of times for one broken file — the red banner is the persistent surface, the log
             // is the event record). Reset when the corruption clears (successful load or recovery).
@@ -488,6 +620,9 @@ public static class ModelRegistry
 
     // ---- CORRUPT-SOURCE RECOVERY (2026-08-19, user design: "not only a try/catch but recovery functionality") ----
     public static bool LastLoadCorrupt => lastLoadCorrupt;
+    public static bool LastLoadLocked => lastLoadLocked;   // the Factory's plain warning — no recovery buttons (see the field)
+    public static string LastLockDetail = "";
+    public static string LastLockAdvice = "";   // RegistryRules.ReadFailureAdvice — a lock and access denied are not equally temporary
     public static string LastCorruptDetail = "";
     static bool corruptLogged;   // one Console error per corruption, not per Load() poll (drill finding)
 
@@ -498,6 +633,31 @@ public static class ModelRegistry
         catch (Newtonsoft.Json.JsonReaderException jre) { return $"line {jre.LineNumber}, position {jre.LinePosition}: {jre.Message}"; }
         catch (Exception ex) { return ex.Message; }
     }
+
+    // THE SOURCE'S VERDICT, shared by Load() and Save() so they never disagree about the same bytes. Null + why =
+    // unreadable. JsonUtility can't tell `{}` from `"models": []` (RegistryFile.models defaults to an empty list), so
+    // an empty result must show the key in the raw text: every file the editor writes carries it, and a source
+    // without one is a broken edit, not an empty pack (review of PR #100: `{}` wiped every model via SaveStatics).
+    // Newtonsoft only runs on an empty result, so the polled Load() of a real pack pays nothing for it.
+    static RegistryFile ParseSource(string json, out string why) => ParseRegistry(json, SourcePath, out why);
+
+    static RegistryFile ParseRegistry(string json, string path, out string why)
+    {
+        why = null;
+        RegistryFile f;
+        try { f = JsonUtility.FromJson<RegistryFile>(json); }
+        catch (Exception e) { why = Pinpoint(path) ?? e.Message; return null; }
+        if (f == null) { why = "the file is empty or not a JSON object"; return null; }
+        if (f.models == null || f.models.Count == 0)
+        {
+            if (!RegistryRules.HasModelsArray(json)) { why = "it has no \"models\" array (every pack.json carries one, even an empty pack)"; return null; }
+            f.models = f.models ?? new List<ModelDef>();
+        }
+        return f;
+    }
+
+    // A verdict ParseSource already worded — Load()'s catch must not replace it with Pinpoint's "Newtonsoft parses it".
+    class SourceUnreadable : Exception { public SourceUnreadable(string why) : base(why) { } }
 
     // Both recovery paths share the same safety contract: the candidate is VALIDATED (must parse and hold >=1
     // model) BEFORE it overwrites the source; the corrupt file is already preserved timestamped; success clears
@@ -550,25 +710,136 @@ public static class ModelRegistry
 
     // Returns true if the registry was written. False = nothing was saved (corrupt-guard tripped, or the atomic write
     // hit a transient lock) — the caller should surface that instead of assuming success.
-    public static bool Save(List<ModelDef> models)
+    public static bool Save(List<ModelDef> models) => Save(models, null);
+
+    // What SaveStatics writes: the Era Lab's own settings, and the version of them that window holds.
+    sealed class EraEdit { public List<EraScaleRow> grid; public bool enabled; public List<FormationThreshold> thresholds; public StaticsVersion held; }
+
+    // era != null = SaveStatics: write the models exactly as THIS read of the source holds them (keepDiskModels). One
+    // read serves both the merge base and the kept models, so a file that turns unreadable between two reads can't
+    // slip through.
+    static bool Save(List<ModelDef> models, EraEdit era)
     {
+        bool keepDiskModels = era != null;
         if (lastLoadCorrupt)
         {
             Debug.LogError("[Factory] not saving: the existing registry was unreadable (see the .corrupt.json backup). " +
                            "Fix or delete it and press Refresh first — refusing to overwrite it and lose your models.");
             return false;
         }
-        SortByName(models);   // write BOTH the live registry and the backup alphabetically, so the order is stable across bakes
+        if (lastLoadLocked && !keepDiskModels)
+        {
+            // A save fed by Load() writes the list that Load returned — empty, for want of a read. SaveStatics is not fed
+            // by Load: it takes its models from its OWN read just below, which judges the bytes as they are now, so a
+            // lock flag left by an earlier poll must not hold it up (review of PR #100).
+            Debug.LogWarning($"[Factory] not saving: the last load couldn't read the registry source ({LastLockDetail}), so the list this save " +
+                             "would write came from a read that failed. Nothing was changed — refresh (or wait for the next refresh), then save again.");
+            return false;
+        }
+        if (keepDiskModels && !loaded)
+        {
+            // …and the statics SaveStatics exists to write must be ones a Load put there. Without one this session (a
+            // domain reload, then a load that failed) they are the reload's empty lists; writing them would wipe the pack's
+            // era grid and scale rules, and keeping the disk's instead would report success for edits never written.
+            Debug.LogWarning("[Factory] not saving: this Lab's settings were never loaded from the registry this session (the load couldn't read it), " +
+                             "so there is nothing trustworthy to write. Refresh once the registry can be read, then save again.");
+            return false;
+        }
         // MERGE onto the current on-disk file instead of rebuilding from defaults: preserve the pack HEADER
         // (schemaVersion/modId/dependsOn/loadAfter/overrides — no window edits these, so they must survive every Save),
         // and preserve the scale/era/threshold arrays whenever this session hasn't Load()ed them (the session statics
-        // are empty right after a domain reload; writing them then would silently wipe Resize/Era-Lab data). A fresh /
-        // absent / unreadable file falls back to RegistryFile defaults, so a first-ever Save still writes a valid pack.
+        // are empty right after a domain reload; writing them then would silently wipe Resize/Era-Lab data). With NO
+        // source the deployed copy is the only surviving one and becomes the base (see below); with neither, RegistryFile
+        // defaults, so a first-ever Save still writes a valid pack.
         RegistryFile file = null;
-        try { if (File.Exists(SourcePath)) file = JsonUtility.FromJson<RegistryFile>(File.ReadAllText(SourcePath)); } catch { }   // merge base = the SOURCE (the collapse: deployed is derived)
+        string sourceText = null;
+        bool sourceExists = File.Exists(SourcePath);
+        if (!sourceExists) { System.Threading.Thread.Sleep(250); sourceExists = File.Exists(SourcePath); }   // an external editor's save-by-rename, as in Load()
+        if (sourceExists)   // merge base = the SOURCE (the collapse: deployed is derived)
+        {
+            // A source that EXISTS but won't parse (conflict markers, a half-finished hand edit) refuses the Save. The
+            // lastLoadCorrupt guard only remembers the previous Load(); a SaveStatics caller never Load()s, and it used
+            // to read an unreadable source as "no models" and write models: [] to both copies.
+            // …but a source that could not be READ at all is not corrupt (review of PR #100, P1): another program has
+            // it open, or is replacing it. This save refuses and changes nothing; it does NOT raise the recovery banner,
+            // whose "Restore last commit" would git-checkout away every uncommitted edit of a file with nothing wrong in it.
+            try { sourceText = File.ReadAllText(SourcePath); }
+            catch (Exception e)
+            {
+                lastLoadLocked = true; LastLockDetail = e.Message; LastLockAdvice = RegistryRules.ReadFailureAdvice(RegistryRules.ClassifyReadFailure(e));   // the Factory's plain warning
+                Debug.LogWarning($"[Factory] not saving: the registry source '{SourcePath}' can't be read right now ({e.Message}). {LastLockAdvice} Nothing was changed.");
+                return false;
+            }
+            file = ParseSource(sourceText, out string why);
+            if (file == null)
+            {
+                lastLoadCorrupt = true; LastCorruptDetail = why;   // the Factory's recovery banner; the next Load() preserves the evidence
+                lastLoadLocked = false;   // it was just read, so whatever lock an earlier poll saw is over
+                Debug.LogError($"[Factory] not saving: the registry source '{SourcePath}' is unreadable right now — {why}. " +
+                               "Refusing to overwrite it; fix it (or use the Model Factory's recovery) and save again.");
+                return false;
+            }
+        }
+        else if (File.Exists(RegistryPath))
+        {
+            // NO SOURCE, but a deployed copy: it is the only surviving copy — of the models AND of the pack's modId,
+            // dependencies, scale rules and era settings, even when it holds no models (review of #100: a default base
+            // erased an empty pack's configuration). Build on it, exactly as Load() adopts it; unreadable refuses.
+            string why;
+            try { file = ParseRegistry(File.ReadAllText(RegistryPath), RegistryPath, out why); }
+            catch (Exception e) { file = null; why = e.Message; }
+            if (file == null)
+            {
+                Debug.LogError($"[Factory] not saving: the registry source '{SourcePath}' is missing and the deployed copy " +
+                               $"'{RegistryPath}' can't be read ({why}) — it may be the only copy of this pack. Close whatever holds it (the game?) and save again.");
+                return false;
+            }
+            Debug.Log($"[Factory] the registry source was missing — this save builds on the deployed copy ({file.models.Count} model(s), its pack settings kept).");
+        }
         if (file == null) file = new RegistryFile();
+        bool writtenByEditor = sourceText != null && Fingerprint(sourceText) == EditorPrefs.GetString(PrefLastWrite, "");
+        int deployed = 0; string deployedWhy = null;
+        if (sourceExists && file.models.Count == 0 && !writtenByEditor) deployed = DeployedModelCount(out deployedWhy);   // read the deployed copy only when it can decide anything
+        var verdict = RegistryRules.JudgeEmptySource(sourceExists, file.models.Count, writtenByEditor, deployed);
+        if (verdict != RegistryRules.EmptySourceVerdict.Allow)
+        {
+            // THE SOURCE HOLDS NO MODELS, and the editor didn't write it that way — for EVERY save, not just statics
+            // (review of #100: a Factory bake Upsert()s onto the empty list it loaded and wrote a one-model registry over
+            // 37). Every editor Save writes both copies, so a deployed copy that still has models means the source was
+            // emptied outside the editor (models cut out mid-edit) — no save may make that wipe permanent. A deployed copy
+            // that can't be READ may still hold them, so that refuses too ("unreadable" once counted as "empty"). An empty
+            // source the editor wrote ITSELF (Remove() of the last model) passes by its fingerprint, even when its deploy
+            // failed and the deployed copy is stale (review of #100: that once blocked every later save).
+            Debug.LogError($"[Factory] not saving: the registry source '{SourcePath}' holds no models, and " +
+                           (verdict == RegistryRules.EmptySourceVerdict.RefuseDeployedHasModels
+                               ? $"the deployed copy still has {deployed}. Restore them (the Model Factory's recovery, or git) and save again. "
+                               : $"the deployed copy '{RegistryPath}' can't be checked ({deployedWhy}), so it may still hold them. Close whatever holds it (the game?) and save again. ") +
+                           "If the pack really is empty now, delete the deployed copy (the next Load recreates it from the source).");
+            return false;
+        }
+        if (keepDiskModels && (era.held == null || !era.held.MaySaveOver(EraPrint(file))))
+        {
+            // THE FILE'S ERA SETTINGS ARE NOT THE ONES THIS ERA LAB COPIED (review of PR #100, third and fourth rounds):
+            // another window, git or a hand edit changed them since the Lab loaded - possibly while the Lab's refresh
+            // was caught by a lock, or while another window's Load() refreshed the session but not this Lab's grid.
+            // Writing now would put the older settings over the newer.
+            Debug.LogWarning("[Factory] not saving: the era settings in the registry changed since this Era Lab loaded them (another window, git, or a hand edit). " +
+                             "Writing now would put the older settings over the newer ones. Reload the Lab, redo the change, and save again.");
+            return false;
+        }
+        if (keepDiskModels) models = file.models;
+        SortByName(models);   // write BOTH the live registry and the backup alphabetically, so the order is stable across bakes
         file.models = models;
-        if (loaded)   // the statics reflect the on-disk state (+ any Lab edits this session) — authoritative
+        if (keepDiskModels)
+        {
+            // THE ERA LAB'S OWN SETTINGS, and nothing else from the session (review of PR #100, fourth round): the unit
+            // scales stay exactly as this read found them - the session's may be older than the file (a refresh lost to
+            // a lock), and the Era Lab never edits them.
+            file.eraGrid = era.grid ?? new List<EraScaleRow>();
+            file.eraGridEnabled = era.enabled;
+            file.formationThresholds = era.thresholds ?? new List<FormationThreshold>();
+        }
+        else if (loaded)   // the statics reflect the on-disk state (+ any Lab edits this session) — authoritative
         {
             file.unitScales = UnitScales ?? new List<UnitScaleRule>();
             file.eraGrid = EraGrid ?? new List<EraScaleRow>();
@@ -582,10 +853,34 @@ public static class ModelRegistry
         try
         {
             Directory.CreateDirectory(PackRepoDir);
-            var tmp = SourcePath + ".tmp";
-            File.WriteAllText(tmp, json);
-            if (File.Exists(SourcePath)) File.Replace(tmp, SourcePath, null);
-            else File.Move(tmp, SourcePath);
+            // …and only over the text this save read and judged (CheckedReplace, review of PR #100, fifth round): another
+            // editor replacing the file between that read and this write used to be overwritten unseen. The replace
+            // reports what it displaced; anything but `sourceText` puts the other version back and refuses.
+            var outcome = CheckedReplace.Write(SourcePath, sourceText, json, out string replaceNote);
+            if (replaceNote != null) Debug.LogWarning($"[Factory] registry source: {replaceNote}.");
+            if (outcome == CheckedReplace.Outcome.Conflict)
+            {
+                Debug.LogWarning($"[Factory] not saving: the registry source '{SourcePath}' changed while this save was writing it (another editor, git, a sync tool). " +
+                                 "That version is back in place and nothing of this save was written. Reload, then save again.");
+                return false;
+            }
+            if (outcome == CheckedReplace.Outcome.Unresolved)
+            {
+                Debug.LogError($"[Factory] registry save could not be settled at '{SourcePath}' (the note above says why: another writer's version could not be put back, or a failed write could not put the source back). " +
+                               "The source may now hold this save, another version, or be missing; the deployed copy was not changed. " +
+                               "Inspect the source and the preserved copies named above, then reload before saving again.");
+                return false;
+            }
+            EditorPrefs.SetString(PrefLastWrite, Fingerprint(json));   // the editor's own write — see PrefLastWrite
+            if (keepDiskModels)
+            {
+                // Only NOW does the session take the Era Lab's settings: a refused save leaves the session untouched, so a
+                // later save from another window can't write a grid this guard refused. The window's version follows its
+                // own write - printed from the written bytes as the next read will parse them.
+                var written = JsonUtility.FromJson<RegistryFile>(json);
+                UnitScales = written.unitScales; EraGrid = written.eraGrid; EraGridEnabled = written.eraGridEnabled; FormationThresholds = written.formationThresholds;
+                era.held.Saved(EraPrint(written));
+            }
         }
         catch (Exception e)
         {
@@ -596,17 +891,17 @@ public static class ModelRegistry
         }
         // 2) Refresh the DEPLOYED ARTIFACT (what the running game reads) — atomically too. A failure here does not
         //    fail the Save (the source of truth is safe) but it is LOUD: the game keeps loading the stale artifact
-        //    until the next successful Save/Load regenerates it.
+        //    until the next successful Save/Load regenerates it — the PENDING fingerprint is what lets a Load() finish it.
         try
         {
-            Directory.CreateDirectory(PackLiveDir);
-            var tmp2 = RegistryPath + ".tmp";
-            File.WriteAllText(tmp2, json);
-            if (File.Exists(RegistryPath)) File.Replace(tmp2, RegistryPath, null);
-            else File.Move(tmp2, RegistryPath);
+            WriteArtifact(json);
+            EditorPrefs.DeleteKey(PrefPendingDeploy);
+            pendingFailures = 0; lastPendingAttempt = -1;
         }
         catch (Exception e)
         {
+            EditorPrefs.SetString(PrefPendingDeploy, Fingerprint(json));
+            pendingRetryWarned = false; pendingFailures = 0; lastPendingAttempt = EditorApplication.timeSinceStartup;   // the first retry is due in 2 s
             Debug.LogWarning($"[Factory] deployed-artifact refresh FAILED ({e.Message}) — the registry SOURCE saved fine, " +
                              $"but the GAME will keep loading the stale copy at '{RegistryPath}' until a Save/Load succeeds " +
                              "(is the game running and holding the file?).");
@@ -615,19 +910,23 @@ public static class ModelRegistry
         return true;
     }
 
-    // Read ONLY the models array from the on-disk file, WITHOUT touching the session statics — so a Lab that owns the
-    // statics (not the models) can save without clobbering a model edit made in another window with its own stale
-    // snapshot. Empty on a missing/unreadable file.
-    static List<ModelDef> LoadModelsOnly()
-    {
-        try { if (File.Exists(SourcePath)) return JsonUtility.FromJson<RegistryFile>(File.ReadAllText(SourcePath))?.models ?? new List<ModelDef>(); } catch { }   // the collapse: read the SOURCE
-        return new List<ModelDef>();
-    }
+    // Save the Era Lab's settings only - the era grid, its switch and the formation thresholds - preserving everything
+    // else on disk exactly as read, the models included (re-read fresh so a concurrent model edit/bake in another window
+    // isn't reverted by a stale snapshot). `held` is the version of the settings the calling window copied
+    // (EraSettingsVersion right after its Load()); the save refuses unless the file still carries it, and advances it
+    // on success. The session statics change only when the save succeeds. An unreadable source refuses (returns false).
+    public static bool SaveStatics(List<EraScaleRow> eraGrid, bool eraGridEnabled, List<FormationThreshold> thresholds, StaticsVersion held) =>
+        Save(null, new EraEdit { grid = eraGrid, enabled = eraGridEnabled, thresholds = thresholds, held = held });
 
-    // Save the era/scale STATICS only, preserving the on-disk MODELS (re-read fresh so a concurrent model edit/bake in
-    // another window isn't reverted by a stale snapshot). For a Lab that owns only the statics (the Global Era Lab).
-    // The caller must have already assigned the current statics (ModelRegistry.EraGrid/UnitScales/…) before calling.
-    public static bool SaveStatics() => Save(LoadModelsOnly());
+    // Models in the deployed copy: 0 only when it is ABSENT or provably empty; -1 when it exists but can't be read or
+    // fails the same shape rule as the source (locked by the game, half-written, `{}`) — no evidence of an empty pack.
+    static int DeployedModelCount(out string why)
+    {
+        why = null;
+        if (!File.Exists(RegistryPath)) return 0;
+        try { var d = ParseRegistry(File.ReadAllText(RegistryPath), RegistryPath, out why); return d == null ? -1 : d.models.Count; }
+        catch (Exception e) { why = e.Message; return -1; }
+    }
 
     public static bool Upsert(ModelDef def)
     {
