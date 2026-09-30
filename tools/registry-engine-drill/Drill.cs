@@ -295,6 +295,7 @@ static class Drill
             Check(msg.StartsWith("Recovered") && !reg.DeployPending, "R8 recovery clears the older owed deploy (it is moot now)");
             EditorApplication.timeSinceStartup += 5; reg.Load();
             Check(Keys(art).SequenceEqual(new[] { "baked-by-another-project", "old" }), "R8 ...so the next load does NOT deploy the recovered text unpreserved over the moved deploy");
+            Check(reg.Snapshot().Stale && !reg.Snapshot().DeployHandEdited, "R8 ...the window offers 'Deploy the source' instead of calling the older game copy a hand edit");
 
             reg = Fresh(); File.WriteAllText(src, Reg("committed")); Git("init -q"); Commit("c");
             File.WriteAllText(art, Reg("committed", "extra")); File.WriteAllText(src, "{}"); reg.Load();
@@ -322,6 +323,24 @@ static class Drill
         Check(Keys(src).SequenceEqual(new[] { "newer" }) && Keys(art).SequenceEqual(new[] { "newer" }), "M3 a newer source is kept AND deployed");
         File.WriteAllText(art, Reg("hand-edited-deploy")); UnityEngine.Debug.Lines.Clear(); reg.Load();
         Check(reg.Snapshot().DeployHandEdited && !reg.Snapshot().Stale, "M3 ...and counts as the editor's own write from then on (a later deploy edit is a hand-edit, not stale)");
+        // A prior editor write of the same source must not mask a failed migration deploy as a hand-edited game copy.
+        var realMigrateCopy = SingleSourceRegistry<DrillFile>.WriteCopyImpl;
+        try
+        {
+            reg = Fresh(migrated: false); File.WriteAllText(src, Reg("mine")); File.WriteAllText(art, Reg("mine"));
+            reg.Change(Add("saved"), "drill", out changed);   // records the source as this editor's last write
+            File.WriteAllText(art, Reg("older")); File.SetLastWriteTimeUtc(art, DateTime.UtcNow.AddHours(-2));
+            int copies = 0;
+            SingleSourceRegistry<DrillFile>.WriteCopyImpl = (path, text) =>
+            {
+                if (++copies == 2) throw new IOException("deploy preservation failed");
+                File.WriteAllText(path, text);
+            };
+            reg.Load();   // migration preserves the loser, but its second copy before deployment fails
+            Check(copies == 2 && reg.Snapshot().Stale && !reg.Snapshot().DeployHandEdited && Keys(art).SequenceEqual(new[] { "older" }),
+                  "M3 a failed migration deploy leaves the game's older copy in place and offers 'Deploy the source'");
+        }
+        finally { SingleSourceRegistry<DrillFile>.WriteCopyImpl = realMigrateCopy; }
         reg = Fresh(migrated: false); File.WriteAllText(src, Reg()); File.WriteAllText(art, Reg("a", "b", "c"));   // a pulled EMPTY source, newer
         File.SetLastWriteTimeUtc(art, DateTime.UtcNow.AddHours(-2)); reg.Load();
         Check(Keys(art).Length == 3 && reg.Snapshot().EmptyButDeployed, "M8 the first migration never deploys an EMPTY source over a deploy with entries: the person decides (EmptyButDeployed)");

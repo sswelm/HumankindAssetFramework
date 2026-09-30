@@ -583,8 +583,15 @@ public class SingleSourceRegistry<TFile> where TFile : class, new()
             EditorPrefs.DeleteKey(PrefPendingDeploy); pendingFailures = 0; lastPendingAttempt = -1;
             var deployed = DeployPreserving(candidateJson, out string kept, out string reason);   // never throws: the source IS recovered by now
             if (deployed == RegistryRules.SaveOutcome.Saved) EditorPrefs.SetString(PrefLastWrite, Fingerprint(candidateJson));
-            else Debug.LogWarning($"{tag} recovered the source, but the deployed copy {(deployed == RegistryRules.SaveOutcome.Unknown ? "could NOT be confirmed" : "was NOT refreshed")}: {reason}. " +
-                                  (deployed == RegistryRules.SaveOutcome.Unknown ? "Inspect it and the copies named above." : "The game keeps reading it; the window's 'Deploy the source' retries (preserving it)."));
+            else
+            {
+                // An earlier editor save may have written this exact source text but failed to deploy it. Its last-write
+                // fingerprint would classify the still-old game copy as a hand edit and hide "Deploy the source".
+                // Recovery has superseded that save; let the next Load report the source as stale instead.
+                EditorPrefs.DeleteKey(PrefLastWrite);
+                Debug.LogWarning($"{tag} recovered the source, but the deployed copy {(deployed == RegistryRules.SaveOutcome.Unknown ? "could NOT be confirmed" : "was NOT refreshed")}: {reason}. " +
+                                 (deployed == RegistryRules.SaveOutcome.Unknown ? "Inspect it and the copies named above." : "The game keeps reading it; the window's 'Deploy the source' retries (preserving it)."));
+            }
             AssetDatabase.Refresh();
             return $"Recovered {count(r)} {noun} from {label}. The corrupt copy (if any) is preserved beside the source for hand-merging." +
                    (deployed == RegistryRules.SaveOutcome.Saved ? (kept != null ? $" The replaced deployed copy is kept as '{Path.GetFileName(kept)}'." : "")
@@ -651,7 +658,12 @@ public class SingleSourceRegistry<TFile> where TFile : class, new()
                                 EditorPrefs.DeleteKey(PrefPendingDeploy); pendingFailures = 0; lastPendingAttempt = -1;   // an older owed deploy is moot
                                 var deployed = DeployPreserving(src, out _, out string reason);
                                 if (deployed == RegistryRules.SaveOutcome.Saved) EditorPrefs.SetString(PrefLastWrite, Fingerprint(src));
-                                else Debug.LogWarning($"{tag} migration kept the source but {(deployed == RegistryRules.SaveOutcome.Unknown ? "its deploy could not be confirmed" : "did not deploy it")}: {reason}.");
+                                else
+                                {
+                                    // A prior editor write of these same bytes must not hide the manual deploy action.
+                                    EditorPrefs.DeleteKey(PrefLastWrite);
+                                    Debug.LogWarning($"{tag} migration kept the source but {(deployed == RegistryRules.SaveOutcome.Unknown ? "its deploy could not be confirmed" : "did not deploy it")}: {reason}.");
+                                }
                             }
                             Debug.LogWarning($"{tag} registry collapse migration: kept the project source ({(depOk ? "it is NEWER than the deployed copy" : "the deployed copy is unreadable")})" +
                                              (emptyOverFull ? " — it is EMPTY while the deployed copy has entries, so the game keeps the deployed copy until you decide (the window asks)" : srcOk ? " and deployed it" : "") +
