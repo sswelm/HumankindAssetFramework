@@ -23,6 +23,23 @@ public class ModelReaderWindow : EditorWindow
     Vector2 scroll;
     bool showMeshes = true, showSkins = true, showAnims = true, showMaterials;
 
+    // THE PREVIEW - the proof. The model the reader produced, built as real Unity meshes with the node hierarchy's
+    // transforms applied, the file's normals and UVs, and the base-colour textures decoded from the embedded images; no
+    // Blender, no file in between. If the reader got any of those wrong, it is visible here. Coordinates and winding
+    // are copied verbatim, as the Model Cutter's preview does (measured 2026-09-19: facing survives, the image is a
+    // mirror); the Unmirror box flips X and the winding, as the Cutter's does.
+    PreviewRenderUtility pru;
+    GameObject inst;
+    readonly List<UnityEngine.Object> previewAssets = new List<UnityEngine.Object>();
+    Bounds bounds; bool boundsValid;
+    Vector2 orbit = new Vector2(30f, 15f); float zoom = 1f; bool spin = true; double lastTick;
+    bool showPreview = true, unmirror, fileNormals = true, textured = true;
+    string previewNote = "";
+
+    void OnEnable() { EditorApplication.update += Tick; lastTick = EditorApplication.timeSinceStartup; }
+    void OnDisable() { EditorApplication.update -= Tick; DestroyPreview(); if (pru != null) { try { pru.Cleanup(); } catch { } pru = null; } }
+    void Tick() { double now = EditorApplication.timeSinceStartup; if (spin && inst != null) { orbit.x += (float)((now - lastTick) * 20.0); Repaint(); } lastTick = now; }
+
     void OnGUI()
     {
         EditorGUILayout.LabelField("Model Reader — what GlbReader sees in a .glb / .gltf", EditorStyles.boldLabel);
@@ -45,6 +62,27 @@ public class ModelReaderWindow : EditorWindow
         }
         if (status.Length > 0) EditorGUILayout.HelpBox(status, status.StartsWith("⚠") ? MessageType.Error : MessageType.Info);
         if (model == null) return;
+
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            showPreview = EditorGUILayout.ToggleLeft(new GUIContent("Preview", "The model as the reader read it, built as Unity meshes: hierarchy transforms, normals, UVs and textures all come from the reader."), showPreview, GUILayout.Width(70));
+            bool wantUnmirror = EditorGUILayout.ToggleLeft(new GUIContent("Unmirror", "Flip X and the winding: the image as the file has it (glTF is right-handed; the verbatim copy is a mirror image, facing correct)."), unmirror, GUILayout.Width(80));
+            bool wantNormals = EditorGUILayout.ToggleLeft(new GUIContent("File normals", "Use the normals the reader read; off = let Unity recompute them. A model that looks right only one way has a normals problem."), fileNormals, GUILayout.Width(100));
+            bool wantTextured = EditorGUILayout.ToggleLeft(new GUIContent("Textures", "Decode the embedded images and map the base-colour texture through the reader's UVs."), textured, GUILayout.Width(80));
+            spin = EditorGUILayout.ToggleLeft("Spin", spin, GUILayout.Width(50));
+            if (wantUnmirror != unmirror || wantNormals != fileNormals || wantTextured != textured) { unmirror = wantUnmirror; fileNormals = wantNormals; textured = wantTextured; BuildPreview(); }
+        }
+        if (showPreview)
+        {
+            if (inst == null && previewNote.Length == 0) BuildPreview();
+            if (previewNote.Length > 0) EditorGUILayout.HelpBox(previewNote, MessageType.Warning);
+            else
+            {
+                var rect = GUILayoutUtility.GetRect(10, 10000, 300, 300);
+                HandlePreviewInput(rect);
+                if (Event.current.type == EventType.Repaint) RenderPreview(rect);
+            }
+        }
 
         scroll = EditorGUILayout.BeginScrollView(scroll);
         int joints = model.Skins.Sum(s => s.Joints.Length);
@@ -89,7 +127,7 @@ public class ModelReaderWindow : EditorWindow
 
     void ReadOne()
     {
-        model = null; status = "";
+        model = null; status = ""; DestroyPreview();
         try
         {
             fileBytes = new FileInfo(path).Length;
@@ -97,6 +135,7 @@ public class ModelReaderWindow : EditorWindow
             model = GlbReader.Read(path);
             sw.Stop(); readMs = sw.Elapsed.TotalMilliseconds;
             status = $"Read {Path.GetFileName(path)} in {readMs:0} ms.";
+            BuildPreview();
         }
         catch (Exception e) { status = "⚠ NOT read — " + e.Message; Debug.LogError("[ModelReader] " + path + ": " + e.Message); }
     }
@@ -125,5 +164,140 @@ public class ModelReaderWindow : EditorWindow
         Debug.Log($"[ModelReader] registry: {ok} read ({bytes / 1e6:0.0} MB in {ms:0} ms), {refused} refused, {missing} missing\n" + string.Join("\n", lines));
         status = $"Registry: {ok} model(s) read ({bytes / 1e6:0.0} MB in {ms:0} ms), {refused} refused, {missing} missing — one line per model in the Console." + (refused > 0 ? " ⚠ a refused file is one the reader cannot read whole; its line says why." : "");
         if (refused > 0) status = "⚠ " + status;
+    }
+
+    // ---------------------------------------------------------------- the preview
+
+    void DestroyPreview()
+    {
+        if (inst != null) { DestroyImmediate(inst); inst = null; }
+        foreach (var a in previewAssets) if (a != null) DestroyImmediate(a);
+        previewAssets.Clear(); boundsValid = false; previewNote = "";
+    }
+
+    void BuildPreview()
+    {
+        DestroyPreview();
+        if (model == null) return;
+        if (model.TriangleCount > 20_000_000) { previewNote = $"no preview: {model.TriangleCount:N0} triangles is over the 20 M the preview builds"; return; }
+        try
+        {
+            if (pru == null) pru = new PreviewRenderUtility();
+            var sh = Shader.Find("Standard") ?? Shader.Find("Unlit/Color");
+            var world = HafTransforms.WorldMatrices(model);
+            var textures = new Dictionary<int, Texture2D>();
+            var materials = new Dictionary<int, Material>();
+            Material MaterialFor(int index)
+            {
+                if (materials.TryGetValue(index, out var have)) return have;
+                var mat = new Material(sh) { hideFlags = HideFlags.HideAndDontSave };
+                var hm = index >= 0 && index < model.Materials.Count ? model.Materials[index] : null;
+                if (hm != null)
+                {
+                    mat.color = new Color(hm.BaseColorFactor[0], hm.BaseColorFactor[1], hm.BaseColorFactor[2], 1f);
+                    if (mat.HasProperty("_Glossiness")) mat.SetFloat("_Glossiness", 1f - hm.RoughnessFactor);
+                    if (mat.HasProperty("_Metallic")) mat.SetFloat("_Metallic", hm.MetallicFactor);
+                    if (textured && hm.BaseColorTexture >= 0 && hm.BaseColorTexture < model.Textures.Count)
+                    {
+                        int img = model.Textures[hm.BaseColorTexture].Source;
+                        if (img >= 0 && img < model.Images.Count && model.Images[img].Bytes != null)
+                        {
+                            if (!textures.TryGetValue(img, out var tex))
+                            {
+                                tex = new Texture2D(2, 2) { hideFlags = HideFlags.HideAndDontSave, name = model.Images[img].Name };
+                                if (!tex.LoadImage(model.Images[img].Bytes)) { DestroyImmediate(tex); tex = null; }
+                                textures[img] = tex; if (tex != null) previewAssets.Add(tex);
+                            }
+                            if (tex != null) mat.mainTexture = tex;
+                        }
+                    }
+                }
+                previewAssets.Add(mat);
+                materials[index] = mat;
+                return mat;
+            }
+
+            inst = new GameObject("__modelReaderPreview") { hideFlags = HideFlags.HideAndDontSave };
+            float sx = unmirror ? -1f : 1f;
+            bool any = false;
+            for (int ni = 0; ni < model.Nodes.Count; ni++)
+            {
+                var node = model.Nodes[ni];
+                if (node.Mesh < 0) continue;
+                var hm = model.Meshes[node.Mesh];
+                var mesh = new Mesh { name = node.Name, hideFlags = HideFlags.HideAndDontSave, indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+                var verts = new List<Vector3>(); var norms = new List<Vector3>(); var uvs = new List<Vector2>();
+                var subs = new List<int[]>(); var mats = new List<Material>();
+                bool allNormals = true;
+                foreach (var p in hm.Primitives)
+                {
+                    if (p.Mode != 4) continue;   // the preview draws triangles; strips and fans are read but not drawn
+                    // a skinned primitive's positions are in the skin's space: the spec says the node's transform is ignored
+                    double[] w = p.Skinned ? HafTransforms.Identity : world[ni];
+                    int baseIndex = verts.Count;
+                    for (int v = 0; v < p.VertexCount; v++)
+                    {
+                        var pos = HafTransforms.Apply(w, p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2], 1.0);
+                        verts.Add(new Vector3(sx * (float)pos[0], (float)pos[1], (float)pos[2]));
+                        if (p.Normals != null)
+                        {
+                            var n = HafTransforms.ApplyNormal(w, p.Normals[v * 3], p.Normals[v * 3 + 1], p.Normals[v * 3 + 2]);
+                            norms.Add(new Vector3(sx * (float)n[0], (float)n[1], (float)n[2]));
+                        }
+                        else allNormals = false;
+                        uvs.Add(p.Uv0 != null ? new Vector2(p.Uv0[v * 2], 1f - p.Uv0[v * 2 + 1]) : Vector2.zero);   // glTF UV origin is top-left, Unity's bottom-left
+                    }
+                    int[] tri;
+                    if (p.Indices != null) { tri = new int[p.Indices.Length]; for (int i = 0; i < tri.Length; i++) tri[i] = baseIndex + p.Indices[i]; }
+                    else { tri = new int[p.VertexCount]; for (int i = 0; i < tri.Length; i++) tri[i] = baseIndex + i; }
+                    if (unmirror) for (int t = 0; t + 2 < tri.Length; t += 3) { int tmp = tri[t + 1]; tri[t + 1] = tri[t + 2]; tri[t + 2] = tmp; }
+                    subs.Add(tri); mats.Add(MaterialFor(p.Material));
+                }
+                if (subs.Count == 0) continue;
+                mesh.SetVertices(verts);
+                mesh.SetUVs(0, uvs);
+                mesh.subMeshCount = subs.Count;
+                for (int si = 0; si < subs.Count; si++) mesh.SetTriangles(subs[si], si, false);
+                if (fileNormals && allNormals && norms.Count == verts.Count) mesh.SetNormals(norms); else mesh.RecalculateNormals();
+                mesh.RecalculateBounds();
+                previewAssets.Add(mesh);
+                var go = new GameObject(node.Name.Length > 0 ? node.Name : "node " + ni) { hideFlags = HideFlags.HideAndDontSave };
+                go.transform.SetParent(inst.transform, false);
+                go.AddComponent<MeshFilter>().sharedMesh = mesh;
+                go.AddComponent<MeshRenderer>().sharedMaterials = mats.ToArray();
+                any = true;
+            }
+            if (!any) { previewNote = "no preview: the file has no triangle primitive on any node"; DestroyPreview(); return; }
+            pru.AddSingleGO(inst);
+            var rs = inst.GetComponentsInChildren<Renderer>();
+            bounds = rs[0].bounds; foreach (var r in rs) bounds.Encapsulate(r.bounds); boundsValid = true;
+        }
+        catch (Exception e) { previewNote = "no preview: " + e.Message; Debug.LogError("[ModelReader] preview: " + e); DestroyPreview(); }
+    }
+
+    void HandlePreviewInput(Rect rect)
+    {
+        var e = Event.current;
+        if (!rect.Contains(e.mousePosition)) return;
+        if (e.type == EventType.ScrollWheel) { zoom = Mathf.Clamp(zoom * Mathf.Pow(1.12f, e.delta.y > 0 ? 1f : -1f), 0.2f, 5f); e.Use(); Repaint(); }
+        else if (e.type == EventType.MouseDrag && e.button == 0) { spin = false; orbit += new Vector2(e.delta.x, -e.delta.y) * 0.7f; orbit.y = Mathf.Clamp(orbit.y, -89f, 89f); e.Use(); Repaint(); }
+    }
+
+    void RenderPreview(Rect rect)
+    {
+        if (!boundsValid || pru == null || inst == null) return;
+        pru.BeginPreview(rect, GUIStyle.none);
+        var cam = pru.camera;
+        float radius = Mathf.Max(bounds.extents.magnitude, 0.1f);
+        float dist = radius * 2.2f * zoom;
+        var rot = Quaternion.Euler(-orbit.y, orbit.x, 0f);
+        cam.transform.position = bounds.center + rot * (Vector3.back * dist);
+        cam.transform.rotation = Quaternion.LookRotation(bounds.center - cam.transform.position);
+        cam.nearClipPlane = Mathf.Max(0.001f, dist * 0.01f); cam.farClipPlane = dist + radius * 4f; cam.fieldOfView = 30f;
+        pru.lights[0].intensity = 1.3f; pru.lights[0].transform.rotation = Quaternion.Euler(45f, 45f, 0f);
+        if (pru.lights.Length > 1) pru.lights[1].intensity = 0.6f;
+        pru.ambientColor = new Color(0.3f, 0.3f, 0.3f);
+        cam.Render();
+        GUI.DrawTexture(rect, pru.EndPreview(), ScaleMode.StretchToFill, false);
     }
 }

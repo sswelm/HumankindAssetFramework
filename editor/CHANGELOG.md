@@ -15,7 +15,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   morph targets are counted, not read. Tested on synthetic files field by field; drilled on the registry: all 35 GLBs
   (784 MB) read in 1.7 s and agree with Blender's import on triangles, materials, images and joints (Blender: 14.4 s
   plus boot). **Tools ▸ HAF ▸ Model Reader (GLB)…** shows what the reader sees in any file (or in every registry
-  model at once): the counts, one row per mesh, the skins, the animations, the read time, a refusal by name.
+  model at once): the counts, one row per mesh, the skins, the animations, the read time, a refusal by name — and a
+  **turntable of the model as the reader read it**, built as Unity meshes from the model alone (the hierarchy's
+  transforms through `HafTransforms`, the file's normals and UVs, the base-colour textures decoded from the embedded
+  images): if the reader got any of those wrong, it is visible there. Unmirror / file normals / textures toggles
+  isolate each.
   Nothing else uses it yet — the pipeline still runs on Blender; the next steps consume it.
 
 - **A Blender script that crashes now fails the bake.** Blender exits 0 on an uncaught Python exception unless

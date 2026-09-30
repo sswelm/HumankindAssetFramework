@@ -29,6 +29,7 @@
     <!-- The in-memory model and the GLB reader (2026-09-30, step 1 of replacing Blender): pure C#, driven against synthetic files. -->
     <Compile Include="..\editor\HafModel.cs" Link="HafModel.cs" />
     <Compile Include="..\editor\GlbReader.cs" Link="GlbReader.cs" />
+    <Compile Include="..\editor\HafTransforms.cs" Link="HafTransforms.cs" />
   </ItemGroup>
 
   <!-- compile-time references the TEST code uses directly -->
