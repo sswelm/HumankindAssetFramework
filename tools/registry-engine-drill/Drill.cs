@@ -107,6 +107,10 @@ static class Drill
         using (new FileStream(art, FileMode.Open, FileAccess.Read, FileShare.Read))   // blocks the deploy's replace
             o = reg.Change(f => f.items.RemoveAll(e => e.key == "a") > 0, "drill", out changed);
         Check(o == S && changed && Keys(src).Length == 0 && Keys(art).Length == 1 && reg.DeployPending, "D5 removing the last entry is saved; its deploy failed and is marked pending");
+        reg.Load();
+        Check(!reg.Snapshot().EmptyButDeployed && !reg.Snapshot().Failed, "D5 ...a Load of the editor's own empty source (deploy still held the entry) is not 'emptied outside the editor'");
+        EditorApplication.timeSinceStartup += 3; reg.Load();
+        Check(Keys(art).Length == 0 && !reg.DeployPending, "D5 ...and the owed deploy finishes on a later load");
         Check(reg.Change(Add("b"), "drill", out changed) == S && Keys(src).SequenceEqual(new[] { "b" }), "D5 the editor's OWN empty source passes the guard by its fingerprint");
 
         // ---- LOCK vs CORRUPT
@@ -134,6 +138,7 @@ static class Drill
         reg = Fresh(); File.WriteAllText(src + ".meta", "guid: x"); File.WriteAllText(art, Reg("old"));
         var k1 = reg.Load();
         Check(k1.items.Count == 0 && reg.LastLoadNoCopy && reg.LastLoadProblem.Contains(".meta") && !File.Exists(src), "K1 missing source Unity still knows (.meta): NOT adopted from the deploy, reported");
+        Check(!reg.Snapshot().MissingKnown && !reg.LastLoadProblem.Contains("Restore last commit"), "K1 ...but 'Restore last commit' is NOT offered: git doesn't have it (only the .meta does)");
         Check(reg.Change(Add("x"), "drill", out changed) == R && !File.Exists(src), "K1 ...and a change neither builds on the deploy nor creates it");
         reg = Fresh(); File.WriteAllText(src + ".displaced-20260930_120000-deadbeef.json", Reg("newest")); File.WriteAllText(art, Reg("old"));
         reg.Load();
@@ -176,6 +181,8 @@ static class Drill
         Check(Keys(art).Length == 1, "D12 not retried before the backoff is due");
         EditorApplication.timeSinceStartup += 3; reg.Load();
         Check(Keys(art).SequenceEqual(new[] { "a", "b" }) && !reg.DeployPending && reg.TakeNotice().Contains("Finished a deploy") && !Logged("hand-edit"), "D12 a later Load finishes the deploy; no hand-edit warning");
+        File.WriteAllText(art, Reg("a", "b", "hand-edited-deploy")); UnityEngine.Debug.Lines.Clear(); reg.Load();
+        Check(reg.Snapshot().DeployHandEdited && !reg.Snapshot().Stale, "D12 ...the finished deploy counts as the editor's own write from then on (a later deploy edit is a hand-edit, not stale)");
 
         // ---- UNSETTLED WRITES (the checked replace can't settle; forced through the engine's own seam)
         var real = SingleSourceRegistry<DrillFile>.ApplyImpl;
@@ -189,6 +196,8 @@ static class Drill
             Check(o == U && reg.DeployPending && Keys(art).Length == 1, "U1 an unsettled write is UNKNOWN (not Saved), its deploy owed");
             reg.Load();   // due at once: the read-back a caller does next
             Check(Keys(art).SequenceEqual(new[] { "a", "landed" }) && !reg.DeployPending && !Logged("hand-edit"), "U1 it landed: the next Load deploys it (the game gets it, no hand-edit warning)");
+            File.WriteAllText(art, Reg("a", "landed", "hand-edited-deploy")); UnityEngine.Debug.Lines.Clear(); reg.Load();
+            Check(reg.Snapshot().DeployHandEdited && !reg.Snapshot().Stale, "U1 ...and the finished deploy counts as the editor's own write (a later deploy edit is a hand-edit, not stale)");
 
             reg = Fresh(); File.WriteAllText(src, Reg("a")); File.WriteAllText(art, Reg("a"));
             SingleSourceRegistry<DrillFile>.ApplyImpl = (string p, Func<string, string> c, int a, out string note) =>
@@ -198,6 +207,14 @@ static class Drill
             reg.Load();
             Check(o == U && !reg.DeployPending && !Keys(art).Contains("lost"), "U2 it did not land: the owed deploy is dropped as moot, our change never deployed");
             Check(reg.LastLoadStale && !Logged("hand-edit"), "U2 ...and the other writer's source is said as STALE for the game, not as a hand-edit");
+
+            reg = Fresh(); File.WriteAllText(src, Reg("only")); File.WriteAllText(art, Reg("only"));
+            SingleSourceRegistry<DrillFile>.ApplyImpl = (string p, Func<string, string> c, int a, out string note) =>
+            { note = null; var next = c(File.ReadAllText(p)); File.WriteAllText(p, next); return CheckedReplace.Outcome.Unresolved; };   // landed, unsettled
+            o = reg.Change(f => f.items.RemoveAll(e => e.key == "only") > 0, "drill", out changed);   // removes the LAST entry
+            SingleSourceRegistry<DrillFile>.ApplyImpl = real;
+            reg.Load();
+            Check(o == U && !reg.Snapshot().EmptyButDeployed && Keys(art).Length == 0 && !reg.DeployPending, "U3 an unsettled write that emptied the registry (landed): the editor's own by its pending fingerprint - not stuck, the deploy finishes");
         }
         finally { SingleSourceRegistry<DrillFile>.ApplyImpl = real; }
 
@@ -213,10 +230,12 @@ static class Drill
         reg.Load();
         Check(before.Corrupt && !reg.Snapshot().Corrupt, "V1 a window's verdict is FROZEN: another Load changes the engine's flags, not the snapshot it took");
         reg = Fresh(); File.WriteAllText(src, Reg("committed")); Git("init -q"); Commit("c");
-        File.WriteAllText(art, Reg("deployed-older")); File.WriteAllText(src, "{}"); reg.Load();
+        File.WriteAllText(art, Reg("committed", "baked-since-commit")); File.WriteAllText(src, "{}"); reg.Load();
         msg = reg.RecoverFromGit();
         Check(msg.StartsWith("Recovered") && Keys(src).SequenceEqual(new[] { "committed" }) && !reg.LastLoadCorrupt, "R2 git recovery restores the committed version");
         Check(Keys(art).SequenceEqual(new[] { "committed" }), "R2 ...and the deploy follows it");
+        var replaced = Beside(art, ".replaced-*.json");
+        Check(replaced.Length == 1 && File.ReadAllText(replaced[0]).Contains("baked-since-commit"), "R2 ...with the old deploy (bakes since the commit) PRESERVED beside it");
         UnityEngine.Debug.Lines.Clear(); reg.Load();
         Check(!Logged("differs"), "R2 ...so the next Load sees no 'hand-edit' drift");
         File.WriteAllText(src, Reg()); Commit("empty");
@@ -226,6 +245,11 @@ static class Drill
         reg = Fresh(); File.WriteAllText(src, "{}"); File.WriteAllText(art, "{}"); reg.Load();
         msg = reg.RecoverFromArtifact();
         Check(msg.Contains("REFUSED") && File.ReadAllText(src) == "{}", "R4 an unreadable deploy is not recovered from");
+        reg = Fresh(); File.WriteAllText(src, Reg("a")); File.WriteAllText(art, Reg("a")); reg.Load();
+        File.WriteAllText(src, "{ \"items\": [ half-typed");   // broken by a hand edit no Load saw
+        msg = reg.RecoverFromArtifact();
+        var corrupts = Beside(src, ".corrupt-*.json");
+        Check(msg.StartsWith("Recovered") && corrupts.Length == 1 && File.ReadAllText(corrupts[0]).Contains("half-typed"), "R5 recovery over a broken source no Load saw keeps a copy of it, as the message promises");
 
         // ---- MIGRATION (off in every scenario above; on here)
         reg = Fresh(migrated: false); File.WriteAllText(src, Reg("valid-source")); File.WriteAllText(art, "{}");
@@ -242,6 +266,11 @@ static class Drill
         File.SetLastWriteTimeUtc(art, DateTime.UtcNow.AddHours(-2));
         reg.Load();
         Check(Keys(src).SequenceEqual(new[] { "newer" }) && Keys(art).SequenceEqual(new[] { "newer" }), "M3 a newer source is kept AND deployed");
+        File.WriteAllText(art, Reg("hand-edited-deploy")); UnityEngine.Debug.Lines.Clear(); reg.Load();
+        Check(reg.Snapshot().DeployHandEdited && !reg.Snapshot().Stale, "M3 ...and counts as the editor's own write from then on (a later deploy edit is a hand-edit, not stale)");
+        reg = Fresh(migrated: false); File.WriteAllText(src, Reg()); File.WriteAllText(art, Reg("a", "b", "c"));   // a pulled EMPTY source, newer
+        File.SetLastWriteTimeUtc(art, DateTime.UtcNow.AddHours(-2)); reg.Load();
+        Check(Keys(art).Length == 3 && reg.Snapshot().EmptyButDeployed, "M8 the first migration never deploys an EMPTY source over a deploy with entries: the person decides (EmptyButDeployed)");
         // THE DEPLOY IS SHARED by every project on the machine (one game config): project A migrates it once; project B,
         // sharing it, keeps ITS OWN source - it must not take A's registry over it
         reg = Fresh(migrated: false); File.WriteAllText(art, Reg("project-A")); reg.Load();
@@ -264,6 +293,10 @@ static class Drill
             SingleSourceRegistry<DrillFile>.WriteCopyImpl = (path, text) => throw new IOException("disk full");
             reg.Load();
             Check(Keys(src).SequenceEqual(new[] { "uncommitted-only-copy" }) && Logged("postponed"), "M6 a loser that can't be preserved: the source is NOT replaced (migration postponed)");
+            Check(reg.Change(Add("x"), "drill", out changed) == R && Keys(art).SequenceEqual(new[] { "deploy-newer" }), "M6 ...saves refuse meanwhile (a save would overwrite the unpreserved deploy)");
+            int warned = UnityEngine.Debug.Lines.Count(l => l.Contains("postponed"));
+            reg.Load(); reg.Load(); reg.Load();
+            Check(UnityEngine.Debug.Lines.Count(l => l.Contains("postponed")) == warned, "M6 ...and the postponement is warned once, not per load");
             SingleSourceRegistry<DrillFile>.WriteCopyImpl = realCopy;
             reg.Load();
             losers = Beside(art, ".pre-collapse-*.json");
@@ -284,13 +317,20 @@ static class Drill
         reg = Fresh(); File.WriteAllText(src, Reg()); File.WriteAllText(art, Reg("a", "b", "c"));
         reg.Load();
         var e1 = reg.Snapshot();
-        Check(e1.EmptyButDeployed && e1.DeployedCount == 3 && e1.Failed && reg.LastLoadFailed, "E1 an empty source (not this editor's) beside a deploy with 3: its own state, the list can't be trusted");
+        Check(e1.EmptyButDeployed && e1.DeployedCount == 3 && e1.Failed && reg.LastLoadFailed && !e1.Stale && !Logged("GAME still reads"), "E1 an empty source (not this editor's) beside a deploy with 3: its own state (not 'stale'), the list can't be trusted");
         Check(reg.Change(Add("x"), "drill", out changed) == R && Keys(art).Length == 3, "E1 ...a change is refused, the deploy untouched");
         msg = reg.RecoverFromArtifact();
         Check(msg.StartsWith("Recovered") && Keys(src).SequenceEqual(new[] { "a", "b", "c" }), "E1 'Restore last deploy' works on an EMPTY readable source (the case it exists for)");
         reg = Fresh(); File.WriteAllText(src, Reg()); File.WriteAllText(art, Reg("a", "b", "c")); reg.Load();
-        msg = reg.AcceptSource();
+        msg = reg.AcceptSource(reg.LoadedVersion);
         Check(msg.StartsWith("Deployed") && Keys(art).Length == 0 && Beside(art, ".replaced-*.json").Length == 1, "E2 'Keep it empty' empties the game's copy, keeping the replaced one beside it");
+        File.WriteAllText(art, Reg("hand-edited-after-accept"));   // then someone edits the DEPLOY: said as that, not as a moved source
+        UnityEngine.Debug.Lines.Clear(); reg.Load();
+        Check(reg.Snapshot().DeployHandEdited && !reg.Snapshot().Stale, "E2 ...the accepted source counts as the editor's own write from then on (a later deploy edit is a hand-edit, not stale)");
+        reg = Fresh(); File.WriteAllText(src, Reg()); File.WriteAllText(art, Reg("a", "b", "c")); reg.Load(); v = reg.LoadedVersion;
+        File.WriteAllText(src, Reg("refilled-by-a-pull"));   // the banner is up, but a pull refilled the source since
+        msg = reg.AcceptSource(v);
+        Check(msg.Contains("REFUSED") && Keys(art).SequenceEqual(new[] { "a", "b", "c" }), "E3 'Keep it empty' over a source that changed since the window loaded it: REFUSED, nothing deployed");
         reg.Load();
         Check(!reg.Snapshot().Failed && reg.Change(Add("fresh"), "drill", out changed) == S, "E2 ...and from then on changes go through");
         reg = Fresh(); File.WriteAllText(src, Reg()); File.WriteAllText(art, "<<<<<<< broken"); reg.Load();
@@ -304,7 +344,7 @@ static class Drill
         UnityEngine.Debug.Lines.Clear(); reg.Load();
         Check(reg.Snapshot().Stale && !reg.Snapshot().Failed && Logged("GAME still reads") && !Logged("hand-edit"), "S1 a pulled source: STALE for the game, not a hand-edit, not a failure");
         Check(Keys(art).SequenceEqual(new[] { "a", "b" }), "S1 ...the deploy is NOT overwritten on a guess (it is the last-deploy recovery candidate)");
-        msg = reg.AcceptSource();
+        msg = reg.AcceptSource(reg.LoadedVersion);
         Check(msg.StartsWith("Deployed") && Keys(art).SequenceEqual(new[] { "a", "b", "pulled" }) && Beside(art, ".replaced-*.json").Length == 1, "S1 'Deploy the source' deploys it, keeping the replaced copy");
         reg = Fresh(); File.WriteAllText(src, Reg("a")); File.WriteAllText(art, Reg("a"));
         reg.Change(Add("b"), "drill", out changed);

@@ -526,8 +526,15 @@ source and make recovery explicit:
   **Restore last commit**. Each candidate is parsed and required to contain models before it can replace the source; the
   committed version is read with `git show`, so a candidate that is refused never touches the working copy. The
   corrupt copy remains available for hand-merging. A source that can't be *read* (another program holds it) is not
-  corrupt: it shows a plain warning without recovery buttons. The District and Formation windows follow the same rules
-  (shared `SingleSourceRegistry` engine).
+  corrupt: it shows a plain warning without recovery buttons. A recovery also refreshes the deployed copy, and the
+  deployed copy it replaces is kept beside it (`.replaced-*.json`), since it may hold every bake made since the commit.
+- **The District, Formation and Game Sound Lab windows** run on the shared `SingleSourceRegistry` engine and show one
+  status banner with the actions each state allows: a source that is **empty while the deployed copy still has entries**
+  (a pull, a teammate's commit) offers **Restore last deploy** or **Keep it empty**; a source **changed outside the
+  editor** (git, a hand edit) tells you the game still reads the older deployed copy and offers **Deploy the source**;
+  a **missing** source that git still tracks offers **Restore last commit**. Every action keeps the copy it replaces.
+  Limit: a project that has **no** registry source adopts whatever is deployed in the game's config — which, on a
+  machine with several Unity projects, may be another project's registry.
 - **Artifact recreation and drift warning.** Opening the Factory recreates a missing deployed `pack.json` from the
   project source. If somebody hand-edited the deployed copy, the editor warns that it differs and the next Save
   overwrites it from the source. A missing project source can adopt a valid deployed artifact as a last-resort recovery.

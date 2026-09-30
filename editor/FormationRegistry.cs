@@ -99,7 +99,7 @@ public static class FormationRegistry
     public static string RecoverFromGit() => Store.RecoverFromGit();
     public static string TakeNotice() => Store.TakeNotice();
     public static RegistryLoadVerdict Snapshot() => Store.Snapshot();   // the last Load's findings, frozen for the window
-    public static string AcceptSource() => Store.AcceptSource();       // 'Keep it empty' / 'Deploy the source'
+    public static string AcceptSource(string loadedVersion) => Store.AcceptSource(loadedVersion);   // 'Keep it empty' / 'Deploy the source': only over the version the window loaded
     public static RegistryBanner.Actions BannerActions => new RegistryBanner.Actions { RestoreDeploy = Store.RecoverFromArtifact, RestoreCommit = Store.RecoverFromGit, AcceptSource = Store.AcceptSource, SourcePath = Store.SourcePath };   // self-healing event for the window status line
 
     static List<FormationLink> Sort(List<FormationLink> list)

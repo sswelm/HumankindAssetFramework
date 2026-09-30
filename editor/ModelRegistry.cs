@@ -721,8 +721,22 @@ public static class ModelRegistry
             if (outcome == CheckedReplace.Outcome.Unresolved) return $"⚠ recovery from {label} could not be settled — inspect the source and the copies named in the Console.";
             EditorPrefs.SetString(PrefLastWrite, Fingerprint(candidateJson));
             lastLoadCorrupt = false; LastCorruptDetail = ""; corruptLogged = false;
-            // the deployed copy follows the recovered source (else the next load calls the difference a hand-edit)
-            try { WriteArtifact(candidateJson); EditorPrefs.DeleteKey(PrefPendingDeploy); }
+            // the deployed copy follows the recovered source (else the next load calls the difference a hand-edit) - PRESERVED
+            // first (review of PR #103, round 3): it may hold every bake since the commit, and a copy must survive
+            try
+            {
+                if (File.Exists(RegistryPath))
+                {
+                    string dep = File.ReadAllText(RegistryPath);
+                    if (RegistryRules.FingerprintText(dep) != RegistryRules.FingerprintText(candidateJson))
+                    {
+                        string keep = RegistryPath + ".replaced-" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + "-" + Guid.NewGuid().ToString("N").Substring(0, 8) + ".json";
+                        File.WriteAllText(keep, dep);   // throws: nothing is deployed over an unpreserved copy
+                        Debug.Log($"[Factory] the replaced deployed copy is kept as '{Path.GetFileName(keep)}'.");
+                    }
+                }
+                WriteArtifact(candidateJson); EditorPrefs.DeleteKey(PrefPendingDeploy);
+            }
             catch (Exception de) { EditorPrefs.SetString(PrefPendingDeploy, Fingerprint(candidateJson)); lastPendingAttempt = -1; pendingFailures = 0; Debug.LogWarning($"[Factory] recovered the source, but the deployed copy couldn't be refreshed yet ({de.Message}); the next load retries it."); }
             AssetDatabase.Refresh();
             return $"Recovered {r.models.Count} model(s) from {label}. The corrupt copy is preserved beside the source for hand-merging.";

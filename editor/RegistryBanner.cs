@@ -20,7 +20,8 @@ public static class RegistryBanner
 {
     public sealed class Actions
     {
-        public Func<string> RestoreDeploy, RestoreCommit, AcceptSource;
+        public Func<string> RestoreDeploy, RestoreCommit;
+        public Func<string, string> AcceptSource;   // takes the version the window loaded: deploys only what the person saw
         public string SourcePath = "";
     }
 
@@ -58,30 +59,31 @@ public static class RegistryBanner
         }
         if (v.EmptyButDeployed)
         {
-            EditorGUILayout.HelpBox($"The {label} registry source {v.MissingDetail}. It wasn't emptied by this editor (a pull, a teammate's commit, a hand edit), " +
+            EditorGUILayout.HelpBox($"The {label} registry source {v.MissingDetail}. This editor has no record of emptying it (a pull, a teammate's commit, a hand edit, or an editor update), " +
                                     "so nothing is changed until you decide:", MessageType.Warning);
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button(new GUIContent("Restore last deploy", "Bring the entries back: copy the deployed file over the empty source (validated first)."), GUILayout.Width(140)))
+                // "Restore last deploy" only when the deploy can be READ (a count of -1 means it can't: the restore would refuse)
+                if (v.DeployedCount > 0 && GUILayout.Button(new GUIContent("Restore last deploy", "Bring the entries back: copy the deployed file over the empty source (validated first)."), GUILayout.Width(140)))
                     return a.RestoreDeploy();
                 if (GUILayout.Button(new GUIContent("Keep it empty", "The registry really is empty now: empty the game's deployed copy too. The replaced deployed copy is kept beside it."), GUILayout.Width(120))
                     && EditorUtility.DisplayDialog($"Keep the {label} registry empty?",
                         v.DeployedCount > 0 ? $"The game's copy still holds {v.DeployedCount} entr{(v.DeployedCount == 1 ? "y" : "ies")}. They will be removed from what the game reads (the replaced copy is kept beside it)."
                                             : "The game's copy can't be checked. It will be replaced by the empty registry (the replaced copy is kept beside it).",
                         "Keep it empty", "Cancel"))
-                    return a.AcceptSource();
+                    return a.AcceptSource(v.LoadedVersion);
             }
             return null;
         }
         if (v.Stale)
         {
-            EditorGUILayout.HelpBox($"The {label} registry source changed outside the editor (git, a hand edit): the GAME still reads the older deployed copy until the next save.", MessageType.Info);
+            EditorGUILayout.HelpBox($"The {label} registry source changed outside the editor (git, a hand edit): the GAME still reads the older deployed copy until a save changes something.", MessageType.Info);
             if (GUILayout.Button(new GUIContent("Deploy the source", "Write the project source to the game now. The replaced deployed copy is kept beside it."), GUILayout.Width(140)))
-                return a.AcceptSource();
+                return a.AcceptSource(v.LoadedVersion);
             return null;
         }
         if (v.DeployHandEdited)
-            EditorGUILayout.HelpBox($"The game's deployed copy of the {label} registry was edited by hand. The editor ignores it; the next save overwrites it from the source.", MessageType.Info);
+            EditorGUILayout.HelpBox($"The game's deployed copy of the {label} registry differs from what this editor last wrote (a hand edit there, or another project's save). The editor ignores it; the next save overwrites it from the source.", MessageType.Info);
         return null;
     }
 }
