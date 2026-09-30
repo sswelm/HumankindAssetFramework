@@ -397,7 +397,7 @@ windows. **Deep dive:**
   file's starboard — tick **Un-mirror** above the preview to see it the right way round (the geometry is flipped back,
   so nothing turns see-through); the side sliders and the mirror finder work in file coordinates and are unaffected
   either way. A model whose
-  meshes would need more than 1 GB is listed and filtered as usual but not drawn.
+  meshes would need more than 2 GB is listed and filtered as usual but not drawn.
   **Find the mirror of …** (0.5.7): with a row highlighted, the button finds the part on the other side of the
   centreline whose bounding box is this one's reflected (within 3 % of the part's size — triangle counts may differ,
   the two sides of a ship are often remodelled rather than instanced), highlights it and scrolls to it; press a letter
