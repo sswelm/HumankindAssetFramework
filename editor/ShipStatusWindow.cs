@@ -84,6 +84,20 @@ public class ShipStatusWindow : EditorWindow
     int lastClicked = -1;   // shift-range anchor (display-order row index); reset on every Scan
 
     void OnEnable() { Scan(); }
+    void OnDisable() { StopWaiting(); }
+
+    bool waitingForProps; double waitStarted, lastWaitPoll;
+    void StopWaiting() { if (waitingForProps) { waitingForProps = false; EditorApplication.update -= WaitForPropAnswer; } }
+    void WaitForPropAnswer()
+    {
+        double now = EditorApplication.timeSinceStartup;
+        if (now - lastWaitPoll < 0.5) return;
+        lastWaitPoll = now;
+        // still waiting: keep polling for as long as the check itself may run; past that its own text says "didn't answer"
+        if (PropRegistry.AnswerPending && now - waitStarted < 15) return;
+        StopWaiting();
+        Scan(); Repaint();
+    }
 
     // One row per baked thing, whoever owns it. THREE registries bake into Assets/Resources — units
     // (ModelRegistry/pack.json), districts (DistrictRegistry/haf_districts.json), props (PropRegistry/
@@ -110,6 +124,16 @@ public class ShipStatusWindow : EditorWindow
                 rows.Add(new Row { name = e.resourceName, state = "no bake needed", detail = "retex/borrow entry — no authored assets", severity = 0 });
             else if (bake == null)
                 rows.Add(new Row { name = e.resourceName, state = "BAKE MISSING", detail = "the entry authors asset GUIDs but no baked outputs exist in Assets/Resources — re-bake it", severity = 2 });
+            else if (e.bakeLocked)
+            {
+                // BAKE-LOCKED (review of PR #105): an in-game-verified bake the tooling may no longer reproduce (the lock's
+                // reason, ModelRegistry.bakeLocked). Both Bake buttons refuse it; deleting its outputs here would lose it
+                // for good with the same click as an orphan. Shown, not deletable - unlock it deliberately first.
+                var r = ShippedRow(e.resourceName, "unit", bake);
+                r.state += " · bake-locked"; r.deletable = false;
+                r.detail += " — BAKE-LOCKED (verified in-game; a rebake may diverge): not deletable here. Untick 'Lock bake' in the Animation Lab first if you really mean to.";
+                rows.Add(r);
+            }
             else
                 rows.Add(ShippedRow(e.resourceName, "unit", bake));
         }
@@ -117,6 +141,8 @@ public class ShipStatusWindow : EditorWindow
         if (DistrictRegistry.LastLoadFailed && registryProblem == "") registryProblem = "the district registry " + DistrictRegistry.LastLoadProblem;
         AddOwned(names, () => PropRegistry.Load().Select(p => p.resourceName), "prop");
         if ((PropRegistry.Unreadable != "" || PropRegistry.Unsure != "") && registryProblem == "") registryProblem = "the prop registry: " + (PropRegistry.Unreadable != "" ? PropRegistry.Unreadable : PropRegistry.Unsure);
+        // "git hasn't answered yet" resolves by itself within seconds: re-scan when it does (bounded), not on the next Refresh
+        if (PropRegistry.Unsure != "" && PropRegistry.AnswerPending && !waitingForProps) { waitingForProps = true; waitStarted = EditorApplication.timeSinceStartup; EditorApplication.update += WaitForPropAnswer; }
         // Hand props referenced by name from unit entries (may not appear in haf_props.json when authored elsewhere).
         AddOwned(names, () => entries.Select(e => e.handPropName).Where(n => !string.IsNullOrEmpty(n)), "hand prop");
         // Orphaned bakes: output files NO registry owns (renamed/removed entries leave these behind; they still
