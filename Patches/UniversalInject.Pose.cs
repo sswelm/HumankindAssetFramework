@@ -540,10 +540,15 @@ namespace HumankindAssetFramework
         {
             // LATE table dump: descriptors registered after our repoint (LODs, lazily-loaded defs) are invisible to the
             // repoint-time dump — re-dump the full table once while the unit is actually on screen (ghost included).
-            if (!descTableDumpedLate) { descTableDumpedLate = true; ResetDescTableDump(); DumpDescriptorTable(); ResetFxMeshTableDump(); DumpFxMeshTable(ghostAnimMgr); }
-            ScanGhostDescriptors();   // re-scan for late-registered descriptors still drawing the donor mesh (every NEAR tick, ~10s)
-            CrushGhostSlice(ghostAnimMgr, e, ghostDonorFxIdx);   // re-crush if the Fx content reloaded (probe-guarded, cheap)
-            PollGhostBisect();   // live operator-driven mesh bisect via haf_ghostbisect.txt (no relaunch needed)
+            // The hunt's writes to SHARED donor data run only under [Debug] GhostHunt (see the repoint site in Inject.cs).
+            // The stale-slot clear below stays on: it touches only slots carrying OUR descriptor.
+            if (GhostHuntOn)
+            {
+                if (!descTableDumpedLate) { descTableDumpedLate = true; ResetDescTableDump(); DumpDescriptorTable(); ResetFxMeshTableDump(); DumpFxMeshTable(ghostAnimMgr); }
+                ScanGhostDescriptors();   // re-scan for late-registered descriptors still drawing the donor mesh (every NEAR tick, ~10s)
+                CrushGhostSlice(ghostAnimMgr, e, ghostDonorFxIdx);   // re-crush if the Fx content reloaded (probe-guarded, cheap)
+                PollGhostBisect();   // live operator-driven mesh bisect via haf_ghostbisect.txt (no relaunch needed)
+            }
             try
             {
                 if (!TryGetTranslation(ctx.entry, out var p0)) return;   // PawnFast or reflection (shares the sweep's 2 s cadence and bucket)
@@ -570,10 +575,14 @@ namespace HumankindAssetFramework
                         var pose0 = GetMember(slot, "Pose0");
                         if (pose0 != null) animId = GetMember(pose0, "AnimationId");
                         var pv = GetMember(os, "Translation") is UnityEngine.Vector3 pp ? pp : default;
-                        Plugin.Log.LogInfo($"[Uni][NEAR] '{e.resourceName}' mgr#{m} slot[{i}]{(beyond ? " (BEYOND pawnCount=" + cnt + ")" : "")} desc={d} skel={s} pose0={animId} at ({pv.x:0.0},{pv.y:0.0},{pv.z:0.0})" +
-                                           (beyond && d == e.descId ? "  <<< STALE GHOST SLOT — CLEARING" : d == e.descId ? "  <ours>" : "  <<< FOREIGN DESC — ghost candidate"));
+                        bool clearing = beyond && d == e.descId;
+                        // The census is diagnostic (up to 24 lines every 10 s, at Info, for every hideSubPawns unit on screen);
+                        // only a slot actually CLEARED is an event for the default log.
+                        string tag = clearing ? "  <<< STALE GHOST SLOT — CLEARING" : d == e.descId ? "  <ours>" : "  <<< FOREIGN DESC — ghost candidate";
+                        string line = Plugin.Inv($"[Uni][NEAR] '{e.resourceName}' mgr#{m} slot[{i}]{(beyond ? " (BEYOND pawnCount=" + cnt + ")" : "")} desc={d} skel={s} pose0={animId} at ({pv.x:0.0},{pv.y:0.0},{pv.z:0.0}){tag}");
+                        if (clearing) Plugin.Log.LogInfo(line); else Plugin.Diag(line);
                         shown++;
-                        if (beyond && d == e.descId)
+                        if (clearing)
                         {
                             arr.SetValue(Activator.CreateInstance(arr.GetType().GetElementType()), i);   // default struct = renders nothing
                         }

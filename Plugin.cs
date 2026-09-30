@@ -99,6 +99,7 @@ namespace HumankindAssetFramework
         // sub-particle stride is compiled in — a raised output-layer PPC re-encodes correctly, the descriptor
         // snapshot follows, and the pawn still shreds. The 255x64=16,320-quad ceiling is per FRAGMENT; the way
         // past it is multiple meshes/fragments per unit, not a bigger stride.)
+        internal static ConfigEntry<bool>   GhostHunt;        // [Debug] the 2026-08-03 ghost-rotor investigation tools (descriptor zeroing, slice crush, haf_ghostbisect.txt): they write to SHARED donor data, so off unless hunting
         internal static ConfigEntry<string> DumpPawnRig;      // CATERPILLAR investigation: pawn-name substring (e.g. "MediumTanks"); when that VANILLA addon loads, dump its skeleton bone tables + clip fields once (how do vanilla tank treads roll?). "" = off.
         internal static ConfigEntry<int>    RespawnDelayFrames; // frames to wait after a borrowed-rotor unit renders before re-spawning it (first-instance rotor fix)
         internal static ConfigEntry<string> SkinRoughness;      // neutral _RoughnessMap value painted on injected-model materials (0..1); live-tunable from the F8 window (angle-dependent sky-sheen fix)
@@ -186,6 +187,11 @@ namespace HumankindAssetFramework
             //     StateProbePose0Move — bound, never read) were deleted outright. ---
             AssetNameFilter = Config.Bind("Debug", "AssetNameFilter", "Zeppelin",
                                   "Substring that picks which PresentationUnitDefinitions the ENCProof scan (F8 window) dumps in detail.");
+            GhostHunt = Config.Bind("Debug", "GhostHunt", false,
+                                  "GHOST-ROTOR investigation tools (2026-08-03) for hideSubPawns models: zero every GPU descriptor fragment " +
+                                  "that encodes the donor mesh, degenerate the donor mesh's layer-0 slice, and obey haf_ghostbisect.txt. " +
+                                  "They write to data the donor's own VANILLA unit draws from (the StealthHelicopter's donor mesh is the " +
+                                  "Helicopter Gunship's), and none of them was the fix (silenceDonorVfx was). Off = normal play.");
             DumpPawnRig = Config.Bind("Debug", "DumpPawnRig", "",
                                   "CATERPILLAR investigation: pawn-name substring (e.g. MediumTanks). When a matching VANILLA " +
                                   "pawn addon loads, dump its skeleton bone tables, mesh info and clip-related fields to the log " +

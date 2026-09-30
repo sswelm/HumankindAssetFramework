@@ -10,6 +10,21 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE GHOST HUNT NO LONGER RUNS IN NORMAL PLAY (2026-09-30).** The 2026-08-03 ghost-rotor tools still ran for
+  every `hideSubPawns` model: at repoint and on every ~10 s NEAR tick they zeroed every GPU descriptor fragment in
+  the pawn table that encodes the donor mesh, and degenerated the donor mesh's layer-0 slice in the shared vertex
+  buffer. Both find their target by the DONOR mesh's start index — which the donor's own vanilla unit draws from
+  too. The shipped StealthHelicopter's donor is `Unit_Era6_Common_HelicopterGunships_01` (the 2026-09-29 log:
+  *"DEGENERATED donor mesh 74's layer-0 slice (66 verts)"*), so a vanilla Helicopter Gunship in the same session
+  lost that slice. None of it was the fix: the last ghost was the donor's VFX billboard, dropped by
+  `silenceDonorVfx` (the 2026-08-04 entry below says it *"survived crushing every vertex of every ContentLayer"*).
+  The tools now run only under `[Debug] GhostHunt` (off by default). What fixed something and touches only our own
+  data stays on: `hideSubPawns`, the cached-struct repair, and clearing stale slots that carry our descriptor. The
+  live bisect no longer obeys a command an earlier run left in `haf_ghostbisect.txt` (its first look this process
+  only baselines), and the `[NEAR]` census — up to 24 Info lines every 10 s — moves to `Diag`, except a slot
+  actually cleared. *Found by the 2026-09-27 critical review; the damage is read from the code, the shipped pack
+  and the log, and has not been watched on a vanilla gunship in a game.*
+
 - **ONE BAD MODEL ENTRY NO LONGER RE-READS THE WHOLE PACK (2026-09-21).** The same twin, the other way round. When
   the district registry got per-entry isolation on 2026-08-23 it was described as "matching `ParseModels`" — but
   `ParseModels` never had it. Its per-model loop sat inside one try whose catch ran `entries.Clear()`, so a single
