@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Xunit;
 
@@ -167,6 +168,92 @@ public class BackupRulesTests
         Assert.StartsWith(BackupRules.DeletedPrefix, f);            // listed, restored and aged with the guard's snapshots
         Assert.DoesNotContain("/", BackupRules.OutputsSnapshotFolderName("s", "../../x"));   // the name is made one segment
         Assert.DoesNotContain("\\", BackupRules.OutputsSnapshotFolderName("s", "..\\..\\x"));
+    }
+
+    // ---- the dedup's "unchanged" and the registry verify (review of PR #105 by ChatGPT: a same-length edit within 2 s
+    //      of the copied version was linked as unchanged, and an existence check called the old bytes "verified") ----
+
+    [Fact]
+    public void A_copy_stands_in_only_when_it_is_the_same_bytes()
+    {
+        var t = new DateTime(2026, 9, 30, 12, 0, 0, DateTimeKind.Utc);
+        int asked = 0;
+        Func<bool> never = () => { asked++; return true; };
+        Assert.False(BackupRules.SameCopy(10, t, 11, t, never));                          // a different size is a different file
+        Assert.True(BackupRules.SameCopy(10, t, 10, t, never));                           // the same time to the tick is proof
+        Assert.Equal(0, asked);                                                           // neither read a byte
+        Assert.False(BackupRules.SameCopy(10, t, 10, t.AddSeconds(3), never));            // past the tolerance: copied, no read
+        Assert.Equal(0, asked);
+        // within the tolerance the bytes decide - the reported case: a same-length edit 1 s after the version copied
+        Assert.False(BackupRules.SameCopy(10, t.AddSeconds(1), 10, t, () => false));
+        Assert.True(BackupRules.SameCopy(10, t.AddSeconds(1.5), 10, t, () => true));      // FAT rounding, same bytes: linked
+        Assert.True(BackupRules.SameCopy(10, t, 10, t.AddSeconds(2), () => true));
+    }
+
+    [Fact]
+    public void Same_bytes_is_the_whole_file()
+    {
+        string d = Path.Combine(Path.GetTempPath(), "haf_samebytes_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(d);
+        try
+        {
+            string a = Path.Combine(d, "a"), b = Path.Combine(d, "b"), c = Path.Combine(d, "c"), e = Path.Combine(d, "e");
+            var big = new byte[200 * 1024]; new Random(7).NextBytes(big);
+            File.WriteAllBytes(a, big); File.WriteAllBytes(b, big);
+            var edited = (byte[])big.Clone(); edited[big.Length - 1] ^= 1;   // same length, last byte differs: the second buffer
+            File.WriteAllBytes(c, edited);
+            File.WriteAllBytes(e, new byte[0]);
+            Assert.True(BackupRules.SameBytes(a, b));
+            Assert.False(BackupRules.SameBytes(a, c));
+            Assert.False(BackupRules.SameBytes(a, e));
+            Assert.True(BackupRules.SameBytes(e, e));
+            Assert.False(BackupRules.SameBytes(a, Path.Combine(d, "missing")));   // unreadable is not the same as anything
+        }
+        finally { Directory.Delete(d, true); }
+    }
+
+    [Fact]
+    public void The_registry_verify_compares_bytes_not_names()
+    {
+        string d = Path.Combine(Path.GetTempPath(), "haf_verify_" + Guid.NewGuid().ToString("N"));
+        string live = Path.Combine(d, "live"), snap = Path.Combine(d, "snap");
+        string packRoot = Path.Combine(live, "Assets", "Pack"), cfgPacks = Path.Combine(live, "config", "haf_packs");
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(packRoot, "ENCReload"));
+            Directory.CreateDirectory(Path.Combine(cfgPacks, "ENCReload"));
+            File.WriteAllText(Path.Combine(packRoot, "ENCReload", "pack.json"), "{\"models\":[{\"n\":\"Tank\",\"v\":5}]}");
+            File.WriteAllText(Path.Combine(cfgPacks, "ENCReload", "pack.json"), "{\"models\":[{\"n\":\"Tank\",\"v\":5}]}");
+            var groups = new[]
+            {
+                new KeyValuePair<string, IEnumerable<string>>("pack", new[] { packRoot }),
+                new KeyValuePair<string, IEnumerable<string>>("config", new[] { Path.Combine(live, "config", "haf_x.json"), cfgPacks }),
+                new KeyValuePair<string, IEnumerable<string>>("resources", new[] { Path.Combine(live, "Assets", "Resources") }),
+            };
+            // nothing landed yet: both missing, both counted
+            string v = BackupRules.VerifyRegistryCopies(snap, groups, out int src, out int dep);
+            Assert.NotNull(v); Assert.Contains("MISSING", v); Assert.Contains("Assets/Pack/ENCReload/pack.json", v); Assert.Contains("haf_packs/ENCReload/pack.json", v);
+            Assert.Equal(1, src); Assert.Equal(1, dep);
+            // the snapshot's layout: <snap>/<group>/<root leaf>/<rel>
+            Directory.CreateDirectory(Path.Combine(snap, "pack", "Pack", "ENCReload"));
+            Directory.CreateDirectory(Path.Combine(snap, "config", "haf_packs", "ENCReload"));
+            File.Copy(Path.Combine(packRoot, "ENCReload", "pack.json"), Path.Combine(snap, "pack", "Pack", "ENCReload", "pack.json"));
+            File.Copy(Path.Combine(cfgPacks, "ENCReload", "pack.json"), Path.Combine(snap, "config", "haf_packs", "ENCReload", "pack.json"));
+            Assert.Null(BackupRules.VerifyRegistryCopies(snap, groups, out src, out dep));
+            Assert.Equal(1, src); Assert.Equal(1, dep);
+            // the reported case: a SAME-LENGTH edit of the live registry after the copy - a name is there, the bytes are not
+            File.WriteAllText(Path.Combine(packRoot, "ENCReload", "pack.json"), "{\"models\":[{\"n\":\"Tank\",\"v\":6}]}");
+            v = BackupRules.VerifyRegistryCopies(snap, groups, out src, out dep);
+            Assert.NotNull(v); Assert.Contains("DIFFERENT version of Assets/Pack/ENCReload/pack.json", v); Assert.DoesNotContain("MISSING", v);
+            // a pack group whose root is gone verifies nothing and counts nothing - but a config group still does
+            var packGone = new[] { new KeyValuePair<string, IEnumerable<string>>("pack", new[] { Path.Combine(live, "nowhere") }), groups[1] };
+            Assert.Null(BackupRules.VerifyRegistryCopies(snap, packGone, out src, out dep));
+            Assert.Equal(0, src); Assert.Equal(1, dep);
+            // a snapshot with no registry group asserts nothing
+            Assert.Null(BackupRules.VerifyRegistryCopies(snap, new[] { groups[2] }, out src, out dep));
+            Assert.Equal(0, src); Assert.Equal(0, dep);
+        }
+        finally { Directory.Delete(d, true); }
     }
 
 }

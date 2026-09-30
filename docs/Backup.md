@@ -31,7 +31,10 @@ differently:
 **Locally, unchanged files are hard-linked** to the newest existing snapshot. A hard link is a second *name* for the
 same bytes on the same volume, so an unchanged file costs **zero** additional space while each snapshot stays a
 complete, independently browsable, independently restorable folder. Same idea as Time Machine or `rsync --link-dest`.
-The first real run: 4,077 files, **3,966 hard-linked (1.2 GB saved), 111 copied (65.4 MB)**.
+The first real run: 4,077 files, **3,966 hard-linked (1.2 GB saved), 111 copied (65.4 MB)**. "Unchanged" means the
+same size and the same last-write time to the tick; within the 2-second tolerance FAT and network shares need, the
+bytes are compared (a same-length edit made within 2 s of the copied version once passed as unchanged — review of
+PR #105); further apart is copied.
 
 > **Two consequences worth knowing.** Explorer reports each snapshot at its full apparent size — it counts shared
 > bytes once per name, so the folder still *looks* like 1.4 GB. And deleting an old snapshot frees only the blocks
@@ -87,7 +90,9 @@ Each group is an independent toggle with a live size readout (the daily auto-ver
 Before *anything* under `FactorySource` / `Databases` / `Scripts/Editor` is deleted — the Factory's **Remove**
 flow, a Project-window delete, a script — it is first copied to a `_deleted_<timestamp>_<name>` folder with a
 real manifest, so the **Restore** button puts it back in one click, **including the `.meta`** (the asset keeps
-its GUID, so references to it survive the round trip). The delete then proceeds normally; the guard never blocks
+its GUID, so references to it survive the round trip). The restore's own pre-restore snapshot covers only originals
+that still exist; when the asset is simply gone, there is nothing to keep and the status says so (a restore whose
+originals had been deleted used to abort on exactly that — review of PR #105). The delete then proceeds normally; the guard never blocks
 anything — it only makes every deletion undoable. Same-second deletions of same-named assets get uniquified
 folders (no silent merge).
 
@@ -131,7 +136,8 @@ the file count is re-verified against the manifest — a mismatch is flagged lou
 never used as a restore's safety snapshot nor zipped offsite. **Critical-content verify**: a snapshot that took
 the Pack source group must actually CONTAIN every registry source (`Assets/Pack/*/pack.json`), and one that took
 the config group every deployed copy (`haf_packs/*/pack.json`), or the whole backup is marked not-ok with a loud
-message — a green backup literally says *"registry source verified in snapshot (N pack.json)"* (the recovery drill
+message — and "contain" means **byte for byte the live file**, not merely a file by that name (a hard link to an
+older version would pass an existence check). A green backup literally says *"registry source verified in snapshot (N pack.json)"* (the recovery drill
 found the registry silently absent from every backup for weeks; and until 2026-09-30 the backup verified only the
 deployed copy while never taking the source at all). The verify is pure file IO over the groups' paths, so it runs
 for the daily auto-version too (its worker thread cannot touch Unity APIs — the earlier verify silently skipped

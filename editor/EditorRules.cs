@@ -269,6 +269,90 @@ public static class BackupRules
         return $"SRC\t{rel.Replace('\\', '/')}\t{original.Replace('\\', '/')}\t{files}\t{bytes}";
     }
 
+    /// <summary>
+    /// May the previous snapshot's copy stand in for the live file (a hard link instead of a copy)? Sizes must match;
+    /// an IDENTICAL last-write time is taken as proof (a copy keeps it to the tick on NTFS); within the 2-second
+    /// tolerance that FAT and network shares need, the BYTES decide (review of PR #105 by ChatGPT: size plus a 2 s
+    /// window let a same-length edit made within 2 s of the copied version be "unchanged", and the snapshot then named
+    /// the OLD bytes under a fresh date); further apart is a different file, copied. Pure: the byte read is the callback's.
+    /// </summary>
+    public static bool SameCopy(long liveLength, DateTime liveWriteUtc, long copyLength, DateTime copyWriteUtc, Func<bool> sameBytes)
+    {
+        if (liveLength != copyLength) return false;
+        if (liveWriteUtc == copyWriteUtc) return true;
+        if (Math.Abs((liveWriteUtc - copyWriteUtc).TotalSeconds) > 2) return false;
+        return sameBytes();
+    }
+
+    /// <summary>Are two files byte-for-byte the same? Streams them; a file that can't be read is not the same as anything.</summary>
+    public static bool SameBytes(string a, string b)
+    {
+        try
+        {
+            var fa = new System.IO.FileInfo(a); var fb = new System.IO.FileInfo(b);
+            if (fa.Length != fb.Length) return false;
+            using (var sa = fa.OpenRead()) using (var sb = fb.OpenRead())
+            {
+                var ba = new byte[64 * 1024]; var bb = new byte[64 * 1024];
+                for (;;)
+                {
+                    int na = Fill(sa, ba), nb = Fill(sb, bb);
+                    if (na != nb) return false;
+                    if (na == 0) return true;
+                    for (int i = 0; i < na; i++) if (ba[i] != bb[i]) return false;
+                }
+            }
+        }
+        catch { return false; }
+    }
+
+    static int Fill(System.IO.Stream s, byte[] buf)
+    {
+        int total = 0;
+        while (total < buf.Length) { int n = s.Read(buf, total, buf.Length - total); if (n <= 0) break; total += n; }
+        return total;
+    }
+
+    /// <summary>
+    /// The registry files a snapshot MUST hold, BYTE FOR BYTE: every pack.json under a "pack" group's roots (the SOURCE,
+    /// Assets/Pack) and under a "config" group's haf_packs root (the deployed copy), each at
+    /// <c>&lt;snapshot&gt;/&lt;group&gt;/&lt;root leaf&gt;/&lt;relative path&gt;</c> and compared with the live file it was
+    /// taken from (review of PR #105 by ChatGPT: an existence check called a linked OLD version "verified"). Null when every
+    /// one is present and identical; else the message the backup is marked NOT ok with - also when the walk itself fails,
+    /// never "clean" for want of an answer. Pure file IO: it runs on the auto-version's worker thread.
+    /// </summary>
+    public static string VerifyRegistryCopies(string snapshotDir, IEnumerable<KeyValuePair<string, IEnumerable<string>>> groups, out int sourcePacks, out int deployedPacks)
+    {
+        sourcePacks = deployedPacks = 0;
+        try
+        {
+            var missing = new List<string>(); var differ = new List<string>();
+            foreach (var g in groups)
+                foreach (var root in g.Value)
+                {
+                    string leaf = System.IO.Path.GetFileName(root.TrimEnd('/', '\\'));
+                    bool source = g.Key == "pack", deployed = g.Key == "config" && leaf == "haf_packs";
+                    if (!(source || deployed) || !System.IO.Directory.Exists(root)) continue;
+                    foreach (var p in System.IO.Directory.GetFiles(root, "pack.json", System.IO.SearchOption.AllDirectories))
+                    {
+                        string rel = p.Substring(root.Length).TrimStart('/', '\\');   // <mod>/pack.json
+                        string shown = (source ? "Assets/Pack/" : "haf_packs/") + rel.Replace('\\', '/');
+                        if (source) sourcePacks++; else deployedPacks++;
+                        string copy = System.IO.Path.Combine(snapshotDir, g.Key, leaf, rel);
+                        if (!System.IO.File.Exists(copy)) missing.Add(shown);
+                        else if (!SameBytes(copy, p)) differ.Add(shown);
+                    }
+                }
+            if (missing.Count == 0 && differ.Count == 0) return null;
+            return "⚠ CRITICAL: this backup "
+                 + (missing.Count > 0 ? "is MISSING the model registry file(s): " + string.Join(", ", missing) : "")
+                 + (missing.Count > 0 && differ.Count > 0 ? "; and it " : "")
+                 + (differ.Count > 0 ? "holds a DIFFERENT version of " + string.Join(", ", differ) + " than the live file" : "")
+                 + " — it CANNOT fully recover a removed model. Do not trust it; back up again.";
+        }
+        catch (Exception e) { return $"⚠ CRITICAL: the registry in this backup could NOT be verified ({e.Message}) — do not trust it; back up again."; }
+    }
+
     /// <summary>The reader of <see cref="ManifestLine"/>: false for a comment, a blank, or a line too short; a file count that does not parse reads as 0.</summary>
     public static bool TryParseManifestLine(string line, out string rel, out string original, out int files)
     {

@@ -580,11 +580,22 @@ public class BackupWindow : EditorWindow
             "This only overwrites files that also exist in the backup.", "Snapshot & Restore", "Cancel")) { status = "Restore cancelled."; return; }
 
         // GUARD 1: snapshot the CURRENT state of exactly the paths we're about to overwrite (unique key per source so
-        // two originals sharing a leaf name can't collide in the snapshot folder).
+        // two originals sharing a leaf name can't collide in the snapshot folder) - the paths that EXIST. A delete-guard
+        // snapshot is restored precisely because its originals are gone (review of PR #105 by ChatGPT: the snapshot
+        // treated each absent original as a folder to walk, failed, and every such restore was ABORTED); with nothing
+        // there, there is nothing to keep, and the restore says so instead of writing an empty undo.
         var affected = new List<Group>();
-        for (int i = 0; i < srcs.Count; i++) affected.Add(new Group(srcs[i].original, "restore" + i, new List<string> { srcs[i].original }));
-        string snap = DoBackupInto(NewBackupDir("_prerestore_"), affected, "auto snapshot before restoring " + Path.GetFileName(backupDir));
-        if (snap == null) { status = "Restore ABORTED — could not take the pre-restore safety snapshot (nothing was changed)."; return; }
+        for (int i = 0; i < srcs.Count; i++)
+            if (File.Exists(srcs[i].original) || Directory.Exists(srcs[i].original))
+                affected.Add(new Group(srcs[i].original, "restore" + i, new List<string> { srcs[i].original }));
+        string snap = null;
+        if (affected.Count > 0)
+        {
+            snap = DoBackupInto(NewBackupDir("_prerestore_"), affected, "auto snapshot before restoring " + Path.GetFileName(backupDir));
+            if (snap == null) { status = "Restore ABORTED — could not take the pre-restore safety snapshot (nothing was changed)."; return; }
+        }
+        string undo = snap != null ? $"Current state was saved to '{Path.GetFileName(snap)}' first (undo by restoring that)."
+                    : "Nothing existed at the originals, so no pre-restore snapshot was needed (undo = delete what was restored).";
 
         // GUARD 2: SMART additive copy back (2026-08-17, user-designed): only files that are MISSING or actually
         // DIFFERENT (byte-compared, not just size) are written — identical files are left completely untouched, so
@@ -601,7 +612,7 @@ public class BackupWindow : EditorWindow
             sizeCache.Clear();
             if (st.missing + st.changed > 0) { AssetDatabase.Refresh(); ModelFactoryWindow.RefreshAllOpen(); }   // reimport + tell open Factory windows the registry may have changed
             status = $"Restored {st.missing} missing + {st.changed} changed file(s) from '{Path.GetFileName(backupDir)}' " +
-                     $"({st.identical} identical file(s) untouched). Current state was saved to '{Path.GetFileName(snap)}' first (undo by restoring that).";
+                     $"({st.identical} identical file(s) untouched). {undo}";
             // The model registry's deployed copy (haf_packs, what the game reads) is refreshed only by a Factory save
             // (review of PR #105: the district/formation/sound windows offer "Deploy the source"; the Model Factory does not).
             // A restored source with the old deploy in place is said, or the next build ships the registry just undone.
@@ -609,7 +620,7 @@ public class BackupWindow : EditorWindow
             if (packRestored && !configRestored && st.missing + st.changed > 0)
                 status += "\n⚠ The game's copy of the model registry (haf_packs) was NOT restored: it is refreshed on the Model Factory's next save (any bake or Save), or restore this backup's Runtime config group as well.";
         }
-        catch (Exception e) { status = $"Restore FAILED midway ({e.Message}). Your pre-restore snapshot '{Path.GetFileName(snap)}' is intact — restore IT to get back."; }
+        catch (Exception e) { status = $"Restore FAILED midway ({e.Message}). " + (snap != null ? $"Your pre-restore snapshot '{Path.GetFileName(snap)}' is intact — restore IT to get back." : "Nothing existed at the originals before; delete what was restored to get back."); }
     }
 
     // A snapshot that includes the pack group must contain every registry SOURCE (Assets/Pack/*/pack.json), and one
@@ -619,31 +630,11 @@ public class BackupWindow : EditorWindow
     // PURE FILE IO over the groups' captured paths (review of PR #105): the daily auto-version runs SnapshotInto on a
     // worker thread, where Application.dataPath and EditorPrefs throw — the earlier verify reached both, threw, and its
     // catch read as "clean", so no auto-version was ever verified. A verify that can't complete is said, not passed.
-    static string VerifyCriticalContents(string dir, List<Group> groups, out int sourcePacks, out int deployedPacks)
-    {
-        sourcePacks = deployedPacks = 0;
-        try
-        {
-            var missing = new List<string>();
-            foreach (var g in groups)
-                foreach (var root in g.Sources)
-                {
-                    string leaf = Path.GetFileName(root.TrimEnd('/', '\\'));
-                    bool source = g.Key == "pack", deployed = g.Key == "config" && leaf == "haf_packs";
-                    if (!(source || deployed) || !Directory.Exists(root)) continue;
-                    foreach (var p in Directory.GetFiles(root, "pack.json", SearchOption.AllDirectories))
-                    {
-                        string rel = p.Substring(root.Length).TrimStart('/', '\\');   // <mod>/pack.json
-                        if (source) sourcePacks++; else deployedPacks++;
-                        if (!File.Exists(Path.Combine(dir, g.Key, leaf, rel)))
-                            missing.Add((source ? "Assets/Pack/" : "haf_packs/") + rel.Replace('\\', '/'));
-                    }
-                }
-            return missing.Count == 0 ? null
-                : $"⚠ CRITICAL: this backup is MISSING the model registry file(s): {string.Join(", ", missing)} — it CANNOT fully recover a removed model. Do not trust it; fix the group and back up again.";
-        }
-        catch (Exception e) { return $"⚠ CRITICAL: the registry in this backup could NOT be verified ({e.Message}) — do not trust it; back up again."; }
-    }
+    // BYTE FOR BYTE against the live file (review of PR #105 by ChatGPT: the dedup can link a previous snapshot's copy
+    // by size and a 2 s time window, and an existence check would have called that "verified"). The rule and its test:
+    // BackupRules.VerifyRegistryCopies.
+    static string VerifyCriticalContents(string dir, List<Group> groups, out int sourcePacks, out int deployedPacks) =>
+        BackupRules.VerifyRegistryCopies(dir, groups.Select(g => new KeyValuePair<string, IEnumerable<string>>(g.Key, g.Sources)), out sourcePacks, out deployedPacks);
 
     // The registry the report may call "verified": the SOURCE (the pack group) - the deployed copy alone is not the
     // registry. Says how many pack.json files that was: "verified" over an Assets/Pack that holds none would be empty

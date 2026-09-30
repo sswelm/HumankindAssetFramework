@@ -50,13 +50,14 @@ internal static class BackupDedup
 
     /// <summary>Is `candidate` (in the previous snapshot) the same file as `src` (live)? Size + last-write time, the
     /// standard cheap test — hashing 1.4 GB every backup to find 18 changed files would cost more than it saves.
-    /// A 2-second tolerance absorbs filesystem timestamp granularity (FAT/network shares round to 2 s).</summary>
+    /// An identical time is proof; within the 2-second tolerance FAT/network shares need, the bytes decide (review of
+    /// PR #105: a same-length edit within 2 s of the copied version was "unchanged"). The rule is BackupRules.SameCopy.</summary>
     internal static bool SameFile(FileInfo src, FileInfo candidate)
     {
         try
         {
-            return src.Length == candidate.Length
-                && Math.Abs((src.LastWriteTimeUtc - candidate.LastWriteTimeUtc).TotalSeconds) <= 2;
+            return BackupRules.SameCopy(src.Length, src.LastWriteTimeUtc, candidate.Length, candidate.LastWriteTimeUtc,
+                                        () => BackupRules.SameBytes(src.FullName, candidate.FullName));
         }
         catch { return false; }
     }
