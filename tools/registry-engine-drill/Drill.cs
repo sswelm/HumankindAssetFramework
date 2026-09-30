@@ -277,6 +277,34 @@ static class Drill
         }
         finally { SingleSourceRegistry<DrillFile>.WriteCopyImpl = realCopy4; }
 
+        // ---- round 5: an OLDER owed deploy must not let the retry deploy the recovered source unpreserved; a deploy that
+        //      can't be read during recovery must not turn "Recovered" into "FAILED (source untouched)"
+        var realCopy5 = SingleSourceRegistry<DrillFile>.WriteCopyImpl;
+        try
+        {
+            reg = Fresh(); File.WriteAllText(src, Reg("old")); File.WriteAllText(art, Reg("old"));
+            using (new FileStream(art, FileMode.Open, FileAccess.Read, FileShare.Read)) o = reg.Change(Add("x"), "drill", out changed);   // save X, deploy fails: PENDING = fp(X)
+            Check(o == S && reg.DeployPending, "R8 an editor save whose deploy failed leaves an owed deploy");
+            Git("init -q"); Commit("x");                                        // X is committed
+            File.WriteAllText(art, Reg("old", "baked-by-another-project"));      // meanwhile the SHARED deploy moved on
+            File.WriteAllText(src, "{}"); reg.Load();                            // the source breaks
+            string cfgDir5 = Path.GetDirectoryName(art);
+            SingleSourceRegistry<DrillFile>.WriteCopyImpl = (path, text) => { if (Path.GetDirectoryName(path) == cfgDir5) throw new IOException("disk full"); File.WriteAllText(path, text); };
+            msg = reg.RecoverFromGit();                                          // recovers X = the pending fingerprint, and can't preserve the deploy
+            SingleSourceRegistry<DrillFile>.WriteCopyImpl = realCopy5;
+            Check(msg.StartsWith("Recovered") && !reg.DeployPending, "R8 recovery clears the older owed deploy (it is moot now)");
+            EditorApplication.timeSinceStartup += 5; reg.Load();
+            Check(Keys(art).SequenceEqual(new[] { "baked-by-another-project", "old" }), "R8 ...so the next load does NOT deploy the recovered text unpreserved over the moved deploy");
+
+            reg = Fresh(); File.WriteAllText(src, Reg("committed")); Git("init -q"); Commit("c");
+            File.WriteAllText(art, Reg("committed", "extra")); File.WriteAllText(src, "{}"); reg.Load();
+            using (new FileStream(art, FileMode.Open, FileAccess.Read, FileShare.None))   // the deploy can't even be READ during the recovery
+                msg = reg.RecoverFromGit();
+            Check(msg.StartsWith("Recovered") && msg.Contains("NOT refreshed") && !msg.Contains("untouched") && Keys(src).SequenceEqual(new[] { "committed" }) && Keys(art).SequenceEqual(new[] { "committed", "extra" }),
+                  "R9 a deploy that can't be read during recovery: the source IS recovered and the message says the game's copy was not refreshed (not 'source untouched')");
+        }
+        finally { SingleSourceRegistry<DrillFile>.WriteCopyImpl = realCopy5; }
+
         // ---- MIGRATION (off in every scenario above; on here)
         reg = Fresh(migrated: false); File.WriteAllText(src, Reg("valid-source")); File.WriteAllText(art, "{}");
         File.SetLastWriteTimeUtc(src, DateTime.UtcNow.AddHours(-2));   // the source is OLDER - the shape rule must still win

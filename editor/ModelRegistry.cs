@@ -726,6 +726,7 @@ public static class ModelRegistry
             // deployed now, the deploy stays as it is and the next save refreshes it; PrefLastWrite is set only when it
             // went through, so the difference is not read as the editor's own.
             string deployNote = "";
+            EditorPrefs.DeleteKey(PrefPendingDeploy); pendingFailures = 0; lastPendingAttempt = -1;   // an older owed deploy is moot now, and must not let the retry deploy the recovered text unpreserved (round 5)
             try
             {
                 string dep = File.Exists(RegistryPath) ? File.ReadAllText(RegistryPath) : null;

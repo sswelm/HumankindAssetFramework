@@ -453,8 +453,9 @@ public class SingleSourceRegistry<TFile> where TFile : class, new()
                 return "⚠ REFUSED: the source changed since the window loaded it (a pull, another window) — what you saw is not what would be deployed. Refresh, look again, then decide.";
             var f = Parse(text, out string why);
             if (f == null) return $"⚠ REFUSED: the source is unreadable ({why}); nothing was deployed.";
-            string problem = DeployPreserving(text, out string kept);
-            if (problem != null) return $"⚠ NOT deployed: {problem}.";
+            var deployed = DeployPreserving(text, out string kept, out string reason);
+            if (deployed == RegistryRules.SaveOutcome.Refused) return $"⚠ NOT deployed: {reason}.";
+            if (deployed == RegistryRules.SaveOutcome.Unknown) return $"⚠ Could NOT be confirmed: {reason}.";
             EditorPrefs.SetString(PrefLastWrite, Fingerprint(text));
             return $"Deployed the source ({count(f)} {noun}) to the game." + (kept != null ? $" The replaced deployed copy is kept as '{Path.GetFileName(kept)}'." : "");
         }
@@ -465,33 +466,43 @@ public class SingleSourceRegistry<TFile> where TFile : class, new()
     // "Restore last commit" deployed the committed version over a deploy holding every bake since, and no file kept
     // them). Recovery, migration and "Deploy the source" all go through here: a differing deploy is preserved first
     // under a unique name; if that fails, nothing is deployed (throws). Returns the copy's path, or null.
-    // Returns null when deployed; else why not (nothing was deployed then, and the deployed copy is whatever it is now).
-    // `kept` = the preserved copy's path when one was made.
-    string DeployPreserving(string json, out string kept)
+    // Saved = deployed (kept = the preserved copy's path, when one was made); Refused = NOT deployed, the deployed copy
+    // is as it was (reason says why); Unknown = the replace could not be settled - the deployed copy may hold either
+    // (review of PR #103, round 5: "NOT deployed" was said for that too). Never throws: a failure to read or copy is a
+    // Refused with the reason, so a caller that already changed the SOURCE can still say so.
+    RegistryRules.SaveOutcome DeployPreserving(string json, out string kept, out string reason)
     {
-        kept = null;
-        string dep = File.Exists(ArtifactPath) ? File.ReadAllText(ArtifactPath) : null;
+        kept = null; reason = null;
+        string dep;
+        try { dep = File.Exists(ArtifactPath) ? File.ReadAllText(ArtifactPath) : null; }
+        catch (Exception re) { reason = $"the deployed copy could not be read first ({re.Message})"; return RegistryRules.SaveOutcome.Refused; }
         if (dep != null && Norm(dep) != Norm(json))
         {
             kept = UniqueCopy(ArtifactPath, "replaced");
             try { WriteCopyImpl(kept, dep); }
-            catch (Exception ce) { kept = null; return $"the deployed copy could not be preserved first ({ce.Message})"; }
+            catch (Exception ce) { kept = null; reason = $"the deployed copy could not be preserved first ({ce.Message})"; return RegistryRules.SaveOutcome.Refused; }
         }
         // The replace is CHECKED against the text that was preserved (review of PR #103, round 4): another editor
         // writing the deploy between the read and the replace would otherwise be overwritten while the kept copy held
         // the older text. A conflict leaves their version in place and nothing of ours deployed.
-        var outcome = CheckedReplace.Write(ArtifactPath, dep, json, out string note);
+        CheckedReplace.Outcome outcome; string note;
+        try { outcome = CheckedReplace.Write(ArtifactPath, dep, json, out note); }
+        catch (Exception we) { if (kept != null) { try { File.Delete(kept); } catch { } kept = null; } reason = $"the deployed copy could not be written ({we.Message})"; return RegistryRules.SaveOutcome.Refused; }
         if (note != null) Debug.LogWarning($"{tag} deployed copy: {note}.");
         if (outcome == CheckedReplace.Outcome.Written)
         {
             EditorPrefs.DeleteKey(PrefPendingDeploy);
             pendingFailures = 0; lastPendingAttempt = -1;
-            return null;
+            return RegistryRules.SaveOutcome.Saved;
+        }
+        if (outcome == CheckedReplace.Outcome.Unresolved)
+        {
+            reason = "the replace of the deployed copy could not be settled (the Console names the copies) — it may hold either version";
+            return RegistryRules.SaveOutcome.Unknown;   // the kept copy stays: it may be the only copy of what was there
         }
         if (kept != null) { try { File.Delete(kept); } catch { } kept = null; }   // nothing was replaced: the copy is of a version still in place (or superseded by its own writer)
-        return outcome == CheckedReplace.Outcome.Conflict
-            ? "the deployed copy changed while it was being replaced (another editor, another project) — that version is in place; look at it, then retry"
-            : "the replace of the deployed copy could not be settled (see the Console)";
+        reason = "the deployed copy changed while it was being replaced (another editor, another project) — that version is in place; look at it, then retry";
+        return RegistryRules.SaveOutcome.Refused;
     }
 
     // Is this text what the editor itself wrote (or the person accepted) — its last write, or the write whose deploy is
@@ -567,12 +578,18 @@ public class SingleSourceRegistry<TFile> where TFile : class, new()
             // NEVER handed to the pending-deploy retry (review of PR #103, round 4): that retry deploys the editor's own
             // saves without preserving. If this can't be deployed now, the deploy stays, the next load says the game reads
             // an older copy, and "Deploy the source" preserves it then.
-            string problem = DeployPreserving(candidateJson, out string kept);
-            if (problem == null) EditorPrefs.SetString(PrefLastWrite, Fingerprint(candidateJson));
-            else Debug.LogWarning($"{tag} recovered the source, but the deployed copy was NOT refreshed: {problem}. The game keeps reading it; the window's 'Deploy the source' retries (preserving it).");
+            // An OLDER owed deploy (an earlier save whose deploy failed) is moot now that the source is the recovered text -
+            // and left in place it could match that text and let the pending retry deploy it unpreserved (round 5).
+            EditorPrefs.DeleteKey(PrefPendingDeploy); pendingFailures = 0; lastPendingAttempt = -1;
+            var deployed = DeployPreserving(candidateJson, out string kept, out string reason);   // never throws: the source IS recovered by now
+            if (deployed == RegistryRules.SaveOutcome.Saved) EditorPrefs.SetString(PrefLastWrite, Fingerprint(candidateJson));
+            else Debug.LogWarning($"{tag} recovered the source, but the deployed copy {(deployed == RegistryRules.SaveOutcome.Unknown ? "could NOT be confirmed" : "was NOT refreshed")}: {reason}. " +
+                                  (deployed == RegistryRules.SaveOutcome.Unknown ? "Inspect it and the copies named above." : "The game keeps reading it; the window's 'Deploy the source' retries (preserving it)."));
             AssetDatabase.Refresh();
             return $"Recovered {count(r)} {noun} from {label}. The corrupt copy (if any) is preserved beside the source for hand-merging." +
-                   (kept != null ? $" The replaced deployed copy is kept as '{Path.GetFileName(kept)}'." : problem != null ? $" ⚠ The game's copy was NOT refreshed ({problem})." : "");
+                   (deployed == RegistryRules.SaveOutcome.Saved ? (kept != null ? $" The replaced deployed copy is kept as '{Path.GetFileName(kept)}'." : "")
+                  : deployed == RegistryRules.SaveOutcome.Unknown ? $" ⚠ The game's copy could NOT be confirmed ({reason})."
+                  : $" ⚠ The game's copy was NOT refreshed ({reason}).");
         }
         catch (Exception e) { return $"⚠ recovery from {label} FAILED: {e.Message} (source untouched)."; }
     }
@@ -631,9 +648,10 @@ public class SingleSourceRegistry<TFile> where TFile : class, new()
                                 // the source won: the game gets it too, through the checked, preserving path (its old deploy is
                                 // the loser, preserved above - and preserved again here if it moved meanwhile). Not deployed
                                 // now = left for the person: the next load says "stale" and offers "Deploy the source".
-                                string problem = DeployPreserving(src, out _);
-                                if (problem == null) EditorPrefs.SetString(PrefLastWrite, Fingerprint(src));
-                                else Debug.LogWarning($"{tag} migration kept the source but did not deploy it: {problem}.");
+                                EditorPrefs.DeleteKey(PrefPendingDeploy); pendingFailures = 0; lastPendingAttempt = -1;   // an older owed deploy is moot
+                                var deployed = DeployPreserving(src, out _, out string reason);
+                                if (deployed == RegistryRules.SaveOutcome.Saved) EditorPrefs.SetString(PrefLastWrite, Fingerprint(src));
+                                else Debug.LogWarning($"{tag} migration kept the source but {(deployed == RegistryRules.SaveOutcome.Unknown ? "its deploy could not be confirmed" : "did not deploy it")}: {reason}.");
                             }
                             Debug.LogWarning($"{tag} registry collapse migration: kept the project source ({(depOk ? "it is NEWER than the deployed copy" : "the deployed copy is unreadable")})" +
                                              (emptyOverFull ? " — it is EMPTY while the deployed copy has entries, so the game keeps the deployed copy until you decide (the window asks)" : srcOk ? " and deployed it" : "") +
