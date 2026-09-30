@@ -27,12 +27,12 @@ static class Drill
     }
 
     // A fresh project + game config. migrated = the one-time migration counts as done (the legacy machine-wide marker).
-    static SingleSourceRegistry<DrillFile> Fresh(bool migrated = true, bool clearPrefs = true)
+    static SingleSourceRegistry<DrillFile> Fresh(bool migrated = true, bool clearPrefs = true, string sharedArt = null)
     {
         root = Path.Combine(Path.GetTempPath(), "haf_ssrdrill_" + Guid.NewGuid().ToString("N"));
         roots.Add(root);
         src = Path.Combine(root, "Assets", "Databases", "reg.backup.json");
-        art = Path.Combine(root, "config", "reg.json");
+        art = sharedArt ?? Path.Combine(root, "config", "reg.json");
         Directory.CreateDirectory(Path.GetDirectoryName(src)); Directory.CreateDirectory(Path.GetDirectoryName(art));
         if (clearPrefs) EditorPrefs.P.Clear();
         UnityEngine.Debug.Lines.Clear(); EditorApplication.timeSinceStartup = 1000;
@@ -46,6 +46,7 @@ static class Drill
     static string[] Keys(string path) => UnityEngine.JsonUtility.FromJson<DrillFile>(File.ReadAllText(path)).items.Select(e => e.key).OrderBy(k => k).ToArray();
     static Func<DrillFile, bool> Add(string k) => f => { f.items.Add(new DrillEntry { key = k }); return true; };
     static bool Logged(string s) => UnityEngine.Debug.Lines.Any(l => l.Contains(s));
+    static string[] Beside(string path, string pattern) => Directory.GetFiles(Path.GetDirectoryName(path), Path.GetFileName(path) + pattern);
 
     static void Git(string args)
     {
@@ -129,7 +130,7 @@ static class Drill
         Check(reg.Change(Add("x"), "drill", out changed) == R && !File.Exists(src), "D8 a change refuses; no one-entry source is created");
         reg = Fresh(); string dep9 = Reg("a", "b"); File.WriteAllText(art, dep9);
         var l9 = reg.Load();
-        Check(l9.items.Count == 2 && File.Exists(src) && reg.LoadedVersion == SingleSourceRegistry<DrillFile>.VersionOf(dep9) && !reg.LastLoadFailed, "D9 a missing source adopts the deploy, and LoadedVersion is the adopted text's");
+        Check(l9.items.Count == 2 && File.Exists(src) && reg.LoadedVersion == SingleSourceRegistry<DrillFile>.VersionOf(dep9) && !reg.LastLoadFailed && reg.TakeNotice().Contains("adopted"), "D9 a missing source adopts the deploy (and says so); LoadedVersion is the adopted text's");
         reg = Fresh(); File.WriteAllText(src + ".meta", "guid: x"); File.WriteAllText(art, Reg("old"));
         var k1 = reg.Load();
         Check(k1.items.Count == 0 && reg.LastLoadNoCopy && reg.LastLoadProblem.Contains(".meta") && !File.Exists(src), "K1 missing source Unity still knows (.meta): NOT adopted from the deploy, reported");
@@ -196,6 +197,7 @@ static class Drill
             SingleSourceRegistry<DrillFile>.ApplyImpl = real;
             reg.Load();
             Check(o == U && !reg.DeployPending && !Keys(art).Contains("lost"), "U2 it did not land: the owed deploy is dropped as moot, our change never deployed");
+            Check(reg.LastLoadStale && !Logged("hand-edit"), "U2 ...and the other writer's source is said as STALE for the game, not as a hand-edit");
         }
         finally { SingleSourceRegistry<DrillFile>.ApplyImpl = real; }
 
@@ -204,6 +206,12 @@ static class Drill
         File.WriteAllText(src, Reg("a", "b", "handfix"));   // fixed by hand; the window didn't reload, the banner is still up
         string msg = reg.RecoverFromArtifact();
         Check(msg.Contains("REFUSED") && msg.Contains("readable now") && Keys(src).SequenceEqual(new[] { "a", "b", "handfix" }) && !reg.LastLoadCorrupt, "R1 recovery over a source fixed by hand since the banner: REFUSED, the fix stays");
+        reg = Fresh(); File.WriteAllText(src, "{}"); File.WriteAllText(art, Reg("a")); reg.Load();
+        var before = reg.Snapshot();
+        File.WriteAllText(src, Reg("a", "fixed-by-hand"));   // the file is fine now - but no Load ran
+        Check(reg.Change(Add("x"), "drill", out changed) == R && Keys(src).SequenceEqual(new[] { "a", "fixed-by-hand" }), "MK a change after a corrupt load refuses until a Load (recovery first), even over a file fixed meanwhile");
+        reg.Load();
+        Check(before.Corrupt && !reg.Snapshot().Corrupt, "V1 a window's verdict is FROZEN: another Load changes the engine's flags, not the snapshot it took");
         reg = Fresh(); File.WriteAllText(src, Reg("committed")); Git("init -q"); Commit("c");
         File.WriteAllText(art, Reg("deployed-older")); File.WriteAllText(src, "{}"); reg.Load();
         msg = reg.RecoverFromGit();
@@ -223,25 +231,95 @@ static class Drill
         reg = Fresh(migrated: false); File.WriteAllText(src, Reg("valid-source")); File.WriteAllText(art, "{}");
         File.SetLastWriteTimeUtc(src, DateTime.UtcNow.AddHours(-2));   // the source is OLDER - the shape rule must still win
         reg.Load();
-        Check(Keys(src).SequenceEqual(new[] { "valid-source" }) && File.Exists(art + ".pre-collapse.json"), "M1 a deployed `{}` never wins the migration, even when newer; it is preserved beside the deploy");
+        Check(Keys(src).SequenceEqual(new[] { "valid-source" }) && Beside(art, ".pre-collapse-*.json").Length == 1, "M1 a deployed `{}` never wins the migration, even when newer; it is preserved beside the deploy");
+        Check(Keys(art).SequenceEqual(new[] { "valid-source" }), "M1 ...and the kept source is DEPLOYED (the game doesn't keep reading the loser)");
         reg = Fresh(migrated: false); File.WriteAllText(src, Reg("older")); File.WriteAllText(art, Reg("newer"));
         File.SetLastWriteTimeUtc(src, DateTime.UtcNow.AddHours(-2));
         reg.Load();
-        Check(Keys(src).SequenceEqual(new[] { "newer" }) && File.ReadAllText(art + ".pre-collapse.json").Contains("older"), "M2 a newer readable deploy is adopted; the older source is preserved");
+        var losers = Beside(art, ".pre-collapse-*.json");
+        Check(Keys(src).SequenceEqual(new[] { "newer" }) && losers.Length == 1 && File.ReadAllText(losers[0]).Contains("older"), "M2 a newer readable deploy is adopted; the older source is preserved");
         reg = Fresh(migrated: false); File.WriteAllText(src, Reg("newer")); File.WriteAllText(art, Reg("older"));
         File.SetLastWriteTimeUtc(art, DateTime.UtcNow.AddHours(-2));
         reg.Load();
-        Check(Keys(src).SequenceEqual(new[] { "newer" }), "M3 a newer source is kept");
-        reg = Fresh(migrated: false); File.WriteAllText(art, Reg("project-A")); reg.Load();   // project A migrates
-        Check(Keys(src).SequenceEqual(new[] { "project-A" }), "M4 project A migrates");
-        // same machine, same prefs, another project - whose migration MATTERS: an older source beside a newer deploy
-        // (without a source, Load would adopt the deploy anyway and the test couldn't tell a migration happened)
-        reg = Fresh(migrated: false, clearPrefs: false); File.WriteAllText(src, Reg("B-older")); File.WriteAllText(art, Reg("B-newer"));
-        File.SetLastWriteTimeUtc(src, DateTime.UtcNow.AddHours(-2)); reg.Load();
-        Check(Keys(src).SequenceEqual(new[] { "B-newer" }), "M4 the marker is per PROJECT: project B on the same machine still migrates");
+        Check(Keys(src).SequenceEqual(new[] { "newer" }) && Keys(art).SequenceEqual(new[] { "newer" }), "M3 a newer source is kept AND deployed");
+        // THE DEPLOY IS SHARED by every project on the machine (one game config): project A migrates it once; project B,
+        // sharing it, keeps ITS OWN source - it must not take A's registry over it
+        reg = Fresh(migrated: false); File.WriteAllText(art, Reg("project-A")); reg.Load();
+        string sharedArt = art;
+        Check(Keys(src).SequenceEqual(new[] { "project-A" }), "M4 project A migrates the deploy");
+        reg = Fresh(migrated: false, clearPrefs: false, sharedArt: sharedArt); File.WriteAllText(src, Reg("B-own"));
+        File.SetLastWriteTimeUtc(src, DateTime.UtcNow.AddHours(-2)); reg.Load();   // B's source is even OLDER than the shared deploy
+        Check(Keys(src).SequenceEqual(new[] { "B-own" }), "M4 project B, sharing the deploy, keeps its own source (the migration ran once, for the deploy)");
+        reg = Fresh(migrated: false, clearPrefs: false, sharedArt: sharedArt); reg.Load();   // project C has no source at all
+        Check(File.Exists(src) && Keys(src).SequenceEqual(new[] { "project-A" }), "M4 project C with no source still gets the deploy (Load adopts it)");
         reg = Fresh(migrated: true); File.WriteAllText(src, Reg("mine")); File.WriteAllText(art, Reg("deployed"));
         File.SetLastWriteTimeUtc(src, DateTime.UtcNow.AddHours(-2)); reg.Load();
         Check(Keys(src).SequenceEqual(new[] { "mine" }), "M5 the old machine-wide marker still counts: nothing migrates twice");
+        // the losing copy can't be preserved -> NOTHING is replaced, and the next load tries again
+        var realCopy = SingleSourceRegistry<DrillFile>.WriteCopyImpl;
+        try
+        {
+            reg = Fresh(migrated: false); File.WriteAllText(src, Reg("uncommitted-only-copy")); File.WriteAllText(art, Reg("deploy-newer"));
+            File.SetLastWriteTimeUtc(src, DateTime.UtcNow.AddHours(-2));
+            SingleSourceRegistry<DrillFile>.WriteCopyImpl = (path, text) => throw new IOException("disk full");
+            reg.Load();
+            Check(Keys(src).SequenceEqual(new[] { "uncommitted-only-copy" }) && Logged("postponed"), "M6 a loser that can't be preserved: the source is NOT replaced (migration postponed)");
+            SingleSourceRegistry<DrillFile>.WriteCopyImpl = realCopy;
+            reg.Load();
+            losers = Beside(art, ".pre-collapse-*.json");
+            Check(Keys(src).SequenceEqual(new[] { "deploy-newer" }) && losers.Length == 1 && File.ReadAllText(losers[0]).Contains("uncommitted-only-copy"), "M6 ...the next load migrates, with the loser preserved");
+            // two migrations never overwrite each other's loser (unique names)
+            reg = Fresh(migrated: false); File.WriteAllText(src, Reg("x1")); File.WriteAllText(art, Reg("y1"));
+            File.SetLastWriteTimeUtc(src, DateTime.UtcNow.AddHours(-2)); reg.Load();
+            EditorPrefs.P.Clear(); File.WriteAllText(src, Reg("x2")); File.WriteAllText(art, Reg("y2"));
+            File.SetLastWriteTimeUtc(src, DateTime.UtcNow.AddHours(-2)); reg.Load();
+            Check(Beside(art, ".pre-collapse-*.json").Length == 2, "M7 a second migration's loser does not overwrite the first's");
+        }
+        finally { SingleSourceRegistry<DrillFile>.WriteCopyImpl = realCopy; }
+        reg = Fresh(migrated: false); File.WriteAllText(src + ".meta", "guid: x"); File.WriteAllText(art, Reg("deployed"));
+        reg.Load();
+        Check(!File.Exists(src) && reg.LastLoadNoCopy, "MB the migration respects the missing-source block too (.meta says it exists: not adopted)");
+
+        // ---- EMPTY SOURCE BESIDE A FULL DEPLOY (a pull of a teammate's empty commit): the person decides
+        reg = Fresh(); File.WriteAllText(src, Reg()); File.WriteAllText(art, Reg("a", "b", "c"));
+        reg.Load();
+        var e1 = reg.Snapshot();
+        Check(e1.EmptyButDeployed && e1.DeployedCount == 3 && e1.Failed && reg.LastLoadFailed, "E1 an empty source (not this editor's) beside a deploy with 3: its own state, the list can't be trusted");
+        Check(reg.Change(Add("x"), "drill", out changed) == R && Keys(art).Length == 3, "E1 ...a change is refused, the deploy untouched");
+        msg = reg.RecoverFromArtifact();
+        Check(msg.StartsWith("Recovered") && Keys(src).SequenceEqual(new[] { "a", "b", "c" }), "E1 'Restore last deploy' works on an EMPTY readable source (the case it exists for)");
+        reg = Fresh(); File.WriteAllText(src, Reg()); File.WriteAllText(art, Reg("a", "b", "c")); reg.Load();
+        msg = reg.AcceptSource();
+        Check(msg.StartsWith("Deployed") && Keys(art).Length == 0 && Beside(art, ".replaced-*.json").Length == 1, "E2 'Keep it empty' empties the game's copy, keeping the replaced one beside it");
+        reg.Load();
+        Check(!reg.Snapshot().Failed && reg.Change(Add("fresh"), "drill", out changed) == S, "E2 ...and from then on changes go through");
+        reg = Fresh(); File.WriteAllText(src, Reg()); File.WriteAllText(art, "<<<<<<< broken"); reg.Load();
+        Check(reg.Snapshot().EmptyButDeployed && reg.Snapshot().DeployedCount == -1, "MA an empty source beside an UNREADABLE deploy: the same state (it may still hold entries)");
+        Check(reg.Change(Add("x"), "drill", out changed) == R && Logged("can't be checked"), "MA ...a change refuses: the deploy can't be checked");
+
+        // ---- A SOURCE CHANGED OUTSIDE THE EDITOR: the game reads an older deploy - said, and deployed on the person's word
+        reg = Fresh(); File.WriteAllText(src, Reg("a")); File.WriteAllText(art, Reg("a"));
+        reg.Change(Add("b"), "drill", out changed);          // the editor's own write: source == deploy == [a,b]
+        File.WriteAllText(src, Reg("a", "b", "pulled"));    // git pull
+        UnityEngine.Debug.Lines.Clear(); reg.Load();
+        Check(reg.Snapshot().Stale && !reg.Snapshot().Failed && Logged("GAME still reads") && !Logged("hand-edit"), "S1 a pulled source: STALE for the game, not a hand-edit, not a failure");
+        Check(Keys(art).SequenceEqual(new[] { "a", "b" }), "S1 ...the deploy is NOT overwritten on a guess (it is the last-deploy recovery candidate)");
+        msg = reg.AcceptSource();
+        Check(msg.StartsWith("Deployed") && Keys(art).SequenceEqual(new[] { "a", "b", "pulled" }) && Beside(art, ".replaced-*.json").Length == 1, "S1 'Deploy the source' deploys it, keeping the replaced copy");
+        reg = Fresh(); File.WriteAllText(src, Reg("a")); File.WriteAllText(art, Reg("a"));
+        reg.Change(Add("b"), "drill", out changed);
+        File.WriteAllText(art, Reg("a", "b", "hand-edited-deploy"));
+        UnityEngine.Debug.Lines.Clear(); reg.Load();
+        Check(reg.Snapshot().DeployHandEdited && !reg.Snapshot().Stale && Logged("hand-edit"), "S2 a hand-edited DEPLOY (the source is what the editor wrote) is said as such");
+
+        // ---- GIT AS EVIDENCE that a missing source exists
+        reg = Fresh(); File.WriteAllText(src, Reg("tracked")); Git("init -q"); Commit("t");
+        File.Delete(src); File.WriteAllText(art, Reg("deployed-older"));
+        reg.Load();
+        Check(reg.Snapshot().NoCopy && reg.Snapshot().MissingKnown && reg.LastLoadProblem.Contains("git tracks it") && !File.Exists(src), "MC a missing source git still tracks: not adopted from the deploy; 'Restore last commit' is offered");
+        Check(reg.Change(Add("x"), "drill", out changed) == R && !File.Exists(src), "MC ...a change refuses");
+        msg = reg.RecoverFromGit();
+        Check(msg.StartsWith("Recovered") && Keys(src).SequenceEqual(new[] { "tracked" }), "MC ...and 'Restore last commit' brings it back");
 
         // ---- HYGIENE
         reg = Fresh(); File.WriteAllText(src, Reg("a")); File.WriteAllText(art, Reg("a"));

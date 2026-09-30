@@ -63,9 +63,12 @@ public class FormationOverrideWindow : EditorWindow
 
     void OnEnable() => RefreshList();
 
+    RegistryLoadVerdict verdict = new RegistryLoadVerdict();   // what this window's last RefreshList found
+
     void RefreshList()
     {
         all = FormationRegistry.Load();
+        verdict = FormationRegistry.Snapshot();   // THIS window's load, frozen (see RegistryBanner)
         var notice = FormationRegistry.TakeNotice(); if (!string.IsNullOrEmpty(notice)) status = notice;   // self-healing is shown, not Console-only
         existing = new[] { "<New>" }.Concat(all.Select(EntryLabel)).ToArray();
     }
@@ -90,31 +93,10 @@ public class FormationOverrideWindow : EditorWindow
 
     void OnGUI()
     {
-        // CORRUPT-SOURCE RECOVERY banner (the Factory's, via the shared SingleSourceRegistry engine — 2026-08-20): the
-        // fault is PINPOINTED (line/column) and recovery is ONE CLICK, each path validated before it writes and the broken
-        // file already preserved timestamped. Saving stays locked until recovered.
-        // A source that could not be READ is not a corrupt one (critical review 2026-09-30, as the Model Factory since PR
-        // #100): a plain warning, and deliberately no recovery buttons - "Restore last commit" would replace a file that
-        // has nothing wrong with it. The lock takes precedence over an earlier corrupt verdict (RegistryRules).
-        if (FormationRegistry.LastLoadLocked)
-            EditorGUILayout.HelpBox("The formation registry source can't be read right now — " + FormationRegistry.LastLockDetail + "\n" +
-                FormationRegistry.LastLockAdvice + " Saves are refused until it can be read; nothing can be recovered from a file that can't be seen.", MessageType.Warning);
-        else if (FormationRegistry.LastLoadFailed && !FormationRegistry.LastLoadCorrupt)
-            EditorGUILayout.HelpBox("The formation registry " + FormationRegistry.LastLoadProblem + ". The list is empty only because of that; changes are refused until it is resolved (then Refresh).", MessageType.Warning);
-        if (RegistryRules.ShowRecoveryControls(FormationRegistry.LastLoadCorrupt, FormationRegistry.LastLoadLocked))
-        {
-            EditorGUILayout.HelpBox("FORMATION REGISTRY SOURCE IS CORRUPT — " + FormationRegistry.LastCorruptDetail + "\n" +
-                "The broken file is preserved beside the source; Save is locked so nothing can be wiped. Recover:", MessageType.Error);
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                if (GUILayout.Button(new GUIContent("Restore last deploy", "Copy the deployed file (refreshed on every Save — usually the freshest valid copy) back over the source. Validated before writing; the corrupt file stays preserved."), GUILayout.Width(140)))
-                { status = FormationRegistry.RecoverFromArtifact(); RefreshList(); Debug.Log("[Formation] " + status); GUIUtility.ExitGUI(); }
-                if (GUILayout.Button(new GUIContent("Restore last commit", "git checkout the source — the last committed version. Validated before accepting; the corrupt file stays preserved."), GUILayout.Width(140)))
-                { status = FormationRegistry.RecoverFromGit(); RefreshList(); Debug.Log("[Formation] " + status); GUIUtility.ExitGUI(); }
-                if (GUILayout.Button(new GUIContent("Open broken file", "Reveal the source in Explorer to fix the reported line by hand — then reopen or refresh the window."), GUILayout.Width(120)))
-                { EditorUtility.RevealInFinder(FormationRegistry.SourcePath); }
-            }
-        }
+        // THE window's status banner (RegistryBanner, review of PR #103): drawn from the verdict of ITS last load, never from the
+        // engine's live flags (another caller's load changes those), with each state's own actions.
+        string bannerResult = RegistryBanner.Draw(verdict, "formation", FormationRegistry.BannerActions);
+        if (bannerResult != null) { status = bannerResult; Debug.Log("[Formation] " + status); RefreshList(); GUIUtility.ExitGUI(); }
         scroll = EditorGUILayout.BeginScrollView(scroll);
         EditorGUILayout.Space();
 
@@ -416,7 +398,7 @@ public class FormationOverrideWindow : EditorWindow
                        && (!isMacro || cur.dummies.Count > 0);   // a macro replacement without data replaces nothing
         using (new EditorGUILayout.HorizontalScope())
         {
-            using (new EditorGUI.DisabledScope(!canSave))
+            using (new EditorGUI.DisabledScope(!canSave || verdict.Failed))   // not over a load that failed (review of PR #103)
                 if (GUILayout.Button(isMacro ? "Save MACRO replacement" : "Save link", GUILayout.Height(34)))
                 {
                     cur.unit = cur.unit.Trim(); cur.formation = cur.formation.Trim();

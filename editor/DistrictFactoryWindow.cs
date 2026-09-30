@@ -57,9 +57,12 @@ public class DistrictFactoryWindow : EditorWindow
         if (pvArrowMesh != null) DestroyImmediate(pvArrowMesh);
     }
 
+    RegistryLoadVerdict verdict = new RegistryLoadVerdict();   // what this window's last RefreshList found (see RegistryBanner)
+
     void RefreshList()
     {
         all = DistrictRegistry.Load();
+        verdict = DistrictRegistry.Snapshot();   // THIS window's load, frozen: banner and gates read it, not the engine's live flags
         var notice = DistrictRegistry.TakeNotice(); if (!string.IsNullOrEmpty(notice)) status = notice;   // self-healing is shown, not Console-only
         existing = new[] { "<New>" }.Concat(all.Select(d => d.district)).ToArray();
     }
@@ -179,31 +182,10 @@ public class DistrictFactoryWindow : EditorWindow
 
     void OnGUI()
     {
-        // CORRUPT-SOURCE RECOVERY banner (the Factory's, via the shared SingleSourceRegistry engine — 2026-08-20): the
-        // fault is PINPOINTED (line/column) and recovery is ONE CLICK, each path validated before it writes and the broken
-        // file already preserved timestamped. Save/Bake stay locked until recovered.
-        // A source that could not be READ is not a corrupt one (critical review 2026-09-30, as the Model Factory since PR
-        // #100): a plain warning, and deliberately no recovery buttons - "Restore last commit" would replace a file that
-        // has nothing wrong with it. The lock takes precedence over an earlier corrupt verdict (RegistryRules).
-        if (DistrictRegistry.LastLoadLocked)
-            EditorGUILayout.HelpBox("The district registry source can't be read right now — " + DistrictRegistry.LastLockDetail + "\n" +
-                DistrictRegistry.LastLockAdvice + " Saves and bakes are refused until it can be read; nothing can be recovered from a file that can't be seen.", MessageType.Warning);
-        else if (DistrictRegistry.LastLoadFailed && !DistrictRegistry.LastLoadCorrupt)
-            EditorGUILayout.HelpBox("The district registry " + DistrictRegistry.LastLoadProblem + ". The list is empty only because of that; changes are refused until it is resolved (then Refresh).", MessageType.Warning);
-        if (RegistryRules.ShowRecoveryControls(DistrictRegistry.LastLoadCorrupt, DistrictRegistry.LastLoadLocked))
-        {
-            EditorGUILayout.HelpBox("DISTRICT REGISTRY SOURCE IS CORRUPT — " + DistrictRegistry.LastCorruptDetail + "\n" +
-                "The broken file is preserved beside the source; Save/Bake are locked so nothing can be wiped. Recover:", MessageType.Error);
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                if (GUILayout.Button(new GUIContent("Restore last deploy", "Copy the deployed file (refreshed on every Save — usually the freshest valid copy) back over the source. Validated before writing; the corrupt file stays preserved."), GUILayout.Width(140)))
-                { status = DistrictRegistry.RecoverFromArtifact(); RefreshList(); Debug.Log("[District] " + status); GUIUtility.ExitGUI(); }
-                if (GUILayout.Button(new GUIContent("Restore last commit", "git checkout the source — the last committed version. Validated before accepting; the corrupt file stays preserved."), GUILayout.Width(140)))
-                { status = DistrictRegistry.RecoverFromGit(); RefreshList(); Debug.Log("[District] " + status); GUIUtility.ExitGUI(); }
-                if (GUILayout.Button(new GUIContent("Open broken file", "Reveal the source in Explorer to fix the reported line by hand — then reopen or refresh the window."), GUILayout.Width(120)))
-                { EditorUtility.RevealInFinder(DistrictRegistry.SourcePath); }
-            }
-        }
+        // THE window's status banner (RegistryBanner, review of PR #103): drawn from the verdict of ITS last load, never from the
+        // engine's live flags (another caller's load changes those), with each state's own actions.
+        string bannerResult = RegistryBanner.Draw(verdict, "district", DistrictRegistry.BannerActions);
+        if (bannerResult != null) { status = bannerResult; Debug.Log("[District] " + status); RefreshList(); GUIUtility.ExitGUI(); }
         scroll = EditorGUILayout.BeginScrollView(scroll);
         EditorGUILayout.Space();
 
@@ -477,7 +459,7 @@ public class DistrictFactoryWindow : EditorWindow
         bool isNew = selected <= 0;
         // The banners say bakes are refused while the registry can't be loaded - so they are (critical review 2026-09-30:
         // the whole bake ran, was rolled back at the registry step, and the message blamed a lock).
-        bool canBake = !DistrictRegistry.LastLoadFailed
+        bool canBake = !verdict.Failed
                     && !string.IsNullOrWhiteSpace(cur.district)
                     && !string.IsNullOrWhiteSpace(cur.resourceName)
                     && nameValid
@@ -489,15 +471,15 @@ public class DistrictFactoryWindow : EditorWindow
             // Persist the RUNTIME knobs (Strategic footprint, Ground, Hex sculpting, isolate, atlas GUIDs...) to
             // haf_districts.json WITHOUT re-baking — so changing a footprint doesn't re-run the model bake or mint a new
             // selector GUID. Only valid for an entry with a district set (Upsert keys on it).
-            using (new EditorGUI.DisabledScope(string.IsNullOrWhiteSpace(cur.district)))
+            using (new EditorGUI.DisabledScope(string.IsNullOrWhiteSpace(cur.district) || verdict.Failed))   // not over a load that failed (review of PR #103)
                 if (GUILayout.Button(new GUIContent("Save settings", "Write this entry's runtime knobs to haf_districts.json without baking. Relaunch to apply."), GUILayout.Height(34), GUILayout.Width(110)))
                     SaveSettingsNoBake();
             if (GUILayout.Button("Reset", GUILayout.Height(34), GUILayout.Width(72))) { cur = new DistrictDef(); selected = 0; status = ""; GUI.FocusControl(null); }
         }
         if (!canBake)
             EditorGUILayout.HelpBox(
-                DistrictRegistry.LastLoadFailed
-                    ? "The district registry " + DistrictRegistry.LastLoadProblem + " — bakes are refused until it can be read (see above), then Refresh."
+                verdict.Failed
+                    ? "The district registry can't be used as loaded (see the banner above) — bakes and saves are refused until that is resolved, then Refresh."
                 : !nameValid && !string.IsNullOrWhiteSpace(cur.resourceName)
                     ? $"Resource name can't contain '{(badChar == ' ' ? "space" : badChar.ToString())}'. Use letters, digits, '_' or '-' only."
                 : isNew ? "New district model: set District, Resource name and a Model file to bake."

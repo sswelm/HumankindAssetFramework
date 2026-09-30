@@ -56,6 +56,9 @@ public static class SoundOverrideRegistry
     public static string RecoverFromArtifact() => Store.RecoverFromArtifact();
     public static string RecoverFromGit() => Store.RecoverFromGit();
     public static string TakeNotice() => Store.TakeNotice();
+    public static RegistryLoadVerdict Snapshot() => Store.Snapshot();   // the last Load's findings, frozen for the window
+    public static string AcceptSource() => Store.AcceptSource();       // 'Keep it empty' / 'Deploy the source'
+    public static RegistryBanner.Actions BannerActions => new RegistryBanner.Actions { RestoreDeploy = Store.RecoverFromArtifact, RestoreCommit = Store.RecoverFromGit, AcceptSource = Store.AcceptSource, SourcePath = Store.SourcePath };
 
     /// <summary>The version of the rules the last successful Load returned; null after a failed one (see Save).</summary>
     public static string LoadedVersion => Store.LoadedVersion;

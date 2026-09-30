@@ -97,7 +97,10 @@ public static class FormationRegistry
     public static bool DeployPending => Store.DeployPending;          // saved, but the game's copy isn't refreshed yet
     public static string RecoverFromArtifact() => Store.RecoverFromArtifact();
     public static string RecoverFromGit() => Store.RecoverFromGit();
-    public static string TakeNotice() => Store.TakeNotice();   // self-healing event for the window status line
+    public static string TakeNotice() => Store.TakeNotice();
+    public static RegistryLoadVerdict Snapshot() => Store.Snapshot();   // the last Load's findings, frozen for the window
+    public static string AcceptSource() => Store.AcceptSource();       // 'Keep it empty' / 'Deploy the source'
+    public static RegistryBanner.Actions BannerActions => new RegistryBanner.Actions { RestoreDeploy = Store.RecoverFromArtifact, RestoreCommit = Store.RecoverFromGit, AcceptSource = Store.AcceptSource, SourcePath = Store.SourcePath };   // self-healing event for the window status line
 
     static List<FormationLink> Sort(List<FormationLink> list)
     {
