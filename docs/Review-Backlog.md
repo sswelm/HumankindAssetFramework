@@ -34,6 +34,41 @@ stale** — struck through in place below, each with the evidence. The rest are 
 
 ## Needs a decision first
 
+### Replace Blender with our own code (raised 2026-09-30; measured, not estimated)
+
+**Goals**: (1) no external dependency — users install a 400 MB Blender, its API has moved under the scripts before
+(now on 5.1), and every headless run is an out-of-process failure class (PR #107: exit codes, timeouts, pipe
+deadlocks); (2) **speed**. Measured 2026-09-30 on `UniversalTanks/deploy_converted.glb` (50.9 MB, 145 objects):
+
+| step | Blender 5.1 | HAF C# (`GlbDisconnectedParts`, Unity's Mono) |
+|---|---|---|
+| boot | 1.6 s | — |
+| glTF import | 1.2 s | read + parse every mesh, rebuild every part, write a 51 MB GLB: **0.31 s** |
+| glTF export | **12.3 s** (the exporter is Python) | (included above) |
+| a Vehicle Lab probe or rig run, end to end | **median 25.4 s** (24 runs today, min 23.3 s) | the rigging math is small; the round trip is the cost |
+
+So a C# Lab would answer a probe in about a second instead of 25 s, and a bake would lose the boot + export +
+Unity-reimport of the FBX round trip. The decimator and modifiers are C inside Blender (no gain there), but a C#
+quadric decimator can run on every core; Blender's Python is single-threaded.
+
+**What Blender does for us** (6,918 lines of Python): `vehicle_rig.py` 3,816 (procedural wheel/track/turret/oar/sail
+rigs + animations), `rig_anim.py` 1,234 (rest-pose fold, clip slicing into roles, bone-cap slimming, placement, FBX
+export), `deploy_convert.py` 1,037 (source → deployable GLB: decimation, texture extraction, bone-per-part rigs),
+plus `placement_shift`, `add_role_clips`, `inspect_fbx`, `prep_model`. Every one is math over meshes, skin weights
+and keyframes; Unity's importer reads FBX/OBJ, our C# reads/writes GLB, Unity builds `Mesh`/skeleton/`AnimationClip`
+assets, and Unity's official FBX Exporter exists if Amplitude's `ClipCollection.SetFromDirectory` turns out to need
+an imported model rather than `.anim` assets. **The one true dependency is `.blend` sources** (that format *is*
+Blender) — keep Blender optional for those.
+
+**Cost**: 2–4 months at the current rigor. **Safety**: the goldens (`deploy_golden`, `lab_golden`, the Bake Tests)
+compare dumps of the same inputs, so Blender stays the oracle until each script reaches parity, then is demoted.
+
+**Order, by payoff per effort**: (1) `inspect_fbx` → Unity's `ModelImporter` clip list (days; removes a Blender
+launch from the Clip Range dialog); (2) reduce/`prep_model` → a C# quadric decimator (1–2 weeks, golden-verified);
+(3) `deploy_convert` (3–4 weeks; the fuse already walks parts and welds); (4) `rig_anim` (3–4 weeks); (5)
+`vehicle_rig` (4–8 weeks; the Lab already computes much of the geometry in C#).
+
+
 - ~~**Gate the rest-fold on the `convertRig` flag?**~~ — DECIDED + IMPLEMENTED 2026-07-19: **split gating.** The
   destructive rest-fold (rest rewrite + visual rebake) is now conversion-path only (`_loc0 and convert_rig`) — a
   legacy model with location keys + shape keys no longer aborts, and legacy means *no rig manipulation*. The
