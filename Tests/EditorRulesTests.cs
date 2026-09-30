@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using Xunit;
 
@@ -7,6 +8,19 @@ using Xunit;
 // failed to protect single-material hand-edits.
 public class BakerRulesTests
 {
+    // The head of every headless Blender run (2026-09-30): the flag that makes a crashed script fail the process, in
+    // the one position Blender honours it (measured on 5.1: before --python exits 1, after it exits 0, without it 0).
+    [Fact]
+    public void A_blender_run_fails_the_process_when_its_script_throws()
+    {
+        string head = BakerRules.BlenderScript(@"C:\Tools\rig_anim.py");
+        Assert.Equal("--background --python-exit-code 1 --python \"C:\\Tools\\rig_anim.py\"", head);
+        Assert.True(head.IndexOf("--python-exit-code") < head.IndexOf("--python \""), "the exit-code flag must come BEFORE --python: Blender applies its arguments in order");
+        Assert.StartsWith("--background", head);
+        Assert.Throws<ArgumentException>(() => BakerRules.BlenderScript(""));
+        Assert.Throws<ArgumentException>(() => BakerRules.BlenderScript("C:\\a\"b.py"));   // a quote would end the argument early
+    }
+
     [Fact]
     public void Fresh_extraction_is_used_regardless_of_the_checkbox()
     {

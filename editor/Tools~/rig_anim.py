@@ -82,6 +82,15 @@ if len(argv) > 9 and argv[9].strip():
                 role_specs.append((_r.strip(), _cn.strip()))
 if role_specs:
     print("RIGANIM state roles: %s" % ", ".join("%s='%s'" % rc for rc in role_specs))
+    # STALE ROLE OUTPUTS (2026-09-30): each role FBX is written LAST, after the primary, and the Factory deletes only
+    # the primary before a run. A run that died between the two left the PREVIOUS bake's role clip in anim_<role>/,
+    # baked against the OLD skeleton, beside the new primary. Clear them up front: after any run, a role file on disk
+    # is one THIS run wrote, and a missing one makes the Factory re-run (roleFbxMissing). Same path rule as the export.
+    for _r, _cn in role_specs:
+        _stale = os.path.join(os.path.dirname(os.path.dirname(outp)), "anim_" + _r, os.path.basename(outp))
+        if os.path.isfile(_stale):
+            os.remove(_stale)
+            print("RIGANIM cleared the previous run's %s clip (%s)" % (_r, _stale))
 
 # DONOR SOCKETS (argv[11], 2026-07-24): "DonorName=ParentSubstr[@x,y,z];..." — create EXACT-NAMED zero-weight leaf
 # bones on our rig so the DONOR's fire/VFX events resolve NATIVELY (GetBoneTRS('Canon_Up_left') just FINDS the bone):

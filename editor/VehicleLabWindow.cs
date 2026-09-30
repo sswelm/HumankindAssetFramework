@@ -2489,12 +2489,16 @@ public class VehicleLabWindow : EditorWindow
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var p = new System.Diagnostics.Process();
             p.StartInfo.FileName = UniversalBaker.FindBlender();
-            p.StartInfo.Arguments = $"--background --python \"{script}\" -- {args}";
+            p.StartInfo.Arguments = $"{BakerRules.BlenderScript(script)} -- {args}";
             p.StartInfo.UseShellExecute = false; p.StartInfo.CreateNoWindow = true;
             p.StartInfo.RedirectStandardOutput = true; p.StartInfo.RedirectStandardError = true;
             p.Start();
             if (!UniversalBaker.RunBounded(p, 300000, out stdout, out string stderr)) { status = "Blender timed out (5 min)."; return false; }
             lastStdout = stdout;
+            // A crashed script now exits 1 (BakerRules.BlenderScript). The rig path also gates on its own DONE marker; the
+            // probe path did not, and a crash mid-probe handed back a partial PART list as the model's parts.
+            if (p.ExitCode != 0)
+            { status = $"Blender crashed (exit {p.ExitCode}) — the traceback is in the Console."; Debug.LogError("[VehicleLab] Blender crashed (exit " + p.ExitCode + ").\n" + stdout + "\n--- stderr ---\n" + stderr); return false; }
             if (stdout.Contains("VEHICLE ERROR"))
             { status = stdout.Split('\n').FirstOrDefault(l => l.Contains("VEHICLE ERROR")) ?? "Blender step failed."; Debug.LogError("[VehicleLab]\n" + stdout + "\n--- stderr ---\n" + stderr); return false; }
             sw.Stop();

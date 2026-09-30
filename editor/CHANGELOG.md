@@ -5,6 +5,17 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **A Blender script that crashes now fails the bake.** Blender exits 0 on an uncaught Python exception unless
+  told otherwise (measured on 5.1), so every `ExitCode != 0` check in the Factory, the Vehicle Lab and the Clip
+  Range dialog was dead for a crashed script: a crash after a partial output looked exactly like a finished run. The
+  worst case was `rig_anim`, which writes the role clips LAST — a crash among them left the previous bake's role
+  clips (baked against the old skeleton) beside a fresh primary, and the Factory called it baked. Every headless
+  run now goes through one head (`BakerRules.BlenderScript`: `--python-exit-code 1` placed before `--python`, the one
+  position Blender honours), `rig_anim` clears the previous run's role clips before it starts, the Vehicle Lab's
+  probe fails on a crash instead of handing back a partial part list, and the Clip Range dialog discards a partial
+  clip set instead of caching it for good. Only `deploy_convert` and the Lab's rig run already gated on their own
+  completion marker; they keep it.
+
 - **Model Workshop: a re-cut keeps what was decided about the pieces** (user: "when I split salegs_revenge.glb and
   then probe it in the fusion, none of my previous configuration seem to have survived"). Since 2026-09-16 a cut
   hands its own marks down to the output; it wrote them straight over the sidecars already lying beside that output,

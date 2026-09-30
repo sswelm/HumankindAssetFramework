@@ -476,6 +476,21 @@ public static class BakerRules
     // `<name>_albedo.png`) — the historic bug was requiring the MTL specifically, which a 1-material source
     // never has, making it permanently "stale": re-extracted every bake, hand-edits deleted, checkbox dead.
     // `stampMatches` = the `.src` stamp exists and equals the current source path + mtime.
+    /// <summary>
+    /// The head of every headless Blender run: background mode and a script that FAILS THE PROCESS when it throws.
+    /// Measured on Blender 5.1 (2026-09-30): a script that raises exits 0 - so every `ExitCode != 0` check in the
+    /// editor was dead for a crashed script, and a crash after a partial output (rig_anim writes its role clips
+    /// LAST) looked exactly like a finished bake; with `--python-exit-code 1` placed BEFORE `--python` it exits 1,
+    /// and placed after it exits 0 again, because Blender applies its arguments in order. The caller appends its
+    /// `-- args`; a .blend to open goes in front of this.
+    /// </summary>
+    public static string BlenderScript(string scriptPath)
+    {
+        if (string.IsNullOrWhiteSpace(scriptPath)) throw new ArgumentException("a Blender run needs a script path");
+        if (scriptPath.IndexOf('"') >= 0) throw new ArgumentException("a script path cannot contain a quote");
+        return $"--background --python-exit-code 1 --python \"{scriptPath}\"";
+    }
+
     public static ExtractionAction DecideExtraction(bool extractedExists, bool stampMatches, bool keepTexture)
     {
         if (extractedExists && stampMatches) return ExtractionAction.UseExisting;

@@ -343,7 +343,7 @@ public static class UniversalBaker
             EditorUtility.DisplayProgressBar("Model Factory", "Deploy conversion (Blender): rigid parts → bone-per-part rig…", 0.3f);
             var p = new System.Diagnostics.Process();
             p.StartInfo.FileName = FindBlender();
-            p.StartInfo.Arguments = $"--background --python \"{script}\" -- \"{cfg.modelFile}\" \"{outFull}\" " +
+            p.StartInfo.Arguments = $"{BakerRules.BlenderScript(script)} -- \"{cfg.modelFile}\" \"{outFull}\" " +
                 $"{cfg.deployStart} {cfg.deployEnd} \"{(cfg.deployStrip ?? "").Trim()}\" \"{(cfg.deployReadyFrame ?? "").Trim()}\" " +
                 $"\"{(cfg.deployLegScale ?? "").Trim()}\" \"{(cfg.deployBarrelScale ?? "").Trim()}\" " +
                 $"\"{rs}\" \"{re}\" \"{(cfg.deployRecoilStep ?? "").Trim()}\" \"{(cfg.deployRecoilMag ?? "").Trim()}\" \"{(cfg.deployArcR ?? "").Trim()}\" \"{(cfg.deployRecoilReturn ?? "").Trim()}\" \"{(cfg.deploySlamDeg ?? "").Trim()}\" \"{(cfg.deploySlamSettle ?? "").Trim()}\" \"{(cfg.deployStripExtra ?? "").Trim()}\" " +
@@ -1192,7 +1192,7 @@ public static class UniversalBaker
         string blender = FindBlender();
         var inv = System.Globalization.CultureInfo.InvariantCulture;   // never the OS locale — a Dutch comma-decimal would corrupt the arg
         string rotArg = string.Format(inv, "{0:0.###},{1:0.###},{2:0.###}", rotation.x, rotation.y, rotation.z);
-        string args = $"--background --python \"{script}\" -- \"{src}\" \"{outFbx}\" {Mathf.Max(0, targetTris)} \"{bonePrefixes ?? ""}\" \"{clipName ?? ""}\" \"{albedoOut ?? ""}\" {(keepMaterials ? "1" : "0")} \"{rotArg}\" {(convertRig ? "1" : "0")} \"{stateRoles ?? ""}\" {(autoGround ? "1" : "0")} \"{socketBones ?? ""}\" {(keepTranslations ? "1" : "0")} \"{staticParts ?? ""}\" {(localNodeAnim ? "1" : "0")}";   // argv[10]: auto-ground; argv[11]: donor sockets; argv[12]: keep translations; argv[13]: static (weightless) parts; argv[14]: local-delta node animation
+        string args = $"{BakerRules.BlenderScript(script)} -- \"{src}\" \"{outFbx}\" {Mathf.Max(0, targetTris)} \"{bonePrefixes ?? ""}\" \"{clipName ?? ""}\" \"{albedoOut ?? ""}\" {(keepMaterials ? "1" : "0")} \"{rotArg}\" {(convertRig ? "1" : "0")} \"{stateRoles ?? ""}\" {(autoGround ? "1" : "0")} \"{socketBones ?? ""}\" {(keepTranslations ? "1" : "0")} \"{staticParts ?? ""}\" {(localNodeAnim ? "1" : "0")}";   // argv[10]: auto-ground; argv[11]: donor sockets; argv[12]: keep translations; argv[13]: static (weightless) parts; argv[14]: local-delta node animation
         var psi = new System.Diagnostics.ProcessStartInfo(blender, args)
         { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         try
@@ -1212,7 +1212,9 @@ public static class UniversalBaker
                     LastRigAnimError = o?.Split('\n').LastOrDefault(l => l.Contains("RIGANIM ERROR"))?.Trim()
                                      ?? o?.Split('\n').LastOrDefault(l => l.TrimStart().StartsWith("Error:"))?.Trim()
                                      ?? "";
-                    Debug.LogError("[Factory] rig_anim produced no FBX (exit " + p.ExitCode + ")." +
+                    // The FBX may EXIST with a non-zero exit (BakerRules.BlenderScript): the primary is written first and the
+                    // role clips last, so a crash among the roles leaves the primary beside roles rig_anim cleared up front.
+                    Debug.LogError("[Factory] rig_anim " + (File.Exists(outFbx) ? "FAILED after writing the primary FBX" : "produced no FBX") + " (exit " + p.ExitCode + ")." +
                         (LastRigAnimError.Length > 0 ? "\nREASON: " + LastRigAnimError : " See the [rig_anim] log above for Blender's output."));
                     return false;
                 }
@@ -2609,7 +2611,7 @@ public static class UniversalBaker
         if (!File.Exists(script)) { Debug.LogError("[Factory] bundled prep_model.py missing: " + script); return false; }
         string blender = FindBlender();
         var psi = new System.Diagnostics.ProcessStartInfo(blender,
-            $"--background --python \"{script}\" -- \"{src}\" \"{outGlb}\" \"{substrings ?? ""}\" {Mathf.Max(0, targetTris)}")
+            $"{BakerRules.BlenderScript(script)} -- \"{src}\" \"{outGlb}\" \"{substrings ?? ""}\" {Mathf.Max(0, targetTris)}")
         { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         try
         {
@@ -2637,7 +2639,7 @@ public static class UniversalBaker
         string script = HafPackageContext.ToolPath("blend_export.py");
         if (!File.Exists(script)) { Debug.LogError("[Factory] bundled blend exporter missing: " + script); return false; }
         string blender = FindBlender();
-        var psi = new System.Diagnostics.ProcessStartInfo(blender, $"\"{blend}\" --background --python \"{script}\" -- \"{outGlb}\"")
+        var psi = new System.Diagnostics.ProcessStartInfo(blender, $"\"{blend}\" {BakerRules.BlenderScript(script)} -- \"{outGlb}\"")
         { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         try
         {
