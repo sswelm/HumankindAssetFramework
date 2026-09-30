@@ -37,7 +37,7 @@ if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/drill.exe" ]; then
   exit 1
 fi
 RESULT=$("$MONO" "$TMPD/drill.exe" 2>&1); rc=$?
-RESULT=$(printf '%s' "$RESULT" | sed 's/^\xEF\xBB\xBF//')   # Mono emits a UTF-8 BOM ahead of the first line under the push hook, which hid that line from the count
+RESULT=$(printf '%s' "$RESULT" | LC_ALL=C sed 's/\xEF\xBB\xBF//g')   # with no console attached (the push hook) Mono writes a UTF-8 BOM per Console stream ahead of the first line, which hid that line from the count
 echo "$RESULT" | grep -v "^PASS "
 n_pass=$(echo "$RESULT" | grep -c "^PASS ")
 if [ "$rc" -ne 0 ]; then echo "FAIL — backup dedup drill ($n_pass passed)"; exit 1; fi
