@@ -797,7 +797,8 @@ public abstract class ModelWorkshopWindow : EditorWindow
         DestroyPreview();
         try
         {
-            // MEMORY CEILING (2026-09-19, user: "1GB should be a good limit"): the preview holds the whole model as
+            // MEMORY CEILING (2026-09-19, user: "1GB should be a good limit"; raised to 2 GB 2026-09-30 when a split of the
+            // Salegs Revenge crossed it): the preview holds the whole model as
             // managed arrays AND as Unity meshes — positions, the Vector3 copy, recalculated normals and the index
             // arrays. Analyze has already counted this file's vertices and triangles, so the cost is known BEFORE a
             // byte is read; past the ceiling the window says so and keeps the list, which is what the Splitter and
@@ -852,7 +853,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // copy and the recalculated normals (3 x 12 bytes) with the same again for Unity's own copy of the mesh, and per
     // index the managed array plus Unity's (2 x 4 bytes). Deliberately an over-estimate — the ceiling is a guard, and
     // refusing a preview costs the user a picture, while running out of memory costs the editor.
-    const long PreviewByteCeiling = 1L << 30;   // 1 GB
+    const long PreviewByteCeiling = 2L << 30;   // 2 GB
     long PreviewBytes()
     {
         long verts = 0, idx = 0;
