@@ -251,6 +251,32 @@ static class Drill
         var corrupts = Beside(src, ".corrupt-*.json");
         Check(msg.StartsWith("Recovered") && corrupts.Length == 1 && File.ReadAllText(corrupts[0]).Contains("half-typed"), "R5 recovery over a broken source no Load saw keeps a copy of it, as the message promises");
 
+        // ---- round 4: a failed preservation must not leak into the (unpreserving) pending-deploy retry; the deploy replace is checked
+        var realCopy4 = SingleSourceRegistry<DrillFile>.WriteCopyImpl;
+        try
+        {
+            reg = Fresh(); File.WriteAllText(src, Reg("committed")); Git("init -q"); Commit("c");
+            File.WriteAllText(art, Reg("committed", "baked-since-commit")); File.WriteAllText(src, "{}"); reg.Load();
+            string cfgDir = Path.GetDirectoryName(art);
+            SingleSourceRegistry<DrillFile>.WriteCopyImpl = (path, text) => { if (Path.GetDirectoryName(path) == cfgDir) throw new IOException("disk full"); File.WriteAllText(path, text); };   // only the DEPLOY's copy fails
+            msg = reg.RecoverFromGit();
+            Check(msg.StartsWith("Recovered") && msg.Contains("NOT refreshed") && Keys(art).SequenceEqual(new[] { "baked-since-commit", "committed" }) && !reg.DeployPending, "R6 recovery whose preservation fails: source recovered, deploy left as is, NOT marked pending");
+            SingleSourceRegistry<DrillFile>.WriteCopyImpl = realCopy4;
+            EditorApplication.timeSinceStartup += 5; reg.Load();
+            Check(Keys(art).SequenceEqual(new[] { "baked-since-commit", "committed" }) && reg.Snapshot().Stale, "R6 ...the next Load does NOT deploy it unpreserved (no retry bypass); it says the game reads an older copy");
+            msg = reg.AcceptSource(reg.LoadedVersion);
+            replaced = Beside(art, ".replaced-*.json");
+            Check(msg.StartsWith("Deployed") && Keys(art).SequenceEqual(new[] { "committed" }) && replaced.Length == 1 && File.ReadAllText(replaced[0]).Contains("baked-since-commit"), "R6 ...'Deploy the source' then deploys it, preserving the bakes");
+
+            reg = Fresh(); File.WriteAllText(src, Reg("a", "pulled")); File.WriteAllText(art, Reg("a")); reg.Load();
+            string other = Reg("a", "theirs-newer");
+            SingleSourceRegistry<DrillFile>.WriteCopyImpl = (path, text) => { File.WriteAllText(path, text); File.WriteAllText(art, other); };   // another editor deploys BETWEEN the read and the replace
+            msg = reg.AcceptSource(reg.LoadedVersion);
+            SingleSourceRegistry<DrillFile>.WriteCopyImpl = realCopy4;
+            Check(msg.Contains("NOT deployed") && Keys(art).SequenceEqual(new[] { "a", "theirs-newer" }) && Beside(art, ".replaced-*.json").Length == 0, "R7 a deploy written by another editor between the read and the replace is NOT overwritten (checked replace); nothing of ours deployed");
+        }
+        finally { SingleSourceRegistry<DrillFile>.WriteCopyImpl = realCopy4; }
+
         // ---- MIGRATION (off in every scenario above; on here)
         reg = Fresh(migrated: false); File.WriteAllText(src, Reg("valid-source")); File.WriteAllText(art, "{}");
         File.SetLastWriteTimeUtc(src, DateTime.UtcNow.AddHours(-2));   // the source is OLDER - the shape rule must still win

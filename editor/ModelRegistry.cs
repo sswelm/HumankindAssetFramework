@@ -719,27 +719,40 @@ public static class ModelRegistry
             if (note != null) Debug.LogWarning($"[Factory] registry source: {note}.");
             if (outcome == CheckedReplace.Outcome.Conflict) return $"⚠ recovery from {label} REFUSED: the source changed while it was being restored — that version is in place; look at it first, then retry.";
             if (outcome == CheckedReplace.Outcome.Unresolved) return $"⚠ recovery from {label} could not be settled — inspect the source and the copies named in the Console.";
-            EditorPrefs.SetString(PrefLastWrite, Fingerprint(candidateJson));
             lastLoadCorrupt = false; LastCorruptDetail = ""; corruptLogged = false;
-            // the deployed copy follows the recovered source (else the next load calls the difference a hand-edit) - PRESERVED
-            // first (review of PR #103, round 3): it may hold every bake since the commit, and a copy must survive
+            // The deployed copy follows the recovered source - PRESERVED first (it may hold every bake since the commit),
+            // and replaced through a CHECKED write against the text preserved (review of PR #103, rounds 3-4). Never handed
+            // to the pending-deploy retry: that retry deploys the editor's own saves without preserving. If it can't be
+            // deployed now, the deploy stays as it is and the next save refreshes it; PrefLastWrite is set only when it
+            // went through, so the difference is not read as the editor's own.
+            string deployNote = "";
             try
             {
-                if (File.Exists(RegistryPath))
+                string dep = File.Exists(RegistryPath) ? File.ReadAllText(RegistryPath) : null;
+                string keep = null;
+                if (dep != null && RegistryRules.FingerprintText(dep) != RegistryRules.FingerprintText(candidateJson))
                 {
-                    string dep = File.ReadAllText(RegistryPath);
-                    if (RegistryRules.FingerprintText(dep) != RegistryRules.FingerprintText(candidateJson))
-                    {
-                        string keep = RegistryPath + ".replaced-" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + "-" + Guid.NewGuid().ToString("N").Substring(0, 8) + ".json";
-                        File.WriteAllText(keep, dep);   // throws: nothing is deployed over an unpreserved copy
-                        Debug.Log($"[Factory] the replaced deployed copy is kept as '{Path.GetFileName(keep)}'.");
-                    }
+                    keep = RegistryPath + ".replaced-" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + "-" + Guid.NewGuid().ToString("N").Substring(0, 8) + ".json";
+                    File.WriteAllText(keep, dep);   // throws: nothing is deployed over an unpreserved copy
                 }
-                WriteArtifact(candidateJson); EditorPrefs.DeleteKey(PrefPendingDeploy);
+                var dOutcome = CheckedReplace.Write(RegistryPath, dep, candidateJson, out string dNote);
+                if (dNote != null) Debug.LogWarning($"[Factory] deployed copy: {dNote}.");
+                if (dOutcome == CheckedReplace.Outcome.Written)
+                {
+                    EditorPrefs.DeleteKey(PrefPendingDeploy); EditorPrefs.SetString(PrefLastWrite, Fingerprint(candidateJson));
+                    if (keep != null) deployNote = $" The replaced deployed copy is kept as '{Path.GetFileName(keep)}'.";
+                }
+                else
+                {
+                    if (keep != null) { try { File.Delete(keep); } catch { } }   // nothing was replaced
+                    deployNote = dOutcome == CheckedReplace.Outcome.Conflict
+                        ? " ⚠ The game's copy changed while it was being replaced (another editor) and was NOT refreshed; look at it, then save or recover again."
+                        : " ⚠ The replace of the game's copy could not be settled (see the Console).";
+                }
             }
-            catch (Exception de) { EditorPrefs.SetString(PrefPendingDeploy, Fingerprint(candidateJson)); lastPendingAttempt = -1; pendingFailures = 0; Debug.LogWarning($"[Factory] recovered the source, but the deployed copy couldn't be refreshed yet ({de.Message}); the next load retries it."); }
+            catch (Exception de) { deployNote = $" ⚠ The game's copy was NOT refreshed ({de.Message}); the next save refreshes it."; }
             AssetDatabase.Refresh();
-            return $"Recovered {r.models.Count} model(s) from {label}. The corrupt copy is preserved beside the source for hand-merging.";
+            return $"Recovered {r.models.Count} model(s) from {label}. The corrupt copy is preserved beside the source for hand-merging." + deployNote;
         }
         catch (Exception e) { return $"⚠ recovery from {label} FAILED: {e.Message} (source untouched)."; }
     }
