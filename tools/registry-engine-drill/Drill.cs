@@ -1,4 +1,5 @@
-// Drill of the REAL SingleSourceRegistry engine: one scenario per row of the exit table.
+// Drill of the REAL SingleSourceRegistry engine: one scenario per row of its exit table (see the PR #103 description),
+// each written to FAIL without the rule it names. Run by tools/registry_engine_drill.sh (a gate step).
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -13,23 +14,38 @@ static class Drill
 {
     static int fails;
     static string root, src, art;
-    static void Check(bool ok, string what) { Console.WriteLine((ok ? "PASS " : "FAIL ") + what); if (!ok) { fails++; foreach (var l in UnityEngine.Debug.Lines.Skip(Math.Max(0, UnityEngine.Debug.Lines.Count - 4))) Console.WriteLine("       log: " + (l.Length > 180 ? l.Substring(0, 180) : l)); } }
+    static readonly List<string> roots = new List<string>();   // every scenario's folder, all removed at the end
+    const string LegacyMarker = "drill.migrated";
 
-    static SingleSourceRegistry<DrillFile> Fresh()
+    static void Check(bool ok, string what)
+    {
+        Console.WriteLine((ok ? "PASS " : "FAIL ") + what);
+        if (ok) return;
+        fails++;
+        foreach (var l in UnityEngine.Debug.Lines.Skip(Math.Max(0, UnityEngine.Debug.Lines.Count - 4)))
+            Console.WriteLine("       log: " + (l.Length > 200 ? l.Substring(0, 200) : l));
+    }
+
+    // A fresh project + game config. migrated = the one-time migration counts as done (the legacy machine-wide marker).
+    static SingleSourceRegistry<DrillFile> Fresh(bool migrated = true, bool clearPrefs = true)
     {
         root = Path.Combine(Path.GetTempPath(), "haf_ssrdrill_" + Guid.NewGuid().ToString("N"));
+        roots.Add(root);
         src = Path.Combine(root, "Assets", "Databases", "reg.backup.json");
         art = Path.Combine(root, "config", "reg.json");
         Directory.CreateDirectory(Path.GetDirectoryName(src)); Directory.CreateDirectory(Path.GetDirectoryName(art));
-        EditorPrefs.P.Clear(); UnityEngine.Debug.Lines.Clear(); EditorApplication.timeSinceStartup = 1000;
-        EditorPrefs.SetBool("drill.migrated", true);   // the one-time migration is its own concern
-        return new SingleSourceRegistry<DrillFile>("[Drill]", () => src, () => art, f => f?.items?.Count ?? 0,
-                                                   "drill.migrated", "Assets/Databases/reg.backup.json", "entries", "items");
+        if (clearPrefs) EditorPrefs.P.Clear();
+        UnityEngine.Debug.Lines.Clear(); EditorApplication.timeSinceStartup = 1000;
+        if (migrated) EditorPrefs.SetBool(LegacyMarker, true);
+        string s = src, a = art;   // this project's paths, fixed for this registry instance
+        return new SingleSourceRegistry<DrillFile>("[Drill]", () => s, () => a, f => f?.items?.Count ?? 0,
+                                                   LegacyMarker, "Assets/Databases/reg.backup.json", "entries", "items");
     }
 
     static string Reg(params string[] keys) => UnityEngine.JsonUtility.ToJson(new DrillFile { items = keys.Select(k => new DrillEntry { key = k }).ToList() }, true);
     static string[] Keys(string path) => UnityEngine.JsonUtility.FromJson<DrillFile>(File.ReadAllText(path)).items.Select(e => e.key).OrderBy(k => k).ToArray();
     static Func<DrillFile, bool> Add(string k) => f => { f.items.Add(new DrillEntry { key = k }); return true; };
+    static bool Logged(string s) => UnityEngine.Debug.Lines.Any(l => l.Contains(s));
 
     static void Git(string args)
     {
@@ -37,42 +53,62 @@ static class Drill
         foreach (var v in new[] { "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE" }) psi.EnvironmentVariables.Remove(v);
         using (var p = Process.Start(psi)) { p.StandardOutput.ReadToEnd(); p.StandardError.ReadToEnd(); p.WaitForExit(); }
     }
+    static void Commit(string msg) { Git("add reg.backup.json"); Git("-c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q -m " + msg); }
+
+    // git writes its object files READ-ONLY, and Directory.Delete refuses those on Windows: clear the flag first.
+    static void RemoveTree(string dir)
+    {
+        try
+        {
+            if (!Directory.Exists(dir)) return;
+            foreach (var f in Directory.GetFiles(dir, "*", SearchOption.AllDirectories)) File.SetAttributes(f, FileAttributes.Normal);
+            Directory.Delete(dir, true);
+        }
+        catch { }
+    }
 
     static int Main()
     {
-        bool changed;
-        var S = RegistryRules.SaveOutcome.Saved; var R = RegistryRules.SaveOutcome.Refused;
+        try { Run(); }
+        catch (Exception e) { Console.WriteLine("FAIL the drill itself threw: " + e); fails++; }
+        foreach (var r in roots) RemoveTree(r);
+        bool leftovers = roots.Any(Directory.Exists);
+        if (leftovers) { Console.WriteLine("FAIL the drill could not remove its temp folders"); fails++; }
+        Console.WriteLine(fails == 0 ? "ALL PASS" : fails + " FAILED");
+        return fails;
+    }
 
-        // D1 `{}` source, deploy holds 3: Load is a FAILURE (corrupt), a change refuses, both copies untouched
+    static void Run()
+    {
+        bool changed;
+        var S = RegistryRules.SaveOutcome.Saved; var R = RegistryRules.SaveOutcome.Refused; var U = RegistryRules.SaveOutcome.Unknown;
+        RegistryRules.SaveOutcome o;
+
+        // ---- LOAD: broken shapes are failures, never "zero entries"
         var reg = Fresh(); File.WriteAllText(src, "{}"); File.WriteAllText(art, Reg("a", "b", "c"));
         var loaded = reg.Load();
         Check(loaded.items.Count == 0 && reg.LastLoadCorrupt && reg.LastLoadFailed, "D1 `{}` loads as CORRUPT, not as an empty registry");
         Check(Directory.GetFiles(Path.GetDirectoryName(src), "*.corrupt-*.json").Length == 1, "D1 the broken source is preserved");
         Check(reg.Change(Add("x"), "drill", out changed) == R && File.ReadAllText(src) == "{}" && Keys(art).Length == 3, "D1 a change refuses; source and deploy untouched");
-
-        // D2 0-byte and garbage sources are broken too
         reg = Fresh(); File.WriteAllText(src, ""); reg.Load();
         Check(reg.LastLoadCorrupt, "D2 a 0-byte source is corrupt, not empty");
         reg = Fresh(); File.WriteAllText(src, "{ \"wrong\": [] }"); reg.Load();
         Check(reg.LastLoadCorrupt, "D2 a source with the wrong key is corrupt, not empty");
+        reg = Fresh(); File.WriteAllText(src, "{ \"Items\": [ { \"key\": \"a\" } ] }"); reg.Load();
+        Check(reg.LastLoadCorrupt, "D2 keys are CASE-SENSITIVE like Unity's JsonUtility: \"Items\" is not \"items\"");
 
-        // D3 a change reaching a `{}` source WITHOUT a prior Load: judged by its own read
+        // ---- CHANGE: judged by its own read
         reg = Fresh(); File.WriteAllText(src, "{}"); File.WriteAllText(art, Reg("a"));
         Check(reg.Change(Add("x"), "drill", out changed) == R && File.ReadAllText(src) == "{}" && reg.LastLoadCorrupt, "D3 a change's own read refuses `{}` and raises the recovery banner");
-
-        // D4 hand-emptied source (valid, empty), deploy holds 3: refused
         reg = Fresh(); File.WriteAllText(src, Reg()); File.WriteAllText(art, Reg("a", "b", "c"));
         Check(reg.Change(Add("x"), "drill", out changed) == R && Keys(src).Length == 0 && Keys(art).Length == 3, "D4 an empty source beside a deploy with entries refuses (no wipe made permanent)");
-
-        // D5 the editor emptied it itself, and that deploy FAILED (deploy still has the entry): the next change is allowed
         reg = Fresh(); File.WriteAllText(src, Reg("a")); File.WriteAllText(art, Reg("a"));
-        RegistryRules.SaveOutcome o;
         using (new FileStream(art, FileMode.Open, FileAccess.Read, FileShare.Read))   // blocks the deploy's replace
             o = reg.Change(f => f.items.RemoveAll(e => e.key == "a") > 0, "drill", out changed);
-        Check(o == S && changed && Keys(src).Length == 0 && Keys(art).Length == 1, "D5 removing the last entry is saved; its deploy failed (deploy still holds 1)");
+        Check(o == S && changed && Keys(src).Length == 0 && Keys(art).Length == 1 && reg.DeployPending, "D5 removing the last entry is saved; its deploy failed and is marked pending");
         Check(reg.Change(Add("b"), "drill", out changed) == S && Keys(src).SequenceEqual(new[] { "b" }), "D5 the editor's OWN empty source passes the guard by its fingerprint");
 
-        // D6 a locked source: a LOCK, not corruption; a change refuses and writes nothing
+        // ---- LOCK vs CORRUPT
         reg = Fresh(); File.WriteAllText(src, Reg("a")); File.WriteAllText(art, Reg("a"));
         using (new FileStream(src, FileMode.Open, FileAccess.Read, FileShare.None))
         {
@@ -81,31 +117,43 @@ static class Drill
             Check(reg.Change(Add("x"), "drill", out changed) == R, "D6 a change refuses while it can't be read");
         }
         Check(Keys(src).SequenceEqual(new[] { "a" }), "D6 the source is untouched");
-
-        // D7 a lock supersedes an earlier corrupt verdict
         reg = Fresh(); File.WriteAllText(src, "{}"); reg.Load();
         File.WriteAllText(src, Reg("fixed"));
         using (new FileStream(src, FileMode.Open, FileAccess.Read, FileShare.None)) reg.Load();
         Check(reg.LastLoadLocked && !reg.LastLoadCorrupt, "D7 a lock clears the earlier corrupt verdict (the file may be repaired)");
 
-        // D8 source missing, deploy unreadable: FAILED (no copy), a change refuses
+        // ---- MISSING SOURCE
         reg = Fresh(); File.WriteAllText(art, "<<<<<<< broken");
         var l8 = reg.Load();
         Check(l8.items.Count == 0 && reg.LastLoadNoCopy && reg.LastLoadFailed && !File.Exists(src), "D8 missing source + unreadable deploy = failed, not empty");
         Check(reg.Change(Add("x"), "drill", out changed) == R && !File.Exists(src), "D8 a change refuses; no one-entry source is created");
-
-        // D9 source missing, deploy with entries: adopted
-        reg = Fresh(); File.WriteAllText(art, Reg("a", "b"));
+        reg = Fresh(); string dep9 = Reg("a", "b"); File.WriteAllText(art, dep9);
         var l9 = reg.Load();
-        Check(l9.items.Count == 2 && File.Exists(src) && reg.LoadedVersion != null && !reg.LastLoadFailed, "D9 a missing source adopts the deploy");
+        Check(l9.items.Count == 2 && File.Exists(src) && reg.LoadedVersion == SingleSourceRegistry<DrillFile>.VersionOf(dep9) && !reg.LastLoadFailed, "D9 a missing source adopts the deploy, and LoadedVersion is the adopted text's");
+        reg = Fresh(); File.WriteAllText(src + ".meta", "guid: x"); File.WriteAllText(art, Reg("old"));
+        var k1 = reg.Load();
+        Check(k1.items.Count == 0 && reg.LastLoadNoCopy && reg.LastLoadProblem.Contains(".meta") && !File.Exists(src), "K1 missing source Unity still knows (.meta): NOT adopted from the deploy, reported");
+        Check(reg.Change(Add("x"), "drill", out changed) == R && !File.Exists(src), "K1 ...and a change neither builds on the deploy nor creates it");
+        reg = Fresh(); File.WriteAllText(src + ".displaced-20260930_120000-deadbeef.json", Reg("newest")); File.WriteAllText(art, Reg("old"));
+        reg.Load();
+        Check(reg.LastLoadNoCopy && reg.LastLoadProblem.Contains("displaced") && !File.Exists(src), "K2 missing source beside an unsettled write's copy: NOT adopted, the copy is named");
+        Check(reg.Change(Add("x"), "drill", out changed) == R && !File.Exists(src), "K2 ...and a change refuses");
+        reg = Fresh();
+        Check(reg.Change(Add("first"), "drill", out changed) == S && Keys(src).SequenceEqual(new[] { "first" }) && Keys(art).SequenceEqual(new[] { "first" }), "D13 a first-ever change creates source and deploy");
+        reg = Fresh(); File.WriteAllText(src + ".meta", "guid: x");
+        Check(reg.Change(Add("x"), "drill", out changed) == R && !File.Exists(src), "D14 a missing source Unity still knows is not recreated (no deploy either)");
 
-        // D10 another writer adds an entry between the change's read and its write: kept, and the change still lands
+        // ---- CONCURRENT WRITERS
         reg = Fresh(); File.WriteAllText(src, Reg("a")); File.WriteAllText(art, Reg("a"));
         int calls = 0;
         o = reg.Change(f => { if (calls++ == 0) { File.WriteAllText(src + ".o", Reg("a", "other")); File.Replace(src + ".o", src, null); } f.items.Add(new DrillEntry { key = "mine" }); return true; }, "drill", out changed);
         Check(o == S && Keys(src).SequenceEqual(new[] { "a", "mine", "other" }) && Keys(art).SequenceEqual(new[] { "a", "mine", "other" }), "D10 a concurrent entry is kept; the change is re-applied to it; the deploy follows");
+        reg = Fresh(); File.WriteAllText(src, Reg("a")); File.WriteAllText(art, Reg("a"));
+        int n = 0;
+        o = reg.Change(f => { n++; File.WriteAllText(src + ".o", Reg("a", "other" + n)); File.Replace(src + ".o", src, null); f.items.Add(new DrillEntry { key = "mine" }); return true; }, "drill", out changed);
+        Check(o == R && n == 3 && Keys(src).SequenceEqual(new[] { "a", "other3" }) && Keys(art).SequenceEqual(new[] { "a" }), "C1 a file that keeps changing: refused after 3 attempts, the other writer's version stays, nothing deployed");
 
-        // D11 ReplaceAll only over the version the window loaded
+        // ---- WHOLE-LIST SAVES
         reg = Fresh(); File.WriteAllText(src, Reg("a")); File.WriteAllText(art, Reg("a"));
         reg.Load(); string v = reg.LoadedVersion;
         File.WriteAllText(src, Reg("a", "pulled"));   // git pull while the window is open
@@ -118,46 +166,86 @@ static class Drill
         File.WriteAllText(src, lf);   // git rewrote the line endings only
         Check(reg.ReplaceAll(new DrillFile { items = { new DrillEntry { key = "z" } } }, v, "drill") == S, "D11 a line-ending rewrite is not a change (CRLF-blind version)");
 
-        // D12 a failed deploy is FINISHED by a later Load, on the backoff, and is not called a hand-edit
+        // ---- DEPLOY OWED: finished later, never a "hand-edit"
         reg = Fresh(); File.WriteAllText(src, Reg("a")); File.WriteAllText(art, Reg("a"));
         using (new FileStream(art, FileMode.Open, FileAccess.Read, FileShare.Read))
             o = reg.Change(Add("b"), "drill", out changed);
-        Check(o == S && Keys(art).Length == 1, "D12 the change is saved; its deploy failed");
+        Check(o == S && Keys(art).Length == 1 && reg.DeployPending, "D12 the change is saved; its deploy failed and is pending");
         EditorApplication.timeSinceStartup += 0.5; reg.Load();
         Check(Keys(art).Length == 1, "D12 not retried before the backoff is due");
         EditorApplication.timeSinceStartup += 3; reg.Load();
-        Check(Keys(art).SequenceEqual(new[] { "a", "b" }) && reg.TakeNotice().Contains("Finished a deploy") && !UnityEngine.Debug.Lines.Any(l => l.Contains("hand-edit")), "D12 a later Load finishes the deploy; no hand-edit warning");
+        Check(Keys(art).SequenceEqual(new[] { "a", "b" }) && !reg.DeployPending && reg.TakeNotice().Contains("Finished a deploy") && !Logged("hand-edit"), "D12 a later Load finishes the deploy; no hand-edit warning");
 
-        // D13 first-ever registry: no source, no deploy, no evidence it existed -> created
-        reg = Fresh();
-        Check(reg.Change(Add("first"), "drill", out changed) == S && Keys(src).SequenceEqual(new[] { "first" }) && Keys(art).SequenceEqual(new[] { "first" }), "D13 a first-ever change creates source and deploy");
+        // ---- UNSETTLED WRITES (the checked replace can't settle; forced through the engine's own seam)
+        var real = SingleSourceRegistry<DrillFile>.ApplyImpl;
+        try
+        {
+            reg = Fresh(); File.WriteAllText(src, Reg("a")); File.WriteAllText(art, Reg("a"));
+            SingleSourceRegistry<DrillFile>.ApplyImpl = (string p, Func<string, string> c, int a, out string note) =>
+            { note = null; var next = c(File.ReadAllText(p)); File.WriteAllText(p, next); return CheckedReplace.Outcome.Unresolved; };   // OUR write landed
+            o = reg.Change(Add("landed"), "drill", out changed);
+            SingleSourceRegistry<DrillFile>.ApplyImpl = real;
+            Check(o == U && reg.DeployPending && Keys(art).Length == 1, "U1 an unsettled write is UNKNOWN (not Saved), its deploy owed");
+            reg.Load();   // due at once: the read-back a caller does next
+            Check(Keys(art).SequenceEqual(new[] { "a", "landed" }) && !reg.DeployPending && !Logged("hand-edit"), "U1 it landed: the next Load deploys it (the game gets it, no hand-edit warning)");
 
-        // D14 source missing but its .meta says it existed, no deploy: refused (another program may be saving it)
-        reg = Fresh(); File.WriteAllText(src + ".meta", "guid: x");
-        Check(reg.Change(Add("x"), "drill", out changed) == R && !File.Exists(src), "D14 a missing source Unity still knows is not recreated");
+            reg = Fresh(); File.WriteAllText(src, Reg("a")); File.WriteAllText(art, Reg("a"));
+            SingleSourceRegistry<DrillFile>.ApplyImpl = (string p, Func<string, string> c, int a, out string note) =>
+            { note = null; c(File.ReadAllText(p)); File.WriteAllText(p, Reg("a", "theirs")); return CheckedReplace.Outcome.Unresolved; };   // THEIRS stayed
+            o = reg.Change(Add("lost"), "drill", out changed);
+            SingleSourceRegistry<DrillFile>.ApplyImpl = real;
+            reg.Load();
+            Check(o == U && !reg.DeployPending && !Keys(art).Contains("lost"), "U2 it did not land: the owed deploy is dropped as moot, our change never deployed");
+        }
+        finally { SingleSourceRegistry<DrillFile>.ApplyImpl = real; }
 
-        // D15 recovery from git reads the COMMITTED text; a refused candidate leaves the working copy alone
-        reg = Fresh(); File.WriteAllText(src, Reg("committed")); Git("init -q"); Git("add reg.backup.json"); Git("-c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q -m c");
-        File.WriteAllText(src, "{}"); reg.Load();
-        string msg = reg.RecoverFromGit();
-        Check(msg.StartsWith("Recovered") && Keys(src).SequenceEqual(new[] { "committed" }) && !reg.LastLoadCorrupt, "D15 git recovery restores the committed version");
-        File.WriteAllText(src, Reg()); Git("add reg.backup.json"); Git("-c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q -m empty");
+        // ---- RECOVERY
+        reg = Fresh(); File.WriteAllText(src, "{}"); File.WriteAllText(art, Reg("a")); reg.Load();
+        File.WriteAllText(src, Reg("a", "b", "handfix"));   // fixed by hand; the window didn't reload, the banner is still up
+        string msg = reg.RecoverFromArtifact();
+        Check(msg.Contains("REFUSED") && msg.Contains("readable now") && Keys(src).SequenceEqual(new[] { "a", "b", "handfix" }) && !reg.LastLoadCorrupt, "R1 recovery over a source fixed by hand since the banner: REFUSED, the fix stays");
+        reg = Fresh(); File.WriteAllText(src, Reg("committed")); Git("init -q"); Commit("c");
+        File.WriteAllText(art, Reg("deployed-older")); File.WriteAllText(src, "{}"); reg.Load();
+        msg = reg.RecoverFromGit();
+        Check(msg.StartsWith("Recovered") && Keys(src).SequenceEqual(new[] { "committed" }) && !reg.LastLoadCorrupt, "R2 git recovery restores the committed version");
+        Check(Keys(art).SequenceEqual(new[] { "committed" }), "R2 ...and the deploy follows it");
+        UnityEngine.Debug.Lines.Clear(); reg.Load();
+        Check(!Logged("differs"), "R2 ...so the next Load sees no 'hand-edit' drift");
+        File.WriteAllText(src, Reg()); Commit("empty");
         File.WriteAllText(src, "<<<<<<< my uncommitted, broken but precious edit"); reg.Load();
         msg = reg.RecoverFromGit();
-        Check(msg.Contains("REFUSED") && File.ReadAllText(src) == "<<<<<<< my uncommitted, broken but precious edit", "D15 a refused git candidate leaves the working copy untouched (" + msg.Substring(0, Math.Min(60, msg.Length)) + ")");
-
-        // D16 recovery from an unreadable deploy refuses and leaves the source
+        Check(msg.Contains("REFUSED") && File.ReadAllText(src) == "<<<<<<< my uncommitted, broken but precious edit", "R3 a refused git candidate leaves the working copy untouched");
         reg = Fresh(); File.WriteAllText(src, "{}"); File.WriteAllText(art, "{}"); reg.Load();
         msg = reg.RecoverFromArtifact();
-        Check(msg.Contains("REFUSED") && File.ReadAllText(src) == "{}", "D16 an unreadable deploy is not recovered from");
+        Check(msg.Contains("REFUSED") && File.ReadAllText(src) == "{}", "R4 an unreadable deploy is not recovered from");
 
-        // D17 nothing is left beside the files by any scenario's writes (temp names)
+        // ---- MIGRATION (off in every scenario above; on here)
+        reg = Fresh(migrated: false); File.WriteAllText(src, Reg("valid-source")); File.WriteAllText(art, "{}");
+        File.SetLastWriteTimeUtc(src, DateTime.UtcNow.AddHours(-2));   // the source is OLDER - the shape rule must still win
+        reg.Load();
+        Check(Keys(src).SequenceEqual(new[] { "valid-source" }) && File.Exists(art + ".pre-collapse.json"), "M1 a deployed `{}` never wins the migration, even when newer; it is preserved beside the deploy");
+        reg = Fresh(migrated: false); File.WriteAllText(src, Reg("older")); File.WriteAllText(art, Reg("newer"));
+        File.SetLastWriteTimeUtc(src, DateTime.UtcNow.AddHours(-2));
+        reg.Load();
+        Check(Keys(src).SequenceEqual(new[] { "newer" }) && File.ReadAllText(art + ".pre-collapse.json").Contains("older"), "M2 a newer readable deploy is adopted; the older source is preserved");
+        reg = Fresh(migrated: false); File.WriteAllText(src, Reg("newer")); File.WriteAllText(art, Reg("older"));
+        File.SetLastWriteTimeUtc(art, DateTime.UtcNow.AddHours(-2));
+        reg.Load();
+        Check(Keys(src).SequenceEqual(new[] { "newer" }), "M3 a newer source is kept");
+        reg = Fresh(migrated: false); File.WriteAllText(art, Reg("project-A")); reg.Load();   // project A migrates
+        Check(Keys(src).SequenceEqual(new[] { "project-A" }), "M4 project A migrates");
+        // same machine, same prefs, another project - whose migration MATTERS: an older source beside a newer deploy
+        // (without a source, Load would adopt the deploy anyway and the test couldn't tell a migration happened)
+        reg = Fresh(migrated: false, clearPrefs: false); File.WriteAllText(src, Reg("B-older")); File.WriteAllText(art, Reg("B-newer"));
+        File.SetLastWriteTimeUtc(src, DateTime.UtcNow.AddHours(-2)); reg.Load();
+        Check(Keys(src).SequenceEqual(new[] { "B-newer" }), "M4 the marker is per PROJECT: project B on the same machine still migrates");
+        reg = Fresh(migrated: true); File.WriteAllText(src, Reg("mine")); File.WriteAllText(art, Reg("deployed"));
+        File.SetLastWriteTimeUtc(src, DateTime.UtcNow.AddHours(-2)); reg.Load();
+        Check(Keys(src).SequenceEqual(new[] { "mine" }), "M5 the old machine-wide marker still counts: nothing migrates twice");
+
+        // ---- HYGIENE
         reg = Fresh(); File.WriteAllText(src, Reg("a")); File.WriteAllText(art, Reg("a"));
         reg.Change(Add("b"), "drill", out changed);
         Check(!Directory.GetFiles(root, "*.tmp", SearchOption.AllDirectories).Any(), "D17 no temp files left");
-
-        try { Directory.Delete(root, true); } catch { }
-        Console.WriteLine(fails == 0 ? "ALL PASS" : fails + " FAILED");
-        return fails;
     }
 }

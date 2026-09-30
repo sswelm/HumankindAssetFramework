@@ -189,7 +189,7 @@ public class DistrictFactoryWindow : EditorWindow
             EditorGUILayout.HelpBox("The district registry source can't be read right now — " + DistrictRegistry.LastLockDetail + "\n" +
                 DistrictRegistry.LastLockAdvice + " Saves and bakes are refused until it can be read; nothing can be recovered from a file that can't be seen.", MessageType.Warning);
         else if (DistrictRegistry.LastLoadFailed && !DistrictRegistry.LastLoadCorrupt)
-            EditorGUILayout.HelpBox("The district registry " + DistrictRegistry.LastLoadProblem + ". The list is empty only because of that; changes are refused until one of them can be read.", MessageType.Warning);
+            EditorGUILayout.HelpBox("The district registry " + DistrictRegistry.LastLoadProblem + ". The list is empty only because of that; changes are refused until it is resolved (then Refresh).", MessageType.Warning);
         if (RegistryRules.ShowRecoveryControls(DistrictRegistry.LastLoadCorrupt, DistrictRegistry.LastLoadLocked))
         {
             EditorGUILayout.HelpBox("DISTRICT REGISTRY SOURCE IS CORRUPT — " + DistrictRegistry.LastCorruptDetail + "\n" +
@@ -475,9 +475,9 @@ public class DistrictFactoryWindow : EditorWindow
             if (!(char.IsLetterOrDigit(c) || c == '_' || c == '-')) { badChar = c; break; }
         bool nameValid = badChar == '\0';
         bool isNew = selected <= 0;
-        // The banner says bakes are locked while the source is corrupt - so they are (critical review 2026-09-30: the whole
-        // bake ran, was rolled back at the registry step, and the message blamed a lock).
-        bool canBake = !DistrictRegistry.LastLoadCorrupt
+        // The banners say bakes are refused while the registry can't be loaded - so they are (critical review 2026-09-30:
+        // the whole bake ran, was rolled back at the registry step, and the message blamed a lock).
+        bool canBake = !DistrictRegistry.LastLoadFailed
                     && !string.IsNullOrWhiteSpace(cur.district)
                     && !string.IsNullOrWhiteSpace(cur.resourceName)
                     && nameValid
@@ -496,7 +496,9 @@ public class DistrictFactoryWindow : EditorWindow
         }
         if (!canBake)
             EditorGUILayout.HelpBox(
-                !nameValid && !string.IsNullOrWhiteSpace(cur.resourceName)
+                DistrictRegistry.LastLoadFailed
+                    ? "The district registry " + DistrictRegistry.LastLoadProblem + " — bakes are refused until it can be read (see above), then Refresh."
+                : !nameValid && !string.IsNullOrWhiteSpace(cur.resourceName)
                     ? $"Resource name can't contain '{(badChar == ' ' ? "space" : badChar.ToString())}'. Use letters, digits, '_' or '-' only."
                 : isNew ? "New district model: set District, Resource name and a Model file to bake."
                         : "Set District and Resource name to bake.", MessageType.Warning);
@@ -563,8 +565,8 @@ public class DistrictFactoryWindow : EditorWindow
         if (saveOutcome == RegistryRules.SaveOutcome.Unknown)
         { status = $"Saving the settings for '{cur.district}' could NOT be confirmed — the registry may hold them or the previous ones (see the Console)."; return; }
         status = ok
-            ? $"Saved runtime settings for '{cur.district}' (no re-bake). Relaunch the game to apply."
-            : "Registry SAVE FAILED — see Console (is haf_districts.json locked / open elsewhere?).";
+            ? $"Saved runtime settings for '{cur.district}' (no re-bake). Relaunch the game to apply." + (DistrictRegistry.DeployPending ? " The game's copy of the registry is not refreshed yet (see the Console) — Refresh retries it." : "")
+            : "Registry save REFUSED — nothing was written (the Console says why).";
         if (!ok) Debug.LogError("[District] " + status);
         GUI.FocusControl(null);
     }
@@ -797,8 +799,8 @@ public class DistrictFactoryWindow : EditorWindow
             // The registry write is INSIDE the rollback (PR #77 review). The freshly baked assets carry new guids,
             // and the entry naming them is exactly what failed to save — so keeping them would leave the old entry
             // pointing at assets that no longer exist. Rolling back returns a district that still works.
-            status = $"'{cur.resourceName}': the REGISTRY SAVE FAILED (see Console), so the bake was rolled back and "
-                   + "the previous district is untouched. Close whatever's locking haf_districts.json and re-bake.";
+            status = $"'{cur.resourceName}': the REGISTRY SAVE was refused or didn't land (the Console says why), so the bake was rolled back and "
+                   + "the previous district is untouched. Fix what the Console names, then re-bake.";
             Debug.LogError("[District] " + status);
             return;
         }
@@ -807,7 +809,7 @@ public class DistrictFactoryWindow : EditorWindow
         status = $"Baked district model '{cur.resourceName}' -> '{cur.district}'\nFxMesh {guid}  (verts={mesh.vertexCount}, tris={TriCount(mesh)}{(cur.sourceTris > 0 ? $", source model {cur.sourceTris:N0} tris" : "")})\n" +
                  (composeReceipt != null ? composeReceipt + "\n" : "") +
                  (string.IsNullOrWhiteSpace(cur.selectorGuid) ? "scoped selector: NOT baked (legacy path) — see Console\n" : $"scoped selector {cur.selectorGuid} (scoped path)\n") +
-                 "Check the FxMesh Inspector preview for orientation, then rebuild the mod + relaunch.";
+                 "Check the FxMesh Inspector preview for orientation, then rebuild the mod + relaunch." + (DistrictRegistry.DeployPending ? " The game's copy of the registry is not refreshed yet (see the Console) — Refresh retries it." : "");
         Debug.Log("[District] " + status);
         RunHealthChecks();   // fresh bake: the stale-bundle warning should light up until the mod is rebuilt
         Selection.activeObject = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>("Assets/Resources/" + cur.resourceName + "_FxMesh.asset");

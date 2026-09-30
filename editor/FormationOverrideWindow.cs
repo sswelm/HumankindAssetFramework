@@ -100,7 +100,7 @@ public class FormationOverrideWindow : EditorWindow
             EditorGUILayout.HelpBox("The formation registry source can't be read right now — " + FormationRegistry.LastLockDetail + "\n" +
                 FormationRegistry.LastLockAdvice + " Saves are refused until it can be read; nothing can be recovered from a file that can't be seen.", MessageType.Warning);
         else if (FormationRegistry.LastLoadFailed && !FormationRegistry.LastLoadCorrupt)
-            EditorGUILayout.HelpBox("The formation registry " + FormationRegistry.LastLoadProblem + ". The list is empty only because of that; changes are refused until one of them can be read.", MessageType.Warning);
+            EditorGUILayout.HelpBox("The formation registry " + FormationRegistry.LastLoadProblem + ". The list is empty only because of that; changes are refused until it is resolved (then Refresh).", MessageType.Warning);
         if (RegistryRules.ShowRecoveryControls(FormationRegistry.LastLoadCorrupt, FormationRegistry.LastLoadLocked))
         {
             EditorGUILayout.HelpBox("FORMATION REGISTRY SOURCE IS CORRUPT — " + FormationRegistry.LastCorruptDetail + "\n" +
@@ -450,10 +450,10 @@ public class FormationOverrideWindow : EditorWindow
                         status = saved
                             ? (isMacro
                                 ? $"Saved MACRO replacement: '{cur.formation}' ⇒ {cur.dummies.Count} pawns for EVERY unit referencing it." + (staleWarn ?? "")
-                                : $"Saved: '{cur.unit}' → '{cur.formation}'" + (cur.dummies.Count > 0 ? $" ({cur.dummies.Count} pawns at full health)." : " (pure repoint).") + (staleWarn ?? ""))
+                                : $"Saved: '{cur.unit}' → '{cur.formation}'" + (cur.dummies.Count > 0 ? $" ({cur.dummies.Count} pawns at full health)." : " (pure repoint).") + (staleWarn ?? "")) + (FormationRegistry.DeployPending ? " The game's copy of the registry is not refreshed yet (see the Console) — Refresh retries it." : "")
                             : saveOutcome == RegistryRules.SaveOutcome.Unknown
                                 ? "Registry save could NOT be confirmed — it may hold this entry or the previous one (see Console)."
-                                : "REGISTRY SAVE FAILED — nothing was written (see Console).";
+                                : "Registry save REFUSED — nothing was written (the Console says why).";
                     }
                 }
             if (GUILayout.Button("Reset", GUILayout.Height(34), GUILayout.Width(72))) { cur = new FormationLink(); selected = 0; status = ""; GUI.FocusControl(null); }

@@ -1,25 +1,50 @@
 // Minimal stand-ins for the Unity APIs SingleSourceRegistry touches, so the REAL engine source runs against real
-// files outside Unity. JsonUtility's contract as the engine relies on it: FromJson of a non-object throws or returns
-// null, `{}` gives an object with its field initialisers, FromJsonOverwrite REPLACES lists.
+// files outside Unity. They must be no KINDER than Unity, or they hide bugs (review of PR #103):
+//   * JsonUtility matches keys CASE-SENSITIVELY and ignores unknown ones — Newtonsoft matches case-insensitively, so
+//     keys that aren't an exact field name are pruned before deserialising ("Items" is not "items");
+//   * FromJson of a non-object throws, of blank text returns null; `{}` gives an object with its field initialisers;
+//   * no FromJsonOverwrite: the engine doesn't use it, and a stand-in that did would be an unverified guess.
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace UnityEngine
 {
     public static class JsonUtility
     {
-        static readonly JsonSerializerSettings S = new JsonSerializerSettings { ObjectCreationHandling = ObjectCreationHandling.Replace };
         public static T FromJson<T>(string json)
         {
             if (string.IsNullOrWhiteSpace(json)) return default(T);
-            var t = json.TrimStart();
-            if (!t.StartsWith("{")) throw new ArgumentException("JSON parse error: not an object");
-            return JsonConvert.DeserializeObject<T>(json, S);
+            var tok = JToken.Parse(json);   // throws on garbage, like Unity's parse error
+            if (!(tok is JObject obj)) throw new ArgumentException("JSON must represent an object type.");
+            Prune(obj, typeof(T));
+            return obj.ToObject<T>();
         }
+
+        // Drop every key that is not EXACTLY a public instance field of the target type (Unity's rule), recursively.
+        static void Prune(JToken tok, Type t)
+        {
+            if (tok is JObject o)
+            {
+                foreach (var p in o.Properties().ToList())
+                {
+                    var f = t.GetField(p.Name, BindingFlags.Public | BindingFlags.Instance);   // case-sensitive
+                    if (f == null) { p.Remove(); continue; }
+                    Prune(p.Value, f.FieldType);
+                }
+            }
+            else if (tok is JArray a)
+            {
+                var et = t.IsArray ? t.GetElementType() : t.IsGenericType ? t.GetGenericArguments()[0] : typeof(object);
+                foreach (var e in a) Prune(e, et);
+            }
+        }
+
         public static string ToJson(object o) => JsonConvert.SerializeObject(o);
         public static string ToJson(object o, bool pretty) => JsonConvert.SerializeObject(o, pretty ? Formatting.Indented : Formatting.None);
-        public static void FromJsonOverwrite(string json, object o) => JsonConvert.PopulateObject(json, o, S);
     }
 
     public static class Debug
@@ -35,6 +60,8 @@ namespace UnityEngine
 
 namespace UnityEditor
 {
+    // Unity's EditorPrefs span every project on the machine; the drill's are cleared per scenario on purpose, and the
+    // per-project migration marker is tested explicitly (M4).
     public static class EditorPrefs
     {
         public static readonly Dictionary<string, object> P = new Dictionary<string, object>();

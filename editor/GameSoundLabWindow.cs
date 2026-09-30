@@ -70,8 +70,30 @@ public class GameSoundLabWindow : EditorWindow
             "Silence vanilla Wwise sounds by event-name SUBSTRING (case-insensitive). The plugin drops any sound whose " +
             "event name contains one of these, at the service sink every sound passes through — so keep substrings " +
             "SPECIFIC. Tip: trim a picked name (drop '_Start'/'_Stop') to catch a whole family of related events.\n\n" +
-            "Writes haf_sounds.json — relaunch the game to apply. 'Replace with' is reserved for a future substitute " +
-            "step (no effect yet).", MessageType.Info);
+            "Saves to the project's haf_sounds.backup.json (git-tracked) and deploys haf_sounds.json for the game — relaunch " +
+            "the game to apply. 'Replace with' is reserved for a future substitute step (no effect yet).", MessageType.Info);
+
+        // The same states as the District and Formation windows (critical review of PR #103): a lock is a plain warning
+        // without recovery; a broken source gets the one-click recovery the messages point at; a missing one says why.
+        if (SoundOverrideRegistry.LastLoadLocked)
+            EditorGUILayout.HelpBox("The sound-override registry can't be read right now — " + SoundOverrideRegistry.LastLockDetail + "\n" +
+                SoundOverrideRegistry.LastLockAdvice + " Saving is refused until it can be read; nothing can be recovered from a file that can't be seen.", MessageType.Warning);
+        else if (SoundOverrideRegistry.LastLoadFailed && !SoundOverrideRegistry.LastLoadCorrupt)
+            EditorGUILayout.HelpBox("The sound-override registry " + SoundOverrideRegistry.LastLoadProblem + ".", MessageType.Warning);
+        if (RegistryRules.ShowRecoveryControls(SoundOverrideRegistry.LastLoadCorrupt, SoundOverrideRegistry.LastLoadLocked))
+        {
+            EditorGUILayout.HelpBox("SOUND-OVERRIDE REGISTRY SOURCE IS CORRUPT — " + SoundOverrideRegistry.LastCorruptDetail + "\n" +
+                "The broken file is preserved beside the source; saving is locked so nothing can be wiped. Recover:", MessageType.Error);
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                if (GUILayout.Button(new GUIContent("Restore last deploy", "Copy the deployed haf_sounds.json back over the source. Validated before writing; refused if the source is readable again."), GUILayout.Width(140)))
+                { string r = SoundOverrideRegistry.RecoverFromArtifact(); Reload(); status = r; GUIUtility.ExitGUI(); }
+                if (GUILayout.Button(new GUIContent("Restore last commit", "The last committed version, read with git and validated before it is written; refused if the source is readable again."), GUILayout.Width(140)))
+                { string r = SoundOverrideRegistry.RecoverFromGit(); Reload(); status = r; GUIUtility.ExitGUI(); }
+                if (GUILayout.Button(new GUIContent("Open broken file", "Reveal the source in Explorer to fix the reported line by hand — then Reload."), GUILayout.Width(120)))
+                { EditorUtility.RevealInFinder(SoundOverrideRegistry.SourcePath); }
+            }
+        }
 
         // ---- override list ----
         EditorGUILayout.Space();
@@ -116,7 +138,9 @@ public class GameSoundLabWindow : EditorWindow
             if (outcome == RegistryRules.SaveOutcome.Saved)
             {
                 Reload();
-                status = $"Saved {n} override(s) -> haf_sounds.json. Relaunch the game to apply.";
+                status = SoundOverrideRegistry.DeployPending
+                    ? $"Saved {n} override(s) to the project, but the game's haf_sounds.json is not refreshed yet (see the Console) — Reload retries it."
+                    : $"Saved {n} override(s) -> haf_sounds.json. Relaunch the game to apply.";
             }
             else status = outcome == RegistryRules.SaveOutcome.Refused
                 ? "SAVE REFUSED — nothing was written; your edits are still here (see the Console for why — if the registry changed since you loaded it, note your edits, Reload, and redo them)."

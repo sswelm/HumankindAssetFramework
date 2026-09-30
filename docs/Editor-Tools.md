@@ -365,7 +365,10 @@ toggle. *Writes:* the unit's entry in `pack.json`; sound files under the pack's 
 ### Game Sound Lab — `Tools ▸ HAF ▸ Game Sound Lab`
 Author **global** audio overrides — silence any vanilla Wwise *event* by name-substring (units / ambient / music / UI).
 Distinct from Sound Studio (which is per-model). *Key controls:* override rows (silence substring), category tabs, a
-searchable catalog pick list. *Writes:* `haf_sounds.json` (via `SoundOverrideRegistry.Save`). **Deep dive:**
+searchable catalog pick list. *Writes:* the git-tracked `Assets/Databases/haf_sounds.backup.json` (the source) and
+deploys `haf_sounds.json` for the game — only over the version the Lab loaded (`SoundOverrideRegistry.Save`, on the
+shared `SingleSourceRegistry` engine). A broken source gets the same one-click recovery as the District and Formation
+windows. **Deep dive:**
 [Game-Sound-Lab.md](Game-Sound-Lab.md).
 
 ---

@@ -13,17 +13,23 @@
 //   * SHAPE: an empty parse is a registry only when the raw text carries its list as an array (RegistryRules.HasArray);
 //     `{}`, the wrong keys or a 0-byte file are a broken file, never "zero entries".
 //   * READ FAILURE IS NOT CORRUPTION: a source another program holds is LastLoadLocked (a plain warning, no recovery
-//     buttons - "Restore last commit" would discard uncommitted work in a file with nothing wrong in it), and it
-//     supersedes an earlier corrupt verdict (RegistryRules.ShowRecoveryControls).
-//   * NO COPY: a missing source whose deployed copy can't be read is LastLoadNoCopy - failed, not empty.
+//     buttons - "Restore last commit" would replace a file with nothing wrong in it), and it supersedes an earlier
+//     corrupt verdict (RegistryRules.ShowRecoveryControls).
+//   * A MISSING SOURCE IS ONLY REBUILT FROM THE DEPLOY WHEN NOTHING SAYS IT STILL EXISTS: not when Unity's .meta or git
+//     still knows it (another program may be saving it by rename), and not when an unsettled write left copies beside
+//     it (they may hold the truth). Otherwise the deploy is adopted, or, with none, a change starts a first registry.
 //   * EVERY CHANGE IS A CHECKED OPERATION on the file as it is at write time (CheckedReplace.Apply): it refuses an
 //     unreadable or broken source, refuses to write over a source that is empty while the deploy still holds entries
 //     (RegistryRules.JudgeEmptySource, with the editor's own last-write fingerprint), re-applies itself to another
 //     writer's version on a conflict, and says what happened (RegistryRules.SaveOutcome).
-//   * A FAILED DEPLOY IS FINISHED LATER (PENDING fingerprint + RegistryRules.PendingRetryDue), not called a hand-edit.
-//   * RECOVERY JUDGES BEFORE IT WRITES: the committed text is read with `git show`, never checked out over the file.
+//   * A DEPLOY THAT DIDN'T HAPPEN IS FINISHED LATER (PENDING fingerprint + RegistryRules.PendingRetryDue), never called
+//     a hand-edit - including after a write that couldn't be settled, when the source may hold this change.
+//   * RECOVERY JUDGES BEFORE IT WRITES: the committed text is read with `git show`, never checked out over the file;
+//     a source that is readable again (fixed by hand since the banner appeared) is never recovered over; the deploy
+//     follows a recovery.
 // Plus the engine's own rules from 2026-08-20: migration never overwrites a NEWER source with an older deployed copy
-// (the loser is preserved either way), and content comparisons are CRLF-normalized.
+// (the loser is preserved either way) - and never adopts a deploy that fails the shape rule - and content comparisons
+// are CRLF-normalized.
 using System;
 using System.IO;
 using UnityEditor;
@@ -34,7 +40,7 @@ public class SingleSourceRegistry<TFile> where TFile : class, new()
     readonly string tag, prefKey, gitRel, noun, arrayKey;
     readonly Func<string> sourcePath, artifactPath;
     readonly Func<TFile, int> count;          // entries in a parsed file — recovery/adoption candidates must hold >= 1
-    bool corruptLogged, driftWarned, pendingRetryWarned;   // once per corruption / domain load / failing deploy (windows poll Load())
+    bool corruptLogged, driftWarned, pendingRetryWarned;   // once per corruption / domain load / failing deploy
     double lastPendingAttempt = -1; int pendingFailures;   // RegistryRules.PendingRetryDue: 2, 4, 8, 16 s, then every 30 s
 
     public string SourcePath => sourcePath();
@@ -46,14 +52,18 @@ public class SingleSourceRegistry<TFile> where TFile : class, new()
     public bool LastLoadLocked { get; private set; }      // could not be READ at all: a plain warning, no recovery
     public string LastLockDetail { get; private set; } = "";
     public string LastLockAdvice { get; private set; } = "";
-    public bool LastLoadNoCopy { get; private set; }      // source missing, deployed copy unreadable: nothing loaded
+    public bool LastLoadNoCopy { get; private set; }      // source missing, and nothing trustworthy to load in its place
+    public string LastMissingDetail { get; private set; } = "";
     /// <summary>The last Load() returned an empty file for want of a read — its "no entries" proves nothing.</summary>
     public bool LastLoadFailed => LastLoadCorrupt || LastLoadLocked || LastLoadNoCopy;
     public string LastLoadProblem =>
         LastLoadCorrupt ? "is unreadable — " + LastCorruptDetail
       : LastLoadLocked ? "can't be read right now — " + LastLockDetail
-      : LastLoadNoCopy ? "is missing, and its deployed copy can't be read"
+      : LastLoadNoCopy ? "is missing — " + LastMissingDetail
       : "";
+
+    /// <summary>A save wrote the source, but the deployed copy the game reads is not refreshed yet (a later load/save finishes it).</summary>
+    public bool DeployPending => EditorPrefs.GetString(PrefPendingDeploy, "") != "";
 
     /// <summary>
     /// The VERSION of the source the last successful Load() returned (a CRLF-blind fingerprint, or NoFile when there
@@ -80,16 +90,21 @@ public class SingleSourceRegistry<TFile> where TFile : class, new()
         this.prefKey = prefKey; this.gitRel = gitRel; this.noun = noun; this.arrayKey = arrayKey;
     }
 
-    // What the editor itself last wrote to the source, and a deploy that failed (see ModelRegistry.PrefLastWrite).
+    // What the editor itself last wrote to the source, and a deploy that is still owed (see ModelRegistry.PrefLastWrite).
     string PrefLastWrite => "HAF.Registry.LastWrite|" + SourcePath;
     string PrefPendingDeploy => "HAF.Registry.PendingDeploy|" + SourcePath;
+
+    // The checked read-change-write, reachable by the drill (tools/registry-engine-drill), which has to make a write
+    // end UNSETTLED to test what follows - no real file system does that on demand.
+    internal delegate CheckedReplace.Outcome ApplyFn(string path, Func<string, string> change, int attempts, out string note);
+    internal static ApplyFn ApplyImpl = (string p, Func<string, string> c, int a, out string n) => CheckedReplace.Apply(p, c, a, out n);
 
     // ======================================================================================================== LOAD
 
     public TFile Load()
     {
-        LastLoadLocked = false; LastLoadNoCopy = false;   // every Load decides them afresh
-        LoadedVersion = null;                             // set below only where a read succeeded
+        LastLoadLocked = false; LastLoadNoCopy = false; LastMissingDetail = "";   // every Load decides them afresh
+        LoadedVersion = null;                                                      // set below only where a read succeeded
         try
         {
             MigrateOnce();
@@ -101,8 +116,12 @@ public class SingleSourceRegistry<TFile> where TFile : class, new()
                 if (!File.Exists(SourcePath))
                 {
                     LastLoadCorrupt = false; corruptLogged = false;
-                    // Source gone (fresh clone, hand-deletion) but a deployed artifact exists: ADOPT it — it is the
-                    // only surviving copy of the data.
+                    // Something says the source still exists (or an unsettled write left its copies): nothing is adopted
+                    // or presented as "no entries" - that is a failed load until it resolves.
+                    string block = MissingSourceBlock();
+                    if (block != null) { LastLoadNoCopy = true; LastMissingDetail = block; return new TFile(); }
+                    // Source gone (fresh clone, a deletion Unity has seen) but a deployed artifact exists: ADOPT it — it
+                    // is the only surviving copy of the data.
                     if (File.Exists(ArtifactPath))
                     {
                         try
@@ -111,7 +130,7 @@ public class SingleSourceRegistry<TFile> where TFile : class, new()
                             var d = Parse(dep, out string depWhy);
                             if (d == null)
                             {
-                                LastLoadNoCopy = true;   // the empty file returned below is for want of a copy, not an empty registry
+                                LastLoadNoCopy = true; LastMissingDetail = $"its deployed copy is unreadable too ({depWhy})";
                                 Debug.LogWarning($"{tag} the project registry source is missing and the deployed artifact '{ArtifactPath}' is unreadable ({depWhy}) — nothing to adopt; changes refuse until one of them is readable.");
                                 return new TFile();
                             }
@@ -127,7 +146,7 @@ public class SingleSourceRegistry<TFile> where TFile : class, new()
                         }
                         catch (Exception be)
                         {
-                            LastLoadNoCopy = true;
+                            LastLoadNoCopy = true; LastMissingDetail = $"its deployed copy could not be read or adopted ({be.Message})";
                             Debug.LogWarning($"{tag} the deployed artifact '{ArtifactPath}' could not be read or adopted ({be.Message}) — nothing loaded.");
                             return new TFile();
                         }
@@ -166,10 +185,26 @@ public class SingleSourceRegistry<TFile> where TFile : class, new()
                 try { File.Copy(SourcePath, keep, true); kept = $"Preserved as '{Path.GetFileName(keep)}'."; }
                 catch (Exception ce) { kept = $"It could NOT be preserved beside the source ({ce.Message}) — copy it by hand before recovering."; }
                 Debug.LogError($"{tag} registry source '{SourcePath}' is unreadable — {LastCorruptDetail}. {kept} " +
-                               "The window shows one-click recovery (restore the last deploy, or the last git commit). Changes are locked until recovered.");
+                               "Recover it (restore the last deploy or the last commit — the window offers both) or fix it by hand. Changes are locked until then.");
             }
             return new TFile();
         }
+    }
+
+    // Why a MISSING source must not be rebuilt from the deploy or started afresh, or null when nothing stands in the way:
+    // copies an unsettled write left beside it (compare them first - one may be the newest version), or evidence that
+    // the file still exists (Unity's .meta, or git: another program may be saving it by rename).
+    string MissingSourceBlock()
+    {
+        string[] kept;
+        try { kept = CheckedReplace.Preserved(SourcePath); } catch { kept = new string[0]; }
+        if (kept.Length > 0)
+            return $"copies an unsettled save kept beside it ({string.Join(", ", Array.ConvertAll(kept, Path.GetFileName))}) may hold its newest version — compare them, rename the right one back to '{Path.GetFileName(SourcePath)}', then refresh";
+        string existed = CheckedReplace.ExistedBefore(SourcePath);
+        if (existed != null)
+            return $"but {existed}, so it existed — another program may be saving it (it comes back by itself; refresh in a moment). If you deleted it on purpose: " +
+                   (existed.StartsWith("git") ? "commit the deletion, or restore it with git" : "let Unity refresh (or delete its .meta too)");
+        return null;
     }
 
     // A verdict Parse already worded — Load()'s catch must not replace it with Pinpoint's "Newtonsoft parses it".
@@ -200,7 +235,7 @@ public class SingleSourceRegistry<TFile> where TFile : class, new()
     /// outcome says only what happened. <paramref name="changed"/> = the operation found something to change.
     /// </summary>
     public RegistryRules.SaveOutcome Change(Func<TFile, bool> apply, string what, out bool changed) =>
-        ChangeCore(apply, what, null, out changed);
+        ChangeCore(f => apply(f) ? f : null, what, null, out changed);
 
     /// <summary>
     /// Replace the whole list with <paramref name="file"/> — for a window that edits the WHOLE list — but only over the
@@ -214,15 +249,16 @@ public class SingleSourceRegistry<TFile> where TFile : class, new()
             Debug.LogWarning($"{tag} not saving {what}: the window never loaded the registry (its last load failed), so there is nothing to save over safely. Reload once it can be read.");
             return RegistryRules.SaveOutcome.Refused;
         }
-        return ChangeCore(current => { CopyInto(file, current); return true; }, what, loadedVersion, out _);
+        return ChangeCore(current => file, what, loadedVersion, out _);   // the caller's file, written as it is
     }
 
-    RegistryRules.SaveOutcome ChangeCore(Func<TFile, bool> apply, string what, string mustStillBe, out bool changed)
+    // `produce` gets the file as read now and returns the file to write, or null when there is nothing to change.
+    RegistryRules.SaveOutcome ChangeCore(Func<TFile, TFile> produce, string what, string mustStillBe, out bool changed)
     {
         changed = false;
         if (LastLoadCorrupt)
         {
-            Debug.LogError($"{tag} not saving {what}: the registry source was unreadable — recover it first (the window shows the buttons). Refusing to overwrite it and lose your entries.");
+            Debug.LogError($"{tag} not saving {what}: the registry source was unreadable — recover it first (restore the last deploy or the last commit, or fix it by hand and refresh). Refusing to overwrite it and lose your entries.");
             return RegistryRules.SaveOutcome.Refused;
         }
         // What the attempt found, decided afresh on every attempt (Apply re-runs the lambda after a conflict).
@@ -231,7 +267,7 @@ public class SingleSourceRegistry<TFile> where TFile : class, new()
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(SourcePath));
-            outcome = CheckedReplace.Apply(SourcePath, text =>
+            outcome = ApplyImpl(SourcePath, text =>
             {
                 refusal = null; broken = false; didChange = false; written = null;
                 if (mustStillBe != null && VersionOf(text) != mustStillBe)
@@ -242,7 +278,10 @@ public class SingleSourceRegistry<TFile> where TFile : class, new()
                 TFile file;
                 if (text == null)
                 {
-                    // NO SOURCE. The deployed copy is then the only surviving one: build on it, exactly as Load() adopts it.
+                    // NO SOURCE. Not while something says it still exists, or an unsettled write left its copies; otherwise
+                    // the deployed copy is the only surviving one - build on it, as Load() adopts it; with none, start one.
+                    string block = MissingSourceBlock();
+                    if (block != null) { refusal = "the source is missing, " + block; return null; }
                     if (File.Exists(ArtifactPath))
                     {
                         string dep;
@@ -251,15 +290,7 @@ public class SingleSourceRegistry<TFile> where TFile : class, new()
                         file = Parse(dep, out string depWhy);
                         if (file == null) { refusal = $"the source is missing and the deployed copy '{ArtifactPath}' is unreadable ({depWhy}) — it may be the only copy of this registry"; return null; }
                     }
-                    else
-                    {
-                        // Neither copy: a first-ever registry — unless something says the source existed (its Unity .meta,
-                        // or git): then another program is replacing it, and a new file would stand where the real one
-                        // belongs (the review of PR #101). Absent evidence, this is a first save.
-                        string existed = CheckedReplace.ExistedBefore(SourcePath);
-                        if (existed != null) { refusal = $"the source is missing, but {existed}, so it existed — another program may be saving it (it comes back by itself). Try again in a moment; if you deleted it on purpose, delete its .meta too (and commit the deletion) first"; return null; }
-                        file = new TFile();
-                    }
+                    else file = new TFile();   // a first-ever registry
                 }
                 else
                 {
@@ -279,9 +310,10 @@ public class SingleSourceRegistry<TFile> where TFile : class, new()
                         { refusal = $"the source holds no {noun}, and the deployed copy '{ArtifactPath}' can't be checked ({deployedWhy}), so it may still hold them. Close whatever holds it (the game?) and try again"; return null; }
                     }
                 }
-                if (!apply(file)) return null;   // nothing to change
+                var result = produce(file);
+                if (result == null) return null;   // nothing to change
                 didChange = true;
-                return written = JsonUtility.ToJson(file, true);
+                return written = JsonUtility.ToJson(result, true);
             }, 3, out note);
         }
         catch (Exception e)
@@ -294,7 +326,7 @@ public class SingleSourceRegistry<TFile> where TFile : class, new()
         if (broken)
         {
             LastLoadCorrupt = true; LastCorruptDetail = refusal; LastLoadLocked = false;   // it was just read, so it is not a lock
-            Debug.LogError($"{tag} not saving {what}: the registry source '{SourcePath}' is unreadable right now — {refusal}. Refusing to overwrite it; recover it (the window shows the buttons) and try again.");
+            Debug.LogError($"{tag} not saving {what}: the registry source '{SourcePath}' is unreadable right now — {refusal}. Refusing to overwrite it; recover it (restore the last deploy or the last commit) or fix it by hand, refresh, and try again.");
             return RegistryRules.SaveOutcome.Refused;
         }
         if (refusal != null)
@@ -310,21 +342,26 @@ public class SingleSourceRegistry<TFile> where TFile : class, new()
                 Debug.LogWarning($"{tag} not saving {what}: the registry source kept changing while this save tried to apply it (another editor, git, a sync tool). That version is in place and nothing of this save was written. Try again.");
                 return RegistryRules.SaveOutcome.Refused;
             case CheckedReplace.Outcome.Unresolved:
+                // The source may hold THIS change: then the deploy is owed. Mark it PENDING with this change's fingerprint,
+                // due at once - the next Load deploys it if the source is exactly this change, and drops it as moot if not
+                // (critical review 2026-09-30: an unsettled write that had landed left the game on the old entry).
+                if (written != null)
+                {
+                    EditorPrefs.SetString(PrefPendingDeploy, Fingerprint(written));
+                    pendingFailures = 0; lastPendingAttempt = -1;
+                }
                 Debug.LogError($"{tag} saving {what} could not be settled at '{SourcePath}' (the note above says why). The source may hold this save, another version, or be missing; " +
-                               "the deployed copy was not changed. Inspect the source and the preserved copies named above, then reload before saving again.");
+                               "inspect the source and the preserved copies named above, then refresh before saving again (if this save landed, the refresh also brings the deployed copy up to date).");
                 return RegistryRules.SaveOutcome.Unknown;
         }
         // WRITTEN. The editor's own write is fingerprinted (the empty-source guard tells it from a hand-emptying), and the
-        // deployed copy follows; a deploy that fails is finished by a later Load, not called a hand-edit.
+        // deployed copy follows; a deploy that fails is finished by a later load or save, not called a hand-edit.
         changed = didChange;
         EditorPrefs.SetString(PrefLastWrite, Fingerprint(written));
         Deploy(written);
         AssetDatabase.Refresh();
         return RegistryRules.SaveOutcome.Saved;
     }
-
-    // Copy every serialized field of `from` into `into` (ReplaceAll on the file as read: its own shape, the caller's data).
-    static void CopyInto(TFile from, TFile into) => JsonUtility.FromJsonOverwrite(JsonUtility.ToJson(from), into);
 
     void Deploy(string json)
     {
@@ -339,7 +376,7 @@ public class SingleSourceRegistry<TFile> where TFile : class, new()
             EditorPrefs.SetString(PrefPendingDeploy, Fingerprint(json));
             pendingRetryWarned = false; pendingFailures = 0; lastPendingAttempt = EditorApplication.timeSinceStartup;   // the first retry is due in 2 s
             Debug.LogWarning($"{tag} deployed-artifact refresh FAILED ({e.Message}) — the registry SOURCE saved fine, but the running game keeps reading the stale " +
-                             $"'{ArtifactPath}' until it can be written; the editor retries by itself (every 2 s at first, backing off to every 30 s).");
+                             $"'{ArtifactPath}' until it can be written. The next load of this registry (Refresh in its window) or the next save retries it.");
         }
     }
 
@@ -355,7 +392,8 @@ public class SingleSourceRegistry<TFile> where TFile : class, new()
 
     // ==================================================================================================== RECOVERY
     // Each candidate is VALIDATED (must parse and hold >= 1 entry) BEFORE it is written; the corrupt file is already
-    // preserved timestamped; and the write is checked, so a source someone changed meanwhile is not overwritten.
+    // preserved timestamped; the write is checked, so a source someone changed meanwhile is not overwritten; and a
+    // source that is readable NOW is never recovered over - the banner may be older than a hand fix.
 
     public string RecoverFromArtifact()
     {
@@ -381,12 +419,20 @@ public class SingleSourceRegistry<TFile> where TFile : class, new()
             if (r == null) return $"⚠ recovery from {label} REFUSED: the candidate is unreadable too ({why}); nothing was overwritten.";
             if (count(r) == 0) return $"⚠ recovery from {label} REFUSED: candidate holds no {noun} (nothing was overwritten).";
             string current = File.Exists(SourcePath) ? File.ReadAllText(SourcePath) : null;
+            if (current != null && Parse(current, out _) != null)
+            {
+                // READABLE NOW (critical review 2026-09-30): the source was fixed by hand after the banner appeared - the
+                // windows don't reload on focus. Recovering would overwrite that fix, and no copy of it would remain.
+                LastLoadCorrupt = false; LastCorruptDetail = ""; corruptLogged = false;
+                return $"⚠ recovery from {label} REFUSED: the source is readable now (fixed since the banner appeared?) — nothing was overwritten. Refresh to load it.";
+            }
             var outcome = CheckedReplace.Write(SourcePath, current, candidateJson, out string note);
             if (note != null) Debug.LogWarning($"{tag} registry source: {note}.");
             if (outcome == CheckedReplace.Outcome.Conflict) return $"⚠ recovery from {label} REFUSED: the source changed while it was being restored — that version is in place; look at it first, then retry.";
             if (outcome == CheckedReplace.Outcome.Unresolved) return $"⚠ recovery from {label} could not be settled — inspect the source and the copies named in the Console.";
             EditorPrefs.SetString(PrefLastWrite, Fingerprint(candidateJson));
             LastLoadCorrupt = false; LastCorruptDetail = ""; corruptLogged = false;
+            Deploy(candidateJson);   // the deployed copy follows the recovered source (else the next load calls the difference a hand-edit)
             AssetDatabase.Refresh();
             return $"Recovered {count(r)} {noun} from {label}. The corrupt copy is preserved beside the source for hand-merging.";
         }
@@ -394,47 +440,61 @@ public class SingleSourceRegistry<TFile> where TFile : class, new()
     }
 
     // =================================================================================================== INTERNALS
-    // One-time migration: until the marker is set, the DEPLOYED copy was the historical authority — adopt it into
-    // the project file if they differ in CONTENT, unless the source is the NEWER of the two (then it is what a human
-    // or git touched last; never overwrite newer data with older). The loser is preserved beside the artifact.
+    // One-time migration: until the marker is set, the DEPLOYED copy was the historical authority — adopt it into the
+    // project file if they differ in CONTENT, unless the source is the NEWER of the two (then it is what a human or git
+    // touched last; never overwrite newer data with older). The loser is preserved beside the artifact. A copy that fails
+    // the shape rule never wins (critical review 2026-09-30: a deployed `{}` went over a valid source). The marker is
+    // per PROJECT source path - EditorPrefs span every project on the machine, and a machine-wide marker left a second
+    // project's registry never migrated; the old machine-wide marker still counts, so nothing migrates twice.
+    string MigrationMarker => prefKey + "|" + SourcePath;
+
     void MigrateOnce()
     {
-        if (EditorPrefs.GetBool(prefKey, false)) return;
+        if (EditorPrefs.GetBool(MigrationMarker, false) || EditorPrefs.GetBool(prefKey, false)) return;
         try
         {
             if (File.Exists(ArtifactPath))
             {
                 string dep = File.ReadAllText(ArtifactPath);
+                bool depOk = Parse(dep, out string depWhy) != null;
                 if (!File.Exists(SourcePath))
                 {
-                    WriteAtomic(SourcePath, dep);
-                    Debug.Log($"{tag} registry collapse migration: adopted the deployed file into the project source (the deployed copy was authoritative until now; from now on it is a build artifact).");
+                    if (depOk && MissingSourceBlock() == null)
+                    {
+                        WriteAtomic(SourcePath, dep);
+                        EditorPrefs.SetString(PrefLastWrite, Fingerprint(dep));
+                        Debug.Log($"{tag} registry collapse migration: adopted the deployed file into the project source (the deployed copy was authoritative until now; from now on it is a build artifact).");
+                    }
+                    else if (!depOk) Debug.LogWarning($"{tag} registry collapse migration: the deployed file is unreadable ({depWhy}) — not adopted; there is no project source yet.");
                 }
                 else
                 {
                     string src = File.ReadAllText(SourcePath);
+                    bool srcOk = Parse(src, out _) != null;
                     if (Norm(src) != Norm(dep))
                     {
-                        bool sourceNewer = File.GetLastWriteTimeUtc(SourcePath) > File.GetLastWriteTimeUtc(ArtifactPath);
+                        // the shape rule first: a broken copy never wins; between two readable ones, the newer does
+                        bool keepSource = !depOk || (srcOk && File.GetLastWriteTimeUtc(SourcePath) > File.GetLastWriteTimeUtc(ArtifactPath));
                         string loser = ArtifactPath + ".pre-collapse.json";
-                        try { File.WriteAllText(loser, sourceNewer ? dep : src); } catch { }
-                        if (sourceNewer)
-                            Debug.LogWarning($"{tag} registry collapse migration: the project source is NEWER than the deployed copy and differs — kept the source; the deployed content is preserved as '{Path.GetFileName(loser)}'.");
+                        try { File.WriteAllText(loser, keepSource ? dep : src); } catch { }
+                        if (keepSource)
+                            Debug.LogWarning($"{tag} registry collapse migration: kept the project source ({(depOk ? "it is NEWER than the deployed copy" : "the deployed copy is unreadable")}); the deployed content is preserved as '{Path.GetFileName(loser)}'.");
                         else
                         {
                             WriteAtomic(SourcePath, dep);
-                            Debug.Log($"{tag} registry collapse migration: adopted the deployed file into the project source (authoritative until now; now a build artifact). The previous source content is preserved as '{Path.GetFileName(loser)}'.");
+                            EditorPrefs.SetString(PrefLastWrite, Fingerprint(dep));
+                            Debug.Log($"{tag} registry collapse migration: adopted the deployed file into the project source ({(srcOk ? "it was newer" : "the source was unreadable")}; now a build artifact). The previous source content is preserved as '{Path.GetFileName(loser)}'.");
                         }
                     }
                 }
             }
-            EditorPrefs.SetBool(prefKey, true);
+            EditorPrefs.SetBool(MigrationMarker, true);
         }
         catch (Exception e) { Debug.LogWarning($"{tag} registry collapse migration failed (will retry next load): " + e.Message); }
     }
 
-    // Keep the deployed ARTIFACT in step: recreate it when missing, FINISH a deploy a change couldn't complete (it is
-    // not a hand-edit), and warn ONCE when it really was hand-edited.
+    // Keep the deployed ARTIFACT in step: recreate it when missing, FINISH a deploy that is still owed (it is not a
+    // hand-edit), and warn ONCE when it really was hand-edited.
     void SyncArtifact(string sourceJson)
     {
         try
@@ -451,11 +511,11 @@ public class SingleSourceRegistry<TFile> where TFile : class, new()
             if (pending != "")
             {
                 double now = EditorApplication.timeSinceStartup;
-                if (!RegistryRules.PendingRetryDue(now, lastPendingAttempt, pendingFailures)) return;   // not on every poll
+                if (!RegistryRules.PendingRetryDue(now, lastPendingAttempt, pendingFailures)) return;   // not on every load
                 lastPendingAttempt = now;
                 if (pending == Fingerprint(sourceJson))
                 {
-                    // the source is still exactly what the failed change wrote: this difference is OUR unfinished deploy
+                    // the source is exactly the change whose deploy is owed: finish it
                     try
                     {
                         WriteAtomic(ArtifactPath, sourceJson);
@@ -467,11 +527,11 @@ public class SingleSourceRegistry<TFile> where TFile : class, new()
                     catch (Exception re)
                     {
                         pendingFailures++;
-                        if (!pendingRetryWarned) { pendingRetryWarned = true; Debug.LogWarning($"{tag} the deployed copy is still out of date (the last save couldn't refresh it: {re.Message}); retrying — every 2 s at first, backing off to every 30 s — until it can."); }
+                        if (!pendingRetryWarned) { pendingRetryWarned = true; Debug.LogWarning($"{tag} the deployed copy is still out of date (the last save couldn't refresh it: {re.Message}); later loads keep retrying, backing off to every 30 s."); }
                     }
                     return;
                 }
-                EditorPrefs.DeleteKey(PrefPendingDeploy); pendingFailures = 0; lastPendingAttempt = -1;   // the source changed since (git, a hand-edit): that deploy is moot
+                EditorPrefs.DeleteKey(PrefPendingDeploy); pendingFailures = 0; lastPendingAttempt = -1;   // the source is something else (git, a hand-edit, an unsettled write that didn't land): that deploy is moot
             }
             if (!driftWarned && Norm(File.ReadAllText(ArtifactPath)) != Norm(sourceJson))
             {

@@ -94,6 +94,7 @@ public static class FormationRegistry
     public static string LastLockAdvice => Store.LastLockAdvice;
     public static bool LastLoadFailed => Store.LastLoadFailed;       // the last Load's empty list proves nothing
     public static string LastLoadProblem => Store.LastLoadProblem;
+    public static bool DeployPending => Store.DeployPending;          // saved, but the game's copy isn't refreshed yet
     public static string RecoverFromArtifact() => Store.RecoverFromArtifact();
     public static string RecoverFromGit() => Store.RecoverFromGit();
     public static string TakeNotice() => Store.TakeNotice();   // self-healing event for the window status line

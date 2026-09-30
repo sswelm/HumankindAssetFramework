@@ -45,8 +45,16 @@ public static class SoundOverrideRegistry
     public static string RegistryPath => Store.ArtifactPath;        // what the running game reads (derived)
     public static string SourcePath => Store.SourcePath;            // what the editor reads and writes (git-tracked)
     public static string ProjectBackupPath => Store.SourcePath;     // historical name, kept for callers
+    public static bool LastLoadCorrupt => Store.LastLoadCorrupt;
+    public static string LastCorruptDetail => Store.LastCorruptDetail;
+    public static bool LastLoadLocked => Store.LastLoadLocked;
+    public static string LastLockDetail => Store.LastLockDetail;
+    public static string LastLockAdvice => Store.LastLockAdvice;
     public static bool LastLoadFailed => Store.LastLoadFailed;
     public static string LastLoadProblem => Store.LastLoadProblem;
+    public static bool DeployPending => Store.DeployPending;
+    public static string RecoverFromArtifact() => Store.RecoverFromArtifact();
+    public static string RecoverFromGit() => Store.RecoverFromGit();
     public static string TakeNotice() => Store.TakeNotice();
 
     /// <summary>The version of the rules the last successful Load returned; null after a failed one (see Save).</summary>

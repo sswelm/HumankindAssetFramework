@@ -706,10 +706,24 @@ public static class ModelRegistry
             var r = JsonUtility.FromJson<RegistryFile>(candidateJson);
             if (r?.models == null || r.models.Count == 0) return $"⚠ recovery from {label} REFUSED: candidate holds no models (nothing was overwritten).";
             Directory.CreateDirectory(PackRepoDir);
-            var tmp = SourcePath + ".tmp";
-            File.WriteAllText(tmp, candidateJson);
-            if (File.Exists(SourcePath)) File.Replace(tmp, SourcePath, null); else File.Move(tmp, SourcePath);
+            string current = File.Exists(SourcePath) ? File.ReadAllText(SourcePath) : null;
+            if (current != null && ParseSource(current, out _) != null)
+            {
+                // READABLE NOW (critical review of PR #103): fixed by hand since the banner appeared — recovering would
+                // overwrite that fix, and no copy of it would remain. The shared registry engine refuses the same way.
+                lastLoadCorrupt = false; LastCorruptDetail = ""; corruptLogged = false;
+                return $"⚠ recovery from {label} REFUSED: the source is readable now (fixed since the banner appeared?) — nothing was overwritten. Refresh to load it.";
+            }
+            // checked, so a source someone changed while this ran is not overwritten
+            var outcome = CheckedReplace.Write(SourcePath, current, candidateJson, out string note);
+            if (note != null) Debug.LogWarning($"[Factory] registry source: {note}.");
+            if (outcome == CheckedReplace.Outcome.Conflict) return $"⚠ recovery from {label} REFUSED: the source changed while it was being restored — that version is in place; look at it first, then retry.";
+            if (outcome == CheckedReplace.Outcome.Unresolved) return $"⚠ recovery from {label} could not be settled — inspect the source and the copies named in the Console.";
+            EditorPrefs.SetString(PrefLastWrite, Fingerprint(candidateJson));
             lastLoadCorrupt = false; LastCorruptDetail = ""; corruptLogged = false;
+            // the deployed copy follows the recovered source (else the next load calls the difference a hand-edit)
+            try { WriteArtifact(candidateJson); EditorPrefs.DeleteKey(PrefPendingDeploy); }
+            catch (Exception de) { EditorPrefs.SetString(PrefPendingDeploy, Fingerprint(candidateJson)); lastPendingAttempt = -1; pendingFailures = 0; Debug.LogWarning($"[Factory] recovered the source, but the deployed copy couldn't be refreshed yet ({de.Message}); the next load retries it."); }
             AssetDatabase.Refresh();
             return $"Recovered {r.models.Count} model(s) from {label}. The corrupt copy is preserved beside the source for hand-merging.";
         }

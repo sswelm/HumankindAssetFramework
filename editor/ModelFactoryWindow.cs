@@ -878,7 +878,10 @@ public class ModelFactoryWindow : EditorWindow
                         string districtNote = "";
                         try
                         {
-                            if (DistrictRegistry.Load().Any(d => string.Equals(d.resourceName, name, StringComparison.OrdinalIgnoreCase)))
+                            var districts = DistrictRegistry.Load();
+                            if (DistrictRegistry.LastLoadFailed)   // not "no district uses it": it couldn't be checked
+                                districtNote = $"\n\nNOTE: it could not be checked whether a district builds on this model — the district registry {DistrictRegistry.LastLoadProblem}.";
+                            else if (districts.Any(d => string.Equals(d.resourceName, name, StringComparison.OrdinalIgnoreCase)))
                                 districtNote = $"\n\nNOTE: district '{name}' BUILDS ON this model's baked outputs — deleting the files breaks that district until it is re-baked.";
                         }
                         catch { /* advisory only — a corrupt district registry must not block Remove */ }
