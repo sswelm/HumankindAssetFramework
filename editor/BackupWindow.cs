@@ -543,7 +543,9 @@ public class BackupWindow : EditorWindow
         catch (Exception e)
         {
             try { if (Directory.Exists(dir) && !Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir); } catch { }
-            return new SnapResult { dir = dir, ok = false, report = "Backup FAILED: " + e.Message };
+            // Parallel file copies wrap the useful per-file IOException in AggregateException.
+            var cause = e is AggregateException aggregate ? aggregate.Flatten().InnerExceptions.FirstOrDefault() ?? e : e;
+            return new SnapResult { dir = dir, ok = false, report = "Backup FAILED: " + cause.Message };
         }
     }
 

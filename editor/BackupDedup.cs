@@ -150,8 +150,11 @@ internal static class BackupDedup
         }
         Directory.CreateDirectory(Path.GetDirectoryName(dst));
         File.Copy(src, dst, true);
-        // the record is of the bytes IN the snapshot, read back after the copy (the live file may move on meanwhile)
-        st.New[rel] = BackupRules.ContentKey(dst) ?? "";
+        // The index must describe the bytes IN the snapshot, not the live file (which may move on meanwhile).
+        // If this read fails, the snapshot cannot be signed or safely deduplicated offsite: fail the backup.
+        string copiedKey = BackupRules.ContentKey(dst);
+        if (copiedKey == null) throw new IOException($"could not verify copied backup file '{dst}'");
+        st.New[rel] = copiedKey;
         System.Threading.Interlocked.Increment(ref st.Copied); System.Threading.Interlocked.Add(ref st.CopiedBytes, len);
         return 1;
     }
