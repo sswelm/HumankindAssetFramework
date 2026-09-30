@@ -113,7 +113,8 @@ FxMesh verts + bounds) and each mesh-manager layer's fill (`verts used / size`).
 
 Moved to the **`[Debug]`** section on 2026-08-21 (investigation dials — off in normal play): `DistrictDebug` (the
 repository dumps, ~40 ms/frame for the first seconds of a load), and the superseded proof modes
-`DistrictAffinityOverride` / `DistrictEvolverGuid`. `[Debug]` also holds `DumpPawnRig` and `AssetNameFilter`. A key that
+`DistrictAffinityOverride` / `DistrictEvolverGuid`. `[Debug]` also holds `DumpPawnRig`, `AssetNameFilter` and `GhostHunt`
+(the 2026-08-03 ghost-rotor tools, which write to the donor mesh the donor's own vanilla unit draws — off in play). A key that
 moves sections comes back at its **default** in an existing `.cfg` (BepInEx orphans the old entry) — re-set it under
 `[Debug]` if you need it.
 

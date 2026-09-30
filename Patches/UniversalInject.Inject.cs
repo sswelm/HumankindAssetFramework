@@ -509,10 +509,13 @@ namespace HumankindAssetFramework
                     // donor-specific names (Gunship/Helix/Rotor/Blur — NOT "Helicopter", which matches our own assets).
                     // ONCE per entry per process (2026-09-14): this was a 15 s timer, i.e. a full-scene
                     // FindObjectsOfType<Renderer> on a timer — Performance.md rule 2, in the file that claims the
-                    // scan was removed. 82 runs in one session, every one "0 renderer(s)": the ghost it hunted is
-                    // killed at the source now (CrushGhostSlice / PruneCloneRenderOutputs). The census keeps its
-                    // diagnostic value as a one-shot; the auto-disable it carried never fired in that session.
-                    if (rendererCensusDone.Add(e.resourceName))
+                    // scan was removed. 82 runs in one session, every one "0 renderer(s)": the ghost it hunted was
+                    // never a renderer — it was the donor's VFX billboard, dropped by silenceDonorVfx (CrushGhostSlice
+                    // did not kill it, and is [Debug] GhostHunt-only since 2026-09-30). The census is a hunt tool like the
+                    // rest and runs under the same key (review of PR #106): its auto-disable switches off ANY renderer
+                    // within 15 units whose name says Gunship/Helix/Rotor/Blur - nothing checks that it is ours - and "it
+                    // never matched" (Amplitude's pawns are not Renderer components) is luck, not a guard.
+                    if (GhostHuntOn && rendererCensusDone.Add(e.resourceName))
                     {
                         var origin = c.transform.position;
                         int found = 0;
@@ -601,13 +604,16 @@ namespace HumankindAssetFramework
             catch (Exception ex) { Plugin.Log.LogWarning("[Uni] CrushGhostSlice: " + ex.Message); }
         }
         static uint ghostDonorFxIdx;   // stashed for periodic re-crush from the NEAR tick
+        internal static bool GhostHuntOn => Plugin.GhostHunt != null && Plugin.GhostHunt.Value;
 
         // LIVE GHOST BISECT (2026-08-03 23:00): the ghost's mesh is SOME layer-0 FxMesh we can't name — so find it by
         // elimination WITHOUT relaunching. Poll BepInEx/config/haf_ghostbisect.txt every ~2s:
         //     crush <from> <to>    degenerate layer-0 meshes [from..to] (originals saved on first touch)
         //     restore              restore every saved mesh
         // The operator edits the file while the player watches the ghost; halving the range pins the mesh in ~8 rounds.
-        static string lastBisectCmd = "";
+        // null = the file has not been looked at this process. The first look only BASELINES: a command an earlier run
+        // left in the file (last month's `crush`) is not an instruction to this one - it used to fire at every launch.
+        static string lastBisectCmd;
         [ProcessLived("per-bisect scratch, cleared per run")] static readonly Dictionary<long, Array> bisectSaved = new Dictionary<long, Array>();   // (layer<<32)|meshIdx -> original vertex records (animMgr manager)
         // manager-aware storage: key -> [mcm, layerIdx, meshIdx, savedArray]. The ghost's mesh proved to live outside
         // the AnimationManager's content manager entirely — other FxManager Behaviours in the scene own their own.
@@ -642,8 +648,14 @@ namespace HumankindAssetFramework
             {
                 if (ghostAnimMgr == null) return;
                 var path = Path.Combine(Paths.ConfigPath, "haf_ghostbisect.txt");
-                if (!File.Exists(path)) return;
+                if (!File.Exists(path)) { if (lastBisectCmd == null) lastBisectCmd = ""; return; }
                 string cmd = File.ReadAllText(path).Trim();
+                if (lastBisectCmd == null)
+                {
+                    lastBisectCmd = cmd;
+                    if (cmd.Length > 0) Plugin.Log.LogInfo($"[Uni][BISECT] ignoring the command an earlier run left in haf_ghostbisect.txt ('{cmd}') — edit the file to issue a new one");
+                    return;
+                }
                 if (cmd.Length == 0 || cmd == lastBisectCmd) return;
                 lastBisectCmd = cmd;
                 var mcm = GetMember(ghostAnimMgr, "FxComponentMeshContentManager");
@@ -984,7 +996,15 @@ namespace HumankindAssetFramework
                 try { if (dIdx != null) dStart = ReadFxStart(animMgr, Convert.ToUInt32(dIdx)); } catch { }
                 try { if (oIdx != null) oStart = ReadFxStart(animMgr, Convert.ToUInt32(oIdx)); } catch { }
                 Plugin.Diag($"[Uni][FX] '{e.resourceName}': FxMeshIndex for '{bodyName}' — donor={dIdx} (start=0x{dStart:X6}) ours={oIdx} (start=0x{oStart:X6})");
-                if (e.hideSubPawns)
+                // THE HUNT IS OPT-IN ([Debug] GhostHunt, 2026-09-30). Everything below zeroes descriptor fragments and
+                // degenerates vertices found by the DONOR mesh's start index — data the donor's own vanilla unit draws
+                // from too: the shipped StealthHelicopter's donor mesh is 'Unit_Era6_Common_HelicopterGunships_01'
+                // (mesh 74; the 2026-09-29 log: "DEGENERATED donor mesh 74's layer-0 slice (66 verts)"), so a vanilla
+                // Helicopter Gunship in the same session lost that slice. None of it was the fix: the last ghost was the
+                // donor's VFX billboard, which silenceDonorVfx drops (the 2026-08-04 entry: it "survived crushing every
+                // vertex of every ContentLayer"). What fixed something and touches only our data stays on unconditionally:
+                // hideSubPawns, the cached-struct repair, and clearing stale slots that carry OUR descriptor.
+                if (e.hideSubPawns && GhostHuntOn)
                 {
                     ghostNeedle = dStart; ghostOurStart = oStart; ghostEntryName = e.resourceName;
                     // PER-LAYER NEEDLES (the transparent-layer test): the blur disc is TRANSLUCENT — its geometry
