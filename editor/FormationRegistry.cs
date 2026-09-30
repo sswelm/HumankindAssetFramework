@@ -82,16 +82,25 @@ public static class FormationRegistry
         () => Path.Combine(Application.dataPath, "Databases", "haf_formations.backup.json"),
         () => Path.Combine(ModelRegistry.ConfigDir, "haf_formations.json"),
         f => f?.links?.Count ?? 0,
-        "HAF.Formations.SingleSource", "Assets/Databases/haf_formations.backup.json", "formation links");
+        "HAF.Formations.SingleSource", "Assets/Databases/haf_formations.backup.json", "formation links", "links");
 
     public static string RegistryPath => Store.ArtifactPath;        // what the running game reads (derived)
     public static string SourcePath => Store.SourcePath;            // what the editor reads and writes (git-tracked)
     public static string ProjectBackupPath => Store.SourcePath;     // historical name, kept for callers
     public static bool LastLoadCorrupt => Store.LastLoadCorrupt;
     public static string LastCorruptDetail => Store.LastCorruptDetail;
+    public static bool LastLoadLocked => Store.LastLoadLocked;       // could not be READ: a plain warning, no recovery buttons
+    public static string LastLockDetail => Store.LastLockDetail;
+    public static string LastLockAdvice => Store.LastLockAdvice;
+    public static bool LastLoadFailed => Store.LastLoadFailed;       // the last Load's empty list proves nothing
+    public static string LastLoadProblem => Store.LastLoadProblem;
+    public static bool DeployPending => Store.DeployPending;          // saved, but the game's copy isn't refreshed yet
     public static string RecoverFromArtifact() => Store.RecoverFromArtifact();
     public static string RecoverFromGit() => Store.RecoverFromGit();
-    public static string TakeNotice() => Store.TakeNotice();   // self-healing event for the window status line
+    public static string TakeNotice() => Store.TakeNotice();
+    public static RegistryLoadVerdict Snapshot() => Store.Snapshot();   // the last Load's findings, frozen for the window
+    public static string AcceptSource(string loadedVersion) => Store.AcceptSource(loadedVersion);   // 'Keep it empty' / 'Deploy the source': only over the version the window loaded
+    public static RegistryBanner.Actions BannerActions => new RegistryBanner.Actions { RestoreDeploy = Store.RecoverFromArtifact, RestoreCommit = Store.RecoverFromGit, AcceptSource = Store.AcceptSource, SourcePath = Store.SourcePath };   // self-healing event for the window status line
 
     static List<FormationLink> Sort(List<FormationLink> list)
     {
@@ -101,12 +110,7 @@ public static class FormationRegistry
 
     public static List<FormationLink> Load() => Sort(Store.Load()?.links ?? new List<FormationLink>());
 
-    // True = written. False = nothing saved (corrupt-guard tripped, or the atomic write hit a lock) — surface it.
-    public static bool Save(List<FormationLink> links)
-    {
-        Sort(links);
-        return Store.Save(new FormationRegistryFile { links = links }, "the link");
-    }
+    // Every change is an OPERATION on the file as it is at write time — see DistrictRegistry.UpsertOutcome.
 
     // Entry identity: unit links key on the unit (one formation per unit); macro replacements key on the
     // TARGET formation name (one macro per formation). Without this, saving a second macro would
@@ -114,22 +118,28 @@ public static class FormationRegistry
     public static string KeyOf(FormationLink l) =>
         string.IsNullOrEmpty(l?.unit) ? "formation:" + (l?.formation ?? "") : "unit:" + l.unit;
 
-    public static bool Upsert(FormationLink link)
+    public static RegistryRules.SaveOutcome UpsertOutcome(FormationLink link)
     {
-        var list = Load();
         var key = KeyOf(link);
-        list.RemoveAll(l => KeyOf(l) == key);
-        list.Add(link);
-        return Save(list);
+        return Store.Change(f =>
+        {
+            f.links = f.links ?? new List<FormationLink>();
+            f.links.RemoveAll(l => KeyOf(l) == key);
+            f.links.Add(link);
+            Sort(f.links);
+            return true;
+        }, $"formation entry '{key}'", out _);
     }
 
-    public static bool Remove(FormationLink link)
+    public static bool Upsert(FormationLink link) => UpsertOutcome(link) == RegistryRules.SaveOutcome.Saved;
+
+    public static RegistryRules.RemoveResult RemoveEntry(FormationLink link)
     {
-        var list = Load();
         var key = KeyOf(link);
-        int before = list.Count;
-        list.RemoveAll(l => KeyOf(l) == key);
-        if (list.Count == before) return false;
-        return Save(list);
+        var outcome = Store.Change(f => (f.links ?? new List<FormationLink>()).RemoveAll(l => KeyOf(l) == key) > 0,
+                                   $"removing formation entry '{key}'", out bool changed);
+        return outcome == RegistryRules.SaveOutcome.Unknown ? RegistryRules.RemoveResult.Unknown
+             : outcome != RegistryRules.SaveOutcome.Saved ? RegistryRules.RemoveResult.Failed
+             : changed ? RegistryRules.RemoveResult.Removed : RegistryRules.RemoveResult.NotPresent;
     }
 }

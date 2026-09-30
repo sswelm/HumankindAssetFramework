@@ -24,9 +24,17 @@ public static class RegistryRules
     /// defaults to empty), so an empty parse proves nothing on its own: every pack.json the editor writes carries the
     /// key, and a source without it is a broken edit, not an empty pack.
     /// </summary>
-    public static bool HasModelsArray(string json)
+    public static bool HasModelsArray(string json) => HasArray(json, "models");
+
+    /// <summary>
+    /// The same rule for any registry: an empty parse is an empty registry only when the raw text carries the list's
+    /// key as an array (districts: "districts", formations: "links", sounds: "overrides"). `{}`, a file with the wrong
+    /// keys and a 0-byte file are broken files, not empty registries (critical review 2026-09-30: SingleSourceRegistry
+    /// still read them as "zero entries", and one bake then wrote a one-entry file over the source and the deploy).
+    /// </summary>
+    public static bool HasArray(string json, string key)
     {
-        try { return Newtonsoft.Json.Linq.JObject.Parse(json ?? "")["models"] is Newtonsoft.Json.Linq.JArray; }
+        try { return Newtonsoft.Json.Linq.JObject.Parse(json ?? "")[key] is Newtonsoft.Json.Linq.JArray; }
         catch { return false; }
     }
 

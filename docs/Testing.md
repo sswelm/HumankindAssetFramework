@@ -37,12 +37,18 @@ in **GitHub Actions**. Both lanes matter, and for different reasons:
 | Surface | `tools/check.sh` (pre-push hook) | also in CI | ~time |
 |---|---|---|---|
 | **Runtime + shared contract** | `dotnet build` · `dotnet test` · docs guard · binding-catalog surface · hot path · parse shape · member shape · schema parity | all source-only checks | seconds |
-| **Editor package** | Roslyn editor compile-check · schema parity · hand-list gate | parity + hand-list; compile check stays local | ~30 s |
+| **Editor package** | Roslyn editor compile-check · registry engine drill · schema parity · hand-list gate | parity + hand-list; compile check and drill stay local | ~30 s |
 
 The one guard CI cannot run is **`tools/editor_compile_check.sh`**: it needs a licensed Unity 2021.3.1f1 install
 (`UnityEditor.dll`, the MonoBleedingEdge 4.7.1 profile, every `UnityEngine` module), none of which is
 redistributable or present on a hosted runner. It stays in the hook, where the Unity install already is. So the
 editor's compile check is the one check a `--no-verify` still gets past — worth knowing before you use one.
+
+**`tools/registry_engine_drill.sh`** needs the same install. It runs the real `editor/SingleSourceRegistry.cs` (the
+district, formation and sound registry engine) against real files on Unity's Mono, with tiny stand-ins for the few
+Unity APIs it touches (`tools/registry-engine-drill/Stubs.cs`): one scenario per row of the engine's exit table — `{}`
+and 0-byte sources, a hand-emptied source beside a full deploy, a lock versus corruption, a concurrent edit, a stale
+snapshot, a failed deploy finished later, git recovery that must not touch the working copy.
 
 ### Schema parity is in-repo and mandatory
 

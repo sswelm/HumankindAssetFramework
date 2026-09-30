@@ -57,9 +57,12 @@ public class DistrictFactoryWindow : EditorWindow
         if (pvArrowMesh != null) DestroyImmediate(pvArrowMesh);
     }
 
+    RegistryLoadVerdict verdict = new RegistryLoadVerdict();   // what this window's last RefreshList found (see RegistryBanner)
+
     void RefreshList()
     {
         all = DistrictRegistry.Load();
+        verdict = DistrictRegistry.Snapshot();   // THIS window's load, frozen: banner and gates read it, not the engine's live flags
         var notice = DistrictRegistry.TakeNotice(); if (!string.IsNullOrEmpty(notice)) status = notice;   // self-healing is shown, not Console-only
         existing = new[] { "<New>" }.Concat(all.Select(d => d.district)).ToArray();
     }
@@ -179,23 +182,10 @@ public class DistrictFactoryWindow : EditorWindow
 
     void OnGUI()
     {
-        // CORRUPT-SOURCE RECOVERY banner (the Factory's, via the shared SingleSourceRegistry engine — 2026-08-20): the
-        // fault is PINPOINTED (line/column) and recovery is ONE CLICK, each path validated before it writes and the broken
-        // file already preserved timestamped. Save/Bake stay locked until recovered.
-        if (DistrictRegistry.LastLoadCorrupt)
-        {
-            EditorGUILayout.HelpBox("DISTRICT REGISTRY SOURCE IS CORRUPT — " + DistrictRegistry.LastCorruptDetail + "\n" +
-                "The broken file is preserved beside the source; Save/Bake are locked so nothing can be wiped. Recover:", MessageType.Error);
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                if (GUILayout.Button(new GUIContent("Restore last deploy", "Copy the deployed file (refreshed on every Save — usually the freshest valid copy) back over the source. Validated before writing; the corrupt file stays preserved."), GUILayout.Width(140)))
-                { status = DistrictRegistry.RecoverFromArtifact(); RefreshList(); Debug.Log("[District] " + status); GUIUtility.ExitGUI(); }
-                if (GUILayout.Button(new GUIContent("Restore last commit", "git checkout the source — the last committed version. Validated before accepting; the corrupt file stays preserved."), GUILayout.Width(140)))
-                { status = DistrictRegistry.RecoverFromGit(); RefreshList(); Debug.Log("[District] " + status); GUIUtility.ExitGUI(); }
-                if (GUILayout.Button(new GUIContent("Open broken file", "Reveal the source in Explorer to fix the reported line by hand — then reopen or refresh the window."), GUILayout.Width(120)))
-                { EditorUtility.RevealInFinder(DistrictRegistry.SourcePath); }
-            }
-        }
+        // THE window's status banner (RegistryBanner, review of PR #103): drawn from the verdict of ITS last load, never from the
+        // engine's live flags (another caller's load changes those), with each state's own actions.
+        string bannerResult = RegistryBanner.Draw(verdict, "district", DistrictRegistry.BannerActions);
+        if (bannerResult != null) { status = bannerResult; Debug.Log("[District] " + status); RefreshList(); GUIUtility.ExitGUI(); }
         scroll = EditorGUILayout.BeginScrollView(scroll);
         EditorGUILayout.Space();
 
@@ -213,9 +203,13 @@ public class DistrictFactoryWindow : EditorWindow
                             $"Remove '{name}' from the district registry? The plugin will stop swapping its mesh on next launch. " +
                             "(The baked FxMesh assets stay in the project.)", "Remove", "Cancel"))
                     {
-                        bool removed = DistrictRegistry.Remove(name);
+                        // WHICH of four it was (critical review 2026-09-30): "not in the registry" used to stand for a save that failed
+                        var removed = DistrictRegistry.RemoveEntry(name);
                         selected = 0; cur = new DistrictDef(); RefreshList(); GUI.FocusControl(null);
-                        status = removed ? $"Removed '{name}' from the district registry." : $"'{name}' was not in the registry — nothing removed.";
+                        status = removed == RegistryRules.RemoveResult.Removed ? $"Removed '{name}' from the district registry."
+                               : removed == RegistryRules.RemoveResult.NotPresent ? $"'{name}' was not in the registry — nothing removed."
+                               : removed == RegistryRules.RemoveResult.Failed ? "Remove FAILED — nothing was removed (see the Console)."
+                               : "Remove could NOT be confirmed — the registry may or may not still hold it (see the Console).";
                     }
                 }
             if (sel != selected) { selected = sel; OnSelect(); GUI.FocusControl(null); }
@@ -463,7 +457,10 @@ public class DistrictFactoryWindow : EditorWindow
             if (!(char.IsLetterOrDigit(c) || c == '_' || c == '-')) { badChar = c; break; }
         bool nameValid = badChar == '\0';
         bool isNew = selected <= 0;
-        bool canBake = !string.IsNullOrWhiteSpace(cur.district)
+        // The banners say bakes are refused while the registry can't be loaded - so they are (critical review 2026-09-30:
+        // the whole bake ran, was rolled back at the registry step, and the message blamed a lock).
+        bool canBake = !verdict.Failed
+                    && !string.IsNullOrWhiteSpace(cur.district)
                     && !string.IsNullOrWhiteSpace(cur.resourceName)
                     && nameValid
                     && (!isNew || !string.IsNullOrWhiteSpace(cur.modelFile));
@@ -474,14 +471,16 @@ public class DistrictFactoryWindow : EditorWindow
             // Persist the RUNTIME knobs (Strategic footprint, Ground, Hex sculpting, isolate, atlas GUIDs...) to
             // haf_districts.json WITHOUT re-baking — so changing a footprint doesn't re-run the model bake or mint a new
             // selector GUID. Only valid for an entry with a district set (Upsert keys on it).
-            using (new EditorGUI.DisabledScope(string.IsNullOrWhiteSpace(cur.district)))
+            using (new EditorGUI.DisabledScope(string.IsNullOrWhiteSpace(cur.district) || verdict.Failed))   // not over a load that failed (review of PR #103)
                 if (GUILayout.Button(new GUIContent("Save settings", "Write this entry's runtime knobs to haf_districts.json without baking. Relaunch to apply."), GUILayout.Height(34), GUILayout.Width(110)))
                     SaveSettingsNoBake();
             if (GUILayout.Button("Reset", GUILayout.Height(34), GUILayout.Width(72))) { cur = new DistrictDef(); selected = 0; status = ""; GUI.FocusControl(null); }
         }
         if (!canBake)
             EditorGUILayout.HelpBox(
-                !nameValid && !string.IsNullOrWhiteSpace(cur.resourceName)
+                verdict.Failed
+                    ? "The district registry can't be used as loaded (see the banner above) — bakes and saves are refused until that is resolved, then Refresh."
+                : !nameValid && !string.IsNullOrWhiteSpace(cur.resourceName)
                     ? $"Resource name can't contain '{(badChar == ' ' ? "space" : badChar.ToString())}'. Use letters, digits, '_' or '-' only."
                 : isNew ? "New district model: set District, Resource name and a Model file to bake."
                         : "Set District and Resource name to bake.", MessageType.Warning);
@@ -541,12 +540,15 @@ public class DistrictFactoryWindow : EditorWindow
     void SaveSettingsNoBake()
     {
         cur.district = (cur.district ?? "").Trim();
-        bool ok = DistrictRegistry.Upsert(cur);
+        var saveOutcome = DistrictRegistry.UpsertOutcome(cur);
+        bool ok = saveOutcome == RegistryRules.SaveOutcome.Saved;
         RefreshList();
         selected = Array.IndexOf(existing, cur.district); if (selected < 0) selected = 0;
+        if (saveOutcome == RegistryRules.SaveOutcome.Unknown)
+        { status = $"Saving the settings for '{cur.district}' could NOT be confirmed — the registry may hold them or the previous ones (see the Console)."; return; }
         status = ok
-            ? $"Saved runtime settings for '{cur.district}' (no re-bake). Relaunch the game to apply."
-            : "Registry SAVE FAILED — see Console (is haf_districts.json locked / open elsewhere?).";
+            ? $"Saved runtime settings for '{cur.district}' (no re-bake). Relaunch the game to apply." + (DistrictRegistry.DeployPending ? " The game's copy of the registry is not refreshed yet (see the Console) — Refresh retries it." : "")
+            : "Registry save REFUSED — nothing was written (the Console says why).";
         if (!ok) Debug.LogError("[District] " + status);
         GUI.FocusControl(null);
     }
@@ -591,6 +593,7 @@ public class DistrictFactoryWindow : EditorWindow
         string curBeforeBake = JsonUtility.ToJson(cur);
         var dbk = UniversalBaker.BackupDistrictBake(cur.resourceName);
         bool districtBakeOk = false;
+        bool districtBakeUndecided = false;   // an unsettled registry save that couldn't be read back: keep the backup, restore nothing
         try
         {
 
@@ -747,7 +750,30 @@ public class DistrictFactoryWindow : EditorWindow
         LoadPreviewAssets(force: true);
 
         // 3) registry entry
-        bool saved = DistrictRegistry.Upsert(cur);
+        var saveOutcome = DistrictRegistry.UpsertOutcome(cur);
+        if (saveOutcome == RegistryRules.SaveOutcome.Unknown)
+        {
+            // UNSETTLED (critical review 2026-09-30): the entry may name the new assets or the previous ones, and each wrong
+            // guess strands one of them - a rollback under a written entry leaves it naming deleted assets, keeping the new
+            // assets under the old entry does the same the other way round. So it is decided on EVIDENCE: read back, an entry
+            // naming the new FxMesh guid means the save landed; any other readable answer means it did not. A read-back that
+            // fails decides nothing, and nothing is done: the backup is kept, nothing is restored, the status says where.
+            var back = DistrictRegistry.Load();
+            if (DistrictRegistry.LastLoadFailed)
+            {
+                districtBakeUndecided = true;   // the finally keeps the backup and restores nothing
+                status = $"'{cur.resourceName}': the bake finished, but its REGISTRY SAVE could NOT be confirmed, and the registry {DistrictRegistry.LastLoadProblem} — "
+                       + $"so it can't be told which assets the entry names. Nothing was rolled back; the previous assets are kept in '{dbk.dir}'. "
+                       + "Once the registry can be read, check the district: if it shows the new bake, discard that folder; if not, bake again.";
+                Debug.LogError("[District] " + status);
+                return;
+            }
+            var landed = back.FirstOrDefault(d => d.district == cur.district);
+            bool isNew = landed != null && landed.fxMeshGuid == cur.fxMeshGuid;
+            Debug.LogWarning($"[District] '{cur.district}': the registry save was unsettled; read back, the entry {(isNew ? "names the new bake — treating the save as done" : "does not name the new bake — rolling the bake back")}.");
+            saveOutcome = isNew ? RegistryRules.SaveOutcome.Saved : RegistryRules.SaveOutcome.Refused;
+        }
+        bool saved = saveOutcome == RegistryRules.SaveOutcome.Saved;
         RefreshList();
         selected = Array.IndexOf(existing, cur.district); if (selected < 0) selected = 0;
         if (!saved)
@@ -755,8 +781,8 @@ public class DistrictFactoryWindow : EditorWindow
             // The registry write is INSIDE the rollback (PR #77 review). The freshly baked assets carry new guids,
             // and the entry naming them is exactly what failed to save — so keeping them would leave the old entry
             // pointing at assets that no longer exist. Rolling back returns a district that still works.
-            status = $"'{cur.resourceName}': the REGISTRY SAVE FAILED (see Console), so the bake was rolled back and "
-                   + "the previous district is untouched. Close whatever's locking haf_districts.json and re-bake.";
+            status = $"'{cur.resourceName}': the REGISTRY SAVE was refused or didn't land (the Console says why), so the bake was rolled back and "
+                   + "the previous district is untouched. Fix what the Console names, then re-bake.";
             Debug.LogError("[District] " + status);
             return;
         }
@@ -765,7 +791,7 @@ public class DistrictFactoryWindow : EditorWindow
         status = $"Baked district model '{cur.resourceName}' -> '{cur.district}'\nFxMesh {guid}  (verts={mesh.vertexCount}, tris={TriCount(mesh)}{(cur.sourceTris > 0 ? $", source model {cur.sourceTris:N0} tris" : "")})\n" +
                  (composeReceipt != null ? composeReceipt + "\n" : "") +
                  (string.IsNullOrWhiteSpace(cur.selectorGuid) ? "scoped selector: NOT baked (legacy path) — see Console\n" : $"scoped selector {cur.selectorGuid} (scoped path)\n") +
-                 "Check the FxMesh Inspector preview for orientation, then rebuild the mod + relaunch.";
+                 "Check the FxMesh Inspector preview for orientation, then rebuild the mod + relaunch." + (DistrictRegistry.DeployPending ? " The game's copy of the registry is not refreshed yet (see the Console) — Refresh retries it." : "");
         Debug.Log("[District] " + status);
         RunHealthChecks();   // fresh bake: the stale-bundle warning should light up until the mod is rebuilt
         Selection.activeObject = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>("Assets/Resources/" + cur.resourceName + "_FxMesh.asset");
@@ -777,6 +803,8 @@ public class DistrictFactoryWindow : EditorWindow
             // model file, a compose failure, a missing atlas, a failed registry save) and an exception alike.
             // Anything short of a complete, registered bake restores.
             if (districtBakeOk) UniversalBaker.DiscardBackup(dbk);
+            else if (districtBakeUndecided)
+                Debug.LogWarning($"[District] '{cur.resourceName}': the previous assets are KEPT in '{dbk.dir}' (nothing restored, nothing discarded) until you decide — see the status.");
             else
             {
                 UniversalBaker.RestoreOutputs(dbk);

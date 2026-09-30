@@ -161,7 +161,10 @@ public static class UniversalBaker
         // sometimes exactly right (a re-bake rebuilds them raw) — but never silently.
         try
         {
-            if (DistrictRegistry.Load().Any(d => string.Equals(d.resourceName, name, StringComparison.OrdinalIgnoreCase)))
+            var districts = DistrictRegistry.Load();
+            if (DistrictRegistry.LastLoadFailed)   // an empty list for want of a read is not "no district uses this model"
+                Debug.LogWarning($"[Factory] {name}: could not check whether a DISTRICT layers on this model's outputs — the district registry {DistrictRegistry.LastLoadProblem}.");
+            else if (districts.Any(d => string.Equals(d.resourceName, name, StringComparison.OrdinalIgnoreCase)))
                 Debug.LogWarning($"[Factory] {name}: a DISTRICT entry layers on this model's baked outputs (shared _Atlas / _NormalAtlas / _RoughAtlas) — re-bake the district after this, or it keeps pointing at raw or missing atlases.");
         }
         catch (OperationCanceledException) { throw; }   // a bake-test cancel passes through every wrapper (review of 610711c)

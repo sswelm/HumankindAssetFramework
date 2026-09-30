@@ -77,6 +77,47 @@ public static class CheckedReplace
     }
 
     /// <summary>
+    /// The text of <paramref name="path"/> as last COMMITTED (HEAD), without touching the file on disk (critical review
+    /// 2026-09-30): "Restore last commit" used to `git checkout` the file and validate it AFTERWARDS, so a candidate it
+    /// then refused had already replaced the working copy - and "REFUSED (nothing was overwritten)" was untrue. Reading
+    /// the committed text first lets the caller judge it and write only a valid one. null = no committed version, or git
+    /// couldn't be asked; <paramref name="error"/> says which.
+    /// </summary>
+    public static string GitCommittedText(string path, out string error)
+    {
+        error = null;
+        try
+        {
+            string full = Path.GetFullPath(path);
+            var psi = new System.Diagnostics.ProcessStartInfo("git", $"show \"HEAD:./{Path.GetFileName(full)}\"")
+            {
+                WorkingDirectory = Path.GetDirectoryName(full),
+                UseShellExecute = false, CreateNoWindow = true,
+                RedirectStandardOutput = true, RedirectStandardError = true,
+                StandardOutputEncoding = new System.Text.UTF8Encoding(false),
+            };
+            foreach (var v in new[] { "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE" }) psi.EnvironmentVariables.Remove(v);   // see GitTracks
+            psi.EnvironmentVariables["LC_ALL"] = "C";
+            using (var p = System.Diagnostics.Process.Start(psi))
+            {
+                var output = p.StandardOutput.ReadToEndAsync();
+                var err = p.StandardError.ReadToEndAsync();
+                if (!p.WaitForExit(15000)) { try { p.Kill(); } catch { } error = "git did not answer within 15 s"; return null; }
+                p.WaitForExit();   // lets the async reads finish
+                if (p.ExitCode != 0)
+                {
+                    string said = err.Wait(1000) ? err.Result.Trim() : "";
+                    error = said.Length > 0 ? said : "git exited " + p.ExitCode;
+                    return null;
+                }
+                if (!output.Wait(5000)) { error = "git's output could not be read"; return null; }
+                return output.Result;
+            }
+        }
+        catch (Exception e) { error = e.Message + " (is git installed?)"; return null; }
+    }
+
+    /// <summary>
     /// Is <paramref name="path"/> in its git repository's index? true = yes; false = git ANSWERED no (not in the index,
     /// or no repository there, so nothing could have tracked it); null = git could not be asked or didn't answer in 5 s.
     /// Three answers, not two (review of PR #101, sixth round): "couldn't ask" is not "not tracked", and the window

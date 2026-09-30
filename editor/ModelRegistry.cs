@@ -706,12 +706,54 @@ public static class ModelRegistry
             var r = JsonUtility.FromJson<RegistryFile>(candidateJson);
             if (r?.models == null || r.models.Count == 0) return $"⚠ recovery from {label} REFUSED: candidate holds no models (nothing was overwritten).";
             Directory.CreateDirectory(PackRepoDir);
-            var tmp = SourcePath + ".tmp";
-            File.WriteAllText(tmp, candidateJson);
-            if (File.Exists(SourcePath)) File.Replace(tmp, SourcePath, null); else File.Move(tmp, SourcePath);
+            string current = File.Exists(SourcePath) ? File.ReadAllText(SourcePath) : null;
+            if (current != null && ParseSource(current, out _) != null)
+            {
+                // READABLE NOW (critical review of PR #103): fixed by hand since the banner appeared — recovering would
+                // overwrite that fix, and no copy of it would remain. The shared registry engine refuses the same way.
+                lastLoadCorrupt = false; LastCorruptDetail = ""; corruptLogged = false;
+                return $"⚠ recovery from {label} REFUSED: the source is readable now (fixed since the banner appeared?) — nothing was overwritten. Refresh to load it.";
+            }
+            // checked, so a source someone changed while this ran is not overwritten
+            var outcome = CheckedReplace.Write(SourcePath, current, candidateJson, out string note);
+            if (note != null) Debug.LogWarning($"[Factory] registry source: {note}.");
+            if (outcome == CheckedReplace.Outcome.Conflict) return $"⚠ recovery from {label} REFUSED: the source changed while it was being restored — that version is in place; look at it first, then retry.";
+            if (outcome == CheckedReplace.Outcome.Unresolved) return $"⚠ recovery from {label} could not be settled — inspect the source and the copies named in the Console.";
             lastLoadCorrupt = false; LastCorruptDetail = ""; corruptLogged = false;
+            // The deployed copy follows the recovered source - PRESERVED first (it may hold every bake since the commit),
+            // and replaced through a CHECKED write against the text preserved (review of PR #103, rounds 3-4). Never handed
+            // to the pending-deploy retry: that retry deploys the editor's own saves without preserving. If it can't be
+            // deployed now, the deploy stays as it is and the next save refreshes it; PrefLastWrite is set only when it
+            // went through, so the difference is not read as the editor's own.
+            string deployNote = "";
+            EditorPrefs.DeleteKey(PrefPendingDeploy); pendingFailures = 0; lastPendingAttempt = -1;   // an older owed deploy is moot now, and must not let the retry deploy the recovered text unpreserved (round 5)
+            try
+            {
+                string dep = File.Exists(RegistryPath) ? File.ReadAllText(RegistryPath) : null;
+                string keep = null;
+                if (dep != null && RegistryRules.FingerprintText(dep) != RegistryRules.FingerprintText(candidateJson))
+                {
+                    keep = RegistryPath + ".replaced-" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + "-" + Guid.NewGuid().ToString("N").Substring(0, 8) + ".json";
+                    File.WriteAllText(keep, dep);   // throws: nothing is deployed over an unpreserved copy
+                }
+                var dOutcome = CheckedReplace.Write(RegistryPath, dep, candidateJson, out string dNote);
+                if (dNote != null) Debug.LogWarning($"[Factory] deployed copy: {dNote}.");
+                if (dOutcome == CheckedReplace.Outcome.Written)
+                {
+                    EditorPrefs.DeleteKey(PrefPendingDeploy); EditorPrefs.SetString(PrefLastWrite, Fingerprint(candidateJson));
+                    if (keep != null) deployNote = $" The replaced deployed copy is kept as '{Path.GetFileName(keep)}'.";
+                }
+                else
+                {
+                    if (keep != null) { try { File.Delete(keep); } catch { } }   // nothing was replaced
+                    deployNote = dOutcome == CheckedReplace.Outcome.Conflict
+                        ? " ⚠ The game's copy changed while it was being replaced (another editor) and was NOT refreshed; look at it, then save or recover again."
+                        : " ⚠ The replace of the game's copy could not be settled (see the Console).";
+                }
+            }
+            catch (Exception de) { deployNote = $" ⚠ The game's copy was NOT refreshed ({de.Message}); the next save refreshes it."; }
             AssetDatabase.Refresh();
-            return $"Recovered {r.models.Count} model(s) from {label}. The corrupt copy is preserved beside the source for hand-merging.";
+            return $"Recovered {r.models.Count} model(s) from {label}. The corrupt copy is preserved beside the source for hand-merging." + deployNote;
         }
         catch (Exception e) { return $"⚠ recovery from {label} FAILED: {e.Message} (source untouched)."; }
     }
@@ -724,25 +766,15 @@ public static class ModelRegistry
         catch (Exception e) { return "⚠ could not read the deployed artifact: " + e.Message; }
     }
 
-    // The last COMMITTED version via git (the source is git-tracked — that was the point of the collapse).
+    // The last COMMITTED version via git (the source is git-tracked — that was the point of the collapse), read with
+    // `git show` and VALIDATED BEFORE anything is written (critical review 2026-09-30): this used to `git checkout` the
+    // file and validate afterwards, so a candidate it then refused had already replaced the working copy, and "REFUSED
+    // (nothing was overwritten)" was untrue.
     public static string RecoverFromGit()
     {
-        try
-        {
-            string projRoot = Directory.GetParent(Application.dataPath).FullName;
-            string rel = "Assets/Pack/" + HafPackageContext.PackName + "/pack.json";
-            var psi = new System.Diagnostics.ProcessStartInfo("git", $"-C \"{projRoot}\" checkout -- \"{rel}\"")
-            { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true };
-            using (var p = System.Diagnostics.Process.Start(psi))
-            {
-                string err = p.StandardError.ReadToEnd();
-                p.WaitForExit(15000);
-                if (p.ExitCode != 0) return "⚠ git recovery FAILED: " + (string.IsNullOrWhiteSpace(err) ? ("exit " + p.ExitCode) : err.Trim());
-            }
-            // git rewrote the file on disk — validate it exactly like any other candidate before declaring victory
-            return RecoverSourceFrom(File.ReadAllText(SourcePath), "git (last committed version)");
-        }
-        catch (Exception e) { return "⚠ git recovery FAILED: " + e.Message + " (is git installed?)"; }
+        string committed = CheckedReplace.GitCommittedText(SourcePath, out string error);
+        if (committed == null) return $"⚠ git recovery FAILED: {error} (nothing was overwritten).";
+        return RecoverSourceFrom(committed, "git (last committed version)");
     }
 
     // Returns true if the registry was written. False = nothing was saved (corrupt-guard tripped, or the atomic write
