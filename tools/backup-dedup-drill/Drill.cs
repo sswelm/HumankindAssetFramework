@@ -6,8 +6,8 @@ using System.Linq;
 // THE DEDUP, DRILLED ON REAL FILES (PR #105, round 6). The real BackupDedup (editor/BackupDedup.cs) and BackupRules
 // (editor/EditorRules.cs) compiled with Unity's Roslyn and run on Unity's Mono, over a scratch tree: "unchanged" must
 // mean the bytes - a file rewritten with new bytes under the SAME size and the SAME last-write time (to the tick) is
-// copied, not linked; identical bytes are linked; two snapshots of the same bytes sign the same; a previous snapshot
-// without a content index links nothing. Stubs.cs supplies the one thing the code takes from the window (Human).
+// copied, not linked; identical bytes are linked; two snapshots of the same bytes for the same originals sign the
+// same, and the same bytes for a moved project do not; a previous snapshot without a content index links nothing. Stubs.cs supplies the one thing the code takes from the window (Human).
 static class Drill
 {
     static int fails;
@@ -32,13 +32,14 @@ static class Drill
         }
     }
 
-    static BackupDedup.Stats Snapshot(string live, string dir, string prev)
+    static BackupDedup.Stats Snapshot(string live, string dir, string prev, string originalAs = null)
     {
         var st = new BackupDedup.Stats { NewRoot = dir, Prev = BackupDedup.ReadHashes(prev), PrevSnapshotExisted = prev != null };
-        BackupDedup.PrehashLive(new[] { live }, st);
         Directory.CreateDirectory(dir);
         string dst = Path.Combine(dir, "source", "tree");
-        BackupDedup.CopyTreeLinked(live, dst, prev == null ? null : Path.Combine(prev, "source", "tree"), st);
+        int n = BackupDedup.CopyTreeLinked(live, dst, prev == null ? null : Path.Combine(prev, "source", "tree"), st);
+        // the window's manifest: one SRC line per source with its ORIGINAL path (where a restore puts it back)
+        File.WriteAllLines(Path.Combine(dir, "manifest.txt"), new[] { "# HAF backup manifest", "", BackupRules.ManifestLine("source/tree", originalAs ?? live, n, 0) });
         BackupDedup.WriteHashes(dir, st);
         BackupDedup.WriteSignature(dir);
         return st;
@@ -96,6 +97,14 @@ static class Drill
             File.Delete(C); File.WriteAllBytes(Path.Combine(live, "new.txt"), new byte[] { 1, 2, 3 });
             var s7 = Snapshot(live, Path.Combine(root, "s7"), Path.Combine(root, "s6"));
             Check(s7.Linked == 2 && s7.Copied == 1 && !File.Exists(Path.Combine(root, "s7", "source", "tree", "empty.txt")), "removed file absent, new file copied (" + s7.Report + ")");
+
+            // 7. the same bytes for a MOVED project (the manifest's originals differ) sign differently: the offsite zip
+            //    already there restores to the old place, so it must not stand in for this one
+            var s8 = Snapshot(live, Path.Combine(root, "s8"), Path.Combine(root, "s7"));
+            var s9 = Snapshot(live, Path.Combine(root, "s9"), Path.Combine(root, "s8"), originalAs: Path.Combine(root, "moved-project", "live"));
+            Check(s8.Linked == 3 && s9.Linked == 3, "the same bytes still link wherever they restore to");
+            Check(BackupDedup.Signature(Path.Combine(root, "s7")) == BackupDedup.Signature(Path.Combine(root, "s8")), "same bytes, same originals: same signature");
+            Check(BackupDedup.Signature(Path.Combine(root, "s8")) != BackupDedup.Signature(Path.Combine(root, "s9")), "same bytes, moved originals: a different signature");
         }
         catch (Exception e) { Console.WriteLine("FAIL drill threw: " + e); fails++; }
         finally { try { Directory.Delete(root, true); } catch { } }

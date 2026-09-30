@@ -35,9 +35,10 @@ The first real run: 4,077 files, **3,966 hard-linked (1.2 GB saved), 111 copied 
 decided by content** (review of PR #105): every snapshot writes an index of `<length>|<sha1>` per file
 (`haf_hashes.txt`), and the next snapshot links a file only when the live file's key equals the record — no size, no
 last-write time however precise, because a tool that writes new bytes under a preserved timestamp defeats any such
-rule. The live tree is keyed in parallel ahead of the copy (measured on Unity's Mono: the 3 GB tree in 2.1 s on 8
-cores, 12.8 s on one; reading the previous snapshot on the backup drive would take 51 s, which is why the index
-exists). The first backup after 2026-09-30 finds no index in the previous snapshot and links nothing that once — it
+rule. Each file is keyed at its own decision time, and the copy loop runs per file in parallel to afford that
+(measured on Unity's Mono: the 3 GB tree in 2.1 s on 8 cores, 12.8 s on one; reading the previous snapshot on the
+backup drive would take 51 s, which is why the index exists). A key taken for the whole tree ahead of the loop would
+be stale for a file edited while the loop still ran, and would link the previous version. The first backup after 2026-09-30 finds no index in the previous snapshot and links nothing that once — it
 takes as long as a backup did before dedup — and every later one links by content.
 
 > **Two consequences worth knowing.** Explorer reports each snapshot at its full apparent size — it counts shared
@@ -53,9 +54,10 @@ takes as long as a backup did before dedup — and every later one links by cont
 
 **Offsite, an unchanged snapshot is not uploaded at all.** Each zip is a full ~1 GB, and daily uploads of the same
 models fill a 15 GB cloud quota in about a week. A SHA-1 over every file's relative path and content key (from the
-snapshot's own index — no second read) is written into each snapshot (`haf_signature.txt`) and beside each uploaded
-zip (`.sig`); a matching signature means the existing zip already *is* this backup, so the zip is skipped. Two
-snapshots of the same bytes sign the same whenever they were taken (until PR #105 the signature took each file's
+snapshot's own index — no second read) and over the manifest's original paths (where a restore puts each source back)
+is written into each snapshot (`haf_signature.txt`) and beside each uploaded zip (`.sig`); a matching signature means
+the existing zip already *is* this backup — same bytes, same destinations — so the zip is skipped. Two snapshots of
+the same bytes for the same originals sign the same whenever they were taken; a moved project signs differently (until PR #105 the signature took each file's
 mtime, and the manifest's — which differs per snapshot — with it, so no two snapshots ever signed the same and the
 skip never fired). An absent or unreadable signature always proceeds: *"I don't know"* must never be read as
 *"unchanged"*. The sidecar is written only after the zip is verified and moved into place, so a crash mid-zip cannot

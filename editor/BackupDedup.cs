@@ -81,22 +81,6 @@ internal static class BackupDedup
         File.WriteAllLines(Path.Combine(snapshotDir, HashName), lines);
     }
 
-    /// <summary>Key every live file under <paramref name="roots"/> in parallel, ahead of the copy loop (measured on Unity's
-    /// Mono: one core 12.8 s for the 3 GB tree, eight cores 2.1 s). The loop then decides link-or-copy without reading
-    /// the previous snapshot at all — its index has the keys.</summary>
-    internal static void PrehashLive(IEnumerable<string> roots, Stats st)
-    {
-        var files = new List<string>();
-        foreach (var r in roots)
-        {
-            if (File.Exists(r)) files.Add(r);
-            else if (Directory.Exists(r)) files.AddRange(Directory.GetFiles(r, "*", SearchOption.AllDirectories));
-        }
-        int par = Math.Min(8, Math.Max(1, Environment.ProcessorCount / 2));
-        System.Threading.Tasks.Parallel.ForEach(files, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = par },
-            f => { var k = BackupRules.ContentKey(f); if (k != null) st.LiveKeys[Path.GetFullPath(f)] = k; });
-    }
-
     /// <summary>Running tally for one snapshot, so the report can state what was actually saved rather than claim it.</summary>
     internal sealed class Stats
     {
@@ -106,10 +90,8 @@ internal static class BackupDedup
         public string NewRoot;                                    // the snapshot being written; index paths are relative to it
         public Dictionary<string, string> Prev;                   // the previous snapshot's index (rel -> key); null = none, nothing links
         public bool PrevSnapshotExisted;                          // a previous snapshot was there (with or without an index)
-        public readonly Dictionary<string, string> New = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        public readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> LiveKeys = new System.Collections.Concurrent.ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        public readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> New = new System.Collections.Concurrent.ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);   // filled from the parallel loop
         public string Rel(string dst) => dst.Substring(NewRoot.Length).TrimStart('/', '\\').Replace('\\', '/');
-        public string KeyOf(string live) => LiveKeys.TryGetValue(Path.GetFullPath(live), out var k) ? k : BackupRules.ContentKey(live);
         public string Report =>
             Linked == 0
                 ? $"{Copied} file(s) copied ({BackupWindow.Human(CopiedBytes)}) — " + (!PrevSnapshotExisted ? "no previous snapshot to link against"
@@ -120,23 +102,36 @@ internal static class BackupDedup
 
     /// <summary>Copy `src` into `dst`, hard-linking any file that is byte-for-byte unchanged from the matching file
     /// under `linkBase`. `linkBase` null/missing = a plain copy of everything (the first snapshot, or a new group).</summary>
+    // The tree is walked first (folders created, one work item per file), then the files are keyed and copied or
+    // linked IN PARALLEL, each keyed at its own decision time (review of PR #105, round 7: a key computed for the whole
+    // tree ahead of the loop was stale for a file edited while the loop still ran - minutes, on a first full copy - and
+    // the stale key linked the previous snapshot's bytes). Measured on Unity's Mono: keying the 3 GB tree takes 12.8 s
+    // on one core, 2.1 s on eight; the parallelism is what makes keying at decision time affordable.
     internal static int CopyTreeLinked(string src, string dst, string linkBase, Stats st)
     {
+        var work = new List<string[]>();   // { live file, target, previous snapshot's copy or null }
+        Gather(src, dst, linkBase, work);
         int n = 0;
+        System.Threading.Tasks.Parallel.ForEach(work, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = Parallelism },
+            w => { CopyOrLink(w[0], w[1], w[2], st); System.Threading.Interlocked.Increment(ref n); });
+        return n;
+    }
+
+    internal static int Parallelism => Math.Min(8, Math.Max(1, Environment.ProcessorCount / 2));
+
+    static void Gather(string src, string dst, string linkBase, List<string[]> work)
+    {
         Directory.CreateDirectory(dst);
         foreach (var f in Directory.GetFiles(src))
         {
             string name = Path.GetFileName(f);
-            string target = Path.Combine(dst, name);
-            string prev = linkBase == null ? null : Path.Combine(linkBase, name);
-            n += CopyOrLink(f, target, prev, st);
+            work.Add(new[] { f, Path.Combine(dst, name), linkBase == null ? null : Path.Combine(linkBase, name) });
         }
         foreach (var d in Directory.GetDirectories(src))
         {
             string name = Path.GetFileName(d);
-            n += CopyTreeLinked(d, Path.Combine(dst, name), linkBase == null ? null : Path.Combine(linkBase, name), st);
+            Gather(d, Path.Combine(dst, name), linkBase == null ? null : Path.Combine(linkBase, name), work);
         }
-        return n;
     }
 
     internal static int CopyOrLink(string src, string dst, string prev, Stats st)
@@ -144,27 +139,31 @@ internal static class BackupDedup
         long len = 0;
         try { len = new FileInfo(src).Length; } catch { }
         string rel = st.Rel(dst);
-        // LINK ONLY BY CONTENT: the live file's key must equal what the previous snapshot RECORDED for the bytes at this
-        // path (its index) - never a size or a time. The previous snapshot is not read; its index is.
+        // LINK ONLY BY CONTENT: the live file's key, read NOW, must equal what the previous snapshot RECORDED for the
+        // bytes at this path (its index) - never a size or a time, never a key from earlier in the backup. The previous
+        // snapshot is not read; its index is. Thread-safe: this runs from the parallel loop.
         if (prev != null && st.Prev != null && st.Prev.TryGetValue(rel, out var recorded) && File.Exists(prev))
         {
-            string live = st.KeyOf(src);
+            string live = BackupRules.ContentKey(src);
             if (live != null && live == recorded && TryHardLink(prev, dst))
-            { st.New[rel] = recorded; st.Linked++; st.LinkedBytes += len; return 1; }
+            { st.New[rel] = recorded; System.Threading.Interlocked.Increment(ref st.Linked); System.Threading.Interlocked.Add(ref st.LinkedBytes, len); return 1; }
         }
         Directory.CreateDirectory(Path.GetDirectoryName(dst));
         File.Copy(src, dst, true);
         // the record is of the bytes IN the snapshot, read back after the copy (the live file may move on meanwhile)
         st.New[rel] = BackupRules.ContentKey(dst) ?? "";
-        st.Copied++; st.CopiedBytes += len;
+        System.Threading.Interlocked.Increment(ref st.Copied); System.Threading.Interlocked.Add(ref st.CopiedBytes, len);
         return 1;
     }
 
     // ---- content signature: what makes "nothing changed since the last offsite zip" answerable ----
 
-    /// <summary>A stable fingerprint of a snapshot's CONTENT: every file's relative path and content key, from the
-    /// snapshot's own index (already computed by the copy step - no second read), sorted so nothing about enumeration
-    /// order or dates can change the answer. Two snapshots of the same bytes sign the same, whenever they were taken.
+    /// <summary>A stable fingerprint of a snapshot's CONTENT and of WHERE IT RESTORES TO: every file's relative path and
+    /// content key, from the snapshot's own index (already computed by the copy step - no second read), plus the
+    /// manifest's rel -> original pairs (review of PR #105, round 7: a project moved while its bytes stayed the same
+    /// signed the same, and the zip already offsite restores to the old place), sorted so nothing about enumeration
+    /// order or dates can change the answer. Two snapshots of the same bytes for the same originals sign the same,
+    /// whenever they were taken.
     /// (Until round 6 of PR #105 the signature took each file's mtime, and the manifest's - which differs per
     /// snapshot - with it: no two snapshots ever signed the same, and the offsite skip never fired.) A snapshot without
     /// an index (made before 2026-09-30) signs by path, size and mtime as before, which is always "changed".</summary>
@@ -176,7 +175,14 @@ internal static class BackupDedup
             var sb = new StringBuilder();
             var index = ReadHashes(dir);
             if (index != null)
+            {
                 foreach (var kv in index.OrderBy(k => k.Key, StringComparer.Ordinal)) sb.Append(kv.Key).Append('|').Append(kv.Value).Append('\n');
+                string mf = Path.Combine(dir, "manifest.txt");
+                if (File.Exists(mf))
+                    foreach (var line in File.ReadAllLines(mf).OrderBy(l => l, StringComparer.Ordinal))
+                        if (BackupRules.TryParseManifestLine(line, out string rel, out string original, out _))
+                            sb.Append("restore:").Append(rel).Append("|").Append(original).Append('\n');
+            }
             else
                 foreach (var f in Directory.GetFiles(dir, "*", SearchOption.AllDirectories)
                                            .Where(p => !p.EndsWith(SigName, StringComparison.OrdinalIgnoreCase))

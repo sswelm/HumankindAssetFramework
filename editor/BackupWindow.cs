@@ -496,8 +496,7 @@ public class BackupWindow : EditorWindow
             // complete independently-restorable folder. Null when there is no previous snapshot (first run), which
             // just means everything is copied, exactly as before. See BackupDedup for why this is safe.
             string prevSnap = PreviousSnapshot(dir);
-            var st = new BackupDedup.Stats { NewRoot = dir, Prev = BackupDedup.ReadHashes(prevSnap), PrevSnapshotExisted = prevSnap != null };
-            BackupDedup.PrehashLive(groups.SelectMany(g => g.Sources), st);   // by content: keyed in parallel ahead of the loop
+            var st = new BackupDedup.Stats { NewRoot = dir, Prev = BackupDedup.ReadHashes(prevSnap), PrevSnapshotExisted = prevSnap != null };   // by content, keyed at decision time
             int totalFiles = 0; long totalBytes = 0;
             foreach (var g in groups)
                 foreach (var src in g.Sources)
