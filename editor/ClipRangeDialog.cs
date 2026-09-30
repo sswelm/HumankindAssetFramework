@@ -116,9 +116,12 @@ public class ClipRangeDialog : EditorWindow
             EditorUtility.DisplayProgressBar("Clip range picker", "Converting the model's clips to inspection FBXs (Blender)…", 0.4f);
             if (System.IO.Directory.Exists(dirFull))                                    // clear stale per-clip files (removed clips)
                 foreach (var f in System.IO.Directory.GetFiles(dirFull, "*.fbx")) System.IO.File.Delete(f);
+            // a missing script is said by name (review of PR #107: the head refuses an empty path, and that refusal read as the error)
+            string script = HafPackageContext.ToolPath("inspect_fbx.py");
+            if (string.IsNullOrEmpty(script) || !System.IO.File.Exists(script)) { Debug.LogError("[ClipRange] bundled inspect_fbx.py missing: " + (script ?? "(not found in the project's Tools/ or the package)")); return false; }
             var p = new System.Diagnostics.Process();
             p.StartInfo.FileName = UniversalBaker.FindBlender();
-            p.StartInfo.Arguments = $"{BakerRules.BlenderScript(HafPackageContext.ToolPath("inspect_fbx.py"))} -- \"{modelFile}\" \"{dirFull}\"";
+            p.StartInfo.Arguments = $"{BakerRules.BlenderScript(script)} -- \"{modelFile}\" \"{dirFull}\"";
             p.StartInfo.UseShellExecute = false; p.StartInfo.CreateNoWindow = true;
             p.StartInfo.RedirectStandardOutput = true; p.StartInfo.RedirectStandardError = true;
             p.Start();
