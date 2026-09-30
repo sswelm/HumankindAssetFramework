@@ -456,7 +456,11 @@ public class BackupWindow : EditorWindow
                 .Where(d => !Path.GetFileName(d).StartsWith("_deleted_", StringComparison.OrdinalIgnoreCase)
                          && !Path.GetFileName(d).StartsWith("_removed_", StringComparison.OrdinalIgnoreCase)
                          && !Path.GetFileName(d).StartsWith("_prerestore", StringComparison.OrdinalIgnoreCase)
-                         && !string.Equals(d.TrimEnd('\\', '/'), newDir.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase))
+                         && !string.Equals(d.TrimEnd('\\', '/'), newDir.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase)
+                         // a COMPLETED snapshot only: a backup that failed mid-copy (975119d: a copied file that can't be
+                         // read back fails it) leaves its folder without a manifest or index, and as the newest folder it
+                         // would be the link base - nothing links, and the report blames "no content index" for the wrong reason
+                         && File.Exists(Path.Combine(d, "manifest.txt")))
                 // BY TIME, NOT BY NAME (2026-08-23, found by the restore drill). Name-sorting looks right because
                 // the folders are timestamped — but `_auto_` snapshots start with '_' (0x5F), which sorts AFTER every
                 // digit, so descending by name always returned the newest _auto_ ahead of a NEWER manual backup.
