@@ -532,17 +532,19 @@ public static class UniversalBaker
         TestPoll();
         // ROLES THIS RECIPE NO LONGER WANTS (review of PR #107): rig_anim clears the previous run's clip for every role it is
         // about to write; a role DROPPED from the recipe (or state-driven mode switched off) is not among those, and its
-        // FBX under FactorySource and its _Clips<Role> collection under Resources stayed, referenced by nothing. Swept
-        // here, after the run, by the same role table (BakerRules.Roles) - what exists is deleted and said.
+        // FBX under FactorySource stayed, referenced by nothing. Swept here, after the run, by the same role table
+        // (BakerRules.Roles); FactorySource is a delete-guard root, so a copy is kept. The role's _Clips<Role> collection
+        // is NOT swept: the registry entry on disk references it until this bake's save succeeds, and a failure after
+        // this point rolls back only the whitelisted outputs (third review of PR #107).
         {
             var wantedRoles = new List<string>();
             if (cfg.animStateDriven) wantedRoles.Add("move");
             if (wantAfter) wantedRoles.Add("after"); if (wantAttack) wantedRoles.Add("attack"); if (wantCombat) wantedRoles.Add("combat");
             if (wantPreMove) wantedRoles.Add("premove"); if (wantIdle) wantedRoles.Add("idle"); if (wantIdleAlt) wantedRoles.Add("idlealt"); if (wantIdleAlt2) wantedRoles.Add("idlealt2");
             var swept = new List<string>();
-            foreach (var rel in BakerRules.StaleRoleOutputs(resDir, name, wantedRoles))
+            foreach (var rel in BakerRules.StaleRoleFbx(resDir, name, wantedRoles))
                 if (File.Exists(Path.Combine(projRoot, rel)) && AssetDatabase.DeleteAsset(rel)) swept.Add(rel);
-            if (swept.Count > 0) Debug.Log($"[Factory] {name}: removed {swept.Count} file(s) of roles this recipe no longer uses (the delete guard keeps a copy of the FactorySource ones): {string.Join(", ", swept)}");
+            if (swept.Count > 0) Debug.Log($"[Factory] {name}: removed the FBX of {swept.Count} role(s) this recipe no longer uses (the delete guard keeps a copy): {string.Join(", ", swept)}");
         }
         if (cfg.animStateDriven)
         {

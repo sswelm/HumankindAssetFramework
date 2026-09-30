@@ -17,9 +17,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   completion marker; they keep it, and a script's own diagnosis (`VEHICLE ERROR`, `RIGANIM ERROR`, `PREP_ERR`) is read
   before the generic crash, so a deliberate failure keeps its reason. The Bake Tests' three launches (litmus, the
   deploy golden diff) go through the same head. And a role dropped from a recipe (or state-driven mode switched off)
-  no longer leaves its `anim_<role>/` FBX under FactorySource and its `_Clips<Role>` collection under Resources
-  behind: a successful bake sweeps the outputs of the roles it no longer wants (six stale FBXs, 5.1 MB, were on the
-  project; no stale collection — that half is a guard).
+  no longer leaves its `anim_<role>/` FBX under FactorySource behind: a bake sweeps the FBX of the roles it no longer
+  wants (six, 5.1 MB, were on the project; the delete guard keeps a copy). The role's `_Clips<Role>` collection under
+  Resources is deliberately left alone: the registry entry on disk references it until the save succeeds. A failed or
+  cancelled rig run also removes the primary FBX it may have written and drops the slim-args stamp, so the reuse path
+  can never take a crashed run's output as a finished one.
 
 - **Model Workshop: a re-cut keeps what was decided about the pieces** (user: "when I split salegs_revenge.glb and
   then probe it in the fusion, none of my previous configuration seem to have survived"). Since 2026-09-16 a cut

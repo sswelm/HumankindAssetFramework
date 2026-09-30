@@ -499,23 +499,19 @@ public static class BakerRules
     };
 
     /// <summary>
-    /// The outputs of the roles a recipe NO LONGER wants (review of PR #107): a role dropped from the recipe - or the
-    /// whole state-driven mode - left its <c>anim_&lt;role&gt;/&lt;name&gt;_anim.fbx</c> under FactorySource and its
-    /// <c>&lt;name&gt;_Clips&lt;Role&gt;</c> collection (+ PoseData) under Resources, referenced by nothing (the entry's
-    /// guid for an unwanted role is written empty). Measured 2026-09-30: six such FBXs (5.1 MB) on the project, no stale
-    /// collection - the sweep of the latter is a guard. Relative asset paths, in the order to delete; the caller
-    /// deletes what exists.
+    /// The FBX intermediates of the roles a recipe NO LONGER wants (review of PR #107): a role dropped from the recipe -
+    /// or the whole state-driven mode - left its <c>anim_&lt;role&gt;/&lt;name&gt;_anim.fbx</c> under FactorySource,
+    /// referenced by nothing. Measured 2026-09-30: six such files (5.1 MB) on the project. ONLY the FBX: the role's
+    /// <c>_Clips&lt;Role&gt;</c> collection under Resources is still referenced by the registry entry ON DISK until the
+    /// bake's save succeeds, is not in the rollback whitelist, and Resources is no delete-guard root - sweeping it before
+    /// the save turned a failed bake's "the old clip still plays" into "clip missing" (third review; and no stale
+    /// collection was measured). Relative asset paths; the caller deletes what exists.
     /// </summary>
-    public static IEnumerable<string> StaleRoleOutputs(string resDir, string name, IEnumerable<string> wantedRoles)
+    public static IEnumerable<string> StaleRoleFbx(string resDir, string name, IEnumerable<string> wantedRoles)
     {
         var wanted = new HashSet<string>(wantedRoles ?? new string[0], StringComparer.OrdinalIgnoreCase);
         foreach (var r in Roles)
-        {
-            if (wanted.Contains(r[0])) continue;
-            yield return resDir + "/anim_" + r[0] + "/" + name + "_anim.fbx";
-            yield return "Assets/Resources/" + name + r[1] + ".asset";
-            yield return "Assets/Resources/" + name + r[1] + "PoseData.bytes";
-        }
+            if (!wanted.Contains(r[0])) yield return resDir + "/anim_" + r[0] + "/" + name + "_anim.fbx";
     }
 
     public static ExtractionAction DecideExtraction(bool extractedExists, bool stampMatches, bool keepTexture)
