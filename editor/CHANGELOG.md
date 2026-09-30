@@ -5,6 +5,24 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **A Blender script that crashes now fails the bake.** Blender exits 0 on an uncaught Python exception unless
+  told otherwise (measured on 5.1), so every `ExitCode != 0` check in the Factory, the Vehicle Lab and the Clip
+  Range dialog was dead for a crashed script: a crash after a partial output looked exactly like a finished run. The
+  worst case was `rig_anim`, which writes the role clips LAST — a crash among them left the previous bake's role
+  clips (baked against the old skeleton) beside a fresh primary, and the Factory called it baked. Every headless
+  run now goes through one head (`BakerRules.BlenderScript`: `--python-exit-code 1` placed before `--python`, the one
+  position Blender honours), `rig_anim` clears the previous run's role clips before it starts, the Vehicle Lab's
+  probe fails on a crash instead of handing back a partial part list, and the Clip Range dialog discards a partial
+  clip set instead of caching it for good. Only `deploy_convert` and the Lab's rig run already gated on their own
+  completion marker; they keep it, and a script's own diagnosis (`VEHICLE ERROR`, `RIGANIM ERROR`, `PREP_ERR`) is read
+  before the generic crash, so a deliberate failure keeps its reason. The Bake Tests' three launches (litmus, the
+  deploy golden diff) go through the same head. And a role dropped from a recipe (or state-driven mode switched off)
+  no longer leaves its `anim_<role>/` FBX under FactorySource behind: a bake sweeps the FBX of the roles it no longer
+  wants (six, 5.1 MB, were on the project; the delete guard keeps a copy). The role's `_Clips<Role>` collection under
+  Resources is deliberately left alone: the registry entry on disk references it until the save succeeds. A failed or
+  cancelled rig run also removes the primary FBX it may have written and drops the slim-args stamp, so the reuse path
+  can never take a crashed run's output as a finished one.
+
 - **Model Workshop: a re-cut keeps what was decided about the pieces** (user: "when I split salegs_revenge.glb and
   then probe it in the fusion, none of my previous configuration seem to have survived"). Since 2026-09-16 a cut
   hands its own marks down to the output; it wrote them straight over the sidecars already lying beside that output,

@@ -28,7 +28,7 @@ def blender():
 B = blender(); TMP = tempfile.mkdtemp(prefix="haf_merge2_")
 def run_py(code, *args):
     p = os.path.join(TMP, "s%d.py" % len(os.listdir(TMP))); open(p, "w", encoding="utf-8").write(code)
-    r = subprocess.run([B, "-b", "--factory-startup", "--python", p, "--", *args], capture_output=True, text=True, encoding="utf-8", errors="replace")
+    r = subprocess.run([B, "-b", "--factory-startup", "--python-exit-code", "1", "--python", p, "--", *args], capture_output=True, text=True, encoding="utf-8", errors="replace")
     return r.stdout + r.stderr
 
 FIRST = os.path.join(TMP, "first.glb")
@@ -36,7 +36,7 @@ run_py("import bpy,sys\nbpy.ops.wm.read_factory_settings(use_empty=True)\nbpy.op
        "bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')", FIRST)
 
 def run_file(path, *args):
-    r = subprocess.run([B, "-b", "--factory-startup", "--python", path, "--", *args], capture_output=True, text=True, encoding="utf-8", errors="replace")
+    r = subprocess.run([B, "-b", "--factory-startup", "--python-exit-code", "1", "--python", path, "--", *args], capture_output=True, text=True, encoding="utf-8", errors="replace")
     return r.stdout + r.stderr
 
 def probe(second, m2):

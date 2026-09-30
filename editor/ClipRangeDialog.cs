@@ -116,9 +116,12 @@ public class ClipRangeDialog : EditorWindow
             EditorUtility.DisplayProgressBar("Clip range picker", "Converting the model's clips to inspection FBXs (Blender)…", 0.4f);
             if (System.IO.Directory.Exists(dirFull))                                    // clear stale per-clip files (removed clips)
                 foreach (var f in System.IO.Directory.GetFiles(dirFull, "*.fbx")) System.IO.File.Delete(f);
+            // a missing script is said by name (review of PR #107: the head refuses an empty path, and that refusal read as the error)
+            string script = HafPackageContext.ToolPath("inspect_fbx.py");
+            if (string.IsNullOrEmpty(script) || !System.IO.File.Exists(script)) { Debug.LogError("[ClipRange] bundled inspect_fbx.py missing: " + (script ?? "(not found in the project's Tools/ or the package)")); return false; }
             var p = new System.Diagnostics.Process();
             p.StartInfo.FileName = UniversalBaker.FindBlender();
-            p.StartInfo.Arguments = $"--background --python \"{HafPackageContext.ToolPath("inspect_fbx.py")}\" -- \"{modelFile}\" \"{dirFull}\"";
+            p.StartInfo.Arguments = $"{BakerRules.BlenderScript(script)} -- \"{modelFile}\" \"{dirFull}\"";
             p.StartInfo.UseShellExecute = false; p.StartInfo.CreateNoWindow = true;
             p.StartInfo.RedirectStandardOutput = true; p.StartInfo.RedirectStandardError = true;
             p.Start();
@@ -126,6 +129,15 @@ public class ClipRangeDialog : EditorWindow
             // Blender fills the stderr pipe buffer while we block on stdout — Unity hangs until the process is killed.
             if (!UniversalBaker.RunBounded(p, 180000, out string so, out string _))
             { Debug.LogError("[ClipRange] Blender inspect conversion timed out."); return false; }
+            // A crash mid-loop wrote SOME clips; with the exit code dead (BakerRules.BlenderScript) the check below then
+            // passed and source.txt cached the partial set for good. Drop what it wrote, so the next open converts again.
+            if (p.ExitCode != 0)
+            {
+                if (System.IO.Directory.Exists(dirFull))
+                    foreach (var f in System.IO.Directory.GetFiles(dirFull, "*.fbx")) System.IO.File.Delete(f);
+                Debug.LogError($"[ClipRange] Blender inspect conversion crashed (exit {p.ExitCode}) — the partial clip set was discarded:\n" + so);
+                return false;
+            }
             if (!System.IO.Directory.Exists(dirFull) || System.IO.Directory.GetFiles(dirFull, "*.fbx").Length == 0)
             { Debug.LogError("[ClipRange] no inspection FBXs produced:\n" + so); return false; }
             System.IO.File.WriteAllText(System.IO.Path.Combine(dirFull, "source.txt"), srcKey);

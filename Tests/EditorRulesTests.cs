@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using Xunit;
 
@@ -7,6 +8,34 @@ using Xunit;
 // failed to protect single-material hand-edits.
 public class BakerRulesTests
 {
+    // A role dropped from a recipe leaves no FBX behind (2026-09-30): the sweep names exactly the unwanted roles' FBX -
+    // and NOTHING under Resources (third review: the registry entry on disk references the collection until the save lands).
+    [Fact]
+    public void A_dropped_role_names_its_fbx_only_and_a_kept_one_nothing()
+    {
+        var stale = BakerRules.StaleRoleFbx("Assets/FactorySource/Tank", "Tank", new[] { "move", "Attack" }).ToList();   // case does not matter
+        Assert.Equal(6, stale.Count);
+        Assert.DoesNotContain(stale, p => p.Contains("anim_move/") || p.Contains("anim_attack/"));
+        Assert.DoesNotContain(stale, p => p.StartsWith("Assets/Resources/"));
+        Assert.Contains("Assets/FactorySource/Tank/anim_after/Tank_anim.fbx", stale);
+        Assert.Contains("Assets/FactorySource/Tank/anim_idlealt2/Tank_anim.fbx", stale);
+        Assert.Equal(8, BakerRules.StaleRoleFbx("Assets/FactorySource/Tank", "Tank", null).Count());   // not state-driven: every role is stale
+        Assert.Empty(BakerRules.StaleRoleFbx("Assets/FactorySource/Tank", "Tank", BakerRules.Roles.Select(r => r[0])));
+    }
+
+    // The head of every headless Blender run (2026-09-30): the flag that makes a crashed script fail the process, in
+    // the one position Blender honours it (measured on 5.1: before --python exits 1, after it exits 0, without it 0).
+    [Fact]
+    public void A_blender_run_fails_the_process_when_its_script_throws()
+    {
+        string head = BakerRules.BlenderScript(@"C:\Tools\rig_anim.py");
+        Assert.Equal("--background --python-exit-code 1 --python \"C:\\Tools\\rig_anim.py\"", head);
+        Assert.True(head.IndexOf("--python-exit-code") < head.IndexOf("--python \""), "the exit-code flag must come BEFORE --python: Blender applies its arguments in order");
+        Assert.StartsWith("--background", head);
+        Assert.Throws<ArgumentException>(() => BakerRules.BlenderScript(""));
+        Assert.Throws<ArgumentException>(() => BakerRules.BlenderScript("C:\\a\"b.py"));   // a quote would end the argument early
+    }
+
     [Fact]
     public void Fresh_extraction_is_used_regardless_of_the_checkbox()
     {

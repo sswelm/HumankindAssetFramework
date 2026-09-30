@@ -343,7 +343,7 @@ public static class UniversalBaker
             EditorUtility.DisplayProgressBar("Model Factory", "Deploy conversion (Blender): rigid parts → bone-per-part rig…", 0.3f);
             var p = new System.Diagnostics.Process();
             p.StartInfo.FileName = FindBlender();
-            p.StartInfo.Arguments = $"--background --python \"{script}\" -- \"{cfg.modelFile}\" \"{outFull}\" " +
+            p.StartInfo.Arguments = $"{BakerRules.BlenderScript(script)} -- \"{cfg.modelFile}\" \"{outFull}\" " +
                 $"{cfg.deployStart} {cfg.deployEnd} \"{(cfg.deployStrip ?? "").Trim()}\" \"{(cfg.deployReadyFrame ?? "").Trim()}\" " +
                 $"\"{(cfg.deployLegScale ?? "").Trim()}\" \"{(cfg.deployBarrelScale ?? "").Trim()}\" " +
                 $"\"{rs}\" \"{re}\" \"{(cfg.deployRecoilStep ?? "").Trim()}\" \"{(cfg.deployRecoilMag ?? "").Trim()}\" \"{(cfg.deployArcR ?? "").Trim()}\" \"{(cfg.deployRecoilReturn ?? "").Trim()}\" \"{(cfg.deploySlamDeg ?? "").Trim()}\" \"{(cfg.deploySlamSettle ?? "").Trim()}\" \"{(cfg.deployStripExtra ?? "").Trim()}\" " +
@@ -501,16 +501,51 @@ public static class UniversalBaker
                 if (wantIdleAlt) stateRoles += ";idlealt=" + cfg.animClipIdleAlt.Trim();
                 if (wantIdleAlt2) stateRoles += ";idlealt2=" + cfg.animClipIdleAlt2.Trim();
             }
-            if (!RigAnimViaBlender(cfg.modelFile, fbxFull, target, cfg.animateBones ?? "", cfg.animClip ?? "", albedoOut, keepMats, cfg.rotationEuler, cfg.convertRig, stateRoles, cfg.autoGroundWheels, cfg.socketBones, cfg.keepTranslations, cfg.staticParts ?? "", cfg.localNodeAnim))
+            // The args sidecar is a SUCCESS stamp. Invalidate it before Blender starts: a failed run may leave a
+            // newer primary and every role filename on disk, making the timestamp and presence checks above pass
+            // on the next bake even though the last role FBX may be only partly written.
+            if (File.Exists(slimArgsFull)) File.Delete(slimArgsFull);
+            bool slimOk = false;
+            try
+            {
+                slimOk = RigAnimViaBlender(cfg.modelFile, fbxFull, target, cfg.animateBones ?? "", cfg.animClip ?? "", albedoOut, keepMats, cfg.rotationEuler, cfg.convertRig, stateRoles, cfg.autoGroundWheels, cfg.socketBones, cfg.keepTranslations, cfg.staticParts ?? "", cfg.localNodeAnim);
+            }
+            finally
+            {
+                // The primary is also a reuse signal when the user later bakes without a model file. Never leave
+                // a file from a failed or cancelled run eligible for that path.
+                if (!slimOk && File.Exists(fbxFull))
+                {
+                    try { File.Delete(fbxFull); }
+                    catch (Exception ex) { Debug.LogWarning("[Factory] could not remove the failed slim FBX: " + ex.Message); }
+                }
+            }
+            if (!slimOk)
                 return Fail(LastRigAnimError.Length > 0
                     ? "Blender animated slim failed: " + LastRigAnimError
                     : "Blender animated slim failed (see console). Is the model rigged with the named animation clip(s)?");
             AssetDatabase.Refresh();   // the role folders are new on disk — let Unity discover them before importing
-            try { File.WriteAllText(slimArgsFull, slimArgsKey); } catch { }   // record the fingerprint so the next 'Reuse extracted' knows whether a setting changed
+            try { File.WriteAllText(slimArgsFull, slimArgsKey); } catch { }   // restore the success stamp only after Blender completes
         }
         if (!File.Exists(fbxFull)) return Fail("no slim FBX at " + fbxRel + " — bake with a Model file first (Reuse extracted needs an existing one).");
         AssetDatabase.ImportAsset(fbxRel, ImportAssetOptions.ForceUpdate);
         TestPoll();
+        // ROLES THIS RECIPE NO LONGER WANTS (review of PR #107): rig_anim clears the previous run's clip for every role it is
+        // about to write; a role DROPPED from the recipe (or state-driven mode switched off) is not among those, and its
+        // FBX under FactorySource stayed, referenced by nothing. Swept here, after the run, by the same role table
+        // (BakerRules.Roles); FactorySource is a delete-guard root, so a copy is kept. The role's _Clips<Role> collection
+        // is NOT swept: the registry entry on disk references it until this bake's save succeeds, and a failure after
+        // this point rolls back only the whitelisted outputs (third review of PR #107).
+        {
+            var wantedRoles = new List<string>();
+            if (cfg.animStateDriven) wantedRoles.Add("move");
+            if (wantAfter) wantedRoles.Add("after"); if (wantAttack) wantedRoles.Add("attack"); if (wantCombat) wantedRoles.Add("combat");
+            if (wantPreMove) wantedRoles.Add("premove"); if (wantIdle) wantedRoles.Add("idle"); if (wantIdleAlt) wantedRoles.Add("idlealt"); if (wantIdleAlt2) wantedRoles.Add("idlealt2");
+            var swept = new List<string>();
+            foreach (var rel in BakerRules.StaleRoleFbx(resDir, name, wantedRoles))
+                if (File.Exists(Path.Combine(projRoot, rel)) && AssetDatabase.DeleteAsset(rel)) swept.Add(rel);
+            if (swept.Count > 0) Debug.Log($"[Factory] {name}: removed the FBX of {swept.Count} role(s) this recipe no longer uses (the delete guard keeps a copy): {string.Join(", ", swept)}");
+        }
         if (cfg.animStateDriven)
         {
             if (!File.Exists(Path.Combine(projRoot, moveFbxRel))) return Fail("state-driven: the Blender step produced no Movement FBX (" + moveFbxRel + ") — check the Movement clip name.");
@@ -1192,7 +1227,7 @@ public static class UniversalBaker
         string blender = FindBlender();
         var inv = System.Globalization.CultureInfo.InvariantCulture;   // never the OS locale — a Dutch comma-decimal would corrupt the arg
         string rotArg = string.Format(inv, "{0:0.###},{1:0.###},{2:0.###}", rotation.x, rotation.y, rotation.z);
-        string args = $"--background --python \"{script}\" -- \"{src}\" \"{outFbx}\" {Mathf.Max(0, targetTris)} \"{bonePrefixes ?? ""}\" \"{clipName ?? ""}\" \"{albedoOut ?? ""}\" {(keepMaterials ? "1" : "0")} \"{rotArg}\" {(convertRig ? "1" : "0")} \"{stateRoles ?? ""}\" {(autoGround ? "1" : "0")} \"{socketBones ?? ""}\" {(keepTranslations ? "1" : "0")} \"{staticParts ?? ""}\" {(localNodeAnim ? "1" : "0")}";   // argv[10]: auto-ground; argv[11]: donor sockets; argv[12]: keep translations; argv[13]: static (weightless) parts; argv[14]: local-delta node animation
+        string args = $"{BakerRules.BlenderScript(script)} -- \"{src}\" \"{outFbx}\" {Mathf.Max(0, targetTris)} \"{bonePrefixes ?? ""}\" \"{clipName ?? ""}\" \"{albedoOut ?? ""}\" {(keepMaterials ? "1" : "0")} \"{rotArg}\" {(convertRig ? "1" : "0")} \"{stateRoles ?? ""}\" {(autoGround ? "1" : "0")} \"{socketBones ?? ""}\" {(keepTranslations ? "1" : "0")} \"{staticParts ?? ""}\" {(localNodeAnim ? "1" : "0")}";   // argv[10]: auto-ground; argv[11]: donor sockets; argv[12]: keep translations; argv[13]: static (weightless) parts; argv[14]: local-delta node animation
         var psi = new System.Diagnostics.ProcessStartInfo(blender, args)
         { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         try
@@ -1212,7 +1247,9 @@ public static class UniversalBaker
                     LastRigAnimError = o?.Split('\n').LastOrDefault(l => l.Contains("RIGANIM ERROR"))?.Trim()
                                      ?? o?.Split('\n').LastOrDefault(l => l.TrimStart().StartsWith("Error:"))?.Trim()
                                      ?? "";
-                    Debug.LogError("[Factory] rig_anim produced no FBX (exit " + p.ExitCode + ")." +
+                    // The FBX may EXIST with a non-zero exit (BakerRules.BlenderScript): the primary is written first and the
+                    // role clips last, so a crash among the roles leaves the primary beside roles rig_anim cleared up front.
+                    Debug.LogError("[Factory] rig_anim " + (File.Exists(outFbx) ? "FAILED after writing the primary FBX" : "produced no FBX") + " (exit " + p.ExitCode + ")." +
                         (LastRigAnimError.Length > 0 ? "\nREASON: " + LastRigAnimError : " See the [rig_anim] log above for Blender's output."));
                     return false;
                 }
@@ -2609,7 +2646,7 @@ public static class UniversalBaker
         if (!File.Exists(script)) { Debug.LogError("[Factory] bundled prep_model.py missing: " + script); return false; }
         string blender = FindBlender();
         var psi = new System.Diagnostics.ProcessStartInfo(blender,
-            $"--background --python \"{script}\" -- \"{src}\" \"{outGlb}\" \"{substrings ?? ""}\" {Mathf.Max(0, targetTris)}")
+            $"{BakerRules.BlenderScript(script)} -- \"{src}\" \"{outGlb}\" \"{substrings ?? ""}\" {Mathf.Max(0, targetTris)}")
         { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         try
         {
@@ -2622,7 +2659,13 @@ public static class UniversalBaker
                 if (!string.IsNullOrWhiteSpace(e)) Debug.LogWarning("[prep] " + e.Trim());
                 var m = System.Text.RegularExpressions.Regex.Match(o ?? "", @"PREP reduce: tris (\d+) -> \d+");
                 if (m.Success && int.TryParse(m.Groups[1].Value, out int srcTris)) LastPrepSourceTris = srcTris;
-                if (p.ExitCode != 0 || !File.Exists(outGlb)) { Debug.LogError("[Factory] Blender prep produced no GLB (exit " + p.ExitCode + ")."); return false; }
+                if (p.ExitCode != 0 || !File.Exists(outGlb))
+                {
+                    // the script's own reason ("PREP_ERR ...") rode inside the info-level [prep] dump above - raise it into the error
+                    string why = o?.Split('\n').LastOrDefault(l => l.Contains("PREP_ERR"))?.Trim();
+                    Debug.LogError("[Factory] Blender prep " + (File.Exists(outGlb) ? "FAILED" : "produced no GLB") + " (exit " + p.ExitCode + ")." + (why != null ? "\nREASON: " + why : ""));
+                    return false;
+                }
                 return true;
             }
         }
@@ -2637,7 +2680,7 @@ public static class UniversalBaker
         string script = HafPackageContext.ToolPath("blend_export.py");
         if (!File.Exists(script)) { Debug.LogError("[Factory] bundled blend exporter missing: " + script); return false; }
         string blender = FindBlender();
-        var psi = new System.Diagnostics.ProcessStartInfo(blender, $"\"{blend}\" --background --python \"{script}\" -- \"{outGlb}\"")
+        var psi = new System.Diagnostics.ProcessStartInfo(blender, $"\"{blend}\" {BakerRules.BlenderScript(script)} -- \"{outGlb}\"")
         { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         try
         {
