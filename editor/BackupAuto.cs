@@ -100,7 +100,10 @@ class HafDeleteGuard : UnityEditor.AssetModificationProcessor
     internal static string SnapshotBakedOutputs(string name)
     {
         string dest = EditorPrefs.GetString("HAF.Backup.Dest", "D:/HAF_Backups");
-        Directory.CreateDirectory(dest);   // as Back up now does; a drive that isn't there throws, and the name is then not deleted
+        // A missing root is a reason to STOP, as the window's backup does (review of PR #105, round 5): renamed, moved, or
+        // on a drive that isn't mounted - conjuring it would start a new empty tree beside every snapshot the person has.
+        // The name is then not deleted, and the reason reaches the window.
+        if (!Directory.Exists(dest)) throw new DirectoryNotFoundException($"the backup root does not exist: {dest} — renamed, moved, or on a drive that isn't mounted? Fix 'Backup folder' in Tools ▸ HAF ▸ Backup and Restore first");
         string dir = BackupRules.ReserveFolder(dest, BackupRules.OutputsSnapshotFolderName(DateTime.Now.ToString("yyyy-MM-dd_HHmmss"), name), CheckedReplace.TryReserveFolder);
         try
         {

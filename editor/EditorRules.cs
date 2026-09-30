@@ -270,17 +270,19 @@ public static class BackupRules
     }
 
     /// <summary>
-    /// May the previous snapshot's copy stand in for the live file (a hard link instead of a copy)? Sizes must match;
-    /// an IDENTICAL last-write time is taken as proof (a copy keeps it to the tick on NTFS); within the 2-second
-    /// tolerance that FAT and network shares need, the BYTES decide (review of PR #105 by ChatGPT: size plus a 2 s
+    /// May the previous snapshot's copy stand in for the live file (a hard link instead of a copy)? Sizes must match.
+    /// An IDENTICAL last-write time is proof only when it carries sub-second ticks: only a fine-grained file system
+    /// (NTFS, 100 ns) writes those, and two writes there never share a tick. A whole-second time is FAT-shaped (2 s
+    /// slots), where a same-length edit inside the slot keeps the time (review of PR #105, round 5) - so it, and any
+    /// time within the 2-second tolerance FAT and network shares need, lets the BYTES decide (round 4: size plus a 2 s
     /// window let a same-length edit made within 2 s of the copied version be "unchanged", and the snapshot then named
-    /// the OLD bytes under a fresh date); further apart is a different file, copied. Pure: the byte read is the callback's.
+    /// the OLD bytes under a fresh date). Further apart is a different file, copied. Pure: the byte read is the callback's.
     /// </summary>
     public static bool SameCopy(long liveLength, DateTime liveWriteUtc, long copyLength, DateTime copyWriteUtc, Func<bool> sameBytes)
     {
         if (liveLength != copyLength) return false;
-        if (liveWriteUtc == copyWriteUtc) return true;
         if (Math.Abs((liveWriteUtc - copyWriteUtc).TotalSeconds) > 2) return false;
+        if (liveWriteUtc == copyWriteUtc && liveWriteUtc.Ticks % TimeSpan.TicksPerSecond != 0) return true;
         return sameBytes();
     }
 

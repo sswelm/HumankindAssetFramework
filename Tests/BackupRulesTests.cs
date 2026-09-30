@@ -176,18 +176,23 @@ public class BackupRulesTests
     [Fact]
     public void A_copy_stands_in_only_when_it_is_the_same_bytes()
     {
-        var t = new DateTime(2026, 9, 30, 12, 0, 0, DateTimeKind.Utc);
+        var fine = new DateTime(2026, 9, 30, 12, 0, 0, DateTimeKind.Utc).AddTicks(1234567);   // NTFS: 100 ns ticks
+        var coarse = new DateTime(2026, 9, 30, 12, 0, 0, DateTimeKind.Utc);                   // FAT: whole 2 s slots
         int asked = 0;
         Func<bool> never = () => { asked++; return true; };
-        Assert.False(BackupRules.SameCopy(10, t, 11, t, never));                          // a different size is a different file
-        Assert.True(BackupRules.SameCopy(10, t, 10, t, never));                           // the same time to the tick is proof
+        Assert.False(BackupRules.SameCopy(10, fine, 11, fine, never));                    // a different size is a different file
+        Assert.True(BackupRules.SameCopy(10, fine, 10, fine, never));                     // the same sub-second time is proof
         Assert.Equal(0, asked);                                                           // neither read a byte
-        Assert.False(BackupRules.SameCopy(10, t, 10, t.AddSeconds(3), never));            // past the tolerance: copied, no read
+        Assert.False(BackupRules.SameCopy(10, fine, 10, fine.AddSeconds(3), never));      // past the tolerance: copied, no read
         Assert.Equal(0, asked);
         // within the tolerance the bytes decide - the reported case: a same-length edit 1 s after the version copied
-        Assert.False(BackupRules.SameCopy(10, t.AddSeconds(1), 10, t, () => false));
-        Assert.True(BackupRules.SameCopy(10, t.AddSeconds(1.5), 10, t, () => true));      // FAT rounding, same bytes: linked
-        Assert.True(BackupRules.SameCopy(10, t, 10, t.AddSeconds(2), () => true));
+        Assert.False(BackupRules.SameCopy(10, fine.AddSeconds(1), 10, fine, () => false));
+        Assert.True(BackupRules.SameCopy(10, fine.AddSeconds(1.5), 10, fine, () => true));   // FAT rounding, same bytes: linked
+        Assert.True(BackupRules.SameCopy(10, fine, 10, fine.AddSeconds(2), () => true));
+        // round 5: an EQUAL whole-second time is FAT-shaped - a same-length edit inside the slot keeps it - so the bytes decide
+        Assert.False(BackupRules.SameCopy(10, coarse, 10, coarse, () => false));
+        Assert.True(BackupRules.SameCopy(10, coarse, 10, coarse, () => { asked++; return true; }));
+        Assert.Equal(1, asked);
     }
 
     [Fact]

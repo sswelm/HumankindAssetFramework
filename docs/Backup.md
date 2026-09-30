@@ -32,9 +32,11 @@ differently:
 same bytes on the same volume, so an unchanged file costs **zero** additional space while each snapshot stays a
 complete, independently browsable, independently restorable folder. Same idea as Time Machine or `rsync --link-dest`.
 The first real run: 4,077 files, **3,966 hard-linked (1.2 GB saved), 111 copied (65.4 MB)**. "Unchanged" means the
-same size and the same last-write time to the tick; within the 2-second tolerance FAT and network shares need, the
-bytes are compared (a same-length edit made within 2 s of the copied version once passed as unchanged — review of
-PR #105); further apart is copied.
+same size and the same **sub-second** last-write time — only a fine-grained file system (NTFS) writes those, and two
+writes there never share a tick. A whole-second match is FAT-shaped (2 s slots, where a same-length edit inside the
+slot keeps the time), so it and anything within the 2-second tolerance FAT and network shares need compares the
+bytes (a same-length edit near the copied version once passed as unchanged — review of PR #105); further apart is
+copied.
 
 > **Two consequences worth knowing.** Explorer reports each snapshot at its full apparent size — it counts shared
 > bytes once per name, so the folder still *looks* like 1.4 GB. And deleting an old snapshot frees only the blocks
