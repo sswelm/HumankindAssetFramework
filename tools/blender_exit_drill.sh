@@ -38,6 +38,9 @@ check $([ "$rc" -ne 0 ]; echo $?) "a script that raises fails the process (exit 
 check $([ "$rc" -eq 0 ]; echo $?) "without the flag the same crash exits $rc — the hole the helper closes"
 "$BLENDER" --background --python-exit-code 1 --python "$WTMP/clean.py" > /dev/null 2>&1; rc=$?
 check $([ "$rc" -eq 0 ]; echo $?) "a clean script still exits 0 (exit $rc)"
+printf 'import sys\nprint("VEHICLE ERROR: a diagnosed failure")\nsys.exit(3)\n' > "$TMPD/diag.py"
+"$BLENDER" --background --python-exit-code 1 --python "$WTMP/diag.py" > /dev/null 2>&1; rc=$?
+check $([ "$rc" -eq 3 ]; echo $?) "a script's own sys.exit keeps its code (exit $rc) — the sites read the diagnosis before the generic crash"
 
 # 3. the real rig_anim.py: the stale role clip is cleared before the model is touched; the dead run exits non-zero
 mkdir -p "$TMPD/res/anim" "$TMPD/res/anim_move"
@@ -50,4 +53,4 @@ check $(grep -q "RIGANIM cleared the previous run's move clip" "$TMPD/rig.log"; 
 check $([ ! -f "$TMPD/res/anim/x_anim.fbx" ]; echo $?) "no primary was written by the dead run"
 
 if [ "$fails" -ne 0 ]; then echo "FAIL — blender exit drill ($fails failed); logs: $TMPD"; trap - EXIT; exit 1; fi
-echo "PASS — blender exit drill: 7 checks against $(basename "$(dirname "$BLENDER")")"
+echo "PASS — blender exit drill: 8 checks against $(basename "$(dirname "$BLENDER")")"

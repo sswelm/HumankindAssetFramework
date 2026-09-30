@@ -14,7 +14,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   position Blender honours), `rig_anim` clears the previous run's role clips before it starts, the Vehicle Lab's
   probe fails on a crash instead of handing back a partial part list, and the Clip Range dialog discards a partial
   clip set instead of caching it for good. Only `deploy_convert` and the Lab's rig run already gated on their own
-  completion marker; they keep it.
+  completion marker; they keep it, and a script's own diagnosis (`VEHICLE ERROR`, `RIGANIM ERROR`, `PREP_ERR`) is read
+  before the generic crash, so a deliberate failure keeps its reason. The Bake Tests' three launches (litmus, the
+  deploy golden diff) go through the same head.
 
 - **Model Workshop: a re-cut keeps what was decided about the pieces** (user: "when I split salegs_revenge.glb and
   then probe it in the fusion, none of my previous configuration seem to have survived"). Since 2026-09-16 a cut

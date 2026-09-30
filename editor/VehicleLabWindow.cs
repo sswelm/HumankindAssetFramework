@@ -2495,12 +2495,15 @@ public class VehicleLabWindow : EditorWindow
             p.Start();
             if (!UniversalBaker.RunBounded(p, 300000, out stdout, out string stderr)) { status = "Blender timed out (5 min)."; return false; }
             lastStdout = stdout;
-            // A crashed script now exits 1 (BakerRules.BlenderScript). The rig path also gates on its own DONE marker; the
-            // probe path did not, and a crash mid-probe handed back a partial PART list as the model's parts.
-            if (p.ExitCode != 0)
-            { status = $"Blender crashed (exit {p.ExitCode}) — the traceback is in the Console."; Debug.LogError("[VehicleLab] Blender crashed (exit " + p.ExitCode + ").\n" + stdout + "\n--- stderr ---\n" + stderr); return false; }
+            // THE SCRIPT'S OWN DIAGNOSIS FIRST: vehicle_rig says "VEHICLE ERROR: <why>" and sys.exit(1)s - that exit was
+            // always 1, so a generic exit check ahead of this would replace the reason with "crashed" (review of PR #107).
             if (stdout.Contains("VEHICLE ERROR"))
             { status = stdout.Split('\n').FirstOrDefault(l => l.Contains("VEHICLE ERROR")) ?? "Blender step failed."; Debug.LogError("[VehicleLab]\n" + stdout + "\n--- stderr ---\n" + stderr); return false; }
+            // Then the crash it did NOT diagnose: an uncaught exception exits 1 since BakerRules.BlenderScript. The rig path
+            // also gates on its own DONE marker; the probe path did not, and a crash mid-probe handed back a partial PART
+            // list as the model's parts.
+            if (p.ExitCode != 0)
+            { status = $"Blender crashed (exit {p.ExitCode}) — the traceback is in the Console."; Debug.LogError("[VehicleLab] Blender crashed (exit " + p.ExitCode + ").\n" + stdout + "\n--- stderr ---\n" + stderr); return false; }
             sw.Stop();
             // console headline = the OUTCOME (collapsed console shows the first line; the old raw dump buried the
             // DONE line and spammed thousands of PART rows)

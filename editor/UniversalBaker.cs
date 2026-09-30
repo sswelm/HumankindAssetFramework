@@ -2624,7 +2624,13 @@ public static class UniversalBaker
                 if (!string.IsNullOrWhiteSpace(e)) Debug.LogWarning("[prep] " + e.Trim());
                 var m = System.Text.RegularExpressions.Regex.Match(o ?? "", @"PREP reduce: tris (\d+) -> \d+");
                 if (m.Success && int.TryParse(m.Groups[1].Value, out int srcTris)) LastPrepSourceTris = srcTris;
-                if (p.ExitCode != 0 || !File.Exists(outGlb)) { Debug.LogError("[Factory] Blender prep produced no GLB (exit " + p.ExitCode + ")."); return false; }
+                if (p.ExitCode != 0 || !File.Exists(outGlb))
+                {
+                    // the script's own reason ("PREP_ERR ...") rode inside the info-level [prep] dump above - raise it into the error
+                    string why = o?.Split('\n').LastOrDefault(l => l.Contains("PREP_ERR"))?.Trim();
+                    Debug.LogError("[Factory] Blender prep " + (File.Exists(outGlb) ? "FAILED" : "produced no GLB") + " (exit " + p.ExitCode + ")." + (why != null ? "\nREASON: " + why : ""));
+                    return false;
+                }
                 return true;
             }
         }
