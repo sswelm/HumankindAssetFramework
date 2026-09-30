@@ -65,7 +65,10 @@ public static class ConversionGateTest
             // deadlocks if Blender fills the stderr pipe buffer while we're blocked reading stdout (and the 180s
             // WaitForExit came AFTER, so it never armed) → the gate test could freeze the whole editor.
             using (var p = System.Diagnostics.Process.Start(psi))
+            {
                 if (!UniversalBaker.RunBounded(p, 180000, out string _, out string _)) return Bad("litmus synthesis: Blender timed out (3 min)");
+                if (p.ExitCode != 0) return Bad($"litmus synthesis: Blender exited {p.ExitCode}");
+            }
             if (!File.Exists(litmus)) return Bad("litmus synthesis produced no GLB");
         }
         var def = new ModelDef
@@ -172,10 +175,13 @@ public static class ConversionGateTest
             string qargs = string.Join(" ", fields.Skip(3).Select(a => "\"" + a + "\""));
             string outGlb = Path.Combine(Path.GetTempPath(), "convgate_" + res + ".glb");
             try { if (File.Exists(outGlb)) File.Delete(outGlb); } catch { }
-            string convOut = RunBlenderCapture(blender, $"{BakerRules.BlenderScript(convert)} -- \"{src}\" \"{outGlb}\" {qargs}");
+            if (!RunBlenderCapture(blender, $"{BakerRules.BlenderScript(convert)} -- \"{src}\" \"{outGlb}\" {qargs}", out string convOut, out string convError))
+            { lines.Add($"FAIL {res} — deploy_convert {convError}"); fail++; continue; }
             if (!File.Exists(outGlb) || !convOut.Contains("DEPLOY wrote:"))
             { lines.Add($"FAIL {res} — deploy_convert did not complete (see the DEPLOY log in the Console)"); fail++; continue; }
-            string got = FilterDump(RunBlenderCapture(blender, $"{BakerRules.BlenderScript(dump)} -- \"{outGlb}\""));
+            if (!RunBlenderCapture(blender, $"{BakerRules.BlenderScript(dump)} -- \"{outGlb}\"", out string dumpOut, out string dumpError))
+            { lines.Add($"FAIL {res} — deploy_bonedump {dumpError}"); fail++; continue; }
+            string got = FilterDump(dumpOut);
             try { File.Delete(outGlb); } catch { }
             string goldFile = Path.Combine(goldDir, res + ".txt");
             if (!File.Exists(goldFile)) { lines.Add($"NO GOLDEN {res} — run `bash Tools/deploy_regression.sh --capture` once"); miss++; continue; }
@@ -189,14 +195,25 @@ public static class ConversionGateTest
         return new BakeTestSection { title = title, pass = pass, fail = fail, skip = miss, body = string.Join("\n", lines) };
     }
 
-    static string RunBlenderCapture(string blender, string args)
+    static bool RunBlenderCapture(string blender, string args, out string stdout, out string error)
     {
+        stdout = ""; error = "";
         var psi = new System.Diagnostics.ProcessStartInfo(blender, args)
         { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
         // Concurrent pipe drain (RunBounded) — a sequential ReadToEnd(stdout)+ReadToEnd(stderr) deadlocks when Blender
         // fills the stderr buffer while we're blocked on stdout; RunBounded reads both on background tasks + bounds the wait.
         using (var p = System.Diagnostics.Process.Start(psi))
-        { UniversalBaker.RunBounded(p, 180000, out string so, out string _); return so; }
+        {
+            if (!UniversalBaker.RunBounded(p, 180000, out stdout, out string stderr))
+            { error = "timed out (3 min)"; return false; }
+            if (p.ExitCode != 0)
+            {
+                error = $"exited {p.ExitCode} (see the Console for Blender's output)";
+                Debug.LogError("[ConvGate] Blender " + error + "\n" + stdout + "\n--- stderr ---\n" + stderr);
+                return false;
+            }
+            return true;
+        }
     }
 
     // Keep only the deterministic snapshot lines (same set the CLI greps), so C# and bash compare identically.

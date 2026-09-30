@@ -501,12 +501,31 @@ public static class UniversalBaker
                 if (wantIdleAlt) stateRoles += ";idlealt=" + cfg.animClipIdleAlt.Trim();
                 if (wantIdleAlt2) stateRoles += ";idlealt2=" + cfg.animClipIdleAlt2.Trim();
             }
-            if (!RigAnimViaBlender(cfg.modelFile, fbxFull, target, cfg.animateBones ?? "", cfg.animClip ?? "", albedoOut, keepMats, cfg.rotationEuler, cfg.convertRig, stateRoles, cfg.autoGroundWheels, cfg.socketBones, cfg.keepTranslations, cfg.staticParts ?? "", cfg.localNodeAnim))
+            // The args sidecar is a SUCCESS stamp. Invalidate it before Blender starts: a failed run may leave a
+            // newer primary and every role filename on disk, making the timestamp and presence checks above pass
+            // on the next bake even though the last role FBX may be only partly written.
+            if (File.Exists(slimArgsFull)) File.Delete(slimArgsFull);
+            bool slimOk = false;
+            try
+            {
+                slimOk = RigAnimViaBlender(cfg.modelFile, fbxFull, target, cfg.animateBones ?? "", cfg.animClip ?? "", albedoOut, keepMats, cfg.rotationEuler, cfg.convertRig, stateRoles, cfg.autoGroundWheels, cfg.socketBones, cfg.keepTranslations, cfg.staticParts ?? "", cfg.localNodeAnim);
+            }
+            finally
+            {
+                // The primary is also a reuse signal when the user later bakes without a model file. Never leave
+                // a file from a failed or cancelled run eligible for that path.
+                if (!slimOk && File.Exists(fbxFull))
+                {
+                    try { File.Delete(fbxFull); }
+                    catch (Exception ex) { Debug.LogWarning("[Factory] could not remove the failed slim FBX: " + ex.Message); }
+                }
+            }
+            if (!slimOk)
                 return Fail(LastRigAnimError.Length > 0
                     ? "Blender animated slim failed: " + LastRigAnimError
                     : "Blender animated slim failed (see console). Is the model rigged with the named animation clip(s)?");
             AssetDatabase.Refresh();   // the role folders are new on disk — let Unity discover them before importing
-            try { File.WriteAllText(slimArgsFull, slimArgsKey); } catch { }   // record the fingerprint so the next 'Reuse extracted' knows whether a setting changed
+            try { File.WriteAllText(slimArgsFull, slimArgsKey); } catch { }   // restore the success stamp only after Blender completes
         }
         if (!File.Exists(fbxFull)) return Fail("no slim FBX at " + fbxRel + " — bake with a Model file first (Reuse extracted needs an existing one).");
         AssetDatabase.ImportAsset(fbxRel, ImportAssetOptions.ForceUpdate);
