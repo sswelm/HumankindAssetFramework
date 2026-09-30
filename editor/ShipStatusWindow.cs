@@ -89,11 +89,18 @@ public class ShipStatusWindow : EditorWindow
     // (ModelRegistry/pack.json), districts (DistrictRegistry/haf_districts.json), props (PropRegistry/
     // haf_props.json) — plus hand-prop names referenced from unit entries. The first version only knew units and
     // accused every district/prop of being an ORPHANED BAKE (2026-08-18 first-run finding, user screenshot).
+    // A registry that could not be READ this scan (critical review 2026-09-30): its empty list is not "no entries", so the
+    // orphan verdict - "outputs no registry owns" - is never given while any registry is unreadable, and Delete is off.
+    string registryProblem = "";
+    // what the last Delete selected did, for the window (the Console has the per-name lines); cleared by Refresh
+    string lastAction = "";
+
     void Scan()
     {
         buildUtc = ShipStatus.LastBuildUtc(out buildDir);
-        rows.Clear();
+        rows.Clear(); registryProblem = "";
         var entries = ModelRegistry.Load();
+        if (ModelRegistry.LastLoadFailed) registryProblem = "the model registry " + ModelRegistry.LastLoadProblem;
         var names = new HashSet<string>(entries.Select(e => e.resourceName));
         foreach (var e in entries)
         {
@@ -107,13 +114,16 @@ public class ShipStatusWindow : EditorWindow
                 rows.Add(ShippedRow(e.resourceName, "unit", bake));
         }
         AddOwned(names, () => DistrictRegistry.Load().Select(d => d.resourceName), "district");
+        if (DistrictRegistry.LastLoadFailed && registryProblem == "") registryProblem = "the district registry " + DistrictRegistry.LastLoadProblem;
         AddOwned(names, () => PropRegistry.Load().Select(p => p.resourceName), "prop");
+        if ((PropRegistry.Unreadable != "" || PropRegistry.Unsure != "") && registryProblem == "") registryProblem = "the prop registry: " + (PropRegistry.Unreadable != "" ? PropRegistry.Unreadable : PropRegistry.Unsure);
         // Hand props referenced by name from unit entries (may not appear in haf_props.json when authored elsewhere).
         AddOwned(names, () => entries.Select(e => e.handPropName).Where(n => !string.IsNullOrEmpty(n)), "hand prop");
         // Orphaned bakes: output files NO registry owns (renamed/removed entries leave these behind; they still
         // SHIP — Resources force-includes everything — so they are dead weight in the bundle). ConversionGateTest
-        // debris gets its own label: it's test scratch, not a lost model.
-        try
+        // debris gets its own label: it's test scratch, not a lost model. NOT while a registry couldn't be read: every
+        // one of its entries would then look ownerless.
+        if (registryProblem == "") try
         {
             var res = Path.Combine(Application.dataPath, "Resources");
             var orphans = new HashSet<string>();
@@ -127,9 +137,10 @@ public class ShipStatusWindow : EditorWindow
             foreach (var n in orphans.OrderBy(x => x))
                 rows.Add(n.StartsWith("__convgate__")
                     ? new Row { name = n, state = "TEST ARTIFACT", detail = "ConversionGateTest scratch bake — still ships as dead bundle weight; safe to delete", severity = 1, deletable = true }
-                    : new Row { name = n, state = "ORPHANED BAKE", detail = "baked outputs no registry owns (renamed/removed?) — dead weight that still ships; tick + Delete selected to clean up (delete-guard snapshots everything)", severity = 1, deletable = true });
+                    : new Row { name = n, state = "ORPHANED BAKE", detail = "baked outputs no registry owns (renamed/removed?) — dead weight that still ships; tick + Delete selected to clean up (each name's outputs are snapshotted first)", severity = 1, deletable = true });
         }
         catch { }
+        if (registryProblem != "") foreach (var r in rows) r.deletable = false;
         rows.Sort((a, b) => b.severity != a.severity ? b.severity - a.severity : string.CompareOrdinal(a.name, b.name));
         lastClicked = -1;
     }
@@ -177,8 +188,11 @@ public class ShipStatusWindow : EditorWindow
         using (new EditorGUILayout.HorizontalScope())
         {
             EditorGUILayout.LabelField(buildUtc == null ? "Last mod build: NONE FOUND" : $"Last mod build: {Local(buildUtc)}   ({Path.GetFileName(buildDir)})");
-            if (GUILayout.Button(new GUIContent("Refresh", "Re-scan bake times and the newest mod build."), GUILayout.Width(70))) Scan();
+            if (GUILayout.Button(new GUIContent("Refresh", "Re-scan bake times and the newest mod build."), GUILayout.Width(70))) { lastAction = ""; Scan(); }
         }
+        if (registryProblem != "")
+            EditorGUILayout.HelpBox($"COULD NOT CHECK ownership: {registryProblem}. An unreadable registry's entries would all look ownerless, so no orphan is reported and Delete is off this scan. Fix that, then Refresh.", MessageType.Warning);
+        if (lastAction != "") EditorGUILayout.HelpBox(lastAction, MessageType.Info);
         int problems = rows.Count(r => r.severity == 2);
         if (problems > 0)
             EditorGUILayout.HelpBox($"{problems} entr{(problems == 1 ? "y is" : "ies are")} not in the current build — run the mod build, then relaunch the game. " +
@@ -222,9 +236,11 @@ public class ShipStatusWindow : EditorWindow
         }
         EditorGUILayout.EndScrollView();
         // DELETE SELECTED (user request 2026-08-18: "any of the listed resources"). Deletion runs the baker's own
-        // SweepAllOutputs (exact whitelist), so the delete-guard snapshots every file first — fully restorable
-        // from the Backup & Restore window's guard-snapshot list. Owned entries are only UN-BAKED: the registry
-        // entry stays (BAKE MISSING until re-baked); removing the entry itself is the Factory's Remove.
+        // SweepAllOutputs (exact whitelist) - AFTER a guard snapshot of that name's outputs taken here, on request
+        // (critical review 2026-09-30: the automatic delete guard excludes Assets/Resources by design, so the promised
+        // "snapshots every file first" never happened). A name whose snapshot can't be taken is not deleted. Owned
+        // entries are only UN-BAKED: the registry entry stays (BAKE MISSING until re-baked); removing the entry itself is
+        // the Factory's Remove.
         var deletable = rows.Where(r => r.deletable).ToList();
         if (deletable.Count > 0)
             using (new EditorGUILayout.HorizontalScope())
@@ -233,7 +249,7 @@ public class ShipStatusWindow : EditorWindow
                 if (GUILayout.Button(new GUIContent(deletable.All(r => r.ticked) ? "Untick all" : "Tick all", "Toggle every row that has baked outputs."), GUILayout.Width(80)))
                 { bool on = !deletable.All(r => r.ticked); foreach (var r in deletable) r.ticked = on; }
                 using (new EditorGUI.DisabledScope(ticked == 0))
-                    if (GUILayout.Button(new GUIContent($"Delete selected ({ticked})", "Delete the ticked rows' baked output files from Assets/Resources. The delete-guard snapshots every file first — restorable from the Backup & Restore window. Registry entries are NOT touched."), GUILayout.Width(150)))
+                    if (GUILayout.Button(new GUIContent($"Delete selected ({ticked})", "Delete the ticked rows' baked output files from Assets/Resources. Each name's outputs are snapshotted first (a _deleted_ folder, restorable from the Backup & Restore window); a name whose snapshot fails is not deleted. Registry entries are NOT touched."), GUILayout.Width(150)))
                     {
                         var sel = deletable.Where(r => r.ticked).ToList();
                         var names = sel.Select(r => r.name).ToList();
@@ -244,19 +260,27 @@ public class ShipStatusWindow : EditorWindow
                             : "";
                         if (EditorUtility.DisplayDialog("Delete baked outputs?",
                             $"Delete the baked outputs of {names.Count} name(s) from Assets/Resources:\n\n{listing}{ownedNote}\n\n" +
-                            "The delete-guard snapshots every file first, so this is restorable from the Backup & Restore window.",
+                            "Each name's outputs are snapshotted first into the backup folder (restorable from the Backup & Restore window); a name whose snapshot can't be taken is NOT deleted.",
                             "Delete", "Cancel"))
                         {
+                            var deleted = new List<string>(); var skipped = new List<string>();
                             foreach (var n in names)
                             {
                                 // a name with path characters is never used to locate files (BackupRules, review of PR #102): said and skipped, the rest still swept
-                                if (!BackupRules.IsPlainName(n)) { Debug.LogWarning($"[ShipStatus] '{n}' contains path characters — its outputs were NOT deleted; fix the entry's resourceName by hand."); continue; }
+                                if (!BackupRules.IsPlainName(n)) { skipped.Add(n); Debug.LogWarning($"[ShipStatus] '{n}' contains path characters — its outputs were NOT deleted; fix the entry's resourceName by hand."); continue; }
+                                string snap;
+                                try { snap = HafDeleteGuard.SnapshotBakedOutputs(n); }
+                                catch (Exception ex) { skipped.Add(n); Debug.LogWarning($"[ShipStatus] '{n}': its outputs were NOT deleted — the guard snapshot could not be taken ({ex.Message})."); continue; }
                                 UniversalBaker.SweepAllOutputs(n);
+                                deleted.Add(n);
+                                if (snap != null) Debug.Log($"[ShipStatus] '{n}': outputs snapshotted → {snap}, then deleted.");
                             }
                             AssetDatabase.Refresh();
                             Scan();
                             ModelFactoryWindow.RefreshAllOpen();   // an open Factory showing an un-baked entry must find out now, not on the next reload
-                            Debug.Log($"[ShipStatus] deleted the baked outputs of {names.Count} name(s): {string.Join(", ", names)} (guard snapshots taken).");
+                            lastAction = $"Deleted the baked outputs of {deleted.Count} name(s)" + (deleted.Count > 0 ? $": {string.Join(", ", deleted)} (each snapshotted first to a _deleted_ folder under {EditorPrefs.GetString("HAF.Backup.Dest", "D:/HAF_Backups")} — restorable from Backup & Restore)" : "") +
+                                         (skipped.Count > 0 ? $". NOT deleted — no snapshot could be taken, or the name isn't plain (see the Console): {string.Join(", ", skipped)}" : "") + ".";
+                            Debug.Log("[ShipStatus] " + lastAction);
                             GUIUtility.ExitGUI();
                         }
                     }
@@ -264,6 +288,6 @@ public class ShipStatusWindow : EditorWindow
         EditorGUILayout.HelpBox("Hover a row for details. BAKED, NOT BUILT = the HandCrankedSubmarine trap (2026-08-18): " +
             "the entry's GUIDs point at assets newer than the shipped bundle, so the game can't resolve them. " +
             "Tick any row with baked outputs + Delete selected: orphans/test artifacts vanish for good, owned entries " +
-            "just lose their bakes (re-bake to regenerate). Everything deleted is guard-snapshotted and restorable.", MessageType.None);
+            "just lose their bakes (re-bake to regenerate). Each deleted name's outputs are snapshotted first and restorable from Backup & Restore.", MessageType.None);
     }
 }

@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using Xunit;
 
@@ -123,4 +124,49 @@ public class BackupRulesTests
         Assert.False(BackupRules.IsRemovedSnapshotInside("", Path.Combine(root, "_removed_x_Tank")));
         Assert.False(BackupRules.IsRemovedSnapshotInside(root, null));
     }
+    // ---- the manifest line (2026-09-30): three writers (the window, the delete guard, Ship Status' outputs snapshot),
+    //      one reader, one format ----
+
+    [Fact]
+    public void A_manifest_line_round_trips_through_the_reader()
+    {
+        string line = BackupRules.ManifestLine("resources\\Tank_Atlas.png", "C:\\Proj\\Assets\\Resources\\Tank_Atlas.png", 1, 4096);
+        Assert.Equal("SRC\tresources/Tank_Atlas.png\tC:/Proj/Assets/Resources/Tank_Atlas.png\t1\t4096", line);   // separators as `/`, tabs between
+        Assert.True(BackupRules.TryParseManifestLine(line, out string rel, out string original, out int files));
+        Assert.Equal("resources/Tank_Atlas.png", rel);
+        Assert.Equal("C:/Proj/Assets/Resources/Tank_Atlas.png", original);
+        Assert.Equal(1, files);
+        // a tree line: the count is the tree's
+        Assert.True(BackupRules.TryParseManifestLine(BackupRules.ManifestLine("pack/Pack", "C:/Proj/Assets/Pack", 37, 123456789L), out _, out _, out files));
+        Assert.Equal(37, files);
+    }
+
+    [Fact]
+    public void The_reader_takes_only_source_lines()
+    {
+        foreach (var notASource in new[] { null, "", "# HAF backup manifest", "# original: C:/x", "SRC", "SRC\tonly-rel", "SRC\trel\toriginal", "src\trel\toriginal\t1\t2", " SRC\trel\toriginal\t1\t2" })
+            Assert.False(BackupRules.TryParseManifestLine(notASource, out _, out _, out _), notASource ?? "<null>");
+        // an older or hand-edited line whose count does not parse reads as 0 files, not as no source
+        Assert.True(BackupRules.TryParseManifestLine("SRC\trel\toriginal\tmany", out string rel, out _, out int files));
+        Assert.Equal("rel", rel); Assert.Equal(0, files);
+    }
+
+    [Fact]
+    public void A_path_with_a_tab_cannot_be_carried()
+    {
+        Assert.Throws<ArgumentException>(() => BackupRules.ManifestLine("a\tb", "C:/x", 1, 1));
+        Assert.Throws<ArgumentException>(() => BackupRules.ManifestLine("a", "C:/x\ty", 1, 1));
+        Assert.Throws<ArgumentNullException>(() => BackupRules.ManifestLine(null, "C:/x", 1, 1));
+    }
+
+    [Fact]
+    public void An_outputs_snapshot_folder_is_a_delete_guard_folder_for_one_name()
+    {
+        string f = BackupRules.OutputsSnapshotFolderName("2026-09-30_141500", "Era6_Common_StealthCorvettes_01");
+        Assert.Equal("_deleted_2026-09-30_141500_Era6_Common_StealthCorvettes_01_outputs", f);
+        Assert.StartsWith(BackupRules.DeletedPrefix, f);            // listed, restored and aged with the guard's snapshots
+        Assert.DoesNotContain("/", BackupRules.OutputsSnapshotFolderName("s", "../../x"));   // the name is made one segment
+        Assert.DoesNotContain("\\", BackupRules.OutputsSnapshotFolderName("s", "..\\..\\x"));
+    }
+
 }

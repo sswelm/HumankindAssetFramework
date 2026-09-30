@@ -80,14 +80,48 @@ class HafDeleteGuard : UnityEditor.AssetModificationProcessor
                 // one click puts the deleted asset back (with the usual pre-restore safety snapshot). The .meta gets
                 // its OWN line: restoring without it would regenerate the GUID and break asset references.
                 var mf = new List<string> { "# HAF delete-guard snapshot", "# original: " + abs.Replace('\\', '/'), "",
-                    $"SRC\t{leaf}\t{abs.Replace('\\', '/')}\t{(meta ? n - 1 : n)}\t{bytes}" };
-                if (meta) mf.Add($"SRC\t{leaf}.meta\t{abs.Replace('\\', '/')}.meta\t1\t{new FileInfo(abs + ".meta").Length}");
+                    BackupRules.ManifestLine(leaf, abs, meta ? n - 1 : n, bytes) };
+                if (meta) mf.Add(BackupRules.ManifestLine(leaf + ".meta", abs + ".meta", 1, new FileInfo(abs + ".meta").Length));
                 File.WriteAllLines(Path.Combine(dir, "manifest.txt"), mf);
                 Debug.Log($"[HAF Backup] delete guard: {n} file(s) of '{p}' snapshotted → {dir} (the delete proceeded normally; restorable from the Backup window)");
             }
         }
         catch (Exception e) { Debug.LogWarning("[HAF Backup] delete guard could not snapshot '" + assetPath + "' (the delete still proceeded): " + e.Message); }
         return AssetDeleteResult.DidNotDelete;   // NEVER block or fail the delete — the guard only copies first
+    }
+
+    /// <summary>
+    /// A guard snapshot of ONE name's baked outputs (the exact whitelist UniversalBaker sweeps), taken ON REQUEST before a
+    /// sweep (critical review 2026-09-30: Ship Status promised "the delete-guard snapshots every file first", but this guard
+    /// excludes Assets/Resources by design, so nothing was ever taken). The folder is the guard's own `_deleted_` shape with a
+    /// real manifest, so the Backup window lists and restores it like any other. Returns the folder, or null when the name
+    /// has no baked outputs; THROWS when the snapshot can't be taken - the caller must then not delete.
+    /// </summary>
+    internal static string SnapshotBakedOutputs(string name)
+    {
+        string dest = EditorPrefs.GetString("HAF.Backup.Dest", "D:/HAF_Backups");
+        if (!Directory.Exists(dest)) throw new DirectoryNotFoundException("the backup root does not exist: " + dest);
+        string dir = BackupRules.ReserveFolder(dest, BackupRules.OutputsSnapshotFolderName(DateTime.Now.ToString("yyyy-MM-dd_HHmmss"), name), CheckedReplace.TryReserveFolder);
+        try
+        {
+            int n = UniversalBaker.CopyAllOutputs(name, dir);
+            if (n == 0) { Directory.Delete(dir); return null; }
+            string res = Path.Combine(Application.dataPath, "Resources");   // where CopyAllOutputs read them
+            var mf = new List<string> { "# HAF delete-guard snapshot (baked outputs, on request)", "# original: " + res.Replace('\\', '/') + "/" + name + "*", "" };
+            foreach (var f in Directory.GetFiles(dir).OrderBy(f => f, StringComparer.Ordinal))
+            {
+                string leaf = Path.GetFileName(f);
+                mf.Add(BackupRules.ManifestLine(leaf, Path.Combine(res, leaf), 1, new FileInfo(f).Length));
+            }
+            File.WriteAllLines(Path.Combine(dir, "manifest.txt"), mf);
+            return dir;
+        }
+        catch
+        {
+            // a half-taken snapshot is not one: the live files stay (the caller does not delete), so the partial copy goes
+            try { if (Directory.Exists(dir)) Directory.Delete(dir, true); } catch { }
+            throw;
+        }
     }
 }
 

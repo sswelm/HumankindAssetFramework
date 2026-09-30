@@ -164,9 +164,11 @@ minutes *after* the last mod build):
 
 The list is also a cleanup tool: every row with baked outputs is selectable — plain click selects one,
 **Ctrl-click** toggles, **Shift-click** selects a range, the checkbox and **Tick all** drive the same state —
-and **Delete selected** removes the ticked rows' baked outputs. The delete-guard snapshots every file first
-(restorable from Backup & Restore), and a registry-owned entry is only *un-baked*: the entry stays and shows
-as bake-missing until re-baked. Removing an entry itself remains the Factory's **Remove**.
+and **Delete selected** removes the ticked rows' baked outputs. Each name's outputs are snapshotted first to a
+`_deleted_` folder (restorable from Backup & Restore; a name whose snapshot fails is not deleted), and a
+registry-owned entry is only *un-baked*: the entry stays and shows as bake-missing until re-baked. Removing an
+entry itself remains the Factory's **Remove**. While any registry cannot be read, no orphan is reported and
+Delete is off — an unreadable registry's entries would all look ownerless.
 
 ### Resource name / Pawn description / Model file
 - **Resource name** — unique id; names all the baked assets (`<name>_Skeleton`, `<name>_Atlas`, …).

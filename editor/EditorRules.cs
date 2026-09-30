@@ -248,6 +248,38 @@ public static class BackupRules
     /// <summary>The snapshot folder's name: the prefix, the stamp, and the resource name made safe as ONE path segment.</summary>
     public static string SnapshotFolderName(string stamp, string resourceName) => RemovedPrefix + stamp + "_" + SafeSegment(resourceName);
 
+    public const string DeletedPrefix = "_deleted_";
+    /// <summary>
+    /// The folder for a name's baked outputs snapshotted ON REQUEST before a sweep (Ship Status' Delete selected, 2026-09-30):
+    /// the delete guard's own shape, so the Backup window lists and ages it with the guard's, and a suffix that says it
+    /// holds a name's outputs, not one asset.
+    /// </summary>
+    public static string OutputsSnapshotFolderName(string stamp, string resourceName) => DeletedPrefix + stamp + "_" + SafeSegment(resourceName) + "_outputs";
+
+    /// <summary>
+    /// A manifest's one source line: <c>SRC&lt;tab&gt;rel&lt;tab&gt;original&lt;tab&gt;files&lt;tab&gt;bytes</c>, separators
+    /// as `/`. Every snapshot writer (the window, the delete guard, the outputs snapshot) builds its lines here and the
+    /// window's restore reads them with <see cref="TryParseManifestLine"/>: one format, pinned by one test. A path with a
+    /// tab in it cannot be carried and is refused.
+    /// </summary>
+    public static string ManifestLine(string rel, string original, int files, long bytes)
+    {
+        if (rel == null || original == null) throw new ArgumentNullException(rel == null ? nameof(rel) : nameof(original));
+        if (rel.IndexOf('\t') >= 0 || original.IndexOf('\t') >= 0) throw new ArgumentException("a manifest path cannot contain a tab");
+        return $"SRC\t{rel.Replace('\\', '/')}\t{original.Replace('\\', '/')}\t{files}\t{bytes}";
+    }
+
+    /// <summary>The reader of <see cref="ManifestLine"/>: false for a comment, a blank, or a line too short; a file count that does not parse reads as 0.</summary>
+    public static bool TryParseManifestLine(string line, out string rel, out string original, out int files)
+    {
+        rel = original = null; files = 0;
+        if (line == null || !line.StartsWith("SRC\t", StringComparison.Ordinal)) return false;
+        var p = line.Split('\t');
+        if (p.Length < 4) return false;
+        rel = p[1]; original = p[2]; files = int.TryParse(p[3], out var n) ? n : 0;
+        return true;
+    }
+
     /// <summary>
     /// Is <paramref name="name"/> usable in a file path AS IT IS — one segment, never a parent, never empty (sixth
     /// round)? The Factory's Remove passed the registry's raw name to the output copy, which uses it in the source

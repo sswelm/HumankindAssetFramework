@@ -60,6 +60,11 @@ public class BackupWindow : EditorWindow
         Add("Source models (Assets/FactorySource)", "source", new[] { Path.Combine(AssetsDir, "FactorySource") });
         Add("Baked assets (Assets/Resources)", "resources", new[] { Path.Combine(AssetsDir, "Resources") });
         Add("ENC Databases (Assets/Databases)", "databases", new[] { Path.Combine(AssetsDir, "Databases") });
+        // THE PACK SOURCE (critical review 2026-09-30): since the 2026-08-19 collapse the git-tracked Assets/Pack/<pack>/
+        // pack.json IS the model registry, with the pack's skins and sounds beside it; the haf_packs copy under the game's
+        // config (taken below) is a build artifact the editor ignores on load and overwrites on the next save. A backup
+        // that held only the artifact "restored" a registry the next save threw away - the 08-17 drill's failure, again.
+        Add("Pack source (Assets/Pack — the model registry + skins + sounds)", "pack", new[] { Path.Combine(AssetsDir, "Pack") });
         Add("Tools (Blender / converters)", "tools", new[] { Path.Combine(ProjectRoot, "Tools") });
         // Runtime config: the LIVE files the plugin reads — haf_*.json + the skins/sounds folders (skip the regenerable
         // atlas dump) AND the haf_packs/ tree, where the MODEL REGISTRY (pack.json) has lived since the multi-pack
@@ -503,7 +508,7 @@ public class BackupWindow : EditorWindow
                         : BackupDedup.CopyTreeLinked(src, dst, Directory.Exists(prev ?? "") ? prev : null, st);
                     long bytes = TreeBytes(dst);
                     totalFiles += files; totalBytes += bytes;
-                    manifest.Add($"SRC\t{rel.Replace('\\', '/')}\t{src.Replace('\\', '/')}\t{files}\t{bytes}");
+                    manifest.Add(BackupRules.ManifestLine(rel, src, files, bytes));
                 }
             manifest.Add("");
             manifest.Add("# dedup: " + st.Report);
@@ -527,7 +532,7 @@ public class BackupWindow : EditorWindow
                 ok = ok,
                 report = critical != null ? critical
                     : ok
-                    ? $"Backed up {totalFiles} files ({Human(totalBytes)}) → {Path.GetFileName(dir)} — registry verified in snapshot.\n{st.Report}"
+                    ? $"Backed up {totalFiles} files ({Human(totalBytes)}) → {Path.GetFileName(dir)} — {RegistryVerdict(groups)}.\n{st.Report}"
                     : $"⚠ Backup COUNT MISMATCH: expected {totalFiles}, found {landed} in {Path.GetFileName(dir)} — inspect before trusting it."
             };
         }
@@ -556,9 +561,13 @@ public class BackupWindow : EditorWindow
         {
             var picked = srcs.Where(s => enabled.TryGetValue(s.rel.Replace('\\', '/').Split('/')[0], out var on) && on).ToList();
             int skipped = srcs.Count - picked.Count;
-            if (picked.Count == 0) { status = "Nothing selected to restore — tick the group checkboxes above (they scope Restore as well as Backup)."; return; }
+            // a TICKED group this snapshot never held (older than the group: the pack source before 2026-09-30) is said, not
+            // silently "restored" - the person may be restoring exactly that
+            var absent = BuildGroups().Where(g => enabled.TryGetValue(g.Key, out var on) && on && !srcs.Any(s => s.rel.Replace('\\', '/').Split('/')[0] == g.Key)).Select(g => g.Name).ToList();
+            if (picked.Count == 0) { status = "Nothing selected to restore — tick the group checkboxes above (they scope Restore as well as Backup)." + (absent.Count > 0 ? $" This backup does not hold: {string.Join("; ", absent)}." : ""); return; }
             srcs = picked;
-            scopeNote = skipped > 0 ? $"\n\nSCOPE: restoring only the {picked.Count} TICKED group source(s); {skipped} unticked group source(s) in this backup are left alone (the checkboxes above scope Restore too)." : "";
+            scopeNote = (skipped > 0 ? $"\n\nSCOPE: restoring only the {picked.Count} TICKED group source(s); {skipped} unticked group source(s) in this backup are left alone (the checkboxes above scope Restore too)." : "")
+                      + (absent.Count > 0 ? $"\n\n⚠ NOT IN THIS BACKUP (ticked, but the snapshot never held it — nothing of it is restored): {string.Join("; ", absent)}." : "");
         }
 
         string list = string.Join("\n", srcs.Select(s => "  • " + s.original + "   (" + s.files + " files)"));
@@ -594,28 +603,55 @@ public class BackupWindow : EditorWindow
         catch (Exception e) { status = $"Restore FAILED midway ({e.Message}). Your pre-restore snapshot '{Path.GetFileName(snap)}' is intact — restore IT to get back."; }
     }
 
-    // A snapshot that includes the config group must contain every live pack registry (haf_packs/*/pack.json) —
-    // the exact file class whose silent absence the 2026-08-17 recovery drill exposed. Returns null when clean,
-    // else a loud message; the caller marks the whole backup NOT ok. Extend as new must-have classes appear.
+    // A snapshot that includes the pack group must contain every registry SOURCE (Assets/Pack/*/pack.json), and one
+    // that includes the config group every deployed copy (haf_packs/*/pack.json) — the file class whose silent absence
+    // the 2026-08-17 recovery drill exposed, and (critical review 2026-09-30) the SOURCE half of it, which the backup
+    // never took at all. Returns null when clean, else a loud message; the caller marks the whole backup NOT ok.
     static string VerifyCriticalContents(string dir, List<Group> groups)
     {
         try
         {
-            if (!groups.Any(g => g.Key == "config")) return null;   // config not taken -> nothing to assert
-            string cfg = SafeConfigDir();
-            if (string.IsNullOrEmpty(cfg)) return null;
-            string packs = Path.Combine(cfg, "haf_packs");
-            if (!Directory.Exists(packs)) return null;
             var missing = new List<string>();
-            foreach (var p in Directory.GetFiles(packs, "pack.json", SearchOption.AllDirectories))
+            if (groups.Any(g => g.Key == "pack"))
             {
-                string rel = p.Substring(cfg.Length).TrimStart('/', '\\');   // haf_packs/<mod>/pack.json
-                if (!File.Exists(Path.Combine(dir, "config", rel))) missing.Add(rel.Replace('\\', '/'));
+                string packRoot = Path.Combine(AssetsDir, "Pack");
+                if (Directory.Exists(packRoot))
+                    foreach (var p in Directory.GetFiles(packRoot, "pack.json", SearchOption.AllDirectories))
+                    {
+                        string rel = p.Substring(packRoot.Length).TrimStart('/', '\\');   // <mod>/pack.json
+                        if (!File.Exists(Path.Combine(dir, "pack", "Pack", rel))) missing.Add("Assets/Pack/" + rel.Replace('\\', '/'));
+                    }
+            }
+            if (groups.Any(g => g.Key == "config"))
+            {
+                string cfg = SafeConfigDir();
+                string packs = string.IsNullOrEmpty(cfg) ? null : Path.Combine(cfg, "haf_packs");
+                if (packs != null && Directory.Exists(packs))
+                    foreach (var p in Directory.GetFiles(packs, "pack.json", SearchOption.AllDirectories))
+                    {
+                        string rel = p.Substring(cfg.Length).TrimStart('/', '\\');   // haf_packs/<mod>/pack.json
+                        if (!File.Exists(Path.Combine(dir, "config", rel))) missing.Add(rel.Replace('\\', '/'));
+                    }
             }
             return missing.Count == 0 ? null
-                : $"⚠ CRITICAL: this backup is MISSING the model registry file(s): {string.Join(", ", missing)} — it CANNOT fully recover a removed model. Do not trust it; fix the config group and back up again.";
+                : $"⚠ CRITICAL: this backup is MISSING the model registry file(s): {string.Join(", ", missing)} — it CANNOT fully recover a removed model. Do not trust it; fix the group and back up again.";
         }
         catch { return null; }   // the verify must never break the backup itself
+    }
+
+    // The registry the report may call "verified": the SOURCE (the pack group) - the deployed copy alone is not the
+    // registry. Says how many pack.json files that was: "verified" over an Assets/Pack that holds none would be empty praise.
+    static string RegistryVerdict(List<Group> groups)
+    {
+        bool source = groups.Any(g => g.Key == "pack"), deployed = groups.Any(g => g.Key == "config");
+        string packRoot = Path.Combine(AssetsDir, "Pack");
+        int packs = 0;
+        try { if (Directory.Exists(packRoot)) packs = Directory.GetFiles(packRoot, "pack.json", SearchOption.AllDirectories).Length; } catch { }
+        if (source)
+            return (packs == 0 ? "Assets/Pack is in the snapshot but holds no pack.json yet" : $"registry source verified in snapshot ({packs} pack.json)")
+                 + (deployed ? "" : " (deployed copy not included)");
+        if (packs > 0) return "⚠ the registry SOURCE (Assets/Pack) is NOT in this backup — tick 'Pack source' for a backup that can restore models";
+        return deployed ? "deployed registry copy in snapshot (no source pack.json exists yet)" : "no registry in this backup";
     }
 
     // ---- smart copy (restore only) ----
@@ -682,11 +718,8 @@ public class BackupWindow : EditorWindow
         string mf = Path.Combine(backupDir, "manifest.txt");
         if (!File.Exists(mf)) return outp;
         foreach (var line in File.ReadAllLines(mf))
-        {
-            if (!line.StartsWith("SRC\t")) continue;
-            var p = line.Split('\t');
-            if (p.Length >= 4) outp.Add(new MSrc { rel = p[1], original = p[2], files = int.TryParse(p[3], out var n) ? n : 0 });
-        }
+            if (BackupRules.TryParseManifestLine(line, out string rel, out string original, out int files))
+                outp.Add(new MSrc { rel = rel, original = original, files = files });
         return outp;
     }
 

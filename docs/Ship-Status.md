@@ -44,6 +44,10 @@ every row with a tooltip:
 | shipped | in the current build | — |
 | no bake needed / no bake yet | retex/borrow entries; saved-but-unbaked district/prop recipes | — |
 
+When a registry cannot be read (locked, corrupt, unsure), the window says **COULD NOT CHECK ownership** above the
+list, reports no orphan and turns Delete off for that scan: an unreadable registry's entries would all look
+ownerless, and "orphan" is a delete verdict.
+
 **When it does not know where the mods are.** Every verdict above depends on finding Humankind's Community
 folder. That path used to be a hardcoded `const`, so off the one machine it named, the window reported
 *"Last mod build: NONE FOUND"* — which reads as *"you have not built the mod"* when the truth was *"I do not
@@ -66,7 +70,9 @@ Every row that has baked output files is selectable, list-style: **plain click**
 Safety properties:
 
 - deletion runs the baker's own output whitelist — never a name wildcard (the lost-portrait lesson);
-- the **delete-guard snapshots every file first** — everything is restorable from the Backup & Restore window;
+- **each name's outputs are snapshotted first** (`_deleted_<timestamp>_<name>_outputs/` under the backup
+  folder, with a manifest) — restorable from the Backup & Restore window's *Delete-guard snapshots*; a name
+  whose snapshot cannot be taken is **not** deleted, and the window says which names were and were not deleted;
 - a registry-owned entry is only **un-baked**: the entry stays and shows BAKE MISSING until re-baked.
   Removing an entry itself remains the Factory's **Remove** (its own confirm + recycle-bin flow);
 - after a delete the window re-scans and nudges every open Factory window immediately.
