@@ -40,6 +40,10 @@ public static class PropRegistry
     // of PR #101, sixth round). Not an error: a bake asks before creating anything.
     public static string Unsure { get; private set; } = "";
 
+    // Is the Unsure above still WAITING for git (true), or is it git's final "didn't answer" (false)? A window that
+    // holds its verdict back while unsure can re-ask once this turns false (Ship Status, review of PR #105).
+    public static bool AnswerPending => gitCheck.Pending;
+
     // null = the file EXISTS but can't be read — never the same as "no recipes yet". That confusion wiped every recipe:
     // Upsert added one prop to the empty list an unreadable file loaded as, and wrote it back (the same defect as the
     // model registry's, PR #100). An empty result must show the "props" array in the raw text: JsonUtility reads `{}`

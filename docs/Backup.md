@@ -31,7 +31,15 @@ differently:
 **Locally, unchanged files are hard-linked** to the newest existing snapshot. A hard link is a second *name* for the
 same bytes on the same volume, so an unchanged file costs **zero** additional space while each snapshot stays a
 complete, independently browsable, independently restorable folder. Same idea as Time Machine or `rsync --link-dest`.
-The first real run: 4,077 files, **3,966 hard-linked (1.2 GB saved), 111 copied (65.4 MB)**.
+The first real run: 4,077 files, **3,966 hard-linked (1.2 GB saved), 111 copied (65.4 MB)**. **"Unchanged" is
+decided by content** (review of PR #105): every snapshot writes an index of `<length>|<sha1>` per file
+(`haf_hashes.txt`), and the next snapshot links a file only when the live file's key equals the record — no size, no
+last-write time however precise, because a tool that writes new bytes under a preserved timestamp defeats any such
+rule. Each file is keyed at its own decision time, and the copy loop runs per file in parallel to afford that
+(measured on Unity's Mono: the 3 GB tree in 2.1 s on 8 cores, 12.8 s on one; reading the previous snapshot on the
+backup drive would take 51 s, which is why the index exists). A key taken for the whole tree ahead of the loop would
+be stale for a file edited while the loop still ran, and would link the previous version. The first backup after 2026-09-30 finds no index in the previous snapshot and links nothing that once — it
+takes as long as a backup did before dedup — and every later one links by content.
 
 > **Two consequences worth knowing.** Explorer reports each snapshot at its full apparent size — it counts shared
 > bytes once per name, so the folder still *looks* like 1.4 GB. And deleting an old snapshot frees only the blocks
@@ -45,11 +53,13 @@ The first real run: 4,077 files, **3,966 hard-linked (1.2 GB saved), 111 copied 
 > space, never correctness.
 
 **Offsite, an unchanged snapshot is not uploaded at all.** Each zip is a full ~1 GB, and daily uploads of the same
-models fill a 15 GB cloud quota in about a week. A SHA-1 over every file's relative path, size and mtime is written
-into each snapshot (`haf_signature.txt`) and beside each uploaded zip (`.sig`); a matching signature means the
-existing zip already *is* this backup, so the zip is skipped. Deliberately **not** a hash of the file bytes — reading
-1.4 GB to decide whether to upload 1 GB is a poor trade, and path+size+mtime is the same evidence the copy step
-already trusts. An absent or unreadable signature always proceeds: *"I don't know"* must never be read as
+models fill a 15 GB cloud quota in about a week. A SHA-1 over every file's relative path and content key (from the
+snapshot's own index — no second read) and over the manifest's original paths (where a restore puts each source back)
+is written into each snapshot (`haf_signature.txt`) and beside each uploaded zip (`.sig`); a matching signature means
+the existing zip already *is* this backup — same bytes, same destinations — so the zip is skipped. Two snapshots of
+the same bytes for the same originals sign the same whenever they were taken; a moved project signs differently (until PR #105 the signature took each file's
+mtime, and the manifest's — which differs per snapshot — with it, so no two snapshots ever signed the same and the
+skip never fired). An absent or unreadable signature always proceeds: *"I don't know"* must never be read as
 *"unchanged"*. The sidecar is written only after the zip is verified and moved into place, so a crash mid-zip cannot
 leave a signature claiming an upload that never landed.
 
@@ -78,17 +88,27 @@ Each group is an independent toggle with a live size readout (the daily auto-ver
 | Source models | `Assets/FactorySource` (the bake *inputs* — licensed, irreplaceable, never shipped in the mod) |
 | Baked assets | `Assets/Resources` (skeletons, atlases, clip collections, PNGs) |
 | ENC Databases | `Assets/Databases` |
+| **Pack source** | `Assets/Pack/` — **the model registry** (`<PackName>/pack.json`) with the pack's skins and sounds beside it. Since the 2026-08-19 collapse this git-tracked file IS the registry; the `haf_packs` copy under the game's config (the Runtime config group) is a build artifact the editor ignores on load and overwrites on its next save. A backup without this group can bring the baked assets back but not the entries that name them. Added 2026-09-30 — older snapshots do not hold it, and a restore says so. |
 | Tools | `Tools/` (Blender rig/convert scripts, `glbconv`) |
-| Runtime config | `BepInEx/config/haf_*.json` + `haf_*.txt` + `community.humankind.haf.cfg` + `haf_packs/`, `haf_skins/`, `haf_sounds/`, `haf_ground_tex/`, and `haf_state/`. Logs stay out; the regenerable `haf_atlas_dump/` is skipped. The `haf_packs` copy is deployed recovery material—the project `Assets/Pack/<PackName>/pack.json` remains authoritative. |
+| Runtime config | `BepInEx/config/haf_*.json` + `haf_*.txt` + `community.humankind.haf.cfg` + `haf_packs/`, `haf_skins/`, `haf_sounds/`, `haf_ground_tex/`, and `haf_state/`. Logs stay out; the regenerable `haf_atlas_dump/` is skipped. The `haf_packs` copy is deployed recovery material—the project `Assets/Pack/<PackName>/pack.json` (the Pack source group) remains authoritative. |
 
 ## The delete guard
 
 Before *anything* under `FactorySource` / `Databases` / `Scripts/Editor` is deleted — the Factory's **Remove**
 flow, a Project-window delete, a script — it is first copied to a `_deleted_<timestamp>_<name>` folder with a
 real manifest, so the **Restore** button puts it back in one click, **including the `.meta`** (the asset keeps
-its GUID, so references to it survive the round trip). The delete then proceeds normally; the guard never blocks
+its GUID, so references to it survive the round trip). The restore's own pre-restore snapshot covers only originals
+that still exist; when the asset is simply gone, there is nothing to keep and the status says so (a restore whose
+originals had been deleted used to abort on exactly that — review of PR #105). The delete then proceeds normally; the guard never blocks
 anything — it only makes every deletion undoable. Same-second deletions of same-named assets get uniquified
 folders (no silent merge).
+
+`Assets/Resources` is deliberately **not** a guarded root (every re-bake deletes and rewrites its outputs; a
+snapshot per bake would bury the list). The two flows that delete baked outputs on purpose take their own
+snapshot instead, in the same `_deleted_` shape: the Factory's **Remove** (`_removed_`, below) and Ship Status'
+**Delete selected**, which copies each name's outputs (+ `.meta`) to `_deleted_<timestamp>_<name>_outputs/`
+with a real manifest *before* sweeping them — a name whose snapshot cannot be taken is not deleted. Those folders
+age with the guard's (the same N-day retention); the window says so wherever it says "restorable".
 
 `Assets/Resources` is deliberately **not** guarded: the bake pipeline delete-firsts baked assets on every
 re-bake (~30 delete sites), so guarding them would flood the backup root with churn within days — and bakes are
@@ -121,10 +141,19 @@ is copied under `<group>/<name>`, alongside a **`manifest.txt`** recording every
 path*, file count, and byte size. Backups are **never overwritten** (each is a fresh timestamp). After copying,
 the file count is re-verified against the manifest — a mismatch is flagged loudly, and a mismatched backup is
 never used as a restore's safety snapshot nor zipped offsite. **Critical-content verify**: a snapshot that took
-the config group must actually CONTAIN every live pack registry (`haf_packs/*/pack.json`) or the whole backup is
-marked not-ok with a loud message — a green backup literally says *"registry verified in snapshot"* (the recovery
-drill found the registry silently absent from every backup for weeks; that failure mode is now structurally
-impossible).
+the Pack source group must actually CONTAIN every registry source (`Assets/Pack/*/pack.json`), and one that took
+the config group every deployed copy (`haf_packs/*/pack.json`), or the whole backup is marked not-ok with a loud
+message — and "contain" means **byte for byte the live file**, not merely a file by that name (a hard link to an
+older version would pass an existence check). A green backup literally says *"registry source verified in snapshot (N pack.json)"* (the recovery drill
+found the registry silently absent from every backup for weeks; and until 2026-09-30 the backup verified only the
+deployed copy while never taking the source at all). The verify is pure file IO over the groups' paths, so it runs
+for the daily auto-version too (its worker thread cannot touch Unity APIs — the earlier verify silently skipped
+there), and a verify that cannot complete marks the backup not-ok rather than clean. A manual backup taken without
+the Pack source group while one exists says *"the registry SOURCE is NOT in this backup"* instead.
+
+**Restoring the Pack source alone** puts the registry back for the editor; the game reads the deployed copy
+(`haf_packs`), which only a Model Factory save refreshes — the restore's status says so. Restore the Runtime
+config group from the same snapshot to bring both back together.
 
 **The list** is grouped, every row starting with its date-time, newest first: *Full backups* (manual + daily
 auto), then *Pre-restore*, *Delete-guard* (open by default — the section you check after an "oops"), and

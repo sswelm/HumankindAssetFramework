@@ -42,7 +42,13 @@ every row with a tooltip:
 | **ORPHANED BAKE** | outputs no registry owns (renamed/removed entries leave these) — dead weight that still ships | tick + Delete selected |
 | **TEST ARTIFACT** | `__convgate__*` ConversionGateTest scratch — also ships | tick + Delete selected |
 | shipped | in the current build | — |
+| *state* **· bake-locked** | an in-game-verified bake the entry's *Lock bake* protects — a rebake may diverge, and both Bake buttons refuse it | shown, **not deletable** here; untick *Lock bake* in the Animation Lab first if you really mean to |
 | no bake needed / no bake yet | retex/borrow entries; saved-but-unbaked district/prop recipes | — |
+
+When a registry cannot be read (locked, corrupt, unsure), the window says **COULD NOT CHECK ownership** above the
+list, reports no orphan and turns Delete off for that scan: an unreadable registry's entries would all look
+ownerless, and "orphan" is a delete verdict. The one transient case — the prop registry's "git hasn't answered
+yet" when `haf_props.json` is absent — re-scans by itself once git answers (bounded to 15 s).
 
 **When it does not know where the mods are.** Every verdict above depends on finding Humankind's Community
 folder. That path used to be a hardcoded `const`, so off the one machine it named, the window reported
@@ -66,7 +72,10 @@ Every row that has baked output files is selectable, list-style: **plain click**
 Safety properties:
 
 - deletion runs the baker's own output whitelist — never a name wildcard (the lost-portrait lesson);
-- the **delete-guard snapshots every file first** — everything is restorable from the Backup & Restore window;
+- **each name's outputs are snapshotted first** (`_deleted_<timestamp>_<name>_outputs/` under the backup
+  folder, with a manifest) — restorable from the Backup & Restore window's *Delete-guard snapshots*, and aged
+  with them (the guard-days retention, said in the dialog); a name whose snapshot cannot be taken is **not**
+  deleted, and the window says which names were and were not deleted, and why;
 - a registry-owned entry is only **un-baked**: the entry stays and shows BAKE MISSING until re-baked.
   Removing an entry itself remains the Factory's **Remove** (its own confirm + recycle-bin flow);
 - after a delete the window re-scans and nudges every open Factory window immediately.

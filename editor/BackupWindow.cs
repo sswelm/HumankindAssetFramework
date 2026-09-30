@@ -60,6 +60,11 @@ public class BackupWindow : EditorWindow
         Add("Source models (Assets/FactorySource)", "source", new[] { Path.Combine(AssetsDir, "FactorySource") });
         Add("Baked assets (Assets/Resources)", "resources", new[] { Path.Combine(AssetsDir, "Resources") });
         Add("ENC Databases (Assets/Databases)", "databases", new[] { Path.Combine(AssetsDir, "Databases") });
+        // THE PACK SOURCE (critical review 2026-09-30): since the 2026-08-19 collapse the git-tracked Assets/Pack/<pack>/
+        // pack.json IS the model registry, with the pack's skins and sounds beside it; the haf_packs copy under the game's
+        // config (taken below) is a build artifact the editor ignores on load and overwrites on the next save. A backup
+        // that held only the artifact "restored" a registry the next save threw away - the 08-17 drill's failure, again.
+        Add("Pack source (Assets/Pack — the model registry + skins + sounds)", "pack", new[] { Path.Combine(AssetsDir, "Pack") });
         Add("Tools (Blender / converters)", "tools", new[] { Path.Combine(ProjectRoot, "Tools") });
         // Runtime config: the LIVE files the plugin reads — haf_*.json + the skins/sounds folders (skip the regenerable
         // atlas dump) AND the haf_packs/ tree, where the MODEL REGISTRY (pack.json) has lived since the multi-pack
@@ -336,8 +341,11 @@ public class BackupWindow : EditorWindow
     // ---- backup ----
     void DoBackup()
     {
-        var groups = BuildGroups().Where(g => enabled.TryGetValue(g.Key, out var b) && b).ToList();
+        var offered = BuildGroups();
+        var groups = offered.Where(g => enabled.TryGetValue(g.Key, out var b) && b).ToList();
         string dir = DoBackupInto(NewBackupDir(""), groups, "manual backup");
+        if (dir != null && offered.Any(g => g.Key == "pack") && !groups.Any(g => g.Key == "pack"))
+            status += "\n⚠ The registry SOURCE (Assets/Pack) is NOT in this backup — tick 'Pack source' for a backup that can restore models.";
         // Offsite ride-along: zip the fresh snapshot into the second folder — OPTIONAL (blank folder = off) and
         // SILENT (background thread; a multi-GB FactorySource zip must not freeze the editor). A failure here NEVER
         // un-does the local backup — the result surfaces in the status line when it lands. (_prerestore safety
@@ -448,7 +456,11 @@ public class BackupWindow : EditorWindow
                 .Where(d => !Path.GetFileName(d).StartsWith("_deleted_", StringComparison.OrdinalIgnoreCase)
                          && !Path.GetFileName(d).StartsWith("_removed_", StringComparison.OrdinalIgnoreCase)
                          && !Path.GetFileName(d).StartsWith("_prerestore", StringComparison.OrdinalIgnoreCase)
-                         && !string.Equals(d.TrimEnd('\\', '/'), newDir.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase))
+                         && !string.Equals(d.TrimEnd('\\', '/'), newDir.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase)
+                         // a COMPLETED snapshot only: a backup that failed mid-copy (975119d: a copied file that can't be
+                         // read back fails it) leaves its folder without a manifest or index, and as the newest folder it
+                         // would be the link base - nothing links, and the report blames "no content index" for the wrong reason
+                         && File.Exists(Path.Combine(d, "manifest.txt")))
                 // BY TIME, NOT BY NAME (2026-08-23, found by the restore drill). Name-sorting looks right because
                 // the folders are timestamped — but `_auto_` snapshots start with '_' (0x5F), which sorts AFTER every
                 // digit, so descending by name always returned the newest _auto_ ahead of a NEWER manual backup.
@@ -488,7 +500,7 @@ public class BackupWindow : EditorWindow
             // complete independently-restorable folder. Null when there is no previous snapshot (first run), which
             // just means everything is copied, exactly as before. See BackupDedup for why this is safe.
             string prevSnap = PreviousSnapshot(dir);
-            var st = new BackupDedup.Stats();
+            var st = new BackupDedup.Stats { NewRoot = dir, Prev = BackupDedup.ReadHashes(prevSnap), PrevSnapshotExisted = prevSnap != null };   // by content, keyed at decision time
             int totalFiles = 0; long totalBytes = 0;
             foreach (var g in groups)
                 foreach (var src in g.Sources)
@@ -503,7 +515,7 @@ public class BackupWindow : EditorWindow
                         : BackupDedup.CopyTreeLinked(src, dst, Directory.Exists(prev ?? "") ? prev : null, st);
                     long bytes = TreeBytes(dst);
                     totalFiles += files; totalBytes += bytes;
-                    manifest.Add($"SRC\t{rel.Replace('\\', '/')}\t{src.Replace('\\', '/')}\t{files}\t{bytes}");
+                    manifest.Add(BackupRules.ManifestLine(rel, src, files, bytes));
                 }
             manifest.Add("");
             manifest.Add("# dedup: " + st.Report);
@@ -515,11 +527,12 @@ public class BackupWindow : EditorWindow
             // green while missing the ONE file a recovery needs is worse than no backup — the recovery drill proved
             // it (the registry silently absent for weeks). A snapshot that took the config group must CONTAIN every
             // live pack registry, or it is NOT ok, full stop.
-            string critical = VerifyCriticalContents(dir, groups);
+            string critical = VerifyCriticalContents(dir, groups, out int sourcePacks, out int deployedPacks);
             if (critical != null) ok = false;
-            // The content fingerprint, written AFTER everything landed — the offsite step reads it to decide whether
-            // this snapshot differs from the one already uploaded. Written even on a failed verify: knowing what a
-            // suspect snapshot contained is useful, and nothing consumes it unless the snapshot is used.
+            // The content index (what the NEXT snapshot links against) and the fingerprint over it (what the offsite
+            // step compares), written AFTER everything landed. Written even on a failed verify: knowing what a suspect
+            // snapshot contained is useful, and nothing consumes it unless the snapshot is used.
+            BackupDedup.WriteHashes(dir, st);
             BackupDedup.WriteSignature(dir);
             return new SnapResult
             {
@@ -527,14 +540,16 @@ public class BackupWindow : EditorWindow
                 ok = ok,
                 report = critical != null ? critical
                     : ok
-                    ? $"Backed up {totalFiles} files ({Human(totalBytes)}) → {Path.GetFileName(dir)} — registry verified in snapshot.\n{st.Report}"
+                    ? $"Backed up {totalFiles} files ({Human(totalBytes)}) → {Path.GetFileName(dir)}{RegistryVerdict(groups, sourcePacks, deployedPacks)}.\n{st.Report}"
                     : $"⚠ Backup COUNT MISMATCH: expected {totalFiles}, found {landed} in {Path.GetFileName(dir)} — inspect before trusting it."
             };
         }
         catch (Exception e)
         {
             try { if (Directory.Exists(dir) && !Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir); } catch { }
-            return new SnapResult { dir = dir, ok = false, report = "Backup FAILED: " + e.Message };
+            // Parallel file copies wrap the useful per-file IOException in AggregateException.
+            var cause = e is AggregateException aggregate ? aggregate.Flatten().InnerExceptions.FirstOrDefault() ?? e : e;
+            return new SnapResult { dir = dir, ok = false, report = "Backup FAILED: " + cause.Message };
         }
     }
 
@@ -556,9 +571,13 @@ public class BackupWindow : EditorWindow
         {
             var picked = srcs.Where(s => enabled.TryGetValue(s.rel.Replace('\\', '/').Split('/')[0], out var on) && on).ToList();
             int skipped = srcs.Count - picked.Count;
-            if (picked.Count == 0) { status = "Nothing selected to restore — tick the group checkboxes above (they scope Restore as well as Backup)."; return; }
+            // a TICKED group this snapshot never held (older than the group: the pack source before 2026-09-30) is said, not
+            // silently "restored" - the person may be restoring exactly that
+            var absent = BuildGroups().Where(g => enabled.TryGetValue(g.Key, out var on) && on && !srcs.Any(s => s.rel.Replace('\\', '/').Split('/')[0] == g.Key)).Select(g => g.Name).ToList();
+            if (picked.Count == 0) { status = "Nothing selected to restore — tick the group checkboxes above (they scope Restore as well as Backup)." + (absent.Count > 0 ? $" This backup does not hold: {string.Join("; ", absent)}." : ""); return; }
             srcs = picked;
-            scopeNote = skipped > 0 ? $"\n\nSCOPE: restoring only the {picked.Count} TICKED group source(s); {skipped} unticked group source(s) in this backup are left alone (the checkboxes above scope Restore too)." : "";
+            scopeNote = (skipped > 0 ? $"\n\nSCOPE: restoring only the {picked.Count} TICKED group source(s); {skipped} unticked group source(s) in this backup are left alone (the checkboxes above scope Restore too)." : "")
+                      + (absent.Count > 0 ? $"\n\n⚠ NOT IN THIS BACKUP (ticked, but the snapshot never held it — nothing of it is restored): {string.Join("; ", absent)}." : "");
         }
 
         string list = string.Join("\n", srcs.Select(s => "  • " + s.original + "   (" + s.files + " files)"));
@@ -568,11 +587,22 @@ public class BackupWindow : EditorWindow
             "This only overwrites files that also exist in the backup.", "Snapshot & Restore", "Cancel")) { status = "Restore cancelled."; return; }
 
         // GUARD 1: snapshot the CURRENT state of exactly the paths we're about to overwrite (unique key per source so
-        // two originals sharing a leaf name can't collide in the snapshot folder).
+        // two originals sharing a leaf name can't collide in the snapshot folder) - the paths that EXIST. A delete-guard
+        // snapshot is restored precisely because its originals are gone (review of PR #105 by ChatGPT: the snapshot
+        // treated each absent original as a folder to walk, failed, and every such restore was ABORTED); with nothing
+        // there, there is nothing to keep, and the restore says so instead of writing an empty undo.
         var affected = new List<Group>();
-        for (int i = 0; i < srcs.Count; i++) affected.Add(new Group(srcs[i].original, "restore" + i, new List<string> { srcs[i].original }));
-        string snap = DoBackupInto(NewBackupDir("_prerestore_"), affected, "auto snapshot before restoring " + Path.GetFileName(backupDir));
-        if (snap == null) { status = "Restore ABORTED — could not take the pre-restore safety snapshot (nothing was changed)."; return; }
+        for (int i = 0; i < srcs.Count; i++)
+            if (File.Exists(srcs[i].original) || Directory.Exists(srcs[i].original))
+                affected.Add(new Group(srcs[i].original, "restore" + i, new List<string> { srcs[i].original }));
+        string snap = null;
+        if (affected.Count > 0)
+        {
+            snap = DoBackupInto(NewBackupDir("_prerestore_"), affected, "auto snapshot before restoring " + Path.GetFileName(backupDir));
+            if (snap == null) { status = "Restore ABORTED — could not take the pre-restore safety snapshot (nothing was changed)."; return; }
+        }
+        string undo = snap != null ? $"Current state was saved to '{Path.GetFileName(snap)}' first (undo by restoring that)."
+                    : "Nothing existed at the originals, so no pre-restore snapshot was needed (undo = delete what was restored).";
 
         // GUARD 2: SMART additive copy back (2026-08-17, user-designed): only files that are MISSING or actually
         // DIFFERENT (byte-compared, not just size) are written — identical files are left completely untouched, so
@@ -589,33 +619,41 @@ public class BackupWindow : EditorWindow
             sizeCache.Clear();
             if (st.missing + st.changed > 0) { AssetDatabase.Refresh(); ModelFactoryWindow.RefreshAllOpen(); }   // reimport + tell open Factory windows the registry may have changed
             status = $"Restored {st.missing} missing + {st.changed} changed file(s) from '{Path.GetFileName(backupDir)}' " +
-                     $"({st.identical} identical file(s) untouched). Current state was saved to '{Path.GetFileName(snap)}' first (undo by restoring that).";
+                     $"({st.identical} identical file(s) untouched). {undo}";
+            // The model registry's deployed copy (haf_packs, what the game reads) is refreshed only by a Factory save
+            // (review of PR #105: the district/formation/sound windows offer "Deploy the source"; the Model Factory does not).
+            // A restored source with the old deploy in place is said, or the next build ships the registry just undone.
+            bool packRestored = srcs.Any(s => s.rel.Replace('\\', '/').Split('/')[0] == "pack"), configRestored = srcs.Any(s => s.rel.Replace('\\', '/').Split('/')[0] == "config");
+            if (packRestored && !configRestored && st.missing + st.changed > 0)
+                status += "\n⚠ The game's copy of the model registry (haf_packs) was NOT restored: it is refreshed on the Model Factory's next save (any bake or Save), or restore this backup's Runtime config group as well.";
         }
-        catch (Exception e) { status = $"Restore FAILED midway ({e.Message}). Your pre-restore snapshot '{Path.GetFileName(snap)}' is intact — restore IT to get back."; }
+        catch (Exception e) { status = $"Restore FAILED midway ({e.Message}). " + (snap != null ? $"Your pre-restore snapshot '{Path.GetFileName(snap)}' is intact — restore IT to get back." : "Nothing existed at the originals before; delete what was restored to get back."); }
     }
 
-    // A snapshot that includes the config group must contain every live pack registry (haf_packs/*/pack.json) —
-    // the exact file class whose silent absence the 2026-08-17 recovery drill exposed. Returns null when clean,
-    // else a loud message; the caller marks the whole backup NOT ok. Extend as new must-have classes appear.
-    static string VerifyCriticalContents(string dir, List<Group> groups)
+    // A snapshot that includes the pack group must contain every registry SOURCE (Assets/Pack/*/pack.json), and one
+    // that includes the config group every deployed copy (haf_packs/*/pack.json) — the file class whose silent absence
+    // the 2026-08-17 recovery drill exposed, and (critical review 2026-09-30) the SOURCE half of it, which the backup
+    // never took at all. Returns null when clean, else a loud message; the caller marks the whole backup NOT ok.
+    // PURE FILE IO over the groups' captured paths (review of PR #105): the daily auto-version runs SnapshotInto on a
+    // worker thread, where Application.dataPath and EditorPrefs throw — the earlier verify reached both, threw, and its
+    // catch read as "clean", so no auto-version was ever verified. A verify that can't complete is said, not passed.
+    // BYTE FOR BYTE against the live file (review of PR #105 by ChatGPT: the dedup can link a previous snapshot's copy
+    // by size and a 2 s time window, and an existence check would have called that "verified"). The rule and its test:
+    // BackupRules.VerifyRegistryCopies.
+    static string VerifyCriticalContents(string dir, List<Group> groups, out int sourcePacks, out int deployedPacks) =>
+        BackupRules.VerifyRegistryCopies(dir, groups.Select(g => new KeyValuePair<string, IEnumerable<string>>(g.Key, g.Sources)), out sourcePacks, out deployedPacks);
+
+    // The registry the report may call "verified": the SOURCE (the pack group) - the deployed copy alone is not the
+    // registry. Says how many pack.json files that was: "verified" over an Assets/Pack that holds none would be empty
+    // praise. Empty for a snapshot that holds neither (a pre-restore undo): nothing to say. Whether a source EXISTS
+    // that was left out is DoBackup's to say - it runs on the main thread, where the offered groups are known.
+    static string RegistryVerdict(List<Group> groups, int sourcePacks, int deployedPacks)
     {
-        try
-        {
-            if (!groups.Any(g => g.Key == "config")) return null;   // config not taken -> nothing to assert
-            string cfg = SafeConfigDir();
-            if (string.IsNullOrEmpty(cfg)) return null;
-            string packs = Path.Combine(cfg, "haf_packs");
-            if (!Directory.Exists(packs)) return null;
-            var missing = new List<string>();
-            foreach (var p in Directory.GetFiles(packs, "pack.json", SearchOption.AllDirectories))
-            {
-                string rel = p.Substring(cfg.Length).TrimStart('/', '\\');   // haf_packs/<mod>/pack.json
-                if (!File.Exists(Path.Combine(dir, "config", rel))) missing.Add(rel.Replace('\\', '/'));
-            }
-            return missing.Count == 0 ? null
-                : $"⚠ CRITICAL: this backup is MISSING the model registry file(s): {string.Join(", ", missing)} — it CANNOT fully recover a removed model. Do not trust it; fix the config group and back up again.";
-        }
-        catch { return null; }   // the verify must never break the backup itself
+        bool source = groups.Any(g => g.Key == "pack"), deployed = groups.Any(g => g.Key == "config");
+        if (source)
+            return (sourcePacks == 0 ? " — Assets/Pack is in the snapshot but holds no pack.json yet" : $" — registry source verified in snapshot ({sourcePacks} pack.json)")
+                 + (deployed ? "" : " (deployed copy not included)");
+        return deployed ? $" — deployed registry copy in snapshot ({deployedPacks} pack.json), NOT the source" : "";
     }
 
     // ---- smart copy (restore only) ----
@@ -682,11 +720,8 @@ public class BackupWindow : EditorWindow
         string mf = Path.Combine(backupDir, "manifest.txt");
         if (!File.Exists(mf)) return outp;
         foreach (var line in File.ReadAllLines(mf))
-        {
-            if (!line.StartsWith("SRC\t")) continue;
-            var p = line.Split('\t');
-            if (p.Length >= 4) outp.Add(new MSrc { rel = p[1], original = p[2], files = int.TryParse(p[3], out var n) ? n : 0 });
-        }
+            if (BackupRules.TryParseManifestLine(line, out string rel, out string original, out int files))
+                outp.Add(new MSrc { rel = rel, original = original, files = files });
         return outp;
     }
 

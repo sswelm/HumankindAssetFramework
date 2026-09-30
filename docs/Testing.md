@@ -37,7 +37,7 @@ in **GitHub Actions**. Both lanes matter, and for different reasons:
 | Surface | `tools/check.sh` (pre-push hook) | also in CI | ~time |
 |---|---|---|---|
 | **Runtime + shared contract** | `dotnet build` · `dotnet test` · docs guard · binding-catalog surface · hot path · parse shape · member shape · schema parity | all source-only checks | seconds |
-| **Editor package** | Roslyn editor compile-check · registry engine drill · schema parity · hand-list gate | parity + hand-list; compile check and drill stay local | ~30 s |
+| **Editor package** | Roslyn editor compile-check · registry engine drill · backup dedup drill · schema parity · hand-list gate | parity + hand-list; compile check and drills stay local | ~30 s |
 
 The one guard CI cannot run is **`tools/editor_compile_check.sh`**: it needs a licensed Unity 2021.3.1f1 install
 (`UnityEditor.dll`, the MonoBleedingEdge 4.7.1 profile, every `UnityEngine` module), none of which is
@@ -49,6 +49,11 @@ district, formation and sound registry engine) against real files on Unity's Mon
 Unity APIs it touches (`tools/registry-engine-drill/Stubs.cs`): one scenario per row of the engine's exit table — `{}`
 and 0-byte sources, a hand-emptied source beside a full deploy, a lock versus corruption, a concurrent edit, a stale
 snapshot, a failed deploy finished later, git recovery that must not touch the working copy.
+
+**`tools/backup_dedup_drill.sh`** runs the real `editor/BackupDedup.cs` the same way over a scratch tree: identical bytes
+hard-link, a file rewritten with new bytes under the same size *and* the same last-write time is copied ("unchanged" is
+decided by content — PR #105), two snapshots of the same bytes sign the same, and a previous snapshot without a
+content index links nothing.
 
 ### Schema parity is in-repo and mandatory
 

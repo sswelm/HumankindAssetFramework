@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.IO;
 using Xunit;
 
@@ -123,4 +125,155 @@ public class BackupRulesTests
         Assert.False(BackupRules.IsRemovedSnapshotInside("", Path.Combine(root, "_removed_x_Tank")));
         Assert.False(BackupRules.IsRemovedSnapshotInside(root, null));
     }
+    // ---- the manifest line (2026-09-30): three writers (the window, the delete guard, Ship Status' outputs snapshot),
+    //      one reader, one format ----
+
+    [Fact]
+    public void A_manifest_line_round_trips_through_the_reader()
+    {
+        string line = BackupRules.ManifestLine("resources\\Tank_Atlas.png", "C:\\Proj\\Assets\\Resources\\Tank_Atlas.png", 1, 4096);
+        Assert.Equal("SRC\tresources/Tank_Atlas.png\tC:/Proj/Assets/Resources/Tank_Atlas.png\t1\t4096", line);   // separators as `/`, tabs between
+        Assert.True(BackupRules.TryParseManifestLine(line, out string rel, out string original, out int files));
+        Assert.Equal("resources/Tank_Atlas.png", rel);
+        Assert.Equal("C:/Proj/Assets/Resources/Tank_Atlas.png", original);
+        Assert.Equal(1, files);
+        // a tree line: the count is the tree's
+        Assert.True(BackupRules.TryParseManifestLine(BackupRules.ManifestLine("pack/Pack", "C:/Proj/Assets/Pack", 37, 123456789L), out _, out _, out files));
+        Assert.Equal(37, files);
+    }
+
+    [Fact]
+    public void The_reader_takes_only_source_lines()
+    {
+        foreach (var notASource in new[] { null, "", "# HAF backup manifest", "# original: C:/x", "SRC", "SRC\tonly-rel", "SRC\trel\toriginal", "src\trel\toriginal\t1\t2", " SRC\trel\toriginal\t1\t2" })
+            Assert.False(BackupRules.TryParseManifestLine(notASource, out _, out _, out _), notASource ?? "<null>");
+        // an older or hand-edited line whose count does not parse reads as 0 files, not as no source
+        Assert.True(BackupRules.TryParseManifestLine("SRC\trel\toriginal\tmany", out string rel, out _, out int files));
+        Assert.Equal("rel", rel); Assert.Equal(0, files);
+    }
+
+    [Fact]
+    public void A_path_with_a_tab_cannot_be_carried()
+    {
+        Assert.Throws<ArgumentException>(() => BackupRules.ManifestLine("a\tb", "C:/x", 1, 1));
+        Assert.Throws<ArgumentException>(() => BackupRules.ManifestLine("a", "C:/x\ty", 1, 1));
+        Assert.Throws<ArgumentNullException>(() => BackupRules.ManifestLine(null, "C:/x", 1, 1));
+    }
+
+    [Fact]
+    public void An_outputs_snapshot_folder_is_a_delete_guard_folder_for_one_name()
+    {
+        string f = BackupRules.OutputsSnapshotFolderName("2026-09-30_141500", "Era6_Common_StealthCorvettes_01");
+        Assert.Equal("_deleted_2026-09-30_141500_Era6_Common_StealthCorvettes_01_outputs", f);
+        Assert.StartsWith(BackupRules.DeletedPrefix, f);            // listed, restored and aged with the guard's snapshots
+        Assert.DoesNotContain("/", BackupRules.OutputsSnapshotFolderName("s", "../../x"));   // the name is made one segment
+        Assert.DoesNotContain("\\", BackupRules.OutputsSnapshotFolderName("s", "..\\..\\x"));
+    }
+
+    // ---- the dedup's "unchanged" and the registry verify (review of PR #105 by ChatGPT: a same-length edit within 2 s
+    //      of the copied version was linked as unchanged, and an existence check called the old bytes "verified") ----
+
+    [Fact]
+    public void A_content_key_is_the_bytes_and_nothing_else()
+    {
+        string d = Path.Combine(Path.GetTempPath(), "haf_key_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(d);
+        try
+        {
+            string abc = Path.Combine(d, "abc"), same = Path.Combine(d, "same"), edited = Path.Combine(d, "edited");
+            File.WriteAllText(abc, "abc");
+            Assert.Equal("3|a9993e364706816aba3e25717850c26c9cd0d89d", BackupRules.ContentKey(abc));   // SHA-1("abc"), the published vector
+            var big = new byte[200 * 1024]; new Random(11).NextBytes(big);
+            File.WriteAllBytes(same, big); File.WriteAllBytes(edited, big);
+            // the reported shape: new bytes under a preserved size AND a preserved last-write time, to the tick
+            var t = File.GetLastWriteTimeUtc(same);
+            var e = (byte[])big.Clone(); e[12345] ^= 1; File.WriteAllBytes(edited, e); File.SetLastWriteTimeUtc(edited, t);
+            Assert.Equal(new FileInfo(same).Length, new FileInfo(edited).Length);
+            Assert.Equal(File.GetLastWriteTimeUtc(same), File.GetLastWriteTimeUtc(edited));
+            Assert.NotEqual(BackupRules.ContentKey(same), BackupRules.ContentKey(edited));            // the key still tells them apart
+            File.WriteAllBytes(edited, big);
+            Assert.Equal(BackupRules.ContentKey(same), BackupRules.ContentKey(edited));               // and equal bytes key equal, whatever the dates
+            Assert.Null(BackupRules.ContentKey(Path.Combine(d, "missing")));                           // unreadable has no key: never "unchanged"
+        }
+        finally { Directory.Delete(d, true); }
+    }
+
+    [Fact]
+    public void An_index_line_round_trips_and_takes_nothing_else()
+    {
+        string line = BackupRules.HashLine("source\\FactorySource\\Tank.glb", "4096|a9993e364706816aba3e25717850c26c9cd0d89d");
+        Assert.Equal("H\tsource/FactorySource/Tank.glb\t4096|a9993e364706816aba3e25717850c26c9cd0d89d", line);
+        Assert.True(BackupRules.TryParseHashLine(line, out string rel, out string key));
+        Assert.Equal("source/FactorySource/Tank.glb", rel); Assert.Equal("4096|a9993e364706816aba3e25717850c26c9cd0d89d", key);
+        foreach (var no in new[] { null, "", "# HAF content index", "H", "H\trel", "H\trel\t", "H\t\tkey", "SRC\trel\torig\t1\t2", "H\trel\tkey\textra" })
+            Assert.False(BackupRules.TryParseHashLine(no, out _, out _), no ?? "<null>");
+        Assert.Throws<ArgumentException>(() => BackupRules.HashLine("a\tb", "k"));
+    }
+
+    [Fact]
+    public void Same_bytes_is_the_whole_file()
+    {
+        string d = Path.Combine(Path.GetTempPath(), "haf_samebytes_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(d);
+        try
+        {
+            string a = Path.Combine(d, "a"), b = Path.Combine(d, "b"), c = Path.Combine(d, "c"), e = Path.Combine(d, "e");
+            var big = new byte[200 * 1024]; new Random(7).NextBytes(big);
+            File.WriteAllBytes(a, big); File.WriteAllBytes(b, big);
+            var edited = (byte[])big.Clone(); edited[big.Length - 1] ^= 1;   // same length, last byte differs: the second buffer
+            File.WriteAllBytes(c, edited);
+            File.WriteAllBytes(e, new byte[0]);
+            Assert.True(BackupRules.SameBytes(a, b));
+            Assert.False(BackupRules.SameBytes(a, c));
+            Assert.False(BackupRules.SameBytes(a, e));
+            Assert.True(BackupRules.SameBytes(e, e));
+            Assert.False(BackupRules.SameBytes(a, Path.Combine(d, "missing")));   // unreadable is not the same as anything
+        }
+        finally { Directory.Delete(d, true); }
+    }
+
+    [Fact]
+    public void The_registry_verify_compares_bytes_not_names()
+    {
+        string d = Path.Combine(Path.GetTempPath(), "haf_verify_" + Guid.NewGuid().ToString("N"));
+        string live = Path.Combine(d, "live"), snap = Path.Combine(d, "snap");
+        string packRoot = Path.Combine(live, "Assets", "Pack"), cfgPacks = Path.Combine(live, "config", "haf_packs");
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(packRoot, "ENCReload"));
+            Directory.CreateDirectory(Path.Combine(cfgPacks, "ENCReload"));
+            File.WriteAllText(Path.Combine(packRoot, "ENCReload", "pack.json"), "{\"models\":[{\"n\":\"Tank\",\"v\":5}]}");
+            File.WriteAllText(Path.Combine(cfgPacks, "ENCReload", "pack.json"), "{\"models\":[{\"n\":\"Tank\",\"v\":5}]}");
+            var groups = new[]
+            {
+                new KeyValuePair<string, IEnumerable<string>>("pack", new[] { packRoot }),
+                new KeyValuePair<string, IEnumerable<string>>("config", new[] { Path.Combine(live, "config", "haf_x.json"), cfgPacks }),
+                new KeyValuePair<string, IEnumerable<string>>("resources", new[] { Path.Combine(live, "Assets", "Resources") }),
+            };
+            // nothing landed yet: both missing, both counted
+            string v = BackupRules.VerifyRegistryCopies(snap, groups, out int src, out int dep);
+            Assert.NotNull(v); Assert.Contains("MISSING", v); Assert.Contains("Assets/Pack/ENCReload/pack.json", v); Assert.Contains("haf_packs/ENCReload/pack.json", v);
+            Assert.Equal(1, src); Assert.Equal(1, dep);
+            // the snapshot's layout: <snap>/<group>/<root leaf>/<rel>
+            Directory.CreateDirectory(Path.Combine(snap, "pack", "Pack", "ENCReload"));
+            Directory.CreateDirectory(Path.Combine(snap, "config", "haf_packs", "ENCReload"));
+            File.Copy(Path.Combine(packRoot, "ENCReload", "pack.json"), Path.Combine(snap, "pack", "Pack", "ENCReload", "pack.json"));
+            File.Copy(Path.Combine(cfgPacks, "ENCReload", "pack.json"), Path.Combine(snap, "config", "haf_packs", "ENCReload", "pack.json"));
+            Assert.Null(BackupRules.VerifyRegistryCopies(snap, groups, out src, out dep));
+            Assert.Equal(1, src); Assert.Equal(1, dep);
+            // the reported case: a SAME-LENGTH edit of the live registry after the copy - a name is there, the bytes are not
+            File.WriteAllText(Path.Combine(packRoot, "ENCReload", "pack.json"), "{\"models\":[{\"n\":\"Tank\",\"v\":6}]}");
+            v = BackupRules.VerifyRegistryCopies(snap, groups, out src, out dep);
+            Assert.NotNull(v); Assert.Contains("DIFFERENT version of Assets/Pack/ENCReload/pack.json", v); Assert.DoesNotContain("MISSING", v);
+            // a pack group whose root is gone verifies nothing and counts nothing - but a config group still does
+            var packGone = new[] { new KeyValuePair<string, IEnumerable<string>>("pack", new[] { Path.Combine(live, "nowhere") }), groups[1] };
+            Assert.Null(BackupRules.VerifyRegistryCopies(snap, packGone, out src, out dep));
+            Assert.Equal(0, src); Assert.Equal(1, dep);
+            // a snapshot with no registry group asserts nothing
+            Assert.Null(BackupRules.VerifyRegistryCopies(snap, new[] { groups[2] }, out src, out dep));
+            Assert.Equal(0, src); Assert.Equal(0, dep);
+        }
+        finally { Directory.Delete(d, true); }
+    }
+
 }

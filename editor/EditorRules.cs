@@ -248,6 +248,149 @@ public static class BackupRules
     /// <summary>The snapshot folder's name: the prefix, the stamp, and the resource name made safe as ONE path segment.</summary>
     public static string SnapshotFolderName(string stamp, string resourceName) => RemovedPrefix + stamp + "_" + SafeSegment(resourceName);
 
+    public const string DeletedPrefix = "_deleted_";
+    /// <summary>
+    /// The folder for a name's baked outputs snapshotted ON REQUEST before a sweep (Ship Status' Delete selected, 2026-09-30):
+    /// the delete guard's own shape, so the Backup window lists and ages it with the guard's, and a suffix that says it
+    /// holds a name's outputs, not one asset.
+    /// </summary>
+    public static string OutputsSnapshotFolderName(string stamp, string resourceName) => DeletedPrefix + stamp + "_" + SafeSegment(resourceName) + "_outputs";
+
+    /// <summary>
+    /// A manifest's one source line: <c>SRC&lt;tab&gt;rel&lt;tab&gt;original&lt;tab&gt;files&lt;tab&gt;bytes</c>, separators
+    /// as `/`. Every snapshot writer (the window, the delete guard, the outputs snapshot) builds its lines here and the
+    /// window's restore reads them with <see cref="TryParseManifestLine"/>: one format, pinned by one test. A path with a
+    /// tab in it cannot be carried and is refused.
+    /// </summary>
+    public static string ManifestLine(string rel, string original, int files, long bytes)
+    {
+        if (rel == null || original == null) throw new ArgumentNullException(rel == null ? nameof(rel) : nameof(original));
+        if (rel.IndexOf('\t') >= 0 || original.IndexOf('\t') >= 0) throw new ArgumentException("a manifest path cannot contain a tab");
+        return $"SRC\t{rel.Replace('\\', '/')}\t{original.Replace('\\', '/')}\t{files}\t{bytes}";
+    }
+
+    /// <summary>
+    /// The content key a snapshot records per file: <c>&lt;length&gt;|&lt;sha1 hex&gt;</c> of the bytes as streamed. Two
+    /// files with the same key hold the same bytes; a file that can't be read has none (null). This is what "unchanged"
+    /// means to the dedup (review of PR #105, round 6): no rule over sizes and last-write times survives a tool that
+    /// writes new bytes under a preserved timestamp, so the bytes are what is recorded and compared. Measured on Unity's
+    /// Mono: 237 MB/s per core, 1.4 GB/s over 8 — the 3 GB live tree in about 2 s warm, 5 s cold.
+    /// </summary>
+    public static string ContentKey(string path)
+    {
+        try
+        {
+            using (var s = System.IO.File.OpenRead(path))
+            using (var sha = System.Security.Cryptography.SHA1.Create())
+            {
+                long len = 0; var buf = new byte[64 * 1024]; int n;
+                while ((n = s.Read(buf, 0, buf.Length)) > 0) { sha.TransformBlock(buf, 0, n, null, 0); len += n; }
+                sha.TransformFinalBlock(buf, 0, 0);
+                return len + "|" + BitConverter.ToString(sha.Hash).Replace("-", "").ToLowerInvariant();
+            }
+        }
+        catch { return null; }
+    }
+
+    /// <summary>One line of a snapshot's content index (haf_hashes.txt): <c>H&lt;tab&gt;rel&lt;tab&gt;key</c>, separators as `/`.</summary>
+    public static string HashLine(string rel, string key)
+    {
+        if (rel == null || key == null) throw new ArgumentNullException(rel == null ? nameof(rel) : nameof(key));
+        if (rel.IndexOf('\t') >= 0 || key.IndexOf('\t') >= 0) throw new ArgumentException("an index path cannot contain a tab");
+        return "H\t" + rel.Replace('\\', '/') + "\t" + key;
+    }
+
+    /// <summary>The reader of <see cref="HashLine"/>: false for a comment, a blank, or a line that is not one.</summary>
+    public static bool TryParseHashLine(string line, out string rel, out string key)
+    {
+        rel = key = null;
+        if (line == null || !line.StartsWith("H\t", StringComparison.Ordinal)) return false;
+        var p = line.Split('\t');
+        if (p.Length != 3 || p[1].Length == 0 || p[2].Length == 0) return false;
+        rel = p[1]; key = p[2];
+        return true;
+    }
+
+    /// <summary>Are two files byte-for-byte the same? Streams them; a file that can't be read is not the same as anything.</summary>
+    public static bool SameBytes(string a, string b)
+    {
+        try
+        {
+            var fa = new System.IO.FileInfo(a); var fb = new System.IO.FileInfo(b);
+            if (fa.Length != fb.Length) return false;
+            using (var sa = fa.OpenRead()) using (var sb = fb.OpenRead())
+            {
+                var ba = new byte[64 * 1024]; var bb = new byte[64 * 1024];
+                for (;;)
+                {
+                    int na = Fill(sa, ba), nb = Fill(sb, bb);
+                    if (na != nb) return false;
+                    if (na == 0) return true;
+                    for (int i = 0; i < na; i++) if (ba[i] != bb[i]) return false;
+                }
+            }
+        }
+        catch { return false; }
+    }
+
+    static int Fill(System.IO.Stream s, byte[] buf)
+    {
+        int total = 0;
+        while (total < buf.Length) { int n = s.Read(buf, total, buf.Length - total); if (n <= 0) break; total += n; }
+        return total;
+    }
+
+    /// <summary>
+    /// The registry files a snapshot MUST hold, BYTE FOR BYTE: every pack.json under a "pack" group's roots (the SOURCE,
+    /// Assets/Pack) and under a "config" group's haf_packs root (the deployed copy), each at
+    /// <c>&lt;snapshot&gt;/&lt;group&gt;/&lt;root leaf&gt;/&lt;relative path&gt;</c> and compared with the live file it was
+    /// taken from (review of PR #105 by ChatGPT: an existence check called a linked OLD version "verified"). Null when every
+    /// one is present and identical; else the message the backup is marked NOT ok with - also when the walk itself fails,
+    /// never "clean" for want of an answer. Pure file IO: it runs on the auto-version's worker thread.
+    /// </summary>
+    public static string VerifyRegistryCopies(string snapshotDir, IEnumerable<KeyValuePair<string, IEnumerable<string>>> groups, out int sourcePacks, out int deployedPacks)
+    {
+        sourcePacks = deployedPacks = 0;
+        try
+        {
+            var missing = new List<string>(); var differ = new List<string>();
+            foreach (var g in groups)
+                foreach (var root in g.Value)
+                {
+                    string leaf = System.IO.Path.GetFileName(root.TrimEnd('/', '\\'));
+                    bool source = g.Key == "pack", deployed = g.Key == "config" && leaf == "haf_packs";
+                    if (!(source || deployed) || !System.IO.Directory.Exists(root)) continue;
+                    foreach (var p in System.IO.Directory.GetFiles(root, "pack.json", System.IO.SearchOption.AllDirectories))
+                    {
+                        string rel = p.Substring(root.Length).TrimStart('/', '\\');   // <mod>/pack.json
+                        string shown = (source ? "Assets/Pack/" : "haf_packs/") + rel.Replace('\\', '/');
+                        if (source) sourcePacks++; else deployedPacks++;
+                        string copy = System.IO.Path.Combine(snapshotDir, g.Key, leaf, rel);
+                        if (!System.IO.File.Exists(copy)) missing.Add(shown);
+                        else if (!SameBytes(copy, p)) differ.Add(shown);
+                    }
+                }
+            if (missing.Count == 0 && differ.Count == 0) return null;
+            return "⚠ CRITICAL: this backup "
+                 + (missing.Count > 0 ? "is MISSING the model registry file(s): " + string.Join(", ", missing) : "")
+                 + (missing.Count > 0 && differ.Count > 0 ? "; and it " : "")
+                 + (differ.Count > 0 ? "holds a DIFFERENT version of " + string.Join(", ", differ) + " than the live file" : "")
+                 + " — it CANNOT fully recover a removed model. Do not trust it; back up again.";
+        }
+        catch (Exception e) { return $"⚠ CRITICAL: the registry in this backup could NOT be verified ({e.Message}) — do not trust it; back up again."; }
+    }
+
+    /// <summary>The reader of <see cref="ManifestLine"/>: false for a comment, a blank, or a line too short; a file count that does not parse reads as 0.</summary>
+    public static bool TryParseManifestLine(string line, out string rel, out string original, out int files)
+    {
+        rel = original = null; files = 0;
+        if (line == null || !line.StartsWith("SRC\t", StringComparison.Ordinal)) return false;
+        var p = line.Split('\t');
+        if (p.Length < 4) return false;
+        rel = p[1]; original = p[2]; files = int.TryParse(p[3], out var n) ? n : 0;
+        return true;
+    }
+
     /// <summary>
     /// Is <paramref name="name"/> usable in a file path AS IT IS — one segment, never a parent, never empty (sixth
     /// round)? The Factory's Remove passed the registry's raw name to the output copy, which uses it in the source
