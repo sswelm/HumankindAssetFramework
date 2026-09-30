@@ -5,6 +5,17 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **The in-memory model and the GLB reader — step 1 of replacing Blender** (`HafModel`, `GlbReader`; the plan and
+  its measurements: `docs/Review-Backlog.md`). A `.glb` or `.gltf` (embedded, data-URI or sibling `.bin`) reads into one
+  model — nodes with transforms and hierarchy, meshes → primitives with every vertex attribute (positions, normals,
+  tangents, two UV sets, colours, joints, weights, indices), PBR materials with textures and images, skins with
+  inverse bind matrices, animations as sampled curves — with every component type, normalized integers and
+  interleaved views decoded exactly. What the reader does not implement is refused by name (sparse accessors, Draco or
+  any unknown required extension, a chunk past the file, an index outside its vertices, an accessor past its view);
+  morph targets are counted, not read. Tested on synthetic files field by field; drilled on the registry: all 35 GLBs
+  (784 MB) read in 1.7 s and agree with Blender's import on triangles, materials, images and joints (Blender: 14.4 s
+  plus boot). Nothing uses it yet — the pipeline still runs on Blender; the next steps consume it.
+
 - **A Blender script that crashes now fails the bake.** Blender exits 0 on an uncaught Python exception unless
   told otherwise (measured on 5.1), so every `ExitCode != 0` check in the Factory, the Vehicle Lab and the Clip
   Range dialog was dead for a crashed script: a crash after a partial output looked exactly like a finished run. The

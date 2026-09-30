@@ -37,7 +37,7 @@ in **GitHub Actions**. Both lanes matter, and for different reasons:
 | Surface | `tools/check.sh` (pre-push hook) | also in CI | ~time |
 |---|---|---|---|
 | **Runtime + shared contract** | `dotnet build` · `dotnet test` · docs guard · binding-catalog surface · hot path · parse shape · member shape · schema parity | all source-only checks | seconds |
-| **Editor package** | Roslyn editor compile-check · registry engine drill · backup dedup drill · blender exit drill · schema parity · hand-list gate | parity + hand-list; compile check and drills stay local | ~30 s |
+| **Editor package** | Roslyn editor compile-check · registry engine drill · backup dedup drill · blender exit drill · GLB reader drill · schema parity · hand-list gate | parity + hand-list; compile check and drills stay local | ~45 s |
 
 The one guard CI cannot run is **`tools/editor_compile_check.sh`**: it needs a licensed Unity 2021.3.1f1 install
 (`UnityEditor.dll`, the MonoBleedingEdge 4.7.1 profile, every `UnityEngine` module), none of which is
@@ -59,6 +59,13 @@ content index links nothing.
 when absent) with the head `BakerRules.BlenderScript` builds: a script that raises exits 1, without the flag it exits 0 (the
 hole), a clean script exits 0, and the real `rig_anim.py` clears the previous run's role clip before touching the model
 and fails the process on a missing input.
+
+**`tools/glb_reader_drill.sh`** (2026-09-30, step 1 of replacing Blender) reads every `.glb` the modding project's registry
+names with the real `editor/GlbReader.cs` on Unity's Mono, checks what a file cannot say about itself (skinned vertices weigh
+to 1 over the skin's joints), and compares triangles, materials, images and joints per file with Blender's import of the same
+file — a sample by default (the largest, the smallest, the animated ones), every file with `FULL=1`. SKIP without the project
+(hosted CI) or without Blender. First full run: 35 of 35 agree; the reader took 1.7 s for 784 MB, Blender's importer 14.4 s
+plus its boot.
 
 ### Schema parity is in-repo and mandatory
 
