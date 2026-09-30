@@ -13,8 +13,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 - **THE GHOST HUNT NO LONGER RUNS IN NORMAL PLAY (2026-09-30).** The 2026-08-03 ghost-rotor tools still ran for
   every `hideSubPawns` model: at repoint and on every ~10 s NEAR tick they zeroed every GPU descriptor fragment in
   the pawn table that encodes the donor mesh, and degenerated the donor mesh's layer-0 slice in the shared vertex
-  buffer. Both find their target by the DONOR mesh's start index — which the donor's own vanilla unit draws from
-  too. The shipped StealthHelicopter's donor is `Unit_Era6_Common_HelicopterGunships_01` (the 2026-09-29 log:
+  buffer — both find their target by the DONOR mesh's start index, which the donor's own vanilla unit draws from
+  too — and the one-shot renderer census switched off any Unity `Renderer` within 15 units whose name said
+  Gunship/Helix/Rotor/Blur, whoever owned it. The shipped StealthHelicopter's donor is `Unit_Era6_Common_HelicopterGunships_01` (the 2026-09-29 log:
   *"DEGENERATED donor mesh 74's layer-0 slice (66 verts)"*), so a vanilla Helicopter Gunship in the same session
   lost that slice. None of it was the fix: the last ghost was the donor's VFX billboard, dropped by
   `silenceDonorVfx` (the 2026-08-04 entry below says it *"survived crushing every vertex of every ContentLayer"*).

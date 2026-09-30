@@ -511,9 +511,11 @@ namespace HumankindAssetFramework
                     // FindObjectsOfType<Renderer> on a timer — Performance.md rule 2, in the file that claims the
                     // scan was removed. 82 runs in one session, every one "0 renderer(s)": the ghost it hunted was
                     // never a renderer — it was the donor's VFX billboard, dropped by silenceDonorVfx (CrushGhostSlice
-                    // did not kill it, and is [Debug] GhostHunt-only since 2026-09-30). The census keeps its
-                    // diagnostic value as a one-shot; the auto-disable it carried never fired in that session.
-                    if (rendererCensusDone.Add(e.resourceName))
+                    // did not kill it, and is [Debug] GhostHunt-only since 2026-09-30). The census is a hunt tool like the
+                    // rest and runs under the same key (review of PR #106): its auto-disable switches off ANY renderer
+                    // within 15 units whose name says Gunship/Helix/Rotor/Blur - nothing checks that it is ours - and "it
+                    // never matched" (Amplitude's pawns are not Renderer components) is luck, not a guard.
+                    if (GhostHuntOn && rendererCensusDone.Add(e.resourceName))
                     {
                         var origin = c.transform.position;
                         int found = 0;
