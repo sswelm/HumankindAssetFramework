@@ -267,6 +267,33 @@ public class CheckedReplaceTests : IDisposable
     }
 
     [Fact]
+    public void The_committed_text_is_read_without_touching_the_file_on_disk()
+    {
+        // critical review 2026-09-30: "Restore last commit" checked the file out and validated AFTERWARDS, so a refused
+        // candidate had already replaced the working copy. Reading the committed text leaves the working copy alone.
+        Git("init -q");
+        File.WriteAllText(P, "{ \"districts\": [ { \"district\": \"A\" } ] }");
+        Git("add pack.json");
+        Git("-c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q -m first");
+        File.WriteAllText(P, "<<<<<<< the working copy, broken");
+        Assert.Equal("{ \"districts\": [ { \"district\": \"A\" } ] }", CheckedReplace.GitCommittedText(P, out var error));
+        Assert.Null(error);
+        Assert.Equal("<<<<<<< the working copy, broken", File.ReadAllText(P));   // untouched
+    }
+
+    [Fact]
+    public void A_file_with_no_committed_version_says_so_and_touches_nothing()
+    {
+        Assert.Null(CheckedReplace.GitCommittedText(P, out var outside));   // no repository at all
+        Assert.False(string.IsNullOrEmpty(outside));
+        Git("init -q");
+        File.WriteAllText(P, "never committed");
+        Assert.Null(CheckedReplace.GitCommittedText(P, out var uncommitted));   // a repository, but no commit of it
+        Assert.False(string.IsNullOrEmpty(uncommitted));
+        Assert.Equal("never committed", File.ReadAllText(P));
+    }
+
+    [Fact]
     public void A_write_that_fails_leaves_the_file_as_it_was()
     {
         // a plain reader (share Read) blocks the replace — measured earlier in this PR

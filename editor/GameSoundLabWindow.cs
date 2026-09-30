@@ -19,6 +19,7 @@ using UnityEngine;
 public class GameSoundLabWindow : EditorWindow
 {
     List<SoundOverrideDef> entries;
+    string loadedVersion;   // the version of the rules this window loaded — Save writes only over it (critical review 2026-09-30)
     string status = "";
     Vector2 scroll;
 
@@ -50,7 +51,11 @@ public class GameSoundLabWindow : EditorWindow
     void Reload()
     {
         entries = SoundOverrideRegistry.Load();
-        status = $"{entries.Count} override(s) loaded from haf_sounds.json.";
+        loadedVersion = SoundOverrideRegistry.LoadedVersion;   // null after a failed load: Save then refuses
+        string notice = SoundOverrideRegistry.TakeNotice();
+        status = SoundOverrideRegistry.LastLoadFailed
+            ? $"The sound-override registry {SoundOverrideRegistry.LastLoadProblem}. The list is empty only because of that; Save is refused until it can be read (Reload)."
+            : $"{entries.Count} override(s) loaded." + (notice != "" ? " " + notice : "");
     }
 
     void LoadCatalog()
@@ -104,13 +109,21 @@ public class GameSoundLabWindow : EditorWindow
         GUILayout.FlexibleSpace();
         if (GUILayout.Button("Save", GUILayout.Width(120)))
         {
-            status = SoundOverrideRegistry.Save(entries)
-                ? $"Saved {entries.Count(o => !string.IsNullOrWhiteSpace(o.silence))} override(s) -> haf_sounds.json. Relaunch the game to apply."
-                : "SAVE FAILED — see the Console.";
-            Reload();
+            // Only a save that went through reloads (critical review 2026-09-30): reloading after a failed one discarded
+            // the edits AND replaced the failure with "N override(s) loaded". The status says what the outcome guarantees.
+            var outcome = SoundOverrideRegistry.Save(entries, loadedVersion);
+            int n = entries.Count(o => !string.IsNullOrWhiteSpace(o.silence));
+            if (outcome == RegistryRules.SaveOutcome.Saved)
+            {
+                Reload();
+                status = $"Saved {n} override(s) -> haf_sounds.json. Relaunch the game to apply.";
+            }
+            else status = outcome == RegistryRules.SaveOutcome.Refused
+                ? "SAVE REFUSED — nothing was written; your edits are still here (see the Console for why — if the registry changed since you loaded it, note your edits, Reload, and redo them)."
+                : "Save could NOT be confirmed — the registry may hold this list or the previous one (see the Console). Your edits are still here.";
         }
         EditorGUILayout.EndHorizontal();
-        if (!string.IsNullOrEmpty(status)) EditorGUILayout.LabelField(status, EditorStyles.miniLabel);
+        if (!string.IsNullOrEmpty(status)) EditorGUILayout.HelpBox(status, MessageType.None);   // wraps: a refusal's reason must not be cut off
 
         // ---- catalog pick list ----
         EditorGUILayout.Space();

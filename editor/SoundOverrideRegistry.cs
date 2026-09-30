@@ -1,7 +1,13 @@
-// SoundOverrideRegistry.cs (HAF editor) — the Game Sound Lab's config store: haf_sounds.json in the game's
-// BepInEx/config, read by the plugin's audio-override path (UniversalInject.EnsureSoundOverrides / ShouldSilenceEvent).
-// Mirrors DistrictRegistry (same target dir, corrupt-guard + atomic write + git-tracked project backup) but for global
-// AUDIO OVERRIDES: each entry silences a vanilla Wwise event by name-substring (and, later, substitutes a better one).
+// SoundOverrideRegistry.cs (HAF editor) — the Game Sound Lab's config store, read by the plugin's audio-override path
+// (UniversalInject.EnsureSoundOverrides / ShouldSilenceEvent) from haf_sounds.json in the game's BepInEx/config.
+// Global AUDIO OVERRIDES: each entry silences a vanilla Wwise event by name-substring (and, later, substitutes a better
+// one).
+//
+// THE COLLAPSE, finally (critical review 2026-09-30): this registry still ran the OLD two-file pattern — it READ the
+// deployed file and wrote the git-tracked copy non-atomically after it, so an older deployed copy (a git pull brought a
+// newer tracked file) overwrote the newer rules on the next save, and `{}` read as "no rules". It now runs on the shared
+// SingleSourceRegistry engine like districts and formations: the git-tracked project file is THE registry, the deployed
+// haf_sounds.json is a build artifact, and every save is checked. The source keeps its historical ".backup.json" name.
 //
 // The RUNTIME reads only { silence } today (Newtonsoft JObject — extra fields ignored); `replaceWith` is reserved for
 // the future silence-then-substitute step and `note` is editor-only. Same JsonUtility caveat as ModelRegistry: the
@@ -10,7 +16,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using UnityEditor;
 using UnityEngine;
 
 // One audio override. `silence` is the key (one rule per event-substring).
@@ -30,12 +35,22 @@ class SoundRegistryFile
 
 public static class SoundOverrideRegistry
 {
-    public static string RegistryPath => Path.Combine(ModelRegistry.ConfigDir, "haf_sounds.json");
-    public static string ProjectBackupPath => Path.Combine(Application.dataPath, "Databases", "haf_sounds.backup.json");
+    static readonly SingleSourceRegistry<SoundRegistryFile> Store = new SingleSourceRegistry<SoundRegistryFile>(
+        "[Sound]",
+        () => Path.Combine(Application.dataPath, "Databases", "haf_sounds.backup.json"),
+        () => Path.Combine(ModelRegistry.ConfigDir, "haf_sounds.json"),
+        f => f?.overrides?.Count ?? 0,
+        "HAF.Sounds.SingleSource", "Assets/Databases/haf_sounds.backup.json", "sound override(s)", "overrides");
 
-    // Set when the last Load() found a file it couldn't parse; Save() refuses while set, so a corrupt / half-edited
-    // registry is never silently replaced with a fresh empty list.
-    static bool lastLoadCorrupt;
+    public static string RegistryPath => Store.ArtifactPath;        // what the running game reads (derived)
+    public static string SourcePath => Store.SourcePath;            // what the editor reads and writes (git-tracked)
+    public static string ProjectBackupPath => Store.SourcePath;     // historical name, kept for callers
+    public static bool LastLoadFailed => Store.LastLoadFailed;
+    public static string LastLoadProblem => Store.LastLoadProblem;
+    public static string TakeNotice() => Store.TakeNotice();
+
+    /// <summary>The version of the rules the last successful Load returned; null after a failed one (see Save).</summary>
+    public static string LoadedVersion => Store.LoadedVersion;
 
     static List<SoundOverrideDef> Clean(List<SoundOverrideDef> list)
     {
@@ -45,89 +60,14 @@ public static class SoundOverrideRegistry
         return list;
     }
 
-    public static List<SoundOverrideDef> Load()
-    {
-        try
-        {
-            if (!File.Exists(RegistryPath))
-            {
-                lastLoadCorrupt = false;
-                if (File.Exists(ProjectBackupPath))
-                {
-                    // parse the backup in its OWN try/catch (see ModelRegistry E6): an unreadable backup while the live
-                    // file is missing must read as "no backup", not lock Save forever.
-                    try
-                    {
-                        var backupJson = File.ReadAllText(ProjectBackupPath);
-                        var b = JsonUtility.FromJson<SoundRegistryFile>(backupJson);
-                        if (b?.overrides != null && b.overrides.Count > 0)
-                        {
-                            try { Directory.CreateDirectory(ModelRegistry.ConfigDir); File.WriteAllText(RegistryPath, backupJson); } catch { }
-                            Debug.Log($"[Sound] game sound-override registry was missing — restored {b.overrides.Count} rule(s) from the project backup.");
-                            return Clean(b.overrides);
-                        }
-                    }
-                    catch (Exception be) { Debug.LogWarning($"[Sound] the project backup '{ProjectBackupPath}' is unreadable ({be.Message}) — treating as no backup."); }
-                }
-                return new List<SoundOverrideDef>();
-            }
-            var data = JsonUtility.FromJson<SoundRegistryFile>(File.ReadAllText(RegistryPath));
-            lastLoadCorrupt = false;
-            return Clean(data?.overrides ?? new List<SoundOverrideDef>());
-        }
-        catch (Exception e)
-        {
-            lastLoadCorrupt = true;
-            try { File.Copy(RegistryPath, RegistryPath + ".corrupt.json", true); } catch { }
-            Debug.LogError($"[Sound] registry '{RegistryPath}' is unreadable ({e.Message}) — backed up to " +
-                           $"'{Path.GetFileName(RegistryPath)}.corrupt.json'. Fix or delete it; the Lab won't save until then.");
-            return new List<SoundOverrideDef>();
-        }
-    }
+    public static List<SoundOverrideDef> Load() => Clean(Store.Load()?.overrides);
 
-    // True = written. False = nothing saved (corrupt-guard tripped, or the atomic write hit a lock) — surface it.
-    public static bool Save(List<SoundOverrideDef> overrides)
-    {
-        if (lastLoadCorrupt)
-        {
-            Debug.LogError("[Sound] not saving: the existing sound-override registry was unreadable (see the .corrupt.json backup). Fix or delete it first.");
-            return false;
-        }
-        var cleaned = Clean(overrides);
-        var json = JsonUtility.ToJson(new SoundRegistryFile { overrides = cleaned }, true);
-        try
-        {
-            Directory.CreateDirectory(ModelRegistry.ConfigDir);
-            var tmp = RegistryPath + ".tmp";
-            File.WriteAllText(tmp, json);
-            if (File.Exists(RegistryPath)) File.Replace(tmp, RegistryPath, null);
-            else File.Move(tmp, RegistryPath);
-        }
-        catch (Exception e)
-        {
-            Debug.LogError($"[Sound] registry write FAILED — the override list was NOT saved to '{RegistryPath}' ({e.Message}). " +
-                           "Close whatever's locking it (AV, indexer, the running game) and retry.");
-            return false;
-        }
-        try { File.WriteAllText(ProjectBackupPath, json); } catch (Exception e) { Debug.LogWarning("[Sound] project backup write failed: " + e.Message); }
-        AssetDatabase.Refresh();
-        return true;
-    }
-
-    public static bool Upsert(SoundOverrideDef def)
-    {
-        var list = Load();
-        list.RemoveAll(o => string.Equals(o.silence, def.silence, StringComparison.OrdinalIgnoreCase));
-        list.Add(def);
-        return Save(list);
-    }
-
-    public static bool Remove(string silence)
-    {
-        var list = Load();
-        int before = list.Count;
-        list.RemoveAll(o => string.Equals(o.silence, silence, StringComparison.OrdinalIgnoreCase));
-        if (list.Count == before) return false;
-        return Save(list);
-    }
+    /// <summary>
+    /// Save the Lab's WHOLE list — only over the version the Lab loaded (<paramref name="loadedVersion"/> = LoadedVersion
+    /// right after its Load). Another writer's change since, a broken source, or a source emptied outside the editor
+    /// while the deploy still holds rules all refuse, with the reason in the Console.
+    /// </summary>
+    public static RegistryRules.SaveOutcome Save(List<SoundOverrideDef> overrides, string loadedVersion) =>
+        Store.ReplaceAll(new SoundRegistryFile { overrides = Clean(new List<SoundOverrideDef>(overrides ?? new List<SoundOverrideDef>())) },
+                         loadedVersion, "the sound overrides");
 }

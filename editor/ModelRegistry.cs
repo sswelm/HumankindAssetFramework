@@ -724,25 +724,15 @@ public static class ModelRegistry
         catch (Exception e) { return "⚠ could not read the deployed artifact: " + e.Message; }
     }
 
-    // The last COMMITTED version via git (the source is git-tracked — that was the point of the collapse).
+    // The last COMMITTED version via git (the source is git-tracked — that was the point of the collapse), read with
+    // `git show` and VALIDATED BEFORE anything is written (critical review 2026-09-30): this used to `git checkout` the
+    // file and validate afterwards, so a candidate it then refused had already replaced the working copy, and "REFUSED
+    // (nothing was overwritten)" was untrue.
     public static string RecoverFromGit()
     {
-        try
-        {
-            string projRoot = Directory.GetParent(Application.dataPath).FullName;
-            string rel = "Assets/Pack/" + HafPackageContext.PackName + "/pack.json";
-            var psi = new System.Diagnostics.ProcessStartInfo("git", $"-C \"{projRoot}\" checkout -- \"{rel}\"")
-            { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true };
-            using (var p = System.Diagnostics.Process.Start(psi))
-            {
-                string err = p.StandardError.ReadToEnd();
-                p.WaitForExit(15000);
-                if (p.ExitCode != 0) return "⚠ git recovery FAILED: " + (string.IsNullOrWhiteSpace(err) ? ("exit " + p.ExitCode) : err.Trim());
-            }
-            // git rewrote the file on disk — validate it exactly like any other candidate before declaring victory
-            return RecoverSourceFrom(File.ReadAllText(SourcePath), "git (last committed version)");
-        }
-        catch (Exception e) { return "⚠ git recovery FAILED: " + e.Message + " (is git installed?)"; }
+        string committed = CheckedReplace.GitCommittedText(SourcePath, out string error);
+        if (committed == null) return $"⚠ git recovery FAILED: {error} (nothing was overwritten).";
+        return RecoverSourceFrom(committed, "git (last committed version)");
     }
 
     // Returns true if the registry was written. False = nothing was saved (corrupt-guard tripped, or the atomic write

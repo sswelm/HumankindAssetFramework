@@ -9,7 +9,8 @@ itself it's mostly a diagnostic/authoring aid. Operates at the **event** level (
 | Part | Where | What |
 |---|---|---|
 | **Game Sound Lab** window | ENCReload editor, `Tools/HAF/Game Sound Lab` | authors `haf_sounds.json` — a list of overrides; has a searchable catalog pick list with category tabs |
-| `haf_sounds.json` | `BepInEx/config/` | `{ "overrides": [ { "silence": "<event-substring>", "replaceWith": "" } ] }` — the registry (via `SoundOverrideRegistry`) |
+| `Assets/Databases/haf_sounds.backup.json` | the Unity project (git-tracked) | the registry **source** (via `SoundOverrideRegistry`, on the shared `SingleSourceRegistry` engine since 2026-09-30). A save writes only over the version the Lab loaded — if the file changed since (another window, git), it refuses and says to reload |
+| `haf_sounds.json` | `BepInEx/config/` | `{ "overrides": [ { "silence": "<event-substring>", "replaceWith": "" } ] }` — the **deployed copy** the game reads, regenerated on every save |
 | Plugin read | `UniversalInject.ShouldSilenceEvent` / `EnsureSoundOverrides` | drops any Wwise event whose name contains a `silence` substring, at the `AudioManager.PostEvent` service sink (`Hk_SilenceEvents`) |
 | `Audio/SilenceAudioEvents` config | `BepInEx/config/community.humankind.haf.cfg` | the same silence mechanism as a hand-edit escape hatch (comma-separated substrings) |
 | **F8 audition** | plugin F8 window — `Play Event` / `Stop` | post any event by name on live emitters so you can HEAR it; `Stop` halts a looping audition |

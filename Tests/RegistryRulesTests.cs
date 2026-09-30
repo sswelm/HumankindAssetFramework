@@ -23,6 +23,23 @@ public class RegistryRulesTests
     }
 
     [Fact]
+    public void Every_registry_has_the_same_shape_rule_under_its_own_key()
+    {
+        // critical review 2026-09-30: the district/formation/sound engine read `{}` as "zero entries"
+        Assert.True(RegistryRules.HasArray("{ \"districts\": [] }", "districts"));
+        Assert.True(RegistryRules.HasArray("{ \"links\": [ { \"unit\": \"x\" } ] }", "links"));
+        Assert.True(RegistryRules.HasArray("{ \"overrides\": [] }", "overrides"));
+        Assert.False(RegistryRules.HasArray("{}", "districts"));
+        Assert.False(RegistryRules.HasArray("{ \"models\": [] }", "districts"));        // the wrong registry's key
+        Assert.False(RegistryRules.HasArray("{ \"districts\": {} }", "districts"));
+        Assert.False(RegistryRules.HasArray("{ \"districts\": null }", "districts"));
+        Assert.False(RegistryRules.HasArray("", "districts"));
+        Assert.False(RegistryRules.HasArray(null, "districts"));
+        Assert.False(RegistryRules.HasArray("<<<<<<< HEAD\n{ \"districts\": [] }", "districts"));
+        Assert.Equal(RegistryRules.HasArray("{ \"models\": [] }", "models"), RegistryRules.HasModelsArray("{ \"models\": [] }"));
+    }
+
+    [Fact]
     public void A_save_over_an_empty_source_goes_ahead_only_when_nothing_else_could_still_hold_the_models()
     {
         var allow = RegistryRules.EmptySourceVerdict.Allow;

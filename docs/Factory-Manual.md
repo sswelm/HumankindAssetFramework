@@ -524,7 +524,10 @@ source and make recovery explicit:
   instead of replacing the unreadable registry with an empty one.
 - **One-click recovery.** The corruption banner offers **Restore last deploy** (usually the freshest valid artifact) and
   **Restore last commit**. Each candidate is parsed and required to contain models before it can replace the source; the
-  corrupt copy remains available for hand-merging.
+  committed version is read with `git show`, so a candidate that is refused never touches the working copy. The
+  corrupt copy remains available for hand-merging. A source that can't be *read* (another program holds it) is not
+  corrupt: it shows a plain warning without recovery buttons. The District and Formation windows follow the same rules
+  (shared `SingleSourceRegistry` engine).
 - **Artifact recreation and drift warning.** Opening the Factory recreates a missing deployed `pack.json` from the
   project source. If somebody hand-edited the deployed copy, the editor warns that it differs and the next Save
   overwrites it from the source. A missing project source can adopt a valid deployed artifact as a last-resort recovery.

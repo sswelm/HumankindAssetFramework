@@ -93,13 +93,18 @@ public static class DistrictRegistry
         () => Path.Combine(Application.dataPath, "Databases", "haf_districts.backup.json"),
         () => Path.Combine(ModelRegistry.ConfigDir, "haf_districts.json"),
         f => f?.districts?.Count ?? 0,
-        "HAF.Districts.SingleSource", "Assets/Databases/haf_districts.backup.json", "district entries");
+        "HAF.Districts.SingleSource", "Assets/Databases/haf_districts.backup.json", "district entries", "districts");
 
     public static string RegistryPath => Store.ArtifactPath;        // what the running game reads (derived)
     public static string SourcePath => Store.SourcePath;            // what the editor reads and writes (git-tracked)
     public static string ProjectBackupPath => Store.SourcePath;     // historical name, kept for callers
     public static bool LastLoadCorrupt => Store.LastLoadCorrupt;
     public static string LastCorruptDetail => Store.LastCorruptDetail;
+    public static bool LastLoadLocked => Store.LastLoadLocked;       // could not be READ: a plain warning, no recovery buttons
+    public static string LastLockDetail => Store.LastLockDetail;
+    public static string LastLockAdvice => Store.LastLockAdvice;
+    public static bool LastLoadFailed => Store.LastLoadFailed;       // the last Load's empty list proves nothing
+    public static string LastLoadProblem => Store.LastLoadProblem;
     public static string RecoverFromArtifact() => Store.RecoverFromArtifact();
     public static string RecoverFromGit() => Store.RecoverFromGit();
     public static string TakeNotice() => Store.TakeNotice();   // self-healing event for the window status line
@@ -112,27 +117,28 @@ public static class DistrictRegistry
 
     public static List<DistrictDef> Load() => Sort(Store.Load()?.districts ?? new List<DistrictDef>());
 
-    // True = written. False = nothing saved (corrupt-guard tripped, or the atomic write hit a lock) — surface it.
-    public static bool Save(List<DistrictDef> districts)
+    // Every change is an OPERATION on the file as it is at write time (SingleSourceRegistry.Change, critical review
+    // 2026-09-30): it used to be Load, change, Save - so a `{}` source loaded as "no districts" and one bake wrote a
+    // one-entry registry over it and over the deploy. The outcome says only what happened (RegistryRules.SaveOutcome).
+    public static RegistryRules.SaveOutcome UpsertOutcome(DistrictDef def) => Store.Change(f =>
     {
-        Sort(districts);
-        return Store.Save(new DistrictRegistryFile { districts = districts }, "the model baked but its entry");
-    }
+        f.districts = f.districts ?? new List<DistrictDef>();
+        f.districts.RemoveAll(d => d.district == def.district);
+        f.districts.Add(def);
+        Sort(f.districts);
+        return true;
+    }, $"district '{def.district}'", out _);
 
-    public static bool Upsert(DistrictDef def)
-    {
-        var list = Load();
-        list.RemoveAll(d => d.district == def.district);
-        list.Add(def);
-        return Save(list);
-    }
+    public static bool Upsert(DistrictDef def) => UpsertOutcome(def) == RegistryRules.SaveOutcome.Saved;
 
-    public static bool Remove(string district)
+    // Removed / NotPresent (a read that WORKED found no such entry) / Failed (nothing was written) / Unknown (see
+    // SaveOutcome.Unknown) — the window says which, never "not in the registry" for a save that failed.
+    public static RegistryRules.RemoveResult RemoveEntry(string district)
     {
-        var list = Load();
-        int before = list.Count;
-        list.RemoveAll(d => d.district == district);
-        if (list.Count == before) return false;
-        return Save(list);
+        var outcome = Store.Change(f => (f.districts ?? new List<DistrictDef>()).RemoveAll(d => d.district == district) > 0,
+                                   $"removing district '{district}'", out bool changed);
+        return outcome == RegistryRules.SaveOutcome.Unknown ? RegistryRules.RemoveResult.Unknown
+             : outcome != RegistryRules.SaveOutcome.Saved ? RegistryRules.RemoveResult.Failed
+             : changed ? RegistryRules.RemoveResult.Removed : RegistryRules.RemoveResult.NotPresent;
     }
 }

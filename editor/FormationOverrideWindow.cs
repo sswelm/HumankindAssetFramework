@@ -93,7 +93,15 @@ public class FormationOverrideWindow : EditorWindow
         // CORRUPT-SOURCE RECOVERY banner (the Factory's, via the shared SingleSourceRegistry engine — 2026-08-20): the
         // fault is PINPOINTED (line/column) and recovery is ONE CLICK, each path validated before it writes and the broken
         // file already preserved timestamped. Saving stays locked until recovered.
-        if (FormationRegistry.LastLoadCorrupt)
+        // A source that could not be READ is not a corrupt one (critical review 2026-09-30, as the Model Factory since PR
+        // #100): a plain warning, and deliberately no recovery buttons - "Restore last commit" would replace a file that
+        // has nothing wrong with it. The lock takes precedence over an earlier corrupt verdict (RegistryRules).
+        if (FormationRegistry.LastLoadLocked)
+            EditorGUILayout.HelpBox("The formation registry source can't be read right now — " + FormationRegistry.LastLockDetail + "\n" +
+                FormationRegistry.LastLockAdvice + " Saves are refused until it can be read; nothing can be recovered from a file that can't be seen.", MessageType.Warning);
+        else if (FormationRegistry.LastLoadFailed && !FormationRegistry.LastLoadCorrupt)
+            EditorGUILayout.HelpBox("The formation registry " + FormationRegistry.LastLoadProblem + ". The list is empty only because of that; changes are refused until one of them can be read.", MessageType.Warning);
+        if (RegistryRules.ShowRecoveryControls(FormationRegistry.LastLoadCorrupt, FormationRegistry.LastLoadLocked))
         {
             EditorGUILayout.HelpBox("FORMATION REGISTRY SOURCE IS CORRUPT — " + FormationRegistry.LastCorruptDetail + "\n" +
                 "The broken file is preserved beside the source; Save is locked so nothing can be wiped. Recover:", MessageType.Error);
@@ -124,9 +132,12 @@ public class FormationOverrideWindow : EditorWindow
                             $"Remove {label}? Affected units show their vanilla formation again on next launch.",
                             "Remove", "Cancel"))
                     {
-                        bool removed = FormationRegistry.Remove(entry);
+                        var removed = FormationRegistry.RemoveEntry(entry);   // which of four (critical review 2026-09-30)
                         selected = 0; cur = new FormationLink(); RefreshList(); GUI.FocusControl(null);
-                        status = removed ? $"Removed {label}." : "Entry was not in the registry — nothing removed.";
+                        status = removed == RegistryRules.RemoveResult.Removed ? $"Removed {label}."
+                               : removed == RegistryRules.RemoveResult.NotPresent ? "Entry was not in the registry — nothing removed."
+                               : removed == RegistryRules.RemoveResult.Failed ? "Remove FAILED — nothing was removed (see the Console)."
+                               : "Remove could NOT be confirmed — the registry may or may not still hold it (see the Console).";
                     }
                 }
             if (sel != selected) { selected = sel; OnSelect(); GUI.FocusControl(null); }
@@ -431,7 +442,8 @@ public class FormationOverrideWindow : EditorWindow
                     }
                     else
                     {
-                        bool saved = FormationRegistry.Upsert(cur);
+                        var saveOutcome = FormationRegistry.UpsertOutcome(cur);
+                        bool saved = saveOutcome == RegistryRules.SaveOutcome.Saved;
                         RefreshList();
                         var label = EntryLabel(cur);
                         selected = Array.IndexOf(existing, label); if (selected < 0) selected = 0;
@@ -439,7 +451,9 @@ public class FormationOverrideWindow : EditorWindow
                             ? (isMacro
                                 ? $"Saved MACRO replacement: '{cur.formation}' ⇒ {cur.dummies.Count} pawns for EVERY unit referencing it." + (staleWarn ?? "")
                                 : $"Saved: '{cur.unit}' → '{cur.formation}'" + (cur.dummies.Count > 0 ? $" ({cur.dummies.Count} pawns at full health)." : " (pure repoint).") + (staleWarn ?? ""))
-                            : "REGISTRY SAVE FAILED (see Console).";
+                            : saveOutcome == RegistryRules.SaveOutcome.Unknown
+                                ? "Registry save could NOT be confirmed — it may hold this entry or the previous one (see Console)."
+                                : "REGISTRY SAVE FAILED — nothing was written (see Console).";
                     }
                 }
             if (GUILayout.Button("Reset", GUILayout.Height(34), GUILayout.Width(72))) { cur = new FormationLink(); selected = 0; status = ""; GUI.FocusControl(null); }
