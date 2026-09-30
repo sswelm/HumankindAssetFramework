@@ -491,6 +491,33 @@ public static class BakerRules
         return $"--background --python-exit-code 1 --python \"{scriptPath}\"";
     }
 
+    /// <summary>The state-driven roles: the folder rig_anim exports each to, and the clip collection the bake mints for it.</summary>
+    public static readonly string[][] Roles =
+    {
+        new[] { "move", "_ClipsMove" }, new[] { "after", "_ClipsAfter" }, new[] { "attack", "_ClipsAttack" }, new[] { "combat", "_ClipsCombat" },
+        new[] { "premove", "_ClipsPreMove" }, new[] { "idle", "_ClipsIdle" }, new[] { "idlealt", "_ClipsIdleAlt" }, new[] { "idlealt2", "_ClipsIdleAlt2" },
+    };
+
+    /// <summary>
+    /// The outputs of the roles a recipe NO LONGER wants (review of PR #107): a role dropped from the recipe - or the
+    /// whole state-driven mode - left its <c>anim_&lt;role&gt;/&lt;name&gt;_anim.fbx</c> under FactorySource and its
+    /// <c>&lt;name&gt;_Clips&lt;Role&gt;</c> collection (+ PoseData) under Resources, referenced by nothing (the entry's
+    /// guid for an unwanted role is written empty). Measured 2026-09-30: six such FBXs (5.1 MB) on the project, no stale
+    /// collection - the sweep of the latter is a guard. Relative asset paths, in the order to delete; the caller
+    /// deletes what exists.
+    /// </summary>
+    public static IEnumerable<string> StaleRoleOutputs(string resDir, string name, IEnumerable<string> wantedRoles)
+    {
+        var wanted = new HashSet<string>(wantedRoles ?? new string[0], StringComparer.OrdinalIgnoreCase);
+        foreach (var r in Roles)
+        {
+            if (wanted.Contains(r[0])) continue;
+            yield return resDir + "/anim_" + r[0] + "/" + name + "_anim.fbx";
+            yield return "Assets/Resources/" + name + r[1] + ".asset";
+            yield return "Assets/Resources/" + name + r[1] + "PoseData.bytes";
+        }
+    }
+
     public static ExtractionAction DecideExtraction(bool extractedExists, bool stampMatches, bool keepTexture)
     {
         if (extractedExists && stampMatches) return ExtractionAction.UseExisting;

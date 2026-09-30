@@ -8,6 +8,21 @@ using Xunit;
 // failed to protect single-material hand-edits.
 public class BakerRulesTests
 {
+    // A role dropped from a recipe leaves nothing behind (2026-09-30): the sweep names exactly the unwanted roles' three files.
+    [Fact]
+    public void A_dropped_role_names_its_three_outputs_and_a_kept_one_none()
+    {
+        var stale = BakerRules.StaleRoleOutputs("Assets/FactorySource/Tank", "Tank", new[] { "move", "Attack" }).ToList();   // case does not matter
+        Assert.Equal(6 * 3, stale.Count);
+        Assert.DoesNotContain(stale, p => p.Contains("anim_move/") || p.Contains("_ClipsMove") || p.Contains("anim_attack/") || p.Contains("_ClipsAttack"));
+        Assert.Contains("Assets/FactorySource/Tank/anim_after/Tank_anim.fbx", stale);
+        Assert.Contains("Assets/Resources/Tank_ClipsAfter.asset", stale);
+        Assert.Contains("Assets/Resources/Tank_ClipsAfterPoseData.bytes", stale);
+        Assert.Contains("Assets/Resources/Tank_ClipsIdleAlt2PoseData.bytes", stale);
+        Assert.Equal(8 * 3, BakerRules.StaleRoleOutputs("Assets/FactorySource/Tank", "Tank", null).Count());   // not state-driven: every role is stale
+        Assert.Empty(BakerRules.StaleRoleOutputs("Assets/FactorySource/Tank", "Tank", BakerRules.Roles.Select(r => r[0])));
+    }
+
     // The head of every headless Blender run (2026-09-30): the flag that makes a crashed script fail the process, in
     // the one position Blender honours it (measured on 5.1: before --python exits 1, after it exits 0, without it 0).
     [Fact]

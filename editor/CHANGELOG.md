@@ -16,7 +16,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   clip set instead of caching it for good. Only `deploy_convert` and the Lab's rig run already gated on their own
   completion marker; they keep it, and a script's own diagnosis (`VEHICLE ERROR`, `RIGANIM ERROR`, `PREP_ERR`) is read
   before the generic crash, so a deliberate failure keeps its reason. The Bake Tests' three launches (litmus, the
-  deploy golden diff) go through the same head.
+  deploy golden diff) go through the same head. And a role dropped from a recipe (or state-driven mode switched off)
+  no longer leaves its `anim_<role>/` FBX under FactorySource and its `_Clips<Role>` collection under Resources
+  behind: a successful bake sweeps the outputs of the roles it no longer wants (six stale FBXs, 5.1 MB, were on the
+  project; no stale collection — that half is a guard).
 
 - **Model Workshop: a re-cut keeps what was decided about the pieces** (user: "when I split salegs_revenge.glb and
   then probe it in the fusion, none of my previous configuration seem to have survived"). Since 2026-09-16 a cut
