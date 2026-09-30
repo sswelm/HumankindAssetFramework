@@ -95,7 +95,8 @@ folders (no silent merge).
 snapshot per bake would bury the list). The two flows that delete baked outputs on purpose take their own
 snapshot instead, in the same `_deleted_` shape: the Factory's **Remove** (`_removed_`, below) and Ship Status'
 **Delete selected**, which copies each name's outputs (+ `.meta`) to `_deleted_<timestamp>_<name>_outputs/`
-with a real manifest *before* sweeping them — a name whose snapshot cannot be taken is not deleted.
+with a real manifest *before* sweeping them — a name whose snapshot cannot be taken is not deleted. Those folders
+age with the guard's (the same N-day retention); the window says so wherever it says "restorable".
 
 `Assets/Resources` is deliberately **not** guarded: the bake pipeline delete-firsts baked assets on every
 re-bake (~30 delete sites), so guarding them would flood the backup root with churn within days — and bakes are
@@ -132,8 +133,14 @@ the Pack source group must actually CONTAIN every registry source (`Assets/Pack/
 the config group every deployed copy (`haf_packs/*/pack.json`), or the whole backup is marked not-ok with a loud
 message — a green backup literally says *"registry source verified in snapshot (N pack.json)"* (the recovery drill
 found the registry silently absent from every backup for weeks; and until 2026-09-30 the backup verified only the
-deployed copy while never taking the source at all). A backup taken without the Pack source group while one exists
-says *"the registry SOURCE is NOT in this backup"* instead.
+deployed copy while never taking the source at all). The verify is pure file IO over the groups' paths, so it runs
+for the daily auto-version too (its worker thread cannot touch Unity APIs — the earlier verify silently skipped
+there), and a verify that cannot complete marks the backup not-ok rather than clean. A manual backup taken without
+the Pack source group while one exists says *"the registry SOURCE is NOT in this backup"* instead.
+
+**Restoring the Pack source alone** puts the registry back for the editor; the game reads the deployed copy
+(`haf_packs`), which only a Model Factory save refreshes — the restore's status says so. Restore the Runtime
+config group from the same snapshot to bring both back together.
 
 **The list** is grouped, every row starting with its date-time, newest first: *Full backups* (manual + daily
 auto), then *Pre-restore*, *Delete-guard* (open by default — the section you check after an "oops"), and

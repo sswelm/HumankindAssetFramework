@@ -71,8 +71,9 @@ Safety properties:
 
 - deletion runs the baker's own output whitelist — never a name wildcard (the lost-portrait lesson);
 - **each name's outputs are snapshotted first** (`_deleted_<timestamp>_<name>_outputs/` under the backup
-  folder, with a manifest) — restorable from the Backup & Restore window's *Delete-guard snapshots*; a name
-  whose snapshot cannot be taken is **not** deleted, and the window says which names were and were not deleted;
+  folder, with a manifest) — restorable from the Backup & Restore window's *Delete-guard snapshots*, and aged
+  with them (the guard-days retention, said in the dialog); a name whose snapshot cannot be taken is **not**
+  deleted, and the window says which names were and were not deleted, and why;
 - a registry-owned entry is only **un-baked**: the entry stays and shows BAKE MISSING until re-baked.
   Removing an entry itself remains the Factory's **Remove** (its own confirm + recycle-bin flow);
 - after a delete the window re-scans and nudges every open Factory window immediately.

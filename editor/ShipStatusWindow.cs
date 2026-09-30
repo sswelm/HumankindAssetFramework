@@ -100,7 +100,7 @@ public class ShipStatusWindow : EditorWindow
         buildUtc = ShipStatus.LastBuildUtc(out buildDir);
         rows.Clear(); registryProblem = "";
         var entries = ModelRegistry.Load();
-        if (ModelRegistry.LastLoadFailed) registryProblem = "the model registry " + ModelRegistry.LastLoadProblem;
+        if (ModelRegistry.LastLoadFailed) registryProblem = "the model registry: " + ModelRegistry.LastLoadProblem;
         var names = new HashSet<string>(entries.Select(e => e.resourceName));
         foreach (var e in entries)
         {
@@ -168,6 +168,9 @@ public class ShipStatusWindow : EditorWindow
             : new Row { name = name, state = $"shipped ({kind})", detail = $"baked {Local(bake)}", severity = 0, deletable = true, owned = true };
 
     static string Local(DateTime? utc) => utc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "never";
+
+    // the snapshots age with the delete guard's (the daily auto-version prunes _deleted_ folders): said wherever "restorable" is
+    static string Retention() => HafAutoBackup.KeepGuardDays <= 0 ? "kept until you delete it" : $"kept {HafAutoBackup.KeepGuardDays} days like every delete-guard snapshot";
 
     void OnGUI()
     {
@@ -249,7 +252,7 @@ public class ShipStatusWindow : EditorWindow
                 if (GUILayout.Button(new GUIContent(deletable.All(r => r.ticked) ? "Untick all" : "Tick all", "Toggle every row that has baked outputs."), GUILayout.Width(80)))
                 { bool on = !deletable.All(r => r.ticked); foreach (var r in deletable) r.ticked = on; }
                 using (new EditorGUI.DisabledScope(ticked == 0))
-                    if (GUILayout.Button(new GUIContent($"Delete selected ({ticked})", "Delete the ticked rows' baked output files from Assets/Resources. Each name's outputs are snapshotted first (a _deleted_ folder, restorable from the Backup & Restore window); a name whose snapshot fails is not deleted. Registry entries are NOT touched."), GUILayout.Width(150)))
+                    if (GUILayout.Button(new GUIContent($"Delete selected ({ticked})", $"Delete the ticked rows' baked output files from Assets/Resources. Each name's outputs are snapshotted first (a _deleted_ folder, restorable from the Backup & Restore window, {Retention()}); a name whose snapshot fails is not deleted. Registry entries are NOT touched."), GUILayout.Width(150)))
                     {
                         var sel = deletable.Where(r => r.ticked).ToList();
                         var names = sel.Select(r => r.name).ToList();
@@ -260,17 +263,17 @@ public class ShipStatusWindow : EditorWindow
                             : "";
                         if (EditorUtility.DisplayDialog("Delete baked outputs?",
                             $"Delete the baked outputs of {names.Count} name(s) from Assets/Resources:\n\n{listing}{ownedNote}\n\n" +
-                            "Each name's outputs are snapshotted first into the backup folder (restorable from the Backup & Restore window); a name whose snapshot can't be taken is NOT deleted.",
+                            $"Each name's outputs are snapshotted first into the backup folder (restorable from the Backup & Restore window, {Retention()}); a name whose snapshot can't be taken is NOT deleted.",
                             "Delete", "Cancel"))
                         {
                             var deleted = new List<string>(); var skipped = new List<string>();
                             foreach (var n in names)
                             {
                                 // a name with path characters is never used to locate files (BackupRules, review of PR #102): said and skipped, the rest still swept
-                                if (!BackupRules.IsPlainName(n)) { skipped.Add(n); Debug.LogWarning($"[ShipStatus] '{n}' contains path characters — its outputs were NOT deleted; fix the entry's resourceName by hand."); continue; }
+                                if (!BackupRules.IsPlainName(n)) { skipped.Add($"{n} (the name has path characters — fix the entry's resourceName by hand)"); Debug.LogWarning($"[ShipStatus] '{n}' contains path characters — its outputs were NOT deleted; fix the entry's resourceName by hand."); continue; }
                                 string snap;
                                 try { snap = HafDeleteGuard.SnapshotBakedOutputs(n); }
-                                catch (Exception ex) { skipped.Add(n); Debug.LogWarning($"[ShipStatus] '{n}': its outputs were NOT deleted — the guard snapshot could not be taken ({ex.Message})."); continue; }
+                                catch (Exception ex) { skipped.Add($"{n} (no snapshot could be taken: {ex.Message})"); Debug.LogWarning($"[ShipStatus] '{n}': its outputs were NOT deleted — the guard snapshot could not be taken ({ex.Message})."); continue; }
                                 UniversalBaker.SweepAllOutputs(n);
                                 deleted.Add(n);
                                 if (snap != null) Debug.Log($"[ShipStatus] '{n}': outputs snapshotted → {snap}, then deleted.");
@@ -278,8 +281,8 @@ public class ShipStatusWindow : EditorWindow
                             AssetDatabase.Refresh();
                             Scan();
                             ModelFactoryWindow.RefreshAllOpen();   // an open Factory showing an un-baked entry must find out now, not on the next reload
-                            lastAction = $"Deleted the baked outputs of {deleted.Count} name(s)" + (deleted.Count > 0 ? $": {string.Join(", ", deleted)} (each snapshotted first to a _deleted_ folder under {EditorPrefs.GetString("HAF.Backup.Dest", "D:/HAF_Backups")} — restorable from Backup & Restore)" : "") +
-                                         (skipped.Count > 0 ? $". NOT deleted — no snapshot could be taken, or the name isn't plain (see the Console): {string.Join(", ", skipped)}" : "") + ".";
+                            lastAction = $"Deleted the baked outputs of {deleted.Count} name(s)" + (deleted.Count > 0 ? $": {string.Join(", ", deleted)} (each snapshotted first to a _deleted_ folder under {EditorPrefs.GetString("HAF.Backup.Dest", "D:/HAF_Backups")} — restorable from Backup & Restore, {Retention()})" : "") +
+                                         (skipped.Count > 0 ? $". NOT deleted: {string.Join("; ", skipped)}" : "") + ".";
                             Debug.Log("[ShipStatus] " + lastAction);
                             GUIUtility.ExitGUI();
                         }
@@ -288,6 +291,6 @@ public class ShipStatusWindow : EditorWindow
         EditorGUILayout.HelpBox("Hover a row for details. BAKED, NOT BUILT = the HandCrankedSubmarine trap (2026-08-18): " +
             "the entry's GUIDs point at assets newer than the shipped bundle, so the game can't resolve them. " +
             "Tick any row with baked outputs + Delete selected: orphans/test artifacts vanish for good, owned entries " +
-            "just lose their bakes (re-bake to regenerate). Each deleted name's outputs are snapshotted first and restorable from Backup & Restore.", MessageType.None);
+            $"just lose their bakes (re-bake to regenerate). Each deleted name's outputs are snapshotted first and restorable from Backup & Restore ({Retention()}).", MessageType.None);
     }
 }

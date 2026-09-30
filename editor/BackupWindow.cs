@@ -341,8 +341,11 @@ public class BackupWindow : EditorWindow
     // ---- backup ----
     void DoBackup()
     {
-        var groups = BuildGroups().Where(g => enabled.TryGetValue(g.Key, out var b) && b).ToList();
+        var offered = BuildGroups();
+        var groups = offered.Where(g => enabled.TryGetValue(g.Key, out var b) && b).ToList();
         string dir = DoBackupInto(NewBackupDir(""), groups, "manual backup");
+        if (dir != null && offered.Any(g => g.Key == "pack") && !groups.Any(g => g.Key == "pack"))
+            status += "\n⚠ The registry SOURCE (Assets/Pack) is NOT in this backup — tick 'Pack source' for a backup that can restore models.";
         // Offsite ride-along: zip the fresh snapshot into the second folder — OPTIONAL (blank folder = off) and
         // SILENT (background thread; a multi-GB FactorySource zip must not freeze the editor). A failure here NEVER
         // un-does the local backup — the result surfaces in the status line when it lands. (_prerestore safety
@@ -520,7 +523,7 @@ public class BackupWindow : EditorWindow
             // green while missing the ONE file a recovery needs is worse than no backup — the recovery drill proved
             // it (the registry silently absent for weeks). A snapshot that took the config group must CONTAIN every
             // live pack registry, or it is NOT ok, full stop.
-            string critical = VerifyCriticalContents(dir, groups);
+            string critical = VerifyCriticalContents(dir, groups, out int sourcePacks, out int deployedPacks);
             if (critical != null) ok = false;
             // The content fingerprint, written AFTER everything landed — the offsite step reads it to decide whether
             // this snapshot differs from the one already uploaded. Written even on a failed verify: knowing what a
@@ -532,7 +535,7 @@ public class BackupWindow : EditorWindow
                 ok = ok,
                 report = critical != null ? critical
                     : ok
-                    ? $"Backed up {totalFiles} files ({Human(totalBytes)}) → {Path.GetFileName(dir)} — {RegistryVerdict(groups)}.\n{st.Report}"
+                    ? $"Backed up {totalFiles} files ({Human(totalBytes)}) → {Path.GetFileName(dir)}{RegistryVerdict(groups, sourcePacks, deployedPacks)}.\n{st.Report}"
                     : $"⚠ Backup COUNT MISMATCH: expected {totalFiles}, found {landed} in {Path.GetFileName(dir)} — inspect before trusting it."
             };
         }
@@ -599,6 +602,12 @@ public class BackupWindow : EditorWindow
             if (st.missing + st.changed > 0) { AssetDatabase.Refresh(); ModelFactoryWindow.RefreshAllOpen(); }   // reimport + tell open Factory windows the registry may have changed
             status = $"Restored {st.missing} missing + {st.changed} changed file(s) from '{Path.GetFileName(backupDir)}' " +
                      $"({st.identical} identical file(s) untouched). Current state was saved to '{Path.GetFileName(snap)}' first (undo by restoring that).";
+            // The model registry's deployed copy (haf_packs, what the game reads) is refreshed only by a Factory save
+            // (review of PR #105: the district/formation/sound windows offer "Deploy the source"; the Model Factory does not).
+            // A restored source with the old deploy in place is said, or the next build ships the registry just undone.
+            bool packRestored = srcs.Any(s => s.rel.Replace('\\', '/').Split('/')[0] == "pack"), configRestored = srcs.Any(s => s.rel.Replace('\\', '/').Split('/')[0] == "config");
+            if (packRestored && !configRestored && st.missing + st.changed > 0)
+                status += "\n⚠ The game's copy of the model registry (haf_packs) was NOT restored: it is refreshed on the Model Factory's next save (any bake or Save), or restore this backup's Runtime config group as well.";
         }
         catch (Exception e) { status = $"Restore FAILED midway ({e.Message}). Your pre-restore snapshot '{Path.GetFileName(snap)}' is intact — restore IT to get back."; }
     }
@@ -607,51 +616,46 @@ public class BackupWindow : EditorWindow
     // that includes the config group every deployed copy (haf_packs/*/pack.json) — the file class whose silent absence
     // the 2026-08-17 recovery drill exposed, and (critical review 2026-09-30) the SOURCE half of it, which the backup
     // never took at all. Returns null when clean, else a loud message; the caller marks the whole backup NOT ok.
-    static string VerifyCriticalContents(string dir, List<Group> groups)
+    // PURE FILE IO over the groups' captured paths (review of PR #105): the daily auto-version runs SnapshotInto on a
+    // worker thread, where Application.dataPath and EditorPrefs throw — the earlier verify reached both, threw, and its
+    // catch read as "clean", so no auto-version was ever verified. A verify that can't complete is said, not passed.
+    static string VerifyCriticalContents(string dir, List<Group> groups, out int sourcePacks, out int deployedPacks)
     {
+        sourcePacks = deployedPacks = 0;
         try
         {
             var missing = new List<string>();
-            if (groups.Any(g => g.Key == "pack"))
-            {
-                string packRoot = Path.Combine(AssetsDir, "Pack");
-                if (Directory.Exists(packRoot))
-                    foreach (var p in Directory.GetFiles(packRoot, "pack.json", SearchOption.AllDirectories))
+            foreach (var g in groups)
+                foreach (var root in g.Sources)
+                {
+                    string leaf = Path.GetFileName(root.TrimEnd('/', '\\'));
+                    bool source = g.Key == "pack", deployed = g.Key == "config" && leaf == "haf_packs";
+                    if (!(source || deployed) || !Directory.Exists(root)) continue;
+                    foreach (var p in Directory.GetFiles(root, "pack.json", SearchOption.AllDirectories))
                     {
-                        string rel = p.Substring(packRoot.Length).TrimStart('/', '\\');   // <mod>/pack.json
-                        if (!File.Exists(Path.Combine(dir, "pack", "Pack", rel))) missing.Add("Assets/Pack/" + rel.Replace('\\', '/'));
+                        string rel = p.Substring(root.Length).TrimStart('/', '\\');   // <mod>/pack.json
+                        if (source) sourcePacks++; else deployedPacks++;
+                        if (!File.Exists(Path.Combine(dir, g.Key, leaf, rel)))
+                            missing.Add((source ? "Assets/Pack/" : "haf_packs/") + rel.Replace('\\', '/'));
                     }
-            }
-            if (groups.Any(g => g.Key == "config"))
-            {
-                string cfg = SafeConfigDir();
-                string packs = string.IsNullOrEmpty(cfg) ? null : Path.Combine(cfg, "haf_packs");
-                if (packs != null && Directory.Exists(packs))
-                    foreach (var p in Directory.GetFiles(packs, "pack.json", SearchOption.AllDirectories))
-                    {
-                        string rel = p.Substring(cfg.Length).TrimStart('/', '\\');   // haf_packs/<mod>/pack.json
-                        if (!File.Exists(Path.Combine(dir, "config", rel))) missing.Add(rel.Replace('\\', '/'));
-                    }
-            }
+                }
             return missing.Count == 0 ? null
                 : $"⚠ CRITICAL: this backup is MISSING the model registry file(s): {string.Join(", ", missing)} — it CANNOT fully recover a removed model. Do not trust it; fix the group and back up again.";
         }
-        catch { return null; }   // the verify must never break the backup itself
+        catch (Exception e) { return $"⚠ CRITICAL: the registry in this backup could NOT be verified ({e.Message}) — do not trust it; back up again."; }
     }
 
     // The registry the report may call "verified": the SOURCE (the pack group) - the deployed copy alone is not the
-    // registry. Says how many pack.json files that was: "verified" over an Assets/Pack that holds none would be empty praise.
-    static string RegistryVerdict(List<Group> groups)
+    // registry. Says how many pack.json files that was: "verified" over an Assets/Pack that holds none would be empty
+    // praise. Empty for a snapshot that holds neither (a pre-restore undo): nothing to say. Whether a source EXISTS
+    // that was left out is DoBackup's to say - it runs on the main thread, where the offered groups are known.
+    static string RegistryVerdict(List<Group> groups, int sourcePacks, int deployedPacks)
     {
         bool source = groups.Any(g => g.Key == "pack"), deployed = groups.Any(g => g.Key == "config");
-        string packRoot = Path.Combine(AssetsDir, "Pack");
-        int packs = 0;
-        try { if (Directory.Exists(packRoot)) packs = Directory.GetFiles(packRoot, "pack.json", SearchOption.AllDirectories).Length; } catch { }
         if (source)
-            return (packs == 0 ? "Assets/Pack is in the snapshot but holds no pack.json yet" : $"registry source verified in snapshot ({packs} pack.json)")
+            return (sourcePacks == 0 ? " — Assets/Pack is in the snapshot but holds no pack.json yet" : $" — registry source verified in snapshot ({sourcePacks} pack.json)")
                  + (deployed ? "" : " (deployed copy not included)");
-        if (packs > 0) return "⚠ the registry SOURCE (Assets/Pack) is NOT in this backup — tick 'Pack source' for a backup that can restore models";
-        return deployed ? "deployed registry copy in snapshot (no source pack.json exists yet)" : "no registry in this backup";
+        return deployed ? $" — deployed registry copy in snapshot ({deployedPacks} pack.json), NOT the source" : "";
     }
 
     // ---- smart copy (restore only) ----

@@ -100,7 +100,7 @@ class HafDeleteGuard : UnityEditor.AssetModificationProcessor
     internal static string SnapshotBakedOutputs(string name)
     {
         string dest = EditorPrefs.GetString("HAF.Backup.Dest", "D:/HAF_Backups");
-        if (!Directory.Exists(dest)) throw new DirectoryNotFoundException("the backup root does not exist: " + dest);
+        Directory.CreateDirectory(dest);   // as Back up now does; a drive that isn't there throws, and the name is then not deleted
         string dir = BackupRules.ReserveFolder(dest, BackupRules.OutputsSnapshotFolderName(DateTime.Now.ToString("yyyy-MM-dd_HHmmss"), name), CheckedReplace.TryReserveFolder);
         try
         {
