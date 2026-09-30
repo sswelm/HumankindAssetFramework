@@ -14,7 +14,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   any unknown required extension, a chunk past the file, an index outside its vertices, an accessor past its view);
   morph targets are counted, not read. Tested on synthetic files field by field; drilled on the registry: all 35 GLBs
   (784 MB) read in 1.7 s and agree with Blender's import on triangles, materials, images and joints (Blender: 14.4 s
-  plus boot). Nothing uses it yet — the pipeline still runs on Blender; the next steps consume it.
+  plus boot). **Tools ▸ HAF ▸ Model Reader (GLB)…** shows what the reader sees in any file (or in every registry
+  model at once): the counts, one row per mesh, the skins, the animations, the read time, a refusal by name.
+  Nothing else uses it yet — the pipeline still runs on Blender; the next steps consume it.
 
 - **A Blender script that crashes now fails the bake.** Blender exits 0 on an uncaught Python exception unless
   told otherwise (measured on 5.1), so every `ExitCode != 0` check in the Factory, the Vehicle Lab and the Clip
