@@ -88,4 +88,67 @@ public static class HafTransforms
         double len = Math.Sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
         return len > 1e-12 ? new[] { n[0] / len, n[1] / len, n[2] / len } : new[] { 0.0, 1.0, 0.0 };
     }
+
+    /// <summary>
+    /// The space a skinned mesh's positions are in, as Blender's import shows them: the topmost joint's world transform
+    /// times its inverse bind matrix - the bind-pose placement with the skeleton root trusted to be at its bind pose.
+    /// Measured against Blender's EVALUATED import of every skinned registry model (2026-10-01): a drone whose
+    /// inverse bind matrices are world-based (the root's 0.01 scale cancels: identity) and two Sketchfab models whose
+    /// matrices are armature-relative (the root's 90° rotation stays) both land where Blender puts them; the plain
+    /// node-pose blend (Σ wᵢ · jointWorldᵢ · IBMᵢ, what a viewer draws) deforms the two whose node pose is not their
+    /// bind pose, and "the skeleton's parent" mis-scales the drone. The mesh stays undeformed: a node-TRS pose that
+    /// differs from the bind pose is the animation's business downstream (the rest-fold).
+    /// </summary>
+    public static double[] SkinSpace(HafModel m, int skinIndex, double[][] world)
+    {
+        var skin = m.Skins[skinIndex];
+        if (skin.Joints.Length == 0) return Identity;
+        var joints = new HashSet<int>(skin.Joints);
+        int top = skin.Skeleton >= 0 && skin.Skeleton < m.Nodes.Count && joints.Contains(skin.Skeleton) ? skin.Skeleton : skin.Joints[0];
+        for (int guard = 0; guard < m.Nodes.Count; guard++)   // climb to the topmost joint
+        {
+            int parent = m.Nodes[top].Parent;
+            if (parent < 0 || !joints.Contains(parent)) break;
+            top = parent;
+        }
+        int j = Array.IndexOf(skin.Joints, top);
+        double[] ibm = Identity;
+        if (skin.InverseBindMatrices != null && j >= 0) { ibm = new double[16]; Array.Copy(skin.InverseBindMatrices, j * 16, ibm, 0, 16); }
+        return Mul(world[top], ibm);
+    }
+
+    /// <summary>
+    /// The matrix each joint would apply in the linear blend at the NODE-TRS pose (glTF: Σ wᵢ · jointWorldᵢ · IBMᵢ) -
+    /// what a viewer draws; NOT what Blender's import shows when that pose differs from the bind pose (see SkinSpace).
+    /// Kept for a consumer that needs the posed mesh.
+    /// </summary>
+    public static double[][] SkinMatrices(HafModel m, int skinIndex, double[][] world)
+    {
+        var skin = m.Skins[skinIndex];
+        var r = new double[skin.Joints.Length][];
+        for (int j = 0; j < skin.Joints.Length; j++)
+        {
+            double[] ibm = Identity;
+            if (skin.InverseBindMatrices != null) { ibm = new double[16]; Array.Copy(skin.InverseBindMatrices, j * 16, ibm, 0, 16); }
+            r[j] = Mul(world[skin.Joints[j]], ibm);
+        }
+        return r;
+    }
+
+    /// <summary>
+    /// A primitive's positions in world space, as Blender shows them: through its node's world matrix, or - when it
+    /// is skinned - undeformed in its skin's space (<see cref="SkinSpace"/>). One vertex = 3 doubles, glTF frame.
+    /// </summary>
+    public static double[] WorldPositions(HafModel m, int nodeIndex, HafPrimitive p, double[][] world)
+    {
+        int skin = m.Nodes[nodeIndex].Skin;
+        var wm = p.Skinned && skin >= 0 && skin < m.Skins.Count ? SkinSpace(m, skin, world) : world[nodeIndex];
+        var outp = new double[p.VertexCount * 3];
+        for (int v = 0; v < p.VertexCount; v++)
+        {
+            var q = Apply(wm, p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2], 1.0);
+            outp[v * 3] = q[0]; outp[v * 3 + 1] = q[1]; outp[v * 3 + 2] = q[2];
+        }
+        return outp;
+    }
 }

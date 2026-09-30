@@ -70,6 +70,8 @@ public sealed class HafPrimitive
     public float[] Colors;                        // 4 per vertex (RGB padded with alpha 1), or null
     public ushort[] Joints;                       // 4 per vertex, or null (JOINTS_0)
     public float[] Weights;                       // 4 per vertex, or null (WEIGHTS_0)
+    public ushort[] Joints1;                      // influences 5-8 (JOINTS_1 / WEIGHTS_1), or null; a third set is refused by the reader
+    public float[] Weights1;
     public int[] Indices;                         // or null = non-indexed (vertex order)
     public int MorphTargets;                      // targets the file declared; their data is NOT read (said, not silently dropped)
     public bool Skinned => Joints != null && Weights != null;

@@ -62,10 +62,16 @@ and fails the process on a missing input.
 
 **`tools/glb_reader_drill.sh`** (2026-09-30, step 1 of replacing Blender) reads every `.glb` the modding project's registry
 names with the real `editor/GlbReader.cs` on Unity's Mono, checks what a file cannot say about itself (skinned vertices weigh
-to 1 over the skin's joints), and compares triangles, materials, images and joints per file with Blender's import of the same
-file — a sample by default (the largest, the smallest, the animated ones), every file with `FULL=1`. SKIP without the project
-(hosted CI) or without Blender. First full run: 35 of 35 agree; the reader took 1.7 s for 784 MB, Blender's importer 14.4 s
-plus its boot.
+to 1 over the skin's joints), and compares each file with Blender's *evaluated* import of the same file: the counts
+(triangles, materials, images, joints) and, order-independent so vertex merging cannot move them, the world-space
+bounding box, the total triangle area, the area-weighted centroid, the area-weighted sum of face normals (winding and
+mirrored nodes), the bone names and the animation durations — through both transform chains, in Blender's Z-up frame.
+Counting alone could not tell a wrong matrix chain: the values found that a skinned mesh sits in its root joint's bind
+space (`HafTransforms.SkinSpace`, two conventions of inverse bind matrices in the registry) and that Blender's importer
+parks animated objects at the current frame, not the clip's start. A sample by default (the largest, the smallest, the
+animated ones), every file with `FULL=1`; the comparison and its tolerances are `tools/glb-reader-drill/compare.py`. SKIP
+without the project (hosted CI) or without Blender. Full run 2026-10-01: 31 of 31 unique files agree on everything; the
+reader took 1.7 s for 784 MB, Blender's importer 14.4 s plus its boot.
 
 ### Schema parity is in-repo and mandatory
 

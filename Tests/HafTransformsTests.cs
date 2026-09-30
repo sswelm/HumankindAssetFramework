@@ -79,4 +79,53 @@ public class HafTransformsTests
         Near(new[] { 4, 6, 8.0 }, HafTransforms.Apply(HafTransforms.Mul(s, t), 1, 1, 1, 1));   // translate first, then scale
         Near(HafTransforms.Identity, HafTransforms.Mul(HafTransforms.Identity, HafTransforms.Identity));
     }
+
+    [Fact]
+    public void A_skinned_primitive_sits_undeformed_in_its_root_joints_bind_space()
+    {
+        // orient (a quarter turn about Y) -> root joint (moved by 10) -> tip joint (moved by 5 up); the skinned mesh's own node
+        // carries a transform the spec ignores. The skin space is the ROOT joint's world times its inverse bind matrix - the
+        // rule Blender's evaluated import follows on every registry model (2026-10-01), for both conventions exporters use.
+        var model = new HafModel();
+        var orient = new HafNode { Name = "orient", Rotation = new double[] { 0, Math.Sin(Math.PI / 4), 0, Math.Cos(Math.PI / 4) } };
+        var rootJoint = new HafNode { Name = "root", Parent = 0, Translation = new double[] { 10, 0, 0 } };
+        var tipJoint = new HafNode { Name = "tip", Parent = 1, Translation = new double[] { 0, 5, 0 } };
+        var meshNode = new HafNode { Name = "skinned", Mesh = 0, Skin = 0, Translation = new double[] { 999, 999, 999 } };
+        orient.Children.Add(1); rootJoint.Children.Add(2);
+        model.Nodes.Add(orient); model.Nodes.Add(rootJoint); model.Nodes.Add(tipJoint); model.Nodes.Add(meshNode); model.Roots.Add(0); model.Roots.Add(3);
+        var prim = new HafPrimitive { VertexCount = 2, Positions = new float[] { 1, 0, 0, 0, 0, 0 }, Joints = new ushort[] { 1, 0, 0, 0, 0, 0, 0, 0 }, Weights = new float[] { 1, 0, 0, 0, 1, 0, 0, 0 } };
+        model.Meshes.Add(new HafMesh { Primitives = { prim } });
+        var world = HafTransforms.WorldMatrices(model);
+        double[] Inverse(double[] m) { var t = HafTransforms.Trs(new double[] { -m[12], -m[13], -m[14] }, new double[] { 0, 0, 0, 1 }, new double[] { 1, 1, 1 }); return t; }   // translation-only inverses suffice below
+
+        // (a) WORLD-based inverse bind matrices (the drone): IBM = inverse(joint world) -> the skin space is identity, the
+        //     positions are world positions as the file holds them, whatever the ancestors above the skeleton do
+        var ibmWorld = new double[32];
+        Array.Copy(HafTransforms.Mul(Inverse(HafTransforms.Trs(rootJoint)), HafTransforms.Trs(new double[] { 0, 0, 0 }, new double[] { 0, -Math.Sin(Math.PI / 4), 0, Math.Cos(Math.PI / 4) }, new double[] { 1, 1, 1 })), 0, ibmWorld, 0, 16);   // (orient*T)^-1 = T^-1 * orient^-1, with T the joint's LOCAL move
+        Array.Copy(HafTransforms.Identity, 0, ibmWorld, 16, 16);
+        model.Skins.Add(new HafSkin { Joints = new[] { 1, 2 }, InverseBindMatrices = ibmWorld, Skeleton = -1 });
+        Near(new[] { 1, 0, 0.0, 0, 0, 0 }, HafTransforms.WorldPositions(model, 3, prim, world));
+
+        // (b) ARMATURE-relative inverse bind matrices (the Sketchfab files): IBM = inverse(joint relative to the node above
+        //     the skeleton) -> the skin space is that node's world: (1,0,0) through orient's quarter turn -> (0,0,-1)
+        var ibmArm = new double[32];
+        Array.Copy(Inverse(HafTransforms.Trs(rootJoint)), 0, ibmArm, 0, 16);
+        Array.Copy(HafTransforms.Identity, 0, ibmArm, 16, 16);
+        model.Skins[0].InverseBindMatrices = ibmArm;
+        Near(new[] { 0, 0, -1.0, 0, 0, 0 }, HafTransforms.WorldPositions(model, 3, prim, world));
+        model.Skins[0].Skeleton = 2;                                                                // a declared skeleton climbs to the same root
+        Near(new[] { 0, 0, -1.0, 0, 0, 0 }, HafTransforms.WorldPositions(model, 3, prim, world));
+
+        // (c) no inverse bind matrices at all: the root joint's world is the space
+        model.Skins[0].InverseBindMatrices = null;
+        Near(new[] { 0, 0, -11.0, 0, 0, -10 }, HafTransforms.WorldPositions(model, 3, prim, world));   // orient * T(10) * v
+
+        // an unskinned primitive on a node goes through that node's world matrix
+        var plain = new HafPrimitive { VertexCount = 1, Positions = new float[] { 1, 2, 3 } };
+        Near(new[] { 1000, 1001, 1002.0 }, HafTransforms.WorldPositions(model, 3, plain, world));
+        // the node-pose blend is a different thing, kept for a consumer that wants the posed mesh: the tip joint's pose moves the vertex
+        var sm = HafTransforms.SkinMatrices(model, 0, world);
+        Assert.Equal(2, sm.Length);
+        Near(new[] { 0, 5, -10.0 }, HafTransforms.Apply(sm[1], 0, 0, 0, 1));   // the tip's world origin: orient * (10, 5, 0)
+    }
 }

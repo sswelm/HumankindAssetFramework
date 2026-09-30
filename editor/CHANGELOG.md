@@ -10,11 +10,14 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   model — nodes with transforms and hierarchy, meshes → primitives with every vertex attribute (positions, normals,
   tangents, two UV sets, colours, joints, weights, indices), PBR materials with textures and images, skins with
   inverse bind matrices, animations as sampled curves — with every component type, normalized integers and
-  interleaved views decoded exactly. What the reader does not implement is refused by name (sparse accessors, Draco or
-  any unknown required extension, a chunk past the file, an index outside its vertices, an accessor past its view);
-  morph targets are counted, not read. Tested on synthetic files field by field; drilled on the registry: all 35 GLBs
-  (784 MB) read in 1.7 s and agree with Blender's import on triangles, materials, images and joints (Blender: 14.4 s
-  plus boot). **Tools ▸ HAF ▸ Model Reader (GLB)…** shows what the reader sees in any file (or in every registry
+  interleaved views decoded exactly, a second influence set (JOINTS_1/WEIGHTS_1) carried. What the reader does not
+  implement is refused by name (sparse accessors, any required extension, a third influence set, a missing image
+  file, a chunk past the file, an index outside its vertices, an accessor past its view, a cyclic hierarchy); morph
+  targets are counted, not read. Tested on synthetic files field by field; drilled on the registry: all 35 GLBs
+  (784 MB) read in 1.7 s and agree with Blender's evaluated import on triangle count, materials, images, joints, and
+  on the values — world bounding box, surface area, centroid, winding, bone names, durations (Blender: 14.4 s plus
+  boot). The values settled two conventions counting could not: a skinned mesh sits in its root joint's bind space
+  (`HafTransforms.SkinSpace`), and node transforms are the static TRS, not the animation's current frame. **Tools ▸ HAF ▸ Model Reader (GLB)…** shows what the reader sees in any file (or in every registry
   model at once): the counts, one row per mesh, the skins, the animations, the read time, a refusal by name — and a
   **turntable of the model as the reader read it**, built as Unity meshes from the model alone (the hierarchy's
   transforms through `HafTransforms`, the file's normals and UVs, the base-colour textures decoded from the embedded

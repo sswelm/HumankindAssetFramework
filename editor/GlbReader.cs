@@ -22,12 +22,10 @@ public static class GlbReader
     const uint ChunkJson = 0x4E4F534A;      // "JSON"
     const uint ChunkBin = 0x004E4942;       // "BIN\0"
 
-    // The extensions this reader honours as REQUIRED. Everything else in extensionsRequired is a refusal: a file that
-    // needs Draco (compressed geometry) or a mesh quantization it cannot decode would read as garbage or empty.
-    static readonly HashSet<string> KnownRequired = new HashSet<string>(StringComparer.Ordinal)
-    {
-        "KHR_materials_pbrSpecularGlossiness", "KHR_texture_transform", "KHR_materials_emissive_strength",   // material-only: geometry reads the same
-    };
+    // No required extension is implemented, so every one is a refusal (review of PR #109: a whitelist of "material-only"
+    // extensions was accepted while their payloads were never read - a specular-glossiness material has no base colour
+    // to read, a texture transform moves the texture). A file that merely USES an extension reads; what the extension
+    // adds is not modelled and the ExtensionsUsed list says so.
 
     public static HafModel Read(string path)
     {
@@ -73,8 +71,7 @@ public static class GlbReader
         var model = new HafModel { Generator = root["asset"]?["generator"]?.ToString() ?? "" };
         foreach (var e in root["extensionsUsed"] as JArray ?? new JArray()) model.ExtensionsUsed.Add(e.ToString());
         foreach (var e in root["extensionsRequired"] as JArray ?? new JArray())
-            if (!KnownRequired.Contains(e.ToString()))
-                throw new InvalidDataException($"the file requires the extension '{e}', which this reader does not implement (KHR_draco_mesh_compression needs a Draco decoder; a quantized mesh needs KHR_mesh_quantization) - refused rather than read wrong");
+            throw new InvalidDataException($"the file requires the extension '{e}', which this reader does not implement (KHR_draco_mesh_compression needs a Draco decoder; KHR_texture_transform moves the textures; KHR_materials_pbrSpecularGlossiness has no base colour to read) - refused rather than read wrong");
 
         var buffers = LoadBuffers(root, glbBin, baseDir);
         var acc = new Accessors(root, buffers);
@@ -92,7 +89,7 @@ public static class GlbReader
             {
                 string uri = im["uri"].ToString();
                 image.Uri = uri.StartsWith("data:", StringComparison.Ordinal) ? uri.Substring(0, Math.Min(uri.Length, 40)) + "…" : uri;
-                image.Bytes = ResolveUri(uri, baseDir, out string mime);
+                image.Bytes = ResolveUri(uri, baseDir, out string mime) ?? throw new InvalidDataException($"image {model.Images.Count} '{image.Name}': '{uri}' could not be found beside the file (review of PR #109: a model without its texture is not a model that was read whole)");
                 if (image.MimeType.Length == 0 && mime != null) image.MimeType = mime;
             }
             model.Images.Add(image);
@@ -144,6 +141,10 @@ public static class GlbReader
                 if (attrs["COLOR_0"] != null) p.Colors = Sized(acc.Colors(attrs.Value<int>("COLOR_0"), where + " COLOR_0"), p.VertexCount * 4, where + " COLOR_0");
                 if (attrs["JOINTS_0"] != null) p.Joints = Sized(acc.Ushorts(attrs.Value<int>("JOINTS_0"), 4, where + " JOINTS_0"), p.VertexCount * 4, where + " JOINTS_0");
                 if (attrs["WEIGHTS_0"] != null) p.Weights = Sized(acc.Floats(attrs.Value<int>("WEIGHTS_0"), 4, where + " WEIGHTS_0"), p.VertexCount * 4, where + " WEIGHTS_0");
+                if (attrs["JOINTS_1"] != null) p.Joints1 = Sized(acc.Ushorts(attrs.Value<int>("JOINTS_1"), 4, where + " JOINTS_1"), p.VertexCount * 4, where + " JOINTS_1");
+                if (attrs["WEIGHTS_1"] != null) p.Weights1 = Sized(acc.Floats(attrs.Value<int>("WEIGHTS_1"), 4, where + " WEIGHTS_1"), p.VertexCount * 4, where + " WEIGHTS_1");
+                if ((p.Joints1 == null) != (p.Weights1 == null)) throw new InvalidDataException($"{where} has one of JOINTS_1 / WEIGHTS_1 without the other");
+                if (attrs["JOINTS_2"] != null || attrs["WEIGHTS_2"] != null) throw new InvalidDataException($"{where} has more than eight influences per vertex (JOINTS_2), which this reader does not carry - refused rather than dropped");
                 if (pr["indices"] != null)
                 {
                     p.Indices = acc.Ints(pr.Value<int>("indices"), where + " indices");
@@ -178,6 +179,11 @@ public static class GlbReader
                 model.Nodes[ci].Parent = i;
                 model.Nodes[i].Children.Add(ci);
             }
+        for (int i = 0; i < model.Nodes.Count; i++)
+        {
+            int at = i, steps = 0;
+            while (model.Nodes[at].Parent >= 0) { at = model.Nodes[at].Parent; if (++steps > model.Nodes.Count) throw new InvalidDataException($"node {i} '{model.Nodes[i].Name}' is its own ancestor - the hierarchy has a cycle"); }
+        }
         var scenes = root["scenes"] as JArray;
         int sceneIndex = root["scene"]?.Value<int>() ?? 0;
         if (scenes != null && sceneIndex < scenes.Count && scenes[sceneIndex]["nodes"] is JArray sceneNodes)

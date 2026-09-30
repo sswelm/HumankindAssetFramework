@@ -232,20 +232,23 @@ public class ModelReaderWindow : EditorWindow
                 foreach (var p in hm.Primitives)
                 {
                     if (p.Mode != 4) continue;   // the preview draws triangles; strips and fans are read but not drawn
-                    // a skinned primitive's positions are in the skin's space: the spec says the node's transform is ignored
+                    // a skinned primitive is placed by its joints' bind-pose matrices (the spec ignores its own node's transform;
+                    // parity drill 2026-10-01: two Sketchfab models carry a 90° root rotation only the joints know), an unskinned one by its node
                     double[] w = p.Skinned ? HafTransforms.Identity : world[ni];
+                    var gl = HafTransforms.WorldPositions(model, ni, p, world);
                     int baseIndex = verts.Count;
                     for (int v = 0; v < p.VertexCount; v++)
                     {
-                        var pos = HafTransforms.Apply(w, p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2], 1.0);
-                        verts.Add(new Vector3(sx * (float)pos[0], (float)pos[1], (float)pos[2]));
+                        verts.Add(new Vector3(sx * (float)gl[v * 3], (float)gl[v * 3 + 1], (float)gl[v * 3 + 2]));
                         if (p.Normals != null)
                         {
                             var n = HafTransforms.ApplyNormal(w, p.Normals[v * 3], p.Normals[v * 3 + 1], p.Normals[v * 3 + 2]);
                             norms.Add(new Vector3(sx * (float)n[0], (float)n[1], (float)n[2]));
                         }
                         else allNormals = false;
-                        uvs.Add(p.Uv0 != null ? new Vector2(p.Uv0[v * 2], 1f - p.Uv0[v * 2 + 1]) : Vector2.zero);   // glTF UV origin is top-left, Unity's bottom-left
+                        // the UV set the material's base colour selects (review of PR #109: UV0 was used whatever texCoord said); glTF's origin is top-left, Unity's bottom-left
+                        var uvSet = p.Material >= 0 && p.Material < model.Materials.Count && model.Materials[p.Material].BaseColorTexCoord == 1 && p.Uv1 != null ? p.Uv1 : p.Uv0;
+                        uvs.Add(uvSet != null ? new Vector2(uvSet[v * 2], 1f - uvSet[v * 2 + 1]) : Vector2.zero);
                     }
                     int[] tri;
                     if (p.Indices != null) { tri = new int[p.Indices.Length]; for (int i = 0; i < tri.Length; i++) tri[i] = baseIndex + p.Indices[i]; }

@@ -35,7 +35,7 @@ cp "$NEWTONSOFT" "$TMPD/Newtonsoft.Json.dll"
 WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"; WTMP="$(cygpath -m "$TMPD" 2>/dev/null || echo "$TMPD")"
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -out:"$WTMP/drill.exe" \
   -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
-  "$WROOT/tools/glb-reader-drill/Drill.cs" "$WROOT/editor/HafModel.cs" "$WROOT/editor/GlbReader.cs" 2>&1); rc=$?
+  "$WROOT/tools/glb-reader-drill/Drill.cs" "$WROOT/editor/HafModel.cs" "$WROOT/editor/GlbReader.cs" "$WROOT/editor/HafTransforms.cs" 2>&1); rc=$?
 if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/drill.exe" ]; then echo "$OUT" | grep -E "error" | head -20; echo "FAIL — the GLB reader drill did not compile (csc rc=$rc)"; exit 1; fi
 
 # the registry's .glb model files (the recipes' sources), as the editor resolves them
@@ -66,20 +66,9 @@ fi
 BOUT=$("$BLENDER" --background --python-exit-code 1 --python "$(cygpath -m "$ROOT/tools/glb-reader-drill/blender_counts.py")" -- "${SAMPLE[@]}" 2>&1); brc=$?
 BOUT=$(printf '%s' "$BOUT" | LC_ALL=C sed 's/\xEF\xBB\xBF//g')
 if [ "$brc" -ne 0 ]; then echo "$BOUT" | tail -5; echo "FAIL — Blender could not import the sample (exit $brc)"; exit 1; fi
-fails=0; compared=0
-while IFS=$'\t' read -r _ name btris bmat bimg bjoints banim bms; do
-  line=$(echo "$RESULT" | grep -F "$(printf 'FILE\t%s\t' "$name")" | head -1)   # literal: a file name may hold regex characters ("(3).glb")
-  [ -n "$line" ] || { echo "FAIL $name: Blender read it, the C# reader has no line"; fails=$((fails+1)); continue; }
-  short=$(basename "$(dirname "$name")")/$(basename "$name")
-  ctris=$(echo "$line" | grep -o "tris=[0-9]*"); cmat=$(echo "$line" | grep -o "materials=[0-9]*"); cimg=$(echo "$line" | grep -o "images=[0-9]*"); cjoints=$(echo "$line" | grep -o "joints=[0-9]*")
-  canim=$(echo "$line" | grep -o "animations=[0-9]*"); cms=$(echo "$line" | grep -o "ms=[0-9]*" | tail -1)
-  compared=$((compared+1))
-  if [ "$ctris" = "$btris" ] && [ "$cmat" = "$bmat" ] && [ "$cimg" = "$bimg" ] && [ "$cjoints" = "$bjoints" ]; then
-    echo "PASS $short: $ctris $cmat $cimg $cjoints agree with Blender (C# $cms, Blender $bms; C# $canim, Blender $banim actions)"
-  else
-    echo "FAIL $short: C# [$ctris $cmat $cimg $cjoints] vs Blender [$btris $bmat $bimg $bjoints]"; fails=$((fails+1))
-  fi
-done < <(echo "$BOUT" | grep "^BLENDER")
-[ "$compared" -gt 0 ] || { echo "FAIL — Blender printed no counts"; exit 1; }
-if [ "$fails" -ne 0 ]; then echo "FAIL — GLB reader drill: $fails of $compared sampled files disagree with Blender"; exit 1; fi
-echo "PASS — GLB reader drill: $n_ok registry files read and checked; $compared compared with Blender, all agree"
+printf '%s
+' "$RESULT" > "$TMPD/csharp.txt"; printf '%s
+' "$BOUT" > "$TMPD/blender.txt"
+python "$ROOT/tools/glb-reader-drill/compare.py" "$TMPD/csharp.txt" "$TMPD/blender.txt"; crc=$?
+if [ "$crc" -ne 0 ]; then echo "FAIL — GLB reader drill: a sampled file disagrees with Blender (or none compared)"; exit 1; fi
+echo "PASS — GLB reader drill: $n_ok registry files read and checked; the sample agrees with Blender on counts, box, area, centroid, winding, bones and durations"

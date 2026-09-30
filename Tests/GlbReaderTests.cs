@@ -242,6 +242,10 @@ public class GlbReaderTests
     [InlineData("times-descending", "not ascending")]
     [InlineData("chunk-past-file", "runs past the file")]
     [InlineData("not-glb", "does not start with the glTF magic")]
+    [InlineData("cycle", "is its own ancestor")]
+    [InlineData("required-texture-transform", "requires the extension 'KHR_texture_transform'")]
+    [InlineData("joints-2", "more than eight influences")]
+    [InlineData("joints-1-alone", "without the other")]
     public void What_the_reader_does_not_implement_or_cannot_trust_is_refused_by_name(string flaw, string message)
     {
         var f = Full();
@@ -259,9 +263,40 @@ public class GlbReaderTests
             case "times-descending": f.Root["animations"][0]["samplers"][0]["input"] = f.FloatAccessor(new float[] { 0, 1, 0.5f }, "SCALAR", 1); break;
             case "chunk-past-file": glb = f.Glb(); Buffer.BlockCopy(BitConverter.GetBytes(0x7FFFFFF0u), 0, glb, 12, 4); break;   // the JSON chunk claims 2 GB
             case "not-glb": glb = Encoding.UTF8.GetBytes("{ \"asset\": { \"version\": \"2.0\" } }"); break;
+            case "cycle": f.Root["nodes"][2]["children"] = new JArray { 1 }; ((JArray)f.Root["nodes"][0]["children"]).Clear(); break;   // Root -> Turret -> Root, each with one parent
+            case "required-texture-transform": f.Root["extensionsRequired"] = new JArray { "KHR_texture_transform" }; break;
+            case "joints-2": f.Root["meshes"][0]["primitives"][0]["attributes"]["JOINTS_2"] = f.Root["meshes"][0]["primitives"][0]["attributes"]["JOINTS_0"]; break;
+            case "joints-1-alone": f.Root["meshes"][0]["primitives"][0]["attributes"]["JOINTS_1"] = f.Root["meshes"][0]["primitives"][0]["attributes"]["JOINTS_0"]; break;
         }
         var ex = Assert.Throws<InvalidDataException>(() => GlbReader.Read(glb ?? f.Glb()));
         Assert.Contains(message, ex.Message);
+    }
+
+    [Fact]
+    public void A_second_influence_set_is_read_and_a_missing_image_is_refused()
+    {
+        var f = Full();
+        var attrs = (JObject)f.Root["meshes"][0]["primitives"][0]["attributes"];
+        attrs["JOINTS_1"] = f.Accessor(f.View(new byte[] { 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0 }), 0, 5121, "VEC4", 3);
+        attrs["WEIGHTS_1"] = f.FloatAccessor(new float[] { 0.25f, 0, 0, 0, 0.5f, 0.5f, 0, 0, 0, 0, 0, 0 }, "VEC4", 4);
+        var p = GlbReader.Read(f.Glb()).Meshes[0].Primitives[0];
+        Assert.Equal(new ushort[] { 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0 }, p.Joints1);
+        Assert.Equal(0.25f, p.Weights1[0]); Assert.Equal(0.5f, p.Weights1[5]);
+        // a .gltf whose image file is not beside it is not read whole
+        string d = Path.Combine(Path.GetTempPath(), "haf_img_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(d);
+        try
+        {
+            var g = Full();
+            var bin = g.Bin.ToArray();
+            g.Root["buffers"] = new JArray { new JObject { ["byteLength"] = bin.Length, ["uri"] = "m.bin" } };
+            File.WriteAllBytes(Path.Combine(d, "m.bin"), bin);
+            ((JObject)g.Root["images"][0]).Remove("bufferView"); g.Root["images"][0]["uri"] = "atlas.png";   // never written
+            File.WriteAllText(Path.Combine(d, "m.gltf"), g.Root.ToString());
+            var ex = Assert.Throws<InvalidDataException>(() => GlbReader.Read(Path.Combine(d, "m.gltf")));
+            Assert.Contains("'atlas.png' could not be found beside the file", ex.Message);
+        }
+        finally { Directory.Delete(d, true); }
     }
 
     [Fact]
