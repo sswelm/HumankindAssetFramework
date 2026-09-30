@@ -496,7 +496,8 @@ public class BackupWindow : EditorWindow
             // complete independently-restorable folder. Null when there is no previous snapshot (first run), which
             // just means everything is copied, exactly as before. See BackupDedup for why this is safe.
             string prevSnap = PreviousSnapshot(dir);
-            var st = new BackupDedup.Stats();
+            var st = new BackupDedup.Stats { NewRoot = dir, Prev = BackupDedup.ReadHashes(prevSnap), PrevSnapshotExisted = prevSnap != null };
+            BackupDedup.PrehashLive(groups.SelectMany(g => g.Sources), st);   // by content: keyed in parallel ahead of the loop
             int totalFiles = 0; long totalBytes = 0;
             foreach (var g in groups)
                 foreach (var src in g.Sources)
@@ -525,9 +526,10 @@ public class BackupWindow : EditorWindow
             // live pack registry, or it is NOT ok, full stop.
             string critical = VerifyCriticalContents(dir, groups, out int sourcePacks, out int deployedPacks);
             if (critical != null) ok = false;
-            // The content fingerprint, written AFTER everything landed — the offsite step reads it to decide whether
-            // this snapshot differs from the one already uploaded. Written even on a failed verify: knowing what a
-            // suspect snapshot contained is useful, and nothing consumes it unless the snapshot is used.
+            // The content index (what the NEXT snapshot links against) and the fingerprint over it (what the offsite
+            // step compares), written AFTER everything landed. Written even on a failed verify: knowing what a suspect
+            // snapshot contained is useful, and nothing consumes it unless the snapshot is used.
+            BackupDedup.WriteHashes(dir, st);
             BackupDedup.WriteSignature(dir);
             return new SnapResult
             {

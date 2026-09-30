@@ -174,25 +174,40 @@ public class BackupRulesTests
     //      of the copied version was linked as unchanged, and an existence check called the old bytes "verified") ----
 
     [Fact]
-    public void A_copy_stands_in_only_when_it_is_the_same_bytes()
+    public void A_content_key_is_the_bytes_and_nothing_else()
     {
-        var fine = new DateTime(2026, 9, 30, 12, 0, 0, DateTimeKind.Utc).AddTicks(1234567);   // NTFS: 100 ns ticks
-        var coarse = new DateTime(2026, 9, 30, 12, 0, 0, DateTimeKind.Utc);                   // FAT: whole 2 s slots
-        int asked = 0;
-        Func<bool> never = () => { asked++; return true; };
-        Assert.False(BackupRules.SameCopy(10, fine, 11, fine, never));                    // a different size is a different file
-        Assert.True(BackupRules.SameCopy(10, fine, 10, fine, never));                     // the same sub-second time is proof
-        Assert.Equal(0, asked);                                                           // neither read a byte
-        Assert.False(BackupRules.SameCopy(10, fine, 10, fine.AddSeconds(3), never));      // past the tolerance: copied, no read
-        Assert.Equal(0, asked);
-        // within the tolerance the bytes decide - the reported case: a same-length edit 1 s after the version copied
-        Assert.False(BackupRules.SameCopy(10, fine.AddSeconds(1), 10, fine, () => false));
-        Assert.True(BackupRules.SameCopy(10, fine.AddSeconds(1.5), 10, fine, () => true));   // FAT rounding, same bytes: linked
-        Assert.True(BackupRules.SameCopy(10, fine, 10, fine.AddSeconds(2), () => true));
-        // round 5: an EQUAL whole-second time is FAT-shaped - a same-length edit inside the slot keeps it - so the bytes decide
-        Assert.False(BackupRules.SameCopy(10, coarse, 10, coarse, () => false));
-        Assert.True(BackupRules.SameCopy(10, coarse, 10, coarse, () => { asked++; return true; }));
-        Assert.Equal(1, asked);
+        string d = Path.Combine(Path.GetTempPath(), "haf_key_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(d);
+        try
+        {
+            string abc = Path.Combine(d, "abc"), same = Path.Combine(d, "same"), edited = Path.Combine(d, "edited");
+            File.WriteAllText(abc, "abc");
+            Assert.Equal("3|a9993e364706816aba3e25717850c26c9cd0d89d", BackupRules.ContentKey(abc));   // SHA-1("abc"), the published vector
+            var big = new byte[200 * 1024]; new Random(11).NextBytes(big);
+            File.WriteAllBytes(same, big); File.WriteAllBytes(edited, big);
+            // the reported shape: new bytes under a preserved size AND a preserved last-write time, to the tick
+            var t = File.GetLastWriteTimeUtc(same);
+            var e = (byte[])big.Clone(); e[12345] ^= 1; File.WriteAllBytes(edited, e); File.SetLastWriteTimeUtc(edited, t);
+            Assert.Equal(new FileInfo(same).Length, new FileInfo(edited).Length);
+            Assert.Equal(File.GetLastWriteTimeUtc(same), File.GetLastWriteTimeUtc(edited));
+            Assert.NotEqual(BackupRules.ContentKey(same), BackupRules.ContentKey(edited));            // the key still tells them apart
+            File.WriteAllBytes(edited, big);
+            Assert.Equal(BackupRules.ContentKey(same), BackupRules.ContentKey(edited));               // and equal bytes key equal, whatever the dates
+            Assert.Null(BackupRules.ContentKey(Path.Combine(d, "missing")));                           // unreadable has no key: never "unchanged"
+        }
+        finally { Directory.Delete(d, true); }
+    }
+
+    [Fact]
+    public void An_index_line_round_trips_and_takes_nothing_else()
+    {
+        string line = BackupRules.HashLine("source\\FactorySource\\Tank.glb", "4096|a9993e364706816aba3e25717850c26c9cd0d89d");
+        Assert.Equal("H\tsource/FactorySource/Tank.glb\t4096|a9993e364706816aba3e25717850c26c9cd0d89d", line);
+        Assert.True(BackupRules.TryParseHashLine(line, out string rel, out string key));
+        Assert.Equal("source/FactorySource/Tank.glb", rel); Assert.Equal("4096|a9993e364706816aba3e25717850c26c9cd0d89d", key);
+        foreach (var no in new[] { null, "", "# HAF content index", "H", "H\trel", "H\trel\t", "H\t\tkey", "SRC\trel\torig\t1\t2", "H\trel\tkey\textra" })
+            Assert.False(BackupRules.TryParseHashLine(no, out _, out _), no ?? "<null>");
+        Assert.Throws<ArgumentException>(() => BackupRules.HashLine("a\tb", "k"));
     }
 
     [Fact]

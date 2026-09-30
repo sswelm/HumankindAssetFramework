@@ -18,7 +18,11 @@ using System.Text;
 //   1) LOCAL: hard-link unchanged files instead of copying them. A hard link is a second NAME for the same bytes on
 //      the same volume, so an unchanged file costs ZERO additional space while each snapshot stays a complete,
 //      independently browsable, independently restorable folder. Nothing about restore changes — a hard link IS the
-//      file. This is what Time Machine and `rsync --link-dest` do.
+//      file. This is what Time Machine and `rsync --link-dest` do. "Unchanged" is decided BY CONTENT (PR #105, round
+//      6): every snapshot writes an index of <length>|<sha1> per file (haf_hashes.txt), and the next links a file only
+//      when the live file's key equals the record — no size, no last-write time, however precise. Measured on Unity's
+//      Mono: keying the 3 GB live tree takes 2.1 s on 8 cores (12.8 s on one); reading the previous snapshot on the
+//      backup drive would take 51 s, which is why the index exists.
 //
 //      THE ONE RULE THAT MAKES IT SAFE: never write INTO a snapshot. Editing a hard-linked file edits every snapshot
 //      sharing it. Restore only ever copies OUT of a snapshot into the live tree, and the delete-guard copies IN
@@ -48,19 +52,49 @@ internal static class BackupDedup
         catch { return false; }
     }
 
-    /// <summary>Is `candidate` (in the previous snapshot) the same file as `src` (live)? Size + last-write time, the
-    /// standard cheap test — hashing 1.4 GB every backup to find 18 changed files would cost more than it saves.
-    /// An identical sub-second time is proof; a whole-second one (FAT-shaped) and anything within the 2-second tolerance
-    /// FAT/network shares need lets the bytes decide (review of PR #105: a same-length edit within 2 s of - or inside the
-    /// 2 s slot of - the copied version was "unchanged"). The rule is BackupRules.SameCopy.</summary>
-    internal static bool SameFile(FileInfo src, FileInfo candidate)
+    /// <summary>The per-snapshot content index: one <c>H&lt;tab&gt;rel&lt;tab&gt;&lt;length&gt;|&lt;sha1&gt;</c> line per
+    /// file, written by the snapshot that holds the bytes. The next snapshot links a file only when the LIVE file's key
+    /// equals the record (review of PR #105, round 6: size + last-write time — even to the tick — is not the bytes).</summary>
+    internal const string HashName = "haf_hashes.txt";
+
+    /// <summary>The previous snapshot's index, or null when it has none (made before 2026-09-30, or not a full snapshot): nothing links then.</summary>
+    internal static Dictionary<string, string> ReadHashes(string snapshotDir)
     {
         try
         {
-            return BackupRules.SameCopy(src.Length, src.LastWriteTimeUtc, candidate.Length, candidate.LastWriteTimeUtc,
-                                        () => BackupRules.SameBytes(src.FullName, candidate.FullName));
+            if (snapshotDir == null) return null;
+            string p = Path.Combine(snapshotDir, HashName);
+            if (!File.Exists(p)) return null;
+            var d = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var line in File.ReadAllLines(p))
+                if (BackupRules.TryParseHashLine(line, out string rel, out string key)) d[rel] = key;
+            return d;
         }
-        catch { return false; }
+        catch { return null; }
+    }
+
+    /// <summary>Written AFTER every file landed, sorted, so the file is the same for the same content.</summary>
+    internal static void WriteHashes(string snapshotDir, Stats st)
+    {
+        var lines = new List<string> { "# HAF content index: <length>|<sha1> of every file in this snapshot, as written" };
+        foreach (var kv in st.New.OrderBy(k => k.Key, StringComparer.Ordinal)) lines.Add(BackupRules.HashLine(kv.Key, kv.Value));
+        File.WriteAllLines(Path.Combine(snapshotDir, HashName), lines);
+    }
+
+    /// <summary>Key every live file under <paramref name="roots"/> in parallel, ahead of the copy loop (measured on Unity's
+    /// Mono: one core 12.8 s for the 3 GB tree, eight cores 2.1 s). The loop then decides link-or-copy without reading
+    /// the previous snapshot at all — its index has the keys.</summary>
+    internal static void PrehashLive(IEnumerable<string> roots, Stats st)
+    {
+        var files = new List<string>();
+        foreach (var r in roots)
+        {
+            if (File.Exists(r)) files.Add(r);
+            else if (Directory.Exists(r)) files.AddRange(Directory.GetFiles(r, "*", SearchOption.AllDirectories));
+        }
+        int par = Math.Min(8, Math.Max(1, Environment.ProcessorCount / 2));
+        System.Threading.Tasks.Parallel.ForEach(files, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = par },
+            f => { var k = BackupRules.ContentKey(f); if (k != null) st.LiveKeys[Path.GetFullPath(f)] = k; });
     }
 
     /// <summary>Running tally for one snapshot, so the report can state what was actually saved rather than claim it.</summary>
@@ -69,10 +103,19 @@ internal static class BackupDedup
         public int Linked, Copied;
         public long LinkedBytes, CopiedBytes;
         public int Files => Linked + Copied;
+        public string NewRoot;                                    // the snapshot being written; index paths are relative to it
+        public Dictionary<string, string> Prev;                   // the previous snapshot's index (rel -> key); null = none, nothing links
+        public bool PrevSnapshotExisted;                          // a previous snapshot was there (with or without an index)
+        public readonly Dictionary<string, string> New = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        public readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> LiveKeys = new System.Collections.Concurrent.ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        public string Rel(string dst) => dst.Substring(NewRoot.Length).TrimStart('/', '\\').Replace('\\', '/');
+        public string KeyOf(string live) => LiveKeys.TryGetValue(Path.GetFullPath(live), out var k) ? k : BackupRules.ContentKey(live);
         public string Report =>
             Linked == 0
-                ? $"{Copied} file(s) copied ({BackupWindow.Human(CopiedBytes)}) — no previous snapshot to link against"
-                : $"{Files} file(s): {Linked} unchanged (hard-linked, {BackupWindow.Human(LinkedBytes)} saved), {Copied} copied ({BackupWindow.Human(CopiedBytes)})";
+                ? $"{Copied} file(s) copied ({BackupWindow.Human(CopiedBytes)}) — " + (!PrevSnapshotExisted ? "no previous snapshot to link against"
+                    : Prev == null ? "the previous snapshot has no content index (made before 2026-09-30), so nothing was linked this once; from the next backup on, unchanged files are linked by content"
+                    : "nothing unchanged by content")
+                : $"{Files} file(s): {Linked} unchanged by content (hard-linked, {BackupWindow.Human(LinkedBytes)} saved), {Copied} copied ({BackupWindow.Human(CopiedBytes)})";
     }
 
     /// <summary>Copy `src` into `dst`, hard-linking any file that is byte-for-byte unchanged from the matching file
@@ -100,34 +143,49 @@ internal static class BackupDedup
     {
         long len = 0;
         try { len = new FileInfo(src).Length; } catch { }
-        if (prev != null && File.Exists(prev) && SameFile(new FileInfo(src), new FileInfo(prev)) && TryHardLink(prev, dst))
-        { st.Linked++; st.LinkedBytes += len; return 1; }
+        string rel = st.Rel(dst);
+        // LINK ONLY BY CONTENT: the live file's key must equal what the previous snapshot RECORDED for the bytes at this
+        // path (its index) - never a size or a time. The previous snapshot is not read; its index is.
+        if (prev != null && st.Prev != null && st.Prev.TryGetValue(rel, out var recorded) && File.Exists(prev))
+        {
+            string live = st.KeyOf(src);
+            if (live != null && live == recorded && TryHardLink(prev, dst))
+            { st.New[rel] = recorded; st.Linked++; st.LinkedBytes += len; return 1; }
+        }
         Directory.CreateDirectory(Path.GetDirectoryName(dst));
         File.Copy(src, dst, true);
+        // the record is of the bytes IN the snapshot, read back after the copy (the live file may move on meanwhile)
+        st.New[rel] = BackupRules.ContentKey(dst) ?? "";
         st.Copied++; st.CopiedBytes += len;
         return 1;
     }
 
     // ---- content signature: what makes "nothing changed since the last offsite zip" answerable ----
 
-    /// <summary>A stable fingerprint of a snapshot's CONTENT: every file's relative path, size and mtime, sorted so
-    /// directory-enumeration order can't change the answer. Deliberately not a hash of the bytes — same reason
-    /// SameFile isn't: reading 1.4 GB to decide whether to upload 1 GB is a poor trade, and path+size+mtime is the
-    /// same evidence the copy step already trusts.</summary>
+    /// <summary>A stable fingerprint of a snapshot's CONTENT: every file's relative path and content key, from the
+    /// snapshot's own index (already computed by the copy step - no second read), sorted so nothing about enumeration
+    /// order or dates can change the answer. Two snapshots of the same bytes sign the same, whenever they were taken.
+    /// (Until round 6 of PR #105 the signature took each file's mtime, and the manifest's - which differs per
+    /// snapshot - with it: no two snapshots ever signed the same, and the offsite skip never fired.) A snapshot without
+    /// an index (made before 2026-09-30) signs by path, size and mtime as before, which is always "changed".</summary>
     internal static string Signature(string dir)
     {
         try
         {
             if (!Directory.Exists(dir)) return "";
             var sb = new StringBuilder();
-            foreach (var f in Directory.GetFiles(dir, "*", SearchOption.AllDirectories)
-                                       .Where(p => !p.EndsWith(SigName, StringComparison.OrdinalIgnoreCase))
-                                       .OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
-            {
-                var fi = new FileInfo(f);
-                sb.Append(f.Substring(dir.Length).Replace('\\', '/')).Append('|')
-                  .Append(fi.Length).Append('|').Append(fi.LastWriteTimeUtc.Ticks).Append('\n');
-            }
+            var index = ReadHashes(dir);
+            if (index != null)
+                foreach (var kv in index.OrderBy(k => k.Key, StringComparer.Ordinal)) sb.Append(kv.Key).Append('|').Append(kv.Value).Append('\n');
+            else
+                foreach (var f in Directory.GetFiles(dir, "*", SearchOption.AllDirectories)
+                                           .Where(p => !p.EndsWith(SigName, StringComparison.OrdinalIgnoreCase))
+                                           .OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
+                {
+                    var fi = new FileInfo(f);
+                    sb.Append(f.Substring(dir.Length).Replace('\\', '/')).Append('|')
+                      .Append(fi.Length).Append('|').Append(fi.LastWriteTimeUtc.Ticks).Append('\n');
+                }
             using (var sha = SHA1.Create())
                 return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(sb.ToString()))).Replace("-", "").ToLowerInvariant();
         }

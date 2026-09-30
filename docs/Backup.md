@@ -31,12 +31,14 @@ differently:
 **Locally, unchanged files are hard-linked** to the newest existing snapshot. A hard link is a second *name* for the
 same bytes on the same volume, so an unchanged file costs **zero** additional space while each snapshot stays a
 complete, independently browsable, independently restorable folder. Same idea as Time Machine or `rsync --link-dest`.
-The first real run: 4,077 files, **3,966 hard-linked (1.2 GB saved), 111 copied (65.4 MB)**. "Unchanged" means the
-same size and the same **sub-second** last-write time — only a fine-grained file system (NTFS) writes those, and two
-writes there never share a tick. A whole-second match is FAT-shaped (2 s slots, where a same-length edit inside the
-slot keeps the time), so it and anything within the 2-second tolerance FAT and network shares need compares the
-bytes (a same-length edit near the copied version once passed as unchanged — review of PR #105); further apart is
-copied.
+The first real run: 4,077 files, **3,966 hard-linked (1.2 GB saved), 111 copied (65.4 MB)**. **"Unchanged" is
+decided by content** (review of PR #105): every snapshot writes an index of `<length>|<sha1>` per file
+(`haf_hashes.txt`), and the next snapshot links a file only when the live file's key equals the record — no size, no
+last-write time however precise, because a tool that writes new bytes under a preserved timestamp defeats any such
+rule. The live tree is keyed in parallel ahead of the copy (measured on Unity's Mono: the 3 GB tree in 2.1 s on 8
+cores, 12.8 s on one; reading the previous snapshot on the backup drive would take 51 s, which is why the index
+exists). The first backup after 2026-09-30 finds no index in the previous snapshot and links nothing that once — it
+takes as long as a backup did before dedup — and every later one links by content.
 
 > **Two consequences worth knowing.** Explorer reports each snapshot at its full apparent size — it counts shared
 > bytes once per name, so the folder still *looks* like 1.4 GB. And deleting an old snapshot frees only the blocks
@@ -50,11 +52,12 @@ copied.
 > space, never correctness.
 
 **Offsite, an unchanged snapshot is not uploaded at all.** Each zip is a full ~1 GB, and daily uploads of the same
-models fill a 15 GB cloud quota in about a week. A SHA-1 over every file's relative path, size and mtime is written
-into each snapshot (`haf_signature.txt`) and beside each uploaded zip (`.sig`); a matching signature means the
-existing zip already *is* this backup, so the zip is skipped. Deliberately **not** a hash of the file bytes — reading
-1.4 GB to decide whether to upload 1 GB is a poor trade, and path+size+mtime is the same evidence the copy step
-already trusts. An absent or unreadable signature always proceeds: *"I don't know"* must never be read as
+models fill a 15 GB cloud quota in about a week. A SHA-1 over every file's relative path and content key (from the
+snapshot's own index — no second read) is written into each snapshot (`haf_signature.txt`) and beside each uploaded
+zip (`.sig`); a matching signature means the existing zip already *is* this backup, so the zip is skipped. Two
+snapshots of the same bytes sign the same whenever they were taken (until PR #105 the signature took each file's
+mtime, and the manifest's — which differs per snapshot — with it, so no two snapshots ever signed the same and the
+skip never fired). An absent or unreadable signature always proceeds: *"I don't know"* must never be read as
 *"unchanged"*. The sidecar is written only after the zip is verified and moved into place, so a crash mid-zip cannot
 leave a signature claiming an upload that never landed.
 

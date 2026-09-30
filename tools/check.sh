@@ -63,6 +63,7 @@ run "editor scripts compile (Roslyn)" bash "$ROOT/tools/editor_compile_check.sh"
 #    5a') The shared registry engine (districts, formations, sounds) RUN against real files: its own source, Unity's
 #         Roslyn and Mono, tiny stand-ins for JsonUtility/EditorPrefs. Same Unity prerequisite as 5a, same loud FAIL.
 run "registry engine drill (SingleSourceRegistry on real files)" bash "$ROOT/tools/registry_engine_drill.sh"
+run "backup dedup drill (BackupDedup on real files: unchanged means the bytes)" bash "$ROOT/tools/backup_dedup_drill.sh"
 #    5b) The ownership-rebase hand-lists. A field the UI edits but the window's rebase doesn't re-apply is thrown
 #        away on every Save — silent, and the reason this gate exists. Pure source analysis, so CI can run it too.
 run "hand-list gate (ownership rebases)" bash "$ROOT/tools/check_handlists.sh"
