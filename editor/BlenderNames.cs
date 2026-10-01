@@ -1,7 +1,7 @@
 // BlenderNames.cs - the names Blender's glTF importer gives a file's nodes, computed from the model WITHOUT Blender
 // (step 3 of replacing Blender: the Vehicle Lab's part rows are keyed by these names, and every saved recipe holds
 // them). This is a port of the importer's `compute_vnodes` (Blender 5.1, io_scene_gltf2/blender/imp/vnode.py) and of
-// `create_vnode`'s creation order, with Blender's `BLI_uniquename` for the ".001" suffixes - measured against the
+// `create_vnode`'s creation order, with Blender's two unique-name rules for the ".001" suffixes - measured against the
 // real importer on fixtures that exercise every rule below (Tests/BlenderNamesTests.cs), then on every registry
 // file by the probe drill. The rules, as the importer has them:
 //   * every node is a "vnode"; the parentless ones hang under a dummy root IN NODE INDEX ORDER (not the scene's
@@ -17,8 +17,10 @@
 //   * a mesh object is named after its node, else after the Blender mesh datablock (the glTF mesh's name, else
 //     "Mesh_<index>", itself unique among meshes); an empty after its node, else "Node_<index>"; a bone after its
 //     node, else "Node_<index>" (unique within its armature);
-//   * uniqueness (BLI_uniquename): when a name is taken, split a trailing ".NNN" off, then try NNN+1, NNN+2 ...
-//     as ".%03d" until free. Objects of every type share one pool; meshes, armatures and bones have their own.
+//   * uniqueness: objects of every type share one pool; meshes, armatures and cameras have their own, and each
+//     armature its bones. A taken DATABLOCK name gets its base's smallest free number (NamePool - two objects named
+//     B.7 are B.7 and B.001); a taken BONE name counts up from its own tail (UniqueBone - J.7 and J.008). Both rules,
+//     with their length limits, are ported from Blender's source further down.
 //   * a camera node's object is named after the node, else after the camera datablock (the glTF camera's name, else
 //     "Camera", unique among cameras); a node with a mesh AND a camera keeps the mesh and gets a child for the camera.
 // Lights (KHR_lights_punctual) and EXT_mesh_gpu_instancing are not modelled - the reader does not carry them: a
@@ -53,7 +55,7 @@ public static class BlenderNames
         public int[] ArmatureNodeOfBone;
         /// <summary>Every object name the import made, of every type (meshes, empties, armatures, cameras, bone shapes):
         /// the pool a later name is made unique in.</summary>
-        public HashSet<string> ObjectPool;
+        public NamePool ObjectPool;
         /// <summary>The bone-shape objects the importer added (one per armature): "Icosphere", "Icosphere.001", ...</summary>
         public List<string> BoneShapes = new List<string>();
         /// <summary>Per glTF node: whether the importer made it a BONE, and then its parent in the importer's tree -
@@ -149,7 +151,7 @@ public static class BlenderNames
         // ---- creation, depth-first: objects, armatures (with their bones and bone shape), mesh datablocks
         var r = new Result { MeshObjectOfNode = new string[m.Nodes.Count], ObjectOfNode = new string[m.Nodes.Count], ArmatureOfSkin = new string[m.Skins.Count], ArmatureNodeOfSkin = new int[m.Skins.Count], IsBone = new bool[m.Nodes.Count], BoneParent = new int[m.Nodes.Count] };
         for (int i = 0; i < m.Nodes.Count; i++) { r.IsBone[i] = v[Key(i)].Type == Kind.Bone; r.BoneParent[i] = Index(v[Key(i)].Parent); }
-        var objects = new HashSet<string>(StringComparer.Ordinal); var meshes = new HashSet<string>(StringComparer.Ordinal); var armatures = new HashSet<string>(StringComparer.Ordinal); var cameras = new HashSet<string>(StringComparer.Ordinal);
+        var objects = new NamePool(); var meshes = new NamePool(); var armatures = new NamePool(); var cameras = new NamePool();
         var armaName = new Dictionary<string, string>();
         var meshData = new Dictionary<(int mesh, int skin), string>();
         void Create(string id)
@@ -163,25 +165,26 @@ public static class BlenderNames
                     int meshIdx = m.Nodes[n.MeshNode].Mesh, skin = m.Nodes[n.MeshNode].Skin;
                     if (!meshData.TryGetValue((meshIdx, skin), out var data))
                     {
-                        data = Unique(meshes, m.Meshes[meshIdx].Name.Length > 0 ? m.Meshes[meshIdx].Name : "Mesh_" + meshIdx);
+                        data = meshes.Unique(m.Meshes[meshIdx].Name.Length > 0 ? m.Meshes[meshIdx].Name : "Mesh_" + meshIdx);
                         meshData[(meshIdx, skin)] = data;
                     }
-                    name = Unique(objects, n.Name ?? data);
+                    name = objects.Unique(n.Name ?? data);
                     r.MeshObjectOfNode[n.MeshNode] = name;
                     r.MeshObjectsInOrder.Add((n.MeshNode, name));
                 }
                 else if (n.IsArma)
                 {
-                    string data = Unique(armatures, n.ArmaName);
-                    name = Unique(objects, n.Name ?? data);
-                    r.BoneShapes.Add(Unique(objects, "Icosphere"));   // armature_display: the bone-shape object, one per armature
+                    string data = armatures.Unique(n.ArmaName);
+                    name = objects.Unique(n.Name ?? data);
+                    r.BoneShapes.Add(objects.Unique("Icosphere"));   // armature_display: the bone-shape object, one per armature
+                    meshes.Unique("Icosphere");   // ... and its mesh DATABLOCK: a glTF mesh named Icosphere, made after it, is Icosphere.001 - and names its nameless node so
                     armaName[id] = name; r.ArmaturesInOrder.Add((Index(id), name));
                     // create_bones: every bone under this armature, depth-first, unique within it
                     var bones = new HashSet<string>(StringComparer.Ordinal);
                     void Bones(string bid)
                     {
                         var b = v[bid];
-                        if (b.Type == Kind.Bone) { r.BoneOfJoint[Index(bid)] = Unique(bones, b.Name ?? b.DefaultName); foreach (var c in b.Children) Bones(c); }
+                        if (b.Type == Kind.Bone) { r.BoneOfJoint[Index(bid)] = UniqueBone(bones, b.Name ?? b.DefaultName); foreach (var c in b.Children) Bones(c); }
                     }
                     foreach (var c in n.Children) Bones(c);
                 }
@@ -190,10 +193,10 @@ public static class BlenderNames
                     // BlenderCamera.create: a datablock per camera OBJECT, named after the glTF camera or "Camera"
                     var cam = m.Cameras[m.Nodes[n.CameraNode].Camera];
                     string camName = (GlbReader.ParseObject(cam)["name"]?.ToString() is string cn && cn.Length > 0) ? cn : "Camera";
-                    string camData = Unique(cameras, camName);   // ALWAYS made, so always reserved: a named node skipping it left "Lens" free for the next camera, and a mesh node named Lens became Lens.001
-                    name = Unique(objects, n.Name ?? camData);
+                    string camData = cameras.Unique(camName);   // ALWAYS made, so always reserved: a named node skipping it left "Lens" free for the next camera, and a mesh node named Lens became Lens.001
+                    name = objects.Unique(n.Name ?? camData);
                 }
-                else name = Unique(objects, n.Name ?? n.DefaultName);
+                else name = objects.Unique(n.Name ?? n.DefaultName);
                 int ni = Index(id);
                 if (ni >= 0) r.ObjectOfNode[ni] = name;
             }
@@ -229,18 +232,186 @@ public static class BlenderNames
         return common[common.Count - 1];
     }
 
-    /// <summary>BLI_uniquename: the name as given when free; else its ".NNN" tail split off and NNN+1, NNN+2, ...
-    /// tried as ".%03d" until one is free. The chosen name joins the pool.</summary>
-    public static string Unique(ISet<string> pool, string name)
+    // ---- unique names. Blender has TWO rules, and a name's numeric tail means something else in each (ported from
+    // Blender 5.1's own source - blenlib/intern/string_utils.cc, blenkernel/intern/main_namemap.cc - and measured
+    // branch by branch on the name_tails fixtures; external review of PR #112 found the first port, one rule for
+    // both with char.IsDigit and int.Parse, throwing on "Hull.\u0661" - and the measurement behind that fix found it
+    // wrong for every duplicate with a tail of its own: two objects named B.7 are B.7 and B.001, not B.008).
+
+    /// <summary>BLI_string_split_name_number: the base before the LAST dot and the number behind it - when what is
+    /// behind it is ASCII digits only and fits an int. Anything else (no dot, nothing behind it, a letter, a digit
+    /// of another script such as "\u0661", a number past 2147483647) is no numeric tail: the whole name, number 0.
+    /// A name that STARTS with its dot (".5") has an empty base.</summary>
+    public static (string left, int number) SplitNumber(string name)
     {
-        if (pool.Add(name)) return name;
-        string left = name; int nr = 0;
         int dot = name.LastIndexOf('.');
-        if (dot > 0 && dot < name.Length - 1 && name.Substring(dot + 1).All(char.IsDigit)) { left = name.Substring(0, dot); nr = int.Parse(name.Substring(dot + 1)); }
-        for (int k = nr + 1; ; k++)
+        if (dot < 0 || dot == name.Length - 1) return (name, 0);
+        long value = 0;
+        for (int i = dot + 1; i < name.Length; i++)
         {
-            string candidate = left + "." + k.ToString("000");
+            char c = name[i];
+            if (c < '0' || c > '9') return (name, 0);
+            if (value <= int.MaxValue) value = value * 10 + (c - '0');   // past an int it stays past it; no overflow of the long
+        }
+        return value > int.MaxValue ? (name, 0) : (name.Substring(0, dot), (int)value);
+    }
+
+    /// <summary>The names of one kind of datablock (objects, meshes, armatures, cameras): Blender's Main name map.
+    /// A free name is taken as given. A taken one gets its base's SMALLEST unused number from 1 (exact up to 1023;
+    /// past that, one above the highest seen) as ".%03d" - never counting up from the name's own tail. Names hold
+    /// 255 bytes of UTF-8; one that would not fit with its number is cut by a character and tried again AS A NAME
+    /// (so the second of two 255-byte names is the 254-byte one, without a number).</summary>
+    public sealed class NamePool
+    {
+        public const int MaxBytes = 255;
+        const int MaxExact = 1023, MaxNumber = 999999999, None = -1;
+
+        /// <summary>UniqueName_Value: which numbers one base name has in use.</summary>
+        sealed class Numbers
+        {
+            public int? Max; public List<bool> Mask = new List<bool>(); public Dictionary<int, int> Multi;
+
+            public void MarkUsed(int number)
+            {
+                if (number <= MaxExact)
+                {
+                    while (Mask.Count <= number) Mask.Add(false);
+                    if (Mask[number]) { if (Multi == null) Multi = new Dictionary<int, int>(); Multi[number] = (Multi.TryGetValue(number, out int n) ? n : 1) + 1; }   // "G.1" and "G.001"
+                    else Mask[number] = true;
+                }
+                if (number <= MaxNumber) Max = Max.HasValue ? Math.Max(Max.Value, number) : number;
+            }
+
+            public void MarkUnused(int number)
+            {
+                if (number <= MaxExact)
+                {
+                    if (Multi != null && Multi.TryGetValue(number, out int n)) { if (n - 1 == 1) Multi.Remove(number); else Multi[number] = n - 1; return; }
+                    if (number < Mask.Count) Mask[number] = false;
+                }
+                if (Max.HasValue && number == Max.Value) { if (number > 0) Max = Max.Value - 1; else Max = null; }
+            }
+
+            public int SmallestUnused()
+            {
+                if (Mask.Count < 2) return 1;
+                for (int i = 1; i < Mask.Count; i++) if (!Mask[i]) return i;   // never 0: a second Foo.001 is Foo.002, not Foo
+                if (Mask.Count <= MaxExact) return Mask.Count;
+                if (Max.HasValue) return Max.Value + 1 <= MaxNumber ? Max.Value + 1 : None;
+                return 1;
+            }
+
+            public Numbers Clone() => new Numbers { Max = Max, Mask = new List<bool>(Mask), Multi = Multi == null ? null : new Dictionary<int, int>(Multi) };
+        }
+
+        readonly HashSet<string> full = new HashSet<string>(StringComparer.Ordinal);
+        readonly Dictionary<string, Numbers> byBase = new Dictionary<string, Numbers>(StringComparer.Ordinal);
+
+        public bool Contains(string name) => full.Contains(name);
+        public int Count => full.Count;
+
+        public NamePool Clone()
+        {
+            var c = new NamePool();
+            foreach (var n in full) c.full.Add(n);
+            foreach (var kv in byBase) c.byBase[kv.Key] = kv.Value.Clone();
+            return c;
+        }
+
+        /// <summary>namemap_get_name: the name this datablock gets; it joins the pool.</summary>
+        public string Unique(string name)
+        {
+            name = TruncateUtf8(name, MaxBytes);
+            while (true)
+            {
+                var (left, number) = SplitNumber(name);
+                if (!byBase.TryGetValue(left, out var val)) byBase[left] = val = new Numbers();
+                if (full.Add(name)) { val.MarkUsed(number); return name; }
+                int use = val.SmallestUnused();
+                if (!FinalBuild(left, use, ref name)) continue;   // the name was edited: judge it afresh, as a name
+                full.Add(name); val.MarkUsed(use);
+                return name;
+            }
+        }
+
+        /// <summary>A removed datablock frees its name, and its number for its base (the Lab's probe purges the
+        /// importer's bone shapes before it splits a single mesh into loose parts).</summary>
+        public void Remove(string name)
+        {
+            if (!full.Remove(name)) return;
+            var (left, number) = SplitNumber(name);
+            if (!byBase.TryGetValue(left, out var val)) return;
+            val.MarkUnused(number);
+            if (!val.Max.HasValue) byBase.Remove(left);
+        }
+
+        // id_name_final_build: base + ".NNN" when there is a number and the result fits; else a new NAME to try -
+        // the base less its last character (a long one), or the base + "_001", "_002" ... (a short one out of numbers)
+        bool FinalBuild(string left, int number, ref string name)
+        {
+            if (number != None)
+            {
+                name = left + "." + number.ToString("000", System.Globalization.CultureInfo.InvariantCulture);
+                if (Utf8Length(name) <= MaxBytes) return true;
+            }
+            name = left;
+            bool Usable(string candidate) => !byBase.TryGetValue(candidate, out var v) || (v.Max ?? 0) < MaxNumber;
+            while (Utf8Length(name) > 8)
+            {
+                name = DropLastCharacter(name);
+                if (Usable(name)) return false;
+            }
+            string shortBase = name;
+            for (ulong suffix = 1; ; suffix++)
+            {
+                name = shortBase + "_" + suffix.ToString("000", System.Globalization.CultureInfo.InvariantCulture);
+                if (Utf8Length(name) >= MaxBytes + 1 - 12) break;
+                if (Usable(name)) return false;
+            }
+            // Blender's "absolute last defense" (random names, after a thousand million of one base): not ported
+            throw new NotSupportedException($"no unique name left for '{left}': every number and every '{shortBase}_NNN' base is used up");
+        }
+    }
+
+    /// <summary>A BONE's name within its armature - BLI_uniquename_cb, the older rule: 63 bytes of UTF-8; a taken name
+    /// has its numeric tail split off and tail+1, tail+2 ... tried as ".%03d" until one is free (two bones named J.7
+    /// are J.7 and J.008), the base cut so that the number fits. The chosen name joins the pool.</summary>
+    public static string UniqueBone(ISet<string> pool, string name)
+    {
+        const int maxBytes = 63;
+        name = TruncateUtf8(name, maxBytes);
+        if (pool.Add(name)) return name;
+        var (left, number) = SplitNumber(name);
+        while (true)
+        {
+            number = unchecked(number + 1);   // C's ++ on an int: past 2147483647 Blender names the bone "Bn.-2147483648" (measured)
+            string tail = "." + number.ToString("000", System.Globalization.CultureInfo.InvariantCulture);
+            string candidate = left.Length == 0 ? tail : TruncateUtf8(left, maxBytes - tail.Length) + tail;
             if (pool.Add(candidate)) return candidate;
         }
+    }
+
+    static int Utf8Length(string s) => System.Text.Encoding.UTF8.GetByteCount(s);
+
+    /// <summary>BLI_strncpy_utf8: as many whole characters as fit in maxBytes of UTF-8.</summary>
+    static string TruncateUtf8(string s, int maxBytes)
+    {
+        if (s.Length <= maxBytes / 3) return s;   // a UTF-16 unit is at most 3 bytes of UTF-8
+        int bytes = 0, i = 0;
+        while (i < s.Length)
+        {
+            int units = char.IsHighSurrogate(s[i]) && i + 1 < s.Length && char.IsLowSurrogate(s[i + 1]) ? 2 : 1;
+            int size = units == 2 ? 4 : s[i] < 0x80 ? 1 : s[i] < 0x800 ? 2 : 3;
+            if (bytes + size > maxBytes) break;
+            bytes += size; i += units;
+        }
+        return i == s.Length ? s : s.Substring(0, i);
+    }
+
+    static string DropLastCharacter(string s)
+    {
+        if (s.Length == 0) return s;
+        int cut = s.Length >= 2 && char.IsLowSurrogate(s[s.Length - 1]) && char.IsHighSurrogate(s[s.Length - 2]) ? 2 : 1;
+        return s.Substring(0, s.Length - cut);
     }
 }

@@ -87,12 +87,14 @@ public static class VehicleProbe
             r.Notes.Add($"single mesh split into {islands.Count} loose parts (names are synthetic)");
             // the loose parts are named in the pool of EVERY object the import made (an empty called Hull.001 pushes the
             // second island to Hull.002), less the bone shapes and the artefacts the script purged before it split
-            var pool = new HashSet<string>(names.ObjectPool, StringComparer.Ordinal);
+            var pool = names.ObjectPool.Clone();
             foreach (var shape in names.BoneShapes) pool.Remove(shape);
             foreach (var gone in purgedNames) pool.Remove(gone);   // only what was PURGED frees its name: a mesh object without vertices is not listed, but still there
             var geo = Geometry(m, node, world, armaWorld);   // ONCE: 3,350 islands each re-posing the whole mesh took 18 s on the Ehrhardt
+            // each new object is a copy of the first, asking for ITS name: the smallest number its base has free
+            // (Hull.005 beside an empty Hull.002 splits into Hull.005, Hull.001, Hull.003, Hull.004 - measured)
             for (int k = 0; k < islands.Count; k++)
-                r.Parts.Add(MakePart(m, node, k == 0 ? name : BlenderNames.Unique(pool, name), geo, islands[k].prim, islands[k].verts, names));
+                r.Parts.Add(MakePart(m, node, k == 0 ? name : pool.Unique(name), geo, islands[k].prim, islands[k].verts, names));
         }
         else
             foreach (var (node, name) in objects) r.Parts.Add(MakePart(m, node, name, Geometry(m, node, world, armaWorld), -1, null, names));

@@ -18,7 +18,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   export and Unity's import of it, which part D removes. NOT wired into the Lab yet; one source, no second model,
   no placements; the visibility and inside-out verdicts still come from Blender: this part is the rows and their
   proof; the verdicts (3b, 3c) and the Lab switch (3d) follow. `vehicle_rig.py probe` gains an opt-in `posestart=1`
-  (the first clip's start instead of Blender's import blend).
+  (the first clip's start instead of Blender's import blend). Duplicate names follow Blender's TWO rules, ported from
+  its source and measured branch by branch: a datablock (object, mesh, camera) takes its base's smallest free number
+  (two parts named `B.7` are `B.7` and `B.001`; a single mesh `Hull.005` splits into `Hull.005`, `Hull.001`, ...),
+  within 255 bytes; a bone counts up from its own tail (`J.7`, `J.008`) within 63. A tail that is not ASCII digits
+  fitting an int is part of the name (`Hull.١` threw before; now `Hull.١.001`, as Blender has it).
 - **The GLB reader on the Lab's real sources**: an accessor is decoded ONCE and the primitives over it share the array
   (a Workshop split of 8.2 M vertices over 2,133 primitives was decoded as 125 M — 4 GB, "Insufficient memory"); the
   GLB's BIN chunk is read in place, not copied; the writer writes a shared array once (the registry's written files

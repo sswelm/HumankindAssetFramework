@@ -26,7 +26,7 @@ public class BlenderNamesTests
     }
 
     [Fact]
-    public void Uniquename_splits_a_numeric_tail_and_counts_from_it()
+    public void A_taken_name_gets_the_smallest_free_number_of_its_base()
     {
         // the "naming" fixture: hull, hull.001, Mesh_1, Foo.001, Foo, Foo.002, L*70, L*70+X, hull.002, Mesh_1.001
         string l70 = new string('L', 70);
@@ -156,7 +156,7 @@ public class BlenderNamesTests
         var r = BlenderNames.Compute(m);
         Assert.Equal(new[] { null, "Camera.001", "Both", "Lens.001" }, r.MeshObjectOfNode);
         Assert.Equal("Camera", r.ObjectOfNode[0]);
-        Assert.Contains("Lens", r.ObjectPool);   // the camera object split off the node that also carries a mesh
+        Assert.True(r.ObjectPool.Contains("Lens"));   // the camera object split off the node that also carries a mesh
     }
 
     [Fact]
@@ -173,13 +173,125 @@ public class BlenderNamesTests
         Assert.Equal(new[] { "Eye", "Lens.001", "Lens", "First", "Wide.001", "Wide", "Wide.002" }, r.ObjectOfNode);
     }
 
+    // ---- unique names: every expectation below is a row Blender 5.1 gave for the fixture named (tools/vehicle-probe-drill/naming_fixtures.py),
+    // except where a line says it follows from Blender's source alone
+
+    static string[] Named(BlenderNames.NamePool pool, params string[] names) => names.Select(pool.Unique).ToArray();
+
     [Fact]
-    public void Unique_is_BLI_uniquename()
+    public void A_numeric_tail_is_ASCII_digits_that_fit_an_int_behind_the_last_dot()
     {
+        Assert.Equal(("B", 7), BlenderNames.SplitNumber("B.7"));
+        Assert.Equal(("T.1", 2), BlenderNames.SplitNumber("T.1.2"));
+        Assert.Equal(("", 5), BlenderNames.SplitNumber(".5"));                       // a name may START with its dot
+        Assert.Equal(("Zero", 0), BlenderNames.SplitNumber("Zero.000"));
+        Assert.Equal(("Int", int.MaxValue), BlenderNames.SplitNumber("Int.2147483647"));
+        Assert.Equal(("Int.2147483648", 0), BlenderNames.SplitNumber("Int.2147483648"));   // one past an int: part of the name
+        Assert.Equal(("Big.99999999999999999999999999", 0), BlenderNames.SplitNumber("Big.99999999999999999999999999"));   // (source: std::stoi out of range; the fixture has 11 digits)
+        Assert.Equal(("Hull.\u0661", 0), BlenderNames.SplitNumber("Hull.\u0661"));   // an Arabic-Indic digit is a digit to char.IsDigit, not to Blender
+        Assert.Equal(("Deck.\uff11", 0), BlenderNames.SplitNumber("Deck.\uff11"));   // nor is a fullwidth one
+        Assert.Equal(("Q.-1", 0), BlenderNames.SplitNumber("Q.-1"));
+        Assert.Equal(("C.", 0), BlenderNames.SplitNumber("C."));
+        Assert.Equal(("123", 0), BlenderNames.SplitNumber("123"));
+    }
+
+    [Fact]
+    public void A_duplicate_datablock_takes_its_bases_smallest_free_number_not_its_own_tail_plus_one()
+    {
+        // the "name_tails" fixture
+        var p = new BlenderNames.NamePool();
+        Assert.Equal(new[] { "Hull.\u0661", "Hull.\u0661.001" }, Named(p, "Hull.\u0661", "Hull.\u0661"));   // threw FormatException before
+        Assert.Equal(new[] { "Deck.\uff11", "Deck.\uff11.001" }, Named(p, "Deck.\uff11", "Deck.\uff11"));
+        Assert.Equal(new[] { "Big.99999999999", "Big.99999999999.001" }, Named(p, "Big.99999999999", "Big.99999999999"));   // threw OverflowException before
+        Assert.Equal(new[] { "Max.999999", "Max.001" }, Named(p, "Max.999999", "Max.999999"));
+        Assert.Equal(new[] { "Over.1000000", "Over.001" }, Named(p, "Over.1000000", "Over.1000000"));
+        Assert.Equal(new[] { ".5", ".001" }, Named(p, ".5", ".5"));
+        Assert.Equal(new[] { "Zero.000", "Zero.001" }, Named(p, "Zero.000", "Zero.000"));
+        Assert.Equal(new[] { "Int.2147483647", "Int.001" }, Named(p, "Int.2147483647", "Int.2147483647"));
+        Assert.Equal(new[] { "Int.2147483648", "Int.2147483648.001" }, Named(p, "Int.2147483648", "Int.2147483648"));
+        Assert.Equal(new[] { "B.7", "B.001" }, Named(p, "B.7", "B.7"));                    // was B.008
+        Assert.Equal(new[] { "Y.009", "Y.002", "Y.001" }, Named(p, "Y.009", "Y.002", "Y.002"));
+        Assert.Equal(new[] { "N.999", "N.001" }, Named(p, "N.999", "N.999"));
+        Assert.Equal(new[] { "W.1023", "W.001", "W.1024", "W.002" }, Named(p, "W.1023", "W.1023", "W.1024", "W.1024"));
+        Assert.Equal(new[] { "T.1.2", "T.1.001" }, Named(p, "T.1.2", "T.1.2"));
+        Assert.Equal(new[] { "Q.-1", "Q.-1.001" }, Named(p, "Q.-1", "Q.-1"));
+        Assert.Equal(new[] { "123", "123.001" }, Named(p, "123", "123"));
+        Assert.Equal(new[] { "P.0", "P.001" }, Named(p, "P.0", "P.0"));
+        Assert.Equal(new[] { "K", "K.001", "K.002" }, Named(p, "K", "K.001", "K.001"));
+        Assert.Equal(new[] { "G.01", "G.002" }, Named(p, "G.01", "G.01"));                 // the number counts, not its spelling
+        Assert.Equal(new[] { "V.005", "V.001", "V.002" }, Named(p, "V.005", "V.005", "V.005"));
+        Assert.Equal(new[] { "C.", "C..001" }, Named(p, "C.", "C."));
+    }
+
+    [Fact]
+    public void A_datablock_name_holds_255_bytes_and_a_duplicate_without_room_for_its_number_is_cut_instead()
+    {
+        // the "long_names" fixture
+        var p = new BlenderNames.NamePool();
+        string L(char c, int n) => new string(c, n);
+        Assert.Equal(new[] { L('L', 255), L('L', 254) }, Named(p, L('L', 255), L('L', 255)));
+        Assert.Equal(new[] { L('M', 255), L('M', 254) }, Named(p, L('M', 300), L('M', 300)));
+        Assert.Equal(new[] { L('\u00e9', 127), L('\u00e9', 126) }, Named(p, L('\u00e9', 130), L('\u00e9', 130)));   // 2 bytes each: 254, then 252
+        Assert.Equal(new[] { L('S', 255), L('S', 254) + "T" }, Named(p, L('S', 255), L('S', 254) + "T"));
+        Assert.Equal(new[] { L('R', 252) + ".05", L('R', 251) }, Named(p, L('R', 252) + ".05", L('R', 252) + ".05"));
+        Assert.Equal(new[] { "\U0001F600" + L('a', 251), "\U0001F600" + L('a', 250) }, Named(p, "\U0001F600" + L('a', 300), "\U0001F600" + L('a', 300)));   // a character outside the BMP is 4 bytes, two UTF-16 units
+    }
+
+    [Fact]
+    public void Past_1023_numbers_a_duplicate_goes_one_above_the_highest_seen_and_with_none_left_gets_an_underscore_base()
+    {
+        // the "many_names" fixture
+        var p = new BlenderNames.NamePool();
+        p.Unique("E.5000");
+        var e = Enumerable.Range(0, 1025).Select(_ => p.Unique("E")).ToArray();
+        Assert.Equal("E", e[0]); Assert.Equal("E.001", e[1]); Assert.Equal("E.1023", e[1023]); Assert.Equal("E.5001", e[1024]);
+        p.Unique("F.999999999");
+        var f = Enumerable.Range(0, 1025).Select(_ => p.Unique("F")).ToArray();
+        Assert.Equal("F.1023", f[1023]); Assert.Equal("F_001", f[1024]);
+    }
+
+    [Fact]
+    public void A_removed_name_frees_its_number_and_a_copy_of_the_pool_is_its_own()
+    {
+        // the "split_purged" fixture: bone shapes Icosphere and Icosphere.001 purged, then Icosphere.005 split in three
+        var p = new BlenderNames.NamePool();
+        Named(p, "Rig1", "Icosphere", "Rig2", "Icosphere", "Icosphere.005");
+        var split = p.Clone();
+        split.Remove("Icosphere"); split.Remove("Icosphere.001");
+        Assert.Equal(new[] { "Icosphere.001", "Icosphere.002" }, Named(split, "Icosphere.005", "Icosphere.005"));
+        Assert.True(p.Contains("Icosphere.001")); Assert.False(p.Contains("Icosphere.002"));   // the original pool is untouched
+        // two spellings of one number: removing one of them does not free the number (source only: Blender's own note on Mesh.1 / Mesh.001)
+        var q = new BlenderNames.NamePool();
+        Named(q, "G.1", "G.001");
+        q.Remove("G.1");
+        Assert.Equal("G.002", q.Unique("G.001"));
+    }
+
+    [Fact]
+    public void A_duplicate_bone_counts_up_from_its_own_tail_within_63_bytes()
+    {
+        // the "bone_tails" fixture - the OLDER rule, BLI_uniquename_cb
         var pool = new HashSet<string>();
-        Assert.Equal("A", BlenderNames.Unique(pool, "A")); Assert.Equal("A.001", BlenderNames.Unique(pool, "A")); Assert.Equal("A.002", BlenderNames.Unique(pool, "A"));
-        Assert.Equal("A.003", BlenderNames.Unique(pool, "A.001"));   // the tail is split off and counted up from
-        Assert.Equal("B.7", BlenderNames.Unique(pool, "B.7")); Assert.Equal("B.008", BlenderNames.Unique(pool, "B.7"));
-        Assert.Equal("C.", BlenderNames.Unique(pool, "C.")); Assert.Equal("C..001", BlenderNames.Unique(pool, "C."));   // no digits after the dot: not a numeric tail
+        string[] Bones(params string[] names) => names.Select(n => BlenderNames.UniqueBone(pool, n)).ToArray();
+        Assert.Equal(new[] { "J.7", "J.008" }, Bones("J.7", "J.7"));
+        Assert.Equal(new[] { "Bone.\u0661", "Bone.\u0661.001" }, Bones("Bone.\u0661", "Bone.\u0661"));
+        Assert.Equal(new[] { "C.009", "C.002", "C.003" }, Bones("C.009", "C.002", "C.002"));
+        Assert.Equal(new[] { new string('X', 63), new string('X', 59) + ".001" }, Bones(new string('X', 70), new string('X', 70)));
+        Assert.Equal(new[] { new string('\u00e9', 31), new string('\u00e9', 29) + ".001" }, Bones(new string('\u00e9', 40), new string('\u00e9', 40)));
+        Assert.Equal(new[] { "D", "D.001" }, Bones("D", "D"));
+        Assert.Equal(new[] { "Huge.99999999999", "Huge.99999999999.001" }, Bones("Huge.99999999999", "Huge.99999999999"));
+        Assert.Equal(new[] { ".5", ".006" }, Bones(".5", ".5"));
+        Assert.Equal(new[] { "Bn.2147483647", "Bn.-2147483648" }, Bones("Bn.2147483647", "Bn.2147483647"));   // C's int wraps, and Blender prints it
+    }
+
+    [Fact]
+    public void The_bone_shapes_mesh_datablock_takes_the_name_Icosphere_too()
+    {
+        // the "icosphere_mesh" fixture: Rig > Bone, Body (skinned), Buoy with a mesh named Icosphere, a NAMELESS node with
+        // another mesh named Icosphere. Blender's objects: Body, Buoy, Icosphere.002
+        var m = Model(new[] { Mesh("body"), Mesh("Icosphere"), Mesh("Icosphere") }, new[] { Node("Rig", -1, -1, 1), Node("Bone"), Node("Body", 0, 0), Node("Buoy", 1), Node("", 2) });
+        m.Skins.Add(new HafSkin { Name = "Skin", Joints = new[] { 1 } });
+        var r = BlenderNames.Compute(m);
+        Assert.Equal(new[] { null, null, "Body", "Buoy", "Icosphere.002" }, r.MeshObjectOfNode);
     }
 }

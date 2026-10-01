@@ -20,8 +20,9 @@ def skinned(b, joint=0):
 
 
 def fx_naming(out):
-    """Missing and duplicate names: a nameless node takes its mesh's name, else Mesh_<index>; a taken name counts up
-    from its own numeric tail (Foo.001 authored, then Foo twice -> Foo, Foo.002); 70-character names are kept."""
+    """Missing and duplicate names: a nameless node takes its mesh's name, else Mesh_<index>; a taken name gets the
+    smallest number its base has free (Foo.001 authored, then Foo twice -> Foo, Foo.002; the name_tails fixture holds
+    the cases that tell this from counting up); 70-character names are kept."""
     b = F.Buf(); pos = tri(b); long = "L" * 70
     root = F.base("naming",
                   meshes=[{"name": "hull", "primitives": [{"attributes": {"POSITION": pos}}]}, {"primitives": [{"attributes": {"POSITION": pos}}]}],
@@ -210,8 +211,103 @@ def fx_camera_data_names(out):
     F.write_glb(os.path.join(out, "camera_data_names.glb"), root, b)
 
 
+def named_objects(out, file, names):
+    """One mesh node per name, all roots, each with its own mesh at x = 3 * index (so a row's box says which node it is)."""
+    b = F.Buf()
+    root = F.base(file, meshes=[{"name": "m%d" % i, "primitives": [{"attributes": {"POSITION": tri(b, 3.0 * i)}}]} for i in range(len(names))],
+                  nodes=[{"name": n, "mesh": i} for i, n in enumerate(names)], scenes=[{"nodes": list(range(len(names)))}], scene=0)
+    F.write_glb(os.path.join(out, file + ".glb"), root, b)
+
+
+def fx_name_tails(out):
+    """What a duplicate OBJECT name becomes - Blender's Main name map, one case per branch of it (external review of
+    PR #112: "Hull.\u0661", an Arabic-Indic digit, threw in the first port; the measurement behind the fix found that port
+    wrong for every duplicate with a numeric tail of its own). The second of each pair, as Blender names it:
+    a tail that is no ASCII number, or does not fit an int, is part of the name (Hull.\u0661.001, Big.99999999999.001,
+    Q.-1.001, C..001); a numeric tail is split off and the base's SMALLEST free number taken, never tail + 1
+    (B.7 -> B.001, Y.002 beside Y.009 -> Y.001, V.005 three times -> V.001, V.002, Max.999999 -> Max.001,
+    Int.2147483647 -> Int.001 but Int.2147483648 -> Int.2147483648.001, W.1023 -> W.001, T.1.2 -> T.1.001, Zero.000 -> Zero.001, .5 -> .001); the number
+    counts, not its spelling (G.01 uses 1: the next is G.002)."""
+    named_objects(out, "name_tails", [
+        "Hull.\u0661", "Hull.\u0661", "Deck.\uff11", "Deck.\uff11", "Big.99999999999", "Big.99999999999", "Max.999999", "Max.999999",
+        "Over.1000000", "Over.1000000", ".5", ".5", "Zero.000", "Zero.000", "Int.2147483647", "Int.2147483647", "Int.2147483648", "Int.2147483648", "B.7", "B.7",
+        "Y.009", "Y.002", "Y.002", "N.999", "N.999", "W.1023", "W.1023", "W.1024", "W.1024", "T.1.2", "T.1.2", "Q.-1", "Q.-1",
+        "123", "123", "P.0", "P.0", "K", "K.001", "K.001", "G.01", "G.01", "V.005", "V.005", "V.005", "C.", "C."])
+
+
+def fx_long_names(out):
+    """A datablock name holds 255 BYTES of UTF-8, cut at a whole character (130 e-acutes are 260 bytes: 127 stay). A
+    duplicate that has no room for ".001" is cut by one character and tried again AS A NAME - so the second of two
+    255-byte names is the 254-byte one, with no number at all; a 252-byte base with ".05" ends as the 251-byte base. A
+    character outside the BMP counts its 4 bytes."""
+    named_objects(out, "long_names", ["L" * 255, "L" * 255, "M" * 300, "M" * 300, "\u00e9" * 130, "\u00e9" * 130, "S" * 255, "S" * 254 + "T", "R" * 252 + ".05", "R" * 252 + ".05",
+                                     "\U0001F600" + "a" * 300, "\U0001F600" + "a" * 300])
+
+
+def fx_many_names(out):
+    """Past the 1,023 numbers Blender tracks exactly: 1,025 objects named E beside an E.5000 are E, E.001 ... E.1023 and
+    then E.5001 (one above the highest seen); beside an F.999999999 - the last number there is - the 1,025th F has none
+    left and is F_001."""
+    b = F.Buf(); pos = tri(b)
+    many = ["E.5000"] + ["E"] * 1025 + ["F.999999999"] + ["F"] * 1025
+    root = F.base("many_names", meshes=[{"name": "m", "primitives": [{"attributes": {"POSITION": pos}}]}],
+                  nodes=[{"name": n, "mesh": 0, "translation": [3.0 * i, 0, 0]} for i, n in enumerate(many)], scenes=[{"nodes": list(range(len(many)))}], scene=0)
+    F.write_glb(os.path.join(out, "many_names.glb"), root, b)
+
+
+def fx_bone_tails(out):
+    """What a duplicate BONE name becomes - the OLDER rule (BLI_uniquename_cb), unlike a datablock's: the numeric tail is
+    split off and tail + 1, tail + 2 ... tried (J.7 -> J.008, C.002 beside C.009 -> C.003, .5 -> .006), a tail that is
+    no ASCII number or does not fit an int is part of the name; 63 BYTES of UTF-8, the base cut so the number fits (70 X
+    -> 63 X, then 59 X + .001). And the int wraps: the bone after Bn.2147483647 is Bn.-2147483648."""
+    bone_names = ["J.7", "J.7", "Bone.\u0661", "Bone.\u0661", "C.009", "C.002", "C.002", "X" * 70, "X" * 70, "\u00e9" * 40, "\u00e9" * 40, "D", "D",
+                  "Huge.99999999999", "Huge.99999999999", ".5", ".5", "Bn.2147483647", "Bn.2147483647"]
+    b = F.Buf(); n = len(bone_names)
+    prims = [{"attributes": {"POSITION": tri(b, 3.0 * j), "JOINTS_0": b.accessor([(j, 0, 0, 0)] * 3, "H", "VEC4", minmax=False), "WEIGHTS_0": b.accessor([(1, 0, 0, 0)] * 3, "f", "VEC4", minmax=False)}} for j in range(n)]
+    nodes = [{"name": "Rig", "children": list(range(1, n + 1))}] + [{"name": bn, "translation": [3.0 * j, 0, 0]} for j, bn in enumerate(bone_names)] + [{"name": "Body", "mesh": 0, "skin": 0}]
+    root = F.base("bone_tails", meshes=[{"name": "body", "primitives": prims}], nodes=nodes, skins=[{"name": "Skin", "joints": list(range(1, n + 1))}], scenes=[{"nodes": [0, n + 1]}], scene=0)
+    F.write_glb(os.path.join(out, "bone_tails.glb"), root, b)
+
+
+def fx_split_tails(out):
+    """The loose split of a single mesh whose name HAS a numeric tail: each new object is a copy asking for the first
+    one's name, so it gets the base's smallest free number - Hull.005 beside empties Hull.002 and Hull.006 splits into
+    Hull.005, Hull.001, Hull.003, Hull.004 (the first port counted up: Hull.007, .008, .009).
+    And a PURGED object frees its number: two armatures make the bone shapes Icosphere and Icosphere.001, the script
+    purges both, and the skinned mesh Icosphere.005 splits into Icosphere.005, Icosphere.001, Icosphere.002."""
+    b = F.Buf()
+    pos = b.accessor([(0, 0, 0), (1, 0, 0), (0, 1, 0), (10, 0, 0), (13, 0, 0), (10, 3, 0), (20, 0, 0), (22, 0, 0), (20, 2, 0), (30, 0, 0), (34, 0, 0), (30, 4, 0)], "f", "VEC3")
+    idx = b.accessor(list(range(12)), "H", "SCALAR")
+    root = F.base("split_tails", meshes=[{"name": "boat", "primitives": [{"attributes": {"POSITION": pos}, "indices": idx}]}],
+                  nodes=[{"name": "Hull.005", "mesh": 0}, {"name": "Hull.002"}, {"name": "Hull.006"}], scenes=[{"nodes": [0, 1, 2]}], scene=0)
+    F.write_glb(os.path.join(out, "split_tails.glb"), root, b)
+    b = F.Buf()
+    pos = b.accessor([(0, 0, 0), (1, 0, 0), (0, 1, 0), (10, 0, 0), (13, 0, 0), (10, 3, 0), (20, 0, 0), (22, 0, 0), (20, 2, 0)], "f", "VEC3")
+    attrs = {"POSITION": pos, "JOINTS_0": b.accessor([(0, 0, 0, 0)] * 9, "H", "VEC4", minmax=False), "WEIGHTS_0": b.accessor([(1, 0, 0, 0)] * 9, "f", "VEC4", minmax=False)}
+    idx = b.accessor(list(range(9)), "H", "SCALAR")
+    root = F.base("split_purged", meshes=[{"name": "body", "primitives": [{"attributes": attrs, "indices": idx}]}],
+                  nodes=[{"name": "Rig1", "children": [1]}, {"name": "BoneA"}, {"name": "Rig2", "children": [3]}, {"name": "BoneB"}, {"name": "Icosphere.005", "mesh": 0, "skin": 0}],
+                  skins=[{"name": "SkinA", "joints": [1]}, {"name": "SkinB", "joints": [3]}], scenes=[{"nodes": [0, 2, 4]}], scene=0)
+    F.write_glb(os.path.join(out, "split_purged.glb"), root, b)
+
+
+def fx_icosphere_mesh(out):
+    """The bone shape is an object AND a mesh datablock, both named Icosphere. Two glTF meshes named Icosphere in a
+    rigged file are therefore the datablocks Icosphere.001 and Icosphere.002 - and a NAMELESS node takes its datablock's
+    name: the second one's object is Icosphere.002 (the port did not reserve the datablock and said Icosphere.001; it
+    was the one neighbour of the camera fix named as unmeasured in PR #112)."""
+    b = F.Buf()
+    root = F.base("icosphere_mesh",
+                  meshes=[{"name": "body", "primitives": [{"attributes": skinned(b)}]}, {"name": "Icosphere", "primitives": [{"attributes": {"POSITION": tri(b, 5)}}]},
+                          {"name": "Icosphere", "primitives": [{"attributes": {"POSITION": tri(b, 9)}}]}],
+                  nodes=[{"name": "Rig", "children": [1]}, {"name": "Bone"}, {"name": "Body", "mesh": 0, "skin": 0}, {"name": "Buoy", "mesh": 1}, {"mesh": 2}],
+                  skins=[{"name": "Skin", "joints": [1]}], scenes=[{"nodes": [0, 2, 3, 4]}], scene=0)
+    F.write_glb(os.path.join(out, "icosphere_mesh.glb"), root, b)
+
+
 FIXTURES = [fx_naming, fx_order, fx_armature_names, fx_skinned_not_moved, fx_skinned_animated, fx_mesh_on_bone, fx_islands, fx_rotated_armature,
-            fx_two_armatures, fx_nested_skins, fx_split_collision, fx_nonunit_rotation, fx_cameras, fx_camera_data_names]
+            fx_two_armatures, fx_nested_skins, fx_split_collision, fx_nonunit_rotation, fx_cameras, fx_camera_data_names,
+            fx_name_tails, fx_long_names, fx_many_names, fx_bone_tails, fx_split_tails, fx_icosphere_mesh]
 
 
 def main(out):

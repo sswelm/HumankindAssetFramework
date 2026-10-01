@@ -106,8 +106,13 @@ the part **names** — the key every saved recipe holds — and their order, ver
 0.0002 + 2e-6 of the model's extent), dominant bones, and the RIGBONE rows. The names come from a port of the
 importer's own tree construction (`compute_vnodes`: creation depth-first from the parentless nodes in index order,
 armatures at the joints' deepest common ancestor, skinned meshes moved or split off under them, meshes on bones moved
-to children named after the mesh, cameras taking names first) and of `BLI_uniquename`; sixteen **naming fixtures**
-(`tools/vehicle-probe-drill/naming_fixtures.py`) hold one rule each, and Blender confirms every one. Five of them exist
+to children named after the mesh, cameras taking names first) and of Blender's two unique-name rules (a datablock
+takes its base's smallest free number, a bone counts up from its own tail — `main_namemap.cc` and
+`BLI_uniquename_cb`, read from Blender 5.1's source); twenty-four **naming fixtures**
+(`tools/vehicle-probe-drill/naming_fixtures.py`) hold one rule each, and Blender confirms every one. Seven of them
+hold the unique-name rules, a case per branch of the source (non-ASCII and overflowing tails, 255- and 63-byte
+limits, past 1,023 duplicates, numbers used up, a purged object freeing its number): the first port was one rule for
+both, right on every real file and wrong for every duplicate with a numeric tail of its own. Five exist
 because no real file had the shape: a self-review found that not one of 105 files carried a second skin, a camera whose
 name clashes, a non-unit rotation or a taken loose-part name — and four of the five fixtures built for those failed
 against Blender before the code was fixed. A PASS on every real file proves the rules the files exercise, no more.
