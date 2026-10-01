@@ -322,7 +322,7 @@ public class GlbCompactTests
         Assert.NotNull(first.Bytes);
         var second = GlbDisconnectedParts.Compact(first.Bytes);
         Assert.Null(second.Bytes); Assert.False(second.Compaction.Changed);
-        Assert.Equal("Nothing to compact: every mesh is used by a node, every accessor by a mesh, a skin or an animation.", second.Details[0]);
+        Assert.Equal("Nothing to compact: every mesh, accessor and buffer view is used; no unused binary ranges remain.", second.Details[0]);
         // an operation on a compact file that orphans nothing writes its binary chunk as it found it
         var renamed = new Builder();
         int mesh = renamed.Mesh("M", renamed.Accessor(renamed.View(Floats(Quad(5))), 0, 5126, "VEC3", 4, Min(5), Max(5)));
@@ -331,6 +331,56 @@ public class GlbCompactTests
         var unique = GlbDisconnectedParts.UniqueNodeNames(twins);
         Assert.True(unique.Changed); Assert.False(unique.Compaction.Changed); Assert.Single(unique.Details);
         Assert.Equal(BinOf(twins), BinOf(unique.Bytes));
+    }
+
+    [Theory]
+    [InlineData("unused-view")]
+    [InlineData("inside-view")]
+    [InlineData("between-views")]
+    [InlineData("trailing-bytes")]
+    public void Unused_bytes_are_removed_even_when_every_mesh_and_accessor_is_live(string layout)
+    {
+        var b = new Builder();
+        byte[] unused = Enumerable.Repeat((byte)0xEE, 1024 * 1024).ToArray();
+        byte[] positions = Floats(Quad(5));
+        int posView = b.View(layout == "inside-view" ? unused.Concat(positions).ToArray() : positions);
+        int pos = b.Accessor(posView, layout == "inside-view" ? unused.Length : 0, 5126, "VEC3", 4, Min(5), Max(5));
+        if (layout == "unused-view") b.View(unused);
+        if (layout == "between-views") b.Bin.AddRange(unused);
+        int idx = b.Accessor(b.View(Shorts(QuadIndices)), 0, 5123, "SCALAR", 6);
+        if (layout == "trailing-bytes") b.Bin.AddRange(unused);
+        b.Node("Hull", b.Mesh("Hull", pos, idx));
+        byte[] source = b.Glb();
+
+        var r = GlbDisconnectedParts.Compact(source);
+
+        Assert.True(r.Compaction.Changed);
+        Assert.Equal(r.Compaction.MeshesBefore, r.Compaction.MeshesAfter);
+        Assert.Equal(r.Compaction.AccessorsBefore, r.Compaction.AccessorsAfter);
+        Assert.Equal(60, BinOf(r.Bytes).Length);
+        EveryNodeReadsAsBefore(source, r.Bytes);
+        var again = GlbDisconnectedParts.Compact(r.Bytes);
+        Assert.Null(again.Bytes);
+        Assert.Null(again.Compaction.Skipped);
+    }
+
+    [Fact]
+    public void Overlapping_live_views_and_required_alignment_do_not_trigger_a_rewrite()
+    {
+        var b = new Builder();
+        int view = b.View(Floats(Quad(5)));
+        b.Views.Add(b.Views[view].DeepClone());   // two live views share the same bytes
+        int posA = b.Accessor(view, 0, 5126, "VEC3", 4, Min(5), Max(5));
+        int posB = b.Accessor(view + 1, 0, 5126, "VEC3", 4, Min(5), Max(5));
+        int idx = b.Accessor(b.View(Shorts(0, 1, 2)), 0, 5123, "SCALAR", 3); // two bytes of GLB padding
+        b.Node("A", b.Mesh("A", posA, idx));
+        b.Node("B", b.Mesh("B", posB, idx));
+
+        var r = GlbDisconnectedParts.Compact(b.Glb());
+
+        Assert.Null(r.Bytes);
+        Assert.False(r.Compaction.Changed);
+        Assert.Null(r.Compaction.Skipped);
     }
 
     [Fact]

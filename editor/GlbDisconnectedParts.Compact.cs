@@ -32,7 +32,7 @@ public static partial class GlbDisconnectedParts
     {
         /// <summary>The document was rewritten without its unreachable data.</summary>
         public bool Changed;
-        /// <summary>Non-null: there WAS something to drop, and it was left in — the reason.</summary>
+        /// <summary>Non-null: compaction was refused without changing the document — the reason.</summary>
         public string Skipped;
         public int MeshesBefore, MeshesAfter, AccessorsBefore, AccessorsAfter, ViewsBefore, ViewsAfter;
         public long BinBefore, BinAfter;
@@ -43,7 +43,7 @@ public static partial class GlbDisconnectedParts
             {
                 var inv = CultureInfo.InvariantCulture;
                 if (Skipped != null) return "Not compacted: " + Skipped;
-                if (!Changed) return "Nothing to compact: every mesh is used by a node, every accessor by a mesh, a skin or an animation.";
+                if (!Changed) return "Nothing to compact: every mesh, accessor and buffer view is used; no unused binary ranges remain.";
                 return string.Format(inv, "Compacted: {0} unused mesh(es) and {1} accessor(s) left out; geometry and images {2:0.0} -> {3:0.0} MB.",
                     MeshesBefore - MeshesAfter, AccessorsBefore - AccessorsAfter, BinBefore / 1e6, BinAfter / 1e6);
             }
@@ -138,9 +138,7 @@ public static partial class GlbDisconnectedParts
         foreach (JObject animation in (root["animations"] as JArray ?? new JArray()).OfType<JObject>())
             foreach (JObject sampler in (animation["samplers"] as JArray ?? new JArray()).OfType<JObject>()) { Use(sampler["input"]); Use(sampler["output"]); }
 
-        if (liveMesh.All(l => l) && liveAccessor.All(l => l)) return;   // nothing was taken away: the file stays as it is, byte for byte
-
-        // ---- 2. only now the question whether we may: an extension that could hold a reference we do not follow
+        // ---- 2. whether we may: an extension that could hold a reference we do not follow
         foreach (string list in new[] { "extensionsUsed", "extensionsRequired" })
             foreach (JToken name in root[list] as JArray ?? new JArray())
                 if (!ExtensionCannotReachGeometry((string)name))
@@ -235,6 +233,23 @@ public static partial class GlbDisconnectedParts
                 newViews.Add(view);
             }
         }
+        // Referenced meshes/accessors can still leave whole views or binary ranges unused. Decide that there is
+        // nothing to remove only after planning the ranges. For otherwise unchanged views, examine their UNION:
+        // overlapping views do not waste bytes, and up to three bytes between ranges preserve their alignment.
+        bool viewsUnchanged = Enumerable.Range(0, viewCount).All(v => segments[v].Count == 1
+            && segments[v][0].Start == 0 && segments[v][0].End == viewLength[v]);
+        if (liveMesh.All(l => l) && liveAccessor.All(l => l) && viewsUnchanged)
+        {
+            long covered = 0;
+            bool unusedBytes = false;
+            foreach (int v in Enumerable.Range(0, viewCount).Where(v => viewBuffer[v] == 0).OrderBy(v => viewOffset[v]))
+            {
+                if (viewOffset[v] - covered >= 4) unusedBytes = true;
+                covered = Math.Max(covered, viewOffset[v] + viewLength[v]);
+            }
+            if (!unusedBytes && bin.Length - covered < 4) return;   // only required alignment / final GLB padding remains
+        }
+
         if (cursor <= 0) throw new CompactionRefused("nothing in the binary chunk would remain");
         if (cursor > int.MaxValue - 4) throw new CompactionRefused("the compacted binary chunk would exceed 2 GiB");
 

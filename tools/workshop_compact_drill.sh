@@ -132,7 +132,9 @@ t0=$(date +%s)
 t1=$(date +%s)
 LC_ALL=C sed 's/\xEF\xBB\xBF//g' "$TMPD/blender_raw.txt" | tr -d '\r' | grep '^BLENDER' > "$TMPD/blender.txt"
 if [ "$brc" -ne 0 ]; then tail -5 "$TMPD/blender_raw.txt"; echo "FAIL — compaction drill: Blender could not import the pairs (exit $brc)"; exit 1; fi
-CMP=$(python "$ROOT/tools/workshop-compact-drill/compare_pairs.py" "$TMPD/pairs.txt" "$TMPD/blender.txt" 2>&1 | tr -d '\r'); crc=$?
+# Capture Python's status before normalizing its output; a pipeline would return tr's success on a mismatch.
+CMP=$(python "$ROOT/tools/workshop-compact-drill/compare_pairs.py" "$TMPD/pairs.txt" "$TMPD/blender.txt" 2>&1); crc=$?
+CMP=$(printf '%s' "$CMP" | tr -d '\r')
 echo "$CMP" | grep -E "^FAIL"
 echo "$CMP" | grep -E "^COMPARED"
 [ "$crc" -eq 0 ] || { echo "FAIL — compaction drill: Blender does not see an original and its compacted copy as the same"; exit 1; }
