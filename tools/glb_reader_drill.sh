@@ -41,6 +41,10 @@ if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/drill.exe" ]; then echo "$OUT" | grep -E "er
 # the registry's .glb model files (the recipes' sources), as the editor resolves them
 mapfile -t FILES < <(python "$ROOT/tools/glb-reader-drill/registry_files.py" "$PACK" | tr -d '\r')   # python on Windows ends lines with CR LF; Mono refuses a path with a CR
 [ "${#FILES[@]}" -gt 0 ] || { echo "SKIP — the registry names no .glb that exists on disk; the GLB reader was NOT drilled"; exit 0; }
+# plus the shapes the registry does not have (review of PR #109): one animation driving two nodes with channels ending apart
+FIXTURE="$WTMP/two_targets.glb"
+python "$ROOT/tools/glb-reader-drill/fixture_two_targets.py" "$FIXTURE" > /dev/null || { echo "FAIL — could not write the two-target fixture"; exit 1; }
+FILES+=("$FIXTURE")
 
 RESULT=$("$MONO" "$TMPD/drill.exe" "${FILES[@]}" 2>&1); rc=$?
 RESULT=$(printf '%s' "$RESULT" | LC_ALL=C sed 's/\xEF\xBB\xBF//g')
@@ -48,7 +52,7 @@ echo "$RESULT" | grep -E "^FAIL"
 n_ok=$(echo "$RESULT" | grep -c "^FILE")
 total=$(echo "$RESULT" | grep "^TOTAL")
 if [ "$rc" -ne 0 ]; then echo "FAIL — GLB reader drill: a registry file did not read ($n_ok of ${#FILES[@]} read)"; exit 1; fi
-echo "C# reader: $n_ok files read and checked ($total)"
+echo "C# reader: $n_ok files read and checked, the two-target fixture among them ($total)"
 
 # ---- Blender parity on a sample (FULL=1 for every file) ----
 BLENDER="${BLENDER:-}"
@@ -61,7 +65,7 @@ fi
 if [ -z "$BLENDER" ]; then echo "PASS — GLB reader drill: $n_ok registry files read; Blender not found, so no parity comparison (BLENDER=<exe> to force)"; exit 0; fi
 if [ "${FULL:-0}" = "1" ]; then SAMPLE=("${FILES[@]}")
 else
-  mapfile -t SAMPLE < <( { ls -S "${FILES[@]}" | head -2; ls -S "${FILES[@]}" | tail -2; echo "$RESULT" | awk -F'\t' '/^FILE/ { for (i=2;i<=NF;i++) if ($i ~ /^animations=/ && $i != "animations=0") print $2 }' | head -4 | while read -r n; do for f in "${FILES[@]}"; do case "$f" in */"$n"/*) echo "$f";; esac; done; done; } | sort -u )
+  mapfile -t SAMPLE < <( { echo "$FIXTURE"; ls -S "${FILES[@]}" | head -2; ls -S "${FILES[@]}" | tail -2; echo "$RESULT" | awk -F'\t' '/^FILE/ { for (i=2;i<=NF;i++) if ($i ~ /^animations=/ && $i != "animations=0") print $2 }' | head -4 | while read -r n; do for f in "${FILES[@]}"; do case "$f" in */"$n"/*) echo "$f";; esac; done; done; } | sort -u )
 fi
 BOUT=$("$BLENDER" --background --python-exit-code 1 --python "$(cygpath -m "$ROOT/tools/glb-reader-drill/blender_counts.py")" -- "${SAMPLE[@]}" 2>&1); brc=$?
 BOUT=$(printf '%s' "$BOUT" | LC_ALL=C sed 's/\xEF\xBB\xBF//g')
@@ -71,4 +75,4 @@ printf '%s
 ' "$BOUT" > "$TMPD/blender.txt"
 python "$ROOT/tools/glb-reader-drill/compare.py" "$TMPD/csharp.txt" "$TMPD/blender.txt"; crc=$?
 if [ "$crc" -ne 0 ]; then echo "FAIL — GLB reader drill: a sampled file disagrees with Blender (or none compared)"; exit 1; fi
-echo "PASS — GLB reader drill: $n_ok registry files read and checked; the sample agrees with Blender on counts, box, area, centroid, winding, bones and durations"
+echo "PASS — GLB reader drill: $n_ok files read and checked (the registry + the two-target fixture); the sample agrees with Blender on counts, box, area, centroid, winding, bones and durations"

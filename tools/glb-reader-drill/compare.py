@@ -4,9 +4,8 @@
 #   area            relative 1e-4
 #   nsum            absolute 1e-3 of the total area (a flipped winding moves it by whole triangle areas)
 #   bones           exact, sorted
-#   durations       the SET of distinct per-target SPANS (first key to last, per animated node / per Blender action), to
-#                   the frame (Blender snaps to frames at 24 fps and makes one action per animated object per glTF
-#                   animation, so counts differ by design and are reported, not compared)
+#   durations       the SET of distinct SPANS per animation (earliest first key to latest last key over every channel -
+#                   what a Blender 5.1 slotted action spans), to the frame (Blender snaps to frames at 24 fps)
 #   pose            both sides evaluate animation 0 at time 0 (blender_counts.py / HafTransforms.PoseAt); the skinned
 #                   vertices go through the weighted joint blend on both sides
 import sys
@@ -63,8 +62,9 @@ for name, b in blender.items():
         problems.append("normal sum (winding) differs by up to %.5f (tolerance %.5f): C# %s vs Blender %s" % (max(abs(x - y) for x, y in zip(cn, bn)), ntol, c.get("nsum"), b.get("nsum")))
     if c.get("bones", "") != b.get("bones", ""):
         problems.append("bone names differ: C# [%s] vs Blender [%s]" % (c.get("bones", ""), b.get("bones", "")))
-    # Blender makes one action per animated OBJECT per glTF animation, each spanning that object's first key to its last;
-    # the C# side states the same per-target spans. The SET of distinct spans (to the frame) must match.
+    # Blender 5.1 makes ONE action per glTF animation (slotted actions), spanning its earliest first key to its latest
+    # last key over every target; the C# side states the same span per animation. The SET of distinct spans (to the
+    # frame) must match. (Blender before 4.4 made one action per animated object; this drill runs against 5.1.)
     cd, bd = sorted(set(round(x * 24) / 24 for x in floats(c.get("sorteddurations", "")))), sorted(set(round(x * 24) / 24 for x in floats(b.get("durations", ""))))
     if len(cd) != len(bd) or any(abs(x - y) > 1.0 / 24 + 1e-6 for x, y in zip(cd, bd)):
         problems.append("distinct animation spans differ: C# %s vs Blender %s" % (c.get("sorteddurations"), b.get("durations")))

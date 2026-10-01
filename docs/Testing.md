@@ -65,8 +65,10 @@ names with the real `editor/GlbReader.cs` on Unity's Mono, checks what a file ca
 to 1 over the skin's joints), and compares each file with Blender's *evaluated* import of the same file: the counts
 (triangles, materials, images, joints) and, order-independent so vertex merging cannot move them, the world-space
 bounding box, the total triangle area, the area-weighted centroid, the area-weighted sum of face normals (winding and
-mirrored nodes), the bone names and the animations' per-target spans (first key to last, per animated node — what a
-Blender action is) — through both transform chains, in Blender's Z-up frame.
+mirrored nodes), the bone names and each animation's span (earliest first key to latest last key over every channel —
+what a Blender 5.1 slotted action spans) — through both transform chains, in Blender's Z-up frame. A synthetic
+two-target fixture (`fixture_two_targets.py`: one animation, two nodes, channels ending apart, one starting late, both
+nodes instancing one mesh) rides along, since no registry file has those shapes.
 Counting alone could not tell a wrong matrix chain. The pose both sides evaluate is **animation 0 at time 0**
 (`HafTransforms.PoseAt`; Blender with its NLA tracks dropped and the active clip at frame 0 — its untouched import
 blends every clip through the NLA, a pose no file defines), and a skinned vertex goes through the spec's weighted joint

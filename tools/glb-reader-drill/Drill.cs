@@ -76,29 +76,32 @@ static class Drill
                 }
             }
             if (area > 0) { cen[0] /= area; cen[1] /= area; cen[2] /= area; }
+            // triangles as DRAWN - per node instance, as Blender's scene has them (a mesh two nodes share counts twice; the model's
+            // TriangleCount is the mesh total). Found by the two-target fixture; no registry file instances a mesh twice.
+            long drawnTris = 0;
+            foreach (var n in m.Nodes) if (n.Mesh >= 0) foreach (var pp in m.Meshes[n.Mesh].Primitives) drawnTris += pp.TriangleCount;
             string F(IEnumerable<double> xs) => string.Join(",", xs.Select(c => c.ToString("0.00000", inv)));
             string bbox = boxed == 0 ? "" : F(new[] { mn[0], mn[1], mn[2], mx[0], mx[1], mx[2] });
             string bboxIdentity = "";   // (kept in the line format; the skinned conventions were settled 2026-10-01: the weighted blend at animation 0, t = 0)
             var bones = m.Skins.SelectMany(s => s.Joints).Distinct().Select(j => m.Nodes[j].Name).OrderBy(n => n, StringComparer.Ordinal).ToList();
-            // what Blender can state about an animation: one ACTION per animated object, its span = that object's first key to its
-            // last; a channel that starts after zero shortens it, channels ending apart give objects different spans. The same
-            // terms here: per animation, per target node, last key - first key over the node's samplers (review of PR #109)
+            // what Blender 5.1 states about an animation: ONE action per glTF animation (slotted: every target a slot), its span
+            // = the earliest first key to the latest last key over every channel (review of PR #109, round 5, measured on a
+            // two-target fixture: channels ending at 1 s and 2 s, one starting at 0.5 s -> one action, 0..2 s). The same term
+            // here: per animation, max last - min first over all its samplers. A channel starting after zero shortens it.
             var spans = new List<double>();
             foreach (var an in m.Animations)
             {
-                var first = new Dictionary<int, double>(); var last = new Dictionary<int, double>();
+                double first = double.PositiveInfinity, last = double.NegativeInfinity;
                 foreach (var ch in an.Channels)
                 {
-                    if (ch.Node < 0 || ch.Sampler < 0 || ch.Sampler >= an.Samplers.Count || an.Samplers[ch.Sampler].KeyCount == 0) continue;
+                    if (ch.Sampler < 0 || ch.Sampler >= an.Samplers.Count || an.Samplers[ch.Sampler].KeyCount == 0) continue;
                     var sp = an.Samplers[ch.Sampler];
-                    double f = sp.Times[0], l = sp.Times[sp.KeyCount - 1];
-                    first[ch.Node] = first.TryGetValue(ch.Node, out var pf) ? Math.Min(pf, f) : f;
-                    last[ch.Node] = last.TryGetValue(ch.Node, out var pl) ? Math.Max(pl, l) : l;
+                    first = Math.Min(first, sp.Times[0]); last = Math.Max(last, sp.Times[sp.KeyCount - 1]);
                 }
-                foreach (var kv in first) spans.Add(last[kv.Key] - kv.Value);
+                if (first <= last) spans.Add(last - first);
             }
             var sortedDurations = spans.Select(d => Math.Round(d, 3)).OrderBy(d => d).Select(d => d.ToString("0.000", inv));
-            Console.WriteLine($"FILE\t{Key(path)}\ttris={m.TriangleCount}\tmaterials={m.Materials.Count}\timages={m.Images.Count}\tjoints={joints}\tanimations={m.Animations.Count}\tdurations={durations}\tnodes={m.Nodes.Count}\tmeshes={m.Meshes.Count}\tvertices={m.VertexCount}\tms={sw.Elapsed.TotalMilliseconds:0}\tbbox={bbox}\tbboxidentity={bboxIdentity}\tarea={area.ToString("0.00000", inv)}\tcentroid={F(cen)}\tnsum={F(nsum)}\tbones={string.Join("|", bones)}\tsorteddurations={string.Join(",", sortedDurations)}");
+            Console.WriteLine($"FILE\t{Key(path)}\ttris={drawnTris}\tmaterials={m.Materials.Count}\timages={m.Images.Count}\tjoints={joints}\tanimations={m.Animations.Count}\tdurations={durations}\tnodes={m.Nodes.Count}\tmeshes={m.Meshes.Count}\tvertices={m.VertexCount}\tms={sw.Elapsed.TotalMilliseconds:0}\tbbox={bbox}\tbboxidentity={bboxIdentity}\tarea={area.ToString("0.00000", inv)}\tcentroid={F(cen)}\tnsum={F(nsum)}\tbones={string.Join("|", bones)}\tsorteddurations={string.Join(",", sortedDurations)}");
         }
         Console.WriteLine($"TOTAL\tfiles={args.Length}\tMB={totalBytes / 1e6:0.0}\tms={totalMs:0}");
         return fails == 0 ? 0 : 1;
