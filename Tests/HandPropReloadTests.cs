@@ -10,7 +10,12 @@ namespace HumankindAssetFramework.Tests
     //   FAIL (1 descriptor repoint(s) undone: 'DroneSquadFPV' descriptor no longer draws 1 of 1 appended fragment(s):
     //   'M60_DistrictMesh' (no live fragment entry on the addon) - block holds 2 entry(ies))
     //
-    // The game calls PresentationPawnDefinitionAddOn.Load more than once per session and our postfix runs on each.
+    // The game calls PresentationPawnDefinitionAddOn.Load more than once per session and our postfix runs on each. For a
+    // definition first reached through Load itself it is structural, not incidental: Load finds PawnDefinitionId == -1
+    // and calls PawnManager.RegisterPawnDefinition, which assigns the id, calls Load AGAIN (the inner call - our pass
+    // 1, the descriptor not yet populated), snapshots the addon into the GPU descriptor and returns into the outer
+    // Load, whose postfix is our pass 2. The log shows exactly that: two MATCH lines back to back, the first with
+    // "descriptor[86] not populated yet", the second with StartFragment=448 FragmentCount=2.
     // Pass 1 appends the prop (its mesh lives in the PROP's collection) and the registration snapshot draws it. Pass 2
     // ran ReloadFragments over EVERY entry - the prop's included - pointing it at OUR skeleton and calling Load: the
     // skeleton holds no mesh of that name, GetFxMeshIndex answers 0, and FragmentEntry.Load then writes
@@ -109,6 +114,7 @@ namespace HumankindAssetFramework.Tests
             Assert.Equal(41u, addon.FragmentEntries[1].BoneIndex);
             Assert.Same(ours, addon.FragmentEntries[0].Collection);                 // the body still is
             Assert.Equal(0x1D000000u + 123, addon.FragmentEntries[0].EncodedMeshAndVisualParticleCount);
+            Assert.True(e.fragsLogged);                                             // set on ReloadFragments' last line: it ran to its end, nothing was swallowed
 
             // ... and the smoke, reading that addon as it does in the game, calls the repoint held
             var f = new UniversalInject.SmokeFacts { Models = 1, Repointed = 1 };
@@ -129,6 +135,21 @@ namespace HumankindAssetFramework.Tests
             UniversalInject.ReloadFragments(addon, mgr, ours, e);
             Assert.Same(ours, addon.FragmentEntries[1].Collection);
             Assert.Equal(0u, addon.FragmentEntries[1].EncodedMeshAndVisualParticleCount);
+        }
+
+        [Fact]
+        public void A_hide_pattern_is_for_donor_fragments_and_does_not_reach_our_own_prop()
+        {
+            // hideMeshes matches by substring; "Mesh" would catch M60_DistrictMesh. On pass 1 the prop is not in the array
+            // yet, so the pattern never applied to it there - and from pass 2 on it used to zero the entry AND the GPU
+            // snapshot: the prop would have vanished at the second Load. The body, a donor fragment, is still hidden.
+            var (addon, mgr, ours, props, e) = Scene();
+            e.hideMeshes = "AllTerrain, DistrictMesh";
+            UniversalInject.ReloadFragments(addon, mgr, ours, e);
+            AppendHandProp(addon, ours, props);
+            UniversalInject.ReloadFragments(addon, mgr, ours, e);
+            Assert.Equal(0u, addon.FragmentEntries[0].EncodedMeshAndVisualParticleCount);              // the donor body: hidden as asked
+            Assert.Equal(0x1D000000u + 77, addon.FragmentEntries[1].EncodedMeshAndVisualParticleCount); // our prop: untouched
         }
 
         [Fact]
