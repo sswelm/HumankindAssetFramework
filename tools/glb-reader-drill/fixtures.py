@@ -249,7 +249,8 @@ def fx_cubic(out):
 def fx_scenes(out):
     """Two scenes, the default the SECOND one (both named, the first with extras); a node in no scene at all (orphan,
     with a mesh); a child placed by a matrix with a negative scale (mirrored winding). Both scenes and the orphan
-    survive the round trip (review of PR #111: the non-default scene used to be dropped); Blender imports every node."""
+    survive the round trip (review of PR #111: the non-default scene used to be dropped); Blender imports every node
+    (the drill counts 4 triangles), a viewer - the Model Reader's preview - draws the default scene's B and D only."""
     b = Buf()
     pos = b.accessor([(0, 0, 0), (1, 0, 0), (0, 1, 0)], "f", "VEC3"); idx = b.accessor([0, 1, 2], "H", "SCALAR")
     root = base("scenes",
@@ -342,7 +343,19 @@ def fx_names(out):
     write_glb(os.path.join(out, "names.glb"), root, b)
 
 
-FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external, fx_cubic, fx_scenes, fx_materials, fx_skin8, fx_big, fx_names]
+def fx_no_default_scene(out):
+    """Two scenes and NO `scene` property: the specification gives that a meaning of its own (a viewer shows nothing at
+    load), so the round trip must keep it absent rather than pick scene 0 (review of PR #111, round 4)."""
+    b = Buf()
+    pos = b.accessor([(0, 0, 0), (1, 0, 0), (0, 1, 0)], "f", "VEC3"); idx = b.accessor([0, 1, 2], "H", "SCALAR")
+    root = base("no_default_scene",
+                meshes=[{"name": "tri", "primitives": [{"attributes": {"POSITION": pos}, "indices": idx}]}],
+                nodes=[{"name": "A", "mesh": 0}, {"name": "B", "mesh": 0, "translation": [2, 0, 0]}],
+                scenes=[{"name": "One", "nodes": [0]}, {"name": "Two", "nodes": [1]}])
+    write_glb(os.path.join(out, "no_default_scene.glb"), root, b)
+
+
+FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external, fx_cubic, fx_scenes, fx_materials, fx_skin8, fx_big, fx_names, fx_no_default_scene]
 
 
 def main(out):

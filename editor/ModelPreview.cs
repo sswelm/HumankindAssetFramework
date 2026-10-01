@@ -65,12 +65,15 @@ public static class ModelPreview
             return mat;
         }
 
+        // what a viewer shows: the nodes the default scene reaches (review of PR #111: every node was drawn, other scenes' and orphans' too)
+        if (!model.HasDefaultScene) { r.Note = model.Scenes.Count == 0 ? "no preview: the file declares no scene, so a viewer shows nothing at load" : $"no preview: the file names no default scene ({model.Scenes.Count} declared), so a viewer shows nothing at load"; return r; }
+        var drawn = model.NodesInScene(model.Scene);
         var root = new GameObject("__modelReaderPreview") { hideFlags = HideFlags.HideAndDontSave };
         float sx = o.Unmirror ? -1f : 1f;
         for (int ni = 0; ni < model.Nodes.Count; ni++)
         {
             var node = model.Nodes[ni];
-            if (node.Mesh < 0) continue;
+            if (node.Mesh < 0 || !drawn.Contains(ni)) continue;
             var hm = model.Meshes[node.Mesh];
             if (hm.Primitives.All(p => p.TriangleCount == 0)) continue;   // lines and points only: nothing to draw, and no Mesh allocated for it (review of PR #111: one leaked per rebuild)
             var mesh = new Mesh { name = node.Name, hideFlags = HideFlags.HideAndDontSave, indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
@@ -117,7 +120,7 @@ public static class ModelPreview
             go.AddComponent<MeshRenderer>().sharedMaterials = mats.ToArray();
             r.Meshes++; r.Vertices += verts.Count;
         }
-        if (r.Meshes == 0) { r.Note = "no preview: the file has no triangle primitive on any node"; UnityEngine.Object.DestroyImmediate(root); return r; }
+        if (r.Meshes == 0) { r.Note = "no preview: the default scene reaches no node with a triangle primitive"; UnityEngine.Object.DestroyImmediate(root); return r; }
         r.Root = root;
         return r;
     }

@@ -14,7 +14,7 @@ using Newtonsoft.Json.Linq;
 // verbatim (HafMaterial.ExtensionsJson) and the names are declared in extensionsUsed, so KHR_materials_specular,
 // clearcoat and the like - and the textures they reference - survive a round trip; so are the texture samplers
 // (wrap and filters), the `extras` of the asset (Sketchfab's author and license), nodes, meshes, materials and scenes,
-// the asset's copyright, and EVERY scene with its name (the default one by index). What the reader does not model is not here
+// the asset's copyright, and EVERY scene with its name (the default one by index, or none, as the file had it). What the reader does not model is not here
 // either, and the writer REFUSES rather than drops: a primitive with morph targets (counted by the reader, data not
 // carried) is refused by name; extensions anywhere but on a material, and extras elsewhere, are not carried and said
 // here. A model that cannot be written as it is - an index that does not fit a uint, a joint that does not fit a
@@ -262,7 +262,7 @@ public static class GlbWriter
                 scenes.Add(j);
             }
             root["scenes"] = scenes;
-            root["scene"] = m.Scene;
+            if (m.Scene >= 0) root["scene"] = m.Scene;
         }
 
         // ---- skins
@@ -357,7 +357,7 @@ public static class GlbWriter
                 FitsFloat(n.Translation, $"node {i} '{n.Name}' translation"); FitsFloat(n.Rotation, $"node {i} '{n.Name}' rotation"); FitsFloat(n.Scale, $"node {i} '{n.Name}' scale");
             }
         }
-        if (m.Scenes.Count > 0 && (m.Scene < 0 || m.Scene >= m.Scenes.Count)) throw new InvalidDataException($"the default scene is {m.Scene}, the model has {m.Scenes.Count}");
+        if (m.Scene != -1 && (m.Scene < 0 || m.Scene >= m.Scenes.Count)) throw new InvalidDataException($"the default scene is {m.Scene}, the model has {m.Scenes.Count} (-1 = none)");
         for (int si = 0; si < m.Scenes.Count; si++)
         {
             foreach (var r in m.Scenes[si].Nodes) if (r < 0 || r >= m.Nodes.Count) throw new InvalidDataException($"scene {si} '{m.Scenes[si].Name}' lists node {r}, the model has {m.Nodes.Count}");

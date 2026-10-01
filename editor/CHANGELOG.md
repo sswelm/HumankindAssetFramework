@@ -18,8 +18,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   the first difference. **The headless editor lane** (`tools/editor_tests.ps1`) gains a Model Reader section: every
   registry model and fixture read, built as meshes (`ModelPreview`, lifted out of the window), written and read back
   equal, in Unity's runtime under the system locale, with a Unity-mesh leak check (42/42). Every SCENE a file declares is
-  carried now, with its name and extras, the default by index (the writer had kept the default one and dropped the rest
-  without a word). `GlbRobustnessTests`: a corruption sweep (every
+  carried now, with its name and extras, the default by index or absent as the file had it - an absent default means
+  "show nothing at load" in the specification and is not turned into scene 0 (the writer had kept the default one and
+  dropped the rest without a word). The Model Reader's preview draws what the default scene reaches, as a viewer does;
+  the drill still counts every node, as Blender imports every node. `GlbRobustnessTests`: a corruption sweep (every
   truncation, every JSON byte four ways, every BIN byte, ten broken containers, bad sidecars) that must never crash,
   culture-independence of the written bytes, eight threads at once.
 

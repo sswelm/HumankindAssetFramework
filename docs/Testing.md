@@ -71,7 +71,7 @@ what a Blender 5.1 slotted action spans) — through both transform chains, in B
 **What else goes through both GLB drills** (the round-trip diversity PR, 2026-10-02 — every registry file is a Blender
 or Sketchfab export, so a reader that only ever saw those had not met the rest of the specification):
 
-- **The fixture library**, `tools/glb-reader-drill/fixtures.py`: eleven small, deterministic files, one per shape the
+- **The fixture library**, `tools/glb-reader-drill/fixtures.py`: twelve small, deterministic files, one per shape the
   registry lacks — normalized integer attributes (ushort UVs, ubyte colours and joints, ushort weights), an
   interleaved buffer view with accessors at byte offsets and `uint` indices sharing one view, every primitive mode
   (non-indexed triangles, strip, fan, lines, points), a `.gltf` with its `.bin`, a `.png` beside it and a data-URI
@@ -80,8 +80,8 @@ or Sketchfab export, so a reader that only ever saw those had not met the rest o
   `TEXCOORD_1`, occlusion strength, normal scale, `KHR_materials_emissive_strength` / `specular` / `unlit`, a sampler
   with all four settings, a texture without one, two textures sharing an image, extras of every JSON type), eight
   influences over a joint chain with no inverse bind matrices and a skinned node under a translated parent, a
-  72,541-vertex grid (`uint` indices), and names (empty, duplicate, unicode, JSON escapes, a material no primitive
-  uses). Each goes through the reader against Blender, the writer round trip field by field, and Blender again.
+  72,541-vertex grid (`uint` indices), names (empty, duplicate, unicode, JSON escapes, a material no primitive
+  uses), and two scenes with no default (the specification's "show nothing at load", kept absent on the round trip). Each goes through the reader against Blender, the writer round trip field by field, and Blender again.
 - **The Khronos glTF-Sample-Assets** named in `samples.txt` — other exporters' output (Box, Duck, CesiumMan,
   BrainStem, InterpolationTest, NegativeScaleTest, Unicode❤♻Test, …) — once fetched with
   `python tools/glb-reader-drill/fetch_samples.py References/gltf-samples` (12 MB, git-ignored; the drills say when

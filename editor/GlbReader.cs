@@ -227,14 +227,8 @@ public static class GlbReader
             }
             model.Scenes.Add(scene);
         }
-        model.Scene = root["scene"]?.Value<int>() ?? 0;
-        if (model.Scenes.Count > 0 && (model.Scene < 0 || model.Scene >= model.Scenes.Count)) throw new InvalidDataException($"the default scene is {model.Scene}, the file has {model.Scenes.Count}");
-        if (model.Scenes.Count == 0)
-        {
-            var scene = new HafScene();
-            for (int i = 0; i < model.Nodes.Count; i++) if (model.Nodes[i].Parent == -1) scene.Nodes.Add(i);
-            model.Scenes.Add(scene); model.Scene = 0;
-        }
+        model.Scene = root["scene"]?.Value<int>() ?? -1;   // absent is absent: a file that names no default scene shows nothing at load, by the specification
+        if (model.Scene != -1 && (model.Scene < 0 || model.Scene >= model.Scenes.Count)) throw new InvalidDataException($"the default scene is {model.Scene}, the file has {model.Scenes.Count}");
 
         // skins
         foreach (var sk in root["skins"] as JArray ?? new JArray())

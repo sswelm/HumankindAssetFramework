@@ -55,7 +55,7 @@ public static class ModelReaderHeadlessTest
                     int meshesBefore = Resources.FindObjectsOfTypeAll<Mesh>().Length;
                     var r = ModelPreview.Build(m, new ModelPreview.Options(), assets);
                     long expectVerts = 0, expectTris = 0;
-                    foreach (var n in m.Nodes) if (n.Mesh >= 0) foreach (var p in m.Meshes[n.Mesh].Primitives) if (p.TriangleCount > 0) { expectVerts += p.VertexCount; expectTris += p.TriangleCount; }
+                    foreach (int ni in m.NodesInScene(m.Scene)) if (m.Nodes[ni].Mesh >= 0) foreach (var p in m.Meshes[m.Nodes[ni].Mesh].Primitives) if (p.TriangleCount > 0) { expectVerts += p.VertexCount; expectTris += p.TriangleCount; }   // the default scene's nodes, as the preview draws them
                     bool built = r.Root != null;   // judged BEFORE the destroy: a destroyed Unity object compares equal to null (the first run failed all 42 files on exactly that)
                     if (built) UnityEngine.Object.DestroyImmediate(r.Root);
                     foreach (var a in assets) if (a != null) UnityEngine.Object.DestroyImmediate(a);

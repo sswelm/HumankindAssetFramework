@@ -227,7 +227,7 @@ public class GlbReaderTests
         var p = m.Meshes[0].Primitives[0];
         Assert.Null(p.Indices); Assert.Null(p.Normals); Assert.Null(p.Uv0); Assert.False(p.Skinned); Assert.Equal(4, p.VertexCount); Assert.Equal(2, p.TriangleCount);
         Assert.Equal(new double[] { 0, 0, 0 }, m.Nodes[0].Translation); Assert.Equal(new double[] { 0, 0, 0, 1 }, m.Nodes[0].Rotation); Assert.Equal(new double[] { 1, 1, 1 }, m.Nodes[0].Scale);
-        Assert.Equal(new[] { 0, 1 }, m.Roots); Assert.Equal("", m.Nodes[1].Name); Assert.Single(m.Scenes);   // no scene declared: one of the parentless nodes
+        Assert.Empty(m.Roots); Assert.Empty(m.Scenes); Assert.Equal(-1, m.Scene); Assert.Equal("", m.Nodes[1].Name);   // no scene declared: none invented, no default, nothing a viewer shows
         Assert.Empty(m.Materials); Assert.Empty(m.Skins); Assert.Empty(m.Animations);
     }
 

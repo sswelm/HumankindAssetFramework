@@ -19,21 +19,33 @@ public sealed class HafModel
     public string Copyright = "";                 // asset.copyright, verbatim
     public string AssetExtrasJson;                // asset.extras, verbatim JSON (any type the file gave - the schema allows any; `{}` included) or null when absent: Sketchfab's author/license/source/title live here (6 registry files; review of PR #110 found them dropped)
     public string SourcePath = "";                // where it was read from ("" for bytes)
-    // EVERY scene the file declares, in order (review of PR #111: the writer kept the default one and dropped the rest without
-    // a word, and a reader-vs-reader compare could not see it); a file without scenes is read as one scene of its parentless
-    // nodes, which is what the writer writes. Scene = the default one (asset `scene`, 0 when absent).
+    // EVERY scene the file declares, in order, and nothing the file does not (review of PR #111: the writer kept the default
+    // one and dropped the rest without a word, and a reader-vs-reader compare could not see it). Scene = the default one, the
+    // file's `scene`, or -1 when it names none: the specification gives an absent default a meaning of its own (a viewer
+    // renders nothing at load), so it is carried as absent, not as 0.
     public readonly List<HafScene> Scenes = new List<HafScene>();
-    public int Scene;
+    public int Scene = -1;
+    public bool HasDefaultScene => Scene >= 0 && Scene < Scenes.Count;
     public readonly List<HafNode> Nodes = new List<HafNode>();
-    /// <summary>The default scene's root nodes - the list itself, so adding to it adds to that scene; a model with no scene
-    /// yet gets one here (a model built by hand lists its roots and has a scene).</summary>
-    public List<int> Roots
+    /// <summary>What a viewer shows at load: the default scene's root nodes, or none when the file names no default
+    /// scene (the specification's reading; Blender imports every node regardless, and the drill counts as Blender does).
+    /// Computed - to change it, change the scene.</summary>
+    public IReadOnlyList<int> Roots => HasDefaultScene ? (IReadOnlyList<int>)Scenes[Scene].Nodes : new int[0];
+
+    /// <summary>Every node reachable from a scene's roots through Children (the nodes a viewer of that scene draws);
+    /// an index outside the scenes gives none. Cycles are tolerated here (the reader and writer refuse them).</summary>
+    public HashSet<int> NodesInScene(int scene)
     {
-        get
+        var seen = new HashSet<int>();
+        if (scene < 0 || scene >= Scenes.Count) return seen;
+        var stack = new Stack<int>(Scenes[scene].Nodes);
+        while (stack.Count > 0)
         {
-            if (Scenes.Count == 0) Scenes.Add(new HafScene());
-            return Scenes[Scene >= 0 && Scene < Scenes.Count ? Scene : 0].Nodes;   // an index out of range is refused by the writer by name; here the first scene stands in
+            int i = stack.Pop();
+            if (i < 0 || i >= Nodes.Count || !seen.Add(i)) continue;
+            foreach (var c in Nodes[i].Children) stack.Push(c);
         }
+        return seen;
     }
     public readonly List<HafMesh> Meshes = new List<HafMesh>();
     public readonly List<HafMaterial> Materials = new List<HafMaterial>();
