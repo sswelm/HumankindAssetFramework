@@ -1498,7 +1498,7 @@ namespace HumankindAssetFramework
             catch (Exception e) { Plugin.Log.LogError("[Uni] rename: " + e); }
         }
 
-        static void ReloadFragments(object addon, object animMgr, object skel, ModelEntry e)
+        internal static void ReloadFragments(object addon, object animMgr, object skel, ModelEntry e)
         {
             try
             {
@@ -1523,13 +1523,24 @@ namespace HumankindAssetFramework
                 // supported way past it is MULTIPLE fragments/meshes per unit — see unit-mesh-render-clamp notes.
                 var hides = (e?.hideMeshes ?? "").Split(',').Select(s => s.Trim()).Where(s => s.Length > 0).ToArray();
                 var hiddenIdx = new System.Collections.Generic.List<int>();
+                string ownProp = HandPropMeshName(e);
                 for (int i = 0; i < frags.Length; i++)
                 {
                     var item = frags.GetValue(i);
                     if (item == null) continue;
 
-                    // Dump the donor's fragment mesh names once, so the modder can see what to hide (e.g. a rotor).
                     var fragMesh = mnField?.GetValue(item) as string;
+                    // OUR OWN HAND PROP IS NOT A DONOR FRAGMENT (2026-10-01). This runs on EVERY Load of the addon, and
+                    // from the second one on the array holds the entry InjectHandProp appended - whose mesh lives in the
+                    // PROP's collection. Pointing it at our skeleton and calling Load asked the skeleton for a mesh it
+                    // does not hold: GetFxMeshIndex answers 0 and FragmentEntry.Load then WRITES encoded = 0 and
+                    // BoneIndex = 0. InjectHandProp, finding the name still there, returned. The GPU snapshot kept
+                    // drawing the prop (the live sync below skips a zero), so the soldier held his M60 while the addon
+                    // said he had none - the F8 smoke, which reads the addon, failed in every session with a Drone
+                    // Squad on the map. Leave the entry exactly as InjectHandProp made it (Tests/HandPropReloadTests).
+                    if (ownProp != null && string.Equals(fragMesh, ownProp, StringComparison.Ordinal)) continue;
+
+                    // Dump the donor's fragment mesh names once, so the modder can see what to hide (e.g. a rotor).
                     if (e != null && !e.fragsLogged) Plugin.Diag($"[Uni] {e.resourceName} donor fragment[{i}] mesh='{fragMesh}'");
 
                     // HIDE donor fragments whose mesh name matches hideMeshes (kept separate per model: a drone hides the
@@ -1722,6 +1733,12 @@ namespace HumankindAssetFramework
         // BoneIndex = skeleton.GetBoneIndex(boneName) against OUR skeleton and GPU-encodes the mesh — the same call
         // the vanilla loader makes. Runs right after ReloadFragments in the AddOn.Load window; re-entrant (skips if
         // our mesh name is already in the array). Parse failures / missing assets log a warning and change nothing.
+        static string HandPropName(ModelEntry e) => string.IsNullOrEmpty(e.handPropName) ? e.resourceName + "Prop" : e.handPropName;
+        /// <summary>The mesh name of this model's hand prop inside the prop's collection (the Prop Lab's fixed name), or
+        /// null for a model without one. ONE definition: InjectHandProp appends under it and ReloadFragments leaves the
+        /// entry of that name alone.</summary>
+        internal static string HandPropMeshName(ModelEntry e) => e == null || string.IsNullOrEmpty(e.handPropGuid) ? null : HandPropName(e) + "_DistrictMesh";
+
         static void InjectHandProp(object addon, object animMgr, object skel, ModelEntry e)
         {
             if (e == null || string.IsNullOrEmpty(e.handPropGuid)) return;
@@ -1736,8 +1753,8 @@ namespace HumankindAssetFramework
                 }
                 var cg = Csv(e.handPropGuid);
                 if (cg == null) { Plugin.Log.LogWarning($"[Props] '{e.resourceName}' hand prop: bad collection guid '{e.handPropGuid}' (want \"a,b,c,d\")"); return; }
-                string propName = string.IsNullOrEmpty(e.handPropName) ? e.resourceName + "Prop" : e.handPropName;
-                string meshName = propName + "_DistrictMesh";   // the Prop Lab's fixed mesh name inside the collection
+                string propName = HandPropName(e);
+                string meshName = HandPropMeshName(e);
                 var frags = GetMember(addon, "FragmentEntries") as Array;
                 if (frags == null) return;
                 var fragType = frags.GetType().GetElementType();

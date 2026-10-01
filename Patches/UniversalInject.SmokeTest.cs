@@ -468,7 +468,7 @@ namespace HumankindAssetFramework
             }
         }
         // meshName -> CURRENT encoded mesh id for every fragment entry on the addon (null = addon gone / unreadable).
-        static Dictionary<string, uint> ReadAddonEncsByName(object addon)
+        internal static Dictionary<string, uint> ReadAddonEncsByName(object addon)
         {
             if (addon == null) return null;
             try
