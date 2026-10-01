@@ -16,6 +16,9 @@ using System.Collections.Generic;
 public sealed class HafModel
 {
     public string Generator = "";                 // asset.generator, for the log
+    public string Copyright = "";                 // asset.copyright, verbatim
+    public string AssetExtrasJson;                // asset.extras, verbatim JSON (any type the file gave - the schema allows any; `{}` included) or null when absent: Sketchfab's author/license/source/title live here (6 registry files; review of PR #110 found them dropped)
+    public string SceneName = "";                 // the default scene's name (Blender writes "Scene" in every file)
     public string SourcePath = "";                // where it was read from ("" for bytes)
     public readonly List<HafNode> Nodes = new List<HafNode>();
     public readonly List<int> Roots = new List<int>();          // the default scene's root nodes (every node without a parent when no scene is declared)
@@ -23,6 +26,7 @@ public sealed class HafModel
     public readonly List<HafMaterial> Materials = new List<HafMaterial>();
     public readonly List<HafTexture> Textures = new List<HafTexture>();
     public readonly List<HafImage> Images = new List<HafImage>();
+    public readonly List<string> Samplers = new List<string>();   // the file's texture samplers, each the verbatim JSON object (wrap, filters): carried, not interpreted (review of PR #110: 28 non-default samplers in the registry were flattened)
     public readonly List<HafSkin> Skins = new List<HafSkin>();
     public readonly List<HafAnimation> Animations = new List<HafAnimation>();
     public readonly List<string> ExtensionsUsed = new List<string>();
@@ -49,12 +53,14 @@ public sealed class HafNode
     public double[] Matrix;                       // 16 doubles, column-major, or null
     public int Mesh = -1;
     public int Skin = -1;
+    public string ExtrasJson;                     // the node's `extras`, verbatim JSON of any type, or null when absent: carried, not interpreted
     public bool HasMatrix => Matrix != null;
 }
 
 public sealed class HafMesh
 {
     public string Name = "";
+    public string ExtrasJson;                     // the mesh's `extras`, verbatim JSON of any type, or null when absent
     public readonly List<HafPrimitive> Primitives = new List<HafPrimitive>();
 }
 
@@ -99,6 +105,12 @@ public sealed class HafMaterial
     public string AlphaMode = "OPAQUE";
     public float AlphaCutoff = 0.5f;
     public bool DoubleSided;
+    // The material's `extensions` object, verbatim JSON, or null: KHR_materials_specular, clearcoat, ior, ... carry their
+    // own texture references and factors. Not interpreted here (nothing in HAF reads them), but CARRIED, so a file
+    // written from this model keeps them and Blender still finds every texture (writer drill 2026-10-01: six registry
+    // files lost 1-6 images on a round trip while the payload was dropped). The writer declares the names it carries.
+    public string ExtensionsJson;
+    public string ExtrasJson;                     // the material's `extras`, verbatim JSON of any type, or null when absent
 }
 
 public sealed class HafTexture

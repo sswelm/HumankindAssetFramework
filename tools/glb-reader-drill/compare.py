@@ -10,32 +10,42 @@
 #                   vertices go through the weighted joint blend on both sides
 import sys
 
-def parse(path, tag):
+def parse(path, tag, by_basename):
     rows = {}
     for line in open(path, encoding="utf-8", errors="replace"):
         line = line.rstrip("\r\n")
         if not line.startswith(tag + "\t"):
             continue
         t = line.split("\t")
+        key = t[1].replace("\\", "/").lower()
+        if by_basename:
+            key = key.rsplit("/", 1)[-1]
         d = {"name": t[1]}
         for f in t[2:]:
             k, _, v = f.partition("=")
             d[k] = v
-        rows[t[1]] = d
+        rows[key] = d
     return rows
 
 def floats(v):
     return [float(x) for x in v.split(",")] if v else []
 
-csharp = parse(sys.argv[1], "FILE")
-blender = parse(sys.argv[2], "BLENDER")
+# usage: compare.py <left: FILE lines> <right> [--right-tag FILE|BLENDER] [--basename]
+#   --right-tag FILE  compares the reader's view of two files (the writer drill: the original and the written copy)
+#   --basename        keys both sides by file name alone (the written copy lives in another folder)
+right_tag = "BLENDER"; by_basename = False
+for i, a in enumerate(sys.argv[3:]):
+    if a == "--right-tag": right_tag = sys.argv[3 + i + 1]
+    if a == "--basename": by_basename = True
+csharp = parse(sys.argv[1], "FILE", by_basename)
+blender = parse(sys.argv[2], right_tag, by_basename)
 fails = 0
 compared = 0
 for name, b in blender.items():
     c = csharp.get(name)
     short = "/".join(name.split("/")[-2:])
     if c is None:
-        print("FAIL %s: Blender read it, the C# reader has no line" % short); fails += 1; continue
+        print("FAIL %s: the right side has it, the left side has no line" % short); fails += 1; continue
     compared += 1
     problems = []
     for k in ("tris", "materials", "images", "joints"):
@@ -65,13 +75,13 @@ for name, b in blender.items():
     # Blender 5.1 makes ONE action per glTF animation (slotted actions), spanning its earliest first key to its latest
     # last key over every target; the C# side states the same span per animation. The SET of distinct spans (to the
     # frame) must match. (Blender before 4.4 made one action per animated object; this drill runs against 5.1.)
-    cd, bd = sorted(set(round(x * 24) / 24 for x in floats(c.get("sorteddurations", "")))), sorted(set(round(x * 24) / 24 for x in floats(b.get("durations", ""))))
+    cd, bd = sorted(set(round(x * 24) / 24 for x in floats(c.get("sorteddurations", "")))), sorted(set(round(x * 24) / 24 for x in floats(b.get("durations", b.get("sorteddurations", "")))))
     if len(cd) != len(bd) or any(abs(x - y) > 1.0 / 24 + 1e-6 for x, y in zip(cd, bd)):
         problems.append("distinct animation spans differ: C# %s vs Blender %s" % (c.get("sorteddurations"), b.get("durations")))
     if problems:
         print("FAIL %s: %s" % (short, "; ".join(problems))); fails += 1
     else:
-        print("PASS %s: tris=%s materials=%s images=%s joints=%s, box/area/centroid/winding/bones/durations agree (C# %s ms, Blender %s ms)"
+        print("PASS %s: tris=%s materials=%s images=%s joints=%s, box/area/centroid/winding/bones/durations agree (left %s ms, right %s ms)"
               % (short, c["tris"], c["materials"], c["images"], c["joints"], c.get("ms"), b.get("ms")))
 print("COMPARED %d FAILED %d" % (compared, fails))
 sys.exit(1 if fails or compared == 0 else 0)

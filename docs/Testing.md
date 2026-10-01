@@ -37,7 +37,7 @@ in **GitHub Actions**. Both lanes matter, and for different reasons:
 | Surface | `tools/check.sh` (pre-push hook) | also in CI | ~time |
 |---|---|---|---|
 | **Runtime + shared contract** | `dotnet build` · `dotnet test` · docs guard · binding-catalog surface · hot path · parse shape · member shape · schema parity | all source-only checks | seconds |
-| **Editor package** | Roslyn editor compile-check · registry engine drill · backup dedup drill · blender exit drill · GLB reader drill · schema parity · hand-list gate | parity + hand-list; compile check and drills stay local | ~45 s |
+| **Editor package** | Roslyn editor compile-check · registry engine drill · backup dedup drill · blender exit drill · GLB reader drill · GLB writer drill · schema parity · hand-list gate | parity + hand-list; compile check and drills stay local | ~60 s |
 
 The one guard CI cannot run is **`tools/editor_compile_check.sh`**: it needs a licensed Unity 2021.3.1f1 install
 (`UnityEditor.dll`, the MonoBleedingEdge 4.7.1 profile, every `UnityEngine` module), none of which is
@@ -69,6 +69,22 @@ mirrored nodes), the bone names and each animation's span (earliest first key to
 what a Blender 5.1 slotted action spans) — through both transform chains, in Blender's Z-up frame. A synthetic
 two-target fixture (`fixture_two_targets.py`: one animation, two nodes, channels ending apart, one starting late, both
 nodes instancing one mesh) rides along, since no registry file has those shapes.
+
+**`tools/glb_writer_drill.sh`** (2026-10-01, step 2) first checks every **source**: each `extensions`/`extras`
+object must sit at a path the model carries (`tools/glb-reader-drill/carried_paths.py`; the reader does not model the
+rest, so the writer would drop it and a reader-vs-reader compare could not tell) — else FAIL by file and path. Then it
+writes every registry model and the fixture to disk with the real `editor/GlbWriter.cs`, reads each written file back
+and compares it with its source **field by field** inside the drill (every vertex of every attribute, every index,
+material field, texture, sampler, image byte, skin matrix, animation key, the asset's extras and the scene's name; the
+first difference is named: `DIFF <file> <field>`), writes the read-back model again and compares the bytes as they
+stream (deterministic on real files), then reads the written files with the reader drill (every value must equal the
+original's) and has Blender import the written sample (every value must equal what the C# side read from the
+original; `FULL=1` for all). Full run: 32 of 32 both ways, 726 MB written to disk in 0.8 s. It found that material
+extension payloads (`KHR_materials_specular`, clearcoat) carry texture references Blender needs — six files lost
+images until the model carried a material's `extensions` verbatim; the field compare then found 12 files whose
+sampler settings (filters, wrap) came back as glTF defaults, and the source check found 6 files whose `asset.extras`
+(Sketchfab author and licence) were dropped — both carried verbatim now (the value summaries could see none of it).
+Each guard was proved by planting the drop it names and watching it fire.
 Counting alone could not tell a wrong matrix chain. The pose both sides evaluate is **animation 0 at time 0**
 (`HafTransforms.PoseAt`; Blender with its NLA tracks dropped and the active clip at frame 0 — its untouched import
 blends every clip through the NLA, a pose no file defines), and a skinned vertex goes through the spec's weighted joint

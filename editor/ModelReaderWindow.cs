@@ -59,6 +59,8 @@ public class ModelReaderWindow : EditorWindow
             using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(path)))
                 if (GUILayout.Button(new GUIContent("Read", "Read this file with GlbReader and show what it holds."), GUILayout.Width(80))) ReadOne();
             if (GUILayout.Button(new GUIContent("Read every registry model", "Read every .glb/.gltf the model registry names, one line per file in the Console, and the totals here."), GUILayout.Width(190))) ReadRegistry();
+            using (new EditorGUI.DisabledScope(model == null))
+                if (GUILayout.Button(new GUIContent("Save as GLB…", "Write the model as the reader holds it to a new .glb (GlbWriter) - open the result in the Model Cutter or Blender to see the round trip; a model the writer cannot write as it is is refused by name."), GUILayout.Width(110))) SaveAs();
         }
         if (status.Length > 0) EditorGUILayout.HelpBox(status, status.StartsWith("⚠") ? MessageType.Error : MessageType.Info);
         if (model == null) return;
@@ -124,6 +126,24 @@ public class ModelReaderWindow : EditorWindow
                 EditorGUILayout.LabelField($"  image {(im.Name.Length > 0 ? im.Name : "(unnamed)")}  ·  {im.MimeType}  ·  {(im.Bytes != null ? (im.Bytes.Length / 1024) + " KB" : "NOT RESOLVED: " + im.Uri)}");
         }
         EditorGUILayout.EndScrollView();
+    }
+
+    // STEP 2 (the writer): the model back to a file, so a round trip can be tried by hand on any model the reader opened.
+    void SaveAs()
+    {
+        if (model == null) return;
+        string suggested = Path.GetFileNameWithoutExtension(model.SourcePath) + "_haf.glb";
+        string p = EditorUtility.SaveFilePanel("Save the model as GLB", string.IsNullOrEmpty(model.SourcePath) ? Application.dataPath : Path.GetDirectoryName(model.SourcePath), suggested, "glb");
+        if (string.IsNullOrEmpty(p)) return;
+        try
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            GlbWriter.Write(model, p);
+            sw.Stop();
+            status = $"Wrote {Path.GetFileName(p)} ({new FileInfo(p).Length / 1e6:0.0} MB) in {sw.Elapsed.TotalMilliseconds:0} ms. Material extensions, samplers, extras, copyright and the scene name are carried verbatim; a primitive with morph targets is refused (the writer's contract).";
+            if (p.Replace(Path.DirectorySeparatorChar, '/').StartsWith(Application.dataPath.Replace(Path.DirectorySeparatorChar, '/'), StringComparison.OrdinalIgnoreCase)) AssetDatabase.Refresh();
+        }
+        catch (Exception e) { status = "⚠ NOT written — " + e.Message; Debug.LogError("[ModelReader] " + p + ": " + e.Message); }
     }
 
     void ReadOne()
