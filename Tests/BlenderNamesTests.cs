@@ -160,6 +160,20 @@ public class BlenderNamesTests
     }
 
     [Fact]
+    public void A_camera_datablock_takes_its_name_even_when_its_node_has_one()
+    {
+        // the "camera_data_names" fixture: cameras Lens, Lens, Wide; nodes Eye(cam 0), nameless(cam 1), mesh Lens, First(cam 2),
+        // nameless(cam 2), mesh Wide, mesh Wide.001. Blender's mesh objects: Lens, Wide, Wide.002 - the nameless camera nodes are
+        // Lens.001 and Wide.001, after their datablocks (one datablock per camera OBJECT, even for one glTF camera)
+        var m = Model(new[] { Mesh("m"), Mesh("m2"), Mesh("m3") }, new[] { Node("Eye"), Node(""), Node("Lens", 0), Node("First"), Node(""), Node("Wide", 1), Node("Wide.001", 2) });
+        m.Cameras.Add("{\"name\":\"Lens\"}"); m.Cameras.Add("{\"name\":\"Lens\"}"); m.Cameras.Add("{\"name\":\"Wide\"}");
+        m.Nodes[0].Camera = 0; m.Nodes[1].Camera = 1; m.Nodes[3].Camera = 2; m.Nodes[4].Camera = 2;
+        var r = BlenderNames.Compute(m);
+        Assert.Equal(new[] { null, null, "Lens", null, null, "Wide", "Wide.002" }, r.MeshObjectOfNode);
+        Assert.Equal(new[] { "Eye", "Lens.001", "Lens", "First", "Wide.001", "Wide", "Wide.002" }, r.ObjectOfNode);
+    }
+
+    [Fact]
     public void Unique_is_BLI_uniquename()
     {
         var pool = new HashSet<string>();

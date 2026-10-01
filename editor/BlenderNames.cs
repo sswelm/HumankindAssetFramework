@@ -190,7 +190,8 @@ public static class BlenderNames
                     // BlenderCamera.create: a datablock per camera OBJECT, named after the glTF camera or "Camera"
                     var cam = m.Cameras[m.Nodes[n.CameraNode].Camera];
                     string camName = (GlbReader.ParseObject(cam)["name"]?.ToString() is string cn && cn.Length > 0) ? cn : "Camera";
-                    name = Unique(objects, n.Name ?? Unique(cameras, camName));
+                    string camData = Unique(cameras, camName);   // ALWAYS made, so always reserved: a named node skipping it left "Lens" free for the next camera, and a mesh node named Lens became Lens.001
+                    name = Unique(objects, n.Name ?? camData);
                 }
                 else name = Unique(objects, n.Name ?? n.DefaultName);
                 int ni = Index(id);

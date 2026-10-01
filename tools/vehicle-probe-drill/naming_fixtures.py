@@ -194,8 +194,24 @@ def fx_cameras(out):
     F.write_glb(os.path.join(out, "cameras.glb"), root, b)
 
 
+def fx_camera_data_names(out):
+    """A camera OBJECT always makes a camera datablock, and that takes its name among the cameras whether or not the node
+    has a name of its own (external review of PR #112: a named camera node skipped the reservation). Two cameras named
+    Lens: the first on the node Eye, the second on a nameless node - whose object is therefore Lens.001, not Lens - so
+    the mesh node named Lens keeps its name. And ONE glTF camera on two nodes makes two datablocks: the nameless
+    second node is Wide.001."""
+    b = F.Buf()
+    cam = {"type": "perspective", "perspective": {"yfov": 0.8, "znear": 0.1}}
+    root = F.base("camera_data_names", cameras=[dict(cam, name="Lens"), dict(cam, name="Lens"), dict(cam, name="Wide")],
+                  meshes=[{"name": "m", "primitives": [{"attributes": {"POSITION": tri(b)}}]}, {"name": "m2", "primitives": [{"attributes": {"POSITION": tri(b, 5)}}]}, {"name": "m3", "primitives": [{"attributes": {"POSITION": tri(b, 9)}}]}],
+                  nodes=[{"name": "Eye", "camera": 0}, {"camera": 1}, {"name": "Lens", "mesh": 0},
+                         {"name": "First", "camera": 2}, {"camera": 2}, {"name": "Wide", "mesh": 1}, {"name": "Wide.001", "mesh": 2}],
+                  scenes=[{"nodes": [0, 1, 2, 3, 4, 5, 6]}], scene=0)
+    F.write_glb(os.path.join(out, "camera_data_names.glb"), root, b)
+
+
 FIXTURES = [fx_naming, fx_order, fx_armature_names, fx_skinned_not_moved, fx_skinned_animated, fx_mesh_on_bone, fx_islands, fx_rotated_armature,
-            fx_two_armatures, fx_nested_skins, fx_split_collision, fx_nonunit_rotation, fx_cameras]
+            fx_two_armatures, fx_nested_skins, fx_split_collision, fx_nonunit_rotation, fx_cameras, fx_camera_data_names]
 
 
 def main(out):
