@@ -149,16 +149,17 @@ public static class GlbWriter
             root["images"] = images;
         }
         // the samplers as the model carries them (verbatim); a texture that points past them gets a default one
-        if (m.Cameras.Count > 0) root["cameras"] = new JArray(m.Cameras.Select(c => (object)GlbReader.ParseObject(c)));
+        // EVERY glTF object carried verbatim goes through here, so the extensions inside it are declared: a payload that
+        // travels and a name that does not is the same defect twice now (samplers in PR #110, cameras in PR #112)
+        JObject Carried(string json) { var o = GlbReader.ParseObject(json); CollectNestedExtensions(o, used); return o; }
+        if (m.Cameras.Count > 0) root["cameras"] = new JArray(m.Cameras.Select(c => (object)Carried(c)));
         int samplerCount = Math.Max(m.Samplers.Count, m.Textures.Count == 0 ? 0 : m.Textures.Max(t => t.Sampler) + 1);
         if (samplerCount > 0)
         {
             var samplers = new JArray();
             for (int i = 0; i < samplerCount; i++)
             {
-                var sj = i < m.Samplers.Count ? GlbReader.ParseObject(m.Samplers[i]) : new JObject();
-                CollectNestedExtensions(sj, used);   // a sampler's own extensions payload travels verbatim, so its names are declared too
-                samplers.Add(sj);
+                samplers.Add(i < m.Samplers.Count ? Carried(m.Samplers[i]) : new JObject());
             }
             root["samplers"] = samplers;
         }

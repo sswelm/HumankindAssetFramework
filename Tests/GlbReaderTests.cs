@@ -258,6 +258,12 @@ public class GlbReaderTests
         Assert.Null(HafModelDiff.FirstDifference(m, back));
         back.Nodes[1].Camera = -1;
         Assert.Equal("node 1 (Eye) camera", HafModelDiff.FirstDifference(m, back));
+        // an extension a camera carries - on the camera or inside its perspective - is declared (external review of 7dcaff4:
+        // the payload was written, the name was not; the same slip as the samplers')
+        m.Cameras[0] = "{\"type\":\"perspective\",\"perspective\":{\"yfov\":0.8,\"znear\":0.1,\"extensions\":{\"EXT_lens_test\":{}}},\"extensions\":{\"EXT_camera_test\":{\"on\":true}}}";
+        var withExt = GlbReader.Read(GlbWriter.Write(m));
+        Assert.Equal(m.Cameras, withExt.Cameras);
+        Assert.Equal(new[] { "EXT_camera_test", "EXT_lens_test" }, withExt.ExtensionsUsed);
         // a camera the file does not have is refused on both sides
         f.Root["nodes"][1]["camera"] = 4;
         Assert.Contains("uses camera 4, the file has 1", Assert.Throws<InvalidDataException>(() => GlbReader.Read(f.Glb())).Message);
