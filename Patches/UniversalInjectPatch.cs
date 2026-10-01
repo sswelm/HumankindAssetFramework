@@ -118,6 +118,13 @@ namespace HumankindAssetFramework
         public int gpuDefId = -1;
         [MainThread("the injection sites (addon Load hook) write, the F8 smoke reads, RearmModelRegistration clears")] public readonly List<string> gpuAppendedNames = new List<string>();
         [MainThread("the injection sites (addon Load hook) write, the F8 smoke reads, RearmModelRegistration clears")] public WeakReference gpuAddon;   // the PresentationPawnDefinitionAddOn the names live on
+        // THE HAND PROP WE APPENDED, by identity: per addon it was appended to (weakly held - the game owns the addon),
+        // its index in that addon's FragmentEntries. ReloadFragments leaves exactly that entry alone on the addon's later
+        // Loads, and InjectHandProp knows by it that the prop is already there - a name alone would also match a donor
+        // fragment (review of PR #113). PER ADDON, not one record: an entry serves every pawn definition its
+        // pawnDescription fits (LongestMatch is a substring match - the _01, _02 variants of one unit), each with its
+        // own addon and its own prop. Replaced with an empty table on re-arm.
+        [MainThread("InjectHandProp (addon Load hook) writes, ReloadFragments reads in the same hook, RearmModelRegistration replaces")] public System.Runtime.CompilerServices.ConditionalWeakTable<object, System.Runtime.CompilerServices.StrongBox<int>> handPropAt = new System.Runtime.CompilerServices.ConditionalWeakTable<object, System.Runtime.CompilerServices.StrongBox<int>>();
         public bool fragsLogged;         // one-shot: dump the donor's fragment mesh names once, so the modder can find hide targets
         public bool repointed;
         public float lastPoseHookAt = -1f;   // Time.time the pose hook last matched a live pawn to this entry (smoke: pose-hook liveness); -1 = never this session
@@ -1213,6 +1220,7 @@ namespace HumankindAssetFramework
                 try
                 {
                     e.skeletonId = -1; e.animId = -1; e.descId = -1; e.repointed = false; e.lastPoseHookAt = -1f;
+                    e.handPropAt = new System.Runtime.CompilerServices.ConditionalWeakTable<object, System.Runtime.CompilerServices.StrongBox<int>>();   // the hand props' identities are the session's addons
                     e.gpuDefId = -1; e.gpuAppendedNames.Clear(); e.gpuAddon = null;   // appended fragments belong to the session's descriptor table — cleared with `repointed`   // session-scoped ids re-learn
                     foreach (var b in e.Roles) b.animId = -1;                                   // every clip role's id re-resolves (the table, not a hand-list)
                     e.idleAltNextAt = 0f; e.idleAltStart = -1f; e.idleAltChosenId = -1;   // idle-alt cadence is session-scoped (Time.time resets)

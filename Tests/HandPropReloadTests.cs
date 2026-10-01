@@ -88,13 +88,15 @@ namespace HumankindAssetFramework.Tests
             return (addon, new FakeAnimationManager(), ours, props, e);
         }
 
-        static void AppendHandProp(FakeAddon addon, FakeCollection ours, FakeCollection props)
+        // what InjectHandProp does, by hand: construct against the PROP's collection, Load, append, and record where
+        static void AppendHandProp(FakeAddon addon, FakeCollection ours, FakeCollection props, ModelEntry e)
         {
             var item = new FakeFragment(0, props, Prop, new object(), "R_Hand");
             item.Load(ours, null, null, 2);
             var grown = new FakeFragment[addon.FragmentEntries.Length + 1];
             addon.FragmentEntries.CopyTo(grown, 0); grown[grown.Length - 1] = item;
             addon.FragmentEntries = grown;
+            UniversalInject.NoteHandPropAppended(e, addon, grown.Length - 1);
         }
 
         [Fact]
@@ -103,7 +105,7 @@ namespace HumankindAssetFramework.Tests
             var (addon, mgr, ours, props, e) = Scene();
             UniversalInject.ReloadFragments(addon, mgr, ours, e);                   // pass 1: the body moves onto our skeleton
             Assert.Equal(0x1D000000u + 123, addon.FragmentEntries[0].EncodedMeshAndVisualParticleCount);
-            AppendHandProp(addon, ours, props);
+            AppendHandProp(addon, ours, props, e);
             Assert.Equal(0x1D000000u + 77, addon.FragmentEntries[1].EncodedMeshAndVisualParticleCount);
             var live = new List<uint> { addon.FragmentEntries[0].EncodedMeshAndVisualParticleCount, addon.FragmentEntries[1].EncodedMeshAndVisualParticleCount };   // the registration snapshot
 
@@ -138,6 +140,69 @@ namespace HumankindAssetFramework.Tests
         }
 
         [Fact]
+        public void A_donor_fragment_that_merely_carries_the_props_name_is_a_donor_fragment()
+        {
+            // External review of PR #113 (P2): the exemption went by mesh NAME alone, so a donor fragment of that name was
+            // skipped too - never moved onto our skeleton, never hidden. It is exempt by IDENTITY now: only the entry
+            // InjectHandProp appended to this addon, at the index it recorded.
+            var (addon, mgr, ours, props, e) = Scene();
+            var weapons = new FakeCollection { name = "EQ_Weapons" }; weapons.meshes[Prop] = 9;
+            var namesake = new FakeFragment(1, weapons, Prop, new object(), "R_Hand"); namesake.Load(ours, null, null, 2);
+            addon.FragmentEntries = new[] { addon.FragmentEntries[0], namesake };
+            UniversalInject.ReloadFragments(addon, mgr, ours, e);                   // pass 1: nothing of ours is on the addon yet
+            Assert.Same(ours, addon.FragmentEntries[1].Collection);                 // moved like every donor fragment ...
+            Assert.Equal(0u, addon.FragmentEntries[1].EncodedMeshAndVisualParticleCount);   // ... and our skeleton has no such mesh
+            // InjectHandProp asks exactly this before it appends: the namesake does not count as "already injected"
+            Assert.False(UniversalInject.IsAppendedHandProp(e, addon, 1, Prop));
+
+            AppendHandProp(addon, ours, props, e);                                  // so the configured prop IS added, as entry 2
+            UniversalInject.ReloadFragments(addon, mgr, ours, e);                   // pass 2
+            Assert.Same(ours, addon.FragmentEntries[1].Collection);                 // the namesake: still a donor fragment
+            Assert.Equal(0u, addon.FragmentEntries[1].EncodedMeshAndVisualParticleCount);
+            Assert.Same(props, addon.FragmentEntries[2].Collection);                // ours: untouched
+            Assert.Equal(0x1D000000u + 77, addon.FragmentEntries[2].EncodedMeshAndVisualParticleCount);
+            Assert.True(UniversalInject.IsAppendedHandProp(e, addon, 2, Prop));     // and InjectHandProp now returns: it is there
+            // the smoke resolves the NAME to the live entry of the two (a live entry beats a dead one of the same name)
+            Assert.Equal(0x1D000000u + 77, UniversalInject.ReadAddonEncsByName(addon)[Prop]);
+        }
+
+        [Fact]
+        public void One_model_entry_serves_several_addons_and_each_keeps_its_own_prop()
+        {
+            // a registry entry matches every pawn definition its pawnDescription fits (the _01, _02 ... variants of one
+            // unit): each has its own addon, each gets the prop, and the record of one must not displace the other's
+            var (addonA, mgr, ours, props, e) = Scene();
+            var addonB = new FakeAddon { FragmentEntries = new[] { addonA.FragmentEntries[0] } };
+            UniversalInject.ReloadFragments(addonA, mgr, ours, e); AppendHandProp(addonA, ours, props, e);
+            UniversalInject.ReloadFragments(addonB, mgr, ours, e); AppendHandProp(addonB, ours, props, e);
+            UniversalInject.ReloadFragments(addonA, mgr, ours, e);                  // A loads again AFTER B was handled
+            UniversalInject.ReloadFragments(addonB, mgr, ours, e);
+            Assert.Equal(0x1D000000u + 77, addonA.FragmentEntries[1].EncodedMeshAndVisualParticleCount);
+            Assert.Equal(0x1D000000u + 77, addonB.FragmentEntries[1].EncodedMeshAndVisualParticleCount);
+            Assert.True(UniversalInject.IsAppendedHandProp(e, addonA, 1, Prop));    // InjectHandProp returns on both: no second copy
+            Assert.True(UniversalInject.IsAppendedHandProp(e, addonB, 1, Prop));
+        }
+
+        [Fact]
+        public void The_identity_is_the_addon_and_the_index_with_the_name_as_guard()
+        {
+            var (addon, mgr, ours, props, e) = Scene();
+            Assert.False(UniversalInject.IsAppendedHandProp(e, addon, 0, Prop));    // nothing appended yet
+            AppendHandProp(addon, ours, props, e);
+            Assert.True(UniversalInject.IsAppendedHandProp(e, addon, 1, Prop));
+            Assert.False(UniversalInject.IsAppendedHandProp(e, addon, 0, Prop));    // another index
+            Assert.False(UniversalInject.IsAppendedHandProp(e, addon, 1, Body));    // the game rebuilt the array: another mesh sits there
+            Assert.False(UniversalInject.IsAppendedHandProp(e, addon, 1, null));
+            Assert.False(UniversalInject.IsAppendedHandProp(e, new FakeAddon(), 1, Prop));   // another addon: a new session's, or another definition's
+            Assert.False(UniversalInject.IsAppendedHandProp(null, addon, 1, Prop));
+            // a rebuilt array on the SAME addon holds no prop: the recorded index is past its end, so a later Load treats
+            // every entry as a donor fragment and InjectHandProp appends again
+            addon.FragmentEntries = new[] { addon.FragmentEntries[0] };
+            UniversalInject.ReloadFragments(addon, mgr, ours, e);
+            Assert.Same(ours, addon.FragmentEntries[0].Collection);
+        }
+
+        [Fact]
         public void A_hide_pattern_is_for_donor_fragments_and_does_not_reach_our_own_prop()
         {
             // hideMeshes matches by substring; "Mesh" would catch M60_DistrictMesh. On pass 1 the prop is not in the array
@@ -146,7 +211,7 @@ namespace HumankindAssetFramework.Tests
             var (addon, mgr, ours, props, e) = Scene();
             e.hideMeshes = "AllTerrain, DistrictMesh";
             UniversalInject.ReloadFragments(addon, mgr, ours, e);
-            AppendHandProp(addon, ours, props);
+            AppendHandProp(addon, ours, props, e);
             UniversalInject.ReloadFragments(addon, mgr, ours, e);
             Assert.Equal(0u, addon.FragmentEntries[0].EncodedMeshAndVisualParticleCount);              // the donor body: hidden as asked
             Assert.Equal(0x1D000000u + 77, addon.FragmentEntries[1].EncodedMeshAndVisualParticleCount); // our prop: untouched

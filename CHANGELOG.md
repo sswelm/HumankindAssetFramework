@@ -18,8 +18,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   `Load`, the skeleton has no mesh of that name, the game's lookup answers 0 and `FragmentEntry.Load` writes
   encoded = 0, bone = 0. `InjectHandProp` saw the name still present and returned. Dead on the addon, alive in the
   GPU snapshot (the live sync skips a zero) — so the smoke, which reads the addon, was right about the addon and
-  wrong about the picture. `ReloadFragments` now leaves our own prop entry alone (one shared name helper with
-  `InjectHandProp`); a donor's own attachment is still moved as before. `Tests/HandPropReloadTests` runs the real
+  wrong about the picture. `ReloadFragments` now leaves our own prop entry alone — the entry `InjectHandProp`
+  appended, known by its addon and index (per addon: one model entry serves every pawn definition its name fits),
+  not by its mesh name, which a donor fragment may share (review of the PR); a donor's own attachment is still moved
+  as before, and a donor namesake no longer keeps the configured prop from being added. `Tests/HandPropReloadTests` runs the real
   `ReloadFragments` twice over fakes carrying the game's member names and its decompiled `Load`: before the
   change it failed, the prop entry re-pointed at our skeleton and encoded 0. Verified in-game the same evening, on
   the session that had failed: the same two Load passes in the log (descriptor[86] 448+2), and F8 reads

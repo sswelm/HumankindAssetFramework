@@ -1523,7 +1523,6 @@ namespace HumankindAssetFramework
                 // supported way past it is MULTIPLE fragments/meshes per unit — see unit-mesh-render-clamp notes.
                 var hides = (e?.hideMeshes ?? "").Split(',').Select(s => s.Trim()).Where(s => s.Length > 0).ToArray();
                 var hiddenIdx = new System.Collections.Generic.List<int>();
-                string ownProp = HandPropMeshName(e);
                 for (int i = 0; i < frags.Length; i++)
                 {
                     var item = frags.GetValue(i);
@@ -1538,7 +1537,9 @@ namespace HumankindAssetFramework
                     // drawing the prop (the live sync below skips a zero), so the soldier held his M60 while the addon
                     // said he had none - the F8 smoke, which reads the addon, failed in every session with a Drone
                     // Squad on the map. Leave the entry exactly as InjectHandProp made it (Tests/HandPropReloadTests).
-                    if (ownProp != null && string.Equals(fragMesh, ownProp, StringComparison.Ordinal)) continue;
+                    // By IDENTITY, not by name (review of PR #113): a donor fragment that merely carries the prop's
+                    // name is a donor fragment and is moved and hidden like the rest.
+                    if (IsAppendedHandProp(e, addon, i, fragMesh)) continue;
 
                     // Dump the donor's fragment mesh names once, so the modder can see what to hide (e.g. a rotor).
                     if (e != null && !e.fragsLogged) Plugin.Diag($"[Uni] {e.resourceName} donor fragment[{i}] mesh='{fragMesh}'");
@@ -1735,9 +1736,28 @@ namespace HumankindAssetFramework
         // our mesh name is already in the array). Parse failures / missing assets log a warning and change nothing.
         static string HandPropName(ModelEntry e) => string.IsNullOrEmpty(e.handPropName) ? e.resourceName + "Prop" : e.handPropName;
         /// <summary>The mesh name of this model's hand prop inside the prop's collection (the Prop Lab's fixed name), or
-        /// null for a model without one. ONE definition: InjectHandProp appends under it and ReloadFragments leaves the
-        /// entry of that name alone.</summary>
+        /// null for a model without one.</summary>
         internal static string HandPropMeshName(ModelEntry e) => e == null || string.IsNullOrEmpty(e.handPropGuid) ? null : HandPropName(e) + "_DistrictMesh";
+
+        /// <summary>InjectHandProp appended this model's prop to `addon` as entry `index` of its FragmentEntries.</summary>
+        internal static void NoteHandPropAppended(ModelEntry e, object addon, int index)
+        {
+            e.handPropAt.Remove(addon);   // an addon whose array the game rebuilt gets the prop again, at a new index
+            e.handPropAt.Add(addon, new System.Runtime.CompilerServices.StrongBox<int>(index));
+        }
+
+        /// <summary>The index at which InjectHandProp appended this model's prop to `addon`, or -1.</summary>
+        internal static int AppendedHandPropIndex(ModelEntry e, object addon)
+            => e != null && addon != null && e.handPropAt.TryGetValue(addon, out var at) ? at.Value : -1;
+
+        /// <summary>Is entry `index` of this addon's FragmentEntries the hand prop WE appended? By identity - the addon
+        /// and the index InjectHandProp recorded for it - with the name as the guard for an array the game has rebuilt
+        /// since (it rebuilds from the definition, WITHOUT our entry: the index is then past the end or on another
+        /// mesh). Nothing between the append and here moves an entry: the overflow chunks are appended after it and a
+        /// data-scale rebuild replaces entries in place. A fragment that merely carries the prop's name is not it.</summary>
+        internal static bool IsAppendedHandProp(ModelEntry e, object addon, int index, string meshNameAtIndex)
+            => index >= 0 && index == AppendedHandPropIndex(e, addon)
+               && meshNameAtIndex != null && string.Equals(meshNameAtIndex, HandPropMeshName(e), StringComparison.Ordinal);
 
         static void InjectHandProp(object addon, object animMgr, object skel, ModelEntry e)
         {
@@ -1759,8 +1779,10 @@ namespace HumankindAssetFramework
                 if (frags == null) return;
                 var fragType = frags.GetType().GetElementType();
                 var mnField = AccessTools.Field(fragType, "meshName");
-                for (int i = 0; i < frags.Length; i++)
-                    if (mnField?.GetValue(frags.GetValue(i)) as string == meshName) return;   // already injected on this addon
+                // already injected on this addon: OUR entry, where we appended it. A donor fragment that happens to carry
+                // the name is not it - going by the name alone, such a donor kept the configured prop from ever being added
+                int at = AppendedHandPropIndex(e, addon);
+                if (at >= 0 && at < frags.Length && IsAppendedHandProp(e, addon, at, mnField?.GetValue(frags.GetValue(at)) as string)) return;
                 // 1) the MeshCollection: already-registered lookup -> Amplitude catalog -> mounted-bundle name fallback
                 //    (the catalog misses mod-bundle MeshCollections by GUID — Pawn-Props trap 3); register after a raw load
                 //    (RegisterMeshCollection dedupes internally and LoadIFNs the meshes into the GPU content manager).
@@ -1902,6 +1924,7 @@ namespace HumankindAssetFramework
                 Array.Copy(frags, narr, frags.Length);
                 narr.SetValue(item, frags.Length);
                 SetMember(addon, "FragmentEntries", narr);
+                NoteHandPropAppended(e, addon, frags.Length);
                 // CRITICAL: the GPU pawn DESCRIPTOR (per definition: StartFragment + FragmentCount into the fragment
                 // buffer) is snapshotted from FragmentEntries at RegisterPawnDefinition time — an append after that
                 // snapshot exists in the array but the renderer still draws the OLD fragment count (the M60 was
