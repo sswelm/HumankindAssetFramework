@@ -140,7 +140,10 @@ public class ModelReaderWindow : EditorWindow
             var sw = System.Diagnostics.Stopwatch.StartNew();
             GlbWriter.Write(model, p);
             sw.Stop();
-            status = $"Wrote {Path.GetFileName(p)} ({new FileInfo(p).Length / 1e6:0.0} MB) in {sw.Elapsed.TotalMilliseconds:0} ms. Material extensions, samplers, extras, copyright and the scene name are carried verbatim; a primitive with morph targets is refused (the writer's contract).";
+            // the proof the drill runs, here too: the file read back is the model field by field, or the first difference is named
+            string diff = HafModelDiff.FirstDifference(model, GlbReader.Read(p));
+            status = $"Wrote {Path.GetFileName(p)} ({new FileInfo(p).Length / 1e6:0.0} MB) in {sw.Elapsed.TotalMilliseconds:0} ms; " + (diff == null ? "read back equal to the model field by field." : "⚠ read back DIFFERENT: " + diff);
+            if (diff != null) Debug.LogError("[ModelReader] " + p + " read back differs from the model: " + diff);
             if (p.Replace(Path.DirectorySeparatorChar, '/').StartsWith(Application.dataPath.Replace(Path.DirectorySeparatorChar, '/'), StringComparison.OrdinalIgnoreCase)) AssetDatabase.Refresh();
         }
         catch (Exception e) { status = "⚠ NOT written — " + e.Message; Debug.LogError("[ModelReader] " + p + ": " + e.Message); }
@@ -200,97 +203,15 @@ public class ModelReaderWindow : EditorWindow
     {
         DestroyPreview();
         if (model == null) return;
-        if (model.TriangleCount > 20_000_000) { previewNote = $"no preview: {model.TriangleCount:N0} triangles is over the 20 M the preview builds"; return; }
         try
         {
             if (pru == null) pru = new PreviewRenderUtility();
-            var sh = Shader.Find("Standard") ?? Shader.Find("Unlit/Color");
-            var world = HafTransforms.WorldMatrices(model, clipStart ? HafTransforms.PoseAt(model, 0, 0.0) : null);
-            var textures = new Dictionary<int, Texture2D>();
-            var materials = new Dictionary<int, Material>();
-            Material MaterialFor(int index)
-            {
-                if (materials.TryGetValue(index, out var have)) return have;
-                var mat = new Material(sh) { hideFlags = HideFlags.HideAndDontSave };
-                var hm = index >= 0 && index < model.Materials.Count ? model.Materials[index] : null;
-                if (hm != null)
-                {
-                    mat.color = new Color(hm.BaseColorFactor[0], hm.BaseColorFactor[1], hm.BaseColorFactor[2], 1f);
-                    if (mat.HasProperty("_Glossiness")) mat.SetFloat("_Glossiness", 1f - hm.RoughnessFactor);
-                    if (mat.HasProperty("_Metallic")) mat.SetFloat("_Metallic", hm.MetallicFactor);
-                    if (textured && hm.BaseColorTexture >= 0 && hm.BaseColorTexture < model.Textures.Count)
-                    {
-                        int img = model.Textures[hm.BaseColorTexture].Source;
-                        if (img >= 0 && img < model.Images.Count && model.Images[img].Bytes != null)
-                        {
-                            if (!textures.TryGetValue(img, out var tex))
-                            {
-                                tex = new Texture2D(2, 2) { hideFlags = HideFlags.HideAndDontSave, name = model.Images[img].Name };
-                                if (!tex.LoadImage(model.Images[img].Bytes)) { DestroyImmediate(tex); tex = null; }
-                                textures[img] = tex; if (tex != null) previewAssets.Add(tex);
-                            }
-                            if (tex != null) mat.mainTexture = tex;
-                        }
-                    }
-                }
-                previewAssets.Add(mat);
-                materials[index] = mat;
-                return mat;
-            }
-
-            inst = new GameObject("__modelReaderPreview") { hideFlags = HideFlags.HideAndDontSave };
-            float sx = unmirror ? -1f : 1f;
-            bool any = false;
-            for (int ni = 0; ni < model.Nodes.Count; ni++)
-            {
-                var node = model.Nodes[ni];
-                if (node.Mesh < 0) continue;
-                var hm = model.Meshes[node.Mesh];
-                var mesh = new Mesh { name = node.Name, hideFlags = HideFlags.HideAndDontSave, indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
-                var verts = new List<Vector3>(); var norms = new List<Vector3>(); var uvs = new List<Vector2>();
-                var subs = new List<int[]>(); var mats = new List<Material>();
-                bool allNormals = true;
-                foreach (var p in hm.Primitives)
-                {
-                    if (p.Mode != 4) continue;   // the preview draws triangles; strips and fans are read but not drawn
-                    // positions and normals through the same matrices: the node's, or per vertex the weighted blend of its joints
-                    // at the chosen pose (review of PR #109: the normals once went through identity while the positions were posed)
-                    var gl = HafTransforms.WorldPositions(model, ni, p, world);
-                    var gn = HafTransforms.WorldNormals(model, ni, p, world);
-                    int baseIndex = verts.Count;
-                    for (int v = 0; v < p.VertexCount; v++)
-                    {
-                        verts.Add(new Vector3(sx * (float)gl[v * 3], (float)gl[v * 3 + 1], (float)gl[v * 3 + 2]));
-                        if (gn != null) norms.Add(new Vector3(sx * (float)gn[v * 3], (float)gn[v * 3 + 1], (float)gn[v * 3 + 2]));
-                        else allNormals = false;
-                        // the UV set the material's base colour selects (review of PR #109: UV0 was used whatever texCoord said); glTF's origin is top-left, Unity's bottom-left
-                        var uvSet = p.Material >= 0 && p.Material < model.Materials.Count && model.Materials[p.Material].BaseColorTexCoord == 1 && p.Uv1 != null ? p.Uv1 : p.Uv0;
-                        uvs.Add(uvSet != null ? new Vector2(uvSet[v * 2], 1f - uvSet[v * 2 + 1]) : Vector2.zero);
-                    }
-                    int[] tri;
-                    if (p.Indices != null) { tri = new int[p.Indices.Length]; for (int i = 0; i < tri.Length; i++) tri[i] = baseIndex + p.Indices[i]; }
-                    else { tri = new int[p.VertexCount]; for (int i = 0; i < tri.Length; i++) tri[i] = baseIndex + i; }
-                    if (unmirror) for (int t = 0; t + 2 < tri.Length; t += 3) { int tmp = tri[t + 1]; tri[t + 1] = tri[t + 2]; tri[t + 2] = tmp; }
-                    subs.Add(tri); mats.Add(MaterialFor(p.Material));
-                }
-                if (subs.Count == 0) continue;
-                mesh.SetVertices(verts);
-                mesh.SetUVs(0, uvs);
-                mesh.subMeshCount = subs.Count;
-                for (int si = 0; si < subs.Count; si++) mesh.SetTriangles(subs[si], si, false);
-                if (fileNormals && allNormals && norms.Count == verts.Count) mesh.SetNormals(norms); else mesh.RecalculateNormals();
-                mesh.RecalculateBounds();
-                previewAssets.Add(mesh);
-                var go = new GameObject(node.Name.Length > 0 ? node.Name : "node " + ni) { hideFlags = HideFlags.HideAndDontSave };
-                go.transform.SetParent(inst.transform, false);
-                go.AddComponent<MeshFilter>().sharedMesh = mesh;
-                go.AddComponent<MeshRenderer>().sharedMaterials = mats.ToArray();
-                any = true;
-            }
-            if (!any) { previewNote = "no preview: the file has no triangle primitive on any node"; DestroyPreview(); return; }
+            var r = ModelPreview.Build(model, new ModelPreview.Options { Unmirror = unmirror, FileNormals = fileNormals, Textured = textured, ClipStart = clipStart }, previewAssets);
+            previewNote = r.Note; inst = r.Root;
+            if (inst == null) { DestroyPreview(); previewNote = r.Note; return; }
             pru.AddSingleGO(inst);
             var rs = inst.GetComponentsInChildren<Renderer>();
-            bounds = rs[0].bounds; foreach (var r in rs) bounds.Encapsulate(r.bounds); boundsValid = true;
+            bounds = rs[0].bounds; foreach (var rd in rs) bounds.Encapsulate(rd.bounds); boundsValid = true;
         }
         catch (Exception e) { previewNote = "no preview: " + e.Message; Debug.LogError("[ModelReader] preview: " + e); DestroyPreview(); }
     }

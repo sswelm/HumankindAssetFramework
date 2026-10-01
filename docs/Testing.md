@@ -66,9 +66,44 @@ to 1 over the skin's joints), and compares each file with Blender's *evaluated* 
 (triangles, materials, images, joints) and, order-independent so vertex merging cannot move them, the world-space
 bounding box, the total triangle area, the area-weighted centroid, the area-weighted sum of face normals (winding and
 mirrored nodes), the bone names and each animation's span (earliest first key to latest last key over every channel —
-what a Blender 5.1 slotted action spans) — through both transform chains, in Blender's Z-up frame. A synthetic
-two-target fixture (`fixture_two_targets.py`: one animation, two nodes, channels ending apart, one starting late, both
-nodes instancing one mesh) rides along, since no registry file has those shapes.
+what a Blender 5.1 slotted action spans) — through both transform chains, in Blender's Z-up frame.
+
+**What else goes through both GLB drills** (the round-trip diversity PR, 2026-10-02 — every registry file is a Blender
+or Sketchfab export, so a reader that only ever saw those had not met the rest of the specification):
+
+- **The fixture library**, `tools/glb-reader-drill/fixtures.py`: twelve small, deterministic files, one per shape the
+  registry lacks — normalized integer attributes (ushort UVs, ubyte colours and joints, ushort weights), an
+  interleaved buffer view with accessors at byte offsets and `uint` indices sharing one view, every primitive mode
+  (non-indexed triangles, strip, fan, lines, points), a `.gltf` with its `.bin`, a `.png` beside it and a data-URI
+  image, CUBICSPLINE/STEP/LINEAR keys with three animations on one node (one unnamed), two scenes with the default
+  the second plus an orphan node and a mirrored matrix child, material variety (MASK/BLEND, double-sided, textures on
+  `TEXCOORD_1`, occlusion strength, normal scale, `KHR_materials_emissive_strength` / `specular` / `unlit`, a sampler
+  with all four settings, a texture without one, two textures sharing an image, extras of every JSON type), eight
+  influences over a joint chain with no inverse bind matrices and a skinned node under a translated parent, a
+  72,541-vertex grid (`uint` indices), names (empty, duplicate, unicode, JSON escapes, a material no primitive
+  uses), and two scenes with no default (the specification's "show nothing at load", kept absent on the round trip). Each goes through the reader against Blender, the writer round trip field by field, and Blender again.
+- **The Khronos glTF-Sample-Assets** named in `samples.txt` — other exporters' output (Box, Duck, CesiumMan,
+  BrainStem, InterpolationTest, NegativeScaleTest, Unicode❤♻Test, …) — once fetched with
+  `python tools/glb-reader-drill/fetch_samples.py References/gltf-samples` (12 MB, git-ignored; the drills say when
+  they are absent and run without them). A line may carry an **expectation**: a stage that must refuse the file by
+  name — `SimpleSparseAccessor` (the reader: sparse), the two morph-target samples (the writer), `TextureTransformTest`
+  (the source guard: a texture-info extension the model does not carry). The "no" cases drilled like the "yes" cases.
+- What the diversity found, fixed on the way: the drill measured area for TRIANGLES only (strips and fans now unroll
+  through `HafPrimitive.Triangles()`, one definition for the drill and the preview); a joint with no name is
+  `Node_<index>` in Blender; Blender creates a material only when a primitive uses it and **invents one** for a
+  `COLOR_0` primitive that has none (the C# line states that count as `blendermaterials`); Blender imports every
+  node, other scenes' and orphans' too; Mono printed an emoji file name as `??` under the console code page.
+
+The Blender comparison in the gate covers every fixture and sample (small) plus the registry's largest, smallest and
+four animated files: 43 files; `FULL=1` for every file.
+
+**`Tests/GlbRobustnessTests.cs`** (2026-10-02): the reader and writer beyond the happy round trip — a **corruption
+sweep** (the full fixture truncated at every 4-byte boundary, every byte of its JSON chunk replaced four ways, every
+byte of its BIN chunk set to 0xFF, ten broken containers, a `.gltf` with missing or malformed sidecars) where every
+outcome must be a read or a refusal by name, never a crash-type exception, and whatever the reader accepts the writer
+writes or refuses by name (planting the removal of one accessor bounds check: the sweep fails on `ArgumentOutOfRange`
+at JSON byte 1595); the written bytes are the same under the invariant, Dutch and Turkish cultures and a Dutch read
+gives the same model; eight threads reading and writing at once get the sequential bytes.
 
 **`tools/glb_writer_drill.sh`** (2026-10-01, step 2) first checks every **source**: each `extensions`/`extras`
 object must sit at a path the model carries (`tools/glb-reader-drill/carried_paths.py`; the reader does not model the
@@ -421,7 +456,13 @@ substitutes for the other, and a mutation drill is how you find out which one yo
   resolves the HAF package (default `C:\Repo\ENCReload`, override with `-Project`/`HAF_UNITY_PROJECT`). It is
   deliberately NOT in the per-push gate: a Unity boot costs ~a minute and hosted CI has no licensed Unity. Run it
   before merging baker changes — the automated form of Factory-Manual §11's instruction. It refuses a project that
-  is currently open in the Unity editor.
+  is currently open in the Unity editor. Since 2026-10-02 it also runs the **Model Reader section**
+  (`ModelReaderHeadlessTest`): every registry model and every GLB fixture (the script generates them with
+  `fixtures.py` and passes `-hafFixtures`) read by `GlbReader`, built as Unity meshes by `ModelPreview` (the vertex
+  and triangle counts must be the model's, and no Unity mesh may be left behind), written by `GlbWriter` to a temporary
+  file and read back equal field by field (`HafModelDiff`) — in Unity's own runtime: the project's Json.Net 11, the editor's Mono, and the SYSTEM
+  locale a batch run gets (first run: 42 files, 722 MB, read in 1.5 s, written in 1.5 s, culture nl-NL). The drills
+  prove the same code outside the editor; this proves it inside.
 
 ## What is deliberately NOT unit-tested — and why
 

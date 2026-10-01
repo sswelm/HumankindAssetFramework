@@ -16,6 +16,7 @@ CARRIED = (
     "materials[].extras",                   # HafMaterial.ExtrasJson
     "nodes[].extras",                       # HafNode.ExtrasJson
     "meshes[].extras",                      # HafMesh.ExtrasJson
+    "scenes[].extras",                      # HafScene.ExtrasJson
     "samplers[].extensions", "samplers[].extras",   # HafModel.Samplers (the whole object, verbatim)
 )
 

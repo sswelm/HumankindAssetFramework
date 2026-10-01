@@ -39,13 +39,22 @@ if (Test-Path $lockfile) {
 }
 
 $log = Join-Path ([IO.Path]::GetTempPath()) "haf_editor_tests.log"
-Write-Host "=== headless bake feature tests (Unity batch, about 1 min boot + bakes; log: $log) ==="
+Write-Host "=== headless bake feature tests + Model Reader section (Unity batch, about 1 min boot + bakes; log: $log) ==="
 
 # -nographics verified fine (14/14, 2026-09-08). The first run's import failures were NOT graphics: batch
 # -executeMethod runs under the SYSTEM locale (the GUI editor pins invariant culture), and the cube fixture
 # formatted vertices with comma decimals on a Dutch machine - fixed in BakeFeatureTest with an explicit
 # invariant culture. Kept as the reminder that a batch run exercises locale paths the GUI never does.
-& $Unity -batchmode -nographics -projectPath $Project -executeMethod HeadlessBakeTests.Run -logFile $log | Out-Null
+# The GLB fixtures (tools/glb-reader-drill/fixtures.py: the shapes the registry lacks) for the Model Reader section,
+# generated here because Unity cannot run Python; passed by -hafFixtures. Without Python the section says SKIP for them.
+$fixtures = Join-Path ([IO.Path]::GetTempPath()) "haf_glb_fixtures"
+$fixArgs = @()
+try {
+    $gen = Join-Path $PSScriptRoot "glb-reader-drill\fixtures.py"
+    & python $gen $fixtures | Out-Null
+    if ($LASTEXITCODE -eq 0) { $fixArgs = @("-hafFixtures", $fixtures) } else { Write-Host "NOTE: fixtures.py failed (exit $LASTEXITCODE) - the Model Reader section runs on the registry alone" }
+} catch { Write-Host "NOTE: python not found - the Model Reader section runs on the registry alone" }
+& $Unity -batchmode -nographics -projectPath $Project -executeMethod HeadlessBakeTests.Run -logFile $log @fixArgs | Out-Null
 $code = $LASTEXITCODE
 
 # Surface the suite's own report lines from the Unity log.

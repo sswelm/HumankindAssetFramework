@@ -31,6 +31,7 @@
     <Compile Include="..\editor\GlbReader.cs" Link="GlbReader.cs" />
     <Compile Include="..\editor\HafTransforms.cs" Link="HafTransforms.cs" />
     <Compile Include="..\editor\GlbWriter.cs" Link="GlbWriter.cs" />
+    <Compile Include="..\editor\HafModelDiff.cs" Link="HafModelDiff.cs" />
   </ItemGroup>
 
   <!-- compile-time references the TEST code uses directly -->

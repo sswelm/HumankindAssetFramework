@@ -18,6 +18,7 @@ static class Drill
     static int Main(string[] args)
     {
         // args: the model files to read
+        Console.OutputEncoding = new UTF8Encoding(false);   // a file named with emoji (the Khronos Unicode sample) printed as "??" under the console's code page, and no longer keyed with Blender's line
         int fails = 0; long totalBytes = 0; double totalMs = 0;
         foreach (var path in args)
         {
@@ -59,11 +60,10 @@ static class Drill
                         if (bz < mn[2]) mn[2] = bz; if (bz > mx[2]) mx[2] = bz;
                         boxed++;
                     }
-                    if (p.Mode != 4) continue;
-                    int count = p.Indices != null ? p.Indices.Length : p.VertexCount;
-                    for (int t = 0; t + 2 < count; t += 3)
+                    // every triangle as drawn: TRIANGLES, and strips and fans unrolled with their winding (Blender imports those
+                    // triangulated; the modes fixture has one of each); lines and points draw no face
+                    foreach (var (ia, ib, ic) in p.Triangles())
                     {
-                        int ia = p.Indices != null ? p.Indices[t] : t, ib = p.Indices != null ? p.Indices[t + 1] : t + 1, ic = p.Indices != null ? p.Indices[t + 2] : t + 2;
                         double ax = wv[ia * 3], ay = wv[ia * 3 + 1], az = wv[ia * 3 + 2];
                         double ux = wv[ib * 3] - ax, uy = wv[ib * 3 + 1] - ay, uz = wv[ib * 3 + 2] - az;
                         double vx = wv[ic * 3] - ax, vy = wv[ic * 3 + 1] - ay, vz = wv[ic * 3 + 2] - az;
@@ -83,7 +83,19 @@ static class Drill
             string F(IEnumerable<double> xs) => string.Join(",", xs.Select(c => c.ToString("0.00000", inv)));
             string bbox = boxed == 0 ? "" : F(new[] { mn[0], mn[1], mn[2], mx[0], mx[1], mx[2] });
             string bboxIdentity = "";   // (kept in the line format; the skinned conventions were settled 2026-10-01: the weighted blend at animation 0, t = 0)
-            var bones = m.Skins.SelectMany(s => s.Joints).Distinct().Select(j => m.Nodes[j].Name).OrderBy(n => n, StringComparer.Ordinal).ToList();
+            // a joint with no name is "Node_<index>" in Blender (the Khronos SimpleSkin and BrainStem samples: nameless joints)
+            var bones = m.Skins.SelectMany(s => s.Joints).Distinct().Select(j => m.Nodes[j].Name.Length > 0 ? m.Nodes[j].Name : "Node_" + j).OrderBy(n => n, StringComparer.Ordinal).ToList();
+            // the materials Blender's importer ends up with: those a primitive uses (an unused one is never created), plus one it
+            // invents PER MESH that has a COLOR_0 primitive without a material (measured 2026-10-02: two such primitives in one mesh
+            // -> 1, in two meshes -> 2, one beside a materialed one -> 1 + 1; the Khronos BoxVertexColors and the normalized fixture)
+            var usedMaterials = new HashSet<int>(); int invented = 0;
+            foreach (var me in m.Meshes)
+            {
+                bool inventsOne = false;
+                foreach (var pp in me.Primitives) { if (pp.Material >= 0) usedMaterials.Add(pp.Material); else if (pp.Colors != null) inventsOne = true; }
+                if (inventsOne) invented++;
+            }
+            int blenderMaterials = usedMaterials.Count + invented;
             // what Blender 5.1 states about an animation: ONE action per glTF animation (slotted: every target a slot), its span
             // = the earliest first key to the latest last key over every channel (review of PR #109, round 5, measured on a
             // two-target fixture: channels ending at 1 s and 2 s, one starting at 0.5 s -> one action, 0..2 s). The same term
@@ -101,7 +113,7 @@ static class Drill
                 if (first <= last) spans.Add(last - first);
             }
             var sortedDurations = spans.Select(d => Math.Round(d, 3)).OrderBy(d => d).Select(d => d.ToString("0.000", inv));
-            Console.WriteLine($"FILE\t{Key(path)}\ttris={drawnTris}\tmaterials={m.Materials.Count}\timages={m.Images.Count}\tjoints={joints}\tanimations={m.Animations.Count}\tdurations={durations}\tnodes={m.Nodes.Count}\tmeshes={m.Meshes.Count}\tvertices={m.VertexCount}\tms={sw.Elapsed.TotalMilliseconds:0}\tbbox={bbox}\tbboxidentity={bboxIdentity}\tarea={area.ToString("0.00000", inv)}\tcentroid={F(cen)}\tnsum={F(nsum)}\tbones={string.Join("|", bones)}\tsorteddurations={string.Join(",", sortedDurations)}");
+            Console.WriteLine($"FILE\t{Key(path)}\ttris={drawnTris}\tmaterials={m.Materials.Count}\tblendermaterials={blenderMaterials}\timages={m.Images.Count}\tjoints={joints}\tanimations={m.Animations.Count}\tdurations={durations}\tnodes={m.Nodes.Count}\tmeshes={m.Meshes.Count}\tvertices={m.VertexCount}\tms={sw.Elapsed.TotalMilliseconds:0}\tbbox={bbox}\tbboxidentity={bboxIdentity}\tarea={area.ToString("0.00000", inv)}\tcentroid={F(cen)}\tnsum={F(nsum)}\tbones={string.Join("|", bones)}\tsorteddurations={string.Join(",", sortedDurations)}");
         }
         Console.WriteLine($"TOTAL\tfiles={args.Length}\tMB={totalBytes / 1e6:0.0}\tms={totalMs:0}");
         return fails == 0 ? 0 : 1;

@@ -215,13 +215,20 @@ public static class GlbReader
             int at = i, steps = 0;
             while (model.Nodes[at].Parent >= 0) { at = model.Nodes[at].Parent; if (++steps > model.Nodes.Count) throw new InvalidDataException($"node {i} '{model.Nodes[i].Name}' is its own ancestor - the hierarchy has a cycle"); }
         }
-        var scenes = root["scenes"] as JArray;
-        int sceneIndex = root["scene"]?.Value<int>() ?? 0;
-        if (scenes != null && sceneIndex < scenes.Count) model.SceneName = scenes[sceneIndex]["name"]?.ToString() ?? "";
-        if (scenes != null && sceneIndex < scenes.Count && scenes[sceneIndex]["nodes"] is JArray sceneNodes)
-            foreach (var sn in sceneNodes) model.Roots.Add(sn.Value<int>());
-        else
-            for (int i = 0; i < model.Nodes.Count; i++) if (model.Nodes[i].Parent == -1) model.Roots.Add(i);
+        // every scene, verbatim; the default by index; a file with none gets one of its parentless nodes
+        foreach (var sc in root["scenes"] as JArray ?? new JArray())
+        {
+            var scene = new HafScene { Name = sc["name"]?.ToString() ?? "", ExtrasJson = Extras(sc) };
+            foreach (var sn in sc["nodes"] as JArray ?? new JArray())
+            {
+                int ni = sn.Value<int>();
+                if (ni < 0 || ni >= model.Nodes.Count) throw new InvalidDataException($"scene {model.Scenes.Count} '{scene.Name}' lists node {ni}, the file has {model.Nodes.Count}");
+                scene.Nodes.Add(ni);
+            }
+            model.Scenes.Add(scene);
+        }
+        model.Scene = root["scene"]?.Value<int>() ?? -1;   // absent is absent: a file that names no default scene shows nothing at load, by the specification
+        if (model.Scene != -1 && (model.Scene < 0 || model.Scene >= model.Scenes.Count)) throw new InvalidDataException($"the default scene is {model.Scene}, the file has {model.Scenes.Count}");
 
         // skins
         foreach (var sk in root["skins"] as JArray ?? new JArray())

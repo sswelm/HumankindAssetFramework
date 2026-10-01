@@ -18,10 +18,35 @@ public sealed class HafModel
     public string Generator = "";                 // asset.generator, for the log
     public string Copyright = "";                 // asset.copyright, verbatim
     public string AssetExtrasJson;                // asset.extras, verbatim JSON (any type the file gave - the schema allows any; `{}` included) or null when absent: Sketchfab's author/license/source/title live here (6 registry files; review of PR #110 found them dropped)
-    public string SceneName = "";                 // the default scene's name (Blender writes "Scene" in every file)
     public string SourcePath = "";                // where it was read from ("" for bytes)
+    // EVERY scene the file declares, in order, and nothing the file does not (review of PR #111: the writer kept the default
+    // one and dropped the rest without a word, and a reader-vs-reader compare could not see it). Scene = the default one, the
+    // file's `scene`, or -1 when it names none: the specification gives an absent default a meaning of its own (a viewer
+    // renders nothing at load), so it is carried as absent, not as 0.
+    public readonly List<HafScene> Scenes = new List<HafScene>();
+    public int Scene = -1;
+    public bool HasDefaultScene => Scene >= 0 && Scene < Scenes.Count;
     public readonly List<HafNode> Nodes = new List<HafNode>();
-    public readonly List<int> Roots = new List<int>();          // the default scene's root nodes (every node without a parent when no scene is declared)
+    /// <summary>What a viewer shows at load: the default scene's root nodes, or none when the file names no default
+    /// scene (the specification's reading; Blender imports every node regardless, and the drill counts as Blender does).
+    /// Computed - to change it, change the scene.</summary>
+    public IReadOnlyList<int> Roots => HasDefaultScene ? (IReadOnlyList<int>)Scenes[Scene].Nodes : new int[0];
+
+    /// <summary>Every node reachable from a scene's roots through Children (the nodes a viewer of that scene draws);
+    /// an index outside the scenes gives none. Cycles are tolerated here (the reader and writer refuse them).</summary>
+    public HashSet<int> NodesInScene(int scene)
+    {
+        var seen = new HashSet<int>();
+        if (scene < 0 || scene >= Scenes.Count) return seen;
+        var stack = new Stack<int>(Scenes[scene].Nodes);
+        while (stack.Count > 0)
+        {
+            int i = stack.Pop();
+            if (i < 0 || i >= Nodes.Count || !seen.Add(i)) continue;
+            foreach (var c in Nodes[i].Children) stack.Push(c);
+        }
+        return seen;
+    }
     public readonly List<HafMesh> Meshes = new List<HafMesh>();
     public readonly List<HafMaterial> Materials = new List<HafMaterial>();
     public readonly List<HafTexture> Textures = new List<HafTexture>();
@@ -39,6 +64,13 @@ public sealed class HafModel
     {
         get { long n = 0; foreach (var m in Meshes) foreach (var p in m.Primitives) n += p.VertexCount; return n; }
     }
+}
+
+public sealed class HafScene
+{
+    public string Name = "";
+    public readonly List<int> Nodes = new List<int>();   // root nodes (a node without a parent); two scenes may share one
+    public string ExtrasJson;                            // verbatim JSON of any type, or null when absent
 }
 
 public sealed class HafNode
@@ -88,6 +120,18 @@ public sealed class HafPrimitive
             long n = Indices != null ? Indices.Length : VertexCount;
             switch (Mode) { case 4: return n / 3; case 5: case 6: return n < 3 ? 0 : n - 2; default: return 0; }
         }
+    }
+
+    /// <summary>The triangles this primitive draws, as vertex indices with the drawn winding: TRIANGLES in threes, a
+    /// strip (mode 5) alternating so every triangle faces the same way, a fan (mode 6) around its first vertex; lines
+    /// and points draw none. One definition for the drill, the preview and whatever counts faces next.</summary>
+    public IEnumerable<(int a, int b, int c)> Triangles()
+    {
+        int count = Indices != null ? Indices.Length : VertexCount;
+        int At(int i) => Indices != null ? Indices[i] : i;
+        if (Mode == 4) for (int t = 0; t + 2 < count; t += 3) yield return (At(t), At(t + 1), At(t + 2));
+        else if (Mode == 5) for (int t = 0; t + 2 < count; t++) yield return t % 2 == 0 ? (At(t), At(t + 1), At(t + 2)) : (At(t + 1), At(t), At(t + 2));
+        else if (Mode == 6) for (int t = 1; t + 1 < count; t++) yield return (At(0), At(t), At(t + 1));
     }
 }
 

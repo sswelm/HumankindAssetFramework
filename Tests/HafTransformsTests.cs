@@ -43,14 +43,14 @@ public class HafTransformsTests
         var parent = new HafNode { Name = "hull", Translation = new double[] { 5, 0, 0 }, Rotation = Q(0, 1, 0, 90) };
         var child = new HafNode { Name = "turret", Parent = 0, Translation = new double[] { 1, 0, 0 } };
         parent.Children.Add(1);
-        model.Nodes.Add(parent); model.Nodes.Add(child); model.Roots.Add(0);
+        model.Nodes.Add(parent); model.Nodes.Add(child);
         var world = HafTransforms.WorldMatrices(model);
         // the child's origin: its (1,0,0) rotated by the parent's quarter turn -> (0,0,-1), then the parent's offset
         Near(new[] { 5, 0, -1.0 }, HafTransforms.Apply(world[1], 0, 0, 0, 1));
         Near(new[] { 5, 0, 0.0 }, HafTransforms.Apply(world[0], 0, 0, 0, 1));
         // a node with a matrix uses it as given
         var fixedNode = new HafNode { Name = "fixed", Matrix = new double[] { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 7, 8, 9, 1 } };
-        model.Nodes.Add(fixedNode); model.Roots.Add(2);
+        model.Nodes.Add(fixedNode);
         Near(new[] { 7, 8, 9.0 }, HafTransforms.Apply(HafTransforms.WorldMatrices(model)[2], 0, 0, 0, 1));
     }
 
@@ -91,7 +91,6 @@ public class HafTransformsTests
         model.Nodes.Add(new HafNode { Name = "A" });
         model.Nodes.Add(new HafNode { Name = "B", Translation = new double[] { 10, 0, 0 } });
         model.Nodes.Add(new HafNode { Name = "skinned", Mesh = 0, Skin = 0, Translation = new double[] { 999, 999, 999 } });
-        model.Roots.AddRange(new[] { 0, 1, 2 });
         var prim = new HafPrimitive
         {
             VertexCount = 4, Positions = new float[] { 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0 },
@@ -129,7 +128,6 @@ public class HafTransformsTests
         var model = new HafModel();
         model.Nodes.Add(new HafNode { Name = "moves", Translation = new double[] { 0, 0, 0 } });
         model.Nodes.Add(new HafNode { Name = "still", Translation = new double[] { 7, 7, 7 } });
-        model.Roots.AddRange(new[] { 0, 1 });
         var anim = new HafAnimation { Name = "walk" };
         anim.Samplers.Add(new HafSampler { Times = new float[] { 0, 1 }, Values = new float[] { 0, 0, 0, 10, 0, 0 }, Components = 3, Interpolation = "LINEAR" });
         anim.Samplers.Add(new HafSampler { Times = new float[] { 0, 1 }, Values = new float[] { 1, 1, 1, 3, 3, 3 }, Components = 3, Interpolation = "STEP" });

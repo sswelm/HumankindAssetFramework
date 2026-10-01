@@ -13,8 +13,8 @@ using Newtonsoft.Json.Linq;
 // THE CONTRACT: the writer writes what the model holds, and only that. A material's extension payload is carried
 // verbatim (HafMaterial.ExtensionsJson) and the names are declared in extensionsUsed, so KHR_materials_specular,
 // clearcoat and the like - and the textures they reference - survive a round trip; so are the texture samplers
-// (wrap and filters), the `extras` of the asset (Sketchfab's author and license), nodes, meshes and materials, the
-// asset's copyright and the scene's name. What the reader does not model is not here
+// (wrap and filters), the `extras` of the asset (Sketchfab's author and license), nodes, meshes, materials and scenes,
+// the asset's copyright, and EVERY scene with its name (the default one by index, or none, as the file had it). What the reader does not model is not here
 // either, and the writer REFUSES rather than drops: a primitive with morph targets (counted by the reader, data not
 // carried) is refused by name; extensions anywhere but on a material, and extras elsewhere, are not carried and said
 // here. A model that cannot be written as it is - an index that does not fit a uint, a joint that does not fit a
@@ -249,10 +249,20 @@ public static class GlbWriter
                 nodes.Add(j);
             }
             root["nodes"] = nodes;
-            var scene = new JObject { ["nodes"] = new JArray(m.Roots.Cast<object>()) };
-            if (m.SceneName.Length > 0) scene["name"] = m.SceneName;
-            root["scenes"] = new JArray { scene };
-            root["scene"] = 0;
+        }
+        if (m.Scenes.Count > 0)
+        {
+            var scenes = new JArray();
+            foreach (var sc in m.Scenes)
+            {
+                var j = new JObject();
+                if (sc.Nodes.Count > 0) j["nodes"] = new JArray(sc.Nodes.Cast<object>());
+                if (sc.Name.Length > 0) j["name"] = sc.Name;
+                if (sc.ExtrasJson != null) j["extras"] = GlbReader.ParseToken(sc.ExtrasJson);
+                scenes.Add(j);
+            }
+            root["scenes"] = scenes;
+            if (m.Scene >= 0) root["scene"] = m.Scene;
         }
 
         // ---- skins
@@ -347,7 +357,12 @@ public static class GlbWriter
                 FitsFloat(n.Translation, $"node {i} '{n.Name}' translation"); FitsFloat(n.Rotation, $"node {i} '{n.Name}' rotation"); FitsFloat(n.Scale, $"node {i} '{n.Name}' scale");
             }
         }
-        foreach (var r in m.Roots) if (r < 0 || r >= m.Nodes.Count) throw new InvalidDataException($"root {r} is not a node of the model");
+        if (m.Scene != -1 && (m.Scene < 0 || m.Scene >= m.Scenes.Count)) throw new InvalidDataException($"the default scene is {m.Scene}, the model has {m.Scenes.Count} (-1 = none)");
+        for (int si = 0; si < m.Scenes.Count; si++)
+        {
+            foreach (var r in m.Scenes[si].Nodes) if (r < 0 || r >= m.Nodes.Count) throw new InvalidDataException($"scene {si} '{m.Scenes[si].Name}' lists node {r}, the model has {m.Nodes.Count}");
+            if (m.Scenes[si].ExtrasJson != null && !IsJson(m.Scenes[si].ExtrasJson)) throw new InvalidDataException($"scene {si} '{m.Scenes[si].Name}': extras is not JSON");
+        }
         // the hierarchy is written from Children; Parent is what a reader derives from it - a model built by hand must tell one story
         var parentOf = new int[m.Nodes.Count]; for (int i = 0; i < parentOf.Length; i++) parentOf[i] = -1;
         for (int i = 0; i < m.Nodes.Count; i++)
@@ -364,10 +379,14 @@ public static class GlbWriter
             int at = i, steps = 0;
             while (parentOf[at] != -1) { at = parentOf[at]; if (++steps > m.Nodes.Count) throw new InvalidDataException($"node {i} '{m.Nodes[i].Name}' is its own ancestor - the hierarchy has a cycle"); }
         }
-        for (int i = 0; i < m.Roots.Count; i++)
+        for (int si = 0; si < m.Scenes.Count; si++)
         {
-            if (parentOf[m.Roots[i]] != -1) throw new InvalidDataException($"root {m.Roots[i]} '{m.Nodes[m.Roots[i]].Name}' is a child of node {parentOf[m.Roots[i]]} (a scene lists root nodes only)");
-            if (m.Roots.IndexOf(m.Roots[i]) != i) throw new InvalidDataException($"root {m.Roots[i]} is listed twice");
+            var roots = m.Scenes[si].Nodes;
+            for (int i = 0; i < roots.Count; i++)
+            {
+                if (parentOf[roots[i]] != -1) throw new InvalidDataException($"scene {si}: root {roots[i]} '{m.Nodes[roots[i]].Name}' is a child of node {parentOf[roots[i]]} (a scene lists root nodes only)");
+                if (roots.IndexOf(roots[i]) != i) throw new InvalidDataException($"scene {si}: root {roots[i]} is listed twice");
+            }
         }
         for (int mi = 0; mi < m.Meshes.Count; mi++)
             for (int pi = 0; pi < m.Meshes[mi].Primitives.Count; pi++)
