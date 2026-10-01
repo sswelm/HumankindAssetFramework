@@ -106,8 +106,11 @@ the part **names** — the key every saved recipe holds — and their order, ver
 0.0002 + 2e-6 of the model's extent), dominant bones, and the RIGBONE rows. The names come from a port of the
 importer's own tree construction (`compute_vnodes`: creation depth-first from the parentless nodes in index order,
 armatures at the joints' deepest common ancestor, skinned meshes moved or split off under them, meshes on bones moved
-to children named after the mesh) and of `BLI_uniquename`; eleven **naming fixtures**
-(`tools/vehicle-probe-drill/naming_fixtures.py`) hold one rule each, and Blender confirms every one.
+to children named after the mesh, cameras taking names first) and of `BLI_uniquename`; sixteen **naming fixtures**
+(`tools/vehicle-probe-drill/naming_fixtures.py`) hold one rule each, and Blender confirms every one. Five of them exist
+because no real file had the shape: a self-review found that not one of 105 files carried a second skin, a camera whose
+name clashes, a non-unit rotation or a taken loose-part name — and four of the five fixtures built for those failed
+against Blender before the code was fixed. A PASS on every real file proves the rules the files exercise, no more.
 
 **The recipes are the product's own oracle**: each stores the parts Blender's probe listed when it was saved (5,214
 parts across 22 recipes). `recipe_check.py` sets every stored part beside the C# probe of its source. A recipe is user

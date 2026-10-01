@@ -14,7 +14,7 @@ using Newtonsoft.Json.Linq;
 // verbatim (HafMaterial.ExtensionsJson) and the names are declared in extensionsUsed, so KHR_materials_specular,
 // clearcoat and the like - and the textures they reference - survive a round trip; so are the texture samplers
 // (wrap and filters), the `extras` of the asset (Sketchfab's author and license), nodes, meshes, materials and scenes,
-// the asset's copyright, and EVERY scene with its name (the default one by index, or none, as the file had it). What the reader does not model is not here
+// the asset's copyright, the cameras (verbatim, and the node that holds each), and EVERY scene with its name (the default one by index, or none, as the file had it). What the reader does not model is not here
 // either, and the writer REFUSES rather than drops: a primitive with morph targets (counted by the reader, data not
 // carried) is refused by name; extensions anywhere but on a material, and extras elsewhere, are not carried and said
 // here. A model that cannot be written as it is - an index that does not fit a uint, a joint that does not fit a
@@ -149,6 +149,7 @@ public static class GlbWriter
             root["images"] = images;
         }
         // the samplers as the model carries them (verbatim); a texture that points past them gets a default one
+        if (m.Cameras.Count > 0) root["cameras"] = new JArray(m.Cameras.Select(c => (object)GlbReader.ParseObject(c)));
         int samplerCount = Math.Max(m.Samplers.Count, m.Textures.Count == 0 ? 0 : m.Textures.Max(t => t.Sampler) + 1);
         if (samplerCount > 0)
         {
@@ -253,6 +254,7 @@ public static class GlbWriter
                 }
                 if (n.Mesh >= 0) j["mesh"] = n.Mesh;
                 if (n.Skin >= 0) j["skin"] = n.Skin;
+                if (n.Camera >= 0) j["camera"] = n.Camera;
                 if (n.Children.Count > 0) j["children"] = new JArray(n.Children.Cast<object>());
                 if (n.ExtrasJson != null) j["extras"] = GlbReader.ParseToken(n.ExtrasJson);
                 nodes.Add(j);
@@ -438,6 +440,8 @@ public static class GlbWriter
         }
         // the verbatim JSON the model carries must be JSON objects, or the file would not parse (said here, not as a parser's exception from the middle of the write)
         for (int i = 0; i < m.Samplers.Count; i++) if (!IsJsonObject(m.Samplers[i])) throw new InvalidDataException($"sampler {i} is not a JSON object: {m.Samplers[i]}");
+        for (int i = 0; i < m.Cameras.Count; i++) if (!IsJsonObject(m.Cameras[i])) throw new InvalidDataException($"camera {i} is not a JSON object: {m.Cameras[i]}");
+        for (int i = 0; i < m.Nodes.Count; i++) if (m.Nodes[i].Camera >= m.Cameras.Count) throw new InvalidDataException($"node {i} '{m.Nodes[i].Name}' uses camera {m.Nodes[i].Camera}, the model has {m.Cameras.Count}");
         for (int i = 0; i < m.Nodes.Count; i++) if (m.Nodes[i].ExtrasJson != null && !IsJson(m.Nodes[i].ExtrasJson)) throw new InvalidDataException($"node {i} '{m.Nodes[i].Name}': extras is not JSON");
         for (int i = 0; i < m.Meshes.Count; i++) if (m.Meshes[i].ExtrasJson != null && !IsJson(m.Meshes[i].ExtrasJson)) throw new InvalidDataException($"mesh {i} '{m.Meshes[i].Name}': extras is not JSON");
         for (int i = 0; i < m.Materials.Count; i++)

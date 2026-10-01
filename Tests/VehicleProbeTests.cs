@@ -115,6 +115,47 @@ public class VehicleProbeTests
     }
 
     [Fact]
+    public void Loose_parts_are_named_in_the_pool_of_every_object()
+    {
+        // the "split_collision" fixture: one mesh "Hull" of three islands, and EMPTIES named Hull.001 and Hull.003. Blender: Hull, Hull.002, Hull.004
+        var me = new HafMesh { Name = "boat" };
+        me.Primitives.Add(new HafPrimitive { VertexCount = 9, Positions = new float[] { 0, 0, 0, 1, 0, 0, 0, 1, 0, 10, 0, 0, 13, 0, 0, 10, 3, 0, 20, 0, 0, 22, 0, 0, 20, 2, 0 }, Indices = new[] { 0, 1, 2, 3, 4, 5, 6, 7, 8 } });
+        var m = new HafModel(); m.Meshes.Add(me);
+        m.Nodes.Add(new HafNode { Name = "Hull", Mesh = 0 }); m.Nodes.Add(new HafNode { Name = "Hull.001" }); m.Nodes.Add(new HafNode { Name = "Hull.003" });
+        Assert.Equal(new[] { "Hull", "Hull.002", "Hull.004" }, VehicleProbe.Run(m).Parts.Select(p => p.Name));
+    }
+
+    [Fact]
+    public void A_rotation_that_is_not_a_unit_quaternion_is_normalized()
+    {
+        // the "nonunit_rotation" fixture: (0, 1, 0, 1) is a quarter turn about Y written 1.41 long. Blender: Turned 5,0.5,0.5 | 0,1,1;
+        // taken as given the part came out twice its size (4.5,1,0.5 | 1,2,1)
+        var m = new HafModel(); m.Meshes.Add(Tri("m")); m.Meshes.Add(Tri("m2"));
+        m.Nodes.Add(new HafNode { Name = "Long", Mesh = 0, Rotation = new double[] { 0, 0, 0, 2 } });
+        m.Nodes.Add(new HafNode { Name = "Turned", Mesh = 1, Rotation = new double[] { 0, 1, 0, 1 }, Translation = new double[] { 5, 0, 0 } });
+        var r = VehicleProbe.Run(m);
+        Assert.Equal("PART|Long|3|0.5000,0.0000,0.5000|1.0000,0.0000,1.0000|1||0", Clean(r.Parts[0].Row));
+        Assert.Equal("PART|Turned|3|5.0000,0.5000,0.5000|0.0000,1.0000,1.0000|1||0", Clean(r.Parts[1].Row));
+    }
+
+    [Fact]
+    public void The_rig_report_reads_the_first_created_armature()
+    {
+        // the "two_armatures" fixture: Blender printed RIGBONE|BoneB|3|5.5,0,0.5|1,0,1 and the parts MeshB (BoneB), MeshA (BoneA)
+        HafMesh Skinned(string name, float dx) { var me = new HafMesh { Name = name }; me.Primitives.Add(new HafPrimitive { VertexCount = 3, Positions = new[] { dx, 0, 0, dx + 1, 0, 0, dx, 1, 0 }, Joints = new ushort[12], Weights = new float[] { 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0 } }); return me; }
+        var m = new HafModel(); m.Meshes.Add(Skinned("ma", 0)); m.Meshes.Add(Skinned("mb", 5));
+        var rig2 = new HafNode { Name = "Rig2" }; rig2.Children.Add(1); var rig1 = new HafNode { Name = "Rig1" }; rig1.Children.Add(3);
+        m.Nodes.Add(rig2); m.Nodes.Add(new HafNode { Name = "BoneB" }); m.Nodes.Add(rig1); m.Nodes.Add(new HafNode { Name = "BoneA" });
+        m.Nodes.Add(new HafNode { Name = "MeshA", Mesh = 0, Skin = 0 }); m.Nodes.Add(new HafNode { Name = "MeshB", Mesh = 1, Skin = 1 });
+        m.Skins.Add(new HafSkin { Name = "SkinA", Joints = new[] { 3 } }); m.Skins.Add(new HafSkin { Name = "SkinB", Joints = new[] { 1 } });
+        var r = VehicleProbe.Run(Link(m));
+        Assert.Equal("Rig2", r.Armature);
+        Assert.Equal("RIGBONE|BoneB|3|5.5000,0.0000,0.5000|1.0000,0.0000,1.0000", Clean(r.RigBones.Single().Row));
+        Assert.Equal(new[] { "MeshB", "MeshA" }, r.Parts.Select(p => p.Name));
+        Assert.Equal(new[] { "BoneB", "BoneA" }, r.Parts.Select(p => p.Bone));
+    }
+
+    [Fact]
     public void A_matrix_node_is_what_Blender_decomposes_it_to()
     {
         // an exactly decomposable matrix (translation, a rotation about Y, a non-uniform scale) comes back as it was

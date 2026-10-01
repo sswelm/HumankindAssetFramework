@@ -29,6 +29,8 @@ public static class HafModelDiff
         if ((d = Count("textures", a.Textures.Count, b.Textures.Count)) != null) return d;
         if ((d = Count("images", a.Images.Count, b.Images.Count)) != null) return d;
         if ((d = Count("samplers", a.Samplers.Count, b.Samplers.Count)) != null) return d;
+        if ((d = Count("cameras", a.Cameras.Count, b.Cameras.Count)) != null) return d;
+        for (int i = 0; i < a.Cameras.Count; i++) if (a.Cameras[i] != b.Cameras[i]) return $"camera {i}: {a.Cameras[i]} -> {b.Cameras[i]}";
         if ((d = Count("skins", a.Skins.Count, b.Skins.Count)) != null) return d;
         if ((d = Count("animations", a.Animations.Count, b.Animations.Count)) != null) return d;
         if ((d = Count("scenes", a.Scenes.Count, b.Scenes.Count)) != null) return d;
@@ -52,6 +54,7 @@ public static class HafModelDiff
             if (!x.Children.SequenceEqual(y.Children)) return w + " children";
             if (x.Mesh != y.Mesh) return w + " mesh";
             if (x.Skin != y.Skin) return w + " skin";
+            if (x.Camera != y.Camera) return w + " camera";
             if (x.HasMatrix != y.HasMatrix) return w + " matrix presence";
             if (x.HasMatrix ? !x.Matrix.SequenceEqual(y.Matrix) : !(x.Translation.SequenceEqual(y.Translation) && x.Rotation.SequenceEqual(y.Rotation) && x.Scale.SequenceEqual(y.Scale))) return w + " transform";
             if (x.ExtrasJson != y.ExtrasJson) return w + " extras";

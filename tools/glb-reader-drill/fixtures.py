@@ -355,7 +355,30 @@ def fx_no_default_scene(out):
     write_glb(os.path.join(out, "no_default_scene.glb"), root, b)
 
 
-FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external, fx_cubic, fx_scenes, fx_materials, fx_skin8, fx_big, fx_names, fx_no_default_scene]
+def fx_dropped(out):
+    """What Blender's import DROPS of a file, all valid glTF and all kept by the reader and the writer: a mesh no node
+    uses (with a material and an image only it names), a triangle that repeats a vertex, and a second triangle over
+    the same three vertices (a face made double-sided by duplication - the Workshop writes such). A Workshop-fused Lab
+    source carries all three at scale (2,084 unused meshes of 2,107; 6,003 dropped triangles); the drill states
+    Blender's view beside the file's."""
+    b = Buf()
+    pos, nrm, uv, idx = grid(2, 1)
+    P = b.accessor(pos, "f", "VEC3"); UV = b.accessor(uv, "f", "VEC2", minmax=False)
+    # 4 real triangles, then one degenerate (0, 0, 1) and the first triangle again with its winding reversed
+    I = b.accessor(idx + [0, 0, 1] + [idx[0], idx[2], idx[1]], "H", "SCALAR")
+    P2 = b.accessor([(9, 0, 0), (10, 0, 0), (9, 1, 0)], "f", "VEC3")
+    used_img = b.blob(png(2, 2, (10, 200, 10))); spare_img = b.blob(png(2, 2, (200, 10, 10)))
+    root = base("dropped",
+                images=[{"name": "used", "mimeType": "image/png", "bufferView": used_img}, {"name": "spare", "mimeType": "image/png", "bufferView": spare_img}],
+                textures=[{"source": 0}, {"source": 1}],
+                materials=[{"name": "kept", "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}}, {"name": "orphaned", "pbrMetallicRoughness": {"baseColorTexture": {"index": 1}}}],
+                meshes=[{"name": "strip", "primitives": [{"attributes": {"POSITION": P, "TEXCOORD_0": UV}, "indices": I, "material": 0}]},
+                        {"name": "left_behind", "primitives": [{"attributes": {"POSITION": P2}, "material": 1}]}],
+                nodes=[{"name": "Strip", "mesh": 0}], scenes=[{"nodes": [0]}], scene=0)
+    write_glb(os.path.join(out, "dropped.glb"), root, b)
+
+
+FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external, fx_cubic, fx_scenes, fx_materials, fx_skin8, fx_big, fx_names, fx_no_default_scene, fx_dropped]
 
 
 def main(out):

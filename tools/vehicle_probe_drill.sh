@@ -16,6 +16,9 @@
 # a differing recipe over 100 MB is left to FULL=1). FULL=1 probes every file in Blender (about a minute in one
 # process, against some 10 s for the C# side, reading 1.7 GB included).
 # Not compared yet, said: the visibility (field 6) and inside-out (field 8) verdicts - steps 3b and 3c.
+# The naming fixtures hold one importer rule each - and the ones no real file of these populations has (review of
+# PR #112: not one of 105 files had a second skin, a camera whose name clashes, a rotation that is not a unit
+# quaternion, or a loose-part name already taken; each had a defect behind it that 105 PASSes could not show).
 # Prerequisites and SKIP rules as glb_reader_drill.sh.
 set -u
 UNITY="${UNITY:-C:/Program Files/Unity 2021.3.1f1/Editor/Data}"
@@ -51,6 +54,11 @@ if [ -n "$PACK" ]; then mapfile -t REGISTRY < <(python "$ROOT/tools/glb-reader-d
 SAMPLES_OK=()
 mapfile -t SLINES < <(python "$ROOT/tools/glb-reader-drill/fetch_samples.py" "$ROOT/References/gltf-samples" --list 2>/dev/null | tr -d '\r')
 for l in "${SLINES[@]}"; do IFS=$'\t' read -r sp st sx <<< "$l"; [ "$st" = "ok" ] && SAMPLES_OK+=("$sp"); done
+# the sample cache, when it exists, must be COMPLETE: a sample that went missing would narrow the drill without a word
+if [ -d "$ROOT/References/gltf-samples" ]; then
+  n_listed=$(grep -cvE '^\s*(#|$)' "$ROOT/tools/glb-reader-drill/samples.txt")
+  [ "${#SLINES[@]}" -eq "$n_listed" ] || { echo "FAIL — the Khronos sample cache has ${#SLINES[@]} of the $n_listed samples samples.txt names (fetch again: python tools/glb-reader-drill/fetch_samples.py References/gltf-samples)"; exit 1; }
+fi
 RECIPE_SOURCES=()
 [ -z "$PACK" ] || mapfile -t RECIPE_SOURCES < <(python "$ROOT/tools/vehicle-probe-drill/recipe_check.py" --list "$PROJECT" | tr -d '\r')
 FILES=("${FIXTURES[@]}" "${NAMING[@]}"); [ "${#REGISTRY[@]}" -eq 0 ] || FILES+=("${REGISTRY[@]}"); [ "${#SAMPLES_OK[@]}" -eq 0 ] || FILES+=("${SAMPLES_OK[@]}"); [ "${#RECIPE_SOURCES[@]}" -eq 0 ] || FILES+=("${RECIPE_SOURCES[@]}")

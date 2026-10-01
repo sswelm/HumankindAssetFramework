@@ -243,6 +243,29 @@ public class GlbReaderTests
     }
 
     [Fact]
+    public void Cameras_are_carried_verbatim_with_the_node_that_holds_each()
+    {
+        // review of PR #112: a round trip dropped them without a word (the Khronos Duck has one), and Blender names an object after each
+        var f = new Fixture();
+        int pos = f.FloatAccessor(new float[] { 0, 0, 0, 1, 0, 0, 0, 1, 0 }, "VEC3", 3);
+        f.Root["cameras"] = new JArray { new JObject { ["type"] = "perspective", ["name"] = "Lens", ["perspective"] = new JObject { ["yfov"] = 0.8, ["znear"] = 0.1, ["extras"] = new JObject { ["note"] = "wide" } } } };
+        f.Root["meshes"] = new JArray { new JObject { ["primitives"] = new JArray { new JObject { ["attributes"] = new JObject { ["POSITION"] = pos } } } } };
+        f.Root["nodes"] = new JArray { new JObject { ["mesh"] = 0 }, new JObject { ["name"] = "Eye", ["camera"] = 0 } };
+        var m = GlbReader.Read(f.Glb());
+        Assert.Single(m.Cameras); Assert.Contains("\"yfov\":0.8", m.Cameras[0]); Assert.Equal(0, m.Nodes[1].Camera); Assert.Equal(-1, m.Nodes[0].Camera);
+        var back = GlbReader.Read(GlbWriter.Write(m));
+        Assert.Equal(m.Cameras, back.Cameras); Assert.Equal(0, back.Nodes[1].Camera);
+        Assert.Null(HafModelDiff.FirstDifference(m, back));
+        back.Nodes[1].Camera = -1;
+        Assert.Equal("node 1 (Eye) camera", HafModelDiff.FirstDifference(m, back));
+        // a camera the file does not have is refused on both sides
+        f.Root["nodes"][1]["camera"] = 4;
+        Assert.Contains("uses camera 4, the file has 1", Assert.Throws<InvalidDataException>(() => GlbReader.Read(f.Glb())).Message);
+        m.Nodes[1].Camera = 4;
+        Assert.Contains("uses camera 4, the model has 1", Assert.Throws<InvalidDataException>(() => GlbWriter.Write(m)).Message);
+    }
+
+    [Fact]
     public void A_required_extension_that_lives_in_a_material_is_read_carried_and_written_back_as_required()
     {
         // a Lab source requires KHR_materials_pbrSpecularGlossiness: its geometry is core glTF, its colours are in the payload

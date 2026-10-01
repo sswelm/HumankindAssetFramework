@@ -585,7 +585,8 @@ if mode == "probe":
     # The glTF importer leaves every clip on an NLA track with the first one active and the scene on frame 1, so an
     # untouched import is a blend of all clips one frame in - a pose no file states (measured 2026-10-02: a part
     # moving 1 unit/s reads 0.0417 off its first key; three clips on one node read a scale of 1.018). Dropping the NLA
-    # tracks and going to frame 0 gives the first clip at its start, the state the C# probe computes.
+    # tracks and going to frame 0 gives the first clip at its start, the state the C# probe computes. It goes AFTER the
+    # preview path (argv[2], which may be empty): in that slot it would be taken for the path.
     if "posestart=1" in argv:
         for _po in bpy.data.objects:
             if _po.animation_data is not None:

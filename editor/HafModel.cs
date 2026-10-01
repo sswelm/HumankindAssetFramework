@@ -52,6 +52,10 @@ public sealed class HafModel
     public readonly List<HafTexture> Textures = new List<HafTexture>();
     public readonly List<HafImage> Images = new List<HafImage>();
     public readonly List<string> Samplers = new List<string>();   // the file's texture samplers, each the verbatim JSON object (wrap, filters): carried, not interpreted (review of PR #110: 28 non-default samplers in the registry were flattened)
+    // the file's cameras, each the verbatim JSON object: carried, not interpreted. A node names one by index (HafNode.Camera).
+    // Review of PR #112: they were dropped on a round trip without a word (Duck.glb has one), and a camera object takes a
+    // NAME in Blender's pool that the names computation needs.
+    public readonly List<string> Cameras = new List<string>();
     public readonly List<HafSkin> Skins = new List<HafSkin>();
     public readonly List<HafAnimation> Animations = new List<HafAnimation>();
     public readonly List<string> ExtensionsUsed = new List<string>();
@@ -90,6 +94,7 @@ public sealed class HafNode
     public double[] Matrix;                       // 16 doubles, column-major, or null
     public int Mesh = -1;
     public int Skin = -1;
+    public int Camera = -1;                       // index into HafModel.Cameras, or -1
     public string ExtrasJson;                     // the node's `extras`, verbatim JSON of any type, or null when absent: carried, not interpreted
     public bool HasMatrix => Matrix != null;
 }

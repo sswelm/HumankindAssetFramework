@@ -130,7 +130,72 @@ def fx_rotated_armature(out):
     F.write_glb(os.path.join(out, "scaled_armature.glb"), root, b)
 
 
-FIXTURES = [fx_naming, fx_order, fx_armature_names, fx_skinned_not_moved, fx_skinned_animated, fx_mesh_on_bone, fx_islands, fx_rotated_armature]
+def fx_two_armatures(out):
+    """TWO armatures, and the one created first is NOT skin 0's: Rig2 sits at a lower node index than Rig1. The script's
+    rig_report reads `arms[0]` - the first armature in creation order - so the RIGBONE rows are BoneB's (review of
+    PR #112: no file of the 105 had more than one skin, and the code took skin 0)."""
+    b = F.Buf()
+    a0 = skinned(b); a1 = {"POSITION": tri(b, 5), "JOINTS_0": b.accessor([(0, 0, 0, 0)] * 3, "H", "VEC4", minmax=False), "WEIGHTS_0": b.accessor([(1, 0, 0, 0)] * 3, "f", "VEC4", minmax=False)}
+    root = F.base("two_armatures",
+                  meshes=[{"name": "ma", "primitives": [{"attributes": a0}]}, {"name": "mb", "primitives": [{"attributes": a1}]}],
+                  nodes=[{"name": "Rig2", "children": [1]}, {"name": "BoneB"}, {"name": "Rig1", "children": [3]}, {"name": "BoneA"},
+                         {"name": "MeshA", "mesh": 0, "skin": 0}, {"name": "MeshB", "mesh": 1, "skin": 1}],
+                  skins=[{"name": "SkinA", "joints": [3]}, {"name": "SkinB", "joints": [1]}], scenes=[{"nodes": [0, 2, 4, 5]}], scene=0)
+    F.write_glb(os.path.join(out, "two_armatures.glb"), root, b)
+
+
+def fx_nested_skins(out):
+    """Two skins in ONE armature: the second skin's joints are a sub-chain of the first's, so its would-be armature is
+    already a bone and no second armature is made. Both meshes hang under the one armature; rig_report lists the bones
+    both carry."""
+    b = F.Buf()
+    a0 = {"POSITION": tri(b), "JOINTS_0": b.accessor([(0, 0, 0, 0), (1, 0, 0, 0), (2, 0, 0, 0)], "H", "VEC4", minmax=False), "WEIGHTS_0": b.accessor([(1, 0, 0, 0)] * 3, "f", "VEC4", minmax=False)}
+    a1 = {"POSITION": tri(b, 5), "JOINTS_0": b.accessor([(0, 0, 0, 0), (1, 0, 0, 0), (1, 0, 0, 0)], "H", "VEC4", minmax=False), "WEIGHTS_0": b.accessor([(1, 0, 0, 0)] * 3, "f", "VEC4", minmax=False)}
+    root = F.base("nested_skins",
+                  meshes=[{"name": "ma", "primitives": [{"attributes": a0}]}, {"name": "mb", "primitives": [{"attributes": a1}]}],
+                  nodes=[{"name": "Rig", "children": [1]}, {"name": "J0", "children": [2]}, {"name": "J1", "translation": [0, 1, 0], "children": [3]}, {"name": "J2", "translation": [0, 1, 0]},
+                         {"name": "MeshA", "mesh": 0, "skin": 0}, {"name": "MeshB", "mesh": 1, "skin": 1}],
+                  skins=[{"name": "Whole", "joints": [1, 2, 3]}, {"name": "Upper", "joints": [2, 3]}], scenes=[{"nodes": [0, 4, 5]}], scene=0)
+    F.write_glb(os.path.join(out, "nested_skins.glb"), root, b)
+
+
+def fx_split_collision(out):
+    """A single mesh of three islands whose split names are partly TAKEN: empties named Hull.001 and Hull.003 exist, so
+    Blender's loose parts are Hull, Hull.002, Hull.004 (review of PR #112: the split counted up in a pool of its own)."""
+    b = F.Buf()
+    pos = b.accessor([(0, 0, 0), (1, 0, 0), (0, 1, 0), (10, 0, 0), (13, 0, 0), (10, 3, 0), (20, 0, 0), (22, 0, 0), (20, 2, 0)], "f", "VEC3")
+    idx = b.accessor([0, 1, 2, 3, 4, 5, 6, 7, 8], "H", "SCALAR")
+    root = F.base("split_collision", meshes=[{"name": "boat", "primitives": [{"attributes": {"POSITION": pos}, "indices": idx}]}],
+                  nodes=[{"name": "Hull", "mesh": 0}, {"name": "Hull.001"}, {"name": "Hull.003"}], scenes=[{"nodes": [0, 1, 2]}], scene=0)
+    F.write_glb(os.path.join(out, "split_collision.glb"), root, b)
+
+
+def fx_nonunit_rotation(out):
+    """Rotations that are not unit quaternions (invalid by the letter, common in the wild): (0, 0, 0, 2) is no rotation
+    twice as long; (0, 1, 0, 1) is a quarter turn about Y at length 1.41. Blender normalizes; so must the probe, or the
+    part comes out scaled by the quaternion's squared length."""
+    b = F.Buf()
+    root = F.base("nonunit_rotation", meshes=[{"name": "m", "primitives": [{"attributes": {"POSITION": tri(b)}}]}, {"name": "m2", "primitives": [{"attributes": {"POSITION": tri(b)}}]}],
+                  nodes=[{"name": "Long", "mesh": 0, "rotation": [0, 0, 0, 2]}, {"name": "Turned", "mesh": 1, "rotation": [0, 1, 0, 1], "translation": [5, 0, 0]}],
+                  scenes=[{"nodes": [0, 1]}], scene=0)
+    F.write_glb(os.path.join(out, "nonunit_rotation.glb"), root, b)
+
+
+def fx_cameras(out):
+    """Cameras take names in the object pool: a NAMELESS camera node becomes an object named after its camera ("Camera"
+    when that has no name either), so the mesh node named Camera is Camera.001; a node with a mesh AND a camera keeps
+    the mesh and gets a child object for the camera."""
+    b = F.Buf()
+    cam = {"type": "perspective", "perspective": {"yfov": 0.8, "znear": 0.1}}
+    root = F.base("cameras", cameras=[dict(cam), dict(cam, name="Lens")],
+                  meshes=[{"name": "m", "primitives": [{"attributes": {"POSITION": tri(b)}}]}, {"name": "m2", "primitives": [{"attributes": {"POSITION": tri(b, 5)}}]}, {"name": "m3", "primitives": [{"attributes": {"POSITION": tri(b, 9)}}]}],
+                  nodes=[{"camera": 0}, {"name": "Camera", "mesh": 0}, {"name": "Both", "mesh": 1, "camera": 1}, {"name": "Lens", "mesh": 2}],
+                  scenes=[{"nodes": [0, 1, 2, 3]}], scene=0)
+    F.write_glb(os.path.join(out, "cameras.glb"), root, b)
+
+
+FIXTURES = [fx_naming, fx_order, fx_armature_names, fx_skinned_not_moved, fx_skinned_animated, fx_mesh_on_bone, fx_islands, fx_rotated_armature,
+            fx_two_armatures, fx_nested_skins, fx_split_collision, fx_nonunit_rotation, fx_cameras]
 
 
 def main(out):

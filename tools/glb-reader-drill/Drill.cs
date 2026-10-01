@@ -22,6 +22,9 @@ static class Drill
         int fails = 0; long totalBytes = 0; double totalMs = 0;
         foreach (var path in args)
         {
+            // the Lab's sources are the unreduced originals (one is 398 MB): collect before each file, or Mono's large-object
+            // space fragments and fourteen later files fail with "Insufficient memory" (seen 2026-10-02; flaky between runs)
+            GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
             var sw = Stopwatch.StartNew();
             HafModel m;
             try { m = GlbReader.Read(path); }
@@ -42,7 +45,7 @@ static class Drill
             var world = HafTransforms.WorldMatrices(m, HafTransforms.PoseAt(m, 0, 0.0));
             double[] mn = { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity }, mx = { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
             double area = 0; double[] cen = { 0, 0, 0 }, nsum = { 0, 0, 0 };
-            long boxed = 0;
+            long boxed = 0, keptTris = 0;
             for (int ni = 0; ni < m.Nodes.Count; ni++)
             {
                 if (m.Nodes[ni].Mesh < 0) continue;
@@ -61,9 +64,17 @@ static class Drill
                         boxed++;
                     }
                     // every triangle as drawn: TRIANGLES, and strips and fans unrolled with their winding (Blender imports those
-                    // triangulated; the modes fixture has one of each); lines and points draw no face
+                    // triangulated; the modes fixture has one of each); lines and points draw no face.
+                    // AS BLENDER KEEPS THEM: a triangle that repeats a vertex is no face, and a second triangle over the same
+                    // three vertices is dropped (a mesh holds one face per vertex set; the first stays) - a Workshop-fused Lab
+                    // source, 2026-10-02: 6,003 of its 3.59 M drawn triangles, 0.2 % of the area, are such
+                    var faces = new HashSet<(int, int, int)>();
                     foreach (var (ia, ib, ic) in p.Triangles())
                     {
+                        if (ia == ib || ib == ic || ia == ic) continue;
+                        int lo = Math.Min(ia, Math.Min(ib, ic)), hi = Math.Max(ia, Math.Max(ib, ic)), mid = ia + ib + ic - lo - hi;
+                        if (!faces.Add((lo, mid, hi))) continue;
+                        keptTris++;
                         double ax = wv[ia * 3], ay = wv[ia * 3 + 1], az = wv[ia * 3 + 2];
                         double ux = wv[ib * 3] - ax, uy = wv[ib * 3 + 1] - ay, uz = wv[ib * 3 + 2] - az;
                         double vx = wv[ic * 3] - ax, vy = wv[ic * 3 + 1] - ay, vz = wv[ic * 3 + 2] - az;
@@ -78,8 +89,7 @@ static class Drill
             if (area > 0) { cen[0] /= area; cen[1] /= area; cen[2] /= area; }
             // triangles as DRAWN - per node instance, as Blender's scene has them (a mesh two nodes share counts twice; the model's
             // TriangleCount is the mesh total). Found by the two-target fixture; no registry file instances a mesh twice.
-            long drawnTris = 0;
-            foreach (var n in m.Nodes) if (n.Mesh >= 0) foreach (var pp in m.Meshes[n.Mesh].Primitives) drawnTris += pp.TriangleCount;
+            long drawnTris = keptTris;   // counted in the loop above: the faces Blender keeps, per node instance
             string F(IEnumerable<double> xs) => string.Join(",", xs.Select(c => c.ToString("0.00000", inv)));
             string bbox = boxed == 0 ? "" : F(new[] { mn[0], mn[1], mn[2], mx[0], mx[1], mx[2] });
             string bboxIdentity = "";   // (kept in the line format; the skinned conventions were settled 2026-10-01: the weighted blend at animation 0, t = 0)
@@ -88,14 +98,29 @@ static class Drill
             // the materials Blender's importer ends up with: those a primitive uses (an unused one is never created), plus one it
             // invents PER MESH that has a COLOR_0 primitive without a material (measured 2026-10-02: two such primitives in one mesh
             // -> 1, in two meshes -> 2, one beside a materialed one -> 1 + 1; the Khronos BoxVertexColors and the normalized fixture)
+            // ... and only for a mesh a NODE uses: a mesh nothing instances is never imported (the same Lab source carries
+            // 2,084 of them beside the 23 its nodes use - 39 materials in the file, 22 in Blender)
             var usedMaterials = new HashSet<int>(); int invented = 0;
-            foreach (var me in m.Meshes)
+            var instanced = new HashSet<int>(m.Nodes.Where(n => n.Mesh >= 0).Select(n => n.Mesh));
+            for (int mi = 0; mi < m.Meshes.Count; mi++)
             {
+                if (!instanced.Contains(mi)) continue;
+                var me = m.Meshes[mi];
                 bool inventsOne = false;
                 foreach (var pp in me.Primitives) { if (pp.Material >= 0) usedMaterials.Add(pp.Material); else if (pp.Colors != null) inventsOne = true; }
                 if (inventsOne) invented++;
             }
             int blenderMaterials = usedMaterials.Count + invented;
+            // the images Blender ends up with: those a texture of a CREATED material names, in its five core slots or anywhere
+            // in its extension payload (a "...Texture": {"index": n} object)
+            var usedTextures = new HashSet<int>();
+            foreach (int mat in usedMaterials)
+            {
+                var hm = m.Materials[mat];
+                foreach (int t in new[] { hm.BaseColorTexture, hm.MetallicRoughnessTexture, hm.NormalTexture, hm.OcclusionTexture, hm.EmissiveTexture }) if (t >= 0) usedTextures.Add(t);
+                if (hm.ExtensionsJson != null) CollectTextures(GlbReader.ParseObject(hm.ExtensionsJson), usedTextures);
+            }
+            int blenderImages = usedTextures.Where(t => t < m.Textures.Count && m.Textures[t].Source >= 0).Select(t => m.Textures[t].Source).Distinct().Count();
             // what Blender 5.1 states about an animation: ONE action per glTF animation (slotted: every target a slot), its span
             // = the earliest first key to the latest last key over every channel (review of PR #109, round 5, measured on a
             // two-target fixture: channels ending at 1 s and 2 s, one starting at 0.5 s -> one action, 0..2 s). The same term
@@ -113,7 +138,7 @@ static class Drill
                 if (first <= last) spans.Add(last - first);
             }
             var sortedDurations = spans.Select(d => Math.Round(d, 3)).OrderBy(d => d).Select(d => d.ToString("0.000", inv));
-            Console.WriteLine($"FILE\t{Key(path)}\ttris={drawnTris}\tmaterials={m.Materials.Count}\tblendermaterials={blenderMaterials}\timages={m.Images.Count}\tjoints={joints}\tanimations={m.Animations.Count}\tdurations={durations}\tnodes={m.Nodes.Count}\tmeshes={m.Meshes.Count}\tvertices={m.VertexCount}\tms={sw.Elapsed.TotalMilliseconds:0}\tbbox={bbox}\tbboxidentity={bboxIdentity}\tarea={area.ToString("0.00000", inv)}\tcentroid={F(cen)}\tnsum={F(nsum)}\tbones={string.Join("|", bones)}\tsorteddurations={string.Join(",", sortedDurations)}");
+            Console.WriteLine($"FILE\t{Key(path)}\ttris={drawnTris}\tmaterials={m.Materials.Count}\tblendermaterials={blenderMaterials}\tblenderimages={blenderImages}\timages={m.Images.Count}\tjoints={joints}\tanimations={m.Animations.Count}\tdurations={durations}\tnodes={m.Nodes.Count}\tmeshes={m.Meshes.Count}\tvertices={m.VertexCount}\tms={sw.Elapsed.TotalMilliseconds:0}\tbbox={bbox}\tbboxidentity={bboxIdentity}\tarea={area.ToString("0.00000", inv)}\tcentroid={F(cen)}\tnsum={F(nsum)}\tbones={string.Join("|", bones)}\tsorteddurations={string.Join(",", sortedDurations)}");
         }
         Console.WriteLine($"TOTAL\tfiles={args.Length}\tMB={totalBytes / 1e6:0.0}\tms={totalMs:0}");
         return fails == 0 ? 0 : 1;
@@ -121,6 +146,18 @@ static class Drill
 
     // What the reader's structural checks do not cover: a skinned vertex's weights sum to about 1 and its joints index
     // the skin the node uses (the file's contract with the game's skinning, which reads garbage otherwise).
+    /// <summary>Every texture index a payload names: any property ending in "Texture" (or named "texture") holding an object with an integer "index".</summary>
+    static void CollectTextures(Newtonsoft.Json.Linq.JToken t, HashSet<int> into)
+    {
+        if (t is Newtonsoft.Json.Linq.JObject o)
+            foreach (var prop in o.Properties())
+            {
+                if (prop.Name.EndsWith("Texture", StringComparison.OrdinalIgnoreCase) && prop.Value is Newtonsoft.Json.Linq.JObject info && info["index"] != null && info["index"].Type == Newtonsoft.Json.Linq.JTokenType.Integer) into.Add((int)info["index"]);
+                CollectTextures(prop.Value, into);
+            }
+        else if (t is Newtonsoft.Json.Linq.JArray a) foreach (var e in a) CollectTextures(e, into);
+    }
+
     static string Consistency(HafModel m)
     {
         foreach (var n in m.Nodes)

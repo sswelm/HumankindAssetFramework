@@ -25,6 +25,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   went from 759 to 737 MB). A file that REQUIRES an extension whose whole effect is a material's payload
   (`KHR_materials_pbrSpecularGlossiness` on a Lab source) is read and the payload carried — and written back as
   required; such a material previews untextured. Everything that changes how data is decoded stays refused.
+  **Cameras** are carried verbatim with the node that holds each (a round trip dropped them without a word). The
+  reader and writer drills now take the Lab's recipe sources too (the registry holds its outputs, these are its
+  inputs); the reader drill states Blender's view of a file beside the file's: no mesh a node does not use, no
+  degenerate triangle, no second face over the same three vertices (a Workshop-fused source carries 2,084 unused
+  meshes of 2,107 — three quarters of its triangles — and 6,003 such faces).
 - **The GLB reader and writer drilled on the rest of the specification** (round-trip diversity, 2026-10-02). Eleven
   generated fixtures (`tools/glb-reader-drill/fixtures.py`: normalized integer attributes, interleaved views, every
   primitive mode, a `.gltf` with sidecars and a data URI, cubic-spline keys, two scenes and an orphan, material and

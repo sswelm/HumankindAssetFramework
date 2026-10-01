@@ -120,6 +120,46 @@ public class BlenderNamesTests
     }
 
     [Fact]
+    public void The_first_armature_is_the_first_created_not_skin_zeros()
+    {
+        // the "two_armatures" fixture: Rig2(0) > BoneB(1), Rig1(2) > BoneA(3); skin 0 = SkinA over BoneA, skin 1 = SkinB over BoneB.
+        // Blender creates Rig2 first; the Lab's rig report reads `arms[0]` and printed RIGBONE|BoneB
+        var m = Model(new[] { Mesh("ma"), Mesh("mb") }, new[] { Node("Rig2", -1, -1, 1), Node("BoneB"), Node("Rig1", -1, -1, 3), Node("BoneA"), Node("MeshA", 0, 0), Node("MeshB", 1, 1) });
+        m.Skins.Add(new HafSkin { Name = "SkinA", Joints = new[] { 3 } }); m.Skins.Add(new HafSkin { Name = "SkinB", Joints = new[] { 1 } });
+        var r = BlenderNames.Compute(m);
+        Assert.Equal(new[] { (0, "Rig2"), (2, "Rig1") }, r.ArmaturesInOrder);
+        Assert.Equal(new[] { "Rig1", "Rig2" }, r.ArmatureOfSkin); Assert.Equal(new[] { 2, 0 }, r.ArmatureNodeOfSkin);
+        Assert.Equal(0, r.ArmatureNodeOfBone[1]); Assert.Equal(2, r.ArmatureNodeOfBone[3]);
+        Assert.Equal(new[] { 5, 4 }, r.MeshObjectsInOrder.Select(x => x.node));   // MeshB hangs under the first armature: Blender listed it first
+    }
+
+    [Fact]
+    public void A_skin_inside_another_skins_chain_shares_its_armature()
+    {
+        // the "nested_skins" fixture: Rig(0) > J0(1) > J1(2) > J2(3); skin 0 over J0..J2, skin 1 over J1, J2 - whose would-be
+        // armature, J0, is already a bone: one armature, both skins in it
+        var m = Model(new[] { Mesh("ma"), Mesh("mb") }, new[] { Node("Rig", -1, -1, 1), Node("J0", -1, -1, 2), Node("J1", -1, -1, 3), Node("J2"), Node("MeshA", 0, 0), Node("MeshB", 1, 1) });
+        m.Skins.Add(new HafSkin { Name = "Whole", Joints = new[] { 1, 2, 3 } }); m.Skins.Add(new HafSkin { Name = "Upper", Joints = new[] { 2, 3 } });
+        var r = BlenderNames.Compute(m);
+        Assert.Single(r.ArmaturesInOrder);
+        Assert.Equal(new[] { "Rig", "Rig" }, r.ArmatureOfSkin); Assert.Equal(new[] { 0, 0 }, r.ArmatureNodeOfSkin);
+    }
+
+    [Fact]
+    public void A_camera_takes_a_name_in_the_pool_before_a_mesh_of_that_name()
+    {
+        // the "cameras" fixture: a nameless camera node (camera 0, unnamed -> "Camera"), a mesh node named Camera, a node with a
+        // mesh AND camera "Lens", a mesh node named Lens. Blender: Camera.001, Both, Lens.001
+        var m = Model(new[] { Mesh("m"), Mesh("m2"), Mesh("m3") }, new[] { Node(""), Node("Camera", 0), Node("Both", 1), Node("Lens", 2) });
+        m.Cameras.Add("{\"type\":\"perspective\"}"); m.Cameras.Add("{\"type\":\"perspective\",\"name\":\"Lens\"}");
+        m.Nodes[0].Camera = 0; m.Nodes[2].Camera = 1;
+        var r = BlenderNames.Compute(m);
+        Assert.Equal(new[] { null, "Camera.001", "Both", "Lens.001" }, r.MeshObjectOfNode);
+        Assert.Equal("Camera", r.ObjectOfNode[0]);
+        Assert.Contains("Lens", r.ObjectPool);   // the camera object split off the node that also carries a mesh
+    }
+
+    [Fact]
     public void Unique_is_BLI_uniquename()
     {
         var pool = new HashSet<string>();

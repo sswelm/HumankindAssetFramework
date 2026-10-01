@@ -42,6 +42,15 @@ OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -out:"$WTMP/read.exe" "${REFS[@]
 FILES=()
 [ -z "$PACK" ] || mapfile -t FILES < <(python "$ROOT/tools/glb-reader-drill/registry_files.py" "$PACK" | tr -d '\r')
 [ -n "$PACK" ] && [ "${#FILES[@]}" -eq 0 ] && REGISTRY_NOTE="NO registry (it names no .glb that exists on disk)"
+# plus the SOURCES of the Lab's saved recipes: the registry holds the Lab's outputs, these are its inputs - the unreduced
+# originals every later step reads (review of PR #112: they found shared vertex accessors and a required material
+# extension that no registry file has). Read (and written) always; put to Blender under FULL=1.
+RECIPE_SOURCES=()
+[ -z "$PACK" ] || mapfile -t RECIPE_SOURCES < <(python "$ROOT/tools/vehicle-probe-drill/recipe_check.py" --list "$PROJECT" | tr -d '\r')
+if [ "${#RECIPE_SOURCES[@]}" -gt 0 ]; then FILES+=("${RECIPE_SOURCES[@]}"); mapfile -t FILES < <(printf '%s\n' "${FILES[@]}" | awk '!seen[tolower($0)]++'); REGISTRY_NOTE="$REGISTRY_NOTE and ${#RECIPE_SOURCES[@]} recipe sources"; fi
+# the registry's own files: the gate's Blender sample takes its largest and smallest from these (a 398 MB recipe source in every push is 20 s)
+REGISTRY_ONLY=()
+for f in "${FILES[@]}"; do keep=1; for r in "${RECIPE_SOURCES[@]}"; do [ "${f,,}" = "${r,,}" ] && { keep=0; break; }; done; [ "$keep" = 1 ] && REGISTRY_ONLY+=("$f"); done
 # plus the shapes the registry does not have: the fixture library (fixtures.py, one small file per shape) and the
 # Khronos sample assets when they are fetched (fetch_samples.py; other exporters' output). A sample line may carry an
 # expectation - a stage that must refuse the file by name - checked below instead of round-tripped.
@@ -62,6 +71,11 @@ if [ -d "$ROOT/References/gltf-samples" ]; then
 fi
 # two registry entries may share a file; the written copies are keyed by basename, so write each file once
 mapfile -t UNIQUE < <(printf '%s\n' "${FILES[@]}" | awk '!seen[tolower($0)]++')
+# a source over 200 MB is read by the other drills but not ROUND-TRIPPED here: two whole models and the file's bytes at once
+# run Unity's Mono out of large-object space (the 398 MB Workshop fuse, three quarters of it meshes no node uses). Named, not hidden.
+KEPT=(); N_TOO_BIG=0
+for f in "${UNIQUE[@]}"; do if [ "$(stat -c %s "$f" 2>/dev/null || echo 0)" -gt 200000000 ]; then N_TOO_BIG=$((N_TOO_BIG + 1)); echo "NOTE — not written in this drill (over 200 MB): $f"; else KEPT+=("$f"); fi; done
+UNIQUE=("${KEPT[@]}")
 
 # ---- 00. every extensions/extras object in the SOURCES sits where the model carries it (the reader does not model the
 # rest, so the writer would drop it without a word and the reader-vs-reader compare below could not tell)
@@ -112,7 +126,7 @@ if [ -z "$BLENDER" ]; then echo "PASS — GLB writer drill: $n_wrote files writt
 if [ "${FULL:-0}" = "1" ]; then SAMPLE=("${WFILES[@]}")
 else
   # the written fixtures and Khronos samples (every one), the largest and smallest two written registry files
-  mapfile -t SAMPLE < <( { for f in "${FIXTURES[@]}" "${SAMPLES_OK[@]}"; do [ -n "$f" ] && echo "$WRITTEN/$(basename "${f%.*}").glb"; done; ls -S "${WFILES[@]}" | head -2; ls -S "${WFILES[@]}" | tail -2; } | sort -u )
+  mapfile -t SAMPLE < <( { for f in "${FIXTURES[@]}" "${SAMPLES_OK[@]}"; do [ -n "$f" ] && echo "$WRITTEN/$(basename "${f%.*}").glb"; done; [ "${#REGISTRY_ONLY[@]}" -eq 0 ] || { ls -S "${REGISTRY_ONLY[@]}" | head -2; ls -S "${REGISTRY_ONLY[@]}" | tail -2; } | while IFS= read -r f; do echo "$WRITTEN/$(basename "${f%.*}").glb"; done; } | sort -u )
 fi
 BOUT=$("$BLENDER" --background --python-exit-code 1 --python "$(cygpath -m "$ROOT/tools/glb-reader-drill/blender_counts.py")" -- "${SAMPLE[@]}" 2>&1); brc=$?
 BOUT=$(printf '%s' "$BOUT" | LC_ALL=C sed 's/\xEF\xBB\xBF//g')

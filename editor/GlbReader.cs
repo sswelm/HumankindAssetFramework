@@ -132,6 +132,7 @@ public static class GlbReader
             }
             model.Images.Add(image);
         }
+        foreach (var cam in root["cameras"] as JArray ?? new JArray()) model.Cameras.Add(cam is JObject co ? co.ToString(Newtonsoft.Json.Formatting.None) : "{}");
         foreach (var sp in root["samplers"] as JArray ?? new JArray()) model.Samplers.Add(sp is JObject so ? so.ToString(Newtonsoft.Json.Formatting.None) : "{}");
         foreach (var tx in root["textures"] as JArray ?? new JArray())
             model.Textures.Add(new HafTexture { Name = tx["name"]?.ToString() ?? "", Source = tx["source"]?.Value<int>() ?? -1, Sampler = tx["sampler"]?.Value<int>() ?? -1 });
@@ -210,6 +211,11 @@ public static class GlbReader
             if (nd["rotation"] is JArray r) n.Rotation = Doubles(r, 4, "node rotation");
             if (nd["scale"] is JArray s) n.Scale = Doubles(s, 3, "node scale");
             n.ExtrasJson = Extras(nd);
+            if (nd["camera"] != null)
+            {
+                n.Camera = nd.Value<int>("camera");
+                if (n.Camera < 0 || n.Camera >= model.Cameras.Count) throw new InvalidDataException($"node '{n.Name}' uses camera {n.Camera}, the file has {model.Cameras.Count}");
+            }
             if (n.Mesh >= model.Meshes.Count) throw new InvalidDataException($"node '{n.Name}' references mesh {n.Mesh}, the file has {model.Meshes.Count}");
             model.Nodes.Add(n);
         }

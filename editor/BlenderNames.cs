@@ -19,8 +19,11 @@
 //     node, else "Node_<index>" (unique within its armature);
 //   * uniqueness (BLI_uniquename): when a name is taken, split a trailing ".NNN" off, then try NNN+1, NNN+2 ...
 //     as ".%03d" until free. Objects of every type share one pool; meshes, armatures and bones have their own.
-// Cameras, lights and EXT_mesh_gpu_instancing are not modelled (the reader does not carry them): such a node is an
-// empty here, which takes the same name - the only thing that matters for the pool.
+//   * a camera node's object is named after the node, else after the camera datablock (the glTF camera's name, else
+//     "Camera", unique among cameras); a node with a mesh AND a camera keeps the mesh and gets a child for the camera.
+// Lights (KHR_lights_punctual) and EXT_mesh_gpu_instancing are not modelled - the reader does not carry them: a
+// NAMED light node takes the same name as the empty it is here; a nameless one would take its light's name in
+// Blender and "Node_<index>" here. No file of the drill's populations has one.
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -39,10 +42,18 @@ public static class BlenderNames
         public List<(int node, string name)> MeshObjectsInOrder = new List<(int, string)>();
         /// <summary>Per joint node: its bone name (unique within its armature).</summary>
         public Dictionary<int, string> BoneOfJoint = new Dictionary<int, string>();
-        /// <summary>Per skin: the armature object's name.</summary>
+        /// <summary>Per skin: the armature object its joints are bones of (two skins may share one), by name.</summary>
         public string[] ArmatureOfSkin;
-        /// <summary>Per skin: the node that became the armature, or -1 for the dummy root.</summary>
+        /// <summary>Per skin: the node that became that armature, or -1 for the dummy root.</summary>
         public int[] ArmatureNodeOfSkin;
+        /// <summary>The armature objects in creation order - Blender's `scene.objects` order, whose first is the one the
+        /// Lab's rig report reads: (node or -1 for the dummy root, name).</summary>
+        public List<(int node, string name)> ArmaturesInOrder = new List<(int, string)>();
+        /// <summary>Per glTF node that is a bone: the node that became its armature, or -1 for the dummy root.</summary>
+        public int[] ArmatureNodeOfBone;
+        /// <summary>Every object name the import made, of every type (meshes, empties, armatures, cameras, bone shapes):
+        /// the pool a later name is made unique in.</summary>
+        public HashSet<string> ObjectPool;
         /// <summary>The bone-shape objects the importer added (one per armature): "Icosphere", "Icosphere.001", ...</summary>
         public List<string> BoneShapes = new List<string>();
         /// <summary>Per glTF node: whether the importer made it a BONE, and then its parent in the importer's tree -
@@ -57,6 +68,7 @@ public static class BlenderNames
         public string Id; public string Name; public string DefaultName; public string Parent;
         public readonly List<string> Children = new List<string>();
         public int MeshNode = -1;              // the glTF node whose mesh this vnode carries, or -1
+        public int CameraNode = -1;            // the glTF node whose camera this vnode carries, or -1
         public Kind Type = Kind.Object; public bool IsArma; public string ArmaName; public string BoneArma; public int ArmaSkin = -1;
     }
 
@@ -66,7 +78,7 @@ public static class BlenderNames
         void Add(VNode n) { v[n.Id] = n; order.Add(n.Id); }
         for (int i = 0; i < m.Nodes.Count; i++)
         {
-            var n = new VNode { Id = Key(i), Name = m.Nodes[i].Name.Length > 0 ? m.Nodes[i].Name : null, DefaultName = "Node_" + i, MeshNode = m.Nodes[i].Mesh >= 0 ? i : -1 };
+            var n = new VNode { Id = Key(i), Name = m.Nodes[i].Name.Length > 0 ? m.Nodes[i].Name : null, DefaultName = "Node_" + i, MeshNode = m.Nodes[i].Mesh >= 0 ? i : -1, CameraNode = m.Nodes[i].Camera >= 0 ? i : -1 };
             foreach (var c in m.Nodes[i].Children) n.Children.Add(Key(c));
             Add(n);
         }
@@ -111,7 +123,7 @@ public static class BlenderNames
             string arma = v[Key(m.Skins[skin].Joints[0])].BoneArma;
             if (arma == null) continue;   // a joint that is not under an armature (the reader accepts such files); the importer would fail
             bool isAnimated = Index(id) >= 0 && animatedNodes.Contains(Index(id));
-            bool okToMove = !isAnimated && n.Type == Kind.Object && !n.IsArma && n.Children.Count == 0;
+            bool okToMove = !isAnimated && n.Type == Kind.Object && !n.IsArma && n.Children.Count == 0 && n.CameraNode < 0;
             if (okToMove)
             {
                 if (n.Parent != arma) { v[n.Parent].Children.Remove(id); n.Parent = arma; v[arma].Children.Add(id); }   // reparent: a no-op when it is there already (keeps its place)
@@ -125,17 +137,20 @@ public static class BlenderNames
         foreach (var id in order.ToList())
         {
             var n = v[id];
-            if (n.MeshNode >= 0 && (n.IsArma || n.Type == Kind.Bone))
+            bool needsMove = n.IsArma || n.Type == Kind.Bone;
+            if (n.MeshNode >= 0)
             {
-                var moved = new VNode { Id = id + ".mesh", Parent = id, MeshNode = n.MeshNode };
-                Add(moved); n.Children.Add(moved.Id); n.MeshNode = -1;
+                if (needsMove) { var moved = new VNode { Id = id + ".mesh", Parent = id, MeshNode = n.MeshNode }; Add(moved); n.Children.Add(moved.Id); n.MeshNode = -1; }
+                needsMove = true;   // an object holds one thing: with a mesh on it, a camera moves off
             }
+            if (n.CameraNode >= 0 && needsMove) { var moved = new VNode { Id = id + ".camera", Parent = id, CameraNode = n.CameraNode }; Add(moved); n.Children.Add(moved.Id); n.CameraNode = -1; }
         }
 
         // ---- creation, depth-first: objects, armatures (with their bones and bone shape), mesh datablocks
         var r = new Result { MeshObjectOfNode = new string[m.Nodes.Count], ObjectOfNode = new string[m.Nodes.Count], ArmatureOfSkin = new string[m.Skins.Count], ArmatureNodeOfSkin = new int[m.Skins.Count], IsBone = new bool[m.Nodes.Count], BoneParent = new int[m.Nodes.Count] };
         for (int i = 0; i < m.Nodes.Count; i++) { r.IsBone[i] = v[Key(i)].Type == Kind.Bone; r.BoneParent[i] = Index(v[Key(i)].Parent); }
-        var objects = new HashSet<string>(StringComparer.Ordinal); var meshes = new HashSet<string>(StringComparer.Ordinal); var armatures = new HashSet<string>(StringComparer.Ordinal);
+        var objects = new HashSet<string>(StringComparer.Ordinal); var meshes = new HashSet<string>(StringComparer.Ordinal); var armatures = new HashSet<string>(StringComparer.Ordinal); var cameras = new HashSet<string>(StringComparer.Ordinal);
+        var armaName = new Dictionary<string, string>();
         var meshData = new Dictionary<(int mesh, int skin), string>();
         void Create(string id)
         {
@@ -160,7 +175,7 @@ public static class BlenderNames
                     string data = Unique(armatures, n.ArmaName);
                     name = Unique(objects, n.Name ?? data);
                     r.BoneShapes.Add(Unique(objects, "Icosphere"));   // armature_display: the bone-shape object, one per armature
-                    for (int si = 0; si < m.Skins.Count; si++) if (armaOfSkin[si] == id) { r.ArmatureOfSkin[si] = name; r.ArmatureNodeOfSkin[si] = Index(id); }
+                    armaName[id] = name; r.ArmaturesInOrder.Add((Index(id), name));
                     // create_bones: every bone under this armature, depth-first, unique within it
                     var bones = new HashSet<string>(StringComparer.Ordinal);
                     void Bones(string bid)
@@ -170,6 +185,13 @@ public static class BlenderNames
                     }
                     foreach (var c in n.Children) Bones(c);
                 }
+                else if (n.CameraNode >= 0)
+                {
+                    // BlenderCamera.create: a datablock per camera OBJECT, named after the glTF camera or "Camera"
+                    var cam = m.Cameras[m.Nodes[n.CameraNode].Camera];
+                    string camName = (GlbReader.ParseObject(cam)["name"]?.ToString() is string cn && cn.Length > 0) ? cn : "Camera";
+                    name = Unique(objects, n.Name ?? Unique(cameras, camName));
+                }
                 else name = Unique(objects, n.Name ?? n.DefaultName);
                 int ni = Index(id);
                 if (ni >= 0) r.ObjectOfNode[ni] = name;
@@ -177,6 +199,17 @@ public static class BlenderNames
             foreach (var c in n.Children) Create(c);
         }
         Create("root");
+        // a skin's armature is the one its joints are bones of (the importer reads it off the first joint) - not always
+        // the one the skin itself would have made: a skin whose joints lie inside another skin's chain makes none
+        r.ArmatureNodeOfBone = new int[m.Nodes.Count];
+        for (int i = 0; i < m.Nodes.Count; i++) r.ArmatureNodeOfBone[i] = v[Key(i)].Type == Kind.Bone && v[Key(i)].BoneArma != null ? Index(v[Key(i)].BoneArma) : -1;
+        for (int si = 0; si < m.Skins.Count; si++)
+        {
+            string arma = m.Skins[si].Joints.Length > 0 ? v[Key(m.Skins[si].Joints[0])].BoneArma : null;
+            if (arma == null || !armaName.ContainsKey(arma)) { r.ArmatureNodeOfSkin[si] = -1; continue; }
+            r.ArmatureOfSkin[si] = armaName[arma]; r.ArmatureNodeOfSkin[si] = Index(arma);
+        }
+        r.ObjectPool = objects;
         return r;
     }
 

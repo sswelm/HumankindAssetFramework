@@ -62,19 +62,19 @@ public static class VehicleProbe
         // (the importer's get_node_trs): whatever shear it holds is gone. The Lab's own rah66.glb has such a node (axes 0.13
         // degrees off square) and four parts' boxes read 0.15 % differently through the matrix as given.
         var pose = m.Animations.Count > 0 ? HafTransforms.PoseAt(m, 0, 0.0) : null;
-        var world = HafTransforms.WorldMatrices(m, i => pose?.Invoke(i) ?? (m.Nodes[i].HasMatrix ? AsBlenderDecomposes(m.Nodes[i].Matrix) : null));
+        var world = HafTransforms.WorldMatrices(m, i => pose?.Invoke(i) ?? (m.Nodes[i].HasMatrix ? AsBlenderDecomposes(m.Nodes[i].Matrix) : UnitRotation(m.Nodes[i])));
         // which node's world matrix is each skin's armature OBJECT: the node that became it, or identity for the dummy root
         var armaWorld = new double[m.Skins.Count][];
         for (int si = 0; si < m.Skins.Count; si++) armaWorld[si] = names.ArmatureNodeOfSkin[si] >= 0 ? world[names.ArmatureNodeOfSkin[si]] : HafTransforms.Identity;
-        r.Armature = m.Skins.Count > 0 ? names.ArmatureOfSkin[0] : null;
+        r.Armature = names.ArmaturesInOrder.Count > 0 ? names.ArmaturesInOrder[0].name : null;   // the first CREATED, which is what `arms[0]` is - not skin 0's
 
         // ---- the mesh objects, in Blender's order, each one object per node (a mesh two nodes share is two objects)
-        var objects = new List<(int node, string name)>();
+        var objects = new List<(int node, string name)>(); var purgedNames = new List<string>();
         foreach (var (node, name) in names.MeshObjectsInOrder)
         {
             var mesh = m.Meshes[m.Nodes[node].Mesh];
             if (mesh.Primitives.Sum(p => Used(p).Length) == 0) continue;            // mesh_objects(): len(vertices) > 0
-            if (IsIcosphereArtifact(m, node, name)) { r.Notes.Add("purged glTF importer bone-shape artifact: " + name); continue; }
+            if (IsIcosphereArtifact(m, node, name)) { r.Notes.Add("purged glTF importer bone-shape artifact: " + name); purgedNames.Add(name); continue; }
             objects.Add((node, name));
         }
 
@@ -85,7 +85,11 @@ public static class VehicleProbe
             var islands = Islands(m.Meshes[m.Nodes[node].Mesh]);
             r.Split = true;
             r.Notes.Add($"single mesh split into {islands.Count} loose parts (names are synthetic)");
-            var pool = new HashSet<string>(StringComparer.Ordinal) { name };
+            // the loose parts are named in the pool of EVERY object the import made (an empty called Hull.001 pushes the
+            // second island to Hull.002), less the bone shapes and the artefacts the script purged before it split
+            var pool = new HashSet<string>(names.ObjectPool, StringComparer.Ordinal);
+            foreach (var shape in names.BoneShapes) pool.Remove(shape);
+            foreach (var gone in purgedNames) pool.Remove(gone);   // only what was PURGED frees its name: a mesh object without vertices is not listed, but still there
             var geo = Geometry(m, node, world, armaWorld);   // ONCE: 3,350 islands each re-posing the whole mesh took 18 s on the Ehrhardt
             for (int k = 0; k < islands.Count; k++)
                 r.Parts.Add(MakePart(m, node, k == 0 ? name : BlenderNames.Unique(pool, name), geo, islands[k].prim, islands[k].verts, names));
@@ -94,7 +98,7 @@ public static class VehicleProbe
             foreach (var (node, name) in objects) r.Parts.Add(MakePart(m, node, name, Geometry(m, node, world, armaWorld), -1, null, names));
 
         // ---- rig_report: the first armature's bones, from the undeformed vertices (v.co = the bind pose)
-        if (m.Skins.Count > 0) RigReport(m, names, armaWorld, BindArmatureMatrices(m, names), r);
+        if (names.ArmaturesInOrder.Count > 0) RigReport(m, names, armaWorld, BindArmatureMatrices(m, names), r);
         return r;
     }
 
@@ -252,6 +256,19 @@ public static class VehicleProbe
         return big > 0 && small > 0.8 * big;
     }
 
+    // ---------------------------------------------------------------- a rotation as Blender holds it
+
+    /// <summary>A TRS node's local matrix with its rotation NORMALIZED, or null when it already is: a quaternion that is
+    /// not of unit length (invalid by the letter, written by real exporters) scales the part by its squared length when
+    /// taken as given - (0, 1, 0, 1) made a part twice its size; Blender normalizes and so does this.</summary>
+    static double[] UnitRotation(HafNode n)
+    {
+        var q = n.Rotation;
+        double len = Math.Sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+        if (len == 0 || Math.Abs(len - 1) < 1e-12) return null;
+        return HafTransforms.Trs(n.Translation, new[] { q[0] / len, q[1] / len, q[2] / len, q[3] / len }, n.Scale);
+    }
+
     // ---------------------------------------------------------------- a matrix as Blender holds it
 
     /// <summary>A glTF node matrix as Blender's importer keeps it: converted to Blender's frame, decomposed
@@ -389,11 +406,12 @@ public static class VehicleProbe
 
     static void RigReport(HafModel m, BlenderNames.Result names, double[][] armaWorld, double[][] bindArma, Result r)
     {
-        // the FIRST armature's bones (scene order = creation order; skin 0's armature is created first unless another
-        // skin's armature sits earlier in the tree - the names result lists them per skin; take the one created first)
-        int firstSkin = 0;
+        // the FIRST armature's bones - `arms[0]`, the first in creation order, which need not be skin 0's (the two_armatures
+        // fixture: Rig2 sits at a lower node index than skin 0's Rig1 and Blender reports BoneB) - EVERY bone of it, whichever
+        // skin's joints they are (two skins can share an armature)
+        int firstArmature = names.ArmaturesInOrder[0].node;
         var boneNames = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var j in m.Skins[firstSkin].Joints) if (names.BoneOfJoint.TryGetValue(j, out var b)) boneNames.Add(b);
+        for (int i = 0; i < m.Nodes.Count; i++) if (names.IsBone[i] && names.ArmatureNodeOfBone[i] == firstArmature && names.BoneOfJoint.TryGetValue(i, out var b)) boneNames.Add(b);
         var stats = new Dictionary<string, (int count, double[] mn, double[] mx)>(); var order = new List<string>();
         long total = 0, weighted = 0;
         foreach (var (node, _) in names.MeshObjectsInOrder)
