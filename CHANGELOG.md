@@ -25,7 +25,8 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   `ReloadFragments` twice over fakes carrying the game's member names and its decompiled `Load`: before the
   change it failed, the prop entry re-pointed at our skeleton and encoded 0. Verified in-game the same evening, on
   the session that had failed: the same two Load passes in the log (descriptor[86] 448+2), and F8 reads
-  "[full] PASS … 4 descriptor repoint(s) held". The game had been running the 09-14 plugin until then — the panel's
+  "[full] PASS … 4 descriptor repoint(s) held" — first on the name-based build, then again on the identity build
+  (built 21:50 UTC: two Load passes, the prop appended ONCE, the block still 448+2). The game had been running the 09-14 plugin until then — the panel's
   "built" line is the first thing to read off a smoke report.
 - **THE GHOST HUNT NO LONGER RUNS IN NORMAL PLAY (2026-09-30).** The 2026-08-03 ghost-rotor tools still ran for
   every `hideSubPawns` model: at repoint and on every ~10 s NEAR tick they zeroed every GPU descriptor fragment in
