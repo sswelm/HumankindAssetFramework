@@ -85,11 +85,17 @@ static class Drill
             string bboxIdentity = "";   // (kept in the line format; the skinned conventions were settled 2026-10-01: the weighted blend at animation 0, t = 0)
             // a joint with no name is "Node_<index>" in Blender (the Khronos SimpleSkin and BrainStem samples: nameless joints)
             var bones = m.Skins.SelectMany(s => s.Joints).Distinct().Select(j => m.Nodes[j].Name.Length > 0 ? m.Nodes[j].Name : "Node_" + j).OrderBy(n => n, StringComparer.Ordinal).ToList();
-            // the materials Blender's importer ends up with: those a primitive uses (an unused one is never created), plus ONE it
-            // invents for a COLOR_0 primitive that has none (measured 2026-10-02 on the Khronos BoxVertexColors and the normalized fixture)
-            var usedMaterials = new HashSet<int>(); bool invented = false;
-            foreach (var me in m.Meshes) foreach (var pp in me.Primitives) { if (pp.Material >= 0) usedMaterials.Add(pp.Material); else if (pp.Colors != null) invented = true; }
-            int blenderMaterials = usedMaterials.Count + (invented ? 1 : 0);
+            // the materials Blender's importer ends up with: those a primitive uses (an unused one is never created), plus one it
+            // invents PER MESH that has a COLOR_0 primitive without a material (measured 2026-10-02: two such primitives in one mesh
+            // -> 1, in two meshes -> 2, one beside a materialed one -> 1 + 1; the Khronos BoxVertexColors and the normalized fixture)
+            var usedMaterials = new HashSet<int>(); int invented = 0;
+            foreach (var me in m.Meshes)
+            {
+                bool inventsOne = false;
+                foreach (var pp in me.Primitives) { if (pp.Material >= 0) usedMaterials.Add(pp.Material); else if (pp.Colors != null) inventsOne = true; }
+                if (inventsOne) invented++;
+            }
+            int blenderMaterials = usedMaterials.Count + invented;
             // what Blender 5.1 states about an animation: ONE action per glTF animation (slotted: every target a slot), its span
             // = the earliest first key to the latest last key over every channel (review of PR #109, round 5, measured on a
             // two-target fixture: channels ending at 1 s and 2 s, one starting at 0.5 s -> one action, 0..2 s). The same term

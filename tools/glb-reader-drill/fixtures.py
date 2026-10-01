@@ -133,9 +133,10 @@ def fx_two_targets(out):
 
 
 def fx_normalized(out):
-    """Normalized integer attributes, as KHR_mesh_quantization-era exporters and many game rips write them: UV as
-    unsigned short, colour as unsigned byte VEC3, joints as unsigned byte, weights as unsigned short; one skin of two
-    joints with inverse bind matrices. The reader must dequantize every one; Blender does."""
+    """Normalized integer attributes, as quantizing exporters and many game rips write them: UV as unsigned short,
+    colour as unsigned byte VEC3, joints as unsigned byte, weights as unsigned short; one skin of two joints with
+    inverse bind matrices. The reader must dequantize every one; Blender does. No material anywhere: Blender invents
+    one per mesh that has a COLOR_0 primitive without one (two meshes here -> two; the drill states that count)."""
     b = Buf()
     pos, nrm, uv, idx = grid(2, 2, 2.0)
     P = b.accessor(pos, "f", "VEC3"); N = b.accessor(nrm, "f", "VEC3")
@@ -145,11 +146,13 @@ def fx_normalized(out):
     W = b.accessor([(int(0.75 * 65535), 65535 - int(0.75 * 65535), 0, 0)] * len(pos), "H", "VEC4", normalized=True, minmax=False)
     I = b.accessor(idx, "H", "SCALAR")
     ibm = b.accessor([(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1), (1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -1, 0, 1)], "f", "MAT4", minmax=False)
-    root = base("normalized",   # no material at all: Blender INVENTS one for a COLOR_0 primitive (measured 2026-10-02; the drill states that count)
-                meshes=[{"name": "quad", "primitives": [{"attributes": {"POSITION": P, "NORMAL": N, "TEXCOORD_0": UV, "COLOR_0": COL, "JOINTS_0": J, "WEIGHTS_0": W}, "indices": I}]}],
-                nodes=[{"name": "Mesh", "mesh": 0, "skin": 0}, {"name": "Root", "children": [2]}, {"name": "Tip", "translation": [0, 1, 0]}],
+    P2 = b.accessor([(4, 0, 0), (5, 0, 0), (4, 1, 0)], "f", "VEC3"); COL2 = b.accessor([(0, 0, 255, 255)] * 3, "B", "VEC4", normalized=True, minmax=False)
+    root = base("normalized",
+                meshes=[{"name": "quad", "primitives": [{"attributes": {"POSITION": P, "NORMAL": N, "TEXCOORD_0": UV, "COLOR_0": COL, "JOINTS_0": J, "WEIGHTS_0": W}, "indices": I}]},
+                        {"name": "tri", "primitives": [{"attributes": {"POSITION": P2, "COLOR_0": COL2}}]}],
+                nodes=[{"name": "Mesh", "mesh": 0, "skin": 0}, {"name": "Root", "children": [2]}, {"name": "Tip", "translation": [0, 1, 0]}, {"name": "Tri", "mesh": 1}],
                 skins=[{"name": "Skin", "joints": [1, 2], "inverseBindMatrices": ibm, "skeleton": 1}],
-                scenes=[{"nodes": [0, 1]}], scene=0)
+                scenes=[{"nodes": [0, 1, 3]}], scene=0)
     write_glb(os.path.join(out, "normalized.glb"), root, b)
 
 
@@ -340,7 +343,6 @@ FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external
 
 def main(out):
     os.makedirs(out, exist_ok=True)
-    before = set(os.listdir(out))
     for fx in FIXTURES:
         fx(out)
     for name in sorted(os.listdir(out)):

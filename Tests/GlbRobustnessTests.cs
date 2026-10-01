@@ -26,9 +26,10 @@ public class GlbRobustnessTests
         catch (InvalidDataException) { return null; }
         catch (Newtonsoft.Json.JsonException) { return null; }
         catch (EndOfStreamException) { return null; }
-        catch (Exception e) when (CrashTypes.Contains(e.GetType()) || true)
+        catch (Exception e)
         {
-            Assert.True(false, $"{what}: the reader threw {e.GetType().Name} ({e.Message}) - a refusal is an InvalidDataException by name, not a crash");
+            // anything else is a crash: the crash types by name, and whatever a future change throws that is not a refusal
+            Assert.Fail($"{what}: the reader threw {e.GetType().Name} ({e.Message}) - a refusal is an InvalidDataException by name, not a crash{(CrashTypes.Contains(e.GetType()) ? "" : " (an unexpected type)")}");
             return null;
         }
     }
@@ -37,7 +38,7 @@ public class GlbRobustnessTests
     {
         try { var bytes = GlbWriter.Write(m); Assert.NotNull(GlbReader.Read(bytes)); }
         catch (InvalidDataException) { }
-        catch (Exception e) { Assert.True(false, $"{what}: the writer threw {e.GetType().Name} ({e.Message}) on a model the reader accepted - it refuses by name or writes"); }
+        catch (Exception e) { Assert.Fail($"{what}: the writer threw {e.GetType().Name} ({e.Message}) on a model the reader accepted - it refuses by name or writes"); }
     }
 
     [Fact]

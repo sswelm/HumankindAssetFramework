@@ -21,7 +21,8 @@ for f in "$CSC" "$MONO" "$API/mscorlib.dll"; do
 done
 command -v dotnet >/dev/null 2>&1 || { echo "FAIL — dotnet not on PATH (GLB writer NOT drilled)"; exit 2; }
 PACK=$(ls "$PROJECT"/Assets/Pack/*/pack.json 2>/dev/null | head -1)
-[ -n "$PACK" ] || { echo "SKIP — no modding project at $PROJECT (set HAF_UNITY_PROJECT); the GLB writer was NOT drilled against the registry"; exit 0; }
+REGISTRY_NOTE="the registry"
+[ -n "$PACK" ] || REGISTRY_NOTE="NO registry (no modding project at $PROJECT; set HAF_UNITY_PROJECT)"   # the fixtures and samples are drilled all the same
 NEWTONSOFT=""
 for cand in "$WROOT/References/Newtonsoft.Json.dll" "$PROJECT/Assets/Plugins/Json.Net 11.0.1/Newtonsoft.Json.dll"; do
   [ -f "$cand" ] && { NEWTONSOFT="$cand"; break; }
@@ -38,8 +39,9 @@ OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -out:"$WTMP/write.exe" "${REFS[@
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -out:"$WTMP/read.exe" "${REFS[@]}" "$WROOT/tools/glb-reader-drill/Drill.cs" "${SRC[@]}" 2>&1); rc=$?
 [ "$rc" -eq 0 ] && [ -s "$TMPD/read.exe" ] || { echo "$OUT" | grep -E "error" | head -20; echo "FAIL — the GLB reader drill did not compile (csc rc=$rc)"; exit 1; }
 
-mapfile -t FILES < <(python "$ROOT/tools/glb-reader-drill/registry_files.py" "$PACK" | tr -d '\r')
-[ "${#FILES[@]}" -gt 0 ] || { echo "SKIP — the registry names no .glb that exists on disk; the GLB writer was NOT drilled"; exit 0; }
+FILES=()
+[ -z "$PACK" ] || mapfile -t FILES < <(python "$ROOT/tools/glb-reader-drill/registry_files.py" "$PACK" | tr -d '\r')
+[ -n "$PACK" ] && [ "${#FILES[@]}" -eq 0 ] && REGISTRY_NOTE="NO registry (it names no .glb that exists on disk)"
 # plus the shapes the registry does not have: the fixture library (fixtures.py, one small file per shape) and the
 # Khronos sample assets when they are fetched (fetch_samples.py; other exporters' output). A sample line may carry an
 # expectation - a stage that must refuse the file by name - checked below instead of round-tripped.
@@ -53,6 +55,11 @@ for l in "${SLINES[@]}"; do IFS=$'\t' read -r sp st sx <<< "$l"; if [ "$st" = "o
 [ "${#SAMPLES_OK[@]}" -eq 0 ] || FILES+=("${SAMPLES_OK[@]}")
 SAMPLES_NOTE="${#SAMPLES_OK[@]} Khronos samples"
 [ "${#SLINES[@]}" -gt 0 ] || SAMPLES_NOTE="no Khronos samples (fetch them once: python tools/glb-reader-drill/fetch_samples.py References/gltf-samples)"
+# the sample cache, when it exists, must be COMPLETE: a sample that went missing would narrow the drill without a word
+if [ -d "$ROOT/References/gltf-samples" ]; then
+  n_listed=$(grep -cvE '^\s*(#|$)' "$ROOT/tools/glb-reader-drill/samples.txt")
+  [ "${#SLINES[@]}" -eq "$n_listed" ] || { echo "FAIL — the Khronos sample cache has ${#SLINES[@]} of the $n_listed samples samples.txt names (fetch again: python tools/glb-reader-drill/fetch_samples.py References/gltf-samples)"; exit 1; }
+fi
 # two registry entries may share a file; the written copies are keyed by basename, so write each file once
 mapfile -t UNIQUE < <(printf '%s\n' "${FILES[@]}" | awk '!seen[tolower($0)]++')
 
@@ -71,7 +78,7 @@ WOUT=$(printf '%s' "$WOUT" | LC_ALL=C sed 's/\xEF\xBB\xBF//g')
 echo "$WOUT" | grep -E "^FAIL|^DIFF"
 n_wrote=$(echo "$WOUT" | grep -c "^WROTE")
 [ "$rc" -eq 0 ] || { echo "FAIL — GLB writer drill: a file could not be written, or read back differently from its source ($n_wrote of ${#UNIQUE[@]} written)"; exit 1; }
-echo "C# writer: $n_wrote files written to disk and read back equal to their source field by field - the registry, ${#FIXTURES[@]} fixtures, $SAMPLES_NOTE ($(echo "$WOUT" | grep '^TOTAL'))"
+echo "C# writer: $n_wrote files written to disk and read back equal to their source field by field - $REGISTRY_NOTE, ${#FIXTURES[@]} fixtures, $SAMPLES_NOTE ($(echo "$WOUT" | grep '^TOTAL'))"
 # the samples a stage must REFUSE, by name: the source guard (a path the model does not carry) or the writer (what it cannot write as it is)
 for l in "${SAMPLES_EXPECT[@]}"; do
   IFS=$'\t' read -r sp st sx <<< "$l"
@@ -101,7 +108,7 @@ if [ -z "$BLENDER" ]; then
     cand=$(ls -d "$base"/Blender* 2>/dev/null | sort -V | tail -1); [ -n "$cand" ] && [ -x "$cand/blender.exe" ] && { BLENDER="$cand/blender.exe"; break; }
   done
 fi
-if [ -z "$BLENDER" ]; then echo "PASS — GLB writer drill: $n_wrote files written and read back equal; Blender not found, so no import of the written files (BLENDER=<exe> to force)"; exit 0; fi
+if [ -z "$BLENDER" ]; then echo "PASS — GLB writer drill: $n_wrote files written and read back equal ($REGISTRY_NOTE, ${#FIXTURES[@]} fixtures, $SAMPLES_NOTE); Blender not found, so no import of the written files (BLENDER=<exe> to force)"; exit 0; fi
 if [ "${FULL:-0}" = "1" ]; then SAMPLE=("${WFILES[@]}")
 else
   # the written fixtures and Khronos samples (every one), the largest and smallest two written registry files
@@ -113,4 +120,4 @@ BOUT=$(printf '%s' "$BOUT" | LC_ALL=C sed 's/\xEF\xBB\xBF//g')
 printf '%s\n' "$BOUT" > "$TMPD/blender.txt"
 python "$ROOT/tools/glb-reader-drill/compare.py" "$TMPD/orig.txt" "$TMPD/blender.txt" --basename | grep -E "^FAIL|^PASS |^COMPARED"
 python "$ROOT/tools/glb-reader-drill/compare.py" "$TMPD/orig.txt" "$TMPD/blender.txt" --basename > /dev/null || { echo "FAIL — GLB writer drill: Blender reads a written file differently from its original"; exit 1; }
-echo "PASS — GLB writer drill: $n_wrote files written and read back equal to their originals field by field; Blender reads ${#SAMPLE[@]} written file(s) as it read the originals"
+echo "PASS — GLB writer drill: $n_wrote files written and read back equal to their originals field by field ($REGISTRY_NOTE, ${#FIXTURES[@]} fixtures, $SAMPLES_NOTE); Blender reads ${#SAMPLE[@]} written file(s) as it read the originals"

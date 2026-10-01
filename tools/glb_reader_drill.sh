@@ -23,7 +23,8 @@ for f in "$CSC" "$MONO" "$API/mscorlib.dll"; do
 done
 command -v dotnet >/dev/null 2>&1 || { echo "FAIL — dotnet not on PATH (GLB reader NOT drilled)"; exit 2; }
 PACK=$(ls "$PROJECT"/Assets/Pack/*/pack.json 2>/dev/null | head -1)
-[ -n "$PACK" ] || { echo "SKIP — no modding project at $PROJECT (set HAF_UNITY_PROJECT); the GLB reader was NOT drilled against the registry"; exit 0; }
+REGISTRY_NOTE="the registry"
+[ -n "$PACK" ] || REGISTRY_NOTE="NO registry (no modding project at $PROJECT; set HAF_UNITY_PROJECT)"   # the fixtures and samples are drilled all the same
 NEWTONSOFT=""
 for cand in "$WROOT/References/Newtonsoft.Json.dll" "$PROJECT/Assets/Plugins/Json.Net 11.0.1/Newtonsoft.Json.dll"; do
   [ -f "$cand" ] && { NEWTONSOFT="$cand"; break; }
@@ -39,8 +40,9 @@ OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -out:"$WTMP/drill.exe" \
 if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/drill.exe" ]; then echo "$OUT" | grep -E "error" | head -20; echo "FAIL — the GLB reader drill did not compile (csc rc=$rc)"; exit 1; fi
 
 # the registry's .glb model files (the recipes' sources), as the editor resolves them
-mapfile -t FILES < <(python "$ROOT/tools/glb-reader-drill/registry_files.py" "$PACK" | tr -d '\r')   # python on Windows ends lines with CR LF; Mono refuses a path with a CR
-[ "${#FILES[@]}" -gt 0 ] || { echo "SKIP — the registry names no .glb that exists on disk; the GLB reader was NOT drilled"; exit 0; }
+FILES=()
+[ -z "$PACK" ] || mapfile -t FILES < <(python "$ROOT/tools/glb-reader-drill/registry_files.py" "$PACK" | tr -d '\r')   # python on Windows ends lines with CR LF; Mono refuses a path with a CR
+[ -n "$PACK" ] && [ "${#FILES[@]}" -eq 0 ] && REGISTRY_NOTE="NO registry (it names no .glb that exists on disk)"
 # plus the shapes the registry does not have: the fixture library (fixtures.py, one small file per shape) and the
 # Khronos sample assets when they are fetched (fetch_samples.py; other exporters' output). A sample line may carry an
 # expectation - a stage that must refuse the file by name - checked below instead of round-tripped.
@@ -54,6 +56,11 @@ for l in "${SLINES[@]}"; do IFS=$'\t' read -r sp st sx <<< "$l"; if [ "$st" = "o
 [ "${#SAMPLES_OK[@]}" -eq 0 ] || FILES+=("${SAMPLES_OK[@]}")
 SAMPLES_NOTE="${#SAMPLES_OK[@]} Khronos samples"
 [ "${#SLINES[@]}" -gt 0 ] || SAMPLES_NOTE="no Khronos samples (fetch them once: python tools/glb-reader-drill/fetch_samples.py References/gltf-samples)"
+# the sample cache, when it exists, must be COMPLETE: a sample that went missing would narrow the drill without a word
+if [ -d "$ROOT/References/gltf-samples" ]; then
+  n_listed=$(grep -cvE '^\s*(#|$)' "$ROOT/tools/glb-reader-drill/samples.txt")
+  [ "${#SLINES[@]}" -eq "$n_listed" ] || { echo "FAIL — the Khronos sample cache has ${#SLINES[@]} of the $n_listed samples samples.txt names (fetch again: python tools/glb-reader-drill/fetch_samples.py References/gltf-samples)"; exit 1; }
+fi
 
 RESULT=$("$MONO" "$TMPD/drill.exe" "${FILES[@]}" 2>&1); rc=$?
 RESULT=$(printf '%s' "$RESULT" | LC_ALL=C sed 's/\xEF\xBB\xBF//g')
@@ -61,7 +68,7 @@ echo "$RESULT" | grep -E "^FAIL"
 n_ok=$(echo "$RESULT" | grep -c "^FILE")
 total=$(echo "$RESULT" | grep "^TOTAL")
 if [ "$rc" -ne 0 ]; then echo "FAIL — GLB reader drill: a registry file did not read ($n_ok of ${#FILES[@]} read)"; exit 1; fi
-echo "C# reader: $n_ok files read and checked - the registry, ${#FIXTURES[@]} fixtures, $SAMPLES_NOTE ($total)"
+echo "C# reader: $n_ok files read and checked - $REGISTRY_NOTE, ${#FIXTURES[@]} fixtures, $SAMPLES_NOTE ($total)"
 # the samples a stage must REFUSE, by name: the contract's "no" cases drilled like the "yes" cases
 for l in "${SAMPLES_EXPECT[@]}"; do
   IFS=$'\t' read -r sp st sx <<< "$l"; [ "$st" = "reader" ] || continue
@@ -77,7 +84,7 @@ if [ -z "$BLENDER" ]; then
     cand=$(ls -d "$base"/Blender* 2>/dev/null | sort -V | tail -1); [ -n "$cand" ] && [ -x "$cand/blender.exe" ] && { BLENDER="$cand/blender.exe"; break; }
   done
 fi
-if [ -z "$BLENDER" ]; then echo "PASS — GLB reader drill: $n_ok registry files read; Blender not found, so no parity comparison (BLENDER=<exe> to force)"; exit 0; fi
+if [ -z "$BLENDER" ]; then echo "PASS — GLB reader drill: $n_ok files read ($REGISTRY_NOTE, ${#FIXTURES[@]} fixtures, $SAMPLES_NOTE); Blender not found, so no parity comparison (BLENDER=<exe> to force)"; exit 0; fi
 if [ "${FULL:-0}" = "1" ]; then SAMPLE=("${FILES[@]}")
 else
   # every fixture and every Khronos sample (small, and the diversity is the point), the registry's largest and smallest two, four animated ones
@@ -91,4 +98,4 @@ printf '%s
 ' "$BOUT" > "$TMPD/blender.txt"
 python "$ROOT/tools/glb-reader-drill/compare.py" "$TMPD/csharp.txt" "$TMPD/blender.txt"; crc=$?
 if [ "$crc" -ne 0 ]; then echo "FAIL — GLB reader drill: a sampled file disagrees with Blender (or none compared)"; exit 1; fi
-echo "PASS — GLB reader drill: $n_ok files read and checked (the registry, ${#FIXTURES[@]} fixtures, $SAMPLES_NOTE); ${#SAMPLE[@]} of them agree with Blender on counts, box, area, centroid, winding, bones and durations"
+echo "PASS — GLB reader drill: $n_ok files read and checked ($REGISTRY_NOTE, ${#FIXTURES[@]} fixtures, $SAMPLES_NOTE); ${#SAMPLE[@]} of them agree with Blender on counts, box, area, centroid, winding, bones and durations"

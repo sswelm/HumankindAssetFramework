@@ -95,7 +95,8 @@ public static class HafModelDiff
         {
             HafImage x = a.Images[i], y = b.Images[i]; string w = $"image {i} ({x.Name})";
             if (x.Name != y.Name) return w + " name";
-            if (x.MimeType != y.MimeType && !(x.MimeType.Length == 0 && y.MimeType.Length > 0)) return w + $" mimeType {x.MimeType} -> {y.MimeType}";   // a .gltf image by uri declares no type; the writer embeds it and must say one (from the bytes)
+            // a .gltf image by uri declares no type; the writer embeds it and must say the one the bytes are (PNG or JPEG by signature)
+            if (x.MimeType != y.MimeType && !(x.MimeType.Length == 0 && y.MimeType == MimeOf(x.Bytes))) return w + $" mimeType '{x.MimeType}' -> '{y.MimeType}' (the bytes are {MimeOf(x.Bytes) ?? "neither PNG nor JPEG"})";
             if ((d = Arr(w + " bytes", x.Bytes, y.Bytes)) != null) return d;
         }
         for (int i = 0; i < a.Skins.Count; i++)
@@ -131,6 +132,7 @@ public static class HafModelDiff
     }
 
     static string Count(string what, int a, int b) => a == b ? null : $"{what}: {a} -> {b}";
+    static string MimeOf(byte[] b) => b == null ? null : b.Length > 8 && b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47 ? "image/png" : b.Length > 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF ? "image/jpeg" : null;
 
     static string Arr<T>(string what, T[] a, T[] b) where T : IEquatable<T>
     {
