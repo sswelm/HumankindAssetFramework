@@ -41,9 +41,12 @@ public class GlbWriterTests
             Assert.Equal(x.MetallicFactor, y.MetallicFactor); Assert.Equal(x.RoughnessFactor, y.RoughnessFactor); Assert.Equal(x.MetallicRoughnessTexture, y.MetallicRoughnessTexture);
             Assert.Equal(x.NormalTexture, y.NormalTexture); Assert.Equal(x.NormalScale, y.NormalScale); Assert.Equal(x.OcclusionTexture, y.OcclusionTexture); Assert.Equal(x.OcclusionStrength, y.OcclusionStrength);
             Assert.Equal(x.EmissiveTexture, y.EmissiveTexture); Assert.Equal(x.EmissiveFactor, y.EmissiveFactor); Assert.Equal(x.AlphaMode, y.AlphaMode); Assert.Equal(x.AlphaCutoff, y.AlphaCutoff); Assert.Equal(x.DoubleSided, y.DoubleSided);
-            Assert.Equal(x.ExtensionsJson, y.ExtensionsJson);
+            Assert.Equal(x.ExtensionsJson, y.ExtensionsJson); Assert.Equal(x.ExtrasJson, y.ExtrasJson);
         }
         for (int i = 0; i < a.Textures.Count; i++) { Assert.Equal(a.Textures[i].Name, b.Textures[i].Name); Assert.Equal(a.Textures[i].Source, b.Textures[i].Source); Assert.Equal(a.Textures[i].Sampler, b.Textures[i].Sampler); }
+        Assert.Equal(a.Samplers, b.Samplers);
+        for (int i = 0; i < a.Nodes.Count; i++) Assert.Equal(a.Nodes[i].ExtrasJson, b.Nodes[i].ExtrasJson);
+        for (int i = 0; i < a.Meshes.Count; i++) Assert.Equal(a.Meshes[i].ExtrasJson, b.Meshes[i].ExtrasJson);
         for (int i = 0; i < a.Images.Count; i++) { Assert.Equal(a.Images[i].Name, b.Images[i].Name); Assert.Equal(a.Images[i].MimeType, b.Images[i].MimeType); Assert.Equal(a.Images[i].Bytes, b.Images[i].Bytes); }
         for (int i = 0; i < a.Skins.Count; i++)
         {
@@ -65,6 +68,7 @@ public class GlbWriterTests
     public void The_full_fixture_survives_a_round_trip_field_by_field()
     {
         var original = GlbReader.Read(GlbReaderTests.FullGlb());
+        original.Meshes[0].Primitives[0].MorphTargets = 0;   // the fixture declares one; the writer refuses it as it is (asserted below), so the round trip is taken without
         var bytes = GlbWriter.Write(original);
         var again = GlbReader.Read(bytes);
         Same(original, again);
@@ -77,6 +81,12 @@ public class GlbWriterTests
         var withExt = GlbReader.Read(GlbWriter.Write(original));
         Assert.Equal(original.Materials[0].ExtensionsJson, withExt.Materials[0].ExtensionsJson);
         Assert.Equal(new[] { "KHR_materials_specular" }, withExt.ExtensionsUsed);
+        // the sampler's settings and every extras object are carried verbatim too (review of PR #110)
+        Assert.Equal(new[] { "{\"magFilter\":9729}" }, original.Samplers);
+        Assert.Equal(original.Samplers, withExt.Samplers);
+        original.Nodes[0].ExtrasJson = "{\"author\":\"HAF\",\"tier\":2}"; original.Meshes[0].ExtrasJson = "{\"lod\":0}"; original.Materials[0].ExtrasJson = "{\"paint\":\"olive\"}";
+        var withExtras = GlbReader.Read(GlbWriter.Write(original));
+        Assert.Equal("{\"author\":\"HAF\",\"tier\":2}", withExtras.Nodes[0].ExtrasJson); Assert.Equal("{\"lod\":0}", withExtras.Meshes[0].ExtrasJson); Assert.Equal("{\"paint\":\"olive\"}", withExtras.Materials[0].ExtrasJson);
         // and a second trip is byte-identical: the writer is deterministic
         Assert.Equal(bytes, GlbWriter.Write(again));
         // a valid container: magic, version 2, 4-byte aligned chunks, the declared length
@@ -108,9 +118,14 @@ public class GlbWriterTests
     [InlineData("missing-mesh", "references mesh 4, the model has 1")]
     [InlineData("image-without-bytes", "has no bytes")]
     [InlineData("sampler-mismatch", "a sampler has 3 keys but 3 values")]
+    [InlineData("morph-targets", "morph target(s), whose data the model does not carry")]
+    [InlineData("nan-position", "not a finite number")]
+    [InlineData("sampler-not-json", "sampler 0 is not a JSON object")]
+    [InlineData("skeleton-out-of-range", "names skeleton node 99")]
     public void What_cannot_be_written_as_it_is_is_refused_by_name(string flaw, string message)
     {
         var m = GlbReader.Read(GlbReaderTests.FullGlb());
+        if (flaw != "morph-targets") m.Meshes[0].Primitives[0].MorphTargets = 0;   // every other flaw is tested on a primitive the writer would otherwise accept
         switch (flaw)
         {
             case "index-out-of-range": m.Meshes[0].Primitives[0].Indices[1] = 9; break;
@@ -118,9 +133,37 @@ public class GlbWriterTests
             case "missing-mesh": m.Nodes[0].Mesh = 4; break;
             case "image-without-bytes": m.Images[0].Bytes = null; break;
             case "sampler-mismatch": m.Animations[0].Samplers[0].Values = new float[] { 1, 2, 3 }; break;
+            case "morph-targets": break;   // the fixture's primitive declares one morph target: the writer refuses it as it is
+            case "nan-position": m.Meshes[0].Primitives[0].Positions[4] = float.NaN; break;
+            case "sampler-not-json": m.Samplers[0] = "[9729]"; break;
+            case "skeleton-out-of-range": m.Skins[0].Skeleton = 99; break;
         }
         var ex = Assert.Throws<InvalidDataException>(() => GlbWriter.Write(m));
         Assert.Contains(message, ex.Message);
+    }
+
+    [Fact]
+    public void The_file_overload_lands_whole_and_replaces_an_existing_file_without_leaving_a_temporary()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "haf-glbwriter-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            string target = Path.Combine(dir, "sub", "model.glb");   // the directory does not exist yet
+            var m = GlbReader.Read(GlbReaderTests.FullGlb()); m.Meshes[0].Primitives[0].MorphTargets = 0;
+            GlbWriter.Write(m, target);
+            Assert.Equal(GlbWriter.Write(m), File.ReadAllBytes(target));
+            File.WriteAllText(target, "stale");                     // an existing file is replaced, not appended to or left
+            GlbWriter.Write(m, target);
+            Assert.Equal(GlbWriter.Write(m), File.ReadAllBytes(target));
+            Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(target)).Where(f => !f.EndsWith("model.glb")));   // no .writing-* left behind
+            // a model the writer refuses leaves the existing file untouched and no temporary beside it
+            var good = File.ReadAllBytes(target);
+            m.Meshes[0].Primitives[0].Positions[0] = float.NaN;
+            Assert.Throws<InvalidDataException>(() => GlbWriter.Write(m, target));
+            Assert.Equal(good, File.ReadAllBytes(target));
+            Assert.Single(Directory.GetFiles(Path.GetDirectoryName(target)));
+        }
+        finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
     }
 
     [Fact]

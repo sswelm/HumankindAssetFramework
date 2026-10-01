@@ -94,6 +94,7 @@ public static class GlbReader
             }
             model.Images.Add(image);
         }
+        foreach (var sp in root["samplers"] as JArray ?? new JArray()) model.Samplers.Add(sp is JObject so ? so.ToString(Newtonsoft.Json.Formatting.None) : "{}");
         foreach (var tx in root["textures"] as JArray ?? new JArray())
             model.Textures.Add(new HafTexture { Name = tx["name"]?.ToString() ?? "", Source = tx["source"]?.Value<int>() ?? -1, Sampler = tx["sampler"]?.Value<int>() ?? -1 });
         foreach (var mt in root["materials"] as JArray ?? new JArray())
@@ -118,6 +119,7 @@ public static class GlbReader
             m.AlphaCutoff = mt["alphaCutoff"]?.Value<float>() ?? 0.5f;
             m.DoubleSided = mt["doubleSided"]?.Value<bool>() ?? false;
             if (mt["extensions"] is JObject ext && ext.Count > 0) m.ExtensionsJson = ext.ToString(Newtonsoft.Json.Formatting.None);
+            if (mt["extras"] is JObject mex && mex.Count > 0) m.ExtrasJson = mex.ToString(Newtonsoft.Json.Formatting.None);
             model.Materials.Add(m);
         }
 
@@ -126,6 +128,7 @@ public static class GlbReader
         foreach (var me in root["meshes"] as JArray ?? new JArray())
         {
             var mesh = new HafMesh { Name = me["name"]?.ToString() ?? "" };
+            if (me["extras"] is JObject meshExtras && meshExtras.Count > 0) mesh.ExtrasJson = meshExtras.ToString(Newtonsoft.Json.Formatting.None);
             int primIndex = 0;
             foreach (var pr in me["primitives"] as JArray ?? new JArray())
             {
@@ -168,6 +171,7 @@ public static class GlbReader
             if (nd["translation"] is JArray t) n.Translation = Doubles(t, 3, "node translation");
             if (nd["rotation"] is JArray r) n.Rotation = Doubles(r, 4, "node rotation");
             if (nd["scale"] is JArray s) n.Scale = Doubles(s, 3, "node scale");
+            if (nd["extras"] is JObject nex && nex.Count > 0) n.ExtrasJson = nex.ToString(Newtonsoft.Json.Formatting.None);
             if (n.Mesh >= model.Meshes.Count) throw new InvalidDataException($"node '{n.Name}' references mesh {n.Mesh}, the file has {model.Meshes.Count}");
             model.Nodes.Add(n);
         }

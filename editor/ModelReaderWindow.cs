@@ -140,7 +140,7 @@ public class ModelReaderWindow : EditorWindow
             var sw = System.Diagnostics.Stopwatch.StartNew();
             GlbWriter.Write(model, p);
             sw.Stop();
-            status = $"Wrote {Path.GetFileName(p)} ({new FileInfo(p).Length / 1e6:0.0} MB) in {sw.Elapsed.TotalMilliseconds:0} ms. Material extensions are carried verbatim; sampler settings and morph-target data are not (the writer's contract).";
+            status = $"Wrote {Path.GetFileName(p)} ({new FileInfo(p).Length / 1e6:0.0} MB) in {sw.Elapsed.TotalMilliseconds:0} ms. Material extensions, sampler settings and extras are carried verbatim; a primitive with morph targets is refused (the writer's contract).";
             if (p.Replace(Path.DirectorySeparatorChar, '/').StartsWith(Application.dataPath.Replace(Path.DirectorySeparatorChar, '/'), StringComparison.OrdinalIgnoreCase)) AssetDatabase.Refresh();
         }
         catch (Exception e) { status = "⚠ NOT written — " + e.Message; Debug.LogError("[ModelReader] " + p + ": " + e.Message); }

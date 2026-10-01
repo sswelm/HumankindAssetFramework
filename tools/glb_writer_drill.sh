@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # glb_writer_drill.sh - the GLB writer against the real registry, and against Blender (2026-10-01, step 2 of replacing
 # Blender). Every model the registry names (and the two-target fixture) is read by the real GlbReader and written by
-# the real GlbWriter; then
+# the real GlbWriter to disk; then
+#   0. the written file is read back and compared with its source FIELD BY FIELD inside the writer drill (every
+#      vertex, index, material field, sampler, image byte, skin matrix, animation key); the first difference is named;
 #   1. the reader drill reads the WRITTEN files and every value (counts, world box, area, centroid, winding, bones,
-#      spans) must equal the original's - the round trip, on real models;
+#      spans) must equal the original's - the round trip, on real models, through the drill's own view;
 #   2. Blender imports the WRITTEN sample and every value must equal what the C# side read from the ORIGINAL - the
 #      written file means to Blender what the original meant. FULL=1 for every file.
 # Prerequisites and SKIP rules as glb_reader_drill.sh.
@@ -47,10 +49,10 @@ mapfile -t UNIQUE < <(printf '%s\n' "${FILES[@]}" | awk '!seen[tolower($0)]++')
 WRITTEN="$WTMP/written"
 WOUT=$("$MONO" "$TMPD/write.exe" "$WRITTEN" "${UNIQUE[@]}" 2>&1); rc=$?
 WOUT=$(printf '%s' "$WOUT" | LC_ALL=C sed 's/\xEF\xBB\xBF//g')
-echo "$WOUT" | grep -E "^FAIL"
+echo "$WOUT" | grep -E "^FAIL|^DIFF"
 n_wrote=$(echo "$WOUT" | grep -c "^WROTE")
-[ "$rc" -eq 0 ] || { echo "FAIL — GLB writer drill: a file could not be written ($n_wrote of ${#UNIQUE[@]} written)"; exit 1; }
-echo "C# writer: $n_wrote files written ($(echo "$WOUT" | grep '^TOTAL'))"
+[ "$rc" -eq 0 ] || { echo "FAIL — GLB writer drill: a file could not be written, or read back differently from its source ($n_wrote of ${#UNIQUE[@]} written)"; exit 1; }
+echo "C# writer: $n_wrote files written to disk and read back equal to their source field by field ($(echo "$WOUT" | grep '^TOTAL'))"
 
 # ---- 1. the reader's view of the originals and of the written copies must agree on every value
 ORIG=$("$MONO" "$TMPD/read.exe" "${UNIQUE[@]}" 2>&1); ORIG=$(printf '%s' "$ORIG" | LC_ALL=C sed 's/\xEF\xBB\xBF//g')
@@ -81,4 +83,4 @@ BOUT=$(printf '%s' "$BOUT" | LC_ALL=C sed 's/\xEF\xBB\xBF//g')
 printf '%s\n' "$BOUT" > "$TMPD/blender.txt"
 python "$ROOT/tools/glb-reader-drill/compare.py" "$TMPD/orig.txt" "$TMPD/blender.txt" --basename | grep -E "^FAIL|^PASS |^COMPARED"
 python "$ROOT/tools/glb-reader-drill/compare.py" "$TMPD/orig.txt" "$TMPD/blender.txt" --basename > /dev/null || { echo "FAIL — GLB writer drill: Blender reads a written file differently from its original"; exit 1; }
-echo "PASS — GLB writer drill: $n_wrote files written and read back equal to their originals; Blender reads the written sample as it read the originals"
+echo "PASS — GLB writer drill: $n_wrote files written and read back equal to their originals field by field; Blender reads ${#SAMPLE[@]} written file(s) as it read the originals"

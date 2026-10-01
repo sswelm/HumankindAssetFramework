@@ -12,11 +12,13 @@ using Newtonsoft.Json.Linq;
 //
 // THE CONTRACT: the writer writes what the model holds, and only that. A material's extension payload is carried
 // verbatim (HafMaterial.ExtensionsJson) and the names are declared in extensionsUsed, so KHR_materials_specular,
-// clearcoat and the like - and the textures they reference - survive a round trip. What the reader does not model is
-// not here either, and the writer says so rather than pretending: sampler settings (a texture's sampler index is
-// kept; the written samplers carry glTF's defaults), morph-target data (counted by the reader, not carried),
-// extensions anywhere but on a material. A model that cannot be written as it is - an index that does not fit a
-// uint, a joint that does not fit a ushort, a node outside the lists - is refused by name.
+// clearcoat and the like - and the textures they reference - survive a round trip; so are the texture samplers
+// (wrap and filters) and the `extras` of nodes, meshes and materials. What the reader does not model is not here
+// either, and the writer REFUSES rather than drops: a primitive with morph targets (counted by the reader, data not
+// carried) is refused by name; extensions anywhere but on a material, and extras elsewhere, are not carried and said
+// here. A model that cannot be written as it is - an index that does not fit a uint, a joint that does not fit a
+// ushort, a node outside the lists, a position that is not a number - is refused by name. The file is written to a
+// temporary name beside the target and moved into place, so a consumer never reads a half-written .glb.
 public static class GlbWriter
 {
     public const string GeneratorTag = "HAF GlbWriter";
@@ -24,8 +26,11 @@ public static class GlbWriter
     public static void Write(HafModel m, string path)
     {
         var bytes = Write(m);
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)));
-        File.WriteAllBytes(path, bytes);
+        string full = Path.GetFullPath(path);
+        Directory.CreateDirectory(Path.GetDirectoryName(full));
+        string tmp = full + ".writing-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        File.WriteAllBytes(tmp, bytes);
+        if (File.Exists(full)) File.Replace(tmp, full, null); else File.Move(tmp, full);
     }
 
     public static byte[] Write(HafModel m)
@@ -96,8 +101,14 @@ public static class GlbWriter
             }
             root["images"] = images;
         }
-        int samplerCount = m.Textures.Count == 0 ? 0 : m.Textures.Max(t => t.Sampler) + 1;
-        if (samplerCount > 0) { var samplers = new JArray(); for (int i = 0; i < samplerCount; i++) samplers.Add(new JObject()); root["samplers"] = samplers; }   // defaults: the model does not carry sampler settings
+        // the samplers as the model carries them (verbatim); a texture that points past them gets a default one
+        int samplerCount = Math.Max(m.Samplers.Count, m.Textures.Count == 0 ? 0 : m.Textures.Max(t => t.Sampler) + 1);
+        if (samplerCount > 0)
+        {
+            var samplers = new JArray();
+            for (int i = 0; i < samplerCount; i++) samplers.Add(i < m.Samplers.Count ? JObject.Parse(m.Samplers[i]) : new JObject());
+            root["samplers"] = samplers;
+        }
         if (m.Textures.Count > 0)
         {
             var textures = new JArray();
@@ -133,6 +144,7 @@ public static class GlbWriter
                 if (mt.AlphaMode == "MASK" && mt.AlphaCutoff != 0.5f) j["alphaCutoff"] = mt.AlphaCutoff;
                 if (mt.DoubleSided) j["doubleSided"] = true;
                 if (mt.ExtensionsJson != null) { var ext = JObject.Parse(mt.ExtensionsJson); j["extensions"] = ext; foreach (var prop in ext.Properties()) used.Add(prop.Name); }
+                if (mt.ExtrasJson != null) j["extras"] = JObject.Parse(mt.ExtrasJson);
                 materials.Add(j);
             }
             root["materials"] = materials;
@@ -146,6 +158,7 @@ public static class GlbWriter
             {
                 var j = new JObject();
                 if (me.Name.Length > 0) j["name"] = me.Name;
+                if (me.ExtrasJson != null) j["extras"] = JObject.Parse(me.ExtrasJson);
                 var prims = new JArray();
                 foreach (var p in me.Primitives)
                 {
@@ -189,6 +202,7 @@ public static class GlbWriter
                 if (n.Mesh >= 0) j["mesh"] = n.Mesh;
                 if (n.Skin >= 0) j["skin"] = n.Skin;
                 if (n.Children.Count > 0) j["children"] = new JArray(n.Children.Cast<object>());
+                if (n.ExtrasJson != null) j["extras"] = JObject.Parse(n.ExtrasJson);
                 nodes.Add(j);
             }
             root["nodes"] = nodes;
@@ -302,6 +316,8 @@ public static class GlbWriter
             {
                 var p = m.Meshes[mi].Primitives[pi]; string where = $"mesh {mi} '{m.Meshes[mi].Name}' primitive {pi}";
                 if (p.Positions == null || p.Positions.Length != p.VertexCount * 3) throw new InvalidDataException($"{where}: positions do not match the vertex count");
+                if (p.MorphTargets > 0) throw new InvalidDataException($"{where} has {p.MorphTargets} morph target(s), whose data the model does not carry - refused rather than written without them");
+                foreach (float v in p.Positions) if (float.IsNaN(v) || float.IsInfinity(v)) throw new InvalidDataException($"{where}: a position is not a finite number (NaN or infinity cannot be written into the POSITION bounds)");
                 void Check(Array a, int per, string name) { if (a != null && a.Length != p.VertexCount * per) throw new InvalidDataException($"{where}: {name} has {a.Length} values, {p.VertexCount * per} expected"); }
                 Check(p.Normals, 3, "normals"); Check(p.Tangents, 4, "tangents"); Check(p.Uv0, 2, "UV0"); Check(p.Uv1, 2, "UV1"); Check(p.Colors, 4, "colours");
                 Check(p.Joints, 4, "joints"); Check(p.Weights, 4, "weights"); Check(p.Joints1, 4, "joints (set 1)"); Check(p.Weights1, 4, "weights (set 1)");
@@ -315,6 +331,16 @@ public static class GlbWriter
             if (sk.Joints == null) throw new InvalidDataException($"skin {si} '{sk.Name}' has no joints");
             foreach (var j in sk.Joints) if (j < 0 || j >= m.Nodes.Count) throw new InvalidDataException($"skin {si} '{sk.Name}' joint {j} is not a node of the model");
             if (sk.InverseBindMatrices != null && sk.InverseBindMatrices.Length != sk.Joints.Length * 16) throw new InvalidDataException($"skin {si} '{sk.Name}' has {sk.Joints.Length} joints but {sk.InverseBindMatrices.Length / 16} inverse bind matrices");
+            if (sk.Skeleton >= m.Nodes.Count) throw new InvalidDataException($"skin {si} '{sk.Name}' names skeleton node {sk.Skeleton}, the model has {m.Nodes.Count} nodes");
+        }
+        // the verbatim JSON the model carries must be JSON objects, or the file would not parse (said here, not as a parser's exception from the middle of the write)
+        for (int i = 0; i < m.Samplers.Count; i++) if (!IsJsonObject(m.Samplers[i])) throw new InvalidDataException($"sampler {i} is not a JSON object: {m.Samplers[i]}");
+        for (int i = 0; i < m.Nodes.Count; i++) if (m.Nodes[i].ExtrasJson != null && !IsJsonObject(m.Nodes[i].ExtrasJson)) throw new InvalidDataException($"node {i} '{m.Nodes[i].Name}': extras is not a JSON object");
+        for (int i = 0; i < m.Meshes.Count; i++) if (m.Meshes[i].ExtrasJson != null && !IsJsonObject(m.Meshes[i].ExtrasJson)) throw new InvalidDataException($"mesh {i} '{m.Meshes[i].Name}': extras is not a JSON object");
+        for (int i = 0; i < m.Materials.Count; i++)
+        {
+            if (m.Materials[i].ExtrasJson != null && !IsJsonObject(m.Materials[i].ExtrasJson)) throw new InvalidDataException($"material {i} '{m.Materials[i].Name}': extras is not a JSON object");
+            if (m.Materials[i].ExtensionsJson != null && !IsJsonObject(m.Materials[i].ExtensionsJson)) throw new InvalidDataException($"material {i} '{m.Materials[i].Name}': extensions is not a JSON object");
         }
         foreach (var t in m.Textures) if (t.Source >= m.Images.Count) throw new InvalidDataException($"texture '{t.Name}' references image {t.Source}, the model has {m.Images.Count}");
         foreach (var mt in m.Materials)
@@ -343,5 +369,10 @@ public static class GlbWriter
     static JArray Arr(double[] v) => new JArray(v.Cast<object>());
     static bool IsDefault(float[] v, params float[] d) { if (v == null || v.Length != d.Length) return false; for (int i = 0; i < v.Length; i++) if (v[i] != d[i]) return false; return true; }
     static bool IsDefault(double[] v, params double[] d) { if (v == null || v.Length != d.Length) return false; for (int i = 0; i < v.Length; i++) if (v[i] != d[i]) return false; return true; }
+    static bool IsJsonObject(string s)
+    {
+        try { return Newtonsoft.Json.Linq.JToken.Parse(s) is JObject; } catch (Newtonsoft.Json.JsonException) { return false; }
+    }
+
     static string GuessMime(byte[] b) => b.Length > 8 && b[0] == 0x89 && b[1] == 0x50 ? "image/png" : b.Length > 3 && b[0] == 0xFF && b[1] == 0xD8 ? "image/jpeg" : "image/png";
 }

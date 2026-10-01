@@ -23,6 +23,7 @@ public sealed class HafModel
     public readonly List<HafMaterial> Materials = new List<HafMaterial>();
     public readonly List<HafTexture> Textures = new List<HafTexture>();
     public readonly List<HafImage> Images = new List<HafImage>();
+    public readonly List<string> Samplers = new List<string>();   // the file's texture samplers, each the verbatim JSON object (wrap, filters): carried, not interpreted (review of PR #110: 28 non-default samplers in the registry were flattened)
     public readonly List<HafSkin> Skins = new List<HafSkin>();
     public readonly List<HafAnimation> Animations = new List<HafAnimation>();
     public readonly List<string> ExtensionsUsed = new List<string>();
@@ -49,12 +50,14 @@ public sealed class HafNode
     public double[] Matrix;                       // 16 doubles, column-major, or null
     public int Mesh = -1;
     public int Skin = -1;
+    public string ExtrasJson;                     // the node's `extras` object, verbatim JSON, or null: carried, not interpreted
     public bool HasMatrix => Matrix != null;
 }
 
 public sealed class HafMesh
 {
     public string Name = "";
+    public string ExtrasJson;                     // the mesh's `extras` object, verbatim JSON, or null
     public readonly List<HafPrimitive> Primitives = new List<HafPrimitive>();
 }
 
@@ -104,6 +107,7 @@ public sealed class HafMaterial
     // written from this model keeps them and Blender still finds every texture (writer drill 2026-10-01: six registry
     // files lost 1-6 images on a round trip while the payload was dropped). The writer declares the names it carries.
     public string ExtensionsJson;
+    public string ExtrasJson;                     // the material's `extras` object, verbatim JSON, or null
 }
 
 public sealed class HafTexture

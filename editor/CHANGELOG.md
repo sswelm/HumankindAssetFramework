@@ -7,12 +7,15 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 - **The GLB writer — step 2 of replacing Blender** (`GlbWriter`). A `HafModel` back to a `.glb`: one BIN chunk, every
   field the model holds, images embedded, uint indices when a mesh needs them, both influence sets; a material's
-  extension payload carried verbatim and declared (specular/clearcoat textures survive). Deterministic (a second
-  write is byte-identical), sized once (no growing buffers: a 106 MB model used to double through 256 MB). Refuses
-  by name what it cannot write as it is. Tested on a round trip of the reader's full fixture field by field; drilled
-  on the registry: all 32 unique models written (726 MB in 0.6 s), every one reads back equal to its original, and
-  Blender reads every written file as it read the original. **Model Reader ▸ Save as GLB…** writes the model the
-  reader holds, for a round trip by hand.
+  extension payload, the texture samplers (wrap, filters) and the `extras` of nodes, meshes and materials carried
+  verbatim (specular/clearcoat textures survive; 28 registry samplers are non-default). Deterministic (a second write
+  is byte-identical), sized once (no growing buffers: a 106 MB model used to double through 256 MB), written to a
+  temporary name and moved into place. Refuses by name what it cannot write as it is - including a primitive with
+  morph targets (their data is not carried) and a position that is not a number. Tested on a round trip of the
+  reader's full fixture field by field; drilled on the registry: all 32 unique models written to disk (726 MB in
+  0.9 s), every one read back EQUAL TO ITS SOURCE FIELD BY FIELD (every vertex, index, material field, sampler,
+  image byte, skin matrix, animation key), and Blender reads every written file as it read the original.
+  **Model Reader ▸ Save as GLB…** writes the model the reader holds, for a round trip by hand.
 
 - **The in-memory model and the GLB reader — step 1 of replacing Blender** (`HafModel`, `GlbReader`; the plan and
   its measurements: `docs/Review-Backlog.md`). A `.glb` or `.gltf` (embedded, data-URI or sibling `.bin`) reads into one

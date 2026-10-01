@@ -70,12 +70,16 @@ what a Blender 5.1 slotted action spans) — through both transform chains, in B
 two-target fixture (`fixture_two_targets.py`: one animation, two nodes, channels ending apart, one starting late, both
 nodes instancing one mesh) rides along, since no registry file has those shapes.
 
-**`tools/glb_writer_drill.sh`** (2026-10-01, step 2) writes every registry model and the fixture with the real
-`editor/GlbWriter.cs`, then reads the written files back with the reader drill (every value must equal the original's)
-and has Blender import the written sample (every value must equal what the C# side read from the original; `FULL=1`
-for all). First full run: 32 of 32 both ways, 726 MB written in 0.6 s. It found that material extension payloads
-(`KHR_materials_specular`, clearcoat) carry texture references Blender needs — six files lost images until the model
-carried a material's `extensions` verbatim.
+**`tools/glb_writer_drill.sh`** (2026-10-01, step 2) writes every registry model and the fixture to disk with the
+real `editor/GlbWriter.cs`, reads each written file back and compares it with its source **field by field** inside
+the drill (every vertex of every attribute, every index, material field, texture, sampler, image byte, skin matrix,
+animation key; the first difference is named: `DIFF <file> <field>`), then reads the written files with the reader
+drill (every value must equal the original's) and has Blender import the written sample (every value must equal what
+the C# side read from the original; `FULL=1` for all). First full run: 32 of 32 both ways, 726 MB written in 0.9 s
+(to disk). It found that material extension payloads (`KHR_materials_specular`, clearcoat) carry texture references
+Blender needs — six files lost images until the model carried a material's `extensions` verbatim; the field compare
+then found 12 files whose sampler settings (filters, wrap) came back as glTF defaults until the model carried the
+samplers verbatim (the value summaries could not see either).
 Counting alone could not tell a wrong matrix chain. The pose both sides evaluate is **animation 0 at time 0**
 (`HafTransforms.PoseAt`; Blender with its NLA tracks dropped and the active clip at frame 0 — its untouched import
 blends every clip through the NLA, a pose no file defines), and a skinned vertex goes through the spec's weighted joint
