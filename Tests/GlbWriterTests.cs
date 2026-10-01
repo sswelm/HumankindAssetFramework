@@ -150,6 +150,10 @@ public class GlbWriterTests
     [InlineData("root-is-child", "root 1 'Root' is a child of node 0")]
     [InlineData("hierarchy-cycle", "is its own ancestor")]
     [InlineData("root-twice", "root 0 is listed twice")]
+    [InlineData("ibm-too-big", "inverse bind matrices: 1E+100 does not fit a 32-bit float")]
+    [InlineData("translation-too-big", "translation: -1E+39 does not fit a 32-bit float")]
+    [InlineData("negative-first-key", "key times start at -0.5 - glTF starts them at or after 0")]
+    [InlineData("repeated-key", "key times must strictly increase (key 1 is 0 after 0)")]
     public void What_cannot_be_written_as_it_is_is_refused_by_name(string flaw, string message)
     {
         var m = GlbReader.Read(GlbReaderTests.FullGlb());
@@ -182,6 +186,10 @@ public class GlbWriterTests
             case "root-is-child": m.Roots.Add(1); break;
             case "hierarchy-cycle": m.Roots.Clear(); m.Nodes[2].Children.Add(0); m.Nodes[0].Parent = 2; break;   // 0 -> 1 -> 2 -> 0, every Parent consistent
             case "root-twice": m.Roots.Add(0); break;
+            case "ibm-too-big": m.Skins[0].InverseBindMatrices[3] = 1e100; break;          // finite, and infinity once cast
+            case "translation-too-big": m.Nodes[0].Translation[0] = -1e39; break;
+            case "negative-first-key": m.Animations[0].Samplers[0].Times[0] = -0.5f; break;
+            case "repeated-key": m.Animations[0].Samplers[0].Times[1] = m.Animations[0].Samplers[0].Times[0]; break;
         }
         var ex = Assert.Throws<InvalidDataException>(() => GlbWriter.Write(m));
         Assert.Contains(message, ex.Message);

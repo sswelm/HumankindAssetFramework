@@ -16,8 +16,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   moved into place; a failed landing leaves nothing behind. An `extras` of any JSON type is kept (the schema allows
   any). Refuses by name what it cannot write as it is - a primitive with morph targets (their data is not carried) or
   none at all, a sampler without keys, a non-finite number anywhere (glTF forbids NaN and infinity in accessor data
-  too, not only in JSON), an image that is neither PNG nor JPEG, a model over 2 GB, a hierarchy whose Parent and
-  Children disagree, a node with two parents, a cycle, a root that is somebody's child. Tested on a round
+  too, not only in JSON), a double that does not fit the float32 the file holds (1e100 would cast to infinity), key
+  times that do not start at or after 0 and strictly increase, an image that is neither PNG nor JPEG, a model over
+  2 GB, a hierarchy whose Parent and Children disagree, a node with two parents, a cycle, a root that is somebody's
+  child. Tested on a round
   trip of the reader's full fixture field by field; drilled on the registry: every extensions/extras object in the
   sources sits at a path the model carries (else FAIL), all 32 unique models written to disk (726 MB in 0.8 s), every
   one read back EQUAL TO ITS SOURCE FIELD BY FIELD (every vertex, index, material field, sampler, image byte, skin

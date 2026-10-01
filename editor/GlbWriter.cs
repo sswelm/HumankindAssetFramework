@@ -19,8 +19,9 @@ using Newtonsoft.Json.Linq;
 // carried) is refused by name; extensions anywhere but on a material, and extras elsewhere, are not carried and said
 // here. A model that cannot be written as it is - an index that does not fit a uint, a joint that does not fit a
 // ushort, a node outside the lists, a value that is not a finite number (anywhere: glTF forbids NaN and infinity in
-// accessor data too), a hierarchy whose Parent and Children disagree, a node with two parents, a cycle, a root that
-// is somebody's child - is refused by name. The file is written to a
+// accessor data too), a double that does not fit the float32 the file holds, key times that do not start at or after
+// 0 and strictly increase, a hierarchy whose Parent and Children disagree, a node with two parents, a cycle, a root
+// that is somebody's child - is refused by name. The file is written to a
 // temporary name beside the target and moved into place, so a consumer never reads a half-written .glb.
 public static class GlbWriter
 {
@@ -334,11 +335,11 @@ public static class GlbWriter
             if (n.Skin >= m.Skins.Count) throw new InvalidDataException($"node {i} '{n.Name}' references skin {n.Skin}, the model has {m.Skins.Count}");
             foreach (var c in n.Children) if (c < 0 || c >= m.Nodes.Count) throw new InvalidDataException($"node {i} '{n.Name}' lists child {c}, the model has {m.Nodes.Count} nodes");
             if (n.HasMatrix && n.Matrix.Length != 16) throw new InvalidDataException($"node {i} '{n.Name}' has a matrix of {n.Matrix.Length} values");
-            if (n.HasMatrix) Finite(n.Matrix, $"node {i} '{n.Name}' matrix");
+            if (n.HasMatrix) FitsFloat(n.Matrix, $"node {i} '{n.Name}' matrix");
             else
             {
                 Len(n.Translation, 3, $"node {i} '{n.Name}' translation"); Len(n.Rotation, 4, $"node {i} '{n.Name}' rotation"); Len(n.Scale, 3, $"node {i} '{n.Name}' scale");
-                Finite(n.Translation, $"node {i} '{n.Name}' translation"); Finite(n.Rotation, $"node {i} '{n.Name}' rotation"); Finite(n.Scale, $"node {i} '{n.Name}' scale");
+                FitsFloat(n.Translation, $"node {i} '{n.Name}' translation"); FitsFloat(n.Rotation, $"node {i} '{n.Name}' rotation"); FitsFloat(n.Scale, $"node {i} '{n.Name}' scale");
             }
         }
         foreach (var r in m.Roots) if (r < 0 || r >= m.Nodes.Count) throw new InvalidDataException($"root {r} is not a node of the model");
@@ -386,7 +387,7 @@ public static class GlbWriter
             foreach (var j in sk.Joints) if (j < 0 || j >= m.Nodes.Count) throw new InvalidDataException($"skin {si} '{sk.Name}' joint {j} is not a node of the model");
             if (sk.InverseBindMatrices != null && sk.InverseBindMatrices.Length != sk.Joints.Length * 16) throw new InvalidDataException($"skin {si} '{sk.Name}' has {sk.Joints.Length} joints but {sk.InverseBindMatrices.Length / 16} inverse bind matrices");
             if (sk.Skeleton >= m.Nodes.Count) throw new InvalidDataException($"skin {si} '{sk.Name}' names skeleton node {sk.Skeleton}, the model has {m.Nodes.Count} nodes");
-            Finite(sk.InverseBindMatrices, $"skin {si} '{sk.Name}' inverse bind matrices");
+            FitsFloat(sk.InverseBindMatrices, $"skin {si} '{sk.Name}' inverse bind matrices");
         }
         // the verbatim JSON the model carries must be JSON objects, or the file would not parse (said here, not as a parser's exception from the middle of the write)
         for (int i = 0; i < m.Samplers.Count; i++) if (!IsJsonObject(m.Samplers[i])) throw new InvalidDataException($"sampler {i} is not a JSON object: {m.Samplers[i]}");
@@ -427,6 +428,8 @@ public static class GlbWriter
                 if (keys == 0) throw new InvalidDataException($"animation '{an.Name}': a sampler has no keys (glTF has no empty accessor)");
                 if (s.Components > 0 && values != keys * per * s.Components) throw new InvalidDataException($"animation '{an.Name}': a sampler has {keys} keys but {values} values ({s.Interpolation}, {s.Components} components)");
                 Finite(s.Times, $"animation '{an.Name}' key times"); Finite(s.Values, $"animation '{an.Name}' key values");
+                if (s.Times[0] < 0) throw new InvalidDataException(FormattableString.Invariant($"animation '{an.Name}': key times start at {s.Times[0]} - glTF starts them at or after 0"));
+                for (int k = 1; k < s.Times.Length; k++) if (s.Times[k] <= s.Times[k - 1]) throw new InvalidDataException(FormattableString.Invariant($"animation '{an.Name}': key times must strictly increase (key {k} is {s.Times[k]} after {s.Times[k - 1]})"));
             }
         }
     }
@@ -437,6 +440,8 @@ public static class GlbWriter
     // glTF forbids NaN and infinity in accessor data as well as in JSON; null arrays are absent attributes, fine
     static void Finite(float[] a, string what) { if (a == null) return; foreach (float v in a) if (float.IsNaN(v) || float.IsInfinity(v)) throw new InvalidDataException($"{what}: a value is not a finite number (glTF forbids NaN and infinity)"); }
     static void Finite(double[] a, string what) { if (a == null) return; foreach (double v in a) if (double.IsNaN(v) || double.IsInfinity(v)) throw new InvalidDataException($"{what}: a value is not a finite number (glTF forbids NaN and infinity)"); }
+    // the model holds these as doubles; the file holds them as float32 (inverse bind matrices are cast; a node's transform is a JSON number every reader parses into a float) - 1e100 would cast to infinity past the finite check
+    static void FitsFloat(double[] a, string what) { Finite(a, what); if (a == null) return; foreach (double v in a) if (Math.Abs(v) > float.MaxValue) throw new InvalidDataException(FormattableString.Invariant($"{what}: {v:R} does not fit a 32-bit float")); }   // invariant: the message is read on a Dutch machine too
     /// <summary>Every extension name used anywhere INSIDE a carried payload (a specularTexture's KHR_texture_transform), so extensionsUsed declares it too.</summary>
     static void CollectNestedExtensions(JToken t, ISet<string> used)
     {

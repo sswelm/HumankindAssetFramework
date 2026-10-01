@@ -21,7 +21,8 @@ CARRIED = (
 
 
 def carried(path):
-    return any(path == c or path.startswith(c + ".") for c in CARRIED)
+    # inside a carried value everything is carried, whether reached through a key (".") or an array ("[]")
+    return any(path == c or path.startswith(c + ".") or path.startswith(c + "[") for c in CARRIED)
 
 
 def read_json(path):
@@ -40,8 +41,9 @@ def walk(node, path, found, bad):
             p = path + "." + k if path else k
             if k == "extras" or (k == "extensions" and isinstance(v, dict) and v):   # an empty extensions object carries nothing; an extras of any shape is data
                 found.append(p)
-                if not carried(p):
-                    bad.append(p)
+                if carried(p):
+                    continue          # verbatim from here down: an extras nested inside it travels with it
+                bad.append(p)
             walk(v, p, found, bad)
     elif isinstance(node, list):
         for v in node:
