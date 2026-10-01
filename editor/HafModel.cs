@@ -52,9 +52,18 @@ public sealed class HafModel
     public readonly List<HafTexture> Textures = new List<HafTexture>();
     public readonly List<HafImage> Images = new List<HafImage>();
     public readonly List<string> Samplers = new List<string>();   // the file's texture samplers, each the verbatim JSON object (wrap, filters): carried, not interpreted (review of PR #110: 28 non-default samplers in the registry were flattened)
+    // the file's cameras, each the verbatim JSON object: carried, not interpreted. A node names one by index (HafNode.Camera).
+    // Review of PR #112: they were dropped on a round trip without a word (Duck.glb has one), and a camera object takes a
+    // NAME in Blender's pool that the names computation needs.
+    public readonly List<string> Cameras = new List<string>();
     public readonly List<HafSkin> Skins = new List<HafSkin>();
     public readonly List<HafAnimation> Animations = new List<HafAnimation>();
     public readonly List<string> ExtensionsUsed = new List<string>();
+    // The extensions the file REQUIRES that the reader accepted: only those whose whole effect is a material's
+    // payload, which is carried verbatim (KHR_materials_pbrSpecularGlossiness on a Lab source, 2026-10-02). The
+    // geometry, skins and animations of such a file are what the specification's core says; what its materials look
+    // like is in HafMaterial.ExtensionsJson for whoever draws them. The writer writes these back as required.
+    public readonly List<string> ExtensionsRequired = new List<string>();
 
     public long TriangleCount
     {
@@ -85,6 +94,7 @@ public sealed class HafNode
     public double[] Matrix;                       // 16 doubles, column-major, or null
     public int Mesh = -1;
     public int Skin = -1;
+    public int Camera = -1;                       // index into HafModel.Cameras, or -1
     public string ExtrasJson;                     // the node's `extras`, verbatim JSON of any type, or null when absent: carried, not interpreted
     public bool HasMatrix => Matrix != null;
 }
@@ -101,6 +111,9 @@ public sealed class HafPrimitive
     public int Mode = 4;                          // glTF primitive mode; 4 = TRIANGLES
     public int Material = -1;
     public int VertexCount;
+    // The arrays below may be SHARED with other primitives: the reader decodes an accessor once, and a file whose parts
+    // reference one vertex accessor (every Workshop split) gives them one array. Read them freely; to edit one, replace it
+    // with a copy. The writer writes a shared array once.
     public float[] Positions;                     // 3 per vertex; never null for a primitive that was read
     public float[] Normals;                       // 3 per vertex, or null
     public float[] Tangents;                      // 4 per vertex (xyz + handedness), or null

@@ -32,6 +32,8 @@
     <Compile Include="..\editor\HafTransforms.cs" Link="HafTransforms.cs" />
     <Compile Include="..\editor\GlbWriter.cs" Link="GlbWriter.cs" />
     <Compile Include="..\editor\HafModelDiff.cs" Link="HafModelDiff.cs" />
+    <Compile Include="..\editor\BlenderNames.cs" Link="BlenderNames.cs" />
+    <Compile Include="..\editor\VehicleProbe.cs" Link="VehicleProbe.cs" />
   </ItemGroup>
 
   <!-- compile-time references the TEST code uses directly -->

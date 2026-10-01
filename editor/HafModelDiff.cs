@@ -15,6 +15,13 @@ public static class HafModelDiff
     /// extensionsUsed may shrink to what is carried (a name the source declared without any payload) but never grow.</summary>
     public static string FirstDifference(HafModel a, HafModel b)
     {
+        equalPairs = null;   // per comparison: the arrays of a model that was edited since are compared afresh
+        try { return Compare(a, b); }
+        finally { equalPairs = null; }   // and not kept alive after it: the set holds both models' arrays
+    }
+
+    static string Compare(HafModel a, HafModel b)
+    {
         string d;
         if ((d = Count("nodes", a.Nodes.Count, b.Nodes.Count)) != null) return d;
         if ((d = Count("meshes", a.Meshes.Count, b.Meshes.Count)) != null) return d;
@@ -22,6 +29,8 @@ public static class HafModelDiff
         if ((d = Count("textures", a.Textures.Count, b.Textures.Count)) != null) return d;
         if ((d = Count("images", a.Images.Count, b.Images.Count)) != null) return d;
         if ((d = Count("samplers", a.Samplers.Count, b.Samplers.Count)) != null) return d;
+        if ((d = Count("cameras", a.Cameras.Count, b.Cameras.Count)) != null) return d;
+        for (int i = 0; i < a.Cameras.Count; i++) if (a.Cameras[i] != b.Cameras[i]) return $"camera {i}: {a.Cameras[i]} -> {b.Cameras[i]}";
         if ((d = Count("skins", a.Skins.Count, b.Skins.Count)) != null) return d;
         if ((d = Count("animations", a.Animations.Count, b.Animations.Count)) != null) return d;
         if ((d = Count("scenes", a.Scenes.Count, b.Scenes.Count)) != null) return d;
@@ -36,6 +45,7 @@ public static class HafModelDiff
         if (a.Copyright != b.Copyright) return "asset copyright";
         if (a.AssetExtrasJson != b.AssetExtrasJson) return $"asset extras: {a.AssetExtrasJson} -> {b.AssetExtrasJson}";
         foreach (var e in b.ExtensionsUsed) if (!a.ExtensionsUsed.Contains(e)) return $"extensionsUsed gained {e}";
+        if (!a.ExtensionsRequired.OrderBy(x => x, StringComparer.Ordinal).SequenceEqual(b.ExtensionsRequired.OrderBy(x => x, StringComparer.Ordinal))) return $"extensionsRequired: [{string.Join(", ", a.ExtensionsRequired)}] -> [{string.Join(", ", b.ExtensionsRequired)}]";
         for (int i = 0; i < a.Nodes.Count; i++)
         {
             HafNode x = a.Nodes[i], y = b.Nodes[i]; string w = $"node {i} ({x.Name})";
@@ -44,6 +54,7 @@ public static class HafModelDiff
             if (!x.Children.SequenceEqual(y.Children)) return w + " children";
             if (x.Mesh != y.Mesh) return w + " mesh";
             if (x.Skin != y.Skin) return w + " skin";
+            if (x.Camera != y.Camera) return w + " camera";
             if (x.HasMatrix != y.HasMatrix) return w + " matrix presence";
             if (x.HasMatrix ? !x.Matrix.SequenceEqual(y.Matrix) : !(x.Translation.SequenceEqual(y.Translation) && x.Rotation.SequenceEqual(y.Rotation) && x.Scale.SequenceEqual(y.Scale))) return w + " transform";
             if (x.ExtrasJson != y.ExtrasJson) return w + " extras";
@@ -145,8 +156,20 @@ public static class HafModelDiff
     {
         if (a == null || b == null) return a == b ? null : $"{what}: {(a == null ? "absent" : "present")} -> {(b == null ? "absent" : "present")}";
         if (a.Length != b.Length) return $"{what}: {a.Length} -> {b.Length} values";
+        // two primitives may share one array on each side (the reader shares what the file shared): a pair found equal once is equal
+        if (equalPairs == null) equalPairs = new HashSet<(object, object)>(PairComparer.Instance);
+        if (equalPairs.Contains((a, b))) return null;
         for (int i = 0; i < a.Length; i++) if (!a[i].Equals(b[i])) return $"{what}[{i}]: {a[i]} -> {b[i]}";
+        equalPairs.Add((a, b));
         return null;
+    }
+
+    [ThreadStatic] static HashSet<(object, object)> equalPairs;
+    sealed class PairComparer : IEqualityComparer<(object, object)>
+    {
+        public static readonly PairComparer Instance = new PairComparer();
+        public bool Equals((object, object) x, (object, object) y) => ReferenceEquals(x.Item1, y.Item1) && ReferenceEquals(x.Item2, y.Item2);
+        public int GetHashCode((object, object) p) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(p.Item1) * 397 ^ System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(p.Item2);
     }
 
 }

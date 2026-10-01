@@ -581,6 +581,20 @@ def rig_report():
         print("RIGBONE|%s|%d|%.4f,%.4f,%.4f|%.4f,%.4f,%.4f" % (bn, cnt, c.x, c.y, c.z, s.x, s.y, s.z))
 
 if mode == "probe":
+    # posestart=1 (opt-in; the C# probe's parity drill passes it): put the scene in a DEFINED pose before measuring.
+    # The glTF importer leaves every clip on an NLA track with the first one active and the scene on frame 1, so an
+    # untouched import is a blend of all clips one frame in - a pose no file states (measured 2026-10-02: a part
+    # moving 1 unit/s reads 0.0417 off its first key; three clips on one node read a scale of 1.018). Dropping the NLA
+    # tracks and going to frame 0 gives the first clip at its start, the state the C# probe computes. It goes AFTER the
+    # preview path (argv[2], which may be empty): in that slot it would be taken for the path.
+    if "posestart=1" in argv:
+        for _po in bpy.data.objects:
+            if _po.animation_data is not None:
+                for _pt in list(_po.animation_data.nla_tracks):
+                    _po.animation_data.nla_tracks.remove(_pt)
+        bpy.context.scene.frame_set(0)
+        bpy.context.view_layer.update()
+        print("VEHICLE note: probe posed at the first clip's start (posestart=1)")
     rig_report()
     _lap("rig_report")
     objs = mesh_objects()

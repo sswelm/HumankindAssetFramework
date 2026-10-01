@@ -14,7 +14,7 @@ using Newtonsoft.Json.Linq;
 // verbatim (HafMaterial.ExtensionsJson) and the names are declared in extensionsUsed, so KHR_materials_specular,
 // clearcoat and the like - and the textures they reference - survive a round trip; so are the texture samplers
 // (wrap and filters), the `extras` of the asset (Sketchfab's author and license), nodes, meshes, materials and scenes,
-// the asset's copyright, and EVERY scene with its name (the default one by index, or none, as the file had it). What the reader does not model is not here
+// the asset's copyright, the cameras (verbatim, and the node that holds each), and EVERY scene with its name (the default one by index, or none, as the file had it). What the reader does not model is not here
 // either, and the writer REFUSES rather than drops: a primitive with morph targets (counted by the reader, data not
 // carried) is refused by name; extensions anywhere but on a material, and extras elsewhere, are not carried and said
 // here. A model that cannot be written as it is - an index that does not fit a uint, a joint that does not fit a
@@ -95,8 +95,15 @@ public static class GlbWriter
             bin.Write(data, 0, byteLength);
             return views.Count - 1;
         }
+        // an array INSTANCE two primitives share is written once (the reader shares what the source shared; a Workshop split
+        // of 8.2 M vertices over 2,133 primitives would otherwise be written as 125 M)
+        var written = new Dictionary<object, Dictionary<string, int>>(RefComparer.Instance);
+        bool Have(object array, string form, out int accessor) { accessor = -1; return written.TryGetValue(array, out var forms) && forms.TryGetValue(form, out accessor); }
+        int Keep(object array, string form, int accessor) { if (!written.TryGetValue(array, out var forms)) written[array] = forms = new Dictionary<string, int>(); forms[form] = accessor; return accessor; }
         int FloatAccessor(float[] data, int components, string type, bool minMax)
         {
+            string form = type + (minMax ? "+bounds" : "");
+            if (Have(data, form, out int had)) return had;
             var b = new byte[data.Length * 4]; Buffer.BlockCopy(data, 0, b, 0, b.Length);
             var a = new JObject { ["bufferView"] = View(b, b.Length), ["componentType"] = 5126, ["type"] = type, ["count"] = data.Length / components };
             if (minMax && data.Length > 0)
@@ -106,23 +113,25 @@ public static class GlbWriter
                 for (int i = 0; i < data.Length; i++) { int c = i % components; if (data[i] < mn[c]) mn[c] = data[i]; if (data[i] > mx[c]) mx[c] = data[i]; }
                 a["min"] = new JArray(mn.Cast<object>()); a["max"] = new JArray(mx.Cast<object>());
             }
-            accessors.Add(a); return accessors.Count - 1;
+            accessors.Add(a); return Keep(data, form, accessors.Count - 1);
         }
         int DoubleAsFloatAccessor(double[] data, int components, string type) => FloatAccessor(data.Select(d => (float)d).ToArray(), components, type, false);
         int UshortAccessor(ushort[] data, int components, string type)
         {
+            if (Have(data, type, out int had)) return had;
             var b = new byte[data.Length * 2]; Buffer.BlockCopy(data, 0, b, 0, b.Length);
             accessors.Add(new JObject { ["bufferView"] = View(b, b.Length), ["componentType"] = 5123, ["type"] = type, ["count"] = data.Length / components });
-            return accessors.Count - 1;
+            return Keep(data, type, accessors.Count - 1);
         }
         int IndexAccessor(int[] indices, int vertexCount)
         {
             bool wide = vertexCount > 65535;
+            if (Have(indices, wide ? "u32" : "u16", out int had)) return had;
             byte[] b;
             if (wide) { b = new byte[indices.Length * 4]; for (int i = 0; i < indices.Length; i++) BitConverter.GetBytes((uint)indices[i]).CopyTo(b, i * 4); }
             else { b = new byte[indices.Length * 2]; for (int i = 0; i < indices.Length; i++) BitConverter.GetBytes((ushort)indices[i]).CopyTo(b, i * 2); }
             accessors.Add(new JObject { ["bufferView"] = View(b, b.Length), ["componentType"] = wide ? 5125 : 5123, ["type"] = "SCALAR", ["count"] = indices.Length });
-            return accessors.Count - 1;
+            return Keep(indices, wide ? "u32" : "u16", accessors.Count - 1);
         }
 
         // ---- images, samplers, textures, materials
@@ -140,15 +149,17 @@ public static class GlbWriter
             root["images"] = images;
         }
         // the samplers as the model carries them (verbatim); a texture that points past them gets a default one
+        // EVERY glTF object carried verbatim goes through here, so the extensions inside it are declared: a payload that
+        // travels and a name that does not is the same defect twice now (samplers in PR #110, cameras in PR #112)
+        JObject Carried(string json) { var o = GlbReader.ParseObject(json); CollectNestedExtensions(o, used); return o; }
+        if (m.Cameras.Count > 0) root["cameras"] = new JArray(m.Cameras.Select(c => (object)Carried(c)));
         int samplerCount = Math.Max(m.Samplers.Count, m.Textures.Count == 0 ? 0 : m.Textures.Max(t => t.Sampler) + 1);
         if (samplerCount > 0)
         {
             var samplers = new JArray();
             for (int i = 0; i < samplerCount; i++)
             {
-                var sj = i < m.Samplers.Count ? GlbReader.ParseObject(m.Samplers[i]) : new JObject();
-                CollectNestedExtensions(sj, used);   // a sampler's own extensions payload travels verbatim, so its names are declared too
-                samplers.Add(sj);
+                samplers.Add(i < m.Samplers.Count ? Carried(m.Samplers[i]) : new JObject());
             }
             root["samplers"] = samplers;
         }
@@ -244,6 +255,7 @@ public static class GlbWriter
                 }
                 if (n.Mesh >= 0) j["mesh"] = n.Mesh;
                 if (n.Skin >= 0) j["skin"] = n.Skin;
+                if (n.Camera >= 0) j["camera"] = n.Camera;
                 if (n.Children.Count > 0) j["children"] = new JArray(n.Children.Cast<object>());
                 if (n.ExtrasJson != null) j["extras"] = GlbReader.ParseToken(n.ExtrasJson);
                 nodes.Add(j);
@@ -310,6 +322,9 @@ public static class GlbWriter
         }
 
         if (used.Count > 0) root["extensionsUsed"] = new JArray(used.Cast<object>());
+        // what the source required and this file still carries stays required (a reader that cannot honour the payload must not show the material as if it could)
+        var required = m.ExtensionsRequired.Where(used.Contains).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList();
+        if (required.Count > 0) root["extensionsRequired"] = new JArray(required.Cast<object>());
         if (accessors.Count > 0) root["accessors"] = accessors;
         if (views.Count > 0) root["bufferViews"] = views;
         while (bin.Length % 4 != 0) bin.WriteByte(0);
@@ -326,7 +341,8 @@ public static class GlbWriter
     static long BinSizeUpperBound(HafModel m)
     {
         long n = 0; int viewsGuess = 0;
-        void Add(Array a, int bytesPer) { if (a != null) { n += (long)a.Length * bytesPer; viewsGuess++; } }
+        var counted = new HashSet<object>(RefComparer.Instance);   // a shared array is written, and counted, once
+        void Add(Array a, int bytesPer) { if (a != null && counted.Add(a)) { n += (long)a.Length * bytesPer; viewsGuess++; } }
         foreach (var me in m.Meshes)
             foreach (var p in me.Primitives)
             {
@@ -341,8 +357,18 @@ public static class GlbWriter
 
     // ---------------------------------------------------------------- what cannot be written as it is
 
+    /// <summary>Equality by INSTANCE: which arrays are the same array.</summary>
+    sealed class RefComparer : IEqualityComparer<object>
+    {
+        public static readonly RefComparer Instance = new RefComparer();
+        bool IEqualityComparer<object>.Equals(object a, object b) => ReferenceEquals(a, b);
+        int IEqualityComparer<object>.GetHashCode(object o) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(o);
+    }
+
     static void Validate(HafModel m)
     {
+        var walked = new HashSet<object>(RefComparer.Instance);   // an array shared by many primitives is checked once
+        void FiniteOnce(float[] a, string what) { if (a != null && walked.Add(a)) Finite(a, what); }
         for (int i = 0; i < m.Nodes.Count; i++)
         {
             var n = m.Nodes[i];
@@ -395,8 +421,8 @@ public static class GlbWriter
                 if (p.VertexCount <= 0) throw new InvalidDataException($"{where} has no vertices (glTF has no empty accessor)");
                 if (p.Positions == null || p.Positions.Length != p.VertexCount * 3) throw new InvalidDataException($"{where}: positions do not match the vertex count");
                 if (p.MorphTargets > 0) throw new InvalidDataException($"{where} has {p.MorphTargets} morph target(s), whose data the model does not carry - refused rather than written without them");
-                Finite(p.Positions, $"{where} POSITION"); Finite(p.Normals, $"{where} NORMAL"); Finite(p.Tangents, $"{where} TANGENT"); Finite(p.Uv0, $"{where} TEXCOORD_0"); Finite(p.Uv1, $"{where} TEXCOORD_1");
-                Finite(p.Colors, $"{where} COLOR_0"); Finite(p.Weights, $"{where} WEIGHTS_0"); Finite(p.Weights1, $"{where} WEIGHTS_1");
+                FiniteOnce(p.Positions, $"{where} POSITION"); FiniteOnce(p.Normals, $"{where} NORMAL"); FiniteOnce(p.Tangents, $"{where} TANGENT"); FiniteOnce(p.Uv0, $"{where} TEXCOORD_0"); FiniteOnce(p.Uv1, $"{where} TEXCOORD_1");
+                FiniteOnce(p.Colors, $"{where} COLOR_0"); FiniteOnce(p.Weights, $"{where} WEIGHTS_0"); FiniteOnce(p.Weights1, $"{where} WEIGHTS_1");
                 void Check(Array a, int per, string name) { if (a != null && a.Length != p.VertexCount * per) throw new InvalidDataException($"{where}: {name} has {a.Length} values, {p.VertexCount * per} expected"); }
                 Check(p.Normals, 3, "normals"); Check(p.Tangents, 4, "tangents"); Check(p.Uv0, 2, "UV0"); Check(p.Uv1, 2, "UV1"); Check(p.Colors, 4, "colours");
                 Check(p.Joints, 4, "joints"); Check(p.Weights, 4, "weights"); Check(p.Joints1, 4, "joints (set 1)"); Check(p.Weights1, 4, "weights (set 1)");
@@ -415,6 +441,8 @@ public static class GlbWriter
         }
         // the verbatim JSON the model carries must be JSON objects, or the file would not parse (said here, not as a parser's exception from the middle of the write)
         for (int i = 0; i < m.Samplers.Count; i++) if (!IsJsonObject(m.Samplers[i])) throw new InvalidDataException($"sampler {i} is not a JSON object: {m.Samplers[i]}");
+        for (int i = 0; i < m.Cameras.Count; i++) if (!IsJsonObject(m.Cameras[i])) throw new InvalidDataException($"camera {i} is not a JSON object: {m.Cameras[i]}");
+        for (int i = 0; i < m.Nodes.Count; i++) if (m.Nodes[i].Camera >= m.Cameras.Count) throw new InvalidDataException($"node {i} '{m.Nodes[i].Name}' uses camera {m.Nodes[i].Camera}, the model has {m.Cameras.Count}");
         for (int i = 0; i < m.Nodes.Count; i++) if (m.Nodes[i].ExtrasJson != null && !IsJson(m.Nodes[i].ExtrasJson)) throw new InvalidDataException($"node {i} '{m.Nodes[i].Name}': extras is not JSON");
         for (int i = 0; i < m.Meshes.Count; i++) if (m.Meshes[i].ExtrasJson != null && !IsJson(m.Meshes[i].ExtrasJson)) throw new InvalidDataException($"mesh {i} '{m.Meshes[i].Name}': extras is not JSON");
         for (int i = 0; i < m.Materials.Count; i++)
@@ -451,7 +479,7 @@ public static class GlbWriter
                 int values = (s.Values?.Length ?? 0), keys = s.KeyCount;
                 if (keys == 0) throw new InvalidDataException($"animation '{an.Name}': a sampler has no keys (glTF has no empty accessor)");
                 if (s.Components > 0 && values != keys * per * s.Components) throw new InvalidDataException($"animation '{an.Name}': a sampler has {keys} keys but {values} values ({s.Interpolation}, {s.Components} components)");
-                Finite(s.Times, $"animation '{an.Name}' key times"); Finite(s.Values, $"animation '{an.Name}' key values");
+                FiniteOnce(s.Times, $"animation '{an.Name}' key times"); FiniteOnce(s.Values, $"animation '{an.Name}' key values");
                 if (s.Times[0] < 0) throw new InvalidDataException(FormattableString.Invariant($"animation '{an.Name}': key times start at {s.Times[0]} - glTF starts them at or after 0"));
                 for (int k = 1; k < s.Times.Length; k++) if (s.Times[k] <= s.Times[k - 1]) throw new InvalidDataException(FormattableString.Invariant($"animation '{an.Name}': key times must strictly increase (key {k} is {s.Times[k]} after {s.Times[k - 1]})"));
             }

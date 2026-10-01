@@ -47,7 +47,7 @@ public static class GlbReader
         if (version != 2) throw new InvalidDataException($"GLB version {version} is not supported (only version 2)");
         uint length = BitConverter.ToUInt32(bytes, 8);
         if (length > bytes.Length) throw new InvalidDataException($"GLB header says {length} bytes, the file has {bytes.Length}");
-        string json = null; byte[] bin = null;
+        string json = null; Segment bin = null;
         int at = 12;
         while (at + 8 <= length)
         {
@@ -55,7 +55,7 @@ public static class GlbReader
             at += 8;
             if (at + chunkLen > length) throw new InvalidDataException($"GLB chunk 0x{chunkType:X8} of {chunkLen} bytes runs past the file");
             if (chunkType == ChunkJson && json == null) json = Encoding.UTF8.GetString(bytes, at, (int)chunkLen);
-            else if (chunkType == ChunkBin && bin == null) { bin = new byte[chunkLen]; Buffer.BlockCopy(bytes, at, bin, 0, (int)chunkLen); }
+            else if (chunkType == ChunkBin && bin == null) bin = new Segment { Data = bytes, Base = at, Length = (int)chunkLen };   // a VIEW of the file's bytes, not a copy: a 398 MB source held twice ran Mono out of memory
             at += (int)chunkLen;
         }
         if (json == null) throw new InvalidDataException("GLB has no JSON chunk");
@@ -63,6 +63,9 @@ public static class GlbReader
     }
 
     public static HafModel ReadGltf(string jsonText, string baseDir) => Build(ParseObject(jsonText), null, baseDir);
+
+    /// <summary>A buffer: bytes [Base, Base + Length) of Data - the GLB's BIN chunk inside the file's own array, or a whole sidecar.</summary>
+    sealed class Segment { public byte[] Data; public int Base, Length; }
 
     /// <summary>JSON text to a JObject with the text's strings kept as strings: Newtonsoft's default turns a string
     /// that looks like a date into a DateTime and writes it back in its own form (an extras value
@@ -91,13 +94,22 @@ public static class GlbReader
 
     // ---------------------------------------------------------------- the build
 
-    static HafModel Build(JObject root, byte[] glbBin, string baseDir)
+    static HafModel Build(JObject root, Segment glbBin, string baseDir)
     {
         var model = new HafModel { Generator = root["asset"]?["generator"]?.ToString() ?? "", Copyright = root["asset"]?["copyright"]?.ToString() ?? "" };
         model.AssetExtrasJson = Extras(root["asset"] as JObject);
         foreach (var e in root["extensionsUsed"] as JArray ?? new JArray()) model.ExtensionsUsed.Add(e.ToString());
         foreach (var e in root["extensionsRequired"] as JArray ?? new JArray())
-            throw new InvalidDataException($"the file requires the extension '{e}', which this reader does not implement (KHR_draco_mesh_compression needs a Draco decoder; KHR_texture_transform moves the textures; KHR_materials_pbrSpecularGlossiness has no base colour to read) - refused rather than read wrong");
+        {
+            // an extension whose whole effect is a MATERIAL's payload is read and carried: the geometry, skins and
+            // animations are core glTF, and the payload travels verbatim in HafMaterial.ExtensionsJson for whoever draws
+            // the material (a Lab source requires KHR_materials_pbrSpecularGlossiness: its colours are in that payload,
+            // not in pbrMetallicRoughness - the preview shows such a material untextured). Everything else changes how
+            // the DATA is decoded or mapped and is refused.
+            string name = e.ToString();
+            if (name.StartsWith("KHR_materials_", StringComparison.Ordinal) && name != "KHR_materials_variants") { model.ExtensionsRequired.Add(name); continue; }
+            throw new InvalidDataException($"the file requires the extension '{name}', which this reader does not implement (KHR_draco_mesh_compression needs a Draco decoder; KHR_texture_transform moves the textures; KHR_materials_variants lives on primitives) - refused rather than read wrong");
+        }
 
         var buffers = LoadBuffers(root, glbBin, baseDir);
         var acc = new Accessors(root, buffers);
@@ -120,6 +132,7 @@ public static class GlbReader
             }
             model.Images.Add(image);
         }
+        foreach (var cam in root["cameras"] as JArray ?? new JArray()) model.Cameras.Add(cam is JObject co ? co.ToString(Newtonsoft.Json.Formatting.None) : "{}");
         foreach (var sp in root["samplers"] as JArray ?? new JArray()) model.Samplers.Add(sp is JObject so ? so.ToString(Newtonsoft.Json.Formatting.None) : "{}");
         foreach (var tx in root["textures"] as JArray ?? new JArray())
             model.Textures.Add(new HafTexture { Name = tx["name"]?.ToString() ?? "", Source = tx["source"]?.Value<int>() ?? -1, Sampler = tx["sampler"]?.Value<int>() ?? -1 });
@@ -198,6 +211,11 @@ public static class GlbReader
             if (nd["rotation"] is JArray r) n.Rotation = Doubles(r, 4, "node rotation");
             if (nd["scale"] is JArray s) n.Scale = Doubles(s, 3, "node scale");
             n.ExtrasJson = Extras(nd);
+            if (nd["camera"] != null)
+            {
+                n.Camera = nd.Value<int>("camera");
+                if (n.Camera < 0 || n.Camera >= model.Cameras.Count) throw new InvalidDataException($"node '{n.Name}' uses camera {n.Camera}, the file has {model.Cameras.Count}");
+            }
             if (n.Mesh >= model.Meshes.Count) throw new InvalidDataException($"node '{n.Name}' references mesh {n.Mesh}, the file has {model.Meshes.Count}");
             model.Nodes.Add(n);
         }
@@ -303,19 +321,23 @@ public static class GlbReader
 
     sealed class BufferView { public byte[] Buffer; public int Offset, Length, Stride; }
 
-    static List<byte[]> LoadBuffers(JObject root, byte[] glbBin, string baseDir)
+    static List<Segment> LoadBuffers(JObject root, Segment glbBin, string baseDir)
     {
-        var list = new List<byte[]>();
+        var list = new List<Segment>();
         int i = 0;
         foreach (var b in root["buffers"] as JArray ?? new JArray())
         {
             long declared = b["byteLength"]?.Value<long>() ?? 0;
-            byte[] data;
+            Segment data;
             if (b["uri"] == null)
             {
                 data = glbBin ?? throw new InvalidDataException($"buffer {i} has no uri and there is no BIN chunk");
             }
-            else data = ResolveUri(b["uri"].ToString(), baseDir, out _) ?? throw new InvalidDataException($"buffer {i}: '{b["uri"]}' could not be found beside the file");
+            else
+            {
+                var whole = ResolveUri(b["uri"].ToString(), baseDir, out _) ?? throw new InvalidDataException($"buffer {i}: '{b["uri"]}' could not be found beside the file");
+                data = new Segment { Data = whole, Base = 0, Length = whole.Length };
+            }
             if (data.Length < declared) throw new InvalidDataException($"buffer {i} declares {declared} bytes but holds {data.Length}");
             list.Add(data);
             i++;
@@ -345,11 +367,11 @@ public static class GlbReader
     sealed class Accessors
     {
         readonly JArray accessors, views;
-        readonly List<byte[]> buffers;
+        readonly List<Segment> buffers;
         sealed class Layout { public int Count, ComponentType, ComponentBytes, Components, Stride, Offset; public byte[] Buffer; public bool Normalized; public string Type; }
         readonly Dictionary<int, Layout> layouts = new Dictionary<int, Layout>();
 
-        public Accessors(JObject root, List<byte[]> buffers)
+        public Accessors(JObject root, List<Segment> buffers)
         {
             accessors = root["accessors"] as JArray ?? new JArray();
             views = root["bufferViews"] as JArray ?? new JArray();
@@ -362,8 +384,10 @@ public static class GlbReader
             var v = views[index];
             int bi = v.Value<int>("buffer");
             if (bi < 0 || bi >= buffers.Count) throw new InvalidDataException($"bufferView {index} uses buffer {bi}, the file has {buffers.Count}");
-            var bv = new BufferView { Buffer = buffers[bi], Offset = v["byteOffset"]?.Value<int>() ?? 0, Length = v.Value<int>("byteLength"), Stride = v["byteStride"]?.Value<int>() ?? 0 };
-            if (bv.Offset < 0 || bv.Length < 0 || (long)bv.Offset + bv.Length > bv.Buffer.Length) throw new InvalidDataException($"bufferView {index} ({bv.Offset}+{bv.Length}) runs past buffer {bi} ({bv.Buffer.Length} bytes)");
+            var seg = buffers[bi];
+            int viewOffset = v["byteOffset"]?.Value<int>() ?? 0;
+            var bv = new BufferView { Buffer = seg.Data, Offset = seg.Base + viewOffset, Length = v.Value<int>("byteLength"), Stride = v["byteStride"]?.Value<int>() ?? 0 };
+            if (viewOffset < 0 || bv.Length < 0 || (long)viewOffset + bv.Length > seg.Length) throw new InvalidDataException($"bufferView {index} ({viewOffset}+{bv.Length}) runs past buffer {bi} ({seg.Length} bytes)");
             return bv;
         }
 
@@ -416,9 +440,24 @@ public static class GlbReader
         {
             var l = Resolve(index);
             if (expectedComponents > 0 && l.Components != expectedComponents) throw new InvalidDataException($"{where}: accessor {index} is {l.Type}, {expectedComponents} components were expected");
-            var outp = new float[l.Count * l.Components];
-            for (int e = 0, o = 0; e < l.Count; e++) for (int c = 0; c < l.Components; c++) outp[o++] = (float)Component(l, e, c);
-            return outp;
+            return Decoded(index, 0, () =>
+            {
+                var outp = new float[l.Count * l.Components];
+                for (int e = 0, o = 0; e < l.Count; e++) for (int c = 0; c < l.Components; c++) outp[o++] = (float)Component(l, e, c);
+                return outp;
+            });
+        }
+
+        // ONE array per accessor: primitives (and animation samplers) that reference the same accessor share it. A Workshop
+        // split writes every part over its parent's vertex accessor - a 398 MB Lab source has 2,133 primitives over 162
+        // accessors, 8.2 M vertices that decoded one copy per primitive came to 125 M (4 GB, "Insufficient memory").
+        // Consumers treat a primitive's arrays as read-only, or copy before editing (HafModel says so).
+        readonly Dictionary<long, Array> decoded = new Dictionary<long, Array>();
+        T[] Decoded<T>(int index, int kind, Func<T[]> decode)
+        {
+            long key = (long)index * 8 + kind;
+            if (decoded.TryGetValue(key, out var have)) return (T[])have;
+            var d = decode(); decoded[key] = d; return d;
         }
 
         public double[] Doubles(int index, int expectedComponents, string where)
@@ -435,9 +474,12 @@ public static class GlbReader
             var l = Resolve(index);
             if (l.Components != expectedComponents) throw new InvalidDataException($"{where}: accessor {index} is {l.Type}, {expectedComponents} components were expected");
             if (l.ComponentType != 5121 && l.ComponentType != 5123) throw new InvalidDataException($"{where}: joints must be unsigned byte or short, accessor {index} is component type {l.ComponentType}");
-            var outp = new ushort[l.Count * l.Components];
-            for (int e = 0, o = 0; e < l.Count; e++) for (int c = 0; c < l.Components; c++) outp[o++] = (ushort)Component(l, e, c);
-            return outp;
+            return Decoded(index, 1, () =>
+            {
+                var outp = new ushort[l.Count * l.Components];
+                for (int e = 0, o = 0; e < l.Count; e++) for (int c = 0; c < l.Components; c++) outp[o++] = (ushort)Component(l, e, c);
+                return outp;
+            });
         }
 
         public int[] Ints(int index, string where)
@@ -445,9 +487,12 @@ public static class GlbReader
             var l = Resolve(index);
             if (l.Components != 1) throw new InvalidDataException($"{where}: accessor {index} is {l.Type}, indices are SCALAR");
             if (l.ComponentType != 5121 && l.ComponentType != 5123 && l.ComponentType != 5125) throw new InvalidDataException($"{where}: indices must be unsigned byte, short or int, accessor {index} is component type {l.ComponentType}");
-            var outp = new int[l.Count];
-            for (int e = 0; e < l.Count; e++) { double v = Component(l, e, 0); if (v > int.MaxValue) throw new InvalidDataException($"{where}: index {v} does not fit"); outp[e] = (int)v; }
-            return outp;
+            return Decoded(index, 2, () =>
+            {
+                var outp = new int[l.Count];
+                for (int e = 0; e < l.Count; e++) { double v = Component(l, e, 0); if (v > int.MaxValue) throw new InvalidDataException($"{where}: index {v} does not fit"); outp[e] = (int)v; }
+                return outp;
+            });
         }
 
         /// <summary>COLOR_0 is VEC3 or VEC4, float or normalized; the model holds RGBA.</summary>
@@ -455,13 +500,16 @@ public static class GlbReader
         {
             var l = Resolve(index);
             if (l.Components != 3 && l.Components != 4) throw new InvalidDataException($"{where}: accessor {index} is {l.Type}, colours are VEC3 or VEC4");
-            var outp = new float[l.Count * 4];
-            for (int e = 0, o = 0; e < l.Count; e++)
+            return Decoded(index, 3, () =>
             {
-                for (int c = 0; c < l.Components; c++) outp[o++] = (float)Component(l, e, c);
-                if (l.Components == 3) outp[o++] = 1f;
-            }
-            return outp;
+                var outp = new float[l.Count * 4];
+                for (int e = 0, o = 0; e < l.Count; e++)
+                {
+                    for (int c = 0; c < l.Components; c++) outp[o++] = (float)Component(l, e, c);
+                    if (l.Components == 3) outp[o++] = 1f;
+                }
+                return outp;
+            });
         }
     }
 

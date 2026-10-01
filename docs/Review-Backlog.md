@@ -63,6 +63,17 @@ Blender) — keep Blender optional for those.
 **Cost**: 2–4 months at the current rigor. **Safety**: the goldens (`deploy_golden`, `lab_golden`, the Bake Tests)
 compare dumps of the same inputs, so Blender stays the oracle until each script reaches parity, then is demoted.
 
+**Progress (2026-10-02)**: the foundation is in — the GLB **reader** (#109), **writer** (#110), their diversity
+and in-Unity proof (#111) — and the first consumer has started: **the Vehicle Lab's probe**, chosen ahead of the
+order below because it is the Lab's most frequent Blender call (every session, 25 s a time) and exercises the model
+end to end. It lands in four parts: **3a** the rows (names as Blender's importer gives them, vertices, boxes, bones,
+rig bones) with row-for-row parity on every registry source and every saved recipe's source — done (105 of 105 files;
+the recipes' sources are the probe's real inputs and found what the registry could not: shared vertex accessors, a
+required material extension, a sheared node matrix); **3b** the visibility verdicts (escape rays over
+one BVH); **3c** the inside-out verdicts (island scoring against the hull axis); **3d** the Lab calls the C# probe for
+`.glb`/`.gltf` sources and builds its part preview in-process instead of importing a preview FBX (FBX/OBJ/.blend
+sources keep Blender). The order below stands for the rest.
+
 **Order, by payoff per effort**: (1) `inspect_fbx` → Unity's `ModelImporter` clip list (days; removes a Blender
 launch from the Clip Range dialog); (2) reduce/`prep_model` → a C# quadric decimator (1–2 weeks, golden-verified);
 (3) `deploy_convert` (3–4 weeks; the fuse already walks parts and welds); (4) `rig_anim` (3–4 weeks); (5)

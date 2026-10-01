@@ -43,6 +43,15 @@ if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/drill.exe" ]; then echo "$OUT" | grep -E "er
 FILES=()
 [ -z "$PACK" ] || mapfile -t FILES < <(python "$ROOT/tools/glb-reader-drill/registry_files.py" "$PACK" | tr -d '\r')   # python on Windows ends lines with CR LF; Mono refuses a path with a CR
 [ -n "$PACK" ] && [ "${#FILES[@]}" -eq 0 ] && REGISTRY_NOTE="NO registry (it names no .glb that exists on disk)"
+# plus the SOURCES of the Lab's saved recipes: the registry holds the Lab's outputs, these are its inputs - the unreduced
+# originals every later step reads (review of PR #112: they found shared vertex accessors and a required material
+# extension that no registry file has). Read (and written) always; put to Blender under FULL=1.
+RECIPE_SOURCES=()
+[ -z "$PACK" ] || mapfile -t RECIPE_SOURCES < <(python "$ROOT/tools/vehicle-probe-drill/recipe_check.py" --list "$PROJECT" | tr -d '\r')
+if [ "${#RECIPE_SOURCES[@]}" -gt 0 ]; then FILES+=("${RECIPE_SOURCES[@]}"); mapfile -t FILES < <(printf '%s\n' "${FILES[@]}" | awk '!seen[tolower($0)]++'); REGISTRY_NOTE="$REGISTRY_NOTE and ${#RECIPE_SOURCES[@]} recipe sources"; fi
+# the registry's own files: the gate's Blender sample takes its largest and smallest from these (a 398 MB recipe source in every push is 20 s)
+REGISTRY_ONLY=()
+for f in "${FILES[@]}"; do keep=1; for r in "${RECIPE_SOURCES[@]}"; do [ "${f,,}" = "${r,,}" ] && { keep=0; break; }; done; [ "$keep" = 1 ] && REGISTRY_ONLY+=("$f"); done
 # plus the shapes the registry does not have: the fixture library (fixtures.py, one small file per shape) and the
 # Khronos sample assets when they are fetched (fetch_samples.py; other exporters' output). A sample line may carry an
 # expectation - a stage that must refuse the file by name - checked below instead of round-tripped.
@@ -88,7 +97,7 @@ if [ -z "$BLENDER" ]; then echo "PASS — GLB reader drill: $n_ok files read ($R
 if [ "${FULL:-0}" = "1" ]; then SAMPLE=("${FILES[@]}")
 else
   # every fixture and every Khronos sample (small, and the diversity is the point), the registry's largest and smallest two, four animated ones
-  mapfile -t SAMPLE < <( { printf '%s\n' "${FIXTURES[@]}"; [ "${#SAMPLES_OK[@]}" -eq 0 ] || printf '%s\n' "${SAMPLES_OK[@]}"; ls -S "${FILES[@]}" | head -2; ls -S "${FILES[@]}" | tail -2; echo "$RESULT" | awk -F'\t' '/^FILE/ { for (i=2;i<=NF;i++) if ($i ~ /^animations=/ && $i != "animations=0") print $2 }' | head -4 | while read -r n; do for f in "${FILES[@]}"; do case "$f" in */"$n"/*) echo "$f";; esac; done; done; } | sort -u )
+  mapfile -t SAMPLE < <( { printf '%s\n' "${FIXTURES[@]}"; [ "${#SAMPLES_OK[@]}" -eq 0 ] || printf '%s\n' "${SAMPLES_OK[@]}"; [ "${#REGISTRY_ONLY[@]}" -eq 0 ] || { ls -S "${REGISTRY_ONLY[@]}" | head -2; ls -S "${REGISTRY_ONLY[@]}" | tail -2; }; echo "$RESULT" | awk -F'\t' '/^FILE/ { for (i=2;i<=NF;i++) if ($i ~ /^animations=/ && $i != "animations=0") print $2 }' | head -4 | while read -r n; do for f in "${FILES[@]}"; do case "$f" in */"$n"/*) echo "$f";; esac; done; done; } | sort -u )
 fi
 BOUT=$("$BLENDER" --background --python-exit-code 1 --python "$(cygpath -m "$ROOT/tools/glb-reader-drill/blender_counts.py")" -- "${SAMPLE[@]}" 2>&1); brc=$?
 BOUT=$(printf '%s' "$BOUT" | LC_ALL=C sed 's/\xEF\xBB\xBF//g')

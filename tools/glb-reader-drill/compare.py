@@ -52,7 +52,7 @@ for name, b in blender.items():
     for k in ("tris", "materials", "images", "joints"):
         # Blender has the materials a primitive USES plus one it invents for an unmaterialed COLOR_0 primitive: the C# line
         # states that count too (blendermaterials); file against file, the file's own count
-        ck = "blendermaterials" if k == "materials" and right_tag == "BLENDER" and "blendermaterials" in c else k
+        ck = "blender" + k if k in ("materials", "images") and right_tag == "BLENDER" and ("blender" + k) in c else k   # and the images those materials name
         if c.get(ck) != b.get(k):
             problems.append("%s C# %s vs Blender %s" % (k, c.get(ck), b.get(k)))
     cb, bb = floats(c.get("bbox", "")), floats(b.get("bbox", ""))

@@ -217,6 +217,85 @@ public class GlbReaderTests
     }
 
     [Fact]
+    public void Primitives_over_one_accessor_share_one_array_and_the_writer_writes_it_once()
+    {
+        // a Workshop split writes every part over its parent's vertex accessor: a 398 MB Lab source has 2,133 primitives over
+        // 162 accessors. Decoded once per primitive that was 125 M vertices (4 GB); shared, it is the file's 8.2 M.
+        var f = new Fixture();
+        int pos = f.FloatAccessor(new float[] { 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0 }, "VEC3", 3);
+        var ib = new byte[12]; Buffer.BlockCopy(new ushort[] { 0, 1, 2, 1, 3, 2 }, 0, ib, 0, 12);
+        int view = f.View(ib);
+        int i0 = f.Accessor(view, 0, 5123, "SCALAR", 3), i1 = f.Accessor(view, 6, 5123, "SCALAR", 3);
+        f.Root["meshes"] = new JArray { new JObject { ["primitives"] = new JArray { new JObject { ["attributes"] = new JObject { ["POSITION"] = pos }, ["indices"] = i0 }, new JObject { ["attributes"] = new JObject { ["POSITION"] = pos }, ["indices"] = i1 } } } };
+        f.Root["nodes"] = new JArray { new JObject { ["mesh"] = 0 } };
+        var m = GlbReader.Read(f.Glb());
+        var p0 = m.Meshes[0].Primitives[0]; var p1 = m.Meshes[0].Primitives[1];
+        Assert.Same(p0.Positions, p1.Positions); Assert.NotSame(p0.Indices, p1.Indices);
+        var written = GlbWriter.Write(m);
+        var json = JObject.Parse(Encoding.UTF8.GetString(written, 20, BitConverter.ToInt32(written, 12)));
+        var prims = (JArray)json["meshes"][0]["primitives"];
+        Assert.Equal(prims[0]["attributes"]["POSITION"].Value<int>(), prims[1]["attributes"]["POSITION"].Value<int>());   // one accessor, as in the source
+        Assert.NotEqual(prims[0]["indices"].Value<int>(), prims[1]["indices"].Value<int>());
+        Assert.Equal(3, ((JArray)json["accessors"]).Count);
+        var back = GlbReader.Read(written);
+        Assert.Null(HafModelDiff.FirstDifference(m, back));
+        Assert.Same(back.Meshes[0].Primitives[0].Positions, back.Meshes[0].Primitives[1].Positions);
+    }
+
+    [Fact]
+    public void Cameras_are_carried_verbatim_with_the_node_that_holds_each()
+    {
+        // review of PR #112: a round trip dropped them without a word (the Khronos Duck has one), and Blender names an object after each
+        var f = new Fixture();
+        int pos = f.FloatAccessor(new float[] { 0, 0, 0, 1, 0, 0, 0, 1, 0 }, "VEC3", 3);
+        f.Root["cameras"] = new JArray { new JObject { ["type"] = "perspective", ["name"] = "Lens", ["perspective"] = new JObject { ["yfov"] = 0.8, ["znear"] = 0.1, ["extras"] = new JObject { ["note"] = "wide" } } } };
+        f.Root["meshes"] = new JArray { new JObject { ["primitives"] = new JArray { new JObject { ["attributes"] = new JObject { ["POSITION"] = pos } } } } };
+        f.Root["nodes"] = new JArray { new JObject { ["mesh"] = 0 }, new JObject { ["name"] = "Eye", ["camera"] = 0 } };
+        var m = GlbReader.Read(f.Glb());
+        Assert.Single(m.Cameras); Assert.Contains("\"yfov\":0.8", m.Cameras[0]); Assert.Equal(0, m.Nodes[1].Camera); Assert.Equal(-1, m.Nodes[0].Camera);
+        var back = GlbReader.Read(GlbWriter.Write(m));
+        Assert.Equal(m.Cameras, back.Cameras); Assert.Equal(0, back.Nodes[1].Camera);
+        Assert.Null(HafModelDiff.FirstDifference(m, back));
+        back.Nodes[1].Camera = -1;
+        Assert.Equal("node 1 (Eye) camera", HafModelDiff.FirstDifference(m, back));
+        // an extension a camera carries - on the camera or inside its perspective - is declared (external review of 7dcaff4:
+        // the payload was written, the name was not; the same slip as the samplers')
+        m.Cameras[0] = "{\"type\":\"perspective\",\"perspective\":{\"yfov\":0.8,\"znear\":0.1,\"extensions\":{\"EXT_lens_test\":{}}},\"extensions\":{\"EXT_camera_test\":{\"on\":true}}}";
+        var withExt = GlbReader.Read(GlbWriter.Write(m));
+        Assert.Equal(m.Cameras, withExt.Cameras);
+        Assert.Equal(new[] { "EXT_camera_test", "EXT_lens_test" }, withExt.ExtensionsUsed);
+        // a camera the file does not have is refused on both sides
+        f.Root["nodes"][1]["camera"] = 4;
+        Assert.Contains("uses camera 4, the file has 1", Assert.Throws<InvalidDataException>(() => GlbReader.Read(f.Glb())).Message);
+        m.Nodes[1].Camera = 4;
+        Assert.Contains("uses camera 4, the model has 1", Assert.Throws<InvalidDataException>(() => GlbWriter.Write(m)).Message);
+    }
+
+    [Fact]
+    public void A_required_extension_that_lives_in_a_material_is_read_carried_and_written_back_as_required()
+    {
+        // a Lab source requires KHR_materials_pbrSpecularGlossiness: its geometry is core glTF, its colours are in the payload
+        var f = new Fixture();
+        int pos = f.FloatAccessor(new float[] { 0, 0, 0, 1, 0, 0, 0, 1, 0 }, "VEC3", 3);
+        f.Root["materials"] = new JArray { new JObject { ["name"] = "old", ["extensions"] = new JObject { ["KHR_materials_pbrSpecularGlossiness"] = new JObject { ["diffuseFactor"] = new JArray { 1, 0, 0, 1 } } } } };
+        f.Root["meshes"] = new JArray { new JObject { ["primitives"] = new JArray { new JObject { ["attributes"] = new JObject { ["POSITION"] = pos }, ["material"] = 0 } } } };
+        f.Root["nodes"] = new JArray { new JObject { ["mesh"] = 0 } };
+        f.Root["extensionsUsed"] = new JArray { "KHR_materials_pbrSpecularGlossiness" }; f.Root["extensionsRequired"] = new JArray { "KHR_materials_pbrSpecularGlossiness" };
+        var m = GlbReader.Read(f.Glb());
+        Assert.Equal(new[] { "KHR_materials_pbrSpecularGlossiness" }, m.ExtensionsRequired);
+        Assert.Contains("diffuseFactor", m.Materials[0].ExtensionsJson);
+        var back = GlbReader.Read(GlbWriter.Write(m));
+        Assert.Equal(new[] { "KHR_materials_pbrSpecularGlossiness" }, back.ExtensionsRequired);
+        Assert.Null(HafModelDiff.FirstDifference(m, back));
+        // once no material carries the payload any more, it is no longer required
+        m.Materials[0].ExtensionsJson = null;
+        Assert.Empty(GlbReader.Read(GlbWriter.Write(m)).ExtensionsRequired);
+        // an extension that is NOT a material's payload is still refused, by name
+        f.Root["extensionsRequired"] = new JArray { "KHR_materials_variants" };
+        Assert.Contains("requires the extension 'KHR_materials_variants'", Assert.Throws<InvalidDataException>(() => GlbReader.Read(f.Glb())).Message);
+    }
+
+    [Fact]
     public void Defaults_apply_when_the_file_is_minimal()
     {
         var f = new Fixture();

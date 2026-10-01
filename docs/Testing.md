@@ -37,7 +37,7 @@ in **GitHub Actions**. Both lanes matter, and for different reasons:
 | Surface | `tools/check.sh` (pre-push hook) | also in CI | ~time |
 |---|---|---|---|
 | **Runtime + shared contract** | `dotnet build` · `dotnet test` · docs guard · binding-catalog surface · hot path · parse shape · member shape · schema parity | all source-only checks | seconds |
-| **Editor package** | Roslyn editor compile-check · registry engine drill · backup dedup drill · blender exit drill · GLB reader drill · GLB writer drill · schema parity · hand-list gate | parity + hand-list; compile check and drills stay local | ~60 s |
+| **Editor package** | Roslyn editor compile-check · registry engine drill · backup dedup drill · blender exit drill · GLB reader drill · GLB writer drill · vehicle probe drill · schema parity · hand-list gate | parity + hand-list; compile check and drills stay local | ~60 s |
 
 The one guard CI cannot run is **`tools/editor_compile_check.sh`**: it needs a licensed Unity 2021.3.1f1 install
 (`UnityEditor.dll`, the MonoBleedingEdge 4.7.1 profile, every `UnityEngine` module), none of which is
@@ -96,6 +96,46 @@ or Sketchfab export, so a reader that only ever saw those had not met the rest o
 
 The Blender comparison in the gate covers every fixture and sample (small) plus the registry's largest, smallest and
 four animated files: 43 files; `FULL=1` for every file.
+
+**`tools/vehicle_probe_drill.sh`** (2026-10-02, step 3: the Vehicle Lab's probe in C#) compiles
+`editor/VehicleProbe.cs` and `editor/BlenderNames.cs` with Unity's Roslyn and probes, on Unity's Mono, every fixture,
+every registry source, the Khronos samples **and the sources of the Lab's saved recipes** — the probe's real inputs,
+the unreduced originals (925 MB, one of 398 MB). Then Blender runs the REAL probe (`vehicle_rig.py probe`, in one
+process, posed at the first clip's start by its opt-in `posestart=1`) on a sample and the rows are compared per file:
+the part **names** — the key every saved recipe holds — and their order, vertex counts, world boxes (tolerance
+0.0002 + 2e-6 of the model's extent), dominant bones, and the RIGBONE rows. The names come from a port of the
+importer's own tree construction (`compute_vnodes`: creation depth-first from the parentless nodes in index order,
+armatures at the joints' deepest common ancestor, skinned meshes moved or split off under them, meshes on bones moved
+to children named after the mesh, cameras taking names first) and of Blender's two unique-name rules (a datablock
+takes its base's smallest free number, a bone counts up from its own tail — `main_namemap.cc` and
+`BLI_uniquename_cb`, read from Blender 5.1's source); twenty-four **naming fixtures**
+(`tools/vehicle-probe-drill/naming_fixtures.py`) hold one rule each, and Blender confirms every one. Seven of them
+hold the unique-name rules, a case per branch of the source (non-ASCII and overflowing tails, 255- and 63-byte
+limits, past 1,023 duplicates, numbers used up, a purged object freeing its number): the first port was one rule for
+both, right on every real file and wrong for every duplicate with a numeric tail of its own. Five exist
+because no real file had the shape: a self-review found that not one of 105 files carried a second skin, a camera whose
+name clashes, a non-unit rotation or a taken loose-part name — and four of the five fixtures built for those failed
+against Blender before the code was fixed. A PASS on every real file proves the rules the files exercise, no more.
+
+**The recipes are the product's own oracle**: each stores the parts Blender's probe listed when it was saved (5,214
+parts across 22 recipes). `recipe_check.py` sets every stored part beside the C# probe of its source. A recipe is user
+data and can be STALE (saved before its source was re-cut or re-fused), so a difference is not a verdict by itself:
+the source of every differing recipe is put to Blender as it is today, and only a C# row that differs from
+**Blender's** fails.
+
+Full run (`FULL=1`): **105 of 105 files, row for row** — 31 registry sources, 20 recipe sources, 31 Khronos samples,
+23 fixtures; 9,793 rows; C# 9.8 s (reading 1.7 GB included), Blender's probe 91 s in one process without the preview
+export. Recipes: 17 of 20 the same; the other three differ from today's Blender exactly as they differ from the C#
+probe (stale). Not compared yet, said in the script: the visibility and inside-out verdicts (steps 3b, 3c).
+
+What the comparison taught, kept as rules in the code: Blender keeps only the vertices a primitive USES; its import
+state is a blend of every clip one frame in (hence `posestart=1` — on the registry's rigged files a sail's box read
+77 units off, at the folded pose of another clip); a part's box is its LOCAL box's corners through the world matrix;
+a node given by a matrix is that matrix decomposed and recomposed (a Lab source's sheared matrix moved four boxes by
+0.15 %); a skinned part's box is posed, a rig bone's is at the importer's guessed bind pose, through the armature.
+And what the Lab's real sources taught the READER, which the registry never had: 2,133 primitives sharing 162 vertex
+accessors (decoded per primitive: 4 GB — one array per accessor now, and the writer writes it once), and a source that
+*requires* `KHR_materials_pbrSpecularGlossiness` (read and carried now: its effect is a material's payload).
 
 **`Tests/GlbRobustnessTests.cs`** (2026-10-02): the reader and writer beyond the happy round trip — a **corruption
 sweep** (the full fixture truncated at every 4-byte boundary, every byte of its JSON chunk replaced four ways, every

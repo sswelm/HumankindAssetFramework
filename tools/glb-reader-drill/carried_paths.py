@@ -18,6 +18,8 @@ CARRIED = (
     "meshes[].extras",                      # HafMesh.ExtrasJson
     "scenes[].extras",                      # HafScene.ExtrasJson
     "samplers[].extensions", "samplers[].extras",   # HafModel.Samplers (the whole object, verbatim)
+    "cameras[].extensions", "cameras[].extras", "cameras[].perspective.extensions", "cameras[].perspective.extras",
+    "cameras[].orthographic.extensions", "cameras[].orthographic.extras",   # HafModel.Cameras (the whole object, verbatim)
 )
 
 
