@@ -4,7 +4,8 @@
 //   Unity.exe -batchmode -nographics -projectPath <modding project> -executeMethod HeadlessBakeTests.Run
 //
 // Runs BakeFeatureTest Tier 1 (self-contained synthetic cubes, non-destructive "__feat_*" names, cleaned up
-// by the section itself) and exits 0 on all-pass, 1 on any failure — deliberately binary (exit codes wrap at
+// by the section itself) and the Model Reader section (every registry model and the GLB fixtures through the
+// reader, the preview builder and the writer, in Unity's runtime) and exits 0 on all-pass, 1 on any failure — deliberately binary (exit codes wrap at
 // 255, so a count would lie for large suites); the log carries the per-check detail and the fail count.
 // Deliberately NOT in the per-push gate: a Unity boot costs ~a minute, and hosted CI runners have no
 // licensed Unity — this is the opt-in lane for baker changes (Factory-Manual §11's "run the bake tests before
@@ -21,6 +22,11 @@ public static class HeadlessBakeTests
         try
         {
             var s = BakeFeatureTest.RunTier1Section();
+            Debug.Log($"[HeadlessBakeTests] {s.title}: PASS {s.pass} / FAIL {s.fail} / SKIP {s.skip}\n{s.body}");
+            fail += s.fail;
+            // the GLB reader and writer in Unity's own runtime (its Newtonsoft, its Mono, the SYSTEM locale a batch run gets):
+            // every registry model and the fixtures read, built as meshes, written, read back equal field by field
+            s = ModelReaderHeadlessTest.RunSection();
             Debug.Log($"[HeadlessBakeTests] {s.title}: PASS {s.pass} / FAIL {s.fail} / SKIP {s.skip}\n{s.body}");
             fail += s.fail;
         }

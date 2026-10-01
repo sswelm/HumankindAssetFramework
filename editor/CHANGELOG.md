@@ -5,6 +5,22 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **The GLB reader and writer drilled on the rest of the specification** (round-trip diversity, 2026-10-02). Eleven
+  generated fixtures (`tools/glb-reader-drill/fixtures.py`: normalized integer attributes, interleaved views, every
+  primitive mode, a `.gltf` with sidecars and a data URI, cubic-spline keys, two scenes and an orphan, material and
+  sampler variety with extras of every type, eight influences, a 72k-vertex grid, unicode and empty names) and 30
+  Khronos sample assets (fetched once, `fetch_samples.py`) go through both drills — the reader against Blender, the
+  writer round trip field by field and back through Blender — plus three samples a stage must REFUSE by name (sparse,
+  morph targets, a texture-info extension). Found and fixed on the way: strips and fans were not measured (one
+  `HafPrimitive.Triangles()` now serves the drill and the preview, which draws them too); Blender's nameless-joint
+  and invented-material conventions stated on the C# side. **`HafModelDiff`** (the field-by-field compare) is in the
+  package: **Model Reader ▸ Save as GLB…** reads its file back through it and says "equal field by field" or names
+  the first difference. **The headless editor lane** (`tools/editor_tests.ps1`) gains a Model Reader section: every
+  registry model and fixture read, built as meshes (`ModelPreview`, lifted out of the window), written and read back
+  equal, in Unity's runtime under the system locale (42/42). `GlbRobustnessTests`: a corruption sweep (every
+  truncation, every JSON byte four ways, every BIN byte, ten broken containers, bad sidecars) that must never crash,
+  culture-independence of the written bytes, eight threads at once.
+
 - **The GLB writer — step 2 of replacing Blender** (`GlbWriter`). A `HafModel` back to a `.glb`: one BIN chunk, every
   field the model holds, images embedded, uint indices when a mesh needs them, both influence sets; a material's
   extension payload, the texture samplers (wrap, filters), the `extras` of the asset (Sketchfab's author and licence,

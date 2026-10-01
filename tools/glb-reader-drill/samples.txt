@@ -1,0 +1,40 @@
+# Khronos glTF-Sample-Assets the drills read when they are fetched (python tools/glb-reader-drill/fetch_samples.py):
+# other exporters' shapes - the registry is Blender and Sketchfab output only. One path per line, relative to
+# https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models; a .gltf line fetches its sidecars too.
+# A line may end in "| expect <reader|guard|writer> <text>": the file is NOT round-tripped, the named stage must
+# refuse it and say <text> (the contract's "no" cases, drilled like the "yes" cases). Licences: CC0 / CC-BY 4.0 /
+# MIT per model (each model's README in the repository); the files are cached under References/ (git-ignored).
+Box/glTF-Binary/Box.glb
+BoxTextured/glTF-Binary/BoxTextured.glb
+BoxVertexColors/glTF-Binary/BoxVertexColors.glb
+BoxInterleaved/glTF-Binary/BoxInterleaved.glb
+BoxTexturedNonPowerOfTwo/glTF-Binary/BoxTexturedNonPowerOfTwo.glb
+Duck/glTF-Binary/Duck.glb
+CesiumMilkTruck/glTF-Binary/CesiumMilkTruck.glb
+CesiumMan/glTF-Binary/CesiumMan.glb
+RiggedSimple/glTF-Binary/RiggedSimple.glb
+RiggedFigure/glTF-Binary/RiggedFigure.glb
+BrainStem/glTF-Binary/BrainStem.glb
+InterpolationTest/glTF-Binary/InterpolationTest.glb
+SimpleSkin/glTF/SimpleSkin.gltf
+SimpleMeshes/glTF/SimpleMeshes.gltf
+Triangle/glTF/Triangle.gltf
+TriangleWithoutIndices/glTF/TriangleWithoutIndices.gltf
+AnimatedTriangle/glTF/AnimatedTriangle.gltf
+AnimatedCube/glTF/AnimatedCube.gltf
+TextureCoordinateTest/glTF-Binary/TextureCoordinateTest.glb
+MultiUVTest/glTF-Binary/MultiUVTest.glb
+NormalTangentTest/glTF-Binary/NormalTangentTest.glb
+NormalTangentMirrorTest/glTF-Binary/NormalTangentMirrorTest.glb
+OrientationTest/glTF-Binary/OrientationTest.glb
+NegativeScaleTest/glTF-Binary/NegativeScaleTest.glb
+TwoSidedPlane/glTF/TwoSidedPlane.gltf
+VertexColorTest/glTF-Binary/VertexColorTest.glb
+Unicode❤♻Test/glTF-Binary/Unicode❤♻Test.glb
+MetalRoughSpheresNoTextures/glTF-Binary/MetalRoughSpheresNoTextures.glb
+AlphaBlendModeTest/glTF-Binary/AlphaBlendModeTest.glb
+EmissiveStrengthTest/glTF-Binary/EmissiveStrengthTest.glb
+MorphPrimitivesTest/glTF-Binary/MorphPrimitivesTest.glb | expect writer morph target(s), whose data the model does not carry
+AnimatedMorphCube/glTF-Binary/AnimatedMorphCube.glb | expect writer morph target(s), whose data the model does not carry
+SimpleSparseAccessor/glTF/SimpleSparseAccessor.gltf | expect reader sparse
+TextureTransformTest/glTF/TextureTransformTest.gltf | expect guard materials[].pbrMetallicRoughness.baseColorTexture.extensions

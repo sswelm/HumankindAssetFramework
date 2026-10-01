@@ -89,6 +89,18 @@ public sealed class HafPrimitive
             switch (Mode) { case 4: return n / 3; case 5: case 6: return n < 3 ? 0 : n - 2; default: return 0; }
         }
     }
+
+    /// <summary>The triangles this primitive draws, as vertex indices with the drawn winding: TRIANGLES in threes, a
+    /// strip (mode 5) alternating so every triangle faces the same way, a fan (mode 6) around its first vertex; lines
+    /// and points draw none. One definition for the drill, the preview and whatever counts faces next.</summary>
+    public IEnumerable<(int a, int b, int c)> Triangles()
+    {
+        int count = Indices != null ? Indices.Length : VertexCount;
+        int At(int i) => Indices != null ? Indices[i] : i;
+        if (Mode == 4) for (int t = 0; t + 2 < count; t += 3) yield return (At(t), At(t + 1), At(t + 2));
+        else if (Mode == 5) for (int t = 0; t + 2 < count; t++) yield return t % 2 == 0 ? (At(t), At(t + 1), At(t + 2)) : (At(t + 1), At(t), At(t + 2));
+        else if (Mode == 6) for (int t = 1; t + 1 < count; t++) yield return (At(0), At(t), At(t + 1));
+    }
 }
 
 public sealed class HafMaterial

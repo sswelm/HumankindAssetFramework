@@ -9,6 +9,7 @@
 #   pose            both sides evaluate animation 0 at time 0 (blender_counts.py / HafTransforms.PoseAt); the skinned
 #                   vertices go through the weighted joint blend on both sides
 import sys
+sys.stdout.reconfigure(encoding="utf-8")   # a sample is named with emoji
 
 def parse(path, tag, by_basename):
     rows = {}
@@ -19,7 +20,7 @@ def parse(path, tag, by_basename):
         t = line.split("\t")
         key = t[1].replace("\\", "/").lower()
         if by_basename:
-            key = key.rsplit("/", 1)[-1]
+            key = key.rsplit("/", 1)[-1].rsplit(".", 1)[0]   # without the extension: a .gltf source comes back as a written .glb
         d = {"name": t[1]}
         for f in t[2:]:
             k, _, v = f.partition("=")
@@ -32,7 +33,7 @@ def floats(v):
 
 # usage: compare.py <left: FILE lines> <right> [--right-tag FILE|BLENDER] [--basename]
 #   --right-tag FILE  compares the reader's view of two files (the writer drill: the original and the written copy)
-#   --basename        keys both sides by file name alone (the written copy lives in another folder)
+#   --basename        keys both sides by file name alone, extension dropped (the written copy lives in another folder, as .glb)
 right_tag = "BLENDER"; by_basename = False
 for i, a in enumerate(sys.argv[3:]):
     if a == "--right-tag": right_tag = sys.argv[3 + i + 1]
@@ -49,8 +50,11 @@ for name, b in blender.items():
     compared += 1
     problems = []
     for k in ("tris", "materials", "images", "joints"):
-        if c.get(k) != b.get(k):
-            problems.append("%s C# %s vs Blender %s" % (k, c.get(k), b.get(k)))
+        # Blender has the materials a primitive USES plus one it invents for an unmaterialed COLOR_0 primitive: the C# line
+        # states that count too (blendermaterials); file against file, the file's own count
+        ck = "blendermaterials" if k == "materials" and right_tag == "BLENDER" and "blendermaterials" in c else k
+        if c.get(ck) != b.get(k):
+            problems.append("%s C# %s vs Blender %s" % (k, c.get(ck), b.get(k)))
     cb, bb = floats(c.get("bbox", "")), floats(b.get("bbox", ""))
     extent = max([abs(x) for x in bb] + [1e-6]) if bb else 1.0
     tol = 1e-3 * extent
