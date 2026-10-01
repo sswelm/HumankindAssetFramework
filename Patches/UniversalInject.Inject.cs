@@ -1739,16 +1739,34 @@ namespace HumankindAssetFramework
         /// null for a model without one.</summary>
         internal static string HandPropMeshName(ModelEntry e) => e == null || string.IsNullOrEmpty(e.handPropGuid) ? null : HandPropName(e) + "_DistrictMesh";
 
-        /// <summary>InjectHandProp appended this model's prop to `addon` as entry `index` of its FragmentEntries.</summary>
-        internal static void NoteHandPropAppended(ModelEntry e, object addon, int index)
+        /// <summary>Record that we appended `name` to `addon` as entry `index` of its FragmentEntries. A record of the
+        /// same fragment on the same addon is replaced (the game rebuilt the array and we appended again); records of
+        /// addons the game has dropped are pruned.</summary>
+        internal static AppendedFragment NoteAppended(ModelEntry e, object addon, int index, string name, bool handProp)
         {
-            e.handPropAt.Remove(addon);   // an addon whose array the game rebuilt gets the prop again, at a new index
-            e.handPropAt.Add(addon, new System.Runtime.CompilerServices.StrongBox<int>(index));
+            e.appended.RemoveAll(r => { var t = r.Addon.Target; return t == null || (ReferenceEquals(t, addon) && r.HandProp == handProp && string.Equals(r.Name, name, StringComparison.Ordinal)); });
+            var rec = new AppendedFragment { Addon = new WeakReference(addon), Index = index, Name = name, HandProp = handProp };
+            e.appended.Add(rec);
+            return rec;
         }
 
         /// <summary>The index at which InjectHandProp appended this model's prop to `addon`, or -1.</summary>
         internal static int AppendedHandPropIndex(ModelEntry e, object addon)
-            => e != null && addon != null && e.handPropAt.TryGetValue(addon, out var at) ? at.Value : -1;
+        {
+            if (e == null || addon == null) return -1;
+            for (int i = 0; i < e.appended.Count; i++)
+                if (e.appended[i].HandProp && ReferenceEquals(e.appended[i].Addon.Target, addon)) return e.appended[i].Index;
+            return -1;
+        }
+
+        /// <summary>The index at which InjectExtraMeshFragments appended the overflow chunk `name` to `addon`, or -1.</summary>
+        internal static int AppendedChunkIndex(ModelEntry e, object addon, string name)
+        {
+            if (e == null || addon == null) return -1;
+            for (int i = 0; i < e.appended.Count; i++)
+                if (!e.appended[i].HandProp && ReferenceEquals(e.appended[i].Addon.Target, addon) && string.Equals(e.appended[i].Name, name, StringComparison.Ordinal)) return e.appended[i].Index;
+            return -1;
+        }
 
         /// <summary>Is entry `index` of this addon's FragmentEntries the hand prop WE appended? By identity - the addon
         /// and the index InjectHandProp recorded for it - with the name as the guard for an array the game has rebuilt
@@ -1924,7 +1942,7 @@ namespace HumankindAssetFramework
                 Array.Copy(frags, narr, frags.Length);
                 narr.SetValue(item, frags.Length);
                 SetMember(addon, "FragmentEntries", narr);
-                NoteHandPropAppended(e, addon, frags.Length);
+                var propRecord = NoteAppended(e, addon, frags.Length, meshName, handProp: true);
                 // CRITICAL: the GPU pawn DESCRIPTOR (per definition: StartFragment + FragmentCount into the fragment
                 // buffer) is snapshotted from FragmentEntries at RegisterPawnDefinition time — an append after that
                 // snapshot exists in the array but the renderer still draws the OLD fragment count (the M60 was
@@ -1966,9 +1984,9 @@ namespace HumankindAssetFramework
                             try { folIdx = (uint)Convert.ToInt32(GetMember(fol, "LayerIndex")); } catch { }
                             feType.GetField("FxOutputLayerIndex").SetValue(ge, folIdx);
                             // the arithmetic is the shared, unit-tested kernel (DescriptorRepoint.cs); this site keeps the game-side writes.
-                            // Either way the smoke verifies that the live descriptor still draws this prop — by NAME through the addon's
-                            // current entry (gpuAppendedNames), so a later re-encode (data-scale clones) does not read as a loss.
-                            e.gpuDefId = defId; e.gpuAddon = new WeakReference(addon); if (!e.gpuAppendedNames.Contains(meshName)) e.gpuAppendedNames.Add(meshName);
+                            // Either way the smoke verifies that the live descriptor still draws this prop — through the entry
+                            // recorded at the append, read as it is NOW, so a later re-encode (data-scale clones) does not read as a loss.
+                            propRecord.DefId = defId;
                             if (DescriptorRepoint.TryReadBlock(descs, defId, out _, out int curCount) && curCount == 0)
                                 Plugin.Diag($"[Props] descriptor[{defId}] not populated yet (0 fragments) — the registration snapshot carries the hand prop; no surgical repoint");
                             else
@@ -2023,11 +2041,14 @@ namespace HumankindAssetFramework
                 var fragType = frags.GetType().GetElementType();
                 var mnField = AccessTools.Field(fragType, "meshName");
                 var folField = AccessTools.Field(fragType, "fxOutputLayer");
-                for (int i = 0; i < frags.Length; i++)
-                    if (mnField?.GetValue(frags.GetValue(i)) is string s2)
-                        for (int x = extraNames.Count - 1; x >= 0; x--)
-                            if (string.Equals(extraNames[x], s2, StringComparison.OrdinalIgnoreCase))
-                            { extraNames.RemoveAt(x); extraSmi.RemoveAt(x); }   // already appended this session
+                // already appended this session: OUR entry, where we appended it - as for the hand prop, a fragment that
+                // merely carries a chunk's name is not the chunk (review of PR #113)
+                for (int x = extraNames.Count - 1; x >= 0; x--)
+                {
+                    int at = AppendedChunkIndex(e, addon, extraNames[x]);
+                    if (at >= 0 && at < frags.Length && string.Equals(mnField?.GetValue(frags.GetValue(at)) as string, extraNames[x], StringComparison.Ordinal))
+                    { extraNames.RemoveAt(x); extraSmi.RemoveAt(x); }
+                }
                 if (extraNames.Count == 0) return;
 
                 // the BODY fragment's output layer: the isolated clone when one was made, else the first fragment
@@ -2066,6 +2087,8 @@ namespace HumankindAssetFramework
                 Array.Copy(frags, narr, frags.Length);
                 for (int i = 0; i < made.Count; i++) narr.SetValue(made[i], frags.Length + i);
                 SetMember(addon, "FragmentEntries", narr);
+                var chunkRecords = new List<AppendedFragment>();
+                for (int i = 0; i < made.Count; i++) chunkRecords.Add(NoteAppended(e, addon, frags.Length + i, madeNames[i], handProp: false));
                 // descriptor repoint — hand-prop pattern, N entries at once (see InjectHandProp for why NOT
                 // UpdateDescriptorBufferContent: the full re-pack shifts unloaded definitions onto wrong fragments).
                 try
@@ -2101,10 +2124,9 @@ namespace HumankindAssetFramework
                         ges.Add(ge);
                     }
                     // the arithmetic is the shared, unit-tested kernel (DescriptorRepoint.cs); this site keeps the game-side writes.
-                    // Either way the smoke verifies that the live descriptor still draws every chunk — by NAME through the addon's
-                    // current entries (gpuAppendedNames), so a later re-encode (data-scale clones) does not read as a loss.
-                    e.gpuDefId = defId; e.gpuAddon = new WeakReference(addon);
-                    foreach (var nm in madeNames) if (!e.gpuAppendedNames.Contains(nm)) e.gpuAppendedNames.Add(nm);
+                    // Either way the smoke verifies that the live descriptor still draws every chunk — through the entries
+                    // recorded at the append, read as they are NOW, so a later re-encode (data-scale clones) does not read as a loss.
+                    foreach (var cr in chunkRecords) cr.DefId = defId;
                     if (DescriptorRepoint.TryReadBlock(descs, defId, out _, out int curCount) && curCount == 0)
                     { Plugin.Diag($"[Uni][Multi] descriptor[{defId}] not populated yet (0 fragments) — the registration snapshot carries the {made.Count} chunk(s); no surgical repoint"); return; }
                     int tail = Convert.ToInt32(cntF.GetValue(pm));

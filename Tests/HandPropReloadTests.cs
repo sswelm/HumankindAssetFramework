@@ -96,8 +96,19 @@ namespace HumankindAssetFramework.Tests
             var grown = new FakeFragment[addon.FragmentEntries.Length + 1];
             addon.FragmentEntries.CopyTo(grown, 0); grown[grown.Length - 1] = item;
             addon.FragmentEntries = grown;
-            UniversalInject.NoteHandPropAppended(e, addon, grown.Length - 1);
+            UniversalInject.NoteAppended(e, addon, grown.Length - 1, Prop, handProp: true).DefId = 86;   // 86: the descriptor was readable, so the smoke judges it
         }
+
+        // GatherFragmentFacts as the smoke runs it, with the descriptor's live block handed in (the real one reads PawnManager)
+        static UniversalInject.SmokeFacts Smoke(ModelEntry e, IDictionary<object, List<uint>> liveByAddon)
+        {
+            var f = new UniversalInject.SmokeFacts { Models = 1, Repointed = 1 };
+            foreach (var set in UniversalInject.AppendedByAddon(e))
+                UniversalInject.GatherFragmentFact(e.resourceName, set.names, UniversalInject.ReadAppendedEncs(set.addon, set.records), set.addon != null && liveByAddon.TryGetValue(set.addon, out var live) ? live : null, f);
+            return f;
+        }
+        static UniversalInject.SmokeFacts Smoke(ModelEntry e, FakeAddon addon, List<uint> live) => Smoke(e, new Dictionary<object, List<uint>> { [addon] = live });
+        static List<uint> Encs(FakeAddon addon) { var l = new List<uint>(); foreach (var fr in addon.FragmentEntries) l.Add(fr.EncodedMeshAndVisualParticleCount); return l; }
 
         [Fact]
         public void The_hand_prop_keeps_its_own_collection_and_its_encoding_when_the_addon_loads_again()
@@ -119,8 +130,7 @@ namespace HumankindAssetFramework.Tests
             Assert.True(e.fragsLogged);                                             // set on ReloadFragments' last line: it ran to its end, nothing was swallowed
 
             // ... and the smoke, reading that addon as it does in the game, calls the repoint held
-            var f = new UniversalInject.SmokeFacts { Models = 1, Repointed = 1 };
-            UniversalInject.GatherFragmentFact(e.resourceName, new List<string> { Prop }, UniversalInject.ReadAddonEncsByName(addon), live, f);
+            var f = Smoke(e, addon, live);
             Assert.Empty(f.FragmentIssues);
             Assert.Equal(1, f.FragmentsChecked);
         }
@@ -162,8 +172,86 @@ namespace HumankindAssetFramework.Tests
             Assert.Same(props, addon.FragmentEntries[2].Collection);                // ours: untouched
             Assert.Equal(0x1D000000u + 77, addon.FragmentEntries[2].EncodedMeshAndVisualParticleCount);
             Assert.True(UniversalInject.IsAppendedHandProp(e, addon, 2, Prop));     // and InjectHandProp now returns: it is there
-            // the smoke resolves the NAME to the live entry of the two (a live entry beats a dead one of the same name)
-            Assert.Equal(0x1D000000u + 77, UniversalInject.ReadAddonEncsByName(addon)[Prop]);
+            // the smoke reads OUR entry of the two
+            Assert.Empty(Smoke(e, addon, Encs(addon)).FragmentIssues);
+        }
+
+        [Fact]
+        public void The_smoke_judges_the_entry_we_appended_not_a_live_namesake()
+        {
+            // External review of PR #113, second P2: the smoke resolved an appended fragment by NAME, a live entry beating
+            // a dead one - so with a live donor namesake on the addon a DEAD prop read as held. It reads the recorded
+            // entry now. Here our skeleton does hold a mesh of the prop's name, so the namesake stays alive on it.
+            var (addon, mgr, ours, props, e) = Scene();
+            ours.meshes[Prop] = 55;
+            var namesake = new FakeFragment(1, ours, Prop, new object(), ""); namesake.Load(ours, null, null, 2);
+            addon.FragmentEntries = new[] { addon.FragmentEntries[0], namesake };
+            UniversalInject.ReloadFragments(addon, mgr, ours, e);
+            AppendHandProp(addon, ours, props, e);
+            var live = Encs(addon);
+            Assert.Empty(Smoke(e, addon, live).FragmentIssues);                     // all three alive: held
+            addon.FragmentEntries[2].EncodedMeshAndVisualParticleCount = 0;         // the prop dies; the namesake lives on, and is drawn
+
+            var f = Smoke(e, addon, live);
+            Assert.Single(f.FragmentIssues);
+            Assert.Contains("encoded id reads 0", f.FragmentIssues[0]);
+        }
+
+        [Fact]
+        public void The_smoke_judges_every_addon_a_model_entry_serves_each_against_its_own_block()
+        {
+            // one record per entry (the old gpuAddon) judged only the addon handled LAST, with the names of all
+            var (addonA, mgr, ours, props, e) = Scene();
+            var addonB = new FakeAddon { FragmentEntries = new[] { addonA.FragmentEntries[0] } };
+            UniversalInject.ReloadFragments(addonA, mgr, ours, e); AppendHandProp(addonA, ours, props, e);
+            UniversalInject.ReloadFragments(addonB, mgr, ours, e); AppendHandProp(addonB, ours, props, e);
+            var live = new Dictionary<object, List<uint>> { [addonA] = Encs(addonA), [addonB] = Encs(addonB) };
+            var held = Smoke(e, live);
+            Assert.Empty(held.FragmentIssues);
+            Assert.Equal(2, held.FragmentsChecked);
+            addonA.FragmentEntries[1].EncodedMeshAndVisualParticleCount = 0;        // A's prop dies; B, handled last, is fine
+            var f = Smoke(e, live);
+            Assert.Single(f.FragmentIssues);
+            Assert.Equal(1, f.FragmentsChecked);
+        }
+
+        [Fact]
+        public void A_record_is_judged_only_where_a_descriptor_was_readable_and_is_replaced_when_we_append_again()
+        {
+            var (addon, mgr, ours, props, e) = Scene();
+            UniversalInject.NoteAppended(e, addon, 1, Prop, handProp: true);        // appended before registration: DefId stays -1
+            Assert.Empty(UniversalInject.AppendedByAddon(e));                       // nothing to judge it against - as before
+            Assert.Equal(1, UniversalInject.AppendedHandPropIndex(e, addon));       // but ReloadFragments knows it all the same
+            UniversalInject.NoteAppended(e, addon, 3, Prop, handProp: true).DefId = 86;   // the array was rebuilt; appended again
+            Assert.Single(e.appended);
+            Assert.Equal(3, UniversalInject.AppendedHandPropIndex(e, addon));
+            UniversalInject.NoteAppended(e, addon, 4, "DroneSquadFPV_ModelMesh_B", handProp: false).DefId = 86;   // a chunk is its own record
+            Assert.Equal(2, e.appended.Count);
+            Assert.Equal(3, UniversalInject.AppendedHandPropIndex(e, addon));
+            var sets = UniversalInject.AppendedByAddon(e);
+            Assert.Single(sets); Assert.Equal(new[] { Prop, "DroneSquadFPV_ModelMesh_B" }, sets[0].names.ToArray());
+            // what InjectExtraMeshFragments asks before it appends a chunk: recorded for THIS addon, under THIS name
+            Assert.Equal(4, UniversalInject.AppendedChunkIndex(e, addon, "DroneSquadFPV_ModelMesh_B"));
+            Assert.Equal(-1, UniversalInject.AppendedChunkIndex(e, addon, "DroneSquadFPV_ModelMesh_C"));
+            Assert.Equal(-1, UniversalInject.AppendedChunkIndex(e, addon, Prop));               // the prop is not a chunk
+            Assert.Equal(-1, UniversalInject.AppendedChunkIndex(e, new FakeAddon(), "DroneSquadFPV_ModelMesh_B"));
+        }
+
+        [Fact]
+        public void An_entry_that_is_no_longer_where_we_appended_it_is_a_miss_whatever_else_carries_its_name()
+        {
+            // the game rebuilt the array from the definition: our entry is gone, and here a donor namesake sits elsewhere
+            var (addon, mgr, ours, props, e) = Scene();
+            UniversalInject.ReloadFragments(addon, mgr, ours, e);
+            AppendHandProp(addon, ours, props, e);
+            var live = Encs(addon);
+            ours.meshes[Prop] = 55;
+            var namesake = new FakeFragment(1, ours, Prop, new object(), ""); namesake.Load(ours, null, null, 2);
+            addon.FragmentEntries = new[] { namesake, addon.FragmentEntries[0] };   // rebuilt: index 1 now holds the body
+            live.Add(namesake.EncodedMeshAndVisualParticleCount);
+            var f = Smoke(e, addon, live);
+            Assert.Single(f.FragmentIssues);
+            Assert.Contains("no longer where we appended it", f.FragmentIssues[0]);
         }
 
         [Fact]

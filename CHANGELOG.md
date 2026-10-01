@@ -21,7 +21,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   wrong about the picture. `ReloadFragments` now leaves our own prop entry alone — the entry `InjectHandProp`
   appended, known by its addon and index (per addon: one model entry serves every pawn definition its name fits),
   not by its mesh name, which a donor fragment may share (review of the PR); a donor's own attachment is still moved
-  as before, and a donor namesake no longer keeps the configured prop from being added. `Tests/HandPropReloadTests` runs the real
+  as before, and a donor namesake no longer keeps the configured prop from being added. The same record
+  (`ModelEntry.appended`: addon, index, name - for the prop and for every overflow chunk) is what the F8 smoke now
+  reads, per addon, instead of resolving a name on the last addon handled: a live namesake no longer makes a dead
+  prop read as held (second review). `Tests/HandPropReloadTests` runs the real
   `ReloadFragments` twice over fakes carrying the game's member names and its decompiled `Load`: before the
   change it failed, the prop entry re-pointed at our skeleton and encoded 0. Verified in-game the same evening, on
   the session that had failed: the same two Load passes in the log (descriptor[86] 448+2), and F8 reads
