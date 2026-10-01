@@ -86,8 +86,8 @@ namespace HumankindAssetFramework.Tests
             var addon = Addon(("Body", 1), ("SomethingElse", 2));
             UniversalInject.GatherFragmentFact("DroneSquadFPV", new List<string> { "M60_DistrictMesh" }, addon, new List<uint> { 1 }, f);
             Assert.Single(f.FragmentIssues);
-            Assert.Contains("'M60_DistrictMesh' (not among the addon's 2 fragment entry(ies)", f.FragmentIssues[0]);
-            Assert.Contains("stale addon", f.FragmentIssues[0]);
+            Assert.Contains("'M60_DistrictMesh' (no longer where we appended it", f.FragmentIssues[0]);
+            Assert.Contains("2 of our entry(ies) still in place", f.FragmentIssues[0]);
         }
 
         [Fact]

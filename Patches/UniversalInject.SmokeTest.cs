@@ -422,13 +422,14 @@ namespace HumankindAssetFramework
         internal struct LiveSlot { public int Desc, Skel; public LiveSlot(int d, int s) { Desc = d; Skel = s; } }
         internal const float PoseIdleSeconds = 5f;
 
-        // PURE: judge one entry's appended fragments against what the engine draws NOW. Identity is the fragment's MESH
-        // NAME: each appended name must still have a live fragment entry on the addon (`addonEncs`: name -> current
-        // encoded mesh id, 0 = dead slot), and THAT id must appear in the descriptor's live block. Never by position —
-        // the game's registration legitimately moves the block (first in-game run, 2026-09-14: two healthy units
-        // flagged) — and never by a remembered encoding: FormationOverride.MaybeScaleFragments (`scaleMode="data"`)
-        // re-encodes every fragment onto scaled clones in the same Load hook, keeping the names (review of PR #53).
-        // Either source unreadable = a note, not a failure; a lost name is the spike-plague FAIL.
+        // PURE: judge the fragments we appended to ONE addon against what the engine draws NOW. `addonEncs` holds, per
+        // appended name, the CURRENT encoded mesh id of the entry we RECORDED at the append (ReadAppendedEncs: the addon,
+        // the index, the name as guard; 0 = dead slot) - and that id must appear in the descriptor's live block.
+        // The entry is found by its place on the ADDON, never by name alone (a donor namesake that was alive made a dead
+        // prop read as held - review of PR #113), never by block position - the game's registration legitimately moves
+        // the block (first in-game run, 2026-09-14: two healthy units flagged) - and never by a remembered encoding:
+        // FormationOverride.MaybeScaleFragments (`scaleMode="data"`) re-encodes every fragment in place in the same Load
+        // hook (review of PR #53). Either source unreadable = a note, not a failure; a lost entry is the spike-plague FAIL.
         internal static void GatherFragmentFact(string name, IList<string> appendedNames, IDictionary<string, uint> addonEncs, IList<uint> liveBlock, SmokeFacts f)
         {
             if (appendedNames == null || appendedNames.Count == 0) return;   // nothing appended this session — nothing to hold
@@ -439,15 +440,13 @@ namespace HumankindAssetFramework
             {
                 string nm = appendedNames[i];
                 // SAY WHICH OF THE THREE HAPPENED (2026-09-20). "No live fragment entry on the addon" covered two
-                // different failures — the name absent, and the name present with a zero encoded id — and that
+                // different failures - the entry gone, and the entry present with a zero encoded id - and that
                 // conflation cost two wrong diagnoses of one real report: a Drone Squad whose hand prop the smoke
-                // called undone while the soldier was visibly holding it. Both appends DO reach
-                // addon.FragmentEntries before any descriptor work (InjectHandProp, InjectExtraMeshFragments), and
-                // the entry carries meshName + EncodedMeshAndVisualParticleCount, so a miss here means the addon we
-                // are reading is not the one we appended to, or its entry has since been unloaded. Which of those
-                // it is decides the fix, so the message now names it.
+                // called undone while the soldier was visibly holding it (it was the second: our own ReloadFragments
+                // re-pointed the prop's entry on the addon's second Load - PR #113). Absent from `addonEncs` = the
+                // recorded place holds something else now, i.e. the game rebuilt the array.
                 if (!addonEncs.TryGetValue(nm, out uint enc))
-                    missing.Add($"'{nm}' (not among the addon's {addonEncs.Count} fragment entry(ies) — stale addon, or re-registered under another name)");
+                    missing.Add($"'{nm}' (no longer where we appended it — the addon's fragment array was rebuilt since; {addonEncs.Count} of our entry(ies) still in place)");
                 else if (enc == 0)
                     missing.Add($"'{nm}' (addon entry present but its encoded id reads 0 — unloaded since the append)");
                 else if (!liveBlock.Contains(enc)) missing.Add($"'{nm}' (0x{enc:X8} not in the descriptor block)");
@@ -461,14 +460,34 @@ namespace HumankindAssetFramework
             for (int i = 0; i < list.Count; i++)
             {
                 var e = list[i];
-                if (!e.repointed || e.gpuDefId < 0 || e.gpuAppendedNames.Count == 0) continue;   // only THIS session's appends — cleared with `repointed` on re-arm
-                var addonEncs = ReadAddonEncsByName(e.gpuAddon?.Target);
-                TryReadLiveBlockEncs(e.gpuDefId, out var live);
-                GatherFragmentFact(e.resourceName, e.gpuAppendedNames, addonEncs, live, f);
+                if (!e.repointed || e.appended.Count == 0) continue;   // only THIS session's appends — cleared on re-arm
+                foreach (var set in AppendedByAddon(e))
+                {
+                    TryReadLiveBlockEncs(set.defId, out var live);
+                    GatherFragmentFact(e.resourceName, set.names, ReadAppendedEncs(set.addon, set.records), live, f);
+                }
             }
         }
-        // meshName -> CURRENT encoded mesh id for every fragment entry on the addon (null = addon gone / unreadable).
-        static Dictionary<string, uint> ReadAddonEncsByName(object addon)
+        // The judged records of one entry, grouped per addon (a model entry may serve several - the _01, _02 variants of a
+        // unit - and each is checked against its own descriptor). An addon the game has dropped comes as null: a note.
+        internal static List<(object addon, int defId, List<AppendedFragment> records, List<string> names)> AppendedByAddon(ModelEntry e)
+        {
+            var sets = new List<(object addon, int defId, List<AppendedFragment> records, List<string> names)>();
+            foreach (var r in e.appended)
+            {
+                if (r.DefId < 0) continue;   // appended where no descriptor could be read: nothing to judge it against
+                object addon = r.Addon.Target;
+                int at = sets.FindIndex(x => ReferenceEquals(x.addon, addon) && x.defId == r.DefId);
+                if (at < 0) { sets.Add((addon, r.DefId, new List<AppendedFragment>(), new List<string>())); at = sets.Count - 1; }
+                sets[at].records.Add(r); sets[at].names.Add(r.Name);
+            }
+            return sets;
+        }
+        // name -> CURRENT encoded mesh id of each RECORDED entry: the entry at the index we appended it, when it still
+        // carries the name we gave it. A record whose place holds something else (the game rebuilt the array) is left
+        // out - a miss; an entry elsewhere on the addon that merely shares the name is never consulted.
+        // null = addon gone / unreadable.
+        internal static Dictionary<string, uint> ReadAppendedEncs(object addon, IList<AppendedFragment> records)
         {
             if (addon == null) return null;
             try
@@ -476,12 +495,12 @@ namespace HumankindAssetFramework
                 var frags = GetMember(addon, "FragmentEntries") as Array;
                 if (frags == null) return null;
                 var map = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
-                for (int i = 0; i < frags.Length; i++)
+                foreach (var r in records)
                 {
-                    var it = frags.GetValue(i); if (it == null) continue;
-                    var mn = GetMember(it, "meshName") as string; if (string.IsNullOrEmpty(mn)) continue;
-                    uint enc = MemberUInt(it, "EncodedMeshAndVisualParticleCount", 0);
-                    if (!map.TryGetValue(mn, out uint prev) || prev == 0) map[mn] = enc;   // a live entry beats a dead one of the same name
+                    if (r.Index < 0 || r.Index >= frags.Length) continue;
+                    var it = frags.GetValue(r.Index); if (it == null) continue;
+                    if (!string.Equals(GetMember(it, "meshName") as string, r.Name, StringComparison.Ordinal)) continue;
+                    map[r.Name] = MemberUInt(it, "EncodedMeshAndVisualParticleCount", 0);
                 }
                 return map;
             }

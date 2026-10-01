@@ -18,6 +18,16 @@ namespace HumankindAssetFramework
     // (ProcessAnimStates), read by the per-frame pose hook via nearest-position match (the deploy poll's approximation).
     internal struct StateSample { public UnityEngine.Vector3 pos; public bool moving; public float stoppedAt; public float moveStartedAt; public bool combat; public float combatChangedAt; }
 
+    /// <summary>One fragment the plugin appended to a pawn definition addon's FragmentEntries.</summary>
+    internal sealed class AppendedFragment
+    {
+        public WeakReference Addon;   // the PresentationPawnDefinitionAddOn (the game owns it)
+        public int Index;             // its place in that addon's FragmentEntries
+        public string Name;           // its mesh name
+        public bool HandProp;         // the hand prop (its mesh lives in the PROP's collection), else an overflow chunk
+        public int DefId = -1;        // the definition's descriptor id, set where the descriptor arrays were readable: the smoke judges only those
+    }
+
     internal class ModelEntry : Haf.Schema.HafModelSchema   // the ~64 shared behavioral/sound/prop fields live in Haf.Schema now (one definition, inherited); only GUID (sa/sb/..), runtime-state, and non-shared fields stay below
     {
         public string coreDesc = "";     // pawnDescription minus the trailing _NN instance suffix, computed ONCE at registry publish. The per-frame movement polls + the sim-thread FindEntryForUnitDefinition matched units by re-running Regex.Replace(pawnDescription,"_[0-9]+$","") per entry per unit — pure garbage since it's a load-time constant. Read-only after publish (safe from any thread).
@@ -108,16 +118,19 @@ namespace HumankindAssetFramework
         [Locked("published by ProcessAnimStates, read by the pose hook — Architecture.md 2")] public readonly List<StateSample> stateSamples = new List<StateSample>();   // published for the pose hook (lock on it); pos = pawn render position
         public int skeletonId = -1;      // runtime AnimationManager skeleton index of our registered skeleton (to match PawnManager.PawnEntry.SkeletonId)
         public int descId = -1;          // runtime PawnDescriptorId of our unit (learned from the correctly-skinned pawn), to spot the wrong-skeleton twin the game spawns for the same unit
-        // The fragments we APPENDED to this unit's addon (hand prop / multi-mesh chunks), by MESH NAME, the definition
-        // they belong to, and the addon itself (weak — the game owns it). The smoke's full tier resolves each name to its
-        // CURRENT fragment entry on the addon and checks that entry's encoded mesh id is in the descriptor's live block.
-        // Identity by name, never by position or by encoding: the game's registration legitimately moves the block
-        // (first in-game run, 2026-09-14: two healthy units flagged), and FormationOverride.MaybeScaleFragments
-        // (`scaleMode="data"`) legitimately RE-ENCODES every fragment onto scaled clones in the same Load hook (review
-        // of PR #53) — the name survives both. -1 / empty = nothing appended this session.
-        public int gpuDefId = -1;
-        [MainThread("the injection sites (addon Load hook) write, the F8 smoke reads, RearmModelRegistration clears")] public readonly List<string> gpuAppendedNames = new List<string>();
-        [MainThread("the injection sites (addon Load hook) write, the F8 smoke reads, RearmModelRegistration clears")] public WeakReference gpuAddon;   // the PresentationPawnDefinitionAddOn the names live on
+        // THE FRAGMENTS WE APPENDED (hand prop, multi-mesh chunks), each by IDENTITY: the addon it was appended to (weak -
+        // the game owns it), its index in that addon's FragmentEntries, and its mesh name as the guard for an array the
+        // game has rebuilt since. ReloadFragments leaves the hand prop's entry alone on the addon's later Loads,
+        // InjectHandProp knows by it that the prop is already there, and the F8 smoke reads the RECORDED entry and
+        // checks its encoded id against the descriptor's live block.
+        // Not by name alone (two reviews of PR #113): a donor fragment may carry the name, and a live namesake made a
+        // dead prop read as held. Not by encoding: FormationOverride.MaybeScaleFragments (`scaleMode="data"`)
+        // re-encodes every fragment IN PLACE in the same Load hook (review of PR #53). Not by block position: the
+        // game's registration moves the block (2026-09-14: two healthy units flagged). The index on the ADDON is
+        // stable: both of our appends go to the end and nothing reorders the array.
+        // PER ADDON: a model entry serves every pawn definition its pawnDescription fits (LongestMatch is a substring
+        // match - the _01, _02 variants of one unit), each with its own addon. Cleared on re-arm.
+        [MainThread("the injection sites (addon Load hook) write, ReloadFragments and the F8 smoke read, RearmModelRegistration clears")] public readonly List<AppendedFragment> appended = new List<AppendedFragment>();
         public bool fragsLogged;         // one-shot: dump the donor's fragment mesh names once, so the modder can find hide targets
         public bool repointed;
         public float lastPoseHookAt = -1f;   // Time.time the pose hook last matched a live pawn to this entry (smoke: pose-hook liveness); -1 = never this session
@@ -1213,7 +1226,7 @@ namespace HumankindAssetFramework
                 try
                 {
                     e.skeletonId = -1; e.animId = -1; e.descId = -1; e.repointed = false; e.lastPoseHookAt = -1f;
-                    e.gpuDefId = -1; e.gpuAppendedNames.Clear(); e.gpuAddon = null;   // appended fragments belong to the session's descriptor table — cleared with `repointed`   // session-scoped ids re-learn
+                    e.appended.Clear();   // appended fragments belong to the session's addons and descriptor table — cleared with `repointed`   // session-scoped ids re-learn
                     foreach (var b in e.Roles) b.animId = -1;                                   // every clip role's id re-resolves (the table, not a hand-list)
                     e.idleAltNextAt = 0f; e.idleAltStart = -1f; e.idleAltChosenId = -1;   // idle-alt cadence is session-scoped (Time.time resets)
                     e.stateLastPos.Clear(); e.stateMoving.Clear(); e.stateStoppedAt.Clear(); e.stateMoveStartedAt.Clear();
