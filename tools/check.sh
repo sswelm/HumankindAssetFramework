@@ -65,6 +65,7 @@ run "editor scripts compile (Roslyn)" bash "$ROOT/tools/editor_compile_check.sh"
 run "registry engine drill (SingleSourceRegistry on real files)" bash "$ROOT/tools/registry_engine_drill.sh"
 run "backup dedup drill (BackupDedup on real files: unchanged means the bytes)" bash "$ROOT/tools/backup_dedup_drill.sh"
 run "blender exit drill (a crashed script fails the process; SKIP without Blender)" bash "$ROOT/tools/blender_exit_drill.sh"
+run "GLB reader drill (every registry GLB read; a sample compared with Blender; SKIP without the project)" bash "$ROOT/tools/glb_reader_drill.sh"
 #    5b) The ownership-rebase hand-lists. A field the UI edits but the window's rebase doesn't re-apply is thrown
 #        away on every Save — silent, and the reason this gate exists. Pure source analysis, so CI can run it too.
 run "hand-list gate (ownership rebases)" bash "$ROOT/tools/check_handlists.sh"

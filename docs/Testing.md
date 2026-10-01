@@ -37,7 +37,7 @@ in **GitHub Actions**. Both lanes matter, and for different reasons:
 | Surface | `tools/check.sh` (pre-push hook) | also in CI | ~time |
 |---|---|---|---|
 | **Runtime + shared contract** | `dotnet build` · `dotnet test` · docs guard · binding-catalog surface · hot path · parse shape · member shape · schema parity | all source-only checks | seconds |
-| **Editor package** | Roslyn editor compile-check · registry engine drill · backup dedup drill · blender exit drill · schema parity · hand-list gate | parity + hand-list; compile check and drills stay local | ~30 s |
+| **Editor package** | Roslyn editor compile-check · registry engine drill · backup dedup drill · blender exit drill · GLB reader drill · schema parity · hand-list gate | parity + hand-list; compile check and drills stay local | ~45 s |
 
 The one guard CI cannot run is **`tools/editor_compile_check.sh`**: it needs a licensed Unity 2021.3.1f1 install
 (`UnityEditor.dll`, the MonoBleedingEdge 4.7.1 profile, every `UnityEngine` module), none of which is
@@ -59,6 +59,25 @@ content index links nothing.
 when absent) with the head `BakerRules.BlenderScript` builds: a script that raises exits 1, without the flag it exits 0 (the
 hole), a clean script exits 0, and the real `rig_anim.py` clears the previous run's role clip before touching the model
 and fails the process on a missing input.
+
+**`tools/glb_reader_drill.sh`** (2026-09-30, step 1 of replacing Blender) reads every `.glb` the modding project's registry
+names with the real `editor/GlbReader.cs` on Unity's Mono, checks what a file cannot say about itself (skinned vertices weigh
+to 1 over the skin's joints), and compares each file with Blender's *evaluated* import of the same file: the counts
+(triangles, materials, images, joints) and, order-independent so vertex merging cannot move them, the world-space
+bounding box, the total triangle area, the area-weighted centroid, the area-weighted sum of face normals (winding and
+mirrored nodes), the bone names and each animation's span (earliest first key to latest last key over every channel —
+what a Blender 5.1 slotted action spans) — through both transform chains, in Blender's Z-up frame. A synthetic
+two-target fixture (`fixture_two_targets.py`: one animation, two nodes, channels ending apart, one starting late, both
+nodes instancing one mesh) rides along, since no registry file has those shapes.
+Counting alone could not tell a wrong matrix chain. The pose both sides evaluate is **animation 0 at time 0**
+(`HafTransforms.PoseAt`; Blender with its NLA tracks dropped and the active clip at frame 0 — its untouched import
+blends every clip through the NLA, a pose no file defines), and a skinned vertex goes through the spec's weighted joint
+blend over both influence sets on both sides (`HafTransforms.WorldPositions` / `WorldNormals`; Blender's armature
+modifier). Measured on scp-682: Blender's untouched import is the blend (area 384.6); the undeformed mesh (394.6)
+appears only once the pose is reset — a reset the drill once did itself, which had made a wrong rule look right. A sample by default (the largest, the smallest, the
+animated ones), every file with `FULL=1`; the comparison and its tolerances are `tools/glb-reader-drill/compare.py`. SKIP
+without the project (hosted CI) or without Blender. Full run 2026-10-01: 31 of 31 unique files agree on everything; the
+reader took 1.7 s for 784 MB, Blender's importer 14.4 s plus its boot.
 
 ### Schema parity is in-repo and mandatory
 

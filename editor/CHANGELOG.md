@@ -5,6 +5,29 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **The in-memory model and the GLB reader — step 1 of replacing Blender** (`HafModel`, `GlbReader`; the plan and
+  its measurements: `docs/Review-Backlog.md`). A `.glb` or `.gltf` (embedded, data-URI or sibling `.bin`) reads into one
+  model — nodes with transforms and hierarchy, meshes → primitives with every vertex attribute (positions, normals,
+  tangents, two UV sets, colours, joints, weights, indices), PBR materials with textures and images, skins with
+  inverse bind matrices, animations as sampled curves — with every component type, normalized integers and
+  interleaved views decoded exactly, a second influence set (JOINTS_1/WEIGHTS_1) carried. What the reader does not
+  implement is refused by name (sparse accessors, any required extension, a third influence set, a missing image
+  file, a chunk past the file, an index outside its vertices, an accessor past its view, a cyclic hierarchy); morph
+  targets are counted, not read. Tested on synthetic files field by field; drilled on the registry: all 35 GLBs
+  (784 MB) read in 1.7 s and agree with Blender's evaluated import on triangle count, materials, images, joints, and
+  on the values — world bounding box, surface area, centroid, winding, bone names, durations (Blender: 14.4 s plus
+  boot). The values settled what counting could not: a skinned vertex is the spec's weighted blend of its joints
+  over both influence sets, normals through the same matrices (`HafTransforms.WorldPositions` / `WorldNormals`), and
+  the pose both sides state exactly is animation 0 at time 0 (`HafTransforms.PoseAt`; the sampler does STEP, LINEAR
+  with slerp for rotations, and the cubic Hermite with the stored tangents for CUBICSPLINE). The
+  Model Reader's turntable shows that pose by default (*Clip start*), or the file's static transforms. **Tools ▸ HAF ▸ Model Reader (GLB)…** shows what the reader sees in any file (or in every registry
+  model at once): the counts, one row per mesh, the skins, the animations, the read time, a refusal by name — and a
+  **turntable of the model as the reader read it**, built as Unity meshes from the model alone (the hierarchy's
+  transforms through `HafTransforms`, the file's normals and UVs, the base-colour textures decoded from the embedded
+  images): if the reader got any of those wrong, it is visible there. Unmirror / file normals / textures toggles
+  isolate each.
+  Nothing else uses it yet — the pipeline still runs on Blender; the next steps consume it.
+
 - **A Blender script that crashes now fails the bake.** Blender exits 0 on an uncaught Python exception unless
   told otherwise (measured on 5.1), so every `ExitCode != 0` check in the Factory, the Vehicle Lab and the Clip
   Range dialog was dead for a crashed script: a crash after a partial output looked exactly like a finished run. The
