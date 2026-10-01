@@ -18,10 +18,23 @@ public sealed class HafModel
     public string Generator = "";                 // asset.generator, for the log
     public string Copyright = "";                 // asset.copyright, verbatim
     public string AssetExtrasJson;                // asset.extras, verbatim JSON (any type the file gave - the schema allows any; `{}` included) or null when absent: Sketchfab's author/license/source/title live here (6 registry files; review of PR #110 found them dropped)
-    public string SceneName = "";                 // the default scene's name (Blender writes "Scene" in every file)
     public string SourcePath = "";                // where it was read from ("" for bytes)
+    // EVERY scene the file declares, in order (review of PR #111: the writer kept the default one and dropped the rest without
+    // a word, and a reader-vs-reader compare could not see it); a file without scenes is read as one scene of its parentless
+    // nodes, which is what the writer writes. Scene = the default one (asset `scene`, 0 when absent).
+    public readonly List<HafScene> Scenes = new List<HafScene>();
+    public int Scene;
     public readonly List<HafNode> Nodes = new List<HafNode>();
-    public readonly List<int> Roots = new List<int>();          // the default scene's root nodes (every node without a parent when no scene is declared)
+    /// <summary>The default scene's root nodes - the list itself, so adding to it adds to that scene; a model with no scene
+    /// yet gets one here (a model built by hand lists its roots and has a scene).</summary>
+    public List<int> Roots
+    {
+        get
+        {
+            if (Scenes.Count == 0) Scenes.Add(new HafScene());
+            return Scenes[Scene >= 0 && Scene < Scenes.Count ? Scene : 0].Nodes;   // an index out of range is refused by the writer by name; here the first scene stands in
+        }
+    }
     public readonly List<HafMesh> Meshes = new List<HafMesh>();
     public readonly List<HafMaterial> Materials = new List<HafMaterial>();
     public readonly List<HafTexture> Textures = new List<HafTexture>();
@@ -39,6 +52,13 @@ public sealed class HafModel
     {
         get { long n = 0; foreach (var m in Meshes) foreach (var p in m.Primitives) n += p.VertexCount; return n; }
     }
+}
+
+public sealed class HafScene
+{
+    public string Name = "";
+    public readonly List<int> Nodes = new List<int>();   // root nodes (a node without a parent); two scenes may share one
+    public string ExtrasJson;                            // verbatim JSON of any type, or null when absent
 }
 
 public sealed class HafNode

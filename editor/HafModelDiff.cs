@@ -24,8 +24,15 @@ public static class HafModelDiff
         if ((d = Count("samplers", a.Samplers.Count, b.Samplers.Count)) != null) return d;
         if ((d = Count("skins", a.Skins.Count, b.Skins.Count)) != null) return d;
         if ((d = Count("animations", a.Animations.Count, b.Animations.Count)) != null) return d;
-        if (!a.Roots.SequenceEqual(b.Roots)) return "roots";
-        if (a.SceneName != b.SceneName) return $"scene name: {a.SceneName} -> {b.SceneName}";
+        if ((d = Count("scenes", a.Scenes.Count, b.Scenes.Count)) != null) return d;
+        if (a.Scene != b.Scene) return $"default scene: {a.Scene} -> {b.Scene}";
+        for (int i = 0; i < a.Scenes.Count; i++)
+        {
+            HafScene x = a.Scenes[i], y = b.Scenes[i];
+            if (x.Name != y.Name) return $"scene {i} name: {x.Name} -> {y.Name}";
+            if (!x.Nodes.SequenceEqual(y.Nodes)) return $"scene {i} ({x.Name}) nodes";
+            if (x.ExtrasJson != y.ExtrasJson) return $"scene {i} ({x.Name}) extras";
+        }
         if (a.Copyright != b.Copyright) return "asset copyright";
         if (a.AssetExtrasJson != b.AssetExtrasJson) return $"asset extras: {a.AssetExtrasJson} -> {b.AssetExtrasJson}";
         foreach (var e in b.ExtensionsUsed) if (!a.ExtensionsUsed.Contains(e)) return $"extensionsUsed gained {e}";

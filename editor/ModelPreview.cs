@@ -5,6 +5,7 @@
 // the caller to destroy.
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 public static class ModelPreview
@@ -71,6 +72,7 @@ public static class ModelPreview
             var node = model.Nodes[ni];
             if (node.Mesh < 0) continue;
             var hm = model.Meshes[node.Mesh];
+            if (hm.Primitives.All(p => p.TriangleCount == 0)) continue;   // lines and points only: nothing to draw, and no Mesh allocated for it (review of PR #111: one leaked per rebuild)
             var mesh = new Mesh { name = node.Name, hideFlags = HideFlags.HideAndDontSave, indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
             var verts = new List<Vector3>(); var norms = new List<Vector3>(); var uvs = new List<Vector2>();
             var subs = new List<int[]>(); var mats = new List<Material>();
@@ -102,7 +104,6 @@ public static class ModelPreview
                 subs.Add(tri.ToArray()); mats.Add(MaterialFor(p.Material));
                 r.Triangles += tri.Count / 3;
             }
-            if (subs.Count == 0) continue;
             mesh.SetVertices(verts);
             mesh.SetUVs(0, uvs);
             mesh.subMeshCount = subs.Count;

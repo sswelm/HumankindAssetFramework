@@ -149,7 +149,7 @@ public class GlbReaderTests
         Assert.Equal(new double[] { 0, 0, 0.7071, 0.7071 }, m.Nodes[1].Rotation); Assert.Equal(new double[] { 2, 2, 2 }, m.Nodes[1].Scale); Assert.False(m.Nodes[1].HasMatrix);
         Assert.True(m.Nodes[2].HasMatrix); Assert.Equal(5, m.Nodes[2].Matrix[12]); Assert.Equal(7, m.Nodes[2].Matrix[14]);
         Assert.Equal(-1, m.Nodes[0].Parent); Assert.Equal(0, m.Nodes[1].Parent); Assert.Equal(1, m.Nodes[2].Parent);
-        Assert.Equal(new[] { 1 }, m.Nodes[0].Children); Assert.Equal(new[] { 0 }, m.Roots);
+        Assert.Equal(new[] { 1 }, m.Nodes[0].Children); Assert.Equal(new[] { 0 }, m.Roots); Assert.Single(m.Scenes); Assert.Equal(0, m.Scene);
 
         // the primitive: every attribute, the interleaved view decoded through its stride, normalized ints scaled
         var p = Assert.Single(Assert.Single(m.Meshes).Primitives);
@@ -227,7 +227,7 @@ public class GlbReaderTests
         var p = m.Meshes[0].Primitives[0];
         Assert.Null(p.Indices); Assert.Null(p.Normals); Assert.Null(p.Uv0); Assert.False(p.Skinned); Assert.Equal(4, p.VertexCount); Assert.Equal(2, p.TriangleCount);
         Assert.Equal(new double[] { 0, 0, 0 }, m.Nodes[0].Translation); Assert.Equal(new double[] { 0, 0, 0, 1 }, m.Nodes[0].Rotation); Assert.Equal(new double[] { 1, 1, 1 }, m.Nodes[0].Scale);
-        Assert.Equal(new[] { 0, 1 }, m.Roots); Assert.Equal("", m.Nodes[1].Name);
+        Assert.Equal(new[] { 0, 1 }, m.Roots); Assert.Equal("", m.Nodes[1].Name); Assert.Single(m.Scenes);   // no scene declared: one of the parentless nodes
         Assert.Empty(m.Materials); Assert.Empty(m.Skins); Assert.Empty(m.Animations);
     }
 

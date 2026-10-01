@@ -17,7 +17,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   package: **Model Reader ▸ Save as GLB…** reads its file back through it and says "equal field by field" or names
   the first difference. **The headless editor lane** (`tools/editor_tests.ps1`) gains a Model Reader section: every
   registry model and fixture read, built as meshes (`ModelPreview`, lifted out of the window), written and read back
-  equal, in Unity's runtime under the system locale (42/42). `GlbRobustnessTests`: a corruption sweep (every
+  equal, in Unity's runtime under the system locale, with a Unity-mesh leak check (42/42). Every SCENE a file declares is
+  carried now, with its name and extras, the default by index (the writer had kept the default one and dropped the rest
+  without a word). `GlbRobustnessTests`: a corruption sweep (every
   truncation, every JSON byte four ways, every BIN byte, ten broken containers, bad sidecars) that must never crash,
   culture-independence of the written bytes, eight threads at once.
 

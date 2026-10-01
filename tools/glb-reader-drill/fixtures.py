@@ -181,7 +181,8 @@ def fx_interleaved(out):
 
 
 def fx_modes(out):
-    """Every primitive mode in one mesh: non-indexed TRIANGLES, TRIANGLE_STRIP, TRIANGLE_FAN, LINES, POINTS.
+    """Every primitive mode in one mesh: non-indexed TRIANGLES, TRIANGLE_STRIP, TRIANGLE_FAN, LINES, POINTS; and a
+    second mesh of LINES only on its own node (a node that draws nothing: the preview must allocate nothing for it).
     Triangles as drawn: 2 + 2 + 3 = 7; the lines and points draw none (Blender: loose edges and vertices)."""
     b = Buf()
     tri = b.accessor([(0, 0, 0), (1, 0, 0), (0, 1, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)], "f", "VEC3")
@@ -190,13 +191,15 @@ def fx_modes(out):
     fan_idx = b.accessor([0, 1, 2, 3, 4], "H", "SCALAR")
     lines = b.accessor([(7, 0, 0), (8, 0, 0), (7, 1, 0), (8, 1, 0)], "f", "VEC3")
     points = b.accessor([(9, 0, 0), (9, 1, 0), (9, 2, 0)], "f", "VEC3")
+    wire = b.accessor([(10, 0, 0), (11, 0, 0), (11, 1, 0), (10, 1, 0)], "f", "VEC3")
     root = base("modes",
                 meshes=[{"name": "modes", "primitives": [{"attributes": {"POSITION": tri}},
                                                          {"attributes": {"POSITION": strip}, "mode": 5},
                                                          {"attributes": {"POSITION": fan}, "indices": fan_idx, "mode": 6},
                                                          {"attributes": {"POSITION": lines}, "mode": 1},
-                                                         {"attributes": {"POSITION": points}, "mode": 0}]}],
-                nodes=[{"name": "Modes", "mesh": 0}], scenes=[{"nodes": [0]}], scene=0)
+                                                         {"attributes": {"POSITION": points}, "mode": 0}]},
+                        {"name": "wire", "primitives": [{"attributes": {"POSITION": wire}, "mode": 2}]}],   # LINE_LOOP
+                nodes=[{"name": "Modes", "mesh": 0}, {"name": "Wire", "mesh": 1}], scenes=[{"nodes": [0, 1]}], scene=0)
     write_glb(os.path.join(out, "modes.glb"), root, b)
 
 
@@ -244,15 +247,16 @@ def fx_cubic(out):
 
 
 def fx_scenes(out):
-    """Two scenes, the default the SECOND one (named); a node in no scene at all (orphan, with a mesh); a child placed
-    by a matrix with a negative scale (mirrored winding). What is drawn is the default scene: A is not, C is not."""
+    """Two scenes, the default the SECOND one (both named, the first with extras); a node in no scene at all (orphan,
+    with a mesh); a child placed by a matrix with a negative scale (mirrored winding). Both scenes and the orphan
+    survive the round trip (review of PR #111: the non-default scene used to be dropped); Blender imports every node."""
     b = Buf()
     pos = b.accessor([(0, 0, 0), (1, 0, 0), (0, 1, 0)], "f", "VEC3"); idx = b.accessor([0, 1, 2], "H", "SCALAR")
     root = base("scenes",
                 meshes=[{"name": "tri", "primitives": [{"attributes": {"POSITION": pos}, "indices": idx}]}],
                 nodes=[{"name": "A", "mesh": 0}, {"name": "B", "mesh": 0, "children": [3]}, {"name": "C", "mesh": 0, "translation": [10, 0, 0]},
                        {"name": "D", "mesh": 0, "matrix": [-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 2, 0, 1]}],
-                scenes=[{"name": "First", "nodes": [0]}, {"name": "Second", "nodes": [1]}], scene=1)
+                scenes=[{"name": "First", "nodes": [0], "extras": {"camera": "front"}}, {"name": "Second", "nodes": [1]}], scene=1)
     write_glb(os.path.join(out, "scenes.glb"), root, b)
 
 

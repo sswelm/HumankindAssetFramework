@@ -13,7 +13,8 @@ public class GlbWriterTests
     {
         Assert.Equal(a.Nodes.Count, b.Nodes.Count); Assert.Equal(a.Meshes.Count, b.Meshes.Count); Assert.Equal(a.Materials.Count, b.Materials.Count);
         Assert.Equal(a.Textures.Count, b.Textures.Count); Assert.Equal(a.Images.Count, b.Images.Count); Assert.Equal(a.Skins.Count, b.Skins.Count); Assert.Equal(a.Animations.Count, b.Animations.Count);
-        Assert.Equal(a.Roots, b.Roots); Assert.Equal(a.SceneName, b.SceneName); Assert.Equal(a.Copyright, b.Copyright); Assert.Equal(a.AssetExtrasJson, b.AssetExtrasJson);
+        Assert.Equal(a.Roots, b.Roots); Assert.Equal(a.Scene, b.Scene); Assert.Equal(a.Scenes.Count, b.Scenes.Count); Assert.Equal(a.Copyright, b.Copyright); Assert.Equal(a.AssetExtrasJson, b.AssetExtrasJson);
+        for (int i = 0; i < a.Scenes.Count; i++) { Assert.Equal(a.Scenes[i].Name, b.Scenes[i].Name); Assert.Equal(a.Scenes[i].Nodes, b.Scenes[i].Nodes); Assert.Equal(a.Scenes[i].ExtrasJson, b.Scenes[i].ExtrasJson); }
         for (int i = 0; i < a.Nodes.Count; i++)
         {
             HafNode x = a.Nodes[i], y = b.Nodes[i];
@@ -70,7 +71,9 @@ public class GlbWriterTests
         var original = GlbReader.Read(GlbReaderTests.FullGlb());
         original.Meshes[0].Primitives[0].MorphTargets = 0;   // the fixture declares one; the writer refuses it as it is (asserted below), so the round trip is taken without
         // what the second review found dropped: the asset's copyright and extras (Sketchfab attribution), the scene's name, an alphaCutoff outside MASK
-        original.Copyright = "CC-BY 4.0 Someone"; original.AssetExtrasJson = "{\"author\":\"someone (https://sketchfab.com/someone)\",\"license\":\"CC-BY-4.0\",\"when\":\"2024-05-06T07:08:09.123+09:00\"}"; original.SceneName = "Scene";
+        original.Copyright = "CC-BY 4.0 Someone"; original.AssetExtrasJson = "{\"author\":\"someone (https://sketchfab.com/someone)\",\"license\":\"CC-BY-4.0\",\"when\":\"2024-05-06T07:08:09.123+09:00\"}"; original.Scenes[0].Name = "Scene";
+        // a second scene (sharing the root, with extras) and the default being the second: every scene survives, the default by index (review of PR #111)
+        var second = new HafScene { Name = "Second", ExtrasJson = "{\"camera\":\"front\"}" }; second.Nodes.Add(0); original.Scenes.Add(second); original.Scene = 1;
         original.Materials[0].AlphaCutoff = 0.3f;
         var bytes = GlbWriter.Write(original);
         var again = GlbReader.Read(bytes);
@@ -153,9 +156,11 @@ public class GlbWriterTests
     [InlineData("nan-key-value", "key values: a value is not a finite number")]
     [InlineData("parent-stale", "node 1 'Root' has Parent -1 but node 0 lists it as a child")]
     [InlineData("child-of-two", "is a child of both node 0 and node 1")]
-    [InlineData("root-is-child", "root 1 'Root' is a child of node 0")]
+    [InlineData("root-is-child", "scene 0: root 1 'Root' is a child of node 0")]
     [InlineData("hierarchy-cycle", "is its own ancestor")]
-    [InlineData("root-twice", "root 0 is listed twice")]
+    [InlineData("root-twice", "scene 0: root 0 is listed twice")]
+    [InlineData("scene-node-out-of-range", "scene 0 '' lists node 7, the model has 3")]
+    [InlineData("default-scene-out-of-range", "the default scene is 3, the model has 1")]
     [InlineData("ibm-too-big", "inverse bind matrices: 1E+100 does not fit a 32-bit float")]
     [InlineData("translation-too-big", "translation: -1E+39 does not fit a 32-bit float")]
     [InlineData("negative-first-key", "key times start at -0.5 - glTF starts them at or after 0")]
@@ -192,6 +197,8 @@ public class GlbWriterTests
             case "root-is-child": m.Roots.Add(1); break;
             case "hierarchy-cycle": m.Roots.Clear(); m.Nodes[2].Children.Add(0); m.Nodes[0].Parent = 2; break;   // 0 -> 1 -> 2 -> 0, every Parent consistent
             case "root-twice": m.Roots.Add(0); break;
+            case "scene-node-out-of-range": m.Scenes[0].Nodes.Add(7); break;
+            case "default-scene-out-of-range": m.Scene = 3; break;
             case "ibm-too-big": m.Skins[0].InverseBindMatrices[3] = 1e100; break;          // finite, and infinity once cast
             case "translation-too-big": m.Nodes[0].Translation[0] = -1e39; break;
             case "negative-first-key": m.Animations[0].Samplers[0].Times[0] = -0.5f; break;

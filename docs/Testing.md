@@ -459,8 +459,8 @@ substitutes for the other, and a mutation drill is how you find out which one yo
   is currently open in the Unity editor. Since 2026-10-02 it also runs the **Model Reader section**
   (`ModelReaderHeadlessTest`): every registry model and every GLB fixture (the script generates them with
   `fixtures.py` and passes `-hafFixtures`) read by `GlbReader`, built as Unity meshes by `ModelPreview` (the vertex
-  and triangle counts must be the model's), written by `GlbWriter` to a temporary file and read back equal field by
-  field (`HafModelDiff`) — in Unity's own runtime: the project's Json.Net 11, the editor's Mono, and the SYSTEM
+  and triangle counts must be the model's, and no Unity mesh may be left behind), written by `GlbWriter` to a temporary
+  file and read back equal field by field (`HafModelDiff`) — in Unity's own runtime: the project's Json.Net 11, the editor's Mono, and the SYSTEM
   locale a batch run gets (first run: 42 files, 722 MB, read in 1.5 s, written in 1.5 s, culture nl-NL). The drills
   prove the same code outside the editor; this proves it inside.
 

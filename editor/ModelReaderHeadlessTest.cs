@@ -51,7 +51,8 @@ public static class ModelReaderHeadlessTest
                     var sw = System.Diagnostics.Stopwatch.StartNew();
                     var m = GlbReader.Read(path);
                     sw.Stop(); readMs += sw.Elapsed.TotalMilliseconds; bytes += new FileInfo(path).Length;
-                    // the preview: every triangle primitive on every mesh node, as Unity meshes
+                    // the preview: every triangle primitive on every mesh node, as Unity meshes; every Unity object it makes must be gone after the destroy (a leak is a FAIL)
+                    int meshesBefore = Resources.FindObjectsOfTypeAll<Mesh>().Length;
                     var r = ModelPreview.Build(m, new ModelPreview.Options(), assets);
                     long expectVerts = 0, expectTris = 0;
                     foreach (var n in m.Nodes) if (n.Mesh >= 0) foreach (var p in m.Meshes[n.Mesh].Primitives) if (p.TriangleCount > 0) { expectVerts += p.VertexCount; expectTris += p.TriangleCount; }
@@ -59,6 +60,8 @@ public static class ModelReaderHeadlessTest
                     if (built) UnityEngine.Object.DestroyImmediate(r.Root);
                     foreach (var a in assets) if (a != null) UnityEngine.Object.DestroyImmediate(a);
                     assets.Clear();
+                    int meshesAfter = Resources.FindObjectsOfTypeAll<Mesh>().Length;
+                    if (meshesAfter != meshesBefore) { s.fail++; body.AppendLine($"FAIL: {label}: the preview leaked {meshesAfter - meshesBefore} Unity mesh(es) (a node that draws nothing must allocate nothing)"); continue; }
                     if (expectTris > 0 && (!built || r.Vertices != expectVerts || r.Triangles != expectTris))
                     { s.fail++; body.AppendLine($"FAIL: {label}: preview built {r.Vertices} vertices / {r.Triangles} triangles, the model draws {expectVerts} / {expectTris} ({r.Note})"); continue; }
                     // the writer: to disk, read back, field by field
