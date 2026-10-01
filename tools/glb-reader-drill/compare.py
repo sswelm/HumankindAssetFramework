@@ -4,8 +4,9 @@
 #   area            relative 1e-4
 #   nsum            absolute 1e-3 of the total area (a flipped winding moves it by whole triangle areas)
 #   bones           exact, sorted
-#   durations       the SET of distinct durations, to the frame (Blender snaps to frames at 24 fps and makes one ACTION
-#                   per animated object per glTF animation, so counts differ by design and are reported, not compared)
+#   durations       the SET of distinct per-target SPANS (first key to last, per animated node / per Blender action), to
+#                   the frame (Blender snaps to frames at 24 fps and makes one action per animated object per glTF
+#                   animation, so counts differ by design and are reported, not compared)
 #   pose            both sides evaluate animation 0 at time 0 (blender_counts.py / HafTransforms.PoseAt); the skinned
 #                   vertices go through the weighted joint blend on both sides
 import sys
@@ -62,11 +63,11 @@ for name, b in blender.items():
         problems.append("normal sum (winding) differs by up to %.5f (tolerance %.5f): C# %s vs Blender %s" % (max(abs(x - y) for x, y in zip(cn, bn)), ntol, c.get("nsum"), b.get("nsum")))
     if c.get("bones", "") != b.get("bones", ""):
         problems.append("bone names differ: C# [%s] vs Blender [%s]" % (c.get("bones", ""), b.get("bones", "")))
-    # Blender makes one action per animated OBJECT per glTF animation, so counts differ by design; the SET of distinct
-    # durations (to the frame) must match: every clip the file has, Blender has, and no other
+    # Blender makes one action per animated OBJECT per glTF animation, each spanning that object's first key to its last;
+    # the C# side states the same per-target spans. The SET of distinct spans (to the frame) must match.
     cd, bd = sorted(set(round(x * 24) / 24 for x in floats(c.get("sorteddurations", "")))), sorted(set(round(x * 24) / 24 for x in floats(b.get("durations", ""))))
     if len(cd) != len(bd) or any(abs(x - y) > 1.0 / 24 + 1e-6 for x, y in zip(cd, bd)):
-        problems.append("distinct durations differ: C# %s vs Blender %s" % (c.get("sorteddurations"), b.get("durations")))
+        problems.append("distinct animation spans differ: C# %s vs Blender %s" % (c.get("sorteddurations"), b.get("durations")))
     if problems:
         print("FAIL %s: %s" % (short, "; ".join(problems))); fails += 1
     else:

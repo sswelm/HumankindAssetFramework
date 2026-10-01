@@ -155,11 +155,25 @@ public class HafTransformsTests
         Near(new[] { 3, 3, 3.0 }, HafTransforms.Apply(w2[0], 1, 1, 1, 0));
         // no such animation: null, the static transforms are the pose
         Assert.Null(HafTransforms.PoseAt(model, 1, 0.0));
-        // a LINEAR rotation between two keys is the normalized lerp, exact at the keys
+        // a LINEAR rotation between two keys is the SLERP: identity to a half turn about Y, halfway is a quarter turn
         var rot = new HafSampler { Times = new float[] { 0, 1 }, Values = new float[] { 0, 0, 0, 1, 0, 1, 0, 0 }, Components = 4, Interpolation = "LINEAR" };
         Near(new[] { 0, 0, 0, 1.0 }, HafTransforms.Sample(rot, 0));
         Near(new[] { 0, 1, 0, 0.0 }, HafTransforms.Sample(rot, 1));
-        var mid = HafTransforms.Sample(rot, 0.5);
-        Assert.Equal(1.0, Math.Sqrt(mid[0] * mid[0] + mid[1] * mid[1] + mid[2] * mid[2] + mid[3] * mid[3]), 6);
+        Near(new[] { 0, Math.Sin(Math.PI / 4), 0, Math.Cos(Math.PI / 4) }, HafTransforms.Sample(rot, 0.5));
+        Near(new[] { 0, Math.Sin(Math.PI / 8), 0, Math.Cos(Math.PI / 8) }, HafTransforms.Sample(rot, 0.25));   // a quarter of the way is an eighth turn - lerp would not give this
+        // a CUBICSPLINE translation is the cubic Hermite over value and tangents: zero tangents give the smoothstep,
+        // whose midpoint is halfway and whose quarter point is 5/32 of the way (a held-value sampler would give 0)
+        var cub = new HafSampler { Times = new float[] { 0, 2 }, Values = new float[] { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0 }, Components = 3, Interpolation = "CUBICSPLINE" };
+        Near(new[] { 4, 0, 0.0 }, HafTransforms.Sample(cub, 1.0));
+        Near(new[] { 8 * 5 / 32.0, 0, 0 }, HafTransforms.Sample(cub, 0.5));
+        Near(new[] { 8, 0, 0.0 }, HafTransforms.Sample(cub, 2.0));
+        // with a tangent: out-tangent 4 at the first key over a 2 s interval pulls the first half up (h10 = 1/8 at the midpoint: +1)
+        cub.Values[6] = 4;   // key 0's out-tangent, x
+        Near(new[] { 5, 0, 0.0 }, HafTransforms.Sample(cub, 1.0));
+        // before the first key the first value holds; after the last, the last
+        var late = new HafSampler { Times = new float[] { 1, 2 }, Values = new float[] { 3, 3, 3, 9, 9, 9 }, Components = 3, Interpolation = "LINEAR" };
+        Near(new[] { 3, 3, 3.0 }, HafTransforms.Sample(late, 0.0));
+        Near(new[] { 6, 6, 6.0 }, HafTransforms.Sample(late, 1.5));
+        Near(new[] { 9, 9, 9.0 }, HafTransforms.Sample(late, 5.0));
     }
 }

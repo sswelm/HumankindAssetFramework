@@ -68,29 +68,68 @@ public static class HafTransforms
         };
     }
 
-    /// <summary>A sampler's value at <paramref name="time"/>, per its interpolation; null for an empty sampler.</summary>
+    /// <summary>
+    /// A sampler's value at <paramref name="time"/>, per its interpolation (glTF 3.7.3): STEP holds the key before;
+    /// LINEAR interpolates, a rotation by SLERP (the short way round; the normalized lerp when the two are nearly
+    /// equal); CUBICSPLINE is the cubic Hermite over the key's value and the stored tangents (in-tangent, value,
+    /// out-tangent per key, tangents scaled by the interval), a rotation normalized afterwards. Before the first key
+    /// the first value holds, after the last the last. Null for an empty sampler.
+    /// </summary>
     public static double[] Sample(HafSampler s, double time)
     {
         int keys = s.KeyCount, c = s.Components;
         if (keys == 0 || c == 0) return null;
-        int per = s.Interpolation == "CUBICSPLINE" ? 3 : 1;
-        int valueAt(int key) => (key * per + (per == 3 ? 1 : 0)) * c;   // CUBICSPLINE: in-tangent, value, out-tangent per key
+        bool cubic = s.Interpolation == "CUBICSPLINE";
+        int per = cubic ? 3 : 1;
+        int valueAt(int key) => (key * per + (cubic ? 1 : 0)) * c;
+        int inTangentAt(int key) => key * per * c;
+        int outTangentAt(int key) => (key * per + 2) * c;
+        double[] take(int at) { var r = new double[c]; for (int i = 0; i < c; i++) r[i] = s.Values[at + i]; return r; }
         int k = 0;
         while (k + 1 < keys && s.Times[k + 1] <= time) k++;
-        var a = new double[c]; for (int i = 0; i < c; i++) a[i] = s.Values[valueAt(k) + i];
-        if (s.Interpolation != "LINEAR" || k + 1 >= keys || time <= s.Times[k]) return a;
+        var a = take(valueAt(k));
+        if (s.Interpolation == "STEP" || k + 1 >= keys || time <= s.Times[k]) return a;
         double t0 = s.Times[k], t1 = s.Times[k + 1];
-        if (time >= t1) { var b = new double[c]; for (int i = 0; i < c; i++) b[i] = s.Values[valueAt(k + 1) + i]; return b; }
+        if (time >= t1) return take(valueAt(k + 1));
+        var bv = take(valueAt(k + 1));
         double f = (time - t0) / (t1 - t0);
         var outp = new double[c];
-        for (int i = 0; i < c; i++) outp[i] = a[i] + (s.Values[valueAt(k + 1) + i] - a[i]) * f;
-        if (c == 4)   // a rotation: normalized lerp (the short way round)
+        if (cubic)
         {
-            double dot = 0; for (int i = 0; i < 4; i++) dot += a[i] * s.Values[valueAt(k + 1) + i];
-            if (dot < 0) for (int i = 0; i < 4; i++) outp[i] = a[i] - (s.Values[valueAt(k + 1) + i] + a[i]) * f;
-            double len = Math.Sqrt(outp[0] * outp[0] + outp[1] * outp[1] + outp[2] * outp[2] + outp[3] * outp[3]);
-            if (len > 1e-12) for (int i = 0; i < 4; i++) outp[i] /= len;
+            double td = t1 - t0, f2 = f * f, f3 = f2 * f;
+            double h00 = 2 * f3 - 3 * f2 + 1, h10 = f3 - 2 * f2 + f, h01 = -2 * f3 + 3 * f2, h11 = f3 - f2;
+            var m0 = take(outTangentAt(k)); var m1 = take(inTangentAt(k + 1));
+            for (int i = 0; i < c; i++) outp[i] = h00 * a[i] + h10 * td * m0[i] + h01 * bv[i] + h11 * td * m1[i];
+            if (c == 4) Normalize4(outp);
+            return outp;
         }
+        if (c == 4) return Slerp(a, bv, f);
+        for (int i = 0; i < c; i++) outp[i] = a[i] + (bv[i] - a[i]) * f;
+        return outp;
+    }
+
+    static void Normalize4(double[] q)
+    {
+        double len = Math.Sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+        if (len > 1e-12) for (int i = 0; i < 4; i++) q[i] /= len;
+    }
+
+    /// <summary>Spherical interpolation between two quaternions (x, y, z, w), the short way round.</summary>
+    public static double[] Slerp(double[] a, double[] b, double f)
+    {
+        double dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+        var bb = (double[])b.Clone();
+        if (dot < 0) { dot = -dot; for (int i = 0; i < 4; i++) bb[i] = -bb[i]; }
+        var outp = new double[4];
+        if (dot > 0.9995)   // nearly the same rotation: the normalized lerp is exact enough and has no division by a vanishing sine
+        {
+            for (int i = 0; i < 4; i++) outp[i] = a[i] + (bb[i] - a[i]) * f;
+            Normalize4(outp);
+            return outp;
+        }
+        double theta = Math.Acos(Math.Max(-1.0, Math.Min(1.0, dot))), sin = Math.Sin(theta);
+        double wa = Math.Sin((1 - f) * theta) / sin, wb = Math.Sin(f * theta) / sin;
+        for (int i = 0; i < 4; i++) outp[i] = wa * a[i] + wb * bb[i];
         return outp;
     }
 

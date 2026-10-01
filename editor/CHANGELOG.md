@@ -18,7 +18,8 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   on the values — world bounding box, surface area, centroid, winding, bone names, durations (Blender: 14.4 s plus
   boot). The values settled what counting could not: a skinned vertex is the spec's weighted blend of its joints
   over both influence sets, normals through the same matrices (`HafTransforms.WorldPositions` / `WorldNormals`), and
-  the pose both sides state exactly is animation 0 at time 0 (`HafTransforms.PoseAt`: STEP, LINEAR, CUBICSPLINE). The
+  the pose both sides state exactly is animation 0 at time 0 (`HafTransforms.PoseAt`; the sampler does STEP, LINEAR
+  with slerp for rotations, and the cubic Hermite with the stored tangents for CUBICSPLINE). The
   Model Reader's turntable shows that pose by default (*Clip start*), or the file's static transforms. **Tools ▸ HAF ▸ Model Reader (GLB)…** shows what the reader sees in any file (or in every registry
   model at once): the counts, one row per mesh, the skins, the animations, the read time, a refusal by name — and a
   **turntable of the model as the reader read it**, built as Unity meshes from the model alone (the hierarchy's
