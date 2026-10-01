@@ -5,6 +5,20 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **The Workshop no longer leaves in a file what its operations took out of the model** (`GlbDisconnectedParts.Compact`).
+  A Split, a Cut, a Fuse and a Delete all take meshes off their nodes — and until now those meshes, their accessors and
+  their bytes stayed in the output: on the Lab's own sources **614 MB of 1,394 MB** was geometry nothing draws (a
+  split-and-fused Saleg's Revenge: 398 MB, of which 121 MB is drawn). Every output is now compacted as it is written:
+  the meshes no node uses, the accessors no live mesh, skin or animation uses, and the bytes no live accessor covers
+  are left out — by byte range, because an exporter packs all meshes into one buffer view and a Split's leftovers sit
+  inside views the parts still share. Nodes are never renumbered (marks and sidecars key on them); materials, textures
+  and images are left alone (3 MB of the 614). A file this cannot follow — an extension that may reference accessors —
+  is written uncompacted, with a line saying why. Each operation's status says what was left out.
+  **Existing files**: `Tools ▸ HAF ▸ Model Tools ▸ Compact a GLB…` writes a compacted copy (the source is never
+  touched); any further Workshop operation on an old file compacts it as well. Proved on the 28 old outputs that had
+  something to leave out (of 91 beside the Lab's sources): the GLB reader — no code in common with the Workshop —
+  reads each as before, field by field, and Blender reports the same for original and copy (1,322 → 757 MB in all).
+  The Workshop gate's split, tear and fuse of every recipe source give the same counts with and without it.
 - **The Vehicle Lab's probe in C# — step 3 of replacing Blender, part A: the rows** (`VehicleProbe`, `BlenderNames`).
   What `vehicle_rig.py probe` prints for a source — one PART row per mesh object (name, vertices, world box, dominant
   bone) and the RIGBONE rows of a rigged source — computed from the model the GLB reader gives, with the SAME names

@@ -37,7 +37,7 @@ in **GitHub Actions**. Both lanes matter, and for different reasons:
 | Surface | `tools/check.sh` (pre-push hook) | also in CI | ~time |
 |---|---|---|---|
 | **Runtime + shared contract** | `dotnet build` · `dotnet test` · docs guard · binding-catalog surface · hot path · parse shape · member shape · schema parity | all source-only checks | seconds |
-| **Editor package** | Roslyn editor compile-check · registry engine drill · backup dedup drill · blender exit drill · GLB reader drill · GLB writer drill · vehicle probe drill · schema parity · hand-list gate | parity + hand-list; compile check and drills stay local | ~60 s |
+| **Editor package** | Roslyn editor compile-check · registry engine drill · backup dedup drill · blender exit drill · GLB reader drill · GLB writer drill · vehicle probe drill · Workshop compaction drill · schema parity · hand-list gate | parity + hand-list; compile check and drills stay local | ~60 s |
 
 The one guard CI cannot run is **`tools/editor_compile_check.sh`**: it needs a licensed Unity 2021.3.1f1 install
 (`UnityEditor.dll`, the MonoBleedingEdge 4.7.1 profile, every `UnityEngine` module), none of which is
@@ -144,6 +144,23 @@ outcome must be a read or a refusal by name, never a crash-type exception, and w
 writes or refuses by name (planting the removal of one accessor bounds check: the sweep fails on `ArgumentOutOfRange`
 at JSON byte 1595); the written bytes are the same under the invariant, Dutch and Turkish cultures and a Dutch read
 gives the same model; eight threads reading and writing at once get the sequential bytes.
+
+**`tools/workshop_compact_drill.sh`** (2026-10-02) is the proof that the Workshop's compaction leaves out only what
+no node can reach. The real `GlbDisconnectedParts.Compact` runs over every `.glb` in the folders of the Lab's recipe
+sources — the Workshop's outputs as the operations wrote them before they compacted, orphans and all — and over the
+fixture library; and through a real operation (the first mesh node removed, which orphans its mesh and compacts on the
+way out) over the fixtures and the Khronos samples: other exporters' layouts — interleaved, sparse, skinned,
+animated — that no Workshop file has. For every file something was left out of, the **GLB reader**, which shares no
+code with the Workshop, reads the file as it was and as it is: the first, less the meshes no node uses, must equal the
+second field by field (`HafModelDiff`); a second compaction must find nothing more; and **Blender** imports original
+and copy of a sample (every pair under `FULL=1`) and must report the same for both *as printed* — the same importer on
+the same live data, so "close" is not accepted. A refused compaction (an extension the tool does not follow, or
+nothing would remain) is listed, not failed. First full run (2026-10-02): 28 of the 91 Workshop files had something
+to leave out, 1,322 → 757 MB; 23 of the 35 fixtures and samples compacted after a part was removed; Blender agreed on
+all 29 pairs. Unity ships its standalone Mono as a 32-bit process, so the two largest sources are verified on the
+64-bit .NET runtime instead, and the drill says so. `Tests/GlbCompactTests.cs` holds one
+hand-built fixture per branch of the compaction (a view two meshes share, an interleaved view, a shared vertex
+accessor, skin/animation/image data, a sparse accessor, the refusals), each judged by the same reader comparison.
 
 **`tools/glb_writer_drill.sh`** (2026-10-01, step 2) first checks every **source**: each `extensions`/`extras`
 object must sit at a path the model carries (`tools/glb-reader-drill/carried_paths.py`; the reader does not model the

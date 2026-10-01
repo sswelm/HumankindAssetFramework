@@ -1746,7 +1746,8 @@ public class GlbFuseTests
         var g = Read(r.Bytes);
         Assert.NotNull(g.Node("A")["mesh"]);
         Assert.Null(g.Node("B")["mesh"]); Assert.Equal(5.0, (double)g.Node("B")["translation"][0]);   // the node stays, with its transform
-        Assert.Equal(2, ((JArray)g.Root["meshes"]).Count);   // the mesh data is left in the file (an orphan), not compacted
+        Assert.Single((JArray)g.Root["meshes"]);              // and its mesh data goes with it: nothing can reach it any more (was left as an orphan until 2026-10-02)
+        Assert.StartsWith("Compacted: 1 unused mesh(es)", r.Details[1]);
         // a node without a mesh, or out of range: reported, nothing written
         var none = GlbDisconnectedParts.RemoveMeshes(r.Bytes, new HashSet<int> { 1, 7 });
         Assert.False(none.Changed); Assert.Null(none.Bytes); Assert.Equal(2, none.Warnings.Count);

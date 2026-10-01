@@ -20,6 +20,7 @@
     <!-- Pure GLB core: production compiles it in the Unity editor assembly; tests compile the same source with
          UNITY_EDITOR absent, so the menu wrapper is excluded and the binary transformation remains testable. -->
     <Compile Include="..\editor\GlbDisconnectedParts.cs" Link="GlbDisconnectedParts.cs" />
+    <Compile Include="..\editor\GlbDisconnectedParts.Compact.cs" Link="GlbDisconnectedParts.Compact.cs" />
     <!-- Pure editor decision kernels (extraction freshness, natural ordering) — same pattern. -->
     <Compile Include="..\editor\EditorRules.cs" Link="EditorRules.cs" />
     <!-- The multi-mesh split's estimator + BSP partition (2026-09-14): the quad ceiling that the Bremen depends on. -->
