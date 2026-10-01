@@ -55,6 +55,11 @@ public sealed class HafModel
     public readonly List<HafSkin> Skins = new List<HafSkin>();
     public readonly List<HafAnimation> Animations = new List<HafAnimation>();
     public readonly List<string> ExtensionsUsed = new List<string>();
+    // The extensions the file REQUIRES that the reader accepted: only those whose whole effect is a material's
+    // payload, which is carried verbatim (KHR_materials_pbrSpecularGlossiness on a Lab source, 2026-10-02). The
+    // geometry, skins and animations of such a file are what the specification's core says; what its materials look
+    // like is in HafMaterial.ExtensionsJson for whoever draws them. The writer writes these back as required.
+    public readonly List<string> ExtensionsRequired = new List<string>();
 
     public long TriangleCount
     {
@@ -101,6 +106,9 @@ public sealed class HafPrimitive
     public int Mode = 4;                          // glTF primitive mode; 4 = TRIANGLES
     public int Material = -1;
     public int VertexCount;
+    // The arrays below may be SHARED with other primitives: the reader decodes an accessor once, and a file whose parts
+    // reference one vertex accessor (every Workshop split) gives them one array. Read them freely; to edit one, replace it
+    // with a copy. The writer writes a shared array once.
     public float[] Positions;                     // 3 per vertex; never null for a primitive that was read
     public float[] Normals;                       // 3 per vertex, or null
     public float[] Tangents;                      // 4 per vertex (xyz + handedness), or null

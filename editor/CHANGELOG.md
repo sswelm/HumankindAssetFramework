@@ -5,6 +5,26 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **The Vehicle Lab's probe in C# — step 3 of replacing Blender, part A: the rows** (`VehicleProbe`, `BlenderNames`).
+  What `vehicle_rig.py probe` prints for a source — one PART row per mesh object (name, vertices, world box, dominant
+  bone) and the RIGBONE rows of a rigged source — computed from the model the GLB reader gives, with the SAME names
+  Blender's importer would give (duplicates as `.001`, nameless nodes after their mesh, skinned meshes split off
+  under their armature, a single mesh split into its loose parts in Blender's order): every saved recipe is keyed by
+  those names. Proved row for row against Blender's own probe on **105 of 105 files**: all 31 registry sources, the
+  20 sources of the Lab's saved recipes (the probe's real inputs), 31 Khronos samples, 23 fixtures — 9,793 rows; and
+  17 of the 20 recipes hold exactly the parts the C# probe lists (the other three are stale: today's Blender disagrees
+  with them the same way). Measured on those files: 9.8 s here (reading 1.7 GB included) against 91 s for Blender's
+  probe in ONE process with no preview export — the Lab's 25 s per probe is mostly Blender's boot, the preview FBX
+  export and Unity's import of it, which part D removes. NOT wired into the Lab yet; one source, no second model,
+  no placements; the visibility and inside-out verdicts still come from Blender: this part is the rows and their
+  proof; the verdicts (3b, 3c) and the Lab switch (3d) follow. `vehicle_rig.py probe` gains an opt-in `posestart=1`
+  (the first clip's start instead of Blender's import blend).
+- **The GLB reader on the Lab's real sources**: an accessor is decoded ONCE and the primitives over it share the array
+  (a Workshop split of 8.2 M vertices over 2,133 primitives was decoded as 125 M — 4 GB, "Insufficient memory"); the
+  GLB's BIN chunk is read in place, not copied; the writer writes a shared array once (the registry's written files
+  went from 759 to 737 MB). A file that REQUIRES an extension whose whole effect is a material's payload
+  (`KHR_materials_pbrSpecularGlossiness` on a Lab source) is read and the payload carried — and written back as
+  required; such a material previews untextured. Everything that changes how data is decoded stays refused.
 - **The GLB reader and writer drilled on the rest of the specification** (round-trip diversity, 2026-10-02). Eleven
   generated fixtures (`tools/glb-reader-drill/fixtures.py`: normalized integer attributes, interleaved views, every
   primitive mode, a `.gltf` with sidecars and a data URI, cubic-spline keys, two scenes and an orphan, material and

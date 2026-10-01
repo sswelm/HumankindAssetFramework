@@ -67,6 +67,7 @@ run "backup dedup drill (BackupDedup on real files: unchanged means the bytes)" 
 run "blender exit drill (a crashed script fails the process; SKIP without Blender)" bash "$ROOT/tools/blender_exit_drill.sh"
 run "GLB reader drill (every registry GLB read; a sample compared with Blender; SKIP without the project)" bash "$ROOT/tools/glb_reader_drill.sh"
 run "GLB writer drill (every registry GLB written, read back equal; a sample re-imported by Blender; SKIP without the project)" bash "$ROOT/tools/glb_writer_drill.sh"
+run "vehicle probe drill (the Lab's probe in C#: every source probed, a sample's rows equal to Blender's own probe)" bash "$ROOT/tools/vehicle_probe_drill.sh"
 #    5b) The ownership-rebase hand-lists. A field the UI edits but the window's rebase doesn't re-apply is thrown
 #        away on every Save — silent, and the reason this gate exists. Pure source analysis, so CI can run it too.
 run "hand-list gate (ownership rebases)" bash "$ROOT/tools/check_handlists.sh"
