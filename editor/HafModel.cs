@@ -17,7 +17,7 @@ public sealed class HafModel
 {
     public string Generator = "";                 // asset.generator, for the log
     public string Copyright = "";                 // asset.copyright, verbatim
-    public string AssetExtrasJson;                // asset.extras, verbatim JSON object or null: Sketchfab's author/license/source/title live here (6 registry files; review of PR #110 found them dropped)
+    public string AssetExtrasJson;                // asset.extras, verbatim JSON (any type the file gave - the schema allows any; `{}` included) or null when absent: Sketchfab's author/license/source/title live here (6 registry files; review of PR #110 found them dropped)
     public string SceneName = "";                 // the default scene's name (Blender writes "Scene" in every file)
     public string SourcePath = "";                // where it was read from ("" for bytes)
     public readonly List<HafNode> Nodes = new List<HafNode>();
@@ -53,14 +53,14 @@ public sealed class HafNode
     public double[] Matrix;                       // 16 doubles, column-major, or null
     public int Mesh = -1;
     public int Skin = -1;
-    public string ExtrasJson;                     // the node's `extras` object, verbatim JSON, or null: carried, not interpreted
+    public string ExtrasJson;                     // the node's `extras`, verbatim JSON of any type, or null when absent: carried, not interpreted
     public bool HasMatrix => Matrix != null;
 }
 
 public sealed class HafMesh
 {
     public string Name = "";
-    public string ExtrasJson;                     // the mesh's `extras` object, verbatim JSON, or null
+    public string ExtrasJson;                     // the mesh's `extras`, verbatim JSON of any type, or null when absent
     public readonly List<HafPrimitive> Primitives = new List<HafPrimitive>();
 }
 
@@ -110,7 +110,7 @@ public sealed class HafMaterial
     // written from this model keeps them and Blender still finds every texture (writer drill 2026-10-01: six registry
     // files lost 1-6 images on a round trip while the payload was dropped). The writer declares the names it carries.
     public string ExtensionsJson;
-    public string ExtrasJson;                     // the material's `extras` object, verbatim JSON, or null
+    public string ExtrasJson;                     // the material's `extras`, verbatim JSON of any type, or null when absent
 }
 
 public sealed class HafTexture

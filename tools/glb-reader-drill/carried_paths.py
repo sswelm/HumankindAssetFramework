@@ -1,4 +1,5 @@
-"""Every `extensions` and `extras` object in a source file must sit at a path the model CARRIES (review of PR #110):
+"""Every `extensions` object and every `extras` value (any JSON type - the schema allows any) in a source file must sit
+at a path the model CARRIES (review of PR #110):
 the reader does not model what lives elsewhere, so the writer would drop it without a word, and the writer drill's
 field compare - reader against reader - cannot see that. This reads the files' JSON directly and names the first
 object at a path the model does not carry.
@@ -37,7 +38,7 @@ def walk(node, path, found, bad):
     if isinstance(node, dict):
         for k, v in node.items():
             p = path + "." + k if path else k
-            if k in ("extensions", "extras") and isinstance(v, dict) and v:
+            if k == "extras" or (k == "extensions" and isinstance(v, dict) and v):   # an empty extensions object carries nothing; an extras of any shape is data
                 found.append(p)
                 if not carried(p):
                     bad.append(p)

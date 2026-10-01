@@ -18,7 +18,9 @@ using Newtonsoft.Json.Linq;
 // either, and the writer REFUSES rather than drops: a primitive with morph targets (counted by the reader, data not
 // carried) is refused by name; extensions anywhere but on a material, and extras elsewhere, are not carried and said
 // here. A model that cannot be written as it is - an index that does not fit a uint, a joint that does not fit a
-// ushort, a node outside the lists, a position that is not a number - is refused by name. The file is written to a
+// ushort, a node outside the lists, a value that is not a finite number (anywhere: glTF forbids NaN and infinity in
+// accessor data too), a hierarchy whose Parent and Children disagree, a node with two parents, a cycle, a root that
+// is somebody's child - is refused by name. The file is written to a
 // temporary name beside the target and moved into place, so a consumer never reads a half-written .glb.
 public static class GlbWriter
 {
@@ -80,7 +82,7 @@ public static class GlbWriter
         // the generator names this writer once; a model that came through it already keeps its line, so a second write is byte-identical
         var asset = new JObject { ["version"] = "2.0", ["generator"] = m.Generator.StartsWith(GeneratorTag, StringComparison.Ordinal) ? m.Generator : GeneratorTag + (m.Generator.Length > 0 ? " (read from " + m.Generator + ")" : "") };
         if (m.Copyright.Length > 0) asset["copyright"] = m.Copyright;
-        if (m.AssetExtrasJson != null) asset["extras"] = GlbReader.ParseObject(m.AssetExtrasJson);
+        if (m.AssetExtrasJson != null) asset["extras"] = GlbReader.ParseToken(m.AssetExtrasJson);
         var root = new JObject { ["asset"] = asset };
         var used = new SortedSet<string>(StringComparer.Ordinal);   // every extension the written file carries, declared below
 
@@ -179,7 +181,7 @@ public static class GlbWriter
                 if (mt.AlphaCutoff != 0.5f) j["alphaCutoff"] = mt.AlphaCutoff;
                 if (mt.DoubleSided) j["doubleSided"] = true;
                 if (mt.ExtensionsJson != null) { var ext = GlbReader.ParseObject(mt.ExtensionsJson); j["extensions"] = ext; foreach (var prop in ext.Properties()) used.Add(prop.Name); CollectNestedExtensions(ext, used); }
-                if (mt.ExtrasJson != null) j["extras"] = GlbReader.ParseObject(mt.ExtrasJson);
+                if (mt.ExtrasJson != null) j["extras"] = GlbReader.ParseToken(mt.ExtrasJson);
                 materials.Add(j);
             }
             root["materials"] = materials;
@@ -193,7 +195,7 @@ public static class GlbWriter
             {
                 var j = new JObject();
                 if (me.Name.Length > 0) j["name"] = me.Name;
-                if (me.ExtrasJson != null) j["extras"] = GlbReader.ParseObject(me.ExtrasJson);
+                if (me.ExtrasJson != null) j["extras"] = GlbReader.ParseToken(me.ExtrasJson);
                 var prims = new JArray();
                 foreach (var p in me.Primitives)
                 {
@@ -237,7 +239,7 @@ public static class GlbWriter
                 if (n.Mesh >= 0) j["mesh"] = n.Mesh;
                 if (n.Skin >= 0) j["skin"] = n.Skin;
                 if (n.Children.Count > 0) j["children"] = new JArray(n.Children.Cast<object>());
-                if (n.ExtrasJson != null) j["extras"] = GlbReader.ParseObject(n.ExtrasJson);
+                if (n.ExtrasJson != null) j["extras"] = GlbReader.ParseToken(n.ExtrasJson);
                 nodes.Add(j);
             }
             root["nodes"] = nodes;
@@ -340,6 +342,27 @@ public static class GlbWriter
             }
         }
         foreach (var r in m.Roots) if (r < 0 || r >= m.Nodes.Count) throw new InvalidDataException($"root {r} is not a node of the model");
+        // the hierarchy is written from Children; Parent is what a reader derives from it - a model built by hand must tell one story
+        var parentOf = new int[m.Nodes.Count]; for (int i = 0; i < parentOf.Length; i++) parentOf[i] = -1;
+        for (int i = 0; i < m.Nodes.Count; i++)
+            foreach (var c in m.Nodes[i].Children)
+            {
+                if (c == i) throw new InvalidDataException($"node {i} '{m.Nodes[i].Name}' lists itself as a child");
+                if (parentOf[c] != -1) throw new InvalidDataException($"node {c} '{m.Nodes[c].Name}' is a child of both node {parentOf[c]} and node {i} (a node has one parent)");
+                parentOf[c] = i;
+            }
+        for (int i = 0; i < m.Nodes.Count; i++)
+            if (m.Nodes[i].Parent != parentOf[i]) throw new InvalidDataException($"node {i} '{m.Nodes[i].Name}' has Parent {m.Nodes[i].Parent} but {(parentOf[i] == -1 ? "no node lists it as a child" : $"node {parentOf[i]} lists it as a child")} - set Parent and Children together");
+        for (int i = 0; i < m.Nodes.Count; i++)
+        {
+            int at = i, steps = 0;
+            while (parentOf[at] != -1) { at = parentOf[at]; if (++steps > m.Nodes.Count) throw new InvalidDataException($"node {i} '{m.Nodes[i].Name}' is its own ancestor - the hierarchy has a cycle"); }
+        }
+        for (int i = 0; i < m.Roots.Count; i++)
+        {
+            if (parentOf[m.Roots[i]] != -1) throw new InvalidDataException($"root {m.Roots[i]} '{m.Nodes[m.Roots[i]].Name}' is a child of node {parentOf[m.Roots[i]]} (a scene lists root nodes only)");
+            if (m.Roots.IndexOf(m.Roots[i]) != i) throw new InvalidDataException($"root {m.Roots[i]} is listed twice");
+        }
         for (int mi = 0; mi < m.Meshes.Count; mi++)
             for (int pi = 0; pi < m.Meshes[mi].Primitives.Count; pi++)
             {
@@ -347,7 +370,8 @@ public static class GlbWriter
                 if (p.VertexCount <= 0) throw new InvalidDataException($"{where} has no vertices (glTF has no empty accessor)");
                 if (p.Positions == null || p.Positions.Length != p.VertexCount * 3) throw new InvalidDataException($"{where}: positions do not match the vertex count");
                 if (p.MorphTargets > 0) throw new InvalidDataException($"{where} has {p.MorphTargets} morph target(s), whose data the model does not carry - refused rather than written without them");
-                foreach (float v in p.Positions) if (float.IsNaN(v) || float.IsInfinity(v)) throw new InvalidDataException($"{where}: a position is not a finite number (NaN or infinity cannot be written into the POSITION bounds)");
+                Finite(p.Positions, $"{where} POSITION"); Finite(p.Normals, $"{where} NORMAL"); Finite(p.Tangents, $"{where} TANGENT"); Finite(p.Uv0, $"{where} TEXCOORD_0"); Finite(p.Uv1, $"{where} TEXCOORD_1");
+                Finite(p.Colors, $"{where} COLOR_0"); Finite(p.Weights, $"{where} WEIGHTS_0"); Finite(p.Weights1, $"{where} WEIGHTS_1");
                 void Check(Array a, int per, string name) { if (a != null && a.Length != p.VertexCount * per) throw new InvalidDataException($"{where}: {name} has {a.Length} values, {p.VertexCount * per} expected"); }
                 Check(p.Normals, 3, "normals"); Check(p.Tangents, 4, "tangents"); Check(p.Uv0, 2, "UV0"); Check(p.Uv1, 2, "UV1"); Check(p.Colors, 4, "colours");
                 Check(p.Joints, 4, "joints"); Check(p.Weights, 4, "weights"); Check(p.Joints1, 4, "joints (set 1)"); Check(p.Weights1, 4, "weights (set 1)");
@@ -362,14 +386,15 @@ public static class GlbWriter
             foreach (var j in sk.Joints) if (j < 0 || j >= m.Nodes.Count) throw new InvalidDataException($"skin {si} '{sk.Name}' joint {j} is not a node of the model");
             if (sk.InverseBindMatrices != null && sk.InverseBindMatrices.Length != sk.Joints.Length * 16) throw new InvalidDataException($"skin {si} '{sk.Name}' has {sk.Joints.Length} joints but {sk.InverseBindMatrices.Length / 16} inverse bind matrices");
             if (sk.Skeleton >= m.Nodes.Count) throw new InvalidDataException($"skin {si} '{sk.Name}' names skeleton node {sk.Skeleton}, the model has {m.Nodes.Count} nodes");
+            Finite(sk.InverseBindMatrices, $"skin {si} '{sk.Name}' inverse bind matrices");
         }
         // the verbatim JSON the model carries must be JSON objects, or the file would not parse (said here, not as a parser's exception from the middle of the write)
         for (int i = 0; i < m.Samplers.Count; i++) if (!IsJsonObject(m.Samplers[i])) throw new InvalidDataException($"sampler {i} is not a JSON object: {m.Samplers[i]}");
-        for (int i = 0; i < m.Nodes.Count; i++) if (m.Nodes[i].ExtrasJson != null && !IsJsonObject(m.Nodes[i].ExtrasJson)) throw new InvalidDataException($"node {i} '{m.Nodes[i].Name}': extras is not a JSON object");
-        for (int i = 0; i < m.Meshes.Count; i++) if (m.Meshes[i].ExtrasJson != null && !IsJsonObject(m.Meshes[i].ExtrasJson)) throw new InvalidDataException($"mesh {i} '{m.Meshes[i].Name}': extras is not a JSON object");
+        for (int i = 0; i < m.Nodes.Count; i++) if (m.Nodes[i].ExtrasJson != null && !IsJson(m.Nodes[i].ExtrasJson)) throw new InvalidDataException($"node {i} '{m.Nodes[i].Name}': extras is not JSON");
+        for (int i = 0; i < m.Meshes.Count; i++) if (m.Meshes[i].ExtrasJson != null && !IsJson(m.Meshes[i].ExtrasJson)) throw new InvalidDataException($"mesh {i} '{m.Meshes[i].Name}': extras is not JSON");
         for (int i = 0; i < m.Materials.Count; i++)
         {
-            if (m.Materials[i].ExtrasJson != null && !IsJsonObject(m.Materials[i].ExtrasJson)) throw new InvalidDataException($"material {i} '{m.Materials[i].Name}': extras is not a JSON object");
+            if (m.Materials[i].ExtrasJson != null && !IsJson(m.Materials[i].ExtrasJson)) throw new InvalidDataException($"material {i} '{m.Materials[i].Name}': extras is not JSON");
             if (m.Materials[i].ExtensionsJson != null && !IsJsonObject(m.Materials[i].ExtensionsJson)) throw new InvalidDataException($"material {i} '{m.Materials[i].Name}': extensions is not a JSON object");
         }
         foreach (var t in m.Textures) if (t.Source >= m.Images.Count) throw new InvalidDataException($"texture '{t.Name}' references image {t.Source}, the model has {m.Images.Count}");
@@ -379,7 +404,7 @@ public static class GlbWriter
             if (im.Bytes == null) throw new InvalidDataException($"image {i} '{im.Name}' has no bytes - a model whose image was never resolved cannot be written whole");
             if (Mime(im) == null) throw new InvalidDataException($"image {i} '{im.Name}' is {(im.MimeType.Length > 0 ? im.MimeType : "of an unrecognised format")}; glTF embeds only PNG and JPEG");
         }
-        if (m.AssetExtrasJson != null && !IsJsonObject(m.AssetExtrasJson)) throw new InvalidDataException("asset extras is not a JSON object");
+        if (m.AssetExtrasJson != null && !IsJson(m.AssetExtrasJson)) throw new InvalidDataException("asset extras is not JSON");
         foreach (var mt in m.Materials)
         {
             foreach (var tx in new[] { mt.BaseColorTexture, mt.MetallicRoughnessTexture, mt.NormalTexture, mt.OcclusionTexture, mt.EmissiveTexture })
@@ -401,7 +426,7 @@ public static class GlbWriter
                 int values = (s.Values?.Length ?? 0), keys = s.KeyCount;
                 if (keys == 0) throw new InvalidDataException($"animation '{an.Name}': a sampler has no keys (glTF has no empty accessor)");
                 if (s.Components > 0 && values != keys * per * s.Components) throw new InvalidDataException($"animation '{an.Name}': a sampler has {keys} keys but {values} values ({s.Interpolation}, {s.Components} components)");
-                Finite(s.Times, $"animation '{an.Name}' key times");
+                Finite(s.Times, $"animation '{an.Name}' key times"); Finite(s.Values, $"animation '{an.Name}' key values");
             }
         }
     }
@@ -409,8 +434,9 @@ public static class GlbWriter
     // ---------------------------------------------------------------- small helpers
 
     static void Len(Array a, int n, string what) { if (a == null || a.Length != n) throw new InvalidDataException($"{what} has {a?.Length ?? 0} values, {n} expected"); }
-    static void Finite(float[] a, string what) { foreach (float v in a) if (float.IsNaN(v) || float.IsInfinity(v)) throw new InvalidDataException($"{what}: a value is not a finite number (NaN or infinity cannot be written as JSON)"); }
-    static void Finite(double[] a, string what) { foreach (double v in a) if (double.IsNaN(v) || double.IsInfinity(v)) throw new InvalidDataException($"{what}: a value is not a finite number (NaN or infinity cannot be written as JSON)"); }
+    // glTF forbids NaN and infinity in accessor data as well as in JSON; null arrays are absent attributes, fine
+    static void Finite(float[] a, string what) { if (a == null) return; foreach (float v in a) if (float.IsNaN(v) || float.IsInfinity(v)) throw new InvalidDataException($"{what}: a value is not a finite number (glTF forbids NaN and infinity)"); }
+    static void Finite(double[] a, string what) { if (a == null) return; foreach (double v in a) if (double.IsNaN(v) || double.IsInfinity(v)) throw new InvalidDataException($"{what}: a value is not a finite number (glTF forbids NaN and infinity)"); }
     /// <summary>Every extension name used anywhere INSIDE a carried payload (a specularTexture's KHR_texture_transform), so extensionsUsed declares it too.</summary>
     static void CollectNestedExtensions(JToken t, ISet<string> used)
     {
@@ -433,6 +459,10 @@ public static class GlbWriter
     static bool IsJsonObject(string s)
     {
         try { GlbReader.ParseObject(s); return true; } catch (Newtonsoft.Json.JsonException) { return false; } catch (InvalidDataException) { return false; }
+    }
+    static bool IsJson(string s)
+    {
+        try { GlbReader.ParseToken(s); return true; } catch (Newtonsoft.Json.JsonException) { return false; } catch (InvalidDataException) { return false; }
     }
 
     static string GuessMime(byte[] b) => b.Length > 8 && b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47 ? "image/png" : b.Length > 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF ? "image/jpeg" : null;

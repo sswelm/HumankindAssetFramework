@@ -68,13 +68,25 @@ public static class GlbReader
     /// that looks like a date into a DateTime and writes it back in its own form (an extras value
     /// "2024-05-06T07:08:09.123+09:00" came back "2024-05-06T00:08:09.123+02:00", the machine's zone - review of PR #110). Used for the file
     /// and for every verbatim fragment the model carries (extensions, extras, samplers).</summary>
-    public static JObject ParseObject(string json)
+    public static JObject ParseObject(string json) => ParseToken(json) as JObject ?? throw new InvalidDataException("the JSON is not an object");
+
+    /// <summary>Any JSON value, strings kept as strings (see <see cref="ParseObject"/>).</summary>
+    public static JToken ParseToken(string json)
     {
         using (var r = new Newtonsoft.Json.JsonTextReader(new StringReader(json)) { DateParseHandling = Newtonsoft.Json.DateParseHandling.None })
         {
             var t = JToken.ReadFrom(r);
-            return t as JObject ?? throw new InvalidDataException("the JSON is not an object");
+            if (r.Read()) throw new InvalidDataException("the JSON has text after its value");
+            return t;
         }
+    }
+
+    /// <summary>An object's `extras` as verbatim JSON text, whatever its type (the schema allows any: an array, a
+    /// string, a number, an empty object are all valid and all kept), or null when there is none.</summary>
+    static string Extras(JToken owner)
+    {
+        var t = owner?["extras"];
+        return t == null || t.Type == JTokenType.None ? null : t.ToString(Newtonsoft.Json.Formatting.None);
     }
 
     // ---------------------------------------------------------------- the build
@@ -82,7 +94,7 @@ public static class GlbReader
     static HafModel Build(JObject root, byte[] glbBin, string baseDir)
     {
         var model = new HafModel { Generator = root["asset"]?["generator"]?.ToString() ?? "", Copyright = root["asset"]?["copyright"]?.ToString() ?? "" };
-        if (root["asset"]?["extras"] is JObject assetExtras && assetExtras.Count > 0) model.AssetExtrasJson = assetExtras.ToString(Newtonsoft.Json.Formatting.None);
+        model.AssetExtrasJson = Extras(root["asset"] as JObject);
         foreach (var e in root["extensionsUsed"] as JArray ?? new JArray()) model.ExtensionsUsed.Add(e.ToString());
         foreach (var e in root["extensionsRequired"] as JArray ?? new JArray())
             throw new InvalidDataException($"the file requires the extension '{e}', which this reader does not implement (KHR_draco_mesh_compression needs a Draco decoder; KHR_texture_transform moves the textures; KHR_materials_pbrSpecularGlossiness has no base colour to read) - refused rather than read wrong");
@@ -133,7 +145,7 @@ public static class GlbReader
             m.AlphaCutoff = mt["alphaCutoff"]?.Value<float>() ?? 0.5f;
             m.DoubleSided = mt["doubleSided"]?.Value<bool>() ?? false;
             if (mt["extensions"] is JObject ext && ext.Count > 0) m.ExtensionsJson = ext.ToString(Newtonsoft.Json.Formatting.None);
-            if (mt["extras"] is JObject mex && mex.Count > 0) m.ExtrasJson = mex.ToString(Newtonsoft.Json.Formatting.None);
+            m.ExtrasJson = Extras(mt);
             model.Materials.Add(m);
         }
 
@@ -142,7 +154,7 @@ public static class GlbReader
         foreach (var me in root["meshes"] as JArray ?? new JArray())
         {
             var mesh = new HafMesh { Name = me["name"]?.ToString() ?? "" };
-            if (me["extras"] is JObject meshExtras && meshExtras.Count > 0) mesh.ExtrasJson = meshExtras.ToString(Newtonsoft.Json.Formatting.None);
+            mesh.ExtrasJson = Extras(me);
             int primIndex = 0;
             foreach (var pr in me["primitives"] as JArray ?? new JArray())
             {
@@ -185,7 +197,7 @@ public static class GlbReader
             if (nd["translation"] is JArray t) n.Translation = Doubles(t, 3, "node translation");
             if (nd["rotation"] is JArray r) n.Rotation = Doubles(r, 4, "node rotation");
             if (nd["scale"] is JArray s) n.Scale = Doubles(s, 3, "node scale");
-            if (nd["extras"] is JObject nex && nex.Count > 0) n.ExtrasJson = nex.ToString(Newtonsoft.Json.Formatting.None);
+            n.ExtrasJson = Extras(nd);
             if (n.Mesh >= model.Meshes.Count) throw new InvalidDataException($"node '{n.Name}' references mesh {n.Mesh}, the file has {model.Meshes.Count}");
             model.Nodes.Add(n);
         }

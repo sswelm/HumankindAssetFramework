@@ -93,6 +93,11 @@ public class GlbWriterTests
         original.Nodes[0].ExtrasJson = "{\"author\":\"HAF\",\"tier\":2}"; original.Meshes[0].ExtrasJson = "{\"lod\":0}"; original.Materials[0].ExtrasJson = "{\"paint\":\"olive\"}";
         var withExtras = GlbReader.Read(GlbWriter.Write(original));
         Assert.Equal("{\"author\":\"HAF\",\"tier\":2}", withExtras.Nodes[0].ExtrasJson); Assert.Equal("{\"lod\":0}", withExtras.Meshes[0].ExtrasJson); Assert.Equal("{\"paint\":\"olive\"}", withExtras.Materials[0].ExtrasJson);
+        // extras of ANY JSON type survive - the schema allows any, and an empty object is a value too (review round 4)
+        original.Nodes[0].ExtrasJson = "[1,\"two\",null]"; original.Meshes[0].ExtrasJson = "\"a note\""; original.Materials[0].ExtrasJson = "3.5"; original.AssetExtrasJson = "{}";
+        var anyType = GlbReader.Read(GlbWriter.Write(original));
+        Assert.Equal("[1,\"two\",null]", anyType.Nodes[0].ExtrasJson); Assert.Equal("\"a note\"", anyType.Meshes[0].ExtrasJson); Assert.Equal("3.5", anyType.Materials[0].ExtrasJson); Assert.Equal("{}", anyType.AssetExtrasJson);
+        Assert.Null(anyType.Nodes[1].ExtrasJson);   // absent stays absent
         // and a second trip is byte-identical: the writer is deterministic
         Assert.Equal(bytes, GlbWriter.Write(again));
         // a valid container: magic, version 2, 4-byte aligned chunks, the declared length
@@ -135,7 +140,16 @@ public class GlbWriterTests
     [InlineData("short-factor", "baseColorFactor has 3 values, 4 expected")]
     [InlineData("unknown-image", "is of an unrecognised format; glTF embeds only PNG and JPEG")]
     [InlineData("webp-image", "is image/webp; glTF embeds only PNG and JPEG")]
-    [InlineData("asset-extras-not-json", "asset extras is not a JSON object")]
+    [InlineData("asset-extras-not-json", "asset extras is not JSON")]
+    [InlineData("nan-normal", "NORMAL: a value is not a finite number")]
+    [InlineData("nan-weight", "WEIGHTS_0: a value is not a finite number")]
+    [InlineData("nan-ibm", "inverse bind matrices: a value is not a finite number")]
+    [InlineData("nan-key-value", "key values: a value is not a finite number")]
+    [InlineData("parent-stale", "node 1 'Root' has Parent -1 but node 0 lists it as a child")]
+    [InlineData("child-of-two", "is a child of both node 0 and node 1")]
+    [InlineData("root-is-child", "root 1 'Root' is a child of node 0")]
+    [InlineData("hierarchy-cycle", "is its own ancestor")]
+    [InlineData("root-twice", "root 0 is listed twice")]
     public void What_cannot_be_written_as_it_is_is_refused_by_name(string flaw, string message)
     {
         var m = GlbReader.Read(GlbReaderTests.FullGlb());
@@ -158,7 +172,16 @@ public class GlbWriterTests
             case "short-factor": m.Materials[0].BaseColorFactor = new float[] { 1, 1, 1 }; break;
             case "unknown-image": m.Images[0].MimeType = ""; m.Images[0].Bytes = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 }; break;
             case "webp-image": m.Images[0].MimeType = "image/webp"; break;
-            case "asset-extras-not-json": m.AssetExtrasJson = "[1]"; break;
+            case "asset-extras-not-json": m.AssetExtrasJson = "{not json"; break;
+            case "nan-normal": m.Meshes[0].Primitives[0].Normals[2] = float.NaN; break;
+            case "nan-weight": m.Meshes[0].Primitives[0].Weights[0] = float.NegativeInfinity; break;
+            case "nan-ibm": m.Skins[0].InverseBindMatrices[5] = double.NaN; break;
+            case "nan-key-value": m.Animations[0].Samplers[0].Values[1] = float.PositiveInfinity; break;
+            case "parent-stale": m.Nodes[1].Parent = -1; break;                                  // node 0 still lists node 1
+            case "child-of-two": m.Nodes[0].Children.Add(2); break;                              // node 2 is node 1's child already
+            case "root-is-child": m.Roots.Add(1); break;
+            case "hierarchy-cycle": m.Roots.Clear(); m.Nodes[2].Children.Add(0); m.Nodes[0].Parent = 2; break;   // 0 -> 1 -> 2 -> 0, every Parent consistent
+            case "root-twice": m.Roots.Add(0); break;
         }
         var ex = Assert.Throws<InvalidDataException>(() => GlbWriter.Write(m));
         Assert.Contains(message, ex.Message);
