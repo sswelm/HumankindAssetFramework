@@ -99,6 +99,11 @@ public sealed class HafMaterial
     public string AlphaMode = "OPAQUE";
     public float AlphaCutoff = 0.5f;
     public bool DoubleSided;
+    // The material's `extensions` object, verbatim JSON, or null: KHR_materials_specular, clearcoat, ior, ... carry their
+    // own texture references and factors. Not interpreted here (nothing in HAF reads them), but CARRIED, so a file
+    // written from this model keeps them and Blender still finds every texture (writer drill 2026-10-01: six registry
+    // files lost 1-6 images on a round trip while the payload was dropped). The writer declares the names it carries.
+    public string ExtensionsJson;
 }
 
 public sealed class HafTexture

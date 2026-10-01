@@ -117,6 +117,7 @@ public static class GlbReader
             m.AlphaMode = mt["alphaMode"]?.ToString() ?? "OPAQUE";
             m.AlphaCutoff = mt["alphaCutoff"]?.Value<float>() ?? 0.5f;
             m.DoubleSided = mt["doubleSided"]?.Value<bool>() ?? false;
+            if (mt["extensions"] is JObject ext && ext.Count > 0) m.ExtensionsJson = ext.ToString(Newtonsoft.Json.Formatting.None);
             model.Materials.Add(m);
         }
 

@@ -62,7 +62,8 @@ public class GlbReaderTests
 
     static readonly byte[] Png = { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3, 4 };   // not a real image; the reader carries bytes, it does not decode them
 
-    /// <summary>The full fixture: everything the model holds, in one file.</summary>
+    /// <summary>The full fixture: everything the model holds, in one file - the writer's round-trip subject too.</summary>
+    internal static byte[] FullGlb() => Full().Glb();
     static Fixture Full()
     {
         var f = new Fixture();

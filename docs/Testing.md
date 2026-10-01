@@ -37,7 +37,7 @@ in **GitHub Actions**. Both lanes matter, and for different reasons:
 | Surface | `tools/check.sh` (pre-push hook) | also in CI | ~time |
 |---|---|---|---|
 | **Runtime + shared contract** | `dotnet build` · `dotnet test` · docs guard · binding-catalog surface · hot path · parse shape · member shape · schema parity | all source-only checks | seconds |
-| **Editor package** | Roslyn editor compile-check · registry engine drill · backup dedup drill · blender exit drill · GLB reader drill · schema parity · hand-list gate | parity + hand-list; compile check and drills stay local | ~45 s |
+| **Editor package** | Roslyn editor compile-check · registry engine drill · backup dedup drill · blender exit drill · GLB reader drill · GLB writer drill · schema parity · hand-list gate | parity + hand-list; compile check and drills stay local | ~60 s |
 
 The one guard CI cannot run is **`tools/editor_compile_check.sh`**: it needs a licensed Unity 2021.3.1f1 install
 (`UnityEditor.dll`, the MonoBleedingEdge 4.7.1 profile, every `UnityEngine` module), none of which is
@@ -69,6 +69,13 @@ mirrored nodes), the bone names and each animation's span (earliest first key to
 what a Blender 5.1 slotted action spans) — through both transform chains, in Blender's Z-up frame. A synthetic
 two-target fixture (`fixture_two_targets.py`: one animation, two nodes, channels ending apart, one starting late, both
 nodes instancing one mesh) rides along, since no registry file has those shapes.
+
+**`tools/glb_writer_drill.sh`** (2026-10-01, step 2) writes every registry model and the fixture with the real
+`editor/GlbWriter.cs`, then reads the written files back with the reader drill (every value must equal the original's)
+and has Blender import the written sample (every value must equal what the C# side read from the original; `FULL=1`
+for all). First full run: 32 of 32 both ways, 726 MB written in 0.6 s. It found that material extension payloads
+(`KHR_materials_specular`, clearcoat) carry texture references Blender needs — six files lost images until the model
+carried a material's `extensions` verbatim.
 Counting alone could not tell a wrong matrix chain. The pose both sides evaluate is **animation 0 at time 0**
 (`HafTransforms.PoseAt`; Blender with its NLA tracks dropped and the active clip at frame 0 — its untouched import
 blends every clip through the NLA, a pose no file defines), and a skinned vertex goes through the spec's weighted joint
