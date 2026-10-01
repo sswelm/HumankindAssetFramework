@@ -66,9 +66,12 @@ to 1 over the skin's joints), and compares each file with Blender's *evaluated* 
 (triangles, materials, images, joints) and, order-independent so vertex merging cannot move them, the world-space
 bounding box, the total triangle area, the area-weighted centroid, the area-weighted sum of face normals (winding and
 mirrored nodes), the bone names and the animation durations — through both transform chains, in Blender's Z-up frame.
-Counting alone could not tell a wrong matrix chain: the values found that a skinned mesh sits in its root joint's bind
-space (`HafTransforms.SkinSpace`, two conventions of inverse bind matrices in the registry) and that Blender's importer
-parks animated objects at the current frame, not the clip's start. A sample by default (the largest, the smallest, the
+Counting alone could not tell a wrong matrix chain. The pose both sides evaluate is **animation 0 at time 0**
+(`HafTransforms.PoseAt`; Blender with its NLA tracks dropped and the active clip at frame 0 — its untouched import
+blends every clip through the NLA, a pose no file defines), and a skinned vertex goes through the spec's weighted joint
+blend over both influence sets on both sides (`HafTransforms.WorldPositions` / `WorldNormals`; Blender's armature
+modifier). Measured on scp-682: Blender's untouched import is the blend (area 384.6); the undeformed mesh (394.6)
+appears only once the pose is reset — a reset the drill once did itself, which had made a wrong rule look right. A sample by default (the largest, the smallest, the
 animated ones), every file with `FULL=1`; the comparison and its tolerances are `tools/glb-reader-drill/compare.py`. SKIP
 without the project (hosted CI) or without Blender. Full run 2026-10-01: 31 of 31 unique files agree on everything; the
 reader took 1.7 s for 784 MB, Blender's importer 14.4 s plus its boot.

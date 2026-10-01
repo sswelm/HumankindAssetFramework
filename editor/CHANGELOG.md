@@ -16,8 +16,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   targets are counted, not read. Tested on synthetic files field by field; drilled on the registry: all 35 GLBs
   (784 MB) read in 1.7 s and agree with Blender's evaluated import on triangle count, materials, images, joints, and
   on the values — world bounding box, surface area, centroid, winding, bone names, durations (Blender: 14.4 s plus
-  boot). The values settled two conventions counting could not: a skinned mesh sits in its root joint's bind space
-  (`HafTransforms.SkinSpace`), and node transforms are the static TRS, not the animation's current frame. **Tools ▸ HAF ▸ Model Reader (GLB)…** shows what the reader sees in any file (or in every registry
+  boot). The values settled what counting could not: a skinned vertex is the spec's weighted blend of its joints
+  over both influence sets, normals through the same matrices (`HafTransforms.WorldPositions` / `WorldNormals`), and
+  the pose both sides state exactly is animation 0 at time 0 (`HafTransforms.PoseAt`: STEP, LINEAR, CUBICSPLINE). The
+  Model Reader's turntable shows that pose by default (*Clip start*), or the file's static transforms. **Tools ▸ HAF ▸ Model Reader (GLB)…** shows what the reader sees in any file (or in every registry
   model at once): the counts, one row per mesh, the skins, the animations, the read time, a refusal by name — and a
   **turntable of the model as the reader read it**, built as Unity meshes from the model alone (the hierarchy's
   transforms through `HafTransforms`, the file's normals and UVs, the base-colour textures decoded from the embedded

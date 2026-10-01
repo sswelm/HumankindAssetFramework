@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Xunit;
 
 // The node hierarchy's transforms (editor/HafTransforms.cs): glTF conventions, locked against known rotations, so a
@@ -81,51 +82,84 @@ public class HafTransformsTests
     }
 
     [Fact]
-    public void A_skinned_primitive_sits_undeformed_in_its_root_joints_bind_space()
+    public void A_skinned_vertex_is_the_weighted_blend_of_its_joints_over_both_influence_sets()
     {
-        // orient (a quarter turn about Y) -> root joint (moved by 10) -> tip joint (moved by 5 up); the skinned mesh's own node
-        // carries a transform the spec ignores. The skin space is the ROOT joint's world times its inverse bind matrix - the
-        // rule Blender's evaluated import follows on every registry model (2026-10-01), for both conventions exporters use.
+        // two joints: A at the origin, B moved by (10,0,0); identity inverse bind matrices, so each joint's matrix is its own
+        // world. A vertex weighted 1 on B lands at +10; half-and-half lands at +5; a vertex whose second set carries the
+        // other half is the same blend; an unweighted vertex stays where the file put it. The mesh node's transform is ignored.
         var model = new HafModel();
-        var orient = new HafNode { Name = "orient", Rotation = new double[] { 0, Math.Sin(Math.PI / 4), 0, Math.Cos(Math.PI / 4) } };
-        var rootJoint = new HafNode { Name = "root", Parent = 0, Translation = new double[] { 10, 0, 0 } };
-        var tipJoint = new HafNode { Name = "tip", Parent = 1, Translation = new double[] { 0, 5, 0 } };
-        var meshNode = new HafNode { Name = "skinned", Mesh = 0, Skin = 0, Translation = new double[] { 999, 999, 999 } };
-        orient.Children.Add(1); rootJoint.Children.Add(2);
-        model.Nodes.Add(orient); model.Nodes.Add(rootJoint); model.Nodes.Add(tipJoint); model.Nodes.Add(meshNode); model.Roots.Add(0); model.Roots.Add(3);
-        var prim = new HafPrimitive { VertexCount = 2, Positions = new float[] { 1, 0, 0, 0, 0, 0 }, Joints = new ushort[] { 1, 0, 0, 0, 0, 0, 0, 0 }, Weights = new float[] { 1, 0, 0, 0, 1, 0, 0, 0 } };
+        model.Nodes.Add(new HafNode { Name = "A" });
+        model.Nodes.Add(new HafNode { Name = "B", Translation = new double[] { 10, 0, 0 } });
+        model.Nodes.Add(new HafNode { Name = "skinned", Mesh = 0, Skin = 0, Translation = new double[] { 999, 999, 999 } });
+        model.Roots.AddRange(new[] { 0, 1, 2 });
+        var prim = new HafPrimitive
+        {
+            VertexCount = 4, Positions = new float[] { 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0 },
+            Joints = new ushort[] { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+            Weights = new float[] { 1, 0, 0, 0, 0.5f, 0.5f, 0, 0, 0.5f, 0, 0, 0, 0, 0, 0, 0 },
+            Joints1 = new ushort[] { 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0 },
+            Weights1 = new float[] { 0, 0, 0, 0, 0, 0, 0, 0, 0.5f, 0, 0, 0, 0, 0, 0, 0 },
+            Normals = new float[] { 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0 },
+        };
         model.Meshes.Add(new HafMesh { Primitives = { prim } });
+        model.Skins.Add(new HafSkin { Joints = new[] { 0, 1 } });
         var world = HafTransforms.WorldMatrices(model);
-        double[] Inverse(double[] m) { var t = HafTransforms.Trs(new double[] { -m[12], -m[13], -m[14] }, new double[] { 0, 0, 0, 1 }, new double[] { 1, 1, 1 }); return t; }   // translation-only inverses suffice below
-
-        // (a) WORLD-based inverse bind matrices (the drone): IBM = inverse(joint world) -> the skin space is identity, the
-        //     positions are world positions as the file holds them, whatever the ancestors above the skeleton do
-        var ibmWorld = new double[32];
-        Array.Copy(HafTransforms.Mul(Inverse(HafTransforms.Trs(rootJoint)), HafTransforms.Trs(new double[] { 0, 0, 0 }, new double[] { 0, -Math.Sin(Math.PI / 4), 0, Math.Cos(Math.PI / 4) }, new double[] { 1, 1, 1 })), 0, ibmWorld, 0, 16);   // (orient*T)^-1 = T^-1 * orient^-1, with T the joint's LOCAL move
-        Array.Copy(HafTransforms.Identity, 0, ibmWorld, 16, 16);
-        model.Skins.Add(new HafSkin { Joints = new[] { 1, 2 }, InverseBindMatrices = ibmWorld, Skeleton = -1 });
-        Near(new[] { 1, 0, 0.0, 0, 0, 0 }, HafTransforms.WorldPositions(model, 3, prim, world));
-
-        // (b) ARMATURE-relative inverse bind matrices (the Sketchfab files): IBM = inverse(joint relative to the node above
-        //     the skeleton) -> the skin space is that node's world: (1,0,0) through orient's quarter turn -> (0,0,-1)
-        var ibmArm = new double[32];
-        Array.Copy(Inverse(HafTransforms.Trs(rootJoint)), 0, ibmArm, 0, 16);
-        Array.Copy(HafTransforms.Identity, 0, ibmArm, 16, 16);
-        model.Skins[0].InverseBindMatrices = ibmArm;
-        Near(new[] { 0, 0, -1.0, 0, 0, 0 }, HafTransforms.WorldPositions(model, 3, prim, world));
-        model.Skins[0].Skeleton = 2;                                                                // a declared skeleton climbs to the same root
-        Near(new[] { 0, 0, -1.0, 0, 0, 0 }, HafTransforms.WorldPositions(model, 3, prim, world));
-
-        // (c) no inverse bind matrices at all: the root joint's world is the space
-        model.Skins[0].InverseBindMatrices = null;
-        Near(new[] { 0, 0, -11.0, 0, 0, -10 }, HafTransforms.WorldPositions(model, 3, prim, world));   // orient * T(10) * v
-
+        var pos = HafTransforms.WorldPositions(model, 2, prim, world);
+        Near(new[] { 11, 0, 0.0 }, new[] { pos[0], pos[1], pos[2] });    // all on B
+        Near(new[] { 6, 0, 0.0 }, new[] { pos[3], pos[4], pos[5] });     // half A, half B
+        Near(new[] { 6, 0, 0.0 }, new[] { pos[6], pos[7], pos[8] });     // half A (set 0), half B (set 1)
+        Near(new[] { 1, 0, 0.0 }, new[] { pos[9], pos[10], pos[11] });   // unweighted: the file's position
+        // weights that do not sum to 1 are normalized: 0.25 on B alone is still "all on B"
+        prim.Weights[0] = 0.25f;
+        Near(new[] { 11, 0, 0.0 }, HafTransforms.WorldPositions(model, 2, prim, world).Take(3).ToArray());
+        // normals go through the blend too: a joint rotated a quarter turn about Y turns the normal with it
+        model.Nodes[1].Rotation = new double[] { 0, Math.Sin(Math.PI / 4), 0, Math.Cos(Math.PI / 4) };
+        world = HafTransforms.WorldMatrices(model);
+        var nrm = HafTransforms.WorldNormals(model, 2, prim, world);
+        Near(new[] { 0, 0, -1.0 }, new[] { nrm[0], nrm[1], nrm[2] });   // vertex 0, all on B
+        Near(new[] { 0, 1, 0.0 }, new[] { nrm[9], nrm[10], nrm[11] });  // unweighted: unchanged
         // an unskinned primitive on a node goes through that node's world matrix
         var plain = new HafPrimitive { VertexCount = 1, Positions = new float[] { 1, 2, 3 } };
-        Near(new[] { 1000, 1001, 1002.0 }, HafTransforms.WorldPositions(model, 3, plain, world));
-        // the node-pose blend is a different thing, kept for a consumer that wants the posed mesh: the tip joint's pose moves the vertex
-        var sm = HafTransforms.SkinMatrices(model, 0, world);
-        Assert.Equal(2, sm.Length);
-        Near(new[] { 0, 5, -10.0 }, HafTransforms.Apply(sm[1], 0, 0, 0, 1));   // the tip's world origin: orient * (10, 5, 0)
+        Near(new[] { 1000, 1001, 1002.0 }, HafTransforms.WorldPositions(model, 2, plain, world));
+    }
+
+    [Fact]
+    public void A_pose_samples_each_channel_at_a_time_and_leaves_the_rest_static()
+    {
+        var model = new HafModel();
+        model.Nodes.Add(new HafNode { Name = "moves", Translation = new double[] { 0, 0, 0 } });
+        model.Nodes.Add(new HafNode { Name = "still", Translation = new double[] { 7, 7, 7 } });
+        model.Roots.AddRange(new[] { 0, 1 });
+        var anim = new HafAnimation { Name = "walk" };
+        anim.Samplers.Add(new HafSampler { Times = new float[] { 0, 1 }, Values = new float[] { 0, 0, 0, 10, 0, 0 }, Components = 3, Interpolation = "LINEAR" });
+        anim.Samplers.Add(new HafSampler { Times = new float[] { 0, 1 }, Values = new float[] { 1, 1, 1, 3, 3, 3 }, Components = 3, Interpolation = "STEP" });
+        anim.Samplers.Add(new HafSampler { Times = new float[] { 0, 1 }, Values = new float[] { 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0 }, Components = 4, Interpolation = "CUBICSPLINE" });
+        anim.Channels.Add(new HafChannel { Sampler = 0, Node = 0, Path = "translation" });
+        anim.Channels.Add(new HafChannel { Sampler = 1, Node = 0, Path = "scale" });
+        anim.Channels.Add(new HafChannel { Sampler = 2, Node = 0, Path = "rotation" });
+        model.Animations.Add(anim);
+        // t = 0: the first keys; the still node is untouched (null = static)
+        var pose0 = HafTransforms.PoseAt(model, 0, 0.0);
+        Assert.Null(pose0(1));
+        var w0 = HafTransforms.WorldMatrices(model, pose0);
+        Near(new[] { 0, 0, 0.0 }, HafTransforms.Apply(w0[0], 0, 0, 0, 1));
+        Near(new[] { 7, 7, 7.0 }, HafTransforms.Apply(w0[1], 0, 0, 0, 1));
+        Near(new[] { 1, 1, 1.0 }, HafTransforms.Apply(w0[0], 1, 1, 1, 0));                      // scale 1 at the first STEP key
+        // t = 0.5: LINEAR translation halfway, STEP scale still the first key, CUBICSPLINE rotation the key's VALUE (identity)
+        var w5 = HafTransforms.WorldMatrices(model, HafTransforms.PoseAt(model, 0, 0.5));
+        Near(new[] { 5, 0, 0.0 }, HafTransforms.Apply(w5[0], 0, 0, 0, 1));
+        Near(new[] { 1, 1, 1.0 }, HafTransforms.Apply(w5[0], 1, 1, 1, 0));
+        // t = 1 and beyond: the last keys hold
+        var w2 = HafTransforms.WorldMatrices(model, HafTransforms.PoseAt(model, 0, 2.0));
+        Near(new[] { 10, 0, 0.0 }, HafTransforms.Apply(w2[0], 0, 0, 0, 1));
+        Near(new[] { 3, 3, 3.0 }, HafTransforms.Apply(w2[0], 1, 1, 1, 0));
+        // no such animation: null, the static transforms are the pose
+        Assert.Null(HafTransforms.PoseAt(model, 1, 0.0));
+        // a LINEAR rotation between two keys is the normalized lerp, exact at the keys
+        var rot = new HafSampler { Times = new float[] { 0, 1 }, Values = new float[] { 0, 0, 0, 1, 0, 1, 0, 0 }, Components = 4, Interpolation = "LINEAR" };
+        Near(new[] { 0, 0, 0, 1.0 }, HafTransforms.Sample(rot, 0));
+        Near(new[] { 0, 1, 0, 0.0 }, HafTransforms.Sample(rot, 1));
+        var mid = HafTransforms.Sample(rot, 0.5);
+        Assert.Equal(1.0, Math.Sqrt(mid[0] * mid[0] + mid[1] * mid[1] + mid[2] * mid[2] + mid[3] * mid[3]), 6);
     }
 }

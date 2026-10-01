@@ -37,7 +37,8 @@ static class Drill
             // vertex; the total triangle area; the area-weighted centroid; the area-weighted sum of face normals from each
             // triangle's own winding (a flipped winding or a mis-handled mirrored node shows here); the joint names; the durations.
             var inv = System.Globalization.CultureInfo.InvariantCulture;
-            var world = HafTransforms.WorldMatrices(m);
+            // the pose both sides can state exactly: animation 0 at time 0 (Blender: that clip active, the NLA cleared, frame 0)
+            var world = HafTransforms.WorldMatrices(m, HafTransforms.PoseAt(m, 0, 0.0));
             double[] mn = { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity }, mx = { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
             double area = 0; double[] cen = { 0, 0, 0 }, nsum = { 0, 0, 0 };
             long boxed = 0;
@@ -77,7 +78,7 @@ static class Drill
             if (area > 0) { cen[0] /= area; cen[1] /= area; cen[2] /= area; }
             string F(IEnumerable<double> xs) => string.Join(",", xs.Select(c => c.ToString("0.00000", inv)));
             string bbox = boxed == 0 ? "" : F(new[] { mn[0], mn[1], mn[2], mx[0], mx[1], mx[2] });
-            string bboxIdentity = "";   // (the two skinned conventions were compared here on 2026-10-01; SkinSpace is Blender's, and stays)
+            string bboxIdentity = "";   // (kept in the line format; the skinned conventions were settled 2026-10-01: the weighted blend at animation 0, t = 0)
             var bones = m.Skins.SelectMany(s => s.Joints).Distinct().Select(j => m.Nodes[j].Name).OrderBy(n => n, StringComparer.Ordinal).ToList();
             var sortedDurations = m.Animations.Select(a => Math.Round(a.Duration, 3)).OrderBy(d => d).Select(d => d.ToString("0.000", inv));
             Console.WriteLine($"FILE\t{Key(path)}\ttris={m.TriangleCount}\tmaterials={m.Materials.Count}\timages={m.Images.Count}\tjoints={joints}\tanimations={m.Animations.Count}\tdurations={durations}\tnodes={m.Nodes.Count}\tmeshes={m.Meshes.Count}\tvertices={m.VertexCount}\tms={sw.Elapsed.TotalMilliseconds:0}\tbbox={bbox}\tbboxidentity={bboxIdentity}\tarea={area.ToString("0.00000", inv)}\tcentroid={F(cen)}\tnsum={F(nsum)}\tbones={string.Join("|", bones)}\tsorteddurations={string.Join(",", sortedDurations)}");

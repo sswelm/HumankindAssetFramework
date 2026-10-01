@@ -16,24 +16,20 @@ for path in files:
     t = time.time()
     bpy.ops.import_scene.gltf(filepath=path)
     ms = (time.time() - t) * 1000.0
-    # the durations come from the actions; then the animation data is cleared and the scene re-evaluated, so the
-    # geometry below is the REST pose (the importer parks every object at the first keyframe otherwise - the C# side
-    # reads the node's static TRS, and a first key that differs from it is not a reader disagreement)
+    # THE POSE: animation 0 at time 0, the one state both sides can compute exactly. The importer puts EVERY clip on an
+    # NLA track and leaves the first one active, so its untouched scene at frame 1 is a blend of all clips 42 ms in -
+    # a pose no file defines. Drop the NLA tracks (the active action stays), go to frame 0 (= the clip's first key),
+    # and keep the pose bones as evaluated: that is the C# side's PoseAt(animation 0, t = 0) through the joint blend.
     fps = bpy.context.scene.render.fps
-    durations = sorted(round((a.frame_range[1] - a.frame_range[0]) / fps, 3) for a in bpy.data.actions)
+    durations = sorted(set(round((a.frame_range[1] - a.frame_range[0]) / fps, 3) for a in bpy.data.actions))
     action_count = len(bpy.data.actions)
-    # the object properties hold whatever the animation evaluated to at the CURRENT frame (frame 1 = 42 ms into the
-    # clip, not its start); clearing the animation keeps those values. Evaluate the clip's first key (time 0) first,
-    # so what remains is the node's static TRS, which is what the C# side reads (measured on the T-62: 3.6 cm otherwise)
+    for o in bpy.data.objects:
+        ad = o.animation_data
+        if ad is None:
+            continue
+        for track in list(ad.nla_tracks):
+            ad.nla_tracks.remove(track)
     bpy.context.scene.frame_set(0)
-    bpy.context.view_layer.update()
-    for o in bpy.data.objects:
-        if o.animation_data is not None:
-            o.animation_data_clear()
-    for o in bpy.data.objects:
-        if o.type == "ARMATURE":
-            for pb in o.pose.bones:
-                pb.matrix_basis.identity()
     bpy.context.view_layer.update()
     # the importer's bone-display custom shape (an 80-face icosphere per skinned file) is not in the file: skip meshes used as one
     shapes = set()

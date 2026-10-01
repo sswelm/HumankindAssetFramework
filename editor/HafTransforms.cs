@@ -10,11 +10,17 @@ public static class HafTransforms
 {
     public static readonly double[] Identity = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
 
-    /// <summary>One world matrix per node: parent * local, roots first. A node the scene does not reach still gets one.</summary>
-    public static double[][] WorldMatrices(HafModel m)
+    /// <summary>One world matrix per node: parent * local, roots first, at the file's static transforms.</summary>
+    public static double[][] WorldMatrices(HafModel m) => WorldMatrices(m, null);
+
+    /// <summary>
+    /// One world matrix per node at a POSE: <paramref name="local"/> returns a node's local matrix for this pose, or
+    /// null for the file's static transform (see <see cref="PoseAt"/>). A node the scene does not reach still gets one.
+    /// </summary>
+    public static double[][] WorldMatrices(HafModel m, Func<int, double[]> local)
     {
-        var local = new double[m.Nodes.Count][]; var world = new double[m.Nodes.Count][];
-        for (int i = 0; i < m.Nodes.Count; i++) local[i] = m.Nodes[i].HasMatrix ? m.Nodes[i].Matrix : Trs(m.Nodes[i]);
+        var loc = new double[m.Nodes.Count][]; var world = new double[m.Nodes.Count][];
+        for (int i = 0; i < m.Nodes.Count; i++) loc[i] = local?.Invoke(i) ?? (m.Nodes[i].HasMatrix ? m.Nodes[i].Matrix : Trs(m.Nodes[i]));
         var order = new List<int>(); var stack = new Stack<int>();
         for (int i = 0; i < m.Nodes.Count; i++) if (m.Nodes[i].Parent < 0) stack.Push(i);
         var seen = new bool[m.Nodes.Count];
@@ -25,9 +31,67 @@ public static class HafTransforms
             seen[n] = true; order.Add(n);
             foreach (var c in m.Nodes[n].Children) stack.Push(c);
         }
-        foreach (int n in order) world[n] = m.Nodes[n].Parent < 0 ? local[n] : Mul(world[m.Nodes[n].Parent], local[n]);
-        for (int i = 0; i < world.Length; i++) if (world[i] == null) world[i] = local[i];   // unreachable through a cycle the reader would have refused; belt and braces
+        foreach (int n in order) world[n] = m.Nodes[n].Parent < 0 ? loc[n] : Mul(world[m.Nodes[n].Parent], loc[n]);
+        for (int i = 0; i < world.Length; i++) if (world[i] == null) world[i] = loc[i];   // unreachable through a cycle the reader would have refused; belt and braces
         return world;
+    }
+
+    /// <summary>
+    /// The pose an animation puts the nodes in at <paramref name="time"/> (seconds): each channel's sampler evaluated
+    /// there (STEP holds the key before; LINEAR interpolates - a rotation by normalized lerp, exact at a key;
+    /// CUBICSPLINE takes the key's value) over the node's static transform. The reference pose the parity drill and the
+    /// preview use is animation 0 at time 0 - the clip start a viewer shows, and what Blender shows with that clip
+    /// active at frame 0 (its untouched import blends every clip through the NLA, which no file defines).
+    /// Returns null when the model has no such animation (the static transforms are the pose then).
+    /// </summary>
+    public static Func<int, double[]> PoseAt(HafModel m, int animationIndex, double time)
+    {
+        if (animationIndex < 0 || animationIndex >= m.Animations.Count) return null;
+        var anim = m.Animations[animationIndex];
+        var t = new Dictionary<int, double[]>(); var r = new Dictionary<int, double[]>(); var sc = new Dictionary<int, double[]>();
+        foreach (var ch in anim.Channels)
+        {
+            if (ch.Node < 0 || ch.Sampler < 0 || ch.Sampler >= anim.Samplers.Count) continue;
+            var value = Sample(anim.Samplers[ch.Sampler], time);
+            if (value == null) continue;
+            if (ch.Path == "translation" && value.Length == 3) t[ch.Node] = value;
+            else if (ch.Path == "rotation" && value.Length == 4) r[ch.Node] = value;
+            else if (ch.Path == "scale" && value.Length == 3) sc[ch.Node] = value;
+        }
+        return i =>
+        {
+            if (!t.ContainsKey(i) && !r.ContainsKey(i) && !sc.ContainsKey(i)) return null;
+            var n = m.Nodes[i];
+            return Trs(t.TryGetValue(i, out var tv) ? tv : n.HasMatrix ? new[] { n.Matrix[12], n.Matrix[13], n.Matrix[14] } : n.Translation,
+                       r.TryGetValue(i, out var rv) ? rv : n.Rotation,
+                       sc.TryGetValue(i, out var sv) ? sv : n.Scale);
+        };
+    }
+
+    /// <summary>A sampler's value at <paramref name="time"/>, per its interpolation; null for an empty sampler.</summary>
+    public static double[] Sample(HafSampler s, double time)
+    {
+        int keys = s.KeyCount, c = s.Components;
+        if (keys == 0 || c == 0) return null;
+        int per = s.Interpolation == "CUBICSPLINE" ? 3 : 1;
+        int valueAt(int key) => (key * per + (per == 3 ? 1 : 0)) * c;   // CUBICSPLINE: in-tangent, value, out-tangent per key
+        int k = 0;
+        while (k + 1 < keys && s.Times[k + 1] <= time) k++;
+        var a = new double[c]; for (int i = 0; i < c; i++) a[i] = s.Values[valueAt(k) + i];
+        if (s.Interpolation != "LINEAR" || k + 1 >= keys || time <= s.Times[k]) return a;
+        double t0 = s.Times[k], t1 = s.Times[k + 1];
+        if (time >= t1) { var b = new double[c]; for (int i = 0; i < c; i++) b[i] = s.Values[valueAt(k + 1) + i]; return b; }
+        double f = (time - t0) / (t1 - t0);
+        var outp = new double[c];
+        for (int i = 0; i < c; i++) outp[i] = a[i] + (s.Values[valueAt(k + 1) + i] - a[i]) * f;
+        if (c == 4)   // a rotation: normalized lerp (the short way round)
+        {
+            double dot = 0; for (int i = 0; i < 4; i++) dot += a[i] * s.Values[valueAt(k + 1) + i];
+            if (dot < 0) for (int i = 0; i < 4; i++) outp[i] = a[i] - (s.Values[valueAt(k + 1) + i] + a[i]) * f;
+            double len = Math.Sqrt(outp[0] * outp[0] + outp[1] * outp[1] + outp[2] * outp[2] + outp[3] * outp[3]);
+            if (len > 1e-12) for (int i = 0; i < 4; i++) outp[i] /= len;
+        }
+        return outp;
     }
 
     /// <summary>T * R * S as a column-major 4x4: the rotation's columns scaled, the translation in the last column.</summary>
@@ -90,37 +154,10 @@ public static class HafTransforms
     }
 
     /// <summary>
-    /// The space a skinned mesh's positions are in, as Blender's import shows them: the topmost joint's world transform
-    /// times its inverse bind matrix - the bind-pose placement with the skeleton root trusted to be at its bind pose.
-    /// Measured against Blender's EVALUATED import of every skinned registry model (2026-10-01): a drone whose
-    /// inverse bind matrices are world-based (the root's 0.01 scale cancels: identity) and two Sketchfab models whose
-    /// matrices are armature-relative (the root's 90° rotation stays) both land where Blender puts them; the plain
-    /// node-pose blend (Σ wᵢ · jointWorldᵢ · IBMᵢ, what a viewer draws) deforms the two whose node pose is not their
-    /// bind pose, and "the skeleton's parent" mis-scales the drone. The mesh stays undeformed: a node-TRS pose that
-    /// differs from the bind pose is the animation's business downstream (the rest-fold).
-    /// </summary>
-    public static double[] SkinSpace(HafModel m, int skinIndex, double[][] world)
-    {
-        var skin = m.Skins[skinIndex];
-        if (skin.Joints.Length == 0) return Identity;
-        var joints = new HashSet<int>(skin.Joints);
-        int top = skin.Skeleton >= 0 && skin.Skeleton < m.Nodes.Count && joints.Contains(skin.Skeleton) ? skin.Skeleton : skin.Joints[0];
-        for (int guard = 0; guard < m.Nodes.Count; guard++)   // climb to the topmost joint
-        {
-            int parent = m.Nodes[top].Parent;
-            if (parent < 0 || !joints.Contains(parent)) break;
-            top = parent;
-        }
-        int j = Array.IndexOf(skin.Joints, top);
-        double[] ibm = Identity;
-        if (skin.InverseBindMatrices != null && j >= 0) { ibm = new double[16]; Array.Copy(skin.InverseBindMatrices, j * 16, ibm, 0, 16); }
-        return Mul(world[top], ibm);
-    }
-
-    /// <summary>
-    /// The matrix each joint would apply in the linear blend at the NODE-TRS pose (glTF: Σ wᵢ · jointWorldᵢ · IBMᵢ) -
-    /// what a viewer draws; NOT what Blender's import shows when that pose differs from the bind pose (see SkinSpace).
-    /// Kept for a consumer that needs the posed mesh.
+    /// The matrix each joint applies in the linear blend at the pose <paramref name="world"/> describes (glTF:
+    /// jointMatrixⱼ = jointWorldⱼ · IBMⱼ; a vertex is Σ wᵢ · jointMatrixⱼᵢ · v). This is what a viewer draws and what
+    /// Blender's evaluated import shows (measured 2026-10-01 on scp-682: Blender's untouched import is the blend at its
+    /// pose, area 384.6; the undeformed mesh is 394.6 and only appears once the pose is reset).
     /// </summary>
     public static double[][] SkinMatrices(HafModel m, int skinIndex, double[][] world)
     {
@@ -136,19 +173,66 @@ public static class HafTransforms
     }
 
     /// <summary>
-    /// A primitive's positions in world space, as Blender shows them: through its node's world matrix, or - when it
-    /// is skinned - undeformed in its skin's space (<see cref="SkinSpace"/>). One vertex = 3 doubles, glTF frame.
+    /// A primitive's positions in world space at the pose <paramref name="world"/> describes: through its node's world
+    /// matrix, or - when it is skinned - through the weighted blend of its joints over BOTH influence sets (the spec's
+    /// per-vertex transform; the skinned node's own transform is ignored). One vertex = 3 doubles, glTF frame.
     /// </summary>
     public static double[] WorldPositions(HafModel m, int nodeIndex, HafPrimitive p, double[][] world)
     {
-        int skin = m.Nodes[nodeIndex].Skin;
-        var wm = p.Skinned && skin >= 0 && skin < m.Skins.Count ? SkinSpace(m, skin, world) : world[nodeIndex];
         var outp = new double[p.VertexCount * 3];
+        var blend = BlendMatrices(m, nodeIndex, p, world);
         for (int v = 0; v < p.VertexCount; v++)
         {
-            var q = Apply(wm, p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2], 1.0);
+            var mv = blend != null ? blend[v] : world[nodeIndex];
+            var q = Apply(mv, p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2], 1.0);
             outp[v * 3] = q[0]; outp[v * 3 + 1] = q[1]; outp[v * 3 + 2] = q[2];
         }
         return outp;
+    }
+
+    /// <summary>The primitive's normals in world space at the same pose (each through the inverse transpose of the matrix
+    /// its vertex went through - the blended one for a skinned vertex); null when the primitive has no normals.</summary>
+    public static double[] WorldNormals(HafModel m, int nodeIndex, HafPrimitive p, double[][] world)
+    {
+        if (p.Normals == null) return null;
+        var outp = new double[p.VertexCount * 3];
+        var blend = BlendMatrices(m, nodeIndex, p, world);
+        for (int v = 0; v < p.VertexCount; v++)
+        {
+            var n = ApplyNormal(blend != null ? blend[v] : world[nodeIndex], p.Normals[v * 3], p.Normals[v * 3 + 1], p.Normals[v * 3 + 2]);
+            outp[v * 3] = n[0]; outp[v * 3 + 1] = n[1]; outp[v * 3 + 2] = n[2];
+        }
+        return outp;
+    }
+
+    /// <summary>Per vertex, the weighted sum of its joints' matrices (both influence sets, weights normalized when they do
+    /// not sum to 1; an unweighted vertex keeps the file's position through identity); null for an unskinned primitive.</summary>
+    public static double[][] BlendMatrices(HafModel m, int nodeIndex, HafPrimitive p, double[][] world)
+    {
+        int skin = m.Nodes[nodeIndex].Skin;
+        if (!p.Skinned || skin < 0 || skin >= m.Skins.Count) return null;
+        var jm = SkinMatrices(m, skin, world);
+        var result = new double[p.VertexCount][];
+        for (int v = 0; v < p.VertexCount; v++)
+        {
+            var acc = new double[16]; double wsum = 0;
+            for (int set = 0; set < 2; set++)
+            {
+                var joints = set == 0 ? p.Joints : p.Joints1; var weights = set == 0 ? p.Weights : p.Weights1;
+                if (joints == null || weights == null) continue;
+                for (int k = 0; k < 4; k++)
+                {
+                    double w = weights[v * 4 + k];
+                    if (w <= 0) continue;
+                    int j = joints[v * 4 + k];
+                    if (j >= jm.Length) continue;
+                    for (int i = 0; i < 16; i++) acc[i] += w * jm[j][i];
+                    wsum += w;
+                }
+            }
+            if (wsum <= 0) result[v] = Identity;
+            else { if (Math.Abs(wsum - 1.0) > 1e-6) for (int i = 0; i < 16; i++) acc[i] /= wsum; result[v] = acc; }
+        }
+        return result;
     }
 }

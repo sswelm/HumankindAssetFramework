@@ -33,7 +33,7 @@ public class ModelReaderWindow : EditorWindow
     readonly List<UnityEngine.Object> previewAssets = new List<UnityEngine.Object>();
     Bounds bounds; bool boundsValid;
     Vector2 orbit = new Vector2(30f, 15f); float zoom = 1f; bool spin = true; double lastTick;
-    bool showPreview = true, unmirror, fileNormals = true, textured = true;
+    bool showPreview = true, unmirror, fileNormals = true, textured = true, clipStart = true;
     string previewNote = "";
 
     void OnEnable() { EditorApplication.update += Tick; lastTick = EditorApplication.timeSinceStartup; }
@@ -69,8 +69,9 @@ public class ModelReaderWindow : EditorWindow
             bool wantUnmirror = EditorGUILayout.ToggleLeft(new GUIContent("Unmirror", "Flip X and the winding: the image as the file has it (glTF is right-handed; the verbatim copy is a mirror image, facing correct)."), unmirror, GUILayout.Width(80));
             bool wantNormals = EditorGUILayout.ToggleLeft(new GUIContent("File normals", "Use the normals the reader read; off = let Unity recompute them. A model that looks right only one way has a normals problem."), fileNormals, GUILayout.Width(100));
             bool wantTextured = EditorGUILayout.ToggleLeft(new GUIContent("Textures", "Decode the embedded images and map the base-colour texture through the reader's UVs."), textured, GUILayout.Width(80));
+            bool wantClipStart = model.Animations.Count == 0 ? clipStart : EditorGUILayout.ToggleLeft(new GUIContent("Clip start", "Pose the nodes at the first animation's start (what a viewer shows; the parity drill's reference). Off = the file's static transforms."), clipStart, GUILayout.Width(80));
             spin = EditorGUILayout.ToggleLeft("Spin", spin, GUILayout.Width(50));
-            if (wantUnmirror != unmirror || wantNormals != fileNormals || wantTextured != textured) { unmirror = wantUnmirror; fileNormals = wantNormals; textured = wantTextured; BuildPreview(); }
+            if (wantUnmirror != unmirror || wantNormals != fileNormals || wantTextured != textured || wantClipStart != clipStart) { unmirror = wantUnmirror; fileNormals = wantNormals; textured = wantTextured; clipStart = wantClipStart; BuildPreview(); }
         }
         if (showPreview)
         {
@@ -184,7 +185,7 @@ public class ModelReaderWindow : EditorWindow
         {
             if (pru == null) pru = new PreviewRenderUtility();
             var sh = Shader.Find("Standard") ?? Shader.Find("Unlit/Color");
-            var world = HafTransforms.WorldMatrices(model);
+            var world = HafTransforms.WorldMatrices(model, clipStart ? HafTransforms.PoseAt(model, 0, 0.0) : null);
             var textures = new Dictionary<int, Texture2D>();
             var materials = new Dictionary<int, Material>();
             Material MaterialFor(int index)
@@ -232,19 +233,15 @@ public class ModelReaderWindow : EditorWindow
                 foreach (var p in hm.Primitives)
                 {
                     if (p.Mode != 4) continue;   // the preview draws triangles; strips and fans are read but not drawn
-                    // a skinned primitive is placed by its joints' bind-pose matrices (the spec ignores its own node's transform;
-                    // parity drill 2026-10-01: two Sketchfab models carry a 90° root rotation only the joints know), an unskinned one by its node
-                    double[] w = p.Skinned ? HafTransforms.Identity : world[ni];
+                    // positions and normals through the same matrices: the node's, or per vertex the weighted blend of its joints
+                    // at the chosen pose (review of PR #109: the normals once went through identity while the positions were posed)
                     var gl = HafTransforms.WorldPositions(model, ni, p, world);
+                    var gn = HafTransforms.WorldNormals(model, ni, p, world);
                     int baseIndex = verts.Count;
                     for (int v = 0; v < p.VertexCount; v++)
                     {
                         verts.Add(new Vector3(sx * (float)gl[v * 3], (float)gl[v * 3 + 1], (float)gl[v * 3 + 2]));
-                        if (p.Normals != null)
-                        {
-                            var n = HafTransforms.ApplyNormal(w, p.Normals[v * 3], p.Normals[v * 3 + 1], p.Normals[v * 3 + 2]);
-                            norms.Add(new Vector3(sx * (float)n[0], (float)n[1], (float)n[2]));
-                        }
+                        if (gn != null) norms.Add(new Vector3(sx * (float)gn[v * 3], (float)gn[v * 3 + 1], (float)gn[v * 3 + 2]));
                         else allNormals = false;
                         // the UV set the material's base colour selects (review of PR #109: UV0 was used whatever texCoord said); glTF's origin is top-left, Unity's bottom-left
                         var uvSet = p.Material >= 0 && p.Material < model.Materials.Count && model.Materials[p.Material].BaseColorTexCoord == 1 && p.Uv1 != null ? p.Uv1 : p.Uv0;
