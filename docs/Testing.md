@@ -156,11 +156,21 @@ second field by field (`HafModelDiff`); a second compaction must find nothing mo
 and copy of a sample (every pair under `FULL=1`) and must report the same for both *as printed* — the same importer on
 the same live data, so "close" is not accepted. A refused compaction (an extension the tool does not follow, or
 nothing would remain) is listed, not failed. First full run (2026-10-02): 28 of the 91 Workshop files had something
-to leave out, 1,322 → 757 MB; 23 of the 35 fixtures and samples compacted after a part was removed; Blender agreed on
+to leave out, 1,322 → 757 MB; 24 of the 35 fixtures and samples compacted after a part was removed; Blender agreed on
 all 29 pairs. Unity ships its standalone Mono as a 32-bit process, so the two largest sources are verified on the
 64-bit .NET runtime instead, and the drill says so. `Tests/GlbCompactTests.cs` holds one
 hand-built fixture per branch of the compaction (a view two meshes share, an interleaved view, a shared vertex
-accessor, skin/animation/image data, a sparse accessor, the refusals), each judged by the same reader comparison.
+accessor, skin/animation/image data, a sparse accessor, unused bytes with every mesh live, the refusals), each judged
+by the same reader comparison.
+
+**`tools/check-exit-status.sh`** (2026-10-02) exists because a drill's verdict was twice read from the END of a
+pipeline — `CMP=$(python compare.py … | tr -d '\r'); crc=$?` — where `$?` is `tr`'s and always 0. The vehicle probe
+drill carried that line from PR #112: for a day the gate that says the C# probe's rows equal Blender's printed the
+comparator's FAIL lines and then PASS (it had no failure to hide in that time: 47 compared, 0 failed, once it could
+fail). The compaction drill was written with a copy of it, which an external review caught. The guard refuses the
+shape — a `|` and then `; name=$?` on one line — in every gate script, and checks its own pattern against the line
+that cost us first. It does not see a status read on the next line or a verdict never read at all; it is a net for
+one shape, not a proof.
 
 **`tools/glb_writer_drill.sh`** (2026-10-01, step 2) first checks every **source**: each `extensions`/`extras`
 object must sit at a path the model carries (`tools/glb-reader-drill/carried_paths.py`; the reader does not model the

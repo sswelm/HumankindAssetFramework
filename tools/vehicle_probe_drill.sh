@@ -108,7 +108,10 @@ if [ "$brc" -ne 0 ] || [ "$n_b" -ne "${#SAMPLE[@]}" ]; then
   grep -E "VEHICLE ERROR|Traceback|Error" "$TMPD/blender_raw.txt" | head -8
   echo "FAIL — vehicle probe drill: Blender's probe ran on $n_b of ${#SAMPLE[@]} files (exit $brc)"; exit 1
 fi
-CMP=$(python "$ROOT/tools/vehicle-probe-drill/compare_probe.py" "$TMPD/csharp.txt" "$TMPD/blender.txt" 2>&1 | tr -d '\r'); crc=$?
+# the comparator's status FIRST, the filter afterwards: read after `| tr`, it was tr's - always 0 - and from PR #112 until
+# 2026-10-02 this drill printed the comparator's FAIL lines and then PASS (tools/check-exit-status.sh guards the shape now)
+CMP=$(python "$ROOT/tools/vehicle-probe-drill/compare_probe.py" "$TMPD/csharp.txt" "$TMPD/blender.txt" 2>&1); crc=$?
+CMP=$(printf '%s' "$CMP" | tr -d '\r')
 echo "$CMP" | grep -E "^FAIL"
 echo "$CMP" | grep -E "^COMPARED"
 [ "$crc" -eq 0 ] || { echo "FAIL — vehicle probe drill: the C# probe's rows differ from Blender's"; exit 1; }
