@@ -16,6 +16,7 @@ public static class ModelPreview
         public bool FileNormals = true;   // the normals the reader read; off = Unity recomputes them
         public bool Textured = true;      // decode the embedded images, map the base-colour texture through the reader's UVs
         public bool ClipStart = true;     // pose the nodes at the first animation's start (the parity drill's reference); off = the static transforms
+        public long TriangleCap = DefaultTriangleCap;   // over this many DRAWN triangles (instances in the default scene) nothing is built
     }
 
     public sealed class Result
@@ -23,14 +24,21 @@ public static class ModelPreview
         public GameObject Root;           // null when nothing is drawable; Note says why
         public string Note = "";
         public int Meshes, Vertices, Triangles;
+        public long DrawnTriangles;       // what the default scene draws, counted before anything is built (the cap is judged on it)
     }
 
-    public const long TriangleCap = 20_000_000;
+    public const long DefaultTriangleCap = 20_000_000;
 
     public static Result Build(HafModel model, Options o, List<UnityEngine.Object> assets)
     {
         var r = new Result();
-        if (model.TriangleCount > TriangleCap) { r.Note = $"no preview: {model.TriangleCount:N0} triangles is over the {TriangleCap / 1_000_000} M the preview builds"; return r; }
+        // what a viewer shows: the nodes the default scene reaches (review of PR #111: every node was drawn, other scenes' and orphans' too)
+        if (!model.HasDefaultScene) { r.Note = model.Scenes.Count == 0 ? "no preview: the file declares no scene, so a viewer shows nothing at load" : $"no preview: the file names no default scene ({model.Scenes.Count} declared), so a viewer shows nothing at load"; return r; }
+        var drawn = model.NodesInScene(model.Scene);
+        // the cap is measured on what WILL be built: every node instance the default scene reaches, each with its mesh's triangles
+        // (review of PR #111: the file's mesh total counted each mesh once - instances could exceed the cap, a mesh another scene uses could block a small scene)
+        foreach (int ni in drawn) if (model.Nodes[ni].Mesh >= 0) foreach (var p in model.Meshes[model.Nodes[ni].Mesh].Primitives) r.DrawnTriangles += p.TriangleCount;
+        if (r.DrawnTriangles > o.TriangleCap) { r.Note = $"no preview: the default scene draws {r.DrawnTriangles:N0} triangles, over the {o.TriangleCap:N0} the preview builds"; return r; }
         var sh = Shader.Find("Standard") ?? Shader.Find("Unlit/Color");
         var world = HafTransforms.WorldMatrices(model, o.ClipStart ? HafTransforms.PoseAt(model, 0, 0.0) : null);
         var textures = new Dictionary<int, Texture2D>();
@@ -65,9 +73,6 @@ public static class ModelPreview
             return mat;
         }
 
-        // what a viewer shows: the nodes the default scene reaches (review of PR #111: every node was drawn, other scenes' and orphans' too)
-        if (!model.HasDefaultScene) { r.Note = model.Scenes.Count == 0 ? "no preview: the file declares no scene, so a viewer shows nothing at load" : $"no preview: the file names no default scene ({model.Scenes.Count} declared), so a viewer shows nothing at load"; return r; }
-        var drawn = model.NodesInScene(model.Scene);
         var root = new GameObject("__modelReaderPreview") { hideFlags = HideFlags.HideAndDontSave };
         float sx = o.Unmirror ? -1f : 1f;
         for (int ni = 0; ni < model.Nodes.Count; ni++)

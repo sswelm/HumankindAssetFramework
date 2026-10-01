@@ -38,6 +38,29 @@ public static class ModelReaderHeadlessTest
         // two registry entries may share a file; once is enough
         files = files.GroupBy(x => x.path.ToLowerInvariant()).Select(g => g.First()).ToList();
 
+        // the preview's cap counts what the default scene DRAWS - instances, not the file's mesh total (review of PR #111, round 5):
+        // one mesh of one triangle drawn by two nodes is over a cap of 1; a file of three triangles whose default scene draws one is not
+        {
+            var two = new HafModel(); var tri = new HafMesh(); tri.Primitives.Add(new HafPrimitive { VertexCount = 3, Positions = new float[9] { 0, 0, 0, 1, 0, 0, 0, 1, 0 } }); two.Meshes.Add(tri);
+            two.Nodes.Add(new HafNode { Name = "A", Mesh = 0 }); two.Nodes.Add(new HafNode { Name = "B", Mesh = 0 }); two.Scenes.Add(new HafScene()); two.Scenes[0].Nodes.Add(0); two.Scenes[0].Nodes.Add(1); two.Scene = 0;
+            var scratch = new List<UnityEngine.Object>();
+            var r2 = ModelPreview.Build(two, new ModelPreview.Options { TriangleCap = 1 }, scratch);
+            bool refused = r2.Root == null && r2.DrawnTriangles == 2 && r2.Note.Contains("draws 2 triangles");
+            if (r2.Root != null) UnityEngine.Object.DestroyImmediate(r2.Root);
+            foreach (var a in scratch) if (a != null) UnityEngine.Object.DestroyImmediate(a);
+            scratch.Clear();
+            var big = new HafModel(); var one = new HafMesh(); one.Primitives.Add(new HafPrimitive { VertexCount = 3, Positions = new float[9] { 0, 0, 0, 1, 0, 0, 0, 1, 0 } });
+            var twoTris = new HafMesh(); twoTris.Primitives.Add(new HafPrimitive { VertexCount = 6, Positions = new float[18] { 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0, 0, 3, 0, 0, 2, 1, 0 } });
+            big.Meshes.Add(one); big.Meshes.Add(twoTris);
+            big.Nodes.Add(new HafNode { Name = "small", Mesh = 0 }); big.Nodes.Add(new HafNode { Name = "large", Mesh = 1 });
+            big.Scenes.Add(new HafScene()); big.Scenes[0].Nodes.Add(0); big.Scenes.Add(new HafScene()); big.Scenes[1].Nodes.Add(1); big.Scene = 0;   // the file holds 3 triangles, the default scene draws 1
+            var r3 = ModelPreview.Build(big, new ModelPreview.Options { TriangleCap = 1 }, scratch);
+            bool built = r3.Root != null && r3.DrawnTriangles == 1 && r3.Triangles == 1;
+            if (r3.Root != null) UnityEngine.Object.DestroyImmediate(r3.Root);
+            foreach (var a in scratch) if (a != null) UnityEngine.Object.DestroyImmediate(a);
+            if (refused && built) { s.pass++; body.AppendLine("PASS: the preview's cap counts drawn instances: 1 triangle drawn twice is refused at cap 1, 3 in the file with 1 drawn is built"); }
+            else { s.fail++; body.AppendLine($"FAIL: the preview's cap: two instances of one triangle at cap 1 -> {(refused ? "refused" : "BUILT (" + r2.Note + ")")}; three in the file, one drawn, at cap 1 -> {(built ? "built" : "NOT built (" + r3.Note + ")")}"); }
+        }
         string tmpDir = Path.Combine(Path.GetTempPath(), "haf_headless_glb_" + Guid.NewGuid().ToString("N").Substring(0, 8));
         Directory.CreateDirectory(tmpDir);
         var assets = new List<UnityEngine.Object>();
