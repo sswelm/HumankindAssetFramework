@@ -10,8 +10,7 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
-- **THE HAND PROP SURVIVES THE ADDON'S SECOND LOAD (2026-10-01 — reproduced and fixed in a test; NOT yet verified
-  in-game).** The F8 smoke failed in every session with a Drone Squad on the map — "descriptor no longer draws
+- **THE HAND PROP SURVIVES THE ADDON'S SECOND LOAD (2026-10-01).** The F8 smoke failed in every session with a Drone Squad on the map — "descriptor no longer draws
   'M60_DistrictMesh' (no live fragment entry on the addon)" — while the soldier visibly held the gun; two diagnoses
   on 09-20 missed it. The game calls the addon's `Load` more than once and the postfix runs each time. The first pass
   appends the prop, whose mesh lives in the PROP's collection, and the registration snapshot draws it. From the
@@ -22,8 +21,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   wrong about the picture. `ReloadFragments` now leaves our own prop entry alone (one shared name helper with
   `InjectHandProp`); a donor's own attachment is still moved as before. `Tests/HandPropReloadTests` runs the real
   `ReloadFragments` twice over fakes carrying the game's member names and its decompiled `Load`: before the
-  change it failed, the prop entry re-pointed at our skeleton and encoded 0. To verify: F8 with a Drone Squad on the map must read
-  "1 descriptor repoint(s) held".
+  change it failed, the prop entry re-pointed at our skeleton and encoded 0. Verified in-game the same evening, on
+  the session that had failed: the same two Load passes in the log (descriptor[86] 448+2), and F8 reads
+  "[full] PASS … 4 descriptor repoint(s) held". The game had been running the 09-14 plugin until then — the panel's
+  "built" line is the first thing to read off a smoke report.
 - **THE GHOST HUNT NO LONGER RUNS IN NORMAL PLAY (2026-09-30).** The 2026-08-03 ghost-rotor tools still ran for
   every `hideSubPawns` model: at repoint and on every ~10 s NEAR tick they zeroed every GPU descriptor fragment in
   the pawn table that encodes the donor mesh, and degenerated the donor mesh's layer-0 slice in the shared vertex
