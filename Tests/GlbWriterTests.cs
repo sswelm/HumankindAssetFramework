@@ -87,6 +87,12 @@ public class GlbWriterTests
         // an extension used INSIDE the payload is declared too
         original.Materials[0].ExtensionsJson = "{\"KHR_materials_specular\":{\"specularTexture\":{\"index\":0,\"extensions\":{\"KHR_texture_transform\":{\"scale\":[2.0,2.0]}}}}}";
         Assert.Equal(new[] { "KHR_materials_specular", "KHR_texture_transform" }, GlbReader.Read(GlbWriter.Write(original)).ExtensionsUsed);
+        // ... and one a SAMPLER carries (review round 6: the payload was written, the name was not)
+        original.Samplers[0] = "{\"magFilter\":9729,\"extensions\":{\"EXT_probe\":{\"on\":true}}}";
+        var withSamplerExt = GlbReader.Read(GlbWriter.Write(original));
+        Assert.Equal(original.Samplers, withSamplerExt.Samplers);
+        Assert.Equal(new[] { "EXT_probe", "KHR_materials_specular", "KHR_texture_transform" }, withSamplerExt.ExtensionsUsed);
+        original.Samplers[0] = "{\"magFilter\":9729}";   // back to the fixture's sampler for the assertions below
         // the sampler's settings and every extras object are carried verbatim too (review of PR #110)
         Assert.Equal(new[] { "{\"magFilter\":9729}" }, original.Samplers);
         Assert.Equal(original.Samplers, withExt.Samplers);

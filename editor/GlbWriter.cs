@@ -144,7 +144,12 @@ public static class GlbWriter
         if (samplerCount > 0)
         {
             var samplers = new JArray();
-            for (int i = 0; i < samplerCount; i++) samplers.Add(i < m.Samplers.Count ? GlbReader.ParseObject(m.Samplers[i]) : new JObject());
+            for (int i = 0; i < samplerCount; i++)
+            {
+                var sj = i < m.Samplers.Count ? GlbReader.ParseObject(m.Samplers[i]) : new JObject();
+                CollectNestedExtensions(sj, used);   // a sampler's own extensions payload travels verbatim, so its names are declared too
+                samplers.Add(sj);
+            }
             root["samplers"] = samplers;
         }
         if (m.Textures.Count > 0)
