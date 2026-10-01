@@ -13,7 +13,7 @@ public class GlbWriterTests
     {
         Assert.Equal(a.Nodes.Count, b.Nodes.Count); Assert.Equal(a.Meshes.Count, b.Meshes.Count); Assert.Equal(a.Materials.Count, b.Materials.Count);
         Assert.Equal(a.Textures.Count, b.Textures.Count); Assert.Equal(a.Images.Count, b.Images.Count); Assert.Equal(a.Skins.Count, b.Skins.Count); Assert.Equal(a.Animations.Count, b.Animations.Count);
-        Assert.Equal(a.Roots, b.Roots);
+        Assert.Equal(a.Roots, b.Roots); Assert.Equal(a.SceneName, b.SceneName); Assert.Equal(a.Copyright, b.Copyright); Assert.Equal(a.AssetExtrasJson, b.AssetExtrasJson);
         for (int i = 0; i < a.Nodes.Count; i++)
         {
             HafNode x = a.Nodes[i], y = b.Nodes[i];
@@ -69,6 +69,9 @@ public class GlbWriterTests
     {
         var original = GlbReader.Read(GlbReaderTests.FullGlb());
         original.Meshes[0].Primitives[0].MorphTargets = 0;   // the fixture declares one; the writer refuses it as it is (asserted below), so the round trip is taken without
+        // what the second review found dropped: the asset's copyright and extras (Sketchfab attribution), the scene's name, an alphaCutoff outside MASK
+        original.Copyright = "CC-BY 4.0 Someone"; original.AssetExtrasJson = "{\"author\":\"someone (https://sketchfab.com/someone)\",\"license\":\"CC-BY-4.0\",\"when\":\"2024-05-06T07:08:09.123+09:00\"}"; original.SceneName = "Scene";
+        original.Materials[0].AlphaCutoff = 0.3f;
         var bytes = GlbWriter.Write(original);
         var again = GlbReader.Read(bytes);
         Same(original, again);
@@ -81,6 +84,9 @@ public class GlbWriterTests
         var withExt = GlbReader.Read(GlbWriter.Write(original));
         Assert.Equal(original.Materials[0].ExtensionsJson, withExt.Materials[0].ExtensionsJson);
         Assert.Equal(new[] { "KHR_materials_specular" }, withExt.ExtensionsUsed);
+        // an extension used INSIDE the payload is declared too
+        original.Materials[0].ExtensionsJson = "{\"KHR_materials_specular\":{\"specularTexture\":{\"index\":0,\"extensions\":{\"KHR_texture_transform\":{\"scale\":[2.0,2.0]}}}}}";
+        Assert.Equal(new[] { "KHR_materials_specular", "KHR_texture_transform" }, GlbReader.Read(GlbWriter.Write(original)).ExtensionsUsed);
         // the sampler's settings and every extras object are carried verbatim too (review of PR #110)
         Assert.Equal(new[] { "{\"magFilter\":9729}" }, original.Samplers);
         Assert.Equal(original.Samplers, withExt.Samplers);
@@ -122,6 +128,14 @@ public class GlbWriterTests
     [InlineData("nan-position", "not a finite number")]
     [InlineData("sampler-not-json", "sampler 0 is not a JSON object")]
     [InlineData("skeleton-out-of-range", "names skeleton node 99")]
+    [InlineData("no-vertices", "has no vertices")]
+    [InlineData("no-keys", "a sampler has no keys")]
+    [InlineData("nan-time", "key times: a value is not a finite number")]
+    [InlineData("nan-translation", "translation: a value is not a finite number")]
+    [InlineData("short-factor", "baseColorFactor has 3 values, 4 expected")]
+    [InlineData("unknown-image", "is of an unrecognised format; glTF embeds only PNG and JPEG")]
+    [InlineData("webp-image", "is image/webp; glTF embeds only PNG and JPEG")]
+    [InlineData("asset-extras-not-json", "asset extras is not a JSON object")]
     public void What_cannot_be_written_as_it_is_is_refused_by_name(string flaw, string message)
     {
         var m = GlbReader.Read(GlbReaderTests.FullGlb());
@@ -137,6 +151,14 @@ public class GlbWriterTests
             case "nan-position": m.Meshes[0].Primitives[0].Positions[4] = float.NaN; break;
             case "sampler-not-json": m.Samplers[0] = "[9729]"; break;
             case "skeleton-out-of-range": m.Skins[0].Skeleton = 99; break;
+            case "no-vertices": m.Meshes[0].Primitives[0].VertexCount = 0; m.Meshes[0].Primitives[0].Positions = new float[0]; break;
+            case "no-keys": m.Animations[0].Samplers[0].Times = new float[0]; m.Animations[0].Samplers[0].Values = new float[0]; break;
+            case "nan-time": m.Animations[0].Samplers[0].Times[0] = float.NaN; break;
+            case "nan-translation": m.Nodes[0].Matrix = null; m.Nodes[0].Translation[1] = double.PositiveInfinity; break;
+            case "short-factor": m.Materials[0].BaseColorFactor = new float[] { 1, 1, 1 }; break;
+            case "unknown-image": m.Images[0].MimeType = ""; m.Images[0].Bytes = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 }; break;
+            case "webp-image": m.Images[0].MimeType = "image/webp"; break;
+            case "asset-extras-not-json": m.AssetExtrasJson = "[1]"; break;
         }
         var ex = Assert.Throws<InvalidDataException>(() => GlbWriter.Write(m));
         Assert.Contains(message, ex.Message);
@@ -162,6 +184,12 @@ public class GlbWriterTests
             Assert.Throws<InvalidDataException>(() => GlbWriter.Write(m, target));
             Assert.Equal(good, File.ReadAllBytes(target));
             Assert.Single(Directory.GetFiles(Path.GetDirectoryName(target)));
+            // a landing that fails (here: a directory stands where the file should go) leaves the directory as it was and no temporary beside it
+            m.Meshes[0].Primitives[0].Positions[0] = 0;
+            string blocked = Path.Combine(dir, "blocked.glb"); Directory.CreateDirectory(blocked);
+            Assert.ThrowsAny<IOException>(() => GlbWriter.Write(m, blocked));
+            Assert.Empty(Directory.GetFiles(dir));
+            Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(target)).Where(f => f.EndsWith(".tmp")));
         }
         finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
     }

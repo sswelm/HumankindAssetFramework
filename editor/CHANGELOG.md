@@ -7,14 +7,19 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 - **The GLB writer — step 2 of replacing Blender** (`GlbWriter`). A `HafModel` back to a `.glb`: one BIN chunk, every
   field the model holds, images embedded, uint indices when a mesh needs them, both influence sets; a material's
-  extension payload, the texture samplers (wrap, filters) and the `extras` of nodes, meshes and materials carried
-  verbatim (specular/clearcoat textures survive; 28 registry samplers are non-default). Deterministic (a second write
-  is byte-identical), sized once (no growing buffers: a 106 MB model used to double through 256 MB), written to a
-  temporary name and moved into place. Refuses by name what it cannot write as it is - including a primitive with
-  morph targets (their data is not carried) and a position that is not a number. Tested on a round trip of the
-  reader's full fixture field by field; drilled on the registry: all 32 unique models written to disk (726 MB in
-  0.9 s), every one read back EQUAL TO ITS SOURCE FIELD BY FIELD (every vertex, index, material field, sampler,
-  image byte, skin matrix, animation key), and Blender reads every written file as it read the original.
+  extension payload, the texture samplers (wrap, filters), the `extras` of the asset (Sketchfab's author and licence,
+  6 registry files), nodes, meshes and materials, the asset's copyright and the scene's name carried verbatim
+  (specular/clearcoat textures survive; 28 registry samplers are non-default); a date-looking string in any of them
+  stays the string it was (Newtonsoft's default parse had turned one into the machine's time zone). Deterministic (a
+  second write is byte-identical, checked on every registry file), sized once (no growing buffers: a 106 MB model used
+  to double through 256 MB), streamed to a `.tmp` name beside the target from the BIN buffer (one copy in memory) and
+  moved into place; a failed landing leaves nothing behind. Refuses by name what it cannot write as it is - a
+  primitive with morph targets (their data is not carried) or none at all, a sampler without keys, a non-finite
+  number anywhere JSON would carry it, an image that is neither PNG nor JPEG, a model over 2 GB. Tested on a round
+  trip of the reader's full fixture field by field; drilled on the registry: every extensions/extras object in the
+  sources sits at a path the model carries (else FAIL), all 32 unique models written to disk (726 MB in 0.8 s), every
+  one read back EQUAL TO ITS SOURCE FIELD BY FIELD (every vertex, index, material field, sampler, image byte, skin
+  matrix, animation key), and Blender reads every written file as it read the original.
   **Model Reader ▸ Save as GLB…** writes the model the reader holds, for a round trip by hand.
 
 - **The in-memory model and the GLB reader — step 1 of replacing Blender** (`HafModel`, `GlbReader`; the plan and

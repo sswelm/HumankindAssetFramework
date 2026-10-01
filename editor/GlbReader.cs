@@ -59,16 +59,30 @@ public static class GlbReader
             at += (int)chunkLen;
         }
         if (json == null) throw new InvalidDataException("GLB has no JSON chunk");
-        return Build(JObject.Parse(json), bin, baseDir);
+        return Build(ParseObject(json), bin, baseDir);
     }
 
-    public static HafModel ReadGltf(string jsonText, string baseDir) => Build(JObject.Parse(jsonText), null, baseDir);
+    public static HafModel ReadGltf(string jsonText, string baseDir) => Build(ParseObject(jsonText), null, baseDir);
+
+    /// <summary>JSON text to a JObject with the text's strings kept as strings: Newtonsoft's default turns a string
+    /// that looks like a date into a DateTime and writes it back in its own form (an extras value
+    /// "2024-05-06T07:08:09.123+09:00" came back "2024-05-06T00:08:09.123+02:00", the machine's zone - review of PR #110). Used for the file
+    /// and for every verbatim fragment the model carries (extensions, extras, samplers).</summary>
+    public static JObject ParseObject(string json)
+    {
+        using (var r = new Newtonsoft.Json.JsonTextReader(new StringReader(json)) { DateParseHandling = Newtonsoft.Json.DateParseHandling.None })
+        {
+            var t = JToken.ReadFrom(r);
+            return t as JObject ?? throw new InvalidDataException("the JSON is not an object");
+        }
+    }
 
     // ---------------------------------------------------------------- the build
 
     static HafModel Build(JObject root, byte[] glbBin, string baseDir)
     {
-        var model = new HafModel { Generator = root["asset"]?["generator"]?.ToString() ?? "" };
+        var model = new HafModel { Generator = root["asset"]?["generator"]?.ToString() ?? "", Copyright = root["asset"]?["copyright"]?.ToString() ?? "" };
+        if (root["asset"]?["extras"] is JObject assetExtras && assetExtras.Count > 0) model.AssetExtrasJson = assetExtras.ToString(Newtonsoft.Json.Formatting.None);
         foreach (var e in root["extensionsUsed"] as JArray ?? new JArray()) model.ExtensionsUsed.Add(e.ToString());
         foreach (var e in root["extensionsRequired"] as JArray ?? new JArray())
             throw new InvalidDataException($"the file requires the extension '{e}', which this reader does not implement (KHR_draco_mesh_compression needs a Draco decoder; KHR_texture_transform moves the textures; KHR_materials_pbrSpecularGlossiness has no base colour to read) - refused rather than read wrong");
@@ -191,6 +205,7 @@ public static class GlbReader
         }
         var scenes = root["scenes"] as JArray;
         int sceneIndex = root["scene"]?.Value<int>() ?? 0;
+        if (scenes != null && sceneIndex < scenes.Count) model.SceneName = scenes[sceneIndex]["name"]?.ToString() ?? "";
         if (scenes != null && sceneIndex < scenes.Count && scenes[sceneIndex]["nodes"] is JArray sceneNodes)
             foreach (var sn in sceneNodes) model.Roots.Add(sn.Value<int>());
         else

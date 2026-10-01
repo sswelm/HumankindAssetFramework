@@ -13,7 +13,8 @@ using Newtonsoft.Json.Linq;
 // THE CONTRACT: the writer writes what the model holds, and only that. A material's extension payload is carried
 // verbatim (HafMaterial.ExtensionsJson) and the names are declared in extensionsUsed, so KHR_materials_specular,
 // clearcoat and the like - and the textures they reference - survive a round trip; so are the texture samplers
-// (wrap and filters) and the `extras` of nodes, meshes and materials. What the reader does not model is not here
+// (wrap and filters), the `extras` of the asset (Sketchfab's author and license), nodes, meshes and materials, the
+// asset's copyright and the scene's name. What the reader does not model is not here
 // either, and the writer REFUSES rather than drops: a primitive with morph targets (counted by the reader, data not
 // carried) is refused by name; extensions anywhere but on a material, and extras elsewhere, are not carried and said
 // here. A model that cannot be written as it is - an index that does not fit a uint, a joint that does not fit a
@@ -25,27 +26,62 @@ public static class GlbWriter
 
     public static void Write(HafModel m, string path)
     {
-        var bytes = Write(m);
+        var built = Build(m);
         string full = Path.GetFullPath(path);
         Directory.CreateDirectory(Path.GetDirectoryName(full));
-        string tmp = full + ".writing-" + Guid.NewGuid().ToString("N").Substring(0, 8);
-        File.WriteAllBytes(tmp, bytes);
-        if (File.Exists(full)) File.Replace(tmp, full, null); else File.Move(tmp, full);
+        // a .tmp name: Unity's asset pipeline ignores *.tmp, so a target under Assets/ never gets a stray .meta for the half-written file
+        string tmp = full + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".tmp";
+        try
+        {
+            using (var f = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 16)) built.WriteTo(f);   // straight from the BIN buffer: one copy of the model's bytes in memory, not two
+            if (File.Exists(full)) File.Replace(tmp, full, null); else File.Move(tmp, full);
+        }
+        catch { try { if (File.Exists(tmp)) File.Delete(tmp); } catch { } throw; }   // the landing failed (locked target, a directory in the way): the target is as it was, the temporary is gone
     }
 
+    /// <summary>The whole file as one array (the tests' path; a file goes through <see cref="Write(HafModel, string)"/>, a stream through <see cref="Write(HafModel, Stream)"/>).</summary>
     public static byte[] Write(HafModel m)
+    {
+        var built = Build(m);
+        var outp = new byte[built.Total];
+        using (var ms = new MemoryStream(outp)) built.WriteTo(ms);
+        return outp;
+    }
+
+    /// <summary>The whole file onto a stream, from the BIN buffer directly: no second copy of the model's bytes.</summary>
+    public static void Write(HafModel m, Stream to) => Build(m).WriteTo(to);
+
+    /// <summary>A built file: the JSON chunk's bytes and the BIN chunk's buffer, written out in one pass by <see cref="WriteTo"/>.</summary>
+    sealed class Built
+    {
+        public byte[] Json; public int JsonPad; public MemoryStream Bin; public int BinLength;
+        public long Total => 12 + 8 + Json.Length + JsonPad + (BinLength > 0 ? 8 + BinLength : 0);
+        public void WriteTo(Stream s)
+        {
+            var h = new byte[4];
+            void U32(uint v) { h[0] = (byte)v; h[1] = (byte)(v >> 8); h[2] = (byte)(v >> 16); h[3] = (byte)(v >> 24); s.Write(h, 0, 4); }
+            U32(0x46546C67u); U32(2u); U32((uint)Total);
+            U32((uint)(Json.Length + JsonPad)); U32(0x4E4F534Au); s.Write(Json, 0, Json.Length);
+            for (int i = 0; i < JsonPad; i++) s.WriteByte(0x20);
+            if (BinLength > 0) { U32((uint)BinLength); U32(0x004E4942u); s.Write(Bin.GetBuffer(), 0, BinLength); }
+        }
+    }
+
+    static Built Build(HafModel m)
     {
         // the BIN chunk is sized ONCE from the model (every array's bytes, every image, 4-byte padding per view): a
         // growing stream doubled a 106 MB model through 128 and 256 MB arrays, and thirty such files in one Mono
         // process ran its large-object heap out ("Insufficient memory", the writer drill, 2026-10-01)
-        var bin = new MemoryStream(checked((int)Math.Min(int.MaxValue, BinSizeUpperBound(m))));
-        var views = new JArray(); var accessors = new JArray();
-        var root = new JObject
-        {
-            // the generator names this writer once; a model that came through it already keeps its line, so a second write is byte-identical
-            ["asset"] = new JObject { ["version"] = "2.0", ["generator"] = m.Generator.StartsWith(GeneratorTag, StringComparison.Ordinal) ? m.Generator : GeneratorTag + (m.Generator.Length > 0 ? " (read from " + m.Generator + ")" : "") },
-        };
         Validate(m);
+        long bound = BinSizeUpperBound(m);
+        if (bound > int.MaxValue - (64L << 20)) throw new InvalidDataException($"the model's binary data is {bound / 1e9:0.0} GB; this writer holds the file in one array and stops at 2 GB");
+        var bin = new MemoryStream((int)bound);
+        var views = new JArray(); var accessors = new JArray();
+        // the generator names this writer once; a model that came through it already keeps its line, so a second write is byte-identical
+        var asset = new JObject { ["version"] = "2.0", ["generator"] = m.Generator.StartsWith(GeneratorTag, StringComparison.Ordinal) ? m.Generator : GeneratorTag + (m.Generator.Length > 0 ? " (read from " + m.Generator + ")" : "") };
+        if (m.Copyright.Length > 0) asset["copyright"] = m.Copyright;
+        if (m.AssetExtrasJson != null) asset["extras"] = GlbReader.ParseObject(m.AssetExtrasJson);
+        var root = new JObject { ["asset"] = asset };
         var used = new SortedSet<string>(StringComparer.Ordinal);   // every extension the written file carries, declared below
 
         // ---- accessors: one tightly packed view each
@@ -94,8 +130,7 @@ public static class GlbWriter
             {
                 var j = new JObject();
                 if (im.Name.Length > 0) j["name"] = im.Name;
-                if (im.Bytes == null) throw new InvalidDataException($"image '{im.Name}' has no bytes - a model whose image was never resolved cannot be written whole");
-                j["mimeType"] = im.MimeType.Length > 0 ? im.MimeType : GuessMime(im.Bytes);
+                j["mimeType"] = Mime(im);
                 j["bufferView"] = View(im.Bytes, im.Bytes.Length);
                 images.Add(j);
             }
@@ -106,7 +141,7 @@ public static class GlbWriter
         if (samplerCount > 0)
         {
             var samplers = new JArray();
-            for (int i = 0; i < samplerCount; i++) samplers.Add(i < m.Samplers.Count ? JObject.Parse(m.Samplers[i]) : new JObject());
+            for (int i = 0; i < samplerCount; i++) samplers.Add(i < m.Samplers.Count ? GlbReader.ParseObject(m.Samplers[i]) : new JObject());
             root["samplers"] = samplers;
         }
         if (m.Textures.Count > 0)
@@ -141,10 +176,10 @@ public static class GlbWriter
                 if (mt.EmissiveTexture >= 0) j["emissiveTexture"] = TexRef(mt.EmissiveTexture, mt.EmissiveTexCoord);
                 if (!IsDefault(mt.EmissiveFactor, 0, 0, 0)) j["emissiveFactor"] = Arr(mt.EmissiveFactor);
                 if (mt.AlphaMode != "OPAQUE") j["alphaMode"] = mt.AlphaMode;
-                if (mt.AlphaMode == "MASK" && mt.AlphaCutoff != 0.5f) j["alphaCutoff"] = mt.AlphaCutoff;
+                if (mt.AlphaCutoff != 0.5f) j["alphaCutoff"] = mt.AlphaCutoff;
                 if (mt.DoubleSided) j["doubleSided"] = true;
-                if (mt.ExtensionsJson != null) { var ext = JObject.Parse(mt.ExtensionsJson); j["extensions"] = ext; foreach (var prop in ext.Properties()) used.Add(prop.Name); }
-                if (mt.ExtrasJson != null) j["extras"] = JObject.Parse(mt.ExtrasJson);
+                if (mt.ExtensionsJson != null) { var ext = GlbReader.ParseObject(mt.ExtensionsJson); j["extensions"] = ext; foreach (var prop in ext.Properties()) used.Add(prop.Name); CollectNestedExtensions(ext, used); }
+                if (mt.ExtrasJson != null) j["extras"] = GlbReader.ParseObject(mt.ExtrasJson);
                 materials.Add(j);
             }
             root["materials"] = materials;
@@ -158,7 +193,7 @@ public static class GlbWriter
             {
                 var j = new JObject();
                 if (me.Name.Length > 0) j["name"] = me.Name;
-                if (me.ExtrasJson != null) j["extras"] = JObject.Parse(me.ExtrasJson);
+                if (me.ExtrasJson != null) j["extras"] = GlbReader.ParseObject(me.ExtrasJson);
                 var prims = new JArray();
                 foreach (var p in me.Primitives)
                 {
@@ -202,11 +237,13 @@ public static class GlbWriter
                 if (n.Mesh >= 0) j["mesh"] = n.Mesh;
                 if (n.Skin >= 0) j["skin"] = n.Skin;
                 if (n.Children.Count > 0) j["children"] = new JArray(n.Children.Cast<object>());
-                if (n.ExtrasJson != null) j["extras"] = JObject.Parse(n.ExtrasJson);
+                if (n.ExtrasJson != null) j["extras"] = GlbReader.ParseObject(n.ExtrasJson);
                 nodes.Add(j);
             }
             root["nodes"] = nodes;
-            root["scenes"] = new JArray { new JObject { ["nodes"] = new JArray(m.Roots.Cast<object>()) } };
+            var scene = new JObject { ["nodes"] = new JArray(m.Roots.Cast<object>()) };
+            if (m.SceneName.Length > 0) scene["name"] = m.SceneName;
+            root["scenes"] = new JArray { scene };
             root["scene"] = 0;
         }
 
@@ -260,25 +297,11 @@ public static class GlbWriter
         while (bin.Length % 4 != 0) bin.WriteByte(0);
         if (bin.Length > 0) root["buffers"] = new JArray { new JObject { ["byteLength"] = (int)bin.Length } };
 
-        // ---- the container, assembled into one exactly sized array
+        // ---- the container: the JSON chunk's bytes, the BIN buffer as it stands
         var json = Encoding.UTF8.GetBytes(root.ToString(Newtonsoft.Json.Formatting.None));
-        int jsonPad = (4 - json.Length % 4) % 4;
-        int binLength = (int)bin.Length;
-        long total = 12 + 8 + json.Length + jsonPad + (binLength > 0 ? 8 + binLength : 0);
-        if (total > uint.MaxValue) throw new InvalidDataException("the model does not fit a GLB (over 4 GB)");
-        var outp = new byte[total];
-        int at = 0;
-        void U32(uint v) { outp[at] = (byte)v; outp[at + 1] = (byte)(v >> 8); outp[at + 2] = (byte)(v >> 16); outp[at + 3] = (byte)(v >> 24); at += 4; }
-        U32(0x46546C67u); U32(2u); U32((uint)total);
-        U32((uint)(json.Length + jsonPad)); U32(0x4E4F534Au); Buffer.BlockCopy(json, 0, outp, at, json.Length); at += json.Length;
-        for (int i = 0; i < jsonPad; i++) outp[at++] = 0x20;
-        if (binLength > 0)
-        {
-            U32((uint)binLength); U32(0x004E4942u);
-            bin.Position = 0; int read = 0; while (read < binLength) { int n = bin.Read(outp, at + read, binLength - read); if (n <= 0) break; read += n; }
-            at += binLength;
-        }
-        return outp;
+        var built = new Built { Json = json, JsonPad = (4 - json.Length % 4) % 4, Bin = bin, BinLength = (int)bin.Length };
+        if (built.Total > int.MaxValue) throw new InvalidDataException("the model does not fit this writer (over 2 GB)");
+        return built;
     }
 
     /// <summary>Every byte the BIN chunk can hold for this model, plus padding: the stream's capacity, allocated once.</summary>
@@ -309,12 +332,19 @@ public static class GlbWriter
             if (n.Skin >= m.Skins.Count) throw new InvalidDataException($"node {i} '{n.Name}' references skin {n.Skin}, the model has {m.Skins.Count}");
             foreach (var c in n.Children) if (c < 0 || c >= m.Nodes.Count) throw new InvalidDataException($"node {i} '{n.Name}' lists child {c}, the model has {m.Nodes.Count} nodes");
             if (n.HasMatrix && n.Matrix.Length != 16) throw new InvalidDataException($"node {i} '{n.Name}' has a matrix of {n.Matrix.Length} values");
+            if (n.HasMatrix) Finite(n.Matrix, $"node {i} '{n.Name}' matrix");
+            else
+            {
+                Len(n.Translation, 3, $"node {i} '{n.Name}' translation"); Len(n.Rotation, 4, $"node {i} '{n.Name}' rotation"); Len(n.Scale, 3, $"node {i} '{n.Name}' scale");
+                Finite(n.Translation, $"node {i} '{n.Name}' translation"); Finite(n.Rotation, $"node {i} '{n.Name}' rotation"); Finite(n.Scale, $"node {i} '{n.Name}' scale");
+            }
         }
         foreach (var r in m.Roots) if (r < 0 || r >= m.Nodes.Count) throw new InvalidDataException($"root {r} is not a node of the model");
         for (int mi = 0; mi < m.Meshes.Count; mi++)
             for (int pi = 0; pi < m.Meshes[mi].Primitives.Count; pi++)
             {
                 var p = m.Meshes[mi].Primitives[pi]; string where = $"mesh {mi} '{m.Meshes[mi].Name}' primitive {pi}";
+                if (p.VertexCount <= 0) throw new InvalidDataException($"{where} has no vertices (glTF has no empty accessor)");
                 if (p.Positions == null || p.Positions.Length != p.VertexCount * 3) throw new InvalidDataException($"{where}: positions do not match the vertex count");
                 if (p.MorphTargets > 0) throw new InvalidDataException($"{where} has {p.MorphTargets} morph target(s), whose data the model does not carry - refused rather than written without them");
                 foreach (float v in p.Positions) if (float.IsNaN(v) || float.IsInfinity(v)) throw new InvalidDataException($"{where}: a position is not a finite number (NaN or infinity cannot be written into the POSITION bounds)");
@@ -343,9 +373,21 @@ public static class GlbWriter
             if (m.Materials[i].ExtensionsJson != null && !IsJsonObject(m.Materials[i].ExtensionsJson)) throw new InvalidDataException($"material {i} '{m.Materials[i].Name}': extensions is not a JSON object");
         }
         foreach (var t in m.Textures) if (t.Source >= m.Images.Count) throw new InvalidDataException($"texture '{t.Name}' references image {t.Source}, the model has {m.Images.Count}");
+        for (int i = 0; i < m.Images.Count; i++)
+        {
+            var im = m.Images[i];
+            if (im.Bytes == null) throw new InvalidDataException($"image {i} '{im.Name}' has no bytes - a model whose image was never resolved cannot be written whole");
+            if (Mime(im) == null) throw new InvalidDataException($"image {i} '{im.Name}' is {(im.MimeType.Length > 0 ? im.MimeType : "of an unrecognised format")}; glTF embeds only PNG and JPEG");
+        }
+        if (m.AssetExtrasJson != null && !IsJsonObject(m.AssetExtrasJson)) throw new InvalidDataException("asset extras is not a JSON object");
         foreach (var mt in m.Materials)
+        {
             foreach (var tx in new[] { mt.BaseColorTexture, mt.MetallicRoughnessTexture, mt.NormalTexture, mt.OcclusionTexture, mt.EmissiveTexture })
                 if (tx >= m.Textures.Count) throw new InvalidDataException($"material '{mt.Name}' references texture {tx}, the model has {m.Textures.Count}");
+            Len(mt.BaseColorFactor, 4, $"material '{mt.Name}' baseColorFactor"); Len(mt.EmissiveFactor, 3, $"material '{mt.Name}' emissiveFactor");
+            Finite(mt.BaseColorFactor, $"material '{mt.Name}' baseColorFactor"); Finite(mt.EmissiveFactor, $"material '{mt.Name}' emissiveFactor");
+            Finite(new[] { mt.MetallicFactor, mt.RoughnessFactor, mt.NormalScale, mt.OcclusionStrength, mt.AlphaCutoff }, $"material '{mt.Name}' factors");
+        }
         foreach (var an in m.Animations)
         {
             foreach (var c in an.Channels)
@@ -357,12 +399,31 @@ public static class GlbWriter
             {
                 int per = s.Interpolation == "CUBICSPLINE" ? 3 : 1;
                 int values = (s.Values?.Length ?? 0), keys = s.KeyCount;
+                if (keys == 0) throw new InvalidDataException($"animation '{an.Name}': a sampler has no keys (glTF has no empty accessor)");
                 if (s.Components > 0 && values != keys * per * s.Components) throw new InvalidDataException($"animation '{an.Name}': a sampler has {keys} keys but {values} values ({s.Interpolation}, {s.Components} components)");
+                Finite(s.Times, $"animation '{an.Name}' key times");
             }
         }
     }
 
     // ---------------------------------------------------------------- small helpers
+
+    static void Len(Array a, int n, string what) { if (a == null || a.Length != n) throw new InvalidDataException($"{what} has {a?.Length ?? 0} values, {n} expected"); }
+    static void Finite(float[] a, string what) { foreach (float v in a) if (float.IsNaN(v) || float.IsInfinity(v)) throw new InvalidDataException($"{what}: a value is not a finite number (NaN or infinity cannot be written as JSON)"); }
+    static void Finite(double[] a, string what) { foreach (double v in a) if (double.IsNaN(v) || double.IsInfinity(v)) throw new InvalidDataException($"{what}: a value is not a finite number (NaN or infinity cannot be written as JSON)"); }
+    /// <summary>Every extension name used anywhere INSIDE a carried payload (a specularTexture's KHR_texture_transform), so extensionsUsed declares it too.</summary>
+    static void CollectNestedExtensions(JToken t, ISet<string> used)
+    {
+        if (t is JObject o) { if (o["extensions"] is JObject ext) foreach (var p in ext.Properties()) used.Add(p.Name); foreach (var p in o.Properties()) CollectNestedExtensions(p.Value, used); }
+        else if (t is JArray a) foreach (var e in a) CollectNestedExtensions(e, used);
+    }
+    /// <summary>The MIME type the image is written with: the declared one when it is one glTF embeds, else what the bytes say; null when neither is PNG or JPEG.</summary>
+    static string Mime(HafImage im)
+    {
+        if (im.MimeType == "image/png" || im.MimeType == "image/jpeg") return im.MimeType;
+        if (im.MimeType.Length > 0 || im.Bytes == null) return null;
+        return GuessMime(im.Bytes);
+    }
 
     static JObject TexRef(int index, int texCoord) { var j = new JObject { ["index"] = index }; if (texCoord != 0) j["texCoord"] = texCoord; return j; }
     static JArray Arr(float[] v) => new JArray(v.Cast<object>());
@@ -371,8 +432,8 @@ public static class GlbWriter
     static bool IsDefault(double[] v, params double[] d) { if (v == null || v.Length != d.Length) return false; for (int i = 0; i < v.Length; i++) if (v[i] != d[i]) return false; return true; }
     static bool IsJsonObject(string s)
     {
-        try { return Newtonsoft.Json.Linq.JToken.Parse(s) is JObject; } catch (Newtonsoft.Json.JsonException) { return false; }
+        try { GlbReader.ParseObject(s); return true; } catch (Newtonsoft.Json.JsonException) { return false; } catch (InvalidDataException) { return false; }
     }
 
-    static string GuessMime(byte[] b) => b.Length > 8 && b[0] == 0x89 && b[1] == 0x50 ? "image/png" : b.Length > 3 && b[0] == 0xFF && b[1] == 0xD8 ? "image/jpeg" : "image/png";
+    static string GuessMime(byte[] b) => b.Length > 8 && b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47 ? "image/png" : b.Length > 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF ? "image/jpeg" : null;
 }

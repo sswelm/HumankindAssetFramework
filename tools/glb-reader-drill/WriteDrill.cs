@@ -33,8 +33,16 @@ static class WriteDrill
                 sw.Stop();
                 long bytes = new FileInfo(target).Length;
                 totalBytes += bytes; totalMs += sw.Elapsed.TotalMilliseconds;
-                string diff = FirstDifference(m, GlbReader.Read(target));
+                var back = GlbReader.Read(target);
+                string diff = FirstDifference(m, back);
+                m = null;   // two whole models is the peak; the second write below needs only one
                 if (diff != null) { Console.WriteLine($"DIFF\t{name}\t{diff}"); fails++; }
+                else
+                {
+                    // deterministic on real files, not only the fixture: the read-back model written again is byte-identical to the file - compared as it streams, no second copy
+                    bool same; using (var cmp = new CompareStream(target)) { GlbWriter.Write(back, cmp); same = cmp.Same; }
+                    if (!same) { Console.WriteLine($"DIFF\t{name}\ta second write of the read-back model is not byte-identical to the first"); fails++; }
+                }
                 Console.WriteLine($"WROTE\t{name}\t{bytes}\t{sw.Elapsed.TotalMilliseconds:0}");
             }
             catch (Exception e) { Console.WriteLine($"FAIL\t{name}\t{e.Message}"); fails++; }
@@ -42,7 +50,7 @@ static class WriteDrill
             // collect between files, or thirty files fragment it into "Insufficient memory" (seen 2026-10-01)
             GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
         }
-        if (Directory.GetFiles(outDir, "*.writing-*").Length > 0) { Console.WriteLine("FAIL\t-\ta temporary file was left behind by the writer"); fails++; }
+        if (Directory.GetFiles(outDir, "*.tmp").Length > 0) { Console.WriteLine("FAIL\t-\ta temporary file was left behind by the writer"); fails++; }
         Console.WriteLine($"TOTAL\tfiles={args.Length - 1}\tMB={totalBytes / 1e6:0.0}\tms={totalMs:0}");
         return fails == 0 ? 0 : 1;
     }
@@ -62,6 +70,9 @@ static class WriteDrill
         if ((d = Count("skins", a.Skins.Count, b.Skins.Count)) != null) return d;
         if ((d = Count("animations", a.Animations.Count, b.Animations.Count)) != null) return d;
         if (!a.Roots.SequenceEqual(b.Roots)) return "roots";
+        if (a.SceneName != b.SceneName) return $"scene name: {a.SceneName} -> {b.SceneName}";
+        if (a.Copyright != b.Copyright) return "asset copyright";
+        if (a.AssetExtrasJson != b.AssetExtrasJson) return $"asset extras: {a.AssetExtrasJson} -> {b.AssetExtrasJson}";
         foreach (var e in b.ExtensionsUsed) if (!a.ExtensionsUsed.Contains(e)) return $"extensionsUsed gained {e}";
         for (int i = 0; i < a.Nodes.Count; i++)
         {
@@ -165,6 +176,33 @@ static class WriteDrill
     }
 
     static string Count(string what, int a, int b) => a == b ? null : $"{what}: {a} -> {b}";
+
+    /// <summary>A write-only stream that compares what is written with a file on disk, byte for byte, as it comes.</summary>
+    sealed class CompareStream : Stream
+    {
+        readonly FileStream file; readonly byte[] buf = new byte[1 << 16]; bool mismatch; long written;
+        public CompareStream(string path) { file = File.OpenRead(path); }
+        public bool Same => !mismatch && written == file.Length;
+        public override void Write(byte[] b, int off, int n)
+        {
+            written += n;
+            while (n > 0 && !mismatch)
+            {
+                int want = Math.Min(n, buf.Length), got = 0;
+                while (got < want) { int r = file.Read(buf, got, want - got); if (r <= 0) { mismatch = true; return; } got += r; }
+                for (int i = 0; i < want; i++) if (buf[i] != b[off + i]) { mismatch = true; return; }
+                off += want; n -= want;
+            }
+        }
+        public override void WriteByte(byte v) { Write(new[] { v }, 0, 1); }
+        protected override void Dispose(bool disposing) { file.Dispose(); base.Dispose(disposing); }
+        public override bool CanRead => false; public override bool CanSeek => false; public override bool CanWrite => true;
+        public override long Length => written; public override long Position { get => written; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] b, int o, int n) => throw new NotSupportedException();
+        public override long Seek(long o, SeekOrigin s) => throw new NotSupportedException();
+        public override void SetLength(long v) => throw new NotSupportedException();
+    }
 
     static string Arr<T>(string what, T[] a, T[] b) where T : IEquatable<T>
     {

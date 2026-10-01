@@ -16,6 +16,9 @@ using System.Collections.Generic;
 public sealed class HafModel
 {
     public string Generator = "";                 // asset.generator, for the log
+    public string Copyright = "";                 // asset.copyright, verbatim
+    public string AssetExtrasJson;                // asset.extras, verbatim JSON object or null: Sketchfab's author/license/source/title live here (6 registry files; review of PR #110 found them dropped)
+    public string SceneName = "";                 // the default scene's name (Blender writes "Scene" in every file)
     public string SourcePath = "";                // where it was read from ("" for bytes)
     public readonly List<HafNode> Nodes = new List<HafNode>();
     public readonly List<int> Roots = new List<int>();          // the default scene's root nodes (every node without a parent when no scene is declared)

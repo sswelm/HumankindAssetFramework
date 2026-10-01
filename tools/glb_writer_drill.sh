@@ -2,6 +2,7 @@
 # glb_writer_drill.sh - the GLB writer against the real registry, and against Blender (2026-10-01, step 2 of replacing
 # Blender). Every model the registry names (and the two-target fixture) is read by the real GlbReader and written by
 # the real GlbWriter to disk; then
+#  00. every extensions/extras object in the sources sits at a path the model carries (carried_paths.py), else FAIL;
 #   0. the written file is read back and compared with its source FIELD BY FIELD inside the writer drill (every
 #      vertex, index, material field, sampler, image byte, skin matrix, animation key); the first difference is named;
 #   1. the reader drill reads the WRITTEN files and every value (counts, world box, area, centroid, winding, bones,
@@ -44,6 +45,14 @@ python "$ROOT/tools/glb-reader-drill/fixture_two_targets.py" "$FIXTURE" > /dev/n
 FILES+=("$FIXTURE")
 # two registry entries may share a file; the written copies are keyed by basename, so write each file once
 mapfile -t UNIQUE < <(printf '%s\n' "${FILES[@]}" | awk '!seen[tolower($0)]++')
+
+# ---- 00. every extensions/extras object in the SOURCES sits where the model carries it (the reader does not model the
+# rest, so the writer would drop it without a word and the reader-vs-reader compare below could not tell)
+COUT=$(python "$ROOT/tools/glb-reader-drill/carried_paths.py" "${UNIQUE[@]}" 2>&1); rc=$?   # rc BEFORE any pipe: a pipe would report tr's
+COUT=$(printf '%s' "$COUT" | tr -d '\r')
+echo "$COUT" | grep -E "^FAIL"
+[ "$rc" -eq 0 ] || { echo "FAIL — GLB writer drill: a source carries an extensions/extras object at a path the model does not (it would be dropped on write)"; exit 1; }
+echo "sources: $(echo "$COUT" | grep '^CARRIED' | cut -f2-)"
 
 # ---- write
 WRITTEN="$WTMP/written"
