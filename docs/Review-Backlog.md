@@ -71,8 +71,8 @@ rig bones) with row-for-row parity on every registry source and every saved reci
 the recipes' sources are the probe's real inputs and found what the registry could not: shared vertex accessors, a
 required material extension, a sheared node matrix); **3b** the visibility verdicts (escape rays over
 one BVH) — done (10,498 parts on 118 files agree with Blender, 1,171 interior; it took Blender's own vertex order
-after a loose split and the file's normals as the normal ray to get there); **3c** the inside-out verdicts (island scoring against the hull axis) — done (11,513 of 11,516 parts agree; the
-three left are skinned parts with zero-area triangles, the item below); **3d** the Lab calls the C# probe for
+after a loose split and the file's normals as the normal ray to get there); **3c** the inside-out verdicts (island scoring against the hull axis) — done (14,020 of 14,023 parts on 119 files
+agree; the three left are skinned parts with zero-area triangles, the item below); **3d** the Lab calls the C# probe for
 `.glb`/`.gltf` sources and builds its part preview in-process instead of importing a preview FBX (FBX/OBJ/.blend
 sources keep Blender). The order below stands for the rest.
 
@@ -97,6 +97,22 @@ launch from the Clip Range dialog); (2) reduce/`prep_model` → a C# quadric dec
   `vehicle_rig` are ported; **(B)** a rule in BOTH the script and the port that a triangle whose edges are parallel to
   float32 resolution casts no vote — measured to change the reference's own count on 29 of 11,516 parts (fused ships
   are full of slivers), a behaviour change, and still a threshold the ulp can straddle; **(C)** leave the three named.
+- **Grazing visibility rays on the re-fused Dragon** — OPEN, BLOCKS THE GATE (2026-10-02, found by 3c's drill run; a
+  3b matter, master fails the same way). `sns_dragon_split_fused.glb` as re-fused that evening: 12 of 2,507 visibility
+  verdicts differ from Blender's, in both directions, on decal quads snapped to panel edges and on coincident twin
+  panels — rays that run exactly along a face edge or a coplanar twin, where the last bit decides. Three causes,
+  each measured in a scratch build (the session's scratchpad `flip/src`, `probe_bw.exe`): (1) the sample position —
+  Blender composes each object's matrix_world in float32 from its float32 location, quaternion and scale (the
+  quaternion normalized, `quat_to_mat3` in double, `mul_m4_m4m4`'s SSE2 association down the parent chain), and a
+  MATRIX node first goes through the importer's `decompose()`; the Dragon's root is a 90° permutation matrix that
+  comes back from the quaternion round trip 1e-7 off, 2e-4 at 2,300 units; (2) the ray — `p + d * eps`, the
+  normalized direction and `isect_ray_tri_watertight_v3` with its leaf-box test are all float32; (3) the normal ray —
+  Blender stores custom normals as two shorts (`custom_normal`, 4.8e-5 rad resolution), so a file normal of exactly
+  (0, 0, 1) comes back as (0, -1, -4.8e-5) in its frame. Porting (1) and (2) bit for bit took the Dragon from 12 to
+  5 differences and changed no other row on 119 files; the 5 left are 4 normal-ray escapes (cause 3: the lnor-space
+  encode/decode of `mesh_normals.cc` is the port still to write) and one fixed ray on a Workshop split part, not yet
+  explained. Until this lands the probe drill FAILS on this recipe source (every push runs it); the quick way out is
+  the user's: re-fuse or re-save the recipe only moves the file, it does not change the rule.
 
 
 - ~~**Gate the rest-fold on the `convertRig` flag?**~~ — DECIDED + IMPLEMENTED 2026-07-19: **split gating.** The

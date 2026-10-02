@@ -106,7 +106,7 @@ the part **names** — the key every saved recipe holds — and their order, ver
 0.0002 + 2e-6 of the model's extent), **visibility verdicts** (since step 3b, 2026-10-02: exact — 10,498 parts, 1,171
 of them interior, agree; two fixtures hold a part inside a closed box, a 1,681-vertex grid Blender separates from a
 single mesh, and a triangle whose only escape is its file normal's direction), **inside-out verdicts** (since step 3c,
-2026-10-02: exact — 11,513 of 11,516 parts agree; the three that differ are skinned parts with zero-area triangles
+2026-10-02: exact — 14,020 of 14,023 parts on 119 files agree; the three that differ are skinned parts with zero-area triangles
 whose normal is decided by the float32 ulp Blender's importer adds when it skins them, named in the Review Backlog;
 the `insideout` fixture holds strips facing the axis and away, the same under a mirrored node, two islands in one
 mesh, a collinear triangle and a skinned strip), dominant bones, and the RIGBONE rows.

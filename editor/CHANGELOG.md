@@ -11,8 +11,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   mid-Y and lower-quartile Z of every part's sampled vertices) — is computed as `vehicle_rig.py probe` computes it, in
   Blender's own arithmetic: the face normal from the LOCAL corners in float32, taken through matrix_world's 3×3 (a
   mirrored node keeps it that way — the cross product of the world corners read a mirrored test part the wrong way),
-  mathutils' products summed in double, its `normalized` and `dot` as written. **11,513 of 11,516 parts on 118 files
-  agree with Blender's own probe** (3,229 of them hold reversed islands; 309,441 islands scored); the three that
+  mathutils' products summed in double, its `normalized` and `dot` as written. **14,020 of 14,023 parts on 119 files
+  agree with Blender's own probe** (3,229 of them hold reversed islands; 309,441 islands scored; the 2,507 parts of the
+  Dragon re-fused on 2026-10-02 all agree); the three that
   differ, by one or two islands each, are skinned parts with zero-area triangles: Blender's importer skins their
   vertices into the bind pose in numpy float32 (the joint matrices through Eigen's inverse and a decompose) and lands
   one float32 ulp from the double arithmetic here, and on a collinear triangle that ulp is the whole normal — named
