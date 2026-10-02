@@ -379,6 +379,11 @@ windows. **Deep dive:**
   and write a new `_split_parts.glb` in which every unattached geometry island is a separately selectable child
   node. The source is protected from overwrite, triangle totals are verified, and existing materials, transforms,
   skins, animations, textures and vertex data are retained. Duplicate UV/normal seam vertices remain attached.
+- **Compact a GLB** — `Tools ▸ HAF ▸ Model Tools ▸ Compact a GLB (leave out what no part uses)…`. Writes a copy of a
+  `.glb` without the geometry no part can reach any more: what Splits, Cuts, Fuses and Deletes took off the nodes of a
+  file written before the Workshop compacted its own outputs (a fused ship can be three quarters dead weight). Every
+  part reads exactly as before; nodes keep their indices; the source is not changed. Every Cutter/Fuser output is
+  compacted as it is written, so this is only for files made earlier.
 - **Model Cutter and Model Fuser** — `Tools ▸ HAF ▸ Model Cutter` and `Tools ▸ HAF ▸ Model Fuser`, two windows on one
   implementation (0.5.7: the one Model Workshop had grown cluttered). Both share the file pickers, the probe, the filtered
   part list, the preview, the mirror finder and the keyboard sweep; the Cutter shows the Split checkboxes, the deletion marks and the plane cut,

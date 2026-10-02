@@ -1,6 +1,7 @@
 // GlbDisconnectedParts.cs — losslessly expose disconnected geometry islands as separate GLB scene parts.
-// The original accessors/materials/skins/textures stay byte-for-byte in the BIN. Only filtered index accessors,
-// meshes and child nodes are appended, so this does not incur Blender import/export reinterpretation.
+// What a node can still reach keeps its bytes exactly; only filtered index accessors, meshes and child nodes are
+// appended, so this does not incur Blender import/export reinterpretation. What NO node can reach any more — the
+// meshes an operation took off their nodes — is left out when the output is written (GlbDisconnectedParts.Compact.cs).
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -13,7 +14,7 @@ using UnityEditor;
 using UnityEngine;
 #endif
 
-public static class GlbDisconnectedParts
+public static partial class GlbDisconnectedParts
 {
     const uint Magic = 0x46546C67;
     const uint JsonChunk = 0x4E4F534A;
@@ -34,6 +35,7 @@ public static class GlbDisconnectedParts
         public int VerticesBefore, VerticesAfter, IslandsBefore, IslandsAfter, FacesRewound;
         public readonly List<string> IslandLines = new List<string>();   // EVERY sheet's verdict, largest first (the report; Details keeps the largest six for the status)
         public int FusedNodeIndex = -1; public string FusedNodeName;   // the appended shell (a fuse only): the output sidecar names it with its group's letter
+        public Compaction Compaction;   // what writing the output left out (never null on a written result); its line is the LAST of Details when it has one
     }
 
     sealed class Chunk
@@ -887,7 +889,7 @@ public static class GlbDisconnectedParts
 
         buffers[0]["byteLength"] = bin.Count;
         document.Chunks[document.BinIndex].Data = bin.ToArray();
-        result.Bytes = Write(document);
+        result.Bytes = Write(document, result);
         ValidateOutput(result.Bytes);
         return result;
     }
@@ -1229,7 +1231,7 @@ public static class GlbDisconnectedParts
             throw new InvalidDataException("Triangle preservation check failed: source " + result.SourceTriangles + ", output " + result.OutputTriangles + ".");
         buffers[0]["byteLength"] = bin.Count;
         document.Chunks[document.BinIndex].Data = bin.ToArray();
-        result.Bytes = Write(document);
+        result.Bytes = Write(document, result);
         ValidateOutput(result.Bytes);
         return result;
     }
@@ -1298,7 +1300,7 @@ public static class GlbDisconnectedParts
         ApplyPlan(root, nodes, meshes, bin, plan);
         buffers[0]["byteLength"] = bin.Count;
         document.Chunks[document.BinIndex].Data = bin.ToArray();
-        plan.Result.Bytes = Write(document);
+        plan.Result.Bytes = Write(document, plan.Result);
         ValidateOutput(plan.Result.Bytes);
         return plan.Result;
     }
@@ -1431,7 +1433,7 @@ public static class GlbDisconnectedParts
         foreach (FusePlan plan in plans) { ApplyPlan(root, nodes, meshes, bin, plan); results.Add(plan.Result); }
         buffers[0]["byteLength"] = bin.Count;
         document.Chunks[document.BinIndex].Data = bin.ToArray();
-        byte[] bytes = Write(document);
+        byte[] bytes = Write(document, results.Count > 0 ? results[results.Count - 1] : null);   // one file, one compaction: said on the last group's result
         ValidateOutput(bytes);
         return bytes;
     }
@@ -2950,7 +2952,7 @@ public static class GlbDisconnectedParts
         result.NodesSplit = renamed.Count;
         if (renamed.Count == 0) return result;   // Changed == false, Bytes null: the caller keeps what it had
         result.Details.Add("Renamed " + renamed.Count + " part(s) to unique names: " + string.Join(", ", renamed.Take(12)) + (renamed.Count > 12 ? ", ..." : ""));
-        result.Bytes = Write(document);
+        result.Bytes = Write(document, result);
         return result;
     }
 
@@ -2972,7 +2974,7 @@ public static class GlbDisconnectedParts
         }
         if (result.NodesSplit == 0) return result;   // Changed == false, Bytes null: the caller keeps what it had
         result.Details.Add("Removed " + result.NodesSplit + " part(s): " + string.Join(", ", names));
-        result.Bytes = Write(document);
+        result.Bytes = Write(document, result);
         ValidateOutput(result.Bytes);
         return result;
     }
@@ -3631,8 +3633,21 @@ public static class GlbDisconnectedParts
         return document;
     }
 
-    static byte[] Write(Document document)
+    /// <summary>Write the document, compacted, and note on the operation's result what was left out (or why not).</summary>
+    static byte[] Write(Document document, Result result)
     {
+        byte[] bytes = Write(document, out Compaction compaction);
+        if (result != null)
+        {
+            result.Compaction = compaction;
+            if (compaction.Changed || compaction.Skipped != null) result.Details.Add(compaction.Line);
+        }
+        return bytes;
+    }
+
+    static byte[] Write(Document document, out Compaction compaction)
+    {
+        compaction = CompactDocument(document);
         document.Chunks[document.JsonIndex].Data = Pad(Encoding.UTF8.GetBytes(document.Root.ToString(Formatting.None)), 0x20);
         document.Chunks[document.BinIndex].Data = Pad(document.Chunks[document.BinIndex].Data, 0x00);
         long total = 12 + document.Chunks.Sum(c => 8L + c.Data.Length);
@@ -3732,6 +3747,52 @@ public static class GlbDisconnectedPartsMenu
         {
             Debug.LogException(ex);
             EditorUtility.DisplayDialog("GLB split failed", ex.Message + "\n\nThe source file was not changed.", "OK");
+        }
+        finally { EditorUtility.ClearProgressBar(); }
+    }
+
+    // COMPACT AN EXISTING FILE (2026-10-02): every Workshop output is compacted as it is written now, but the files
+    // written before that still carry what their Splits, Cuts and Fuses took off the nodes (a fused Saleg's Revenge:
+    // 398 MB, of which 121 MB is still drawn). Any further Workshop operation on such a file compacts it too; this is
+    // the way to do it without one. Like every tool here it writes a NEW file and never touches the source.
+    [MenuItem("Tools/HAF/Model Tools/Compact a GLB (leave out what no part uses)…", false, 41)]
+    static void CompactGlb()
+    {
+        string input = EditorUtility.OpenFilePanel("Choose a GLB to compact", "D:/3DModels", "glb");
+        if (string.IsNullOrEmpty(input)) return;
+        try
+        {
+            EditorUtility.DisplayProgressBar("HAF — Compact GLB", "Finding what no part uses…", 0.35f);
+            byte[] source = File.ReadAllBytes(input);
+            GlbDisconnectedParts.Result result = GlbDisconnectedParts.Compact(source);
+            if (result.Bytes == null)
+            {
+                EditorUtility.DisplayDialog(result.Compaction.Skipped != null ? "Not compacted" : "Nothing to compact", result.Details[0], "OK");
+                return;
+            }
+            string output = EditorUtility.SaveFilePanel("Write compacted GLB", Path.GetDirectoryName(input),
+                Path.GetFileNameWithoutExtension(input) + "_compact", "glb");
+            if (string.IsNullOrEmpty(output)) return;
+            if (string.Equals(Path.GetFullPath(input), Path.GetFullPath(output), StringComparison.OrdinalIgnoreCase))
+            {
+                EditorUtility.DisplayDialog("Source protected", "Choose a different output filename. This tool never overwrites the source GLB.", "OK");
+                return;
+            }
+            if (File.Exists(output) && !EditorUtility.DisplayDialog("Overwrite existing GLB?", output, "Overwrite", "Cancel")) return;
+
+            EditorUtility.DisplayProgressBar("HAF — Compact GLB", "Writing…", 0.8f);
+            File.WriteAllBytes(output, result.Bytes);
+            ImportIfInsideProject(output);
+            string sizes = (source.Length / 1e6).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " MB -> "
+                         + (result.Bytes.Length / 1e6).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " MB";
+            EditorUtility.DisplayDialog("GLB compacted", result.Details[0] + "\n\nFile: " + sizes + "\nEvery part reads exactly as before; the source was not changed.\n\n" + output, "OK");
+            EditorUtility.RevealInFinder(output);
+            Debug.Log("[HAF GLB Compact] " + result.Details[0] + " File: " + sizes + ". Output: " + output);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogException(ex);
+            EditorUtility.DisplayDialog("GLB compaction failed", ex.Message + "\n\nThe source file was not changed.", "OK");
         }
         finally { EditorUtility.ClearProgressBar(); }
     }

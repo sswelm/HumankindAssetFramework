@@ -68,6 +68,7 @@ run "blender exit drill (a crashed script fails the process; SKIP without Blende
 run "GLB reader drill (every registry GLB read; a sample compared with Blender; SKIP without the project)" bash "$ROOT/tools/glb_reader_drill.sh"
 run "GLB writer drill (every registry GLB written, read back equal; a sample re-imported by Blender; SKIP without the project)" bash "$ROOT/tools/glb_writer_drill.sh"
 run "vehicle probe drill (the Lab's probe in C#: every source probed, a sample's rows equal to Blender's own probe)" bash "$ROOT/tools/vehicle_probe_drill.sh"
+run "Workshop compaction drill (what no node uses is left out; every part reads as before - GLB reader and Blender; SKIP without the project)" bash "$ROOT/tools/workshop_compact_drill.sh"
 #    5b) The ownership-rebase hand-lists. A field the UI edits but the window's rebase doesn't re-apply is thrown
 #        away on every Save — silent, and the reason this gate exists. Pure source analysis, so CI can run it too.
 run "hand-list gate (ownership rebases)" bash "$ROOT/tools/check_handlists.sh"
@@ -77,6 +78,7 @@ run "hand-list gate (ownership rebases)" bash "$ROOT/tools/check_handlists.sh"
 #        authoring side by construction. Broke the install three times on 2026-08-24 (package.json + asmdef, then
 #        HafPackageContext.cs, then the Plugins FOLDER); an ignored asmdef means the package compiles to nothing.
 run "package meta (every editor/ path has one)" bash "$ROOT/tools/check-package-meta.sh"
+run "exit status (no gate script reads a status from the end of a pipeline)" bash "$ROOT/tools/check-exit-status.sh"
 
 printf '\n========================================\n'
 if [ "$fail" -eq 0 ]; then printf 'CHECK: PASS — safe to push.\n'; else printf 'CHECK: FAIL — fix the [FAIL] step(s) above before pushing (or, only in a real emergency, git push --no-verify).\n'; fi
