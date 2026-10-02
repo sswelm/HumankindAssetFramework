@@ -14,7 +14,7 @@
 // Said, not solved: a SKINNED part's vertex positions are what Blender's importer skinned into the bind pose in numpy
 // float32 (joint matrices from the inverse bind matrices through Eigen's inverse and a decompose, then a float32
 // multiply-add chain); the double arithmetic here lands within one float32 ulp of them, and on a zero-area triangle that
-// ulp decides the normal. 3 parts of 11,516 (all skinned, all on collinear triangles) differ by 1-2 islands for it -
+// ulp decides the normal. 3 parts of 14,023 (all skinned, all on collinear triangles) differ by 1-2 islands for it -
 // docs/Review-Backlog.md.
 using System;
 using System.Collections.Generic;

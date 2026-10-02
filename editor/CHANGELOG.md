@@ -12,15 +12,15 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   Blender's own arithmetic: the face normal from the LOCAL corners in float32, taken through matrix_world's 3×3 (a
   mirrored node keeps it that way — the cross product of the world corners read a mirrored test part the wrong way),
   mathutils' products summed in double, its `normalized` and `dot` as written. **14,020 of 14,023 parts on 119 files
-  agree with Blender's own probe** (3,229 of them hold reversed islands; 309,441 islands scored; the 2,507 parts of the
-  Dragon re-fused on 2026-10-02 all agree); the three that
+  agree with Blender's own probe** (4,208 of them hold islands the fix would reverse, 318,756 such islands in all; the 2,507
+  parts of the Dragon re-fused on 2026-10-02 all agree); the three that
   differ, by one or two islands each, are skinned parts with zero-area triangles: Blender's importer skins their
   vertices into the bind pose in numpy float32 (the joint matrices through Eigen's inverse and a decompose) and lands
   one float32 ulp from the double arithmetic here, and on a collinear triangle that ulp is the whole normal — named
   in docs/Review-Backlog.md, decision pending. The drill compares the field from now on; the `insideout` fixture (a
   keel pinning the axis, strips facing down and up, the same under a mirrored node, two islands in one mesh, a
-  collinear triangle, a skinned strip) agrees with Blender part for part. The probe over the 118 files: 27 s, reading
-  included. Not wired into the Lab yet (part D).
+  collinear triangle, a skinned strip) agrees with Blender part for part. The probe over the 119 files: 29 s on the 64-bit
+  runtime, reading included. Not wired into the Lab yet (part D).
 - **The probe's visibility verdict in C# — step 3 of replacing Blender, part B** (`VehicleProbe.Visibility`,
   `VehicleProbe.Islands`). The PART row's field 6 — 1 for a part some vertex of which can shoot a ray to infinity
   past all geometry, 0 for one blocked from every sample in every direction (the Lab strips those) — is computed

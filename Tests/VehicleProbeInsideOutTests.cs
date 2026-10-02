@@ -6,7 +6,7 @@ using Xunit;
 /// <summary>The PART row's inside-out verdict (field 8, step 3c): the islands the fix would reverse. Every expectation
 /// here was READ OFF Blender's own probe (vehicle_rig.py probe, Blender 5.1, 2026-10-02) on the `insideout` fixture of
 /// the same shape in tools/vehicle-probe-drill/naming_fixtures.py; the drill holds the two together on the real files
-/// (11,516 parts; 3 skinned parts differ on zero-area triangles that Blender's float32 skinning perturbs - said in
+/// (14,023 parts on 119 files; 3 skinned parts differ on zero-area triangles that Blender's float32 skinning perturbs - said in
 /// VehicleProbe.InsideOut.cs and docs/Review-Backlog.md).</summary>
 public class VehicleProbeInsideOutTests
 {
