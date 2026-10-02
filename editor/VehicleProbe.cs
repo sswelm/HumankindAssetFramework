@@ -117,6 +117,7 @@ public static partial class VehicleProbe
                 int skin = m.Nodes[node].Skin;
                 bool skinned = skin >= 0 && skin < m.Skins.Count && mesh.Primitives.Any(p => p.Skinned);
                 Func<HafPrimitive, int, double[]> position = (p, v) => new double[] { p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2] };
+                Func<HafPrimitive, int, double[]> normal = (p, v) => p.Normals == null ? null : new double[] { p.Normals[v * 3], p.Normals[v * 3 + 1], p.Normals[v * 3 + 2] };
                 if (skinned)
                 {
                     if (!jointMatsOfSkin.TryGetValue(skin, out var jointMats))
@@ -125,9 +126,15 @@ public static partial class VehicleProbe
                         jointMats = jointMatsOfSkin[skin] = BindJointMatrices(m, m.Skins[skin], bindArma);
                     }
                     var jm = jointMats;
-                    position = (p, v) => p.Skinned ? BindPosition(p, v, jm) : new double[] { p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2] };
+                    position = (p, v) => p.Skinned ? HafTransforms.Apply(BindMatrix(p, v, jm), p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2], 1.0)
+                                                   : new double[] { p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2] };
+                    // skin_into_bind_pose skins the NORMALS too: the 3x3 of the same weighted matrix, no translation, normalized
+                    // (external review of PR #115: left as the file's, a part whose only escape is its normal ray read interior)
+                    normal = (p, v) => p.Normals == null ? null
+                                     : p.Skinned ? HafTransforms.Apply(BindMatrix(p, v, jm), p.Normals[v * 3], p.Normals[v * 3 + 1], p.Normals[v * 3 + 2], 0.0)
+                                     : new double[] { p.Normals[v * 3], p.Normals[v * 3 + 1], p.Normals[v * 3 + 2] };
                 }
-                partMeshes.Add(BuildPartMesh(m, node, prim, verts, skinned ? armaWorld[skin] : world[node], position));
+                partMeshes.Add(BuildPartMesh(m, node, prim, verts, skinned ? armaWorld[skin] : world[node], position, normal));
             }
             Visibility(r.Parts, partMeshes);
         }
@@ -416,9 +423,14 @@ public static partial class VehicleProbe
         return jointMats;
     }
 
-    /// <summary>`v.co` of a skinned vertex: skinned into the importer's bind pose, in the armature's space - the weighted
-    /// joint matrices, the weights normalized by their sum (a zero sum = all on the first joint).</summary>
+    /// <summary>`v.co` of a skinned vertex: skinned into the importer's bind pose, in the armature's space.</summary>
     static double[] BindPosition(HafPrimitive p, int v, double[][] jointMats)
+        => HafTransforms.Apply(BindMatrix(p, v, jointMats), p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2], 1.0);
+
+    /// <summary>A skinned vertex's skinning matrix into the importer's bind pose: the weighted joint matrices, the weights
+    /// normalized by their sum (a zero sum = all on the first joint). Positions go through it with w = 1, normals with
+    /// w = 0 (skin_into_bind_pose: the 3x3, no translation).</summary>
+    static double[] BindMatrix(HafPrimitive p, int v, double[][] jointMats)
     {
         var acc = new double[16]; double wsum = 0;
         for (int set = 0; set < 2; set++)
@@ -435,7 +447,7 @@ public static partial class VehicleProbe
         }
         if (wsum == 0) { int j0 = p.Joints[v * 4]; acc = (double[])jointMats[j0 < jointMats.Length ? j0 : 0].Clone(); wsum = 1; }
         for (int e = 0; e < 16; e++) acc[e] /= wsum;
-        return HafTransforms.Apply(acc, p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2], 1.0);
+        return acc;
     }
 
     // ---------------------------------------------------------------- rig_report

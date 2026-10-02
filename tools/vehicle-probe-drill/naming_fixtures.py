@@ -363,6 +363,42 @@ def fx_visibility(out):
     F.write_glb(os.path.join(out, "visibility.glb"), root, b)
 
 
+def fx_visibility_skinned(out):
+    """A SKINNED triangle inside the 15 shields, its file normals +X and its one joint turned 63.43 degrees about glTF Y
+    so that the bind pose takes that normal to the gap direction (1, 0, -2) / sqrt 5: Blender skins the normals into the
+    bind pose as it skins the positions (skin_into_bind_pose), so the normal ray escapes (1). With the file's normal as
+    given it would meet the +X shield (external review of PR #115). Its twin Still, whose joint is not turned, is 0."""
+    b = F.Buf()
+    import math
+    th = math.atan2(2.0, 1.0)
+    meshes = []; nodes = []
+    dirs = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1), (1, 1, 1), (1, 1, -1), (1, -1, 1), (1, -1, -1), (-1, 1, 1), (-1, 1, -1), (-1, -1, 1), (-1, -1, -1), (-1, -2, 0)]
+    for k, (ox, oy, oz) in enumerate(dirs):
+        gx, gy, gz = ox, oz, -oy
+        l = (gx * gx + gy * gy + gz * gz) ** 0.5; gx, gy, gz = gx / l, gy / l, gz / l
+        cx, cy, cz = gx * 5, gy * 5, gz * 5
+        ax, ay, az = (0, 1, 0) if abs(gy) < 0.9 else (1, 0, 0)
+        ux, uy, uz = gy * az - gz * ay, gz * ax - gx * az, gx * ay - gy * ax
+        l = (ux * ux + uy * uy + uz * uz) ** 0.5; ux, uy, uz = ux / l, uy / l, uz / l
+        vx, vy, vz = gy * uz - gz * uy, gz * ux - gx * uz, gx * uy - gy * ux
+        q = [(cx + s1 * 1.5 * ux + s2 * 1.5 * vx, cy + s1 * 1.5 * uy + s2 * 1.5 * vy, cz + s1 * 1.5 * uz + s2 * 1.5 * vz) for s1, s2 in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+        meshes.append({"name": "shield%d" % k, "primitives": [{"attributes": {"POSITION": b.accessor(q, "f", "VEC3")}, "indices": b.accessor([0, 1, 2, 0, 2, 3], "H", "SCALAR")}]})
+        nodes.append({"name": "Shield%02d" % k, "mesh": len(meshes) - 1})
+    tpos = [(0, 0, 0), (0.2, 0, 0), (0, 0.2, 0)]
+    def skinned_tri(joint):
+        return {"POSITION": b.accessor(tpos, "f", "VEC3"), "NORMAL": b.accessor([(1.0, 0.0, 0.0)] * 3, "f", "VEC3", minmax=False),
+                "JOINTS_0": b.accessor([(joint, 0, 0, 0)] * 3, "H", "VEC4", minmax=False), "WEIGHTS_0": b.accessor([(1, 0, 0, 0)] * 3, "f", "VEC4", minmax=False)}
+    meshes.append({"name": "turned", "primitives": [{"attributes": skinned_tri(0)}]})
+    meshes.append({"name": "still", "primitives": [{"attributes": skinned_tri(0)}]})
+    n0 = len(nodes)
+    nodes += [{"name": "Rig", "children": [n0 + 1]}, {"name": "Turned", "rotation": [0, math.sin(th / 2), 0, math.cos(th / 2)]},
+              {"name": "Rig2", "children": [n0 + 3]}, {"name": "StillJoint"},
+              {"name": "TurnedMesh", "mesh": len(meshes) - 2, "skin": 0}, {"name": "StillMesh", "mesh": len(meshes) - 1, "skin": 1}]
+    skins = [{"name": "Skin", "joints": [n0 + 1]}, {"name": "Skin2", "joints": [n0 + 3]}]
+    root = F.base("visibility_skinned", meshes=meshes, nodes=nodes, skins=skins, scenes=[{"nodes": list(range(n0)) + [n0, n0 + 2, n0 + 4, n0 + 5]}], scene=0)
+    F.write_glb(os.path.join(out, "visibility_skinned.glb"), root, b)
+
+
 def fx_visibility_split(out):
     """The same box, core and outside triangle as ONE mesh of three islands, split into loose parts - the core a 40 x 40
     grid (1,681 vertices, so every 56th is sampled, and 3,200 faces, so Blender's edge array is built in 8 hash buckets):
@@ -381,7 +417,7 @@ def fx_visibility_split(out):
 
 FIXTURES = [fx_naming, fx_order, fx_armature_names, fx_skinned_not_moved, fx_skinned_animated, fx_mesh_on_bone, fx_islands, fx_rotated_armature,
             fx_two_armatures, fx_nested_skins, fx_split_collision, fx_nonunit_rotation, fx_cameras, fx_camera_data_names,
-            fx_name_tails, fx_long_names, fx_many_names, fx_bone_tails, fx_split_tails, fx_icosphere_mesh, fx_visibility, fx_visibility_split]
+            fx_name_tails, fx_long_names, fx_many_names, fx_bone_tails, fx_split_tails, fx_icosphere_mesh, fx_visibility, fx_visibility_skinned, fx_visibility_split]
 
 
 def main(out):

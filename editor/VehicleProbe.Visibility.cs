@@ -14,7 +14,8 @@
 // The vertex NORMAL is the one Blender holds for the vertex after import. A glTF mesh with a NORMAL attribute gets it as
 // custom corner normals, and `vertex.normal` is then the angle-weighted mix of the vertex's corner normals - which for
 // a glTF vertex, whose corners all carry the file's normal, IS the file's normal (measured on the Ehrhardt: 13 sliver
-// quads differed with computed normals, none with the file's). Without a NORMAL attribute Blender computes the vertex
+// quads differed with computed normals, none with the file's) - for a skinned vertex the file's normal skinned into the
+// bind pose as the importer skins it (skin_into_bind_pose: the skinning matrix's 3x3, normalized). Without a NORMAL attribute Blender computes the vertex
 // normal from the faces (angle-weighted face normals; a vertex without faces: its position's direction).
 // Measured: 10,498 parts on 118 files agree with Blender's probe, 1,171 of them interior.
 using System;
@@ -38,8 +39,9 @@ public static partial class VehicleProbe
 
     /// <summary>The data vertices of one part (the node's whole mesh, or one island of it) in Blender's order, its
     /// triangles, and its normal rays - from the object's local space through `objWorld` into Blender's frame.
-    /// `dataPosition` gives a primitive's vertex in the object's local space (the file's position, or the bind pose).</summary>
-    static PartMesh BuildPartMesh(HafModel m, int node, int onlyPrim, int[] onlyVerts, double[] objWorld, Func<HafPrimitive, int, double[]> dataPosition)
+    /// `dataPosition` gives a primitive's vertex in the object's local space (the file's position, or the bind pose);
+    /// `dataNormal` the file's normal there (skinned into the bind pose for a skinned vertex), or null without one.</summary>
+    static PartMesh BuildPartMesh(HafModel m, int node, int onlyPrim, int[] onlyVerts, double[] objWorld, Func<HafPrimitive, int, double[]> dataPosition, Func<HafPrimitive, int, double[]> dataNormal)
     {
         var mesh = m.Meshes[m.Nodes[node].Mesh];
         var local = new List<double>(); var fileNormal = new List<double>(); var tris = new List<int>();
@@ -55,7 +57,8 @@ public static partial class VehicleProbe
                 rank[verts[k]] = offset + k;
                 var co = dataPosition(p, verts[k]);
                 local.Add(co[0]); local.Add(co[1]); local.Add(co[2]);
-                if (p.Normals != null) { fileNormal.Add(p.Normals[verts[k] * 3]); fileNormal.Add(p.Normals[verts[k] * 3 + 1]); fileNormal.Add(p.Normals[verts[k] * 3 + 2]); }
+                var fn = dataNormal(p, verts[k]);
+                if (fn != null) { fileNormal.Add(fn[0]); fileNormal.Add(fn[1]); fileNormal.Add(fn[2]); }
                 else { fileNormal.Add(double.NaN); fileNormal.Add(double.NaN); fileNormal.Add(double.NaN); }
             }
             int count = p.Indices != null ? p.Indices.Length : p.VertexCount;

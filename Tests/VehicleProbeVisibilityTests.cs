@@ -84,6 +84,44 @@ public class VehicleProbeVisibilityTests
     }
 
     [Fact]
+    public void A_skinned_vertexs_normal_ray_is_its_file_normal_skinned_into_the_bind_pose()
+    {
+        // the "visibility_skinned" fixture, Blender: TurnedMesh 1, StillMesh 0 - the same +X file normal, a joint turned
+        // 63.43 degrees about glTF Y takes it to the gap (external review of PR #115: the normal was left as the file's)
+        var m = new HafModel();
+        var dirs = new[] { (1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1), (1, 1, 1), (1, 1, -1), (1, -1, 1), (1, -1, -1), (-1, 1, 1), (-1, 1, -1), (-1, -1, 1), (-1, -1, -1), (-1, -2, 0) };
+        foreach (var (ox, oy, oz) in dirs)
+        {
+            double gx = ox, gy = oz, gz = -oy; double l = Math.Sqrt(gx * gx + gy * gy + gz * gz); gx /= l; gy /= l; gz /= l;
+            double cx = gx * 5, cy = gy * 5, cz = gz * 5;
+            double ax = Math.Abs(gy) < 0.9 ? 0 : 1, ay = Math.Abs(gy) < 0.9 ? 1 : 0, az = 0;
+            double ux = gy * az - gz * ay, uy = gz * ax - gx * az, uz = gx * ay - gy * ax; l = Math.Sqrt(ux * ux + uy * uy + uz * uz); ux /= l; uy /= l; uz /= l;
+            double vx = gy * uz - gz * uy, vy = gz * ux - gx * uz, vz = gx * uy - gy * ux;
+            var q = new List<float>();
+            foreach (var (s1, s2) in new[] { (-1, -1), (1, -1), (1, 1), (-1, 1) }) { q.Add((float)(cx + s1 * 1.5 * ux + s2 * 1.5 * vx)); q.Add((float)(cy + s1 * 1.5 * uy + s2 * 1.5 * vy)); q.Add((float)(cz + s1 * 1.5 * uz + s2 * 1.5 * vz)); }
+            m.Meshes.Add(Mesh("shield", q.ToArray(), new[] { 0, 1, 2, 0, 2, 3 }));
+            m.Nodes.Add(new HafNode { Name = "Shield" + m.Meshes.Count, Mesh = m.Meshes.Count - 1 });
+        }
+        HafMesh Skinned(string name)
+        {
+            var me = Mesh(name, new float[] { 0, 0, 0, 0.2f, 0, 0, 0, 0.2f, 0 }, new[] { 0, 1, 2 }, new float[] { 1, 0, 0, 1, 0, 0, 1, 0, 0 });
+            me.Primitives[0].Joints = new ushort[12]; me.Primitives[0].Weights = new[] { 1f, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0 };
+            return me;
+        }
+        m.Meshes.Add(Skinned("turned")); m.Meshes.Add(Skinned("still"));
+        int n0 = m.Nodes.Count; double th = Math.Atan2(2, 1);
+        var rig = new HafNode { Name = "Rig" }; rig.Children.Add(n0 + 1); m.Nodes.Add(rig);
+        m.Nodes.Add(new HafNode { Name = "Turned", Rotation = new[] { 0, Math.Sin(th / 2), 0, Math.Cos(th / 2) } });
+        var rig2 = new HafNode { Name = "Rig2" }; rig2.Children.Add(n0 + 3); m.Nodes.Add(rig2);
+        m.Nodes.Add(new HafNode { Name = "StillJoint" });
+        m.Nodes.Add(new HafNode { Name = "TurnedMesh", Mesh = m.Meshes.Count - 2, Skin = 0 });
+        m.Nodes.Add(new HafNode { Name = "StillMesh", Mesh = m.Meshes.Count - 1, Skin = 1 });
+        m.Skins.Add(new HafSkin { Name = "Skin", Joints = new[] { n0 + 1 } }); m.Skins.Add(new HafSkin { Name = "Skin2", Joints = new[] { n0 + 3 } });
+        var r = VehicleProbe.Run(Link(m));
+        Assert.Equal("1", Vis(r, "TurnedMesh")); Assert.Equal("0", Vis(r, "StillMesh"));
+    }
+
+    [Fact]
     public void A_separated_island_holds_its_vertices_in_the_order_Blenders_edge_walk_finds_them()
     {
         // the order fixture (scratch, 2026-10-02): ONE mesh, island A = vertices 0..5 with faces (3,4,5), (0,1,2), (1,2,4),
