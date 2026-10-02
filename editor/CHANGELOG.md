@@ -18,8 +18,8 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   vertices into the bind pose in numpy float32 (the joint matrices through Eigen's inverse and a decompose) and lands
   one float32 ulp from the double arithmetic here, and on a collinear triangle that ulp is the whole normal — named
   in docs/Review-Backlog.md, decision pending. The drill compares the field from now on; the `insideout` fixture (a
-  keel pinning the axis, strips facing down and up, the same under a mirrored node, two islands in one mesh, a
-  collinear triangle, a skinned strip) agrees with Blender part for part. The probe over the 119 files: 29 s on the 64-bit
+  keel pinning the axis, strips facing down and up, the same under a mirrored node and under a turned one, two
+  islands in one mesh, faces sharing only a vertex, three faces on one edge, a collinear triangle, a skinned strip) agrees with Blender part for part. The probe over the 119 files: 29 s on the 64-bit
   runtime, reading included. Not wired into the Lab yet (part D).
 - **The probe's visibility verdict in C# — step 3 of replacing Blender, part B** (`VehicleProbe.Visibility`,
   `VehicleProbe.Islands`). The PART row's field 6 — 1 for a part some vertex of which can shoot a ray to infinity

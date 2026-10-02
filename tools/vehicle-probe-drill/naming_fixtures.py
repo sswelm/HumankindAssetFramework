@@ -434,7 +434,9 @@ def fx_insideout(out):
     joint at rest (1). Collinear: the down strip beside a triangle whose three corners lie on one line - its normal is
     exactly zero, so that island casts no vote and does not count (1). VertexTouch: two inward faces sharing only a
     vertex are two face islands (2). NonManifold: two inward and one outward face share an edge, forming one island
-    with an inward average (1). Every node its own mesh: no split."""
+    with an inward average (1). TurnedDown / TurnedUp: the two strips under a node turned 90 degrees about glTF X and
+    moved along X - the strips stand upright beside the axis and the local normal goes through a real rotation, not only
+    a mirror: 1 and 0 (a transposed 3x3 would swap them). Every node its own mesh: no split."""
     b = F.Buf()
     gpos, _, _, gidx = F.grid(8, 8)
     kpos = [(x - 0.5, -5.0, y - 0.5) for x, y, _ in gpos]   # Blender z = glTF y: 5 below the plates
@@ -471,7 +473,10 @@ def fx_insideout(out):
     meshes += [mesh("vertextouch", [(0, 5, 0), (1, 5, 0), (0, 5, 1), (-1, 5, 0), (0, 5, -1)], [0, 1, 2, 0, 3, 4]),
                mesh("nonmanifold", [(0, 5, 0), (1, 5, 0), (0, 5, 1), (0, 5, 2), (0, 5, -1)], [0, 1, 2, 0, 1, 3, 0, 1, 4])]
     nodes += [{"name": "VertexTouch", "mesh": 8}, {"name": "NonManifold", "mesh": 9}]
-    root = F.base("insideout", meshes=meshes, nodes=nodes, skins=skins, scenes=[{"nodes": [0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11]}], scene=0)
+    meshes += [mesh("turneddown", dpos, didx), mesh("turnedup", upos, uidx)]
+    nodes += [{"name": "TurnedDown", "mesh": 10, "rotation": [0.7071067811865476, 0, 0, 0.7071067811865476], "translation": [50, 0, 0]},
+              {"name": "TurnedUp", "mesh": 11, "rotation": [0.7071067811865476, 0, 0, 0.7071067811865476], "translation": [60, 0, 0]}]
+    root = F.base("insideout", meshes=meshes, nodes=nodes, skins=skins, scenes=[{"nodes": [0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13]}], scene=0)
     F.write_glb(os.path.join(out, "insideout.glb"), root, b)
 
 

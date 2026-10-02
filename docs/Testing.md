@@ -108,9 +108,9 @@ of them interior, agree; two fixtures hold a part inside a closed box, a 1,681-v
 single mesh, and a triangle whose only escape is its file normal's direction), **inside-out verdicts** (since step 3c,
 2026-10-02: exact — 14,020 of 14,023 parts on 119 files agree; the three that differ are skinned parts with zero-area triangles
 whose normal is decided by the float32 ulp Blender's importer adds when it skins them, named in the Review Backlog;
-the `insideout` fixture holds strips facing the axis and away, the same under a mirrored node, two islands in one
-mesh, faces sharing only a vertex (two islands), a nonmanifold edge joining three faces (one island), a collinear
-triangle and a skinned strip), dominant bones, and the RIGBONE rows.
+the `insideout` fixture holds strips facing the axis and away, the same under a mirrored node and under a turned one, two
+islands in one mesh, faces sharing only a vertex (two islands), a nonmanifold edge joining three faces (one island), a
+collinear triangle and a skinned strip), dominant bones, and the RIGBONE rows.
 A file too large for Unity's 32-bit standalone Mono is probed on the 64-bit .NET runtime instead, and the drill says so. The names come from a port of the
 importer's own tree construction (`compute_vnodes`: creation depth-first from the parentless nodes in index order,
 armatures at the joints' deepest common ancestor, skinned meshes moved or split off under them, meshes on bones moved

@@ -71,6 +71,20 @@ public class VehicleProbeInsideOutTests
     }
 
     [Fact]
+    public void A_turned_node_takes_the_local_face_normal_through_its_rotation()
+    {
+        // the fixture's TurnedDown / TurnedUp: the strips under a node turned 90 degrees about glTF X and moved along X, so they
+        // stand upright beside the axis; Blender: 1 and 0 - a transposed 3x3 would swap them
+        var m = KeelAndPlates();
+        var (dp, di) = Strip(0, true); m.Meshes.Add(Mesh("turneddown", dp, di));
+        m.Nodes.Add(new HafNode { Name = "TurnedDown", Mesh = 3, Rotation = new[] { 0.7071067811865476, 0, 0, 0.7071067811865476 }, Translation = new double[] { 50, 0, 0 } });
+        var (up, ui) = Strip(10, false); m.Meshes.Add(Mesh("turnedup", up, ui));
+        m.Nodes.Add(new HafNode { Name = "TurnedUp", Mesh = 4, Rotation = new[] { 0.7071067811865476, 0, 0, 0.7071067811865476 }, Translation = new double[] { 60, 0, 0 } });
+        var r = VehicleProbe.Run(Link(m));
+        Assert.Equal("1 0", Flip(r, "TurnedDown") + " " + Flip(r, "TurnedUp"));
+    }
+
+    [Fact]
     public void Islands_are_faces_joined_by_an_edge_and_each_votes_on_its_own()
     {
         // the fixture's TwoIslands: one mesh holding a down strip and an up strip that share no vertex - two islands, one reversed (1);
