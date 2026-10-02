@@ -102,6 +102,23 @@ public class VehicleProbeVisibilityTests
     }
 
     [Fact]
+    public void A_files_loose_edges_come_before_the_faces_edges_whatever_bucket_they_fall_in()
+    {
+        // from the source alone (mesh_calc_edges keeps a mesh's existing edges FIRST, in their order, and only buckets the
+        // new ones; no file of the populations has a line primitive on a split mesh): 1,000 faces make eight buckets; a
+        // line primitive's edges (5,7), (3,5), (4,5) - its vertices 3..7 - stay in that order, so vertex 5's edges come
+        // (5,7), (3,5), (4,5) and the walk from 3 finds 3, 5, 7, 4. Bucketed by their lower vertex they would read
+        // (3,5), (4,5), (5,7) and the walk 3, 5, 4, 7.
+        var tris = new HafMesh { Name = "m" };
+        var faces = new int[3000]; for (int i = 0; i < 1000; i++) { faces[i * 3] = 0; faces[i * 3 + 1] = 1; faces[i * 3 + 2] = 2; }
+        tris.Primitives.Add(new HafPrimitive { VertexCount = 3, Positions = new float[9], Indices = faces, Mode = 4 });
+        tris.Primitives.Add(new HafPrimitive { VertexCount = 5, Positions = new float[15], Indices = new[] { 2, 4, 0, 2, 1, 2 }, Mode = 1 });
+        var islands = VehicleProbe.BlenderIslands(tris);
+        Assert.Equal(2, islands.Count);
+        Assert.Equal(new[] { 0, 2, 4, 1 }, islands[1].Verts);
+    }
+
+    [Fact]
     public void A_split_grids_samples_come_from_Blenders_order_and_its_verdict_from_them()
     {
         // the "visibility_split" fixture, Blender: Hull 1 (the box), Hull.001 0 (a 40 x 40 grid inside: 1,681 vertices,

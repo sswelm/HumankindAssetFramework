@@ -10,7 +10,7 @@
 // (previous corner, corner) starting from the last corner - into ONE insertion-ordered set when the mesh has fewer
 // than 1,000 faces, else into 8 sets chosen by the lower vertex index & 7, concatenated. (8 = min(8, threads); a
 // machine with fewer than 8 threads would order them differently - said, not handled; every machine this runs on has 16.) Loose edges the file gives
-// (line primitives) come first, in their order. mesh.validate() then drops degenerate faces and edges, which does
+// (line primitives) exist before the faces' are computed and stay FIRST, in their order, whatever bucket they would fall in. mesh.validate() then drops degenerate faces and edges, which does
 // not reorder what remains.
 using System;
 using System.Collections.Generic;
@@ -53,17 +53,17 @@ public static partial class VehicleProbe
         // ---- mesh_calc_edges: the edge array, then each vertex's edges in creation order (its BMesh disk cycle)
         int faceCount = faces.Count / 3;
         int maps = faceCount < 1000 ? 1 : 8; int mask = maps - 1;
-        var seen = new HashSet<long>(); var perMap = new List<(int a, int b)>[maps];
-        for (int i = 0; i < maps; i++) perMap[i] = new List<(int, int)>();
-        void Add(int a, int b)
+        var seen = new HashSet<long>(); var perMap = new List<(int a, int b)>[maps + 1];   // [0]: the file's loose edges, then the buckets
+        for (int i = 0; i <= maps; i++) perMap[i] = new List<(int, int)>();
+        void Add(int a, int b, int map)
         {
             int lo = Math.Min(a, b), hi = Math.Max(a, b);
             if (lo == hi) return;   // validate drops it
             long key = (long)lo << 32 | (uint)hi;
-            if (seen.Add(key)) perMap[lo & mask].Add((lo, hi));
+            if (seen.Add(key)) perMap[map].Add((lo, hi));
         }
-        for (int i = 0; i + 1 < loose.Count; i += 2) Add(loose[i], loose[i + 1]);
-        for (int f = 0; f < faceCount; f++) { int a = faces[f * 3], b = faces[f * 3 + 1], c = faces[f * 3 + 2]; Add(c, a); Add(a, b); Add(b, c); }
+        for (int i = 0; i + 1 < loose.Count; i += 2) Add(loose[i], loose[i + 1], 0);
+        for (int f = 0; f < faceCount; f++) { int a = faces[f * 3], b = faces[f * 3 + 1], c = faces[f * 3 + 2]; Add(c, a, 1 + (Math.Min(c, a) & mask)); Add(a, b, 1 + (Math.Min(a, b) & mask)); Add(b, c, 1 + (Math.Min(b, c) & mask)); }
         var disk = new List<int>[n]; var edges = new List<(int a, int b)>();
         foreach (var map in perMap)
             foreach (var e in map)
