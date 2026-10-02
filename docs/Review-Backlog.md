@@ -113,6 +113,12 @@ launch from the Clip Range dialog); (2) reduce/`prep_model` → a C# quadric dec
   encode/decode of `mesh_normals.cc` is the port still to write) and one fixed ray on a Workshop split part, not yet
   explained. Until this lands the probe drill FAILS on this recipe source (every push runs it); the quick way out is
   the user's: re-fuse or re-save the recipe only moves the file, it does not change the rule.
+  Follow-up verification (2026-10-03, PR #116 review): `FULL=1` compared the 94 files available locally (no Khronos
+  sample cache) and failed on the three skinned inside-out counts named above, the Dragon source's 12 visibility
+  differences, and **49 of 17,152 visibility verdicts** on `sns_dragon_split_fused_Spin.glb`. Running that baked
+  Dragon through the pre-3c probe and the 3c probe gave identical names and visibility on every part: the additional
+  visibility failure also predates 3c. The hosted CI passes without this real-model drill; a green CI run does not
+  establish full probe parity.
 
 
 - ~~**Gate the rest-fold on the `convertRig` flag?**~~ — DECIDED + IMPLEMENTED 2026-07-19: **split gating.** The
