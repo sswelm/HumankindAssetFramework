@@ -71,7 +71,8 @@ rig bones) with row-for-row parity on every registry source and every saved reci
 the recipes' sources are the probe's real inputs and found what the registry could not: shared vertex accessors, a
 required material extension, a sheared node matrix); **3b** the visibility verdicts (escape rays over
 one BVH) — done (10,498 parts on 118 files agree with Blender, 1,171 interior; it took Blender's own vertex order
-after a loose split and the file's normals as the normal ray to get there); **3c** the inside-out verdicts (island scoring against the hull axis); **3d** the Lab calls the C# probe for
+after a loose split and the file's normals as the normal ray to get there); **3c** the inside-out verdicts (island scoring against the hull axis) — done (14,020 of 14,023 parts on 119 files
+agree; the three left are skinned parts with zero-area triangles, the item below); **3d** the Lab calls the C# probe for
 `.glb`/`.gltf` sources and builds its part preview in-process instead of importing a preview FBX (FBX/OBJ/.blend
 sources keep Blender). The order below stands for the rest.
 
@@ -79,6 +80,45 @@ sources keep Blender). The order below stands for the rest.
 launch from the Clip Range dialog); (2) reduce/`prep_model` → a C# quadric decimator (1–2 weeks, golden-verified);
 (3) `deploy_convert` (3–4 weeks; the fuse already walks parts and welds); (4) `rig_anim` (3–4 weeks); (5)
 `vehicle_rig` (4–8 weeks; the Lab already computes much of the geometry in C#).
+
+- **Blender-exact vertex positions for skinned parts** — OPEN (2026-10-02, found by 3c). Blender's importer skins a
+  rigged mesh into its bind pose in numpy float32: per joint, (bind matrix) @ (inverse bind matrix), where the bind
+  matrix is GUESSED from the inverse bind matrices (`guess_original_bind_pose`, on by default: Eigen's 4×4 inverse, a
+  `decompose`, `Matrix.Translation @ Quaternion.to_matrix()`), the per-vertex blend and the final multiply-add chain
+  all in float32 (measured inside Blender's Python: `np.matmul` on stacked 3×3 equals the plain sequential chain —
+  no BLAS, no FMA — so every step is deterministic and portable). The C# probe skins in double and lands within one
+  float32 ulp; on a zero-area (collinear) triangle that ulp IS the normal, so the inside-out verdict of 3 skinned
+  parts in 11,516 differs by 1–2 islands: `sms_wespe_split_fused_Spin` Mesh___keep__Fused_T_Material2_6_Part_006
+  (Blender 233, C# 235), `m114_gun_only_Spin` Mesh_Gun (136, 137), `hms_svea_cut_split_fused_Spin` Mesh_Root (1262,
+  1260) — the probe drill's `FULL=1` names them; the default run (recipe sources) does not reach them. Options:
+  **(A)** port the importer's chain bit for bit (Eigen's `compute_inverse_size4`, `mat4_to_loc_rot_size`,
+  `mat3_to_quat`, `quat_to_mat3`, the numpy chain) with a drill that compares every skinned vertex's bits against
+  Blender's `v.co` — exact by construction, and the bind-pose positions are needed again when `rig_anim` and
+  `vehicle_rig` are ported; **(B)** a rule in BOTH the script and the port that a triangle whose edges are parallel to
+  float32 resolution casts no vote — measured to change the reference's own count on 29 of 11,516 parts (fused ships
+  are full of slivers), a behaviour change, and still a threshold the ulp can straddle; **(C)** leave the three named.
+- **Grazing visibility rays on the re-fused Dragon** — OPEN, BLOCKS THE GATE (2026-10-02, found by 3c's drill run; a
+  3b matter, master fails the same way). `sns_dragon_split_fused.glb` as re-fused that evening: 12 of 2,507 visibility
+  verdicts differ from Blender's, in both directions, on decal quads snapped to panel edges and on coincident twin
+  panels — rays that run exactly along a face edge or a coplanar twin, where the last bit decides. Three causes,
+  each measured in a scratch build (the session's scratchpad `flip/src`, `probe_bw.exe`): (1) the sample position —
+  Blender composes each object's matrix_world in float32 from its float32 location, quaternion and scale (the
+  quaternion normalized, `quat_to_mat3` in double, `mul_m4_m4m4`'s SSE2 association down the parent chain), and a
+  MATRIX node first goes through the importer's `decompose()`; the Dragon's root is a 90° permutation matrix that
+  comes back from the quaternion round trip 1e-7 off, 2e-4 at 2,300 units; (2) the ray — `p + d * eps`, the
+  normalized direction and `isect_ray_tri_watertight_v3` with its leaf-box test are all float32; (3) the normal ray —
+  Blender stores custom normals as two shorts (`custom_normal`, 4.8e-5 rad resolution), so a file normal of exactly
+  (0, 0, 1) comes back as (0, -1, -4.8e-5) in its frame. Porting (1) and (2) bit for bit took the Dragon from 12 to
+  5 differences and changed no other row on 119 files; the 5 left are 4 normal-ray escapes (cause 3: the lnor-space
+  encode/decode of `mesh_normals.cc` is the port still to write) and one fixed ray on a Workshop split part, not yet
+  explained. Until this lands the probe drill FAILS on this recipe source (every push runs it); the quick way out is
+  the user's: re-fuse or re-save the recipe only moves the file, it does not change the rule.
+  Follow-up verification (2026-10-03, PR #116 review): `FULL=1` compared the 94 files available locally (no Khronos
+  sample cache) and failed on the three skinned inside-out counts named above, the Dragon source's 12 visibility
+  differences, and **49 of 17,152 visibility verdicts** on `sns_dragon_split_fused_Spin.glb`. Running that baked
+  Dragon through the pre-3c probe and the 3c probe gave identical names and visibility on every part: the additional
+  visibility failure also predates 3c. The hosted CI passes without this real-model drill; a green CI run does not
+  establish full probe parity.
 
 
 - ~~**Gate the rest-fold on the `convertRig` flag?**~~ — DECIDED + IMPLEMENTED 2026-07-19: **split gating.** The

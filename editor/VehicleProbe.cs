@@ -110,7 +110,7 @@ public static partial class VehicleProbe
         if (r.Parts.Count > 0)
         {
             double[][] bindArma = null; var jointMatsOfSkin = new Dictionary<int, double[][]>();
-            var partMeshes = new List<PartMesh>();
+            var partMeshes = new List<PartMesh>(); var objWorlds = new List<double[]>();   // per part: Blender's matrix_world (the armature's for a skinned part)
             foreach (var (node, prim, verts) in sources)
             {
                 var mesh = m.Meshes[m.Nodes[node].Mesh];
@@ -135,8 +135,10 @@ public static partial class VehicleProbe
                                      : new double[] { p.Normals[v * 3], p.Normals[v * 3 + 1], p.Normals[v * 3 + 2] };
                 }
                 partMeshes.Add(BuildPartMesh(m, node, prim, verts, skinned ? armaWorld[skin] : world[node], position, normal));
+                objWorlds.Add(skinned ? armaWorld[skin] : world[node]);
             }
             Visibility(r.Parts, partMeshes);
+            InsideOut(r.Parts, partMeshes, objWorlds);
         }
 
         // ---- rig_report: the first armature's bones, from the undeformed vertices (v.co = the bind pose)
