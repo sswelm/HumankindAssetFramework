@@ -45,6 +45,7 @@ public static partial class VehicleProbe
     {
         var mesh = m.Meshes[m.Nodes[node].Mesh];
         var local = new List<double>(); var fileNormal = new List<double>(); var tris = new List<int>();
+        var faces = new HashSet<(int, int, int)>();   // mesh.validate() drops a second face over the same three vertices, whichever way it winds: the FIRST stays
         int offset = 0;
         for (int pi = 0; pi < mesh.Primitives.Count; pi++)
         {
@@ -68,6 +69,8 @@ public static partial class VehicleProbe
                 if (a < 0 || b < 0 || c < 0 || a >= rank.Length || b >= rank.Length || c >= rank.Length) return;
                 int ra = rank[a], rb = rank[b], rc = rank[c];
                 if (ra < 0 || rb < 0 || rc < 0 || ra == rb || rb == rc || ra == rc) return;   // another island's, or degenerate (mesh.validate drops it)
+                int lo = Math.Min(ra, Math.Min(rb, rc)), hi = Math.Max(ra, Math.Max(rb, rc));
+                if (!faces.Add((lo, ra + rb + rc - lo - hi, hi))) return;   // a duplicate (external review of PR #115: two twins wound against each other summed to no normal at all)
                 tris.Add(ra); tris.Add(rb); tris.Add(rc);
             }
             switch (p.Mode)   // the importer's points_edges_tris: strips and fans become triangles, lines and points no polygon

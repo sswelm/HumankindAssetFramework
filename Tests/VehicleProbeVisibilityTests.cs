@@ -51,7 +51,8 @@ public class VehicleProbeVisibilityTests
         // the "visibility" fixture's Normal, Sideways, Computed and ComputedFlipped: a triangle inside 15 shields - one across
         // each fixed direction, one opposite the gap - with the gap in the direction Blender (1, 2, 0) = glTF (1, 0, -2).
         // Blender: file normals along it 1; along +X 0; no NORMAL and wound so the computed face normal points into the gap 1;
-        // wound the other way 0.
+        // wound the other way 0; the triangle twice with the second face wound against the first 1 (Blender's validate keeps
+        // the first face only - external review of PR #115: both summed to no normal here), the flipped one first 0.
         var m = new HafModel();
         var dirs = new[] { (1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1), (1, 1, 1), (1, 1, -1), (1, -1, 1), (1, -1, -1), (-1, 1, 1), (-1, 1, -1), (-1, -1, 1), (-1, -1, -1), (-1, -2, 0) };
         foreach (var (ox, oy, oz) in dirs)
@@ -77,9 +78,14 @@ public class VehicleProbeVisibilityTests
         m.Nodes.Add(new HafNode { Name = "Computed", Mesh = m.Meshes.Count - 1 });
         m.Meshes.Add(Mesh("computedflipped", tilted, new[] { 0, 2, 1 }));
         m.Nodes.Add(new HafNode { Name = "ComputedFlipped", Mesh = m.Meshes.Count - 1 });
+        m.Meshes.Add(Mesh("computedtwin", tilted, new[] { 0, 1, 2, 0, 2, 1 }));          // Blender keeps the first of two faces over the same vertices
+        m.Nodes.Add(new HafNode { Name = "ComputedTwin", Mesh = m.Meshes.Count - 1 });
+        m.Meshes.Add(Mesh("computedtwinflipped", tilted, new[] { 0, 2, 1, 0, 1, 2 }));
+        m.Nodes.Add(new HafNode { Name = "ComputedTwinFlipped", Mesh = m.Meshes.Count - 1 });
         var r = VehicleProbe.Run(Link(m));
         Assert.Equal("1", Vis(r, "Normal")); Assert.Equal("0", Vis(r, "Sideways"));
         Assert.Equal("1", Vis(r, "Computed")); Assert.Equal("0", Vis(r, "ComputedFlipped"));
+        Assert.Equal("1", Vis(r, "ComputedTwin")); Assert.Equal("0", Vis(r, "ComputedTwinFlipped"));
         Assert.All(r.Parts.Where(p => p.Name.StartsWith("Shield")), p => Assert.Equal(1, p.Vis));
     }
 

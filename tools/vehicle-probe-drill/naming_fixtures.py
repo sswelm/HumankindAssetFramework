@@ -320,7 +320,10 @@ def fx_visibility(out):
     the file gives as that direction, escapes (1); its twin Sideways, whose file normals point +X into a shield, is
     interior (0): the normal ray is the file's normal, not a computed one. Computed: the same spot WITHOUT a NORMAL
     attribute, a triangle wound so that the normal Blender computes from its face points into the gap (1);
-    ComputedFlipped: wound the other way, into the opposite shield (0). Every node its own mesh: no split."""
+    ComputedFlipped: wound the other way, into the opposite shield (0). ComputedTwin: the same triangle twice, the second
+    wound against the first - Blender's validate drops the second face, so the normal is the first's (1); ComputedTwinFlipped:
+    the flipped one first (0) (external review of PR #115: both faces summed to no normal, and the part read interior).
+    Every node its own mesh: no split."""
     b = F.Buf()
     bpos, bidx = box(0, 0, 0, 2)
     gpos, _, _, gidx = F.grid(8, 8)
@@ -359,6 +362,10 @@ def fx_visibility(out):
     nodes.append({"name": "Computed", "mesh": len(meshes) - 1})
     meshes.append({"name": "computedflipped", "primitives": [{"attributes": {"POSITION": b.accessor(cpos, "f", "VEC3")}, "indices": b.accessor([0, 2, 1], "H", "SCALAR")}]})
     nodes.append({"name": "ComputedFlipped", "mesh": len(meshes) - 1})
+    meshes.append({"name": "computedtwin", "primitives": [{"attributes": {"POSITION": b.accessor(cpos, "f", "VEC3")}, "indices": b.accessor([0, 1, 2, 0, 2, 1], "H", "SCALAR")}]})
+    nodes.append({"name": "ComputedTwin", "mesh": len(meshes) - 1})
+    meshes.append({"name": "computedtwinflipped", "primitives": [{"attributes": {"POSITION": b.accessor(cpos, "f", "VEC3")}, "indices": b.accessor([0, 2, 1, 0, 1, 2], "H", "SCALAR")}]})
+    nodes.append({"name": "ComputedTwinFlipped", "mesh": len(meshes) - 1})
     root = F.base("visibility", meshes=meshes, nodes=nodes, scenes=[{"nodes": list(range(len(nodes)))}], scene=0)
     F.write_glb(os.path.join(out, "visibility.glb"), root, b)
 
