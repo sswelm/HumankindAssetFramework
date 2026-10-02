@@ -480,9 +480,30 @@ def fx_insideout(out):
     F.write_glb(os.path.join(out, "insideout.glb"), root, b)
 
 
+def fx_custom_normals(out):
+    """Blender's vertex normals for a mesh WITH file normals (the visibility verdict's normal ray): the importer sets them as
+    custom normals, which Blender stores as two shorts against each corner's smooth-fan space and mixes back per vertex.
+    Leaning: a quad whose file normals lean 10 degrees about X, +Z side and -Z side - the decoded vertex normals carry the
+    quantization (read off Blender: v0 (-7.6e-9, -0.17361137, 0.98481423)). Flat: a quad whose file normals are +Y while its
+    winding faces -Y - the fan normal is the face normal, the custom normal its opposite, and the decode lands 4.8e-5 off
+    axis (v0 (-2.1e-12, -4.777114e-05, 1.0)), the Dragon's decal case. Every node its own mesh: no split."""
+    import math
+    b = F.Buf()
+    th = math.radians(10.0)
+    pos = [(0, 0, 0), (1, 0, 0), (1, 0, 1), (0, 0, 1)]
+    idx = [0, 1, 2, 0, 2, 3]
+    lean = [(0.0, math.cos(th), math.sin(th))] * 2 + [(0.0, math.cos(th), -math.sin(th))] * 2
+    flat = [(0.0, 1.0, 0.0)] * 4
+    meshes = [{"name": "leaning", "primitives": [{"attributes": {"POSITION": b.accessor(pos, "f", "VEC3"), "NORMAL": b.accessor(lean, "f", "VEC3", minmax=False)}, "indices": b.accessor(idx, "H", "SCALAR")}]},
+              {"name": "flat", "primitives": [{"attributes": {"POSITION": b.accessor([(x + 5, y, z) for x, y, z in pos], "f", "VEC3"), "NORMAL": b.accessor(flat, "f", "VEC3", minmax=False)}, "indices": b.accessor(idx, "H", "SCALAR")}]}]
+    nodes = [{"name": "Leaning", "mesh": 0}, {"name": "Flat", "mesh": 1}]
+    root = F.base("custom_normals", meshes=meshes, nodes=nodes, scenes=[{"nodes": [0, 1]}], scene=0)
+    F.write_glb(os.path.join(out, "custom_normals.glb"), root, b)
+
+
 FIXTURES = [fx_naming, fx_order, fx_armature_names, fx_skinned_not_moved, fx_skinned_animated, fx_mesh_on_bone, fx_islands, fx_rotated_armature,
             fx_two_armatures, fx_nested_skins, fx_split_collision, fx_nonunit_rotation, fx_cameras, fx_camera_data_names,
-            fx_name_tails, fx_long_names, fx_many_names, fx_bone_tails, fx_split_tails, fx_icosphere_mesh, fx_visibility, fx_visibility_skinned, fx_visibility_split, fx_insideout]
+            fx_name_tails, fx_long_names, fx_many_names, fx_bone_tails, fx_split_tails, fx_icosphere_mesh, fx_visibility, fx_visibility_skinned, fx_visibility_split, fx_insideout, fx_custom_normals]
 
 
 def main(out):

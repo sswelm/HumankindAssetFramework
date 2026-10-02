@@ -91,39 +91,28 @@ public static partial class VehicleProbe
             offset += verts.Length;
         }
         int n = offset;
-        // a vertex without a file normal: Blender's computed one - the faces' normals weighted by the corner angle; none to sum = the position's direction
-        var computed = new double[n * 3];
-        for (int t = 0; t < tris.Count; t += 3)
-        {
-            int a = tris[t], b = tris[t + 1], c = tris[t + 2];
-            double ax = local[a * 3], ay = local[a * 3 + 1], az = local[a * 3 + 2], bx = local[b * 3], by = local[b * 3 + 1], bz = local[b * 3 + 2], cx = local[c * 3], cy = local[c * 3 + 1], cz = local[c * 3 + 2];
-            double ux = bx - ax, uy = by - ay, uz = bz - az, vx = cx - ax, vy = cy - ay, vz = cz - az;
-            double nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
-            double nl = Math.Sqrt(nx * nx + ny * ny + nz * nz);
-            if (nl == 0) continue;
-            nx /= nl; ny /= nl; nz /= nl;
-            double wa = CornerAngle(bx - ax, by - ay, bz - az, cx - ax, cy - ay, cz - az), wb = CornerAngle(ax - bx, ay - by, az - bz, cx - bx, cy - by, cz - bz), wc = CornerAngle(ax - cx, ay - cy, az - cz, bx - cx, by - cy, bz - cz);
-            computed[a * 3] += nx * wa; computed[a * 3 + 1] += ny * wa; computed[a * 3 + 2] += nz * wa;
-            computed[b * 3] += nx * wb; computed[b * 3 + 1] += ny * wb; computed[b * 3 + 2] += nz * wb;
-            computed[c * 3] += nx * wc; computed[c * 3 + 1] += ny * wc; computed[c * 3 + 2] += nz * wc;
-        }
         var pm = new PartMesh { Count = n, World = new float[n * 3], Normal = new float[n * 3], Local = new float[n * 3], Tris = tris.ToArray() };
+        // a mesh with file normals: Blender's vertex.normal is the file's normal through its two-short custom-normal encoding and the
+        // corner-angle mix (VehicleProbe.CustomNormals.cs), not the file's normal itself; without file normals it is the computed one
+        bool anyFileNormal = false; for (int i = 0; i < n && !anyFileNormal; i++) anyFileNormal = !double.IsNaN(fileNormal[i * 3]);
+        var Pb = new float[n * 3]; var Nb = anyFileNormal ? new float[n * 3] : null;
+        for (int i = 0; i < n; i++)
+        {
+            Pb[i * 3] = (float)local[i * 3]; Pb[i * 3 + 1] = (float)-local[i * 3 + 2]; Pb[i * 3 + 2] = (float)local[i * 3 + 1];
+            if (Nb == null) continue;
+            if (double.IsNaN(fileNormal[i * 3])) { Nb[i * 3] = Nb[i * 3 + 1] = Nb[i * 3 + 2] = float.NaN; }
+            else { Nb[i * 3] = (float)fileNormal[i * 3]; Nb[i * 3 + 1] = (float)-fileNormal[i * 3 + 2]; Nb[i * 3 + 2] = (float)fileNormal[i * 3 + 1]; }
+        }
+        float[] blenderN = BlenderVertexNormals(Pb, pm.Tris, Nb);
         for (int i = 0; i < n; i++)
         {
             double lx = local[i * 3], ly = local[i * 3 + 1], lz = local[i * 3 + 2];
             pm.Local[i * 3] = (float)lx; pm.Local[i * 3 + 1] = (float)ly; pm.Local[i * 3 + 2] = (float)lz;
-            double nx, ny, nz;
-            if (!double.IsNaN(fileNormal[i * 3])) { nx = fileNormal[i * 3]; ny = fileNormal[i * 3 + 1]; nz = fileNormal[i * 3 + 2]; }
-            else
-            {
-                nx = computed[i * 3]; ny = computed[i * 3 + 1]; nz = computed[i * 3 + 2];
-                if (nx == 0 && ny == 0 && nz == 0) { nx = lx; ny = ly; nz = lz; }
-            }
             // the script: p = matrix_world @ co, d = (matrix_world.to_3x3() @ normal).normalized() - mathutils' float32 products summed
             // in double (MatRow), NOT the inverse transpose; Blender's frame (x, -z, y) of the glTF data
             float bx = (float)lx, by = (float)-lz, bz = (float)ly;
             pm.World[i * 3] = MatRow(mb, 0, 4, bx, by, bz, 1f); pm.World[i * 3 + 1] = MatRow(mb, 1, 4, bx, by, bz, 1f); pm.World[i * 3 + 2] = MatRow(mb, 2, 4, bx, by, bz, 1f);
-            float nbx = (float)nx, nby = (float)-nz, nbz = (float)ny;
+            float nbx = blenderN[i * 3], nby = blenderN[i * 3 + 1], nbz = blenderN[i * 3 + 2];
             float wx = MatRow(mb, 0, 3, nbx, nby, nbz, 0f), wy = MatRow(mb, 1, 3, nbx, nby, nbz, 0f), wz = MatRow(mb, 2, 3, nbx, nby, nbz, 0f);
             NormalizeVn(ref wx, ref wy, ref wz);
             pm.Normal[i * 3] = wx; pm.Normal[i * 3 + 1] = wy; pm.Normal[i * 3 + 2] = wz;
@@ -131,13 +120,6 @@ public static partial class VehicleProbe
         return pm;
     }
 
-    static double CornerAngle(double ux, double uy, double uz, double vx, double vy, double vz)
-    {
-        double ul = Math.Sqrt(ux * ux + uy * uy + uz * uz), vl = Math.Sqrt(vx * vx + vy * vy + vz * vz);
-        if (ul == 0 || vl == 0) return 0;
-        double c = (ux * vx + uy * vy + uz * vz) / (ul * vl);
-        return Math.Acos(c < -1 ? -1 : c > 1 ? 1 : c);
-    }
 
     // ---------------------------------------------------------------- one BVH over every part's triangles
 
@@ -237,7 +219,10 @@ public static partial class VehicleProbe
             float inv = (float)(1.0f / dir[kz]);
             float sx = (float)(dir[kx] * inv), sy = (float)(dir[ky] * inv), sz = inv;
             var idot = new float[3]; var near = new int[3];
-            for (int i = 0; i < 3; i++) { idot[i] = (float)(1.0f / dir[i]); near[i] = idot[i] < 0f ? 1 : 0; }
+            // bvhtree_ray_cast_data_precalc: a direction component below FLT_EPSILON makes the reciprocal FLT_MAX, not infinity - so
+            // an origin exactly on a box's far plane gives t = 0 there and the box is culled (the Dragon's decal corners under deck
+            // vertices; two of its verdicts). Blender's binary does not follow this at every such origin (docs/Review-Backlog.md).
+            for (int i = 0; i < 3; i++) { idot[i] = Math.Abs(dir[i]) < 1.1920929e-7f ? float.MaxValue : (float)(1.0f / dir[i]); near[i] = idot[i] < 0f ? 1 : 0; }
             float[] o = { ox, oy, oz };
             double ix = dx != 0 ? 1.0 / dx : double.PositiveInfinity, iy = dy != 0 ? 1.0 / dy : double.PositiveInfinity, iz = dz != 0 ? 1.0 / dz : double.PositiveInfinity;
             var stack = new int[128]; int sp = 0; stack[sp++] = 0;

@@ -742,6 +742,11 @@ if mode == "probe":
     # floats in their shortest round-trip form - the C# side composes the same float32 matrix and the drill compares bit for bit
     for o in objs:
         print("MATRIX|%s|%s" % (o.name, " ".join(repr(float(_mv)) for _mr in o.matrix_world for _mv in _mr)))
+    # VERTEX rows: vertex 0 through the same arithmetic the visibility rays use - the world position and the normalized world normal
+    for o in objs:
+        if len(o.data.vertices):
+            _v0 = o.data.vertices[0]; _p0 = o.matrix_world @ _v0.co; _n0 = (o.matrix_world.to_3x3() @ _v0.normal).normalized()
+            print("VERTEX|%s|%s|%s" % (o.name, " ".join(repr(float(_c)) for _c in _p0), " ".join(repr(float(_c)) for _c in _n0)))
     print("VEHICLE parts listed"); sys.stdout.flush()   # sentinel + flush: Blender's C-level banner flushes AFTER Python's buffer and would otherwise glue onto the last PART line
     # optional argv[2]: export the SPLIT scene as a preview FBX so the Lab can show/zoom/highlight each part by name.
     # PERF (2026-08-20): exported UNSKINNED — plain meshes, world transforms baked, no armature. The FBX exporter

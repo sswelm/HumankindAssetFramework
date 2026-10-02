@@ -3,7 +3,7 @@ the script is a program that reads sys.argv and exits, so each file runs it afre
 set for it and the SystemExit caught. The 1.6 s boot is paid once. Every line the probe prints is echoed behind the
 file's key, as the C# drill prints its rows:
 
-    ROW <TAB> <file key> <TAB> PART|...       (and RIGBONE|..., MATRIX|..., VEHICLE ...)
+    ROW <TAB> <file key> <TAB> PART|...       (and RIGBONE|..., MATRIX|..., VERTEX|..., VEHICLE ...)
 
 usage: blender --background --python blender_probe_many.py -- <vehicle_rig.py> <file>...
 """
@@ -21,7 +21,7 @@ for path in files:
     def keyed_print(*a, **k):
         text = " ".join(str(x) for x in a)
         for line in text.split("\n"):
-            if line.startswith(("PART|", "RIGBONE|", "MATRIX|", "VEHICLE ")):
+            if line.startswith(("PART|", "RIGBONE|", "MATRIX|", "VERTEX|", "VEHICLE ")):
                 real_print("ROW\t%s\t%s" % (key, line), flush=True)
 
     t0 = time.time()

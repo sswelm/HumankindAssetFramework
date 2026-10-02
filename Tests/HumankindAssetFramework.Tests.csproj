@@ -2,6 +2,9 @@
 
   <PropertyGroup>
     <TargetFramework>net471</TargetFramework>
+    <!-- x64: the probe's Blender-parity tests compare float32 bits; the 32-bit .NET Framework host evaluates float in x87
+         extended precision and lands an ulp or two off, where every real host (Unity's 64-bit Mono, the drill) is SSE -->
+    <PlatformTarget>x64</PlatformTarget>
     <IsPackable>false</IsPackable>
     <LangVersion>latest</LangVersion>
     <AssemblyName>HumankindAssetFramework.Tests</AssemblyName>
@@ -39,6 +42,8 @@
     <Compile Include="..\editor\VehicleProbe.Islands.cs" Link="VehicleProbe.Islands.cs" />
     <Compile Include="..\editor\VehicleProbe.InsideOut.cs" Link="VehicleProbe.InsideOut.cs" />
     <Compile Include="..\editor\VehicleProbe.BlenderWorld.cs" Link="VehicleProbe.BlenderWorld.cs" />
+    <Compile Include="..\editor\VehicleProbe.BlenderSkin.cs" Link="VehicleProbe.BlenderSkin.cs" />
+    <Compile Include="..\editor\VehicleProbe.CustomNormals.cs" Link="VehicleProbe.CustomNormals.cs" />
   </ItemGroup>
 
   <!-- compile-time references the TEST code uses directly -->

@@ -116,11 +116,31 @@ launch from the Clip Range dialog); (2) reduce/`prep_model` → a C# quadric dec
   **Causes 1 and 2 ported (2026-10-03, PR after #116)**: `VehicleProbe.BlenderWorld.cs` composes every matrix_world
   as Blender does (bit for bit on 14,003 of 14,023 parts, MATRIX rows in the drill) and the ray cast is Blender's
   float32; the Dragon reads 5 off (4 normal rays, cause 3; 1 fixed ray on `Material2_2008_Part_034`, unexplained).
-  Cause 3 is the next port: `mesh_normals.cc` builds a corner-normal SPACE per smooth fan (`corner_fan_space_define`:
-  the fan normal from the faces weighted by `safe_acos_approx` of the corner angle, a reference edge and the angle
-  to the other edge), encodes the custom normal as two shorts against it (`corner_space_custom_normal_to_data`) and
-  reads it back (`..._data_to_normal`, cosf/sinf of the quantized angles), then `mix_normals_corner_to_vert` weights
-  the corner normals by the corner angle and normalizes - all float32, `safe_acos_approx` a polynomial.
+  **Cause 3 ported the same day** (`VehicleProbe.CustomNormals.cs`: the smooth fans - the importer's flat-face guess
+  breaks them -, `corner_fan_space_define`, the two-short encode and decode, `mix_normals_corner_to_vert`, all read
+  from `mesh_normals.cc`; the custom_normals fixture and the drill's VERTEX rows hold it to the bit): the Dragon reads
+  **0 of 2,507 off**. The fixed ray on `Material2_2008_Part_034` was the box test's FLT_MAX reciprocal (ported). Said:
+  **the vertex normal is not bit for bit.** The drill's VERTEX rows count it: on one tested Dragon vertex the fan
+  normal's z is 2.85e-6 here against Blender's 2.14e-6 - no arithmetic variant of the printed `accumulate_fan_normal`
+  (float32, fma, double accumulation, exact acosf, any summation order) gives Blender's number - and across 119 files
+  the last bits differ on many vertices (the Dragon: 1,813 of 2,507), while no verdict changes for it (every verdict
+  that hangs on a normal ray agrees). Next: find what Blender's binary computes there (a fan-weight or face-normal
+  detail its source as read does not show); until then the row holds the position and counts the normal. Also the
+  Ehrhardt item below.
+- **Rays whose origin sits exactly on a box plane: Blender's binary against its source** — OPEN (2026-10-03). With
+  the FLT_MAX reciprocal of `bvhtree_ray_cast_data_precalc` an origin exactly on a box's FAR plane along a zero
+  direction component gives t = 0 and `fast_ray_nearest_hit` culls the box. Blender's installed 5.1.2 (the tag's
+  commit, clang-cl, `-march=x86-64-v2`, `-ffp-contract=off`) follows that for a triangle (0,0,5)(4,0,5)(0,4,5): rays
+  through its (xmax, ymin) and (xmin, ymax) vertices miss, through (xmin, ymin) hit - and does NOT follow it for
+  (4,1,5)(0,1,5)(0.1,0,5) at its (xmin, ymax) vertex, which hits, while the same triangle scaled by 2 misses. No
+  reading of the source predicts both. The port keeps the source's rule; the Ehrhardt's spin output
+  (`ehrhardt_spin2.glb`, a Lab output, not a recipe source) reads 6 of 3,350 visibility verdicts off for it, all C#
+  external where Blender hits a triangle whose box plane the origin sits on. Not a gate failure (FULL=1 only).
+- ~~**Blender-exact vertex positions for skinned parts**~~ — DONE 2026-10-03 (`VehicleProbe.BlenderSkin.cs`): the
+  importer's chain ported bit for bit (Eigen's SSE 4x4 inverse as an exact-division sequence - the build has no FMA,
+  so `preciprocal` is `pdiv` -, `mat4_to_loc_rot_size`, `mat3_normalized_to_quat_fast`, `quat_to_mat3`, mathutils'
+  products, numpy's float32 blend and multiply-add chain); the three skinned slivers agree; the drill's VERTEX rows
+  hold every skinned part's vertex 0 to the bit.
 - **Meshes parented to a bone: the bone chain** — OPEN (2026-10-03). A glTF mesh node under a joint becomes, in
   Blender, an object parented to that BONE (`parent_type = 'BONE'`, moved by −bone_length along Y), and its
   matrix_world is armature @ `pchan->pose_mat` (translated to the bone's tail) @ local. The pose matrix comes from the

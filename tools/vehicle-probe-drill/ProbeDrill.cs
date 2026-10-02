@@ -7,7 +7,7 @@ using System.Text;
 // given is read by GlbReader and probed by VehicleProbe; the rows are printed as vehicle_rig.py prints them, each
 // behind its file's key, for tools/vehicle-probe-drill/compare_probe.py to set beside Blender's own rows.
 //   FILE\t<key>\tparts=<n>\trigbones=<n>\tsplit=<0|1>\tms=<read+probe>
-//   ROW\t<key>\tPART|name|verts|cx,cy,cz|sx,sy,sz|vis|bone|flip      (and RIGBONE|name|count|c|s, MATRIX|name|16 floats)
+//   ROW\t<key>\tPART|name|verts|cx,cy,cz|sx,sy,sz|vis|bone|flip      (and RIGBONE|name|count|c|s, MATRIX|name|16 floats, VERTEX|name|p|n)
 static class ProbeDrill
 {
     static int Main(string[] args)
@@ -27,6 +27,7 @@ static class ProbeDrill
                 foreach (var b in r.RigBones) Console.WriteLine($"ROW\t{key}\t{b.Row}");
                 foreach (var p in r.Parts) Console.WriteLine($"ROW\t{key}\t{p.Row}");
                 foreach (var p in r.Parts) if (p.BlenderMatrix != null) Console.WriteLine($"ROW\t{key}\t{p.MatrixRow}");
+                foreach (var p in r.Parts) if (p.FirstVertex != null) Console.WriteLine($"ROW\t{key}\t{p.VertexRow}");
             }
             catch (Exception e) { Console.WriteLine($"FAIL\t{key}\t{e.GetType().Name}: {e.Message}"); fails++; }
             // the Lab's sources are the unreduced originals (one is 398 MB): collect between files, or Mono's large-object space fragments into "Insufficient memory"
