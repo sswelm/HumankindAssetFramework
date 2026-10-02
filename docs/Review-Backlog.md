@@ -71,7 +71,8 @@ rig bones) with row-for-row parity on every registry source and every saved reci
 the recipes' sources are the probe's real inputs and found what the registry could not: shared vertex accessors, a
 required material extension, a sheared node matrix); **3b** the visibility verdicts (escape rays over
 one BVH) — done (10,498 parts on 118 files agree with Blender, 1,171 interior; it took Blender's own vertex order
-after a loose split and the file's normals as the normal ray to get there); **3c** the inside-out verdicts (island scoring against the hull axis); **3d** the Lab calls the C# probe for
+after a loose split and the file's normals as the normal ray to get there); **3c** the inside-out verdicts (island scoring against the hull axis) — done (11,513 of 11,516 parts agree; the
+three left are skinned parts with zero-area triangles, the item below); **3d** the Lab calls the C# probe for
 `.glb`/`.gltf` sources and builds its part preview in-process instead of importing a preview FBX (FBX/OBJ/.blend
 sources keep Blender). The order below stands for the rest.
 
@@ -79,6 +80,23 @@ sources keep Blender). The order below stands for the rest.
 launch from the Clip Range dialog); (2) reduce/`prep_model` → a C# quadric decimator (1–2 weeks, golden-verified);
 (3) `deploy_convert` (3–4 weeks; the fuse already walks parts and welds); (4) `rig_anim` (3–4 weeks); (5)
 `vehicle_rig` (4–8 weeks; the Lab already computes much of the geometry in C#).
+
+- **Blender-exact vertex positions for skinned parts** — OPEN (2026-10-02, found by 3c). Blender's importer skins a
+  rigged mesh into its bind pose in numpy float32: per joint, (bind matrix) @ (inverse bind matrix), where the bind
+  matrix is GUESSED from the inverse bind matrices (`guess_original_bind_pose`, on by default: Eigen's 4×4 inverse, a
+  `decompose`, `Matrix.Translation @ Quaternion.to_matrix()`), the per-vertex blend and the final multiply-add chain
+  all in float32 (measured inside Blender's Python: `np.matmul` on stacked 3×3 equals the plain sequential chain —
+  no BLAS, no FMA — so every step is deterministic and portable). The C# probe skins in double and lands within one
+  float32 ulp; on a zero-area (collinear) triangle that ulp IS the normal, so the inside-out verdict of 3 skinned
+  parts in 11,516 differs by 1–2 islands: `sms_wespe_split_fused_Spin` Mesh___keep__Fused_T_Material2_6_Part_006
+  (Blender 233, C# 235), `m114_gun_only_Spin` Mesh_Gun (136, 137), `hms_svea_cut_split_fused_Spin` Mesh_Root (1262,
+  1260) — the probe drill's `FULL=1` names them; the default run (recipe sources) does not reach them. Options:
+  **(A)** port the importer's chain bit for bit (Eigen's `compute_inverse_size4`, `mat4_to_loc_rot_size`,
+  `mat3_to_quat`, `quat_to_mat3`, the numpy chain) with a drill that compares every skinned vertex's bits against
+  Blender's `v.co` — exact by construction, and the bind-pose positions are needed again when `rig_anim` and
+  `vehicle_rig` are ported; **(B)** a rule in BOTH the script and the port that a triangle whose edges are parallel to
+  float32 resolution casts no vote — measured to change the reference's own count on 29 of 11,516 parts (fused ships
+  are full of slivers), a behaviour change, and still a threshold the ulp can straddle; **(C)** leave the three named.
 
 
 - ~~**Gate the rest-fold on the `convertRig` flag?**~~ — DECIDED + IMPLEMENTED 2026-07-19: **split gating.** The

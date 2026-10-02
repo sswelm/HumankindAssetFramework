@@ -12,7 +12,7 @@ Compared, per part NAME (the recipe key - a name on one side only is a FAIL):
                   clip's start (vehicle_rig.py posestart=1; Blender's untouched import is a blend one frame in)
   order           the rows must come in the same order (the Lab lists them as given)
   RIGBONE         name, count exact; centre, size with the same tolerance; order
-Not compared yet, said: flip (field 8, step 3c) - the C# side prints 0 for every part.
+  flip            exact (field 8: the islands the inside-out fix would reverse - step 3c)
 """
 import sys
 sys.stdout.reconfigure(encoding="utf-8")
@@ -75,7 +75,7 @@ def main():
                     first = next(i for i in range(len(bn)) if bn[i] != cn[i])
                     problems.append(f"{kind} order differs from row {first}: Blender {bn[first]!r}, C# {cn[first]!r}")
             cby = {r["name"]: r for r in c}
-            bad = {"verts": [], "vis": [], "bone": [], "centre": [], "size": []}
+            bad = {"verts": [], "vis": [], "flip": [], "bone": [], "centre": [], "size": []}
             worst = 0.0
             for r in b:
                 o = cby.get(r["name"])
@@ -85,6 +85,8 @@ def main():
                     bad["verts"].append(f"{r['name']} {o['verts']} vs {r['verts']}")
                 if kind == "PART" and r["vis"] != o["vis"]:
                     bad["vis"].append(f"{r['name']} {o['vis']} vs {r['vis']}")
+                if kind == "PART" and r["flip"] != o["flip"]:
+                    bad["flip"].append(f"{r['name']} {o['flip']} vs {r['flip']}")
                 if kind == "PART" and r["bone"] != o["bone"]:
                     bad["bone"].append(f"{r['name']} {o['bone']!r} vs {r['bone']!r}")
                 for field, label in (("c", "centre"), ("s", "size")):
@@ -101,7 +103,7 @@ def main():
             fails += 1
             print(f"FAIL {short}: " + "; ".join(problems))
         else:
-            print(f"PASS {short}: {n_parts} parts, {len(bl[key]['RIGBONE'])} rig bones - names, order, verts, visibility, bones, boxes agree (largest box difference {part_worst:.4f}, tolerance {part_tol:.4f})")
+            print(f"PASS {short}: {n_parts} parts, {len(bl[key]['RIGBONE'])} rig bones - names, order, verts, visibility, inside-out, bones, boxes agree (largest box difference {part_worst:.4f}, tolerance {part_tol:.4f})")
     print(f"COMPARED {compared} FAILED {fails}")
     return 1 if fails else 0
 

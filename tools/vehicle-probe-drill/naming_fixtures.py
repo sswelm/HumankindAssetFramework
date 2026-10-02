@@ -422,9 +422,57 @@ def fx_visibility_split(out):
     F.write_glb(os.path.join(out, "visibility_split.glb"), root, b)
 
 
+def fx_insideout(out):
+    """The inside-out verdict (PART field 8, step 3c): the number of face islands whose faces on average point INTO the
+    hull - towards the hull's length axis (Blender's X axis through the mid-Y and lower-quartile Z of every part's
+    vertices). Keel: an 81-vertex grid 5 below the plates that pins the axis there (0). PlateDown: a strip of quads 5
+    above the axis wound so its face normals point down, at the axis (1); PlateUp: the same strip wound the other way (0).
+    MirroredDown / MirroredUp: the same two strips under a node of scale (-1, 1, 1) - bmesh's face normal is computed from
+    the LOCAL corners and taken through matrix_world's 3x3, so the mirror does not turn it: still 1 and 0, where the cross
+    product of the world corners would say the opposite (negativescaletest's Shiny1). TwoIslands: one mesh holding a down
+    strip and an up strip that share no vertex - two islands, one reversed (1). SkinnedDown: the down strip skinned to a
+    joint at rest (1). Collinear: the down strip beside a triangle whose three corners lie on one line - its normal is
+    exactly zero, so that island casts no vote and does not count (1). Every node its own mesh: no split."""
+    b = F.Buf()
+    gpos, _, _, gidx = F.grid(8, 8)
+    kpos = [(x - 0.5, -5.0, y - 0.5) for x, y, _ in gpos]   # Blender z = glTF y: 5 below the plates
+
+    def strip(x0, down):
+        # 4 quads from x0 to x0 + 4 at glTF y = 5 (Blender z = 5), across glTF z in [-1, 1] (Blender y); corners
+        # p0 (x, z0) p1 (x + 1, z0) p2 (x + 1, z1) p3 (x, z1): (p1 - p0) x (p2 - p0) = (0, -dx dz, 0), glTF -y = Blender -z = down
+        pos = [(x0 + q, 5.0, -1.0) for q in range(5)] + [(x0 + q, 5.0, 1.0) for q in range(5)]   # shared corners: one island
+        idx = []
+        for q in range(4):
+            p0, p1, p2, p3 = q, q + 1, 5 + q + 1, 5 + q
+            idx += [p0, p1, p2, p0, p2, p3] if down else [p0, p2, p1, p0, p3, p2]
+        return pos, idx
+
+    def mesh(name, pos, idx, extra=None):
+        attrs = {"POSITION": b.accessor(pos, "f", "VEC3")}
+        if extra:
+            attrs.update(extra)
+        return {"name": name, "primitives": [{"attributes": attrs, "indices": b.accessor(idx, "H", "SCALAR")}]}
+
+    dpos, didx = strip(0.0, True); upos, uidx = strip(10.0, False)
+    tpos, tidx = strip(20.0, True); t2pos, t2idx = strip(30.0, False)
+    meshes = [mesh("keel", kpos, gidx), mesh("platedown", dpos, didx), mesh("plateup", upos, uidx),
+              mesh("mirroreddown", dpos, didx), mesh("mirroredup", upos, uidx),
+              mesh("twoislands", tpos + t2pos, tidx + [i + len(tpos) for i in t2idx]),
+              mesh("collinear", dpos + [(40.0, 5.0, 0.0), (41.0, 5.0, 0.0), (42.0, 5.0, 0.0)], didx + [len(dpos), len(dpos) + 1, len(dpos) + 2]),
+              mesh("skinneddown", dpos, didx, {"JOINTS_0": b.accessor([(0, 0, 0, 0)] * len(dpos), "H", "VEC4", minmax=False),
+                                               "WEIGHTS_0": b.accessor([(1, 0, 0, 0)] * len(dpos), "f", "VEC4", minmax=False)})]
+    nodes = [{"name": "Keel", "mesh": 0}, {"name": "PlateDown", "mesh": 1}, {"name": "PlateUp", "mesh": 2},
+             {"name": "MirroredDown", "mesh": 3, "scale": [-1, 1, 1]}, {"name": "MirroredUp", "mesh": 4, "scale": [-1, 1, 1]},
+             {"name": "TwoIslands", "mesh": 5}, {"name": "Collinear", "mesh": 6},
+             {"name": "Rig", "children": [8]}, {"name": "Joint"}, {"name": "SkinnedDown", "mesh": 7, "skin": 0}]
+    skins = [{"name": "Skin", "joints": [8]}]
+    root = F.base("insideout", meshes=meshes, nodes=nodes, skins=skins, scenes=[{"nodes": [0, 1, 2, 3, 4, 5, 6, 7, 9]}], scene=0)
+    F.write_glb(os.path.join(out, "insideout.glb"), root, b)
+
+
 FIXTURES = [fx_naming, fx_order, fx_armature_names, fx_skinned_not_moved, fx_skinned_animated, fx_mesh_on_bone, fx_islands, fx_rotated_armature,
             fx_two_armatures, fx_nested_skins, fx_split_collision, fx_nonunit_rotation, fx_cameras, fx_camera_data_names,
-            fx_name_tails, fx_long_names, fx_many_names, fx_bone_tails, fx_split_tails, fx_icosphere_mesh, fx_visibility, fx_visibility_skinned, fx_visibility_split]
+            fx_name_tails, fx_long_names, fx_many_names, fx_bone_tails, fx_split_tails, fx_icosphere_mesh, fx_visibility, fx_visibility_skinned, fx_visibility_split, fx_insideout]
 
 
 def main(out):

@@ -5,6 +5,21 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **The probe's inside-out verdict in C# — step 3 of replacing Blender, part C** (`VehicleProbe.InsideOut`). The PART
+  row's field 8 — the number of face islands the Lab's fix would reverse: faces joined by a shared edge whose normals,
+  on average, point at the hull's length axis (a dot below −0.25 with the radial from Blender's X axis through the
+  mid-Y and lower-quartile Z of every part's sampled vertices) — is computed as `vehicle_rig.py probe` computes it, in
+  Blender's own arithmetic: the face normal from the LOCAL corners in float32, taken through matrix_world's 3×3 (a
+  mirrored node keeps it that way — the cross product of the world corners read a mirrored test part the wrong way),
+  mathutils' products summed in double, its `normalized` and `dot` as written. **11,513 of 11,516 parts on 118 files
+  agree with Blender's own probe** (3,229 of them hold reversed islands; 309,441 islands scored); the three that
+  differ, by one or two islands each, are skinned parts with zero-area triangles: Blender's importer skins their
+  vertices into the bind pose in numpy float32 (the joint matrices through Eigen's inverse and a decompose) and lands
+  one float32 ulp from the double arithmetic here, and on a collinear triangle that ulp is the whole normal — named
+  in docs/Review-Backlog.md, decision pending. The drill compares the field from now on; the `insideout` fixture (a
+  keel pinning the axis, strips facing down and up, the same under a mirrored node, two islands in one mesh, a
+  collinear triangle, a skinned strip) agrees with Blender part for part. The probe over the 118 files: 27 s, reading
+  included. Not wired into the Lab yet (part D).
 - **The probe's visibility verdict in C# — step 3 of replacing Blender, part B** (`VehicleProbe.Visibility`,
   `VehicleProbe.Islands`). The PART row's field 6 — 1 for a part some vertex of which can shoot a ray to infinity
   past all geometry, 0 for one blocked from every sample in every direction (the Lab strips those) — is computed

@@ -26,7 +26,7 @@ public static partial class VehicleProbe
 {
     /// <summary>One part as Blender holds its mesh DATA: the vertices in Blender's order, in world space and Blender's
     /// frame, the direction each one's normal ray takes there, and its triangles (into those vertices).</summary>
-    sealed class PartMesh { public float[] World; public float[] Normal; public int[] Tris; public int Count; }
+    sealed class PartMesh { public float[] World; public float[] Normal; public float[] Local; public int[] Tris; public int Count; }   // Local: the mesh data as Blender holds it (float32, glTF frame; the bind pose for a skinned part) - the inside-out verdict reads it (step 3c)
 
     static readonly double[][] FixedDirections = MakeFixedDirections();
     static double[][] MakeFixedDirections()
@@ -98,10 +98,11 @@ public static partial class VehicleProbe
             computed[b * 3] += nx * wb; computed[b * 3 + 1] += ny * wb; computed[b * 3 + 2] += nz * wb;
             computed[c * 3] += nx * wc; computed[c * 3 + 1] += ny * wc; computed[c * 3 + 2] += nz * wc;
         }
-        var pm = new PartMesh { Count = n, World = new float[n * 3], Normal = new float[n * 3], Tris = tris.ToArray() };
+        var pm = new PartMesh { Count = n, World = new float[n * 3], Normal = new float[n * 3], Local = new float[n * 3], Tris = tris.ToArray() };
         for (int i = 0; i < n; i++)
         {
             double lx = local[i * 3], ly = local[i * 3 + 1], lz = local[i * 3 + 2];
+            pm.Local[i * 3] = (float)lx; pm.Local[i * 3 + 1] = (float)ly; pm.Local[i * 3 + 2] = (float)lz;
             double nx, ny, nz;
             if (!double.IsNaN(fileNormal[i * 3])) { nx = fileNormal[i * 3]; ny = fileNormal[i * 3 + 1]; nz = fileNormal[i * 3 + 2]; }
             else
