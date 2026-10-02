@@ -46,12 +46,14 @@ public class VehicleProbeVisibilityTests
     }
 
     [Fact]
-    public void The_normal_ray_is_the_files_normal_and_can_be_the_only_escape()
+    public void The_normal_ray_is_the_files_normal_or_the_computed_one_and_can_be_the_only_escape()
     {
-        // the "visibility" fixture's Normal and Sideways: a triangle inside 14 shields, one across each fixed direction,
-        // with the gap in the direction Blender (1, 2, 0) = glTF (1, 0, -2). File normals along it: 1; along +X: 0.
+        // the "visibility" fixture's Normal, Sideways, Computed and ComputedFlipped: a triangle inside 15 shields - one across
+        // each fixed direction, one opposite the gap - with the gap in the direction Blender (1, 2, 0) = glTF (1, 0, -2).
+        // Blender: file normals along it 1; along +X 0; no NORMAL and wound so the computed face normal points into the gap 1;
+        // wound the other way 0.
         var m = new HafModel();
-        var dirs = new[] { (1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1), (1, 1, 1), (1, 1, -1), (1, -1, 1), (1, -1, -1), (-1, 1, 1), (-1, 1, -1), (-1, -1, 1), (-1, -1, -1) };
+        var dirs = new[] { (1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1), (1, 1, 1), (1, 1, -1), (1, -1, 1), (1, -1, -1), (-1, 1, 1), (-1, 1, -1), (-1, -1, 1), (-1, -1, -1), (-1, -2, 0) };
         foreach (var (ox, oy, oz) in dirs)
         {
             double gx = ox, gy = oz, gz = -oy; double l = Math.Sqrt(gx * gx + gy * gy + gz * gz); gx /= l; gy /= l; gz /= l;
@@ -70,8 +72,14 @@ public class VehicleProbeVisibilityTests
         m.Nodes.Add(new HafNode { Name = "Normal", Mesh = m.Meshes.Count - 1 });
         m.Meshes.Add(Mesh("sideways", tri, new[] { 0, 1, 2 }, new float[] { 1, 0, 0, 1, 0, 0, 1, 0, 0 }));
         m.Nodes.Add(new HafNode { Name = "Sideways", Mesh = m.Meshes.Count - 1 });
+        float[] tilted = { 30, 0, 0, 30, 0.2f, 0, 30 + 0.4f / (float)Math.Sqrt(5), 0, 0.2f / (float)Math.Sqrt(5) };   // (p1 - p0) x (p2 - p0) = (1, 0, -2) / sqrt 5: into the gap
+        m.Meshes.Add(Mesh("computed", tilted, new[] { 0, 1, 2 }));
+        m.Nodes.Add(new HafNode { Name = "Computed", Mesh = m.Meshes.Count - 1 });
+        m.Meshes.Add(Mesh("computedflipped", tilted, new[] { 0, 2, 1 }));
+        m.Nodes.Add(new HafNode { Name = "ComputedFlipped", Mesh = m.Meshes.Count - 1 });
         var r = VehicleProbe.Run(Link(m));
         Assert.Equal("1", Vis(r, "Normal")); Assert.Equal("0", Vis(r, "Sideways"));
+        Assert.Equal("1", Vis(r, "Computed")); Assert.Equal("0", Vis(r, "ComputedFlipped"));
         Assert.All(r.Parts.Where(p => p.Name.StartsWith("Shield")), p => Assert.Equal(1, p.Vis));
     }
 
