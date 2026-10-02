@@ -84,6 +84,27 @@ public class VehicleProbeInsideOutTests
     }
 
     [Fact]
+    public void Faces_touching_at_only_a_vertex_vote_as_separate_islands()
+    {
+        // insideout fixture, Blender: VertexTouch 2. Sharing a corner does not join face islands.
+        var m = KeelAndPlates();
+        m.Meshes.Add(Mesh("vertextouch", new float[] { 0, 5, 0, 1, 5, 0, 0, 5, 1, -1, 5, 0, 0, 5, -1 }, new[] { 0, 1, 2, 0, 3, 4 }));
+        m.Nodes.Add(new HafNode { Name = "VertexTouch", Mesh = 3 });
+        Assert.Equal(2, Flip(VehicleProbe.Run(Link(m)), "VertexTouch"));
+    }
+
+    [Fact]
+    public void All_faces_on_a_nonmanifold_edge_vote_as_one_island()
+    {
+        // insideout fixture, Blender: NonManifold 1. Two inward and one outward face share one edge;
+        // their average is below -0.25. Every linked face joins the island, including the third.
+        var m = KeelAndPlates();
+        m.Meshes.Add(Mesh("nonmanifold", new float[] { 0, 5, 0, 1, 5, 0, 0, 5, 1, 0, 5, 2, 0, 5, -1 }, new[] { 0, 1, 2, 0, 1, 3, 0, 1, 4 }));
+        m.Nodes.Add(new HafNode { Name = "NonManifold", Mesh = 3 });
+        Assert.Equal(1, Flip(VehicleProbe.Run(Link(m)), "NonManifold"));
+    }
+
+    [Fact]
     public void A_zero_area_triangle_casts_no_vote_and_its_island_does_not_count()
     {
         // the fixture's Collinear: the down strip beside a triangle whose corners lie on one line - bmesh's normal for it is exactly

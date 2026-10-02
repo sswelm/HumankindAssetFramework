@@ -432,7 +432,9 @@ def fx_insideout(out):
     product of the world corners would say the opposite (negativescaletest's Shiny1). TwoIslands: one mesh holding a down
     strip and an up strip that share no vertex - two islands, one reversed (1). SkinnedDown: the down strip skinned to a
     joint at rest (1). Collinear: the down strip beside a triangle whose three corners lie on one line - its normal is
-    exactly zero, so that island casts no vote and does not count (1). Every node its own mesh: no split."""
+    exactly zero, so that island casts no vote and does not count (1). VertexTouch: two inward faces sharing only a
+    vertex are two face islands (2). NonManifold: two inward and one outward face share an edge, forming one island
+    with an inward average (1). Every node its own mesh: no split."""
     b = F.Buf()
     gpos, _, _, gidx = F.grid(8, 8)
     kpos = [(x - 0.5, -5.0, y - 0.5) for x, y, _ in gpos]   # Blender z = glTF y: 5 below the plates
@@ -466,7 +468,10 @@ def fx_insideout(out):
              {"name": "TwoIslands", "mesh": 5}, {"name": "Collinear", "mesh": 6},
              {"name": "Rig", "children": [8]}, {"name": "Joint"}, {"name": "SkinnedDown", "mesh": 7, "skin": 0}]
     skins = [{"name": "Skin", "joints": [8]}]
-    root = F.base("insideout", meshes=meshes, nodes=nodes, skins=skins, scenes=[{"nodes": [0, 1, 2, 3, 4, 5, 6, 7, 9]}], scene=0)
+    meshes += [mesh("vertextouch", [(0, 5, 0), (1, 5, 0), (0, 5, 1), (-1, 5, 0), (0, 5, -1)], [0, 1, 2, 0, 3, 4]),
+               mesh("nonmanifold", [(0, 5, 0), (1, 5, 0), (0, 5, 1), (0, 5, 2), (0, 5, -1)], [0, 1, 2, 0, 1, 3, 0, 1, 4])]
+    nodes += [{"name": "VertexTouch", "mesh": 8}, {"name": "NonManifold", "mesh": 9}]
+    root = F.base("insideout", meshes=meshes, nodes=nodes, skins=skins, scenes=[{"nodes": [0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11]}], scene=0)
     F.write_glb(os.path.join(out, "insideout.glb"), root, b)
 
 
