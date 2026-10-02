@@ -305,9 +305,126 @@ def fx_icosphere_mesh(out):
     F.write_glb(os.path.join(out, "icosphere_mesh.glb"), root, b)
 
 
+def box(cx, cy, cz, h):
+    """A closed cube of 12 triangles around (cx, cy, cz), half-size h: positions and indices."""
+    pos = [(cx + sx * h, cy + sy * h, cz + sz * h) for sz in (-1, 1) for sy in (-1, 1) for sx in (-1, 1)]
+    idx = [0, 2, 1, 1, 2, 3,  4, 5, 6, 5, 7, 6,  0, 1, 5, 0, 5, 4,  2, 6, 7, 2, 7, 3,  0, 4, 6, 0, 6, 2,  1, 3, 7, 1, 7, 5]
+    return pos, idx
+
+
+def fx_visibility(out):
+    """The visibility verdict (PART field 6, step 3b): a part every ray from which meets other geometry is INTERIOR (0).
+    Box: a closed cube - its own vertices escape outward (1). Core: a grid inside the box (0). Outside: a triangle far
+    away (1). Normal: a triangle inside a box of 15 shields - one across each fixed ray direction and one across the
+    direction opposite to the gap - with the gap in the direction Blender (1, 2, 0): only the vertex NORMAL ray, which
+    the file gives as that direction, escapes (1); its twin Sideways, whose file normals point +X into a shield, is
+    interior (0): the normal ray is the file's normal, not a computed one. Computed: the same spot WITHOUT a NORMAL
+    attribute, a triangle wound so that the normal Blender computes from its face points into the gap (1);
+    ComputedFlipped: wound the other way, into the opposite shield (0). ComputedTwin: the same triangle twice, the second
+    wound against the first - Blender's validate drops the second face, so the normal is the first's (1); ComputedTwinFlipped:
+    the flipped one first (0) (external review of PR #115: both faces summed to no normal, and the part read interior).
+    Every node its own mesh: no split."""
+    b = F.Buf()
+    bpos, bidx = box(0, 0, 0, 2)
+    gpos, _, _, gidx = F.grid(8, 8)
+    gpos = [(x - 0.5, y - 0.5, 0.0) for x, y, _ in gpos]
+    meshes = [{"name": "box", "primitives": [{"attributes": {"POSITION": b.accessor(bpos, "f", "VEC3")}, "indices": b.accessor(bidx, "H", "SCALAR")}]},
+              {"name": "core", "primitives": [{"attributes": {"POSITION": b.accessor(gpos, "f", "VEC3")}, "indices": b.accessor(gidx, "H", "SCALAR")}]},
+              {"name": "outside", "primitives": [{"attributes": {"POSITION": tri(b, 10)}}]}]
+    nodes = [{"name": "Box", "mesh": 0}, {"name": "Core", "mesh": 1}, {"name": "Outside", "mesh": 2}]
+    # the shields: 14 quads of size 3 x 3, each 5 units out along one fixed direction (Blender's frame; z here = -y of glTF)
+    dirs = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1), (1, 1, 1), (1, 1, -1), (1, -1, 1), (1, -1, -1), (-1, 1, 1), (-1, 1, -1), (-1, -1, 1), (-1, -1, -1),
+            (-1, -2, 0)]   # the 15th: opposite to the gap, so a computed normal pointing the wrong way is blocked too
+    for k, (ox, oy, oz) in enumerate(dirs):
+        # Blender frame (x, y, z) = glTF (x, -z, y): the fixed direction in glTF terms
+        gx, gy, gz = ox, oz, -oy
+        l = (gx * gx + gy * gy + gz * gz) ** 0.5; gx, gy, gz = gx / l, gy / l, gz / l
+        cx, cy, cz = 30 + gx * 5, gy * 5, gz * 5
+        # two unit vectors across the direction
+        ax, ay, az = (0, 1, 0) if abs(gy) < 0.9 else (1, 0, 0)
+        ux, uy, uz = gy * az - gz * ay, gz * ax - gx * az, gx * ay - gy * ax
+        l = (ux * ux + uy * uy + uz * uz) ** 0.5; ux, uy, uz = ux / l, uy / l, uz / l
+        vx, vy, vz = gy * uz - gz * uy, gz * ux - gx * uz, gx * uy - gy * ux
+        q = [(cx + s1 * 1.5 * ux + s2 * 1.5 * vx, cy + s1 * 1.5 * uy + s2 * 1.5 * vy, cz + s1 * 1.5 * uz + s2 * 1.5 * vz) for s1, s2 in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+        meshes.append({"name": "shield%d" % k, "primitives": [{"attributes": {"POSITION": b.accessor(q, "f", "VEC3")}, "indices": b.accessor([0, 1, 2, 0, 2, 3], "H", "SCALAR")}]})
+        nodes.append({"name": "Shield%02d" % k, "mesh": len(meshes) - 1})
+    # the two triangles at (30, 0, 0): "Normal" with file normals along Blender (1, 2, 0) = glTF (1, 0, -2) (not a fixed direction), "Sideways" with +X
+    tpos = [(30, 0, 0), (30.2, 0, 0), (30, 0.2, 0)]
+    nn = (1 / 5 ** 0.5, 0.0, -2 / 5 ** 0.5)
+    meshes.append({"name": "normal", "primitives": [{"attributes": {"POSITION": b.accessor(tpos, "f", "VEC3"), "NORMAL": b.accessor([nn] * 3, "f", "VEC3", minmax=False)}}]})
+    nodes.append({"name": "Normal", "mesh": len(meshes) - 1})
+    meshes.append({"name": "sideways", "primitives": [{"attributes": {"POSITION": b.accessor(tpos, "f", "VEC3"), "NORMAL": b.accessor([(1.0, 0.0, 0.0)] * 3, "f", "VEC3", minmax=False)}}]})
+    nodes.append({"name": "Sideways", "mesh": len(meshes) - 1})
+    # no NORMAL: the face normal Blender computes is (p1 - p0) x (p2 - p0); u = (0, 1, 0) and v = n x u = (2, 0, 1) / sqrt 5 span the plane across n
+    s5 = 5 ** 0.5
+    cpos = [(30.0, 0.0, 0.0), (30.0, 0.2, 0.0), (30.0 + 0.4 / s5, 0.0, 0.2 / s5)]
+    meshes.append({"name": "computed", "primitives": [{"attributes": {"POSITION": b.accessor(cpos, "f", "VEC3")}, "indices": b.accessor([0, 1, 2], "H", "SCALAR")}]})
+    nodes.append({"name": "Computed", "mesh": len(meshes) - 1})
+    meshes.append({"name": "computedflipped", "primitives": [{"attributes": {"POSITION": b.accessor(cpos, "f", "VEC3")}, "indices": b.accessor([0, 2, 1], "H", "SCALAR")}]})
+    nodes.append({"name": "ComputedFlipped", "mesh": len(meshes) - 1})
+    meshes.append({"name": "computedtwin", "primitives": [{"attributes": {"POSITION": b.accessor(cpos, "f", "VEC3")}, "indices": b.accessor([0, 1, 2, 0, 2, 1], "H", "SCALAR")}]})
+    nodes.append({"name": "ComputedTwin", "mesh": len(meshes) - 1})
+    meshes.append({"name": "computedtwinflipped", "primitives": [{"attributes": {"POSITION": b.accessor(cpos, "f", "VEC3")}, "indices": b.accessor([0, 2, 1, 0, 1, 2], "H", "SCALAR")}]})
+    nodes.append({"name": "ComputedTwinFlipped", "mesh": len(meshes) - 1})
+    root = F.base("visibility", meshes=meshes, nodes=nodes, scenes=[{"nodes": list(range(len(nodes)))}], scene=0)
+    F.write_glb(os.path.join(out, "visibility.glb"), root, b)
+
+
+def fx_visibility_skinned(out):
+    """A SKINNED triangle inside the 15 shields, its file normals +X and its one joint turned 63.43 degrees about glTF Y
+    so that the bind pose takes that normal to the gap direction (1, 0, -2) / sqrt 5: Blender skins the normals into the
+    bind pose as it skins the positions (skin_into_bind_pose), so the normal ray escapes (1). With the file's normal as
+    given it would meet the +X shield (external review of PR #115). Its twin Still, whose joint is not turned, is 0."""
+    b = F.Buf()
+    import math
+    th = math.atan2(2.0, 1.0)
+    meshes = []; nodes = []
+    dirs = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1), (1, 1, 1), (1, 1, -1), (1, -1, 1), (1, -1, -1), (-1, 1, 1), (-1, 1, -1), (-1, -1, 1), (-1, -1, -1), (-1, -2, 0)]
+    for k, (ox, oy, oz) in enumerate(dirs):
+        gx, gy, gz = ox, oz, -oy
+        l = (gx * gx + gy * gy + gz * gz) ** 0.5; gx, gy, gz = gx / l, gy / l, gz / l
+        cx, cy, cz = gx * 5, gy * 5, gz * 5
+        ax, ay, az = (0, 1, 0) if abs(gy) < 0.9 else (1, 0, 0)
+        ux, uy, uz = gy * az - gz * ay, gz * ax - gx * az, gx * ay - gy * ax
+        l = (ux * ux + uy * uy + uz * uz) ** 0.5; ux, uy, uz = ux / l, uy / l, uz / l
+        vx, vy, vz = gy * uz - gz * uy, gz * ux - gx * uz, gx * uy - gy * ux
+        q = [(cx + s1 * 1.5 * ux + s2 * 1.5 * vx, cy + s1 * 1.5 * uy + s2 * 1.5 * vy, cz + s1 * 1.5 * uz + s2 * 1.5 * vz) for s1, s2 in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+        meshes.append({"name": "shield%d" % k, "primitives": [{"attributes": {"POSITION": b.accessor(q, "f", "VEC3")}, "indices": b.accessor([0, 1, 2, 0, 2, 3], "H", "SCALAR")}]})
+        nodes.append({"name": "Shield%02d" % k, "mesh": len(meshes) - 1})
+    tpos = [(0, 0, 0), (0.2, 0, 0), (0, 0.2, 0)]
+    def skinned_tri(joint):
+        return {"POSITION": b.accessor(tpos, "f", "VEC3"), "NORMAL": b.accessor([(1.0, 0.0, 0.0)] * 3, "f", "VEC3", minmax=False),
+                "JOINTS_0": b.accessor([(joint, 0, 0, 0)] * 3, "H", "VEC4", minmax=False), "WEIGHTS_0": b.accessor([(1, 0, 0, 0)] * 3, "f", "VEC4", minmax=False)}
+    meshes.append({"name": "turned", "primitives": [{"attributes": skinned_tri(0)}]})
+    meshes.append({"name": "still", "primitives": [{"attributes": skinned_tri(0)}]})
+    n0 = len(nodes)
+    nodes += [{"name": "Rig", "children": [n0 + 1]}, {"name": "Turned", "rotation": [0, math.sin(th / 2), 0, math.cos(th / 2)]},
+              {"name": "Rig2", "children": [n0 + 3]}, {"name": "StillJoint"},
+              {"name": "TurnedMesh", "mesh": len(meshes) - 2, "skin": 0}, {"name": "StillMesh", "mesh": len(meshes) - 1, "skin": 1}]
+    skins = [{"name": "Skin", "joints": [n0 + 1]}, {"name": "Skin2", "joints": [n0 + 3]}]
+    root = F.base("visibility_skinned", meshes=meshes, nodes=nodes, skins=skins, scenes=[{"nodes": list(range(n0)) + [n0, n0 + 2, n0 + 4, n0 + 5]}], scene=0)
+    F.write_glb(os.path.join(out, "visibility_skinned.glb"), root, b)
+
+
+def fx_visibility_split(out):
+    """The same box, core and outside triangle as ONE mesh of three islands, split into loose parts - the core a 40 x 40
+    grid (1,681 vertices, so every 56th is sampled, and 3,200 faces, so Blender's edge array is built in 8 hash buckets):
+    the sampled vertices are the ones Blender's separated island holds at those indices (VehicleProbe.Islands.cs)."""
+    b = F.Buf()
+    bpos, bidx = box(0, 0, 0, 2)
+    gpos, _, _, gidx = F.grid(40, 40)
+    gpos = [(x - 0.5, y - 0.5, 0.0) for x, y, _ in gpos]
+    opos = [(10, 0, 0), (11, 0, 0), (10, 1, 0)]
+    pos = bpos + gpos + opos
+    idx = bidx + [i + len(bpos) for i in gidx] + [i + len(bpos) + len(gpos) for i in (0, 1, 2)]
+    root = F.base("visibility_split", meshes=[{"name": "all", "primitives": [{"attributes": {"POSITION": b.accessor(pos, "f", "VEC3")}, "indices": b.accessor(idx, "H", "SCALAR")}]}],
+                  nodes=[{"name": "Hull", "mesh": 0}], scenes=[{"nodes": [0]}], scene=0)
+    F.write_glb(os.path.join(out, "visibility_split.glb"), root, b)
+
+
 FIXTURES = [fx_naming, fx_order, fx_armature_names, fx_skinned_not_moved, fx_skinned_animated, fx_mesh_on_bone, fx_islands, fx_rotated_armature,
             fx_two_armatures, fx_nested_skins, fx_split_collision, fx_nonunit_rotation, fx_cameras, fx_camera_data_names,
-            fx_name_tails, fx_long_names, fx_many_names, fx_bone_tails, fx_split_tails, fx_icosphere_mesh]
+            fx_name_tails, fx_long_names, fx_many_names, fx_bone_tails, fx_split_tails, fx_icosphere_mesh, fx_visibility, fx_visibility_skinned, fx_visibility_split]
 
 
 def main(out):

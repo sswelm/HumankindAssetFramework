@@ -35,6 +35,8 @@
     <Compile Include="..\editor\HafModelDiff.cs" Link="HafModelDiff.cs" />
     <Compile Include="..\editor\BlenderNames.cs" Link="BlenderNames.cs" />
     <Compile Include="..\editor\VehicleProbe.cs" Link="VehicleProbe.cs" />
+    <Compile Include="..\editor\VehicleProbe.Visibility.cs" Link="VehicleProbe.Visibility.cs" />
+    <Compile Include="..\editor\VehicleProbe.Islands.cs" Link="VehicleProbe.Islands.cs" />
   </ItemGroup>
 
   <!-- compile-time references the TEST code uses directly -->

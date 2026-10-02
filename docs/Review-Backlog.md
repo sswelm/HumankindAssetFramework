@@ -70,7 +70,8 @@ end to end. It lands in four parts: **3a** the rows (names as Blender's importer
 rig bones) with row-for-row parity on every registry source and every saved recipe's source — done (105 of 105 files;
 the recipes' sources are the probe's real inputs and found what the registry could not: shared vertex accessors, a
 required material extension, a sheared node matrix); **3b** the visibility verdicts (escape rays over
-one BVH); **3c** the inside-out verdicts (island scoring against the hull axis); **3d** the Lab calls the C# probe for
+one BVH) — done (10,498 parts on 118 files agree with Blender, 1,171 interior; it took Blender's own vertex order
+after a loose split and the file's normals as the normal ray to get there); **3c** the inside-out verdicts (island scoring against the hull axis); **3d** the Lab calls the C# probe for
 `.glb`/`.gltf` sources and builds its part preview in-process instead of importing a preview FBX (FBX/OBJ/.blend
 sources keep Blender). The order below stands for the rest.
 
