@@ -14,14 +14,16 @@
 // What Blender does that this reproduces on purpose: a source with ONE mesh object is split into its loose parts
 // (islands by shared vertex index; the island with the lowest vertex index keeps the name, the rest count up in
 // that order - measured); the importer's bone-shape "Icosphere" is purged by signature, and so is any real part
-// that matches it (the script's rule, kept). The visibility and inside-out verdicts (fields 6 and 8) come in their
-// own steps; until then every part is "visible" and "keeps as authored", and the drill does not compare them.
+// that matches it (the script's rule, kept); the separated parts' VERTEX ORDER is the one Blender's edge walk gives
+// (VehicleProbe.Islands.cs). The visibility verdict (field 6) is computed as the script computes it - escape rays
+// over one BVH, VehicleProbe.Visibility.cs - and the drill compares it. The inside-out verdict (field 8) comes in
+// its own step; until then every part "keeps as authored" and the drill does not compare that field.
 // Proof: tools/vehicle_probe_drill.sh runs Blender's probe and this on every registry source and compares the rows.
 using System;
 using System.Collections.Generic;
 using System.Linq;
 
-public static class VehicleProbe
+public static partial class VehicleProbe
 {
     public sealed class Part
     {
@@ -70,6 +72,7 @@ public static class VehicleProbe
 
         // ---- the mesh objects, in Blender's order, each one object per node (a mesh two nodes share is two objects)
         var objects = new List<(int node, string name)>(); var purgedNames = new List<string>();
+        var sources = new List<(int node, int prim, int[] verts)>();   // per part, in r.Parts order: what MakePart was given - the visibility reads the same vertices
         foreach (var (node, name) in names.MeshObjectsInOrder)
         {
             var mesh = m.Meshes[m.Nodes[node].Mesh];
@@ -82,7 +85,7 @@ public static class VehicleProbe
         if (objects.Count == 1)
         {
             var (node, name) = objects[0];
-            var islands = Islands(m.Meshes[m.Nodes[node].Mesh]);
+            var islands = BlenderIslands(m.Meshes[m.Nodes[node].Mesh]);
             r.Split = true;
             r.Notes.Add($"single mesh split into {islands.Count} loose parts (names are synthetic)");
             // the loose parts are named in the pool of EVERY object the import made (an empty called Hull.001 pushes the
@@ -94,10 +97,40 @@ public static class VehicleProbe
             // each new object is a copy of the first, asking for ITS name: the smallest number its base has free
             // (Hull.005 beside an empty Hull.002 splits into Hull.005, Hull.001, Hull.003, Hull.004 - measured)
             for (int k = 0; k < islands.Count; k++)
-                r.Parts.Add(MakePart(m, node, k == 0 ? name : pool.Unique(name), geo, islands[k].prim, islands[k].verts, names));
+            {
+                r.Parts.Add(MakePart(m, node, k == 0 ? name : pool.Unique(name), geo, islands[k].Prim, islands[k].Verts, names));
+                sources.Add((node, islands[k].Prim, islands[k].Verts));
+            }
         }
         else
-            foreach (var (node, name) in objects) r.Parts.Add(MakePart(m, node, name, Geometry(m, node, world, armaWorld), -1, null, names));
+            foreach (var (node, name) in objects) { r.Parts.Add(MakePart(m, node, name, Geometry(m, node, world, armaWorld), -1, null, names)); sources.Add((node, -1, null)); }
+
+        // ---- the visibility verdict: every part's mesh DATA in world space (the importer's bind pose for a skinned
+        //      part - `matrix_world @ v.co`, not the posed vertices the box is read from), one BVH, escape rays
+        if (r.Parts.Count > 0)
+        {
+            double[][] bindArma = null; var jointMatsOfSkin = new Dictionary<int, double[][]>();
+            var partMeshes = new List<PartMesh>();
+            foreach (var (node, prim, verts) in sources)
+            {
+                var mesh = m.Meshes[m.Nodes[node].Mesh];
+                int skin = m.Nodes[node].Skin;
+                bool skinned = skin >= 0 && skin < m.Skins.Count && mesh.Primitives.Any(p => p.Skinned);
+                Func<HafPrimitive, int, double[]> position = (p, v) => new double[] { p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2] };
+                if (skinned)
+                {
+                    if (!jointMatsOfSkin.TryGetValue(skin, out var jointMats))
+                    {
+                        bindArma = bindArma ?? BindArmatureMatrices(m, names);
+                        jointMats = jointMatsOfSkin[skin] = BindJointMatrices(m, m.Skins[skin], bindArma);
+                    }
+                    var jm = jointMats;
+                    position = (p, v) => p.Skinned ? BindPosition(p, v, jm) : new double[] { p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2] };
+                }
+                partMeshes.Add(BuildPartMesh(m, node, prim, verts, skinned ? armaWorld[skin] : world[node], position));
+            }
+            Visibility(r.Parts, partMeshes);
+        }
 
         // ---- rig_report: the first armature's bones, from the undeformed vertices (v.co = the bind pose)
         if (names.ArmaturesInOrder.Count > 0) RigReport(m, names, armaWorld, BindArmatureMatrices(m, names), r);
@@ -205,42 +238,6 @@ public static class VehicleProbe
             var list = new List<int>(); for (int i = 0; i < seen.Length; i++) if (seen[i]) list.Add(i);
             return list.ToArray();
         });
-    }
-
-    // ---------------------------------------------------------------- loose parts, as Blender separates them
-
-    /// <summary>The mesh's islands by shared vertex INDEX (a glTF primitive's vertices are its own; two primitives never
-    /// connect), each the vertices of one primitive, ordered by their lowest vertex - Blender's `separate(type='LOOSE')`
-    /// order (measured on fixtures whose islands were laid out against it).</summary>
-    static List<(int prim, int[] verts)> Islands(HafMesh mesh)
-    {
-        var result = new List<(int, int[])>();
-        for (int pi = 0; pi < mesh.Primitives.Count; pi++)
-        {
-            var p = mesh.Primitives[pi];
-            var parent = new int[p.VertexCount]; for (int i = 0; i < parent.Length; i++) parent[i] = i;
-            int Find(int a) { while (parent[a] != a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; }
-            void Union(int a, int b) { a = Find(a); b = Find(b); if (a != b) parent[Math.Max(a, b)] = Math.Min(a, b); }
-            int count = p.Indices != null ? p.Indices.Length : p.VertexCount;
-            int At(int i) => p.Indices != null ? p.Indices[i] : i;
-            switch (p.Mode)
-            {
-                case 4: for (int t = 0; t + 2 < count; t += 3) { Union(At(t), At(t + 1)); Union(At(t + 1), At(t + 2)); } break;
-                case 5: case 6: for (int t = 0; t + 2 < count; t++) { Union(At(t), At(t + 1)); Union(At(t + 1), At(t + 2)); } break;
-                case 1: for (int t = 0; t + 1 < count; t += 2) Union(At(t), At(t + 1)); break;
-                case 2: for (int t = 0; t < count; t++) Union(At(t), At((t + 1) % count)); break;
-                case 3: for (int t = 0; t + 1 < count; t++) Union(At(t), At(t + 1)); break;
-            }
-            var byRoot = new Dictionary<int, List<int>>(); var order = new List<int>();
-            foreach (int v in Used(p))   // the vertices Blender has: an unused one was never imported, so it is no island
-            {
-                int root = Find(v);
-                if (!byRoot.TryGetValue(root, out var list)) { list = new List<int>(); byRoot[root] = list; order.Add(root); }   // roots are the lowest vertex of each island, met in vertex order
-                list.Add(v);
-            }
-            foreach (var root in order) result.Add((pi, byRoot[root].ToArray()));
-        }
-        return result;
     }
 
     // ---------------------------------------------------------------- the importer's bone-shape artefact, by signature
@@ -404,6 +401,43 @@ public static class VehicleProbe
         return r;
     }
 
+    // ---------------------------------------------------------------- the importer's bind pose (skin_into_bind_pose)
+
+    /// <summary>Per joint of a skin: (the bone's bind matrix in armature space) x (its inverse bind matrix).</summary>
+    static double[][] BindJointMatrices(HafModel m, HafSkin sk, double[][] bindArma)
+    {
+        var jointMats = new double[sk.Joints.Length][];
+        for (int j = 0; j < sk.Joints.Length; j++)
+        {
+            double[] ibm = HafTransforms.Identity;
+            if (sk.InverseBindMatrices != null) { ibm = new double[16]; Array.Copy(sk.InverseBindMatrices, j * 16, ibm, 0, 16); }
+            jointMats[j] = HafTransforms.Mul(bindArma[sk.Joints[j]] ?? HafTransforms.Identity, ibm);
+        }
+        return jointMats;
+    }
+
+    /// <summary>`v.co` of a skinned vertex: skinned into the importer's bind pose, in the armature's space - the weighted
+    /// joint matrices, the weights normalized by their sum (a zero sum = all on the first joint).</summary>
+    static double[] BindPosition(HafPrimitive p, int v, double[][] jointMats)
+    {
+        var acc = new double[16]; double wsum = 0;
+        for (int set = 0; set < 2; set++)
+        {
+            var js = set == 0 ? p.Joints : p.Joints1; var ws = set == 0 ? p.Weights : p.Weights1;
+            if (js == null || ws == null) continue;
+            for (int k = 0; k < 4; k++)
+            {
+                double w = ws[v * 4 + k]; int jj = js[v * 4 + k];
+                if (w == 0 || jj >= jointMats.Length) continue;
+                for (int e = 0; e < 16; e++) acc[e] += w * jointMats[jj][e];
+                wsum += w;
+            }
+        }
+        if (wsum == 0) { int j0 = p.Joints[v * 4]; acc = (double[])jointMats[j0 < jointMats.Length ? j0 : 0].Clone(); wsum = 1; }
+        for (int e = 0; e < 16; e++) acc[e] /= wsum;
+        return HafTransforms.Apply(acc, p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2], 1.0);
+    }
+
     // ---------------------------------------------------------------- rig_report
 
     static void RigReport(HafModel m, BlenderNames.Result names, double[][] armaWorld, double[][] bindArma, Result r)
@@ -422,14 +456,7 @@ public static class VehicleProbe
             if (skin < 0 || skin >= m.Skins.Count) continue;
             var sk = m.Skins[skin];
             if (!sk.Joints.Any(j => names.BoneOfJoint.TryGetValue(j, out var bn) && boneNames.Contains(bn))) continue;   // no vertex group of the first armature's bones
-            // skin_into_bind_pose: joint matrix = (the bone's bind matrix in armature space) x (its inverse bind matrix)
-            var jointMats = new double[sk.Joints.Length][];
-            for (int j = 0; j < sk.Joints.Length; j++)
-            {
-                double[] ibm = HafTransforms.Identity;
-                if (sk.InverseBindMatrices != null) { ibm = new double[16]; Array.Copy(sk.InverseBindMatrices, j * 16, ibm, 0, 16); }
-                jointMats[j] = HafTransforms.Mul(bindArma[sk.Joints[j]] ?? HafTransforms.Identity, ibm);
-            }
+            var jointMats = BindJointMatrices(m, sk, bindArma);
             foreach (var p in m.Meshes[m.Nodes[node].Mesh].Primitives)
             {
                 if (!p.Skinned) { total += Used(p).Length; continue; }
@@ -451,22 +478,7 @@ public static class VehicleProbe
                     // armature object's world matrix. Two files taught this: combine_soldier, whose root node carries a quarter
                     // turn the inverse bind matrices do not (Y and Z came out swapped from the raw vertices), and drone_clean,
                     // whose armature carries a 0.01 scale they DO account for (the raw vertices through it came out 100x small)
-                    var acc = new double[16]; double wsum = 0;
-                    for (int set = 0; set < 2; set++)
-                    {
-                        var js = set == 0 ? p.Joints : p.Joints1; var ws = set == 0 ? p.Weights : p.Weights1;
-                        if (js == null || ws == null) continue;
-                        for (int k = 0; k < 4; k++)
-                        {
-                            double w = ws[v * 4 + k]; int jj = js[v * 4 + k];
-                            if (w == 0 || jj >= jointMats.Length) continue;
-                            for (int e = 0; e < 16; e++) acc[e] += w * jointMats[jj][e];
-                            wsum += w;
-                        }
-                    }
-                    if (wsum == 0) { int j0 = p.Joints[v * 4]; acc = (double[])jointMats[j0 < jointMats.Length ? j0 : 0].Clone(); wsum = 1; }
-                    for (int e = 0; e < 16; e++) acc[e] /= wsum;
-                    var co = HafTransforms.Apply(acc, p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2], 1.0);
+                    var co = BindPosition(p, v, jointMats);
                     var q = HafTransforms.Apply(armaWorld[skin], co[0], co[1], co[2], 1.0);
                     double x = q[0], y = -q[2], z = q[1];   // Blender frame
                     if (!stats.TryGetValue(best, out var st)) { st = (0, new[] { x, y, z }, new[] { x, y, z }); order.Add(best); }

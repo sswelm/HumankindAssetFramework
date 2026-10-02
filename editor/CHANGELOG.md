@@ -5,6 +5,19 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **The probe's visibility verdict in C# — step 3 of replacing Blender, part B** (`VehicleProbe.Visibility`,
+  `VehicleProbe.Islands`). The PART row's field 6 — 1 for a part some vertex of which can shoot a ray to infinity
+  past all geometry, 0 for one blocked from every sample in every direction (the Lab strips those) — is computed
+  as `vehicle_rig.py probe` computes it: one BVH over every part's mesh data (the bind pose for a skinned part),
+  every n-th vertex sampled, the vertex normal's direction first and 14 fixed ones after it, a start offset of
+  0.1 % of the largest part. Two things the measurement taught, each a rule and not a tolerance: Blender's
+  `vertex.normal` on a mesh with a NORMAL attribute is the file's normal (its custom corner normals mixed), so 13
+  sliver quads on the Ehrhardt read differently with computed normals and the same with the file's; and a part
+  Blender separated from a single mesh holds its vertices in the order its edge walk found them — edges in
+  face order, hash-bucketed into eight sets past 1,000 faces, a depth-first walk from the lowest vertex — which
+  decides which vertices are sampled. Both are ported from Blender's source. **10,498 parts on 118 files agree
+  with Blender's own probe, 1,171 of them interior**; the drill compares the field from now on. Not wired into
+  the Lab yet (part D); the inside-out verdict (field 8) is part C.
 - **The Workshop no longer leaves in a file what its operations took out of the model** (`GlbDisconnectedParts.Compact`).
   A Split, a Cut, a Fuse and a Delete all take meshes off their nodes — and until now those meshes, their accessors and
   their bytes stayed in the output: on the Lab's own sources **614 MB of 1,394 MB** was geometry nothing draws (a

@@ -9,13 +9,13 @@
 #     398 MB), each recipe holding the parts Blender's probe listed when it was saved,
 # then Blender runs the REAL probe (editor/Tools~/vehicle_rig.py probe, posed at the first clip's start) on a
 # sample of them in one process, and the rows are compared per file: the part NAMES (the key every saved recipe
-# holds) and their order, the vertex counts, the world boxes, the dominant bones, the RIGBONE rows.
+# holds) and their order, the vertex counts, the world boxes, the visibility verdicts, the dominant bones, the RIGBONE rows.
 # The sample is every fixture, six rigged Khronos samples, the registry's three smallest files, and the source of
 # every recipe whose stored parts DIFFER from the C# probe's (a recipe can be stale - saved before its source was
 # re-cut - so Blender's probe of the source as it is today decides: only a C# row that differs from Blender's fails;
 # a differing recipe over 100 MB is left to FULL=1). FULL=1 probes every file in Blender (about a minute in one
 # process, against some 10 s for the C# side, reading 1.7 GB included).
-# Not compared yet, said: the visibility (field 6) and inside-out (field 8) verdicts - steps 3b and 3c.
+# The visibility verdict (field 6) is compared since step 3b (2026-10-02). Not compared yet, said: the inside-out verdict (field 8) - step 3c.
 # The naming fixtures hold one importer rule each - and the ones no real file of these populations has (review of
 # PR #112: not one of 105 files had a second skin, a camera whose name clashes, a rotation that is not a unit
 # quaternion, or a loose-part name already taken; each had a defect behind it that 105 PASSes could not show).
@@ -41,7 +41,7 @@ cp "$NEWTONSOFT" "$TMPD/Newtonsoft.Json.dll"
 WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"; WTMP="$(cygpath -m "$TMPD" 2>/dev/null || echo "$TMPD")"
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -out:"$WTMP/probe.exe" \
   -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
-  "$WROOT/tools/vehicle-probe-drill/ProbeDrill.cs" "$WROOT/editor/HafModel.cs" "$WROOT/editor/GlbReader.cs" "$WROOT/editor/HafTransforms.cs" "$WROOT/editor/BlenderNames.cs" "$WROOT/editor/VehicleProbe.cs" 2>&1); rc=$?
+  "$WROOT/tools/vehicle-probe-drill/ProbeDrill.cs" "$WROOT/editor/HafModel.cs" "$WROOT/editor/GlbReader.cs" "$WROOT/editor/HafTransforms.cs" "$WROOT/editor/BlenderNames.cs" "$WROOT/editor/VehicleProbe.cs" "$WROOT/editor/VehicleProbe.Visibility.cs" "$WROOT/editor/VehicleProbe.Islands.cs" 2>&1); rc=$?
 if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/probe.exe" ]; then echo "$OUT" | grep -E "error" | head -20; echo "FAIL — the vehicle probe drill did not compile (csc rc=$rc)"; exit 1; fi
 
 # ---- the sources: fixtures, naming fixtures, the registry, the Khronos samples
@@ -66,10 +66,23 @@ mapfile -t FILES < <(printf '%s\n' "${FILES[@]}" | awk '!seen[tolower($0)]++')  
 
 # ---- the C# probe on every file
 "$MONO" "$TMPD/probe.exe" "${FILES[@]}" > "$TMPD/csharp_raw.txt" 2>&1; rc=$?
-LC_ALL=C sed 's/\xEF\xBB\xBF//g' "$TMPD/csharp_raw.txt" > "$TMPD/csharp.txt"
+LC_ALL=C sed 's/\xEF\xBB\xBF//g' "$TMPD/csharp_raw.txt" | tr -d '\r' > "$TMPD/csharp.txt"
+# a file the 32-bit Mono has no address space for (Unity ships its standalone Mono as a 32-bit process; the 398 MB
+# recipe source with its visibility BVH is one): probe it on the 64-bit .NET runtime - the same exe, run natively -
+# and splice its rows in; said in the summary. The timing line stays Mono's for the rest.
+N_NATIVE=0
+mapfile -t OOM < <(awk -F'\t' '$1 == "FAIL" && $3 ~ /^OutOfMemoryException/ { print $2 }' "$TMPD/csharp.txt")
+for key in "${OOM[@]}"; do
+  [ -n "$key" ] || continue
+  src=""; for f in "${FILES[@]}"; do k=$(printf '%s' "$f" | tr '\\' '/' | tr 'A-Z' 'a-z'); [ "$k" = "$key" ] && { src="$f"; break; }; done
+  [ -n "$src" ] || continue
+  "$TMPD/probe.exe" "$src" 2>&1 | LC_ALL=C sed 's/\xEF\xBB\xBF//g' | tr -d '\r' | grep -E '^(ROW|FILE|FAIL)' > "$TMPD/native_$N_NATIVE.txt"
+  awk -F'\t' -v k="$key" '!($1 == "FAIL" && $2 == k)' "$TMPD/csharp.txt" > "$TMPD/csharp2.txt"; cat "$TMPD/native_$N_NATIVE.txt" >> "$TMPD/csharp2.txt"; mv "$TMPD/csharp2.txt" "$TMPD/csharp.txt"
+  N_NATIVE=$((N_NATIVE + 1))
+done
 grep -E "^FAIL" "$TMPD/csharp.txt"
 n_ok=$(grep -c "^FILE" "$TMPD/csharp.txt"); n_rows=$(grep -c "^ROW" "$TMPD/csharp.txt")
-[ "$rc" -eq 0 ] || { echo "FAIL — vehicle probe drill: a file could not be probed ($n_ok of ${#FILES[@]})"; exit 1; }
+[ "$n_ok" -eq "${#FILES[@]}" ] || { echo "FAIL — vehicle probe drill: a file could not be probed ($n_ok of ${#FILES[@]})"; exit 1; }
 echo "C# probe: $n_ok files, $n_rows rows - ${#FIXTURES[@]} fixtures, ${#NAMING[@]} naming fixtures, $REGISTRY_NOTE (${#REGISTRY[@]}), ${#SAMPLES_OK[@]} Khronos samples, ${#RECIPE_SOURCES[@]} recipe sources ($(grep '^TOTAL' "$TMPD/csharp.txt"))"
 
 # ---- the saved recipes: what Blender listed when each was saved, against the C# probe of its source today
@@ -119,4 +132,5 @@ echo "$CMP" | grep -E "^COMPARED"
 n_arb=0; n_left=0
 for d in "${DIFFERING[@]}"; do [ -z "$d" ] && continue; if printf '%s\n' "${SAMPLE[@]}" | grep -qixF -- "$d"; then n_arb=$((n_arb + 1)); else n_left=$((n_left + 1)); echo "NOTE — a differing recipe's source was not put to Blender in this run (over 100 MB; FULL=1): $d"; fi; done
 [ "${#DIFFERING[@]}" -eq 0 ] || echo "recipes that differ: $n_arb are STALE (Blender's probe of the source today gives the C# rows, not the recipe's), $n_left left for FULL=1"
-echo "PASS — vehicle probe drill: $n_ok files probed in C#; on ${#SAMPLE[@]} of them the rows equal Blender's own probe (names, order, vertices, boxes, bones, rig bones; Blender took $((t1 - t0)) s for those)${RECIPE_LINE:+; $RECIPE_LINE}"
+NATIVE_NOTE=""; [ "$N_NATIVE" -eq 0 ] || NATIVE_NOTE=" ($N_NATIVE probed on the 64-bit .NET runtime: too large for Unity's 32-bit standalone Mono)"
+echo "PASS — vehicle probe drill: $n_ok files probed in C#$NATIVE_NOTE; on ${#SAMPLE[@]} of them the rows equal Blender's own probe (names, order, vertices, visibility, boxes, bones, rig bones; Blender took $((t1 - t0)) s for those)${RECIPE_LINE:+; $RECIPE_LINE}"

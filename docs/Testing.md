@@ -103,7 +103,10 @@ every registry source, the Khronos samples **and the sources of the Lab's saved 
 the unreduced originals (925 MB, one of 398 MB). Then Blender runs the REAL probe (`vehicle_rig.py probe`, in one
 process, posed at the first clip's start by its opt-in `posestart=1`) on a sample and the rows are compared per file:
 the part **names** — the key every saved recipe holds — and their order, vertex counts, world boxes (tolerance
-0.0002 + 2e-6 of the model's extent), dominant bones, and the RIGBONE rows. The names come from a port of the
+0.0002 + 2e-6 of the model's extent), **visibility verdicts** (since step 3b, 2026-10-02: exact — 10,498 parts, 1,171
+of them interior, agree; two fixtures hold a part inside a closed box, a 1,681-vertex grid Blender separates from a
+single mesh, and a triangle whose only escape is its file normal's direction), dominant bones, and the RIGBONE rows.
+A file too large for Unity's 32-bit standalone Mono is probed on the 64-bit .NET runtime instead, and the drill says so. The names come from a port of the
 importer's own tree construction (`compute_vnodes`: creation depth-first from the parentless nodes in index order,
 armatures at the joints' deepest common ancestor, skinned meshes moved or split off under them, meshes on bones moved
 to children named after the mesh, cameras taking names first) and of Blender's two unique-name rules (a datablock

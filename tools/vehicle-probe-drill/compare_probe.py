@@ -5,13 +5,14 @@
 Both files hold lines  ROW <TAB> <file key> <TAB> PART|name|verts|cx,cy,cz|sx,sy,sz|vis|bone|flip   (and RIGBONE|name|count|c|s).
 Compared, per part NAME (the recipe key - a name on one side only is a FAIL):
   verts, bone     exact
+  vis             exact (field 6: 1 external, 0 interior - step 3b)
   centre, size    absolute tolerance = 0.0002 + 2e-6 of the model's largest extent: the rows print 4 decimals and the
                   positions are float32 through two matrix chains (first full run, 2026-10-02: the largest difference
                   on 31 registry files was 0.0003, on a model 4,422 units long). Both sides are posed at the first
                   clip's start (vehicle_rig.py posestart=1; Blender's untouched import is a blend one frame in)
   order           the rows must come in the same order (the Lab lists them as given)
   RIGBONE         name, count exact; centre, size with the same tolerance; order
-Not compared yet, said: vis (field 6, step 3b) and flip (field 8, step 3c) - the C# side prints 1 and 0 for every part.
+Not compared yet, said: flip (field 8, step 3c) - the C# side prints 0 for every part.
 """
 import sys
 sys.stdout.reconfigure(encoding="utf-8")
@@ -74,7 +75,7 @@ def main():
                     first = next(i for i in range(len(bn)) if bn[i] != cn[i])
                     problems.append(f"{kind} order differs from row {first}: Blender {bn[first]!r}, C# {cn[first]!r}")
             cby = {r["name"]: r for r in c}
-            bad = {"verts": [], "bone": [], "centre": [], "size": []}
+            bad = {"verts": [], "vis": [], "bone": [], "centre": [], "size": []}
             worst = 0.0
             for r in b:
                 o = cby.get(r["name"])
@@ -82,6 +83,8 @@ def main():
                     continue
                 if r["verts"] != o["verts"]:
                     bad["verts"].append(f"{r['name']} {o['verts']} vs {r['verts']}")
+                if kind == "PART" and r["vis"] != o["vis"]:
+                    bad["vis"].append(f"{r['name']} {o['vis']} vs {r['vis']}")
                 if kind == "PART" and r["bone"] != o["bone"]:
                     bad["bone"].append(f"{r['name']} {o['bone']!r} vs {r['bone']!r}")
                 for field, label in (("c", "centre"), ("s", "size")):
@@ -98,7 +101,7 @@ def main():
             fails += 1
             print(f"FAIL {short}: " + "; ".join(problems))
         else:
-            print(f"PASS {short}: {n_parts} parts, {len(bl[key]['RIGBONE'])} rig bones - names, order, verts, bones, boxes agree (largest box difference {part_worst:.4f}, tolerance {part_tol:.4f})")
+            print(f"PASS {short}: {n_parts} parts, {len(bl[key]['RIGBONE'])} rig bones - names, order, verts, visibility, bones, boxes agree (largest box difference {part_worst:.4f}, tolerance {part_tol:.4f})")
     print(f"COMPARED {compared} FAILED {fails}")
     return 1 if fails else 0
 
