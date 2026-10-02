@@ -115,7 +115,7 @@ importer's own tree construction (`compute_vnodes`: creation depth-first from th
 armatures at the joints' deepest common ancestor, skinned meshes moved or split off under them, meshes on bones moved
 to children named after the mesh, cameras taking names first) and of Blender's two unique-name rules (a datablock
 takes its base's smallest free number, a bone counts up from its own tail — `main_namemap.cc` and
-`BLI_uniquename_cb`, read from Blender 5.1's source); twenty-four **fixtures**
+`BLI_uniquename_cb`, read from Blender 5.1's source); twenty-eight **naming fixtures** (files, as the drill counts them)
 (`tools/vehicle-probe-drill/naming_fixtures.py`) hold one rule each, and Blender confirms every one. Seven of them
 hold the unique-name rules, a case per branch of the source (non-ASCII and overflowing tails, 255- and 63-byte
 limits, past 1,023 duplicates, numbers used up, a purged object freeing its number): the first port was one rule for
