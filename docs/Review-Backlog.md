@@ -113,6 +113,24 @@ launch from the Clip Range dialog); (2) reduce/`prep_model` → a C# quadric dec
   encode/decode of `mesh_normals.cc` is the port still to write) and one fixed ray on a Workshop split part, not yet
   explained. Until this lands the probe drill FAILS on this recipe source (every push runs it); the quick way out is
   the user's: re-fuse or re-save the recipe only moves the file, it does not change the rule.
+  **Causes 1 and 2 ported (2026-10-03, PR after #116)**: `VehicleProbe.BlenderWorld.cs` composes every matrix_world
+  as Blender does (bit for bit on 14,003 of 14,023 parts, MATRIX rows in the drill) and the ray cast is Blender's
+  float32; the Dragon reads 5 off (4 normal rays, cause 3; 1 fixed ray on `Material2_2008_Part_034`, unexplained).
+  Cause 3 is the next port: `mesh_normals.cc` builds a corner-normal SPACE per smooth fan (`corner_fan_space_define`:
+  the fan normal from the faces weighted by `safe_acos_approx` of the corner angle, a reference edge and the angle
+  to the other edge), encodes the custom normal as two shorts against it (`corner_space_custom_normal_to_data`) and
+  reads it back (`..._data_to_normal`, cosf/sinf of the quantized angles), then `mix_normals_corner_to_vert` weights
+  the corner normals by the corner angle and normalizes - all float32, `safe_acos_approx` a polynomial.
+- **Meshes parented to a bone: the bone chain** — OPEN (2026-10-03). A glTF mesh node under a joint becomes, in
+  Blender, an object parented to that BONE (`parent_type = 'BONE'`, moved by −bone_length along Y), and its
+  matrix_world is armature @ `pchan->pose_mat` (translated to the bone's tail) @ local. The pose matrix comes from the
+  editbone (head/tail from `editbone_arma_mat`, length from the importer's heuristic, roll from `align_roll`), the
+  rest matrix (`vec_roll_to_mat3`, `BKE_armature_where_is_bone`), the pose channel the importer sets relative to it
+  (`er.conjugated() @ (t - et)`) and `BKE_pchan_to_mat4` / `BKE_armature_mat_bone_to_pose` down the chain. 20 of
+  14,023 matrices (the dug-out canoe's 19 cloth and rope parts, the `mesh_on_bone` fixture) differ from Blender's by
+  a few ulps for it; the drill counts them as `under-bone` and does not hold them. The sources are read; the port is
+  the next step after cause 3.
+
   Follow-up verification (2026-10-03, PR #116 review): `FULL=1` compared the 94 files available locally (no Khronos
   sample cache) and failed on the three skinned inside-out counts named above, the Dragon source's 12 visibility
   differences, and **49 of 17,152 visibility verdicts** on `sns_dragon_split_fused_Spin.glb`. Running that baked

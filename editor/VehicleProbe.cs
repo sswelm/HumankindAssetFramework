@@ -34,7 +34,12 @@ public static partial class VehicleProbe
         public int Vis = 1;                 // 1 external / 0 interior (step 3b)
         public string Bone = "";            // dominant bone of a skinned part, else ""
         public int Flip;                    // islands the inside-out fix would reverse (step 3c)
+        public float[] BlenderMatrix;       // matrix_world as Blender holds it (float32, row-major, Blender's frame) - the verdicts read it
+        public bool UnderBone;              // the node hangs under a joint: Blender parents the object to the BONE, whose pose chain is not modelled yet
         public string Row => string.Join("|", "PART", Name, Verts.ToString(), F(Center), F(Size), Vis.ToString(), Bone, Flip.ToString());
+        /// <summary>The drill's bit-for-bit check of the matrix against Blender's own: 16 floats, row-major, shortest round-trip form;
+        /// a part under a bone says `under-bone` after them and is counted, not held (docs/Review-Backlog.md).</summary>
+        public string MatrixRow => "MATRIX|" + Name + "|" + string.Join(" ", BlenderMatrix.Select(v => ((double)v).ToString("R", System.Globalization.CultureInfo.InvariantCulture))) + (UnderBone ? "|under-bone" : "");
     }
 
     public sealed class RigBone
@@ -68,6 +73,11 @@ public static partial class VehicleProbe
         // which node's world matrix is each skin's armature OBJECT: the node that became it, or identity for the dummy root
         var armaWorld = new double[m.Skins.Count][];
         for (int si = 0; si < m.Skins.Count; si++) armaWorld[si] = names.ArmatureNodeOfSkin[si] >= 0 ? world[names.ArmatureNodeOfSkin[si]] : HafTransforms.Identity;
+        // the same matrices as Blender holds them: float32, composed as Blender composes them (the verdicts read these; a
+        // mesh parented to a BONE is not modelled yet - its matrix is the node chain's, said in docs/Review-Backlog.md)
+        var bworld = BlenderWorldMatrices(m, m.Animations.Count > 0 ? HafTransforms.PoseTrsAt(m, 0, 0.0) : null);
+        var bArma = new float[m.Skins.Count][];
+        for (int si = 0; si < m.Skins.Count; si++) bArma[si] = names.ArmatureNodeOfSkin[si] >= 0 ? bworld[names.ArmatureNodeOfSkin[si]] : IdentityF();
         r.Armature = names.ArmaturesInOrder.Count > 0 ? names.ArmaturesInOrder[0].name : null;   // the first CREATED, which is what `arms[0]` is - not skin 0's
 
         // ---- the mesh objects, in Blender's order, each one object per node (a mesh two nodes share is two objects)
@@ -110,7 +120,7 @@ public static partial class VehicleProbe
         if (r.Parts.Count > 0)
         {
             double[][] bindArma = null; var jointMatsOfSkin = new Dictionary<int, double[][]>();
-            var partMeshes = new List<PartMesh>(); var objWorlds = new List<double[]>();   // per part: Blender's matrix_world (the armature's for a skinned part)
+            var partMeshes = new List<PartMesh>(); var mats = new List<float[]>();   // per part: Blender's matrix_world (the armature's for a skinned part)
             foreach (var (node, prim, verts) in sources)
             {
                 var mesh = m.Meshes[m.Nodes[node].Mesh];
@@ -134,11 +144,17 @@ public static partial class VehicleProbe
                                      : p.Skinned ? HafTransforms.Apply(BindMatrix(p, v, jm), p.Normals[v * 3], p.Normals[v * 3 + 1], p.Normals[v * 3 + 2], 0.0)
                                      : new double[] { p.Normals[v * 3], p.Normals[v * 3 + 1], p.Normals[v * 3 + 2] };
                 }
-                partMeshes.Add(BuildPartMesh(m, node, prim, verts, skinned ? armaWorld[skin] : world[node], position, normal));
-                objWorlds.Add(skinned ? armaWorld[skin] : world[node]);
+                var mb = ToRowMajor(skinned ? bArma[skin] : bworld[node]);
+                partMeshes.Add(BuildPartMesh(m, node, prim, verts, position, normal, mb));
+                mats.Add(mb); r.Parts[partMeshes.Count - 1].BlenderMatrix = mb;
+                // under a bone when ANY ancestor is one: the importer parents the first object below a joint to the BONE, and
+                // the objects below that to it in turn (the dug-out canoe's cloth hangs two plain nodes under a joint)
+                bool underBone = names.IsBone[node];   // a mesh ON a joint becomes a child object under that bone
+                for (int a = m.Nodes[node].Parent; a >= 0 && !underBone; a = m.Nodes[a].Parent) underBone = names.IsBone[a];
+                r.Parts[partMeshes.Count - 1].UnderBone = !skinned && underBone;
             }
             Visibility(r.Parts, partMeshes);
-            InsideOut(r.Parts, partMeshes, objWorlds);
+            InsideOut(r.Parts, partMeshes, mats);
         }
 
         // ---- rig_report: the first armature's bones, from the undeformed vertices (v.co = the bind pose)

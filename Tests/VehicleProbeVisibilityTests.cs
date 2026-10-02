@@ -180,12 +180,12 @@ public class VehicleProbeVisibilityTests
     public void The_ray_test_counts_a_hit_on_an_edge_and_nothing_behind_the_ray()
     {
         var bvh = new VehicleProbe.TriangleBvh(new float[] { 0, 0, 5, 2, 0, 5, 0, 2, 5 }, new[] { 0, 1, 2 });
-        Assert.True(bvh.AnyHit(0.5, 0.5, 0, 0, 0, 1));      // through the face
-        Assert.True(bvh.AnyHit(1, 0, 0, 0, 0, 1));          // on an edge
-        Assert.True(bvh.AnyHit(0, 0, 0, 0, 0, 1));          // on a vertex
-        Assert.False(bvh.AnyHit(1.5, 1.5, 0, 0, 0, 1));     // past the hypotenuse
-        Assert.False(bvh.AnyHit(0.5, 0.5, 6, 0, 0, 1));     // the triangle is behind the ray
-        Assert.True(bvh.AnyHit(0.5, 0.5, 6, 0, 0, -1));     // and in front of its reverse, from either side
-        Assert.True(bvh.AnyHit(0.5, 0.5, 5, 0, 0, 1));      // t = 0 counts
+        Assert.True(bvh.AnyHit(0.5f, 0.5f, 0f, 0f, 0f, 1f));      // through the face
+        Assert.True(bvh.AnyHit(1f, 0f, 0f, 0f, 0f, 1f));          // on an edge
+        Assert.True(bvh.AnyHit(0f, 0f, 0f, 0f, 0f, 1f));          // on a vertex
+        Assert.False(bvh.AnyHit(1.5f, 1.5f, 0f, 0f, 0f, 1f));     // past the hypotenuse
+        Assert.False(bvh.AnyHit(0.5f, 0.5f, 6f, 0f, 0f, 1f));     // the triangle is behind the ray
+        Assert.True(bvh.AnyHit(0.5f, 0.5f, 6f, 0f, 0f, -1f));     // and in front of its reverse, from either side
+        Assert.True(bvh.AnyHit(0.5f, 0.5f, 5f, 0f, 0f, 1f));      // t = 0 counts
     }
 }

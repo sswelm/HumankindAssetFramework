@@ -22,20 +22,6 @@ using System.Linq;
 
 public static partial class VehicleProbe
 {
-    /// <summary>Blender's matrix_world of a part as mathutils holds it: float32, row-major (item[row, col]), Blender's Z-up
-    /// frame. Built from the glTF-frame matrix through the axis change C(x, y, z) = (x, -z, y): column j = C M Cinv e_j.</summary>
-    static float[] BlenderMatrix(double[] M)
-    {
-        var mb = new float[16];
-        for (int col = 0; col < 4; col++)
-        {
-            double bx = col == 0 ? 1 : 0, by = col == 1 ? 1 : 0, bz = col == 2 ? 1 : 0, w = col == 3 ? 1 : 0;
-            var g = HafTransforms.Apply(M, bx, bz, -by, w);   // Cinv(b) = (bx, bz, -by)
-            mb[0 * 4 + col] = (float)g[0]; mb[1 * 4 + col] = (float)(-g[2]); mb[2 * 4 + col] = (float)g[1]; mb[3 * 4 + col] = col == 3 ? 1f : 0f;
-        }
-        return mb;
-    }
-
     /// <summary>mathutils Matrix @ Vector (column_vector_multiplication): one row - float32 products summed in double,
     /// stored as float32; a 3-vector through a 4x4 gets w = 1, a 3x3 (to_3x3) takes three columns.</summary>
     static float MatRow(float[] mb, int row, int cols, float x, float y, float z, float w)
@@ -73,11 +59,10 @@ public static partial class VehicleProbe
         else { x = 0f; y = 0f; z = 0f; }
     }
 
-    /// <summary>Sets every part's Flip: the islands the inside-out fix would reverse. objWorlds[i] is part i's matrix_world
-    /// in the glTF frame (the armature's for a skinned part, whose Local is then the bind pose).</summary>
-    static void InsideOut(IList<Part> parts, IList<PartMesh> meshes, IList<double[]> objWorlds)
+    /// <summary>Sets every part's Flip: the islands the inside-out fix would reverse. mats[i] is part i's matrix_world as
+    /// Blender holds it (float32, row-major; the armature's for a skinned part, whose Local is then the bind pose).</summary>
+    static void InsideOut(IList<Part> parts, IList<PartMesh> meshes, IList<float[]> mats)
     {
-        var mats = objWorlds.Select(BlenderMatrix).ToList();
         // the hull axis: every part, every max(1, n / 2000)-th vertex in Blender's order, through matrix_world
         var ys = new List<float>(); var zs = new List<float>();
         for (int pi = 0; pi < meshes.Count; pi++)

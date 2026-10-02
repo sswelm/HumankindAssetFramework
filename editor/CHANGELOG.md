@@ -5,6 +5,21 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **The probe's verdicts read Blender's own float32 matrices and cast Blender's own float32 rays** (`VehicleProbe.BlenderWorld`,
+  `VehicleProbe.Visibility`). A grazing ray — one that runs exactly along a panel edge, as from a decal snapped to that
+  edge, or along a coincident twin panel — is decided by the last bit of the sample position and of the ray, and Blender
+  computes both in float32: the re-fused Dragon (2026-10-02) read 12 of 2,507 visibility verdicts off against Blender
+  with the double chain rounded once. Now every node's `matrix_world` is composed as Blender composes it from what the
+  importer sets on the object (a matrix node decomposed and recomposed through the quaternion, the quaternion
+  normalized, `quat_to_mat3`'s double inside, the parent chain multiplied with `mul_m4_m4m4`'s SSE2 association), the
+  sample position and the normal ray go through it as mathutils does, and the ray — the eps offset, the normalized
+  direction, the leaf-box test and the watertight triangle test — is Blender's float32 arithmetic step for step. The
+  drill now compares every part's matrix with Blender's **bit for bit** (MATRIX rows): **14,003 of 14,023 on 119
+  files**; the 20 left (the dug-out canoe's 19, one fixture) are meshes Blender parents to a BONE, whose pose chain is
+  not modelled yet — the drill counts them and says so. The Dragon: 12 → 5, the other 118 files unchanged; the 5 left
+  are 4 normal-ray escapes (Blender stores custom normals as two shorts, 4.8e-5 rad apart, and reads the vertex normal
+  back from them) and one fixed ray on a split part — docs/Review-Backlog.md. The inside-out verdict reads the same
+  matrices (its own conversion of the double chain is gone).
 - **The probe's inside-out verdict in C# — step 3 of replacing Blender, part C** (`VehicleProbe.InsideOut`). The PART
   row's field 8 — the number of face islands the Lab's fix would reverse: faces joined by a shared edge whose normals,
   on average, point at the hull's length axis (a dot below −0.25 with the radial from Blender's X axis through the

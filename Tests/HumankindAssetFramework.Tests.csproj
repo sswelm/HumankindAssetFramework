@@ -38,6 +38,7 @@
     <Compile Include="..\editor\VehicleProbe.Visibility.cs" Link="VehicleProbe.Visibility.cs" />
     <Compile Include="..\editor\VehicleProbe.Islands.cs" Link="VehicleProbe.Islands.cs" />
     <Compile Include="..\editor\VehicleProbe.InsideOut.cs" Link="VehicleProbe.InsideOut.cs" />
+    <Compile Include="..\editor\VehicleProbe.BlenderWorld.cs" Link="VehicleProbe.BlenderWorld.cs" />
   </ItemGroup>
 
   <!-- compile-time references the TEST code uses directly -->

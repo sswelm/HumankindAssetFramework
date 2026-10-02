@@ -44,6 +44,30 @@ public static class HafTransforms
     /// active at frame 0 (its untouched import blends every clip through the NLA, which no file defines).
     /// Returns null when the model has no such animation (the static transforms are the pose then).
     /// </summary>
+    /// <summary>As <see cref="PoseAt"/>, but the animated channels' VALUES: {translation, rotation, scale}, each null when
+    /// the node has no such channel; null for a node the animation does not touch. Blender's float32 matrix composition
+    /// (VehicleProbe.BlenderWorld.cs) starts from these, as the importer's objects do.</summary>
+    public static Func<int, double[][]> PoseTrsAt(HafModel m, int animationIndex, double time)
+    {
+        if (animationIndex < 0 || animationIndex >= m.Animations.Count) return null;
+        var anim = m.Animations[animationIndex];
+        var t = new Dictionary<int, double[]>(); var r = new Dictionary<int, double[]>(); var sc = new Dictionary<int, double[]>();
+        foreach (var ch in anim.Channels)
+        {
+            if (ch.Node < 0 || ch.Sampler < 0 || ch.Sampler >= anim.Samplers.Count) continue;
+            var value = Sample(anim.Samplers[ch.Sampler], time);
+            if (value == null) continue;
+            if (ch.Path == "translation" && value.Length == 3) t[ch.Node] = value;
+            else if (ch.Path == "rotation" && value.Length == 4) r[ch.Node] = value;
+            else if (ch.Path == "scale" && value.Length == 3) sc[ch.Node] = value;
+        }
+        return i =>
+        {
+            if (!t.ContainsKey(i) && !r.ContainsKey(i) && !sc.ContainsKey(i)) return null;
+            return new[] { t.TryGetValue(i, out var tv) ? tv : null, r.TryGetValue(i, out var rv) ? rv : null, sc.TryGetValue(i, out var sv) ? sv : null };
+        };
+    }
+
     public static Func<int, double[]> PoseAt(HafModel m, int animationIndex, double time)
     {
         if (animationIndex < 0 || animationIndex >= m.Animations.Count) return null;

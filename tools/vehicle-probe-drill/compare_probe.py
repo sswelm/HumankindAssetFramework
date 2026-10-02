@@ -13,8 +13,12 @@ Compared, per part NAME (the recipe key - a name on one side only is a FAIL):
   order           the rows must come in the same order (the Lab lists them as given)
   RIGBONE         name, count exact; centre, size with the same tolerance; order
   flip            exact (field 8: the islands the inside-out fix would reverse - step 3c)
+  MATRIX rows     bit for bit (2026-10-03): each part's matrix_world as Blender holds it, 16 float32 values, against the
+                  C# composition of the same (VehicleProbe.BlenderWorld.cs) - the verdicts read these. A C# row ending in
+                  `under-bone` (a mesh Blender parents to a BONE - its pose chain is not modelled yet) is COUNTED in the
+                  PASS line, not held: the number says how many matrices the file's verdicts read with the double chain
 """
-import sys
+import sys, struct
 sys.stdout.reconfigure(encoding="utf-8")
 
 
@@ -26,12 +30,21 @@ def load(path):
         if len(t) < 3 or t[0] != "ROW":
             continue
         row = t[2]
-        d = files.setdefault(t[1], {"PART": [], "RIGBONE": []})
+        d = files.setdefault(t[1], {"PART": [], "RIGBONE": [], "MATRIX": {}})
         if row.startswith("PART|"):
             f = row.split("|")
             # a '|' inside a name folds back into the name: the numeric tail is fixed (verts, c, s, vis, bone, flip)
             name = "|".join(f[1:len(f) - 6]); tail = f[len(f) - 6:]
             d["PART"].append({"name": name, "verts": tail[0], "c": tail[1], "s": tail[2], "vis": tail[3], "bone": tail[4].strip(), "flip": tail[5]})
+        elif row.startswith("MATRIX|"):
+            body = row[len("MATRIX|"):]
+            under_bone = body.endswith("|under-bone")
+            if under_bone:
+                body = body[:-len("|under-bone")]
+            name, _, vals = body.rpartition("|")
+            d["MATRIX"][name] = tuple(struct.unpack("<f", struct.pack("<f", float(x)))[0] for x in vals.split())
+            if under_bone:
+                d.setdefault("UNDER_BONE", set()).add(name)
         elif row.startswith("RIGBONE|"):
             f = row.split("|")
             name = "|".join(f[1:len(f) - 3]); tail = f[len(f) - 3:]
@@ -99,11 +112,20 @@ def main():
                     problems.append(f"{kind} {label}: {len(items)} of {len(b)} differ (C# vs Blender), e.g. {items[0]}")
             if kind == "PART":
                 part_worst, part_tol, n_parts = worst, tol, len(b)
+        bm, cm = bl[key]["MATRIX"], cs[key]["MATRIX"]
+        under_bone = cs[key].get("UNDER_BONE", set())
+        n_under_bone = len(under_bone)
+        if bm and cm:
+            off = [n for n, v in bm.items() if n in cm and n not in under_bone and cm[n] != v]
+            if off:
+                n0 = off[0]; i0 = next(i for i in range(16) if bm[n0][i] != cm[n0][i])
+                problems.append(f"MATRIX: {len(off)} of {len(bm)} differ from Blender's bits, e.g. {n0} element {i0}: C# {cm[n0][i0]!r} vs {bm[n0][i0]!r}")
         if problems:
             fails += 1
             print(f"FAIL {short}: " + "; ".join(problems))
         else:
-            print(f"PASS {short}: {n_parts} parts, {len(bl[key]['RIGBONE'])} rig bones - names, order, verts, visibility, inside-out, bones, boxes agree (largest box difference {part_worst:.4f}, tolerance {part_tol:.4f})")
+            matrices = (f"{len(bm) - n_under_bone} of {len(bm)} matrices bit for bit ({n_under_bone} under bones not held)" if n_under_bone else f"{len(bm)} matrices bit for bit") if bm and cm else "no matrices compared"
+            print(f"PASS {short}: {n_parts} parts, {len(bl[key]['RIGBONE'])} rig bones - names, order, verts, visibility, inside-out, bones, boxes agree (largest box difference {part_worst:.4f}, tolerance {part_tol:.4f}); {matrices}")
     print(f"COMPARED {compared} FAILED {fails}")
     return 1 if fails else 0
 
