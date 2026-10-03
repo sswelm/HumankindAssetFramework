@@ -129,28 +129,30 @@ public static partial class VehicleProbe
         public static BlenderSkinner Build(HafModel m, int skinIndex, BlenderNames.Result names)
         {
             var sk = m.Skins[skinIndex];
-            // inv_binds: 'root' (-1) is the identity; the skeleton node (or its parent, when it is itself a joint) too; then each joint's converted IBM
+            // pick_bind_pose builds ONE inverse-bind map over every skin, in file order (the last skin wins for a shared
+            // joint). A mesh is then retargeted with its OWN skin's inverse binds, not that global map.
             var invBinds = new Dictionary<int, float[]> { { -1, IdentityRow() } };
-            if (sk.InverseBindMatrices != null)
+            foreach (var bindSkin in m.Skins)
             {
-                if (sk.Skeleton >= 0)
+                if (bindSkin.InverseBindMatrices == null) continue;
+                if (bindSkin.Skeleton >= 0)
                 {
-                    int skel = sk.Skeleton;
-                    if (Array.IndexOf(sk.Joints, skel) >= 0) skel = m.Nodes[skel].Parent;
+                    int skel = bindSkin.Skeleton;
+                    if (Array.IndexOf(bindSkin.Joints, skel) >= 0) skel = names.BoneParent[skel];
                     if (!invBinds.ContainsKey(skel)) invBinds[skel] = IdentityRow();
                 }
-                for (int i = 0; i < sk.Joints.Length; i++) invBinds[sk.Joints[i]] = ConvertMatrixGltf(sk.InverseBindMatrices, i * 16);
+                for (int i = 0; i < bindSkin.Joints.Length; i++) invBinds[bindSkin.Joints[i]] = ConvertMatrixGltf(bindSkin.InverseBindMatrices, i * 16);
             }
             // bind_trans / bind_rot per bone node (every node the importer makes a bone of), then bind_arma_mat down the chain
-            var bindTrans = new Dictionary<int, float[]>(); var bindRot = new Dictionary<int, float[]>(); var bindArma = new Dictionary<int, float[]>();
+            var bindArma = new Dictionary<int, float[]>();
             float[] BindArmaOf(int node)
             {
                 if (bindArma.TryGetValue(node, out var done)) return done;
                 var n = m.Nodes[node];
                 float[] loc, quat, size;
                 if (n.HasMatrix) DecomposeAsBlender(n.Matrix, out loc, out quat, out size); else ConvertTrs(n.Translation, n.Rotation, n.Scale, out loc, out quat, out size);
-                int parent = n.Parent;
-                if (sk.InverseBindMatrices != null && invBinds.ContainsKey(node) && invBinds.ContainsKey(parent))
+                int parent = names.BoneParent[node];
+                if (invBinds.ContainsKey(node) && invBinds.ContainsKey(parent))
                 {
                     var bindLocal = MatMulMathutils(invBinds[parent], InvertedSafe(invBinds[node]));
                     DecomposeBlenderMatrix(bindLocal, out loc, out quat, out size);
@@ -163,7 +165,7 @@ public static partial class VehicleProbe
             for (int i = 0; i < sk.Joints.Length; i++)
             {
                 int j = sk.Joints[i];
-                var inv = invBinds.TryGetValue(j, out var ib) ? ib : IdentityRow();
+                var inv = sk.InverseBindMatrices != null ? ConvertMatrixGltf(sk.InverseBindMatrices, i * 16) : IdentityRow();
                 s.JointMats[i] = MatMulMathutils(BindArmaOf(j), inv);
             }
             return s;
@@ -187,7 +189,8 @@ public static partial class VehicleProbe
                     wsum = (float)(wsum + w);
                 }
             }
-            if (wsum == 0f) { var J = JointMats[0]; for (int e = 0; e < 16; e++) acc[e] = J[e]; wsum = 1f; }   // the importer gives such a vertex to the first bone
+            // The importer sets WEIGHTS_0[v, 0] to 1: the first influence can name any joint in the skin.
+            if (wsum == 0f) { int j = p.Joints[v * 4]; var J = JointMats[j < JointMats.Length ? j : 0]; for (int e = 0; e < 16; e++) acc[e] = J[e]; wsum = 1f; }
             for (int e = 0; e < 16; e++) acc[e] = (float)(acc[e] / wsum);
             return acc;
         }

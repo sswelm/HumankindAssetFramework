@@ -214,6 +214,7 @@ public static partial class VehicleProbe
                 if (local != null) { x = local[v * 3]; y = local[v * 3 + 1]; z = local[v * 3 + 2]; }
                 else { x = p.Positions[v * 3]; y = p.Positions[v * 3 + 1]; z = p.Positions[v * 3 + 2]; }
                 if (x < mn[0]) mn[0] = x; if (x > mx[0]) mx[0] = x; if (y < mn[1]) mn[1] = y; if (y > mx[1]) mx[1] = y; if (z < mn[2]) mn[2] = z; if (z > mx[2]) mx[2] = z;
+                bool zeroWeights = skinned && HasZeroWeights(p, v);
                 if (skinned)
                     for (int set = 0; set < 2; set++)
                     {
@@ -221,7 +222,7 @@ public static partial class VehicleProbe
                         if (joints == null || weights == null) continue;
                         for (int k = 0; k < 4; k++)
                         {
-                            float w = weights[v * 4 + k];
+                            float w = zeroWeights && set == 0 && k == 0 ? 1f : weights[v * 4 + k];
                             if (w <= 0) continue;
                             int joint = joints[v * 4 + k];
                             if (joint >= m.Skins[skin].Joints.Length || !names.BoneOfJoint.TryGetValue(m.Skins[skin].Joints[joint], out var bone)) continue;
@@ -449,8 +450,17 @@ public static partial class VehicleProbe
     static double[] BindPosition(HafPrimitive p, int v, double[][] jointMats)
         => HafTransforms.Apply(BindMatrix(p, v, jointMats), p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2], 1.0);
 
+    // skin_into_bind_pose also updates the weights used for vertex groups: a zero sum gives the first influence 1.
+    static bool HasZeroWeights(HafPrimitive p, int v)
+    {
+        if (!p.Skinned) return false;
+        for (int k = 0; k < 4; k++)
+            if (p.Weights[v * 4 + k] != 0f || (p.Weights1 != null && p.Weights1[v * 4 + k] != 0f)) return false;
+        return true;
+    }
+
     /// <summary>A skinned vertex's skinning matrix into the importer's bind pose: the weighted joint matrices, the weights
-    /// normalized by their sum (a zero sum = all on the first joint). Positions go through it with w = 1, normals with
+    /// normalized by their sum (a zero sum = all on the first influence). Positions go through it with w = 1, normals with
     /// w = 0 (skin_into_bind_pose: the 3x3, no translation).</summary>
     static double[] BindMatrix(HafPrimitive p, int v, double[][] jointMats)
     {
@@ -498,12 +508,13 @@ public static partial class VehicleProbe
                 {
                     total++;
                     string best = null;
+                    bool zeroWeights = HasZeroWeights(p, v);
                     for (int set = 0; set < 2 && best == null; set++)
                     {
                         var joints = set == 0 ? p.Joints : p.Joints1; var weights = set == 0 ? p.Weights : p.Weights1;
                         if (joints == null || weights == null) continue;
                         for (int k = 0; k < 4; k++)
-                            if (weights[v * 4 + k] > 0.5f && joints[v * 4 + k] < sk.Joints.Length && names.BoneOfJoint.TryGetValue(sk.Joints[joints[v * 4 + k]], out var bn) && boneNames.Contains(bn)) { best = bn; break; }
+                            if ((zeroWeights && set == 0 && k == 0 ? 1f : weights[v * 4 + k]) > 0.5f && joints[v * 4 + k] < sk.Joints.Length && names.BoneOfJoint.TryGetValue(sk.Joints[joints[v * 4 + k]], out var bn) && boneNames.Contains(bn)) { best = bn; break; }
                     }
                     if (best == null) continue;
                     weighted++;

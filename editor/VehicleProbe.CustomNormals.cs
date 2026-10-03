@@ -10,9 +10,9 @@
 // Before any of it, the importer's set_poly_smoothing marks a face SHARP when every corner's file normal equals the face
 // normal (dot above 0.9999999 as float32: a flat-shaded face), and a sharp face breaks the fans at its edges.
 // All float32, the C++ math:: flavour: normalize = v / sqrt(len2), dot summed left to right, read from Blender 5.1's
-// source. Said, not solved: cosf/sinf are the C runtime's, here the double ones rounded; and on one tested vertex of the
-// Dragon the fan normal's z came out 2.85e-6 against Blender's 2.14e-6 - a difference no arithmetic variant of the
-// printed formula reproduces (docs/Review-Backlog.md) - without changing any verdict on 119 files.
+// source. Mesh::face_normals uses Newell's sum even for triangles; MeshPolygon.normal's triangle cross product is a
+// different accessor. The distinction changes the fan spaces and the Dragon spin's grazing normal-ray verdicts.
+// cosf/sinf are the C runtime's, here the double ones rounded; normal differences are still counted by the drill.
 using System;
 using System.Collections.Generic;
 
@@ -132,18 +132,26 @@ public static partial class VehicleProbe
 
     sealed class VertCornerInfo { public int face, corner, cornerPrev, cornerNext, vertPrev, vertNext, edgePrev, edgeNext; }
 
-    /// <summary>Face normals as Mesh::face_normals() holds them: math::normal_tri = normalize(cross(v1 - v2, v2 - v3)); a zero one is (0, 0, 1).</summary>
+    /// <summary>Mesh::face_normals() uses normal_calc_ngon even for triangles: Newell's sum, then normalize_v3
+    /// (multiply by the reciprocal length). MeshPolygon.normal uses a triangle cross product instead; using that here
+    /// changes fan spaces on thin triangles far from the origin. A zero normal is (0, 0, 1).</summary>
     static float[] FaceNormals(float[] P, int[] tris)
     {
         int nf = tris.Length / 3;
         var FN = new float[nf * 3];
         for (int f = 0; f < nf; f++)
         {
-            int a = tris[f * 3], b = tris[f * 3 + 1], c = tris[f * 3 + 2];
-            float ux = (float)(P[a * 3] - P[b * 3]), uy = (float)(P[a * 3 + 1] - P[b * 3 + 1]), uz = (float)(P[a * 3 + 2] - P[b * 3 + 2]);
-            float vx = (float)(P[b * 3] - P[c * 3]), vy = (float)(P[b * 3 + 1] - P[c * 3 + 1]), vz = (float)(P[b * 3 + 2] - P[c * 3 + 2]);
-            float nx = (float)((float)(uy * vz) - (float)(uz * vy)), ny = (float)((float)(uz * vx) - (float)(ux * vz)), nz = (float)((float)(ux * vy) - (float)(uy * vx));
-            Normalize3(ref nx, ref ny, ref nz);
+            float nx = 0f, ny = 0f, nz = 0f;
+            int prev = tris[f * 3 + 2] * 3;
+            for (int k = 0; k < 3; k++)
+            {
+                int curr = tris[f * 3 + k] * 3;
+                nx = (float)(nx + (float)((float)(P[prev + 1] - P[curr + 1]) * (float)(P[prev + 2] + P[curr + 2])));
+                ny = (float)(ny + (float)((float)(P[prev + 2] - P[curr + 2]) * (float)(P[prev] + P[curr])));
+                nz = (float)(nz + (float)((float)(P[prev] - P[curr]) * (float)(P[prev + 1] + P[curr + 1])));
+                prev = curr;
+            }
+            NormalizeVn(ref nx, ref ny, ref nz);
             if (nx == 0f && ny == 0f && nz == 0f) nz = 1.0f;
             FN[f * 3] = nx; FN[f * 3 + 1] = ny; FN[f * 3 + 2] = nz;
         }

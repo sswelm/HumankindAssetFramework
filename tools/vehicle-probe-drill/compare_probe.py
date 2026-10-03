@@ -17,9 +17,9 @@ Compared, per part NAME (the recipe key - a name on one side only is a FAIL):
                   C# composition of the same (VehicleProbe.BlenderWorld.cs) - the verdicts read these. A C# row ending in
                   `under-bone` (a mesh Blender parents to a BONE - its pose chain is not modelled yet) is COUNTED in the
                   PASS line, not held: the number says how many matrices the file's verdicts read with the double chain
-  VERTEX rows     bit for bit (2026-10-03): vertex 0 of each part as the visibility rays see it - matrix_world @ co and the
-                  normalized world normal - against the C# chain (the float32 matrix, the importer's skinning in numpy float32,
-                  the two-short custom-normal encoding); under-bone parts counted, not held, as for MATRIX
+  VERTEX rows     positions exact in float32: vertex 0 of each part as the visibility rays see it. Normal differences are
+                  counted, not held (the custom-normal pipeline is approximate); under-bone parts counted, not held,
+                  as for MATRIX. Both diagnostic row kinds must be present for every part on both sides.
 """
 import sys, struct
 sys.stdout.reconfigure(encoding="utf-8")
@@ -46,6 +46,8 @@ def load(path):
                 body = body[:-len("|under-bone")]
             name, _, vals = body.rpartition("|")
             d["MATRIX"][name] = tuple(struct.unpack("<f", struct.pack("<f", float(x)))[0] for x in vals.split())
+            if len(d["MATRIX"][name]) != 16:
+                raise ValueError(f"{path}: MATRIX {name!r} requires 16 values")
             if under_bone:
                 d.setdefault("UNDER_BONE", set()).add(name)
         elif row.startswith("VERTEX|"):
@@ -53,8 +55,9 @@ def load(path):
             under_bone = body.endswith("|under-bone")
             if under_bone:
                 body = body[:-len("|under-bone")]
-            name, _, rest = body.partition("|")
-            pos, _, nor = rest.partition("|")
+            name, pos, nor = body.rsplit("|", 2)
+            if len(pos.split()) != 3 or len(nor.split()) != 3:
+                raise ValueError(f"{path}: VERTEX {name!r} requires a position and normal of 3 values each")
             d["VERTEX"][name] = tuple(struct.unpack("<f", struct.pack("<f", float(x)))[0] for x in (pos + " " + nor).split())
             if under_bone:
                 d.setdefault("UNDER_BONE", set()).add(name)
@@ -80,7 +83,14 @@ def close(a, b, tol):
 
 
 def main():
-    cs, bl = load(sys.argv[1]), load(sys.argv[2])
+    try:
+        cs, bl = load(sys.argv[1]), load(sys.argv[2])
+    except (OSError, ValueError, OverflowError) as error:
+        print(f"FAIL input: {error}")
+        return 1
+    if not cs or not bl:
+        print("FAIL input: both probes must report at least one file")
+        return 1
     fails = 0; compared = 0
     for key in sorted(bl):
         short = "/".join(key.split("/")[-2:])
@@ -126,6 +136,12 @@ def main():
             if kind == "PART":
                 part_worst, part_tol, n_parts = worst, tol, len(b)
         bm, cm = bl[key]["MATRIX"], cs[key]["MATRIX"]
+        for side, rows in (("Blender", bl[key]), ("C#", cs[key])):
+            names = {r["name"] for r in rows["PART"]}
+            for kind in ("MATRIX", "VERTEX"):
+                missing, extra = names - rows[kind].keys(), rows[kind].keys() - names
+                if missing or extra:
+                    problems.append(f"{side} {kind} rows incomplete: missing {sorted(missing)[:4]}, unexpected {sorted(extra)[:4]}")
         under_bone = cs[key].get("UNDER_BONE", set())
         n_under_bone = len(under_bone)
         if bm and cm:
@@ -135,6 +151,7 @@ def main():
                 problems.append(f"MATRIX: {len(off)} of {len(bm)} differ from Blender's bits, e.g. {n0} element {i0}: C# {cm[n0][i0]!r} vs {bm[n0][i0]!r}")
         bv, cv = bl[key]["VERTEX"], cs[key]["VERTEX"]
         n_vertices = 0
+        n_normals_off = 0
         if bv and cv:
             off_v = [n for n, v in bv.items() if n in cv and n not in under_bone and cv[n][:3] != v[:3]]
             n_vertices = len(bv)

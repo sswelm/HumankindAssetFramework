@@ -5,7 +5,8 @@ using Xunit;
 /// <summary>The mesh data as Blender's importer stores it and as its `vertex.normal` reads it (VehicleProbe.BlenderSkin.cs,
 /// VehicleProbe.CustomNormals.cs). Every expectation is a value Blender 5.1.2 printed (repr) on 2026-10-03, compared BIT FOR
 /// BIT: `Matrix.inverted_safe()` of two matrices, the skinned vertices of the `visibility_skinned` fixture, the vertex normals
-/// of the `custom_normals` fixture. The drill holds vertex 0 of every part of 119 files to the same standard (VERTEX rows).</summary>
+/// of the `custom_normals` fixture. The drill holds vertex-0 positions; normal differences are counted, since arbitrary
+/// smooth-fan normals are approximate. Shared-skin and zero-weight expectations below are also read from Blender.</summary>
 public class VehicleProbeBlenderMeshTests
 {
     static float F(double x) => (float)x;
@@ -25,6 +26,63 @@ public class VehicleProbeBlenderMeshTests
         Assert.Equal(expGen.Select(Bits), invGen.Select(Bits));
     }
     static uint Bits(float x) => BitConverter.ToUInt32(BitConverter.GetBytes(x), 0);
+
+    static HafMesh WeightedTriangle(ushort joint = 0, float weight = 1f)
+    {
+        var mesh = new HafMesh();
+        mesh.Primitives.Add(new HafPrimitive { VertexCount = 3, Mode = 4, Positions = new float[] { 0, 0, 0, 1, 0, 0, 0, 1, 0 },
+            Joints = new ushort[] { joint, 0, 0, 0, joint, 0, 0, 0, joint, 0, 0, 0 },
+            Weights = new float[] { weight, 0, 0, 0, weight, 0, 0, 0, weight, 0, 0, 0 } });
+        return mesh;
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void Shared_joints_use_the_last_skins_bind_pose_and_each_meshs_own_inverse_bind(int skeleton)
+    {
+        // shared_skin_bind_pose.glb: Blender 5.1.2 puts Skin|A and NoIBM at +10 outside Box, SkinB at 0 inside it.
+        var m = new HafModel();
+        m.Nodes.Add(new HafNode { Name = "Rig" }); m.Nodes[0].Children.Add(1);
+        m.Nodes.Add(new HafNode { Name = "Joint" });
+        var box = new HafMesh();
+        box.Primitives.Add(new HafPrimitive { Mode = 4, VertexCount = 8,
+            Positions = new float[] { -2,-2,-2, 2,-2,-2, -2,2,-2, 2,2,-2, -2,-2,2, 2,-2,2, -2,2,2, 2,2,2 },
+            Indices = new[] { 0,2,1, 1,2,3, 4,5,6, 5,7,6, 0,1,5, 0,5,4, 2,6,7, 2,7,3, 0,4,6, 0,6,2, 1,3,7, 1,7,5 } });
+        m.Meshes.Add(box); m.Meshes.Add(WeightedTriangle());
+        m.Nodes.Add(new HafNode { Name = "Box", Mesh = 0 });
+        m.Nodes.Add(new HafNode { Name = "Skin|A", Mesh = 1, Skin = 0 });
+        m.Nodes.Add(new HafNode { Name = "SkinB", Mesh = 1, Skin = 1 });
+        m.Nodes.Add(new HafNode { Name = "NoIBM", Mesh = 1, Skin = 2 });
+        var shifted = (double[])HafTransforms.Identity.Clone(); shifted[12] = -10;
+        m.Skins.Add(new HafSkin { Skeleton = skeleton, Joints = new[] { 1 }, InverseBindMatrices = (double[])HafTransforms.Identity.Clone() });
+        m.Skins.Add(new HafSkin { Skeleton = skeleton, Joints = new[] { 1 }, InverseBindMatrices = shifted });
+        m.Skins.Add(new HafSkin { Skeleton = skeleton, Joints = new[] { 1 } });
+        var r = VehicleProbe.Run(Link(m));
+        foreach (var name in new[] { "Skin|A", "NoIBM" })
+        {
+            var part = r.Parts.Single(p => p.Name == name);
+            Assert.Equal(10f, part.FirstVertex[0]); Assert.Equal(1, part.Vis);
+        }
+        var inner = r.Parts.Single(p => p.Name == "SkinB");
+        Assert.Equal(0f, inner.FirstVertex[0]); Assert.Equal(0, inner.Vis);
+    }
+
+    [Fact]
+    public void Zero_weights_recover_to_the_first_influence_in_positions_boxes_and_bone_reports()
+    {
+        // zero_weight_joint.glb: Blender prints v0.x=10, centre.x=10.5, bone=FirstInfluence and a 3-vertex rig bone.
+        var m = new HafModel(); m.Meshes.Add(WeightedTriangle(1, 0f));
+        m.Nodes.Add(new HafNode { Name = "Rig" }); m.Nodes[0].Children.AddRange(new[] { 1, 2 });
+        m.Nodes.Add(new HafNode { Name = "Unused" });
+        m.Nodes.Add(new HafNode { Name = "FirstInfluence", Translation = new double[] { 10, 0, 0 } });
+        m.Nodes.Add(new HafNode { Name = "ZeroWeight", Mesh = 0, Skin = 0 });
+        m.Skins.Add(new HafSkin { Joints = new[] { 1, 2 } });
+        var r = VehicleProbe.Run(Link(m)); var part = Assert.Single(r.Parts);
+        Assert.Equal(10f, part.FirstVertex[0]); Assert.Equal(10.5, part.Center[0]); Assert.Equal("FirstInfluence", part.Bone);
+        var bone = Assert.Single(r.RigBones); Assert.Equal("FirstInfluence", bone.Name); Assert.Equal(3, bone.Count);
+        Assert.All(m.Meshes[0].Primitives[0].Weights, w => Assert.Equal(0f, w)); // probing must not rewrite the source
+    }
 
     [Fact]
     public void A_skinned_vertex_lands_where_the_importers_float32_chain_puts_it()
@@ -52,6 +110,27 @@ public class VehicleProbeBlenderMeshTests
         var vn = VehicleProbe.BlenderVertexNormals(P, new[] { 0, 1, 2 }, N);
         var expected = new[] { F(0.44721361994743347), F(0.8944272398948669), 0f, F(0.4472135901451111), F(0.8944271802902222), F(1.9043684005737305e-05), F(0.4472135901451111), F(0.8944271206855774), F(3.8135043723741546e-05) };
         Assert.Equal(expected.Select(Bits), vn.Select(Bits));
+    }
+
+    [Fact]
+    public void Cached_face_normals_use_Newells_sum_on_thin_triangles_far_from_the_origin()
+    {
+        // Reduced from Dragon spin's Mesh_Root.13015 and .13888. Blender's polygon.normal uses a cross product,
+        // but polygon_normals and the custom-normal fan use Newell's sum, even for triangles. The wrong formula
+        // changes the normal rays' escape verdicts on these two parts. Values read from Blender 5.1.2.
+        var normal = Enumerable.Range(0, 4).SelectMany(_ => new[] { 0f, -3.42285453e-08f, 1f }).ToArray();
+        var inward = new float[] { 2435.61572f,656.436462f,247.244019f, 2443.48975f,657.1539f,247.244019f,
+                                  2435.61572f,748.1206f,247.244f, 2443.48975f,747.4032f,247.244f };
+        var expectedInward = new[] { F(2.49848275402087e-09), F(-4.760470983455889e-05), 1f,
+            F(3.878942152368836e-05), F(-2.7314830731484108e-05), 1f, F(4.398743840283714e-05), F(-1.762303440955293e-06), 1f,
+            F(4.033556979265995e-05), F(-1.5251124523274484e-06), 1f };
+        Assert.Equal(expectedInward.Select(Bits), VehicleProbe.BlenderVertexNormals(inward, new[] { 3,1,2, 0,2,1 }, normal).Select(Bits));
+        var outward = new float[] { 2411.99365f,465.5446f,246.062927f, 2404.11987f,465.590668f,246.062927f,
+                                   2411.99365f,560.0327f,246.0629f, 2404.11987f,559.986633f,246.0629f };
+        var expectedOutward = new[] { F(5.250487447483465e-06), F(3.229880007893371e-07), 1f,
+            F(4.973564955434995e-06), F(3.2300357588610495e-07), 1f, F(2.7899463361791277e-07), F(3.2326755672329455e-07), 1f,
+            0f, F(3.2328324550690013e-07), 1f };
+        Assert.Equal(expectedOutward.Select(Bits), VehicleProbe.BlenderVertexNormals(outward, new[] { 0,2,1, 3,1,2 }, normal).Select(Bits));
     }
 
     [Fact]

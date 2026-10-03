@@ -177,6 +177,19 @@ public class VehicleProbeVisibilityTests
     }
 
     [Fact]
+    public void The_BVH_inflates_zero_epsilon_bounds_before_testing_a_ray_on_the_far_plane()
+    {
+        // Blender 5.1.2 BVHTree.FromPolygons: (0,1,0) +Z hits the y=1 vertex; the triangle doubled misses at y=2.
+        // FLT_EPSILON moves 1 to 1.000000119, but 2 + FLT_EPSILON rounds back to 2 (ties to even).
+        foreach (float scale in new[] { 1f, 2f })
+        {
+            var bvh = new VehicleProbe.TriangleBvh(new float[] { 4*scale, scale, 5*scale, 0, scale, 5*scale, 0.1f*scale, 0, 5*scale }, new[] { 0, 1, 2 });
+            Assert.Equal(scale == 1f, bvh.AnyHit(0, scale, 0, 0, 0, 1));
+            Assert.False(bvh.AnyHit(0, scale + 0.001f, 0, 0, 0, 1));
+        }
+    }
+
+    [Fact]
     public void The_ray_test_counts_a_hit_on_an_edge_and_nothing_behind_the_ray()
     {
         var bvh = new VehicleProbe.TriangleBvh(new float[] { 0, 0, 5, 2, 0, 5, 0, 2, 5 }, new[] { 0, 1, 2 });

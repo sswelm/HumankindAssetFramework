@@ -11,11 +11,8 @@
 // through matrix_world's 3x3 - NOT the cross product of the world corners: a mirrored node (negative scale) keeps bmesh's
 // sign (negativescaletest's Shiny1 read 1 against Blender's 0 before this).
 //
-// Said, not solved: a SKINNED part's vertex positions are what Blender's importer skinned into the bind pose in numpy
-// float32 (joint matrices from the inverse bind matrices through Eigen's inverse and a decompose, then a float32
-// multiply-add chain); the double arithmetic here lands within one float32 ulp of them, and on a zero-area triangle that
-// ulp decides the normal. 3 parts of 14,023 (all skinned, all on collinear triangles) differ by 1-2 islands for it -
-// docs/Review-Backlog.md.
+// Skinned positions are supplied by BlenderSkinner's float32 import chain. This also holds collinear triangles whose
+// normal is decided by one ulp of skinning noise; the previous double chain changed three inside-out verdicts.
 using System;
 using System.Collections.Generic;
 using System.Linq;

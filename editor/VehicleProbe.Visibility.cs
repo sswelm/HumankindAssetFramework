@@ -166,7 +166,10 @@ public static partial class VehicleProbe
                     if (cy[tri] < c0y) c0y = cy[tri]; if (cy[tri] > c1y) c1y = cy[tri];
                     if (cz[tri] < c0z) c0z = cz[tri]; if (cz[tri] > c1z) c1z = cz[tri];
                 }
-                bmin[node * 3] = x0; bmin[node * 3 + 1] = y0; bmin[node * 3 + 2] = z0; bmax[node * 3] = x1; bmax[node * 3 + 1] = y1; bmax[node * 3 + 2] = z1;
+                // BLI_bvhtree_new clamps even epsilon=0 to FLT_EPSILON; insertion inflates every leaf by it.
+                const float padding = 1.1920929e-7f;
+                bmin[node * 3] = (float)(x0 - padding); bmin[node * 3 + 1] = (float)(y0 - padding); bmin[node * 3 + 2] = (float)(z0 - padding);
+                bmax[node * 3] = (float)(x1 + padding); bmax[node * 3 + 1] = (float)(y1 + padding); bmax[node * 3 + 2] = (float)(z1 + padding);
                 int n = hi - lo;
                 float ex = c1x - c0x, ey = c1y - c0y, ez = c1z - c0z;
                 int axis = ex >= ey && ex >= ez ? 0 : ey >= ez ? 1 : 2;
@@ -221,7 +224,7 @@ public static partial class VehicleProbe
             var idot = new float[3]; var near = new int[3];
             // bvhtree_ray_cast_data_precalc: a direction component below FLT_EPSILON makes the reciprocal FLT_MAX, not infinity - so
             // an origin exactly on a box's far plane gives t = 0 there and the box is culled (the Dragon's decal corners under deck
-            // vertices; two of its verdicts). Blender's binary does not follow this at every such origin (docs/Review-Backlog.md).
+            // vertices). The leaf bounds are inflated by FLT_EPSILON, which can round away at larger coordinates.
             for (int i = 0; i < 3; i++) { idot[i] = Math.Abs(dir[i]) < 1.1920929e-7f ? float.MaxValue : (float)(1.0f / dir[i]); near[i] = idot[i] < 0f ? 1 : 0; }
             float[] o = { ox, oy, oz };
             double ix = dx != 0 ? 1.0 / dx : double.PositiveInfinity, iy = dy != 0 ? 1.0 / dy : double.PositiveInfinity, iz = dz != 0 ? 1.0 / dz : double.PositiveInfinity;
@@ -242,11 +245,12 @@ public static partial class VehicleProbe
                 for (int i = start[node]; i < start[node] + count[node]; i++)
                 {
                     int ia = t[i * 3] * 3, ib = t[i * 3 + 1] * 3, ic = t[i * 3 + 2] * 3;
-                    // the leaf's box (BLI_bvhtree_insert, epsilon 0) through fast_ray_nearest_hit
+                    // The leaf's box through fast_ray_nearest_hit: BLI_bvhtree_insert inflates it even for epsilon=0.
                     bool culled = false;
                     for (int ax = 0; ax < 3; ax++)
                     {
                         float mn = Math.Min(v[ia + ax], Math.Min(v[ib + ax], v[ic + ax])), mx = Math.Max(v[ia + ax], Math.Max(v[ib + ax], v[ic + ax]));
+                        mn = (float)(mn - 1.1920929e-7f); mx = (float)(mx + 1.1920929e-7f);
                         float bvNear = near[ax] == 0 ? mn : mx, bvFar = near[ax] == 0 ? mx : mn;
                         t1s[ax] = (float)((float)(bvNear - o[ax]) * idot[ax]); t2s[ax] = (float)((float)(bvFar - o[ax]) * idot[ax]);
                     }

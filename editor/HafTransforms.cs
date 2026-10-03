@@ -295,7 +295,7 @@ public static class HafTransforms
     }
 
     /// <summary>Per vertex, the weighted sum of its joints' matrices (both influence sets, weights normalized when they do
-    /// not sum to 1; an unweighted vertex keeps the file's position through identity); null for an unskinned primitive.</summary>
+    /// not sum to 1; an unweighted vertex follows its first JOINTS_0 influence, as Blender recovers it); null for an unskinned primitive.</summary>
     public static double[][] BlendMatrices(HafModel m, int nodeIndex, HafPrimitive p, double[][] world)
     {
         int skin = m.Nodes[nodeIndex].Skin;
@@ -319,7 +319,8 @@ public static class HafTransforms
                     wsum += w;
                 }
             }
-            if (wsum <= 0) result[v] = Identity;
+            // Blender recovers unweighted vertices by assigning their first JOINTS_0 influence a weight of 1.
+            if (wsum <= 0) { int first = p.Joints[v * 4]; result[v] = jm[first < jm.Length ? first : 0]; }
             else { if (Math.Abs(wsum - 1.0) > 1e-6) for (int i = 0; i < 16; i++) acc[i] /= wsum; result[v] = acc; }
         }
         return result;
