@@ -117,9 +117,14 @@ public class HafTransformsTests
         var nrm = HafTransforms.WorldNormals(model, 2, prim, world);
         Near(new[] { 0, 0, -1.0 }, new[] { nrm[0], nrm[1], nrm[2] });   // vertex 0, all on B
         Near(new[] { 0, 1, 0.0 }, new[] { nrm[9], nrm[10], nrm[11] });  // unweighted: unchanged
-        // an unskinned primitive on a node goes through that node's world matrix
+        // an unskinned primitive on a node goes through that node's world matrix ...
         var plain = new HafPrimitive { VertexCount = 1, Positions = new float[] { 1, 2, 3 } };
         Near(new[] { 1000, 1001, 1002.0 }, HafTransforms.WorldPositions(model, 2, plain, world));
+        // ... unless it is one of a skinned mesh's own primitives: Blender's importer skins the whole mesh, this primitive's joint
+        // data is all zero, and its vertices ride joint 0 at weight 1 - joint A at the origin here, so the file's position
+        // (measured 2026-10-03 on the mixed_skin fixture; no registry file has the shape)
+        model.Meshes[0].Primitives.Add(plain);
+        Near(new[] { 1, 2, 3.0 }, HafTransforms.WorldPositions(model, 2, plain, world));
     }
 
     [Fact]

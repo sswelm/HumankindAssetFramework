@@ -45,6 +45,7 @@
     <Compile Include="..\editor\VehicleProbe.BlenderSkin.cs" Link="VehicleProbe.BlenderSkin.cs" />
     <Compile Include="..\editor\VehicleProbe.CustomNormals.cs" Link="VehicleProbe.CustomNormals.cs" />
     <Compile Include="..\editor\VehicleProbe.Merge.cs" Link="VehicleProbe.Merge.cs" />
+    <Compile Include="..\editor\HafUnityFrame.cs" Link="HafUnityFrame.cs" />
   </ItemGroup>
 
   <!-- compile-time references the TEST code uses directly -->

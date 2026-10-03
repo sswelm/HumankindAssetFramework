@@ -5,6 +5,36 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Clip player review fixes:** switching clips restores animated properties that the selected clip does not drive,
+  including properties on other nodes. Slashes in node names no longer break Unity animation paths, and long Unicode
+  track names truncate at whole characters within Blender's 63-byte limit. The Unity comparison uses each pose's own
+  error and extent, so rounding at a distant pose cannot fail a later pose at the origin. Four regression fixtures
+  cover these cases; the Unity gate also checks the names of the actual AnimationClips.
+
+- **The Clip Range picker plays a glTF in-process — step 4 of replacing Blender.** Opening the ▶ picker on a `.glb`/`.gltf`
+  model no longer runs Blender to convert the clips to inspection FBXs for Unity to import: the model is read by the GLB
+  reader and built as a LIVE Unity rig (`HafModelRig`) — the node hierarchy, every skinned mesh as a SkinnedMeshRenderer
+  with the file's joints as bones and its inverse bind matrices as bindposes (up to eight influences), and one legacy
+  AnimationClip per glTF animation baked at the picker's 24 fps from the reader's own sampler arithmetic (STEP, LINEAR
+  with slerp, CUBICSPLINE), named as Blender names its tracks (the animation's name, else `Anim_<index>`, `.001` when
+  taken — `BlenderNames.TrackNames`), which is the name a clip spec carries and `rig_anim.py` looks up. Play, scrub,
+  frame-step and Confirm work as before, in a fraction of a second instead of a Blender run per model. FBX and `.blend`
+  models keep the inspection FBXs; a glTF with morph targets, or one the reader refuses, falls back to them with the
+  reason in the Console. The frame is the one the FBX import gave (X mirrored). Held: `HafUnityFrameTests` (the mirror's
+  conjugation of rotations, matrices and matrix nodes; Unity's skinning formula with the rig's matrices against the
+  reader's posed vertex; the track names) and the Bake Tests row *Does the glTF clip player match the reader?*
+  (`HafModelRigHeadlessTest`, also in the headless lane): every registry model and fixture as a rig in Unity, every clip
+  sampled at its first and middle frame, every skinned mesh baked through Unity's own skinning and every vertex set
+  beside the reader's pose within 1e-4 of the extent. A scratch drill of the same formula outside Unity ran every
+  registry model and fixture before this shipped (the numbers in the PR).
+  A self-review drilled the one shape no file of the registry, the recipes or the Khronos samples has (0 of 275 skinned
+  nodes): a mesh that MIXES skinned and unskinned primitives. Blender's importer skins the whole mesh, so the unskinned
+  primitive's all-zero joint data makes its vertices ride joint 0 at weight 1 (measured on the new `mixed_skin` fixture:
+  they sit at the joint, with the joint as their bone). The reader, the Vehicle Lab's probe (its rays, box, dominant bone
+  and rig report were inconsistent on that shape) and the rig now share that rule, and the probe drill holds the fixture
+  to Blender bit for bit. A skinned mesh's renderer sits on its own object at identity (Unity's skinning ignores the
+  renderer's transform, glTF the node's), so a bake of it reads in world space.
+
 - **Preview material and comparison fixes:** the in-process Lab preview preserves glTF transparency and alpha
   cutouts, and converts linear colour factors to the sRGB colours Unity's FBX importer made of the Blender preview
   (measured in the project's import cache: the Salegs Revenge's Charcoal 0.137255 imported as 0.4062, its red 0.8 as

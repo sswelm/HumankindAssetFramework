@@ -295,11 +295,23 @@ public static class HafTransforms
     }
 
     /// <summary>Per vertex, the weighted sum of its joints' matrices (both influence sets, weights normalized when they do
-    /// not sum to 1; an unweighted vertex follows its first JOINTS_0 influence, as Blender recovers it); null for an unskinned primitive.</summary>
+    /// not sum to 1; an unweighted vertex follows its first JOINTS_0 influence, as Blender recovers it); null for an unskinned
+    /// primitive - unless another primitive of the same mesh IS skinned: Blender's importer then skins the whole mesh, this
+    /// primitive's joint data is all zero, and every one of its vertices rides joint 0 with weight 1 (measured 2026-10-03 on the
+    /// mixed_skin fixture: the unskinned triangle sits at the joint, with the joint as its bone - not at the node's transform;
+    /// no file of the registry, the recipes or the Khronos samples has the shape).</summary>
     public static double[][] BlendMatrices(HafModel m, int nodeIndex, HafPrimitive p, double[][] world)
     {
         int skin = m.Nodes[nodeIndex].Skin;
-        if (!p.Skinned || skin < 0 || skin >= m.Skins.Count) return null;
+        if (skin < 0 || skin >= m.Skins.Count) return null;
+        if (!p.Skinned)
+        {
+            int meshIdx = m.Nodes[nodeIndex].Mesh;
+            if (meshIdx < 0 || meshIdx >= m.Meshes.Count || !m.Meshes[meshIdx].Primitives.Contains(p) || !m.Meshes[meshIdx].Primitives.Exists(q => q.Skinned)) return null;   // one of the mesh's own primitives, beside a skinned one
+            var jm0 = SkinMatrices(m, skin, world);
+            var all0 = new double[p.VertexCount][]; for (int v = 0; v < p.VertexCount; v++) all0[v] = jm0[0];
+            return all0;
+        }
         var jm = SkinMatrices(m, skin, world);
         var result = new double[p.VertexCount][];
         for (int v = 0; v < p.VertexCount; v++)

@@ -143,6 +143,18 @@ public class BakeTestRunnerWindow : EditorWindow
                        "rewound-faces count that moves on a ship nobody touched is a direction-pass regression.",
                 run = WorkshopGateTest.RunSection },
 
+            // THE glTF CLIP PLAYER (2026-10-03, step 4): the Clip Range picker's in-process rig, every registry model, Unity's own
+            // skinning against the reader's posed vertices - the check the push gate cannot run (it needs Unity's runtime).
+            new TestRow { name = "Does the glTF clip player match the reader? (every registry model, in Unity)", quick = true, on = true,
+                cost = "the reader and a live rig per registry .glb, in memory - seconds to a minute, no Blender",
+                what = "Builds the Clip Range picker's in-process rig (HafModelRig: hierarchy, skinned meshes, one legacy clip per " +
+                       "animation) for every registry .glb/.gltf and the fixtures, samples each clip at its first frame and at " +
+                       "its middle frame, bakes every skinned mesh through Unity's own skinning and sets every vertex beside the " +
+                       "reader's posed world position (HafTransforms, the Blender-drilled chain) in the preview frame, within 1e-4 " +
+                       "of the model's extent; static meshes through their transforms likewise; the clip names must be Blender's " +
+                       "track names. A leaked Unity mesh fails.",
+                run = HafModelRigHeadlessTest.RunSection },
+
             // THE IN-PROCESS PROBE PREVIEW (2026-10-03, step 3d): the C# probe's rows are held to Blender's by the push gate; the PREVIEW
             // it builds in Unity - the frame, the facing, the lifecycle of its objects - can only be judged in Unity, against the
             // preview FBX files Blender left under Assets/FactorySource/VehicleLab and Unity imported.

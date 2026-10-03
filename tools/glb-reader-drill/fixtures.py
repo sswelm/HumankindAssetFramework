@@ -378,7 +378,80 @@ def fx_dropped(out):
     write_glb(os.path.join(out, "dropped.glb"), root, b)
 
 
-FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external, fx_cubic, fx_scenes, fx_materials, fx_skin8, fx_big, fx_names, fx_no_default_scene, fx_dropped]
+def fx_mixed_skin(out):
+    """A skinned node whose mesh MIXES a skinned primitive and an unskinned one (no file of the registry, the recipes or the
+    Khronos samples has this shape - 0 of 275 skinned nodes, counted 2026-10-03): Blender assigns the unskinned triangle
+    all-zero joint data, so both primitives ride joint 0. The reader, probe and live rig share this measured rule."""
+    b = Buf()
+    tri = b.accessor([(0, 0, 0), (1, 0, 0), (0, 1, 0)], "f", "VEC3")
+    tri2 = b.accessor([(0, 0, 2), (1, 0, 2), (0, 1, 2)], "f", "VEC3")
+    J0 = b.accessor([(0, 0, 0, 0)] * 3, "H", "VEC4", minmax=False); W0 = b.accessor([(1, 0, 0, 0)] * 3, "f", "VEC4", minmax=False)
+    root = base("mixed_skin",
+                meshes=[{"name": "mixed", "primitives": [{"attributes": {"POSITION": tri, "JOINTS_0": J0, "WEIGHTS_0": W0}}, {"attributes": {"POSITION": tri2}}]}],
+                nodes=[{"name": "Holder", "translation": [5, 0, 0], "children": [1, 2]}, {"name": "Mixed", "mesh": 0, "skin": 0, "rotation": [0, 0.3826834, 0, 0.9238795]},
+                       {"name": "Joint", "translation": [0, 3, 0]}],
+                skins=[{"joints": [2], "skeleton": 2}], scenes=[{"nodes": [0]}], scene=0)
+    write_glb(os.path.join(out, "mixed_skin.glb"), root, b)
+
+
+def fx_clip_switch(out):
+    """Consecutive clips animate different nodes and different properties of the same node. Sampling a clip must reset
+    properties that only another clip animates, including translation and scale left at the previous clip's middle frame."""
+    b = Buf()
+    pos = b.accessor([(0, 0, 0), (1, 0, 0), (0, 1, 0)], "f", "VEC3")
+    times = b.accessor([0, 1], "f", "SCALAR")
+    move = b.accessor([(0, 0, 0), (4, 0, 0)], "f", "VEC3")
+    scale = b.accessor([(1, 1, 1), (2, 2, 2)], "f", "VEC3")
+    turn = b.accessor([(0, 0, 0, 1), (0, 0, 0.70710677, 0.70710677)], "f", "VEC4", minmax=False)
+    other = b.accessor([(0, 0, 0), (0, 3, 0)], "f", "VEC3")
+    root = base("clip_switch", meshes=[{"primitives": [{"attributes": {"POSITION": pos}}]}],
+                nodes=[{"name": "Mover", "mesh": 0}, {"name": "Other", "mesh": 0}], scenes=[{"nodes": [0, 1]}], scene=0,
+                animations=[{"name": "Move", "samplers": [{"input": times, "output": move}, {"input": times, "output": scale}],
+                             "channels": [{"sampler": 0, "target": {"node": 0, "path": "translation"}}, {"sampler": 1, "target": {"node": 1, "path": "scale"}}]},
+                            {"name": "Turn", "samplers": [{"input": times, "output": turn}], "channels": [{"sampler": 0, "target": {"node": 0, "path": "rotation"}}]},
+                            {"name": "Other", "samplers": [{"input": times, "output": other}], "channels": [{"sampler": 0, "target": {"node": 1, "path": "translation"}}]}])
+    write_glb(os.path.join(out, "clip_switch.glb"), root, b)
+
+
+def fx_path_clip(out):
+    """A legal glTF node name containing Unity's animation path separator: '/' is a name character, not a parent."""
+    b = Buf()
+    pos = b.accessor([(0, 0, 0), (1, 0, 0), (0, 1, 0)], "f", "VEC3")
+    times = b.accessor([0, 1], "f", "SCALAR")
+    values = b.accessor([(0, 0, 0), (4, 0, 0)], "f", "VEC3")
+    root = base("path_clip", meshes=[{"primitives": [{"attributes": {"POSITION": pos}}]}],
+                nodes=[{"name": "Part/Port", "mesh": 0}], scenes=[{"nodes": [0]}], scene=0,
+                animations=[{"name": "Move", "samplers": [{"input": times, "output": values}], "channels": [{"sampler": 0, "target": {"node": 0, "path": "translation"}}]}])
+    write_glb(os.path.join(out, "path_clip.glb"), root, b)
+
+
+def fx_far_clip(out):
+    """A large translation at frame zero has acceptable float32 rounding; the middle frame at the origin is exact.
+    The rig gate must judge each pose with its own deviation, rather than reuse the first pose's worst error."""
+    b = Buf()
+    # Keep the triangle in the YZ plane: the rounding along X is a uniform offset, preserving its area in Blender.
+    pos = b.accessor([(0.012345, 0, 0), (0.012345, 1, 0), (0.012345, 0, 1)], "f", "VEC3")
+    times = b.accessor([0, 0.5, 1], "f", "SCALAR")
+    values = b.accessor([(100000, 0, 0), (0, 0, 0), (0, 0, 0)], "f", "VEC3")
+    root = base("far_clip", meshes=[{"primitives": [{"attributes": {"POSITION": pos}}]}],
+                nodes=[{"name": "Mover", "mesh": 0}], scenes=[{"nodes": [0]}], scene=0,
+                animations=[{"name": "Return", "samplers": [{"input": times, "output": values}], "channels": [{"sampler": 0, "target": {"node": 0, "path": "translation"}}]}])
+    write_glb(os.path.join(out, "far_clip.glb"), root, b)
+
+
+def fx_unicode_clip(out):
+    """A clip name truncated to Blender's 63-byte limit must preserve whole Unicode code points, even before a suffix."""
+    b = Buf()
+    pos = b.accessor([(0, 0, 0), (1, 0, 0), (0, 1, 0)], "f", "VEC3")
+    times = b.accessor([0, 1], "f", "SCALAR")
+    values = b.accessor([(0, 0, 0), (1, 0, 0)], "f", "VEC3")
+    anim = {"name": "\U0001F680" * 40, "samplers": [{"input": times, "output": values}], "channels": [{"sampler": 0, "target": {"node": 0, "path": "translation"}}]}
+    root = base("unicode_clip", meshes=[{"primitives": [{"attributes": {"POSITION": pos}}]}],
+                nodes=[{"name": "Mover", "mesh": 0}], scenes=[{"nodes": [0]}], scene=0, animations=[anim, anim])
+    write_glb(os.path.join(out, "unicode_clip.glb"), root, b)
+
+
+FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external, fx_cubic, fx_scenes, fx_materials, fx_skin8, fx_big, fx_names, fx_no_default_scene, fx_dropped, fx_mixed_skin, fx_clip_switch, fx_path_clip, fx_far_clip, fx_unicode_clip]
 
 
 def main(out):
