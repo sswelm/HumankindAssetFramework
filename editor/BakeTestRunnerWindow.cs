@@ -143,6 +143,20 @@ public class BakeTestRunnerWindow : EditorWindow
                        "rewound-faces count that moves on a ship nobody touched is a direction-pass regression.",
                 run = WorkshopGateTest.RunSection },
 
+            // THE IN-PROCESS PROBE PREVIEW (2026-10-03, step 3d): the C# probe's rows are held to Blender's by the push gate; the PREVIEW
+            // it builds in Unity - the frame, the facing, the lifecycle of its objects - can only be judged in Unity, against the
+            // preview FBX files Blender left under Assets/FactorySource/VehicleLab and Unity imported.
+            new TestRow { name = "Does the in-process probe preview match the Blender preview? (every recipe with a preview FBX)", quick = true, on = true,
+                cost = "the C# probe on every recipe's source, in memory - seconds to a minute, no Blender",
+                what = "For every saved recipe whose source is a .glb/.gltf and whose Blender preview FBX exists " +
+                       "(Assets/FactorySource/VehicleLab/<source>_probe.fbx, left by the last Blender probe of that source), builds " +
+                       "the in-process probe preview for the recipe's inputs - second model, placements, orientation - and sets it " +
+                       "beside Unity's import of the FBX part for part by NAME: world bounds centre and size within 1e-3 of the " +
+                       "model's extent, and the facing of the faces (the sign of the area-weighted normals against the part centre). " +
+                       "A wrong frame or winding moves every part; a stale FBX a few - over 5 % of the matched parts off fails. " +
+                       "Parts on one side only are counted, not held. A leaked Unity mesh fails.",
+                run = VehicleProbePreviewGateTest.RunSection },
+
             new TestRow { name = "Does the Vehicle Lab still generate? (representative recipes)", quick = true, on = true, needsBlender = true, group = "lab",
                 cost = "one Blender rig run per representative recipe (up to six) — minutes",
                 what = "Runs the Vehicle Lab's Generate — the SAME code the button runs, headless: no dialogs, no " +

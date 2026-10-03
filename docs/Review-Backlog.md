@@ -87,8 +87,9 @@ them (`probe_jobs.py`); the Lab's Probe parts button runs it (`VehicleLabWindow.
   model at its first clip's start (the drill's reference) where the Blender path showed the untouched import blend —
   an animated source's boxes can differ slightly from what the Lab listed before; (d) the preview's brightness is a
   material tint where Blender's preview baked the textures, and the preview's frame — Blender (X, Y, Z) as Unity
-  (X, Z, Y), faces rewound — is the FBX import's as derived from the exporter's axes, to be confirmed by eye on the
-  first in-Unity probe; (e) `Matrix.Rotation`'s cosf/sinf are the double functions rounded to float (every drilled angle
+  (X, Z, Y), faces rewound — is the FBX import's as derived from the exporter's axes; the Bake Tests row *Does the
+  in-process probe preview match the Blender preview?* judges it in Unity against Unity's own import of every preview FBX
+  the Blender probe left (37 in the project on 2026-10-03) — run it once before trusting the turntable; (e) `Matrix.Rotation`'s cosf/sinf are the double functions rounded to float (every drilled angle
   agrees); (f) a `B_` name the first model already uses is made unique in Blender's name order, approximated as
   case-insensitive ordinal order.
 

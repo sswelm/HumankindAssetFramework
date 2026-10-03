@@ -99,6 +99,7 @@ public static partial class VehicleProbe
     {
         var r = new Result();
         foreach (var w in input.Warnings) r.Notes.Add("WARN: " + w);
+        input.Progress?.Invoke("naming");
         var A = MakeSource(input.Model, 0, null, posed: true);
         var objsA = MeshObjects(A, r, "");
         var pool = A.Names.ObjectPool;   // every object name in the scene, as Blender's name map holds them
@@ -108,6 +109,7 @@ public static partial class VehicleProbe
         {
             // ---- the second model: imported into the same scene (its names made unique against the first model's), its bone
             //      shapes purged, every object prefixed "B_", each mesh's target matrix baked into its vertices, its helpers dropped
+            input.Progress?.Invoke("second model");
             B = MakeSource(input.Second, 1, A.Names, posed: false);
             pool = B.Names.ObjectPool;
             objsB = MeshObjects(B, r, " (second model)");
@@ -162,6 +164,7 @@ public static partial class VehicleProbe
         specs.AddRange(extras);
 
         // ---- the parts: name, vertex count, world box, dominant bone - the box through the double chain (tolerance in the drill)
+        input.Progress?.Invoke("parts");
         var boneNamesA = new HashSet<string>(A.Names.BoneOfJoint.Values, StringComparer.Ordinal);   // _bone_names: the bones of the armatures left in the scene - the first model's
         foreach (var s in specs)
         {
@@ -172,6 +175,7 @@ public static partial class VehicleProbe
         }
 
         // ---- the placements: the part (and its direct children) detached keeping its world matrix, then T onto matrix_world
+        input.Progress?.Invoke("placements");
         var byName = new Dictionary<string, PartSpec>(StringComparer.Ordinal);
         var byNode = new Dictionary<(Source, int), PartSpec>();   // the object a node became (an island copy is a new object: not it)
         foreach (var s in specs) { if (!byName.ContainsKey(s.Name)) byName[s.Name] = s; if (!s.IslandCopy) byNode[(s.Src, s.Node)] = s; }
@@ -228,8 +232,10 @@ public static partial class VehicleProbe
                 for (int a = m.Nodes[s.Node].Parent; a >= 0 && !underBone; a = m.Nodes[a].Parent) underBone = names.IsBone[a];
                 s.Part.UnderBone = !skinned && underBone;
             }
+            input.Progress?.Invoke("visibility");
             Visibility(r.Parts, partMeshes);
             r.Notes.Add($"visibility: {r.Parts.Count(p => p.Vis == 1)} external / {r.Parts.Count(p => p.Vis != 1)} interior part(s)");
+            input.Progress?.Invoke("inside-out");
             InsideOut(r.Parts, partMeshes, mats);
             r.Notes.Add($"inside-out verdicts: {r.Parts.Count(p => p.Flip > 0)} part(s) hold interior-facing islands (the fix would reverse them)");
         }
@@ -237,6 +243,7 @@ public static partial class VehicleProbe
         // ---- rig_report: the first armature's bones, from the undeformed vertices (v.co = the bind pose). The first model's
         //      armatures only - the second model's are dropped by the merge - but a second-model mesh whose vertex groups carry
         //      the first armature's bone NAMES counts in Blender (rig_report reads every mesh object's groups by name), and does here
+        input.Progress?.Invoke("rig report");
         if (A.Names.ArmaturesInOrder.Count > 0) RigReport(A.M, A.Names, A.ArmaWorld, BindArmatureMatrices(A.M, A.Names), r, B, objsB);
         return r;
     }

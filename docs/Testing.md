@@ -131,6 +131,10 @@ part, with a per-axis scale on a turned part, on a missing name, with a zero sca
 and one per saved recipe that sets any of these, with the recipe's exact arguments formatted as the Lab formats them
 (`Tests/test_probe_jobs.py` holds the formatting to the Lab's). Every job's MATRIX and VERTEX rows are held bit for bit
 like a file's; `recipe_check.py` judges a recipe with inputs on its job's rows — its B_ parts and placed parts included.
+What no drill outside Unity can hold is the PREVIEW the Lab builds from the probe's parts: the Bake Tests row *Does the
+in-process probe preview match the Blender preview?* (`VehicleProbePreviewGateTest`, no Blender needed) sets it beside
+Unity's import of the preview FBX the last Blender probe left for the same source, part for part by name — bounds centre
+and size within 1e-3 of the extent, the facing of the faces — and fails on a leaked Unity mesh.
 A file too large for Unity's 32-bit standalone Mono is probed on the 64-bit .NET runtime instead, and the drill says so. The names come from a port of the
 importer's own tree construction (`compute_vnodes`: creation depth-first from the parentless nodes in index order,
 armatures at the joints' deepest common ancestor, skinned meshes moved or split off under them, meshes on bones moved

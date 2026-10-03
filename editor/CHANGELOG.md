@@ -27,6 +27,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   that no file states) — here at its static transforms; a placement on a SKINNED part reads its box off the double chain
   (close, not bit for bit); the in-process path poses the first model at its first clip's start where the Blender path
   showed the untouched import; the preview's brightness is a material tint where Blender's preview baked the textures.
+  The Bake Tests gained the row *Does the in-process probe preview match the Blender preview?*: for every recipe whose
+  Blender preview FBX is still in the project, the in-process preview is set beside Unity's import of that FBX part for
+  part — bounds centre and size, the facing of the faces — so the frame and the winding are judged in Unity, by Unity's
+  own FBX import, not by eye; and the Lab's progress bar now moves with the probe's stages.
 
 - **Safe inverse bind matrices follow Blender's fallback.** If a float32 determinant rounds to zero, add `1e-8f`
   to the diagonal and retry, then use identity if still singular. An invertible bind matrix can underflow here;

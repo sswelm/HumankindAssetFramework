@@ -42,6 +42,7 @@ public static partial class VehicleProbe
         public List<Placement> Placements = new List<Placement>();
         public double[] ProbeRotation;                            // degrees about Blender's X, Y, Z, or null
         public List<string> Warnings = new List<string>();        // what the script prints as "VEHICLE WARN: ..." while parsing
+        public Action<string> Progress;                           // told each stage as the probe reaches it (the Lab's progress bar), or null
 
         public sealed class Placement { public string Name; public double[] Offset, Scale; }
 

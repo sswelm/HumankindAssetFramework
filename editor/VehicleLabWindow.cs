@@ -2502,27 +2502,46 @@ public class VehicleLabWindow : EditorWindow
     // bit against Blender's own probe by tools/vehicle_probe_drill.sh, in a fraction of a second instead of 25 s; and the
     // turntable instance is built from the probe's own vertices (VehicleProbePreview) instead of a preview FBX written by
     // Blender, imported and instantiated. FBX/OBJ/.blend sources - and a second model of those kinds - keep the Blender probe.
+    // The preview against Unity's import of the Blender preview FBX is a Bake Tests row (VehicleProbePreviewGateTest).
     static bool IsGltf(string p) => !string.IsNullOrWhiteSpace(p) && (p.Trim().EndsWith(".glb", StringComparison.OrdinalIgnoreCase) || p.Trim().EndsWith(".gltf", StringComparison.OrdinalIgnoreCase));
     bool CanProbeInProcess => IsGltf(srcFile) && (string.IsNullOrWhiteSpace(srcFile2) || IsGltf(srcFile2));
+
+    /// <summary>The probe's input from this window's state: the source read, the second model read from the merge2 text, the placed
+    /// parts as parttx lines, the Orientation as proberot text - the SAME characters the Blender command line gets, parsed as the
+    /// script parses them. False with the script's own VEHICLE ERROR text (a second model that is not on disk).</summary>
+    internal bool BuildProbeInput(out VehicleProbe.Input input, out string error)
+    {
+        error = null;
+        input = new VehicleProbe.Input { Model = GlbReader.Read(srcFile) };
+        string merge2 = Merge2Text();
+        if (merge2 != null && !input.SetSecond(merge2, GlbReader.Read, out error)) return false;
+        input.AddPlacementLines(parts.Where(IsPlaced).Select(x => VehicleLabRules.PartPlacementLine(x.name, x.offset.x, x.offset.y, x.offset.z, x.scale.x, x.scale.y, x.scale.z)));
+        string rot = ProbeRotText();
+        if (rot != null) input.SetProbeRotation(rot);
+        return true;
+    }
+
+    HafModel[] PreviewModels(VehicleProbe.Input input) => input.Second != null ? new[] { input.Model, input.Second } : new[] { input.Model };
+    float[] PreviewBrightness(VehicleProbe.Input input) => new[] { model1Bright, input.Second != null ? model2Bright : 1f };
 
     bool ProbeInProcess(out List<string> rows, out GameObject preview, out List<UnityEngine.Object> previewObjects)
     {
         rows = null; preview = null; previewObjects = new List<UnityEngine.Object>();
         var sw = System.Diagnostics.Stopwatch.StartNew();
+        // the progress bar moves with the probe's stages (the Blender path's bar stood still for its 25 s): reading, then what
+        // VehicleProbe.Run reports as it goes, then the preview
+        int stage = 0; const int stages = 9;
+        void Bar(string what) { if (!headless) EditorUtility.DisplayProgressBar("Vehicle Lab", "Probing in-process: " + what, Mathf.Clamp01(++stage / (float)stages)); }
         try
         {
-            if (!headless) EditorUtility.DisplayProgressBar("Vehicle Lab", "Probing…", 0.4f);
-            var input = new VehicleProbe.Input { Model = GlbReader.Read(srcFile) };
-            string merge2 = Merge2Text();
-            if (merge2 != null && !input.SetSecond(merge2, GlbReader.Read, out string error))
+            Bar("reading " + Path.GetFileName(srcFile) + (string.IsNullOrWhiteSpace(srcFile2) ? "" : " and " + Path.GetFileName(srcFile2.Trim())));
+            if (!BuildProbeInput(out var input, out string error))
             { status = "VEHICLE ERROR: " + error; Debug.LogError("[VehicleLab] probe: " + error); return false; }   // the script's own refusals, word for word
-            input.AddPlacementLines(parts.Where(IsPlaced).Select(x => VehicleLabRules.PartPlacementLine(x.name, x.offset.x, x.offset.y, x.offset.z, x.scale.x, x.scale.y, x.scale.z)));
-            string rot = ProbeRotText();
-            if (rot != null) input.SetProbeRotation(rot);
+            input.Progress = Bar;
             var r = VehicleProbe.Run(input);
             rows = r.Notes.Select(n => "VEHICLE " + n).Concat(r.RigBones.Select(b => b.Row)).Concat(r.Parts.Select(p => p.Row)).ToList();
-            var models = input.Second != null ? new[] { input.Model, input.Second } : new[] { input.Model };
-            preview = VehicleProbePreview.Build(r, models, new[] { model1Bright, input.Second != null ? model2Bright : 1f }, previewObjects);
+            Bar("preview");
+            preview = VehicleProbePreview.Build(r, PreviewModels(input), PreviewBrightness(input), previewObjects);
             sw.Stop();
             // console headline = the OUTCOME, as the Blender path logs it (the rows themselves would bury it)
             Debug.Log($"[VehicleLab] probe (C#, in-process): {r.Parts.Count} part(s) found   ({sw.Elapsed.TotalSeconds:0.00}s)\n" + string.Join("\n", r.Notes.Select(n => "VEHICLE " + n)));
@@ -2538,6 +2557,27 @@ public class VehicleLabWindow : EditorWindow
             return false;
         }
         finally { if (!headless) EditorUtility.ClearProgressBar(); }
+    }
+
+    // THE BAKE TESTS' ENTRY (VehicleProbePreviewGateTest): the in-process probe and its preview for a saved recipe, in a window
+    // instance never shown - the SAME input the Probe parts button builds. False, with the reason, for a recipe the in-process
+    // path does not take (an FBX/OBJ/.blend source or second model) or whose second model is not on disk.
+    internal static bool ProbeRecipeHeadless(string recipePath, List<UnityEngine.Object> assets, out VehicleProbe.Result result, out GameObject preview, out string error)
+    {
+        result = null; preview = null; error = null;
+        var w = CreateInstance<VehicleLabWindow>();
+        try
+        {
+            w.headless = true;
+            w.LoadRecipeFromPath(recipePath);
+            if (!w.recipeReadThisSession) { error = w.status; return false; }
+            if (!w.CanProbeInProcess) { error = "an FBX/OBJ/.blend source or second model: Blender's probe, not this one"; return false; }
+            if (!w.BuildProbeInput(out var input, out error)) return false;
+            result = VehicleProbe.Run(input);
+            preview = VehicleProbePreview.Build(result, w.PreviewModels(input), w.PreviewBrightness(input), assets);
+            return true;
+        }
+        finally { DestroyImmediate(w); }
     }
 
     bool RunBlender(string args, out string stdout)
