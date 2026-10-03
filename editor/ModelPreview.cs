@@ -41,7 +41,36 @@ public static class ModelPreview
         var hm = index >= 0 && index < model.Materials.Count ? model.Materials[index] : null;
         if (hm != null)
         {
-            mat.color = new Color(hm.BaseColorFactor[0] * tint, hm.BaseColorFactor[1] * tint, hm.BaseColorFactor[2] * tint, 1f);
+            // glTF factors are linear; Standard's colour property, like Unity's imported FBX material, is sRGB.
+            // Convert RGB before the Lab's brightness multiplier; alpha is coverage and stays linear.
+            var colour = new Color(hm.BaseColorFactor[0], hm.BaseColorFactor[1], hm.BaseColorFactor[2],
+                hm.AlphaMode == "OPAQUE" ? 1f : hm.BaseColorFactor[3]).gamma;
+            mat.color = new Color(colour.r * tint, colour.g * tint, colour.b * tint, colour.a);
+            if (mat.HasProperty("_Mode"))
+            {
+                if (hm.AlphaMode == "MASK")
+                {
+                    mat.SetFloat("_Mode", 1f);
+                    mat.SetOverrideTag("RenderType", "TransparentCutout");
+                    mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.One);
+                    mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.Zero);
+                    mat.SetInt("_ZWrite", 1);
+                    mat.SetFloat("_Cutoff", hm.AlphaCutoff);
+                    mat.EnableKeyword("_ALPHATEST_ON");
+                    mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.AlphaTest;
+                }
+                else if (hm.AlphaMode == "BLEND")
+                {
+                    // Standard's transparent mode premultiplies alpha in the shader, as the FBX importer does.
+                    mat.SetFloat("_Mode", 3f);
+                    mat.SetOverrideTag("RenderType", "Transparent");
+                    mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.One);
+                    mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                    mat.SetInt("_ZWrite", 0);
+                    mat.EnableKeyword("_ALPHAPREMULTIPLY_ON");
+                    mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+                }
+            }
             if (mat.HasProperty("_Glossiness")) mat.SetFloat("_Glossiness", 1f - hm.RoughnessFactor);
             if (mat.HasProperty("_Metallic")) mat.SetFloat("_Metallic", hm.MetallicFactor);
             if (textured && hm.BaseColorTexture >= 0 && hm.BaseColorTexture < model.Textures.Count)

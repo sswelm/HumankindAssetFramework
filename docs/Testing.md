@@ -134,7 +134,9 @@ like a file's; `recipe_check.py` judges a recipe with inputs on its job's rows �
 What no drill outside Unity can hold is the PREVIEW the Lab builds from the probe's parts: the Bake Tests row *Does the
 in-process probe preview match the Blender preview?* (`VehicleProbePreviewGateTest`, no Blender needed) sets it beside
 Unity's import of the preview FBX the last Blender probe left for the same source, part for part by name — bounds centre
-and size within 1e-3 of the extent, the facing of the faces — and fails on a leaked Unity mesh.
+and size within 1e-3 of the extent, the facing of the faces — and fails on a leaked Unity mesh. A single-part FBX
+root is matched by its mesh's original part name, because Unity renames that root to the file name. The allowance
+for stale previews is at most five percent of distinct matched parts; a mismatch on a one-part model fails.
 The sheared-child job holds the bounds of children and descendants after detachment. The Lab routes geometry the
 kernel does not yet evaluate (morph targets, bone-parented meshes, animated second models and animated/placed
 first-model skinned meshes) through Blender; `VehicleProbeMergeTests` holds this routing policy.
@@ -142,7 +144,10 @@ first-model skinned meshes) through Blender; `VehicleProbeMergeTests` holds this
 **`VehicleProbePreviewHeadlessTest.Run`** runs in Unity with `-batchmode -nographics -executeMethod
 VehicleProbePreviewHeadlessTest.Run`. It checks the preview frame against coordinates measured from Blender's FBX
 export imported in Unity, normals perpendicular to a nonuniformly scaled panel, and destruction of both complete
-and partially built previews. Run it in a Unity project with the HAF editor package installed; it exits nonzero
+and partially built previews. It also checks material colours against the imported FBX's sRGB values, BLEND/MASK/OPAQUE
+alpha handling, brightness preserving alpha, imported root names, and rejection of reversed winding on a single
+part while allowing five percent of stale parts in larger models. Run it in a Unity project with the HAF editor
+package installed; it exits nonzero
 if an invariant fails. The probe comparator's normal rays retain Blender's forward-matrix arithmetic; rendered
 surface normals use the inverse transpose.
 
