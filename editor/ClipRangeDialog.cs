@@ -154,8 +154,9 @@ public class ClipRangeDialog : EditorWindow
     void DestroyRig()
     {
         if (rigAssets != null) foreach (var o in rigAssets) if (o != null) DestroyImmediate(o);
+        bool wasRig = rig != null && inst != null && inst == rig.Root;
         rigAssets = null; rig = null;
-        if (inst != null && inst == null) inst = null;   // a destroyed root compares equal to null
+        if (wasRig) { inst = null; boundsValid = false; }   // the root died with the rig's assets
     }
 
     bool BuildInspectFbx(string proj, string dirFull)

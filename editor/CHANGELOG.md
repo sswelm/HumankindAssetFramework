@@ -21,6 +21,13 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   sampled at its first and middle frame, every skinned mesh baked through Unity's own skinning and every vertex set
   beside the reader's pose within 1e-4 of the extent. A scratch drill of the same formula outside Unity ran every
   registry model and fixture before this shipped (the numbers in the PR).
+  A self-review drilled the one shape no file of the registry, the recipes or the Khronos samples has (0 of 275 skinned
+  nodes): a mesh that MIXES skinned and unskinned primitives. Blender's importer skins the whole mesh, so the unskinned
+  primitive's all-zero joint data makes its vertices ride joint 0 at weight 1 (measured on the new `mixed_skin` fixture:
+  they sit at the joint, with the joint as their bone). The reader, the Vehicle Lab's probe (its rays, box, dominant bone
+  and rig report were inconsistent on that shape) and the rig now share that rule, and the probe drill holds the fixture
+  to Blender bit for bit. A skinned mesh's renderer sits on its own object at identity (Unity's skinning ignores the
+  renderer's transform, glTF the node's), so a bake of it reads in world space.
 
 - **Preview material and comparison fixes:** the in-process Lab preview preserves glTF transparency and alpha
   cutouts, and converts linear colour factors to the sRGB colours Unity's FBX importer made of the Blender preview

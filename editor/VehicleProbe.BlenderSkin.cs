@@ -188,6 +188,7 @@ public static partial class VehicleProbe
         /// <summary>The vertex's skinning matrix: the float32 blend of its joints' matrices by weight, divided by the weight sum.</summary>
         float[] SkinningMatrix(HafPrimitive p, int v)
         {
+            if (!p.Skinned) return (float[])JointMats[0].Clone();   // an unskinned primitive of a skinned mesh: all-zero joint data, so joint 0 at weight 1 (the zero-weight rule)
             var acc = new float[16]; float wsum = 0f;
             // the importer loops over the influence sets in order (JOINTS_0/WEIGHTS_0, then JOINTS_1/WEIGHTS_1), four influences each
             for (int set = 0; set < 2; set++)

@@ -69,9 +69,10 @@ public static class HafModelRigHeadlessTest
                     for (int ni = 0; ni < m.Nodes.Count; ni++)
                     {
                         var node = m.Nodes[ni]; if (node.Mesh < 0) continue;
-                        var trn = rig.Nodes[ni];
+                        var trn = rig.MeshOf[ni]; if (trn == null) continue;
                         var smr = trn.GetComponent<SkinnedMeshRenderer>(); var mf = trn.GetComponent<MeshFilter>();
                         Vector3[] actual; Matrix4x4 toWorld;
+                        // a skinned mesh's renderer sits at identity (HafModelRig), so its bake IS world space whichever space BakeMesh means
                         if (smr != null) { var baked = new Mesh(); smr.BakeMesh(baked); actual = baked.vertices; toWorld = smr.transform.localToWorldMatrix; UnityEngine.Object.DestroyImmediate(baked); }
                         else if (mf != null && mf.sharedMesh != null) { actual = mf.sharedMesh.vertices; toWorld = trn.localToWorldMatrix; }
                         else continue;

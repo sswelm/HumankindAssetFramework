@@ -21,6 +21,7 @@ public static class HafModelRig
         public AnimationClip[] Clips = new AnimationClip[0];
         public string[] ClipNames = new string[0];   // Blender's track names: the exact names a clip spec carries
         public Transform[] Nodes;                    // per glTF node
+        public Transform[] MeshOf;                   // per glTF node: the object carrying its mesh (the node itself; a skinned mesh's own child at identity), or null
         public int Meshes, SkinnedMeshes, Vertices, Triangles;
         public string Note = "";
     }
@@ -32,7 +33,7 @@ public static class HafModelRig
         r.Root = root;
         // ---- the hierarchy: a GameObject per node, every node (Blender imports them all, scene or not), named uniquely so a
         //      clip's curve path finds exactly one
-        var tr = new Transform[m.Nodes.Count]; r.Nodes = tr;
+        var tr = new Transform[m.Nodes.Count]; r.Nodes = tr; r.MeshOf = new Transform[m.Nodes.Count];
         for (int i = 0; i < m.Nodes.Count; i++)
         {
             var go = new GameObject((m.Nodes[i].Name.Length > 0 ? m.Nodes[i].Name : "node") + " #" + i) { hideFlags = HideFlags.HideAndDontSave };
@@ -63,22 +64,28 @@ public static class HafModelRig
                 built[key] = mb;
                 r.Meshes++; r.Vertices += mb.mesh.vertexCount; r.Triangles += (int)hm.Primitives.Sum(p => p.TriangleCount);
             }
-            var go = tr[i].gameObject;
             if (skinned)
             {
+                // the renderer sits on its own child at identity: glTF ignores a skinned mesh node's transform, Unity's skinning
+                // ignores the renderer's, and a bake of the skinned mesh then reads in world space whatever the node's transform is
                 var sk = m.Skins[node.Skin];
-                var smr = go.AddComponent<SkinnedMeshRenderer>();
+                var host = new GameObject(tr[i].name + " skin") { hideFlags = HideFlags.HideAndDontSave };
+                host.transform.SetParent(root.transform, false);
+                var smr = host.AddComponent<SkinnedMeshRenderer>();
                 smr.sharedMesh = mb.mesh;
                 smr.bones = sk.Joints.Select(j => j >= 0 && j < tr.Length ? tr[j] : root.transform).ToArray();
                 smr.rootBone = sk.Skeleton >= 0 && sk.Skeleton < tr.Length ? tr[sk.Skeleton] : (sk.Joints.Length > 0 && sk.Joints[0] < tr.Length ? tr[sk.Joints[0]] : root.transform);
                 smr.updateWhenOffscreen = true;   // the bounds follow the pose: the picker frames and culls by them
                 smr.sharedMaterials = mb.mats;
+                r.MeshOf[i] = host.transform;
                 r.SkinnedMeshes++;
             }
             else
             {
+                var go = tr[i].gameObject;
                 go.AddComponent<MeshFilter>().sharedMesh = mb.mesh;
                 go.AddComponent<MeshRenderer>().sharedMaterials = mb.mats;
+                r.MeshOf[i] = tr[i];
             }
         }
         // ---- the clips: one legacy clip per animation, every animated node's position, rotation and scale keyed at every frame
@@ -180,7 +187,10 @@ public static class HafModelRig
                             if (joints == null || weights == null) continue;
                             for (int k = 0; k < 4; k++) if (weights[v * 4 + k] > 0f) inf.Add(new BoneWeight1 { boneIndex = joints[v * 4 + k], weight = weights[v * 4 + k] });
                         }
-                    if (inf.Count == 0) inf.Add(new BoneWeight1 { boneIndex = p.Skinned ? p.Joints[v * 4] : 0, weight = 1f });   // the importer's rule: a zero-sum vertex rides its first influence
+                    // the importer's zero-weight rule: a vertex with no weight rides its first JOINTS_0 influence - and an UNSKINNED
+                    // primitive in a skinned mesh has all-zero joint data, so its vertices ride joint 0 (measured on the mixed_skin
+                    // fixture: Blender puts them at the joint, with the joint as their bone - not at the node's transform)
+                    if (inf.Count == 0) inf.Add(new BoneWeight1 { boneIndex = p.Skinned ? p.Joints[v * 4] : 0, weight = 1f });
                     float sum = inf.Sum(x => x.weight);
                     inf = inf.Select(x => new BoneWeight1 { boneIndex = x.boneIndex, weight = x.weight / sum }).OrderByDescending(x => x.weight).ToList();
                     perVertex.Add((byte)inf.Count); influences.AddRange(inf); maxInfluences = Math.Max(maxInfluences, inf.Count);

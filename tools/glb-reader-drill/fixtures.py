@@ -378,7 +378,25 @@ def fx_dropped(out):
     write_glb(os.path.join(out, "dropped.glb"), root, b)
 
 
-FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external, fx_cubic, fx_scenes, fx_materials, fx_skin8, fx_big, fx_names, fx_no_default_scene, fx_dropped]
+def fx_mixed_skin(out):
+    """A skinned node whose mesh MIXES a skinned primitive and an unskinned one (no file of the registry, the recipes or the
+    Khronos samples has this shape - 0 of 275 skinned nodes, counted 2026-10-03): the unskinned triangle rides the NODE's
+    transform (the reader's rule; the node sits under a translated parent and is itself turned), the skinned one its joint,
+    translated away. The Clip Range picker's rig gives the unskinned vertices an extra bone - the node - and the headless row
+    holds Unity's skinning of both primitives to the reader."""
+    b = Buf()
+    tri = b.accessor([(0, 0, 0), (1, 0, 0), (0, 1, 0)], "f", "VEC3")
+    tri2 = b.accessor([(0, 0, 2), (1, 0, 2), (0, 1, 2)], "f", "VEC3")
+    J0 = b.accessor([(0, 0, 0, 0)] * 3, "H", "VEC4", minmax=False); W0 = b.accessor([(1, 0, 0, 0)] * 3, "f", "VEC4", minmax=False)
+    root = base("mixed_skin",
+                meshes=[{"name": "mixed", "primitives": [{"attributes": {"POSITION": tri, "JOINTS_0": J0, "WEIGHTS_0": W0}}, {"attributes": {"POSITION": tri2}}]}],
+                nodes=[{"name": "Holder", "translation": [5, 0, 0], "children": [1, 2]}, {"name": "Mixed", "mesh": 0, "skin": 0, "rotation": [0, 0.3826834, 0, 0.9238795]},
+                       {"name": "Joint", "translation": [0, 3, 0]}],
+                skins=[{"joints": [2], "skeleton": 2}], scenes=[{"nodes": [0]}], scene=0)
+    write_glb(os.path.join(out, "mixed_skin.glb"), root, b)
+
+
+FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external, fx_cubic, fx_scenes, fx_materials, fx_skin8, fx_big, fx_names, fx_no_default_scene, fx_dropped, fx_mixed_skin]
 
 
 def main(out):

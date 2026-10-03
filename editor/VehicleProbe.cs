@@ -227,8 +227,8 @@ public static partial class VehicleProbe
                     // bits (3 skinned parts of 14,023 read differently from the double chain; external review of PR #115 had first
                     // found the normals left unskinned)
                     var sknr = SkinnerOf(s.Src, skin);
-                    position = (p, v) => p.Skinned ? GltfOf(sknr.Position(p, v)) : new double[] { p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2] };
-                    normal = (p, v) => p.Normals == null ? null : p.Skinned ? GltfOf(sknr.Normal(p, v)) : new double[] { p.Normals[v * 3], p.Normals[v * 3 + 1], p.Normals[v * 3 + 2] };
+                    position = (p, v) => GltfOf(sknr.Position(p, v));   // an unskinned primitive of the mesh too: joint 0 (BlenderSkinner's rule)
+                    normal = (p, v) => p.Normals == null ? null : GltfOf(sknr.Normal(p, v));
                 }
                 var mb = MatrixOf(s);
                 var pm = BuildPartMesh(m, s.Node, s.Prim, s.Verts, position, normal, mb, s.Src.Index == 1 ? s.Src.Target[s.Node] : null);
@@ -356,7 +356,7 @@ public static partial class VehicleProbe
         {
             var p = mesh.Primitives[pi];
             var local = new double[p.VertexCount * 3];
-            var sknr = skinned && p.Skinned ? SkinnerOf(B, skin) : null;
+            var sknr = skinned ? SkinnerOf(B, skin) : null;   // every primitive of a skinned mesh, the unskinned one through joint 0
             foreach (int v in Used(p))
             {
                 float bx, by, bz;
@@ -443,7 +443,12 @@ public static partial class VehicleProbe
                 else { x = p.Positions[v * 3]; y = p.Positions[v * 3 + 1]; z = p.Positions[v * 3 + 2]; }
                 if (x < mn[0]) mn[0] = x; if (x > mx[0]) mx[0] = x; if (y < mn[1]) mn[1] = y; if (y > mx[1]) mx[1] = y; if (z < mn[2]) mn[2] = z; if (z > mx[2]) mx[2] = z;
                 bool zeroWeights = skinned && p.Skinned && HasZeroWeights(p, v);
-                if (skinned && p.Skinned)
+                if (skinned && !p.Skinned)
+                {   // an unskinned primitive of a skinned mesh: joint 0 at weight 1 (Blender's zero-weight rule over all-zero data)
+                    if (m.Skins[skin].Joints.Length > 0 && names.BoneOfJoint.TryGetValue(m.Skins[skin].Joints[0], out var bone0) && (boneFilter == null || boneFilter.Contains(bone0)))
+                    { if (!tally.ContainsKey(bone0)) { tally[bone0] = 0; tallyOrder.Add(bone0); } tally[bone0] += 1; }
+                }
+                else if (skinned)
                     for (int set = 0; set < 2; set++)
                     {
                         var joints = set == 0 ? p.Joints : p.Joints1; var weights = set == 0 ? p.Weights : p.Weights1;
@@ -693,6 +698,7 @@ public static partial class VehicleProbe
     /// w = 0 (skin_into_bind_pose: the 3x3, no translation).</summary>
     static double[] BindMatrix(HafPrimitive p, int v, double[][] jointMats)
     {
+        if (!p.Skinned) return (double[])jointMats[0].Clone();   // an unskinned primitive of a skinned mesh: joint 0 (the zero-weight rule)
         var acc = new double[16]; double wsum = 0;
         for (int set = 0; set < 2; set++)
         {
@@ -732,12 +738,13 @@ public static partial class VehicleProbe
             var jointMats = BindJointMatrices(m, sk, bindArma);
             foreach (var p in m.Meshes[m.Nodes[node].Mesh].Primitives)
             {
-                if (!p.Skinned) { total += Used(p).Length; continue; }
                 foreach (int v in Used(p))
                 {
                     total++;
                     string best = null;
                     bool zeroWeights = HasZeroWeights(p, v);
+                    if (!p.Skinned) { if (sk.Joints.Length > 0 && names.BoneOfJoint.TryGetValue(sk.Joints[0], out var b0) && boneNames.Contains(b0)) best = b0; }   // joint 0 at weight 1
+                    else
                     for (int set = 0; set < 2 && best == null; set++)
                     {
                         var joints = set == 0 ? p.Joints : p.Joints1; var weights = set == 0 ? p.Weights : p.Weights1;
@@ -776,13 +783,14 @@ public static partial class VehicleProbe
                 for (int pi = 0; pi < mesh2.Primitives.Count; pi++)
                 {
                     var p = mesh2.Primitives[pi];
-                    if (!p.Skinned) { total += Used(p).Length; continue; }
                     var local = second.Geo[node].Local[pi];
                     foreach (int v in Used(p))
                     {
                         total++;
                         string best = null;
                         bool zeroWeights = HasZeroWeights(p, v);
+                        if (!p.Skinned) { if (sk.Joints.Length > 0 && second.Names.BoneOfJoint.TryGetValue(sk.Joints[0], out var b0) && boneNames.Contains(b0)) best = b0; }   // joint 0 at weight 1
+                        else
                         for (int set = 0; set < 2 && best == null; set++)
                         {
                             var joints = set == 0 ? p.Joints : p.Joints1; var weights = set == 0 ? p.Weights : p.Weights1;

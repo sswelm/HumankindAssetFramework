@@ -79,6 +79,11 @@ Blender's arithmetic (`VehicleProbe.Merge.cs`), held bit for bit on ten fixture 
 them (`probe_jobs.py`); the Lab's Probe parts button runs it (`VehicleLabWindow.ProbeInProcess`,
 `VehicleProbePreview`). The order below stands for the rest.
 
+- **An unskinned primitive in a skinned mesh** — settled 2026-10-03 (PR #119 review): Blender's importer skins the whole
+  mesh, the primitive's joint data is all zero, and its vertices ride joint 0 at weight 1 (the zero-weight rule), with
+  joint 0 as their bone; the reader placed them at the node's transform and the probe read their box through the node but
+  their rays through the armature — three rules for one shape no real file has (0 of 275 skinned nodes). The `mixed_skin`
+  fixture (reader drill fixtures) holds Blender's rule on the reader, the probe and the clip player's rig.
 - **The in-process probe's edges, said (2026-10-03, 3d)**: (a) an ANIMATED second model — Blender's merge bakes its
   matrices at the untouched import state, a blend of every clip one frame in that no file states; the C# probe uses its
   static transforms (the same for an unanimated file, which every recipe's second model is). PR #118 review keeps
