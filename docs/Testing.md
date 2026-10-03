@@ -131,6 +131,12 @@ part, with a per-axis scale on a turned part, on a missing name, with a zero sca
 and one per saved recipe that sets any of these, with the recipe's exact arguments formatted as the Lab formats them
 (`Tests/test_probe_jobs.py` holds the formatting to the Lab's). Every job's MATRIX and VERTEX rows are held bit for bit
 like a file's; `recipe_check.py` judges a recipe with inputs on its job's rows — its B_ parts and placed parts included.
+**The Clip Range picker's in-process rig** (step 4, 2026-10-03): `HafUnityFrameTests` hold the preview frame's arithmetic
+without Unity — the X mirror's conjugation of rotations, matrices and matrix nodes; Unity's skinning formula fed the rig's
+matrices (the joints' world matrices, the inverse bind matrices, the vertex, all mirrored) against the reader's posed vertex;
+Blender's track names. The Bake Tests row *Does the glTF clip player match the reader?* (`HafModelRigHeadlessTest`, also in the
+headless lane) builds the rig for every registry model and fixture in Unity, samples each clip at its first and middle frame,
+bakes every skinned mesh through Unity's own skinning and sets every vertex beside the reader's pose within 1e-4 of the extent.
 What no drill outside Unity can hold is the PREVIEW the Lab builds from the probe's parts: the Bake Tests row *Does the
 in-process probe preview match the Blender preview?* (`VehicleProbePreviewGateTest`, no Blender needed) sets it beside
 Unity's import of the preview FBX the last Blender probe left for the same source, part for part by name — bounds centre

@@ -240,6 +240,29 @@ public static class BlenderNames
         return r;
     }
 
+    /// <summary>The importer's name for each animation's NLA track AND its action - what a clip spec names and rig_anim.py looks
+    /// up (`bpy.data.actions.get(spec)`): the animation's name, else "Anim_&lt;index&gt;", made pair-wise unique by find_unused_name
+    /// (blender_gltf.py: a taken name tries .001, .002 ...; the whole thing kept within 63 UTF-8 bytes by cutting the stem).</summary>
+    public static string[] TrackNames(HafModel m)
+    {
+        var taken = new HashSet<string>(StringComparer.Ordinal); var names = new string[m.Animations.Count];
+        for (int i = 0; i < m.Animations.Count; i++)
+        {
+            string desired = m.Animations[i].Name.Length > 0 ? m.Animations[i].Name : "Anim_" + i;
+            string stem = Cut(desired, 63), suffix = ""; int cntr = 1;
+            while (true)
+            {
+                string name = stem + suffix;
+                if (System.Text.Encoding.UTF8.GetByteCount(name) > 63) { stem = stem.Substring(0, stem.Length - 1); continue; }
+                if (!taken.Contains(name)) { names[i] = name; taken.Add(name); break; }
+                suffix = "." + cntr.ToString("000"); cntr++;
+            }
+        }
+        return names;
+    }
+
+    static string Cut(string s, int maxChars) => s.Length <= maxChars ? s : s.Substring(0, maxChars);
+
     static string Key(int node) => node.ToString();
     static int Index(string id) => int.TryParse(id, out int i) ? i : -1;
 

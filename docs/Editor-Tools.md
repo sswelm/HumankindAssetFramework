@@ -568,5 +568,5 @@ Run before committing baker/pipeline changes. See [Testing.md](Testing.md) and [
   hand-driven menu: `Tools ▸ HAF ▸ District ▸ 1. Bake District FxMesh` (superseded by District Factory).
 - **Registries** — `ModelRegistry` (master; `pack.json` + static `UnitScales`/`EraGrid`/`FormationThresholds`;
   corruption-guarded — won't overwrite an unparsable file), `DistrictRegistry`, `FormationRegistry`, `SoundOverrideRegistry`.
-- **Dialogs** — `ClipRangeDialog` (scrub a clip → `clip[start..end/N]`), `SocketBonesDialog` (donor hardpoint → your bone
+- **Dialogs** — `ClipRangeDialog` (scrub a clip → `clip[start..end/N]`; a `.glb`/`.gltf` plays as a live rig built in-process by `HafModelRig`, an FBX/`.blend` through Blender's inspection FBXs), `SocketBonesDialog` (donor hardpoint → your bone
   map → `socketBones`), `StripPartsDialog` (pick parts → `deployStripExtra` CSV).

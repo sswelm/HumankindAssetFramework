@@ -1,5 +1,6 @@
 // ClipRangeDialog.cs — the CLIP RANGE PICKER (2026-07-19, user-designed). Opened from any clip field's ▶ button:
-// shows a playable/scrubbable 3D preview of the model's clips (via an "inspection FBX" — a pure Blender format
+// shows a playable/scrubbable 3D preview of the model's clips (a .glb/.gltf as a live rig built in-process by HafModelRig, step 4
+// of replacing Blender, 2026-10-03; an FBX/.blend via an "inspection FBX" — a pure Blender format
 // conversion carrying ALL clips, no rig surgery) with Start/End frame fields and a Speed /N step (every Nth source
 // frame = N× faster; pacing is bake-only — Law 3 — so this is where walk speed is authored, and Play previews at
 // that speed); Confirm writes `clip[start..end/N]` (or the plain clip name for the full range at /1) back into the field. This is how a modder finds segment boundaries
@@ -31,6 +32,7 @@ public class ClipRangeDialog : EditorWindow
     // then giant parts) while the underlying animation data was provably correct. Nothing sits between data and eyes.
     GameObject inst;
     PreviewRenderUtility pru;
+    HafModelRig.Result rig; List<UnityEngine.Object> rigAssets;   // a .glb/.gltf played IN-PROCESS (HafModelRig: the reader's hierarchy, skins and clips as a live Unity rig; step 4 of replacing Blender, 2026-10-03), or null: the inspection FBXs Blender wrote
     Vector2 orbit = new Vector2(150f, -15f);
     float zoom = 1.4f;
     Bounds bounds; bool boundsValid;
@@ -58,6 +60,8 @@ public class ClipRangeDialog : EditorWindow
 
         if (string.IsNullOrEmpty(resourceName) || string.IsNullOrEmpty(modelFile) || !System.IO.File.Exists(modelFile))
         { ShowNotification(new GUIContent("Needs a loaded entry with an existing model file.")); return; }
+        DestroyInstance(); DestroyRig();
+        if (IsGltf(modelFile) && BuildRig(wantClip, wantS, wantE)) return;   // the in-process player; a model it refuses falls through to Blender's inspection FBXs
         fbxDir = "Assets/FactorySource/" + resourceName + "/inspect";
         string proj = System.IO.Directory.GetParent(Application.dataPath).FullName;
         string dirFull = System.IO.Path.Combine(proj, fbxDir);
@@ -109,6 +113,51 @@ public class ClipRangeDialog : EditorWindow
         Repaint();
     }
 
+    static bool IsGltf(string p) => p.EndsWith(".glb", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".gltf", StringComparison.OrdinalIgnoreCase);
+
+    // THE IN-PROCESS PLAYER (2026-10-03, step 4 of replacing Blender): the model read by GlbReader and built as a live Unity rig
+    // (HafModelRig) - the node hierarchy, the skins as SkinnedMeshRenderers, one legacy clip per animation baked at FPS from the
+    // reader's samplers, named as Blender names its tracks (the names a spec carries). The Bake Tests row "Does the glTF clip
+    // player match the reader?" holds Unity's skinning of these rigs to the reader's posed vertices on every registry model.
+    // False, with the reason in the Console, for what the rig does not carry (morph targets, a file the reader refuses) - Blender then.
+    bool BuildRig(string wantClip, int wantS, int wantE)
+    {
+        rigAssets = new List<UnityEngine.Object>();
+        try
+        {
+            EditorUtility.DisplayProgressBar("Clip range picker", "Reading the model and building its rig in-process…", 0.4f);
+            var m = GlbReader.Read(modelFile);
+            if (m.Meshes.Any(x => x.Primitives.Any(p => p.MorphTargets > 0))) { Debug.Log("[ClipRange] using Blender's inspection FBXs: the model has morph targets, which the in-process rig does not carry"); DestroyRig(); return false; }
+            if (m.Animations.Count == 0) { Debug.Log("[ClipRange] using Blender's inspection FBXs: the file declares no animation"); DestroyRig(); return false; }
+            rig = HafModelRig.Build(m, rigAssets, FPS);
+            clips = rig.Clips; clipNames = rig.ClipNames; clipPaths = clips.Select(c => "").ToArray();
+            clipLabels = clips.Select((c, i) => $"{clipNames[i]}   (frames 0..{Mathf.RoundToInt(c.length * FPS)}, {c.length:0.0}s)").ToArray();
+            if (clips.Length == 0) { Debug.Log("[ClipRange] using Blender's inspection FBXs: the rig built no clip"); DestroyRig(); clips = new AnimationClip[0]; return false; }
+            clipIdx = Mathf.Max(0, Array.IndexOf(clipNames, wantClip));
+            int total = TotalFrames;
+            startF = wantS >= 0 ? Mathf.Clamp(wantS, 0, total) : 0;
+            endF = wantE >= 0 ? Mathf.Clamp(wantE, 0, total) : total;
+            frame = startF;
+            Debug.Log($"[ClipRange] in-process rig: {rig.Meshes} mesh(es), {rig.SkinnedMeshes} skinned, {rig.Vertices} vertices, {clips.Length} clip(s): {string.Join(", ", clipNames)}");
+            Repaint();
+            return true;
+        }
+        catch (Exception e)
+        {
+            Debug.Log("[ClipRange] using Blender's inspection FBXs: the in-process rig could not be built - " + e.Message);
+            DestroyRig(); clips = new AnimationClip[0];
+            return false;
+        }
+        finally { EditorUtility.ClearProgressBar(); }
+    }
+
+    void DestroyRig()
+    {
+        if (rigAssets != null) foreach (var o in rigAssets) if (o != null) DestroyImmediate(o);
+        rigAssets = null; rig = null;
+        if (inst != null && inst == null) inst = null;   // a destroyed root compares equal to null
+    }
+
     bool BuildInspectFbx(string proj, string dirFull)
     {
         try
@@ -152,6 +201,11 @@ public class ClipRangeDialog : EditorWindow
 
     void EnsureInstance()
     {
+        if (rig != null)
+        {   // the in-process rig IS the instance: one root for every clip
+            if (inst == null) { instPath = null; if (pru == null) pru = new PreviewRenderUtility(); inst = rig.Root; pru.AddSingleGO(inst); boundsValid = false; }
+            return;
+        }
         string want = clips.Length > 0 ? clipPaths[Mathf.Clamp(clipIdx, 0, clipPaths.Length - 1)] : null;
         if (inst != null && instPath == want) return;
         DestroyInstance();
@@ -167,7 +221,7 @@ public class ClipRangeDialog : EditorWindow
 
     void DestroyInstance()
     {
-        if (inst != null) { DestroyImmediate(inst); inst = null; }
+        if (inst != null) { if (rig == null || inst != rig.Root) DestroyImmediate(inst); inst = null; }   // the rig's root dies with the rig (DestroyRig)
         boundsValid = false;
     }
 
@@ -175,7 +229,7 @@ public class ClipRangeDialog : EditorWindow
     void OnDisable()
     {
         EditorApplication.update -= Tick;
-        DestroyInstance();
+        DestroyInstance(); DestroyRig();
         if (pru != null) { try { pru.Cleanup(); } catch { } pru = null; }
     }
 

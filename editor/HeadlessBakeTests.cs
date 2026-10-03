@@ -29,6 +29,10 @@ public static class HeadlessBakeTests
             s = ModelReaderHeadlessTest.RunSection();
             Debug.Log($"[HeadlessBakeTests] {s.title}: PASS {s.pass} / FAIL {s.fail} / SKIP {s.skip}\n{s.body}");
             fail += s.fail;
+            // the Clip Range picker's in-process rig: Unity's own skinning of every registry model against the reader's pose
+            s = HafModelRigHeadlessTest.RunSection();
+            Debug.Log($"[HeadlessBakeTests] {s.title}: PASS {s.pass} / FAIL {s.fail} / SKIP {s.skip}\n{s.body}");
+            fail += s.fail;
         }
         catch (System.Exception e)
         {

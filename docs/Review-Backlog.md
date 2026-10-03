@@ -100,8 +100,9 @@ them (`probe_jobs.py`); the Lab's Probe parts button runs it (`VehicleLabWindow.
   cases remain available to the parity drill but are not used by the Lab's fast path. Detaching a sheared child now
   refreshes its own and its descendants' PART boxes; `placement_shear` holds this against Blender.
 
-**Order, by payoff per effort**: (1) `inspect_fbx` → Unity's `ModelImporter` clip list (days; removes a Blender
-launch from the Clip Range dialog); (2) reduce/`prep_model` → a C# quadric decimator (1–2 weeks, golden-verified);
+**Order, by payoff per effort**: (1) `inspect_fbx` → an in-process rig — done 2026-10-03 for `.glb`/`.gltf` (35 of the
+registry's 37 models; `HafModelRig`, the picker plays the reader's clips in Unity's own skinning; the one FBX entry
+and `.blend` sources keep `inspect_fbx.py`); (2) reduce/`prep_model` → a C# quadric decimator (1–2 weeks, golden-verified);
 (3) `deploy_convert` (3–4 weeks; the fuse already walks parts and welds); (4) `rig_anim` (3–4 weeks); (5)
 `vehicle_rig` (4–8 weeks; the Lab already computes much of the geometry in C#).
 
