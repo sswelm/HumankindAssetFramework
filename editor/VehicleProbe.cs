@@ -91,6 +91,7 @@ public static partial class VehicleProbe
     {
         public Source Src; public int Node, Prim = -1; public int[] Verts; public string Name; public bool IslandCopy;   // IslandCopy: a loose part other than the first - a new object, no children of its own
         public float[] Override;   // matrix_world after a placement touched it (row-major item layout), else null = the source's matrix
+        public bool MatrixChanged; // a detached ancestor made this node's world matrix change
         public Part Part;
         public bool Skinned => Src.M.Nodes[Node].Skin >= 0 && Src.M.Nodes[Node].Skin < Src.M.Skins.Count && Src.M.Meshes[Src.M.Nodes[Node].Mesh].Primitives.Any(p => p.Skinned);
     }
@@ -188,6 +189,16 @@ public static partial class VehicleProbe
                 "PLACED (probe): {0} | offset ({1}) scale ({2}) | centre ({3:0.000},{4:0.000},{5:0.000}) -> ({6:0.000},{7:0.000},{8:0.000}) | size ({9:0.000},{10:0.000},{11:0.000}) -> ({12:0.000},{13:0.000},{14:0.000})",
                 s.Name, string.Join(",", pl.Offset.Select(v => v.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture))), string.Join(",", pl.Scale.Select(v => v.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture))),
                 c0[0], c0[1], c0[2], c1[0], c1[1], c1[2], s0[0], s0[1], s0[2], s1[0], s1[1], s1[2]));
+        }
+
+        // Detaching a child can remove shear; descendants follow the rebuilt matrix. Their PART boxes must follow too,
+        // even when they have no placement of their own (the initial double-chain boxes predate the detach).
+        foreach (var s in specs.Where(s => s.Override != null || s.MatrixChanged))
+        {
+            LocalBox(s.Src.M, s.Node, s.Src.Geo[s.Node], s.Prim, s.Verts, out var mn, out var mx);
+            WorldBox(MatrixOf(s), mn, mx, out var center, out var size);
+            s.Part.Center = center.Select(v => (double)v).ToArray();
+            s.Part.Size = size.Select(v => (double)v).ToArray();
         }
 
         // ---- the visibility verdict: every part's mesh DATA in world space (the importer's bind pose for a skinned part - `matrix_world
@@ -316,7 +327,8 @@ public static partial class VehicleProbe
         {
             if (src.Names.ObjectParentNode[d] != node || src.Detached.Contains(d) || src.Names.IsBone[d]) continue;
             src.BWorld[d] = MulM4(src.BWorld[node], src.BLocal[d]);
-            foreach (var spec in specs) if (spec.Src == src && spec.Node == d && spec.Override != null) spec.Override = null;   // reads the source's matrix again
+            foreach (var spec in specs) if (spec.Src == src && spec.Node == d)
+            { spec.Override = null; spec.MatrixChanged = true; }   // reads the source's matrix again, including its box
             Recompute(src, d, specs);
         }
     }

@@ -37,6 +37,7 @@ public static class ModelPreview
     {
         if (materials.TryGetValue(index, out var have)) return have;
         var mat = new Material(sh) { hideFlags = HideFlags.HideAndDontSave };
+        assets.Add(mat); // owns the material even if a later texture or property operation throws
         var hm = index >= 0 && index < model.Materials.Count ? model.Materials[index] : null;
         if (hm != null)
         {
@@ -59,7 +60,6 @@ public static class ModelPreview
             }
         }
         else if (tint != 1f) mat.color = new Color(tint, tint, tint, 1f);
-        assets.Add(mat);
         materials[index] = mat;
         return mat;
     }

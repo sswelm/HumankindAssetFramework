@@ -5,6 +5,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Probe review fixes:** match the preview FBX's measured Unity frame (-X, Z, -Y of Blender), transport rendered
+  normals by the inverse transpose under nonuniform scale, and clean up partially built previews on failure.
+  Detaching a sheared child now refreshes its bounds and its descendants' bounds. Morph targets, bone-parented
+  meshes, animated second models, animated/placed first-model skinned meshes and glTF features refused by the
+  reader retain the Blender probe. Recipe drill arguments now match Unity's Single midpoint formatting.
 - **The Vehicle Lab's Probe parts runs in-process for glTF sources — step 3d of replacing Blender.** A `.glb`/`.gltf`
   source (with a `.glb`/`.gltf` second model, or none) is probed by the C# probe (`VehicleProbe`) instead of a headless
   Blender: the same part rows from the same inputs — the second model merged in with its offset, rotation and per-axis

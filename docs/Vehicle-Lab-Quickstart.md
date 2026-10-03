@@ -18,7 +18,9 @@ the HAF atlas, build the Humankind mod, or deploy anything to the game. Those ha
 | 4. Package and deploy | Humankind Mod Editor or `haf build` | Updated mod in Humankind's `Community` folder |
 | 5. Verify | Humankind + F8 | The real runtime model, animation, and shared mesh-budget cost |
 
-Blender must be installed for Generate and animated bakes (Probe parts of a `.glb`/`.gltf` source runs without it, in-process). HAF auto-detects it; use the override in the HAF
+Blender must be installed for Generate and animated bakes. Probe parts uses an in-process path for supported `.glb`/`.gltf`
+sources; morph targets, bone-parented meshes, animated or placed skinned meshes, animated second models and reader-refused
+features keep the Blender path. HAF auto-detects it; use the override in the HAF
 settings only when detection fails.
 
 ## 1. Prepare the source
