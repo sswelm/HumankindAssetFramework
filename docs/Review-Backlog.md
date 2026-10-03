@@ -107,7 +107,13 @@ them (`probe_jobs.py`); the Lab's Probe parts button runs it (`VehicleLabWindow.
 
 **Order, by payoff per effort**: (1) `inspect_fbx` → an in-process rig — done 2026-10-03 for `.glb`/`.gltf` (35 of the
 registry's 37 models; `HafModelRig`, the picker plays the reader's clips in Unity's own skinning; the one FBX entry
-and `.blend` sources keep `inspect_fbx.py`); (2) reduce/`prep_model` → a C# quadric decimator (1–2 weeks, golden-verified);
+and `.blend` sources keep `inspect_fbx.py`); (2) reduce/`prep_model` → an EXACT port of Blender's Decimate collapse
+(decided 2026-10-03 over an independent decimator: equal costs are ordered by Blender's edge and link order, and exact
+mirror geometry makes ties real — the Zumwalt 95 %, the submarine 78 %, instanced spokes); in milestones: **(a) the
+importer's mesh layout** — vertex order, `mesh_calc_edges`' bucketed insertion-ordered edge list, validate — done
+2026-10-03 (`BlenderMesh.cs`, `tools/decimate_drill.sh`: 137 files, 6,912 objects, 21.1 million edges equal to
+Blender's, in order); (b) BMesh's disk and radial link order through collapse; (c) the collapse itself (quadrics, the heap,
+the costs, UV and normal interpolation); 2–3 weeks in all;
 (3) `deploy_convert` (3–4 weeks; the fuse already walks parts and welds); (4) `rig_anim` (3–4 weeks); (5)
 `vehicle_rig` (4–8 weeks; the Lab already computes much of the geometry in C#).
 

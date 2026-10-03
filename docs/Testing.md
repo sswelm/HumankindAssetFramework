@@ -131,6 +131,15 @@ part, with a per-axis scale on a turned part, on a missing name, with a zero sca
 and one per saved recipe that sets any of these, with the recipe's exact arguments formatted as the Lab formats them
 (`Tests/test_probe_jobs.py` holds the formatting to the Lab's). Every job's MATRIX and VERTEX rows are held bit for bit
 like a file's; `recipe_check.py` judges a recipe with inputs on its job's rows — its B_ parts and placed parts included.
+**`tools/decimate_drill.sh`** (step 5 milestone a, 2026-10-03: the exact port of Blender's Decimate begins with the ORDER its
+heap sees) compiles `editor/BlenderMesh.cs` with Unity's Roslyn and lays out every fixture, registry and recipe mesh as
+Blender's importer and `mesh_calc_edges` do - each primitive's used indices ascending, the line primitives' pairs first in their
+own orientation, then per face per corner the (previous, current) pair as (low, high), deduplicated in insertion order inside
+1 bucket (under 1,000 faces) or 8 (the lower vertex index masked; the machine's thread count as a power of two, at most 8),
+then validate's removals - and Blender imports a sample in one process and dumps `mesh.edges`; the lists are compared per
+object, exact (hash of the whole list, counts, the first edges on a mismatch). `FULL=1` on 2026-10-03: 137 files, 6,912 mesh
+objects, 21,137,582 edges equal. `BlenderMeshTests` hold each rule on a hand-made case.
+
 **The Clip Range picker's in-process rig** (step 4, 2026-10-03): `HafUnityFrameTests` hold the preview frame's arithmetic
 without Unity — the X mirror's conjugation of rotations, matrices and matrix nodes; Unity's skinning formula fed the rig's
 matrices (the joints' world matrices, the inverse bind matrices, the vertex, all mirrored) against the reader's posed vertex;
