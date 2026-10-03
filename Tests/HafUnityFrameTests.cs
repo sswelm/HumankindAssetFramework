@@ -87,4 +87,33 @@ public class HafUnityFrameTests
         var names = BlenderNames.TrackNames(m);
         Assert.Equal(new[] { "Walk", "Anim_1", "Walk.001", "Walk.002", new string('x', 63), new string('x', 59) + ".001" }, names);
     }
+
+    [Fact]
+    public void Track_names_truncate_whole_Unicode_characters_at_Blenders_byte_limit()
+    {
+        string rocket = char.ConvertFromUtf32(0x1F680);
+        string longName = string.Concat(Enumerable.Repeat(rocket, 40));
+        var m = new HafModel();
+        m.Animations.Add(new HafAnimation { Name = longName });
+        m.Animations.Add(new HafAnimation { Name = longName });
+        m.Animations.Add(new HafAnimation { Name = longName });
+        var names = BlenderNames.TrackNames(m);
+        Assert.Equal(new[] { string.Concat(Enumerable.Repeat(rocket, 15)),
+            string.Concat(Enumerable.Repeat(rocket, 14)) + ".001",
+            string.Concat(Enumerable.Repeat(rocket, 14)) + ".002" }, names);
+        foreach (string name in names)
+        {
+            Assert.True(new System.Text.UTF8Encoding(false, true).GetByteCount(name) <= 63);
+            Assert.False(char.IsHighSurrogate(name[name.Length - 1]));
+        }
+    }
+
+    [Fact]
+    public void Track_names_reserve_suffix_bytes_for_multibyte_names()
+    {
+        var m = new HafModel();
+        m.Animations.Add(new HafAnimation { Name = new string('\u65E5', 40) });
+        m.Animations.Add(new HafAnimation { Name = new string('\u65E5', 40) });
+        Assert.Equal(new[] { new string('\u65E5', 21), new string('\u65E5', 19) + ".001" }, BlenderNames.TrackNames(m));
+    }
 }

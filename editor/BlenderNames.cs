@@ -253,7 +253,12 @@ public static class BlenderNames
             while (true)
             {
                 string name = stem + suffix;
-                if (System.Text.Encoding.UTF8.GetByteCount(name) > 63) { stem = stem.Substring(0, stem.Length - 1); continue; }
+                if (System.Text.Encoding.UTF8.GetByteCount(name) > 63)
+                {
+                    int end = stem.Length - 1;
+                    if (end > 0 && char.IsLowSurrogate(stem[end]) && char.IsHighSurrogate(stem[end - 1])) end--;
+                    stem = stem.Substring(0, end); continue;
+                }
                 if (!taken.Contains(name)) { names[i] = name; taken.Add(name); break; }
                 suffix = "." + cntr.ToString("000"); cntr++;
             }
@@ -261,7 +266,13 @@ public static class BlenderNames
         return names;
     }
 
-    static string Cut(string s, int maxChars) => s.Length <= maxChars ? s : s.Substring(0, maxChars);
+    static string Cut(string s, int maxChars)
+    {
+        if (s.Length <= maxChars) return s;
+        int end = maxChars;
+        if (end > 0 && char.IsHighSurrogate(s[end - 1]) && char.IsLowSurrogate(s[end])) end--;
+        return s.Substring(0, end);
+    }
 
     static string Key(int node) => node.ToString();
     static int Index(string id) => int.TryParse(id, out int i) ? i : -1;

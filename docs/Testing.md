@@ -136,7 +136,12 @@ without Unity — the X mirror's conjugation of rotations, matrices and matrix n
 matrices (the joints' world matrices, the inverse bind matrices, the vertex, all mirrored) against the reader's posed vertex;
 Blender's track names. The Bake Tests row *Does the glTF clip player match the reader?* (`HafModelRigHeadlessTest`, also in the
 headless lane) builds the rig for every registry model and fixture in Unity, samples each clip at its first and middle frame,
-bakes every skinned mesh through Unity's own skinning and sets every vertex beside the reader's pose within 1e-4 of the extent.
+bakes every skinned mesh through Unity's own skinning and sets every vertex beside the reader's pose within
+`1e-4 * max(1e-3, largest absolute coordinate) + 1e-4`, calculated separately for each pose.
+The `clip_switch` fixture holds restoration of both other nodes and other properties
+when switching clips; `path_clip` holds animation binding for node names containing `/`; `unicode_clip` holds the actual
+Unity clip names against Blender's whole-character, 63-byte truncation; `far_clip` holds independent tolerances for a
+distant pose and a later pose at the origin. Unit tests also cover multibyte track names and collision suffixes.
 What no drill outside Unity can hold is the PREVIEW the Lab builds from the probe's parts: the Bake Tests row *Does the
 in-process probe preview match the Blender preview?* (`VehicleProbePreviewGateTest`, no Blender needed) sets it beside
 Unity's import of the preview FBX the last Blender probe left for the same source, part for part by name — bounds centre

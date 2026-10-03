@@ -36,7 +36,8 @@ public static class HafModelRig
         var tr = new Transform[m.Nodes.Count]; r.Nodes = tr; r.MeshOf = new Transform[m.Nodes.Count];
         for (int i = 0; i < m.Nodes.Count; i++)
         {
-            var go = new GameObject((m.Nodes[i].Name.Length > 0 ? m.Nodes[i].Name : "node") + " #" + i) { hideFlags = HideFlags.HideAndDontSave };
+            // '/' separates AnimationClip paths. The index keeps names unique after sanitizing that separator.
+            var go = new GameObject((m.Nodes[i].Name.Length > 0 ? m.Nodes[i].Name.Replace('/', '_') : "node") + " #" + i) { hideFlags = HideFlags.HideAndDontSave };
             tr[i] = go.transform;
         }
         for (int i = 0; i < m.Nodes.Count; i++)
@@ -91,6 +92,15 @@ public static class HafModelRig
         // ---- the clips: one legacy clip per animation, every animated node's position, rotation and scale keyed at every frame
         var names = BlenderNames.TrackNames(m);
         var clips = new List<AnimationClip>();
+        // Every clip must restore properties another clip animates. SampleAnimation changes only its bound curves;
+        // without these defaults, selecting a second clip leaves the first clip's pose on untouched nodes/properties.
+        var animated = new Dictionary<int, int>(); // per node: translation=1, rotation=2, scale=4
+        foreach (var a in m.Animations) foreach (var ch in a.Channels)
+        {
+            if (ch.Node < 0 || ch.Node >= m.Nodes.Count || ch.Sampler < 0 || ch.Sampler >= a.Samplers.Count) continue;
+            int bit = ch.Path == "translation" ? 1 : ch.Path == "rotation" ? 2 : ch.Path == "scale" ? 4 : 0;
+            if (bit != 0) animated[ch.Node] = (animated.TryGetValue(ch.Node, out int mask) ? mask : 0) | bit;
+        }
         for (int ai = 0; ai < m.Animations.Count; ai++)
         {
             var anim = m.Animations[ai];
@@ -98,6 +108,7 @@ public static class HafModelRig
             assets.Add(clip);
             int frames = Mathf.Max(1, Mathf.RoundToInt((float)(anim.Duration * fps)));
             var byNode = new Dictionary<int, (HafSampler t, HafSampler r, HafSampler s)>();
+            foreach (int node in animated.Keys) byNode[node] = (null, null, null);
             foreach (var ch in anim.Channels)
             {
                 if (ch.Node < 0 || ch.Node >= m.Nodes.Count || ch.Sampler < 0 || ch.Sampler >= anim.Samplers.Count) continue;
@@ -112,7 +123,7 @@ public static class HafModelRig
                 HafUnityFrame.LocalTrs(m.Nodes[kv.Key], out var t0, out var q0, out var s0);
                 var keys = new List<Keyframe>[10]; for (int k = 0; k < 10; k++) keys[k] = new List<Keyframe>(frames + 1);
                 double[] prevQ = null;
-                for (int f = 0; f <= frames; f++)
+                for (int f = 0; (kv.Value.t != null || kv.Value.r != null || kv.Value.s != null) && f <= frames; f++)
                 {
                     double time = f / (double)fps;
                     var tv = kv.Value.t != null ? HafTransforms.Sample(kv.Value.t, time) : null;
@@ -132,10 +143,13 @@ public static class HafModelRig
                 string[] props = { "localPosition.x", "localPosition.y", "localPosition.z", "localRotation.x", "localRotation.y", "localRotation.z", "localRotation.w", "localScale.x", "localScale.y", "localScale.z" };
                 for (int k = 0; k < 10; k++)
                 {
-                    if (k < 3 && kv.Value.t == null) continue;
-                    if (k >= 3 && k < 7 && kv.Value.r == null) continue;
-                    if (k >= 7 && kv.Value.s == null) continue;
-                    clip.SetCurve(path, typeof(Transform), props[k], Linear(keys[k]));
+                    int bit = k < 3 ? 1 : k < 7 ? 2 : 4;
+                    if ((animated[kv.Key] & bit) == 0) continue;
+                    var sampler = k < 3 ? kv.Value.t : k < 7 ? kv.Value.r : kv.Value.s;
+                    float rest = (float)(k < 3 ? t0[k] : k < 7 ? q0[k - 3] : s0[k - 7]);
+                    var curve = sampler != null ? Linear(keys[k])
+                        : AnimationCurve.Constant(0f, frames / fps, rest);
+                    clip.SetCurve(path, typeof(Transform), props[k], curve);
                 }
             }
             clip.EnsureQuaternionContinuity();

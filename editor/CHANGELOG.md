@@ -5,6 +5,12 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Clip player review fixes:** switching clips restores animated properties that the selected clip does not drive,
+  including properties on other nodes. Slashes in node names no longer break Unity animation paths, and long Unicode
+  track names truncate at whole characters within Blender's 63-byte limit. The Unity comparison uses each pose's own
+  error and extent, so rounding at a distant pose cannot fail a later pose at the origin. Four regression fixtures
+  cover these cases; the Unity gate also checks the names of the actual AnimationClips.
+
 - **The Clip Range picker plays a glTF in-process — step 4 of replacing Blender.** Opening the ▶ picker on a `.glb`/`.gltf`
   model no longer runs Blender to convert the clips to inspection FBXs for Unity to import: the model is read by the GLB
   reader and built as a LIVE Unity rig (`HafModelRig`) — the node hierarchy, every skinned mesh as a SkinnedMeshRenderer

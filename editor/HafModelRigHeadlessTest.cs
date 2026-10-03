@@ -48,7 +48,8 @@ public static class HafModelRigHeadlessTest
                 if (m.Meshes.Any(x => x.Primitives.Any(p => p.MorphTargets > 0))) { s.skip++; body.AppendLine($"SKIP: {label}: morph targets - the picker uses Blender for it"); continue; }
                 var rig = HafModelRig.Build(m, assets, 24f);
                 var expectedNames = BlenderNames.TrackNames(m);
-                if (!rig.ClipNames.SequenceEqual(expectedNames)) { s.fail++; body.AppendLine($"FAIL: {label}: clip names {string.Join(", ", rig.ClipNames)} are not Blender's track names {string.Join(", ", expectedNames)}"); continue; }
+                if (!rig.ClipNames.SequenceEqual(expectedNames) || !rig.Clips.Select(c => c.name).SequenceEqual(expectedNames))
+                { s.fail++; body.AppendLine($"FAIL: {label}: clip names {string.Join(", ", rig.Clips.Select(c => c.name))} are not Blender's track names {string.Join(", ", expectedNames)}"); continue; }
                 // the poses to judge: the static transforms when there is no clip; else each clip at frame 0 and at its middle frame
                 var poses = new List<(string what, int anim, double time)>();
                 if (m.Animations.Count == 0) poses.Add(("static", -1, 0));
@@ -57,9 +58,10 @@ public static class HafModelRigHeadlessTest
                     int frames = Mathf.Max(1, Mathf.RoundToInt((float)(m.Animations[ai].Duration * 24f)));
                     poses.Add(($"'{rig.ClipNames[ai]}' frame 0", ai, 0)); poses.Add(($"'{rig.ClipNames[ai]}' frame {frames / 2}", ai, (frames / 2) / 24.0));
                 }
-                double worst = 0; int judged = 0; string worstWhere = "";
+                double worst = 0; int judged = 0;
                 foreach (var (what, ai, time) in poses)
                 {
+                    double poseWorst = 0; string worstWhere = "";
                     if (ai >= 0) rig.Clips[ai].SampleAnimation(rig.Root, (float)time);
                     // the reader's pose as the rig can hold it: an animated channel's value, else the node's local matrix with its rotation
                     // normalized and a matrix node decomposed (HafUnityFrame.ReaderLocal - a Transform holds no shear, Blender drops it too)
@@ -87,14 +89,17 @@ public static class HafModelRigHeadlessTest
                                 double ex = -expect[v * 3], ey = expect[v * 3 + 1], ez = expect[v * 3 + 2];   // the preview frame: X mirrored
                                 ext = Math.Max(ext, Math.Max(Math.Abs(ex), Math.Max(Math.Abs(ey), Math.Abs(ez))));
                                 double d = Math.Sqrt((a.x - ex) * (a.x - ex) + (a.y - ey) * (a.y - ey) + (a.z - ez) * (a.z - ez));
-                                if (d > worst) { worst = d; worstWhere = $"{what}, node {ni} '{node.Name}' vertex {v}: rig ({a.x:0.####}, {a.y:0.####}, {a.z:0.####}) vs reader ({ex:0.####}, {ey:0.####}, {ez:0.####})"; }
+                                if (d > poseWorst) { poseWorst = d; worstWhere = $"{what}, node {ni} '{node.Name}' vertex {v}: rig ({a.x:0.####}, {a.y:0.####}, {a.z:0.####}) vs reader ({ex:0.####}, {ey:0.####}, {ez:0.####})"; }
                                 judged++;
                             }
                             at += p.VertexCount;
                         }
                     }
                     double tol = 1e-4 * ext + 1e-4;
-                    if (worst > tol) { s.fail++; body.AppendLine($"FAIL: {label}: a vertex is {worst:0.#####} off the reader's pose (tolerance {tol:0.#####}) - {worstWhere}"); goto next; }
+                    // A distant pose can have more float32 rounding and a larger tolerance. Do not compare its error
+                    // against a later pose's smaller tolerance; retain the file-wide maximum only for reporting.
+                    if (poseWorst > tol) { s.fail++; body.AppendLine($"FAIL: {label}: a vertex is {poseWorst:0.#####} off the reader's pose (tolerance {tol:0.#####}) - {worstWhere}"); goto next; }
+                    worst = Math.Max(worst, poseWorst);
                 }
                 totalVerts += judged; worstAll = Math.Max(worstAll, worst);
                 s.pass++; body.AppendLine($"PASS: {label}: {rig.Meshes} mesh(es) ({rig.SkinnedMeshes} skinned), {rig.Clips.Length} clip(s), {judged} vertex samples within {worst:0.#####} of the reader's pose");
