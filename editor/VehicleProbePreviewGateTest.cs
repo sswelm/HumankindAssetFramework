@@ -1,8 +1,8 @@
 // VehicleProbePreviewGateTest.cs - the in-process probe PREVIEW against the Blender preview FBX Unity imported for the same source
 // (2026-10-03, step 3d of replacing Blender; run via Tools > HAF > Bake Tests). The C# probe's ROWS are held to Blender's own
 // probe by tools/vehicle_probe_drill.sh; what no drill outside Unity can hold is the preview: the FRAME the parts land in
-// (Blender's (X, Y, Z) drawn as Unity's (X, Z, Y) with the faces rewound - what the FBX exporter and Unity's importer gave the
-// old preview), the FACING of the faces, and that every Unity object the preview makes is destroyed with it. The oracle is
+// (Blender's (X, Y, Z) drawn as Unity's (-X, Z, -Y) with the faces rewound - what the FBX exporter and Unity's importer gave
+// the old preview), the FACING of the faces, and that every Unity object the preview makes is destroyed with it. The oracle is
 // already in the project: every source the Lab ever probed through Blender left <source>_probe.fbx under
 // Assets/FactorySource/VehicleLab, imported by Unity's own FBX importer. For every saved recipe whose source is a .glb/.gltf and
 // whose preview FBX exists, the in-process preview is built for the recipe's inputs and set beside the imported FBX part for part
@@ -88,7 +88,7 @@ public static class VehicleProbePreviewGateTest
                 if (meshesAfter != meshesBefore) { s.fail++; body.AppendLine($"FAIL {name}: the in-process preview leaked {meshesAfter - meshesBefore} Unity mesh(es)"); }
             }
         }
-        body.Insert(0, $"{judged} recipes judged, {matchedTotal} parts matched against Unity's import of the Blender preview FBX; frame Blender (X, Y, Z) = Unity (X, Z, Y), faces rewound\n");
+        body.Insert(0, $"{judged} recipes judged, {matchedTotal} parts matched against Unity's import of the Blender preview FBX; frame Blender (X, Y, Z) = Unity (-X, Z, -Y), faces rewound\n");
         s.body = body.ToString();
         return s;
     }

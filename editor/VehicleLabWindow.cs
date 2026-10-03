@@ -616,7 +616,7 @@ public class VehicleLabWindow : EditorWindow
         using (new EditorGUILayout.HorizontalScope())
         {
             using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(srcFile) || !File.Exists(srcFile)))
-                if (GUILayout.Button(new GUIContent("Probe parts", "Lists the model's mesh parts (a single combined mesh is split into loose parts) - a .glb/.gltf source in-process in a moment, an FBX/OBJ/.blend through headless Blender. Roles are auto-guessed from names."), GUILayout.Height(24)))
+                if (GUILayout.Button(new GUIContent("Probe parts", "Lists the model's mesh parts (a single combined mesh is split into loose parts). Supported .glb/.gltf sources run in-process; other formats and unsupported geometry use headless Blender. Roles are auto-guessed from names."), GUILayout.Height(24)))
                     Probe();
             using (new EditorGUI.DisabledScope(parts.Count == 0 && boneParts.Count == 0))
                 if (GUILayout.Button(new GUIContent("Save", "Save the whole configuration (source, output, roles, knobs) to the current recipe file — no dialog, no rename: the loaded recipe (or, for a new session, one named after the source model) is written in place under " + RecipesDir + " and appears in the Edit-existing dropdown above."), GUILayout.Width(70), GUILayout.Height(24)))
@@ -1496,11 +1496,17 @@ public class VehicleLabWindow : EditorWindow
         // THE PROBE IN C# for a .glb/.gltf source (2026-10-03, step 3d of replacing Blender; ProbeInProcess below): the same rows,
         // in-process, and a preview built from the probe's own parts. FBX/OBJ/.blend sources keep the Blender probe and its FBX.
         IEnumerable<string> rowLines; GameObject builtPreview = null; List<UnityEngine.Object> builtObjects = null;
-        if (CanProbeInProcess)
+        bool inProcess = CanProbeInProcess;
+        List<string> nativeRows = null;
+        if (inProcess)
         {
-            if (!ProbeInProcess(out var rows, out builtPreview, out builtObjects)) return;   // failed: session intact, error already in status/Console
-            rowLines = rows;
+            if (!ProbeInProcess(out nativeRows, out builtPreview, out builtObjects, out bool useBlender))
+            {
+                if (!useBlender) return;   // failed: session intact, error already in status/Console
+                inProcess = false;
+            }
         }
+        if (inProcess) rowLines = nativeRows;
         else
         {
             if (!RunBlender($"probe \"{srcFile}\" \"{prevFull}\"{Merge2Arg()}{BrightArg()}{ProbeRotArg()}{PartTxArg(projRoot, prevDir, Path.GetFileNameWithoutExtension(srcFile))}", out string stdout)) return;   // failed run: session intact, error already in status/Console
@@ -2524,9 +2530,9 @@ public class VehicleLabWindow : EditorWindow
     HafModel[] PreviewModels(VehicleProbe.Input input) => input.Second != null ? new[] { input.Model, input.Second } : new[] { input.Model };
     float[] PreviewBrightness(VehicleProbe.Input input) => new[] { model1Bright, input.Second != null ? model2Bright : 1f };
 
-    bool ProbeInProcess(out List<string> rows, out GameObject preview, out List<UnityEngine.Object> previewObjects)
+    bool ProbeInProcess(out List<string> rows, out GameObject preview, out List<UnityEngine.Object> previewObjects, out bool useBlender)
     {
-        rows = null; preview = null; previewObjects = new List<UnityEngine.Object>();
+        rows = null; preview = null; previewObjects = new List<UnityEngine.Object>(); useBlender = false;
         var sw = System.Diagnostics.Stopwatch.StartNew();
         // the progress bar moves with the probe's stages (the Blender path's bar stood still for its 25 s): reading, then what
         // VehicleProbe.Run reports as it goes, then the preview
@@ -2537,6 +2543,9 @@ public class VehicleLabWindow : EditorWindow
             Bar("reading " + Path.GetFileName(srcFile) + (string.IsNullOrWhiteSpace(srcFile2) ? "" : " and " + Path.GetFileName(srcFile2.Trim())));
             if (!BuildProbeInput(out var input, out string error))
             { status = "VEHICLE ERROR: " + error; Debug.LogError("[VehicleLab] probe: " + error); return false; }   // the script's own refusals, word for word
+            string fallback = input.InProcessFallbackReason();
+            if (fallback != null)
+            { useBlender = true; Debug.Log("[VehicleLab] probe: using Blender because " + fallback + "."); return false; }
             input.Progress = Bar;
             var r = VehicleProbe.Run(input);
             rows = r.Notes.Select(n => "VEHICLE " + n).Concat(r.RigBones.Select(b => b.Row)).Concat(r.Parts.Select(p => p.Row)).ToList();
@@ -2549,8 +2558,12 @@ public class VehicleLabWindow : EditorWindow
         }
         catch (Exception e)
         {
-            status = "Probe failed: " + e.Message;
-            Debug.LogError("[VehicleLab] probe (C#, in-process) failed on " + srcFile + "\n" + e);
+            // The C# reader deliberately refuses extensions it cannot interpret (e.g. Draco). Blender can still
+            // import those glTFs; choosing the new fast path must not remove the old format support.
+            if (e is InvalidDataException || e is NotSupportedException)
+            { useBlender = true; Debug.Log("[VehicleLab] probe: using Blender because the C# reader cannot handle this input: " + e.Message); }
+            else
+            { status = "Probe failed: " + e.Message; Debug.LogError("[VehicleLab] probe (C#, in-process) failed on " + srcFile + "\n" + e); }
             if (preview != null) { DestroyImmediate(preview); preview = null; }
             foreach (var o in previewObjects) if (o != null) DestroyImmediate(o);
             previewObjects.Clear();
@@ -2573,6 +2586,8 @@ public class VehicleLabWindow : EditorWindow
             if (!w.recipeReadThisSession) { error = w.status; return false; }
             if (!w.CanProbeInProcess) { error = "an FBX/OBJ/.blend source or second model: Blender's probe, not this one"; return false; }
             if (!w.BuildProbeInput(out var input, out error)) return false;
+            string fallback = input.InProcessFallbackReason();
+            if (fallback != null) { error = "the Lab would use Blender for this recipe: " + fallback; return false; }
             result = VehicleProbe.Run(input);
             preview = VehicleProbePreview.Build(result, w.PreviewModels(input), w.PreviewBrightness(input), assets);
             return true;

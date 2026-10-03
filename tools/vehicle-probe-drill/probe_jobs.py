@@ -15,23 +15,26 @@ Two kinds of job:
     (merge2: five decimals, the legacy uniform scale times the per-axis one; parttx: four decimals; proberot: two). These
     are the probe's real inputs: recipe_check.py judges the stored B_ and placed parts against these rows.
 """
-import glob, json, os, struct, sys
-from decimal import Decimal, ROUND_HALF_UP
+import glob, json, math, os, struct, sys
+from decimal import Decimal, ROUND_HALF_UP, localcontext
 sys.stdout.reconfigure(encoding="utf-8")
 
 
 def fmt(v, places):
-    """C#'s float.ToString("0.#####") (places decimals) on .NET Framework / Unity's Mono, measured 2026-10-03: the float32
-    value at 7 significant digits, then rounded half AWAY from zero on that decimal (1.03125 -> 1.0313; printf's half-even on
-    the binary gave 1.0312), trailing zeros stripped, never "-0"."""
-    f = struct.unpack("<f", struct.pack("<f", float(v)))[0]
-    d = Decimal("%.7g" % abs(f)).quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
-    s = format(d, "f")
+    """C#'s ToString("0.#####") (places decimals): round half away from zero, trailing zeros stripped, never "-0"."""
+    # The Lab stores Vector3 fields as System.Single. Mono/.NET Framework's custom format first uses its
+    # seven-digit decimal buffer, then rounds midpoints away from zero. Python's %f rounds ties to even.
+    v = struct.unpack("<f", struct.pack("<f", float(v)))[0]
+    if not math.isfinite(v):
+        return "NaN" if math.isnan(v) else ("-Infinity" if v < 0 else "Infinity")
+    with localcontext() as ctx:
+        ctx.prec = 60
+        s = format(Decimal(format(abs(v), ".7g")).quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP), "f")
     if "." in s:
         s = s.rstrip("0").rstrip(".")
     if s in ("", "0"):
         return "0"
-    return ("-" if f < 0 else "") + s
+    return ("-" if v < 0 else "") + s
 
 
 def positive(v):
@@ -76,6 +79,9 @@ def fixture_jobs(fx):
         jobs.append({"key": key_of(nested, "placed"), "file": nested, "parttx": ["Carrier|0,0,2|1,1,1", "Turned|0,0,0|2,1,1", "NoSuchPart|1,1,1|1,1,1", "Plain|0.25,0,0|0,1,1"]})
     if os.path.isfile(split):
         jobs.append({"key": key_of(split, "placed"), "file": split, "parttx": ["Loose.001|0,1,0|0.5,0.5,0.5"]})
+    shear = os.path.join(fx, "placement_shear.glb").replace("\\", "/")
+    if os.path.isfile(shear):
+        jobs.append({"key": key_of(shear, "placed"), "file": shear, "parttx": ["Carrier|0,0,2|1,1,1"]})
     if os.path.isfile(io_):
         jobs.append({"key": key_of(io_, "proberot"), "file": io_, "proberot": "0,0,90"})
         jobs.append({"key": key_of(io_, "proberot-x"), "file": io_, "proberot": "90,0,0"})
@@ -88,7 +94,8 @@ def recipe_jobs(project):
         return jobs
     for f in sorted(glob.glob(os.path.join(project, "Assets", "FactorySource", "VehicleLab", "Recipes", "*.json"))):
         try:
-            r = json.load(open(f, encoding="utf-8-sig"))
+            with open(f, encoding="utf-8-sig") as recipe:
+                r = json.load(recipe)
         except Exception:
             continue
         src = (r.get("srcFile") or "").strip()

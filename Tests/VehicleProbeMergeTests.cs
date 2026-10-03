@@ -9,6 +9,84 @@ using Xunit;
 /// placement fixtures and on the recipes that set these inputs (tools/vehicle-probe-drill/probe_jobs.py).</summary>
 public class VehicleProbeMergeTests
 {
+    static HafModel BoxModel()
+    {
+        var m = new HafModel(); var mesh = new HafMesh();
+        mesh.Primitives.Add(new HafPrimitive { VertexCount = 8,
+            Positions = new float[] { -1,-1,-1, 1,-1,-1, -1,1,-1, 1,1,-1, -1,-1,1, 1,-1,1, -1,1,1, 1,1,1 },
+            Indices = new[] { 0,2,1, 1,2,3, 4,5,6, 5,7,6, 0,1,5, 0,5,4, 2,6,7, 2,7,3, 0,4,6, 0,6,2, 1,3,7, 1,7,5 } });
+        m.Meshes.Add(mesh); return m;
+    }
+
+    [Fact]
+    public void Detaching_a_sheared_child_refreshes_its_box_and_its_descendants_boxes()
+    {
+        var m = BoxModel();
+        m.Nodes.Add(new HafNode { Name = "Carrier", Mesh = 0, Scale = new double[] { 2,1,1 } }); m.Nodes[0].Children.Add(1);
+        m.Nodes.Add(new HafNode { Name = "Child", Mesh = 0, Parent = 0,
+            Rotation = new[] { 0, Math.Sin(Math.PI / 8), 0, Math.Cos(Math.PI / 8) } }); m.Nodes[1].Children.Add(2);
+        m.Nodes.Add(new HafNode { Name = "Grand", Mesh = 0, Parent = 1, Translation = new double[] { 0,0,3 } });
+        var input = new VehicleProbe.Input { Model = m }; input.AddPlacementLines(new[] { "Carrier|0,0,2|1,1,1" });
+        var r = VehicleProbe.Run(input);
+        // Blender 5.1.2: the child's matrix_world assignment removes its shear. World boxes follow the rebuilt matrix.
+        Assert.Equal("PART|Child|8|0.0000,0.0000,0.0000|4.4711,4.4711,2.0000|1||0", r.Parts.Single(p => p.Name == "Child").Row);
+        Assert.Equal("PART|Grand|8|3.2801,-3.4265,0.0000|4.4711,4.4711,2.0000|1||0", r.Parts.Single(p => p.Name == "Grand").Row);
+    }
+
+    [Fact]
+    public void Preview_surface_normals_stay_perpendicular_under_nonuniform_scale()
+    {
+        var m = new HafModel(); var mesh = new HafMesh(); float n = F(1 / Math.Sqrt(2));
+        mesh.Primitives.Add(new HafPrimitive { VertexCount = 3, Positions = new float[] { 0,0,0, 1,0,1, 0,1,0 },
+            Normals = new[] { -n,0,n, -n,0,n, -n,0,n } });
+        m.Meshes.Add(mesh); m.Nodes.Add(new HafNode { Name = "Panel", Mesh = 0, Scale = new double[] { 2,1,1 } });
+        var data = Assert.Single(VehicleProbe.Run(m).Parts).Mesh;
+        float dot = 0, rayDot = 0;
+        for (int i = 0; i < 3; i++)
+        {
+            float tangent = data.World[3 + i] - data.World[i];
+            dot += tangent * data.PreviewNormal[i]; rayDot += tangent * data.Normal[i];
+        }
+        Assert.InRange(Math.Abs(dot), 0f, 0.0002f);
+        Assert.True(Math.Abs(rayDot) > 1f); // the script's visibility ray intentionally follows the forward matrix
+    }
+
+    [Fact]
+    public void Unsupported_morph_and_animated_second_models_keep_the_Blender_path()
+    {
+        var m = BoxModel(); m.Nodes.Add(new HafNode { Mesh = 0 });
+        var input = new VehicleProbe.Input { Model = m };
+        Assert.Null(input.InProcessFallbackReason());
+        m.Meshes[0].Primitives[0].MorphTargets = 1;
+        Assert.Contains("morph targets", input.InProcessFallbackReason());
+        m.Meshes[0].Primitives[0].MorphTargets = 0;
+        var second = BoxModel(); input.Second = second;
+        Assert.Null(input.InProcessFallbackReason());
+        second.Animations.Add(new HafAnimation());
+        Assert.Contains("second model is animated", input.InProcessFallbackReason());
+    }
+
+    [Fact]
+    public void Bone_parented_and_evaluated_skinned_meshes_keep_the_Blender_path()
+    {
+        var m = BoxModel();
+        m.Nodes.Add(new HafNode { Name = "Rig" }); m.Nodes[0].Children.Add(1);
+        m.Nodes.Add(new HafNode { Name = "Joint", Parent = 0 }); m.Nodes[1].Children.Add(2);
+        m.Nodes.Add(new HafNode { Name = "BoneMesh", Mesh = 0, Parent = 1 });
+        m.Nodes.Add(new HafNode { Name = "SkinMesh", Mesh = 0, Skin = 0 });
+        m.Skins.Add(new HafSkin { Skeleton = 0, Joints = new[] { 1 } });
+        var input = new VehicleProbe.Input { Model = m };
+        Assert.Contains("parented to a bone", input.InProcessFallbackReason());
+        m.Nodes[2].Mesh = -1;
+        var primitive = m.Meshes[0].Primitives[0]; primitive.Joints = new ushort[32];
+        primitive.Weights = Enumerable.Range(0, 32).Select(i => i % 4 == 0 ? 1f : 0f).ToArray();
+        Assert.Null(input.InProcessFallbackReason());
+        input.AddPlacementLines(new[] { "SkinMesh|0,0,1|1,1,1" });
+        Assert.Contains("evaluated pose", input.InProcessFallbackReason());
+        input.Placements.Clear(); m.Animations.Add(new HafAnimation());
+        Assert.Contains("evaluated pose", input.InProcessFallbackReason());
+    }
+
     static float F(double x) => (float)x;
     static float[] Row(params double[] v) => v.Select(F).ToArray();
     static double Rad(double deg) => deg * (Math.PI / 180.0);

@@ -30,6 +30,14 @@ class ProbeJobsTests(unittest.TestCase):
         self.assertEqual("0.0001", J.fmt(0.00005, 4))
         self.assertEqual("0", J.fmt(0.00005, 2))
 
+    def test_midpoint_rounding_and_single_precision_match_the_labs_runtime(self):
+        # Measured through Unity 2021.3's float.ToString(custom format, InvariantCulture).
+        self.assertEqual("0.0313", J.fmt(0.03125, 4))
+        self.assertEqual("-0.0313", J.fmt(-0.03125, 4))
+        self.assertEqual("1.3", J.fmt(1.25, 1))
+        self.assertEqual("0.00002", J.fmt(0.000015, 5))
+        self.assertEqual("1.23445", J.fmt(1.234445, 5))
+
     def test_merge2_text_multiplies_the_legacy_uniform_scale_and_makes_bad_components_1(self):
         text = J.merge2_text("D:\\x\\b.glb", {"x": 0.5, "y": 0, "z": 2}, {"x": 0, "y": 0, "z": 30}, 2.0, {"x": 1.5, "y": 1, "z": 0})
         self.assertEqual("D:/x/b.glb|0.5,0,2|0,0,30|3,2,2", text)   # z: 0 is not positive -> 1, times the legacy 2

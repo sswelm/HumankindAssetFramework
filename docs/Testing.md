@@ -124,7 +124,7 @@ fixture holds a leaning and a flat quad whose vertex normals are read off Blende
 **Since 2026-10-03 (step 3d) the drill also runs JOBS** — probes with the Lab's other inputs, a second model (`merge2=`),
 per-part placements (`parttx=`) and an orientation (`proberot=`), from one JSON both sides read
 (`tools/vehicle-probe-drill/probe_jobs.py`, `ProbeDrill.cs @jobs.json`, `blender_probe_many.py @jobs.json`): ten on
-the `second_model_a/b/c`, `placement_nested`, `placement_split` and `insideout` fixtures (a turned second-model root
+the `second_model_a/b/c`, `placement_nested`, `placement_split`, `placement_shear` and `insideout` fixtures (a turned second-model root
 with a per-axis scale, a mirrored node, leaning normals, a skinned part, a bone shape, a clashing name, a single-mesh
 second model's split, a first model's split beside a second model and both splitting at once, placements on a parent with children, on a loose
 part, with a per-axis scale on a turned part, on a missing name, with a zero scale; the orientation about Z and about X),
@@ -135,6 +135,17 @@ What no drill outside Unity can hold is the PREVIEW the Lab builds from the prob
 in-process probe preview match the Blender preview?* (`VehicleProbePreviewGateTest`, no Blender needed) sets it beside
 Unity's import of the preview FBX the last Blender probe left for the same source, part for part by name — bounds centre
 and size within 1e-3 of the extent, the facing of the faces — and fails on a leaked Unity mesh.
+The sheared-child job holds the bounds of children and descendants after detachment. The Lab routes geometry the
+kernel does not yet evaluate (morph targets, bone-parented meshes, animated second models and animated/placed
+first-model skinned meshes) through Blender; `VehicleProbeMergeTests` holds this routing policy.
+
+**`VehicleProbePreviewHeadlessTest.Run`** runs in Unity with `-batchmode -nographics -executeMethod
+VehicleProbePreviewHeadlessTest.Run`. It checks the preview frame against coordinates measured from Blender's FBX
+export imported in Unity, normals perpendicular to a nonuniformly scaled panel, and destruction of both complete
+and partially built previews. Run it in a Unity project with the HAF editor package installed; it exits nonzero
+if an invariant fails. The probe comparator's normal rays retain Blender's forward-matrix arithmetic; rendered
+surface normals use the inverse transpose.
+
 A file too large for Unity's 32-bit standalone Mono is probed on the 64-bit .NET runtime instead, and the drill says so. The names come from a port of the
 importer's own tree construction (`compute_vnodes`: creation depth-first from the parentless nodes in index order,
 armatures at the joints' deepest common ancestor, skinned meshes moved or split off under them, meshes on bones moved

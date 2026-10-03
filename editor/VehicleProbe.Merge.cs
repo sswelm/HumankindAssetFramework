@@ -46,6 +46,34 @@ public static partial class VehicleProbe
 
         public sealed class Placement { public string Name; public double[] Offset, Scale; }
 
+        /// <summary>Geometry the in-process probe or its static preview cannot reproduce yet. The Lab keeps the
+        /// existing Blender path for these inputs; the parity drill can still exercise the kernel separately.</summary>
+        public string InProcessFallbackReason()
+        {
+            if (Second != null && Second.Animations.Count > 0) return "the second model is animated";
+            foreach (var model in new[] { Model, Second }.Where(m => m != null))
+            {
+                if (model.Meshes.Any(m => m.Primitives.Any(p => p.MorphTargets > 0))) return "the model has morph targets";
+                if (model.Skins.Count == 0) continue;
+                var names = BlenderNames.Compute(model);
+                for (int n = 0; n < model.Nodes.Count; n++)
+                {
+                    var node = model.Nodes[n];
+                    if (node.Mesh < 0) continue;
+                    bool skinned = node.Skin >= 0 && model.Meshes[node.Mesh].Primitives.Any(p => p.Skinned);
+                    if (skinned)
+                    {
+                        if (model == Model && (model.Animations.Count > 0 || Placements.Count > 0))
+                            return "an animated or placed skinned mesh needs Blender's evaluated pose";
+                        continue;
+                    }
+                    for (int a = n; a >= 0; a = model.Nodes[a].Parent)
+                        if (names.IsBone[a]) return "a mesh is parented to a bone";
+                }
+            }
+            return null;
+        }
+
         /// <summary>The merge2 argument's tail, "path|ox,oy,oz|rx,ry,rz|sx,sy,sz", parsed as the script parses it (_merge2_scale
         /// included: one number is a uniform scale; a component that is not a positive finite number becomes 1 and is reported).
         /// False with the script's VEHICLE ERROR text when the text is malformed.</summary>

@@ -630,6 +630,13 @@ def fx_placement(out):
              {"name": "Grand", "mesh": 0, "translation": [0, 1, 0]}, {"name": "Turned", "mesh": 0, "rotation": [0, s30, 0, c30], "translation": [-5, 0, 0]}, {"name": "Plain", "mesh": 0, "translation": [5, 0, 0]}]
     root = F.base("placement_nested", meshes=[mesh], nodes=nodes, scenes=[{"nodes": [0, 4, 5]}], scene=0)
     F.write_glb(os.path.join(out, "placement_nested.glb"), root, b)
+    # A child's rotated local axes under a nonuniform parent carry shear. Detaching it rebuilds its TRS and moves
+    # its descendants; the PART boxes must follow, even though those children have no placement of their own.
+    root = F.base("placement_shear", meshes=[mesh], nodes=[
+        {"name": "Carrier", "mesh": 0, "scale": [2, 1, 1], "children": [1]},
+        {"name": "Child", "mesh": 0, "rotation": [0, math.sin(math.pi / 8), 0, math.cos(math.pi / 8)], "children": [2]},
+        {"name": "Grand", "mesh": 0, "translation": [0, 0, 3]}], scenes=[{"nodes": [0]}], scene=0)
+    F.write_glb(os.path.join(out, "placement_shear.glb"), root, b)
     b = F.Buf()
     i1, x1 = box(0, 0, 0, 1); i2, x2 = box(3, 0, 0, 1)
     root = F.base("placement_split", meshes=[{"name": "LooseMesh", "primitives": [{"attributes": {"POSITION": b.accessor(i1 + i2, "f", "VEC3")}, "indices": b.accessor(x1 + [i + len(i1) for i in x2], "H", "SCALAR")}]}],

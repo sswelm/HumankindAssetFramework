@@ -30,6 +30,7 @@ public static partial class VehicleProbe
     {
         public float[] World;        // 3 per vertex, world space, Blender's frame (what the rays sample)
         public float[] Normal;       // 3 per vertex: the normal ray's direction, normalized, Blender's frame
+        public float[] PreviewNormal; // 3 per vertex: surface normals through the inverse transpose, Blender's frame
         public float[] Local;        // the mesh data as Blender holds it (float32, glTF frame; the bind pose for a skinned part) - the inside-out verdict reads it (step 3c)
         public int[] Tris;           // 3 corners per face, into the vertices
         public int Count;
@@ -104,7 +105,7 @@ public static partial class VehicleProbe
             offset += verts.Length;
         }
         int n = offset;
-        var pm = new PartMesh { Count = n, World = new float[n * 3], Normal = new float[n * 3], Local = new float[n * 3], Tris = tris.ToArray(), Uv = uv.ToArray(), TriMaterial = triMaterial.ToArray() };
+        var pm = new PartMesh { Count = n, World = new float[n * 3], Normal = new float[n * 3], PreviewNormal = new float[n * 3], Local = new float[n * 3], Tris = tris.ToArray(), Uv = uv.ToArray(), TriMaterial = triMaterial.ToArray() };
         // the mesh data as imported, Blender's frame, float32: positions and - when the file has them - the normals the importer
         // sets as custom normals
         bool anyFileNormal = false; for (int i = 0; i < n && !anyFileNormal; i++) anyFileNormal = !double.IsNaN(fileNormal[i * 3]);
@@ -134,6 +135,7 @@ public static partial class VehicleProbe
             Pb = moved;
             blenderN = Nb != null ? DecodeCustomShorts(Pb, pm.Tris, sharp, d0, d1) : BlenderVertexNormals(Pb, pm.Tris, null);
         }
+        var inverse = InvertedSafe(mb);
         for (int i = 0; i < n; i++)
         {
             float bx = Pb[i * 3], by = Pb[i * 3 + 1], bz = Pb[i * 3 + 2];
@@ -145,6 +147,13 @@ public static partial class VehicleProbe
             float wx = MatRow(mb, 0, 3, nbx, nby, nbz, 0f), wy = MatRow(mb, 1, 3, nbx, nby, nbz, 0f), wz = MatRow(mb, 2, 3, nbx, nby, nbz, 0f);
             NormalizeVn(ref wx, ref wy, ref wz);
             pm.Normal[i * 3] = wx; pm.Normal[i * 3 + 1] = wy; pm.Normal[i * 3 + 2] = wz;
+            // The script's normal RAY above deliberately uses the forward matrix. A rendered surface normal needs
+            // its inverse transpose instead, or a non-uniformly scaled panel is lit as if its normal were a tangent.
+            wx = (float)((double)inverse[0] * nbx + (double)inverse[4] * nby + (double)inverse[8] * nbz);
+            wy = (float)((double)inverse[1] * nbx + (double)inverse[5] * nby + (double)inverse[9] * nbz);
+            wz = (float)((double)inverse[2] * nbx + (double)inverse[6] * nby + (double)inverse[10] * nbz);
+            NormalizeVn(ref wx, ref wy, ref wz);
+            pm.PreviewNormal[i * 3] = wx; pm.PreviewNormal[i * 3 + 1] = wy; pm.PreviewNormal[i * 3 + 2] = wz;
         }
         return pm;
     }
