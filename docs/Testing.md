@@ -144,7 +144,8 @@ first-model skinned meshes) through Blender; `VehicleProbeMergeTests` holds this
 **`VehicleProbePreviewHeadlessTest.Run`** runs in Unity with `-batchmode -nographics -executeMethod
 VehicleProbePreviewHeadlessTest.Run`. It checks the preview frame against coordinates measured from Blender's FBX
 export imported in Unity, normals perpendicular to a nonuniformly scaled panel, and destruction of both complete
-and partially built previews. It also checks material colours against the imported FBX's sRGB values, BLEND/MASK/OPAQUE
+and partially built previews. It also checks that a material's colour is the file's linear factor (what the Blender
+preview FBX carried: io_scene_fbx writes DiffuseColor unconverted, and the project renders in gamma space), BLEND/MASK/OPAQUE
 alpha handling, brightness preserving alpha, imported root names, and rejection of reversed winding on a single
 part while allowing five percent of stale parts in larger models. Run it in a Unity project with the HAF editor
 package installed; it exits nonzero

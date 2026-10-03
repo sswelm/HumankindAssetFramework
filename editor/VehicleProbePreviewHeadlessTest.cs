@@ -58,9 +58,11 @@ public static class VehicleProbePreviewHeadlessTest
         Material Make(float tint = 1f) => ModelPreview.MaterialFor(m, 0, true, Shader.Find("Standard"),
             new Dictionary<int, Texture2D>(), new Dictionary<int, Material>(), assets, tint);
         var blend = Make();
-        // Measured from Unity's import of Blender's probe FBX for this factor, with no texture.
-        Require(Mathf.Abs(blend.color.r - 0.34919f) < 0.00002f && Mathf.Abs(blend.color.g - 0.48453f) < 0.00002f &&
-            Mathf.Abs(blend.color.b - 0.90633f) < 0.00002f, "FBX material colour");
+        // The factor's linear number, as the Blender preview FBX carried it (io_scene_fbx writes DiffuseColor unconverted) and as
+        // the gamma-space project shows it; the first version of this test expected the sRGB encoding (0.349, 0.485, 0.906) on a
+        // "measured" claim nothing had measured.
+        Require(Mathf.Abs(blend.color.r - 0.1f) < 0.00002f && Mathf.Abs(blend.color.g - 0.2f) < 0.00002f &&
+            Mathf.Abs(blend.color.b - 0.8f) < 0.00002f, "FBX material colour");
         Require(blend.color.a == 0.25f && blend.GetFloat("_Mode") == 3f && blend.renderQueue == 3000 &&
             blend.GetInt("_SrcBlend") == 1 && blend.GetInt("_DstBlend") == 10 && blend.GetInt("_ZWrite") == 0 &&
             blend.IsKeywordEnabled("_ALPHAPREMULTIPLY_ON"), "FBX transparent material");

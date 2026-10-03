@@ -41,10 +41,12 @@ public static class ModelPreview
         var hm = index >= 0 && index < model.Materials.Count ? model.Materials[index] : null;
         if (hm != null)
         {
-            // glTF factors are linear; Standard's colour property, like Unity's imported FBX material, is sRGB.
-            // Convert RGB before the Lab's brightness multiplier; alpha is coverage and stays linear.
+            // The factor's LINEAR number, as it is: the project renders in gamma space, and the Blender preview FBX this preview
+            // replaces carried the same linear number (io_scene_fbx writes DiffuseColor = base_color unconverted; read off the
+            // Salegs Revenge's twelve flat materials 2026-09-19) - a conversion would restore nothing and would brighten the
+            // Model Reader's turntable too. The alpha is the factor's for a MASK or BLEND material, 1 for an OPAQUE one.
             var colour = new Color(hm.BaseColorFactor[0], hm.BaseColorFactor[1], hm.BaseColorFactor[2],
-                hm.AlphaMode == "OPAQUE" ? 1f : hm.BaseColorFactor[3]).gamma;
+                hm.AlphaMode == "OPAQUE" ? 1f : hm.BaseColorFactor[3]);
             mat.color = new Color(colour.r * tint, colour.g * tint, colour.b * tint, colour.a);
             if (mat.HasProperty("_Mode"))
             {
