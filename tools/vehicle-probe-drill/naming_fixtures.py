@@ -545,10 +545,109 @@ def fx_bind_inverse_underflow(out):
     F.write_glb(os.path.join(out, "bind_inverse_underflow.glb"), root, b)
 
 
+def sphere42(b, cx=0.0, cy=0.0, cz=0.0, r=1.0):
+    """42 points on a sphere with a fan of faces: the importer's bone-shape signature (42 vertices, a round box)."""
+    import math
+    pts = [(cx, cy + r, cz), (cx, cy - r, cz)]
+    for ring in range(4):
+        lat = math.radians(-54 + 36 * ring)
+        for k in range(10):
+            lon = math.radians(36 * k + 18 * (ring % 2))
+            pts.append((cx + r * math.cos(lat) * math.cos(lon), cy + r * math.sin(lat), cz + r * math.cos(lat) * math.sin(lon)))
+    idx = []
+    for k in range(10):
+        idx += [0, 2 + 30 + k, 2 + 30 + (k + 1) % 10]
+    return b.accessor(pts, "f", "VEC3"), b.accessor(idx, "H", "SCALAR")
+
+
+def fx_second_model(out):
+    """The Lab's SECOND MODEL (step 3d, 2026-10-03): three files the jobs (probe_jobs.py) merge in pairs, as the Lab's merge2=
+    argument merges them in Blender - imported into the first model's scene, names made unique against it, every object
+    prefixed B_, each mesh's target matrix T2 @ matrix_world baked into its vertices, helpers dropped, bone shapes purged.
+    second_model_a.glb (the first model of the main job): Hull (a box), an empty Group turned 20 degrees carrying Deck (a
+    quad), a nameless mesh node (Plank, after its mesh), Object_1 (a box), an armature Rig with a skinned triangle SkinnedA.
+    second_model_b.glb: everything under a root Base turned 30 degrees about Blender's Z, so the job's per-axis scale (2, 1, 1)
+    is a SHEAR in its frame (baked into the vertices exactly as Blender bakes it); Object_1 again (Object_1.001 before the
+    prefix); a nameless node (its mesh Plank again: Plank.001); Mirror, a box under scale (-1, 1, 1) (a negative determinant:
+    the merge flips its faces, the custom-normal shorts travel with the corners); Leaning, a quad whose file normals lean off
+    its face (decoded against the moved geometry); an empty Helper; an armature Rig with a skinned triangle SkinnedB (the
+    helpers are dropped, the part baked from its bind pose, no RIGBONE for it); an Icosphere of 42 vertices (purged before the
+    prefix, its name freed). second_model_c.glb: ONE mesh object Islands of two islands - the per-source split of a second
+    model (B_Islands, B_Islands.001) and, swapped, of a first model whose loose parts are linked after the second model's."""
+    import math
+    b = F.Buf()
+    hull, hidx = box(0, 0, 0, 2)
+    quad = [(0, 0, 0), (3, 0, 0), (3, 0, 2), (0, 0, 2)]; qidx = [0, 1, 2, 0, 2, 3]
+    s20 = math.sin(math.radians(10)); c20 = math.cos(math.radians(10))
+    meshes = [{"name": "HullMesh", "primitives": [{"attributes": {"POSITION": b.accessor(hull, "f", "VEC3")}, "indices": b.accessor(hidx, "H", "SCALAR")}]},
+              {"name": "DeckMesh", "primitives": [{"attributes": {"POSITION": b.accessor(quad, "f", "VEC3")}, "indices": b.accessor(qidx, "H", "SCALAR")}]},
+              {"name": "Plank", "primitives": [{"attributes": {"POSITION": b.accessor([(x + 6, y, z) for x, y, z in quad], "f", "VEC3")}, "indices": b.accessor(qidx, "H", "SCALAR")}]},
+              {"name": "Box1", "primitives": [{"attributes": {"POSITION": b.accessor([(x - 6, y, z) for x, y, z in hull], "f", "VEC3")}, "indices": b.accessor(hidx, "H", "SCALAR")}]},
+              {"name": "SkinMesh", "primitives": [{"attributes": skinned(b)}]}]
+    nodes = [{"name": "Hull", "mesh": 0}, {"name": "Group", "rotation": [0, s20, 0, c20], "translation": [0, 3, 0], "children": [2]}, {"name": "Deck", "mesh": 1},
+             {"mesh": 2}, {"name": "Object_1", "mesh": 3}, {"name": "Rig", "translation": [0, 0, 5], "children": [6]}, {"name": "Joint"}, {"name": "SkinnedA", "mesh": 4, "skin": 0}]
+    root = F.base("second_model_a", meshes=meshes, nodes=nodes, skins=[{"skeleton": 5, "joints": [6]}], scenes=[{"nodes": [0, 1, 3, 4, 5, 7]}], scene=0)
+    F.write_glb(os.path.join(out, "second_model_a.glb"), root, b)
+
+    b = F.Buf()
+    th = math.radians(10.0)
+    lean = [(0.0, math.cos(th), math.sin(th))] * 2 + [(0.0, math.cos(th), -math.sin(th))] * 2
+    ico_pos, ico_idx = sphere42(b, 0, 8, 0)
+    meshes = [{"name": "Box1", "primitives": [{"attributes": {"POSITION": b.accessor(hull, "f", "VEC3")}, "indices": b.accessor(hidx, "H", "SCALAR")}]},
+              {"name": "Plank", "primitives": [{"attributes": {"POSITION": b.accessor([(x, y + 3, z) for x, y, z in quad], "f", "VEC3")}, "indices": b.accessor(qidx, "H", "SCALAR")}]},
+              {"name": "MirrorMesh", "primitives": [{"attributes": {"POSITION": b.accessor([(x + 4, y, z) for x, y, z in hull], "f", "VEC3"), "NORMAL": b.accessor([(0, 1, 0)] * len(hull), "f", "VEC3", minmax=False)}, "indices": b.accessor(hidx, "H", "SCALAR")}]},
+              {"name": "LeaningMesh", "primitives": [{"attributes": {"POSITION": b.accessor([(x, y + 6, z) for x, y, z in quad], "f", "VEC3"), "NORMAL": b.accessor(lean, "f", "VEC3", minmax=False)}, "indices": b.accessor(qidx, "H", "SCALAR")}]},
+              {"name": "SkinMesh", "primitives": [{"attributes": skinned(b)}]},
+              {"name": "Ico", "primitives": [{"attributes": {"POSITION": ico_pos}, "indices": ico_idx}]}]
+    s30 = math.sin(math.radians(15)); c30 = math.cos(math.radians(15))
+    nodes = [{"name": "Base", "rotation": [0, s30, 0, c30], "children": [1, 2, 3, 4, 5, 6, 9]},
+             {"name": "Object_1", "mesh": 0}, {"mesh": 1}, {"name": "Mirror", "scale": [-1, 1, 1], "mesh": 2}, {"name": "Leaning", "mesh": 3},
+             {"name": "Helper", "translation": [1, 1, 1]}, {"name": "Rig", "translation": [0, 0, -5], "children": [7]}, {"name": "Joint", "translation": [1, 0, 0]}, {"name": "SkinnedB", "mesh": 4, "skin": 0},
+             {"name": "Icosphere", "mesh": 5}]
+    root = F.base("second_model_b", meshes=meshes, nodes=nodes, skins=[{"skeleton": 6, "joints": [7]}], scenes=[{"nodes": [0, 8]}], scene=0)
+    F.write_glb(os.path.join(out, "second_model_b.glb"), root, b)
+
+    b = F.Buf()
+    i1, x1 = box(0, 0, 0, 1); i2, x2 = box(3, 0, 0, 1)
+    pos = i1 + i2; idx = x1 + [i + len(i1) for i in x2]
+    root = F.base("second_model_c", meshes=[{"name": "IslandsMesh", "primitives": [{"attributes": {"POSITION": b.accessor(pos, "f", "VEC3")}, "indices": b.accessor(idx, "H", "SCALAR")}]}],
+                  nodes=[{"name": "Islands", "mesh": 0}], scenes=[{"nodes": [0]}], scene=0)
+    F.write_glb(os.path.join(out, "second_model_c.glb"), root, b)
+
+
+def fx_placement(out):
+    """The Lab's PER-PART PLACEMENTS (step 3d): placement_nested.glb - Carrier (a box) carrying Child (a box above it) and an
+    empty Holder carrying Grand (a box): the job places Carrier, which Blender detaches with its DIRECT children (world kept
+    through the matrix_world round trip; Grand follows Holder) and moves alone; Turned, a box under a 30-degree turn, placed
+    with a per-axis scale (a shear the object cannot hold: decomposed away, as Blender does); Plain, untouched; and a name
+    no part has (warned, skipped). placement_split.glb - ONE mesh Loose of two islands, the job placing the split's Loose.001."""
+    import math
+    b = F.Buf()
+    pos, idx = box(0, 0, 0, 2)
+    mesh = {"name": "BoxMesh", "primitives": [{"attributes": {"POSITION": b.accessor(pos, "f", "VEC3")}, "indices": b.accessor(idx, "H", "SCALAR")}]}
+    s30 = math.sin(math.radians(15)); c30 = math.cos(math.radians(15))
+    nodes = [{"name": "Carrier", "mesh": 0, "children": [1, 2]}, {"name": "Child", "mesh": 0, "translation": [0, 3, 0]}, {"name": "Holder", "translation": [2, 0, 0], "children": [3]},
+             {"name": "Grand", "mesh": 0, "translation": [0, 1, 0]}, {"name": "Turned", "mesh": 0, "rotation": [0, s30, 0, c30], "translation": [-5, 0, 0]}, {"name": "Plain", "mesh": 0, "translation": [5, 0, 0]}]
+    root = F.base("placement_nested", meshes=[mesh], nodes=nodes, scenes=[{"nodes": [0, 4, 5]}], scene=0)
+    F.write_glb(os.path.join(out, "placement_nested.glb"), root, b)
+    # A child's rotated local axes under a nonuniform parent carry shear. Detaching it rebuilds its TRS and moves
+    # its descendants; the PART boxes must follow, even though those children have no placement of their own.
+    root = F.base("placement_shear", meshes=[mesh], nodes=[
+        {"name": "Carrier", "mesh": 0, "scale": [2, 1, 1], "children": [1]},
+        {"name": "Child", "mesh": 0, "rotation": [0, math.sin(math.pi / 8), 0, math.cos(math.pi / 8)], "children": [2]},
+        {"name": "Grand", "mesh": 0, "translation": [0, 0, 3]}], scenes=[{"nodes": [0]}], scene=0)
+    F.write_glb(os.path.join(out, "placement_shear.glb"), root, b)
+    b = F.Buf()
+    i1, x1 = box(0, 0, 0, 1); i2, x2 = box(3, 0, 0, 1)
+    root = F.base("placement_split", meshes=[{"name": "LooseMesh", "primitives": [{"attributes": {"POSITION": b.accessor(i1 + i2, "f", "VEC3")}, "indices": b.accessor(x1 + [i + len(i1) for i in x2], "H", "SCALAR")}]}],
+                  nodes=[{"name": "Loose", "mesh": 0}], scenes=[{"nodes": [0]}], scene=0)
+    F.write_glb(os.path.join(out, "placement_split.glb"), root, b)
+
+
 FIXTURES = [fx_naming, fx_order, fx_armature_names, fx_skinned_not_moved, fx_skinned_animated, fx_mesh_on_bone, fx_islands, fx_rotated_armature,
             fx_two_armatures, fx_nested_skins, fx_split_collision, fx_nonunit_rotation, fx_cameras, fx_camera_data_names,
             fx_name_tails, fx_long_names, fx_many_names, fx_bone_tails, fx_split_tails, fx_icosphere_mesh, fx_visibility, fx_visibility_skinned, fx_visibility_split, fx_insideout, fx_custom_normals,
-            fx_shared_skin_bind_pose, fx_zero_weight_joint, fx_bind_inverse_underflow]
+            fx_shared_skin_bind_pose, fx_zero_weight_joint, fx_bind_inverse_underflow, fx_second_model, fx_placement]
 
 
 def main(out):

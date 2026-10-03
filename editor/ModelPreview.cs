@@ -29,6 +29,74 @@ public static class ModelPreview
 
     public const long DefaultTriangleCap = 20_000_000;
 
+    /// <summary>The Unity material for one of a model's materials: its base colour factor (times `tint`, the Vehicle Lab's
+    /// per-source brightness), roughness and metallic, and - textured - its base-colour image decoded from the file. Cached per
+    /// index in `materials` (and per image in `textures`); every Unity object made goes to `assets` for the caller to destroy.
+    /// The Model Reader's turntable and the Vehicle Lab's in-process probe preview share it.</summary>
+    public static Material MaterialFor(HafModel model, int index, bool textured, Shader sh, Dictionary<int, Texture2D> textures, Dictionary<int, Material> materials, List<UnityEngine.Object> assets, float tint = 1f)
+    {
+        if (materials.TryGetValue(index, out var have)) return have;
+        var mat = new Material(sh) { hideFlags = HideFlags.HideAndDontSave };
+        assets.Add(mat); // owns the material even if a later texture or property operation throws
+        var hm = index >= 0 && index < model.Materials.Count ? model.Materials[index] : null;
+        if (hm != null)
+        {
+            // glTF factors are linear; Standard's colour property is sRGB, and so is what Unity's FBX importer makes of a
+            // Blender export: MEASURED 2026-10-03 in the project's own import cache (Library/Artifacts) of the Salegs Revenge's
+            // probe FBX - 0136_Charcoal's linear 0.137255 is imported as 0.4062, Color_A06's 0.8 as 0.90633, the sRGB encoding -
+            // although io_scene_fbx writes DiffuseColor unconverted. So the old Blender previews showed these colours, and the
+            // project's gamma colour space shows them as glTF means them. Convert RGB before the Lab's brightness multiplier;
+            // alpha is coverage and stays linear. (A revert of this on the exporter's line alone was wrong: PR #118.)
+            var colour = new Color(hm.BaseColorFactor[0], hm.BaseColorFactor[1], hm.BaseColorFactor[2],
+                hm.AlphaMode == "OPAQUE" ? 1f : hm.BaseColorFactor[3]).gamma;
+            mat.color = new Color(colour.r * tint, colour.g * tint, colour.b * tint, colour.a);
+            if (mat.HasProperty("_Mode"))
+            {
+                if (hm.AlphaMode == "MASK")
+                {
+                    mat.SetFloat("_Mode", 1f);
+                    mat.SetOverrideTag("RenderType", "TransparentCutout");
+                    mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.One);
+                    mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.Zero);
+                    mat.SetInt("_ZWrite", 1);
+                    mat.SetFloat("_Cutoff", hm.AlphaCutoff);
+                    mat.EnableKeyword("_ALPHATEST_ON");
+                    mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.AlphaTest;
+                }
+                else if (hm.AlphaMode == "BLEND")
+                {
+                    // Standard's transparent mode premultiplies alpha in the shader, as the FBX importer does.
+                    mat.SetFloat("_Mode", 3f);
+                    mat.SetOverrideTag("RenderType", "Transparent");
+                    mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.One);
+                    mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                    mat.SetInt("_ZWrite", 0);
+                    mat.EnableKeyword("_ALPHAPREMULTIPLY_ON");
+                    mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+                }
+            }
+            if (mat.HasProperty("_Glossiness")) mat.SetFloat("_Glossiness", 1f - hm.RoughnessFactor);
+            if (mat.HasProperty("_Metallic")) mat.SetFloat("_Metallic", hm.MetallicFactor);
+            if (textured && hm.BaseColorTexture >= 0 && hm.BaseColorTexture < model.Textures.Count)
+            {
+                int img = model.Textures[hm.BaseColorTexture].Source;
+                if (img >= 0 && img < model.Images.Count && model.Images[img].Bytes != null)
+                {
+                    if (!textures.TryGetValue(img, out var tex))
+                    {
+                        tex = new Texture2D(2, 2) { hideFlags = HideFlags.HideAndDontSave, name = model.Images[img].Name };
+                        if (!tex.LoadImage(model.Images[img].Bytes)) { UnityEngine.Object.DestroyImmediate(tex); tex = null; }
+                        textures[img] = tex; if (tex != null) assets.Add(tex);
+                    }
+                    if (tex != null) mat.mainTexture = tex;
+                }
+            }
+        }
+        else if (tint != 1f) mat.color = new Color(tint, tint, tint, 1f);
+        materials[index] = mat;
+        return mat;
+    }
+
     public static Result Build(HafModel model, Options o, List<UnityEngine.Object> assets)
     {
         var r = new Result();
@@ -43,35 +111,7 @@ public static class ModelPreview
         var world = HafTransforms.WorldMatrices(model, o.ClipStart ? HafTransforms.PoseAt(model, 0, 0.0) : null);
         var textures = new Dictionary<int, Texture2D>();
         var materials = new Dictionary<int, Material>();
-        Material MaterialFor(int index)
-        {
-            if (materials.TryGetValue(index, out var have)) return have;
-            var mat = new Material(sh) { hideFlags = HideFlags.HideAndDontSave };
-            var hm = index >= 0 && index < model.Materials.Count ? model.Materials[index] : null;
-            if (hm != null)
-            {
-                mat.color = new Color(hm.BaseColorFactor[0], hm.BaseColorFactor[1], hm.BaseColorFactor[2], 1f);
-                if (mat.HasProperty("_Glossiness")) mat.SetFloat("_Glossiness", 1f - hm.RoughnessFactor);
-                if (mat.HasProperty("_Metallic")) mat.SetFloat("_Metallic", hm.MetallicFactor);
-                if (o.Textured && hm.BaseColorTexture >= 0 && hm.BaseColorTexture < model.Textures.Count)
-                {
-                    int img = model.Textures[hm.BaseColorTexture].Source;
-                    if (img >= 0 && img < model.Images.Count && model.Images[img].Bytes != null)
-                    {
-                        if (!textures.TryGetValue(img, out var tex))
-                        {
-                            tex = new Texture2D(2, 2) { hideFlags = HideFlags.HideAndDontSave, name = model.Images[img].Name };
-                            if (!tex.LoadImage(model.Images[img].Bytes)) { UnityEngine.Object.DestroyImmediate(tex); tex = null; }
-                            textures[img] = tex; if (tex != null) assets.Add(tex);
-                        }
-                        if (tex != null) mat.mainTexture = tex;
-                    }
-                }
-            }
-            assets.Add(mat);
-            materials[index] = mat;
-            return mat;
-        }
+        Material MatFor(int index) => MaterialFor(model, index, o.Textured, sh, textures, materials, assets);
 
         var root = new GameObject("__modelReaderPreview") { hideFlags = HideFlags.HideAndDontSave };
         float sx = o.Unmirror ? -1f : 1f;
@@ -109,7 +149,7 @@ public static class ModelPreview
                     tri.Add(baseIndex + a);
                     if (o.Unmirror) { tri.Add(baseIndex + c); tri.Add(baseIndex + b); } else { tri.Add(baseIndex + b); tri.Add(baseIndex + c); }
                 }
-                subs.Add(tri.ToArray()); mats.Add(MaterialFor(p.Material));
+                subs.Add(tri.ToArray()); mats.Add(MatFor(p.Material));
                 r.Triangles += tri.Count / 3;
             }
             mesh.SetVertices(verts);

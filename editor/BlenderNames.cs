@@ -56,11 +56,21 @@ public static class BlenderNames
         /// <summary>Every object name the import made, of every type (meshes, empties, armatures, cameras, bone shapes):
         /// the pool a later name is made unique in.</summary>
         public NamePool ObjectPool;
+        /// <summary>The datablock pools of the other kinds the import filled - meshes (the bone shapes' "Icosphere" included),
+        /// armatures, cameras: a SECOND file imported into the same scene (the Lab's second model) is named in all four.</summary>
+        public NamePool MeshPool, ArmaturePool, CameraPool;
+        /// <summary>Every object the import made, in creation order - mesh objects, empties, armatures, bone shapes, cameras.</summary>
+        public List<string> ObjectsInOrder = new List<string>();
         /// <summary>The bone-shape objects the importer added (one per armature): "Icosphere", "Icosphere.001", ...</summary>
         public List<string> BoneShapes = new List<string>();
         /// <summary>Per glTF node: whether the importer made it a BONE, and then its parent in the importer's tree -
         /// a node index, or -1 for the dummy root (the parent of a chain's first bone is its armature).</summary>
         public bool[] IsBone; public int[] BoneParent;
+        /// <summary>Per glTF node that became an OBJECT: the glTF node whose object Blender parents it to (`obj.parent`), or
+        /// -1 when it hangs from the dummy root, from a bone, or from an object no glTF node made. A mesh moved under its
+        /// armature (".skinned") is under that armature's node here; a ".mesh" child of an armature or bone node is under
+        /// that node. The Lab's placement detaches a part and its DIRECT children (`o.children`) - this is who those are.</summary>
+        public int[] ObjectParentNode;
     }
 
     enum Kind { Object, Bone, DummyRoot }
@@ -74,7 +84,12 @@ public static class BlenderNames
         public Kind Type = Kind.Object; public bool IsArma; public string ArmaName; public string BoneArma; public int ArmaSkin = -1;
     }
 
-    public static Result Compute(HafModel m)
+    public static Result Compute(HafModel m) => Compute(m, null);
+
+    /// <summary>The names a file's nodes get when it is imported into a scene that already holds `seed`'s datablocks (the
+    /// Lab's second model, `bpy.ops.import_scene.gltf` into the first model's scene): every pool starts as the seed's -
+    /// a second "Object_1" is Object_1.001 before the Lab's "B_" prefix - and the seed is not modified.</summary>
+    public static Result Compute(HafModel m, Result seed)
     {
         var v = new Dictionary<string, VNode>(); var order = new List<string>();   // a Python dict: insertion order
         void Add(VNode n) { v[n.Id] = n; order.Add(n.Id); }
@@ -149,16 +164,21 @@ public static class BlenderNames
         }
 
         // ---- creation, depth-first: objects, armatures (with their bones and bone shape), mesh datablocks
-        var r = new Result { MeshObjectOfNode = new string[m.Nodes.Count], ObjectOfNode = new string[m.Nodes.Count], ArmatureOfSkin = new string[m.Skins.Count], ArmatureNodeOfSkin = new int[m.Skins.Count], IsBone = new bool[m.Nodes.Count], BoneParent = new int[m.Nodes.Count] };
-        for (int i = 0; i < m.Nodes.Count; i++) { r.IsBone[i] = v[Key(i)].Type == Kind.Bone; r.BoneParent[i] = Index(v[Key(i)].Parent); }
-        var objects = new NamePool(); var meshes = new NamePool(); var armatures = new NamePool(); var cameras = new NamePool();
+        var r = new Result { MeshObjectOfNode = new string[m.Nodes.Count], ObjectOfNode = new string[m.Nodes.Count], ArmatureOfSkin = new string[m.Skins.Count], ArmatureNodeOfSkin = new int[m.Skins.Count], IsBone = new bool[m.Nodes.Count], BoneParent = new int[m.Nodes.Count], ObjectParentNode = new int[m.Nodes.Count] };
+        for (int i = 0; i < m.Nodes.Count; i++) { r.IsBone[i] = v[Key(i)].Type == Kind.Bone; r.BoneParent[i] = Index(v[Key(i)].Parent); r.ObjectParentNode[i] = -1; }
+        var objects = seed?.ObjectPool.Clone() ?? new NamePool(); var meshes = seed?.MeshPool.Clone() ?? new NamePool();
+        var armatures = seed?.ArmaturePool.Clone() ?? new NamePool(); var cameras = seed?.CameraPool.Clone() ?? new NamePool();
         var armaName = new Dictionary<string, string>();
         var meshData = new Dictionary<(int mesh, int skin), string>();
-        void Create(string id)
+        void Create(string id, int parentObject)
         {
             var n = v[id];
+            int ownObject = parentObject;   // what this vnode's children are parented to: its own object, or nothing below a bone
             if (n.Type == Kind.Object)
             {
+                int ni0 = Index(id);
+                if (ni0 >= 0) r.ObjectParentNode[ni0] = parentObject;
+                ownObject = ni0;   // a synthetic vnode (".skinned", ".mesh", ".camera") has no children of its own
                 string name;
                 if (n.MeshNode >= 0)
                 {
@@ -177,6 +197,7 @@ public static class BlenderNames
                     string data = armatures.Unique(n.ArmaName);
                     name = objects.Unique(n.Name ?? data);
                     r.BoneShapes.Add(objects.Unique("Icosphere"));   // armature_display: the bone-shape object, one per armature
+                    r.ObjectsInOrder.Add(r.BoneShapes[r.BoneShapes.Count - 1]);
                     meshes.Unique("Icosphere");   // ... and its mesh DATABLOCK: a glTF mesh named Icosphere, made after it, is Icosphere.001 - and names its nameless node so
                     armaName[id] = name; r.ArmaturesInOrder.Add((Index(id), name));
                     // create_bones: every bone under this armature, depth-first, unique within it
@@ -197,12 +218,14 @@ public static class BlenderNames
                     name = objects.Unique(n.Name ?? camData);
                 }
                 else name = objects.Unique(n.Name ?? n.DefaultName);
+                r.ObjectsInOrder.Add(name);
                 int ni = Index(id);
                 if (ni >= 0) r.ObjectOfNode[ni] = name;
             }
-            foreach (var c in n.Children) Create(c);
+            else if (n.Type == Kind.Bone) ownObject = -1;   // objects below a bone are parented to the BONE (parent_type BONE), not to an object
+            foreach (var c in n.Children) Create(c, ownObject);
         }
-        Create("root");
+        Create("root", -1);
         // a skin's armature is the one its joints are bones of (the importer reads it off the first joint) - not always
         // the one the skin itself would have made: a skin whose joints lie inside another skin's chain makes none
         r.ArmatureNodeOfBone = new int[m.Nodes.Count];
@@ -213,7 +236,7 @@ public static class BlenderNames
             if (arma == null || !armaName.ContainsKey(arma)) { r.ArmatureNodeOfSkin[si] = -1; continue; }
             r.ArmatureOfSkin[si] = armaName[arma]; r.ArmatureNodeOfSkin[si] = Index(arma);
         }
-        r.ObjectPool = objects;
+        r.ObjectPool = objects; r.MeshPool = meshes; r.ArmaturePool = armatures; r.CameraPool = cameras;
         return r;
     }
 

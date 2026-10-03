@@ -26,7 +26,18 @@ public static partial class VehicleProbe
 {
     /// <summary>One part as Blender holds its mesh DATA: the vertices in Blender's order, in world space and Blender's
     /// frame, the direction each one's normal ray takes there, and its triangles (into those vertices).</summary>
-    sealed class PartMesh { public float[] World; public float[] Normal; public float[] Local; public int[] Tris; public int Count; }   // Local: the mesh data as Blender holds it (float32, glTF frame; the bind pose for a skinned part) - the inside-out verdict reads it (step 3c)
+    public sealed class PartMesh
+    {
+        public float[] World;        // 3 per vertex, world space, Blender's frame (what the rays sample)
+        public float[] Normal;       // 3 per vertex: the normal ray's direction, normalized, Blender's frame
+        public float[] PreviewNormal; // 3 per vertex: surface normals through the inverse transpose, Blender's frame
+        public float[] Local;        // the mesh data as Blender holds it (float32, glTF frame; the bind pose for a skinned part) - the inside-out verdict reads it (step 3c)
+        public int[] Tris;           // 3 corners per face, into the vertices
+        public int Count;
+        public float[] Uv;           // 2 per vertex: the UV set the material's base colour selects, as the file has it (glTF: origin top-left) - the Lab's preview
+        public int[] TriMaterial;    // per face: the primitive's material index into its model's Materials, or -1
+        public int Source;           // 0 the first model, 1 the second
+    }   // Local: the mesh data as Blender holds it (float32, glTF frame; the bind pose for a skinned part) - the inside-out verdict reads it (step 3c)
 
     static readonly double[][] FixedDirections = MakeFixedDirections();
     /// <summary>The fixed directions as mathutils normalizes them (Vector((1, 1, 1)).normalized(): double length, 1.0f / float(sqrt)).</summary>
@@ -50,10 +61,10 @@ public static partial class VehicleProbe
     /// triangles, and its normal rays - from the object's local space through `objWorld` into Blender's frame.
     /// `dataPosition` gives a primitive's vertex in the object's local space (the file's position, or the bind pose);
     /// `dataNormal` the file's normal there (skinned into the bind pose for a skinned vertex), or null without one.</summary>
-    static PartMesh BuildPartMesh(HafModel m, int node, int onlyPrim, int[] onlyVerts, Func<HafPrimitive, int, double[]> dataPosition, Func<HafPrimitive, int, double[]> dataNormal, float[] mb)
+    static PartMesh BuildPartMesh(HafModel m, int node, int onlyPrim, int[] onlyVerts, Func<HafPrimitive, int, double[]> dataPosition, Func<HafPrimitive, int, double[]> dataNormal, float[] mb, float[] bake)
     {
         var mesh = m.Meshes[m.Nodes[node].Mesh];
-        var local = new List<double>(); var fileNormal = new List<double>(); var tris = new List<int>();
+        var local = new List<double>(); var fileNormal = new List<double>(); var tris = new List<int>(); var uv = new List<float>(); var triMaterial = new List<int>();
         var faces = new HashSet<(int, int, int)>();   // mesh.validate() drops a second face over the same three vertices, whichever way it winds: the FIRST stays
         int offset = 0;
         for (int pi = 0; pi < mesh.Primitives.Count; pi++)
@@ -62,6 +73,8 @@ public static partial class VehicleProbe
             var p = mesh.Primitives[pi];
             int[] verts = onlyVerts ?? Used(p);
             var rank = new int[p.VertexCount]; for (int i = 0; i < rank.Length; i++) rank[i] = -1;
+            // the UV set the material's base colour selects (the preview maps its texture through it); glTF's origin is top-left
+            var uvSet = p.Material >= 0 && p.Material < m.Materials.Count && m.Materials[p.Material].BaseColorTexCoord == 1 && p.Uv1 != null ? p.Uv1 : p.Uv0;
             for (int k = 0; k < verts.Length; k++)
             {
                 rank[verts[k]] = offset + k;
@@ -70,6 +83,7 @@ public static partial class VehicleProbe
                 var fn = dataNormal(p, verts[k]);
                 if (fn != null) { fileNormal.Add(fn[0]); fileNormal.Add(fn[1]); fileNormal.Add(fn[2]); }
                 else { fileNormal.Add(double.NaN); fileNormal.Add(double.NaN); fileNormal.Add(double.NaN); }
+                if (uvSet != null) { uv.Add(uvSet[verts[k] * 2]); uv.Add(uvSet[verts[k] * 2 + 1]); } else { uv.Add(0f); uv.Add(0f); }
             }
             int count = p.Indices != null ? p.Indices.Length : p.VertexCount;
             int At(int i) => p.Indices != null ? p.Indices[i] : i;
@@ -80,7 +94,7 @@ public static partial class VehicleProbe
                 if (ra < 0 || rb < 0 || rc < 0 || ra == rb || rb == rc || ra == rc) return;   // another island's, or degenerate (mesh.validate drops it)
                 int lo = Math.Min(ra, Math.Min(rb, rc)), hi = Math.Max(ra, Math.Max(rb, rc));
                 if (!faces.Add((lo, ra + rb + rc - lo - hi, hi))) return;   // a duplicate (external review of PR #115: two twins wound against each other summed to no normal at all)
-                tris.Add(ra); tris.Add(rb); tris.Add(rc);
+                tris.Add(ra); tris.Add(rb); tris.Add(rc); triMaterial.Add(p.Material);
             }
             switch (p.Mode)   // the importer's points_edges_tris: strips and fans become triangles, lines and points no polygon
             {
@@ -91,9 +105,9 @@ public static partial class VehicleProbe
             offset += verts.Length;
         }
         int n = offset;
-        var pm = new PartMesh { Count = n, World = new float[n * 3], Normal = new float[n * 3], Local = new float[n * 3], Tris = tris.ToArray() };
-        // a mesh with file normals: Blender's vertex.normal is the file's normal through its two-short custom-normal encoding and the
-        // corner-angle mix (VehicleProbe.CustomNormals.cs), not the file's normal itself; without file normals it is the computed one
+        var pm = new PartMesh { Count = n, World = new float[n * 3], Normal = new float[n * 3], PreviewNormal = new float[n * 3], Local = new float[n * 3], Tris = tris.ToArray(), Uv = uv.ToArray(), TriMaterial = triMaterial.ToArray() };
+        // the mesh data as imported, Blender's frame, float32: positions and - when the file has them - the normals the importer
+        // sets as custom normals
         bool anyFileNormal = false; for (int i = 0; i < n && !anyFileNormal; i++) anyFileNormal = !double.IsNaN(fileNormal[i * 3]);
         var Pb = new float[n * 3]; var Nb = anyFileNormal ? new float[n * 3] : null;
         for (int i = 0; i < n; i++)
@@ -103,19 +117,43 @@ public static partial class VehicleProbe
             if (double.IsNaN(fileNormal[i * 3])) { Nb[i * 3] = Nb[i * 3 + 1] = Nb[i * 3 + 2] = float.NaN; }
             else { Nb[i * 3] = (float)fileNormal[i * 3]; Nb[i * 3 + 1] = (float)-fileNormal[i * 3 + 2]; Nb[i * 3 + 2] = (float)fileNormal[i * 3 + 1]; }
         }
-        float[] blenderN = BlenderVertexNormals(Pb, pm.Tris, Nb);
+        float[] blenderN;
+        if (bake == null)
+            // a mesh with file normals: Blender's vertex.normal is the file's normal through its two-short custom-normal encoding and the
+            // corner-angle mix (VehicleProbe.CustomNormals.cs), not the file's normal itself; without file normals it is the computed one
+            blenderN = BlenderVertexNormals(Pb, pm.Tris, Nb);
+        else
+        {
+            // the second model's mesh after the merge baked its target matrix into it (VehicleProbe.Merge.cs): the custom normals were
+            // SET against the imported geometry and are READ against the moved one - Mesh.transform leaves the shorts alone -, and a
+            // mirroring matrix flips every face, each corner's shorts travelling with it
+            bool[] sharp = null; short[] d0 = null, d1 = null;
+            if (Nb != null) { sharp = SharpFaces(Pb, pm.Tris, Nb); (d0, d1) = EncodeCustomShorts(Pb, pm.Tris, Nb, sharp); }
+            var moved = new float[n * 3];
+            for (int i = 0; i < n; i++) TransformPoint(bake, Pb[i * 3], Pb[i * 3 + 1], Pb[i * 3 + 2], out moved[i * 3], out moved[i * 3 + 1], out moved[i * 3 + 2]);
+            if (Determinant4(bake) < 0f) pm.Tris = FlipFaces(pm.Tris, d0, d1);
+            Pb = moved;
+            blenderN = Nb != null ? DecodeCustomShorts(Pb, pm.Tris, sharp, d0, d1) : BlenderVertexNormals(Pb, pm.Tris, null);
+        }
+        var inverse = InvertedSafe(mb);
         for (int i = 0; i < n; i++)
         {
-            double lx = local[i * 3], ly = local[i * 3 + 1], lz = local[i * 3 + 2];
-            pm.Local[i * 3] = (float)lx; pm.Local[i * 3 + 1] = (float)ly; pm.Local[i * 3 + 2] = (float)lz;
+            float bx = Pb[i * 3], by = Pb[i * 3 + 1], bz = Pb[i * 3 + 2];
+            pm.Local[i * 3] = bx; pm.Local[i * 3 + 1] = bz; pm.Local[i * 3 + 2] = -by;   // glTF's frame: (x, z, -y) of Blender's - exact
             // the script: p = matrix_world @ co, d = (matrix_world.to_3x3() @ normal).normalized() - mathutils' float32 products summed
-            // in double (MatRow), NOT the inverse transpose; Blender's frame (x, -z, y) of the glTF data
-            float bx = (float)lx, by = (float)-lz, bz = (float)ly;
+            // in double (MatRow), NOT the inverse transpose
             pm.World[i * 3] = MatRow(mb, 0, 4, bx, by, bz, 1f); pm.World[i * 3 + 1] = MatRow(mb, 1, 4, bx, by, bz, 1f); pm.World[i * 3 + 2] = MatRow(mb, 2, 4, bx, by, bz, 1f);
             float nbx = blenderN[i * 3], nby = blenderN[i * 3 + 1], nbz = blenderN[i * 3 + 2];
             float wx = MatRow(mb, 0, 3, nbx, nby, nbz, 0f), wy = MatRow(mb, 1, 3, nbx, nby, nbz, 0f), wz = MatRow(mb, 2, 3, nbx, nby, nbz, 0f);
             NormalizeVn(ref wx, ref wy, ref wz);
             pm.Normal[i * 3] = wx; pm.Normal[i * 3 + 1] = wy; pm.Normal[i * 3 + 2] = wz;
+            // The script's normal RAY above deliberately uses the forward matrix. A rendered surface normal needs
+            // its inverse transpose instead, or a non-uniformly scaled panel is lit as if its normal were a tangent.
+            wx = (float)((double)inverse[0] * nbx + (double)inverse[4] * nby + (double)inverse[8] * nbz);
+            wy = (float)((double)inverse[1] * nbx + (double)inverse[5] * nby + (double)inverse[9] * nbz);
+            wz = (float)((double)inverse[2] * nbx + (double)inverse[6] * nby + (double)inverse[10] * nbz);
+            NormalizeVn(ref wx, ref wy, ref wz);
+            pm.PreviewNormal[i * 3] = wx; pm.PreviewNormal[i * 3 + 1] = wy; pm.PreviewNormal[i * 3 + 2] = wz;
         }
         return pm;
     }

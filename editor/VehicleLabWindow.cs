@@ -432,7 +432,7 @@ public class VehicleLabWindow : EditorWindow
     string lastOutGlb = "";
 
     // turntable preview state
-    GameObject inst; PreviewRenderUtility pru; AnimationClip spinClip;
+    GameObject inst; PreviewRenderUtility pru; AnimationClip spinClip; List<UnityEngine.Object> previewAssets;   // previewAssets: what the in-process probe preview made (VehicleProbePreview), destroyed with the instance
     // CLIP PICKER (2026-08-22): the rig can now author more than one action (Spin + Deploy), so the turntable must
     // let you choose which to judge — the same need the Animation Lab preview had. Rebuilt with every preview.
     List<AnimationClip> previewClips; [SerializeField] int previewClipIdx;
@@ -616,7 +616,7 @@ public class VehicleLabWindow : EditorWindow
         using (new EditorGUILayout.HorizontalScope())
         {
             using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(srcFile) || !File.Exists(srcFile)))
-                if (GUILayout.Button(new GUIContent("Probe parts", "Headless Blender lists the model's mesh parts (a single combined mesh is split into loose parts). Roles are auto-guessed from names."), GUILayout.Height(24)))
+                if (GUILayout.Button(new GUIContent("Probe parts", "Lists the model's mesh parts (a single combined mesh is split into loose parts). Supported .glb/.gltf sources run in-process; other formats and unsupported geometry use headless Blender. Roles are auto-guessed from names."), GUILayout.Height(24)))
                     Probe();
             using (new EditorGUI.DisabledScope(parts.Count == 0 && boneParts.Count == 0))
                 if (GUILayout.Button(new GUIContent("Save", "Save the whole configuration (source, output, roles, knobs) to the current recipe file — no dialog, no rename: the loaded recipe (or, for a new session, one named after the source model) is written in place under " + RecipesDir + " and appears in the Edit-existing dropdown above."), GUILayout.Width(70), GUILayout.Height(24)))
@@ -1493,14 +1493,33 @@ public class VehicleLabWindow : EditorWindow
         Directory.CreateDirectory(Path.Combine(projRoot, prevDir));
         string prevRel = prevDir + "/" + Path.GetFileNameWithoutExtension(srcFile) + "_probe.fbx";
         string prevFull = Path.Combine(projRoot, prevRel).Replace('\\', '/');
-        if (!RunBlender($"probe \"{srcFile}\" \"{prevFull}\"{Merge2Arg()}{BrightArg()}{ProbeRotArg()}{PartTxArg(projRoot, prevDir, Path.GetFileNameWithoutExtension(srcFile))}", out string stdout)) return;   // failed run: session intact, error already in status/Console
+        // THE PROBE IN C# for a .glb/.gltf source (2026-10-03, step 3d of replacing Blender; ProbeInProcess below): the same rows,
+        // in-process, and a preview built from the probe's own parts. FBX/OBJ/.blend sources keep the Blender probe and its FBX.
+        IEnumerable<string> rowLines; GameObject builtPreview = null; List<UnityEngine.Object> builtObjects = null;
+        bool inProcess = CanProbeInProcess;
+        List<string> nativeRows = null;
+        if (inProcess)
+        {
+            if (!ProbeInProcess(out nativeRows, out builtPreview, out builtObjects, out bool useBlender))
+            {
+                if (!useBlender) return;   // failed: session intact, error already in status/Console
+                inProcess = false;
+            }
+        }
+        if (inProcess) rowLines = nativeRows;
+        else
+        {
+            if (!RunBlender($"probe \"{srcFile}\" \"{prevFull}\"{Merge2Arg()}{BrightArg()}{ProbeRotArg()}{PartTxArg(projRoot, prevDir, Path.GetFileNameWithoutExtension(srcFile))}", out string stdout)) return;   // failed run: session intact, error already in status/Console
+            rowLines = stdout.Split('\n');
+        }
+        void DropBuilt() { if (builtPreview != null) DestroyImmediate(builtPreview); if (builtObjects != null) foreach (var o in builtObjects) if (o != null) DestroyImmediate(o); builtPreview = null; builtObjects = null; }
         // Lenient float parse: degenerate shards can emit "nan" (python lowercase — .NET rejects it) — such a value
         // becomes 0 instead of killing the whole probe on one bad line out of thousands.
         // The row contract is parsed by the pure kernel (EditorRules.cs: VehicleLabRules.TryParsePartLine, unit-tested):
         // a '|' inside a part name folds back into the name; a row whose numeric tail does not parse is REJECTED
         // LOUDLY (before 2026-09-14 a 9th field, or a pipe in a name, silently emptied the Lab).
         var rejected = new List<string>();
-        foreach (var line in stdout.Split('\n'))
+        foreach (var line in rowLines)
         {
             if (!VehicleLabRules.TryParsePartLine(line, out var row, out string why))
             {
@@ -1547,8 +1566,9 @@ public class VehicleLabWindow : EditorWindow
             Debug.LogWarning($"[VehicleLab] probe: {rejected.Count} PART/RIGBONE row(s) rejected (a row shape this Lab cannot parse — a new field in vehicle_rig.py needs a parser change):\n  " +
                              string.Join("\n  ", rejected.Take(5)) + (rejected.Count > 5 ? $"\n  … {rejected.Count - 5} more" : ""));
         if (newParts.Count == 0 && newBoneParts.Count == 0)
-        {   // Blender ran but listed nothing — keep the session (markings + preview) and say so
-            status = "Probe found no mesh parts — is this a mesh model? Existing markings kept. (See the Console for Blender output.)";
+        {   // the probe ran but listed nothing — keep the session (markings + preview) and say so
+            DropBuilt();
+            status = "Probe found no mesh parts — is this a mesh model? Existing markings kept. (See the Console for the probe's output.)";
             return;
         }
         // RENAMED FUSED GROUPS (2026-09-21, user: "I had given Fused_Y_Object_1740 a Z offset of -0.5 … this seems to
@@ -1579,7 +1599,8 @@ public class VehicleLabWindow : EditorWindow
         boneParts.Clear(); boneParts.AddRange(newBoneParts);
         DestroyPreview();
         if (boneParts.Count > 0 && !hadBones) useSourceRig = true;   // first detection: default to the fast path
-        if (File.Exists(prevFull))
+        if (builtPreview != null) AttachPreview(builtPreview, new List<AnimationClip>(), builtObjects);   // the C# probe's parts: a static turntable for part inspection
+        else if (File.Exists(prevFull))
         {
             AssetDatabase.ImportAsset(prevRel, ImportAssetOptions.ForceUpdate);
             BuildPreview(prevRel);   // no Spin clip yet — a static turntable for part inspection
@@ -2358,11 +2379,12 @@ public class VehicleLabWindow : EditorWindow
     // the same straightened frame Generate classifies in, or "re-Probe after straightening" promises a
     // correction that never happens (a 90°-yawed fixture probed 2 flips where Generate reversed 0). Sent only
     // when Orientation is dialed; applied script-side to the classification math alone, never the preview.
-    string ProbeRotArg()
+    string ProbeRotArg() { var t = ProbeRotText(); return t == null ? "" : $" \"proberot={t}\""; }
+    string ProbeRotText()
     {
-        if (modelRot == Vector3.zero) return "";
+        if (modelRot == Vector3.zero) return null;
         var inv = System.Globalization.CultureInfo.InvariantCulture;
-        return $" \"proberot={modelRot.x.ToString("0.##", inv)},{modelRot.y.ToString("0.##", inv)},{modelRot.z.ToString("0.##", inv)}\"";
+        return $"{modelRot.x.ToString("0.##", inv)},{modelRot.y.ToString("0.##", inv)},{modelRot.z.ToString("0.##", inv)}";
     }
 
     // PER-PART PLACEMENT argument (2026-09-20): tagged like merge2= (position-independent in the long argv), travels by
@@ -2377,12 +2399,15 @@ public class VehicleLabWindow : EditorWindow
         return $" \"parttx=@{file}\"";
     }
 
-    string Merge2Arg()
+    string Merge2Arg() { var t = Merge2Text(); return t == null ? "" : $" \"merge2={t}\""; }
+    // The TEXT both paths read - the in-process probe parses these very characters as the script does, so the two never
+    // disagree on a rounded fifth decimal.
+    string Merge2Text()
     {
-        if (string.IsNullOrWhiteSpace(srcFile2)) return "";
+        if (string.IsNullOrWhiteSpace(srcFile2)) return null;
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         string F(float v) => v.ToString("0.#####", inv);   // 0.### rounded a sub-0.0005 scale to a literal "0" (review finding 7) — 5 places covers any sane unit factor
-        return $" \"merge2={srcFile2.Trim().Replace('\\', '/')}|{F(model2Off.x)},{F(model2Off.y)},{F(model2Off.z)}|{F(model2Rot.x)},{F(model2Rot.y)},{F(model2Rot.z)}|{VehicleLabRules.Merge2ScaleField(model2Scale.x, model2Scale.y, model2Scale.z)}\"";
+        return $"{srcFile2.Trim().Replace('\\', '/')}|{F(model2Off.x)},{F(model2Off.y)},{F(model2Off.z)}|{F(model2Rot.x)},{F(model2Rot.y)},{F(model2Rot.z)}|{VehicleLabRules.Merge2ScaleField(model2Scale.x, model2Scale.y, model2Scale.z)}";
     }
 
     // The per-source BRIGHTNESS argument — tagged like merge2 (probe and rig both need it so the preview
@@ -2477,6 +2502,99 @@ public class VehicleLabWindow : EditorWindow
         finally { try { w.DestroyPreview(); } catch { } DestroyImmediate(w); }
     }
 
+    // ---- THE PROBE IN C# (2026-10-03, step 3d of replacing Blender). A .glb/.gltf source - with a .glb/.gltf second model or
+    // none - is probed in-process by VehicleProbe: the rows Blender's probe would print from the SAME inputs (the merge2, parttx
+    // and proberot text this window would hand vehicle_rig.py, parsed as the script parses them), held row for row and bit for
+    // bit against Blender's own probe by tools/vehicle_probe_drill.sh, in a fraction of a second instead of 25 s; and the
+    // turntable instance is built from the probe's own vertices (VehicleProbePreview) instead of a preview FBX written by
+    // Blender, imported and instantiated. FBX/OBJ/.blend sources - and a second model of those kinds - keep the Blender probe.
+    // The preview against Unity's import of the Blender preview FBX is a Bake Tests row (VehicleProbePreviewGateTest).
+    static bool IsGltf(string p) => !string.IsNullOrWhiteSpace(p) && (p.Trim().EndsWith(".glb", StringComparison.OrdinalIgnoreCase) || p.Trim().EndsWith(".gltf", StringComparison.OrdinalIgnoreCase));
+    bool CanProbeInProcess => IsGltf(srcFile) && (string.IsNullOrWhiteSpace(srcFile2) || IsGltf(srcFile2));
+
+    /// <summary>The probe's input from this window's state: the source read, the second model read from the merge2 text, the placed
+    /// parts as parttx lines, the Orientation as proberot text - the SAME characters the Blender command line gets, parsed as the
+    /// script parses them. False with the script's own VEHICLE ERROR text (a second model that is not on disk).</summary>
+    internal bool BuildProbeInput(out VehicleProbe.Input input, out string error)
+    {
+        error = null;
+        input = new VehicleProbe.Input { Model = GlbReader.Read(srcFile) };
+        string merge2 = Merge2Text();
+        if (merge2 != null && !input.SetSecond(merge2, GlbReader.Read, out error)) return false;
+        input.AddPlacementLines(parts.Where(IsPlaced).Select(x => VehicleLabRules.PartPlacementLine(x.name, x.offset.x, x.offset.y, x.offset.z, x.scale.x, x.scale.y, x.scale.z)));
+        string rot = ProbeRotText();
+        if (rot != null) input.SetProbeRotation(rot);
+        return true;
+    }
+
+    HafModel[] PreviewModels(VehicleProbe.Input input) => input.Second != null ? new[] { input.Model, input.Second } : new[] { input.Model };
+    float[] PreviewBrightness(VehicleProbe.Input input) => new[] { model1Bright, input.Second != null ? model2Bright : 1f };
+
+    bool ProbeInProcess(out List<string> rows, out GameObject preview, out List<UnityEngine.Object> previewObjects, out bool useBlender)
+    {
+        rows = null; preview = null; previewObjects = new List<UnityEngine.Object>(); useBlender = false;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        // the progress bar moves with the probe's stages (the Blender path's bar stood still for its 25 s): reading, then what
+        // VehicleProbe.Run reports as it goes, then the preview
+        int stage = 0; const int stages = 9;
+        void Bar(string what) { if (!headless) EditorUtility.DisplayProgressBar("Vehicle Lab", "Probing in-process: " + what, Mathf.Clamp01(++stage / (float)stages)); }
+        try
+        {
+            Bar("reading " + Path.GetFileName(srcFile) + (string.IsNullOrWhiteSpace(srcFile2) ? "" : " and " + Path.GetFileName(srcFile2.Trim())));
+            if (!BuildProbeInput(out var input, out string error))
+            { status = "VEHICLE ERROR: " + error; Debug.LogError("[VehicleLab] probe: " + error); return false; }   // the script's own refusals, word for word
+            string fallback = input.InProcessFallbackReason();
+            if (fallback != null)
+            { useBlender = true; Debug.Log("[VehicleLab] probe: using Blender because " + fallback + "."); return false; }
+            input.Progress = Bar;
+            var r = VehicleProbe.Run(input);
+            rows = r.Notes.Select(n => "VEHICLE " + n).Concat(r.RigBones.Select(b => b.Row)).Concat(r.Parts.Select(p => p.Row)).ToList();
+            Bar("preview");
+            preview = VehicleProbePreview.Build(r, PreviewModels(input), PreviewBrightness(input), previewObjects);
+            sw.Stop();
+            // console headline = the OUTCOME, as the Blender path logs it (the rows themselves would bury it)
+            Debug.Log($"[VehicleLab] probe (C#, in-process): {r.Parts.Count} part(s) found   ({sw.Elapsed.TotalSeconds:0.00}s)\n" + string.Join("\n", r.Notes.Select(n => "VEHICLE " + n)));
+            return true;
+        }
+        catch (Exception e)
+        {
+            // The C# reader deliberately refuses extensions it cannot interpret (e.g. Draco). Blender can still
+            // import those glTFs; choosing the new fast path must not remove the old format support.
+            if (e is InvalidDataException || e is NotSupportedException)
+            { useBlender = true; Debug.Log("[VehicleLab] probe: using Blender because the C# reader cannot handle this input: " + e.Message); }
+            else
+            { status = "Probe failed: " + e.Message; Debug.LogError("[VehicleLab] probe (C#, in-process) failed on " + srcFile + "\n" + e); }
+            if (preview != null) { DestroyImmediate(preview); preview = null; }
+            foreach (var o in previewObjects) if (o != null) DestroyImmediate(o);
+            previewObjects.Clear();
+            return false;
+        }
+        finally { if (!headless) EditorUtility.ClearProgressBar(); }
+    }
+
+    // THE BAKE TESTS' ENTRY (VehicleProbePreviewGateTest): the in-process probe and its preview for a saved recipe, in a window
+    // instance never shown - the SAME input the Probe parts button builds. False, with the reason, for a recipe the in-process
+    // path does not take (an FBX/OBJ/.blend source or second model) or whose second model is not on disk.
+    internal static bool ProbeRecipeHeadless(string recipePath, List<UnityEngine.Object> assets, out VehicleProbe.Result result, out GameObject preview, out string error)
+    {
+        result = null; preview = null; error = null;
+        var w = CreateInstance<VehicleLabWindow>();
+        try
+        {
+            w.headless = true;
+            w.LoadRecipeFromPath(recipePath);
+            if (!w.recipeReadThisSession) { error = w.status; return false; }
+            if (!w.CanProbeInProcess) { error = "an FBX/OBJ/.blend source or second model: Blender's probe, not this one"; return false; }
+            if (!w.BuildProbeInput(out var input, out error)) return false;
+            string fallback = input.InProcessFallbackReason();
+            if (fallback != null) { error = "the Lab would use Blender for this recipe: " + fallback; return false; }
+            result = VehicleProbe.Run(input);
+            preview = VehicleProbePreview.Build(result, w.PreviewModels(input), w.PreviewBrightness(input), assets);
+            return true;
+        }
+        finally { DestroyImmediate(w); }
+    }
+
     bool RunBlender(string args, out string stdout)
     {
         stdout = "";
@@ -2532,10 +2650,17 @@ public class VehicleLabWindow : EditorWindow
         previewClips = AssetDatabase.LoadAllAssetsAtPath(prevRel).OfType<AnimationClip>()
                                     .Where(c => c != null && !c.name.StartsWith("__preview"))
                                     .OrderBy(c => c.name.EndsWith("Spin") ? 0 : 1).ThenBy(c => c.name).ToList();
+        AttachPreview(Instantiate(prefab), previewClips, null);
+    }
+    // The turntable instance - the preview FBX's, or the one the in-process probe built from its own parts (VehicleProbePreview;
+    // `assets` are the meshes, materials and textures made for it, destroyed with it). Spin FIRST in the clip list, as above.
+    void AttachPreview(GameObject go, List<AnimationClip> clips, List<UnityEngine.Object> assets)
+    {
+        previewClips = clips ?? new List<AnimationClip>(); previewAssets = assets;
         if (previewClipIdx >= previewClips.Count) previewClipIdx = 0;
         spinClip = previewClips.Count > 0 ? previewClips[previewClipIdx] : null;
         if (pru == null) pru = new PreviewRenderUtility();
-        inst = Instantiate(prefab);
+        inst = go;
         pru.AddSingleGO(inst);
         checkerOriginals = null;
         if (previewChecker) ApplyChecker(true);   // fresh instance: repaint it
@@ -2589,6 +2714,7 @@ public class VehicleLabWindow : EditorWindow
     void DestroyPreview()
     {
         if (inst != null) { DestroyImmediate(inst); inst = null; }
+        if (previewAssets != null) { foreach (var o in previewAssets) if (o != null) DestroyImmediate(o); previewAssets = null; }   // the in-process preview's meshes, materials, textures
         boneShards = null; highlightedRenderers = null; highlightedOriginals = null;   // per-instance caches die with it
         spinClip = null; previewClips = null; boundsValid = false;
         selectedPart = ""; highlightedRenderers = null; highlightedOriginals = null;

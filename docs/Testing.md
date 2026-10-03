@@ -121,6 +121,38 @@ ray cast are Blender's float32 arithmetic (`VehicleProbe.BlenderWorld.cs`, `Vehi
 verdicts off with the double chain, 0 with this; every inside-out verdict agrees (14,023); the Ehrhardt's spin output
 keeps 6 visibility verdicts where Blender's binary contradicts its own box test (Review Backlog). The `custom_normals`
 fixture holds a leaning and a flat quad whose vertex normals are read off Blender to the bit.
+**Since 2026-10-03 (step 3d) the drill also runs JOBS** — probes with the Lab's other inputs, a second model (`merge2=`),
+per-part placements (`parttx=`) and an orientation (`proberot=`), from one JSON both sides read
+(`tools/vehicle-probe-drill/probe_jobs.py`, `ProbeDrill.cs @jobs.json`, `blender_probe_many.py @jobs.json`): ten on
+the `second_model_a/b/c`, `placement_nested`, `placement_split`, `placement_shear` and `insideout` fixtures (a turned second-model root
+with a per-axis scale, a mirrored node, leaning normals, a skinned part, a bone shape, a clashing name, a single-mesh
+second model's split, a first model's split beside a second model and both splitting at once, placements on a parent with children, on a loose
+part, with a per-axis scale on a turned part, on a missing name, with a zero scale; the orientation about Z and about X),
+and one per saved recipe that sets any of these, with the recipe's exact arguments formatted as the Lab formats them
+(`Tests/test_probe_jobs.py` holds the formatting to the Lab's). Every job's MATRIX and VERTEX rows are held bit for bit
+like a file's; `recipe_check.py` judges a recipe with inputs on its job's rows — its B_ parts and placed parts included.
+What no drill outside Unity can hold is the PREVIEW the Lab builds from the probe's parts: the Bake Tests row *Does the
+in-process probe preview match the Blender preview?* (`VehicleProbePreviewGateTest`, no Blender needed) sets it beside
+Unity's import of the preview FBX the last Blender probe left for the same source, part for part by name — bounds centre
+and size within 1e-3 of the extent, the facing of the faces — and fails on a leaked Unity mesh. A single-part FBX
+root is matched by its mesh's original part name, because Unity renames that root to the file name. The allowance
+for stale previews is at most five percent of distinct matched parts; a mismatch on a one-part model fails.
+The sheared-child job holds the bounds of children and descendants after detachment. The Lab routes geometry the
+kernel does not yet evaluate (morph targets, bone-parented meshes, animated second models and animated/placed
+first-model skinned meshes) through Blender; `VehicleProbeMergeTests` holds this routing policy.
+
+**`VehicleProbePreviewHeadlessTest.Run`** runs in Unity with `-batchmode -nographics -executeMethod
+VehicleProbePreviewHeadlessTest.Run`. It checks the preview frame against coordinates measured from Blender's FBX
+export imported in Unity, normals perpendicular to a nonuniformly scaled panel, and destruction of both complete
+and partially built previews. It also checks material colours against the imported FBX's sRGB values (Unity's FBX
+importer converts Blender's linear colours on import: measured in the project's import cache on the Salegs Revenge's
+probe FBX, 0.137255 -> 0.4062), BLEND/MASK/OPAQUE
+alpha handling, brightness preserving alpha, imported root names, and rejection of reversed winding on a single
+part while allowing five percent of stale parts in larger models. Run it in a Unity project with the HAF editor
+package installed; it exits nonzero
+if an invariant fails. The probe comparator's normal rays retain Blender's forward-matrix arithmetic; rendered
+surface normals use the inverse transpose.
+
 A file too large for Unity's 32-bit standalone Mono is probed on the 64-bit .NET runtime instead, and the drill says so. The names come from a port of the
 importer's own tree construction (`compute_vnodes`: creation depth-first from the parentless nodes in index order,
 armatures at the joints' deepest common ancestor, skinned meshes moved or split off under them, meshes on bones moved

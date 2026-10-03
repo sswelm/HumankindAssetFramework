@@ -5,6 +5,46 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Preview material and comparison fixes:** the in-process Lab preview preserves glTF transparency and alpha
+  cutouts, and converts linear colour factors to the sRGB colours Unity's FBX importer made of the Blender preview
+  (measured in the project's import cache: the Salegs Revenge's Charcoal 0.137255 imported as 0.4062, its red 0.8 as
+  0.90633 - the exporter writes the linear number, the importer converts; a revert on the exporter's line alone was
+  wrong and is undone). The preview
+  comparison recognizes single-part FBX roots by their mesh names. Its five-percent allowance counts distinct
+  parts and no longer lets a completely reversed single-part model pass. Headless Unity regression checks cover
+  all four fixes.
+- **Probe review fixes:** match the preview FBX's measured Unity frame (-X, Z, -Y of Blender), transport rendered
+  normals by the inverse transpose under nonuniform scale, and clean up partially built previews on failure.
+  Detaching a sheared child now refreshes its bounds and its descendants' bounds. Morph targets, bone-parented
+  meshes, animated second models, animated/placed first-model skinned meshes and glTF features refused by the
+  reader retain the Blender probe. Recipe drill arguments now match Unity's Single midpoint formatting.
+- **The Vehicle Lab's Probe parts runs in-process for glTF sources — step 3d of replacing Blender.** A `.glb`/`.gltf`
+  source (with a `.glb`/`.gltf` second model, or none) is probed by the C# probe (`VehicleProbe`) instead of a headless
+  Blender: the same part rows from the same inputs — the second model merged in with its offset, rotation and per-axis
+  scale, every placement, the Orientation the inside-out verdicts are judged in — in a fraction of a second instead of
+  some 25 s, and the turntable preview is built from the probe's own parts (`VehicleProbePreview`: one object per part,
+  named as its row names it, textured, tinted by the brightness dials) instead of a preview FBX written by Blender,
+  imported and instantiated. FBX/OBJ/.blend sources keep the Blender probe. The merge, the placements and the orientation
+  are Blender's own arithmetic, read from its source (`VehicleProbe.Merge.cs`: mathutils' matrix products, `Matrix.Rotation`'s
+  float32 angle wrap, the `matrix_world` assignment's decompose-and-rebuild round trip, `Mesh.transform`'s point transform,
+  the face flip under a mirroring matrix with the custom-normal shorts travelling with the corners, the second model's names
+  made unique against the first model's and prefixed, its helpers dropped, a vertex group named like a first-model bone
+  counting in the rig report) and held **bit for bit** by the drill on fixtures that exercise each — a second model under a
+  turned root with a per-axis scale (a shear, baked), a mirrored node, leaning file normals, a skinned part, a bone shape, a
+  name the first model already has, a single-mesh second model split into loose parts (and the first model's loose parts
+  linked after the second model's), placements on a part with children (detached, world kept) and on a loose part, a
+  per-axis scale on a turned part, a name no part has — **and on every saved recipe that sets one of these inputs, with
+  the recipe's exact arguments** (the TOW launcher's tripod, the paddle gunboat's second hull, the frigate's four placements,
+  the Comanche's orientation): `tools/vehicle-probe-drill/probe_jobs.py`, run by both sides. Said, not solved
+  (docs/Review-Backlog.md): an ANIMATED second model is baked by Blender at its untouched import pose (a blend one frame in
+  that no file states) — here at its static transforms; a placement on a SKINNED part reads its box off the double chain
+  (close, not bit for bit); the in-process path poses the first model at its first clip's start where the Blender path
+  showed the untouched import; the preview's brightness is a material tint where Blender's preview baked the textures.
+  The Bake Tests gained the row *Does the in-process probe preview match the Blender preview?*: for every recipe whose
+  Blender preview FBX is still in the project, the in-process preview is set beside Unity's import of that FBX part for
+  part — bounds centre and size, the facing of the faces — so the frame and the winding are judged in Unity, by Unity's
+  own FBX import, not by eye; and the Lab's progress bar now moves with the probe's stages.
+
 - **Safe inverse bind matrices follow Blender's fallback.** If a float32 determinant rounds to zero, add `1e-8f`
   to the diagonal and retry, then use identity if still singular. An invertible bind matrix can underflow here;
   dividing by zero previously produced NaN vertices and marked an enclosed skinned mesh external. Bit-exact

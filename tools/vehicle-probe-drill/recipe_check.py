@@ -10,8 +10,10 @@ and, where the part carries no placement, the same box.
     python recipe_check.py <projectDir> <csharp rows> [<differing out>]  SAME / DIFFERS per recipe; the sources of the
                                                                         recipes that differ are written to <differing out>
 
-Not judged, and said per recipe: parts of a SECOND model (the "B_" prefix - the merge is the Lab switch's part, 3d),
-parts with a placement (their box is moved by it), recipes whose source is an FBX/OBJ/.blend (Blender keeps those).
+A recipe that sets a second model, a placement or an orientation is probed WITH them (probe_jobs.py: the rows behind the
+key `<source>#<recipe>`, since 2026-10-03, step 3d) and judged on those rows - its B_ parts and its placed parts' boxes
+included. Without such rows (an older row file, a second model that is not a .glb/.gltf), the B_ parts and the placed
+parts' boxes are not judged, and said. Recipes whose source is an FBX/OBJ/.blend are Blender's, not judged.
 A recipe is the user's data and can be STALE - saved before its source was re-cut or re-fused - so a difference is
 not a verdict on the probe by itself: the drill has Blender probe the differing recipes' sources as they are today,
 and only a C# row that differs from BLENDER's fails. (First run, 2026-10-02: 17 of 20 recipes the same; the other
@@ -65,12 +67,14 @@ def main(argv):
             print(f"NOTE {name}: source is {os.path.splitext(src)[1] or 'unset'} - Blender keeps those, not judged"); continue
         if not os.path.isfile(src):
             print(f"NOTE {name}: source {src} is not on this machine - not judged"); continue
-        have = rows.get(key(src))
+        own_key = key(src) + "#" + os.path.splitext(name)[0]
+        with_inputs = own_key in rows   # probed with the recipe's second model, placements and orientation
+        have = rows.get(own_key) or rows.get(key(src))
         if have is None:
             print(f"DIFFERS {name}: the C# probe has no rows for {src}"); fails += 1; differing.append(src); continue
         judged += 1
         stored = r.get("parts") or []
-        second = [p for p in stored if p["name"].startswith("B_")] if r.get("srcFile2") else []
+        second = [p for p in stored if p["name"].startswith("B_")] if r.get("srcFile2") and not with_inputs else []
         own = [p for p in stored if p not in second]
         missing = [p["name"] for p in own if p["name"] not in have]
         verts = []; boxes = []; placed = 0; worst = 0.0
@@ -84,7 +88,7 @@ def main(argv):
             if p.get("verts") != row[0]:
                 verts.append(f"{p['name']} {row[0]} vs {p.get('verts')}")
             off = p.get("offset") or {}; scl = p.get("scale") or {}
-            if any(abs(off.get(a, 0)) > 1e-9 for a in "xyz") or any(abs(scl.get(a, 1) - 1) > 1e-9 for a in "xyz"):
+            if not with_inputs and (any(abs(off.get(a, 0)) > 1e-9 for a in "xyz") or any(abs(scl.get(a, 1) - 1) > 1e-9 for a in "xyz")):
                 placed += 1; continue
             c = [p["center"][a] for a in "xyz"]; s = [p["size"][a] for a in "xyz"]
             d = max(abs(x - y) for x, y in zip(c + s, row[1] + row[2]))
@@ -99,7 +103,7 @@ def main(argv):
         if boxes:
             problems.append(f"{len(boxes)} boxes differ (C# vs recipe), e.g. {boxes[0]}")
         extra = len(have) - (len(own) - len(missing))
-        tail = f"{len(own)} stored parts" + (f", {len(second)} second-model parts not judged" if second else "") + (f", {placed} placed parts' boxes not judged" if placed else "") + (f", {extra} probe parts the recipe does not store" if extra else "")
+        tail = f"{len(own)} stored parts" + (" - probed with the recipe's second model, placements and orientation" if with_inputs else "") + (f", {len(second)} second-model parts not judged" if second else "") + (f", {placed} placed parts' boxes not judged" if placed else "") + (f", {extra} probe parts the recipe does not store" if extra else "")
         if problems:
             fails += 1; differing.append(src); print(f"DIFFERS {name}: " + "; ".join(problems) + f" ({tail})")
         else:
