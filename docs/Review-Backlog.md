@@ -113,6 +113,51 @@ launch from the Clip Range dialog); (2) reduce/`prep_model` → a C# quadric dec
   encode/decode of `mesh_normals.cc` is the port still to write) and one fixed ray on a Workshop split part, not yet
   explained. Until this lands the probe drill FAILS on this recipe source (every push runs it); the quick way out is
   the user's: re-fuse or re-save the recipe only moves the file, it does not change the rule.
+  **Causes 1 and 2 ported (2026-10-03, PR after #116)**: `VehicleProbe.BlenderWorld.cs` composes every matrix_world
+  as Blender does (bit for bit on 14,003 of 14,023 parts, MATRIX rows in the drill) and the ray cast is Blender's
+  float32; the Dragon reads 5 off (4 normal rays, cause 3; 1 fixed ray on `Material2_2008_Part_034`, unexplained).
+  **Cause 3 ported the same day** (`VehicleProbe.CustomNormals.cs`: the smooth fans - the importer's flat-face guess
+  breaks them -, `corner_fan_space_define`, the two-short encode and decode, `mix_normals_corner_to_vert`, all read
+  from `mesh_normals.cc`; the custom_normals fixture and the drill's VERTEX rows hold it to the bit): the Dragon reads
+  **0 of 2,507 off**. The fixed ray on `Material2_2008_Part_034` was the box test's FLT_MAX reciprocal (ported). Said:
+  **the vertex normal is not universally bit for bit.** PR #117 review found the missing face-normal detail:
+  `Mesh::face_normals()` calls `normal_calc_ngon` even for triangles (Newell's sum, normalized by a reciprocal),
+  while `MeshPolygon.normal` calls the triangle cross-product formula. The port had used the latter for both.
+  The corrected cached normals fix two normal-ray visibility differences on `sns_dragon_split_fused_Spin.glb`;
+  both reduced four-vertex cases now match Blender's vertex normals bit for bit in unit tests. The full comparison
+  passes on all 97 available files (44 fixtures, 32 registry files, 21 recipe sources; no Khronos cache in this run).
+  Normal bits still differ on some vertices (the Dragon source: 366 of 2,507), so VERTEX rows hold positions and
+  count normal differences; all sampled visibility and inside-out verdicts agree. The C-runtime trigonometric
+  functions remain approximated by double functions rounded to float.
+- ~~**Rays whose origin sits exactly on a box plane**~~ — DONE (2026-10-03, PR #117 review).
+  `BLI_bvhtree_new` clamps even a requested epsilon of zero to `FLT_EPSILON`; `BLI_bvhtree_insert` inflates leaf bounds
+  by that amount. The port omitted the inflation. This explains the apparent scale dependence: at a bound of 1,
+  adding epsilon advances one float32 value; at 2, the half-ulp rounds back to 2. Both cases now match Blender in
+  a regression test. All six Ehrhardt spin visibility differences are fixed, with no differing verdicts in the
+  97-file comparison.
+- ~~**Blender-exact vertex positions for skinned parts**~~ — DONE 2026-10-03 (`VehicleProbe.BlenderSkin.cs`): the
+  importer's chain ported bit for bit (mathutils' `inverted_safe` adjugate over the determinant,
+  `mat4_to_loc_rot_size`, `mat3_normalized_to_quat_fast`, `quat_to_mat3`, mathutils'
+  products, numpy's float32 blend and multiply-add chain); the three skinned slivers agree; the drill's VERTEX rows
+  hold every skinned part's vertex 0 to the bit.
+  PR #117 review also fixes shared joints: the guessed bind pose uses inverse binds from **all** skins in file
+  order, with the last skin winning, while each mesh retains its **own** skin's inverse binds. Skins without an IBM
+  still inherit that guessed pose. Zero-weight vertices follow their first JOINTS_0 influence, including posed
+  boxes and bone reports. Both cases have Blender fixtures and unit coverage.
+  A further review adds `inverted_safe`'s zero-determinant fallback: perturb the diagonal by `1e-8f`, then use
+  identity if still zero. Even an invertible IBM can have a determinant that underflows in float32; without
+  the fallback, NaN vertices incorrectly make an enclosed mesh external. `bind_inverse_underflow` agrees with
+  Blender on visibility, matrices and vertex positions; unit tests hold both fallback paths bit for bit.
+- **Meshes parented to a bone: the bone chain** — OPEN (2026-10-03). A glTF mesh node under a joint becomes, in
+  Blender, an object parented to that BONE (`parent_type = 'BONE'`, moved by −bone_length along Y), and its
+  matrix_world is armature @ `pchan->pose_mat` (translated to the bone's tail) @ local. The pose matrix comes from the
+  editbone (head/tail from `editbone_arma_mat`, length from the importer's heuristic, roll from `align_roll`), the
+  rest matrix (`vec_roll_to_mat3`, `BKE_armature_where_is_bone`), the pose channel the importer sets relative to it
+  (`er.conjugated() @ (t - et)`) and `BKE_pchan_to_mat4` / `BKE_armature_mat_bone_to_pose` down the chain. 20 of
+  14,023 matrices (the dug-out canoe's 19 cloth and rope parts, the `mesh_on_bone` fixture) differ from Blender's by
+  a few ulps for it; the drill counts them as `under-bone` and does not hold them. The sources are read; the port is
+  the next step after cause 3.
+
   Follow-up verification (2026-10-03, PR #116 review): `FULL=1` compared the 94 files available locally (no Khronos
   sample cache) and failed on the three skinned inside-out counts named above, the Dragon source's 12 visibility
   differences, and **49 of 17,152 visibility verdicts** on `sns_dragon_split_fused_Spin.glb`. Running that baked

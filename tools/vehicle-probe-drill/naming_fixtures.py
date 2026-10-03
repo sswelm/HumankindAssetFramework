@@ -480,9 +480,75 @@ def fx_insideout(out):
     F.write_glb(os.path.join(out, "insideout.glb"), root, b)
 
 
+def fx_custom_normals(out):
+    """Blender's vertex normals for a mesh WITH file normals (the visibility verdict's normal ray): the importer sets them as
+    custom normals, which Blender stores as two shorts against each corner's smooth-fan space and mixes back per vertex.
+    Leaning: a quad whose file normals lean 10 degrees about X, +Z side and -Z side - the decoded vertex normals carry the
+    quantization (read off Blender: v0 (-7.6e-9, -0.17361137, 0.98481423)). Flat: a quad whose file normals are +Y while its
+    winding faces -Y - the fan normal is the face normal, the custom normal its opposite, and the decode lands 4.8e-5 off
+    axis (v0 (-2.1e-12, -4.777114e-05, 1.0)), the Dragon's decal case. Every node its own mesh: no split."""
+    import math
+    b = F.Buf()
+    th = math.radians(10.0)
+    pos = [(0, 0, 0), (1, 0, 0), (1, 0, 1), (0, 0, 1)]
+    idx = [0, 1, 2, 0, 2, 3]
+    lean = [(0.0, math.cos(th), math.sin(th))] * 2 + [(0.0, math.cos(th), -math.sin(th))] * 2
+    flat = [(0.0, 1.0, 0.0)] * 4
+    meshes = [{"name": "leaning", "primitives": [{"attributes": {"POSITION": b.accessor(pos, "f", "VEC3"), "NORMAL": b.accessor(lean, "f", "VEC3", minmax=False)}, "indices": b.accessor(idx, "H", "SCALAR")}]},
+              {"name": "flat", "primitives": [{"attributes": {"POSITION": b.accessor([(x + 5, y, z) for x, y, z in pos], "f", "VEC3"), "NORMAL": b.accessor(flat, "f", "VEC3", minmax=False)}, "indices": b.accessor(idx, "H", "SCALAR")}]}]
+    nodes = [{"name": "Leaning", "mesh": 0}, {"name": "Flat", "mesh": 1}]
+    root = F.base("custom_normals", meshes=meshes, nodes=nodes, scenes=[{"nodes": [0, 1]}], scene=0)
+    F.write_glb(os.path.join(out, "custom_normals.glb"), root, b)
+
+
+def fx_shared_skin_bind_pose(out):
+    """Two skins share a joint: Blender guesses one bind pose from the LAST skin's IBM (+10), then retargets each
+    mesh with its OWN IBM. Skin|A and NoIBM are outside Box; SkinB is inside. Pipe names exercise diagnostic parsing."""
+    b = F.Buf()
+    pos, idx = box(0, 0, 0, 2)
+    identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+    shifted = identity.copy(); shifted[12] = -10
+    meshes = [{"primitives": [{"attributes": {"POSITION": b.accessor(pos, "f", "VEC3")}, "indices": b.accessor(idx, "H", "SCALAR")}]},
+              {"primitives": [{"attributes": skinned(b)}]}]
+    nodes = [{"name": "Rig", "children": [1]}, {"name": "Joint"}, {"name": "Box", "mesh": 0},
+             {"name": "Skin|A", "mesh": 1, "skin": 0}, {"name": "SkinB", "mesh": 1, "skin": 1}, {"name": "NoIBM", "mesh": 1, "skin": 2}]
+    skins = [{"skeleton": 0, "joints": [1], "inverseBindMatrices": b.accessor([matrix], "f", "MAT4")} for matrix in (identity, shifted)]
+    skins.append({"skeleton": 0, "joints": [1]})
+    root = F.base("shared_skin_bind_pose", meshes=meshes, nodes=nodes, skins=skins, scenes=[{"nodes": [0, 2, 3, 4, 5]}], scene=0)
+    F.write_glb(os.path.join(out, "shared_skin_bind_pose.glb"), root, b)
+
+
+def fx_zero_weight_joint(out):
+    """Blender assigns a zero-weight vertex to its first JOINTS_0 influence (joint 1, translated +10), not joint 0."""
+    b = F.Buf()
+    attrs = skinned(b, joint=1)
+    attrs["WEIGHTS_0"] = b.accessor([(0, 0, 0, 0)] * 3, "f", "VEC4", minmax=False)
+    root = F.base("zero_weight_joint", meshes=[{"primitives": [{"attributes": attrs}]}],
+                  nodes=[{"name": "Rig", "children": [1, 2]}, {"name": "Unused"}, {"name": "FirstInfluence", "translation": [10, 0, 0]},
+                         {"name": "ZeroWeight", "mesh": 0, "skin": 0}], skins=[{"joints": [1, 2]}], scenes=[{"nodes": [0, 3]}], scene=0)
+    F.write_glb(os.path.join(out, "zero_weight_joint.glb"), root, b)
+
+
+def fx_bind_inverse_underflow(out):
+    """An invertible IBM with det=1e-48 underflows in float32. Blender's safe inverse keeps Mesh finite inside Box."""
+    b = F.Buf()
+    attrs = skinned(b)
+    attrs["NORMAL"] = b.accessor([(0, 0, 1)] * 3, "f", "VEC3", minmax=False)
+    pos, idx = box(0, 0, 0, 2)
+    ibm = [1e-16,0,0,0, 0,1e-16,0,0, 0,0,1e-16,0, 0,0,0,1]
+    meshes = [{"primitives": [{"attributes": attrs}]},
+              {"primitives": [{"attributes": {"POSITION": b.accessor(pos, "f", "VEC3")}, "indices": b.accessor(idx, "H", "SCALAR")}]}]
+    nodes = [{"name": "Rig", "children": [1]}, {"name": "Joint", "scale": [1e16, 1e16, 1e16]},
+             {"name": "Mesh", "mesh": 0, "skin": 0}, {"name": "Box", "mesh": 1}]
+    skins = [{"skeleton": 0, "joints": [1], "inverseBindMatrices": b.accessor([ibm], "f", "MAT4")}]
+    root = F.base("bind_inverse_underflow", meshes=meshes, nodes=nodes, skins=skins, scenes=[{"nodes": [0, 2, 3]}], scene=0)
+    F.write_glb(os.path.join(out, "bind_inverse_underflow.glb"), root, b)
+
+
 FIXTURES = [fx_naming, fx_order, fx_armature_names, fx_skinned_not_moved, fx_skinned_animated, fx_mesh_on_bone, fx_islands, fx_rotated_armature,
             fx_two_armatures, fx_nested_skins, fx_split_collision, fx_nonunit_rotation, fx_cameras, fx_camera_data_names,
-            fx_name_tails, fx_long_names, fx_many_names, fx_bone_tails, fx_split_tails, fx_icosphere_mesh, fx_visibility, fx_visibility_skinned, fx_visibility_split, fx_insideout]
+            fx_name_tails, fx_long_names, fx_many_names, fx_bone_tails, fx_split_tails, fx_icosphere_mesh, fx_visibility, fx_visibility_skinned, fx_visibility_split, fx_insideout, fx_custom_normals,
+            fx_shared_skin_bind_pose, fx_zero_weight_joint, fx_bind_inverse_underflow]
 
 
 def main(out):

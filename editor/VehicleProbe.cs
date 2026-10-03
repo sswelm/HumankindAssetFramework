@@ -34,7 +34,16 @@ public static partial class VehicleProbe
         public int Vis = 1;                 // 1 external / 0 interior (step 3b)
         public string Bone = "";            // dominant bone of a skinned part, else ""
         public int Flip;                    // islands the inside-out fix would reverse (step 3c)
+        public float[] BlenderMatrix;       // matrix_world as Blender holds it (float32, row-major, Blender's frame) - the verdicts read it
+        public bool UnderBone;              // the node hangs under a joint: Blender parents the object to the BONE, whose pose chain is not modelled yet
+        public float[] FirstVertex;         // vertex 0 as the verdicts see it: world position (3) and normalized world normal (3), Blender's frame
         public string Row => string.Join("|", "PART", Name, Verts.ToString(), F(Center), F(Size), Vis.ToString(), Bone, Flip.ToString());
+        /// <summary>The drill's bit-for-bit check of the matrix against Blender's own: 16 floats, row-major, shortest round-trip form;
+        /// a part under a bone says `under-bone` after them and is counted, not held (docs/Review-Backlog.md).</summary>
+        public string MatrixRow => "MATRIX|" + Name + "|" + string.Join(" ", BlenderMatrix.Select(v => ((double)v).ToString("R", System.Globalization.CultureInfo.InvariantCulture))) + (UnderBone ? "|under-bone" : "");
+        /// <summary>The drill's bit-for-bit check of the whole chain - matrix, skinning, custom normals - on one vertex: `matrix_world @
+        /// co` and `(matrix_world.to_3x3() @ normal).normalized()` of vertex 0, as Blender's probe computes them.</summary>
+        public string VertexRow => "VERTEX|" + Name + "|" + string.Join(" ", FirstVertex.Take(3).Select(v => ((double)v).ToString("R", System.Globalization.CultureInfo.InvariantCulture))) + "|" + string.Join(" ", FirstVertex.Skip(3).Select(v => ((double)v).ToString("R", System.Globalization.CultureInfo.InvariantCulture))) + (UnderBone ? "|under-bone" : "");
     }
 
     public sealed class RigBone
@@ -52,6 +61,9 @@ public static partial class VehicleProbe
         public bool Split;                  // a single mesh object was split into loose parts (names synthetic)
     }
 
+    /// <summary>A Blender-frame vector (x, y, z) back in glTF's frame (x, z, -y): exact.</summary>
+    static double[] GltfOf(float[] b) => new double[] { b[0], b[2], -b[1] };
+
     static string F(double[] v) => string.Join(",", v.Select(x => x.ToString("0.0000", System.Globalization.CultureInfo.InvariantCulture)));
 
     /// <summary>The probe of one source model, in the pose Blender's import shows: the first animation's start (the
@@ -68,6 +80,11 @@ public static partial class VehicleProbe
         // which node's world matrix is each skin's armature OBJECT: the node that became it, or identity for the dummy root
         var armaWorld = new double[m.Skins.Count][];
         for (int si = 0; si < m.Skins.Count; si++) armaWorld[si] = names.ArmatureNodeOfSkin[si] >= 0 ? world[names.ArmatureNodeOfSkin[si]] : HafTransforms.Identity;
+        // the same matrices as Blender holds them: float32, composed as Blender composes them (the verdicts read these; a
+        // mesh parented to a BONE is not modelled yet - its matrix is the node chain's, said in docs/Review-Backlog.md)
+        var bworld = BlenderWorldMatrices(m, m.Animations.Count > 0 ? HafTransforms.PoseTrsAt(m, 0, 0.0) : null);
+        var bArma = new float[m.Skins.Count][];
+        for (int si = 0; si < m.Skins.Count; si++) bArma[si] = names.ArmatureNodeOfSkin[si] >= 0 ? bworld[names.ArmatureNodeOfSkin[si]] : IdentityF();
         r.Armature = names.ArmaturesInOrder.Count > 0 ? names.ArmaturesInOrder[0].name : null;   // the first CREATED, which is what `arms[0]` is - not skin 0's
 
         // ---- the mesh objects, in Blender's order, each one object per node (a mesh two nodes share is two objects)
@@ -109,8 +126,8 @@ public static partial class VehicleProbe
         //      part - `matrix_world @ v.co`, not the posed vertices the box is read from), one BVH, escape rays
         if (r.Parts.Count > 0)
         {
-            double[][] bindArma = null; var jointMatsOfSkin = new Dictionary<int, double[][]>();
-            var partMeshes = new List<PartMesh>(); var objWorlds = new List<double[]>();   // per part: Blender's matrix_world (the armature's for a skinned part)
+            var skinnerOfSkin = new Dictionary<int, BlenderSkinner>();
+            var partMeshes = new List<PartMesh>(); var mats = new List<float[]>();   // per part: Blender's matrix_world (the armature's for a skinned part)
             foreach (var (node, prim, verts) in sources)
             {
                 var mesh = m.Meshes[m.Nodes[node].Mesh];
@@ -120,25 +137,28 @@ public static partial class VehicleProbe
                 Func<HafPrimitive, int, double[]> normal = (p, v) => p.Normals == null ? null : new double[] { p.Normals[v * 3], p.Normals[v * 3 + 1], p.Normals[v * 3 + 2] };
                 if (skinned)
                 {
-                    if (!jointMatsOfSkin.TryGetValue(skin, out var jointMats))
-                    {
-                        bindArma = bindArma ?? BindArmatureMatrices(m, names);
-                        jointMats = jointMatsOfSkin[skin] = BindJointMatrices(m, m.Skins[skin], bindArma);
-                    }
-                    var jm = jointMats;
-                    position = (p, v) => p.Skinned ? HafTransforms.Apply(BindMatrix(p, v, jm), p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2], 1.0)
-                                                   : new double[] { p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2] };
-                    // skin_into_bind_pose skins the NORMALS too: the 3x3 of the same weighted matrix, no translation, normalized
-                    // (external review of PR #115: left as the file's, a part whose only escape is its normal ray read interior)
-                    normal = (p, v) => p.Normals == null ? null
-                                     : p.Skinned ? HafTransforms.Apply(BindMatrix(p, v, jm), p.Normals[v * 3], p.Normals[v * 3 + 1], p.Normals[v * 3 + 2], 0.0)
-                                     : new double[] { p.Normals[v * 3], p.Normals[v * 3 + 1], p.Normals[v * 3 + 2] };
+                    // the mesh data as the importer stores it: positions and normals skinned into the bind pose in numpy float32, with
+                    // the joint matrices mathutils gave it (VehicleProbe.BlenderSkin.cs) - a zero-area triangle's verdict hangs on these
+                    // bits (3 skinned parts of 14,023 read differently from the double chain; external review of PR #115 had first
+                    // found the normals left unskinned)
+                    if (!skinnerOfSkin.TryGetValue(skin, out var skinner)) skinner = skinnerOfSkin[skin] = BlenderSkinner.Build(m, skin, names);
+                    var sknr = skinner;
+                    position = (p, v) => p.Skinned ? GltfOf(sknr.Position(p, v)) : new double[] { p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2] };
+                    normal = (p, v) => p.Normals == null ? null : p.Skinned ? GltfOf(sknr.Normal(p, v)) : new double[] { p.Normals[v * 3], p.Normals[v * 3 + 1], p.Normals[v * 3 + 2] };
                 }
-                partMeshes.Add(BuildPartMesh(m, node, prim, verts, skinned ? armaWorld[skin] : world[node], position, normal));
-                objWorlds.Add(skinned ? armaWorld[skin] : world[node]);
+                var mb = ToRowMajor(skinned ? bArma[skin] : bworld[node]);
+                partMeshes.Add(BuildPartMesh(m, node, prim, verts, position, normal, mb));
+                mats.Add(mb); r.Parts[partMeshes.Count - 1].BlenderMatrix = mb;
+                var pm0 = partMeshes[partMeshes.Count - 1];
+                if (pm0.Count > 0) r.Parts[partMeshes.Count - 1].FirstVertex = new[] { pm0.World[0], pm0.World[1], pm0.World[2], pm0.Normal[0], pm0.Normal[1], pm0.Normal[2] };
+                // under a bone when ANY ancestor is one: the importer parents the first object below a joint to the BONE, and
+                // the objects below that to it in turn (the dug-out canoe's cloth hangs two plain nodes under a joint)
+                bool underBone = names.IsBone[node];   // a mesh ON a joint becomes a child object under that bone
+                for (int a = m.Nodes[node].Parent; a >= 0 && !underBone; a = m.Nodes[a].Parent) underBone = names.IsBone[a];
+                r.Parts[partMeshes.Count - 1].UnderBone = !skinned && underBone;
             }
             Visibility(r.Parts, partMeshes);
-            InsideOut(r.Parts, partMeshes, objWorlds);
+            InsideOut(r.Parts, partMeshes, mats);
         }
 
         // ---- rig_report: the first armature's bones, from the undeformed vertices (v.co = the bind pose)
@@ -194,6 +214,7 @@ public static partial class VehicleProbe
                 if (local != null) { x = local[v * 3]; y = local[v * 3 + 1]; z = local[v * 3 + 2]; }
                 else { x = p.Positions[v * 3]; y = p.Positions[v * 3 + 1]; z = p.Positions[v * 3 + 2]; }
                 if (x < mn[0]) mn[0] = x; if (x > mx[0]) mx[0] = x; if (y < mn[1]) mn[1] = y; if (y > mx[1]) mx[1] = y; if (z < mn[2]) mn[2] = z; if (z > mx[2]) mx[2] = z;
+                bool zeroWeights = skinned && HasZeroWeights(p, v);
                 if (skinned)
                     for (int set = 0; set < 2; set++)
                     {
@@ -201,7 +222,7 @@ public static partial class VehicleProbe
                         if (joints == null || weights == null) continue;
                         for (int k = 0; k < 4; k++)
                         {
-                            float w = weights[v * 4 + k];
+                            float w = zeroWeights && set == 0 && k == 0 ? 1f : weights[v * 4 + k];
                             if (w <= 0) continue;
                             int joint = joints[v * 4 + k];
                             if (joint >= m.Skins[skin].Joints.Length || !names.BoneOfJoint.TryGetValue(m.Skins[skin].Joints[joint], out var bone)) continue;
@@ -429,8 +450,17 @@ public static partial class VehicleProbe
     static double[] BindPosition(HafPrimitive p, int v, double[][] jointMats)
         => HafTransforms.Apply(BindMatrix(p, v, jointMats), p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2], 1.0);
 
+    // skin_into_bind_pose also updates the weights used for vertex groups: a zero sum gives the first influence 1.
+    static bool HasZeroWeights(HafPrimitive p, int v)
+    {
+        if (!p.Skinned) return false;
+        for (int k = 0; k < 4; k++)
+            if (p.Weights[v * 4 + k] != 0f || (p.Weights1 != null && p.Weights1[v * 4 + k] != 0f)) return false;
+        return true;
+    }
+
     /// <summary>A skinned vertex's skinning matrix into the importer's bind pose: the weighted joint matrices, the weights
-    /// normalized by their sum (a zero sum = all on the first joint). Positions go through it with w = 1, normals with
+    /// normalized by their sum (a zero sum = all on the first influence). Positions go through it with w = 1, normals with
     /// w = 0 (skin_into_bind_pose: the 3x3, no translation).</summary>
     static double[] BindMatrix(HafPrimitive p, int v, double[][] jointMats)
     {
@@ -478,12 +508,13 @@ public static partial class VehicleProbe
                 {
                     total++;
                     string best = null;
+                    bool zeroWeights = HasZeroWeights(p, v);
                     for (int set = 0; set < 2 && best == null; set++)
                     {
                         var joints = set == 0 ? p.Joints : p.Joints1; var weights = set == 0 ? p.Weights : p.Weights1;
                         if (joints == null || weights == null) continue;
                         for (int k = 0; k < 4; k++)
-                            if (weights[v * 4 + k] > 0.5f && joints[v * 4 + k] < sk.Joints.Length && names.BoneOfJoint.TryGetValue(sk.Joints[joints[v * 4 + k]], out var bn) && boneNames.Contains(bn)) { best = bn; break; }
+                            if ((zeroWeights && set == 0 && k == 0 ? 1f : weights[v * 4 + k]) > 0.5f && joints[v * 4 + k] < sk.Joints.Length && names.BoneOfJoint.TryGetValue(sk.Joints[joints[v * 4 + k]], out var bn) && boneNames.Contains(bn)) { best = bn; break; }
                     }
                     if (best == null) continue;
                     weighted++;

@@ -29,6 +29,15 @@ public static partial class VehicleProbe
     sealed class PartMesh { public float[] World; public float[] Normal; public float[] Local; public int[] Tris; public int Count; }   // Local: the mesh data as Blender holds it (float32, glTF frame; the bind pose for a skinned part) - the inside-out verdict reads it (step 3c)
 
     static readonly double[][] FixedDirections = MakeFixedDirections();
+    /// <summary>The fixed directions as mathutils normalizes them (Vector((1, 1, 1)).normalized(): double length, 1.0f / float(sqrt)).</summary>
+    static readonly float[][] FixedF32 = MakeFixedF32();
+    static float[][] MakeFixedF32()
+    {
+        var raw = new[] { new float[] { 1, 0, 0 }, new float[] { -1, 0, 0 }, new float[] { 0, 1, 0 }, new float[] { 0, -1, 0 }, new float[] { 0, 0, 1 }, new float[] { 0, 0, -1 },
+            new float[] { 1, 1, 1 }, new float[] { 1, 1, -1 }, new float[] { 1, -1, 1 }, new float[] { 1, -1, -1 }, new float[] { -1, 1, 1 }, new float[] { -1, 1, -1 }, new float[] { -1, -1, 1 }, new float[] { -1, -1, -1 } };
+        foreach (var d in raw) NormalizeVn(ref d[0], ref d[1], ref d[2]);
+        return raw;
+    }
     static double[][] MakeFixedDirections()
     {
         var raw = new[] { new double[] { 1, 0, 0 }, new double[] { -1, 0, 0 }, new double[] { 0, 1, 0 }, new double[] { 0, -1, 0 }, new double[] { 0, 0, 1 }, new double[] { 0, 0, -1 },
@@ -41,7 +50,7 @@ public static partial class VehicleProbe
     /// triangles, and its normal rays - from the object's local space through `objWorld` into Blender's frame.
     /// `dataPosition` gives a primitive's vertex in the object's local space (the file's position, or the bind pose);
     /// `dataNormal` the file's normal there (skinned into the bind pose for a skinned vertex), or null without one.</summary>
-    static PartMesh BuildPartMesh(HafModel m, int node, int onlyPrim, int[] onlyVerts, double[] objWorld, Func<HafPrimitive, int, double[]> dataPosition, Func<HafPrimitive, int, double[]> dataNormal)
+    static PartMesh BuildPartMesh(HafModel m, int node, int onlyPrim, int[] onlyVerts, Func<HafPrimitive, int, double[]> dataPosition, Func<HafPrimitive, int, double[]> dataNormal, float[] mb)
     {
         var mesh = m.Meshes[m.Nodes[node].Mesh];
         var local = new List<double>(); var fileNormal = new List<double>(); var tris = new List<int>();
@@ -82,50 +91,35 @@ public static partial class VehicleProbe
             offset += verts.Length;
         }
         int n = offset;
-        // a vertex without a file normal: Blender's computed one - the faces' normals weighted by the corner angle; none to sum = the position's direction
-        var computed = new double[n * 3];
-        for (int t = 0; t < tris.Count; t += 3)
-        {
-            int a = tris[t], b = tris[t + 1], c = tris[t + 2];
-            double ax = local[a * 3], ay = local[a * 3 + 1], az = local[a * 3 + 2], bx = local[b * 3], by = local[b * 3 + 1], bz = local[b * 3 + 2], cx = local[c * 3], cy = local[c * 3 + 1], cz = local[c * 3 + 2];
-            double ux = bx - ax, uy = by - ay, uz = bz - az, vx = cx - ax, vy = cy - ay, vz = cz - az;
-            double nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
-            double nl = Math.Sqrt(nx * nx + ny * ny + nz * nz);
-            if (nl == 0) continue;
-            nx /= nl; ny /= nl; nz /= nl;
-            double wa = CornerAngle(bx - ax, by - ay, bz - az, cx - ax, cy - ay, cz - az), wb = CornerAngle(ax - bx, ay - by, az - bz, cx - bx, cy - by, cz - bz), wc = CornerAngle(ax - cx, ay - cy, az - cz, bx - cx, by - cy, bz - cz);
-            computed[a * 3] += nx * wa; computed[a * 3 + 1] += ny * wa; computed[a * 3 + 2] += nz * wa;
-            computed[b * 3] += nx * wb; computed[b * 3 + 1] += ny * wb; computed[b * 3 + 2] += nz * wb;
-            computed[c * 3] += nx * wc; computed[c * 3 + 1] += ny * wc; computed[c * 3 + 2] += nz * wc;
-        }
         var pm = new PartMesh { Count = n, World = new float[n * 3], Normal = new float[n * 3], Local = new float[n * 3], Tris = tris.ToArray() };
+        // a mesh with file normals: Blender's vertex.normal is the file's normal through its two-short custom-normal encoding and the
+        // corner-angle mix (VehicleProbe.CustomNormals.cs), not the file's normal itself; without file normals it is the computed one
+        bool anyFileNormal = false; for (int i = 0; i < n && !anyFileNormal; i++) anyFileNormal = !double.IsNaN(fileNormal[i * 3]);
+        var Pb = new float[n * 3]; var Nb = anyFileNormal ? new float[n * 3] : null;
+        for (int i = 0; i < n; i++)
+        {
+            Pb[i * 3] = (float)local[i * 3]; Pb[i * 3 + 1] = (float)-local[i * 3 + 2]; Pb[i * 3 + 2] = (float)local[i * 3 + 1];
+            if (Nb == null) continue;
+            if (double.IsNaN(fileNormal[i * 3])) { Nb[i * 3] = Nb[i * 3 + 1] = Nb[i * 3 + 2] = float.NaN; }
+            else { Nb[i * 3] = (float)fileNormal[i * 3]; Nb[i * 3 + 1] = (float)-fileNormal[i * 3 + 2]; Nb[i * 3 + 2] = (float)fileNormal[i * 3 + 1]; }
+        }
+        float[] blenderN = BlenderVertexNormals(Pb, pm.Tris, Nb);
         for (int i = 0; i < n; i++)
         {
             double lx = local[i * 3], ly = local[i * 3 + 1], lz = local[i * 3 + 2];
             pm.Local[i * 3] = (float)lx; pm.Local[i * 3 + 1] = (float)ly; pm.Local[i * 3 + 2] = (float)lz;
-            double nx, ny, nz;
-            if (!double.IsNaN(fileNormal[i * 3])) { nx = fileNormal[i * 3]; ny = fileNormal[i * 3 + 1]; nz = fileNormal[i * 3 + 2]; }
-            else
-            {
-                nx = computed[i * 3]; ny = computed[i * 3 + 1]; nz = computed[i * 3 + 2];
-                if (nx == 0 && ny == 0 && nz == 0) { nx = lx; ny = ly; nz = lz; }
-            }
-            var w = HafTransforms.Apply(objWorld, lx, ly, lz, 1.0);
-            pm.World[i * 3] = (float)w[0]; pm.World[i * 3 + 1] = (float)-w[2]; pm.World[i * 3 + 2] = (float)w[1];
-            var d = HafTransforms.Apply(objWorld, nx, ny, nz, 0.0);   // matrix_world.to_3x3() @ normal, NOT the inverse transpose - the script normalizes what it gets
-            double dl = Math.Sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
-            if (dl > 0) { pm.Normal[i * 3] = (float)(d[0] / dl); pm.Normal[i * 3 + 1] = (float)(-d[2] / dl); pm.Normal[i * 3 + 2] = (float)(d[1] / dl); }
+            // the script: p = matrix_world @ co, d = (matrix_world.to_3x3() @ normal).normalized() - mathutils' float32 products summed
+            // in double (MatRow), NOT the inverse transpose; Blender's frame (x, -z, y) of the glTF data
+            float bx = (float)lx, by = (float)-lz, bz = (float)ly;
+            pm.World[i * 3] = MatRow(mb, 0, 4, bx, by, bz, 1f); pm.World[i * 3 + 1] = MatRow(mb, 1, 4, bx, by, bz, 1f); pm.World[i * 3 + 2] = MatRow(mb, 2, 4, bx, by, bz, 1f);
+            float nbx = blenderN[i * 3], nby = blenderN[i * 3 + 1], nbz = blenderN[i * 3 + 2];
+            float wx = MatRow(mb, 0, 3, nbx, nby, nbz, 0f), wy = MatRow(mb, 1, 3, nbx, nby, nbz, 0f), wz = MatRow(mb, 2, 3, nbx, nby, nbz, 0f);
+            NormalizeVn(ref wx, ref wy, ref wz);
+            pm.Normal[i * 3] = wx; pm.Normal[i * 3 + 1] = wy; pm.Normal[i * 3 + 2] = wz;
         }
         return pm;
     }
 
-    static double CornerAngle(double ux, double uy, double uz, double vx, double vy, double vz)
-    {
-        double ul = Math.Sqrt(ux * ux + uy * uy + uz * uz), vl = Math.Sqrt(vx * vx + vy * vy + vz * vz);
-        if (ul == 0 || vl == 0) return 0;
-        double c = (ux * vx + uy * vy + uz * vz) / (ul * vl);
-        return Math.Acos(c < -1 ? -1 : c > 1 ? 1 : c);
-    }
 
     // ---------------------------------------------------------------- one BVH over every part's triangles
 
@@ -172,7 +166,10 @@ public static partial class VehicleProbe
                     if (cy[tri] < c0y) c0y = cy[tri]; if (cy[tri] > c1y) c1y = cy[tri];
                     if (cz[tri] < c0z) c0z = cz[tri]; if (cz[tri] > c1z) c1z = cz[tri];
                 }
-                bmin[node * 3] = x0; bmin[node * 3 + 1] = y0; bmin[node * 3 + 2] = z0; bmax[node * 3] = x1; bmax[node * 3 + 1] = y1; bmax[node * 3 + 2] = z1;
+                // BLI_bvhtree_new clamps even epsilon=0 to FLT_EPSILON; insertion inflates every leaf by it.
+                const float padding = 1.1920929e-7f;
+                bmin[node * 3] = (float)(x0 - padding); bmin[node * 3 + 1] = (float)(y0 - padding); bmin[node * 3 + 2] = (float)(z0 - padding);
+                bmax[node * 3] = (float)(x1 + padding); bmax[node * 3 + 1] = (float)(y1 + padding); bmax[node * 3 + 2] = (float)(z1 + padding);
                 int n = hi - lo;
                 float ex = c1x - c0x, ey = c1y - c0y, ez = c1z - c0z;
                 int axis = ex >= ey && ex >= ez ? 0 : ey >= ez ? 1 : 2;
@@ -204,47 +201,79 @@ public static partial class VehicleProbe
             }
         }
 
-        /// <summary>Does the ray from (ox, oy, oz) along the unit direction (dx, dy, dz) meet any triangle at t >= 0? The
-        /// watertight ray-triangle test Blender's BVHTree uses (Woop, Benthin, Wald 2013): the ray's largest axis
-        /// becomes z, the triangle is sheared into that frame, the barycentric signs decide; a hit on an edge or a
-        /// vertex counts, from either side.</summary>
-        public bool AnyHit(double ox, double oy, double oz, double dx, double dy, double dz)
+        /// <summary>Does the ray from (ox, oy, oz) along (dx, dy, dz) meet any triangle, as BLI_bvhtree_ray_cast decides it? Its
+        /// arithmetic is Blender's, float32 step for step: normalize_v3 on the direction (float32 dot, sqrtf, times 1.0f / length),
+        /// the watertight precalc (the dominant axis - ties go to x, then y - kx/ky swapped under a negative direction, the shear
+        /// constants from 1.0f / dir[kz]), per leaf the box test fast_ray_nearest_hit (bounds minus origin times 1 / dir, NaN
+        /// never culls) and isect_ray_tri_watertight_v3 (Woop, Benthin, Wald 2013: an edge or vertex hit counts, from either
+        /// side; a parallel triangle - determinant zero - does not). This tree's own double slab test, lenient by 1e-6, only
+        /// finds the candidates; Blender's tests decide each one. A grazing ray along a face edge is decided by the last
+        /// float32 bit, so nothing here may be computed in double (the re-fused Dragon, 2026-10-02).</summary>
+        public bool AnyHit(float ox, float oy, float oz, float dx, float dy, float dz)
         {
-            double adx = Math.Abs(dx), ady = Math.Abs(dy), adz = Math.Abs(dz);
-            int kz = adx > ady ? (adx > adz ? 0 : 2) : (ady > adz ? 1 : 2);
-            int kx = (kz + 1) % 3, ky = (kx + 1) % 3;
-            double[] dir = { dx, dy, dz };
-            if (dir[kz] < 0) { int tmp = kx; kx = ky; ky = tmp; }
-            double sx = dir[kx] / dir[kz], sy = dir[ky] / dir[kz], sz = 1.0 / dir[kz];
+            float dd = (float)((float)((float)(dx * dx) + (float)(dy * dy)) + (float)(dz * dz));
+            if (dd > 1.0e-35f) { dd = (float)Math.Sqrt(dd); float s = (float)(1.0f / dd); dx = (float)(dx * s); dy = (float)(dy * s); dz = (float)(dz * s); }
+            else { dx = 0f; dy = 0f; dz = 0f; }
+            float[] dir = { dx, dy, dz };
+            float xn = Math.Abs(dx), yn = Math.Abs(dy), zn = Math.Abs(dz);
+            int kz = (xn >= yn && xn >= zn) ? 0 : (yn >= xn && yn >= zn) ? 1 : 2;
+            int kx = kz != 2 ? kz + 1 : 0; int ky = kx != 2 ? kx + 1 : 0;
+            if (dir[kz] < 0f) { int tmp = kx; kx = ky; ky = tmp; }
+            float inv = (float)(1.0f / dir[kz]);
+            float sx = (float)(dir[kx] * inv), sy = (float)(dir[ky] * inv), sz = inv;
+            var idot = new float[3]; var near = new int[3];
+            // bvhtree_ray_cast_data_precalc: a direction component below FLT_EPSILON makes the reciprocal FLT_MAX, not infinity - so
+            // an origin exactly on a box's far plane gives t = 0 there and the box is culled (the Dragon's decal corners under deck
+            // vertices). The leaf bounds are inflated by FLT_EPSILON, which can round away at larger coordinates.
+            for (int i = 0; i < 3; i++) { idot[i] = Math.Abs(dir[i]) < 1.1920929e-7f ? float.MaxValue : (float)(1.0f / dir[i]); near[i] = idot[i] < 0f ? 1 : 0; }
+            float[] o = { ox, oy, oz };
             double ix = dx != 0 ? 1.0 / dx : double.PositiveInfinity, iy = dy != 0 ? 1.0 / dy : double.PositiveInfinity, iz = dz != 0 ? 1.0 / dz : double.PositiveInfinity;
             var stack = new int[128]; int sp = 0; stack[sp++] = 0;
-            var A = new double[3]; var B = new double[3]; var C = new double[3];
+            var A = new float[3]; var B = new float[3]; var C = new float[3]; var t1s = new float[3]; var t2s = new float[3];
             while (sp > 0)
             {
                 int node = stack[--sp];
-                double t0 = 0, t1 = double.PositiveInfinity;   // the slab test, t >= 0
+                double t0 = 0, t1 = double.PositiveInfinity;
                 double a = (bmin[node * 3] - ox) * ix, b = (bmax[node * 3] - ox) * ix;
                 if (dx == 0) { if (ox < bmin[node * 3] || ox > bmax[node * 3]) continue; } else { if (a > b) { double tmp = a; a = b; b = tmp; } if (a > t0) t0 = a; if (b < t1) t1 = b; }
                 a = (bmin[node * 3 + 1] - oy) * iy; b = (bmax[node * 3 + 1] - oy) * iy;
                 if (dy == 0) { if (oy < bmin[node * 3 + 1] || oy > bmax[node * 3 + 1]) continue; } else { if (a > b) { double tmp = a; a = b; b = tmp; } if (a > t0) t0 = a; if (b < t1) t1 = b; }
                 a = (bmin[node * 3 + 2] - oz) * iz; b = (bmax[node * 3 + 2] - oz) * iz;
                 if (dz == 0) { if (oz < bmin[node * 3 + 2] || oz > bmax[node * 3 + 2]) continue; } else { if (a > b) { double tmp = a; a = b; b = tmp; } if (a > t0) t0 = a; if (b < t1) t1 = b; }
-                if (t0 > t1 * (1 + 1e-9) + 1e-12) continue;
+                if (t0 > t1 * (1 + 1e-6) + 1e-6) continue;
                 if (count[node] == 0) { stack[sp++] = left[node]; stack[sp++] = left[node] + 1; continue; }
                 for (int i = start[node]; i < start[node] + count[node]; i++)
                 {
                     int ia = t[i * 3] * 3, ib = t[i * 3 + 1] * 3, ic = t[i * 3 + 2] * 3;
-                    A[0] = v[ia] - ox; A[1] = v[ia + 1] - oy; A[2] = v[ia + 2] - oz;
-                    B[0] = v[ib] - ox; B[1] = v[ib + 1] - oy; B[2] = v[ib + 2] - oz;
-                    C[0] = v[ic] - ox; C[1] = v[ic + 1] - oy; C[2] = v[ic + 2] - oz;
-                    double Ax = A[kx] - sx * A[kz], Ay = A[ky] - sy * A[kz], Bx = B[kx] - sx * B[kz], By = B[ky] - sy * B[kz], Cx = C[kx] - sx * C[kz], Cy = C[ky] - sy * C[kz];
-                    double U = Cx * By - Cy * Bx, V = Ax * Cy - Ay * Cx, W = Bx * Ay - By * Ax;
-                    if ((U < 0 || V < 0 || W < 0) && (U > 0 || V > 0 || W > 0)) continue;
-                    double det = U + V + W;
-                    if (det == 0) continue;
-                    double T = U * sz * A[kz] + V * sz * B[kz] + W * sz * C[kz];
-                    if ((det < 0 && T > 0) || (det > 0 && T < 0)) continue;   // t = T / det would be negative: behind the ray
-                    return true;
+                    // The leaf's box through fast_ray_nearest_hit: BLI_bvhtree_insert inflates it even for epsilon=0.
+                    bool culled = false;
+                    for (int ax = 0; ax < 3; ax++)
+                    {
+                        float mn = Math.Min(v[ia + ax], Math.Min(v[ib + ax], v[ic + ax])), mx = Math.Max(v[ia + ax], Math.Max(v[ib + ax], v[ic + ax]));
+                        mn = (float)(mn - 1.1920929e-7f); mx = (float)(mx + 1.1920929e-7f);
+                        float bvNear = near[ax] == 0 ? mn : mx, bvFar = near[ax] == 0 ? mx : mn;
+                        t1s[ax] = (float)((float)(bvNear - o[ax]) * idot[ax]); t2s[ax] = (float)((float)(bvFar - o[ax]) * idot[ax]);
+                    }
+                    if ((t1s[0] > t2s[1] || t2s[0] < t1s[1] || t1s[0] > t2s[2] || t2s[0] < t1s[2] || t1s[1] > t2s[2] || t2s[1] < t1s[2]) || (t2s[0] < 0f || t2s[1] < 0f || t2s[2] < 0f)) culled = true;
+                    if (culled) continue;
+                    if (Math.Max(t1s[0], Math.Max(t1s[1], t1s[2])) >= float.MaxValue) continue;
+                    // isect_ray_tri_watertight_v3
+                    A[0] = (float)(v[ia] - ox); A[1] = (float)(v[ia + 1] - oy); A[2] = (float)(v[ia + 2] - oz);
+                    B[0] = (float)(v[ib] - ox); B[1] = (float)(v[ib + 1] - oy); B[2] = (float)(v[ib + 2] - oz);
+                    C[0] = (float)(v[ic] - ox); C[1] = (float)(v[ic + 1] - oy); C[2] = (float)(v[ic + 2] - oz);
+                    float Ax = (float)(A[kx] - (float)(sx * A[kz])), Ay = (float)(A[ky] - (float)(sy * A[kz]));
+                    float Bx = (float)(B[kx] - (float)(sx * B[kz])), By = (float)(B[ky] - (float)(sy * B[kz]));
+                    float Cx = (float)(C[kx] - (float)(sx * C[kz])), Cy = (float)(C[ky] - (float)(sy * C[kz]));
+                    float U = (float)((float)(Cx * By) - (float)(Cy * Bx)), V = (float)((float)(Ax * Cy) - (float)(Ay * Cx)), W = (float)((float)(Bx * Ay) - (float)(By * Ax));
+                    if ((U < 0f || V < 0f || W < 0f) && (U > 0f || V > 0f || W > 0f)) continue;
+                    float det = (float)((float)(U + V) + W);
+                    if (det == 0f || float.IsNaN(det) || float.IsInfinity(det)) continue;
+                    float T = (float)((float)((float)((float)(U * A[kz]) + (float)(V * B[kz])) + (float)(W * C[kz])) * sz);
+                    bool detNeg = det < 0f || (det == 0f && 1f / det < 0f);
+                    float signT = detNeg ? -T : T;
+                    if (signT < 0f) continue;
+                    float dist = (float)(T * (float)(1.0f / det));
+                    if (dist >= 0f && dist < float.MaxValue) return true;
                 }
             }
             return false;
@@ -274,12 +303,15 @@ public static partial class VehicleProbe
             for (int i = 0; i < pm.Count && !seen; i += step)
             {
                 double px = pm.World[i * 3], py = pm.World[i * 3 + 1], pz = pm.World[i * 3 + 2];
-                for (int k = -1; k < FixedDirections.Length && !seen; k++)
+                for (int k = -1; k < FixedF32.Length && !seen; k++)
                 {
-                    double dx, dy, dz;
-                    if (k < 0) { dx = pm.Normal[i * 3]; dy = pm.Normal[i * 3 + 1]; dz = pm.Normal[i * 3 + 2]; if (dx * dx + dy * dy + dz * dz < 0.25) continue; }
-                    else { dx = FixedDirections[k][0]; dy = FixedDirections[k][1]; dz = FixedDirections[k][2]; }
-                    if (!bvh.AnyHit(px + dx * eps, py + dy * eps, pz + dz * eps, dx, dy, dz)) seen = true;
+                    float dx, dy, dz;
+                    if (k < 0) { dx = pm.Normal[i * 3]; dy = pm.Normal[i * 3 + 1]; dz = pm.Normal[i * 3 + 2]; if (Math.Sqrt(DotVn(dx, dy, dz, dx, dy, dz)) < 0.5) continue; }
+                    else { dx = FixedF32[k][0]; dy = FixedF32[k][1]; dz = FixedF32[k][2]; }
+                    // the script: _bvh.ray_cast(_p + _d * _eps, _d) - the offset in float32 (eps goes through a float), the cast in Blender's
+                    float e = (float)eps;
+                    float ox = (float)((float)px + (float)(dx * e)), oy = (float)((float)py + (float)(dy * e)), oz = (float)((float)pz + (float)(dz * e));
+                    if (!bvh.AnyHit(ox, oy, oz, dx, dy, dz)) seen = true;
                 }
             }
             parts[pi].Vis = seen ? 1 : 0;

@@ -5,6 +5,38 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Safe inverse bind matrices follow Blender's fallback.** If a float32 determinant rounds to zero, add `1e-8f`
+  to the diagonal and retry, then use identity if still singular. An invertible bind matrix can underflow here;
+  dividing by zero previously produced NaN vertices and marked an enclosed skinned mesh external. Bit-exact
+  inverse tests and the `bind_inverse_underflow` Blender fixture cover the fallback and corrected visibility.
+- **The probe's verdicts read Blender's own float32 matrices and cast Blender's own float32 rays** (`VehicleProbe.BlenderWorld`,
+  `VehicleProbe.Visibility`). A grazing ray — one that runs exactly along a panel edge, as from a decal snapped to that
+  edge, or along a coincident twin panel — is decided by the last bit of the sample position and of the ray, and Blender
+  computes both in float32: the re-fused Dragon (2026-10-02) read 12 of 2,507 visibility verdicts off against Blender
+  with the double chain rounded once. Now every node's `matrix_world` is composed as Blender composes it from what the
+  importer sets on the object (a matrix node decomposed and recomposed through the quaternion, the quaternion
+  normalized, `quat_to_mat3`'s double inside, the parent chain multiplied with `mul_m4_m4m4`'s SSE2 association), the
+  sample position and the normal ray go through it as mathutils does, and the ray — the eps offset, the normalized
+  direction, the leaf-box test and the watertight triangle test — is Blender's float32 arithmetic step for step. The
+  drill now compares every part's matrix with Blender's **bit for bit** (MATRIX rows): **14,003 of 14,023 on 119
+  files**; the 20 left (the dug-out canoe's 19, one fixture) are meshes Blender parents to a BONE, whose pose chain is
+  not modelled yet — the drill counts them and says so. The Dragon: 12 → 5, the other 118 files unchanged; the 5 left
+  were 4 normal-ray escapes and one fixed ray; the same day's second port closes them: **the normal ray is Blender's
+  `vertex.normal`** — the file's normal through the importer's custom-normal set, which Blender stores as two shorts
+  against each corner's smooth-fan space and reads back with cosf/sinf, mixed per vertex by corner angle
+  (`VehicleProbe.CustomNormals`; the importer's flat-face guess, which breaks fans, included); **a skinned mesh's
+  positions and normals are what the importer skinned into the bind pose in numpy float32** (`VehicleProbe.BlenderSkin`:
+  the bind pose guessed from the inverse bind matrices through Eigen's SSE inverse and mathutils' decompose, the joint
+  matrices, the weighted blend, the multiply-add chain — the installed build is clang-cl at x86-64-v2 with fp-contract
+  off, so every step is its own arithmetic); and the ray's box test keeps Blender's FLT_MAX reciprocal for a zero
+  direction component, so an origin exactly on a box's far plane is culled. The drill now also holds **vertex 0 of every
+  part's position bit for bit** (VERTEX rows, 14,003 of 14,023) and counts its normal: the normal pipeline agrees to
+  about 1e-5 and not yet to the bit (docs/Review-Backlog.md), without a verdict changing for it. Result: the Dragon
+  0 of 2,507; **every inside-out verdict agrees, 14,023 of 14,023** (the three skinned slivers were that ulp); the one
+  file left is the Ehrhardt's spin output, 6 of 3,350 visibility verdicts, on rays whose origin sits exactly on a
+  box plane — where Blender's own binary contradicts its source (the same configuration hits at one scale and misses at
+  another; docs/Review-Backlog.md). The inside-out verdict reads the same matrices (its own conversion of the double
+  chain is gone).
 - **The probe's inside-out verdict in C# — step 3 of replacing Blender, part C** (`VehicleProbe.InsideOut`). The PART
   row's field 8 — the number of face islands the Lab's fix would reverse: faces joined by a shared edge whose normals,
   on average, point at the hull's length axis (a dot below −0.25 with the radial from Blender's X axis through the

@@ -33,6 +33,8 @@ jobs:
       - name: Vehicle Lab math tests (oar calibration guard)
         shell: bash
         run: python Tests/test_vehicle_rig_math.py
+      - name: Vehicle probe comparator tests
+        run: python Tests/test_compare_vehicle_probe.py
       # Needs neither the game nor Unity — pure Markdown/link checking, so it belongs on the runner too.
       # It was in the pre-push gate only, which a --no-verify (or a web edit) walks straight past.
       - name: Docs guard (links + notes convention)

@@ -13,8 +13,15 @@ Compared, per part NAME (the recipe key - a name on one side only is a FAIL):
   order           the rows must come in the same order (the Lab lists them as given)
   RIGBONE         name, count exact; centre, size with the same tolerance; order
   flip            exact (field 8: the islands the inside-out fix would reverse - step 3c)
+  MATRIX rows     bit for bit (2026-10-03): each part's matrix_world as Blender holds it, 16 float32 values, against the
+                  C# composition of the same (VehicleProbe.BlenderWorld.cs) - the verdicts read these. A C# row ending in
+                  `under-bone` (a mesh Blender parents to a BONE - its pose chain is not modelled yet) is COUNTED in the
+                  PASS line, not held: the number says how many matrices the file's verdicts read with the double chain
+  VERTEX rows     positions exact in float32: vertex 0 of each part as the visibility rays see it. Normal differences are
+                  counted, not held (the custom-normal pipeline is approximate); under-bone parts counted, not held,
+                  as for MATRIX. Both diagnostic row kinds must be present for every part on both sides.
 """
-import sys
+import sys, struct
 sys.stdout.reconfigure(encoding="utf-8")
 
 
@@ -26,12 +33,34 @@ def load(path):
         if len(t) < 3 or t[0] != "ROW":
             continue
         row = t[2]
-        d = files.setdefault(t[1], {"PART": [], "RIGBONE": []})
+        d = files.setdefault(t[1], {"PART": [], "RIGBONE": [], "MATRIX": {}, "VERTEX": {}})
         if row.startswith("PART|"):
             f = row.split("|")
             # a '|' inside a name folds back into the name: the numeric tail is fixed (verts, c, s, vis, bone, flip)
             name = "|".join(f[1:len(f) - 6]); tail = f[len(f) - 6:]
             d["PART"].append({"name": name, "verts": tail[0], "c": tail[1], "s": tail[2], "vis": tail[3], "bone": tail[4].strip(), "flip": tail[5]})
+        elif row.startswith("MATRIX|"):
+            body = row[len("MATRIX|"):]
+            under_bone = body.endswith("|under-bone")
+            if under_bone:
+                body = body[:-len("|under-bone")]
+            name, _, vals = body.rpartition("|")
+            d["MATRIX"][name] = tuple(struct.unpack("<f", struct.pack("<f", float(x)))[0] for x in vals.split())
+            if len(d["MATRIX"][name]) != 16:
+                raise ValueError(f"{path}: MATRIX {name!r} requires 16 values")
+            if under_bone:
+                d.setdefault("UNDER_BONE", set()).add(name)
+        elif row.startswith("VERTEX|"):
+            body = row[len("VERTEX|"):]
+            under_bone = body.endswith("|under-bone")
+            if under_bone:
+                body = body[:-len("|under-bone")]
+            name, pos, nor = body.rsplit("|", 2)
+            if len(pos.split()) != 3 or len(nor.split()) != 3:
+                raise ValueError(f"{path}: VERTEX {name!r} requires a position and normal of 3 values each")
+            d["VERTEX"][name] = tuple(struct.unpack("<f", struct.pack("<f", float(x)))[0] for x in (pos + " " + nor).split())
+            if under_bone:
+                d.setdefault("UNDER_BONE", set()).add(name)
         elif row.startswith("RIGBONE|"):
             f = row.split("|")
             name = "|".join(f[1:len(f) - 3]); tail = f[len(f) - 3:]
@@ -54,7 +83,14 @@ def close(a, b, tol):
 
 
 def main():
-    cs, bl = load(sys.argv[1]), load(sys.argv[2])
+    try:
+        cs, bl = load(sys.argv[1]), load(sys.argv[2])
+    except (OSError, ValueError, OverflowError) as error:
+        print(f"FAIL input: {error}")
+        return 1
+    if not cs or not bl:
+        print("FAIL input: both probes must report at least one file")
+        return 1
     fails = 0; compared = 0
     for key in sorted(bl):
         short = "/".join(key.split("/")[-2:])
@@ -99,11 +135,38 @@ def main():
                     problems.append(f"{kind} {label}: {len(items)} of {len(b)} differ (C# vs Blender), e.g. {items[0]}")
             if kind == "PART":
                 part_worst, part_tol, n_parts = worst, tol, len(b)
+        bm, cm = bl[key]["MATRIX"], cs[key]["MATRIX"]
+        for side, rows in (("Blender", bl[key]), ("C#", cs[key])):
+            names = {r["name"] for r in rows["PART"]}
+            for kind in ("MATRIX", "VERTEX"):
+                missing, extra = names - rows[kind].keys(), rows[kind].keys() - names
+                if missing or extra:
+                    problems.append(f"{side} {kind} rows incomplete: missing {sorted(missing)[:4]}, unexpected {sorted(extra)[:4]}")
+        under_bone = cs[key].get("UNDER_BONE", set())
+        n_under_bone = len(under_bone)
+        if bm and cm:
+            off = [n for n, v in bm.items() if n in cm and n not in under_bone and cm[n] != v]
+            if off:
+                n0 = off[0]; i0 = next(i for i in range(16) if bm[n0][i] != cm[n0][i])
+                problems.append(f"MATRIX: {len(off)} of {len(bm)} differ from Blender's bits, e.g. {n0} element {i0}: C# {cm[n0][i0]!r} vs {bm[n0][i0]!r}")
+        bv, cv = bl[key]["VERTEX"], cs[key]["VERTEX"]
+        n_vertices = 0
+        n_normals_off = 0
+        if bv and cv:
+            off_v = [n for n, v in bv.items() if n in cv and n not in under_bone and cv[n][:3] != v[:3]]
+            n_vertices = len(bv)
+            if off_v:
+                n0 = off_v[0]; i0 = next(i for i in range(3) if bv[n0][i] != cv[n0][i])
+                problems.append(f"VERTEX: {len(off_v)} of {len(bv)} positions differ from Blender's bits, e.g. {n0} component {i0}: C# {cv[n0][i0]!r} vs {bv[n0][i0]!r}")
+            # the vertex NORMAL is counted, not held: the custom-normal pipeline agrees to ~1e-5 and not to the bit (Review Backlog)
+            n_normals_off = sum(1 for n, v in bv.items() if n in cv and n not in under_bone and cv[n][3:] != v[3:])
         if problems:
             fails += 1
             print(f"FAIL {short}: " + "; ".join(problems))
         else:
-            print(f"PASS {short}: {n_parts} parts, {len(bl[key]['RIGBONE'])} rig bones - names, order, verts, visibility, inside-out, bones, boxes agree (largest box difference {part_worst:.4f}, tolerance {part_tol:.4f})")
+            normals_note = f"; {n_normals_off} of {n_vertices} vertex normals not bit for bit (counted, not held)" if bm and cm and n_normals_off else ""
+            matrices = ((f"{len(bm) - n_under_bone} of {len(bm)} matrices and {n_vertices - n_under_bone} of {n_vertices} vertex positions bit for bit ({n_under_bone} under bones not held)" if n_under_bone else f"{len(bm)} matrices and {n_vertices} vertex positions bit for bit") + normals_note) if bm and cm else "no matrices compared"
+            print(f"PASS {short}: {n_parts} parts, {len(bl[key]['RIGBONE'])} rig bones - names, order, verts, visibility, inside-out, bones, boxes agree (largest box difference {part_worst:.4f}, tolerance {part_tol:.4f}); {matrices}")
     print(f"COMPARED {compared} FAILED {fails}")
     return 1 if fails else 0
 

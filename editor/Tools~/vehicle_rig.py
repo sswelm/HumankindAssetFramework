@@ -738,6 +738,15 @@ if mode == "probe":
         c, s = world_bbox(o)
         # 8th field (2026-09-13): islands the inside-out fix would reverse in this part (0 = keeps as authored)
         print("PART|%s|%d|%.4f,%.4f,%.4f|%.4f,%.4f,%.4f|%d|%s|%d" % (o.name, len(o.data.vertices), c.x, c.y, c.z, s.x, s.y, s.z, _vis.get(o.name, 1), _bone.get(o.name, ""), _flipn.get(o.name, 0)))
+    # MATRIX rows (2026-10-03, the C# probe's parity drill): each part's matrix_world as this process holds it, row-major, 16
+    # floats in their shortest round-trip form - the C# side composes the same float32 matrix and the drill compares bit for bit
+    for o in objs:
+        print("MATRIX|%s|%s" % (o.name, " ".join(repr(float(_mv)) for _mr in o.matrix_world for _mv in _mr)))
+    # VERTEX rows: vertex 0 through the same arithmetic the visibility rays use - the world position and the normalized world normal
+    for o in objs:
+        if len(o.data.vertices):
+            _v0 = o.data.vertices[0]; _p0 = o.matrix_world @ _v0.co; _n0 = (o.matrix_world.to_3x3() @ _v0.normal).normalized()
+            print("VERTEX|%s|%s|%s" % (o.name, " ".join(repr(float(_c)) for _c in _p0), " ".join(repr(float(_c)) for _c in _n0)))
     print("VEHICLE parts listed"); sys.stdout.flush()   # sentinel + flush: Blender's C-level banner flushes AFTER Python's buffer and would otherwise glue onto the last PART line
     # optional argv[2]: export the SPLIT scene as a preview FBX so the Lab can show/zoom/highlight each part by name.
     # PERF (2026-08-20): exported UNSKINNED — plain meshes, world transforms baked, no armature. The FBX exporter
