@@ -172,13 +172,16 @@ public static partial class VehicleProbe
         }
 
         // ---- the placements: the part (and its direct children) detached keeping its world matrix, then T onto matrix_world
+        var byName = new Dictionary<string, PartSpec>(StringComparer.Ordinal);
+        var byNode = new Dictionary<(Source, int), PartSpec>();   // the object a node became (an island copy is a new object: not it)
+        foreach (var s in specs) { if (!byName.ContainsKey(s.Name)) byName[s.Name] = s; if (!s.IslandCopy) byNode[(s.Src, s.Node)] = s; }
         foreach (var pl in input.Placements)
         {
-            var s = specs.FirstOrDefault(x => x.Name == pl.Name);
+            if (!byName.TryGetValue(pl.Name, out var s)) s = null;
             if (s == null) { r.Notes.Add($"WARN: placement for '{pl.Name}' skipped — no such part after the split (re-Probe, then place it again)"); continue; }
             var mw = ApplyMat4(MatrixOf(s));   // rel.matrix_world = mw.copy() after rel.parent = None: the assignment's round trip
             s.Src.Detached.Add(s.Node);
-            if (!s.IslandCopy && s.Src.Index == 0) DetachChildren(s.Src, s.Node, specs);   // a second-model mesh has no children left: the merge unparented every mesh and dropped the helpers
+            if (!s.IslandCopy && s.Src.Index == 0) DetachChildren(s.Src, s.Node, byNode);   // a second-model mesh has no children left: the merge unparented every mesh and dropped the helpers
             LocalBox(s.Src.M, s.Node, s.Src.Geo[s.Node], s.Prim, s.Verts, out var lmn, out var lmx);
             WorldBox(mw, lmn, lmx, out var c0, out var s0);
             s.Override = PlacementMatrix(mw, c0, pl.Offset, pl.Scale);
@@ -292,32 +295,32 @@ public static partial class VehicleProbe
     /// <summary>`for rel in [o] + list(o.children): mw = rel.matrix_world.copy(); rel.parent = None; rel.matrix_world = mw` for the
     /// children: every object Blender parents to this node's object is detached with its world matrix through the assignment's
     /// round trip, and what hangs below each child is recomputed down the chain (BKE_object_where_is_calc: parent @ local).</summary>
-    static void DetachChildren(Source src, int node, List<PartSpec> specs)
+    static void DetachChildren(Source src, int node, Dictionary<(Source, int), PartSpec> byNode)
     {
         var names = src.Names; var m = src.M;
         for (int c = 0; c < m.Nodes.Count; c++)
         {
             if (names.ObjectParentNode[c] != node || src.Detached.Contains(c)) continue;
-            var spec = specs.FirstOrDefault(x => x.Src == src && x.Node == c && !x.IslandCopy);
+            byNode.TryGetValue((src, c), out var spec);
             float[] now = spec != null ? MatrixOf(spec) : ToRowMajor(src.BWorld[c]);
             var kept = ApplyMat4(now);
             src.BWorld[c] = FromRowMajor(kept);
             if (spec != null) spec.Override = kept;
             src.Detached.Add(c);
-            Recompute(src, c, specs);
+            Recompute(src, c, byNode);
         }
     }
 
     /// <summary>The objects below `node` take parent @ local again (mul_m4_m4m4) after their parent's matrix changed; a detached one does not.</summary>
-    static void Recompute(Source src, int node, List<PartSpec> specs)
+    static void Recompute(Source src, int node, Dictionary<(Source, int), PartSpec> byNode)
     {
         var m = src.M;
         for (int d = 0; d < m.Nodes.Count; d++)
         {
             if (src.Names.ObjectParentNode[d] != node || src.Detached.Contains(d) || src.Names.IsBone[d]) continue;
             src.BWorld[d] = MulM4(src.BWorld[node], src.BLocal[d]);
-            foreach (var spec in specs) if (spec.Src == src && spec.Node == d && spec.Override != null) spec.Override = null;   // reads the source's matrix again
-            Recompute(src, d, specs);
+            if (byNode.TryGetValue((src, d), out var spec)) spec.Override = null;   // reads the source's matrix again
+            Recompute(src, d, byNode);
         }
     }
 

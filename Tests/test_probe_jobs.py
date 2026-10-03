@@ -23,6 +23,12 @@ class ProbeJobsTests(unittest.TestCase):
         self.assertEqual("0", J.fmt(-0.000001, 5))
         self.assertEqual("1.23457", J.fmt(1.234567, 5))
         self.assertEqual("-2.5", J.fmt(-2.5, 4))
+        # exact binary ties round AWAY from zero, as the Lab's float.ToString does (measured on Mono and .NET Framework); printf would give 1.0312 and 0.12
+        self.assertEqual("1.0313", J.fmt(1.03125, 4))
+        self.assertEqual("-1.0313", J.fmt(-1.03125, 4))
+        self.assertEqual("0.13", J.fmt(0.125, 2))
+        self.assertEqual("0.0001", J.fmt(0.00005, 4))
+        self.assertEqual("0", J.fmt(0.00005, 2))
 
     def test_merge2_text_multiplies_the_legacy_uniform_scale_and_makes_bad_components_1(self):
         text = J.merge2_text("D:\\x\\b.glb", {"x": 0.5, "y": 0, "z": 2}, {"x": 0, "y": 0, "z": 30}, 2.0, {"x": 1.5, "y": 1, "z": 0})

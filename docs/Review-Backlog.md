@@ -75,7 +75,7 @@ after a loose split and the file's normals as the normal ray to get there); **3c
 agree; the three left are skinned parts with zero-area triangles, the item below); **3d** the Lab calls the C# probe for
 `.glb`/`.gltf` sources and builds its part preview in-process instead of importing a preview FBX (FBX/OBJ/.blend
 sources keep Blender) — done 2026-10-03: the second model's merge, the per-part placements and the Orientation are
-Blender's arithmetic (`VehicleProbe.Merge.cs`), held bit for bit on nine fixture jobs and on the four recipes that set
+Blender's arithmetic (`VehicleProbe.Merge.cs`), held bit for bit on ten fixture jobs and on the four recipes that set
 them (`probe_jobs.py`); the Lab's Probe parts button runs it (`VehicleLabWindow.ProbeInProcess`,
 `VehicleProbePreview`). The order below stands for the rest.
 

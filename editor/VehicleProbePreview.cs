@@ -30,12 +30,11 @@ public static class VehicleProbePreview
             float tint = brightness != null && src < brightness.Length && brightness[src] > 0f ? brightness[src] : 1f;
             var mesh = new Mesh { name = part.Name, hideFlags = HideFlags.HideAndDontSave, indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
             var verts = new Vector3[pm.Count]; var norms = new Vector3[pm.Count]; var uvs = new Vector2[pm.Count];
-            bool normalsOk = true;
             for (int i = 0; i < pm.Count; i++)
             {
                 verts[i] = new Vector3(pm.World[i * 3], pm.World[i * 3 + 2], pm.World[i * 3 + 1]);
                 var nv = new Vector3(pm.Normal[i * 3], pm.Normal[i * 3 + 2], pm.Normal[i * 3 + 1]);
-                if (float.IsNaN(nv.x) || float.IsNaN(nv.y) || float.IsNaN(nv.z) || nv.sqrMagnitude < 0.25f) normalsOk = false;
+                if (float.IsNaN(nv.x) || float.IsNaN(nv.y) || float.IsNaN(nv.z) || nv.sqrMagnitude < 0.25f) nv = Vector3.up;   // a vertex of no face at the origin has no direction
                 norms[i] = nv;
                 uvs[i] = pm.Uv != null && pm.Uv.Length >= pm.Count * 2 ? new Vector2(pm.Uv[i * 2], 1f - pm.Uv[i * 2 + 1]) : Vector2.zero;   // glTF's origin is top-left, Unity's bottom-left
             }
@@ -51,7 +50,7 @@ public static class VehicleProbePreview
             mesh.SetUVs(0, uvs);
             mesh.subMeshCount = order.Count;
             for (int si = 0; si < order.Count; si++) mesh.SetTriangles(subs[order[si]], si, false);
-            if (normalsOk) mesh.SetNormals(norms); else mesh.RecalculateNormals();
+            mesh.SetNormals(norms);
             mesh.RecalculateBounds();
             assets.Add(mesh);
             var go = new GameObject(part.Name) { hideFlags = HideFlags.HideAndDontSave };

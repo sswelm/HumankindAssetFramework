@@ -123,10 +123,10 @@ keeps 6 visibility verdicts where Blender's binary contradicts its own box test 
 fixture holds a leaning and a flat quad whose vertex normals are read off Blender to the bit.
 **Since 2026-10-03 (step 3d) the drill also runs JOBS** — probes with the Lab's other inputs, a second model (`merge2=`),
 per-part placements (`parttx=`) and an orientation (`proberot=`), from one JSON both sides read
-(`tools/vehicle-probe-drill/probe_jobs.py`, `ProbeDrill.cs @jobs.json`, `blender_probe_many.py @jobs.json`): nine on
+(`tools/vehicle-probe-drill/probe_jobs.py`, `ProbeDrill.cs @jobs.json`, `blender_probe_many.py @jobs.json`): ten on
 the `second_model_a/b/c`, `placement_nested`, `placement_split` and `insideout` fixtures (a turned second-model root
 with a per-axis scale, a mirrored node, leaning normals, a skinned part, a bone shape, a clashing name, a single-mesh
-second model's split and a first model's split beside a second model, placements on a parent with children, on a loose
+second model's split, a first model's split beside a second model and both splitting at once, placements on a parent with children, on a loose
 part, with a per-axis scale on a turned part, on a missing name, with a zero scale; the orientation about Z and about X),
 and one per saved recipe that sets any of these, with the recipe's exact arguments formatted as the Lab formats them
 (`Tests/test_probe_jobs.py` holds the formatting to the Lab's). Every job's MATRIX and VERTEX rows are held bit for bit

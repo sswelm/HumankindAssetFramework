@@ -15,19 +15,23 @@ Two kinds of job:
     (merge2: five decimals, the legacy uniform scale times the per-axis one; parttx: four decimals; proberot: two). These
     are the probe's real inputs: recipe_check.py judges the stored B_ and placed parts against these rows.
 """
-import glob, json, os, sys
+import glob, json, os, struct, sys
+from decimal import Decimal, ROUND_HALF_UP
 sys.stdout.reconfigure(encoding="utf-8")
 
 
 def fmt(v, places):
-    """C#'s ToString("0.#####") (places decimals): round half away from zero, trailing zeros stripped, never "-0"."""
-    v = float(v)
-    s = ("%." + str(places) + "f") % abs(v)
+    """C#'s float.ToString("0.#####") (places decimals) on .NET Framework / Unity's Mono, measured 2026-10-03: the float32
+    value at 7 significant digits, then rounded half AWAY from zero on that decimal (1.03125 -> 1.0313; printf's half-even on
+    the binary gave 1.0312), trailing zeros stripped, never "-0"."""
+    f = struct.unpack("<f", struct.pack("<f", float(v)))[0]
+    d = Decimal("%.7g" % abs(f)).quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
+    s = format(d, "f")
     if "." in s:
         s = s.rstrip("0").rstrip(".")
     if s in ("", "0"):
         return "0"
-    return ("-" if v < 0 else "") + s
+    return ("-" if f < 0 else "") + s
 
 
 def positive(v):
@@ -67,6 +71,7 @@ def fixture_jobs(fx):
     if os.path.isfile(a) and os.path.isfile(c):
         jobs.append({"key": key_of(a, "merged-split"), "file": a, "merge2": c + "|0,0,-4|0,0,0|1"})
         jobs.append({"key": key_of(c, "merged-split-swapped"), "file": c, "merge2": a + "|0,0,4|0,0,0|1"})
+        jobs.append({"key": key_of(c, "merged-both-split"), "file": c, "merge2": c + "|0,0,-6|0,0,0|1"})   # both sources single meshes: both split, the first's loose parts linked before the second's
     if os.path.isfile(nested):
         jobs.append({"key": key_of(nested, "placed"), "file": nested, "parttx": ["Carrier|0,0,2|1,1,1", "Turned|0,0,0|2,1,1", "NoSuchPart|1,1,1|1,1,1", "Plain|0.25,0,0|0,1,1"]})
     if os.path.isfile(split):
