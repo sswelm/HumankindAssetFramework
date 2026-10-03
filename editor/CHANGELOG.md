@@ -5,6 +5,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Safe inverse bind matrices follow Blender's fallback.** If a float32 determinant rounds to zero, add `1e-8f`
+  to the diagonal and retry, then use identity if still singular. An invertible bind matrix can underflow here;
+  dividing by zero previously produced NaN vertices and marked an enclosed skinned mesh external. Bit-exact
+  inverse tests and the `bind_inverse_underflow` Blender fixture cover the fallback and corrected visibility.
 - **The probe's verdicts read Blender's own float32 matrices and cast Blender's own float32 rays** (`VehicleProbe.BlenderWorld`,
   `VehicleProbe.Visibility`). A grazing ray — one that runs exactly along a panel edge, as from a decal snapped to that
   edge, or along a coincident twin panel — is decided by the last bit of the sample position and of the ray, and Blender

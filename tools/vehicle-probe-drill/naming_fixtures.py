@@ -529,10 +529,26 @@ def fx_zero_weight_joint(out):
     F.write_glb(os.path.join(out, "zero_weight_joint.glb"), root, b)
 
 
+def fx_bind_inverse_underflow(out):
+    """An invertible IBM with det=1e-48 underflows in float32. Blender's safe inverse keeps Mesh finite inside Box."""
+    b = F.Buf()
+    attrs = skinned(b)
+    attrs["NORMAL"] = b.accessor([(0, 0, 1)] * 3, "f", "VEC3", minmax=False)
+    pos, idx = box(0, 0, 0, 2)
+    ibm = [1e-16,0,0,0, 0,1e-16,0,0, 0,0,1e-16,0, 0,0,0,1]
+    meshes = [{"primitives": [{"attributes": attrs}]},
+              {"primitives": [{"attributes": {"POSITION": b.accessor(pos, "f", "VEC3")}, "indices": b.accessor(idx, "H", "SCALAR")}]}]
+    nodes = [{"name": "Rig", "children": [1]}, {"name": "Joint", "scale": [1e16, 1e16, 1e16]},
+             {"name": "Mesh", "mesh": 0, "skin": 0}, {"name": "Box", "mesh": 1}]
+    skins = [{"skeleton": 0, "joints": [1], "inverseBindMatrices": b.accessor([ibm], "f", "MAT4")}]
+    root = F.base("bind_inverse_underflow", meshes=meshes, nodes=nodes, skins=skins, scenes=[{"nodes": [0, 2, 3]}], scene=0)
+    F.write_glb(os.path.join(out, "bind_inverse_underflow.glb"), root, b)
+
+
 FIXTURES = [fx_naming, fx_order, fx_armature_names, fx_skinned_not_moved, fx_skinned_animated, fx_mesh_on_bone, fx_islands, fx_rotated_armature,
             fx_two_armatures, fx_nested_skins, fx_split_collision, fx_nonunit_rotation, fx_cameras, fx_camera_data_names,
             fx_name_tails, fx_long_names, fx_many_names, fx_bone_tails, fx_split_tails, fx_icosphere_mesh, fx_visibility, fx_visibility_skinned, fx_visibility_split, fx_insideout, fx_custom_normals,
-            fx_shared_skin_bind_pose, fx_zero_weight_joint]
+            fx_shared_skin_bind_pose, fx_zero_weight_joint, fx_bind_inverse_underflow]
 
 
 def main(out):

@@ -27,6 +27,48 @@ public class VehicleProbeBlenderMeshTests
     }
     static uint Bits(float x) => BitConverter.ToUInt32(BitConverter.GetBytes(x), 0);
 
+    [Theory]
+    [InlineData(1e-16f, 1e-16f, 1e-16f, 0x4cbebc20u, 0x4cbebc20u, 0x4cbebc20u)]
+    [InlineData(0f, 2f, 3f, 0x4cbebc20u, 0x3f000000u, 0x3eaaaaabu)]
+    [InlineData(-1e-8f, 0f, 0f, 0x3f800000u, 0x3f800000u, 0x3f800000u)]
+    public void A_zero_float32_determinant_retries_with_epsilon_then_identity_as_Blender_does(
+        float x, float y, float z, uint inverseX, uint inverseY, uint inverseZ)
+    {
+        // Blender 5.1.2 Matrix.Diagonal((x,y,z,1)).inverted_safe(): underflow, singular, still singular after epsilon.
+        var matrix = new float[] { x,0,0,0, 0,y,0,0, 0,0,z,0, 0,0,0,1 };
+        var original = matrix.Select(Bits).ToArray();
+        var expected = new uint[] { inverseX,0x80000000,0,0x80000000, 0x80000000,inverseY,0x80000000,0,
+            0,0x80000000,inverseZ,0x80000000, 0x80000000,0,0x80000000,0x3f800000 };
+        Assert.Equal(expected, VehicleProbe.InvertedSafe(matrix).Select(Bits));
+        Assert.Equal(original, matrix.Select(Bits));
+    }
+
+    [Fact]
+    public void An_underflowing_inverse_bind_keeps_the_enclosed_mesh_finite_and_interior()
+    {
+        // bind_inverse_underflow.glb: an invertible IBM has det=1e-48, which rounds to zero in float32.
+        // Blender's safe inverse keeps Mesh at the origin inside Box; division by zero made it NaN and external.
+        var m = new HafModel();
+        var triangle = WeightedTriangle();
+        triangle.Primitives[0].Normals = new float[] { 0,0,1, 0,0,1, 0,0,1 };
+        m.Meshes.Add(triangle);
+        var box = new HafMesh();
+        box.Primitives.Add(new HafPrimitive { Mode = 4, VertexCount = 8,
+            Positions = new float[] { -2,-2,-2, 2,-2,-2, -2,2,-2, 2,2,-2, -2,-2,2, 2,-2,2, -2,2,2, 2,2,2 },
+            Indices = new[] { 0,2,1, 1,2,3, 4,5,6, 5,7,6, 0,1,5, 0,5,4, 2,6,7, 2,7,3, 0,4,6, 0,6,2, 1,3,7, 1,7,5 } });
+        m.Meshes.Add(box);
+        m.Nodes.Add(new HafNode { Name = "Rig" }); m.Nodes[0].Children.Add(1);
+        m.Nodes.Add(new HafNode { Name = "Joint", Scale = new double[] { 1e16, 1e16, 1e16 } });
+        m.Nodes.Add(new HafNode { Name = "Mesh", Mesh = 0, Skin = 0 });
+        m.Nodes.Add(new HafNode { Name = "Box", Mesh = 1 });
+        m.Skins.Add(new HafSkin { Skeleton = 0, Joints = new[] { 1 }, InverseBindMatrices = new double[] {
+            F(1e-16),0,0,0, 0,F(1e-16),0,0, 0,0,F(1e-16),0, 0,0,0,1 } });
+        var result = VehicleProbe.Run(Link(m));
+        var mesh = result.Parts.Single(p => p.Name == "Mesh");
+        Assert.Equal(new float[6], mesh.FirstVertex); // position and normal, as Blender prints them
+        Assert.Equal(0, mesh.Vis);
+    }
+
     static HafMesh WeightedTriangle(ushort joint = 0, float weight = 1f)
     {
         var mesh = new HafMesh();

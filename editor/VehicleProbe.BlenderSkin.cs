@@ -51,9 +51,14 @@ public static partial class VehicleProbe
 
     /// <summary>mathutils Matrix.inverted_safe(): matrix_invert_safe_internal - the determinant (determinant_m4, float32) and
     /// the adjugate (adjoint_m4_m4) divided by it, entry by entry; NOT Eigen, which only Matrix.inverted() reaches. A
-    /// singular matrix gets PSEUDOINVERSE_EPSILON on its diagonal first (not modelled: an inverse bind matrix is never
-    /// singular). In and out in the row-major item layout; Blender's M[col][row] is read off it.</summary>
+    /// zero float32 determinant gets PSEUDOINVERSE_EPSILON on its diagonal first, then identity if still zero.
+    /// In and out in the row-major item layout; Blender's M[col][row] is read off it. The input is never modified.</summary>
     internal static float[] InvertedSafe(float[] it)
+    {
+        return InvertedSafe(it, true);
+    }
+
+    static float[] InvertedSafe(float[] it, bool perturb)
     {
         // a1..d4 as adjoint_m4_m4 names them: aN = M[N-1][0] (column N-1, row 0), bN = M[N-1][1], cN = M[N-1][2], dN = M[N-1][3]
         float a1 = it[0 * 4 + 0], b1 = it[1 * 4 + 0], c1 = it[2 * 4 + 0], d1 = it[3 * 4 + 0];
@@ -62,6 +67,15 @@ public static partial class VehicleProbe
         float a4 = it[0 * 4 + 3], b4 = it[1 * 4 + 3], c4 = it[2 * 4 + 3], d4 = it[3 * 4 + 3];
         // determinant_m4: a1 D1 - b1 D2 + c1 D3 - d1 D4, left to right
         float det = (float)((float)((float)((float)(a1 * Det3(b2, b3, b4, c2, c3, c4, d2, d3, d4)) - (float)(b1 * Det3(a2, a3, a4, c2, c3, c4, d2, d3, d4))) + (float)(c1 * Det3(a2, a3, a4, b2, b3, b4, d2, d3, d4))) - (float)(d1 * Det3(a2, a3, a4, b2, b3, b4, c2, c3, c4)));
+        if (det == 0f)
+        {
+            // Even an invertible glTF IBM can underflow here. Match mathutils' single retry, including signed zeros
+            // from the identity's adjugate when the perturbed determinant is still zero.
+            if (!perturb) return InvertedSafe(IdentityRow(), false);
+            var adjusted = (float[])it.Clone();
+            for (int i = 0; i < 4; i++) adjusted[i * 5] = (float)(adjusted[i * 5] + 1e-8f);
+            return InvertedSafe(adjusted, false);
+        }
         // adjoint_m4_m4: R[col][row]
         var R = new float[4][];
         for (int c = 0; c < 4; c++) R[c] = new float[4];

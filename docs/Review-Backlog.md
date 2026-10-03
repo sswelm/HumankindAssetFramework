@@ -144,6 +144,10 @@ launch from the Clip Range dialog); (2) reduce/`prep_model` → a C# quadric dec
   order, with the last skin winning, while each mesh retains its **own** skin's inverse binds. Skins without an IBM
   still inherit that guessed pose. Zero-weight vertices follow their first JOINTS_0 influence, including posed
   boxes and bone reports. Both cases have Blender fixtures and unit coverage.
+  A further review adds `inverted_safe`'s zero-determinant fallback: perturb the diagonal by `1e-8f`, then use
+  identity if still zero. Even an invertible IBM can have a determinant that underflows in float32; without
+  the fallback, NaN vertices incorrectly make an enclosed mesh external. `bind_inverse_underflow` agrees with
+  Blender on visibility, matrices and vertex positions; unit tests hold both fallback paths bit for bit.
 - **Meshes parented to a bone: the bone chain** — OPEN (2026-10-03). A glTF mesh node under a joint becomes, in
   Blender, an object parented to that BONE (`parent_type = 'BONE'`, moved by −bone_length along Y), and its
   matrix_world is armature @ `pchan->pose_mat` (translated to the bone's tail) @ local. The pose matrix comes from the
