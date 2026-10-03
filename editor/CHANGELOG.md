@@ -6,11 +6,13 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 ## 0.5.7 — unreleased
 
 - **Preview material and comparison fixes:** the in-process Lab preview preserves glTF transparency and alpha
-  cutouts (MASK and BLEND materials as Standard's cutout and transparent modes). The colour factor stays the file's
-  linear number, as the Blender preview FBX carried it and the gamma-space project shows it (a review commit had
-  converted it to sRGB on a measurement nothing had made; io_scene_fbx writes DiffuseColor unconverted). The preview
-  comparison recognizes single-part FBX roots by their mesh names, and its five-percent allowance counts distinct
-  parts and no longer lets a completely reversed single-part model pass. Headless Unity regression checks cover them.
+  cutouts, and converts linear colour factors to the sRGB colours Unity's FBX importer made of the Blender preview
+  (measured in the project's import cache: the Salegs Revenge's Charcoal 0.137255 imported as 0.4062, its red 0.8 as
+  0.90633 - the exporter writes the linear number, the importer converts; a revert on the exporter's line alone was
+  wrong and is undone). The preview
+  comparison recognizes single-part FBX roots by their mesh names. Its five-percent allowance counts distinct
+  parts and no longer lets a completely reversed single-part model pass. Headless Unity regression checks cover
+  all four fixes.
 - **Probe review fixes:** match the preview FBX's measured Unity frame (-X, Z, -Y of Blender), transport rendered
   normals by the inverse transpose under nonuniform scale, and clean up partially built previews on failure.
   Detaching a sheared child now refreshes its bounds and its descendants' bounds. Morph targets, bone-parented

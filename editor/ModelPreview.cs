@@ -41,12 +41,14 @@ public static class ModelPreview
         var hm = index >= 0 && index < model.Materials.Count ? model.Materials[index] : null;
         if (hm != null)
         {
-            // The factor's LINEAR number, as it is: the project renders in gamma space, and the Blender preview FBX this preview
-            // replaces carried the same linear number (io_scene_fbx writes DiffuseColor = base_color unconverted; read off the
-            // Salegs Revenge's twelve flat materials 2026-09-19) - a conversion would restore nothing and would brighten the
-            // Model Reader's turntable too. The alpha is the factor's for a MASK or BLEND material, 1 for an OPAQUE one.
+            // glTF factors are linear; Standard's colour property is sRGB, and so is what Unity's FBX importer makes of a
+            // Blender export: MEASURED 2026-10-03 in the project's own import cache (Library/Artifacts) of the Salegs Revenge's
+            // probe FBX - 0136_Charcoal's linear 0.137255 is imported as 0.4062, Color_A06's 0.8 as 0.90633, the sRGB encoding -
+            // although io_scene_fbx writes DiffuseColor unconverted. So the old Blender previews showed these colours, and the
+            // project's gamma colour space shows them as glTF means them. Convert RGB before the Lab's brightness multiplier;
+            // alpha is coverage and stays linear. (A revert of this on the exporter's line alone was wrong: PR #118.)
             var colour = new Color(hm.BaseColorFactor[0], hm.BaseColorFactor[1], hm.BaseColorFactor[2],
-                hm.AlphaMode == "OPAQUE" ? 1f : hm.BaseColorFactor[3]);
+                hm.AlphaMode == "OPAQUE" ? 1f : hm.BaseColorFactor[3]).gamma;
             mat.color = new Color(colour.r * tint, colour.g * tint, colour.b * tint, colour.a);
             if (mat.HasProperty("_Mode"))
             {
