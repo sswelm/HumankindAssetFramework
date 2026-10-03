@@ -159,9 +159,13 @@ public static partial class VehicleProbe
     /// <summary>Every node's matrix_world as Blender holds it (column-major float32), at the pose: posedTrs gives a node's
     /// animated translation, rotation and scale (any of them null for an unanimated channel), or null for an unanimated node.
     /// An animated channel replaces the base value the importer set - for a matrix node, the decomposed matrix's.</summary>
-    internal static float[][] BlenderWorldMatrices(HafModel m, Func<int, double[][]> posedTrs)
+    internal static float[][] BlenderWorldMatrices(HafModel m, Func<int, double[][]> posedTrs) => BlenderWorldMatrices(m, posedTrs, out _);
+
+    /// <summary>... and every node's LOCAL matrix (BKE_object_to_mat4 of its loc, quat and size), from which a child's world matrix is
+    /// parent @ local: what Blender recomputes when a parent's matrix changes (the Lab's placement detaches children first).</summary>
+    internal static float[][] BlenderWorldMatrices(HafModel m, Func<int, double[][]> posedTrs, out float[][] localOut)
     {
-        var world = new float[m.Nodes.Count][];
+        var world = new float[m.Nodes.Count][]; var locals = new float[m.Nodes.Count][];
         var stack = new Stack<int>(); var seen = new bool[m.Nodes.Count];
         for (int i = m.Nodes.Count - 1; i >= 0; i--) if (m.Nodes[i].Parent < 0) stack.Push(i);
         while (stack.Count > 0)
@@ -182,11 +186,12 @@ public static partial class VehicleProbe
                 if (p[1] != null) quat = q2;
                 if (p[2] != null) size = s2;
             }
-            var local = ObjectMatrix(loc, quat, size);
+            var local = ObjectMatrix(loc, quat, size); locals[n] = local;
             world[n] = node.Parent >= 0 && world[node.Parent] != null ? MulM4(world[node.Parent], local) : local;
             foreach (var c in node.Children) stack.Push(c);
         }
-        for (int i = 0; i < m.Nodes.Count; i++) if (world[i] == null) world[i] = IdentityF();
+        for (int i = 0; i < m.Nodes.Count; i++) { if (world[i] == null) world[i] = IdentityF(); if (locals[i] == null) locals[i] = IdentityF(); }
+        localOut = locals;
         return world;
     }
 }

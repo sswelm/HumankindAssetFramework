@@ -191,8 +191,18 @@ public static partial class VehicleProbe
             }
             return res;
         }
+        var sharpFace = SharpFaces(P, tris, N);
+        var (d0, d1) = EncodeCustomShorts(P, tris, N, sharpFace);
+        return DecodeCustomShorts(P, tris, sharpFace, d0, d1);
+    }
+
+    /// <summary>set_poly_smoothing: a face is SHARP when no corner's file normal differs from the face normal (dot above 0.9999999
+    /// as float32), or when a corner has no file normal. Decided at import, against the geometry as imported; a mesh the Lab
+    /// transforms afterwards (its second model) keeps these flags.</summary>
+    internal static bool[] SharpFaces(float[] P, int[] tris, float[] N)
+    {
+        int nf = tris.Length / 3;
         var FN = FaceNormals(P, tris);
-        // set_poly_smoothing: a face is SHARP when no corner's file normal differs from the face normal (dot above 0.9999999 as float32)
         var sharpFace = new bool[nf];
         const float flatDot = 0.9999999f;
         for (int f = 0; f < nf; f++)
@@ -206,20 +216,88 @@ public static partial class VehicleProbe
             }
             sharpFace[f] = !hasNormals || !smooth;
         }
+        return sharpFace;
+    }
+
+    /// <summary>normals_split_custom_set_from_vertices as the importer calls it: the corner-fan spaces of the geometry as
+    /// imported, and each vertex's file normal encoded against its fan's space as two shorts per corner (a fan of two or more
+    /// corners takes the float32 average of the same vector that many times - mesh_normals_corner_custom_set). What Blender
+    /// STORES; `vertex.normal` is read back from it against whatever the geometry is by then (DecodeCustomShorts).</summary>
+    internal static (short[] d0, short[] d1) EncodeCustomShorts(float[] P, int[] tris, float[] N, bool[] sharpFace)
+    {
+        var d0 = new short[tris.Length]; var d1 = new short[tris.Length];
+        WalkFans(P, tris, sharpFace, (v, infos, fan, space) =>
+        {
+            float cx = float.IsNaN(N[v * 3]) ? 0f : N[v * 3], cy = float.IsNaN(N[v * 3]) ? 0f : N[v * 3 + 1], cz = float.IsNaN(N[v * 3]) ? 0f : N[v * 3 + 2];
+            if (fan.Count >= 2)
+            {
+                float ax = 0f, ay = 0f, az = 0f;
+                for (int i = 0; i < fan.Count; i++) { ax = (float)(ax + cx); ay = (float)(ay + cy); az = (float)(az + cz); }
+                float inv = (float)(1.0f / (float)fan.Count);
+                cx = (float)(ax * inv); cy = (float)(ay * inv); cz = (float)(az * inv);
+            }
+            short e0, e1; EncodeCustom(space, cx, cy, cz, out e0, out e1);
+            foreach (int lc in fan) { int c = infos[lc].corner; d0[c] = e0; d1[c] = e1; }
+        }, null, null);
+        return (d0, d1);
+    }
+
+    /// <summary>`vertex.normal` from the stored two shorts per corner: normals_calc_corners over the geometry as it is NOW - the
+    /// fans walked afresh, each fan's stored shorts averaged as int2 (integer division) and decoded against its space -, then
+    /// mix_normals_corner_to_vert. The same geometry gives the file normal back to the quantization; a transformed one (the Lab's
+    /// second model: Mesh.transform moves the vertices and leaves the shorts, flip_normals reverses the corners and carries
+    /// each corner's shorts with it) gives what Blender then holds.</summary>
+    internal static float[] DecodeCustomShorts(float[] P, int[] tris, bool[] sharpFace, short[] d0, short[] d1)
+    {
+        int nv = P.Length / 3, nf = tris.Length / 3;
+        var cornerNormal = new float[nf * 3 * 3];
+        var result = new float[nv * 3];
+        WalkFans(P, tris, sharpFace, (v, infos, fan, space) =>
+        {
+            int s0 = 0, s1 = 0;
+            foreach (int lc in fan) { int c = infos[lc].corner; s0 += d0[c]; s1 += d1[c]; }
+            short a0 = (short)(s0 / fan.Count), a1 = (short)(s1 / fan.Count);   // int2 /= size: C++ integer division, towards zero
+            float dx, dy, dz; DecodeCustom(space, a0, a1, out dx, out dy, out dz);
+            foreach (int lc in fan) { int c = infos[lc].corner; cornerNormal[c * 3] = dx; cornerNormal[c * 3 + 1] = dy; cornerNormal[c * 3 + 2] = dz; }
+        }, (v, infos) =>
+        {
+            // mix_normals_corner_to_vert: the decoded corner normals weighted by the corner angle, normalized
+            float sx = 0f, sy = 0f, sz = 0f;
+            foreach (var ci in infos)
+            {
+                float pdx = (float)(P[ci.vertPrev * 3] - P[v * 3]), pdy = (float)(P[ci.vertPrev * 3 + 1] - P[v * 3 + 1]), pdz = (float)(P[ci.vertPrev * 3 + 2] - P[v * 3 + 2]);
+                float ndx = (float)(P[ci.vertNext * 3] - P[v * 3]), ndy = (float)(P[ci.vertNext * 3 + 1] - P[v * 3 + 1]), ndz = (float)(P[ci.vertNext * 3 + 2] - P[v * 3 + 2]);
+                Normalize3(ref pdx, ref pdy, ref pdz); Normalize3(ref ndx, ref ndy, ref ndz);
+                float factor = SafeAcosApprox(Dot3(pdx, pdy, pdz, ndx, ndy, ndz));
+                int c = ci.corner;
+                sx = (float)(sx + (float)(cornerNormal[c * 3] * factor)); sy = (float)(sy + (float)(cornerNormal[c * 3 + 1] * factor)); sz = (float)(sz + (float)(cornerNormal[c * 3 + 2] * factor));
+            }
+            Normalize3(ref sx, ref sy, ref sz);
+            result[v * 3] = sx; result[v * 3 + 1] = sy; result[v * 3 + 2] = sz;
+        }, v =>
+        {
+            float px = P[v * 3], py = P[v * 3 + 1], pz = P[v * 3 + 2]; Normalize3(ref px, ref py, ref pz);
+            result[v * 3] = px; result[v * 3 + 1] = py; result[v * 3 + 2] = pz;
+        });
+        return result;
+    }
+
+    /// <summary>normals_calc_corners' walk: for every vertex its corner infos, its local edges, the edge kinds (sharp faces, a
+    /// third face, a winding mismatch), the fans (traverse_fan_local_corners), each fan's normal (accumulate_fan_normal) and
+    /// space (corner_fan_space_define) - handed to onFan with the corners in the fan; onVertex after a vertex's fans; onLone
+    /// for a vertex of no face.</summary>
+    static void WalkFans(float[] P, int[] tris, bool[] sharpFace, Action<int, List<VertCornerInfo>, List<int>, FanSpace> onFan, Action<int, List<VertCornerInfo>> onVertex, Action<int> onLone)
+    {
+        int nv = P.Length / 3, nf = tris.Length / 3;
+        var FN = FaceNormals(P, tris);
         // the faces around each vertex, ascending (build_vert_to_face_map sorts each group)
         var vertFaces = new List<int>[nv];
         for (int f = 0; f < nf; f++) for (int k = 0; k < 3; k++) { int v = tris[f * 3 + k]; (vertFaces[v] ?? (vertFaces[v] = new List<int>())).Add(f); }
-        var cornerNormal = new float[nf * 3 * 3];
-        var result = new float[nv * 3];
         var infos = new List<VertCornerInfo>(); var localEdgeVerts = new List<int>(); var fan = new List<int>();
         for (int v = 0; v < nv; v++)
         {
             var faces = vertFaces[v];
-            if (faces == null)
-            {
-                float px = P[v * 3], py = P[v * 3 + 1], pz = P[v * 3 + 2]; Normalize3(ref px, ref py, ref pz);
-                result[v * 3] = px; result[v * 3 + 1] = py; result[v * 3 + 2] = pz; continue;
-            }
+            if (faces == null) { onLone?.Invoke(v); continue; }
             // collect_corner_info
             infos.Clear();
             foreach (int f in faces)
@@ -305,8 +383,7 @@ public static partial class VehicleProbe
                     }
                     Normalize3(ref fx, ref fy, ref fz);
                 }
-                // handle_fan_result_and_custom_normals: the space, then the vertex's file normal encoded and decoded through it; a fan
-                // of two or more corners takes the float32 average of the same vector that many times (mesh_normals_corner_custom_set)
+                // the fan's space: corner_fan_space_define over the first and last edge and, for a fan of several corners, every edge
                 int edgeFirst = infos[fan[0]].edgeNext, edgeLast = infos[fan[fan.Count - 1]].edgePrev;
                 var fanEdgeDirs = new List<float[]>();
                 if (fan.Count > 1)
@@ -315,36 +392,13 @@ public static partial class VehicleProbe
                     if (edgeLast != edgeFirst) fanEdgeDirs.Add(edgeDirs[edgeLast]);
                 }
                 var space = DefineSpace(fx, fy, fz, edgeDirs[edgeFirst][0], edgeDirs[edgeFirst][1], edgeDirs[edgeFirst][2], edgeDirs[edgeLast][0], edgeDirs[edgeLast][1], edgeDirs[edgeLast][2], fanEdgeDirs);
-                float cx = float.IsNaN(N[v * 3]) ? 0f : N[v * 3], cy = float.IsNaN(N[v * 3]) ? 0f : N[v * 3 + 1], cz = float.IsNaN(N[v * 3]) ? 0f : N[v * 3 + 2];
-                if (fan.Count >= 2)
-                {
-                    float ax = 0f, ay = 0f, az = 0f;
-                    for (int i = 0; i < fan.Count; i++) { ax = (float)(ax + cx); ay = (float)(ay + cy); az = (float)(az + cz); }
-                    float inv = (float)(1.0f / (float)fan.Count);
-                    cx = (float)(ax * inv); cy = (float)(ay * inv); cz = (float)(az * inv);
-                }
-                short d0, d1; EncodeCustom(space, cx, cy, cz, out d0, out d1);
-                float dx, dy, dz; DecodeCustom(space, d0, d1, out dx, out dy, out dz);
-                foreach (int lc in fan) { int c = infos[lc].corner; cornerNormal[c * 3] = dx; cornerNormal[c * 3 + 1] = dy; cornerNormal[c * 3 + 2] = dz; }
+                onFan(v, infos, fan, space);
                 visitedCount += fan.Count;
                 if (visitedCount == infos.Count) break;
                 foreach (int lc in fan) visited[lc] = true;
                 while (visited[start]) start++;
             }
-            // mix_normals_corner_to_vert: the decoded corner normals weighted by the corner angle, normalized
-            float sx = 0f, sy = 0f, sz = 0f;
-            foreach (var ci in infos)
-            {
-                float pdx = (float)(P[ci.vertPrev * 3] - P[v * 3]), pdy = (float)(P[ci.vertPrev * 3 + 1] - P[v * 3 + 1]), pdz = (float)(P[ci.vertPrev * 3 + 2] - P[v * 3 + 2]);
-                float ndx = (float)(P[ci.vertNext * 3] - P[v * 3]), ndy = (float)(P[ci.vertNext * 3 + 1] - P[v * 3 + 1]), ndz = (float)(P[ci.vertNext * 3 + 2] - P[v * 3 + 2]);
-                Normalize3(ref pdx, ref pdy, ref pdz); Normalize3(ref ndx, ref ndy, ref ndz);
-                float factor = SafeAcosApprox(Dot3(pdx, pdy, pdz, ndx, ndy, ndz));
-                int c = ci.corner;
-                sx = (float)(sx + (float)(cornerNormal[c * 3] * factor)); sy = (float)(sy + (float)(cornerNormal[c * 3 + 1] * factor)); sz = (float)(sz + (float)(cornerNormal[c * 3 + 2] * factor));
-            }
-            Normalize3(ref sx, ref sy, ref sz);
-            result[v * 3] = sx; result[v * 3 + 1] = sy; result[v * 3 + 2] = sz;
+            onVertex?.Invoke(v, infos);
         }
-        return result;
     }
 }

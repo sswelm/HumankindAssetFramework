@@ -41,7 +41,7 @@ cp "$NEWTONSOFT" "$TMPD/Newtonsoft.Json.dll"
 WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"; WTMP="$(cygpath -m "$TMPD" 2>/dev/null || echo "$TMPD")"
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -out:"$WTMP/probe.exe" \
   -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
-  "$WROOT/tools/vehicle-probe-drill/ProbeDrill.cs" "$WROOT/editor/HafModel.cs" "$WROOT/editor/GlbReader.cs" "$WROOT/editor/HafTransforms.cs" "$WROOT/editor/BlenderNames.cs" "$WROOT/editor/VehicleProbe.cs" "$WROOT/editor/VehicleProbe.Visibility.cs" "$WROOT/editor/VehicleProbe.Islands.cs" "$WROOT/editor/VehicleProbe.InsideOut.cs" "$WROOT/editor/VehicleProbe.BlenderWorld.cs" "$WROOT/editor/VehicleProbe.BlenderSkin.cs" "$WROOT/editor/VehicleProbe.CustomNormals.cs" 2>&1); rc=$?
+  "$WROOT/tools/vehicle-probe-drill/ProbeDrill.cs" "$WROOT/editor/HafModel.cs" "$WROOT/editor/GlbReader.cs" "$WROOT/editor/HafTransforms.cs" "$WROOT/editor/BlenderNames.cs" "$WROOT/editor/VehicleProbe.cs" "$WROOT/editor/VehicleProbe.Visibility.cs" "$WROOT/editor/VehicleProbe.Islands.cs" "$WROOT/editor/VehicleProbe.InsideOut.cs" "$WROOT/editor/VehicleProbe.BlenderWorld.cs" "$WROOT/editor/VehicleProbe.BlenderSkin.cs" "$WROOT/editor/VehicleProbe.CustomNormals.cs" "$WROOT/editor/VehicleProbe.Merge.cs" 2>&1); rc=$?
 if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/probe.exe" ]; then echo "$OUT" | grep -E "error" | head -20; echo "FAIL — the vehicle probe drill did not compile (csc rc=$rc)"; exit 1; fi
 
 # ---- the sources: fixtures, naming fixtures, the registry, the Khronos samples
@@ -63,9 +63,15 @@ RECIPE_SOURCES=()
 [ -z "$PACK" ] || mapfile -t RECIPE_SOURCES < <(python "$ROOT/tools/vehicle-probe-drill/recipe_check.py" --list "$PROJECT" | tr -d '\r')
 FILES=("${FIXTURES[@]}" "${NAMING[@]}"); [ "${#REGISTRY[@]}" -eq 0 ] || FILES+=("${REGISTRY[@]}"); [ "${#SAMPLES_OK[@]}" -eq 0 ] || FILES+=("${SAMPLES_OK[@]}"); [ "${#RECIPE_SOURCES[@]}" -eq 0 ] || FILES+=("${RECIPE_SOURCES[@]}")
 mapfile -t FILES < <(printf '%s\n' "${FILES[@]}" | awk '!seen[tolower($0)]++')   # a recipe's source may also be a registry file
+# ---- the JOBS (step 3d): probes with the Lab's other inputs - a second model, placements, an orientation - on the fixtures that
+#      exercise each and on every saved recipe that sets one (its exact arguments); both sides run the same JSON (probe_jobs.py)
+JOBPROJ="-"; [ -z "$PACK" ] || JOBPROJ="$PROJECT"   # the recipes live in the modding project; none without it
+mapfile -t JOBS < <(python "$ROOT/tools/vehicle-probe-drill/probe_jobs.py" "$WTMP/naming" "$JOBPROJ" "$WTMP/jobs.json" | tr -d '\r')
+[ "${#JOBS[@]}" -gt 0 ] || { echo "FAIL — could not write the probe jobs"; exit 1; }
+N_FIXTURE_JOBS=$(printf '%s\n' "${JOBS[@]}" | grep -c "/naming/")
 
 # ---- the C# probe on every file
-"$MONO" "$TMPD/probe.exe" "${FILES[@]}" > "$TMPD/csharp_raw.txt" 2>&1; rc=$?
+"$MONO" "$TMPD/probe.exe" "${FILES[@]}" "@$WTMP/jobs.json" > "$TMPD/csharp_raw.txt" 2>&1; rc=$?
 LC_ALL=C sed 's/\xEF\xBB\xBF//g' "$TMPD/csharp_raw.txt" | tr -d '\r' > "$TMPD/csharp.txt"
 # a file the 32-bit Mono has no address space for (Unity ships its standalone Mono as a 32-bit process; the 398 MB
 # recipe source with its visibility BVH is one): probe it on the 64-bit .NET runtime - the same exe, run natively -
@@ -75,6 +81,14 @@ mapfile -t OOM < <(awk -F'\t' '$1 == "FAIL" && $3 ~ /^OutOfMemoryException/ { pr
 for key in "${OOM[@]}"; do
   [ -n "$key" ] || continue
   src=""; for f in "${FILES[@]}"; do k=$(printf '%s' "$f" | tr '\\' '/' | tr 'A-Z' 'a-z'); [ "$k" = "$key" ] && { src="$f"; break; }; done
+  if [ -z "$src" ] && [[ "$key" == *"#"* ]]; then   # a job: rerun it alone from its own jobs file
+    python - "$WTMP/jobs.json" "$key" "$WTMP/job_$N_NATIVE.json" <<'PY'
+import json, sys
+jobs = [j for j in json.load(open(sys.argv[1], encoding="utf-8")) if j["key"] == sys.argv[2]]
+json.dump(jobs, open(sys.argv[3], "w", encoding="utf-8"))
+PY
+    src="@$WTMP/job_$N_NATIVE.json"
+  fi
   [ -n "$src" ] || continue
   "$TMPD/probe.exe" "$src" 2>&1 | LC_ALL=C sed 's/\xEF\xBB\xBF//g' | tr -d '\r' | grep -E '^(ROW|FILE|FAIL)' > "$TMPD/native_$N_NATIVE.txt"
   awk -F'\t' -v k="$key" '!($1 == "FAIL" && $2 == k)' "$TMPD/csharp.txt" > "$TMPD/csharp2.txt"; cat "$TMPD/native_$N_NATIVE.txt" >> "$TMPD/csharp2.txt"; mv "$TMPD/csharp2.txt" "$TMPD/csharp.txt"
@@ -82,8 +96,8 @@ for key in "${OOM[@]}"; do
 done
 grep -E "^FAIL" "$TMPD/csharp.txt"
 n_ok=$(grep -c "^FILE" "$TMPD/csharp.txt"); n_rows=$(grep -c "^ROW" "$TMPD/csharp.txt")
-[ "$n_ok" -eq "${#FILES[@]}" ] || { echo "FAIL — vehicle probe drill: a file could not be probed ($n_ok of ${#FILES[@]})"; exit 1; }
-echo "C# probe: $n_ok files, $n_rows rows - ${#FIXTURES[@]} fixtures, ${#NAMING[@]} naming fixtures, $REGISTRY_NOTE (${#REGISTRY[@]}), ${#SAMPLES_OK[@]} Khronos samples, ${#RECIPE_SOURCES[@]} recipe sources ($(grep '^TOTAL' "$TMPD/csharp.txt"))"
+[ "$n_ok" -eq $(( ${#FILES[@]} + ${#JOBS[@]} )) ] || { echo "FAIL — vehicle probe drill: a file could not be probed ($n_ok of ${#FILES[@]} files + ${#JOBS[@]} jobs)"; exit 1; }
+echo "C# probe: $n_ok probes, $n_rows rows - ${#FIXTURES[@]} fixtures, ${#NAMING[@]} naming fixtures, $REGISTRY_NOTE (${#REGISTRY[@]}), ${#SAMPLES_OK[@]} Khronos samples, ${#RECIPE_SOURCES[@]} recipe sources, ${#JOBS[@]} jobs with a second model, placements or an orientation ($N_FIXTURE_JOBS on fixtures, $(( ${#JOBS[@]} - N_FIXTURE_JOBS )) recipes' own) ($(grep '^TOTAL' "$TMPD/csharp.txt"))"
 
 # ---- the saved recipes: what Blender listed when each was saved, against the C# probe of its source today
 DIFFERING=(); RECIPE_LINE=""
@@ -104,8 +118,14 @@ if [ -z "$BLENDER" ]; then
   done
 fi
 if [ -z "$BLENDER" ]; then echo "PASS — vehicle probe drill: $n_ok files probed in C#; Blender not found, so NO parity comparison (BLENDER=<exe> to force)"; exit 0; fi
-if [ "${FULL:-0}" = "1" ]; then SAMPLE=("${FILES[@]}")
+if [ "${FULL:-0}" = "1" ]; then SAMPLE=("${FILES[@]}"); cp "$WTMP/jobs.json" "$WTMP/jobs_sample.json"
 else
+  python - "$WTMP/jobs.json" "$WTMP/jobs_sample.json" <<'PY'
+import json, os, sys
+jobs = json.load(open(sys.argv[1], encoding="utf-8"))
+keep = [j for j in jobs if "/naming/" in j["key"] or (os.path.getsize(j["file"]) <= 100000000 and (not j.get("merge2") or os.path.getsize(j["merge2"].split("|")[0]) <= 100000000))]
+json.dump(keep, open(sys.argv[2], "w", encoding="utf-8"))
+PY
   # every fixture (the 72k-vertex grid aside: Blender's probe walks its faces in Python), the rigged Khronos samples, the registry's three smallest
   mapfile -t SAMPLE < <( { printf '%s\n' "${FIXTURES[@]}" | grep -v '/big\.glb$'; printf '%s\n' "${NAMING[@]}";
     for s in "${SAMPLES_OK[@]}"; do case "$(basename "$s")" in SimpleSkin.gltf|RiggedSimple.glb|RiggedFigure.glb|CesiumMan.glb|BrainStem.glb|MultipleScenes.gltf) echo "$s";; esac; done;
@@ -113,13 +133,14 @@ else
     for d in "${DIFFERING[@]}"; do [ -n "$d" ] && [ "$(stat -c %s "$d" 2>/dev/null || echo 0)" -le 100000000 ] && echo "$d"; done; } | awk '!seen[tolower($0)]++' )
 fi
 t0=$(date +%s)
-"$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/vehicle-probe-drill/blender_probe_many.py")" -- "$(cygpath -m "$ROOT/editor/Tools~/vehicle_rig.py")" "${SAMPLE[@]}" > "$TMPD/blender_raw.txt" 2>&1; brc=$?
+N_JOBS_SAMPLE=$(python -c "import json,sys; print(len(json.load(open(sys.argv[1], encoding='utf-8'))))" "$WTMP/jobs_sample.json")
+"$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/vehicle-probe-drill/blender_probe_many.py")" -- "$(cygpath -m "$ROOT/editor/Tools~/vehicle_rig.py")" "${SAMPLE[@]}" "@$WTMP/jobs_sample.json" > "$TMPD/blender_raw.txt" 2>&1; brc=$?
 t1=$(date +%s)
 tr -d '\r' < "$TMPD/blender_raw.txt" | grep -E "^ROW|^FILE" > "$TMPD/blender.txt"
 n_b=$(grep -c "^FILE" "$TMPD/blender.txt")
-if [ "$brc" -ne 0 ] || [ "$n_b" -ne "${#SAMPLE[@]}" ]; then
+if [ "$brc" -ne 0 ] || [ "$n_b" -ne $(( ${#SAMPLE[@]} + N_JOBS_SAMPLE )) ]; then
   grep -E "VEHICLE ERROR|Traceback|Error" "$TMPD/blender_raw.txt" | head -8
-  echo "FAIL — vehicle probe drill: Blender's probe ran on $n_b of ${#SAMPLE[@]} files (exit $brc)"; exit 1
+  echo "FAIL — vehicle probe drill: Blender's probe ran on $n_b of ${#SAMPLE[@]} files + $N_JOBS_SAMPLE jobs (exit $brc)"; exit 1
 fi
 # the comparator's status FIRST, the filter afterwards: read after `| tr`, it was tr's - always 0 - and from PR #112 until
 # 2026-10-02 this drill printed the comparator's FAIL lines and then PASS (tools/check-exit-status.sh guards the shape now)
@@ -133,4 +154,4 @@ n_arb=0; n_left=0
 for d in "${DIFFERING[@]}"; do [ -z "$d" ] && continue; if printf '%s\n' "${SAMPLE[@]}" | grep -qixF -- "$d"; then n_arb=$((n_arb + 1)); else n_left=$((n_left + 1)); echo "NOTE — a differing recipe's source was not put to Blender in this run (over 100 MB; FULL=1): $d"; fi; done
 [ "${#DIFFERING[@]}" -eq 0 ] || echo "recipes that differ: $n_arb are STALE (Blender's probe of the source today gives the C# rows, not the recipe's), $n_left left for FULL=1"
 NATIVE_NOTE=""; [ "$N_NATIVE" -eq 0 ] || NATIVE_NOTE=" ($N_NATIVE probed on the 64-bit .NET runtime: too large for Unity's 32-bit standalone Mono)"
-echo "PASS — vehicle probe drill: $n_ok files probed in C#$NATIVE_NOTE; on ${#SAMPLE[@]} of them the rows equal Blender's own probe (names, order, vertices, visibility, boxes, bones, rig bones; Blender took $((t1 - t0)) s for those)${RECIPE_LINE:+; $RECIPE_LINE}"
+echo "PASS — vehicle probe drill: $n_ok probes in C# (${#FILES[@]} files, ${#JOBS[@]} jobs with a second model, placements or an orientation)$NATIVE_NOTE; on ${#SAMPLE[@]} files and $N_JOBS_SAMPLE jobs the rows equal Blender's own probe (names, order, vertices, visibility, inside-out, boxes, bones, rig bones, matrices and vertex positions bit for bit; Blender took $((t1 - t0)) s for those)${RECIPE_LINE:+; $RECIPE_LINE}"

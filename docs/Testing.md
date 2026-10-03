@@ -121,6 +121,16 @@ ray cast are Blender's float32 arithmetic (`VehicleProbe.BlenderWorld.cs`, `Vehi
 verdicts off with the double chain, 0 with this; every inside-out verdict agrees (14,023); the Ehrhardt's spin output
 keeps 6 visibility verdicts where Blender's binary contradicts its own box test (Review Backlog). The `custom_normals`
 fixture holds a leaning and a flat quad whose vertex normals are read off Blender to the bit.
+**Since 2026-10-03 (step 3d) the drill also runs JOBS** — probes with the Lab's other inputs, a second model (`merge2=`),
+per-part placements (`parttx=`) and an orientation (`proberot=`), from one JSON both sides read
+(`tools/vehicle-probe-drill/probe_jobs.py`, `ProbeDrill.cs @jobs.json`, `blender_probe_many.py @jobs.json`): nine on
+the `second_model_a/b/c`, `placement_nested`, `placement_split` and `insideout` fixtures (a turned second-model root
+with a per-axis scale, a mirrored node, leaning normals, a skinned part, a bone shape, a clashing name, a single-mesh
+second model's split and a first model's split beside a second model, placements on a parent with children, on a loose
+part, with a per-axis scale on a turned part, on a missing name, with a zero scale; the orientation about Z and about X),
+and one per saved recipe that sets any of these, with the recipe's exact arguments formatted as the Lab formats them
+(`Tests/test_probe_jobs.py` holds the formatting to the Lab's). Every job's MATRIX and VERTEX rows are held bit for bit
+like a file's; `recipe_check.py` judges a recipe with inputs on its job's rows — its B_ parts and placed parts included.
 A file too large for Unity's 32-bit standalone Mono is probed on the 64-bit .NET runtime instead, and the drill says so. The names come from a port of the
 importer's own tree construction (`compute_vnodes`: creation depth-first from the parentless nodes in index order,
 armatures at the joints' deepest common ancestor, skinned meshes moved or split off under them, meshes on bones moved

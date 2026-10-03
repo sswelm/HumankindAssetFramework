@@ -74,7 +74,23 @@ one BVH) — done (10,498 parts on 118 files agree with Blender, 1,171 interior;
 after a loose split and the file's normals as the normal ray to get there); **3c** the inside-out verdicts (island scoring against the hull axis) — done (14,020 of 14,023 parts on 119 files
 agree; the three left are skinned parts with zero-area triangles, the item below); **3d** the Lab calls the C# probe for
 `.glb`/`.gltf` sources and builds its part preview in-process instead of importing a preview FBX (FBX/OBJ/.blend
-sources keep Blender). The order below stands for the rest.
+sources keep Blender) — done 2026-10-03: the second model's merge, the per-part placements and the Orientation are
+Blender's arithmetic (`VehicleProbe.Merge.cs`), held bit for bit on nine fixture jobs and on the four recipes that set
+them (`probe_jobs.py`); the Lab's Probe parts button runs it (`VehicleLabWindow.ProbeInProcess`,
+`VehicleProbePreview`). The order below stands for the rest.
+
+- **The in-process probe's edges, said (2026-10-03, 3d)**: (a) an ANIMATED second model — Blender's merge bakes its
+  matrices at the untouched import state, a blend of every clip one frame in that no file states; the C# probe uses its
+  static transforms (the same for an unanimated file, which every recipe's second model is); (b) a placement on a
+  SKINNED part reads its `bound_box` off the double chain's posed positions and the armature modifier's interplay with a
+  detached mesh is not modelled — close, not bit for bit (no recipe has one); (c) the in-process path poses the first
+  model at its first clip's start (the drill's reference) where the Blender path showed the untouched import blend —
+  an animated source's boxes can differ slightly from what the Lab listed before; (d) the preview's brightness is a
+  material tint where Blender's preview baked the textures, and the preview's frame — Blender (X, Y, Z) as Unity
+  (X, Z, Y), faces rewound — is the FBX import's as derived from the exporter's axes, to be confirmed by eye on the
+  first in-Unity probe; (e) `Matrix.Rotation`'s cosf/sinf are the double functions rounded to float (every drilled angle
+  agrees); (f) a `B_` name the first model already uses is made unique in Blender's name order, approximated as
+  case-insensitive ordinal order.
 
 **Order, by payoff per effort**: (1) `inspect_fbx` → Unity's `ModelImporter` clip list (days; removes a Blender
 launch from the Clip Range dialog); (2) reduce/`prep_model` → a C# quadric decimator (1–2 weeks, golden-verified);
