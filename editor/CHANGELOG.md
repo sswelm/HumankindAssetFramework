@@ -5,6 +5,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Fuser view modes:** "Not in a fuse group" is replaced by "Delete parts" and "Not marked".
+  "Not marked" shows ungrouped parts without a deletion mark, keeping the remaining parts to review separate
+  from the deletion queue. Existing marks, group assignments and part numbering stay unchanged.
+
 - **Model Fuser/Cutter overlapping parts:** a selected part's two-sided highlight now takes precedence over a
   coincident front/back material twin, while nearer geometry still occludes it. The new "Selected part only"
   preview toggle lets you inspect buried parts without the surrounding model. Deselecting restores the model;
