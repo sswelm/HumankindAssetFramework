@@ -362,6 +362,7 @@ public static partial class GlbDisconnectedParts
         public int Triangles;
         public int Islands;
         public string Blocked;   // non-null = unsupported for splitting (compressed, instanced, non-triangle…)
+        public bool TriangleFree;   // proven from primitive modes: empty mesh, or only points/lines (0–3); never strips/fans or mixed meshes
         // For the Workshop's list filters (2026-09-16, the Vehicle Lab's sliders brought over): the node's WORLD-space
         // bounding box from the POSITION accessors' min/max (required by glTF, so no vertex is read) through the node's
         // world matrix, and its vertex count. Min/Max stay null where an accessor has no min/max — such a part is never hidden.
@@ -398,6 +399,9 @@ public static partial class GlbDisconnectedParts
             if (node?["mesh"] == null) continue;
             int meshIndex = node.Value<int>("mesh");
             var info = new PartInfo { NodeIndex = nodeIndex, NodeName = (string)node["name"] ?? ("node " + nodeIndex), MeshName = (string)meshes[meshIndex]?["name"] ?? ("mesh " + meshIndex) };
+            info.TriangleFree = ((meshes[meshIndex]?["primitives"] as JArray) ?? new JArray()).All(token =>
+                token is JObject primitive && primitive["mode"]?.Type == JTokenType.Integer &&
+                (long)primitive["mode"] >= 0 && (long)primitive["mode"] <= 3);
             MeasureNode(root, nodes, nodeIndex, meshes[meshIndex] as JObject, info);
             info.ParentIndex = parentOf.TryGetValue(nodeIndex, out int pi) ? pi : -1;
             if (node["extensions"]?["EXT_mesh_gpu_instancing"] != null)

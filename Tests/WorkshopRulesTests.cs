@@ -41,6 +41,14 @@ public class WorkshopRulesTests
         Assert.False(WorkshopRules.HideTinyDeletedPart(0, true, true));
     }
 
+    [Fact]
+    public void Confirmed_triangle_free_parts_are_auto_deleted_unless_assigned()
+    {
+        Assert.True(WorkshopRules.ShouldMarkTinyPartForDeletion(0, "Only TRIANGLES primitives can be split safely.", false, triangleFree: true));
+        Assert.False(WorkshopRules.ShouldMarkTinyPartForDeletion(0, "Only TRIANGLES primitives can be split safely.", true, triangleFree: true));
+        Assert.False(WorkshopRules.ShouldMarkTinyPartForDeletion(0, "Only TRIANGLES primitives can be split safely.", false, triangleFree: false));
+    }
+
     static IList<KeyValuePair<int, string>> Rows(params (int, string)[] rows)
     {
         var l = new List<KeyValuePair<int, string>>();

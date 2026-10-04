@@ -811,8 +811,8 @@ public static class WorkshopRules
 {
     // Unknown counts (unsupported/compressed geometry) must not be treated as empty. Explicit group/Split/Tear
     // assignments take precedence over the automatic cleanup default.
-    public static bool ShouldMarkTinyPartForDeletion(int triangles, string blocked, bool assigned) =>
-        triangles >= 0 && triangles <= 2 && blocked == null && !assigned;
+    public static bool ShouldMarkTinyPartForDeletion(int triangles, string blocked, bool assigned, bool triangleFree = false) =>
+        triangles >= 0 && triangles <= 2 && (blocked == null || triangleFree) && !assigned;
 
     // Hiding honors an existing Delete mark even when analysis could not read the geometry. That does not
     // justify marking unsupported geometry automatically, but the user's explicit deletion choice is sufficient.

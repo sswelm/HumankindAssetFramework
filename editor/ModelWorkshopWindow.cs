@@ -38,6 +38,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         public int tris;
         public int islands;      // 1 = nothing to split (row disabled)
         public string blocked;   // non-null = the analyzer's reason this part cannot be split
+        public bool triangleFree; // confirmed points/lines-only geometry, distinct from an unknown triangle count
         public bool split;       // the checkbox (Split)
         public bool tear;        // TEAR (2026-09-25): Split, plus a cut wherever the other side of the ship has the welded object as a separate island; T key or the row popup
         public bool delete;      // MARKED FOR DELETION (2026-09-18): the part loses its mesh in the output — Delete key or the row popup, in both windows; exclusive with split and fuse
@@ -57,6 +58,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
     [SerializeField] string probedFile = "";   // the file `rows` (and the checks/preview/output path) were built from — serialized so a domain reload doesn't read surviving rows as stale (review finding 8)
     [SerializeField] string probedStamp = "";  // …and WHICH file was there: its length and write time, so a file rewritten in place under the window is not read as the file the rows describe (WorkshopRules.RowsStillDescribe)
     [SerializeField] List<Row> rows = new List<Row>();
+    [SerializeField] int triangleFreeCleanupVersion;   // one-time upgrade of rows restored from a layout predating line cleanup
     [SerializeField] bool hideWhole = false;   // filter: hide "1 island — already whole" rows (nothing to split there)
     // LIST FILTERS (2026-09-16, the Vehicle Lab's sliders brought over — user: "make these selection tools also available in
     // the Model Workshop"): the same bands, over the node bbox the analyzer reads from the accessors. Height is glTF +Y, the
@@ -153,6 +155,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
     bool cutNormalsDone;
     bool CutModeActive => cutGO != null;
 
+    void OnEnable() { if (rows.Count > 0 && triangleFreeCleanupVersion < 1) analyzePending = true; }
     void OnDisable() => DestroyPreview();
 
     // P1 OF THE REVIEW OF PR #97: the stamp check in Analyze() decides what a re-Probe shows, and an operation
@@ -705,12 +708,12 @@ public abstract class ModelWorkshopWindow : EditorWindow
         if (Analyze()) BuildPreviewFromGlb();
     }
 
-    int MarkTinyPartsForDeletion()
+    int MarkTinyPartsForDeletion(bool triangleFreeOnly = false)
     {
         int marked = 0;
         foreach (var r in rows)
-            if (!r.delete && WorkshopRules.ShouldMarkTinyPartForDeletion(r.tris, r.blocked,
-                r.split || r.tear || !string.IsNullOrEmpty(r.fuse)))
+            if (!r.delete && (!triangleFreeOnly || r.triangleFree) && WorkshopRules.ShouldMarkTinyPartForDeletion(r.tris, r.blocked,
+                r.split || r.tear || !string.IsNullOrEmpty(r.fuse), r.triangleFree))
             { r.delete = true; marked++; }
         return marked;
     }
@@ -779,7 +782,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         {
             var fileNames = GlbDisconnectedParts.NodeNames(File.ReadAllBytes(srcFile)).ToDictionary(kv => kv.Key, kv => kv.Value);
             rows = GlbDisconnectedParts.Analyze(UniqueBytes(srcFile), mergePct / 100.0)
-                .Select(p => new Row { nodeIndex = p.NodeIndex, node = p.NodeName, fileName = fileNames.TryGetValue(p.NodeIndex, out string fn) ? fn : p.NodeName, mesh = p.MeshName, tris = p.Triangles, islands = p.Islands, blocked = p.Blocked, split = kept.Contains(p.NodeIndex), tear = keptTear.Contains(p.NodeIndex), delete = keptDelete.Contains(p.NodeIndex),
+                .Select(p => new Row { nodeIndex = p.NodeIndex, node = p.NodeName, fileName = fileNames.TryGetValue(p.NodeIndex, out string fn) ? fn : p.NodeName, mesh = p.MeshName, tris = p.Triangles, islands = p.Islands, blocked = p.Blocked, triangleFree = p.TriangleFree, split = kept.Contains(p.NodeIndex), tear = keptTear.Contains(p.NodeIndex), delete = keptDelete.Contains(p.NodeIndex),
                                        fuse = keptFuse.TryGetValue(p.NodeIndex, out string kf) ? kf : "",
                                        verts = p.Vertices, min = p.Min?.Select(d => (float)d).ToArray(), max = p.Max?.Select(d => (float)d).ToArray() })
                 .OrderBy(r => NaturalPrefix(r.node), StringComparer.OrdinalIgnoreCase)
@@ -790,7 +793,8 @@ public abstract class ModelWorkshopWindow : EditorWindow
             foreach (var r in rows) if (r.islands <= 1 || r.blocked != null) r.split = false;   // no longer splittable at this distance
             // Apply the default once per loaded file, after restoring explicit assignments. Re-probes and merge
             // slider recounts preserve a Delete mark the user cleared; they must not silently select it again.
-            int tinyMarked = firstLoad ? MarkTinyPartsForDeletion() : 0;
+            int tinyMarked = firstLoad ? MarkTinyPartsForDeletion() : triangleFreeCleanupVersion < 1 ? MarkTinyPartsForDeletion(true) : 0;
+            triangleFreeCleanupVersion = 1;
             int multi = rows.Count(r => r.islands > 1 && r.blocked == null);
             probedFile = srcFile; probedStamp = stamp;   // the rows now describe THIS file, this version of it (the source-switch hygiene above keys on both)
             // …AND SAY SO WHEN THERE ARE GROUPS ON DISK AND NONE IN THE WINDOW (2026-09-27, user: "my work is back, I

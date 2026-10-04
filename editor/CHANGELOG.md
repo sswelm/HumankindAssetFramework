@@ -6,12 +6,15 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 ## 0.5.7 — unreleased
 
 - **Model Fuser/Cutter tiny-part cleanup:** a fresh probe automatically marks unassigned mesh parts with 0–2
-  triangles for deletion. Existing groups and Split/Tear marks take precedence, and unsupported geometry is skipped.
+  triangles for deletion, including confirmed point/line-only meshes. Existing groups and Split/Tear marks take
+  precedence; other unsupported geometry (including triangle strips/fans and mixed meshes) is skipped.
   Re-probes preserve manual overrides. A button applies the same cleanup to an already loaded list; deletion marks
   stay editable and geometry is removed only when writing an output. Tiny deletion-marked parts are hidden from
   the normal list and preview, with original names and node indices kept. This includes existing deletion marks
   on unsupported rows reporting zero triangles. Show all preserves this hiding; "Marked for deletion" reveals them
   for review.
+  An already loaded list receives point/line cleanup once after recompile, preserving its current groups and
+  existing manual overrides on triangle parts.
 
 - **Vehicle Lab probe crash:** replaced the process-wide weak-table vertex cache after Unity 2021.3's Mono crashed
   in its lookup while probing the fused Protected Cruiser. Each probe now owns its cache and releases it on success
