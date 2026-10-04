@@ -7,6 +7,32 @@ using Xunit;
 // selected every namesake). Rows are (node index, name).
 public class WorkshopRulesTests
 {
+    [Theory]
+    [InlineData(0, null, false, true)]
+    [InlineData(1, null, false, true)]
+    [InlineData(2, null, false, true)]
+    [InlineData(3, null, false, false)]
+    [InlineData(-1, null, false, false)]
+    [InlineData(0, "compressed mesh", false, false)]
+    [InlineData(2, "non-triangle primitive", false, false)]
+    [InlineData(2, null, true, false)]
+    public void Tiny_part_cleanup_uses_known_counts_and_preserves_assignments(int triangles, string blocked, bool assigned, bool expected)
+    {
+        Assert.Equal(expected, WorkshopRules.ShouldMarkTinyPartForDeletion(triangles, blocked, assigned));
+    }
+
+    [Theory]
+    [InlineData(0, null, true, false, true)]
+    [InlineData(2, null, true, false, true)]
+    [InlineData(2, null, false, false, false)]
+    [InlineData(2, null, true, true, false)]
+    [InlineData(3, null, true, false, false)]
+    [InlineData(0, "unsupported", true, false, false)]
+    public void Tiny_deletion_marks_are_hidden_until_reviewed_or_cleared(int triangles, string blocked, bool deleted, bool showingDeleted, bool expected)
+    {
+        Assert.Equal(expected, WorkshopRules.HideTinyDeletedPart(triangles, blocked, deleted, showingDeleted));
+    }
+
     static IList<KeyValuePair<int, string>> Rows(params (int, string)[] rows)
     {
         var l = new List<KeyValuePair<int, string>>();

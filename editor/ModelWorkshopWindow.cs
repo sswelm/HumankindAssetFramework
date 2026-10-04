@@ -58,6 +58,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
     [SerializeField] string probedStamp = "";  // …and WHICH file was there: its length and write time, so a file rewritten in place under the window is not read as the file the rows describe (WorkshopRules.RowsStillDescribe)
     [SerializeField] List<Row> rows = new List<Row>();
     [SerializeField] bool hideWhole = false;   // filter: hide "1 island — already whole" rows (nothing to split there)
+    [SerializeField] bool hideTinyDeleted = true;   // visibility only: rows, names and node indices are never removed or renumbered
     // LIST FILTERS (2026-09-16, the Vehicle Lab's sliders brought over — user: "make these selection tools also available in
     // the Model Workshop"): the same bands, over the node bbox the analyzer reads from the accessors. Height is glTF +Y, the
     // side axis is the model's shorter horizontal extent (as the fuse's belly axis). The flat-surface filter came over on
@@ -96,7 +97,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
     {
         minVerts = 1; minPartSize = 0f; maxPartSize = 1e9f; minFlatPct = 0f;
         minHeight = -1e9f; maxHeight = 1e9f; minWidth = -1e9f; maxWidth = 1e9f;
-        showOnly = 0; showOnlyLetter = ""; hideWhole = false;
+        showOnly = 0; showOnlyLetter = ""; hideWhole = false; hideTinyDeleted = false;
     }
     // FUSE (2026-09-15): the checked parts become ONE welded shell with consistent winding — the fix for a hull
     // authored as separate plates (the Teutonic: see-through, a hole in its side, gaps under any reduction).
@@ -266,6 +267,14 @@ public abstract class ModelWorkshopWindow : EditorWindow
 
         if (rows.Count > 0)
         {
+            hideTinyDeleted = EditorGUILayout.ToggleLeft(new GUIContent("Hide deleted 0–2 triangle parts",
+                "Hide these parts from the list and preview while keeping their names, node indices and Delete marks. 'Marked for deletion' reveals them; untick this to show them in the normal view."), hideTinyDeleted);
+            if (GUILayout.Button(new GUIContent("Mark 0–2 triangle parts for deletion",
+                "Fresh probes mark these automatically. Apply to the current list too; existing groups and Split/Tear marks are kept. Clear a row's Delete mark to keep it. The source GLB is unchanged.")))
+            {
+                if (RowsDescribeTheFile("Mark tiny parts"))
+                    status = $"Marked {MarkTinyPartsForDeletion()} additional part(s) with 0–2 triangles for deletion. Clear any Delete mark to keep that part.";
+            }
             int splittable = rows.Count(r => r.islands > 1 && r.blocked == null);
             int chosen = rows.Count(r => r.split || r.tear);   // a Tear mark is a mark: it is saved, and it keeps the Save button live
             int deleted = rows.Count(r => r.delete);
@@ -371,6 +380,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             }
             bool Passes(Row r)
             {
+                if (TinyPartHidden(r)) return false;
                 if (!Fusing && hideWhole && r.islands <= 1 && r.blocked == null) return false;   // the Splitter's toggle; the Fuser has no use for island counts
                 if (Fusing && !string.IsNullOrEmpty(showOnlyLetter) && r.fuse != showOnlyLetter) return false;
                 switch (showOnly)
@@ -698,6 +708,29 @@ public abstract class ModelWorkshopWindow : EditorWindow
         if (Analyze()) BuildPreviewFromGlb();
     }
 
+    int MarkTinyPartsForDeletion()
+    {
+        int marked = 0;
+        foreach (var r in rows)
+            if (!r.delete && WorkshopRules.ShouldMarkTinyPartForDeletion(r.tris, r.blocked,
+                r.split || r.tear || !string.IsNullOrEmpty(r.fuse)))
+            { r.delete = true; marked++; }
+        return marked;
+    }
+
+    bool TinyPartHidden(Row row) => hideTinyDeleted &&
+        WorkshopRules.HideTinyDeletedPart(row.tris, row.blocked, row.delete, showOnly == 7);
+
+    void UpdateTinyPreviewVisibility()
+    {
+        foreach (var row in rows)
+            if (previewByNode.TryGetValue(row.nodeIndex, out Renderer renderer) && renderer != null)
+            {
+                bool visible = !CutModeActive && !TinyPartHidden(row);
+                if (renderer.enabled != visible) { renderer.enabled = visible; boundsValid = false; }
+            }
+    }
+
     // Path identity for the source-switch hygiene: separator- and case-insensitive (Windows paths), so retyping
     // the same file with the other slash style is not read as a switch.
     static bool SamePath(string a, string b) => WorkshopRules.SamePath(a, b);
@@ -743,7 +776,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         // 0a8b56e: the old rule "no letters in memory" reloaded the sidecar over a deliberate clear). "Load groups" is
         // the explicit way back.
         bool initialLoad = !sameFile || !Fusing;
-        if (firstLoad) ResetFilters();   // a model probed into the window starts fully visible (see ResetFilters)
+        if (firstLoad) { ResetFilters(); hideTinyDeleted = true; }   // fresh model: no geometric filters, hide tiny deletion marks
         try
         {
             var fileNames = GlbDisconnectedParts.NodeNames(File.ReadAllBytes(srcFile)).ToDictionary(kv => kv.Key, kv => kv.Value);
@@ -757,6 +790,9 @@ public abstract class ModelWorkshopWindow : EditorWindow
             if (keptFuse.Count == 0 && initialLoad) ApplyFuseSidecar(rows, out _);
             if (firstLoad && kept.Count == 0 && keptTear.Count == 0 && keptDelete.Count == 0) ApplyMarksSidecar(rows, out _);
             foreach (var r in rows) if (r.islands <= 1 || r.blocked != null) r.split = false;   // no longer splittable at this distance
+            // Apply the default once per loaded file, after restoring explicit assignments. Re-probes and merge
+            // slider recounts preserve a Delete mark the user cleared; they must not silently select it again.
+            int tinyMarked = firstLoad ? MarkTinyPartsForDeletion() : 0;
             int multi = rows.Count(r => r.islands > 1 && r.blocked == null);
             probedFile = srcFile; probedStamp = stamp;   // the rows now describe THIS file, this version of it (the source-switch hygiene above keys on both)
             // …AND SAY SO WHEN THERE ARE GROUPS ON DISK AND NONE IN THE WINDOW (2026-09-27, user: "my work is back, I
@@ -767,7 +803,8 @@ public abstract class ModelWorkshopWindow : EditorWindow
             status = (rewritten ? "This file was rewritten since it was last probed, so the checks and letters in the window were dropped — they named nodes of the old file — and the marks saved beside the new one were read instead. " : "")
                    + (onDisk > 0 ? $"{onDisk} group letter(s) are saved beside this file and no row in the window carries one — press 'Load groups' to read them back (a re-Probe keeps what the window holds, so a deliberate clear stays cleared). " : "")
                    + (multi == 0 ? "Every part is a single attached island (at this merge distance) — nothing to split."
-                   : $"{rows.Count} part(s); {multi} hold more than one island at merge distance {mergePct:0.#}%. Check the ones hiding junk; raise the slider if a part still shreds into fragments.");
+                   : $"{rows.Count} part(s); {multi} hold more than one island at merge distance {mergePct:0.#}%. Check the ones hiding junk; raise the slider if a part still shreds into fragments.")
+                   + (tinyMarked > 0 ? $" Automatically marked {tinyMarked} unassigned part(s) with 0–2 triangles for deletion; clear a Delete mark to keep a part." : "");
             Repaint();
             return true;
         }
@@ -841,6 +878,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             }
             if (pru == null) pru = new PreviewRenderUtility();
             pru.AddSingleGO(inst);
+            UpdateTinyPreviewVisibility();
             boundsValid = false; previewPan = Vector2.zero; zoom = 1.5f;
             int missing = rows.Count(r => !previewByNode.ContainsKey(r.nodeIndex));
             if (missing > 0) status += $"\n(preview: {missing} part(s) the extractor refused are not drawn — their rows say why)";
@@ -993,6 +1031,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
     {
         if (inst == null) return;
         foreach (var r in inst.GetComponentsInChildren<Renderer>(true)) if (r != null) r.enabled = on;
+        if (on) UpdateTinyPreviewVisibility();
     }
 
     double CutPlaneValue() => cutGeo.Min[cutAxis] + (cutGeo.Max[cutAxis] - cutGeo.Min[cutAxis]) * Mathf.Clamp(cutPct, 0f, 100f) / 100.0;
@@ -1152,6 +1191,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
     void RenderPreview(Rect rect)
     {
         if (pru == null || (inst == null && !CutModeActive)) return;
+        UpdateTinyPreviewVisibility();
         if (!boundsValid)
         {
             if (CutModeActive)
@@ -1164,7 +1204,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             {
                 bool first = true;
                 foreach (var r in inst.GetComponentsInChildren<Renderer>())
-                { if (r == null) continue; if (first) { bounds = r.bounds; first = false; } else bounds.Encapsulate(r.bounds); }
+                { if (r == null || !r.enabled) continue; if (first) { bounds = r.bounds; first = false; } else bounds.Encapsulate(r.bounds); }
                 boundsValid = !first;
                 if (boundsValid) fullRadius = bounds.extents.magnitude;
             }
