@@ -10,6 +10,55 @@ public class VehicleProbeTests
     static HafMesh Tri(string name, float dx = 0, float size = 1) { var me = new HafMesh { Name = name }; me.Primitives.Add(new HafPrimitive { VertexCount = 3, Positions = new[] { dx, 0, 0, dx + size, 0, 0, dx, size, 0 }, Indices = new[] { 0, 1, 2 } }); return me; }
     static HafModel Link(HafModel m) { for (int i = 0; i < m.Nodes.Count; i++) foreach (var c in m.Nodes[i].Children) m.Nodes[c].Parent = i; return m; }
 
+    static HafModel EditableIndexedModel()
+    {
+        var m = new HafModel(); var mesh = new HafMesh();
+        mesh.Primitives.Add(new HafPrimitive { VertexCount = 6,
+            Positions = new float[] { 0, 0, 0, 1, 0, 0, 0, 1, 0, 10, 0, 0, 11, 0, 0, 10, 1, 0 },
+            Indices = new[] { 0, 1, 2 } });
+        m.Meshes.Add(mesh);
+        m.Nodes.Add(new HafNode { Name = "First", Mesh = 0 });
+        m.Nodes.Add(new HafNode { Name = "Second", Mesh = 0 });
+        return m;
+    }
+
+    [Fact]
+    public void Reprobing_a_model_reads_its_current_indices()
+    {
+        var m = EditableIndexedModel();
+        Assert.Equal(0.5, VehicleProbe.Run(m).Parts[0].Center[0]);
+        m.Meshes[0].Primitives[0].Indices = new[] { 3, 4, 5 };
+        var result = VehicleProbe.Run(m);
+        Assert.All(result.Parts, p => Assert.Equal(10.5, p.Center[0]));
+        Assert.All(result.Parts, p => Assert.Equal(3, p.Verts));
+    }
+
+    [Fact]
+    public void An_aborted_probe_does_not_leave_cached_vertices_for_the_next_probe()
+    {
+        var m = EditableIndexedModel();
+        Assert.Throws<System.InvalidOperationException>(() => VehicleProbe.Run(new VehicleProbe.Input
+        { Model = m, Progress = stage => { if (stage == "visibility") throw new System.InvalidOperationException("cancelled"); } }));
+        m.Meshes[0].Primitives[0].Indices = new[] { 3, 4, 5 };
+        Assert.All(VehicleProbe.Run(m).Parts, p => Assert.Equal(10.5, p.Center[0]));
+    }
+
+    [Fact]
+    public void A_nested_probe_restores_the_outer_probes_cache()
+    {
+        var outer = EditableIndexedModel(); var inner = EditableIndexedModel();
+        inner.Meshes[0].Primitives[0].Indices = new[] { 3, 4, 5 };
+        bool nested = false;
+        var result = VehicleProbe.Run(new VehicleProbe.Input { Model = outer, Progress = stage =>
+        {
+            if (stage != "parts" || nested) return;
+            nested = true;
+            Assert.All(VehicleProbe.Run(inner).Parts, p => Assert.Equal(10.5, p.Center[0]));
+        }});
+        Assert.True(nested);
+        Assert.All(result.Parts, p => Assert.Equal(0.5, p.Center[0]));
+    }
+
     [Fact]
     public void A_part_row_is_the_local_box_through_the_world_matrix_in_Blenders_frame()
     {

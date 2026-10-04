@@ -5,6 +5,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Vehicle Lab probe crash:** replaced the process-wide weak-table vertex cache after Unity 2021.3's Mono crashed
+  in its lookup while probing the fused Protected Cruiser. Each probe now owns its cache and releases it on success
+  or failure; nested and concurrent probes stay isolated. Re-probing also reads changed indices. Unit and Unity
+  regressions cover edited models, aborted/nested probes, and collection between probe stages.
+
 - **Clip player review fixes:** switching clips restores animated properties that the selected clip does not drive,
   including properties on other nodes. Slashes in node names no longer break Unity animation paths, and long Unicode
   track names truncate at whole characters within Blender's 63-byte limit. The Unity comparison uses each pose's own
