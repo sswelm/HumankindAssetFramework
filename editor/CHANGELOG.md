@@ -5,6 +5,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Fuser/Cutter overlapping parts:** a selected part's two-sided highlight now takes precedence over a
+  coincident front/back material twin, while nearer geometry still occludes it. The new "Selected part only"
+  preview toggle lets you inspect buried parts without the surrounding model. Deselecting restores the model;
+  row identities, marks, source winding and output geometry are unchanged.
+
 - **Model Fuser hull facing:** a negative open-sheet volume no longer turns an exposed broadside inward when
   its visible surface already faces outward. This fixes the Protected Cruiser's rectangular hull opening after
   fusion. The check uses whole-model side exposure and an area-weighted vote; hidden cavity walls and closed

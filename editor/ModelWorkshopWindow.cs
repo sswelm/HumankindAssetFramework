@@ -98,7 +98,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
     {
         minVerts = 1; minPartSize = 0f; maxPartSize = 1e9f; minFlatPct = 0f;
         minHeight = -1e9f; maxHeight = 1e9f; minWidth = -1e9f; maxWidth = 1e9f;
-        showOnly = 0; showOnlyLetter = ""; hideWhole = false;
+        showOnly = 0; showOnlyLetter = ""; hideWhole = false; isolateSelected = false;
     }
     // FUSE (2026-09-15): the checked parts become ONE welded shell with consistent winding — the fix for a hull
     // authored as separate plates (the Teutonic: see-through, a hole in its side, gaps under any reduction).
@@ -131,6 +131,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // way; negating WITHOUT the flip would invert the whole ship). Off by default so the view does not move under
     // anyone mid-session. Nothing else changes: the sliders, the mirror finder and every output read file coordinates.
     [SerializeField] bool unmirror = false;
+    [SerializeField] bool isolateSelected = false;
     [SerializeField] Vector2 orbit = new Vector2(30f, -20f);
     [SerializeField] float zoom = 1.5f;
     Vector2 previewPan;
@@ -626,6 +627,21 @@ public abstract class ModelWorkshopWindow : EditorWindow
                         "sliders, Find the mirror and every output always work in the file's own coordinates and are unaffected either way."),
                         unmirror, GUILayout.Width(90));
                     if (wantUnmirror != unmirror) { unmirror = wantUnmirror; FlipPreviewX(); }
+                    using (new EditorGUI.DisabledScope(CutModeActive))
+                    {
+                        bool wantIsolate = EditorGUILayout.ToggleLeft(new GUIContent("Selected part only",
+                            "Temporarily hide other parts so you can inspect the selected part, including both sides of its surfaces. " +
+                            "The source can contain coincident front/back material parts that otherwise cover one another. " +
+                            "This changes only the preview; part numbers, marks and the output are unchanged."),
+                            isolateSelected, GUILayout.Width(140));
+                        if (wantIsolate != isolateSelected)
+                        {
+                            isolateSelected = wantIsolate;
+                            bool hadBounds = boundsValid;
+                            UpdatePreviewVisibility();
+                            if (highlightedRenderers != null && highlightedRenderers.Count > 0) boundsValid = hadBounds;
+                        }
+                    }
                 }
                 var rect = GUILayoutUtility.GetRect(200f, 4000f, 600f, 600f, GUILayout.ExpandWidth(true));
                 HandlePreviewInput(rect);
@@ -724,10 +740,12 @@ public abstract class ModelWorkshopWindow : EditorWindow
 
     void UpdatePreviewVisibility()
     {
+        bool isolated = isolateSelected && highlightedRenderers != null && highlightedRenderers.Count > 0;
         foreach (var row in rows)
             if (previewByNode.TryGetValue(row.nodeIndex, out Renderer renderer) && renderer != null)
             {
-                bool visible = !CutModeActive && !PartHiddenByView(row);
+                bool visible = !CutModeActive && !PartHiddenByView(row)
+                    && (!isolated || highlightedRenderers.Contains(renderer));
                 if (renderer.enabled != visible) { renderer.enabled = visible; boundsValid = false; }
             }
     }
@@ -1159,10 +1177,11 @@ public abstract class ModelWorkshopWindow : EditorWindow
         selectedRow = row?.node ?? "";
         boundsValid = false;
         previewPan = Vector2.zero;
-        if (inst == null || row == null) return;
+        if (inst == null || row == null) { UpdatePreviewVisibility(); return; }
         // by NODE INDEX (2026-09-19): the preview is built from the GLB one object per node, so a row lights exactly its
         // own part — the old name match lit every namesake, all 113 of them on a file that names every node "Material2"
-        if (!previewByNode.TryGetValue(row.nodeIndex, out Renderer hit) || hit == null) return;   // a part the extractor refused: nothing to light
+        if (!previewByNode.TryGetValue(row.nodeIndex, out Renderer hit) || hit == null)
+        { UpdatePreviewVisibility(); return; }   // a part the extractor refused: nothing to light
         var hits = new List<Renderer> { hit };
         if (highlightMat == null)
         {
@@ -1179,6 +1198,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             r.sharedMaterials = Enumerable.Repeat(highlightMat, r.sharedMaterials.Length).ToArray();
             b.Encapsulate(r.bounds);
         }
+        UpdatePreviewVisibility();
         bounds = b; bounds.Expand(bounds.size.magnitude * 0.6f + 0.1f); boundsValid = true;
         Repaint();
     }
