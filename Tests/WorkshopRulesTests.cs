@@ -7,6 +7,48 @@ using Xunit;
 // selected every namesake). Rows are (node index, name).
 public class WorkshopRulesTests
 {
+    [Theory]
+    [InlineData(0, null, false, true)]
+    [InlineData(1, null, false, true)]
+    [InlineData(2, null, false, true)]
+    [InlineData(3, null, false, false)]
+    [InlineData(-1, null, false, false)]
+    [InlineData(0, "compressed mesh", false, false)]
+    [InlineData(2, "non-triangle primitive", false, false)]
+    [InlineData(2, null, true, false)]
+    public void Tiny_part_cleanup_uses_known_counts_and_preserves_assignments(int triangles, string blocked, bool assigned, bool expected)
+    {
+        Assert.Equal(expected, WorkshopRules.ShouldMarkTinyPartForDeletion(triangles, blocked, assigned));
+    }
+
+    [Theory]
+    [InlineData(true, 0, false)]
+    [InlineData(false, 0, false)]
+    [InlineData(true, 7, false)]
+    [InlineData(false, 7, false)]
+    [InlineData(true, 8, true)]
+    [InlineData(false, 8, false)]
+    public void Deletion_is_hidden_only_in_the_explicit_cleanup_view(bool deleted, int viewMode, bool expected)
+    {
+        Assert.Equal(expected, WorkshopRules.DeletedPartHiddenByView(deleted, viewMode));
+    }
+
+    [Fact]
+    public void An_unsupported_row_is_not_auto_deleted_and_its_mark_can_be_reviewed_in_normal_view()
+    {
+        Assert.False(WorkshopRules.ShouldMarkTinyPartForDeletion(0, "unsupported", false));
+        Assert.False(WorkshopRules.DeletedPartHiddenByView(true, 0));
+        Assert.True(WorkshopRules.DeletedPartHiddenByView(true, WorkshopRules.HideDeletedView));
+    }
+
+    [Fact]
+    public void Confirmed_triangle_free_parts_are_auto_deleted_unless_assigned()
+    {
+        Assert.True(WorkshopRules.ShouldMarkTinyPartForDeletion(0, "Only TRIANGLES primitives can be split safely.", false, triangleFree: true));
+        Assert.False(WorkshopRules.ShouldMarkTinyPartForDeletion(0, "Only TRIANGLES primitives can be split safely.", true, triangleFree: true));
+        Assert.False(WorkshopRules.ShouldMarkTinyPartForDeletion(0, "Only TRIANGLES primitives can be split safely.", false, triangleFree: false));
+    }
+
     static IList<KeyValuePair<int, string>> Rows(params (int, string)[] rows)
     {
         var l = new List<KeyValuePair<int, string>>();
