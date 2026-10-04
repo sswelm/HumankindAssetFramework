@@ -1962,6 +1962,8 @@ public static partial class GlbDisconnectedParts
         // less of the model in the way of the question.
         const int ColumnLevels = 7;   // the coarsest is master's 256th of the model, the finest a 16,384th
         Dictionary<long, List<int>>[] columns = null; var columnCells = new double[ColumnLevels];
+        Dictionary<long, List<int>>[] sideColumns = null;
+        var sideCells = new double[ColumnLevels];
         var occluders = new List<Vec3>(); double columnCell = 1, modelTop = 0, modelBottom = 0;
         // BUILT ON FIRST USE, AND ONLY THEN (outside review of PR #96). Reading every mesh node of the file and
         // transforming its triangles is not cheap - on a 230 MB ship it is ten seconds and hundreds of megabytes - and
@@ -2105,8 +2107,72 @@ public static partial class GlbDisconnectedParts
             if (v == 0) exposedMemo[at] = v = double.IsPositiveInfinity(Column(f, fromAbove, null)) ? (sbyte)1 : (sbyte)-1;
             return v > 0;
         }
+        // The same whole-model exposure question for the broadside. Build its length/height grid only when
+        // a negative open-volume verdict would reverse a side plate; ordinary fuse groups pay no extra index cost.
+        static double Horizontal(Vec3 p, int axis) => axis == 0 ? p.X : p.Z;
+        Dictionary<long, List<int>>[] EnsureSideOccluders(int width)
+        {
+            EnsureOccluders();
+            var built = System.Threading.Volatile.Read(ref sideColumns);
+            if (built != null) return built;
+            lock (columnsGate)
+            {
+                if (sideColumns != null) return sideColumns;
+                int length = width == 0 ? 2 : 0;
+                var grids = new Dictionary<long, List<int>>[ColumnLevels];
+                double baseCell = Math.Max(columnCell, (modelTop - modelBottom) / 256.0);
+                for (int k = 0; k < ColumnLevels; k++)
+                { grids[k] = new Dictionary<long, List<int>>(); sideCells[k] = baseCell / (1 << k); }
+                void Register(int id, Vec3 a, Vec3 b, Vec3 c)
+                {
+                    double low = Math.Min(Horizontal(a, length), Math.Min(Horizontal(b, length), Horizontal(c, length)));
+                    double high = Math.Max(Horizontal(a, length), Math.Max(Horizontal(b, length), Horizontal(c, length)));
+                    double lowY = Math.Min(a.Y, Math.Min(b.Y, c.Y)), highY = Math.Max(a.Y, Math.Max(b.Y, c.Y));
+                    int lev = ColumnLevels - 1;
+                    while (lev > 0 && (high - low > sideCells[lev] || highY - lowY > sideCells[lev])) lev--;
+                    double cell = sideCells[lev];
+                    long x0 = (long)Math.Floor(low / cell), x1 = (long)Math.Floor(high / cell);
+                    long y0 = (long)Math.Floor(lowY / cell), y1 = (long)Math.Floor(highY / cell);
+                    // The base cell covers both projection axes, bounding even tall triangles to the model grid.
+                    for (long x = x0; x <= x1; x++) for (long y = y0; y <= y1; y++)
+                    {
+                        long key = (x << 32) ^ (y & 0xffffffffL);
+                        if (!grids[lev].TryGetValue(key, out List<int> list)) grids[lev].Add(key, list = new List<int>());
+                        list.Add(id);
+                    }
+                }
+                for (int t = 0; t < occluders.Count; t += 3) Register(t, occluders[t], occluders[t + 1], occluders[t + 2]);
+                for (int f = 0; f < faceCount; f++) Register(-1 - f, P(f, 0), P(f, 1), P(f, 2));
+                System.Threading.Volatile.Write(ref sideColumns, grids);
+                return grids;
+            }
+        }
+        bool ExposedFromSide(int f, int width, bool positive)
+        {
+            var grids = EnsureSideOccluders(width); int length = width == 0 ? 2 : 0;
+            Vec3 c = FScale(FAdd(FAdd(P(f, 0), P(f, 1)), P(f, 2)), 1.0 / 3.0);
+            var d = width == 0 ? new Vec3 { X = positive ? 1 : -1 } : new Vec3 { Z = positive ? 1 : -1 };
+            double skin = 1e-6 * Math.Max(1.0, modelTop - modelBottom), along = Horizontal(c, length);
+            for (int k = 0; k < ColumnLevels; k++)
+            {
+                double cell = sideCells[k];
+                long key = ((long)Math.Floor(along / cell) << 32) ^ ((long)Math.Floor(c.Y / cell) & 0xffffffffL);
+                if (!grids[k].TryGetValue(key, out List<int> list)) continue;
+                foreach (int id in list)
+                {
+                    Vec3 a, b, cc;
+                    if (id >= 0) { a = occluders[id]; b = occluders[id + 1]; cc = occluders[id + 2]; }
+                    else { int g = -1 - id; if (g == f) continue; a = P(g, 0); b = P(g, 1); cc = P(g, 2); }
+                    if (along < Math.Min(Horizontal(a, length), Math.Min(Horizontal(b, length), Horizontal(cc, length))) - skin ||
+                        along > Math.Max(Horizontal(a, length), Math.Max(Horizontal(b, length), Horizontal(cc, length))) + skin ||
+                        c.Y < Math.Min(a.Y, Math.Min(b.Y, cc.Y)) - skin || c.Y > Math.Max(a.Y, Math.Max(b.Y, cc.Y)) + skin) continue;
+                    if (RayTriangle(c, d, a, b, cc) > skin) return false;
+                }
+            }
+            return true;
+        }
         var flip = new bool[faceCount];
-        int islandsMadeConsistent = 0, islandsNotOrientable = 0, asAuthoredSheets = 0, fromAboveKept = 0, reversalsVetoed = 0, undersidesKept = 0;
+        int islandsMadeConsistent = 0, islandsNotOrientable = 0, asAuthoredSheets = 0, fromAboveKept = 0, reversalsVetoed = 0, sideReversalsVetoed = 0, undersidesKept = 0;
         bool DirOf(int face, long key) { for (int e = 0; e < 3; e++) if (fEdgeKeys[face * 3 + e] == key) return fEdgeDir[face * 3 + e]; return false; }
         long PairKey(int f, int g) => f < g ? ((long)f << 32) | (uint)g : ((long)g << 32) | (uint)f;
         Vec3 P(int f, int corner) => pos[tris[f * 3 + corner]];
@@ -2698,6 +2764,31 @@ public static partial class GlbDisconnectedParts
                     // the well read 15 against 0. A near-even vote is no evidence and the verdict above stands.
                     if (upExposed >= 3 * downExposed && upExposed > 0) { reverse = false; reversalVetoed = true; System.Threading.Interlocked.Increment(ref reversalsVetoed); vetoNote = string.Format(System.Globalization.CultureInfo.InvariantCulture, " (seen from above it shows {0} up-facing faces and {1} backs: a reversal would turn them down)", upExposed, downExposed); }
                 }
+                // A folded broadside is a shallow tray seen horizontally: its own centroid gives a negative
+                // volume even when it already faces the exterior (Protected Cruiser's rectangular hull opening).
+                // Ask the side actually exposed to the outside, not the radial score alone. Hidden cavity walls
+                // do not vote; inward-facing hull sides show backs and remain eligible for reversal.
+                if (reverse && volumeConfident && volume < 0)
+                {
+                    double frontArea = 0, backArea = 0; int fronts = 0, backs = 0;
+                    foreach (int f in isl)
+                    {
+                        if (joinMinor[ii] >= 0 && parityOf[f] == joinMinor[ii]) continue;
+                        Vec3 nf = FaceNormal(f); double nl = FLen(nf), nw = Horizontal(nf, widthAxis);
+                        if (nl < 1e-12 || Math.Abs(nw) < 0.5 * nl) continue;
+                        Vec3 c = FScale(FAdd(FAdd(P(f, 0), P(f, 1)), P(f, 2)), 1.0 / 3.0);
+                        double side = Horizontal(c, widthAxis) - centreW;
+                        if (Math.Abs(side) < 1e-9 || !ExposedFromSide(f, widthAxis, side > 0)) continue;
+                        if (nw * side > 0) { frontArea += nl; fronts++; } else { backArea += nl; backs++; }
+                    }
+                    if (frontArea > 0 && frontArea >= 3 * backArea)
+                    {
+                        reverse = false; reversalVetoed = true;
+                        System.Threading.Interlocked.Increment(ref sideReversalsVetoed);
+                        vetoNote = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                            " (seen from the side it shows {0} fronts and {1} backs, at least 3:1 by area: a reversal would turn the exterior inward)", fronts, backs);
+                    }
+                }
                 if (reverse) System.Threading.Interlocked.Increment(ref openReversed);
             }
             // A DOUBLE WALL WITH AN UNDECIDED VOTE IS LEFT AS AUTHORED, parity flips included (2026-09-24, the Wespe's
@@ -2745,6 +2836,8 @@ public static partial class GlbDisconnectedParts
         for (int f = 0; f < faceCount; f++) if (twinFace[f] && flip[f]) { flip[f] = false; twinsRestored++; }
         if (fromAboveKept + reversalsVetoed > 0) plan.FromAboveLine = string.Format(System.Globalization.CultureInfo.InvariantCulture,
             "from above: {0} sheet(s) whose parity minority shows its authored front to the sky keep their authored winding - a join is not a winding error; {1} reversal(s) of an open sheet vetoed because the sheet already shows more fronts than backs to the sky", fromAboveKept, reversalsVetoed);
+        if (sideReversalsVetoed > 0) plan.FromAboveLine = (plan.FromAboveLine == null ? "" : plan.FromAboveLine + "\n") +
+            "from the side: " + sideReversalsVetoed + " open-volume reversal(s) vetoed because the exposed broadside already faces outward";
         if (undersidesKept > 0) plan.UndersideLine = string.Format(System.Globalization.CultureInfo.InvariantCulture,
             "undersides: {0} down-facing sheet(s) above the belly line keep their authored facing - a ceiling close above and air beneath is what an underside looks like, not an inside-out skin", undersidesKept);
         if (asAuthoredSheets > 0) plan.AsAuthoredLine = string.Format(System.Globalization.CultureInfo.InvariantCulture,
