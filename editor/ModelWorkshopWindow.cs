@@ -1166,7 +1166,9 @@ public abstract class ModelWorkshopWindow : EditorWindow
         var hits = new List<Renderer> { hit };
         if (highlightMat == null)
         {
-            var sh = Shader.Find("Unlit/Color") ?? Shader.Find("Standard");
+            // Selection must reveal inward-facing source plates too: fusion may repair their winding,
+            // but the user needs to identify them before fusing. Keep ordinary preview materials unchanged.
+            var sh = Shader.Find("Hidden/HAF/WorkshopHighlight") ?? Shader.Find("Unlit/Color") ?? Shader.Find("Standard");
             highlightMat = new Material(sh) { color = new Color(1f, 0.85f, 0.1f), hideFlags = HideFlags.HideAndDontSave };
         }
         highlightedRenderers = hits;

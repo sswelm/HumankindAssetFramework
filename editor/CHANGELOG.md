@@ -5,6 +5,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Fuser/Cutter highlighting:** the selected part is highlighted on both sides, so inward-facing source
+  plates can be identified before fusion repairs their winding. Ordinary preview materials and output geometry
+  are unchanged; other parts still occlude the selection normally.
+
 - **Model Fuser/Cutter tiny-part cleanup:** a fresh probe automatically marks unassigned mesh parts with 0–2
   triangles for deletion, including confirmed point/line-only meshes. Existing groups and Split/Tear marks take
   precedence; other unsupported geometry (including triangle strips/fans and mixed meshes) is skipped.
