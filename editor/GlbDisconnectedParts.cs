@@ -2108,7 +2108,7 @@ public static partial class GlbDisconnectedParts
             return v > 0;
         }
         // The same whole-model exposure question for the broadside. Build its length/height grid only when
-        // a negative open-volume verdict would reverse a side plate; ordinary fuse groups pay no extra index cost.
+        // a parity minority or a negative open-volume verdict would reverse a side plate.
         static double Horizontal(Vec3 p, int axis) => axis == 0 ? p.X : p.Z;
         Dictionary<long, List<int>>[] EnsureSideOccluders(int width)
         {
@@ -2171,7 +2171,9 @@ public static partial class GlbDisconnectedParts
             }
             return true;
         }
+        ModelBelly(nodes, meshes, reader, pos, out int lengthAxis, out int widthAxis, out double centreW, out double bellyY, out double floorY);
         var flip = new bool[faceCount];
+        int sideJoinsKept = 0;
         int islandsMadeConsistent = 0, islandsNotOrientable = 0, asAuthoredSheets = 0, fromAboveKept = 0, reversalsVetoed = 0, sideReversalsVetoed = 0, undersidesKept = 0;
         bool DirOf(int face, long key) { for (int e = 0; e < 3; e++) if (fEdgeKeys[face * 3 + e] == key) return fEdgeDir[face * 3 + e]; return false; }
         long PairKey(int f, int g) => f < g ? ((long)f << 32) | (uint)g : ((long)g << 32) | (uint)f;
@@ -2327,15 +2329,41 @@ public static partial class GlbDisconnectedParts
                     if (!ExposedFromAbove(f)) continue;
                     if (nf.Y > 0) minFront++; else minBack++;
                 }
-                if (minBack >= minFront)
+                // A vertical wall can be the same authored join as a deck. The Protected Cruiser's stair wall
+                // belonged to the minority of a folded sheet and was turned inward before the direction pass.
+                // Only exposed broadside faces vote, by area; an inward patch shows its back and still flips.
+                double sideFrontArea = 0, sideBackArea = 0; int sideFronts = 0, sideBacks = 0;
+                if (minBack >= minFront) foreach (int f in isl)
+                {
+                    if (parityOf[f] != minor) continue;
+                    Vec3 nf = FaceNormal(f); double nl = FLen(nf), nw = Horizontal(nf, widthAxis);
+                    if (nl < 1e-12 || Math.Abs(nw) < 0.5 * nl) continue;
+                    Vec3 c = FScale(FAdd(FAdd(P(f, 0), P(f, 1)), P(f, 2)), 1.0 / 3.0);
+                    double side = Horizontal(c, widthAxis) - centreW;
+                    if (Math.Abs(side) < 1e-9 || !ExposedFromSide(f, widthAxis, side > 0)) continue;
+                    if (nw * side > 0) { sideFrontArea += nl; sideFronts++; }
+                    else { sideBackArea += nl; sideBacks++; }
+                }
+                bool sideJoin = sideFrontArea > 0 && sideFrontArea >= 3 * sideBackArea;
+                if (minBack >= minFront && !sideJoin)
                 {
                     foreach (int f in isl) if (parityOf[f] == minor) flip[f] = true;
                     islandsMadeConsistent++;
                 }
                 else
                 {
-                    fromAboveKept++; joinMinor[ii] = minor;
-                    islandConflict[ii] += string.Format(System.Globalization.CultureInfo.InvariantCulture, " — seen from above the minority shows its front ({0} up-facing exposed, {1} down-facing): a join, not an error, left as authored", minFront, minBack);
+                    joinMinor[ii] = minor;
+                    if (sideJoin)
+                    {
+                        sideJoinsKept++;
+                        islandConflict[ii] += string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                            " — seen from the side the minority shows {0} fronts and {1} backs, at least 3:1 by area: a join, left as authored", sideFronts, sideBacks);
+                    }
+                    else
+                    {
+                        fromAboveKept++;
+                        islandConflict[ii] += string.Format(System.Globalization.CultureInfo.InvariantCulture, " — seen from above the minority shows its front ({0} up-facing exposed, {1} down-facing): a join, not an error, left as authored", minFront, minBack);
+                    }
                 }
             }
         }
@@ -2355,7 +2383,6 @@ public static partial class GlbDisconnectedParts
         // and a deck facing down scores ~0 — undecidable, kept as authored. Sampled over every mesh node in the file
         // through its world matrix (masts and funnels do not move a percentile the way they move a bounding box);
         // the group's own vertices are the fallback for a file with nothing else in it.
-        ModelBelly(nodes, meshes, reader, pos, out int lengthAxis, out int widthAxis, out double centreW, out double bellyY, out double floorY);
         int openJudged = 0, openReversed = 0, closedReversed = 0;
         var islandRule = new string[sheets.Count];   // per island, for the "largest islands" line: what was measured and what decided
         // DOUBLE-SKIN twin grid, built ONCE over every face of the group (the two skins of a thin solid are usually separate
@@ -2838,6 +2865,8 @@ public static partial class GlbDisconnectedParts
             "from above: {0} sheet(s) whose parity minority shows its authored front to the sky keep their authored winding - a join is not a winding error; {1} reversal(s) of an open sheet vetoed because the sheet already shows more fronts than backs to the sky", fromAboveKept, reversalsVetoed);
         if (sideReversalsVetoed > 0) plan.FromAboveLine = (plan.FromAboveLine == null ? "" : plan.FromAboveLine + "\n") +
             "from the side: " + sideReversalsVetoed + " open-volume reversal(s) vetoed because the exposed broadside already faces outward";
+        if (sideJoinsKept > 0) plan.FromAboveLine = (plan.FromAboveLine == null ? "" : plan.FromAboveLine + "\n") +
+            "side joins: " + sideJoinsKept + " sheet(s) keep their authored parity minority because the exposed broadside already faces outward";
         if (undersidesKept > 0) plan.UndersideLine = string.Format(System.Globalization.CultureInfo.InvariantCulture,
             "undersides: {0} down-facing sheet(s) above the belly line keep their authored facing - a ceiling close above and air beneath is what an underside looks like, not an inside-out skin", undersidesKept);
         if (asAuthoredSheets > 0) plan.AsAuthoredLine = string.Format(System.Globalization.CultureInfo.InvariantCulture,

@@ -2796,6 +2796,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Authoring tools
 
+- **FUSION KEEPS EXPOSED VERTICAL JOINS FACING OUTWARD (2026-10-04).** The Protected Cruiser's starboard wall
+  beside the stairs retained all its triangles but the parity pass reversed 21 faces of `Material2_2006_Part_004`
+  in group H. The existing join safeguard only checked fronts visible from above. The parity minority now also
+  keeps its authored winding when whole-model broadside exposure gives outward fronts at least three times the
+  area of backs. Hidden walls and genuine inward patches still follow the winding correction. Regression cases
+  cover both sides, both horizontal model axes, inverted patches and a hidden join; the original kernel fails
+  all four exposed-join cases. This runs before the later whole-island hull safeguard.
 - **THE PIZZA BAKERY — multi-model districts (2026-08-08, verified: the Oracle's temple + a beech tree).** The
   District Factory composes MULTIPLE models onto one tile: parts bake with their own knobs, auto-ground to the
   base's floor, and merge into one mesh with super albedo/normal/rough atlases sharing one rect set — the
