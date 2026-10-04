@@ -22,23 +22,23 @@ public class WorkshopRulesTests
     }
 
     [Theory]
-    [InlineData(0, true, false, true)]
-    [InlineData(2, true, false, true)]
-    [InlineData(2, false, false, false)]
-    [InlineData(2, true, true, false)]
-    [InlineData(3, true, false, false)]
-    [InlineData(-1, true, false, false)]
-    public void Tiny_deletion_marks_are_hidden_until_reviewed_or_cleared(int triangles, bool deleted, bool showingDeleted, bool expected)
+    [InlineData(true, 0, false)]
+    [InlineData(false, 0, false)]
+    [InlineData(true, 7, false)]
+    [InlineData(false, 7, false)]
+    [InlineData(true, 8, true)]
+    [InlineData(false, 8, false)]
+    public void Deletion_is_hidden_only_in_the_explicit_cleanup_view(bool deleted, int viewMode, bool expected)
     {
-        Assert.Equal(expected, WorkshopRules.HideTinyDeletedPart(triangles, deleted, showingDeleted));
+        Assert.Equal(expected, WorkshopRules.DeletedPartHiddenByView(deleted, viewMode));
     }
 
     [Fact]
-    public void An_unsupported_row_is_not_auto_deleted_but_its_existing_delete_mark_is_hidden()
+    public void An_unsupported_row_is_not_auto_deleted_and_its_mark_can_be_reviewed_in_normal_view()
     {
         Assert.False(WorkshopRules.ShouldMarkTinyPartForDeletion(0, "unsupported", false));
-        Assert.True(WorkshopRules.HideTinyDeletedPart(0, true, false));
-        Assert.False(WorkshopRules.HideTinyDeletedPart(0, true, true));
+        Assert.False(WorkshopRules.DeletedPartHiddenByView(true, 0));
+        Assert.True(WorkshopRules.DeletedPartHiddenByView(true, WorkshopRules.HideDeletedView));
     }
 
     [Fact]

@@ -9,10 +9,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   triangles for deletion, including confirmed point/line-only meshes. Existing groups and Split/Tear marks take
   precedence; other unsupported geometry (including triangle strips/fans and mixed meshes) is skipped.
   Re-probes preserve manual overrides. A button applies the same cleanup to an already loaded list; deletion marks
-  stay editable and geometry is removed only when writing an output. Tiny deletion-marked parts are hidden from
-  the normal list and preview, with original names and node indices kept. This includes existing deletion marks
-  on unsupported rows reporting zero triangles. Show all preserves this hiding; "Marked for deletion" reveals them
-  for review.
+  stay editable and geometry is removed only when writing an output. Normal view shows all parts, including
+  deletion marks. The separate "Hide deleted parts" view hides every deletion-marked part from the list and preview;
+  "Marked for deletion" shows those marks for review. Original names and node indices stay unchanged in every view.
   An already loaded list receives point/line cleanup once after recompile, preserving its current groups and
   existing manual overrides on triangle parts.
 

@@ -84,7 +84,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         groupLabels.RemoveAll(g => g.letter == letter);
         if (!string.IsNullOrWhiteSpace(name)) groupLabels.Add(new GroupLabel { letter = letter, name = name.Trim() });
     }
-    static readonly string[] ShowOnlyOptions = { "None (all parts)", "Checked for Split", "In a fuse group", "Not in a fuse group", "More than one island", "Already whole", "Skipped by the analyzer", "Marked for deletion" };
+    static readonly string[] ShowOnlyOptions = { "Normal (all parts)", "Checked for Split", "In a fuse group", "Not in a fuse group", "More than one island", "Already whole", "Skipped by the analyzer", "Marked for deletion", "Hide deleted parts" };
     // DISTANCE MERGE (2026-09-06, the 602-island rope): topology alone shreds segmented geometry into hundreds
     // of 3-vert parts millimetres apart. Islands within this % of a part's own diagonal count as ONE part, so
     // only genuinely distant geometry — the floating junk — separates. 0 = pure topology.
@@ -288,7 +288,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                     if (GUILayout.Button("Uncheck all", GUILayout.Width(100))) foreach (var r in rows) { r.split = false; r.tear = false; }
                     hideWhole = EditorGUILayout.ToggleLeft(new GUIContent("Hide already-whole parts",
                         "Hide the rows with a single island — there is nothing to split in them, they only pad the list."), hideWhole, GUILayout.Width(180));
-                    if (GUILayout.Button(new GUIContent("Show all", "Reset the size, position, group and island filters. Marks are kept; deleted 0–2 triangle parts stay hidden in normal view. Select 'Marked for deletion' to review them."), GUILayout.Width(70)))
+                    if (GUILayout.Button(new GUIContent("Show all", "Reset the size, position, group and island filters and return to Normal (all parts). Deletion marks are kept and visible."), GUILayout.Width(70)))
                         ResetFilters();
                     bool marksOnDisk = File.Exists(MarksSidecarPath(srcFile) ?? "");
                     using (new EditorGUI.DisabledScope(chosen == 0 && deleted == 0 && !marksOnDisk))   // with no marks AND a file on disk, saving means "clear it"
@@ -361,12 +361,12 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 "builds it); parts the preview can't measure stay visible."), minFlatPct, 0f, 100f);
             var lettersInUse = rows.Where(r => !string.IsNullOrEmpty(r.fuse)).Select(r => r.fuse).Distinct().OrderBy(l => l).ToList();
             // each window lists its own kinds (the Splitter: checked / islands; the Fuser: groups / islands, then every letter in use)
-            int[] kinds = Fusing ? new[] { 0, 2, 3, 7, 4, 5, 6 } : new[] { 0, 1, 7, 4, 5, 6 };
+            int[] kinds = Fusing ? new[] { 0, WorkshopRules.HideDeletedView, 2, 3, 7, 4, 5, 6 } : new[] { 0, WorkshopRules.HideDeletedView, 1, 7, 4, 5, 6 };
             if (Array.IndexOf(kinds, showOnly) < 0) showOnly = 0;
             var showOptions = kinds.Select(k => ShowOnlyOptions[k]).Concat(Fusing ? lettersInUse.Select(l => $"Group ⊕{l}{(GroupName(l).Length > 0 ? " — " + GroupName(l) : "")}  ({rows.Count(r => r.fuse == l)} part(s))") : Enumerable.Empty<string>()).ToArray();
             int showIdx = Fusing && !string.IsNullOrEmpty(showOnlyLetter) && lettersInUse.Contains(showOnlyLetter) ? kinds.Length + lettersInUse.IndexOf(showOnlyLetter) : Array.IndexOf(kinds, showOnly);
-            int picked = EditorGUILayout.Popup(new GUIContent("Show only", Fusing ? "Filter the list to one kind of row, or to ONE fuse group (every letter in use is listed). Marks on hidden rows are kept."
-                                                                                  : "Filter the list to one kind of row. Checks on hidden rows are kept."), showIdx, showOptions);
+            int picked = EditorGUILayout.Popup(new GUIContent("View mode", Fusing ? "Normal shows deletion marks; 'Hide deleted parts' hides them from the list and preview. Other modes filter the list to one kind of row or ONE fuse group. Marks on hidden rows are kept."
+                                                                                  : "Normal shows deletion marks; 'Hide deleted parts' hides them from the list and preview. Other modes filter the list to one kind of row. Checks on hidden rows are kept."), showIdx, showOptions);
             if (picked >= kinds.Length) { showOnly = 0; showOnlyLetter = lettersInUse[picked - kinds.Length]; }
             else { showOnly = kinds[picked]; showOnlyLetter = ""; }
             // THE GROUP'S NAME (2026-09-25, user: "when you have selected a group, it should be possible to name the group in
@@ -375,12 +375,12 @@ public abstract class ModelWorkshopWindow : EditorWindow
             if (Fusing && !string.IsNullOrEmpty(showOnlyLetter))
             {
                 string was = GroupName(showOnlyLetter);
-                string now = EditorGUILayout.TextField(new GUIContent($"Group ⊕{showOnlyLetter} name", "A name for this group: shown in the 'Show only' list, saved with the groupings, and the fused shell is named after it (Fused_" + showOnlyLetter + "_<name>). Leave empty for the first part's name."), was);
+                string now = EditorGUILayout.TextField(new GUIContent($"Group ⊕{showOnlyLetter} name", "A name for this group: shown in the view-mode list, saved with the groupings, and the fused shell is named after it (Fused_" + showOnlyLetter + "_<name>). Leave empty for the first part's name."), was);
                 if (now != was) SetGroupName(showOnlyLetter, now);
             }
             bool Passes(Row r)
             {
-                if (TinyPartHidden(r)) return false;
+                if (PartHiddenByView(r)) return false;
                 if (!Fusing && hideWhole && r.islands <= 1 && r.blocked == null) return false;   // the Splitter's toggle; the Fuser has no use for island counts
                 if (Fusing && !string.IsNullOrEmpty(showOnlyLetter) && r.fuse != showOnlyLetter) return false;
                 switch (showOnly)
@@ -718,16 +718,16 @@ public abstract class ModelWorkshopWindow : EditorWindow
         return marked;
     }
 
-    // Visibility only: keep every row, name and node index. Existing Delete marks apply immediately, including
-    // after a domain reload; a serialized filter setting must not leave tiny deleted parts in normal view.
-    bool TinyPartHidden(Row row) => WorkshopRules.HideTinyDeletedPart(row.tris, row.delete, showOnly == 7);
+    // Visibility only: keep every row, name, node index and mark. Normal view includes deleted parts;
+    // the user explicitly chooses the separate cleanup view to hide them.
+    bool PartHiddenByView(Row row) => WorkshopRules.DeletedPartHiddenByView(row.delete, showOnly);
 
-    void UpdateTinyPreviewVisibility()
+    void UpdatePreviewVisibility()
     {
         foreach (var row in rows)
             if (previewByNode.TryGetValue(row.nodeIndex, out Renderer renderer) && renderer != null)
             {
-                bool visible = !CutModeActive && !TinyPartHidden(row);
+                bool visible = !CutModeActive && !PartHiddenByView(row);
                 if (renderer.enabled != visible) { renderer.enabled = visible; boundsValid = false; }
             }
     }
@@ -777,7 +777,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         // 0a8b56e: the old rule "no letters in memory" reloaded the sidecar over a deliberate clear). "Load groups" is
         // the explicit way back.
         bool initialLoad = !sameFile || !Fusing;
-        if (firstLoad) ResetFilters();   // fresh model: no geometric filters; tiny deletion marks stay hidden
+        if (firstLoad) ResetFilters();   // fresh model: normal view, no geometric filters
         try
         {
             var fileNames = GlbDisconnectedParts.NodeNames(File.ReadAllBytes(srcFile)).ToDictionary(kv => kv.Key, kv => kv.Value);
@@ -880,7 +880,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             }
             if (pru == null) pru = new PreviewRenderUtility();
             pru.AddSingleGO(inst);
-            UpdateTinyPreviewVisibility();
+            UpdatePreviewVisibility();
             boundsValid = false; previewPan = Vector2.zero; zoom = 1.5f;
             int missing = rows.Count(r => !previewByNode.ContainsKey(r.nodeIndex));
             if (missing > 0) status += $"\n(preview: {missing} part(s) the extractor refused are not drawn — their rows say why)";
@@ -1033,7 +1033,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
     {
         if (inst == null) return;
         foreach (var r in inst.GetComponentsInChildren<Renderer>(true)) if (r != null) r.enabled = on;
-        if (on) UpdateTinyPreviewVisibility();
+        if (on) UpdatePreviewVisibility();
     }
 
     double CutPlaneValue() => cutGeo.Min[cutAxis] + (cutGeo.Max[cutAxis] - cutGeo.Min[cutAxis]) * Mathf.Clamp(cutPct, 0f, 100f) / 100.0;
@@ -1193,7 +1193,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
     void RenderPreview(Rect rect)
     {
         if (pru == null || (inst == null && !CutModeActive)) return;
-        UpdateTinyPreviewVisibility();
+        UpdatePreviewVisibility();
         if (!boundsValid)
         {
             if (CutModeActive)
