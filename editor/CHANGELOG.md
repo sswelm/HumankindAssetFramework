@@ -9,8 +9,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   triangles for deletion. Existing groups and Split/Tear marks take precedence, and unsupported geometry is skipped.
   Re-probes preserve manual overrides. A button applies the same cleanup to an already loaded list; deletion marks
   stay editable and geometry is removed only when writing an output. Tiny deletion-marked parts are hidden from
-  the normal list and preview, with original names and node indices kept. "Marked for deletion", Show all, or the
-  visibility checkbox reveals them for review.
+  the normal list and preview, with original names and node indices kept. This includes existing deletion marks
+  on unsupported rows reporting zero triangles. Show all preserves this hiding; "Marked for deletion" reveals them
+  for review.
 
 - **Vehicle Lab probe crash:** replaced the process-wide weak-table vertex cache after Unity 2021.3's Mono crashed
   in its lookup while probing the fused Protected Cruiser. Each probe now owns its cache and releases it on success

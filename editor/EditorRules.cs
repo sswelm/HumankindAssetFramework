@@ -814,8 +814,10 @@ public static class WorkshopRules
     public static bool ShouldMarkTinyPartForDeletion(int triangles, string blocked, bool assigned) =>
         triangles >= 0 && triangles <= 2 && blocked == null && !assigned;
 
-    public static bool HideTinyDeletedPart(int triangles, string blocked, bool deleted, bool showingDeleted) =>
-        deleted && !showingDeleted && ShouldMarkTinyPartForDeletion(triangles, blocked, false);
+    // Hiding honors an existing Delete mark even when analysis could not read the geometry. That does not
+    // justify marking unsupported geometry automatically, but the user's explicit deletion choice is sufficient.
+    public static bool HideTinyDeletedPart(int triangles, bool deleted, bool showingDeleted) =>
+        deleted && !showingDeleted && triangles >= 0 && triangles <= 2;
 
     // The fuse-groupings sidecar (<source>.glb.fuse.txt). Format v2 (2026-09-16): a header line, then one part per
     // line as "<letter>|<node index>|<name>" — the name is LAST, so every '|' after the second belongs to it and

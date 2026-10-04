@@ -58,7 +58,6 @@ public abstract class ModelWorkshopWindow : EditorWindow
     [SerializeField] string probedStamp = "";  // …and WHICH file was there: its length and write time, so a file rewritten in place under the window is not read as the file the rows describe (WorkshopRules.RowsStillDescribe)
     [SerializeField] List<Row> rows = new List<Row>();
     [SerializeField] bool hideWhole = false;   // filter: hide "1 island — already whole" rows (nothing to split there)
-    [SerializeField] bool hideTinyDeleted = true;   // visibility only: rows, names and node indices are never removed or renumbered
     // LIST FILTERS (2026-09-16, the Vehicle Lab's sliders brought over — user: "make these selection tools also available in
     // the Model Workshop"): the same bands, over the node bbox the analyzer reads from the accessors. Height is glTF +Y, the
     // side axis is the model's shorter horizontal extent (as the fuse's belly axis). The flat-surface filter came over on
@@ -97,7 +96,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
     {
         minVerts = 1; minPartSize = 0f; maxPartSize = 1e9f; minFlatPct = 0f;
         minHeight = -1e9f; maxHeight = 1e9f; minWidth = -1e9f; maxWidth = 1e9f;
-        showOnly = 0; showOnlyLetter = ""; hideWhole = false; hideTinyDeleted = false;
+        showOnly = 0; showOnlyLetter = ""; hideWhole = false;
     }
     // FUSE (2026-09-15): the checked parts become ONE welded shell with consistent winding — the fix for a hull
     // authored as separate plates (the Teutonic: see-through, a hole in its side, gaps under any reduction).
@@ -267,8 +266,6 @@ public abstract class ModelWorkshopWindow : EditorWindow
 
         if (rows.Count > 0)
         {
-            hideTinyDeleted = EditorGUILayout.ToggleLeft(new GUIContent("Hide deleted 0–2 triangle parts",
-                "Hide these parts from the list and preview while keeping their names, node indices and Delete marks. 'Marked for deletion' reveals them; untick this to show them in the normal view."), hideTinyDeleted);
             if (GUILayout.Button(new GUIContent("Mark 0–2 triangle parts for deletion",
                 "Fresh probes mark these automatically. Apply to the current list too; existing groups and Split/Tear marks are kept. Clear a row's Delete mark to keep it. The source GLB is unchanged.")))
             {
@@ -288,7 +285,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                     if (GUILayout.Button("Uncheck all", GUILayout.Width(100))) foreach (var r in rows) { r.split = false; r.tear = false; }
                     hideWhole = EditorGUILayout.ToggleLeft(new GUIContent("Hide already-whole parts",
                         "Hide the rows with a single island — there is nothing to split in them, they only pad the list."), hideWhole, GUILayout.Width(180));
-                    if (GUILayout.Button(new GUIContent("Show all", "Every list filter back to 'hide nothing' — the sliders, 'Show only' and this toggle. Marks are kept. (A file probed into the window for the first time starts this way.)"), GUILayout.Width(70)))
+                    if (GUILayout.Button(new GUIContent("Show all", "Reset the size, position, group and island filters. Marks are kept; deleted 0–2 triangle parts stay hidden in normal view. Select 'Marked for deletion' to review them."), GUILayout.Width(70)))
                         ResetFilters();
                     bool marksOnDisk = File.Exists(MarksSidecarPath(srcFile) ?? "");
                     using (new EditorGUI.DisabledScope(chosen == 0 && deleted == 0 && !marksOnDisk))   // with no marks AND a file on disk, saving means "clear it"
@@ -718,8 +715,9 @@ public abstract class ModelWorkshopWindow : EditorWindow
         return marked;
     }
 
-    bool TinyPartHidden(Row row) => hideTinyDeleted &&
-        WorkshopRules.HideTinyDeletedPart(row.tris, row.blocked, row.delete, showOnly == 7);
+    // Visibility only: keep every row, name and node index. Existing Delete marks apply immediately, including
+    // after a domain reload; a serialized filter setting must not leave tiny deleted parts in normal view.
+    bool TinyPartHidden(Row row) => WorkshopRules.HideTinyDeletedPart(row.tris, row.delete, showOnly == 7);
 
     void UpdateTinyPreviewVisibility()
     {
@@ -776,7 +774,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         // 0a8b56e: the old rule "no letters in memory" reloaded the sidecar over a deliberate clear). "Load groups" is
         // the explicit way back.
         bool initialLoad = !sameFile || !Fusing;
-        if (firstLoad) { ResetFilters(); hideTinyDeleted = true; }   // fresh model: no geometric filters, hide tiny deletion marks
+        if (firstLoad) ResetFilters();   // fresh model: no geometric filters; tiny deletion marks stay hidden
         try
         {
             var fileNames = GlbDisconnectedParts.NodeNames(File.ReadAllBytes(srcFile)).ToDictionary(kv => kv.Key, kv => kv.Value);

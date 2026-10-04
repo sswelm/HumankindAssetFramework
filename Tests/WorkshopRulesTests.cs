@@ -22,15 +22,23 @@ public class WorkshopRulesTests
     }
 
     [Theory]
-    [InlineData(0, null, true, false, true)]
-    [InlineData(2, null, true, false, true)]
-    [InlineData(2, null, false, false, false)]
-    [InlineData(2, null, true, true, false)]
-    [InlineData(3, null, true, false, false)]
-    [InlineData(0, "unsupported", true, false, false)]
-    public void Tiny_deletion_marks_are_hidden_until_reviewed_or_cleared(int triangles, string blocked, bool deleted, bool showingDeleted, bool expected)
+    [InlineData(0, true, false, true)]
+    [InlineData(2, true, false, true)]
+    [InlineData(2, false, false, false)]
+    [InlineData(2, true, true, false)]
+    [InlineData(3, true, false, false)]
+    [InlineData(-1, true, false, false)]
+    public void Tiny_deletion_marks_are_hidden_until_reviewed_or_cleared(int triangles, bool deleted, bool showingDeleted, bool expected)
     {
-        Assert.Equal(expected, WorkshopRules.HideTinyDeletedPart(triangles, blocked, deleted, showingDeleted));
+        Assert.Equal(expected, WorkshopRules.HideTinyDeletedPart(triangles, deleted, showingDeleted));
+    }
+
+    [Fact]
+    public void An_unsupported_row_is_not_auto_deleted_but_its_existing_delete_mark_is_hidden()
+    {
+        Assert.False(WorkshopRules.ShouldMarkTinyPartForDeletion(0, "unsupported", false));
+        Assert.True(WorkshopRules.HideTinyDeletedPart(0, true, false));
+        Assert.False(WorkshopRules.HideTinyDeletedPart(0, true, true));
     }
 
     static IList<KeyValuePair<int, string>> Rows(params (int, string)[] rows)
