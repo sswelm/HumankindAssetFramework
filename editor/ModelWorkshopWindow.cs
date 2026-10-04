@@ -84,7 +84,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         groupLabels.RemoveAll(g => g.letter == letter);
         if (!string.IsNullOrWhiteSpace(name)) groupLabels.Add(new GroupLabel { letter = letter, name = name.Trim() });
     }
-    static readonly string[] ShowOnlyOptions = { "Normal (all parts)", "Checked for Split", "In a fuse group", "Not in a fuse group", "More than one island", "Already whole", "Skipped by the analyzer", "Marked for deletion", "Hide deleted parts" };
+    static readonly string[] ShowOnlyOptions = { "Normal (all parts)", "Checked for Split", "In a fuse group", "Not marked", "More than one island", "Already whole", "Skipped by the analyzer", "Marked for deletion", "Hide deleted parts" };
     // DISTANCE MERGE (2026-09-06, the 602-island rope): topology alone shreds segmented geometry into hundreds
     // of 3-vert parts millimetres apart. Islands within this % of a part's own diagonal count as ONE part, so
     // only genuinely distant geometry — the floating junk — separates. 0 = pure topology.
@@ -362,9 +362,9 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 "builds it); parts the preview can't measure stay visible."), minFlatPct, 0f, 100f);
             var lettersInUse = rows.Where(r => !string.IsNullOrEmpty(r.fuse)).Select(r => r.fuse).Distinct().OrderBy(l => l).ToList();
             // each window lists its own kinds (the Splitter: checked / islands; the Fuser: groups / islands, then every letter in use)
-            int[] kinds = Fusing ? new[] { 0, WorkshopRules.HideDeletedView, 2, 3, 7, 4, 5, 6 } : new[] { 0, WorkshopRules.HideDeletedView, 1, 7, 4, 5, 6 };
+            int[] kinds = Fusing ? new[] { 0, WorkshopRules.HideDeletedView, 2, 7, 3, 4, 5, 6 } : new[] { 0, WorkshopRules.HideDeletedView, 1, 7, 4, 5, 6 };
             if (Array.IndexOf(kinds, showOnly) < 0) showOnly = 0;
-            var showOptions = kinds.Select(k => ShowOnlyOptions[k]).Concat(Fusing ? lettersInUse.Select(l => $"Group ⊕{l}{(GroupName(l).Length > 0 ? " — " + GroupName(l) : "")}  ({rows.Count(r => r.fuse == l)} part(s))") : Enumerable.Empty<string>()).ToArray();
+            var showOptions = kinds.Select(k => Fusing && k == 7 ? "Deleted Parts" : ShowOnlyOptions[k]).Concat(Fusing ? lettersInUse.Select(l => $"Group ⊕{l}{(GroupName(l).Length > 0 ? " — " + GroupName(l) : "")}  ({rows.Count(r => r.fuse == l)} part(s))") : Enumerable.Empty<string>()).ToArray();
             int showIdx = Fusing && !string.IsNullOrEmpty(showOnlyLetter) && lettersInUse.Contains(showOnlyLetter) ? kinds.Length + lettersInUse.IndexOf(showOnlyLetter) : Array.IndexOf(kinds, showOnly);
             int picked = EditorGUILayout.Popup(new GUIContent("View mode", Fusing ? "Normal shows deletion marks; 'Hide deleted parts' hides them from the list and preview. Other modes filter the list to one kind of row or ONE fuse group. Marks on hidden rows are kept."
                                                                                   : "Normal shows deletion marks; 'Hide deleted parts' hides them from the list and preview. Other modes filter the list to one kind of row. Checks on hidden rows are kept."), showIdx, showOptions);
@@ -388,7 +388,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 {
                     case 1: if (!r.split && !r.tear) return false; break;
                     case 2: if (string.IsNullOrEmpty(r.fuse)) return false; break;
-                    case 3: if (!string.IsNullOrEmpty(r.fuse)) return false; break;
+                    case 3: if (!string.IsNullOrEmpty(r.fuse) || r.delete) return false; break;
                     case 4: if (r.islands <= 1 || r.blocked != null) return false; break;
                     case 5: if (r.islands != 1 || r.blocked != null) return false; break;
                     case 6: if (r.blocked == null) return false; break;

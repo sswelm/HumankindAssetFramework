@@ -1057,6 +1057,77 @@ public class GlbFuseTests
         }
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void A_vertical_wall_join_keeps_its_exposed_authored_front(bool lengthAlongZ, bool negativeSide)
+    {
+        // Rotate the deck/wall join above into a broadside. Its smaller panel already faces the exterior,
+        // although its shared edges run the same way as those of the larger folded surface.
+        var hull = Box("Hull", 400, -200, -450, -200, inward: false);
+        for (int i = 0; i < hull.Positions.Length; i += 3) hull.Positions[i] *= 20;
+        var walls = Wall("Join", new (float x, float z)[] { (0, 0), (0, 10), (10, 10), (10, 0), (0, 0) }, 0, 10, 1, new[] { 1, 1, 1, 1 }, flip: false);
+        var panel = Level("Join", 0, 10, 0, 10, 0, down: false);
+        float sign = negativeSide ? -1 : 1;
+        foreach (var p in new[] { walls, panel }) for (int i = 0; i < p.Positions.Length; i += 3)
+        {
+            float y = p.Positions[i + 1], z = p.Positions[i + 2];
+            p.Positions[i] *= sign; p.Positions[i + 1] = -z; p.Positions[i + 2] = sign * (300 + y);
+        }
+        if (lengthAlongZ) foreach (var p in new[] { hull, walls, panel }) for (int i = 0; i < p.Positions.Length; i += 3)
+        { float x = p.Positions[i]; p.Positions[i] = p.Positions[i + 2]; p.Positions[i + 2] = -x; }
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, walls, panel), new[] { 1, 2 }, 0.0);
+        Assert.Contains(r.Details, d => d.Contains("seen from the side the minority shows 2 fronts and 0 backs"));
+        Assert.Equal(0, r.FacesRewound);
+        var g = Read(r.Bytes);
+        Assert.Equal(10, TriangleCount(g, g.Node("Join_Fused")));
+        int axis = lengthAlongZ ? 0 : 2;
+        var faces = FusedFaces(r, "Join_Fused").Where(f => Math.Abs(f.c[axis] - sign * 300) < 1e-3).ToArray();
+        Assert.Equal(2, faces.Length);
+        Assert.All(faces, f => Assert.True(f.n[axis] * sign > 0, "the exposed wall still faces outward"));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void A_reversed_patch_in_a_vertical_plate_is_still_recoloured(bool lengthAlongZ, bool negativeSide)
+    {
+        var hull = Box("Hull", 400, -200, -450, -200, inward: false);
+        for (int i = 0; i < hull.Positions.Length; i += 3) hull.Positions[i] *= 20;
+        float sign = negativeSide ? -1 : 1;
+        var parts = new List<Part> { hull };
+        for (int i = 0; i < 5; i++) parts.Add(Quad("Plate", i, i + 1, 0, 1, sign * 300, inward: negativeSide ^ (i == 2)));
+        if (lengthAlongZ) foreach (var p in parts) for (int i = 0; i < p.Positions.Length; i += 3)
+        { float x = p.Positions[i]; p.Positions[i] = p.Positions[i + 2]; p.Positions[i + 2] = -x; }
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(parts.ToArray()), new[] { 1, 2, 3, 4, 5 }, 0.0);
+        Assert.DoesNotContain(r.Details, d => d.Contains("side joins:"));
+        Assert.Equal(2, r.FacesRewound);
+        int axis = lengthAlongZ ? 0 : 2;
+        Assert.All(FusedNormals(r, "Plate_Fused"), n => Assert.True(n[axis] * sign > 0, "every patch faces outward"));
+    }
+
+    [Fact]
+    public void A_hidden_vertical_join_does_not_veto_the_parity_correction()
+    {
+        var hull = Box("Hull", 400, -200, -450, -200, inward: false);
+        for (int i = 0; i < hull.Positions.Length; i += 3) hull.Positions[i] *= 20;
+        var walls = Wall("Join", new (float x, float z)[] { (0, 0), (0, 10), (10, 10), (10, 0), (0, 0) }, 0, 10, 1, new[] { 1, 1, 1, 1 }, flip: false);
+        var panel = Level("Join", 0, 10, 0, 10, 0, down: false);
+        foreach (var p in new[] { walls, panel }) for (int i = 0; i < p.Positions.Length; i += 3)
+        { float y = p.Positions[i + 1], z = p.Positions[i + 2]; p.Positions[i + 1] = -z; p.Positions[i + 2] = 300 + y; }
+        var outside = Quad("Outside", -1, 11, -11, 1, 312);
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, walls, panel, outside), new[] { 1, 2 }, 0.0);
+        Assert.DoesNotContain(r.Details, d => d.Contains("side joins:"));
+        Assert.Equal(2, r.FacesRewound);
+        var faces = FusedFaces(r, "Join_Fused").Where(f => Math.Abs(f.c[2] - 300) < 1e-3).ToArray();
+        Assert.Equal(2, faces.Length);
+        Assert.All(faces, f => Assert.True(f.n[2] < 0));
+    }
+
     [Fact]
     public void A_reversed_patch_in_a_plate_is_still_recoloured()
     {
