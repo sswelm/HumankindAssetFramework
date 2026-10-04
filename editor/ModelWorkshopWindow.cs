@@ -364,7 +364,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             // each window lists its own kinds (the Splitter: checked / islands; the Fuser: groups / islands, then every letter in use)
             int[] kinds = Fusing ? new[] { 0, WorkshopRules.HideDeletedView, 2, 7, 3, 4, 5, 6 } : new[] { 0, WorkshopRules.HideDeletedView, 1, 7, 4, 5, 6 };
             if (Array.IndexOf(kinds, showOnly) < 0) showOnly = 0;
-            var showOptions = kinds.Select(k => Fusing && k == 7 ? "Delete parts" : ShowOnlyOptions[k]).Concat(Fusing ? lettersInUse.Select(l => $"Group ⊕{l}{(GroupName(l).Length > 0 ? " — " + GroupName(l) : "")}  ({rows.Count(r => r.fuse == l)} part(s))") : Enumerable.Empty<string>()).ToArray();
+            var showOptions = kinds.Select(k => Fusing && k == 7 ? "Deleted Parts" : ShowOnlyOptions[k]).Concat(Fusing ? lettersInUse.Select(l => $"Group ⊕{l}{(GroupName(l).Length > 0 ? " — " + GroupName(l) : "")}  ({rows.Count(r => r.fuse == l)} part(s))") : Enumerable.Empty<string>()).ToArray();
             int showIdx = Fusing && !string.IsNullOrEmpty(showOnlyLetter) && lettersInUse.Contains(showOnlyLetter) ? kinds.Length + lettersInUse.IndexOf(showOnlyLetter) : Array.IndexOf(kinds, showOnly);
             int picked = EditorGUILayout.Popup(new GUIContent("View mode", Fusing ? "Normal shows deletion marks; 'Hide deleted parts' hides them from the list and preview. Other modes filter the list to one kind of row or ONE fuse group. Marks on hidden rows are kept."
                                                                                   : "Normal shows deletion marks; 'Hide deleted parts' hides them from the list and preview. Other modes filter the list to one kind of row. Checks on hidden rows are kept."), showIdx, showOptions);

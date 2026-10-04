@@ -5,7 +5,7 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
-- **Model Fuser view modes:** "Not in a fuse group" is replaced by "Delete parts" and "Not marked".
+- **Model Fuser view modes:** "Not in a fuse group" is replaced by "Deleted Parts" and "Not marked".
   "Not marked" shows ungrouped parts without a deletion mark, keeping the remaining parts to review separate
   from the deletion queue. Existing marks, group assignments and part numbering stay unchanged.
 
