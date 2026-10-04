@@ -5,6 +5,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Fuser hull facing:** a negative open-sheet volume no longer turns an exposed broadside inward when
+  its visible surface already faces outward. This fixes the Protected Cruiser's rectangular hull opening after
+  fusion. The check uses whole-model side exposure and an area-weighted vote; hidden cavity walls and closed
+  shells keep their existing volume rules. Triangle counts, deletion marks and group assignments are unchanged.
+
 - **Model Fuser/Cutter highlighting:** the selected part is highlighted on both sides, so inward-facing source
   plates can be identified before fusion repairs their winding. Ordinary preview materials and output geometry
   are unchanged; other parts still occlude the selection normally.
