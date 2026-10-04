@@ -652,6 +652,58 @@ public class GlbFuseTests
         return new Part { Name = name, Positions = P.ToArray(), Indices = I.ToArray() };
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void An_exposed_rimmed_broadside_keeps_facing_outward_despite_negative_open_volume(bool lengthAlongZ, bool negativeSide)
+    {
+        // Protected Cruiser: the fold gives an open hull panel a negative signed volume about its own centroid,
+        // even though its main surface already faces the exterior. Reversing it makes a rectangular hole.
+        var hull = Box("Hull", 4, 0, -4, -2, false);
+        for (int i = 0; i < hull.Positions.Length; i += 3) hull.Positions[i] *= 20; // length dominates the frame
+        var plate = Tray("Plate", 10, 20, 0, 5, 6, 1);
+        for (int i = 0; i < plate.Positions.Length; i += 3)
+        {
+            float y = plate.Positions[i + 1]; plate.Positions[i + 1] = plate.Positions[i + 2];
+            plate.Positions[i + 2] = negativeSide ? -y : y;
+        }
+        // Swapping Y/Z reflects the mesh; a second reflection for the negative side cancels it.
+        if (!negativeSide) for (int i = 0; i < plate.Indices.Length; i += 3)
+        { int tmp = plate.Indices[i + 1]; plate.Indices[i + 1] = plate.Indices[i + 2]; plate.Indices[i + 2] = tmp; }
+        if (lengthAlongZ) foreach (var part in new[] { hull, plate })
+            for (int i = 0; i < part.Positions.Length; i += 3)
+            { float x = part.Positions[i]; part.Positions[i] = part.Positions[i + 2]; part.Positions[i + 2] = -x; }
+        var result = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, plate), new[] { 1 }, 0.0);
+        Assert.True(result.Changed);
+        var g = Read(result.Bytes); var node = g.Node("Plate_Fused");
+        Assert.Equal(10, TriangleCount(g, node));
+        var normals = FaceNormals(g, (JObject)g.Primitives(node)[0]);
+        int axis = lengthAlongZ ? 0 : 2; double sign = negativeSide ? -1 : 1;
+        // The two large floor triangles of the rotated tray are the broadside.
+        Assert.Equal(2, normals.Count(n => n[axis] * sign > 1));
+        Assert.Contains(result.Details, d => d.Contains("seen from the side"));
+    }
+
+    [Fact]
+    public void A_hidden_rimmed_wall_does_not_veto_its_negative_volume_reversal()
+    {
+        var hull = Box("Hull", 4, 0, -4, -2, false);
+        for (int i = 0; i < hull.Positions.Length; i += 3) hull.Positions[i] *= 20;
+        var plate = Tray("Plate", 10, 20, 0, 5, 6, 1);
+        for (int i = 0; i < plate.Positions.Length; i += 3)
+        { float y = plate.Positions[i + 1]; plate.Positions[i + 1] = plate.Positions[i + 2]; plate.Positions[i + 2] = y; }
+        for (int i = 0; i < plate.Indices.Length; i += 3)
+        { int tmp = plate.Indices[i + 1]; plate.Indices[i + 1] = plate.Indices[i + 2]; plate.Indices[i + 2] = tmp; }
+        // An unfused exterior wall hides the cavity from the side. Facing toward it is not exterior evidence.
+        var outside = Quad("Outside", 0, 40, -1, 10, 8);
+        var result = GlbDisconnectedParts.FuseNodes(BuildGlb(hull, plate, outside), new[] { 1 }, 0.0);
+        Assert.Contains(result.Details, d => d.Contains("reversed whole"));
+        Assert.DoesNotContain(result.Details, d => d.Contains("seen from the side"));
+        Assert.Equal(2, FusedNormals(result, "Plate_Fused").Count(n => n[2] < -1));
+    }
+
     [Fact]
     public void A_deck_with_a_raised_edge_is_not_turned_over_by_its_own_volume()
     {

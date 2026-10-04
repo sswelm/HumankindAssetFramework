@@ -5,6 +5,35 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Fuser/Cutter overlapping parts:** a selected part's two-sided highlight now takes precedence over a
+  coincident front/back material twin, while nearer geometry still occludes it. The new "Selected part only"
+  preview toggle lets you inspect buried parts without the surrounding model. Deselecting restores the model;
+  row identities, marks, source winding and output geometry are unchanged.
+
+- **Model Fuser hull facing:** a negative open-sheet volume no longer turns an exposed broadside inward when
+  its visible surface already faces outward. This fixes the Protected Cruiser's rectangular hull opening after
+  fusion. The check uses whole-model side exposure and an area-weighted vote; hidden cavity walls and closed
+  shells keep their existing volume rules. Triangle counts, deletion marks and group assignments are unchanged.
+
+- **Model Fuser/Cutter highlighting:** the selected part is highlighted on both sides, so inward-facing source
+  plates can be identified before fusion repairs their winding. Ordinary preview materials and output geometry
+  are unchanged; other parts still occlude the selection normally.
+
+- **Model Fuser/Cutter tiny-part cleanup:** a fresh probe automatically marks unassigned mesh parts with 0–2
+  triangles for deletion, including confirmed point/line-only meshes. Existing groups and Split/Tear marks take
+  precedence; other unsupported geometry (including triangle strips/fans and mixed meshes) is skipped.
+  Re-probes preserve manual overrides. A button applies the same cleanup to an already loaded list; deletion marks
+  stay editable and geometry is removed only when writing an output. Normal view shows all parts, including
+  deletion marks. The separate "Hide deleted parts" view hides every deletion-marked part from the list and preview;
+  "Marked for deletion" shows those marks for review. Original names and node indices stay unchanged in every view.
+  An already loaded list receives point/line cleanup once after recompile, preserving its current groups and
+  existing manual overrides on triangle parts.
+
+- **Vehicle Lab probe crash:** replaced the process-wide weak-table vertex cache after Unity 2021.3's Mono crashed
+  in its lookup while probing the fused Protected Cruiser. Each probe now owns its cache and releases it on success
+  or failure; nested and concurrent probes stay isolated. Re-probing also reads changed indices. Unit and Unity
+  regressions cover edited models, aborted/nested probes, and collection between probe stages.
+
 - **Clip player review fixes:** switching clips restores animated properties that the selected clip does not drive,
   including properties on other nodes. Slashes in node names no longer break Unity animation paths, and long Unicode
   track names truncate at whole characters within Blender's 63-byte limit. The Unity comparison uses each pose's own

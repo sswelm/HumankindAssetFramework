@@ -9,6 +9,36 @@ using Xunit;
 
 public class GlbDisconnectedPartsTests
 {
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(1, true)]
+    [InlineData(2, true)]
+    [InlineData(3, true)]
+    [InlineData(4, false)]
+    [InlineData(5, false)]
+    [InlineData(6, false)]
+    public void Point_and_line_modes_are_triangle_free_but_triangle_strips_and_fans_are_not(int mode, bool expected)
+    {
+        var source = BuildGlb(new float[] { 0,0,0, 1,0,0, 0,1,0 }, edit: root => root["meshes"][0]["primitives"][0]["mode"] = mode);
+        Assert.Equal(expected, Assert.Single(GlbDisconnectedParts.Analyze(source)).TriangleFree);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void A_mixed_line_and_triangle_mesh_is_not_triangle_free(bool lineFirst)
+    {
+        var source = BuildGlb(new float[] { 0,0,0, 1,0,0, 0,1,0 }, edit: root =>
+        {
+            var primitives = (JArray)root["meshes"][0]["primitives"];
+            primitives.Add(primitives[0].DeepClone());
+            primitives[lineFirst ? 0 : 1]["mode"] = 1;
+        });
+        var info = Assert.Single(GlbDisconnectedParts.Analyze(source));
+        Assert.NotNull(info.Blocked);
+        Assert.False(info.TriangleFree);
+    }
+
     [Fact]
     public void Splits_disconnected_triangles_into_child_nodes_and_preserves_materials()
     {
@@ -219,7 +249,7 @@ public class GlbDisconnectedPartsTests
         Assert.Equal(2, result.OutputTriangles);
     }
 
-    static byte[] BuildGlb(float[] positions, bool withWeightAnimation = false, string nodeName = "Hull")
+    static byte[] BuildGlb(float[] positions, bool withWeightAnimation = false, string nodeName = "Hull", Action<JObject> edit = null)
     {
         byte[] positionBytes = new byte[positions.Length * 4];
         for (int i = 0; i < positions.Length; i++)
@@ -266,6 +296,7 @@ public class GlbDisconnectedPartsTests
                 })
             });
         }
+        edit?.Invoke(root);
         return WriteGlb(root, bin);
     }
 

@@ -809,6 +809,15 @@ public static class VehicleLabRules
 /// <summary>Model Workshop decisions (WorkshopRulesTests locks them).</summary>
 public static class WorkshopRules
 {
+    // Unknown counts (unsupported/compressed geometry) must not be treated as empty. Explicit group/Split/Tear
+    // assignments take precedence over the automatic cleanup default.
+    public static bool ShouldMarkTinyPartForDeletion(int triangles, string blocked, bool assigned, bool triangleFree = false) =>
+        triangles >= 0 && triangles <= 2 && (blocked == null || triangleFree) && !assigned;
+
+    public const int HideDeletedView = 8;
+    // Deletion is visible in the normal and review modes; only the explicit cleanup view hides it.
+    public static bool DeletedPartHiddenByView(bool deleted, int viewMode) => deleted && viewMode == HideDeletedView;
+
     // The fuse-groupings sidecar (<source>.glb.fuse.txt). Format v2 (2026-09-16): a header line, then one part per
     // line as "<letter>|<node index>|<name>" — the name is LAST, so every '|' after the second belongs to it and
     // nothing has to be guessed. Two earlier layouts still read: "<letter>|<name>|<node index>" (2026-09-15) and

@@ -8,6 +8,27 @@ using UnityEngine;
 
 public static class VehicleProbePreviewHeadlessTest
 {
+    // The Protected Cruiser probe crashed in Unity's Mono weak-table cache (2026-10-04). Exercise the replacement
+    // under collection between stages, and verify that a second probe reads edited indices instead of stale vertices.
+    static void CheckProbeCache()
+    {
+        var model = new HafModel(); var mesh = new HafMesh();
+        var primitive = new HafPrimitive { VertexCount = 6,
+            Positions = new float[] { 0,0,0, 1,0,0, 0,1,0, 10,0,0, 11,0,0, 10,1,0 }, Indices = new[] { 0,1,2 } };
+        mesh.Primitives.Add(primitive); model.Meshes.Add(mesh);
+        model.Nodes.Add(new HafNode { Name = "First", Mesh = 0 });
+        model.Nodes.Add(new HafNode { Name = "Second", Mesh = 0 });
+        for (int run = 0; run < 4; run++)
+        {
+            bool moved = (run & 1) != 0;
+            primitive.Indices = moved ? new[] { 3,4,5 } : new[] { 0,1,2 };
+            var result = VehicleProbe.Run(new VehicleProbe.Input { Model = model, Progress = _ =>
+            { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); } });
+            Require(result.Parts.Count == 2 && result.Parts.All(p => p.Verts == 3 && p.Center[0] == (moved ? 10.5 : 0.5)),
+                "probe cache lifetime under collection");
+        }
+    }
+
     public static void Run()
     {
         var assets = new List<UnityEngine.Object>();
@@ -30,6 +51,7 @@ public static class VehicleProbePreviewHeadlessTest
             Clear(assets);
             Require(!Resources.FindObjectsOfTypeAll<UnityEngine.Object>().Any(a => ids.Contains(a.GetInstanceID())), "preview asset cleanup");
 
+            CheckProbeCache();
             CheckMaterials(assets);
             CheckGate(assets);
             Clear(assets);

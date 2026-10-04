@@ -98,6 +98,17 @@ public static partial class VehicleProbe
 
     public static Result Run(Input input)
     {
+        // Unity 2021.3's Mono crashed inside the process-wide ConditionalWeakTable used by Used() while probing
+        // the fused Protected Cruiser (2026-10-04). Keep strong entries only for this call, then release them even
+        // on failure. A nested progress callback restores its caller's cache; concurrent probes use separate caches.
+        var previous = usedCache;
+        usedCache = new Dictionary<HafPrimitive, int[]>();
+        try { return RunCore(input); }
+        finally { usedCache = previous; }
+    }
+
+    static Result RunCore(Input input)
+    {
         var r = new Result();
         foreach (var w in input.Warnings) r.Notes.Add("WARN: " + w);
         input.Progress?.Invoke("naming");
@@ -487,21 +498,28 @@ public static partial class VehicleProbe
 
     // ---------------------------------------------------------------- the vertices Blender has
 
-    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<HafPrimitive, int[]> usedCache = new System.Runtime.CompilerServices.ConditionalWeakTable<HafPrimitive, int[]>();
+    [ThreadStatic] static Dictionary<HafPrimitive, int[]> usedCache;
 
     /// <summary>The vertices of a primitive as Blender's importer keeps them: the indices its faces, lines or points
     /// USE, unique and ascending (np.unique over the indices; a vertex nothing uses is never imported - the interleaved
     /// fixture's two primitives share one vertex array and each keeps its own six of eight). Non-indexed: all of them.</summary>
     static int[] Used(HafPrimitive p)
     {
-        return usedCache.GetValue(p, q =>
+        if (usedCache != null && usedCache.TryGetValue(p, out var cached)) return cached;
+        int[] result;
+        if (p.Indices == null)
         {
-            if (q.Indices == null) { var all = new int[q.VertexCount]; for (int i = 0; i < all.Length; i++) all[i] = i; return all; }
-            var seen = new bool[q.VertexCount];
-            foreach (int ix in q.Indices) if (ix >= 0 && ix < seen.Length) seen[ix] = true;
+            result = new int[p.VertexCount]; for (int i = 0; i < result.Length; i++) result[i] = i;
+        }
+        else
+        {
+            var seen = new bool[p.VertexCount];
+            foreach (int ix in p.Indices) if (ix >= 0 && ix < seen.Length) seen[ix] = true;
             var list = new List<int>(); for (int i = 0; i < seen.Length; i++) if (seen[i]) list.Add(i);
-            return list.ToArray();
-        });
+            result = list.ToArray();
+        }
+        if (usedCache != null) usedCache.Add(p, result);
+        return result;
     }
 
     // ---------------------------------------------------------------- the importer's bone-shape artefact, by signature
