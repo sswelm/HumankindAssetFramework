@@ -119,6 +119,8 @@ public sealed class HafPrimitive
     public float[] Tangents;                      // 4 per vertex (xyz + handedness), or null
     public float[] Uv0, Uv1;                      // 2 per vertex, or null
     public float[] Colors;                        // 4 per vertex (RGB padded with alpha 1), or null
+    public List<float[]> UvMore;                  // TEXCOORD_2 and up, in order (2 per vertex each), or null - Blender imports 8 sets
+    public List<float[]> ColorMore;               // COLOR_1 and up, in order (4 per vertex each, RGB padded with alpha 1), or null
     public ushort[] Joints;                       // 4 per vertex, or null (JOINTS_0)
     public float[] Weights;                       // 4 per vertex, or null (WEIGHTS_0)
     public ushort[] Joints1;                      // influences 5-8 (JOINTS_1 / WEIGHTS_1), or null; a third set is refused by the reader

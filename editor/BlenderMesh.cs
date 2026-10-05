@@ -110,7 +110,7 @@ public sealed class BlenderMesh
     {
         uint mask = (uint)parallelMaps - 1;
         var sets = new List<long>[parallelMaps]; var seen = new HashSet<long>[parallelMaps];
-        for (int i = 0; i < parallelMaps; i++) { sets[i] = new List<long>(); seen[i] = new HashSet<long>(); }
+        for (int i = 0; i < parallelMaps; i++) { sets[i] = new List<long>(); seen[i] = new HashSet<long>(EdgeKeyComparer.Instance); }
         long Key(int a, int b) { int lo = Math.Min(a, b), hi = Math.Max(a, b); return ((long)lo << 32) | (uint)hi; }
         int MapOf(long key) => (int)(mask & (uint)(key >> 32));   // edge_hash_2 = v_low
         void Add(int a, int b) { long k = Key(a, b); int mi = MapOf(k); if (seen[mi].Add(k)) sets[mi].Add(k); }
@@ -124,12 +124,22 @@ public sealed class BlenderMesh
         // serialize: the distinct existing edges in their ORIGINAL order (mask_first_distinct_edges + gather), then each bucket's
         // new edges (its entries past the prefix) bucket by bucket
         var result = new List<int>();
-        var emitted = new HashSet<long>();
+        var emitted = new HashSet<long>(EdgeKeyComparer.Instance);
         // an existing edge keeps the ORIENTATION the importer gave it (gather of the original int2) - only the new ones are (low, high)
         for (int i = 0; i + 1 < looseEdges.Length; i += 2) { long k = Key(looseEdges[i], looseEdges[i + 1]); if (emitted.Add(k)) { result.Add(looseEdges[i]); result.Add(looseEdges[i + 1]); } }
         for (int mi = 0; mi < parallelMaps; mi++)
             for (int j = prefix[mi]; j < sets[mi].Count; j++) { long k = sets[mi][j]; result.Add((int)(k >> 32)); result.Add((int)(k & 0xffffffff)); }
         return result.ToArray();
+    }
+
+    /// <summary>The hash of a packed (low, high) edge key. The default hash of a long is its halves XORed, which sends every
+    /// edge between neighbouring vertex numbers - most of a triangle soup or a grid - to a handful of buckets: the BMesh build
+    /// of the Wespe took 64 of 78 seconds in one dictionary until the halves were mixed (measured 2026-10-05).</summary>
+    public sealed class EdgeKeyComparer : IEqualityComparer<long>
+    {
+        public static readonly EdgeKeyComparer Instance = new EdgeKeyComparer();
+        public bool Equals(long a, long b) => a == b;
+        public int GetHashCode(long k) => unchecked((int)(((ulong)k * 0x9E3779B97F4A7C15UL) >> 32));
     }
 
     /// <summary>mesh.validate(): drop faces with a repeated vertex, then faces equal to an earlier kept face as a vertex set,

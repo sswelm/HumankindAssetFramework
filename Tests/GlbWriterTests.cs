@@ -117,6 +117,39 @@ public class GlbWriterTests
     }
 
     [Fact]
+    public void Further_uv_and_colour_sets_survive_and_a_gap_in_their_numbering_is_refused()
+    {
+        // TEXCOORD_2.. and COLOR_1.. (Blender imports eight of each; the Decimate port needs every layer Blender holds)
+        HafModel Model(bool uv1, bool color0)
+        {
+            var m = new HafModel();
+            var p = new HafPrimitive { VertexCount = 3, Positions = new float[] { 0, 0, 0, 1, 0, 0, 0, 1, 0 }, Uv0 = new float[] { 0, 0, 1, 0, 0, 1 }, Uv1 = uv1 ? new float[] { 0.5f, 0, 1, 0.5f, 0, 1 } : null,
+                Colors = color0 ? new float[] { 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 1 } : null,
+                UvMore = new List<float[]> { new float[] { 0.25f, 0.5f, 0.75f, 0.5f, 0.5f, 1 }, new float[] { 1, 1, 0, 0, 0.5f, 0.5f } },
+                ColorMore = new List<float[]> { new float[] { 0.1f, 0.2f, 0.3f, 1, 0.4f, 0.5f, 0.6f, 0.5f, 0.7f, 0.8f, 0.9f, 0 } } };
+            m.Meshes.Add(new HafMesh { Name = "tri", Primitives = { p } });
+            m.Nodes.Add(new HafNode { Name = "root", Mesh = 0 });
+            var scene = new HafScene(); scene.Nodes.Add(0); m.Scenes.Add(scene); m.Scene = 0;
+            return m;
+        }
+        var original = Model(true, true);
+        var again = GlbReader.Read(GlbWriter.Write(original));
+        Assert.Null(HafModelDiff.FirstDifference(original, again));
+        var q = again.Meshes[0].Primitives[0];
+        Assert.Equal(2, q.UvMore.Count); Assert.Single(q.ColorMore);
+        Assert.Equal(original.Meshes[0].Primitives[0].UvMore[1], q.UvMore[1]);
+        Assert.Equal(original.Meshes[0].Primitives[0].ColorMore[0], q.ColorMore[0]);
+        // the diff sees a changed value and a dropped set
+        again.Meshes[0].Primitives[0].UvMore[1][0] = 0.5f;
+        Assert.Contains("TEXCOORD_3", HafModelDiff.FirstDifference(original, again));
+        again.Meshes[0].Primitives[0].UvMore.RemoveAt(1);
+        Assert.Contains("TEXCOORD sets", HafModelDiff.FirstDifference(original, again));
+        // readers count the sets from 0 and stop at the first missing one: a gap would be written and never read
+        Assert.Contains("TEXCOORD_2", Assert.Throws<InvalidDataException>(() => GlbWriter.Write(Model(false, true))).Message);
+        Assert.Contains("COLOR_1", Assert.Throws<InvalidDataException>(() => GlbWriter.Write(Model(true, false))).Message);
+    }
+
+    [Fact]
     public void Wide_indices_both_influence_sets_and_a_matrix_node_survive()
     {
         // 70,000 vertices need uint indices; the second influence set and a matrix node are written as given

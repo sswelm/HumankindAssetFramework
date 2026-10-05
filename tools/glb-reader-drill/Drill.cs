@@ -100,17 +100,20 @@ static class Drill
             // -> 1, in two meshes -> 2, one beside a materialed one -> 1 + 1; the Khronos BoxVertexColors and the normalized fixture)
             // ... and only for a mesh a NODE uses: a mesh nothing instances is never imported (the same Lab source carries
             // 2,084 of them beside the 23 its nodes use - 39 materials in the file, 22 in Blender)
-            var usedMaterials = new HashSet<int>(); int invented = 0;
+            // ... and a material is created once per vertex-colour variant: a primitive with COLOR_0 gets
+            // pymaterial.blender_material['COLOR_0'], one without it blender_material[None] - two Blender materials when the same
+            // glTF material serves both (read in io_scene_gltf2 mesh.py; the decimate_attrs fixture, step 5 c)
+            var usedMaterials = new HashSet<int>(); var materialVariants = new HashSet<(int, bool)>(); int invented = 0;
             var instanced = new HashSet<int>(m.Nodes.Where(n => n.Mesh >= 0).Select(n => n.Mesh));
             for (int mi = 0; mi < m.Meshes.Count; mi++)
             {
                 if (!instanced.Contains(mi)) continue;
                 var me = m.Meshes[mi];
                 bool inventsOne = false;
-                foreach (var pp in me.Primitives) { if (pp.Material >= 0) usedMaterials.Add(pp.Material); else if (pp.Colors != null) inventsOne = true; }
+                foreach (var pp in me.Primitives) { if (pp.Material >= 0) { usedMaterials.Add(pp.Material); materialVariants.Add((pp.Material, pp.Colors != null)); } else if (pp.Colors != null) inventsOne = true; }
                 if (inventsOne) invented++;
             }
-            int blenderMaterials = usedMaterials.Count + invented;
+            int blenderMaterials = materialVariants.Count + invented;
             // the images Blender ends up with: those a texture of a CREATED material names, in its five core slots or anywhere
             // in its extension payload (a "...Texture": {"index": n} object)
             var usedTextures = new HashSet<int>();

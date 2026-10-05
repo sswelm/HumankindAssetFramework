@@ -222,6 +222,8 @@ public static class GlbWriter
                     if (p.Uv0 != null) attrs["TEXCOORD_0"] = FloatAccessor(p.Uv0, 2, "VEC2", false);
                     if (p.Uv1 != null) attrs["TEXCOORD_1"] = FloatAccessor(p.Uv1, 2, "VEC2", false);
                     if (p.Colors != null) attrs["COLOR_0"] = FloatAccessor(p.Colors, 4, "VEC4", false);
+                    if (p.UvMore != null) for (int t = 0; t < p.UvMore.Count; t++) attrs["TEXCOORD_" + (t + 2)] = FloatAccessor(p.UvMore[t], 2, "VEC2", false);
+                    if (p.ColorMore != null) for (int t = 0; t < p.ColorMore.Count; t++) attrs["COLOR_" + (t + 1)] = FloatAccessor(p.ColorMore[t], 4, "VEC4", false);
                     if (p.Joints != null) attrs["JOINTS_0"] = UshortAccessor(p.Joints, 4, "VEC4");
                     if (p.Weights != null) attrs["WEIGHTS_0"] = FloatAccessor(p.Weights, 4, "VEC4", false);
                     if (p.Joints1 != null) attrs["JOINTS_1"] = UshortAccessor(p.Joints1, 4, "VEC4");
@@ -347,6 +349,8 @@ public static class GlbWriter
             foreach (var p in me.Primitives)
             {
                 Add(p.Positions, 4); Add(p.Normals, 4); Add(p.Tangents, 4); Add(p.Uv0, 4); Add(p.Uv1, 4); Add(p.Colors, 4);
+                if (p.UvMore != null) foreach (var a in p.UvMore) Add(a, 4);
+                if (p.ColorMore != null) foreach (var a in p.ColorMore) Add(a, 4);
                 Add(p.Joints, 2); Add(p.Weights, 4); Add(p.Joints1, 2); Add(p.Weights1, 4); Add(p.Indices, 4);
             }
         foreach (var im in m.Images) Add(im.Bytes, 1);
@@ -423,8 +427,14 @@ public static class GlbWriter
                 if (p.MorphTargets > 0) throw new InvalidDataException($"{where} has {p.MorphTargets} morph target(s), whose data the model does not carry - refused rather than written without them");
                 FiniteOnce(p.Positions, $"{where} POSITION"); FiniteOnce(p.Normals, $"{where} NORMAL"); FiniteOnce(p.Tangents, $"{where} TANGENT"); FiniteOnce(p.Uv0, $"{where} TEXCOORD_0"); FiniteOnce(p.Uv1, $"{where} TEXCOORD_1");
                 FiniteOnce(p.Colors, $"{where} COLOR_0"); FiniteOnce(p.Weights, $"{where} WEIGHTS_0"); FiniteOnce(p.Weights1, $"{where} WEIGHTS_1");
+                if (p.UvMore != null) for (int t = 0; t < p.UvMore.Count; t++) FiniteOnce(p.UvMore[t], $"{where} TEXCOORD_{t + 2}");
+                if (p.ColorMore != null) for (int t = 0; t < p.ColorMore.Count; t++) FiniteOnce(p.ColorMore[t], $"{where} COLOR_{t + 1}");
                 void Check(Array a, int per, string name) { if (a != null && a.Length != p.VertexCount * per) throw new InvalidDataException($"{where}: {name} has {a.Length} values, {p.VertexCount * per} expected"); }
                 Check(p.Normals, 3, "normals"); Check(p.Tangents, 4, "tangents"); Check(p.Uv0, 2, "UV0"); Check(p.Uv1, 2, "UV1"); Check(p.Colors, 4, "colours");
+                if (p.UvMore != null) for (int t = 0; t < p.UvMore.Count; t++) { if (p.UvMore[t] == null) throw new InvalidDataException($"{where}: TEXCOORD_{t + 2} is null"); Check(p.UvMore[t], 2, "UV" + (t + 2)); }
+                if (p.ColorMore != null) for (int t = 0; t < p.ColorMore.Count; t++) { if (p.ColorMore[t] == null) throw new InvalidDataException($"{where}: COLOR_{t + 1} is null"); Check(p.ColorMore[t], 4, "colours (set " + (t + 1) + ")"); }
+                if (p.UvMore != null && p.UvMore.Count > 0 && (p.Uv0 == null || p.Uv1 == null)) throw new InvalidDataException($"{where}: TEXCOORD_2 and up need TEXCOORD_0 and TEXCOORD_1 (readers count the sets from 0 and stop at a gap)");
+                if (p.ColorMore != null && p.ColorMore.Count > 0 && p.Colors == null) throw new InvalidDataException($"{where}: COLOR_1 and up need COLOR_0 (readers count the sets from 0 and stop at a gap)");
                 Check(p.Joints, 4, "joints"); Check(p.Weights, 4, "weights"); Check(p.Joints1, 4, "joints (set 1)"); Check(p.Weights1, 4, "weights (set 1)");
                 if ((p.Joints == null) != (p.Weights == null) || (p.Joints1 == null) != (p.Weights1 == null)) throw new InvalidDataException($"{where}: joints without weights (or the reverse)");
                 if (p.Indices != null) foreach (int ix in p.Indices) if (ix < 0 || ix >= p.VertexCount) throw new InvalidDataException($"{where}: index {ix} is outside its {p.VertexCount} vertices");

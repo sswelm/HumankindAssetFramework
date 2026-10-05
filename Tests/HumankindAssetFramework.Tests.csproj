@@ -47,6 +47,11 @@
     <Compile Include="..\editor\VehicleProbe.Merge.cs" Link="VehicleProbe.Merge.cs" />
     <Compile Include="..\editor\HafUnityFrame.cs" Link="HafUnityFrame.cs" />
     <Compile Include="..\editor\BlenderMesh.cs" Link="BlenderMesh.cs" />
+    <Compile Include="..\editor\BMesh.cs" Link="BMesh.cs" />
+    <Compile Include="..\editor\BlenderColor.cs" Link="BlenderColor.cs" />
+    <Compile Include="..\editor\BlenderTrig.cs" Link="BlenderTrig.cs" />
+    <Compile Include="..\editor\BlenderDecimate.cs" Link="BlenderDecimate.cs" />
+    <Compile Include="..\editor\BlenderReduce.cs" Link="BlenderReduce.cs" />
   </ItemGroup>
 
   <!-- compile-time references the TEST code uses directly -->

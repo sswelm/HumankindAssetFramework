@@ -182,11 +182,12 @@ public static partial class VehicleProbe
     }
 
     /// <summary>Matrix.Rotation(angle, 4, axis) for axis 'X', 'Y' or 'Z': the double angle to float, wrapped, then
-    /// axis_angle_to_mat3_single with cosf/sinf (here the double functions rounded to float).</summary>
+    /// axis_angle_to_mat3_single with cosf/sinf (the C runtime's own in a 64-bit process, BlenderTrig.cs; the rounded double
+    /// functions otherwise).</summary>
     internal static float[] MatRotation(double angleRad, char axis)
     {
         float angle = AngleWrapRad((float)angleRad);
-        float c = (float)Math.Cos((double)angle), s = (float)Math.Sin((double)angle);
+        float c = BlenderTrig.Cosf(angle), s = BlenderTrig.Sinf(angle);
         // R[col][row] as the C writes it; item(row, col) = R[col][row]
         var r = IdentityRow();
         switch (axis)
