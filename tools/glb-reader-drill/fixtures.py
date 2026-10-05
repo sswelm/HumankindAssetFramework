@@ -629,8 +629,8 @@ def export_skin(out, name, bad_weights):
     through its matrix; vertex 1 has two EQUAL weights listed joint 1 first (a stable sort keeps that order); vertex 2 a
     weight of float32 0.0001 (not over the exporter's 0.0001: dropped) beside a full one; vertex 3 one of 0.00011 (kept).
     With bad_weights, vertex 0 carries one weight of 0.00005 and nothing else: under the threshold, so it is left with no
-    bone and the exporter adds its "neutral bone". That breaks the contract every other file keeps (a skinned vertex's
-    weights sum to about 1), which the reader drill checks - hence a file of its own, marked in its NAME."""
+    bone and the exporter adds its "neutral bone" to the skin shared with a fully weighted second mesh.
+    That breaks the contract every other file keeps (a skinned vertex's weights sum to about 1), which the reader drill checks - hence a file of its own, marked in its NAME."""
     b = Buf()
     pos, nrm, uv0, _, _, idx = bent_grid(4, 4, 0.0, 0.0)
     J, Wt = [], []
@@ -652,6 +652,14 @@ def export_skin(out, name, bad_weights):
                        {"name": "Tip", "translation": [1.0, 0.2, 0.0]}],
                 skins=[{"name": "rig", "joints": [2, 3]}],
                 scenes=[{"nodes": [0]}], scene=0)
+    if bad_weights:
+        # GoodBody itself needs no neutral joint, but Blender appends one to their shared armature/skin.
+        # Put it first in object order to also catch a checker that only accumulates requirements as it compares.
+        good_attrs = dict(attrs)
+        good_attrs["WEIGHTS_0"] = b.accessor([(1.0, 0.0, 0.0, 0.0)] + Wt[1:], "f", "VEC4", minmax=False)
+        root["meshes"].append({"name": "good_body", "primitives": [{"attributes": good_attrs, "indices": root["meshes"][0]["primitives"][0]["indices"]}]})
+        root["nodes"].append({"name": "GoodBody", "mesh": 1, "skin": 0})
+        root["nodes"][0]["children"].insert(0, 4)
     write_glb(os.path.join(out, name + ".glb"), root, b)
 
 

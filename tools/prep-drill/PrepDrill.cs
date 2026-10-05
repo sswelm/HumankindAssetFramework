@@ -63,6 +63,8 @@ static class PrepDrill
                 var nodeByName = new Dictionary<string, int>();
                 for (int i = 0; i < written.Nodes.Count; i++) if (written.Nodes[i].Mesh >= 0 && !nodeByName.ContainsKey(written.Nodes[i].Name)) nodeByName[written.Nodes[i].Name] = i;
                 int okObjects = 0, okPrims = 0;
+                var prepared = new List<(string name, int armature, BlenderExport.Skin skin, List<string> joints, List<BlenderExport.Primitive> primitives)>();
+                var neutralArmatures = new HashSet<int>();
                 foreach (var (node, name, faces) in meshObjects)
                 {
                     bool skinned = m.Nodes[node].Skin >= 0 && m.Nodes[node].Skin < m.Skins.Count && m.Meshes[m.Nodes[node].Mesh].Primitives.Exists(p => p.Skinned);
@@ -93,6 +95,16 @@ static class PrepDrill
                         bool identity = true; for (int i = 0; i < 16; i++) if (skinLayout.ArmatureWorld[i] != (i % 5 == 0 ? 1f : 0f)) identity = false;
                         if (!identity) cover["an armature that is not at the identity"]++;
                     }
+                    int armature = skinLayout != null ? names.ArmatureNodeOfSkin[m.Nodes[node].Skin] : -1;
+                    if (skinLayout != null && mine.Count > 0 && mine[0].NeutralBone) neutralArmatures.Add(armature);
+                    prepared.Add((name, armature, skinLayout, jointNames, mine));
+                }
+                // Blender appends one neutral joint to the shared armature if ANY exported mesh needs it.
+                // Collect that requirement from our layouts before comparing any object's skin, so mesh order cannot matter.
+                foreach (var (name, armature, skinLayout, jointNames, mine) in prepared)
+                {
+                    if (skinLayout != null && mine.Count > 0 && !mine[0].NeutralBone && neutralArmatures.Contains(armature))
+                        cover["a weighted mesh sharing an armature with a neutral bone"]++;
                     if (mine.Count == 0)
                     {
                         // an object without faces (lines, points): the exporter writes its node WITHOUT a mesh
@@ -106,7 +118,7 @@ static class PrepDrill
                         int ws = written.Nodes[wn].Skin;
                         if (ws < 0 || ws >= written.Skins.Count) { problems.Add($"{name}: skinned here, no skin in Blender's file"); continue; }
                         var theirJoints = written.Skins[ws].Joints.Select(j => written.Nodes[j].Name).ToList();
-                        var myJoints = new List<string>(jointNames); if (mine[0].NeutralBone) myJoints.Add("neutral_bone");
+                        var myJoints = new List<string>(jointNames); if (neutralArmatures.Contains(armature)) myJoints.Add("neutral_bone");
                         if (!theirJoints.SequenceEqual(myJoints)) { problems.Add($"{name}: joints [{string.Join(",", myJoints.Take(6))}...] ({myJoints.Count}) vs Blender's [{string.Join(",", theirJoints.Take(6))}...] ({theirJoints.Count})"); continue; }
                     }
                     else if (written.Nodes[wn].Skin >= 0) { problems.Add($"{name}: Blender's file skins it, the layout does not"); continue; }
@@ -139,6 +151,7 @@ static class PrepDrill
         "normals from the file (custom normals)", "no normals (every face flat)", "a normal that rounds to zero, made up", "a zero normal on a fan that does not point up", "an object of several primitives",
         "an object without faces", "two or more UV sets", "COLOR_0 as RGB (the material's colour)", "COLOR_0 with alpha (a face without material)",
         "COLOR_0 forced (255s)", "two or more colour sets", "a colour layer on the vertices (point domain)", "a twin face the exporter's validate removes",
+        "a weighted mesh sharing an armature with a neutral bone",
         "a skinned object", "a vertex without a bone (the neutral bone)", "a vertex of more than four groups", "an armature that is not at the identity",
     };
 
