@@ -205,6 +205,17 @@ public class BlenderDecimateTests
         var m = BentGrid(25, false, false);
         var p = m.Meshes[0].Primitives[0];
         for (int v = 0; v < p.VertexCount; v++) p.Positions[3 * v + 1] = 0f;   // equal-cost edges expose order differences
+        // the grid can show a wrong count: 4 and 8 buckets order its edges differently (Blender with -t 4 against its default
+        // gave 350 against 351 vertices at a half on the decimate_limits fixture, verified 2026-10-05)
+        Assert.Equal(4, BlenderMesh.ParallelMaps(1250, 4)); Assert.Equal(8, BlenderMesh.ParallelMaps(1250, 16));
+        Assert.NotEqual(BlenderMesh.FromGltf(m, 0, 4).ValidEdges, BlenderMesh.FromGltf(m, 0, 16).ValidEdges);
+        // on a machine of 8 or more threads the comparisons below cannot tell the runtime's count from a hard-coded 16 (the
+        // defect they guard), so the defaults themselves are held: no entry point may carry a machine's count again
+        foreach (var method in new[] { typeof(BlenderMesh).GetMethod("ParallelMaps"), typeof(BlenderMesh).GetMethod("FromGltf"), typeof(BlenderReduce).GetMethod("Reduce") })
+        {
+            var threads = Array.Find(method.GetParameters(), q => q.Name == "threads");
+            Assert.NotNull(threads); Assert.True(threads.HasDefaultValue); Assert.Equal(0, threads.DefaultValue);
+        }
         Assert.Equal(BlenderMesh.ParallelMaps(1250, Environment.ProcessorCount), BlenderMesh.ParallelMaps(1250));
         Assert.Equal(BlenderMesh.FromGltf(m, 0, Environment.ProcessorCount).ValidEdges, BlenderMesh.FromGltf(m, 0).ValidEdges);
         var names = BlenderNames.Compute(m);
