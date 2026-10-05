@@ -170,6 +170,37 @@ equal, none declined, in 15 minutes (C# under 5 of them). The vehicle probe dril
 (`PROBE_MONO=1` for the old way).
 `BlenderDecimateTests` hold the heap order, the quadric, the stop count, the UV merge and the colour path (values from
 real SSE on the same CPU); the `decimate_attrs` fixture carries the attribute combinations no population file has.
+**`tools/prep_drill.sh`** (step 5 milestone d, 2026-10-05: the mesh as Blender's glTF EXPORTER writes it after the reduce,
+`editor/BlenderExport.cs`) lets Blender run the REAL `editor/Tools~/prep_model.py` - by `runpy`, with the Factory's command
+line - twice per file: with a target of a third of the file's triangles, and with a target of all of them (nothing
+collapses; importer, apply and exporter still run). The C# side reduces every mesh object of the source at prep_model's
+ratio (`BlenderReduce`), lays it out as the exporter does and holds each primitive to the one Blender wrote for the node of
+the same name, bit for bit: the vertex count, positions, normals, every UV set, every colour set, the indices. The rules,
+each read from `io_scene_gltf2/blender/exp/primitive_extract.py`: the exporter first runs `mesh.validate()`, which
+removes the later of two faces on the same three vertices - the collapse leaves such twins where a small closed solid (a
+bolt, a rivet) closes onto itself, and the normals of the faces that stay change with them; one "dot" per corner (vertex
+number, normal, UVs, colours); the normal is `Mesh.corner_normals` (`VehicleProbe.BlenderCornerNormals`: by the mesh's normal domain) rounded
+to 4 decimals in float32, renormalized, a zero made "up"; every -0.0 becomes 0.0; triangles are bucketed per material
+slot and each bucket's unique dots are SORTED as raw 32-bit words (numpy sorts the records as strings: a negative float
+comes after a positive one); the colour sets follow the first material slot in use - a material built with the vertex
+colour gives COLOR_0 as linear RGB floats, a face without material ahead of it gives COLOR_0 with alpha, materials
+without either give a forced COLOR_0 of 255s - and every further layer follows with alpha as normalized shorts. The C#
+side prints which rules its compared objects exercised (`COVER` rows) and the script FAILS on a row at zero: three were
+at zero on the first run (the forced set, alpha first, the zero normal) and the `export_layout` fixture now carries them.
+The validate step was MISSING until the first `FULL=1` run: the gate sample was equal, five fused ships were not (a few
+triangles too many, one normal made "up"), and the fixture's closed solids now hold it in the gate. The fixture's
+triangle of no area could not tell "a zero normal is made up" from "an invalid space keeps the fan's normal" - its fan
+points up anyway - so a fan whose angle-weighted normal runs along its own edge, +X, stands beside it (its own `COVER`
+row): Blender's corner normal there is zero, and the rival rule, planted, fails the drill on that object alone.
+It runs 64-bit like the decimate drill. A file `prep_model.py` itself fails on (several scenes: "not in View Layer")
+passes only as that known failure. NOT laid out yet, counted and named on every run: skinned objects (positions by the
+object's matrix, normals by the armature's, joints and weights) and a coloured material with alpha (its colour set depends
+on the material's node tree). Gate sample: 46 runs on 23 files, 78 object runs (86 primitives, 4,471 vertices) equal, 20
+not laid out, in 8 s; `FULL=1` on 2026-10-06: 148 runs on 74 files, 3,532 object runs (4,178 primitives, 13,008,486
+vertices) equal, 622 not laid out (528 skinned, 94 with a coloured alpha material), 18 object runs with twin faces
+removed, 24 with a zero normal on a fan that points elsewhere, in a quarter of an hour. `BlenderExportTests` hold each rule alone, the rounding and the short quantizing against
+values numpy gave; seventeen planted defects, one per rule, each failed them, and six planted under the drill (five
+of those, and the rival rule for the invalid fan) each failed it on the fixture built for that rule.
 
 **The Clip Range picker's in-process rig** (step 4, 2026-10-03): `HafUnityFrameTests` hold the preview frame's arithmetic
 without Unity — the X mirror's conjugation of rotations, matrices and matrix nodes; Unity's skinning formula fed the rig's

@@ -24,6 +24,7 @@ public static class BlenderReduce
         public short[] CustomNormal;              // 2 per corner, or null when no primitive had normals
         public List<int>[] DefNr; public List<float>[] DefWeight;   // per vertex, or null when the object has no vertex groups
         public List<(string name, bool point, byte[] bytes)> Colors = new List<(string, bool, byte[])>();   // per colour layer: 4 bytes per corner, or per vertex for the point domain
+        public List<(int material, bool vertexColor)> Slots = new List<(int, bool)>();   // the mesh's material slots: the glTF material (-1 none) and whether the importer built it WITH the vertex colour
         public float Ratio;                       // the modifier's ratio as stored (float32)
         public bool Collapsed;                    // false when the modifier would return the mesh untouched
         public string Fallback;                   // non-null: the mesh is outside this port; why
@@ -101,6 +102,7 @@ public static class BlenderReduce
             if (s < 0) { s = slots.Count; slots.Add(key); }
             slotOf[pi] = s;
         }
+        r.Slots = slots;
         var faceMaterial = new int[nf];
         for (int f = 0; f < nf; f++) faceMaterial[f] = slotOf[layout.FacePrimitive[f]];
 

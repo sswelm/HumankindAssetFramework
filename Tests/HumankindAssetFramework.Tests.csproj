@@ -52,6 +52,7 @@
     <Compile Include="..\editor\BlenderTrig.cs" Link="BlenderTrig.cs" />
     <Compile Include="..\editor\BlenderDecimate.cs" Link="BlenderDecimate.cs" />
     <Compile Include="..\editor\BlenderReduce.cs" Link="BlenderReduce.cs" />
+    <Compile Include="..\editor\BlenderExport.cs" Link="BlenderExport.cs" />
   </ItemGroup>
 
   <!-- compile-time references the TEST code uses directly -->

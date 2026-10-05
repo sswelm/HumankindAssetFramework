@@ -49,7 +49,7 @@ public static partial class VehicleProbe
 
     static short UnitFloatToShort(float v) => (short)Math.Floor((double)(float)((float)(v * 32767f) + 0.5f));
 
-    struct FanSpace { public float lx, ly, lz, rx, ry, rz, ox, oy, oz, refAlpha, refBeta; }
+    struct FanSpace { public float lx, ly, lz, rx, ry, rz, ox, oy, oz, refAlpha, refBeta; public float fnx, fny, fnz; }   // fn: the fan's own normal, also when the space is invalid (l is zero then)
 
     /// <summary>corner_fan_space_define: the space a fan's custom normals are encoded against.</summary>
     static FanSpace DefineSpace(float lx, float ly, float lz, float vrx, float vry, float vrz, float vox, float voy, float voz, List<float[]> edgeVectors)
@@ -137,7 +137,7 @@ public static partial class VehicleProbe
     /// <summary>Mesh::face_normals() uses normal_calc_ngon even for triangles: Newell's sum, then normalize_v3
     /// (multiply by the reciprocal length). MeshPolygon.normal uses a triangle cross product instead; using that here
     /// changes fan spaces on thin triangles far from the origin. A zero normal is (0, 0, 1).</summary>
-    static float[] FaceNormals(float[] P, int[] tris)
+    internal static float[] FaceNormals(float[] P, int[] tris)
     {
         int nf = tris.Length / 3;
         var FN = new float[nf * 3];
@@ -314,6 +314,62 @@ public static partial class VehicleProbe
         return result;
     }
 
+    /// <summary>Mesh::corner_normals(): per corner (3 per face, 3 floats each), by the mesh's normal domain. With custom
+    /// normals (the two shorts per corner) always the fan walk: each fan's shorts averaged and decoded against its space - an
+    /// invalid space decodes to a ZERO vector, which the glTF exporter later replaces. Without them: every face sharp gives
+    /// the face normals, none sharp the vertex normals, a mix the fan walk with each fan's own normal.</summary>
+    internal static float[] BlenderCornerNormals(float[] P, int[] tris, bool[] sharpFace, short[] d0, short[] d1)
+    {
+        int nf = tris.Length / 3;
+        var cn = new float[nf * 9];
+        if (nf == 0) return cn;
+        if (d0 == null)
+        {
+            bool all = true, any = false;
+            for (int f = 0; f < nf; f++) { if (sharpFace[f]) any = true; else all = false; }
+            if (all)
+            {
+                var FN = FaceNormals(P, tris);
+                for (int c = 0; c < nf * 3; c++) { cn[c * 3] = FN[(c / 3) * 3]; cn[c * 3 + 1] = FN[(c / 3) * 3 + 1]; cn[c * 3 + 2] = FN[(c / 3) * 3 + 2]; }
+                return cn;
+            }
+            if (!any)
+            {
+                var VN = BlenderVertexNormals(P, tris, null);
+                for (int c = 0; c < nf * 3; c++) { int v = tris[c]; cn[c * 3] = VN[v * 3]; cn[c * 3 + 1] = VN[v * 3 + 1]; cn[c * 3 + 2] = VN[v * 3 + 2]; }
+                return cn;
+            }
+            WalkFans(P, tris, sharpFace, (v, infos, fan, space) =>
+            {
+                foreach (int lc in fan) { int c = infos[lc].corner; cn[c * 3] = space.fnx; cn[c * 3 + 1] = space.fny; cn[c * 3 + 2] = space.fnz; }
+            }, null, null);
+            return cn;
+        }
+        WalkFans(P, tris, sharpFace, (v, infos, fan, space) =>
+        {
+            int s0 = 0, s1 = 0;
+            foreach (int lc in fan) { int c = infos[lc].corner; s0 += d0[c]; s1 += d1[c]; }
+            short a0 = (short)(s0 / fan.Count), a1 = (short)(s1 / fan.Count);
+            float dx, dy, dz; DecodeCustom(space, a0, a1, out dx, out dy, out dz);
+            foreach (int lc in fan) { int c = infos[lc].corner; cn[c * 3] = dx; cn[c * 3 + 1] = dy; cn[c * 3 + 2] = dz; }
+        }, null, null);
+        return cn;
+    }
+
+    /// <summary>Every corner's FAN normal (accumulate_fan_normal), 3 per corner: what the corner's normal is before the
+    /// custom normals are decoded against it. For telling a decoded zero on a fan that points somewhere from one that
+    /// points up anyway (tools/prep-drill).</summary>
+    internal static float[] BlenderFanNormals(float[] P, int[] tris, bool[] sharpFace)
+    {
+        var fn = new float[tris.Length * 3];
+        if (tris.Length == 0) return fn;
+        WalkFans(P, tris, sharpFace, (v, infos, fan, space) =>
+        {
+            foreach (int lc in fan) { int c = infos[lc].corner; fn[c * 3] = space.fnx; fn[c * 3 + 1] = space.fny; fn[c * 3 + 2] = space.fnz; }
+        }, null, null);
+        return fn;
+    }
+
     /// <summary>normals_calc_corners' walk: for every vertex its corner infos, its local edges, the edge kinds (sharp faces, a
     /// third face, a winding mismatch), the fans (traverse_fan_local_corners), each fan's normal (accumulate_fan_normal) and
     /// space (corner_fan_space_define) - handed to onFan with the corners in the fan; onVertex after a vertex's fans; onLone
@@ -424,6 +480,7 @@ public static partial class VehicleProbe
                     if (edgeLast != edgeFirst) fanEdgeDirs.Add(edgeDirs[edgeLast]);
                 }
                 var space = DefineSpace(fx, fy, fz, edgeDirs[edgeFirst][0], edgeDirs[edgeFirst][1], edgeDirs[edgeFirst][2], edgeDirs[edgeLast][0], edgeDirs[edgeLast][1], edgeDirs[edgeLast][2], fanEdgeDirs);
+                space.fnx = fx; space.fny = fy; space.fnz = fz;
                 onFan(v, infos, fan, space);
                 visitedCount += fan.Count;
                 if (visitedCount == infos.Count) break;

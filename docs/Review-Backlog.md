@@ -119,8 +119,17 @@ every object of the population collapsed at three ratios equal to Blender's Deci
 colour bytes: 6,099 reductions of 19.2 million faces on 110 files, 15 minutes; found on the way: `modifier_apply`'s UV merge, Blender's per-vertex-colour material variants, the
 float32 `normalize_v3` of face normals and the normalized custom-normal input (both shared with the probe), the C runtime's
 `cosf`/`sinf` (not the rounded double; `BlenderTrig.cs`, and the drills' C# side as a 64-bit process), Mono's double
-evaluation of uncast float products, an edge-key hash that made the BMesh build quadratic); NOT wired into the Lab yet; (d) the glTF exporter's vertex order for the written file, then prep_model in C#
-(strip + reduce + write); 2–3 weeks in all;
+evaluation of uncast float products, an edge-key hash that made the BMesh build quadratic); NOT wired into the Lab yet; **(d) the glTF exporter's mesh layout** — the unskinned part done 2026-10-05 (`BlenderExport.cs`,
+`tools/prep_drill.sh`: Blender runs the real `prep_model.py`, every primitive it wrote is held to the C# reduce plus layout,
+bit for bit - the exporter's own `mesh.validate()` first (it removes the twin faces a collapse leaves; missing until the
+full run showed five ships differ), corner normals rounded to 4 decimals, unique corners sorted as raw words, the
+colour-set rules; `FULL=1` on 2026-10-06: 148 runs on 74 files, 3,532 object runs, 13.0 million vertices equal);
+still open in (d), each counted and named by the drill on every run: skinned objects (the Salegs is the registry's one
+prep_model entry with a skin), a coloured material with alpha; then prep_model in C# - strip, the file as the Factory's
+converter reads it (node and material order: Blender writes materials in order of first use, one per vertex-colour
+variant, and a `DefaultMaterial` for a coloured primitive without one), the write, the wiring behind
+`UniversalBaker.PrepViaBlender` with Blender as the fallback; KNOWN on the way: `prep_model.py` fails on a file of several
+scenes ("not in View Layer") - today's behaviour, the drill passes it only as that; 2–3 weeks in all;
 (3) `deploy_convert` (3–4 weeks; the fuse already walks parts and welds); (4) `rig_anim` (3–4 weeks); (5)
 `vehicle_rig` (4–8 weeks; the Lab already computes much of the geometry in C#).
 

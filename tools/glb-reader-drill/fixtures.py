@@ -549,7 +549,81 @@ def fx_decimate_limits(out):
     write_glb(os.path.join(out, "decimate_limits.glb"), root, b)
 
 
-FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external, fx_cubic, fx_scenes, fx_materials, fx_skin8, fx_big, fx_names, fx_no_default_scene, fx_dropped, fx_mixed_skin, fx_clip_switch, fx_path_clip, fx_far_clip, fx_unicode_clip, fx_decimate_attrs, fx_decimate_limits]
+def fx_export_layout(out):
+    """The rules of Blender's glTF EXPORTER (step 5 d, tools/prep_drill.sh) that no other fixture and no registry file
+    exercised (counted 2026-10-05 by the drill's COVER rows): a mesh whose FIRST material slot in use is the empty one while
+    another primitive is coloured (COLOR_0 then carries alpha - and these alphas vary); a mesh whose faces are all on a plain
+    material while a LINES primitive brings a colour layer (the exporter forces a COLOR_0 of 255s ahead of it); a triangle of
+    no area on a mesh without normals (Blender gives such a face the normal +Z) and one on a mesh with them, standing along
+    Blender's Z: at its middle vertex the fan's normal (+Z again) runs along the fan's own edges, the custom-normal space is
+    invalid, the corner normal decodes to ZERO and the exporter makes it "up" - which that triangle cannot tell from "the
+    fan's normal is kept", +Z as well; so a fan of three faces follows whose angle-weighted normal runs along its own first
+    edge, +X: Blender's `corner_normals` there is (0, 0, 0) (read 2026-10-05), exported as up. And small closed solids - a tetrahedron, a
+    bipyramid, an octahedron, a box, each with normals and without: at a third of the faces the collapse closes them onto
+    themselves, leaving two faces on the same three vertices, and the exporter's `mesh.validate()` removes the later one
+    (found on five fused ships by the full run, 2026-10-05: their bolts and rivets are such solids)."""
+    b = Buf()
+
+    def surface(ox, oy, normals=True, colour=None, material=None, extra=None):
+        pos, nrm, uv0, _, _, idx = bent_grid(4, 4, ox, oy)
+        if extra:   # three more vertices on one line: a triangle of no area
+            n0 = len(pos); pos += extra; nrm += [(0.0, 1.0, 0.0)] * 3; uv0 += [(0.0, 0.0), (0.5, 0.0), (1.0, 0.0)]; idx += [n0, n0 + 1, n0 + 2]
+        attrs = {"POSITION": b.accessor(pos, "f", "VEC3"), "TEXCOORD_0": b.accessor(uv0, "f", "VEC2", minmax=False)}
+        if normals:
+            attrs["NORMAL"] = b.accessor(nrm, "f", "VEC3", minmax=False)
+        if colour:
+            attrs["COLOR_0"] = b.accessor([colour(i) for i in range(len(pos))], "f", "VEC4", minmax=False)
+        p = {"attributes": attrs, "indices": b.accessor(idx, "H", "SCALAR")}
+        if material is not None:
+            p["material"] = material
+        return p
+
+    alpha_first = {"name": "alpha_first", "primitives": [
+        surface(0.0, 0.0),
+        surface(1.2, 0.0, colour=lambda i: (0.1 + 0.2 * (i % 5), 0.6, 0.9 - 0.2 * (i // 5), 0.15 + 0.2 * (i % 5)), material=0)]}
+    line = b.accessor([(0, 0, -2.5), (1, 0.2, -2.5), (2, 0, -2.5)], "f", "VEC3")
+    lcol = b.accessor([(1.0, 0.0, 0.0, 0.25), (0.0, 1.0, 0.0, 0.5), (0.0, 0.0, 1.0, 1.0)], "f", "VEC4", minmax=False)
+    forced = {"name": "forced", "primitives": [surface(0.0, 2.0, material=0), {"attributes": {"POSITION": line, "COLOR_0": lcol}, "mode": 3, "material": 1}]}
+    flat = {"name": "flat_degenerate", "primitives": [surface(0.0, 4.0, normals=False, material=0, extra=[(3.0, 0.0, -4.0), (4.0, 0.0, -4.0), (5.0, 0.0, -4.0)])]}
+    smooth = {"name": "smooth_degenerate", "primitives": [surface(0.0, 6.0, material=0, extra=[(3.0, 0.0, -6.0), (3.0, 1.0, -6.0), (3.0, 2.0, -6.0)])]}
+    # the invalid fan, in Blender's frame (written (x, z, -y)): a sliver along +X, a quarter in the XZ plane (both with
+    # the normal -Y), then 120 degrees in a plane whose normal is (0.661, 0.75, 0): 90 x -Y + 120 x 0.75 Y leaves +X
+    fan_bl = [(0.0, 0.0, 0.0), (1.0, 0.0, -0.004), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0), (0.6495, -0.5727, -0.5)]
+    fan_gl = [(x + 8.0, z, -y) for x, y, z in fan_bl]
+    invalid_fan = {"name": "invalid_fan", "primitives": [{
+        "attributes": {"POSITION": b.accessor(fan_gl, "f", "VEC3"), "NORMAL": b.accessor([(0.0, 1.0, 0.0)] * 5, "f", "VEC3", minmax=False)},
+        "indices": b.accessor([0, 1, 2, 0, 2, 3, 0, 3, 4], "H", "SCALAR"), "material": 0}]}
+    meshes = [alpha_first, forced, flat, smooth, invalid_fan]
+    names = ["AlphaFirst", "Forced", "FlatDegenerate", "SmoothDegenerate", "InvalidFan"]
+    solids = [
+        ("Tetra", [(0, 0, 0), (1, 0, 0), (0.4, 0.9, 0), (0.45, 0.3, 0.8)], [(0, 2, 1), (0, 1, 3), (1, 2, 3), (2, 0, 3)]),
+        ("Bipyramid", [(0, 0, 0), (1, 0, 0), (0.4, 0.9, 0), (0.45, 0.3, 0.8), (0.5, 0.35, -0.7)], [(0, 1, 3), (1, 2, 3), (2, 0, 3), (1, 0, 4), (2, 1, 4), (0, 2, 4)]),
+        ("Octa", [(1, 0, 0), (-1, 0, 0.1), (0, 1.1, 0), (0, -0.9, 0), (0.1, 0, 1.2), (0, 0.1, -1)], [(0, 2, 4), (2, 1, 4), (1, 3, 4), (3, 0, 4), (2, 0, 5), (1, 2, 5), (3, 1, 5), (0, 3, 5)]),
+        ("Box", [(0, 0, 0), (1, 0, 0), (1, 0.6, 0), (0, 0.6, 0), (0, 0, 0.3), (1, 0, 0.3), (1, 0.6, 0.3), (0, 0.6, 0.3)],
+         [(0, 2, 1), (0, 3, 2), (4, 5, 6), (4, 6, 7), (0, 1, 5), (0, 5, 4), (1, 2, 6), (1, 6, 5), (2, 3, 7), (2, 7, 6), (3, 0, 4), (3, 4, 7)]),
+    ]
+    for with_normals in (True, False):
+        for i, (name, verts, faces) in enumerate(solids):
+            verts = [(x + 2.0 * i, y + 3.0, z - (9.0 if with_normals else 12.0)) for x, y, z in verts]
+            centre = [sum(v[k] for v in verts) / len(verts) for k in range(3)]
+            attrs = {"POSITION": b.accessor(verts, "f", "VEC3")}
+            if with_normals:   # outward from the centre
+                nrm = []
+                for v in verts:
+                    d = [v[k] - centre[k] for k in range(3)]; ln = math.sqrt(sum(x * x for x in d))
+                    nrm.append(tuple(x / ln for x in d))
+                attrs["NORMAL"] = b.accessor(nrm, "f", "VEC3", minmax=False)
+            meshes.append({"name": name.lower() + ("" if with_normals else "_flat"), "primitives": [{"attributes": attrs, "indices": b.accessor([k for f in faces for k in f], "H", "SCALAR"), "material": 0}]})
+            names.append(name + ("" if with_normals else "Flat"))
+    root = base("export_layout",
+                materials=[{"name": "plain", "pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.8, 0.8, 1]}}, {"name": "lined", "pbrMetallicRoughness": {"baseColorFactor": [0.3, 0.6, 0.9, 1]}}],
+                meshes=meshes,
+                nodes=[{"name": name, "mesh": i} for i, name in enumerate(names)],
+                scenes=[{"nodes": list(range(len(names)))}], scene=0)
+    write_glb(os.path.join(out, "export_layout.glb"), root, b)
+
+
+FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external, fx_cubic, fx_scenes, fx_materials, fx_skin8, fx_big, fx_names, fx_no_default_scene, fx_dropped, fx_mixed_skin, fx_clip_switch, fx_path_clip, fx_far_clip, fx_unicode_clip, fx_decimate_attrs, fx_decimate_limits, fx_export_layout]
 
 
 def main(out):
