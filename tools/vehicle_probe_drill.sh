@@ -41,7 +41,7 @@ cp "$NEWTONSOFT" "$TMPD/Newtonsoft.Json.dll"
 WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"; WTMP="$(cygpath -m "$TMPD" 2>/dev/null || echo "$TMPD")"
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -out:"$WTMP/probe.exe" \
   -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
-  "$WROOT/tools/vehicle-probe-drill/ProbeDrill.cs" "$WROOT/editor/HafModel.cs" "$WROOT/editor/GlbReader.cs" "$WROOT/editor/HafTransforms.cs" "$WROOT/editor/BlenderNames.cs" "$WROOT/editor/VehicleProbe.cs" "$WROOT/editor/VehicleProbe.Visibility.cs" "$WROOT/editor/VehicleProbe.Islands.cs" "$WROOT/editor/VehicleProbe.InsideOut.cs" "$WROOT/editor/VehicleProbe.BlenderWorld.cs" "$WROOT/editor/VehicleProbe.BlenderSkin.cs" "$WROOT/editor/VehicleProbe.CustomNormals.cs" "$WROOT/editor/VehicleProbe.Merge.cs" 2>&1); rc=$?
+  "$WROOT/tools/vehicle-probe-drill/ProbeDrill.cs" "$WROOT/editor/HafModel.cs" "$WROOT/editor/GlbReader.cs" "$WROOT/editor/HafTransforms.cs" "$WROOT/editor/BlenderNames.cs" "$WROOT/editor/VehicleProbe.cs" "$WROOT/editor/VehicleProbe.Visibility.cs" "$WROOT/editor/VehicleProbe.Islands.cs" "$WROOT/editor/VehicleProbe.InsideOut.cs" "$WROOT/editor/VehicleProbe.BlenderWorld.cs" "$WROOT/editor/VehicleProbe.BlenderSkin.cs" "$WROOT/editor/VehicleProbe.CustomNormals.cs" "$WROOT/editor/VehicleProbe.Merge.cs" "$WROOT/editor/BlenderTrig.cs" 2>&1); rc=$?
 if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/probe.exe" ]; then echo "$OUT" | grep -E "error" | head -20; echo "FAIL — the vehicle probe drill did not compile (csc rc=$rc)"; exit 1; fi
 
 # ---- the sources: fixtures, naming fixtures, the registry, the Khronos samples
@@ -70,8 +70,12 @@ mapfile -t JOBS < <(python "$ROOT/tools/vehicle-probe-drill/probe_jobs.py" "$WTM
 [ "${#JOBS[@]}" -gt 0 ] || { echo "FAIL — could not write the probe jobs"; exit 1; }
 N_FIXTURE_JOBS=$(printf '%s\n' "${JOBS[@]}" | grep -c "/naming/")
 
-# ---- the C# probe on every file
-"$MONO" "$TMPD/probe.exe" "${FILES[@]}" "@$WTMP/jobs.json" > "$TMPD/csharp_raw.txt" 2>&1; rc=$?
+# ---- the C# probe on every file, as a 64-BIT process (the exe run directly: the .NET Framework's 64-bit runtime) since
+# 2026-10-05: the custom-normal decode and Matrix.Rotation call cosf/sinf, which in Blender are the 64-bit C runtime's
+# own and not the rounded double functions (BlenderTrig.cs); a 32-bit process has no cosf to call, so Unity's stand-alone
+# Mono would drill the fallback, not the path Unity's 64-bit editor takes. PROBE_MONO=1 runs it under that Mono instead.
+if [ "${PROBE_MONO:-0}" = "1" ]; then "$MONO" "$TMPD/probe.exe" "${FILES[@]}" "@$WTMP/jobs.json" > "$TMPD/csharp_raw.txt" 2>&1; rc=$?
+else "$TMPD/probe.exe" "${FILES[@]}" "@$WTMP/jobs.json" > "$TMPD/csharp_raw.txt" 2>&1; rc=$?; fi
 LC_ALL=C sed 's/\xEF\xBB\xBF//g' "$TMPD/csharp_raw.txt" | tr -d '\r' > "$TMPD/csharp.txt"
 # a file the 32-bit Mono has no address space for (Unity ships its standalone Mono as a 32-bit process; the 398 MB
 # recipe source with its visibility BVH is one): probe it on the 64-bit .NET runtime - the same exe, run natively -

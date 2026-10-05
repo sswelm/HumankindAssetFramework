@@ -182,6 +182,10 @@ public static class GlbReader
                 if (attrs["TEXCOORD_0"] != null) p.Uv0 = Sized(acc.Floats(attrs.Value<int>("TEXCOORD_0"), 2, where + " TEXCOORD_0"), p.VertexCount * 2, where + " TEXCOORD_0");
                 if (attrs["TEXCOORD_1"] != null) p.Uv1 = Sized(acc.Floats(attrs.Value<int>("TEXCOORD_1"), 2, where + " TEXCOORD_1"), p.VertexCount * 2, where + " TEXCOORD_1");
                 if (attrs["COLOR_0"] != null) p.Colors = Sized(acc.Colors(attrs.Value<int>("COLOR_0"), where + " COLOR_0"), p.VertexCount * 4, where + " COLOR_0");
+                // the further sets, consecutive from 2 (UVs) and 1 (colours) as Blender's importer counts them (step 5 c: the
+                // Decimate port needs every layer Blender holds; 7 registry files carry TEXCOORD_2, the Ehrhardt COLOR_1)
+                for (int t = 2; attrs["TEXCOORD_" + t] != null; t++) (p.UvMore ?? (p.UvMore = new List<float[]>())).Add(Sized(acc.Floats(attrs.Value<int>("TEXCOORD_" + t), 2, where + " TEXCOORD_" + t), p.VertexCount * 2, where + " TEXCOORD_" + t));
+                for (int t = 1; attrs["COLOR_" + t] != null; t++) (p.ColorMore ?? (p.ColorMore = new List<float[]>())).Add(Sized(acc.Colors(attrs.Value<int>("COLOR_" + t), where + " COLOR_" + t), p.VertexCount * 4, where + " COLOR_" + t));
                 if (attrs["JOINTS_0"] != null) p.Joints = Sized(acc.Ushorts(attrs.Value<int>("JOINTS_0"), 4, where + " JOINTS_0"), p.VertexCount * 4, where + " JOINTS_0");
                 if (attrs["WEIGHTS_0"] != null) p.Weights = Sized(acc.Floats(attrs.Value<int>("WEIGHTS_0"), 4, where + " WEIGHTS_0"), p.VertexCount * 4, where + " WEIGHTS_0");
                 if (attrs["JOINTS_1"] != null) p.Joints1 = Sized(acc.Ushorts(attrs.Value<int>("JOINTS_1"), 4, where + " JOINTS_1"), p.VertexCount * 4, where + " JOINTS_1");

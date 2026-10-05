@@ -131,6 +131,46 @@ part, with a per-axis scale on a turned part, on a missing name, with a zero sca
 and one per saved recipe that sets any of these, with the recipe's exact arguments formatted as the Lab formats them
 (`Tests/test_probe_jobs.py` holds the formatting to the Lab's). Every job's MATRIX and VERTEX rows are held bit for bit
 like a file's; `recipe_check.py` judges a recipe with inputs on its job's rows — its B_ parts and placed parts included.
+**`tools/decimate_drill.sh`** (step 5 milestone a, 2026-10-03: the exact port of Blender's Decimate begins with the ORDER its
+heap sees) compiles `editor/BlenderMesh.cs` with Unity's Roslyn and lays out every fixture, registry and recipe mesh as
+Blender's importer and `mesh_calc_edges` do - each primitive's used indices ascending, the line primitives' pairs first in their
+own orientation, then per face per corner the (previous, current) pair as (low, high), deduplicated in insertion order inside
+1 bucket (under 1,000 faces) or 8 (the lower vertex index masked; the machine's thread count as a power of two, at most 8),
+then validate's removals - and Blender imports a sample in one process and dumps `mesh.edges`; the lists are compared per
+object, exact (hash of the whole list, counts, the first edges on a mismatch). `FULL=1` on 2026-10-03: 137 files, 6,912 mesh
+objects, 21,137,582 edges equal. `BlenderMeshTests` hold each rule on a hand-made case.
+Milestone (b), the same day, adds `editor/BMesh.cs` - Blender's BMesh kernel as far as the collapse walks it: the disk
+cycle (a new edge is appended before the head; a removed head passes to its next), the radial cycle (the LATEST face's
+loop is the head), LOOPS_OF_VERT (edge by edge around the disk from the head edge's loop at the vertex - or that loop's
+NEXT, on another edge, when the head's loop sits at the far end - then along each radial cycle), the kills and splices
+(the head, repeatedly), element numbers = creation order = `BM_ITER_MESH` order (creation after a kill is refused rather
+than modelling the pool's free list). The same drill builds the BMesh of every object and holds every link list - per
+vertex its edges and its loops, per edge its ends and its loops, per face its loops and vertices - to `bmesh.from_mesh`'s,
+then on objects of at most 3,000 edges runs a scripted sequence of vertex kills, edge kills and vertex splices (a fixed
+generator seeded per object, the same sequence on both sides; Blender's Python refuses a splice across a shared edge or
+face, so the sequence kills the edge first, as the collapse does) and holds the lists after every step. Gate sample:
+2,284 objects' links and 7,059 steps equal; `FULL=1` on 2026-10-05 (the population as it stood then): 110 files, 4,312
+objects, 19,453,528 edges and 38,510 steps equal. `BMeshTests` walk each rule by hand.
+Milestone (c) adds the collapse: `editor/BlenderDecimate.cs` (`BM_mesh_decimate_collapse` without symmetry, weights or
+triangulation - the double quadrics, `BLI_heap` whose equal values pop last-inserted first, the costs and the topology
+fallback, the degenerate checks, the collapse with its UV / colour / vertex-group blending), `editor/BlenderReduce.cs` (the
+mesh as the importer stores it - the bind pose, the custom normals, sharp faces, material slots per material AND vertex
+colour, UV layers with gaps filled (0, 1), colour layers per domain, vertex groups with the zero-sum rule - then the
+modifier, then `modifier_apply`'s `merge_customdata`, which snaps a vertex's UVs within 12 ulps together) and
+`editor/BlenderColor.cs` (Blender's SSE linear-to-sRGB with the `rsqrtps` table read off this machine's Zen 4; another
+CPU keeps Blender for coloured meshes) and `editor/BlenderTrig.cs` (`cosf`/`sinf` as the 64-bit Windows C runtime computes
+them - Blender's, and an ulp off the rounded double cosine on 1 float in 2,000, enough to reorder the heap among equal
+costs). The same drill collapses every object of more than 3 faces at three ratios (1, a half, prep_model's ratio for a
+third of the file) and compares positions, faces, UVs, custom normals, material and sharp flags, vertex groups and colour
+bytes with Blender's own, exact. Its C# side runs as a 64-BIT process (the exe directly, on the .NET Framework: a 32-bit
+process has no `cosf` to call), then once more on Unity's 32-bit Mono over the meshes without normals, because Mono
+evaluates an uncast float product in double and only that run shows it. Gate sample: 141 reductions (42,208 faces)
+equal, 102 of them under Mono too, in 15 s; `FULL=1` on 2026-10-05: 6,099 reductions of 19,194,169 faces on 110 files
+equal, none declined, in 15 minutes (C# under 5 of them). The vehicle probe drill runs 64-bit for the same reason
+(`PROBE_MONO=1` for the old way).
+`BlenderDecimateTests` hold the heap order, the quadric, the stop count, the UV merge and the colour path (values from
+real SSE on the same CPU); the `decimate_attrs` fixture carries the attribute combinations no population file has.
+
 **The Clip Range picker's in-process rig** (step 4, 2026-10-03): `HafUnityFrameTests` hold the preview frame's arithmetic
 without Unity — the X mirror's conjugation of rotations, matrices and matrix nodes; Unity's skinning formula fed the rig's
 matrices (the joints' world matrices, the inverse bind matrices, the vertex, all mirrored) against the reader's posed vertex;

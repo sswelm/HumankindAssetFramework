@@ -78,6 +78,10 @@ public static class HafModelDiff
                 if ((d = Arr(pw + " TEXCOORD_0", p.Uv0, q.Uv0)) != null) return d;
                 if ((d = Arr(pw + " TEXCOORD_1", p.Uv1, q.Uv1)) != null) return d;
                 if ((d = Arr(pw + " COLOR_0", p.Colors, q.Colors)) != null) return d;
+                if ((p.UvMore?.Count ?? 0) != (q.UvMore?.Count ?? 0)) return pw + " TEXCOORD sets";
+                for (int t = 0; t < (p.UvMore?.Count ?? 0); t++) if ((d = Arr(pw + " TEXCOORD_" + (t + 2), p.UvMore[t], q.UvMore[t])) != null) return d;
+                if ((p.ColorMore?.Count ?? 0) != (q.ColorMore?.Count ?? 0)) return pw + " COLOR sets";
+                for (int t = 0; t < (p.ColorMore?.Count ?? 0); t++) if ((d = Arr(pw + " COLOR_" + (t + 1), p.ColorMore[t], q.ColorMore[t])) != null) return d;
                 if ((d = Arr(pw + " JOINTS_0", p.Joints, q.Joints)) != null) return d;
                 if ((d = Arr(pw + " WEIGHTS_0", p.Weights, q.Weights)) != null) return d;
                 if ((d = Arr(pw + " JOINTS_1", p.Joints1, q.Joints1)) != null) return d;

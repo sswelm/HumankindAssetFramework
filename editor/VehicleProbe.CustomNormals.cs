@@ -87,7 +87,9 @@ public static partial class VehicleProbe
     static void EncodeCustom(FanSpace s, float cx, float cy, float cz, out short d0, out short d1)
     {
         d0 = 0; d1 = 0;
-        if ((cx == 0f && cy == 0f && cz == 0f) || (Math.Abs(s.lx - cx) < 1e-4f && Math.Abs(s.ly - cy) < 1e-4f && Math.Abs(s.lz - cz) < 1e-4f)) return;
+        // is_zero_v3 || compare_v3v3(vec_lnor, custom, 1e-4f): compare_ff is fabsf(a - b) <= max_diff, the difference rounded
+        // to float32 (a strict < kept two Cobra corners at the boundary from Blender's (0, 0) - the Decimate drill, step 5 c)
+        if ((cx == 0f && cy == 0f && cz == 0f) || (Math.Abs((float)(s.lx - cx)) <= 1e-4f && Math.Abs((float)(s.ly - cy)) <= 1e-4f && Math.Abs((float)(s.lz - cz)) <= 1e-4f)) return;
         float cosAlpha = Dot3(s.lx, s.ly, s.lz, cx, cy, cz);
         float alpha = SafeAcosApprox(cosAlpha);
         if (alpha > s.refAlpha) d0 = UnitFloatToShort((float)(-(float)(PI2F - alpha) / (float)(PI2F - s.refAlpha)));
@@ -113,18 +115,18 @@ public static partial class VehicleProbe
         float alphafac = (float)((float)d0 / 32767f);
         float alpha = (float)((alphafac > 0.0f ? s.refAlpha : (float)(PI2F - s.refAlpha)) * alphafac);
         float betafac = (float)((float)d1 / 32767f);
-        float ca = (float)Math.Cos((double)alpha);
+        float ca = BlenderTrig.Cosf(alpha);   // cosf and sinf as the C runtime computes them: not the rounded double (BlenderTrig.cs)
         x = (float)(s.lx * ca); y = (float)(s.ly * ca); z = (float)(s.lz * ca);
         if (betafac == 0.0f)
         {
-            float sa = (float)Math.Sin((double)alpha);
+            float sa = BlenderTrig.Sinf(alpha);
             x = (float)(x + (float)(s.rx * sa)); y = (float)(y + (float)(s.ry * sa)); z = (float)(z + (float)(s.rz * sa));
         }
         else
         {
-            float sinalpha = (float)Math.Sin((double)alpha);
+            float sinalpha = BlenderTrig.Sinf(alpha);
             float beta = (float)((betafac > 0.0f ? s.refBeta : (float)(PI2F - s.refBeta)) * betafac);
-            float f1 = (float)(sinalpha * (float)Math.Cos((double)beta)), f2 = (float)(sinalpha * (float)Math.Sin((double)beta));
+            float f1 = (float)(sinalpha * BlenderTrig.Cosf(beta)), f2 = (float)(sinalpha * BlenderTrig.Sinf(beta));
             x = (float)(x + (float)(s.rx * f1)); y = (float)(y + (float)(s.ry * f1)); z = (float)(z + (float)(s.rz * f1));
             x = (float)(x + (float)(s.ox * f2)); y = (float)(y + (float)(s.oy * f2)); z = (float)(z + (float)(s.oz * f2));
         }
@@ -151,11 +153,22 @@ public static partial class VehicleProbe
                 nz = (float)(nz + (float)((float)(P[prev] - P[curr]) * (float)(P[prev + 1] + P[curr + 1])));
                 prev = curr;
             }
-            NormalizeVn(ref nx, ref ny, ref nz);
+            NormalizeV3(ref nx, ref ny, ref nz);
             if (nx == 0f && ny == 0f && nz == 0f) nz = 1.0f;
             FN[f * 3] = nx; FN[f * 3 + 1] = ny; FN[f * 3 + 2] = nz;
         }
         return FN;
+    }
+
+    /// <summary>normalize_v3 (BLI_math_vector_inline.cc), the C++ one: the squared length summed in float32, sqrtf, and a
+    /// multiply by the float32 reciprocal; zero below 1e-35. NOT NormalizeVn (mathutils: the length in double) - the face
+    /// normals used that until the Decimate drill (step 5 c) caught 1-2 ulp differences that turned a flat face smooth
+    /// (the Zumwalt hull's face 3: the importer's dot of 0.9999999 is decided on those bits).</summary>
+    internal static void NormalizeV3(ref float x, ref float y, ref float z)
+    {
+        float d = Dot3(x, y, z, x, y, z);
+        if (d > 1.0e-35f) { d = Sqrtf(d); float s = (float)(1.0f / d); x = (float)(x * s); y = (float)(y * s); z = (float)(z * s); }
+        else { x = 0f; y = 0f; z = 0f; }
     }
 
     /// <summary>Every vertex's `vertex.normal`, in Blender's frame. P: positions (3 per vertex, Blender's frame), tris: the faces
@@ -222,13 +235,32 @@ public static partial class VehicleProbe
     /// <summary>normals_split_custom_set_from_vertices as the importer calls it: the corner-fan spaces of the geometry as
     /// imported, and each vertex's file normal encoded against its fan's space as two shorts per corner (a fan of two or more
     /// corners takes the float32 average of the same vector that many times - mesh_normals_corner_custom_set). What Blender
-    /// STORES; `vertex.normal` is read back from it against whatever the geometry is by then (DecodeCustomShorts).</summary>
+    /// STORES; `vertex.normal` is read back from it against whatever the geometry is by then (DecodeCustomShorts).
+    /// Before encoding, mesh_set_custom_normals_from_verts normalizes every vector (math::normalize) and
+    /// mesh_normals_corner_custom_set replaces a zero one - the importer's zeros for a primitive without normals (NaN here)
+    /// - with the mesh's own vertex normal (vert_normals_true); without both, a unit-ish file normal encodes one short off
+    /// (found by the Decimate drill, step 5 c: 35 of 642 corners on the LCAC).</summary>
     internal static (short[] d0, short[] d1) EncodeCustomShorts(float[] P, int[] tris, float[] N, bool[] sharpFace)
     {
         var d0 = new short[tris.Length]; var d1 = new short[tris.Length];
+        int nv = P.Length / 3;
+        var C = new float[nv * 3]; float[] trueNormals = null;
+        for (int v = 0; v < nv; v++)
+        {
+            bool none = float.IsNaN(N[v * 3]);
+            float x = none ? 0f : N[v * 3], y = none ? 0f : N[v * 3 + 1], z = none ? 0f : N[v * 3 + 2];
+            Normalize3(ref x, ref y, ref z);
+            if (x == 0f && y == 0f && z == 0f)
+            {
+                trueNormals = trueNormals ?? BlenderVertexNormals(P, tris, null);
+                x = trueNormals[v * 3]; y = trueNormals[v * 3 + 1]; z = trueNormals[v * 3 + 2];
+            }
+            C[v * 3] = x; C[v * 3 + 1] = y; C[v * 3 + 2] = z;
+        }
+        N = C;
         WalkFans(P, tris, sharpFace, (v, infos, fan, space) =>
         {
-            float cx = float.IsNaN(N[v * 3]) ? 0f : N[v * 3], cy = float.IsNaN(N[v * 3]) ? 0f : N[v * 3 + 1], cz = float.IsNaN(N[v * 3]) ? 0f : N[v * 3 + 2];
+            float cx = N[v * 3], cy = N[v * 3 + 1], cz = N[v * 3 + 2];
             if (fan.Count >= 2)
             {
                 float ax = 0f, ay = 0f, az = 0f;

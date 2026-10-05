@@ -451,7 +451,105 @@ def fx_unicode_clip(out):
     write_glb(os.path.join(out, "unicode_clip.glb"), root, b)
 
 
-FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external, fx_cubic, fx_scenes, fx_materials, fx_skin8, fx_big, fx_names, fx_no_default_scene, fx_dropped, fx_mixed_skin, fx_clip_switch, fx_path_clip, fx_far_clip, fx_unicode_clip]
+def bent_grid(nx, ny, ox, oy):
+    """A curved grid (so the Decimate quadrics see real costs), its outward normals, three UV sets, indices."""
+    pos, nrm, uv0, uv1, uv2 = [], [], [], [], []
+    for j in range(ny + 1):
+        for i in range(nx + 1):
+            x, y = ox + i / nx, oy + j / ny
+            z = 0.3 * math.sin(2.0 * x) * math.cos(1.5 * y)
+            dzx, dzy = 0.6 * math.cos(2.0 * x) * math.cos(1.5 * y), -0.45 * math.sin(2.0 * x) * math.sin(1.5 * y)
+            ln = math.sqrt(dzx * dzx + dzy * dzy + 1.0)
+            pos.append((x, z, -y)); nrm.append((-dzx / ln, 1.0 / ln, dzy / ln))   # glTF Y up: the grid lies in XZ
+            uv0.append((i / nx, j / ny)); uv1.append((0.5 * i / nx, 0.25 + 0.5 * j / ny)); uv2.append((1.0 - j / ny, i / nx))
+    idx = []
+    for j in range(ny):
+        for i in range(nx):
+            a = j * (nx + 1) + i; b = a + 1; c = a + nx + 1; d = c + 1
+            idx += [a, d, b, a, c, d]
+    return pos, nrm, uv0, uv1, uv2, idx
+
+
+def fx_decimate_attrs(out):
+    """The attribute combinations the Decimate port (step 5 c) must lay out as Blender's importer does, which no registry,
+    recipe or Khronos file has (counted 2026-10-03): in ONE mesh, a coloured and a plain primitive on the SAME material (two
+    Blender materials, blender_material[vertex_color]), a coloured primitive with no material (the invented "default +
+    vertex colour" slot) and a plain one with none (the empty slot); a primitive without NORMAL beside ones with (the
+    importer's zeros, replaced by the vertex normal before encoding); TEXCOORD_2 on one primitive only (zeros elsewhere);
+    COLOR_1 as unsigned short on one primitive (white elsewhere); colours as float VEC4, unsigned byte VEC3 and unsigned
+    short. A second mesh carries COLOR_0 on a LINES primitive too, which puts its colour layer on the POINT domain; a
+    third has no normals at all (flat faces, no custom normals), which the drill's Mono pass can collapse."""
+    b = Buf()
+    prims = []
+    specs = [  # (offset, material, colour, normals, texcoords)
+        (0.0, 0, "float4", True, 3),
+        (1.2, 0, None, True, 1),
+        (2.4, None, "ubyte3", False, 2),
+        (3.6, None, None, True, 1),
+    ]
+    for k, (ox, mat, col, normals, nuv) in enumerate(specs):
+        pos, nrm, uv0, uv1, uv2, idx = bent_grid(5, 5, ox, 0.0)
+        attrs = {"POSITION": b.accessor(pos, "f", "VEC3")}
+        if normals:
+            attrs["NORMAL"] = b.accessor(nrm, "f", "VEC3", minmax=False)
+        for t, uv in enumerate([uv0, uv1, uv2][:nuv]):
+            attrs["TEXCOORD_%d" % t] = b.accessor(uv, "f", "VEC2", minmax=False)
+        n = len(pos)
+        if col == "float4":
+            attrs["COLOR_0"] = b.accessor([(0.1 + 0.8 * (i % 6) / 5.0, 0.5, 0.9 - 0.8 * (i // 6) / 5.0, 1.0) for i in range(n)], "f", "VEC4", minmax=False)
+        elif col == "ubyte3":
+            attrs["COLOR_0"] = b.accessor([(20 + 7 * (i % 6), 200, 3 * (i // 6)) for i in range(n)], "B", "VEC3", normalized=True, minmax=False)
+            attrs["COLOR_1"] = b.accessor([(65535, 1000 * (i % 6), 30000, 65535) for i in range(n)], "H", "VEC4", normalized=True, minmax=False)
+        p = {"attributes": attrs, "indices": b.accessor(idx, "H", "SCALAR")}
+        if mat is not None:
+            p["material"] = mat
+        prims.append(p)
+    # the second mesh: a coloured surface and a coloured line strip -> COLOR_0 on the POINT domain
+    pos, nrm, uv0, uv1, uv2, idx = bent_grid(4, 4, 0.0, 2.0)
+    c0 = b.accessor([(0.25 * (i % 5), 0.75, 0.25 * (i // 5), 1.0) for i in range(len(pos))], "f", "VEC4", minmax=False)
+    line = b.accessor([(0, 0, -3.5), (1, 0.2, -3.5), (2, 0, -3.5)], "f", "VEC3")
+    lcol = b.accessor([(1.0, 0.0, 0.0, 1.0), (0.0, 1.0, 0.0, 1.0), (0.0, 0.0, 1.0, 1.0)], "f", "VEC4", minmax=False)
+    point_mesh = {"name": "point_colours", "primitives": [
+        {"attributes": {"POSITION": b.accessor(pos, "f", "VEC3"), "NORMAL": b.accessor(nrm, "f", "VEC3", minmax=False), "TEXCOORD_0": b.accessor(uv0, "f", "VEC2", minmax=False), "COLOR_0": c0},
+         "indices": b.accessor(idx, "H", "SCALAR"), "material": 1},
+        {"attributes": {"POSITION": line, "COLOR_0": lcol}, "mode": 3, "material": 1}]}
+    # the third mesh: no normals at all, UVs only - every face flat-shaded, no custom normals, so the collapse needs no
+    # cosine and the drill's 32-bit Mono pass can run it (the float32 discipline of the quadrics, the costs and the UV blend)
+    pos, nrm, uv0, uv1, uv2, idx = bent_grid(7, 7, 0.0, 5.0)
+    bare_mesh = {"name": "bare", "primitives": [{"attributes": {"POSITION": b.accessor(pos, "f", "VEC3"), "TEXCOORD_0": b.accessor(uv0, "f", "VEC2", minmax=False)},
+                                                 "indices": b.accessor(idx, "H", "SCALAR"), "material": 0}]}
+    root = base("decimate_attrs",
+                materials=[{"name": "painted", "pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.8, 0.8, 1]}}, {"name": "lined", "pbrMetallicRoughness": {"baseColorFactor": [0.3, 0.6, 0.9, 1]}}],
+                meshes=[{"name": "attrs", "primitives": prims}, point_mesh, bare_mesh],
+                nodes=[{"name": "Attrs", "mesh": 0}, {"name": "PointColours", "mesh": 1}, {"name": "Bare", "mesh": 2}], scenes=[{"nodes": [0, 1, 2]}], scene=0)
+    write_glb(os.path.join(out, "decimate_attrs.glb"), root, b)
+
+
+def fx_decimate_limits(out):
+    """Review of PR #120: Blender imports only eight UV/colour layers, and a large flat grid exposes
+    the thread-dependent edge order that the reducer's runtime default must reproduce."""
+    b = Buf()
+    meshes = []
+    for kind in ("uv9", "color9", "thread_grid"):
+        n = 25 if kind == "thread_grid" else 5
+        pos, _, uv0, _, _, idx = bent_grid(n, n, 0.0, 0.0)
+        if kind == "thread_grid":
+            pos = [(x, 0.0, z) for x, _, z in pos]
+        attrs = {"POSITION": b.accessor(pos, "f", "VEC3")}
+        if kind == "uv9":
+            for i in range(9):
+                attrs["TEXCOORD_%d" % i] = b.accessor([(u + i / 10.0, v) for u, v in uv0], "f", "VEC2", minmax=False)
+        if kind == "color9":
+            for i in range(9):
+                attrs["COLOR_%d" % i] = b.accessor([(0.2, 0.4, i / 10.0, 1.0)] * len(pos), "f", "VEC4", minmax=False)
+        meshes.append({"name": kind, "primitives": [{"attributes": attrs, "indices": b.accessor(idx, "H", "SCALAR")}]})
+    root = base("decimate_limits", meshes=meshes,
+                nodes=[{"name": mesh["name"], "mesh": i} for i, mesh in enumerate(meshes)],
+                scenes=[{"nodes": [0, 1, 2]}], scene=0)
+    write_glb(os.path.join(out, "decimate_limits.glb"), root, b)
+
+
+FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external, fx_cubic, fx_scenes, fx_materials, fx_skin8, fx_big, fx_names, fx_no_default_scene, fx_dropped, fx_mixed_skin, fx_clip_switch, fx_path_clip, fx_far_clip, fx_unicode_clip, fx_decimate_attrs, fx_decimate_limits]
 
 
 def main(out):
