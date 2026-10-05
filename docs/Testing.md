@@ -193,14 +193,23 @@ triangle of no area could not tell "a zero normal is made up" from "an invalid s
 points up anyway - so a fan whose angle-weighted normal runs along its own edge, +X, stands beside it (its own `COVER`
 row): Blender's corner normal there is zero, and the rival rule, planted, fails the drill on that object alone.
 It runs 64-bit like the decimate drill. A file `prep_model.py` itself fails on (several scenes: "not in View Layer")
-passes only as that known failure. NOT laid out yet, counted and named on every run: skinned objects (positions by the
-object's matrix, normals by the armature's, joints and weights) and a coloured material with alpha (its colour set depends
-on the material's node tree). Gate sample: 46 runs on 23 files, 78 object runs (86 primitives, 4,471 vertices) equal, 20
-not laid out, in 8 s; `FULL=1` on 2026-10-06: 148 runs on 74 files, 3,532 object runs (4,178 primitives, 13,008,486
-vertices) equal, 622 not laid out (528 skinned, 94 with a coloured alpha material), 18 object runs with twin faces
-removed, 24 with a zero normal on a fan that points elsewhere, in a quarter of an hour. `BlenderExportTests` hold each rule alone, the rounding and the short quantizing against
-values numpy gave; seventeen planted defects, one per rule, each failed them, and six planted under the drill (five
-of those, and the rival rule for the invalid fan) each failed it on the fixture built for that rule.
+passes only as that known failure. A SKINNED object (second part, 2026-10-06) hangs from its armature without a
+transform of its own: its positions go through the armature's `matrix_world`, its normals through the armature's 3x3 times
+the inverse transpose of `armature^-1 @ object` (the identity plus float noise - an ulp or two that shows), both by
+numpy's float32 `matmul` (numpy reads a mathutils matrix as FLOAT32; the first version computed in double and the
+turned, unevenly scaled armature of the `export_skin` fixture showed an ulp where the simpler rigs of the sample had
+agreed); per vertex the groups over 0.0001 by weight (a stable sort), four kept, divided by their float32 sum; the joints
+are the armature's bones depth-first (`BlenderNames.BoneNodesInOrder`), and a vertex left without a bone gets the
+exporter's "neutral bone" - only a vertex whose weights do not sum to 1 reaches that, so the fixture for it,
+`export_skin_badweights`, says so in its name and the reader drill's weight contract lets that name through. NOT laid out
+yet, counted and named on every run: a coloured material with alpha (its colour set depends on the material's node tree).
+Gate sample: 50 runs on 25 files, 100 object runs (160 primitives, 30,988 vertices) equal, 2 not laid out, in 10 s;
+`FULL=1` on 2026-10-06: 152 runs on 76 files, 4,062 object runs (5,211 primitives, 15,803,190 vertices) equal - 530 of them skinned, 164 under an armature not at the identity - 96 not laid out (the coloured alpha material), 26 object runs with twin faces removed, 40 with a zero normal on a fan that points elsewhere, in a quarter of an hour. `BlenderExportTests` hold each rule alone, the rounding and the short quantizing against
+values numpy gave, the skinned arithmetic against matrices and results read off Blender; thirty planted defects, one
+per rule, each failed them but one that changes nothing (`<` for `<=` at the weight threshold: no float32 equals 0.0001);
+sixteen planted under the drill each failed it on the fixture built for that rule. Three planted defects cannot fail the
+drill, because no imported file reaches them, and are held by the unit tests alone: that equivalent threshold, validate's
+clamp of a weight outside 0..1, and a vertex group whose bone is no joint.
 
 **The Clip Range picker's in-process rig** (step 4, 2026-10-03): `HafUnityFrameTests` hold the preview frame's arithmetic
 without Unity — the X mirror's conjugation of rotations, matrices and matrix nodes; Unity's skinning formula fed the rig's

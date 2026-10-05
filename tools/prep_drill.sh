@@ -4,8 +4,8 @@
 # the fixtures and the registry - twice per file: a target of a third of its triangles, and a target of all of them (nothing
 # collapses, the file still goes through importer, apply and exporter) - and writes GLBs; the C# side reduces every mesh
 # object of the source (BlenderReduce), lays it out as the exporter does (BlenderExport) and holds each primitive to the one
-# Blender wrote for the node of the same name: vertex count, positions, normals, UV sets, colour sets and indices, bit for
-# bit. FULL=1 takes every file. The C# side runs as a 64-bit process (the exe directly), as decimate_drill.sh does and for
+# Blender wrote for the node of the same name: vertex count, positions, normals, UV sets, colour sets, joints and weights
+# (a skinned object's joint list too, by name) and indices, bit for bit. FULL=1 takes every file. The C# side runs as a 64-bit process (the exe directly), as decimate_drill.sh does and for
 # the same reason (BlenderTrig.cs). Prerequisites and SKIP rules as glb_reader_drill.sh.
 # The C# side also prints which rules of the layout its compared objects exercised (COVER rows); a row at zero FAILS the
 # drill, because equal output says nothing about a rule no object reached - the exporter's validate step was missing while
@@ -83,4 +83,4 @@ n_runs=$(echo "$TOTAL" | awk '{print $3}'); n_obj=$(echo "$TOTAL" | awk '{print 
 UNCOVERED=$(grep -E "^COVER 0 " "$TMPD/csharp.txt" | cut -d' ' -f3- | paste -sd';' -)
 [ -z "$UNCOVERED" ] || { echo "FAIL — prep drill: no compared object exercised: $UNCOVERED (a rule Blender did not judge; add a fixture to tools/glb-reader-drill/fixtures.py)"; exit 1; }
 [ "$(grep -cE "^COVER " "$TMPD/csharp.txt")" -gt 0 ] || { echo "FAIL — prep drill: the C# side printed no COVER rows"; exit 1; }
-echo "PASS — prep drill: $n_runs runs of prep_model.py on ${#SAMPLE[@]} files; $n_obj object runs ($n_prim primitives, $n_vert vertices) laid out equal to the meshes Blender wrote - positions, normals, UVs, colours, indices; $n_decl object runs not laid out yet (named above), $n_pf runs where prep_model.py itself fails as known (Blender took $((t1 - t0)) s); ${#FIXTURES[@]} fixtures, $REGISTRY_NOTE (${#REGISTRY[@]}), ${#RECIPE_SOURCES[@]} recipe sources known"
+echo "PASS — prep drill: $n_runs runs of prep_model.py on ${#SAMPLE[@]} files; $n_obj object runs ($n_prim primitives, $n_vert vertices) laid out equal to the meshes Blender wrote - positions, normals, UVs, colours, joints and weights, indices; $n_decl object runs not laid out yet (named above), $n_pf runs where prep_model.py itself fails as known (Blender took $((t1 - t0)) s); ${#FIXTURES[@]} fixtures, $REGISTRY_NOTE (${#REGISTRY[@]}), ${#RECIPE_SOURCES[@]} recipe sources known"

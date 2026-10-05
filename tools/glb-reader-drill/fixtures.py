@@ -623,7 +623,47 @@ def fx_export_layout(out):
     write_glb(os.path.join(out, "export_layout.glb"), root, b)
 
 
-FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external, fx_cubic, fx_scenes, fx_materials, fx_skin8, fx_big, fx_names, fx_no_default_scene, fx_dropped, fx_mixed_skin, fx_clip_switch, fx_path_clip, fx_far_clip, fx_unicode_clip, fx_decimate_attrs, fx_decimate_limits, fx_export_layout]
+def export_skin(out, name, bad_weights):
+    """The rules of the glTF exporter's SKINNED layout (step 5 d) no other fixture reaches (the drill's COVER rows,
+    2026-10-06): the armature is the turned, unevenly scaled node above the joints, so positions and normals really go
+    through its matrix; vertex 1 has two EQUAL weights listed joint 1 first (a stable sort keeps that order); vertex 2 a
+    weight of float32 0.0001 (not over the exporter's 0.0001: dropped) beside a full one; vertex 3 one of 0.00011 (kept).
+    With bad_weights, vertex 0 carries one weight of 0.00005 and nothing else: under the threshold, so it is left with no
+    bone and the exporter adds its "neutral bone". That breaks the contract every other file keeps (a skinned vertex's
+    weights sum to about 1), which the reader drill checks - hence a file of its own, marked in its NAME."""
+    b = Buf()
+    pos, nrm, uv0, _, _, idx = bent_grid(4, 4, 0.0, 0.0)
+    J, Wt = [], []
+    for i in range(len(pos)):
+        t = (i % 5) / 4.0
+        J.append((0, 1, 0, 0)); Wt.append((1.0 - t, t, 0.0, 0.0))
+    if bad_weights:
+        J[0], Wt[0] = (0, 0, 0, 0), (0.00005, 0.0, 0.0, 0.0)
+    J[1], Wt[1] = (1, 0, 0, 0), (0.5, 0.5, 0.0, 0.0)
+    J[2], Wt[2] = (0, 1, 0, 0), (0.0001, 1.0, 0.0, 0.0)
+    J[3], Wt[3] = (0, 1, 0, 0), (0.00011, 0.99989, 0.0, 0.0)
+    attrs = {"POSITION": b.accessor(pos, "f", "VEC3"), "NORMAL": b.accessor(nrm, "f", "VEC3", minmax=False), "TEXCOORD_0": b.accessor(uv0, "f", "VEC2", minmax=False),
+             "JOINTS_0": b.accessor(J, "H", "VEC4", minmax=False), "WEIGHTS_0": b.accessor(Wt, "f", "VEC4", minmax=False)}
+    root = base(name,
+                meshes=[{"name": "body", "primitives": [{"attributes": attrs, "indices": b.accessor(idx, "H", "SCALAR")}]}],
+                nodes=[{"name": "Rig", "translation": [2.0, 0.5, -1.0], "rotation": [0.2886751, 0.2886751, 0.2886751, 0.8660254], "scale": [1.5, 0.75, 1.25], "children": [1, 2]},
+                       {"name": "Body", "mesh": 0, "skin": 0},
+                       {"name": "Root", "translation": [0.0, 0.1, 0.0], "children": [3]},
+                       {"name": "Tip", "translation": [1.0, 0.2, 0.0]}],
+                skins=[{"name": "rig", "joints": [2, 3]}],
+                scenes=[{"nodes": [0]}], scene=0)
+    write_glb(os.path.join(out, name + ".glb"), root, b)
+
+
+def fx_export_skin(out):
+    export_skin(out, "export_skin", False)
+
+
+def fx_export_skin_badweights(out):
+    export_skin(out, "export_skin_badweights", True)
+
+
+FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external, fx_cubic, fx_scenes, fx_materials, fx_skin8, fx_big, fx_names, fx_no_default_scene, fx_dropped, fx_mixed_skin, fx_clip_switch, fx_path_clip, fx_far_clip, fx_unicode_clip, fx_decimate_attrs, fx_decimate_limits, fx_export_layout, fx_export_skin, fx_export_skin_badweights]
 
 
 def main(out):

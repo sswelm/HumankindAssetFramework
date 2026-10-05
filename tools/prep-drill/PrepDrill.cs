@@ -7,8 +7,8 @@ using System.Text;
 // THE MODEL PREP IN C#, DRILLED AGAINST BLENDER'S (step 5 milestone d): blender_prep_many.py ran the real prep_model.py
 // and wrote GLBs; this reads its PREP rows, reduces every mesh object of the SOURCE as prep_model does (BlenderReduce at
 // prep's ratio), lays each out as the glTF exporter does (BlenderExport), and holds the result to the mesh Blender wrote
-// for the node of the same name - per primitive: the vertex count, positions, normals, every UV set and the indices, bit
-// for bit. One line per file and run:
+// for the node of the same name - per primitive: the vertex count, positions, normals, every UV and colour set, a
+// skinned mesh's joints and weights (and its joint list, by name) and the indices, bit for bit. One line per file and run:
 //   PASS <key> <tag>: <n> objects, <p> primitives equal            FAIL <key> <tag>: <the first differences>
 // and a TOTAL line. An object the port declines (BlenderReduce.FallbackReason) or does not lay out yet is counted, named.
 static class PrepDrill
@@ -21,7 +21,7 @@ static class PrepDrill
         var declinedWhy = new Dictionary<string, int>();
         var cover = new SortedDictionary<string, long>();
         foreach (var k in CoverKeys) cover[k] = 0;
-        HafModel source = null; string sourcePath = null; BlenderNames.Result names = null;
+        HafModel source = null; string sourcePath = null; BlenderNames.Result names = null; float[][] bworld = null;
         foreach (var line in File.ReadAllLines(args[0]))
         {
             var t = line.Split('\t');
@@ -46,7 +46,7 @@ static class PrepDrill
             runs++;
             try
             {
-                if (sourcePath != key) { source = GlbReader.Read(key); sourcePath = key; names = BlenderNames.Compute(source); GC.Collect(); }   // the key is the path, lower-cased
+                if (sourcePath != key) { source = GlbReader.Read(key); sourcePath = key; names = BlenderNames.Compute(source); bworld = null; GC.Collect(); }   // the key is the path, lower-cased
                 var m = source;
                 var meshObjects = new List<(int node, string name, int faces)>();
                 long myTotal = 0;
@@ -67,13 +67,32 @@ static class PrepDrill
                 {
                     bool skinned = m.Nodes[node].Skin >= 0 && m.Nodes[node].Skin < m.Skins.Count && m.Meshes[m.Nodes[node].Mesh].Primitives.Exists(p => p.Skinned);
                     string why = BlenderReduce.FallbackReason(m, node);
-                    if (why == null && skinned) why = "skinned (not laid out yet)";
                     if (why != null) { declined++; declinedWhy[why] = declinedWhy.TryGetValue(why, out int c) ? c + 1 : 1; continue; }
+                    // a skinned mesh hangs from its armature with no transform of its own: both matrices are the armature's.
+                    // The exported joints are the armature's bones in creation order; group i is the skin's joint i
+                    BlenderExport.Skin skinLayout = null; List<string> jointNames = null;
+                    if (skinned)
+                    {
+                        int si = m.Nodes[node].Skin, an = names.ArmatureNodeOfSkin[si];
+                        if (bworld == null) bworld = VehicleProbe.BlenderWorldMatrices(m, null);
+                        var arma = an >= 0 ? bworld[an] : new float[] { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+                        var place = new Dictionary<int, int>(); jointNames = new List<string>();
+                        foreach (int b in names.BoneNodesInOrder) if (names.ArmatureNodeOfBone[b] == an) { place[b] = place.Count; jointNames.Add(names.BoneOfJoint[b]); }
+                        skinLayout = new BlenderExport.Skin { ObjectWorld = arma, ArmatureWorld = arma, JointCount = place.Count, GroupJoint = m.Skins[si].Joints.Select(j => place.TryGetValue(j, out int at) ? at : -1).ToArray() };
+                    }
                     var r = BlenderReduce.Reduce(m, node, ratio, names);
                     why = BlenderExport.NotLaidOut(r, m);
                     if (why != null) { declined++; declinedWhy[why] = declinedWhy.TryGetValue(why, out int c2) ? c2 + 1 : 1; continue; }
-                    var mine = BlenderExport.MeshPrimitives(r);
+                    var mine = BlenderExport.MeshPrimitives(r, skinLayout);
                     Cover(r, BlenderExport.Validated(r), mine, cover);
+                    if (skinLayout != null)
+                    {
+                        cover["a skinned object"]++;
+                        if (mine.Count > 0 && mine[0].NeutralBone) cover["a vertex without a bone (the neutral bone)"]++;
+                        if (r.DefNr != null && r.DefNr.Any(l => l != null && l.Count > 4)) cover["a vertex of more than four groups"]++;
+                        bool identity = true; for (int i = 0; i < 16; i++) if (skinLayout.ArmatureWorld[i] != (i % 5 == 0 ? 1f : 0f)) identity = false;
+                        if (!identity) cover["an armature that is not at the identity"]++;
+                    }
                     if (mine.Count == 0)
                     {
                         // an object without faces (lines, points): the exporter writes its node WITHOUT a mesh
@@ -81,6 +100,16 @@ static class PrepDrill
                         continue;
                     }
                     if (!nodeByName.TryGetValue(name, out int wn)) { problems.Add($"{name}: no mesh node of that name in Blender's file"); continue; }
+                    if (skinLayout != null)
+                    {
+                        // the joints Blender wrote, by name, against the armature's bones in creation order (+ the neutral bone)
+                        int ws = written.Nodes[wn].Skin;
+                        if (ws < 0 || ws >= written.Skins.Count) { problems.Add($"{name}: skinned here, no skin in Blender's file"); continue; }
+                        var theirJoints = written.Skins[ws].Joints.Select(j => written.Nodes[j].Name).ToList();
+                        var myJoints = new List<string>(jointNames); if (mine[0].NeutralBone) myJoints.Add("neutral_bone");
+                        if (!theirJoints.SequenceEqual(myJoints)) { problems.Add($"{name}: joints [{string.Join(",", myJoints.Take(6))}...] ({myJoints.Count}) vs Blender's [{string.Join(",", theirJoints.Take(6))}...] ({theirJoints.Count})"); continue; }
+                    }
+                    else if (written.Nodes[wn].Skin >= 0) { problems.Add($"{name}: Blender's file skins it, the layout does not"); continue; }
                     var theirs = written.Meshes[written.Nodes[wn].Mesh].Primitives.Where(p => p.Mode == 4).ToList();
                     if (theirs.Count != mine.Count) { problems.Add($"{name}: {mine.Count} primitives vs Blender's {theirs.Count}"); continue; }
                     bool objectOk = true;
@@ -110,6 +139,7 @@ static class PrepDrill
         "normals from the file (custom normals)", "no normals (every face flat)", "a normal that rounds to zero, made up", "a zero normal on a fan that does not point up", "an object of several primitives",
         "an object without faces", "two or more UV sets", "COLOR_0 as RGB (the material's colour)", "COLOR_0 with alpha (a face without material)",
         "COLOR_0 forced (255s)", "two or more colour sets", "a colour layer on the vertices (point domain)", "a twin face the exporter's validate removes",
+        "a skinned object", "a vertex without a bone (the neutral bone)", "a vertex of more than four groups", "an armature that is not at the identity",
     };
 
     /// <summary>Which of the layout's rules this object exercised (counted per object run).</summary>
@@ -168,6 +198,13 @@ static class PrepDrill
                 for (int j = 0; j < 4; j++)
                     expect[4 * i + j] = set.Forced ? 1f : set.Alpha ? (float)(set.Shorts[4 * i + j] / 65535.0) : j < 3 ? set.Data[3 * i + j] : 1f;
             if ((d = Arr("colour set " + k, expect, theirColors[k], 4)) != null) return d;
+        }
+        if ((a.Joints != null) != (b.Joints != null)) return a.Joints != null ? "joints here, none in Blender's file" : "Blender wrote joints, the layout none";
+        if (a.Joints != null)
+        {
+            if (b.Joints1 != null) return "Blender wrote a second set of joints";
+            for (int i = 0; i < a.Joints.Length; i++) if (a.Joints[i] != b.Joints[i]) return $"joint {i % 4} of vertex {i / 4} is {a.Joints[i]} vs Blender's {b.Joints[i]} (weights {a.Weights[i]:R} vs {b.Weights[i]:R})";
+            if ((d = Arr("weights", a.Weights, b.Weights, 4)) != null) return d;
         }
         int[] bi = b.Indices ?? Enumerable.Range(0, b.VertexCount).ToArray();
         if (a.Indices.Length != bi.Length) return $"{a.Indices.Length} indices vs Blender's {bi.Length}";

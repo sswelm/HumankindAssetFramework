@@ -317,6 +317,112 @@ public class BlenderExportTests
         Assert.Equal(new[] { U(0f), U(1f), U(0f) }, new[] { U(p.Normals[0]), U(p.Normals[1]), U(p.Normals[2]) });
     }
 
+    // An armature's matrix_world in Blender 5.1.2 (rows of the upper 3x4, read 2026-10-06 off a rig like the export_skin
+    // fixture's, before its rotation was made a unit quaternion - a matrix and what Blender made of it either way): a node
+    // turned by a quaternion that is not unit, scaled (1.5, 0.75, 1.25), moved to (2, 0.5, -1) in glTF's frame
+    static readonly uint[] ArmatureRows =
+    {
+        0x3F25438A, 0xBF8F29CC, 0xBDB6CD26, 0x40000000,
+        0x3F91F3FE, 0x3F09B849, 0xBEBAE878, 0x3F800000,
+        0x3F3AE878, 0x3E1855A0, 0x3F26283E, 0x3F000000,
+    };
+
+    static float[] ArmatureWorld()   // column-major, as VehicleProbe holds Blender's matrices
+    {
+        var m = new float[16]; m[15] = 1f;
+        for (int row = 0; row < 3; row++) for (int col = 0; col < 4; col++) m[col * 4 + row] = F(ArmatureRows[row * 4 + col]);
+        return m;
+    }
+
+    [Fact]
+    public void A_skinned_meshs_positions_go_through_the_objects_matrix_in_float32()
+    {
+        // the fixture's first four rest positions (v.co) and what the exporter's np.matmul made of them, read off Blender:
+        // numpy sees the mathutils matrix as float32, so every product and sum rounds to float32
+        var co = new[] { 0x00000000u, 0x00000000u, 0x3DCCCCCDu, 0x3F400000u, 0x00000000u, 0x3EB00A2Eu, 0x3FBFFCB9u, 0x00000000u, 0x3F0D6B7Cu, 0x3FDFF8CCu, 0x00000000u, 0x3F196578u };
+        var expected = new[] { 0x3FFEDB85u, 0x3F76A794u, 0x3F109DA0u, 0x401D05D9u, 0x3FDD6616u, 0x3FA2A7BEu, 0x403AD067u, 0x40208D10u, 0x3FFA10ECu, 0x4044DEF0u, 0x4031B182u, 0x400AA70Eu };
+        Assert.Equal(expected, BlenderExport.SkinnedPositions(co.Select(F).ToArray(), ArmatureWorld()).Select(U).ToArray());
+    }
+
+    [Fact]
+    public void A_skinned_meshs_normals_go_through_the_armatures_3x3_times_the_inverse_transpose_of_what_is_almost_identity()
+    {
+        // a mesh that hangs from its armature has the armature's matrix_world; armature^-1 @ object is the identity plus
+        // float noise, and its inverse transpose leaves the armature's 3x3 an ulp or two off in three entries (Blender's
+        // own normal_transform for the fixture)
+        var nt = VehicleProbe.ExporterNormalTransform(ArmatureWorld(), ArmatureWorld());
+        Assert.Equal(new[] { 0x3F25438Au, 0xBF8F29CDu, 0xBDB6CD28u, 0x3F91F3FEu, 0x3F09B849u, 0xBEBAE878u, 0x3F3AE878u, 0x3E1855A0u, 0x3F26283Du }, nt.Select(U).ToArray());
+        // four normals through round, normalize, the transform, normalize - numpy's results in Blender for the same inputs
+        var input = new[] { 0.6f, 0.48f, 0.64f, 0f, 0f, 1f, -0.7071f, 0.7071f, 0f, 0.1234f, -0.6543f, 0.7461f };
+        var expected = new[] { 0xBE32D159u, 0x3F19525Fu, 0x3F48132Bu, 0xBDF3BC37u, 0xBEF935F7u, 0x3F5D8AFDu, 0xBF6747E8u, 0xBE9DEEAAu, 0xBE9870AFu, 0x3F3D2712u, 0xBEF5A2A7u, 0x3EF243EAu };
+        for (int i = 0; i < 4; i++)
+        {
+            float x = input[3 * i], y = input[3 * i + 1], z = input[3 * i + 2];
+            BlenderExport.ExportedNormal(ref x, ref y, ref z, nt);
+            Assert.Equal(new[] { expected[3 * i], expected[3 * i + 1], expected[3 * i + 2] }, new[] { U(x), U(y), U(z) });
+        }
+    }
+
+    static BlenderReduce.Result Weighted(params (int group, float weight)[][] perVertex)
+    {
+        var r = Mesh(new float[3 * perVertex.Length], new int[0]);
+        r.DefNr = perVertex.Select(v => v.Select(g => g.group).ToList()).ToArray();
+        r.DefWeight = perVertex.Select(v => v.Select(g => g.weight).ToList()).ToArray();
+        return r;
+    }
+
+    [Fact]
+    public void A_vertexs_joints_are_its_groups_over_the_threshold_by_weight_the_first_four_kept_and_divided_by_their_sum()
+    {
+        // groups 0..5 are joints 10..15, group 6 names no joint
+        var skin = new BlenderExport.Skin { GroupJoint = new[] { 10, 11, 12, 13, 14, 15, -1 }, JointCount = 20 };
+        var r = Weighted(
+            new[] { (0, 0.25f), (1, 0.5f), (2, 0.125f) },                                        // 0: by weight, descending
+            new[] { (3, 0.5f), (1, 0.5f), (0, 0.5f) },                                           // 1: equal weights keep the vertex's own order (a stable sort)
+            new[] { (0, 0.0001f), (1, 0.00011f), (2, 0.5f) },                                    // 2: float32 0.0001 is not over 0.0001, 0.00011 is
+            new[] { (0, 0.1f), (1, 0.2f), (2, 0.3f), (3, 0.4f), (4, 0.5f), (5, 0.6f) },          // 3: six groups, the four heaviest
+            new[] { (6, 1f), (0, 0.00005f) },                                                    // 4: a group without a joint, a weight under the threshold: no bone
+            new (int, float)[0],                                                                 // 5: no group at all
+            new[] { (0, 1.5f), (1, -0.5f), (2, float.NaN) });                                    // 6: validate clamps to 0..1 and zeroes what is not finite
+        BlenderExport.VertexBones(r, skin, out var joints, out var weights, out bool neutral);
+        ushort[] J(int v) => joints.Skip(4 * v).Take(4).ToArray(); float[] Wt(int v) => weights.Skip(4 * v).Take(4).ToArray();
+        Assert.Equal(new ushort[] { 11, 10, 12, 0 }, J(0));
+        float s0 = (float)((float)((float)(0.5f + 0.25f) + 0.125f) + 0f);
+        Assert.Equal(new[] { (float)(0.5f / s0), (float)(0.25f / s0), (float)(0.125f / s0), 0f }, Wt(0));
+        Assert.Equal(new ushort[] { 13, 11, 10, 0 }, J(1));
+        Assert.Equal(new ushort[] { 12, 11, 0, 0 }, J(2));
+        float s2 = (float)(0.5f + 0.00011f);
+        Assert.Equal(new[] { U((float)(0.5f / s2)), U((float)(0.00011f / s2)), U(0f), U(0f) }, Wt(2).Select(U).ToArray());
+        Assert.Equal(new ushort[] { 15, 14, 13, 12 }, J(3));
+        float s3 = (float)((float)((float)(0.6f + 0.5f) + 0.4f) + 0.3f);
+        Assert.Equal(new[] { U((float)(0.6f / s3)), U((float)(0.5f / s3)), U((float)(0.4f / s3)), U((float)(0.3f / s3)) }, Wt(3).Select(U).ToArray());
+        // no bone: the joint the exporter adds after the armature's own, at full weight
+        Assert.Equal(new ushort[] { 20, 0, 0, 0 }, J(4)); Assert.Equal(new[] { 1f, 0f, 0f, 0f }, Wt(4));
+        Assert.Equal(new ushort[] { 20, 0, 0, 0 }, J(5));
+        Assert.True(neutral);
+        Assert.Equal(new ushort[] { 10, 0, 0, 0 }, J(6)); Assert.Equal(new[] { 1f, 0f, 0f, 0f }, Wt(6));
+        // every vertex with a bone: no neutral bone
+        BlenderExport.VertexBones(Weighted(new[] { (0, 1f) }), skin, out _, out _, out neutral);
+        Assert.False(neutral);
+    }
+
+    [Fact]
+    public void A_skinned_primitive_carries_each_exported_vertexs_joints_and_weights()
+    {
+        var r = Mesh(Square, SquareFaces, sharp: false);
+        r.DefNr = new[] { new List<int> { 0 }, new List<int> { 1 }, new List<int> { 0, 1 }, new List<int>() };
+        r.DefWeight = new[] { new List<float> { 1f }, new List<float> { 1f }, new List<float> { 0.25f, 0.75f }, new List<float>() };
+        r.Uv.Add(new float[] { 0f, 1f, 1f, 1f, 1f, 0f, /* face 2 */ 0f, 1f, 1f, 0.5f, 0f, 0f });   // vertex 2 splits in two
+        var identity = new float[] { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+        var skin = new BlenderExport.Skin { ObjectWorld = identity, ArmatureWorld = identity, GroupJoint = new[] { 3, 5 }, JointCount = 7 };
+        var p = Assert.Single(BlenderExport.MeshPrimitives(r, skin));
+        Assert.Equal(new[] { 0, 1, 2, 2, 3 }, p.SourceVertex);
+        Assert.Equal(new ushort[] { 3, 0, 0, 0, 5, 0, 0, 0, 5, 3, 0, 0, 5, 3, 0, 0, 7, 0, 0, 0 }, p.Joints);
+        Assert.Equal(new[] { 1f, 0, 0, 0, 1f, 0, 0, 0, 0.75f, 0.25f, 0, 0, 0.75f, 0.25f, 0, 0, 1f, 0, 0, 0 }, p.Weights);
+        Assert.True(p.NeutralBone);
+        Assert.Null(Assert.Single(BlenderExport.MeshPrimitives(r)).Joints);   // unskinned: none
+    }
+
     [Fact]
     public void The_srgb_byte_table_is_exact_at_the_ends_rises_strictly_and_stays_on_the_srgb_curve()
     {

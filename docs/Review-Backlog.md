@@ -124,8 +124,9 @@ evaluation of uncast float products, an edge-key hash that made the BMesh build 
 bit for bit - the exporter's own `mesh.validate()` first (it removes the twin faces a collapse leaves; missing until the
 full run showed five ships differ), corner normals rounded to 4 decimals, unique corners sorted as raw words, the
 colour-set rules; `FULL=1` on 2026-10-06: 148 runs on 74 files, 3,532 object runs, 13.0 million vertices equal);
-still open in (d), each counted and named by the drill on every run: skinned objects (the Salegs is the registry's one
-prep_model entry with a skin), a coloured material with alpha; then prep_model in C# - strip, the file as the Factory's
+skinned objects too, the same day (positions and normals through the armature's matrix in numpy's float32, joints and
+weights from the vertex groups, the exporter's neutral bone; `FULL=1` on 2026-10-06: 152 runs on 76 files, 4,062 object runs, 15.8 million vertices equal, 530 object runs skinned); still open in (d), counted and named by the
+drill on every run: a coloured material with alpha; then prep_model in C# - strip, the file as the Factory's
 converter reads it (node and material order: Blender writes materials in order of first use, one per vertex-colour
 variant, and a `DefaultMaterial` for a coloured primitive without one), the write, the wiring behind
 `UniversalBaker.PrepViaBlender` with Blender as the fallback; KNOWN on the way: `prep_model.py` fails on a file of several

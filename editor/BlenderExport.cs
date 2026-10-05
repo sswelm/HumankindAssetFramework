@@ -27,6 +27,14 @@
 //     follows as the next COLOR_n with alpha. A layer's value is its sRGB bytes through Blender's table (alpha: byte / 255);
 //     a set with alpha is written as normalized unsigned shorts (clip, times 65535, + 0.5, truncated).
 //     NOT laid out: a deciding material that is not OPAQUE (its alpha depends on the material's node tree) - named.
+//   * A SKINNED mesh (the object carries an armature modifier): the positions go through the object's matrix_world and
+//     the normals - after the rounding and normalizing above - through armature.matrix_world.to_3x3() @ (armature.
+//     matrix_world.inverted_safe() @ object.matrix_world).to_3x3().inverted_safe().transposed(), both by np.matmul in
+//     FLOAT32 (numpy reads a mathutils matrix through the buffer protocol as float32 - measured, not the float64 a list
+//     of Python floats would give): a plain chain x m0 + y m1 + z m2, then the translation; the normals normalized again. Per vertex
+//     the vertex groups over 0.0001 whose bone is a joint, sorted by weight (stable, descending), the first four kept
+//     (the exporter's default of 4 influences), the weights divided by their float32 sum; a vertex without any goes to a
+//     "neutral bone" the exporter adds after the armature's bones. The joints are the armature's bones depth-first.
 // Proof: tools/prep-drill (Blender runs the real prep_model.py; its GLB's primitives against these, bit for bit).
 using System;
 using System.Collections.Generic;
@@ -41,8 +49,19 @@ public static class BlenderExport
         public ushort[] Shorts;   // the written shorts of a set with alpha, 4 per vertex
     }
 
+    /// <summary>What the layout needs of a skinned mesh's armature.</summary>
+    public sealed class Skin
+    {
+        public float[] ObjectWorld, ArmatureWorld;   // matrix_world as Blender holds it: column-major float32
+        public int[] GroupJoint;                     // per vertex group: its bone's place among the exported joints, or -1
+        public int JointCount;                       // the exported joints (the armature's bones); the neutral bone is this index
+    }
+
     public sealed class Primitive
     {
+        public ushort[] Joints;                          // JOINTS_0, 4 per vertex, or null (not skinned)
+        public float[] Weights;                          // WEIGHTS_0
+        public bool NeutralBone;                         // some vertex of the MESH has no bone: the exporter adds a joint
         public int MaterialSlot;
         public int VertexCount;
         public int[] SourceVertex;                       // per exported vertex: the reduced mesh's vertex
@@ -57,7 +76,7 @@ public static class BlenderExport
     static float NoNegativeZero(float f) => f == 0f ? 0f : f;   // arr[arr == -0.0] = 0.0
 
     /// <summary>The exporter's normals for every corner of a mesh in Blender's frame (3 per corner, already Y up).</summary>
-    public static float[] CornerNormals(float[] positions, int[] faces, bool[] faceSharp, short[] customNormal)
+    public static float[] CornerNormals(float[] positions, int[] faces, bool[] faceSharp, short[] customNormal, float[] skinTransform = null)
     {
         int nc = faces.Length;
         short[] d0 = null, d1 = null;
@@ -71,20 +90,82 @@ public static class BlenderExport
         for (int c = 0; c < nc; c++)
         {
             float x = cn[3 * c], y = cn[3 * c + 1], z = cn[3 * c + 2];
-            ExportedNormal(ref x, ref y, ref z);
+            ExportedNormal(ref x, ref y, ref z, skinTransform);
             outN[3 * c] = x; outN[3 * c + 1] = z; outN[3 * c + 2] = -y;   // zup2yup
         }
         return outN;
     }
 
     /// <summary>A corner normal as the exporter keeps it, still Z up: np.round(normals, 4) in float32, then normalize_vecs
-    /// (a zero norm leaves the vector alone), then a zero vector made (0, 0, 1).</summary>
-    internal static void ExportedNormal(ref float x, ref float y, ref float z)
+    /// (a zero norm leaves the vector alone); for a skinned mesh the 3x3 (row-major items) applied as numpy's float32
+    /// matmul does - a plain chain - and normalize_vecs again; then a zero vector made (0, 0, 1).</summary>
+    internal static void ExportedNormal(ref float x, ref float y, ref float z, float[] skinTransform = null)
     {
         x = Round4(x); y = Round4(y); z = Round4(z);
+        NormalizeVecs(ref x, ref y, ref z);
+        if (skinTransform != null)
+        {
+            var t = skinTransform; float nx = x, ny = y, nz = z;
+            x = (float)((float)((float)(nx * t[0]) + (float)(ny * t[1])) + (float)(nz * t[2]));
+            y = (float)((float)((float)(nx * t[3]) + (float)(ny * t[4])) + (float)(nz * t[5]));
+            z = (float)((float)((float)(nx * t[6]) + (float)(ny * t[7])) + (float)(nz * t[8]));
+            NormalizeVecs(ref x, ref y, ref z);
+        }
+        if (x == 0f && y == 0f && z == 0f) z = 1f;
+    }
+
+    static void NormalizeVecs(ref float x, ref float y, ref float z)
+    {
         float norm = (float)Math.Sqrt((double)(float)((float)((float)(x * x) + (float)(y * y)) + (float)(z * z)));
         if (norm != 0f) { x = (float)(x / norm); y = (float)(y / norm); z = (float)(z / norm); }
-        if (x == 0f && y == 0f && z == 0f) z = 1f;
+    }
+
+    /// <summary>apply_mat_to_all(object.matrix_world, locs): np.matmul of the float32 positions with the float32 3x3
+    /// transposed, plus the translation, each step float32. Blender's frame in and out; the matrix column-major.</summary>
+    internal static float[] SkinnedPositions(float[] positions, float[] world)
+    {
+        var o = new float[positions.Length];
+        for (int v = 0; v < positions.Length / 3; v++)
+        {
+            float x = positions[3 * v], y = positions[3 * v + 1], z = positions[3 * v + 2];
+            for (int row = 0; row < 3; row++)
+                o[3 * v + row] = (float)((float)((float)((float)(x * world[0 * 4 + row]) + (float)(y * world[1 * 4 + row])) + (float)(z * world[2 * 4 + row])) + world[3 * 4 + row]);
+        }
+        return o;
+    }
+
+    /// <summary>__get_bone_data and the joint attributes (primitive_attributes.py), per vertex of the mesh: 4 joints, 4
+    /// weights. mesh.validate() ran first: a weight that is not finite is 0, one outside 0..1 is clamped.</summary>
+    internal static void VertexBones(BlenderReduce.Result r, Skin skin, out ushort[] joints, out float[] weights, out bool neutral)
+    {
+        int nv = r.Positions.Length / 3;
+        joints = new ushort[4 * nv]; weights = new float[4 * nv]; neutral = false;
+        var bones = new List<(int joint, float weight)>();
+        for (int v = 0; v < nv; v++)
+        {
+            bones.Clear();
+            if (r.DefNr != null && r.DefNr[v] != null)
+                for (int i = 0; i < r.DefNr[v].Count; i++)
+                {
+                    int g = r.DefNr[v][i]; float w = r.DefWeight[v][i];
+                    if (float.IsNaN(w) || float.IsInfinity(w)) w = 0f; else if (w < 0f) w = 0f; else if (w > 1f) w = 1f;
+                    if ((double)w <= 0.0001) continue;
+                    if (g < 0 || g >= skin.GroupJoint.Length || skin.GroupJoint[g] < 0) continue;
+                    bones.Add((skin.GroupJoint[g], w));
+                }
+            // bones.sort(key=weight, reverse=True): stable, so equal weights keep the vertex's group order
+            for (int i = 1; i < bones.Count; i++)
+            {
+                var b = bones[i]; int k = i - 1;
+                while (k >= 0 && bones[k].weight < b.weight) { bones[k + 1] = bones[k]; k--; }
+                bones[k + 1] = b;
+            }
+            if (bones.Count == 0) { bones.Add((skin.JointCount, 1f)); neutral = true; }
+            float sum = 0f;
+            for (int j = 0; j < 4 && j < bones.Count; j++) { joints[4 * v + j] = (ushort)bones[j].joint; weights[4 * v + j] = bones[j].weight; }
+            for (int j = 0; j < 4; j++) sum = (float)(sum + weights[4 * v + j]);
+            for (int j = 0; j < 4; j++) weights[4 * v + j] = (float)(weights[4 * v + j] / sum);
+        }
     }
 
     /// <summary>numpy's around(x, 4) on a float32: x * 10000, rint (ties to even), / 10000, each in float32.</summary>
@@ -165,12 +246,15 @@ public static class BlenderExport
     }
 
     /// <summary>The triangle primitives of a reduced, unskinned mesh, one per material slot in use, ascending.</summary>
-    public static List<Primitive> MeshPrimitives(BlenderReduce.Result r)
+    public static List<Primitive> MeshPrimitives(BlenderReduce.Result r, Skin skin = null)
     {
         r = Validated(r);
         int nc = r.Faces.Length, nf = nc / 3;
         var plan = ColorPlan(r);
-        var normals = CornerNormals(r.Positions, r.Faces, r.FaceSharp, r.CustomNormal);
+        float[] nt = skin != null ? VehicleProbe.ExporterNormalTransform(skin.ArmatureWorld, skin.ObjectWorld) : null;
+        var normals = CornerNormals(r.Positions, r.Faces, r.FaceSharp, r.CustomNormal, nt);
+        float[] locs = r.Positions; ushort[] vertJoints = null; float[] vertWeights = null; bool neutral = false;
+        if (skin != null) { locs = SkinnedPositions(r.Positions, skin.ObjectWorld); VertexBones(r, skin, out vertJoints, out vertWeights, out neutral); }
         int colorAt = 1 + 3 + 2 * r.Uv.Count;
         var colorOffset = new int[plan.Count]; int fields = colorAt;
         for (int k = 0; k < plan.Count; k++) { colorOffset[k] = fields; fields += plan[k].layer < 0 ? 1 : plan[k].alpha ? 4 : 3; }   // the forced set: four bytes, one word
@@ -220,6 +304,7 @@ public static class BlenderExport
             int n = unique.Count;
             var p = new Primitive { MaterialSlot = slot, VertexCount = n, SourceVertex = new int[n], Positions = new float[3 * n], Normals = new float[3 * n], Indices = new int[corners.Count] };
             for (int u = 0; u < r.Uv.Count; u++) p.Uv.Add(new float[2 * n]);
+            if (skin != null) { p.Joints = new ushort[4 * n]; p.Weights = new float[4 * n]; p.NeutralBone = neutral; }
             foreach (var (layer, alpha) in plan)
             {
                 var set = new ColorSet { Alpha = alpha, Forced = layer < 0 };
@@ -232,7 +317,8 @@ public static class BlenderExport
                 int c = unique[i], o = c * fields, v = r.Faces[c];
                 p.SourceVertex[i] = v;
                 // locs[vertex], zup2yup
-                p.Positions[3 * i] = r.Positions[3 * v]; p.Positions[3 * i + 1] = r.Positions[3 * v + 2]; p.Positions[3 * i + 2] = -r.Positions[3 * v + 1];
+                p.Positions[3 * i] = locs[3 * v]; p.Positions[3 * i + 1] = locs[3 * v + 2]; p.Positions[3 * i + 2] = -locs[3 * v + 1];
+                if (skin != null) for (int j = 0; j < 4; j++) { p.Joints[4 * i + j] = vertJoints[4 * v + j]; p.Weights[4 * i + j] = vertWeights[4 * v + j]; }
                 p.Normals[3 * i] = FromBits(dots[o + 1]); p.Normals[3 * i + 1] = FromBits(dots[o + 2]); p.Normals[3 * i + 2] = FromBits(dots[o + 3]);
                 for (int u = 0; u < r.Uv.Count; u++) { p.Uv[u][2 * i] = FromBits(dots[o + 4 + 2 * u]); p.Uv[u][2 * i + 1] = FromBits(dots[o + 5 + 2 * u]); }
                 for (int k = 0; k < plan.Count; k++)
