@@ -16,7 +16,8 @@ static class EdgesDrill
     static int Main(string[] args)
     {
         Console.OutputEncoding = new UTF8Encoding(false);
-        int fails = 0; int threads = Environment.ProcessorCount; bool decimateOnly = false;
+        int fails = 0; int threads = 0;   // exercise the APIs' runtime default; --threads still overrides it
+        bool decimateOnly = false;
         Console.WriteLine($"RUNTIME	{(IntPtr.Size * 8)}-bit	trig {(BlenderTrig.Exact ? "exact" : "rounded")}	colour table {(BlenderColor.TableKnown ? "known" : "unknown")}");
         foreach (var path in args)
         {

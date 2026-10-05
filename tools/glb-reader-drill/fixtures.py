@@ -525,7 +525,31 @@ def fx_decimate_attrs(out):
     write_glb(os.path.join(out, "decimate_attrs.glb"), root, b)
 
 
-FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external, fx_cubic, fx_scenes, fx_materials, fx_skin8, fx_big, fx_names, fx_no_default_scene, fx_dropped, fx_mixed_skin, fx_clip_switch, fx_path_clip, fx_far_clip, fx_unicode_clip, fx_decimate_attrs]
+def fx_decimate_limits(out):
+    """Review of PR #120: Blender imports only eight UV/colour layers, and a large flat grid exposes
+    the thread-dependent edge order that the reducer's runtime default must reproduce."""
+    b = Buf()
+    meshes = []
+    for kind in ("uv9", "color9", "thread_grid"):
+        n = 25 if kind == "thread_grid" else 5
+        pos, _, uv0, _, _, idx = bent_grid(n, n, 0.0, 0.0)
+        if kind == "thread_grid":
+            pos = [(x, 0.0, z) for x, _, z in pos]
+        attrs = {"POSITION": b.accessor(pos, "f", "VEC3")}
+        if kind == "uv9":
+            for i in range(9):
+                attrs["TEXCOORD_%d" % i] = b.accessor([(u + i / 10.0, v) for u, v in uv0], "f", "VEC2", minmax=False)
+        if kind == "color9":
+            for i in range(9):
+                attrs["COLOR_%d" % i] = b.accessor([(0.2, 0.4, i / 10.0, 1.0)] * len(pos), "f", "VEC4", minmax=False)
+        meshes.append({"name": kind, "primitives": [{"attributes": attrs, "indices": b.accessor(idx, "H", "SCALAR")}]})
+    root = base("decimate_limits", meshes=meshes,
+                nodes=[{"name": mesh["name"], "mesh": i} for i, mesh in enumerate(meshes)],
+                scenes=[{"nodes": [0, 1, 2]}], scene=0)
+    write_glb(os.path.join(out, "decimate_limits.glb"), root, b)
+
+
+FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external, fx_cubic, fx_scenes, fx_materials, fx_skin8, fx_big, fx_names, fx_no_default_scene, fx_dropped, fx_mixed_skin, fx_clip_switch, fx_path_clip, fx_far_clip, fx_unicode_clip, fx_decimate_attrs, fx_decimate_limits]
 
 
 def main(out):

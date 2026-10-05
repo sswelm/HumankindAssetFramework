@@ -165,6 +165,60 @@ public class BlenderDecimateTests
     }
 
     [Fact]
+    public void A_ninth_uv_or_colour_layer_is_not_imported_by_the_reduce()
+    {
+        var m = BentGrid(5, false, BlenderColor.TableKnown);
+        var p = m.Meshes[0].Primitives[0];
+        p.Uv1 = (float[])p.Uv0.Clone();
+        p.UvMore = new List<float[]>();
+        for (int i = 2; i < 9; i++) p.UvMore.Add((float[])p.Uv0.Clone());
+        if (BlenderColor.TableKnown)
+        {
+            p.ColorMore = new List<float[]>();
+            for (int i = 1; i < 9; i++) p.ColorMore.Add((float[])p.Colors.Clone());
+        }
+        var names = BlenderNames.Compute(m);
+        foreach (float ratio in new[] { 1f, 0.5f, BlenderReduce.Ratio(50 / 3, 50) })
+        {
+            var nine = BlenderReduce.Reduce(m, 0, ratio, names);
+            Assert.Null(nine.Fallback); Assert.Equal(8, nine.Uv.Count);
+            if (BlenderColor.TableKnown) Assert.Equal(8, nine.Colors.Count);
+            // Removing only the ignored ninth layers must leave geometry and every retained layer unchanged.
+            var lastUv = p.UvMore[6]; p.UvMore.RemoveAt(6);
+            float[] lastColor = null;
+            if (BlenderColor.TableKnown) { lastColor = p.ColorMore[7]; p.ColorMore.RemoveAt(7); }
+            var eight = BlenderReduce.Reduce(m, 0, ratio, names);
+            Assert.Equal(eight.Positions, nine.Positions); Assert.Equal(eight.Faces, nine.Faces);
+            for (int i = 0; i < 8; i++)
+            {
+                Assert.Equal(eight.Uv[i], nine.Uv[i]);
+                if (BlenderColor.TableKnown) Assert.Equal(eight.Colors[i].bytes, nine.Colors[i].bytes);
+            }
+            p.UvMore.Add(lastUv);
+            if (BlenderColor.TableKnown) p.ColorMore.Add(lastColor);
+        }
+    }
+
+    [Fact]
+    public void Default_threads_match_the_runtime_on_a_large_grid()
+    {
+        var m = BentGrid(25, false, false);
+        var p = m.Meshes[0].Primitives[0];
+        for (int v = 0; v < p.VertexCount; v++) p.Positions[3 * v + 1] = 0f;   // equal-cost edges expose order differences
+        Assert.Equal(BlenderMesh.ParallelMaps(1250, Environment.ProcessorCount), BlenderMesh.ParallelMaps(1250));
+        Assert.Equal(BlenderMesh.FromGltf(m, 0, Environment.ProcessorCount).ValidEdges, BlenderMesh.FromGltf(m, 0).ValidEdges);
+        var names = BlenderNames.Compute(m);
+        foreach (float ratio in new[] { 0.5f, BlenderReduce.Ratio(1250 / 3, 1250) })
+        {
+            var expected = BlenderReduce.Reduce(m, 0, ratio, names, Environment.ProcessorCount);
+            var actual = BlenderReduce.Reduce(m, 0, ratio, names);
+            Assert.Null(actual.Fallback);
+            Assert.Equal(expected.Positions, actual.Positions); Assert.Equal(expected.Faces, actual.Faces);
+            Assert.Equal(expected.Edges, actual.Edges);
+        }
+    }
+
+    [Fact]
     public void The_reduce_names_what_it_keeps_for_Blender()
     {
         var m = BentGrid(2, false, false);

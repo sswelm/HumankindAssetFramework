@@ -31,12 +31,17 @@ public sealed class BlenderMesh
     public int[] ValidEdges = new int[0]; // pairs, post-validate (edges with equal ends dropped)
 
     /// <summary>The buckets mesh_calc_edges uses on this machine: one under 1,000 faces, else the thread count as a power of
-    /// two, at most 8. The development machine has 16 threads; a machine with fewer changes the order of a large mesh's edges.</summary>
-    public static int ParallelMaps(int faces, int threads = 16) => faces < 1000 ? 1 : Math.Min(8, PowerOfTwoMin(Math.Min(8, threads)));
+    /// two, at most 8. Zero threads uses the current runtime's processor count. The development machine has 16 threads;
+    /// a machine with fewer changes the order of a large mesh's edges.</summary>
+    public static int ParallelMaps(int faces, int threads = 0)
+    {
+        if (threads == 0) threads = Environment.ProcessorCount;
+        return faces < 1000 ? 1 : Math.Min(8, PowerOfTwoMin(Math.Min(8, threads)));
+    }
 
     static int PowerOfTwoMin(int n) { int p = 1; while (p * 2 <= n) p *= 2; return p; }   // power_of_2_min_i
 
-    public static BlenderMesh FromGltf(HafModel m, int meshIndex, int threads = 16)
+    public static BlenderMesh FromGltf(HafModel m, int meshIndex, int threads = 0)
     {
         var mesh = m.Meshes[meshIndex];
         var r = new BlenderMesh();

@@ -46,7 +46,7 @@ public static class BlenderReduce
         return null;
     }
 
-    public static Result Reduce(HafModel m, int node, float ratio, BlenderNames.Result names, int threads = 16)
+    public static Result Reduce(HafModel m, int node, float ratio, BlenderNames.Result names, int threads = 0)
     {
         var r = new Result { Ratio = ratio };
         r.Fallback = FallbackReason(m, node);
@@ -106,6 +106,7 @@ public static class BlenderReduce
 
         // --- UV layers: as many as the longest run of TEXCOORD_n on any primitive; a primitive lacking a set gives zeros;
         // v flipped as uvs_gltf_to_blender does (v * -1, then + 1, float32)
+        // The importer caps TEXCOORD_n and COLOR_n at eight even when the GLB carries more.
         int numUv = 0;
         foreach (var p in mesh.Primitives) numUv = Math.Max(numUv, UvSetCount(p));
         var d = new BlenderDecimate.MeshData();
@@ -333,7 +334,7 @@ public static class BlenderReduce
     static int ColorSetCount(HafPrimitive p)
     {
         int n = 0;
-        while (ColorSet(p, n) != null) n++;
+        while (n < 8 && ColorSet(p, n) != null) n++;
         return n;
     }
 
@@ -346,7 +347,7 @@ public static class BlenderReduce
     static int UvSetCount(HafPrimitive p)
     {
         int n = 0;
-        while (UvSet(p, n) != null) n++;
+        while (n < 8 && UvSet(p, n) != null) n++;
         return n;
     }
 
