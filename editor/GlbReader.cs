@@ -142,7 +142,7 @@ public static class GlbReader
             var pbr = mt["pbrMetallicRoughness"] as JObject;
             if (pbr != null)
             {
-                if (pbr["baseColorFactor"] is JArray bcf) m.BaseColorFactor = Floats(bcf, 4, "baseColorFactor");
+                if (pbr["baseColorFactor"] is JArray bcf) m.BaseColorFactor = Doubles(bcf, 4, "baseColorFactor");
                 TexRef(pbr["baseColorTexture"], out m.BaseColorTexture, out m.BaseColorTexCoord);
                 m.MetallicFactor = pbr["metallicFactor"]?.Value<float>() ?? 1f;
                 m.RoughnessFactor = pbr["roughnessFactor"]?.Value<float>() ?? 1f;

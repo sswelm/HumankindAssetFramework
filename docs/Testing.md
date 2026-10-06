@@ -213,9 +213,12 @@ the wiring through a base colour texture, unlit BLEND and MASK, and a BLEND soli
 modes must survive validate's rebuild - they did not, in the first version: the review of PR #128 found it, and the rule
 above, which the first version had as "BLEND, or MASK in (0, 1]"). The cutoff is kept as the JSON DOUBLE through the model (the review's
 fixtures: MASK at 1.00000001 and at 1e-50, which float32 would put on the wrong side), so a boundary is decided as the
-importer decides it. NOT exact, named here and in BlenderExport.cs: a BLEND material whose baseColorFactor alpha is within
-a float32 ulp of 1 (the importer adds an alpha-factor node the exporter reads as 1 = OPAQUE and writes RGB); no file has it. Not probed:
-`KHR_animation_pointer` (an animated cutoff keeps the socket) and `KHR_materials_pbrSpecularGlossiness`. Nothing is
+importer decides it. Base colour factors also retain JSON double precision: a non-unit alpha such as `0.99999999`
+creates a factor node whose float32 value rounds to 1, so the exporter detects OPAQUE and writes RGB. Exactly 1
+creates no factor node and keeps RGBA; MASK's clip nodes also keep RGBA. The regression fixture exercises plain,
+textured, unlit and specular-glossiness materials, with coverage required for both sides of the near-one decision.
+Specular-glossiness uses its diffuse alpha factor; unlit takes precedence and uses the core base colour factor.
+Not probed: `KHR_animation_pointer` (an animated cutoff keeps the socket). Nothing is
 declined any more. Gate sample: 50 runs on 25 files, 138 object runs (203 primitives, 31,592 vertices) equal, in 10 s;
 `FULL=1` on 2026-10-06: 152 runs on 76 files, 4,194 object runs (5,348 primitives, 15,883,230 vertices) equal, 0 declined
 - 530 of them skinned, 164 under an armature not at the identity, 124 with a wired alpha, 26 with twin faces removed,

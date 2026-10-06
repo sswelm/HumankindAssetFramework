@@ -152,6 +152,7 @@ static class PrepDrill
         "COLOR_0 with alpha (a coloured material whose alpha is wired)", "COLOR_0 as RGB (a coloured MASK material whose alpha is not wired)",
         "a coloured alpha material after twin-face validation", "a MASK cutoff whose float rounding crosses a wiring boundary",
         "COLOR_0 with alpha wired through a base colour texture", "COLOR_0 with alpha on an unlit material",
+        "COLOR_0 as RGB after a non-unit alpha factor rounds to one", "COLOR_0 with alpha when the factor is exactly one",
         "a weighted mesh sharing an armature with a neutral bone",
         "a skinned object", "a vertex without a bone (the neutral bone)", "a vertex of more than four groups", "an armature that is not at the identity",
     };
@@ -177,7 +178,7 @@ static class PrepDrill
         Hit("COLOR_0 forced (255s)", sets.Count > 0 && sets[0].Forced);
         Hit("two or more colour sets", sets.Count > 1);
         Hit("COLOR_0 with alpha (a coloured material whose alpha is wired)", alphaMaterial && sets.Count > 0 && sets[0].Alpha);
-        Hit("COLOR_0 as RGB (a coloured MASK material whose alpha is not wired)", alphaMaterial && sets.Count > 0 && !sets[0].Alpha);
+        Hit("COLOR_0 as RGB (a coloured MASK material whose alpha is not wired)", alphaMaterial && r.SlotAlpha[deciding].mode == "MASK" && sets.Count > 0 && !sets[0].Alpha);
         Hit("a coloured alpha material after twin-face validation", alphaMaterial && r.Faces.Length < reduced.Faces.Length && sets.Count > 0 && sets[0].Alpha);
         bool roundedBoundary = false;
         if (alphaMaterial && r.SlotAlpha[deciding].mode == "MASK")
@@ -187,6 +188,10 @@ static class PrepDrill
         }
         Hit("a MASK cutoff whose float rounding crosses a wiring boundary", roundedBoundary);
         bool wired = alphaMaterial && sets.Count > 0 && sets[0].Alpha;
+        bool blend = alphaMaterial && r.SlotAlpha[deciding].mode == "BLEND";
+        double factor = alphaMaterial ? r.SlotAlpha[deciding].factor : 1.0;
+        Hit("COLOR_0 as RGB after a non-unit alpha factor rounds to one", blend && factor != 1.0 && (float)factor == 1f && sets.Count > 0 && !sets[0].Alpha);
+        Hit("COLOR_0 with alpha when the factor is exactly one", blend && factor == 1.0 && wired);
         Hit("COLOR_0 with alpha wired through a base colour texture", wired && model.Materials[r.Slots[deciding].material].BaseColorTexture >= 0);
         Hit("COLOR_0 with alpha on an unlit material", wired && (model.Materials[r.Slots[deciding].material].ExtensionsJson ?? "").Contains("KHR_materials_unlit"));
         Hit("a colour layer on the vertices (point domain)", r.Colors.Exists(c => c.point));

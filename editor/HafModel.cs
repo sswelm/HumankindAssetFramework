@@ -153,7 +153,7 @@ public sealed class HafPrimitive
 public sealed class HafMaterial
 {
     public string Name = "";
-    public float[] BaseColorFactor = { 1, 1, 1, 1 };
+    public double[] BaseColorFactor = { 1, 1, 1, 1 };   // JSON precision decides whether Blender creates an alpha-factor node
     public int BaseColorTexture = -1; public int BaseColorTexCoord;
     public float MetallicFactor = 1, RoughnessFactor = 1;
     public int MetallicRoughnessTexture = -1; public int MetallicRoughnessTexCoord;

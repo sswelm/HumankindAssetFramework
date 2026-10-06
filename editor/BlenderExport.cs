@@ -31,9 +31,8 @@
 //     mode at all - and for MASK at a cutoff of 0 or over 1; every other mode string and cutoff keeps it, a negative
 //     cutoff and a mode the spec does not know included) - the exporter's add_alpha is "a colour attribute feeds the alpha
 //     socket" and "the detected alpha mode is not OPAQUE". The importer compares the JSON DOUBLE, and so does this: the
-//     model keeps the cutoff as a double (HafMaterial.AlphaCutoff). One edge stays on float32: a BLEND material whose
-//     baseColorFactor alpha is within a float32 ulp of 1 (the importer adds an alpha-factor node the exporter then reads
-//     as 1 = OPAQUE, and writes RGB) - named in docs/Testing.md, no file has it.
+//     model keeps the cutoff and base colour factor as doubles. A non-unit alpha factor creates a multiply node whose
+//     float32 value can round to 1: the exporter then detects OPAQUE and writes RGB (unless MASK's clip nodes remain).
 //   * A SKINNED mesh (the object carries an armature modifier): the positions go through the object's matrix_world and
 //     the normals - after the rounding and normalizing above - through armature.matrix_world.to_3x3() @ (armature.
 //     matrix_world.inverted_safe() @ object.matrix_world).to_3x3().inverted_safe().transposed(), both by np.matmul in
@@ -214,8 +213,12 @@ public static class BlenderExport
 
     /// <summary>Whether the importer wires a coloured material's vertex alpha into it (base_color): not for OPAQUE or no
     /// mode, not for MASK at a cutoff of 0 or over 1; for every other mode and cutoff (BLEND, MASK in (0, 1] and below 0,
-    /// a mode string the spec does not know).</summary>
-    internal static bool VertexAlphaWired(string alphaMode, double alphaCutoff) => !string.IsNullOrEmpty(alphaMode) && alphaMode != "OPAQUE" && !(alphaMode == "MASK" && (alphaCutoff == 0.0 || alphaCutoff > 1.0));
+    /// a mode string the spec does not know). A created alpha-factor node rounded to 1 makes the exported mode OPAQUE
+    /// unless MASK clipping remains, so its colour set omits alpha.</summary>
+    internal static bool VertexAlphaWired(string alphaMode, double alphaCutoff, double alphaFactor = 1.0) =>
+        !string.IsNullOrEmpty(alphaMode) && alphaMode != "OPAQUE" &&
+        !(alphaMode == "MASK" && (alphaCutoff == 0.0 || alphaCutoff > 1.0)) &&
+        !(alphaMode != "MASK" && alphaFactor != 1.0 && (float)alphaFactor == 1f);
 
     /// <summary>The colour sets the exporter writes for the mesh: (layer, with alpha), layer -1 for the forced set.</summary>
     static List<(int layer, bool alpha)> ColorPlan(BlenderReduce.Result r)
@@ -230,7 +233,7 @@ public static class BlenderExport
             bool hasMaterial = material >= 0 || vertexColor;   // the importer invents a material for a coloured primitive without one
             if (hasMaterial) noMaterials = false;
             if (decided) continue;
-            if (vertexColor) { plan.Add((0, material >= 0 && VertexAlphaWired(r.SlotAlpha[slot].mode, r.SlotAlpha[slot].cutoff))); decided = true; }   // the material's own vertex colour: RGB, or RGBA when its alpha is wired
+            if (vertexColor) { plan.Add((0, material >= 0 && VertexAlphaWired(r.SlotAlpha[slot].mode, r.SlotAlpha[slot].cutoff, r.SlotAlpha[slot].factor))); decided = true; }   // the material's own vertex colour: RGB, or RGBA when its alpha is wired
             else if (!hasMaterial) { plan.Add((0, true)); decided = true; }     // no material: the active (render) layer, with alpha
         }
         if (!noMaterials && plan.Count == 0) plan.Add((-1, true));              // a forced COLOR_0 of 255s

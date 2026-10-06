@@ -25,7 +25,7 @@ public static class BlenderReduce
         public List<int>[] DefNr; public List<float>[] DefWeight;   // per vertex, or null when the object has no vertex groups
         public List<(string name, bool point, byte[] bytes)> Colors = new List<(string, bool, byte[])>();   // per colour layer: 4 bytes per corner, or per vertex for the point domain
         public List<(int material, bool vertexColor)> Slots = new List<(int, bool)>();   // the mesh's material slots: the glTF material (-1 none) and whether the importer built it WITH the vertex colour
-        public List<(string mode, double cutoff)> SlotAlpha = new List<(string, double)>();   // per slot: the glTF material's alphaMode and alphaCutoff ("OPAQUE" without a material)
+        public List<(string mode, double cutoff, double factor)> SlotAlpha = new List<(string, double, double)>();   // per slot: the material's alphaMode, alphaCutoff and effective source alpha factor ("OPAQUE" without a material)
         public float Ratio;                       // the modifier's ratio as stored (float32)
         public bool Collapsed;                    // false when the modifier would return the mesh untouched
         public string Fallback;                   // non-null: the mesh is outside this port; why
@@ -34,6 +34,18 @@ public static class BlenderReduce
     /// <summary>The ratio as prep_model.py computes and the modifier stores it: min(1, max(0.001, target / total)) in
     /// double, then float32.</summary>
     public static float Ratio(long target, long total) => (float)Math.Min(1.0, Math.Max(0.001, (double)target / Math.Max(1, total)));
+
+    // The importer gives unlit precedence; otherwise specular-glossiness uses diffuseFactor instead of baseColorFactor.
+    internal static double MaterialAlphaFactor(HafMaterial material)
+    {
+        if (material.ExtensionsJson != null)
+        {
+            var extensions = GlbReader.ParseObject(material.ExtensionsJson);
+            if (extensions["KHR_materials_unlit"] == null && extensions["KHR_materials_pbrSpecularGlossiness"] != null)
+                return (double?)extensions["KHR_materials_pbrSpecularGlossiness"]?["diffuseFactor"]?[3] ?? 1.0;
+        }
+        return material.BaseColorFactor[3];
+    }
 
     /// <summary>Why this port keeps Blender for a mesh, or null when it covers it.</summary>
     public static string FallbackReason(HafModel m, int node)
@@ -104,7 +116,7 @@ public static class BlenderReduce
             slotOf[pi] = s;
         }
         r.Slots = slots;
-        foreach (var (mat, _) in slots) r.SlotAlpha.Add(mat >= 0 ? (m.Materials[mat].AlphaMode, m.Materials[mat].AlphaCutoff) : ("OPAQUE", 0.5f));
+        foreach (var (mat, _) in slots) r.SlotAlpha.Add(mat >= 0 ? (m.Materials[mat].AlphaMode, m.Materials[mat].AlphaCutoff, MaterialAlphaFactor(m.Materials[mat])) : ("OPAQUE", 0.5, 1.0));
         var faceMaterial = new int[nf];
         for (int f = 0; f < nf; f++) faceMaterial[f] = slotOf[layout.FacePrimitive[f]];
 

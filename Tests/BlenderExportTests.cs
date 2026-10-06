@@ -17,7 +17,7 @@ public class BlenderExportTests
     {
         int nf = faces.Length / 3;
         var r = new BlenderReduce.Result { VertexCount = positions.Length / 3, FaceCount = nf, Positions = positions, Faces = faces, FaceMaterial = faceMaterial ?? new int[nf], FaceSharp = Enumerable.Repeat(sharp, nf).ToArray() };
-        r.Slots.Add((0, false)); r.SlotAlpha.Add(("OPAQUE", 0.5f));
+        r.Slots.Add((0, false)); r.SlotAlpha.Add(("OPAQUE", 0.5f, 1.0));
         return r;
     }
 
@@ -98,7 +98,7 @@ public class BlenderExportTests
     {
         // the first face is on slot 2, the second on slot 0; slot 1 has no face
         var r = Mesh(Square, SquareFaces, new[] { 2, 0 }, sharp: false);
-        r.Slots.Add((1, false)); r.Slots.Add((2, false)); r.SlotAlpha.Add(("OPAQUE", 0.5f)); r.SlotAlpha.Add(("OPAQUE", 0.5f));
+        r.Slots.Add((1, false)); r.Slots.Add((2, false)); r.SlotAlpha.Add(("OPAQUE", 0.5f, 1.0)); r.SlotAlpha.Add(("OPAQUE", 0.5f, 1.0));
         var prims = BlenderExport.MeshPrimitives(r);
         Assert.Equal(new[] { 0, 2 }, prims.Select(p => p.MaterialSlot).ToArray());
         Assert.Equal(new[] { 0, 2, 3 }, prims[0].SourceVertex); Assert.Equal(new[] { 0, 1, 2 }, prims[0].Indices);
@@ -110,7 +110,7 @@ public class BlenderExportTests
     {
         // face 0 a triangle; face 1 repeats a vertex; face 2 is face 0 wound the other way (a twin); face 3 stays
         var r = Mesh(new float[] { 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0 }, new[] { 0, 1, 2, 1, 1, 3, 2, 1, 0, 1, 3, 2 }, new[] { 0, 1, 2, 1 }, sharp: false);
-        r.Slots.Add((1, false)); r.Slots.Add((2, false)); r.SlotAlpha.Add(("OPAQUE", 0.5f)); r.SlotAlpha.Add(("OPAQUE", 0.5f));
+        r.Slots.Add((1, false)); r.Slots.Add((2, false)); r.SlotAlpha.Add(("OPAQUE", 0.5f, 1.0)); r.SlotAlpha.Add(("OPAQUE", 0.5f, 1.0));
         r.FaceSharp = new[] { false, true, true, true };
         r.Uv.Add(Enumerable.Range(0, 24).Select(i => (float)i).ToArray());
         r.CustomNormal = Enumerable.Range(0, 24).Select(i => (short)(100 + i)).ToArray();
@@ -141,12 +141,12 @@ public class BlenderExportTests
         // a slot whose only face was the twin has no primitive, and no say in the colour sets: the empty slot 0 would have
         // decided "with alpha" ahead of the coloured slot 1
         var c = Mesh(Square, new[] { 0, 1, 2, 0, 2, 3, 2, 1, 0 }, new[] { 1, 1, 0 }, sharp: false);
-        c.Slots[0] = (-1, false); c.Slots.Add((0, true)); c.SlotAlpha.Add(("OPAQUE", 0.5f));
+        c.Slots[0] = (-1, false); c.Slots.Add((0, true)); c.SlotAlpha.Add(("OPAQUE", 0.5f, 1.0));
         c.Colors.Add(("Color", false, new byte[36]));
         var pc = Assert.Single(BlenderExport.MeshPrimitives(c));
         Assert.Equal(1, pc.MaterialSlot); Assert.False(Assert.Single(pc.Colors).Alpha);
         // nor is it the deciding material: a coloured BLEND material whose only face is the twin would have given alpha
-        c.Slots[0] = (1, true); c.SlotAlpha[0] = ("BLEND", 0.5f);
+        c.Slots[0] = (1, true); c.SlotAlpha[0] = ("BLEND", 0.5f, 1.0);
         Assert.False(Assert.Single(Assert.Single(BlenderExport.MeshPrimitives(c)).Colors).Alpha);
     }
 
@@ -157,7 +157,7 @@ public class BlenderExportTests
     public void Removing_a_twin_preserves_the_retained_materials_alpha(string mode, double cutoff, bool alpha)
     {
         var r = Mesh(Square, new[] { 0, 1, 2, 0, 2, 3, 2, 1, 0 });
-        r.Slots[0] = (0, true); r.SlotAlpha[0] = (mode, cutoff);
+        r.Slots[0] = (0, true); r.SlotAlpha[0] = (mode, cutoff, 1.0);
         r.Colors.Add(("Color", false, Enumerable.Repeat((byte)100, 36).ToArray()));
         var p = Assert.Single(BlenderExport.MeshPrimitives(r));
         Assert.Equal(6, p.Indices.Length);
@@ -223,21 +223,21 @@ public class BlenderExportTests
         byte[] second = Enumerable.Repeat((byte)77, 24).ToArray();
         // (a) slot 0 plain material, slot 1 empty, slot 2 coloured - faces on 0 and 1: the EMPTY slot decides (alpha)
         var a = Mesh(Square, SquareFaces, new[] { 0, 1 }, sharp: false);
-        a.Slots.Add((-1, false)); a.Slots.Add((1, true)); a.SlotAlpha.Add(("OPAQUE", 0.5f)); a.SlotAlpha.Add(("OPAQUE", 0.5f));
+        a.Slots.Add((-1, false)); a.Slots.Add((1, true)); a.SlotAlpha.Add(("OPAQUE", 0.5f, 1.0)); a.SlotAlpha.Add(("OPAQUE", 0.5f, 1.0));
         a.Colors.Add(("Color", false, CornerColors())); a.Colors.Add(("Color.001", false, second));
         var pa = BlenderExport.MeshPrimitives(a);
         Assert.Equal(2, pa.Count);
         Assert.All(pa, p => { Assert.Equal(2, p.Colors.Count); Assert.True(p.Colors[0].Alpha && !p.Colors[0].Forced); Assert.True(p.Colors[1].Alpha); });
         // (b) the coloured slot is met first: RGB on EVERY primitive, the empty slot's too; the second layer with alpha
         var b = Mesh(Square, SquareFaces, new[] { 0, 1 }, sharp: false);
-        b.Slots[0] = (1, true); b.Slots.Add((-1, false)); b.SlotAlpha.Add(("OPAQUE", 0.5f));
+        b.Slots[0] = (1, true); b.Slots.Add((-1, false)); b.SlotAlpha.Add(("OPAQUE", 0.5f, 1.0));
         b.Colors.Add(("Color", false, CornerColors())); b.Colors.Add(("Color.001", false, second));
         var pb = BlenderExport.MeshPrimitives(b);
         Assert.All(pb, p => { Assert.Equal(2, p.Colors.Count); Assert.False(p.Colors[0].Alpha); Assert.True(p.Colors[1].Alpha); });
         Assert.Equal(U(BlenderColor.SrgbByteToLinear(77)), U(pb[1].Colors[1].Data[0]));
         // (c) the coloured slot exists but no face is on it: it does not decide - forced, then both layers
         var c = Mesh(Square, SquareFaces, sharp: false);
-        c.Slots.Add((1, true)); c.SlotAlpha.Add(("OPAQUE", 0.5f));
+        c.Slots.Add((1, true)); c.SlotAlpha.Add(("OPAQUE", 0.5f, 1.0));
         c.Colors.Add(("Color", false, CornerColors())); c.Colors.Add(("Color.001", false, second));
         var pc = Assert.Single(BlenderExport.MeshPrimitives(c));
         Assert.Equal(new[] { true, false, false }, pc.Colors.Select(s => s.Forced).ToArray());
@@ -272,20 +272,33 @@ public class BlenderExportTests
         Assert.Throws<InvalidOperationException>(() => BlenderExport.MeshPrimitives(short_));
         // the plan: a BLEND material on the deciding slot gives COLOR_0 with alpha, as normalized shorts, every layer still following
         var r = Mesh(Square, SquareFaces, sharp: false);
-        r.Slots[0] = (1, true); r.SlotAlpha[0] = ("BLEND", 0.5f);
+        r.Slots[0] = (1, true); r.SlotAlpha[0] = ("BLEND", 0.5f, 1.0);
         r.Colors.Add(("Color", false, CornerColors()));
         var set = Assert.Single(Assert.Single(BlenderExport.MeshPrimitives(r)).Colors);
         Assert.True(set.Alpha); Assert.False(set.Forced); Assert.NotNull(set.Shorts);
         Assert.Equal((ushort)9766, set.Shorts[4 * 2 + 3]);   // vertex 1's alpha byte 38 (order: 0 (red 10), 0 (red 200), 1, 2, 3)
         // the invented material of a coloured primitive without one is OPAQUE: RGB
-        r.Slots[0] = (-1, true); r.SlotAlpha[0] = ("BLEND", 0.5f);
+        r.Slots[0] = (-1, true); r.SlotAlpha[0] = ("BLEND", 0.5f, 1.0);
         Assert.False(Assert.Single(Assert.Single(BlenderExport.MeshPrimitives(r)).Colors).Alpha);
         // a plain material first does not decide; the MASK one behind it does, by its cutoff
         var e = Mesh(Square, SquareFaces, new[] { 0, 1 }, sharp: false);
-        e.Slots.Add((1, true)); e.SlotAlpha.Add(("MASK", 0f)); e.Colors.Add(("Color", false, CornerColors()));
+        e.Slots.Add((1, true)); e.SlotAlpha.Add(("MASK", 0f, 1.0)); e.Colors.Add(("Color", false, CornerColors()));
         Assert.All(BlenderExport.MeshPrimitives(e), p => Assert.False(p.Colors[0].Alpha));
-        e.SlotAlpha[1] = ("MASK", 0.5f);
+        e.SlotAlpha[1] = ("MASK", 0.5f, 1.0);
         Assert.All(BlenderExport.MeshPrimitives(e), p => Assert.True(p.Colors[0].Alpha));
+    }
+
+    [Theory]
+    [InlineData("BLEND", 0.99999999, false)]
+    [InlineData("BLEND", 1.0, true)]
+    [InlineData("BLEND", 0.9999999, true)]
+    [InlineData("MASK", 0.99999999, true)]
+    public void Only_a_created_factor_node_rounding_to_one_changes_the_colour_format(string mode, double factor, bool alpha)
+    {
+        var r = Mesh(Square, SquareFaces);
+        r.Slots[0] = (0, true); r.SlotAlpha[0] = (mode, 0.5, factor);
+        r.Colors.Add(("Color", false, CornerColors()));
+        Assert.Equal(alpha, Assert.Single(Assert.Single(BlenderExport.MeshPrimitives(r)).Colors).Alpha);
     }
 
     // a ridge: two faces over the edge 0-1, one leaning each way, and a third face apart from them
@@ -450,7 +463,7 @@ public class BlenderExportTests
     {
         // review of PR #128: Validated() rebuilt the Result without SlotAlpha, and a guard read the gap as OPAQUE
         var r = Mesh(Square, new[] { 0, 1, 2, 0, 2, 3, 2, 1, 0 }, sharp: false);
-        r.Slots[0] = (1, true); r.SlotAlpha[0] = ("BLEND", 0.5f);
+        r.Slots[0] = (1, true); r.SlotAlpha[0] = ("BLEND", 0.5f, 1.0);
         r.Colors.Add(("Color", false, new byte[36]));
         Assert.Same(r.SlotAlpha, BlenderExport.Validated(r).SlotAlpha);
         Assert.True(Assert.Single(Assert.Single(BlenderExport.MeshPrimitives(r)).Colors).Alpha);

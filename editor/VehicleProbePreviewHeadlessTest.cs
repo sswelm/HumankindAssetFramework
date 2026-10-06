@@ -57,7 +57,7 @@ public static class VehicleProbePreviewHeadlessTest
             Clear(assets);
 
             int rootsBefore = Resources.FindObjectsOfTypeAll<GameObject>().Count(g => g.name == "__vehicleProbePreview");
-            m.Materials[0].BaseColorFactor = new float[0]; // inject a failure after the hierarchy and mesh exist
+            m.Materials[0].BaseColorFactor = new double[0]; // inject a failure after the hierarchy and mesh exist
             bool failed = false;
             try { VehicleProbePreview.Build(result, new[] { m }, null, assets); }
             catch (IndexOutOfRangeException) { failed = true; }
@@ -75,7 +75,7 @@ public static class VehicleProbePreviewHeadlessTest
     static void CheckMaterials(List<UnityEngine.Object> assets)
     {
         var m = new HafModel();
-        var hm = new HafMaterial { BaseColorFactor = new[] { 0.1f, 0.2f, 0.8f, 0.25f }, AlphaMode = "BLEND" };
+        var hm = new HafMaterial { BaseColorFactor = new double[] { 0.1f, 0.2f, 0.8f, 0.25f }, AlphaMode = "BLEND" };
         m.Materials.Add(hm);
         Material Make(float tint = 1f) => ModelPreview.MaterialFor(m, 0, true, Shader.Find("Standard"),
             new Dictionary<int, Texture2D>(), new Dictionary<int, Material>(), assets, tint);

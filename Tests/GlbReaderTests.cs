@@ -31,6 +31,21 @@ public class GlbReaderTests
         Assert.Equal(cutoff, GlbReader.Read(GlbWriter.Write(m)).Materials[0].AlphaCutoff);
     }
 
+    [Fact]
+    public void Near_one_alpha_keeps_its_source_precision_through_reduce_and_round_trip()
+    {
+        var f = Full();
+        f.Root["materials"][0]["alphaMode"] = "BLEND";
+        f.Root["materials"][0]["pbrMetallicRoughness"]["baseColorFactor"][3] = 0.99999999;
+        var m = GlbReader.Read(f.Glb());
+        Assert.Equal(0.99999999, m.Materials[0].BaseColorFactor[3]);
+        foreach (var p in m.Meshes[0].Primitives) p.MorphTargets = 0;
+        var reduced = BlenderReduce.Reduce(m, 0, 1f, BlenderNames.Compute(m));
+        Assert.Equal(0.99999999, reduced.SlotAlpha[0].factor);
+        Assert.False(BlenderExport.VertexAlphaWired(reduced.SlotAlpha[0].mode, reduced.SlotAlpha[0].cutoff, reduced.SlotAlpha[0].factor));
+        Assert.Equal(0.99999999, GlbReader.Read(GlbWriter.Write(m)).Materials[0].BaseColorFactor[3]);
+    }
+
     // ---- a tiny GLB writer for fixtures: accessors appended to one BIN chunk, layout under the test's control ----
     sealed class Fixture
     {
@@ -188,7 +203,7 @@ public class GlbReaderTests
         // material, texture, image
         var mat = Assert.Single(m.Materials);
         Assert.Equal("Hull", mat.Name); Assert.True(mat.DoubleSided); Assert.Equal("MASK", mat.AlphaMode); Assert.Equal(0.25f, mat.AlphaCutoff);
-        Assert.Equal(new float[] { 0.5f, 0.25f, 1, 1 }, mat.BaseColorFactor); Assert.Equal(0, mat.BaseColorTexture); Assert.Equal(1, mat.BaseColorTexCoord);
+        Assert.Equal(new double[] { 0.5, 0.25, 1, 1 }, mat.BaseColorFactor); Assert.Equal(0, mat.BaseColorTexture); Assert.Equal(1, mat.BaseColorTexCoord);
         Assert.Equal(0f, mat.MetallicFactor); Assert.Equal(0.8f, mat.RoughnessFactor); Assert.Equal(-1, mat.MetallicRoughnessTexture);
         Assert.Equal(0, mat.NormalTexture); Assert.Equal(0.5f, mat.NormalScale); Assert.Equal(new float[] { 1, 0, 0 }, mat.EmissiveFactor);
         Assert.Equal(0, Assert.Single(m.Textures).Source); Assert.Equal("atlasTex", m.Textures[0].Name);
