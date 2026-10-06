@@ -125,8 +125,9 @@ bit for bit - the exporter's own `mesh.validate()` first (it removes the twin fa
 full run showed five ships differ), corner normals rounded to 4 decimals, unique corners sorted as raw words, the
 colour-set rules; `FULL=1` on 2026-10-06: 148 runs on 74 files, 3,532 object runs, 13.0 million vertices equal);
 skinned objects too, the same day (positions and normals through the armature's matrix in numpy's float32, joints and
-weights from the vertex groups, the exporter's neutral bone; `FULL=1` on 2026-10-06: 152 runs on 76 files, 4,062 object runs, 15.8 million vertices equal, 530 object runs skinned); still open in (d), counted and named by the
-drill on every run: a coloured material with alpha; then prep_model in C# - strip, the file as the Factory's
+weights from the vertex groups, the exporter's neutral bone; `FULL=1` on 2026-10-06: 152 runs on 76 files, 4,062 object runs, 15.8 million vertices equal, 530 object runs skinned); the coloured material with alpha too
+(its set carries alpha when the importer wired the vertex alpha in: BLEND, or MASK with a cutoff in (0, 1]; `FULL=1` on 2026-10-06: 152 runs on 76 files, 4,170 object runs, 15.9 million vertices equal, 0 declined);
+nothing is declined any more; still open in (d): prep_model in C# - strip, the file as the Factory's
 converter reads it (node and material order: Blender writes materials in order of first use, one per vertex-colour
 variant, and a `DefaultMaterial` for a coloured primitive without one), the write, the wiring behind
 `UniversalBaker.PrepViaBlender` with Blender as the fallback; KNOWN on the way: `prep_model.py` fails on a file of several

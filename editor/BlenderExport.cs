@@ -26,7 +26,10 @@
 //     colour layers but none of the above, COLOR_0 is a "forced" set of 255 bytes; then every colour layer not yet written
 //     follows as the next COLOR_n with alpha. A layer's value is its sRGB bytes through Blender's table (alpha: byte / 255);
 //     a set with alpha is written as normalized unsigned shorts (clip, times 65535, + 0.5, truncated).
-//     NOT laid out: a deciding material that is not OPAQUE (its alpha depends on the material's node tree) - named.
+//     A deciding material built with the vertex colour writes the set WITH alpha when the importer wired the vertex
+//     colour's alpha into the material (pbrMetallicRoughness.py base_color: never for OPAQUE; for MASK only with a cutoff
+//     in (0, 1], the importer drops the alpha socket otherwise; always for BLEND) - the exporter's add_alpha is "a colour
+//     attribute feeds the alpha socket" and "the detected alpha mode is not OPAQUE".
 //   * A SKINNED mesh (the object carries an armature modifier): the positions go through the object's matrix_world and
 //     the normals - after the rounding and normalizing above - through armature.matrix_world.to_3x3() @ (armature.
 //     matrix_world.inverted_safe() @ object.matrix_world).to_3x3().inverted_safe().transposed(), both by np.matmul in
@@ -206,19 +209,11 @@ public static class BlenderExport
     }
 
     /// <summary>Why this layout does not cover a reduced mesh, or null.</summary>
-    public static string NotLaidOut(BlenderReduce.Result r, HafModel m)
-    {
-        if (r.Colors.Count == 0) return null;
-        r = Validated(r);
-        foreach (int slot in new SortedSet<int>(r.FaceMaterial))
-        {
-            var (material, vertexColor) = r.Slots[slot];
-            if (!vertexColor) { if (material < 0) return null; continue; }   // an empty slot first decides (the active layer, with alpha): laid out
-            if (material >= 0 && m.Materials[material].AlphaMode != "OPAQUE") return "a coloured material with alpha (its colour set depends on the material's node tree)";
-            return null;
-        }
-        return null;
-    }
+    public static string NotLaidOut(BlenderReduce.Result r, HafModel m) => null;
+
+    /// <summary>Whether the importer wires a coloured material's vertex alpha into it (base_color): BLEND yes, OPAQUE no,
+    /// MASK only with a cutoff in (0, 1].</summary>
+    internal static bool VertexAlphaWired(string alphaMode, float alphaCutoff) => alphaMode == "BLEND" || (alphaMode == "MASK" && alphaCutoff > 0f && alphaCutoff <= 1f);
 
     /// <summary>The colour sets the exporter writes for the mesh: (layer, with alpha), layer -1 for the forced set.</summary>
     static List<(int layer, bool alpha)> ColorPlan(BlenderReduce.Result r)
@@ -232,7 +227,7 @@ public static class BlenderExport
             bool hasMaterial = material >= 0 || vertexColor;   // the importer invents a material for a coloured primitive without one
             if (hasMaterial) noMaterials = false;
             if (decided) continue;
-            if (vertexColor) { plan.Add((0, false)); decided = true; }          // the material's own vertex colour: RGB (an OPAQUE material)
+            if (vertexColor) { plan.Add((0, material >= 0 && slot < r.SlotAlpha.Count && VertexAlphaWired(r.SlotAlpha[slot].mode, r.SlotAlpha[slot].cutoff))); decided = true; }   // the material's own vertex colour: RGB, or RGBA when its alpha is wired (a Result built by hand without SlotAlpha: OPAQUE)
             else if (!hasMaterial) { plan.Add((0, true)); decided = true; }     // no material: the active (render) layer, with alpha
         }
         if (!noMaterials && plan.Count == 0) plan.Add((-1, true));              // a forced COLOR_0 of 255s

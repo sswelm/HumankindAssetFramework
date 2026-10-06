@@ -145,11 +145,9 @@ public class BlenderExportTests
         c.Colors.Add(("Color", false, new byte[36]));
         var pc = Assert.Single(BlenderExport.MeshPrimitives(c));
         Assert.Equal(1, pc.MaterialSlot); Assert.False(Assert.Single(pc.Colors).Alpha);
-        // nor is it the deciding material: a coloured BLEND material whose only face is the twin does not stop the layout
-        var m = new HafModel();
-        m.Materials.Add(new HafMaterial { Name = "opaque" }); m.Materials.Add(new HafMaterial { Name = "glass", AlphaMode = "BLEND" });
-        c.Slots[0] = (1, true);
-        Assert.Null(BlenderExport.NotLaidOut(c, m));
+        // nor is it the deciding material: a coloured BLEND material whose only face is the twin would have given alpha
+        c.Slots[0] = (1, true); c.SlotAlpha.Add(("BLEND", 0.5f)); c.SlotAlpha.Add(("OPAQUE", 0.5f));
+        Assert.False(Assert.Single(Assert.Single(BlenderExport.MeshPrimitives(c)).Colors).Alpha);
     }
 
     // one colour per corner of the square: the corners of vertex 0 differ in red (10 and 200), the rest agree per vertex
@@ -246,24 +244,30 @@ public class BlenderExportTests
     }
 
     [Fact]
-    public void Only_a_deciding_material_with_alpha_is_named_as_not_laid_out()
+    public void A_coloured_material_writes_alpha_only_when_the_importer_wired_the_vertex_alpha_into_it()
     {
-        var m = new HafModel();
-        m.Materials.Add(new HafMaterial { Name = "opaque" }); m.Materials.Add(new HafMaterial { Name = "glass", AlphaMode = "BLEND" });
+        // base_color (the importer): OPAQUE never takes the alpha; BLEND always; MASK only with a cutoff in (0, 1]
+        Assert.False(BlenderExport.VertexAlphaWired("OPAQUE", 0.5f));
+        Assert.True(BlenderExport.VertexAlphaWired("BLEND", 0.5f));
+        Assert.True(BlenderExport.VertexAlphaWired("MASK", 0.5f)); Assert.True(BlenderExport.VertexAlphaWired("MASK", 1f)); Assert.True(BlenderExport.VertexAlphaWired("MASK", 1e-6f));
+        Assert.False(BlenderExport.VertexAlphaWired("MASK", 0f)); Assert.False(BlenderExport.VertexAlphaWired("MASK", 1.5f));
+        // the plan: a BLEND material on the deciding slot gives COLOR_0 with alpha, as normalized shorts, every layer still following
         var r = Mesh(Square, SquareFaces, sharp: false);
-        r.Slots[0] = (1, true);
-        Assert.Null(BlenderExport.NotLaidOut(r, m));                         // no colour layer: nothing depends on the material
+        r.Slots[0] = (1, true); r.SlotAlpha.Add(("BLEND", 0.5f));
         r.Colors.Add(("Color", false, CornerColors()));
-        Assert.Contains("alpha", BlenderExport.NotLaidOut(r, m));            // the coloured BLEND material decides
-        r.Slots[0] = (0, true); Assert.Null(BlenderExport.NotLaidOut(r, m)); // an OPAQUE one: laid out
-        r.Slots[0] = (-1, true); Assert.Null(BlenderExport.NotLaidOut(r, m));// the importer's invented material: OPAQUE
-        // an empty slot met first decides before the BLEND material is reached
+        var set = Assert.Single(Assert.Single(BlenderExport.MeshPrimitives(r)).Colors);
+        Assert.True(set.Alpha); Assert.False(set.Forced); Assert.NotNull(set.Shorts);
+        Assert.Equal((ushort)9766, set.Shorts[4 * 2 + 3]);   // vertex 1's alpha byte 38 (order: 0 (red 10), 0 (red 200), 1, 2, 3)
+        // the invented material of a coloured primitive without one is OPAQUE: RGB
+        r.Slots[0] = (-1, true); r.SlotAlpha[0] = ("BLEND", 0.5f);
+        Assert.False(Assert.Single(Assert.Single(BlenderExport.MeshPrimitives(r)).Colors).Alpha);
+        // a plain material first does not decide; the MASK one behind it does, by its cutoff
         var e = Mesh(Square, SquareFaces, new[] { 0, 1 }, sharp: false);
-        e.Slots[0] = (-1, false); e.Slots.Add((1, true)); e.Colors.Add(("Color", false, CornerColors()));
-        Assert.Null(BlenderExport.NotLaidOut(e, m));
-        // a plain material first does not decide: the BLEND one behind it does
-        e.Slots[0] = (0, false);
-        Assert.Contains("alpha", BlenderExport.NotLaidOut(e, m));
+        e.Slots.Add((1, true)); e.SlotAlpha.Add(("OPAQUE", 0.5f)); e.SlotAlpha.Add(("MASK", 0f)); e.Colors.Add(("Color", false, CornerColors()));
+        Assert.All(BlenderExport.MeshPrimitives(e), p => Assert.False(p.Colors[0].Alpha));
+        e.SlotAlpha[1] = ("MASK", 0.5f);
+        Assert.All(BlenderExport.MeshPrimitives(e), p => Assert.True(p.Colors[0].Alpha));
+        Assert.Null(BlenderExport.NotLaidOut(e, new HafModel()));   // nothing is declined any more
     }
 
     // a ridge: two faces over the edge 0-1, one leaning each way, and a third face apart from them

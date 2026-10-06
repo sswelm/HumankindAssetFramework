@@ -203,8 +203,13 @@ are the armature's bones depth-first (`BlenderNames.BoneNodesInOrder`), and a ve
 exporter's "neutral bone" - only a vertex whose weights do not sum to 1 reaches that, so the fixture for it,
 `export_skin_badweights`, says so in its name and the reader drill's weight contract lets that name through. The neutral
 bone is the ARMATURE's: Blender appends it to the shared skin when any mesh of that armature needs it, so a fully
-weighted mesh beside the boneless one lists it too (review of PR #127; that fixture's second mesh, listed first). NOT laid out
-yet, counted and named on every run: a coloured material with alpha (its colour set depends on the material's node tree).
+weighted mesh beside the boneless one lists it too (review of PR #127; that fixture's second mesh, listed first). A coloured
+material WITH alpha (third part, 2026-10-06): its set is written with alpha exactly when the importer wired the vertex
+colour's alpha into the material (`pbrMetallicRoughness.py` `base_color`): always for BLEND, for MASK only with a cutoff in
+(0, 1] (the importer drops the alpha socket at 0 or over 1), never for OPAQUE (`BlenderExport.VertexAlphaWired`; five
+coloured meshes of the `export_layout` fixture, one per branch, and the population's 96 such object runs). Nothing is
+declined any more: `FULL=1` on 2026-10-06, 152 runs on 76 files, 4,170 object runs (5,324 primitives, 15,882,859 vertices)
+equal, 102 object runs with a wired alpha.
 Gate sample: 50 runs on 25 files, 100 object runs (160 primitives, 30,988 vertices) equal, 2 not laid out, in 10 s;
 `FULL=1` on 2026-10-06: 152 runs on 76 files, 4,062 object runs (5,211 primitives, 15,803,190 vertices) equal - 530 of them skinned, 164 under an armature not at the identity - 96 not laid out (the coloured alpha material), 26 object runs with twin faces removed, 40 with a zero normal on a fan that points elsewhere, in a quarter of an hour. `BlenderExportTests` hold each rule alone, the rounding and the short quantizing against
 values numpy gave, the skinned arithmetic against matrices and results read off Blender; thirty planted defects, one

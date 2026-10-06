@@ -595,6 +595,13 @@ def fx_export_layout(out):
         "indices": b.accessor([0, 1, 2, 0, 2, 3, 0, 3, 4], "H", "SCALAR"), "material": 0}]}
     meshes = [alpha_first, forced, flat, smooth, invalid_fan]
     names = ["AlphaFirst", "Forced", "FlatDegenerate", "SmoothDegenerate", "InvalidFan"]
+    # a coloured primitive on a material with alpha (materials 2..5): the importer wires the vertex colour's alpha into a
+    # BLEND material and into a MASK material whose cutoff is in (0, 1], not into MASK at a cutoff of 0 or over 1 - and
+    # only a wired alpha makes the exporter write COLOR_0 with alpha (2026-10-06, the 96 such object runs of the population)
+    colour = lambda i: (0.1 + 0.2 * (i % 5), 0.6, 0.9 - 0.2 * (i // 5), 0.15 + 0.2 * (i % 5))
+    for k, label in enumerate(["Blend", "MaskHalf", "MaskZero", "MaskOver", "MaskOne"]):
+        meshes.append({"name": "coloured_" + label.lower(), "primitives": [surface(8.0 + 1.2 * k, 2.0, colour=colour, material=2 + k)]})
+        names.append("Coloured" + label)
     solids = [
         ("Tetra", [(0, 0, 0), (1, 0, 0), (0.4, 0.9, 0), (0.45, 0.3, 0.8)], [(0, 2, 1), (0, 1, 3), (1, 2, 3), (2, 0, 3)]),
         ("Bipyramid", [(0, 0, 0), (1, 0, 0), (0.4, 0.9, 0), (0.45, 0.3, 0.8), (0.5, 0.35, -0.7)], [(0, 1, 3), (1, 2, 3), (2, 0, 3), (1, 0, 4), (2, 1, 4), (0, 2, 4)]),
@@ -616,7 +623,12 @@ def fx_export_layout(out):
             meshes.append({"name": name.lower() + ("" if with_normals else "_flat"), "primitives": [{"attributes": attrs, "indices": b.accessor([k for f in faces for k in f], "H", "SCALAR"), "material": 0}]})
             names.append(name + ("" if with_normals else "Flat"))
     root = base("export_layout",
-                materials=[{"name": "plain", "pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.8, 0.8, 1]}}, {"name": "lined", "pbrMetallicRoughness": {"baseColorFactor": [0.3, 0.6, 0.9, 1]}}],
+                materials=[{"name": "plain", "pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.8, 0.8, 1]}}, {"name": "lined", "pbrMetallicRoughness": {"baseColorFactor": [0.3, 0.6, 0.9, 1]}},
+                           {"name": "glass", "alphaMode": "BLEND", "pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.9, 1, 0.5]}},
+                           {"name": "leaves", "alphaMode": "MASK", "alphaCutoff": 0.5, "pbrMetallicRoughness": {"baseColorFactor": [0.2, 0.7, 0.2, 1]}},
+                           {"name": "mask_zero", "alphaMode": "MASK", "alphaCutoff": 0.0, "pbrMetallicRoughness": {"baseColorFactor": [0.7, 0.7, 0.2, 1]}},
+                           {"name": "mask_over", "alphaMode": "MASK", "alphaCutoff": 1.5, "pbrMetallicRoughness": {"baseColorFactor": [0.7, 0.2, 0.7, 1]}},
+                           {"name": "mask_one", "alphaMode": "MASK", "alphaCutoff": 1.0, "pbrMetallicRoughness": {"baseColorFactor": [0.2, 0.7, 0.7, 1]}}],
                 meshes=meshes,
                 nodes=[{"name": name, "mesh": i} for i, name in enumerate(names)],
                 scenes=[{"nodes": list(range(len(names)))}], scene=0)

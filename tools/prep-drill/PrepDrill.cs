@@ -151,6 +151,7 @@ static class PrepDrill
         "normals from the file (custom normals)", "no normals (every face flat)", "a normal that rounds to zero, made up", "a zero normal on a fan that does not point up", "an object of several primitives",
         "an object without faces", "two or more UV sets", "COLOR_0 as RGB (the material's colour)", "COLOR_0 with alpha (a face without material)",
         "COLOR_0 forced (255s)", "two or more colour sets", "a colour layer on the vertices (point domain)", "a twin face the exporter's validate removes",
+        "COLOR_0 with alpha (a coloured material whose alpha is wired)", "COLOR_0 as RGB (a coloured MASK material whose alpha is not wired)",
         "a weighted mesh sharing an armature with a neutral bone",
         "a skinned object", "a vertex without a bone (the neutral bone)", "a vertex of more than four groups", "an armature that is not at the identity",
     };
@@ -171,6 +172,12 @@ static class PrepDrill
         Hit("COLOR_0 with alpha (a face without material)", sets.Count > 0 && sets[0].Alpha && !sets[0].Forced);
         Hit("COLOR_0 forced (255s)", sets.Count > 0 && sets[0].Forced);
         Hit("two or more colour sets", sets.Count > 1);
+        // the deciding slot's material: one with alpha splits by whether the importer wired the vertex alpha into it
+        int deciding = -1;
+        foreach (int slot in new SortedSet<int>(r.FaceMaterial)) { var (mat, vc) = r.Slots[slot]; if (vc) { deciding = slot; break; } if (mat < 0) break; }
+        bool alphaMaterial = deciding >= 0 && r.Slots[deciding].material >= 0 && r.SlotAlpha[deciding].mode != "OPAQUE";
+        Hit("COLOR_0 with alpha (a coloured material whose alpha is wired)", alphaMaterial && sets.Count > 0 && sets[0].Alpha);
+        Hit("COLOR_0 as RGB (a coloured MASK material whose alpha is not wired)", alphaMaterial && sets.Count > 0 && !sets[0].Alpha);
         Hit("a colour layer on the vertices (point domain)", r.Colors.Exists(c => c.point));
         // the corner normals once more, before the exporter's rounding: does any round to the zero vector
         int nc = r.Faces.Length; short[] d0 = null, d1 = null;
