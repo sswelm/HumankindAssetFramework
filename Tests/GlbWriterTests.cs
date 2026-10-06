@@ -221,7 +221,7 @@ public class GlbWriterTests
             case "no-keys": m.Animations[0].Samplers[0].Times = new float[0]; m.Animations[0].Samplers[0].Values = new float[0]; break;
             case "nan-time": m.Animations[0].Samplers[0].Times[0] = float.NaN; break;
             case "nan-translation": m.Nodes[0].Matrix = null; m.Nodes[0].Translation[1] = double.PositiveInfinity; break;
-            case "short-factor": m.Materials[0].BaseColorFactor = new float[] { 1, 1, 1 }; break;
+            case "short-factor": m.Materials[0].BaseColorFactor = new double[] { 1, 1, 1 }; break;
             case "unknown-image": m.Images[0].MimeType = ""; m.Images[0].Bytes = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 }; break;
             case "webp-image": m.Images[0].MimeType = "image/webp"; break;
             case "asset-extras-not-json": m.AssetExtrasJson = "{not json"; break;

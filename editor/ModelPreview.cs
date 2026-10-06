@@ -47,8 +47,8 @@ public static class ModelPreview
             // although io_scene_fbx writes DiffuseColor unconverted. So the old Blender previews showed these colours, and the
             // project's gamma colour space shows them as glTF means them. Convert RGB before the Lab's brightness multiplier;
             // alpha is coverage and stays linear. (A revert of this on the exporter's line alone was wrong: PR #118.)
-            var colour = new Color(hm.BaseColorFactor[0], hm.BaseColorFactor[1], hm.BaseColorFactor[2],
-                hm.AlphaMode == "OPAQUE" ? 1f : hm.BaseColorFactor[3]).gamma;
+            var colour = new Color((float)hm.BaseColorFactor[0], (float)hm.BaseColorFactor[1], (float)hm.BaseColorFactor[2],
+                hm.AlphaMode == "OPAQUE" ? 1f : (float)hm.BaseColorFactor[3]).gamma;
             mat.color = new Color(colour.r * tint, colour.g * tint, colour.b * tint, colour.a);
             if (mat.HasProperty("_Mode"))
             {
@@ -59,7 +59,7 @@ public static class ModelPreview
                     mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.One);
                     mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.Zero);
                     mat.SetInt("_ZWrite", 1);
-                    mat.SetFloat("_Cutoff", hm.AlphaCutoff);
+                    mat.SetFloat("_Cutoff", (float)hm.AlphaCutoff);
                     mat.EnableKeyword("_ALPHATEST_ON");
                     mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.AlphaTest;
                 }

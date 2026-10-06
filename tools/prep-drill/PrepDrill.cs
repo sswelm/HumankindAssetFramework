@@ -10,7 +10,7 @@ using System.Text;
 // for the node of the same name - per primitive: the vertex count, positions, normals, every UV and colour set, a
 // skinned mesh's joints and weights (and its joint list, by name) and the indices, bit for bit. One line per file and run:
 //   PASS <key> <tag>: <n> objects, <p> primitives equal            FAIL <key> <tag>: <the first differences>
-// and a TOTAL line. An object the port declines (BlenderReduce.FallbackReason) or does not lay out yet is counted, named.
+// and a TOTAL line. An object the port declines (BlenderReduce.FallbackReason) is counted, named.
 static class PrepDrill
 {
     static int Main(string[] args)
@@ -83,10 +83,8 @@ static class PrepDrill
                         skinLayout = new BlenderExport.Skin { ObjectWorld = arma, ArmatureWorld = arma, JointCount = place.Count, GroupJoint = m.Skins[si].Joints.Select(j => place.TryGetValue(j, out int at) ? at : -1).ToArray() };
                     }
                     var r = BlenderReduce.Reduce(m, node, ratio, names);
-                    why = BlenderExport.NotLaidOut(r, m);
-                    if (why != null) { declined++; declinedWhy[why] = declinedWhy.TryGetValue(why, out int c2) ? c2 + 1 : 1; continue; }
                     var mine = BlenderExport.MeshPrimitives(r, skinLayout);
-                    Cover(r, BlenderExport.Validated(r), mine, cover);
+                    Cover(m, r, BlenderExport.Validated(r), mine, cover);
                     if (skinLayout != null)
                     {
                         cover["a skinned object"]++;
@@ -151,12 +149,16 @@ static class PrepDrill
         "normals from the file (custom normals)", "no normals (every face flat)", "a normal that rounds to zero, made up", "a zero normal on a fan that does not point up", "an object of several primitives",
         "an object without faces", "two or more UV sets", "COLOR_0 as RGB (the material's colour)", "COLOR_0 with alpha (a face without material)",
         "COLOR_0 forced (255s)", "two or more colour sets", "a colour layer on the vertices (point domain)", "a twin face the exporter's validate removes",
+        "COLOR_0 with alpha (a coloured material whose alpha is wired)", "COLOR_0 as RGB (a coloured MASK material at a cutoff of 0 or over 1)",
+        "a coloured alpha material after twin-face validation", "a MASK cutoff whose float rounding crosses a wiring boundary",
+        "COLOR_0 with alpha wired through a base colour texture", "COLOR_0 with alpha on an unlit material",
+        "COLOR_0 as RGB after a non-unit alpha factor rounds to one", "COLOR_0 with alpha when the factor is exactly one",
         "a weighted mesh sharing an armature with a neutral bone",
         "a skinned object", "a vertex without a bone (the neutral bone)", "a vertex of more than four groups", "an armature that is not at the identity",
     };
 
     /// <summary>Which of the layout's rules this object exercised (counted per object run).</summary>
-    static void Cover(BlenderReduce.Result reduced, BlenderReduce.Result r, List<BlenderExport.Primitive> mine, SortedDictionary<string, long> cover)
+    static void Cover(HafModel model, BlenderReduce.Result reduced, BlenderReduce.Result r, List<BlenderExport.Primitive> mine, SortedDictionary<string, long> cover)
     {
         void Hit(string k, bool yes) { if (yes) cover[k]++; }
         Hit("a twin face the exporter's validate removes", r.Faces.Length < reduced.Faces.Length);
@@ -168,9 +170,30 @@ static class PrepDrill
         Hit("two or more UV sets", r.Uv.Count > 1);
         var sets = mine[0].Colors;
         Hit("COLOR_0 as RGB (the material's colour)", sets.Count > 0 && !sets[0].Alpha);
-        Hit("COLOR_0 with alpha (a face without material)", sets.Count > 0 && sets[0].Alpha && !sets[0].Forced);
+        // the deciding slot's material: one with alpha splits by whether the importer wired the vertex alpha into it
+        int deciding = -1;
+        foreach (int slot in new SortedSet<int>(r.FaceMaterial)) { var (mat, vc) = r.Slots[slot]; if (vc) { deciding = slot; break; } if (mat < 0) break; }
+        bool alphaMaterial = deciding >= 0 && r.Slots[deciding].material >= 0 && r.SlotAlpha[deciding].mode != "OPAQUE";
+        Hit("COLOR_0 with alpha (a face without material)", sets.Count > 0 && sets[0].Alpha && !sets[0].Forced && !alphaMaterial);
         Hit("COLOR_0 forced (255s)", sets.Count > 0 && sets[0].Forced);
         Hit("two or more colour sets", sets.Count > 1);
+        Hit("COLOR_0 with alpha (a coloured material whose alpha is wired)", alphaMaterial && sets.Count > 0 && sets[0].Alpha);
+        Hit("COLOR_0 as RGB (a coloured MASK material at a cutoff of 0 or over 1)", alphaMaterial && r.SlotAlpha[deciding].mode == "MASK" && sets.Count > 0 && !sets[0].Alpha);
+        Hit("a coloured alpha material after twin-face validation", alphaMaterial && r.Faces.Length < reduced.Faces.Length && sets.Count > 0 && sets[0].Alpha);
+        bool roundedBoundary = false;
+        if (alphaMaterial && r.SlotAlpha[deciding].mode == "MASK")
+        {
+            double cutoff = r.SlotAlpha[deciding].cutoff;
+            roundedBoundary = (cutoff > 1 && (float)cutoff == 1f) || (cutoff != 0 && (float)cutoff == 0f);   // 1.00000001, 1e-50, -1e-50
+        }
+        Hit("a MASK cutoff whose float rounding crosses a wiring boundary", roundedBoundary);
+        bool wired = alphaMaterial && sets.Count > 0 && sets[0].Alpha;
+        bool blend = alphaMaterial && r.SlotAlpha[deciding].mode == "BLEND";
+        double factor = alphaMaterial ? r.SlotAlpha[deciding].factor : 1.0;
+        Hit("COLOR_0 as RGB after a non-unit alpha factor rounds to one", blend && factor != 1.0 && (float)factor == 1f && sets.Count > 0 && !sets[0].Alpha);
+        Hit("COLOR_0 with alpha when the factor is exactly one", blend && factor == 1.0 && wired);
+        Hit("COLOR_0 with alpha wired through a base colour texture", wired && model.Materials[r.Slots[deciding].material].BaseColorTexture >= 0);
+        Hit("COLOR_0 with alpha on an unlit material", wired && (model.Materials[r.Slots[deciding].material].ExtensionsJson ?? "").Contains("KHR_materials_unlit"));
         Hit("a colour layer on the vertices (point domain)", r.Colors.Exists(c => c.point));
         // the corner normals once more, before the exporter's rounding: does any round to the zero vector
         int nc = r.Faces.Length; short[] d0 = null, d1 = null;

@@ -203,10 +203,27 @@ are the armature's bones depth-first (`BlenderNames.BoneNodesInOrder`), and a ve
 exporter's "neutral bone" - only a vertex whose weights do not sum to 1 reaches that, so the fixture for it,
 `export_skin_badweights`, says so in its name and the reader drill's weight contract lets that name through. The neutral
 bone is the ARMATURE's: Blender appends it to the shared skin when any mesh of that armature needs it, so a fully
-weighted mesh beside the boneless one lists it too (review of PR #127; that fixture's second mesh, listed first). NOT laid out
-yet, counted and named on every run: a coloured material with alpha (its colour set depends on the material's node tree).
-Gate sample: 50 runs on 25 files, 100 object runs (160 primitives, 30,988 vertices) equal, 2 not laid out, in 10 s;
-`FULL=1` on 2026-10-06: 152 runs on 76 files, 4,062 object runs (5,211 primitives, 15,803,190 vertices) equal - 530 of them skinned, 164 under an armature not at the identity - 96 not laid out (the coloured alpha material), 26 object runs with twin faces removed, 40 with a zero normal on a fan that points elsewhere, in a quarter of an hour. `BlenderExportTests` hold each rule alone, the rounding and the short quantizing against
+weighted mesh beside the boneless one lists it too (review of PR #127; that fixture's second mesh, listed first). A coloured
+material WITH alpha (third part, 2026-10-06): its set is written with alpha when the importer wired the vertex colour's
+alpha into the material (`pbrMetallicRoughness.py` `base_color`), which it does for every alpha mode and cutoff except
+OPAQUE (or no mode) and MASK at a cutoff of 0 or over 1 - so BLEND, MASK in (0, 1] and below 0, and a mode string the spec
+does not know are wired (`BlenderExport.VertexAlphaWired`). The population has 48 such primitives, all BLEND and one of
+them textured; the `export_layout` fixture carries the rest: MASK at 0.5, 0, 1.5, 1.0, without a cutoff and at -0.5, "Blend",
+the wiring through a base colour texture, unlit BLEND and MASK, and a BLEND solid that loses a twin face (its slots' alpha
+modes must survive validate's rebuild - they did not, in the first version: the review of PR #128 found it, and the rule
+above, which the first version had as "BLEND, or MASK in (0, 1]"). The cutoff is kept as the JSON DOUBLE through the model (the review's
+fixtures: MASK at 1.00000001 and at 1e-50, which float32 would put on the wrong side), so a boundary is decided as the
+importer decides it. Base colour factors also retain JSON double precision: a non-unit alpha such as `0.99999999`
+creates a factor node whose float32 value rounds to 1, so the exporter detects OPAQUE and writes RGB. Exactly 1
+creates no factor node and keeps RGBA; MASK's clip nodes also keep RGBA. The regression fixture exercises plain,
+textured, unlit and specular-glossiness materials, with coverage required for both sides of the near-one decision.
+Specular-glossiness uses its diffuse alpha factor; unlit takes precedence and uses the core base colour factor.
+Not probed: `KHR_animation_pointer` (an animated cutoff keeps the socket). Nothing is
+declined any more. Gate sample: 50 runs on 25 files, 154 object runs (219 primitives, 31,884 vertices) equal, in 10 s;
+`FULL=1` on 2026-10-06 (late, with the Espana just fused and rigged - 1.1 million triangles over 3,500 objects): 154 runs on
+77 files, 11,344 object runs (12,505 primitives, 17,449,348 vertices) equal, 0 declined - 534 of them skinned, 166 under an
+armature not at the identity, 132 with a wired alpha, 29 with twin faces removed, 42 with a zero normal on a fan that points
+elsewhere; Blender needed an hour for it, the C# side a few minutes. `BlenderExportTests` hold each rule alone, the rounding and the short quantizing against
 values numpy gave, the skinned arithmetic against matrices and results read off Blender; thirty planted defects, one
 per rule, each failed them but one that changes nothing (`<` for `<=` at the weight threshold: no float32 equals 0.0001);
 sixteen planted under the drill each failed it on the fixture built for that rule. Three planted defects cannot fail the

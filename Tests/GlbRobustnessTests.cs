@@ -169,7 +169,7 @@ public class GlbRobustnessTests
     public void The_written_bytes_do_not_depend_on_the_threads_culture()
     {
         var m = GlbReader.Read(GlbReaderTests.FullGlb()); m.Meshes[0].Primitives[0].MorphTargets = 0;
-        m.Nodes[0].Translation = new[] { 0.5, -1.25, 1e-7 }; m.Materials[0].BaseColorFactor = new[] { 0.5f, 0.25f, 0.125f, 1f }; m.Animations[0].Samplers[0].Times[1] = 0.75f;
+        m.Nodes[0].Translation = new[] { 0.5, -1.25, 1e-7 }; m.Materials[0].BaseColorFactor = new double[] { 0.5f, 0.25f, 0.125f, 1f }; m.Animations[0].Samplers[0].Times[1] = 0.75f;
         var was = CultureInfo.CurrentCulture;
         byte[] invariant, dutch, turkish;
         try

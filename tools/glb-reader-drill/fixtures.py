@@ -561,7 +561,8 @@ def fx_export_layout(out):
     edge, +X: Blender's `corner_normals` there is (0, 0, 0) (read 2026-10-05), exported as up. And small closed solids - a tetrahedron, a
     bipyramid, an octahedron, a box, each with normals and without: at a third of the faces the collapse closes them onto
     themselves, leaving two faces on the same three vertices, and the exporter's `mesh.validate()` removes the later one
-    (found on five fused ships by the full run, 2026-10-05: their bolts and rivets are such solids)."""
+    (found on five fused ships by the full run, 2026-10-05: their bolts and rivets are such solids). Then coloured meshes
+    on materials with alpha, one per branch of the vertex colour's alpha wiring (see the comments at the materials)."""
     b = Buf()
 
     def surface(ox, oy, normals=True, colour=None, material=None, extra=None):
@@ -595,6 +596,32 @@ def fx_export_layout(out):
         "indices": b.accessor([0, 1, 2, 0, 2, 3, 0, 3, 4], "H", "SCALAR"), "material": 0}]}
     meshes = [alpha_first, forced, flat, smooth, invalid_fan]
     names = ["AlphaFirst", "Forced", "FlatDegenerate", "SmoothDegenerate", "InvalidFan"]
+    # a coloured primitive on a material with alpha (materials 2..8): the importer drops the vertex colour's alpha for
+    # OPAQUE and for MASK at a cutoff of 0 or over 1, and wires it for everything else - and only a wired alpha makes the
+    # exporter write COLOR_0 with alpha (2026-10-06, the 96 such object runs of the population)
+    colour = lambda i: (0.1 + 0.2 * (i % 5), 0.6, 0.9 - 0.2 * (i // 5), 0.15 + 0.2 * (i % 5))
+    for k, label in enumerate(["Blend", "MaskHalf", "MaskZero", "MaskOver", "MaskOne", "MaskJustOverOne", "MaskTiny"]):
+        meshes.append({"name": "coloured_" + label.lower(), "primitives": [surface(8.0 + 1.2 * k, 2.0, colour=colour, material=2 + k)]})
+        names.append("Coloured" + label)
+    # review of PR #128: the same wiring through a base colour TEXTURE (the importer mixes the texture's alpha with the
+    # vertex colour's; materials 9 and 10), on an UNLIT material (11, 12), and on closed solids whose collapse leaves a twin
+    # face (validate rebuilds the mesh: its slots' alpha modes must come along; the "_alpha" solids below)
+    # ... and (review of PR #128, each measured in Blender) unlit MASK, MASK without a cutoff (the default 0.5), a mode
+    # string the spec does not know ("Blend": wired - the importer drops the socket only for OPAQUE) and a NEGATIVE cutoff (wired)
+    for k, label in enumerate(["BlendTextured", "MaskTextured", "BlendUnlit", "MaskUnlit", "MaskNoCutoff", "OddMode", "MaskNegative"]):
+        meshes.append({"name": "coloured_" + label.lower(), "primitives": [surface(8.0 + 1.2 * k, 4.0, colour=colour, material=9 + k)]})
+        names.append("Coloured" + label)
+    # A JSON alpha just below 1 creates a factor node that rounds to float32 1: RGB for BLEND, RGBA for MASK.
+    # Exactly 1 creates no factor node and keeps RGBA. Exercise the textured, unlit and specular-glossiness paths too.
+    # ... and MASK at -1e-50: a cutoff that is 0 in float32 only (wired - not 0 as a double)
+    for k, label in enumerate(["NearOne", "NearOneTextured", "NearOneUnlit", "NearOneMask", "ExactlyOne", "NearOneSpecGloss", "CoreNearOneSpecGloss", "MaskTinyNegative"]):
+        meshes.append({"name": "coloured_" + label.lower(), "primitives": [surface(8.0 + 1.2 * k, 6.0, colour=colour, material=16 + k)]})
+        names.append("Coloured" + label)
+    tetra = [(14.0, 3.0, -9.0), (15.0, 3.0, -9.0), (14.4, 3.9, -9.0), (14.45, 3.3, -8.2)]
+    tetra_attrs = {"POSITION": b.accessor(tetra, "f", "VEC3"), "COLOR_0": b.accessor([colour(i) for i in range(4)], "f", "VEC4", minmax=False)}
+    meshes.append({"name": "coloured_tetra", "primitives": [{"attributes": tetra_attrs, "indices": b.accessor([0, 2, 1, 0, 1, 3, 1, 2, 3, 2, 0, 3], "H", "SCALAR"), "material": 2}]})
+    names.append("ColouredTetra")
+    tex = b.blob(png(4, 4, (200, 120, 60)))
     solids = [
         ("Tetra", [(0, 0, 0), (1, 0, 0), (0.4, 0.9, 0), (0.45, 0.3, 0.8)], [(0, 2, 1), (0, 1, 3), (1, 2, 3), (2, 0, 3)]),
         ("Bipyramid", [(0, 0, 0), (1, 0, 0), (0.4, 0.9, 0), (0.45, 0.3, 0.8), (0.5, 0.35, -0.7)], [(0, 1, 3), (1, 2, 3), (2, 0, 3), (1, 0, 4), (2, 1, 4), (0, 2, 4)]),
@@ -615,8 +642,39 @@ def fx_export_layout(out):
                 attrs["NORMAL"] = b.accessor(nrm, "f", "VEC3", minmax=False)
             meshes.append({"name": name.lower() + ("" if with_normals else "_flat"), "primitives": [{"attributes": attrs, "indices": b.accessor([k for f in faces for k in f], "H", "SCALAR"), "material": 0}]})
             names.append(name + ("" if with_normals else "Flat"))
+            if not with_normals and name in ("Tetra", "Octa"):
+                # Reduction leaves twins; export validation must retain this BLEND slot's alpha metadata.
+                coloured = dict(attrs)
+                coloured["COLOR_0"] = b.accessor([colour(i) for i in range(len(verts))], "f", "VEC4", minmax=False)
+                meshes.append({"name": name.lower() + "_alpha", "primitives": [{"attributes": coloured, "indices": b.accessor([k for f in faces for k in f], "H", "SCALAR"), "material": 2}]})
+                names.append(name + "Alpha")
     root = base("export_layout",
-                materials=[{"name": "plain", "pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.8, 0.8, 1]}}, {"name": "lined", "pbrMetallicRoughness": {"baseColorFactor": [0.3, 0.6, 0.9, 1]}}],
+                materials=[{"name": "plain", "pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.8, 0.8, 1]}}, {"name": "lined", "pbrMetallicRoughness": {"baseColorFactor": [0.3, 0.6, 0.9, 1]}},
+                           {"name": "glass", "alphaMode": "BLEND", "pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.9, 1, 0.5]}},
+                           {"name": "leaves", "alphaMode": "MASK", "alphaCutoff": 0.5, "pbrMetallicRoughness": {"baseColorFactor": [0.2, 0.7, 0.2, 1]}},
+                           {"name": "mask_zero", "alphaMode": "MASK", "alphaCutoff": 0.0, "pbrMetallicRoughness": {"baseColorFactor": [0.7, 0.7, 0.2, 1]}},
+                           {"name": "mask_over", "alphaMode": "MASK", "alphaCutoff": 1.5, "pbrMetallicRoughness": {"baseColorFactor": [0.7, 0.2, 0.7, 1]}},
+                           {"name": "mask_one", "alphaMode": "MASK", "alphaCutoff": 1.0, "pbrMetallicRoughness": {"baseColorFactor": [0.2, 0.7, 0.7, 1]}},
+                           {"name": "mask_just_over_one", "alphaMode": "MASK", "alphaCutoff": 1.00000001},
+                           {"name": "mask_tiny", "alphaMode": "MASK", "alphaCutoff": 1e-50},
+                           {"name": "glass_textured", "alphaMode": "BLEND", "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}, "baseColorFactor": [1, 1, 1, 0.8]}},
+                           {"name": "leaves_textured", "alphaMode": "MASK", "alphaCutoff": 0.4, "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}},
+                           {"name": "glass_unlit", "alphaMode": "BLEND", "extensions": {"KHR_materials_unlit": {}}, "pbrMetallicRoughness": {"baseColorFactor": [0.9, 0.9, 1, 0.6]}},
+                           {"name": "leaves_unlit", "alphaMode": "MASK", "alphaCutoff": 0.5, "extensions": {"KHR_materials_unlit": {}}, "pbrMetallicRoughness": {"baseColorFactor": [0.3, 0.8, 0.3, 1]}},
+                           {"name": "mask_default", "alphaMode": "MASK", "pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.5, 0.3, 1]}},
+                           {"name": "odd_mode", "alphaMode": "Blend", "pbrMetallicRoughness": {"baseColorFactor": [0.5, 0.5, 0.8, 0.7]}},
+                           {"name": "mask_negative", "alphaMode": "MASK", "alphaCutoff": -0.5, "pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.3, 0.5, 1]}},
+                           {"name": "near_one", "alphaMode": "BLEND", "pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.9, 1, 0.99999999]}},
+                           {"name": "near_one_textured", "alphaMode": "BLEND", "pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.9, 1, 0.99999999], "baseColorTexture": {"index": 0}}},
+                           {"name": "near_one_unlit", "alphaMode": "BLEND", "pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.9, 1, 0.99999999]}, "extensions": {"KHR_materials_unlit": {}}},
+                           {"name": "near_one_mask", "alphaMode": "MASK", "pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.9, 1, 0.99999999]}},
+                           {"name": "exactly_one", "alphaMode": "BLEND", "pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.9, 1, 1]}},
+                           {"name": "near_one_spec_gloss", "alphaMode": "BLEND", "extensions": {"KHR_materials_pbrSpecularGlossiness": {"diffuseFactor": [0.8, 0.9, 1, 0.99999999]}}},
+                           {"name": "core_near_one_spec_gloss", "alphaMode": "BLEND", "pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.9, 1, 0.99999999]}, "extensions": {"KHR_materials_pbrSpecularGlossiness": {"diffuseFactor": [0.8, 0.9, 1, 0.5]}}},
+                           {"name": "mask_tiny_negative", "alphaMode": "MASK", "alphaCutoff": -1e-50, "pbrMetallicRoughness": {"baseColorFactor": [0.6, 0.9, 0.6, 1]}}],
+                images=[{"name": "orange", "mimeType": "image/png", "bufferView": tex}],
+                textures=[{"name": "orange", "source": 0}],
+                extensionsUsed=["KHR_materials_unlit", "KHR_materials_pbrSpecularGlossiness"],
                 meshes=meshes,
                 nodes=[{"name": name, "mesh": i} for i, name in enumerate(names)],
                 scenes=[{"nodes": list(range(len(names)))}], scene=0)

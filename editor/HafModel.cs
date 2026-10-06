@@ -153,7 +153,7 @@ public sealed class HafPrimitive
 public sealed class HafMaterial
 {
     public string Name = "";
-    public float[] BaseColorFactor = { 1, 1, 1, 1 };
+    public double[] BaseColorFactor = { 1, 1, 1, 1 };   // JSON precision decides whether Blender creates an alpha-factor node
     public int BaseColorTexture = -1; public int BaseColorTexCoord;
     public float MetallicFactor = 1, RoughnessFactor = 1;
     public int MetallicRoughnessTexture = -1; public int MetallicRoughnessTexCoord;
@@ -162,7 +162,7 @@ public sealed class HafMaterial
     public int EmissiveTexture = -1; public int EmissiveTexCoord;
     public float[] EmissiveFactor = { 0, 0, 0 };
     public string AlphaMode = "OPAQUE";
-    public float AlphaCutoff = 0.5f;
+    public double AlphaCutoff = 0.5;   // keep JSON precision: Blender tests MASK boundaries before storing node values as floats
     public bool DoubleSided;
     // The material's `extensions` object, verbatim JSON, or null: KHR_materials_specular, clearcoat, ior, ... carry their
     // own texture references and factors. Not interpreted here (nothing in HAF reads them), but CARRIED, so a file
