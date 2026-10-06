@@ -170,6 +170,48 @@ equal, none declined, in 15 minutes (C# under 5 of them). The vehicle probe dril
 (`PROBE_MONO=1` for the old way).
 `BlenderDecimateTests` hold the heap order, the quadric, the stop count, the UV merge and the colour path (values from
 real SSE on the same CPU); the `decimate_attrs` fixture carries the attribute combinations no population file has.
+**`tools/prep_drill.sh`** (step 5 milestone d, 2026-10-05: the mesh as Blender's glTF EXPORTER writes it after the reduce,
+`editor/BlenderExport.cs`) lets Blender run the REAL `editor/Tools~/prep_model.py` - by `runpy`, with the Factory's command
+line - twice per file: with a target of a third of the file's triangles, and with a target of all of them (nothing
+collapses; importer, apply and exporter still run). The C# side reduces every mesh object of the source at prep_model's
+ratio (`BlenderReduce`), lays it out as the exporter does and holds each primitive to the one Blender wrote for the node of
+the same name, bit for bit: the vertex count, positions, normals, every UV set, every colour set, the indices. The rules,
+each read from `io_scene_gltf2/blender/exp/primitive_extract.py`: the exporter first runs `mesh.validate()`, which
+removes the later of two faces on the same three vertices - the collapse leaves such twins where a small closed solid (a
+bolt, a rivet) closes onto itself, and the normals of the faces that stay change with them; one "dot" per corner (vertex
+number, normal, UVs, colours); the normal is `Mesh.corner_normals` (`VehicleProbe.BlenderCornerNormals`: by the mesh's normal domain) rounded
+to 4 decimals in float32, renormalized, a zero made "up"; every -0.0 becomes 0.0; triangles are bucketed per material
+slot and each bucket's unique dots are SORTED as raw 32-bit words (numpy sorts the records as strings: a negative float
+comes after a positive one); the colour sets follow the first material slot in use - a material built with the vertex
+colour gives COLOR_0 as linear RGB floats, a face without material ahead of it gives COLOR_0 with alpha, materials
+without either give a forced COLOR_0 of 255s - and every further layer follows with alpha as normalized shorts. The C#
+side prints which rules its compared objects exercised (`COVER` rows) and the script FAILS on a row at zero: three were
+at zero on the first run (the forced set, alpha first, the zero normal) and the `export_layout` fixture now carries them.
+The validate step was MISSING until the first `FULL=1` run: the gate sample was equal, five fused ships were not (a few
+triangles too many, one normal made "up"), and the fixture's closed solids now hold it in the gate. The fixture's
+triangle of no area could not tell "a zero normal is made up" from "an invalid space keeps the fan's normal" - its fan
+points up anyway - so a fan whose angle-weighted normal runs along its own edge, +X, stands beside it (its own `COVER`
+row): Blender's corner normal there is zero, and the rival rule, planted, fails the drill on that object alone.
+It runs 64-bit like the decimate drill. A file `prep_model.py` itself fails on (several scenes: "not in View Layer")
+passes only as that known failure. A SKINNED object (second part, 2026-10-06) hangs from its armature without a
+transform of its own: its positions go through the armature's `matrix_world`, its normals through the armature's 3x3 times
+the inverse transpose of `armature^-1 @ object` (the identity plus float noise - an ulp or two that shows), both by
+numpy's float32 `matmul` (numpy reads a mathutils matrix as FLOAT32; the first version computed in double and the
+turned, unevenly scaled armature of the `export_skin` fixture showed an ulp where the simpler rigs of the sample had
+agreed); per vertex the groups over 0.0001 by weight (a stable sort), four kept, divided by their float32 sum; the joints
+are the armature's bones depth-first (`BlenderNames.BoneNodesInOrder`), and a vertex left without a bone gets the
+exporter's "neutral bone" - only a vertex whose weights do not sum to 1 reaches that, so the fixture for it,
+`export_skin_badweights`, says so in its name and the reader drill's weight contract lets that name through. The neutral
+bone is the ARMATURE's: Blender appends it to the shared skin when any mesh of that armature needs it, so a fully
+weighted mesh beside the boneless one lists it too (review of PR #127; that fixture's second mesh, listed first). NOT laid out
+yet, counted and named on every run: a coloured material with alpha (its colour set depends on the material's node tree).
+Gate sample: 50 runs on 25 files, 100 object runs (160 primitives, 30,988 vertices) equal, 2 not laid out, in 10 s;
+`FULL=1` on 2026-10-06: 152 runs on 76 files, 4,062 object runs (5,211 primitives, 15,803,190 vertices) equal - 530 of them skinned, 164 under an armature not at the identity - 96 not laid out (the coloured alpha material), 26 object runs with twin faces removed, 40 with a zero normal on a fan that points elsewhere, in a quarter of an hour. `BlenderExportTests` hold each rule alone, the rounding and the short quantizing against
+values numpy gave, the skinned arithmetic against matrices and results read off Blender; thirty planted defects, one
+per rule, each failed them but one that changes nothing (`<` for `<=` at the weight threshold: no float32 equals 0.0001);
+sixteen planted under the drill each failed it on the fixture built for that rule. Three planted defects cannot fail the
+drill, because no imported file reaches them, and are held by the unit tests alone: that equivalent threshold, validate's
+clamp of a weight outside 0..1, and a vertex group whose bone is no joint.
 
 **The Clip Range picker's in-process rig** (step 4, 2026-10-03): `HafUnityFrameTests` hold the preview frame's arithmetic
 without Unity — the X mirror's conjugation of rotations, matrices and matrix nodes; Unity's skinning formula fed the rig's

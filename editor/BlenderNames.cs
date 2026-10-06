@@ -44,6 +44,9 @@ public static class BlenderNames
         public List<(int node, string name)> MeshObjectsInOrder = new List<(int, string)>();
         /// <summary>Per joint node: its bone name (unique within its armature).</summary>
         public Dictionary<int, string> BoneOfJoint = new Dictionary<int, string>();
+        /// <summary>Every bone node in creation order: armature by armature, depth-first, children in the importer's order.
+        /// Within one armature this is `pose.bones` walked from the roots - the order of the joints the exporter writes.</summary>
+        public List<int> BoneNodesInOrder = new List<int>();
         /// <summary>Per skin: the armature object its joints are bones of (two skins may share one), by name.</summary>
         public string[] ArmatureOfSkin;
         /// <summary>Per skin: the node that became that armature, or -1 for the dummy root.</summary>
@@ -205,7 +208,7 @@ public static class BlenderNames
                     void Bones(string bid)
                     {
                         var b = v[bid];
-                        if (b.Type == Kind.Bone) { r.BoneOfJoint[Index(bid)] = UniqueBone(bones, b.Name ?? b.DefaultName); foreach (var c in b.Children) Bones(c); }
+                        if (b.Type == Kind.Bone) { r.BoneOfJoint[Index(bid)] = UniqueBone(bones, b.Name ?? b.DefaultName); r.BoneNodesInOrder.Add(Index(bid)); foreach (var c in b.Children) Bones(c); }
                     }
                     foreach (var c in n.Children) Bones(c);
                 }

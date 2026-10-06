@@ -31,7 +31,9 @@ static class Drill
             catch (Exception e) { Console.WriteLine($"FAIL\t{Key(path)}\t{e.Message}"); fails++; continue; }
             sw.Stop();
             totalBytes += new FileInfo(path).Length; totalMs += sw.Elapsed.TotalMilliseconds;
-            string why = Consistency(m);
+            // a fixture that breaks the weight contract ON PURPOSE says so in its name (fixtures.py: export_skin_badweights,
+            // a vertex left without a bone for the exporter's neutral bone); its joints are still checked
+            string why = Consistency(m, Path.GetFileName(path).IndexOf("badweights", StringComparison.OrdinalIgnoreCase) < 0);
             if (why != null) { Console.WriteLine($"FAIL\t{Key(path)}\t{why}"); fails++; continue; }
             int joints = m.Skins.Sum(s => s.Joints.Length);
             string durations = string.Join(",", m.Animations.Select(a => a.Duration.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)));
@@ -161,7 +163,7 @@ static class Drill
         else if (t is Newtonsoft.Json.Linq.JArray a) foreach (var e in a) CollectTextures(e, into);
     }
 
-    static string Consistency(HafModel m)
+    static string Consistency(HafModel m, bool weightsSumToOne = true)
     {
         foreach (var n in m.Nodes)
         {
@@ -182,7 +184,7 @@ static class Drill
                         sum += w;
                         if (p.Weights1 != null) { float w1 = p.Weights1[v * 4 + k]; if (w1 > 0 && p.Joints1[v * 4 + k] >= jointCount) return $"node '{n.Name}' vertex {v} weighs joint {p.Joints1[v * 4 + k]} (set 1), the skin has {jointCount}"; sum += w1; }
                     }
-                    if (Math.Abs(sum - 1f) > 0.02f) return $"node '{n.Name}' vertex {v} weights sum to {sum:0.###}";
+                    if (weightsSumToOne && Math.Abs(sum - 1f) > 0.02f) return $"node '{n.Name}' vertex {v} weights sum to {sum:0.###}";
                 }
             }
         }

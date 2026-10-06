@@ -134,6 +134,58 @@ public static partial class VehicleProbe
         return r;
     }
 
+    /// <summary>mathutils Matrix.inverted_safe() of a 3x3 (row-major item layout in and out): the determinant by
+    /// determinant_m3 over the items row by row, adjoint_m3_m3 over the storage M[col][row], every entry divided by the
+    /// determinant. A zero determinant gets PSEUDOINVERSE_EPSILON on the diagonal (determinant_m3_array then), and the
+    /// identity when that is zero too.</summary>
+    internal static float[] InvertedSafe3(float[] it)
+    {
+        float det = Det3(it[0], it[1], it[2], it[3], it[4], it[5], it[6], it[7], it[8]);
+        var m = new float[3][];   // m[col][row]
+        for (int c = 0; c < 3; c++) m[c] = new[] { it[0 * 3 + c], it[1 * 3 + c], it[2 * 3 + c] };
+        if (det == 0f)
+        {
+            for (int i = 0; i < 3; i++) m[i][i] = (float)(m[i][i] + 1e-8f);
+            det = Det3(m);
+            if (det == 0f) { for (int c = 0; c < 3; c++) for (int w = 0; w < 3; w++) m[c][w] = c == w ? 1f : 0f; det = 1f; }
+        }
+        float m00 = m[0][0], m01 = m[0][1], m02 = m[0][2], m10 = m[1][0], m11 = m[1][1], m12 = m[1][2], m20 = m[2][0], m21 = m[2][1], m22 = m[2][2];
+        var R = new float[3][];
+        R[0] = new[] { (float)((float)(m11 * m22) - (float)(m12 * m21)), (float)((float)(-m01 * m22) + (float)(m02 * m21)), (float)((float)(m01 * m12) - (float)(m02 * m11)) };
+        R[1] = new[] { (float)((float)(-m10 * m22) + (float)(m12 * m20)), (float)((float)(m00 * m22) - (float)(m02 * m20)), (float)((float)(-m00 * m12) + (float)(m02 * m10)) };
+        R[2] = new[] { (float)((float)(m10 * m21) - (float)(m11 * m20)), (float)((float)(-m00 * m21) + (float)(m01 * m20)), (float)((float)(m00 * m11) - (float)(m01 * m10)) };
+        var r = new float[9];
+        for (int c = 0; c < 3; c++) for (int w = 0; w < 3; w++) r[w * 3 + c] = (float)(R[c][w] / det);
+        return r;
+    }
+
+    /// <summary>mathutils Matrix @ Matrix for 3x3s, row-major item layout: the same double accumulation as the 4x4.</summary>
+    static float[] MatMulMathutils3(float[] a, float[] b)
+    {
+        var r = new float[9];
+        for (int row = 0; row < 3; row++)
+            for (int col = 0; col < 3; col++)
+            {
+                double d = 0.0;
+                for (int k = 0; k < 3; k++) d += (double)(float)(a[row * 3 + k] * b[k * 3 + col]);
+                r[row * 3 + col] = (float)d;
+            }
+        return r;
+    }
+
+    /// <summary>The glTF exporter's transform for a skinned mesh's normals (primitive_extract.py): with apply = armature.
+    /// matrix_world.inverted_safe() @ object.matrix_world, armature.matrix_world.to_3x3() @ apply.to_3x3().inverted_safe()
+    /// .transposed(). Both matrices as the probe holds them (column-major float32); the result a 3x3, row-major items.</summary>
+    internal static float[] ExporterNormalTransform(float[] armatureWorld, float[] objectWorld)
+    {
+        var arma = ToRowMajor(armatureWorld);
+        var apply = MatMulMathutils(InvertedSafe(arma), ToRowMajor(objectWorld));
+        float[] To3(float[] m4) => new[] { m4[0], m4[1], m4[2], m4[4], m4[5], m4[6], m4[8], m4[9], m4[10] };
+        var inv = InvertedSafe3(To3(apply));
+        var invT = new[] { inv[0], inv[3], inv[6], inv[1], inv[4], inv[7], inv[2], inv[5], inv[8] };
+        return MatMulMathutils3(To3(arma), invT);
+    }
+
     /// <summary>One skin as the importer stores its meshes: the joint matrices (bind_arma_mat @ inv_bind, float32) and the
     /// skinning of a vertex by them.</summary>
     internal sealed class BlenderSkinner

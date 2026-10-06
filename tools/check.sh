@@ -71,6 +71,7 @@ run "vehicle probe drill (the Lab's probe in C#: every source probed, a sample's
 run "vehicle probe comparator tests (diagnostic rows must be complete)" python "$ROOT/Tests/test_compare_vehicle_probe.py"
 run "vehicle probe jobs tests (the recipes' arguments as the Lab formats them)" python "$ROOT/Tests/test_probe_jobs.py"
 run "mesh layout drill (Blender's vertex and edge order in C#: a sample's edge lists equal to Blender's own)" bash "$ROOT/tools/decimate_drill.sh"
+run "prep drill (the reduce plus the glTF exporter's mesh layout in C#: a sample equal to what Blender's prep_model.py wrote)" bash "$ROOT/tools/prep_drill.sh"
 run "Workshop compaction drill (what no node uses is left out; every part reads as before - GLB reader and Blender; SKIP without the project)" bash "$ROOT/tools/workshop_compact_drill.sh"
 #    5b) The ownership-rebase hand-lists. A field the UI edits but the window's rebase doesn't re-apply is thrown
 #        away on every Save — silent, and the reason this gate exists. Pure source analysis, so CI can run it too.
