@@ -201,7 +201,9 @@ turned, unevenly scaled armature of the `export_skin` fixture showed an ulp wher
 agreed); per vertex the groups over 0.0001 by weight (a stable sort), four kept, divided by their float32 sum; the joints
 are the armature's bones depth-first (`BlenderNames.BoneNodesInOrder`), and a vertex left without a bone gets the
 exporter's "neutral bone" - only a vertex whose weights do not sum to 1 reaches that, so the fixture for it,
-`export_skin_badweights`, says so in its name and the reader drill's weight contract lets that name through. NOT laid out
+`export_skin_badweights`, says so in its name and the reader drill's weight contract lets that name through. The neutral
+bone is the ARMATURE's: Blender appends it to the shared skin when any mesh of that armature needs it, so a fully
+weighted mesh beside the boneless one lists it too (review of PR #127; that fixture's second mesh, listed first). NOT laid out
 yet, counted and named on every run: a coloured material with alpha (its colour set depends on the material's node tree).
 Gate sample: 50 runs on 25 files, 100 object runs (160 primitives, 30,988 vertices) equal, 2 not laid out, in 10 s;
 `FULL=1` on 2026-10-06: 152 runs on 76 files, 4,062 object runs (5,211 primitives, 15,803,190 vertices) equal - 530 of them skinned, 164 under an armature not at the identity - 96 not laid out (the coloured alpha material), 26 object runs with twin faces removed, 40 with a zero normal on a fan that points elsewhere, in a quarter of an hour. `BlenderExportTests` hold each rule alone, the rounding and the short quantizing against
