@@ -23,8 +23,9 @@ public class GlbReaderTests
         f.Root["materials"][0]["alphaCutoff"] = cutoff;
         var m = GlbReader.Read(f.Glb());
         Assert.Equal(cutoff, m.Materials[0].AlphaCutoff);
-        // Full has morph targets; these are irrelevant to this material-only regression.
-        foreach (var p in m.Meshes[0].Primitives) p.MorphTargets = 0;
+        // Full has morph targets and colours; both are irrelevant to this material-only regression, and the colours would
+        // make the reduce decline the mesh on a CPU whose rsqrtps table is not measured (CI's; BlenderColor.TableKnown)
+        foreach (var p in m.Meshes[0].Primitives) { p.MorphTargets = 0; p.Colors = null; }
         var reduced = BlenderReduce.Reduce(m, 0, 1f, BlenderNames.Compute(m));
         Assert.Null(reduced.Fallback);
         Assert.Equal(alpha, BlenderExport.VertexAlphaWired(reduced.SlotAlpha[0].mode, reduced.SlotAlpha[0].cutoff));
@@ -39,8 +40,9 @@ public class GlbReaderTests
         f.Root["materials"][0]["pbrMetallicRoughness"]["baseColorFactor"][3] = 0.99999999;
         var m = GlbReader.Read(f.Glb());
         Assert.Equal(0.99999999, m.Materials[0].BaseColorFactor[3]);
-        foreach (var p in m.Meshes[0].Primitives) p.MorphTargets = 0;
+        foreach (var p in m.Meshes[0].Primitives) { p.MorphTargets = 0; p.Colors = null; }   // as above: no colours, so any CPU reduces it
         var reduced = BlenderReduce.Reduce(m, 0, 1f, BlenderNames.Compute(m));
+        Assert.Null(reduced.Fallback);
         Assert.Equal(0.99999999, reduced.SlotAlpha[0].factor);
         Assert.False(BlenderExport.VertexAlphaWired(reduced.SlotAlpha[0].mode, reduced.SlotAlpha[0].cutoff, reduced.SlotAlpha[0].factor));
         Assert.Equal(0.99999999, GlbReader.Read(GlbWriter.Write(m)).Materials[0].BaseColorFactor[3]);
