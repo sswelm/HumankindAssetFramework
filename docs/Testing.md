@@ -209,7 +209,10 @@ colour's alpha into the material (`pbrMetallicRoughness.py` `base_color`): alway
 (0, 1] (the importer drops the alpha socket at 0 or over 1), never for OPAQUE (`BlenderExport.VertexAlphaWired`; five
 coloured meshes of the `export_layout` fixture, one per branch, and the population's 96 such object runs). Nothing is
 declined any more: `FULL=1` on 2026-10-06, 152 runs on 76 files, 4,170 object runs (5,324 primitives, 15,882,859 vertices)
-equal, 102 object runs with a wired alpha.
+equal, 102 object runs with a wired alpha. Review of PR #128 added coloured tetrahedron and octahedron cases whose reduction
+leaves twin faces: validation must keep the slot's alpha metadata. MASK cutoffs `1.00000001` and `1e-50` also have
+fixtures; the model keeps cutoff precision as a double until Unity's preview shader needs a float, so rounding across
+0 or 1 cannot change whether the importer wires alpha. The drill requires coverage of both regression cases.
 Gate sample: 50 runs on 25 files, 100 object runs (160 primitives, 30,988 vertices) equal, 2 not laid out, in 10 s;
 `FULL=1` on 2026-10-06: 152 runs on 76 files, 4,062 object runs (5,211 primitives, 15,803,190 vertices) equal - 530 of them skinned, 164 under an armature not at the identity - 96 not laid out (the coloured alpha material), 26 object runs with twin faces removed, 40 with a zero normal on a fan that points elsewhere, in a quarter of an hour. `BlenderExportTests` hold each rule alone, the rounding and the short quantizing against
 values numpy gave, the skinned arithmetic against matrices and results read off Blender; thirty planted defects, one

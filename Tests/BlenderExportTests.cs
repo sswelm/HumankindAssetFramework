@@ -150,6 +150,20 @@ public class BlenderExportTests
         Assert.False(Assert.Single(Assert.Single(BlenderExport.MeshPrimitives(c)).Colors).Alpha);
     }
 
+    [Theory]
+    [InlineData("BLEND", 0.5, true)]
+    [InlineData("MASK", 0.5, true)]
+    [InlineData("MASK", 0.0, false)]
+    public void Removing_a_twin_preserves_the_retained_materials_alpha(string mode, double cutoff, bool alpha)
+    {
+        var r = Mesh(Square, new[] { 0, 1, 2, 0, 2, 3, 2, 1, 0 });
+        r.Slots[0] = (0, true); r.SlotAlpha.Add((mode, cutoff));
+        r.Colors.Add(("Color", false, Enumerable.Repeat((byte)100, 36).ToArray()));
+        var p = Assert.Single(BlenderExport.MeshPrimitives(r));
+        Assert.Equal(6, p.Indices.Length);
+        Assert.Equal(alpha, Assert.Single(p.Colors).Alpha);
+    }
+
     // one colour per corner of the square: the corners of vertex 0 differ in red (10 and 200), the rest agree per vertex
     static byte[] CornerColors() => new byte[]
     {

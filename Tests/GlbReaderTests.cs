@@ -13,6 +13,24 @@ using Xunit;
 // accessors, Draco, a chunk past the file, an index outside its vertices, an accessor past its view, two parents.
 public class GlbReaderTests
 {
+    [Theory]
+    [InlineData(1.00000001, false)]
+    [InlineData(1e-50, true)]
+    public void Mask_cutoff_precision_survives_read_reduce_and_write(double cutoff, bool alpha)
+    {
+        var f = Full();
+        f.Root["materials"][0]["alphaMode"] = "MASK";
+        f.Root["materials"][0]["alphaCutoff"] = cutoff;
+        var m = GlbReader.Read(f.Glb());
+        Assert.Equal(cutoff, m.Materials[0].AlphaCutoff);
+        // Full has morph targets; these are irrelevant to this material-only regression.
+        foreach (var p in m.Meshes[0].Primitives) p.MorphTargets = 0;
+        var reduced = BlenderReduce.Reduce(m, 0, 1f, BlenderNames.Compute(m));
+        Assert.Null(reduced.Fallback);
+        Assert.Equal(alpha, BlenderExport.VertexAlphaWired(reduced.SlotAlpha[0].mode, reduced.SlotAlpha[0].cutoff));
+        Assert.Equal(cutoff, GlbReader.Read(GlbWriter.Write(m)).Materials[0].AlphaCutoff);
+    }
+
     // ---- a tiny GLB writer for fixtures: accessors appended to one BIN chunk, layout under the test's control ----
     sealed class Fixture
     {

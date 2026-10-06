@@ -195,7 +195,7 @@ public static class GlbWriter
                 if (mt.EmissiveTexture >= 0) j["emissiveTexture"] = TexRef(mt.EmissiveTexture, mt.EmissiveTexCoord);
                 if (!IsDefault(mt.EmissiveFactor, 0, 0, 0)) j["emissiveFactor"] = Arr(mt.EmissiveFactor);
                 if (mt.AlphaMode != "OPAQUE") j["alphaMode"] = mt.AlphaMode;
-                if (mt.AlphaCutoff != 0.5f) j["alphaCutoff"] = mt.AlphaCutoff;
+                if (mt.AlphaCutoff != 0.5) j["alphaCutoff"] = mt.AlphaCutoff;
                 if (mt.DoubleSided) j["doubleSided"] = true;
                 if (mt.ExtensionsJson != null) { var ext = GlbReader.ParseObject(mt.ExtensionsJson); j["extensions"] = ext; foreach (var prop in ext.Properties()) used.Add(prop.Name); CollectNestedExtensions(ext, used); }
                 if (mt.ExtrasJson != null) j["extras"] = GlbReader.ParseToken(mt.ExtrasJson);

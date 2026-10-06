@@ -25,7 +25,7 @@ public static class BlenderReduce
         public List<int>[] DefNr; public List<float>[] DefWeight;   // per vertex, or null when the object has no vertex groups
         public List<(string name, bool point, byte[] bytes)> Colors = new List<(string, bool, byte[])>();   // per colour layer: 4 bytes per corner, or per vertex for the point domain
         public List<(int material, bool vertexColor)> Slots = new List<(int, bool)>();   // the mesh's material slots: the glTF material (-1 none) and whether the importer built it WITH the vertex colour
-        public List<(string mode, float cutoff)> SlotAlpha = new List<(string, float)>();   // per slot: the glTF material's alphaMode and alphaCutoff ("OPAQUE" without a material)
+        public List<(string mode, double cutoff)> SlotAlpha = new List<(string, double)>();   // per slot: the glTF material's alphaMode and alphaCutoff ("OPAQUE" without a material)
         public float Ratio;                       // the modifier's ratio as stored (float32)
         public bool Collapsed;                    // false when the modifier would return the mesh untouched
         public string Fallback;                   // non-null: the mesh is outside this port; why

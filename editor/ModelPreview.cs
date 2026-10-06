@@ -59,7 +59,7 @@ public static class ModelPreview
                     mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.One);
                     mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.Zero);
                     mat.SetInt("_ZWrite", 1);
-                    mat.SetFloat("_Cutoff", hm.AlphaCutoff);
+                    mat.SetFloat("_Cutoff", (float)hm.AlphaCutoff);
                     mat.EnableKeyword("_ALPHATEST_ON");
                     mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.AlphaTest;
                 }

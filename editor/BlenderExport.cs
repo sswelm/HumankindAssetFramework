@@ -200,7 +200,7 @@ public static class BlenderExport
         var v = new BlenderReduce.Result
         {
             VertexCount = r.VertexCount, FaceCount = kept, Positions = r.Positions, Edges = r.Edges, DefNr = r.DefNr, DefWeight = r.DefWeight,
-            Slots = r.Slots, Ratio = r.Ratio, Collapsed = r.Collapsed, Fallback = r.Fallback,
+            Slots = r.Slots, SlotAlpha = r.SlotAlpha, Ratio = r.Ratio, Collapsed = r.Collapsed, Fallback = r.Fallback,
             Faces = PerFace(r.Faces, 3), FaceMaterial = PerFace(r.FaceMaterial, 1), FaceSharp = PerFace(r.FaceSharp, 1), CustomNormal = PerFace(r.CustomNormal, 6),
         };
         foreach (var uv in r.Uv) v.Uv.Add(PerFace(uv, 6));
@@ -213,7 +213,7 @@ public static class BlenderExport
 
     /// <summary>Whether the importer wires a coloured material's vertex alpha into it (base_color): BLEND yes, OPAQUE no,
     /// MASK only with a cutoff in (0, 1].</summary>
-    internal static bool VertexAlphaWired(string alphaMode, float alphaCutoff) => alphaMode == "BLEND" || (alphaMode == "MASK" && alphaCutoff > 0f && alphaCutoff <= 1f);
+    internal static bool VertexAlphaWired(string alphaMode, double alphaCutoff) => alphaMode == "BLEND" || (alphaMode == "MASK" && alphaCutoff > 0f && alphaCutoff <= 1f);
 
     /// <summary>The colour sets the exporter writes for the mesh: (layer, with alpha), layer -1 for the forced set.</summary>
     static List<(int layer, bool alpha)> ColorPlan(BlenderReduce.Result r)

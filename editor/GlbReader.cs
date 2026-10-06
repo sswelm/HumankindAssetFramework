@@ -155,7 +155,7 @@ public static class GlbReader
             TexRef(mt["emissiveTexture"], out m.EmissiveTexture, out m.EmissiveTexCoord);
             if (mt["emissiveFactor"] is JArray ef) m.EmissiveFactor = Floats(ef, 3, "emissiveFactor");
             m.AlphaMode = mt["alphaMode"]?.ToString() ?? "OPAQUE";
-            m.AlphaCutoff = mt["alphaCutoff"]?.Value<float>() ?? 0.5f;
+            m.AlphaCutoff = mt["alphaCutoff"]?.Value<double>() ?? 0.5;
             m.DoubleSided = mt["doubleSided"]?.Value<bool>() ?? false;
             if (mt["extensions"] is JObject ext && ext.Count > 0) m.ExtensionsJson = ext.ToString(Newtonsoft.Json.Formatting.None);
             m.ExtrasJson = Extras(mt);

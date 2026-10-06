@@ -152,6 +152,7 @@ static class PrepDrill
         "an object without faces", "two or more UV sets", "COLOR_0 as RGB (the material's colour)", "COLOR_0 with alpha (a face without material)",
         "COLOR_0 forced (255s)", "two or more colour sets", "a colour layer on the vertices (point domain)", "a twin face the exporter's validate removes",
         "COLOR_0 with alpha (a coloured material whose alpha is wired)", "COLOR_0 as RGB (a coloured MASK material whose alpha is not wired)",
+        "a coloured alpha material after twin-face validation", "a MASK cutoff whose float rounding crosses a wiring boundary",
         "a weighted mesh sharing an armature with a neutral bone",
         "a skinned object", "a vertex without a bone (the neutral bone)", "a vertex of more than four groups", "an armature that is not at the identity",
     };
@@ -178,6 +179,14 @@ static class PrepDrill
         bool alphaMaterial = deciding >= 0 && r.Slots[deciding].material >= 0 && r.SlotAlpha[deciding].mode != "OPAQUE";
         Hit("COLOR_0 with alpha (a coloured material whose alpha is wired)", alphaMaterial && sets.Count > 0 && sets[0].Alpha);
         Hit("COLOR_0 as RGB (a coloured MASK material whose alpha is not wired)", alphaMaterial && sets.Count > 0 && !sets[0].Alpha);
+        Hit("a coloured alpha material after twin-face validation", alphaMaterial && r.Faces.Length < reduced.Faces.Length && sets.Count > 0 && sets[0].Alpha);
+        bool roundedBoundary = false;
+        if (alphaMaterial && r.SlotAlpha[deciding].mode == "MASK")
+        {
+            double cutoff = r.SlotAlpha[deciding].cutoff;
+            roundedBoundary = (cutoff > 1 && (float)cutoff == 1f) || (cutoff > 0 && (float)cutoff == 0f);
+        }
+        Hit("a MASK cutoff whose float rounding crosses a wiring boundary", roundedBoundary);
         Hit("a colour layer on the vertices (point domain)", r.Colors.Exists(c => c.point));
         // the corner normals once more, before the exporter's rounding: does any round to the zero vector
         int nc = r.Faces.Length; short[] d0 = null, d1 = null;
