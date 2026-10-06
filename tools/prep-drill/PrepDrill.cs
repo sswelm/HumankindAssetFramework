@@ -10,7 +10,7 @@ using System.Text;
 // for the node of the same name - per primitive: the vertex count, positions, normals, every UV and colour set, a
 // skinned mesh's joints and weights (and its joint list, by name) and the indices, bit for bit. One line per file and run:
 //   PASS <key> <tag>: <n> objects, <p> primitives equal            FAIL <key> <tag>: <the first differences>
-// and a TOTAL line. An object the port declines (BlenderReduce.FallbackReason) or does not lay out yet is counted, named.
+// and a TOTAL line. An object the port declines (BlenderReduce.FallbackReason) is counted, named.
 static class PrepDrill
 {
     static int Main(string[] args)
@@ -149,7 +149,7 @@ static class PrepDrill
         "normals from the file (custom normals)", "no normals (every face flat)", "a normal that rounds to zero, made up", "a zero normal on a fan that does not point up", "an object of several primitives",
         "an object without faces", "two or more UV sets", "COLOR_0 as RGB (the material's colour)", "COLOR_0 with alpha (a face without material)",
         "COLOR_0 forced (255s)", "two or more colour sets", "a colour layer on the vertices (point domain)", "a twin face the exporter's validate removes",
-        "COLOR_0 with alpha (a coloured material whose alpha is wired)", "COLOR_0 as RGB (a coloured MASK material whose alpha is not wired)",
+        "COLOR_0 with alpha (a coloured material whose alpha is wired)", "COLOR_0 as RGB (a coloured MASK material at a cutoff of 0 or over 1)",
         "a coloured alpha material after twin-face validation", "a MASK cutoff whose float rounding crosses a wiring boundary",
         "COLOR_0 with alpha wired through a base colour texture", "COLOR_0 with alpha on an unlit material",
         "COLOR_0 as RGB after a non-unit alpha factor rounds to one", "COLOR_0 with alpha when the factor is exactly one",
@@ -178,13 +178,13 @@ static class PrepDrill
         Hit("COLOR_0 forced (255s)", sets.Count > 0 && sets[0].Forced);
         Hit("two or more colour sets", sets.Count > 1);
         Hit("COLOR_0 with alpha (a coloured material whose alpha is wired)", alphaMaterial && sets.Count > 0 && sets[0].Alpha);
-        Hit("COLOR_0 as RGB (a coloured MASK material whose alpha is not wired)", alphaMaterial && r.SlotAlpha[deciding].mode == "MASK" && sets.Count > 0 && !sets[0].Alpha);
+        Hit("COLOR_0 as RGB (a coloured MASK material at a cutoff of 0 or over 1)", alphaMaterial && r.SlotAlpha[deciding].mode == "MASK" && sets.Count > 0 && !sets[0].Alpha);
         Hit("a coloured alpha material after twin-face validation", alphaMaterial && r.Faces.Length < reduced.Faces.Length && sets.Count > 0 && sets[0].Alpha);
         bool roundedBoundary = false;
         if (alphaMaterial && r.SlotAlpha[deciding].mode == "MASK")
         {
             double cutoff = r.SlotAlpha[deciding].cutoff;
-            roundedBoundary = (cutoff > 1 && (float)cutoff == 1f) || (cutoff > 0 && (float)cutoff == 0f);
+            roundedBoundary = (cutoff > 1 && (float)cutoff == 1f) || (cutoff != 0 && (float)cutoff == 0f);   // 1.00000001, 1e-50, -1e-50
         }
         Hit("a MASK cutoff whose float rounding crosses a wiring boundary", roundedBoundary);
         bool wired = alphaMaterial && sets.Count > 0 && sets[0].Alpha;

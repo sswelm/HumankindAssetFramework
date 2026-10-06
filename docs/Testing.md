@@ -219,10 +219,11 @@ creates no factor node and keeps RGBA; MASK's clip nodes also keep RGBA. The reg
 textured, unlit and specular-glossiness materials, with coverage required for both sides of the near-one decision.
 Specular-glossiness uses its diffuse alpha factor; unlit takes precedence and uses the core base colour factor.
 Not probed: `KHR_animation_pointer` (an animated cutoff keeps the socket). Nothing is
-declined any more. Gate sample: 50 runs on 25 files, 138 object runs (203 primitives, 31,592 vertices) equal, in 10 s;
-`FULL=1` on 2026-10-06: 152 runs on 76 files, 4,194 object runs (5,348 primitives, 15,883,230 vertices) equal, 0 declined
-- 530 of them skinned, 164 under an armature not at the identity, 124 with a wired alpha, 26 with twin faces removed,
-40 with a zero normal on a fan that points elsewhere, in a quarter of an hour. `BlenderExportTests` hold each rule alone, the rounding and the short quantizing against
+declined any more. Gate sample: 50 runs on 25 files, 154 object runs (219 primitives, 31,884 vertices) equal, in 10 s;
+`FULL=1` on 2026-10-06 (late, with the Espana just fused and rigged - 1.1 million triangles over 3,500 objects): 154 runs on
+77 files, 11,344 object runs (12,505 primitives, 17,449,348 vertices) equal, 0 declined - 534 of them skinned, 166 under an
+armature not at the identity, 132 with a wired alpha, 29 with twin faces removed, 42 with a zero normal on a fan that points
+elsewhere; Blender needed an hour for it, the C# side a few minutes. `BlenderExportTests` hold each rule alone, the rounding and the short quantizing against
 values numpy gave, the skinned arithmetic against matrices and results read off Blender; thirty planted defects, one
 per rule, each failed them but one that changes nothing (`<` for `<=` at the weight threshold: no float32 equals 0.0001);
 sixteen planted under the drill each failed it on the fixture built for that rule. Three planted defects cannot fail the

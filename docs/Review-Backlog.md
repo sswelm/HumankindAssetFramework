@@ -126,7 +126,7 @@ full run showed five ships differ), corner normals rounded to 4 decimals, unique
 colour-set rules; `FULL=1` on 2026-10-06: 148 runs on 74 files, 3,532 object runs, 13.0 million vertices equal);
 skinned objects too, the same day (positions and normals through the armature's matrix in numpy's float32, joints and
 weights from the vertex groups, the exporter's neutral bone; `FULL=1` on 2026-10-06: 152 runs on 76 files, 4,062 object runs, 15.8 million vertices equal, 530 object runs skinned); the coloured material with alpha too
-(its set carries alpha when the importer wired the vertex alpha in: every mode and cutoff but OPAQUE and MASK at a cutoff of 0 or over 1; `FULL=1` on 2026-10-06: 152 runs on 76 files, 4,194 object runs, 15.9 million vertices equal, 0 declined; the review found the first rule wrong on two inputs and validate's rebuild dropping the slots' alpha modes);
+(its set carries alpha when the importer wired the vertex alpha in: every mode and cutoff but OPAQUE and MASK at a cutoff of 0 or over 1; `FULL=1` on 2026-10-06: 152 runs on 76 files, 154 runs on 77 files, 11,344 object runs, 17.4 million vertices equal, 0 declined; two reviews found the first rule wrong on two inputs, validate's rebuild dropping the slots' alpha modes, and the alpha factor's float32 rounding - the cutoff and the base colour factor are doubles now);
 nothing is declined any more; still open in (d): prep_model in C# - strip, the file as the Factory's
 converter reads it (node and material order: Blender writes materials in order of first use, one per vertex-colour
 variant, and a `DefaultMaterial` for a coloured primitive without one), the write, the wiring behind

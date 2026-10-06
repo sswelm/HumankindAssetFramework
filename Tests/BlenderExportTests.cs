@@ -159,6 +159,7 @@ public class BlenderExportTests
         var r = Mesh(Square, new[] { 0, 1, 2, 0, 2, 3, 2, 1, 0 });
         r.Slots[0] = (0, true); r.SlotAlpha[0] = (mode, cutoff, 1.0);
         r.Colors.Add(("Color", false, Enumerable.Repeat((byte)100, 36).ToArray()));
+        Assert.Same(r.SlotAlpha, BlenderExport.Validated(r).SlotAlpha);   // review of PR #128: Validated() rebuilt the Result without SlotAlpha
         var p = Assert.Single(BlenderExport.MeshPrimitives(r));
         Assert.Equal(6, p.Indices.Length);
         Assert.Equal(alpha, Assert.Single(p.Colors).Alpha);
@@ -267,6 +268,7 @@ public class BlenderExportTests
         Assert.True(BlenderExport.VertexAlphaWired("BLEND", 0.5f)); Assert.True(BlenderExport.VertexAlphaWired("Blend", 0.5f));
         Assert.True(BlenderExport.VertexAlphaWired("MASK", 0.5f)); Assert.True(BlenderExport.VertexAlphaWired("MASK", 1f)); Assert.True(BlenderExport.VertexAlphaWired("MASK", 1e-6f)); Assert.True(BlenderExport.VertexAlphaWired("MASK", -0.5f));
         Assert.False(BlenderExport.VertexAlphaWired("MASK", 0f)); Assert.False(BlenderExport.VertexAlphaWired("MASK", 1.5f));
+        Assert.True(BlenderExport.VertexAlphaWired("MASK", -1e-50)); Assert.False(BlenderExport.VertexAlphaWired("MASK", 1.00000001)); Assert.True(BlenderExport.VertexAlphaWired("MASK", 1e-50));   // the double decides, not its float32
         // a reduced mesh must carry one alpha mode per slot
         var short_ = Mesh(Square, SquareFaces, sharp: false); short_.Slots[0] = (0, true); short_.SlotAlpha.Clear(); short_.Colors.Add(("Color", false, CornerColors()));
         Assert.Throws<InvalidOperationException>(() => BlenderExport.MeshPrimitives(short_));
@@ -456,17 +458,6 @@ public class BlenderExportTests
         Assert.Equal(new[] { 1f, 0, 0, 0, 1f, 0, 0, 0, 0.75f, 0.25f, 0, 0, 0.75f, 0.25f, 0, 0, 1f, 0, 0, 0 }, p.Weights);
         Assert.True(p.NeutralBone);
         Assert.Null(Assert.Single(BlenderExport.MeshPrimitives(r)).Joints);   // unskinned: none
-    }
-
-    [Fact]
-    public void A_blend_material_keeps_its_alpha_after_validate_removes_a_twin()
-    {
-        // review of PR #128: Validated() rebuilt the Result without SlotAlpha, and a guard read the gap as OPAQUE
-        var r = Mesh(Square, new[] { 0, 1, 2, 0, 2, 3, 2, 1, 0 }, sharp: false);
-        r.Slots[0] = (1, true); r.SlotAlpha[0] = ("BLEND", 0.5f, 1.0);
-        r.Colors.Add(("Color", false, new byte[36]));
-        Assert.Same(r.SlotAlpha, BlenderExport.Validated(r).SlotAlpha);
-        Assert.True(Assert.Single(Assert.Single(BlenderExport.MeshPrimitives(r)).Colors).Alpha);
     }
 
     [Fact]
