@@ -204,17 +204,22 @@ exporter's "neutral bone" - only a vertex whose weights do not sum to 1 reaches 
 `export_skin_badweights`, says so in its name and the reader drill's weight contract lets that name through. The neutral
 bone is the ARMATURE's: Blender appends it to the shared skin when any mesh of that armature needs it, so a fully
 weighted mesh beside the boneless one lists it too (review of PR #127; that fixture's second mesh, listed first). A coloured
-material WITH alpha (third part, 2026-10-06): its set is written with alpha exactly when the importer wired the vertex
-colour's alpha into the material (`pbrMetallicRoughness.py` `base_color`): always for BLEND, for MASK only with a cutoff in
-(0, 1] (the importer drops the alpha socket at 0 or over 1), never for OPAQUE (`BlenderExport.VertexAlphaWired`; five
-coloured meshes of the `export_layout` fixture, one per branch, and the population's 96 such object runs). Nothing is
-declined any more: `FULL=1` on 2026-10-06, 152 runs on 76 files, 4,170 object runs (5,324 primitives, 15,882,859 vertices)
-equal, 102 object runs with a wired alpha. Review of PR #128 added coloured tetrahedron and octahedron cases whose reduction
-leaves twin faces: validation must keep the slot's alpha metadata. MASK cutoffs `1.00000001` and `1e-50` also have
-fixtures; the model keeps cutoff precision as a double until Unity's preview shader needs a float, so rounding across
-0 or 1 cannot change whether the importer wires alpha. The drill requires coverage of both regression cases.
-Gate sample: 50 runs on 25 files, 100 object runs (160 primitives, 30,988 vertices) equal, 2 not laid out, in 10 s;
-`FULL=1` on 2026-10-06: 152 runs on 76 files, 4,062 object runs (5,211 primitives, 15,803,190 vertices) equal - 530 of them skinned, 164 under an armature not at the identity - 96 not laid out (the coloured alpha material), 26 object runs with twin faces removed, 40 with a zero normal on a fan that points elsewhere, in a quarter of an hour. `BlenderExportTests` hold each rule alone, the rounding and the short quantizing against
+material WITH alpha (third part, 2026-10-06): its set is written with alpha when the importer wired the vertex colour's
+alpha into the material (`pbrMetallicRoughness.py` `base_color`), which it does for every alpha mode and cutoff except
+OPAQUE (or no mode) and MASK at a cutoff of 0 or over 1 - so BLEND, MASK in (0, 1] and below 0, and a mode string the spec
+does not know are wired (`BlenderExport.VertexAlphaWired`). The population has 48 such primitives, all BLEND and one of
+them textured; the `export_layout` fixture carries the rest: MASK at 0.5, 0, 1.5, 1.0, without a cutoff and at -0.5, "Blend",
+the wiring through a base colour texture, unlit BLEND and MASK, and a BLEND solid that loses a twin face (its slots' alpha
+modes must survive validate's rebuild - they did not, in the first version: the review of PR #128 found it, and the rule
+above, which the first version had as "BLEND, or MASK in (0, 1]"). The cutoff is kept as the JSON DOUBLE through the model (the review's
+fixtures: MASK at 1.00000001 and at 1e-50, which float32 would put on the wrong side), so a boundary is decided as the
+importer decides it. NOT exact, named here and in BlenderExport.cs: a BLEND material whose baseColorFactor alpha is within
+a float32 ulp of 1 (the importer adds an alpha-factor node the exporter reads as 1 = OPAQUE and writes RGB); no file has it. Not probed:
+`KHR_animation_pointer` (an animated cutoff keeps the socket) and `KHR_materials_pbrSpecularGlossiness`. Nothing is
+declined any more. Gate sample: 50 runs on 25 files, 138 object runs (203 primitives, 31,592 vertices) equal, in 10 s;
+`FULL=1` on 2026-10-06: 152 runs on 76 files, 4,194 object runs (5,348 primitives, 15,883,230 vertices) equal, 0 declined
+- 530 of them skinned, 164 under an armature not at the identity, 124 with a wired alpha, 26 with twin faces removed,
+40 with a zero normal on a fan that points elsewhere, in a quarter of an hour. `BlenderExportTests` hold each rule alone, the rounding and the short quantizing against
 values numpy gave, the skinned arithmetic against matrices and results read off Blender; thirty planted defects, one
 per rule, each failed them but one that changes nothing (`<` for `<=` at the weight threshold: no float32 equals 0.0001);
 sixteen planted under the drill each failed it on the fixture built for that rule. Three planted defects cannot fail the

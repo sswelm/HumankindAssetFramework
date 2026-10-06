@@ -557,6 +557,8 @@ def fx_export_layout(out):
     no area on a mesh without normals (Blender gives such a face the normal +Z) and one on a mesh with them, standing along
     Blender's Z: at its middle vertex the fan's normal (+Z again) runs along the fan's own edges, the custom-normal space is
     invalid, the corner normal decodes to ZERO and the exporter makes it "up" - which that triangle cannot tell from "the
+    [coloured meshes on materials with alpha follow: the wiring of the vertex colour's alpha, one mesh per branch - see the
+    comments at the materials]
     fan's normal is kept", +Z as well; so a fan of three faces follows whose angle-weighted normal runs along its own first
     edge, +X: Blender's `corner_normals` there is (0, 0, 0) (read 2026-10-05), exported as up. And small closed solids - a tetrahedron, a
     bipyramid, an octahedron, a box, each with normals and without: at a third of the faces the collapse closes them onto
@@ -595,13 +597,26 @@ def fx_export_layout(out):
         "indices": b.accessor([0, 1, 2, 0, 2, 3, 0, 3, 4], "H", "SCALAR"), "material": 0}]}
     meshes = [alpha_first, forced, flat, smooth, invalid_fan]
     names = ["AlphaFirst", "Forced", "FlatDegenerate", "SmoothDegenerate", "InvalidFan"]
-    # a coloured primitive on a material with alpha (materials 2..5): the importer wires the vertex colour's alpha into a
-    # BLEND material and into a MASK material whose cutoff is in (0, 1], not into MASK at a cutoff of 0 or over 1 - and
-    # only a wired alpha makes the exporter write COLOR_0 with alpha (2026-10-06, the 96 such object runs of the population)
+    # a coloured primitive on a material with alpha (materials 2..8): the importer drops the vertex colour's alpha for
+    # OPAQUE and for MASK at a cutoff of 0 or over 1, and wires it for everything else - and only a wired alpha makes the
+    # exporter write COLOR_0 with alpha (2026-10-06, the 96 such object runs of the population)
     colour = lambda i: (0.1 + 0.2 * (i % 5), 0.6, 0.9 - 0.2 * (i // 5), 0.15 + 0.2 * (i % 5))
     for k, label in enumerate(["Blend", "MaskHalf", "MaskZero", "MaskOver", "MaskOne", "MaskJustOverOne", "MaskTiny"]):
         meshes.append({"name": "coloured_" + label.lower(), "primitives": [surface(8.0 + 1.2 * k, 2.0, colour=colour, material=2 + k)]})
         names.append("Coloured" + label)
+    # review of PR #128: the same wiring through a base colour TEXTURE (the importer mixes the texture's alpha with the
+    # vertex colour's; materials 7 and 8), on an UNLIT material (9), and on a closed solid whose collapse leaves a twin face
+    # (validate rebuilds the mesh: its slots' alpha modes must come along)
+    # ... and (review of PR #128, each measured in Blender) unlit MASK, MASK without a cutoff (the default 0.5), a mode
+    # string the spec does not know ("Blend": wired - the importer drops the socket only for OPAQUE) and a NEGATIVE cutoff (wired)
+    for k, label in enumerate(["BlendTextured", "MaskTextured", "BlendUnlit", "MaskUnlit", "MaskNoCutoff", "OddMode", "MaskNegative"]):
+        meshes.append({"name": "coloured_" + label.lower(), "primitives": [surface(8.0 + 1.2 * k, 4.0, colour=colour, material=9 + k)]})
+        names.append("Coloured" + label)
+    tetra = [(14.0, 3.0, -9.0), (15.0, 3.0, -9.0), (14.4, 3.9, -9.0), (14.45, 3.3, -8.2)]
+    tetra_attrs = {"POSITION": b.accessor(tetra, "f", "VEC3"), "COLOR_0": b.accessor([colour(i) for i in range(4)], "f", "VEC4", minmax=False)}
+    meshes.append({"name": "coloured_tetra", "primitives": [{"attributes": tetra_attrs, "indices": b.accessor([0, 2, 1, 0, 1, 3, 1, 2, 3, 2, 0, 3], "H", "SCALAR"), "material": 2}]})
+    names.append("ColouredTetra")
+    tex = b.blob(png(4, 4, (200, 120, 60)))
     solids = [
         ("Tetra", [(0, 0, 0), (1, 0, 0), (0.4, 0.9, 0), (0.45, 0.3, 0.8)], [(0, 2, 1), (0, 1, 3), (1, 2, 3), (2, 0, 3)]),
         ("Bipyramid", [(0, 0, 0), (1, 0, 0), (0.4, 0.9, 0), (0.45, 0.3, 0.8), (0.5, 0.35, -0.7)], [(0, 1, 3), (1, 2, 3), (2, 0, 3), (1, 0, 4), (2, 1, 4), (0, 2, 4)]),
@@ -636,7 +651,17 @@ def fx_export_layout(out):
                            {"name": "mask_over", "alphaMode": "MASK", "alphaCutoff": 1.5, "pbrMetallicRoughness": {"baseColorFactor": [0.7, 0.2, 0.7, 1]}},
                            {"name": "mask_one", "alphaMode": "MASK", "alphaCutoff": 1.0, "pbrMetallicRoughness": {"baseColorFactor": [0.2, 0.7, 0.7, 1]}},
                            {"name": "mask_just_over_one", "alphaMode": "MASK", "alphaCutoff": 1.00000001},
-                           {"name": "mask_tiny", "alphaMode": "MASK", "alphaCutoff": 1e-50}],
+                           {"name": "mask_tiny", "alphaMode": "MASK", "alphaCutoff": 1e-50},
+                           {"name": "glass_textured", "alphaMode": "BLEND", "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}, "baseColorFactor": [1, 1, 1, 0.8]}},
+                           {"name": "leaves_textured", "alphaMode": "MASK", "alphaCutoff": 0.4, "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}},
+                           {"name": "glass_unlit", "alphaMode": "BLEND", "extensions": {"KHR_materials_unlit": {}}, "pbrMetallicRoughness": {"baseColorFactor": [0.9, 0.9, 1, 0.6]}},
+                           {"name": "leaves_unlit", "alphaMode": "MASK", "alphaCutoff": 0.5, "extensions": {"KHR_materials_unlit": {}}, "pbrMetallicRoughness": {"baseColorFactor": [0.3, 0.8, 0.3, 1]}},
+                           {"name": "mask_default", "alphaMode": "MASK", "pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.5, 0.3, 1]}},
+                           {"name": "odd_mode", "alphaMode": "Blend", "pbrMetallicRoughness": {"baseColorFactor": [0.5, 0.5, 0.8, 0.7]}},
+                           {"name": "mask_negative", "alphaMode": "MASK", "alphaCutoff": -0.5, "pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.3, 0.5, 1]}}],
+                images=[{"name": "orange", "mimeType": "image/png", "bufferView": tex}],
+                textures=[{"name": "orange", "source": 0}],
+                extensionsUsed=["KHR_materials_unlit"],
                 meshes=meshes,
                 nodes=[{"name": name, "mesh": i} for i, name in enumerate(names)],
                 scenes=[{"nodes": list(range(len(names)))}], scene=0)
