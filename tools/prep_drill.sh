@@ -47,7 +47,7 @@ OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -optimize+ -out:"$WTMP/prep.exe"
   "$WROOT/editor/VehicleProbe.BlenderWorld.cs" "$WROOT/editor/VehicleProbe.BlenderSkin.cs" "$WROOT/editor/VehicleProbe.CustomNormals.cs" "$WROOT/editor/VehicleProbe.Merge.cs" "$WROOT/editor/VehicleProbe.BlenderArmature.cs" "$WROOT/editor/BlenderEigen.cs" 2>&1); rc=$?
 if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/prep.exe" ]; then echo "$OUT" | grep -E "error" | head -20; echo "FAIL — the prep drill did not compile (csc rc=$rc)"; exit 1; fi
 
-mapfile -t FIXTURES < <(python "$ROOT/tools/glb-reader-drill/fixtures.py" "$WTMP/fixtures" | tr -d '\r')
+mapfile -t FIXTURES < <(python "$ROOT/tools/glb-reader-drill/fixtures.py" "$WTMP/fixtures" --prep | tr -d '\r')
 [ "${#FIXTURES[@]}" -gt 0 ] || { echo "FAIL — could not write the fixtures"; exit 1; }
 PACK=$(ls "$PROJECT"/Assets/Pack/*/pack.json 2>/dev/null | head -1)
 REGISTRY=(); REGISTRY_NOTE="the registry"
@@ -83,4 +83,13 @@ n_runs=$(echo "$TOTAL" | awk '{print $3}'); n_obj=$(echo "$TOTAL" | awk '{print 
 UNCOVERED=$(grep -E "^COVER 0 " "$TMPD/csharp.txt" | cut -d' ' -f3- | paste -sd';' -)
 [ -z "$UNCOVERED" ] || { echo "FAIL — prep drill: no compared object exercised: $UNCOVERED (a rule Blender did not judge; add a fixture to tools/glb-reader-drill/fixtures.py)"; exit 1; }
 [ "$(grep -cE "^COVER " "$TMPD/csharp.txt")" -gt 0 ] || { echo "FAIL — prep drill: the C# side printed no COVER rows"; exit 1; }
+
+# Missing inverseBindMatrices means identity in glTF, not permission to skip the comparison.
+python "$ROOT/tools/prep-drill/missing_ibm.py" "$WTMP/rows.txt" "$WTMP/no_ibm.glb" "$WTMP/no_ibm_rows.txt" || { echo "FAIL — could not construct the missing inverse bind matrix regression"; exit 1; }
+"$TMPD/prep.exe" "$WTMP/no_ibm_rows.txt" > "$TMPD/no_ibm.txt" 2>&1; badrc=$?
+if [ "$badrc" -ne 1 ] || ! grep -qE "^FAIL .*inverse bind matrix.*implicit identity" "$TMPD/no_ibm.txt"; then
+  cat "$TMPD/no_ibm.txt"
+  echo "FAIL — prep drill accepted an export missing nonidentity inverse bind matrices (rc=$badrc)"; exit 1
+fi
+echo "PASS — prep structure rejects missing nonidentity inverse bind matrices"
 echo "PASS — prep drill: $n_runs runs of prep_model.py on ${#SAMPLE[@]} files; $n_obj object runs ($n_prim primitives, $n_vert vertices) laid out equal to the meshes Blender wrote - positions, normals, UVs, colours, joints and weights, indices; $n_decl object runs declined (BlenderReduce.FallbackReason, named above), $n_pf runs where prep_model.py itself fails as known (Blender took $((t1 - t0)) s); ${#FIXTURES[@]} fixtures, $REGISTRY_NOTE (${#REGISTRY[@]}), ${#RECIPE_SOURCES[@]} recipe sources known"

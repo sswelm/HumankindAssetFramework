@@ -93,6 +93,7 @@ public static class HafModelDiff
         {
             HafMaterial x = a.Materials[i], y = b.Materials[i]; string w = $"material {i} ({x.Name})";
             if (x.Name != y.Name) return w + " name";
+            if (x.NameAbsent != y.NameAbsent) return w + " name presence";
             if (!x.BaseColorFactor.SequenceEqual(y.BaseColorFactor)) return w + " baseColorFactor";
             if (x.BaseColorTexture != y.BaseColorTexture || x.BaseColorTexCoord != y.BaseColorTexCoord) return w + " baseColorTexture";
             if (x.MetallicFactor != y.MetallicFactor || x.RoughnessFactor != y.RoughnessFactor) return w + " metallic/roughness";

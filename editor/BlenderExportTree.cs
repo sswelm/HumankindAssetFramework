@@ -168,7 +168,7 @@ public static class BlenderExportTree
                 r.MeshVisitOrder.Add(o.MeshNode);
                 if (materialsOfMesh != null) foreach (var mat in materialsOfMesh(o.MeshNode)) if (mat != null && !r.Materials.Contains(mat)) r.Materials.Add(mat);
             }
-            if (o.Kind == BlenderNames.ObjectKind.Mesh && o.Skin >= 0 && o.Skin < m.Skins.Count && names.ArmatureNodeOfSkin[o.Skin] >= -1)
+            if (node.HasMesh && o.Kind == BlenderNames.ObjectKind.Mesh && o.Skin >= 0 && o.Skin < m.Skins.Count && names.ArmatureNodeOfSkin[o.Skin] >= -1)
             {
                 int armaGltf = names.ArmatureNodeOfSkin[o.Skin];
                 var arma = objs.FirstOrDefault(a => a.Kind == BlenderNames.ObjectKind.Armature && a.GltfNode == armaGltf);

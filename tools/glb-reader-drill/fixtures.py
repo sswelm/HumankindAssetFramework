@@ -684,7 +684,7 @@ def fx_export_layout(out):
     write_glb(os.path.join(out, "export_layout.glb"), root, b)
 
 
-def export_skin(out, name, bad_weights, bone_child=False):
+def export_skin(out, name, bad_weights, bone_child=False, faceless=False):
     """The rules of the glTF exporter's SKINNED layout (step 5 d) no other fixture reaches (the drill's COVER rows,
     2026-10-06): the armature is the turned, unevenly scaled node above the joints, so positions and normals really go
     through its matrix; vertex 1 has two EQUAL weights listed joint 1 first (a stable sort keeps that order); vertex 2 a
@@ -713,6 +713,9 @@ def export_skin(out, name, bad_weights, bone_child=False):
                        {"name": "Tip", "translation": [1.0, 0.2, 0.0]}],
                 skins=[{"name": "rig", "joints": [2, 3]}],
                 scenes=[{"nodes": [0]}], scene=0)
+    if faceless:
+        # Without faces the exporter drops the mesh and skin: Body precedes the joints.
+        root["meshes"][0]["primitives"][0]["mode"] = 1
     if bad_weights:
         # GoodBody itself needs no neutral joint, but Blender appends one to their shared armature/skin.
         # Put it first in object order to also catch a checker that only accumulates requirements as it compares.
@@ -733,6 +736,10 @@ def fx_export_skin(out):
     export_skin(out, "export_skin", False)
 
 
+def fx_export_skin_lines(out):
+    export_skin(out, "export_skin_lines", False, faceless=True)
+
+
 def fx_export_skin_badweights(out):
     export_skin(out, "export_skin_badweights", True)
 
@@ -749,9 +756,10 @@ def fx_export_skin_bonechild(out):
 FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external, fx_cubic, fx_scenes, fx_materials, fx_skin8, fx_big, fx_names, fx_no_default_scene, fx_dropped, fx_mixed_skin, fx_clip_switch, fx_path_clip, fx_far_clip, fx_unicode_clip, fx_decimate_attrs, fx_decimate_limits, fx_export_layout, fx_export_skin, fx_export_skin_badweights, fx_export_skin_bonechild]
 
 
-def main(out):
+def main(out, prep=False):
     os.makedirs(out, exist_ok=True)
-    for fx in FIXTURES:
+    # Blender drops the line mesh: its vertex bounds are only relevant to the prep export drill.
+    for fx in FIXTURES + ([fx_export_skin_lines] if prep else []):
         fx(out)
     for name in sorted(os.listdir(out)):
         if name.endswith((".glb", ".gltf")):
@@ -759,4 +767,4 @@ def main(out):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main(sys.argv[1], prep="--prep" in sys.argv[2:])

@@ -39,6 +39,7 @@ public class GlbWriterTests
         for (int i = 0; i < a.Materials.Count; i++)
         {
             HafMaterial x = a.Materials[i], y = b.Materials[i];
+            Assert.Equal(x.NameAbsent, y.NameAbsent);
             Assert.Equal(x.Name, y.Name); Assert.Equal(x.BaseColorFactor, y.BaseColorFactor); Assert.Equal(x.BaseColorTexture, y.BaseColorTexture); Assert.Equal(x.BaseColorTexCoord, y.BaseColorTexCoord);
             Assert.Equal(x.MetallicFactor, y.MetallicFactor); Assert.Equal(x.RoughnessFactor, y.RoughnessFactor); Assert.Equal(x.MetallicRoughnessTexture, y.MetallicRoughnessTexture);
             Assert.Equal(x.NormalTexture, y.NormalTexture); Assert.Equal(x.NormalScale, y.NormalScale); Assert.Equal(x.OcclusionTexture, y.OcclusionTexture); Assert.Equal(x.OcclusionStrength, y.OcclusionStrength);
@@ -64,6 +65,20 @@ public class GlbWriterTests
             for (int k = 0; k < x.Samplers.Count; k++) { Assert.Equal(x.Samplers[k].Times, y.Samplers[k].Times); Assert.Equal(x.Samplers[k].Values, y.Samplers[k].Values); Assert.Equal(x.Samplers[k].Components, y.Samplers[k].Components); Assert.Equal(x.Samplers[k].Interpolation, y.Samplers[k].Interpolation); }
             for (int k = 0; k < x.Channels.Count; k++) { Assert.Equal(x.Channels[k].Sampler, y.Channels[k].Sampler); Assert.Equal(x.Channels[k].Node, y.Channels[k].Node); Assert.Equal(x.Channels[k].Path, y.Channels[k].Path); }
         }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Empty_and_absent_material_names_remain_distinct(bool absent)
+    {
+        var original = GlbReader.ReadGltf("{\"asset\":{\"version\":\"2.0\"},\"materials\":[" + (absent ? "{}" : "{\"name\":\"\"}") + "]}", null);
+        var again = GlbReader.Read(GlbWriter.Write(original));
+        Assert.Equal("", again.Materials[0].Name);
+        Assert.Equal(absent, again.Materials[0].NameAbsent);
+        Assert.Null(HafModelDiff.FirstDifference(original, again));
+        again.Materials[0].NameAbsent = !absent;
+        Assert.Contains("name presence", HafModelDiff.FirstDifference(original, again));
     }
 
     [Fact]

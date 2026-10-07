@@ -96,16 +96,18 @@ public class BlenderExportTreeTests
     [Fact]
     public void A_skinned_mesh_hangs_from_its_armature_with_the_identity_and_a_faceless_mesh_is_a_node_without_one()
     {
-        var nodes = new List<HafNode> { Node("Holder", -1, -1, 1, 2), Node("Mixed", 0, 0), Node("Joint") };
+        var nodes = new List<HafNode> { Node("Holder", -1, -1, 1, 2), Node("Body", 0, 0), Node("Joint") };
         nodes[1].Rotation = new double[] { 0, 0.3826834, 0, 0.9238795 };
         var m = Model(new[] { Mesh("tri") }, nodes, 0);
         m.Skins.Add(new HafSkin { Joints = new[] { 2 }, Skeleton = 2 });
         m.Meshes[0].Primitives[0].Joints = new ushort[12]; m.Meshes[0].Primitives[0].Weights = new float[12];
         var t = Tree(m);
-        var mixed = t.Nodes.Single(n => n.Name == "Mixed");
+        var mixed = t.Nodes.Single(n => n.Name == "Body");
         Assert.Null(mixed.Rotation); Assert.Null(mixed.Translation); Assert.Null(mixed.Scale);   // moved under the armature: no transform of its own
         var withoutFaces = BlenderExportTree.Build(m, BlenderNames.Compute(m), VehicleProbe.BlenderWorldMatrices(m, null), new HashSet<int>(), null);
-        Assert.False(withoutFaces.Nodes.Single(n => n.Name == "Mixed").HasMesh);
+        Assert.False(withoutFaces.Nodes.Single(n => n.Name == "Body").HasMesh);
+        Assert.Equal(new[] { "Joint", "Body", "Holder" }, t.Nodes.Select(n => n.Name));
+        Assert.Equal(new[] { "Body", "Joint", "Holder" }, withoutFaces.Nodes.Select(n => n.Name));
     }
 
     [Fact]

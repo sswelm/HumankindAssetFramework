@@ -151,7 +151,7 @@ static class PrepDrill
 
     static readonly string[] CoverKeys =
     {
-        "a node list compared (name, parent, order)", "a node transform compared", "a joint transform compared", "a skin's inverse bind matrices compared", "a neutral bone compared", "a material list compared (names, order)", "an object under a bone (its transform is the next part's)", "an animated file (its transforms are Blender's posed state, not compared)",
+        "a faceless skinned object compared", "a node list compared (name, parent, order)", "a node transform compared", "a joint transform compared", "a skin's inverse bind matrices compared", "a neutral bone compared", "a material list compared (names, order)", "an object under a bone (its transform is the next part's)", "an animated file (its transforms are Blender's posed state, not compared)",
         "normals from the file (custom normals)", "no normals (every face flat)", "a normal that rounds to zero, made up", "a zero normal on a fan that does not point up", "an object of several primitives",
         "an object without faces", "two or more UV sets", "COLOR_0 as RGB (the material's colour)", "COLOR_0 with alpha (a face without material)",
         "COLOR_0 forced (255s)", "two or more colour sets", "a colour layer on the vertices (point domain)", "a twin face the exporter's validate removes",
@@ -187,6 +187,7 @@ static class PrepDrill
             if (n.Name != w.Name) { problems.Add($"structure: node {i} is '{n.Name}' here, '{w.Name}' written"); shown++; continue; }
             if (n.Parent != wparent[i]) { problems.Add($"structure: node {i} '{n.Name}' under {n.Parent} here, {wparent[i]} written"); shown++; continue; }
             if (n.HasMesh != (w.Mesh >= 0)) { problems.Add($"structure: node {i} '{n.Name}' {(w.Mesh >= 0 ? "has a mesh in the file, none here" : "has a mesh here, none in the file")}"); shown++; continue; }
+            if (!n.HasMesh && n.Object != null && n.Object.Skin >= 0) cover["a faceless skinned object compared"]++;
             if (!n.TransformKnown) { cover["an object under a bone (its transform is the next part's)"]++; continue; }
             if (animated && n.Object != null) continue;
             if (n.BoneNode >= 0) cover["a joint transform compared"]++;
@@ -200,16 +201,20 @@ static class PrepDrill
         for (int i = 0; i < written.Nodes.Count && shown < 4; i++)
         {
             var w = written.Nodes[i];
-            if (w.Skin < 0 || w.Skin >= written.Skins.Count || written.Skins[w.Skin].InverseBindMatrices == null) continue;
+            if (w.Skin < 0 || w.Skin >= written.Skins.Count) continue;
             var sk = written.Skins[w.Skin];
             bool all = true;
             for (int j = 0; j < sk.Joints.Length && all; j++)
             {
                 var jn = tree.Nodes[sk.Joints[j]];
-                if (jn.InverseBind == null) { all = false; break; }
+                if (jn.InverseBind == null) { problems.Add("structure: skin of '" + w.Name + "' joint '" + jn.Name + "' inverse bind matrix not predicted"); shown++; all = false; break; }
                 for (int k = 0; k < 16; k++)
-                    if (BitConverter.ToUInt32(BitConverter.GetBytes(jn.InverseBind[k]), 0) != BitConverter.ToUInt32(BitConverter.GetBytes((float)sk.InverseBindMatrices[16 * j + k]), 0))
-                    { problems.Add("structure: skin of '" + w.Name + "' joint " + j + " '" + jn.Name + "' inverse bind matrix entry " + k + ": " + jn.InverseBind[k].ToString("R") + " here vs " + ((float)sk.InverseBindMatrices[16 * j + k]).ToString("R") + " written"); shown++; all = false; break; }
+                {
+                    // glTF defaults an omitted accessor to identity; absence must still be compared.
+                    float actual = sk.InverseBindMatrices == null ? (k % 5 == 0 ? 1f : 0f) : (float)sk.InverseBindMatrices[16 * j + k];
+                    if (BitConverter.ToUInt32(BitConverter.GetBytes(jn.InverseBind[k]), 0) != BitConverter.ToUInt32(BitConverter.GetBytes(actual), 0))
+                    { problems.Add("structure: skin of '" + w.Name + "' joint " + j + " '" + jn.Name + "' inverse bind matrix entry " + k + ": " + jn.InverseBind[k].ToString("R") + " here vs " + actual.ToString("R") + " written" + (sk.InverseBindMatrices == null ? " (implicit identity)" : "")); shown++; all = false; break; }
+                }
             }
             if (all) cover["a skin's inverse bind matrices compared"]++;
         }

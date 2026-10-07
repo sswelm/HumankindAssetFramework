@@ -277,6 +277,11 @@ transforms differ by ulps because the probe's world matrix for the armature's an
 off unit, components of 1e-33) is not Blender's - an existing gap of `BlenderWorldMatrices`, now in the backlog;
 the canoe's edit bones and `matrix_local` are equal. `BlenderExportTreeTests`, `BlenderArmatureTests` and
 `BlenderEigenTests` hold each rule on the measured values.
+The PR #129 regressions include the prep-only `export_skin_lines` fixture (`fixtures.py --prep`): Blender drops its faceless mesh and skin, so its
+object is indexed before the armature's bones. The prep drill also removes an inverse-bind accessor
+from an export with nonidentity matrices and requires the checker to reject the resulting implicit
+identity matrices. Empty and absent material names remain distinct through writer round trips and
+`HafModelDiff`, with both forms covered by `GlbWriterTests`.
 
 **The Clip Range picker's in-process rig** (step 4, 2026-10-03): `HafUnityFrameTests` hold the preview frame's arithmetic
 without Unity — the X mirror's conjugation of rotations, matrices and matrix nodes; Unity's skinning formula fed the rig's

@@ -182,7 +182,7 @@ public static class GlbWriter
             foreach (var mt in m.Materials)
             {
                 var j = new JObject();
-                if (mt.Name.Length > 0) j["name"] = mt.Name;
+                if (mt.Name.Length > 0 || !mt.NameAbsent) j["name"] = mt.Name;
                 var pbr = new JObject();
                 if (!IsDefault(mt.BaseColorFactor, 1, 1, 1, 1)) pbr["baseColorFactor"] = Arr(mt.BaseColorFactor);
                 if (mt.BaseColorTexture >= 0) pbr["baseColorTexture"] = TexRef(mt.BaseColorTexture, mt.BaseColorTexCoord);
