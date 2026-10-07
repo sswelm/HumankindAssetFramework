@@ -101,4 +101,12 @@ for mode in skin joints; do
   fi
 done
 echo "PASS — prep structure rejects a wrong skin and joints with identical names and bind matrices"
+# Two primitives with their materials swapped: the list's names and order and every vertex are as before.
+python "$ROOT/tools/prep-drill/wrong_material.py" "$WTMP/rows.txt" "$WTMP/wrong_material.glb" "$WTMP/wrong_material_rows.txt" || { echo "FAIL — could not construct the swapped materials regression"; exit 1; }
+"$TMPD/prep.exe" "$WTMP/wrong_material_rows.txt" > "$TMPD/wrong_material.txt" 2>&1; badrc=$?
+if [ "$badrc" -ne 1 ] || ! grep -qE "^FAIL .*material index" "$TMPD/wrong_material.txt"; then
+  cat "$TMPD/wrong_material.txt"
+  echo "FAIL — prep drill accepted two primitives with their materials swapped (rc=$badrc)"; exit 1
+fi
+echo "PASS — prep structure rejects two primitives with their materials swapped"
 echo "PASS — prep drill: $n_runs runs of prep_model.py on ${#SAMPLE[@]} files; $n_obj object runs ($n_prim primitives, $n_vert vertices) laid out equal to the meshes Blender wrote - positions, normals, UVs, colours, joints and weights, indices; $n_decl object runs declined (BlenderReduce.FallbackReason, named above), $n_pf runs where prep_model.py itself fails as known (Blender took $((t1 - t0)) s); ${#FIXTURES[@]} fixtures, $REGISTRY_NOTE (${#REGISTRY[@]}), ${#RECIPE_SOURCES[@]} recipe sources known"

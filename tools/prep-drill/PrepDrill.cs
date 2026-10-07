@@ -156,7 +156,7 @@ static class PrepDrill
 
     static readonly string[] CoverKeys =
     {
-        "a skin's joint indices compared", "a faceless skinned object compared", "left to Blender: an object of the file is declined", "left to Blender: material-uv", "left to Blender: camera-children", "left to Blender: lights", "a camera left out", "an object hung from a node that bears its parent bone's name",
+        "a node's mesh index compared", "a skin's joint indices compared", "two nodes of one armature sharing a skin", "two armatures, a skin each", "a primitive's material index compared", "a faceless skinned object compared", "left to Blender: an object of the file is declined", "left to Blender: material-uv", "left to Blender: camera-children", "left to Blender: lights", "a camera left out", "an object hung from a node that bears its parent bone's name",
         "bones: two or more root bones", "bones: a bone child nearer than 0.004 (no length taken from it)", "bones: a bone of length 1 (no bone child, no parent bone, at its parent's origin)", "bones: an edit bone of no length (its tail moved along Z)", "bones: an edit bone shorter than 1e-6 (its tail moved along the bone)",
         "bones: a skeleton that is not a joint, on a skin with inverse bind matrices", "bones: a bone almost along -Y (the series for 1 + y)", "bones: a bone along -Y (the mirrored matrix)", "a node list compared (name, parent, order)", "a node transform compared", "a joint transform compared", "a skin's inverse bind matrices compared", "a neutral bone compared", "a material list compared (names, order)", "an object under a bone (its transform is the next part's)", "an animated file (its transforms are Blender's posed state, not compared)",
         "normals from the file (custom normals)", "no normals (every face flat)", "a normal that rounds to zero, made up", "a zero normal on a fan that does not point up", "an object of several primitives",
@@ -203,6 +203,13 @@ static class PrepDrill
             if (n.Name != w.Name) { problems.Add($"structure: node {i} is '{n.Name}' here, '{w.Name}' written"); shown++; continue; }
             if (n.Parent != wparent[i]) { problems.Add($"structure: node {i} '{n.Name}' under {n.Parent} here, {wparent[i]} written"); shown++; continue; }
             if (n.HasMesh != (w.Mesh >= 0)) { problems.Add($"structure: node {i} '{n.Name}' {(w.Mesh >= 0 ? "has a mesh in the file, none here" : "has a mesh here, none in the file")}"); shown++; continue; }
+            // the mesh INDEX: every object's mesh is written once, in the order the serializer reaches them (MeshVisitOrder)
+            if (n.HasMesh && n.Object != null)
+            {
+                int expectedMesh = tree.MeshVisitOrder.IndexOf(n.Object.MeshNode);
+                if (expectedMesh != w.Mesh) { problems.Add($"structure: node {i} '{n.Name}' mesh index {expectedMesh} here vs {w.Mesh} written"); shown++; continue; }
+                cover["a node's mesh index compared"]++;
+            }
             // the children ARRAY, in order: the converter walks it (a parent per node alone does not hold the order)
             if (!n.Children.SequenceEqual(w.Children)) { problems.Add($"structure: node {i} '{n.Name}' children [{string.Join(",", n.Children)}] here vs [{string.Join(",", w.Children)}] written"); shown++; continue; }
             if (!n.HasMesh && n.Object != null && n.Object.Skin >= 0) cover["a faceless skinned object compared"]++;
@@ -220,30 +227,52 @@ static class PrepDrill
             if (n.BoneNode >= 0) cover["a joint transform compared"]++;
             if (n.NeutralBone) cover["a neutral bone compared"]++;
         }
-        // The source armature fixes the joint indices: names and bind matrices can coincide across armatures.
-        var boneIndex = tree.Nodes.Select((n, i) => (n, i)).Where(x => x.n.BoneNode >= 0).ToDictionary(x => x.n.BoneNode, x => x.i);
+        // each primitive's material: its INDEX in the written list. The list above holds names and order, the mesh stage the
+        // vertex data; neither holds which primitive got which material (review of PR #129: the same hole as the skins')
+        for (int i = 0; i < written.Nodes.Count && shown < 4; i++)
+        {
+            var n = tree.Nodes[i]; var w = written.Nodes[i];
+            if (!n.HasMesh || n.Object == null || w.Mesh < 0 || !materialsOfMesh.TryGetValue(n.Object.MeshNode, out var mats)) continue;
+            var theirs = written.Meshes[w.Mesh].Primitives.Where(p => p.Mode == 4).ToList();
+            if (theirs.Count != mats.Count) continue;   // the mesh stage's to report
+            bool same = true;
+            for (int k = 0; k < mats.Count && same; k++)
+            {
+                int expected = mats[k] == null ? -1 : tree.Materials.IndexOf(mats[k]);
+                if (expected != theirs[k].Material) { problems.Add($"structure: node '{w.Name}' primitive {k} material index {expected} ('{mats[k]}') here vs {theirs[k].Material} written"); shown++; same = false; }
+            }
+            if (same && mats.Count > 0) cover["a primitive's material index compared"]++;
+        }
+        // The source armature fixes the joint indices: names and bind matrices can coincide across armatures. The tree
+        // holds each skinned node's joints (BlenderExportTree.Node.SkinJoints) - the rule the writer will use
+        var skinOfArmature = new Dictionary<int, int>();   // armature glTF node -> the written skin its first node used
         for (int i = 0; i < written.Nodes.Count && shown < 4; i++)
         {
             var w = written.Nodes[i];
-            var n = tree.Nodes[i]; var o = n.Object;
-            bool expectsSkin = n.HasMesh && o != null && o.Skin >= 0 && m.Meshes[m.Nodes[o.MeshNode].Mesh].Primitives.Exists(p => p.Skinned);
-            if (!expectsSkin)
+            var n = tree.Nodes[i];
+            if (n.SkinJoints == null)
             {
                 if (w.Skin >= 0) { problems.Add("structure: node '" + w.Name + "' has an unexpected skin"); shown++; }
                 continue;
             }
             if (w.Skin < 0 || w.Skin >= written.Skins.Count) { problems.Add("structure: node '" + w.Name + "' is missing its skin"); shown++; continue; }
-            int armature = names.ArmatureNodeOfSkin[o.Skin];
-            var expectedJoints = names.BoneNodesInOrder.Where(b => names.ArmatureNodeOfBone[b] == armature).Select(b => boneIndex[b]).ToList();
-            if (neutralArmatures.Contains(armature))
-            {
-                int armatureIndex = tree.Nodes.FindIndex(x => x.Object != null && x.Object.Kind == BlenderNames.ObjectKind.Armature && x.Object.GltfNode == armature);
-                expectedJoints.Add(tree.Nodes.FindIndex(x => x.NeutralBone && x.ArmatureNode == armatureIndex));
-            }
+            var expectedJoints = n.SkinJoints;
             var sk = written.Skins[w.Skin];
             if (!expectedJoints.SequenceEqual(sk.Joints))
             { problems.Add("structure: skin of '" + w.Name + "' joint indices [" + string.Join(",", expectedJoints) + "] here vs [" + string.Join(",", sk.Joints) + "] written"); shown++; continue; }
             cover["a skin's joint indices compared"]++;
+            // one skin per armature: the same index for every node of it, another for another armature's
+            if (skinOfArmature.TryGetValue(n.SkinArmature, out int shared))
+            {
+                if (shared != w.Skin) { problems.Add($"structure: node '{w.Name}' uses skin {w.Skin}, another node of its armature skin {shared}"); shown++; continue; }
+                cover["two nodes of one armature sharing a skin"]++;
+            }
+            else
+            {
+                if (skinOfArmature.ContainsValue(w.Skin)) { problems.Add($"structure: node '{w.Name}' uses skin {w.Skin}, which a node of another armature uses"); shown++; continue; }
+                if (skinOfArmature.Count > 0) cover["two armatures, a skin each"]++;
+                skinOfArmature[n.SkinArmature] = w.Skin;
+            }
             if (sk.Skeleton >= 0) { problems.Add("structure: skin of '" + w.Name + "' written with a skeleton (the exporter names none)"); shown++; }
             bool all = true;
             for (int j = 0; j < sk.Joints.Length && all; j++)

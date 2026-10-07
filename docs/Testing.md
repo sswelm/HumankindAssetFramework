@@ -290,6 +290,13 @@ identical joint names and inverse bind matrices. The structure stage derives eac
 joint indices from its source armature, including the neutral bone when needed, before comparing
 matrices. `tools/prep-drill/wrong_skin.py` constructs two negative exports: a mesh redirected to
 the other skin, and a skin with the other armature's joint indices. Both must fail the prep drill.
+A review of that fix found the same hole one field over: nothing compared WHICH material a written primitive uses (the
+list held names and order, the mesh stage the vertices). The structure stage now compares each primitive's material
+index, with a negative row of its own (`tools/prep-drill/wrong_material.py` swaps two primitives' materials in one of
+Blender's outputs). The joints a skin lists are the tree's now (`BlenderExportTree.Node.SkinJoints`, the rule the writer
+will use - the drill had its own copy), and the stage holds the exporter's one skin per armature: nodes of one armature
+share a skin index, nodes of two never do. Each node's mesh INDEX is compared too (every object's mesh written once, in
+the order the serializer reaches them: `Result.MeshVisitOrder`, which nothing had consumed). `FULL=1` after it (188 runs on 94 files): 5,885 mesh indices, 5,861 material assignments and 558 skins' joint indices equal, 474 nodes sharing their armature's skin.
 A second review the same day (two independent readers against Blender's and Eigen's sources; every finding run through
 Blender before it was believed) found four shapes the 80 real files do not have and the tree got wrong, and a branch of
 the bone chain that was not ported. Fixed and held by prep-only fixtures: a camera is not exported (`export_camera`; the

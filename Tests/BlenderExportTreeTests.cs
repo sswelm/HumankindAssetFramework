@@ -191,6 +191,30 @@ public class BlenderExportTreeTests
     }
 
     [Fact]
+    public void A_skins_joints_are_its_own_armatures_bones_whatever_another_armature_names_its_own()
+    {
+        // export_skin_twins: two armatures with the same joint names; each body lists the indices of ITS bones, and a mesh
+        // without a skin lists none
+        var nodes = new List<HafNode> { Node("RigA", -1, -1, 1, 2), Node("BodyA", 0, 0), Node("Root", -1, -1, 3), Node("Tip"),
+                                        Node("RigB", -1, -1, 5, 6), Node("BodyB", 0, 1), Node("Root", -1, -1, 7), Node("Tip"), Node("Plain", 0) };
+        var m = Model(new[] { Mesh("tri") }, nodes, 0, 4, 8);
+        m.Skins.Add(new HafSkin { Joints = new[] { 2, 3 } }); m.Skins.Add(new HafSkin { Joints = new[] { 6, 7 } });
+        m.Meshes[0].Primitives[0].Joints = new ushort[12]; m.Meshes[0].Primitives[0].Weights = new float[12];
+        var t = Tree(m);
+        var a = t.Nodes.Single(n => n.Name == "BodyA"); var b = t.Nodes.Single(n => n.Name == "BodyB");
+        Assert.Equal(new[] { 2, 3 }, a.SkinJoints.Select(i => t.Nodes[i].BoneNode));
+        Assert.Equal(new[] { 6, 7 }, b.SkinJoints.Select(i => t.Nodes[i].BoneNode));
+        Assert.NotEqual(a.SkinArmature, b.SkinArmature);
+        Assert.Empty(a.SkinJoints.Intersect(b.SkinJoints));
+        Assert.Null(t.Nodes.Single(n => n.Name == "Plain").SkinJoints);
+        // the neutral bone is the skin's last joint
+        var withNeutral = BlenderExportTree.Build(m, BlenderNames.Compute(m), VehicleProbe.BlenderWorldMatrices(m, null), null, new HashSet<int> { a.SkinArmature });
+        var an = withNeutral.Nodes.Single(n => n.Name == "BodyA");
+        Assert.Equal(3, an.SkinJoints.Count); Assert.True(withNeutral.Nodes[an.SkinJoints[2]].NeutralBone);
+        Assert.Equal(2, withNeutral.Nodes.Single(n => n.Name == "BodyB").SkinJoints.Count);
+    }
+
+    [Fact]
     public void Siblings_whose_names_differ_only_by_case_keep_their_creation_order()
     {
         // id_sort_by_name puts a new ID before the first name that compares GREATER: equal ignoring case stays behind

@@ -42,6 +42,11 @@ public static class BlenderExportTree
         public float[] InverseBind;                 // a joint's inverse bind matrix as written (16 floats, column by column), the neutral bone's too
         public bool TransformKnown;                 // false for a bone, and under one: its transform is the next part's
         public List<int> Children = new List<int>();
+        // a skinned mesh: the joints of its skin as written (node indices: the armature's bones in creation order, the
+        // neutral bone last) and the armature's glTF node (-1 for the dummy root's); null when the node has no skin. The
+        // exporter makes ONE skin per armature, so two nodes of one SkinArmature share a skin and two of different ones
+        // never do - whatever the joints' names and matrices (review of PR #129: twin armatures)
+        public List<int> SkinJoints; public int SkinArmature = -2;
     }
 
     public sealed class Result
@@ -246,6 +251,9 @@ public static class BlenderExportTree
                     // the skin's joints are the armature's bones depth-first; the serializer reaches them here first
                     if (boneChildren.TryGetValue(armaGltf, out var roots)) foreach (int b in roots) VisitBone(b, -2, null);
                     if (neutralArmatures.Contains(armaGltf)) VisitNeutral(armaGltf, -2);
+                    node.SkinArmature = armaGltf;
+                    node.SkinJoints = names.BoneNodesInOrder.Where(b => names.ArmatureNodeOfBone[b] == armaGltf).Select(b => indexOf[b]).ToList();
+                    if (neutralArmatures.Contains(armaGltf)) node.SkinJoints.Add(indexOf["neutral:" + armaGltf]);
                 }
             }
             int idx = r.Nodes.Count; r.Nodes.Add(node); indexOf[o] = idx;
