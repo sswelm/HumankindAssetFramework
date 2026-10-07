@@ -285,6 +285,11 @@ removes a skin's non-identity `inverseBindMatrices` accessor from one of Blender
 and requires the structure stage to fail on the implicit identity (the stage had skipped such a skin). And the writer keeps
 a material's empty name (`"name": ""`, which the importer names `Material`; an absent one is `Material_<index>`), with
 `HafModelDiff` telling the two apart (`GlbWriterTests`).
+The skin-wiring regression uses the prep-only `export_skin_twins` fixture: two armatures have
+identical joint names and inverse bind matrices. The structure stage derives each mesh's ordered
+joint indices from its source armature, including the neutral bone when needed, before comparing
+matrices. `tools/prep-drill/wrong_skin.py` constructs two negative exports: a mesh redirected to
+the other skin, and a skin with the other armature's joint indices. Both must fail the prep drill.
 A second review the same day (two independent readers against Blender's and Eigen's sources; every finding run through
 Blender before it was believed) found four shapes the 80 real files do not have and the tree got wrong, and a branch of
 the bone chain that was not ported. Fixed and held by prep-only fixtures: a camera is not exported (`export_camera`; the

@@ -92,4 +92,13 @@ if [ "$badrc" -ne 1 ] || ! grep -qE "^FAIL .*inverse bind matrix.*implicit ident
   echo "FAIL — prep drill accepted an export missing nonidentity inverse bind matrices (rc=$badrc)"; exit 1
 fi
 echo "PASS — prep structure rejects missing nonidentity inverse bind matrices"
+for mode in skin joints; do
+  python "$ROOT/tools/prep-drill/wrong_skin.py" "$WTMP/rows.txt" "$WTMP/wrong_$mode.glb" "$WTMP/wrong_${mode}_rows.txt" "$mode" || { echo "FAIL — could not construct the wrong $mode regression"; exit 1; }
+  "$TMPD/prep.exe" "$WTMP/wrong_${mode}_rows.txt" > "$TMPD/wrong_$mode.txt" 2>&1; badrc=$?
+  if [ "$badrc" -ne 1 ] || ! grep -qE "^FAIL .*joint indices" "$TMPD/wrong_$mode.txt"; then
+    cat "$TMPD/wrong_$mode.txt"
+    echo "FAIL — prep drill accepted wrong $mode wiring with identical joint names and bind matrices (rc=$badrc)"; exit 1
+  fi
+done
+echo "PASS — prep structure rejects a wrong skin and joints with identical names and bind matrices"
 echo "PASS — prep drill: $n_runs runs of prep_model.py on ${#SAMPLE[@]} files; $n_obj object runs ($n_prim primitives, $n_vert vertices) laid out equal to the meshes Blender wrote - positions, normals, UVs, colours, joints and weights, indices; $n_decl object runs declined (BlenderReduce.FallbackReason, named above), $n_pf runs where prep_model.py itself fails as known (Blender took $((t1 - t0)) s); ${#FIXTURES[@]} fixtures, $REGISTRY_NOTE (${#REGISTRY[@]}), ${#RECIPE_SOURCES[@]} recipe sources known"

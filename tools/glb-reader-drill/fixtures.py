@@ -885,13 +885,29 @@ def fx_export_review(out):
     write_glb(os.path.join(out, "export_bone_name_clash.glb"), root, b)
 
 
+def fx_export_skin_twins(out):
+    """Separate armatures with identical joint names and bind matrices: skin wiring must compare indices."""
+    b = Buf()
+    attrs = {"POSITION": b.accessor([(0., 0., 0.), (1., 0., 0.), (0., 1., 0.)], "f", "VEC3"),
+             "JOINTS_0": b.accessor([(0, 0, 0, 0)] * 3, "H", "VEC4", minmax=False),
+             "WEIGHTS_0": b.accessor([(1., 0., 0., 0.)] * 3, "f", "VEC4", minmax=False)}
+    root = base("export_skin_twins", meshes=[{"name": "tri", "primitives": [{"attributes": attrs}]}],
+                nodes=[{"name": "RigA", "children": [1, 2]}, {"name": "BodyA", "mesh": 0, "skin": 0},
+                       {"name": "Root", "children": [3]}, {"name": "Tip", "translation": [0., 1., 0.]},
+                       {"name": "RigB", "children": [5, 6]}, {"name": "BodyB", "mesh": 0, "skin": 1},
+                       {"name": "Root", "children": [7]}, {"name": "Tip", "translation": [0., 1., 0.]}],
+                skins=[{"name": "ArmA", "joints": [2, 3]}, {"name": "ArmB", "joints": [6, 7]}],
+                scenes=[{"nodes": [0, 4]}], scene=0)
+    write_glb(os.path.join(out, "export_skin_twins.glb"), root, b)
+
+
 FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external, fx_cubic, fx_scenes, fx_materials, fx_skin8, fx_big, fx_names, fx_no_default_scene, fx_dropped, fx_mixed_skin, fx_clip_switch, fx_path_clip, fx_far_clip, fx_unicode_clip, fx_decimate_attrs, fx_decimate_limits, fx_export_layout, fx_export_skin, fx_export_skin_badweights, fx_export_skin_bonechild]
 
 
 def main(out, prep=False):
     os.makedirs(out, exist_ok=True)
     # Blender drops the line mesh: its vertex bounds are only relevant to the prep export drill.
-    for fx in FIXTURES + ([fx_export_skin_lines, fx_export_bones, fx_export_review] if prep else []):
+    for fx in FIXTURES + ([fx_export_skin_lines, fx_export_bones, fx_export_review, fx_export_skin_twins] if prep else []):
         fx(out)
     for name in sorted(os.listdir(out)):
         if name.endswith((".glb", ".gltf")):

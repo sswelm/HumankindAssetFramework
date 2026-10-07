@@ -156,7 +156,7 @@ static class PrepDrill
 
     static readonly string[] CoverKeys =
     {
-        "a faceless skinned object compared", "left to Blender: an object of the file is declined", "left to Blender: material-uv", "left to Blender: camera-children", "left to Blender: lights", "a camera left out", "an object hung from a node that bears its parent bone's name",
+        "a skin's joint indices compared", "a faceless skinned object compared", "left to Blender: an object of the file is declined", "left to Blender: material-uv", "left to Blender: camera-children", "left to Blender: lights", "a camera left out", "an object hung from a node that bears its parent bone's name",
         "bones: two or more root bones", "bones: a bone child nearer than 0.004 (no length taken from it)", "bones: a bone of length 1 (no bone child, no parent bone, at its parent's origin)", "bones: an edit bone of no length (its tail moved along Z)", "bones: an edit bone shorter than 1e-6 (its tail moved along the bone)",
         "bones: a skeleton that is not a joint, on a skin with inverse bind matrices", "bones: a bone almost along -Y (the series for 1 + y)", "bones: a bone along -Y (the mirrored matrix)", "a node list compared (name, parent, order)", "a node transform compared", "a joint transform compared", "a skin's inverse bind matrices compared", "a neutral bone compared", "a material list compared (names, order)", "an object under a bone (its transform is the next part's)", "an animated file (its transforms are Blender's posed state, not compared)",
         "normals from the file (custom normals)", "no normals (every face flat)", "a normal that rounds to zero, made up", "a zero normal on a fan that does not point up", "an object of several primitives",
@@ -220,17 +220,35 @@ static class PrepDrill
             if (n.BoneNode >= 0) cover["a joint transform compared"]++;
             if (n.NeutralBone) cover["a neutral bone compared"]++;
         }
-        // the skins: each skinned node's inverse bind matrices, joint by joint (the joint order was held by name above)
+        // The source armature fixes the joint indices: names and bind matrices can coincide across armatures.
+        var boneIndex = tree.Nodes.Select((n, i) => (n, i)).Where(x => x.n.BoneNode >= 0).ToDictionary(x => x.n.BoneNode, x => x.i);
         for (int i = 0; i < written.Nodes.Count && shown < 4; i++)
         {
             var w = written.Nodes[i];
-            if (w.Skin < 0 || w.Skin >= written.Skins.Count) continue;
+            var n = tree.Nodes[i]; var o = n.Object;
+            bool expectsSkin = n.HasMesh && o != null && o.Skin >= 0 && m.Meshes[m.Nodes[o.MeshNode].Mesh].Primitives.Exists(p => p.Skinned);
+            if (!expectsSkin)
+            {
+                if (w.Skin >= 0) { problems.Add("structure: node '" + w.Name + "' has an unexpected skin"); shown++; }
+                continue;
+            }
+            if (w.Skin < 0 || w.Skin >= written.Skins.Count) { problems.Add("structure: node '" + w.Name + "' is missing its skin"); shown++; continue; }
+            int armature = names.ArmatureNodeOfSkin[o.Skin];
+            var expectedJoints = names.BoneNodesInOrder.Where(b => names.ArmatureNodeOfBone[b] == armature).Select(b => boneIndex[b]).ToList();
+            if (neutralArmatures.Contains(armature))
+            {
+                int armatureIndex = tree.Nodes.FindIndex(x => x.Object != null && x.Object.Kind == BlenderNames.ObjectKind.Armature && x.Object.GltfNode == armature);
+                expectedJoints.Add(tree.Nodes.FindIndex(x => x.NeutralBone && x.ArmatureNode == armatureIndex));
+            }
             var sk = written.Skins[w.Skin];
+            if (!expectedJoints.SequenceEqual(sk.Joints))
+            { problems.Add("structure: skin of '" + w.Name + "' joint indices [" + string.Join(",", expectedJoints) + "] here vs [" + string.Join(",", sk.Joints) + "] written"); shown++; continue; }
+            cover["a skin's joint indices compared"]++;
             if (sk.Skeleton >= 0) { problems.Add("structure: skin of '" + w.Name + "' written with a skeleton (the exporter names none)"); shown++; }
             bool all = true;
             for (int j = 0; j < sk.Joints.Length && all; j++)
             {
-                var jn = tree.Nodes[sk.Joints[j]];
+                var jn = tree.Nodes[expectedJoints[j]];
                 if (jn.InverseBind == null) { problems.Add("structure: skin of '" + w.Name + "' joint '" + jn.Name + "' inverse bind matrix not predicted"); shown++; all = false; break; }
                 for (int k = 0; k < 16; k++)
                 {
