@@ -269,11 +269,10 @@ defects in the chain each fail the drill on it. NOT compared: an object parented
 Blender's pose evaluation; the dug-out canoe's eleven parts, the `export_skin_bonechild` fixture) and an animated
 file's object transforms (Blender's posed import state; the Factory preps static entries). Gate sample: 48 node
 lists, 176 object and 46 joint transforms, 26 skins' inverse bind matrices, 2 neutral bones and 24 material lists
-equal; `FULL=1` on 2026-10-07: 158 runs on 79 files, 156 node lists, 39,072 object and 978 joint transforms, 538 skins'
-inverse bind matrices, 2 neutral bones and 126 material lists equal; it also found the walk appending an armature before
-its bones when no mesh uses the skin (the dug-out canoe; fixed, unit-tested, re-run on that file) and left two files
-named: the Espana, re-fused by the user while the run was on (its triangle total moved), and the canoe, whose eight joint
-transforms differ by ulps because the probe's world matrix for the armature's ancestor `Canoe` (a quaternion 2.9e-8
+equal; `FULL=1` on 2026-10-07 (after the review below): 160 runs on 80 files, 158 node lists, 50,872 object and 990 joint
+transforms, 538 skins' inverse bind matrices, 2 neutral bones and 128 material lists equal; an earlier run found the walk
+appending an armature before its bones when no mesh uses the skin (the dug-out canoe; fixed, unit-tested) and the one file
+still named is the canoe, whose eight joint transforms differ by ulps because the probe's world matrix for the armature's ancestor `Canoe` (a quaternion 2.9e-8
 off unit, components of 1e-33) is not Blender's - an existing gap of `BlenderWorldMatrices`, now in the backlog;
 the canoe's edit bones and `matrix_local` are equal. `BlenderExportTreeTests`, `BlenderArmatureTests` and
 `BlenderEigenTests` hold each rule on the measured values.
