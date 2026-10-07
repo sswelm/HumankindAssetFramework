@@ -63,8 +63,12 @@ public static class BlenderEigen
 
     static void Store(float[] r, int at, P p) { r[at] = p.a; r[at + 1] = p.b; r[at + 2] = p.c; r[at + 3] = p.d; }
 
-    /// <summary>Eigen's determinant (determinant_impl for 4: 2x2 minors, then 3x3s), computed here in double: only its
-    /// zero-ness decides anything (computeInverseWithCheck with a threshold of 0).</summary>
+    /// <summary>A determinant for the zero check only (computeInverseWithCheck with a threshold of 0: invertible when
+    /// abs(det) > 0). NOT Eigen's own arithmetic: Eigen's determinant_impl for 4 is a float32 formula of 2x2 and 3x3
+    /// minors, this is a cofactor expansion in double. The two disagree only on a matrix whose float32 determinant
+    /// cancels to exactly zero while the double one does not (or the reverse); a bone's arm_mat, the one caller's
+    /// input, has a determinant near 1. Port Eigen's formula before using InvertM4 on matrices that may be singular
+    /// (review of PR #129).</summary>
     static float Determinant(float[] m)
     {
         double[] a = new double[16]; for (int i = 0; i < 16; i++) a[i] = m[i];

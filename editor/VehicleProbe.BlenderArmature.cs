@@ -46,11 +46,13 @@ public static partial class VehicleProbe
         var r = new ArmatureResult();
         var bones = names.BoneNodesInOrder.Where(b => names.ArmatureNodeOfBone[b] == armatureNode).ToList();
         if (bones.Count == 0) return r;
+        armatureNotes = r.Notes;
         var boneSet = new HashSet<int>(bones);
         var children = new Dictionary<int, List<int>>();   // bone -> bone children, creation order (the vnode's children order)
         foreach (int b in bones) children[b] = new List<int>();
         foreach (int b in bones) { int p = names.BoneParent[b]; if (boneSet.Contains(p)) children[p].Add(b); }
         var roots = bones.Where(b => !boneSet.Contains(names.BoneParent[b])).ToList();
+        if (roots.Count > 1) Note("two or more root bones");
 
         // ---- pick_bind_pose: bind_trans / bind_rot per bone (BlenderSkinner's rule)
         BindTransRot(m, names, boneSet, out var bindTrans, out var bindRot);
@@ -64,11 +66,12 @@ public static partial class VehicleProbe
         {
             // pick_bone_length: Vector.length is sqrt of the double sum of float products
             var childLens = children[b].Select(c => VecLength(ebTrans[c])).Where(l => l > 0.004).ToList();
+            if (childLens.Count < children[b].Count) Note("a bone child nearer than 0.004 (no length taken from it)");
             double len;
             if (childLens.Count > 0) len = childLens.Min();
             else if (boneSet.Contains(names.BoneParent[b])) len = boneLength[names.BoneParent[b]];
             else if (VecLength(ebTrans[b]) > 0.004) len = VecLength(ebTrans[b]);
-            else len = 1;
+            else { len = 1; Note("a bone of length 1 (no bone child, no parent bone, at its parent's origin)"); }
             boneLength[b] = len;
             // rotate_edit_bone(rot): editbone_rot @= rot; the children's trans and rot turned by rot's conjugate
             ebRot[b] = MulQt(ebRot[b], turn);
@@ -106,6 +109,28 @@ public static partial class VehicleProbe
             head[b] = h; tail[b] = t;
             roll[b] = RollToVector(h, t, axis);
             r.EditHead[b] = h; r.EditTail[b] = t; r.EditRoll[b] = roll[b];
+        }
+
+        // ---- ED_armature_from_edit, "avoid (almost) zero sized bones" (5.x elongates them; it deleted them before): an edit
+        // bone no longer than 1e-6 gets its tail moved to 2e-6 from the head - along the bone, or along Z when it has no
+        // length at all (a length below half an ulp of the head, or an armature scaled by millions)
+        {
+            const float threshold = 0.000001f; float thresholdSq = (float)(threshold * threshold), adjusted = (float)(2f * threshold);
+            foreach (int b in bones)
+            {
+                float ox = (float)(tail[b][0] - head[b][0]), oy = (float)(tail[b][1] - head[b][1]), oz = (float)(tail[b][2] - head[b][2]);
+                float lenSq = (float)((float)((float)(ox * ox) + (float)(oy * oy)) + (float)(oz * oz));
+                if (lenSq > thresholdSq) continue;
+                if (lenSq == 0f) { ox = 0f; oy = 0f; oz = adjusted; Note("an edit bone of no length (its tail moved along Z)"); }
+                else
+                {
+                    // normalize_v3_length(offset, adjusted): a * (unit_length / sqrtf(dot)), or zero under 1e-35
+                    if (lenSq > 1.0e-35f) { float f = (float)(adjusted / Sqrtf(lenSq)); ox = (float)(ox * f); oy = (float)(oy * f); oz = (float)(oz * f); }
+                    else { ox = oy = oz = 0f; }
+                    Note("an edit bone shorter than 1e-6 (its tail moved along the bone)");
+                }
+                tail[b] = new[] { (float)(head[b][0] + ox), (float)(head[b][1] + oy), (float)(head[b][2] + oz) };
+            }
         }
 
         // ---- ED_armature_from_edit + armature_finalize_restpose + where_is_bone: bone.matrix_local (arm_mat)
@@ -158,6 +183,7 @@ public static partial class VehicleProbe
             for (int col = 0; col < 4; col++) for (int row = 0; row < 4; row++) flat[col * 4 + row] = ibm[row * 4 + col];
             r.InverseBind[b] = flat;
         }
+        armatureNotes = null;
         return r;
     }
 
@@ -199,6 +225,7 @@ public static partial class VehicleProbe
             {
                 int skel = bindSkin.Skeleton;
                 if (Array.IndexOf(bindSkin.Joints, skel) >= 0) skel = names.BoneParent[skel];
+                else Note("a skeleton that is not a joint, on a skin with inverse bind matrices");
                 if (!invBinds.ContainsKey(skel)) invBinds[skel] = IdentityRow();
             }
             for (int i = 0; i < bindSkin.Joints.Length; i++) invBinds[bindSkin.Joints[i]] = ConvertMatrixGltf(bindSkin.InverseBindMatrices, i * 16);
@@ -220,8 +247,12 @@ public static partial class VehicleProbe
     }
 
     // ---- mathutils
-    /// <summary>Vector.length: sqrt (double) of the dot summed in double from float products.</summary>
-    static double VecLength(float[] v) { double d = 0; for (int i = 0; i < 3; i++) d += (double)(float)(v[i] * v[i]); return Math.Sqrt(d); }
+    /// <summary>Vector.length: sqrt (double) of dot_vn_vn - float products summed in double from the LAST element down.</summary>
+    static double VecLength(float[] v) { double d = 0; for (int i = 2; i >= 0; i--) d += (double)(float)(v[i] * v[i]); return Math.Sqrt(d); }
+
+    // which branches a run took, for the drill's coverage rows (ArmatureResult.Notes); null outside BlenderArmature
+    [ThreadStatic] static List<string> armatureNotes;
+    static void Note(string what) { var l = armatureNotes; if (l != null && !l.Contains(what)) l.Add(what); }
 
     /// <summary>mul_qt_qtqt (w, x, y, z), float32 left to right.</summary>
     static float[] MulQt(float[] a, float[] b)
@@ -289,12 +320,12 @@ public static partial class VehicleProbe
         if (theta > SAFE_THRESHOLD || thetaAlt > THRESHOLD_SQUARED)
         {
             b[0 * 3 + 1] = -x; b[1 * 3 + 0] = x; b[1 * 3 + 1] = y; b[1 * 3 + 2] = z; b[2 * 3 + 1] = -z;
-            if (theta <= SAFE_THRESHOLD) theta = (float)((float)(thetaAlt * 0.5f) + (float)((float)(thetaAlt * thetaAlt) * 0.125f));
+            if (theta <= SAFE_THRESHOLD) { theta = (float)((float)(thetaAlt * 0.5f) + (float)((float)(thetaAlt * thetaAlt) * 0.125f)); Note("a bone almost along -Y (the series for 1 + y)"); }
             b[0 * 3 + 0] = (float)(1f - (float)((float)(x * x) / theta));
             b[2 * 3 + 2] = (float)(1f - (float)((float)(z * z) / theta));
             b[2 * 3 + 0] = b[0 * 3 + 2] = (float)((float)(-x * z) / theta);
         }
-        else { b[0] = b[4] = -1f; b[8] = 1f; }
+        else { b[0] = b[4] = -1f; b[8] = 1f; Note("a bone along -Y (the mirrored matrix)"); }
         var rm = AxisAngleNormalizedToMat3(x, y, z, roll);
         return MulM3(rm, b);
     }

@@ -762,13 +762,136 @@ def fx_export_skin_bonechild(out):
     export_skin(out, "export_skin_bonechild", False, bone_child=True)
 
 
+def export_bones(out, name, joints, rig=None, ibms=None, above=False, doc=""):
+    """One rig for a branch of the bone chain no other fixture takes (review of PR #129; the prep drill's "bones:" COVER
+    rows): `joints` is a list of (name, parent index or -1, translation, rotation or None); every joint is in the skin,
+    the mesh is weighted to the first two. With `above`, an empty sits between the rig node and the root joints and the
+    skin names it as its skeleton - a skeleton that is not a joint, which matters only with inverse bind matrices."""
+    b = Buf()
+    pos, nrm, uv0, _, _, idx = bent_grid(4, 4, 0.0, 0.0)
+    second = 1 if len(joints) > 1 else 0
+    J, Wt = [], []
+    for i in range(len(pos)):
+        t = (i % 5) / 4.0
+        J.append((0, second, 0, 0)); Wt.append((1.0 - t, t, 0.0, 0.0) if second else (1.0, 0.0, 0.0, 0.0))
+    attrs = {"POSITION": b.accessor(pos, "f", "VEC3"), "NORMAL": b.accessor(nrm, "f", "VEC3", minmax=False),
+             "JOINTS_0": b.accessor(J, "H", "VEC4", minmax=False), "WEIGHTS_0": b.accessor(Wt, "f", "VEC4", minmax=False)}
+    nodes = [dict({"name": "Rig", "children": [1]}, **(rig or {})), {"name": "Body", "mesh": 0, "skin": 0}]
+    first = len(nodes) + (1 if above else 0)
+    if above:
+        nodes.append({"name": "Above", "translation": [0.25, 0.5, 0.0], "children": []})
+    for jn, parent, translation, rotation in joints:
+        node = {"name": jn, "translation": list(translation)}
+        if rotation:
+            node["rotation"] = list(rotation)
+        nodes.append(node)
+    for i, (jn, parent, translation, rotation) in enumerate(joints):
+        holder = nodes[first + parent] if parent >= 0 else nodes[2] if above else nodes[0]
+        holder.setdefault("children", []).append(first + i)
+    if above:
+        nodes[0]["children"].append(2)
+    skin = {"name": "rig", "joints": [first + i for i in range(len(joints))]}
+    if above:
+        skin["skeleton"] = 2
+    if ibms:
+        skin["inverseBindMatrices"] = b.accessor(ibms, "f", "MAT4", minmax=False)
+    root = base(name + " " + doc, meshes=[{"name": "body", "primitives": [{"attributes": attrs, "indices": b.accessor(idx, "H", "SCALAR")}]}],
+                nodes=nodes, skins=[skin], scenes=[{"nodes": [0]}], scene=0)
+    write_glb(os.path.join(out, name + ".glb"), root, b)
+
+
+def fx_export_bones(out):
+    def shift(x, y, z):
+        return (1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -x, -y, -z, 1)
+    # a joint at its parent's origin whose only child is 3 mm away: no child far enough, no parent bone, no translation -
+    # the length of 1. A bone's length does not show in its OWN matrices, only in its children's (their heads are taken
+    # against the parent's tail and the length is added back, in float32): hence the child. A planted length of 3
+    # fails on it; a lone joint could not tell (planted, not caught)
+    export_bones(out, "export_bones_single", [("Solo", -1, (0.0, 0.0, 0.0), None), ("Near", 0, (0.0, 0.003, 0.0), None)], doc="length 1")
+    # a child 3 mm away is not a length: Root takes its own translation, Near its parent's length
+    export_bones(out, "export_bones_near", [("Root", -1, (0.0, 0.1, 0.0), None), ("Near", 0, (0.0, 0.003, 0.0), None)], doc="child nearer than 0.004")
+    # a bone pointing down its parent's -Y: a half turn about X (the mirrored matrix), and one 0.0088 rad short of it (the series)
+    export_bones(out, "export_bones_down", [("Root", -1, (0.0, 0.1, 0.0), None), ("Flip", 0, (0.0, 1.0, 0.0), (1.0, 0.0, 0.0, 0.0)), ("FlipTip", 1, (0.0, 1.0, 0.0), None),
+                                            ("Almost", 0, (0.5, 1.0, 0.0), (0.99999032, 0.0, 0.0, 0.0043999858)), ("AlmostTip", 3, (0.0, 1.0, 0.0), None)], doc="-Y")
+    # two root bones under one armature
+    export_bones(out, "export_bones_forest", [("RootA", -1, (-1.0, 0.1, 0.0), None), ("RootB", -1, (1.0, 0.2, 0.0), (0.0, 0.3826834, 0.0, 0.9238795)), ("TipA", 0, (0.0, 1.0, 0.0), None), ("TipB", 1, (0.0, 0.5, 0.5), None)], doc="two roots")
+    # the skeleton is an empty above the joints, and the skin has inverse bind matrices that are not the nodes' own
+    export_bones(out, "export_bones_skeleton", [("Root", -1, (0.0, 0.1, 0.0), None), ("Tip", 0, (1.0, 0.2, 0.0), None)], above=True, ibms=[shift(0.3, 0.15, 0.0), shift(1.2, 0.4, 0.1)],
+                 rig={"translation": [2.0, 0.5, -1.0], "rotation": [0.2886751, 0.2886751, 0.2886751, 0.8660254]}, doc="skeleton not a joint")
+    # an armature scaled by millions: every bone is shorter than 1e-6 and is elongated along itself
+    export_bones(out, "export_bones_tiny", [("Root", -1, (0.0, 0.1, 0.0), None), ("Tip", 0, (0.0, 1.0, 0.0), None)], rig={"scale": [4.0e6, 4.0e6, 4.0e6]}, doc="shorter than 1e-6")
+    # an armature scaled by a billion with its root bone at (1, 1, 1): the bone's length of 1e-9 is under half an ulp of
+    # every coordinate of its head, so head and tail coincide and the tail moves 2e-6 along Z - which, at 1, shows.
+    # (With a zero among the head's coordinates the 1e-8 the bone's direction carries there survives: an edit bone of
+    # 1e-17, elongated along that. And 200 km out the 2e-6 is itself lost: a plant moving it along Y was not caught)
+    export_bones(out, "export_bones_nolength", [("Root", -1, (1.0, 1.0, 1.0), None), ("Tip", 0, (0.0, 1.0, 0.0), None)], rig={"scale": [1.0e9, 1.0e9, 1.0e9]}, doc="no length")
+
+
+def fx_export_review(out):
+    """Shapes the second review of PR #129 found the structure wrong on (each measured in Blender 5.1.2, 2026-10-07)."""
+    tri = [(0.0, 0.0, 0.0), (0.2, 0.0, 0.0), (0.0, 0.2, 0.0)]
+    cam = {"type": "perspective", "perspective": {"yfov": 0.6, "znear": 0.1, "aspectRatio": 1.5}}
+    # a camera is not exported: the leaf Cam goes, and so does the camera object the importer splits off Both
+    b = Buf()
+    root = base("export_camera", meshes=[{"name": "t", "primitives": [{"attributes": {"POSITION": b.accessor(tri, "f", "VEC3")}}]}],
+                nodes=[{"name": "Root", "children": [1, 2, 3, 4]}, {"name": "Cam", "camera": 0, "translation": [0.0, 1.0, 0.0], "rotation": [0.0, 0.3826834, 0.0, 0.9238795]},
+                       {"name": "Alpha", "mesh": 0}, {"name": "Zed", "mesh": 0, "translation": [0.0, 0.0, 1.0]}, {"name": "Both", "mesh": 0, "camera": 0, "translation": [1.0, 0.0, 0.0]}],
+                cameras=[cam], scenes=[{"nodes": [0]}], scene=0)
+    write_glb(os.path.join(out, "export_camera.glb"), root, b)
+    # a camera WITH a child: the child goes to the end of Root's children with the camera's transform folded in; its matrix
+    # carries the importer's camera correction, which the C# world matrices do not model - left to Blender, named. The
+    # file also declares lights (a light is an object the exporter leaves out; the reader does not carry which node)
+    b = Buf()
+    root = base("export_camera_child", meshes=[{"name": "t", "primitives": [{"attributes": {"POSITION": b.accessor(tri, "f", "VEC3")}}]}],
+                nodes=[{"name": "Root", "children": [1, 3, 4]}, {"name": "Cam", "camera": 0, "translation": [0.0, 1.0, 0.0], "rotation": [0.0, 0.3826834, 0.0, 0.9238795], "children": [2]},
+                       {"name": "Kid", "mesh": 0, "translation": [0.5, 0.0, 0.0]}, {"name": "Alpha", "mesh": 0}, {"name": "Lamp", "extensions": {"KHR_lights_punctual": {"light": 0}}}],
+                cameras=[cam], extensionsUsed=["KHR_lights_punctual"], extensions={"KHR_lights_punctual": {"lights": [{"type": "point", "intensity": 10.0}]}}, scenes=[{"nodes": [0]}], scene=0)
+    write_glb(os.path.join(out, "export_camera_child.glb"), root, b)
+    # a skin on a mesh WITHOUT weights: no vertex group, so no skin on the node - yet positions through the armature and
+    # JOINTS_0 of a neutral bone that is never added. Left to Blender (BlenderReduce.FallbackReason)
+    b = Buf()
+    pos, nrm, uv0, _, _, idx = bent_grid(4, 4, 0.0, 0.0)
+    root = base("export_skin_noweights", meshes=[{"name": "body", "primitives": [{"attributes": {"POSITION": b.accessor(pos, "f", "VEC3"), "NORMAL": b.accessor(nrm, "f", "VEC3", minmax=False)}, "indices": b.accessor(idx, "H", "SCALAR")}]}],
+                nodes=[{"name": "Rig", "translation": [2.0, 0.5, -1.0], "rotation": [0.2886751, 0.2886751, 0.2886751, 0.8660254], "children": [2]}, {"name": "Body", "mesh": 0, "skin": 0, "translation": [0.5, 0.0, 0.0]},
+                       {"name": "Root", "translation": [0.0, 0.1, 0.0], "children": [3]}, {"name": "Tip", "translation": [1.0, 0.2, 0.0]}, {"name": "Holder", "translation": [0.0, 3.0, 0.0], "children": [1]}],
+                skins=[{"name": "rig", "joints": [2, 3]}], scenes=[{"nodes": [0, 4]}], scene=0)
+    write_glb(os.path.join(out, "export_skin_noweights.glb"), root, b)
+    # one material whose texture reads TEXCOORD_1, on a mesh with two UV sets and on a mesh with one: the exporter writes
+    # it twice (once per set of UV indices). Left to Blender, named
+    b = Buf()
+    pos, nrm, uv0, _, _, idx = bent_grid(2, 2, 0.0, 0.0)
+    p = b.accessor(pos, "f", "VEC3"); u = b.accessor(uv0, "f", "VEC2", minmax=False); i = b.accessor(idx, "H", "SCALAR")
+    root = base("export_material_uv", images=[{"bufferView": b.blob(png(2, 2, (200, 60, 30))), "mimeType": "image/png", "name": "red"}], textures=[{"source": 0}],
+                materials=[{"name": "M", "pbrMetallicRoughness": {"baseColorTexture": {"index": 0, "texCoord": 1}}}],
+                meshes=[{"name": "two", "primitives": [{"attributes": {"POSITION": p, "TEXCOORD_0": u, "TEXCOORD_1": u}, "indices": i, "material": 0}]},
+                        {"name": "one", "primitives": [{"attributes": {"POSITION": p, "TEXCOORD_0": u}, "indices": i, "material": 0}]}],
+                nodes=[{"name": "A", "mesh": 0}, {"name": "B", "mesh": 1, "translation": [2.0, 0.0, 0.0]}], scenes=[{"nodes": [0, 1]}], scene=0)
+    write_glb(os.path.join(out, "export_material_uv.glb"), root, b)
+    # a material whose name is JSON null: no name to the importer (Material_1), not an empty one (Material)
+    b = Buf()
+    p = b.accessor(pos, "f", "VEC3"); i = b.accessor(idx, "H", "SCALAR")
+    root = base("export_material_null", materials=[{"name": "First"}, {"name": None, "pbrMetallicRoughness": {"baseColorFactor": [0.2, 0.4, 0.6, 1.0]}}],
+                meshes=[{"name": "nul", "primitives": [{"attributes": {"POSITION": p}, "indices": i, "material": 1}]}], nodes=[{"name": "C", "mesh": 0}], scenes=[{"nodes": [0]}], scene=0)
+    write_glb(os.path.join(out, "export_material_null.glb"), root, b)
+    # bones Root -> {L, R}; a mesh object NAMED "R" is parented to bone L, and X to bone R: the exporter looks the parent
+    # joint up by name, depth first, and meets the object "R" under L before the joint R - X hangs from the object
+    b = Buf()
+    pos, nrm, uv0, _, _, idx = bent_grid(4, 4, 0.0, 0.0)
+    attrs = {"POSITION": b.accessor(pos, "f", "VEC3"), "JOINTS_0": b.accessor([(0, 1, 0, 0)] * len(pos), "H", "VEC4", minmax=False), "WEIGHTS_0": b.accessor([(0.5, 0.5, 0.0, 0.0)] * len(pos), "f", "VEC4", minmax=False)}
+    root = base("export_bone_name_clash", meshes=[{"name": "body", "primitives": [{"attributes": attrs, "indices": b.accessor(idx, "H", "SCALAR")}]}, {"name": "t", "primitives": [{"attributes": {"POSITION": b.accessor(tri, "f", "VEC3")}}]}],
+                nodes=[{"name": "Rig", "children": [1, 2]}, {"name": "Body", "mesh": 0, "skin": 0}, {"name": "Root", "children": [3, 4]}, {"name": "L", "translation": [-1.0, 0.5, 0.0], "children": [5]},
+                       {"name": "R", "translation": [1.0, 0.5, 0.0], "children": [6]}, {"name": "R", "mesh": 1, "translation": [0.0, 0.3, 0.0]}, {"name": "X", "mesh": 1, "translation": [0.0, 0.4, 0.0]}],
+                skins=[{"name": "rig", "joints": [2, 3, 4]}], scenes=[{"nodes": [0]}], scene=0)
+    write_glb(os.path.join(out, "export_bone_name_clash.glb"), root, b)
+
+
 FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external, fx_cubic, fx_scenes, fx_materials, fx_skin8, fx_big, fx_names, fx_no_default_scene, fx_dropped, fx_mixed_skin, fx_clip_switch, fx_path_clip, fx_far_clip, fx_unicode_clip, fx_decimate_attrs, fx_decimate_limits, fx_export_layout, fx_export_skin, fx_export_skin_badweights, fx_export_skin_bonechild]
 
 
 def main(out, prep=False):
     os.makedirs(out, exist_ok=True)
     # Blender drops the line mesh: its vertex bounds are only relevant to the prep export drill.
-    for fx in FIXTURES + ([fx_export_skin_lines] if prep else []):
+    for fx in FIXTURES + ([fx_export_skin_lines, fx_export_bones, fx_export_review] if prep else []):
         fx(out)
     for name in sorted(os.listdir(out)):
         if name.endswith((".glb", ".gltf")):

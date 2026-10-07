@@ -110,6 +110,104 @@ public class BlenderExportTreeTests
         Assert.Equal(new[] { "Body", "Joint", "Holder" }, withoutFaces.Nodes.Select(n => n.Name));
     }
 
+    // ---- the second review of PR #129 (2026-10-07): each shape measured in Blender 5.1.2 first (the export_* fixtures)
+
+    [Fact]
+    public void A_camera_is_left_out_and_a_node_that_is_also_a_camera_keeps_only_its_mesh()
+    {
+        // export_camera: Root { Cam (camera), Alpha, Zed, Both (mesh AND camera) } is written [Alpha, Both, Zed, Root]
+        var nodes = new List<HafNode> { Node("Root", -1, -1, 1, 2, 3, 4), Node("Cam"), Node("Alpha", 0), Node("Zed", 0), Node("Both", 0) };
+        nodes[1].Camera = 0; nodes[4].Camera = 0;
+        var m = Model(new[] { Mesh("t") }, nodes, 0); m.Cameras.Add("{}");
+        var t = Tree(m);
+        Assert.Equal(new[] { "Alpha", "Both", "Zed", "Root" }, t.Nodes.Select(n => n.Name));
+        Assert.Equal(2, t.CamerasLeftOut);
+        Assert.Empty(t.Problems);
+    }
+
+    [Fact]
+    public void A_cameras_child_goes_to_the_end_of_the_kept_ancestors_children_and_the_file_is_named_as_not_modelled()
+    {
+        // export_camera_child: Root { Cam { Kid }, Alpha } is written [Alpha, Kid, Root] - Kid AFTER its name-sorted
+        // siblings; its matrix carries the importer's camera correction, which is not modelled: a problem, by name
+        var nodes = new List<HafNode> { Node("Root", -1, -1, 1, 3), Node("Cam", -1, -1, 2), Node("Kid", 0), Node("Zed", 0) };
+        nodes[1].Camera = 0;
+        var m = Model(new[] { Mesh("t") }, nodes, 0); m.Cameras.Add("{}");
+        var t = Tree(m);
+        Assert.Equal(new[] { "Zed", "Kid", "Root" }, t.Nodes.Select(n => n.Name));
+        Assert.Equal("Root", t.Nodes[t.Nodes.Single(n => n.Name == "Kid").Parent].Name);
+        Assert.Contains(t.Problems, p => p.StartsWith("camera-children:"));
+        // a camera at the root: its child becomes a root, after the others
+        var nodes2 = new List<HafNode> { Node("Cam", -1, -1, 1), Node("Kid", 0), Node("Other", 0) };
+        nodes2[0].Camera = 0;
+        var m2 = Model(new[] { Mesh("t") }, nodes2, 0, 2); m2.Cameras.Add("{}");
+        var t2 = Tree(m2);
+        Assert.Equal(new[] { "Other", "Kid" }, t2.Nodes.Select(n => n.Name));
+        Assert.Equal(new[] { 0, 1 }, t2.SceneRoots);
+    }
+
+    [Fact]
+    public void An_object_parented_to_a_bone_hangs_from_the_first_node_that_bears_the_bones_name_depth_first()
+    {
+        // export_bone_name_clash: bones Root { L, R }; the mesh object "R" under bone L, X under bone R. The exporter's
+        // __find_parent_joint meets the OBJECT "R" (under L) before the joint R: written [X, R, L, R, Root, Body, Rig]
+        var nodes = new List<HafNode> { Node("Rig", -1, -1, 1, 2), Node("Body", 0, 0), Node("Root", -1, -1, 3, 4), Node("L", -1, -1, 5), Node("R", -1, -1, 6), Node("R", 1), Node("X", 1) };
+        var m = Model(new[] { Mesh("body"), Mesh("t") }, nodes, 0);
+        m.Skins.Add(new HafSkin { Joints = new[] { 2, 3, 4 } });
+        m.Meshes[0].Primitives[0].Joints = new ushort[12]; m.Meshes[0].Primitives[0].Weights = new float[12];
+        var t = Tree(m);
+        Assert.Equal(new[] { "X", "R", "L", "R", "Root", "Body", "Rig" }, t.Nodes.Select(n => n.Name));
+        Assert.Equal(1, t.Nodes[0].Parent);                      // X under the object R
+        Assert.True(t.Nodes[1].HasMesh); Assert.Equal(2, t.Nodes[1].Parent);   // the object R under the joint L
+        Assert.True(t.Nodes[3].BoneNode >= 0 && t.Nodes[3].Children.Count == 0);   // the joint R got nothing
+    }
+
+    [Fact]
+    public void A_skin_on_a_mesh_without_weights_reaches_no_joints_and_is_named_as_not_modelled()
+    {
+        var nodes = new List<HafNode> { Node("Rig", -1, -1, 1, 2), Node("Body", 0, 0), Node("Joint") };
+        var m = Model(new[] { Mesh("tri") }, nodes, 0);
+        m.Skins.Add(new HafSkin { Joints = new[] { 2 } });
+        var t = Tree(m);
+        Assert.Contains(t.Problems, p => p.StartsWith("skin-no-weights:"));
+        Assert.Equal(new[] { "Body", "Joint", "Rig" }, t.Nodes.Select(n => n.Name));   // not through the skin: the object first
+        Assert.NotNull(BlenderReduce.FallbackReason(m, 1));
+    }
+
+    [Fact]
+    public void A_material_read_with_two_sets_of_UV_indices_and_a_file_with_lights_are_named_as_not_modelled()
+    {
+        // export_material_uv: the texture reads TEXCOORD_1; one mesh has two UV sets, the other one - Blender writes M twice
+        HafMesh WithUvs(string name, int sets) { var me = Mesh(name); var p = me.Primitives[0]; p.Material = 0; if (sets > 0) p.Uv0 = new float[6]; if (sets > 1) p.Uv1 = new float[6]; return me; }
+        var m = Model(new[] { WithUvs("two", 2), WithUvs("one", 1) }, new List<HafNode> { Node("A", 0), Node("B", 1) });
+        m.Materials.Add(new HafMaterial { Name = "M", BaseColorTexture = 0, BaseColorTexCoord = 1 });
+        Assert.Contains(Tree(m).Problems, p => p.StartsWith("material-uv:"));
+        // both meshes with two sets: one set of indices, nothing to name
+        var same = Model(new[] { WithUvs("two", 2), WithUvs("too", 2) }, new List<HafNode> { Node("A", 0), Node("B", 1) });
+        same.Materials.Add(new HafMaterial { Name = "M", BaseColorTexture = 0, BaseColorTexCoord = 1 });
+        Assert.Empty(Tree(same).Problems);
+        same.ExtensionsUsed.Add("KHR_lights_punctual");
+        Assert.Contains(Tree(same).Problems, p => p.StartsWith("lights:"));
+    }
+
+    [Fact]
+    public void Siblings_whose_names_differ_only_by_case_keep_their_creation_order()
+    {
+        // id_sort_by_name puts a new ID before the first name that compares GREATER: equal ignoring case stays behind
+        var m = Model(new[] { Mesh("t") }, new List<HafNode> { Node("Root", -1, -1, 1, 2, 3), Node("b", 0), Node("B", 0), Node("a", 0) }, 0);
+        Assert.Equal(new[] { "a", "b", "B", "Root" }, Tree(m).Nodes.Select(n => n.Name));
+        var m2 = Model(new[] { Mesh("t") }, new List<HafNode> { Node("Root", -1, -1, 1, 2, 3), Node("B", 0), Node("b", 0), Node("a", 0) }, 0);
+        Assert.Equal(new[] { "a", "B", "b", "Root" }, Tree(m2).Nodes.Select(n => n.Name));
+    }
+
+    [Fact]
+    public void A_material_named_null_has_no_name()
+    {
+        var m = GlbReader.ReadGltf("{\"asset\":{\"version\":\"2.0\"},\"materials\":[{\"name\":null}]}", null);
+        Assert.True(m.Materials[0].NameAbsent);
+        Assert.Equal("", m.Materials[0].Name);
+    }
+
     [Fact]
     public void A_faceless_skinned_mesh_still_hangs_from_its_armature_with_the_identity_only_its_index_moves_before_the_joints()
     {

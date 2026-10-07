@@ -138,7 +138,7 @@ public static class GlbReader
             model.Textures.Add(new HafTexture { Name = tx["name"]?.ToString() ?? "", Source = tx["source"]?.Value<int>() ?? -1, Sampler = tx["sampler"]?.Value<int>() ?? -1 });
         foreach (var mt in root["materials"] as JArray ?? new JArray())
         {
-            var m = new HafMaterial { Name = mt["name"]?.ToString() ?? "", NameAbsent = mt["name"] == null };
+            var m = new HafMaterial { Name = mt["name"]?.ToString() ?? "", NameAbsent = mt["name"] == null || mt["name"].Type == JTokenType.Null };   // a JSON null is no name to the importer (from_none): Material_<index>
             var pbr = mt["pbrMetallicRoughness"] as JObject;
             if (pbr != null)
             {

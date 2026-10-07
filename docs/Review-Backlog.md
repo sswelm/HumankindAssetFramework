@@ -135,7 +135,13 @@ lists, 50,872 object transforms and 128 material lists equal);
 the exporter's joint rule; `FULL=1` on 2026-10-07: 990 joint transforms and 538 skins' inverse bind matrices equal, the dug-out
 canoe's eight joints off by ulps through the probe's world matrix of `Canoe`); still open in (d): an object parented to a
 bone (pose evaluation), the probe's object world matrix on a quaternion like the canoe's (2.9e-8 off unit, 1e-33
-components: `BlenderWorldMatrices` is an ulp off Blender's from that node down), (4c) the writer and the converter-level acceptance (OBJ
+components: `BlenderWorldMatrices` is an ulp off Blender's from that node down), the shapes the tree names and leaves to
+Blender (second review of PR #129, 2026-10-07: a camera with children - `BlenderWorldMatrices` does not model the
+importer's `camera_correction`, an ulp on the child's matrix, which is a gap of the merged probe too; `KHR_lights_punctual`,
+which the reader does not carry per node; a skin on a mesh without weights; a material read with two sets of UV indices,
+which the exporter writes once per set - `get_final_material`), `BlenderEigen.InvertM4`'s zero check, which is a double
+cofactor determinant and not Eigen's float32 formula (it matters only for a matrix singular in one and not the other; a
+bone's matrix is not), (4c) the writer and the converter-level acceptance (OBJ
 byte-equal, images copied), (4d) prep_model in C# - strip, the file as the Factory's
 converter reads it (node and material order: Blender writes materials in order of first use, one per vertex-colour
 variant, and a `DefaultMaterial` for a coloured primitive without one), the write, the wiring behind

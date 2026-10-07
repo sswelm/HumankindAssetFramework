@@ -285,6 +285,25 @@ removes a skin's non-identity `inverseBindMatrices` accessor from one of Blender
 and requires the structure stage to fail on the implicit identity (the stage had skipped such a skin). And the writer keeps
 a material's empty name (`"name": ""`, which the importer names `Material`; an absent one is `Material_<index>`), with
 `HafModelDiff` telling the two apart (`GlbWriterTests`).
+A second review the same day (two independent readers against Blender's and Eigen's sources; every finding run through
+Blender before it was believed) found four shapes the 80 real files do not have and the tree got wrong, and a branch of
+the bone chain that was not ported. Fixed and held by prep-only fixtures: a camera is not exported (`export_camera`; the
+filter of `tree.py`), an object parented to a bone hangs from the first node that BEARS THE BONE'S NAME in a depth-first
+search - an object hung earlier can come before the joint (`export_bone_name_clash`), a material named JSON `null` has no
+name (`export_material_null`), and an edit bone no longer than 1e-6 is elongated on leaving edit mode - along itself, or
+along Z when it has no length (`export_bones_tiny`, `export_bones_nolength`). Left to Blender, each NAMED by the tree
+(`BlenderExportTree.Result.Problems`; the drill prints a NOTE and does not compare that file's structure): a camera with
+children (their matrices carry the importer's camera correction, which the world matrices do not model),
+`KHR_lights_punctual`, a skin on a mesh without weights (Blender writes its positions through the armature and joints of a
+bone it never adds; `BlenderReduce.FallbackReason` declines the object too), and a material read with two different
+sets of UV indices (the exporter writes it once per set). A file with a declined object is left to Blender as a whole.
+The bone chain's branches the sample did not take now have a fixture and a `bones:` COVER row each, counted only when
+the file that took the branch compared equal: a bone of length 1, a bone child nearer than 0.004, a bone along -Y (the
+mirrored matrix) and almost along it (the series), two root bones, a skeleton that is not a joint on a skin with inverse
+bind matrices. Ten planted defects each fail; two were NOT caught at first and changed their fixtures - a lone bone's
+length shows only in a child's matrices, and 200 km out the 2e-6 elongation is itself lost. The structure stage now also
+compares every node's children ARRAY in order and requires a skin without a `skeleton`; its COVER rows count after the
+comparison, not before. `FULL=1` after it: 186 runs on 93 files, 176 node lists, 50,960 object and 1,026 joint transforms, 554 skins' inverse bind matrices and 130 material lists equal; no real file is left to Blender by the new rules, and real files do take the -Y and length-1 branches; the canoe remains the one file named.
 
 **The Clip Range picker's in-process rig** (step 4, 2026-10-03): `HafUnityFrameTests` hold the preview frame's arithmetic
 without Unity — the X mirror's conjugation of rotations, matrices and matrix nodes; Unity's skinning formula fed the rig's

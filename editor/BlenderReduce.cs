@@ -51,6 +51,10 @@ public static class BlenderReduce
     public static string FallbackReason(HafModel m, int node)
     {
         var mesh = m.Meshes[m.Nodes[node].Mesh];
+        // the importer hangs the object under the armature whatever its attributes; without a joint set it gets no vertex
+        // group, and the exporter then writes its positions through the armature, JOINTS_0 of a neutral bone it never
+        // adds and no skin on the node (measured 2026-10-07, review of PR #129): Blender's to prep
+        if (m.Nodes[node].Skin >= 0 && !mesh.Primitives.Exists(p => p.Skinned)) return "a skin on a mesh without weights";
         foreach (var p in mesh.Primitives)
         {
             if (p.Colors != null && !BlenderColor.TableKnown) return "colours on a CPU whose rsqrtps table is not measured";   // BlenderColor.cs
