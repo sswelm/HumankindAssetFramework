@@ -111,6 +111,27 @@ public class BlenderExportTreeTests
     }
 
     [Fact]
+    public void A_faceless_skinned_mesh_still_hangs_from_its_armature_with_the_identity_only_its_index_moves_before_the_joints()
+    {
+        // measured 2026-10-07 (the export_skin_lines fixture, Body under a turned Holder with a transform of its own): the
+        // armature modifier moves the object under the armature, faces or not; without a mesh the node has no skin, so the
+        // serializer does not reach the joints through it and Body precedes them
+        var nodes = new List<HafNode> { Node("Rig", -1, -1, 2), Node("Body", 0, 0), Node("Joint"), Node("Holder", -1, -1, 1) };
+        nodes[1].Translation = new double[] { 0.5, 0, 0 }; nodes[1].Rotation = new double[] { 0, 0.3826834, 0, 0.9238795 };
+        nodes[3].Translation = new double[] { 0, 3, 0 }; nodes[3].Rotation = new double[] { 0.3826834, 0, 0, 0.9238795 };
+        var m = Model(new[] { Mesh("lines") }, nodes, 0, 3);
+        m.Skins.Add(new HafSkin { Joints = new[] { 2 }, Skeleton = 2 });
+        m.Meshes[0].Primitives[0].Joints = new ushort[12]; m.Meshes[0].Primitives[0].Weights = new float[12];
+        var t = BlenderExportTree.Build(m, BlenderNames.Compute(m), VehicleProbe.BlenderWorldMatrices(m, null), new HashSet<int>(), null);
+        Assert.Equal(new[] { "Body", "Joint", "Rig", "Holder" }, t.Nodes.Select(n => n.Name));
+        var body = t.Nodes.Single(n => n.Name == "Body");
+        Assert.Equal("Rig", t.Nodes[body.Parent].Name);
+        Assert.False(body.HasMesh);
+        Assert.Null(body.Translation); Assert.Null(body.Rotation); Assert.Null(body.Scale);
+        Assert.Equal(new[] { 2, 3 }, t.SceneRoots);
+    }
+
+    [Fact]
     public void Materials_are_listed_at_first_use_along_the_walk_and_named_as_the_importer_names_them()
     {
         // the names fixture: mesh 0 (material 2 "same") on the root and its grandchild, mesh 1 (an EMPTY name) on the child;

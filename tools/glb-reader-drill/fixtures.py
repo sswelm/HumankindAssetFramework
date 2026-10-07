@@ -714,8 +714,17 @@ def export_skin(out, name, bad_weights, bone_child=False, faceless=False):
                 skins=[{"name": "rig", "joints": [2, 3]}],
                 scenes=[{"nodes": [0]}], scene=0)
     if faceless:
-        # Without faces the exporter drops the mesh and skin: Body precedes the joints.
+        # Lines only: the exporter writes the node without a mesh and without a skin, so the serializer does not reach the
+        # joints through it and Body precedes them. The object still hangs under the ARMATURE with the identity (the
+        # armature modifier moves it, faces or not; measured 2026-10-07 in Blender 5.1.2), so Body sits under a turned
+        # Holder of its own with a transform of its own here: a fixture with Body already under Rig and without a
+        # transform could not tell that rule from "it stays with its parent and keeps its transform".
         root["meshes"][0]["primitives"][0]["mode"] = 1
+        root["nodes"][1]["translation"] = [0.5, 0.0, 0.0]
+        root["nodes"][1]["rotation"] = [0.0, 0.3826834, 0.0, 0.9238795]
+        root["nodes"][0]["children"].remove(1)
+        root["nodes"].append({"name": "Holder", "translation": [0.0, 3.0, 0.0], "rotation": [0.3826834, 0.0, 0.0, 0.9238795], "children": [1]})
+        root["scenes"][0]["nodes"].append(len(root["nodes"]) - 1)
     if bad_weights:
         # GoodBody itself needs no neutral joint, but Blender appends one to their shared armature/skin.
         # Put it first in object order to also catch a checker that only accumulates requirements as it compares.

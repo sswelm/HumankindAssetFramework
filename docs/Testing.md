@@ -277,11 +277,15 @@ transforms differ by ulps because the probe's world matrix for the armature's an
 off unit, components of 1e-33) is not Blender's - an existing gap of `BlenderWorldMatrices`, now in the backlog;
 the canoe's edit bones and `matrix_local` are equal. `BlenderExportTreeTests`, `BlenderArmatureTests` and
 `BlenderEigenTests` hold each rule on the measured values.
-The PR #129 regressions include the prep-only `export_skin_lines` fixture (`fixtures.py --prep`): Blender drops its faceless mesh and skin, so its
-object is indexed before the armature's bones. The prep drill also removes an inverse-bind accessor
-from an export with nonidentity matrices and requires the checker to reject the resulting implicit
-identity matrices. Empty and absent material names remain distinct through writer round trips and
-`HafModelDiff`, with both forms covered by `GlbWriterTests`.
+The review of PR #129 (2026-10-07) added three checks. The prep-only `export_skin_lines` fixture (`fixtures.py --prep`;
+the reader and writer drills do not see it) is a lines-only skinned mesh under a turned Holder with a transform of its own:
+the exporter writes its node without a mesh and without a skin, still under the ARMATURE with the identity, and indexed
+before the joints because the serializer does not reach them through it (measured; a first fixture with Body already
+under the armature and without a transform could not tell that rule from "it stays with its parent"). A negative row
+removes a skin's non-identity `inverseBindMatrices` accessor from one of Blender's outputs (`tools/prep-drill/missing_ibm.py`)
+and requires the structure stage to fail on the implicit identity (the stage had skipped such a skin). And the writer keeps
+a material's empty name (`"name": ""`, which the importer names `Material`; an absent one is `Material_<index>`), with
+`HafModelDiff` telling the two apart (`GlbWriterTests`).
 
 **The Clip Range picker's in-process rig** (step 4, 2026-10-03): `HafUnityFrameTests` hold the preview frame's arithmetic
 without Unity — the X mirror's conjugation of rotations, matrices and matrix nodes; Unity's skinning formula fed the rig's
