@@ -18,6 +18,12 @@ public static class BlenderTrig
     [DllImport("ucrtbase.dll", EntryPoint = "sinf", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     static extern float ucrt_sinf(float x);
 
+    [DllImport("ucrtbase.dll", EntryPoint = "atan2f", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    static extern float ucrt_atan2f(float y, float x);
+
+    [DllImport("ucrtbase.dll", EntryPoint = "asinf", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    static extern float ucrt_asinf(float x);
+
     /// <summary>True when cosf and sinf here ARE the 64-bit Windows C runtime's, the ones Blender calls.</summary>
     public static readonly bool Exact = Probe();
 
@@ -35,4 +41,6 @@ public static class BlenderTrig
 
     public static float Cosf(float x) => Exact ? ucrt_cosf(x) : (float)Math.Cos((double)x);
     public static float Sinf(float x) => Exact ? ucrt_sinf(x) : (float)Math.Sin((double)x);
+    public static float Atan2f(float y, float x) => Exact ? ucrt_atan2f(y, x) : (float)Math.Atan2((double)y, (double)x);
+    public static float Asinf(float x) => Exact ? ucrt_asinf(x) : (float)Math.Asin((double)x);
 }

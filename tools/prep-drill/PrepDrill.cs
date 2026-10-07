@@ -64,6 +64,7 @@ static class PrepDrill
                 for (int i = 0; i < written.Nodes.Count; i++) if (written.Nodes[i].Mesh >= 0 && !nodeByName.ContainsKey(written.Nodes[i].Name)) nodeByName[written.Nodes[i].Name] = i;
                 int okObjects = 0, okPrims = 0;
                 var prepared = new List<(string name, int armature, BlenderExport.Skin skin, List<string> joints, List<BlenderExport.Primitive> primitives)>();
+                var materialsOfMesh = new Dictionary<int, List<string>>();   // per mesh node: the Blender material of each primitive written, in order (null for the empty slot)
                 var neutralArmatures = new HashSet<int>();
                 foreach (var (node, name, faces) in meshObjects)
                 {
@@ -84,6 +85,7 @@ static class PrepDrill
                     }
                     var r = BlenderReduce.Reduce(m, node, ratio, names);
                     var mine = BlenderExport.MeshPrimitives(r, skinLayout);
+                    materialsOfMesh[node] = mine.Select(p => { var (mat, vc) = r.Slots[p.MaterialSlot]; return mat < 0 && !vc ? null : names.MaterialOf[(mat < 0 ? names.MeshDatablockNode[node] : -1, mat, vc)]; }).ToList();
                     Cover(m, r, BlenderExport.Validated(r), mine, cover);
                     if (skinLayout != null)
                     {
@@ -132,6 +134,9 @@ static class PrepDrill
                     if (objectOk) okObjects++;
                 }
                 objects += okObjects; prims += okPrims;
+                // the file's structure: every node Blender wrote, by index - name, parent, transform (BlenderExportTree)
+                if (bworld == null) bworld = VehicleProbe.BlenderWorldMatrices(m, null);
+                Structure(m, names, bworld, written, problems, cover, new HashSet<int>(materialsOfMesh.Where(kv => kv.Value.Count > 0).Select(kv => kv.Key)), neutralArmatures, materialsOfMesh);
                 if (problems.Count > 0) { fails++; Console.WriteLine($"FAIL {shortKey} {tag}: " + string.Join("; ", problems.Take(4)) + (problems.Count > 4 ? $"; ... {problems.Count - 4} more" : "")); }
                 else Console.WriteLine($"PASS {shortKey} {tag}: {okObjects} objects, {okPrims} primitives equal (ratio {ratio:R})");
             }
@@ -146,6 +151,7 @@ static class PrepDrill
 
     static readonly string[] CoverKeys =
     {
+        "a node list compared (name, parent, order)", "a node transform compared", "a joint transform compared", "a skin's inverse bind matrices compared", "a neutral bone compared", "a material list compared (names, order)", "an object under a bone (its transform is the next part's)", "an animated file (its transforms are Blender's posed state, not compared)",
         "normals from the file (custom normals)", "no normals (every face flat)", "a normal that rounds to zero, made up", "a zero normal on a fan that does not point up", "an object of several primitives",
         "an object without faces", "two or more UV sets", "COLOR_0 as RGB (the material's colour)", "COLOR_0 with alpha (a face without material)",
         "COLOR_0 forced (255s)", "two or more colour sets", "a colour layer on the vertices (point domain)", "a twin face the exporter's validate removes",
@@ -156,6 +162,71 @@ static class PrepDrill
         "a weighted mesh sharing an armature with a neutral bone",
         "a skinned object", "a vertex without a bone (the neutral bone)", "a vertex of more than four groups", "an armature that is not at the identity",
     };
+
+    /// <summary>The written file's node list against the tree the exporter builds: count, each node's name, parent and
+    /// transform bits, the scene's roots. Bones' transforms wait for the bone part; an animated file's transforms are
+    /// Blender's posed import state, which the tree does not model (the Factory preps static entries).</summary>
+    static void Structure(HafModel m, BlenderNames.Result names, float[][] bworld, HafModel written, List<string> problems, SortedDictionary<string, long> cover, ISet<int> meshNodesWithFaces, ISet<int> neutralArmatures, Dictionary<int, List<string>> materialsOfMesh)
+    {
+        var tree = BlenderExportTree.Build(m, names, bworld, meshNodesWithFaces, neutralArmatures, mn => materialsOfMesh.TryGetValue(mn, out var l) ? l : new List<string>());
+        // the materials: the same names in the same order (the properties are the writer part's)
+        var wmats = written.Materials.Select(x => x.Name).ToList();
+        if (!wmats.SequenceEqual(tree.Materials)) problems.Add($"structure: materials [{string.Join(",", tree.Materials.Take(6))}] ({tree.Materials.Count}) here vs [{string.Join(",", wmats.Take(6))}] ({wmats.Count}) written");
+        else if (tree.Materials.Count > 0) cover["a material list compared (names, order)"]++;
+        foreach (var p in tree.Problems) problems.Add("structure: " + p);
+        cover["a node list compared (name, parent, order)"]++;
+        if (written.Nodes.Count != tree.Nodes.Count) { problems.Add($"structure: {tree.Nodes.Count} nodes here vs {written.Nodes.Count} written [{string.Join(",", tree.Nodes.Select(n => n.Name).Take(8))}] vs [{string.Join(",", written.Nodes.Select(n => n.Name).Take(8))}]"); return; }
+        var wparent = new int[written.Nodes.Count]; for (int i = 0; i < wparent.Length; i++) wparent[i] = -1;
+        for (int i = 0; i < written.Nodes.Count; i++) foreach (int c in written.Nodes[i].Children) wparent[c] = i;
+        bool animated = m.Animations.Count > 0;
+        if (animated) cover["an animated file (its transforms are Blender's posed state, not compared)"]++;
+        int shown = 0;
+        for (int i = 0; i < tree.Nodes.Count && shown < 4; i++)
+        {
+            var n = tree.Nodes[i]; var w = written.Nodes[i];
+            if (n.Name != w.Name) { problems.Add($"structure: node {i} is '{n.Name}' here, '{w.Name}' written"); shown++; continue; }
+            if (n.Parent != wparent[i]) { problems.Add($"structure: node {i} '{n.Name}' under {n.Parent} here, {wparent[i]} written"); shown++; continue; }
+            if (n.HasMesh != (w.Mesh >= 0)) { problems.Add($"structure: node {i} '{n.Name}' {(w.Mesh >= 0 ? "has a mesh in the file, none here" : "has a mesh here, none in the file")}"); shown++; continue; }
+            if (!n.TransformKnown) { cover["an object under a bone (its transform is the next part's)"]++; continue; }
+            if (animated && n.Object != null) continue;
+            if (n.BoneNode >= 0) cover["a joint transform compared"]++;
+            if (n.NeutralBone) cover["a neutral bone compared"]++;
+            if (w.HasMatrix) { problems.Add($"structure: node {i} '{n.Name}' written with a matrix"); shown++; continue; }
+            string d = Trs("translation", n.Translation, w.Translation, 0, 0, 0) ?? Trs("rotation", n.Rotation, w.Rotation, 0, 0, 0, 1) ?? Trs("scale", n.Scale, w.Scale, 1, 1, 1);
+            if (d != null) { problems.Add($"structure: node {i} '{n.Name}' {d}"); shown++; continue; }
+            cover["a node transform compared"]++;
+        }
+        // the skins: each skinned node's inverse bind matrices, joint by joint (the joint order was held by name above)
+        for (int i = 0; i < written.Nodes.Count && shown < 4; i++)
+        {
+            var w = written.Nodes[i];
+            if (w.Skin < 0 || w.Skin >= written.Skins.Count || written.Skins[w.Skin].InverseBindMatrices == null) continue;
+            var sk = written.Skins[w.Skin];
+            bool all = true;
+            for (int j = 0; j < sk.Joints.Length && all; j++)
+            {
+                var jn = tree.Nodes[sk.Joints[j]];
+                if (jn.InverseBind == null) { all = false; break; }
+                for (int k = 0; k < 16; k++)
+                    if (BitConverter.ToUInt32(BitConverter.GetBytes(jn.InverseBind[k]), 0) != BitConverter.ToUInt32(BitConverter.GetBytes((float)sk.InverseBindMatrices[16 * j + k]), 0))
+                    { problems.Add("structure: skin of '" + w.Name + "' joint " + j + " '" + jn.Name + "' inverse bind matrix entry " + k + ": " + jn.InverseBind[k].ToString("R") + " here vs " + ((float)sk.InverseBindMatrices[16 * j + k]).ToString("R") + " written"); shown++; all = false; break; }
+            }
+            if (all) cover["a skin's inverse bind matrices compared"]++;
+        }
+        if (!tree.SceneRoots.SequenceEqual(written.Scenes.Count > 0 ? written.Scenes[written.Scene < 0 ? 0 : written.Scene].Nodes : new List<int>()))
+            problems.Add($"structure: scene roots [{string.Join(",", tree.SceneRoots)}] here vs [{string.Join(",", written.Scenes.Count > 0 ? written.Scenes[0].Nodes : new List<int>())}] written");
+    }
+
+    static string Trs(string what, float[] mine, double[] theirs, params double[] identity)
+    {
+        for (int k = 0; k < identity.Length; k++)
+        {
+            float a = mine != null ? mine[k] : (float)identity[k];
+            if (BitConverter.ToUInt32(BitConverter.GetBytes(a), 0) != BitConverter.ToUInt32(BitConverter.GetBytes((float)theirs[k]), 0))
+                return $"{what} [{string.Join(",", (mine ?? identity.Select(x => (float)x).ToArray()).Select(x => x.ToString("R")))}] here vs [{string.Join(",", theirs.Select(x => ((float)x).ToString("R")))}] written";
+        }
+        return null;
+    }
 
     /// <summary>Which of the layout's rules this object exercised (counted per object run).</summary>
     static void Cover(HafModel model, BlenderReduce.Result reduced, BlenderReduce.Result r, List<BlenderExport.Primitive> mine, SortedDictionary<string, long> cover)

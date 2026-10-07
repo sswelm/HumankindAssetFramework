@@ -308,6 +308,9 @@ def fx_skin8(out):
     W0 = b.accessor([(0.125, 0.125, 0.125, 0.125)] * 4, "f", "VEC4", minmax=False); W1 = b.accessor([(0.125, 0.125, 0.125, 0.125)] * 4, "f", "VEC4", minmax=False)
     joints = [{"name": "j%d" % i, "translation": [0, 0.25, 0], "children": [3 + i]} for i in range(7)] + [{"name": "j7", "translation": [0, 0.25, 0]}]
     joints[0]["translation"] = [0, 0, 0]
+    # two joints turned (30 degrees about X, 40 about Y): a chain whose bone matrices are not axis-aligned, so Eigen's
+    # inverse of a parent's matrix (the bone part's chain) and mathutils' adjugate no longer give the same bits
+    joints[2]["rotation"] = [0.2588190, 0, 0, 0.9659258]; joints[4]["rotation"] = [0, 0.3420201, 0, 0.9396926]
     root = base("skin8",
                 meshes=[{"name": "quad", "primitives": [{"attributes": {"POSITION": pos, "JOINTS_0": J0, "WEIGHTS_0": W0, "JOINTS_1": J1, "WEIGHTS_1": W1}, "indices": idx}]}],
                 nodes=[{"name": "Holder", "translation": [100, 0, 0], "children": [1]}, {"name": "Skinned", "mesh": 0, "skin": 0}] + joints,
@@ -681,7 +684,7 @@ def fx_export_layout(out):
     write_glb(os.path.join(out, "export_layout.glb"), root, b)
 
 
-def export_skin(out, name, bad_weights):
+def export_skin(out, name, bad_weights, bone_child=False):
     """The rules of the glTF exporter's SKINNED layout (step 5 d) no other fixture reaches (the drill's COVER rows,
     2026-10-06): the armature is the turned, unevenly scaled node above the joints, so positions and normals really go
     through its matrix; vertex 1 has two EQUAL weights listed joint 1 first (a stable sort keeps that order); vertex 2 a
@@ -716,8 +719,13 @@ def export_skin(out, name, bad_weights):
         good_attrs = dict(attrs)
         good_attrs["WEIGHTS_0"] = b.accessor([(1.0, 0.0, 0.0, 0.0)] + Wt[1:], "f", "VEC4", minmax=False)
         root["meshes"].append({"name": "good_body", "primitives": [{"attributes": good_attrs, "indices": root["meshes"][0]["primitives"][0]["indices"]}]})
-        root["nodes"].append({"name": "GoodBody", "mesh": 1, "skin": 0})
-        root["nodes"][0]["children"].insert(0, 4)
+        root["nodes"].append({"name": "GoodBody", "mesh": len(root["meshes"]) - 1, "skin": 0})
+        root["nodes"][0]["children"].insert(0, len(root["nodes"]) - 1)
+    if bone_child:
+        lamp = b.accessor([(0.0, 0.0, 0.0), (0.2, 0.0, 0.0), (0.0, 0.2, 0.0)], "f", "VEC3")
+        root["meshes"].append({"name": "lamp", "primitives": [{"attributes": {"POSITION": lamp}}]})
+        root["nodes"].append({"name": "Lamp", "mesh": len(root["meshes"]) - 1, "translation": [0.0, 0.3, 0.0]})
+        root["nodes"][3]["children"] = [len(root["nodes"]) - 1]
     write_glb(os.path.join(out, name + ".glb"), root, b)
 
 
@@ -729,7 +737,16 @@ def fx_export_skin_badweights(out):
     export_skin(out, "export_skin_badweights", True)
 
 
-FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external, fx_cubic, fx_scenes, fx_materials, fx_skin8, fx_big, fx_names, fx_no_default_scene, fx_dropped, fx_mixed_skin, fx_clip_switch, fx_path_clip, fx_far_clip, fx_unicode_clip, fx_decimate_attrs, fx_decimate_limits, fx_export_layout, fx_export_skin, fx_export_skin_badweights]
+def fx_export_skin_bonechild(out):
+    """A mesh node under the Tip joint that is no joint itself: Blender parents the object to the BONE (parent_type BONE;
+    the dug-out canoe of the registry has eleven), and the exporter hangs it from the joint after the joint's bone children
+    (step 5 d, part 4a). The probe does not model such a placement yet (its matrix is the node chain's, said in
+    docs/Review-Backlog.md), so the vehicle probe drill names this file and skips its placement rows - hence a file of its
+    own, marked "bonechild" in its NAME."""
+    export_skin(out, "export_skin_bonechild", False, bone_child=True)
+
+
+FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external, fx_cubic, fx_scenes, fx_materials, fx_skin8, fx_big, fx_names, fx_no_default_scene, fx_dropped, fx_mixed_skin, fx_clip_switch, fx_path_clip, fx_far_clip, fx_unicode_clip, fx_decimate_attrs, fx_decimate_limits, fx_export_layout, fx_export_skin, fx_export_skin_badweights, fx_export_skin_bonechild]
 
 
 def main(out):

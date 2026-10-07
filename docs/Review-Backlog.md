@@ -127,7 +127,16 @@ colour-set rules; `FULL=1` on 2026-10-06: 148 runs on 74 files, 3,532 object run
 skinned objects too, the same day (positions and normals through the armature's matrix in numpy's float32, joints and
 weights from the vertex groups, the exporter's neutral bone; `FULL=1` on 2026-10-06: 152 runs on 76 files, 4,062 object runs, 15.8 million vertices equal, 530 object runs skinned); the coloured material with alpha too
 (its set carries alpha when the importer wired the vertex alpha in: every mode and cutoff but OPAQUE and MASK at a cutoff of 0 or over 1; `FULL=1` on 2026-10-06: 152 runs on 76 files, 154 runs on 77 files, 11,344 object runs, 17.4 million vertices equal, 0 declined; two reviews found the first rule wrong on two inputs, validate's rebuild dropping the slots' alpha modes, and the alpha factor's float32 rounding - the cutoff and the base colour factor are doubles now);
-nothing is declined any more; still open in (d): prep_model in C# - strip, the file as the Factory's
+nothing is declined any more; **(4a) the written file's structure** - nodes, order, parents, transforms, material names and
+order, as the converter walks them - done 2026-10-07 (`BlenderExportTree.cs`, a structure stage of the prep drill; `FULL=1`: 156 node
+lists, 39,072 object transforms and 126 material lists equal);
+**(4b) the bones' transforms and inverse bind matrices** - the same day (`VehicleProbe.BlenderArmature.cs`,
+`BlenderEigen.cs`: the importer's edit bones, Blender's `bone.matrix_local` through Eigen's SSE inverse and atan2f,
+the exporter's joint rule; `FULL=1` on 2026-10-07: 978 joint transforms and 538 skins' inverse bind matrices equal, the dug-out
+canoe's eight joints off by ulps through the probe's world matrix of `Canoe`); still open in (d): an object parented to a
+bone (pose evaluation), the probe's object world matrix on a quaternion like the canoe's (2.9e-8 off unit, 1e-33
+components: `BlenderWorldMatrices` is an ulp off Blender's from that node down), (4c) the writer and the converter-level acceptance (OBJ
+byte-equal, images copied), (4d) prep_model in C# - strip, the file as the Factory's
 converter reads it (node and material order: Blender writes materials in order of first use, one per vertex-colour
 variant, and a `DefaultMaterial` for a coloured primitive without one), the write, the wiring behind
 `UniversalBaker.PrepViaBlender` with Blender as the fallback; KNOWN on the way: `prep_model.py` fails on a file of several

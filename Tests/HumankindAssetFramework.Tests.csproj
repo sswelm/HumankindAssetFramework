@@ -16,7 +16,8 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
     <PackageReference Include="xunit" Version="2.6.6" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.6" />
-  </ItemGroup>
+    <None Include="eigen_inverses.txt" CopyToOutputDirectory="PreserveNewest" />
+</ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\HumankindAssetFramework.csproj" />
@@ -45,6 +46,7 @@
     <Compile Include="..\editor\VehicleProbe.BlenderSkin.cs" Link="VehicleProbe.BlenderSkin.cs" />
     <Compile Include="..\editor\VehicleProbe.CustomNormals.cs" Link="VehicleProbe.CustomNormals.cs" />
     <Compile Include="..\editor\VehicleProbe.Merge.cs" Link="VehicleProbe.Merge.cs" />
+    <Compile Include="..\editor\VehicleProbe.BlenderArmature.cs" Link="VehicleProbe.BlenderArmature.cs" />
     <Compile Include="..\editor\HafUnityFrame.cs" Link="HafUnityFrame.cs" />
     <Compile Include="..\editor\BlenderMesh.cs" Link="BlenderMesh.cs" />
     <Compile Include="..\editor\BMesh.cs" Link="BMesh.cs" />
@@ -53,6 +55,8 @@
     <Compile Include="..\editor\BlenderDecimate.cs" Link="BlenderDecimate.cs" />
     <Compile Include="..\editor\BlenderReduce.cs" Link="BlenderReduce.cs" />
     <Compile Include="..\editor\BlenderExport.cs" Link="BlenderExport.cs" />
+    <Compile Include="..\editor\BlenderExportTree.cs" Link="BlenderExportTree.cs" />
+    <Compile Include="..\editor\BlenderEigen.cs" Link="BlenderEigen.cs" />
   </ItemGroup>
 
   <!-- compile-time references the TEST code uses directly -->

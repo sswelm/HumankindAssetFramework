@@ -186,6 +186,28 @@ public static partial class VehicleProbe
         return MatMulMathutils3(To3(arma), invT);
     }
 
+    /// <summary>The glTF exporter's translation, rotation and scale for a node (nodes.py __gather_trans_rot_scale): the
+    /// decomposition of parent.matrix_world.inverted_safe() @ matrix_world (of matrix_world alone for a root), the
+    /// quaternion normalized, turned Y up - (x, z, -y), (x, z, -y, w), (x, z, y) -, each component within 2e-6 of its
+    /// identity value snapped to it, and a property that is the identity left out (null). Both matrices column-major
+    /// float32 as the probe holds them; parentWorld null for a root. A JOINT (joints.py gather_joint_vnode) gets neither
+    /// the normalization nor the snapping: its float noise is written as it is.</summary>
+    internal static void ExporterTrs(float[] parentWorld, float[] world, out float[] translation, out float[] rotation, out float[] scale, bool joint = false)
+    {
+        var local = parentWorld == null ? ToRowMajor(world) : MatMulMathutils(InvertedSafe(ToRowMajor(parentWorld)), ToRowMajor(world));
+        DecomposeBlenderMatrix(local, out var loc, out var quat, out var size);
+        if (!joint) NormalizeQt(quat);
+        // round_if_near: value if abs(value - target) > 2.0e-6 else target - Python's double arithmetic on float32 values
+        // ... and the writer's __fix_json turns an integral float into an int: a -0.0 is written as 0
+        float Near(float v, float target) { float r = joint || Math.Abs((double)v - (double)target) > 2.0e-6 ? v : target; return r == 0f ? 0f : r; }
+        float tx = Near(loc[0], 0f), ty = Near(loc[2], 0f), tz = Near(-loc[1], 0f);
+        float rw = Near(quat[0], 1f), rx = Near(quat[1], 0f), ry = Near(quat[3], 0f), rz = Near(-quat[2], 0f);
+        float sx = Near(size[0], 1f), sy = Near(size[2], 1f), sz = Near(size[1], 1f);
+        translation = tx != 0f || ty != 0f || tz != 0f ? new[] { tx, ty, tz } : null;
+        rotation = rw != 1f || rx != 0f || ry != 0f || rz != 0f ? new[] { rx, ry, rz, rw } : null;
+        scale = sx != 1f || sy != 1f || sz != 1f ? new[] { sx, sy, sz } : null;
+    }
+
     /// <summary>One skin as the importer stores its meshes: the joint matrices (bind_arma_mat @ inv_bind, float32) and the
     /// skinning of a vertex by them.</summary>
     internal sealed class BlenderSkinner

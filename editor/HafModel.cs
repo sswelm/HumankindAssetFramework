@@ -161,6 +161,7 @@ public sealed class HafMaterial
     public int OcclusionTexture = -1; public int OcclusionTexCoord; public float OcclusionStrength = 1;
     public int EmissiveTexture = -1; public int EmissiveTexCoord;
     public float[] EmissiveFactor = { 0, 0, 0 };
+    public bool NameAbsent;          // the file had no "name" at all (not an empty one): Blender's importer names it Material_<index> then, and an EMPTY name "Material"
     public string AlphaMode = "OPAQUE";
     public double AlphaCutoff = 0.5;   // keep JSON precision: Blender tests MASK boundaries before storing node values as floats
     public bool DoubleSided;
