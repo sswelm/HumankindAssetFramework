@@ -42,7 +42,7 @@ OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -optimize+ -out:"$WTMP/prep.exe"
   -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
   "$WROOT/tools/prep-drill/PrepDrill.cs" \
   "$WROOT/editor/HafModel.cs" "$WROOT/editor/GlbReader.cs" "$WROOT/editor/HafTransforms.cs" "$WROOT/editor/BlenderNames.cs" "$WROOT/editor/BlenderMesh.cs" "$WROOT/editor/BMesh.cs" \
-  "$WROOT/editor/BlenderColor.cs" "$WROOT/editor/BlenderTrig.cs" "$WROOT/editor/BlenderDecimate.cs" "$WROOT/editor/BlenderReduce.cs" "$WROOT/editor/BlenderExport.cs" "$WROOT/editor/BlenderExportTree.cs" \
+  "$WROOT/editor/BlenderColor.cs" "$WROOT/editor/BlenderTrig.cs" "$WROOT/editor/BlenderDecimate.cs" "$WROOT/editor/BlenderReduce.cs" "$WROOT/editor/BlenderExport.cs" "$WROOT/editor/BlenderExportTree.cs" "$WROOT/editor/BlenderPrep.cs" "$WROOT/editor/GlbWriter.cs" \
   "$WROOT/editor/VehicleProbe.cs" "$WROOT/editor/VehicleProbe.Visibility.cs" "$WROOT/editor/VehicleProbe.Islands.cs" "$WROOT/editor/VehicleProbe.InsideOut.cs" \
   "$WROOT/editor/VehicleProbe.BlenderWorld.cs" "$WROOT/editor/VehicleProbe.BlenderSkin.cs" "$WROOT/editor/VehicleProbe.CustomNormals.cs" "$WROOT/editor/VehicleProbe.Merge.cs" "$WROOT/editor/VehicleProbe.BlenderArmature.cs" "$WROOT/editor/BlenderEigen.cs" 2>&1); rc=$?
 if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/prep.exe" ]; then echo "$OUT" | grep -E "error" | head -20; echo "FAIL — the prep drill did not compile (csc rc=$rc)"; exit 1; fi
@@ -67,7 +67,10 @@ if [ "$brc" -ne 0 ] || [ "$n_b" -ne "${#SAMPLE[@]}" ]; then
   grep -E "^FAIL|Traceback|Error" "$TMPD/blender_raw.txt" | head -8
   echo "FAIL — prep drill: Blender prepared $n_b of ${#SAMPLE[@]} files (exit $brc)"; exit 1
 fi
-"$TMPD/prep.exe" "$WTMP/rows.txt" > "$TMPD/csharp_raw.txt" 2>&1; rc=$?
+CONVERTER="$WROOT/editor/Tools~/glbconv/glbconv.exe"
+[ -f "$CONVERTER" ] || { echo "FAIL — the Factory's converter is not at $CONVERTER (the written files were NOT compared)"; exit 2; }
+mkdir -p "$TMPD/conv"
+"$TMPD/prep.exe" "$WTMP/rows.txt" "$CONVERTER" "$WTMP/conv" > "$TMPD/csharp_raw.txt" 2>&1; rc=$?
 LC_ALL=C sed 's/\xEF\xBB\xBF//g' "$TMPD/csharp_raw.txt" | tr -d '\r' > "$TMPD/csharp.txt"
 RUNTIME=$(grep -E "^RUNTIME" "$TMPD/csharp.txt" | head -1 | cut -f2-)
 echo "$RUNTIME" | grep -q "64-bit.*trig exact" || { echo "FAIL — prep drill: the C# side did not run as a 64-bit process with the C runtime's cosf ($RUNTIME); the prep was NOT drilled"; exit 2; }

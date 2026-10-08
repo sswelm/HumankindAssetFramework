@@ -901,13 +901,68 @@ def fx_export_skin_twins(out):
     write_glb(os.path.join(out, "export_skin_twins.glb"), root, b)
 
 
+def fx_export_flat_alpha(out):
+    """baseColorFactor's alpha as it comes back out of Blender for a material with NEITHER a base colour texture NOR
+    vertex colours - the importer sets the Principled alpha socket itself there (step 5 d, part 4c; every alpha material
+    of export_layout is a vertex-colour variant, which takes the other branch): OPAQUE writes 1 whatever the factor
+    says, MASK 1 or 0 by `alpha >= cutoff`, BLEND the alpha in float32. Six materials on six parts, so the converter's
+    faithful mode writes a swatch each - the alpha is its fourth byte. Three more materials hold what the plain six
+    cannot (see each)."""
+    b = Buf()
+    pos, nrm, uv0, _, _, idx = bent_grid(2, 2, 0.0, 0.0)
+    p = b.accessor(pos, "f", "VEC3"); n = b.accessor(nrm, "f", "VEC3", minmax=False); i = b.accessor(idx, "H", "SCALAR")
+    mats = [{"name": "opaque_half", "pbrMetallicRoughness": {"baseColorFactor": [0.9, 0.2, 0.2, 0.5]}},
+            {"name": "mask_under", "alphaMode": "MASK", "pbrMetallicRoughness": {"baseColorFactor": [0.2, 0.9, 0.2, 0.3]}},
+            {"name": "mask_at", "alphaMode": "MASK", "alphaCutoff": 0.3, "pbrMetallicRoughness": {"baseColorFactor": [0.2, 0.2, 0.9, 0.3]}},
+            {"name": "mask_over_factor", "alphaMode": "MASK", "alphaCutoff": 0.25, "pbrMetallicRoughness": {"baseColorFactor": [0.9, 0.9, 0.2, 0.3]}},
+            {"name": "blend_flat", "alphaMode": "BLEND", "pbrMetallicRoughness": {"baseColorFactor": [0.9, 0.2, 0.9, 0.4]}},
+            {"name": "mask_zero_flat", "alphaMode": "MASK", "alphaCutoff": 0.0, "pbrMetallicRoughness": {"baseColorFactor": [0.2, 0.9, 0.9, 0.0]}},
+            # the OTHER branch, where export_layout's mask_zero has an alpha of 1 and could not tell: with vertex colours a
+            # MASK at a cutoff of 0 is opaque - 1 written, not the factor's 0.4 (planted: not caught before this material)
+            {"name": "mask_zero_coloured", "alphaMode": "MASK", "alphaCutoff": 0.0, "pbrMetallicRoughness": {"baseColorFactor": [0.9, 0.6, 0.2, 0.4]}},
+            # specular-glossiness with every diffuse value at its default: metallic 0 and roughness 1 - glossiness still make
+            # a pbrMetallicRoughness object, which the converter's swatch depends on (white with one, grey without)
+            {"name": "spec_gloss_white", "extensions": {"KHR_materials_pbrSpecularGlossiness": {"glossinessFactor": 0.25}}},
+            # and a material of nothing but defaults: no pbrMetallicRoughness object at all (the grey swatch)
+            {"name": "all_defaults"},
+            # unlit, every value at its default: the exporter writes an unlit material with metallic 0 and roughness 0.9
+            # whatever the source says - so the object is there, and the swatch white (review of the writer, 2026-10-08)
+            {"name": "unlit_white", "extensions": {"KHR_materials_unlit": {}}},
+            # unlit beside specular-glossiness: the importer takes the unlit path and never looks at the diffuse colour
+            {"name": "unlit_over_spec_gloss", "pbrMetallicRoughness": {"baseColorFactor": [0.3, 0.6, 0.9, 1.0]},
+             "extensions": {"KHR_materials_unlit": {}, "KHR_materials_pbrSpecularGlossiness": {"diffuseFactor": [0.9, 0.1, 0.1, 1.0]}}},
+            # an alpha mode of "": OPAQUE to the importer (`alpha_mode or 'OPAQUE'`) - 1 written, not the factor's 0.5
+            {"name": "mode_empty", "alphaMode": "", "pbrMetallicRoughness": {"baseColorFactor": [0.4, 0.4, 0.9, 0.5]}}]
+    white = b.accessor([(1.0, 1.0, 1.0, 1.0)] * len(pos), "f", "VEC4", minmax=False)
+    root = base("export_flat_alpha", materials=mats, extensionsUsed=["KHR_materials_pbrSpecularGlossiness", "KHR_materials_unlit"],
+                meshes=[{"name": "part%d" % k, "primitives": [{"attributes": dict({"POSITION": p, "NORMAL": n}, **({"COLOR_0": white} if mats[k]["name"] == "mask_zero_coloured" else {})), "indices": i, "material": k}]} for k in range(len(mats))],
+                nodes=[{"name": "Part%d" % k, "mesh": k, "translation": [1.5 * k, 0.0, 0.0]} for k in range(len(mats))],
+                scenes=[{"nodes": list(range(len(mats)))}], scene=0)
+    write_glb(os.path.join(out, "export_flat_alpha.glb"), root, b)
+
+
+def fx_export_jpeg_alpha(out):
+    """A JPEG base colour image on a BLEND material: the exporter writes an image whose alpha is read as PNG, so Blender
+    decodes this one and encodes it again - bytes only Blender makes. BlenderPrep names the file and leaves it to
+    Blender (measured on the Espana, 2026-10-08). The same image on an OPAQUE material passes through; real files hold that."""
+    import base64
+    jpeg = base64.b64decode("/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/yQALCAABAAEBAREA/8wABgAQEAX/2gAIAQEAAD8A0s8g/9k=")
+    b = Buf()
+    pos, nrm, uv0, _, _, idx = bent_grid(2, 2, 0.0, 0.0)
+    root = base("export_jpeg_alpha", images=[{"bufferView": b.blob(jpeg), "mimeType": "image/jpeg", "name": "tiny"}], textures=[{"source": 0}],
+                materials=[{"name": "glass_jpeg", "alphaMode": "BLEND", "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}}],
+                meshes=[{"name": "pane", "primitives": [{"attributes": {"POSITION": b.accessor(pos, "f", "VEC3"), "TEXCOORD_0": b.accessor(uv0, "f", "VEC2", minmax=False)}, "indices": b.accessor(idx, "H", "SCALAR"), "material": 0}]}],
+                nodes=[{"name": "Pane", "mesh": 0}], scenes=[{"nodes": [0]}], scene=0)
+    write_glb(os.path.join(out, "export_jpeg_alpha.glb"), root, b)
+
+
 FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external, fx_cubic, fx_scenes, fx_materials, fx_skin8, fx_big, fx_names, fx_no_default_scene, fx_dropped, fx_mixed_skin, fx_clip_switch, fx_path_clip, fx_far_clip, fx_unicode_clip, fx_decimate_attrs, fx_decimate_limits, fx_export_layout, fx_export_skin, fx_export_skin_badweights, fx_export_skin_bonechild]
 
 
 def main(out, prep=False):
     os.makedirs(out, exist_ok=True)
     # Blender drops the line mesh: its vertex bounds are only relevant to the prep export drill.
-    for fx in FIXTURES + ([fx_export_skin_lines, fx_export_bones, fx_export_review, fx_export_skin_twins] if prep else []):
+    for fx in FIXTURES + ([fx_export_skin_lines, fx_export_bones, fx_export_review, fx_export_skin_twins, fx_export_flat_alpha, fx_export_jpeg_alpha] if prep else []):
         fx(out)
     for name in sorted(os.listdir(out)):
         if name.endswith((".glb", ".gltf")):

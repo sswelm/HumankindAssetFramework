@@ -17,7 +17,10 @@ static class PrepDrill
     {
         Console.OutputEncoding = new UTF8Encoding(false);
         Console.WriteLine($"RUNTIME\t{(IntPtr.Size * 8)}-bit\ttrig {(BlenderTrig.Exact ? "exact" : "rounded")}\tcolour table {(BlenderColor.TableKnown ? "known" : "unknown")}");
-        int fails = 0, runs = 0, objects = 0, prims = 0, declined = 0, expectedFailures = 0; long verts = 0;
+        int fails = 0, runs = 0, objects = 0, prims = 0, declined = 0, expectedFailures = 0, writtenRuns = 0, leftRuns = 0; long verts = 0;
+        // the Factory's converter and a folder to run it in (arguments 2 and 3); without them the written stage is skipped, said
+        string converter = args.Length > 2 && File.Exists(args[1]) ? args[1] : null, workDir = args.Length > 2 ? args[2] : null;
+        Console.WriteLine(converter != null ? "CONVERTER\t" + converter : "CONVERTER\tnone: the written files are NOT compared");
         var declinedWhy = new Dictionary<string, int>(); var leftToBlender = new SortedDictionary<string, int>();
         var cover = new SortedDictionary<string, long>();
         foreach (var k in CoverKeys) cover[k] = 0;
@@ -48,45 +51,26 @@ static class PrepDrill
             {
                 if (sourcePath != key) { source = GlbReader.Read(key); sourcePath = key; names = BlenderNames.Compute(source); bworld = null; GC.Collect(); }   // the key is the path, lower-cased
                 var m = source;
-                var meshObjects = new List<(int node, string name, int faces)>();
-                long myTotal = 0;
-                foreach (var (node, name) in names.MeshObjectsInOrder)
-                {
-                    var layout = BlenderMesh.FromGltf(m, m.Nodes[node].Mesh);
-                    if (layout.VertexCount == 0) continue;
-                    meshObjects.Add((node, name, layout.Faces.Length / 3)); myTotal += layout.Faces.Length / 3;
-                }
-                var problems = new List<string>();
+                // the PRODUCTION prep (BlenderPrep.Prepare) does the work; `diagnose` keeps it going past a reason to fall
+                // back, so everything it can lay out is still compared
+                var prep = BlenderPrep.Prepare(m, target, diagnose: true, names: names);
+                if (prep.World != null) bworld = prep.World;
+                long myTotal = prep.SourceTriangles;
+                var problems = new List<string>(); string outcome = "";
                 if (myTotal != total) problems.Add($"triangle total C# {myTotal} vs Blender {total}");
-                float ratio = BlenderReduce.Ratio(target, myTotal);
+                float ratio = prep.Ratio;
                 var written = GlbReader.Read(outGlb);
                 var nodeByName = new Dictionary<string, int>();
                 for (int i = 0; i < written.Nodes.Count; i++) if (written.Nodes[i].Mesh >= 0 && !nodeByName.ContainsKey(written.Nodes[i].Name)) nodeByName[written.Nodes[i].Name] = i;
                 int okObjects = 0, okPrims = 0;
                 var prepared = new List<(string name, int armature, BlenderExport.Skin skin, List<string> joints, List<BlenderExport.Primitive> primitives)>();
-                var materialsOfMesh = new Dictionary<int, List<string>>();   // per mesh node: the Blender material of each primitive written, in order (null for the empty slot)
-                var neutralArmatures = new HashSet<int>();
+                var materialsOfMesh = prep.MaterialsOfMesh;   // per mesh node: the Blender material of each primitive written, in order (null for the empty slot)
+                var neutralArmatures = prep.NeutralArmatures;
                 int declinedBefore = declined;
-                foreach (var (node, name, faces) in meshObjects)
+                foreach (var run in prep.Objects)
                 {
-                    bool skinned = m.Nodes[node].Skin >= 0 && m.Nodes[node].Skin < m.Skins.Count && m.Meshes[m.Nodes[node].Mesh].Primitives.Exists(p => p.Skinned);
-                    string why = BlenderReduce.FallbackReason(m, node);
-                    if (why != null) { declined++; declinedWhy[why] = declinedWhy.TryGetValue(why, out int c) ? c + 1 : 1; continue; }
-                    // a skinned mesh hangs from its armature with no transform of its own: both matrices are the armature's.
-                    // The exported joints are the armature's bones in creation order; group i is the skin's joint i
-                    BlenderExport.Skin skinLayout = null; List<string> jointNames = null;
-                    if (skinned)
-                    {
-                        int si = m.Nodes[node].Skin, an = names.ArmatureNodeOfSkin[si];
-                        if (bworld == null) bworld = VehicleProbe.BlenderWorldMatrices(m, null);
-                        var arma = an >= 0 ? bworld[an] : new float[] { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
-                        var place = new Dictionary<int, int>(); jointNames = new List<string>();
-                        foreach (int b in names.BoneNodesInOrder) if (names.ArmatureNodeOfBone[b] == an) { place[b] = place.Count; jointNames.Add(names.BoneOfJoint[b]); }
-                        skinLayout = new BlenderExport.Skin { ObjectWorld = arma, ArmatureWorld = arma, JointCount = place.Count, GroupJoint = m.Skins[si].Joints.Select(j => place.TryGetValue(j, out int at) ? at : -1).ToArray() };
-                    }
-                    var r = BlenderReduce.Reduce(m, node, ratio, names);
-                    var mine = BlenderExport.MeshPrimitives(r, skinLayout);
-                    materialsOfMesh[node] = mine.Select(p => { var (mat, vc) = r.Slots[p.MaterialSlot]; return mat < 0 && !vc ? null : names.MaterialOf[(mat < 0 ? names.MeshDatablockNode[node] : -1, mat, vc)]; }).ToList();
+                    if (run.Declined != null) { declined++; declinedWhy[run.Declined] = declinedWhy.TryGetValue(run.Declined, out int c) ? c + 1 : 1; continue; }
+                    var r = run.Reduced; var mine = run.Primitives; var skinLayout = run.Skin;
                     Cover(m, r, BlenderExport.Validated(r), mine, cover);
                     if (skinLayout != null)
                     {
@@ -96,9 +80,7 @@ static class PrepDrill
                         bool identity = true; for (int i = 0; i < 16; i++) if (skinLayout.ArmatureWorld[i] != (i % 5 == 0 ? 1f : 0f)) identity = false;
                         if (!identity) cover["an armature that is not at the identity"]++;
                     }
-                    int armature = skinLayout != null ? names.ArmatureNodeOfSkin[m.Nodes[node].Skin] : -1;
-                    if (skinLayout != null && mine.Count > 0 && mine[0].NeutralBone) neutralArmatures.Add(armature);
-                    prepared.Add((name, armature, skinLayout, jointNames, mine));
+                    prepared.Add((run.Name, skinLayout != null ? run.Armature : -1, skinLayout, run.JointNames, mine));
                 }
                 // Blender appends one neutral joint to the shared armature if ANY exported mesh needs it.
                 // Collect that requirement from our layouts before comparing any object's skin, so mesh order cannot matter.
@@ -140,9 +122,40 @@ static class PrepDrill
                 // a file with a declined object is Blender's to prep as a whole: its structure is not predicted (the tree would
                 // not know whether the declined mesh has faces, nor its materials)
                 if (declined > declinedBefore) { leftToBlender["an object of the file is declined"] = leftToBlender.TryGetValue("an object of the file is declined", out int lc) ? lc + 1 : 1; cover["left to Blender: an object of the file is declined"]++; }
-                else Structure(m, names, bworld, written, problems, cover, new HashSet<int>(materialsOfMesh.Where(kv => kv.Value.Count > 0).Select(kv => kv.Key)), neutralArmatures, materialsOfMesh, leftToBlender);
+                else Structure(m, names, bworld, written, problems, cover, prep.Tree, neutralArmatures, materialsOfMesh, leftToBlender);
+                // every other reason the production prep names for leaving the file to Blender (the tree's own are counted above)
+                foreach (var reason in prep.Reasons)
+                {
+                    if (reason.StartsWith("'") || (prep.Tree != null && prep.Tree.Problems.Contains(reason))) continue;
+                    string kind = reason.Split(':')[0];
+                    leftToBlender[kind] = leftToBlender.TryGetValue(kind, out int kc) ? kc + 1 : 1;
+                    if (cover.ContainsKey("left to Blender: " + kind)) cover["left to Blender: " + kind]++;
+                }
+                // the WRITTEN file: what the Factory's converter makes of it against what it makes of Blender's, byte for byte
+                if (prep.Model != null && problems.Count == 0 && converter != null)
+                {
+                    // the file as WRITTEN and read back - not the model in memory: the writer is part of what is judged
+                    string myGlb = Path.Combine(workDir, "in_cs", "model.glb");
+                    Directory.CreateDirectory(Path.GetDirectoryName(myGlb));
+                    GlbWriter.Write(prep.Model, myGlb);
+                    var reread = GlbReader.Read(myGlb);
+                    var hits = new List<string>();
+                    string d = Assembled(reread, written) ?? Materials(reread, written, myGlb, outGlb, hits) ?? Written(myGlb, outGlb, converter, workDir, hits, reread.Skins.Count > 0);
+                    if (d != null) problems.Add("written: " + d);
+                    else
+                    {
+                        // counted only now: every comparison of this run held
+                        outcome = "written, and the converter reads it as it reads Blender's";
+                        writtenRuns++; cover["a written file the converter reads as it reads Blender's"]++;
+                        foreach (var h in hits) cover[h]++;
+                        foreach (var note in prep.Notes) if (cover.ContainsKey("material: " + note)) cover["material: " + note]++; else problems.Add("the prep notes a material rule the drill has no row for: " + note);
+                    }
+                }
+                else if (prep.Model == null && prep.Fallback == null) problems.Add("the prep gave neither a file nor a reason");
+                else if (prep.Model == null && problems.Count == 0) { outcome = "LEFT TO BLENDER: " + prep.Fallback; leftRuns++; }
+                else if (problems.Count == 0) problems.Add("a prepared file that was not judged (no converter)");
                 if (problems.Count > 0) { fails++; Console.WriteLine($"FAIL {shortKey} {tag}: " + string.Join("; ", problems.Take(4)) + (problems.Count > 4 ? $"; ... {problems.Count - 4} more" : "")); }
-                else Console.WriteLine($"PASS {shortKey} {tag}: {okObjects} objects, {okPrims} primitives equal (ratio {ratio:R})");
+                else Console.WriteLine($"PASS {shortKey} {tag}: {okObjects} objects, {okPrims} primitives equal (ratio {ratio:R}); {outcome}");
             }
             catch (Exception e) { fails++; Console.WriteLine($"FAIL {shortKey} {tag}: {e.GetType().Name}: {e.Message}"); }
         }
@@ -150,13 +163,16 @@ static class PrepDrill
         foreach (var kv in leftToBlender) Console.WriteLine($"NOTE {kv.Value} runs whose structure is left to Blender: {kv.Key}");
         // a rule no compared object exercised was not held to Blender by this run: the script fails on a zero it expects filled
         foreach (var kv in cover) Console.WriteLine($"COVER {kv.Value} {kv.Key}");
-        Console.WriteLine($"TOTAL runs {runs} failed {fails} objects {objects} primitives {prims} vertices {verts} declined {declined} prepfails {expectedFailures}");
+        // every run ends one way: failed, known to fail in prep_model.py, written and judged, or left to Blender by name
+        if (runs != fails + expectedFailures + writtenRuns + leftRuns) { Console.WriteLine($"FAIL the runs do not add up: {runs} runs, {fails} failed + {expectedFailures} prep failures + {writtenRuns} written + {leftRuns} left to Blender"); fails++; }
+        Console.WriteLine($"TOTAL runs {runs} failed {fails} objects {objects} primitives {prims} vertices {verts} declined {declined} prepfails {expectedFailures} written {writtenRuns} left {leftRuns}");
         return fails == 0 ? 0 : 1;
     }
 
     static readonly string[] CoverKeys =
     {
-        "a node's mesh index compared", "a skin's joint indices compared", "two nodes of one armature sharing a skin", "two armatures, a skin each", "a primitive's material index compared", "a faceless skinned object compared", "left to Blender: an object of the file is declined", "left to Blender: material-uv", "left to Blender: camera-children", "left to Blender: lights", "a camera left out", "an object hung from a node that bears its parent bone's name",
+        "a node's mesh index compared", "a written file the converter reads as it reads Blender's", "a material's base colour compared (factor, image)", "material: a MASK alpha written as 0", "material: a pbrMetallicRoughness object beside a default base colour", "material: no pbrMetallicRoughness object on either side", "material: a base colour image under a colour factor", "material: unlit", "material: specular-glossiness", "left to Blender: jpeg-alpha", "material: a blended alpha kept", "material: a base colour image, byte for byte", "written: a skinned file", "written: several materials (an .mtl and an albedo each)", "written: a base colour image", "written: a flat material (a swatch from its factor)",
+"left to Blender: an animated file", "left to Blender: an object under a bone", "a skin's joint indices compared", "two nodes of one armature sharing a skin", "two armatures, a skin each", "a primitive's material index compared", "a faceless skinned object compared", "left to Blender: an object of the file is declined", "left to Blender: material-uv", "left to Blender: camera-children", "left to Blender: lights", "a camera left out", "an object hung from a node that bears its parent bone's name",
         "bones: two or more root bones", "bones: a bone child nearer than 0.004 (no length taken from it)", "bones: a bone of length 1 (no bone child, no parent bone, at its parent's origin)", "bones: an edit bone of no length (its tail moved along Z)", "bones: an edit bone shorter than 1e-6 (its tail moved along the bone)",
         "bones: a skeleton that is not a joint, on a skin with inverse bind matrices", "bones: a bone almost along -Y (the series for 1 + y)", "bones: a bone along -Y (the mirrored matrix)", "a node list compared (name, parent, order)", "a node transform compared", "a joint transform compared", "a skin's inverse bind matrices compared", "a neutral bone compared", "a material list compared (names, order)", "an object under a bone (its transform is the next part's)", "an animated file (its transforms are Blender's posed state, not compared)",
         "normals from the file (custom normals)", "no normals (every face flat)", "a normal that rounds to zero, made up", "a zero normal on a fan that does not point up", "an object of several primitives",
@@ -173,9 +189,8 @@ static class PrepDrill
     /// <summary>The written file's node list against the tree the exporter builds: count, each node's name, parent and
     /// transform bits, the scene's roots. Bones' transforms wait for the bone part; an animated file's transforms are
     /// Blender's posed import state, which the tree does not model (the Factory preps static entries).</summary>
-    static void Structure(HafModel m, BlenderNames.Result names, float[][] bworld, HafModel written, List<string> problems, SortedDictionary<string, long> cover, ISet<int> meshNodesWithFaces, ISet<int> neutralArmatures, Dictionary<int, List<string>> materialsOfMesh, SortedDictionary<string, int> leftToBlender)
+    static void Structure(HafModel m, BlenderNames.Result names, float[][] bworld, HafModel written, List<string> problems, SortedDictionary<string, long> cover, BlenderExportTree.Result tree, ISet<int> neutralArmatures, Dictionary<int, List<string>> materialsOfMesh, SortedDictionary<string, int> leftToBlender)
     {
-        var tree = BlenderExportTree.Build(m, names, bworld, meshNodesWithFaces, neutralArmatures, mn => materialsOfMesh.TryGetValue(mn, out var l) ? l : new List<string>());
         if (tree.Problems.Count > 0)
         {
             foreach (var p in tree.Problems)
@@ -297,6 +312,135 @@ static class PrepDrill
             if (tree.CamerasLeftOut > 0) cover["a camera left out"]++;
             // a branch of the bone chain counts when the file that took it compared equal, joints and inverse bind matrices
             foreach (var note in tree.Notes) if (cover.ContainsKey("bones: " + note)) cover["bones: " + note]++; else problems.Add("structure: the bone chain notes a branch the drill has no row for: " + note);
+        }
+    }
+
+    /// <summary>What the converter reads of a material, held to Blender's file directly - the converter itself shows a
+    /// factor only where there is no texture, and an image only in its faithful mode: the base colour factor as float32
+    /// and the base colour image's bytes (or that there is none).</summary>
+    static string Materials(HafModel mine, HafModel theirs, string myGlb, string theirGlb, List<string> hits)
+    {
+        if (mine.Materials.Count != theirs.Materials.Count) return $"{mine.Materials.Count} materials here, {theirs.Materials.Count} in Blender's";
+        // whether a material HAS a pbrMetallicRoughness object decides the converter's swatch (white with one, grey without):
+        // read off the two files' JSON, not inferred from values
+        bool[] pa = PbrObjects(myGlb), pb = PbrObjects(theirGlb);
+        for (int i = 0; i < mine.Materials.Count; i++)
+        {
+            HafMaterial a = mine.Materials[i], b = theirs.Materials[i];
+            // the DOUBLES: Blender writes a float32's exact value, and so must this (a consumer that reads floats could not tell)
+            for (int k = 0; k < 4; k++)
+                if (!SameDouble(a.BaseColorFactor[k], b.BaseColorFactor[k]))
+                    return $"material {i} '{a.Name}' base colour factor [{string.Join(",", a.BaseColorFactor.Select(x => x.ToString("R")))}] here vs [{string.Join(",", b.BaseColorFactor.Select(x => x.ToString("R")))}] in Blender's ({a.AlphaMode}, cutoff {a.AlphaCutoff:R}, texture {a.BaseColorTexture >= 0})";
+            if (pa[i] != pb[i]) return $"material {i} '{a.Name}' {(pa[i] ? "has a" : "has no")} pbrMetallicRoughness object here (metallic {a.MetallicFactor:R}, roughness {a.RoughnessFactor:R}), Blender's {(pb[i] ? "has one" : "has none")} (metallic {b.MetallicFactor:R}, roughness {b.RoughnessFactor:R})";
+            // metallic and roughness are not the converter's to read, but they make the object: held to Blender's as float32
+            if (a.MetallicFactor != b.MetallicFactor || a.RoughnessFactor != b.RoughnessFactor) return $"material {i} '{a.Name}' metallic {a.MetallicFactor:R}, roughness {a.RoughnessFactor:R} here vs {b.MetallicFactor:R}, {b.RoughnessFactor:R} in Blender's";
+            bool flat = a.BaseColorTexture < 0 && a.BaseColorFactor.All(x => x == 1);
+            if (pa[i] && flat) hits.Add("material: a pbrMetallicRoughness object beside a default base colour");
+            if (!pa[i]) hits.Add("material: no pbrMetallicRoughness object on either side");
+            byte[] ia = a.BaseColorTexture >= 0 ? mine.Images[mine.Textures[a.BaseColorTexture].Source].Bytes : null, ib = b.BaseColorTexture >= 0 ? theirs.Images[theirs.Textures[b.BaseColorTexture].Source].Bytes : null;
+            if ((ia == null) != (ib == null)) return $"material {i} '{a.Name}' {(ia == null ? "has no base colour image here, one in Blender's" : "has a base colour image here, none in Blender's")}";
+            if (ia != null && !ia.SequenceEqual(ib)) return $"material {i} '{a.Name}' base colour image differs ({ia.Length} bytes here, {ib.Length} in Blender's)";
+            bool plain = a.BaseColorTexture < 0;
+            if (a.AlphaMode == "MASK" && plain && a.BaseColorFactor[3] == 0) hits.Add("material: a MASK alpha written as 0");
+            if (a.AlphaMode != "OPAQUE" && a.AlphaMode != "MASK" && a.BaseColorFactor[3] != 1) hits.Add("material: a blended alpha kept");
+            if (ia != null) hits.Add("material: a base colour image, byte for byte");
+            if (ia != null && (a.BaseColorFactor[0] != 1 || a.BaseColorFactor[1] != 1 || a.BaseColorFactor[2] != 1)) hits.Add("material: a base colour image under a colour factor");
+        }
+        if (mine.Materials.Count > 0) hits.Add("a material's base colour compared (factor, image)");
+        return null;
+    }
+
+    /// <summary>Two JSON numbers as the reader parsed them: equal, or within two units in the last place of a double. The
+    /// reader's JSON parser is not correctly rounded: Blender writes a float32's double in Python's shortest form
+    /// (0.4829860329627991), the writer here in 17 digits (0.48298603296279907) - one double, parsed an ulp apart
+    /// (the Cobra, 2026-10-08; Python reads both alike). A value left in double differs at 1e-8 and is still caught.</summary>
+    static bool SameDouble(double a, double b) => a == b || Math.Abs(a - b) <= 4.5e-16 * Math.Max(Math.Abs(a), Math.Abs(b));
+    static bool SameDoubles(double[] a, double[] b) { if (a.Length != b.Length) return false; for (int i = 0; i < a.Length; i++) if (!SameDouble(a[i], b[i])) return false; return true; }
+
+    /// <summary>Per material of a GLB: does its JSON have a pbrMetallicRoughness object.</summary>
+    static bool[] PbrObjects(string glb)
+    {
+        var bytes = File.ReadAllBytes(glb);
+        int n = BitConverter.ToInt32(bytes, 12);
+        var root = Newtonsoft.Json.Linq.JObject.Parse(Encoding.UTF8.GetString(bytes, 20, n));
+        return (root["materials"] as Newtonsoft.Json.Linq.JArray ?? new Newtonsoft.Json.Linq.JArray()).Select(x => x["pbrMetallicRoughness"] != null).ToArray();
+    }
+
+    /// <summary>The assembled model against Blender's file, field by field, for what the converter does not show: the
+    /// scene's roots (it walks the node list), and - so that a difference is named here and not as an OBJ line - every
+    /// node's name, children, mesh, skin and transform as the JSON doubles, every skin's joints and inverse bind
+    /// matrices.</summary>
+    static string Assembled(HafModel mine, HafModel theirs)
+    {
+        if (mine.Scenes.Count != theirs.Scenes.Count || mine.Scene != theirs.Scene) return $"{mine.Scenes.Count} scenes (default {mine.Scene}) here, {theirs.Scenes.Count} ({theirs.Scene}) in Blender's";
+        for (int i = 0; i < mine.Scenes.Count; i++) if (!mine.Scenes[i].Nodes.SequenceEqual(theirs.Scenes[i].Nodes)) return $"scene {i} roots [{string.Join(",", mine.Scenes[i].Nodes)}] here, [{string.Join(",", theirs.Scenes[i].Nodes)}] in Blender's";
+        if (mine.Nodes.Count != theirs.Nodes.Count) return $"{mine.Nodes.Count} nodes here, {theirs.Nodes.Count} in Blender's";
+        for (int i = 0; i < mine.Nodes.Count; i++)
+        {
+            HafNode a = mine.Nodes[i], b = theirs.Nodes[i];
+            if (a.Name != b.Name || !a.Children.SequenceEqual(b.Children) || a.Mesh != b.Mesh || a.Skin != b.Skin || b.HasMatrix) return $"node {i} '{a.Name}' (children {a.Children.Count}, mesh {a.Mesh}, skin {a.Skin}) here, '{b.Name}' (children {b.Children.Count}, mesh {b.Mesh}, skin {b.Skin}) in Blender's";
+            if (!SameDoubles(a.Translation, b.Translation) || !SameDoubles(a.Rotation, b.Rotation) || !SameDoubles(a.Scale, b.Scale)) return $"node {i} '{a.Name}' transform [{string.Join(",", a.Translation.Concat(a.Rotation).Concat(a.Scale).Select(x => x.ToString("R")))}] here vs [{string.Join(",", b.Translation.Concat(b.Rotation).Concat(b.Scale).Select(x => x.ToString("R")))}] in Blender's";
+        }
+        if (mine.Skins.Count != theirs.Skins.Count) return $"{mine.Skins.Count} skins here, {theirs.Skins.Count} in Blender's";
+        for (int i = 0; i < mine.Skins.Count; i++)
+        {
+            HafSkin a = mine.Skins[i], b = theirs.Skins[i];
+            if (!a.Joints.SequenceEqual(b.Joints)) return $"skin {i} joints differ from Blender's";
+            if (b.InverseBindMatrices == null || !a.InverseBindMatrices.SequenceEqual(b.InverseBindMatrices)) return $"skin {i} inverse bind matrices differ from Blender's";
+        }
+        if (mine.Meshes.Count != theirs.Meshes.Count) return $"{mine.Meshes.Count} meshes here, {theirs.Meshes.Count} in Blender's";
+        return null;
+    }
+
+    /// <summary>The prepared model written, and the converter run on it and on Blender's file - in the faithful mode
+    /// (grid 0: every vertex, an .mtl and an albedo per material) and at the Factory's default grid - with the two output
+    /// folders compared file by file, byte for byte. Both inputs carry the same file name: the OBJ's first line has it.</summary>
+    static string Written(string myGlb, string blenderGlb, string converter, string work, List<string> hits, bool skinned)
+    {
+        string inA = Path.GetDirectoryName(myGlb), inB = Path.Combine(work, "in_bl");
+        Directory.CreateDirectory(inB);
+        File.Copy(blenderGlb, Path.Combine(inB, "model.glb"), true);
+        foreach (int grid in new[] { 0, 140 })
+        {
+            string outA = Path.Combine(work, "out_cs"), outB = Path.Combine(work, "out_bl");
+            foreach (var d in new[] { outA, outB }) { if (Directory.Exists(d)) Directory.Delete(d, true); Directory.CreateDirectory(d); }
+            string ea = Convert(converter, Path.Combine(inA, "model.glb"), outA, grid), eb = Convert(converter, Path.Combine(inB, "model.glb"), outB, grid);
+            if (eb != null) return $"the converter fails on Blender's own file (grid {grid}): {eb}";
+            if (ea != null) return $"the converter fails on the written file (grid {grid}): {ea}";
+            var fa = Directory.GetFiles(outA).Select(Path.GetFileName).OrderBy(x => x, StringComparer.Ordinal).ToList();
+            var fb = Directory.GetFiles(outB).Select(Path.GetFileName).OrderBy(x => x, StringComparer.Ordinal).ToList();
+            if (!fa.SequenceEqual(fb)) return $"grid {grid}: the converter wrote [{string.Join(",", fa)}] from this file, [{string.Join(",", fb)}] from Blender's";
+            foreach (var f in fa)
+            {
+                byte[] a = File.ReadAllBytes(Path.Combine(outA, f)), b = File.ReadAllBytes(Path.Combine(outB, f));
+                if (a.SequenceEqual(b)) continue;
+                if (f.EndsWith(".obj") || f.EndsWith(".mtl"))
+                {
+                    string[] la = File.ReadAllLines(Path.Combine(outA, f)), lb = File.ReadAllLines(Path.Combine(outB, f));
+                    int at = 0; while (at < la.Length && at < lb.Length && la[at] == lb[at]) at++;
+                    int diff = 0; for (int i = 0; i < Math.Min(la.Length, lb.Length); i++) if (la[i] != lb[i]) diff++;
+                    return $"grid {grid}: {f} differs in {diff} of {la.Length} lines ({lb.Length} from Blender's), first at line {at + 1}: '{(at < la.Length ? la[at] : "<end>")}' here vs '{(at < lb.Length ? lb[at] : "<end>")}'";
+                }
+                return $"grid {grid}: {f} differs ({a.Length} bytes here, {b.Length} from Blender's)";
+            }
+            if (grid == 0)
+            {
+                if (skinned) hits.Add("written: a skinned file");
+                if (fa.Any(f => f.EndsWith(".mtl"))) hits.Add("written: several materials (an .mtl and an albedo each)");
+                if (fa.Any(f => f.EndsWith(".png") || f.EndsWith(".jpg") || f.EndsWith(".webp"))) hits.Add("written: a base colour image");
+                if (fa.Any(f => f.EndsWith(".tga"))) hits.Add("written: a flat material (a swatch from its factor)");
+            }
+        }
+        return null;
+    }
+
+    static string Convert(string converter, string glb, string outDir, int grid)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo(converter, $"\"{glb}\" \"{outDir}\" model {grid}") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        using (var p = System.Diagnostics.Process.Start(psi))
+        {
+            var err = p.StandardError.ReadToEndAsync(); p.StandardOutput.ReadToEnd(); p.WaitForExit();
+            return p.ExitCode == 0 ? null : "exit " + p.ExitCode + " " + err.Result.Trim().Split('\n').LastOrDefault();
         }
     }
 

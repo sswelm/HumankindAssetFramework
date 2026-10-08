@@ -317,6 +317,33 @@ length shows only in a child's matrices, and 200 km out the 2e-6 elongation is i
 compares every node's children ARRAY in order and requires a skin without a `skeleton`; its COVER rows count after the
 comparison, not before. `FULL=1` after it: 186 runs on 93 files, 176 node lists, 50,960 object and 1,026 joint transforms, 554 skins' inverse bind matrices and 130 material lists equal; no real file is left to Blender by the new rules, and real files do take the -Y and length-1 branches; the canoe remains the one file named.
 
+**The prepared file, written** (step 5 d, part 4c, 2026-10-08): `editor/BlenderPrep.cs` assembles the ports into the file
+`prep_model.py` writes and `GlbWriter` writes it. The prep drill calls that production code for everything it compares
+(`BlenderPrep.Prepare(diagnose: true)`; it no longer has an orchestration of its own) and gained a WRITTEN stage: the
+file is written, read back, and held to Blender's three ways - the assembled model field by field (scene roots; every
+node's name, children, mesh, skin and transform as the JSON doubles; every skin's joints and inverse bind matrices), each
+material (the base colour factor as doubles, the base colour image's bytes, metallic and roughness, and whether its JSON
+has a `pbrMetallicRoughness` object at all - the converter makes a white swatch of a flat material with one and a grey
+one without), and the Factory's converter itself: `glbconv` is run on this file and on Blender's, at grid 0 (every
+vertex, an `.mtl` and an albedo per material) and at the default grid, and its two output folders must be equal file by
+file, byte for byte. A file the prep cannot make as Blender does is NAMED and left to Blender (`Result.Fallback`); the
+drill prints why per run, counts it, and requires the runs to add up (failed + known prep failures + written + left).
+What came back out of Blender, measured before it was written down: images are passed through byte for byte EXCEPT a
+JPEG whose alpha is read (written again as PNG - the Espana; left to Blender); `baseColorFactor` is the factor in
+float32 with an alpha that depends on the mode, the cutoff and whether the material has a texture or vertex colours
+(`export_layout`, `export_flat_alpha`); a specular-glossiness material comes back metallic-roughness with the diffuse
+colour and texture, metallic 0 and roughness 1 - glossiness (22 materials of the Teutonic); an unlit one with metallic 0
+and roughness 0.9; an alpha mode the schema does not know makes the converter refuse the file. An independent reader
+went through it against the exporter's source before the PR and found the unlit rule, `prep_model.py`'s purge of every
+unskinned object named Icosphere, and the shapes now left to Blender by name (material variants, a factor outside 0..1,
+an image that is not a PNG or a JPEG or whose file name is not its format's). 25 planted defects in the assembly each
+fail the drill; three did not at first and changed it (the scene's roots, which the converter does not walk; a factor
+left in double, which a float compare hid; a MASK at a cutoff of 0, whose fixture had an alpha of 1). `FULL=1` (192 runs on 96 files; the two files the parser's ulp had failed re-judged after the fix): 114 runs written and read by the converter as it reads Blender's, 74 left to Blender by name (58 animated, 6 under a bone, 4 a JPEG whose alpha is read, the rest fixtures of the named shapes), 2 known prep failures, and the canoe's 2 (the probe's world matrix, in the backlog); 484 base colour images byte for byte.
+`BlenderPrepTests` hold the assembly's shape, every reason to fall back and the material rules. Not Blender's, and not
+read by the converter: mesh names, COLOR_n as float RGBA, material properties beyond the base colour, metallic and
+roughness (copied from the source; the alpha mode made one the schema knows), unused textures and images (kept).
+Nothing calls `BlenderPrep` yet: strip and the wiring behind `PrepViaBlender` are part 4d.
+
 **The Clip Range picker's in-process rig** (step 4, 2026-10-03): `HafUnityFrameTests` hold the preview frame's arithmetic
 without Unity — the X mirror's conjugation of rotations, matrices and matrix nodes; Unity's skinning formula fed the rig's
 matrices (the joints' world matrices, the inverse bind matrices, the vertex, all mirrored) against the reader's posed vertex;
