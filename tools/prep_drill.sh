@@ -74,7 +74,7 @@ mkdir -p "$TMPD/conv"
 LC_ALL=C sed 's/\xEF\xBB\xBF//g' "$TMPD/csharp_raw.txt" | tr -d '\r' > "$TMPD/csharp.txt"
 RUNTIME=$(grep -E "^RUNTIME" "$TMPD/csharp.txt" | head -1 | cut -f2-)
 echo "$RUNTIME" | grep -q "64-bit.*trig exact" || { echo "FAIL — prep drill: the C# side did not run as a 64-bit process with the C runtime's cosf ($RUNTIME); the prep was NOT drilled"; exit 2; }
-grep -E "^FAIL|^NOTE|^COVER" "$TMPD/csharp.txt"
+grep -E "^FAIL|^LEFT|^NOTE|^COVER" "$TMPD/csharp.txt"
 TOTAL=$(grep -E "^TOTAL" "$TMPD/csharp.txt" | tail -1)
 echo "$TOTAL"
 [ -n "$TOTAL" ] || { tail -5 "$TMPD/csharp.txt"; echo "FAIL — prep drill: the C# side gave no total (rc=$rc)"; exit 1; }
