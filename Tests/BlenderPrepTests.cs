@@ -122,12 +122,7 @@ public class BlenderPrepTests
         // material variants: the importer keeps a slot per primitive
         var variants = Plain(); variants.ExtensionsUsed.Add("KHR_materials_variants");
         Assert.StartsWith("variants:", Why(variants));
-        // a factor Blender clamps
         HafModel With(HafMaterial mat) { var w = Model(new[] { Grid("g", 0) }, new List<HafNode> { Node("A", 0) }); w.Materials.Add(mat); return w; }
-        Assert.StartsWith("factor-range:", Why(With(new HafMaterial { Name = "hot", BaseColorFactor = new[] { 1.5, 1, 1, 1 } })));
-        Assert.StartsWith("factor-range:", Why(With(new HafMaterial { Name = "neg", BaseColorFactor = new[] { 1, 1, 1, -0.1 } })));
-        Assert.StartsWith("factor-range:", Why(With(new HafMaterial { Name = "metal", MetallicFactor = 2f })));
-        Assert.StartsWith("factor-range:", Why(With(new HafMaterial { Name = "rough", RoughnessFactor = -1f })));
         // a base colour image the exporter does not pass through, or the writer cannot embed
         HafModel Textured(byte[] bytes, string uri)
         {
@@ -200,6 +195,32 @@ public class BlenderPrepTests
         Assert.Null(r.Fallback);
         Assert.Equal(written, r.Model.Materials[0].AlphaMode);
         Assert.Equal(alpha, r.Model.Materials[0].BaseColorFactor[3]);
+    }
+
+    [Fact]
+    public void A_colour_outside_0_to_1_is_clamped_as_the_exporter_clamps_it_and_nothing_else_is()
+    {
+        // measured (export_flat_alpha): the exporter clamps the base colour; an unlit one only below 0
+        HafMaterial One(HafMaterial mat)
+        {
+            var w = Model(new[] { Grid("g", 0) }, new List<HafNode> { Node("A", 0) }); w.Materials.Add(mat);
+            var r = BlenderPrep.Prepare(w, 1000); Assert.Null(r.Fallback); return r.Model.Materials[0];
+        }
+        Assert.Equal(new[] { 1.0, 1.0, 0.0, 1.0 }, One(new HafMaterial { Name = "hot", BaseColorFactor = new[] { 1.5, 1.0, -0.5, 1.0 } }).BaseColorFactor);
+        Assert.Equal(new[] { 0.5, 1.0, 0.0, 1.0 }, One(new HafMaterial { Name = "unlit", BaseColorFactor = new[] { 0.5, 1.0, -0.5, 1.0 }, ExtensionsJson = "{\"KHR_materials_unlit\":{}}" }).BaseColorFactor);
+        // what Blender does NOT clamp comes back out of range, and the converter refuses such a file (Blender's own too):
+        // named and left
+        string Why(HafMaterial mat)
+        {
+            var w = Model(new[] { Grid("g", 0) }, new List<HafNode> { Node("A", 0) }); w.Materials.Add(mat);
+            var r = BlenderPrep.Prepare(w, 1000); Assert.Null(r.Model); return r.Fallback;
+        }
+        Assert.StartsWith("factor-range:", Why(new HafMaterial { Name = "unlit", BaseColorFactor = new[] { 1.5, 1.0, 0.5, 1.0 }, ExtensionsJson = "{\"KHR_materials_unlit\":{}}" }));
+        Assert.StartsWith("factor-range:", Why(new HafMaterial { Name = "alpha", AlphaMode = "BLEND", BaseColorFactor = new[] { 1.0, 1.0, 1.0, 1.5 } }));
+        Assert.StartsWith("factor-range:", Why(new HafMaterial { Name = "metal", MetallicFactor = 2f }));
+        Assert.StartsWith("factor-range:", Why(new HafMaterial { Name = "rough", RoughnessFactor = -1f }));
+        // an OPAQUE material's alpha of 1.5 is written 1, and a plain MASK's 1 or 0: in range, written
+        Assert.Equal(1.0, One(new HafMaterial { Name = "opaque", BaseColorFactor = new[] { 1.0, 1.0, 1.0, 1.5 } }).BaseColorFactor[3]);
     }
 
     [Fact]

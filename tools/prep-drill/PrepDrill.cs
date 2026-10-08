@@ -21,7 +21,7 @@ static class PrepDrill
         // the Factory's converter and a folder to run it in (arguments 2 and 3); without them the written stage is skipped, said
         string converter = args.Length > 2 && File.Exists(args[1]) ? args[1] : null, workDir = args.Length > 2 ? args[2] : null;
         Console.WriteLine(converter != null ? "CONVERTER\t" + converter : "CONVERTER\tnone: the written files are NOT compared");
-        var declinedWhy = new Dictionary<string, int>(); var leftToBlender = new SortedDictionary<string, int>();
+        var declinedWhy = new Dictionary<string, int>(); var leftToBlender = new SortedDictionary<string, int>(); var leftFiles = new HashSet<string>();
         var cover = new SortedDictionary<string, long>();
         foreach (var k in CoverKeys) cover[k] = 0;
         HafModel source = null; string sourcePath = null; BlenderNames.Result names = null; float[][] bworld = null;
@@ -152,10 +152,25 @@ static class PrepDrill
                     }
                 }
                 else if (prep.Model == null && prep.Fallback == null) problems.Add("the prep gave neither a file nor a reason");
-                else if (prep.Model == null && problems.Count == 0) { outcome = "LEFT TO BLENDER: " + prep.Fallback; leftRuns++; }
+                else if (prep.Model == null && problems.Count == 0)
+                {
+                    // a reason that claims something about Blender's file is held to it: the converter must refuse that file
+                    if (prep.Reasons.Any(x => x.StartsWith("factor-range:")) && converter != null)
+                    {
+                        string refused = Convert(converter, outGlb, Path.Combine(workDir, "out_range"), 0);
+                        if (refused == null) problems.Add("left to Blender for a factor outside 0..1, yet the converter reads Blender's file");
+                        else cover["left to Blender: factor-range (the converter refuses Blender's file too)"]++;
+                    }
+                    if (problems.Count == 0) { outcome = "LEFT TO BLENDER: " + prep.Fallback; leftRuns++; }
+                }
                 else if (problems.Count == 0) problems.Add("a prepared file that was not judged (no converter)");
                 if (problems.Count > 0) { fails++; Console.WriteLine($"FAIL {shortKey} {tag}: " + string.Join("; ", problems.Take(4)) + (problems.Count > 4 ? $"; ... {problems.Count - 4} more" : "")); }
-                else Console.WriteLine($"PASS {shortKey} {tag}: {okObjects} objects, {okPrims} primitives equal (ratio {ratio:R}); {outcome}");
+                else
+                {
+                    Console.WriteLine($"PASS {shortKey} {tag}: {okObjects} objects, {okPrims} primitives equal (ratio {ratio:R}); {outcome}");
+                    // a file left to Blender, by name and reason, once per file (the script prints these: a count alone does not say WHICH)
+                    if (prep.Model == null && leftFiles.Add(key)) Console.WriteLine($"LEFT {shortKey}: {prep.Fallback}");
+                }
             }
             catch (Exception e) { fails++; Console.WriteLine($"FAIL {shortKey} {tag}: {e.GetType().Name}: {e.Message}"); }
         }
@@ -171,7 +186,7 @@ static class PrepDrill
 
     static readonly string[] CoverKeys =
     {
-        "a node's mesh index compared", "a written file the converter reads as it reads Blender's", "a material's base colour compared (factor, image)", "material: a MASK alpha written as 0", "material: a pbrMetallicRoughness object beside a default base colour", "material: no pbrMetallicRoughness object on either side", "material: a base colour image under a colour factor", "material: unlit", "material: specular-glossiness", "left to Blender: jpeg-alpha", "material: a blended alpha kept", "material: a base colour image, byte for byte", "written: a skinned file", "written: several materials (an .mtl and an albedo each)", "written: a base colour image", "written: a flat material (a swatch from its factor)",
+        "a node's mesh index compared", "a written file the converter reads as it reads Blender's", "a material's base colour compared (factor, image)", "material: a MASK alpha written as 0", "material: a pbrMetallicRoughness object beside a default base colour", "material: no pbrMetallicRoughness object on either side", "material: a base colour image under a colour factor", "material: unlit", "material: specular-glossiness", "left to Blender: jpeg-alpha", "left to Blender: factor-range (the converter refuses Blender's file too)", "material: a blended alpha kept", "material: a base colour image, byte for byte", "written: a skinned file", "written: several materials (an .mtl and an albedo each)", "written: a base colour image", "written: a flat material (a swatch from its factor)",
 "left to Blender: an animated file", "left to Blender: an object under a bone", "a skin's joint indices compared", "two nodes of one armature sharing a skin", "two armatures, a skin each", "a primitive's material index compared", "a faceless skinned object compared", "left to Blender: an object of the file is declined", "left to Blender: material-uv", "left to Blender: camera-children", "left to Blender: lights", "a camera left out", "an object hung from a node that bears its parent bone's name",
         "bones: two or more root bones", "bones: a bone child nearer than 0.004 (no length taken from it)", "bones: a bone of length 1 (no bone child, no parent bone, at its parent's origin)", "bones: an edit bone of no length (its tail moved along Z)", "bones: an edit bone shorter than 1e-6 (its tail moved along the bone)",
         "bones: a skeleton that is not a joint, on a skin with inverse bind matrices", "bones: a bone almost along -Y (the series for 1 + y)", "bones: a bone along -Y (the mirrored matrix)", "a node list compared (name, parent, order)", "a node transform compared", "a joint transform compared", "a skin's inverse bind matrices compared", "a neutral bone compared", "a material list compared (names, order)", "an object under a bone (its transform is the next part's)", "an animated file (its transforms are Blender's posed state, not compared)",

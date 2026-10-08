@@ -932,13 +932,48 @@ def fx_export_flat_alpha(out):
             {"name": "unlit_over_spec_gloss", "pbrMetallicRoughness": {"baseColorFactor": [0.3, 0.6, 0.9, 1.0]},
              "extensions": {"KHR_materials_unlit": {}, "KHR_materials_pbrSpecularGlossiness": {"diffuseFactor": [0.9, 0.1, 0.1, 1.0]}}},
             # an alpha mode of "": OPAQUE to the importer (`alpha_mode or 'OPAQUE'`) - 1 written, not the factor's 0.5
-            {"name": "mode_empty", "alphaMode": "", "pbrMetallicRoughness": {"baseColorFactor": [0.4, 0.4, 0.9, 0.5]}}]
+            {"name": "mode_empty", "alphaMode": "", "pbrMetallicRoughness": {"baseColorFactor": [0.4, 0.4, 0.9, 0.5]}},
+            # the plain branch under the OTHER shaders and modes (self-review of PR #130: each was held by reading alone):
+            # unlit goes through the same base_color with the Mix shader's factor as its alpha socket; specular-glossiness
+            # through it with the diffuse values; a mode the specification does not know is neither OPAQUE nor MASK
+            {"name": "unlit_mask_under", "alphaMode": "MASK", "pbrMetallicRoughness": {"baseColorFactor": [0.9, 0.5, 0.1, 0.3]}, "extensions": {"KHR_materials_unlit": {}}},
+            {"name": "unlit_mask_over", "alphaMode": "MASK", "alphaCutoff": 0.2, "pbrMetallicRoughness": {"baseColorFactor": [0.1, 0.5, 0.9, 0.3]}, "extensions": {"KHR_materials_unlit": {}}},
+            {"name": "unlit_blend", "alphaMode": "BLEND", "pbrMetallicRoughness": {"baseColorFactor": [0.5, 0.9, 0.1, 0.4]}, "extensions": {"KHR_materials_unlit": {}}},
+            {"name": "unlit_opaque_half", "pbrMetallicRoughness": {"baseColorFactor": [0.5, 0.1, 0.9, 0.5]}, "extensions": {"KHR_materials_unlit": {}}},
+            {"name": "odd_mode_flat", "alphaMode": "Blend", "pbrMetallicRoughness": {"baseColorFactor": [0.6, 0.6, 0.1, 0.7]}},
+            {"name": "spec_gloss_mask_under", "alphaMode": "MASK", "extensions": {"KHR_materials_pbrSpecularGlossiness": {"diffuseFactor": [0.7, 0.3, 0.3, 0.2]}}},
+            {"name": "spec_gloss_blend", "alphaMode": "BLEND", "extensions": {"KHR_materials_pbrSpecularGlossiness": {"diffuseFactor": [0.3, 0.7, 0.3, 0.6], "glossinessFactor": 1.0}}},
+            # a COLOUR outside 0..1 is clamped by the exporter: "hot" comes back white, with no pbrMetallicRoughness object
+            # at all (the grey swatch), "negative" with a 0; an unlit colour loses only what is under 0 (measured)
+            {"name": "hot", "pbrMetallicRoughness": {"baseColorFactor": [1.5, 1.5, 1.5, 1.0]}},
+            {"name": "negative", "pbrMetallicRoughness": {"baseColorFactor": [-0.5, 0.5, 0.5, 1.0]}},
+            {"name": "unlit_negative", "pbrMetallicRoughness": {"baseColorFactor": [0.9, 0.5, -0.5, 1.0]}, "extensions": {"KHR_materials_unlit": {}}},
+            {"name": "spec_gloss_hot", "extensions": {"KHR_materials_pbrSpecularGlossiness": {"diffuseFactor": [2.0, 0.5, 0.5, 1.0]}}}]
     white = b.accessor([(1.0, 1.0, 1.0, 1.0)] * len(pos), "f", "VEC4", minmax=False)
     root = base("export_flat_alpha", materials=mats, extensionsUsed=["KHR_materials_pbrSpecularGlossiness", "KHR_materials_unlit"],
                 meshes=[{"name": "part%d" % k, "primitives": [{"attributes": dict({"POSITION": p, "NORMAL": n}, **({"COLOR_0": white} if mats[k]["name"] == "mask_zero_coloured" else {})), "indices": i, "material": k}]} for k in range(len(mats))],
                 nodes=[{"name": "Part%d" % k, "mesh": k, "translation": [1.5 * k, 0.0, 0.0]} for k in range(len(mats))],
                 scenes=[{"nodes": list(range(len(mats)))}], scene=0)
     write_glb(os.path.join(out, "export_flat_alpha.glb"), root, b)
+
+
+def fx_export_factor_range(out):
+    """Factors Blender does NOT clamp: metallic 2, roughness -1, an alpha of 1.5 and an unlit colour of 1.5 come back out
+    of it as they went in (measured 2026-10-08, material by material, before this was a fixture) - and the Factory's
+    converter refuses a file that has one, Blender's own included. BlenderPrep names such a file and leaves it to
+    Blender; the prep drill runs the converter on Blender's output and requires it to fail, so the reason stays true."""
+    b = Buf()
+    pos, nrm, uv0, _, _, idx = bent_grid(2, 2, 0.0, 0.0)
+    p = b.accessor(pos, "f", "VEC3"); n = b.accessor(nrm, "f", "VEC3", minmax=False); i = b.accessor(idx, "H", "SCALAR")
+    mats = [{"name": "metal_two", "pbrMetallicRoughness": {"metallicFactor": 2.0}},
+            {"name": "rough_negative", "pbrMetallicRoughness": {"roughnessFactor": -1.0}},
+            {"name": "alpha_over", "alphaMode": "BLEND", "pbrMetallicRoughness": {"baseColorFactor": [1.0, 1.0, 1.0, 1.5]}},
+            {"name": "unlit_hot", "pbrMetallicRoughness": {"baseColorFactor": [1.5, 0.5, 0.5, 1.0]}, "extensions": {"KHR_materials_unlit": {}}}]
+    root = base("export_factor_range", materials=mats, extensionsUsed=["KHR_materials_unlit"],
+                meshes=[{"name": "part%d" % k, "primitives": [{"attributes": {"POSITION": p, "NORMAL": n}, "indices": i, "material": k}]} for k in range(len(mats))],
+                nodes=[{"name": "Part%d" % k, "mesh": k, "translation": [1.5 * k, 0.0, 0.0]} for k in range(len(mats))],
+                scenes=[{"nodes": list(range(len(mats)))}], scene=0)
+    write_glb(os.path.join(out, "export_factor_range.glb"), root, b)
 
 
 def fx_export_jpeg_alpha(out):
@@ -962,7 +997,7 @@ FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external
 def main(out, prep=False):
     os.makedirs(out, exist_ok=True)
     # Blender drops the line mesh: its vertex bounds are only relevant to the prep export drill.
-    for fx in FIXTURES + ([fx_export_skin_lines, fx_export_bones, fx_export_review, fx_export_skin_twins, fx_export_flat_alpha, fx_export_jpeg_alpha] if prep else []):
+    for fx in FIXTURES + ([fx_export_skin_lines, fx_export_bones, fx_export_review, fx_export_skin_twins, fx_export_flat_alpha, fx_export_jpeg_alpha, fx_export_factor_range] if prep else []):
         fx(out)
     for name in sorted(os.listdir(out)):
         if name.endswith((".glb", ".gltf")):

@@ -335,7 +335,8 @@ float32 with an alpha that depends on the mode, the cutoff and whether the mater
 colour and texture, metallic 0 and roughness 1 - glossiness (22 materials of the Teutonic); an unlit one with metallic 0
 and roughness 0.9; an alpha mode the schema does not know makes the converter refuse the file. An independent reader
 went through it against the exporter's source before the PR and found the unlit rule, `prep_model.py`'s purge of every
-unskinned object named Icosphere, and the shapes now left to Blender by name (material variants, a factor outside 0..1,
+unskinned object named Icosphere, and the shapes now left to Blender by name (material variants, a factor outside 0..1 -
+see the self-review below -,
 an image that is not a PNG or a JPEG or whose file name is not its format's). 25 planted defects in the assembly each
 fail the drill; three did not at first and changed it (the scene's roots, which the converter does not walk; a factor
 left in double, which a float compare hid; a MASK at a cutoff of 0, whose fixture had an alpha of 1). `FULL=1` (192 runs on 96 files; the two files the parser's ulp had failed re-judged after the fix): 114 runs written and read by the converter as it reads Blender's, 74 left to Blender by name (58 animated, 6 under a bone, 4 a JPEG whose alpha is read, the rest fixtures of the named shapes), 2 known prep failures, and the canoe's 2 (the probe's world matrix, in the backlog); 484 base colour images byte for byte.
@@ -343,6 +344,18 @@ left in double, which a float compare hid; a MASK at a cutoff of 0, whose fixtur
 read by the converter: mesh names, COLOR_n as float RGBA, material properties beyond the base colour, metallic and
 roughness (copied from the source; the alpha mode made one the schema knows), unused textures and images (kept).
 Nothing calls `BlenderPrep` yet: strip and the wiring behind `PrepViaBlender` are part 4d.
+A self-review after the PR (2026-10-08, the follow-up to PR #130) ran what the first version had only read. Wrong, and
+corrected: Blender clamps a base colour's RGB and NOTHING else - metallic 2, roughness -1 and an alpha of 1.5 come back as
+they went in, an unlit colour loses only what is under 0 - so the "Blender clamps it" decline was false. What is true,
+and found by the drill on Blender's own output: the converter REFUSES a file with such a factor, so that source does not
+bake today either; the prep names it and leaves it, and the drill runs the converter on Blender's file for those runs
+and requires it to fail (`export_factor_range`). The reason given for a file of several scenes was false too
+(`prep_model.py` fails on some, not on all): reworded. The Icosphere purge is measured now (the part goes, its child
+becomes a root with its local transform) and reaches an object without vertices. Seven more plain materials hold the
+alpha rule where only vertex-colour variants had (unlit under MASK and BLEND, a mode the specification does not know,
+specular-glossiness under MASK and BLEND). And the drill's log now NAMES every file left to Blender with its reason
+(`LEFT <file>: <why>`): the script had been printing FAIL, NOTE and COVER lines only, so the per-run outcome added
+for the review never reached anyone. One clean `FULL=1` run on that state (194 runs on 97 files; the figures above were a run plus two files judged again): 114 written and read by the converter as it reads Blender's, 76 left to Blender by name, 2 known prep failures, the canoe's 2. Of the real files, 23 are left: 22 animated ones and the Espana (a JPEG whose alpha is read).
 
 **The Clip Range picker's in-process rig** (step 4, 2026-10-03): `HafUnityFrameTests` hold the preview frame's arithmetic
 without Unity — the X mirror's conjugation of rotations, matrices and matrix nodes; Unity's skinning formula fed the rig's

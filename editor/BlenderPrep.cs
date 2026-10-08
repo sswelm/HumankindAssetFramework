@@ -13,14 +13,15 @@
 // made one the schema knows), textures and
 // images the written materials do not use (kept; Blender drops them), `extras`.
 // A file this cannot prep as Blender does is NAMED (Result.Fallback) and left to Blender - never guessed:
-//   no reduce asked (instanced meshes stay shared then: not modelled), several scenes (prep_model.py itself fails),
+//   no reduce asked (instanced meshes stay shared then: not modelled), several scenes (prep_model.py fails on some),
 //   animations (Blender exports its posed import state), KHR_materials_variants (the importer keeps a slot per
 //   primitive then), an unskinned mesh object named Icosphere... (prep_model.py removes it as the importer's bone
 //   shape), an object the reduce declines (BlenderReduce.FallbackReason), a shape the tree names
 //   (BlenderExportTree.Result.Problems), an object under a bone (pose evaluation), and what MaterialProblems names:
-//   a factor outside 0..1 (Blender clamps), a base colour image that is not a PNG or a JPEG, one whose file name's
-//   extension is not its format's, a JPEG whose alpha is read (each written again by Blender's own encoder), and any
-//   image the writer cannot embed.
+//   a material that comes out with a factor outside 0..1 (Blender clamps the colour only, and the converter refuses the
+//   file - Blender's own too), a base colour image that is not a PNG or a JPEG, one whose file name's extension is not
+//   its format's, a JPEG whose alpha is read (each written again by Blender's own encoder), and any image the writer
+//   cannot embed.
 // NOT here yet: prep_model.py's STRIP (part 4d) - a caller that strips must use Blender. Nothing calls this yet.
 using System;
 using System.Collections.Generic;
@@ -62,7 +63,9 @@ public static class BlenderPrep
         names = res.Names;
         void Decline(string why) { res.Reasons.Add(why); if (res.Fallback == null) res.Fallback = why; }
         if (targetTris <= 0) Decline("no reduce asked: instanced meshes stay shared in Blender then, which is not modelled");
-        if (m.Scenes.Count > 1) Decline("a file of several scenes: prep_model.py itself fails on it");
+        // prep_model.py fails on such a file when an object lies outside the scene Blender makes active ("not in View
+        // Layer": the scenes fixture), and works when none does (no_default_scene); which it is, is not modelled
+        if (m.Scenes.Count > 1) Decline("a file of several scenes: which one Blender makes active, and whether prep_model.py then fails on an object outside it, is not modelled");
         if (m.Animations.Count > 0) Decline("an animated file: Blender exports its posed import state");
         // imp/mesh.py: with variant mappings the importer never merges a mesh's material slots, and it makes materials for
         // the variants alone (read, not measured: named and left)
@@ -73,14 +76,15 @@ public static class BlenderPrep
         var meshObjects = new List<(int node, string name)>();
         foreach (var (node, name) in names.MeshObjectsInOrder)
         {
-            var layout = BlenderMesh.FromGltf(m, m.Nodes[node].Mesh);
-            if (layout.VertexCount == 0) continue;
-            meshObjects.Add((node, name)); res.SourceTriangles += layout.Faces.Length / 3;
             // prep_model.py purges "the importer's bone shape": every mesh object whose name starts with Icosphere and has
-            // no vertex group - a real part of that name too, with its triangles out of the ratio and its children unparented
+            // no vertex group - a real part of that name too, with its triangles out of the ratio and its children
+            // unparented; an object without a vertex is a mesh object all the same
             int sk = m.Nodes[node].Skin;
             bool groups = sk >= 0 && sk < m.Skins.Count && m.Meshes[m.Nodes[node].Mesh].Primitives.Exists(p => p.Skinned);
             if (name.StartsWith("Icosphere", StringComparison.Ordinal) && !groups) Decline("icosphere: the object '" + name + "' is removed by prep_model.py (it takes every unskinned Icosphere... for the importer's bone shape)");
+            var layout = BlenderMesh.FromGltf(m, m.Nodes[node].Mesh);
+            if (layout.VertexCount == 0) continue;
+            meshObjects.Add((node, name)); res.SourceTriangles += layout.Faces.Length / 3;
         }
         if (meshObjects.Count == 0) { Decline("no mesh to reduce"); return res; }
         res.Ratio = BlenderReduce.Ratio(Math.Max(1, targetTris), res.SourceTriangles);
@@ -137,10 +141,8 @@ public static class BlenderPrep
     static bool Png(byte[] b) => b != null && b.Length > 3 && b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47;
     static bool Jpeg(byte[] b) => b != null && b.Length > 2 && b[0] == 0xFF && b[1] == 0xD8;
 
-    /// <summary>What the written materials and their images cannot be made to equal, named per material:
-    /// - a factor outside 0..1: the exporter clamps the base colour (pbr_metallic_roughness.py) and the Principled
-    ///   sockets clamp alpha, metallic and roughness - which can also decide whether the material has a
-    ///   pbrMetallicRoughness object at all (read, not measured: named and left);
+    /// <summary>What the written materials and their images cannot be, or must not be, made to equal - named per material:
+    /// - a factor outside 0..1 in what Blender writes (see the line below);
     /// - a base colour image the exporter does not pass through. It writes the ORIGINAL bytes only of an image it can
     ///   keep in its format: when the material's alpha is read from the texture (the importer wires it for every mode but
     ///   OPAQUE and a MASK at a cutoff of 0 or over 1) the image is written as PNG (material/image.py __gather_mime_type:
@@ -152,15 +154,17 @@ public static class BlenderPrep
     /// it is named all the same (an over-decline, on the safe side).</summary>
     static IEnumerable<string> MaterialProblems(HafModel m, Result res)
     {
-        var sourceOf = new Dictionary<string, int>();
-        foreach (var kv in res.Names.MaterialOf) if (!sourceOf.ContainsKey(kv.Value)) sourceOf[kv.Value] = kv.Key.material;
+        var sourceOf = new Dictionary<string, (int material, bool vertexColor)>();
+        foreach (var kv in res.Names.MaterialOf) if (!sourceOf.ContainsKey(kv.Value)) sourceOf[kv.Value] = (kv.Key.material, kv.Key.vertexColor);
         foreach (var name in res.Tree.Materials)
         {
-            int src = sourceOf[name];
+            var (src, vertexColor) = sourceOf[name];
             if (src < 0) continue;
-            var mat = Copy(m.Materials[src]); SpecularGlossiness(mat, null);
+            var mat = WrittenMaterial(m.Materials[src], vertexColor, null);
+            // Blender writes these as they are (only the colour is clamped), and the converter's reader refuses a file
+            // with one - measured on Blender's own output (2026-10-08): such a source does not bake today either
             if (mat.BaseColorFactor.Any(v => !(v >= 0 && v <= 1)) || !(mat.MetallicFactor >= 0f && mat.MetallicFactor <= 1f) || !(mat.RoughnessFactor >= 0f && mat.RoughnessFactor <= 1f))
-                yield return $"factor-range: material '{name}' has a factor outside 0..1, which Blender clamps";
+                yield return $"factor-range: material '{name}' comes out of Blender with a factor outside 0..1 (it clamps the colour only), and the converter refuses such a file";
             if (mat.BaseColorTexture < 0) continue;
             int image = mat.BaseColorTexture < m.Textures.Count ? m.Textures[mat.BaseColorTexture].Source : -1;
             var im = image >= 0 && image < m.Images.Count ? m.Images[image] : null;
@@ -202,21 +206,7 @@ public static class BlenderPrep
         {
             var (src, vertexColor) = sourceOf[name];
             HafMaterial mat;
-            if (src >= 0)
-            {
-                mat = Copy(m.Materials[src]);
-                SpecularGlossiness(mat, res.Notes);
-                // exp/material/materials.py: an unlit material is written with metallic 0 and roughness 0.9 whatever the
-                // source says - so it always has a pbrMetallicRoughness object (the converter's white swatch, not its grey)
-                if (Unlit(mat)) { mat.MetallicFactor = 0f; mat.RoughnessFactor = 0.9f; mat.MetallicRoughnessTexture = -1; mat.MetallicRoughnessTexCoord = 0; if (!res.Notes.Contains("unlit")) res.Notes.Add("unlit"); }
-                mat.BaseColorFactor = WrittenBaseColour(mat, vertexColor);
-                // an alpha mode the schema does not know makes the converter's reader refuse the whole file (measured: "").
-                // The importer reads an empty one as OPAQUE and anything but OPAQUE and MASK as a blend; Blender writes
-                // one of the three. WHICH of them it writes is not modelled beyond that (it drops MASK at a cutoff of 0
-                // and BLEND at an alpha of 1, for one) - the converter does not read the mode
-                string mode = Mode(mat);
-                mat.AlphaMode = mode == "OPAQUE" || mode == "MASK" || mode == "BLEND" ? mode : "BLEND";
-            }
+            if (src >= 0) mat = WrittenMaterial(m.Materials[src], vertexColor, res.Notes);
             // the importer's material for a coloured primitive without one, as the exporter writes it (measured: no base
             // colour, metallic 0, roughness 0.5, double sided)
             else mat = new HafMaterial { MetallicFactor = 0f, RoughnessFactor = 0.5f, DoubleSided = true };
@@ -274,6 +264,25 @@ public static class BlenderPrep
         return o;
     }
 
+    /// <summary>A source material as it comes back out of Blender, for what the converter reads of it (the rest is the
+    /// source's own): specular-glossiness and unlit, the base colour factor, an alpha mode the schema knows.</summary>
+    static HafMaterial WrittenMaterial(HafMaterial source, bool vertexColor, List<string> notes)
+    {
+        var mat = Copy(source);
+        SpecularGlossiness(mat, notes);
+        // exp/material/materials.py: an unlit material is written with metallic 0 and roughness 0.9 whatever the
+        // source says - so it always has a pbrMetallicRoughness object (the converter's white swatch, not its grey)
+        if (Unlit(mat)) { mat.MetallicFactor = 0f; mat.RoughnessFactor = 0.9f; mat.MetallicRoughnessTexture = -1; mat.MetallicRoughnessTexCoord = 0; if (notes != null && !notes.Contains("unlit")) notes.Add("unlit"); }
+        mat.BaseColorFactor = WrittenBaseColour(mat, vertexColor, Unlit(mat));
+        // an alpha mode the schema does not know makes the converter's reader refuse the whole file (measured: "").
+        // The importer reads an empty one as OPAQUE and anything but OPAQUE and MASK as a blend; Blender writes
+        // one of the three. WHICH of them it writes is not modelled beyond that (it drops MASK at a cutoff of 0
+        // and BLEND at an alpha of 1, for one) - the converter does not read the mode
+        string mode = Mode(mat);
+        mat.AlphaMode = mode == "OPAQUE" || mode == "MASK" || mode == "BLEND" ? mode : "BLEND";
+        return mat;
+    }
+
     /// <summary>KHR_materials_pbrSpecularGlossiness: the importer takes the extension's diffuse colour and texture as the
     /// base colour (metallic 0, roughness 1 - glossiness), and the exporter writes a metallic-roughness material - the
     /// extension is gone from the file (measured on a Lab source, 2026-10-08: 22 materials of one ship). With
@@ -309,8 +318,13 @@ public static class BlenderPrep
     /// - under MASK to 1 or 0 by `alpha >= cutoff`, compared as the JSON doubles; with a texture or vertex colours a MASK
     /// at a cutoff of 0 is opaque (1), over 1 discards everything (the socket at 0), and every other case multiplies by
     /// the factor's alpha in float32 (measured 2026-10-08 on the 24 materials of export_layout; the converter makes a
-    /// flat material's swatch from these four).</summary>
-    static double[] WrittenBaseColour(HafMaterial mat, bool vertexColor)
+    /// flat material's swatch from these four). A colour outside 0..1 is CLAMPED by the exporter
+    /// (pbr_metallic_roughness.py) - so [1.5, 1.5, 1.5] is white and the factor is left out of the file. An unlit
+    /// material's colour keeps what is over 1 (unlit.py does not clamp) but a negative component still comes back 0
+    /// (read as "not clamped at all", measured otherwise). Neither the alpha, nor metallic, nor roughness is clamped:
+    /// those come back as they went in (all measured on the export_flat_alpha fixture; a self-review of PR #130
+    /// found the first version declining every one of them for a clamp Blender does not do).</summary>
+    static double[] WrittenBaseColour(HafMaterial mat, bool vertexColor, bool unlit)
     {
         var f = mat.BaseColorFactor ?? new double[] { 1, 1, 1, 1 };
         double alpha = f[3], cutoff = mat.AlphaCutoff;
@@ -321,7 +335,8 @@ public static class BlenderPrep
         else if (mode == "MASK" && cutoff == 0) a = 1;
         else if (mode == "MASK" && cutoff > 1) a = 0;
         else a = (float)alpha;
-        return new double[] { (float)f[0], (float)f[1], (float)f[2], a };
+        float C(double v) { float x = (float)v; return x < 0f ? 0f : x > 1f && !unlit ? 1f : x; }
+        return new double[] { C(f[0]), C(f[1]), C(f[2]), a };
     }
 
     /// <summary>A colour set as the model holds one: four floats per vertex.</summary>
