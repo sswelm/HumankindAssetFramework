@@ -33,6 +33,47 @@ public class BlenderPrepTests
     }
 
     [Fact]
+    public void Cancelling_prep_propagates_instead_of_becoming_a_Blender_fallback()
+    {
+        var m = Model(new[] { Grid("part") }, new[] { Node("Part", 0) });
+        Assert.Throws<OperationCanceledException>(() => BlenderPrep.Prepare(m, 6,
+            checkpoint: () => throw new OperationCanceledException()));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_running_collapse_can_be_cancelled_or_timed_out_before_finishing(bool timeout)
+    {
+        var m = Model(new[] { Grid("part") }, new[] { Node("Part", 0) });
+        var layout = BlenderMesh.FromGltf(m, 0);
+        var bm = BMesh.FromMesh(layout, m.Meshes[0].Primitives[0].Positions);
+        BlenderDecimate.FaceNormalsUpdate(bm);
+        int before = bm.TotFace, polls = 0;
+        var stop = timeout ? (Exception)new TimeoutException() : new OperationCanceledException();
+        var thrown = Assert.ThrowsAny<Exception>(() => BlenderDecimate.Collapse(bm, 0.1f,
+            new BlenderDecimate.MeshData(), () =>
+            {
+                polls++;
+                if (bm.TotFace < before) throw stop;   // interrupt actual reduction, after initialization
+            }));
+        Assert.Same(stop, thrown);
+        Assert.True(polls > 1);
+        Assert.InRange(bm.TotFace, BlenderDecimate.FaceTarget(before, 0.1f) + 1, before - 1);
+    }
+
+    [Fact]
+    public void Polling_prep_does_not_change_the_written_model()
+    {
+        var m = Model(new[] { Grid("part") }, new[] { Node("Part", 0) });
+        int polls = 0;
+        var withPolling = BlenderPrep.Prepare(m, 6, checkpoint: () => polls++);
+        Assert.Null(withPolling.Fallback);
+        Assert.True(polls > 1);
+        Assert.Null(HafModelDiff.FirstDifference(BlenderPrep.Prepare(m, 6).Model, withPolling.Model));
+    }
+
+    [Fact]
     public void A_plain_file_is_assembled_in_the_exporters_order_and_reads_back_from_the_writer()
     {
         var nodes = new List<HafNode> { Node("Root", -1, -1, 1, 2), Node("Zed", 0), Node("Alpha", 1) };
@@ -187,6 +228,18 @@ public class BlenderPrepTests
         // what Python's lower case and .NET's may not agree on is named, not matched
         BlenderPrep.Stripped(names, "t\u00fcrret", out _, out string notAscii);
         Assert.StartsWith("strip:", notAscii);
+    }
+
+    [Theory]
+    [InlineData("\u001cturret\u001f")]
+    [InlineData("\u001dhatch\u001e")]
+    [InlineData("\u0085rotor\u00a0")]
+    public void Strip_trims_the_same_whitespace_as_Pythons_str_strip(string strip)
+    {
+        var gone = BlenderPrep.Stripped(BlenderNames.Compute(Vehicle()), strip, out var subs, out var problem);
+        Assert.Null(problem);
+        Assert.Single(subs);
+        Assert.NotEmpty(gone);
     }
 
     [Fact]

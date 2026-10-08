@@ -2659,11 +2659,25 @@ public static class UniversalBaker
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            // no timeout and no cancel in here (Blender's prep has both): the bar at least says what the editor is busy with
+            // Cooperatively bound the prep and poll Bake Tests cancellation during stages and the collapse loop.
+            // Keep this on the editor thread: the port's arithmetic and Unity progress UI run in their usual runtime.
+            long nextPoll = 0;
+            void Checkpoint()
+            {
+                long elapsed = sw.ElapsedMilliseconds;
+                if (elapsed < nextPoll) return;
+                nextPoll = elapsed + 250;
+                try { BakeTestRunnerWindow.Progress.Heartbeat(); } catch { }   // cosmetic, as in RunBounded
+                BakeTestRunnerWindow.Progress.ThrowIfCancelled();
+                if (elapsed >= ProcTimeoutMs) throw new TimeoutException("the in-process prep exceeded " + ProcTimeoutMs / 1000 + " seconds");
+            }
             if (!QuietDialogs) EditorUtility.DisplayProgressBar("Model Factory", "Preparing " + Path.GetFileName(src) + " in process (strip / reduce)...", 0.2f);
+            Checkpoint();
             var model = GlbReader.Read(src);
-            var r = BlenderPrep.Prepare(model, targetTris, strip: substrings ?? "");
+            Checkpoint();
+            var r = BlenderPrep.Prepare(model, targetTris, strip: substrings ?? "", checkpoint: Checkpoint);
             if (r.Model == null) { useBlender = r.Fallback ?? "the C# prep gave no file"; return false; }
+            Checkpoint();
             GlbWriter.Write(r.Model, outGlb);   // a temporary file, then a replace: never half a file
             sw.Stop();
             LastPrepSourceTris = (int)Math.Min(int.MaxValue, r.SourceTriangles);

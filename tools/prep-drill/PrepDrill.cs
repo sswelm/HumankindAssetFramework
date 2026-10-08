@@ -62,7 +62,7 @@ static class PrepDrill
                 var m = source;
                 // the PRODUCTION prep (BlenderPrep.Prepare) does the work; `diagnose` keeps it going past a reason to fall
                 // back, so everything it can lay out is still compared
-                var prep = BlenderPrep.Prepare(m, target, diagnose: true, names: names, strip: strip);
+                var prep = BlenderPrep.Prepare(m, target, diagnose: true, names: names, strip: strip, checkpoint: () => { });
                 // what this strip run exercised - counted only if every comparison of the run holds and the file is written
                 var stripHits = new List<string>();
                 if (strip.Length > 0)

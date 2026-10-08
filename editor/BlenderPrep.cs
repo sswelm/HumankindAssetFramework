@@ -62,8 +62,9 @@ public static class BlenderPrep
 
     /// <summary>prep_model.py's reduce on a glTF model. With `diagnose` the work goes on past a reason to fall back (the
     /// drill compares what it can); without, it stops at the first one.</summary>
-    public static Result Prepare(HafModel m, long targetTris, bool diagnose = false, BlenderNames.Result names = null, int threads = 0, string strip = null)
+    public static Result Prepare(HafModel m, long targetTris, bool diagnose = false, BlenderNames.Result names = null, int threads = 0, string strip = null, Action checkpoint = null)
     {
+        checkpoint?.Invoke();
         var res = new Result { Names = names ?? BlenderNames.Compute(m) };
         names = res.Names;
         void Decline(string why) { res.Reasons.Add(why); if (res.Fallback == null) res.Fallback = why; }
@@ -83,6 +84,7 @@ public static class BlenderPrep
         var meshObjects = new List<(int node, string name)>();
         foreach (var (node, name) in names.MeshObjectsInOrder)
         {
+            checkpoint?.Invoke();
             // prep_model.py purges "the importer's bone shape": every mesh object whose name starts with Icosphere and has
             // no vertex group - a real part of that name too, with its triangles out of the ratio and its children
             // unparented; an object without a vertex is a mesh object all the same
@@ -100,6 +102,7 @@ public static class BlenderPrep
         res.Ratio = BlenderReduce.Ratio(Math.Max(1, targetTris), res.SourceTriangles);
         foreach (var (node, name) in meshObjects)
         {
+            checkpoint?.Invoke();
             string why = BlenderReduce.FallbackReason(m, node);
             if (why != null) Decline("'" + name + "': " + why);
         }
@@ -107,6 +110,7 @@ public static class BlenderPrep
 
         foreach (var (node, name) in meshObjects)
         {
+            checkpoint?.Invoke();
             var run = new ObjectRun { Node = node, Name = name, Declined = BlenderReduce.FallbackReason(m, node) };
             res.Objects.Add(run);
             if (run.Declined != null) continue;
@@ -123,7 +127,7 @@ public static class BlenderPrep
                 run.Skin = new BlenderExport.Skin { ObjectWorld = arma, ArmatureWorld = arma, JointCount = place.Count, GroupJoint = m.Skins[skin].Joints.Select(j => place.TryGetValue(j, out int at) ? at : -1).ToArray() };
                 run.Armature = an;
             }
-            var r = BlenderReduce.Reduce(m, node, res.Ratio, names, threads);
+            var r = BlenderReduce.Reduce(m, node, res.Ratio, names, threads, checkpoint);
             run.Reduced = r;
             run.Primitives = BlenderExport.MeshPrimitives(r, run.Skin);
             res.MaterialsOfMesh[node] = run.Primitives.Select(p => { var (mat, vc) = r.Slots[p.MaterialSlot]; return mat < 0 && !vc ? null : names.MaterialOf[(mat < 0 ? names.MeshDatablockNode[node] : -1, mat, vc)]; }).ToList();
@@ -133,6 +137,7 @@ public static class BlenderPrep
         }
         if (res.Objects.Exists(o => o.Declined != null)) return res;   // the tree would not know the declined mesh's faces nor its materials
 
+        checkpoint?.Invoke();
         if (res.World == null) res.World = VehicleProbe.BlenderWorldMatrices(m, null);
         var withFaces = new HashSet<int>(res.MaterialsOfMesh.Where(kv => kv.Value.Count > 0).Select(kv => kv.Key));
         res.Tree = BlenderExportTree.Build(m, names, res.World, withFaces, res.NeutralArmatures, mn => res.MaterialsOfMesh.TryGetValue(mn, out var l) ? l : new List<string>(), stripped: res.Stripped);
@@ -142,9 +147,15 @@ public static class BlenderPrep
         if (!res.Tree.Nodes.Exists(n => n.HasMesh)) Decline("no mesh left to export");
         foreach (var why in MaterialProblems(m, res)) Decline(why);
         if (res.Fallback != null) return res;
+        checkpoint?.Invoke();
         res.Model = Assemble(m, res);
+        checkpoint?.Invoke();
         return res;
     }
+
+    // Python str.strip includes the ASCII information separators U+001C..U+001F; .NET Trim does not.
+    // Use Python's whitespace set explicitly so the editor's Mono follows the same rule too.
+    static readonly char[] PythonWhitespace = "\u0009\u000a\u000b\u000c\u000d\u001c\u001d\u001e\u001f\u0020\u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000".ToCharArray();
 
     /// <summary>prep_model.py's strip: `subs = [s.strip().lower() for s in arg.split(",") if s.strip()]`, then every object
     /// whose `name.lower()` contains one of them, with its `children_recursive` - an object's children are the objects
@@ -154,7 +165,7 @@ public static class BlenderPrep
     public static HashSet<string> Stripped(BlenderNames.Result names, string strip, out List<string> substrings, out string problem)
     {
         problem = null;
-        substrings = (strip ?? "").Split(',').Select(s => s.Trim()).Where(s => s.Length > 0).Select(s => s.ToLowerInvariant()).ToList();
+        substrings = (strip ?? "").Split(',').Select(s => s.Trim(PythonWhitespace)).Where(s => s.Length > 0).Select(s => s.ToLowerInvariant()).ToList();
         var gone = new HashSet<string>(StringComparer.Ordinal);
         if (substrings.Count == 0) return gone;
         if (substrings.Exists(s => s.Any(c => c > 127))) { problem = "strip: a strip substring that is not ASCII (Python's lower case and .NET's can differ there)"; return gone; }
