@@ -357,6 +357,34 @@ specular-glossiness under MASK and BLEND). And the drill's log now NAMES every f
 (`LEFT <file>: <why>`): the script had been printing FAIL, NOTE and COVER lines only, so the per-run outcome added
 for the review never reached anyone. One clean `FULL=1` run on that state (194 runs on 97 files; the figures above were a run plus two files judged again): 114 written and read by the converter as it reads Blender's, 76 left to Blender by name, 2 known prep failures, the canoe's 2. Of the real files, 23 are left: 22 animated ones and the Espana (a JPEG whose alpha is read).
 
+**The prep in the Factory: strip, and the wiring** (step 5 d, part 4d, 2026-10-08). `BlenderPrep.Prepare` takes
+`prep_model.py`'s strip list: every object whose name contains one of the substrings, ignoring case, goes with all its
+descendants (those hanging from an armature's bones included), and the reduce's ratio is taken from what is left
+(`BlenderPrep.Stripped`). The prep drill's Blender side now makes STRIP runs: a fixture names its own in a file beside
+it (`export_strip.glb.strip`, one list per line: a subtree under an empty, a match by case only, several substrings
+with spaces, a skinned mesh whose armature stays, the armature itself, a list that matches nothing, one that leaves no
+mesh - `prep_model.py` stops there, and the prep must name it), every other file gets one (the name of an object a
+third of the way down its sorted names). The strip runs found a rule of the exporter no file had shown: an armature
+that NO kept mesh is skinned to still gets its skin written, after the skins nodes use, in the order the armatures
+enter the exporter's tree (`tree.py` `get_unused_skins`; `BlenderExportTree.Result.UnusedSkins`) - a source skin no
+node uses makes one without any strip (`export_skin_unused`, and `export_skin_unused_order` for the order).
+`UniversalBaker.PrepInProcess` is the Factory's call: a .glb/.gltf with a reduce target is prepared in process, and
+whatever `BlenderPrep` names - or the C# reader refuses, or goes wrong there - is logged with its reason and prepared
+by Blender's `prep_model.py` as before; a failure of the C# path never fails a bake. An independent reader went
+through strip, the unused skins and the wiring against Blender's source BEFORE the PR: no difference in what is
+written; its findings were the drill's (a strip that leaves nothing on an animated file would have failed falsely;
+the strip COVER rows counted before the comparison; the Mono pass said more than it shows) and are fixed. Twelve
+planted defects: eleven fail the drill, the twelfth changes no output (bone matrices computed for a stripped
+armature are never used). The drill also runs its C# side under the Mono that ships with Unity - which is 32-bit and
+NOT the editor's runtime, so meshes with normals are declined there; it holds the node list, the bone chain, the
+assembly and the writer on the normal-less files under a second runtime, and nothing about the decimate. The answer
+for the editor itself is the Bake Tests row *Does the in-process model prep match Blender's?*
+(`BlenderPrepHeadlessTest`): every static registry entry that reduces is prepared in process AND by Blender, the
+converter runs on both at the entry's grid, and its output folders must be equal byte for byte; an entry left to
+Blender is a SKIP that says why. It needs Blender and is not in the push gate. `FULL=1` (293 runs on 99 files, 74 of them strip runs): 163 written and read by the converter as it reads Blender's - 43 of them stripped -, 106 left to Blender by name, 21 known prep failures (18 strips that leave no mesh), the canoe's 3. The drill's two sides now run as six processes each (`PREP_JOBS`; `tools/prep-drill/merge_shards.py` adds their rows up, and a shard that did not finish is a FAIL): the gate sample in 43 s where it took minutes, that FULL run in 27 minutes.
+Not covered: district entries in that row (they prep through the same `UniversalBaker.Build`); a strip list that was
+already broken on Blender's command line (a trailing backslash, a double quote) now strips what it says.
+
 **The Clip Range picker's in-process rig** (step 4, 2026-10-03): `HafUnityFrameTests` hold the preview frame's arithmetic
 without Unity — the X mirror's conjugation of rotations, matrices and matrix nodes; Unity's skinning formula fed the rig's
 matrices (the joints' world matrices, the inverse bind matrices, the vertex, all mirrored) against the reader's posed vertex;

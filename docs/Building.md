@@ -49,16 +49,21 @@ together. The editor package consumes the same tracked DLL from `editor/Plugins/
 
 ## Blender (optional dependency)
 
-**Blender** is needed for `.blend` import, **animated-model import**, **Strip parts**, and Reduce-to-tris decimation —
-auto-detected under `Program Files`, or point the Factory Settings override / `EditorPrefs 'ENC.blenderPath'` at
-`blender.exe`. Static GLB/OBJ/FBX bakes with neither Strip nor Reduce need **no** Blender: the GLB path uses the
+**Blender** is needed for `.blend` import, **animated-model import**, and for **Strip parts** / Reduce-to-tris on what the
+Factory cannot prepare itself — auto-detected under `Program Files`, or point the Factory Settings override /
+`EditorPrefs 'ENC.blenderPath'` at `blender.exe`. Since 2026-10-08 a static **.glb/.gltf** with a reduce target is
+stripped and reduced **in process** (`BlenderPrep`, the same file Blender's `prep_model.py` would write as far as the
+converter reads it); Blender still does an OBJ/FBX source, a strip without a reduce, and any model the in-process prep
+names in the console ("model prep: using Blender because ..." — an animated file, a JPEG whose alpha is read, an
+object under a bone, ...). Static GLB/OBJ/FBX bakes with neither Strip nor Reduce need **no** Blender: the GLB path uses the
 self-contained packaged `editor/Tools~/glbconv/glbconv.exe` (no .NET install required, and its `Weld & simplify` option decimates without
 Blender). A `dotnet glbconv.dll` fallback exists for local dev.
 
 ### Why Blender does the geometry work (design rationale)
 
 The heavy geometry passes shell out to headless Blender (`editor/Tools~/prep_model.py`, `rig_anim.py`, `blend_export.py`)
-rather than being written in C#. The scripts are Python, but **Python is only the remote control** — the actual
+rather than being written in C# (the prep of a .glb/.gltf is the exception since 2026-10-08: an exact port of what
+Blender does there, held to Blender's output by the push gate, with `prep_model.py` as its fallback). The scripts are Python, but **Python is only the remote control** — the actual
 decimation/import/export executes inside Blender's C/C++ core:
 
 - **Quadric edge-collapse decimation is hard to write well** (error quadrics, topology preservation, UV/normal

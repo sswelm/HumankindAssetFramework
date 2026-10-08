@@ -1358,13 +1358,20 @@ public static class UniversalBaker
             bool wantReduce = cfg.targetTris > 0;
             if (wantStrip || wantReduce)
             {
-                if (!BlenderAvailable()) return Fail((wantStrip ? "'Strip parts'" : "'Reduce to tris'") +
-                    " needs Blender installed (auto-detected, or set EditorPrefs 'HAF.BlenderPath').");
                 int effTarget = cfg.doubleSided ? Mathf.Max(1, cfg.targetTris / 2) : cfg.targetTris;
                 if (wantReduce && cfg.doubleSided) Debug.Log($"[Factory] reduce target {cfg.targetTris} -> {effTarget} tris (double-sided halves it; it doubles the baked geometry)");
                 string prepped = Path.Combine(Path.GetTempPath(), name + "_prepped.glb");
-                if (!PrepViaBlender(srcFile, prepped, wantStrip ? cfg.stripParts : "", wantReduce ? effTarget : 0))
-                    return Fail("model prep (strip / reduce) failed (see console)");
+                // THE PREP IN C# for a .glb/.gltf source (2026-10-08, step 5 of replacing Blender; PrepInProcess below): the
+                // file prep_model.py would write, as far as the converter reads it - the push gate holds it to Blender's
+                // through the converter itself. Whatever it cannot make as Blender does it NAMES, and Blender does that one.
+                if (!PrepInProcess(srcFile, prepped, wantStrip ? cfg.stripParts : "", wantReduce ? effTarget : 0, out string useBlender))
+                {
+                    if (!BlenderAvailable()) return Fail("model prep (strip / reduce): " + useBlender +
+                        ". That leaves this model to Blender, which is not installed (it is auto-detected, or set EditorPrefs 'HAF.BlenderPath').");
+                    Debug.Log("[Factory] model prep: using Blender because " + useBlender + ".");
+                    if (!PrepViaBlender(srcFile, prepped, wantStrip ? cfg.stripParts : "", wantReduce ? effTarget : 0))
+                        return Fail("model prep (strip / reduce) failed (see console)");
+                }
                 srcFile = prepped;
             }
             string ext = Path.GetExtension(srcFile).ToLowerInvariant();
@@ -2515,7 +2522,7 @@ public static class UniversalBaker
         return atlas;
     }
 
-    static bool ConvertGlb(string glb, string outDir, string name, int grid)
+    internal static bool ConvertGlb(string glb, string outDir, string name, int grid)
     {
         string proj = Directory.GetParent(Application.dataPath).FullName;
         string tools = HafPackageContext.ToolPath("glbconv");
@@ -2634,10 +2641,55 @@ public static class UniversalBaker
     // strip-then-reduce (two Blender startups + an intermediate GLB round-trip) with one, cutting ~24% off a heavy
     // model's Blender time. substrings "" = skip strip; targetTris <= 0 = skip reduce (so either step can run alone).
     // Source (pre-decimation) triangle count of the LAST prep run, parsed from prep_model.py's
-    // "PREP reduce: tris <before> -> <after>" line. -1 = no reduce ran (model untouched or under the ceiling).
+    // "PREP reduce: tris <before> -> <after>" line, or the in-process prep's own count. -1 = no reduce was asked or the prep failed
+    // (a model under the ceiling still reports its count: the ratio is 1 then).
     internal static int LastPrepSourceTris = -1;
 
-    static bool PrepViaBlender(string src, string outGlb, string substrings, int targetTris)
+    /// <summary>prep_model.py's strip and reduce in this process (BlenderPrep), for a .glb/.gltf source and a reduce target.
+    /// True when the prepared file is written; false with the reason Blender has to do it - a shape BlenderPrep names
+    /// (Result.Fallback), an input the C# reader refuses, or anything that went wrong here: Blender's prep is the
+    /// reference, so a failure of this path never fails the bake. Logs what prep_model.py logs.</summary>
+    internal static bool PrepInProcess(string src, string outGlb, string substrings, int targetTris, out string useBlender)
+    {
+        useBlender = null; LastPrepSourceTris = -1;
+        string ext = Path.GetExtension(src ?? "").ToLowerInvariant();
+        if (ext != ".glb" && ext != ".gltf") { useBlender = "the source is not a .glb/.gltf file"; return false; }
+        if (targetTris <= 0) { useBlender = "no reduce is asked (a strip alone keeps instanced meshes shared in Blender, which the C# prep does not model)"; return false; }
+        if (!File.Exists(src)) { useBlender = "the model file is not there"; return false; }   // PrepViaBlender reports it
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            // no timeout and no cancel in here (Blender's prep has both): the bar at least says what the editor is busy with
+            if (!QuietDialogs) EditorUtility.DisplayProgressBar("Model Factory", "Preparing " + Path.GetFileName(src) + " in process (strip / reduce)...", 0.2f);
+            var model = GlbReader.Read(src);
+            var r = BlenderPrep.Prepare(model, targetTris, strip: substrings ?? "");
+            if (r.Model == null) { useBlender = r.Fallback ?? "the C# prep gave no file"; return false; }
+            GlbWriter.Write(r.Model, outGlb);   // a temporary file, then a replace: never half a file
+            sw.Stop();
+            LastPrepSourceTris = (int)Math.Min(int.MaxValue, r.SourceTriangles);
+            if (r.StripSubstrings.Count > 0)
+            {
+                var removed = r.Stripped.OrderBy(x => x, StringComparer.Ordinal).ToList();
+                Debug.Log($"[prep] PREP strip: removed {removed.Count} object(s) for [{string.Join(", ", r.StripSubstrings)}]: {string.Join(", ", removed.Take(50))}");
+                if (removed.Count == 0) Debug.LogWarning($"[prep] PREP WARNING: no object name matched [{string.Join(", ", r.StripSubstrings)}] — nothing was stripped (check the names)");
+            }
+            Debug.Log($"[prep] PREP reduce: tris {r.SourceTriangles} -> {r.Triangles} (target {targetTris}, ratio {r.Ratio.ToString("0.0000", System.Globalization.CultureInfo.InvariantCulture)})   (C#, in-process, {sw.Elapsed.TotalSeconds.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}s)");
+            return true;
+        }
+        catch (OperationCanceledException) { throw; }   // a bake-test cancel passes through every wrapper
+        catch (Exception e)
+        {
+            try { if (File.Exists(outGlb)) File.Delete(outGlb); } catch { }
+            LastPrepSourceTris = -1;
+            // the C# reader deliberately refuses what it cannot interpret (Draco, a missing image): that is an ordinary reason
+            if (e is InvalidDataException || e is NotSupportedException) useBlender = "the C# reader cannot handle this input: " + e.Message;
+            else { useBlender = "the C# prep failed (" + e.GetType().Name + ": " + e.Message + ")"; Debug.LogWarning("[Factory] the in-process model prep failed on " + src + "; Blender does it instead.\n" + e); }
+            return false;
+        }
+        finally { if (!QuietDialogs) EditorUtility.ClearProgressBar(); }
+    }
+
+    internal static bool PrepViaBlender(string src, string outGlb, string substrings, int targetTris)
     {
         LastPrepSourceTris = -1;
         if (!File.Exists(src)) { Debug.LogError("[Factory] prep: model file not found: " + src); return false; }

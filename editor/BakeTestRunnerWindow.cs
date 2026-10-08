@@ -155,6 +155,17 @@ public class BakeTestRunnerWindow : EditorWindow
                        "track names. A leaked Unity mesh fails.",
                 run = HafModelRigHeadlessTest.RunSection },
 
+            // THE MODEL PREP IN C# (2026-10-08, step 5): the push gate holds the in-process prep to Blender's outside Unity; that
+            // it gives the same file under Unity's own Mono is this row's to show - and it needs Blender for the other side.
+            new TestRow { name = "Does the in-process model prep match Blender's? (every registry model that reduces, in Unity)", quick = false, on = false,
+                cost = "Blender's prep and the converter twice per registry .glb with a reduce target - minutes",
+                what = "For every registry entry that preps a .glb/.gltf (a reduce target, with its strip list), prepares the file " +
+                       "in process (BlenderPrep) AND with Blender's prep_model.py, runs the Factory's converter on both at the " +
+                       "entry's own grid and compares its two output folders file by file, byte for byte. An entry the C# prep " +
+                       "leaves to Blender is a SKIP that says why (an animated file, a JPEG whose alpha is read, ...). A " +
+                       "difference here and none in the push gate means Unity's runtime computes something differently.",
+                run = BlenderPrepHeadlessTest.RunSection },
+
             // THE IN-PROCESS PROBE PREVIEW (2026-10-03, step 3d): the C# probe's rows are held to Blender's by the push gate; the PREVIEW
             // it builds in Unity - the frame, the facing, the lifecycle of its objects - can only be judged in Unity, against the
             // preview FBX files Blender left under Assets/FactorySource/VehicleLab and Unity imported.

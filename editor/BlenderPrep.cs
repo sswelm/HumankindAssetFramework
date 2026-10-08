@@ -22,7 +22,10 @@
 //   file - Blender's own too), a base colour image that is not a PNG or a JPEG, one whose file name's extension is not
 //   its format's, a JPEG whose alpha is read (each written again by Blender's own encoder), and any image the writer
 //   cannot embed.
-// NOT here yet: prep_model.py's STRIP (part 4d) - a caller that strips must use Blender. Nothing calls this yet.
+// STRIP (part 4d): prep_model.py deletes every object whose name contains one of the given substrings, ignoring case,
+// with all its descendants, before it reduces - the ratio is taken from what is left. Stripped() is that rule; the tree
+// and the reduce leave those objects out. A strip WITHOUT a reduce is Blender's (no reduce asked, above).
+// Called by UniversalBaker.PrepInProcess, with Blender's prep_model.py as the fallback for every file named here.
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -53,15 +56,19 @@ public static class BlenderPrep
         public readonly HashSet<int> NeutralArmatures = new HashSet<int>();
         public long SourceTriangles, Triangles; public float Ratio;
         public readonly List<string> Notes = new List<string>();   // the material rules this file took, each once (the drill's coverage rows)
+        public List<string> StripSubstrings = new List<string>();  // the strip list as prep_model.py parses it (trimmed, lower case, no empties)
+        public HashSet<string> Stripped = new HashSet<string>(StringComparer.Ordinal);   // the objects the strip removed, by Blender name
     }
 
     /// <summary>prep_model.py's reduce on a glTF model. With `diagnose` the work goes on past a reason to fall back (the
     /// drill compares what it can); without, it stops at the first one.</summary>
-    public static Result Prepare(HafModel m, long targetTris, bool diagnose = false, BlenderNames.Result names = null, int threads = 0)
+    public static Result Prepare(HafModel m, long targetTris, bool diagnose = false, BlenderNames.Result names = null, int threads = 0, string strip = null)
     {
         var res = new Result { Names = names ?? BlenderNames.Compute(m) };
         names = res.Names;
         void Decline(string why) { res.Reasons.Add(why); if (res.Fallback == null) res.Fallback = why; }
+        res.Stripped = Stripped(names, strip, out res.StripSubstrings, out string stripProblem);
+        if (stripProblem != null) Decline(stripProblem);
         if (targetTris <= 0) Decline("no reduce asked: instanced meshes stay shared in Blender then, which is not modelled");
         // prep_model.py fails on such a file when an object lies outside the scene Blender makes active ("not in View
         // Layer": the scenes fixture), and works when none does (no_default_scene); which it is, is not modelled
@@ -82,10 +89,13 @@ public static class BlenderPrep
             int sk = m.Nodes[node].Skin;
             bool groups = sk >= 0 && sk < m.Skins.Count && m.Meshes[m.Nodes[node].Mesh].Primitives.Exists(p => p.Skinned);
             if (name.StartsWith("Icosphere", StringComparison.Ordinal) && !groups) Decline("icosphere: the object '" + name + "' is removed by prep_model.py (it takes every unskinned Icosphere... for the importer's bone shape)");
+            if (res.Stripped.Contains(name)) continue;   // stripped: not reduced, not in the ratio
             var layout = BlenderMesh.FromGltf(m, m.Nodes[node].Mesh);
             if (layout.VertexCount == 0) continue;
             meshObjects.Add((node, name)); res.SourceTriangles += layout.Faces.Length / 3;
         }
+        // prep_model.py stops when the strip leaves no mesh OBJECT ("no meshes to reduce"); with only vertex-less ones left
+        // it would go on and export a file without a mesh - named here all the same, and Blender does what it does
         if (meshObjects.Count == 0) { Decline("no mesh to reduce"); return res; }
         res.Ratio = BlenderReduce.Ratio(Math.Max(1, targetTris), res.SourceTriangles);
         foreach (var (node, name) in meshObjects)
@@ -125,7 +135,7 @@ public static class BlenderPrep
 
         if (res.World == null) res.World = VehicleProbe.BlenderWorldMatrices(m, null);
         var withFaces = new HashSet<int>(res.MaterialsOfMesh.Where(kv => kv.Value.Count > 0).Select(kv => kv.Key));
-        res.Tree = BlenderExportTree.Build(m, names, res.World, withFaces, res.NeutralArmatures, mn => res.MaterialsOfMesh.TryGetValue(mn, out var l) ? l : new List<string>());
+        res.Tree = BlenderExportTree.Build(m, names, res.World, withFaces, res.NeutralArmatures, mn => res.MaterialsOfMesh.TryGetValue(mn, out var l) ? l : new List<string>(), stripped: res.Stripped);
         foreach (var p in res.Tree.Problems) Decline(p);
         var underBone = res.Tree.Nodes.FirstOrDefault(n => !n.TransformKnown);
         if (underBone != null) Decline("an object under a bone: '" + underBone.Name + "' - its transform needs Blender's pose evaluation");
@@ -134,6 +144,31 @@ public static class BlenderPrep
         if (res.Fallback != null) return res;
         res.Model = Assemble(m, res);
         return res;
+    }
+
+    /// <summary>prep_model.py's strip: `subs = [s.strip().lower() for s in arg.split(",") if s.strip()]`, then every object
+    /// whose `name.lower()` contains one of them, with its `children_recursive` - an object's children are the objects
+    /// parented to it, those parented to one of an armature's bones included. Python's lower() and .NET's are the same
+    /// on ASCII; a substring that is not ASCII, or a name with one of the two letters whose lower case IS ASCII in
+    /// Python (the Kelvin sign, the dotted capital I), is named and left to Blender rather than matched differently.</summary>
+    public static HashSet<string> Stripped(BlenderNames.Result names, string strip, out List<string> substrings, out string problem)
+    {
+        problem = null;
+        substrings = (strip ?? "").Split(',').Select(s => s.Trim()).Where(s => s.Length > 0).Select(s => s.ToLowerInvariant()).ToList();
+        var gone = new HashSet<string>(StringComparer.Ordinal);
+        if (substrings.Count == 0) return gone;
+        if (substrings.Exists(s => s.Any(c => c > 127))) { problem = "strip: a strip substring that is not ASCII (Python's lower case and .NET's can differ there)"; return gone; }
+        if (names.Objects.Exists(o => o.Name.IndexOf('\u212A') >= 0 || o.Name.IndexOf('\u0130') >= 0)) { problem = "strip: an object name with a letter whose lower case is ASCII in Python only"; return gone; }
+        var children = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (var o in names.Objects)
+            if (o.Parent != null) { if (!children.TryGetValue(o.Parent, out var l)) children[o.Parent] = l = new List<string>(); l.Add(o.Name); }
+        void Take(string name) { if (!gone.Add(name)) return; if (children.TryGetValue(name, out var kids)) foreach (var k in kids) Take(k); }
+        foreach (var o in names.Objects)
+        {
+            string lower = o.Name.ToLowerInvariant();
+            if (substrings.Exists(s => lower.Contains(s))) Take(o.Name);
+        }
+        return gone;
     }
 
     static string Mode(HafMaterial mat) => string.IsNullOrEmpty(mat.AlphaMode) ? "OPAQUE" : mat.AlphaMode;   // the importer: `alpha_mode or 'OPAQUE'`
@@ -257,6 +292,13 @@ public static class BlenderPrep
                 hn.Skin = si;
             }
             o.Nodes.Add(hn);
+        }
+        // the skins no node uses, after the others (BlenderExportTree.Result.UnusedSkins)
+        foreach (var (armature, name, joints) in tree.UnusedSkins)
+        {
+            var ibm = new double[16 * joints.Count];
+            for (int j = 0; j < joints.Count; j++) for (int k = 0; k < 16; k++) ibm[16 * j + k] = tree.Nodes[joints[j]].InverseBind[k];
+            o.Skins.Add(new HafSkin { Name = name, Joints = joints.ToArray(), InverseBindMatrices = ibm });
         }
         var scene = new HafScene { Name = "Scene" };
         scene.Nodes.AddRange(tree.SceneRoots);

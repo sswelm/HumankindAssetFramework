@@ -17,7 +17,7 @@ static class PrepDrill
     {
         Console.OutputEncoding = new UTF8Encoding(false);
         Console.WriteLine($"RUNTIME\t{(IntPtr.Size * 8)}-bit\ttrig {(BlenderTrig.Exact ? "exact" : "rounded")}\tcolour table {(BlenderColor.TableKnown ? "known" : "unknown")}");
-        int fails = 0, runs = 0, objects = 0, prims = 0, declined = 0, expectedFailures = 0, writtenRuns = 0, leftRuns = 0; long verts = 0;
+        int fails = 0, runs = 0, objects = 0, prims = 0, declined = 0, expectedFailures = 0, writtenRuns = 0, leftRuns = 0, stripRuns = 0, stripWritten = 0; long verts = 0;
         // the Factory's converter and a folder to run it in (arguments 2 and 3); without them the written stage is skipped, said
         string converter = args.Length > 2 && File.Exists(args[1]) ? args[1] : null, workDir = args.Length > 2 ? args[2] : null;
         Console.WriteLine(converter != null ? "CONVERTER\t" + converter : "CONVERTER\tnone: the written files are NOT compared");
@@ -37,7 +37,14 @@ static class PrepDrill
                 try
                 {
                     var failedModel = GlbReader.Read(t[1]);
-                    if (failedModel.Scenes.Count > 1 && t[5].Contains("View Layer")) { expectedFailures++; Console.WriteLine($"PASS {sk} {t[2]}: prep_model.py fails on a file of {failedModel.Scenes.Count} scenes, as known ({t[5]})"); }
+                    // a strip that leaves no mesh: prep_model.py stops ("no meshes to reduce"), and so must the prep here
+                    string failedStrip = t.Length > 6 ? t[6] : "";
+                    // `diagnose`: an earlier reason to fall back (an animated file) must not hide this one. The runner reports
+                    // prep_model.py's exit only ("exited 1": its PREP_ERR), so that is all the row is held to
+                    var failedPrep = failedStrip.Length > 0 && t[5].Contains("exited 1") ? BlenderPrep.Prepare(failedModel, Math.Max(1, long.Parse(t[4])), diagnose: true, strip: failedStrip) : null;
+                    if (failedPrep != null && failedPrep.Model == null && failedPrep.Reasons.Exists(x => x.StartsWith("no mesh to reduce")))
+                    { expectedFailures++; cover["strip: everything stripped (prep_model.py stops, and so does the prep)"]++; Console.WriteLine($"PASS {sk} {t[2]}: the strip '{failedStrip}' leaves no mesh; prep_model.py stops and the prep names it"); }
+                    else if (failedModel.Scenes.Count > 1 && t[5].Contains("View Layer")) { expectedFailures++; Console.WriteLine($"PASS {sk} {t[2]}: prep_model.py fails on a file of {failedModel.Scenes.Count} scenes, as known ({t[5]})"); }
                     else { fails++; Console.WriteLine($"FAIL {sk} {t[2]}: prep_model.py failed for a reason this drill does not know: {t[5]}"); }
                 }
                 catch (Exception e) { fails++; Console.WriteLine($"FAIL {sk} {t[2]}: {e.GetType().Name}: {e.Message}"); }
@@ -45,15 +52,34 @@ static class PrepDrill
             }
             if (t.Length < 6 || t[0] != "PREP") continue;
             string key = t[1], tag = t[2]; long total = long.Parse(t[3]), target = long.Parse(t[4]); string outGlb = t[5];
+            string strip = t.Length > 6 ? t[6] : "";
             string shortKey = string.Join("/", key.Split('/').Reverse().Take(2).Reverse());
             runs++;
             try
             {
+                if (strip.Length > 0) stripRuns++;
                 if (sourcePath != key) { source = GlbReader.Read(key); sourcePath = key; names = BlenderNames.Compute(source); bworld = null; GC.Collect(); }   // the key is the path, lower-cased
                 var m = source;
                 // the PRODUCTION prep (BlenderPrep.Prepare) does the work; `diagnose` keeps it going past a reason to fall
                 // back, so everything it can lay out is still compared
-                var prep = BlenderPrep.Prepare(m, target, diagnose: true, names: names);
+                var prep = BlenderPrep.Prepare(m, target, diagnose: true, names: names, strip: strip);
+                // what this strip run exercised - counted only if every comparison of the run holds and the file is written
+                var stripHits = new List<string>();
+                if (strip.Length > 0)
+                {
+                    if (prep.Stripped.Count == 0) stripHits.Add("strip: a list that matches nothing");
+                    else
+                    {
+                        stripHits.Add("strip: objects removed");
+                        var byName = names.Objects.ToDictionary(o => o.Name, o => o);
+                        if (prep.Stripped.Any(n => byName[n].Parent != null && prep.Stripped.Contains(byName[n].Parent) && !prep.StripSubstrings.Exists(x => n.ToLowerInvariant().Contains(x)))) stripHits.Add("strip: a descendant removed with its parent");
+                        if (prep.Stripped.Any(n => byName[n].Kind == BlenderNames.ObjectKind.Armature)) stripHits.Add("strip: an armature removed");
+                        if (prep.Stripped.Any(n => byName[n].Kind == BlenderNames.ObjectKind.Mesh && byName[n].Skin >= 0) && !prep.Stripped.Any(n => byName[n].Kind == BlenderNames.ObjectKind.Armature)) stripHits.Add("strip: a skinned mesh removed, its armature kept");
+                        if (prep.Stripped.Any(n => byName[n].ParentBone != null)) stripHits.Add("strip: an object under a bone removed");
+                        if (prep.StripSubstrings.Count > 1) stripHits.Add("strip: several substrings");
+                        if (prep.Stripped.Any(n => prep.StripSubstrings.Exists(x => n.ToLowerInvariant().Contains(x) && !n.Contains(x)))) stripHits.Add("strip: a match by case only");
+                    }
+                }
                 if (prep.World != null) bworld = prep.World;
                 long myTotal = prep.SourceTriangles;
                 var problems = new List<string>(); string outcome = "";
@@ -146,6 +172,11 @@ static class PrepDrill
                     {
                         // counted only now: every comparison of this run held
                         outcome = "written, and the converter reads it as it reads Blender's";
+                        if (prep.Tree.UnusedSkins.Count > 0) cover["a skin no node uses, written all the same"]++;
+                        if (prep.Tree.UnusedSkins.Count > 1) cover["two skins no node uses, in the order their armatures enter the tree"]++;
+                        if (prep.Tree.UnusedSkins.Count > 0 && reread.Nodes.Exists(x => x.Skin >= 0)) cover["a skin no node uses, after one a node uses"]++;
+                        foreach (var h in stripHits) cover[h]++;
+                        if (strip.Length > 0) { stripWritten++; cover["strip: a stripped file written, and read by the converter as Blender's"]++; }
                         writtenRuns++; cover["a written file the converter reads as it reads Blender's"]++;
                         foreach (var h in hits) cover[h]++;
                         foreach (var note in prep.Notes) if (cover.ContainsKey("material: " + note)) cover["material: " + note]++; else problems.Add("the prep notes a material rule the drill has no row for: " + note);
@@ -180,13 +211,13 @@ static class PrepDrill
         foreach (var kv in cover) Console.WriteLine($"COVER {kv.Value} {kv.Key}");
         // every run ends one way: failed, known to fail in prep_model.py, written and judged, or left to Blender by name
         if (runs != fails + expectedFailures + writtenRuns + leftRuns) { Console.WriteLine($"FAIL the runs do not add up: {runs} runs, {fails} failed + {expectedFailures} prep failures + {writtenRuns} written + {leftRuns} left to Blender"); fails++; }
-        Console.WriteLine($"TOTAL runs {runs} failed {fails} objects {objects} primitives {prims} vertices {verts} declined {declined} prepfails {expectedFailures} written {writtenRuns} left {leftRuns}");
+        Console.WriteLine($"TOTAL runs {runs} failed {fails} objects {objects} primitives {prims} vertices {verts} declined {declined} prepfails {expectedFailures} written {writtenRuns} left {leftRuns} strip {stripRuns} stripwritten {stripWritten}");
         return fails == 0 ? 0 : 1;
     }
 
     static readonly string[] CoverKeys =
     {
-        "a node's mesh index compared", "a written file the converter reads as it reads Blender's", "a material's base colour compared (factor, image)", "material: a MASK alpha written as 0", "material: a pbrMetallicRoughness object beside a default base colour", "material: no pbrMetallicRoughness object on either side", "material: a base colour image under a colour factor", "material: unlit", "material: specular-glossiness", "left to Blender: jpeg-alpha", "left to Blender: factor-range (the converter refuses Blender's file too)", "material: a blended alpha kept", "material: a base colour image, byte for byte", "written: a skinned file", "written: several materials (an .mtl and an albedo each)", "written: a base colour image", "written: a flat material (a swatch from its factor)",
+        "a node's mesh index compared", "a written file the converter reads as it reads Blender's", "a skin no node uses, written all the same", "two skins no node uses, in the order their armatures enter the tree", "a skin no node uses, after one a node uses", "strip: objects removed", "strip: a list that matches nothing", "strip: a descendant removed with its parent", "strip: an armature removed", "strip: a skinned mesh removed, its armature kept", "strip: an object under a bone removed", "strip: several substrings", "strip: a match by case only", "strip: a stripped file written, and read by the converter as Blender's", "strip: everything stripped (prep_model.py stops, and so does the prep)", "a material's base colour compared (factor, image)", "material: a MASK alpha written as 0", "material: a pbrMetallicRoughness object beside a default base colour", "material: no pbrMetallicRoughness object on either side", "material: a base colour image under a colour factor", "material: unlit", "material: specular-glossiness", "left to Blender: jpeg-alpha", "left to Blender: factor-range (the converter refuses Blender's file too)", "material: a blended alpha kept", "material: a base colour image, byte for byte", "written: a skinned file", "written: several materials (an .mtl and an albedo each)", "written: a base colour image", "written: a flat material (a swatch from its factor)",
 "left to Blender: an animated file", "left to Blender: an object under a bone", "a skin's joint indices compared", "two nodes of one armature sharing a skin", "two armatures, a skin each", "a primitive's material index compared", "a faceless skinned object compared", "left to Blender: an object of the file is declined", "left to Blender: material-uv", "left to Blender: camera-children", "left to Blender: lights", "a camera left out", "an object hung from a node that bears its parent bone's name",
         "bones: two or more root bones", "bones: a bone child nearer than 0.004 (no length taken from it)", "bones: a bone of length 1 (no bone child, no parent bone, at its parent's origin)", "bones: an edit bone of no length (its tail moved along Z)", "bones: an edit bone shorter than 1e-6 (its tail moved along the bone)",
         "bones: a skeleton that is not a joint, on a skin with inverse bind matrices", "bones: a bone almost along -Y (the series for 1 + y)", "bones: a bone along -Y (the mirrored matrix)", "a node list compared (name, parent, order)", "a node transform compared", "a joint transform compared", "a skin's inverse bind matrices compared", "a neutral bone compared", "a material list compared (names, order)", "an object under a bone (its transform is the next part's)", "an animated file (its transforms are Blender's posed state, not compared)",

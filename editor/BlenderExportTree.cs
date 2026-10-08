@@ -57,6 +57,11 @@ public static class BlenderExportTree
         public List<string> Materials = new List<string>();  // the written materials, by Blender name, in first-use order
         public List<string> Notes = new List<string>();      // the bone chain's branches this file took (VehicleProbe.ArmatureResult.Notes), each once
         public int CamerasLeftOut;                           // cameras the exporter's filter dropped
+        // the skins of armatures NO kept mesh object is skinned to (tree.py get_unused_skins): written all the same, after
+        // every skin a node uses, in the order the armatures enter the exporter's tree - each the armature's glTF node and
+        // its joints (node indices, the bones in creation order). A skin of the source no node uses makes one, and so
+        // does a strip that takes an armature's meshes and leaves it (measured 2026-10-08, export_strip)
+        public List<(int armature, string name, List<int> joints)> UnusedSkins = new List<(int, string, List<int>)>();
         public List<string> Problems = new List<string>();   // shapes Blender writes in a way this tree does not model, named: such a file is Blender's to prep
     }
 
@@ -79,14 +84,17 @@ public static class BlenderExportTree
     /// (VehicleProbe.BlenderWorldMatrices, column-major float32), the mesh nodes whose mesh has a triangle (the others are
     /// written without a mesh) and the armature glTF nodes (-1 for the dummy root's) a mesh of which needs the neutral
     /// bone.</summary>
-    public static Result Build(HafModel m, BlenderNames.Result names, float[][] bworld, ISet<int> meshNodesWithFaces = null, ISet<int> neutralArmatures = null, Func<int, IEnumerable<string>> materialsOfMesh = null, bool bones = true)
+    public static Result Build(HafModel m, BlenderNames.Result names, float[][] bworld, ISet<int> meshNodesWithFaces = null, ISet<int> neutralArmatures = null, Func<int, IEnumerable<string>> materialsOfMesh = null, bool bones = true, ISet<string> stripped = null)
     {
+        // prep_model.py's strip removes objects (by name, each with its descendants) before the export: they are not
+        // in the tree, and an armature among them takes its bones along (BlenderPrep.Stripped)
+        bool Kept(BlenderNames.BlenderObject o) => stripped == null || !stripped.Contains(o.Name);
         neutralArmatures = neutralArmatures ?? new HashSet<int>();
         // the bones of every armature as Blender writes them: matrix_world and inverse bind matrix per joint (VehicleProbe.BlenderArmature)
         var boneNotes = new List<string>();
         var boneWorld = new Dictionary<int, float[]>(); var boneIbm = new Dictionary<int, float[]>(); var armaWorldOf = new Dictionary<int, float[]>();
         if (bones)
-            foreach (var a in names.Objects.Where(o => o.Kind == BlenderNames.ObjectKind.Armature))
+            foreach (var a in names.Objects.Where(o => o.Kind == BlenderNames.ObjectKind.Armature && Kept(o)))
             {
                 var aw = a.GltfNode >= 0 ? bworld[a.GltfNode] : Identity();
                 armaWorldOf[a.GltfNode] = aw;
@@ -97,7 +105,7 @@ public static class BlenderExportTree
             }
         var r = new Result();
         r.Notes.AddRange(boneNotes);
-        var objs = names.Objects;
+        var objs = stripped == null ? names.Objects : names.Objects.Where(Kept).ToList();
         var byName = objs.ToDictionary(o => o.Name, o => o, StringComparer.Ordinal);
         // the vtree: an object's children by name (a stable sort keeps creation order among names equal ignoring case)
         var objChildren = new Dictionary<string, List<BlenderNames.BlenderObject>>(StringComparer.Ordinal);
@@ -261,6 +269,23 @@ public static class BlenderExportTree
             return idx;
         }
         foreach (var o in roots) r.SceneRoots.Add(Visit(o));
+        // unused skins: an object uses an armature when it carries the armature modifier under it - every mesh object the
+        // importer skinned, with faces or without. The exporter's tree is made parent first, children in their order
+        var used = new HashSet<int>(objs.Where(x => x.Kind == BlenderNames.ObjectKind.Mesh && x.Skin >= 0 && x.Skin < m.Skins.Count).Select(x => names.ArmatureNodeOfSkin[x.Skin]));
+        var seenArmatures = new HashSet<BlenderNames.BlenderObject>();
+        void Unused(BlenderNames.BlenderObject o)
+        {
+            if (o.Kind == BlenderNames.ObjectKind.Armature && seenArmatures.Add(o) && !used.Contains(o.GltfNode) && indexOf.ContainsKey(o))
+            {
+                var joints = names.BoneNodesInOrder.Where(b => names.ArmatureNodeOfBone[b] == o.GltfNode && indexOf.ContainsKey(b)).Select(b => indexOf[b]).ToList();
+                if (joints.Count > 0) r.UnusedSkins.Add((o.GltfNode, o.Name, joints));
+            }
+            foreach (var c in objChildren[o.Name]) Unused(c);
+        }
+        foreach (var o in roots) Unused(o);
+        // an armature that hangs from a BONE is reached last here; the exporter's tree has it inside its parent armature's
+        // subtree. No file gets that far today (an object under a bone is left to Blender) - set this right with that
+        foreach (var o in objs) if (o.Kind == BlenderNames.ObjectKind.Armature && !seenArmatures.Contains(o)) Unused(o);
         // every bone's armature index (bones reached through a skin got -2 until their armature was indexed)
         foreach (var n in r.Nodes) if (n.BoneNode >= 0 || n.NeutralBone) { int a = n.Parent; while (a >= 0 && r.Nodes[a].BoneNode >= 0) a = r.Nodes[a].Parent; n.ArmatureNode = a; }
         // transforms: objects against their parent's world, joints against their parent joint's or the armature's
