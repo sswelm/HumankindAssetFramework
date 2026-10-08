@@ -229,6 +229,93 @@ per rule, each failed them but one that changes nothing (`<` for `<=` at the wei
 sixteen planted under the drill each failed it on the fixture built for that rule. Three planted defects cannot fail the
 drill, because no imported file reaches them, and are held by the unit tests alone: that equivalent threshold, validate's
 clamp of a weight outside 0..1, and a vertex group whose bone is no joint.
+**The written file's structure** (milestone d, part 4a, 2026-10-07: `editor/BlenderExportTree.cs`, judged by a structure
+stage of the same drill): which nodes Blender's exporter writes, in which order, under which parent, with which transform,
+and which materials in which order - what the Factory's converter walks. Measured first (an `order_try` file of roots and
+children named to tell the rules apart, the fixtures' outputs dumped), then read in `tree.py`, `nodes.py` and
+`exporter.py`: the scene's root objects in creation order; an object's children by name as `bpy.data.objects` sorts them
+(`BLI_strcasecmp`: signed bytes after an ASCII tolower - "a10" before "a9", a non-ASCII byte before every letter); an
+armature's object children before its root bones, bones' children in creation order; the index order is the
+serializer's walk - a node's members alphabetically (children, then mesh, then skin), the node appended AFTER them: every
+child before its parent, a joint reached through a skin before the mesh that uses it, a root last; the dummy root's
+armature holds every top-level object. A transform is mathutils' float32 decomposition of `parent.matrix_world.
+inverted_safe() @ matrix_world` (the matrix alone for a root), the quaternion normalized, turned Y up, each component
+within 2e-6 of its identity snapped to it, an identity property left out (the names fixture's 0.99999994 and
+0.707106829). A skinned mesh hangs from its armature with the identity; a mesh of lines or points alone is a node
+without a mesh; a mesh needing the neutral bone adds the joint "neutral_bone" after the armature's bones. Materials: the
+importer makes one per (glTF material, has COLOR_0) variant on first use, in mesh creation order, named after the glTF
+material - "Material_<index>" when the file has none, Blender's default "Material" when it is there but empty -, a
+"DefaultMaterial" per mesh for a coloured primitive without one; the exporter lists them at first use along its walk.
+`BlenderNames.Objects` and `MaterialOf` carry what the tree needs. **The bones** (part 4b, the same day;
+`VehicleProbe.BlenderArmature.cs`, `BlenderEigen.cs`): a joint's written transform and a skin's inverse bind matrices
+come out of a chain the importer and Blender run on every rig - the bind translation and rotation per bone; the
+BLENDER bone heuristic (every edit bone turned by a quarter about X, its children turned back - mathutils' mul_qt_qtqt
+and mul_qt_v3 -, a bone length from the nearest bone child over 0.004, else the parent's, else its own, else 1 - a
+double square root); the edit bone's head, tail (mathutils' double sums), length (divided by the armature's largest
+scale) and roll (ED_armature_ebone_roll_to_vector: angle_v3v3 by asinf); then leaving edit mode -
+armature_finalize_restpose: head and tail relative to the parent's tail through Eigen's 4x4 inverse of the parent's
+`arm_mat` (`BlenderEigen.InvertM4`: Intel's SSE block algorithm with a true division, since Blender's build has no FMA)
+and mul_mat3_m4_v3; where_is_bone with roll 0 (vec_roll_to_mat3, the parent's length added along Y, mul_m4_m4m4's SSE
+association); the roll that brings that matrix onto the edit bone's (invert_m3_m3, mul_m3_m3m3, -atan2f) and
+where_is_bone once more: `bone.matrix_local`. The exporter then takes armature.matrix_world @ matrix_local @ the
+basis change as the joint's world, decomposes it against the parent joint's or the armature's WITHOUT the
+normalization and the snapping object nodes get (joints.py), writes a -0.0 as 0 (__fix_json), and the inverse bind
+matrix (basis @ armature.matrix_world @ matrix_local).inverted_safe(); the neutral bone is the basis change decomposed
+with (basis @ armature.matrix_world).inverted_safe(). Found on the way: `mathutils.Matrix.inverted()` is NOT
+Blender's C invert_m4_m4 (it is the adjugate), so measuring Eigen through it misled the port for an hour - the C call
+is reached through `bpy.ops.object.parent_set`, which stores it in `matrix_parent_inverse`; five matrices measured
+that way, bit for bit. A tilted joint chain in the skin8 fixture tells Eigen's inverse from the adjugate; eight planted
+defects in the chain each fail the drill on it. NOT compared: an object parented to a bone (its transform needs
+Blender's pose evaluation; the dug-out canoe's eleven parts, the `export_skin_bonechild` fixture) and an animated
+file's object transforms (Blender's posed import state; the Factory preps static entries). Gate sample: 48 node
+lists, 176 object and 46 joint transforms, 26 skins' inverse bind matrices, 2 neutral bones and 24 material lists
+equal; `FULL=1` on 2026-10-07 (after the review below): 160 runs on 80 files, 158 node lists, 50,872 object and 990 joint
+transforms, 538 skins' inverse bind matrices, 2 neutral bones and 128 material lists equal; an earlier run found the walk
+appending an armature before its bones when no mesh uses the skin (the dug-out canoe; fixed, unit-tested) and the one file
+still named is the canoe, whose eight joint transforms differ by ulps because the probe's world matrix for the armature's ancestor `Canoe` (a quaternion 2.9e-8
+off unit, components of 1e-33) is not Blender's - an existing gap of `BlenderWorldMatrices`, now in the backlog;
+the canoe's edit bones and `matrix_local` are equal. `BlenderExportTreeTests`, `BlenderArmatureTests` and
+`BlenderEigenTests` hold each rule on the measured values.
+The review of PR #129 (2026-10-07) added three checks. The prep-only `export_skin_lines` fixture (`fixtures.py --prep`;
+the reader and writer drills do not see it) is a lines-only skinned mesh under a turned Holder with a transform of its own:
+the exporter writes its node without a mesh and without a skin, still under the ARMATURE with the identity, and indexed
+before the joints because the serializer does not reach them through it (measured; a first fixture with Body already
+under the armature and without a transform could not tell that rule from "it stays with its parent"). A negative row
+removes a skin's non-identity `inverseBindMatrices` accessor from one of Blender's outputs (`tools/prep-drill/missing_ibm.py`)
+and requires the structure stage to fail on the implicit identity (the stage had skipped such a skin). And the writer keeps
+a material's empty name (`"name": ""`, which the importer names `Material`; an absent one is `Material_<index>`), with
+`HafModelDiff` telling the two apart (`GlbWriterTests`).
+The skin-wiring regression uses the prep-only `export_skin_twins` fixture: two armatures have
+identical joint names and inverse bind matrices. The structure stage derives each mesh's ordered
+joint indices from its source armature, including the neutral bone when needed, before comparing
+matrices. `tools/prep-drill/wrong_skin.py` constructs two negative exports: a mesh redirected to
+the other skin, and a skin with the other armature's joint indices. Both must fail the prep drill.
+A review of that fix found the same hole one field over: nothing compared WHICH material a written primitive uses (the
+list held names and order, the mesh stage the vertices). The structure stage now compares each primitive's material
+index, with a negative row of its own (`tools/prep-drill/wrong_material.py` swaps two primitives' materials in one of
+Blender's outputs). The joints a skin lists are the tree's now (`BlenderExportTree.Node.SkinJoints`, the rule the writer
+will use - the drill had its own copy), and the stage holds the exporter's one skin per armature: nodes of one armature
+share a skin index, nodes of two never do. Each node's mesh INDEX is compared too (every object's mesh written once, in
+the order the serializer reaches them: `Result.MeshVisitOrder`, which nothing had consumed). `FULL=1` after it (188 runs on 94 files): 5,885 mesh indices, 5,861 material assignments and 558 skins' joint indices equal, 474 nodes sharing their armature's skin.
+A second review the same day (two independent readers against Blender's and Eigen's sources; every finding run through
+Blender before it was believed) found four shapes the 80 real files do not have and the tree got wrong, and a branch of
+the bone chain that was not ported. Fixed and held by prep-only fixtures: a camera is not exported (`export_camera`; the
+filter of `tree.py`), an object parented to a bone hangs from the first node that BEARS THE BONE'S NAME in a depth-first
+search - an object hung earlier can come before the joint (`export_bone_name_clash`), a material named JSON `null` has no
+name (`export_material_null`), and an edit bone no longer than 1e-6 is elongated on leaving edit mode - along itself, or
+along Z when it has no length (`export_bones_tiny`, `export_bones_nolength`). Left to Blender, each NAMED by the tree
+(`BlenderExportTree.Result.Problems`; the drill prints a NOTE and does not compare that file's structure): a camera with
+children (their matrices carry the importer's camera correction, which the world matrices do not model),
+`KHR_lights_punctual`, a skin on a mesh without weights (Blender writes its positions through the armature and joints of a
+bone it never adds; `BlenderReduce.FallbackReason` declines the object too), and a material read with two different
+sets of UV indices (the exporter writes it once per set). A file with a declined object is left to Blender as a whole.
+The bone chain's branches the sample did not take now have a fixture and a `bones:` COVER row each, counted only when
+the file that took the branch compared equal: a bone of length 1, a bone child nearer than 0.004, a bone along -Y (the
+mirrored matrix) and almost along it (the series), two root bones, a skeleton that is not a joint on a skin with inverse
+bind matrices. Ten planted defects each fail; two were NOT caught at first and changed their fixtures - a lone bone's
+length shows only in a child's matrices, and 200 km out the 2e-6 elongation is itself lost. The structure stage now also
+compares every node's children ARRAY in order and requires a skin without a `skeleton`; its COVER rows count after the
+comparison, not before. `FULL=1` after it: 186 runs on 93 files, 176 node lists, 50,960 object and 1,026 joint transforms, 554 skins' inverse bind matrices and 130 material lists equal; no real file is left to Blender by the new rules, and real files do take the -Y and length-1 branches; the canoe remains the one file named.
 
 **The Clip Range picker's in-process rig** (step 4, 2026-10-03): `HafUnityFrameTests` hold the preview frame's arithmetic
 without Unity — the X mirror's conjugation of rotations, matrices and matrix nodes; Unity's skinning formula fed the rig's

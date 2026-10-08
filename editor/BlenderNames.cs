@@ -74,6 +74,34 @@ public static class BlenderNames
         /// armature (".skinned") is under that armature's node here; a ".mesh" child of an armature or bone node is under
         /// that node. The Lab's placement detaches a part and its DIRECT children (`o.children`) - this is who those are.</summary>
         public int[] ObjectParentNode;
+        /// <summary>Every object the import made, in creation order, as Blender's scene holds it: what the glTF EXPORTER walks
+        /// (tools/prep-drill, step 5 d). Bone shapes are left out: prep_model.py removes them before the export.</summary>
+        public List<BlenderObject> Objects = new List<BlenderObject>();
+        /// <summary>The Blender material of every (glTF material, with COLOR_0) variant a mesh's primitives use, keyed by the
+        /// MESH DATABLOCK's node (the first mesh node that made it) too, because a coloured primitive without a material gets
+        /// its own "DefaultMaterial" per mesh (imp/mesh.py). Materials are made on first use, in mesh creation order, named
+        /// after the glTF material (else "Material_&lt;index&gt;"), unique as datablocks are.</summary>
+        public Dictionary<(int meshNode, int material, bool vertexColor), string> MaterialOf = new Dictionary<(int, int, bool), string>();
+        /// <summary>Per glTF mesh node: the node whose object first made its mesh datablock (itself, or an earlier node with the
+        /// same mesh and skin) - the key MaterialOf uses.</summary>
+        public int[] MeshDatablockNode;
+        public List<string> MaterialsInOrder = new List<string>();
+        public NamePool MaterialPool;
+    }
+
+    public enum ObjectKind { Empty, Mesh, Armature, Camera }
+
+    /// <summary>One Blender object after the import: its unique name, its parent object (null under the scene), the bone it
+    /// hangs from when parented to one (parent_type BONE: the parent is then that bone's armature), what it carries.</summary>
+    public sealed class BlenderObject
+    {
+        public string Name, Parent, ParentBone;
+        public ObjectKind Kind;
+        public int GltfNode = -1;        // the glTF node that became it, or -1 for a vnode the importer made (".skinned", ".mesh", ".camera")
+        public int MeshNode = -1;        // the glTF node whose mesh it carries, or -1
+        public int Skin = -1;            // that mesh node's skin, or -1
+        public int CameraNode = -1;
+        public int ArmatureSkin = -1;    // for an armature: the skin that made it
     }
 
     enum Kind { Object, Bone, DummyRoot }
@@ -173,24 +201,46 @@ public static class BlenderNames
         var armatures = seed?.ArmaturePool.Clone() ?? new NamePool(); var cameras = seed?.CameraPool.Clone() ?? new NamePool();
         var armaName = new Dictionary<string, string>();
         var meshData = new Dictionary<(int mesh, int skin), string>();
-        void Create(string id, int parentObject)
+        var meshDataNode = new Dictionary<(int mesh, int skin), int>();
+        var materials = seed?.MaterialPool.Clone() ?? new NamePool();
+        r.MeshDatablockNode = new int[m.Nodes.Count];
+        void Create(string id, int parentObject, string parentName, string parentBone)
         {
             var n = v[id];
             int ownObject = parentObject;   // what this vnode's children are parented to: its own object, or nothing below a bone
+            string ownName = parentName, ownBone = parentBone;
             if (n.Type == Kind.Object)
             {
                 int ni0 = Index(id);
                 if (ni0 >= 0) r.ObjectParentNode[ni0] = parentObject;
                 ownObject = ni0;   // a synthetic vnode (".skinned", ".mesh", ".camera") has no children of its own
                 string name;
+                var bo = new BlenderObject { Parent = parentName, ParentBone = parentBone, GltfNode = ni0, MeshNode = n.MeshNode, CameraNode = n.CameraNode, ArmatureSkin = n.IsArma ? n.ArmaSkin : -1 };
+                bo.Kind = n.MeshNode >= 0 ? ObjectKind.Mesh : n.IsArma ? ObjectKind.Armature : n.CameraNode >= 0 ? ObjectKind.Camera : ObjectKind.Empty;
+                if (n.MeshNode >= 0) bo.Skin = m.Nodes[n.MeshNode].Skin;
                 if (n.MeshNode >= 0)
                 {
                     int meshIdx = m.Nodes[n.MeshNode].Mesh, skin = m.Nodes[n.MeshNode].Skin;
                     if (!meshData.TryGetValue((meshIdx, skin), out var data))
                     {
                         data = meshes.Unique(m.Meshes[meshIdx].Name.Length > 0 ? m.Meshes[meshIdx].Name : "Mesh_" + meshIdx);
-                        meshData[(meshIdx, skin)] = data;
+                        meshData[(meshIdx, skin)] = data; meshDataNode[(meshIdx, skin)] = n.MeshNode;
+                        // the mesh's materials, made on first use: one per (material, COLOR_0) variant, "DefaultMaterial" per mesh
+                        // for a coloured primitive without one, none for a plain primitive without one
+                        foreach (var p in m.Meshes[meshIdx].Primitives)
+                        {
+                            bool vc = p.Colors != null;
+                            if (p.Material < 0 && !vc) continue;
+                            var key = (p.Material < 0 ? n.MeshNode : -1, p.Material, vc);
+                            if (r.MaterialOf.ContainsKey(key)) continue;
+                            // imp/material.py: the glTF name; "Material_<index>" when the file has none; a name that is there but EMPTY
+                            // goes to bpy.data.materials.new("") and Blender gives it the datablock's default, "Material"
+                            string matName = p.Material < 0 ? "DefaultMaterial" : m.Materials[p.Material].NameAbsent ? "Material_" + p.Material : m.Materials[p.Material].Name.Length > 0 ? m.Materials[p.Material].Name : "Material";
+                            matName = materials.Unique(matName);
+                            r.MaterialOf[key] = matName; r.MaterialsInOrder.Add(matName);
+                        }
                     }
+                    r.MeshDatablockNode[n.MeshNode] = meshDataNode[(meshIdx, skin)];
                     name = objects.Unique(n.Name ?? data);
                     r.MeshObjectOfNode[n.MeshNode] = name;
                     r.MeshObjectsInOrder.Add((n.MeshNode, name));
@@ -224,11 +274,13 @@ public static class BlenderNames
                 r.ObjectsInOrder.Add(name);
                 int ni = Index(id);
                 if (ni >= 0) r.ObjectOfNode[ni] = name;
+                bo.Name = name; r.Objects.Add(bo);
+                ownName = name; ownBone = null;
             }
-            else if (n.Type == Kind.Bone) ownObject = -1;   // objects below a bone are parented to the BONE (parent_type BONE), not to an object
-            foreach (var c in n.Children) Create(c, ownObject);
+            else if (n.Type == Kind.Bone) { ownObject = -1; ownBone = r.BoneOfJoint.TryGetValue(Index(id), out var bn) ? bn : null; }   // objects below a bone are parented to the BONE (parent_type BONE), not to an object: Blender's parent is the armature
+            foreach (var c in n.Children) Create(c, ownObject, ownName, ownBone);
         }
-        Create("root", -1);
+        Create("root", -1, null, null);
         // a skin's armature is the one its joints are bones of (the importer reads it off the first joint) - not always
         // the one the skin itself would have made: a skin whose joints lie inside another skin's chain makes none
         r.ArmatureNodeOfBone = new int[m.Nodes.Count];
@@ -239,7 +291,7 @@ public static class BlenderNames
             if (arma == null || !armaName.ContainsKey(arma)) { r.ArmatureNodeOfSkin[si] = -1; continue; }
             r.ArmatureOfSkin[si] = armaName[arma]; r.ArmatureNodeOfSkin[si] = Index(arma);
         }
-        r.ObjectPool = objects; r.MeshPool = meshes; r.ArmaturePool = armatures; r.CameraPool = cameras;
+        r.ObjectPool = objects; r.MeshPool = meshes; r.ArmaturePool = armatures; r.CameraPool = cameras; r.MaterialPool = materials;
         return r;
     }
 

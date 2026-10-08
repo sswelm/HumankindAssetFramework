@@ -147,7 +147,7 @@ public static partial class VehicleProbe
     }
 
     /// <summary>mul_m4_m4m4(R, A, B) = A @ B with the SSE2 association: column i of R = (B[i][0] A[0] + B[i][1] A[1]) + (B[i][2] A[2] + B[i][3] A[3]).</summary>
-    static float[] MulM4(float[] A, float[] B)
+    internal static float[] MulM4(float[] A, float[] B)
     {
         var R = new float[16];
         for (int i = 0; i < 4; i++)
