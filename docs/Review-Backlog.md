@@ -141,7 +141,10 @@ importer's `camera_correction`, an ulp on the child's matrix, which is a gap of 
 which the reader does not carry per node; a skin on a mesh without weights; a material read with two sets of UV indices,
 which the exporter writes once per set - `get_final_material`), `BlenderEigen.InvertM4`'s zero check, which is a double
 cofactor determinant and not Eigen's float32 formula (it matters only for a matrix singular in one and not the other; a
-bone's matrix is not), (4c) the writer and the converter-level acceptance (OBJ
+bone's matrix is not), the shapes the PREP names and leaves to Blender (part 4c, `BlenderPrep.cs`, done 2026-10-08: the writer and the
+converter-level acceptance - a JPEG whose alpha is read, which Blender encodes again as PNG; material variants; a factor
+outside 0..1; an image that is not PNG or JPEG or whose file name is not its format's; an unskinned object named
+Icosphere; no reduce asked, where instanced meshes stay shared; an unlit material's JPEG is over-declined), was: (4c) the writer and the converter-level acceptance (OBJ
 byte-equal, images copied), (4d) prep_model in C# - strip, the file as the Factory's
 converter reads it (node and material order: Blender writes materials in order of first use, one per vertex-colour
 variant, and a `DefaultMaterial` for a coloured primitive without one), the write, the wiring behind

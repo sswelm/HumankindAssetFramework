@@ -57,6 +57,7 @@
     <Compile Include="..\editor\BlenderExport.cs" Link="BlenderExport.cs" />
     <Compile Include="..\editor\BlenderExportTree.cs" Link="BlenderExportTree.cs" />
     <Compile Include="..\editor\BlenderEigen.cs" Link="BlenderEigen.cs" />
+    <Compile Include="..\editor\BlenderPrep.cs" Link="BlenderPrep.cs" />
   </ItemGroup>
 
   <!-- compile-time references the TEST code uses directly -->
