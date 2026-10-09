@@ -33,6 +33,26 @@ public static partial class VehicleProbe
         size = new[] { (float)s[0], (float)s[2], (float)s[1] };
     }
 
+    /// <summary>A node's location, quaternion (w, x, y, z) and scale as the importer's get_node_trs gives them.</summary>
+    internal static void BlenderTrs(HafNode node, out float[] loc, out float[] quat, out float[] size)
+    {
+        if (node.HasMatrix) DecomposeAsBlender(node.Matrix, out loc, out quat, out size);
+        else ConvertTrs(node.Translation, node.Rotation, node.Scale, out loc, out quat, out size);
+    }
+
+    /// <summary>A pose in glTF's convention (translation, rotation x y z w, scale - any of them null) as
+    /// BlenderWorldMatrices takes it: Blender's location, quaternion (w, x, y, z) and scale.</summary>
+    static Func<int, float[][]> InBlenderConvention(Func<int, double[][]> gltf)
+    {
+        return n =>
+        {
+            var p = gltf(n);
+            if (p == null) return null;
+            ConvertTrs(p[0] ?? new double[] { 0, 0, 0 }, p[1] ?? new double[] { 0, 0, 0, 1 }, p[2] ?? new double[] { 1, 1, 1 }, out var l, out var q, out var s);
+            return new[] { p[0] != null ? l : null, p[1] != null ? q : null, p[2] != null ? s : null };
+        };
+    }
+
     /// <summary>get_node_trs for a matrix node: convert_matrix, then Matrix.decompose() - mat4_to_loc_rot_size and
     /// mat3_normalized_to_quat_fast, float32 as Blender runs them.</summary>
     static void DecomposeAsBlender(double[] g, out float[] loc, out float[] quat, out float[] size)
@@ -128,8 +148,12 @@ public static partial class VehicleProbe
         return q;
     }
 
-    /// <summary>BKE_object_to_mat4: the normalized quaternion through quat_to_mat3 (double inside), each column times its scale
-    /// (one rounded product - the other two terms are zeros), the location; column-major.</summary>
+    /// <summary>BKE_object_to_mat4: the normalized quaternion through quat_to_mat3 (double inside); the delta rotation
+    /// before it (mul_m3_m3m3(mat, dmat, rmat) with dmat the identity quat_to_mat3 makes of (1, 0, 0, 0)); the scale
+    /// (mul_m3_m3m3(r_mat, rmat, smat), smat the diagonal of scale x dscale); the location plus the delta location.
+    /// Column-major. The two products and the sum change no VALUE - they decide the sign of a ZERO: a term of -0 survives
+    /// only beside other negative zeros, and -0 + 0 is +0 (a rotated root's matrix had -0 where Blender's has +0 until
+    /// this was written out; review of the posed state, 2026-10-09).</summary>
     static float[] ObjectMatrix(float[] loc, float[] quat, float[] size)
     {
         var tq = (float[])quat.Clone(); NormalizeQt(tq);
@@ -140,9 +164,22 @@ public static partial class VehicleProbe
         r[0] = new[] { (float)(1.0 - qbb - qcc), (float)(qdc + qab), (float)(-qdb + qac) };
         r[1] = new[] { (float)(-qdc + qab), (float)(1.0 - qaa - qcc), (float)(qda + qbc) };
         r[2] = new[] { (float)(qdb + qac), (float)(-qda + qbc), (float)(1.0 - qaa - qbb) };
+        // mul_m3_m3m3(R, A, B): R[i][j] = B[i][0] A[0][j] + B[i][1] A[1][j] + B[i][2] A[2][j], left to right in float32
+        var rot = new float[3][];
+        for (int i = 0; i < 3; i++)
+        {
+            rot[i] = new float[3];
+            for (int j = 0; j < 3; j++)
+                rot[i][j] = (float)((float)((float)(r[i][0] * (j == 0 ? 1f : 0f)) + (float)(r[i][1] * (j == 1 ? 1f : 0f))) + (float)(r[i][2] * (j == 2 ? 1f : 0f)));
+        }
         var bm = new float[16];
-        for (int c = 0; c < 3; c++) for (int w = 0; w < 3; w++) bm[c * 4 + w] = (float)(size[c] * r[c][w]);
-        bm[12] = loc[0]; bm[13] = loc[1]; bm[14] = loc[2]; bm[15] = 1f;
+        for (int i = 0; i < 3; i++)
+        {
+            float s0 = i == 0 ? (float)(size[0] * 1f) : 0f, s1 = i == 1 ? (float)(size[1] * 1f) : 0f, s2 = i == 2 ? (float)(size[2] * 1f) : 0f;
+            for (int j = 0; j < 3; j++)
+                bm[i * 4 + j] = (float)((float)((float)(s0 * rot[0][j]) + (float)(s1 * rot[1][j])) + (float)(s2 * rot[2][j]));
+        }
+        bm[12] = (float)(loc[0] + 0f); bm[13] = (float)(loc[1] + 0f); bm[14] = (float)(loc[2] + 0f); bm[15] = 1f;
         return bm;
     }
 
@@ -157,13 +194,14 @@ public static partial class VehicleProbe
     }
 
     /// <summary>Every node's matrix_world as Blender holds it (column-major float32), at the pose: posedTrs gives a node's
-    /// animated translation, rotation and scale (any of them null for an unanimated channel), or null for an unanimated node.
+    /// animated location, rotation_quaternion (w, x, y, z) and scale in BLENDER's convention (any of them null for an
+    /// unanimated channel), or null for an unanimated node.
     /// An animated channel replaces the base value the importer set - for a matrix node, the decomposed matrix's.</summary>
-    internal static float[][] BlenderWorldMatrices(HafModel m, Func<int, double[][]> posedTrs) => BlenderWorldMatrices(m, posedTrs, out _);
+    internal static float[][] BlenderWorldMatrices(HafModel m, Func<int, float[][]> posedTrs) => BlenderWorldMatrices(m, posedTrs, out _);
 
     /// <summary>... and every node's LOCAL matrix (BKE_object_to_mat4 of its loc, quat and size), from which a child's world matrix is
     /// parent @ local: what Blender recomputes when a parent's matrix changes (the Lab's placement detaches children first).</summary>
-    internal static float[][] BlenderWorldMatrices(HafModel m, Func<int, double[][]> posedTrs, out float[][] localOut)
+    internal static float[][] BlenderWorldMatrices(HafModel m, Func<int, float[][]> posedTrs, out float[][] localOut)
     {
         var world = new float[m.Nodes.Count][]; var locals = new float[m.Nodes.Count][];
         var stack = new Stack<int>(); var seen = new bool[m.Nodes.Count];
@@ -174,17 +212,13 @@ public static partial class VehicleProbe
             if (seen[n]) continue;
             seen[n] = true;
             var node = m.Nodes[n];
-            float[] loc, quat, size;
-            if (node.HasMatrix) DecomposeAsBlender(node.Matrix, out loc, out quat, out size);
-            else ConvertTrs(node.Translation, node.Rotation, node.Scale, out loc, out quat, out size);
+            BlenderTrs(node, out float[] loc, out float[] quat, out float[] size);
             var p = posedTrs?.Invoke(n);
             if (p != null)
             {
-                float[] l2, q2, s2;
-                ConvertTrs(p[0] ?? new double[] { 0, 0, 0 }, p[1] ?? new double[] { 0, 0, 0, 1 }, p[2] ?? new double[] { 1, 1, 1 }, out l2, out q2, out s2);
-                if (p[0] != null) loc = l2;
-                if (p[1] != null) quat = q2;
-                if (p[2] != null) size = s2;
+                if (p[0] != null) loc = p[0];
+                if (p[1] != null) quat = p[1];
+                if (p[2] != null) size = p[2];
             }
             var local = ObjectMatrix(loc, quat, size); locals[n] = local;
             world[n] = node.Parent >= 0 && world[node.Parent] != null ? MulM4(world[node.Parent], local) : local;

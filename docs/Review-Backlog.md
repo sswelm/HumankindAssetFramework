@@ -150,7 +150,16 @@ converter reads it (node and material order: Blender writes materials in order o
 variant, and a `DefaultMaterial` for a coloured primitive without one), the write, the wiring behind
 `UniversalBaker.PrepViaBlender` with Blender as the fallback; KNOWN on the way: `prep_model.py` fails on a file of several
 scenes ("not in View Layer") - today's behaviour, the drill passes it only as that; 2–3 weeks in all;
-(3) `deploy_convert` (3–4 weeks; the fuse already walks parts and welds); (4) `rig_anim` (3–4 weeks); (5)
+(3) `deploy_convert` (3–4 weeks; the fuse already walks parts and welds) - STARTED 2026-10-09. It is HAF's own algorithm on
+Blender's animation machinery (frame evaluation, a constraint bake, fcurves, the exporter's sampling), five registry
+models use it, and its output goes to `rig_anim.py` - so Blender leaves that path only with (4). Parts: **1 the posed
+state** (`BlenderPosedState.cs`, `tools/deploy_drill.sh`: every object's matrix and animated property at a frame, the
+bits - a zero's sign included - on 84 files) - done 2026-10-09; 2 the decisions (strip, frame range, normalization, parts, slimming, cull, path) against the script's
+`DEPLOY` log lines; 3 the armature's rest and the binding; 4 the bake, the options (barrel, legs, recoil, wheels) and
+the role clips; 5 the exported animation, the wiring, the existing golden. OPEN for part 4: bit-exact or a tight
+tolerance - the script's decisions are thresholds on continuous values, the existing golden compares three decimals;
+to be decided on measured distance. Not modelled yet: Bezier keys (a CUBICSPLINE sampler), `KHR_animation_pointer`, an
+animated armature's pose and what hangs from its bones, a camera's correction (also open for the prep); (4) `rig_anim` (3–4 weeks); (5)
 `vehicle_rig` (4–8 weeks; the Lab already computes much of the geometry in C#).
 
 - **Blender-exact vertex positions for skinned parts** — OPEN (2026-10-02, found by 3c). Blender's importer skins a
