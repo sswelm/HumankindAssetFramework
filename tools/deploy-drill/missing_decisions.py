@@ -54,6 +54,28 @@ def main(out, dump, jobs):
     t = job[loc].split("\t"); t[2] = "3"
     lines = list(job); lines[loc] = "\t".join(t)
     write("index", lines)
+    # the fire-window snapshot (5a): a job that has one - a snapshot row, a pose row of the new armature and an object
+    # row after it, each missing, doubled in place of its neighbour, or under a name nothing has
+    fire = next((b for b in blocks if "SNAP" in kinds(b) and "DONE" in kinds(b) and not b[0].startswith(("JOB\tLEFT:", "JOB\tBAKELEFT:"))), None)
+    if fire is None:
+        raise ValueError("no job with a fire-window snapshot in the dump")
+    control("fire", fire)
+    for kind in ("SNAP", "APB", "O4"):
+        rows = [i for i, l in enumerate(fire) if l.startswith(kind + "\t")]
+        lines = list(fire); del lines[rows[0]]
+        write("fire_%s_missing" % kind, lines)
+        lines = list(fire); lines[rows[1]] = fire[rows[0]]
+        write("fire_%s_duplicate" % kind, lines)
+        t = fire[rows[0]].split("\t"); t[2 if kind == "SNAP" else 1] = "no such name"
+        lines = list(fire); lines[rows[0]] = "\t".join(t)
+        write("fire_%s_unknown" % kind, lines)
+        lines = list(fire); lines[rows[0]] = fire[rows[0]].rsplit("\t", 1)[0]
+        write("fire_%s_short" % kind, lines)
+        last = fire[rows[-1]][-1]
+        lines = list(fire); lines[rows[-1]] = fire[rows[-1]][:-1] + ("0" if last != "0" else "1")
+        write("fire_%s_value" % kind, lines)
+    lines = [l for l in fire if not l.startswith("LOG3\t")]
+    write("fire_LOG3_missing", lines)
     abort = next((b for b in blocks if "EXIT\t1" in b and "DONE" in kinds(b) and not b[0].startswith("JOB\tLEFT:")), None)
     if abort is None:
         raise ValueError("no abort job in the dump for the EXIT regressions")

@@ -18,7 +18,7 @@ static class DecisionsDrill
         "no object with an action left (frame range 1..1)", "normalization: x100", "normalization: recentered", "normalization: none",
         "bone slimming", "the legacy path", "the contract path", "a culled part", "a culled part's descendant", "a pair-merge", "the script stops (no animated part)",
         "the recoil step off with a recoil range given", "left to Blender (BlenderDeploy.Fallback)", "an armature that is a part (its bones are animated)",
-        "a bake on the legacy path", "a custom property keyed by the bake (not modelled: it moves nothing)", "an imported armature baked with it (its bones keyed a frame, its own animation dropped)", "a clip of frame 0 alone (the bake keys frame 1 too)", "a bake on the contract path (scale curves stripped, delta-form rebase)",
+        "a bake on the legacy path", "a fire-window snapshot (5a)", "no recoil range: no snapshot", "a custom property keyed by the bake (not modelled: it moves nothing)", "an imported armature baked with it (its bones keyed a frame, its own animation dropped)", "a clip of frame 0 alone (the bake keys frame 1 too)", "a bake on the contract path (scale curves stripped, delta-form rebase)",
         "no static mesh (StaticRoot has no anchor)", "StaticRoot anchored to a mesh that has no parent", "StaticRoot anchored to a static mesh's parent",
         "a root-motion anchor (the armature parented for the bake)", "the biggest part does not travel (no anchor)", "no mesh rides a bone (no travel measured)",
         "a bone under its part's parent's bone", "a part whose parent is no part (a root bone)",
@@ -39,7 +39,7 @@ static class DecisionsDrill
             jobs[t[0]] = t;
         }
         var cover = new SortedDictionary<string, long>(); foreach (var k in CoverKeys) cover[k] = 0;
-        int fails = 0, files = 0, left = 0; long matrices = 0, objects = 0, lines = 0, bones = 0, curves = 0, keysCompared = 0, after = 0, importedKeys = 0, held2 = 0, atLast = 0;
+        int fails = 0, files = 0, left = 0; long matrices = 0, objects = 0, lines = 0, bones = 0, curves = 0, keysCompared = 0, after = 0, importedKeys = 0, held2 = 0, atLast = 0, snapped = 0;
         var blocks = new List<List<string>>();
         foreach (var dump in args.Skip(1))
             foreach (var line in File.ReadLines(dump))
@@ -51,7 +51,7 @@ static class DecisionsDrill
         {
             string key = block[0].Split('\t')[1];
             files++;
-            var problems = new List<string>(); string bakeLeftReason = null; bool bakeClamped = false, rebakedArmature = false;
+            var problems = new List<string>(); string bakeLeftReason = null; bool bakeClamped = false, rebakedArmature = false, fireSnap = false;
             try
             {
                 if (!jobs.TryGetValue(key, out var job)) throw new InvalidDataException("the dump has a job the jobs file does not");
@@ -249,12 +249,52 @@ static class DecisionsDrill
                     foreach (var o in baked.Objects)
                     {
                         if (!o2.TryGetValue(o.Name, out var row) || row.Length != 18) throw new InvalidDataException($"the dump has no complete matrix row after the bake for '{o.Name}'");
-                        bool ok = true;
-                        for (int rr = 0; rr < 4; rr++) for (int c = 0; c < 4; c++) if (H(o.World[c * 4 + rr]) != row[2 + rr * 4 + c]) ok = false;
+                        bool ok = true; var afterBake = baked.AfterBake[o.Name];
+                        for (int rr = 0; rr < 4; rr++) for (int c = 0; c < 4; c++) if (H(afterBake[c * 4 + rr]) != row[2 + rr * 4 + c]) ok = false;
                         after++;
                         if (!ok) { wrongAfter++; firstAfter = firstAfter ?? $"'{o.Name}'"; }
                     }
                     if (wrongAfter > 0) problems.Add($"{wrongAfter} of {baked.Objects.Count} matrices after the bake differ, first {firstAfter}");
+                    // ---- 5a, the fire-window snapshot (part 5a): its log line, every bone at every frame of the window, what
+                    //      the new armature's pose bones hold afterwards and where the scene stands
+                    var log3 = block.Where(l => l.StartsWith("LOG3\t")).Select(l => l.Substring(5)).ToList();
+                    Compare(problems, "the fire window's log", baked.FireLog, log3);
+                    lines += log3.Count;
+                    var snap = Of("SNAP"); var seenSnap = new HashSet<(int, string)>(); long wrongSnap = 0; string firstSnap = null;
+                    foreach (var t in snap)
+                    {
+                        if (t.Length != 10) throw new InvalidDataException($"the dump's snapshot row has {t.Length} fields, expected 10");
+                        int f = int.Parse(t[1]);
+                        if (!baked.FireSnap.TryGetValue(f, out var atFrame) || !atFrame.TryGetValue(t[2], out var mine)) throw new InvalidDataException($"the dump has an unknown snapshot row: frame {f}, bone '{t[2]}'");
+                        if (!seenSnap.Add((f, t[2]))) throw new InvalidDataException($"the dump has a snapshot row twice: frame {f}, bone '{t[2]}'");
+                        snapped++;
+                        if (!mine.Select(H).SequenceEqual(t.Skip(3))) { wrongSnap++; firstSnap = firstSnap ?? $"'{t[2]}' at frame {f}: here [{string.Join(",", mine.Select(Show))}] Blender [{string.Join(",", t.Skip(3).Select(h => Show(F(h))))}]"; }
+                    }
+                    foreach (var kv in baked.FireSnap) foreach (var bone in kv.Value.Keys) if (!seenSnap.Contains((kv.Key, bone))) throw new InvalidDataException($"the dump has no snapshot row for frame {kv.Key}, bone '{bone}'");
+                    if (wrongSnap > 0) problems.Add($"{wrongSnap} of {snap.Count} snapshot rows differ, first {firstSnap}");
+                    if (baked.FireSnap.Count > 0) fireSnap = true;
+                    var apb = Of("APB"); var seenApb = new HashSet<string>(StringComparer.Ordinal); long wrongApb = 0; string firstApb = null;
+                    foreach (var t in apb)
+                    {
+                        if (t.Length != 12) throw new InvalidDataException($"the dump's armature pose row has {t.Length} fields, expected 12");
+                        if (!baked.ArmPose.TryGetValue(t[1], out var mine)) throw new InvalidDataException($"the dump has an unknown armature pose row: bone '{t[1]}'");
+                        if (!seenApb.Add(t[1])) throw new InvalidDataException($"the dump has an armature pose row twice: bone '{t[1]}'");
+                        if (!mine.Select(H).SequenceEqual(t.Skip(2))) { wrongApb++; firstApb = firstApb ?? $"'{t[1]}': here [{string.Join(",", mine.Select(Show))}] Blender [{string.Join(",", t.Skip(2).Select(h => Show(F(h))))}]"; }
+                    }
+                    foreach (var bone in baked.ArmPose.Keys) if (!seenApb.Contains(bone)) throw new InvalidDataException($"the dump has no armature pose row for bone '{bone}'");
+                    if (wrongApb > 0) problems.Add($"{wrongApb} of {apb.Count} pose bones of the new armature hold other values after the fire window, first {firstApb}");
+                    var o4 = Of("O4"); var seenO4 = new HashSet<string>(StringComparer.Ordinal); long wrongO4 = 0; string firstO4 = null;
+                    foreach (var t in o4)
+                    {
+                        if (t.Length != 18) throw new InvalidDataException($"the dump's object row after the fire window has {t.Length} fields, expected 18");
+                        if (!baked.AfterFire.TryGetValue(t[1], out var mine)) throw new InvalidDataException($"the dump has an unknown object row after the fire window: '{t[1]}'");
+                        if (!seenO4.Add(t[1])) throw new InvalidDataException($"the dump has an object row after the fire window twice: '{t[1]}'");
+                        bool ok = true;
+                        for (int rr = 0; rr < 4; rr++) for (int c = 0; c < 4; c++) if (H(mine[c * 4 + rr]) != t[2 + rr * 4 + c]) ok = false;
+                        if (!ok) { wrongO4++; firstO4 = firstO4 ?? $"'{t[1]}'"; }
+                    }
+                    foreach (var name in baked.AfterFire.Keys) if (!seenO4.Contains(name)) throw new InvalidDataException($"the dump has no object row after the fire window for '{name}'");
+                    if (wrongO4 > 0) problems.Add($"{wrongO4} of {o4.Count} matrices after the fire window differ, first {firstO4}");
                     // ... and the same scene at the LAST frame of the range (the dump set it last of all): a frozen armature
                     // object, a stripped scale curve and the re-baked keys show there, not at the bind frame
                     var o3 = Of("O3").ToDictionary(t => t[1], t => t, StringComparer.Ordinal); var pb3 = Of("PB3");
@@ -333,6 +373,7 @@ static class DecisionsDrill
                     if (r.Bones.Any(b => b.Part != null && b.Part.Parent != null && b.Parent == null)) cover["a part whose parent is no part (a root bone)"]++;
                 }
                 if (bakeLeftReason != null) Console.WriteLine($"BAKELEFT {key}: {bakeLeftReason}");   // no job is so marked since part 4b; the mark stays for what the later steps may leave
+                if (bakeLeftReason == null && !r.Exit) cover[fireSnap ? "a fire-window snapshot (5a)" : "no recoil range: no snapshot"]++;
                 if (rebakedArmature) cover["an imported armature baked with it (its bones keyed a frame, its own animation dropped)"]++;
                 if (bakeClamped) cover["a clip of frame 0 alone (the bake keys frame 1 too)"]++;
                 if (bakeLeftReason == null && !r.Exit) cover[r.Legacy ? "a bake on the legacy path" : "a bake on the contract path (scale curves stripped, delta-form rebase)"]++;
@@ -345,7 +386,7 @@ static class DecisionsDrill
         var dumped = new HashSet<string>(blocks.Select(b => b[0].Split('\t')[1]), StringComparer.Ordinal);
         foreach (var k in jobs.Keys) if (!dumped.Contains(k)) { fails++; Console.WriteLine($"FAIL {k}: the dump holds no such job"); }
         foreach (var kv in cover) Console.WriteLine($"COVER {kv.Value} {kv.Key}");
-        Console.WriteLine($"TOTAL jobs {files} failed {fails} left {left} objects {objects} matrices {matrices} lines {lines} bones {bones} curves {curves} keys {keysCompared} after {after} imported {importedKeys} held {held2} last {atLast}");
+        Console.WriteLine($"TOTAL jobs {files} failed {fails} left {left} objects {objects} matrices {matrices} lines {lines} bones {bones} curves {curves} keys {keysCompared} after {after} imported {importedKeys} held {held2} last {atLast} snapshot {snapped}");
         return fails == 0 ? 0 : 1;
     }
 

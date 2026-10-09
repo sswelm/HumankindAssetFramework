@@ -97,6 +97,16 @@ public static class BlenderDeploy
         /// <summary>`scene.frame_set(frame)` on the scene the conversion has reached, for a drill: every object's
         /// matrix_world by name and what each imported pose bone holds. It MOVES the scene - nothing may follow it.</summary>
         public Func<int, (Dictionary<string, float[]> worlds, Dictionary<string, Dictionary<string, float[][]>> pose)> ProbeAt;
+        // the scene as the BAKE left it (every object's matrix_world by name): the steps after it move it on
+        public Dictionary<string, float[]> AfterBake;
+        // ---- 5a, the fire-window snapshot: per source frame, per bone of the new armature, its location (3) and
+        //      rotation_quaternion (4) as the baked action gives them there; the segments as the script reads them
+        public readonly SortedDictionary<int, Dictionary<string, float[]>> FireSnap = new SortedDictionary<int, Dictionary<string, float[]>>();
+        public readonly List<(int start, int end, int step)> Segments = new List<(int, int, int)>();
+        public readonly List<string> FireLog = new List<string>();
+        // what each pose bone of the new armature HOLDS now (location 3, quaternion 4, scale 3), and the scene after 5a
+        public readonly Dictionary<string, float[]> ArmPose = new Dictionary<string, float[]>(StringComparer.Ordinal);
+        public Dictionary<string, float[]> AfterFire;
     }
 
     /// <summary>A bone of the armature at rest.</summary>
@@ -548,6 +558,15 @@ public static class BlenderDeploy
         }
         FrameSet(fmin);   // the bake puts the scene's frame back
         for (int i = 0; i < nb; i++) r.Keys[r.Bones[i].Name] = KeysFromBasis(bakedBasis[i]);
+        // the new armature's pose bones: the bake left their properties at the LAST frame's values, and the script's
+        // next operator evaluates the new action at the bind frame over them (an equal value is not written)
+        foreach (var b in r.Bones)
+        {
+            var keys = r.Keys[b.Name];
+            var held = (float[])keys[nf - 1].Clone();
+            for (int c = 0; c < 10; c++) if (held[c] != keys[0][c]) held[c] = keys[0][c];
+            r.ArmPose[b.Name] = held;
+        }
         // the imported armatures: their bones are keyed a frame from here on, the properties left at the LAST frame's
         // values; the armature OBJECT's own curves went with the action the bake replaced - it stays where the bind
         // frame put it.
@@ -578,6 +597,7 @@ public static class BlenderDeploy
         if (!r.Legacy)
         {
             r.ScaleKeys = false;
+            foreach (var b in r.Bones) { var h = r.ArmPose[b.Name]; h[7] = h[8] = h[9] = 1f; }   // `_pb.scale = (1, 1, 1)`
             // every pose-bone scale curve of EVERY action goes: the new armature's, those the bake gave each surviving
             // imported armature (three a bone), and the importer's own - a bone's animated scale, in any animation,
             // whether its armature is still there or not
@@ -629,6 +649,53 @@ public static class BlenderDeploy
         }
         r.BakeLog.Add($"DEPLOY baked {r.BoneOf.Count} bones");
         foreach (var a in imported) r.ImportedPose[a.Name] = rig.Armatures[a.Node].Bones.ToDictionary(b => names.BoneOfJoint[b], b => pose.Current(b), StringComparer.Ordinal);
+        r.AfterBake = all.ToDictionary(o => o.Name, o => (float[])o.World.Clone(), StringComparer.Ordinal);
+
+        // ---- 5a. the fire-window snapshot: argv[8] and argv[9] are lists of starts and ends ("530,441/2": an end with a
+        //      speed step); every frame of every segment is set and each bone's location and quaternion taken
+        // the new armature's bones follow their baked curves: a key a frame, the ends held; an equal value is not written
+        void EvalArm(int f)
+        {
+            foreach (var b in r.Bones)
+            {
+                var keys = r.Keys[b.Name]; var key = keys[Math.Max(0, Math.Min(keys.Length - 1, f - r.BakeFrameMin))]; var held = r.ArmPose[b.Name];
+                for (int c = 0; c < (r.ScaleKeys ? 10 : 7); c++) if (held[c] != key[c]) held[c] = key[c];
+            }
+        }
+        string seg8 = recoilOff && hadRecoil ? "" : (argc > 8 ? Arg(8) : ""), seg9 = argc > 9 ? Arg(9) : "";
+        var starts = new List<int>(); var ends = new List<int>(); var steps = new List<int>();
+        // Python's int(): white space around the digits is fine - but NOT the separators U+001C..U+001F, which
+        // str.strip() removes and int() refuses (the starts are read unstripped: such a start kills the script)
+        bool PyInt(string s, out int v) => int.TryParse((s ?? "").Trim(IntWhitespace), System.Globalization.NumberStyles.AllowLeadingSign, System.Globalization.CultureInfo.InvariantCulture, out v);
+        if (PyStrip(seg8) != "")
+            foreach (string tok in seg8.Split(','))
+            {
+                if (PyStrip(tok) == "") continue;
+                if (!PyInt(tok, out int v)) { r.Fallback = $"a recoil start the script cannot read as a whole number ('{tok}': it fails there)"; return r; }
+                starts.Add(v);
+            }
+        if (PyStrip(seg9) != "")
+            foreach (string raw in seg9.Split(','))
+            {
+                string tok = PyStrip(raw);
+                if (tok == "") continue;
+                int slash = tok.IndexOf('/');
+                string e = slash >= 0 ? tok.Substring(0, slash) : tok, st = slash >= 0 ? tok.Substring(slash + 1) : "1";
+                if (!PyInt(e, out int ev) || !PyInt(st, out int sv)) { r.Fallback = $"a recoil end the script cannot read ('{tok}': it fails there)"; return r; }
+                ends.Add(ev); steps.Add(Math.Max(1, sv));
+            }
+        for (int i = 0; i < Math.Min(starts.Count, ends.Count); i++) r.Segments.Add((starts[i], ends[i], steps[i]));
+        if (r.Segments.Count > 0)
+        {
+            foreach (var (ss, se, _) in r.Segments)
+                for (int f = ss; f <= se; f++)
+                {
+                    FrameSet(f); EvalArm(f);
+                    r.FireSnap[f] = r.Bones.ToDictionary(b => b.Name, b => r.ArmPose[b.Name].Take(7).ToArray(), StringComparer.Ordinal);
+                }
+            r.FireLog.Add($"DEPLOY fire-window snapshot: {r.FireSnap.Count} frames ({string.Join(", ", r.Segments.Select(s => $"{s.start}..{s.end}/{s.step}"))}) captured PRISTINE (pre-retarget)");
+        }
+        r.AfterFire = all.ToDictionary(o => o.Name, o => (float[])o.World.Clone(), StringComparer.Ordinal);
         r.ProbeAt = frame =>
         {
             FrameSet(frame);
@@ -787,6 +854,7 @@ public static class BlenderDeploy
     // Python's str.strip() set (the ASCII separators U+001C..U+001F included, which .NET's Trim leaves)
     static readonly char[] PythonWhitespace = "\u0009\u000a\u000b\u000c\u000d\u001c\u001d\u001e\u001f\u0020\u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000".ToCharArray();
     static string PyStrip(string s) => (s ?? "").Trim(PythonWhitespace);
+    static readonly char[] IntWhitespace = PythonWhitespace.Where(c => c < '\u001c' || c > '\u001f').ToArray();
 
     static string AsciiLower(string s)
     {

@@ -650,6 +650,39 @@ planted defects fail; not caught, a zero's sign only: a bone holding its FIRST k
 last. Not held: a re-baked bone at a frame that is not whole (every frame the script sets is); a bone name with a
 control character (the drill does not unescape it; the keys are right). Next: the script's steps 5a-5d.
 
+**Replacing `deploy_convert.py`, part 5a: the fire-window snapshot** (2026-10-11). The script's steps 5a-5d rework
+the baked keys for a firing cycle (of the registry's models the towed howitzer alone uses them) and are much denser
+than what came before, so they go one at a time. 5a: `argv[8]` is a list of segment starts, `argv[9]` of ends each with
+an optional `/step`; with the recoil step (`argv[10]`) on, every frame of every segment is set and each pose bone's
+location and quaternion of the new armature recorded - before 5b and 5c re-key the barrel and the legs.
+`Result.Segments`, `FireSnap`, `FireLog`; `ArmPose` is what each of those bones HOLDS: after the bake the last frame's
+key with the bind frame's written over it (an equal value is not written), scale 1 on the contract path, then the
+key of every frame set. The oracle runs a THIRD stage, to the script's `# --- 5b.`, and writes the log line, the
+snapshot row by row, what the pose bones hold and every object's matrix after it. 83 jobs, 7,349 snapshot rows equal
+to the bit - the howitzer's two segments (`442..530/1, 305..441/2`, 226 frames) and fixtures for two segments, one
+past the clip's end, overlapping ones (the snapshot is keyed by frame: 8 captured, not 12), more starts than ends
+(the lists are zipped), a backwards segment with a step of 0, the contract path with its rebased keys, a range with
+the step off, a part thrown past float32.
+
+**The oracle was wrong, and is corrected**: to read matrices the dump called `view_layer.update()` between its
+stages - and on the contract path that update EVALUATES the action the rebase has just rewritten, which the script
+does not do there; the dump reported pose bones the script never has. Both calls are gone (the state they read is
+current without them), everything of parts 2-4b still agrees, and the reviewer ran the script in ONE piece to 5b
+with no dump code in between: byte-identical rows on 154 jobs. *Review before the PR* (an independent agent, 154
+generated jobs, 61 argument strings): 5a held; it found (1) `BlenderEigen.InvertM4` inverting a matrix whose
+determinant is NaN - Eigen asks `abs(det) > 0`, which a NaN fails, and gives the zero matrix; the port asked
+`det == 0` (a part of 3e38 on one frame as the root-motion anchor: Blender bakes zeros, the port NaN) - fixed,
+fixture `fire_huge`, planted; (2) Python's `int()` takes white space around the digits but NOT the separators
+U+001C..U+001F that `str.strip()` removes: the port read a start the script dies on - fixed
+(`BlenderDeployTests`); (3) AGAIN the reader's `-0.0` read as `+0` (9 of 70 fuzzed rigs differ in a held zero's
+sign; no snapshot row did), now with a second importer rule beside it that is not traced (a node of translation
+`[-0.739, -0.0, 0.0]` holds `+0, +0` straight after the import): in the backlog, not fixed here. 9 planted defects,
+all caught; the gate takes a snapshot row, a pose row and an object row out of the real dump, doubles each in place
+of its neighbour, renames, truncates and turns a bit of each: every one must fail. Not held: a range Python reads
+and `int.TryParse` does not (`1_0`, digits past ASCII, a value over int32) is left to Blender; an INFINITE key
+(Blender clamps a written value to FLT_MAX). Next: 5b and 5c - they key with Blender's default BEZIER interpolation,
+so its curve evaluation between two keys has to be ported - then 5d, which re-enters edit mode.
+
 *Review of PR #138*: the imported pose rows at the bind and last frames (`PB2`, `PB3`) must name every expected
 armature/bone exactly once, with all ten held values. A matching row count cannot substitute duplicates for missing
 bones, and unknown names cannot skip comparison. `missing_imported_pose.py` keeps a passing single-job control and

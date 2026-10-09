@@ -180,7 +180,7 @@ n_jobs=$(grep -c "" "$TMPD/jobs.txt")
 t3=$(date +%s)
 "$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_decisions_dump.py")" -- "$WROOT/editor/Tools~/deploy_convert.py" "$WTMP/jobs.txt" > "$TMPD/decisions_raw.txt" 2> "$TMPD/decisions_err.txt"; drc=$?   # stderr apart: a depsgraph warning lands in the middle of a row otherwise
 t4=$(date +%s)
-tr -d '\r' < "$TMPD/decisions_raw.txt" | grep -E "^(JOB|LOG|LOG2|EXIT|RANGE|NORM|FLAG|PART|BAD|ALIAS|ARM|BONEOF|RBONE|ANCHOR|HULL|PINV|OBJ|M|T|BOX|ACT|FC|FCA|PB2|PB3|M2|O2|O3|DONE|FAIL)	" > "$TMPD/decisions.txt"
+tr -d '\r' < "$TMPD/decisions_raw.txt" | grep -E "^(JOB|LOG|LOG2|EXIT|RANGE|NORM|FLAG|PART|BAD|ALIAS|ARM|BONEOF|RBONE|ANCHOR|HULL|PINV|OBJ|M|T|BOX|ACT|FC|FCA|PB2|PB3|M2|O2|O3|LOG3|SNAP|APB|O4|DONE|FAIL)	" > "$TMPD/decisions.txt"
 n_done=$(grep -c "^DONE" "$TMPD/decisions.txt")
 if [ "$drc" -ne 0 ] || [ "$n_done" -ne "$n_jobs" ]; then
   grep -E "^FAIL|Traceback|Error" "$TMPD/decisions_raw.txt" "$TMPD/decisions_err.txt" | head -8
@@ -261,6 +261,33 @@ done
 echo "PASS — deploy drill accepts intact imported poses and rejects missing, duplicate, unknown, truncated or oversized PB2 and PB3 rows"
 echo "PASS — deploy drill rejects a decisions dump without a log line, a matrix, a transform, a box, an object, a part, the range, the end row, a bone, a part's bone, the anchors, the parent inverse, a baked curve, a key, the bake's log line or the action row - and one with a baked value changed by one bit or a curve under a component its channel does not have"
 echo "PASS — deploy drill accepts intact single-job controls and rejects a successful, truncated or duplicated abort record"
+# ... and the fire-window snapshot (5a): against an intact control, a snapshot row, a pose row of the new armature and an
+# object row after it - each missing, doubled in place of its neighbour, under an unknown name, cut short, or one bit off
+"$TMPD/deploy.exe" --decisions "$WTMP/missing_dec/fire_jobs.txt" "$WTMP/missing_dec/fire_intact.txt" > "$TMPD/fire_control.txt" 2>&1; controlrc=$?
+if [ "$controlrc" -ne 0 ] || ! grep -qE "^PASS " "$TMPD/fire_control.txt"; then
+  head -5 "$TMPD/fire_control.txt"
+  echo "FAIL — deploy drill rejected the intact fire-window control (rc=$controlrc)"; exit 1
+fi
+for kind in SNAP APB O4; do
+  case "$kind" in SNAP) what="snapshot row";; APB) what="armature pose row";; O4) what="object row after the fire window";; esac
+  for mode in missing duplicate unknown short value; do
+    case "$mode" in
+      missing) reason="has no $what";;
+      duplicate) reason="twice";;
+      unknown) reason="an unknown $what";;
+      short) reason="fields, expected";;
+      value) case "$kind" in SNAP) reason="snapshot rows differ";; APB) reason="hold other values after the fire window";; O4) reason="matrices after the fire window differ";; esac;;
+    esac
+    "$TMPD/deploy.exe" --decisions "$WTMP/missing_dec/fire_jobs.txt" "$WTMP/missing_dec/fire_${kind}_$mode.txt" > "$TMPD/fire_${kind}_$mode.txt" 2>&1; badrc=$?
+    if [ "$badrc" -ne 1 ] || ! grep -E "^FAIL " "$TMPD/fire_${kind}_$mode.txt" | grep -qF "$reason"; then
+      head -5 "$TMPD/fire_${kind}_$mode.txt"
+      echo "FAIL — deploy drill accepted invalid fire-window evidence ($kind $mode, rc=$badrc)"; exit 1
+    fi
+  done
+done
+"$TMPD/deploy.exe" --decisions "$WTMP/missing_dec/fire_jobs.txt" "$WTMP/missing_dec/fire_LOG3_missing.txt" > "$TMPD/fire_log3.txt" 2>&1; badrc=$?
+if [ "$badrc" -ne 1 ] || ! grep -E "^FAIL " "$TMPD/fire_log3.txt" | grep -qF "the fire window's log"; then head -5 "$TMPD/fire_log3.txt"; echo "FAIL — deploy drill accepted a dump without the fire window's log line (rc=$badrc)"; exit 1; fi
+echo "PASS — deploy drill accepts an intact fire-window snapshot and rejects missing, doubled, unknown, truncated or changed snapshot, pose and object rows, and a missing log line"
 n_j=$(echo "$TOTAL2" | awk '{print $3}'); n_l=$(echo "$TOTAL2" | awk '{print $7}'); n_o=$(echo "$TOTAL2" | awk '{print $9}'); n_ln=$(echo "$TOTAL2" | awk '{print $13}'); n_bones=$(echo "$TOTAL2" | awk '{print $15}'); n_keys=$(echo "$TOTAL2" | awk '{print $19}'); n_after=$(echo "$TOTAL2" | awk '{print $21}'); n_bl=$(grep -c "^BAKELEFT " "$TMPD/dec.txt")
 NOTE_MISSING=""; [ -z "$MISSING" ] || NOTE_MISSING="; recorded jobs whose source file is GONE, not judged:$MISSING"
 echo "PASS — deploy drill, the decisions: $n_j jobs ($n_rec recorded conversions, $n_fx fixture jobs) decided as deploy_convert.py decides them - $n_ln log lines to the letter, the parts, the cull and the merges, the armature it builds ($n_bones bones at rest, StaticRoot's anchor, the root-motion anchor) $n_o objects with their matrices, transforms and bound boxes to the bit, and the BAKE - $n_keys keys of the action it holds at its step 5a, each to the bit, with $n_after object matrices of the scene it leaves ($n_bl jobs are Blender's from the bake on, as marked: the scene before it is held); $n_l jobs left to Blender as marked (Blender took $((t4 - t3)) s)$NOTE_MISSING"
