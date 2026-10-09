@@ -88,9 +88,10 @@ public static class BlenderDeploy
         names = names ?? BlenderNames.Compute(m);
         string Arg(int scriptIndex) => scriptIndex - 2 < args.Length ? args[scriptIndex - 2] : null;
         int argc = args.Length + 2;
-        // the importer divides by each component of an armature's scale (the bone shape's size): a zero there and it fails
+        // The importer divides by each component of the armature's float32 scale (the bone shape's size): a zero
+        // there fails, whether it came from TRS, matrix decomposition, or a nonzero double that underflowed.
         foreach (var (armNode, armName) in names.ArmaturesInOrder)
-            if (armNode >= 0 && m.Nodes[armNode].Scale.Any(c => c == 0.0) && !m.Nodes[armNode].HasMatrix) { r.Fallback = $"an armature with a zero scale ('{armName}': Blender's importer fails on it)"; return r; }
+            if (armNode >= 0 && VehicleProbe.ArmatureScale(m, armNode).Any(c => c == 0f)) { r.Fallback = $"an armature with a zero scale ('{armName}': Blender's importer fails on it)"; return r; }
         var rig = VehicleProbe.BuildImportRig(m, names);
         var action = BlenderPosedState.Import(m, 0, 24.0, rig);
         if (action.NotModelled != null) { r.Fallback = action.NotModelled; return r; }

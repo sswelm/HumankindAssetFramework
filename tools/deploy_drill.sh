@@ -121,6 +121,29 @@ for mode in matrix property all_properties frames short_matrix short_property; d
   fi
 done
 echo "PASS — deploy drill rejects missing matrices, one or all properties, empty frame lists, and truncated records"
+python "$ROOT/tools/deploy-drill/missing_bones.py" "$WTMP/missing_bones" "${DUMPS[@]}" || { echo "FAIL — could not construct bone-record regressions"; exit 1; }
+"$TMPD/deploy.exe" "$WTMP/missing_bones/intact.txt" > "$TMPD/bones_control.txt" 2>&1; controlrc=$?
+if [ "$controlrc" -ne 0 ] || ! grep -qE "^PASS " "$TMPD/bones_control.txt"; then
+  cat "$TMPD/bones_control.txt" | head -5
+  echo "FAIL — deploy drill rejected the intact bone-record control (rc=$controlrc)"; exit 1
+fi
+for mode in missing_bone duplicate_bone short_bone long_bone missing_pose duplicate_pose short_pose long_pose unknown_pose all_poses; do
+  case "$mode" in
+    missing_bone) reason="dump is missing bone row";;
+    duplicate_bone) reason="dump has a duplicate bone row";;
+    short_bone|long_bone) reason="dump bone row has";;
+    missing_pose|all_poses) reason="dump is missing pose row";;
+    duplicate_pose) reason="dump has a duplicate pose row";;
+    short_pose|long_pose) reason="dump pose row has";;
+    unknown_pose) reason="dump has an unknown pose row";;
+  esac
+  "$TMPD/deploy.exe" "$WTMP/missing_bones/$mode.txt" > "$TMPD/missing_bones_$mode.txt" 2>&1; badrc=$?
+  if [ "$badrc" -ne 1 ] || ! grep -E "^FAIL .*InvalidDataException:" "$TMPD/missing_bones_$mode.txt" | grep -qF "$reason"; then
+    cat "$TMPD/missing_bones_$mode.txt" | head -5
+    echo "FAIL — deploy drill accepted invalid bone evidence ($mode, rc=$badrc)"; exit 1
+  fi
+done
+echo "PASS — deploy drill accepts intact bone evidence and rejects missing, duplicate, truncated, oversized or unknown bone and pose records"
 
 n_prop=$(echo "$TOTAL" | awk '{print $13}')
 n_pose=$(echo "$TOTAL" | awk '{print $15}')

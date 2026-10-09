@@ -523,6 +523,12 @@ files, 121,774 object matrices, 9,153 pose bones equal. The canoe's 21 bones and
 the first comparison, and its decisions job passes without the `LEFT:` mark - 43 log lines, 37 parts, 124 objects:
 every recorded conversion whose source exists is now decided in C#.
 
+Rest records must identify every imported bone exactly once, with all 29 numeric values. Pose records must identify
+every bone at every declared frame exactly once, with all 26 values. The drill validates this evidence before choosing
+which animations it can compare. `missing_bones.py` constructs ten negative cases from the real `posed_bones` dump:
+missing, duplicate, truncated and oversized rest/pose records, an unknown pose bone, and all poses removed. An intact
+control must first pass, and each mutation must fail for its specific defect.
+
 Found on the way, each with a fixture: an armature that is STRIPPED leaves what hung from its bones as roots (the
 bone link goes with the parent); the importer's bone shape is evaluated only while its armature is there (its
 collection is hidden) - with the armature stripped its `matrix_world` stays the identity though it is parented to
@@ -533,12 +539,13 @@ through is static, frame 1, then the frames set (`Pose` evaluates frame 1 when i
 plain objects too, a pose bone's rest location of `er^-1 @ 0` with its `-0` made it show); (2) an armature under
 another armature's bone read its unposed matrix when its node came later in the file (`BlenderWorldMatricesPosed`
 resolves what a node hangs from first); (3) an armature with a zero scale component: Blender's importer divides by
-it and fails - left to Blender; (4) OPEN, older code: `GlbReader` reads the JSON token `-0.0` as `+0` (.NET
+it and fails - left to Blender, including scales decomposed from a matrix and TRS values that underflow float32
+(three regression cases); (4) OPEN, older code: `GlbReader` reads the JSON token `-0.0` as `+0` (.NET
 Framework's `double.Parse`), Python keeps the sign - it shows in a location's zero only, real sources carry such
 tokens and pass because the matrix's `loc + 0` and the corrections mask it; in the backlog. 24 of 26 planted defects
 fail; not caught, both a zero's sign only: a pose bone's matrix built with the object's delta product, and a bone's
-history started from the node's own transform. Not held: a camera or a light under a bone; an armature given as a
-matrix with a zero axis. Next: part 3, the armature's rest and the binding.
+history started from the node's own transform. Not held: a camera or a light under a bone. Next: part 3, the
+armature's rest and the binding.
 
 **The Clip Range picker's in-process rig** (step 4, 2026-10-03): `HafUnityFrameTests` hold the preview frame's arithmetic
 without Unity — the X mirror's conjugation of rotations, matrices and matrix nodes; Unity's skinning formula fed the rig's

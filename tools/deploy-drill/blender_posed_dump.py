@@ -11,6 +11,8 @@ Rows (tab separated; floats as the hex of their float32 bits, so nothing is lost
     FRAMES <f> <f> ...                                                     the frames that follow
     L      <frame> <name> <loc x y z> <quat w x y z> <scale x y z>         the evaluated properties
     M      <frame> <name> <matrix_world, 16 floats row by row>
+    BONE   <armature> <bone> <parent or -> <length, head 3, matrix 9, matrix_local 16>
+    PB     <frame> <armature> <bone> <loc 3, quat 4, scale 3, pose matrix 16>
     DONE   <path>
 
 The frames: before the first key, the first, the one after, eight spread over the range, the last, and one beyond -

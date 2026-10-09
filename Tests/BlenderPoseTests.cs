@@ -67,6 +67,24 @@ public class BlenderPoseTests
         Assert.Contains("zero scale", BlenderDeploy.Decide(m, "0|24|||||||0|||4|0|1".Split('|')).Fallback);
     }
 
+    [Theory]
+    [InlineData(0.0)]
+    [InlineData(1e-50)]
+    public void A_matrix_armatures_effective_zero_scale_is_left_to_Blender(double axis)
+    {
+        var m = Rig(out _);
+        m.Nodes[0].Matrix = new double[] { 1, 0, 0, 0, 0, axis, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+        Assert.Contains("zero scale", BlenderDeploy.Decide(m, "0|24|||||||0|||4|0|1".Split('|')).Fallback);
+    }
+
+    [Fact]
+    public void A_TRS_armature_scale_that_underflows_float_is_left_to_Blender()
+    {
+        var m = Rig(out _);
+        m.Nodes[0].Scale = new double[] { 1, 1e-50, 1 };
+        Assert.Contains("zero scale", BlenderDeploy.Decide(m, "0|24|||||||0|||4|0|1".Split('|')).Fallback);
+    }
+
     [Fact]
     public void ob_parbone_moves_the_pose_matrix_to_the_bones_tail_along_its_Y_axis()
     {

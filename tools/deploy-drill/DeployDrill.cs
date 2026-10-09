@@ -3,8 +3,8 @@
 // (BlenderPosedState.Import) and every object's matrix_world at every dumped frame is set beside Blender's - the bits of
 // all sixteen floats. Also held: the action's frame range, and WHICH objects the animation touches (deploy_convert.py
 // takes those for its parts).
-// Not compared, counted: an object under a bone (it follows the armature's pose) and what hangs below one; a skinned
-// mesh (it sits under its armature with the identity).
+// Not compared, counted: a camera and its descendants (the importer's correction is not modelled); synthetic
+// objects without a glTF node; a skinned mesh (it sits under its armature with the identity).
 // usage: DeployDrill.exe <dump>...     exit 0 when every compared matrix is equal
 using System;
 using System.Collections.Generic;
@@ -45,7 +45,8 @@ static class DeployDrill
         foreach (var block in blocks)
         {
             string path = null; var objs = new List<string[]>(); var actions = new List<string[]>();
-            var boneRows = new List<string[]>(); var poseRows = new Dictionary<(int, string, string), float[]>();
+            var boneRows = new List<string[]>(); var rawPoseRows = new List<string[]>();
+            var poseRows = new Dictionary<(int, string, string), float[]>();
             var rows = new Dictionary<int, Dictionary<string, float[]>>(); var frames = new List<int>();
             var props = new Dictionary<(int, string), float[]>(); var icospheres = new HashSet<string>(StringComparer.Ordinal);
             foreach (var line in block)
@@ -62,7 +63,7 @@ static class DeployDrill
                     d[t[2]] = t.Skip(3).Select(FromHex).ToArray();
                 }
                 else if (t[0] == "BONE") boneRows.Add(t);
-                else if (t[0] == "PB") poseRows[(int.Parse(t[1]), t[2], t[3])] = t.Skip(4).Select(FromHex).ToArray();
+                else if (t[0] == "PB") rawPoseRows.Add(t);
                 else if (t[0] == "L") props[(int.Parse(t[1]), t[2])] = t.Skip(3).Select(FromHex).ToArray();
                 else if (t[0] == "FAIL") { Console.WriteLine($"FAIL {t[1]}: Blender could not dump it: {t[2]}"); fails++; }
             }
@@ -97,8 +98,32 @@ static class DeployDrill
                     string armName = names.ArmaturesInOrder.First(x => x.node == an).name;
                     boneNode[(armName, names.BoneOfJoint[b])] = b;
                 }
+                // Validate identity, uniqueness and complete evidence even for a file whose animation is unsupported.
+                var seenBones = new HashSet<(string, string)>();
+                foreach (var t in boneRows)
+                {
+                    if (t.Length != 33) throw new InvalidDataException($"dump bone row has {t.Length} fields, expected 33");
+                    var key = (t[1], t[2]);
+                    if (!boneNode.ContainsKey(key)) throw new InvalidDataException($"dump has an unknown bone '{t[2]}' of '{t[1]}'");
+                    if (!seenBones.Add(key)) throw new InvalidDataException($"dump has a duplicate bone row for '{t[2]}' of '{t[1]}'");
+                }
+                foreach (var key in boneNode.Keys)
+                    if (!seenBones.Contains(key)) throw new InvalidDataException($"dump is missing bone row for '{key.Item2}' of '{key.Item1}'");
+                var frameSet = new HashSet<int>(frames);
+                foreach (var t in rawPoseRows)
+                {
+                    if (t.Length != 30) throw new InvalidDataException($"dump pose row has {t.Length} fields, expected 30");
+                    var key = (int.Parse(t[1]), t[2], t[3]);
+                    if (!frameSet.Contains(key.Item1) || !boneNode.ContainsKey((key.Item2, key.Item3)))
+                        throw new InvalidDataException($"dump has an unknown pose row for '{t[3]}' of '{t[2]}' at frame {key.Item1}");
+                    if (poseRows.ContainsKey(key)) throw new InvalidDataException($"dump has a duplicate pose row for '{t[3]}' of '{t[2]}' at frame {key.Item1}");
+                    poseRows.Add(key, t.Skip(4).Select(FromHex).ToArray());
+                }
+                foreach (int f in frames)
+                    foreach (var key in boneNode.Keys)
+                        if (!poseRows.ContainsKey((f, key.Item1, key.Item2)))
+                            throw new InvalidDataException($"dump is missing pose row for '{key.Item2}' of '{key.Item1}' at frame {f}");
                 // every bone Blender has is one here, and the other way round; its rest length and matrix_local equal
-                if (boneRows.Count != boneNode.Count) problems.Add($"{boneNode.Count} bones here, {boneRows.Count} in Blender");
                 long bonesWrong = 0; string firstBone = null;
                 foreach (var t in boneRows)
                 {

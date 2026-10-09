@@ -162,7 +162,7 @@ log to the letter and the scene it leaves to the bit, 47 jobs) - done 2026-10-10
 the role clips; 5 the exported animation, the wiring, the existing golden. OPEN for part 4: bit-exact or a tight
 tolerance - the script's decisions are thresholds on continuous values, the existing golden compares three decimals;
 to be decided on measured distance. Not modelled yet: Bezier keys (a CUBICSPLINE sampler), `KHR_animation_pointer`, an
-animated armature's pose and what hangs from its bones, a camera's correction (also open for the prep), morph
+a camera's correction (also open for the prep), morph
 targets (the evaluated mesh's bounds), nodes outside the named scene (excluded collections), mesh instancing. OPEN,
 found by the review of part 2 and not measured: `BlenderExportTree.StrCaseCmp` reads UTF-8 bytes as signed, Blender's
 object order has them unsigned - the exporter's child order with names past ASCII may be wrong the same way. OPEN,
