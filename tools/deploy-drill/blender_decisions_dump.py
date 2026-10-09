@@ -123,6 +123,22 @@ for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
                                 kps = fc.keyframe_points
                                 print("FC\t%s\t%d\t%s\t%s" % (fc.data_path, fc.array_index, kps[0].interpolation if len(kps) else "-",
                                                               "\t".join("%s:%s" % (h32(kp.co[0]), h32(kp.co[1])) for kp in kps)))
+            # the bake takes every selected armature: the action it gave each OTHER armature (part 4b), its slot's curves
+            for o in bpy.data.objects:
+                if o.type != 'ARMATURE' or o is arm or not o.animation_data or not o.animation_data.action:
+                    continue
+                oa = o.animation_data.action; slot = o.animation_data.action_slot
+                for layer in oa.layers:
+                    for strip in layer.strips:
+                        cb = strip.channelbag(slot) if slot is not None else None
+                        for fc in (cb.fcurves if cb is not None else []):
+                            kps = fc.keyframe_points
+                            print("FCA\t%s\t%s\t%d\t%s\t%s" % (o.name, fc.data_path, fc.array_index, kps[0].interpolation if len(kps) else "-",
+                                                                "\t".join("%s:%s" % (h32(kp.co[0]), h32(kp.co[1])) for kp in kps)))
+                # what each of its pose bones HOLDS when the script goes on (the later steps start from this state)
+                for pb in o.pose.bones:
+                    q = pb.rotation_quaternion
+                    print("PB2\t%s\t%s\t%s" % (o.name, pb.name, "\t".join(h32(v) for v in (*pb.location, q.w, q.x, q.y, q.z, *pb.scale))))
             mw = arm.matrix_world
             print("M2\t%s" % "\t".join(h32(mw[r][c]) for r in range(4) for c in range(4)))
             # ... and the scene the bake leaves: every object's matrix_world again (the later steps read them)
@@ -130,6 +146,17 @@ for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
             for o in bpy.data.objects:
                 mw = o.matrix_world
                 print("O2\t%s\t%s" % (o.name, "\t".join(h32(mw[r][c]) for r in range(4) for c in range(4))))
+            # ... and at the LAST frame of the range: the bind frame cannot tell a frozen object from an animated one,
+            # nor a stripped scale curve from a kept one (the script's later steps set frames all over the range)
+            bpy.context.scene.frame_set(g["fmax"])
+            bpy.context.view_layer.update()
+            for o in bpy.data.objects:
+                mw = o.matrix_world
+                print("O3\t%s\t%s" % (o.name, "\t".join(h32(mw[r][c]) for r in range(4) for c in range(4))))
+                if o.type == 'ARMATURE' and o is not arm:
+                    for pb in o.pose.bones:
+                        q = pb.rotation_quaternion
+                        print("PB3\t%s\t%s\t%s" % (o.name, pb.name, "\t".join(h32(v) for v in (*pb.location, q.w, q.x, q.y, q.z, *pb.scale))))
         print("DONE\t%s" % key, flush=True)
     except Exception as e:
         traceback.print_exc()

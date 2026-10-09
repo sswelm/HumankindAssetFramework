@@ -17,8 +17,8 @@ static class DecisionsDrill
         "a job compared", "the default strip list", "a strip list given", "stripExtra", "a stripped object's child left as a root", "a bone shape that survives the strip",
         "no object with an action left (frame range 1..1)", "normalization: x100", "normalization: recentered", "normalization: none",
         "bone slimming", "the legacy path", "the contract path", "a culled part", "a culled part's descendant", "a pair-merge", "the script stops (no animated part)",
-        "the recoil step off with a recoil range given", "left to Blender (BlenderDeploy.Fallback)", "an armature that is a part (its bones are animated)", "left to Blender at the bake (the scene before it is held)",
-        "a bake on the legacy path", "a clip of frame 0 alone (the bake keys frame 1 too)", "a bake on the contract path (scale curves stripped, delta-form rebase)",
+        "the recoil step off with a recoil range given", "left to Blender (BlenderDeploy.Fallback)", "an armature that is a part (its bones are animated)",
+        "a bake on the legacy path", "a custom property keyed by the bake (not modelled: it moves nothing)", "an imported armature baked with it (its bones keyed a frame, its own animation dropped)", "a clip of frame 0 alone (the bake keys frame 1 too)", "a bake on the contract path (scale curves stripped, delta-form rebase)",
         "no static mesh (StaticRoot has no anchor)", "StaticRoot anchored to a mesh that has no parent", "StaticRoot anchored to a static mesh's parent",
         "a root-motion anchor (the armature parented for the bake)", "the biggest part does not travel (no anchor)", "no mesh rides a bone (no travel measured)",
         "a bone under its part's parent's bone", "a part whose parent is no part (a root bone)",
@@ -39,7 +39,7 @@ static class DecisionsDrill
             jobs[t[0]] = t;
         }
         var cover = new SortedDictionary<string, long>(); foreach (var k in CoverKeys) cover[k] = 0;
-        int fails = 0, files = 0, left = 0; long matrices = 0, objects = 0, lines = 0, bones = 0, curves = 0, keysCompared = 0, after = 0;
+        int fails = 0, files = 0, left = 0; long matrices = 0, objects = 0, lines = 0, bones = 0, curves = 0, keysCompared = 0, after = 0, importedKeys = 0, held2 = 0, atLast = 0;
         var blocks = new List<List<string>>();
         foreach (var dump in args.Skip(1))
             foreach (var line in File.ReadLines(dump))
@@ -51,7 +51,7 @@ static class DecisionsDrill
         {
             string key = block[0].Split('\t')[1];
             files++;
-            var problems = new List<string>(); string bakeLeftReason = null; bool bakeClamped = false;
+            var problems = new List<string>(); string bakeLeftReason = null; bool bakeClamped = false, rebakedArmature = false;
             try
             {
                 if (!jobs.TryGetValue(key, out var job)) throw new InvalidDataException("the dump has a job the jobs file does not");
@@ -191,6 +191,52 @@ static class DecisionsDrill
                             }
                         }
                     }
+                    // ... and the curves the bake gave every other armature that was selected (the imported ones that survived)
+                    var fca = Of("FCA"); int customCurves = 0;
+                    var seenImported = new HashSet<string>(StringComparer.Ordinal);
+                    long importedExpected = baked.ImportedKeys.Values.Sum(a => (long)a.Count) * (baked.ScaleKeys ? 10 : 7);
+                    foreach (var t in fca)
+                    {
+                        const string head = "pose.bones[\"";
+                        int close = t[2].LastIndexOf("\"].", StringComparison.Ordinal);
+                        // a CUSTOM PROPERTY (the node's `extras`): the bake keys it too (channel_types has PROPS). It moves nothing
+                        // and the script clears the action later - not modelled, counted, and the comparison goes on
+                        if (t[2].EndsWith("\"]", StringComparison.Ordinal)) { customCurves++; continue; }
+                        if (!t[2].StartsWith(head, StringComparison.Ordinal) || close < 0) { problems.Add($"'{t[1]}' has a curve after the bake that is no pose bone's: {t[2]} (the armature object's own animation should be gone)"); break; }
+                        string bone = t[2].Substring(head.Length, close - head.Length).Replace("\\\"", "\"").Replace("\\\\", "\\"), channel = t[2].Substring(close + 3);
+                        int index = int.Parse(t[3]);
+                        if (index < 0 || index >= (channel == "rotation_quaternion" ? 4 : 3)) throw new InvalidDataException($"the dump has a curve with a component its channel does not have: {t[2]}[{index}]");
+                        int at = channel == "location" ? index : channel == "rotation_quaternion" ? 3 + index : channel == "scale" ? 7 + index : -1;
+                        if (at < 0) throw new InvalidDataException($"the dump has a curve of an unknown channel: {t[2]}");
+                        if (!seenImported.Add(t[1] + "\t" + bone + "\t" + at)) throw new InvalidDataException($"the dump has a curve twice: {t[1]} {t[2]}[{index}]");
+                        curves++;
+                        if (!baked.ImportedKeys.TryGetValue(t[1], out var ofArm) || !ofArm.TryGetValue(bone, out var keys) || (at >= 7 && !baked.ScaleKeys)) { wrongCurves++; firstKey = firstKey ?? $"Blender has the curve {t[2]}[{index}] on '{t[1]}', not here"; continue; }
+                        if (t[4] != "LINEAR" || t.Length - 5 != nf) { wrongCurves++; firstKey = firstKey ?? $"the curve {t[2]}[{index}] of '{t[1]}' is {t[4]} with {t.Length - 5} keys in Blender, LINEAR with {nf} here"; continue; }
+                        for (int k = 0; k < nf; k++)
+                        {
+                            keysCompared++; importedKeys++;
+                            string mine = H((float)(baked.BakeFrameMin + k)) + ":" + H(keys[k][at]);
+                            if (mine != t[5 + k])
+                            {
+                                wrongKeys++;
+                                if (firstKey == null) { var th = t[5 + k].Split(':'); firstKey = $"'{t[1]}' bone '{bone}' {channel}[{index}] at frame {baked.BakeFrameMin + k}: here {Show(keys[k][at])} ({H(keys[k][at])}), Blender {Show(F(th[1]))} ({th[1]})"; }
+                            }
+                        }
+                    }
+                    if (customCurves > 0) cover["a custom property keyed by the bake (not modelled: it moves nothing)"]++;
+                    if (fca.Count - customCurves != importedExpected) problems.Add($"{importedExpected} curves on the imported armatures after the bake here, {fca.Count} in Blender");
+                    if (baked.ImportedKeys.Count > 0) rebakedArmature = true;
+                    // what every imported pose bone holds after the bake
+                    var pb2 = Of("PB2"); long wrongHeld = 0; string firstHeld = null;
+                    ValidatePoseRows(pb2, baked.ImportedPose, "PB2");
+                    foreach (var t in pb2)
+                    {
+                        var held = baked.ImportedPose[t[1]][t[2]];
+                        held2++;
+                        var mine = held == null ? null : held[0].Concat(held[1]).Concat(held[2]).Select(H).ToList();
+                        if (mine == null || !mine.SequenceEqual(t.Skip(3))) { wrongHeld++; firstHeld = firstHeld ?? $"'{t[2]}' of '{t[1]}'"; }
+                    }
+                    if (wrongHeld > 0) problems.Add($"{wrongHeld} of {pb2.Count} imported pose bones hold other values after the bake, first {firstHeld}");
                     int expectCurves = baked.Keys.Count * (baked.ScaleKeys ? 10 : 7);
                     if (fcs.Count != expectCurves) problems.Add($"{expectCurves} curves here, {fcs.Count} in Blender");
                     if (wrongCurves > 0 || wrongKeys > 0) problems.Add($"{wrongKeys} baked keys and {wrongCurves} curves differ, first {firstKey}");
@@ -209,6 +255,30 @@ static class DecisionsDrill
                         if (!ok) { wrongAfter++; firstAfter = firstAfter ?? $"'{o.Name}'"; }
                     }
                     if (wrongAfter > 0) problems.Add($"{wrongAfter} of {baked.Objects.Count} matrices after the bake differ, first {firstAfter}");
+                    // ... and the same scene at the LAST frame of the range (the dump set it last of all): a frozen armature
+                    // object, a stripped scale curve and the re-baked keys show there, not at the bind frame
+                    var o3 = Of("O3").ToDictionary(t => t[1], t => t, StringComparer.Ordinal); var pb3 = Of("PB3");
+                    if (o3.Count != baked.Objects.Count) throw new InvalidDataException($"the dump has {o3.Count} object rows at the last frame, {baked.Objects.Count} objects here");
+                    var (lastWorlds, lastPose) = baked.ProbeAt(r.FrameMax);
+                    ValidatePoseRows(pb3, lastPose, "PB3");
+                    long wrongLast = 0; string firstLast = null;
+                    foreach (var kv in lastWorlds)
+                    {
+                        if (!o3.TryGetValue(kv.Key, out var row) || row.Length != 18) throw new InvalidDataException($"the dump has no complete matrix row at the last frame for '{kv.Key}'");
+                        bool ok = true;
+                        for (int rr = 0; rr < 4; rr++) for (int c = 0; c < 4; c++) if (H(kv.Value[c * 4 + rr]) != row[2 + rr * 4 + c]) ok = false;
+                        atLast++;
+                        if (!ok) { wrongLast++; firstLast = firstLast ?? $"'{kv.Key}'"; }
+                    }
+                    if (wrongLast > 0) problems.Add($"{wrongLast} of {lastWorlds.Count} matrices at the last frame after the bake differ, first {firstLast}");
+                    long wrongHeldLast = 0; string firstHeldLast = null;
+                    foreach (var t in pb3)
+                    {
+                        var held = lastPose[t[1]][t[2]];
+                        if (held == null || !held[0].Concat(held[1]).Concat(held[2]).Select(H).SequenceEqual(t.Skip(3)))
+                        { wrongHeldLast++; firstHeldLast = firstHeldLast ?? $"'{t[2]}' of '{t[1]}'"; }
+                    }
+                    if (wrongHeldLast > 0) problems.Add($"{wrongHeldLast} of {pb3.Count} imported pose bones hold other values at the last frame, first {firstHeldLast}");
                     }
                     long wrongM = 0, wrongT = 0, wrongB = 0; string firstM = null, firstT = null, firstB = null;
                     foreach (var o in r.Objects)
@@ -262,7 +332,8 @@ static class DecisionsDrill
                     if (r.Bones.Any(b => b.Parent != null)) cover["a bone under its part's parent's bone"]++;
                     if (r.Bones.Any(b => b.Part != null && b.Part.Parent != null && b.Parent == null)) cover["a part whose parent is no part (a root bone)"]++;
                 }
-                if (bakeLeftReason != null) { cover["left to Blender at the bake (the scene before it is held)"]++; Console.WriteLine($"BAKELEFT {key}: {bakeLeftReason}"); }
+                if (bakeLeftReason != null) Console.WriteLine($"BAKELEFT {key}: {bakeLeftReason}");   // no job is so marked since part 4b; the mark stays for what the later steps may leave
+                if (rebakedArmature) cover["an imported armature baked with it (its bones keyed a frame, its own animation dropped)"]++;
                 if (bakeClamped) cover["a clip of frame 0 alone (the bake keys frame 1 too)"]++;
                 if (bakeLeftReason == null && !r.Exit) cover[r.Legacy ? "a bake on the legacy path" : "a bake on the contract path (scale curves stripped, delta-form rebase)"]++;
                 Console.WriteLine(r.Exit ? $"PASS {key}: {log.Count} log lines equal to Blender's, and the script stops there as it does here (no scene is compared)"
@@ -274,12 +345,28 @@ static class DecisionsDrill
         var dumped = new HashSet<string>(blocks.Select(b => b[0].Split('\t')[1]), StringComparer.Ordinal);
         foreach (var k in jobs.Keys) if (!dumped.Contains(k)) { fails++; Console.WriteLine($"FAIL {k}: the dump holds no such job"); }
         foreach (var kv in cover) Console.WriteLine($"COVER {kv.Value} {kv.Key}");
-        Console.WriteLine($"TOTAL jobs {files} failed {fails} left {left} objects {objects} matrices {matrices} lines {lines} bones {bones} curves {curves} keys {keysCompared} after {after}");
+        Console.WriteLine($"TOTAL jobs {files} failed {fails} left {left} objects {objects} matrices {matrices} lines {lines} bones {bones} curves {curves} keys {keysCompared} after {after} imported {importedKeys} held {held2} last {atLast}");
         return fails == 0 ? 0 : 1;
     }
 
     static string Show(float x) => x.ToString("R") + (x == 0f && Bits(x) != 0 ? "(-0)" : "");
     static string Cut(string s) => s.Length > 150 ? s.Substring(0, 150) + "..." : s;
+
+    // A row count alone lets a duplicate replace an omitted bone. Require each expected identity once at each frame.
+    static void ValidatePoseRows(List<string[]> rows, Dictionary<string, Dictionary<string, float[][]>> expected, string kind)
+    {
+        var seen = new HashSet<(string armature, string bone)>();
+        foreach (var t in rows)
+        {
+            if (t.Length != 13) throw new InvalidDataException($"the dump's {kind} row has {t.Length} fields, expected 13");
+            if (!expected.TryGetValue(t[1], out var armature) || !armature.ContainsKey(t[2]))
+                throw new InvalidDataException($"the dump has an unknown {kind} bone '{t[2]}' of '{t[1]}'");
+            if (!seen.Add((t[1], t[2]))) throw new InvalidDataException($"the dump has a duplicate {kind} bone '{t[2]}' of '{t[1]}'");
+        }
+        foreach (var armature in expected)
+            foreach (var bone in armature.Value.Keys)
+                if (!seen.Contains((armature.Key, bone))) throw new InvalidDataException($"the dump has no {kind} row for bone '{bone}' of '{armature.Key}'");
+    }
 
     static void Compare(List<string> problems, string what, List<string> mine, List<string> theirs)
     {

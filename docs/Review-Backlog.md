@@ -160,8 +160,9 @@ log to the letter and the scene it leaves to the bit, 47 jobs) - done 2026-10-10
 (objects under animated bones); **2b the armature's pose** (`VehicleProbe.BlenderPose.cs`: pose bones from the importer's bone curves,
 `BKE_pose_where_is`, what hangs from a bone) - done 2026-10-10, the canoe is decided in C#; **3 the armature and its anchors** (the bones at rest, StaticRoot's anchor, the root-motion anchor - the oracle
 now runs the script up to the bake) - done 2026-10-10; the binding of the meshes goes with the bake's parts; **4 the bake** (every baked key to the bit; the scale-free
-step and the delta-form rebase) - done 2026-10-11, bit-exact: no tolerance was needed. The dugout canoe is Blender's
-from the bake on (`BAKELEFT:`): `nla.bake` re-bakes its imported armature, which is selected - **4b**, next; 4 the bake, the options (barrel, legs, recoil, wheels) and
+step and the delta-form rebase) - done 2026-10-11, bit-exact: no tolerance was needed. **4b the bake takes the selected imported armatures too** (their bones keyed a frame, their object animation
+dropped) - done 2026-10-11: the dugout canoe is baked in C#, no job is left at the bake; next the script's steps
+5a-5d (fire window, barrel, legs, recoil), the binding, the role clips, the export; 4 the bake, the options (barrel, legs, recoil, wheels) and
 the role clips; 5 the exported animation, the wiring, the existing golden. OPEN for part 4: bit-exact or a tight
 tolerance - the script's decisions are thresholds on continuous values, the existing golden compares three decimals;
 to be decided on measured distance. Not modelled yet: Bezier keys (a CUBICSPLINE sampler), `KHR_animation_pointer`, an
