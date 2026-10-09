@@ -228,11 +228,10 @@ static class DecisionsDrill
                     if (baked.ImportedKeys.Count > 0) rebakedArmature = true;
                     // what every imported pose bone holds after the bake
                     var pb2 = Of("PB2"); long wrongHeld = 0; string firstHeld = null;
-                    if (pb2.Count != baked.ImportedPose.Values.Sum(a => a.Count)) problems.Add($"{baked.ImportedPose.Values.Sum(a => a.Count)} imported pose bones here, {pb2.Count} in Blender");
+                    ValidatePoseRows(pb2, baked.ImportedPose, "PB2");
                     foreach (var t in pb2)
                     {
-                        if (t.Length != 13) throw new InvalidDataException($"the dump's pose row after the bake for '{t[2]}' has {t.Length} fields, expected 13");
-                        if (!baked.ImportedPose.TryGetValue(t[1], out var ofArm) || !ofArm.TryGetValue(t[2], out var held)) continue;
+                        var held = baked.ImportedPose[t[1]][t[2]];
                         held2++;
                         var mine = held == null ? null : held[0].Concat(held[1]).Concat(held[2]).Select(H).ToList();
                         if (mine == null || !mine.SequenceEqual(t.Skip(3))) { wrongHeld++; firstHeld = firstHeld ?? $"'{t[2]}' of '{t[1]}'"; }
@@ -261,6 +260,7 @@ static class DecisionsDrill
                     var o3 = Of("O3").ToDictionary(t => t[1], t => t, StringComparer.Ordinal); var pb3 = Of("PB3");
                     if (o3.Count != baked.Objects.Count) throw new InvalidDataException($"the dump has {o3.Count} object rows at the last frame, {baked.Objects.Count} objects here");
                     var (lastWorlds, lastPose) = baked.ProbeAt(r.FrameMax);
+                    ValidatePoseRows(pb3, lastPose, "PB3");
                     long wrongLast = 0; string firstLast = null;
                     foreach (var kv in lastWorlds)
                     {
@@ -274,11 +274,10 @@ static class DecisionsDrill
                     long wrongHeldLast = 0; string firstHeldLast = null;
                     foreach (var t in pb3)
                     {
-                        if (t.Length != 13) throw new InvalidDataException($"the dump's pose row at the last frame for '{t[2]}' has {t.Length} fields, expected 13");
-                        if (!lastPose.TryGetValue(t[1], out var ofArm) || !ofArm.TryGetValue(t[2], out var held) || held == null || !held[0].Concat(held[1]).Concat(held[2]).Select(H).SequenceEqual(t.Skip(3)))
+                        var held = lastPose[t[1]][t[2]];
+                        if (held == null || !held[0].Concat(held[1]).Concat(held[2]).Select(H).SequenceEqual(t.Skip(3)))
                         { wrongHeldLast++; firstHeldLast = firstHeldLast ?? $"'{t[2]}' of '{t[1]}'"; }
                     }
-                    if (pb3.Count != pb2.Count) problems.Add($"{pb2.Count} imported pose bones after the bake, {pb3.Count} at the last frame");
                     if (wrongHeldLast > 0) problems.Add($"{wrongHeldLast} of {pb3.Count} imported pose bones hold other values at the last frame, first {firstHeldLast}");
                     }
                     long wrongM = 0, wrongT = 0, wrongB = 0; string firstM = null, firstT = null, firstB = null;
@@ -352,6 +351,22 @@ static class DecisionsDrill
 
     static string Show(float x) => x.ToString("R") + (x == 0f && Bits(x) != 0 ? "(-0)" : "");
     static string Cut(string s) => s.Length > 150 ? s.Substring(0, 150) + "..." : s;
+
+    // A row count alone lets a duplicate replace an omitted bone. Require each expected identity once at each frame.
+    static void ValidatePoseRows(List<string[]> rows, Dictionary<string, Dictionary<string, float[][]>> expected, string kind)
+    {
+        var seen = new HashSet<(string armature, string bone)>();
+        foreach (var t in rows)
+        {
+            if (t.Length != 13) throw new InvalidDataException($"the dump's {kind} row has {t.Length} fields, expected 13");
+            if (!expected.TryGetValue(t[1], out var armature) || !armature.ContainsKey(t[2]))
+                throw new InvalidDataException($"the dump has an unknown {kind} bone '{t[2]}' of '{t[1]}'");
+            if (!seen.Add((t[1], t[2]))) throw new InvalidDataException($"the dump has a duplicate {kind} bone '{t[2]}' of '{t[1]}'");
+        }
+        foreach (var armature in expected)
+            foreach (var bone in armature.Value.Keys)
+                if (!seen.Contains((armature.Key, bone))) throw new InvalidDataException($"the dump has no {kind} row for bone '{bone}' of '{armature.Key}'");
+    }
 
     static void Compare(List<string> problems, string what, List<string> mine, List<string> theirs)
     {

@@ -650,6 +650,13 @@ planted defects fail; not caught, a zero's sign only: a bone holding its FIRST k
 last. Not held: a re-baked bone at a frame that is not whole (every frame the script sets is); a bone name with a
 control character (the drill does not unescape it; the keys are right). Next: the script's steps 5a-5d.
 
+*Review of PR #138*: the imported pose rows at the bind and last frames (`PB2`, `PB3`) must name every expected
+armature/bone exactly once, with all ten held values. A matching row count cannot substitute duplicates for missing
+bones, and unknown names cannot skip comparison. `missing_imported_pose.py` keeps a passing single-job control and
+plants sixteen mutations: one or all rows missing, a duplicate replacing another bone, an unknown armature or bone,
+all identities and values replaced, and a truncated or oversized row, at each frame. Each must fail for its specific
+validation reason.
+
 **The Clip Range picker's in-process rig** (step 4, 2026-10-03): `HafUnityFrameTests` hold the preview frame's arithmetic
 without Unity — the X mirror's conjugation of rotations, matrices and matrix nodes; Unity's skinning formula fed the rig's
 matrices (the joints' world matrices, the inverse bind matrices, the vertex, all mirrored) against the reader's posed vertex;

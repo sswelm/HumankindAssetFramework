@@ -237,6 +237,28 @@ for mode in exit_zero exit_short exit_duplicate; do
     echo "FAIL — deploy drill accepted an invalid abort record ($mode, rc=$badrc)"; exit 1
   fi
 done
+python "$ROOT/tools/deploy-drill/missing_imported_pose.py" "$WTMP/imported_pose" "$WTMP/decisions.txt" "$WTMP/jobs.txt" || { echo "FAIL — could not construct the imported-pose regressions"; exit 1; }
+"$TMPD/deploy.exe" --decisions "$WTMP/imported_pose/jobs.txt" "$WTMP/imported_pose/intact.txt" > "$TMPD/imported_pose_control.txt" 2>&1; controlrc=$?
+if [ "$controlrc" -ne 0 ] || ! grep -qE "^PASS " "$TMPD/imported_pose_control.txt"; then
+  head -5 "$TMPD/imported_pose_control.txt"
+  echo "FAIL — deploy drill rejected the intact imported-pose control (rc=$controlrc)"; exit 1
+fi
+for kind in PB2 PB3; do
+  for mode in missing all_missing duplicate unknown_armature unknown_bone all_unknown short long; do
+    case "$mode" in
+      missing|all_missing) reason="no $kind row for bone";;
+      duplicate) reason="duplicate $kind bone";;
+      unknown_armature|unknown_bone|all_unknown) reason="unknown $kind bone";;
+      short|long) reason="$kind row has";;
+    esac
+    "$TMPD/deploy.exe" --decisions "$WTMP/imported_pose/jobs.txt" "$WTMP/imported_pose/${kind}_$mode.txt" > "$TMPD/imported_pose_${kind}_$mode.txt" 2>&1; badrc=$?
+    if [ "$badrc" -ne 1 ] || ! grep -E "^FAIL " "$TMPD/imported_pose_${kind}_$mode.txt" | grep -qF "$reason"; then
+      head -5 "$TMPD/imported_pose_${kind}_$mode.txt"
+      echo "FAIL — deploy drill accepted invalid $kind evidence ($mode, rc=$badrc)"; exit 1
+    fi
+  done
+done
+echo "PASS — deploy drill accepts intact imported poses and rejects missing, duplicate, unknown, truncated or oversized PB2 and PB3 rows"
 echo "PASS — deploy drill rejects a decisions dump without a log line, a matrix, a transform, a box, an object, a part, the range, the end row, a bone, a part's bone, the anchors, the parent inverse, a baked curve, a key, the bake's log line or the action row - and one with a baked value changed by one bit or a curve under a component its channel does not have"
 echo "PASS — deploy drill accepts intact single-job controls and rejects a successful, truncated or duplicated abort record"
 n_j=$(echo "$TOTAL2" | awk '{print $3}'); n_l=$(echo "$TOTAL2" | awk '{print $7}'); n_o=$(echo "$TOTAL2" | awk '{print $9}'); n_ln=$(echo "$TOTAL2" | awk '{print $13}'); n_bones=$(echo "$TOTAL2" | awk '{print $15}'); n_keys=$(echo "$TOTAL2" | awk '{print $19}'); n_after=$(echo "$TOTAL2" | awk '{print $21}'); n_bl=$(grep -c "^BAKELEFT " "$TMPD/dec.txt")
