@@ -130,6 +130,80 @@ def wall(out, links, pads, wrappers, name, small_classes=0):
     return s.write(out, name)
 
 
+def bones(out, name="deploy_bones"):
+    """Objects that hang from BONES the animation moves (the dugout canoe's shape, and more): a bone that turns, one
+    that slides and is scaled unevenly; under them an object that is itself animated (a part), one with a child, one
+    that only rides. The skinned crew that makes the armature is stripped by the default list."""
+    s = Scene()
+    s.node("Hull", None, mesh=s.mesh("hull", 6.0))
+    rig = s.node("Rig", None, translation=[1.0, 0.5, -0.5], rotation=[0.0, 0.2588190, 0.0, 0.9659258], scale=[1.5, 1.5, 1.5])
+    j0 = s.node("J0", rig, translation=[0.0, 1.0, 0.0], rotation=[0.1305262, 0.0, 0.0, 0.9914449])
+    j1 = s.node("J1", j0, translation=[0.3, 1.2, 0.1], scale=[1.2, 0.8, 1.5])
+    j2 = s.node("J2", j1, translation=[0.0, 0.7, 0.0])
+    s.node("SoldierBody", rig, mesh=s.mesh("soldierbody", 1.0, skinned=True), skin=0)
+    s.skins.append({"joints": [j0, j1, j2]})
+    s.anim(j0, "rotation", [0.0, 0.5, 1.0], [(0.1305262, 0.0, 0.0, 0.9914449), (0.0, 0.3826834, 0.0, 0.9238795), (0.0, -0.7071068, 0.0, -0.7071068)])
+    s.anim(j1, "translation", [0.0, 1.0], [(0.3, 1.2, 0.1), (0.6, 1.5, -0.2)])
+    s.anim(j1, "scale", [0.0, 1.0], [(1.2, 0.8, 1.5), (0.9, 1.4, 1.1)])
+    s.anim(j2, "rotation", [0.0, 1.0], [(0.0, 0.0, 0.0, 1.0), (0.0, 0.0, 0.3826834, 0.9238795)])
+    hang = s.node("Hang", j1, mesh=s.mesh("hang", 1.0), translation=[0.2, 0.5, -0.3], rotation=[0.0, 0.0, 0.2588190, 0.9659258], scale=[1.0, 2.0, 0.5])
+    s.anim(hang, "translation", [0.0, 1.0], [(0.2, 0.5, -0.3), (0.2, 1.0, -0.3)])
+    s.anim(hang, "rotation", [0.0, 1.0], [(0.0, 0.0, 0.2588190, 0.9659258), (0.2588190, 0.0, 0.0, 0.9659258)])
+    s.node("Below", hang, mesh=s.mesh("below", 0.5), translation=[0.0, 0.3, 0.0])
+    s.node("Rider", j2, mesh=s.mesh("rider", 0.5), translation=[0.1, 0.0, 0.2], rotation=[0.3826834, 0.0, 0.0, 0.9238795])
+    s.node("RootRider", j0, mesh=s.mesh("rootrider", 0.5))
+    p = s.node("Good", None, mesh=s.mesh("good", 1.0), translation=[2.0, 0.0, 0.0])
+    s.anim(p, "translation", [0.0, 1.0], [(2.0, 0.0, 0.0), (2.0, 1.0, 0.0)])
+    return s.write(out, name)
+
+
+def _crew(s, parent, joints, name):
+    s.node(name, parent, mesh=s.mesh(name.lower(), 1.0, skinned=True), skin=len(s.skins))
+    s.skins.append({"joints": joints})
+
+
+def frame1(out, name="deploy_frame1"):
+    """The review's: no negative zero anywhere in the file, and still a sign to get wrong. A bone whose rest pose
+    location is (-0, 0, 0) in its own frame; its first key moves it along two axes only. When the import returns the
+    property already holds the action at frame 1 - not zero on X - so the +0 the first frame set brings IS written."""
+    h = 0.5 ** 0.5
+    s = Scene(); s.node("Hull", None, mesh=s.mesh("hull", 6.0))
+    p = s.node("Good", None, mesh=s.mesh("good", 1.0), translation=[2.0, 0.0, 0.0])
+    s.anim(p, "translation", [0.0, 1.0], [(2.0, 0.0, 0.0), (2.0, 1.0, 0.0)])
+    rig = s.node("Rig", None, translation=[0.25, 0.25, 0.0])
+    j0 = s.node("J0", rig, translation=[0.25, 0.0, 0.5])
+    j1 = s.node("J1", j0, translation=[0.0, 0.25, 0.5], rotation=[-h, 0.0, 0.0, -h])
+    s.node("Rider", j1, mesh=s.mesh("rider", 0.5), translation=[0.1, 0.2, 0.3])
+    _crew(s, rig, [j0, j1], "SoldierBody")
+    s.anim(j1, "translation", [0.0, 0.5], [(0.0, 1.0, -0.5), (-1.0, 2.0, 0.25)])
+    return s.write(out, name)
+
+
+def nested(out, name="deploy_nested"):
+    """The review's: an armature that hangs (through an object) from ANOTHER armature's bone, and an object under the
+    inner armature's bone whose node comes BEFORE both in the file - the inner armature's matrix must be the posed one."""
+    import math
+    def q(axis, deg):
+        a = math.radians(deg) / 2.0; v = [0.0, 0.0, 0.0, math.cos(a)]; v[axis] = math.sin(a); return v
+    s = Scene(); s.node("Hull", None, mesh=s.mesh("hull", 6.0))
+    p = s.node("Good", None, mesh=s.mesh("good", 1.0), translation=[2.0, 0.0, 0.0])
+    s.anim(p, "translation", [0.0, 1.0], [(2.0, 0.0, 0.0), (2.0, 1.0, 0.0)])
+    s.nodes.append({"name": "Inner", "mesh": s.mesh("inner", 0.5), "translation": [0.1, 0.2, 0.3], "rotation": q(1, 30)}); inner = len(s.nodes) - 1
+    s.anim(inner, "translation", [0.0, 1.0], [(0.1, 0.2, 0.3), (0.4, 0.2, 0.3)])
+    rig = s.node("RigA", None, translation=[1.0, 0.5, -0.5], rotation=q(1, 30))
+    a0 = s.node("A0", rig, translation=[0.0, 1.0, 0.0], rotation=q(0, 15))
+    a1 = s.node("A1", a0, translation=[0.3, 1.2, 0.1])
+    x = s.node("X", a1, translation=[0.2, 0.3, 0.4], rotation=q(2, 40), scale=[1.5, 1.5, 1.5])
+    b0 = s.node("B0", x, translation=[0.0, 0.5, 0.0], rotation=q(0, -25))
+    b1 = s.node("B1", b0, translation=[0.1, 0.6, 0.0])
+    s.nodes[b1].setdefault("children", []).append(inner)
+    s.node("Late", b1, mesh=s.mesh("late", 0.5), translation=[0.3, 0.0, 0.0])
+    _crew(s, rig, [a0, a1], "SoldierBodyA"); _crew(s, rig, [b0, b1], "SoldierBodyB")
+    s.anim(a1, "rotation", [0.0, 1.0], [(0.0, 0.0, 0.0, 1.0), tuple(q(2, 50))])
+    s.anim(b0, "rotation", [0.0, 1.0], [tuple(q(0, -25)), tuple(q(1, 60))])
+    return s.write(out, name)
+
+
 def half(out):
     """The lowest point exactly 0.125 below zero: Python prints the vertical offset as 0.12 (the exact half goes to the
     even digit), .NET's own formatting as 0.13."""
@@ -157,6 +231,12 @@ def main(out):
     # 0.4 across: still under the half unit the x100 gate asks for
     print("tiny_edge|%s|%s" % (small(out, "deploy_tiny_edge", 0.01), DEFAULT))
     print("half|%s|%s" % (half(out), DEFAULT))
+    fb = bones(out)
+    print("bones|%s|%s" % (fb, DEFAULT))
+    # the armature itself stripped: what hung from its bones is left as roots, where its own transform puts it
+    print("bones_norig|%s|0|24|rig,soldier||||||0|||4|0|1" % fb)
+    print("frame1|%s|%s" % (frame1(out), DEFAULT))
+    print("nested|%s|%s" % (nested(out), DEFAULT))
     # a skinned mesh the strip leaves in: its bound_box is the deformed mesh's - left to Blender, by name
     print("LEFT:skinned|%s|0|24|zzz||||||0|||4|0|1" % small(out, "deploy_skinned", 1.0, skin=True))
     print("cull|%s|%s" % (cull(out), DEFAULT))

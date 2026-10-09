@@ -43,6 +43,13 @@ for path in files:
         for o in objs:
             act = o.animation_data.action.name if o.animation_data and o.animation_data.action else "-"
             print("OBJ\t%s\t%s\t%s\t%s\t%s\t%s\t%s" % (o.name, o.type, o.parent.name if o.parent else "-", o.parent_type, o.parent_bone or "-", act, o.rotation_mode))
+        # an armature's bones at rest: the parent, the length, the head in the parent's space, bone.matrix (3x3, rows)
+        # and bone.matrix_local (4x4, rows)
+        for o in objs:
+            if o.type == 'ARMATURE':
+                for b in o.data.bones:
+                    print("BONE\t%s\t%s\t%s\t%s" % (o.name, b.name, b.parent.name if b.parent else "-", "\t".join(
+                        hx(v) for v in (b.length, *b.head, *(b.matrix[r][c] for r in range(3) for c in range(3)), *(b.matrix_local[r][c] for r in range(4) for c in range(4))))))
         fmin, fmax = 1e9, -1e9
         for o in objs:
             if o.animation_data and o.animation_data.action:
@@ -62,6 +69,10 @@ for path in files:
                 print("L\t%d\t%s\t%s" % (f, o.name, "\t".join(hx(v) for v in (*o.location, q.w, q.x, q.y, q.z, *o.scale))))
                 mw = o.matrix_world
                 print("M\t%d\t%s\t%s" % (f, o.name, "\t".join(hx(mw[r][c]) for r in range(4) for c in range(4))))
+                if o.type == 'ARMATURE':
+                    for pb in o.pose.bones:
+                        q = pb.rotation_quaternion; pm = pb.matrix
+                        print("PB\t%d\t%s\t%s\t%s" % (f, o.name, pb.name, "\t".join(hx(v) for v in (*pb.location, q.w, q.x, q.y, q.z, *pb.scale, *(pm[r][c] for r in range(4) for c in range(4))))))
         print("DONE\t%s" % key, flush=True)
     except Exception as e:
         print("FAIL\t%s\t%s: %s" % (key, type(e).__name__, e), flush=True)

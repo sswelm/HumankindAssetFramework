@@ -21,7 +21,7 @@ static class DeployDrill
     {
         "a frame on a key", "a frame between two keys", "a frame before the first key", "a frame after the last key",
         "an animated translation", "an animated rotation", "an animated scale", "a quaternion negated to run the short way", "keys closer than 0.01 frame merged (the last wins)",
-        "several animations: the first one's action is the active one", "morph weights in the action (they count for its frame range)", "a camera and what hangs below it: the importer's camera correction is not modelled (not compared)", "left to Blender: KHR_animation_pointer (nothing of it is held)", "left to Blender: KHR_animation_pointer with a CUBICSPLINE sampler (nothing of it is held)", "a merged key on a whole frame (it keeps its own frame)", "a key within 0.0001 frame of the frame, not on it (its value, not an interpolation)", "a curve of one key", "a STEP sampler (constant keys)",
+        "several animations: the first one's action is the active one", "morph weights in the action (they count for its frame range)", "an object under a bone (it follows the armature's pose)", "a bone at rest (parent, length, matrix_local)", "a camera and what hangs below it: the importer's camera correction is not modelled (not compared)", "left to Blender: KHR_animation_pointer (nothing of it is held)", "left to Blender: KHR_animation_pointer with a CUBICSPLINE sampler (nothing of it is held)", "a merged key on a whole frame (it keeps its own frame)", "a key within 0.0001 frame of the frame, not on it (its value, not an interpolation)", "a curve of one key", "a STEP sampler (constant keys)",
         "a second channel on one node and path (the first stands)", "an object only a later animation touches (no action on it)", "left to Blender: a CUBICSPLINE sampler (Bezier keys with automatic handles)",
         "an animated node given as a matrix", "an unanimated child of an animated node", "an armature whose bones are animated (an action, no object motion)",
     };
@@ -31,7 +31,7 @@ static class DeployDrill
         Console.OutputEncoding = new UTF8Encoding(false);
         if (args.Length > 0 && args[0] == "--decisions") return DecisionsDrill.Run(args.Skip(1).ToArray());
         Console.WriteLine($"RUNTIME	{(IntPtr.Size * 8)}-bit");
-        int fails = 0, files = 0, left = 0; long matrices = 0, skipped = 0, properties = 0;
+        int fails = 0, files = 0, left = 0; long matrices = 0, skipped = 0, properties = 0, poses = 0;
         var cover = new SortedDictionary<string, long>(); foreach (var k in CoverKeys) cover[k] = 0;
         var notes = new SortedDictionary<string, long>();
         // a dump holds one block per file: FILE ... DONE
@@ -45,6 +45,7 @@ static class DeployDrill
         foreach (var block in blocks)
         {
             string path = null; var objs = new List<string[]>(); var actions = new List<string[]>();
+            var boneRows = new List<string[]>(); var poseRows = new Dictionary<(int, string, string), float[]>();
             var rows = new Dictionary<int, Dictionary<string, float[]>>(); var frames = new List<int>();
             var props = new Dictionary<(int, string), float[]>(); var icospheres = new HashSet<string>(StringComparer.Ordinal);
             foreach (var line in block)
@@ -60,6 +61,8 @@ static class DeployDrill
                     if (!rows.TryGetValue(f, out var d)) rows[f] = d = new Dictionary<string, float[]>(StringComparer.Ordinal);
                     d[t[2]] = t.Skip(3).Select(FromHex).ToArray();
                 }
+                else if (t[0] == "BONE") boneRows.Add(t);
+                else if (t[0] == "PB") poseRows[(int.Parse(t[1]), t[2], t[3])] = t.Skip(4).Select(FromHex).ToArray();
                 else if (t[0] == "L") props[(int.Parse(t[1]), t[2])] = t.Skip(3).Select(FromHex).ToArray();
                 else if (t[0] == "FAIL") { Console.WriteLine($"FAIL {t[1]}: Blender could not dump it: {t[2]}"); fails++; }
             }
@@ -84,7 +87,33 @@ static class DeployDrill
                     }
                 var m = GlbReader.Read(path);
                 var names = BlenderNames.Compute(m);
-                var action = BlenderPosedState.Import(m, 0);
+                // the armatures as the importer builds them: a bone's keys are its pose bone's, an object under a bone follows it
+                var rig = VehicleProbe.BuildImportRig(m, names);
+                var action = BlenderPosedState.Import(m, 0, 24.0, rig);
+                var boneNode = new Dictionary<(string, string), int>();
+                foreach (int b in names.BoneNodesInOrder)
+                {
+                    int an = names.ArmatureNodeOfBone[b];
+                    string armName = names.ArmaturesInOrder.First(x => x.node == an).name;
+                    boneNode[(armName, names.BoneOfJoint[b])] = b;
+                }
+                // every bone Blender has is one here, and the other way round; its rest length and matrix_local equal
+                if (boneRows.Count != boneNode.Count) problems.Add($"{boneNode.Count} bones here, {boneRows.Count} in Blender");
+                long bonesWrong = 0; string firstBone = null;
+                foreach (var t in boneRows)
+                {
+                    if (!boneNode.TryGetValue((t[1], t[2]), out int b)) { problems.Add($"Blender has a bone '{t[2]}' of '{t[1]}' the names do not"); continue; }
+                    var arm = rig.ArmatureOfBone[b]; var theirs = t.Skip(4).Select(FromHex).ToArray();
+                    bool ok = Bits(arm.Length[b]) == Bits(theirs[0]);
+                    // its parent bone, by name
+                    string parentHere = arm.Parent[b] >= 0 ? names.BoneOfJoint[arm.Parent[b]] : "-";
+                    if (parentHere != t[3]) ok = false;
+                    for (int r = 0; r < 4; r++) for (int c = 0; c < 4; c++) if (Bits(arm.ArmMat[b][c * 4 + r]) != Bits(theirs[13 + r * 4 + c])) ok = false;
+                    if (!ok) { bonesWrong++; firstBone = firstBone ?? $"'{t[2]}'"; }
+                }
+                if (bonesWrong > 0) problems.Add($"{bonesWrong} of {boneRows.Count} bones' rest (length, matrix_local) differ, first {firstBone}");
+                cover["a bone at rest (parent, length, matrix_local)"] += boneRows.Count;
+                long posesCompared = 0, posesWrong = 0; string firstPose = null;
                 // Bezier keys with automatic handles are not modelled: the file is named and left, not compared
                 // (its frame range and the objects it touches are held all the same: the keys' frames are the importer's)
                 // KHR_animation_pointer: the importer animates through pointers the reader does not carry - nothing is held)
@@ -145,17 +174,32 @@ static class DeployDrill
                         if (q.ParentBone != null) { underBone.Add(o.Name); break; }
                 long equal = 0, compared = 0; uint worst = 0; string worstWhere = null;
                 // the frames in the order the dump set them: a property keeps the sign of the zero it held
-                var pose = new BlenderPosedState.Pose(action, m);
+                var pose = new BlenderPosedState.Pose(action, m, rig);
                 foreach (int f in unsupported ? new List<int>() : frames)
                 {
                     var set = pose.FrameSet(f);
                     for (int n = 0; n < m.Nodes.Count; n++) set(n);
-                    var world = VehicleProbe.BlenderWorldMatrices(m, set);
+                    var world = VehicleProbe.BlenderWorldMatricesPosed(m, rig, set, out var poseMats, out var poseProps);
+                    // the pose bones: location, rotation_quaternion, scale and the pose matrix, as bits
+                    foreach (var kv in boneNode)
+                    {
+                        if (!poseRows.TryGetValue((f, kv.Key.Item1, kv.Key.Item2), out var pr)) { problems.Add($"the dump has no pose row for bone '{kv.Key.Item2}' at frame {f}"); break; }
+                        var pp = poseProps[kv.Value]; var pm = poseMats[kv.Value];
+                        var mine = pp[0].Concat(pp[1]).Concat(pp[2]).Concat(Enumerable.Range(0, 16).Select(i => pm[(i % 4) * 4 + i / 4])).ToArray();
+                        posesCompared++;
+                        int at = -1; for (int i = 0; i < 26 && at < 0; i++) if (Bits(mine[i]) != Bits(pr[i])) at = i;
+                        if (at >= 0)
+                        {
+                            posesWrong++;
+                            firstPose = firstPose ?? $"'{kv.Key.Item2}' at frame {f}, value {at} ({(at < 3 ? "location" : at < 7 ? "quaternion" : at < 10 ? "scale" : "pose matrix")}): here {mine[at]:R}, Blender {pr[at]:R} | here loc[{string.Join(",", pp[0].Select(x => x.ToString("R")))}] quat[{string.Join(",", pp[1].Select(x => x.ToString("R")))}] Blender loc[{string.Join(",", pr.Take(3).Select(x => x.ToString("R")))}] quat[{string.Join(",", pr.Skip(3).Take(4).Select(x => x.ToString("R")))}]";
+                        }
+                    }
                     foreach (var o in names.Objects)
                     {
                         if (!rows[f].TryGetValue(o.Name, out var theirs)) continue;
                         if (underCamera.Contains(o.Name)) { skipped++; continue; }
-                        if (underBone.Contains(o.Name) || o.GltfNode < 0 || (o.Kind == BlenderNames.ObjectKind.Mesh && o.Skin >= 0)) { skipped++; continue; }
+                        if (underBone.Contains(o.Name)) cover["an object under a bone (it follows the armature's pose)"]++;
+                        if (o.GltfNode < 0 || (o.Kind == BlenderNames.ObjectKind.Mesh && o.Skin >= 0)) { skipped++; continue; }
                         var mine = world[o.GltfNode];
                         compared++;
                         uint d = 0;
@@ -213,6 +257,8 @@ static class DeployDrill
                 }
                 matrices += compared;
                 if (equal != compared) problems.Add($"{compared - equal} of {compared} matrices differ, the worst by {worst} ulp: {worstWhere}");
+                if (posesWrong > 0) problems.Add($"{posesWrong} of {posesCompared} pose bones differ, first {firstPose}");
+                poses += posesCompared;
                 if (propsWrong > 0) problems.Add($"{propsWrong} of {propsCompared} evaluated location/rotation/scale sets differ, first {firstProp}");
                 properties += propsCompared;
                 if (problems.Count > 0) { fails++; Console.WriteLine($"FAIL {shortKey}: " + string.Join("; ", problems.Take(4))); }
@@ -234,7 +280,7 @@ static class DeployDrill
         }
         foreach (var kv in notes) Console.WriteLine($"NOTE {kv.Value} files: {kv.Key}");
         foreach (var kv in cover) Console.WriteLine($"COVER {kv.Value} {kv.Key}");
-        Console.WriteLine($"TOTAL files {files} failed {fails} matrices {matrices} skipped {skipped} left {left} properties {properties}");
+        Console.WriteLine($"TOTAL files {files} failed {fails} matrices {matrices} skipped {skipped} left {left} properties {properties} poses {poses}");
         return fails == 0 ? 0 : 1;
     }
 }

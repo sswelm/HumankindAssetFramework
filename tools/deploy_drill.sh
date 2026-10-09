@@ -46,7 +46,7 @@ OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -optimize+ -out:"$WTMP/deploy.ex
   "$WROOT/tools/deploy-drill/DeployDrill.cs" "$WROOT/tools/deploy-drill/DecisionsDrill.cs" "$E/BlenderDeploy.cs" "$E/BlenderExportTree.cs" \
   "$E/HafModel.cs" "$E/GlbReader.cs" "$E/HafTransforms.cs" "$E/BlenderNames.cs" "$E/BlenderPosedState.cs" "$E/BlenderTrig.cs" "$E/BlenderEigen.cs" "$E/BlenderMesh.cs" "$E/BMesh.cs" "$E/BlenderColor.cs" \
   "$E/VehicleProbe.cs" "$E/VehicleProbe.Visibility.cs" "$E/VehicleProbe.Islands.cs" "$E/VehicleProbe.InsideOut.cs" \
-  "$E/VehicleProbe.BlenderWorld.cs" "$E/VehicleProbe.BlenderSkin.cs" "$E/VehicleProbe.CustomNormals.cs" "$E/VehicleProbe.Merge.cs" "$E/VehicleProbe.BlenderArmature.cs" 2>&1); rc=$?
+  "$E/VehicleProbe.BlenderWorld.cs" "$E/VehicleProbe.BlenderSkin.cs" "$E/VehicleProbe.CustomNormals.cs" "$E/VehicleProbe.Merge.cs" "$E/VehicleProbe.BlenderArmature.cs" "$E/VehicleProbe.BlenderPose.cs" 2>&1); rc=$?
 if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/deploy.exe" ]; then echo "$OUT" | grep -E "error" | head -20; echo "FAIL — the deploy drill did not compile (csc rc=$rc)"; exit 1; fi
 
 mapfile -t FIXTURES < <(python "$ROOT/tools/glb-reader-drill/fixtures.py" "$WTMP/fixtures" --posed | tr -d '\r')
@@ -83,7 +83,7 @@ brc=0; for pid in "${BPIDS[@]}"; do wait "$pid" || brc=$?; done
 t1=$(date +%s)
 n_b=0
 for ((k = 0; k < JOBS; k++)); do
-  tr -d '\r' < "$TMPD/blender_raw_$k.txt" | grep -E "^(FILE|SCENE|ACTION|OBJ|FRAMES|L|M|DONE|FAIL)	" > "$TMPD/posed_$k.txt"
+  tr -d '\r' < "$TMPD/blender_raw_$k.txt" | grep -E "^(FILE|SCENE|ACTION|OBJ|BONE|FRAMES|L|M|PB|DONE|FAIL)	" > "$TMPD/posed_$k.txt"
   n_b=$((n_b + $(grep -c "^DONE" "$TMPD/posed_$k.txt")))
 done
 if [ "$brc" -ne 0 ] || [ "$n_b" -ne "${#SAMPLE[@]}" ]; then
@@ -123,7 +123,8 @@ done
 echo "PASS — deploy drill rejects missing matrices, one or all properties, empty frame lists, and truncated records"
 
 n_prop=$(echo "$TOTAL" | awk '{print $13}')
-echo "PASS — deploy drill, the posed state: $n_mat object matrices of $n_files files, at up to thirteen frames each, equal to Blender's bit for bit - the sign of a zero included - and $n_prop evaluated location/rotation/scale sets; $n_left files left to Blender by name (Blender took $((t1 - t0)) s, the comparison $((t2 - t1)) s, in $JOBS processes each); ${#FIXTURES[@]} fixtures, $NOTE_SOURCES"
+n_pose=$(echo "$TOTAL" | awk '{print $15}')
+echo "PASS — deploy drill, the posed state: $n_mat object matrices of $n_files files, at up to thirteen frames each, equal to Blender's bit for bit - the sign of a zero included - with $n_prop evaluated location/rotation/scale sets and $n_pose pose bones (location, rotation, scale, pose matrix); $n_left files left to Blender by name (Blender took $((t1 - t0)) s, the comparison $((t2 - t1)) s, in $JOBS processes each); ${#FIXTURES[@]} fixtures, $NOTE_SOURCES"
 
 # PART 2, THE DECISIONS (2026-10-10): what deploy_convert.py decides before it builds anything - the strip, the frame
 # range, the unit normalization, the parts, the bone slimming, the path, the degenerate cull, the bone budget.
@@ -133,7 +134,7 @@ echo "PASS — deploy drill, the posed state: $n_mat object matrices of $n_files
 # takes). BlenderDeploy.Decide is then held to the script's own log lines, its decisions and the scene it left: every
 # object's matrix, transform and bound box, as bits. A job the jobs file marks LEFT: must come out left to Blender, and
 # no other may - a wrong decision that ends in a fallback is a failure. A recorded job whose source is gone is named.
-KNOWN_LEFT="DugoutCanoe"   # objects under animated bones: the armature's pose is not modelled yet
+KNOWN_LEFT=""   # none: the dugout canoe (objects under animated bones) is decided here since the pose is modelled (2b)
 : > "$TMPD/jobs.txt"; n_rec=0; MISSING=""
 if [ -n "$PACK" ]; then
   for a in "$PROJECT"/Assets/FactorySource/*/deploy_converted.args.txt; do

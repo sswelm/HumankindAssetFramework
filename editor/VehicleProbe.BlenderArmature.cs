@@ -34,6 +34,14 @@ public static partial class VehicleProbe
         public Dictionary<int, float[]> EditHead = new Dictionary<int, float[]>(), EditTail = new Dictionary<int, float[]>();   // the edit bone, armature space
         public Dictionary<int, float> EditRoll = new Dictionary<int, float>();
         public List<string> Notes = new List<string>();
+        // the rest as the POSE needs it (VehicleProbe.BlenderPose.cs), per bone node:
+        public List<int> Bones = new List<int>();                                       // creation order: a parent before its children
+        public Dictionary<int, int> Parent = new Dictionary<int, int>();                // the parent bone's node, or -1
+        public Dictionary<int, float[]> ArmMat = new Dictionary<int, float[]>();        // bone.matrix_local, column-major
+        public Dictionary<int, float[]> OffsBone = new Dictionary<int, float[]>();      // BKE_bone_offset_matrix_get: the bone's own matrix at its head, the parent's length added along Y (a root's: arm_mat)
+        public Dictionary<int, float> Length = new Dictionary<int, float>();            // bone.length
+        public Dictionary<int, float[]> EditTrans = new Dictionary<int, float[]>(), EditRot = new Dictionary<int, float[]>();   // the vnode's editbone_trans / editbone_rot after prettify_bones
+        public Dictionary<int, double> PyLength = new Dictionary<int, double>();        // the vnode's bone_length (a Python float)
     }
 
     static readonly float[] AxisBasisChange = { 1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1 };   // row-major items: (x, y, z) -> (x, z, -y)
@@ -163,8 +171,10 @@ public static partial class VehicleProbe
             var postmat = new[] { arm[0], arm[1], arm[2], arm[4], arm[5], arm[6], arm[8], arm[9], arm[10] };   // copy_m3_m4: M[col][row], three columns
             var difmat = MulM3(imat, postmat);
             float boneRoll = -BlenderTrig.Atan2f(difmat[2 * 3 + 0], difmat[2 * 3 + 2]);
-            arm = WhereIsBone(bh, bt, boneRoll, parent >= 0 ? armMat[parent] : null, parent >= 0 ? bLength[parent] : 0f, out float len1);
+            arm = WhereIsBone(bh, bt, boneRoll, parent >= 0 ? armMat[parent] : null, parent >= 0 ? bLength[parent] : 0f, out float len1, out var offs);
             armMat[b] = arm; bLength[b] = len1;
+            r.Bones.Add(b); r.Parent[b] = parent; r.ArmMat[b] = arm; r.OffsBone[b] = offs; r.Length[b] = len1;
+            r.EditTrans[b] = ebTrans[b]; r.EditRot[b] = ebRot[b]; r.PyLength[b] = boneLength[b];
             foreach (int c in children[b]) Finalize(c, b);
         }
         foreach (int b in roots) Finalize(b, -1);
@@ -371,7 +381,9 @@ public static partial class VehicleProbe
 
     /// <summary>BKE_armature_where_is_bone for one bone: head and tail in the parent's space, the roll, the parent's arm_mat
     /// (16 floats, M[col][row]) and length; returns arm_mat and the bone's length.</summary>
-    static float[] WhereIsBone(float[] head, float[] tail, float roll, float[] parentArm, float parentLength, out float length)
+    static float[] WhereIsBone(float[] head, float[] tail, float roll, float[] parentArm, float parentLength, out float length) => WhereIsBone(head, tail, roll, parentArm, parentLength, out length, out _);
+
+    static float[] WhereIsBone(float[] head, float[] tail, float roll, float[] parentArm, float parentLength, out float length, out float[] offsBone)
     {
         float vx = (float)(tail[0] - head[0]), vy = (float)(tail[1] - head[1]), vz = (float)(tail[2] - head[2]);
         length = Sqrtf((float)((float)((float)(vx * vx) + (float)(vy * vy)) + (float)(vz * vz)));
@@ -382,6 +394,7 @@ public static partial class VehicleProbe
         for (int col = 0; col < 3; col++) for (int row = 0; row < 3; row++) offs[col * 4 + row] = boneMat[col * 3 + row];
         offs[15] = 1f;
         offs[12] = head[0]; offs[13] = head[1]; offs[14] = head[2];
+        offsBone = offs;
         if (parentArm == null) return offs;
         offs[13] = (float)(offs[13] + parentLength);   // offs_bone[3][1] += parent->length
         return MulM4(parentArm, offs);
