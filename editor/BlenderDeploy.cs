@@ -80,6 +80,14 @@ public static class BlenderDeploy
         public Obj StaticAnchor;                                  // what StaticRoot is constrained to, or null
         public Obj Hull;                                          // the root-motion anchor the armature is parented to for the bake, or null
         public bool TravelMeasured; public double Travel, ModelSize;
+        // ---- the bake (part 4): per bone, by name, a key per frame FrameMin..FrameMax - location 3, rotation_quaternion
+        //      (w, x, y, z) 4, scale 3 - as the action holds them when the script reaches its step 5a
+        public readonly Dictionary<string, float[][]> Keys = new Dictionary<string, float[][]>(StringComparer.Ordinal);
+        public bool ScaleKeys = true;                             // false on the contract path: the scale curves are stripped
+        // the frames the bake keyed: FrameMin..FrameMax as the bake operator takes them - its frame_end is at least 1,
+        // so a clip whose whole range is frame 0 is baked on frames 0 AND 1
+        public int BakeFrameMin, BakeFrameMax;
+        public readonly List<string> BakeLog = new List<string>();
     }
 
     /// <summary>A bone of the armature at rest.</summary>
@@ -89,6 +97,7 @@ public static class BlenderDeploy
         public float[] Head, Tail;                                 // head_local, tail_local: the edit bone's, armature space
         public float Length;
         public float[] MatrixLocal;                                // bone.matrix_local, column-major
+        public float[] Offs;                                       // its offset matrix in the parent (BKE_bone_offset_matrix_get; a root's: matrix_local)
     }
 
     const int BoneWall = 124, PartBudget = 124;
@@ -99,7 +108,11 @@ public static class BlenderDeploy
 
     /// <summary>The script's decisions for a model and the arguments the Factory gives it after the input and the output
     /// (args[0] is the script's argv[2]).</summary>
-    public static Result Decide(HafModel m, string[] args, BlenderNames.Result names = null)
+    public static Result Decide(HafModel m, string[] args, BlenderNames.Result names = null) => Decide(m, args, names, false);
+
+    /// <summary>... and with `bake` the conversion goes on through the bake, the scale-free step and the delta-form
+    /// rebase: Result.Keys, as the action stands when the script reaches its step 5a.</summary>
+    public static Result Decide(HafModel m, string[] args, BlenderNames.Result names, bool bake)
     {
         var r = new Result();
         names = names ?? BlenderNames.Compute(m);
@@ -401,7 +414,7 @@ public static class BlenderDeploy
             VehicleProbe.RestFromEditBones(ids, kids, rootIds, head, tail, roll, (b, parent, armMat, offs, len) =>
             {
                 var bone = r.Bones[b];
-                bone.MatrixLocal = armMat; bone.Length = len;
+                bone.MatrixLocal = armMat; bone.Length = len; bone.Offs = offs;
                 // head_local and tail_local are the EDIT bone's (arm_head, arm_tail: copied, never recomputed) - a child's
                 // matrix_local goes through its parent and back and may sit an ulp beside its own head
                 bone.Head = head[b]; bone.Tail = tail[b];
@@ -461,7 +474,190 @@ public static class BlenderDeploy
             }
         }
         r.Objects = all;
+        if (!bake) return r;
+
+        // nla.bake with only_selected=False bakes every SELECTED object that has a pose as well - and the importer leaves
+        // everything selected: an imported armature that survived the strip is baked too. Its bones get a key a frame
+        // (visual, near what they had) and its own OBJECT animation is gone with the action the bake replaces. That is
+        // not modelled: where it can show - the armature's node is itself animated, or something still hangs from
+        // its bones - the job is Blender's from here (review of the bake, 2026-10-11).
+        var imported = all.Where(o => o.Type == "ARMATURE" && o != arm).ToList();
+        foreach (var a in imported)
+        {
+            if (a.Node >= 0 && action.Animates(a.Node)) { r.Fallback = $"the bake re-bakes the imported armature '{a.Name}', whose own animation it drops (not modelled)"; return r; }
+            var rider = all.FirstOrDefault(o => o.Parent == a && o.BoneNode >= 0);
+            if (rider != null) { r.Fallback = $"the bake re-bakes the imported armature '{a.Name}', from whose bones '{rider.Name}' hangs (not modelled)"; return r; }
+        }
+
+        // ---- 5. the bake (bpy.ops.nla.bake, visual keying, bake_types POSE): every frame the pose each bone's Copy
+        //      Transforms gives it, brought into the bone's own space; then, bone by bone, decomposed into keys
+        // NLA_OT_bake's own limits: frame_start is an IntProperty of 0..300000, frame_end of 1..300000, and a value
+        // outside is CLAMPED. A clip whose keys all sit within frame 0 has the range 0..0 and is baked on frames 0 and 1
+        // (measured; review of PR #137). The rebase below still runs over fmin..fmax, so the extra key stays as baked.
+        if (fmin < 0 || fmax > 300000) { r.Fallback = $"a frame range the bake operator clamps ({fmin}..{fmax}: its frame_start is 0..300000)"; return r; }
+        int bakeEnd = Math.Max(fmax, 1);
+        r.BakeFrameMin = fmin; r.BakeFrameMax = bakeEnd;
+        int nf = bakeEnd - fmin + 1, nb = r.Bones.Count, nRebase = fmax - fmin + 1;
+        var order = new List<int>();   // a parent before its children
+        { var seen = new bool[nb]; void Visit(int i) { if (seen[i]) return; seen[i] = true; if (r.Bones[i].Parent != null) Visit(r.Bones.IndexOf(r.Bones[i].Parent)); order.Add(i); } for (int i = 0; i < nb; i++) Visit(i); }
+        var parentIndex = r.Bones.Select(b => b.Parent != null ? r.Bones.IndexOf(b.Parent) : -1).ToArray();
+        var bakedBasis = new float[nb][][]; for (int i = 0; i < nb; i++) bakedBasis[i] = new float[nf][];
+        for (int f = fmin; f <= bakeEnd; f++)
+        {
+            FrameSet(f);
+            var armInv = BlenderEigen.InvertM4(arm.World);   // world_to_object
+            var poseMat = new float[nb][];
+            foreach (int i in order)
+            {
+                var bone = r.Bones[i]; var target = bone.Part ?? r.StaticAnchor;
+                // the constraint replaces the bone's matrix in WORLD space by its target's; back to pose space
+                if (target != null) { poseMat[i] = VehicleProbe.MulM4(armInv, target.World); continue; }
+                // no constraint (StaticRoot without a static mesh): the rest, through an identity channel
+                var rs = parentIndex[i] >= 0 ? VehicleProbe.MulM4(poseMat[parentIndex[i]], bone.Offs) : bone.MatrixLocal;
+                poseMat[i] = PoseFromChannel(rs, VehicleProbe.IdentityF());
+            }
+            // obj.convert_space(pose_bone, matrix, 'POSE', 'LOCAL'): BKE_armature_mat_pose_to_bone
+            foreach (int i in order)
+            {
+                var bone = r.Bones[i];
+                var rs = parentIndex[i] >= 0 ? VehicleProbe.MulM4(poseMat[parentIndex[i]], bone.Offs) : bone.MatrixLocal;
+                bakedBasis[i][f - fmin] = PoseFromChannel(BlenderEigen.InvertM4(rs), poseMat[i]);
+            }
+        }
+        FrameSet(fmin);   // the bake puts the scene's frame back
+        for (int i = 0; i < nb; i++)
+        {
+            var keys = new float[nf][]; float[] prev = null;
+            for (int k = 0; k < nf; k++)
+            {
+                // pbone.matrix_basis = m: BKE_pchan_apply_mat4 - mat4_to_loc_rot_size, mat3_normalized_to_quat
+                VehicleProbe.Mat4ToLocRotSize(bakedBasis[i][k], out var loc, out var rot, out var size);
+                var q = VehicleProbe.Mat3NormalizedToQuat(rot);
+                if (prev != null) q = MakeCompatible(q, prev);
+                prev = q;
+                keys[k] = new[] { loc[0], loc[1], loc[2], q[0], q[1], q[2], q[3], size[0], size[1], size[2] };
+            }
+            r.Keys[r.Bones[i].Name] = keys;
+        }
+        if (r.Hull != null)
+        {
+            // arm.parent = None; arm.matrix_world = Matrix.Identity(4)
+            arm.Parent = null; arm.ParentInverse = null;
+            ApplyMat4Root(arm, VehicleProbe.IdentityF());
+            Update(all);
+        }
+
+        // ---- the scale-free rig and the delta-form rebase (the contract path only)
+        if (!r.Legacy)
+        {
+            r.ScaleKeys = false;
+            // every pose-bone scale curve of EVERY action goes: the new armature's, those the bake gave each surviving
+            // imported armature (three a bone), and the importer's own - a bone's animated scale, in any animation,
+            // whether its armature is still there or not
+            int stripped = 3 * nb;
+            foreach (var a in imported) stripped += 3 * rig.Armatures[a.Node].Bones.Count;
+            for (int ai = 0; ai < m.Animations.Count; ai++)
+                stripped += 3 * (ai == 0 ? action : BlenderPosedState.Import(m, ai, 24.0, rig)).Scale.Keys.Count(n => rig.IsBone(n));
+            r.BakeLog.Add($"DEPLOY scale-free rig: {stripped} pose-scale fcurve(s) stripped (verts carry the unit scale)");
+            int rebased = 0;
+            foreach (var bone in r.Bones)
+            {
+                if (AsciiLower(bone.Name).Contains("leg")) continue;
+                var keys = r.Keys[bone.Name];
+                float[] l0 = { keys[0][0], keys[0][1], keys[0][2] }, q0 = { keys[0][3], keys[0][4], keys[0][5], keys[0][6] };
+                if (Magnitude(q0) < 1e-6) continue;
+                var n0 = (float[])q0.Clone(); VehicleProbe.NormalizeQt(n0);
+                var m0i = VehicleProbe.Inverted(VehicleProbe.TranslationRotation(l0, n0));
+                if (m0i == null) { r.Fallback = $"the delta-form rebase: bone '{bone.Name}' has no inverse at the bind frame (the script fails on it)"; return r; }
+                float[] prevQ = null;
+                var rebasedKeys = (float[][])keys.Clone();   // a key past fmax..: the bake's extra frame is not rebased
+                for (int k = 0; k < nRebase; k++)
+                {
+                    float[] lf = { keys[k][0], keys[k][1], keys[k][2] }, qf = { keys[k][3], keys[k][4], keys[k][5], keys[k][6] };
+                    if (Magnitude(qf) < 1e-6) qf = new[] { 1f, 0f, 0f, 0f };
+                    var nq = (float[])qf.Clone(); VehicleProbe.NormalizeQt(nq);
+                    var mn2 = VehicleProbe.MatMulMathutils(VehicleProbe.TranslationRotation(lf, nq), m0i);
+                    // Matrix.decompose(): mat4_to_loc_rot_size and mat3_normalized_to_quat_fast
+                    VehicleProbe.Mat4ToLocRotSize(VehicleProbe.ToColumnMajor(mn2), out var ln, out var rot, out _);
+                    var qn = VehicleProbe.Mat3NormalizedToQuatFast(rot);
+                    if (prevQ != null && VehicleProbe.DotQt(prevQ, qn) < 0f) qn = new[] { -qn[0], -qn[1], -qn[2], -qn[3] };
+                    prevQ = qn;
+                    // `_d = new - kp.co[1]; kp.co[1] += _d` in Python: a DOUBLE difference added back to the float32 key. Where
+                    // the old key is some thirty bits bigger than the new one the difference does not hold the new value's
+                    // last bits, and the key comes out an ulp or two beside it (1,103 keys of the T-62 and a chain fixture)
+                    float Rekey(float old, float value) => (float)((double)old + ((double)value - (double)old));
+                    rebasedKeys[k] = new[] { Rekey(keys[k][0], ln[0]), Rekey(keys[k][1], ln[1]), Rekey(keys[k][2], ln[2]),
+                                             Rekey(keys[k][3], qn[0]), Rekey(keys[k][4], qn[1]), Rekey(keys[k][5], qn[2]), Rekey(keys[k][6], qn[3]), keys[k][7], keys[k][8], keys[k][9] };
+                }
+                r.Keys[bone.Name] = rebasedKeys;
+                rebased++;
+            }
+            r.BakeLog.Add($"DEPLOY delta-form rebase: {rebased} bone(s) rebased to identity-at-f0 deltas (bind == frame 0)");
+        }
+        else
+        {
+            r.BakeLog.Add("DEPLOY scale-free rig: SKIPPED (legacy path keeps the cm-verts x0.01 pose scale)");
+            r.BakeLog.Add("DEPLOY delta-form rebase: SKIPPED (legacy path — pre-contract engine handling renders absolute poses correctly; bind==f0 would fold the legs' rest and cross them)");
+        }
+        r.BakeLog.Add($"DEPLOY baked {r.BoneOf.Count} bones");
         return r;
+    }
+
+    /// <summary>BKE_bone_parent_transform_apply with one matrix for rotation, scale and location: the matrix times the
+    /// channel, the location column through the same matrix apart (mul_v3_m4v3), the axes times a post scale of 1.</summary>
+    static float[] PoseFromChannel(float[] rotscale, float[] chan)
+    {
+        var o = VehicleProbe.MulM4(rotscale, chan);
+        float x = chan[12], y = chan[13], z = chan[14];
+        for (int k = 0; k < 3; k++)
+            o[12 + k] = (float)((float)((float)((float)(x * rotscale[k]) + (float)(y * rotscale[4 + k])) + (float)(z * rotscale[8 + k])) + rotscale[12 + k]);
+        for (int k = 0; k < 12; k++) if (k % 4 != 3) o[k] = (float)(o[k] * 1f);
+        return o;
+    }
+
+    /// <summary>mathutils' Quaternion.make_compatible(other): the unit quaternion brought next to `old` through the
+    /// rotation between them (quat_to_compatible_quat), its length put back. It does not return the quaternion it was
+    /// given: a bone that stands still drifts by an ulp a frame.</summary>
+    static float[] MakeCompatible(float[] self, float[] old)
+    {
+        var a = (float[])self.Clone();
+        float len = VehicleProbe.Sqrtf(VehicleProbe.DotQt(a, a));
+        if (len != 0f) { float f = (float)(1.0f / len); for (int i = 0; i < 4; i++) a[i] = (float)(a[i] * f); } else { a[1] = 1f; a[0] = a[2] = a[3] = 0f; }
+        float[] q;
+        var oldUnit = (float[])old.Clone();
+        float oldLen = VehicleProbe.Sqrtf(VehicleProbe.DotQt(oldUnit, oldUnit));
+        if (oldLen != 0f) { float f = (float)(1.0f / oldLen); for (int i = 0; i < 4; i++) oldUnit[i] = (float)(oldUnit[i] * f); } else { oldUnit[1] = 1f; oldUnit[0] = oldUnit[2] = oldUnit[3] = 0f; }
+        if (oldLen > 1e-4f)
+        {
+            // rotation_between_quats_to_quat(delta, old_unit, a): the conjugate over its squared length, times a
+            var t = new[] { oldUnit[0], -oldUnit[1], -oldUnit[2], -oldUnit[3] };
+            float inv = (float)(1.0f / VehicleProbe.DotQt(t, t));
+            for (int i = 0; i < 4; i++) t[i] = (float)(t[i] * inv);
+            var delta = BlenderPosedState.MulQtQt(t, a);
+            q = BlenderPosedState.MulQtQt(old, delta);
+            var neg = new[] { -q[0], -q[1], -q[2], -q[3] };
+            if (LenSquaredV4(neg, old) < LenSquaredV4(q, old)) q = neg;
+        }
+        else q = a;
+        return new[] { (float)(q[0] * len), (float)(q[1] * len), (float)(q[2] * len), (float)(q[3] * len) };
+    }
+
+    static float LenSquaredV4(float[] a, float[] b)
+    {
+        float d0 = (float)(b[0] - a[0]), d1 = (float)(b[1] - a[1]), d2 = (float)(b[2] - a[2]), d3 = (float)(b[3] - a[3]);
+        return (float)((float)((float)((float)(d0 * d0) + (float)(d1 * d1)) + (float)(d2 * d2)) + (float)(d3 * d3));
+    }
+
+    /// <summary>Quaternion.magnitude: the float32 root of the float32 dot, as a Python float.</summary>
+    static double Magnitude(float[] q) => (double)VehicleProbe.Sqrtf(VehicleProbe.DotQt(q, q));
+
+    /// <summary>`o.matrix_world = m` for an object without a parent.</summary>
+    static void ApplyMat4Root(Obj o, float[] mat)
+    {
+        VehicleProbe.Mat4ToLocRotSize(mat, out var loc, out var rot, out var size);
+        if (!o.Euler) o.Quat = BlenderPosedState.MulQtQt(new[] { 1f, -0f, -0f, -0f }, VehicleProbe.Mat3NormalizedToQuat(rot));
+        o.Loc = new[] { (float)(loc[0] - 0f), (float)(loc[1] - 0f), (float)(loc[2] - 0f) };
+        o.Scale = new[] { (float)(size[0] / 1f), (float)(size[1] / 1f), (float)(size[2] / 1f) };
     }
 
     /// <summary>The depsgraph's pass: every object's matrix_world from its own transform and its parent's matrix.</summary>

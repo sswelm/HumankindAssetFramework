@@ -69,13 +69,18 @@ public static class BlenderEigen
     /// cancels to exactly zero while the double one does not (or the reverse); a bone's arm_mat, the one caller's
     /// input, has a determinant near 1. Port Eigen's formula before using InvertM4 on matrices that may be singular
     /// (review of PR #129).</summary>
-    static float Determinant(float[] m)
+    /// <summary>Eigen's determinant of a 4x4 (Determinant.h, determinant_impl&lt;..., 4&gt;) in float32, operation by
+    /// operation - it decides "singular": EIG_invert_m4_m4 gives the ZERO matrix where this is exactly 0. A double
+    /// cofactor expansion stood here; on a part flattened on one axis Blender's float32 determinant cancels to 0 and the
+    /// double one did not, so Blender wrote zeros where the port wrote NaN (review of the bake, 2026-10-11: 16 of 908
+    /// fuzzed jobs, and the cull of part 2 with them).</summary>
+    static float Determinant(float[] a)
     {
-        double[] a = new double[16]; for (int i = 0; i < 16; i++) a[i] = m[i];
-        double M(int r, int c) => a[c * 4 + r];
-        double Det3(int r0, int r1, int r2, int c0, int c1, int c2) =>
-            M(r0, c0) * (M(r1, c1) * M(r2, c2) - M(r1, c2) * M(r2, c1)) - M(r0, c1) * (M(r1, c0) * M(r2, c2) - M(r1, c2) * M(r2, c0)) + M(r0, c2) * (M(r1, c0) * M(r2, c1) - M(r1, c1) * M(r2, c0));
-        double det = M(0, 0) * Det3(1, 2, 3, 1, 2, 3) - M(0, 1) * Det3(1, 2, 3, 0, 2, 3) + M(0, 2) * Det3(1, 2, 3, 0, 1, 3) - M(0, 3) * Det3(1, 2, 3, 0, 1, 2);
-        return (float)det;
+        float M(int r, int c) => a[c * 4 + r];
+        float Det2(int i0, int i1) => (float)((float)(M(i0, 0) * M(i1, 1)) - (float)(M(i1, 0) * M(i0, 1)));
+        float Det3(int i0, float d0, int i1, float d1, int i2, float d2) => (float)((float)(M(i0, 2) * d0) + (float)((float)(-M(i1, 2) * d1) + (float)(M(i2, 2) * d2)));
+        float d01 = Det2(0, 1), d02 = Det2(0, 2), d03 = Det2(0, 3), d12 = Det2(1, 2), d13 = Det2(1, 3), d23 = Det2(2, 3);
+        float d3_0 = Det3(1, d23, 2, d13, 3, d12), d3_1 = Det3(0, d23, 2, d03, 3, d02), d3_2 = Det3(0, d13, 1, d03, 3, d01), d3_3 = Det3(0, d12, 1, d02, 2, d01);
+        return (float)((float)((float)(-M(0, 3) * d3_0) + (float)(M(1, 3) * d3_1)) + (float)((float)(-M(2, 3) * d3_2) + (float)(M(3, 3) * d3_3)));
     }
 }

@@ -198,6 +198,34 @@ public class BlenderDeployTests
     }
 
     [Fact]
+    public void The_bake_gives_every_bone_a_key_a_frame_in_its_own_space()
+    {
+        var s = new Scene();
+        int hull = s.Node("Hull", mesh: true);
+        int gun = s.Node("Gun", hull, mesh: true, t: new double[] { 0, 2, 0 }); s.Move(gun, 1f, new[] { 0f, 2f, 0.024f });   // 0.001 a frame along glTF z
+        s.Decide();   // builds the scene and the animation
+        var r = BlenderDeploy.Decide(s.M, Default.Split('|'), null, true);
+        Assert.Null(r.Fallback);
+        Assert.Equal(new[] { "Gun", "StaticRoot" }, r.Keys.Keys.OrderBy(k => k));
+        var k = r.Keys["Gun"];
+        Assert.Equal(25, k.Length);                                  // frames 0..24
+        Assert.All(k, key => Assert.Equal(10, key.Length));           // location 3, quaternion 4, scale 3
+        // the bone stands at the part's place and points up Z: in its own space the part is turned a quarter back
+        // (w = sqrt(1/2)) and its move along glTF z - Blender's -y - runs along the bone's own Z
+        Assert.Equal(0f, k[0][2], 6); Assert.Equal(0.012f, Math.Abs(k[12][2]), 5); Assert.Equal(0.024f, Math.Abs(k[24][2]), 5);
+        Assert.All(k, key => { Assert.Equal(0f, key[0], 5); Assert.Equal(0f, key[1], 5); Assert.Equal(0.70711f, key[3], 4); Assert.Equal(1f, key[7], 5); });
+        Assert.True(r.ScaleKeys);                                    // the legacy path keeps the scale curves
+        Assert.Equal(new[]
+        {
+            "DEPLOY scale-free rig: SKIPPED (legacy path keeps the cm-verts x0.01 pose scale)",
+            "DEPLOY delta-form rebase: SKIPPED (legacy path — pre-contract engine handling renders absolute poses correctly; bind==f0 would fold the legs' rest and cross them)",
+            "DEPLOY baked 1 bones",
+        }, r.BakeLog);
+        // without `bake` the conversion stops before it
+        Assert.Empty(s.Decide().Keys);
+    }
+
+    [Fact]
     public void What_the_matrices_here_do_not_model_is_left_to_Blender_by_name()
     {
         var s = new Scene();

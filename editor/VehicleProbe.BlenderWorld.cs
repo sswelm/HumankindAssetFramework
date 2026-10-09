@@ -118,10 +118,10 @@ public static partial class VehicleProbe
         return (float)((float)(a - b) + c);
     }
 
-    static float DotQt(float[] a, float[] b) => (float)((float)((float)((float)(a[0] * b[0]) + (float)(a[1] * b[1])) + (float)(a[2] * b[2])) + (float)(a[3] * b[3]));
+    internal static float DotQt(float[] a, float[] b) => (float)((float)((float)((float)(a[0] * b[0]) + (float)(a[1] * b[1])) + (float)(a[2] * b[2])) + (float)(a[3] * b[3]));
 
     /// <summary>normalize_qt: length sqrtf(dot), each component times 1.0f / length; a zero quaternion becomes (0, 1, 0, 0).</summary>
-    static void NormalizeQt(float[] q)
+    internal static void NormalizeQt(float[] q)
     {
         float len = Sqrtf(DotQt(q, q));
         if (len != 0f) { float f = (float)(1.0f / len); for (int i = 0; i < 4; i++) q[i] = (float)(q[i] * f); }
@@ -129,7 +129,7 @@ public static partial class VehicleProbe
     }
 
     /// <summary>mat3_normalized_to_quat_fast (Mike Day's method as Blender writes it), mat[col][row], quaternion (w, x, y, z).</summary>
-    static float[] Mat3NormalizedToQuatFast(float[][] mat)
+    internal static float[] Mat3NormalizedToQuatFast(float[][] mat)
     {
         var q = new float[4];
         if (mat[2][2] < 0f)

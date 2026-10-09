@@ -150,7 +150,8 @@ n_pose=$(echo "$TOTAL" | awk '{print $15}')
 echo "PASS — deploy drill, the posed state: $n_mat object matrices of $n_files files, at up to thirteen frames each, equal to Blender's bit for bit - the sign of a zero included - with $n_prop evaluated location/rotation/scale sets and $n_pose pose bones (location, rotation, scale, pose matrix); $n_left files left to Blender by name (Blender took $((t1 - t0)) s, the comparison $((t2 - t1)) s, in $JOBS processes each); ${#FIXTURES[@]} fixtures, $NOTE_SOURCES"
 
 # PARTS 2 AND 3, THE DECISIONS AND THE ARMATURE (2026-10-10): what deploy_convert.py decides and builds before it BAKES
-# (the dump runs the script up to `bpy.ops.nla.bake(`): what it decides before it builds anything - the strip, the frame
+# (the dump runs the script up to `bpy.ops.nla.bake(`, shows the scene, and runs it on to its `# --- 5a.` for the
+# baked action - PART 4, 2026-10-11): what it decides before it builds anything - the strip, the frame
 # range, the unit normalization, the parts, the bone slimming, the path, the degenerate cull, the bone budget.
 # tools/deploy-drill/blender_decisions_dump.py runs THE SCRIPT ITSELF, cut where it starts on the armature, for every
 # job: the project's recorded conversions (Assets/FactorySource/*/deploy_converted.args.txt - the source and the
@@ -158,6 +159,7 @@ echo "PASS — deploy drill, the posed state: $n_mat object matrices of $n_files
 # takes). BlenderDeploy.Decide is then held to the script's own log lines, its decisions and the scene it left: every
 # object's matrix, transform and bound box, as bits. A job the jobs file marks LEFT: must come out left to Blender, and
 # no other may - a wrong decision that ends in a fallback is a failure. A recorded job whose source is gone is named.
+KNOWN_BAKE_LEFT="DugoutCanoe"   # the bake re-bakes its imported armature, from whose bones ten objects hang: Blender's from the bake on
 KNOWN_LEFT=""   # none: the dugout canoe (objects under animated bones) is decided here since the pose is modelled (2b)
 : > "$TMPD/jobs.txt"; n_rec=0; MISSING=""
 if [ -n "$PACK" ]; then
@@ -167,6 +169,7 @@ if [ -n "$PACK" ]; then
     if [ ! -f "$src" ]; then MISSING="$MISSING $key"; continue; fi
     rest=$(printf '%s' "$line" | cut -d'|' -f4-)
     case " $KNOWN_LEFT " in *" $key "*) key="LEFT:$key";; esac
+    case " $KNOWN_BAKE_LEFT " in *" $key "*) key="BAKELEFT:$key";; esac
     printf '%s|%s|%s\n' "$key" "$src" "$rest" >> "$TMPD/jobs.txt"; n_rec=$((n_rec + 1))
   done
 fi
@@ -175,17 +178,17 @@ n_fx=$(grep -c "" "$TMPD/jobs_fx.txt"); [ "$n_fx" -gt 0 ] || { echo "FAIL — th
 cat "$TMPD/jobs_fx.txt" >> "$TMPD/jobs.txt"
 n_jobs=$(grep -c "" "$TMPD/jobs.txt")
 t3=$(date +%s)
-"$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_decisions_dump.py")" -- "$WROOT/editor/Tools~/deploy_convert.py" "$WTMP/jobs.txt" > "$TMPD/decisions_raw.txt" 2>&1; drc=$?
+"$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_decisions_dump.py")" -- "$WROOT/editor/Tools~/deploy_convert.py" "$WTMP/jobs.txt" > "$TMPD/decisions_raw.txt" 2> "$TMPD/decisions_err.txt"; drc=$?   # stderr apart: a depsgraph warning lands in the middle of a row otherwise
 t4=$(date +%s)
-tr -d '\r' < "$TMPD/decisions_raw.txt" | grep -E "^(JOB|LOG|EXIT|RANGE|NORM|FLAG|PART|BAD|ALIAS|ARM|BONEOF|RBONE|ANCHOR|HULL|PINV|OBJ|M|T|BOX|DONE|FAIL)	" > "$TMPD/decisions.txt"
+tr -d '\r' < "$TMPD/decisions_raw.txt" | grep -E "^(JOB|LOG|LOG2|EXIT|RANGE|NORM|FLAG|PART|BAD|ALIAS|ARM|BONEOF|RBONE|ANCHOR|HULL|PINV|OBJ|M|T|BOX|ACT|FC|M2|O2|DONE|FAIL)	" > "$TMPD/decisions.txt"
 n_done=$(grep -c "^DONE" "$TMPD/decisions.txt")
 if [ "$drc" -ne 0 ] || [ "$n_done" -ne "$n_jobs" ]; then
-  grep -E "^FAIL|Traceback|Error" "$TMPD/decisions_raw.txt" | head -8
+  grep -E "^FAIL|Traceback|Error" "$TMPD/decisions_raw.txt" "$TMPD/decisions_err.txt" | head -8
   echo "FAIL — deploy drill: Blender ran the script for $n_done of $n_jobs jobs (exit $drc)"; exit 1
 fi
 "$TMPD/deploy.exe" --decisions "$WTMP/jobs.txt" "$WTMP/decisions.txt" > "$TMPD/dec_raw.txt" 2>&1; rc2=$?
 tr -d '\r' < "$TMPD/dec_raw.txt" > "$TMPD/dec.txt"
-grep -E "^FAIL|^LEFT|^COVER" "$TMPD/dec.txt"
+grep -E "^FAIL|^LEFT|^BAKELEFT|^COVER" "$TMPD/dec.txt"
 TOTAL2=$(grep -E "^TOTAL" "$TMPD/dec.txt" | tail -1); echo "$TOTAL2"
 [ -n "$TOTAL2" ] || { tail -5 "$TMPD/dec.txt"; echo "FAIL — deploy drill: the decisions gave no total (rc=$rc2)"; exit 1; }
 [ "$rc2" -eq 0 ] || { echo "FAIL — deploy drill: the decisions here differ from deploy_convert.py's"; exit 1; }
@@ -201,7 +204,7 @@ for control in missing exit; do
     echo "FAIL — deploy drill rejected the intact $control control (rc=$controlrc)"; exit 1
   fi
 done
-for mode in log matrix transform box object part range done bone boneof anchor hull pinv; do
+for mode in log matrix transform box object part range done bone boneof anchor hull pinv curve key value log2 act index; do
   case "$mode" in
     log) reason="log line";;
     matrix|transform|box) reason="no complete $mode row";;
@@ -214,6 +217,12 @@ for mode in log matrix transform box object part range done bone boneof anchor h
     anchor) reason="0 ANCHOR rows";;
     hull) reason="0 HULL rows";;
     pinv) reason="0 PINV rows";;
+    curve) reason="curves here";;
+    key) reason="keys in Blender";;
+    value) reason="baked keys";;
+    log2) reason="bake log line";;
+    act) reason="no single ACT and M2 row";;
+    index) reason="a component its channel does not have";;
   esac
   "$TMPD/deploy.exe" --decisions "$WTMP/missing_dec/missing_jobs.txt" "$WTMP/missing_dec/$mode.txt" > "$TMPD/missing_dec_$mode.txt" 2>&1; badrc=$?
   if [ "$badrc" -ne 1 ] || ! grep -E "^FAIL " "$TMPD/missing_dec_$mode.txt" | grep -qF "$reason"; then
@@ -228,8 +237,8 @@ for mode in exit_zero exit_short exit_duplicate; do
     echo "FAIL — deploy drill accepted an invalid abort record ($mode, rc=$badrc)"; exit 1
   fi
 done
-echo "PASS — deploy drill rejects a decisions dump without a log line, a matrix, a transform, a box, an object, a part, the range, the end row, a bone, a part's bone, the anchors or the parent inverse"
+echo "PASS — deploy drill rejects a decisions dump without a log line, a matrix, a transform, a box, an object, a part, the range, the end row, a bone, a part's bone, the anchors, the parent inverse, a baked curve, a key, the bake's log line or the action row - and one with a baked value changed by one bit or a curve under a component its channel does not have"
 echo "PASS — deploy drill accepts intact single-job controls and rejects a successful, truncated or duplicated abort record"
-n_j=$(echo "$TOTAL2" | awk '{print $3}'); n_l=$(echo "$TOTAL2" | awk '{print $7}'); n_o=$(echo "$TOTAL2" | awk '{print $9}'); n_ln=$(echo "$TOTAL2" | awk '{print $13}'); n_bones=$(echo "$TOTAL2" | awk '{print $15}')
+n_j=$(echo "$TOTAL2" | awk '{print $3}'); n_l=$(echo "$TOTAL2" | awk '{print $7}'); n_o=$(echo "$TOTAL2" | awk '{print $9}'); n_ln=$(echo "$TOTAL2" | awk '{print $13}'); n_bones=$(echo "$TOTAL2" | awk '{print $15}'); n_keys=$(echo "$TOTAL2" | awk '{print $19}'); n_after=$(echo "$TOTAL2" | awk '{print $21}'); n_bl=$(grep -c "^BAKELEFT " "$TMPD/dec.txt")
 NOTE_MISSING=""; [ -z "$MISSING" ] || NOTE_MISSING="; recorded jobs whose source file is GONE, not judged:$MISSING"
-echo "PASS — deploy drill, the decisions: $n_j jobs ($n_rec recorded conversions, $n_fx fixture jobs) decided as deploy_convert.py decides them - $n_ln log lines to the letter, the parts, the cull and the merges, the armature it builds ($n_bones bones at rest, StaticRoot's anchor, the root-motion anchor) and $n_o objects with their matrices, transforms and bound boxes to the bit; $n_l jobs left to Blender as marked (Blender took $((t4 - t3)) s)$NOTE_MISSING"
+echo "PASS — deploy drill, the decisions: $n_j jobs ($n_rec recorded conversions, $n_fx fixture jobs) decided as deploy_convert.py decides them - $n_ln log lines to the letter, the parts, the cull and the merges, the armature it builds ($n_bones bones at rest, StaticRoot's anchor, the root-motion anchor) $n_o objects with their matrices, transforms and bound boxes to the bit, and the BAKE - $n_keys keys of the action it holds at its step 5a, each to the bit, with $n_after object matrices of the scene it leaves ($n_bl jobs are Blender's from the bake on, as marked: the scene before it is held); $n_l jobs left to Blender as marked (Blender took $((t4 - t3)) s)$NOTE_MISSING"

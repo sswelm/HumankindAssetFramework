@@ -17,7 +17,8 @@ static class DecisionsDrill
         "a job compared", "the default strip list", "a strip list given", "stripExtra", "a stripped object's child left as a root", "a bone shape that survives the strip",
         "no object with an action left (frame range 1..1)", "normalization: x100", "normalization: recentered", "normalization: none",
         "bone slimming", "the legacy path", "the contract path", "a culled part", "a culled part's descendant", "a pair-merge", "the script stops (no animated part)",
-        "the recoil step off with a recoil range given", "left to Blender (BlenderDeploy.Fallback)", "an armature that is a part (its bones are animated)",
+        "the recoil step off with a recoil range given", "left to Blender (BlenderDeploy.Fallback)", "an armature that is a part (its bones are animated)", "left to Blender at the bake (the scene before it is held)",
+        "a bake on the legacy path", "a clip of frame 0 alone (the bake keys frame 1 too)", "a bake on the contract path (scale curves stripped, delta-form rebase)",
         "no static mesh (StaticRoot has no anchor)", "StaticRoot anchored to a mesh that has no parent", "StaticRoot anchored to a static mesh's parent",
         "a root-motion anchor (the armature parented for the bake)", "the biggest part does not travel (no anchor)", "no mesh rides a bone (no travel measured)",
         "a bone under its part's parent's bone", "a part whose parent is no part (a root bone)",
@@ -38,7 +39,7 @@ static class DecisionsDrill
             jobs[t[0]] = t;
         }
         var cover = new SortedDictionary<string, long>(); foreach (var k in CoverKeys) cover[k] = 0;
-        int fails = 0, files = 0, left = 0; long matrices = 0, objects = 0, lines = 0, bones = 0;
+        int fails = 0, files = 0, left = 0; long matrices = 0, objects = 0, lines = 0, bones = 0, curves = 0, keysCompared = 0, after = 0;
         var blocks = new List<List<string>>();
         foreach (var dump in args.Skip(1))
             foreach (var line in File.ReadLines(dump))
@@ -50,7 +51,7 @@ static class DecisionsDrill
         {
             string key = block[0].Split('\t')[1];
             files++;
-            var problems = new List<string>();
+            var problems = new List<string>(); string bakeLeftReason = null; bool bakeClamped = false;
             try
             {
                 if (!jobs.TryGetValue(key, out var job)) throw new InvalidDataException("the dump has a job the jobs file does not");
@@ -79,7 +80,12 @@ static class DecisionsDrill
 
                 var m = GlbReader.Read(job[1]);
                 var argv = job.Skip(2).ToArray();
+                // twice: the scene the dump shows is the one BEFORE the bake (the script's state at `bpy.ops.nla.bake(`);
+                // the baked action and the armature after it come from the run that goes on (`baked`)
                 var r = BlenderDeploy.Decide(m, argv);
+                var baked = r.Fallback == null && !r.Exit ? BlenderDeploy.Decide(m, argv, null, true) : r;
+                // a job may be Blender's from the BAKE on (its key says "BAKELEFT:"): the scene before it is still held
+                bool expectBakeLeft = key.StartsWith("BAKELEFT:", StringComparison.Ordinal), bakeLeft = r.Fallback == null && baked.Fallback != null;
                 // a job is left to Blender only where the jobs file says so ("LEFT:" before its key): a wrong decision that
                 // happens to end in a fallback must not pass as one
                 bool expectLeft = key.StartsWith("LEFT:", StringComparison.Ordinal);
@@ -139,6 +145,71 @@ static class DecisionsDrill
                     if (hullMine != hr[1] + " " + hr[2] + " " + hr[3]) problems.Add($"the root-motion anchor: here {hullMine}, Blender {hr[1]} {hr[2]} {hr[3]} (anchor, travel, model size)");
                     var pinv = r.Armature.ParentInverse ?? new float[] { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
                     if (!Enumerable.Range(0, 16).Select(i => H(pinv[(i % 4) * 4 + i / 4])).SequenceEqual(Of("PINV")[0].Skip(1))) problems.Add("the armature's matrix_parent_inverse differs");
+                    if (bakeLeft != expectBakeLeft) problems.Add(bakeLeft ? $"left to Blender at the bake, which the jobs file does not expect: {baked.Fallback}" : "the jobs file expects this left to Blender at the bake (BAKELEFT:), and it is baked here");
+                    if (bakeLeft) bakeLeftReason = baked.Fallback;
+                    // ---- the bake (part 4): the action the script holds at its step 5a - every fcurve, key by key
+                    if (!bakeLeft)
+                    {
+                    var log2 = block.Where(l => l.StartsWith("LOG2\t")).Select(l => l.Substring(5)).ToList();
+                    for (int i = 0; i < Math.Max(log2.Count, baked.BakeLog.Count); i++)
+                    {
+                        string theirs = i < log2.Count ? log2[i] : "(no line)", mine = i < baked.BakeLog.Count ? baked.BakeLog[i] : "(no line)";
+                        if (theirs != mine) { problems.Add($"bake log line {i + 1}: here «{Cut(mine)}», Blender «{Cut(theirs)}»"); break; }
+                    }
+                    lines += log2.Count;
+                    if (Of("ACT").Count != 1 || Of("M2").Count != 1) throw new InvalidDataException("the dump has no single ACT and M2 row");
+                    var fcs = Of("FC");
+                    var seenCurves = new HashSet<string>(StringComparer.Ordinal);
+                    long wrongKeys = 0, wrongCurves = 0; string firstKey = null;
+                    int nf = baked.BakeFrameMax - baked.BakeFrameMin + 1;
+                    if (baked.BakeFrameMax != r.FrameMax) bakeClamped = true;
+                    foreach (var t in fcs)
+                    {
+                        // pose.bones["<name, escaped>"].<channel>
+                        const string head = "pose.bones[\"";
+                        int close = t[1].LastIndexOf("\"].", StringComparison.Ordinal);
+                        if (!t[1].StartsWith(head, StringComparison.Ordinal) || close < 0) throw new InvalidDataException($"the dump has a curve that is no pose bone's: {t[1]}");
+                        string bone = t[1].Substring(head.Length, close - head.Length).Replace("\\\"", "\"").Replace("\\\\", "\\"), channel = t[1].Substring(close + 3);
+                        int index = int.Parse(t[2]);
+                        // the component index must be one the channel has: location[3] would otherwise land in the quaternion's slot
+                        if (index < 0 || index >= (channel == "rotation_quaternion" ? 4 : 3)) throw new InvalidDataException($"the dump has a curve with a component its channel does not have: {t[1]}[{index}]");
+                        int at = channel == "location" ? index : channel == "rotation_quaternion" ? 3 + index : channel == "scale" ? 7 + index : -1;
+                        if (at < 0) throw new InvalidDataException($"the dump has a curve of an unknown channel: {t[1]}");
+                        if (!seenCurves.Add(bone + "\t" + at)) throw new InvalidDataException($"the dump has a curve twice: {t[1]}[{index}]");
+                        curves++;
+                        if (!baked.Keys.TryGetValue(bone, out var keys) || (at >= 7 && !baked.ScaleKeys)) { wrongCurves++; firstKey = firstKey ?? $"Blender has the curve {t[1]}[{index}], not here"; continue; }
+                        if (t[3] != "LINEAR") { wrongCurves++; firstKey = firstKey ?? $"the curve {t[1]}[{index}] is {t[3]}"; continue; }
+                        if (t.Length - 4 != nf) { wrongCurves++; firstKey = firstKey ?? $"the curve {t[1]}[{index}] has {t.Length - 4} keys in Blender, {nf} here"; continue; }
+                        for (int k = 0; k < nf; k++)
+                        {
+                            keysCompared++;
+                            string mine = H((float)(baked.BakeFrameMin + k)) + ":" + H(keys[k][at]);
+                            if (mine != t[4 + k])
+                            {
+                                wrongKeys++;
+                                if (firstKey == null) { var th = t[4 + k].Split(':'); firstKey = $"'{bone}' {channel}[{index}] at frame {baked.BakeFrameMin + k}: here {Show(keys[k][at])} ({H(keys[k][at])}), Blender {Show(F(th[1]))} ({th[1]})"; }
+                            }
+                        }
+                    }
+                    int expectCurves = baked.Keys.Count * (baked.ScaleKeys ? 10 : 7);
+                    if (fcs.Count != expectCurves) problems.Add($"{expectCurves} curves here, {fcs.Count} in Blender");
+                    if (wrongCurves > 0 || wrongKeys > 0) problems.Add($"{wrongKeys} baked keys and {wrongCurves} curves differ, first {firstKey}");
+                    if (!Enumerable.Range(0, 16).Select(i => H(baked.Armature.World[(i % 4) * 4 + i / 4])).SequenceEqual(Of("M2")[0].Skip(1))) problems.Add("the armature's matrix_world after the bake differs");
+                    if ((baked.Armature.Parent != null ? baked.Armature.Parent.Name : "-") != Of("ACT")[0][2]) problems.Add("the armature's parent after the bake differs");
+                    // the scene the bake leaves: every object's matrix_world again
+                    var o2 = Of("O2").ToDictionary(t => t[1], t => t, StringComparer.Ordinal);
+                    if (o2.Count != baked.Objects.Count) problems.Add($"{baked.Objects.Count} objects after the bake here, {o2.Count} in Blender");
+                    long wrongAfter = 0; string firstAfter = null;
+                    foreach (var o in baked.Objects)
+                    {
+                        if (!o2.TryGetValue(o.Name, out var row) || row.Length != 18) throw new InvalidDataException($"the dump has no complete matrix row after the bake for '{o.Name}'");
+                        bool ok = true;
+                        for (int rr = 0; rr < 4; rr++) for (int c = 0; c < 4; c++) if (H(o.World[c * 4 + rr]) != row[2 + rr * 4 + c]) ok = false;
+                        after++;
+                        if (!ok) { wrongAfter++; firstAfter = firstAfter ?? $"'{o.Name}'"; }
+                    }
+                    if (wrongAfter > 0) problems.Add($"{wrongAfter} of {baked.Objects.Count} matrices after the bake differ, first {firstAfter}");
+                    }
                     long wrongM = 0, wrongT = 0, wrongB = 0; string firstM = null, firstT = null, firstB = null;
                     foreach (var o in r.Objects)
                     {
@@ -191,6 +262,9 @@ static class DecisionsDrill
                     if (r.Bones.Any(b => b.Parent != null)) cover["a bone under its part's parent's bone"]++;
                     if (r.Bones.Any(b => b.Part != null && b.Part.Parent != null && b.Parent == null)) cover["a part whose parent is no part (a root bone)"]++;
                 }
+                if (bakeLeftReason != null) { cover["left to Blender at the bake (the scene before it is held)"]++; Console.WriteLine($"BAKELEFT {key}: {bakeLeftReason}"); }
+                if (bakeClamped) cover["a clip of frame 0 alone (the bake keys frame 1 too)"]++;
+                if (bakeLeftReason == null && !r.Exit) cover[r.Legacy ? "a bake on the legacy path" : "a bake on the contract path (scale curves stripped, delta-form rebase)"]++;
                 Console.WriteLine(r.Exit ? $"PASS {key}: {log.Count} log lines equal to Blender's, and the script stops there as it does here (no scene is compared)"
                                          : $"PASS {key}: {log.Count} log lines, {r.Parts.Count} parts, {r.Objects.Count} objects with their matrices, transforms and boxes equal to Blender's");
             }
@@ -200,7 +274,7 @@ static class DecisionsDrill
         var dumped = new HashSet<string>(blocks.Select(b => b[0].Split('\t')[1]), StringComparer.Ordinal);
         foreach (var k in jobs.Keys) if (!dumped.Contains(k)) { fails++; Console.WriteLine($"FAIL {k}: the dump holds no such job"); }
         foreach (var kv in cover) Console.WriteLine($"COVER {kv.Value} {kv.Key}");
-        Console.WriteLine($"TOTAL jobs {files} failed {fails} left {left} objects {objects} matrices {matrices} lines {lines} bones {bones}");
+        Console.WriteLine($"TOTAL jobs {files} failed {fails} left {left} objects {objects} matrices {matrices} lines {lines} bones {bones} curves {curves} keys {keysCompared} after {after}");
         return fails == 0 ? 0 : 1;
     }
 
