@@ -666,7 +666,14 @@ public static class BlenderDeploy
         var starts = new List<int>(); var ends = new List<int>(); var steps = new List<int>();
         // Python's int(): white space around the digits is fine - but NOT the separators U+001C..U+001F, which
         // str.strip() removes and int() refuses (the starts are read unstripped: such a start kills the script)
-        bool PyInt(string s, out int v) => int.TryParse((s ?? "").Trim(IntWhitespace), System.Globalization.NumberStyles.AllowLeadingSign, System.Globalization.CultureInfo.InvariantCulture, out v);
+        bool PyInt(string s, out int v)
+        {
+            s = (s ?? "").Trim(IntWhitespace); v = 0;
+            int first = s.Length > 0 && (s[0] == '+' || s[0] == '-') ? 1 : 0;
+            // .NET accepts trailing NULs; Python int() refuses them. Unsupported Python forms still fall back.
+            for (int i = first; i < s.Length; i++) if (s[i] < '0' || s[i] > '9') return false;
+            return int.TryParse(s, System.Globalization.NumberStyles.AllowLeadingSign, System.Globalization.CultureInfo.InvariantCulture, out v);
+        }
         if (PyStrip(seg8) != "")
             foreach (string tok in seg8.Split(','))
             {
@@ -688,9 +695,13 @@ public static class BlenderDeploy
         if (r.Segments.Count > 0)
         {
             foreach (var (ss, se, _) in r.Segments)
-                for (int f = ss; f <= se; f++)
+                for (long frame = ss; frame <= se; frame++)   // int.MaxValue is a valid endpoint: do not wrap after it
                 {
-                    FrameSet(f); EvalArm(f);
+                    int f = (int)frame;
+                    // scene.frame_set clamps its argument; the snapshot dictionary keeps the requested source frame.
+                    // Clamp before indexing too: int.MinValue minus a positive bind frame would overflow.
+                    int evaluatedFrame = Math.Max(-1048574, Math.Min(1048574, f));
+                    FrameSet(evaluatedFrame); EvalArm(evaluatedFrame);
                     r.FireSnap[f] = r.Bones.ToDictionary(b => b.Name, b => r.ArmPose[b.Name].Take(7).ToArray(), StringComparer.Ordinal);
                 }
             r.FireLog.Add($"DEPLOY fire-window snapshot: {r.FireSnap.Count} frames ({string.Join(", ", r.Segments.Select(s => $"{s.start}..{s.end}/{s.step}"))}) captured PRISTINE (pre-retarget)");

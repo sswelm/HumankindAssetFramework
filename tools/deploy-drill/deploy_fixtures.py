@@ -331,6 +331,25 @@ def flatx(out, name, travel):
     return s.write(out, name)
 
 
+def fire_limits(out, name, skin=False, contract=False):
+    """A clip starting at frame 24, sampled at the Int32 limits: scene.frame_set clamps, snapshot keys do not.
+    The imported rig checks its rebaked evaluator; the large rig checks the contract path too."""
+    s = Scene(); s.node("Hull", mesh=s.mesh("hull", 6.0))
+    p = s.node("Gun", mesh=s.mesh("gun", 1.0))
+    s.anim(p, "translation", [1.0, 2.0], [(0, 0, 0), (0.04, 0, 0)])
+    if skin:
+        rig = s.node("Rig", translation=[0.2, 0.0, 0.0])
+        j0 = s.node("J0", rig, translation=[0, 1, 0]); j1 = s.node("J1", j0, translation=[0, 0.5, 0])
+        _crew(s, rig, [j0, j1], "SoldierBody")
+        s.anim(j1, "translation", [1.0, 2.0], [(0, 0.5, 0), (0.1, 0.5, 0)])
+        s.node("Rider", j1, mesh=s.mesh("rider", 0.2))
+    if contract:
+        for i in range(125):
+            p = s.node("Part%03d" % i, mesh=s.mesh("part%d" % i, 0.1), translation=[i * 0.02, 0, 0])
+            s.anim(p, "translation", [1.0, 2.0], [(i * 0.02, 0, 0), (i * 0.02, 0.03, 0)])
+    return s.write(out, name)
+
+
 def huge(out):
     """The review's (5a): a part thrown past float32's range in world space on frame 3 - a frame the cull does not
     sample. It is the root-motion anchor, so the armature's matrix overflows there and its determinant is NaN: Eigen
@@ -381,6 +400,10 @@ def main(out):
     print("fire_uneven|%s|0|24|||||3,10,15|8|1|||0|0|1" % fs)
     print("fire_backwards|%s|0|24|||||10|5/0|1|||0|0|1" % fs)
     print("fire_wall|%s|0|24|||||0,5|3,9|1|||0|0|1" % wall(out, 110, 30, 0, "deploy_wall_fire", turning=True))
+    for kind, skin, contract in (("plain", False, False), ("rig", True, False), ("contract", True, True)):
+        limit_file = fire_limits(out, "deploy_fire_limits_" + kind, skin, contract)
+        for label, frame in (("min", -2147483648), ("max", 2147483647)):
+            print("fire_%s_%s|%s|0|48|||||%d|%d|1|||0|0|1" % (kind, label, limit_file, frame, frame))
     # the armature (part 3): a static mesh without a parent; no mesh on any bone; bone and armature names already taken
     print("near|%s|%s" % (near(out, "deploy_near"), DEFAULT))
     print("near_noride|%s|%s" % (near(out, "deploy_near_noride", ride=False), DEFAULT))

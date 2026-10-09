@@ -245,6 +245,35 @@ public class BlenderDeployTests
         Assert.Null(BlenderDeploy.Decide(Make().M, "0|24||||| +3 | 5 / 2 |1|||0|0|1".Split('|'), null, true).Fallback);
     }
 
+    [Theory]
+    [InlineData("3\0", "5")]
+    [InlineData("3\0\0", "5")]
+    [InlineData("3", "5\0")]
+    [InlineData("3", "5/2\0")]
+    public void Python_integer_ranges_reject_NUL_characters(string start, string end)
+    {
+        var s = new Scene(); int hull = s.Node("Hull", mesh: true);
+        s.Move(s.Node("Gun", hull, mesh: true), to: new[] { 0.04f, 0f, 0f }); s.Decide();
+        var r = BlenderDeploy.Decide(s.M, $"0|24|||||{start}|{end}|1|||0|0|1".Split('|'), null, true);
+        Assert.Contains("cannot read", r.Fallback);
+    }
+
+    [Theory]
+    [InlineData(int.MinValue, 0)]
+    [InlineData(int.MaxValue, 24)]
+    public void Extreme_fire_frames_hold_the_correct_end_of_a_late_clip(int frame, int key)
+    {
+        var s = new Scene(); int hull = s.Node("Hull", mesh: true);
+        s.Move(s.Node("Gun", hull, mesh: true), to: new[] { 0.04f, 0f, 0f }); s.Decide();
+        // The action starts at frame 24: subtracting it from int.MinValue used to wrap to a positive index.
+        foreach (var sampler in s.M.Animations[0].Samplers) sampler.Times = new[] { 1f, 2f };
+        var r = BlenderDeploy.Decide(s.M, $"0|48|||||{frame}|{frame}|1|||0|0|1".Split('|'), null, true);
+        Assert.Null(r.Fallback);
+        Assert.Equal(24, r.FrameMin);
+        Assert.Equal(frame, Assert.Single(r.FireSnap.Keys));
+        Assert.Equal(r.Keys["Gun"][key].Take(7), r.FireSnap[frame]["Gun"]);
+    }
+
     [Fact]
     public void What_the_matrices_here_do_not_model_is_left_to_Blender_by_name()
     {

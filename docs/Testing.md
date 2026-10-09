@@ -690,6 +690,13 @@ plants sixteen mutations: one or all rows missing, a duplicate replacing another
 all identities and values replaced, and a truncated or oversized row, at each frame. Each must fail for its specific
 validation reason.
 
+*Review of PR #139*: the snapshot loop uses a wider counter so an `int.MaxValue` endpoint terminates. Requested
+frames are clamped to Blender's `scene.frame_set` bounds before evaluation, while snapshot keys retain the requested
+frame: a negative extreme can no longer overflow the baked-key index of a clip that starts after frame zero. Six
+Blender fixtures exercise both Int32 limits on a late clip, an imported armature and the contract path. The range
+parser also refuses trailing NUL characters, which .NET's integer parser accepts and Python's `int()` rejects;
+four unit cases cover starts, ends and speed steps.
+
 **The Clip Range picker's in-process rig** (step 4, 2026-10-03): `HafUnityFrameTests` hold the preview frame's arithmetic
 without Unity — the X mirror's conjugation of rotations, matrices and matrix nodes; Unity's skinning formula fed the rig's
 matrices (the joints' world matrices, the inverse bind matrices, the vertex, all mirrored) against the reader's posed vertex;
