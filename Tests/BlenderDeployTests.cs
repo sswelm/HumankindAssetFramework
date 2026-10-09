@@ -226,6 +226,55 @@ public class BlenderDeployTests
     }
 
     [Fact]
+    public void The_fire_window_is_snapshot_frame_by_frame_and_a_range_the_script_cannot_read_is_left_to_Blender()
+    {
+        Scene Make() { var s = new Scene(); int hull = s.Node("Hull", mesh: true); s.Move(s.Node("Gun", hull, mesh: true, t: new double[] { 0, 2, 0 }), 1f, new[] { 0f, 2f, 0.024f }); s.Decide(); return s; }
+        // starts "3,10", ends "5,12/2", the step on: frames 3..5 and 10..12; the bones as the baked action has them there
+        var r = BlenderDeploy.Decide(Make().M, "0|24|||||3,10|5,12/2|1|||0|0|1".Split('|'), null, true);
+        Assert.Null(r.Fallback);
+        Assert.Equal(new[] { (3, 5, 1), (10, 12, 2) }, r.Segments);
+        Assert.Equal(new[] { 3, 4, 5, 10, 11, 12 }, r.FireSnap.Keys);
+        Assert.Equal(r.Keys["Gun"][11].Take(7), r.FireSnap[11]["Gun"]);
+        Assert.Equal(r.Keys["Gun"][12], r.ArmPose["Gun"]);                 // the last frame set is what the bone holds
+        Assert.Equal(new[] { "DEPLOY fire-window snapshot: 6 frames (3..5/1, 10..12/2) captured PRISTINE (pre-retarget)" }, r.FireLog);
+        // the step off (argv[10] empty or "0"): the range is blanked, no snapshot
+        Assert.Empty(BlenderDeploy.Decide(Make().M, "0|24|||||3|5|0|||0|0|1".Split('|'), null, true).FireSnap);
+        // Python's int() takes white space but not the separators str.strip() removes: the script dies on such a start
+        Assert.Contains("cannot read", BlenderDeploy.Decide(Make().M, "0|24|||||\u001f3|5|1|||0|0|1".Split('|'), null, true).Fallback);
+        Assert.Contains("cannot read", BlenderDeploy.Decide(Make().M, "0|24|||||3|5/2/3|1|||0|0|1".Split('|'), null, true).Fallback);
+        Assert.Null(BlenderDeploy.Decide(Make().M, "0|24||||| +3 | 5 / 2 |1|||0|0|1".Split('|'), null, true).Fallback);
+    }
+
+    [Theory]
+    [InlineData("3\0", "5")]
+    [InlineData("3\0\0", "5")]
+    [InlineData("3", "5\0")]
+    [InlineData("3", "5/2\0")]
+    public void Python_integer_ranges_reject_NUL_characters(string start, string end)
+    {
+        var s = new Scene(); int hull = s.Node("Hull", mesh: true);
+        s.Move(s.Node("Gun", hull, mesh: true), to: new[] { 0.04f, 0f, 0f }); s.Decide();
+        var r = BlenderDeploy.Decide(s.M, $"0|24|||||{start}|{end}|1|||0|0|1".Split('|'), null, true);
+        Assert.Contains("cannot read", r.Fallback);
+    }
+
+    [Theory]
+    [InlineData(int.MinValue, 0)]
+    [InlineData(int.MaxValue, 24)]
+    public void Extreme_fire_frames_hold_the_correct_end_of_a_late_clip(int frame, int key)
+    {
+        var s = new Scene(); int hull = s.Node("Hull", mesh: true);
+        s.Move(s.Node("Gun", hull, mesh: true), to: new[] { 0.04f, 0f, 0f }); s.Decide();
+        // The action starts at frame 24: subtracting it from int.MinValue used to wrap to a positive index.
+        foreach (var sampler in s.M.Animations[0].Samplers) sampler.Times = new[] { 1f, 2f };
+        var r = BlenderDeploy.Decide(s.M, $"0|48|||||{frame}|{frame}|1|||0|0|1".Split('|'), null, true);
+        Assert.Null(r.Fallback);
+        Assert.Equal(24, r.FrameMin);
+        Assert.Equal(frame, Assert.Single(r.FireSnap.Keys));
+        Assert.Equal(r.Keys["Gun"][key].Take(7), r.FireSnap[frame]["Gun"]);
+    }
+
+    [Fact]
     public void What_the_matrices_here_do_not_model_is_left_to_Blender_by_name()
     {
         var s = new Scene();

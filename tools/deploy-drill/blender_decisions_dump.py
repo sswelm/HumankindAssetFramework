@@ -47,6 +47,8 @@ cut = source.index("\nbpy.ops.nla.bake(")   # the armature, its constraints and 
 code = compile(source[:cut], script, "exec")
 cut2 = source.index("\n# --- 5a.")            # ... and then the bake, the scale-free step and the delta-form rebase
 code2 = compile(source[cut:cut2], script, "exec")
+cut3 = source.index("\n# --- 5b.")            # ... and then the fire-window snapshot (5a)
+code3 = compile(source[cut2:cut3], script, "exec")
 fails = 0
 for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
     line = line.rstrip("\r")
@@ -142,10 +144,29 @@ for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
             mw = arm.matrix_world
             print("M2\t%s" % "\t".join(h32(mw[r][c]) for r in range(4) for c in range(4)))
             # ... and the scene the bake leaves: every object's matrix_world again (the later steps read them)
-            bpy.context.view_layer.update()
+            # (no view_layer.update() here: it would evaluate the action again - the rebased keys - where the script does not)
             for o in bpy.data.objects:
                 mw = o.matrix_world
                 print("O2\t%s\t%s" % (o.name, "\t".join(h32(mw[r][c]) for r in range(4) for c in range(4))))
+            # ---- stage 3 (part 5a): the script goes on to its `# --- 5b.` - the fire-window snapshot. What it printed,
+            #      the snapshot itself (per frame and bone: location, rotation_quaternion), what the new armature's pose
+            #      bones hold afterwards and where the scene stands
+            out3 = io.StringIO()
+            with contextlib.redirect_stdout(out3):
+                exec(code3, g)
+            for l in out3.getvalue().split("\n"):
+                if l.startswith("DEPLOY"):
+                    print("LOG3\t%s" % l)
+            for f in sorted(g["_fire_snap"]):
+                for bone, (loc, quat) in g["_fire_snap"][f].items():
+                    print("SNAP\t%d\t%s\t%s" % (f, bone, "\t".join(h32(v) for v in (*loc, quat.w, quat.x, quat.y, quat.z))))
+            # (and none here: the snapshot's own loop updated the scene where the script does)
+            for pb in arm.pose.bones:
+                q = pb.rotation_quaternion
+                print("APB\t%s\t%s" % (pb.name, "\t".join(h32(v) for v in (*pb.location, q.w, q.x, q.y, q.z, *pb.scale))))
+            for o in bpy.data.objects:
+                mw = o.matrix_world
+                print("O4\t%s\t%s" % (o.name, "\t".join(h32(mw[r][c]) for r in range(4) for c in range(4))))
             # ... and at the LAST frame of the range: the bind frame cannot tell a frozen object from an animated one,
             # nor a stripped scale curve from a kept one (the script's later steps set frames all over the range)
             bpy.context.scene.frame_set(g["fmax"])

@@ -331,6 +331,36 @@ def flatx(out, name, travel):
     return s.write(out, name)
 
 
+def fire_limits(out, name, skin=False, contract=False):
+    """A clip starting at frame 24, sampled at the Int32 limits: scene.frame_set clamps, snapshot keys do not.
+    The imported rig checks its rebaked evaluator; the large rig checks the contract path too."""
+    s = Scene(); s.node("Hull", mesh=s.mesh("hull", 6.0))
+    p = s.node("Gun", mesh=s.mesh("gun", 1.0))
+    s.anim(p, "translation", [1.0, 2.0], [(0, 0, 0), (0.04, 0, 0)])
+    if skin:
+        rig = s.node("Rig", translation=[0.2, 0.0, 0.0])
+        j0 = s.node("J0", rig, translation=[0, 1, 0]); j1 = s.node("J1", j0, translation=[0, 0.5, 0])
+        _crew(s, rig, [j0, j1], "SoldierBody")
+        s.anim(j1, "translation", [1.0, 2.0], [(0, 0.5, 0), (0.1, 0.5, 0)])
+        s.node("Rider", j1, mesh=s.mesh("rider", 0.2))
+    if contract:
+        for i in range(125):
+            p = s.node("Part%03d" % i, mesh=s.mesh("part%d" % i, 0.1), translation=[i * 0.02, 0, 0])
+            s.anim(p, "translation", [1.0, 2.0], [(i * 0.02, 0, 0), (i * 0.02, 0.03, 0)])
+    return s.write(out, name)
+
+
+def huge(out):
+    """The review's (5a): a part thrown past float32's range in world space on frame 3 - a frame the cull does not
+    sample. It is the root-motion anchor, so the armature's matrix overflows there and its determinant is NaN: Eigen
+    gives the ZERO matrix for it (it asks abs(det) > 0), Blender bakes zeros, a port that asked det == 0 baked NaN."""
+    s = Scene(); s.node("Hull", None, mesh=s.mesh("hull", 4.0, at=(-2.0, 0.0, -0.5)))
+    root = s.node("Root", None, scale=[2.0, 2.0, 2.0])
+    p = s.node("Gun", root, mesh=s.mesh("gun", 1.0), translation=[0.0, 1.0, 0.0])
+    s.anim(p, "translation", [0.0, 2 / 24.0, 3 / 24.0, 4 / 24.0, 1.0], [(0, 1, 0), (0, 1, 0), (3.0e38, 1, 0), (0, 1, 0), (0, 2, 0)])
+    return s.write(out, "deploy_huge")
+
+
 def half(out):
     """The lowest point exactly 0.125 below zero: Python prints the vertical offset as 0.12 (the exact half goes to the
     even digit), .NET's own formatting as 0.13."""
@@ -358,6 +388,22 @@ def main(out):
     # 0.4 across: still under the half unit the x100 gate asks for
     print("tiny_edge|%s|%s" % (small(out, "deploy_tiny_edge", 0.01), DEFAULT))
     print("half|%s|%s" % (half(out), DEFAULT))
+    # 5a, the fire-window snapshot: the recoil range is a list of starts (argv[8]) and of ends with a speed step
+    # (argv[9]); the step (argv[10]) switches it on. Two segments, the second past the clip's last frame (the baked
+    # curves are held there); two segments that overlap; a range with the step off; more starts than ends (the lists are zipped); a segment that runs backwards (no frame,
+    # still in the log) with a step of 0 (read as 1); and the same on the contract path, where the keys are rebased
+    fs = small(out, "deploy_fire", 1.0)
+    print("fire_two|%s|0|24||||| 3,10 |8, 45/2|1|||0|0|1" % fs)   # the clip ends at 36: 37..45 hold its last keys
+    print("fire_overlap|%s|0|24|||||3,5|8,10|1|||0|0|1" % fs)          # 3..8 and 5..10 share four frames: 8 are captured, not 12
+    print("fire_off|%s|0|24|||||3|8|0|||0|0|1" % fs)
+    print("fire_huge|%s|0|24|||||1|6|1|||0|0|1" % huge(out))                   # a range, and the step 0: the fire cycle is off, no snapshot
+    print("fire_uneven|%s|0|24|||||3,10,15|8|1|||0|0|1" % fs)
+    print("fire_backwards|%s|0|24|||||10|5/0|1|||0|0|1" % fs)
+    print("fire_wall|%s|0|24|||||0,5|3,9|1|||0|0|1" % wall(out, 110, 30, 0, "deploy_wall_fire", turning=True))
+    for kind, skin, contract in (("plain", False, False), ("rig", True, False), ("contract", True, True)):
+        limit_file = fire_limits(out, "deploy_fire_limits_" + kind, skin, contract)
+        for label, frame in (("min", -2147483648), ("max", 2147483647)):
+            print("fire_%s_%s|%s|0|48|||||%d|%d|1|||0|0|1" % (kind, label, limit_file, frame, frame))
     # the armature (part 3): a static mesh without a parent; no mesh on any bone; bone and armature names already taken
     print("near|%s|%s" % (near(out, "deploy_near"), DEFAULT))
     print("near_noride|%s|%s" % (near(out, "deploy_near_noride", ride=False), DEFAULT))

@@ -161,8 +161,10 @@ log to the letter and the scene it leaves to the bit, 47 jobs) - done 2026-10-10
 `BKE_pose_where_is`, what hangs from a bone) - done 2026-10-10, the canoe is decided in C#; **3 the armature and its anchors** (the bones at rest, StaticRoot's anchor, the root-motion anchor - the oracle
 now runs the script up to the bake) - done 2026-10-10; the binding of the meshes goes with the bake's parts; **4 the bake** (every baked key to the bit; the scale-free
 step and the delta-form rebase) - done 2026-10-11, bit-exact: no tolerance was needed. **4b the bake takes the selected imported armatures too** (their bones keyed a frame, their object animation
-dropped) - done 2026-10-11: the dugout canoe is baked in C#, no job is left at the bake; next the script's steps
-5a-5d (fire window, barrel, legs, recoil), the binding, the role clips, the export; 4 the bake, the options (barrel, legs, recoil, wheels) and
+dropped) - done 2026-10-11: the dugout canoe is baked in C#, no job is left at the bake; **5a the fire-window
+snapshot** - done 2026-10-11 (the dump's own scene updates between stages were wrong on the contract path and are
+gone); next 5b/5c (barrel retarget, leg scale: Blender's BEZIER evaluation between two keys), 5d (recoil: edit mode
+again), the binding, the role clips, the export; 4 the bake, the options (barrel, legs, recoil, wheels) and
 the role clips; 5 the exported animation, the wiring, the existing golden. OPEN for part 4: bit-exact or a tight
 tolerance - the script's decisions are thresholds on continuous values, the existing golden compares three decimals;
 to be decided on measured distance. Not modelled yet: Bezier keys (a CUBICSPLINE sampler), `KHR_animation_pointer`, an
@@ -172,7 +174,10 @@ found by the review of part 2 and not measured: `BlenderExportTree.StrCaseCmp` r
 object order has them unsigned - the exporter's child order with names past ASCII may be wrong the same way. OPEN,
 found by the review of part 2b: `GlbReader.Doubles` reads the JSON token `-0.0` as `+0` (.NET Framework's
 `double.Parse`; Python's json keeps the sign) - a location's zero sign only; the T-62 has 92 nodes with such a token
-and passes (masked by `loc + 0` and the importer's corrections), a fuzzed armature did not; (4) `rig_anim` (3–4 weeks); (5)
+and passes (masked by `loc + 0` and the importer's corrections), a fuzzed armature did not; found again by the
+review of 5a (9 of 70 fuzzed rigs, a held zero's sign), with a SECOND rule beside it that is not traced: a node of
+translation `[-0.739, -0.0, 0.0]` holds `+0, +0` straight after the import, where the axis conversion alone gives
+`-0, -0` - both to be measured together; (4) `rig_anim` (3–4 weeks); (5)
 `vehicle_rig` (4–8 weeks; the Lab already computes much of the geometry in C#).
 
 - **Blender-exact vertex positions for skinned parts** — OPEN (2026-10-02, found by 3c). Blender's importer skins a

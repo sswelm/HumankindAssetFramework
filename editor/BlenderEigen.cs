@@ -28,10 +28,11 @@ public static class BlenderEigen
     static P Dup(P x, int p) => new P(x[p], x[p], x[p], x[p]);
 
     /// <summary>The inverse of a Blender float[4][4] (sixteen floats, M[col][row]); the zero matrix when Eigen's determinant
-    /// is zero.</summary>
+    /// is zero - or NaN: Eigen takes a matrix as invertible when abs(det) &gt; 0, and a NaN is not (a part thrown past
+    /// float32's range on one frame: Blender bakes zeros there, the port baked NaN; review of 5a, 2026-10-11).</summary>
     public static float[] InvertM4(float[] m)
     {
-        if (Determinant(m) == 0f) return new float[16];
+        if (!(Math.Abs(Determinant(m)) > 0f)) return new float[16];
         var L1 = new P(m[0], m[1], m[2], m[3]); var L2 = new P(m[4], m[5], m[6], m[7]); var L3 = new P(m[8], m[9], m[10], m[11]); var L4 = new P(m[12], m[13], m[14], m[15]);
         // the four 2x2 blocks (storage orders match: movelh / movehl)
         P A = MoveLH(L1, L2), B = MoveHL(L2, L1), C = MoveLH(L3, L4), D = MoveHL(L4, L3);
