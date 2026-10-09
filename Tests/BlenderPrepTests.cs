@@ -33,6 +33,47 @@ public class BlenderPrepTests
     }
 
     [Fact]
+    public void Cancelling_prep_propagates_instead_of_becoming_a_Blender_fallback()
+    {
+        var m = Model(new[] { Grid("part") }, new[] { Node("Part", 0) });
+        Assert.Throws<OperationCanceledException>(() => BlenderPrep.Prepare(m, 6,
+            checkpoint: () => throw new OperationCanceledException()));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_running_collapse_can_be_cancelled_or_timed_out_before_finishing(bool timeout)
+    {
+        var m = Model(new[] { Grid("part") }, new[] { Node("Part", 0) });
+        var layout = BlenderMesh.FromGltf(m, 0);
+        var bm = BMesh.FromMesh(layout, m.Meshes[0].Primitives[0].Positions);
+        BlenderDecimate.FaceNormalsUpdate(bm);
+        int before = bm.TotFace, polls = 0;
+        var stop = timeout ? (Exception)new TimeoutException() : new OperationCanceledException();
+        var thrown = Assert.ThrowsAny<Exception>(() => BlenderDecimate.Collapse(bm, 0.1f,
+            new BlenderDecimate.MeshData(), () =>
+            {
+                polls++;
+                if (bm.TotFace < before) throw stop;   // interrupt actual reduction, after initialization
+            }));
+        Assert.Same(stop, thrown);
+        Assert.True(polls > 1);
+        Assert.InRange(bm.TotFace, BlenderDecimate.FaceTarget(before, 0.1f) + 1, before - 1);
+    }
+
+    [Fact]
+    public void Polling_prep_does_not_change_the_written_model()
+    {
+        var m = Model(new[] { Grid("part") }, new[] { Node("Part", 0) });
+        int polls = 0;
+        var withPolling = BlenderPrep.Prepare(m, 6, checkpoint: () => polls++);
+        Assert.Null(withPolling.Fallback);
+        Assert.True(polls > 1);
+        Assert.Null(HafModelDiff.FirstDifference(BlenderPrep.Prepare(m, 6).Model, withPolling.Model));
+    }
+
+    [Fact]
     public void A_plain_file_is_assembled_in_the_exporters_order_and_reads_back_from_the_writer()
     {
         var nodes = new List<HafNode> { Node("Root", -1, -1, 1, 2), Node("Zed", 0), Node("Alpha", 1) };
@@ -151,6 +192,103 @@ public class BlenderPrepTests
         // with `diagnose` the work goes on, the reason stays and there is still no model
         var d = BlenderPrep.Prepare(animated, 100, diagnose: true);
         Assert.Null(d.Model); Assert.StartsWith("an animated file", d.Fallback); Assert.Single(d.Objects); Assert.NotNull(d.Tree);
+    }
+
+    // ---- strip (part 4d): prep_model.py's rule, measured on export_strip
+
+    static HafModel Vehicle()
+    {
+        // Vehicle { Hull, Turret { Barrel, Hatch }, ROTOR_main, Crew { Pilot (skinned), Spine { Head } } }
+        var nodes = new List<HafNode> { Node("Vehicle", -1, -1, 1, 2, 5, 6), Node("Hull", 0), Node("Turret", -1, -1, 3, 4), Node("Barrel", 1), Node("Hatch", 2), Node("ROTOR_main", 3),
+                                        Node("Crew", -1, -1, 7, 8), Node("Pilot", 4, 0), Node("Spine", -1, -1, 9), Node("Head") };
+        nodes[9].Translation = new double[] { 0, 1, 0 };
+        var crew = Grid("crew", 0); crew.Primitives[0].Joints = new ushort[64]; crew.Primitives[0].Weights = Enumerable.Range(0, 64).Select(i => i % 4 == 0 ? 1f : 0f).ToArray();
+        var m = Model(new[] { Grid("hull", 0), Grid("barrel", 1), Grid("hatch", 2), Grid("rotor", 1), crew }, nodes, 0);
+        m.Materials.Add(new HafMaterial { Name = "paint" }); m.Materials.Add(new HafMaterial { Name = "steel" }); m.Materials.Add(new HafMaterial { Name = "glass" });
+        m.Skins.Add(new HafSkin { Joints = new[] { 8, 9 } });
+        return m;
+    }
+
+    [Fact]
+    public void The_strip_list_is_parsed_and_matched_as_prep_model_does()
+    {
+        var names = BlenderNames.Compute(Vehicle());
+        HashSet<string> Gone(string strip) { var g = BlenderPrep.Stripped(names, strip, out _, out string problem); Assert.Null(problem); return g; }
+        Assert.Empty(Gone(null)); Assert.Empty(Gone("")); Assert.Empty(Gone(" , ,"));
+        Assert.Equal(new[] { "Barrel", "Hatch", "Turret" }, Gone("turret").OrderBy(x => x, StringComparer.Ordinal));          // an object and all its descendants
+        Assert.Equal(new[] { "ROTOR_main" }, Gone("rotor"));                                                                 // ignoring case
+        Assert.Equal(new[] { "Hatch", "ROTOR_main" }, Gone(" hatch , Rotor ").OrderBy(x => x, StringComparer.Ordinal));      // trimmed, each lowered
+        Assert.Equal(new[] { "Pilot" }, Gone("pilot"));
+        Assert.Empty(Gone("no_such_part"));
+        BlenderPrep.Stripped(names, "turret", out var subs, out _);
+        Assert.Equal(new[] { "turret" }, subs);
+        Assert.Equal(names.Objects.Count, Gone("vehicle").Count);                                                            // the root takes everything
+        // a substring is a substring: "r" is in almost every name
+        Assert.Contains("Barrel", Gone("r")); Assert.Contains("ROTOR_main", Gone("r"));
+        // what Python's lower case and .NET's may not agree on is named, not matched
+        BlenderPrep.Stripped(names, "t\u00fcrret", out _, out string notAscii);
+        Assert.StartsWith("strip:", notAscii);
+    }
+
+    [Theory]
+    [InlineData("\u001cturret\u001f")]
+    [InlineData("\u001dhatch\u001e")]
+    [InlineData("\u0085rotor\u00a0")]
+    public void Strip_trims_the_same_whitespace_as_Pythons_str_strip(string strip)
+    {
+        var gone = BlenderPrep.Stripped(BlenderNames.Compute(Vehicle()), strip, out var subs, out var problem);
+        Assert.Null(problem);
+        Assert.Single(subs);
+        Assert.NotEmpty(gone);
+    }
+
+    [Fact]
+    public void A_stripped_object_is_out_of_the_file_and_out_of_the_ratio()
+    {
+        var m = Vehicle();
+        var all = BlenderPrep.Prepare(m, 100000);
+        Assert.Null(all.Fallback); Assert.Equal(90, all.SourceTriangles);
+        var r = BlenderPrep.Prepare(m, 100000, strip: "turret");
+        Assert.Null(r.Fallback);
+        Assert.Equal(54, r.SourceTriangles);                                         // three of five grids are left
+        Assert.DoesNotContain(r.Model.Nodes, n => n.Name == "Turret" || n.Name == "Barrel" || n.Name == "Hatch");
+        Assert.Equal(new[] { "paint", "steel" }, r.Model.Materials.Select(x => x.Name).OrderBy(x => x, StringComparer.Ordinal));   // glass was the hatch's alone
+        Assert.Equal(3, r.Model.Meshes.Count);
+        Assert.Null(HafModelDiff.FirstDifference(r.Model, GlbReader.Read(GlbWriter.Write(r.Model))));
+        // the ratio is taken from what is left: a target of 54 collapses nothing after the strip, and would without it
+        Assert.Equal(1f, BlenderPrep.Prepare(m, 54, strip: "turret").Ratio);
+        Assert.True(BlenderPrep.Prepare(m, 54).Ratio < 1f);
+        // nothing left: prep_model.py stops, and so does the prep
+        Assert.StartsWith("no mesh to reduce", BlenderPrep.Prepare(m, 100, strip: "vehicle").Fallback);
+        // a strip without a reduce is Blender's
+        Assert.StartsWith("no reduce asked", BlenderPrep.Prepare(m, 0, strip: "turret").Fallback);
+    }
+
+    [Fact]
+    public void An_armature_no_kept_mesh_is_skinned_to_still_gets_its_skin_written_after_the_others()
+    {
+        // tree.py get_unused_skins: the pilot stripped, the armature and its joints stay - and so does the skin, on no node
+        var r = BlenderPrep.Prepare(Vehicle(), 100000, strip: "pilot");
+        Assert.Null(r.Fallback);
+        Assert.Single(r.Tree.UnusedSkins);
+        Assert.Single(r.Model.Skins);
+        Assert.Equal(new[] { "Spine", "Head" }, r.Model.Skins[0].Joints.Select(j => r.Model.Nodes[j].Name));
+        Assert.Equal(32, r.Model.Skins[0].InverseBindMatrices.Length);
+        Assert.DoesNotContain(r.Model.Nodes, n => n.Skin >= 0);
+        Assert.Null(HafModelDiff.FirstDifference(r.Model, GlbReader.Read(GlbWriter.Write(r.Model))));
+        // with the pilot kept, the skin is the node's and none is unused
+        var kept = BlenderPrep.Prepare(Vehicle(), 100000);
+        Assert.Empty(kept.Tree.UnusedSkins); Assert.Single(kept.Model.Skins); Assert.Contains(kept.Model.Nodes, n => n.Skin == 0);
+        // the armature stripped: its mesh and joints go with it, and no skin is left
+        var gone = BlenderPrep.Prepare(Vehicle(), 100000, strip: "crew");
+        Assert.Null(gone.Fallback);
+        Assert.Empty(gone.Model.Skins); Assert.DoesNotContain(gone.Model.Nodes, n => n.Name == "Spine" || n.Name == "Pilot" || n.Name == "Crew");
+        // a source skin no node uses at all makes an unused skin without any strip
+        var m = Model(new[] { Grid("g") }, new List<HafNode> { Node("Hull", 0), Node("Rig", -1, -1, 2), Node("Bone") });
+        m.Skins.Add(new HafSkin { Joints = new[] { 2 } });
+        var orphan = BlenderPrep.Prepare(m, 1000);
+        Assert.Null(orphan.Fallback);
+        Assert.Single(orphan.Model.Skins); Assert.Equal("Bone", orphan.Model.Nodes[orphan.Model.Skins[0].Joints[0]].Name);
     }
 
     [Theory]

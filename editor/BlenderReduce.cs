@@ -64,14 +64,16 @@ public static class BlenderReduce
         return null;
     }
 
-    public static Result Reduce(HafModel m, int node, float ratio, BlenderNames.Result names, int threads = 0)
+    public static Result Reduce(HafModel m, int node, float ratio, BlenderNames.Result names, int threads = 0, Action checkpoint = null)
     {
         var r = new Result { Ratio = ratio };
         r.Fallback = FallbackReason(m, node);
         if (r.Fallback != null) return r;
         int meshIndex = m.Nodes[node].Mesh, skin = m.Nodes[node].Skin;
         var mesh = m.Meshes[meshIndex];
+        checkpoint?.Invoke();
         var layout = BlenderMesh.FromGltf(m, meshIndex, threads);
+        checkpoint?.Invoke();
         int nv = layout.VertexCount, nf = layout.Faces.Length / 3;
 
         // --- the vertices as the importer stores them: Blender's frame, the bind pose for a skinned mesh
@@ -92,6 +94,7 @@ public static class BlenderReduce
             else { N[3 * v] = p.Normals[3 * idx]; N[3 * v + 1] = -p.Normals[3 * idx + 2]; N[3 * v + 2] = p.Normals[3 * idx + 1]; }
         }
         // set_poly_smoothing, then normals_split_custom_set_from_vertices (the shorts per corner), then the mesh's own vertex normals
+        checkpoint?.Invoke();
         var sharp = VehicleProbe.SharpFaces(P, layout.Faces, N);
         short[] customNormal = null;
         float[] vno;
@@ -107,6 +110,7 @@ public static class BlenderReduce
         }
         else vno = VehicleProbe.BlenderVertexNormals(P, layout.Faces, null);   // the angle-weighted face normals
 
+        checkpoint?.Invoke();
         // --- material slots: with import_merge_material_slots, one slot per distinct material in order of first appearance
         // over ALL primitives; primitives without a material share one empty slot
         // a material with COLOR_0 on the primitive is ANOTHER Blender material (blender_material[vertex_color]); a primitive
@@ -211,11 +215,13 @@ public static class BlenderReduce
         }
 
         // --- the BMesh as the modifier converts it: positions, the face normals recomputed (normal_tri_v3), the vertex normals copied
+        checkpoint?.Invoke();
         var bm = BMesh.FromMesh(layout, P, sharp, faceMaterial);
         Array.Copy(vno, bm.VNo, vno.Length);
         BlenderDecimate.FaceNormalsUpdate(bm);
-        if (BlenderDecimate.WouldRun(bm.TotFace, ratio)) { BlenderDecimate.Collapse(bm, ratio, d); r.Collapsed = true; }
+        if (BlenderDecimate.WouldRun(bm.TotFace, ratio)) { BlenderDecimate.Collapse(bm, ratio, d, checkpoint); r.Collapsed = true; }
 
+        checkpoint?.Invoke();
         // --- BM_mesh_bm_to_me: elements in creation order, the dead skipped
         var newIndex = new int[bm.VertCount]; int count = 0;
         for (int v = 0; v < bm.VertCount; v++) newIndex[v] = bm.VAlive[v] ? count++ : -1;

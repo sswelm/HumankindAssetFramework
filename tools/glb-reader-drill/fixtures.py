@@ -957,6 +957,78 @@ def fx_export_flat_alpha(out):
     write_glb(os.path.join(out, "export_flat_alpha.glb"), root, b)
 
 
+def fx_export_strip(out):
+    """prep_model.py's STRIP (step 5 d, part 4d): every object whose name contains one of the substrings, ignoring case,
+    goes with all its descendants, and the reduce's ratio is taken from what is left. One file, a strip list per line of
+    `export_strip.glb.strip` beside it (the prep drill's Blender side runs each): a subtree under an empty, a match by
+    case only, several substrings with spaces around them, a skinned mesh whose armature stays (its joints are still
+    written, and so is its skin - on no node: tree.py get_unused_skins), the armature itself (its mesh goes with it), a
+    list that matches nothing, and one that
+    leaves no mesh at all (prep_model.py stops there). A second list, beside export_skin_bonechild.glb, strips the
+    object that hangs from a bone - what is left is a file the prep can write."""
+    b = Buf()
+    pos, nrm, uv0, _, _, idx = bent_grid(4, 4, 0.0, 0.0)
+    plain = {"POSITION": b.accessor(pos, "f", "VEC3"), "NORMAL": b.accessor(nrm, "f", "VEC3", minmax=False)}
+    i = b.accessor(idx, "H", "SCALAR")
+    J, Wt = [], []
+    for k in range(len(pos)):
+        t = (k % 5) / 4.0
+        J.append((0, 1, 0, 0)); Wt.append((1.0 - t, t, 0.0, 0.0))
+    skinned = dict(plain, JOINTS_0=b.accessor(J, "H", "VEC4", minmax=False), WEIGHTS_0=b.accessor(Wt, "f", "VEC4", minmax=False))
+    mats = [{"name": "paint", "pbrMetallicRoughness": {"baseColorFactor": [0.2, 0.4, 0.8, 1.0]}}, {"name": "steel", "pbrMetallicRoughness": {"baseColorFactor": [0.6, 0.6, 0.6, 1.0]}},
+            {"name": "glass", "pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.9, 1.0, 1.0]}}]
+    meshes = [{"name": "hull", "primitives": [{"attributes": plain, "indices": i, "material": 0}]},
+              {"name": "barrel", "primitives": [{"attributes": plain, "indices": i, "material": 1}]},
+              {"name": "hatch", "primitives": [{"attributes": plain, "indices": i, "material": 2}]},
+              {"name": "rotor", "primitives": [{"attributes": plain, "indices": i, "material": 1}]},
+              {"name": "crew", "primitives": [{"attributes": skinned, "indices": i, "material": 0}]}]
+    nodes = [{"name": "Vehicle", "children": [1, 2, 5, 6]},
+             {"name": "Hull", "mesh": 0},
+             {"name": "Turret", "translation": [0.0, 1.0, 0.0], "rotation": [0.0, 0.3826834, 0.0, 0.9238795], "children": [3, 4]},
+             {"name": "Barrel", "mesh": 1, "translation": [0.0, 0.2, 1.0]},
+             {"name": "Hatch", "mesh": 2, "translation": [0.0, 0.5, 0.0]},
+             {"name": "ROTOR_main", "mesh": 3, "translation": [0.0, 2.0, 0.0]},
+             {"name": "Crew", "translation": [2.0, 0.0, 0.0], "children": [7, 8]},
+             {"name": "Pilot", "mesh": 4, "skin": 0},
+             {"name": "Spine", "translation": [0.0, 0.1, 0.0], "children": [9]},
+             {"name": "Head", "translation": [0.0, 1.0, 0.0]}]
+    root = base("export_strip", materials=mats, meshes=meshes, nodes=nodes, skins=[{"name": "crew", "joints": [8, 9]}], scenes=[{"nodes": [0]}], scene=0)
+    write_glb(os.path.join(out, "export_strip.glb"), root, b)
+    with open(os.path.join(out, "export_strip.glb.strip"), "w", encoding="utf-8", newline="\n") as f:
+        f.write("turret\n")                      # an empty: Barrel and Hatch go with it
+        f.write("rotor\n")                       # ROTOR_main, by case only
+        f.write(" hatch , Rotor \n")             # two substrings, spaces around them, one in another case
+        f.write("pilot\n")                       # the skinned mesh: its armature, joints AND skin stay (a skin no node uses)
+        f.write("crew\n")                        # the node above the joints (the armature, as Blender names it): Pilot goes with it
+        f.write("no_such_part\n")                # nothing matches: the file as without a strip
+        # Python's str.strip() takes the information separators U+001C..U+001F for white space and .NET's Trim() does not
+        # (review of PR #132): around a name they must go, or the part stays in the model
+        f.write("\x1fhatch\x1c\n")
+        f.write("vehicle\n")                     # the root: nothing is left, prep_model.py stops
+    # a skin NO node uses, with no strip at all: the importer makes its armature and bones, and the exporter writes the skin
+    # all the same, after any skin a node uses (tree.py get_unused_skins)
+    b2 = Buf()
+    root = base("export_skin_unused", meshes=[{"name": "hull", "primitives": [{"attributes": {"POSITION": b2.accessor(pos, "f", "VEC3"), "NORMAL": b2.accessor(nrm, "f", "VEC3", minmax=False)}, "indices": b2.accessor(idx, "H", "SCALAR")}]}],
+                nodes=[{"name": "Hull", "mesh": 0}, {"name": "Mast", "translation": [1.0, 0.0, 0.0], "children": [2]}, {"name": "Yard", "translation": [0.0, 1.0, 0.0], "children": [3]}, {"name": "Tip", "translation": [0.5, 0.0, 0.0]}],
+                skins=[{"name": "rigging", "joints": [2, 3]}], scenes=[{"nodes": [0, 1]}], scene=0)
+    write_glb(os.path.join(out, "export_skin_unused.glb"), root, b2)
+    # the ORDER: an unused skin's armature first in the file, then one a mesh uses, then a second unused one - the used
+    # skin is written first, the unused ones after it in the order their armatures enter the exporter's tree
+    b3 = Buf()
+    p3 = b3.accessor(pos, "f", "VEC3"); n3 = b3.accessor(nrm, "f", "VEC3", minmax=False); i3 = b3.accessor(idx, "H", "SCALAR")
+    sk3 = {"POSITION": p3, "NORMAL": n3, "JOINTS_0": b3.accessor(J, "H", "VEC4", minmax=False), "WEIGHTS_0": b3.accessor(Wt, "f", "VEC4", minmax=False)}
+    root = base("export_skin_unused_order", meshes=[{"name": "hull", "primitives": [{"attributes": {"POSITION": p3, "NORMAL": n3}, "indices": i3}]}, {"name": "crew", "primitives": [{"attributes": sk3, "indices": i3}]}],
+                nodes=[{"name": "Zebra", "children": [1]}, {"name": "ZebraBone", "translation": [0.0, 1.0, 0.0]},
+                       {"name": "Hull", "mesh": 0},
+                       {"name": "Middle", "translation": [2.0, 0.0, 0.0], "children": [4, 5]}, {"name": "Pilot", "mesh": 1, "skin": 1}, {"name": "Spine", "translation": [0.0, 0.1, 0.0], "children": [6]}, {"name": "Head", "translation": [0.0, 1.0, 0.0]},
+                       {"name": "Alpha", "translation": [4.0, 0.0, 0.0], "children": [8]}, {"name": "AlphaBone", "translation": [0.0, 0.5, 0.0]}],
+                skins=[{"name": "zebra", "joints": [1]}, {"name": "crew", "joints": [5, 6]}, {"name": "alpha", "joints": [8]}], scenes=[{"nodes": [0, 2, 3, 7]}], scene=0)
+    write_glb(os.path.join(out, "export_skin_unused_order.glb"), root, b3)
+    # the object that hangs from a bone, stripped: the rest is a file the prep can write
+    with open(os.path.join(out, "export_skin_bonechild.glb.strip"), "w", encoding="utf-8", newline="\n") as f:
+        f.write("lamp\n")
+
+
 def fx_export_factor_range(out):
     """Factors Blender does NOT clamp: metallic 2, roughness -1, an alpha of 1.5 and an unlit colour of 1.5 come back out
     of it as they went in (measured 2026-10-08, material by material, before this was a fixture) - and the Factory's
@@ -997,7 +1069,7 @@ FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external
 def main(out, prep=False):
     os.makedirs(out, exist_ok=True)
     # Blender drops the line mesh: its vertex bounds are only relevant to the prep export drill.
-    for fx in FIXTURES + ([fx_export_skin_lines, fx_export_bones, fx_export_review, fx_export_skin_twins, fx_export_flat_alpha, fx_export_jpeg_alpha, fx_export_factor_range] if prep else []):
+    for fx in FIXTURES + ([fx_export_skin_lines, fx_export_bones, fx_export_review, fx_export_skin_twins, fx_export_flat_alpha, fx_export_jpeg_alpha, fx_export_factor_range, fx_export_strip] if prep else []):
         fx(out)
     for name in sorted(os.listdir(out)):
         if name.endswith((".glb", ".gltf")):

@@ -271,10 +271,11 @@ public static class BlenderDecimate
 
     // ---------------------------------------------------------------- the quadrics and the costs
 
-    static void BuildQuadrics(BMesh bm, Quadric[] vq)
+    static void BuildQuadrics(BMesh bm, Quadric[] vq, Action checkpoint)
     {
         for (int f = 0; f < bm.FaceCount; f++)
         {
+            if ((f & 1023) == 0) checkpoint?.Invoke();
             if (!bm.FAlive[f]) continue;
             // BM_face_calc_center_median: the loops' positions summed in order, times 1 / len
             float cx = 0f, cy = 0f, cz = 0f;
@@ -290,6 +291,7 @@ public static class BlenderDecimate
         }
         for (int e = 0; e < bm.EdgeCount; e++)
         {
+            if ((e & 1023) == 0) checkpoint?.Invoke();
             if (!bm.EAlive[e] || !bm.EdgeIsBoundary(e)) continue;
             int v1 = bm.EV1[e], v2 = bm.EV2[e];
             float evx = (float)(bm.VCo[3 * v2] - bm.VCo[3 * v1]), evy = (float)(bm.VCo[3 * v2 + 1] - bm.VCo[3 * v1 + 1]), evz = (float)(bm.VCo[3 * v2 + 2] - bm.VCo[3 * v1 + 2]);
@@ -670,18 +672,20 @@ public static class BlenderDecimate
     /// <summary>BM_mesh_decimate_collapse without symmetry, weights or triangulation (the modifier as prep_model sets it): the
     /// face normals and vertex normals must be in place (FaceNormalsUpdate; VNo from the mesh's own normals). factor is the
     /// modifier's ratio as the float32 it is stored as.</summary>
-    public static void Collapse(BMesh bm, float factor, MeshData d)
+    public static void Collapse(BMesh bm, float factor, MeshData d, Action checkpoint = null)
     {
         var vq = new Quadric[bm.VertCount];
         var heap = new Heap(bm.TotEdge);
         var table = new int[bm.EdgeCount];
         for (int i = 0; i < table.Length; i++) table[i] = -1;
-        BuildQuadrics(bm, vq);
-        for (int e = 0; e < bm.EdgeCount; e++) { if (!bm.EAlive[e]) continue; table[e] = -1; BuildEdgeCostSingle(bm, e, vq, heap, table); }
+        checkpoint?.Invoke();
+        BuildQuadrics(bm, vq, checkpoint);
+        for (int e = 0; e < bm.EdgeCount; e++) { if ((e & 1023) == 0) checkpoint?.Invoke(); if (!bm.EAlive[e]) continue; table[e] = -1; BuildEdgeCostSingle(bm, e, vq, heap, table); }
         int faceTotTarget = FaceTarget(bm.TotFace, factor);
         var loops = new List<int>(); var eClearOther = new int[2];
         while (bm.TotFace > faceTotTarget && !heap.IsEmpty && heap.TopValue != CostInvalid)
         {
+            checkpoint?.Invoke();
             int e = heap.PopMin();
             table[e] = -1;
             DecimEdgeCollapse(bm, d, e, vq, heap, table, loops, eClearOther);
