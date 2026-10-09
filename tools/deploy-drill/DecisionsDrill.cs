@@ -55,7 +55,11 @@ static class DecisionsDrill
                 if (!rows.Any(t => t[0] == "DONE")) throw new InvalidDataException(rows.Any(t => t[0] == "FAIL") ? "Blender could not run it: " + rows.First(t => t[0] == "FAIL").Last() : "the dump has no DONE row");
                 List<string[]> Of(string k) => rows.Where(t => t[0] == k).ToList();
                 var log = block.Where(l => l.StartsWith("LOG\t")).Select(l => l.Substring(4)).ToList();
-                bool exit = Of("EXIT").Count > 0;
+                var exits = Of("EXIT");
+                bool exit = exits.Count > 0;
+                // The no-parts guard aborts with failure: a successful SystemExit is not the same decision.
+                if (exit && (exits.Count != 1 || exits[0].Length != 2 || exits[0][1] != "1"))
+                    throw new InvalidDataException("the dump has an invalid EXIT row (expected exactly one EXIT with code 1)");
                 if (!exit) foreach (string k in new[] { "RANGE", "NORM", "FLAG" }) if (Of(k).Count != 1) throw new InvalidDataException($"the dump has {Of(k).Count} {k} rows");
                 var bObj = Of("OBJ"); var bM = Of("M").ToDictionary(t => t[1], t => t, StringComparer.Ordinal); var bT = Of("T").ToDictionary(t => t[1], t => t, StringComparer.Ordinal);
                 var bBox = Of("BOX").ToDictionary(t => t[1], t => t, StringComparer.Ordinal);

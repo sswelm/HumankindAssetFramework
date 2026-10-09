@@ -490,6 +490,11 @@ excluded collection and frozen where the import left it (left to Blender); `EXT_
 per instance (left); the normalization root's name after a strip took an object of that name; `%-40s` by code point;
 the culled list's order by code point and its `repr`. Its fixtures are in the gate.
 
+The no-parts abort must have exactly one `EXIT` record with code `1`; a successful exit, a truncated record and a
+duplicate record each fail a regression check. Missing-record regressions use matching one-job lists, first prove
+their intact controls pass, and then require the failure for the specific removed record. This prevents unrelated
+missing jobs from satisfying a negative check.
+
 A job may fall back to Blender only where the jobs file marks it `LEFT:` - the first plant run had SEVERAL wrong strip
 rules end in a fallback and pass. Marked: the dugout canoe (ten objects hang from animated bones: the armature's pose
 is not modelled), a skinned survivor, the morph, scene and instancing fixtures. 54 of 55 planted defects fail; with

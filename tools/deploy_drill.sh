@@ -167,15 +167,39 @@ TOTAL2=$(grep -E "^TOTAL" "$TMPD/dec.txt" | tail -1); echo "$TOTAL2"
 UNCOVERED=$(grep -E "^COVER 0 " "$TMPD/dec.txt" | cut -d' ' -f3- | paste -sd';' -)
 [ -z "$UNCOVERED" ] || { echo "FAIL — deploy drill: no compared job exercised: $UNCOVERED (a branch the script did not judge; add it to tools/deploy-drill/deploy_fixtures.py)"; exit 1; }
 # negative guards on the REAL dump: evidence taken away must not pass as equality
-python "$ROOT/tools/deploy-drill/missing_decisions.py" "$WTMP/missing_dec" "$WTMP/decisions.txt" || { echo "FAIL — could not construct the missing-decision regressions"; exit 1; }
+python "$ROOT/tools/deploy-drill/missing_decisions.py" "$WTMP/missing_dec" "$WTMP/decisions.txt" "$WTMP/jobs.txt" || { echo "FAIL — could not construct the missing-decision regressions"; exit 1; }
+# The same one-job lists must accept the intact controls before their mutations are judged.
+for control in missing exit; do
+  "$TMPD/deploy.exe" --decisions "$WTMP/missing_dec/${control}_jobs.txt" "$WTMP/missing_dec/${control}_intact.txt" > "$TMPD/dec_control_$control.txt" 2>&1; controlrc=$?
+  if [ "$controlrc" -ne 0 ] || ! grep -qE "^PASS " "$TMPD/dec_control_$control.txt"; then
+    cat "$TMPD/dec_control_$control.txt" | head -5
+    echo "FAIL — deploy drill rejected the intact $control control (rc=$controlrc)"; exit 1
+  fi
+done
 for mode in log matrix transform box object part range done; do
-  "$TMPD/deploy.exe" --decisions "$WTMP/jobs.txt" "$WTMP/missing_dec/$mode.txt" > "$TMPD/missing_dec_$mode.txt" 2>&1; badrc=$?
-  if [ "$badrc" -ne 1 ] || ! grep -qE "^FAIL " "$TMPD/missing_dec_$mode.txt"; then
+  case "$mode" in
+    log) reason="log line";;
+    matrix|transform|box) reason="no complete $mode row";;
+    object) reason="objects:";;
+    part) reason="parts:";;
+    range) reason="0 RANGE rows";;
+    done) reason="no DONE row";;
+  esac
+  "$TMPD/deploy.exe" --decisions "$WTMP/missing_dec/missing_jobs.txt" "$WTMP/missing_dec/$mode.txt" > "$TMPD/missing_dec_$mode.txt" 2>&1; badrc=$?
+  if [ "$badrc" -ne 1 ] || ! grep -E "^FAIL " "$TMPD/missing_dec_$mode.txt" | grep -qF "$reason"; then
     cat "$TMPD/missing_dec_$mode.txt" | head -5
     echo "FAIL — deploy drill accepted a dump with a missing $mode row (rc=$badrc)"; exit 1
   fi
 done
+for mode in exit_zero exit_short exit_duplicate; do
+  "$TMPD/deploy.exe" --decisions "$WTMP/missing_dec/exit_jobs.txt" "$WTMP/missing_dec/$mode.txt" > "$TMPD/missing_dec_$mode.txt" 2>&1; badrc=$?
+  if [ "$badrc" -ne 1 ] || ! grep -qE "^FAIL .*InvalidDataException: the dump has an invalid EXIT row" "$TMPD/missing_dec_$mode.txt"; then
+    cat "$TMPD/missing_dec_$mode.txt" | head -5
+    echo "FAIL — deploy drill accepted an invalid abort record ($mode, rc=$badrc)"; exit 1
+  fi
+done
 echo "PASS — deploy drill rejects a decisions dump without a log line, a matrix, a transform, a box, an object, a part, the range or the end row"
+echo "PASS — deploy drill accepts intact single-job controls and rejects a successful, truncated or duplicated abort record"
 n_j=$(echo "$TOTAL2" | awk '{print $3}'); n_l=$(echo "$TOTAL2" | awk '{print $7}'); n_o=$(echo "$TOTAL2" | awk '{print $9}'); n_ln=$(echo "$TOTAL2" | awk '{print $13}')
 NOTE_MISSING=""; [ -z "$MISSING" ] || NOTE_MISSING="; recorded jobs whose source file is GONE, not judged:$MISSING"
 echo "PASS — deploy drill, the decisions: $n_j jobs ($n_rec recorded conversions, $n_fx fixture jobs) decided as deploy_convert.py decides them - $n_ln log lines to the letter, the parts, the cull and the merges, and $n_o objects with their matrices, transforms and bound boxes to the bit; $n_l jobs left to Blender as marked (Blender took $((t4 - t3)) s)$NOTE_MISSING"
