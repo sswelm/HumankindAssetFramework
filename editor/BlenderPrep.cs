@@ -54,7 +54,7 @@ public static class BlenderPrep
         public BlenderExportTree.Result Tree;                // null when an object was declined
         public readonly Dictionary<int, List<string>> MaterialsOfMesh = new Dictionary<int, List<string>>();   // per mesh node: each written primitive's Blender material (null for none)
         public readonly HashSet<int> NeutralArmatures = new HashSet<int>();
-        public long SourceTriangles, Triangles; public float Ratio;
+        public long SourceTriangles, Triangles; public float Ratio;   // prep_model.py's "PREP reduce: tris <before> -> <after>" and its ratio
         public readonly List<string> Notes = new List<string>();   // the material rules this file took, each once (the drill's coverage rows)
         public List<string> StripSubstrings = new List<string>();  // the strip list as prep_model.py parses it (trimmed, lower case, no empties)
         public HashSet<string> Stripped = new HashSet<string>(StringComparer.Ordinal);   // the objects the strip removed, by Blender name
@@ -133,7 +133,10 @@ public static class BlenderPrep
             res.MaterialsOfMesh[node] = run.Primitives.Select(p => { var (mat, vc) = r.Slots[p.MaterialSlot]; return mat < 0 && !vc ? null : names.MaterialOf[(mat < 0 ? names.MeshDatablockNode[node] : -1, mat, vc)]; }).ToList();
             // Blender appends ONE neutral joint to an armature if any mesh of it has a vertex without a bone
             if (run.Skin != null && run.Primitives.Count > 0 && run.Primitives[0].NeutralBone) res.NeutralArmatures.Add(run.Armature);
-            foreach (var p in run.Primitives) res.Triangles += p.Indices.Length / 3;
+            // as prep_model.py counts its "tris <before> -> <after>": the faces the modifier left, BEFORE the exporter's
+            // validate drops a twin face or two (the written primitives hold a few fewer: 28,356 for Blender's 28,365
+            // on a 3.6M-triangle ship, measured 2026-10-09 - the files were equal, the log line was not)
+            res.Triangles += r.Faces.Length / 3;
         }
         if (res.Objects.Exists(o => o.Declined != null)) return res;   // the tree would not know the declined mesh's faces nor its materials
 

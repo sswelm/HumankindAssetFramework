@@ -384,6 +384,17 @@ converter runs on both at the entry's grid, and its output folders must be equal
 Blender is a SKIP that says why. It needs Blender and is not in the push gate. `FULL=1` (293 runs on 99 files, 74 of them strip runs): 163 written and read by the converter as it reads Blender's - 43 of them stripped -, 106 left to Blender by name, 21 known prep failures (18 strips that leave no mesh), the canoe's 3. The drill's two sides now run as six processes each (`PREP_JOBS`; `tools/prep-drill/merge_shards.py` adds their rows up, and a shard that did not finish is a FAIL): the gate sample in 43 s where it took minutes, that FULL run in 27 minutes.
 Not covered: district entries in that row (they prep through the same `UniversalBaker.Build`); a strip list that was
 already broken on Blender's command line (a trailing backslash, a double quote) now strips what it says.
+The review of PR #132 (2026-10-09). ChatGPT: the strip list was trimmed with .NET's `Trim()`, which keeps the
+information separators U+001C..U+001F that Python's `str.strip()` takes - so a name between two of them stayed in the
+model; the list is trimmed with Python's own white space now (29 characters, compared with `str.isspace` over all of
+Unicode in Blender's Python 3.13: the same set), a line of `export_strip.glb.strip` holds it, and .NET's `Trim()`
+planted in its place fails the drill. And `PrepInProcess` polls a 180-second deadline and the Bake Tests' cancel at the
+prep's stages and inside the collapse loop (a time-out falls back to Blender like any other failure of the C# path;
+a cancel passes through). That deadline asked for a measurement nobody had made - how long the prep takes: 18 s in
+process against Blender's 29 s on a 3.6-million-triangle ship, 2 s against 7 s on one of 410,000 (the default target,
+wall time of the whole prep). The same measurement showed the log line off by a few: `PREP reduce: tris a -> b`
+counted the WRITTEN triangles, a twin face or two fewer than the modifier leaves, where `prep_model.py` counts before
+the export (28,356 for its 28,365; the files were equal); it counts as Blender does now. `FULL=1` on that state: 294 runs, 164 written and read by the converter as it reads Blender's (44 stripped), 106 left by name, 21 known prep failures, the canoe's 3.
 
 **The Clip Range picker's in-process rig** (step 4, 2026-10-03): `HafUnityFrameTests` hold the preview frame's arithmetic
 without Unity — the X mirror's conjugation of rotations, matrices and matrix nodes; Unity's skinning formula fed the rig's

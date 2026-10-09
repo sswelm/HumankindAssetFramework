@@ -1001,6 +1001,9 @@ def fx_export_strip(out):
         f.write("pilot\n")                       # the skinned mesh: its armature, joints AND skin stay (a skin no node uses)
         f.write("crew\n")                        # the node above the joints (the armature, as Blender names it): Pilot goes with it
         f.write("no_such_part\n")                # nothing matches: the file as without a strip
+        # Python's str.strip() takes the information separators U+001C..U+001F for white space and .NET's Trim() does not
+        # (review of PR #132): around a name they must go, or the part stays in the model
+        f.write("\x1fhatch\x1c\n")
         f.write("vehicle\n")                     # the root: nothing is left, prep_model.py stops
     # a skin NO node uses, with no strip at all: the importer makes its armature and bones, and the exporter writes the skin
     # all the same, after any skin a node uses (tree.py get_unused_skins)
