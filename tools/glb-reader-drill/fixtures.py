@@ -1063,11 +1063,112 @@ def fx_export_jpeg_alpha(out):
     write_glb(os.path.join(out, "export_jpeg_alpha.glb"), root, b)
 
 
+def fx_posed(out):
+    """Blender's POSED STATE of an imported animation (replacing deploy_convert.py, part 1; tools/deploy_drill.sh): the
+    branches of the importer's fcurves and of Blender's evaluation that the deploy sources do not reach, one node each.
+    Times are in seconds; Blender keys them at time x 24.
+      Slide   translation, LINEAR, keys at 30 per second - every whole frame but the first lies BETWEEN two keys
+      Turn    rotation whose second key points away from the first (the importer negates it) and whose third does not
+      Pulse   scale, STEP - held, never interpolated
+      Matrix  a node given as a MATRIX, with an animated translation (the channel replaces the decomposed one)
+      Equal   two keys at the SAME time (legal: times ascend, they need not climb) - they merge like any pair
+      Twins   keys closer than 0.01 frame: a pair off a whole frame (the later key takes the earlier one's frame), a
+              pair whose later key IS a whole frame (it keeps its own), and three in a row
+      Twice   two translation channels on one node: Blender refuses the second
+      Rider   an unanimated child of Slide
+      Single  a sampler of one key
+      Later   animated by the SECOND animation only: no action on it after import
+      Morph   a mesh with a morph target whose WEIGHT is animated for a full second - longer than anything else here:
+              the curve sits on the mesh's shape keys in the same action, moves no object, and stretches the action's
+              frame range to 24 (deploy_convert.py takes its range from there; review of the posed state)
+      Near    a key 0.00005 frame before frame 5 (a frame the dump samples now that Morph stretches the range to 24) and
+              the next far off in value: Blender takes a key within 0.0001 of the frame for the frame's value and does
+              not interpolate (planted: without the rule nothing failed before)
+      Zero    the SIGN of a zero, on keys at frames the dump samples (0, 5, 8, 10, 13): glTF's z of 0 after one of 0.6
+              (Blender's -y: the importer's identity corrections make +0 of the -0, and it is written over the -0.6);
+              a key negated to run the short way whose zero meets a zero (not written: the property keeps its +0);
+              and a negated key's zero after a value (written: -0). Only the two large deploy sources told these
+              three apart before
+    """
+    b = Buf()
+    tri = b.accessor([(0, 0, 0), (1, 0, 0), (0, 1, 0)], "f", "VEC3")
+    names = ["Slide", "Turn", "Pulse", "Matrix", "Equal", "Twins", "Twice", "Rider", "Single", "Later", "Near", "Morph", "Zero"]
+    nodes = [{"name": n, "mesh": 0, "translation": [1.5 * i, 0.0, 0.0]} for i, n in enumerate(names)]
+    nodes[11]["mesh"] = 1
+    bulge = b.accessor([(0.0, 0.0, 0.5), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)], "f", "VEC3")
+    nodes[0]["children"] = [7]; nodes[0]["rotation"] = [0.0, 0.3826834, 0.0, 0.9238795]; nodes[0]["scale"] = [1.5, 0.75, 1.25]
+    nodes[3] = {"name": "Matrix", "mesh": 0, "matrix": [0.0, 0.0, -2.0, 0.0, 0.0, 1.5, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 3.0, 1.0, -2.0, 1.0]}
+    samplers, channels = [], []
+
+    def chan(node, path, times, values, kind=None, interpolation=None):
+        smp = {"input": b.accessor(times, "f", "SCALAR"), "output": b.accessor(values, "f", kind or ("VEC4" if path == "rotation" else "VEC3"), minmax=False)}
+        if interpolation:
+            smp["interpolation"] = interpolation
+        samplers.append(smp); channels.append({"sampler": len(samplers) - 1, "target": {"node": node, "path": path}})
+
+    chan(0, "translation", [k / 30.0 for k in range(7)], [(0.3 * k, 0.1 * k * k, -0.2 * k) for k in range(7)])
+    chan(1, "rotation", [0.0, 0.1, 0.2, 0.3], [(0.0, 0.0, 0.0, 1.0), (0.0, -0.3826834, 0.0, -0.9238795), (0.0, 0.7071068, 0.0, 0.7071068), (0.5, 0.5, 0.5, 0.5)])
+    chan(2, "scale", [0.0, 0.11, 0.21], [(1.0, 1.0, 1.0), (2.0, 0.5, 1.5), (0.25, 3.0, 1.0)], interpolation="STEP")
+    chan(3, "translation", [0.0, 0.26], [(3.0, 1.0, -2.0), (4.0, 2.5, 0.5)])
+    chan(4, "translation", [0.0, 0.1, 0.1, 0.2], [(0.0, 0.0, 0.0), (2.0, 1.0, 0.0), (1.0, 0.0, 3.0), (4.0, 0.0, 0.0)])
+    # 0.1 s = frame 2.4 and 2.4+0.004 (a pair off a frame); 0.2496 s = frame 5.9904 before 0.25 s = frame 6 exactly;
+    # then three keys within 0.01 frame of the first of them
+    chan(5, "translation", [0.0, 0.1, 0.1 + 0.004 / 24.0, 0.2496, 0.25, 0.3, 0.3 + 0.004 / 24.0, 0.3 + 0.008 / 24.0, 0.4],
+         [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.5, 0.5, 0.0), (2.0, 1.0, 0.0), (2.5, 1.0, 0.5), (3.0, 0.0, 0.0), (3.2, 0.2, 0.0), (3.4, 0.4, 0.0), (5.0, 0.0, 1.0)])
+    chan(6, "translation", [0.0, 0.2], [(0.0, 0.0, 0.0), (0.0, 2.0, 0.0)])
+    chan(6, "translation", [0.0, 0.2], [(9.0, 9.0, 9.0), (9.0, 9.0, 9.0)])
+    chan(8, "translation", [0.15], [(7.0, 7.0, 7.0)])
+    chan(12, "rotation", [0.0, 5.0 / 24.0, 8.0 / 24.0, 10.0 / 24.0, 13.0 / 24.0],
+         [(0.0, 0.0, 0.0, 1.0), (0.0, 0.0, 0.6, 0.8), (0.0, 0.0, 0.0, 1.0), (0.6, 0.0, 0.0, -0.8), (0.0, 0.0, 0.0, -1.0)])
+    chan(11, "weights", [0.0, 0.5, 1.0], [0.0, 1.0, 0.25], kind="SCALAR")
+    chan(10, "translation", [0.0, 4.99995 / 24.0, 6.0 / 24.0, 0.3], [(0.0, 0.0, 0.0), (10.0, 1.0, -1.0), (1000.0, -500.0, 250.0), (0.0, 0.0, 0.0)])
+    second = {"name": "Second", "samplers": [{"input": b.accessor([0.0, 0.5], "f", "SCALAR"), "output": b.accessor([(0.0, 0.0, 0.0), (0.0, 0.0, 5.0)], "f", "VEC3", minmax=False)}],
+              "channels": [{"sampler": 0, "target": {"node": 9, "path": "translation"}}]}
+    root = base("posed", meshes=[{"primitives": [{"attributes": {"POSITION": tri}}]}, {"primitives": [{"attributes": {"POSITION": tri}, "targets": [{"POSITION": bulge}]}], "weights": [0.0]}], nodes=nodes,
+                scenes=[{"nodes": [i for i in range(len(nodes)) if i != 7]}], scene=0,
+                animations=[{"name": "First", "samplers": samplers, "channels": channels}, second])
+    write_glb(os.path.join(out, "posed.glb"), root, b)
+    # a camera with a mesh below it, under an animated root: the importer turns the camera (and turns its children back),
+    # which VehicleProbe.BlenderWorldMatrices does not model - the drill must skip both by name and still hold Root
+    b = Buf()
+    tri = b.accessor([(0, 0, 0), (1, 0, 0), (0, 1, 0)], "f", "VEC3")
+    root = base("posed_camera", meshes=[{"primitives": [{"attributes": {"POSITION": tri}}]}],
+                nodes=[{"name": "Root", "mesh": 0, "children": [1]}, {"name": "Cam", "camera": 0, "translation": [0.0, 1.0, 0.0], "rotation": [0.0, 0.3826834, 0.0, 0.9238795], "children": [2]},
+                       {"name": "Kid", "mesh": 0, "translation": [0.5, 0.0, 0.0]}],
+                cameras=[{"type": "perspective", "perspective": {"yfov": 0.6, "znear": 0.1, "aspectRatio": 1.5}}], scenes=[{"nodes": [0]}], scene=0,
+                animations=[{"name": "Move", "samplers": [{"input": b.accessor([0.0, 0.5], "f", "SCALAR"), "output": b.accessor([(0.0, 0.0, 0.0), (1.0, 2.0, 3.0)], "f", "VEC3", minmax=False)}],
+                             "channels": [{"sampler": 0, "target": {"node": 0, "path": "translation"}}]}])
+    write_glb(os.path.join(out, "posed_camera.glb"), root, b)
+    # KHR_animation_pointer: a node's translation animated through a pointer - Blender moves the object, the reader carries
+    # no such channel. The file must come out LEFT to Blender by name, never compared as if nothing moved
+    b = Buf()
+    tri = b.accessor([(0, 0, 0), (1, 0, 0), (0, 1, 0)], "f", "VEC3")
+    root = base("posed_pointer", meshes=[{"primitives": [{"attributes": {"POSITION": tri}}]}], nodes=[{"name": "Pointed", "mesh": 0}],
+                extensionsUsed=["KHR_animation_pointer"], scenes=[{"nodes": [0]}], scene=0,
+                animations=[{"name": "Point", "samplers": [{"input": b.accessor([0.0, 0.5], "f", "SCALAR"), "output": b.accessor([(0.0, 0.0, 0.0), (1.0, 2.0, 3.0)], "f", "VEC3", minmax=False)}],
+                             "channels": [{"sampler": 0, "target": {"path": "pointer", "extensions": {"KHR_animation_pointer": {"pointer": "/nodes/0/translation"}}}}]}])
+    write_glb(os.path.join(out, "posed_pointer.glb"), root, b)
+    # Both unsupported features together: the unread pointer extends the range beyond the cubic channel.
+    # It must still be LEFT without comparing the incomplete action range or touched-object set.
+    root["nodes"].append({"name": "Cubic", "mesh": 0})
+    root["scenes"][0]["nodes"].append(1)
+    anim = root["animations"][0]
+    anim["samplers"].append({"input": b.accessor([0.0, 0.25], "f", "SCALAR"),
+                             "output": b.accessor([(0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0),
+                                                   (0.0, 0.0, 0.0), (1.0, 2.0, 3.0), (0.0, 0.0, 0.0)], "f", "VEC3", minmax=False),
+                             "interpolation": "CUBICSPLINE"})
+    anim["channels"].append({"sampler": 1, "target": {"node": 1, "path": "translation"}})
+    root["asset"]["generator"] = "posed_pointer_cubic"
+    write_glb(os.path.join(out, "posed_pointer_cubic.glb"), root, b)
+
+
 FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external, fx_cubic, fx_scenes, fx_materials, fx_skin8, fx_big, fx_names, fx_no_default_scene, fx_dropped, fx_mixed_skin, fx_clip_switch, fx_path_clip, fx_far_clip, fx_unicode_clip, fx_decimate_attrs, fx_decimate_limits, fx_export_layout, fx_export_skin, fx_export_skin_badweights, fx_export_skin_bonechild]
 
 
-def main(out, prep=False):
+def main(out, prep=False, posed=False):
     os.makedirs(out, exist_ok=True)
+    if posed:   # for tools/deploy_drill.sh alone: a doubled channel and merged keys are not for the other drills
+        fx_posed(out)
     # Blender drops the line mesh: its vertex bounds are only relevant to the prep export drill.
     for fx in FIXTURES + ([fx_export_skin_lines, fx_export_bones, fx_export_review, fx_export_skin_twins, fx_export_flat_alpha, fx_export_jpeg_alpha, fx_export_factor_range, fx_export_strip] if prep else []):
         fx(out)
@@ -1077,4 +1178,4 @@ def main(out, prep=False):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], prep="--prep" in sys.argv[2:])
+    main(sys.argv[1], prep="--prep" in sys.argv[2:], posed="--posed" in sys.argv[2:])

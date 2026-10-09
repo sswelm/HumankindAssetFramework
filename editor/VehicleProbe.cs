@@ -285,7 +285,7 @@ public static partial class VehicleProbe
         for (int si = 0; si < m.Skins.Count; si++) s.ArmaWorld[si] = s.Names.ArmatureNodeOfSkin[si] >= 0 ? s.World[s.Names.ArmatureNodeOfSkin[si]] : HafTransforms.Identity;
         // the same matrices as Blender holds them: float32, composed as Blender composes them (the verdicts read these; a
         // mesh parented to a BONE is not modelled yet - its matrix is the node chain's, said in docs/Review-Backlog.md)
-        s.BWorld = BlenderWorldMatrices(m, posed && m.Animations.Count > 0 ? HafTransforms.PoseTrsAt(m, 0, 0.0) : null, out s.BLocal);
+        s.BWorld = BlenderWorldMatrices(m, posed && m.Animations.Count > 0 ? InBlenderConvention(HafTransforms.PoseTrsAt(m, 0, 0.0)) : null, out s.BLocal);
         s.BArma = new float[m.Skins.Count][];
         for (int si = 0; si < m.Skins.Count; si++) s.BArma[si] = s.Names.ArmatureNodeOfSkin[si] >= 0 ? s.BWorld[s.Names.ArmatureNodeOfSkin[si]] : IdentityF();
         return s;

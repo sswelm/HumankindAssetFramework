@@ -396,6 +396,64 @@ wall time of the whole prep). The same measurement showed the log line off by a 
 counted the WRITTEN triangles, a twin face or two fewer than the modifier leaves, where `prep_model.py` counts before
 the export (28,356 for its 28,365; the files were equal); it counts as Blender does now. `FULL=1` on that state: 294 runs, 164 written and read by the converter as it reads Blender's (44 stripped), 106 left by name, 21 known prep failures, the canoe's 3.
 
+**Replacing `deploy_convert.py`, part 1: Blender's posed state** (2026-10-09). `deploy_convert.py` is HAF's own
+algorithm on Blender's animation machinery: everything it decides and bakes starts from what `scene.frame_set(f)` makes
+of the imported file. `tools/deploy_drill.sh` holds that: Blender dumps every object's `matrix_world` and its evaluated
+`location`, `rotation_quaternion` and `scale` at up to thirteen frames of each file
+(`tools/deploy-drill/blender_posed_dump.py`: before the first key, on it, after it, eight across the range, the last,
+beyond it - fewer where those coincide), and the C# side rebuilds the importer's action (`BlenderPosedState.Import`),
+sets the frames in the same order (`BlenderPosedState.Pose`), composes the matrices as Blender does
+(`VehicleProbe.BlenderWorldMatrices`) and compares the BITS of all sixteen floats of each matrix and of every animated
+property - with the action's frame range and WHICH objects the animation touches (the script takes those for its
+parts). What it took, read from the importer, `fcurve.cc` and `anim_sys.cc` and measured: one fcurve per component, a
+key at its time x 24 (in double, stored float32); quaternions that point away from the one before negated, then
+interpolated component by component; `change * time / duration + begin` in float32 between keys, the end keys held
+outside; a key within 0.0001 frame of the frame gives its value; and `fcurve.update()` MERGES keys closer than 0.01
+frame, the last one winning at the earlier key's frame unless it sits on a whole frame - the T-62 has 332 such pairs
+in each curve (times written both exact and rounded to the millisecond), and 9,376 of its 15,314 matrices were wrong
+until that was ported. The first animation's action is the active one, found by its track name (`bpy.data.actions` is
+sorted by name: comparing with its first row had a three-animation fixture's range wrong). Morph-weight curves sit in
+the same action and count for its frame range.
+
+The comparator validates complete matrix and property rows for every dumped object at every declared frame, with a
+nonempty frame list. The gate removes one matrix, one property, every property row, or the frame list, and truncates
+a matrix/property record; each plant must fail. `posed_pointer_cubic.glb` combines a pointer channel with CUBICSPLINE:
+its unread pointer extends the action range, so the entire file is left to Blender without range or action checks
+(`Action.RangeAndTouchedKnown` says so to a caller: the pointer's reason stands over the cubic sampler's, which alone
+leaves the range known).
+
+*The sign of a zero.* The first version compared values (`-0 == +0`) and said "bit for bit"; an independent review
+measured `-0` here where Blender has `+0`. Compared as bits, four rules decide it, each read from the source and each
+with a planted defect that fails: (1) `BKE_object_to_mat4` multiplies the rotation by the delta rotation and by the
+scale matrix and adds the delta location - identities that change no value and turn a lone `-0` into `+0`
+(`ObjectMatrix` writes the products out); (2) the importer puts every key through `rotation_after @ loc`,
+`rotation_after @ rot @ rotation_before` and a matrix `@ scale` - identities again for anything but a camera or a
+light, so glTF's `z = 0`, negated into Blender's `y`, is `+0` in the curve (the curves are now kept in Blender's
+components; evaluating in glTF's axes and negating afterwards had 554 of the howitzer's 1,664 evaluated sets wrong);
+(3) the short-way negation comes AFTER that, so a negated key's zeros are `-0`; (4) `BKE_animsys_write_to_rna_path`
+does not write a value equal to the one held - and `-0` equals `+0` - so a property keeps the sign of the zero it
+had, back to the last value that was not zero or to the import: the posed state depends on the frames set before
+(`Pose` keeps that state; `TrsAt` alone gives the curves' values).
+
+The gate sample: the fixtures with `posed.glb`, `posed_camera.glb`, `posed_pointer.glb` and `posed_pointer_cubic.glb`
+(`fixtures.py --posed`: STEP keys, a matrix node, a doubled channel, a second animation, key merges on and off a whole frame, two keys at one
+time, a curve of one key, the near-key rule, an animated morph weight that stretches the range, the four zero rules on
+sampled keys) and the deploy sources under 40 MB; `FULL=1` adds the T-62, every registry model and recipe source:
+121,055 object matrices and 15,703 evaluated property sets of 85 files equal. A COVER row at zero fails, and a file's
+rows count only once the file holds. Twenty planted defects, all caught. LEFT to Blender by name
+(`Action.NotModelled`): a CUBICSPLINE sampler (Bezier keys with automatic handles; its frame range and touched objects
+are still held, its values are not) and `KHR_animation_pointer` (the reader carries no such channel; without the rule
+the fixture reads as a file where nothing moves). Not compared, counted: a camera and what hangs below it (the
+importer's camera correction is not in `BlenderWorldMatrices`; without the skip 24 of the fixture's 36 matrices
+differ), an object under a bone and what hangs below it (it follows the armature's pose), a skinned mesh. NOT held, to
+know: the properties of an object the animation does not touch (their matrices are, bit for bit; the importer's
+corrections are not applied to the static values `BlenderWorldMatrices` starts from, and no matrix told the
+difference); a scale key of zero (no file and no fixture has one); the frames in another order than ascending.
+`BlenderPosedStateTests` hold each rule, the merge on the T-62's measured value. For part 2, named by the review:
+`matrix_local` is the parent's inverse times the world (Blender's Eigen inverse), `matrix_world = m` goes through
+`BKE_object_apply_mat4`, the frame range is per ACTION (a stripped object's slot, bones and weights count) and is cut
+by `int()`. Next: the conversion's decisions against the script's own `DEPLOY` log lines.
+
 **The Clip Range picker's in-process rig** (step 4, 2026-10-03): `HafUnityFrameTests` hold the preview frame's arithmetic
 without Unity — the X mirror's conjugation of rotations, matrices and matrix nodes; Unity's skinning formula fed the rig's
 matrices (the joints' world matrices, the inverse bind matrices, the vertex, all mirrored) against the reader's posed vertex;
