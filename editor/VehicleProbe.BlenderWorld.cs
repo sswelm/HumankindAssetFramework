@@ -182,7 +182,11 @@ public static partial class VehicleProbe
     /// Column-major. The two products and the sum change no VALUE - they decide the sign of a ZERO: a term of -0 survives
     /// only beside other negative zeros, and -0 + 0 is +0 (a rotated root's matrix had -0 where Blender's has +0 until
     /// this was written out; review of the posed state, 2026-10-09).</summary>
-    internal static float[] ObjectMatrix(float[] loc, float[] quat, float[] size)
+    internal static float[] ObjectMatrix(float[] loc, float[] quat, float[] size) => ObjectMatrix(loc, quat, size, false);
+
+    /// <summary>... and BKE_pchan_to_mat4 with `pchan`: a pose bone has no deltas - the quaternion's matrix times the
+    /// scale matrix, the location copied.</summary>
+    internal static float[] ObjectMatrix(float[] loc, float[] quat, float[] size, bool pchan)
     {
         var tq = (float[])quat.Clone(); NormalizeQt(tq);
         const double M_SQRT2 = 1.4142135623730951;
@@ -198,15 +202,16 @@ public static partial class VehicleProbe
         {
             rot[i] = new float[3];
             for (int j = 0; j < 3; j++)
-                rot[i][j] = (float)((float)((float)(r[i][0] * (j == 0 ? 1f : 0f)) + (float)(r[i][1] * (j == 1 ? 1f : 0f))) + (float)(r[i][2] * (j == 2 ? 1f : 0f)));
+                rot[i][j] = pchan ? r[i][j] : (float)((float)((float)(r[i][0] * (j == 0 ? 1f : 0f)) + (float)(r[i][1] * (j == 1 ? 1f : 0f))) + (float)(r[i][2] * (j == 2 ? 1f : 0f)));
         }
         var bm = new float[16];
         for (int i = 0; i < 3; i++)
         {
-            float s0 = i == 0 ? (float)(size[0] * 1f) : 0f, s1 = i == 1 ? (float)(size[1] * 1f) : 0f, s2 = i == 2 ? (float)(size[2] * 1f) : 0f;
+            float s0 = i == 0 ? (pchan ? size[0] : (float)(size[0] * 1f)) : 0f, s1 = i == 1 ? (pchan ? size[1] : (float)(size[1] * 1f)) : 0f, s2 = i == 2 ? (pchan ? size[2] : (float)(size[2] * 1f)) : 0f;
             for (int j = 0; j < 3; j++)
                 bm[i * 4 + j] = (float)((float)((float)(s0 * rot[0][j]) + (float)(s1 * rot[1][j])) + (float)(s2 * rot[2][j]));
         }
+        if (pchan) { bm[12] = loc[0]; bm[13] = loc[1]; bm[14] = loc[2]; bm[15] = 1f; return bm; }
         bm[12] = (float)(loc[0] + 0f); bm[13] = (float)(loc[1] + 0f); bm[14] = (float)(loc[2] + 0f); bm[15] = 1f;
         return bm;
     }

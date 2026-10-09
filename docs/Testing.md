@@ -508,6 +508,45 @@ Eigen's is float32; lights and cameras that survive are left to Blender unjudged
 matrix, a transform, a box, an object, a part, the range or the end row from the real dump: each must fail. Next:
 the armature's pose (the canoe), then part 3, the armature's rest and the binding.
 
+**Replacing `deploy_convert.py`, part 2b: the armature's pose** (2026-10-10). The dugout canoe was left to Blender:
+ten of its objects hang from bones the animation moves. `VehicleProbe.BlenderPose.cs` now gives an imported
+armature's pose and what hangs from it. The importer: `prettify_bones` turns every bone's edit rotation by a quarter
+turn and cancels it in the node's own transform (the bone's vnode gets the turn as `rotation_before`, every child of
+it - bone or object - the conjugate as `rotation_after`; a bone's scale has Y and Z swapped); a pose bone holds the
+transform RELATIVE to its edit bone (`er^-1 @ (t - et)`, `er^-1 @ r`); an object under a bone is parented to the bone
+and moved back by `bone_length` (the vnode's Python value, not the scaled Blender one); every key goes the same way.
+Blender: `BKE_pchan_to_mat4`, `BKE_armature_mat_bone_to_pose` (a child on its parent's POSE matrix times the bone's
+offset matrix, the location column through the same matrix apart), `ob_parbone` (the pose matrix moved to the bone's
+tail). The posed drill now dumps and compares every bone at rest (parent, length, `matrix_local`), every pose bone
+at every sampled frame (location, quaternion, scale, pose matrix) and no longer skips an object under a bone: 88
+files, 121,774 object matrices, 9,153 pose bones equal. The canoe's 21 bones and ten bone-parented objects matched on
+the first comparison, and its decisions job passes without the `LEFT:` mark - 43 log lines, 37 parts, 124 objects:
+every recorded conversion whose source exists is now decided in C#.
+
+Rest records must identify every imported bone exactly once, with all 29 numeric values. Pose records must identify
+every bone at every declared frame exactly once, with all 26 values. The drill validates this evidence before choosing
+which animations it can compare. `missing_bones.py` constructs ten negative cases from the real `posed_bones` dump:
+missing, duplicate, truncated and oversized rest/pose records, an unknown pose bone, and all poses removed. An intact
+control must first pass, and each mutation must fail for its specific defect.
+
+Found on the way, each with a fixture: an armature that is STRIPPED leaves what hung from its bones as roots (the
+bone link goes with the parent); the importer's bone shape is evaluated only while its armature is there (its
+collection is hidden) - with the armature stripped its `matrix_world` stays the identity though it is parented to
+the normalization root. *Review before the PR* (an independent agent, 252 files through the posed drill and 322
+decision jobs, 200 of them fuzzed): (1) a property's history does not start at the importer's value - when the
+import returns, every animated property already holds the action at frame 1, so the chain a zero's sign runs
+through is static, frame 1, then the frames set (`Pose` evaluates frame 1 when it is made; part 1 had this wrong for
+plain objects too, a pose bone's rest location of `er^-1 @ 0` with its `-0` made it show); (2) an armature under
+another armature's bone read its unposed matrix when its node came later in the file (`BlenderWorldMatricesPosed`
+resolves what a node hangs from first); (3) an armature with a zero scale component: Blender's importer divides by
+it and fails - left to Blender, including scales decomposed from a matrix and TRS values that underflow float32
+(three regression cases); (4) OPEN, older code: `GlbReader` reads the JSON token `-0.0` as `+0` (.NET
+Framework's `double.Parse`), Python keeps the sign - it shows in a location's zero only, real sources carry such
+tokens and pass because the matrix's `loc + 0` and the corrections mask it; in the backlog. 24 of 26 planted defects
+fail; not caught, both a zero's sign only: a pose bone's matrix built with the object's delta product, and a bone's
+history started from the node's own transform. Not held: a camera or a light under a bone. Next: part 3, the
+armature's rest and the binding.
+
 **The Clip Range picker's in-process rig** (step 4, 2026-10-03): `HafUnityFrameTests` hold the preview frame's arithmetic
 without Unity — the X mirror's conjugation of rotations, matrices and matrix nodes; Unity's skinning formula fed the rig's
 matrices (the joints' world matrices, the inverse bind matrices, the vertex, all mirrored) against the reader's posed vertex;

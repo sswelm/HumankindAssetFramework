@@ -120,9 +120,18 @@ public static class BlenderPosedState
     /// what the importer set: the node's own transform through the same corrections as a key.</summary>
     public sealed class Pose
     {
-        readonly Action action; readonly HafModel model;
+        readonly Action action; readonly HafModel model; readonly VehicleProbe.ImportRig rig;
         readonly Dictionary<int, float[][]> held = new Dictionary<int, float[][]>();
-        public Pose(Action a, HafModel m) { action = a; model = m; }
+        public Pose(Action a, HafModel m, VehicleProbe.ImportRig importRig = null)
+        {
+            action = a; model = m; rig = importRig;
+            // when import_scene.gltf returns, every animated property already holds the action at the scene's frame, 1:
+            // the chain a zero's sign runs through is the importer's value, THAT evaluation, then the frames set
+            // (measured straight after the import; review of the pose, 2026-10-10 - a pose bone's rest location is
+            // er^-1 @ 0 and routinely carries a -0, which made it show)
+            var first = FrameSet(1f);
+            for (int n = 0; n < m.Nodes.Count; n++) first(n);
+        }
 
         /// <summary>A script wrote the object's transform (`o.matrix_world = m`): what the next frame's values meet.</summary>
         public void Write(int node, float[] loc, float[] quat, float[] scale) { held[node] = new[] { (float[])loc.Clone(), (float[])quat.Clone(), (float[])scale.Clone() }; }
@@ -140,7 +149,9 @@ public static class BlenderPosedState
                 if (p == null) return now[node] = null;
                 if (!held.TryGetValue(node, out var h))
                 {
-                    ImportedTrs(model.Nodes[node], out var l, out var q, out var s);
+                    float[] l, q, s;
+                    if (rig != null && (rig.IsBone(node) || rig.ParentBone(node) >= 0)) rig.StaticProperty(node, out l, out q, out s);   // a pose bone, or an object under a bone
+                    else ImportedTrs(model.Nodes[node], out l, out q, out s);
                     held[node] = h = new[] { l, q, s };
                 }
                 for (int k = 0; k < 3; k++)
@@ -154,7 +165,13 @@ public static class BlenderPosedState
     }
 
     /// <summary>The importer's action for a glTF animation at the scene's frame rate (24 after read_factory_settings).</summary>
-    public static Action Import(HafModel m, int animation, double fps = 24.0)
+    public static Action Import(HafModel m, int animation, double fps = 24.0) => Import(m, animation, fps, null);
+
+    /// <summary>... with the importer's armatures (`rig`): a BONE's keys become its pose bone's - through the vnode's
+    /// rotations and into the edit bone's space - and an object under a bone has its keys turned and moved back by
+    /// the bone's length, as its static transform is. Without it such channels keep the node's own values (they count
+    /// for the frame range only).</summary>
+    public static Action Import(HafModel m, int animation, double fps, VehicleProbe.ImportRig rig)
     {
         var a = new Action();
         if (animation < 0 || animation >= m.Animations.Count) return a;
@@ -198,6 +215,13 @@ public static class BlenderPosedState
             for (int k = 0; k < keys; k++)
             {
                 var g = v[k];
+                if (rig != null && (rig.IsBone(ch.Node) || rig.ParentBone(ch.Node) >= 0))
+                {
+                    v[k] = ch.Path == "translation" ? rig.KeyLocation(ch.Node, new[] { g[0], -g[2], g[1] })
+                         : ch.Path == "rotation" ? rig.KeyRotation(ch.Node, new[] { g[3], g[0], -g[2], g[1] })
+                         : rig.KeyScale(ch.Node, new[] { g[0], g[2], g[1] });
+                    continue;
+                }
                 v[k] = ch.Path == "translation" ? MulQtV3(IdentityQuat, new[] { g[0], -g[2], g[1] })
                      : ch.Path == "rotation" ? MulQtQt(MulQtQt(IdentityQuat, new[] { g[3], g[0], -g[2], g[1] }), IdentityQuat)
                      : new[] { IdentityRow(g[0], g[2], g[1], 0), IdentityRow(g[0], g[2], g[1], 1), IdentityRow(g[0], g[2], g[1], 2) };

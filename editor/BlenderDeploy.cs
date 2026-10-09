@@ -22,7 +22,11 @@
 //     bytes as signed and puts it first, which the exporter's child order was never measured on);
 //   - a removed object's NAME is free again: the normalization root is "UnitNormalize" even when the file had one
 //     and the strip took it.
-// Left to Blender, named (Result.Fallback): what BlenderPosedState does not model; a surviving object under a bone, under
+//   - the bone shape is evaluated only while its armature is there (the bones' custom shape; its collection is
+//     hidden): with the armature stripped its matrix_world stays the identity, whatever it is parented to;
+//   - an object that hangs from a BONE follows the armature's pose (VehicleProbe.BlenderPose.cs: the pose bones from
+//     the importer's bone curves, BKE_pose_where_is, ob_parbone) - the dugout canoe's ropes and cloth.
+// Left to Blender, named (Result.Fallback): what BlenderPosedState does not model; a surviving object under
 // a camera in the file, or a skinned mesh (its bound_box is the deformed mesh's); a surviving mesh with morph targets
 // (bound_box is the EVALUATED mesh: the shape keys move it); a node outside the scene the file names (the importer
 // excludes its collection: such an object is frozen where the import left it, no frame_set reaches it);
@@ -42,8 +46,14 @@ public static class BlenderDeploy
     {
         public string Name, Type, DataName;       // Type as Blender prints it: MESH, EMPTY, ARMATURE, CAMERA
         public Obj Parent;
+        public int BoneNode = -1;                  // the bone (its glTF node) of Parent - an armature - it hangs from, or -1
+        public float[] BoneMatrix;                 // that bone's pose matrix moved to its tail (ob_parbone), armature space
+        /// <summary>BKE_object_get_parent_matrix: the parent's matrix_world, through the bone when it hangs from one.</summary>
+        public float[] ParentMatrix => BoneNode >= 0 && BoneMatrix != null ? VehicleProbe.MulM4(Parent.World, BoneMatrix) : Parent.World;
         public int Node = -1, MeshNode = -1;       // the glTF node that became it / whose mesh it carries, or -1
         public bool HasAction;
+        public Obj ShapeOf;                        // a bone shape: the armature whose bones show it
+        public bool Frozen;                        // no longer evaluated: matrix_world stays what it was (a bone shape whose armature is gone)
         public bool Euler;                         // made by an operator or by the script, not by the importer: no quaternion mode
         public float[] Loc, Quat, Scale;           // its own transform as the properties hold it
         public float[] World;                      // matrix_world, column-major
@@ -78,7 +88,12 @@ public static class BlenderDeploy
         names = names ?? BlenderNames.Compute(m);
         string Arg(int scriptIndex) => scriptIndex - 2 < args.Length ? args[scriptIndex - 2] : null;
         int argc = args.Length + 2;
-        var action = BlenderPosedState.Import(m, 0);
+        // The importer divides by each component of the armature's float32 scale (the bone shape's size): a zero
+        // there fails, whether it came from TRS, matrix decomposition, or a nonzero double that underflowed.
+        foreach (var (armNode, armName) in names.ArmaturesInOrder)
+            if (armNode >= 0 && VehicleProbe.ArmatureScale(m, armNode).Any(c => c == 0f)) { r.Fallback = $"an armature with a zero scale ('{armName}': Blender's importer fails on it)"; return r; }
+        var rig = VehicleProbe.BuildImportRig(m, names);
+        var action = BlenderPosedState.Import(m, 0, 24.0, rig);
         if (action.NotModelled != null) { r.Fallback = action.NotModelled; return r; }
         if (m.ExtensionsUsed.Contains("KHR_lights_punctual")) { r.Fallback = "a light (the reader does not carry which node holds it)"; return r; }
         if (m.ExtensionsUsed.Contains("EXT_mesh_gpu_instancing")) { r.Fallback = "EXT_mesh_gpu_instancing (the importer makes an object of every instance)"; return r; }
@@ -106,7 +121,15 @@ public static class BlenderDeploy
             x.Type = o.Kind == BlenderNames.ObjectKind.Mesh ? "MESH" : o.Kind == BlenderNames.ObjectKind.Armature ? "ARMATURE" : o.Kind == BlenderNames.ObjectKind.Camera ? "CAMERA" : "EMPTY";
             x.HasAction = o.Kind == BlenderNames.ObjectKind.Armature ? animatedArmatures.Contains(o.GltfNode) || (o.GltfNode >= 0 && action.Animates(o.GltfNode))
                         : o.GltfNode >= 0 && !(o.Kind == BlenderNames.ObjectKind.Mesh && o.Skin >= 0) && action.Animates(o.GltfNode);
-            if (o.GltfNode >= 0) BlenderPosedState.ImportedTrs(m.Nodes[o.GltfNode], out x.Loc, out x.Quat, out x.Scale);
+            if (o.GltfNode >= 0 && o.ParentBone != null)
+            {
+                // under a bone: turned by the bone's prettify rotation and moved back by its length
+                x.BoneNode = rig.ParentBone(o.GltfNode);
+                if (x.BoneNode < 0) { r.Fallback = $"an object under a bone that is not its node's parent ('{o.Name}')"; return r; }
+                rig.StaticProperty(o.GltfNode, out x.Loc, out x.Quat, out x.Scale);
+            }
+            else if (o.ParentBone != null) { r.Fallback = $"an object the importer made under a bone ('{o.Name}')"; return r; }
+            else if (o.GltfNode >= 0) BlenderPosedState.ImportedTrs(m.Nodes[o.GltfNode], out x.Loc, out x.Quat, out x.Scale);
             else { x.Loc = new float[3]; x.Quat = new[] { 1f, 0f, 0f, 0f }; x.Scale = new[] { 1f, 1f, 1f }; }
             all.Add(x); byName[x.Name] = x; source[x] = o;
         }
@@ -114,6 +137,8 @@ public static class BlenderDeploy
         for (int i = 0; i < names.BoneShapes.Count; i++)
         {
             var x = new Obj { Name = names.BoneShapes[i], Type = "MESH", DataName = names.BoneShapeData[i], Euler = true, Loc = new float[3], Quat = new[] { 1f, 0f, 0f, 0f }, Scale = new[] { 1f, 1f, 1f }, BoxMin = IcoMin, BoxMax = IcoMax };
+            // its armature's bones use it as their custom shape: that is all that keeps it evaluated (its collection is hidden)
+            if (i < names.ArmaturesInOrder.Count && byName.TryGetValue(names.ArmaturesInOrder[i].name, out var owner)) x.ShapeOf = owner;
             all.Add(x); byName[x.Name] = x;
         }
         // bpy.data.objects: by name ignoring case, equal names in creation order (ObjectsInOrder has the bone shapes in place)
@@ -145,12 +170,13 @@ public static class BlenderDeploy
             if (o.Kind == BlenderNames.ObjectKind.Camera) { r.Fallback = $"a camera survives the strip ('{x.Name}': the importer's camera correction is not modelled)"; return r; }
             for (var q = o; q != null; q = q.Parent != null && byName.TryGetValue(q.Parent, out var up) ? source[up] : null)
             {
-                if (q.ParentBone != null) { r.Fallback = $"an object under a bone survives the strip ('{x.Name}': it follows the armature's pose)"; return r; }
                 if (q != o && q.Kind == BlenderNames.ObjectKind.Camera) { r.Fallback = $"an object under a camera survives the strip ('{x.Name}': the importer's camera correction is not modelled)"; return r; }
             }
         }
         all = all.Where(o => !gone.Contains(o)).ToList();
-        foreach (var o in all) if (o.Parent != null && gone.Contains(o.Parent)) o.Parent = null;   // a removed object's children are roots
+        foreach (var o in all) if (o.Parent != null && gone.Contains(o.Parent)) { o.Parent = null; o.BoneNode = -1; }   // a removed object's children are roots
+        // a bone shape whose armature is gone is evaluated no more: its matrix_world stays the identity of the import
+        foreach (var o in all) if (o.ShapeOf != null && gone.Contains(o.ShapeOf)) { o.Frozen = true; o.World = VehicleProbe.IdentityF(); }
         var meshes = all.Where(o => o.Type == "MESH").ToList();
         r.Log.Add($"DEPLOY after strip: {all.Count} objects, {meshes.Count} meshes: {string.Join(", ", meshes.Select(o => o.Name))}");
         foreach (var o in meshes)
@@ -166,7 +192,7 @@ public static class BlenderDeploy
         if (fminD > fmaxD) { fminD = 1.0; fmaxD = 1.0; }
         int fmin = (int)Math.Truncate(fminD), fmax = (int)Math.Truncate(fmaxD);
         r.FrameMin = fmin; r.FrameMax = fmax;
-        var pose = new BlenderPosedState.Pose(action, m);
+        var pose = new BlenderPosedState.Pose(action, m, rig);
         void FrameSet(int f)
         {
             var set = pose.FrameSet(f);
@@ -179,6 +205,17 @@ public static class BlenderDeploy
                 if (p[0] != null) o.Loc = p[0];
                 if (p[1] != null) o.Quat = p[1];
                 if (p[2] != null) o.Scale = p[2];
+            }
+            // the armatures' poses: each bone's pose matrix from its pose bone's properties, for what hangs from it
+            if (all.Exists(o => o.BoneNode >= 0 && o.Parent != null))
+            {
+                var poseMats = new Dictionary<int, float[]>();
+                foreach (var arm in rig.Armatures.Values)
+                {
+                    float[][] Props(int b) { var p = set(b); rig.StaticProperty(b, out var l, out var q, out var s); return new[] { p?[0] ?? l, p?[1] ?? q, p?[2] ?? s }; }
+                    foreach (var kv in VehicleProbe.PoseMatrices(arm, Props)) poseMats[kv.Key] = kv.Value;
+                }
+                foreach (var o in all) if (o.BoneNode >= 0 && o.Parent != null) o.BoneMatrix = VehicleProbe.ParBone(poseMats[o.BoneNode], rig.ArmatureOfBone[o.BoneNode].Length[o.BoneNode]);
             }
             Update(all);
         }
@@ -261,7 +298,7 @@ public static class BlenderDeploy
             {
                 if (bad.Contains(p)) continue;
                 var basis = VehicleProbe.ObjectMatrix(p.Loc, p.Euler ? new[] { 1f, 0f, 0f, 0f } : p.Quat, p.Scale);
-                var local = p.Parent != null ? VehicleProbe.MulM4(BlenderEigen.InvertM4(p.Parent.World), p.World) : p.World;
+                var local = p.Parent != null ? VehicleProbe.MulM4(BlenderEigen.InvertM4(p.ParentMatrix), p.World) : p.World;
                 if (MatBad(basis) || MatBad(local) || MatBad(p.World)) bad.Add(p);
             }
         }
@@ -274,6 +311,7 @@ public static class BlenderDeploy
             r.Log.Add($"DEPLOY culled {bad.Count} degenerate part(s) (garbage world matrix): [{string.Join(", ", r.Bad.Select(PyRepr))}]  (+{Math.Max(0, victims.Count - bad.Count)} descendant object(s))");
             parts = parts.Where(p => !Doomed(p)).ToList();
             var dead = new HashSet<Obj>(victims);
+            foreach (var o in all) if (o.ShapeOf != null && dead.Contains(o.ShapeOf)) o.Frozen = true;
             all = all.Where(o => !dead.Contains(o)).ToList();
         }
 
@@ -326,10 +364,11 @@ public static class BlenderDeploy
         void Calc(Obj o)
         {
             if (!done.Add(o)) return;
+            if (o.Frozen) return;
             var local = VehicleProbe.ObjectMatrix(o.Loc, o.Euler ? new[] { 1f, 0f, 0f, 0f } : o.Quat, o.Scale);
             if (o.Parent == null) { o.World = local; return; }
             Calc(o.Parent);
-            o.World = VehicleProbe.MulM4(o.Parent.World, local);
+            o.World = VehicleProbe.MulM4(o.ParentMatrix, local);
         }
         foreach (var o in all) Calc(o);
     }
