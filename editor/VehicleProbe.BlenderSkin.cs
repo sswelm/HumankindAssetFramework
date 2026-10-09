@@ -16,7 +16,7 @@ using System.Collections.Generic;
 public static partial class VehicleProbe
 {
     /// <summary>mathutils Matrix @ Matrix: item(row, col) = float(sum over k in double of float(a(row, k) * b(k, col))).</summary>
-    static float[] MatMulMathutils(float[] a, float[] b)
+    internal static float[] MatMulMathutils(float[] a, float[] b)
     {
         var r = new float[16];
         for (int row = 0; row < 4; row++)
@@ -133,7 +133,7 @@ public static partial class VehicleProbe
 
     /// <summary>Matrix.Translation(t) @ Quaternion(r).to_matrix().to_4x4(): quat_to_mat3 (double inside, no normalization here)
     /// into a 4x4 with the translation; row-major item layout. The product with the translation matrix is exact.</summary>
-    static float[] TranslationRotation(float[] t, float[] q)
+    internal static float[] TranslationRotation(float[] t, float[] q)
     {
         const double M_SQRT2 = 1.4142135623730951;
         double q0 = M_SQRT2 * (double)q[0], q1 = M_SQRT2 * (double)q[1], q2 = M_SQRT2 * (double)q[2], q3 = M_SQRT2 * (double)q[3];

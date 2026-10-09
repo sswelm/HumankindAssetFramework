@@ -579,6 +579,41 @@ or the parent inverse from the real dump: each must fail. Not in this part: bind
 after the bake and the options); the order of `arm.data.bones` (compared by name; the order is the export's, part
 5). Next: part 4, the bake.
 
+**Replacing `deploy_convert.py`, part 4: the bake** (2026-10-11). From `bpy.ops.nla.bake` to the script's
+`# --- 5a.`: the bake (every bone's Copy Transforms gives it its part's world matrix; `bake_action` brings that into
+the bone's own space frame by frame - `inverse(armature) @ target`, then `BKE_armature_mat_pose_to_bone` against the
+parent's CONSTRAINED pose - and afterwards, bone by bone, sets `matrix_basis`, makes each quaternion compatible with
+the one before and writes a location, a quaternion and a scale key per frame, LINEAR), the armature taken off its
+root-motion anchor, and on the contract path the scale curves stripped and the delta-form rebase
+(`LocRotScale(l, q) @ M0^-1`, `decompose()`, the hemisphere rule, every bone but those with "leg" in the name).
+`BlenderDeploy.Decide(..., bake: true)`; `Result.Keys`. The oracle runs the script in TWO stages: to the bake (the
+scene of parts 2 and 3), then on to `# --- 5a.`, where it writes every fcurve of the action key by key and every
+object's `matrix_world` again. The open question of the plan - bit-exact or a tolerance - is answered by the
+measurement: 798,655 baked keys of 67 baked jobs equal Blender's TO THE BIT, the T-62's contract path with them, and
+the 2,946 object matrices of the scene the bake leaves.
+
+What the comparison showed: (1) a bone that stands still DRIFTS - `Quaternion.make_compatible` goes through the
+rotation between the two quaternions and does not give back the one it was handed; StaticRoot moves an ulp a frame
+(the port has `quat_to_compatible_quat` as written); (2) the rebase writes `kp.co[1] += new - kp.co[1]` in Python: a
+DOUBLE difference added back to a float32 key - where the old key is some thirty bits bigger than the new value the
+difference loses that value's last bits (all 1,103 keys that differed at first: the T-62 and the chain fixture).
+*Review before the PR* (an independent agent, about 1,100 generated jobs): (a) `BlenderEigen.InvertM4` decided
+"singular" on a determinant in DOUBLE where Eigen's is float32 - a part flattened on one axis on a frame the cull
+does not sample has a float32 determinant of exactly 0, Blender bakes zeros, the port baked NaN, and the cull of part
+2 went wrong with it (16 of 908 fuzzed jobs): the determinant is now Eigen's own, operation by operation, and six of
+forty generated cases that tell the two apart are in the gate (`flat3`); (b) `nla.bake` with `only_selected=False`
+also bakes every SELECTED object with a pose, and the importer leaves everything selected: a surviving imported
+armature gets a key a frame and loses its own object animation. Where that cannot show (nothing hangs from its bones,
+its node is not animated) only the scale-free step's COUNT changes (three a bone of each such armature, plus the
+importer's own pose-scale curves in every animation: 384, 381, 378 on the `wall_rig` jobs); where it can, the job is
+Blender's FROM THE BAKE ON - marked `BAKELEFT:`, its scene before the bake still held: the dugout canoe (ten objects
+hang from its armature's bones) and four fixtures. So the helicopter, the towed howitzer and the T-62 are baked in
+C#, the canoe is not until that re-bake is modelled. 21 of 22 planted defects fail; not caught: the ASSOCIATION of
+the determinant's last sum (read from Eigen, no job tells it apart). Not held: the action's NAME (`Action.001` when
+another armature is baked first); a quaternion's magnitude within an ulp of the rebase's 1e-6 gate. The gate also
+takes a curve, a key, the bake's log line or the action row out of the real dump and turns one bit of a baked value:
+each must fail. Next: the re-bake of a surviving imported armature (the canoe), then the script's steps 5a-5d.
+
 **The Clip Range picker's in-process rig** (step 4, 2026-10-03): `HafUnityFrameTests` hold the preview frame's arithmetic
 without Unity — the X mirror's conjugation of rotations, matrices and matrix nodes; Unity's skinning formula fed the rig's
 matrices (the joints' world matrices, the inverse bind matrices, the vertex, all mirrored) against the reader's posed vertex;

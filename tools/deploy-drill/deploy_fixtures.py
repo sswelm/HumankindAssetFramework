@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from fixtures import Buf, base, write_glb   # noqa: E402
 
 DEFAULT = "0|24|||||||0|||4|0|1"
+FLAT3_SEEDS = (6, 7, 14, 18, 20, 24)
 
 
 class Scene:
@@ -109,7 +110,26 @@ def cull(out):
     return s.write(out, "deploy_cull")
 
 
-def wall(out, links, pads, wrappers, name, small_classes=0):
+def flat3(out, seed):
+    """The review's (part 4): a part FLATTENED on one axis on frame 3 - a frame the cull does not sample - with a turned
+    child part and a grandchild. The parent's pose has no inverse there: Eigen's float32 determinant is exactly 0 and
+    Blender bakes zeros; a determinant in double did not cancel and gave NaN. Whether the float32 one cancels hangs on
+    the rotations: the seeds in main() are those of forty on which a double determinant bakes other keys."""
+    import random, math
+    r = random.Random(seed)
+    def rq():
+        q = [r.gauss(0, 1) for _ in range(4)]; n = math.sqrt(sum(c * c for c in q)); return [round(c / n, 4) for c in q]
+    s = Scene(); s.node("Hull", None, mesh=s.mesh("hull", 6.0))
+    p = s.node("Flat", None, mesh=s.mesh("flat", 1.0), translation=[1.0, 2.0, 0.5], rotation=rq())
+    s.anim(p, "scale", [0.0, 2 / 24.0, 3 / 24.0, 4 / 24.0, 1.0], [(1, 1, 1), (1, 1, 1), (1, 0, 1), (1, 1, 1), (1, 1, 1)])
+    c = s.node("Kid", p, mesh=s.mesh("kid", 0.5), translation=[0.5, 0.25, 0.125], rotation=rq())
+    s.anim(c, "translation", [0.0, 1.0], [(0.5, 0.25, 0.125), (0.5, 0.5, 0.125)])
+    g = s.node("GrandKid", c, mesh=s.mesh("gk", 0.5), translation=[0.125, 0.25, 0.375])
+    s.anim(g, "translation", [0.0, 1.0], [(0.125, 0.25, 0.375), (0.5, 0.25, 0.375)])
+    return s.write(out, "deploy_flat3_%d" % seed)
+
+
+def wall(out, links, pads, wrappers, name, small_classes=0, turning=False, crew=None):
     """Over the bone wall: chains of instanced parts ("Link.007": the script groups by the name before the first dot),
     a few of a class too small to merge, and animated wrappers no mesh hangs from."""
     s = Scene()
@@ -122,6 +142,25 @@ def wall(out, links, pads, wrappers, name, small_classes=0):
     chain("Link", links, 0.0); chain("Pad", pads, 1.0); chain("Few", 6, 2.0)
     for c in range(small_classes):
         chain("Class%d" % c, 7, 4.0 + c)
+    if crew is not None:
+        # an imported armature beside the parts, nothing hanging from its bones (crew: is a bone's SCALE animated?). The
+        # bake bakes it too - it is selected - and the scale-free step counts its curves and the importer's
+        rig = s.node("Rig", None, translation=[1.0, 6.0, -0.5], scale=[1.5, 1.5, 1.5])
+        j0 = s.node("J0", rig, translation=[0.0, 1.0, 0.0]); j1 = s.node("J1", j0, translation=[0.3, 1.2, 0.1], scale=[1.2, 0.8, 1.5])
+        _crew(s, rig, [j0, j1], "SoldierBody")
+        s.anim(j0, "rotation", [0.0, 1.0], [(0.0, 0.0, 0.0, 1.0), (0.0, 0.3826834, 0.0, 0.9238795)])
+        if crew:
+            s.anim(j1, "scale", [0.0, 1.0], [(1.2, 0.8, 1.5), (0.9, 1.4, 1.1)])
+    if turning:
+        # the bake's rotations on the contract path: a turret that turns right round (its quaternion changes sign on
+        # the way: make_compatible in the bake, the hemisphere rule in the delta-form rebase), a part turned at the
+        # bind frame, and a LEG - the rebase leaves every bone with "leg" in its name alone
+        t = s.node("Turret", None, mesh=m, translation=[2.0, 5.0, 0.0])
+        s.anim(t, "rotation", [0.0, 0.25, 0.5, 0.75, 1.0], [(0.0, 0.0, 0.0, 1.0), (0.0, 0.7071068, 0.0, 0.7071068), (0.0, 1.0, 0.0, 0.0), (0.0, 0.7071068, 0.0, -0.7071068), (0.0, 0.0, 0.0, -1.0)])
+        b = s.node("Barrel", t, mesh=m, translation=[0.5, 0.2, 0.0], rotation=[0.2588190, 0.0, 0.0, 0.9659258], scale=[1.0, 2.0, 0.5])
+        s.anim(b, "rotation", [0.0, 1.0], [(0.2588190, 0.0, 0.0, 0.9659258), (0.0, 0.0, 0.3826834, 0.9238795)])
+        leg = s.node("LandingLeg", None, mesh=m, translation=[-2.0, 5.0, 0.0], rotation=[0.0, 0.0, 0.3826834, 0.9238795])
+        s.anim(leg, "rotation", [0.0, 1.0], [(0.0, 0.0, 0.3826834, 0.9238795), (0.3826834, 0.0, 0.0, 0.9238795)])
     for i in range(wrappers):
         w = s.node("Wrap%d" % i, None, translation=[0.0, 3.0, 0.1 * i])
         s.anim(w, "translation", [0.0, 1.0], [(0.0, 3.0, 0.1 * i), (1.0, 3.0, 0.1 * i)])
@@ -318,15 +357,23 @@ def main(out):
     print("flatx_small|%s|%s" % (flatx(out, "deploy_flatx_small", 0.05), DEFAULT))
     print("flatx_big|%s|%s" % (flatx(out, "deploy_flatx_big", 3.0), DEFAULT))
     fb = bones(out)
-    print("bones|%s|%s" % (fb, DEFAULT))
+    # BAKELEFT: the scene before the bake is held; the bake re-bakes the imported armature these hang from - Blender's
+    print("BAKELEFT:bones|%s|%s" % (fb, DEFAULT))
     # the armature itself stripped: what hung from its bones is left as roots, where its own transform puts it
     print("bones_norig|%s|0|24|rig,soldier||||||0|||4|0|1" % fb)
-    print("frame1|%s|%s" % (frame1(out), DEFAULT))
-    print("nested|%s|%s" % (nested(out), DEFAULT))
+    print("BAKELEFT:frame1|%s|%s" % (frame1(out), DEFAULT))
+    print("BAKELEFT:nested|%s|%s" % (nested(out), DEFAULT))
+    for seed in FLAT3_SEEDS:
+        print("flat3_%d|%s|%s" % (seed, flat3(out, seed), DEFAULT))
+    # the contract path beside an imported armature: with a bone's scale animated, without, and with the armature stripped
+    fr = wall(out, 110, 30, 0, "deploy_wall_rig", crew=True)
+    print("wall_rig|%s|%s" % (fr, DEFAULT))
+    print("wall_rig_plain|%s|%s" % (wall(out, 110, 30, 0, "deploy_wall_rig_plain", crew=False), DEFAULT))
+    print("wall_rig_stripped|%s|0|24|rig,soldier,icosphere||||||0|||4|0|1" % fr)
     # a skinned mesh the strip leaves in: its bound_box is the deformed mesh's - left to Blender, by name
     print("LEFT:skinned|%s|0|24|zzz||||||0|||4|0|1" % small(out, "deploy_skinned", 1.0, skin=True))
     print("cull|%s|%s" % (cull(out), DEFAULT))
-    print("wall_budget|%s|%s" % (wall(out, 110, 30, 10, "deploy_wall"), DEFAULT))
+    print("wall_budget|%s|%s" % (wall(out, 110, 30, 10, "deploy_wall", turning=True), DEFAULT))
     # slimmed back under the wall: the legacy path after all, no merge
     print("wall_slim|%s|%s" % (wall(out, 90, 26, 10, "deploy_wall_slim"), DEFAULT))
     # exactly AT the wall, wrappers included: no slimming, the legacy path

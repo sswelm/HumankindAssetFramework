@@ -20,7 +20,7 @@ def main(out, dump, jobs):
             cur.append(line)
     def kinds(b):
         return {l.split("\t")[0] for l in b}
-    job = next((b for b in blocks if {"DONE", "RANGE", "PART", "BOX", "LOG"} <= kinds(b) and not b[0].startswith("JOB\tLEFT:")), None)
+    job = next((b for b in blocks if {"DONE", "RANGE", "PART", "BOX", "LOG"} <= kinds(b) and not b[0].startswith(("JOB\tLEFT:", "JOB\tBAKELEFT:"))), None)
     if job is None:
         raise ValueError("no complete job in the dump for the missing-record regressions")
     out = Path(out); out.mkdir(parents=True, exist_ok=True)
@@ -39,9 +39,16 @@ def main(out, dump, jobs):
     cuts = {"log": last("LOG"), "matrix": first("M"), "transform": first("T"), "box": first("BOX"), "object": first("OBJ"),
             "part": first("PART"), "range": first("RANGE"), "done": first("DONE"),
             "bone": first("RBONE"), "boneof": first("BONEOF"), "anchor": first("ANCHOR"), "hull": first("HULL"), "pinv": first("PINV")}
+    cuts.update({"curve": first("FC"), "log2": first("LOG2"), "act": first("ACT")})
     for mode, i in cuts.items():
         lines = list(job); del lines[i]
         write(mode, lines)
+    # a baked curve one key short, and one with the last bit of its last value turned
+    fc = first("FC")
+    lines = list(job); lines[fc] = job[fc].rsplit("\t", 1)[0]
+    write("key", lines)
+    lines = list(job); last = job[fc][-1]; lines[fc] = job[fc][:-1] + ("0" if last != "0" else "1")
+    write("value", lines)
     abort = next((b for b in blocks if "EXIT\t1" in b and "DONE" in kinds(b) and not b[0].startswith("JOB\tLEFT:")), None)
     if abort is None:
         raise ValueError("no abort job in the dump for the EXIT regressions")

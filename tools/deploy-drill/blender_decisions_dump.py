@@ -45,6 +45,8 @@ script, jobs = args[0], args[1]
 source = open(script, encoding="utf-8").read()
 cut = source.index("\nbpy.ops.nla.bake(")   # the armature, its constraints and the root-motion anchor are made; nothing is baked
 code = compile(source[:cut], script, "exec")
+cut2 = source.index("\n# --- 5a.")            # ... and then the bake, the scale-free step and the delta-form rebase
+code2 = compile(source[cut:cut2], script, "exec")
 fails = 0
 for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
     line = line.rstrip("\r")
@@ -102,6 +104,32 @@ for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
                 if o.type == 'MESH':
                     bb = [tuple(c) for c in o.bound_box]
                     print("BOX\t%s\t%s" % (o.name, "\t".join(h32(v) for v in (*map(min, *bb), *map(max, *bb)))))
+            # ---- stage 2 (part 4): the script goes on - the bake, the scale-free step, the delta-form rebase - up to
+            #      its `# --- 5a.`; what it printed there and the action it left: every fcurve, key by key
+            out2 = io.StringIO()
+            with contextlib.redirect_stdout(out2):
+                exec(code2, g)
+            for l in out2.getvalue().split("\n"):
+                if l.startswith("DEPLOY"):
+                    print("LOG2\t%s" % l)
+            arm = g["arm"]
+            act = arm.animation_data.action if arm.animation_data else None
+            print("ACT\t%s\t%s" % (act.name if act else "-", arm.parent.name if arm.parent else "-"))
+            if act is not None:
+                for layer in act.layers:
+                    for strip in layer.strips:
+                        for cb in strip.channelbags:
+                            for fc in cb.fcurves:
+                                kps = fc.keyframe_points
+                                print("FC\t%s\t%d\t%s\t%s" % (fc.data_path, fc.array_index, kps[0].interpolation if len(kps) else "-",
+                                                              "\t".join("%s:%s" % (h32(kp.co[0]), h32(kp.co[1])) for kp in kps)))
+            mw = arm.matrix_world
+            print("M2\t%s" % "\t".join(h32(mw[r][c]) for r in range(4) for c in range(4)))
+            # ... and the scene the bake leaves: every object's matrix_world again (the later steps read them)
+            bpy.context.view_layer.update()
+            for o in bpy.data.objects:
+                mw = o.matrix_world
+                print("O2\t%s\t%s" % (o.name, "\t".join(h32(mw[r][c]) for r in range(4) for c in range(4))))
         print("DONE\t%s" % key, flush=True)
     except Exception as e:
         traceback.print_exc()
