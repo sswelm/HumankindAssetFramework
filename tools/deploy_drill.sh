@@ -43,7 +43,7 @@ WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"; WTMP="$(cygpath -m "$TMP
 E="$WROOT/editor"
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -optimize+ -out:"$WTMP/deploy.exe" \
   -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
-  "$WROOT/tools/deploy-drill/DeployDrill.cs" \
+  "$WROOT/tools/deploy-drill/DeployDrill.cs" "$WROOT/tools/deploy-drill/DecisionsDrill.cs" "$E/BlenderDeploy.cs" "$E/BlenderExportTree.cs" \
   "$E/HafModel.cs" "$E/GlbReader.cs" "$E/HafTransforms.cs" "$E/BlenderNames.cs" "$E/BlenderPosedState.cs" "$E/BlenderTrig.cs" "$E/BlenderEigen.cs" "$E/BlenderMesh.cs" "$E/BMesh.cs" "$E/BlenderColor.cs" \
   "$E/VehicleProbe.cs" "$E/VehicleProbe.Visibility.cs" "$E/VehicleProbe.Islands.cs" "$E/VehicleProbe.InsideOut.cs" \
   "$E/VehicleProbe.BlenderWorld.cs" "$E/VehicleProbe.BlenderSkin.cs" "$E/VehicleProbe.CustomNormals.cs" "$E/VehicleProbe.Merge.cs" "$E/VehicleProbe.BlenderArmature.cs" 2>&1); rc=$?
@@ -124,3 +124,58 @@ echo "PASS — deploy drill rejects missing matrices, one or all properties, emp
 
 n_prop=$(echo "$TOTAL" | awk '{print $13}')
 echo "PASS — deploy drill, the posed state: $n_mat object matrices of $n_files files, at up to thirteen frames each, equal to Blender's bit for bit - the sign of a zero included - and $n_prop evaluated location/rotation/scale sets; $n_left files left to Blender by name (Blender took $((t1 - t0)) s, the comparison $((t2 - t1)) s, in $JOBS processes each); ${#FIXTURES[@]} fixtures, $NOTE_SOURCES"
+
+# PART 2, THE DECISIONS (2026-10-10): what deploy_convert.py decides before it builds anything - the strip, the frame
+# range, the unit normalization, the parts, the bone slimming, the path, the degenerate cull, the bone budget.
+# tools/deploy-drill/blender_decisions_dump.py runs THE SCRIPT ITSELF, cut where it starts on the armature, for every
+# job: the project's recorded conversions (Assets/FactorySource/*/deploy_converted.args.txt - the source and the
+# arguments the Factory gave) and the fixtures of tools/deploy-drill/deploy_fixtures.py (each branch no recorded job
+# takes). BlenderDeploy.Decide is then held to the script's own log lines, its decisions and the scene it left: every
+# object's matrix, transform and bound box, as bits. A job the jobs file marks LEFT: must come out left to Blender, and
+# no other may - a wrong decision that ends in a fallback is a failure. A recorded job whose source is gone is named.
+KNOWN_LEFT="DugoutCanoe"   # objects under animated bones: the armature's pose is not modelled yet
+: > "$TMPD/jobs.txt"; n_rec=0; MISSING=""
+if [ -n "$PACK" ]; then
+  for a in "$PROJECT"/Assets/FactorySource/*/deploy_converted.args.txt; do
+    [ -f "$a" ] || continue
+    key=$(basename "$(dirname "$a")"); line=$(head -1 "$a" | tr -d '\r'); src=${line%%|*}
+    if [ ! -f "$src" ]; then MISSING="$MISSING $key"; continue; fi
+    rest=$(printf '%s' "$line" | cut -d'|' -f4-)
+    case " $KNOWN_LEFT " in *" $key "*) key="LEFT:$key";; esac
+    printf '%s|%s|%s\n' "$key" "$src" "$rest" >> "$TMPD/jobs.txt"; n_rec=$((n_rec + 1))
+  done
+fi
+python "$ROOT/tools/deploy-drill/deploy_fixtures.py" "$WTMP/deploy_fixtures" | tr -d '\r' > "$TMPD/jobs_fx.txt" || { echo "FAIL — could not write the deploy fixtures"; exit 1; }
+n_fx=$(grep -c "" "$TMPD/jobs_fx.txt"); [ "$n_fx" -gt 0 ] || { echo "FAIL — the deploy fixtures gave no job"; exit 1; }
+cat "$TMPD/jobs_fx.txt" >> "$TMPD/jobs.txt"
+n_jobs=$(grep -c "" "$TMPD/jobs.txt")
+t3=$(date +%s)
+"$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_decisions_dump.py")" -- "$WROOT/editor/Tools~/deploy_convert.py" "$WTMP/jobs.txt" > "$TMPD/decisions_raw.txt" 2>&1; drc=$?
+t4=$(date +%s)
+tr -d '\r' < "$TMPD/decisions_raw.txt" | grep -E "^(JOB|LOG|EXIT|RANGE|NORM|FLAG|PART|BAD|ALIAS|OBJ|M|T|BOX|DONE|FAIL)	" > "$TMPD/decisions.txt"
+n_done=$(grep -c "^DONE" "$TMPD/decisions.txt")
+if [ "$drc" -ne 0 ] || [ "$n_done" -ne "$n_jobs" ]; then
+  grep -E "^FAIL|Traceback|Error" "$TMPD/decisions_raw.txt" | head -8
+  echo "FAIL — deploy drill: Blender ran the script for $n_done of $n_jobs jobs (exit $drc)"; exit 1
+fi
+"$TMPD/deploy.exe" --decisions "$WTMP/jobs.txt" "$WTMP/decisions.txt" > "$TMPD/dec_raw.txt" 2>&1; rc2=$?
+tr -d '\r' < "$TMPD/dec_raw.txt" > "$TMPD/dec.txt"
+grep -E "^FAIL|^LEFT|^COVER" "$TMPD/dec.txt"
+TOTAL2=$(grep -E "^TOTAL" "$TMPD/dec.txt" | tail -1); echo "$TOTAL2"
+[ -n "$TOTAL2" ] || { tail -5 "$TMPD/dec.txt"; echo "FAIL — deploy drill: the decisions gave no total (rc=$rc2)"; exit 1; }
+[ "$rc2" -eq 0 ] || { echo "FAIL — deploy drill: the decisions here differ from deploy_convert.py's"; exit 1; }
+UNCOVERED=$(grep -E "^COVER 0 " "$TMPD/dec.txt" | cut -d' ' -f3- | paste -sd';' -)
+[ -z "$UNCOVERED" ] || { echo "FAIL — deploy drill: no compared job exercised: $UNCOVERED (a branch the script did not judge; add it to tools/deploy-drill/deploy_fixtures.py)"; exit 1; }
+# negative guards on the REAL dump: evidence taken away must not pass as equality
+python "$ROOT/tools/deploy-drill/missing_decisions.py" "$WTMP/missing_dec" "$WTMP/decisions.txt" || { echo "FAIL — could not construct the missing-decision regressions"; exit 1; }
+for mode in log matrix transform box object part range done; do
+  "$TMPD/deploy.exe" --decisions "$WTMP/jobs.txt" "$WTMP/missing_dec/$mode.txt" > "$TMPD/missing_dec_$mode.txt" 2>&1; badrc=$?
+  if [ "$badrc" -ne 1 ] || ! grep -qE "^FAIL " "$TMPD/missing_dec_$mode.txt"; then
+    cat "$TMPD/missing_dec_$mode.txt" | head -5
+    echo "FAIL — deploy drill accepted a dump with a missing $mode row (rc=$badrc)"; exit 1
+  fi
+done
+echo "PASS — deploy drill rejects a decisions dump without a log line, a matrix, a transform, a box, an object, a part, the range or the end row"
+n_j=$(echo "$TOTAL2" | awk '{print $3}'); n_l=$(echo "$TOTAL2" | awk '{print $7}'); n_o=$(echo "$TOTAL2" | awk '{print $9}'); n_ln=$(echo "$TOTAL2" | awk '{print $13}')
+NOTE_MISSING=""; [ -z "$MISSING" ] || NOTE_MISSING="; recorded jobs whose source file is GONE, not judged:$MISSING"
+echo "PASS — deploy drill, the decisions: $n_j jobs ($n_rec recorded conversions, $n_fx fixture jobs) decided as deploy_convert.py decides them - $n_ln log lines to the letter, the parts, the cull and the merges, and $n_o objects with their matrices, transforms and bound boxes to the bit; $n_l jobs left to Blender as marked (Blender took $((t4 - t3)) s)$NOTE_MISSING"

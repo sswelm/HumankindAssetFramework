@@ -454,6 +454,55 @@ difference); a scale key of zero (no file and no fixture has one); the frames in
 `BKE_object_apply_mat4`, the frame range is per ACTION (a stripped object's slot, bones and weights count) and is cut
 by `int()`. Next: the conversion's decisions against the script's own `DEPLOY` log lines.
 
+**Replacing `deploy_convert.py`, part 2: the decisions** (2026-10-10). Everything the script decides before it builds
+the armature: what the strip leaves, the frame range, the unit normalization, which objects are parts, the bone
+slimming, the legacy or contract path, the degenerate cull, the bone-budget pair-merge, the stop when no part is left
+(`BlenderDeploy.Decide`). The oracle is THE SCRIPT ITSELF: `tools/deploy-drill/blender_decisions_dump.py` executes
+`deploy_convert.py` cut at the line where it starts on the armature, so no rule is restated on Blender's side, and
+writes what it printed, what its variables hold and the scene it left. The second half of `tools/deploy_drill.sh`
+compares, per job: the log lines to the letter (Python's `%.3f` is an exact half-to-even rounding - `PyFormat.Fixed`;
+`%-40s` pads by code point; the culled names are a Python `repr`), the frame range, the normalization's five numbers
+as the bits of each double, the path, the parts with their parents in the script's order, the culled parts, the
+merges, and EVERY object left - order, type, parent, datablock name, action - with its `matrix_world`, its location,
+rotation and scale and a mesh object's `bound_box`, as bits. The jobs: the project's recorded conversions
+(`Assets/FactorySource/*/deploy_converted.args.txt`: the source and the arguments the Factory gave) and 43 fixture
+jobs (`deploy_fixtures.py`, `deploy_fixtures_review.py`). 47 jobs, 1,037 log lines, 1,997 objects equal; the
+helicopter, the towed howitzer and the T-62 (1,179 objects, slimmed from 1,032 parts to 139 and merged to 124)
+matched on the first run.
+
+What the scene does, measured and read from Blender's source: `bpy.data.objects` is ordered by name, the UTF-8 bytes
+as unsigned values with upper-case ASCII folded - the order of the survivors, the parts, the roots;
+`bpy.data.objects.remove` leaves a removed object's children as ROOTS with their own transform, and its name free;
+the importer's bone shape (`Icosphere`, radius 1 at the origin) is a mesh object like any other - the canoe's strip
+list does not name it, and its vertical offset of 1.00 is that radius; `o.matrix_world = keep` is
+`BKE_object_apply_mat4` - the parent's inverse, `mat4_to_loc_rot_size`, `mat3_normalized_to_quat`: the object's
+transform is REPLACED by a decomposition (a mirrored root comes out with three negative sizes, a sheared one
+changed); mathutils sums a `Matrix @ Vector` row in a double over float32 products, and `Vector.length` is the double
+root of a double sum taken from the last component.
+
+*Review before the PR* (an independent source-reading agent, 31 fixture jobs of its own): eight defects, each
+executed. Two reach a plausible model. A mesh with MORPH TARGETS: `bound_box` is the evaluated mesh, shape keys
+applied, and the port read the base positions (`dim 4.000` here, `31.000` in Blender) - now left to Blender. Names
+past ASCII: the order came from `BlenderExportTree.StrCaseCmp`, which reads the bytes as SIGNED and put `Émile`
+first where Blender has it last - `BlenderDeploy.IdNameCmp` now (the exporter's child order uses the signed one and
+was never measured on such names: open, in the backlog). Then: a node outside the scene the file names is in an
+excluded collection and frozen where the import left it (left to Blender); `EXT_mesh_gpu_instancing` makes an object
+per instance (left); the normalization root's name after a strip took an object of that name; `%-40s` by code point;
+the culled list's order by code point and its `repr`. Its fixtures are in the gate.
+
+A job may fall back to Blender only where the jobs file marks it `LEFT:` - the first plant run had SEVERAL wrong strip
+rules end in a fallback and pass. Marked: the dugout canoe (ten objects hang from animated bones: the armature's pose
+is not modelled), a skinned survivor, the morph, scene and instancing fixtures. 54 of 55 planted defects fail; with
+the fallbacks planted away, each of those jobs fails too, so every fallback is needed. NOT caught: whether the pose
+hears of the transform the script writes (`Pose.Write`) - it can differ only in the sign of a zero and no fixture
+tells the two apart. Not judged: `SiegeHowitzersCar` (its source, `D:/Downloads/m114_howitzer_in_action.glb`, is
+gone; the drill names it - the same model at another path is `TowedGunHowitzers`). Not held, to know: a name with a
+TAB (the dump is tab-separated; `BlenderDeployTests` holds the `repr`); a zero-key sampler (invalid glTF: Blender
+still gives the object an action); the cull's parent inverse asks a double determinant "is it singular" where
+Eigen's is float32; lights and cameras that survive are left to Blender unjudged. The gate removes a log line, a
+matrix, a transform, a box, an object, a part, the range or the end row from the real dump: each must fail. Next:
+the armature's pose (the canoe), then part 3, the armature's rest and the binding.
+
 **The Clip Range picker's in-process rig** (step 4, 2026-10-03): `HafUnityFrameTests` hold the preview frame's arithmetic
 without Unity — the X mirror's conjugation of rotations, matrices and matrix nodes; Unity's skinning formula fed the rig's
 matrices (the joints' world matrices, the inverse bind matrices, the vertex, all mirrored) against the reader's posed vertex;

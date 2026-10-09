@@ -59,6 +59,7 @@
     <Compile Include="..\editor\BlenderEigen.cs" Link="BlenderEigen.cs" />
     <Compile Include="..\editor\BlenderPrep.cs" Link="BlenderPrep.cs" />
     <Compile Include="..\editor\BlenderPosedState.cs" Link="BlenderPosedState.cs" />
+    <Compile Include="..\editor\BlenderDeploy.cs" Link="BlenderDeploy.cs" />
   </ItemGroup>
 
   <!-- compile-time references the TEST code uses directly -->

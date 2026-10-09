@@ -124,6 +124,9 @@ public static class BlenderPosedState
         readonly Dictionary<int, float[][]> held = new Dictionary<int, float[][]>();
         public Pose(Action a, HafModel m) { action = a; model = m; }
 
+        /// <summary>A script wrote the object's transform (`o.matrix_world = m`): what the next frame's values meet.</summary>
+        public void Write(int node, float[] loc, float[] quat, float[] scale) { held[node] = new[] { (float[])loc.Clone(), (float[])quat.Clone(), (float[])scale.Clone() }; }
+
         /// <summary>frame_set: what VehicleProbe.BlenderWorldMatrices takes for this frame. The frames must be given
         /// in the order Blender is given them.</summary>
         public Func<int, float[][]> FrameSet(float frame)
@@ -137,8 +140,8 @@ public static class BlenderPosedState
                 if (p == null) return now[node] = null;
                 if (!held.TryGetValue(node, out var h))
                 {
-                    VehicleProbe.BlenderTrs(model.Nodes[node], out var l, out var q, out var s);
-                    held[node] = h = new[] { MulQtV3(IdentityQuat, l), MulQtQt(MulQtQt(IdentityQuat, q), IdentityQuat), new[] { IdentityRow(s[0], s[1], s[2], 0), IdentityRow(s[0], s[1], s[2], 1), IdentityRow(s[0], s[1], s[2], 2) } };
+                    ImportedTrs(model.Nodes[node], out var l, out var q, out var s);
+                    held[node] = h = new[] { l, q, s };
                 }
                 for (int k = 0; k < 3; k++)
                 {
@@ -222,7 +225,8 @@ public static class BlenderPosedState
             float first = curves[0].Frames[0], last = curves[0].Frames[keys - 1];
             if (!any) { lo = first; hi = last; any = true; } else { lo = Math.Min(lo, first); hi = Math.Max(hi, last); }
         }
-        a.FrameStart = lo; a.FrameEnd = hi;
+        // get_frame_range_of_fcurves (animrig action.cc): held within the frames Blender has, +-1048574
+        a.FrameStart = Math.Max(lo, -1048574f); a.FrameEnd = Math.Min(hi, 1048574f);
         // the pointer's reason stands over a cubic sampler's: it takes the range and the touched objects with it
         if (m.ExtensionsUsed.Contains("KHR_animation_pointer")) { a.NotModelled = "KHR_animation_pointer - the importer animates through pointers this does not read"; a.RangeAndTouchedKnown = false; }
         return a;
@@ -255,6 +259,15 @@ public static class BlenderPosedState
 
     static readonly float[] IdentityQuat = { 1f, 0f, 0f, 0f };
 
+    /// <summary>A node's location, quaternion (w, x, y, z) and scale as the importer SETS them on the object (vnode.trs()):
+    /// get_node_trs through the same corrections as a key.</summary>
+    internal static void ImportedTrs(HafNode node, out float[] loc, out float[] quat, out float[] scale)
+    {
+        VehicleProbe.BlenderTrs(node, out var l, out var q, out var s);
+        loc = MulQtV3(IdentityQuat, l); quat = MulQtQt(MulQtQt(IdentityQuat, q), IdentityQuat);
+        scale = new[] { IdentityRow(s[0], s[1], s[2], 0), IdentityRow(s[0], s[1], s[2], 1), IdentityRow(s[0], s[1], s[2], 2) };
+    }
+
     /// <summary>mul_qt_v3 (mathutils' Quaternion @ Vector), float32 term by term.</summary>
     static float[] MulQtV3(float[] q, float[] v)
     {
@@ -272,7 +285,7 @@ public static class BlenderPosedState
     }
 
     /// <summary>mul_qt_qtqt (mathutils' Quaternion @ Quaternion), float32 term by term.</summary>
-    static float[] MulQtQt(float[] a, float[] b)
+    internal static float[] MulQtQt(float[] a, float[] b)
     {
         return new[]
         {

@@ -66,6 +66,8 @@ public static class BlenderNames
         public List<string> ObjectsInOrder = new List<string>();
         /// <summary>The bone-shape objects the importer added (one per armature): "Icosphere", "Icosphere.001", ...</summary>
         public List<string> BoneShapes = new List<string>();
+        /// <summary>... and the name of each one's mesh datablock.</summary>
+        public List<string> BoneShapeData = new List<string>();
         /// <summary>Per glTF node: whether the importer made it a BONE, and then its parent in the importer's tree -
         /// a node index, or -1 for the dummy root (the parent of a chain's first bone is its armature).</summary>
         public bool[] IsBone; public int[] BoneParent;
@@ -96,6 +98,7 @@ public static class BlenderNames
     public sealed class BlenderObject
     {
         public string Name, Parent, ParentBone;
+        public string DataName;          // its datablock's name (the mesh, the armature, the camera), or null for an empty
         public ObjectKind Kind;
         public int GltfNode = -1;        // the glTF node that became it, or -1 for a vnode the importer made (".skinned", ".mesh", ".camera")
         public int MeshNode = -1;        // the glTF node whose mesh it carries, or -1
@@ -241,6 +244,7 @@ public static class BlenderNames
                         }
                     }
                     r.MeshDatablockNode[n.MeshNode] = meshDataNode[(meshIdx, skin)];
+                    bo.DataName = data;
                     name = objects.Unique(n.Name ?? data);
                     r.MeshObjectOfNode[n.MeshNode] = name;
                     r.MeshObjectsInOrder.Add((n.MeshNode, name));
@@ -251,8 +255,9 @@ public static class BlenderNames
                     name = objects.Unique(n.Name ?? data);
                     r.BoneShapes.Add(objects.Unique("Icosphere"));   // armature_display: the bone-shape object, one per armature
                     r.ObjectsInOrder.Add(r.BoneShapes[r.BoneShapes.Count - 1]);
-                    meshes.Unique("Icosphere");   // ... and its mesh DATABLOCK: a glTF mesh named Icosphere, made after it, is Icosphere.001 - and names its nameless node so
+                    r.BoneShapeData.Add(meshes.Unique("Icosphere"));   // ... and its mesh DATABLOCK: a glTF mesh named Icosphere, made after it, is Icosphere.001 - and names its nameless node so
                     armaName[id] = name; r.ArmaturesInOrder.Add((Index(id), name));
+                    bo.DataName = data;
                     // create_bones: every bone under this armature, depth-first, unique within it
                     var bones = new HashSet<string>(StringComparer.Ordinal);
                     void Bones(string bid)
@@ -269,6 +274,7 @@ public static class BlenderNames
                     string camName = (GlbReader.ParseObject(cam)["name"]?.ToString() is string cn && cn.Length > 0) ? cn : "Camera";
                     string camData = cameras.Unique(camName);   // ALWAYS made, so always reserved: a named node skipping it left "Lens" free for the next camera, and a mesh node named Lens became Lens.001
                     name = objects.Unique(n.Name ?? camData);
+                    bo.DataName = camData;
                 }
                 else name = objects.Unique(n.Name ?? n.DefaultName);
                 r.ObjectsInOrder.Add(name);

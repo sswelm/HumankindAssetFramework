@@ -503,7 +503,7 @@ public static partial class VehicleProbe
     /// <summary>The vertices of a primitive as Blender's importer keeps them: the indices its faces, lines or points
     /// USE, unique and ascending (np.unique over the indices; a vertex nothing uses is never imported - the interleaved
     /// fixture's two primitives share one vertex array and each keeps its own six of eight). Non-indexed: all of them.</summary>
-    static int[] Used(HafPrimitive p)
+    internal static int[] Used(HafPrimitive p)
     {
         if (usedCache != null && usedCache.TryGetValue(p, out var cached)) return cached;
         int[] result;
