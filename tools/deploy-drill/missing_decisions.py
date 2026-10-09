@@ -49,6 +49,11 @@ def main(out, dump, jobs):
     write("key", lines)
     lines = list(job); last = job[fc][-1]; lines[fc] = job[fc][:-1] + ("0" if last != "0" else "1")
     write("value", lines)
+    # a location curve labelled with a component a location does not have (3): it must not land in the quaternion's slot
+    loc = next(i for i, l in enumerate(job) if l.startswith("FC" + "\t") and l.split("\t")[1].endswith(".location") and l.split("\t")[2] == "0")
+    t = job[loc].split("\t"); t[2] = "3"
+    lines = list(job); lines[loc] = "\t".join(t)
+    write("index", lines)
     abort = next((b for b in blocks if "EXIT\t1" in b and "DONE" in kinds(b) and not b[0].startswith("JOB\tLEFT:")), None)
     if abort is None:
         raise ValueError("no abort job in the dump for the EXIT regressions")

@@ -84,6 +84,9 @@ public static class BlenderDeploy
         //      (w, x, y, z) 4, scale 3 - as the action holds them when the script reaches its step 5a
         public readonly Dictionary<string, float[][]> Keys = new Dictionary<string, float[][]>(StringComparer.Ordinal);
         public bool ScaleKeys = true;                             // false on the contract path: the scale curves are stripped
+        // the frames the bake keyed: FrameMin..FrameMax as the bake operator takes them - its frame_end is at least 1,
+        // so a clip whose whole range is frame 0 is baked on frames 0 AND 1
+        public int BakeFrameMin, BakeFrameMax;
         public readonly List<string> BakeLog = new List<string>();
     }
 
@@ -488,12 +491,18 @@ public static class BlenderDeploy
 
         // ---- 5. the bake (bpy.ops.nla.bake, visual keying, bake_types POSE): every frame the pose each bone's Copy
         //      Transforms gives it, brought into the bone's own space; then, bone by bone, decomposed into keys
-        int nf = fmax - fmin + 1, nb = r.Bones.Count;
+        // NLA_OT_bake's own limits: frame_start is an IntProperty of 0..300000, frame_end of 1..300000, and a value
+        // outside is CLAMPED. A clip whose keys all sit within frame 0 has the range 0..0 and is baked on frames 0 and 1
+        // (measured; review of PR #137). The rebase below still runs over fmin..fmax, so the extra key stays as baked.
+        if (fmin < 0 || fmax > 300000) { r.Fallback = $"a frame range the bake operator clamps ({fmin}..{fmax}: its frame_start is 0..300000)"; return r; }
+        int bakeEnd = Math.Max(fmax, 1);
+        r.BakeFrameMin = fmin; r.BakeFrameMax = bakeEnd;
+        int nf = bakeEnd - fmin + 1, nb = r.Bones.Count, nRebase = fmax - fmin + 1;
         var order = new List<int>();   // a parent before its children
         { var seen = new bool[nb]; void Visit(int i) { if (seen[i]) return; seen[i] = true; if (r.Bones[i].Parent != null) Visit(r.Bones.IndexOf(r.Bones[i].Parent)); order.Add(i); } for (int i = 0; i < nb; i++) Visit(i); }
         var parentIndex = r.Bones.Select(b => b.Parent != null ? r.Bones.IndexOf(b.Parent) : -1).ToArray();
         var bakedBasis = new float[nb][][]; for (int i = 0; i < nb; i++) bakedBasis[i] = new float[nf][];
-        for (int f = fmin; f <= fmax; f++)
+        for (int f = fmin; f <= bakeEnd; f++)
         {
             FrameSet(f);
             var armInv = BlenderEigen.InvertM4(arm.World);   // world_to_object
@@ -561,8 +570,8 @@ public static class BlenderDeploy
                 var m0i = VehicleProbe.Inverted(VehicleProbe.TranslationRotation(l0, n0));
                 if (m0i == null) { r.Fallback = $"the delta-form rebase: bone '{bone.Name}' has no inverse at the bind frame (the script fails on it)"; return r; }
                 float[] prevQ = null;
-                var rebasedKeys = new float[nf][];
-                for (int k = 0; k < nf; k++)
+                var rebasedKeys = (float[][])keys.Clone();   // a key past fmax..: the bake's extra frame is not rebased
+                for (int k = 0; k < nRebase; k++)
                 {
                     float[] lf = { keys[k][0], keys[k][1], keys[k][2] }, qf = { keys[k][3], keys[k][4], keys[k][5], keys[k][6] };
                     if (Magnitude(qf) < 1e-6) qf = new[] { 1f, 0f, 0f, 0f };

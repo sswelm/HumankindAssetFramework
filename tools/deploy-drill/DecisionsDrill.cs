@@ -18,7 +18,7 @@ static class DecisionsDrill
         "no object with an action left (frame range 1..1)", "normalization: x100", "normalization: recentered", "normalization: none",
         "bone slimming", "the legacy path", "the contract path", "a culled part", "a culled part's descendant", "a pair-merge", "the script stops (no animated part)",
         "the recoil step off with a recoil range given", "left to Blender (BlenderDeploy.Fallback)", "an armature that is a part (its bones are animated)", "left to Blender at the bake (the scene before it is held)",
-        "a bake on the legacy path", "a bake on the contract path (scale curves stripped, delta-form rebase)",
+        "a bake on the legacy path", "a clip of frame 0 alone (the bake keys frame 1 too)", "a bake on the contract path (scale curves stripped, delta-form rebase)",
         "no static mesh (StaticRoot has no anchor)", "StaticRoot anchored to a mesh that has no parent", "StaticRoot anchored to a static mesh's parent",
         "a root-motion anchor (the armature parented for the bake)", "the biggest part does not travel (no anchor)", "no mesh rides a bone (no travel measured)",
         "a bone under its part's parent's bone", "a part whose parent is no part (a root bone)",
@@ -51,7 +51,7 @@ static class DecisionsDrill
         {
             string key = block[0].Split('\t')[1];
             files++;
-            var problems = new List<string>(); string bakeLeftReason = null;
+            var problems = new List<string>(); string bakeLeftReason = null; bool bakeClamped = false;
             try
             {
                 if (!jobs.TryGetValue(key, out var job)) throw new InvalidDataException("the dump has a job the jobs file does not");
@@ -161,7 +161,8 @@ static class DecisionsDrill
                     var fcs = Of("FC");
                     var seenCurves = new HashSet<string>(StringComparer.Ordinal);
                     long wrongKeys = 0, wrongCurves = 0; string firstKey = null;
-                    int nf = r.FrameMax - r.FrameMin + 1;
+                    int nf = baked.BakeFrameMax - baked.BakeFrameMin + 1;
+                    if (baked.BakeFrameMax != r.FrameMax) bakeClamped = true;
                     foreach (var t in fcs)
                     {
                         // pose.bones["<name, escaped>"].<channel>
@@ -170,6 +171,8 @@ static class DecisionsDrill
                         if (!t[1].StartsWith(head, StringComparison.Ordinal) || close < 0) throw new InvalidDataException($"the dump has a curve that is no pose bone's: {t[1]}");
                         string bone = t[1].Substring(head.Length, close - head.Length).Replace("\\\"", "\"").Replace("\\\\", "\\"), channel = t[1].Substring(close + 3);
                         int index = int.Parse(t[2]);
+                        // the component index must be one the channel has: location[3] would otherwise land in the quaternion's slot
+                        if (index < 0 || index >= (channel == "rotation_quaternion" ? 4 : 3)) throw new InvalidDataException($"the dump has a curve with a component its channel does not have: {t[1]}[{index}]");
                         int at = channel == "location" ? index : channel == "rotation_quaternion" ? 3 + index : channel == "scale" ? 7 + index : -1;
                         if (at < 0) throw new InvalidDataException($"the dump has a curve of an unknown channel: {t[1]}");
                         if (!seenCurves.Add(bone + "\t" + at)) throw new InvalidDataException($"the dump has a curve twice: {t[1]}[{index}]");
@@ -180,11 +183,11 @@ static class DecisionsDrill
                         for (int k = 0; k < nf; k++)
                         {
                             keysCompared++;
-                            string mine = H((float)(r.FrameMin + k)) + ":" + H(keys[k][at]);
+                            string mine = H((float)(baked.BakeFrameMin + k)) + ":" + H(keys[k][at]);
                             if (mine != t[4 + k])
                             {
                                 wrongKeys++;
-                                if (firstKey == null) { var th = t[4 + k].Split(':'); firstKey = $"'{bone}' {channel}[{index}] at frame {r.FrameMin + k}: here {Show(keys[k][at])} ({H(keys[k][at])}), Blender {Show(F(th[1]))} ({th[1]})"; }
+                                if (firstKey == null) { var th = t[4 + k].Split(':'); firstKey = $"'{bone}' {channel}[{index}] at frame {baked.BakeFrameMin + k}: here {Show(keys[k][at])} ({H(keys[k][at])}), Blender {Show(F(th[1]))} ({th[1]})"; }
                             }
                         }
                     }
@@ -260,7 +263,8 @@ static class DecisionsDrill
                     if (r.Bones.Any(b => b.Part != null && b.Part.Parent != null && b.Parent == null)) cover["a part whose parent is no part (a root bone)"]++;
                 }
                 if (bakeLeftReason != null) { cover["left to Blender at the bake (the scene before it is held)"]++; Console.WriteLine($"BAKELEFT {key}: {bakeLeftReason}"); }
-                else if (!r.Exit) cover[r.Legacy ? "a bake on the legacy path" : "a bake on the contract path (scale curves stripped, delta-form rebase)"]++;
+                if (bakeClamped) cover["a clip of frame 0 alone (the bake keys frame 1 too)"]++;
+                if (bakeLeftReason == null && !r.Exit) cover[r.Legacy ? "a bake on the legacy path" : "a bake on the contract path (scale curves stripped, delta-form rebase)"]++;
                 Console.WriteLine(r.Exit ? $"PASS {key}: {log.Count} log lines equal to Blender's, and the script stops there as it does here (no scene is compared)"
                                          : $"PASS {key}: {log.Count} log lines, {r.Parts.Count} parts, {r.Objects.Count} objects with their matrices, transforms and boxes equal to Blender's");
             }

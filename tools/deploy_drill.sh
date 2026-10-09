@@ -204,7 +204,7 @@ for control in missing exit; do
     echo "FAIL — deploy drill rejected the intact $control control (rc=$controlrc)"; exit 1
   fi
 done
-for mode in log matrix transform box object part range done bone boneof anchor hull pinv curve key value log2 act; do
+for mode in log matrix transform box object part range done bone boneof anchor hull pinv curve key value log2 act index; do
   case "$mode" in
     log) reason="log line";;
     matrix|transform|box) reason="no complete $mode row";;
@@ -222,6 +222,7 @@ for mode in log matrix transform box object part range done bone boneof anchor h
     value) reason="baked keys";;
     log2) reason="bake log line";;
     act) reason="no single ACT and M2 row";;
+    index) reason="a component its channel does not have";;
   esac
   "$TMPD/deploy.exe" --decisions "$WTMP/missing_dec/missing_jobs.txt" "$WTMP/missing_dec/$mode.txt" > "$TMPD/missing_dec_$mode.txt" 2>&1; badrc=$?
   if [ "$badrc" -ne 1 ] || ! grep -E "^FAIL " "$TMPD/missing_dec_$mode.txt" | grep -qF "$reason"; then
@@ -236,7 +237,7 @@ for mode in exit_zero exit_short exit_duplicate; do
     echo "FAIL — deploy drill accepted an invalid abort record ($mode, rc=$badrc)"; exit 1
   fi
 done
-echo "PASS — deploy drill rejects a decisions dump without a log line, a matrix, a transform, a box, an object, a part, the range, the end row, a bone, a part's bone, the anchors, the parent inverse, a baked curve, a key, the bake's log line or the action row - and one with a baked value changed by one bit"
+echo "PASS — deploy drill rejects a decisions dump without a log line, a matrix, a transform, a box, an object, a part, the range, the end row, a bone, a part's bone, the anchors, the parent inverse, a baked curve, a key, the bake's log line or the action row - and one with a baked value changed by one bit or a curve under a component its channel does not have"
 echo "PASS — deploy drill accepts intact single-job controls and rejects a successful, truncated or duplicated abort record"
 n_j=$(echo "$TOTAL2" | awk '{print $3}'); n_l=$(echo "$TOTAL2" | awk '{print $7}'); n_o=$(echo "$TOTAL2" | awk '{print $9}'); n_ln=$(echo "$TOTAL2" | awk '{print $13}'); n_bones=$(echo "$TOTAL2" | awk '{print $15}'); n_keys=$(echo "$TOTAL2" | awk '{print $19}'); n_after=$(echo "$TOTAL2" | awk '{print $21}'); n_bl=$(grep -c "^BAKELEFT " "$TMPD/dec.txt")
 NOTE_MISSING=""; [ -z "$MISSING" ] || NOTE_MISSING="; recorded jobs whose source file is GONE, not judged:$MISSING"

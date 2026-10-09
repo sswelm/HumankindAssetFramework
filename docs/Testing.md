@@ -614,6 +614,14 @@ another armature is baked first); a quaternion's magnitude within an ulp of the 
 takes a curve, a key, the bake's log line or the action row out of the real dump and turns one bit of a baked value:
 each must fail. Next: the re-bake of a surviving imported armature (the canoe), then the script's steps 5a-5d.
 
+*Review of PR #137* (ChatGPT, two findings, both executed here): (1) the bake OPERATOR has its own frame limits -
+`frame_start` is an IntProperty of 0..300000, `frame_end` of 1..300000, and a value outside is clamped: a clip whose
+keys all sit within frame 0 has the range 0..0 and Blender bakes frames 0 AND 1 (two keys a curve; the port baked
+one). `Result.BakeFrameMin/Max` now; the rebase still runs over the script's own 0..0, so on the contract path the
+extra key stays as baked. Fixtures `frame0_one`, `frame0_two`, `wall_frame0`; a range below 0 or past 300000 is left
+to Blender. (2) the drill placed a curve by its channel and component index without checking the index: `location[3]`
+would have landed in the quaternion's slot - refused now, and the gate plants it. Both variants planted: caught.
+
 **The Clip Range picker's in-process rig** (step 4, 2026-10-03): `HafUnityFrameTests` hold the preview frame's arithmetic
 without Unity — the X mirror's conjugation of rotations, matrices and matrix nodes; Unity's skinning formula fed the rig's
 matrices (the joints' world matrices, the inverse bind matrices, the vertex, all mirrored) against the reader's posed vertex;

@@ -110,6 +110,13 @@ def cull(out):
     return s.write(out, "deploy_cull")
 
 
+def frame0(out, name, times, values):
+    s = Scene(); s.node("Hull", None, mesh=s.mesh("hull", 4.0, at=(-2.0, 0.0, -0.5)))
+    p = s.node("Gun", None, mesh=s.mesh("gun", 1.0, at=(-0.5, 0.0, -0.125)), translation=[0.0, 1.0, 0.0], rotation=[0.0, 0.2588190, 0.0, 0.9659258])
+    s.anim(p, "translation", times, values)
+    return s.write(out, name)
+
+
 def flat3(out, seed):
     """The review's (part 4): a part FLATTENED on one axis on frame 3 - a frame the cull does not sample - with a turned
     child part and a grandchild. The parent's pose has no inverse there: Eigen's float32 determinant is exactly 0 and
@@ -129,7 +136,7 @@ def flat3(out, seed):
     return s.write(out, "deploy_flat3_%d" % seed)
 
 
-def wall(out, links, pads, wrappers, name, small_classes=0, turning=False, crew=None):
+def wall(out, links, pads, wrappers, name, small_classes=0, turning=False, crew=None, span=1.0):
     """Over the bone wall: chains of instanced parts ("Link.007": the script groups by the name before the first dot),
     a few of a class too small to merge, and animated wrappers no mesh hangs from."""
     s = Scene()
@@ -138,7 +145,7 @@ def wall(out, links, pads, wrappers, name, small_classes=0, turning=False, crew=
     def chain(base_name, count, y):
         for i in range(count):
             n = s.node(base_name if i == 0 else "%s.%03d" % (base_name, i), None, mesh=m, translation=[0.3 * i, y, 0.0])
-            s.anim(n, "translation", [0.0, 1.0], [(0.3 * i, y, 0.0), (0.3 * i + 1.0, y, 0.0)])
+            s.anim(n, "translation", [0.0, span], [(0.3 * i, y, 0.0), (0.3 * i + 1.0, y, 0.0)])
     chain("Link", links, 0.0); chain("Pad", pads, 1.0); chain("Few", 6, 2.0)
     for c in range(small_classes):
         chain("Class%d" % c, 7, 4.0 + c)
@@ -363,6 +370,12 @@ def main(out):
     print("bones_norig|%s|0|24|rig,soldier||||||0|||4|0|1" % fb)
     print("BAKELEFT:frame1|%s|%s" % (frame1(out), DEFAULT))
     print("BAKELEFT:nested|%s|%s" % (nested(out), DEFAULT))
+    # the bake operator's frame_end is at least 1: a clip whose keys all sit within frame 0 (the range 0..0) is baked
+    # on frames 0 and 1 - one key at time 0; two keys 0.03 s apart; and the same on the contract path, where the
+    # rebase runs over 0..0 alone and leaves the extra key as baked (the review of PR #137)
+    print("frame0_one|%s|%s" % (frame0(out, "deploy_frame0_one", [0.0], [(0.0, 1.0, 0.0)]), DEFAULT))
+    print("frame0_two|%s|%s" % (frame0(out, "deploy_frame0_two", [0.0, 0.03], [(0.0, 1.0, 0.0), (0.0, 1.5, 0.0)]), DEFAULT))
+    print("wall_frame0|%s|%s" % (wall(out, 110, 30, 0, "deploy_wall_frame0", turning=False, span=0.03), DEFAULT))
     for seed in FLAT3_SEEDS:
         print("flat3_%d|%s|%s" % (seed, flat3(out, seed), DEFAULT))
     # the contract path beside an imported armature: with a bone's scale animated, without, and with the armature stripped
