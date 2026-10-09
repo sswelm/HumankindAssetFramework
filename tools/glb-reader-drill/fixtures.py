@@ -1148,6 +1148,18 @@ def fx_posed(out):
                 animations=[{"name": "Point", "samplers": [{"input": b.accessor([0.0, 0.5], "f", "SCALAR"), "output": b.accessor([(0.0, 0.0, 0.0), (1.0, 2.0, 3.0)], "f", "VEC3", minmax=False)}],
                              "channels": [{"sampler": 0, "target": {"path": "pointer", "extensions": {"KHR_animation_pointer": {"pointer": "/nodes/0/translation"}}}}]}])
     write_glb(os.path.join(out, "posed_pointer.glb"), root, b)
+    # Both unsupported features together: the unread pointer extends the range beyond the cubic channel.
+    # It must still be LEFT without comparing the incomplete action range or touched-object set.
+    root["nodes"].append({"name": "Cubic", "mesh": 0})
+    root["scenes"][0]["nodes"].append(1)
+    anim = root["animations"][0]
+    anim["samplers"].append({"input": b.accessor([0.0, 0.25], "f", "SCALAR"),
+                             "output": b.accessor([(0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0),
+                                                   (0.0, 0.0, 0.0), (1.0, 2.0, 3.0), (0.0, 0.0, 0.0)], "f", "VEC3", minmax=False),
+                             "interpolation": "CUBICSPLINE"})
+    anim["channels"].append({"sampler": 1, "target": {"node": 1, "path": "translation"}})
+    root["asset"]["generator"] = "posed_pointer_cubic"
+    write_glb(os.path.join(out, "posed_pointer_cubic.glb"), root, b)
 
 
 FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external, fx_cubic, fx_scenes, fx_materials, fx_skin8, fx_big, fx_names, fx_no_default_scene, fx_dropped, fx_mixed_skin, fx_clip_switch, fx_path_clip, fx_far_clip, fx_unicode_clip, fx_decimate_attrs, fx_decimate_limits, fx_export_layout, fx_export_skin, fx_export_skin_badweights, fx_export_skin_bonechild]

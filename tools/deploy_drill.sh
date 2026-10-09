@@ -110,5 +110,17 @@ n_files=$(echo "$TOTAL" | awk '{print $3}'); n_mat=$(echo "$TOTAL" | awk '{print
 [ "$n_mat" -gt 0 ] || { echo "FAIL — deploy drill: no matrix was compared at all"; exit 1; }
 UNCOVERED=$(grep -E "^COVER 0 " "$TMPD/csharp.txt" | cut -d' ' -f3- | paste -sd';' -)
 [ -z "$UNCOVERED" ] || { echo "FAIL — deploy drill: no compared file exercised: $UNCOVERED (a branch Blender did not judge; add it to fx_posed in tools/glb-reader-drill/fixtures.py)"; exit 1; }
+# Negative guards use the REAL Blender dump: omitted evidence and an empty frame list must not pass as equality.
+DUMPS=(); for ((k = 0; k < JOBS; k++)); do DUMPS+=("$WTMP/posed_$k.txt"); done
+python "$ROOT/tools/deploy-drill/missing_rows.py" "$WTMP/missing_rows" "${DUMPS[@]}" || { echo "FAIL — could not construct missing posed-record regressions"; exit 1; }
+for mode in matrix property all_properties frames short_matrix short_property; do
+  "$TMPD/deploy.exe" "$WTMP/missing_rows/$mode.txt" > "$TMPD/missing_$mode.txt" 2>&1; badrc=$?
+  if [ "$badrc" -ne 1 ] || ! grep -qE "^FAIL .*InvalidDataException: dump (is missing|has no frames|matrix row|property row)" "$TMPD/missing_$mode.txt"; then
+    cat "$TMPD/missing_$mode.txt"
+    echo "FAIL — deploy drill accepted missing or truncated posed evidence ($mode, rc=$badrc)"; exit 1
+  fi
+done
+echo "PASS — deploy drill rejects missing matrices, one or all properties, empty frame lists, and truncated records"
+
 n_prop=$(echo "$TOTAL" | awk '{print $13}')
 echo "PASS — deploy drill, the posed state: $n_mat object matrices of $n_files files, at up to thirteen frames each, equal to Blender's bit for bit - the sign of a zero included - and $n_prop evaluated location/rotation/scale sets; $n_left files left to Blender by name (Blender took $((t1 - t0)) s, the comparison $((t2 - t1)) s, in $JOBS processes each); ${#FIXTURES[@]} fixtures, $NOTE_SOURCES"

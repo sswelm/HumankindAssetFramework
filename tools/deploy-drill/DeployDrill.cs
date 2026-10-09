@@ -21,7 +21,7 @@ static class DeployDrill
     {
         "a frame on a key", "a frame between two keys", "a frame before the first key", "a frame after the last key",
         "an animated translation", "an animated rotation", "an animated scale", "a quaternion negated to run the short way", "keys closer than 0.01 frame merged (the last wins)",
-        "several animations: the first one's action is the active one", "morph weights in the action (they count for its frame range)", "a camera and what hangs below it: the importer's camera correction is not modelled (not compared)", "left to Blender: KHR_animation_pointer (nothing of it is held)", "a merged key on a whole frame (it keeps its own frame)", "a key within 0.0001 frame of the frame, not on it (its value, not an interpolation)", "a curve of one key", "a STEP sampler (constant keys)",
+        "several animations: the first one's action is the active one", "morph weights in the action (they count for its frame range)", "a camera and what hangs below it: the importer's camera correction is not modelled (not compared)", "left to Blender: KHR_animation_pointer (nothing of it is held)", "left to Blender: KHR_animation_pointer with a CUBICSPLINE sampler (nothing of it is held)", "a merged key on a whole frame (it keeps its own frame)", "a key within 0.0001 frame of the frame, not on it (its value, not an interpolation)", "a curve of one key", "a STEP sampler (constant keys)",
         "a second channel on one node and path (the first stands)", "an object only a later animation touches (no action on it)", "left to Blender: a CUBICSPLINE sampler (Bezier keys with automatic handles)",
         "an animated node given as a matrix", "an unanimated child of an animated node", "an armature whose bones are animated (an action, no object motion)",
     };
@@ -68,13 +68,28 @@ static class DeployDrill
             var problems = new List<string>();
             try
             {
+                // A skipped or unsupported object still has rows in the dump. Validate its contract before deciding
+                // what we can compare: absent evidence must never be counted as equal output.
+                if (frames.Count == 0) throw new InvalidDataException("dump has no frames");
+                foreach (int f in frames)
+                    foreach (var o in objs)
+                    {
+                        if (!rows.TryGetValue(f, out var frameRows) || !frameRows.TryGetValue(o[1], out var matrix))
+                            throw new InvalidDataException($"dump is missing matrix row for '{o[1]}' at frame {f}");
+                        if (matrix.Length != 16) throw new InvalidDataException($"dump matrix row for '{o[1]}' at frame {f} has {matrix.Length} values, expected 16");
+                        if (!props.TryGetValue((f, o[1]), out var property))
+                            throw new InvalidDataException($"dump is missing property row for '{o[1]}' at frame {f}");
+                        if (property.Length != 10) throw new InvalidDataException($"dump property row for '{o[1]}' at frame {f} has {property.Length} values, expected 10");
+                    }
                 var m = GlbReader.Read(path);
                 var names = BlenderNames.Compute(m);
                 var action = BlenderPosedState.Import(m, 0);
                 // Bezier keys with automatic handles are not modelled: the file is named and left, not compared
                 // (its frame range and the objects it touches are held all the same: the keys' frames are the importer's)
                 // KHR_animation_pointer: the importer animates through pointers the reader does not carry - nothing is held)
-                bool bezier = action.NotModelled != null, blind = bezier && !action.HasBezier;
+                bool unsupported = action.NotModelled != null, blind = m.ExtensionsUsed.Contains("KHR_animation_pointer");
+                // Pointer channels are unread even when another channel is CUBICSPLINE. Their frame range and touched
+                // objects cannot be compared; HasBezier describes an independent limitation.
                 var later = new HashSet<int>();
                 for (int ai = 1; ai < m.Animations.Count; ai++) foreach (var ch in m.Animations[ai].Channels) if (ch.Node >= 0 && !action.Animates(ch.Node)) later.Add(ch.Node);
                 // the action: Blender activates the first animation; its range is the first and the last key
@@ -130,7 +145,7 @@ static class DeployDrill
                 long equal = 0, compared = 0; uint worst = 0; string worstWhere = null;
                 // the frames in the order the dump set them: a property keeps the sign of the zero it held
                 var pose = new BlenderPosedState.Pose(action, m);
-                foreach (int f in bezier ? new List<int>() : frames)
+                foreach (int f in unsupported ? new List<int>() : frames)
                 {
                     var set = pose.FrameSet(f);
                     for (int n = 0; n < m.Nodes.Count; n++) set(n);
@@ -200,18 +215,20 @@ static class DeployDrill
                 if (propsWrong > 0) problems.Add($"{propsWrong} of {propsCompared} evaluated location/rotation/scale sets differ, first {firstProp}");
                 properties += propsCompared;
                 if (problems.Count > 0) { fails++; Console.WriteLine($"FAIL {shortKey}: " + string.Join("; ", problems.Take(4))); }
-                else if (bezier)
+                else if (unsupported)
                 {
                     left++;
-                    cover[action.HasBezier ? "left to Blender: a CUBICSPLINE sampler (Bezier keys with automatic handles)" : "left to Blender: KHR_animation_pointer (nothing of it is held)"]++;
-                    Console.WriteLine($"LEFT {shortKey}: {action.NotModelled}, which BlenderPosedState does not model" + (blind ? "" : " (its frame range and the objects it touches equal Blender's)"));
+                    cover[blind ? "left to Blender: KHR_animation_pointer (nothing of it is held)" : "left to Blender: a CUBICSPLINE sampler (Bezier keys with automatic handles)"]++;
+                    if (blind && action.HasBezier) cover["left to Blender: KHR_animation_pointer with a CUBICSPLINE sampler (nothing of it is held)"]++;
+                    string reason = blind ? "KHR_animation_pointer - the importer animates through pointers this does not read" : action.NotModelled;
+                    Console.WriteLine($"LEFT {shortKey}: {reason}, which BlenderPosedState does not model" + (blind ? "" : " (its frame range and the objects it touches equal Blender's)"));
                 }
                 else
                 {
                     // what the action exercised counts once the file holds: every matrix and every evaluated property equal
                     foreach (var n in action.Notes) if (cover.ContainsKey(n)) cover[n]++; else notes[n] = notes.TryGetValue(n, out long c) ? c + 1 : 1;
                 }
-                if (problems.Count == 0 && !bezier) Console.WriteLine($"PASS {shortKey}: {compared} matrices of {names.Objects.Count} objects at {frames.Count} frames equal to Blender's, bit for bit (frames {action.FrameStart:R}..{action.FrameEnd:R})");
+                if (problems.Count == 0 && !unsupported) Console.WriteLine($"PASS {shortKey}: {compared} matrices of {names.Objects.Count} objects at {frames.Count} frames equal to Blender's, bit for bit (frames {action.FrameStart:R}..{action.FrameEnd:R})");
             }
             catch (Exception e) { fails++; Console.WriteLine($"FAIL {shortKey}: {e.GetType().Name}: {e.Message}"); }
         }
