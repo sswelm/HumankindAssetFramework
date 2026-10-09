@@ -136,6 +136,29 @@ public static class BlenderPosedState
         /// <summary>A script wrote the object's transform (`o.matrix_world = m`): what the next frame's values meet.</summary>
         public void Write(int node, float[] loc, float[] quat, float[] scale) { held[node] = new[] { (float[])loc.Clone(), (float[])quat.Clone(), (float[])scale.Clone() }; }
 
+        // a BAKE replaced a node's curves (bpy.ops.nla.bake on an imported armature: deploy_convert.py, part 4b): a pose
+        // bone has a key a frame instead of the importer's curves, an armature OBJECT has none left at all
+        readonly Dictionary<int, (int start, float[][] keys)> rebaked = new Dictionary<int, (int, float[][])>();
+        readonly HashSet<int> scaleDropped = new HashSet<int>(), frozen = new HashSet<int>();
+
+        /// <summary>The bake keyed this pose bone on every frame from `start` (location 3, quaternion 4, scale 3 a key)
+        /// and left its properties at the LAST frame's values - what the next frame set meets.</summary>
+        public void Rebake(int node, int start, float[][] keys)
+        {
+            rebaked[node] = (start, keys);
+            var last = keys[keys.Length - 1];
+            held[node] = new[] { new[] { last[0], last[1], last[2] }, new[] { last[3], last[4], last[5], last[6] }, new[] { last[7], last[8], last[9] } };
+        }
+
+        /// <summary>The scale curves of a re-baked bone are stripped: its scale stays what the property holds.</summary>
+        public void DropScale(int node) { scaleDropped.Add(node); }
+
+        /// <summary>The node's own curves are gone (the bake replaced its action): its properties stay as they are.</summary>
+        public void Freeze(int node) { frozen.Add(node); }
+
+        /// <summary>What a node's properties hold now, or null for a node nothing has animated.</summary>
+        public float[][] Current(int node) => held.TryGetValue(node, out var h) ? new[] { (float[])h[0].Clone(), (float[])h[1].Clone(), (float[])h[2].Clone() } : null;
+
         /// <summary>frame_set: what VehicleProbe.BlenderWorldMatrices takes for this frame. The frames must be given
         /// in the order Blender is given them.</summary>
         public Func<int, float[][]> FrameSet(float frame)
@@ -145,6 +168,17 @@ public static class BlenderPosedState
             return node =>
             {
                 if (now.TryGetValue(node, out var done)) return done;
+                if (frozen.Contains(node)) return now[node] = null;
+                if (rebaked.TryGetValue(node, out var rb))
+                {
+                    // LINEAR keys on whole frames, the ends held: on a whole frame the key itself
+                    int at = Math.Max(0, Math.Min(rb.keys.Length - 1, (int)Math.Round(frame) - rb.start));
+                    var key = rb.keys[at]; var hb = held[node];
+                    var pb = new[] { new[] { key[0], key[1], key[2] }, new[] { key[3], key[4], key[5], key[6] }, scaleDropped.Contains(node) ? (float[])hb[2].Clone() : new[] { key[7], key[8], key[9] } };
+                    for (int k = 0; k < 3; k++)
+                        for (int c = 0; c < pb[k].Length; c++) { if (hb[k][c] == pb[k][c]) pb[k][c] = hb[k][c]; else hb[k][c] = pb[k][c]; }
+                    return now[node] = pb;
+                }
                 var p = curves(node);
                 if (p == null) return now[node] = null;
                 if (!held.TryGetValue(node, out var h))

@@ -98,7 +98,7 @@ def main(out):
     s.part("Good", None, at=(1.0, 0.0, 0.0))
     f = s.write(out, "r7_arm_mesh"); J("r7_arm_mesh", f)
     s.anim(arm, "translation", [0.0, 2.0], [(3.0, 1.0, 0.5), (4.0, 1.0, 0.5)])
-    J("BAKELEFT:r7_arm_animated", s.write(out, "r7_arm_animated"))
+    J("r7_arm_animated", s.write(out, "r7_arm_animated"))
 
     # R8 names: case-only differences, non-ASCII, long, and culled names with quotes
     s = S(); s.node("Hull", None, mesh=s.mesh("hull", 4.0))

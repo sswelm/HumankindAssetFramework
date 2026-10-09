@@ -159,7 +159,7 @@ echo "PASS — deploy drill, the posed state: $n_mat object matrices of $n_files
 # takes). BlenderDeploy.Decide is then held to the script's own log lines, its decisions and the scene it left: every
 # object's matrix, transform and bound box, as bits. A job the jobs file marks LEFT: must come out left to Blender, and
 # no other may - a wrong decision that ends in a fallback is a failure. A recorded job whose source is gone is named.
-KNOWN_BAKE_LEFT="DugoutCanoe"   # the bake re-bakes its imported armature, from whose bones ten objects hang: Blender's from the bake on
+KNOWN_BAKE_LEFT=""   # none: the dugout canoe's imported armature is re-baked here as Blender re-bakes it (part 4b)
 KNOWN_LEFT=""   # none: the dugout canoe (objects under animated bones) is decided here since the pose is modelled (2b)
 : > "$TMPD/jobs.txt"; n_rec=0; MISSING=""
 if [ -n "$PACK" ]; then
@@ -180,7 +180,7 @@ n_jobs=$(grep -c "" "$TMPD/jobs.txt")
 t3=$(date +%s)
 "$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_decisions_dump.py")" -- "$WROOT/editor/Tools~/deploy_convert.py" "$WTMP/jobs.txt" > "$TMPD/decisions_raw.txt" 2> "$TMPD/decisions_err.txt"; drc=$?   # stderr apart: a depsgraph warning lands in the middle of a row otherwise
 t4=$(date +%s)
-tr -d '\r' < "$TMPD/decisions_raw.txt" | grep -E "^(JOB|LOG|LOG2|EXIT|RANGE|NORM|FLAG|PART|BAD|ALIAS|ARM|BONEOF|RBONE|ANCHOR|HULL|PINV|OBJ|M|T|BOX|ACT|FC|M2|O2|DONE|FAIL)	" > "$TMPD/decisions.txt"
+tr -d '\r' < "$TMPD/decisions_raw.txt" | grep -E "^(JOB|LOG|LOG2|EXIT|RANGE|NORM|FLAG|PART|BAD|ALIAS|ARM|BONEOF|RBONE|ANCHOR|HULL|PINV|OBJ|M|T|BOX|ACT|FC|FCA|PB2|PB3|M2|O2|O3|DONE|FAIL)	" > "$TMPD/decisions.txt"
 n_done=$(grep -c "^DONE" "$TMPD/decisions.txt")
 if [ "$drc" -ne 0 ] || [ "$n_done" -ne "$n_jobs" ]; then
   grep -E "^FAIL|Traceback|Error" "$TMPD/decisions_raw.txt" "$TMPD/decisions_err.txt" | head -8

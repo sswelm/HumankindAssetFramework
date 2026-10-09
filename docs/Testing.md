@@ -622,6 +622,34 @@ extra key stays as baked. Fixtures `frame0_one`, `frame0_two`, `wall_frame0`; a 
 to Blender. (2) the drill placed a curve by its channel and component index without checking the index: `location[3]`
 would have landed in the quaternion's slot - refused now, and the gate plants it. Both variants planted: caught.
 
+**Replacing `deploy_convert.py`, part 4b: the bake takes the imported armatures too** (2026-10-11). `nla.bake` with
+`only_selected=False` bakes every SELECTED object that has a pose, the importer leaves everything selected, and so an
+imported armature that survived the strip is baked with the new one: each of its bones gets a location, a quaternion
+and a scale key a frame from its animated pose brought into its own space (the same two steps as the new armature's
+bones: `KeysFromBasis`), a NEW action replaces the importer's - the armature OBJECT's own animation is gone with it,
+the object stays where the bind frame put it - and the scene goes on from those keys (`Pose.Rebake`, `Freeze`; on
+the contract path the scale curves are stripped from this action too and a bone keeps the scale it holds:
+`DropScale`). Part 4 left such a job to Blender from the bake on; that mark is gone - the dugout canoe is baked in
+C#, as are the four fixtures that shared it: every recorded conversion whose source exists goes through the bake
+here. The oracle's second stage now also writes the curves of every other armature's action (`FCA`), what each of
+their pose bones holds when the script goes on (`PB2`), and - after everything else - the scene and those bones once
+more at the LAST frame of the range (`O3`, `PB3`: the bind frame cannot tell a frozen object from an animated one,
+nor a stripped curve from a kept one). 76 jobs, 2,807,725 baked keys - 1,864,590 of them on re-baked imported
+armatures, most on the howitzer's five soldier rigs - 3,264 object matrices at the bind frame and as many at the last,
+357 pose bones: all equal to the bit.
+
+Found by measurement: between the end of the bake and the next frame set the re-baked bones stand at the BIND frame's
+keys, not at the last frame's values the bake left in their properties - the script's next operator (`mode_set`)
+updates the scene and evaluates the new action (46 object matrices of four jobs were wrong on the first model).
+*Review before the PR* (an independent agent, 171 generated jobs: the dummy-root armature, two armatures, an armature
+that is itself the root-motion hull, culled or under a stripped parent, 110 random rigs): no P1 or P2. Its notes,
+taken: a node's `extras` become custom properties and the bake KEYS them (`channel_types` has PROPS) - they move
+nothing and the script clears the action later; not modelled, the drill counts such a curve and goes on (fixture
+`bones_extras`); the bind frame alone could not hold `Freeze` or `DropScale` - hence the last-frame rows. 7 of 8
+planted defects fail; not caught, a zero's sign only: a bone holding its FIRST key after the bake instead of its
+last. Not held: a re-baked bone at a frame that is not whole (every frame the script sets is); a bone name with a
+control character (the drill does not unescape it; the keys are right). Next: the script's steps 5a-5d.
+
 **The Clip Range picker's in-process rig** (step 4, 2026-10-03): `HafUnityFrameTests` hold the preview frame's arithmetic
 without Unity — the X mirror's conjugation of rotations, matrices and matrix nodes; Unity's skinning formula fed the rig's
 matrices (the joints' world matrices, the inverse bind matrices, the vertex, all mirrored) against the reader's posed vertex;

@@ -88,6 +88,15 @@ public static class BlenderDeploy
         // so a clip whose whole range is frame 0 is baked on frames 0 AND 1
         public int BakeFrameMin, BakeFrameMax;
         public readonly List<string> BakeLog = new List<string>();
+        // the bake takes every SELECTED armature, and the importer leaves all selected: an imported armature that
+        // survived the strip is keyed too - per armature object, per bone, the keys as Keys holds them
+        public readonly Dictionary<string, Dictionary<string, float[][]>> ImportedKeys = new Dictionary<string, Dictionary<string, float[][]>>(StringComparer.Ordinal);
+        // ... and what each of those bones HOLDS when the conversion goes on from here (location, quaternion, scale):
+        // the later steps start from this state
+        public readonly Dictionary<string, Dictionary<string, float[][]>> ImportedPose = new Dictionary<string, Dictionary<string, float[][]>>(StringComparer.Ordinal);
+        /// <summary>`scene.frame_set(frame)` on the scene the conversion has reached, for a drill: every object's
+        /// matrix_world by name and what each imported pose bone holds. It MOVES the scene - nothing may follow it.</summary>
+        public Func<int, (Dictionary<string, float[]> worlds, Dictionary<string, Dictionary<string, float[][]>> pose)> ProbeAt;
     }
 
     /// <summary>A bone of the armature at rest.</summary>
@@ -236,16 +245,23 @@ public static class BlenderDeploy
                 if (p[1] != null) o.Quat = p[1];
                 if (p[2] != null) o.Scale = p[2];
             }
-            // the armatures' poses: each bone's pose matrix from its pose bone's properties, for what hangs from it
-            if (all.Exists(o => o.BoneNode >= 0 && o.Parent != null))
+            Repose(b => set(b));
+        }
+        // the armatures' poses: each bone's pose matrix from its pose bone's properties (`props`: a bone's animated
+        // values, null where nothing animates them), for what hangs from it - and the scene's matrices after it
+        Dictionary<int, float[]> poseNow = new Dictionary<int, float[]>();
+        void Repose(Func<int, float[][]> props)
+        {
+            if (rig.Armatures.Count > 0)
             {
                 var poseMats = new Dictionary<int, float[]>();
                 foreach (var arm in rig.Armatures.Values)
                 {
-                    float[][] Props(int b) { var p = set(b); rig.StaticProperty(b, out var l, out var q, out var s); return new[] { p?[0] ?? l, p?[1] ?? q, p?[2] ?? s }; }
+                    float[][] Props(int b) { var p = props(b); rig.StaticProperty(b, out var l, out var q, out var s); return new[] { p?[0] ?? l, p?[1] ?? q, p?[2] ?? s }; }
                     foreach (var kv in VehicleProbe.PoseMatrices(arm, Props)) poseMats[kv.Key] = kv.Value;
                 }
                 foreach (var o in all) if (o.BoneNode >= 0 && o.Parent != null) o.BoneMatrix = VehicleProbe.ParBone(poseMats[o.BoneNode], rig.ArmatureOfBone[o.BoneNode].Length[o.BoneNode]);
+                poseNow = poseMats;
             }
             Update(all);
         }
@@ -482,12 +498,7 @@ public static class BlenderDeploy
         // not modelled: where it can show - the armature's node is itself animated, or something still hangs from
         // its bones - the job is Blender's from here (review of the bake, 2026-10-11).
         var imported = all.Where(o => o.Type == "ARMATURE" && o != arm).ToList();
-        foreach (var a in imported)
-        {
-            if (a.Node >= 0 && action.Animates(a.Node)) { r.Fallback = $"the bake re-bakes the imported armature '{a.Name}', whose own animation it drops (not modelled)"; return r; }
-            var rider = all.FirstOrDefault(o => o.Parent == a && o.BoneNode >= 0);
-            if (rider != null) { r.Fallback = $"the bake re-bakes the imported armature '{a.Name}', from whose bones '{rider.Name}' hangs (not modelled)"; return r; }
-        }
+        var importedBasis = new Dictionary<int, float[][]>();   // per bone node of a surviving imported armature: its basis a frame
 
         // ---- 5. the bake (bpy.ops.nla.bake, visual keying, bake_types POSE): every frame the pose each bone's Copy
         //      Transforms gives it, brought into the bone's own space; then, bone by bone, decomposed into keys
@@ -523,22 +534,38 @@ public static class BlenderDeploy
                 var rs = parentIndex[i] >= 0 ? VehicleProbe.MulM4(poseMat[parentIndex[i]], bone.Offs) : bone.MatrixLocal;
                 bakedBasis[i][f - fmin] = PoseFromChannel(BlenderEigen.InvertM4(rs), poseMat[i]);
             }
+            // ... and every surviving imported armature's bones the same way, from the pose the importer's action gives
+            foreach (var a in imported)
+            {
+                var ia = rig.Armatures[a.Node];
+                foreach (int b in ia.Bones)
+                {
+                    var rs = ia.Parent[b] >= 0 ? VehicleProbe.MulM4(poseNow[ia.Parent[b]], ia.OffsBone[b]) : ia.ArmMat[b];
+                    if (!importedBasis.TryGetValue(b, out var perFrame)) importedBasis[b] = perFrame = new float[nf][];
+                    perFrame[f - fmin] = PoseFromChannel(BlenderEigen.InvertM4(rs), poseNow[b]);
+                }
+            }
         }
         FrameSet(fmin);   // the bake puts the scene's frame back
-        for (int i = 0; i < nb; i++)
+        for (int i = 0; i < nb; i++) r.Keys[r.Bones[i].Name] = KeysFromBasis(bakedBasis[i]);
+        // the imported armatures: their bones are keyed a frame from here on, the properties left at the LAST frame's
+        // values; the armature OBJECT's own curves went with the action the bake replaced - it stays where the bind
+        // frame put it.
+        foreach (var a in imported)
         {
-            var keys = new float[nf][]; float[] prev = null;
-            for (int k = 0; k < nf; k++)
+            var ia = rig.Armatures[a.Node]; var byBone = new Dictionary<string, float[][]>(StringComparer.Ordinal);
+            foreach (int b in ia.Bones)
             {
-                // pbone.matrix_basis = m: BKE_pchan_apply_mat4 - mat4_to_loc_rot_size, mat3_normalized_to_quat
-                VehicleProbe.Mat4ToLocRotSize(bakedBasis[i][k], out var loc, out var rot, out var size);
-                var q = VehicleProbe.Mat3NormalizedToQuat(rot);
-                if (prev != null) q = MakeCompatible(q, prev);
-                prev = q;
-                keys[k] = new[] { loc[0], loc[1], loc[2], q[0], q[1], q[2], q[3], size[0], size[1], size[2] };
+                var keys = KeysFromBasis(importedBasis[b]);
+                byBone[names.BoneOfJoint[b]] = keys;
+                pose.Rebake(b, fmin, keys);
             }
-            r.Keys[r.Bones[i].Name] = keys;
+            if (a.Node >= 0) pose.Freeze(a.Node);
+            r.ImportedKeys[a.Name] = byBone;
         }
+        // the new actions are evaluated at once (the script's next operator updates the scene): the bones take their
+        // keys of the bind frame, written over the last frame's values
+        if (imported.Count > 0) FrameSet(fmin);
         if (r.Hull != null)
         {
             // arm.parent = None; arm.matrix_world = Matrix.Identity(4)
@@ -559,6 +586,7 @@ public static class BlenderDeploy
             for (int ai = 0; ai < m.Animations.Count; ai++)
                 stripped += 3 * (ai == 0 ? action : BlenderPosedState.Import(m, ai, 24.0, rig)).Scale.Keys.Count(n => rig.IsBone(n));
             r.BakeLog.Add($"DEPLOY scale-free rig: {stripped} pose-scale fcurve(s) stripped (verts carry the unit scale)");
+            foreach (var a in imported) foreach (int b in rig.Armatures[a.Node].Bones) pose.DropScale(b);   // an imported armature's bones keep the scale they hold
             int rebased = 0;
             foreach (var bone in r.Bones)
             {
@@ -600,7 +628,31 @@ public static class BlenderDeploy
             r.BakeLog.Add("DEPLOY delta-form rebase: SKIPPED (legacy path — pre-contract engine handling renders absolute poses correctly; bind==f0 would fold the legs' rest and cross them)");
         }
         r.BakeLog.Add($"DEPLOY baked {r.BoneOf.Count} bones");
+        foreach (var a in imported) r.ImportedPose[a.Name] = rig.Armatures[a.Node].Bones.ToDictionary(b => names.BoneOfJoint[b], b => pose.Current(b), StringComparer.Ordinal);
+        r.ProbeAt = frame =>
+        {
+            FrameSet(frame);
+            return (all.ToDictionary(o => o.Name, o => (float[])o.World.Clone(), StringComparer.Ordinal),
+                    imported.ToDictionary(a => a.Name, a => rig.Armatures[a.Node].Bones.ToDictionary(b => names.BoneOfJoint[b], b => pose.Current(b), StringComparer.Ordinal), StringComparer.Ordinal));
+        };
         return r;
+    }
+
+    /// <summary>The bake's second half for one bone: each frame's basis set (`pbone.matrix_basis = m`: BKE_pchan_apply_mat4 -
+    /// mat4_to_loc_rot_size, mat3_normalized_to_quat), the quaternion made compatible with the frame before, and a
+    /// key of location 3, quaternion 4, scale 3.</summary>
+    static float[][] KeysFromBasis(float[][] basis)
+    {
+        var keys = new float[basis.Length][]; float[] prev = null;
+        for (int k = 0; k < basis.Length; k++)
+        {
+            VehicleProbe.Mat4ToLocRotSize(basis[k], out var loc, out var rot, out var size);
+            var q = VehicleProbe.Mat3NormalizedToQuat(rot);
+            if (prev != null) q = MakeCompatible(q, prev);
+            prev = q;
+            keys[k] = new[] { loc[0], loc[1], loc[2], q[0], q[1], q[2], q[3], size[0], size[1], size[2] };
+        }
+        return keys;
     }
 
     /// <summary>BKE_bone_parent_transform_apply with one matrix for rotation, scale and location: the matrix times the

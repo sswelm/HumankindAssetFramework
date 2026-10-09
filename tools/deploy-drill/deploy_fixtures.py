@@ -176,7 +176,7 @@ def wall(out, links, pads, wrappers, name, small_classes=0, turning=False, crew=
     return s.write(out, name)
 
 
-def bones(out, name="deploy_bones"):
+def bones(out, name="deploy_bones", extras=False):
     """Objects that hang from BONES the animation moves (the dugout canoe's shape, and more): a bone that turns, one
     that slides and is scaled unevenly; under them an object that is itself animated (a part), one with a child, one
     that only rides. The skinned crew that makes the armature is stripped by the default list."""
@@ -200,6 +200,10 @@ def bones(out, name="deploy_bones"):
     s.node("RootRider", j0, mesh=s.mesh("rootrider", 0.5))
     p = s.node("Good", None, mesh=s.mesh("good", 1.0), translation=[2.0, 0.0, 0.0])
     s.anim(p, "translation", [0.0, 1.0], [(2.0, 0.0, 0.0), (2.0, 1.0, 0.0)])
+    if extras:
+        # `extras` on a joint and on the armature's node become custom properties, and the bake keys those too
+        s.nodes[j1]["extras"] = {"power": 2.5, "tag": "x", "n": 3}
+        s.nodes[rig]["extras"] = {"power": 2.5}
     return s.write(out, name)
 
 
@@ -364,12 +368,12 @@ def main(out):
     print("flatx_small|%s|%s" % (flatx(out, "deploy_flatx_small", 0.05), DEFAULT))
     print("flatx_big|%s|%s" % (flatx(out, "deploy_flatx_big", 3.0), DEFAULT))
     fb = bones(out)
-    # BAKELEFT: the scene before the bake is held; the bake re-bakes the imported armature these hang from - Blender's
-    print("BAKELEFT:bones|%s|%s" % (fb, DEFAULT))
+    print("bones|%s|%s" % (fb, DEFAULT))
+    print("bones_extras|%s|%s" % (bones(out, "deploy_bones_extras", extras=True), DEFAULT))
     # the armature itself stripped: what hung from its bones is left as roots, where its own transform puts it
     print("bones_norig|%s|0|24|rig,soldier||||||0|||4|0|1" % fb)
-    print("BAKELEFT:frame1|%s|%s" % (frame1(out), DEFAULT))
-    print("BAKELEFT:nested|%s|%s" % (nested(out), DEFAULT))
+    print("frame1|%s|%s" % (frame1(out), DEFAULT))
+    print("nested|%s|%s" % (nested(out), DEFAULT))
     # the bake operator's frame_end is at least 1: a clip whose keys all sit within frame 0 (the range 0..0) is baked
     # on frames 0 and 1 - one key at time 0; two keys 0.03 s apart; and the same on the contract path, where the
     # rebase runs over 0..0 alone and leaves the extra key as baked (the review of PR #137)
