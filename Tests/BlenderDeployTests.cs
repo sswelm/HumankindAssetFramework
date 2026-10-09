@@ -245,6 +245,58 @@ public class BlenderDeployTests
         Assert.Null(BlenderDeploy.Decide(Make().M, "0|24||||| +3 | 5 / 2 |1|||0|0|1".Split('|'), null, true).Fallback);
     }
 
+    [Fact]
+    public void The_barrel_is_rekeyed_to_its_scaled_ready_pose_and_the_legs_to_a_scaled_spread()
+    {
+        Scene Make()
+        {
+            var s = new Scene(); int hull = s.Node("Hull", mesh: true);
+            s.Move(s.Node("Barrel", hull, mesh: true, t: new double[] { 0, 2, 0 }), 1f, new[] { 0f, 2f, 0.024f });
+            s.Move(s.Node("Leg", hull, mesh: true, t: new double[] { 1, 0, 0 }), 1f, new[] { 1f, 0f, 0.048f });
+            s.Decide(); return s;
+        }
+        BlenderDeploy.Result Run(string args) => BlenderDeploy.Decide(Make().M, args.Split('|'), null, true);
+        // argv[5] the ready frame, argv[7] the barrel scale: the barrel's curves go, a rest key at the mid frame
+        // (int(24 / 2)) and the ready pose - its turn and its move doubled - at the end
+        var r = Run("0|24||24||2|||0|||4|0|1");
+        Assert.Null(r.Fallback);
+        Assert.Equal(new[] { "DEPLOY barrel retargeted to ready-frame 24 over 12..24 (1 bones)" }, r.RetargetLog);
+        var b = r.Rekeyed["Barrel"]; var baked = r.Keys["Barrel"][24];
+        for (int c = 0; c < 7; c++)
+        {
+            Assert.Equal(new[] { 12f, 24f }, b[c].Select(k => k.Frame));
+            Assert.Equal(c == 3 ? 1f : 0f, b[c][0].Value);
+            // flat handles a third of the way to the neighbour
+            Assert.All(b[c], k => { Assert.Equal(k.Value, k.LeftY); Assert.Equal(k.Value, k.RightY); Assert.Equal(k.Frame - 4f, k.LeftX, 4); Assert.Equal(k.Frame + 4f, k.RightX, 4); });
+            // what the bone HOLDS afterwards is the end pose assigned last: nothing evaluates the new curve
+            Assert.Equal(b[c][1].Value, r.ArmPose["Barrel"][c]);
+        }
+        for (int c = 0; c < 3; c++) Assert.Equal((float)(baked[c] * 2f), b[c][1].Value);
+        Assert.Equal(0f, b[3][1].Value, 5);                          // a quarter turn doubled: w = cos(90 degrees)
+        Assert.Null(b[7]); Assert.Null(b[8]); Assert.Null(b[9]);     // the scale curves are cleared and not keyed again
+        Assert.False(r.Rekeyed.ContainsKey("Leg"));
+        // the same with the ready frame before the end: the bone still holds the end pose, not the curve at frame 3
+        var early = Run("0|24||3||2|||0|||4|0|1");
+        Assert.Equal(early.Rekeyed["Barrel"][2][1].Value, early.ArmPose["Barrel"][2]);
+        // argv[6] the leg scale: the quaternion keyed at the first frame, at the spread frame and at the end; the
+        // location's curves cleared
+        var l = Run("0|24|||0.5||||0|||4|0|1");
+        Assert.Null(l.Fallback);
+        Assert.Equal(new[] { "DEPLOY legs scaled x0.50 from initial (1 bones), spread by 12 held to 24" }, l.RetargetLog);
+        for (int c = 3; c < 7; c++) Assert.Equal(new[] { 0f, 12f, 24f }, l.Rekeyed["Leg"][c].Select(k => k.Frame));
+        Assert.Null(l.Rekeyed["Leg"][0]);
+        // Python's float(): a negative zero keeps its sign (the log prints it); what it refuses, and a scale
+        // Quaternion.slerp refuses, are left to Blender
+        Assert.StartsWith("DEPLOY legs scaled x-0.00 ", Run("0|24|||-0||||0|||4|0|1").RetargetLog.Single());
+        Assert.Null(Run("0|24||24| .5 |+1.E0|||0|||4|0|1").Fallback);
+        Assert.Contains("outside 0..1", Run("0|24|||1.5||||0|||4|0|1").Fallback);
+        Assert.Contains("float()", Run("0|24|||1e||||0|||4|0|1").Fallback);
+        Assert.Contains("float()", Run("0|24||24||nan|||0|||4|0|1").Fallback);
+        Assert.Contains("past a float", Run("0|24||24||1e39|||0|||4|0|1").Fallback);
+        // a negative end: the legs' first frame_set lands between the barrel's two new keys
+        Assert.Contains("inside a Bezier segment", Run("0|-5||24|0.5|2|||0|||4|0|1").Fallback);
+    }
+
     [Theory]
     [InlineData("3\0", "5")]
     [InlineData("3\0\0", "5")]

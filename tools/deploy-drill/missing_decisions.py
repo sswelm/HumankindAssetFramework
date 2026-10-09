@@ -76,6 +76,27 @@ def main(out, dump, jobs):
         write("fire_%s_value" % kind, lines)
     lines = [l for l in fire if not l.startswith("LOG3\t")]
     write("fire_LOG3_missing", lines)
+    # the barrel retarget and the leg scale (5b, 5c): a job that re-keyed a bone - one of its Bezier curves, a pose row
+    # and an object row after it, each missing, doubled in place of its neighbour, renamed, or one bit off
+    gun = next((b for b in blocks if "LOG4" in kinds(b) and "DONE" in kinds(b) and any(l.startswith("FC4\t") and ":BEZIER:" in l for l in b)
+                and not b[0].startswith(("JOB\tLEFT:", "JOB\tBAKELEFT:"))), None)
+    if gun is None:
+        raise ValueError("no job with a re-keyed bone in the dump")
+    control("gun", gun)
+    for kind in ("FC4", "APB4", "O5"):
+        rows = [i for i, l in enumerate(gun) if l.startswith(kind + "\t") and (kind != "FC4" or ":BEZIER:" in l)]
+        lines = list(gun); del lines[rows[0]]
+        write("gun_%s_missing" % kind, lines)
+        lines = list(gun); lines[rows[1]] = gun[rows[0]]
+        write("gun_%s_duplicate" % kind, lines)
+        t = gun[rows[0]].split("\t"); t[1] = 'pose.bones["no such bone"].location' if kind == "FC4" else "no such name"
+        lines = list(gun); lines[rows[0]] = "\t".join(t)
+        write("gun_%s_unknown" % kind, lines)
+        last = gun[rows[-1]][-1]
+        lines = list(gun); lines[rows[-1]] = gun[rows[-1]][:-1] + ("0" if last != "0" else "1")
+        write("gun_%s_value" % kind, lines)
+    lines = [l for l in gun if not l.startswith("LOG4\t")]
+    write("gun_LOG4_missing", lines)
     abort = next((b for b in blocks if "EXIT\t1" in b and "DONE" in kinds(b) and not b[0].startswith("JOB\tLEFT:")), None)
     if abort is None:
         raise ValueError("no abort job in the dump for the EXIT regressions")

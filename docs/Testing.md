@@ -683,6 +683,50 @@ and `int.TryParse` does not (`1_0`, digits past ASCII, a value over int32) is le
 (Blender clamps a written value to FLT_MAX). Next: 5b and 5c - they key with Blender's default BEZIER interpolation,
 so its curve evaluation between two keys has to be ported - then 5d, which re-enters edit mode.
 
+**Replacing `deploy_convert.py`, parts 5b and 5c: the barrel retarget and the leg scale** (2026-10-10). 5b
+(`argv[5]` the ready frame, `argv[7]` the barrel scale): every bone with "barrel" or "cannon" in its name loses its
+curves and gets two keys - the rest pose at `max(int(end / 2), 1)`, the ready pose with its turn and its move scaled
+at the end. 5c (`argv[6]` the leg scale): every "leg" bone's quaternion is keyed at the first frame, at the spread
+frame and at the end, slerped between the folded and the spread pose; its other curves go. `Result.Rekeyed` (per bone
+ten channels of `ArmKey`: frame, value, both handles), `RetargetLog`, `AfterRetarget`. What had to be ported:
+`keyframe_insert` (a BEZIER key, AUTO_CLAMPED handles, CONSTANT extrapolation; a key already on that frame is MOVED
+by `new - old` in float32, `replace_bezt_keyframe_ypos`, which is not the new value to the bit), the handles
+(`calchandleNurb_intern` for an fcurve: flat, a third of the way to the neighbour through `6 / 2.5614 * 2.5614`, a
+lone key's at frame -/+ 1), `Quaternion.to_axis_angle` (`acosf`/`sinf` of the UCRT, the 0.0005 guard),
+`Quaternion(axis, angle)` with the angle wrapped in float32, `Quaternion.slerp`, `clear_bone_channels` (the raw name
+inside the escaped data path), `bone_of.values()` naming a pair-merged part's bone twice, and Python's `float()` (a
+negative zero keeps its sign). `mode_set` evaluates NOTHING: after 5b a barrel bone holds the end pose assigned last,
+not the curve at the ready frame. The oracle runs a FOURTH stage, to `# --- 5d.`: the log, every curve of the action
+with its extrapolation and smoothing and every key with interpolation, handle types and both handles (`FC4`), what
+the pose bones hold (`APB4`), every object's matrix (`O5`). 147 jobs, 4,408 re-keyed keys with their handles equal to
+the bit: the howitzer (neutral scales only - no registry model scales) and a fixture gun through scales 0, 0.25, 0.5,
+1.5, 2, 2.9, 3, -2.3, 5.9, 1e6, -0, ends 0, 1, 2, 24, 25, the ready frame before, on, between and past the new keys,
+with a fire window, on the contract path with merged "Cannon" links and with a barrel under a turning turret;
+three generated guns about general axes (names with a dot and brackets, a bone that is barrel AND leg, a leg turning
+250 degrees, one standing still) and one whose ready poses are 0.001 to 0.06 degrees off the rest (the guard).
+
+*Review before the PR* (an independent agent, 89 generated jobs through the real script): three defects, all
+executed, all fixed and planted. (1) The port evaluated the animation at `mode_set('OBJECT')`; Blender does not -
+the held pose after a barrel-only retarget with the ready frame before the end was the curve's, not the end pose
+(`gun_held_*`, `wall_held`); with that gone the "ready frame inside the new segment" job no longer needs Blender.
+(2) A replaced key was set to the new value; Blender adds the float32 difference - 1 to 10 ulp off past a 120 degree
+turn, and `+0` where the value is `-0` (`gun_replace_*`). (3) `double.TryParse` reads `-0` as `+0` on .NET
+Framework and on Mono (`gun_bs_negzero`, `gun_ls_negzero`: six curves, and the log's `x-0.00`). 27 planted defects:
+26 caught; the one that is not - an evaluation after the LEGS are keyed - is equivalent (every frame set there lies
+on a key whose value is the one held). The gate takes a Bezier curve, a pose row and an object row out of the real
+dump, removes, doubles, renames and turns a bit of each, and removes the log line: thirteen checks, each must fail.
+
+Left to Blender from the bake on, by name (`BAKELEFT:` jobs, `BlenderDeployTests`): a frame set strictly INSIDE a new
+Bezier segment (a negative end with a leg scale; the evaluation needs Blender's cubic solver and comes as its own
+part - the export samples every frame, so it must); a middle key that is no extreme of its neighbours (the
+smoothing solver; 5b and 5c cannot make one: two of a leg's three values are equal); a barrel scale that takes a
+value past a float (the location's setter clamps to FLT_MAX); a scale Python's `float()` reads and the port does
+not (`inf`, `nan`, `1_0`, digits past ASCII); a leg scale outside 0..1 (the script itself dies in `slerp`); a
+barrel or leg bone with a quote or a backslash in its name, or past ASCII. Not held: a new curve takes its
+smoothing from the USER PREFERENCE "F-Curve smoothing" - the port is the default's (CONT_ACCEL), the drill asserts
+the dump says so, and a Blender set otherwise would differ; the curve's group name and the keys' type are not
+compared. Next: the Bezier evaluation between two keys, then 5d.
+
 *Review of PR #138*: the imported pose rows at the bind and last frames (`PB2`, `PB3`) must name every expected
 armature/bone exactly once, with all ten held values. A matching row count cannot substitute duplicates for missing
 bones, and unknown names cannot skip comparison. `missing_imported_pose.py` keeps a passing single-job control and
