@@ -91,10 +91,13 @@ public static class BlenderPosedState
         public readonly Dictionary<int, Curve[]> Translation = new Dictionary<int, Curve[]>(), Rotation = new Dictionary<int, Curve[]>(), Scale = new Dictionary<int, Curve[]>();
         public float FrameStart, FrameEnd;     // Action.frame_range: the first and the last key over every curve
         public bool HasBezier;                 // a CUBICSPLINE sampler: Bezier keys with automatic handles, not modelled
-        // why Blender's posed state of this file is NOT what TrsAt gives (the first reason), or null: such a file is left to
-        // Blender by whoever asks - a CUBICSPLINE sampler; KHR_animation_pointer (the importer takes pointers at a node's
+        // why Blender's posed state of this file is NOT what TrsAt gives, or null: such a file is left to Blender by
+        // whoever asks - a CUBICSPLINE sampler; KHR_animation_pointer (the importer takes pointers at a node's
         // translation, rotation and scale for channels, and other pointers' curves into the same action: neither is read)
         public string NotModelled;
+        // false with KHR_animation_pointer: an unread pointer channel may extend the range and touch other objects, so
+        // FrameStart, FrameEnd and Animates are not Blender's either - with a CUBICSPLINE sampler alone they are
+        public bool RangeAndTouchedKnown = true;
         public readonly List<string> Notes = new List<string>();   // what this action exercised (the drill's coverage)
         public bool Animates(int node) => Translation.ContainsKey(node) || Rotation.ContainsKey(node) || Scale.ContainsKey(node);
 
@@ -220,7 +223,8 @@ public static class BlenderPosedState
             if (!any) { lo = first; hi = last; any = true; } else { lo = Math.Min(lo, first); hi = Math.Max(hi, last); }
         }
         a.FrameStart = lo; a.FrameEnd = hi;
-        if (m.ExtensionsUsed.Contains("KHR_animation_pointer")) a.NotModelled = a.NotModelled ?? "KHR_animation_pointer - the importer animates through pointers this does not read";
+        // the pointer's reason stands over a cubic sampler's: it takes the range and the touched objects with it
+        if (m.ExtensionsUsed.Contains("KHR_animation_pointer")) { a.NotModelled = "KHR_animation_pointer - the importer animates through pointers this does not read"; a.RangeAndTouchedKnown = false; }
         return a;
     }
 

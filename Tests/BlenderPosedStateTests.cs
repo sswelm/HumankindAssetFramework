@@ -130,6 +130,13 @@ public class BlenderPosedStateTests
         // KHR_animation_pointer: the importer animates through pointers the reader does not carry
         var pointed = Model((0, "translation", new[] { 0f, 1f }, X(0f, 2f), null)); pointed.ExtensionsUsed.Add("KHR_animation_pointer");
         Assert.Contains("KHR_animation_pointer", BlenderPosedState.Import(pointed, 0).NotModelled);
+        Assert.False(BlenderPosedState.Import(pointed, 0).RangeAndTouchedKnown);
+        // with a cubic sampler as well the pointer's reason stands: the range of such a file is not Blender's (a cubic
+        // sampler alone leaves it known)
+        Assert.True(cubic.RangeAndTouchedKnown);
+        var both = Model((0, "translation", new[] { 0f, 1f }, new[] { 9f, 9f, 9f, 1f, 0f, 0f, 9f, 9f, 9f,   9f, 9f, 9f, 2f, 0f, 0f, 9f, 9f, 9f }, "CUBICSPLINE")); both.ExtensionsUsed.Add("KHR_animation_pointer");
+        var ba = BlenderPosedState.Import(both, 0);
+        Assert.True(ba.HasBezier); Assert.False(ba.RangeAndTouchedKnown); Assert.Contains("KHR_animation_pointer", ba.NotModelled);
     }
 
     [Fact]

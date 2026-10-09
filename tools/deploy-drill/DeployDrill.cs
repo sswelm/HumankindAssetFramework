@@ -87,7 +87,7 @@ static class DeployDrill
                 // Bezier keys with automatic handles are not modelled: the file is named and left, not compared
                 // (its frame range and the objects it touches are held all the same: the keys' frames are the importer's)
                 // KHR_animation_pointer: the importer animates through pointers the reader does not carry - nothing is held)
-                bool unsupported = action.NotModelled != null, blind = m.ExtensionsUsed.Contains("KHR_animation_pointer");
+                bool unsupported = action.NotModelled != null, blind = !action.RangeAndTouchedKnown;
                 // Pointer channels are unread even when another channel is CUBICSPLINE. Their frame range and touched
                 // objects cannot be compared; HasBezier describes an independent limitation.
                 var later = new HashSet<int>();
@@ -220,8 +220,7 @@ static class DeployDrill
                     left++;
                     cover[blind ? "left to Blender: KHR_animation_pointer (nothing of it is held)" : "left to Blender: a CUBICSPLINE sampler (Bezier keys with automatic handles)"]++;
                     if (blind && action.HasBezier) cover["left to Blender: KHR_animation_pointer with a CUBICSPLINE sampler (nothing of it is held)"]++;
-                    string reason = blind ? "KHR_animation_pointer - the importer animates through pointers this does not read" : action.NotModelled;
-                    Console.WriteLine($"LEFT {shortKey}: {reason}, which BlenderPosedState does not model" + (blind ? "" : " (its frame range and the objects it touches equal Blender's)"));
+                    Console.WriteLine($"LEFT {shortKey}: {action.NotModelled}, which BlenderPosedState does not model" + (blind ? "" : " (its frame range and the objects it touches equal Blender's)"));
                 }
                 else
                 {

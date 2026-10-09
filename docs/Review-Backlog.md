@@ -154,7 +154,7 @@ scenes ("not in View Layer") - today's behaviour, the drill passes it only as th
 Blender's animation machinery (frame evaluation, a constraint bake, fcurves, the exporter's sampling), five registry
 models use it, and its output goes to `rig_anim.py` - so Blender leaves that path only with (4). Parts: **1 the posed
 state** (`BlenderPosedState.cs`, `tools/deploy_drill.sh`: every object's matrix and animated property at a frame, the
-bits - a zero's sign included - on 84 files) - done 2026-10-09; 2 the decisions (strip, frame range, normalization, parts, slimming, cull, path) against the script's
+bits - a zero's sign included - on 85 files) - done 2026-10-09; 2 the decisions (strip, frame range, normalization, parts, slimming, cull, path) against the script's
 `DEPLOY` log lines; 3 the armature's rest and the binding; 4 the bake, the options (barrel, legs, recoil, wheels) and
 the role clips; 5 the exported animation, the wiring, the existing golden. OPEN for part 4: bit-exact or a tight
 tolerance - the script's decisions are thresholds on continuous values, the existing golden compares three decimals;
