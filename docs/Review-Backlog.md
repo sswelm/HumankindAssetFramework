@@ -154,12 +154,18 @@ scenes ("not in View Layer") - today's behaviour, the drill passes it only as th
 Blender's animation machinery (frame evaluation, a constraint bake, fcurves, the exporter's sampling), five registry
 models use it, and its output goes to `rig_anim.py` - so Blender leaves that path only with (4). Parts: **1 the posed
 state** (`BlenderPosedState.cs`, `tools/deploy_drill.sh`: every object's matrix and animated property at a frame, the
-bits - a zero's sign included - on 85 files) - done 2026-10-09; 2 the decisions (strip, frame range, normalization, parts, slimming, cull, path) against the script's
-`DEPLOY` log lines; 3 the armature's rest and the binding; 4 the bake, the options (barrel, legs, recoil, wheels) and
+bits - a zero's sign included - on 85 files) - done 2026-10-09; **2 the decisions** (`BlenderDeploy.cs`: strip, frame
+range, normalization, parts, slimming, cull, path, bone budget - against the script itself, cut at the armature: its
+log to the letter and the scene it leaves to the bit, 47 jobs) - done 2026-10-10, the dugout canoe LEFT to Blender
+(objects under animated bones); **2b the armature's pose** (pose bones from the importer's bone curves, what hangs
+from a bone) - next, the canoe needs it; 3 the armature's rest and the binding; 4 the bake, the options (barrel, legs, recoil, wheels) and
 the role clips; 5 the exported animation, the wiring, the existing golden. OPEN for part 4: bit-exact or a tight
 tolerance - the script's decisions are thresholds on continuous values, the existing golden compares three decimals;
 to be decided on measured distance. Not modelled yet: Bezier keys (a CUBICSPLINE sampler), `KHR_animation_pointer`, an
-animated armature's pose and what hangs from its bones, a camera's correction (also open for the prep); (4) `rig_anim` (3–4 weeks); (5)
+animated armature's pose and what hangs from its bones, a camera's correction (also open for the prep), morph
+targets (the evaluated mesh's bounds), nodes outside the named scene (excluded collections), mesh instancing. OPEN,
+found by the review of part 2 and not measured: `BlenderExportTree.StrCaseCmp` reads UTF-8 bytes as signed, Blender's
+object order has them unsigned - the exporter's child order with names past ASCII may be wrong the same way; (4) `rig_anim` (3–4 weeks); (5)
 `vehicle_rig` (4–8 weeks; the Lab already computes much of the geometry in C#).
 
 - **Blender-exact vertex positions for skinned parts** — OPEN (2026-10-02, found by 3c). Blender's importer skins a

@@ -342,7 +342,7 @@ public static class BlenderExportTree
         }
     }
 
-    static void StableSort<T>(List<T> list, Comparison<T> cmp)
+    internal static void StableSort<T>(List<T> list, Comparison<T> cmp)
     {
         var indexed = list.Select((x, i) => (x, i)).ToList();
         indexed.Sort((a, b) => { int c = cmp(a.x, b.x); return c != 0 ? c : a.i.CompareTo(b.i); });

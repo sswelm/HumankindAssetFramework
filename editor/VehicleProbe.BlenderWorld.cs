@@ -20,7 +20,7 @@ public static partial class VehicleProbe
 {
     static float Sqrtf(float x) => (float)Math.Sqrt((double)x);   // sqrtf: the double square root rounded to float is the correctly rounded float
 
-    static float[] IdentityF() { var m = new float[16]; m[0] = m[5] = m[10] = m[15] = 1f; return m; }
+    internal static float[] IdentityF() { var m = new float[16]; m[0] = m[5] = m[10] = m[15] = 1f; return m; }
 
     internal static float[] ToRowMajor(float[] bm) { var r = new float[16]; for (int c = 0; c < 4; c++) for (int w = 0; w < 4; w++) r[w * 4 + c] = bm[c * 4 + w]; return r; }
 
@@ -77,6 +77,34 @@ public static partial class VehicleProbe
         if (Det3(rot) < 0f) for (int c = 0; c < 3; c++) { size[c] = -size[c]; for (int k = 0; k < 3; k++) rot[c][k] = -rot[c][k]; }
         loc = new[] { it[0, 3], it[1, 3], it[2, 3] };
         quat = Mat3NormalizedToQuatFast(rot);
+    }
+
+    /// <summary>mat4_to_loc_rot_size of a Blender float[4][4] (column-major): each axis normalized (normalize_v3_v3), its
+    /// length the size; all three negated when the axes are left-handed; the location the fourth column.</summary>
+    internal static void Mat4ToLocRotSize(float[] bm, out float[] loc, out float[][] rot, out float[] size)
+    {
+        rot = new float[3][]; size = new float[3];
+        for (int c = 0; c < 3; c++)
+        {
+            float x = bm[c * 4], y = bm[c * 4 + 1], z = bm[c * 4 + 2];
+            float d = (float)((float)((float)(x * x) + (float)(y * y)) + (float)(z * z));
+            if (d > 1.0e-35f) { d = Sqrtf(d); float f = (float)(1.0f / d); rot[c] = new[] { (float)(x * f), (float)(y * f), (float)(z * f) }; }
+            else { rot[c] = new float[3]; d = 0f; }
+            size[c] = d;
+        }
+        if (Det3(rot) < 0f) for (int c = 0; c < 3; c++) { size[c] = -size[c]; for (int k = 0; k < 3; k++) rot[c][k] = -rot[c][k]; }
+        loc = new[] { bm[12], bm[13], bm[14] };
+    }
+
+    /// <summary>mat3_normalized_to_quat: the matrix made the identity when its determinant is not finite, negated when
+    /// it is negative, then mat3_normalized_to_quat_fast.</summary>
+    internal static float[] Mat3NormalizedToQuat(float[][] rot)
+    {
+        var mcopy = new[] { (float[])rot[0].Clone(), (float[])rot[1].Clone(), (float[])rot[2].Clone() };
+        float det = Det3(mcopy);
+        if (float.IsNaN(det) || float.IsInfinity(det)) mcopy = new[] { new[] { 1f, 0f, 0f }, new[] { 0f, 1f, 0f }, new[] { 0f, 0f, 1f } };
+        else if (det < 0f) for (int c = 0; c < 3; c++) for (int k = 0; k < 3; k++) mcopy[c][k] = -mcopy[c][k];
+        return Mat3NormalizedToQuatFast(mcopy);
     }
 
     /// <summary>determinant_m3_array over m[col][row].</summary>
@@ -154,7 +182,7 @@ public static partial class VehicleProbe
     /// Column-major. The two products and the sum change no VALUE - they decide the sign of a ZERO: a term of -0 survives
     /// only beside other negative zeros, and -0 + 0 is +0 (a rotated root's matrix had -0 where Blender's has +0 until
     /// this was written out; review of the posed state, 2026-10-09).</summary>
-    static float[] ObjectMatrix(float[] loc, float[] quat, float[] size)
+    internal static float[] ObjectMatrix(float[] loc, float[] quat, float[] size)
     {
         var tq = (float[])quat.Clone(); NormalizeQt(tq);
         const double M_SQRT2 = 1.4142135623730951;
