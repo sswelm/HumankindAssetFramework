@@ -16,6 +16,12 @@ the scene is then written out, every float as the hex of its bits.
     PART    <name> <parent or ->            the parts left, in the script's order
     BAD     <name>                          a culled part
     ALIAS   <dropped part> <kept part>      a pair-merge
+    ARM     <the armature's name>
+    BONEOF  <part> <bone>                   which bone each part rides (a merged part: its neighbour's)
+    RBONE   <bone> <parent or -> <head_local 3, tail_local 3, length, matrix_local 16>      arm.data.bones order
+    ANCHOR  <the object StaticRoot is constrained to, or ->
+    HULL    <the root-motion anchor or -> <travel> <model size>      (float64 hex, - when no mesh rides a bone)
+    PINV    <the armature's matrix_parent_inverse, 16>
     OBJ     <name> <type> <parent or -> <data name or -> <action 0|1>    every object left, bpy.data.objects order
     M       <name> <16 float32 hex, rows>                                  its matrix_world at the bind frame
     T       <name> <location 3, rotation_quaternion 4 (w x y z), scale 3>   its own transform there (float32 hex)
@@ -37,7 +43,7 @@ sys.stdout.reconfigure(encoding="utf-8")   # names are not ASCII: a redirected s
 args = sys.argv[sys.argv.index("--") + 1:]
 script, jobs = args[0], args[1]
 source = open(script, encoding="utf-8").read()
-cut = source.index("\n# --- 4. armature")
+cut = source.index("\nbpy.ops.nla.bake(")   # the armature, its constraints and the root-motion anchor are made; nothing is baked
 code = compile(source[:cut], script, "exec")
 fails = 0
 for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
@@ -73,6 +79,19 @@ for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
                 print("BAD\t%s" % n)
             for d, k in g["_alias_pairs"]:
                 print("ALIAS\t%s\t%s" % (d.name, k.name))
+            # the armature the script made (part 3): its bones at rest, which bone each part rides, the anchors
+            arm = g["arm"]
+            print("ARM\t%s" % arm.name)
+            for part, bone in g["bone_of"].items():
+                print("BONEOF\t%s\t%s" % (part, bone))
+            for b in arm.data.bones:
+                ml = b.matrix_local
+                print("RBONE\t%s\t%s\t%s" % (b.name, b.parent.name if b.parent else "-", "\t".join(
+                    h32(v) for v in (*b.head_local, *b.tail_local, b.length, *(ml[r][c] for r in range(4) for c in range(4))))))
+            print("ANCHOR\t%s" % (g["_static_anchor"].name if g["_static_anchor"] is not None else "-"))
+            print("HULL\t%s\t%s\t%s" % (g["_hull"].name if g["_hull"] is not None else "-", h64(g["_travel"]) if "_travel" in g else "-", h64(g["_dim_now"]) if "_dim_now" in g else "-"))
+            pi = arm.matrix_parent_inverse
+            print("PINV\t%s" % "\t".join(h32(pi[r][c]) for r in range(4) for c in range(4)))
             bpy.context.view_layer.update()
             for o in bpy.data.objects:
                 data = o.data.name if getattr(o, "data", None) is not None and hasattr(o.data, "name") else "-"

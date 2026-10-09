@@ -67,10 +67,10 @@ public class BlenderDeployTests
         var r = s.Decide();
         Assert.Null(r.Fallback);
         // by name ignoring case: Gun, Hat, Hull - the crew and the prop (by its MESH's name) are gone
-        Assert.Equal(new[] { "Gun", "Hat", "Hull" }, r.Objects.Select(o => o.Name));
-        Assert.Null(r.Objects[1].Parent);
+        Assert.Equal(new[] { "Gun", "Hat", "Hull" }, r.Objects.Where(o => o.Type != "ARMATURE").Select(o => o.Name));
+        var hatObj = r.Objects.First(o => o.Name == "Hat"); Assert.Null(hatObj.Parent);
         // the hat keeps its own transform: where its parent was no longer counts (glTF y 1 is Blender z 1)
-        Assert.Equal(1f, r.Objects[1].World[14]); Assert.Equal(0f, r.Objects[1].World[13]);
+        Assert.Equal(1f, hatObj.World[14]); Assert.Equal(0f, hatObj.World[13]);
         Assert.Equal("DEPLOY after strip: 3 objects, 3 meshes: Gun, Hat, Hull", r.Log[0]);
         Assert.Equal(new[] { "Gun" }, r.Parts.Select(p => p.Name));
         Assert.True(r.Legacy);
@@ -81,10 +81,10 @@ public class BlenderDeployTests
     public void A_strip_list_given_replaces_the_default_one_and_an_empty_name_in_it_takes_everything()
     {
         Scene Make() { var s = new Scene(); int hull = s.Node("Hull", mesh: true); s.Node("Soldier", hull, mesh: true); s.Move(s.Node("Gun", hull, mesh: true)); return s; }
-        Assert.Equal(new[] { "Gun", "Hull" }, Make().Decide().Objects.Select(o => o.Name));   // the default list takes the soldier
-        Assert.Equal(new[] { "Hull", "Soldier" }, Make().Decide("0|24| GUN ||||||0|||4|0|1").Objects.Select(o => o.Name));
+        Assert.Equal(new[] { "Gun", "Hull" }, Make().Decide().Objects.Where(o => o.Type != "ARMATURE").Select(o => o.Name));   // the default list takes the soldier
+        Assert.Equal(new[] { "Hull", "Soldier" }, Make().Decide("0|24| GUN ||||||0|||4|0|1").Objects.Where(o => o.Type != "ARMATURE").Select(o => o.Name));
         // stripExtra (the script's argv[16]) comes on top of the default list
-        Assert.Equal(new[] { "Hull" }, Make().Decide("0|24|||||||0|||4|0|1|gun").Objects.Select(o => o.Name));
+        Assert.Equal(new[] { "Hull" }, Make().Decide("0|24|||||||0|||4|0|1|gun").Objects.Where(o => o.Type != "ARMATURE").Select(o => o.Name));
         var all = Make().Decide("0|24|gun,,zzz||||||0|||4|0|1");
         Assert.Empty(all.Objects); Assert.True(all.Exit);
         Assert.Equal(1, all.FrameMin); Assert.Equal(1, all.FrameMax);   // no action left: 1..1
@@ -135,7 +135,7 @@ public class BlenderDeployTests
         s.Node("Below", flat, mesh: true);
         var r = s.Decide();
         Assert.Equal(new[] { "Flat" }, r.Bad);
-        Assert.Equal(new[] { "Good", "Hull" }, r.Objects.Select(o => o.Name));
+        Assert.Equal(new[] { "Good", "Hull" }, r.Objects.Where(o => o.Type != "ARMATURE").Select(o => o.Name));
         Assert.Contains("DEPLOY culled 1 degenerate part(s) (garbage world matrix): ['Flat']  (+1 descendant object(s))", r.Log);
     }
 
@@ -155,6 +155,46 @@ public class BlenderDeployTests
         Assert.All(r.Alias, a => Assert.StartsWith("Link", a.dropped.Name));
         Assert.Equal(("Link.001", "Link"), (r.Alias[0].dropped.Name, r.Alias[0].kept.Name));
         Assert.Equal(6, r.Parts.Count(p => p.Name.StartsWith("Few")));
+    }
+
+    [Fact]
+    public void The_armature_has_a_bone_per_part_at_the_parts_place_and_StaticRoot_for_what_no_bone_carries()
+    {
+        var s = new Scene();
+        int hull = s.Node("Hull", mesh: true);
+        int gun = s.Node("Gun", hull, mesh: true, t: new double[] { 0, 2, 0 }); s.Move(gun, 1f, new[] { 0f, 2f, 0.01f });
+        int sight = s.Node("Sight", gun, mesh: true, t: new double[] { 0, 0.5, 0 }); s.Move(sight, 1f, new[] { 0f, 0.5f, 0.01f });
+        var r = s.Decide();
+        Assert.Null(r.Fallback);
+        Assert.Equal("DeployArm", r.Armature.Name);                 // the legacy path's name
+        Assert.Equal(new[] { "Gun", "Sight", "StaticRoot" }, r.Bones.Select(b => b.Name));
+        Assert.Null(r.Bones[0].Parent); Assert.Same(r.Bones[0], r.Bones[1].Parent); Assert.Null(r.Bones[2].Parent);
+        // glTF y is Blender z: the gun's bone stands at height 2, its tail 0.1 above; the sight's at 2.5
+        Assert.Equal(new[] { 0f, 0f, 2f }, r.Bones[0].Head); Assert.Equal((float)(2f + 0.1f), r.Bones[0].Tail[2]);
+        Assert.Equal(2.5f, r.Bones[1].Head[2]);
+        Assert.Equal(new[] { 0f, 0f, 0f }, r.Bones[2].Head);
+        Assert.Equal(new[] { ("Gun", "Gun"), ("Sight", "Sight") }, r.BoneOf);
+        // the hull has no part above it: StaticRoot is anchored to it - a mesh without a parent, so to the mesh itself
+        Assert.Same(r.Objects.First(o => o.Name == "Hull"), r.StaticAnchor);
+        Assert.Contains("DEPLOY StaticRoot baked against 'Hull' (static geometry scale anchor)", r.Log);
+        // the biggest mesh on a bone hardly moves (0.01 against a model of 2): no root-motion anchor
+        Assert.True(r.TravelMeasured); Assert.Null(r.Hull); Assert.Null(r.Armature.Parent);
+    }
+
+    [Fact]
+    public void A_part_that_travels_becomes_the_root_motion_anchor_and_bone_names_are_made_unique()
+    {
+        var s = new Scene();
+        s.Node("Hull", mesh: true);
+        s.Move(s.Node("StaticRoot", mesh: true), 1f, new[] { 3f, 0f, 0f });   // travels 3 units; and takes the name
+        var r = s.Decide();
+        Assert.Equal(new[] { "StaticRoot", "StaticRoot.001" }, r.Bones.Select(b => b.Name));
+        Assert.Equal("StaticRoot", r.Hull.Name);
+        Assert.Equal(3.0, r.Travel, 5);
+        Assert.Same(r.Hull, r.Armature.Parent);
+        // the parent inverse pins the armature where it was at the bind frame: the identity
+        for (int i = 0; i < 16; i++) Assert.Equal(i % 5 == 0 ? 1f : 0f, r.Armature.World[i], 5);
+        Assert.Contains(r.Log, l => l.StartsWith("DEPLOY root-motion anchor: 'StaticRoot' travels 3.00 units (model 2.00)"));
     }
 
     [Fact]

@@ -149,7 +149,8 @@ n_prop=$(echo "$TOTAL" | awk '{print $13}')
 n_pose=$(echo "$TOTAL" | awk '{print $15}')
 echo "PASS — deploy drill, the posed state: $n_mat object matrices of $n_files files, at up to thirteen frames each, equal to Blender's bit for bit - the sign of a zero included - with $n_prop evaluated location/rotation/scale sets and $n_pose pose bones (location, rotation, scale, pose matrix); $n_left files left to Blender by name (Blender took $((t1 - t0)) s, the comparison $((t2 - t1)) s, in $JOBS processes each); ${#FIXTURES[@]} fixtures, $NOTE_SOURCES"
 
-# PART 2, THE DECISIONS (2026-10-10): what deploy_convert.py decides before it builds anything - the strip, the frame
+# PARTS 2 AND 3, THE DECISIONS AND THE ARMATURE (2026-10-10): what deploy_convert.py decides and builds before it BAKES
+# (the dump runs the script up to `bpy.ops.nla.bake(`): what it decides before it builds anything - the strip, the frame
 # range, the unit normalization, the parts, the bone slimming, the path, the degenerate cull, the bone budget.
 # tools/deploy-drill/blender_decisions_dump.py runs THE SCRIPT ITSELF, cut where it starts on the armature, for every
 # job: the project's recorded conversions (Assets/FactorySource/*/deploy_converted.args.txt - the source and the
@@ -176,7 +177,7 @@ n_jobs=$(grep -c "" "$TMPD/jobs.txt")
 t3=$(date +%s)
 "$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_decisions_dump.py")" -- "$WROOT/editor/Tools~/deploy_convert.py" "$WTMP/jobs.txt" > "$TMPD/decisions_raw.txt" 2>&1; drc=$?
 t4=$(date +%s)
-tr -d '\r' < "$TMPD/decisions_raw.txt" | grep -E "^(JOB|LOG|EXIT|RANGE|NORM|FLAG|PART|BAD|ALIAS|OBJ|M|T|BOX|DONE|FAIL)	" > "$TMPD/decisions.txt"
+tr -d '\r' < "$TMPD/decisions_raw.txt" | grep -E "^(JOB|LOG|EXIT|RANGE|NORM|FLAG|PART|BAD|ALIAS|ARM|BONEOF|RBONE|ANCHOR|HULL|PINV|OBJ|M|T|BOX|DONE|FAIL)	" > "$TMPD/decisions.txt"
 n_done=$(grep -c "^DONE" "$TMPD/decisions.txt")
 if [ "$drc" -ne 0 ] || [ "$n_done" -ne "$n_jobs" ]; then
   grep -E "^FAIL|Traceback|Error" "$TMPD/decisions_raw.txt" | head -8
@@ -200,7 +201,7 @@ for control in missing exit; do
     echo "FAIL — deploy drill rejected the intact $control control (rc=$controlrc)"; exit 1
   fi
 done
-for mode in log matrix transform box object part range done; do
+for mode in log matrix transform box object part range done bone boneof anchor hull pinv; do
   case "$mode" in
     log) reason="log line";;
     matrix|transform|box) reason="no complete $mode row";;
@@ -208,6 +209,11 @@ for mode in log matrix transform box object part range done; do
     part) reason="parts:";;
     range) reason="0 RANGE rows";;
     done) reason="no DONE row";;
+    bone) reason="bones:";;
+    boneof) reason="bone of each part:";;
+    anchor) reason="0 ANCHOR rows";;
+    hull) reason="0 HULL rows";;
+    pinv) reason="0 PINV rows";;
   esac
   "$TMPD/deploy.exe" --decisions "$WTMP/missing_dec/missing_jobs.txt" "$WTMP/missing_dec/$mode.txt" > "$TMPD/missing_dec_$mode.txt" 2>&1; badrc=$?
   if [ "$badrc" -ne 1 ] || ! grep -E "^FAIL " "$TMPD/missing_dec_$mode.txt" | grep -qF "$reason"; then
@@ -222,8 +228,8 @@ for mode in exit_zero exit_short exit_duplicate; do
     echo "FAIL — deploy drill accepted an invalid abort record ($mode, rc=$badrc)"; exit 1
   fi
 done
-echo "PASS — deploy drill rejects a decisions dump without a log line, a matrix, a transform, a box, an object, a part, the range or the end row"
+echo "PASS — deploy drill rejects a decisions dump without a log line, a matrix, a transform, a box, an object, a part, the range, the end row, a bone, a part's bone, the anchors or the parent inverse"
 echo "PASS — deploy drill accepts intact single-job controls and rejects a successful, truncated or duplicated abort record"
-n_j=$(echo "$TOTAL2" | awk '{print $3}'); n_l=$(echo "$TOTAL2" | awk '{print $7}'); n_o=$(echo "$TOTAL2" | awk '{print $9}'); n_ln=$(echo "$TOTAL2" | awk '{print $13}')
+n_j=$(echo "$TOTAL2" | awk '{print $3}'); n_l=$(echo "$TOTAL2" | awk '{print $7}'); n_o=$(echo "$TOTAL2" | awk '{print $9}'); n_ln=$(echo "$TOTAL2" | awk '{print $13}'); n_bones=$(echo "$TOTAL2" | awk '{print $15}')
 NOTE_MISSING=""; [ -z "$MISSING" ] || NOTE_MISSING="; recorded jobs whose source file is GONE, not judged:$MISSING"
-echo "PASS — deploy drill, the decisions: $n_j jobs ($n_rec recorded conversions, $n_fx fixture jobs) decided as deploy_convert.py decides them - $n_ln log lines to the letter, the parts, the cull and the merges, and $n_o objects with their matrices, transforms and bound boxes to the bit; $n_l jobs left to Blender as marked (Blender took $((t4 - t3)) s)$NOTE_MISSING"
+echo "PASS — deploy drill, the decisions: $n_j jobs ($n_rec recorded conversions, $n_fx fixture jobs) decided as deploy_convert.py decides them - $n_ln log lines to the letter, the parts, the cull and the merges, the armature it builds ($n_bones bones at rest, StaticRoot's anchor, the root-motion anchor) and $n_o objects with their matrices, transforms and bound boxes to the bit; $n_l jobs left to Blender as marked (Blender took $((t4 - t3)) s)$NOTE_MISSING"
