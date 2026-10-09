@@ -58,6 +58,17 @@ public static partial class VehicleProbe
         return InvertedSafe(it, true);
     }
 
+    [ThreadStatic] static bool inverseSawZeroDeterminant;
+
+    /// <summary>Matrix.inverted(): the same adjugate over the float32 determinant - null where mathutils raises
+    /// ("matrix does not have an inverse": a determinant of exactly zero).</summary>
+    internal static float[] Inverted(float[] it)
+    {
+        inverseSawZeroDeterminant = false;
+        var result = InvertedSafe(it, true);
+        return inverseSawZeroDeterminant ? null : result;
+    }
+
     static float[] InvertedSafe(float[] it, bool perturb)
     {
         // a1..d4 as adjoint_m4_m4 names them: aN = M[N-1][0] (column N-1, row 0), bN = M[N-1][1], cN = M[N-1][2], dN = M[N-1][3]
@@ -69,6 +80,7 @@ public static partial class VehicleProbe
         float det = (float)((float)((float)((float)(a1 * Det3(b2, b3, b4, c2, c3, c4, d2, d3, d4)) - (float)(b1 * Det3(a2, a3, a4, c2, c3, c4, d2, d3, d4))) + (float)(c1 * Det3(a2, a3, a4, b2, b3, b4, d2, d3, d4))) - (float)(d1 * Det3(a2, a3, a4, b2, b3, b4, c2, c3, c4)));
         if (det == 0f)
         {
+            inverseSawZeroDeterminant = true;
             // Even an invertible glTF IBM can underflow here. Match mathutils' single retry, including signed zeros
             // from the identity's adjugate when the perturbed determinant is still zero.
             if (!perturb) return InvertedSafe(IdentityRow(), false);

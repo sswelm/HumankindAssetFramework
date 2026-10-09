@@ -18,6 +18,9 @@ static class DecisionsDrill
         "no object with an action left (frame range 1..1)", "normalization: x100", "normalization: recentered", "normalization: none",
         "bone slimming", "the legacy path", "the contract path", "a culled part", "a culled part's descendant", "a pair-merge", "the script stops (no animated part)",
         "the recoil step off with a recoil range given", "left to Blender (BlenderDeploy.Fallback)", "an armature that is a part (its bones are animated)",
+        "no static mesh (StaticRoot has no anchor)", "StaticRoot anchored to a mesh that has no parent", "StaticRoot anchored to a static mesh's parent",
+        "a root-motion anchor (the armature parented for the bake)", "the biggest part does not travel (no anchor)", "no mesh rides a bone (no travel measured)",
+        "a bone under its part's parent's bone", "a part whose parent is no part (a root bone)",
     };
 
     static uint Bits(float f) => BitConverter.ToUInt32(BitConverter.GetBytes(f), 0);
@@ -35,7 +38,7 @@ static class DecisionsDrill
             jobs[t[0]] = t;
         }
         var cover = new SortedDictionary<string, long>(); foreach (var k in CoverKeys) cover[k] = 0;
-        int fails = 0, files = 0, left = 0; long matrices = 0, objects = 0, lines = 0;
+        int fails = 0, files = 0, left = 0; long matrices = 0, objects = 0, lines = 0, bones = 0;
         var blocks = new List<List<string>>();
         foreach (var dump in args.Skip(1))
             foreach (var line in File.ReadLines(dump))
@@ -60,7 +63,7 @@ static class DecisionsDrill
                 // The no-parts guard aborts with failure: a successful SystemExit is not the same decision.
                 if (exit && (exits.Count != 1 || exits[0].Length != 2 || exits[0][1] != "1"))
                     throw new InvalidDataException("the dump has an invalid EXIT row (expected exactly one EXIT with code 1)");
-                if (!exit) foreach (string k in new[] { "RANGE", "NORM", "FLAG" }) if (Of(k).Count != 1) throw new InvalidDataException($"the dump has {Of(k).Count} {k} rows");
+                if (!exit) foreach (string k in new[] { "RANGE", "NORM", "FLAG", "ARM", "ANCHOR", "HULL", "PINV" }) if (Of(k).Count != 1) throw new InvalidDataException($"the dump has {Of(k).Count} {k} rows");
                 var bObj = Of("OBJ"); var bM = Of("M").ToDictionary(t => t[1], t => t, StringComparer.Ordinal); var bT = Of("T").ToDictionary(t => t[1], t => t, StringComparer.Ordinal);
                 var bBox = Of("BOX").ToDictionary(t => t[1], t => t, StringComparer.Ordinal);
                 if (!exit)
@@ -108,6 +111,34 @@ static class DecisionsDrill
                     Compare(problems, "culled parts", r.Bad, Of("BAD").Select(t => t[1]).ToList());
                     Compare(problems, "pair-merges", r.Alias.Select(a => a.dropped.Name + "\t" + a.kept.Name).ToList(), Of("ALIAS").Select(t => t[1] + "\t" + t[2]).ToList());
                     Compare(problems, "objects", r.Objects.Select(o => $"{o.Name}\t{o.Type}\t{(o.Parent != null ? o.Parent.Name : "-")}\t{o.DataName ?? "-"}\t{(o.HasAction ? 1 : 0)}").ToList(), bObj.Select(t => string.Join("\t", t.Skip(1))).ToList());
+                    // ---- the armature (part 3): its name, which bone each part rides, the bones at rest, the anchors
+                    if (Of("ARM")[0][1] != r.Armature.Name) problems.Add($"the armature is '{r.Armature.Name}' here, '{Of("ARM")[0][1]}' in Blender");
+                    Compare(problems, "bone of each part", r.BoneOf.Select(b => b.part + "\t" + b.bone).ToList(), Of("BONEOF").Select(t => t[1] + "\t" + t[2]).ToList());
+                    var rb = Of("RBONE");
+                    foreach (var t in rb) if (t.Length != 26) throw new InvalidDataException($"the dump's bone row for '{t[1]}' has {t.Length} fields, expected 26");
+                    if (rb.Select(t => t[1]).Distinct().Count() != rb.Count) throw new InvalidDataException("the dump has a bone twice");
+                    // by name: arm.data.bones lists a bone after its parent, not in creation order (the order is the export's, part 5)
+                    Compare(problems, "bones", r.Bones.Select(b => b.Name).OrderBy(n => n, StringComparer.Ordinal).ToList(), rb.Select(t => t[1]).OrderBy(n => n, StringComparer.Ordinal).ToList());
+                    long wrongBones = 0; string firstBone = null;
+                    foreach (var t in rb)
+                    {
+                        var b = r.Bones.FirstOrDefault(x => x.Name == t[1]);
+                        if (b == null) continue;
+                        var mine = new List<string> { b.Parent != null ? b.Parent.Name : "-" };
+                        mine.AddRange(b.Head.Select(H)); mine.AddRange(b.Tail.Select(H)); mine.Add(H(b.Length));
+                        for (int row = 0; row < 4; row++) for (int c = 0; c < 4; c++) mine.Add(H(b.MatrixLocal[c * 4 + row]));
+                        bones++;
+                        int at = -1; for (int i = 0; i < mine.Count && at < 0; i++) if (mine[i] != t[2 + i]) at = i;
+                        if (at >= 0) { wrongBones++; firstBone = firstBone ?? $"'{b.Name}' field {at} ({(at == 0 ? "parent" : at < 4 ? "head" : at < 7 ? "tail" : at == 7 ? "length" : "matrix_local")}): here {mine[at]}, Blender {t[2 + at]}"; }
+                    }
+                    if (wrongBones > 0) problems.Add($"{wrongBones} of {rb.Count} bones at rest differ, first {firstBone}");
+                    string anchor = r.StaticAnchor != null ? r.StaticAnchor.Name : "-";
+                    if (anchor != Of("ANCHOR")[0][1]) problems.Add($"StaticRoot's anchor is '{anchor}' here, '{Of("ANCHOR")[0][1]}' in Blender");
+                    var hr = Of("HULL")[0];
+                    string hullMine = (r.Hull != null ? r.Hull.Name : "-") + " " + (r.TravelMeasured ? H64(r.Travel) + " " + H64(r.ModelSize) : "- -");
+                    if (hullMine != hr[1] + " " + hr[2] + " " + hr[3]) problems.Add($"the root-motion anchor: here {hullMine}, Blender {hr[1]} {hr[2]} {hr[3]} (anchor, travel, model size)");
+                    var pinv = r.Armature.ParentInverse ?? new float[] { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+                    if (!Enumerable.Range(0, 16).Select(i => H(pinv[(i % 4) * 4 + i / 4])).SequenceEqual(Of("PINV")[0].Skip(1))) problems.Add("the armature's matrix_parent_inverse differs");
                     long wrongM = 0, wrongT = 0, wrongB = 0; string firstM = null, firstT = null, firstB = null;
                     foreach (var o in r.Objects)
                     {
@@ -149,6 +180,17 @@ static class DecisionsDrill
                 if (r.Bad.Count > 0) cover["a culled part"]++;
                 if (log.Any(l => l.StartsWith("DEPLOY culled") && !l.Contains("(+0 descendant"))) cover["a culled part's descendant"]++;
                 if (r.Alias.Count > 0) cover["a pair-merge"]++;
+                if (!r.Exit)
+                {
+                    if (r.StaticAnchor == null) cover["no static mesh (StaticRoot has no anchor)"]++;
+                    else if (r.StaticAnchor.Type == "MESH") cover["StaticRoot anchored to a mesh that has no parent"]++;
+                    else cover["StaticRoot anchored to a static mesh's parent"]++;
+                    if (r.Hull != null) cover["a root-motion anchor (the armature parented for the bake)"]++;
+                    else if (r.TravelMeasured) cover["the biggest part does not travel (no anchor)"]++;
+                    else cover["no mesh rides a bone (no travel measured)"]++;
+                    if (r.Bones.Any(b => b.Parent != null)) cover["a bone under its part's parent's bone"]++;
+                    if (r.Bones.Any(b => b.Part != null && b.Part.Parent != null && b.Parent == null)) cover["a part whose parent is no part (a root bone)"]++;
+                }
                 Console.WriteLine(r.Exit ? $"PASS {key}: {log.Count} log lines equal to Blender's, and the script stops there as it does here (no scene is compared)"
                                          : $"PASS {key}: {log.Count} log lines, {r.Parts.Count} parts, {r.Objects.Count} objects with their matrices, transforms and boxes equal to Blender's");
             }
@@ -158,7 +200,7 @@ static class DecisionsDrill
         var dumped = new HashSet<string>(blocks.Select(b => b[0].Split('\t')[1]), StringComparer.Ordinal);
         foreach (var k in jobs.Keys) if (!dumped.Contains(k)) { fails++; Console.WriteLine($"FAIL {k}: the dump holds no such job"); }
         foreach (var kv in cover) Console.WriteLine($"COVER {kv.Value} {kv.Key}");
-        Console.WriteLine($"TOTAL jobs {files} failed {fails} left {left} objects {objects} matrices {matrices} lines {lines}");
+        Console.WriteLine($"TOTAL jobs {files} failed {fails} left {left} objects {objects} matrices {matrices} lines {lines} bones {bones}");
         return fails == 0 ? 0 : 1;
     }
 

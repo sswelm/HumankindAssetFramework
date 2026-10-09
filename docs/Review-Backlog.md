@@ -158,7 +158,8 @@ bits - a zero's sign included - on 85 files) - done 2026-10-09; **2 the decision
 range, normalization, parts, slimming, cull, path, bone budget - against the script itself, cut at the armature: its
 log to the letter and the scene it leaves to the bit, 47 jobs) - done 2026-10-10, the dugout canoe LEFT to Blender
 (objects under animated bones); **2b the armature's pose** (`VehicleProbe.BlenderPose.cs`: pose bones from the importer's bone curves,
-`BKE_pose_where_is`, what hangs from a bone) - done 2026-10-10, the canoe is decided in C#; 3 the armature's rest and the binding; 4 the bake, the options (barrel, legs, recoil, wheels) and
+`BKE_pose_where_is`, what hangs from a bone) - done 2026-10-10, the canoe is decided in C#; **3 the armature and its anchors** (the bones at rest, StaticRoot's anchor, the root-motion anchor - the oracle
+now runs the script up to the bake) - done 2026-10-10; the binding of the meshes goes with the bake's parts; 4 the bake, the options (barrel, legs, recoil, wheels) and
 the role clips; 5 the exported animation, the wiring, the existing golden. OPEN for part 4: bit-exact or a tight
 tolerance - the script's decisions are thresholds on continuous values, the existing golden compares three decimals;
 to be decided on measured distance. Not modelled yet: Bezier keys (a CUBICSPLINE sampler), `KHR_animation_pointer`, an

@@ -204,6 +204,83 @@ def nested(out, name="deploy_nested"):
     return s.write(out, name)
 
 
+def near(out, name, ride=True, names=False):
+    """A model that stands at the origin (no normalization: its static mesh has NO parent, so StaticRoot is anchored to
+    the mesh itself). `ride=False`: the only part is an empty no mesh hangs from - no mesh rides a bone, no travel is
+    measured. `names`: bone names that collide - a part called StaticRoot, two parts whose names agree in their first
+    63 bytes, an object called DeployArm (the armature's own name is taken)."""
+    s = Scene()
+    s.node("Hull", None, mesh=s.mesh("hull", 4.0, at=(-2.0, 0.0, -0.5)))
+    if ride:
+        p = s.node("Gun", None, mesh=s.mesh("gun", 1.0, at=(-0.5, 0.0, -0.125)), translation=[0.0, 1.0, 0.0])
+        s.anim(p, "rotation", [0.0, 1.0], [(0.0, 0.0, 0.0, 1.0), (0.0, 0.3826834, 0.0, 0.9238795)])
+        c = s.node("Sight", p, mesh=s.mesh("sight", 0.25, at=(-0.125, 0.0, 0.0)), translation=[0.0, 0.5, 0.0])
+        s.anim(c, "translation", [0.0, 1.0], [(0.0, 0.5, 0.0), (0.0, 0.75, 0.0)])
+    else:
+        e = s.node("Spinner", None, translation=[0.0, 1.0, 0.0])
+        s.anim(e, "rotation", [0.0, 1.0], [(0.0, 0.0, 0.0, 1.0), (0.0, 0.3826834, 0.0, 0.9238795)])
+    if names:
+        long_ = "L" * 63
+        for i, nm in enumerate(["StaticRoot", long_ + "_first", long_ + "_second", "DeployArm"]):
+            n = s.node(nm, None, mesh=s.mesh("m%d" % i, 0.5, at=(-0.25, 0.0, 0.0)), translation=[0.0, 0.25 * i, 0.0])
+            if nm != "DeployArm":
+                s.anim(n, "translation", [0.0, 1.0], [(0.0, 0.25 * i, 0.0), (0.0, 0.25 * i + 0.05, 0.0)])
+    return s.write(out, name)
+
+
+def chain(out):
+    """The review's (part 3): 140 instanced links, each the CHILD of the one before. The bone budget merges some away;
+    a link whose direct parent was merged gets a ROOT bone - the merged part's entry joins bone_of only after the
+    parents are mirrored (a port that added it first passed every other job)."""
+    s = Scene(); s.node("Hull", None, mesh=s.mesh("hull", 10.0, at=(-5.0, 0.0, -1.0)))
+    m = s.mesh("link", 0.2); prev = None
+    for i in range(140):
+        prev = s.node("Link" if i == 0 else "Link.%03d" % i, prev, mesh=m, translation=[0.03, 0.01, 0.0], rotation=[0.0, 0.0499792, 0.0, 0.9987503])
+        s.anim(prev, "translation", [0.0, 1.0], [(0.03, 0.01, 0.0), (0.03, 0.02, 0.0)])
+    return s.write(out, "deploy_chain")
+
+
+def ties(out, seed):
+    """The review's (part 3): many parts carrying ONE mesh, turned and scaled so that their volumes are equal or an
+    ulp apart - which of them is the biggest (the root-motion anchor) hangs on the float32 order of `dimensions`."""
+    import random, math
+    r = random.Random(seed); s = Scene()
+    def rq():
+        while True:
+            q = [r.gauss(0, 1) for _ in range(4)]; n = math.sqrt(sum(c * c for c in q))
+            if n > 1e-3:
+                return [c / n for c in q]
+    s.node("Hull", None, mesh=s.mesh("hull", 4.0, at=(-2.0, 0.0, -0.5)))
+    m = s.mesh("same", 2.0, at=(-1.0, 0.0, -0.25)); mode = ["rot", "rotscale", "matrix", "nest"][seed % 4]; prev = None
+    for i in range(40):
+        kw = dict(translation=[r.uniform(-1, 1), r.uniform(0, 1), r.uniform(-1, 1)], rotation=rq())
+        if mode == "rotscale":
+            v = r.uniform(0.5, 2.0); w = r.uniform(0.5, 2.0); kw["scale"] = [v, w, 1.0 / (v * w)]
+        if mode == "matrix":
+            kw = dict(matrix=[1.0, r.uniform(-.3, .3), 0.0, 0.0, r.uniform(-.3, .3), 1.0, r.uniform(-.3, .3), 0.0, 0.0, 0.0, 1.0, 0.0, r.uniform(-1, 1), r.uniform(0, 1), 0.0, 1.0])
+        a = s.node("P%03d" % i, prev if (mode == "nest" and r.random() < 0.7) else None, mesh=m, **kw)
+        t0 = tuple(kw.get("translation", (0.0, 0.0, 0.0)))
+        if mode == "matrix":
+            s.anim(a, "rotation", [0.0, 1.0], [tuple(rq()), tuple(rq())])
+        else:
+            s.anim(a, "translation", [0.0, 1.0], [t0, (t0[0], t0[1] + r.choice([0.01, 1.0, 3.0]), t0[2])])
+        prev = a
+    return s.write(out, "deploy_ties_%d" % seed)
+
+
+def flatx(out, name, travel):
+    """The review's (part 3): every mesh flat in X. The normalization's size is 0 by its guard (`mx.x > mn.x`); the
+    travel gate's model size has NO such guard and is the Y/Z extent - a small move must not anchor the armature."""
+    s = Scene()
+    def flat(mesh_name, size):
+        s.meshes.append({"name": mesh_name, "primitives": [{"attributes": {"POSITION": s.b.accessor([(0.0, 0.0, 0.0), (0.0, size, 0.0), (0.0, 0.0, size)], "f", "VEC3")}}]})
+        return len(s.meshes) - 1
+    s.node("Wall", None, mesh=flat("wall", 4.0))
+    p = s.node("Door", None, mesh=flat("door", 1.0))
+    s.anim(p, "translation", [0.0, 1.0], [(0.0, 0.0, 0.0), (0.0, travel, 0.0)])
+    return s.write(out, name)
+
+
 def half(out):
     """The lowest point exactly 0.125 below zero: Python prints the vertical offset as 0.12 (the exact half goes to the
     even digit), .NET's own formatting as 0.13."""
@@ -231,6 +308,15 @@ def main(out):
     # 0.4 across: still under the half unit the x100 gate asks for
     print("tiny_edge|%s|%s" % (small(out, "deploy_tiny_edge", 0.01), DEFAULT))
     print("half|%s|%s" % (half(out), DEFAULT))
+    # the armature (part 3): a static mesh without a parent; no mesh on any bone; bone and armature names already taken
+    print("near|%s|%s" % (near(out, "deploy_near"), DEFAULT))
+    print("near_noride|%s|%s" % (near(out, "deploy_near_noride", ride=False), DEFAULT))
+    print("near_names|%s|%s" % (near(out, "deploy_near_names", names=True), DEFAULT))
+    print("chain|%s|%s" % (chain(out), DEFAULT))
+    for seed in (3, 11, 47, 52, 117, 119):   # 3, 11, 47, 52: the four of eighty seeds on which a size summed in another float order picks another anchor
+        print("ties_%d|%s|%s" % (seed, ties(out, seed), DEFAULT))
+    print("flatx_small|%s|%s" % (flatx(out, "deploy_flatx_small", 0.05), DEFAULT))
+    print("flatx_big|%s|%s" % (flatx(out, "deploy_flatx_big", 3.0), DEFAULT))
     fb = bones(out)
     print("bones|%s|%s" % (fb, DEFAULT))
     # the armature itself stripped: what hung from its bones is left as roots, where its own transform puts it

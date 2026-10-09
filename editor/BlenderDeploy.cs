@@ -50,6 +50,7 @@ public static class BlenderDeploy
         public float[] BoneMatrix;                 // that bone's pose matrix moved to its tail (ob_parbone), armature space
         /// <summary>BKE_object_get_parent_matrix: the parent's matrix_world, through the bone when it hangs from one.</summary>
         public float[] ParentMatrix => BoneNode >= 0 && BoneMatrix != null ? VehicleProbe.MulM4(Parent.World, BoneMatrix) : Parent.World;
+        public float[] ParentInverse;              // matrix_parent_inverse when a script set one (the root-motion anchor), else the identity
         public int Node = -1, MeshNode = -1;       // the glTF node that became it / whose mesh it carries, or -1
         public bool HasAction;
         public Obj ShapeOf;                        // a bone shape: the armature whose bones show it
@@ -72,6 +73,22 @@ public static class BlenderDeploy
         public List<Obj> Parts = new List<Obj>();                // the parts left, in the script's order
         public List<string> Bad = new List<string>();            // the culled parts, sorted as Python sorts them
         public List<(Obj dropped, Obj kept)> Alias = new List<(Obj, Obj)>();
+        // ---- the armature the script builds (part 3): one bone per part at the part's place, StaticRoot, the anchors
+        public Obj Armature;                                      // "DeployArm" (the legacy path) or "DeployArmV2"
+        public readonly List<Bone> Bones = new List<Bone>();      // creation order: the parts', then StaticRoot
+        public readonly List<(string part, string bone)> BoneOf = new List<(string, string)>();   // which bone each part rides, the merged ones last
+        public Obj StaticAnchor;                                  // what StaticRoot is constrained to, or null
+        public Obj Hull;                                          // the root-motion anchor the armature is parented to for the bake, or null
+        public bool TravelMeasured; public double Travel, ModelSize;
+    }
+
+    /// <summary>A bone of the armature at rest.</summary>
+    public sealed class Bone
+    {
+        public string Name; public Bone Parent; public Obj Part;   // Part: the object it copies (null for StaticRoot)
+        public float[] Head, Tail;                                 // head_local, tail_local: the edit bone's, armature space
+        public float Length;
+        public float[] MatrixLocal;                                // bone.matrix_local, column-major
     }
 
     const int BoneWall = 124, PartBudget = 124;
@@ -244,10 +261,10 @@ public static class BlenderDeploy
         double dimScaled = dim * scale;
         bool recenter = dimScaled > 0.0 && (offH > 0.15 * dimScaled || offV > 0.15 * dimScaled);
         r.NormDim = dim; r.NormScale = scale; r.OffsetH = offH; r.OffsetV = offV; r.Recenter = recenter;
+        var pool = names.ObjectPool.Clone();
+        foreach (var g in gone) pool.Remove(g.Name);   // a removed object's name is free again
         if (scale != 1.0 || recenter)
         {
-            var pool = names.ObjectPool.Clone();
-            foreach (var g in gone) pool.Remove(g.Name);   // a removed object's name is free again
             var root = new Obj { Name = pool.Unique("UnitNormalize"), Type = "EMPTY", Euler = true, Loc = new float[3], Quat = new[] { 1f, 0f, 0f, 0f }, Scale = new[] { 1f, 1f, 1f }, World = VehicleProbe.IdentityF() };
             var roots = all.Where(o => o.Parent == null).ToList();
             // a new ID goes behind the last one whose name is not greater
@@ -311,6 +328,7 @@ public static class BlenderDeploy
             r.Log.Add($"DEPLOY culled {bad.Count} degenerate part(s) (garbage world matrix): [{string.Join(", ", r.Bad.Select(PyRepr))}]  (+{Math.Max(0, victims.Count - bad.Count)} descendant object(s))");
             parts = parts.Where(p => !Doomed(p)).ToList();
             var dead = new HashSet<Obj>(victims);
+            foreach (var o in victims) pool.Remove(o.Name);
             foreach (var o in all) if (o.ShapeOf != null && dead.Contains(o.ShapeOf)) o.Frozen = true;
             all = all.Where(o => !dead.Contains(o)).ToList();
         }
@@ -353,7 +371,96 @@ public static class BlenderDeploy
         {
             r.Log.Add("DEPLOY ERROR: no animated parts to convert (0 after filtering) — the source has no per-part TRS animation the deploy conversion can use (node/matrix-level animation is unsupported), or every part was culled. Aborting instead of exporting a static single-bone rig.");
             r.Exit = true;
+            return r;
         }
+
+        // ---- 4. the armature: a bone per part at the part's place (translation only, 0.1 along Z), the hierarchy mirrored
+        string deployArm = r.Legacy ? "DeployArm" : "DeployArmV2";
+        var arm = new Obj { Name = pool.Unique(deployArm), Type = "ARMATURE", DataName = names.ArmaturePool.Clone().Unique(deployArm), Euler = true, Loc = new float[3], Quat = new[] { 1f, 0f, 0f, 0f }, Scale = new[] { 1f, 1f, 1f }, World = VehicleProbe.IdentityF() };
+        { int at = all.Count; while (at > 0 && IdNameCmp(all[at - 1].Name, arm.Name) > 0) at--; all.Insert(at, arm); }
+        r.Armature = arm;
+        var boneNames = new HashSet<string>(StringComparer.Ordinal); var boneOf = new Dictionary<Obj, Bone>();
+        var head = new Dictionary<int, float[]>(); var tail = new Dictionary<int, float[]>(); var roll = new Dictionary<int, float>();
+        void AddBone(Obj part, string name, float[] h)
+        {
+            var b = new Bone { Name = BlenderNames.UniqueBone(boneNames, name), Part = part };
+            // Vector + Vector((0, 0, 0.1)) in float32
+            head[r.Bones.Count] = h; tail[r.Bones.Count] = new[] { (float)(h[0] + 0f), (float)(h[1] + 0f), (float)(h[2] + 0.1f) }; roll[r.Bones.Count] = 0f;
+            r.Bones.Add(b);
+            if (part != null) { boneOf[part] = b; r.BoneOf.Add((part.Name, b.Name)); }
+        }
+        foreach (var p in parts) AddBone(p, p.Name, new[] { p.World[12], p.World[13], p.World[14] });
+        foreach (var p in parts) if (p.Parent != null && boneOf.TryGetValue(p.Parent, out var pb)) boneOf[p].Parent = pb;
+        foreach (var (d, k) in r.Alias) if (boneOf.TryGetValue(k, out var kb)) { boneOf[d] = kb; r.BoneOf.Add((d.Name, kb.Name)); }
+        AddBone(null, "StaticRoot", new float[3]);
+        {
+            var ids = Enumerable.Range(0, r.Bones.Count).ToList();
+            var kids = ids.ToDictionary(i => i, i => new List<int>());
+            foreach (int i in ids) if (r.Bones[i].Parent != null) kids[r.Bones.IndexOf(r.Bones[i].Parent)].Add(i);
+            var rootIds = ids.Where(i => r.Bones[i].Parent == null).ToList();
+            VehicleProbe.RestFromEditBones(ids, kids, rootIds, head, tail, roll, (b, parent, armMat, offs, len) =>
+            {
+                var bone = r.Bones[b];
+                bone.MatrixLocal = armMat; bone.Length = len;
+                // head_local and tail_local are the EDIT bone's (arm_head, arm_tail: copied, never recomputed) - a child's
+                // matrix_local goes through its parent and back and may sit an ulp beside its own head
+                bone.Head = head[b]; bone.Tail = tail[b];
+            });
+        }
+        // StaticRoot is constrained to the first mesh no bone carries: its parent, or itself
+        meshes = all.Where(o => o.Type == "MESH").ToList();
+        bool Carried(Obj o, out Obj carrier) { for (carrier = o; carrier != null; carrier = carrier.Parent) if (boneOf.ContainsKey(carrier)) return true; return false; }
+        foreach (var mo in meshes)
+            if (!Carried(mo, out _)) { r.StaticAnchor = mo.Parent ?? mo; break; }
+        if (r.StaticAnchor != null) r.Log.Add($"DEPLOY StaticRoot baked against '{r.StaticAnchor.Name}' (static geometry scale anchor)");
+
+        // ---- the root-motion anchor: the biggest mesh's bone-carrying node; does it travel?
+        Obj hull = null; double bigVol = -1.0;
+        foreach (var mo in meshes)
+        {
+            // o.dimensions: the world matrix's axis lengths times the bound box's size, float32
+            float[] sz = new float[3];
+            for (int k = 0; k < 3; k++)
+            {
+                float x = mo.World[k * 4], y = mo.World[k * 4 + 1], z = mo.World[k * 4 + 2];
+                float len = VehicleProbe.Sqrtf((float)((float)((float)(x * x) + (float)(y * y)) + (float)(z * z)));
+                sz[k] = (float)(len * (float)(mo.BoxMax[k] - mo.BoxMin[k]));
+            }
+            double v = (double)sz[0] * (double)sz[1] * (double)sz[2];
+            if (v > bigVol && Carried(mo, out var carrier)) { bigVol = v; hull = carrier; }
+        }
+        if (hull != null)
+        {
+            float[] lo = null, hi = null;
+            foreach (int f in frames)
+            {
+                FrameSet(f);
+                var t = new[] { hull.World[12], hull.World[13], hull.World[14] };
+                if (lo == null) { lo = (float[])t.Clone(); hi = (float[])t.Clone(); }
+                else for (int k = 0; k < 3; k++) { if (t[k] < lo[k]) lo[k] = t[k]; if (t[k] > hi[k]) hi[k] = t[k]; }
+            }
+            FrameSet(fmin);
+            var d = new[] { (float)(hi[0] - lo[0]), (float)(hi[1] - lo[1]), (float)(hi[2] - lo[2]) };
+            r.Travel = Math.Sqrt(0.0 + (double)(float)(d[2] * d[2]) + (double)(float)(d[1] * d[1]) + (double)(float)(d[0] * d[0]));
+            // _dim_now = max(_nrm_mx - _nrm_mn) * _nrm_scale: the box again, WITHOUT the guard the normalization's size has
+            // (a model flat in X has size 0 there and its Y/Z extent here; review of part 3)
+            double dimNow = (double)(float)(mx[0] - mn[0]);
+            for (int k = 1; k < 3; k++) { double e = (double)(float)(mx[k] - mn[k]); if (e > dimNow) dimNow = e; }
+            r.ModelSize = dimNow * scale; r.TravelMeasured = true;
+            if (r.Travel > 0.10 * Math.Max(r.ModelSize, 1e-6))
+            {
+                // arm.parent = hull; arm.matrix_parent_inverse = hull.matrix_world.inverted() (mathutils' own inverse)
+                var inverse = VehicleProbe.Inverted(VehicleProbe.ToRowMajor(hull.World));
+                // Matrix.inverted() RAISES on a float32 determinant of zero: the script dies there
+                if (inverse == null) { r.Fallback = $"the root-motion anchor's matrix has no inverse ('{hull.Name}': the script fails on it)"; return r; }
+                arm.Parent = hull;
+                arm.ParentInverse = VehicleProbe.ToColumnMajor(inverse);
+                r.Hull = hull;
+                r.Log.Add($"DEPLOY root-motion anchor: '{hull.Name}' travels {PyFormat.Fixed(r.Travel, 2)} units (model {PyFormat.Fixed(r.ModelSize, 2)}) -> clip baked hull-relative (in-place)");
+                Update(all);
+            }
+        }
+        r.Objects = all;
         return r;
     }
 
@@ -368,7 +475,7 @@ public static class BlenderDeploy
             var local = VehicleProbe.ObjectMatrix(o.Loc, o.Euler ? new[] { 1f, 0f, 0f, 0f } : o.Quat, o.Scale);
             if (o.Parent == null) { o.World = local; return; }
             Calc(o.Parent);
-            o.World = VehicleProbe.MulM4(o.ParentMatrix, local);
+            o.World = VehicleProbe.MulM4(o.ParentInverse != null ? VehicleProbe.MulM4(o.ParentMatrix, o.ParentInverse) : o.ParentMatrix, local);
         }
         foreach (var o in all) Calc(o);
     }

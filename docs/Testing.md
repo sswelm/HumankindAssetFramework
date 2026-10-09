@@ -547,6 +547,38 @@ fail; not caught, both a zero's sign only: a pose bone's matrix built with the o
 history started from the node's own transform. Not held: a camera or a light under a bone. Next: part 3, the
 armature's rest and the binding.
 
+**Replacing `deploy_convert.py`, part 3: the armature and its anchors** (2026-10-10). What the script BUILDS before
+it bakes, from its `# --- 4. armature` to the call of `bpy.ops.nla.bake`: the armature (`DeployArm` on the legacy
+path, `DeployArmV2` on the contract one - object and datablock names made unique as Blender makes them), an edit
+bone per part at the part's world translation with its tail 0.1 up Z, the parts' DIRECT parents mirrored onto the
+bones, `bone_of` (a pair-merged part rides its neighbour's bone - an entry that joins only AFTER the parents are
+mirrored, so a part whose parent was merged away has a root bone), the `StaticRoot` bone and what it is constrained
+to (the first mesh no bone carries: its parent, or the mesh itself), and the root-motion anchor (the bone-carrying
+node of the mesh with the biggest `dimensions` volume; its travel over every seventh frame and the last; the
+armature parented to it with `matrix_parent_inverse = matrix_world.inverted()` when it travels more than a tenth of
+the model). The oracle's cut moved from the armature step to the bake (`blender_decisions_dump.py`), so ONE run of
+the real script covers parts 2 and 3; the drill compares, besides everything of part 2, the armature's name, the
+bone of each part, every bone at rest (parent, `head_local`, `tail_local`, length, `matrix_local`), both anchors,
+the travel and the model size as the bits of their doubles, the parent inverse - and the armature object's own row
+among the objects. 63 jobs, 1,218 bones at rest, 2,612 objects equal; the T-62's anchor (`T_62_body.003`, 12.57
+units against a model of 9.61) and its parent inverse to the bit. Leaving edit mode is the importer's code path:
+`VehicleProbe.RestFromEditBones` is now shared with it (the probe, prep and posed drills hold it as before).
+
+What the first comparison showed: `head_local` and `tail_local` are the EDIT bone's own values, never recomputed,
+while `matrix_local` goes through the parent's inverse and back - a child bone's matrix may sit an ulp beside its
+own head (two bones of 843, one in the canoe). *Review before the PR* (an independent agent, about 6,000 generated
+rigs through the real script): (1) the travel gate's model size is `max(mx - mn)` WITHOUT the guard the
+normalization's size has (`mx.x > mn.x`) - a model flat in X has size 0 there and its Y/Z extent here, the port
+reused the guarded one and anchored on any travel; (2) `Matrix.inverted()` RAISES on a float32 determinant of zero
+- the script dies, the port now leaves such a job to Blender (not drillable: Blender cannot run it; the reviewer's
+probe showed it); (3) two wrong ports passed every job: the merged part's bone known before the parents are
+mirrored, and the `dimensions` axis length summed in another float order - fixtures `chain` (140 links, each the
+child of the one before) and `ties` (forty parts of one mesh; four of eighty seeds pick another anchor under that
+mutant) are in the gate. 27 planted defects, all caught. The gate also removes a bone, a part's bone, either anchor
+or the parent inverse from the real dump: each must fail. Not in this part: binding the meshes (the script does it
+after the bake and the options); the order of `arm.data.bones` (compared by name; the order is the export's, part
+5). Next: part 4, the bake.
+
 **The Clip Range picker's in-process rig** (step 4, 2026-10-03): `HafUnityFrameTests` hold the preview frame's arithmetic
 without Unity — the X mirror's conjugation of rotations, matrices and matrix nodes; Unity's skinning formula fed the rig's
 matrices (the joints' world matrices, the inverse bind matrices, the vertex, all mirrored) against the reader's posed vertex;

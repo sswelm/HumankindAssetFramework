@@ -18,9 +18,11 @@ using System.Collections.Generic;
 
 public static partial class VehicleProbe
 {
-    static float Sqrtf(float x) => (float)Math.Sqrt((double)x);   // sqrtf: the double square root rounded to float is the correctly rounded float
+    internal static float Sqrtf(float x) => (float)Math.Sqrt((double)x);   // sqrtf: the double square root rounded to float is the correctly rounded float
 
     internal static float[] IdentityF() { var m = new float[16]; m[0] = m[5] = m[10] = m[15] = 1f; return m; }
+
+    internal static float[] ToColumnMajor(float[] it) => ToRowMajor(it);   // a transpose either way
 
     internal static float[] ToRowMajor(float[] bm) { var r = new float[16]; for (int c = 0; c < 4; c++) for (int w = 0; w < 4; w++) r[w * 4 + c] = bm[c * 4 + w]; return r; }
 

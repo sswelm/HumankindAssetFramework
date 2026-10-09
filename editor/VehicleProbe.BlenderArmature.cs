@@ -119,6 +119,36 @@ public static partial class VehicleProbe
             r.EditHead[b] = h; r.EditTail[b] = t; r.EditRoll[b] = roll[b];
         }
 
+        RestFromEditBones(bones, children, roots, head, tail, roll, (b, parent, arm, offs, len) =>
+        {
+            r.Bones.Add(b); r.Parent[b] = parent; r.ArmMat[b] = arm; r.OffsBone[b] = offs; r.Length[b] = len;
+            r.EditTrans[b] = ebTrans[b]; r.EditRot[b] = ebRot[b]; r.PyLength[b] = boneLength[b];
+        });
+
+        // ---- the exporter: matrix_world of each joint and its inverse bind matrix
+        var armaWorldRM = ToRowMajor(armatureWorld);
+        foreach (int b in bones)
+        {
+            var ml = ToRowMajor(r.ArmMat[b]);   // bone.matrix_local as mathutils items
+            r.MatrixLocal[b] = ml;
+            var world = MatMulMathutils(MatMulMathutils(armaWorldRM, ml), AxisBasisChange);
+            var cm = new float[16]; for (int col = 0; col < 4; col++) for (int row = 0; row < 4; row++) cm[col * 4 + row] = world[row * 4 + col];
+            r.World[b] = cm;
+            var ibm = InvertedSafe(MatMulMathutils(AxisBasisChange, MatMulMathutils(armaWorldRM, ml)));
+            var flat = new float[16];
+            for (int col = 0; col < 4; col++) for (int row = 0; row < 4; row++) flat[col * 4 + row] = ibm[row * 4 + col];
+            r.InverseBind[b] = flat;
+        }
+        armatureNotes = null;
+        return r;
+    }
+
+    /// <summary>Leaving edit mode (ED_armature_from_edit, armature_finalize_restpose, where_is_bone): the bones' rest from
+    /// edit bones given by head, tail (armature space) and roll - per bone, a parent before its children, its
+    /// matrix_local (column-major), its offset matrix in the parent and its length. Shared by the importer's armatures
+    /// and by the armature deploy_convert.py builds (BlenderDeploy).</summary>
+    internal static void RestFromEditBones(List<int> bones, Dictionary<int, List<int>> children, List<int> roots, Dictionary<int, float[]> head, Dictionary<int, float[]> tail, Dictionary<int, float> roll, Action<int, int, float[], float[], float> onBone)
+    {
         // ---- ED_armature_from_edit, "avoid (almost) zero sized bones" (5.x elongates them; it deleted them before): an edit
         // bone no longer than 1e-6 gets its tail moved to 2e-6 from the head - along the bone, or along Z when it has no
         // length at all (a length below half an ulp of the head, or an armature scaled by millions)
@@ -173,28 +203,10 @@ public static partial class VehicleProbe
             float boneRoll = -BlenderTrig.Atan2f(difmat[2 * 3 + 0], difmat[2 * 3 + 2]);
             arm = WhereIsBone(bh, bt, boneRoll, parent >= 0 ? armMat[parent] : null, parent >= 0 ? bLength[parent] : 0f, out float len1, out var offs);
             armMat[b] = arm; bLength[b] = len1;
-            r.Bones.Add(b); r.Parent[b] = parent; r.ArmMat[b] = arm; r.OffsBone[b] = offs; r.Length[b] = len1;
-            r.EditTrans[b] = ebTrans[b]; r.EditRot[b] = ebRot[b]; r.PyLength[b] = boneLength[b];
+            onBone(b, parent, arm, offs, len1);
             foreach (int c in children[b]) Finalize(c, b);
         }
         foreach (int b in roots) Finalize(b, -1);
-
-        // ---- the exporter: matrix_world of each joint and its inverse bind matrix
-        var armaWorldRM = ToRowMajor(armatureWorld);
-        foreach (int b in bones)
-        {
-            var ml = ToRowMajor(armMat[b]);   // bone.matrix_local as mathutils items
-            r.MatrixLocal[b] = ml;
-            var world = MatMulMathutils(MatMulMathutils(armaWorldRM, ml), AxisBasisChange);
-            var cm = new float[16]; for (int col = 0; col < 4; col++) for (int row = 0; row < 4; row++) cm[col * 4 + row] = world[row * 4 + col];
-            r.World[b] = cm;
-            var ibm = InvertedSafe(MatMulMathutils(AxisBasisChange, MatMulMathutils(armaWorldRM, ml)));
-            var flat = new float[16];
-            for (int col = 0; col < 4; col++) for (int row = 0; row < 4; row++) flat[col * 4 + row] = ibm[row * 4 + col];
-            r.InverseBind[b] = flat;
-        }
-        armatureNotes = null;
-        return r;
     }
 
     /// <summary>The neutral bone the exporter adds (tree.py add_neutral_bones): its transform is the Z-up to Y-up basis

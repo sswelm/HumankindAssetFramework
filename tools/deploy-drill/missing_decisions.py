@@ -37,7 +37,8 @@ def main(out, dump, jobs):
     def last(kind):
         return max(i for i, l in enumerate(job) if l.startswith(kind + "\t"))
     cuts = {"log": last("LOG"), "matrix": first("M"), "transform": first("T"), "box": first("BOX"), "object": first("OBJ"),
-            "part": first("PART"), "range": first("RANGE"), "done": first("DONE")}
+            "part": first("PART"), "range": first("RANGE"), "done": first("DONE"),
+            "bone": first("RBONE"), "boneof": first("BONEOF"), "anchor": first("ANCHOR"), "hull": first("HULL"), "pinv": first("PINV")}
     for mode, i in cuts.items():
         lines = list(job); del lines[i]
         write(mode, lines)
