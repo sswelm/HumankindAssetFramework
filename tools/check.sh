@@ -8,11 +8,47 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." && ROOT="$(pwd)" || exit 2
 fail=0
-run() {  # run <label> <command...>
-  local label="$1"; shift
+# Progress: every step appends a line to PROGRESS.md (the file beside the worktrees, kept open by the user) when it
+# ends, so a 20-minute gate can be watched without asking. Nothing here fails on its absence.
+PROGRESS="${HAF_PROGRESS:-$ROOT/../PROGRESS.md}"
+note() { [ -f "$PROGRESS" ] && printf '%s  gate  %s\n' "$(date +%H:%M)" "$*" >> "$PROGRESS"; return 0; }
+run() {  # run <label> <command...>: in sequence, the output as it comes
+  local label="$1"; shift; local t0=$(date +%s) t1
   printf '\n=== %s ===\n' "$label"
-  if "$@"; then printf '[PASS] %s\n' "$label"; else printf '[FAIL] %s\n' "$label"; fail=1; fi
+  if "$@"; then t1=$(date +%s); printf '[PASS] %s (%d s)\n' "$label" "$((t1 - t0))"; note "PASS $label ($((t1 - t0)) s)"
+  else t1=$(date +%s); printf '[FAIL] %s (%d s)\n' "$label" "$((t1 - t0))"; note "FAIL $label ($((t1 - t0)) s)"; fail=1; fi
 }
+# The drills are independent of one another (each works in its own mktemp directory and builds its own exe), and the
+# Blender-backed ones took the gate from a minute to 25 in sequence: they run AT ONCE, each into its own log, and the
+# logs are printed in declaration order; each worker reports progress and records its duration when it finishes.
+BG_LOGS=$(mktemp -d); bg_n=0; declare -a BG_LABEL BG_PID BG_T0
+run_bg() {  # run_bg <label> <command...>: started now, judged by run_bg_wait
+  local label="$1"; shift; local log="$BG_LOGS/$bg_n"
+  BG_LABEL[$bg_n]="$label"; BG_T0[$bg_n]=$(date +%s)
+  local t0="${BG_T0[$bg_n]}"
+  ( "$@" > "$log.out" 2>&1; rc=$?; t1=$(date +%s)
+    echo "$t1" > "$log.end"
+    if [ "$rc" = "0" ]; then note "PASS $label ($((t1 - t0)) s)"
+    else note "FAIL $label ($((t1 - t0)) s)"; fi
+    echo "$rc" > "$log.rc"
+  ) &
+  BG_PID[$bg_n]=$!; bg_n=$((bg_n + 1))
+}
+run_bg_wait() {
+  local i t1 completed
+  for ((i = 0; i < bg_n; i++)); do
+    wait "${BG_PID[$i]}"
+    t1=$(cat "$BG_LOGS/$i.end" 2>/dev/null)
+    # Missing completion metadata is also a failed worker, never a fabricated success.
+    completed=1
+    if ! [[ "$t1" =~ ^[0-9]+$ ]]; then t1="${BG_T0[$i]}"; completed=0; fi
+    printf '\n=== %s ===\n' "${BG_LABEL[$i]}"; cat "$BG_LOGS/$i.out"
+    if [ "$(cat "$BG_LOGS/$i.rc" 2>/dev/null)" = "0" ] && [ "$completed" = "1" ]; then printf '[PASS] %s (%d s)\n' "${BG_LABEL[$i]}" "$((t1 - BG_T0[$i]))"
+    else printf '[FAIL] %s (%d s)\n' "${BG_LABEL[$i]}" "$((t1 - BG_T0[$i]))"; fail=1; fi
+  done
+  rm -rf "$BG_LOGS"; bg_n=0
+}
+note "started ($(git rev-parse --short HEAD 2>/dev/null) $(git branch --show-current 2>/dev/null))"
 
 # 1) plugin compiles — dotnet build exits non-zero on ERRORS only (the one benign CS0169 warning is fine).
 run "plugin build (dotnet build -c Release)" dotnet build "$ROOT/HumankindAssetFramework.csproj" -c Release --nologo -v q
@@ -54,26 +90,28 @@ run "reader-gate drill (the gates refuse an unknown wrapper)" bash "$ROOT/tools/
 run "registry schema parity" bash "$ROOT/tools/check_schema_parity.sh"
 
 # 5) editor source guards — also in-repo since the move. Both guard editor/, so they belong with it.
+run "parallel gate regression tests (completion, paths and verdicts)" python "$ROOT/Tests/test_parallel_gate.py"
 #    5a) The editor compiles. Roslyn against Unity's own reference assemblies — the ONE check that needs a licensed
 #        Unity install (UnityEditor.dll + the MonoBleedingEdge profile), so it stays hook-only and never runs in CI.
 # No guard: the script itself fails LOUD when Unity/dotnet/Newtonsoft are absent. The old guard here was
 # always-true (it accepted the committed .rsp as proof of Unity), and the script then PASSed while compiling
 # nothing on any machine without Unity at the author's path — a fabricated green found 2026-09-02.
-run "editor scripts compile (Roslyn)" bash "$ROOT/tools/editor_compile_check.sh"
+run_bg "editor scripts compile (Roslyn)" bash "$ROOT/tools/editor_compile_check.sh"
 #    5a') The shared registry engine (districts, formations, sounds) RUN against real files: its own source, Unity's
 #         Roslyn and Mono, tiny stand-ins for JsonUtility/EditorPrefs. Same Unity prerequisite as 5a, same loud FAIL.
-run "registry engine drill (SingleSourceRegistry on real files)" bash "$ROOT/tools/registry_engine_drill.sh"
-run "backup dedup drill (BackupDedup on real files: unchanged means the bytes)" bash "$ROOT/tools/backup_dedup_drill.sh"
-run "blender exit drill (a crashed script fails the process; SKIP without Blender)" bash "$ROOT/tools/blender_exit_drill.sh"
-run "GLB reader drill (every registry GLB read; a sample compared with Blender; SKIP without the project)" bash "$ROOT/tools/glb_reader_drill.sh"
-run "GLB writer drill (every registry GLB written, read back equal; a sample re-imported by Blender; SKIP without the project)" bash "$ROOT/tools/glb_writer_drill.sh"
-run "vehicle probe drill (the Lab's probe in C#: every source probed, a sample's rows equal to Blender's own probe)" bash "$ROOT/tools/vehicle_probe_drill.sh"
-run "vehicle probe comparator tests (diagnostic rows must be complete)" python "$ROOT/Tests/test_compare_vehicle_probe.py"
-run "vehicle probe jobs tests (the recipes' arguments as the Lab formats them)" python "$ROOT/Tests/test_probe_jobs.py"
-run "mesh layout drill (Blender's vertex and edge order in C#: a sample's edge lists equal to Blender's own)" bash "$ROOT/tools/decimate_drill.sh"
-run "prep drill (the reduce plus the glTF exporter's mesh layout in C#: a sample equal to what Blender's prep_model.py wrote)" bash "$ROOT/tools/prep_drill.sh"
-run "deploy drill (Blender's posed state of an imported animation in C#: every object matrix and evaluated property at up to thirteen frames equal to Blender's own, the sign of a zero included; and deploy_convert.py's decisions and the armature it builds - its log, its parts, its bones at rest, its anchors and the scene it leaves - against the script itself, run up to the bake, and then the bake: every key of the action to the bit)" bash "$ROOT/tools/deploy_drill.sh"
-run "Workshop compaction drill (what no node uses is left out; every part reads as before - GLB reader and Blender; SKIP without the project)" bash "$ROOT/tools/workshop_compact_drill.sh"
+run_bg "registry engine drill (SingleSourceRegistry on real files)" bash "$ROOT/tools/registry_engine_drill.sh"
+run_bg "backup dedup drill (BackupDedup on real files: unchanged means the bytes)" bash "$ROOT/tools/backup_dedup_drill.sh"
+run_bg "blender exit drill (a crashed script fails the process; SKIP without Blender)" bash "$ROOT/tools/blender_exit_drill.sh"
+run_bg "GLB reader drill (every registry GLB read; a sample compared with Blender; SKIP without the project)" bash "$ROOT/tools/glb_reader_drill.sh"
+run_bg "GLB writer drill (every registry GLB written, read back equal; a sample re-imported by Blender; SKIP without the project)" bash "$ROOT/tools/glb_writer_drill.sh"
+run_bg "vehicle probe drill (the Lab's probe in C#: every source probed, a sample's rows equal to Blender's own probe)" bash "$ROOT/tools/vehicle_probe_drill.sh"
+run_bg "vehicle probe comparator tests (diagnostic rows must be complete)" python "$ROOT/Tests/test_compare_vehicle_probe.py"
+run_bg "vehicle probe jobs tests (the recipes' arguments as the Lab formats them)" python "$ROOT/Tests/test_probe_jobs.py"
+run_bg "mesh layout drill (Blender's vertex and edge order in C#: a sample's edge lists equal to Blender's own)" bash "$ROOT/tools/decimate_drill.sh"
+run_bg "prep drill (the reduce plus the glTF exporter's mesh layout in C#: a sample equal to what Blender's prep_model.py wrote)" bash "$ROOT/tools/prep_drill.sh"
+run_bg "deploy drill (Blender's posed state of an imported animation in C#: every object matrix and evaluated property at up to thirteen frames equal to Blender's own, the sign of a zero included; and deploy_convert.py's decisions and the armature it builds - its log, its parts, its bones at rest, its anchors and the scene it leaves - against the script itself, run up to the bake, and then the bake: every key of the action to the bit)" bash "$ROOT/tools/deploy_drill.sh"
+run_bg "Workshop compaction drill (what no node uses is left out; every part reads as before - GLB reader and Blender; SKIP without the project)" bash "$ROOT/tools/workshop_compact_drill.sh"
+run_bg_wait
 #    5b) The ownership-rebase hand-lists. A field the UI edits but the window's rebase doesn't re-apply is thrown
 #        away on every Save — silent, and the reason this gate exists. Pure source analysis, so CI can run it too.
 run "hand-list gate (ownership rebases)" bash "$ROOT/tools/check_handlists.sh"
@@ -86,5 +124,5 @@ run "package meta (every editor/ path has one)" bash "$ROOT/tools/check-package-
 run "exit status (no gate script reads a status from the end of a pipeline)" bash "$ROOT/tools/check-exit-status.sh"
 
 printf '\n========================================\n'
-if [ "$fail" -eq 0 ]; then printf 'CHECK: PASS — safe to push.\n'; else printf 'CHECK: FAIL — fix the [FAIL] step(s) above before pushing (or, only in a real emergency, git push --no-verify).\n'; fi
+if [ "$fail" -eq 0 ]; then printf 'CHECK: PASS — safe to push.\n'; note "DONE PASS"; else printf 'CHECK: FAIL — fix the [FAIL] step(s) above before pushing (or, only in a real emergency, git push --no-verify).\n'; note "DONE FAIL"; fi
 exit "$fail"

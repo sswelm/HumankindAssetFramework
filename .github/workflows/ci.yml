@@ -37,6 +37,8 @@ jobs:
         run: python Tests/test_compare_vehicle_probe.py
       - name: Vehicle probe job argument tests
         run: python Tests/test_probe_jobs.py
+      - name: Parallel gate regression tests
+        run: python Tests/test_parallel_gate.py
       # Needs neither the game nor Unity — pure Markdown/link checking, so it belongs on the runner too.
       # It was in the pre-push gate only, which a --no-verify (or a web edit) walks straight past.
       - name: Docs guard (links + notes convention)
