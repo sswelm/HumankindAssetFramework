@@ -57,6 +57,8 @@ public static class BlenderDeploy
         public bool Frozen;                        // no longer evaluated: matrix_world stays what it was (a bone shape whose armature is gone)
         public bool Euler;                         // made by an operator or by the script, not by the importer: no quaternion mode
         public float[] Loc, Quat, Scale;           // its own transform as the properties hold it
+        public float[] Eul = { 0f, 0f, 0f };       // rotation_euler as held: what turns an Euler-mode object (the script's own), never written by the importer
+        public bool HasAnimData => HasAction;      // animation_data: an action or nothing (the importer makes none without one)
         public float[] World;                      // matrix_world, column-major
         public float[] BoxMin, BoxMax;             // a mesh object's bound_box
     }
@@ -136,6 +138,33 @@ public static class BlenderDeploy
         /// <summary>Every object's matrix_world after the bind, the scene updated at the bind frame: the meshes under
         /// the armature, each at the armature's world times the inverse the bind gave it.</summary>
         public Dictionary<string, float[]> AfterBind;
+        // ---- 7, 7b (lazy, Finish): the animated empties removed, every other object's animation cleared, the actions
+        //      purged but the armature's, renamed "deploy"; 7c: the role clips. The oracle runs these after its frame sweep,
+        //      and what an object HOLDS after 7b is what the last evaluation left: a caller runs Finish after its own probes
+        //      (the Factory right away; the drill after the sweep)
+        public Action Finish;
+        public readonly List<string> Log7 = new List<string>();
+        public List<Obj> Objects7;                                // every object left after step 7, bpy.data.objects order (copies: Objects is untouched)
+        public List<string> Actions7;                             // every action left: "deploy"
+        public Dictionary<string, float[]> AfterPurge;             // every object's matrix_world after scene.frame_set(fmin), 7c's first act
+        /// <summary>arm.data.bones order after the recoil step: the edit bones' creation order, depth-first (a child
+        /// list keeps that order; the RecoilArm, made last, is the last child of the tube root's parent).</summary>
+        public List<string> BoneOrder;
+        public string RoleFallback;                                // why the role clips are Blender's (the script dies, or a span past 20,000 frames), or null
+        public readonly List<string> RoleLog = new List<string>();
+        public readonly List<Role> Roles = new List<Role>();       // in creation order: unfold, fold, folded, deployed[, recoil]
+        public string ActiveAction;                                // the armature's active action afterwards: "deploy"
+        /// <summary>What each pose bone holds after the role clips: rotation mode, location 3, quaternion 4, Euler 3, scale 3.</summary>
+        public Dictionary<string, (string mode, float[] values)> ArmPose7;
+    }
+
+    /// <summary>A role clip (7c): an action keyed by pose_bone.keyframe_insert frame after frame - per bone, per channel
+    /// (location 3, quaternion 4, scale 3 - never keyed here -, Euler 3) the keys, or null where the channel has no curve.</summary>
+    public sealed class Role
+    {
+        public string Name, Slot;                                  // the slot's identifier: "OB" + the armature's name
+        public readonly Dictionary<string, List<ArmKey>[]> Curves = new Dictionary<string, List<ArmKey>[]>(StringComparer.Ordinal);
+        public readonly List<string> BoneOrder = new List<string>();   // the curves' creation order follows the pose bones
     }
 
     /// <summary>A mesh the bind bound: its object (now under the armature, at the identity), its one vertex group - named
@@ -171,6 +200,7 @@ public static class BlenderDeploy
     public sealed class ArmKey
     {
         public float Frame, Value, LeftX, LeftY, RightX, RightY;
+        public string Interpolation = "BEZIER";
     }
 
     sealed class NotPortedException : Exception
@@ -1154,6 +1184,9 @@ public static class BlenderDeploy
                 ApplyMat4Root(mo, VehicleProbe.IdentityF());
                 mo.Parent = arm; mo.ParentInverse = null;
                 ApplyMat4(mo, VehicleProbe.IdentityF(), arm.World);
+                // BKE_animsys_write_to_rna_path compares the next evaluation against THESE values (a mesh that is a part keeps
+                // the +0 the apply wrote where its curve says -0: measured on bind_longname after the last-frame probe)
+                if (mo.Node >= 0) pose.Write(mo.Node, mo.Loc, mo.Quat, mo.Scale);
                 r.Bound.Add(new Bound { Mesh = mo, Group = group, DataName = data, Copied = copied, World = mw, Positions = P, Corners = corners, CustomNormal = cn });
                 bound++;
             }
@@ -1168,6 +1201,280 @@ public static class BlenderDeploy
             FrameSet(e); EvalArm(e);
             return r.ArmPose.ToDictionary(kv => kv.Key, kv => (float[])kv.Value.Clone(), StringComparer.Ordinal);
         };
+        // arm.data.bones after the recoil step: the edit list's order (creation, the RecoilArm last) nested depth-first
+        {
+            var ordered = new List<string>();
+            void Walk(Bone parent) { foreach (var b in r.BonesAfterRecoil) if (b.Parent == parent) { ordered.Add(b.Name); Walk(b); } }
+            Walk(null); r.BoneOrder = ordered;
+        }
+        r.Finish = () =>
+        {
+            if (r.Objects7 != null) return;
+            // ---- 7. the animated empties removed: a removed object's children are roots with their own transform (the
+            //      meshes are under the armature by now; an imported armature that is a part goes too, and what hung from
+            //      its bones keeps the transform it held). 7b: every other object's animation cleared (it holds what the last
+            //      evaluation left), every action but the armature's removed, that one renamed "deploy".
+            var removed = new HashSet<Obj>(parts.Where(p => p.Type != "MESH"));
+            var copy = new Dictionary<Obj, Obj>();
+            foreach (var o in all) if (!removed.Contains(o)) copy[o] = new Obj { Name = o.Name, Type = o.Type, DataName = o.DataName, Node = o.Node, MeshNode = o.MeshNode, Euler = o.Euler, Frozen = o.Frozen,
+                Loc = (float[])o.Loc.Clone(), Quat = (float[])o.Quat.Clone(), Scale = (float[])o.Scale.Clone(), Eul = (float[])o.Eul.Clone(), World = (float[])o.World.Clone(), BoxMin = o.BoxMin, BoxMax = o.BoxMax,
+                BoneNode = o.BoneNode, BoneMatrix = o.BoneMatrix, ParentInverse = o.ParentInverse, HasAction = o == arm };
+            foreach (var o in all)
+            {
+                if (removed.Contains(o)) continue;
+                var c = copy[o];
+                if (o.Parent != null && copy.TryGetValue(o.Parent, out var pc)) c.Parent = pc;
+                else { c.Parent = null; c.BoneNode = -1; c.BoneMatrix = null; c.ParentInverse = null; }
+            }
+            var scene7 = all.Where(o => !removed.Contains(o)).Select(o => copy[o]).ToList();
+            var arm7 = copy[arm];
+            r.Log7.Add("DEPLOY kept 1 action: deploy");
+            r.Objects7 = scene7; r.Actions7 = new List<string> { "deploy" };
+            // 7c's first act is scene.frame_set(fmin): the armature follows its action there, nothing else has one any more
+            EvalArm(fmin); current = fmin;
+            Update(scene7);
+            r.AfterPurge = scene7.ToDictionary(o => o.Name, o => (float[])o.World.Clone(), StringComparer.Ordinal);
+            try { RoleClips(scene7, arm7); }
+            catch (NotPortedException e) { r.RoleFallback = e.Message; }
+        };
+        void RoleClips(List<Obj> scene7, Obj arm7)
+        {
+            // ---- 7c. the baked deploy sampled frame by frame into role actions, each keyed with pose_bone.keyframe_insert
+            //      (Bezier, AUTO_CLAMPED, the smoothing solver): unfold (fmin..deploy_end), fold (backwards), folded (the
+            //      rest frame twice, or the wheels spun), deployed (the end twice), recoil (the pristine fire window with the
+            //      slam layered on the arm, the window played back slower, the later segments appended)
+            var rec = r.Recoil;
+            int deployEnd = fmax;
+            if (argc > 3 && !PyInt(Arg(3), out deployEnd)) throw new NotPortedException($"a deploy end the script cannot read ('{Arg(3)}': int() fails in the role clips)");
+            long tailEnd = rec != null ? rec.OutEnd : deployEnd;
+            long span = Math.Max(deployEnd, tailEnd) - fmin + 1, segSpan = 0;
+            foreach (var (ss, se, _) in r.Segments) segSpan = Math.Max(segSpan, (long)se - ss + 1);
+            if (span > 20000 || segSpan > 20000) throw new NotPortedException($"a role clip span past 20,000 frames ({span} to the deploy's or the tail's end, {segSpan} in a fire segment: the script would key for hours)");
+            var wheelNames = (argc > 17 ? Arg(17) : "").Split(',').Select(PyStrip).Where(w => w != "").ToList();
+            int wheelFrames = 15;
+            if (argc > 19 && PyStrip(Arg(19)) != "" && !PyInt(Arg(19), out wheelFrames)) throw new NotPortedException($"a wheel frame count the script cannot read ('{Arg(19)}')");
+            // folded holds N+1 poses even if a requested wheel is missing. Widen before adding so Int32.MaxValue
+            // cannot wrap to a negative count and silently produce an empty clip.
+            long wheelSpan = wheelNames.Count > 0 ? Math.Max(0L, (long)wheelFrames + 1) : 0L;
+            if (wheelSpan > 20000) throw new NotPortedException($"a role clip span past 20,000 frames ({wheelSpan} in the wheel clip: the script would key for hours)");
+            long last = tailEnd > deployEnd ? tailEnd : deployEnd;
+            var poseOrder = r.BoneOrder;
+            var eul = poseOrder.ToDictionary(bn => bn, bn => new[] { 0f, 0f, 0f }, StringComparer.Ordinal);
+            var mode = poseOrder.ToDictionary(bn => bn, bn => "QUATERNION", StringComparer.Ordinal);
+            // the snapshot: the evaluated pose per frame, as the bake keyed it
+            var snap = new Dictionary<long, Dictionary<string, float[]>>();
+            for (long f = fmin; f <= last; f++)
+            {
+                int e = (int)Math.Max(-1048574, Math.Min(1048574, f)); EvalArm(e); current = e;
+                snap[f] = poseOrder.ToDictionary(bn => bn, bn => r.ArmPose[bn].Take(7).ToArray(), StringComparer.Ordinal);
+            }
+            // pb.keyframe_insert on a role's own curves: the property's value keyed there (a key on that frame already is MOVED by the difference)
+            void InsertKey(Role role, string bn, int from, int count, long frame)
+            {
+                if (frame < int.MinValue || frame > int.MaxValue) throw new NotPortedException("a role key past a whole number (keyframe_insert takes it as a float)");
+                if (!role.Curves.TryGetValue(bn, out var channels)) { role.Curves[bn] = channels = new List<ArmKey>[13]; role.BoneOrder.Add(bn); }
+                for (int c = from; c < from + count; c++)
+                {
+                    float v = c < 10 ? r.ArmPose[bn][c] : eul[bn][c - 10];
+                    var list = channels[c] ?? (channels[c] = new List<ArmKey>());
+                    var key = list.FirstOrDefault(k => k.Frame == (float)frame);
+                    if (key == null) { key = new ArmKey { Frame = (float)frame, Value = v }; list.Add(key); list.Sort((x, y) => x.Frame.CompareTo(y.Frame)); }
+                    else { float dy = (float)(v - key.Value); key.Value = (float)(key.Value + dy); }
+                    BlenderFCurve.RecalcHandles(list);
+                }
+            }
+            Role MakeRole(string name, IList<long> frames, Dictionary<long, Dictionary<string, float[]>> snaps = null, (string bone, List<float[]> quats)? armOverride = null)
+            {
+                var src = snaps ?? snap;
+                var role = new Role { Name = name, Slot = "OB" + arm.Name }; r.Roles.Add(role);
+                for (int i = 0; i < frames.Count; i++)
+                {
+                    long f = frames[i];
+                    foreach (string bn in poseOrder)
+                    {
+                        var h = r.ArmPose[bn];
+                        if (armOverride != null && bn == armOverride.Value.bone)
+                        {
+                            h[0] = h[1] = h[2] = 0f; var q = armOverride.Value.quats[i]; h[3] = q[0]; h[4] = q[1]; h[5] = q[2]; h[6] = q[3];
+                        }
+                        else
+                        {
+                            if (!src.TryGetValue(f, out var at)) throw new NotPortedException($"a role clip frame the snapshot does not hold ({f} in '{name}': the script dies on the KeyError)");
+                            if (at.TryGetValue(bn, out var sv)) Array.Copy(sv, 0, h, 0, 7);
+                            else { h[0] = h[1] = h[2] = 0f; h[3] = 1f; h[4] = h[5] = h[6] = 0f; }   // a bone born after the snapshot (the RecoilArm vs the fire window)
+                        }
+                        InsertKey(role, bn, 0, 3, fmin + i); InsertKey(role, bn, 3, 4, fmin + i);
+                    }
+                }
+                return role;
+            }
+            var dep = new List<long>(); for (long f = fmin; f <= deployEnd; f++) dep.Add(f);
+            MakeRole("unfold", dep);
+            MakeRole("fold", Enumerable.Reverse(dep).ToList());
+            // the wheel spin in the folded role (argv[17..20]: bones, axis, frames, degrees)
+            string wheelAxis = argc > 18 ? PyStrip(Arg(18)) : "AUTO";
+            // .strip().upper(): no string past ASCII upper-cases to X, Y or Z, so any such axis is AUTO (the reviewer's note)
+            wheelAxis = wheelAxis.Any(ch => ch > 127) ? "AUTO" : wheelAxis.ToUpperInvariant(); if (wheelAxis == "") wheelAxis = "AUTO";
+            double wheelDeg = -360.0;
+            if (argc > 20 && PyStrip(Arg(20)) != "" && !PyFloat(Arg(20), out wheelDeg)) throw new NotPortedException($"wheel degrees the port does not read as Python's float() does ('{Arg(20)}')");
+            if (wheelNames.Count > 0)
+            {
+                var held = new List<long>(); for (int i = 0; i < wheelFrames + 1; i++) held.Add(fmin);
+                SpinWheels(MakeRole("folded", held), wheelNames, wheelAxis, wheelFrames, wheelDeg);
+            }
+            else MakeRole("folded", new List<long> { fmin, fmin });
+            MakeRole("deployed", new List<long> { deployEnd, deployEnd });
+            bool hasRecoil = r.FireSnap.Count > 0;
+            if (recoilOff && hadRecoil) { MakeRole("recoil", new List<long> { deployEnd, deployEnd }); hasRecoil = true; }
+            else if (hasRecoil)
+            {
+                var (rs2, re2, _) = r.Segments[0];
+                int ret2 = 4;
+                if (argc > 13 && PyStrip(Arg(13)) != "" && !PyInt(Arg(13), out ret2)) throw new NotPortedException($"a return slowness the script cannot read ('{Arg(13)}')");
+                var fwd = new List<long>(); for (long f = rs2; f <= re2; f++) fwd.Add(f);
+                var frames2 = new List<long>(fwd);
+                if (ret2 > 0) for (int i = fwd.Count - 2; i >= 0; i--) frames2.Add(fwd[i]);
+                var epilogue = new List<long>();
+                foreach (var (ss, se, st) in r.Segments.Skip(1))
+                {
+                    var fr = new List<long>(); for (long f = ss; f <= se; f += st) fr.Add(f);
+                    if (fr.Count > 0 && fr[fr.Count - 1] != se) fr.Add(se);
+                    epilogue.AddRange(fr);
+                }
+                frames2.AddRange(epilogue);
+                var arcKeys = rec != null ? rec.Frames.Distinct().ToList() : new List<int>();   // _arc_by_src: one theta a window frame, in the frames' order
+                var arc = rec != null ? rec.ArcBySrc : new Dictionary<int, double>();
+                var ks = arcKeys.OrderBy(k => k).ToList();
+                double ThetaAt(long t)
+                {
+                    if (arcKeys.Count == 0) return 0.0;
+                    if (t <= ks[0]) return arc[ks[0]];
+                    if (t >= ks[ks.Count - 1]) return arc[ks[ks.Count - 1]];
+                    int lo = ks.Where(k => k <= t).Max(), hi = ks.Where(k => k >= t).Min();
+                    if (lo == hi) return arc[lo];
+                    double w = (t - lo) / (double)(hi - lo);
+                    return arc[lo] * (1 - w) + arc[hi] * w;
+                }
+                int tPeak = 0; double peakAbs = double.NegativeInfinity;
+                foreach (int k in arcKeys) if (Math.Abs(arc[k]) > peakAbs) { peakAbs = Math.Abs(arc[k]); tPeak = k; }   // max(): the first of equals
+                double settle = 1.0;
+                if (argc > 15 && PyStrip(Arg(15)) != "" && !PyFloat(Arg(15), out settle)) throw new NotPortedException($"a slam settle the port does not read as Python's float() does ('{Arg(15)}')");
+                if (settle <= 0.0) settle = 1.0;
+                double SlamTheta(long t)
+                {
+                    if (arcKeys.Count == 0) return 0.0;
+                    if (t <= tPeak) return ThetaAt(t);
+                    double mm = tPeak - (t - tPeak) / settle;
+                    return mm >= rs2 ? ThetaAtD(mm) : 0.0;
+                }
+                double ThetaAtD(double t)
+                {
+                    // theta_at on a Python float: the comparisons and the weight in double
+                    if (t <= ks[0]) return arc[ks[0]];
+                    if (t >= ks[ks.Count - 1]) return arc[ks[ks.Count - 1]];
+                    int lo = ks.Where(k => k <= t).Max(), hi = ks.Where(k => k >= t).Min();
+                    if (lo == hi) return arc[lo];
+                    double w = (t - lo) / (double)(hi - lo);
+                    return arc[lo] * (1 - w) + arc[hi] * w;
+                }
+                var armQuats = new List<float[]>();
+                for (int i = 0; i < frames2.Count; i++)
+                    armQuats.Add(arcKeys.Count > 0 && i < fwd.Count ? QuaternionAxisAngle(rec.ALocal, SlamTheta(frames2[i])) : new[] { 1f, 0f, 0f, 0f });
+                var fire = r.FireSnap.ToDictionary(kv => (long)kv.Key, kv => kv.Value);
+                MakeRole("recoil", frames2, fire, (rec.ArmName, armQuats));
+                r.RoleLog.Add($"DEPLOY recoil role: PRISTINE fire cycle {rs2}..{re2} (barrel choreography intact) + Slam layer{(ret2 > 0 ? $" + palindrome return x{ret2}" : " (no return)")}"
+                    + (epilogue.Count > 0 ? $" + epilogue {string.Join(", ", r.Segments.Skip(1).Select(s => $"{s.start}..{s.end}/{s.step}"))} ({epilogue.Count} frames)" : ""));
+            }
+            r.ActiveAction = "deploy";   // the legacy action is made active again; nothing evaluates after it
+            r.RoleLog.Add($"DEPLOY role clips: unfold/fold/folded/deployed{(hasRecoil ? "/recoil" : "")} (+ legacy 'deploy')");
+            r.ArmPose7 = poseOrder.ToDictionary(bn => bn, bn => (mode[bn], r.ArmPose[bn].Take(7).Concat(eul[bn]).Concat(r.ArmPose[bn].Skip(7)).ToArray()), StringComparer.Ordinal);
+
+            void SpinWheels(Role role, List<string> wnames, string axisArg, int nframes, double degrees)
+            {
+                // _spin_wheels: each wheel bone turned about the LOCAL axis nearest its axle, Euler keys (XYZ mode) LINEAR
+                var byName = r.BonesAfterRecoil.ToDictionary(b => b.Name, b => b, StringComparer.Ordinal);
+                var spun = new List<(string bone, string dir)>();
+                foreach (string bn in wnames)
+                {
+                    string found = poseOrder.Contains(bn) ? bn : null;
+                    if (found == null)
+                    {
+                        if (bn.Any(ch => ch > 127) || poseOrder.Any(n => n.Any(ch => ch > 127))) throw new NotPortedException("a wheel bone sought by a substring among names past ASCII (Python's lower case of them)");
+                        found = poseOrder.FirstOrDefault(n => AsciiLower(n).Contains(AsciiLower(bn)));
+                    }
+                    if (found == null)
+                    {
+                        r.RoleLog.Add($"DEPLOY WHEEL ERROR: bone '{bn}' not found. Bones: [{string.Join(", ", poseOrder.Select(PyRepr))}]");
+                        continue;
+                    }
+                    var axle = WheelAxle(found, axisArg);
+                    // (arm.matrix_world @ db.matrix_local).to_3x3(): the armature at the identity, so matrix_local itself; m3 @ unit = a column
+                    if (!Enumerable.Range(0, 16).All(i => arm7.World[i] == (i % 5 == 0 ? 1f : 0f))) throw new NotPortedException("a wheel spin under an armature off the identity (mathutils' product is not modelled there)");
+                    var ml = byName[found].MatrixLocal;
+                    int bestI = 0; double bestD = 0.0;
+                    for (int i = 0; i < 3; i++)
+                    {
+                        var col = NormalizedPy(new[] { ml[i * 4], ml[i * 4 + 1], ml[i * 4 + 2] });
+                        double d = DotPy(col, axle);
+                        if (Math.Abs(d) > Math.Abs(bestD)) { bestI = i; bestD = d; }
+                    }
+                    double sign = bestD >= 0 ? 1.0 : -1.0;
+                    // pb.rotation_mode = 'XYZ': the held quaternion is normalized in place and converted into the Euler angles
+                    // (a wheel named twice: the second time the mode is XYZ already, nothing converts)
+                    if (mode[found] != "XYZ")
+                    {
+                        var hq = r.ArmPose[found]; var qq = new[] { hq[3], hq[4], hq[5], hq[6] };
+                        eul[found] = QuatToEulXYZ(qq); hq[3] = qq[0]; hq[4] = qq[1]; hq[5] = qq[2]; hq[6] = qq[3];
+                        mode[found] = "XYZ";
+                    }
+                    if (nframes == 0) throw new NotPortedException("a wheel spin of 0 frames (the script divides by it and dies)");
+                    for (int i = 0; i < nframes + 1; i++)
+                    {
+                        var e3 = new[] { 0f, 0f, 0f };
+                        // The RNA rotation_euler setter bounds the stored float; clamp before conversion to avoid Infinity.
+                        double angle = degrees * (Math.PI / 180.0) * sign * (i / (double)nframes);
+                        e3[bestI] = (float)Math.Max(-(double)float.MaxValue, Math.Min((double)float.MaxValue, angle));
+                        eul[found] = e3;
+                        InsertKey(role, found, 10, 3, fmin + i);
+                    }
+                    int at = spun.FindIndex(s => s.bone == found); string dir = (sign > 0 ? "+" : "-") + "XYZ"[bestI];
+                    if (at >= 0) spun[at] = (found, dir); else spun.Add((found, dir));
+                }
+                foreach (var channels in role.Curves.Values) foreach (var list in channels) if (list != null) foreach (var k in list) k.Interpolation = "LINEAR";
+                r.RoleLog.Add($"DEPLOY WHEEL SPIN in 'folded': {{{string.Join(", ", spun.Select(s => PyRepr(s.bone) + ": " + PyRepr(s.dir)))}}} (rest untouched), {nframes} frames, {PyFormat.Fixed(degrees, 0)} deg -> Movement clip = folded[1..{nframes}]");
+            }
+            float[] WheelAxle(string bn, string axisArg)
+            {
+                float[] axle;
+                if (axisArg == "X" || axisArg == "Y" || axisArg == "Z") axle = axisArg == "X" ? new[] { 1f, 0f, 0f } : axisArg == "Y" ? new[] { 0f, 1f, 0f } : new[] { 0f, 0f, 1f };
+                else
+                {
+                    // the verts skinned to this bone: every vertex of every mesh whose one group is the bone's (weight 1 > 0.5), through its matrix_world (mathutils)
+                    var pts = new List<float[]>();
+                    foreach (var o in scene7)
+                    {
+                        if (o.Type != "MESH") continue;
+                        var bound = r.Bound.FirstOrDefault(b => b.Mesh.Name == o.Name);
+                        if (bound == null || bound.Group != bn) continue;
+                        for (int v = 0; v < bound.Positions.Length / 3; v++) pts.Add(MatVec(o.World, bound.Positions[3 * v], bound.Positions[3 * v + 1], bound.Positions[3 * v + 2]));
+                    }
+                    if (pts.Count < 8)
+                    {
+                        r.RoleLog.Add($"DEPLOY WHEEL '{bn}': no skinned verts for AUTO axle — assuming X");
+                        axle = new[] { 1f, 0f, 0f };
+                    }
+                    else
+                    {
+                        var ext = new double[3];
+                        for (int i = 0; i < 3; i++) { double mx = double.NegativeInfinity, mn = double.PositiveInfinity; foreach (var p in pts) { if (p[i] > mx) mx = p[i]; if (p[i] < mn) mn = p[i]; } ext[i] = mx - mn; }
+                        int best = 0; for (int i = 1; i < 3; i++) if (ext[i] < ext[best]) best = i;   // min(): the first of equals
+                        axle = new[] { 0f, 0f, 0f }; axle[best] = 1f;
+                    }
+                }
+                int refI = 0; for (int i = 1; i < 3; i++) if (Math.Abs(axle[i]) > Math.Abs(axle[refI])) refI = i;
+                return axle[refI] >= 0 ? axle : new[] { -axle[0], -axle[1], -axle[2] };
+            }
+        }
         r.ProbeAt = frame =>
         {
             int e = Math.Max(-1048574, Math.Min(1048574, frame));
@@ -1309,6 +1616,19 @@ public static class BlenderDeploy
         }
     }
 
+    /// <summary>Vector.dot: float32 products summed in a double from the LAST component down (dot_vn_vn).</summary>
+    static double DotPy(float[] a, float[] b) { double d = 0.0; for (int i = 2; i >= 0; i--) d += (double)(float)(a[i] * b[i]); return d; }
+
+    /// <summary>Vector.normalized: the SQUARES summed in double (len_squared_vn), the double root, each component divided in float32; a
+    /// zero vector stays.</summary>
+    static float[] NormalizedPy(float[] v)
+    {
+        double d = 0.0; for (int i = 2; i >= 0; i--) d += (double)v[i] * v[i];
+        if (d == 0.0) return (float[])v.Clone();
+        float len = (float)Math.Sqrt(d), f = (float)(1.0f / len);   // normalize_vn_vn: the float32 reciprocal, multiplied
+        return new[] { (float)(v[0] * f), (float)(v[1] * f), (float)(v[2] * f) };
+    }
+
     /// <summary>mathutils' Quaternion(axis, angle): the angle wrapped into -pi..pi in float32 (angle_wrap_rad), the axis
     /// normalized, (cosf, axis sinf) of the half angle; the identity for an axis of no length.</summary>
     static float[] QuaternionAxisAngle(float[] axis, double angle)
@@ -1446,11 +1766,61 @@ public static class BlenderDeploy
         return true;
     }
 
+    /// <summary>mat3_normalized_to_eul for the one matrix an Euler-mode object is given here, the identity: of the two
+    /// candidates eul1 = (atan2f(0, 1), atan2f(-0, hypotf(1, 0)), atan2f(0, 1)) = (0, -0, 0) and eul2 (three of -pi), the
+    /// smaller sum of magnitudes wins - a Y of MINUS zero (measured on the armature after `arm.matrix_world = Identity`).
+    /// Any other matrix would need atan2f from the C runtime: not ported, left by name.</summary>
+    static float[] EulerOfIdentity(Obj o, float[][] rot) => Mat3ToEulXYZ(rot);
+
+    /// <summary>mat3_normalized_to_eulO for the XYZ order (mat3_normalized_to_eulo2, i j k = 0 1 2, no parity): hypotf and
+    /// atan2f from the C runtime, the candidate with the smaller sum of magnitudes (eul1 on a tie). `rot` in rows.</summary>
+    static float[] Mat3ToEulXYZ(float[][] m)
+    {
+        if (!BlenderTrig.Exact) throw new NotPortedException("an Euler extraction in a process without the 64-bit Windows C runtime (atan2f, hypotf)");
+        const float eps = 0.0000375f;   // EULER_HYPOT_EPSILON
+        float cy = BlenderTrig.Hypotf(m[0][0], m[0][1]);
+        float[] e1, e2;
+        if (cy > eps)
+        {
+            e1 = new[] { BlenderTrig.Atan2f(m[1][2], m[2][2]), BlenderTrig.Atan2f(-m[0][2], cy), BlenderTrig.Atan2f(m[0][1], m[0][0]) };
+            e2 = new[] { BlenderTrig.Atan2f(-m[1][2], -m[2][2]), BlenderTrig.Atan2f(-m[0][2], -cy), BlenderTrig.Atan2f(-m[0][1], -m[0][0]) };
+        }
+        else
+        {
+            e1 = new[] { BlenderTrig.Atan2f(-m[2][1], m[1][1]), BlenderTrig.Atan2f(-m[0][2], cy), 0f };
+            e2 = (float[])e1.Clone();
+        }
+        float d1 = (float)((float)(Math.Abs(e1[0]) + Math.Abs(e1[1])) + Math.Abs(e1[2])), d2 = (float)((float)(Math.Abs(e2[0]) + Math.Abs(e2[1])) + Math.Abs(e2[2]));
+        return d1 > d2 ? e2 : e1;
+    }
+
+    /// <summary>BKE_rotMode_change_values from QUATERNION to XYZ: the quaternion normalized IN PLACE (normalize_qt: the float32
+    /// root of the float32 dot, each component scaled by its reciprocal; a zero one becomes (0, 1, 0, 0)), quat_to_mat3 (the
+    /// products in double through M_SQRT2), then the Euler extraction.</summary>
+    static float[] QuatToEulXYZ(float[] q)
+    {
+        float dot = (float)((float)((float)((float)(q[0] * q[0]) + (float)(q[1] * q[1])) + (float)(q[2] * q[2])) + (float)(q[3] * q[3]));
+        float len = VehicleProbe.Sqrtf(dot);
+        if (len != 0f) { float f = (float)(1.0f / len); for (int i = 0; i < 4; i++) q[i] = (float)(q[i] * f); }
+        else { q[1] = 1f; q[0] = q[2] = q[3] = 0f; }
+        const double s2 = 1.4142135623730951;   // M_SQRT2
+        double q0 = s2 * q[0], q1 = s2 * q[1], q2 = s2 * q[2], q3 = s2 * q[3];
+        double qda = q0 * q1, qdb = q0 * q2, qdc = q0 * q3, qaa = q1 * q1, qab = q1 * q2, qac = q1 * q3, qbb = q2 * q2, qbc = q2 * q3, qcc = q3 * q3;
+        var m = new[]
+        {
+            new[] { (float)(1.0 - qbb - qcc), (float)(qdc + qab), (float)(-qdb + qac) },
+            new[] { (float)(-qdc + qab), (float)(1.0 - qaa - qcc), (float)(qda + qbc) },
+            new[] { (float)(qdb + qac), (float)(-qda + qbc), (float)(1.0 - qaa - qbb) },
+        };
+        return Mat3ToEulXYZ(m);
+    }
+
     /// <summary>`o.matrix_world = m` for an object without a parent.</summary>
     static void ApplyMat4Root(Obj o, float[] mat)
     {
         VehicleProbe.Mat4ToLocRotSize(mat, out var loc, out var rot, out var size);
         if (!o.Euler) o.Quat = BlenderPosedState.MulQtQt(new[] { 1f, -0f, -0f, -0f }, VehicleProbe.Mat3NormalizedToQuat(rot));
+        else o.Eul = EulerOfIdentity(o, rot);
         o.Loc = new[] { (float)(loc[0] - 0f), (float)(loc[1] - 0f), (float)(loc[2] - 0f) };
         o.Scale = new[] { (float)(size[0] / 1f), (float)(size[1] / 1f), (float)(size[2] / 1f) };
     }
@@ -1484,6 +1854,7 @@ public static class BlenderDeploy
             var q = VehicleProbe.Mat3NormalizedToQuat(rot);
             o.Quat = BlenderPosedState.MulQtQt(new[] { 1f, -0f, -0f, -0f }, q);
         }
+        else o.Eul = EulerOfIdentity(o, rot);
         o.Loc = new[] { (float)(loc[0] - 0f), (float)(loc[1] - 0f), (float)(loc[2] - 0f) };
         o.Scale = new[] { (float)(size[0] / 1f), (float)(size[1] / 1f), (float)(size[2] / 1f) };
     }

@@ -38,6 +38,18 @@ the scene is then written out, every float as the hex of its bits.
     N6      <mesh object> <custom_normal data type or -> <domain or -> <count> <sha256 of the INT16_2D values, little-endian, or ->
     DATA6   <mesh datablock> <users>        every mesh datablock (bpy.data.meshes), the copies the bind made included
     O7      <name> <16>                     every object's matrix_world after a view_layer.update()
+    stage 7 (7, 7b: after `# --- 7.`, before `# --- 7c.`) and 7c (to `# --- 8.`), written AFTER the sweep:
+    LOG7    <a DEPLOY line>                 DIES7 <exception>
+    OBJ7    <name> <type> <parent or -> <data or -> <action 0|1> <animation data 0|1>    every object left
+    ACT7    <action name>                   every action left
+    E7      <name> <rotation mode> <location 3, rotation_quaternion 4, rotation_euler 3, scale 3>   as held (no evaluation)
+    O8      <name> <16>                     matrix_world after scene.frame_set(fmin), 7c's first act
+    SKIP7C  <span> <segment span> <wheel span>  past 20,000 frames: 7c not run (the port must leave the job by name)
+    LOG7C   <a DEPLOY line>                 DIES7C <exception>
+    ACT7C   <action> <slot identifiers>     every action after 7c
+    FC7C    <action> <data_path> <index> <extrapolation> <auto_smoothing> <key: co, interpolation, handle types, handles>...
+    ACTIVE7 <the armature's active action> <its slot>
+    APB7    <bone> <rotation mode> <location 3, quaternion 4, euler 3, scale 3>   what the pose bones hold after 7c
     DONE    <key>
 """
 import bpy, sys, io, struct, contextlib, traceback, hashlib, array
@@ -67,6 +79,10 @@ cut5 = source.index("\n# --- 6.")             # ... and then the recoil tail (5d
 code5 = compile(source[cut4:cut5], script, "exec")
 cut6 = source.index("\n# --- 7.")             # ... and then the bind (6)
 code6 = compile(source[cut5:cut6], script, "exec")
+cut7 = source.index("\n# --- 7c.")            # ... and then the empties removed, the actions purged (7, 7b)
+code7 = compile(source[cut6:cut7], script, "exec")
+cut8 = source.index("\n# --- 8.")             # ... and then the role clips (7c)
+code7c = compile(source[cut7:cut8], script, "exec")
 fails = 0
 for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
     line = line.rstrip("\r")
@@ -278,8 +294,9 @@ for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
             #      float32 and a sample), its custom normals (unchanged: the attribute is INT16_2D, which mesh_transform leaves
             #      alone), every mesh datablock with its users, and every object's matrix_world after an update. (The rows at
             #      the last frame and the sweep below then see the bound scene: the meshes under the armature.)
+            dies6 = False
             if exit5 is None and not dies5:
-                out6 = io.StringIO(); dies6 = False
+                out6 = io.StringIO()
                 try:
                     with contextlib.redirect_stdout(out6):
                         exec(code6, g)
@@ -373,6 +390,80 @@ for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
                     for pb in arm.pose.bones:
                         q = pb.rotation_quaternion
                         print("SW\t%d\t%s\t%s" % (frame, pb.name, "\t".join(h32(v) for v in (*pb.location, q.w, q.x, q.y, q.z, *pb.scale))))
+            # ---- stage 7 (parts 7, 7b): the script goes on to its `# --- 7c.` - the animated empties removed (their children
+            #      left as roots), every other object's animation cleared, every action but the armature's removed and that
+            #      one renamed. What it printed; every object left (order, type, parent, data, action, animation data); the
+            #      actions left; every object's own transform as it holds it (the mode, the quaternion, the Euler angles); then
+            #      the scene set to the bind frame (7c's first act) and every matrix_world
+            if exit5 is None and not dies5 and not dies6:
+                out7 = io.StringIO(); dies7 = False
+                try:
+                    with contextlib.redirect_stdout(out7):
+                        exec(code7, g)
+                except Exception as e:
+                    print("DIES7\t%s: %s" % (type(e).__name__, e)); dies7 = True
+                for l in out7.getvalue().split("\n"):
+                    if l.startswith("DEPLOY"):
+                        print("LOG7\t%s" % l)
+                if not dies7:
+                    for o in bpy.data.objects:
+                        data = o.data.name if getattr(o, "data", None) is not None and hasattr(o.data, "name") else "-"
+                        print("OBJ7\t%s\t%s\t%s\t%s\t%d\t%d" % (o.name, o.type, o.parent.name if o.parent else "-", data,
+                              1 if o.animation_data and o.animation_data.action else 0, 1 if o.animation_data else 0))
+                    for a in bpy.data.actions:
+                        print("ACT7\t%s" % a.name)
+                    for o in bpy.data.objects:
+                        q = o.rotation_quaternion; e = o.rotation_euler
+                        print("E7\t%s\t%s\t%s" % (o.name, o.rotation_mode, "\t".join(h32(v) for v in (*o.location, q.w, q.x, q.y, q.z, e.x, e.y, e.z, *o.scale))))
+                    bpy.context.scene.frame_set(g["fmin"])
+                    for o in bpy.data.objects:
+                        mw = o.matrix_world
+                        print("O8\t%s\t%s" % (o.name, "\t".join(h32(mw[r][c]) for r in range(4) for c in range(4))))
+                    # ---- stage 7c (the role clips): the baked deploy sampled frame by frame into unfold, fold, folded (the
+                    #      wheels spun, when asked), deployed and recoil (the pristine fire window with the slam layered on the
+                    #      arm). A span past 20,000 frames is not run (the script would key for hours): SKIP7C, and the port
+                    #      must leave such a job by name. What it printed; the death; every action with its slot and every
+                    #      curve key by key (handles included); every pose bone's rotation mode; the active action; what the
+                    #      pose bones hold afterwards (the last role's assignment: nothing evaluates after it)
+                    av = g["argv"]
+                    deploy_end = int(av[3]) if len(av) > 3 else g["fmax"]
+                    tail_end = g.get("recoil_out_end")
+                    span = max(deploy_end, tail_end if tail_end is not None else deploy_end) - g["fmin"] + 1
+                    seg_span = max([se - ss + 1 for ss, se, st in g["_segments"]] + [0])
+                    wheel_span = 0
+                    if len(av) > 17 and any(w.strip() for w in av[17].split(",")):
+                        try:
+                            wheel_span = max(0, (int(av[19]) if len(av) > 19 and av[19].strip() else 15) + 1)
+                        except ValueError:
+                            pass  # let code7c report the script's own int() failure
+                    if span > 20000 or seg_span > 20000 or wheel_span > 20000:
+                        print("SKIP7C\t%d\t%d\t%d" % (span, seg_span, wheel_span))
+                    else:
+                        out7c = io.StringIO(); dies7c = False
+                        try:
+                            with contextlib.redirect_stdout(out7c):
+                                exec(code7c, g)
+                        except Exception as e:
+                            print("DIES7C\t%s: %s" % (type(e).__name__, e)); dies7c = True
+                        for l in out7c.getvalue().split("\n"):
+                            if l.startswith("DEPLOY"):
+                                print("LOG7C\t%s" % l)
+                        if not dies7c:
+                            for a in bpy.data.actions:
+                                print("ACT7C\t%s\t%s" % (a.name, ",".join(s.identifier for s in a.slots)))
+                                for layer in a.layers:
+                                    for strip in layer.strips:
+                                        for cb in strip.channelbags:
+                                            for fc in cb.fcurves:
+                                                print("FC7C\t%s\t%s\t%d\t%s\t%s\t%s" % (a.name, fc.data_path, fc.array_index, fc.extrapolation, fc.auto_smoothing, "\t".join(
+                                                    "%s:%s:%s:%s:%s:%s:%s:%s:%s" % (h32(kp.co[0]), h32(kp.co[1]), kp.interpolation, kp.handle_left_type, kp.handle_right_type,
+                                                                                    h32(kp.handle_left[0]), h32(kp.handle_left[1]), h32(kp.handle_right[0]), h32(kp.handle_right[1]))
+                                                    for kp in fc.keyframe_points)))
+                            ad = arm.animation_data
+                            print("ACTIVE7\t%s\t%s" % (ad.action.name if ad and ad.action else "-", ad.action_slot.identifier if ad and ad.action_slot else "-"))
+                            for pb in arm.pose.bones:
+                                q = pb.rotation_quaternion; e = pb.rotation_euler
+                                print("APB7\t%s\t%s\t%s" % (pb.name, pb.rotation_mode, "\t".join(h32(v) for v in (*pb.location, q.w, q.x, q.y, q.z, e.x, e.y, e.z, *pb.scale))))
         print("DONE\t%s" % key, flush=True)
     except Exception as e:
         traceback.print_exc()

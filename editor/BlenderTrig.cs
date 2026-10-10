@@ -21,6 +21,9 @@ public static class BlenderTrig
     [DllImport("ucrtbase.dll", EntryPoint = "atan2f", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     static extern float ucrt_atan2f(float y, float x);
 
+    [DllImport("ucrtbase.dll", EntryPoint = "_hypotf", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    static extern float ucrt_hypotf(float x, float y);
+
     [DllImport("ucrtbase.dll", EntryPoint = "asinf", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     static extern float ucrt_asinf(float x);
 
@@ -45,6 +48,7 @@ public static class BlenderTrig
     public static float Cosf(float x) => Exact ? ucrt_cosf(x) : (float)Math.Cos((double)x);
     public static float Sinf(float x) => Exact ? ucrt_sinf(x) : (float)Math.Sin((double)x);
     public static float Atan2f(float y, float x) => Exact ? ucrt_atan2f(y, x) : (float)Math.Atan2((double)y, (double)x);
+    public static float Hypotf(float x, float y) => Exact ? ucrt_hypotf(x, y) : (float)Math.Sqrt((double)x * x + (double)y * y);
     public static float Asinf(float x) => Exact ? ucrt_asinf(x) : (float)Math.Asin((double)x);
     public static float Acosf(float x) => Exact ? ucrt_acosf(x) : (float)Math.Acos((double)x);
 
