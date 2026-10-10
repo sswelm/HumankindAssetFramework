@@ -180,7 +180,7 @@ n_jobs=$(grep -c "" "$TMPD/jobs.txt")
 t3=$(date +%s)
 "$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_decisions_dump.py")" -- "$WROOT/editor/Tools~/deploy_convert.py" "$WTMP/jobs.txt" > "$TMPD/decisions_raw.txt" 2> "$TMPD/decisions_err.txt"; drc=$?   # stderr apart: a depsgraph warning lands in the middle of a row otherwise
 t4=$(date +%s)
-tr -d '\r' < "$TMPD/decisions_raw.txt" | grep -E "^(JOB|LOG|LOG2|EXIT|RANGE|NORM|FLAG|PART|BAD|ALIAS|ARM|BONEOF|RBONE|ANCHOR|HULL|PINV|OBJ|M|T|BOX|ACT|FC|FCA|PB2|PB3|M2|O2|O3|LOG3|SNAP|APB|O4|LOG4|FC4|APB4|O5|LOG5|EXIT5|DIES5|R5|RBONE5|FC5|APB5|PM5|O6|SW|DONE|FAIL)	" > "$TMPD/decisions.txt"
+tr -d '\r' < "$TMPD/decisions_raw.txt" | grep -E "^(JOB|LOG|LOG2|EXIT|RANGE|NORM|FLAG|PART|BAD|ALIAS|ARM|BONEOF|RBONE|ANCHOR|HULL|PINV|OBJ|M|T|BOX|ACT|FC|FCA|PB2|PB3|M2|O2|O3|LOG3|SNAP|APB|O4|LOG4|FC4|APB4|O5|LOG5|EXIT5|DIES5|R5|RBONE5|FC5|APB5|PM5|O6|LOG6|DIES6|BIND|VG6|MOD6|V6|VX6|N6|DATA6|O7|SW|DONE|FAIL)	" > "$TMPD/decisions.txt"
 n_done=$(grep -c "^DONE" "$TMPD/decisions.txt")
 if [ "$drc" -ne 0 ] || [ "$n_done" -ne "$n_jobs" ]; then
   grep -E "^FAIL|Traceback|Error" "$TMPD/decisions_raw.txt" "$TMPD/decisions_err.txt" | head -8
