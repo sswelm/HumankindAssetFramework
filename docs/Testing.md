@@ -848,6 +848,69 @@ inside Unity (two second releases and one handle kept after two releases). Limit
 in a temporary copy of the solver made the fixed oracle reject two differing keys. No handle differed in the
 unchanged solver.
 
+**Replacing `deploy_convert.py`, part 5d: the recoil tail** (2026-10-10). The script's step 5d reads the source's own
+kickback - each barrel/cannon node's world matrix at the aim frame and across the first fire segment (`argv[8..10]`:
+start, end, step) -, picks the tube that moves most, freezes its cradle at the aim and takes the clean slide, scales
+it (`argv[11]`), derives an arc radius from a slam in degrees (`argv[14]`, or a legacy radius `argv[12]`, or 1e9 for
+none), and in EDIT mode puts a `RecoilArm` bone between the tube's root and its parent (head at the pivot, a capped
+radius away, tail ten along the arc axis). Leaving edit mode REBUILDS EVERY BONE from its edit bone (head, tail, roll
+0): the tube's subtree lands an ulp off its old rest (measured: 5 of the howitzer's 26 bones change, 2 of the
+fixture gun's 6). The arm is then keyed: the identity at frame 0 and the deploy's end, one key a window frame with a
+quaternion about the arc axis in the arm's own frame (`theta = -|slide| / R`, the sign from the slide direction, the
+quaternion negated when it turns away from the previous key), the same backwards and `argv[13]` times slower for the
+return, the identity to settle. `BlenderDeploy`: `Result.Recoil` (every matrix, vector and angle the script's own
+variables hold), `RecoilLog`, `ExitAtRecoil` (no tube to pick: the script's `exit(1)`), `BonesAfterRecoil`,
+`AfterRecoil`, `ArmPoseAfterRetarget`; `BlenderDeploy.PoseMatrices` (`BKE_pose_where_is` over the script's bones);
+`PyFormat.General` (Python's `%g`, correctly rounded on the exact value - the log prints the slide scale and the
+radius with it). What had to be ported beside: `Vector.length` and `.dot` (float32 products summed in a double from
+the last component), `Vector.normalized` (the SQUARES in double - `len_squared_vn`, not `dot_vn_vn`: one ulp on the
+slam fixtures until measured), `cross`, `Vector * float` (the scalar a float32), `Matrix.to_3x3().inverted()` (the
+adjugate over the float32 determinant), `max()` (the first of equals), `peak.length or 1.0` (a zero of either sign is
+false), `range(rs, re + 1, step)` both ways round, and the order of the script's own checks (a gun without a tube
+exits BEFORE the frames are listed: `fire_backwards` found it). The oracle runs a FIFTH stage, to `# --- 6.`: the log,
+the exit, the script's death (`DIES5`: a matrix without an inverse), every measurement (`R5`: frames, names, scalars
+as float64 hex, the aim and home matrices, every source matrix of every window frame, every slide vector, the peak,
+the directions, the pivot, `Cbar3`, every theta), the bones rebuilt (`RBONE5`), the action with the arm's curves
+(`FC5`), what the pose bones hold (`APB5`), their pose matrices (`PM5` - only where the step evaluated last:
+`pb.matrix` is what the LAST evaluation left, a dropped scale curve lingers in it, so a job without the step would
+compare a stale matrix), the scene (`O6`); the frame sweep now walks the arm too. 192 jobs, 0 failed: the howitzer
+(its arm 91 keys a channel, slam 0, no return) and fixtures through a slam of 5 and -3 degrees (the radius derived,
+the kick down and up), a legacy radius, the return at x4, x2 and none, a step of 2 (the window's end appended), of 3,
+one past the window, a slide scale of 2, 0 (treated as 1, logged) and -1.5, a window past the clip (no slide: a
+zero arc axis, the arm a zero-length bone elongated by 2e-6), a window run backwards, a tube that slides straight up
+(the arc axis from the second cross product), a barrel that is a root part (the cradle is the tube), merged "Cannon"
+links on the contract path (a bone named twice among the recoil bones), a gun without a tube (the exit, 12 jobs
+take it) and - left to Blender from the bake on - a tube whose scale is zero at the aim frame (`Matrix.inverted()`
+raises; the script dies, `BAKELEFT:gun_recoil_dies`). 2,428 measurement rows, 203 arm curves on 29 jobs, 340,553 swept
+pose rows equal to the bit. Not held: a step the script reads as 0 ("00": `range` refuses it - "0" itself switches the
+recoil off before the step), a return key past int32 (`keyframe_insert` takes a float), a slam Python reads and the
+port does not (`nan`, `inf`): all left to Blender by name (`BlenderDeployTests`); the step's default of 2 is dead
+(an empty `argv[10]` switches the recoil off first); the ROTATION MODE of the new arm's pose channel is not read -
+within 5d nothing depends on it (its one matrix read is at the identity) and 7c sets every bone to QUATERNION.
+
+*Review before the PR* (an independent agent; 222 generated jobs through the real script, 11,043 measurement rows
+and 266,781 swept rows equal; 120,005 doubles through `%g` and `%.1f`, equal): ONE defect - a legacy arc radius of
+ZERO (`argv[12]` = "0", "-0", "0.0" with the slam empty or 0): the script divides by it (`theta = -length / R`) and
+dies, the port went on keying `-inf`/`NaN` thetas - fixed (left to Blender by name), fixtures `gun_recoil_arc0` and
+its slam-0 twin. Holes it found in the GATE, now fixtures: the cradle that IS the tube (a root cannon, a tube under
+a static mesh: my `gun_recoil_root` did not reach that branch - its driver was the sliding tube, whose parent bone is
+the barrel), the same under a hull that travels (the root-motion anchor), three recoil bones deep (the arm between
+Barrel_A and Barrel_B), parts already named RecoilArm (the bone is RecoilArm.002), the deploy's end before frame 0
+(the kick crosses the identity key), the arc axis's 1e-4 threshold a hair under and over, and the script's deaths
+on a window run backwards for a positive step, on a start without an end, on a cradle whose scale is zero at a
+window frame off the aim. The frame SWEEP never reached the tail's end (the arm's return and settle were judged by
+their keys and handles only): it now walks the kick's end, the settle and nine points of the return, and runs for a
+recoil without a retarget too. The drill named the wrong cause when the script died and the port went on (a missing
+pose-matrix row before the death): the death is reported and the rest skipped. Measured on the way: every pose
+channel's rotation mode is QUATERNION from the start (a zeroed channel is ROT_MODE_QUAT), `pb.matrix` of the arm
+follows its keys after a frame_set, `mode_set` evaluates nothing (the held -0 jobs agree). Not re-planted after the
+fix (the fix is one fallback line with its own BAKELEFT fixtures). Noted, not held: the port leaves to Blender what
+Python's `float()` reads and it does not (`1_0`, `inf`, `nan`, `1e400` as a slide scale: the script goes on with
+`xinf`, `xnan` in its log), a return slowness or a deploy end whose keys pass int32 (the script keys floats), and a
+recoil bone name past ASCII (read, never executed: no fixture reached it); the bone ORDER after the rebuild (the arm
+takes the tube root's place in its parent's child list) is not compared - nothing in 5d depends on it, the export
+may.
+
 *Review of PR #138*: the imported pose rows at the bind and last frames (`PB2`, `PB3`) must name every expected
 armature/bone exactly once, with all ten held values. A matching row count cannot substitute duplicates for missing
 bones, and unknown names cannot skip comparison. `missing_imported_pose.py` keeps a passing single-job control and

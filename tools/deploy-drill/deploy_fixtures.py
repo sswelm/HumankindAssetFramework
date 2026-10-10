@@ -361,6 +361,89 @@ def huge(out):
     return s.write(out, "deploy_huge")
 
 
+def gunnery_recoil(out, name, vertical=False, root=False, tube_zero=False):
+    """A gun for the recoil step (5d): a barrel whose tube slides over the fire window (frames 26..34 of a 36-frame
+    clip). `vertical`: the tube slides straight up - the arc axis's first cross product (with Z) is zero and the
+    script takes the second (with Y). `root`: the barrel is a root part - its bone has no animated parent, so the
+    cradle is the tube itself. `tube_zero`: the tube's scale is zero at the aim frame - its matrix has no inverse
+    there and the script dies in the step."""
+    import math
+    def q(axis, deg):
+        a = math.radians(deg) / 2.0; v = [0.0, 0.0, 0.0, math.cos(a)]; v[axis] = math.sin(a); return v
+    s = Scene(); s.node("Hull", None, mesh=s.mesh("hull", 4.0, at=(-2.0, 0.0, -0.5)))
+    car = s.node("Carriage", None, mesh=s.mesh("carriage", 2.0, at=(-1.0, 0.0, -0.25)), translation=[0.0, 0.5, 0.0])
+    s.anim(car, "translation", [0.0, 1.5], [(0.0, 0.5, 0.0), (0.0, 0.5, 0.4)])
+    b = s.node("Main_Barrel", None if root else car, mesh=s.mesh("barrelmesh", 1.5, at=(0.0, 0.0, -0.1)), translation=[0.2, 1.1 if root else 0.6, 0.0], rotation=q(2, 5))
+    s.anim(b, "rotation", [0.0, 0.5, 1.0, 1.5], [tuple(q(2, 5)), tuple(q(2, 20)), tuple(q(2, 48)), tuple(q(2, 63))])
+    c = s.node("CANNON tube", b, mesh=s.mesh("tube", 1.0, at=(0.0, 0.0, -0.05)), translation=[0.5, 0.0, 0.0])
+    # the kick: back over 26..30, forward again over 30..34 (the clip runs to 36 = 1.5 s)
+    if vertical:
+        s.anim(c, "translation", [0.0, 1.0, 1.25, 1.5], [(0.5, 0.0, 0.0), (0.5, 0.0, 0.0), (0.5, 0.6, 0.0), (0.5, 0.1, 0.0)])
+    else:
+        s.anim(c, "translation", [0.0, 1.0, 1.25, 1.5], [(0.5, 0.0, 0.0), (0.5, 0.0, 0.0), (-0.3, 0.05, 0.0), (0.4, 0.0, 0.0)])
+    if tube_zero:
+        s.anim(c, "scale", [0.0, 1.0, 1.125, 1.25], [(1.0, 1.0, 1.0), (1.0, 1.0, 1.0), (0.0, 0.0, 0.0), (1.0, 1.0, 1.0)])
+    for leg, sign in (("L_Leg", 1.0), ("r_LEG", -1.0)):
+        l = s.node(leg, car, mesh=s.mesh(leg.lower(), 1.0, at=(-1.0, 0.0, -0.05)), translation=[-0.5, 0.0, 0.3 * sign], rotation=q(1, 4 * sign))
+        s.anim(l, "rotation", [0.0, 0.5, 1.5], [tuple(q(1, 4 * sign)), tuple(q(1, 38 * sign)), tuple(q(1, 55 * sign))])
+    return s.write(out, name)
+
+
+def gunnery_recoil2(out, name, kind, d=None):
+    """More guns for the recoil step, the shapes the review asked for. `root`: the cannon is a root part - its bone has
+    no parent, the cradle is the tube itself, the RecoilArm a root bone; `travel`: the same under a hull that travels
+    (the root-motion anchor: the armature parented to it for the bake); `staticparent`: the tube under a STATIC mesh
+    under the carriage (its bone has no parent either); `deep3`: Barrel_A turns, Barrel_B slides a little, the cannon
+    under it slides most (three recoil bones deep, the arm between A and B); `armname`: parts named RecoilArm and
+    RecoilArm.001 (the new bone is RecoilArm.002); `cradle_zero`: the barrel's scale is zero at frame 30, inside the
+    window and off the aim (its matrix has no inverse there: the script dies); `dir`: the barrel at the identity
+    through the window, the tube's kick along the glTF vector d."""
+    import math
+    def q(axis, deg):
+        a = math.radians(deg) / 2.0; v = [0.0, 0.0, 0.0, math.cos(a)]; v[axis] = math.sin(a); return v
+    def qa(ax, deg):
+        n = math.sqrt(sum(c * c for c in ax)); a = math.radians(deg) / 2.0
+        return [ax[0] / n * math.sin(a), ax[1] / n * math.sin(a), ax[2] / n * math.sin(a), math.cos(a)]
+    def kick(node, rest, back):
+        s.anim(node, "translation", [0.0, 1.0, 1.25, 1.5], [rest, rest, back, tuple(rest[i] * 0.8 + back[i] * 0.2 for i in range(3))])
+    s = Scene()
+    hull = s.node("Hull", None, mesh=s.mesh("hull", 4.0, at=(-2.0, 0.0, -0.5)))
+    if kind == "travel": s.anim(hull, "translation", [0.0, 1.5], [(0.0, 0.0, 0.0), (3.0, 0.0, 0.5)])
+    car = s.node("Carriage", None, mesh=s.mesh("carriage", 2.0, at=(-1.0, 0.0, -0.25)), translation=[0.0, 0.5, 0.0])
+    s.anim(car, "translation", [0.0, 1.5], [(0.0, 0.5, 0.0), (0.0, 0.5, 0.4)])
+    l = s.node("L_Leg", car, mesh=s.mesh("lleg", 1.0, at=(-1.0, 0.0, -0.05)), translation=[-0.5, 0.0, 0.3], rotation=q(1, 4))
+    s.anim(l, "rotation", [0.0, 0.5, 1.5], [tuple(q(1, 4)), tuple(q(1, 38)), tuple(q(1, 55))])
+    if kind in ("root", "travel"):
+        c = s.node("Cannon", hull if kind == "travel" else None, mesh=s.mesh("tube", 1.0, at=(0.0, 0.0, -0.05)), translation=[0.5, 1.0, 0.0], rotation=q(2, 5))
+        kick(c, (0.5, 1.0, 0.0), (-0.3, 1.05, 0.0))
+    elif kind == "staticparent":
+        mt = s.node("Mount", car, mesh=s.mesh("mount", 1.5, at=(0.0, 0.0, -0.1)), translation=[0.2, 0.6, 0.0], rotation=q(2, 5))
+        c = s.node("Cannon", mt, mesh=s.mesh("tube", 1.0, at=(0.0, 0.0, -0.05)), translation=[0.5, 0.0, 0.0])
+        kick(c, (0.5, 0.0, 0.0), (-0.3, 0.05, 0.0))
+    elif kind == "deep3":
+        a = s.node("Barrel_A", car, mesh=s.mesh("ba", 1.5, at=(0.0, 0.0, -0.1)), translation=[0.2, 0.6, 0.0], rotation=q(2, 5))
+        s.anim(a, "rotation", [0.0, 0.5, 1.0, 1.5], [tuple(q(2, 5)), tuple(q(2, 20)), tuple(q(2, 48)), tuple(q(2, 63))])
+        b = s.node("Barrel_B", a, mesh=s.mesh("bb", 1.2, at=(0.0, 0.0, -0.08)), translation=[0.3, 0.1, 0.0], rotation=qa((1, 2, 3), 7))
+        kick(b, (0.3, 0.1, 0.0), (0.1, 0.1, 0.0))
+        c = s.node("cannon", b, mesh=s.mesh("tube", 1.0, at=(0.0, 0.0, -0.05)), translation=[0.5, 0.0, 0.0])
+        kick(c, (0.5, 0.0, 0.0), (-0.3, 0.05, 0.0))
+    else:
+        bkw = {} if kind == "dir" else {"rotation": q(2, 5)}
+        b = s.node("Main_Barrel", car, mesh=s.mesh("barrelmesh", 1.5, at=(0.0, 0.0, -0.1)), translation=[0.2, 0.6, 0.0], **bkw)
+        if kind == "dir": s.anim(b, "rotation", [0.0, 0.5, 1.0, 1.5], [tuple(q(2, 5)), tuple(q(2, 20)), (0.0, 0.0, 0.0, 1.0), (0.0, 0.0, 0.0, 1.0)])
+        else: s.anim(b, "rotation", [0.0, 0.5, 1.0, 1.5], [tuple(q(2, 5)), tuple(q(2, 20)), tuple(q(2, 48)), tuple(q(2, 63))])
+        c = s.node("CANNON tube", b, mesh=s.mesh("tube", 1.0, at=(0.0, 0.0, -0.05)), translation=[0.5, 0.0, 0.0])
+        kick(c, (0.5, 0.0, 0.0), (0.5 + d[0], d[1], d[2]) if kind == "dir" else (-0.3, 0.05, 0.0))
+        if kind == "armname":
+            for i, nm in enumerate(("RecoilArm", "RecoilArm.001")):
+                p = s.node(nm, car, mesh=s.mesh("ra%d" % i, 0.5, at=(0.0, 0.0, 0.0)), translation=[-1.0, 0.2 * i, 0.5])
+                s.anim(p, "translation", [0.0, 1.5], [(-1.0, 0.2 * i, 0.5), (-1.2, 0.2 * i, 0.5)])
+        if kind == "cradle_zero":
+            t = 30 / 24.0
+            s.anim(b, "scale", [0.0, t - 1 / 24.0, t, t + 1 / 24.0], [(1, 1, 1), (1, 1, 1), (0, 0, 0), (1, 1, 1)])
+    return s.write(out, name)
+
+
 def gunnery(out, name="deploy_gunnery", barrel=True):
     """A gun for the script's steps 5b and 5c: a barrel that elevates and a cannon tube under it that slides (their
     names decide: "barrel", "cannon"), two legs that spread ("leg"), a carriage that rolls. The clip runs to frame 36."""
@@ -567,6 +650,54 @@ def main(out):
     fs = gunnery_signs(out)
     print("gun_signs_12|%s|0|24||12||1.5|30,10|36,12|1|||0|0|1" % fs)
     print("gun_signs_11|%s|0|24||11||1.5|30,9|36,11|1|||0|0|1" % fs)
+    # 5d, the recoil tail: argv[10] the frame step, argv[11] the slide scale, argv[12] a legacy arc radius, argv[13] the
+    # return's slowness, argv[14] the slam in degrees. A slam (the radius derived, the kick down) and a negative one (up);
+    # a legacy radius with no slam; the return at x4 and x2 and none; a step of 2 (the window's end appended), of 3,
+    # one past the window; a slide scale of 2, of 0 (treated as 1, logged) and negative; a window past the clip's end
+    # (no slide: the radius direction is zero); a window that runs backwards for its step
+    fr = gunnery_recoil(out, "deploy_gunnery_recoil")
+    print("gun_recoil_slam|%s|0|24||30|0.5|1.5|26,3|34,9/2|1|||4|5|1" % fr)
+    print("gun_recoil_slam_up|%s|0|24||30||1.5|26|34|1|||2|-3|1" % fr)
+    print("gun_recoil_legacy_r|%s|0|24||30|||26|34|1||50|4||1" % fr)
+    print("gun_recoil_none|%s|0|24||30|||26|34|1|||0|6|1" % fr)
+    print("gun_recoil_step2|%s|0|24||30|||26|35|2|||4|5|1" % fr)
+    print("gun_recoil_step3|%s|0|24||30|||26|34|3|2||2|8|1" % fr)
+    print("gun_recoil_step_past|%s|0|24||30|||26|34|20|||4|5|1" % fr)
+    print("gun_recoil_mag0|%s|0|24||30|||26|34|1|0||0|3|1" % fr)
+    print("gun_recoil_mag_neg|%s|0|24||30|||26|34|1|-1.5||4|3|1" % fr)
+    print("gun_recoil_past_clip|%s|0|24||30|||40|48|1|||4|5|1" % fr)
+    print("gun_recoil_backwards|%s|0|24||30|||34|26|-2|||4|5|1" % fr)
+    # the tube slides straight up: the arc axis comes from the second cross product
+    print("gun_recoil_vertical|%s|0|24||30|||26|34|1|||4|5|1" % gunnery_recoil(out, "deploy_gunnery_recoil_vertical", vertical=True))
+    # the barrel is a root part: no animated parent, the cradle is the tube itself
+    print("gun_recoil_root|%s|0|24||30|||26|34|1|||4|5|1" % gunnery_recoil(out, "deploy_gunnery_recoil_root", root=True))
+    # a gun without a barrel or cannon, with a fire window: the script's own error exit
+    print("gun_recoil_no_tube|%s|0|24|||0.5||26|34|1|||4|5|1" % gunnery(out, "deploy_gunnery_legs2", barrel=False))
+    # merged "Cannon" links on the contract path: a bone named twice among the recoil bones
+    print("wall_cannon_fire|%s|0|24||24||1.5|26,3|34|1|||4|5|1" % wall(out, 110, 30, 0, "deploy_wall_cannon_fire", link="Cannon"))
+    # left to Blender from the bake on: the tube's matrix has no inverse at the aim frame (Matrix.inverted() raises)
+    print("BAKELEFT:gun_recoil_dies|%s|0|24||30|||27|34|1|||4|5|1" % gunnery_recoil(out, "deploy_gunnery_recoil_zero", tube_zero=True))
+    # the review's shapes: the cannon a root part (the cradle is the tube, the arm a root bone), the same under a hull
+    # that travels (the root-motion anchor), the tube under a static mesh, three recoil bones deep, parts already
+    # named RecoilArm, the deploy's end before frame 0 (the kick crosses the identity key), the arc axis's threshold
+    # on both sides (the horizontal part of the slide a hair under and over 1e-4 of it)
+    print("gun_recoil_root2|%s|0|24|||||26|34|1|||4|-6|1" % gunnery_recoil2(out, "deploy_gunnery_rec_root", "root"))
+    print("gun_recoil_travel|%s|0|24||30|||26|34|1|||4|5|1" % gunnery_recoil2(out, "deploy_gunnery_rec_travel", "travel"))
+    print("gun_recoil_static_parent|%s|0|24||30|||26|34|1|||4|5|1" % gunnery_recoil2(out, "deploy_gunnery_rec_static", "staticparent"))
+    print("gun_recoil_deep3|%s|0|24||30|||26|34|1|||4|5|1" % gunnery_recoil2(out, "deploy_gunnery_rec_deep3", "deep3"))
+    print("gun_recoil_armname|%s|0|24||30|||26|34|1|||4|5|1" % gunnery_recoil2(out, "deploy_gunnery_rec_armname", "armname"))
+    print("gun_recoil_end_m8|%s|0|-8||30|||26|34|1|||4|5|1" % fr)
+    print("gun_recoil_end_m4|%s|0|-4||30|||26|34|1|||4|5|1" % fr)
+    print("gun_recoil_dir_under|%s|0|24||30|||26|34|1|||4|5|1" % gunnery_recoil2(out, "deploy_gunnery_rec_dir_under", "dir", d=(0.99e-4 * 0.6, 0.6, 0.0)))
+    print("gun_recoil_dir_over|%s|0|24||30|||26|34|1|||4|5|1" % gunnery_recoil2(out, "deploy_gunnery_rec_dir_over", "dir", d=(1.01e-4 * 0.6, 0.6, 0.0)))
+    # ... and where the script dies: an arc radius of 0 (a division by zero; with and without a slam of 0), a window
+    # that runs backwards for a positive step (no frame to read), a start without an end (no segment), the cradle's
+    # scale zero at a window frame off the aim (no inverse there)
+    print("BAKELEFT:gun_recoil_arc0|%s|0|24||30|||26|34|1||0|4||1" % fr)
+    print("BAKELEFT:gun_recoil_arc0_slam0|%s|0|24||30|||26|34|1||-0|4|0|1" % fr)
+    print("BAKELEFT:gun_recoil_back_step|%s|0|24||30|||34|26|2|||4|5|1" % fr)
+    print("BAKELEFT:gun_recoil_no_end|%s|0|24||30|||26||1|||4|5|1" % fr)
+    print("BAKELEFT:gun_recoil_cradle_zero|%s|0|24||30|||26|34|1|||4|5|1" % gunnery_recoil2(out, "deploy_gunnery_rec_cradle_zero", "cradle_zero"))
     # left to Blender from the bake on: a barrel scale past a float
     print("BAKELEFT:gun_bs_overflow|%s|0|24||36||1e39|||0|||4|0|1" % fg)
     # (a leg scale outside 0..1 is not here: Blender itself fails on it - BlenderDeployTests hold the fallback)

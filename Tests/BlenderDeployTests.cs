@@ -512,6 +512,94 @@ public class BlenderDeployTests
     }
 
     [Theory]
+    // Python's own `%g` on these doubles (printed by Python 3, as hex and string)
+    [InlineData(0x41cdcd6500000000UL, "1e+09")]
+    [InlineData(0x3ff0000000000000UL, "1")]
+    [InlineData(0x3fe0000000000000UL, "0.5")]
+    [InlineData(0x4132d68700000000UL, "1.23457e+06")]
+    [InlineData(0x40fe240000000000UL, "123456")]
+    [InlineData(0x412e847f00000000UL, "1e+06")]         // 999999.5 rounds up into the exponent form
+    [InlineData(0x3f1a36e2eb1c432dUL, "0.0001")]
+    [InlineData(0x3ee4f8b588e368f1UL, "1e-05")]
+    [InlineData(0x3eef75104d551d69UL, "1.5e-05")]
+    [InlineData(0x40f86a0000000000UL, "100000")]
+    [InlineData(0x4004000000000000UL, "2.5")]
+    [InlineData(0xc004000000000000UL, "-2.5")]
+    [InlineData(0x0000000000000000UL, "0")]
+    [InlineData(0x8000000000000000UL, "-0")]
+    [InlineData(0x406d13dece571088UL, "232.621")]
+    [InlineData(0x3e112e0be826d695UL, "1e-09")]
+    [InlineData(0x419d6f3454000000UL, "1.23457e+08")]
+    [InlineData(0x3fb999999999999aUL, "0.1")]
+    [InlineData(0x412e848000000000UL, "1e+06")]
+    [InlineData(0x412e847e00000000UL, "999999")]
+    [InlineData(0x54b249ad2594c37dUL, "1e+100")]
+    [InlineData(0x3ff000001ad7f29bUL, "1")]
+    [InlineData(0x40344ccccccccccdUL, "20.3")]
+    [InlineData(0x400aaaaaaa9f36a3UL, "3.33333")]
+    [InlineData(0x7ff0000000000000UL, "inf")]
+    [InlineData(0x7ff8000000000000UL, "nan")]
+    [InlineData(0xbe7ad7f29abcaf48UL, "-1e-07")]
+    [InlineData(0x40f0000000000000UL, "65536")]
+    [InlineData(0x3f202e85be111841UL, "0.000123457")]
+    [InlineData(0x3ff8000000000000UL, "1.5")]
+    public void A_number_is_printed_as_Pythons_general_format_prints_it(ulong bits, string expected) => Assert.Equal(expected, PyFormat.General(BitConverter.Int64BitsToDouble((long)bits)));
+
+    [Fact]
+    public void The_recoil_is_keyed_on_an_arm_between_the_tube_and_its_parent()
+    {
+        // a carriage that rolls, a barrel under it, a tube under the barrel that kicks back over frames 26..34
+        var s = new Scene(); int hull = s.Node("Hull", mesh: true);
+        int car = s.Node("Carriage", hull, mesh: true, t: new double[] { 0, 0.5, 0 }); s.Move(car, 1.5f, new[] { 0f, 0.5f, 0.4f });
+        int barrel = s.Node("Main_Barrel", car, mesh: true, t: new double[] { 0.2, 0.6, 0 }); s.Move(barrel, 1.5f, new[] { 0.2f, 0.7f, 0f });
+        int tube = s.Node("CANNON tube", barrel, mesh: true, t: new double[] { 0.5, 0, 0 });
+        var anim = s.M.Animations.Count > 0 ? s.M.Animations[0] : null;
+        s.Decide();
+        anim = s.M.Animations[0];
+        anim.Samplers.Add(new HafSampler { Times = new[] { 0f, 1f, 1.25f, 1.5f }, Values = new[] { 0.5f, 0f, 0f, 0.5f, 0f, 0f, -0.3f, 0.05f, 0f, 0.4f, 0f, 0f }, Components = 3, Interpolation = "LINEAR" });
+        anim.Channels.Add(new HafChannel { Node = tube, Path = "translation", Sampler = anim.Samplers.Count - 1 });
+        BlenderDeploy.Result Run(string args) => BlenderDeploy.Decide(s.M, args.Split('|'), null, true);
+        // a slam of 5 degrees, the return at a quarter speed
+        var r = Run("0|24||30|||26|34|1|||4|5|1");
+        Assert.Null(r.Fallback); Assert.False(r.ExitAtRecoil);
+        var rec = r.Recoil;
+        Assert.Equal(Enumerable.Range(26, 9), rec.Frames);
+        Assert.Equal("CANNON tube", rec.Driver); Assert.Equal("Main_Barrel", rec.Cradle); Assert.Equal("Main_Barrel", rec.TubeRoot); Assert.Equal("RecoilArm", rec.ArmName);
+        Assert.True(rec.Dist > 0.5 && rec.Dist < 1.0);                  // the tube's 0.8 kick, in output units
+        Assert.Equal(rec.Dist * 57.2958 / 5.0, rec.R);
+        // the arm sits between the tube's root and that root's parent; the tube's subtree is rebuilt an ulp off at most
+        var arm = r.BonesAfterRecoil.Single(b => b.Name == "RecoilArm");
+        var tubeRoot = r.BonesAfterRecoil.Single(b => b.Name == "Main_Barrel");
+        Assert.Same(arm, tubeRoot.Parent); Assert.Equal("Carriage", arm.Parent.Name);
+        Assert.Equal(r.Bones.Count + 1, r.BonesAfterRecoil.Count);
+        Assert.Equal(10f, arm.Length, 3);
+        // the arm's curves: location zero throughout; the quaternion the identity at 0 and 24, the kick over 24..32, the
+        // return over 32..64 (every frame slowed by four), the identity again at 65
+        var loc = r.Rekeyed["RecoilArm"][0]; var qw = r.Rekeyed["RecoilArm"][3];
+        Assert.All(loc, k => Assert.Equal(0f, k.Value));
+        Assert.Equal(new[] { 0f, 24f, 25f, 26f, 27f, 28f, 29f, 30f, 31f, 32f, 36f, 40f, 44f, 48f, 52f, 56f, 60f, 64f, 65f }, qw.Select(k => k.Frame));
+        Assert.Equal(1f, qw[0].Value); Assert.Equal(1f, qw[1].Value); Assert.Equal(1f, qw[qw.Count - 1].Value);
+        Assert.True(qw.Skip(2).Take(7).Any(k => k.Value < 0.9999f));    // the tube turns through the kick
+        Assert.Equal(65, rec.OutEnd); Assert.Equal(32, rec.KickEnd);
+        Assert.Contains("DEPLOY recoil return: x4 slow-back glide", r.RecoilLog);
+        Assert.Contains(r.RecoilLog, l => l.StartsWith("DEPLOY recoil (ARC slide x1, R=") && l.EndsWith(") tail 24..65 via RecoilArm; tube 'Main_Barrel'"));
+        // no slam: the radius sentinel, the arm's keys all the identity; the return off
+        var flat = Run("0|24||30|||26|34|1|||0|0|1");
+        Assert.Equal(1.0e9, flat.Recoil.R);
+        Assert.All(flat.Rekeyed["RecoilArm"][3], k => Assert.True(k.Value > 0.999999f));
+        Assert.Contains("DEPLOY recoil return: none (hold + snap)", flat.RecoilLog);
+        Assert.Contains("DEPLOY slam 0 — no kick pitch (arm stays identity)", flat.RecoilLog);
+        // a slide scale of 0 is 1, and logged; a step that reads as 0 ("0" itself switches the recoil OFF before the
+        // step; "00" does not) and an unreadable slam are left to Blender
+        Assert.Contains("DEPLOY slide scale 0 treated as 1 (zero would silently kill the Slam)", Run("0|24||30|||26|34|1|0||0|3|1").RecoilLog);
+        Assert.Contains("step of 0", Run("0|24||30|||26|34|00|||0|3|1").Fallback ?? "");
+        Assert.Null(Run("0|24||30|||26|34|0|||0|3|1").Recoil);
+        Assert.Contains("float()", Run("0|24||30|||26|34|1|||0|nan|1").Fallback ?? "");
+        // without the window the step does not run
+        Assert.Null(Run("0|24||30|||||1|||4|5|1").Recoil);
+    }
+
+    [Theory]
     [InlineData(0.125, 2, "0.12")]        // an exact half goes to the even digit - .NET's F2 gives 0.13
     [InlineData(0.375, 2, "0.38")]
     [InlineData(2.675, 2, "2.67")]        // the double is just under 2.675

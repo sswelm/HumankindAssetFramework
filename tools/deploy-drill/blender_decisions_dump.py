@@ -51,6 +51,8 @@ cut3 = source.index("\n# --- 5b.")            # ... and then the fire-window sna
 code3 = compile(source[cut2:cut3], script, "exec")
 cut4 = source.index("\n# --- 5d.")            # ... and then the barrel retarget (5b) and the leg scale (5c)
 code4 = compile(source[cut3:cut4], script, "exec")
+cut5 = source.index("\n# --- 6.")             # ... and then the recoil tail (5d)
+code5 = compile(source[cut4:cut5], script, "exec")
 fails = 0
 for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
     line = line.rstrip("\r")
@@ -194,6 +196,66 @@ for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
             for o in bpy.data.objects:
                 mw = o.matrix_world
                 print("O5\t%s\t%s" % (o.name, "\t".join(h32(mw[r][c]) for r in range(4) for c in range(4))))
+            # ---- stage 5 (part 5d): the script goes on to its `# --- 6.` - the recoil tail: the source's kickback read
+            #      over the fire window, a RecoilArm bone put between the tube and its parent (edit mode: every bone is
+            #      rebuilt from its edit bone), the arm keyed. What it printed; what it measured on the way (the script's
+            #      own variables); the bones at rest again; the action; what the pose bones hold and where they stand
+            out5 = io.StringIO(); exit5 = None
+            try:
+                with contextlib.redirect_stdout(out5):
+                    exec(code5, g)
+            except SystemExit as e:
+                exit5 = e.code
+            except Exception as e:   # the script's own death in the step (a matrix without an inverse): the port must have left it
+                print("DIES5\t%s: %s" % (type(e).__name__, e))
+            for l in out5.getvalue().split("\n"):
+                if l.startswith("DEPLOY"):
+                    print("LOG5\t%s" % l)
+            if exit5 is not None:
+                print("EXIT5\t%s" % exit5)
+            elif g.get("recoil_out_end") is not None:
+                def m16(m): return "\t".join(h32(m[r][c]) for r in range(4) for c in range(4))
+                def v3(v): return "\t".join(h32(c) for c in v)
+                print("R5\tframes\t%d\t%d\t%d\t%s" % (g["rs"], g["re"], g["step"], ",".join(str(t) for t in g["frames"])))
+                print("R5\tnames\t%s\t%s\t%s\t%s\t%s" % (g["driver"], g["cradle"], g["tube_root"], g["ra_name"], ",".join(g["ordered"])))
+                print("R5\tscalars\t%s\t%s\t%s\t%d\t%d\t%d" % (h64(g["mag"]), h64(g["dist"]), h64(g["R"]), g["deploy_end"], g["kick_end"], g["recoil_out_end"]))
+                for bn in g["ordered"]:
+                    print("R5\thome\t%s\t%s" % (bn, m16(g["m_home"][bn])))
+                    print("R5\taim\t%s\t%s" % (bn, m16(g["m_aim"][bn])))
+                for bn, by in g["src_w"].items():
+                    for t, m in by.items():
+                        print("R5\tsrc\t%s\t%d\t%s" % (bn, t, m16(m)))
+                for t, v in g["slide"].items():
+                    print("R5\tslide\t%d\t%s" % (t, v3(v)))
+                for n in ("peak", "d", "A", "radius", "tube_head", "pivot", "A_local"):
+                    print("R5\tvec\t%s\t%s" % (n, v3(g[n])))
+                print("R5\tcbar\t%s" % "\t".join(h32(g["Cbar3"][r][c]) for r in range(3) for c in range(3)))
+                print("R5\tthetas\t%s" % "\t".join(h64(v) for v in g["thetas"]))
+            for b in arm.data.bones:
+                ml = b.matrix_local
+                print("RBONE5\t%s\t%s\t%s" % (b.name, b.parent.name if b.parent else "-", "\t".join(
+                    h32(v) for v in (*b.head_local, *b.tail_local, b.length, *(ml[r][c] for r in range(4) for c in range(4))))))
+            act = arm.animation_data.action if arm.animation_data else None
+            if act is not None:
+                for layer in act.layers:
+                    for strip in layer.strips:
+                        for cb in strip.channelbags:
+                            for fc in cb.fcurves:
+                                print("FC5\t%s\t%d\t%s\t%s\t%s" % (fc.data_path, fc.array_index, fc.extrapolation, fc.auto_smoothing, "\t".join(
+                                    "%s:%s:%s:%s:%s:%s:%s:%s:%s" % (h32(kp.co[0]), h32(kp.co[1]), kp.interpolation, kp.handle_left_type, kp.handle_right_type,
+                                                                    h32(kp.handle_left[0]), h32(kp.handle_left[1]), h32(kp.handle_right[0]), h32(kp.handle_right[1]))
+                                    for kp in fc.keyframe_points)))
+            for pb in arm.pose.bones:
+                q = pb.rotation_quaternion
+                print("APB5\t%s\t%s" % (pb.name, "\t".join(h32(v) for v in (*pb.location, q.w, q.x, q.y, q.z, *pb.scale))))
+                # pb.matrix is what the LAST evaluation left (a dropped scale curve lingers in it until a frame is set):
+                # only where the recoil step evaluated last does it say what the properties say
+                if exit5 is None and g.get("recoil_out_end") is not None:
+                    pm = pb.matrix
+                    print("PM5\t%s\t%s" % (pb.name, "\t".join(h32(pm[r][c]) for r in range(4) for c in range(4))))
+            for o in bpy.data.objects:
+                mw = o.matrix_world
+                print("O6\t%s\t%s" % (o.name, "\t".join(h32(mw[r][c]) for r in range(4) for c in range(4))))
             # ... and at the LAST frame of the range: the bind frame cannot tell a frozen object from an animated one,
             # nor a stripped scale curve from a kept one (the script's later steps set frames all over the range)
             bpy.context.scene.frame_set(g["fmax"])
@@ -207,7 +269,7 @@ for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
                         print("PB3\t%s\t%s\t%s" % (o.name, pb.name, "\t".join(h32(v) for v in (*pb.location, q.w, q.x, q.y, q.z, *pb.scale))))
             # ... and, last of all, a SWEEP over the frames: what the new armature's pose bones hold at each - a
             # re-keyed bone between two of its Bezier keys is Blender's curve evaluation (the cubic solver)
-            if any(l.startswith("DEPLOY") for l in out4.getvalue().split("\n")):
+            if any(l.startswith("DEPLOY") for l in (out4.getvalue() + out5.getvalue()).split("\n")):
                 def whole(s, d):
                     try: return max(-3000, min(3000, int(s)))
                     except ValueError: return d
@@ -227,6 +289,12 @@ for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
                     more += [k_ - 2, k_ - 1, k_, k_ + 1, k_ + 2]
                 a_, b_ = min(m_, e_), max(m_, e_)
                 more += [a_ + (b_ - a_) * j // 97 for j in range(98)] + [a_ + j for j in range(40)] + [b_ - j for j in range(40)]
+                if exit5 is None and g.get("recoil_out_end") is not None:
+                    # ... and the recoil tail: about the kick's end and the settle, and across the return
+                    k_, o_ = g["kick_end"], g["recoil_out_end"]
+                    for x_ in (k_, o_):
+                        more += [x_ - 2, x_ - 1, x_, x_ + 1, x_ + 2]
+                    more += [k_ + (o_ - k_) * j // 8 for j in range(9)] + [lo, hi]
                 frames = []
                 for frame in list(range(lo, hi + 1, step)) + [lo + 1, hi + 1, (lo + hi) // 2] + more + [lo, hi]:
                     # frame_set accepts Int32, then clamps to Blender's scene limits. Neighbours of a valid

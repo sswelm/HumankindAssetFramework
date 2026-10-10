@@ -18,7 +18,7 @@ static class DecisionsDrill
         "no object with an action left (frame range 1..1)", "normalization: x100", "normalization: recentered", "normalization: none",
         "bone slimming", "the legacy path", "the contract path", "a culled part", "a culled part's descendant", "a pair-merge", "the script stops (no animated part)",
         "the recoil step off with a recoil range given", "left to Blender (BlenderDeploy.Fallback)", "an armature that is a part (its bones are animated)",
-        "a bake on the legacy path", "a bone re-keyed by the barrel retarget or the leg scale (5b, 5c)", "a frame set between two Bezier keys of a re-keyed bone", "a fire-window snapshot (5a)", "no recoil range: no snapshot", "a custom property keyed by the bake (not modelled: it moves nothing)", "an imported armature baked with it (its bones keyed a frame, its own animation dropped)", "a clip of frame 0 alone (the bake keys frame 1 too)", "a bake on the contract path (scale curves stripped, delta-form rebase)",
+        "a bake on the legacy path", "a bone re-keyed by the barrel retarget or the leg scale (5b, 5c)", "a frame set between two Bezier keys of a re-keyed bone", "a recoil tail keyed on a RecoilArm (5d)", "the recoil step's exit: no barrel or cannon to pick", "a fire-window snapshot (5a)", "no recoil range: no snapshot", "a custom property keyed by the bake (not modelled: it moves nothing)", "an imported armature baked with it (its bones keyed a frame, its own animation dropped)", "a clip of frame 0 alone (the bake keys frame 1 too)", "a bake on the contract path (scale curves stripped, delta-form rebase)",
         "no static mesh (StaticRoot has no anchor)", "StaticRoot anchored to a mesh that has no parent", "StaticRoot anchored to a static mesh's parent",
         "a root-motion anchor (the armature parented for the bake)", "the biggest part does not travel (no anchor)", "no mesh rides a bone (no travel measured)",
         "a bone under its part's parent's bone", "a part whose parent is no part (a root bone)",
@@ -40,7 +40,7 @@ static class DecisionsDrill
             jobs[t[0]] = t;
         }
         var cover = new SortedDictionary<string, long>(); foreach (var k in CoverKeys) cover[k] = 0;
-        int fails = 0, files = 0, left = 0; long matrices = 0, objects = 0, lines = 0, bones = 0, curves = 0, keysCompared = 0, after = 0, importedKeys = 0, held2 = 0, atLast = 0, snapped = 0, rekeyed = 0, swept = 0;
+        int fails = 0, files = 0, left = 0; long matrices = 0, objects = 0, lines = 0, bones = 0, curves = 0, keysCompared = 0, after = 0, importedKeys = 0, held2 = 0, atLast = 0, snapped = 0, rekeyed = 0, swept = 0, recoilRows = 0;
         var blocks = new List<List<string>>();
         foreach (var dump in args.Skip(1))
             foreach (var line in File.ReadLines(dump))
@@ -52,7 +52,7 @@ static class DecisionsDrill
         {
             string key = block[0].Split('\t')[1];
             files++;
-            var problems = new List<string>(); string bakeLeftReason = null; bool bakeClamped = false, rebakedArmature = false, fireSnap = false, retargeted = false, betweenKeys = false;
+            var problems = new List<string>(); string bakeLeftReason = null; bool bakeClamped = false, rebakedArmature = false, fireSnap = false, retargeted = false, betweenKeys = false, recoiled = false, recoilExit = false;
             try
             {
                 if (!jobs.TryGetValue(key, out var job)) throw new InvalidDataException("the dump has a job the jobs file does not");
@@ -121,24 +121,28 @@ static class DecisionsDrill
                     // ---- the armature (part 3): its name, which bone each part rides, the bones at rest, the anchors
                     if (Of("ARM")[0][1] != r.Armature.Name) problems.Add($"the armature is '{r.Armature.Name}' here, '{Of("ARM")[0][1]}' in Blender");
                     Compare(problems, "bone of each part", r.BoneOf.Select(b => b.part + "\t" + b.bone).ToList(), Of("BONEOF").Select(t => t[1] + "\t" + t[2]).ToList());
-                    var rb = Of("RBONE");
-                    foreach (var t in rb) if (t.Length != 26) throw new InvalidDataException($"the dump's bone row for '{t[1]}' has {t.Length} fields, expected 26");
-                    if (rb.Select(t => t[1]).Distinct().Count() != rb.Count) throw new InvalidDataException("the dump has a bone twice");
-                    // by name: arm.data.bones lists a bone after its parent, not in creation order (the order is the export's, part 5)
-                    Compare(problems, "bones", r.Bones.Select(b => b.Name).OrderBy(n => n, StringComparer.Ordinal).ToList(), rb.Select(t => t[1]).OrderBy(n => n, StringComparer.Ordinal).ToList());
-                    long wrongBones = 0; string firstBone = null;
-                    foreach (var t in rb)
+                    void CompareBoneRows(string kind, string what, List<BlenderDeploy.Bone> bonesHere)
                     {
-                        var b = r.Bones.FirstOrDefault(x => x.Name == t[1]);
-                        if (b == null) continue;
-                        var mine = new List<string> { b.Parent != null ? b.Parent.Name : "-" };
-                        mine.AddRange(b.Head.Select(H)); mine.AddRange(b.Tail.Select(H)); mine.Add(H(b.Length));
-                        for (int row = 0; row < 4; row++) for (int c = 0; c < 4; c++) mine.Add(H(b.MatrixLocal[c * 4 + row]));
-                        bones++;
-                        int at = -1; for (int i = 0; i < mine.Count && at < 0; i++) if (mine[i] != t[2 + i]) at = i;
-                        if (at >= 0) { wrongBones++; firstBone = firstBone ?? $"'{b.Name}' field {at} ({(at == 0 ? "parent" : at < 4 ? "head" : at < 7 ? "tail" : at == 7 ? "length" : "matrix_local")}): here {mine[at]}, Blender {t[2 + at]}"; }
+                        var rb = Of(kind);
+                        foreach (var t in rb) if (t.Length != 26) throw new InvalidDataException($"the dump's bone row for '{t[1]}' has {t.Length} fields, expected 26");
+                        if (rb.Select(t => t[1]).Distinct().Count() != rb.Count) throw new InvalidDataException("the dump has a bone twice");
+                        // by name: arm.data.bones lists a bone after its parent, not in creation order (the order is the export's, part 5)
+                        Compare(problems, what, bonesHere.Select(b => b.Name).OrderBy(n => n, StringComparer.Ordinal).ToList(), rb.Select(t => t[1]).OrderBy(n => n, StringComparer.Ordinal).ToList());
+                        long wrongBones = 0; string firstBone = null;
+                        foreach (var t in rb)
+                        {
+                            var b = bonesHere.FirstOrDefault(x => x.Name == t[1]);
+                            if (b == null) continue;
+                            var mine = new List<string> { b.Parent != null ? b.Parent.Name : "-" };
+                            mine.AddRange(b.Head.Select(H)); mine.AddRange(b.Tail.Select(H)); mine.Add(H(b.Length));
+                            for (int row = 0; row < 4; row++) for (int c = 0; c < 4; c++) mine.Add(H(b.MatrixLocal[c * 4 + row]));
+                            bones++;
+                            int at = -1; for (int i = 0; i < mine.Count && at < 0; i++) if (mine[i] != t[2 + i]) at = i;
+                            if (at >= 0) { wrongBones++; firstBone = firstBone ?? $"'{b.Name}' field {at} ({(at == 0 ? "parent" : at < 4 ? "head" : at < 7 ? "tail" : at == 7 ? "length" : "matrix_local")}): here {mine[at]}, Blender {t[2 + at]}"; }
+                        }
+                        if (wrongBones > 0) problems.Add($"{wrongBones} of {rb.Count} {what} differ, first {firstBone}");
                     }
-                    if (wrongBones > 0) problems.Add($"{wrongBones} of {rb.Count} bones at rest differ, first {firstBone}");
+                    CompareBoneRows("RBONE", "bones", r.Bones);
                     string anchor = r.StaticAnchor != null ? r.StaticAnchor.Name : "-";
                     if (anchor != Of("ANCHOR")[0][1]) problems.Add($"StaticRoot's anchor is '{anchor}' here, '{Of("ANCHOR")[0][1]}' in Blender");
                     var hr = Of("HULL")[0];
@@ -302,60 +306,110 @@ static class DecisionsDrill
                     var log4 = block.Where(l => l.StartsWith("LOG4\t")).Select(l => l.Substring(5)).ToList();
                     Compare(problems, "the retarget's log", baked.RetargetLog, log4);
                     lines += log4.Count;
-                    var fc4 = Of("FC4"); var seen4 = new HashSet<(string, int)>(); long wrong4 = 0, keys4 = 0; string first4 = null;
-                    int nfB = baked.BakeFrameMax - baked.BakeFrameMin + 1;
-                    foreach (var t in fc4)
+                    // the curves of the action: a baked key by frame and value, a Bezier key with its handles too - every
+                    // curve of every bone in `allowed` must be there, none of any other
+                    void CompareCurveRows(string kind, string when, HashSet<string> allowed)
                     {
-                        const string head = "pose.bones[\"";
-                        int close = t[1].LastIndexOf("\"].", StringComparison.Ordinal);
-                        if (!t[1].StartsWith(head, StringComparison.Ordinal) || close < 0) throw new InvalidDataException($"the dump has a curve after the retarget that is no pose bone's: {t[1]}");
-                        string bone = t[1].Substring(head.Length, close - head.Length).Replace("\\\"", "\"").Replace("\\\\", "\\"), channel = t[1].Substring(close + 3);
-                        int index = int.Parse(t[2]);
-                        if (index < 0 || index >= (channel == "rotation_quaternion" ? 4 : 3)) throw new InvalidDataException($"the dump has a curve with a component its channel does not have: {t[1]}[{index}]");
-                        int at = channel == "location" ? index : channel == "rotation_quaternion" ? 3 + index : channel == "scale" ? 7 + index : -1;
-                        if (at < 0) throw new InvalidDataException($"the dump has a curve of an unknown channel: {t[1]}");
-                        if (!baked.Keys.ContainsKey(bone)) throw new InvalidDataException($"the dump has a curve after the retarget of an unknown bone: {t[1]}");
-                        if (!seen4.Add((bone, at))) throw new InvalidDataException($"the dump has a curve after the retarget twice: {t[1]}[{index}]");
-                        if (t[3] != "CONSTANT") { wrong4++; first4 = first4 ?? $"{t[1]}[{index}] extrapolates {t[3]}"; continue; }
-                        // a new curve takes its smoothing from the user preference; the handles ported are CONT_ACCEL's
-                        if (t.Length < 5 || (t[4] != "CONT_ACCEL" && t[4] != "NONE")) throw new InvalidDataException($"the dump has a curve without its smoothing: {t[1]}[{index}]");
-                        if (baked.Rekeyed.ContainsKey(bone) && t[4] != "CONT_ACCEL") { wrong4++; first4 = first4 ?? $"{t[1]}[{index}] smooths {t[4]}"; continue; }
-                        var theirs = t.Skip(5).Select(k => k.Split(':')).ToList();
-                        if (theirs.Any(k => k.Length != 9)) throw new InvalidDataException($"the dump has a malformed key on {t[1]}[{index}]");
-                        if (baked.Rekeyed.TryGetValue(bone, out var channels))
+                        var fc4 = Of(kind); var seen4 = new HashSet<(string, int)>(); long wrong4 = 0, keys4 = 0; string first4 = null;
+                        int nfB = baked.BakeFrameMax - baked.BakeFrameMin + 1;
+                        foreach (var t in fc4)
                         {
-                            var mine = channels[at];
-                            if (mine == null || mine.Count != theirs.Count) { wrong4++; first4 = first4 ?? $"{t[1]}[{index}] has {theirs.Count} keys in Blender, {(mine == null ? "no curve" : mine.Count + " keys")} here"; continue; }
-                            for (int k = 0; k < mine.Count; k++)
+                            const string head = "pose.bones[\"";
+                            int close = t[1].LastIndexOf("\"].", StringComparison.Ordinal);
+                            if (!t[1].StartsWith(head, StringComparison.Ordinal) || close < 0) throw new InvalidDataException($"the dump has a curve {when} that is no pose bone's: {t[1]}");
+                            string bone = t[1].Substring(head.Length, close - head.Length).Replace("\\\"", "\"").Replace("\\\\", "\\"), channel = t[1].Substring(close + 3);
+                            int index = int.Parse(t[2]);
+                            if (index < 0 || index >= (channel == "rotation_quaternion" ? 4 : 3)) throw new InvalidDataException($"the dump has a curve with a component its channel does not have: {t[1]}[{index}]");
+                            int at = channel == "location" ? index : channel == "rotation_quaternion" ? 3 + index : channel == "scale" ? 7 + index : -1;
+                            if (at < 0) throw new InvalidDataException($"the dump has a curve of an unknown channel: {t[1]}");
+                            if (!allowed.Contains(bone)) throw new InvalidDataException($"the dump has a curve {when} of an unknown bone: {t[1]}");
+                            if (!seen4.Add((bone, at))) throw new InvalidDataException($"the dump has a curve {when} twice: {t[1]}[{index}]");
+                            if (t[3] != "CONSTANT") { wrong4++; first4 = first4 ?? $"{t[1]}[{index}] extrapolates {t[3]}"; continue; }
+                            // a new curve takes its smoothing from the user preference; the handles ported are CONT_ACCEL's
+                            if (t.Length < 5 || (t[4] != "CONT_ACCEL" && t[4] != "NONE")) throw new InvalidDataException($"the dump has a curve without its smoothing: {t[1]}[{index}]");
+                            if (baked.Rekeyed.ContainsKey(bone) && t[4] != "CONT_ACCEL") { wrong4++; first4 = first4 ?? $"{t[1]}[{index}] smooths {t[4]}"; continue; }
+                            var theirs = t.Skip(5).Select(k => k.Split(':')).ToList();
+                            if (theirs.Any(k => k.Length != 9)) throw new InvalidDataException($"the dump has a malformed key on {t[1]}[{index}]");
+                            if (baked.Rekeyed.TryGetValue(bone, out var channels))
                             {
-                                keys4++; rekeyed++;
-                                string mineKey = $"{H(mine[k].Frame)}:{H(mine[k].Value)}:BEZIER:AUTO_CLAMPED:AUTO_CLAMPED:{H(mine[k].LeftX)}:{H(mine[k].LeftY)}:{H(mine[k].RightX)}:{H(mine[k].RightY)}";
-                                if (mineKey != string.Join(":", theirs[k])) { wrong4++; first4 = first4 ?? $"'{bone}' {channel}[{index}] key {k}: here {mineKey}, Blender {string.Join(":", theirs[k])}"; break; }
+                                var mine = channels[at];
+                                if (mine == null || mine.Count != theirs.Count) { wrong4++; first4 = first4 ?? $"{t[1]}[{index}] has {theirs.Count} keys in Blender, {(mine == null ? "no curve" : mine.Count + " keys")} here"; continue; }
+                                for (int k = 0; k < mine.Count; k++)
+                                {
+                                    keys4++; rekeyed++;
+                                    string mineKey = $"{H(mine[k].Frame)}:{H(mine[k].Value)}:BEZIER:AUTO_CLAMPED:AUTO_CLAMPED:{H(mine[k].LeftX)}:{H(mine[k].LeftY)}:{H(mine[k].RightX)}:{H(mine[k].RightY)}";
+                                    if (mineKey != string.Join(":", theirs[k])) { wrong4++; first4 = first4 ?? $"'{bone}' {channel}[{index}] key {k}: here {mineKey}, Blender {string.Join(":", theirs[k])}"; break; }
+                                }
+                            }
+                            else
+                            {
+                                var keys = baked.Keys[bone];
+                                if ((at >= 7 && !baked.ScaleKeys) || theirs.Count != nfB) { wrong4++; first4 = first4 ?? $"{t[1]}[{index}] has {theirs.Count} keys in Blender, {(at >= 7 && !baked.ScaleKeys ? 0 : nfB)} here"; continue; }
+                                for (int k = 0; k < nfB; k++)
+                                {
+                                    keys4++;
+                                    if (theirs[k][0] != H((float)(baked.BakeFrameMin + k)) || theirs[k][1] != H(keys[k][at]) || theirs[k][2] != "LINEAR") { wrong4++; first4 = first4 ?? $"'{bone}' {channel}[{index}] at frame {baked.BakeFrameMin + k}"; break; }
+                                }
                             }
                         }
-                        else
-                        {
-                            var keys = baked.Keys[bone];
-                            if ((at >= 7 && !baked.ScaleKeys) || theirs.Count != nfB) { wrong4++; first4 = first4 ?? $"{t[1]}[{index}] has {theirs.Count} keys in Blender, {(at >= 7 && !baked.ScaleKeys ? 0 : nfB)} here"; continue; }
-                            for (int k = 0; k < nfB; k++)
+                        // every curve the port holds must be in the dump: a re-keyed channel with keys, a baked bone's seven or ten
+                        foreach (var b in allowed)
+                            for (int at = 0; at < 10; at++)
                             {
-                                keys4++;
-                                if (theirs[k][0] != H((float)(baked.BakeFrameMin + k)) || theirs[k][1] != H(keys[k][at]) || theirs[k][2] != "LINEAR") { wrong4++; first4 = first4 ?? $"'{bone}' {channel}[{index}] at frame {baked.BakeFrameMin + k}"; break; }
+                                bool has = baked.Rekeyed.TryGetValue(b, out var ch) ? ch[at] != null && ch[at].Count > 0 : at < 7 || baked.ScaleKeys;
+                                if (has && !seen4.Contains((b, at))) throw new InvalidDataException($"the dump has no curve {when} for bone '{b}', channel {at}");
+                                if (!has && seen4.Contains((b, at))) { wrong4++; first4 = first4 ?? $"Blender still has a curve on '{b}', channel {at}; it is cleared here"; }
                             }
-                        }
+                        if (wrong4 > 0) problems.Add($"{wrong4} curves {when} differ ({keys4} keys compared), first {first4}");
+                        if (baked.Rekeyed.Count > 0) retargeted = true;
                     }
-                    // every curve the port holds must be in the dump: a re-keyed channel with keys, a baked bone's seven or ten
-                    foreach (var b in baked.Keys.Keys)
-                        for (int at = 0; at < 10; at++)
-                        {
-                            bool has = baked.Rekeyed.TryGetValue(b, out var ch) ? ch[at] != null && ch[at].Count > 0 : at < 7 || baked.ScaleKeys;
-                            if (has && !seen4.Contains((b, at))) throw new InvalidDataException($"the dump has no curve after the retarget for bone '{b}', channel {at}");
-                            if (!has && seen4.Contains((b, at))) { wrong4++; first4 = first4 ?? $"Blender still has a curve on '{b}', channel {at}; it is cleared here"; }
-                        }
-                    if (wrong4 > 0) problems.Add($"{wrong4} curves after the retarget differ ({keys4} keys compared), first {first4}");
-                    if (baked.Rekeyed.Count > 0) retargeted = true;
-                    ComparePoseRows(problems, Of("APB4"), baked.ArmPose, "after the retarget");
+                    CompareCurveRows("FC4", "after the retarget", new HashSet<string>(baked.Keys.Keys, StringComparer.Ordinal));
+                    ComparePoseRows(problems, Of("APB4"), baked.ArmPoseAfterRetarget, "after the retarget");
                     CompareObjectRows(problems, Of("O5"), baked.AfterRetarget, "after the retarget");
+                    // ---- 5d (the recoil tail): its log; the script's own exit when no tube is there to pick; what it measured
+                    //      on the way (every matrix, vector and angle its variables hold); the bones rebuilt from their edit
+                    //      bones with the RecoilArm among them; the action with the arm's curves; what the pose bones hold,
+                    //      their pose matrices; the scene
+                    var log5 = block.Where(l => l.StartsWith("LOG5\t")).Select(l => l.Substring(5)).ToList();
+                    Compare(problems, "the recoil step's log", baked.RecoilLog, log5);
+                    lines += log5.Count;
+                    var rec = baked.Recoil;
+                    var exit5 = Of("EXIT5"); var dies5 = Of("DIES5");
+                    if (dies5.Count > 0) { problems.Add($"the script died in the recoil step ({string.Join(" ", dies5[0].Skip(1))}) and the port went on"); goto afterRecoil; }
+                    if (exit5.Count > 1) throw new InvalidDataException("the dump has two exits for the recoil step");
+                    if (exit5.Count == 1 && (exit5[0].Length != 2 || exit5[0][1] != "1")) throw new InvalidDataException("the dump's recoil exit is not the script's exit(1)");
+                    if ((exit5.Count == 1) != baked.ExitAtRecoil) problems.Add(exit5.Count == 1 ? "the script exits in the recoil step (no tube to pick); the port goes on" : "the port exits in the recoil step (no tube to pick); the script goes on");
+                    var r5 = Of("R5").Select(t => string.Join("\t", t.Skip(1))).ToList();
+                    var mine5 = new List<string>();
+                    if (rec != null && !baked.ExitAtRecoil)
+                    {
+                        string M16(float[] it) => string.Join("\t", it.Select(H));
+                        string V3(float[] v) => string.Join("\t", v.Select(H));
+                        mine5.Add($"frames\t{rec.Rs}\t{rec.Re}\t{rec.Step}\t{string.Join(",", rec.Frames)}");
+                        mine5.Add($"names\t{rec.Driver}\t{rec.Cradle}\t{rec.TubeRoot}\t{rec.ArmName}\t{string.Join(",", rec.Ordered)}");
+                        mine5.Add($"scalars\t{H64(rec.Mag)}\t{H64(rec.Dist)}\t{H64(rec.R)}\t{rec.DeployEnd}\t{rec.KickEnd}\t{rec.OutEnd}");
+                        foreach (string bn in rec.Ordered) { mine5.Add($"home\t{bn}\t{M16(rec.Home[bn])}"); mine5.Add($"aim\t{bn}\t{M16(rec.Aim[bn])}"); }
+                        foreach (string bn in rec.SrcOrder) foreach (int t in rec.Frames.Distinct()) mine5.Add($"src\t{bn}\t{t}\t{M16(rec.Src[bn][t])}");
+                        foreach (int t in rec.SlideOrder) mine5.Add($"slide\t{t}\t{V3(rec.Slide[t])}");
+                        mine5.Add($"vec\tpeak\t{V3(rec.Peak)}"); mine5.Add($"vec\td\t{V3(rec.D)}"); mine5.Add($"vec\tA\t{V3(rec.A)}"); mine5.Add($"vec\tradius\t{V3(rec.Radius)}");
+                        mine5.Add($"vec\ttube_head\t{V3(rec.TubeHead)}"); mine5.Add($"vec\tpivot\t{V3(rec.Pivot)}"); mine5.Add($"vec\tA_local\t{V3(rec.ALocal)}");
+                        mine5.Add($"cbar\t{string.Join("\t", rec.Cbar3.Select(H))}");
+                        mine5.Add($"thetas\t{string.Join("\t", rec.Thetas.Select(H64))}");
+                    }
+                    Compare(problems, "the recoil step's measurements", mine5, r5);
+                    recoilRows += r5.Count;
+                    CompareBoneRows("RBONE5", "bones after the recoil step", baked.BonesAfterRecoil);
+                    CompareCurveRows("FC5", "after the recoil", new HashSet<string>(baked.Keys.Keys.Concat(baked.Rekeyed.Keys), StringComparer.Ordinal));
+                    ComparePoseRows(problems, Of("APB5"), baked.ArmPose, "after the recoil");
+                    // pb.matrix is what the LAST evaluation left, not the properties (a bone whose scale curves the scale-free
+                    // step dropped still shows the baked scale until a frame is set): the dump writes the pose matrices only
+                    // where the recoil step evaluated last - after its frame_set and its view_layer.update()
+                    if (rec != null && !baked.ExitAtRecoil) CompareObjectRows(problems, Of("PM5"), BlenderDeploy.PoseMatrices(baked.BonesAfterRecoil, baked.ArmPose), "(pose matrices) after the recoil");
+                    else if (Of("PM5").Count > 0) throw new InvalidDataException("the dump has pose matrices for a job without a recoil tail (they would be stale)");
+                    CompareObjectRows(problems, Of("O6"), baked.AfterRecoil, "after the recoil");
+                    if (rec != null && !baked.ExitAtRecoil) recoiled = true;
+                    if (baked.ExitAtRecoil) recoilExit = true;
+                    afterRecoil:;
                     // ... and the same scene at the LAST frame of the range (the dump set it last of all): a frozen armature
                     // object, a stripped scale curve and the re-baked keys show there, not at the bind frame
                     var o3 = Of("O3").ToDictionary(t => t[1], t => t, StringComparer.Ordinal); var pb3 = Of("PB3");
@@ -384,7 +438,8 @@ static class DecisionsDrill
                     //      a re-keyed bone between two Bezier keys is the curve evaluation. Every frame the dump names is set
                     //      here in the dump's order (a held zero's sign depends on it), every bone exactly once a frame.
                     var sw = Of("SW");
-                    if ((sw.Count > 0) != (baked.RetargetLog.Count > 0)) throw new InvalidDataException(sw.Count > 0 ? "the dump has a frame sweep for a job without a retarget" : "the dump has no frame sweep for a job with a retarget");
+                    bool recoilRan = rec != null && !baked.ExitAtRecoil && dies5.Count == 0;
+                    if ((sw.Count > 0) != (baked.RetargetLog.Count > 0 || baked.RecoilLog.Count > 0)) throw new InvalidDataException(sw.Count > 0 ? "the dump has a frame sweep for a job without a retarget or a recoil" : "the dump has no frame sweep for a job with a retarget or a recoil");
                     long wrongSw = 0; string firstSw = null; int at0 = 0, sweptFrames = 0; bool insideSegment = false;
                     var framesSwept = new List<long>();
                     while (at0 < sw.Count)
@@ -422,6 +477,13 @@ static class DecisionsDrill
                         for (int j = 0; j < 98; j++) all4.Add(a_ + (b_ - a_) * j / 97);
                         for (int j = 0; j < 40; j++) all4.Add(a_ + j);
                         for (int j = 0; j < 40; j++) all4.Add(b_ - j);
+                        // ... and the recoil tail: about the kick's end and the settle, and across the return
+                        if (recoilRan)
+                        {
+                            foreach (long k_ in new[] { rec.KickEnd, rec.OutEnd }) for (int d = -2; d <= 2; d++) all4.Add(k_ + d);
+                            for (int j = 0; j <= 8; j++) all4.Add(rec.KickEnd + (long)Math.Floor((rec.OutEnd - rec.KickEnd) * j / 8.0));   // Python's // floors (a return that runs backwards)
+                            all4.Add(lo); all4.Add(hi);
+                        }
                         all4.Add(lo); all4.Add(hi);
                         var expected = new List<long>();
                         foreach (long fr in all4)
@@ -490,6 +552,8 @@ static class DecisionsDrill
                 if (bakeLeftReason != null) Console.WriteLine($"BAKELEFT {key}: {bakeLeftReason}");   // no job is so marked since part 4b; the mark stays for what the later steps may leave
                 if (bakeLeftReason == null && !r.Exit) cover[fireSnap ? "a fire-window snapshot (5a)" : "no recoil range: no snapshot"]++;
                 if (retargeted) cover["a bone re-keyed by the barrel retarget or the leg scale (5b, 5c)"]++;
+                if (recoiled) cover["a recoil tail keyed on a RecoilArm (5d)"]++;
+                if (recoilExit) cover["the recoil step's exit: no barrel or cannon to pick"]++;
                 if (betweenKeys) cover["a frame set between two Bezier keys of a re-keyed bone"]++;
                 if (rebakedArmature) cover["an imported armature baked with it (its bones keyed a frame, its own animation dropped)"]++;
                 if (bakeClamped) cover["a clip of frame 0 alone (the bake keys frame 1 too)"]++;
@@ -504,7 +568,7 @@ static class DecisionsDrill
         foreach (var k in jobs.Keys) if (!dumped.Contains(k)) { fails++; Console.WriteLine($"FAIL {k}: the dump holds no such job"); }
         foreach (var kv in cover) Console.WriteLine($"COVER {kv.Value} {kv.Key}");
         for (int bi = 0; bi < BlenderFCurve.Branches.Length; bi++) Console.WriteLine($"BRANCH	{BlenderFCurve.Hits[bi]}	{BlenderFCurve.Branches[bi]}");
-        Console.WriteLine($"TOTAL jobs {files} failed {fails} left {left} objects {objects} matrices {matrices} lines {lines} bones {bones} curves {curves} keys {keysCompared} after {after} imported {importedKeys} held {held2} last {atLast} snapshot {snapped} rekeyed {rekeyed} swept {swept}");
+        Console.WriteLine($"TOTAL jobs {files} failed {fails} left {left} objects {objects} matrices {matrices} lines {lines} bones {bones} curves {curves} keys {keysCompared} after {after} imported {importedKeys} held {held2} last {atLast} snapshot {snapped} rekeyed {rekeyed} swept {swept} recoil {recoilRows}");
         return fails == 0 ? 0 : 1;
     }
 
@@ -533,7 +597,7 @@ static class DecisionsDrill
             if (!seen.Add(t[1])) throw new InvalidDataException($"the dump has an object row {when} twice: '{t[1]}'");
             bool ok = true;
             for (int rr = 0; rr < 4; rr++) for (int c = 0; c < 4; c++) if (H(mine[c * 4 + rr]) != t[2 + rr * 4 + c]) ok = false;
-            if (!ok) { wrong++; first = first ?? $"'{t[1]}'"; }
+            if (!ok) { wrong++; first = first ?? $"'{t[1]}': here [{string.Join(",", Enumerable.Range(0, 16).Select(i => Show(mine[(i % 4) * 4 + i / 4])))}] Blender [{string.Join(",", t.Skip(2).Select(h => Show(F(h))))}]"; }
         }
         foreach (var name in expected.Keys) if (!seen.Contains(name)) throw new InvalidDataException($"the dump has no object row {when} for '{name}'");
         if (wrong > 0) problems.Add($"{wrong} of {rows.Count} matrices {when} differ, first {first}");
