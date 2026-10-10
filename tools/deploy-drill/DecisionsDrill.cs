@@ -427,8 +427,9 @@ static class DecisionsDrill
                     var dies6 = Of("DIES6");
                     if (dies6.Count > 0) throw new InvalidDataException($"the script died in the bind ({string.Join(" ", dies6[0].Skip(1))}) and the port went on");
                     bool bindRan = exit5.Count == 0;
+                    // (a dump that claims an exit the port did not take is judged above, as a problem; rows after a REAL exit are invalid)
                     foreach (string k6 in new[] { "BIND", "VG6", "MOD6", "V6", "VX6", "N6", "DATA6", "O7" })
-                        if (!bindRan && Of(k6).Count > 0) throw new InvalidDataException($"the dump has {k6} rows for a job whose script exited before the bind");
+                        if (!bindRan && baked.ExitAtRecoil && Of(k6).Count > 0) throw new InvalidDataException($"the dump has {k6} rows for a job whose script exited before the bind");
                     if (!bindRan && (baked.Bound.Count > 0 || baked.MeshData != null || baked.AfterBind != null)) problems.Add("the port binds after the script's exit in the recoil step");
                     if (bindRan)
                     {
