@@ -3,4 +3,12 @@
 # can't land. Version-controlled: enabled once per clone with
 #     git config core.hooksPath tools/git-hooks
 # Runs tools/check.sh (sub-minute). Bypass ONLY in a genuine emergency:  git push --no-verify
+# A push that only DELETES refs (git push origin --delete <branch>) changes nothing the gate guards, yet it ran the full
+# gate on every merged-branch clean-up until 2026-10-11. Git gives the refs on stdin as
+# "<local ref> <local sha> <remote ref> <remote sha>"; a deletion has an all-zero local sha.
+only_deletes=1
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$local_sha" in 0000000000000000000000000000000000000000) ;; *) only_deletes=0;; esac
+done
+if [ "$only_deletes" -eq 1 ]; then echo "pre-push: only deletions - no gate"; exit 0; fi
 exec bash "$(git rev-parse --show-toplevel)/tools/check.sh"

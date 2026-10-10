@@ -37,7 +37,17 @@ in **GitHub Actions**. Both lanes matter, and for different reasons:
 | Surface | `tools/check.sh` (pre-push hook) | also in CI | ~time |
 |---|---|---|---|
 | **Runtime + shared contract** | `dotnet build` · `dotnet test` · docs guard · binding-catalog surface · hot path · parse shape · member shape · schema parity | all source-only checks | seconds |
-| **Editor package** | Roslyn editor compile-check · registry engine drill · backup dedup drill · blender exit drill · GLB reader drill · GLB writer drill · vehicle probe drill · Workshop compaction drill · schema parity · hand-list gate | parity + hand-list; compile check and drills stay local | ~60 s |
+| **Editor package** | Roslyn editor compile-check · registry engine drill · backup dedup drill · blender exit drill · GLB reader drill · GLB writer drill · vehicle probe drill · mesh layout, prep and deploy drills · Workshop compaction drill · schema parity · hand-list gate | parity + hand-list; compile check and drills stay local | the drills AT ONCE: the longest one's time |
+
+**Since 2026-10-11 the drills run concurrently.** The thirteen drills are independent (each works in its own temp
+directory and builds its own exe), so `check.sh` starts them together (`run_bg`), each into its own log, and prints
+the logs in order once all are done - the output reads as before, the wall time is the longest drill's. Measured on
+the deploy port's branch: 870 s where the sequence took about 1,500. Inside the deploy drill the ~160 single-job
+tamper replays (one drill run per mutated dump) run eight at a time up front (`prerun_tampers`, `DEPLOY_PAR`), and
+every loop reads its verdict from `$PAR/<dump name>.rc`. Every gate step appends `HH:MM gate PASS <step> (N s)` to
+`PROGRESS.md` beside the worktrees (`HAF_PROGRESS` points it elsewhere; nothing fails on its absence), so a run can
+be watched without asking. A push that only deletes refs (`git push origin --delete`) skips the gate: the hook reads
+the refs on stdin and exits when every local sha is zero. Not done: skipping a drill whose inputs did not change.
 
 The one guard CI cannot run is **`tools/editor_compile_check.sh`**: it needs a licensed Unity 2021.3.1f1 install
 (`UnityEditor.dll`, the MonoBleedingEdge 4.7.1 profile, every `UnityEngine` module), none of which is
