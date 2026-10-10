@@ -236,7 +236,8 @@ public static partial class VehicleProbe
     /// imported, and each vertex's file normal encoded against its fan's space as two shorts per corner (a fan of two or more
     /// corners takes the float32 average of the same vector that many times - mesh_normals_corner_custom_set). What Blender
     /// STORES; `vertex.normal` is read back from it against whatever the geometry is by then (DecodeCustomShorts).
-    /// Before encoding, mesh_set_custom_normals_from_verts normalizes every vector (math::normalize) and
+    /// The Python API clamps each component to [-1, 1] first (RNA_def_float_array's hard range). Before encoding,
+    /// mesh_set_custom_normals_from_verts normalizes every vector (math::normalize) and
     /// mesh_normals_corner_custom_set replaces a zero one - the importer's zeros for a primitive without normals (NaN here)
     /// - with the mesh's own vertex normal (vert_normals_true); without both, a unit-ish file normal encodes one short off
     /// (found by the Decimate drill, step 5 c: 35 of 642 corners on the LCAC).</summary>
@@ -249,6 +250,9 @@ public static partial class VehicleProbe
         {
             bool none = float.IsNaN(N[v * 3]);
             float x = none ? 0f : N[v * 3], y = none ? 0f : N[v * 3 + 1], z = none ? 0f : N[v * 3 + 2];
+            // normals_split_custom_set_from_vertices receives the file normals through RNA's [-1, 1] float array,
+            // after set_poly_smoothing used their original values. Clamping changes even (2, .5, -.25)'s direction.
+            x = Math.Max(-1f, Math.Min(1f, x)); y = Math.Max(-1f, Math.Min(1f, y)); z = Math.Max(-1f, Math.Min(1f, z));
             Normalize3(ref x, ref y, ref z);
             if (x == 0f && y == 0f && z == 0f)
             {

@@ -648,6 +648,24 @@ public class BlenderDeployTests
     }
 
     [Theory]
+    // Blender 5.1.2's custom_normal shorts on the imported triangle below, measured through the bind oracle.
+    [InlineData(2f, 0.5f, -0.25f, new int[] { -29978, 6750, -29978, -13100, -29978, -27538 })]
+    [InlineData(-0.5f, -2f, 0.25f, new int[] { 19718, -14875, 19718, -27078, 19718, -3567 })]
+    [InlineData(1.2f, 0.8f, -0.3f, new int[] { -29317, 10985, -29317, -11948, -29317, -26264 })]
+    [InlineData(1e30f, 1e30f, 1e30f, new int[] { 27319, 19406, 27319, -9657, 27319, -23732 })]
+    public void The_bind_clamps_file_normal_components_before_encoding(float x, float y, float z, int[] expected)
+    {
+        var s = new Scene(); int part = s.Node("Part", mesh: true); s.Move(part);
+        var primitive = s.M.Meshes[s.M.Nodes[part].Mesh].Primitives[0];
+        primitive.Positions = new float[] { 0, 0, 0, 1, 0, 0, 0, 0.5f, 0.25f };
+        primitive.Normals = new[] { x, y, z, x, y, z, x, y, z };
+        s.Decide();
+        var r = BlenderDeploy.Decide(s.M, Default.Split('|'), null, true);
+        Assert.Null(r.Fallback);
+        Assert.Equal(expected, r.Bound.Single().CustomNormal.Select(n => (int)n));
+    }
+
+    [Theory]
     [InlineData(0.125, 2, "0.12")]        // an exact half goes to the even digit - .NET's F2 gives 0.13
     [InlineData(0.375, 2, "0.38")]
     [InlineData(2.675, 2, "2.67")]        // the double is just under 2.675

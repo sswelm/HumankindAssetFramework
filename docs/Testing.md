@@ -954,6 +954,15 @@ log line and a claimed death. LEFT from the bake on, by name: a surviving bone s
 `bpy.data.meshes` (compared as a set: nothing later reads it); a mesh with a parent inverse of its own (the importer
 sets none); whether the exporter writes the merged links' bone-less group (step 8).
 
+*Review of PR #145*: the bind's imported custom normals missed the Python setter's component clamp to `[-1, 1]`
+([Blender's RNA declaration](https://github.com/blender/blender/blob/v5.1.2/source/blender/makesrna/intern/rna_mesh_api.cc#L329)).
+Normals such as `(2, .5, -.25)` were normalized directly instead of clamped first, giving a different direction
+and different stored shorts; very large finite normals also differed. The shared `EncodeCustomShorts` now clamps
+before normalization, after the smooth/flat decision uses the original normals. Four unit cases hold Blender's
+exact shorts, and three permanent bind jobs cover positive, negative and large components. All 85 additional
+independent jobs agree after the fix (random hierarchies, shared meshes, mixed primitives, degenerate faces and
+normal magnitudes); the shared encoder also serves the probe and prep, checked by the full pre-push gate.
+
 *Review before the PR* (an independent agent; 29 generated jobs through the real script, 383 meshes and 2,557 vertices
 bound, every stage-6 row equal): NO executed defect. It confirmed by execution what the port claims and I had not
 fixtured: group names cut at 63/64 ASCII bytes and around multi-byte characters (an emoji cut, `€` runs, two parts

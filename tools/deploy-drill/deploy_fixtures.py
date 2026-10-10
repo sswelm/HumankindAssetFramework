@@ -768,7 +768,7 @@ def main(out):
     # the bind (part 6): a datablock shared by three meshes (two copies, numbered), the same from a numbered name, the same
     # with one sharer stripped; a mesh under a mesh part and a mesh two static meshes below a part; file normals under an
     # uneven, mirrored matrix; no mesh at all
-    for kind in ("shared", "suffix", "strip", "nested", "normals", "empty", "longname", "anchor", "near"):
+    for kind in ("shared", "suffix", "strip", "nested", "normals", "normals_clamp", "normals_clamp_negative", "normals_large", "empty", "longname", "anchor", "near"):
         print("bind_%s|%s|%s" % (kind, bind(out, "deploy_bind_" + kind, kind), DEFAULT))
 
 
@@ -783,7 +783,7 @@ def bind(out, name, kind):
     (the root-motion anchor) and stands off the identity by the float32 error of hull times its inverse; "near": world
     matrices within and just past the 1e-6 of the identity under which Blender skips the transform."""
     s = Scene()
-    nrm = kind == "normals"
+    nrm = kind.startswith("normals")
     if kind == "near":   # centred, so the normalization neither scales nor recentres: the root meshes' world matrices are their own
         hull = s.node("Hull", None)
     else:
@@ -809,10 +809,17 @@ def bind(out, name, kind):
         s.node("GunSight", gun, mesh=s.mesh("sight", 0.5), translation=[0.0, 0.5, 0.0], scale=[0.5, 0.5, 0.5])       # a mesh under a mesh part: the part's bone
         box = s.node("Box", turret, mesh=s.mesh("box", 1.0), translation=[-1.0, 0.0, 0.0])                            # a static mesh under the part
         s.node("Lid", box, mesh=s.mesh("lid", 0.8), translation=[0.0, 1.0, 0.0], rotation=[0.3826834, 0.0, 0.0, 0.9238795])   # ... and a mesh under that: the turret's bone through two
-    elif kind == "normals":
+    elif kind.startswith("normals"):
         gun = s.node("Gun", turret, mesh=s.mesh("gun", 2.0, normals=True), translation=[1.0, 0.5, 0.0])
         s.anim(gun, "translation", [0.0, 1.0], [(1.0, 0.5, 0.0), (2.5, 0.5, 0.0)])
         s.node("Mirror", turret, mesh=s.mesh("mirror", 1.0, normals=True), translation=[-1.0, 0.0, 0.0], scale=[1.0, -2.0, 0.5])
+        # The Python normal setter clamps every component to [-1, 1] BEFORE normalizing. Keep the original
+        # vectors for the importer's earlier smooth/flat decision; clamping changes a non-unit vector's direction.
+        if kind != "normals":
+            normal = (2.0, 0.5, -0.25) if kind == "normals_clamp" else (-0.5, -2.0, 0.25) if kind == "normals_clamp_negative" else (1e30, 1e30, 1e30)
+            for mesh in s.meshes:
+                for primitive in mesh["primitives"]:
+                    primitive["attributes"]["NORMAL"] = s.b.accessor([normal] * 3, "f", "VEC3", minmax=False)
     elif kind == "longname":
         # a vertex group's name holds 63 bytes (bDeformGroup.name): a part named longer binds its mesh to the cut name - a bone
         # of the same cut name (the bone's limit is the same); a name of two-byte characters is cut at a character
