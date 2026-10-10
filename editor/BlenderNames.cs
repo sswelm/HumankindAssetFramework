@@ -427,6 +427,8 @@ public static class BlenderNames
 
         public bool Contains(string name) => full.Contains(name);
         public int Count => full.Count;
+        /// <summary>Every name in the pool (bpy.data.<kind>, in no particular order).</summary>
+        public IEnumerable<string> Names => full;
 
         public NamePool Clone()
         {
@@ -512,7 +514,7 @@ public static class BlenderNames
     static int Utf8Length(string s) => System.Text.Encoding.UTF8.GetByteCount(s);
 
     /// <summary>BLI_strncpy_utf8: as many whole characters as fit in maxBytes of UTF-8.</summary>
-    static string TruncateUtf8(string s, int maxBytes)
+    internal static string TruncateUtf8(string s, int maxBytes)
     {
         if (s.Length <= maxBytes / 3) return s;   // a UTF-16 unit is at most 3 bytes of UTF-8
         int bytes = 0, i = 0;

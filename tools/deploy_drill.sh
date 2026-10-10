@@ -159,7 +159,7 @@ echo "PASS — deploy drill, the posed state: $n_mat object matrices of $n_files
 # takes). BlenderDeploy.Decide is then held to the script's own log lines, its decisions and the scene it left: every
 # object's matrix, transform and bound box, as bits. A job the jobs file marks LEFT: must come out left to Blender, and
 # no other may - a wrong decision that ends in a fallback is a failure. A recorded job whose source is gone is named.
-KNOWN_BAKE_LEFT=""   # none: the dugout canoe's imported armature is re-baked here as Blender re-bakes it (part 4b)
+KNOWN_BAKE_LEFT="DugoutCanoe"   # its strip list ("camera") leaves the importer's bone shape in: the bind folds the icosphere's vertices, which are Blender's (part 6)
 KNOWN_LEFT=""   # none: the dugout canoe (objects under animated bones) is decided here since the pose is modelled (2b)
 : > "$TMPD/jobs.txt"; n_rec=0; MISSING=""
 if [ -n "$PACK" ]; then
@@ -180,7 +180,7 @@ n_jobs=$(grep -c "" "$TMPD/jobs.txt")
 t3=$(date +%s)
 "$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_decisions_dump.py")" -- "$WROOT/editor/Tools~/deploy_convert.py" "$WTMP/jobs.txt" > "$TMPD/decisions_raw.txt" 2> "$TMPD/decisions_err.txt"; drc=$?   # stderr apart: a depsgraph warning lands in the middle of a row otherwise
 t4=$(date +%s)
-tr -d '\r' < "$TMPD/decisions_raw.txt" | grep -E "^(JOB|LOG|LOG2|EXIT|RANGE|NORM|FLAG|PART|BAD|ALIAS|ARM|BONEOF|RBONE|ANCHOR|HULL|PINV|OBJ|M|T|BOX|ACT|FC|FCA|PB2|PB3|M2|O2|O3|LOG3|SNAP|APB|O4|LOG4|FC4|APB4|O5|LOG5|EXIT5|DIES5|R5|RBONE5|FC5|APB5|PM5|O6|SW|DONE|FAIL)	" > "$TMPD/decisions.txt"
+tr -d '\r' < "$TMPD/decisions_raw.txt" | grep -E "^(JOB|LOG|LOG2|EXIT|RANGE|NORM|FLAG|PART|BAD|ALIAS|ARM|BONEOF|RBONE|ANCHOR|HULL|PINV|OBJ|M|T|BOX|ACT|FC|FCA|PB2|PB3|M2|O2|O3|LOG3|SNAP|APB|O4|LOG4|FC4|APB4|O5|LOG5|EXIT5|DIES5|R5|RBONE5|FC5|APB5|PM5|O6|LOG6|DIES6|BIND|VG6|MOD6|V6|VX6|N6|DATA6|O7|SW|DONE|FAIL)	" > "$TMPD/decisions.txt"
 n_done=$(grep -c "^DONE" "$TMPD/decisions.txt")
 if [ "$drc" -ne 0 ] || [ "$n_done" -ne "$n_jobs" ]; then
   grep -E "^FAIL|Traceback|Error" "$TMPD/decisions_raw.txt" "$TMPD/decisions_err.txt" | head -8
@@ -373,6 +373,44 @@ for mode in LOG5_missing EXIT5_claimed DIES5_claimed; do
   fi
 done
 echo "PASS — deploy drill accepts an intact recoil tail and rejects missing, doubled, unknown, truncated or changed measurement, bone, curve, pose, pose-matrix and object rows, a missing log line, and a claimed exit or death of the script"
+# ... and the bind (6): against an intact control, a bind row, a vertex-group row, a modifier row, a vertex hash, a sampled
+# vertex, a custom-normal row, a datablock row and an object row after it - each missing, doubled, renamed, cut short or one
+# bit off; the log line missing; the script's death claimed where the port went on
+"$TMPD/deploy.exe" --decisions "$WTMP/missing_dec/bind_jobs.txt" "$WTMP/missing_dec/bind_intact.txt" > "$TMPD/bind_control.txt" 2>&1; controlrc=$?
+if [ "$controlrc" -ne 0 ] || ! grep -qE "^PASS " "$TMPD/bind_control.txt"; then
+  head -5 "$TMPD/bind_control.txt"
+  echo "FAIL — deploy drill rejected the intact bind control (rc=$controlrc)"; exit 1
+fi
+for kind in BIND VG6 MOD6 V6 VX6 N6 DATA6 O7; do
+  for mode in missing duplicate unknown short value; do
+    case "$kind" in
+      BIND) reason="bound meshes|bind row";;
+      VG6) reason="vertex groups after the bind";;
+      MOD6) reason="modifiers after the bind";;
+      V6) reason="vertices after the bind";;
+      VX6) reason="sampled vertices after the bind";;
+      N6) reason="custom normals after the bind";;
+      DATA6) reason="mesh datablocks after the bind";;
+      O7) reason="object row|matrices .*after the bind";;
+    esac
+    "$TMPD/deploy.exe" --decisions "$WTMP/missing_dec/bind_jobs.txt" "$WTMP/missing_dec/bind_${kind}_$mode.txt" > "$TMPD/bind_${kind}_$mode.txt" 2>&1; badrc=$?
+    if [ "$badrc" -ne 1 ] || ! grep -E "^FAIL " "$TMPD/bind_${kind}_$mode.txt" | grep -qE "$reason"; then
+      head -5 "$TMPD/bind_${kind}_$mode.txt"
+      echo "FAIL — deploy drill accepted invalid bind evidence ($kind $mode, rc=$badrc)"; exit 1
+    fi
+  done
+done
+for mode in LOG6_missing DIES6_claimed; do
+  case "$mode" in
+    LOG6_missing) reason="the bind's log";;
+    DIES6_claimed) reason="died in the bind";;
+  esac
+  "$TMPD/deploy.exe" --decisions "$WTMP/missing_dec/bind_jobs.txt" "$WTMP/missing_dec/bind_$mode.txt" > "$TMPD/bind_$mode.txt" 2>&1; badrc=$?
+  if [ "$badrc" -ne 1 ] || ! grep -E "^FAIL " "$TMPD/bind_$mode.txt" | grep -qE "$reason"; then
+    head -5 "$TMPD/bind_$mode.txt"; echo "FAIL — deploy drill accepted a bind dump with $mode (rc=$badrc)"; exit 1
+  fi
+done
+echo "PASS — deploy drill accepts an intact bind and rejects missing, doubled, unknown, truncated or changed bind, vertex-group, modifier, vertex-hash, sampled-vertex, custom-normal, datablock and object rows, a missing log line, and a claimed death of the script"
 
 # ---- the handles of automatic keys: Blender's own calculation (FCurve.update(), keyframe_points.insert(), and
 #      handles_recalc() on keys stored raw) on generated curves against BlenderFCurve.RecalcHandles, both handles of

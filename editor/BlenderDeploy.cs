@@ -127,6 +127,28 @@ public static class BlenderDeploy
         /// the same list as Bones when the step did not run.</summary>
         public List<Bone> BonesAfterRecoil;
         public Dictionary<string, float[]> AfterRecoil;
+        /// <summary>What the pose bones held after the recoil step, before the bind set the bind frame.</summary>
+        public Dictionary<string, float[]> ArmPoseAfterRecoil;
+        // ---- 6, the bind: each mesh bound to the bone of its nearest animated ancestor (self included), else StaticRoot
+        public readonly List<string> BindLog = new List<string>();
+        public readonly List<Bound> Bound = new List<Bound>();                   // in the script's `meshes` order (bpy.data.objects')
+        public List<(string name, int users)> MeshData;                           // every mesh datablock after the bind, with its users
+        /// <summary>Every object's matrix_world after the bind, the scene updated at the bind frame: the meshes under
+        /// the armature, each at the armature's world times the inverse the bind gave it.</summary>
+        public Dictionary<string, float[]> AfterBind;
+    }
+
+    /// <summary>A mesh the bind bound: its object (now under the armature, at the identity), its one vertex group - named
+    /// after the PART found (anim_ancestor returns the object's name, not its bone's: a pair-merged part names a group no
+    /// bone has), cut to the 63 bytes a group name holds, or StaticRoot -, its datablock's name (a copy's, numbered as Blender numbers a copy, when the datablock was shared with
+    /// another live object), the matrix folded into its vertices, and the vertices after it (Blender's frame, the
+    /// importer's order, math::transform_point per vertex); the custom normals as the importer encoded them (INT16_2D per
+    /// corner, relative to the face normals), which mesh_transform leaves alone - null without file normals.</summary>
+    public sealed class Bound
+    {
+        public Obj Mesh; public string Group, DataName; public bool Copied;
+        public float[] World;                                     // matrix_world at the bind frame, column-major
+        public float[] Positions; public int Corners; public short[] CustomNormal;
     }
 
     /// <summary>The recoil step's measurements, as the script's own variables hold them (matrices in mathutils' item
@@ -1079,6 +1101,67 @@ public static class BlenderDeploy
             r.RecoilLog.Add($"DEPLOY recoil (ARC slide x{PyFormat.General(mag)}, R={PyFormat.General(R)}, peak={PyFormat.Fixed(dist, 1)}) tail {deployEnd}..{outEnd} via RecoilArm; tube '{tubeRoot}'");
         }
         r.AfterRecoil = all.ToDictionary(o => o.Name, o => (float[])o.World.Clone(), StringComparer.Ordinal);
+
+        // ---- 6. the bind: the scene at the bind frame; every mesh detached (parent None: the parent inverse reset, the bone
+        //      parenting dropped), its world matrix folded into its vertices (a datablock shared with another live object is
+        //      copied first, and the copy takes the next free number), one vertex group of its bone over every vertex at 1,
+        //      an Armature modifier, then under the armature at the identity (BKE_object_apply_mat4 through the armature's
+        //      inverse: the object's own transform is what undoes the armature's world). The script exits before it when the
+        //      recoil step found no tube.
+        r.ArmPoseAfterRecoil = r.ArmPose.ToDictionary(kv => kv.Key, kv => (float[])kv.Value.Clone(), StringComparer.Ordinal);
+        if (!r.ExitAtRecoil)
+        {
+            try { BindStep(); }
+            catch (NotPortedException e) { r.Fallback = e.Message; return r; }
+        }
+        void BindStep()
+        {
+            var partNames = new HashSet<string>(r.BoneOf.Select(x => x.part), StringComparer.Ordinal);   // bone_of's keys: the parts, the merged ones too
+            string staticRoot = r.Bones.First(b => b.Part == null).Name;
+            Set(fmin);   // scene.frame_set(fmin): the bind at the rest frame
+            var meshObjs = all.Where(o => o.Type == "MESH").ToList();
+            // a datablock's users: the live objects that carry it (a stripped or culled object let go of its)
+            var users = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var mo in meshObjs) users[mo.DataName] = (users.TryGetValue(mo.DataName, out int n) ? n : 0) + 1;
+            var meshPool = names.MeshPool.Clone();   // every mesh datablock's name, the orphans' included: a copy is named against them all
+            int bound = 0;
+            foreach (var mo in meshObjs)
+            {
+                if (mo.MeshNode < 0) throw new NotPortedException($"a bone shape left in the scene at the bind ('{mo.Name}': its icosphere's vertices are Blender's)");
+                string bname = null;
+                for (var o = mo; o != null && bname == null; o = o.Parent) if (partNames.Contains(o.Name)) bname = o.Name;
+                if (bname == null) { bname = staticRoot; r.BindLog.Add($"DEPLOY static mesh '{mo.Name}' -> StaticRoot (no animated ancestor)"); }
+                string group = BlenderNames.TruncateUtf8(bname, 63);   // bDeformGroup.name: copy_utf8_truncated
+                var mw = (float[])mo.World.Clone();
+                // m.parent = None (parent_set: the parent inverse is the identity again, the type OBJECT); m.matrix_world = mw
+                mo.Parent = null; mo.BoneNode = -1; mo.BoneMatrix = null; mo.ParentInverse = null;
+                ApplyMat4Root(mo, mw);
+                string data = mo.DataName; bool copied = false;
+                if (users[data] > 1)
+                {
+                    // m.data = m.data.copy(): BKE_id_copy names the copy as the original and Blender numbers it (namemap_get_name)
+                    users[data]--;
+                    data = meshPool.Unique(mo.DataName); users[data] = 1; mo.DataName = data; copied = true;
+                }
+                ImportedMesh(m, mo.MeshNode, out var P, out int corners, out var cn);
+                // m.data.transform(mw): math::transform_points SKIPS a matrix within 1e-6 of the identity on every entry
+                // (skip_transform: is_equal with that epsilon, float32) - the vertices keep their bits, the importer's -0 among
+                // them (measured: a static mesh at the identity keeps -0 where the product would give +0)
+                var it = VehicleProbe.ToRowMajor(mw);
+                if (!NearIdentity(it))
+                    for (int v = 0; v < P.Length / 3; v++) VehicleProbe.TransformPoint(it, P[3 * v], P[3 * v + 1], P[3 * v + 2], out P[3 * v], out P[3 * v + 1], out P[3 * v + 2]);
+                // m.matrix_world = Identity; m.parent = arm; m.matrix_world = Identity (the setter applies it through the parent)
+                ApplyMat4Root(mo, VehicleProbe.IdentityF());
+                mo.Parent = arm; mo.ParentInverse = null;
+                ApplyMat4(mo, VehicleProbe.IdentityF(), arm.World);
+                r.Bound.Add(new Bound { Mesh = mo, Group = group, DataName = data, Copied = copied, World = mw, Positions = P, Corners = corners, CustomNormal = cn });
+                bound++;
+            }
+            r.BindLog.Add($"DEPLOY bound {bound} meshes");
+            r.MeshData = meshPool.Names.Select(n => (n, users.TryGetValue(n, out int u) ? u : 0)).ToList();
+            Update(all);
+            r.AfterBind = all.ToDictionary(o => o.Name, o => (float[])o.World.Clone(), StringComparer.Ordinal);
+        }
         r.ArmAt = frame =>
         {
             int e = Math.Max(-1048574, Math.Min(1048574, frame));
@@ -1325,6 +1408,43 @@ public static class BlenderDeploy
 
     /// <summary>Quaternion.magnitude: the float32 root of the float32 dot, as a Python float.</summary>
     static double Magnitude(float[] q) => (double)VehicleProbe.Sqrtf(VehicleProbe.DotQt(q, q));
+
+    /// <summary>A mesh object's vertices as the importer stores them (BlenderMesh's order, Blender's frame), its number of
+    /// face corners, and the custom normals the importer set from the file's normals as the INT16_2D attribute holds them
+    /// (null when no primitive has normals) - BlenderReduce's reading of an unskinned mesh.</summary>
+    internal static void ImportedMesh(HafModel m, int meshNode, out float[] P, out int corners, out short[] customNormal)
+    {
+        if (m.Nodes[meshNode].Skin >= 0) throw new NotPortedException($"a skinned mesh at the bind ('{m.Nodes[meshNode].Name}')");
+        int meshIndex = m.Nodes[meshNode].Mesh;
+        var mesh = m.Meshes[meshIndex];
+        var layout = BlenderMesh.FromGltf(m, meshIndex);
+        int nv = layout.VertexCount; P = new float[nv * 3]; var N = new float[nv * 3]; bool hasNormals = false;
+        for (int v = 0; v < nv; v++)
+        {
+            var p = mesh.Primitives[layout.RankPrimitive[v]]; int idx = layout.RankIndex[v];
+            P[3 * v] = p.Positions[3 * idx]; P[3 * v + 1] = -p.Positions[3 * idx + 2]; P[3 * v + 2] = p.Positions[3 * idx + 1];
+            if (p.Normals == null) { N[3 * v] = N[3 * v + 1] = N[3 * v + 2] = float.NaN; continue; }
+            hasNormals = true;
+            N[3 * v] = p.Normals[3 * idx]; N[3 * v + 1] = -p.Normals[3 * idx + 2]; N[3 * v + 2] = p.Normals[3 * idx + 1];
+        }
+        corners = layout.Faces.Length; customNormal = null;
+        if (hasNormals)
+        {
+            if (!BlenderTrig.Exact) throw new NotPortedException("a mesh with normals at the bind in a process without the 64-bit Windows C runtime (the custom normals' cosf)");
+            var sharp = VehicleProbe.SharpFaces(P, layout.Faces, N);
+            var (d0, d1) = VehicleProbe.EncodeCustomShorts(P, layout.Faces, N, sharp);
+            customNormal = new short[2 * corners];
+            for (int c = 0; c < corners; c++) { customNormal[2 * c] = d0[c]; customNormal[2 * c + 1] = d1[c]; }
+        }
+    }
+
+    /// <summary>skip_transform (math_matrix.cc): math::is_equal(transform, identity, 1e-6f) - no entry differs from the
+    /// identity's by MORE than 1e-6 in float32 (a NaN entry does not: it is "equal", and the transform is skipped).</summary>
+    internal static bool NearIdentity(float[] it)
+    {
+        for (int i = 0; i < 16; i++) { float d = (float)(it[i] - (i % 5 == 0 ? 1f : 0f)); if (Math.Abs(d) > 1e-6f) return false; }
+        return true;
+    }
 
     /// <summary>`o.matrix_world = m` for an object without a parent.</summary>
     static void ApplyMat4Root(Obj o, float[] mat)

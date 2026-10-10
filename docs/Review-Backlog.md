@@ -170,7 +170,15 @@ a frame strictly inside a new segment was left to Blender); **the Bezier evaluat
 (`BlenderFCurve.RecalcHandles`: the smoothing solver) - done 2026-10-10, against Blender's own calculation and
 against `pose_bone.keyframe_insert` key by key; **5d the recoil tail** (the kickback read off the source, the
 RecoilArm put in through edit mode - every bone rebuilt an ulp off -, the arc keyed) - done 2026-10-10, 192 jobs to
-the bit; next 6 the binding, the binding, the role clips, the export; 4 the bake, the options (barrel, legs, recoil, wheels) and
+the bit; **6 the binding** (each mesh detached, its world matrix at the bind frame folded into its vertices - skipped
+within 1e-6 of the identity, as Blender skips it -, a shared datablock copied and numbered, one vertex group named after
+the PART found, an Armature modifier, the mesh under the armature) - done 2026-10-10, 204 jobs; the script's own bug
+measured on the way: a pair-merged link's vertex group names a bone that does not exist (`anim_ancestor` returns the
+part's name, not `bone_of[name]`), so the merged links of a budgeted rig never deform - kept as Blender has it, to be
+fixed in the script AND the port together, with the goldens; LEFT from the bind on: a surviving bone shape (the dugout
+canoe's strip list is "camera": its icosphere's vertices are Blender's primitive - port `primitive_ico_sphere_add`, or
+have the Factory strip "icosphere" always, which changes the output); next 7/7b the empties and the actions, 7c the
+role clips, 8 the export; 4 the bake, the options (barrel, legs, recoil, wheels) and
 the role clips; 5 the exported animation, the wiring, the existing golden. OPEN for part 4: bit-exact or a tight
 tolerance - the script's decisions are thresholds on continuous values, the existing golden compares three decimals;
 to be decided on measured distance. Not modelled yet: Bezier keys (a CUBICSPLINE sampler), `KHR_animation_pointer`, an

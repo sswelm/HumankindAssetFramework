@@ -268,8 +268,9 @@ public class BlenderDeployTests
             Assert.Equal(c == 3 ? 1f : 0f, b[c][0].Value);
             // flat handles a third of the way to the neighbour
             Assert.All(b[c], k => { Assert.Equal(k.Value, k.LeftY); Assert.Equal(k.Value, k.RightY); Assert.Equal(k.Frame - 4f, k.LeftX, 4); Assert.Equal(k.Frame + 4f, k.RightX, 4); });
-            // what the bone HOLDS afterwards is the end pose assigned last: nothing evaluates the new curve
-            Assert.Equal(b[c][1].Value, r.ArmPose["Barrel"][c]);
+            // what the bone HOLDS after the retarget is the end pose assigned last: nothing evaluates the new curve there
+            // (the bind then sets the bind frame: ArmPose moves on, ArmPoseAfterRetarget is the snapshot)
+            Assert.Equal(b[c][1].Value, r.ArmPoseAfterRetarget["Barrel"][c]);
         }
         for (int c = 0; c < 3; c++) Assert.Equal((float)(baked[c] * 2f), b[c][1].Value);
         Assert.Equal(0f, b[3][1].Value, 5);                          // a quarter turn doubled: w = cos(90 degrees)
@@ -277,7 +278,7 @@ public class BlenderDeployTests
         Assert.False(r.Rekeyed.ContainsKey("Leg"));
         // the same with the ready frame before the end: the bone still holds the end pose, not the curve at frame 3
         var early = Run("0|24||3||2|||0|||4|0|1");
-        Assert.Equal(early.Rekeyed["Barrel"][2][1].Value, early.ArmPose["Barrel"][2]);
+        Assert.Equal(early.Rekeyed["Barrel"][2][1].Value, early.ArmPoseAfterRetarget["Barrel"][2]);
         // argv[6] the leg scale: the quaternion keyed at the first frame, at the spread frame and at the end; the
         // location's curves cleared
         var l = Run("0|24|||0.5||||0|||4|0|1");
@@ -603,6 +604,65 @@ public class BlenderDeployTests
         Assert.Null(Run("0|24||30|||26|34|1||1e300|4|0|1").Fallback);
         // without the window the step does not run
         Assert.Null(Run("0|24||30|||||1|||4|5|1").Recoil);
+    }
+
+    [Fact]
+    public void The_bind_folds_each_mesh_into_its_parts_group_and_copies_a_shared_datablock()
+    {
+        // a hull that stands still (StaticRoot), a turret that turns, a plate on it (a part of its own), a second and a
+        // third plate SHARING the first's mesh datablock: one static under the hull, one under the turret; a sight under the plate
+        var s = new Scene(); int hull = s.Node("Hull", mesh: true, t: new double[] { 1, 0, -2 }, s: new double[] { 1.5, 1, 1.5 });
+        int turret = s.Node("Turret", hull, mesh: true, t: new double[] { 0, 2, 0 }); s.Move(turret);
+        int plateA = s.Node("PlateA", turret, mesh: true, meshName: "Plate", t: new double[] { 1, 0, 0 }); s.Move(plateA, 1f, new[] { 1f, 0.5f, 0f });
+        int plateB = s.Node("PlateB", hull, t: new double[] { -2, 0, 0 }, s: new double[] { 2, 2, 2 }); s.M.Nodes[plateB].Mesh = s.M.Nodes[plateA].Mesh;
+        int plateC = s.Node("PlateC", turret, t: new double[] { 0, 1, 0 }); s.M.Nodes[plateC].Mesh = s.M.Nodes[plateA].Mesh;
+        s.Node("Sight", plateA, mesh: true, t: new double[] { 0, 0.5, 0 }, s: new double[] { 0.5, 0.5, 0.5 });
+        s.Decide();
+        var r = BlenderDeploy.Decide(s.M, Default.Split('|'), null, true);
+        Assert.Null(r.Fallback);
+        // bpy.data.objects order: Hull, PlateA, PlateB, PlateC, Sight, Turret - every mesh bound
+        Assert.Equal(new[] { "Hull", "PlateA", "PlateB", "PlateC", "Sight", "Turret" }, r.Bound.Select(b => b.Mesh.Name));
+        Assert.Equal(new[] { "DEPLOY static mesh 'Hull' -> StaticRoot (no animated ancestor)", "DEPLOY static mesh 'PlateB' -> StaticRoot (no animated ancestor)", "DEPLOY bound 6 meshes" }, r.BindLog);
+        // the group is the PART's name (its own, its nearest animated ancestor's), StaticRoot for a mesh under none
+        Assert.Equal(new[] { "StaticRoot", "PlateA", "StaticRoot", "Turret", "PlateA", "Turret" }, r.Bound.Select(b => b.Group));
+        // the shared datablock: the first two sharers get numbered copies, the last keeps the original
+        Assert.Equal(new[] { "Plate.001", "Plate.002", "Plate" }, r.Bound.Where(b => b.Mesh.Name.StartsWith("Plate")).Select(b => b.DataName));
+        Assert.Equal(new[] { true, true, false }, r.Bound.Where(b => b.Mesh.Name.StartsWith("Plate")).Select(b => b.Copied));
+        Assert.Equal(1, r.MeshData.Single(x => x.name == "Plate").users); Assert.Equal(1, r.MeshData.Single(x => x.name == "Plate.002").users);
+        Assert.Equal(6, r.MeshData.Count);
+        // every mesh is under the armature at the identity, its parent inverse the identity; the armature at the identity here
+        Assert.All(r.Bound, b => { Assert.Same(r.Armature, b.Mesh.Parent); Assert.Null(b.Mesh.ParentInverse); Assert.Equal(new[] { 0f, 0f, 0f }, b.Mesh.Loc); Assert.Equal(new[] { 1f, 1f, 1f }, b.Mesh.Scale); });
+        // the vertices carry the world matrix at the bind frame: PlateB's at (-2, 0, 0) under the hull, scaled 2 x 1.5 along X (glTF X)
+        var pb = r.Bound.Single(b => b.Mesh.Name == "PlateB");
+        Assert.Equal(3 * 3, pb.Positions.Length);
+        float x0 = pb.Positions[0], x1 = pb.Positions[3];
+        Assert.Equal(6f, x1 - x0, 3);                                   // two across, times 2, times 1.5
+        Assert.Equal(1f + 1.5f * -2f - 3f, x0, 3);                      // hull at x 1, the plate at -2 scaled by the hull's 1.5, the vertex at -1 scaled by 3
+        Assert.Null(pb.CustomNormal); Assert.Equal(3, pb.Corners);
+        // the scene after: every mesh's matrix_world is the armature's (the identity); the armature itself stands where it was
+        Assert.All(r.Bound, b => Assert.Equal(new float[] { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 }, r.AfterBind[b.Mesh.Name]));
+        Assert.Equal(r.AfterRecoil[r.Armature.Name], r.AfterBind[r.Armature.Name]);
+        // a job whose script exits in the recoil step binds nothing
+        var exit = BlenderDeploy.Decide(s.M, "0|24|||||26|34|1|||4|5|1".Split('|'), null, true);
+        Assert.Null(exit.Fallback); Assert.True(exit.ExitAtRecoil); Assert.Empty(exit.Bound); Assert.Empty(exit.BindLog);
+    }
+
+    [Theory]
+    // Blender 5.1.2's custom_normal shorts on the imported triangle below, measured through the bind oracle.
+    [InlineData(2f, 0.5f, -0.25f, new int[] { -29978, 6750, -29978, -13100, -29978, -27538 })]
+    [InlineData(-0.5f, -2f, 0.25f, new int[] { 19718, -14875, 19718, -27078, 19718, -3567 })]
+    [InlineData(1.2f, 0.8f, -0.3f, new int[] { -29317, 10985, -29317, -11948, -29317, -26264 })]
+    [InlineData(1e30f, 1e30f, 1e30f, new int[] { 27319, 19406, 27319, -9657, 27319, -23732 })]
+    public void The_bind_clamps_file_normal_components_before_encoding(float x, float y, float z, int[] expected)
+    {
+        var s = new Scene(); int part = s.Node("Part", mesh: true); s.Move(part);
+        var primitive = s.M.Meshes[s.M.Nodes[part].Mesh].Primitives[0];
+        primitive.Positions = new float[] { 0, 0, 0, 1, 0, 0, 0, 0.5f, 0.25f };
+        primitive.Normals = new[] { x, y, z, x, y, z, x, y, z };
+        s.Decide();
+        var r = BlenderDeploy.Decide(s.M, Default.Split('|'), null, true);
+        Assert.Null(r.Fallback);
+        Assert.Equal(expected, r.Bound.Single().CustomNormal.Select(n => (int)n));
     }
 
     [Theory]
