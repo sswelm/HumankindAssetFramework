@@ -647,6 +647,61 @@ public class BlenderDeployTests
         Assert.Null(exit.Fallback); Assert.True(exit.ExitAtRecoil); Assert.Empty(exit.Bound); Assert.Empty(exit.BindLog);
     }
 
+    [Fact]
+    public void The_purge_removes_the_animated_empties_and_the_role_clips_sample_the_deploy()
+    {
+        // a hull mesh under an animated EMPTY (removed by 7: the hull mesh is under the armature by then), a turret part
+        // with a gun, a static box under the turret empty
+        var s = new Scene(); int root = s.Node("Root", t: new double[] { 1, 0, 0 }); s.Move(root);
+        s.Node("Hull", root, mesh: true);
+        int turret = s.Node("Turret", root, mesh: true, t: new double[] { 0, 2, 0 }); s.Move(turret);
+        s.Node("Box", turret, t: new double[] { -1, 0, 0 });
+        s.Decide();
+        var r = BlenderDeploy.Decide(s.M, Default.Split('|'), null, true);
+        Assert.Null(r.Fallback);
+        r.Finish();
+        // 7: Root (an animated empty) is gone; Box, its child through the turret... stays as it was (the turret is a mesh part, kept)
+        Assert.Equal(new[] { "DEPLOY kept 1 action: deploy" }, r.Log7);
+        Assert.Equal(new[] { "Box", "DeployArm", "Hull", "Turret", "UnitNormalize" }, r.Objects7.Select(o => o.Name));   // the normalization root (the model is small) stays: no action
+        Assert.DoesNotContain(r.Objects7, o => o.Name == "Root");
+        Assert.Same(r.Objects7.Single(o => o.Name == "Turret"), r.Objects7.Single(o => o.Name == "Box").Parent);
+        Assert.All(r.Objects7, o => Assert.Equal(o.Name == "DeployArm", o.HasAction));
+        Assert.Equal(new[] { "deploy" }, r.Actions7);
+        Assert.DoesNotContain(r.Objects, o => o.Name == "Root" && !r.Objects.Contains(o));   // the pre-purge list is untouched
+        Assert.Contains(r.Objects, o => o.Name == "Root");
+        // 7c: unfold over 0..24, fold backwards, folded the rest frame twice, deployed the end twice; location and quaternion
+        // curves per bone, Bezier; the slot named after the armature; the deploy action stays active
+        Assert.Null(r.RoleFallback);
+        Assert.Equal(new[] { "unfold", "fold", "folded", "deployed" }, r.Roles.Select(x => x.Name));
+        Assert.All(r.Roles, x => Assert.Equal("OBDeployArm", x.Slot));
+        var unfold = r.Roles[0]; var turretKeys = unfold.Curves["Turret"];
+        Assert.Equal(Enumerable.Range(0, 25).Select(i => (float)i), turretKeys[1].Select(k => k.Frame));
+        Assert.Equal(r.Keys["Turret"][0][1], turretKeys[1][0].Value); Assert.Equal(r.Keys["Turret"][24][1], turretKeys[1][24].Value);
+        Assert.Null(turretKeys[7]); Assert.Null(turretKeys[10]);                                  // no scale, no Euler curves
+        Assert.Equal(r.Keys["Turret"][24][0], r.Roles[1].Curves["Turret"][0][0].Value);        // fold starts at the end
+        Assert.Equal(new[] { 0f, 1f }, r.Roles[2].Curves["Turret"][3].Select(k => k.Frame));
+        Assert.Equal(new[] { 0f, 1f }, r.Roles[3].Curves["Turret"][3].Select(k => k.Frame));
+        Assert.Equal("deploy", r.ActiveAction);
+        Assert.Contains("DEPLOY role clips: unfold/fold/folded/deployed (+ legacy 'deploy')", r.RoleLog);
+        Assert.Equal("QUATERNION", r.ArmPose7["Turret"].mode);
+        // the wheels: Turret spun about its local X (forced), 4 frames of 90 degrees, Euler keys LINEAR, the mode XYZ afterwards
+        var w = BlenderDeploy.Decide(s.M, "0|24|||||||0|||4|0|1||Turret,Nothing|x|4|90".Split('|'), null, true); w.Finish();
+        Assert.Null(w.RoleFallback);
+        var folded = w.Roles.Single(x => x.Name == "folded");
+        Assert.Equal(new[] { 0f, 1f, 2f, 3f, 4f }, folded.Curves["Turret"][10].Select(k => k.Frame));
+        Assert.Equal((float)(90 * Math.PI / 180), folded.Curves["Turret"][10][4].Value, 5);
+        Assert.All(folded.Curves["Turret"][10], k => Assert.Equal("LINEAR", k.Interpolation));
+        Assert.All(folded.Curves["Turret"][3], k => Assert.Equal("LINEAR", k.Interpolation));
+        Assert.Equal("XYZ", w.ArmPose7["Turret"].mode);
+        Assert.Contains("DEPLOY WHEEL ERROR: bone 'Nothing' not found. Bones: ['Root', 'Turret', 'StaticRoot']", w.RoleLog);
+        Assert.Contains("DEPLOY WHEEL SPIN in 'folded': {'Turret': '+X'} (rest untouched), 4 frames, 90 deg -> Movement clip = folded[1..4]", w.RoleLog);
+        // a deploy end before the bind frame: the script dies on its snapshot; a span past 20,000 frames: left by name
+        var dead = BlenderDeploy.Decide(s.M, "0|-3|||||||0|||4|0|1".Split('|'), null, true); dead.Finish();
+        Assert.Contains("the script dies on the KeyError", dead.RoleFallback ?? "");
+        var far = BlenderDeploy.Decide(s.M, "0|30000|||||||0|||4|0|1".Split('|'), null, true); far.Finish();
+        Assert.Contains("20,000 frames", far.RoleFallback ?? "");
+    }
+
     [Theory]
     // Blender 5.1.2's custom_normal shorts on the imported triangle below, measured through the bind oracle.
     [InlineData(2f, 0.5f, -0.25f, new int[] { -29978, 6750, -29978, -13100, -29978, -27538 })]

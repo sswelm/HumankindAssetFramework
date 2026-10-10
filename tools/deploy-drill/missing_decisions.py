@@ -175,6 +175,40 @@ def main(out, dump, jobs):
         write("bind_%s_value" % kind, lines)
     write("bind_LOG6_missing", [l for l in bnd if not l.startswith("LOG6\t")])
     write("bind_DIES6_claimed", list(bnd) + ["DIES6\tRuntimeError: Error: Mesh has no vertices"])
+    # the purge and the role clips (7, 7b, 7c): a job whose role clips were keyed, with a recoil role - an object row, an
+    # action, a transform row and a matrix after the purge, a role action, a role curve and a pose row afterwards: each
+    # missing, doubled, renamed, cut short or one bit off; the log lines missing; the active action wrong; a death or a
+    # skip claimed
+    rol = next((b for b in blocks if "FC7C" in kinds(b) and "DONE" in kinds(b) and any(l.startswith("ACT7C\trecoil") for l in b)
+                and not b[0].startswith(("JOB\tLEFT:", "JOB\tBAKELEFT:", "JOB\tROLELEFT:"))), None)
+    if rol is None:
+        raise ValueError("no job with keyed role clips and a recoil role in the dump")
+    control("role", rol)
+    for kind in ("OBJ7", "ACT7", "E7", "O8", "ACT7C", "FC7C", "APB7"):
+        rows = [i for i, l in enumerate(rol) if l.startswith(kind + "\t") and (kind != "FC7C" or l.startswith("FC7C\trecoil\t")) and (kind != "ACT7" or True)]
+        lines = list(rol); del lines[rows[0]]
+        write("role_%s_missing" % kind, lines)
+        if len(rows) > 1:
+            lines = list(rol); lines[rows[1]] = rol[rows[0]]
+        else:   # one action after the purge: doubled in place
+            lines = list(rol); lines.insert(rows[0], rol[rows[0]])
+        write("role_%s_duplicate" % kind, lines)
+        t = rol[rows[0]].split("\t"); t[1 if kind != "FC7C" else 2] = "no such name" if kind != "FC7C" else 'pose.bones["no such bone"].location'
+        lines = list(rol); lines[rows[0]] = "\t".join(t)
+        write("role_%s_unknown" % kind, lines)
+        lines = list(rol); lines[rows[0]] = rol[rows[0]].rsplit("\t", 1)[0]
+        write("role_%s_short" % kind, lines)
+        last = rol[rows[-1]][-1]
+        lines = list(rol); lines[rows[-1]] = rol[rows[-1]][:-1] + ("0" if last != "0" else "1")
+        write("role_%s_value" % kind, lines)
+    write("role_LOG7_missing", [l for l in rol if not l.startswith("LOG7\t")])
+    write("role_LOG7C_missing", [l for l in rol if not l.startswith("LOG7C\t")])
+    act = next(i for i, l in enumerate(rol) if l.startswith("ACTIVE7\t"))
+    lines = list(rol); lines[act] = "ACTIVE7\tunfold\t" + rol[act].split("\t")[2]
+    write("role_ACTIVE7_wrong", lines)
+    write("role_DIES7_claimed", list(rol) + ["DIES7\tReferenceError: StructRNA of type Object has been removed"])
+    write("role_DIES7C_claimed", list(rol) + ["DIES7C\tKeyError: 0"])
+    write("role_SKIP7C_claimed", list(rol) + ["SKIP7C\t25\t0"])
     abort = next((b for b in blocks if "EXIT\t1" in b and "DONE" in kinds(b) and not b[0].startswith("JOB\tLEFT:")), None)
     if abort is None:
         raise ValueError("no abort job in the dump for the EXIT regressions")

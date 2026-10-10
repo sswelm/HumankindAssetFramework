@@ -180,7 +180,7 @@ n_jobs=$(grep -c "" "$TMPD/jobs.txt")
 t3=$(date +%s)
 "$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_decisions_dump.py")" -- "$WROOT/editor/Tools~/deploy_convert.py" "$WTMP/jobs.txt" > "$TMPD/decisions_raw.txt" 2> "$TMPD/decisions_err.txt"; drc=$?   # stderr apart: a depsgraph warning lands in the middle of a row otherwise
 t4=$(date +%s)
-tr -d '\r' < "$TMPD/decisions_raw.txt" | grep -E "^(JOB|LOG|LOG2|EXIT|RANGE|NORM|FLAG|PART|BAD|ALIAS|ARM|BONEOF|RBONE|ANCHOR|HULL|PINV|OBJ|M|T|BOX|ACT|FC|FCA|PB2|PB3|M2|O2|O3|LOG3|SNAP|APB|O4|LOG4|FC4|APB4|O5|LOG5|EXIT5|DIES5|R5|RBONE5|FC5|APB5|PM5|O6|LOG6|DIES6|BIND|VG6|MOD6|V6|VX6|N6|DATA6|O7|SW|DONE|FAIL)	" > "$TMPD/decisions.txt"
+tr -d '\r' < "$TMPD/decisions_raw.txt" | grep -E "^(JOB|LOG|LOG2|EXIT|RANGE|NORM|FLAG|PART|BAD|ALIAS|ARM|BONEOF|RBONE|ANCHOR|HULL|PINV|OBJ|M|T|BOX|ACT|FC|FCA|PB2|PB3|M2|O2|O3|LOG3|SNAP|APB|O4|LOG4|FC4|APB4|O5|LOG5|EXIT5|DIES5|R5|RBONE5|FC5|APB5|PM5|O6|LOG6|DIES6|BIND|VG6|MOD6|V6|VX6|N6|DATA6|O7|LOG7|DIES7|OBJ7|ACT7|E7|O8|SKIP7C|LOG7C|DIES7C|ACT7C|FC7C|ACTIVE7|APB7|SW|DONE|FAIL)	" > "$TMPD/decisions.txt"
 n_done=$(grep -c "^DONE" "$TMPD/decisions.txt")
 if [ "$drc" -ne 0 ] || [ "$n_done" -ne "$n_jobs" ]; then
   grep -E "^FAIL|Traceback|Error" "$TMPD/decisions_raw.txt" "$TMPD/decisions_err.txt" | head -8
@@ -411,6 +411,47 @@ for mode in LOG6_missing DIES6_claimed; do
   fi
 done
 echo "PASS — deploy drill accepts an intact bind and rejects missing, doubled, unknown, truncated or changed bind, vertex-group, modifier, vertex-hash, sampled-vertex, custom-normal, datablock and object rows, a missing log line, and a claimed death of the script"
+# ... and the purge and the role clips (7, 7b, 7c): against an intact control, an object row, an action, a transform row and
+# an object matrix after the purge, a role action, a role curve and a pose row after the role clips - each missing, doubled,
+# renamed, cut short or one bit off; the log lines missing; the active action wrong; a death or a skip claimed
+"$TMPD/deploy.exe" --decisions "$WTMP/missing_dec/role_jobs.txt" "$WTMP/missing_dec/role_intact.txt" > "$TMPD/role_control.txt" 2>&1; controlrc=$?
+if [ "$controlrc" -ne 0 ] || ! grep -qE "^PASS " "$TMPD/role_control.txt"; then
+  head -5 "$TMPD/role_control.txt"
+  echo "FAIL — deploy drill rejected the intact role-clip control (rc=$controlrc)"; exit 1
+fi
+for kind in OBJ7 ACT7 E7 O8 ACT7C FC7C APB7; do
+  for mode in missing duplicate unknown short value; do
+    case "$kind" in
+      OBJ7) reason="objects after the purge";;
+      ACT7) reason="actions after the purge";;
+      E7) reason="transforms after the purge|transform row after the purge";;
+      O8) reason="object row|matrices .*after the purge";;
+      ACT7C) reason="actions after the role clips";;
+      FC7C) reason="role curve|deploy action.s curves after the role clips";;
+      APB7) reason="pose row after the role clips|pose bones hold other values after the role clips";;
+    esac
+    "$TMPD/deploy.exe" --decisions "$WTMP/missing_dec/role_jobs.txt" "$WTMP/missing_dec/role_${kind}_$mode.txt" > "$TMPD/role_${kind}_$mode.txt" 2>&1; badrc=$?
+    if [ "$badrc" -ne 1 ] || ! grep -E "^FAIL " "$TMPD/role_${kind}_$mode.txt" | grep -qE "$reason"; then
+      head -5 "$TMPD/role_${kind}_$mode.txt"
+      echo "FAIL — deploy drill accepted invalid role-clip evidence ($kind $mode, rc=$badrc)"; exit 1
+    fi
+  done
+done
+for mode in LOG7_missing LOG7C_missing ACTIVE7_wrong DIES7_claimed DIES7C_claimed SKIP7C_claimed; do
+  case "$mode" in
+    LOG7_missing) reason="the purge.s log";;
+    LOG7C_missing) reason="the role clips. log";;
+    ACTIVE7_wrong) reason="the active action after the role clips";;
+    DIES7_claimed) reason="died removing the empties";;
+    DIES7C_claimed) reason="died in the role clips";;
+    SKIP7C_claimed) reason="skipped the role clips";;
+  esac
+  "$TMPD/deploy.exe" --decisions "$WTMP/missing_dec/role_jobs.txt" "$WTMP/missing_dec/role_$mode.txt" > "$TMPD/role_$mode.txt" 2>&1; badrc=$?
+  if [ "$badrc" -ne 1 ] || ! grep -E "^FAIL " "$TMPD/role_$mode.txt" | grep -qE "$reason"; then
+    head -5 "$TMPD/role_$mode.txt"; echo "FAIL — deploy drill accepted a role-clip dump with $mode (rc=$badrc)"; exit 1
+  fi
+done
+echo "PASS — deploy drill accepts intact purge and role-clip rows and rejects missing, doubled, unknown, truncated or changed object, action, transform, matrix, role-action, role-curve and pose rows, missing log lines, a wrong active action, and a claimed death or skip"
 
 # ---- the handles of automatic keys: Blender's own calculation (FCurve.update(), keyframe_points.insert(), and
 #      handles_recalc() on keys stored raw) on generated curves against BlenderFCurve.RecalcHandles, both handles of

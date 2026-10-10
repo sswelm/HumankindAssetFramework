@@ -954,6 +954,70 @@ log line and a claimed death. LEFT from the bake on, by name: a surviving bone s
 `bpy.data.meshes` (compared as a set: nothing later reads it); a mesh with a parent inverse of its own (the importer
 sets none); whether the exporter writes the merged links' bone-less group (step 8).
 
+**Replacing `deploy_convert.py`, parts 7, 7b, 7c: the purge and the role clips** (2026-10-11). Step 7 removes the
+animated empties (a removed part's children are roots with the transform they held; the meshes are under the
+armature by then; an imported armature that is a part goes too), 7b clears every other object's animation, removes
+every action but the armature's and renames it "deploy", 7c samples the baked deploy frame by frame into role actions
+keyed with `pose_bone.keyframe_insert`: unfold (fmin..deploy end), fold (backwards), folded (the rest frame twice, or
+the wheels spun: argv[17..20] bones, axis, frames, degrees - Euler keys about the local axis nearest the axle, XYZ
+mode, every key of the role LINEAR), deployed (the end twice), recoil (the pristine fire window with the slam layered
+on the RecoilArm, the window played back `argv[13]` times slower, the later segments appended with their step).
+`BlenderDeploy`: `Result.Finish` - LAZY: what an object holds after 7b is what the LAST evaluation left, and the
+oracle sweeps frames after the bind, so the drill runs Finish after its sweep and the Factory will run it right after
+Decide -, `Log7`, `Objects7` (copies; `Objects` stays the pre-purge list), `Actions7`, `AfterPurge`, `BoneOrder`,
+`RoleFallback`, `RoleLog`, `Roles`, `ActiveAction`, `ArmPose7`; `Obj.Eul`; `ArmKey.Interpolation`;
+`Mat3ToEulXYZ`, `QuatToEulXYZ` (hypotf, atan2f from the C runtime). Measured, not read: the armature is unparented
+after the bake already, so step 7 moves nothing; `arm.data.bones` after the recoil is the edit list's order nested
+depth-first (the RecoilArm the last child of the tube root's parent) and the pose channels follow it - the drill now
+checks that order on the RBONE5 rows; `arm.matrix_world = Identity` leaves the armature's Euler Y at MINUS zero
+(`mat3_normalized_to_eul`); `pb.rotation_mode = 'XYZ'` CONVERTS the held quaternion (normalized in place) into the
+Euler angles (`BKE_rotMode_change_values`: found by `wheels_negative`, where no key overwrites them); the role curves
+are Bezier, AUTO_CLAMPED, CONT_ACCEL, extrapolation CONSTANT; the bind's apply is the value the animsys compares the
+next evaluation against (`bind_longname`: a mesh part kept the apply's +0 where its curve says -0 - the port's pose
+history had to take the apply, `pose.Write`). The oracle runs two more stages AFTER its sweep: the purge (`LOG7`,
+`DIES7`, `OBJ7`, `ACT7`, `E7` - mode, location, quaternion, Euler, scale as held -, `O8` after `frame_set(fmin)`,
+7c's first act) and the role clips (`LOG7C`, `DIES7C`, `ACT7C` with slots, `FC7C` every curve of every action with
+handles and interpolation, `ACTIVE7`, `APB7` with the mode and the Euler angles). A span past 20,000 frames is not
+run by the oracle (`SKIP7C`: the script would key for hours - `gun_end_max` would never finish) and the port must
+leave such a job by name; the script's own death (a deploy end before the bind frame: the snapshot it never took,
+`KeyError`; a wheel count of 0: the division) likewise - a job so left is marked `ROLELEFT:` and compared through the
+bind and the purge. 217 jobs, 0 failed: 4,787 objects after the purge, 92,622 role curves, 2,295,177 keys to the
+bit; the T-62's 124 bones in five roles, the howitzer's recoil role with its epilogue. Fixtures: the wheel spin with
+the axle by AUTO (12-vertex rings), forced to Y and Z, a bone found by a substring and one not found (logged), 8
+frames of -180 degrees, a negative count (no keys, the mode set and the quaternion converted), a wheel named twice,
+a wheel past ASCII found by its exact name, with the recoil; the span guard; ROLELEFT: `gun_end_65537`, `gun_end_max`,
+`role_span` (the span), `gun_end_min`, `gun_end_minus5000`, `gun_end_negative*`, `gun_gen*_negative`,
+`gun_recoil_end_m8/m4` (the KeyError), `wheels_zero` (the division), `wheels_nonascii_sub` (Python's lower case of a
+name past ASCII, sought by a substring). Planted: 41 in the port, 41 fail the drill (the parts removed by their action,
+a removed part's child under the grandparent, the armature's action cleared, the action's name, the Euler sign, the bones'
+order, the span guard both ways, the snapshot's KeyError taken as the identity, unfold a frame late, fold not reversed,
+folded and deployed keyed once, keys at the source frame, a bone born after the snapshot zeroed, the arm's location held,
+the slam into the return, the palindrome's last frame, the return without its switch, the epilogue's step and end, the
+peak the last of equals, the settle's default, the decay not mirrored and in float, theta in float, the axle's sign, the
+local axis by the signed dot, degrees not in radians and in another order, the keys left Bezier, the mode left
+QUATERNION and the mode change without the conversion, the last wheel frame short, the substring search case-sensitive,
+the verts threshold, the thin extent the last of equals, the verts through the local matrix, the held recoil keyed once,
+the count's default, the active action the last role). A plant that raises the span guard HANGS the port on
+`gun_end_65537` (the quadratic keying the guard prevents): that direction is judged by the other jobs only. The gate tampers the purge and role rows (missing, doubled, renamed,
+cut short, one bit off), both log lines, the active action, and claims a death or a skip; each must fail, replayed
+locally against the gate's reasons before the push. Not held: an Euler-mode object given a rotation other than the
+identity is now extracted by the real function, but only the identity is reached (the armature); the order of the
+curves within a role action (compared as a set; the export may read it).
+
+*Review before the PR* (an independent agent; 101 generated jobs through the real script over 13 fixtures, 49,732 role
+curves and 851,116 keys equal): NO executed defect. It confirmed by execution what I had not fixtured: deploy ends at
+fmin and past fmax, the return at 0, 1, 2, 7 and 50, settles of 0.5, 1.5, 2, 0 and -3, three fire segments with steps,
+a point segment, a reversed segment, a one-frame window, wheels thin along each axis, rings of exactly 8 and 7
+vertices, forced axes in any case, 1 to 2,000 frames, degrees of 0, -0, 1e-3, 720.5, -120.5, substrings among
+look-alike names, names with both quote kinds and a backslash in the repr, a pair-merged wheel (its group names no
+bone: logged as not found), the contract path with 142 parts and the recoil, the wheels and a leg scale together, the
+bone order read through the wheel-error list on five recoil shapes, the rotation-mode conversion through its eul2,
+gimbal and identity branches. Taken from its notes: a non-ASCII axis is AUTO (no such string upper-cases to X, Y or
+Z), the normalize helper multiplies by the float32 reciprocal as `normalize_vn_vn` does (unobservable here: the rests'
+columns are unit), `wheels_negative_turned` holds the conversion through a general quaternion. Noted, not held:
+Python's numeric syntax with underscores is left by name as elsewhere; a bone name with a TAB cannot be dumped by the
+tab-separated oracle; a CAMERA part cannot be drilled through step 7 (a camera leaves the file at the import, as before).
+
 *Review of PR #145*: the bind's imported custom normals missed the Python setter's component clamp to `[-1, 1]`
 ([Blender's RNA declaration](https://github.com/blender/blender/blob/v5.1.2/source/blender/makesrna/intern/rna_mesh_api.cc#L329)).
 Normals such as `(2, .5, -.25)` were normalized directly instead of clamped first, giving a different direction

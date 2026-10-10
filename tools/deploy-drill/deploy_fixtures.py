@@ -15,9 +15,13 @@ class Scene:
     def __init__(self):
         self.b = Buf(); self.nodes = []; self.meshes = []; self.samplers = []; self.channels = []; self.roots = []; self.skins = []
 
-    def mesh(self, name, size=1.0, at=(0.0, 0.0, 0.0), skinned=False, normals=False):
+    def mesh(self, name, size=1.0, at=(0.0, 0.0, 0.0), skinned=False, normals=False, ring=0):
         x, y, z = at
         pos = [(x, y, z), (x + size, y, z), (x, y + size * 0.5, z + size * 0.25)]
+        if ring:
+            # a thin wheel: `ring` vertices on a circle in the YZ plane, a hair thick along X - its axle is X
+            import math
+            pos = [(x + (0.02 if i % 2 else -0.02), y + size * math.cos(2 * math.pi * i / ring), z + size * math.sin(2 * math.pi * i / ring)) for i in range(ring)]
         attrs = {"POSITION": self.b.accessor(pos, "f", "VEC3")}
         if normals:
             # three file normals, not the face's and not unit: the importer encodes them against the face as custom normals
@@ -637,17 +641,20 @@ def main(out):
     print("gun_guard_first|%s|0|24||0||2|||0|||4|0|1" % f)
     # a negative end with a leg scale: the legs' frame_set lands INSIDE the barrel's new Bezier segment (-5..1), and
     # what the legs are slerped from is the curve's value there
-    print("gun_end_negative|%s|0|-5||36|0.5|1.5|||0|||4|0|1" % fg)
-    print("gun_end_negative1|%s|0|-1||0|0.5|1.5|||0|||4|0|1" % fg)
+    # (ROLELEFT: a deploy end before the bind frame - the role clips die on the snapshot the script never took)
+    print("ROLELEFT:gun_end_negative|%s|0|-5||36|0.5|1.5|||0|||4|0|1" % fg)
+    print("ROLELEFT:gun_end_negative1|%s|0|-1||0|0.5|1.5|||0|||4|0|1" % fg)
     for seed in (1, 2, 3):
-        print("gun_gen%d_negative|%s|0|-40||30|0.7|2.2|||0|||4|0|1" % (seed, gunnery_general(out, "deploy_gunnery_general%d" % seed, seed)))
+        print("ROLELEFT:gun_gen%d_negative|%s|0|-40||30|0.7|2.2|||0|||4|0|1" % (seed, gunnery_general(out, "deploy_gunnery_general%d" % seed, seed)))
     # ends far outside the clip: the barrel's segment lies where only the sweep about its keys looks
     print("gun_end_5000|%s|0|5000||36|0.5|1.5|||0|||4|0|1" % fg)
-    print("gun_end_65537|%s|0|65537||36||2.2|||0|||4|0|1" % fg)
-    print("gun_end_minus5000|%s|0|-5000||12|0.25|0.7|||0|||4|0|1" % fg)
+    # (ROLELEFT: the role clips of a span past 20,000 frames are not run by the dump; of a deploy end before the bind frame,
+    # the script dies on the snapshot it never took)
+    print("ROLELEFT:gun_end_65537|%s|0|65537||36||2.2|||0|||4|0|1" % fg)
+    print("ROLELEFT:gun_end_minus5000|%s|0|-5000||12|0.25|0.7|||0|||4|0|1" % fg)
     # Legal Int32 end/ready frames: probing their neighbours must not send an out-of-Int32 value to frame_set.
     for label, frame in (("min", -2147483648), ("max", 2147483647)):
-        print("gun_end_%s|%s|0|%d||36|0.5|1.5|||0|||4|0|1" % (label, fg, frame))
+        print("ROLELEFT:gun_end_%s|%s|0|%d||36|0.5|1.5|||0|||4|0|1" % (label, fg, frame))
         print("gun_ready_%s|%s|0|24||%d|0.5|1.5|||0|||4|0|1" % (label, fg, frame))
     # a held zero's sign: the fire window's last frame is a -0 frame reached from a non-zero one, and the frame set
     # after it (the last-frame probe, then the sweep) must start from what THAT left
@@ -695,8 +702,8 @@ def main(out):
     print("gun_recoil_static_parent|%s|0|24||30|||26|34|1|||4|5|1" % gunnery_recoil2(out, "deploy_gunnery_rec_static", "staticparent"))
     print("gun_recoil_deep3|%s|0|24||30|||26|34|1|||4|5|1" % gunnery_recoil2(out, "deploy_gunnery_rec_deep3", "deep3"))
     print("gun_recoil_armname|%s|0|24||30|||26|34|1|||4|5|1" % gunnery_recoil2(out, "deploy_gunnery_rec_armname", "armname"))
-    print("gun_recoil_end_m8|%s|0|-8||30|||26|34|1|||4|5|1" % fr)
-    print("gun_recoil_end_m4|%s|0|-4||30|||26|34|1|||4|5|1" % fr)
+    print("ROLELEFT:gun_recoil_end_m8|%s|0|-8||30|||26|34|1|||4|5|1" % fr)
+    print("ROLELEFT:gun_recoil_end_m4|%s|0|-4||30|||26|34|1|||4|5|1" % fr)
     print("gun_recoil_dir_under|%s|0|24||30|||26|34|1|||4|5|1" % gunnery_recoil2(out, "deploy_gunnery_rec_dir_under", "dir", d=(0.99e-4 * 0.6, 0.6, 0.0)))
     print("gun_recoil_dir_over|%s|0|24||30|||26|34|1|||4|5|1" % gunnery_recoil2(out, "deploy_gunnery_rec_dir_over", "dir", d=(1.01e-4 * 0.6, 0.6, 0.0)))
     # ... and where the script dies: an arc radius of 0 (a division by zero; with and without a slam of 0), a window
@@ -770,6 +777,25 @@ def main(out):
     # uneven, mirrored matrix; no mesh at all
     for kind in ("shared", "suffix", "strip", "nested", "normals", "normals_clamp", "normals_clamp_negative", "normals_large", "empty", "longname", "anchor", "near"):
         print("bind_%s|%s|%s" % (kind, bind(out, "deploy_bind_" + kind, kind), DEFAULT))
+    # the role clips (7c): the wheel spin - the axle from the verts (AUTO: the thin extent), forced to Y and Z, a bone found
+    # by a substring, one not found (logged), 8 frames and -180 degrees, the frame count 0 (the script divides by it:
+    # ROLELEFT), a negative count (no keys, the modes set), a wheel named twice, a wheel bone past ASCII (ROLELEFT); the
+    # span guard (a deploy end of 30,000: Blender would key for hours, the dump skips it, the port leaves it)
+    fw = wheels(out, "deploy_wheels", "auto")
+    print("wheels_auto|%s|0|24|||||||0|||4|0|1||L_Wheel,R_Wheel|AUTO|8|-180" % fw)
+    print("wheels_forced_y|%s|0|24|||||||0|||4|0|1||L_Wheel,R_Wheel|y|6|90" % fw)
+    print("wheels_forced_z|%s|0|24|||||||0|||4|0|1||L_Wheel| Z ||" % fw)
+    print("wheels_substring|%s|0|24|||||||0|||4|0|1||wheel,Nothing,R_W|AUTO|4|360" % fw)
+    print("ROLELEFT:wheels_zero|%s|0|24|||||||0|||4|0|1||L_Wheel|AUTO|0|-360" % fw)
+    print("wheels_negative|%s|0|24|||||||0|||4|0|1||L_Wheel,R_Wheel|AUTO|-3|-360" % fw)
+    # ... and on wheels turned about two axes: the quaternion converted to Euler angles through the other branch, kept (no key overwrites it)
+    print("wheels_negative_turned|%s|0|24|||||||0|||4|0|1||L_Wheel,R_Wheel|AUTO|-3|-360" % wheels(out, "deploy_wheels_turned", "turned"))
+    print("wheels_twice|%s|0|24|||||||0|||4|0|1||L_Wheel,R_Wheel,L_Wheel,Tail_Wheel|AUTO|5|-120.5" % wheels(out, "deploy_wheels_many", "many"))
+    fn = wheels(out, "deploy_wheels_nonascii", "nonascii")
+    print("wheels_nonascii|%s|0|24|||||||0|||4|0|1||L_Wh\u00e9el|AUTO|8|-180" % fn)             # found by its exact name
+    print("ROLELEFT:wheels_nonascii_sub|%s|0|24|||||||0|||4|0|1||Wh\u00e9|AUTO|8|-180" % fn)     # sought by a substring: Python's lower case of a name past ASCII
+    print("wheels_recoil|%s|0|24||30|||26|34|1|||4|5|1||L_Wheel,R_Wheel|AUTO|8|-180" % wheels(out, "deploy_wheels_recoil", "auto"))
+    print("ROLELEFT:role_span|%s|0|30000|||||||0|||4|0|1" % fw)
 
 
 def bind(out, name, kind):
@@ -844,6 +870,28 @@ def bind(out, name, kind):
     else:   # empty: a second animated empty, nothing to bind
         barrel = s.node("Barrel", turret, translation=[1.0, 0.0, 0.0])
         s.anim(barrel, "translation", [0.0, 1.0], [(1.0, 0.0, 0.0), (1.0, 0.5, 0.0)])
+    return s.write(out, name)
+
+
+def wheels(out, name, kind):
+    """The wheel spin of the folded role (7c, argv[17..20]). A hull that rolls (StaticRoot anchor) with two thin wheels on
+    animated axles (the parts L_Wheel and R_Wheel, 12-vertex rings) and a gun. "auto": the axle from the verts (X, the thin
+    extent); "nonascii": a wheel bone named past ASCII (the port leaves it); "many": three wheels, one named twice."""
+    s = Scene()
+    hull = s.node("Hull", None, mesh=s.mesh("hull", 4.0, at=(-2.0, 0.5, -1.0)), translation=[0.0, 0.0, 0.0])
+    lw = s.node("L_Wheel", hull, mesh=s.mesh("lwheel", 0.5, ring=12), translation=[-1.5, 0.5, 0.0])
+    rw = s.node("R_Wheel", hull, mesh=s.mesh("rwheel", 0.5, ring=12), translation=[1.5, 0.5, 0.0], rotation=[0.0, 1.0, 0.0, 0.0])
+    turns = {lw: (0.0, 0.7660444, 0.0, 0.6427876), rw: (0.5, 0.5, 0.5, 0.5)} if kind == "turned" else {}
+    for w in (lw, rw):
+        q = turns.get(w, (0.0, 0.0, 0.0, 1.0))
+        s.anim(w, "rotation", [0.0, 1.0], [q, q])
+    gun = s.node("Gun", hull, mesh=s.mesh("gun", 1.0), translation=[0.0, 1.0, 0.0])
+    s.anim(gun, "translation", [0.0, 1.0], [(0.0, 1.0, 0.0), (0.0, 1.5, 0.0)])
+    if kind == "nonascii":
+        s.nodes[lw]["name"] = "L_Wh\u00e9el"
+    if kind == "many":
+        t = s.node("Tail_Wheel", hull, mesh=s.mesh("twheel", 0.3, ring=8), translation=[0.0, 0.3, -2.0])
+        s.anim(t, "rotation", [0.0, 1.0], [(0.0, 0.0, 0.0, 1.0), (0.0, 0.0, 0.0, 1.0)])
     return s.write(out, name)
 
 

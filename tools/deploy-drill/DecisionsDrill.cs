@@ -25,6 +25,9 @@ static class DecisionsDrill
         "a mesh bound to its own bone (6)", "a mesh bound to an ancestor's bone", "a static mesh bound to StaticRoot", "a shared mesh datablock copied at the bind",
         "a bound mesh with custom normals", "a bound mesh without normals", "no mesh to bind",
         "a vertex group named after a pair-merged part (no bone of that name)",
+        "an animated empty removed (7)", "an imported armature that is a part removed (7)", "a mesh that was a part: its animation cleared (7b)",
+        "the role clips keyed (7c)", "a recoil role from the fire window (7c)", "a recoil role held (the step off)", "the wheels spun in the folded role", "a wheel bone not found (logged)",
+        "a wheel axle by AUTO", "a wheel axle forced", "a role clip epilogue (a second fire segment)", "the role clips left to Blender (RoleFallback)",
     };
 
     static uint Bits(float f) => BitConverter.ToUInt32(BitConverter.GetBytes(f), 0);
@@ -46,7 +49,7 @@ static class DecisionsDrill
             jobs[t[0]] = t;
         }
         var cover = new SortedDictionary<string, long>(); foreach (var k in CoverKeys) cover[k] = 0;
-        int fails = 0, files = 0, left = 0; long matrices = 0, objects = 0, lines = 0, bones = 0, curves = 0, keysCompared = 0, after = 0, importedKeys = 0, held2 = 0, atLast = 0, snapped = 0, rekeyed = 0, swept = 0, recoilRows = 0, boundMeshes = 0, vertices = 0;
+        int fails = 0, files = 0, left = 0; long matrices = 0, objects = 0, lines = 0, bones = 0, curves = 0, keysCompared = 0, after = 0, importedKeys = 0, held2 = 0, atLast = 0, snapped = 0, rekeyed = 0, swept = 0, recoilRows = 0, boundMeshes = 0, vertices = 0, roleCurves = 0, roleKeys = 0, purged = 0;
         var blocks = new List<List<string>>();
         foreach (var dump in args.Skip(1))
             foreach (var line in File.ReadLines(dump))
@@ -60,6 +63,7 @@ static class DecisionsDrill
             files++;
             var problems = new List<string>(); string bakeLeftReason = null; bool bakeClamped = false, rebakedArmature = false, fireSnap = false, retargeted = false, betweenKeys = false, recoiled = false, recoilExit = false;
             bool boundOwn = false, boundAncestor = false, boundStatic = false, copiedData = false, boundNormals = false, boundPlain = false, noMesh = false, groupNoBone = false;
+            bool emptyRemoved = false, armRemoved = false, meshCleared = false, rolesKeyed = false, recoilRole = false, recoilHeld = false, wheels = false, wheelMissing = false, axleAuto = false, axleForced = false, epilogue = false, roleLeft = false;
             try
             {
                 if (!jobs.TryGetValue(key, out var job)) throw new InvalidDataException("the dump has a job the jobs file does not");
@@ -407,6 +411,7 @@ static class DecisionsDrill
                     Compare(problems, "the recoil step's measurements", mine5, r5);
                     recoilRows += r5.Count;
                     CompareBoneRows("RBONE5", "bones after the recoil step", baked.BonesAfterRecoil);
+                    Compare(problems, "the bones' order after the recoil step (arm.data.bones)", baked.BoneOrder, Of("RBONE5").Select(t => t[1]).ToList());
                     CompareCurveRows("FC5", "after the recoil", new HashSet<string>(baked.Keys.Keys.Concat(baked.Rekeyed.Keys), StringComparer.Ordinal));
                     ComparePoseRows(problems, Of("APB5"), baked.ArmPoseAfterRecoil, "after the recoil");
                     // pb.matrix is what the LAST evaluation left, not the properties (a bone whose scale curves the scale-free
@@ -552,6 +557,102 @@ static class DecisionsDrill
                     if (sw.Count > 0 && sweptFrames < 6) throw new InvalidDataException($"the dump's frame sweep has {sweptFrames} frames only");
                     if (wrongSw > 0) problems.Add($"{wrongSw} of {sw.Count} pose bones of the frame sweep hold other values, first {firstSw}");
                     if (insideSegment) betweenKeys = true;
+                    // ---- 7, 7b (after the sweep, as the dump runs them): the empties removed, the animation cleared, the actions
+                    //      purged - the log, every object left with its parent and data, the actions, every object's own transform
+                    //      as held (the mode, the quaternion, the Euler angles), the scene at the bind frame (7c's first act)
+                    if (exit5.Count == 0)
+                    {
+                        baked.Finish();
+                        var dies7 = Of("DIES7");
+                        if (dies7.Count > 0) throw new InvalidDataException($"the script died removing the empties ({string.Join(" ", dies7[0].Skip(1))}) and the port went on");
+                        Compare(problems, "the purge's log (7, 7b)", baked.Log7, block.Where(l => l.StartsWith("LOG7\t")).Select(l => l.Substring(5)).ToList());
+                        lines += Of("LOG7").Count;
+                        Compare(problems, "objects after the purge (name, type, parent, data, action, animation data)",
+                                baked.Objects7.Select(o => $"{o.Name}\t{o.Type}\t{(o.Parent != null ? o.Parent.Name : "-")}\t{o.DataName ?? "-"}\t{(o.HasAction ? 1 : 0)}\t{(o.HasAnimData ? 1 : 0)}").ToList(),
+                                Of("OBJ7").Select(t => string.Join("\t", t.Skip(1))).ToList());
+                        foreach (var t in Of("ACT7")) if (t.Length != 2) throw new InvalidDataException("the dump's actions after the purge: a row cut short or too long");
+                        Compare(problems, "actions after the purge", baked.Actions7, Of("ACT7").Select(t => t[1]).ToList());
+                        var e7 = Of("E7"); foreach (var t in e7) if (t.Length != 16) throw new InvalidDataException($"the dump's transform row after the purge for '{t[1]}' has {t.Length} fields, expected 16");
+                        Compare(problems, "transforms after the purge (mode, location, quaternion, Euler, scale)",
+                                baked.Objects7.Select(o => $"{o.Name}\t{(o.Euler ? "XYZ" : "QUATERNION")}\t{string.Join("\t", o.Loc.Select(H))}\t{(o.Euler ? string.Join("\t", e7.Where(t => t[1] == o.Name).Select(t => string.Join("\t", t.Skip(6).Take(4))).DefaultIfEmpty("-").First()) : string.Join("\t", o.Quat.Select(H)))}\t{string.Join("\t", o.Eul.Select(H))}\t{string.Join("\t", o.Scale.Select(H))}").ToList(),
+                                e7.Select(t => string.Join("\t", t.Skip(1))).ToList());   // (an Euler-mode object's quaternion is not what turns it: taken as Blender holds it)
+                        CompareObjectRows(problems, Of("O8"), baked.AfterPurge, "after the purge, at the bind frame");
+                        purged += baked.Objects7.Count;
+                        var before7 = new HashSet<string>(baked.Objects.Select(o => o.Name), StringComparer.Ordinal); var after7 = new HashSet<string>(baked.Objects7.Select(o => o.Name), StringComparer.Ordinal);
+                        foreach (var o in baked.Objects) if (!after7.Contains(o.Name)) { if (o.Type == "ARMATURE") armRemoved = true; else emptyRemoved = true; }
+                        if (baked.Objects.Any(o => o.Type == "MESH" && o.HasAction && after7.Contains(o.Name))) meshCleared = true;
+                        // ---- 7c: the role clips - skipped by the dump past 20,000 frames (the port must have left them by name), the
+                        //      script's death (the port must have left them), else the log, every action with its slot, every curve of
+                        //      every role key by key, the active action, what the pose bones hold afterwards
+                        var skip7c = Of("SKIP7C"); var dies7c = Of("DIES7C");
+                        if (skip7c.Count > 0 && !(baked.RoleFallback ?? "").StartsWith("a role clip span past 20,000 frames")) problems.Add($"the dump skipped the role clips (span {skip7c[0][1]}, segment {skip7c[0][2]}) and the port {(baked.RoleFallback == null ? "keyed them" : "left them for another reason: " + baked.RoleFallback)}");
+                        else if (dies7c.Count > 0 && baked.RoleFallback == null) throw new InvalidDataException($"the script died in the role clips ({string.Join(" ", dies7c[0].Skip(1))}) and the port went on");
+                        else if (skip7c.Count == 0 && dies7c.Count == 0 && baked.RoleFallback != null && !key.StartsWith("ROLELEFT:", StringComparison.Ordinal)) problems.Add($"the port left the role clips to Blender, which keyed them: {baked.RoleFallback}");
+                        else if (baked.RoleFallback != null)
+                        {
+                            if (!key.StartsWith("ROLELEFT:", StringComparison.Ordinal)) problems.Add($"the role clips are left to Blender, which the jobs file does not expect (ROLELEFT:): {baked.RoleFallback}");
+                            roleLeft = true; Console.WriteLine($"ROLELEFT {key}: {baked.RoleFallback}");
+                        }
+                        else
+                        {
+                            Compare(problems, "the role clips' log (7c)", baked.RoleLog, block.Where(l => l.StartsWith("LOG7C\t")).Select(l => l.Substring(6)).ToList());
+                            lines += Of("LOG7C").Count;
+                            // bpy.data.actions is sorted by name: the deploy action and the roles, each with its slot
+                            Compare(problems, "actions after the role clips (name, slot)", baked.Roles.Select(x => $"{x.Name}\t{x.Slot}").Concat(new[] { $"deploy\tOB{baked.Armature.Name}" }).OrderBy(s => s, StringComparer.Ordinal).ToList(), Of("ACT7C").Select(t => string.Join("\t", t.Skip(1))).OrderBy(s => s, StringComparer.Ordinal).ToList());
+                            if (Of("ACTIVE7").Count != 1 || Of("ACTIVE7")[0].Length != 3) throw new InvalidDataException("the dump has no single active-action row after the role clips");
+                            if (Of("ACTIVE7")[0][1] != baked.ActiveAction || Of("ACTIVE7")[0][2] != "OB" + baked.Armature.Name) problems.Add($"the active action after the role clips: here {baked.ActiveAction}, Blender {Of("ACTIVE7")[0][1]} ({Of("ACTIVE7")[0][2]})");
+                            // the deploy action's curves are the ones the recoil step left: the FC7C rows of "deploy" must equal the FC5 rows
+                            var fc7 = Of("FC7C");
+                            Compare(problems, "the deploy action's curves after the role clips (against the recoil step's)", Of("FC5").Select(t => string.Join("\t", t.Skip(1))).ToList(), fc7.Where(t => t[1] == "deploy").Select(t => string.Join("\t", t.Skip(2))).ToList());
+                            // every role's curves: per (role, bone, channel) the keys with their handles and interpolation; a curve the port has
+                            // must be there once, none the port lacks
+                            string Channel(int c) => c < 3 ? "location" : c < 7 ? "rotation_quaternion" : c < 10 ? "scale" : "rotation_euler";
+                            int Index(int c) => c < 3 ? c : c < 7 ? c - 3 : c < 10 ? c - 7 : c - 10;
+                            var mineRole = new Dictionary<string, string>(StringComparer.Ordinal); var mineOrder = new List<string>();
+                            foreach (var role in baked.Roles)
+                                foreach (string bn in role.BoneOrder)
+                                    for (int c = 0; c < 13; c++)
+                                    {
+                                        var list = role.Curves[bn][c]; if (list == null || list.Count == 0) continue;
+                                        string path = "pose.bones[\"" + bn.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"]." + Channel(c);
+                                        string k = $"{role.Name}\t{path}\t{Index(c)}";
+                                        mineRole[k] = "CONSTANT\tCONT_ACCEL\t" + string.Join("\t", list.Select(x => $"{H(x.Frame)}:{H(x.Value)}:{x.Interpolation}:AUTO_CLAMPED:AUTO_CLAMPED:{H(x.LeftX)}:{H(x.LeftY)}:{H(x.RightX)}:{H(x.RightY)}"));
+                                        mineOrder.Add(k); roleKeys += list.Count;
+                                    }
+                            var seen7 = new HashSet<string>(StringComparer.Ordinal); long wrong7 = 0; string first7 = null;
+                            foreach (var t in fc7)
+                            {
+                                if (t[1] == "deploy") continue;
+                                if (t.Length < 6) throw new InvalidDataException("the dump has a role curve row cut short");
+                                string k = $"{t[1]}\t{t[2]}\t{t[3]}";
+                                if (!mineRole.TryGetValue(k, out var mine)) throw new InvalidDataException($"the dump has a role curve the port does not: {k.Replace('\t', ' ')}");
+                                if (!seen7.Add(k)) throw new InvalidDataException($"the dump has a role curve twice: {k.Replace('\t', ' ')}");
+                                roleCurves++;
+                                string theirs = string.Join("\t", t.Skip(4));
+                                if (mine != theirs) { wrong7++; if (first7 == null) { var a = mine.Split('\t'); var b = theirs.Split('\t'); int at = 0; while (at < a.Length && at < b.Length && a[at] == b[at]) at++; first7 = $"{k.Replace('\t', ' ')} at field {at}: here «{(at < a.Length ? a[at] : "(none)")}», Blender «{(at < b.Length ? b[at] : "(none)")}» ({a.Length - 2} keys here, {b.Length - 2} in Blender)"; } }
+                            }
+                            foreach (string k in mineOrder) if (!seen7.Contains(k)) throw new InvalidDataException($"the dump has no role curve for {k.Replace('\t', ' ')}");
+                            if (wrong7 > 0) problems.Add($"{wrong7} role curves differ, first {first7}");
+                            // what the pose bones hold afterwards: the mode and thirteen values
+                            var apb7 = Of("APB7"); var seenP = new HashSet<string>(StringComparer.Ordinal); long wrongP = 0; string firstP = null;
+                            foreach (var t in apb7)
+                            {
+                                if (t.Length != 16) throw new InvalidDataException($"the dump's pose row after the role clips has {t.Length} fields, expected 16");
+                                if (!baked.ArmPose7.TryGetValue(t[1], out var mine)) throw new InvalidDataException($"the dump has an unknown pose row after the role clips: bone '{t[1]}'");
+                                if (!seenP.Add(t[1])) throw new InvalidDataException($"the dump has a pose row after the role clips twice: bone '{t[1]}'");
+                                string ms = mine.mode + "\t" + string.Join("\t", mine.values.Select(H));
+                                if (ms != string.Join("\t", t.Skip(2))) { wrongP++; firstP = firstP ?? $"'{t[1]}': here [{ms.Replace('\t', ' ')}] Blender [{string.Join(" ", t.Skip(2))}]"; }
+                            }
+                            foreach (var bn in baked.ArmPose7.Keys) if (!seenP.Contains(bn)) throw new InvalidDataException($"the dump has no pose row after the role clips for bone '{bn}'");
+                            if (wrongP > 0) problems.Add($"{wrongP} of {apb7.Count} pose bones hold other values after the role clips, first {firstP}");
+                            rolesKeyed = true;
+                            if (key.StartsWith("ROLELEFT:", StringComparison.Ordinal)) problems.Add("the jobs file expects the role clips left to Blender (ROLELEFT:), and they are keyed here (take the mark away once it holds)");
+                            if (baked.Roles.Any(x => x.Name == "recoil")) { if (baked.FireSnap.Count > 0 && !baked.RoleLog.Any(l => l.StartsWith("DEPLOY recoil role: PRISTINE"))) recoilHeld = true; else if (baked.RoleLog.Any(l => l.StartsWith("DEPLOY recoil role: PRISTINE"))) recoilRole = true; else recoilHeld = true; }
+                            if (baked.RoleLog.Any(l => l.Contains("+ epilogue"))) epilogue = true;
+                            if (baked.RoleLog.Any(l => l.StartsWith("DEPLOY WHEEL SPIN"))) { wheels = true; string ax = argv.Length > 16 ? argv[16].Trim().ToUpperInvariant() : ""; if (ax == "X" || ax == "Y" || ax == "Z") axleForced = true; else axleAuto = true; }
+                            if (baked.RoleLog.Any(l => l.StartsWith("DEPLOY WHEEL ERROR"))) wheelMissing = true;
+                        }
+                    }
                     }
                     long wrongM = 0, wrongT = 0, wrongB = 0; string firstM = null, firstT = null, firstB = null;
                     foreach (var o in r.Objects)
@@ -619,6 +720,18 @@ static class DecisionsDrill
                 if (boundPlain) cover["a bound mesh without normals"]++;
                 if (noMesh) cover["no mesh to bind"]++;
                 if (groupNoBone) cover["a vertex group named after a pair-merged part (no bone of that name)"]++;
+                if (emptyRemoved) cover["an animated empty removed (7)"]++;
+                if (armRemoved) cover["an imported armature that is a part removed (7)"]++;
+                if (meshCleared) cover["a mesh that was a part: its animation cleared (7b)"]++;
+                if (rolesKeyed) cover["the role clips keyed (7c)"]++;
+                if (recoilRole) cover["a recoil role from the fire window (7c)"]++;
+                if (recoilHeld) cover["a recoil role held (the step off)"]++;
+                if (wheels) cover["the wheels spun in the folded role"]++;
+                if (wheelMissing) cover["a wheel bone not found (logged)"]++;
+                if (axleAuto) cover["a wheel axle by AUTO"]++;
+                if (axleForced) cover["a wheel axle forced"]++;
+                if (epilogue) cover["a role clip epilogue (a second fire segment)"]++;
+                if (roleLeft) cover["the role clips left to Blender (RoleFallback)"]++;
                 if (rebakedArmature) cover["an imported armature baked with it (its bones keyed a frame, its own animation dropped)"]++;
                 if (bakeClamped) cover["a clip of frame 0 alone (the bake keys frame 1 too)"]++;
                 if (bakeLeftReason == null && !r.Exit) cover[r.Legacy ? "a bake on the legacy path" : "a bake on the contract path (scale curves stripped, delta-form rebase)"]++;
@@ -632,7 +745,7 @@ static class DecisionsDrill
         foreach (var k in jobs.Keys) if (!dumped.Contains(k)) { fails++; Console.WriteLine($"FAIL {k}: the dump holds no such job"); }
         foreach (var kv in cover) Console.WriteLine($"COVER {kv.Value} {kv.Key}");
         for (int bi = 0; bi < BlenderFCurve.Branches.Length; bi++) Console.WriteLine($"BRANCH	{BlenderFCurve.Hits[bi]}	{BlenderFCurve.Branches[bi]}");
-        Console.WriteLine($"TOTAL jobs {files} failed {fails} left {left} objects {objects} matrices {matrices} lines {lines} bones {bones} curves {curves} keys {keysCompared} after {after} imported {importedKeys} held {held2} last {atLast} snapshot {snapped} rekeyed {rekeyed} swept {swept} recoil {recoilRows} bound {boundMeshes} vertices {vertices}");
+        Console.WriteLine($"TOTAL jobs {files} failed {fails} left {left} objects {objects} matrices {matrices} lines {lines} bones {bones} curves {curves} keys {keysCompared} after {after} imported {importedKeys} held {held2} last {atLast} snapshot {snapped} rekeyed {rekeyed} swept {swept} recoil {recoilRows} bound {boundMeshes} vertices {vertices} purged {purged} rolecurves {roleCurves} rolekeys {roleKeys}");
         return fails == 0 ? 0 : 1;
     }
 
