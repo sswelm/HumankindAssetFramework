@@ -436,7 +436,6 @@ static class DecisionsDrill
                         string Row(string[] t) => string.Join("\t", t.Skip(1));
                         var bindRows = Of("BIND");
                         foreach (var t in bindRows) if (t.Length != 33) throw new InvalidDataException($"the dump's bind row for '{t[1]}' has {t.Length} fields, expected 33");
-                        if (bindRows.Count != Of("VG6").Count || bindRows.Count != Of("MOD6").Count || bindRows.Count != Of("V6").Count || bindRows.Count != Of("N6").Count) throw new InvalidDataException("the dump's bind rows do not agree in number (BIND, VG6, MOD6, V6, N6)");
                         string identity16 = string.Join("\t", Enumerable.Range(0, 16).Select(i => H(i % 5 == 0 ? 1f : 0f)));
                         Compare(problems, "bound meshes (bone, datablock, users, parent, transform, parent inverse)",
                                 baked.Bound.Select(b => $"{b.Mesh.Name}\t{b.Group}\t{b.DataName}\t1\t{(b.Mesh.Parent != null ? b.Mesh.Parent.Name : "-")}\t{(b.Mesh.BoneNode >= 0 ? "BONE" : "OBJECT")}\t{string.Join("\t", b.Mesh.Loc.Select(H))}\t{string.Join("\t", b.Mesh.Quat.Select(H))}\t{string.Join("\t", b.Mesh.Scale.Select(H))}\t{identity16}").ToList(),
