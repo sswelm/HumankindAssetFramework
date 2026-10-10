@@ -42,10 +42,29 @@ namespace HumankindAssetFramework.Tests
         static List<string> Capture(Action a, LogLevel level)
         {
             var got = new List<string>();
-            EventHandler<LogEventArgs> h = (s, ev) => { if ((ev.Level & level) != 0) got.Add(ev.Data?.ToString() ?? ""); };
+            // ReportFormationCollisions logs synchronously. Other test classes share this source and run in
+            // parallel, so their errors must not turn a silent formation action into a false collision.
+            var caller = System.Threading.Thread.CurrentThread;
+            EventHandler<LogEventArgs> h = (s, ev) =>
+            {
+                if (System.Threading.Thread.CurrentThread == caller && (ev.Level & level) != 0)
+                    got.Add(ev.Data?.ToString() ?? "");
+            };
             Plugin.Log.LogEvent += h;
             try { a(); } finally { Plugin.Log.LogEvent -= h; }
             return got;
+        }
+
+        [Fact]
+        public void Capture_observes_its_own_action_without_parallel_test_errors()
+        {
+            var errors = Capture(() =>
+            {
+                var other = new System.Threading.Thread(() => Plugin.Log.LogError("parallel test error"));
+                other.Start(); other.Join();
+                Plugin.Log.LogError("this action's error");
+            }, LogLevel.Error);
+            Assert.Equal(new[] { "this action's error" }, errors);
         }
 
         // ---- the signature: what actually distinguishes two writes to one name ----

@@ -97,6 +97,9 @@ public static class BlenderDeploy
         /// <summary>`scene.frame_set(frame)` on the scene the conversion has reached, for a drill: every object's
         /// matrix_world by name and what each imported pose bone holds. It MOVES the scene - nothing may follow it.</summary>
         public Func<int, (Dictionary<string, float[]> worlds, Dictionary<string, Dictionary<string, float[][]>> pose)> ProbeAt;
+        /// <summary>scene.frame_set(frame) once more: what the new armature's pose bones hold then (location,
+        /// quaternion, scale). A re-keyed bone follows its Bezier curves, BlenderFCurve.Evaluate.</summary>
+        public Func<int, Dictionary<string, float[]>> ArmAt;
         // the scene as the BAKE left it (every object's matrix_world by name): the steps after it move it on
         public Dictionary<string, float[]> AfterBake;
         // ---- 5a, the fire-window snapshot: per source frame, per bone of the new armature, its location (3) and
@@ -684,15 +687,7 @@ public static class BlenderDeploy
                     {
                         var list = channels[c];
                         if (list == null || list.Count == 0) continue;
-                        float v;
-                        if (f <= list[0].Frame) v = list[0].Value;
-                        else if (f >= list[list.Count - 1].Frame) v = list[list.Count - 1].Value;
-                        else
-                        {
-                            var on = list.FirstOrDefault(k => k.Frame == f);
-                            if (on == null) throw new NotPortedException($"frame {f} lies inside a Bezier segment of bone '{b.Name}' (its evaluation between two keys is not ported yet)");
-                            v = on.Value;
-                        }
+                        float v = BlenderFCurve.Evaluate(list, (float)f);
                         if (h[c] != v) h[c] = v;
                     }
                     continue;
@@ -784,6 +779,10 @@ public static class BlenderDeploy
             }
             bool PyFloat(string s, out double v) => ReadPythonFloat(s, out v);
             string Lower(string n) => AsciiLower(n);
+            // acosf, sinf and the cubic solver's exp, log, acos and cos are the 64-bit Windows C runtime's: elsewhere the
+            // rounded doubles are an ulp off now and then (2 of 19,078 values measured under a 32-bit Mono)
+            if (!BlenderTrig.Exact && (PyStrip(argc > 5 ? Arg(5) : "") != "" || PyStrip(argc > 6 ? Arg(6) : "") != ""))
+            { r.Fallback = "a barrel retarget or a leg scale in a process without the 64-bit Windows C runtime's float functions (Blender's bits cannot be had)"; return r; }
             var boneOfValues = r.BoneOf.Select(x => x.bone).ToList();   // bone_of.values(): a merged part's bone comes again
             if (boneOfValues.Any(n => n.Any(ch => ch > 127)) && (PyStrip(argc > 5 ? Arg(5) : "") != "" || PyStrip(argc > 6 ? Arg(6) : "") != ""))
             { r.Fallback = "a bone name past ASCII with a barrel retarget or a leg scale (Python's lower case of it)"; return r; }
@@ -847,9 +846,16 @@ public static class BlenderDeploy
         }
         catch (NotPortedException e) { r.Fallback = e.Message; return r; }
         r.AfterRetarget = all.ToDictionary(o => o.Name, o => (float[])o.World.Clone(), StringComparer.Ordinal);
+        r.ArmAt = frame =>
+        {
+            int e = Math.Max(-1048574, Math.Min(1048574, frame));
+            FrameSet(e); EvalArm(e);
+            return r.ArmPose.ToDictionary(kv => kv.Key, kv => (float[])kv.Value.Clone(), StringComparer.Ordinal);
+        };
         r.ProbeAt = frame =>
         {
-            FrameSet(frame);
+            int e = Math.Max(-1048574, Math.Min(1048574, frame));
+            FrameSet(e); EvalArm(e);
             return (all.ToDictionary(o => o.Name, o => (float[])o.World.Clone(), StringComparer.Ordinal),
                     imported.ToDictionary(a => a.Name, a => rig.Armatures[a.Node].Bones.ToDictionary(b => names.BoneOfJoint[b], b => pose.Current(b), StringComparer.Ordinal), StringComparer.Ordinal));
         };

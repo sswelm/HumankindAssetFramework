@@ -427,6 +427,35 @@ def gunnery_guard(out):
     return s.write(out, "deploy_gunnery_guard")
 
 
+def gunnery_signs(out):
+    """A held zero's sign: parts that are no barrel and no leg (never re-keyed) turning about ONE axis of their own past
+    a quarter turn at frame 12 - the bake keys -0 in the two idle components there (frames 9 to 12), +0 before - about a
+    general axis at the last frame, at rest on the first. A frame set that lands on such a frame from a non-zero one
+    writes the -0; one that comes from a +0 does not (an equal value is not written)."""
+    import math
+    def q(axis, deg):
+        a = math.radians(deg) / 2.0; v = [0.0, 0.0, 0.0, math.cos(a)]; v[axis] = math.sin(a); return v
+    def qa(ax, deg):
+        n = math.sqrt(sum(c * c for c in ax)); a = math.radians(deg) / 2.0
+        return [ax[0] / n * math.sin(a), ax[1] / n * math.sin(a), ax[2] / n * math.sin(a), math.cos(a)]
+    s = Scene(); s.node("Hull", None, mesh=s.mesh("hull", 4.0, at=(-2.0, 0.0, -0.5)))
+    car = s.node("Carriage", None, mesh=s.mesh("carriage", 2.0, at=(-1.0, 0.0, -0.25)), translation=[0.0, 0.5, 0.0])
+    s.anim(car, "translation", [0.0, 1.5], [(0.0, 0.5, 0.0), (0.0, 0.5, 0.4)])
+    b = s.node("Main_Barrel", car, mesh=s.mesh("barrelmesh", 1.5, at=(0.0, 0.0, -0.1)), translation=[0.2, 0.6, 0.0], rotation=q(2, 5))
+    s.anim(b, "rotation", [0.0, 0.5, 1.0, 1.5], [tuple(q(2, 5)), tuple(q(2, 20)), tuple(q(2, 48)), tuple(q(2, 63))])
+    l = s.node("L_Leg", car, mesh=s.mesh("lleg", 1.0, at=(-1.0, 0.0, -0.05)), translation=[-0.5, 0.0, 0.3], rotation=q(1, 4))
+    s.anim(l, "rotation", [0.0, 0.5, 1.5], [tuple(q(1, 4)), tuple(q(1, 38)), tuple(q(1, 55))])
+    i = 0
+    for parent in (None, car):
+        for ax in (0, 1, 2):
+            for deg in (-135, 135, -100, 170, -179):
+                n = "Arm%d" % i; i += 1
+                nd = s.node(n, parent, mesh=s.mesh("m" + n, 1.0, at=(0.0, 0.0, -0.05)), translation=[0.25 * i, 0.5, 0.0])
+                s.anim(nd, "rotation", [0.0, 0.25, 0.5, 1.0, 1.5], [(0.0, 0.0, 0.0, 1.0), tuple(q(ax, deg / 2)), tuple(q(ax, deg)), tuple(qa((1, 2, 3), 50)), tuple(qa((3, -2, 1), 70))])
+                s.anim(nd, "translation", [0.0, 0.5, 1.5], [(0.25 * i, 0.5, 0.0), (0.25 * i, 0.5, 0.0), (0.25 * i + 0.1, 0.4, 0.2)])
+    return s.write(out, "deploy_gunnery_signs")
+
+
 def half(out):
     """The lowest point exactly 0.125 below zero: Python prints the vertical offset as 0.12 (the exact half goes to the
     even digit), .NET's own formatting as 0.13."""
@@ -519,9 +548,26 @@ def main(out):
     print("gun_guard_x|%s|0|24||36||1.5|||0|||4|0|1" % f)
     print("gun_guard_big|%s|0|24||36||9000|||0|||4|0|1" % f)
     print("gun_guard_first|%s|0|24||0||2|||0|||4|0|1" % f)
-    # left to Blender from the bake on: a negative end with a leg scale (the legs' frame_set lands INSIDE the barrel's
-    # new Bezier segment, whose evaluation between two keys is not ported), and a barrel scale past a float
-    print("BAKELEFT:gun_end_negative|%s|0|-5||36|0.5|1.5|||0|||4|0|1" % fg)
+    # a negative end with a leg scale: the legs' frame_set lands INSIDE the barrel's new Bezier segment (-5..1), and
+    # what the legs are slerped from is the curve's value there
+    print("gun_end_negative|%s|0|-5||36|0.5|1.5|||0|||4|0|1" % fg)
+    print("gun_end_negative1|%s|0|-1||0|0.5|1.5|||0|||4|0|1" % fg)
+    for seed in (1, 2, 3):
+        print("gun_gen%d_negative|%s|0|-40||30|0.7|2.2|||0|||4|0|1" % (seed, gunnery_general(out, "deploy_gunnery_general%d" % seed, seed)))
+    # ends far outside the clip: the barrel's segment lies where only the sweep about its keys looks
+    print("gun_end_5000|%s|0|5000||36|0.5|1.5|||0|||4|0|1" % fg)
+    print("gun_end_65537|%s|0|65537||36||2.2|||0|||4|0|1" % fg)
+    print("gun_end_minus5000|%s|0|-5000||12|0.25|0.7|||0|||4|0|1" % fg)
+    # Legal Int32 end/ready frames: probing their neighbours must not send an out-of-Int32 value to frame_set.
+    for label, frame in (("min", -2147483648), ("max", 2147483647)):
+        print("gun_end_%s|%s|0|%d||36|0.5|1.5|||0|||4|0|1" % (label, fg, frame))
+        print("gun_ready_%s|%s|0|24||%d|0.5|1.5|||0|||4|0|1" % (label, fg, frame))
+    # a held zero's sign: the fire window's last frame is a -0 frame reached from a non-zero one, and the frame set
+    # after it (the last-frame probe, then the sweep) must start from what THAT left
+    fs = gunnery_signs(out)
+    print("gun_signs_12|%s|0|24||12||1.5|30,10|36,12|1|||0|0|1" % fs)
+    print("gun_signs_11|%s|0|24||11||1.5|30,9|36,11|1|||0|0|1" % fs)
+    # left to Blender from the bake on: a barrel scale past a float
     print("BAKELEFT:gun_bs_overflow|%s|0|24||36||1e39|||0|||4|0|1" % fg)
     # (a leg scale outside 0..1 is not here: Blender itself fails on it - BlenderDeployTests hold the fallback)
     # 5a, the fire-window snapshot: the recoil range is a list of starts (argv[8]) and of ends with a speed step

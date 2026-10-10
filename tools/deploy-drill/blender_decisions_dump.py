@@ -205,6 +205,39 @@ for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
                     for pb in o.pose.bones:
                         q = pb.rotation_quaternion
                         print("PB3\t%s\t%s\t%s" % (o.name, pb.name, "\t".join(h32(v) for v in (*pb.location, q.w, q.x, q.y, q.z, *pb.scale))))
+            # ... and, last of all, a SWEEP over the frames: what the new armature's pose bones hold at each - a
+            # re-keyed bone between two of its Bezier keys is Blender's curve evaluation (the cubic solver)
+            if any(l.startswith("DEPLOY") for l in out4.getvalue().split("\n")):
+                def whole(s, d):
+                    try: return max(-3000, min(3000, int(s)))
+                    except ValueError: return d
+                av = g["argv"]
+                ends = [g["fmin"], g["fmax"], whole(av[3] if len(av) > 3 else "", g["fmax"]), whole(av[5] if len(av) > 5 else "", g["fmin"])]
+                lo, hi = min(ends) - 3, max(ends) + 3
+                step = max(1, (hi - lo) // 600)
+                def raw(s, d):
+                    try: return int(s)
+                    except ValueError: return d
+                # ... and about the barrel's mid and end key and the ready frame wherever they lie (an end of 40000 is
+                # far outside the range above), across the segment between them, at the frame limits - then back
+                # again: a held zero keeps its sign. (DecisionsDrill makes the same list and takes no other.)
+                e_ = raw(av[3] if len(av) > 3 else "", g["fmax"]); m_ = max(int(e_ * 0.5), 1); r_ = raw(av[5] if len(av) > 5 else "", g["fmin"])
+                more = []
+                for k_ in (m_, e_, r_, 1048574, -1048574):
+                    more += [k_ - 2, k_ - 1, k_, k_ + 1, k_ + 2]
+                a_, b_ = min(m_, e_), max(m_, e_)
+                more += [a_ + (b_ - a_) * j // 97 for j in range(98)] + [a_ + j for j in range(40)] + [b_ - j for j in range(40)]
+                frames = []
+                for frame in list(range(lo, hi + 1, step)) + [lo + 1, hi + 1, (lo + hi) // 2] + more + [lo, hi]:
+                    # frame_set accepts Int32, then clamps to Blender's scene limits. Neighbours of a valid
+                    # extreme end/ready frame must remain valid API arguments too.
+                    frame = max(-2147483648, min(2147483647, frame))
+                    if not frames or frames[-1] != frame: frames.append(frame)
+                for frame in frames:
+                    bpy.context.scene.frame_set(frame)
+                    for pb in arm.pose.bones:
+                        q = pb.rotation_quaternion
+                        print("SW\t%d\t%s\t%s" % (frame, pb.name, "\t".join(h32(v) for v in (*pb.location, q.w, q.x, q.y, q.z, *pb.scale))))
         print("DONE\t%s" % key, flush=True)
     except Exception as e:
         traceback.print_exc()

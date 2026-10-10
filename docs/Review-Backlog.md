@@ -164,9 +164,10 @@ step and the delta-form rebase) - done 2026-10-11, bit-exact: no tolerance was n
 dropped) - done 2026-10-11: the dugout canoe is baked in C#, no job is left at the bake; **5a the fire-window
 snapshot** - done 2026-10-11 (the dump's own scene updates between stages were wrong on the contract path and are
 gone); **5b/5c the barrel retarget and the leg scale** - done 2026-10-10 (Bezier keys with their handles to the bit;
-a frame strictly inside a new segment is left to Blender); next Blender's BEZIER evaluation between two keys (the
-cubic solver in UCRT double math - before the export, which samples every frame) and the smoothing solver for a
-middle key that is no extreme, 5d (recoil: edit mode again), the binding, the role clips, the export; 4 the bake, the options (barrel, legs, recoil, wheels) and
+a frame strictly inside a new segment was left to Blender); **the Bezier evaluation between two keys**
+(`BlenderFCurve.cs`: the cubic solver in the C runtime's double math) - done 2026-10-10, against Blender's own
+`FCurve.evaluate()` on raw curves and a frame sweep at the end of every retarget job; next the smoothing solver for
+a middle key that is no extreme, 5d (recoil: edit mode again), the binding, the role clips, the export; 4 the bake, the options (barrel, legs, recoil, wheels) and
 the role clips; 5 the exported animation, the wiring, the existing golden. OPEN for part 4: bit-exact or a tight
 tolerance - the script's decisions are thresholds on continuous values, the existing golden compares three decimals;
 to be decided on measured distance. Not modelled yet: Bezier keys (a CUBICSPLINE sampler), `KHR_animation_pointer`, an
