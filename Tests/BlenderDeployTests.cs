@@ -307,6 +307,27 @@ public class BlenderDeployTests
     }
 
     [Theory]
+    [InlineData(int.MinValue)]
+    [InlineData(int.MaxValue)]
+    public void The_last_frame_probe_evaluates_the_same_clamped_frame_as_the_pose_probe(int frame)
+    {
+        var s = new Scene(); s.Node("Hull", mesh: true);
+        s.Move(s.Node("Barrel", mesh: true), 1f, new[] { 1f, 0f, 0f });
+        s.Move(s.Node("Leg", mesh: true), 1f, new[] { 0f, 1f, 0f });
+        s.Decide();
+        // A bake beginning after zero exposes subtraction overflow at int.MinValue. A re-keyed barrel whose
+        // first key lies beyond Blender's scene limit exposes evaluation at the raw int.MaxValue.
+        foreach (var sampler in s.M.Animations[0].Samplers) sampler.Times = sampler.Times.Select(t => t + 1f).ToArray();
+        var r = BlenderDeploy.Decide(s.M, "0|2147483647||48||1|||0|||4|0|1".Split('|'), null, true);
+        Assert.Null(r.Fallback); Assert.Equal(24, r.BakeFrameMin);
+        var expected = r.ArmAt(Math.Max(-1048574, Math.Min(1048574, frame)));
+        r.ProbeAt(frame);
+        int Bits(float v) => BitConverter.ToInt32(BitConverter.GetBytes(v), 0);
+        foreach (var bone in expected.Keys)
+            Assert.Equal(expected[bone].Select(Bits), r.ArmPose[bone].Select(Bits));
+    }
+
+    [Theory]
     // rows of Blender 5.1.2's own FCurve.evaluate() (tools/deploy-drill/blender_bezier_dump.py, seed 1): the curve as
     // frame:value:left handle:right handle in float hex, then time and value
     // free handles inside the span: one real root, and three

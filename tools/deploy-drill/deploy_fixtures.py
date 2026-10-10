@@ -558,6 +558,10 @@ def main(out):
     print("gun_end_5000|%s|0|5000||36|0.5|1.5|||0|||4|0|1" % fg)
     print("gun_end_65537|%s|0|65537||36||2.2|||0|||4|0|1" % fg)
     print("gun_end_minus5000|%s|0|-5000||12|0.25|0.7|||0|||4|0|1" % fg)
+    # Legal Int32 end/ready frames: probing their neighbours must not send an out-of-Int32 value to frame_set.
+    for label, frame in (("min", -2147483648), ("max", 2147483647)):
+        print("gun_end_%s|%s|0|%d||36|0.5|1.5|||0|||4|0|1" % (label, fg, frame))
+        print("gun_ready_%s|%s|0|24||%d|0.5|1.5|||0|||4|0|1" % (label, fg, frame))
     # a held zero's sign: the fire window's last frame is a -0 frame reached from a non-zero one, and the frame set
     # after it (the last-frame probe, then the sweep) must start from what THAT left
     fs = gunnery_signs(out)

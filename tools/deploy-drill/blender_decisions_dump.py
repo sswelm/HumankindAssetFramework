@@ -229,6 +229,9 @@ for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
                 more += [a_ + (b_ - a_) * j // 97 for j in range(98)] + [a_ + j for j in range(40)] + [b_ - j for j in range(40)]
                 frames = []
                 for frame in list(range(lo, hi + 1, step)) + [lo + 1, hi + 1, (lo + hi) // 2] + more + [lo, hi]:
+                    # frame_set accepts Int32, then clamps to Blender's scene limits. Neighbours of a valid
+                    # extreme end/ready frame must remain valid API arguments too.
+                    frame = max(-2147483648, min(2147483647, frame))
                     if not frames or frames[-1] != frame: frames.append(frame)
                 for frame in frames:
                     bpy.context.scene.frame_set(frame)

@@ -423,7 +423,12 @@ static class DecisionsDrill
                         for (int j = 0; j < 40; j++) all4.Add(a_ + j);
                         for (int j = 0; j < 40; j++) all4.Add(b_ - j);
                         all4.Add(lo); all4.Add(hi);
-                        var expected = new List<long>(); foreach (long fr in all4) if (expected.Count == 0 || expected[expected.Count - 1] != fr) expected.Add(fr);
+                        var expected = new List<long>();
+                        foreach (long fr in all4)
+                        {
+                            long requested = Math.Max(int.MinValue, Math.Min(int.MaxValue, fr));
+                            if (expected.Count == 0 || expected[expected.Count - 1] != requested) expected.Add(requested);
+                        }
                         if (!expected.SequenceEqual(framesSwept)) throw new InvalidDataException($"the dump's frame sweep is not the sweep the dump script makes: {framesSwept.Count} frames, expected {expected.Count}");
                     }
                     if (sw.Count > 0 && sweptFrames < 6) throw new InvalidDataException($"the dump's frame sweep has {sweptFrames} frames only");

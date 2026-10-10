@@ -342,7 +342,7 @@ echo "PASS — deploy drill rejects a frame sweep with a missing, doubled, unkno
 #      handles, flat ones, exactly quadratic and linear time curves, many keys) against BlenderFCurve.Evaluate, to the
 #      bit. Every branch of the solver the generator can reach must be reached, and a dump cut short or one bit off fails.
 BEZ_CURVES="${BEZ_CURVES:-6000}"
-"$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_bezier_dump.py")" -- 1 "$BEZ_CURVES" 2> "$TMPD/bezier_err.txt" | tr -d '\r' | grep -E "^(CURVE|E|END)	" > "$TMPD/bezier.txt"
+"$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_bezier_dump.py")" -- 1 "$BEZ_CURVES" 2> "$TMPD/bezier_err.txt" | tr -d '\r' | grep -E "^(CURVE|TIMES|E|END)	" > "$TMPD/bezier.txt"
 "$TMPD/deploy.exe" --bezier "$WTMP/bezier.txt" > "$TMPD/bezier_out.txt" 2>&1; brc=$?
 if [ "$brc" -ne 0 ] || ! grep -q "^PASS " "$TMPD/bezier_out.txt"; then
   tail -3 "$TMPD/bezier_err.txt"; grep -E "^(DIFF|FAIL|TOTAL)" "$TMPD/bezier_out.txt" | head -8
@@ -373,7 +373,37 @@ if [ "$badrc" -ne 1 ] || ! grep -q "cut short" "$TMPD/bezier_few_out.txt"; then 
 { head -3 "$TMPD/bezier.txt"; printf 'GARBAGE\tx\n'; tail -n +4 "$TMPD/bezier.txt"; } > "$TMPD/bezier_junk.txt"
 "$TMPD/deploy.exe" --bezier "$WTMP/bezier_junk.txt" > "$TMPD/bezier_junk_out.txt" 2>&1; badrc=$?
 if [ "$badrc" -eq 0 ] || ! grep -q "does not know" "$TMPD/bezier_junk_out.txt"; then echo "FAIL — the Bezier drill accepted a row of an unknown kind (rc=$badrc)"; exit 1; fi
-echo "$(grep "^PASS " "$TMPD/bezier_out.txt") - keys stored raw: backward handles, keys out of order, doubled frames; a dump cut short, one bit off or with a row the drill does not know fails (never reached, ported from the source only: a quadratic's zero discriminant, the 1e-8 key test, the segment miss, no equation left)"
+# Counts alone cannot detect a lost evaluation replaced by a repeated constant value, or a curve replaced by
+# another with the same number of evaluations. The request list and curve ordinal must catch both.
+python - "$TMPD/bezier.txt" "$TMPD" <<'PYEOF'
+import pathlib, sys
+lines = pathlib.Path(sys.argv[1]).read_text(encoding="ascii").splitlines()
+out = pathlib.Path(sys.argv[2])
+def write(name, changed): (out / ("bezier_" + name + ".txt")).write_text("\n".join(changed) + "\n", encoding="ascii")
+rows = []
+for i, line in enumerate(lines):
+    if line.startswith("CURVE\t"): rows = []
+    elif line.startswith("E\t"):
+        fields = line.split("\t")
+        prior = next((j for j in rows if lines[j].split("\t")[2] == fields[2] and lines[j].split("\t")[1] != fields[1]), None)
+        if prior is not None:
+            changed = list(lines); changed[i] = lines[prior]; write("replaced_sample", changed); break
+        rows.append(i)
+else: raise RuntimeError("no two distinct evaluation times with an equal value for the negative control")
+starts = [i for i, line in enumerate(lines) if line.startswith("CURVE\t")]
+assert starts[1] - starts[0] == starts[2] - starts[1]
+write("replaced_curve", lines[:starts[1]] + lines[starts[0]:starts[1]] + lines[starts[2]:])
+write("missing_times", [line for i, line in enumerate(lines) if i != starts[0] + 1])
+write("after_end", lines + [lines[0]])
+write("double_end", lines + [lines[-1]])
+PYEOF
+for mode in replaced_sample replaced_curve missing_times after_end double_end; do
+  "$TMPD/deploy.exe" --bezier "$WTMP/bezier_$mode.txt" > "$TMPD/bezier_${mode}_out.txt" 2>&1; badrc=$?
+  if [ "$badrc" -ne 1 ] || ! grep -q "^FAIL " "$TMPD/bezier_${mode}_out.txt"; then
+    echo "FAIL — the Bezier drill accepted malformed evidence ($mode, rc=$badrc)"; exit 1
+  fi
+done
+echo "$(grep "^PASS " "$TMPD/bezier_out.txt") - keys stored raw: backward handles, keys out of order, doubled frames; missing or replaced requests/curves, cut dumps, changed values, unknown rows and rows after the end fail (never reached, ported from the source only: a quadratic's zero discriminant, the 1e-8 key test, the segment miss, no equation left)"
 n_j=$(echo "$TOTAL2" | awk '{print $3}'); n_l=$(echo "$TOTAL2" | awk '{print $7}'); n_o=$(echo "$TOTAL2" | awk '{print $9}'); n_ln=$(echo "$TOTAL2" | awk '{print $13}'); n_bones=$(echo "$TOTAL2" | awk '{print $15}'); n_keys=$(echo "$TOTAL2" | awk '{print $19}'); n_after=$(echo "$TOTAL2" | awk '{print $21}'); n_bl=$(grep -c "^BAKELEFT " "$TMPD/dec.txt")
 NOTE_MISSING=""; [ -z "$MISSING" ] || NOTE_MISSING="; recorded jobs whose source file is GONE, not judged:$MISSING"
 echo "PASS — deploy drill, the decisions: $n_j jobs ($n_rec recorded conversions, $n_fx fixture jobs) decided as deploy_convert.py decides them - $n_ln log lines to the letter, the parts, the cull and the merges, the armature it builds ($n_bones bones at rest, StaticRoot's anchor, the root-motion anchor) $n_o objects with their matrices, transforms and bound boxes to the bit, and the BAKE - $n_keys keys of the action it holds at its step 5a, each to the bit, with $n_after object matrices of the scene it leaves ($n_bl jobs are Blender's from the bake on, as marked: the scene before it is held); $n_l jobs left to Blender as marked (Blender took $((t4 - t3)) s)$NOTE_MISSING"

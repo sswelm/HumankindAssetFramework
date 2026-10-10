@@ -5,7 +5,8 @@ usage: blender --background --python blender_bezier_dump.py -- <seed> <curves> [
 
 Every curve is written as the float32 Blender STORES (read back from the key), every time as the float32 the
 evaluation receives:
-  CURVE <CONSTANT|LINEAR> <frame:value:lx:ly:rx:ry> ...
+  CURVE <ordinal> <CONSTANT|LINEAR> <frame:value:lx:ly:rx:ry> ...
+  TIMES <time> ... (ordered evaluation requests, including repeats)
   E <time> <value>
   END <curves> <values>
 The keys are stored RAW: the extrapolation is set FIRST (its setter sorts the keys, drops doubled frames and
@@ -81,10 +82,10 @@ def main(seed, count, mode):
         for i in range(1, len(st)):
             if st[i][0] == st[i - 1][0]: stat["dup_kept"] += 1
             if st[i][0] < st[i - 1][0]: stat["unsorted_kept"] += 1
-        print("CURVE\t%s\t%s" % (extrapolation, "\t".join(":".join(h32(v) for v in k) for k in st)))
+        times = [t for t in map(f32, times) if not math.isnan(t)]
+        print("CURVE\t%d\t%s\t%s" % (made, extrapolation, "\t".join(":".join(h32(v) for v in k) for k in st)))
+        print("TIMES\t%s" % "\t".join(h32(t) for t in times))
         for t in times:
-            t = f32(t)
-            if math.isnan(t): continue
             v = fc.evaluate(t)
             if math.isnan(v): stat["nan"] += 1
             print("E\t%s\t%s" % (h32(t), h32(v)))

@@ -854,7 +854,8 @@ public static class BlenderDeploy
         };
         r.ProbeAt = frame =>
         {
-            FrameSet(frame); EvalArm(frame);
+            int e = Math.Max(-1048574, Math.Min(1048574, frame));
+            FrameSet(e); EvalArm(e);
             return (all.ToDictionary(o => o.Name, o => (float[])o.World.Clone(), StringComparer.Ordinal),
                     imported.ToDictionary(a => a.Name, a => rig.Armatures[a.Node].Bones.ToDictionary(b => names.BoneOfJoint[b], b => pose.Current(b), StringComparer.Ordinal), StringComparer.Ordinal));
         };

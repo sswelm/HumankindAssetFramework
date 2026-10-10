@@ -16,30 +16,55 @@ static class BezierDrill
 
     public static int Run(string[] args)
     {
+        try { return Compare(args); }
+        catch (InvalidDataException e) { Console.WriteLine($"FAIL — {e.Message}"); return 1; }
+    }
+
+    static int Compare(string[] args)
+    {
         Console.WriteLine($"RUNTIME\t{(IntPtr.Size * 8)}-bit, the C runtime's own functions: {BlenderTrig.Exact}");
-        long curves = 0, values = 0, wrong = 0, nans = 0, ended = -1, endedValues = 0;
+        long curves = 0, values = 0, wrong = 0, nans = 0;
         BlenderFCurve.Hits = new int[BlenderFCurve.Branches.Length];
         List<BlenderDeploy.ArmKey> keys = null; bool constant = true; string shown = null;
         foreach (string dump in args)
+        {
+            long fileCurves = 0, fileValues = 0; bool ended = false;
+            string[] times = null; int sample = 0; keys = null;
+            void CompleteCurve()
+            {
+                if (keys != null && (times == null || sample != times.Length))
+                    throw new InvalidDataException("the dump is cut short: a curve lacks its requested evaluations");
+            }
             foreach (string line in File.ReadLines(dump))
             {
                 var t = line.Split('\t');
+                if (ended) throw new InvalidDataException("a row follows the dump's end row");
                 if (t[0] == "CURVE")
                 {
-                    if (t.Length < 3 || (t[1] != "CONSTANT" && t[1] != "LINEAR")) throw new InvalidDataException($"a malformed curve row: {line}");
-                    constant = t[1] == "CONSTANT";
-                    keys = t.Skip(2).Select(k =>
+                    CompleteCurve();
+                    if (t.Length < 4 || (t[2] != "CONSTANT" && t[2] != "LINEAR")) throw new InvalidDataException($"a malformed curve row: {line}");
+                    if (!long.TryParse(t[1], out long ordinal) || ordinal != fileCurves) throw new InvalidDataException("the dump's curve ordinal is not the next curve");
+                    constant = t[2] == "CONSTANT";
+                    keys = t.Skip(3).Select(k =>
                     {
                         var p = k.Split(':'); if (p.Length != 6) throw new InvalidDataException($"a key without its six floats: {k}");
                         return new BlenderDeploy.ArmKey { Frame = F(p[0]), Value = F(p[1]), LeftX = F(p[2]), LeftY = F(p[3]), RightX = F(p[4]), RightY = F(p[5]) };
                     }).ToList();
-                    curves++; shown = line;
+                    curves++; fileCurves++; shown = line; times = null; sample = 0;
+                }
+                else if (t[0] == "TIMES")
+                {
+                    if (keys == null || times != null || t.Length < 2) throw new InvalidDataException("a malformed or duplicated evaluation request list");
+                    times = t.Skip(1).ToArray();
+                    foreach (string time in times) if (float.IsNaN(F(time))) throw new InvalidDataException("a NaN evaluation request");
                 }
                 else if (t[0] == "E")
                 {
                     if (keys == null || t.Length != 3) throw new InvalidDataException($"a malformed evaluation row: {line}");
+                    if (times == null || sample >= times.Length || t[1] != times[sample]) throw new InvalidDataException("the dump's evaluation is not the next requested time (cut short or replaced?)");
+                    sample++;
                     float time = F(t[1]); string mine = H(BlenderFCurve.Evaluate(keys, time, constant));
-                    values++;
+                    values++; fileValues++;
                     // a NaN is held as a NaN: which of two NaNs survives an addition follows the compiler's operand order
                     if (float.IsNaN(F(t[2])) && float.IsNaN(F(mine))) { nans++; continue; }
                     if (mine != t[2])
@@ -48,12 +73,19 @@ static class BezierDrill
                         if (wrong <= 12) Console.WriteLine($"DIFF at {time:R}: here {mine} ({F(mine):R}), Blender {t[2]} ({F(t[2]):R}) on {shown}");
                     }
                 }
-                else if (t[0] == "END") { if (t.Length != 3) throw new InvalidDataException("a malformed end row"); ended = (ended < 0 ? 0 : ended) + long.Parse(t[1]); endedValues += long.Parse(t[2]); }
+                else if (t[0] == "END")
+                {
+                    CompleteCurve();
+                    if (t.Length != 3 || !long.TryParse(t[1], out long nc) || !long.TryParse(t[2], out long nv)) throw new InvalidDataException("a malformed end row");
+                    if (nc != fileCurves || nv != fileValues) throw new InvalidDataException($"the dump is cut short: ends after {nc} curves and {nv} values but holds {fileCurves} and {fileValues}");
+                    ended = true;
+                }
                 else throw new InvalidDataException($"a row the drill does not know: '{(line.Length > 60 ? line.Substring(0, 60) : line)}'");
             }
+            if (!ended) throw new InvalidDataException("the dump is cut short: no end row");
+        }
         for (int i = 0; i < BlenderFCurve.Branches.Length; i++) Console.WriteLine($"BRANCH\t{BlenderFCurve.Hits[i]}\t{BlenderFCurve.Branches[i]}");
         Console.WriteLine($"TOTAL\tcurves {curves} values {values} wrong {wrong} nan {nans}");
-        if (ended != curves || endedValues != values) { Console.WriteLine($"FAIL — the dump ends after {ended} curves and {endedValues} values and holds {curves} and {values} (cut short?)"); return 1; }
         if (curves == 0 || values == 0) { Console.WriteLine("FAIL — the dump holds no curve"); return 1; }
         if (wrong > 0) { Console.WriteLine($"FAIL — {wrong} of {values} values differ from Blender's"); return 1; }
         Console.WriteLine($"PASS — {values} values of {curves} Bezier curves equal to Blender's FCurve.evaluate(), bit for bit ({nans} of them a NaN on both sides, its sign not compared)");

@@ -748,7 +748,7 @@ thirds on whole frames, spans to 1e30, infinities) - `deploy.exe --bezier`: 5,40
 to the bit over four seeds (the gate runs 6,000 curves and requires 16 named branches to be reached); (2) the
 decisions dump ends with a frame SWEEP (`SW` rows: what every pose bone of the new armature holds, frame after
 frame - over the range, about the barrel's mid and end key and the ready frame wherever they lie, across the
-segment, at the frame limits, and back again): 158 jobs, 199,179 swept rows equal, 53 jobs with a frame between two
+segment, at the frame limits, and back again): 162 jobs, 217,635 swept rows equal, 57 jobs with a frame between two
 Bezier keys; `Result.ArmAt`. The drill makes the SAME frame list and takes no other.
 
 *Review before the PR* (an independent agent; 287 + 44 + 10 + 38 generated jobs through the real script, 4 million
@@ -767,7 +767,9 @@ double as ucrtbase on 20 million samples each: the port calls ucrtbase's all the
 the conversion went on silently: a barrel retarget or a leg scale is now left to Blender there. (7) The sweep
 stopped at frame 3000: now about the keys wherever they are (ends of 5000, 65537, -5000 in the gate; the reviewer
 ran ends to 40,000,000). (8) A NaN's sign is not portable (which of two NaNs survives follows the compiler's
-operand order): the Bezier drill holds a NaN as a NaN; the conversion never reaches one (non-finite keys fall back).
+operand order): the Bezier drill holds a NaN as a NaN. Very large finite barrel scales can also overflow the
+intermediate Bezier coefficients and produce NaNs during conversion; the pose oracle compares their bits on
+the tested Windows runtime, without asserting that their signs are portable.
 39 planted defects: 35 caught; the four that are not are equivalent - `exp` and `log` (above), `2*a*a*a` grouped
 the other way (a factor of two is exact), the linear root divided in float (a float quotient rounds the same from
 double).
@@ -778,6 +780,19 @@ doubled frame is found as a key), no equation left; 64-bit Mono (Unity's own run
 at hand - the drills run on 64-bit .NET Framework); NaN or infinite key FRAMES and sub-frames (the script sets
 whole frames); the smoothing solver for a middle key that is no extreme (still left to Blender; 5d needs it).
 Next: 5d.
+
+*Review of PR #142*: the last-frame probe now clamps requested frames to Blender's scene bounds before both
+object and baked-armature evaluation. Two unit regressions expose the old baked-key subtraction overflow at
+`int.MinValue` on a clip starting at frame 24, and evaluation past the scene limit at `int.MaxValue` on a
+re-keyed barrel. The sweep's generated neighbours are clamped to Int32 before consecutive deduplication on both
+sides of the oracle; four real-script fixtures cover minimum/maximum end and ready frames. The raw-curve oracle
+also checks sequential curve ordinals and each curve's ordered `TIMES` requests: replacing a sample by another
+equal value no longer preserves a passing result just by preserving totals. Five additional negative controls
+cover replaced samples and curves, missing requests, and rows or a second end marker after the end. Validation:
+1,434 unit tests, 162 conversion jobs with 217,635 swept rows, 90 additional generated conversions with 152,615
+swept rows, and 579,367 raw values from a second seed, all passing. Three further extreme finite-scale jobs match
+Blender, including the NaN interpolation case above. The existing missing `SiegeHowitzersCar` source is still
+reported as untested.
 
 *Review of PR #138*: the imported pose rows at the bind and last frames (`PB2`, `PB3`) must name every expected
 armature/bone exactly once, with all ten held values. A matching row count cannot substitute duplicates for missing
