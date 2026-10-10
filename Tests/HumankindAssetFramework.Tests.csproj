@@ -17,6 +17,7 @@
     <PackageReference Include="xunit" Version="2.6.6" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.6" />
     <None Include="eigen_inverses.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="blender_handle_releases.txt" CopyToOutputDirectory="PreserveNewest" />
 </ItemGroup>
 
   <ItemGroup>

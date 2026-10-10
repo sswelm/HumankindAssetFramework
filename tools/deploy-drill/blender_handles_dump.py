@@ -13,8 +13,11 @@ The shapes: rising and falling runs between extremes (the smoothing solver's sys
 that overshoot (a handle locked at its neighbour's height, and released again), plateaus, zigzags (every key an
 extreme), uneven spacing down to a thousandth of a frame and up to thousands, values from 1e-30 to 1e30, two keys,
 three keys, more than 256 keys (the recalculation works in chunks of 256), LINEAR extrapolation (free ends).
+The first two requested curves use fixed rare-release shapes shared with the unit tests; the remaining curves
+are generated from the seed.
 """
 import math
+import pathlib
 import random
 import struct
 import sys
@@ -27,6 +30,15 @@ def h32(v):
 
 
 def main(seed, count):
+    # Keep the requested count, but reserve the first two rows for fixed rare-release shapes. Expected handles
+    # are held by the unit tests; this oracle reads only their frame/value inputs and recalculates in Blender.
+    fixture = pathlib.Path(__file__).resolve().parents[2] / "Tests" / "blender_handle_releases.txt"
+    rare = [line.split("\t") for line in fixture.read_text(encoding="ascii").splitlines()]
+    if len(rare) != 2:
+        raise ValueError("the handles drill requires its two rare-release fixture curves")
+    def f32hex(h):
+        return struct.unpack("<f", struct.pack("<I", int(h, 16)))[0]
+
     r = random.Random(seed)
     act = bpy.data.actions.new("handles")
     slot = act.slots.new('OBJECT', "s")
@@ -116,6 +128,11 @@ def main(seed, count):
         return [v * s for v in out]
 
     for i in range(count):
+        if i < len(rare):
+            t = rare[i]
+            points = [key.split(":") for key in t[4:]]
+            curve([f32hex(p[0]) for p in points], [f32hex(p[1]) for p in points], t[2], 0)
+            continue
         # long curves (the recalculation works in chunks of 256 keys) by update() and by insertion, in and out of
         # order - never RAW with a doubled frame: there Blender's own result is not one result (a key's thread marks
         # its doubled neighbour while that neighbour's thread resets the mark: 5 of 40 runs differed, measured)

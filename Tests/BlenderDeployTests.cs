@@ -348,6 +348,18 @@ public class BlenderDeployTests
         Assert.Equal(t.Skip(1), keys.Select(k => $"{H(k.Frame)}:{H(k.Value)}:{H(k.LeftX)}:{H(k.LeftY)}:{H(k.RightX)}:{H(k.RightY)}"));
     }
 
+    [Theory]
+    [InlineData(0)] // a locked handle released a second time
+    [InlineData(1)] // a locked handle kept after two releases
+    public void Rare_handle_release_cases_keep_Blenders_bits(int row)
+    {
+        // Blender 5.1.2 oracle rows from seed 1, curves 903 and 18282. The deploy drill also recalculates these
+        // shapes in Blender and requires both release branches, so they cannot disappear behind a random seed.
+        var path = System.IO.Path.Combine(AppContext.BaseDirectory, "blender_handle_releases.txt");
+        var t = System.IO.File.ReadAllLines(path)[row].Split('\t');
+        The_handles_of_automatic_keys_are_Blenders((t[2] == "CONSTANT" ? "C " : "L ") + string.Join(" ", t.Skip(4)));
+    }
+
     [Fact]
     public void A_lone_key_keeps_handles_a_frame_to_each_side()
     {

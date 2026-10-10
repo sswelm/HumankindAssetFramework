@@ -811,7 +811,8 @@ solved one. `BlenderDeploy`'s `Insert` calls it; the "key between a lower and a 
 Two oracles, `deploy.exe --handles`: (1) `blender_handles_dump.py` - generated curves built four ways (stored and
 `FCurve.update()`, `keyframe_points.insert()` in and out of order, stored raw with doubled frames and
 `handles_recalc()`): both handles of 2,409,595 keys on 80,000 curves equal to the bit over four seeds (the gate
-runs 6,000 curves and requires 13 named branches); (2) `blender_keyframe_insert_dump.py` - the real thing,
+runs 6,000 curves, including two fixed rare-release shapes, and requires 15 named branches);
+(2) `blender_keyframe_insert_dump.py` - the real thing,
 `pose_bone.keyframe_insert` on an armature the way step 5d keys its arm, every curve written after EVERY insert:
 320,970 keys on 17,666 curves equal (the gate runs 40 key sequences). All 162 conversion jobs still pass.
 
@@ -835,9 +836,17 @@ a flat step; the two-unknown form when nothing cycles; the last key's ratio, whi
 that changed nothing.
 
 Not held: `bezier_calc_handle_adj` scaling a fixed end handle to fit (dead with AUTO_CLAMPED keys alone: the
-reviewer's argument and 900,000 raw curves); a handle released a SECOND time and one kept after two releases are
-reached on 80,000 curves (17 and 9) but not required by the gate's 6,000; other handle types, a Cycles modifier,
-smoothing NONE; 64-bit Mono. Next: 5d itself.
+reviewer's argument and 900,000 raw curves); other handle types, a Cycles modifier, smoothing NONE. Next: 5d itself.
+
+*PR #143 follow-up*: fixed Blender 5.1.2 oracle rows (seed 1, curves 903 and 18282; 12 and 40 keys) now
+hold a handle released a second time and one kept after two releases in the unit tests. The handles generator
+reserves its first two curves for these shapes, reading only their frame/value inputs and recalculating the
+handles in Blender; the gate requires both branches to be reached. Unity 2021.3.1f1's actual 64-bit embedded
+Mono also passed 195,174 keys on 2,938 independent curves in an isolated batch-mode project: exhaustive small
+sign patterns, signed zero, extreme finite values, and curves up to 5,000 keys. Both rare fixtures also passed
+inside Unity (two second releases and one handle kept after two releases). Limiting a handle to only one release
+in a temporary copy of the solver made the fixed oracle reject two differing keys. No handle differed in the
+unchanged solver.
 
 *Review of PR #138*: the imported pose rows at the bind and last frames (`PB2`, `PB3`) must name every expected
 armature/bone exactly once, with all ten held values. A matching row count cannot substitute duplicates for missing

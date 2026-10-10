@@ -355,7 +355,7 @@ if [ "${hnd_n:-0}" -ne "$HND_CURVES" ]; then echo "FAIL — the handles dump hol
 for branch in "a key that is an extreme of its neighbours (flat)" "the left handle stopped at the previous key's height" "the right handle stopped at the next key's height" \
     "an end held flat (CONSTANT extrapolation)" "two keys on one frame" "a run of keys smoothed" "a free first key (LINEAR extrapolation)" "a free last key (LINEAR extrapolation)" \
     "the system has no finite solution (the handles stay)" "an overshooting handle locked on the second look (at zero)" "an overshooting handle locked at its limit" \
-    "a locked handle released" "two unknowns"; do
+    "a locked handle released" "two unknowns" "a locked handle released a second time" "a locked handle kept after two releases"; do
   hits=$(grep -F "	handles: $branch" "$TMPD/handles_out.txt" | grep "^BRANCH" | head -1 | cut -f2)
   if [ -z "$hits" ] || [ "$hits" -le 0 ]; then echo "FAIL — the generated curves never reach the handle branch '$branch'"; exit 1; fi
 done
