@@ -16,24 +16,35 @@ run() {  # run <label> <command...>: in sequence, the output as it comes
   local label="$1"; shift; local t0=$(date +%s) t1
   printf '\n=== %s ===\n' "$label"
   if "$@"; then t1=$(date +%s); printf '[PASS] %s (%d s)\n' "$label" "$((t1 - t0))"; note "PASS $label ($((t1 - t0)) s)"
-  else t1=$(date +%s); printf '[FAIL] %s (%d s)\n' "$label" "$((t1 - t0))"; note "FAIL $label"; fail=1; fi
+  else t1=$(date +%s); printf '[FAIL] %s (%d s)\n' "$label" "$((t1 - t0))"; note "FAIL $label ($((t1 - t0)) s)"; fail=1; fi
 }
 # The drills are independent of one another (each works in its own mktemp directory and builds its own exe), and the
 # Blender-backed ones took the gate from a minute to 25 in sequence: they run AT ONCE, each into its own log, and the
-# logs are printed in order once all are done - the output reads as before, the wall time is the longest drill's.
+# logs are printed in declaration order; each worker reports progress and records its duration when it finishes.
 BG_LOGS=$(mktemp -d); bg_n=0; declare -a BG_LABEL BG_PID BG_T0
 run_bg() {  # run_bg <label> <command...>: started now, judged by run_bg_wait
   local label="$1"; shift; local log="$BG_LOGS/$bg_n"
-  ( "$@" > "$log.out" 2>&1; echo $? > "$log.rc" ) &
-  BG_LABEL[$bg_n]="$label"; BG_PID[$bg_n]=$!; BG_T0[$bg_n]=$(date +%s); bg_n=$((bg_n + 1))
+  BG_LABEL[$bg_n]="$label"; BG_T0[$bg_n]=$(date +%s)
+  local t0="${BG_T0[$bg_n]}"
+  ( "$@" > "$log.out" 2>&1; rc=$?; t1=$(date +%s)
+    echo "$t1" > "$log.end"
+    if [ "$rc" = "0" ]; then note "PASS $label ($((t1 - t0)) s)"
+    else note "FAIL $label ($((t1 - t0)) s)"; fi
+    echo "$rc" > "$log.rc"
+  ) &
+  BG_PID[$bg_n]=$!; bg_n=$((bg_n + 1))
 }
 run_bg_wait() {
-  local i t1
+  local i t1 completed
   for ((i = 0; i < bg_n; i++)); do
-    wait "${BG_PID[$i]}"; t1=$(date +%s)
+    wait "${BG_PID[$i]}"
+    t1=$(cat "$BG_LOGS/$i.end" 2>/dev/null)
+    # Missing completion metadata is also a failed worker, never a fabricated success.
+    completed=1
+    if ! [[ "$t1" =~ ^[0-9]+$ ]]; then t1="${BG_T0[$i]}"; completed=0; fi
     printf '\n=== %s ===\n' "${BG_LABEL[$i]}"; cat "$BG_LOGS/$i.out"
-    if [ "$(cat "$BG_LOGS/$i.rc" 2>/dev/null)" = "0" ]; then printf '[PASS] %s (%d s)\n' "${BG_LABEL[$i]}" "$((t1 - BG_T0[$i]))"; note "PASS ${BG_LABEL[$i]} ($((t1 - BG_T0[$i])) s)"
-    else printf '[FAIL] %s (%d s)\n' "${BG_LABEL[$i]}" "$((t1 - BG_T0[$i]))"; note "FAIL ${BG_LABEL[$i]}"; fail=1; fi
+    if [ "$(cat "$BG_LOGS/$i.rc" 2>/dev/null)" = "0" ] && [ "$completed" = "1" ]; then printf '[PASS] %s (%d s)\n' "${BG_LABEL[$i]}" "$((t1 - BG_T0[$i]))"
+    else printf '[FAIL] %s (%d s)\n' "${BG_LABEL[$i]}" "$((t1 - BG_T0[$i]))"; fail=1; fi
   done
   rm -rf "$BG_LOGS"; bg_n=0
 }
@@ -79,6 +90,7 @@ run "reader-gate drill (the gates refuse an unknown wrapper)" bash "$ROOT/tools/
 run "registry schema parity" bash "$ROOT/tools/check_schema_parity.sh"
 
 # 5) editor source guards — also in-repo since the move. Both guard editor/, so they belong with it.
+run "parallel gate regression tests (completion, paths and verdicts)" python "$ROOT/Tests/test_parallel_gate.py"
 #    5a) The editor compiles. Roslyn against Unity's own reference assemblies — the ONE check that needs a licensed
 #        Unity install (UnityEditor.dll + the MonoBleedingEdge profile), so it stays hook-only and never runs in CI.
 # No guard: the script itself fails LOUD when Unity/dotnet/Newtonsoft are absent. The old guard here was

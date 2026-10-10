@@ -41,10 +41,14 @@ in **GitHub Actions**. Both lanes matter, and for different reasons:
 
 **Since 2026-10-11 the drills run concurrently.** The thirteen drills are independent (each works in its own temp
 directory and builds its own exe), so `check.sh` starts them together (`run_bg`), each into its own log, and prints
-the logs in order once all are done - the output reads as before, the wall time is the longest drill's. Measured on
+the logs in declaration order. Each worker records its elapsed time and reports progress as soon as it finishes;
+the wall time is the longest drill's. Measured on
 the deploy port's branch: 870 s where the sequence took about 1,500. Inside the deploy drill the ~160 single-job
 tamper replays (one drill run per mutated dump) run eight at a time up front (`prerun_tampers`, `DEPLOY_PAR`), and
-every loop reads its verdict from `$PAR/<dump name>.rc`. Every gate step appends `HH:MM gate PASS <step> (N s)` to
+every loop requires an exact exit code from `$PAR/<dump name>.rc` plus its expected diagnostic. Jobs and dump paths
+are passed as NUL-delimited arguments, preserving spaces and quotes. `Tests/test_parallel_gate.py` exercises these
+contracts, ordered output, failure propagation and delete-only pushes in both the hook and CI, without Unity or
+Blender. Every gate step appends `HH:MM gate PASS/FAIL <step> (N s)` to
 `PROGRESS.md` beside the worktrees (`HAF_PROGRESS` points it elsewhere; nothing fails on its absence), so a run can
 be watched without asking. A push that only deletes refs (`git push origin --delete`) skips the gate: the hook reads
 the refs on stdin and exits when every local sha is zero. Not done: skipping a drill whose inputs did not change.
