@@ -734,6 +734,51 @@ smoothing from the USER PREFERENCE "F-Curve smoothing" - the port is the default
 the dump says so, and a Blender set otherwise would differ; the curve's group name and the keys' type are not
 compared. Next: the Bezier evaluation between two keys, then 5d.
 
+**Replacing `deploy_convert.py`: the Bezier evaluation between two keys** (2026-10-10). `editor/BlenderFCurve.cs`:
+`fcurve_eval_keyframes` for Bezier keys - the key search with its 0.0001 frame threshold, the "all at one height"
+shortcut, `BKE_fcurve_correct_bezpart` (a handle longer than the keys are apart is cut back), `findzero` /
+`solve_cubic` (the time solved for the curve parameter in DOUBLE: Cardano through the C runtime's `exp`, `log`,
+`acos`, `cos` - `BlenderTrig` calls ucrtbase's - the FIRST root in -1e-10..1.000001 in the formula's order) and
+`berekeny` (the value's cubic in FLOAT). `EvalArm` uses it for every re-keyed bone; the "frame inside a Bezier
+segment" fallback of 5b/5c is gone (`gun_end_negative` and four more jobs are decided here). Two oracles:
+(1) `blender_bezier_dump.py` - Blender's own `FCurve.evaluate()` on generated curves stored RAW (the extrapolation
+set first and the keys through `foreach_set`: handles pointing backwards, keys out of order, two keys on one frame,
+a first key without a handle and a second 2^100 away, exactly quadratic time curves, double roots placed by hand,
+thirds on whole frames, spans to 1e30, infinities) - `deploy.exe --bezier`: 5,408,360 values of 56,016 curves equal
+to the bit over four seeds (the gate runs 6,000 curves and requires 16 named branches to be reached); (2) the
+decisions dump ends with a frame SWEEP (`SW` rows: what every pose bone of the new armature holds, frame after
+frame - over the range, about the barrel's mid and end key and the ready frame wherever they lie, across the
+segment, at the frame limits, and back again): 158 jobs, 199,179 swept rows equal, 53 jobs with a frame between two
+Bezier keys; `Result.ArmAt`. The drill makes the SAME frame list and takes no other.
+
+*Review before the PR* (an independent agent; 287 + 44 + 10 + 38 generated jobs through the real script, 4 million
+raw curve values): no value differed. Eight notes, all acted on. (1) My oracle claim "Blender does not store a
+backward handle" was FALSE: the dump set the extrapolation last and that setter sorts the keys and recalculates the
+handles - the generator is now the reviewer's raw one, and two branches I had called unreachable are reached
+(1,602 and 17,572 hits a seed). (2) The drill replayed whatever frames the dump named: a dump with a frame taken
+out, its tail cut off or its frames reordered passed - the list is now recomputed and compared; planted in the
+gate. (3) The Bezier drill counted curves, not values, and skipped unknown rows: the end row counts both, an unknown
+row fails; planted. (4) My uncaught plant "the last-frame probe does not evaluate the armature" is caught by a new
+fixture (`gunnery_signs`: a bake that keys -0, a fire window ending on such a frame). (5) `Math.Acos` is not
+ucrtbase's `acos` on 98,216 of 20 million doubles, but the solver carries it into the float 4 times in 576 million
+evaluations: those four rows are FIXED rows of the dump and catch the plant. `Math.Exp` and `Math.Log` gave the same
+double as ucrtbase on 20 million samples each: the port calls ucrtbase's all the same, but no drill can tell.
+(6) Without the 64-bit Windows C runtime (`BlenderTrig.Exact` false: 2 of 19,078 values differ under a 32-bit Mono)
+the conversion went on silently: a barrel retarget or a leg scale is now left to Blender there. (7) The sweep
+stopped at frame 3000: now about the keys wherever they are (ends of 5000, 65537, -5000 in the gate; the reviewer
+ran ends to 40,000,000). (8) A NaN's sign is not portable (which of two NaNs survives follows the compiler's
+operand order): the Bezier drill holds a NaN as a NaN; the conversion never reaches one (non-finite keys fall back).
+39 planted defects: 35 caught; the four that are not are equivalent - `exp` and `log` (above), `2*a*a*a` grouped
+the other way (a factor of two is exact), the linear root divided in float (a float quotient rounds the same from
+double).
+
+Not held: five branches no curve reached, ported from the source only - a quadratic time curve's zero
+discriminant, the 1e-8 key test after the search, the segment miss, two keys on one frame INSIDE the search (a
+doubled frame is found as a key), no equation left; 64-bit Mono (Unity's own runtime: only a 32-bit `mono.exe` is
+at hand - the drills run on 64-bit .NET Framework); NaN or infinite key FRAMES and sub-frames (the script sets
+whole frames); the smoothing solver for a middle key that is no extreme (still left to Blender; 5d needs it).
+Next: 5d.
+
 *Review of PR #138*: the imported pose rows at the bind and last frames (`PB2`, `PB3`) must name every expected
 armature/bone exactly once, with all ten held values. A matching row count cannot substitute duplicates for missing
 bones, and unknown names cannot skip comparison. `missing_imported_pose.py` keeps a passing single-job control and

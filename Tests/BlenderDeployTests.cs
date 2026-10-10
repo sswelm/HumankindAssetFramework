@@ -293,8 +293,46 @@ public class BlenderDeployTests
         Assert.Contains("float()", Run("0|24|||1e||||0|||4|0|1").Fallback);
         Assert.Contains("float()", Run("0|24||24||nan|||0|||4|0|1").Fallback);
         Assert.Contains("past a float", Run("0|24||24||1e39|||0|||4|0|1").Fallback);
-        // a negative end: the legs' first frame_set lands between the barrel's two new keys
-        Assert.Contains("inside a Bezier segment", Run("0|-5||24|0.5|2|||0|||4|0|1").Fallback);
+        // a negative end: the legs' first frame_set lands between the barrel's two new keys (-5 and 1) - the curve is
+        // evaluated there, and frame after frame the barrel moves from its ready pose to its rest
+        var neg = Run("0|-5||24|0.5|2|||0|||4|0|1");
+        Assert.Null(neg.Fallback);
+        var k2 = neg.Rekeyed["Barrel"][2];
+        Assert.Equal(new[] { -5f, 1f }, k2.Select(k => k.Frame));
+        float before = neg.ArmAt(-9)["Barrel"][2], nearFirst = neg.ArmAt(-4)["Barrel"][2], mid = neg.ArmAt(-2)["Barrel"][2], late = neg.ArmAt(0)["Barrel"][2], after = neg.ArmAt(7)["Barrel"][2];
+        Assert.Equal(k2[0].Value, before); Assert.Equal(k2[1].Value, after);
+        Assert.Equal((k2[0].Value + k2[1].Value) / 2f, mid, 6);                 // flat handles a third out: the middle is the mean
+        Assert.True(Math.Abs(nearFirst - k2[0].Value) < Math.Abs(mid - k2[0].Value) && Math.Abs(late - k2[1].Value) < Math.Abs(mid - k2[1].Value));
+        Assert.True(Math.Abs(nearFirst - k2[0].Value) < Math.Abs(k2[1].Value - k2[0].Value) / 6f);   // eased: slower than a straight line near the key
+    }
+
+    [Theory]
+    // rows of Blender 5.1.2's own FCurve.evaluate() (tools/deploy-drill/blender_bezier_dump.py, seed 1): the curve as
+    // frame:value:left handle:right handle in float hex, then time and value
+    // free handles inside the span: one real root, and three
+    [InlineData("C 44980636:c2944cdc:43ac691b:00000000:44dc0467:00000000 452e3ee6:3f800000:44e6a3bb:41d89800:458169b0:3a25e781", "44fa4201 40f77606", "44a5ddb6 c26b88b9", "44cf452a c17ac003")]
+    // handles past the neighbour: cut back to the span, their height with them
+    [InlineData("C c381316d:00000000:c381b16d:00000000:c380be47:3f789489 c380fcfc:3f800000:c3812f9f:b9f3425b:c3807cfc:3f800000", "c3811734 3e7b23a4", "c3811e1f 3e28a1a7", "c38111c1 3f07305a")]
+    // the time curve exactly quadratic
+    [InlineData("C 42180000:3f800000:c57da000:3f800000:45813000:3f800000 46409800:00000000:46009800:429d36d1:46804c00:00000000", "45c13000 41efd23a", "45b90e99 41e5af1c", "462eb9e4 41909aa8")]
+    // symmetric handles, LINEAR extrapolation: before the first key its left handle's slope (flat here)
+    [InlineData("L 44ee85cd:00000000:44ee7374:00000000:44ee9826:3db5230f 44eeaa7f:3f800000:44ee9826:3f1daacd:44eebcd8:3f800000", "44ee25cd 00000000", "44ee9826 3ec73b64", "44eea245 3f491f7f")]
+    // four keys: a time within 0.0001 frame of a key IS that key; one float step before it is not
+    [InlineData("L 44bb2000:bfeb484e:44bae93a:be6f1747:44bb2b56:4110eb2f 44bc0000:41ec44e9:44bbca8a:3f800000:44bc1318:380ddf41 44bef775:c121f53c:44bed4f3:00000000:44bf17b6:3e791671 44bf3775:39932c5e:44befb02:00000000:44bf8293:3f800000", "44bb1fff bfeb448e", "44bc0000 41ec44e9", "44bbffff 41ec40a3")]
+    // keyframe_insert's own shape - flat handles a third out: the time curve is a straight line
+    [InlineData("C 443e8000:bf292751:44362aab:bf292751:4446d555:bf292751 44578000:00000000:444f2aab:00000000:445fd555:00000000", "444b0000 bea92751", "444e4000 be515728", "44410000 bf246ad2")]
+    public void A_Bezier_curve_is_evaluated_as_Blender_evaluates_it(string curve, params string[] rows)
+    {
+        float F(string hex) => BitConverter.ToSingle(BitConverter.GetBytes(Convert.ToUInt32(hex, 16)), 0);
+        var t = curve.Split(' ');
+        var keys = t.Skip(1).Select(k => k.Split(':').Select(F).ToArray()).Select(p => new BlenderDeploy.ArmKey { Frame = p[0], Value = p[1], LeftX = p[2], LeftY = p[3], RightX = p[4], RightY = p[5] }).ToList();
+        foreach (string row in rows)
+        {
+            var p = row.Split(' '); float got = BlenderFCurve.Evaluate(keys, F(p[0]), t[0] == "C");
+            // to the bit where the C runtime's own exp, log, acos and cos are at hand (a 64-bit Windows process)
+            if (BlenderTrig.Exact) Assert.Equal(p[1], BitConverter.ToUInt32(BitConverter.GetBytes(got), 0).ToString("x8"));
+            else Assert.Equal(F(p[1]), got, 4);
+        }
     }
 
     [Theory]

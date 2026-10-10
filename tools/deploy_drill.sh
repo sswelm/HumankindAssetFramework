@@ -43,7 +43,7 @@ WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"; WTMP="$(cygpath -m "$TMP
 E="$WROOT/editor"
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -optimize+ -out:"$WTMP/deploy.exe" \
   -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
-  "$WROOT/tools/deploy-drill/DeployDrill.cs" "$WROOT/tools/deploy-drill/DecisionsDrill.cs" "$E/BlenderDeploy.cs" "$E/BlenderExportTree.cs" \
+  "$WROOT/tools/deploy-drill/DeployDrill.cs" "$WROOT/tools/deploy-drill/DecisionsDrill.cs" "$WROOT/tools/deploy-drill/BezierDrill.cs" "$E/BlenderDeploy.cs" "$E/BlenderFCurve.cs" "$E/BlenderExportTree.cs" \
   "$E/HafModel.cs" "$E/GlbReader.cs" "$E/HafTransforms.cs" "$E/BlenderNames.cs" "$E/BlenderPosedState.cs" "$E/BlenderTrig.cs" "$E/BlenderEigen.cs" "$E/BlenderMesh.cs" "$E/BMesh.cs" "$E/BlenderColor.cs" \
   "$E/VehicleProbe.cs" "$E/VehicleProbe.Visibility.cs" "$E/VehicleProbe.Islands.cs" "$E/VehicleProbe.InsideOut.cs" \
   "$E/VehicleProbe.BlenderWorld.cs" "$E/VehicleProbe.BlenderSkin.cs" "$E/VehicleProbe.CustomNormals.cs" "$E/VehicleProbe.Merge.cs" "$E/VehicleProbe.BlenderArmature.cs" "$E/VehicleProbe.BlenderPose.cs" 2>&1); rc=$?
@@ -180,7 +180,7 @@ n_jobs=$(grep -c "" "$TMPD/jobs.txt")
 t3=$(date +%s)
 "$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_decisions_dump.py")" -- "$WROOT/editor/Tools~/deploy_convert.py" "$WTMP/jobs.txt" > "$TMPD/decisions_raw.txt" 2> "$TMPD/decisions_err.txt"; drc=$?   # stderr apart: a depsgraph warning lands in the middle of a row otherwise
 t4=$(date +%s)
-tr -d '\r' < "$TMPD/decisions_raw.txt" | grep -E "^(JOB|LOG|LOG2|EXIT|RANGE|NORM|FLAG|PART|BAD|ALIAS|ARM|BONEOF|RBONE|ANCHOR|HULL|PINV|OBJ|M|T|BOX|ACT|FC|FCA|PB2|PB3|M2|O2|O3|LOG3|SNAP|APB|O4|LOG4|FC4|APB4|O5|DONE|FAIL)	" > "$TMPD/decisions.txt"
+tr -d '\r' < "$TMPD/decisions_raw.txt" | grep -E "^(JOB|LOG|LOG2|EXIT|RANGE|NORM|FLAG|PART|BAD|ALIAS|ARM|BONEOF|RBONE|ANCHOR|HULL|PINV|OBJ|M|T|BOX|ACT|FC|FCA|PB2|PB3|M2|O2|O3|LOG3|SNAP|APB|O4|LOG4|FC4|APB4|O5|SW|DONE|FAIL)	" > "$TMPD/decisions.txt"
 n_done=$(grep -c "^DONE" "$TMPD/decisions.txt")
 if [ "$drc" -ne 0 ] || [ "$n_done" -ne "$n_jobs" ]; then
   grep -E "^FAIL|Traceback|Error" "$TMPD/decisions_raw.txt" "$TMPD/decisions_err.txt" | head -8
@@ -319,6 +319,61 @@ done
 "$TMPD/deploy.exe" --decisions "$WTMP/missing_dec/gun_jobs.txt" "$WTMP/missing_dec/gun_LOG4_missing.txt" > "$TMPD/gun_log4.txt" 2>&1; badrc=$?
 if [ "$badrc" -ne 1 ] || ! grep -E "^FAIL " "$TMPD/gun_log4.txt" | grep -qF "the retarget's log"; then head -5 "$TMPD/gun_log4.txt"; echo "FAIL — deploy drill accepted a dump without the retarget's log line (rc=$badrc)"; exit 1; fi
 echo "PASS — deploy drill accepts an intact barrel retarget and rejects missing, doubled, unknown or changed curve, pose and object rows, and a missing log line"
+# ... and the frame sweep after it: a row missing, doubled, renamed, cut short, one bit off, and no sweep at all
+for mode in missing duplicate unknown short value none frame tail; do
+  case "$mode" in
+    missing) reason="has no sweep row at frame";;
+    duplicate) reason="twice";;
+    unknown) reason="of an unknown bone";;
+    short) reason="fields, expected 13";;
+    value) reason="of the frame sweep hold other values";;
+    none) reason="has no frame sweep";;
+    frame|tail) reason="is not the sweep the dump script makes";;
+  esac
+  "$TMPD/deploy.exe" --decisions "$WTMP/missing_dec/gun_jobs.txt" "$WTMP/missing_dec/gun_SW_$mode.txt" > "$TMPD/gun_SW_$mode.txt" 2>&1; badrc=$?
+  if [ "$badrc" -ne 1 ] || ! grep -E "^FAIL " "$TMPD/gun_SW_$mode.txt" | grep -qF "$reason"; then
+    head -5 "$TMPD/gun_SW_$mode.txt"
+    echo "FAIL — deploy drill accepted an invalid frame sweep ($mode, rc=$badrc)"; exit 1
+  fi
+done
+echo "PASS — deploy drill rejects a frame sweep with a missing, doubled, unknown, truncated or changed row, one with a frame taken out or its tail cut off, and a retarget without one"
+
+# ---- the Bezier evaluation on its own: Blender's FCurve.evaluate() on generated curves (free handles, cut-back
+#      handles, flat ones, exactly quadratic and linear time curves, many keys) against BlenderFCurve.Evaluate, to the
+#      bit. Every branch of the solver the generator can reach must be reached, and a dump cut short or one bit off fails.
+BEZ_CURVES="${BEZ_CURVES:-6000}"
+"$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_bezier_dump.py")" -- 1 "$BEZ_CURVES" 2> "$TMPD/bezier_err.txt" | tr -d '\r' | grep -E "^(CURVE|E|END)	" > "$TMPD/bezier.txt"
+"$TMPD/deploy.exe" --bezier "$WTMP/bezier.txt" > "$TMPD/bezier_out.txt" 2>&1; brc=$?
+if [ "$brc" -ne 0 ] || ! grep -q "^PASS " "$TMPD/bezier_out.txt"; then
+  tail -3 "$TMPD/bezier_err.txt"; grep -E "^(DIFF|FAIL|TOTAL)" "$TMPD/bezier_out.txt" | head -8
+  echo "FAIL — the Bezier evaluation differs from Blender's FCurve.evaluate() (rc=$brc)"; exit 1
+fi
+for branch in "at or before the first key" "at or past the last key" "on a middle key (within 0.0001 frame)" "all at one height" "no root in range (0)" \
+    "the first key's handle cut back" "the second key's handle cut back" "cubic, one real root" "cubic, zero discriminant: the first root" "cubic, zero discriminant: the second root" \
+    "cubic, three real roots: the first" "cubic, three real roots: the second" "cubic, three real roots: the third" "quadratic: the first root" "quadratic: the second root" "linear"; do
+  hits=$(grep -F "	$branch" "$TMPD/bezier_out.txt" | grep "^BRANCH" | head -1 | cut -f2)
+  if [ -z "$hits" ] || [ "$hits" -le 0 ]; then echo "FAIL — the generated Bezier curves never reach the branch '$branch'"; exit 1; fi
+done
+sed '$d' "$TMPD/bezier.txt" > "$TMPD/bezier_cut.txt"
+"$TMPD/deploy.exe" --bezier "$WTMP/bezier_cut.txt" > "$TMPD/bezier_cut_out.txt" 2>&1; badrc=$?
+if [ "$badrc" -ne 1 ] || ! grep -q "cut short" "$TMPD/bezier_cut_out.txt"; then echo "FAIL — the Bezier drill accepted a dump without its end row (rc=$badrc)"; exit 1; fi
+python - "$TMPD/bezier.txt" "$TMPD/bezier_bit.txt" <<'PYEOF'
+import sys
+lines = open(sys.argv[1], encoding="ascii").read().split("\n")
+i = max(k for k, l in enumerate(lines) if l.startswith("E\t"))
+lines[i] = lines[i][:-1] + ("0" if lines[i][-1] != "0" else "1")
+open(sys.argv[2], "w", encoding="ascii", newline="\n").write("\n".join(lines))
+PYEOF
+"$TMPD/deploy.exe" --bezier "$WTMP/bezier_bit.txt" > "$TMPD/bezier_bit_out.txt" 2>&1; badrc=$?
+if [ "$badrc" -ne 1 ] || ! grep -q "1 of .* values differ" "$TMPD/bezier_bit_out.txt"; then echo "FAIL — the Bezier drill accepted a value one bit off (rc=$badrc)"; exit 1; fi
+# ... and one with most of its values gone (the end row counts them), or a row of another kind
+awk -F'\t' '$1 != "E" || ++n % 50 == 0' "$TMPD/bezier.txt" > "$TMPD/bezier_few.txt"
+"$TMPD/deploy.exe" --bezier "$WTMP/bezier_few.txt" > "$TMPD/bezier_few_out.txt" 2>&1; badrc=$?
+if [ "$badrc" -ne 1 ] || ! grep -q "cut short" "$TMPD/bezier_few_out.txt"; then echo "FAIL — the Bezier drill accepted a dump with most of its values gone (rc=$badrc)"; exit 1; fi
+{ head -3 "$TMPD/bezier.txt"; printf 'GARBAGE\tx\n'; tail -n +4 "$TMPD/bezier.txt"; } > "$TMPD/bezier_junk.txt"
+"$TMPD/deploy.exe" --bezier "$WTMP/bezier_junk.txt" > "$TMPD/bezier_junk_out.txt" 2>&1; badrc=$?
+if [ "$badrc" -eq 0 ] || ! grep -q "does not know" "$TMPD/bezier_junk_out.txt"; then echo "FAIL — the Bezier drill accepted a row of an unknown kind (rc=$badrc)"; exit 1; fi
+echo "$(grep "^PASS " "$TMPD/bezier_out.txt") - keys stored raw: backward handles, keys out of order, doubled frames; a dump cut short, one bit off or with a row the drill does not know fails (never reached, ported from the source only: a quadratic's zero discriminant, the 1e-8 key test, the segment miss, no equation left)"
 n_j=$(echo "$TOTAL2" | awk '{print $3}'); n_l=$(echo "$TOTAL2" | awk '{print $7}'); n_o=$(echo "$TOTAL2" | awk '{print $9}'); n_ln=$(echo "$TOTAL2" | awk '{print $13}'); n_bones=$(echo "$TOTAL2" | awk '{print $15}'); n_keys=$(echo "$TOTAL2" | awk '{print $19}'); n_after=$(echo "$TOTAL2" | awk '{print $21}'); n_bl=$(grep -c "^BAKELEFT " "$TMPD/dec.txt")
 NOTE_MISSING=""; [ -z "$MISSING" ] || NOTE_MISSING="; recorded jobs whose source file is GONE, not judged:$MISSING"
 echo "PASS — deploy drill, the decisions: $n_j jobs ($n_rec recorded conversions, $n_fx fixture jobs) decided as deploy_convert.py decides them - $n_ln log lines to the letter, the parts, the cull and the merges, the armature it builds ($n_bones bones at rest, StaticRoot's anchor, the root-motion anchor) $n_o objects with their matrices, transforms and bound boxes to the bit, and the BAKE - $n_keys keys of the action it holds at its step 5a, each to the bit, with $n_after object matrices of the scene it leaves ($n_bl jobs are Blender's from the bake on, as marked: the scene before it is held); $n_l jobs left to Blender as marked (Blender took $((t4 - t3)) s)$NOTE_MISSING"

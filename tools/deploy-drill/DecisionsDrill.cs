@@ -18,7 +18,7 @@ static class DecisionsDrill
         "no object with an action left (frame range 1..1)", "normalization: x100", "normalization: recentered", "normalization: none",
         "bone slimming", "the legacy path", "the contract path", "a culled part", "a culled part's descendant", "a pair-merge", "the script stops (no animated part)",
         "the recoil step off with a recoil range given", "left to Blender (BlenderDeploy.Fallback)", "an armature that is a part (its bones are animated)",
-        "a bake on the legacy path", "a bone re-keyed by the barrel retarget or the leg scale (5b, 5c)", "a fire-window snapshot (5a)", "no recoil range: no snapshot", "a custom property keyed by the bake (not modelled: it moves nothing)", "an imported armature baked with it (its bones keyed a frame, its own animation dropped)", "a clip of frame 0 alone (the bake keys frame 1 too)", "a bake on the contract path (scale curves stripped, delta-form rebase)",
+        "a bake on the legacy path", "a bone re-keyed by the barrel retarget or the leg scale (5b, 5c)", "a frame set between two Bezier keys of a re-keyed bone", "a fire-window snapshot (5a)", "no recoil range: no snapshot", "a custom property keyed by the bake (not modelled: it moves nothing)", "an imported armature baked with it (its bones keyed a frame, its own animation dropped)", "a clip of frame 0 alone (the bake keys frame 1 too)", "a bake on the contract path (scale curves stripped, delta-form rebase)",
         "no static mesh (StaticRoot has no anchor)", "StaticRoot anchored to a mesh that has no parent", "StaticRoot anchored to a static mesh's parent",
         "a root-motion anchor (the armature parented for the bake)", "the biggest part does not travel (no anchor)", "no mesh rides a bone (no travel measured)",
         "a bone under its part's parent's bone", "a part whose parent is no part (a root bone)",
@@ -31,6 +31,7 @@ static class DecisionsDrill
 
     public static int Run(string[] args)
     {
+        BlenderFCurve.Hits = new int[BlenderFCurve.Branches.Length];
         var jobs = new Dictionary<string, string[]>(StringComparer.Ordinal);
         foreach (var line in File.ReadAllLines(args[0]))
         {
@@ -39,7 +40,7 @@ static class DecisionsDrill
             jobs[t[0]] = t;
         }
         var cover = new SortedDictionary<string, long>(); foreach (var k in CoverKeys) cover[k] = 0;
-        int fails = 0, files = 0, left = 0; long matrices = 0, objects = 0, lines = 0, bones = 0, curves = 0, keysCompared = 0, after = 0, importedKeys = 0, held2 = 0, atLast = 0, snapped = 0, rekeyed = 0;
+        int fails = 0, files = 0, left = 0; long matrices = 0, objects = 0, lines = 0, bones = 0, curves = 0, keysCompared = 0, after = 0, importedKeys = 0, held2 = 0, atLast = 0, snapped = 0, rekeyed = 0, swept = 0;
         var blocks = new List<List<string>>();
         foreach (var dump in args.Skip(1))
             foreach (var line in File.ReadLines(dump))
@@ -51,7 +52,7 @@ static class DecisionsDrill
         {
             string key = block[0].Split('\t')[1];
             files++;
-            var problems = new List<string>(); string bakeLeftReason = null; bool bakeClamped = false, rebakedArmature = false, fireSnap = false, retargeted = false;
+            var problems = new List<string>(); string bakeLeftReason = null; bool bakeClamped = false, rebakedArmature = false, fireSnap = false, retargeted = false, betweenKeys = false;
             try
             {
                 if (!jobs.TryGetValue(key, out var job)) throw new InvalidDataException("the dump has a job the jobs file does not");
@@ -379,6 +380,55 @@ static class DecisionsDrill
                         { wrongHeldLast++; firstHeldLast = firstHeldLast ?? $"'{t[2]}' of '{t[1]}'"; }
                     }
                     if (wrongHeldLast > 0) problems.Add($"{wrongHeldLast} of {pb3.Count} imported pose bones hold other values at the last frame, first {firstHeldLast}");
+                    // ---- the sweep (the dump's very last act): frame after frame, what the new armature's pose bones hold -
+                    //      a re-keyed bone between two Bezier keys is the curve evaluation. Every frame the dump names is set
+                    //      here in the dump's order (a held zero's sign depends on it), every bone exactly once a frame.
+                    var sw = Of("SW");
+                    if ((sw.Count > 0) != (baked.RetargetLog.Count > 0)) throw new InvalidDataException(sw.Count > 0 ? "the dump has a frame sweep for a job without a retarget" : "the dump has no frame sweep for a job with a retarget");
+                    long wrongSw = 0; string firstSw = null; int at0 = 0, sweptFrames = 0; bool insideSegment = false;
+                    var framesSwept = new List<long>();
+                    while (at0 < sw.Count)
+                    {
+                        if (sw[at0].Length != 13 || !int.TryParse(sw[at0][1], out int frame)) throw new InvalidDataException("the dump has a malformed sweep row");
+                        int n = 0; while (at0 + n < sw.Count && sw[at0 + n][1] == sw[at0][1]) n++;
+                        var mine = baked.ArmAt(frame); var seenSw = new HashSet<string>(StringComparer.Ordinal);
+                        for (int i = at0; i < at0 + n; i++)
+                        {
+                            var t = sw[i];
+                            if (t.Length != 13) throw new InvalidDataException($"the dump's sweep row at frame {frame} has {t.Length} fields, expected 13");
+                            if (!mine.TryGetValue(t[2], out var held)) throw new InvalidDataException($"the dump has a sweep row of an unknown bone at frame {frame}: '{t[2]}'");
+                            if (!seenSw.Add(t[2])) throw new InvalidDataException($"the dump has a sweep row twice at frame {frame}: bone '{t[2]}'");
+                            swept++;
+                            if (!held.Select(H).SequenceEqual(t.Skip(3))) { wrongSw++; firstSw = firstSw ?? $"'{t[2]}' at frame {frame}: here [{string.Join(",", held.Select(Show))}] Blender [{string.Join(",", t.Skip(3).Select(h => Show(F(h))))}]"; }
+                        }
+                        foreach (var bone in mine.Keys) if (!seenSw.Contains(bone)) throw new InvalidDataException($"the dump has no sweep row at frame {frame} for bone '{bone}'");
+                        foreach (var ch in baked.Rekeyed.Values) foreach (var list in ch) if (list != null && list.Count > 1 && frame > list[0].Frame && frame < list[list.Count - 1].Frame && !list.Any(k => k.Frame == frame)) insideSegment = true;
+                        at0 += n; sweptFrames++; framesSwept.Add(frame);
+                    }
+                    if (sw.Count > 0)
+                    {
+                        // the frames are the ones blender_decisions_dump.py sets, in its order: no group gone, moved, doubled or
+                        // renumbered (the drill replays what the dump names - a dump that names less would be judged on less)
+                        long Raw(string txt, long d) => long.TryParse((txt ?? "").Trim(), System.Globalization.NumberStyles.AllowLeadingSign, System.Globalization.CultureInfo.InvariantCulture, out long w) ? w : d;
+                        long Whole(string txt, long d) => Math.Max(-3000, Math.Min(3000, Raw(txt, d)));
+                        long fmn = r.FrameMin, fmx = r.FrameMax;
+                        var e4 = new[] { fmn, fmx, Whole(job.Length > 3 ? job[3] : "", fmx), Whole(job.Length > 5 ? job[5] : "", fmn) };
+                        long lo = e4.Min() - 3, hi = e4.Max() + 3, step = Math.Max(1, (hi - lo) / 600);
+                        var all4 = new List<long>(); for (long fr = lo; fr <= hi; fr += step) all4.Add(fr);
+                        all4.Add(lo + 1); all4.Add(hi + 1); all4.Add((long)Math.Floor((lo + hi) / 2.0));
+                        long e_ = Raw(job.Length > 3 ? job[3] : "", fmx), m_ = Math.Max((long)Math.Truncate(e_ * 0.5), 1), r_ = Raw(job.Length > 5 ? job[5] : "", fmn);
+                        foreach (long k_ in new[] { m_, e_, r_, 1048574L, -1048574L }) for (int d = -2; d <= 2; d++) all4.Add(k_ + d);
+                        long a_ = Math.Min(m_, e_), b_ = Math.Max(m_, e_);
+                        for (int j = 0; j < 98; j++) all4.Add(a_ + (b_ - a_) * j / 97);
+                        for (int j = 0; j < 40; j++) all4.Add(a_ + j);
+                        for (int j = 0; j < 40; j++) all4.Add(b_ - j);
+                        all4.Add(lo); all4.Add(hi);
+                        var expected = new List<long>(); foreach (long fr in all4) if (expected.Count == 0 || expected[expected.Count - 1] != fr) expected.Add(fr);
+                        if (!expected.SequenceEqual(framesSwept)) throw new InvalidDataException($"the dump's frame sweep is not the sweep the dump script makes: {framesSwept.Count} frames, expected {expected.Count}");
+                    }
+                    if (sw.Count > 0 && sweptFrames < 6) throw new InvalidDataException($"the dump's frame sweep has {sweptFrames} frames only");
+                    if (wrongSw > 0) problems.Add($"{wrongSw} of {sw.Count} pose bones of the frame sweep hold other values, first {firstSw}");
+                    if (insideSegment) betweenKeys = true;
                     }
                     long wrongM = 0, wrongT = 0, wrongB = 0; string firstM = null, firstT = null, firstB = null;
                     foreach (var o in r.Objects)
@@ -435,6 +485,7 @@ static class DecisionsDrill
                 if (bakeLeftReason != null) Console.WriteLine($"BAKELEFT {key}: {bakeLeftReason}");   // no job is so marked since part 4b; the mark stays for what the later steps may leave
                 if (bakeLeftReason == null && !r.Exit) cover[fireSnap ? "a fire-window snapshot (5a)" : "no recoil range: no snapshot"]++;
                 if (retargeted) cover["a bone re-keyed by the barrel retarget or the leg scale (5b, 5c)"]++;
+                if (betweenKeys) cover["a frame set between two Bezier keys of a re-keyed bone"]++;
                 if (rebakedArmature) cover["an imported armature baked with it (its bones keyed a frame, its own animation dropped)"]++;
                 if (bakeClamped) cover["a clip of frame 0 alone (the bake keys frame 1 too)"]++;
                 if (bakeLeftReason == null && !r.Exit) cover[r.Legacy ? "a bake on the legacy path" : "a bake on the contract path (scale curves stripped, delta-form rebase)"]++;
@@ -447,7 +498,8 @@ static class DecisionsDrill
         var dumped = new HashSet<string>(blocks.Select(b => b[0].Split('\t')[1]), StringComparer.Ordinal);
         foreach (var k in jobs.Keys) if (!dumped.Contains(k)) { fails++; Console.WriteLine($"FAIL {k}: the dump holds no such job"); }
         foreach (var kv in cover) Console.WriteLine($"COVER {kv.Value} {kv.Key}");
-        Console.WriteLine($"TOTAL jobs {files} failed {fails} left {left} objects {objects} matrices {matrices} lines {lines} bones {bones} curves {curves} keys {keysCompared} after {after} imported {importedKeys} held {held2} last {atLast} snapshot {snapped} rekeyed {rekeyed}");
+        for (int bi = 0; bi < BlenderFCurve.Branches.Length; bi++) Console.WriteLine($"BRANCH	{BlenderFCurve.Hits[bi]}	{BlenderFCurve.Branches[bi]}");
+        Console.WriteLine($"TOTAL jobs {files} failed {fails} left {left} objects {objects} matrices {matrices} lines {lines} bones {bones} curves {curves} keys {keysCompared} after {after} imported {importedKeys} held {held2} last {atLast} snapshot {snapped} rekeyed {rekeyed} swept {swept}");
         return fails == 0 ? 0 : 1;
     }
 

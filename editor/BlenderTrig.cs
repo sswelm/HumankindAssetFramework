@@ -47,4 +47,22 @@ public static class BlenderTrig
     public static float Atan2f(float y, float x) => Exact ? ucrt_atan2f(y, x) : (float)Math.Atan2((double)y, (double)x);
     public static float Asinf(float x) => Exact ? ucrt_asinf(x) : (float)Math.Asin((double)x);
     public static float Acosf(float x) => Exact ? ucrt_acosf(x) : (float)Math.Acos((double)x);
+
+    // the double functions Blender's cubic solver calls (fcurve.cc: solve_cubic, sqrt3d)
+    [DllImport("ucrtbase.dll", EntryPoint = "exp", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    static extern double ucrt_exp(double x);
+
+    [DllImport("ucrtbase.dll", EntryPoint = "log", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    static extern double ucrt_log(double x);
+
+    [DllImport("ucrtbase.dll", EntryPoint = "acos", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    static extern double ucrt_acos(double x);
+
+    [DllImport("ucrtbase.dll", EntryPoint = "cos", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    static extern double ucrt_cos(double x);
+
+    public static double Exp(double x) => Exact ? ucrt_exp(x) : Math.Exp(x);
+    public static double Log(double x) => Exact ? ucrt_log(x) : Math.Log(x);
+    public static double Acos(double x) => Exact ? ucrt_acos(x) : Math.Acos(x);
+    public static double Cos(double x) => Exact ? ucrt_cos(x) : Math.Cos(x);
 }

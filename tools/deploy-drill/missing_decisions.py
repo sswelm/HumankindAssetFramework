@@ -97,6 +97,35 @@ def main(out, dump, jobs):
         write("gun_%s_value" % kind, lines)
     lines = [l for l in gun if not l.startswith("LOG4\t")]
     write("gun_LOG4_missing", lines)
+    # the frame sweep at the end (what the pose bones hold frame after frame, a Bezier curve evaluated between its
+    # keys): a row missing, doubled in place of its neighbour of the same frame, renamed, cut short, one bit off - and
+    # no sweep at all
+    rows = [i for i, l in enumerate(gun) if l.startswith("SW\t")]
+    if len(rows) < 12 or gun[rows[0]].split("\t")[1] != gun[rows[1]].split("\t")[1]:
+        raise ValueError("the retarget job has no frame sweep of at least two bones")
+    lines = list(gun); del lines[rows[1]]
+    write("gun_SW_missing", lines)
+    lines = list(gun); lines[rows[1]] = gun[rows[0]]
+    write("gun_SW_duplicate", lines)
+    t = gun[rows[1]].split("\t"); t[2] = "no such name"
+    lines = list(gun); lines[rows[1]] = "\t".join(t)
+    write("gun_SW_unknown", lines)
+    lines = list(gun); lines[rows[1]] = gun[rows[1]].rsplit("\t", 1)[0]
+    write("gun_SW_short", lines)
+    last = gun[rows[-1]][-1]
+    lines = list(gun); lines[rows[-1]] = gun[rows[-1]][:-1] + ("0" if last != "0" else "1")
+    write("gun_SW_value", lines)
+    write("gun_SW_none", [l for l in gun if not l.startswith("SW\t")])
+    # a whole frame taken out of the middle, and the tail cut off: every remaining row is right - the dump just says less
+    frames = []
+    for i in rows:
+        f = gun[i].split("\t")[1]
+        if not frames or frames[-1][0] != f: frames.append((f, []))
+        frames[-1][1].append(i)
+    gone = set(frames[len(frames) // 2][1])
+    write("gun_SW_frame", [l for i, l in enumerate(gun) if i not in gone])
+    gone = set(i for _, g in frames[6:] for i in g)
+    write("gun_SW_tail", [l for i, l in enumerate(gun) if i not in gone])
     abort = next((b for b in blocks if "EXIT\t1" in b and "DONE" in kinds(b) and not b[0].startswith("JOB\tLEFT:")), None)
     if abort is None:
         raise ValueError("no abort job in the dump for the EXIT regressions")
