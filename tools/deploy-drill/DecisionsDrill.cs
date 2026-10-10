@@ -22,12 +22,18 @@ static class DecisionsDrill
         "no static mesh (StaticRoot has no anchor)", "StaticRoot anchored to a mesh that has no parent", "StaticRoot anchored to a static mesh's parent",
         "a root-motion anchor (the armature parented for the bake)", "the biggest part does not travel (no anchor)", "no mesh rides a bone (no travel measured)",
         "a bone under its part's parent's bone", "a part whose parent is no part (a root bone)",
+        "a mesh bound to its own bone (6)", "a mesh bound to an ancestor's bone", "a static mesh bound to StaticRoot", "a shared mesh datablock copied at the bind",
+        "a bound mesh with custom normals", "a bound mesh without normals", "no mesh to bind",
+        "a vertex group named after a pair-merged part (no bone of that name)",
     };
 
     static uint Bits(float f) => BitConverter.ToUInt32(BitConverter.GetBytes(f), 0);
     static float F(string hex) => BitConverter.ToSingle(BitConverter.GetBytes(Convert.ToUInt32(hex, 16)), 0);
     static string H(float f) => Bits(f).ToString("x8");
     static string H64(double d) => BitConverter.DoubleToInt64Bits(d).ToString("x16");
+    static string Sha(byte[] bytes) { using (var sha = System.Security.Cryptography.SHA256.Create()) return string.Concat(sha.ComputeHash(bytes).Select(b => b.ToString("x2"))); }
+    static string ShaFloats(float[] v) { var b = new byte[4 * v.Length]; for (int i = 0; i < v.Length; i++) BitConverter.GetBytes(v[i]).CopyTo(b, 4 * i); return Sha(b); }   // little-endian float32, as the dump hashes them
+    static string ShaShorts(short[] v) { var b = new byte[2 * v.Length]; for (int i = 0; i < v.Length; i++) BitConverter.GetBytes(v[i]).CopyTo(b, 2 * i); return Sha(b); }
 
     public static int Run(string[] args)
     {
@@ -40,7 +46,7 @@ static class DecisionsDrill
             jobs[t[0]] = t;
         }
         var cover = new SortedDictionary<string, long>(); foreach (var k in CoverKeys) cover[k] = 0;
-        int fails = 0, files = 0, left = 0; long matrices = 0, objects = 0, lines = 0, bones = 0, curves = 0, keysCompared = 0, after = 0, importedKeys = 0, held2 = 0, atLast = 0, snapped = 0, rekeyed = 0, swept = 0, recoilRows = 0;
+        int fails = 0, files = 0, left = 0; long matrices = 0, objects = 0, lines = 0, bones = 0, curves = 0, keysCompared = 0, after = 0, importedKeys = 0, held2 = 0, atLast = 0, snapped = 0, rekeyed = 0, swept = 0, recoilRows = 0, boundMeshes = 0, vertices = 0;
         var blocks = new List<List<string>>();
         foreach (var dump in args.Skip(1))
             foreach (var line in File.ReadLines(dump))
@@ -53,6 +59,7 @@ static class DecisionsDrill
             string key = block[0].Split('\t')[1];
             files++;
             var problems = new List<string>(); string bakeLeftReason = null; bool bakeClamped = false, rebakedArmature = false, fireSnap = false, retargeted = false, betweenKeys = false, recoiled = false, recoilExit = false;
+            bool boundOwn = false, boundAncestor = false, boundStatic = false, copiedData = false, boundNormals = false, boundPlain = false, noMesh = false, groupNoBone = false;
             try
             {
                 if (!jobs.TryGetValue(key, out var job)) throw new InvalidDataException("the dump has a job the jobs file does not");
@@ -401,15 +408,64 @@ static class DecisionsDrill
                     recoilRows += r5.Count;
                     CompareBoneRows("RBONE5", "bones after the recoil step", baked.BonesAfterRecoil);
                     CompareCurveRows("FC5", "after the recoil", new HashSet<string>(baked.Keys.Keys.Concat(baked.Rekeyed.Keys), StringComparer.Ordinal));
-                    ComparePoseRows(problems, Of("APB5"), baked.ArmPose, "after the recoil");
+                    ComparePoseRows(problems, Of("APB5"), baked.ArmPoseAfterRecoil, "after the recoil");
                     // pb.matrix is what the LAST evaluation left, not the properties (a bone whose scale curves the scale-free
                     // step dropped still shows the baked scale until a frame is set): the dump writes the pose matrices only
                     // where the recoil step evaluated last - after its frame_set and its view_layer.update()
-                    if (rec != null && !baked.ExitAtRecoil) CompareObjectRows(problems, Of("PM5"), BlenderDeploy.PoseMatrices(baked.BonesAfterRecoil, baked.ArmPose), "(pose matrices) after the recoil");
+                    if (rec != null && !baked.ExitAtRecoil) CompareObjectRows(problems, Of("PM5"), BlenderDeploy.PoseMatrices(baked.BonesAfterRecoil, baked.ArmPoseAfterRecoil), "(pose matrices) after the recoil");
                     else if (Of("PM5").Count > 0) throw new InvalidDataException("the dump has pose matrices for a job without a recoil tail (they would be stale)");
                     CompareObjectRows(problems, Of("O6"), baked.AfterRecoil, "after the recoil");
                     if (rec != null && !baked.ExitAtRecoil) recoiled = true;
                     if (baked.ExitAtRecoil) recoilExit = true;
+                    // ---- 6 (the bind): its log; the script's death there; each bound mesh in the script's order (its bone, its
+                    //      datablock and that one's users, its parent and own transform, its parent inverse), its vertex groups
+                    //      with the weights' census, its modifiers, its vertices (every float32 hashed, a sample in the clear),
+                    //      its custom normals (the attribute unchanged), every mesh datablock's users, the scene after an update
+                    var log6 = block.Where(l => l.StartsWith("LOG6\t")).Select(l => l.Substring(5)).ToList();
+                    Compare(problems, "the bind's log", baked.BindLog, log6);
+                    lines += log6.Count;
+                    var dies6 = Of("DIES6");
+                    if (dies6.Count > 0) throw new InvalidDataException($"the script died in the bind ({string.Join(" ", dies6[0].Skip(1))}) and the port went on");
+                    bool bindRan = exit5.Count == 0;
+                    foreach (string k6 in new[] { "BIND", "VG6", "MOD6", "V6", "VX6", "N6", "DATA6", "O7" })
+                        if (!bindRan && Of(k6).Count > 0) throw new InvalidDataException($"the dump has {k6} rows for a job whose script exited before the bind");
+                    if (!bindRan && (baked.Bound.Count > 0 || baked.MeshData != null || baked.AfterBind != null)) problems.Add("the port binds after the script's exit in the recoil step");
+                    if (bindRan)
+                    {
+                        string Row(string[] t) => string.Join("\t", t.Skip(1));
+                        var bindRows = Of("BIND");
+                        foreach (var t in bindRows) if (t.Length != 33) throw new InvalidDataException($"the dump's bind row for '{t[1]}' has {t.Length} fields, expected 33");
+                        if (bindRows.Count != Of("VG6").Count || bindRows.Count != Of("MOD6").Count || bindRows.Count != Of("V6").Count || bindRows.Count != Of("N6").Count) throw new InvalidDataException("the dump's bind rows do not agree in number (BIND, VG6, MOD6, V6, N6)");
+                        string identity16 = string.Join("\t", Enumerable.Range(0, 16).Select(i => H(i % 5 == 0 ? 1f : 0f)));
+                        Compare(problems, "bound meshes (bone, datablock, users, parent, transform, parent inverse)",
+                                baked.Bound.Select(b => $"{b.Mesh.Name}\t{b.Group}\t{b.DataName}\t1\t{(b.Mesh.Parent != null ? b.Mesh.Parent.Name : "-")}\t{(b.Mesh.BoneNode >= 0 ? "BONE" : "OBJECT")}\t{string.Join("\t", b.Mesh.Loc.Select(H))}\t{string.Join("\t", b.Mesh.Quat.Select(H))}\t{string.Join("\t", b.Mesh.Scale.Select(H))}\t{identity16}").ToList(),
+                                bindRows.Select(Row).ToList());
+                        Compare(problems, "vertex groups after the bind", baked.Bound.Select(b => $"{b.Mesh.Name}\t{b.Group}\t{b.Positions.Length / 3}\t{b.Positions.Length / 3}").ToList(), Of("VG6").Select(Row).ToList());
+                        Compare(problems, "modifiers after the bind", baked.Bound.Select(b => $"{b.Mesh.Name}\tARMATURE:arm:{baked.Armature.Name}").ToList(), Of("MOD6").Select(Row).ToList());
+                        Compare(problems, "vertices after the bind", baked.Bound.Select(b => $"{b.Mesh.Name}\t{b.Positions.Length / 3}\t{ShaFloats(b.Positions)}").ToList(), Of("V6").Select(Row).ToList());
+                        var mineVx = new List<string>();
+                        foreach (var b in baked.Bound)
+                        {
+                            int n = b.Positions.Length / 3, k = Math.Min(64, n); var idx = new SortedSet<int>();
+                            for (int i = 0; i < k; i++) idx.Add((int)((long)i * n / k));
+                            foreach (int i in idx) mineVx.Add($"{b.Mesh.Name}\t{i}\t{H(b.Positions[3 * i])}\t{H(b.Positions[3 * i + 1])}\t{H(b.Positions[3 * i + 2])}");
+                        }
+                        Compare(problems, "sampled vertices after the bind", mineVx, Of("VX6").Select(Row).ToList());
+                        Compare(problems, "custom normals after the bind", baked.Bound.Select(b => b.CustomNormal == null ? $"{b.Mesh.Name}\t-\t-\t0\t-" : $"{b.Mesh.Name}\tINT16_2D\tCORNER\t{b.Corners}\t{ShaShorts(b.CustomNormal)}").ToList(), Of("N6").Select(Row).ToList());
+                        // bpy.data.meshes: by name - the order is Blender's sort, which nothing later reads
+                        Compare(problems, "mesh datablocks after the bind (name, users)", baked.MeshData.Select(x => $"{x.name}\t{x.users}").OrderBy(s => s, StringComparer.Ordinal).ToList(), Of("DATA6").Select(Row).OrderBy(s => s, StringComparer.Ordinal).ToList());
+                        CompareObjectRows(problems, Of("O7"), baked.AfterBind, "after the bind");
+                        boundMeshes += baked.Bound.Count; vertices += baked.Bound.Sum(b => (long)b.Positions.Length / 3);
+                        string staticRoot = baked.Bones.First(b => b.Part == null).Name;
+                        foreach (var b in baked.Bound)
+                        {
+                            if (b.Group == staticRoot) boundStatic = true; else if (b.Group == b.Mesh.Name) boundOwn = true; else boundAncestor = true;
+                            if (b.Group != staticRoot && !baked.BonesAfterRecoil.Any(x => x.Name == b.Group)) groupNoBone = true;
+                            if (b.Copied) copiedData = true;
+                            if (b.CustomNormal != null) boundNormals = true; else boundPlain = true;
+                        }
+                        if (baked.Bound.Count == 0) noMesh = true;
+                    }
                     // ... and the same scene at the LAST frame of the range (the dump set it last of all): a frozen armature
                     // object, a stripped scale curve and the re-baked keys show there, not at the bind frame
                     var o3 = Of("O3").ToDictionary(t => t[1], t => t, StringComparer.Ordinal); var pb3 = Of("PB3");
@@ -555,6 +611,14 @@ static class DecisionsDrill
                 if (recoiled) cover["a recoil tail keyed on a RecoilArm (5d)"]++;
                 if (recoilExit) cover["the recoil step's exit: no barrel or cannon to pick"]++;
                 if (betweenKeys) cover["a frame set between two Bezier keys of a re-keyed bone"]++;
+                if (boundOwn) cover["a mesh bound to its own bone (6)"]++;
+                if (boundAncestor) cover["a mesh bound to an ancestor's bone"]++;
+                if (boundStatic) cover["a static mesh bound to StaticRoot"]++;
+                if (copiedData) cover["a shared mesh datablock copied at the bind"]++;
+                if (boundNormals) cover["a bound mesh with custom normals"]++;
+                if (boundPlain) cover["a bound mesh without normals"]++;
+                if (noMesh) cover["no mesh to bind"]++;
+                if (groupNoBone) cover["a vertex group named after a pair-merged part (no bone of that name)"]++;
                 if (rebakedArmature) cover["an imported armature baked with it (its bones keyed a frame, its own animation dropped)"]++;
                 if (bakeClamped) cover["a clip of frame 0 alone (the bake keys frame 1 too)"]++;
                 if (bakeLeftReason == null && !r.Exit) cover[r.Legacy ? "a bake on the legacy path" : "a bake on the contract path (scale curves stripped, delta-form rebase)"]++;
@@ -568,7 +632,7 @@ static class DecisionsDrill
         foreach (var k in jobs.Keys) if (!dumped.Contains(k)) { fails++; Console.WriteLine($"FAIL {k}: the dump holds no such job"); }
         foreach (var kv in cover) Console.WriteLine($"COVER {kv.Value} {kv.Key}");
         for (int bi = 0; bi < BlenderFCurve.Branches.Length; bi++) Console.WriteLine($"BRANCH	{BlenderFCurve.Hits[bi]}	{BlenderFCurve.Branches[bi]}");
-        Console.WriteLine($"TOTAL jobs {files} failed {fails} left {left} objects {objects} matrices {matrices} lines {lines} bones {bones} curves {curves} keys {keysCompared} after {after} imported {importedKeys} held {held2} last {atLast} snapshot {snapped} rekeyed {rekeyed} swept {swept} recoil {recoilRows}");
+        Console.WriteLine($"TOTAL jobs {files} failed {fails} left {left} objects {objects} matrices {matrices} lines {lines} bones {bones} curves {curves} keys {keysCompared} after {after} imported {importedKeys} held {held2} last {atLast} snapshot {snapped} rekeyed {rekeyed} swept {swept} recoil {recoilRows} bound {boundMeshes} vertices {vertices}");
         return fails == 0 ? 0 : 1;
     }
 

@@ -917,6 +917,61 @@ recoil bone name past ASCII (read, never executed: no fixture reached it); the b
 takes the tube root's place in its parent's child list) is not compared - nothing in 5d depends on it, the export
 may.
 
+**Replacing `deploy_convert.py`, part 6: the bind** (2026-10-10). The script's step 6 sets the bind frame, then for
+every mesh (`bpy.data.objects` order, the culled gone) finds its nearest animated ancestor - itself included - in
+`bone_of`'s keys, detaches it (`parent = None`: the parent inverse is the identity again, a bone parenting dropped),
+folds its world matrix into its vertices (`mesh.transform`), gives it ONE vertex group over every vertex at weight 1,
+an Armature modifier, and puts it under the armature at the identity (`BKE_object_apply_mat4` through the armature's
+inverse). `BlenderDeploy`: `Result.Bound` (per mesh: its group, its datablock, the matrix folded in, the vertices after
+it, the custom normals), `BindLog`, `MeshData` (every datablock with its users), `AfterBind`, `ArmPoseAfterRecoil`;
+`BlenderDeploy.ImportedMesh` (the importer's vertices and custom normals of an unskinned mesh, BlenderReduce's
+reading). Measured, not read: `anim_ancestor` returns the PART'S NAME, so the group is named after the part, not its
+bone - a pair-merged link's group names NO bone (the script's own bug: the wall and T-62 riders never deform; kept, in
+the backlog); a group name holds 63 bytes (`bind_longname`: an ASCII and a two-byte name cut); a shared datablock is
+copied and the copy numbered by `namemap_get_name` (Plate -> Plate.001 and .002, the last sharer keeps the original;
+from Plate.001 the copies count on; a stripped sharer let go of its user); `mesh.transform` is `math::transform_points`
+((x c0 + y c1) + z c2) + loc in float32, no FMA) and it SKIPS a matrix within 1e-6 of the identity on every entry
+(`skip_transform`: four jobs kept the importer's -0 where the product gives +0; `bind_near` holds both sides of the
+threshold); the custom_normal attribute is INT16_2D and `transform_custom_normal_attribute` leaves it alone (float3
+only); the armature stands at the EXACT identity at the bind frame in every job (it is set there after the anchor
+parenting, and hull x inverse rounds to I), so every bound mesh's own transform is the identity too. The oracle runs
+a SIXTH stage, to `# --- 7.`, BEFORE the last-frame rows and the sweep (they see the bound scene): the log, the
+death (`DIES6`), per mesh `BIND` (group, datablock, users, parent, parent type, transform, parent inverse), `VG6`
+(group names, the weights' census), `MOD6`, `V6` (every vertex position hashed, float32 little-endian) with `VX6` (64
+sampled vertices in the clear), `N6` (the attribute's type, domain, count, hash), `DATA6` (every mesh datablock with
+its users), `O7` (every object after an update). 204 jobs, 0 failed: 3,489 meshes bound, 52,434 vertices, the T-62's
+140 meshes from 11 shared datablocks among them. Fixtures: a datablock shared by three (two copies numbered), the same
+from a numbered name, the same with a sharer stripped, a mesh under a mesh part and one two static meshes below a
+part, file normals under an uneven mirrored matrix, no mesh at all, names past 63 bytes, the root-motion anchor at
+the bind, the skip threshold both ways. Planted: 32 in the port, 30 fail the drill (the skip threshold at 1e-5 and 1e-7, judged on the translation alone, or not applied: `bind_near` catches each); the two that do not bypass the
+armature as the parent of the bound mesh, and the armature is at the identity in every job (equivalent in practice;
+the rule is `BKE_object_apply_mat4`'s, drilled under 2b with arbitrary parents); one planted equivalent (a mesh's
+parent inverse kept: the importer gives a mesh none) was dropped. The first plant run found the DRILL reading the
+parent and parent type as constants instead of the port's state - two plants passed; every field of a row now comes
+from the port. The gate tampers the bind rows (missing, doubled, renamed, cut short, one bit or hex digit off), the
+log line and a claimed death. LEFT from the bake on, by name: a surviving bone shape (the dugout canoe - strip list
+"camera" -, `small_strip`, `bones_norig`: the icosphere's vertices are Blender's primitive). Not held: the order of
+`bpy.data.meshes` (compared as a set: nothing later reads it); a mesh with a parent inverse of its own (the importer
+sets none); whether the exporter writes the merged links' bone-less group (step 8).
+
+*Review before the PR* (an independent agent; 29 generated jobs through the real script, 383 meshes and 2,557 vertices
+bound, every stage-6 row equal): NO executed defect. It confirmed by execution what the port claims and I had not
+fixtured: group names cut at 63/64 ASCII bytes and around multi-byte characters (an emoji cut, `€` runs, two parts
+equal to byte 63); a sharer culled by the degenerate cull or stripped leaves one user (no copy) while its orphan
+datablock keeps its name at 0 users and BLOCKS the copy's number (`Plate.001` present -> the copy is `Plate.002`);
+four-way sharing in case-folded, non-ASCII-last object order; two glTF meshes both named `Plate`; nameless meshes;
+numbered names at the edge (`Plate.2147483648` copies to `Plate.2147483648.001`, `Plate.2147483647` to `Plate.002`,
+`Plate.` to `Plate..001`, `.001` to `.002`, `007` to `007.001`, `Plate.0001` to `Plate.003`); 255-byte shared names
+whose copies are the 254- and 253-byte names; the skip threshold on each entry kind (diagonal, rotation, translation,
+just under and over 1e-6, under an animated part at the identity, a datablock shared across an identity, a moved and a
+near-identity node); custom normals unchanged through shear, mirror, zero and 1e-30 scales; the bind at frame 12, with
+the root-motion anchor, with a RecoilArm added, with parts named `StaticRoot`, `DeployArm`, `arm`; points, lines,
+strips, fans, unindexed and 8/16/32-bit indexed primitives, a shared POSITION accessor, an unreferenced vertex, mixed
+normals per primitive. Notes: `math::transform_point` starts its sum from +0 (`result(0) +=`), so Blender's order is
+`(((0 + x c0) + y c1) + z c2) + loc` - it differs from the port's only when all four terms are -0, which needs a -0
+world translation that `BKE_object_to_mat4` never gives (fixtured, unreachable); a file with `KHR_mesh_quantization`
+required is refused by `GlbReader` before the port starts (Blender imports it) - a reader gap, not this step's.
+
 *Review of PR #138*: the imported pose rows at the bind and last frames (`PB2`, `PB3`) must name every expected
 armature/bone exactly once, with all ten held values. A matching row count cannot substitute duplicates for missing
 bones, and unknown names cannot skip comparison. `missing_imported_pose.py` keeps a passing single-job control and

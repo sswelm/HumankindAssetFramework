@@ -151,6 +151,30 @@ def main(out, dump, jobs):
     write("recoil_LOG5_missing", [l for l in rec if not l.startswith("LOG5\t")])
     write("recoil_EXIT5_claimed", [l if not l.startswith("R5\t") else l for l in rec] + ["EXIT5\t1"])
     write("recoil_DIES5_claimed", list(rec) + ["DIES5\tValueError: Matrix.inverted(): singular"])
+    # the bind (6): a job that bound at least two meshes, one of them from a copied datablock - a bind row, a vertex-group
+    # row, a modifier row, a vertex hash, a sampled vertex, a custom-normal row, a datablock row and an object row after
+    # it: each missing, doubled, renamed, cut short or one bit off; the log line missing; the script's death claimed
+    bnd = next((b for b in blocks if "BIND" in kinds(b) and "DONE" in kinds(b) and sum(1 for l in b if l.startswith("BIND\t")) >= 2
+                and any(l.startswith("N6\t") and "INT16_2D" in l for l in b) and not b[0].startswith(("JOB\tLEFT:", "JOB\tBAKELEFT:"))), None)
+    if bnd is None:
+        raise ValueError("no job with two bound meshes and custom normals in the dump")
+    control("bind", bnd)
+    for kind in ("BIND", "VG6", "MOD6", "V6", "VX6", "N6", "DATA6", "O7"):
+        rows = [i for i, l in enumerate(bnd) if l.startswith(kind + "\t") and (kind != "N6" or "INT16_2D" in l)]
+        lines = list(bnd); del lines[rows[0]]
+        write("bind_%s_missing" % kind, lines)
+        lines = list(bnd); lines[rows[1]] = bnd[rows[0]]
+        write("bind_%s_duplicate" % kind, lines)
+        t = bnd[rows[0]].split("\t"); t[1] = "no such name"
+        lines = list(bnd); lines[rows[0]] = "\t".join(t)
+        write("bind_%s_unknown" % kind, lines)
+        lines = list(bnd); lines[rows[0]] = bnd[rows[0]].rsplit("\t", 1)[0]
+        write("bind_%s_short" % kind, lines)
+        last = bnd[rows[-1]][-1]
+        lines = list(bnd); lines[rows[-1]] = bnd[rows[-1]][:-1] + ("0" if last != "0" else "1")
+        write("bind_%s_value" % kind, lines)
+    write("bind_LOG6_missing", [l for l in bnd if not l.startswith("LOG6\t")])
+    write("bind_DIES6_claimed", list(bnd) + ["DIES6\tRuntimeError: Error: Mesh has no vertices"])
     abort = next((b for b in blocks if "EXIT\t1" in b and "DONE" in kinds(b) and not b[0].startswith("JOB\tLEFT:")), None)
     if abort is None:
         raise ValueError("no abort job in the dump for the EXIT regressions")

@@ -15,10 +15,13 @@ class Scene:
     def __init__(self):
         self.b = Buf(); self.nodes = []; self.meshes = []; self.samplers = []; self.channels = []; self.roots = []; self.skins = []
 
-    def mesh(self, name, size=1.0, at=(0.0, 0.0, 0.0), skinned=False):
+    def mesh(self, name, size=1.0, at=(0.0, 0.0, 0.0), skinned=False, normals=False):
         x, y, z = at
         pos = [(x, y, z), (x + size, y, z), (x, y + size * 0.5, z + size * 0.25)]
         attrs = {"POSITION": self.b.accessor(pos, "f", "VEC3")}
+        if normals:
+            # three file normals, not the face's and not unit: the importer encodes them against the face as custom normals
+            attrs["NORMAL"] = self.b.accessor([(0.0, 0.6, 0.8), (0.28, 0.96, 0.0), (0.0, 0.0, 1.5)], "f", "VEC3", minmax=False)
         if skinned:
             attrs["JOINTS_0"] = self.b.accessor([(0, 0, 0, 0)] * 3, "H", "VEC4", minmax=False)
             attrs["WEIGHTS_0"] = self.b.accessor([(1, 0, 0, 0)] * 3, "f", "VEC4", minmax=False)
@@ -554,7 +557,8 @@ def main(out):
     f = small(out, "deploy_small", 1.0, skin=True)
     print("small_default|%s|%s" % (f, DEFAULT))
     # a strip list GIVEN replaces the default one: the bone shape is not in it and stays; "shell" hits a mesh's name
-    print("small_strip|%s|0|24|soldier, SHELL ||||||0|||4|0|1" % f)
+    # (BAKELEFT: the strip list leaves the importer's bone shape in, and the bind folds its icosphere - Blender's vertices)
+    print("BAKELEFT:small_strip|%s|0|24|soldier, SHELL ||||||0|||4|0|1" % f)
     # stripExtra on top of the default list; the recoil step off while a recoil range is given
     print("small_extra|%s|0|24||||| 5,6 ||0||||0|1|gun, HAT" % f)
     # everything animated stripped: no action left, the range falls to 1..1 and the script stops
@@ -735,7 +739,7 @@ def main(out):
     print("bones|%s|%s" % (fb, DEFAULT))
     print("bones_extras|%s|%s" % (bones(out, "deploy_bones_extras", extras=True), DEFAULT))
     # the armature itself stripped: what hung from its bones is left as roots, where its own transform puts it
-    print("bones_norig|%s|0|24|rig,soldier||||||0|||4|0|1" % fb)
+    print("BAKELEFT:bones_norig|%s|0|24|rig,soldier||||||0|||4|0|1" % fb)   # the bone shape survives: Blender's from the bake on (its icosphere)
     print("frame1|%s|%s" % (frame1(out), DEFAULT))
     print("nested|%s|%s" % (nested(out), DEFAULT))
     # the bake operator's frame_end is at least 1: a clip whose keys all sit within frame 0 (the range 0..0) is baked
@@ -761,6 +765,79 @@ def main(out):
     print("wall_at|%s|%s" % (wall(out, 100, 14, 4, "deploy_wall_at"), DEFAULT))
     # over the wall with no class of eight to merge: nothing is merged, the warning
     print("wall_warn|%s|%s" % (wall(out, 7, 7, 0, "deploy_wall_few", small_classes=17), DEFAULT))
+    # the bind (part 6): a datablock shared by three meshes (two copies, numbered), the same from a numbered name, the same
+    # with one sharer stripped; a mesh under a mesh part and a mesh two static meshes below a part; file normals under an
+    # uneven, mirrored matrix; no mesh at all
+    for kind in ("shared", "suffix", "strip", "nested", "normals", "empty", "longname", "anchor", "near"):
+        print("bind_%s|%s|%s" % (kind, bind(out, "deploy_bind_" + kind, kind), DEFAULT))
+
+
+def bind(out, name, kind):
+    """The bind's shapes (part 6). "shared": one glTF mesh on three nodes - a part, a static mesh under the hull, a mesh
+    under the part - so the datablock is copied twice (the copies numbered, the last keeps the original); "suffix": the
+    same with the mesh named Plate.001 (the copies count on from the number in use); "strip": the same with one of the
+    three stripped by name (two users left: one copy); "nested": a mesh under a mesh that is a part, and a mesh under a
+    static mesh under a part; "normals": every mesh with file normals, one of them scaled unevenly and mirrored (the
+    custom normals stay as encoded; the positions take the matrix); "empty": animated empties and no mesh at all; "longname":
+    parts named past the 63 bytes a vertex group's name holds; "anchor": the hull travels, so the armature is parented to it
+    (the root-motion anchor) and stands off the identity by the float32 error of hull times its inverse; "near": world
+    matrices within and just past the 1e-6 of the identity under which Blender skips the transform."""
+    s = Scene()
+    nrm = kind == "normals"
+    if kind == "near":   # centred, so the normalization neither scales nor recentres: the root meshes' world matrices are their own
+        hull = s.node("Hull", None)
+    else:
+        hull = s.node("Hull", None, translation=[1.0, 0.0, -2.0], rotation=[0.0, 0.2588190, 0.0, 0.9659258], scale=[1.5, 1.0, 1.5])
+    if kind == "anchor":
+        # the hull travels a third of the model: the root-motion anchor parents the armature to it with the inverse of its
+        # world matrix - turned and scaled, the product is not the identity to the bit, and every mesh's own transform
+        # under the armature undoes what is left
+        s.anim(hull, "translation", [0.0, 1.0], [(1.0, 0.0, -2.0), (4.0, 0.0, -2.0)])
+    if kind != "empty":
+        s.node("HullMesh", hull, mesh=s.mesh("hullmesh", 6.0, at=(-3.0, 0.0, -1.5) if kind == "near" else (0.0, 0.0, 0.0), normals=nrm))
+    turret = s.node("Turret", hull, translation=[0.0, 2.0, 0.0])
+    s.anim(turret, "rotation", [0.0, 0.5, 1.0], TURN)
+    if kind in ("shared", "suffix", "strip"):
+        plate = s.mesh("Plate.001" if kind == "suffix" else "Plate", 1.0)
+        s.node("PlateA", turret, mesh=plate, translation=[1.0, 0.0, 0.0])          # a part itself, sharing
+        s.anim(len(s.nodes) - 1, "translation", [0.0, 1.0], [(1.0, 0.0, 0.0), (1.0, 0.5, 0.0)])
+        s.node("PlateB" if kind != "strip" else "PlateSoldier", hull, mesh=plate, translation=[-2.0, 0.0, 0.0], scale=[2.0, 2.0, 2.0])   # static, under the hull
+        s.node("PlateC", turret, mesh=plate, translation=[0.0, 1.0, 0.0], rotation=[0.0, 0.0, 0.3826834, 0.9238795])   # under the turret
+    elif kind == "nested":
+        gun = s.node("Gun", turret, mesh=s.mesh("gun", 2.0), translation=[1.0, 0.5, 0.0])
+        s.anim(gun, "translation", [0.0, 1.0], [(1.0, 0.5, 0.0), (2.5, 0.5, 0.0)])
+        s.node("GunSight", gun, mesh=s.mesh("sight", 0.5), translation=[0.0, 0.5, 0.0], scale=[0.5, 0.5, 0.5])       # a mesh under a mesh part: the part's bone
+        box = s.node("Box", turret, mesh=s.mesh("box", 1.0), translation=[-1.0, 0.0, 0.0])                            # a static mesh under the part
+        s.node("Lid", box, mesh=s.mesh("lid", 0.8), translation=[0.0, 1.0, 0.0], rotation=[0.3826834, 0.0, 0.0, 0.9238795])   # ... and a mesh under that: the turret's bone through two
+    elif kind == "normals":
+        gun = s.node("Gun", turret, mesh=s.mesh("gun", 2.0, normals=True), translation=[1.0, 0.5, 0.0])
+        s.anim(gun, "translation", [0.0, 1.0], [(1.0, 0.5, 0.0), (2.5, 0.5, 0.0)])
+        s.node("Mirror", turret, mesh=s.mesh("mirror", 1.0, normals=True), translation=[-1.0, 0.0, 0.0], scale=[1.0, -2.0, 0.5])
+    elif kind == "longname":
+        # a vertex group's name holds 63 bytes (bDeformGroup.name): a part named longer binds its mesh to the cut name - a bone
+        # of the same cut name (the bone's limit is the same); a name of two-byte characters is cut at a character
+        long_a = "Turret_" + "x" * 70
+        long_b = "Gun_" + "\u00e9" * 40
+        a = s.node(long_a, turret, translation=[1.0, 0.0, 0.0])
+        s.anim(a, "translation", [0.0, 1.0], [(1.0, 0.0, 0.0), (1.0, 0.5, 0.0)])
+        s.node("PlateA", a, mesh=s.mesh("platea", 1.0), translation=[0.0, 0.5, 0.0])
+        b = s.node(long_b, turret, mesh=s.mesh("gunb", 1.0), translation=[-1.0, 0.0, 0.0])
+        s.anim(b, "translation", [0.0, 1.0], [(-1.0, 0.0, 0.0), (-1.5, 0.0, 0.0)])
+    elif kind == "near":
+        # transform_points SKIPS a matrix within 1e-6 of the identity on every entry (math::is_equal): the vertices keep
+        # their bits, the importer's -0 among them; one entry past it is applied. Static root meshes, so the world matrix is
+        # the node's own
+        s.node("NearIn", None, mesh=s.mesh("nearin", 1.0), translation=[5.0e-7, 0.0, -9.0e-7], scale=[1.0, 1.0000005, 1.0])
+        s.node("NearOut", None, mesh=s.mesh("nearout", 1.0), translation=[2.0e-6, 0.0, 0.0])
+        s.node("NearScale", None, mesh=s.mesh("nearscale", 1.0), scale=[1.0, 1.0, 1.0000021])
+    elif kind == "anchor":
+        gun = s.node("Gun", turret, mesh=s.mesh("gun", 2.0, normals=True), translation=[1.0, 0.5, 0.0])
+        s.anim(gun, "translation", [0.0, 1.0], [(1.0, 0.5, 0.0), (2.5, 0.5, 0.0)])
+        s.node("Box", turret, mesh=s.mesh("box", 1.0), translation=[-1.0, 0.0, 0.0])
+    else:   # empty: a second animated empty, nothing to bind
+        barrel = s.node("Barrel", turret, translation=[1.0, 0.0, 0.0])
+        s.anim(barrel, "translation", [0.0, 1.0], [(1.0, 0.0, 0.0), (1.0, 0.5, 0.0)])
+    return s.write(out, name)
 
 
 def review(out):

@@ -26,9 +26,21 @@ the scene is then written out, every float as the hex of its bits.
     M       <name> <16 float32 hex, rows>                                  its matrix_world at the bind frame
     T       <name> <location 3, rotation_quaternion 4 (w x y z), scale 3>   its own transform there (float32 hex)
     BOX     <name> <min 3, max 3>                                          a mesh object's bound_box (float32 hex)
+    (stages 2-5: the bake, the snapshot, the retarget, the recoil - see the comments in the loop)
+    stage 6, the bind (after `# --- 6.`, before `# --- 7.`), written before the last-frame rows and the sweep:
+    LOG6    <a DEPLOY line the bind printed>
+    DIES6   <exception>                     the script died in the bind (the port must have left the file to Blender)
+    BIND    <mesh object> <bone (its vertex group)> <data name> <data users> <parent> <parent_type> <location 3, rotation_quaternion 4, scale 3> <matrix_parent_inverse 16>
+    VG6     <mesh object> <vertex group names, comma-separated> <vertices> <vertices with exactly one weight, group 0 at 1.0>
+    MOD6    <mesh object> <type:name:object, comma-separated>
+    V6      <mesh object> <vertices> <sha256 of every vertex position, float32 little-endian, in order>
+    VX6     <mesh object> <vertex index> <x y z>   a sample: index i*n//k for i in range(k), k = min(64, n)
+    N6      <mesh object> <custom_normal data type or -> <domain or -> <count> <sha256 of the INT16_2D values, little-endian, or ->
+    DATA6   <mesh datablock> <users>        every mesh datablock (bpy.data.meshes), the copies the bind made included
+    O7      <name> <16>                     every object's matrix_world after a view_layer.update()
     DONE    <key>
 """
-import bpy, sys, io, struct, contextlib, traceback
+import bpy, sys, io, struct, contextlib, traceback, hashlib, array
 
 
 def h32(v):
@@ -53,6 +65,8 @@ cut4 = source.index("\n# --- 5d.")            # ... and then the barrel retarget
 code4 = compile(source[cut3:cut4], script, "exec")
 cut5 = source.index("\n# --- 6.")             # ... and then the recoil tail (5d)
 code5 = compile(source[cut4:cut5], script, "exec")
+cut6 = source.index("\n# --- 7.")             # ... and then the bind (6)
+code6 = compile(source[cut5:cut6], script, "exec")
 fails = 0
 for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
     line = line.rstrip("\r")
@@ -200,14 +214,14 @@ for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
             #      over the fire window, a RecoilArm bone put between the tube and its parent (edit mode: every bone is
             #      rebuilt from its edit bone), the arm keyed. What it printed; what it measured on the way (the script's
             #      own variables); the bones at rest again; the action; what the pose bones hold and where they stand
-            out5 = io.StringIO(); exit5 = None
+            out5 = io.StringIO(); exit5 = None; dies5 = False
             try:
                 with contextlib.redirect_stdout(out5):
                     exec(code5, g)
             except SystemExit as e:
                 exit5 = e.code
             except Exception as e:   # the script's own death in the step (a matrix without an inverse): the port must have left it
-                print("DIES5\t%s: %s" % (type(e).__name__, e))
+                print("DIES5\t%s: %s" % (type(e).__name__, e)); dies5 = True
             for l in out5.getvalue().split("\n"):
                 if l.startswith("DEPLOY"):
                     print("LOG5\t%s" % l)
@@ -256,6 +270,59 @@ for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
             for o in bpy.data.objects:
                 mw = o.matrix_world
                 print("O6\t%s\t%s" % (o.name, "\t".join(h32(mw[r][c]) for r in range(4) for c in range(4))))
+            # ---- stage 6 (part 6): the script goes on to its `# --- 7.` - the bind: the scene set to the bind frame, each
+            #      mesh detached, its world transform folded into its vertices (a shared datablock copied first), one vertex
+            #      group of its bone at weight 1, an Armature modifier, the mesh under the armature at the identity. What it
+            #      printed; each bound mesh (its bone, its datablock and that one's users, its parent and own transform, its
+            #      parent inverse), its vertex groups and the weights' census, its modifiers, its vertices (a hash of every
+            #      float32 and a sample), its custom normals (unchanged: the attribute is INT16_2D, which mesh_transform leaves
+            #      alone), every mesh datablock with its users, and every object's matrix_world after an update. (The rows at
+            #      the last frame and the sweep below then see the bound scene: the meshes under the armature.)
+            if exit5 is None and not dies5:
+                out6 = io.StringIO(); dies6 = False
+                try:
+                    with contextlib.redirect_stdout(out6):
+                        exec(code6, g)
+                except Exception as e:
+                    print("DIES6\t%s: %s" % (type(e).__name__, e)); dies6 = True
+                for l in out6.getvalue().split("\n"):
+                    if l.startswith("DEPLOY"):
+                        print("LOG6\t%s" % l)
+                if not dies6:
+                    for m in g["meshes"]:
+                        me = m.data
+                        q = m.rotation_quaternion
+                        print("BIND\t%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s" % (m.name, m.vertex_groups[0].name if len(m.vertex_groups) else "-", me.name, me.users,
+                              m.parent.name if m.parent else "-", m.parent_type, "\t".join(h32(v) for v in (*m.location, q.w, q.x, q.y, q.z, *m.scale)),
+                              "\t".join(h32(m.matrix_parent_inverse[r][c]) for r in range(4) for c in range(4))))
+                        n = len(me.vertices)
+                        ok = sum(1 for v in me.vertices if len(v.groups) == 1 and v.groups[0].group == 0 and v.groups[0].weight == 1.0)
+                        print("VG6\t%s\t%s\t%d\t%d" % (m.name, ",".join(vg.name for vg in m.vertex_groups), n, ok))
+                        print("MOD6\t%s\t%s" % (m.name, ",".join("%s:%s:%s" % (md.type, md.name, md.object.name if md.type == 'ARMATURE' and md.object else "-") for md in m.modifiers)))
+                        co = array.array("f", [0.0]) * (3 * n)
+                        me.vertices.foreach_get("co", co)
+                        if sys.byteorder != "little": co.byteswap()
+                        print("V6\t%s\t%d\t%s" % (m.name, n, hashlib.sha256(co.tobytes()).hexdigest()))
+                        k = min(64, n)
+                        for i in sorted(set(i * n // k for i in range(k))):
+                            print("VX6\t%s\t%d\t%s\t%s\t%s" % (m.name, i, h32(co[3 * i]), h32(co[3 * i + 1]), h32(co[3 * i + 2])))
+                        cn = me.attributes.get("custom_normal")
+                        if cn is None:
+                            print("N6\t%s\t-\t-\t0\t-" % m.name)
+                        elif cn.data_type == 'INT16_2D':
+                            vals = array.array("i", [0]) * (2 * len(cn.data))
+                            cn.data.foreach_get("value", vals)
+                            shorts = array.array("h", vals)
+                            if sys.byteorder != "little": shorts.byteswap()
+                            print("N6\t%s\t%s\t%s\t%d\t%s" % (m.name, cn.data_type, cn.domain, len(cn.data), hashlib.sha256(shorts.tobytes()).hexdigest()))
+                        else:
+                            print("N6\t%s\t%s\t%s\t%d\t?" % (m.name, cn.data_type, cn.domain, len(cn.data)))
+                    for me in bpy.data.meshes:
+                        print("DATA6\t%s\t%d" % (me.name, me.users))
+                    bpy.context.view_layer.update()
+                    for o in bpy.data.objects:
+                        mw = o.matrix_world
+                        print("O7\t%s\t%s" % (o.name, "\t".join(h32(mw[r][c]) for r in range(4) for c in range(4))))
             # ... and at the LAST frame of the range: the bind frame cannot tell a frozen object from an animated one,
             # nor a stripped scale curve from a kept one (the script's later steps set frames all over the range)
             bpy.context.scene.frame_set(g["fmax"])
