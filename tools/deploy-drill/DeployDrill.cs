@@ -31,6 +31,7 @@ static class DeployDrill
         Console.OutputEncoding = new UTF8Encoding(false);
         if (args.Length > 0 && args[0] == "--decisions") return DecisionsDrill.Run(args.Skip(1).ToArray());
         if (args.Length > 0 && args[0] == "--bezier") return BezierDrill.Run(args.Skip(1).ToArray());
+        if (args.Length > 0 && args[0] == "--handles") return BezierDrill.RunHandles(args.Skip(1).ToArray());
         Console.WriteLine($"RUNTIME	{(IntPtr.Size * 8)}-bit");
         int fails = 0, files = 0, left = 0; long matrices = 0, skipped = 0, properties = 0, poses = 0;
         var cover = new SortedDictionary<string, long>(); foreach (var k in CoverKeys) cover[k] = 0;
