@@ -375,7 +375,8 @@ static class DecisionsDrill
                     lines += log5.Count;
                     var rec = baked.Recoil;
                     var exit5 = Of("EXIT5"); var dies5 = Of("DIES5");
-                    if (dies5.Count > 0) { problems.Add($"the script died in the recoil step ({string.Join(" ", dies5[0].Skip(1))}) and the port went on"); goto afterRecoil; }
+                    // (an exception: nothing after it can be judged - the sweep the dump makes is the one without a tail)
+                    if (dies5.Count > 0) throw new InvalidDataException($"the script died in the recoil step ({string.Join(" ", dies5[0].Skip(1))}) and the port went on");
                     if (exit5.Count > 1) throw new InvalidDataException("the dump has two exits for the recoil step");
                     if (exit5.Count == 1 && (exit5[0].Length != 2 || exit5[0][1] != "1")) throw new InvalidDataException("the dump's recoil exit is not the script's exit(1)");
                     if ((exit5.Count == 1) != baked.ExitAtRecoil) problems.Add(exit5.Count == 1 ? "the script exits in the recoil step (no tube to pick); the port goes on" : "the port exits in the recoil step (no tube to pick); the script goes on");
@@ -409,7 +410,6 @@ static class DecisionsDrill
                     CompareObjectRows(problems, Of("O6"), baked.AfterRecoil, "after the recoil");
                     if (rec != null && !baked.ExitAtRecoil) recoiled = true;
                     if (baked.ExitAtRecoil) recoilExit = true;
-                    afterRecoil:;
                     // ... and the same scene at the LAST frame of the range (the dump set it last of all): a frozen armature
                     // object, a stripped scale curve and the re-baked keys show there, not at the bind frame
                     var o3 = Of("O3").ToDictionary(t => t[1], t => t, StringComparer.Ordinal); var pb3 = Of("PB3");
