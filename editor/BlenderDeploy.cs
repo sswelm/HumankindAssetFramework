@@ -774,7 +774,7 @@ public static class BlenderDeploy
                         float dy = (float)(h[c] - key.Value);
                         key.Value = (float)(key.Value + dy);
                     }
-                    RecalcHandles(list);
+                    BlenderFCurve.RecalcHandles(list);
                 }
             }
             bool PyFloat(string s, out double v) => ReadPythonFloat(s, out v);
@@ -940,43 +940,6 @@ public static class BlenderDeploy
                 if (ac != bc) return ac.CompareTo(bc);
             }
             return 0;
-        }
-    }
-
-    /// <summary>BKE_fcurve_handles_recalc for a curve of Bezier keys whose handles are all AUTO_CLAMPED, constant
-    /// extrapolation, the default smoothing (CONT_ACCEL): calchandleNurb_intern for an fcurve gives each handle its X a
-    /// third of the way to the neighbour (through `len = 6 / 2.5614 * 2.5614`), the first and the last key and a key that
-    /// is an extreme of its neighbours are FLAT. A middle key between a lower and a higher neighbour is not: its
-    /// handles come from the smoothing solver, which is not ported.</summary>
-    static void RecalcHandles(List<ArmKey> keys)
-    {
-        if (keys.Count < 2) { foreach (var k in keys) { k.LeftX = (float)(k.Frame - 1f); k.RightX = (float)(k.Frame + 1f); k.LeftY = k.RightY = k.Value; } return; }
-        for (int i = 0; i < keys.Count; i++)
-        {
-            var k = keys[i]; float p2x = k.Frame, p2y = k.Value;
-            float p1x, p1y, p3x, p3y;
-            if (i == 0) { p3x = keys[1].Frame; p3y = keys[1].Value; p1x = (float)((float)(2.0f * p2x) - p3x); p1y = (float)((float)(2.0f * p2y) - p3y); }
-            else { p1x = keys[i - 1].Frame; p1y = keys[i - 1].Value; if (i == keys.Count - 1) { p3x = (float)((float)(2.0f * p2x) - p1x); p3y = (float)((float)(2.0f * p2y) - p1y); } else { p3x = keys[i + 1].Frame; p3y = keys[i + 1].Value; } }
-            float dax = (float)(p2x - p1x), dbx = (float)(p3x - p2x);
-            float lenA = dax, lenB = dbx;
-            if (lenA == 0f) lenA = 1f;
-            if (lenB == 0f) lenB = 1f;
-            float tvx = (float)((float)(dbx / lenB) + (float)(dax / lenA));
-            float len = (float)(6.0f / 2.5614f);
-            len = (float)(len * 2.5614f);
-            if (len != 0f)
-            {
-                lenA = (float)(lenA / len); k.LeftX = (float)(p2x + (float)(tvx * -lenA));
-                lenB = (float)(lenB / len); k.RightX = (float)(p2x + (float)(tvx * lenB));
-            }
-            bool middle = i > 0 && i < keys.Count - 1;
-            if (middle)
-            {
-                float yd1 = (float)(p1y - p2y), yd2 = (float)(p3y - p2y);
-                if (!((yd1 <= 0f && yd2 <= 0f) || (yd1 >= 0f && yd2 >= 0f)))
-                    throw new NotPortedException("a Bezier key between a lower and a higher neighbour (its handles come from the fcurve smoothing solver, which is not ported yet)");
-            }
-            k.LeftY = k.RightY = p2y;
         }
     }
 

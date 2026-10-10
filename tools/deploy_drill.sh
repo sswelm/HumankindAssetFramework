@@ -338,6 +338,69 @@ for mode in missing duplicate unknown short value none frame tail; do
 done
 echo "PASS — deploy drill rejects a frame sweep with a missing, doubled, unknown, truncated or changed row, one with a frame taken out or its tail cut off, and a retarget without one"
 
+# ---- the handles of automatic keys: Blender's own calculation (FCurve.update(), keyframe_points.insert(), and
+#      handles_recalc() on keys stored raw) on generated curves against BlenderFCurve.RecalcHandles, both handles of
+#      every key to the bit. Every branch the generator can reach must be reached; a dump cut short, with a curve
+#      replaced by its neighbour, one bit off, or of another smoothing fails.
+HND_CURVES="${HND_CURVES:-6000}"
+"$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_handles_dump.py")" -- 1 "$HND_CURVES" 2> "$TMPD/handles_err.txt" | tr -d '\r' | grep -E "^(H|END)	" > "$TMPD/handles.txt"
+"$TMPD/deploy.exe" --handles "$WTMP/handles.txt" > "$TMPD/handles_out.txt" 2>&1; hrc=$?
+if [ "$hrc" -ne 0 ] || ! grep -q "^PASS " "$TMPD/handles_out.txt"; then
+  tail -3 "$TMPD/handles_err.txt"; grep -E "^(DIFF|FAIL|TOTAL)" "$TMPD/handles_out.txt" | head -8
+  echo "FAIL — the handles of automatic keys differ from Blender's (rc=$hrc)"; exit 1
+fi
+# every curve is judged on its own, so a dump that holds fewer is still consistent: the count asked for is the floor
+hnd_n=$(grep "^TOTAL" "$TMPD/handles_out.txt" | awk '{print $3}')
+if [ "${hnd_n:-0}" -ne "$HND_CURVES" ]; then echo "FAIL — the handles dump holds $hnd_n curves, $HND_CURVES were asked for"; exit 1; fi
+for branch in "a key that is an extreme of its neighbours (flat)" "the left handle stopped at the previous key's height" "the right handle stopped at the next key's height" \
+    "an end held flat (CONSTANT extrapolation)" "two keys on one frame" "a run of keys smoothed" "a free first key (LINEAR extrapolation)" "a free last key (LINEAR extrapolation)" \
+    "the system has no finite solution (the handles stay)" "an overshooting handle locked on the second look (at zero)" "an overshooting handle locked at its limit" \
+    "a locked handle released" "two unknowns" "a locked handle released a second time" "a locked handle kept after two releases"; do
+  hits=$(grep -F "	handles: $branch" "$TMPD/handles_out.txt" | grep "^BRANCH" | head -1 | cut -f2)
+  if [ -z "$hits" ] || [ "$hits" -le 0 ]; then echo "FAIL — the generated curves never reach the handle branch '$branch'"; exit 1; fi
+done
+python - "$TMPD/handles.txt" "$TMPD" <<'PYEOF'
+import pathlib, sys
+lines = pathlib.Path(sys.argv[1]).read_text(encoding="ascii").splitlines()
+out = pathlib.Path(sys.argv[2])
+def write(name, changed): (out / ("handles_" + name + ".txt")).write_text("\n".join(changed) + "\n", encoding="ascii")
+write("cut", lines[:-1])
+write("short", lines[:len(lines) // 2] + lines[-1:])
+write("replaced", lines[:1] + lines[:1] + lines[2:])
+i = max(k for k, l in enumerate(lines) if l.startswith("H\t") and len(l.split("\t")) > 6)
+changed = list(lines); changed[i] = lines[i][:-1] + ("0" if lines[i][-1] != "0" else "1"); write("bit", changed)
+t = lines[0].split("\t"); t[3] = "NONE"; write("smoothing", ["\t".join(t)] + lines[1:])
+t = lines[0].split("\t"); write("key", ["\t".join(t[:-1])] + lines[1:])
+write("junk", lines[:3] + ["GARBAGE\tx"] + lines[3:])
+write("after_end", lines + [lines[0]])
+PYEOF
+for mode in cut short replaced bit smoothing key junk after_end; do
+  case "$mode" in
+    cut) reason="no end row";; short) reason="cut short";; replaced) reason="ordinal";; bit) reason="have other handles";;
+    smoothing) reason="smoothing is NONE";; key) reason="cut short";; junk) reason="does not know";; after_end) reason="follows the dump's end row";;
+  esac
+  "$TMPD/deploy.exe" --handles "$WTMP/handles_$mode.txt" > "$TMPD/handles_${mode}_out.txt" 2>&1; badrc=$?
+  if [ "$badrc" -ne 1 ] || ! grep "^FAIL " "$TMPD/handles_${mode}_out.txt" | grep -qF "$reason"; then
+    head -3 "$TMPD/handles_${mode}_out.txt"; echo "FAIL — the handles drill accepted malformed evidence ($mode, rc=$badrc)"; exit 1
+  fi
+done
+echo "$(grep "^PASS " "$TMPD/handles_out.txt") - every key AUTO_CLAMPED, the default smoothing; keys stored and updated, inserted in and out of order, stored raw with doubled frames; a dump cut short, with a curve replaced or a key gone, one bit off, of another smoothing, or with an unknown row fails (never reached, ported from the source only: a fixed end handle scaled to fit)"
+
+# ---- ... and the real thing: pose_bone.keyframe_insert on an armature, key after key the way the script's step 5d
+#      keys its RecoilArm (holds, a turn whose first key lands on a hold, the turns back slower, a key again on a
+#      frame that has one). Every curve is written after EVERY insert: each state of the handles must be the one
+#      calculation from the keys alone. The dump writes no end row when a key is not BEZIER / AUTO_CLAMPED or a
+#      replaced value is not old + (new - old).
+KEY_TRIALS="${KEY_TRIALS:-40}"
+"$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_keyframe_insert_dump.py")" -- 1 "$KEY_TRIALS" 2> "$TMPD/keyins_err.txt" | tr -d '\r' | grep -E "^(H|END)	" > "$TMPD/keyins.txt"
+"$TMPD/deploy.exe" --handles "$WTMP/keyins.txt" > "$TMPD/keyins_out.txt" 2>&1; krc=$?
+key_n=$(grep "^TOTAL" "$TMPD/keyins_out.txt" | awk '{print $3}')
+if [ "$krc" -ne 0 ] || ! grep -q "^PASS " "$TMPD/keyins_out.txt" || [ "${key_n:-0}" -lt $((KEY_TRIALS * 100)) ]; then
+  tail -3 "$TMPD/keyins_err.txt"; grep -E "^(DIFF|FAIL|TOTAL)" "$TMPD/keyins_out.txt" | head -8
+  echo "FAIL — the handles keyframe_insert leaves on a pose bone differ from the port's (rc=$krc, ${key_n:-0} curves)"; exit 1
+fi
+echo "$(grep "^PASS " "$TMPD/keyins_out.txt") - pose_bone.keyframe_insert on an armature, $KEY_TRIALS recoil key sequences, every curve after every insert"
+
 # ---- the Bezier evaluation on its own: Blender's FCurve.evaluate() on generated curves (free handles, cut-back
 #      handles, flat ones, exactly quadratic and linear time curves, many keys) against BlenderFCurve.Evaluate, to the
 #      bit. Every branch of the solver the generator can reach must be reached, and a dump cut short or one bit off fails.

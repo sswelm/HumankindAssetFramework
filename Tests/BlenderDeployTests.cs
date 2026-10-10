@@ -328,6 +328,47 @@ public class BlenderDeployTests
     }
 
     [Theory]
+    // rows of Blender 5.1.2's own handle calculation (tools/deploy-drill/blender_handles_dump.py, seed 1): every key
+    // AUTO_CLAMPED, as frame:value:left handle:right handle in float hex
+    // CONSTANT extrapolation, a plateau and a step: every key an extreme or an end - all flat
+    [InlineData("C 43dc8000:00000000:436a9d65:00000000:4421d8a7:00000000 448484fa:00000000:4455714d:00000000:44863ebc:00000000 4489b23f:00000000:4487f87d:00000000:448ab17a:00000000 448caff0:40400000:448bb0b5:40400000:448daf2b:40400000")]
+    // a rising run between flat ends, the intervals far from even: the two middle keys are solved together
+    [InlineData("C 3f800000:3dcccccd:3f555555:3dcccccd:3f955555:3dcccccd 3fc00000:3eade21b:3faaaaab:3eadd770:44d08555:3f93a238 459c4c00:3f93a238:45506d56:3eecc800:45d06155:3fec1270 461c4600:407ab18b:46023b55:407ab18b:463650ab:407ab18b")]
+    // LINEAR extrapolation: the ends are free - solved with the run, their outer handle a mirror of the inner one
+    [InlineData("L 453b8000:42c80000:453b7aab:42aa3f5e:453b8555:42e5c0a2 453b9000:431495cd:453b8aab:4301c0a2:453b9555:43276af8 453ba000:435cc686:453b9aab:433e34fe:453ba555:437b580e 453bb000:43a40511:453baaab:4390d88c:453bb555:43b73196")]
+    // a fall, an extreme, a rise: two runs, a handle stopped at its neighbour's height, a zero that keeps its sign
+    [InlineData("L 453b8000:80000000:453b4000:3e85bc83:453bc000:be85bc83 453c4000:bf3504f3:453c0000:bf05bc84:453c8000:bf644d62 453d0000:bf800000:453cc000:bf800000:453d4000:bf800000 453dc000:bf2aaaab:453d8000:bf800000:453dc555:bf238e39 453dd000:beaaaaab:453dcaab:beb1c71d:453e5000:00000000 453f5000:80000000:453ed000:80000000:453fd000:00000000")]
+    public void The_handles_of_automatic_keys_are_Blenders(string curve)
+    {
+        float F(string hex) => BitConverter.ToSingle(BitConverter.GetBytes(Convert.ToUInt32(hex, 16)), 0);
+        string H(float v) => BitConverter.ToUInt32(BitConverter.GetBytes(v), 0).ToString("x8");
+        var t = curve.Split(' ');
+        var keys = t.Skip(1).Select(k => new BlenderDeploy.ArmKey { Frame = F(k.Split(':')[0]), Value = F(k.Split(':')[1]) }).ToList();
+        BlenderFCurve.RecalcHandles(keys, t[0] == "C");
+        Assert.Equal(t.Skip(1), keys.Select(k => $"{H(k.Frame)}:{H(k.Value)}:{H(k.LeftX)}:{H(k.LeftY)}:{H(k.RightX)}:{H(k.RightY)}"));
+    }
+
+    [Theory]
+    [InlineData(0)] // a locked handle released a second time
+    [InlineData(1)] // a locked handle kept after two releases
+    public void Rare_handle_release_cases_keep_Blenders_bits(int row)
+    {
+        // Blender 5.1.2 oracle rows from seed 1, curves 903 and 18282. The deploy drill also recalculates these
+        // shapes in Blender and requires both release branches, so they cannot disappear behind a random seed.
+        var path = System.IO.Path.Combine(AppContext.BaseDirectory, "blender_handle_releases.txt");
+        var t = System.IO.File.ReadAllLines(path)[row].Split('\t');
+        The_handles_of_automatic_keys_are_Blenders((t[2] == "CONSTANT" ? "C " : "L ") + string.Join(" ", t.Skip(4)));
+    }
+
+    [Fact]
+    public void A_lone_key_keeps_handles_a_frame_to_each_side()
+    {
+        var keys = new List<BlenderDeploy.ArmKey> { new BlenderDeploy.ArmKey { Frame = 7f, Value = 2f } };
+        BlenderFCurve.RecalcHandles(keys);
+        Assert.Equal(new[] { 6f, 2f, 8f, 2f }, new[] { keys[0].LeftX, keys[0].LeftY, keys[0].RightX, keys[0].RightY });
+    }
+
+    [Theory]
     // rows of Blender 5.1.2's own FCurve.evaluate() (tools/deploy-drill/blender_bezier_dump.py, seed 1): the curve as
     // frame:value:left handle:right handle in float hex, then time and value
     // free handles inside the span: one real root, and three

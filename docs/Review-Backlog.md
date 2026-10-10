@@ -166,8 +166,9 @@ snapshot** - done 2026-10-11 (the dump's own scene updates between stages were w
 gone); **5b/5c the barrel retarget and the leg scale** - done 2026-10-10 (Bezier keys with their handles to the bit;
 a frame strictly inside a new segment was left to Blender); **the Bezier evaluation between two keys**
 (`BlenderFCurve.cs`: the cubic solver in the C runtime's double math) - done 2026-10-10, against Blender's own
-`FCurve.evaluate()` on raw curves and a frame sweep at the end of every retarget job; next the smoothing solver for
-a middle key that is no extreme, 5d (recoil: edit mode again), the binding, the role clips, the export; 4 the bake, the options (barrel, legs, recoil, wheels) and
+`FCurve.evaluate()` on raw curves and a frame sweep at the end of every retarget job; **the handles of automatic keys**
+(`BlenderFCurve.RecalcHandles`: the smoothing solver) - done 2026-10-10, against Blender's own calculation and
+against `pose_bone.keyframe_insert` key by key; next 5d (recoil: edit mode again), the binding, the role clips, the export; 4 the bake, the options (barrel, legs, recoil, wheels) and
 the role clips; 5 the exported animation, the wiring, the existing golden. OPEN for part 4: bit-exact or a tight
 tolerance - the script's decisions are thresholds on continuous values, the existing golden compares three decimals;
 to be decided on measured distance. Not modelled yet: Bezier keys (a CUBICSPLINE sampler), `KHR_animation_pointer`, an

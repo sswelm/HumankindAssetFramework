@@ -797,6 +797,57 @@ The pre-push run also exposed parallel error-log interference in `FormationColli
 observes the synchronous action's thread. A regression emits an error from another thread and one from the
 action, proving that the former is ignored and the latter still reaches the assertions.
 
+**Replacing `deploy_convert.py`: the handles of automatic keys** (2026-10-10). The script's step 5d keys its
+RecoilArm with a turn that rises and falls: its keys are no extremes, and their handles come from Blender's
+smoothing solver - until now such a key was left to Blender. `BlenderFCurve.RecalcHandles(keys, constant)` is
+`BKE_fcurve_handles_recalc` for Bezier keys whose handles are all AUTO_CLAMPED under the default smoothing
+(CONT_ACCEL): `calchandleNurb_intern` (each handle a third of the way in time; an extreme key and, under CONSTANT
+extrapolation, the two ends flat; a handle stopped at its neighbour's height turns the other with it), then
+`BKE_nurb_handle_smooth_fcurve` - every run of free keys between two locked ones is a tridiagonal system
+("no jump in acceleration"), solved in DOUBLE (`BLI_tridiagonal_solve`), re-solved with every handle that overshoots
+its limit locked there, and a locked handle that wants back released, twice at most
+(`tridiagonal_solve_with_limits`). Under LINEAR extrapolation the ends are free and their outer handle mirrors the
+solved one. `BlenderDeploy`'s `Insert` calls it; the "key between a lower and a higher neighbour" fallback is gone.
+Two oracles, `deploy.exe --handles`: (1) `blender_handles_dump.py` - generated curves built four ways (stored and
+`FCurve.update()`, `keyframe_points.insert()` in and out of order, stored raw with doubled frames and
+`handles_recalc()`): both handles of 2,409,595 keys on 80,000 curves equal to the bit over four seeds (the gate
+runs 6,000 curves, including two fixed rare-release shapes, and requires 15 named branches);
+(2) `blender_keyframe_insert_dump.py` - the real thing,
+`pose_bone.keyframe_insert` on an armature the way step 5d keys its arm, every curve written after EVERY insert:
+320,970 keys on 17,666 curves equal (the gate runs 40 key sequences). All 162 conversion jobs still pass.
+
+*Review before the PR* (an independent agent; 4.9 million keys through the real `keyframe_insert`, 2.4 million
+more on its own shapes - every two- and three-key sign pattern, systems of 5,000 unknowns, up to 13 re-solves of
+one system, denormals, frames an ulp apart): no value differed, and NOTHING of an earlier insert survives in the
+handles - each state equals one calculation from the keys alone (the first pass rewrites all four coordinates of
+every key, so the 0.001 clamp of old handles and the shift of a replaced key leave no trace). Five notes, all acted
+on. (1) BLENDER ITSELF is not deterministic for two keys on one frame at a chunk boundary of its parallel first
+pass (a key's thread marks its doubled neighbour while that neighbour's thread resets the mark): the same 520-key
+curve gave two results, 35 and 5 of 40 runs. `keyframe_insert` never leaves a doubled frame; the generator makes
+long curves by update and by insertion only, never raw (I then made it do so by mistake and measured the same: 23 keys of 4 curves differed, and one of six identical runs gave another dump). (2) A NaN's sign differed on keys past float32: the
+handles drill now holds a NaN as a NaN, as the Bezier drill does. (3) My claim "both handles cannot be stopped at
+once" holds for finite keys only (9,481 hits on overflowing ones; the port keeps C's left-first order, the results
+are equal). (4) Every curve is judged on its own, so a dump that holds fewer curves is still consistent: the gate
+now requires the count it asked for; the real-`keyframe_insert` oracle is in the gate. (5) Only a new curve's
+SMOOTHING follows the user preferences (handle type and interpolation do not, measured); the script reads factory
+settings and the drill refuses a dump that is not CONT_ACCEL. 41 planted defects: 34 caught; of the seven that are
+not, five are equivalent (`6 / 2.5614 * 2.5614` IS 6 in float; the left-first order on finite keys; the clamp of
+a flat step; the two-unknown form when nothing cycles; the last key's ratio, which is 1) and two were mutations
+that changed nothing.
+
+Not held: `bezier_calc_handle_adj` scaling a fixed end handle to fit (dead with AUTO_CLAMPED keys alone: the
+reviewer's argument and 900,000 raw curves); other handle types, a Cycles modifier, smoothing NONE. Next: 5d itself.
+
+*PR #143 follow-up*: fixed Blender 5.1.2 oracle rows (seed 1, curves 903 and 18282; 12 and 40 keys) now
+hold a handle released a second time and one kept after two releases in the unit tests. The handles generator
+reserves its first two curves for these shapes, reading only their frame/value inputs and recalculating the
+handles in Blender; the gate requires both branches to be reached. Unity 2021.3.1f1's actual 64-bit embedded
+Mono also passed 195,174 keys on 2,938 independent curves in an isolated batch-mode project: exhaustive small
+sign patterns, signed zero, extreme finite values, and curves up to 5,000 keys. Both rare fixtures also passed
+inside Unity (two second releases and one handle kept after two releases). Limiting a handle to only one release
+in a temporary copy of the solver made the fixed oracle reject two differing keys. No handle differed in the
+unchanged solver.
+
 *Review of PR #138*: the imported pose rows at the bind and last frames (`PB2`, `PB3`) must name every expected
 armature/bone exactly once, with all ten held values. A matching row count cannot substitute duplicates for missing
 bones, and unknown names cannot skip comparison. `missing_imported_pose.py` keeps a passing single-job control and
