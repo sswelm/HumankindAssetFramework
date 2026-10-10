@@ -789,10 +789,13 @@ sides of the oracle; four real-script fixtures cover minimum/maximum end and rea
 also checks sequential curve ordinals and each curve's ordered `TIMES` requests: replacing a sample by another
 equal value no longer preserves a passing result just by preserving totals. Five additional negative controls
 cover replaced samples and curves, missing requests, and rows or a second end marker after the end. Validation:
-1,434 unit tests, 162 conversion jobs with 217,635 swept rows, 90 additional generated conversions with 152,615
+1,435 unit tests, 162 conversion jobs with 217,635 swept rows, 90 additional generated conversions with 152,615
 swept rows, and 579,367 raw values from a second seed, all passing. Three further extreme finite-scale jobs match
 Blender, including the NaN interpolation case above. The existing missing `SiegeHowitzersCar` source is still
 reported as untested.
+The pre-push run also exposed parallel error-log interference in `FormationCollisionTests`: its capture now
+observes the synchronous action's thread. A regression emits an error from another thread and one from the
+action, proving that the former is ignored and the latter still reaches the assertions.
 
 *Review of PR #138*: the imported pose rows at the bind and last frames (`PB2`, `PB3`) must name every expected
 armature/bone exactly once, with all ten held values. A matching row count cannot substitute duplicates for missing
