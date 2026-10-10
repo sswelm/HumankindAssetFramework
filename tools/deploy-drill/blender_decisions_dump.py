@@ -49,6 +49,8 @@ cut2 = source.index("\n# --- 5a.")            # ... and then the bake, the scale
 code2 = compile(source[cut:cut2], script, "exec")
 cut3 = source.index("\n# --- 5b.")            # ... and then the fire-window snapshot (5a)
 code3 = compile(source[cut2:cut3], script, "exec")
+cut4 = source.index("\n# --- 5d.")            # ... and then the barrel retarget (5b) and the leg scale (5c)
+code4 = compile(source[cut3:cut4], script, "exec")
 fails = 0
 for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
     line = line.rstrip("\r")
@@ -167,6 +169,31 @@ for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
             for o in bpy.data.objects:
                 mw = o.matrix_world
                 print("O4\t%s\t%s" % (o.name, "\t".join(h32(mw[r][c]) for r in range(4) for c in range(4))))
+            # ---- stage 4 (parts 5b, 5c): the script goes on to its `# --- 5d.` - the barrel retargeted to its ready
+            #      frame, the leg spread scaled. What it printed; the action again, now with EVERY key's interpolation and
+            #      handles (the new keys are Bezier); what the pose bones hold; where the scene stands
+            out4 = io.StringIO()
+            with contextlib.redirect_stdout(out4):
+                exec(code4, g)
+            for l in out4.getvalue().split("\n"):
+                if l.startswith("DEPLOY"):
+                    print("LOG4\t%s" % l)
+            act = arm.animation_data.action if arm.animation_data else None
+            if act is not None:
+                for layer in act.layers:
+                    for strip in layer.strips:
+                        for cb in strip.channelbags:
+                            for fc in cb.fcurves:
+                                print("FC4\t%s\t%d\t%s\t%s\t%s" % (fc.data_path, fc.array_index, fc.extrapolation, fc.auto_smoothing, "\t".join(
+                                    "%s:%s:%s:%s:%s:%s:%s:%s:%s" % (h32(kp.co[0]), h32(kp.co[1]), kp.interpolation, kp.handle_left_type, kp.handle_right_type,
+                                                                    h32(kp.handle_left[0]), h32(kp.handle_left[1]), h32(kp.handle_right[0]), h32(kp.handle_right[1]))
+                                    for kp in fc.keyframe_points)))
+            for pb in arm.pose.bones:
+                q = pb.rotation_quaternion
+                print("APB4\t%s\t%s" % (pb.name, "\t".join(h32(v) for v in (*pb.location, q.w, q.x, q.y, q.z, *pb.scale))))
+            for o in bpy.data.objects:
+                mw = o.matrix_world
+                print("O5\t%s\t%s" % (o.name, "\t".join(h32(mw[r][c]) for r in range(4) for c in range(4))))
             # ... and at the LAST frame of the range: the bind frame cannot tell a frozen object from an animated one,
             # nor a stripped scale curve from a kept one (the script's later steps set frames all over the range)
             bpy.context.scene.frame_set(g["fmax"])

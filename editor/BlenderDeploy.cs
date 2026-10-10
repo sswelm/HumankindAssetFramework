@@ -107,6 +107,24 @@ public static class BlenderDeploy
         // what each pose bone of the new armature HOLDS now (location 3, quaternion 4, scale 3), and the scene after 5a
         public readonly Dictionary<string, float[]> ArmPose = new Dictionary<string, float[]>(StringComparer.Ordinal);
         public Dictionary<string, float[]> AfterFire;
+        public Dictionary<string, float[]> ArmPoseAfterFire;
+        // ---- 5b, 5c: the barrel retargeted to its ready frame, the leg spread scaled. A bone these steps touch has its
+        //      curves CLEARED and a few Bezier keys in their place: per bone, per channel (location 3, quaternion 4,
+        //      scale 3) the keys left, or null where the channel has no curve any more and the property just holds
+        public readonly Dictionary<string, List<ArmKey>[]> Rekeyed = new Dictionary<string, List<ArmKey>[]>(StringComparer.Ordinal);
+        public readonly List<string> RetargetLog = new List<string>();
+        public Dictionary<string, float[]> AfterRetarget;
+    }
+
+    /// <summary>A key `keyframe_insert` made: Bezier, both handles AUTO_CLAMPED.</summary>
+    public sealed class ArmKey
+    {
+        public float Frame, Value, LeftX, LeftY, RightX, RightY;
+    }
+
+    sealed class NotPortedException : Exception
+    {
+        public NotPortedException(string what) : base(what) { }
     }
 
     /// <summary>A bone of the armature at rest.</summary>
@@ -658,6 +676,27 @@ public static class BlenderDeploy
         {
             foreach (var b in r.Bones)
             {
+                if (r.Rekeyed.TryGetValue(b.Name, out var channels))
+                {
+                    // a re-keyed bone: Bezier keys with constant ends; a channel without a curve holds
+                    var h = r.ArmPose[b.Name];
+                    for (int c = 0; c < 10; c++)
+                    {
+                        var list = channels[c];
+                        if (list == null || list.Count == 0) continue;
+                        float v;
+                        if (f <= list[0].Frame) v = list[0].Value;
+                        else if (f >= list[list.Count - 1].Frame) v = list[list.Count - 1].Value;
+                        else
+                        {
+                            var on = list.FirstOrDefault(k => k.Frame == f);
+                            if (on == null) throw new NotPortedException($"frame {f} lies inside a Bezier segment of bone '{b.Name}' (its evaluation between two keys is not ported yet)");
+                            v = on.Value;
+                        }
+                        if (h[c] != v) h[c] = v;
+                    }
+                    continue;
+                }
                 var keys = r.Keys[b.Name]; var key = keys[Math.Max(0, Math.Min(keys.Length - 1, f - r.BakeFrameMin))]; var held = r.ArmPose[b.Name];
                 for (int c = 0; c < (r.ScaleKeys ? 10 : 7); c++) if (held[c] != key[c]) held[c] = key[c];
             }
@@ -692,6 +731,7 @@ public static class BlenderDeploy
                 ends.Add(ev); steps.Add(Math.Max(1, sv));
             }
         for (int i = 0; i < Math.Min(starts.Count, ends.Count); i++) r.Segments.Add((starts[i], ends[i], steps[i]));
+        int lastSet = fmin;
         if (r.Segments.Count > 0)
         {
             foreach (var (ss, se, _) in r.Segments)
@@ -701,12 +741,112 @@ public static class BlenderDeploy
                     // scene.frame_set clamps its argument; the snapshot dictionary keeps the requested source frame.
                     // Clamp before indexing too: int.MinValue minus a positive bind frame would overflow.
                     int evaluatedFrame = Math.Max(-1048574, Math.Min(1048574, f));
-                    FrameSet(evaluatedFrame); EvalArm(evaluatedFrame);
+                    FrameSet(evaluatedFrame); EvalArm(evaluatedFrame); lastSet = evaluatedFrame;
                     r.FireSnap[f] = r.Bones.ToDictionary(b => b.Name, b => r.ArmPose[b.Name].Take(7).ToArray(), StringComparer.Ordinal);
                 }
             r.FireLog.Add($"DEPLOY fire-window snapshot: {r.FireSnap.Count} frames ({string.Join(", ", r.Segments.Select(s => $"{s.start}..{s.end}/{s.step}"))}) captured PRISTINE (pre-retarget)");
         }
         r.AfterFire = all.ToDictionary(o => o.Name, o => (float[])o.World.Clone(), StringComparer.Ordinal);
+        r.ArmPoseAfterFire = r.ArmPose.ToDictionary(kv => kv.Key, kv => (float[])kv.Value.Clone(), StringComparer.Ordinal);
+
+        // ---- 5b, 5c
+        try
+        {
+            int current = r.Segments.Count > 0 && r.FireSnap.Count > 0 ? lastSet : fmin;
+            void Set(int f) { int e = Math.Max(-1048574, Math.Min(1048574, f)); FrameSet(e); EvalArm(e); current = e; }
+            // clear_bone_channels: every curve whose data path CONTAINS pose.bones["<name>"] - the name as it is, the
+            // path with the name escaped: a name with a quote or a backslash is never found
+            bool Escaped(string n) => n.IndexOf('"') >= 0 || n.IndexOf('\\') >= 0;
+            void Clear(IEnumerable<string> bones)
+            {
+                foreach (string bn in bones.Distinct())
+                    foreach (var b in r.Bones)
+                        if (("pose.bones[\"" + b.Name + "\"]").Contains("pose.bones[\"" + bn + "\"]")) r.Rekeyed[b.Name] = new List<ArmKey>[10];
+            }
+            // pb.keyframe_insert(path, frame): the property's value keyed there - a Bezier key, the handles recalculated
+            void Insert(string bone, int from, int count, int frame)
+            {
+                var channels = r.Rekeyed[bone]; var h = r.ArmPose[bone];
+                for (int c = from; c < from + count; c++)
+                {
+                    var list = channels[c] ?? (channels[c] = new List<ArmKey>());
+                    var key = list.FirstOrDefault(k => k.Frame == frame);
+                    if (key == null) { key = new ArmKey { Frame = frame, Value = h[c] }; list.Add(key); list.Sort((x, y) => x.Frame.CompareTo(y.Frame)); }
+                    else
+                    {
+                        // a key already on that frame is MOVED by the difference (replace_bezt_keyframe_ypos: dy = new - old,
+                        // value += dy, in float32): not the new value to the bit when the difference lies in a higher binade
+                        float dy = (float)(h[c] - key.Value);
+                        key.Value = (float)(key.Value + dy);
+                    }
+                    RecalcHandles(list);
+                }
+            }
+            bool PyFloat(string s, out double v) => ReadPythonFloat(s, out v);
+            string Lower(string n) => AsciiLower(n);
+            var boneOfValues = r.BoneOf.Select(x => x.bone).ToList();   // bone_of.values(): a merged part's bone comes again
+            if (boneOfValues.Any(n => n.Any(ch => ch > 127)) && (PyStrip(argc > 5 ? Arg(5) : "") != "" || PyStrip(argc > 6 ? Arg(6) : "") != ""))
+            { r.Fallback = "a bone name past ASCII with a barrel retarget or a leg scale (Python's lower case of it)"; return r; }
+
+            if (argc > 5 && PyStrip(Arg(5)) != "")
+            {
+                if (!PyInt(Arg(5), out int readyFrame)) { r.Fallback = $"a ready frame the script cannot read ('{Arg(5)}')"; return r; }
+                double barrelScale = 1.0;
+                if (argc > 7 && PyStrip(Arg(7)) != "" && !PyFloat(Arg(7), out barrelScale)) { r.Fallback = $"a barrel scale the port does not read as Python's float() does ('{Arg(7)}')"; return r; }
+                int endFrame = fmax;
+                if (argc > 3 && !PyInt(Arg(3), out endFrame)) { r.Fallback = $"an end frame the script cannot read ('{Arg(3)}')"; return r; }
+                int mid = Math.Max((int)Math.Truncate(endFrame * 0.5), 1);
+                var barrelBones = boneOfValues.Where(n => Lower(n).Contains("barrel") || Lower(n).Contains("cannon")).ToList();
+                if (barrelBones.Any(Escaped)) { r.Fallback = "a barrel bone with a quote or a backslash in its name (its channels are not cleared)"; return r; }
+                Set(readyFrame);
+                var ready = barrelBones.Distinct().ToDictionary(bn => bn, bn => (float[])r.ArmPose[bn].Clone(), StringComparer.Ordinal);
+                Clear(barrelBones);
+                // (mode_set does not evaluate the animation: what is assigned below stays held until the next frame_set)
+                foreach (string bn in barrelBones)
+                {
+                    var h = r.ArmPose[bn];
+                    h[3] = 1f; h[4] = 0f; h[5] = 0f; h[6] = 0f; h[0] = h[1] = h[2] = 0f;
+                    Insert(bn, 3, 4, mid); Insert(bn, 0, 3, mid);
+                    var rd = ready[bn];
+                    ToAxisAngle(new[] { rd[3], rd[4], rd[5], rd[6] }, out var axis, out float angle);
+                    var rq = QuaternionAxisAngle(axis, (double)angle * barrelScale);
+                    float bs = (float)barrelScale;
+                    h[3] = rq[0]; h[4] = rq[1]; h[5] = rq[2]; h[6] = rq[3];
+                    h[0] = (float)(rd[0] * bs); h[1] = (float)(rd[1] * bs); h[2] = (float)(rd[2] * bs);
+                    // the location's setter clamps to +-FLT_MAX and a quaternion of a non-finite angle is not modelled
+                    for (int c = 0; c < 7; c++) if (float.IsNaN(h[c]) || float.IsInfinity(h[c])) throw new NotPortedException($"a barrel scale that leaves bone '{bn}' a value past a float ('{Arg(7)}')");
+                    Insert(bn, 3, 4, endFrame); Insert(bn, 0, 3, endFrame);
+                }
+                r.RetargetLog.Add($"DEPLOY barrel retargeted to ready-frame {readyFrame} over {mid}..{endFrame} ({barrelBones.Count} bones)");
+            }
+
+            if (argc > 6 && PyStrip(Arg(6)) != "")
+            {
+                if (!PyFloat(Arg(6), out double legScale)) { r.Fallback = $"a leg scale the port does not read as Python's float() does ('{Arg(6)}')"; return r; }
+                float fac = (float)legScale;
+                if (fac > 1.0f || fac < 0.0f) { r.Fallback = $"a leg scale outside 0..1 ('{Arg(6)}': Quaternion.slerp refuses it and the script fails)"; return r; }
+                int endFrame = fmax;
+                if (argc > 3 && !PyInt(Arg(3), out endFrame)) { r.Fallback = $"an end frame the script cannot read ('{Arg(3)}')"; return r; }
+                int spread = Math.Max((int)Math.Truncate(endFrame * 0.5), 1);
+                var legBones = boneOfValues.Where(n => Lower(n).Contains("leg")).ToList();
+                if (legBones.Any(Escaped)) { r.Fallback = "a leg bone with a quote or a backslash in its name (its channels are not cleared)"; return r; }
+                Set(fmin);
+                var folded = legBones.Distinct().ToDictionary(bn => bn, bn => r.ArmPose[bn].Skip(3).Take(4).ToArray(), StringComparer.Ordinal);
+                Set(spread);
+                var full = legBones.Distinct().ToDictionary(bn => bn, bn => r.ArmPose[bn].Skip(3).Take(4).ToArray(), StringComparer.Ordinal);
+                var scaled = legBones.Distinct().ToDictionary(bn => bn, bn => Slerp(folded[bn], full[bn], fac), StringComparer.Ordinal);
+                Clear(legBones);
+                foreach (string bn in legBones)
+                {
+                    var h = r.ArmPose[bn];
+                    Array.Copy(folded[bn], 0, h, 3, 4); Insert(bn, 3, 4, fmin);
+                    Array.Copy(scaled[bn], 0, h, 3, 4); Insert(bn, 3, 4, spread); Insert(bn, 3, 4, endFrame);
+                }
+                r.RetargetLog.Add($"DEPLOY legs scaled x{PyFormat.Fixed(legScale, 2)} from initial ({legBones.Count} bones), spread by {spread} held to {endFrame}");
+            }
+        }
+        catch (NotPortedException e) { r.Fallback = e.Message; return r; }
+        r.AfterRetarget = all.ToDictionary(o => o.Name, o => (float[])o.World.Clone(), StringComparer.Ordinal);
         r.ProbeAt = frame =>
         {
             FrameSet(frame);
@@ -714,6 +854,187 @@ public static class BlenderDeploy
                     imported.ToDictionary(a => a.Name, a => rig.Armatures[a.Node].Bones.ToDictionary(b => names.BoneOfJoint[b], b => pose.Current(b), StringComparer.Ordinal), StringComparer.Ordinal));
         };
         return r;
+    }
+
+    // .NET Framework's decimal conversion can round a double one ulp away from Python (for example
+    // 0.39499999999999999). Use it as an estimate, then compare the exact decimal input to the exact binary
+    // midpoints around that estimate. This also holds under Unity's Mono, without a native parser dependency.
+    internal static bool ReadPythonFloat(string s, out double v)
+    {
+        s = (s ?? "").Trim(IntWhitespace); v = 0;
+        if (s.Length == 0 || s.Any(ch => !(ch >= '0' && ch <= '9') && ch != '+' && ch != '-' && ch != '.' && ch != 'e' && ch != 'E')) return false;
+        if (!double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out v) || double.IsInfinity(v)) return false;
+        bool neg = s[0] == '-';
+        string token = s[0] == '+' || neg ? s.Substring(1) : s;
+        int at = token.IndexOfAny(new[] { 'e', 'E' }); long power = 0;
+        if (at >= 0)
+        {
+            string exp = token.Substring(at + 1); bool minus = exp[0] == '-';
+            int first = exp[0] == '+' || minus ? 1 : 0;
+            // Exponents beyond this bound cannot cancel a string's (Int32-sized) number of digits.
+            for (int i = first; i < exp.Length; i++) power = Math.Min(10000000000L, power * 10 + exp[i] - '0');
+            if (minus) power = -power;
+            token = token.Substring(0, at);
+        }
+        int point = token.IndexOf('.');
+        if (point >= 0) { power -= token.Length - point - 1; token = token.Remove(point, 1); }
+        string digits = token.TrimStart('0');
+        if (digits.Length == 0) { v = neg ? -0.0 : 0.0; return true; }
+        var exact = Canonical(digits, power);
+        long bits = BitConverter.DoubleToInt64Bits(v) & long.MaxValue;
+        while (true)
+        {
+            int e = (int)(bits >> 52); ulong m = (ulong)bits & 0xFFFFFFFFFFFFFUL;
+            int binaryPower = e == 0 ? -1074 : e - 1075;
+            if (e != 0) m |= 1UL << 52;
+            bool odd = (bits & 1) != 0;
+            int upper = Compare(exact, BinaryDecimal(2 * m + 1, binaryPower - 1));
+            if (upper > 0 || upper == 0 && odd)
+            {
+                if (++bits == 0x7ff0000000000000L) return false; // a scale overflowing a double stays Blender's
+                continue;
+            }
+            if (bits != 0)
+            {
+                bool boundary = e > 1 && m == 1UL << 52;
+                int lower = Compare(exact, BinaryDecimal(boundary ? 4 * m - 1 : 2 * m - 1, binaryPower - (boundary ? 2 : 1)));
+                if (lower < 0 || lower == 0 && odd) { bits--; continue; }
+            }
+            v = BitConverter.Int64BitsToDouble(bits | (neg ? long.MinValue : 0)); return true;
+        }
+
+        (string digits, long power) Canonical(string d, long p)
+        {
+            string trimmed = d.TrimEnd('0'); return (trimmed, p + d.Length - trimmed.Length);
+        }
+        (string digits, long power) BinaryDecimal(ulong coefficient, int p)
+        {
+            var ds = coefficient.ToString(System.Globalization.CultureInfo.InvariantCulture).Select(c => c - '0').ToList();
+            int frac = 0;
+            for (; p > 0; p--)
+            {
+                int carry = 0;
+                for (int i = ds.Count - 1; i >= 0; i--) { int d = ds[i] * 2 + carry; ds[i] = d % 10; carry = d / 10; }
+                if (carry > 0) ds.Insert(0, carry);
+            }
+            for (; p < 0; p++)
+            {
+                ds.Add(0); frac++; int rem = 0;
+                for (int i = 0; i < ds.Count; i++) { int d = rem * 10 + ds[i]; ds[i] = d / 2; rem = d % 2; }
+            }
+            return Canonical(new string(ds.Select(d => (char)('0' + d)).ToArray()).TrimStart('0'), -frac);
+        }
+        int Compare((string digits, long power) a, (string digits, long power) b)
+        {
+            int order = (a.digits.Length + a.power).CompareTo(b.digits.Length + b.power);
+            if (order != 0) return order;
+            for (int i = 0; i < Math.Max(a.digits.Length, b.digits.Length); i++)
+            {
+                char ac = i < a.digits.Length ? a.digits[i] : '0', bc = i < b.digits.Length ? b.digits[i] : '0';
+                if (ac != bc) return ac.CompareTo(bc);
+            }
+            return 0;
+        }
+    }
+
+    /// <summary>BKE_fcurve_handles_recalc for a curve of Bezier keys whose handles are all AUTO_CLAMPED, constant
+    /// extrapolation, the default smoothing (CONT_ACCEL): calchandleNurb_intern for an fcurve gives each handle its X a
+    /// third of the way to the neighbour (through `len = 6 / 2.5614 * 2.5614`), the first and the last key and a key that
+    /// is an extreme of its neighbours are FLAT. A middle key between a lower and a higher neighbour is not: its
+    /// handles come from the smoothing solver, which is not ported.</summary>
+    static void RecalcHandles(List<ArmKey> keys)
+    {
+        if (keys.Count < 2) { foreach (var k in keys) { k.LeftX = (float)(k.Frame - 1f); k.RightX = (float)(k.Frame + 1f); k.LeftY = k.RightY = k.Value; } return; }
+        for (int i = 0; i < keys.Count; i++)
+        {
+            var k = keys[i]; float p2x = k.Frame, p2y = k.Value;
+            float p1x, p1y, p3x, p3y;
+            if (i == 0) { p3x = keys[1].Frame; p3y = keys[1].Value; p1x = (float)((float)(2.0f * p2x) - p3x); p1y = (float)((float)(2.0f * p2y) - p3y); }
+            else { p1x = keys[i - 1].Frame; p1y = keys[i - 1].Value; if (i == keys.Count - 1) { p3x = (float)((float)(2.0f * p2x) - p1x); p3y = (float)((float)(2.0f * p2y) - p1y); } else { p3x = keys[i + 1].Frame; p3y = keys[i + 1].Value; } }
+            float dax = (float)(p2x - p1x), dbx = (float)(p3x - p2x);
+            float lenA = dax, lenB = dbx;
+            if (lenA == 0f) lenA = 1f;
+            if (lenB == 0f) lenB = 1f;
+            float tvx = (float)((float)(dbx / lenB) + (float)(dax / lenA));
+            float len = (float)(6.0f / 2.5614f);
+            len = (float)(len * 2.5614f);
+            if (len != 0f)
+            {
+                lenA = (float)(lenA / len); k.LeftX = (float)(p2x + (float)(tvx * -lenA));
+                lenB = (float)(lenB / len); k.RightX = (float)(p2x + (float)(tvx * lenB));
+            }
+            bool middle = i > 0 && i < keys.Count - 1;
+            if (middle)
+            {
+                float yd1 = (float)(p1y - p2y), yd2 = (float)(p3y - p2y);
+                if (!((yd1 <= 0f && yd2 <= 0f) || (yd1 >= 0f && yd2 >= 0f)))
+                    throw new NotPortedException("a Bezier key between a lower and a higher neighbour (its handles come from the fcurve smoothing solver, which is not ported yet)");
+            }
+            k.LeftY = k.RightY = p2y;
+        }
+    }
+
+    /// <summary>mathutils' Quaternion.to_axis_angle(): the quaternion normalized, quat_to_axis_angle (acosf, sinf), and the
+    /// axis made sane (a zero or non-finite one is X; one within ten float steps of zero on all three gets X = 1).</summary>
+    static void ToAxisAngle(float[] q, out float[] axis, out float angle)
+    {
+        var t = (float[])q.Clone(); VehicleProbe.NormalizeQt(t);
+        float ha = BlenderTrig.Acosf(t[0]), si = BlenderTrig.Sinf(ha);
+        angle = (float)(ha * 2f);
+        if (Math.Abs(si) < 0.0005f) si = 1.0f;
+        axis = new[] { (float)(t[1] / si), (float)(t[2] / si), (float)(t[3] / si) };
+        if (axis[0] == 0f && axis[1] == 0f && axis[2] == 0f) axis[1] = 1.0f;
+        bool Finite(float v) => !float.IsNaN(v) && !float.IsInfinity(v);
+        if ((axis[0] == 0f && axis[1] == 0f && axis[2] == 0f) || !Finite(axis[0]) || !Finite(axis[1]) || !Finite(axis[2])) { axis[0] = 1f; axis[1] = 0f; axis[2] = 0f; }
+        else if (NearZero(axis[0]) && NearZero(axis[1]) && NearZero(axis[2])) axis[0] = 1.0f;
+        if (!Finite(angle)) angle = 0f;
+    }
+
+    /// <summary>EXPP_FloatsAreEqual(v, 0, 10): within ten representable floats of zero.</summary>
+    static bool NearZero(float v)
+    {
+        unchecked
+        {
+            int ai = BitConverter.ToInt32(BitConverter.GetBytes(v), 0);
+            int test = ai < 0 ? -1 : 0;
+            int diff = ai ^ (test & 0x7fffffff);
+            return ((10 + diff) | (10 - diff)) >= 0;
+        }
+    }
+
+    /// <summary>mathutils' Quaternion(axis, angle): the angle wrapped into -pi..pi in float32 (angle_wrap_rad), the axis
+    /// normalized, (cosf, axis sinf) of the half angle; the identity for an axis of no length.</summary>
+    static float[] QuaternionAxisAngle(float[] axis, double angle)
+    {
+        const float pi = (float)Math.PI;
+        float a = (float)angle;
+        float b = (float)(pi * 2.0f), x = (float)(a + pi);
+        a = (float)((float)(x - (float)(b * (float)Math.Floor((double)(float)(x / b)))) - pi);
+        float d = (float)((float)((float)(axis[0] * axis[0]) + (float)(axis[1] * axis[1])) + (float)(axis[2] * axis[2]));
+        if (!(d > 1.0e-35f)) return new[] { 1f, 0f, 0f, 0f };
+        d = VehicleProbe.Sqrtf(d); float f = (float)(1.0f / d);
+        float phi = (float)(0.5f * a), si = BlenderTrig.Sinf(phi), co = BlenderTrig.Cosf(phi);
+        return new[] { co, (float)((float)(axis[0] * f) * si), (float)((float)(axis[1] * f) * si), (float)((float)(axis[2] * f) * si) };
+    }
+
+    /// <summary>interp_qt_qtqt (Quaternion.slerp): the short way round, interp_dot_slerp's weights (a plain lerp when the
+    /// two are within 1e-4 of aligned), no normalization afterwards.</summary>
+    static float[] Slerp(float[] a, float[] b, float t)
+    {
+        float cosom = VehicleProbe.DotQt(a, b);
+        var quat = (float[])a.Clone();
+        if (cosom < 0f) { cosom = -cosom; for (int i = 0; i < 4; i++) quat[i] = -a[i]; }
+        float w0, w1;
+        if (Math.Abs(cosom) < (float)(1.0f - 1e-4f))
+        {
+            float omega = BlenderTrig.Acosf(cosom), sinom = BlenderTrig.Sinf(omega);
+            w0 = (float)(BlenderTrig.Sinf((float)((float)(1.0f - t) * omega)) / sinom);
+            w1 = (float)(BlenderTrig.Sinf((float)(t * omega)) / sinom);
+        }
+        else { w0 = (float)(1.0f - t); w1 = t; }
+        var q = new float[4];
+        for (int i = 0; i < 4; i++) q[i] = (float)((float)(w0 * quat[i]) + (float)(w1 * b[i]));
+        return q;
     }
 
     /// <summary>The bake's second half for one bone: each frame's basis set (`pbone.matrix_basis = m`: BKE_pchan_apply_mat4 -

@@ -136,7 +136,7 @@ def flat3(out, seed):
     return s.write(out, "deploy_flat3_%d" % seed)
 
 
-def wall(out, links, pads, wrappers, name, small_classes=0, turning=False, crew=None, span=1.0):
+def wall(out, links, pads, wrappers, name, small_classes=0, turning=False, crew=None, span=1.0, link="Link"):
     """Over the bone wall: chains of instanced parts ("Link.007": the script groups by the name before the first dot),
     a few of a class too small to merge, and animated wrappers no mesh hangs from."""
     s = Scene()
@@ -146,7 +146,7 @@ def wall(out, links, pads, wrappers, name, small_classes=0, turning=False, crew=
         for i in range(count):
             n = s.node(base_name if i == 0 else "%s.%03d" % (base_name, i), None, mesh=m, translation=[0.3 * i, y, 0.0])
             s.anim(n, "translation", [0.0, span], [(0.3 * i, y, 0.0), (0.3 * i + 1.0, y, 0.0)])
-    chain("Link", links, 0.0); chain("Pad", pads, 1.0); chain("Few", 6, 2.0)
+    chain(link, links, 0.0); chain("Pad", pads, 1.0); chain("Few", 6, 2.0)
     for c in range(small_classes):
         chain("Class%d" % c, 7, 4.0 + c)
     if crew is not None:
@@ -361,6 +361,72 @@ def huge(out):
     return s.write(out, "deploy_huge")
 
 
+def gunnery(out, name="deploy_gunnery", barrel=True):
+    """A gun for the script's steps 5b and 5c: a barrel that elevates and a cannon tube under it that slides (their
+    names decide: "barrel", "cannon"), two legs that spread ("leg"), a carriage that rolls. The clip runs to frame 36."""
+    import math
+    def q(axis, deg):
+        a = math.radians(deg) / 2.0; v = [0.0, 0.0, 0.0, math.cos(a)]; v[axis] = math.sin(a); return v
+    s = Scene(); s.node("Hull", None, mesh=s.mesh("hull", 4.0, at=(-2.0, 0.0, -0.5)))
+    car = s.node("Carriage", None, mesh=s.mesh("carriage", 2.0, at=(-1.0, 0.0, -0.25)), translation=[0.0, 0.5, 0.0])
+    s.anim(car, "translation", [0.0, 1.5], [(0.0, 0.5, 0.0), (0.0, 0.5, 0.4)])
+    if barrel:
+        b = s.node("Main_Barrel", car, mesh=s.mesh("barrelmesh", 1.5, at=(0.0, 0.0, -0.1)), translation=[0.2, 0.6, 0.0], rotation=q(2, 5))
+        s.anim(b, "rotation", [0.0, 0.5, 1.0, 1.5], [tuple(q(2, 5)), tuple(q(2, 20)), tuple(q(2, 48)), tuple(q(2, 63))])
+        c = s.node("CANNON tube", b, mesh=s.mesh("tube", 1.0, at=(0.0, 0.0, -0.05)), translation=[0.5, 0.0, 0.0])
+        s.anim(c, "translation", [0.0, 1.0, 1.5], [(0.5, 0.0, 0.0), (0.9, 0.0, 0.0), (0.7, 0.1, 0.0)])
+    for leg, sign in (("L_Leg", 1.0), ("r_LEG", -1.0)):
+        l = s.node(leg, car, mesh=s.mesh(leg.lower(), 1.0, at=(-1.0, 0.0, -0.05)), translation=[-0.5, 0.0, 0.3 * sign], rotation=q(1, 4 * sign))
+        s.anim(l, "rotation", [0.0, 0.5, 1.5], [tuple(q(1, 4 * sign)), tuple(q(1, 38 * sign)), tuple(q(1, 55 * sign))])
+        s.anim(l, "translation", [0.0, 1.5], [(-0.5, 0.0, 0.3 * sign), (-0.6, 0.05, 0.3 * sign)])
+    return s.write(out, name)
+
+
+def gunnery_general(out, name, seed):
+    """Barrels and legs about general axes: names with a dot and with brackets, a bone that is a barrel AND a leg
+    (its location is cleared too), a leg that turns the long way round (250 degrees) and one that stands still."""
+    import math, random
+    def qa(ax, deg):
+        n = math.sqrt(sum(c * c for c in ax)); a = math.radians(deg) / 2.0
+        return [ax[0] / n * math.sin(a), ax[1] / n * math.sin(a), ax[2] / n * math.sin(a), math.cos(a)]
+    r = random.Random(seed); s = Scene()
+    s.node("Hull", None, mesh=s.mesh("hull", 4.0, at=(-2.0, 0.0, -0.5)))
+    car = s.node("Carriage", None, mesh=s.mesh("carriage", 2.0, at=(-1.0, 0.0, -0.25)), translation=[0.0, 0.5, 0.0], rotation=qa((1, 2, 3), 20))
+    s.anim(car, "translation", [0.0, 1.5], [(0.0, 0.5, 0.0), (0.3, 0.5, 0.4)])
+    s.anim(car, "rotation", [0.0, 1.5], [tuple(qa((1, 2, 3), 20)), tuple(qa((1, 2.5, 3), 31))])
+    def rnd(): return (r.uniform(-1, 1), r.uniform(-1, 1), r.uniform(-1, 1))
+    for n in ("Barrel", "Barrel.001", "my cannon[2]", "BARREL_Leg", "Leg.L", "leg", "LEGO far", "Leg_near"):
+        a0, a1, a2 = rnd(), rnd(), rnd(); r0 = qa(a0, r.uniform(0, 40)); t0 = [r.uniform(-1, 1) for _ in range(3)]
+        nd = s.node(n, car, mesh=s.mesh("m" + n, 1.0, at=(0.0, 0.0, -0.05)), translation=t0, rotation=r0)
+        if n == "LEGO far":
+            s.anim(nd, "rotation", [0.0, 0.25, 0.5, 1.5], [tuple(qa(a0, d)) for d in (0, 125, 250, 300)])
+        elif n == "Leg_near":
+            s.anim(nd, "rotation", [0.0, 0.5, 1.5], [tuple(r0), tuple(r0), tuple(r0)])
+            s.anim(nd, "translation", [0.0, 1.5], [tuple(t0), (t0[0] + 0.1, t0[1], t0[2])])
+        else:
+            s.anim(nd, "rotation", [0.0, 0.5, 1.0, 1.5], [tuple(r0), tuple(qa(a1, r.uniform(10, 170))), tuple(qa(a2, r.uniform(10, 170))), tuple(qa(a1, r.uniform(10, 170)))])
+            s.anim(nd, "translation", [0.0, 1.0, 1.5], [tuple(t0), tuple(rnd()), tuple(rnd())])
+    return s.write(out, name)
+
+
+def gunnery_guard(out):
+    """Barrels whose ready pose is a hair off the rest (0.001 to 0.06 degrees, about Z and about a general axis): the
+    half angle's sine is under 0.0005 and Quaternion.to_axis_angle divides by 1 instead - Blender keys -0.0 there."""
+    import math
+    def qa(ax, deg):
+        n = math.sqrt(sum(c * c for c in ax)); a = math.radians(deg) / 2.0
+        return [ax[0] / n * math.sin(a), ax[1] / n * math.sin(a), ax[2] / n * math.sin(a), math.cos(a)]
+    s = Scene(); s.node("Hull", None, mesh=s.mesh("hull", 4.0, at=(-2.0, 0.0, -0.5)))
+    car = s.node("Carriage", None, mesh=s.mesh("carriage", 2.0, at=(-1.0, 0.0, -0.25)), translation=[0.0, 0.5, 0.0])
+    s.anim(car, "translation", [0.0, 1.5], [(0.0, 0.5, 0.0), (0.0, 0.5, 0.4)])
+    for i, d in enumerate((-0.01, -0.02, -0.03, -0.04, -0.045, -0.05, -0.055, 0.02, 0.05, -0.06, -0.001)):
+        ax = (1, -2, 3) if i % 2 else (0, 0, 1)
+        b = s.node("Barrel_%d" % i, car, mesh=s.mesh("b%d" % i, 1.0, at=(0.0, 0.0, -0.1)), translation=[0.2 * i, 0.6, 0.0], rotation=qa(ax, 5))
+        s.anim(b, "rotation", [0.0, 0.5, 1.5], [tuple(qa(ax, 5)), tuple(qa(ax, 25)), tuple(qa(ax, d))])
+        s.anim(b, "translation", [0.0, 1.5], [(0.2 * i, 0.6, 0.0), (0.2 * i, 0.6 - 0.001 * i, 0.0)])
+    return s.write(out, "deploy_gunnery_guard")
+
+
 def half(out):
     """The lowest point exactly 0.125 below zero: Python prints the vertical offset as 0.12 (the exact half goes to the
     even digit), .NET's own formatting as 0.13."""
@@ -388,6 +454,76 @@ def main(out):
     # 0.4 across: still under the half unit the x100 gate asks for
     print("tiny_edge|%s|%s" % (small(out, "deploy_tiny_edge", 0.01), DEFAULT))
     print("half|%s|%s" % (half(out), DEFAULT))
+    # 5b and 5c: argv[5] the ready frame, argv[6] the leg scale, argv[7] the barrel scale, argv[3] the deploy's end.
+    # The ready frame ON the new curve's last key, past it, and before its first; the scales 1.5 / 0.5, 0 / 0, 1 / 1;
+    # a barrel alone, legs alone, a gun without a barrel; an end of 2, of 1 (both keys on one frame) and of 0 (the
+    # "end" key before the "mid" one); a ready frame INSIDE the new Bezier segment (nothing evaluates there: the legs'
+    # frame_sets land on keys)
+    fg = gunnery(out)
+    print("gun_on_key|%s|0|24||24|0.5|1.5|||0|||4|0|1" % fg)
+    print("gun_past|%s|0|24||30|0|0|||0|||4|0|1" % fg)
+    print("gun_before|%s|0|24||3|1|1|||0|||4|0|1" % fg)
+    print("gun_barrel_only|%s|0|24||36||2|||0|||4|0|1" % fg)
+    print("gun_legs_only|%s|0|24|||0.25||||0|||4|0|1" % fg)
+    print("gun_no_scale|%s|0|24||36|||||0|||4|0|1" % fg)
+    print("gun_end2|%s|0|2||36|0.5|1.5|||0|||4|0|1" % fg)
+    print("gun_end1|%s|0|1||36|0.5|1.5|||0|||4|0|1" % fg)
+    print("gun_end0|%s|0|0||36|0.5|1.5|||0|||4|0|1" % fg)
+    print("gun_no_barrel|%s|0|24||24|0.5|1.5|||0|||4|0|1" % gunnery(out, "deploy_gunnery_legs", barrel=False))
+    print("gun_fire|%s|0|24||30|0.5|1.5|26,3|34,9/2|1|||0|0|1" % fg)
+    print("gun_odd|%s|0|25||36|0.5|1.5|||0|||4|0|1" % fg)       # an odd end: the mid frame is int(12.5) = 12
+    # the contract path with a chain of "Cannon" links: the merged ones ride a neighbour's bone, so bone_of.values()
+    # names that bone twice - it is re-keyed twice and counted twice in the log
+    print("wall_cannon|%s|0|24||24||1.5|||0|||4|0|1" % wall(out, 110, 30, 0, "deploy_wall_cannon", link="Cannon"))
+    print("gun_inside|%s|0|24||18|0.5|1.5|||0|||4|0|1" % fg)
+    # what the bones HOLD after the retarget is the end pose assigned last, not the curve at the ready frame (mode_set
+    # evaluates nothing): a barrel alone, the ready frame before the end - before the first key, on it, inside the
+    # segment, with a fire window, with the end at 0, on the contract path
+    print("gun_held_before|%s|0|24||3||1.5|||0|||4|0|1" % fg)
+    print("gun_held_first|%s|0|24||0||1.5|||0|||4|0|1" % fg)
+    print("gun_held_mid|%s|0|24||12||1.5|||0|||4|0|1" % fg)
+    print("gun_held_inside|%s|0|24||18||1.5|||0|||4|0|1" % fg)
+    print("gun_held_fire|%s|0|24||3||1.5|26,3|34,9/2|1|||0|0|1" % fg)
+    print("gun_held_end0|%s|0|0||36||1.5|||0|||4|0|1" % fg)
+    fw = wall(out, 110, 30, 0, "deploy_wall_gun", turning=True)
+    print("wall_held|%s|0|24||3||1.5|||0|||4|0|1" % fw)
+    print("wall_gun|%s|0|24||24|0.5|1.5|||0|||4|0|1" % fw)
+    print("wall_gun_end1|%s|0|1||24|0.5|2.4|||0|||4|0|1" % fw)
+    # a key that is already there is MOVED by the difference (old + (new - old) in float32): both barrel keys on frame
+    # 1, the difference in a higher binade than the value (scales past a 120 degree turn; 3 gives +0 where the value
+    # is -0), and the legs' first and last key on frame 0
+    for bs in ("2", "2.9", "3", "-2.3"):
+        print("gun_replace_%s|%s|0|1||36||%s|||0|||4|0|1" % (bs, fg, bs))
+    print("gun_replace_legs|%s|0|0|||0.9||||0|||4|0|1" % fg)
+    # scales as Python's float() reads them: a negative zero stays negative (the log prints x-0.00); the turn wrapped
+    # past pi; forms with a sign, a bare point, an exponent, blanks
+    print("gun_bs_negzero|%s|0|24||36||-0|||0|||4|0|1" % fg)
+    print("gun_ls_negzero|%s|0|24|||-0.0||||0|||4|0|1" % fg)
+    print("gun_bs_wrap|%s|0|24||36||5.9|||0|||4|0|1" % fg)
+    print("gun_bs_huge|%s|0|24||36||1e6|||0|||4|0|1" % fg)
+    print("gun_bs_forms|%s|0|24||36|.5|+.5e1|||0|||4|0|1" % fg)
+    print("gun_ls_forms|%s|0|24|| 24| 1E0 |1.|||0|||4|0|1" % fg)
+    # .NET Framework used to read this decimal one ulp above Python, printing leg scale x0.40 instead of x0.39.
+    print("gun_ls_decimal|%s|0|24|||0.39499999999999999||||0|||4|0|1" % fg)
+    print("gun_bs_decimal|%s|0|24||36||0.39499999999999999|||0|||4|0|1" % fg)
+    for seed in (1, 2, 3):
+        f = gunnery_general(out, "deploy_gunnery_general%d" % seed, seed)
+        print("gun_gen%d_a|%s|0|24||36|0.3|1.7|||0|||4|0|1" % (seed, f))
+        print("gun_gen%d_b|%s|0|24||24|0.85|0.4|||0|||4|0|1" % (seed, f))
+        print("gun_gen%d_c|%s|0|24||30||3.3|||0|||4|0|1" % (seed, f))
+        print("gun_gen%d_d|%s|0|24|||0.05||||0|||4|0|1" % (seed, f))
+        print("gun_gen%d_e|%s|0|1||36|0.6|2.6|||0|||4|0|1" % (seed, f))
+        print("gun_gen%d_f|%s|0|0||36|0.6|2.6|||0|||4|0|1" % (seed, f))
+    f = gunnery_guard(out)
+    print("gun_guard_1|%s|0|24||36||1|||0|||4|0|1" % f)
+    print("gun_guard_x|%s|0|24||36||1.5|||0|||4|0|1" % f)
+    print("gun_guard_big|%s|0|24||36||9000|||0|||4|0|1" % f)
+    print("gun_guard_first|%s|0|24||0||2|||0|||4|0|1" % f)
+    # left to Blender from the bake on: a negative end with a leg scale (the legs' frame_set lands INSIDE the barrel's
+    # new Bezier segment, whose evaluation between two keys is not ported), and a barrel scale past a float
+    print("BAKELEFT:gun_end_negative|%s|0|-5||36|0.5|1.5|||0|||4|0|1" % fg)
+    print("BAKELEFT:gun_bs_overflow|%s|0|24||36||1e39|||0|||4|0|1" % fg)
+    # (a leg scale outside 0..1 is not here: Blender itself fails on it - BlenderDeployTests hold the fallback)
     # 5a, the fire-window snapshot: the recoil range is a list of starts (argv[8]) and of ends with a speed step
     # (argv[9]); the step (argv[10]) switches it on. Two segments, the second past the clip's last frame (the baked
     # curves are held there); two segments that overlap; a range with the step off; more starts than ends (the lists are zipped); a segment that runs backwards (no frame,
