@@ -52,6 +52,19 @@ def main(out):
     J("LEFT:r2_scenes", s.write(out, "r2_scenes"))
     s.scene = None
     J("r2_scenes_nodefault", s.write(out, "r2_scenes_nodefault"))
+    # R2b (the export, 8a): no mesh at all and a second scene - the skin no node uses is written only from the LAST scene
+    # the exporter gathers (by name): not with "Zoo" after "Scene", yes with "Alpha" before it; and a line mesh alone, bound,
+    # is a node without a mesh and without a skin, and no skin is written at all
+    for second in ("Zoo", "Alpha"):
+        s = S(); hull = s.node("Hull", None, translation=[1.0, 0.0, -2.0])
+        turret = s.node("Turret", hull, translation=[0.0, 2.0, 0.0]); s.anim(turret, "rotation", [0.0, 0.5, 1.0], TURN)
+        barrel = s.node("Barrel", turret, translation=[1.0, 0.0, 0.0]); s.anim(barrel, "translation", [0.0, 1.0], [(1.0, 0.0, 0.0), (1.0, 0.5, 0.0)])
+        s.scenes = [{"nodes": s.roots}, {"nodes": [], "name": second}]; s.scene = None
+        J("r2_scenes_nomesh_" + second.lower(), s.write(out, "r2_scenes_nomesh_" + second.lower()))
+    s = S(); hull = s.node("Hull", None, translation=[1.0, 0.0, -2.0])
+    turret = s.node("Turret", hull, translation=[0.0, 2.0, 0.0]); s.anim(turret, "rotation", [0.0, 0.5, 1.0], TURN)
+    s.node("Wire", turret, mesh=s.mesh("wire", 1.0, mode=1), translation=[1.0, 0.0, 0.0])
+    J("r5_lines_only", s.write(out, "r5_lines_only"))
 
     # R3 two animations: the first is the active one; B is animated by the second only, and it is the longer
     s = S(); s.node("Hull", None, mesh=s.mesh("hull", 4.0)); pa = s.part("A"); pb = s.node("B", None, mesh=s.mesh("b", 1.0))

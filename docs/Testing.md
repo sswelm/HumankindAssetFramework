@@ -1029,6 +1029,70 @@ locally against the gate's reasons before the push. Not held: an Euler-mode obje
 identity is now extracted by the real function, but only the identity is reached (the armature); the order of the
 curves within a role action (compared as a set; the export may read it).
 
+**Replacing `deploy_convert.py`, part 8a: the export's structure** (2026-10-11). The script's last step trims the scene's
+frame range to argv[2]..the recoil tail's end (or argv[3]), purges every object but the meshes and the armature, de-animates
+any bone with a key that is not finite or beyond 1e6 in any action, and calls `export_scene.gltf` (GLB, animations,
+frame range, Y up; the exporter's defaults otherwise). The oracle for it is the GLB itself: `tools/deploy-drill/
+blender_export_dump.py` runs THE WHOLE SCRIPT per job and reads the file it wrote back row by row (`LOG8`, `SCENE`,
+`NODE` with children, mesh, skin and transform bits, `SKIN`, `IBM`, `MESH`, `PRIM` with the material, the mode, the
+indices' count and hash and every attribute's count, type and hash, `MAT`, `IMG`, `TEX`, `ANIM`, `CHAN`; `EXIT8`,
+`DIES8`). It runs in `EXPORT_JOBS` Blender processes (8) BESIDE the decisions dump, on every job the port does not leave
+before the export (a ROLELEFT job is not run: the whole script keys its role clips for hours - two such jobs held two
+processes until they were killed, 2026-10-11). `editor/BlenderDeployExport.cs` (`Build`, after `Finish`) makes the
+structure from the port's state and REUSES the prep step's exporter ports: `BlenderExport.MeshPrimitives` over the bound
+mesh (the folded vertices, the importer's faces, UVs, colours, custom normals and sharp faces, ONE vertex group at
+weight 1; `BlenderReduce.Reduce` at ratio 1 with `mergeUvs: false` - the script applies no modifier),
+`VehicleProbe.ExporterTrs` (joints without the snapping), `InvertedSafe` for the inverse bind matrices,
+`NeutralBone`. Read in the exporter and measured on its files: the serializer numbers a node AFTER its members
+(children, then mesh, then skin), so the first mesh node's skin reaches the joints - each bone after its bone children,
+the neutral bone last - before that node; the skin's joints are pre-order (the `BoneOrder` of part 7); the armature is
+last; a mesh node has no transform of its own; a bound mesh without a triangle (a line) is a node without a mesh and
+without a skin; a vertex group that names a pair-merged PART (no bone of that name) puts every vertex on the
+`neutral_bone` the exporter adds once (13 jobs); with no mesh with a triangle the skin is still written, unused; the
+materials are numbered at first use along the walk (BlenderNames.MaterialOf); every glTF scene but the default one is
+a Blender scene of its own (`scene.name or "Scene %d"`, numbered where taken) and is written empty after the purge
+(`r2_scenes_nodefault`); an action without a curve is no animation (`wheels_negative`'s folded role); the trim's two
+assignments go through the RNA setters (each value clamped to 0..1048574, the other end pulled along when crossed:
+`gun_recoil_backwards` prints 0..0 for a tail that ended at -15); images are the source's own bytes (the 24 of the
+howitzer); the sanitize line is printed always. Found and declined by name on the way: a TRIANGLES primitive whose
+corner count is not a multiple of three (the importer's last face takes the leftover corners as an n-gon, which the
+triangle layout drops - `BlenderReduce.FallbackReason`, so the prep declines it too; the `wheels_twice` tail wheel had
+8 vertices and is a 9-vertex ring now). `deploy.exe --export`: the export step's log lines, the scenes, every node row,
+every skin and inverse bind matrix row, every mesh and primitive row (the material index included), the animations'
+names, each animation's channel and sampler count (three per bone). An independent reader went through the port
+against the exporter's source BEFORE the PR and found two rules the 192 jobs never exercised, both run through Blender
+before they were believed: `export_frame_range` cuts every action to the trimmed scene range (`action.py`: the action's
+range, int(first key)..int(last key), against `scene.frame_start..frame_end`; the sampler keys `while frame <= end`), so
+a deploy from frame 5 drops "deployed" and "folded", keyed at fmin and fmin + 1 alone (`small_start5`); and the skin no
+node uses is written only with ZERO mesh objects (a line mesh alone carries the armature modifier: no skin at all,
+`r5_lines_only`) and only from the LAST scene the exporter gathered (`export.py` reads the vtree the last scene left:
+a second scene "Zoo" after "Scene" leaves no skin, "Alpha" before it keeps it - `r2_scenes_nomesh_zoo`, `_alpha`).
+Also from the review: the script keys its garbage bones by `data_path.split('"')[1]` (a bone name with a quote maps to
+its escaped prefix, and a sibling sharing it loses its curves too) - ported, no fixture; `need_neutral_bone` is decided
+over every bound mesh's vertices, a triangle or not (`prepare_data`) - ported from the source, no fixture (it needs a
+pair-merged line mesh); a material read with two sets of UV indices (written twice by the exporter) and a vertex
+attribute that is not finite (`validate` resets it) are left by name; the importer's bone-shape icosphere, which the
+exporter filters out, never reaches the export (the bind leaves such a job to Blender already); the deploy action
+with every curve taken by the sanitize is left by name (its range without curves is not modelled). 197 jobs, 0 failed:
+181 exports compared (15 stop before it: the script's own exits; `EXPORTLEFT:bind_ngon` left by name), 6,895 nodes,
+3,230 joints and inverse bind matrices, 3,477 meshes with 3,478 primitives and 55,183 vertices (positions, normals, UVs,
+joints, weights and indices as bytes), 930 animations. Fixtures: `bind_export` (a two-material mesh part with a line
+mesh below it), `bind_ngon` (eight corners: EXPORTLEFT), `small_start5`, `r2_scenes_nomesh_zoo`/`_alpha`,
+`r5_lines_only`. The gate tampers the export rows (missing, doubled, changed, cut short), the log lines, the written
+line, the end row, and claims a death or an exit; each must fail. Planted: 21 in the port, 18 fail the drill (the
+joints in post-order, the root bones before the meshes, the neutral bone out of the skin, a joint snapped like an
+object, the inverse bind matrix without the basis, the mesh named after its object, the material by its glTF index, the
+group's bone in creation order, the other scenes dropped, the trim unclamped, an action without a curve kept, the purge
+line past one object only, the imported positions exported, the trim end from argv beside a recoil tail, the n-gon
+fallback dropped, an action outside the range kept, the unused skin whatever the last scene, the unused skin beside a
+line mesh); three cannot fail it, and say why: the modifier-apply UV merge run on the export's mesh (one glTF vertex per
+Blender vertex - its corners share their UV, so the merge moves nothing on an imported mesh), the group's weight at 0.5
+(the exporter divides by the sum: one group is 1 whatever its weight), and the garbage keyed by the bone's name (no job
+has a garbage bone). A whole `tools/deploy_drill.sh` runs in 10 min 40 s: Blender's export of 197 jobs took 446 s in 8
+processes beside the decisions dump, the comparison 137 s. NOT compared yet, named: the materials' contents, the
+textures and images (8a-ii), the animations' channels (8b), the GLB's bytes - accessor and buffer layout, JSON (8c).
+`BlenderDeployExportTests` hold the walk, the trim's setters, the scenes and the empty role on small models.
+
 *Review before the PR* (an independent agent; 101 generated jobs through the real script over 13 fixtures, 49,732 role
 curves and 851,116 keys equal): NO executed defect. It confirmed by execution what I had not fixtured: deploy ends at
 fmin and past fmax, the return at 0, 1, 2, 7 and 50, settles of 0.5, 1.5, 2, 0 and -3, three fire segments with steps,
@@ -1270,6 +1334,16 @@ The write boundary is intentional: the workflow defaults to `contents: read`; on
 `contents: write`, and its event condition excludes pull requests. The sync generator still owns stale-page cleanup and
 link validation (sidebar coverage is enforced by `check-docs.sh` in `build-test`), so a broken generation fails before
 the wiki commit is created.
+
+**The Bake Tests goldens, re-blessed** (2026-10-11). A run of the Workshop and Lab rows failed on eleven goldens; the
+failures were run down outside Unity (`WorkshopGateTest.Exercise` rebuilt as a console program per commit, `git bisect
+run`, headless renders of the fused files old against new) and none came from the deploy port: every Workshop difference
+is the underside rule of 2026-09-26 (the HMS Svea crow's nest) and the exposed-hull-panel rule of 2026-10-04, with the
+old and new renders pixel-identical; the Lab rows are the Gun section of 2026-09-26 (the pivot, the GUNSPAN line) and the
+in-process probe's naming (the Wespe); the Khelandion's dissolve row changed without an attributable commit and is noted.
+One standing defect found on the way, in the backlog: the salegs split's "23 split children are not one island" fails on
+2026-09-25 too. The eleven goldens were re-blessed (`ENCReload/Tools/{workshop,lab}_golden`, the old copies kept as
+`.bak-2026-09-25`); the dragon's preview FBX is stale and the battleship has no preview (both named, not fixed).
 
 The in-editor tests all run from **one window** — `Tools ▸ HAF ▸ Bake Tests…` (Smoke / Features / Conversion rows,
 each with a plain-language explanation, live per-row PASS/FAIL, and a durable `Logs/haf_bake_tests_report.txt` per
