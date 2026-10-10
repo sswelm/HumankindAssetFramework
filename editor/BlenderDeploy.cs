@@ -1250,6 +1250,13 @@ public static class BlenderDeploy
             long span = Math.Max(deployEnd, tailEnd) - fmin + 1, segSpan = 0;
             foreach (var (ss, se, _) in r.Segments) segSpan = Math.Max(segSpan, (long)se - ss + 1);
             if (span > 20000 || segSpan > 20000) throw new NotPortedException($"a role clip span past 20,000 frames ({span} to the deploy's or the tail's end, {segSpan} in a fire segment: the script would key for hours)");
+            var wheelNames = (argc > 17 ? Arg(17) : "").Split(',').Select(PyStrip).Where(w => w != "").ToList();
+            int wheelFrames = 15;
+            if (argc > 19 && PyStrip(Arg(19)) != "" && !PyInt(Arg(19), out wheelFrames)) throw new NotPortedException($"a wheel frame count the script cannot read ('{Arg(19)}')");
+            // folded holds N+1 poses even if a requested wheel is missing. Widen before adding so Int32.MaxValue
+            // cannot wrap to a negative count and silently produce an empty clip.
+            long wheelSpan = wheelNames.Count > 0 ? Math.Max(0L, (long)wheelFrames + 1) : 0L;
+            if (wheelSpan > 20000) throw new NotPortedException($"a role clip span past 20,000 frames ({wheelSpan} in the wheel clip: the script would key for hours)");
             long last = tailEnd > deployEnd ? tailEnd : deployEnd;
             var poseOrder = r.BoneOrder;
             var eul = poseOrder.ToDictionary(bn => bn, bn => new[] { 0f, 0f, 0f }, StringComparer.Ordinal);
@@ -1305,12 +1312,10 @@ public static class BlenderDeploy
             MakeRole("unfold", dep);
             MakeRole("fold", Enumerable.Reverse(dep).ToList());
             // the wheel spin in the folded role (argv[17..20]: bones, axis, frames, degrees)
-            var wheelNames = (argc > 17 ? Arg(17) : "").Split(',').Select(PyStrip).Where(w => w != "").ToList();
             string wheelAxis = argc > 18 ? PyStrip(Arg(18)) : "AUTO";
             // .strip().upper(): no string past ASCII upper-cases to X, Y or Z, so any such axis is AUTO (the reviewer's note)
             wheelAxis = wheelAxis.Any(ch => ch > 127) ? "AUTO" : wheelAxis.ToUpperInvariant(); if (wheelAxis == "") wheelAxis = "AUTO";
-            int wheelFrames = 15; double wheelDeg = -360.0;
-            if (argc > 19 && PyStrip(Arg(19)) != "" && !PyInt(Arg(19), out wheelFrames)) throw new NotPortedException($"a wheel frame count the script cannot read ('{Arg(19)}')");
+            double wheelDeg = -360.0;
             if (argc > 20 && PyStrip(Arg(20)) != "" && !PyFloat(Arg(20), out wheelDeg)) throw new NotPortedException($"wheel degrees the port does not read as Python's float() does ('{Arg(20)}')");
             if (wheelNames.Count > 0)
             {
@@ -1426,7 +1431,9 @@ public static class BlenderDeploy
                     for (int i = 0; i < nframes + 1; i++)
                     {
                         var e3 = new[] { 0f, 0f, 0f };
-                        e3[bestI] = (float)(degrees * (Math.PI / 180.0) * sign * (i / (double)nframes));
+                        // The RNA rotation_euler setter bounds the stored float; clamp before conversion to avoid Infinity.
+                        double angle = degrees * (Math.PI / 180.0) * sign * (i / (double)nframes);
+                        e3[bestI] = (float)Math.Max(-(double)float.MaxValue, Math.Min((double)float.MaxValue, angle));
                         eul[found] = e3;
                         InsertKey(role, found, 10, 3, fmin + i);
                     }

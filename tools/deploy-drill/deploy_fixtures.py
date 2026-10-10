@@ -795,6 +795,13 @@ def main(out):
     print("wheels_nonascii|%s|0|24|||||||0|||4|0|1||L_Wh\u00e9el|AUTO|8|-180" % fn)             # found by its exact name
     print("ROLELEFT:wheels_nonascii_sub|%s|0|24|||||||0|||4|0|1||Wh\u00e9|AUTO|8|-180" % fn)     # sought by a substring: Python's lower case of a name past ASCII
     print("wheels_recoil|%s|0|24||30|||26|34|1|||4|5|1||L_Wheel,R_Wheel|AUTO|8|-180" % wheels(out, "deploy_wheels_recoil", "auto"))
+    # rotation_euler's RNA setter clamps Python doubles to +/- FLT_MAX before storing them, including at intermediate keys.
+    for key, degrees in (("positive", "2e40"), ("negative", "-2e40"), ("large", "1e300"), ("large_negative", "-1e300")):
+        print("wheels_clamp_%s|%s|0|24|||||||0|||4|0|1||L_Wheel,R_Wheel|AUTO|3|%s" % (key, fw, degrees))
+    # Folded holds N+1 poses: the exact 20,000-key limit, a larger count and Int32 overflow must all be guarded.
+    for key, count in (("limit", 20000), ("large", 30000), ("max", 2147483647)):
+        print("ROLELEFT:wheels_span_%s|%s|0|24|||||||0|||4|0|1||L_Wheel|AUTO|%d|-360" % (key, fw, count))
+    print("wheels_unused_max|%s|0|24|||||||0|||4|0|1|||AUTO|2147483647|-360" % fw)
     print("ROLELEFT:role_span|%s|0|30000|||||||0|||4|0|1" % fw)
 
 

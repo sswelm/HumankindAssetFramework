@@ -703,6 +703,45 @@ public class BlenderDeployTests
     }
 
     [Theory]
+    [InlineData("1e40", 0x7f034dd2u)]
+    [InlineData("-1e40", 0xff034dd2u)]
+    [InlineData("2e40", 0x7f7fffffu)]
+    [InlineData("-2e40", 0xff7fffffu)]
+    [InlineData("1e300", 0x7f7fffffu)]
+    [InlineData("-1e300", 0xff7fffffu)]
+    public void Wheel_Euler_keys_clamp_like_the_Blender_RNA_setter(string degrees, uint expected)
+    {
+        // Blender 5.1.2: the rotation_euler setter clamps the Python double to +/- FLT_MAX before storing it.
+        // The final key and the held pose agree; finite angles below that limit keep their original bits.
+        var s = new Scene(); int wheel = s.Node("Wheel", mesh: true); s.Move(wheel); s.Decide();
+        var r = BlenderDeploy.Decide(s.M, ($"0|24|||||||0|||4|0|1||Wheel|X|3|{degrees}").Split('|'), null, true);
+        r.Finish(); Assert.Null(r.RoleFallback);
+        var keys = r.Roles.Single(x => x.Name == "folded").Curves["Wheel"][10];
+        Assert.Equal(4, keys.Count);
+        Assert.Equal(expected, BitConverter.ToUInt32(BitConverter.GetBytes(keys.Last().Value), 0));
+        Assert.Equal(expected, BitConverter.ToUInt32(BitConverter.GetBytes(r.ArmPose7["Wheel"].values[7]), 0));
+        Assert.All(keys, k => Assert.False(float.IsInfinity(k.Value) || float.IsNaN(k.Value)));
+    }
+
+    [Theory]
+    [InlineData(20000)]
+    [InlineData(30000)]
+    [InlineData(int.MaxValue)]
+    public void The_role_span_guard_includes_the_wheel_clip_before_allocating_keys(int frames)
+    {
+        var s = new Scene(); int wheel = s.Node("Wheel", mesh: true); s.Move(wheel); s.Decide();
+        var r = BlenderDeploy.Decide(s.M, ($"0|24|||||||0|||4|0|1||Wheel|X|{frames}|90").Split('|'), null, true);
+        r.Finish(); Assert.Null(r.Fallback);
+        Assert.Contains("20,000 frames", r.RoleFallback ?? "");
+        Assert.Contains("wheel clip", r.RoleFallback ?? "");
+        Assert.Empty(r.Roles);
+        Assert.NotNull(r.Objects7); // binding and cleanup remain available to the caller
+        // A count with no requested wheels doesn't build a wheel clip, so it must not trigger this guard.
+        var unused = BlenderDeploy.Decide(s.M, ($"0|24|||||||0|||4|0|1|||X|{frames}|90").Split('|'), null, true);
+        unused.Finish(); Assert.Null(unused.RoleFallback);
+    }
+
+    [Theory]
     // Blender 5.1.2's custom_normal shorts on the imported triangle below, measured through the bind oracle.
     [InlineData(2f, 0.5f, -0.25f, new int[] { -29978, 6750, -29978, -13100, -29978, -27538 })]
     [InlineData(-0.5f, -2f, 0.25f, new int[] { 19718, -14875, 19718, -27078, 19718, -3567 })]

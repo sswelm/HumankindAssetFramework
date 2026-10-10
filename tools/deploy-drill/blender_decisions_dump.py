@@ -44,7 +44,7 @@ the scene is then written out, every float as the hex of its bits.
     ACT7    <action name>                   every action left
     E7      <name> <rotation mode> <location 3, rotation_quaternion 4, rotation_euler 3, scale 3>   as held (no evaluation)
     O8      <name> <16>                     matrix_world after scene.frame_set(fmin), 7c's first act
-    SKIP7C  <span> <segment span>           a span past 20,000 frames: 7c not run (the port must leave the job by name)
+    SKIP7C  <span> <segment span> <wheel span>  past 20,000 frames: 7c not run (the port must leave the job by name)
     LOG7C   <a DEPLOY line>                 DIES7C <exception>
     ACT7C   <action> <slot identifiers>     every action after 7c
     FC7C    <action> <data_path> <index> <extrapolation> <auto_smoothing> <key: co, interpolation, handle types, handles>...
@@ -430,8 +430,14 @@ for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
                     tail_end = g.get("recoil_out_end")
                     span = max(deploy_end, tail_end if tail_end is not None else deploy_end) - g["fmin"] + 1
                     seg_span = max([se - ss + 1 for ss, se, st in g["_segments"]] + [0])
-                    if span > 20000 or seg_span > 20000:
-                        print("SKIP7C\t%d\t%d" % (span, seg_span))
+                    wheel_span = 0
+                    if len(av) > 17 and any(w.strip() for w in av[17].split(",")):
+                        try:
+                            wheel_span = max(0, (int(av[19]) if len(av) > 19 and av[19].strip() else 15) + 1)
+                        except ValueError:
+                            pass  # let code7c report the script's own int() failure
+                    if span > 20000 or seg_span > 20000 or wheel_span > 20000:
+                        print("SKIP7C\t%d\t%d\t%d" % (span, seg_span, wheel_span))
                     else:
                         out7c = io.StringIO(); dies7c = False
                         try:

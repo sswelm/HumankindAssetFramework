@@ -181,7 +181,8 @@ have the Factory strip "icosphere" always, which changes the output); **7, 7b, 7
 animated empties removed, every other animation cleared, the actions purged to "deploy"; the baked deploy sampled into
 unfold, fold, folded - the wheels spun on request -, deployed and recoil, each keyed with `keyframe_insert` frame by
 frame) - done 2026-10-11, as `Result.Finish` (lazy: what an object holds after 7b is what the LAST evaluation left,
-and the oracle sweeps frames before it); LEFT by name: a role clip span past 20,000 frames (the script would key for
+and the oracle sweeps frames before it); wheel Euler assignments clamp to +/- FLT_MAX as Blender's RNA setter does;
+LEFT by name: a role clip span past 20,000 frames (including the wheel clip's N+1 poses; the script would key for
 hours: the oracle does not run it either) and a deploy end before the bind frame (the script dies on a snapshot it
 never took - `gun_end_minus5000`, `gun_recoil_end_m8`: the recipe would need an end inside the clip); next 8 the
 export; 4 the bake, the options (barrel, legs, recoil, wheels) and

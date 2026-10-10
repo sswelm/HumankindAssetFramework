@@ -988,7 +988,18 @@ frames of -180 degrees, a negative count (no keys, the mode set and the quaterni
 a wheel past ASCII found by its exact name, with the recoil; the span guard; ROLELEFT: `gun_end_65537`, `gun_end_max`,
 `role_span` (the span), `gun_end_min`, `gun_end_minus5000`, `gun_end_negative*`, `gun_gen*_negative`,
 `gun_recoil_end_m8/m4` (the KeyError), `wheels_zero` (the division), `wheels_nonascii_sub` (Python's lower case of a
-name past ASCII, sought by a substring). Planted: 41 in the port, 41 fail the drill (the parts removed by their action,
+name past ASCII, sought by a substring).
+
+PR #146 review regressions: wheel angles `2e40`, `-2e40`, `1e300` and `-1e300` hold the RNA
+`rotation_euler` clamp to +/- FLT_MAX, including intermediate keys, handles and the held pose. Counts of
+20,000, 30,000 and Int32.MaxValue are `ROLELEFT:wheels_span_*`: the folded clip holds N+1 poses and must reach
+the 20,000-frame guard before allocating keys. The oracle skips those wheel clips too; a count of Int32.MaxValue
+with no requested wheel remains a fully compared control. Nine unit cases cover both fixes and finite-angle controls.
+Review validation: 1,488 unit tests pass; 104 independent Blender jobs compare 13,552 role curves and 193,720 keys
+without a mismatch (including shifted bind frames and recoil settle extremes with multi-segment epilogues).
+Removing either fix makes its matching one-job oracle regression fail; both intact controls pass.
+
+Planted: 41 in the port, 41 fail the drill (the parts removed by their action,
 a removed part's child under the grandparent, the armature's action cleared, the action's name, the Euler sign, the bones'
 order, the span guard both ways, the snapshot's KeyError taken as the identity, unfold a frame late, fold not reversed,
 folded and deployed keyed once, keys at the source frame, a bone born after the snapshot zeroed, the arm's location held,
