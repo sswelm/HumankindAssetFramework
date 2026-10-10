@@ -503,6 +503,9 @@ def main(out):
     print("gun_bs_huge|%s|0|24||36||1e6|||0|||4|0|1" % fg)
     print("gun_bs_forms|%s|0|24||36|.5|+.5e1|||0|||4|0|1" % fg)
     print("gun_ls_forms|%s|0|24|| 24| 1E0 |1.|||0|||4|0|1" % fg)
+    # .NET Framework used to read this decimal one ulp above Python, printing leg scale x0.40 instead of x0.39.
+    print("gun_ls_decimal|%s|0|24|||0.39499999999999999||||0|||4|0|1" % fg)
+    print("gun_bs_decimal|%s|0|24||36||0.39499999999999999|||0|||4|0|1" % fg)
     for seed in (1, 2, 3):
         f = gunnery_general(out, "deploy_gunnery_general%d" % seed, seed)
         print("gun_gen%d_a|%s|0|24||36|0.3|1.7|||0|||4|0|1" % (seed, f))

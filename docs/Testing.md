@@ -698,7 +698,7 @@ inside the escaped data path), `bone_of.values()` naming a pair-merged part's bo
 negative zero keeps its sign). `mode_set` evaluates NOTHING: after 5b a barrel bone holds the end pose assigned last,
 not the curve at the ready frame. The oracle runs a FOURTH stage, to `# --- 5d.`: the log, every curve of the action
 with its extrapolation and smoothing and every key with interpolation, handle types and both handles (`FC4`), what
-the pose bones hold (`APB4`), every object's matrix (`O5`). 147 jobs, 4,408 re-keyed keys with their handles equal to
+the pose bones hold (`APB4`), every object's matrix (`O5`). 149 jobs, 4,460 re-keyed keys with their handles equal to
 the bit: the howitzer (neutral scales only - no registry model scales) and a fixture gun through scales 0, 0.25, 0.5,
 1.5, 2, 2.9, 3, -2.3, 5.9, 1e6, -0, ends 0, 1, 2, 24, 25, the ready frame before, on, between and past the new keys,
 with a fire window, on the contract path with merged "Cannon" links and with a barrel under a turning turret;
@@ -715,6 +715,13 @@ Framework and on Mono (`gun_bs_negzero`, `gun_ls_negzero`: six curves, and the l
 26 caught; the one that is not - an evaluation after the LEGS are keyed - is equivalent (every frame set there lies
 on a key whose value is the one held). The gate takes a Bezier curve, a pose row and an object row out of the real
 dump, removes, doubles, renames and turns a bit of each, and removes the log line: thirteen checks, each must fail.
+
+*Review of PR #141*: barrel and leg scales use the correctly rounded Python double even where .NET Framework's
+`double.TryParse` differs by one ulp. `gun_ls_decimal` holds the log's `x0.39` for `0.39499999999999999` (the old
+conversion printed `x0.40`), and `gun_bs_decimal` uses the same scale in the barrel retarget. Unit cases hold the
+parsed bits near decimal rounding boundaries, exact binary midpoint ties (including a power-of-two boundary),
+subnormal and normal transitions, underflow and signed zero. The parser corrects the runtime's estimate by comparing
+the exact decimal input to the adjacent doubles' exact midpoints; unsupported Python forms still fall back.
 
 Left to Blender from the bake on, by name (`BAKELEFT:` jobs, `BlenderDeployTests`): a frame set strictly INSIDE a new
 Bezier segment (a negative end with a leg scale; the evaluation needs Blender's cubic solver and comes as its own

@@ -298,6 +298,36 @@ public class BlenderDeployTests
     }
 
     [Theory]
+    [InlineData("0.39499999999999999", "3fd947ae147ae147")]
+    [InlineData("0.5749999999999999", "3fe2666666666665")]
+    [InlineData("0.8249999999999999", "3fea666666666665")]
+    [InlineData("-0.39499999999999999", "bfd947ae147ae147")]
+    [InlineData("-0", "8000000000000000")]
+    [InlineData("-1e-500", "8000000000000000")]
+    [InlineData("5e-324", "0000000000000001")]
+    [InlineData("2.4703282292062327e-324", "0000000000000000")]
+    [InlineData("2.4703282292062328e-324", "0000000000000001")]
+    [InlineData("2.2250738585072012e-308", "0010000000000000")]
+    [InlineData("1.00000000000000011102230246251565404236316680908203125", "3ff0000000000000")]
+    [InlineData("1.00000000000000033306690738754696212708950042724609375", "3ff0000000000002")]
+    [InlineData("0.999999999999999944488848768742172978818416595458984375", "3ff0000000000000")]
+    public void Scale_decimals_round_to_the_nearest_Python_double(string input, string bits)
+    {
+        Assert.True(BlenderDeploy.ReadPythonFloat(input, out double value));
+        Assert.Equal(bits, BitConverter.DoubleToInt64Bits(value).ToString("x16"));
+    }
+
+    [Fact]
+    public void A_leg_scale_decimal_is_rounded_as_Python_reads_it()
+    {
+        var s = new Scene(); int hull = s.Node("Hull", mesh: true);
+        s.Move(s.Node("Leg", hull, mesh: true)); s.Decide();
+        var r = BlenderDeploy.Decide(s.M, "0|24|||0.39499999999999999||||0|||4|0|1".Split('|'), null, true);
+        Assert.Null(r.Fallback);
+        Assert.Contains("DEPLOY legs scaled x0.39 from initial (1 bones), spread by 12 held to 24", r.RetargetLog);
+    }
+
+    [Theory]
     [InlineData("3\0", "5")]
     [InlineData("3\0\0", "5")]
     [InlineData("3", "5\0")]
