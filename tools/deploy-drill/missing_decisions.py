@@ -126,6 +126,31 @@ def main(out, dump, jobs):
     write("gun_SW_frame", [l for i, l in enumerate(gun) if i not in gone])
     gone = set(i for _, g in frames[6:] for i in g)
     write("gun_SW_tail", [l for i, l in enumerate(gun) if i not in gone])
+    # the recoil tail (5d): a job that keyed a RecoilArm - its measurements, the rebuilt bones, the arm's curves, the
+    # pose rows, the pose matrices and the objects after it: each missing, doubled, renamed, cut short or one bit off;
+    # the log line missing; the script's exit claimed
+    rec = next((b for b in blocks if "R5" in kinds(b) and "DONE" in kinds(b) and any(l.startswith("RBONE5\tRecoilArm") for l in b)
+                and not b[0].startswith(("JOB\tLEFT:", "JOB\tBAKELEFT:"))), None)
+    if rec is None:
+        raise ValueError("no job with a recoil tail in the dump")
+    control("recoil", rec)
+    for kind in ("R5", "RBONE5", "FC5", "APB5", "PM5", "O6"):
+        rows = [i for i, l in enumerate(rec) if l.startswith(kind + "\t") and (kind != "FC5" or "RecoilArm" in l)]
+        lines = list(rec); del lines[rows[0]]
+        write("recoil_%s_missing" % kind, lines)
+        lines = list(rec); lines[rows[1]] = rec[rows[0]]
+        write("recoil_%s_duplicate" % kind, lines)
+        t = rec[rows[0]].split("\t"); t[1 if kind != "FC5" else 1] = ('pose.bones["no such bone"].location' if kind == "FC5" else "no such name")
+        lines = list(rec); lines[rows[0]] = "\t".join(t)
+        write("recoil_%s_unknown" % kind, lines)
+        lines = list(rec); lines[rows[0]] = rec[rows[0]].rsplit("\t", 1)[0]
+        write("recoil_%s_short" % kind, lines)
+        last = rec[rows[-1]][-1]
+        lines = list(rec); lines[rows[-1]] = rec[rows[-1]][:-1] + ("0" if last != "0" else "1")
+        write("recoil_%s_value" % kind, lines)
+    write("recoil_LOG5_missing", [l for l in rec if not l.startswith("LOG5\t")])
+    write("recoil_EXIT5_claimed", [l if not l.startswith("R5\t") else l for l in rec] + ["EXIT5\t1"])
+    write("recoil_DIES5_claimed", list(rec) + ["DIES5\tValueError: Matrix.inverted(): singular"])
     abort = next((b for b in blocks if "EXIT\t1" in b and "DONE" in kinds(b) and not b[0].startswith("JOB\tLEFT:")), None)
     if abort is None:
         raise ValueError("no abort job in the dump for the EXIT regressions")

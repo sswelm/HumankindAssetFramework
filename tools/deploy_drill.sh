@@ -180,7 +180,7 @@ n_jobs=$(grep -c "" "$TMPD/jobs.txt")
 t3=$(date +%s)
 "$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_decisions_dump.py")" -- "$WROOT/editor/Tools~/deploy_convert.py" "$WTMP/jobs.txt" > "$TMPD/decisions_raw.txt" 2> "$TMPD/decisions_err.txt"; drc=$?   # stderr apart: a depsgraph warning lands in the middle of a row otherwise
 t4=$(date +%s)
-tr -d '\r' < "$TMPD/decisions_raw.txt" | grep -E "^(JOB|LOG|LOG2|EXIT|RANGE|NORM|FLAG|PART|BAD|ALIAS|ARM|BONEOF|RBONE|ANCHOR|HULL|PINV|OBJ|M|T|BOX|ACT|FC|FCA|PB2|PB3|M2|O2|O3|LOG3|SNAP|APB|O4|LOG4|FC4|APB4|O5|SW|DONE|FAIL)	" > "$TMPD/decisions.txt"
+tr -d '\r' < "$TMPD/decisions_raw.txt" | grep -E "^(JOB|LOG|LOG2|EXIT|RANGE|NORM|FLAG|PART|BAD|ALIAS|ARM|BONEOF|RBONE|ANCHOR|HULL|PINV|OBJ|M|T|BOX|ACT|FC|FCA|PB2|PB3|M2|O2|O3|LOG3|SNAP|APB|O4|LOG4|FC4|APB4|O5|LOG5|EXIT5|DIES5|R5|RBONE5|FC5|APB5|PM5|O6|SW|DONE|FAIL)	" > "$TMPD/decisions.txt"
 n_done=$(grep -c "^DONE" "$TMPD/decisions.txt")
 if [ "$drc" -ne 0 ] || [ "$n_done" -ne "$n_jobs" ]; then
   grep -E "^FAIL|Traceback|Error" "$TMPD/decisions_raw.txt" "$TMPD/decisions_err.txt" | head -8
@@ -337,6 +337,42 @@ for mode in missing duplicate unknown short value none frame tail; do
   fi
 done
 echo "PASS — deploy drill rejects a frame sweep with a missing, doubled, unknown, truncated or changed row, one with a frame taken out or its tail cut off, and a retarget without one"
+# ... and the recoil tail (5d): against an intact control, a measurement row, a rebuilt bone, one of the arm's curves, a
+# pose row, a pose matrix and an object row after it - each missing, doubled, renamed, cut short or one bit off; the
+# log line missing; the script's exit or death claimed where the port went on
+"$TMPD/deploy.exe" --decisions "$WTMP/missing_dec/recoil_jobs.txt" "$WTMP/missing_dec/recoil_intact.txt" > "$TMPD/recoil_control.txt" 2>&1; controlrc=$?
+if [ "$controlrc" -ne 0 ] || ! grep -qE "^PASS " "$TMPD/recoil_control.txt"; then
+  head -5 "$TMPD/recoil_control.txt"
+  echo "FAIL — deploy drill rejected the intact recoil control (rc=$controlrc)"; exit 1
+fi
+for kind in R5 RBONE5 FC5 APB5 PM5 O6; do
+  for mode in missing duplicate unknown short value; do
+    case "$kind" in
+      R5) reason="the recoil step's measurements";;
+      RBONE5) reason="bone";;
+      FC5) reason="curve";;
+      APB5) reason="pose row|pose bones of the new armature hold other values";;
+      PM5|O6) reason="object row|matrices .*after the recoil";;
+    esac
+    "$TMPD/deploy.exe" --decisions "$WTMP/missing_dec/recoil_jobs.txt" "$WTMP/missing_dec/recoil_${kind}_$mode.txt" > "$TMPD/recoil_${kind}_$mode.txt" 2>&1; badrc=$?
+    if [ "$badrc" -ne 1 ] || ! grep -E "^FAIL " "$TMPD/recoil_${kind}_$mode.txt" | grep -qE "$reason"; then
+      head -5 "$TMPD/recoil_${kind}_$mode.txt"
+      echo "FAIL — deploy drill accepted invalid recoil evidence ($kind $mode, rc=$badrc)"; exit 1
+    fi
+  done
+done
+for mode in LOG5_missing EXIT5_claimed DIES5_claimed; do
+  case "$mode" in
+    LOG5_missing) reason="the recoil step's log";;
+    EXIT5_claimed) reason="exits in the recoil step";;
+    DIES5_claimed) reason="died in the recoil step";;
+  esac
+  "$TMPD/deploy.exe" --decisions "$WTMP/missing_dec/recoil_jobs.txt" "$WTMP/missing_dec/recoil_$mode.txt" > "$TMPD/recoil_$mode.txt" 2>&1; badrc=$?
+  if [ "$badrc" -ne 1 ] || ! grep -E "^FAIL " "$TMPD/recoil_$mode.txt" | grep -qE "$reason"; then
+    head -5 "$TMPD/recoil_$mode.txt"; echo "FAIL — deploy drill accepted a recoil dump with $mode (rc=$badrc)"; exit 1
+  fi
+done
+echo "PASS — deploy drill accepts an intact recoil tail and rejects missing, doubled, unknown, truncated or changed measurement, bone, curve, pose, pose-matrix and object rows, a missing log line, and a claimed exit or death of the script"
 
 # ---- the handles of automatic keys: Blender's own calculation (FCurve.update(), keyframe_points.insert(), and
 #      handles_recalc() on keys stored raw) on generated curves against BlenderFCurve.RecalcHandles, both handles of

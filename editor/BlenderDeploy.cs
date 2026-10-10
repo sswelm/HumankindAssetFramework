@@ -117,6 +117,32 @@ public static class BlenderDeploy
         public readonly Dictionary<string, List<ArmKey>[]> Rekeyed = new Dictionary<string, List<ArmKey>[]>(StringComparer.Ordinal);
         public readonly List<string> RetargetLog = new List<string>();
         public Dictionary<string, float[]> AfterRetarget;
+        /// <summary>What the pose bones held after 5b/5c, before the recoil step moved the scene.</summary>
+        public Dictionary<string, float[]> ArmPoseAfterRetarget;
+        // ---- 5d, the recoil tail
+        public readonly List<string> RecoilLog = new List<string>();
+        public bool ExitAtRecoil;                                   // the script's own exit (no barrel to pick)
+        public RecoilResult Recoil;                                 // what the step measured on the way (null without one)
+        /// <summary>The bones after the recoil step: every bone rebuilt from its edit bone, the RecoilArm among them -
+        /// the same list as Bones when the step did not run.</summary>
+        public List<Bone> BonesAfterRecoil;
+        public Dictionary<string, float[]> AfterRecoil;
+    }
+
+    /// <summary>The recoil step's measurements, as the script's own variables hold them (matrices in mathutils' item
+    /// order, row-major; vectors float32; the lengths and angles Python doubles).</summary>
+    public sealed class RecoilResult
+    {
+        public int Rs, Re, Step, DeployEnd; public long KickEnd, OutEnd;
+        public List<int> Frames;
+        public string Driver, Cradle, TubeRoot, ArmName; public List<string> Ordered;
+        public double Mag, Dist, R;
+        public Dictionary<string, float[]> Home, Aim;
+        public Dictionary<string, Dictionary<int, float[]>> Src; public List<string> SrcOrder;
+        public Dictionary<int, float[]> Slide; public List<int> SlideOrder;
+        public float[] Peak, D, A, Radius, TubeHead, Pivot, ALocal, Cbar3;
+        public readonly List<double> Thetas = new List<double>();
+        public readonly Dictionary<int, double> ArcBySrc = new Dictionary<int, double>();
     }
 
     /// <summary>A key `keyframe_insert` made: Bezier, both handles AUTO_CLAMPED.</summary>
@@ -675,14 +701,15 @@ public static class BlenderDeploy
         // ---- 5a. the fire-window snapshot: argv[8] and argv[9] are lists of starts and ends ("530,441/2": an end with a
         //      speed step); every frame of every segment is set and each bone's location and quaternion taken
         // the new armature's bones follow their baked curves: a key a frame, the ends held; an equal value is not written
+        var poseBoneNames = r.Bones.Select(b => b.Name).ToList();
         void EvalArm(int f)
         {
-            foreach (var b in r.Bones)
+            foreach (string bn in poseBoneNames)
             {
-                if (r.Rekeyed.TryGetValue(b.Name, out var channels))
+                if (r.Rekeyed.TryGetValue(bn, out var channels))
                 {
                     // a re-keyed bone: Bezier keys with constant ends; a channel without a curve holds
-                    var h = r.ArmPose[b.Name];
+                    var h = r.ArmPose[bn];
                     for (int c = 0; c < 10; c++)
                     {
                         var list = channels[c];
@@ -692,7 +719,8 @@ public static class BlenderDeploy
                     }
                     continue;
                 }
-                var keys = r.Keys[b.Name]; var key = keys[Math.Max(0, Math.Min(keys.Length - 1, f - r.BakeFrameMin))]; var held = r.ArmPose[b.Name];
+                if (!r.Keys.TryGetValue(bn, out var keys)) continue;   // a bone without curves (the RecoilArm before its keys)
+                var key = keys[Math.Max(0, Math.Min(keys.Length - 1, f - r.BakeFrameMin))]; var held = r.ArmPose[bn];
                 for (int c = 0; c < (r.ScaleKeys ? 10 : 7); c++) if (held[c] != key[c]) held[c] = key[c];
             }
         }
@@ -744,11 +772,33 @@ public static class BlenderDeploy
         r.AfterFire = all.ToDictionary(o => o.Name, o => (float[])o.World.Clone(), StringComparer.Ordinal);
         r.ArmPoseAfterFire = r.ArmPose.ToDictionary(kv => kv.Key, kv => (float[])kv.Value.Clone(), StringComparer.Ordinal);
 
+        int current = r.Segments.Count > 0 && r.FireSnap.Count > 0 ? lastSet : fmin;
+        void Set(int f) { int e = Math.Max(-1048574, Math.Min(1048574, f)); FrameSet(e); EvalArm(e); current = e; }
+        // pb.keyframe_insert(path, frame): the property's value keyed there - a Bezier key, the handles recalculated
+        void Insert(string bone, int from, int count, int frame)
+        {
+            var channels = r.Rekeyed[bone]; var h = r.ArmPose[bone];
+            for (int c = from; c < from + count; c++)
+            {
+                var list = channels[c] ?? (channels[c] = new List<ArmKey>());
+                var key = list.FirstOrDefault(k => k.Frame == frame);
+                if (key == null) { key = new ArmKey { Frame = frame, Value = h[c] }; list.Add(key); list.Sort((x, y) => x.Frame.CompareTo(y.Frame)); }
+                else
+                {
+                    // a key already on that frame is MOVED by the difference (replace_bezt_keyframe_ypos: dy = new - old,
+                    // value += dy, in float32): not the new value to the bit when the difference lies in a higher binade
+                    float dy = (float)(h[c] - key.Value);
+                    key.Value = (float)(key.Value + dy);
+                }
+                BlenderFCurve.RecalcHandles(list);
+            }
+        }
+        bool PyFloat(string s, out double v) => ReadPythonFloat(s, out v);
+        string Lower(string n) => AsciiLower(n);
+        var boneOfValues = r.BoneOf.Select(x => x.bone).ToList();   // bone_of.values(): a merged part's bone comes again
         // ---- 5b, 5c
         try
         {
-            int current = r.Segments.Count > 0 && r.FireSnap.Count > 0 ? lastSet : fmin;
-            void Set(int f) { int e = Math.Max(-1048574, Math.Min(1048574, f)); FrameSet(e); EvalArm(e); current = e; }
             // clear_bone_channels: every curve whose data path CONTAINS pose.bones["<name>"] - the name as it is, the
             // path with the name escaped: a name with a quote or a backslash is never found
             bool Escaped(string n) => n.IndexOf('"') >= 0 || n.IndexOf('\\') >= 0;
@@ -758,32 +808,10 @@ public static class BlenderDeploy
                     foreach (var b in r.Bones)
                         if (("pose.bones[\"" + b.Name + "\"]").Contains("pose.bones[\"" + bn + "\"]")) r.Rekeyed[b.Name] = new List<ArmKey>[10];
             }
-            // pb.keyframe_insert(path, frame): the property's value keyed there - a Bezier key, the handles recalculated
-            void Insert(string bone, int from, int count, int frame)
-            {
-                var channels = r.Rekeyed[bone]; var h = r.ArmPose[bone];
-                for (int c = from; c < from + count; c++)
-                {
-                    var list = channels[c] ?? (channels[c] = new List<ArmKey>());
-                    var key = list.FirstOrDefault(k => k.Frame == frame);
-                    if (key == null) { key = new ArmKey { Frame = frame, Value = h[c] }; list.Add(key); list.Sort((x, y) => x.Frame.CompareTo(y.Frame)); }
-                    else
-                    {
-                        // a key already on that frame is MOVED by the difference (replace_bezt_keyframe_ypos: dy = new - old,
-                        // value += dy, in float32): not the new value to the bit when the difference lies in a higher binade
-                        float dy = (float)(h[c] - key.Value);
-                        key.Value = (float)(key.Value + dy);
-                    }
-                    BlenderFCurve.RecalcHandles(list);
-                }
-            }
-            bool PyFloat(string s, out double v) => ReadPythonFloat(s, out v);
-            string Lower(string n) => AsciiLower(n);
             // acosf, sinf and the cubic solver's exp, log, acos and cos are the 64-bit Windows C runtime's: elsewhere the
             // rounded doubles are an ulp off now and then (2 of 19,078 values measured under a 32-bit Mono)
-            if (!BlenderTrig.Exact && (PyStrip(argc > 5 ? Arg(5) : "") != "" || PyStrip(argc > 6 ? Arg(6) : "") != ""))
-            { r.Fallback = "a barrel retarget or a leg scale in a process without the 64-bit Windows C runtime's float functions (Blender's bits cannot be had)"; return r; }
-            var boneOfValues = r.BoneOf.Select(x => x.bone).ToList();   // bone_of.values(): a merged part's bone comes again
+            if (!BlenderTrig.Exact && (PyStrip(argc > 5 ? Arg(5) : "") != "" || PyStrip(argc > 6 ? Arg(6) : "") != "" || PyStrip(seg8) != ""))
+            { r.Fallback = "a barrel retarget, a leg scale or a recoil in a process without the 64-bit Windows C runtime's float functions (Blender's bits cannot be had)"; return r; }
             if (boneOfValues.Any(n => n.Any(ch => ch > 127)) && (PyStrip(argc > 5 ? Arg(5) : "") != "" || PyStrip(argc > 6 ? Arg(6) : "") != ""))
             { r.Fallback = "a bone name past ASCII with a barrel retarget or a leg scale (Python's lower case of it)"; return r; }
 
@@ -846,6 +874,211 @@ public static class BlenderDeploy
         }
         catch (NotPortedException e) { r.Fallback = e.Message; return r; }
         r.AfterRetarget = all.ToDictionary(o => o.Name, o => (float[])o.World.Clone(), StringComparer.Ordinal);
+
+        // ---- 5d. the recoil tail: the source's own kickback over the first fire segment, read as each tube node's world
+        //      matrix frame by frame, becomes an arc on a new RecoilArm bone put between the tube and its parent (edit
+        //      mode: every bone is rebuilt from its edit bone, an ulp moves) and keyed there - the identity through the
+        //      deploy, the arc over the kick, the arc backwards and slower for the return, the identity to settle
+        r.ArmPoseAfterRetarget = r.ArmPose.ToDictionary(kv => kv.Key, kv => (float[])kv.Value.Clone(), StringComparer.Ordinal);
+        r.BonesAfterRecoil = r.Bones;
+        if (PyStrip(seg8) != "")
+        {
+            try { RecoilStep(); }
+            catch (NotPortedException e) { r.Fallback = e.Message; return r; }
+        }
+        void RecoilStep()
+        {
+            var rec = new RecoilResult(); r.Recoil = rec;
+            float[] Trans(float[] it) => new[] { it[3], it[7], it[11] };
+            float[] Sub3(float[] a, float[] b) => new[] { (float)(a[0] - b[0]), (float)(a[1] - b[1]), (float)(a[2] - b[2]) };
+            float[] Add3(float[] a, float[] b) => new[] { (float)(a[0] + b[0]), (float)(a[1] + b[1]), (float)(a[2] + b[2]) };
+            float[] MulF(float[] a, float s) => new[] { (float)(a[0] * s), (float)(a[1] * s), (float)(a[2] * s) };
+            float[] Cross(float[] a, float[] b) => new[] { (float)((float)(a[1] * b[2]) - (float)(a[2] * b[1])), (float)((float)(a[2] * b[0]) - (float)(a[0] * b[2])), (float)((float)(a[0] * b[1]) - (float)(a[1] * b[0])) };
+            // Vector.length and Vector.dot: float32 products summed in a double from the LAST component down (dot_vn_vn)
+            double Dot3(float[] a, float[] b) { double d = 0.0; for (int i = 2; i >= 0; i--) d += (double)(float)(a[i] * b[i]); return d; }
+            double PyLen(float[] a) => Math.Sqrt(Dot3(a, a));
+            // Vector.normalized (normalize_vn): the SQUARES in double, summed from the last component (len_squared_vn - not
+            // the float32 products .length takes), 1 / float(sqrt) as the float32 scale, zero under 1e-35
+            float[] Normalized(float[] a) { double d = 0.0; for (int i = 2; i >= 0; i--) d += (double)a[i] * (double)a[i]; if (!(d > 1.0e-35)) return new[] { 0f, 0f, 0f }; float s = (float)(1.0f / (float)Math.Sqrt(d)); return MulF(a, s); }
+            float[] To3x3(float[] it) => new[] { it[0], it[1], it[2], it[4], it[5], it[6], it[8], it[9], it[10] };
+            // Matrix(3x3) @ Vector: per row a double sum of float32 products
+            float[] Mat3Vec(float[] m, float[] v) { var o = new float[3]; for (int row = 0; row < 3; row++) { double d = 0.0; for (int col = 0; col < 3; col++) d += (double)(float)(m[row * 3 + col] * v[col]); o[row] = (float)d; } return o; }
+            float[] RowMajor(float[] world) => VehicleProbe.ToRowMajor(world);
+
+            int deployEnd;
+            if (!PyInt(argc > 3 ? Arg(3) : "", out deployEnd)) throw new NotPortedException($"an end frame the script cannot read ('{(argc > 3 ? Arg(3) : "")}': the recoil step fails there)");
+            if (r.Segments.Count == 0) throw new NotPortedException("a fire window without a segment (the recoil step fails on it)");
+            int rs = r.Segments[0].start, re = r.Segments[0].end;
+            int step = 2;
+            if (argc > 10 && PyStrip(Arg(10)) != "" && !PyInt(Arg(10), out step)) throw new NotPortedException($"a recoil step the script cannot read ('{Arg(10)}')");
+            var byName = r.Bones.ToDictionary(b => b.Name, b => b, StringComparer.Ordinal);
+            var recoilBones = boneOfValues.Where(n => Lower(n).Contains("barrel") || Lower(n).Contains("cannon")).ToList();
+            if (recoilBones.Any(n => n.Any(ch => ch > 127))) throw new NotPortedException("a bone name past ASCII in the recoil step (Python's lower case of it)");
+            // bone_to_src = {bone_of[p.name]: p for p in parts if p.name in bone_of}: the LAST part on a bone wins
+            var boneToSrc = new Dictionary<string, Obj>(StringComparer.Ordinal);
+            foreach (var p in parts) if (boneOf.TryGetValue(p, out var pbn)) boneToSrc[pbn.Name] = p;
+            int Depth(string bn) { int d = 0; for (var b = byName[bn].Parent; b != null; b = b.Parent) d++; return d; }
+            var ordered = recoilBones.Where(bn => boneToSrc.ContainsKey(bn)).OrderBy(Depth).ToList();   // a stable sort, as Python's
+            if (ordered.Count == 0)
+            {
+                r.RecoilLog.Add("DEPLOY ERROR: recoil requested but no animated part name contains 'barrel'/'cannon' — cannot pick the tube. Animated parts: " + string.Join(", ", boneOfValues.OrderBy(n => n, StringComparer.Ordinal)));
+                r.ExitAtRecoil = true;
+                return;
+            }
+            if (step == 0) throw new NotPortedException("a recoil step of 0 (range() refuses it: the script fails)");
+            var frames = new List<int>();
+            if (step > 0) for (long t = rs; t <= re; t += step) frames.Add((int)t);
+            else for (long t = rs; t > (long)re + 1; t += step) frames.Add((int)t);
+            if (frames.Count == 0) throw new NotPortedException("a fire segment that runs the wrong way for its step (no frame to read: the script fails)");
+            if (frames[frames.Count - 1] != re) frames.Add(re);
+            rec.Rs = rs; rec.Re = re; rec.Step = step; rec.Frames = frames; rec.Ordered = ordered;
+
+            // Phase A: the source nodes' world matrices at the aim frame and across the recoil
+            Set(rs);
+            var mAim = new Dictionary<string, float[]>(StringComparer.Ordinal); foreach (string bn in ordered) mAim[bn] = RowMajor(boneToSrc[bn].World);
+            var srcW = new Dictionary<string, Dictionary<int, float[]>>(StringComparer.Ordinal); var srcOrder = new List<string>();
+            foreach (string bn in ordered) if (!srcW.ContainsKey(bn)) { srcW[bn] = new Dictionary<int, float[]>(); srcOrder.Add(bn); }
+            foreach (int t in frames) { Set(t); foreach (string bn in ordered) srcW[bn][t] = RowMajor(boneToSrc[bn].World); }
+
+            // Phase B: the deployed hold
+            Set(deployEnd);
+            var poseNow = PoseMatrices(r.Bones, r.ArmPose);
+            var mHome = new Dictionary<string, float[]>(StringComparer.Ordinal); foreach (string bn in ordered) mHome[bn] = RowMajor(poseNow[bn]);
+            // the tube that moves most over the window (max(): the first of equals; a NaN first stands)
+            string driver = null; double best = 0.0; bool first = true;
+            foreach (string bn in ordered)
+            {
+                double m = 0.0; bool f0 = true;
+                foreach (int t in frames) { double len = PyLen(Sub3(Trans(srcW[bn][t]), Trans(mAim[bn]))); if (f0 || len > m) { m = len; f0 = false; } }
+                if (first || m > best) { best = m; driver = bn; first = false; }
+            }
+            var parentBone = byName[driver].Parent;
+            string cradle = parentBone != null && boneToSrc.ContainsKey(parentBone.Name) ? parentBone.Name : driver;
+            string tubeRoot = mHome.ContainsKey(cradle) ? cradle : driver;
+            double mag = 1.0;
+            if (argc > 11 && PyStrip(Arg(11)) != "" && !PyFloat(Arg(11), out mag)) throw new NotPortedException($"a slide scale the port does not read as Python's float() does ('{Arg(11)}')");
+            if (mag == 0.0) { mag = 1.0; r.RecoilLog.Add("DEPLOY slide scale 0 treated as 1 (zero would silently kill the Slam)"); }
+            if (!srcW.ContainsKey(cradle))
+            {
+                srcW[cradle] = new Dictionary<int, float[]>(); srcOrder.Add(cradle);
+                foreach (int t in frames) { Set(t); srcW[cradle][t] = RowMajor(boneToSrc[cradle].World); }
+                Set(deployEnd);
+            }
+            var scAim = srcW[cradle][rs]; var sbAim = srcW[driver][rs];
+            var sbInv = VehicleProbe.Inverted(sbAim);
+            if (sbInv == null) throw new NotPortedException($"the tube's aim matrix has no inverse ('{driver}': Matrix.inverted() raises, the script fails)");
+            var cbar3 = To3x3(VehicleProbe.MatMulMathutils(mHome[driver], sbInv));
+            var slide = new Dictionary<int, float[]>(); var slideOrder = new List<int>();
+            foreach (int t in frames)
+            {
+                var cInv = VehicleProbe.Inverted(srcW[cradle][t]);
+                if (cInv == null) throw new NotPortedException($"the cradle's matrix at frame {t} has no inverse ('{cradle}': the script fails)");
+                var bt = VehicleProbe.MatMulMathutils(scAim, VehicleProbe.MatMulMathutils(cInv, srcW[driver][t]));
+                if (!slide.ContainsKey(t)) slideOrder.Add(t);
+                slide[t] = MulF(Mat3Vec(cbar3, Sub3(Trans(bt), Trans(sbAim))), (float)mag);
+            }
+            float[] peak = null; double peakLen = 0.0; first = true;
+            foreach (int t in slideOrder) { double l = PyLen(slide[t]); if (first || l > peakLen) { peakLen = l; peak = slide[t]; first = false; } }
+            double dist = peakLen != 0.0 ? peakLen : 1.0;   // `or 1.0`: a zero (of either sign) is false, a NaN is true
+            var d = Normalized(peak);
+            var A = Cross(d, new[] { 0f, 0f, 1f });
+            if (PyLen(A) < 1e-4) A = Cross(d, new[] { 0f, 1f, 0f });
+            A = Normalized(A);
+            double slamDeg = 0.0;
+            if (argc > 14 && PyStrip(Arg(14)) != "" && !PyFloat(Arg(14), out slamDeg)) throw new NotPortedException($"a slam the port does not read as Python's float() does ('{Arg(14)}')");
+            double R;
+            if (Math.Abs(slamDeg) > 0.0)
+            {
+                R = dist * 57.2958 / slamDeg;
+                r.RecoilLog.Add($"DEPLOY slam {PyFormat.Fixed(slamDeg, 1)} deg -> derived Arc R {PyFormat.Fixed(R, 1)} (peak slide {PyFormat.Fixed(dist, 1)}){(slamDeg < 0 ? " [REVERSED: muzzle-up]" : "")}");
+            }
+            else if (argc > 12 && PyStrip(Arg(12)) != "")
+            {
+                if (!PyFloat(Arg(12), out R)) throw new NotPortedException($"an arc radius the port does not read as Python's float() does ('{Arg(12)}')");
+            }
+            else { R = 1.0e9; r.RecoilLog.Add("DEPLOY slam 0 — no kick pitch (arm stays identity)"); }
+            // theta = -length / R: Python divides by zero and dies (a legacy radius of 0, of either sign)
+            if (R == 0.0) throw new NotPortedException($"an arc radius of zero ('{Arg(12)}': the script divides by it and fails)");
+            // Positive radii are capped at 1000 for the edit bone's pivot; negative radii are not. Casting a very
+            // negative Python double to float makes the pivot non-finite: Blender's rebuilt bone cannot be inverted,
+            // while the port's NaN determinant can pass the zero-determinant guard. Leave that edit-mode case to Blender.
+            if (R < -float.MaxValue) throw new NotPortedException("an arc radius below the finite float32 range (the recoil edit-bone pivot overflows)");
+            var radius = Normalized(Cross(A, d));
+            var tubeHead = Trans(mHome[tubeRoot]);
+            var pivot = Sub3(tubeHead, MulF(radius, (float)Math.Min(R, 1000.0)));
+            rec.Driver = driver; rec.Cradle = cradle; rec.TubeRoot = tubeRoot; rec.Mag = mag; rec.Dist = dist; rec.R = R; rec.DeployEnd = deployEnd;
+            rec.Home = mHome; rec.Aim = mAim; rec.Src = srcW; rec.SrcOrder = srcOrder; rec.Slide = slide; rec.SlideOrder = slideOrder;
+            rec.Peak = peak; rec.D = d; rec.A = A; rec.Radius = radius; rec.TubeHead = tubeHead; rec.Pivot = pivot; rec.Cbar3 = cbar3;
+
+            // edit mode: a RecoilArm bone (head at the pivot, tail 10 along the arc axis) between the tube and its parent;
+            // leaving edit mode rebuilds EVERY bone from its edit bone (head, tail, roll): the tube's subtree moves an ulp
+            string raName = BlenderNames.UniqueBone(boneNames, "RecoilArm");
+            rec.ArmName = raName;
+            var clones = r.Bones.Select(b => new Bone { Name = b.Name, Part = b.Part, Head = (float[])b.Head.Clone(), Tail = (float[])b.Tail.Clone() }).ToList();
+            var cloneOf = r.Bones.Zip(clones, (o, c) => (o, c)).ToDictionary(p => p.o, p => p.c);
+            foreach (var b in r.Bones) if (b.Parent != null) cloneOf[b].Parent = cloneOf[b.Parent];
+            var ra = new Bone { Name = raName, Head = pivot, Tail = Add3(pivot, MulF(A, 10f)) };
+            var tube = cloneOf[byName[tubeRoot]];
+            ra.Parent = tube.Parent; tube.Parent = ra;
+            clones.Add(ra);
+            {
+                var ids = Enumerable.Range(0, clones.Count).ToList();
+                var kids = ids.ToDictionary(i => i, i => new List<int>());
+                foreach (int i in ids) if (clones[i].Parent != null) kids[clones.IndexOf(clones[i].Parent)].Add(i);
+                var rootIds = ids.Where(i => clones[i].Parent == null).ToList();
+                var eHead = ids.ToDictionary(i => i, i => (float[])clones[i].Head.Clone()); var eTail = ids.ToDictionary(i => i, i => (float[])clones[i].Tail.Clone()); var eRoll = ids.ToDictionary(i => i, i => 0f);
+                VehicleProbe.RestFromEditBones(ids, kids, rootIds, eHead, eTail, eRoll, (b, parent, armMat, offs, len) =>
+                {
+                    var bone = clones[b];
+                    bone.MatrixLocal = armMat; bone.Length = len; bone.Offs = offs; bone.Head = eHead[b]; bone.Tail = eTail[b];
+                });
+            }
+            r.BonesAfterRecoil = clones;
+            poseBoneNames.Add(raName);
+            r.ArmPose[raName] = new[] { 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f, 1f, 1f };
+            r.Rekeyed[raName] = new List<ArmKey>[10];
+            Set(deployEnd);   // scene.frame_set(deploy_end): parents held at their deployed pose
+            void KeyIdentity(int f)
+            {
+                var h = r.ArmPose[raName]; h[3] = 1f; h[4] = 0f; h[5] = 0f; h[6] = 0f; h[0] = h[1] = h[2] = 0f;
+                Insert(raName, 0, 3, f); Insert(raName, 3, 4, f);
+            }
+            KeyIdentity(0); KeyIdentity(deployEnd);
+            EvalArm(current);   // bpy.context.view_layer.update(): the animation at the current frame
+            var raM3 = To3x3(RowMajor(PoseMatrices(clones, r.ArmPose)[raName]));
+            var inv3 = VehicleProbe.Inverted3(raM3);
+            if (inv3 == null) throw new NotPortedException("the recoil arm's pose matrix has no inverse (Matrix.inverted() raises, the script fails)");
+            var aLocal = Normalized(Mat3Vec(inv3, A));
+            rec.ALocal = aLocal;
+            float[] prevQ = null;
+            void KeyTheta(int f, double theta)
+            {
+                var q = QuaternionAxisAngle(aLocal, theta);
+                if (prevQ != null && VehicleProbe.DotQt(q, prevQ) < 0f) q = new[] { -q[0], -q[1], -q[2], -q[3] };
+                var h = r.ArmPose[raName]; h[3] = q[0]; h[4] = q[1]; h[5] = q[2]; h[6] = q[3]; h[0] = h[1] = h[2] = 0f; prevQ = q;
+                Insert(raName, 0, 3, f); Insert(raName, 3, 4, f);
+            }
+            int KeyFrame(long f) { if (f < int.MinValue || f > int.MaxValue) throw new NotPortedException("a recoil key past a whole number (keyframe_insert takes it as a float)"); return (int)f; }
+            foreach (int t in frames)
+            {
+                double theta = -PyLen(slide[t]) / R * (Dot3(slide[t], d) >= 0 ? 1 : -1);
+                KeyTheta(KeyFrame((long)deployEnd + ((long)t - rs)), theta);
+                rec.Thetas.Add(theta); rec.ArcBySrc[t] = theta;
+            }
+            long kickEnd = (long)deployEnd + ((long)frames[frames.Count - 1] - rs);
+            int retSlow = 4;
+            if (argc > 13 && PyStrip(Arg(13)) != "" && !PyInt(Arg(13), out retSlow)) throw new NotPortedException($"a return slowness the script cannot read ('{Arg(13)}')");
+            long fr = kickEnd;
+            if (retSlow > 0)
+                for (int i = rec.Thetas.Count - 2; i >= 0; i--) { fr += (long)step * retSlow; KeyTheta(KeyFrame(fr), rec.Thetas[i]); }
+            long outEnd = fr;
+            KeyIdentity(KeyFrame(outEnd + 1)); outEnd += 1;
+            rec.KickEnd = kickEnd; rec.OutEnd = outEnd;
+            r.RecoilLog.Add($"DEPLOY recoil return: {(retSlow > 0 ? $"x{retSlow} slow-back glide" : "none (hold + snap)")}");
+            // mode_set(OBJECT): no evaluation - the arm holds its last key's value
+            r.RecoilLog.Add($"DEPLOY recoil (ARC slide x{PyFormat.General(mag)}, R={PyFormat.General(R)}, peak={PyFormat.Fixed(dist, 1)}) tail {deployEnd}..{outEnd} via RecoilArm; tube '{tubeRoot}'");
+        }
+        r.AfterRecoil = all.ToDictionary(o => o.Name, o => (float[])o.World.Clone(), StringComparer.Ordinal);
         r.ArmAt = frame =>
         {
             int e = Math.Max(-1048574, Math.Min(1048574, frame));
@@ -941,6 +1174,28 @@ public static class BlenderDeploy
             }
             return 0;
         }
+    }
+
+    /// <summary>BKE_pose_where_is for the armature the script made: every bone's pose matrix (armature space, column-major)
+    /// from what its pose bone holds, a parent before its children whatever the list's order.</summary>
+    internal static Dictionary<string, float[]> PoseMatrices(IList<Bone> bones, Dictionary<string, float[]> armPose)
+    {
+        var pose = new Dictionary<string, float[]>(StringComparer.Ordinal);
+        var pending = new List<Bone>(bones);
+        while (pending.Count > 0)
+        {
+            var next = pending.Where(b => b.Parent == null || pose.ContainsKey(b.Parent.Name)).ToList();
+            if (next.Count == 0) throw new InvalidOperationException("a bone whose parent is not in the list");
+            foreach (var b in next)
+            {
+                var p = armPose[b.Name];
+                var chan = VehicleProbe.ObjectMatrix(new[] { p[0], p[1], p[2] }, new[] { p[3], p[4], p[5], p[6] }, new[] { p[7], p[8], p[9] }, pchan: true);
+                var rs = b.Parent != null ? VehicleProbe.MulM4(pose[b.Parent.Name], b.Offs) : b.MatrixLocal;
+                pose[b.Name] = PoseFromChannel(rs, chan);
+                pending.Remove(b);
+            }
+        }
+        return pose;
     }
 
     /// <summary>mathutils' Quaternion.to_axis_angle(): the quaternion normalized, quat_to_axis_angle (acosf, sinf), and the
@@ -1228,6 +1483,77 @@ public static class BlenderDeploy
 /// .NET rounds a 15-digit rendering instead and differs on a value that sits near a half.</summary>
 public static class PyFormat
 {
+    /// <summary>Python's `%g`: six significant digits, correctly rounded (half to even on the exact value), the exponent
+    /// form below 1e-4 and from 1e6, trailing zeros dropped, the exponent at least two digits.</summary>
+    public static string General(double v, int significant = 6)
+    {
+        if (double.IsNaN(v)) return "nan";
+        if (double.IsInfinity(v)) return v > 0 ? "inf" : "-inf";
+        long bits = BitConverter.DoubleToInt64Bits(v);
+        bool neg = bits < 0;
+        if (v == 0.0) return neg ? "-0" : "0";
+        var digits = ExactDigits(v, out int frac);   // the exact decimal expansion: an integer with `frac` decimals
+        int lead = 0; while (lead < digits.Count - 1 && digits[lead] == 0) lead++;
+        digits.RemoveRange(0, lead);
+        int exp10 = digits.Count - frac - 1;        // the decimal exponent of the first significant digit
+        if (digits.Count > significant)
+        {
+            int cut = significant; int firstDropped = digits[cut]; bool rest = false;
+            for (int i = cut + 1; i < digits.Count; i++) if (digits[i] != 0) { rest = true; break; }
+            bool up = firstDropped > 5 || (firstDropped == 5 && (rest || (digits[cut - 1] & 1) == 1));
+            digits.RemoveRange(cut, digits.Count - cut);
+            if (up)
+            {
+                int i = digits.Count - 1;
+                for (; i >= 0; i--) { if (digits[i] == 9) digits[i] = 0; else { digits[i]++; break; } }
+                if (i < 0) { digits.Insert(0, 1); digits.RemoveAt(digits.Count - 1); exp10++; }
+            }
+        }
+        while (digits.Count < significant) digits.Add(0);
+        int last = digits.Count - 1; while (last > 0 && digits[last] == 0) last--;   // trailing zeros go
+        var s = new StringBuilder(); if (neg) s.Append('-');
+        if (exp10 < -4 || exp10 >= significant)
+        {
+            s.Append((char)('0' + digits[0]));
+            if (last > 0) { s.Append('.'); for (int i = 1; i <= last; i++) s.Append((char)('0' + digits[i])); }
+            s.Append('e').Append(exp10 < 0 ? '-' : '+').Append(Math.Abs(exp10).ToString("00"));
+        }
+        else if (exp10 >= 0)
+        {
+            for (int i = 0; i <= exp10; i++) s.Append((char)('0' + (i < digits.Count ? digits[i] : 0)));
+            if (last > exp10) { s.Append('.'); for (int i = exp10 + 1; i <= last; i++) s.Append((char)('0' + digits[i])); }
+        }
+        else
+        {
+            s.Append("0."); for (int i = exp10 + 1; i < 0; i++) s.Append('0');
+            for (int i = 0; i <= last; i++) s.Append((char)('0' + digits[i]));
+        }
+        return s.ToString();
+    }
+
+    static List<int> ExactDigits(double v, out int frac)
+    {
+        long bits = BitConverter.DoubleToInt64Bits(v);
+        int e = (int)((bits >> 52) & 0x7FF); long man = bits & 0xFFFFFFFFFFFFFL;
+        if (e == 0) e = 1; else man |= 1L << 52;
+        e -= 1075;
+        var digits = man.ToString().Select(c => c - '0').ToList(); frac = 0;
+        for (; e > 0; e--)
+        {
+            int carry = 0;
+            for (int i = digits.Count - 1; i >= 0; i--) { int d = digits[i] * 2 + carry; digits[i] = d % 10; carry = d / 10; }
+            if (carry > 0) digits.Insert(0, carry);
+        }
+        for (; e < 0; e++)
+        {
+            digits.Add(0); frac++;
+            int rem = 0;
+            for (int i = 0; i < digits.Count; i++) { int d = rem * 10 + digits[i]; digits[i] = d / 2; rem = d % 2; }
+        }
+        while (digits.Count <= frac) digits.Insert(0, 0);
+        return digits;
+    }
+
     public static string Fixed(double v, int decimals)
     {
         if (double.IsNaN(v)) return "nan";

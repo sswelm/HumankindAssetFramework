@@ -171,6 +171,10 @@ public static partial class VehicleProbe
         return r;
     }
 
+    /// <summary>Matrix.inverted() of a 3x3: the adjugate over the float32 determinant - null where mathutils raises (a
+    /// determinant of zero).</summary>
+    internal static float[] Inverted3(float[] it) => Det3(it[0], it[1], it[2], it[3], it[4], it[5], it[6], it[7], it[8]) == 0f ? null : InvertedSafe3(it);
+
     /// <summary>mathutils Matrix @ Matrix for 3x3s, row-major item layout: the same double accumulation as the 4x4.</summary>
     static float[] MatMulMathutils3(float[] a, float[] b)
     {
