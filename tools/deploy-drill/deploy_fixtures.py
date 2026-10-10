@@ -659,6 +659,11 @@ def main(out):
     print("gun_recoil_slam|%s|0|24||30|0.5|1.5|26,3|34,9/2|1|||4|5|1" % fr)
     print("gun_recoil_slam_up|%s|0|24||30||1.5|26|34|1|||2|-3|1" % fr)
     print("gun_recoil_legacy_r|%s|0|24||30|||26|34|1||50|4||1" % fr)
+    # The pivot caps positive radii only. A finite negative double outside float32 overflows the edit bone and
+    # Blender fails to invert its pose matrix; this must fall back instead of producing a successful NaN recoil.
+    print("gun_recoil_large_positive_arc|%s|0|24||30|||26|34|1||1e300|4|0|1" % fr)
+    print("BAKELEFT:gun_recoil_arc_overflow|%s|0|24||30|||26|34|1||-1e39|4|0|1" % fr)
+    print("BAKELEFT:gun_recoil_arc_double_overflow|%s|0|24||30|||26|34|1||-1e300|4|0|1" % fr)
     print("gun_recoil_none|%s|0|24||30|||26|34|1|||0|6|1" % fr)
     print("gun_recoil_step2|%s|0|24||30|||26|35|2|||4|5|1" % fr)
     print("gun_recoil_step3|%s|0|24||30|||26|34|3|2||2|8|1" % fr)

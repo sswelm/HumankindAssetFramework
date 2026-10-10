@@ -888,6 +888,12 @@ port does not (`nan`, `inf`): all left to Blender by name (`BlenderDeployTests`)
 (an empty `argv[10]` switches the recoil off first); the ROTATION MODE of the new arm's pose channel is not read -
 within 5d nothing depends on it (its one matrix read is at the identity) and 7c sets every bone to QUATERNION.
 
+*Review of PR #144*: finite negative radii such as `-1e39` and `-1e300` overflow the float32 edit-bone pivot
+(positive radii are capped at 1000). Blender then fails to invert the rebuilt arm's pose matrix, while the port
+previously continued with NaNs. Radii below `-float.MaxValue` now fall back explicitly. Unit assertions and two
+`BAKELEFT:` oracle jobs hold the regression; a `1e300` positive-radius control remains supported. An additional
+48 independent jobs check extreme slide scales, slam angles, radii and return slownesses against Blender.
+
 *Review before the PR* (an independent agent; 222 generated jobs through the real script, 11,043 measurement rows
 and 266,781 swept rows equal; 120,005 doubles through `%g` and `%.1f`, equal): ONE defect - a legacy arc radius of
 ZERO (`argv[12]` = "0", "-0", "0.0" with the slam empty or 0): the script divides by it (`theta = -length / R`) and

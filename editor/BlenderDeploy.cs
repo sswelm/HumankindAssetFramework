@@ -999,6 +999,10 @@ public static class BlenderDeploy
             else { R = 1.0e9; r.RecoilLog.Add("DEPLOY slam 0 — no kick pitch (arm stays identity)"); }
             // theta = -length / R: Python divides by zero and dies (a legacy radius of 0, of either sign)
             if (R == 0.0) throw new NotPortedException($"an arc radius of zero ('{Arg(12)}': the script divides by it and fails)");
+            // Positive radii are capped at 1000 for the edit bone's pivot; negative radii are not. Casting a very
+            // negative Python double to float makes the pivot non-finite: Blender's rebuilt bone cannot be inverted,
+            // while the port's NaN determinant can pass the zero-determinant guard. Leave that edit-mode case to Blender.
+            if (R < -float.MaxValue) throw new NotPortedException("an arc radius below the finite float32 range (the recoil edit-bone pivot overflows)");
             var radius = Normalized(Cross(A, d));
             var tubeHead = Trans(mHome[tubeRoot]);
             var pivot = Sub3(tubeHead, MulF(radius, (float)Math.Min(R, 1000.0)));

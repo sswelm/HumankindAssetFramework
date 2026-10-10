@@ -595,6 +595,12 @@ public class BlenderDeployTests
         Assert.Contains("step of 0", Run("0|24||30|||26|34|00|||0|3|1").Fallback ?? "");
         Assert.Null(Run("0|24||30|||26|34|0|||0|3|1").Recoil);
         Assert.Contains("float()", Run("0|24||30|||26|34|1|||0|nan|1").Fallback ?? "");
+        // A finite negative Python radius can overflow the float32 edit-bone pivot. Blender fails to invert its
+        // rebuilt pose matrix; the port must leave it to Blender rather than return a successful NaN recoil.
+        foreach (string radius in new[] { "-1e39", "-1e300" })
+            Assert.Contains("recoil edit-bone pivot overflows", Run($"0|24||30|||26|34|1||{radius}|4|0|1").Fallback ?? "");
+        // The pivot caps positive radii, so the corresponding large positive radius is still supported.
+        Assert.Null(Run("0|24||30|||26|34|1||1e300|4|0|1").Fallback);
         // without the window the step does not run
         Assert.Null(Run("0|24||30|||||1|||4|5|1").Recoil);
     }
