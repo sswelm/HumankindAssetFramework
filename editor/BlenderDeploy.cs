@@ -230,7 +230,7 @@ public static class BlenderDeploy
 
     /// <summary>... and with `bake` the conversion goes on through the bake, the scale-free step and the delta-form
     /// rebase: Result.Keys, as the action stands when the script reaches its step 5a.</summary>
-    public static Result Decide(HafModel m, string[] args, BlenderNames.Result names, bool bake)
+    public static Result Decide(HafModel m, string[] args, BlenderNames.Result names, bool bake, int maxFrames = 0)
     {
         var r = new Result();
         names = names ?? BlenderNames.Compute(m);
@@ -340,6 +340,14 @@ public static class BlenderDeploy
         if (fminD > fmaxD) { fminD = 1.0; fmaxD = 1.0; }
         int fmin = (int)Math.Truncate(fminD), fmax = (int)Math.Truncate(fmaxD);
         r.FrameMin = fmin; r.FrameMax = fmax;
+        // The in-process Factory path must stop before the degenerate cull's per-frame sweep.
+        // Other callers (including the parity drill) keep the script's full range.
+        long span = (long)fmax - fmin + 1;
+        if (maxFrames > 0 && span > maxFrames)
+        {
+            r.Fallback = $"an animation of {span} frames (the in-process conversion takes up to {maxFrames}; Blender runs under the Factory's timeout)";
+            return r;
+        }
         var pose = new BlenderPosedState.Pose(action, m, rig);
         void FrameSet(int f)
         {
