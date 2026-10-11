@@ -51,7 +51,10 @@ mapfile -t FIXTURES < <(python "$ROOT/tools/glb-reader-drill/fixtures.py" "$WTMP
 [ "${#FIXTURES[@]}" -gt 0 ] || { echo "FAIL — could not write the fixtures"; exit 1; }
 PACK=$(ls "$PROJECT"/Assets/Pack/*/pack.json 2>/dev/null | head -1)
 REGISTRY=(); REGISTRY_NOTE="the registry"
-if [ -n "$PACK" ]; then mapfile -t REGISTRY < <(python "$ROOT/tools/glb-reader-drill/registry_files.py" "$PACK" | tr -d '\r' | awk '!seen[tolower($0)]++'); else REGISTRY_NOTE="NO registry (no modding project at $PROJECT; set HAF_UNITY_PROJECT)"; fi
+if [ -n "$PACK" ]; then
+  python "$ROOT/tools/glb-reader-drill/registry_files.py" "$PACK" > "$TMPD/registry_files.txt" || { echo "FAIL — cannot read the registry at $PACK"; exit 1; }
+  mapfile -t REGISTRY < <(tr -d '\r' < "$TMPD/registry_files.txt" | awk '!seen[tolower($0)]++')
+else REGISTRY_NOTE="NO registry (no modding project at $PROJECT; set HAF_UNITY_PROJECT)"; fi
 RECIPE_SOURCES=()
 [ -z "$PACK" ] || mapfile -t RECIPE_SOURCES < <(python "$ROOT/tools/vehicle-probe-drill/recipe_check.py" --list "$PROJECT" | tr -d '\r')
 # the sample: every fixture but the big grid, the registry's three smallest files; FULL=1 everything (.glb / .gltf only)
@@ -164,5 +167,5 @@ if [ "$badrc" -ne 1 ] || ! grep -qE "^FAIL .*material index" "$TMPD/wrong_materi
 fi
 echo "PASS — prep structure rejects two primitives with their materials swapped"
 RESULT="PASS — prep drill: $n_runs runs of prep_model.py on ${#SAMPLE[@]} files; $n_obj object runs ($n_prim primitives, $n_vert vertices) laid out equal to the meshes Blender wrote - positions, normals, UVs, colours, joints and weights, indices; $n_decl object runs declined (BlenderReduce.FallbackReason, named above), $n_pf runs where prep_model.py itself fails as known (Blender took $((t1 - t0)) s, the comparison $((t2 - t1)) s, in $JOBS processes each); ${#FIXTURES[@]} fixtures, $REGISTRY_NOTE (${#REGISTRY[@]}), ${#RECIPE_SOURCES[@]} recipe sources known"
-[ -n "$PACK" ] || { echo "SKIP — ${RESULT#PASS — } | the registry population was NOT drilled: no modding project at $PROJECT (set HAF_UNITY_PROJECT)"; exit 3; }
+[ "${#REGISTRY[@]}" -gt 0 ] || { echo "SKIP — ${RESULT#PASS — } | the registry population was NOT drilled: no existing registry model files at $PROJECT (set HAF_UNITY_PROJECT)"; exit 3; }
 echo "$RESULT"

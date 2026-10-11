@@ -171,6 +171,33 @@ verdict; exit $?
         self.assertIn("[FAIL] skipper", result.stdout)
         self.assertNotIn("[SKIP] skipper", result.stdout)
 
+    def test_project_drills_need_real_project_inputs_even_with_a_pack_file(self):
+        # Exercise the actual final verdict lines without running Unity or Blender.
+        guards = {
+            "glb_reader_drill.sh": "N_REGISTRY",
+            "glb_writer_drill.sh": "N_REGISTRY",
+            "decimate_drill.sh": "REGISTRY",
+            "prep_drill.sh": "REGISTRY",
+            "vehicle_probe_drill.sh": "REGISTRY",
+            "workshop_compact_drill.sh": "WORKSHOP",
+            "deploy_drill.sh": "n_rec",
+        }
+        for name, count in guards.items():
+            source = (ROOT / "tools" / name).read_text(encoding="utf-8")
+            guard = next(line for line in source.splitlines()
+                         if line.startswith("[") and "${RESULT#PASS" in line)
+            if count == "N_REGISTRY":
+                self.assertLess(source.index("N_REGISTRY=${#FILES[@]}"), source.index("FILES+=(\"${FIXTURES[@]}\")"))
+            for present in (False, True):
+                with self.subTest(drill=name, present=present):
+                    value = "one.glb" if present else ""
+                    setup = f'PACK=pack.json; PROJECT=project; RESULT="PASS — fixtures checked"; N_REGISTRY={int(present)}; n_rec={int(present)}; REGISTRY=(); WORKSHOP=()\n'
+                    if present:
+                        setup += f'{count}+=("{value}")\n' if count in ("REGISTRY", "WORKSHOP") else ""
+                    result = self.run_shell(setup + guard + '\necho PASS\n')
+                    self.assertEqual(result.returncode, 0 if present else 3, result.stderr)
+                    self.assertIn("PASS" if present else "SKIP", result.stdout)
+
     def test_a_clean_gate_still_passes_with_the_verdict(self):
         result = self.run_shell(self.helpers()+'''
 run_bg good bash -c 'echo good-output'

@@ -53,7 +53,10 @@ mapfile -t NAMING < <(python "$ROOT/tools/vehicle-probe-drill/naming_fixtures.py
 [ "${#FIXTURES[@]}" -gt 0 ] && [ "${#NAMING[@]}" -gt 0 ] || { echo "FAIL — could not write the fixtures"; exit 1; }
 PACK=$(ls "$PROJECT"/Assets/Pack/*/pack.json 2>/dev/null | head -1)
 REGISTRY=(); REGISTRY_NOTE="the registry"
-if [ -n "$PACK" ]; then mapfile -t REGISTRY < <(python "$ROOT/tools/glb-reader-drill/registry_files.py" "$PACK" | tr -d '\r' | awk '!seen[tolower($0)]++'); else REGISTRY_NOTE="NO registry (no modding project at $PROJECT; set HAF_UNITY_PROJECT)"; fi
+if [ -n "$PACK" ]; then
+  python "$ROOT/tools/glb-reader-drill/registry_files.py" "$PACK" > "$TMPD/registry_files.txt" || { echo "FAIL — cannot read the registry at $PACK"; exit 1; }
+  mapfile -t REGISTRY < <(tr -d '\r' < "$TMPD/registry_files.txt" | awk '!seen[tolower($0)]++')
+else REGISTRY_NOTE="NO registry (no modding project at $PROJECT; set HAF_UNITY_PROJECT)"; fi
 SAMPLES_OK=()
 mapfile -t SLINES < <(python "$ROOT/tools/glb-reader-drill/fetch_samples.py" "$ROOT/References/gltf-samples" --list 2>/dev/null | tr -d '\r')
 for l in "${SLINES[@]}"; do IFS=$'\t' read -r sp st sx <<< "$l"; [ "$st" = "ok" ] && SAMPLES_OK+=("$sp"); done
@@ -162,5 +165,5 @@ for d in "${DIFFERING[@]}"; do [ -z "$d" ] && continue; if printf '%s\n' "${SAMP
 [ "${#DIFFERING[@]}" -eq 0 ] || echo "recipes that differ: $n_arb are STALE (Blender's probe of the source today gives the C# rows, not the recipe's), $n_left left for FULL=1"
 NATIVE_NOTE=""; [ "$N_NATIVE" -eq 0 ] || NATIVE_NOTE=" ($N_NATIVE probed on the 64-bit .NET runtime: too large for Unity's 32-bit standalone Mono)"
 RESULT="PASS — vehicle probe drill: $n_ok probes in C# (${#FILES[@]} files, ${#JOBS[@]} jobs with a second model, placements or an orientation)$NATIVE_NOTE; on ${#SAMPLE[@]} files and $N_JOBS_SAMPLE jobs the rows equal Blender's own probe (names, order, vertices, visibility, inside-out, boxes, bones, rig bones, matrices and vertex positions bit for bit; Blender took $((t1 - t0)) s for those)${RECIPE_LINE:+; $RECIPE_LINE}"
-[ -n "$PACK" ] || { echo "SKIP — ${RESULT#PASS — } | the registry population was NOT drilled: no modding project at $PROJECT (set HAF_UNITY_PROJECT)"; exit 3; }
+[ "${#REGISTRY[@]}" -gt 0 ] || { echo "SKIP — ${RESULT#PASS — } | the registry population was NOT drilled: no existing registry model files at $PROJECT (set HAF_UNITY_PROJECT)"; exit 3; }
 echo "$RESULT"

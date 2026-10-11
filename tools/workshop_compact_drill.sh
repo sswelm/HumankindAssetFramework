@@ -54,7 +54,7 @@ if [ -n "$PACK" ]; then
   mapfile -t WORKSHOP < <(for s in "${RECIPE_SOURCES[@]}"; do dirname "$s"; done | awk '!seen[tolower($0)]++' | while IFS= read -r d; do [ -d "$d" ] && find "$d" -iname '*.glb' -type f; done | sort | awk '!seen[tolower($0)]++')
 fi
 WORKSHOP_NOTE="${#WORKSHOP[@]} file(s) beside the Lab's recipe sources"
-[ "${#WORKSHOP[@]}" -gt 0 ] || WORKSHOP_NOTE="NO Workshop files (no modding project at $PROJECT; set HAF_UNITY_PROJECT)"
+[ "${#WORKSHOP[@]}" -gt 0 ] || WORKSHOP_NOTE="NO Workshop files beside recipe sources at $PROJECT (set HAF_UNITY_PROJECT)"
 mapfile -t FIXTURES < <(python "$ROOT/tools/glb-reader-drill/fixtures.py" "$WTMP/fixtures" | tr -d '\r' | grep -i '\.glb$')
 [ "${#FIXTURES[@]}" -gt 0 ] || { echo "FAIL — could not write the fixtures (tools/glb-reader-drill/fixtures.py)"; exit 1; }
 SAMPLES=()
@@ -139,5 +139,5 @@ echo "$CMP" | grep -E "^FAIL"
 echo "$CMP" | grep -E "^COMPARED"
 [ "$crc" -eq 0 ] || { echo "FAIL — compaction drill: Blender does not see an original and its compacted copy as the same"; exit 1; }
 RESULT="PASS — compaction drill: $SUMMARY; Blender imports $n_pairs original(s) and their compacted copies and reports the same for both, as printed (triangles, materials, images, box, area, centroid, winding, bones, durations; $((t1 - t0)) s)"
-[ -n "$PACK" ] || { echo "SKIP — ${RESULT#PASS — } | the registry population was NOT drilled: no modding project at $PROJECT (set HAF_UNITY_PROJECT)"; exit 3; }
+[ "${#WORKSHOP[@]}" -gt 0 ] || { echo "SKIP — ${RESULT#PASS — } | the Workshop population was NOT drilled: no Workshop files beside recipe sources at $PROJECT (set HAF_UNITY_PROJECT)"; exit 3; }
 echo "$RESULT"

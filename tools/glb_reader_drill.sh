@@ -41,7 +41,11 @@ if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/drill.exe" ]; then echo "$OUT" | grep -E "er
 
 # the registry's .glb model files (the recipes' sources), as the editor resolves them
 FILES=()
-[ -z "$PACK" ] || mapfile -t FILES < <(python "$ROOT/tools/glb-reader-drill/registry_files.py" "$PACK" | tr -d '\r')   # python on Windows ends lines with CR LF; Mono refuses a path with a CR
+if [ -n "$PACK" ]; then
+  python "$ROOT/tools/glb-reader-drill/registry_files.py" "$PACK" > "$TMPD/registry_files.txt" || { echo "FAIL — cannot read the registry at $PACK"; exit 1; }
+  mapfile -t FILES < <(tr -d '\r' < "$TMPD/registry_files.txt")   # Python on Windows ends lines with CR LF; Mono refuses a path with a CR.
+fi
+N_REGISTRY=${#FILES[@]}
 [ -n "$PACK" ] && [ "${#FILES[@]}" -eq 0 ] && REGISTRY_NOTE="NO registry (it names no .glb that exists on disk)"
 # plus the SOURCES of the Lab's saved recipes: the registry holds the Lab's outputs, these are its inputs - the unreduced
 # originals every later step reads (review of PR #112: they found shared vertex accessors and a required material
@@ -108,5 +112,5 @@ printf '%s
 python "$ROOT/tools/glb-reader-drill/compare.py" "$TMPD/csharp.txt" "$TMPD/blender.txt"; crc=$?
 if [ "$crc" -ne 0 ]; then echo "FAIL — GLB reader drill: a sampled file disagrees with Blender (or none compared)"; exit 1; fi
 RESULT="PASS — GLB reader drill: $n_ok files read and checked ($REGISTRY_NOTE, ${#FIXTURES[@]} fixtures, $SAMPLES_NOTE); ${#SAMPLE[@]} of them agree with Blender on counts, box, area, centroid, winding, bones and durations"
-[ -n "$PACK" ] || { echo "SKIP — ${RESULT#PASS — } | the registry population was NOT drilled: no modding project at $PROJECT (set HAF_UNITY_PROJECT)"; exit 3; }
+[ "$N_REGISTRY" -gt 0 ] || { echo "SKIP — ${RESULT#PASS — } | the registry population was NOT drilled: no existing registry model files at $PROJECT (set HAF_UNITY_PROJECT)"; exit 3; }
 echo "$RESULT"
