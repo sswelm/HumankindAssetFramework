@@ -222,6 +222,9 @@ public static class HafModelRig
         if (allNormals && norms.Count == verts.Count) mesh.SetNormals(norms); else mesh.RecalculateNormals();
         if (skinIndex >= 0)
         {
+            // The game SDK's skinned MeshCollection.ImportMeshes indexes tangents
+            // for every vertex. Preview rendering tolerated an empty array.
+            mesh.RecalculateTangents();
             var sk = m.Skins[skinIndex];
             var bind = new Matrix4x4[sk.Joints.Length];
             for (int j = 0; j < sk.Joints.Length; j++)

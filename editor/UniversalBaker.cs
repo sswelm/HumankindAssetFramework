@@ -1334,10 +1334,11 @@ public static class UniversalBaker
             (cfg.stripParts ?? "").Trim(),
             cfg.targetTris > 0 ? cfg.targetTris.ToString(sinv) : "0",
             cfg.doubleSided ? "1" : "0",    // double-sided halves the reduce target -> shapes the OBJ
-            "v3");   // extractor-convention stamp: v3 = single Z-up frame + skinned bind-pose evaluation (2026-09-12) — bumping it re-extracts every cached OBJ
+            "v3",   // extractor-convention stamp: v3 = single Z-up frame + skinned bind-pose evaluation (2026-09-12)
+            BlenderPrep.CacheRevision);   // C# prep changes also invalidate reused extracts; the Python script's mtime cannot see them
         string extractArgsFull = Path.Combine(projRoot, resDir, name + ".extract.args.txt");
         bool argsChanged = cachedFull != null && (!File.Exists(extractArgsFull) || File.ReadAllText(extractArgsFull) != extractArgsKey);
-        if (argsChanged) Debug.Log($"[Factory] {name}: an extract setting changed (source/grid/strip/reduce/double-sided) — re-extracting.");
+        if (argsChanged) Debug.Log($"[Factory] {name}: an extract input or C# prep revision changed — re-extracting.");
 
         // --- 0) (re)import the model. Skipped only when "Reuse extracted files" is on, the files exist, AND none of
         //        the busters above fired — so manual OBJ/albedo edits survive a re-bake while a changed source/tool/
