@@ -13,6 +13,11 @@ using Newtonsoft.Json.Linq;
 
 static class MaterialDrill
 {
+    static readonly HashSet<string> RowKinds = new HashSet<string>(new[]
+    {
+        "FILE", "DIES", "MAT", "IMG", "TEX", "SAMP", "MATS", "DONE", "FAIL",
+    }, StringComparer.Ordinal);
+
     static readonly string[] CoverKeys =
     {
         "a file compared", "a material with a base colour texture", "a material with a metallic-roughness texture", "a normal texture", "an occlusion texture",
@@ -36,6 +41,13 @@ static class MaterialDrill
 
     public static int Run(string[] args)
     {
+        HashSet<string> expected = null;
+        if (args.Length >= 2 && args[0] == "--expected")
+        {
+            expected = new HashSet<string>(File.ReadLines(args[1]), StringComparer.Ordinal);
+            if (expected.Count == 0) { Console.WriteLine("FAIL sources: no expected material files"); return 1; }
+            args = args.Skip(2).ToArray();
+        }
         var cover = new SortedDictionary<string, long>(); foreach (var k in CoverKeys) cover[k] = 0;
         int fails = 0, files = 0, left = 0, notes = 0; long mats = 0, texs = 0, imgs = 0, samps = 0;
         var blocks = new List<List<string>>();
@@ -44,7 +56,10 @@ static class MaterialDrill
             {
                 if (line.StartsWith("FILE\t")) blocks.Add(new List<string>());
                 if (blocks.Count > 0) blocks[blocks.Count - 1].Add(line);
+                else if (line.Length > 0) { fails++; Console.WriteLine("FAIL dump: a row before the first FILE"); }
             }
+        if (blocks.Count == 0) { Console.WriteLine("FAIL dump: no material files to compare"); return 1; }
+        var dumped = new HashSet<string>(StringComparer.Ordinal);
         foreach (var block in blocks)
         {
             string file = block[0].Substring(5);
@@ -54,10 +69,25 @@ static class MaterialDrill
             {
                 var rows = block.Select(l => l.Split('\t')).ToList();
                 List<string[]> Of(string k) => rows.Where(t => t[0] == k).ToList();
-                if (!rows.Any(t => t[0] == "DONE")) throw new InvalidDataException(rows.Any(t => t[0] == "FAIL") ? "Blender could not run it: " + rows.First(t => t[0] == "FAIL").Last() : "the dump has no DONE row");
+                if (rows.Any(t => t[0] == "FAIL")) throw new InvalidDataException("Blender could not run it: " + rows.First(t => t[0] == "FAIL").Last());
+                if (rows.Any(t => !RowKinds.Contains(t[0]))) throw new InvalidDataException("the dump has an unknown row kind");
+                if (rows[0].Length != 2 || file.Length == 0) throw new InvalidDataException("the dump has an invalid FILE row");
+                if (expected != null && !expected.Contains(file)) throw new InvalidDataException("the dump has an unexpected source file");
+                if (!dumped.Add(file)) throw new InvalidDataException("the dump repeats a file");
+                var done = Of("DONE");
+                if (done.Count == 0) throw new InvalidDataException("the dump has no DONE row");
+                if (done.Count != 1 || done[0].Length != 2 || done[0][1] != file || rows[rows.Count - 1] != done[0])
+                    throw new InvalidDataException("the dump must end with exactly one matching DONE row");
                 var dies = Of("DIES");
-                if (dies.Count > 0) { notes++; Console.WriteLine($"NOTE {file}: Blender could not import or export it ({string.Join(" ", dies[0].Skip(1))})"); continue; }
-                if (!File.Exists(file)) { notes++; Console.WriteLine($"NOTE {file}: the source is gone"); continue; }
+                if (dies.Count > 0)
+                {
+                    if (dies.Count != 1 || dies[0].Length != 2 || dies[0][1].Length == 0) throw new InvalidDataException("the dump has an invalid DIES row");
+                    if (rows.Any(t => t[0] != "FILE" && t[0] != "DIES" && t[0] != "DONE"))
+                        throw new InvalidDataException("the dump claims exported material rows after a death");
+                    notes++; fails++; Console.WriteLine($"FAIL {file}: Blender could not import or export it ({dies[0][1]}); no material comparison was possible"); continue;
+                }
+                if (Of("MATS").Count != 1 || Of("MATS")[0].Length < 2) throw new InvalidDataException("the dump has no single MATS completion row");
+                if (!File.Exists(file)) throw new FileNotFoundException("the source is gone", file);
                 foreach (var t in Of("MAT")) if (t.Length != 3) throw new InvalidDataException($"the dump's material row has {t.Length} fields, expected 3");
                 foreach (var t in Of("TEX")) if (t.Length != 5) throw new InvalidDataException($"the dump's texture row has {t.Length} fields, expected 5");
                 foreach (var t in Of("SAMP")) if (t.Length != 3) throw new InvalidDataException($"the dump's sampler row has {t.Length} fields, expected 3");
@@ -106,6 +136,8 @@ static class MaterialDrill
             }
             catch (Exception e) { fails++; Console.WriteLine($"FAIL {file}: {e.GetType().Name}: {e.Message}"); }
         }
+        if (expected != null) foreach (string file in expected)
+            if (!dumped.Contains(file)) { fails++; Console.WriteLine($"FAIL {file}: the dump holds no such source file"); }
         foreach (var kv in cover) Console.WriteLine($"COVER {kv.Value} {kv.Key}");
         Console.WriteLine($"TOTAL files {files} failed {fails} left {left} notes {notes} materials {mats} textures {texs} samplers {samps} images {imgs}");
         return fails == 0 ? 0 : 1;

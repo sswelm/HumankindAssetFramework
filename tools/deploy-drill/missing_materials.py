@@ -55,6 +55,20 @@ def main(out, dump):
     lines = [job[0], "DIES\tRuntimeError: planted", job[rows("DONE")[0]]]
     write("mat_DIES_claimed", lines)
 
+    done = rows("DONE")[0]
+    lines = list(job); lines[done] = "DONE\twrong"; write("mat_DONE_wrong", lines)
+    lines = list(job); lines[done] = "DONE"; write("mat_DONE_short", lines)
+    lines = list(job); lines[done] += "\textra"; write("mat_DONE_extra", lines)
+    lines = list(job); lines.insert(done, job[done]); write("mat_DONE_duplicate", lines)
+    write("mat_DONE_trailing", job + ["MATS\tplanted"])
+    lines = list(job); lines.insert(done, "FAIL\tplanted\tclaimed failure"); write("mat_FAIL_claimed", lines)
+    write("mat_FILE_duplicate", job + job)
+    lines = list(job); lines[0] += "\textra"; write("mat_FILE_extra", lines)
+    lines = list(job); lines.insert(done, "UNKNOWN\tplanted"); write("mat_UNKNOWN", lines)
+    write("mat_MATS_missing", [l for l in job if not l.startswith("MATS\t")])
+    lines = list(job); lines.insert(done, "DIES\tRuntimeError: planted"); write("mat_DIES_rows", lines)
+    write("mat_DIES_duplicate", [job[0], "DIES\tRuntimeError: planted", "DIES\tRuntimeError: twice", job[done]])
+
 
 if __name__ == "__main__":
     main(*sys.argv[1:3])

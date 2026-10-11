@@ -995,6 +995,38 @@ def fx_export_material_edges(out):
     write_glb(os.path.join(out, "export_material_edges.glb"), root, b)
 
 
+def fx_export_material_review(out):
+    """PR 149: ORM sharing across UV layers, ignored unlit slots, and an unused mesh's UV layers."""
+    for mode in ("orm_uv", "unlit_images", "unused_mesh", "uv_variants"):
+        b = Buf()
+        p = b.accessor([(0, 0, 0), (1, 0, 0), (0, 1, 0)], "f", "VEC3")
+        uv = b.accessor([(0, 0), (1, 0), (0, 1)], "f", "VEC2")
+        attrs = {"POSITION": p, "TEXCOORD_0": uv, "TEXCOORD_1": uv}
+        root = base(mode, meshes=[{"primitives": [{"attributes": attrs, "material": 0}]}],
+                    nodes=[{"mesh": 0}], scenes=[{"nodes": [0]}], scene=0,
+                    images=[{"name": "shared.png", "mimeType": "image/png", "bufferView": b.blob(png(2, 2, (50, 100, 150)))}],
+                    textures=[{"source": 0}], materials=[])
+        if mode == "orm_uv":
+            root["textures"] = [{"source": 0, "sampler": 0}, {"source": 0, "sampler": 1}]
+            root["samplers"] = [{"magFilter": 9728, "minFilter": 9728}, {"magFilter": 9729, "minFilter": 9729}]
+            root["materials"] = [{"name": mode, "occlusionTexture": {"index": 0},
+                                  "pbrMetallicRoughness": {"metallicRoughnessTexture": {"index": 1, "texCoord": 1}}}]
+        elif mode == "unlit_images":
+            root["images"].append({"name": "shared.png", "mimeType": "image/png", "bufferView": b.blob(png(2, 2, (100, 150, 50)))})
+            root["textures"].append({"source": 1})
+            root["materials"] = [{"name": mode, "extensions": {"KHR_materials_unlit": {}}, "emissiveTexture": {"index": 0},
+                                  "pbrMetallicRoughness": {"baseColorTexture": {"index": 1}}}]
+            root["extensionsUsed"] = ["KHR_materials_unlit"]
+        else:
+            del attrs["TEXCOORD_1"]
+            root["meshes"].append({"primitives": [{"attributes": dict(attrs, TEXCOORD_1=uv), "material": 0}]})
+            root["materials"] = [{"name": mode, "pbrMetallicRoughness": {"baseColorTexture": {"index": 0, "texCoord": 1}}}]
+            if mode == "uv_variants":
+                root["meshes"][1]["primitives"][0]["attributes"]["COLOR_0"] = b.accessor([(1, 1, 1, 1)] * 3, "f", "VEC4", minmax=False)
+                root["nodes"].append({"mesh": 1}); root["scenes"][0]["nodes"].append(1)
+        write_glb(os.path.join(out, "export_review_" + mode + ".glb"), root, b)
+
+
 def fx_export_uri_mime(out):
     """A .gltf whose image FILE is named as a PNG but holds JPEG bytes: Blender's importer loads it from the file, and the
     exporter takes the type from the file's extension - the bytes' magic then does not match and the image is encoded
@@ -1236,7 +1268,7 @@ def main(out, prep=False, posed=False, materials=False):
     # fixture carries a specularFactor of 1.5, which the glTF importer tolerates and folds into the colour, while the
     # Factory's converter (SharpGLTF's validator) refuses it in the C# prep's written file, where the source material
     # passes through unchanged until the Factory writes BlenderMaterialExport's materials.
-    for fx in FIXTURES + ([fx_export_skin_lines, fx_export_bones, fx_export_review, fx_export_skin_twins, fx_export_flat_alpha, fx_export_jpeg_alpha, fx_export_factor_range, fx_export_strip] if prep else []) + ([fx_export_material_edges, fx_export_uri_mime] if materials else []):
+    for fx in FIXTURES + ([fx_export_skin_lines, fx_export_bones, fx_export_review, fx_export_skin_twins, fx_export_flat_alpha, fx_export_jpeg_alpha, fx_export_factor_range, fx_export_strip] if prep else []) + ([fx_export_material_edges, fx_export_uri_mime, fx_export_material_review] if materials else []):
         fx(out)
     for name in sorted(os.listdir(out)):
         if name.endswith((".glb", ".gltf")):

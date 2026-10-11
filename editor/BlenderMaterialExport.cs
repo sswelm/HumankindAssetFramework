@@ -98,13 +98,18 @@ public static class BlenderMaterialExport
         foreach (var kv in names.MaterialOf) if (!sourceOf.ContainsKey(kv.Value)) sourceOf[kv.Value] = (kv.Key.material, kv.Key.vertexColor);
         // the UV layers of the meshes that use each material (the importer makes one per TEXCOORD_n, eight at most): a
         // texCoord beyond them is written as 0 (every mesh of a material agrees, or MaterialUvProblems named it)
-        var uvSets = new Dictionary<int, int>();
-        foreach (var mesh in m.Meshes)
+        var uvSets = new Dictionary<(int material, bool vertexColor), int>();
+        foreach (int meshIndex in m.Nodes.Where(n => n.Mesh >= 0).Select(n => n.Mesh).Distinct())
         {
+            var mesh = m.Meshes[meshIndex];
             int sets = 0;
             foreach (var p in mesh.Primitives) sets = Math.Max(sets, p.Uv0 == null ? 0 : p.Uv1 == null ? 1 : 2 + (p.UvMore?.Count ?? 0));
             sets = Math.Min(sets, 8);
-            foreach (var p in mesh.Primitives) if (p.Material >= 0) uvSets[p.Material] = Math.Max(uvSets.TryGetValue(p.Material, out int s) ? s : 0, sets);
+            foreach (var p in mesh.Primitives) if (p.Material >= 0)
+            {
+                var variant = (p.Material, p.Colors != null);
+                uvSets[variant] = Math.Max(uvSets.TryGetValue(variant, out int s) ? s : 0, sets);
+            }
         }
         var ctx = new Context(m, r);
         ctx.PreNumber(names.MaterialsInOrder, sourceOf);
@@ -113,7 +118,7 @@ public static class BlenderMaterialExport
             if (!sourceOf.TryGetValue(name, out var src)) { r.Fallback = $"the material '{name}' has no source material"; return r; }
             if (src.vertexColor) r.VertexColourVariants++;
             JObject j;
-            try { j = src.material < 0 ? DefaultMaterial(name) : One(ctx, m.Materials[src.material], name, src.vertexColor, uvSets.TryGetValue(src.material, out int sets) ? sets : 0); }
+            try { j = src.material < 0 ? DefaultMaterial(name) : One(ctx, m.Materials[src.material], name, src.vertexColor, uvSets.TryGetValue((src.material, src.vertexColor), out int sets) ? sets : 0); }
             catch (LeftException e) { r.Fallback = $"material '{name}': {e.Message}"; return r; }
             if (src.material >= 0 && (m.Materials[src.material].NameAbsent || m.Materials[src.material].Name.Length == 0)) r.Unnamed++;
             r.Names.Add(name); r.Materials.Add(j);
@@ -150,11 +155,15 @@ public static class BlenderMaterialExport
                 var mat = M.Materials[src.material];
                 var ext = ParseExtensions(mat);
                 var sg = ext["KHR_materials_unlit"] == null ? ext["KHR_materials_pbrSpecularGlossiness"] as JObject : null;
-                var slots = new List<int> { mat.EmissiveTexture };
+                bool unlit = ext["KHR_materials_unlit"] != null;
+                var slots = new List<int> { unlit ? -1 : mat.EmissiveTexture };
                 if (sg != null) { slots.Add(sg["diffuseTexture"] is JObject dt ? (int)dt["index"] : -1); slots.Add(sg["specularGlossinessTexture"] is JObject sgt ? (int)sgt["index"] : -1); }
                 else slots.Add(mat.BaseColorTexture);
-                slots.Add(sg != null ? -1 : mat.MetallicRoughnessTexture); slots.Add(mat.NormalTexture); slots.Add(mat.OcclusionTexture);
-                if (ext["KHR_materials_specular"] is JObject sp) { slots.Add(sp["specularTexture"] is JObject st ? (int)st["index"] : -1); slots.Add(sp["specularColorTexture"] is JObject sct ? (int)sct["index"] : -1); }
+                if (!unlit)
+                {
+                    slots.Add(sg != null ? -1 : mat.MetallicRoughnessTexture); slots.Add(mat.NormalTexture); slots.Add(mat.OcclusionTexture);
+                }
+                if (!unlit && ext["KHR_materials_specular"] is JObject sp) { slots.Add(sp["specularTexture"] is JObject st ? (int)st["index"] : -1); slots.Add(sp["specularColorTexture"] is JObject sct ? (int)sct["index"] : -1); }
                 foreach (int t in slots) if (t >= 0 && t < M.Textures.Count && M.Textures[t].Source >= 0 && M.Textures[t].Source < M.Images.Count) BlenderImageName(M.Textures[t].Source);
             }
         }
@@ -439,7 +448,7 @@ public static class BlenderMaterialExport
             int occTexIndex = -1;
             if (mat.OcclusionTexture >= 0)
             {
-                bool orm = mrTex >= 0 && c.M.Textures[mat.OcclusionTexture].Source == c.M.Textures[mrTex].Source && mat.OcclusionTexCoord == mrCoord;
+                bool orm = mrTex >= 0 && c.M.Textures[mat.OcclusionTexture].Source == c.M.Textures[mrTex].Source;
                 if (!orm && mrTex >= 0 && SameSize(c.M, mat.OcclusionTexture, mrTex)) throw new LeftException("an occlusion image beside a metallic-roughness image of the same size (the exporter composes a new image)");
                 occTexIndex = c.Texture(mat.OcclusionTexture, false);
                 var o = TextureInfo(occTexIndex, mat.OcclusionTexCoord, uvSets);

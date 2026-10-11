@@ -177,4 +177,57 @@ public class BlenderMaterialExportTests
         Assert.Equal("my.texture", BlenderMaterialExport.SplitExtForTest("my.texture.v2"));
         Assert.Equal(".hidden", BlenderMaterialExport.SplitExtForTest(".hidden"));
     }
+    [Fact]
+    public void Unreferenced_meshes_cannot_choose_a_materials_UV_layer()
+    {
+        var f = new File(); var mat = f.Material("m");
+        mat.BaseColorTexture = f.Texture(f.Image("t", Png)); mat.BaseColorTexCoord = 1;
+        f.M.Meshes[0].Primitives[0].Uv0 = new float[6];
+        var unused = new HafMesh();
+        unused.Primitives.Add(new HafPrimitive { Material = 0, Uv0 = new float[6], Uv1 = new float[6] });
+        f.M.Meshes.Add(unused);
+        var x = f.Build(); Assert.Null(x.Fallback);
+        Assert.Null(x.Materials[0]["pbrMetallicRoughness"]["baseColorTexture"]["texCoord"]);
+    }
+
+    [Fact]
+    public void Unlit_ignored_slots_do_not_reserve_image_names()
+    {
+        var f = new File(); var mat = f.Material("m");
+        mat.ExtensionsJson = "{\"KHR_materials_unlit\":{}}";
+        mat.EmissiveTexture = f.Texture(f.Image("shared.png", Png));
+        mat.BaseColorTexture = f.Texture(f.Image("shared.png", Png));
+        var x = f.Build(); Assert.Null(x.Fallback);
+        Assert.Equal("shared", Assert.Single(x.Images).name);
+    }
+
+    [Fact]
+    public void An_ORM_image_is_shared_even_when_the_slots_read_different_UV_layers()
+    {
+        var f = new File(); var mat = f.Material("m");
+        int image = f.Image("orm.png", Png);
+        mat.OcclusionTexture = f.Texture(image, f.Sampler("{\"magFilter\":9728,\"minFilter\":9728}"));
+        mat.MetallicRoughnessTexture = f.Texture(image); mat.MetallicRoughnessTexCoord = 1;
+        f.M.Meshes[0].Primitives[0].Uv0 = new float[6]; f.M.Meshes[0].Primitives[0].Uv1 = new float[6];
+        var x = f.Build(); Assert.Null(x.Fallback);
+        Assert.Single(x.Textures);
+        Assert.Equal(9984, (int)x.Samplers[0]["minFilter"]);
+        Assert.Null(x.Materials[0]["occlusionTexture"]["texCoord"]);
+        Assert.Equal(1, (int)x.Materials[0]["pbrMetallicRoughness"]["metallicRoughnessTexture"]["texCoord"]);
+    }
+
+    [Fact]
+    public void Vertex_colour_variants_resolve_their_own_UV_layers()
+    {
+        var f = new File(); var mat = f.Material("paint");
+        mat.BaseColorTexture = f.Texture(f.Image("t", Png)); mat.BaseColorTexCoord = 1;
+        f.M.Meshes[0].Primitives[0].Uv0 = new float[6];
+        f.Material("unused");
+        var coloured = f.M.Meshes[1].Primitives[0]; coloured.Material = 0;
+        coloured.Colors = new float[12]; coloured.Uv0 = new float[6]; coloured.Uv1 = new float[6];
+        var x = f.Build(); Assert.Null(x.Fallback); Assert.Equal(2, x.Materials.Count);
+        Assert.Null(x.Materials[0]["pbrMetallicRoughness"]["baseColorTexture"]["texCoord"]);
+        Assert.Equal(1, (int)x.Materials[1]["pbrMetallicRoughness"]["baseColorTexture"]["texCoord"]);
+    }
+
 }

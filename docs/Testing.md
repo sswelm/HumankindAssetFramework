@@ -1094,6 +1094,16 @@ after the decisions and their tampers - the review of PR #148 made each shard no
 textures and images (8a-ii), the animations' channels (8b), the GLB's bytes - accessor and buffer layout, JSON (8c).
 `BlenderDeployExportTests` hold the walk, the trim's setters, the scenes and the empty role on small models.
 
+**PR #149 review regressions** (2026-10-11). `BlenderMaterialExportTests` and the four
+`export_review_*` material fixtures hold the port to Blender for an ORM image shared across different UV layers
+(and different samplers: the occlusion sampler wins), ignored unlit slots that must not reserve image names, and
+unreferenced meshes whose UV layers must not influence a written material, and vertex-colour variants that
+resolve their UV layers independently. `MaterialDrillTests` requires a complete,
+unique file block with one matching final DONE, rejects fatal or contradictory records and empty dumps, and checks
+an explicit source manifest. A Blender import/export failure or a missing source fails the material comparison.
+The shell gate also replays twelve malformed envelopes in addition to the existing row mutations; a claimed death
+must fail instead of silently replacing a comparison.
+
 **Replacing `deploy_convert.py`, part 8a-ii: the materials, textures, samplers and images** (2026-10-11). Every
 source material takes the same round trip in `deploy_convert.py` and `prep_model.py`: the importer builds a node tree
 from it, the exporter reads the tree back and writes a material. The oracle is that round trip alone:
@@ -1144,8 +1154,8 @@ the reader does not carry a texture's transform. 105 files, 0 failed: 1,090 mate
 images; 4 left by name.
 `BlenderMaterialExportTests` hold each rule on a material small enough to read, through the drill's canonical form.
 The gate tampers the material rows in both drills (missing, doubled, changed, cut short) and the material dump's end
-row; a claimed import failure counts as not compared. The gate's material sample is part 1's plus every prep fixture
-(`fixtures.py --prep`), where the material shapes live, and the round trip's own two (`--materials`: the edge fixture's
+row; malformed completion records and claimed import/export failures fail the material comparison. The gate's material sample is part 1's plus every prep fixture
+(`fixtures.py --prep`), where the material shapes live, and the round trip's own fixtures (`--materials`: the edge fixture's
 specularFactor of 1.5 is folded by Blender's importer but refused by the Factory's converter, so the prep drill, whose
 C# prep passes the source material through unchanged, does not get it; the Factory wiring will write the port's
 materials). Planted: 31 in the port, 30 fail the drill (factors in double,

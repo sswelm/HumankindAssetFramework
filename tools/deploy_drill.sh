@@ -197,6 +197,7 @@ mkdir -p "$TMPD/mat"
 # part 8a-ii, a uri image typed by its extension - out of the prep drill, whose converter refuses a specularFactor over 1)
 mapfile -t PREPFX < <(python "$ROOT/tools/glb-reader-drill/fixtures.py" "$WTMP/fixtures_prep" --prep --materials | tr -d '\r')
 mapfile -t MSAMPLE < <( { printf '%s\n' "${SAMPLE[@]}"; printf '%s\n' "${PREPFX[@]}"; } | grep -iE '\.(glb|gltf)$' | awk '!seen[tolower($0)]++' )
+printf '%s\n' "${MSAMPLE[@]}" > "$TMPD/material_sources.txt"
 for ((k = 0; k < JOBS; k++)); do : > "$TMPD/mshard_$k.txt"; done
 for ((i = 0; i < ${#MSAMPLE[@]}; i++)); do printf '%s\n' "${MSAMPLE[$i]}" >> "$TMPD/mshard_$((i % JOBS)).txt"; done
 MPIDS=(); t_m0=$(date +%s)
@@ -631,7 +632,7 @@ if [ "$mrc" -ne 0 ] || [ "$n_mdone" -ne "${#MSAMPLE[@]}" ]; then
   echo "FAIL — deploy drill: Blender round-tripped $n_mdone of ${#MSAMPLE[@]} files' materials (exit $mrc)"; exit 1
 fi
 t_m2=$(date +%s)
-"$TMPD/deploy.exe" --materials "$WTMP/materials.txt" > "$TMPD/mat_raw.txt" 2>&1; rcm=$?
+"$TMPD/deploy.exe" --materials --expected "$WTMP/material_sources.txt" "$WTMP/materials.txt" > "$TMPD/mat_raw.txt" 2>&1; rcm=$?
 t_m3=$(date +%s)
 tr -d '\r' < "$TMPD/mat_raw.txt" > "$TMPD/mat.txt"
 grep -E "^FAIL|^LEFT|^NOTE|^COVER" "$TMPD/mat.txt"
@@ -674,16 +675,22 @@ for kind in MAT TEX SAMP IMG; do
     fi
   done
 done
-for mode in DONE_missing DIES_claimed; do
-  case "$mode" in DONE_missing) reason="no DONE row";; DIES_claimed) reason="NEVER";; esac
+for mode in DONE_missing DIES_claimed DONE_wrong DONE_short DONE_extra DONE_duplicate DONE_trailing FAIL_claimed FILE_duplicate FILE_extra UNKNOWN MATS_missing DIES_rows DIES_duplicate; do
+  case "$mode" in
+    DONE_missing) reason="no DONE row";;
+    DONE_*) reason="exactly one matching DONE row";;
+    DIES_claimed) reason="could not import or export";;
+    FAIL_claimed) reason="Blender could not run it";;
+    FILE_duplicate) reason="repeats a file";;
+    FILE_extra) reason="invalid FILE row";;
+    UNKNOWN) reason="unknown row kind";;
+    MATS_missing) reason="single MATS completion row";;
+    DIES_rows) reason="exported material rows after a death";;
+    DIES_duplicate) reason="invalid DIES row";;
+  esac
   cp "$PAR/mat_$mode.txt" "$TMPD/mat_$mode.txt" 2>/dev/null; badrc=$(cat "$PAR/mat_$mode.txt.rc" 2>/dev/null || echo 99)
-  if [ "$mode" = "DIES_claimed" ]; then
-    # a claimed death is a NOTE, not a comparison: the file must be counted as not compared, never as equal
-    if [ "$badrc" != "0" ] || ! grep -qE "^NOTE .*could not import or export" "$TMPD/mat_$mode.txt" || grep -qE "^PASS " "$TMPD/mat_$mode.txt"; then
-      head -5 "$TMPD/mat_$mode.txt"; echo "FAIL — deploy drill mishandled a claimed death in a material dump (rc=$badrc)"; exit 1
-    fi
-  elif [ "$badrc" != "1" ] || ! grep -E "^FAIL " "$TMPD/mat_$mode.txt" | grep -qE "$reason"; then
-    head -5 "$TMPD/mat_$mode.txt"; echo "FAIL — deploy drill accepted a material dump with $mode (rc=$badrc)"; exit 1
+  if [ "$badrc" != "1" ] || ! grep -E "^FAIL " "$TMPD/mat_$mode.txt" | grep -qE "$reason"; then
+    head -5 "$TMPD/mat_$mode.txt"; echo "FAIL — deploy drill accepted invalid material envelope ($mode, rc=$badrc)"; exit 1
   fi
 done
 nm_files=$(echo "$TOTALM" | awk '{print $3}'); nm_mats=$(echo "$TOTALM" | awk '{print $11}'); nm_tex=$(echo "$TOTALM" | awk '{print $13}'); nm_img=$(echo "$TOTALM" | awk '{print $17}')
