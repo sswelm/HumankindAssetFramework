@@ -42,7 +42,9 @@ def sha(b): return hashlib.sha256(b).hexdigest()
 def rows(path):
     b = open(path, "rb").read()
     jl = struct.unpack_from("<I", b, 12)[0]; j = json.loads(b[20:20 + jl].decode("utf-8"))
-    bl = struct.unpack_from("<I", b, 20 + jl)[0]; bin_ = b[28 + jl:28 + jl + bl]
+    bin_ = b""; bl = 0
+    if len(b) >= 28 + jl:   # a file without accessors has no BIN chunk
+        bl = struct.unpack_from("<I", b, 20 + jl)[0]; bin_ = b[28 + jl:28 + jl + bl]
     out = ["GLB\t%d\t%d\t%d" % (len(b), jl, bl)]
     for s in j.get("scenes", []):
         out.append("SCENE\t%s\t%s" % (s.get("name", "-"), ",".join(str(n) for n in s.get("nodes", []))))
@@ -85,7 +87,9 @@ def rows(path):
         bv = j["bufferViews"][im["bufferView"]]
         out.append("IMG\t%d\t%s\t%s\t%s" % (ii, im.get("name", "-"), im.get("mimeType", "-"), sha(bin_[bv.get("byteOffset", 0):bv.get("byteOffset", 0) + bv["byteLength"]])))
     for ti, t in enumerate(j.get("textures", [])):
-        out.append("TEX\t%d\t%s\t%s" % (ti, t.get("source", "-"), t.get("sampler", "-")))
+        out.append("TEX\t%d\t%s\t%s\t%s" % (ti, t.get("source", "-"), t.get("sampler", "-"), json.dumps({k: v for k, v in t.items() if k not in ("source", "sampler")}, sort_keys=True, separators=(",", ":"))))
+    for si, s in enumerate(j.get("samplers", [])):
+        out.append("SAMP\t%d\t%s" % (si, json.dumps(s, sort_keys=True, separators=(",", ":"))))
     for ai, a in enumerate(j.get("animations", [])):
         out.append("ANIM\t%d\t%s\t%d\t%d" % (ai, a.get("name", "-"), len(a["channels"]), len(a["samplers"])))
         for ci, c in enumerate(a["channels"]):

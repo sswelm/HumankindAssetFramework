@@ -152,8 +152,9 @@ public static class GlbReader
             m.NormalScale = mt["normalTexture"]?["scale"]?.Value<float>() ?? 1f;
             TexRef(mt["occlusionTexture"], out m.OcclusionTexture, out m.OcclusionTexCoord);
             m.OcclusionStrength = mt["occlusionTexture"]?["strength"]?.Value<float>() ?? 1f;
+            m.OcclusionStrengthJson = mt["occlusionTexture"]?["strength"]?.Value<double>() ?? 1.0;
             TexRef(mt["emissiveTexture"], out m.EmissiveTexture, out m.EmissiveTexCoord);
-            if (mt["emissiveFactor"] is JArray ef) m.EmissiveFactor = Floats(ef, 3, "emissiveFactor");
+            if (mt["emissiveFactor"] is JArray ef) { m.EmissiveFactor = Floats(ef, 3, "emissiveFactor"); m.EmissiveFactorJson = new[] { ef[0].Value<double>(), ef[1].Value<double>(), ef[2].Value<double>() }; }
             m.AlphaMode = mt["alphaMode"]?.ToString() ?? "OPAQUE";
             m.AlphaCutoff = mt["alphaCutoff"]?.Value<double>() ?? 0.5;
             m.DoubleSided = mt["doubleSided"]?.Value<bool>() ?? false;

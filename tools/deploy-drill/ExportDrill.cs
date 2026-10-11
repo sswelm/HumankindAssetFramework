@@ -16,7 +16,7 @@ static class ExportDrill
 {
     static readonly HashSet<string> RowKinds = new HashSet<string>(new[]
     {
-        "JOB", "LOG8", "DIES8", "EXIT8", "GLB", "SCENE", "NODE", "SKIN", "IBM", "MESH", "PRIM", "MAT", "IMG", "TEX", "ANIM", "CHAN", "DONE", "FAIL",
+        "JOB", "LOG8", "DIES8", "EXIT8", "GLB", "SCENE", "NODE", "SKIN", "IBM", "MESH", "PRIM", "MAT", "IMG", "TEX", "SAMP", "ANIM", "CHAN", "DONE", "FAIL",
     }, StringComparer.Ordinal);
 
     static readonly string[] CoverKeys =
@@ -48,7 +48,7 @@ static class ExportDrill
         }
         if (jobs.Count == 0) { Console.WriteLine("FAIL jobs: no export jobs to compare"); return 1; }
         var cover = new SortedDictionary<string, long>(); foreach (var k in CoverKeys) cover[k] = 0;
-        int fails = 0, files = 0, left = 0, exits = 0, rolesLeft = 0; long nodes = 0, joints = 0, ibms = 0, meshes = 0, prims = 0, vertices = 0, lines = 0, anims = 0;
+        int fails = 0, files = 0, left = 0, exits = 0, rolesLeft = 0; long nodes = 0, joints = 0, ibms = 0, meshes = 0, prims = 0, vertices = 0, lines = 0, anims = 0, materials = 0, images = 0;
         var blocks = new List<List<string>>();
         foreach (var dump in args.Skip(1))
             foreach (var line in File.ReadLines(dump))
@@ -193,6 +193,23 @@ static class ExportDrill
                     }
                 Compare(problems, "the primitives (mesh, primitive, material, mode, indices, their hash, each attribute's count, type and hash)", minePrims, primRows.Select(t => string.Join("\t", t.Skip(1))).ToList());
                 prims += primRows.Count;
+                // ---- the materials, textures, samplers and images (8a-ii): structurally for the JSON rows, by name, type and hash for the images
+                var mr = x.MaterialRows;
+                var matRows = Of("MAT");
+                foreach (var t in matRows) if (t.Length != 3) throw new InvalidDataException($"the dump's material row has {t.Length} fields, expected 3");
+                Compare(problems, "the materials (index, json)", mr.Materials.Select((jm, i) => $"{i}\t{MaterialDrill.Canonical(jm).ToString(Newtonsoft.Json.Formatting.None)}").ToList(),
+                        matRows.Select(t => $"{t[1]}\t{MaterialDrill.Canonical(Newtonsoft.Json.Linq.JObject.Parse(t[2])).ToString(Newtonsoft.Json.Formatting.None)}").ToList());
+                var texRows = Of("TEX");
+                foreach (var t in texRows) if (t.Length != 5) throw new InvalidDataException($"the dump's texture row has {t.Length} fields, expected 5");
+                Compare(problems, "the textures (index, source, sampler, other fields)", mr.Textures.Select((t, i) => $"{i}\t{t.image}\t{(t.sampler >= 0 ? t.sampler.ToString() : "-")}\t{{}}").ToList(), texRows.Select(t => string.Join("\t", t.Skip(1))).ToList());
+                var sampRows = Of("SAMP");
+                foreach (var t in sampRows) if (t.Length != 3) throw new InvalidDataException($"the dump's sampler row has {t.Length} fields, expected 3");
+                Compare(problems, "the samplers (index, json)", mr.Samplers.Select((s, i) => $"{i}\t{MaterialDrill.Canonical(s).ToString(Newtonsoft.Json.Formatting.None)}").ToList(),
+                        sampRows.Select(t => $"{t[1]}\t{MaterialDrill.Canonical(Newtonsoft.Json.Linq.JObject.Parse(t[2])).ToString(Newtonsoft.Json.Formatting.None)}").ToList());
+                var imgRows = Of("IMG");
+                foreach (var t in imgRows) if (t.Length != 5) throw new InvalidDataException($"the dump's image row has {t.Length} fields, expected 5");
+                Compare(problems, "the images (index, name, mime, sha256)", mr.Images.Select((im, i) => $"{i}\t{im.name}\t{im.mime}\t{Sha(im.bytes)}").ToList(), imgRows.Select(t => string.Join("\t", t.Skip(1))).ToList());
+                materials += matRows.Count; images += imgRows.Count;
                 // ---- the animations: names and order (their channels are part 8b's)
                 var animRows = Of("ANIM");
                 foreach (var t in animRows) if (t.Length != 5) throw new InvalidDataException($"the dump's animation row has {t.Length} fields, expected 5");
@@ -217,7 +234,7 @@ static class ExportDrill
         }
         foreach (var k in jobs.Keys) if (!dumped.Contains(k)) { fails++; Console.WriteLine($"FAIL {k}: the dump holds no such job"); }
         foreach (var kv in cover) Console.WriteLine($"COVER {kv.Value} {kv.Key}");
-        Console.WriteLine($"TOTAL jobs {files} failed {fails} left {left} exits {exits} rolesleft {rolesLeft} lines {lines} nodes {nodes} joints {joints} ibms {ibms} meshes {meshes} primitives {prims} vertices {vertices} animations {anims}");
+        Console.WriteLine($"TOTAL jobs {files} failed {fails} left {left} exits {exits} rolesleft {rolesLeft} lines {lines} nodes {nodes} joints {joints} ibms {ibms} meshes {meshes} primitives {prims} vertices {vertices} animations {anims} materials {materials} images {images}");
         return fails == 0 ? 0 : 1;
     }
 

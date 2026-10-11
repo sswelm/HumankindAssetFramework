@@ -957,6 +957,93 @@ def fx_export_flat_alpha(out):
     write_glb(os.path.join(out, "export_flat_alpha.glb"), root, b)
 
 
+def fx_export_material_edges(out):
+    """The material round trip's edges the sources do not reach (deploy_convert part 8a-ii, the material plants): a flat
+    MASK whose alpha is under the cutoff by less than float32 tells (the importer compares the JSON doubles: 0), an IOR
+    without a specular extension (dropped by the exporter), an image declared PNG that holds JPEG bytes (the exporter
+    writes the type the bytes say), and an occlusion strength of 0.99999999 (the importer makes the Mix node on the
+    double, the exporter writes its float32: 1)."""
+    import base64
+    jpeg = base64.b64decode("/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/yQALCAABAAEBAREA/8wABgAQEAX/2gAIAQEAAD8A0s8g/9k=")
+    b = Buf()
+    pos, nrm, uv0, _, _, idx = bent_grid(2, 2, 0.0, 0.0)
+    p = b.accessor(pos, "f", "VEC3"); n = b.accessor(nrm, "f", "VEC3", minmax=False); uv = b.accessor(uv0, "f", "VEC2", minmax=False); i = b.accessor(idx, "H", "SCALAR")
+    mats = [{"name": "mask_edge", "alphaMode": "MASK", "alphaCutoff": 0.30000001, "pbrMetallicRoughness": {"baseColorFactor": [0.2, 0.9, 0.2, 0.3]}},
+            {"name": "ior_only", "extensions": {"KHR_materials_ior": {"ior": 1.4}}},
+            {"name": "mime_lies", "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}},
+            {"name": "occlusion_near_one", "occlusionTexture": {"index": 1, "strength": 0.99999999}},
+            # a clearcoat without textures: the weight written when not 0, the roughness when not within 1e-5 of Blender's 0.03
+            {"name": "coated", "extensions": {"KHR_materials_clearcoat": {"clearcoatFactor": 0.3, "clearcoatRoughnessFactor": 0.2}}},
+            {"name": "coated_default_roughness", "extensions": {"KHR_materials_clearcoat": {"clearcoatFactor": 1.0, "clearcoatRoughnessFactor": 0.03}}},
+            # the second review's shapes: beside a specular colour TEXTURE the colour factor is written whenever the source's
+            # is not white (a list compared to a tuple) and (fac, fac, fac) when the factor is over 1; a texCoord the mesh has
+            # no layer for is written as 0; a grey emissive factor is folded into the strength on the JSON doubles (3 x 0.3
+            # is 0.8999999999999999, not float32(0.3) x 3); a negative colour component is clamped to 0 by the socket; a
+            # wrap value the importer does not know reads back as CLAMP on both axes
+            {"name": "spec_colour_textured", "extensions": {"KHR_materials_specular": {"specularColorTexture": {"index": 1}, "specularColorFactor": [0.5, 0.5, 0.5]}}},
+            {"name": "spec_over_one_textured", "extensions": {"KHR_materials_specular": {"specularColorTexture": {"index": 1}, "specularFactor": 1.5}}},
+            {"name": "texcoord_beyond", "pbrMetallicRoughness": {"baseColorTexture": {"index": 1, "texCoord": 1}}},
+            {"name": "grey_glow", "emissiveFactor": [0.3, 0.3, 0.3], "extensions": {"KHR_materials_emissive_strength": {"emissiveStrength": 3.0}}},
+            {"name": "negative_glow", "emissiveFactor": [-0.5, 0.5, 0.25]},
+            {"name": "odd_wrap", "pbrMetallicRoughness": {"baseColorTexture": {"index": 2}}}]
+    root = base("export_material_edges", images=[{"bufferView": b.blob(jpeg), "mimeType": "image/png", "name": "liar"}, {"bufferView": b.blob(png(2, 2, (120, 120, 120))), "mimeType": "image/png", "name": "ao"}],
+                textures=[{"source": 0}, {"source": 1}, {"source": 1, "sampler": 0}], samplers=[{"wrapS": 12345, "wrapT": 12345}],
+                materials=mats, extensionsUsed=["KHR_materials_ior", "KHR_materials_clearcoat", "KHR_materials_specular", "KHR_materials_emissive_strength"],
+                meshes=[{"name": "part%d" % k, "primitives": [{"attributes": {"POSITION": p, "NORMAL": n, "TEXCOORD_0": uv}, "indices": i, "material": k}]} for k in range(len(mats))],
+                nodes=[{"name": "Part%d" % k, "mesh": k, "translation": [1.5 * k, 0.0, 0.0]} for k in range(len(mats))],
+                scenes=[{"nodes": list(range(len(mats)))}], scene=0)
+    write_glb(os.path.join(out, "export_material_edges.glb"), root, b)
+
+
+def fx_export_material_review(out):
+    """PR 149: ORM sharing across UV layers, ignored unlit slots, and an unused mesh's UV layers."""
+    for mode in ("orm_uv", "unlit_images", "unused_mesh", "uv_variants"):
+        b = Buf()
+        p = b.accessor([(0, 0, 0), (1, 0, 0), (0, 1, 0)], "f", "VEC3")
+        uv = b.accessor([(0, 0), (1, 0), (0, 1)], "f", "VEC2")
+        attrs = {"POSITION": p, "TEXCOORD_0": uv, "TEXCOORD_1": uv}
+        root = base(mode, meshes=[{"primitives": [{"attributes": attrs, "material": 0}]}],
+                    nodes=[{"mesh": 0}], scenes=[{"nodes": [0]}], scene=0,
+                    images=[{"name": "shared.png", "mimeType": "image/png", "bufferView": b.blob(png(2, 2, (50, 100, 150)))}],
+                    textures=[{"source": 0}], materials=[])
+        if mode == "orm_uv":
+            root["textures"] = [{"source": 0, "sampler": 0}, {"source": 0, "sampler": 1}]
+            root["samplers"] = [{"magFilter": 9728, "minFilter": 9728}, {"magFilter": 9729, "minFilter": 9729}]
+            root["materials"] = [{"name": mode, "occlusionTexture": {"index": 0},
+                                  "pbrMetallicRoughness": {"metallicRoughnessTexture": {"index": 1, "texCoord": 1}}}]
+        elif mode == "unlit_images":
+            root["images"].append({"name": "shared.png", "mimeType": "image/png", "bufferView": b.blob(png(2, 2, (100, 150, 50)))})
+            root["textures"].append({"source": 1})
+            root["materials"] = [{"name": mode, "extensions": {"KHR_materials_unlit": {}}, "emissiveTexture": {"index": 0},
+                                  "pbrMetallicRoughness": {"baseColorTexture": {"index": 1}}}]
+            root["extensionsUsed"] = ["KHR_materials_unlit"]
+        else:
+            del attrs["TEXCOORD_1"]
+            root["meshes"].append({"primitives": [{"attributes": dict(attrs, TEXCOORD_1=uv), "material": 0}]})
+            root["materials"] = [{"name": mode, "pbrMetallicRoughness": {"baseColorTexture": {"index": 0, "texCoord": 1}}}]
+            if mode == "uv_variants":
+                root["meshes"][1]["primitives"][0]["attributes"]["COLOR_0"] = b.accessor([(1, 1, 1, 1)] * 3, "f", "VEC4", minmax=False)
+                root["nodes"].append({"mesh": 1}); root["scenes"][0]["nodes"].append(1)
+        write_glb(os.path.join(out, "export_review_" + mode + ".glb"), root, b)
+
+
+def fx_export_uri_mime(out):
+    """A .gltf whose image FILE is named as a PNG but holds JPEG bytes: Blender's importer loads it from the file, and the
+    exporter takes the type from the file's extension - the bytes' magic then does not match and the image is encoded
+    again; the material port leaves such a file by name (the second review of part 8a-ii)."""
+    import base64
+    jpeg = base64.b64decode("/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/yQALCAABAAEBAREA/8wABgAQEAX/2gAIAQEAAD8A0s8g/9k=")
+    with open(os.path.join(out, "liar.png"), "wb") as f:
+        f.write(jpeg)
+    b = Buf()
+    pos, nrm, uv0, _, _, idx = bent_grid(2, 2, 0.0, 0.0)
+    root = base("export_uri_mime", images=[{"uri": "liar.png"}], textures=[{"source": 0}],
+                materials=[{"name": "wall", "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}}],
+                meshes=[{"name": "pane", "primitives": [{"attributes": {"POSITION": b.accessor(pos, "f", "VEC3"), "TEXCOORD_0": b.accessor(uv0, "f", "VEC2", minmax=False)}, "indices": b.accessor(idx, "H", "SCALAR"), "material": 0}]}],
+                nodes=[{"name": "Pane", "mesh": 0}], scenes=[{"nodes": [0]}], scene=0)
+    write_gltf(os.path.join(out, "export_uri_mime.gltf"), root, b, "export_uri_mime.bin")
+
+
 def fx_export_strip(out):
     """prep_model.py's STRIP (step 5 d, part 4d): every object whose name contains one of the substrings, ignoring case,
     goes with all its descendants, and the reduce's ratio is taken from what is left. One file, a strip list per line of
@@ -1172,12 +1259,16 @@ def fx_posed(out):
 FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external, fx_cubic, fx_scenes, fx_materials, fx_skin8, fx_big, fx_names, fx_no_default_scene, fx_dropped, fx_mixed_skin, fx_clip_switch, fx_path_clip, fx_far_clip, fx_unicode_clip, fx_decimate_attrs, fx_decimate_limits, fx_export_layout, fx_export_skin, fx_export_skin_badweights, fx_export_skin_bonechild]
 
 
-def main(out, prep=False, posed=False):
+def main(out, prep=False, posed=False, materials=False):
     os.makedirs(out, exist_ok=True)
     if posed:   # for tools/deploy_drill.sh alone: a doubled channel and merged keys are not for the other drills
         fx_posed(out)
     # Blender drops the line mesh: its vertex bounds are only relevant to the prep export drill.
-    for fx in FIXTURES + ([fx_export_skin_lines, fx_export_bones, fx_export_review, fx_export_skin_twins, fx_export_flat_alpha, fx_export_jpeg_alpha, fx_export_factor_range, fx_export_strip] if prep else []):
+    # --materials: the material round trip's own fixtures (tools/deploy_drill.sh, part 8a-ii), NOT for the prep drill: the edge
+    # fixture carries a specularFactor of 1.5, which the glTF importer tolerates and folds into the colour, while the
+    # Factory's converter (SharpGLTF's validator) refuses it in the C# prep's written file, where the source material
+    # passes through unchanged until the Factory writes BlenderMaterialExport's materials.
+    for fx in FIXTURES + ([fx_export_skin_lines, fx_export_bones, fx_export_review, fx_export_skin_twins, fx_export_flat_alpha, fx_export_jpeg_alpha, fx_export_factor_range, fx_export_strip] if prep else []) + ([fx_export_material_edges, fx_export_uri_mime, fx_export_material_review] if materials else []):
         fx(out)
     for name in sorted(os.listdir(out)):
         if name.endswith((".glb", ".gltf")):
@@ -1185,4 +1276,4 @@ def main(out, prep=False, posed=False):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], prep="--prep" in sys.argv[2:], posed="--posed" in sys.argv[2:])
+    main(sys.argv[1], prep="--prep" in sys.argv[2:], posed="--posed" in sys.argv[2:], materials="--materials" in sys.argv[2:])

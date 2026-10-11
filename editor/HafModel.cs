@@ -159,8 +159,10 @@ public sealed class HafMaterial
     public int MetallicRoughnessTexture = -1; public int MetallicRoughnessTexCoord;
     public int NormalTexture = -1; public int NormalTexCoord; public float NormalScale = 1;
     public int OcclusionTexture = -1; public int OcclusionTexCoord; public float OcclusionStrength = 1;
+    public double OcclusionStrengthJson = 1;   // the strength as the file gives it: Blender's importer decides on the double whether to make the strength node (BlenderMaterialExport)
     public int EmissiveTexture = -1; public int EmissiveTexCoord;
     public float[] EmissiveFactor = { 0, 0, 0 };
+    public double[] EmissiveFactorJson = { 0, 0, 0 };   // as the file gives it: Blender's importer folds a grey factor into the strength on the doubles (BlenderMaterialExport)
     public bool NameAbsent;          // the file had no "name" at all (not an empty one): Blender's importer names it Material_<index> then, and an EMPTY name "Material"
     public string AlphaMode = "OPAQUE";
     public double AlphaCutoff = 0.5;   // keep JSON precision: Blender tests MASK boundaries before storing node values as floats
