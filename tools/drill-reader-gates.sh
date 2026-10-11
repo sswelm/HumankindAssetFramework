@@ -16,6 +16,9 @@
 #      gate must trace to their literals (the shape that hid `RenderMatFields` from the two literal passes);
 #   5. (2026-10-11) a reader whose name is a parameter nothing in the file ever passes a literal to (`RunDynamic`):
 #      pass 3 must refuse it by name rather than silently not count it.
+#   6. a same-named loop in another method, an ambiguous table in another file, a parameter shadowing a table,
+#      mixed literal/computed table entries, and a dynamic suffix must not manufacture a complete literal name;
+#      a bounded numeric suffix must enumerate every generated name.
 #
 # Then removes the plant and re-runs both gates, which must PASS — so a drill that leaves the tree dirty, or a gate
 # that fails for an unrelated reason, is reported as the drill's own failure. The plant is removed on every exit.
@@ -25,8 +28,9 @@ set -uo pipefail
 cd "$(dirname "$0")/.." || exit 2
 
 PLANT=Patches/_ReaderGateDrill.cs
-[ -e "$PLANT" ] && { echo "[FAIL] $PLANT already exists — a previous drill did not clean up; inspect and delete it"; exit 2; }
-trap 'rm -f "$PLANT"' EXIT
+SHADOW=Patches/_ReaderGateDrillShadow.cs
+[ -e "$PLANT" ] || [ -e "$SHADOW" ] && { echo "[FAIL] a reader-gate drill plant already exists — inspect and delete it"; exit 2; }
+trap 'rm -f "$PLANT" "$SHADOW"' EXIT
 
 cat > "$PLANT" <<'EOF'
 using System;
@@ -72,10 +76,26 @@ namespace HumankindAssetFramework
             object Loc(string n) => Peek(unit, n);
             Loc("BogusLocalMember");
         }
+        // A prior loop with the same identifier must not lend its literal to a later method's parameter.
+        static void Decoy() { foreach (var dyn in new[] { "BogusDecoyMember" }) { } }
         // string FIRST: the `(object, string)` helper self-check must not be the one that refuses this — pass 3 must
         static void RunDynamic(string dyn, object unit) { Peek(unit, dyn); }
+        static void RunDynamicSuffix(string suffix, object unit) { Peek(unit, "BogusPrefix" + suffix); }
+        static void RunMixed(string dynamicPart, object unit)
+        {
+            foreach (var mixedField in new[] { "BogusKnownMember", dynamicPart }) Peek(unit, mixedField);
+        }
+        static void RunShadowedTable(string DrillFields, object unit) { Peek(unit, DrillFields); }
+        static void RunIndexed(object unit)
+        {
+            for (int i = 0; i < 3; i++) Peek(unit, "BogusIndexed" + i);
+        }
     }
 }
+EOF
+cat > "$SHADOW" <<'EOF'
+// Same table identifier in another file: it must not replace the declaration local to _ReaderGateDrill.cs.
+class ReaderGateDrillShadow { static readonly string[] DrillFields = { "BogusShadowMember" }; }
 EOF
 
 fail=0
@@ -109,8 +129,18 @@ for nm in BogusLoopMember BogusStaticTableMember BogusLocalMember; do
   else echo "[FAIL] check-catalog.sh did not report $nm — pass 3 lost a name read without a literal at the call:"; printf '%s\n' "$out" | head -8; fail=1; fi
 done
 # … and shape 5: the parameter nothing passes a literal to is refused by the function's name, not silently uncounted.
-if printf '%s' "$out" | grep -q "RunDynamic"; then echo "ok   — check-catalog.sh refuses the reader whose name has no literal behind it (RunDynamic)"
+if printf '%s' "$out" | grep -q 'RunDynamic('; then echo "ok   — check-catalog.sh refuses the reader whose name has no literal behind it (RunDynamic)"
 else echo "[FAIL] check-catalog.sh did not refuse RunDynamic's computed member name:"; printf '%s\n' "$out" | head -8; fail=1; fi
+if printf '%s' "$out" | grep -q 'RunDynamicSuffix'; then echo "ok   — check-catalog.sh refuses a literal prefix plus a computed suffix"
+else echo "[FAIL] check-catalog.sh treated a dynamic suffix as a whole literal:"; printf '%s\n' "$out" | head -8; fail=1; fi
+if printf '%s' "$out" | grep -q 'mixedField'; then echo "ok   — check-catalog.sh refuses a table that mixes a literal with a computed element"
+else echo "[FAIL] check-catalog.sh treated a mixed table as all literal:"; printf '%s\n' "$out" | head -8; fail=1; fi
+if printf '%s' "$out" | grep -q 'RunShadowedTable('; then echo "ok   — check-catalog.sh follows a parameter that shadows a static table"
+else echo "[FAIL] check-catalog.sh resolved a shadowed parameter as the static table:"; printf '%s\n' "$out" | head -8; fail=1; fi
+for nm in BogusIndexed0 BogusIndexed1 BogusIndexed2; do
+  if printf '%s' "$out" | grep -q "$nm"; then echo "ok   — check-catalog.sh enumerates $nm from a bounded name loop"
+  else echo "[FAIL] check-catalog.sh did not enumerate $nm from a bounded name loop:"; printf '%s\n' "$out" | head -8; fail=1; fi
+done
 out=$(bash tools/check-member-shape.sh 2>&1); rc=$?
 if [ $rc -eq 0 ] || ! printf '%s' "$out" | grep -q "IsLoadedDrill"; then echo "[FAIL] check-member-shape.sh did not report the dead-sentinel through a known wrapper:"; printf '%s\n' "$out" | head -6; fail=1
 else echo "ok   — check-member-shape.sh sees the dead-sentinel through the known wrapper 'Mem'"; fi

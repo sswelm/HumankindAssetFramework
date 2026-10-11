@@ -14,12 +14,14 @@
 #   1. a loop variable — the nearest preceding `foreach (var X in …)` — resolves to its source: an inline
 #      `new[] { "a", "b" }` gives its literals, an identifier is looked up as a table (2);
 #   2. a table — `string[] X = { … }` / `= new[] { … }` anywhere in the runtime sources, or `const string X = "a"`,
-#      or `var X = cond ? "a" : "b"` in the same file — gives its literals;
-#   3. a `string` PARAMETER of the enclosing method or local function: a function in --known (the gate's HELPERS and
+#      or `var X = cond ? "a" : "b"` in the same file — gives its literals only when every element is literal;
+#   3. a bounded `for (int i = 0; i < N; i++)` with `"Prefix" + i + ".Suffix"` enumerates every name;
+#   4. a `string` PARAMETER of the enclosing method or local function: a function in --known (the gate's HELPERS and
 #      NOT_MEMBER_READERS lists) forwards its caller's literal, which the first two passes already extract, so nothing
 #      is printed; any OTHER function (a local function, a private static the gate does not know) is a wrapper of its
 #      own, and every call to it in the same file is resolved the same way, argument by argument, two levels deep;
-#   4. anything else is printed as UNRESOLVED — the gate FAILS on it unless the site is allowlisted with a reason.
+#   5. anything else is printed as UNRESOLVED — the gate FAILS on it unless the site is allowlisted with a reason.
+# A loop is used only inside its body; a parameter shadows a table; ambiguous table declarations fail closed.
 #
 # Output, one per line:
 #     <name>\t<file>:<line>                         a literal the site reads (the line is the READER site)
@@ -117,9 +119,31 @@ sub call_args {
 }
 
 sub literals_in { my ($t) = @_; return ($t =~ /"([A-Za-z_][A-Za-z0-9_.]*)"/g) }
+sub literal_list {
+    my ($body) = @_;
+    my $rest = $body;
+    $rest =~ s/"[A-Za-z_][A-Za-z0-9_.]*"//g;
+    return undef if $rest =~ /[^\s,]/;  # a computed element must not be hidden by neighbouring literals
+    my @names = literals_in($body);
+    return @names ? \@names : undef;
+}
 
 my %files;        # file -> { code, text }
-my %tables;       # identifier -> [literals], from every file (static tables are reached across partials)
+my %tableDefs;    # identifier -> [{file, names}]; a table in another partial is usable only when unambiguous
+sub add_table {
+    my ($f, $name, $names) = @_;
+    push @{ $tableDefs{$name} }, { file => $f, names => $names };
+}
+sub table_at {
+    my ($f, $name) = @_;
+    my @defs = @{ $tableDefs{$name} // [] };
+    my @local = grep { $_->{file} eq $f } @defs;
+    @defs = @local if @local;
+    return undef unless @defs;
+    my $sig = join "\0", @{ $defs[0]{names} // [] };
+    return undef if grep { !defined($_->{names}) || join("\0", @{ $_->{names} }) ne $sig } @defs;
+    return $defs[0]{names};
+}
 for my $f (@ARGV) {
     open(my $fh, '<', $f) or next;
     my $src = do { local $/; <$fh> };
@@ -129,10 +153,10 @@ for my $f (@ARGV) {
     $files{$f} = { code => $code, text => $text };
     while ($text =~ /\bstring\s*\[\]\s+(\w+)\s*=\s*(?:new\s*(?:string)?\s*\[\]\s*)?\{([^{}]*)\}/g) {
         my ($name, $body) = ($1, $2);
-        $tables{$name} = [literals_in($body)];
+        add_table($f, $name, literal_list($body));
     }
     while ($text =~ /\b(?:const\s+string|static\s+readonly\s+string|string)\s+(\w+)\s*=\s*("[A-Za-z_][A-Za-z0-9_.]*")\s*;/g) {
-        $tables{$1} = [literals_in($2)];
+        add_table($f, $1, [literals_in($2)]);
     }
 }
 
@@ -179,48 +203,116 @@ sub param_index {   # position of `string $ident` among the parameters
     return -1;
 }
 
+sub closing_delimiter {
+    my ($code, $open, $left, $right) = @_;
+    my $depth = 0;
+    for (my $j = $open; $j < length $code; $j++) {
+        my $c = substr($code, $j, 1);
+        $depth++ if $c eq $left;
+        if ($c eq $right) { $depth--; return $j if $depth == 0 }
+    }
+    return -1;
+}
+
+sub statement_end {
+    my ($code, $body) = @_;
+    $body++ while $body < length($code) && substr($code, $body, 1) =~ /\s/;
+    return closing_delimiter($code, $body, '{', '}') if substr($code, $body, 1) eq '{';
+    my ($parens, $brackets, $braces) = (0, 0, 0);
+    for (my $j = $body; $j < length($code); $j++) {
+        my $c = substr($code, $j, 1);
+        $parens++ if $c eq '('; $parens-- if $c eq ')';
+        $brackets++ if $c eq '['; $brackets-- if $c eq ']';
+        if ($c eq '{' && !$parens && !$brackets && !$braces) {
+            return closing_delimiter($code, $j, '{', '}');  # `if (...) { ... }` as the single statement
+        }
+        $braces++ if $c eq '{'; $braces-- if $c eq '}';
+        return $j if $c eq ';' && !$parens && !$brackets && !$braces;
+    }
+    return -1;
+}
+
+# A preceding foreach only owns its variable INSIDE its body. A same-named parameter in a later method must not
+# inherit its literals (otherwise an untraceable reader silently passes the catalog gate).
+sub loop_source {
+    my ($code, $text, $pos, $ident) = @_;
+    my $source;
+    while ($code =~ /\bforeach\s*\(\s*(?:var|string)\s+\Q$ident\E\s+in\s*/g) {
+        my $srcStart = pos($code);
+        my $open = index($code, '(', $-[0]);
+        my $close = closing_delimiter($code, $open, '(', ')');
+        next if $close < 0 || $close >= $pos;
+        my $end = statement_end($code, $close + 1);
+        next if $end < $pos;
+        $source = substr($text, $srcStart, $close - $srcStart);
+    }
+    return $source;
+}
+
+# A small literal-index loop spells a finite member set (`"Pose" + i + ".Time"`). The catalog must bind every
+# generated name, not merely its endpoints. Only accept a loop whose body contains this reader.
+sub loop_bounds {
+    my ($code, $pos, $ident) = @_;
+    my $bounds;
+    while ($code =~ /\bfor\s*\(\s*int\s+\Q$ident\E\s*=\s*(\d+)\s*;\s*\Q$ident\E\s*<\s*(\d+)\s*;\s*\Q$ident\E\s*\+\+\s*\)/g) {
+        my ($first, $limit) = ($1, $2);
+        my $close = pos($code) - 1;
+        next if $close >= $pos || statement_end($code, $close + 1) < $pos;
+        next if $limit < $first || $limit - $first > 64;
+        $bounds = [$first, $limit];
+    }
+    return $bounds;
+}
+
 # resolve one argument text at a site; returns (\@literals) or undef when it cannot
 sub resolve {
     my ($f, $pos, $arg, $depth) = @_;
     return undef if $depth > 3;
     my ($code, $text) = ($files{$f}{code}, $files{$f}{text});
-    return [literals_in($arg)] if $arg =~ /^"[A-Za-z_][A-Za-z0-9_.]*"(?:\s*\+\s*\S+)?$/;
+    return [literals_in($arg)] if $arg =~ /^"[A-Za-z_][A-Za-z0-9_.]*"$/;
+    if ($arg =~ /^"([A-Za-z_][A-Za-z0-9_]*)"\s*\+\s*([A-Za-z_]\w*)(?:\s*\+\s*"(\.[A-Za-z_][A-Za-z0-9_]*)")?$/) {
+        my ($prefix, $index, $suffix) = ($1, $2, $3 // '');
+        my $bounds = loop_bounds($code, $pos, $index);
+        return [map { "$prefix$_$suffix" } $bounds->[0] .. $bounds->[1] - 1] if $bounds;
+        return undef;
+    }
     my $ident = $arg =~ /^([A-Za-z_]\w*)\s*\[[^\]]*\]$/ ? $1 : $arg =~ /^([A-Za-z_]\w*)$/ ? $1 : undef;
     return undef unless defined $ident;
     # 1. a loop variable: the nearest preceding foreach that declares it
     my $before = substr($code, 0, $pos);
-    if ($before =~ /.*\bforeach\s*\(\s*(?:var|string)\s+\Q$ident\E\s+in\s*/s) {
-        my $srcStart = $+[0];
-        my $srcText  = substr($text, $srcStart);
-        if ($srcText =~ /^new\s*(?:string)?\s*\[\]\s*\{([^{}]*)\}/) { return [literals_in($1)] }
-        if ($srcText =~ /^([A-Za-z_]\w*)\s*\)/) { return $tables{$1} if $tables{$1}; return undef }
+    if (defined(my $srcText = loop_source($code, $text, $pos, $ident))) {
+        if ($srcText =~ /^new\s*(?:string)?\s*\[\]\s*\{([^{}]*)\}/) { return literal_list($1) }
+        if ($srcText =~ /^([A-Za-z_]\w*)\s*$/) { return table_at($f, $1) }
         return undef;
     }
-    # 2. a table or a constant
-    return $tables{$ident} if $tables{$ident};
+    # 2. a parameter shadows a field/table of the same name. Resolve its callers before consulting file-wide tables.
+    my $h = enclosing($f, $pos, $ident);
+    if ($h) {
+        return [] if $known{ $h->{name} };  # known helper: its callers' literals are extracted by the gate
+        my $idx = param_index($h->{params}, $ident);
+        my @out;
+        my $found = 0;
+        while ($code =~ /(?<![\w.])\Q$h->{name}\E\s*\(/g) {
+            my $open = $-[0] + length($&) - 1;
+            next if $open >= $h->{start} && $open < $h->{end} && $open < $h->{start} + length($h->{name}) + 2;   # the header itself
+            my @args = call_args($code, $text, $open);
+            next if $idx < 0 || $idx > $#args;
+            $found++;
+            my $r = resolve($f, $open, $args[$idx], $depth + 1);
+            return undef unless $r;
+            push @out, @$r;
+        }
+        return $found ? \@out : undef;
+    }
+    # 3. a table or a local constant
+    my $table = table_at($f, $ident);
+    return $table if $table;
     if ($before =~ /.*\b(?:var|string)\s+\Q$ident\E\s*=\s*/s) {
         my $init = substr($text, $+[0]);
         if ($init =~ /^[^;]*?\?\s*"([A-Za-z_][A-Za-z0-9_.]*)"\s*:\s*"([A-Za-z_][A-Za-z0-9_.]*)"\s*;/) { return [$1, $2] }
         if ($init =~ /^"([A-Za-z_][A-Za-z0-9_.]*)"\s*;/) { return [$1] }
     }
-    # 3. a parameter of the enclosing function
-    my $h = enclosing($f, $pos, $ident);
-    return undef unless $h;
-    return [] if $known{ $h->{name} };                      # a known helper: its callers' literals are extracted by the gate
-    my $idx = param_index($h->{params}, $ident);
-    my @out;
-    my $found = 0;
-    while ($code =~ /(?<![\w.])\Q$h->{name}\E\s*\(/g) {
-        my $open = $-[0] + length($&) - 1;
-        next if $open >= $h->{start} && $open < $h->{end} && $open < $h->{start} + length($h->{name}) + 2;   # the header itself
-        my @args = call_args($code, $text, $open);
-        next if $idx < 0 || $idx > $#args;
-        $found++;
-        my $r = resolve($f, $open, $args[$idx], $depth + 1);
-        return undef unless $r;
-        push @out, @$r;
-    }
-    return $found ? \@out : undef;
+    return undef;
 }
 
 for my $f (sort keys %files) {
@@ -239,7 +331,7 @@ for my $f (sort keys %files) {
         my $idx = ($kind eq 'getx' || $kind eq 'traverse') ? 0 : 1;
         my $a = $args[$idx];
         next unless defined $a && length $a;
-        next if $a =~ /^"/;                                   # a literal: the first two passes own it
+        next if $a =~ /^"[A-Za-z_][A-Za-z0-9_.]*"$/;          # a whole literal: the first two passes own it
         my $r = resolve($f, $open, $a, 0);
         if (!$r) {
             my $h = enclosing($f, $open, $a =~ /^([A-Za-z_]\w*)/ ? $1 : '');

@@ -545,8 +545,8 @@ namespace HumankindAssetFramework
             new Dep(TerrainRendererTechnicalSettings, nameof(TerrainRendererTechnicalSettings),
                 "VisibleHexagonsBufferSize", "DrawCommandBufferSize"),
             // formation (EntityFactoryControllerSettings / GameObjectPoolController resolve by SIMPLE name — see ResolveType)
-            // ColumnsCountPerRow0/5 are the ENDPOINTS of the six per-row grids the builder writes (like Pose0/Pose8).
-            new Dep(PresentationFormationDefinition, nameof(PresentationFormationDefinition), "Dummies", "ColumnsCountPerRow0", "ColumnsCountPerRow5", "Initialize", "LowSpecFormationDefinition"),
+            // The builder writes all six per-row grids through a bounded computed-name loop.
+            new Dep(PresentationFormationDefinition, nameof(PresentationFormationDefinition), "Dummies", "ColumnsCountPerRow0", "ColumnsCountPerRow1", "ColumnsCountPerRow2", "ColumnsCountPerRow3", "ColumnsCountPerRow4", "ColumnsCountPerRow5", "Initialize", "LowSpecFormationDefinition"),
             new Dep(FormationHelper, nameof(FormationHelper), "InitializeFormation3DForDefinition"),
             new Dep(EntityFactoryControllerSettings, nameof(EntityFactoryControllerSettings), "Instance", "Formation3DPrefab"),
             new Dep(GameObjectPoolController, nameof(GameObjectPoolController), "DoStart"),

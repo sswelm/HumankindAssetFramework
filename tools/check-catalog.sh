@@ -14,7 +14,7 @@
 #
 # THREE passes (the third since 2026-10-11): 1. the literal inside the reader call, 2. the same in a NESTED call, and
 # 3. a name that is NOT a literal at the call — a loop variable over `new[] { … }`, a `static readonly string[]` table,
-# a local function forwarding its parameter — traced to the literals behind it by tools/find-name-sites.pl. The two
+# a bounded indexed name or a local function forwarding its parameter — traced to literals by tools/find-name-sites.pl. The two
 # literal passes had reported "all 383 catalogued" for weeks while `RenderMatFields` fed three functional reads
 # (the retexture recovery and the district albedo bind) with names no catalog row held. A name the third pass cannot
 # trace to a literal FAILS the gate unless its site is allowlisted below with the reason.
@@ -216,7 +216,7 @@ UNRESOLVED=$(printf '%s\n' "$NAMESITES" | awk -F'\t' '$1 == "UNRESOLVED"' \
   | awk -F'\t' -v allow="$(printf '%s\n' "$NAME_ARG_ALLOW" | cut -f1)" 'BEGIN{n=split(allow,rows,"\n"); for(i=1;i<=n;i++) ok[rows[i]]=1}
                                                                        { split($3,s,":"); if (!(($2 "@" s[1]) in ok)) print $2 "\t" $3 "\t" $4 }')
 
-SITES=$( { extract; printf '%s\n' "$NAMESITES" | awk -F'\t' '$1 != "UNRESOLVED"'; } | sort -u)
+SITES=$( { extract; printf '%s\n' "$NAMESITES" | awk -F'\t' '$1 != "UNRESOLVED" && NF >= 2 {n=split($1,p,"."); for(i=1;i<=n;i++) if(p[i] != "") print p[i] "\t" $2}'; } | sort -u)
 [ -n "$SITES" ] || { echo "[FAIL] extracted 0 by-name literals — the extraction regex broke (were the accessors renamed?)"; exit 2; }
 
 if [ "${1:-}" = "--list" ]; then
