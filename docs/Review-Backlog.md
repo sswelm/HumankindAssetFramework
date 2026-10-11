@@ -370,6 +370,12 @@ skipped. Ranked by consequence within each group.
 
 ### Verification machinery (fix first — a green gate that cannot see the shape is worse than no gate)
 
+- **`Tests/test_parallel_gate.py` is timing-flaky** (2026-10-12): `test_progress_reports_completion_before_an_earlier_job_finishes_and_uses_real_duration`
+  failed a push's gate on a docs-only change (`'PASS fast (2 s)' not found in ''`) and 1 of 3 reruns on an idle machine; it reads the
+  progress output before the writer has flushed it. Needs a deterministic wait on the file, not a sleep; until then a failed push
+  on that check is retried, not debugged (it also failed 1 of 8 once under load in the PR #148 review).
+
+
 - ~~**`check-member-shape.sh` matches only `Convert.To*(GetMember(` — blind to the `Mem(` wrapper, and one live
   dead-sentinel sits behind it.**~~ — **FIXED 2026-09-14, drilled.** Worse than reviewed: the regex was also blind to
   the *qualified* `UniversalInject.GetMember(`, so the widened gate found **four more** live sites (FacingPersist
