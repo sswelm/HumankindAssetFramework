@@ -160,7 +160,9 @@ log to the letter and the scene it leaves to the bit, 47 jobs) - done 2026-10-10
 (objects under animated bones); **2b the armature's pose** (`VehicleProbe.BlenderPose.cs`: pose bones from the importer's bone curves,
 `BKE_pose_where_is`, what hangs from a bone) - done 2026-10-10, the canoe is decided in C#; **3 the armature and its anchors** (the bones at rest, StaticRoot's anchor, the root-motion anchor - the oracle
 now runs the script up to the bake) - done 2026-10-10; the binding of the meshes goes with the bake's parts; **4 the bake** (every baked key to the bit; the scale-free
-step and the delta-form rebase) - done 2026-10-11, bit-exact: no tolerance was needed. **4b the bake takes the selected imported armatures too** (their bones keyed a frame, their object animation
+step and the delta-form rebase) - done 2026-10-11, bit-exact: no tolerance was needed. **8a the export's structure** (`BlenderDeployExport.cs`: the trim, the purge,
+the sanitize, every node, skin, inverse bind matrix, mesh, primitive and animation name of the GLB against the file Blender writes, 192 jobs) - done 2026-10-11;
+next **8a-ii** the materials, textures and images, **8b** the animations' channels (sampled every frame, STEP for the constant), **8c** the bytes. **4b the bake takes the selected imported armatures too** (their bones keyed a frame, their object animation
 dropped) - done 2026-10-11: the dugout canoe is baked in C#, no job is left at the bake; **5a the fire-window
 snapshot** - done 2026-10-11 (the dump's own scene updates between stages were wrong on the contract path and are
 gone); **5b/5c the barrel retarget and the leg scale** - done 2026-10-10 (Bezier keys with their handles to the bit;

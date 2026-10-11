@@ -780,14 +780,7 @@ public static class BlenderDeploy
         var starts = new List<int>(); var ends = new List<int>(); var steps = new List<int>();
         // Python's int(): white space around the digits is fine - but NOT the separators U+001C..U+001F, which
         // str.strip() removes and int() refuses (the starts are read unstripped: such a start kills the script)
-        bool PyInt(string s, out int v)
-        {
-            s = (s ?? "").Trim(IntWhitespace); v = 0;
-            int first = s.Length > 0 && (s[0] == '+' || s[0] == '-') ? 1 : 0;
-            // .NET accepts trailing NULs; Python int() refuses them. Unsupported Python forms still fall back.
-            for (int i = first; i < s.Length; i++) if (s[i] < '0' || s[i] > '9') return false;
-            return int.TryParse(s, System.Globalization.NumberStyles.AllowLeadingSign, System.Globalization.CultureInfo.InvariantCulture, out v);
-        }
+        bool PyInt(string s, out int v) => PyIntParse(s, out v);
         if (PyStrip(seg8) != "")
             foreach (string tok in seg8.Split(','))
             {
@@ -1903,6 +1896,17 @@ public static class BlenderDeploy
     static string PyStrip(string s) => (s ?? "").Trim(PythonWhitespace);
     static readonly char[] IntWhitespace = PythonWhitespace.Where(c => c < '\u001c' || c > '\u001f').ToArray();
 
+    /// <summary>Python's int() of a str, for the forms the arguments take: white space around, a sign, ASCII digits.
+    /// .NET accepts trailing NULs; Python refuses them. Unsupported Python forms (an underscore, other digits) are
+    /// refused here too, and the caller falls back.</summary>
+    internal static bool PyIntParse(string s, out int v)
+    {
+        s = (s ?? "").Trim(IntWhitespace); v = 0;
+        int first = s.Length > 0 && (s[0] == '+' || s[0] == '-') ? 1 : 0;
+        for (int i = first; i < s.Length; i++) if (s[i] < '0' || s[i] > '9') return false;
+        return int.TryParse(s, System.Globalization.NumberStyles.AllowLeadingSign, System.Globalization.CultureInfo.InvariantCulture, out v);
+    }
+
     static string AsciiLower(string s)
     {
         var b = new StringBuilder(s.Length);
@@ -1958,7 +1962,7 @@ public static class BlenderDeploy
     }
 
     /// <summary>Python orders str by code point; .NET's ordinal order is by UTF-16 unit, which differs past the BMP.</summary>
-    static readonly IComparer<string> CodePointOrder = Comparer<string>.Create((a, b) =>
+    internal static readonly IComparer<string> CodePointOrder = Comparer<string>.Create((a, b) =>
     {
         int i = 0, j = 0;
         while (i < a.Length && j < b.Length)

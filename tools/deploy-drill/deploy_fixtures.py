@@ -13,11 +13,15 @@ FLAT3_SEEDS = (6, 7, 14, 18, 20, 24)
 
 class Scene:
     def __init__(self):
-        self.b = Buf(); self.nodes = []; self.meshes = []; self.samplers = []; self.channels = []; self.roots = []; self.skins = []
+        self.b = Buf(); self.nodes = []; self.meshes = []; self.samplers = []; self.channels = []; self.roots = []; self.skins = []; self.materials = []
 
-    def mesh(self, name, size=1.0, at=(0.0, 0.0, 0.0), skinned=False, normals=False, ring=0):
+    def mesh(self, name, size=1.0, at=(0.0, 0.0, 0.0), skinned=False, normals=False, ring=0, mode=4, material=None, second=None):
+        """One triangle (or a `ring`), `mode` 1 for a line of two vertices; `material` an index into self.materials;
+        `second` adds a second primitive (a triangle beside the first) with that material index."""
         x, y, z = at
         pos = [(x, y, z), (x + size, y, z), (x, y + size * 0.5, z + size * 0.25)]
+        if mode == 1:
+            pos = [(x, y, z), (x + size, y + size, z)]
         if ring:
             # a thin wheel: `ring` vertices on a circle in the YZ plane, a hair thick along X - its axle is X
             import math
@@ -29,7 +33,16 @@ class Scene:
         if skinned:
             attrs["JOINTS_0"] = self.b.accessor([(0, 0, 0, 0)] * 3, "H", "VEC4", minmax=False)
             attrs["WEIGHTS_0"] = self.b.accessor([(1, 0, 0, 0)] * 3, "f", "VEC4", minmax=False)
-        self.meshes.append({"name": name, "primitives": [{"attributes": attrs}]})
+        prim = {"attributes": attrs}
+        if mode != 4:
+            prim["mode"] = mode
+        if material is not None:
+            prim["material"] = material
+        prims = [prim]
+        if second is not None:
+            pos2 = [(x, y + size, z), (x + size, y + size, z), (x, y + size * 1.5, z + size * 0.25)]
+            prims.append({"attributes": {"POSITION": self.b.accessor(pos2, "f", "VEC3")}, "material": second})
+        self.meshes.append({"name": name, "primitives": prims})
         return len(self.meshes) - 1
 
     def node(self, name, parent=None, **kw):
@@ -48,6 +61,8 @@ class Scene:
 
     def write(self, out, name):
         extra = {"skins": self.skins} if self.skins else {}
+        if self.materials:
+            extra["materials"] = self.materials
         root = base(name, meshes=self.meshes, nodes=self.nodes, scenes=[{"nodes": self.roots}], scene=0,
                     animations=[{"name": "Deploy", "samplers": self.samplers, "channels": self.channels}], **extra)
         path = os.path.join(out, name + ".glb")
@@ -560,6 +575,9 @@ def main(out):
     os.makedirs(out, exist_ok=True)
     f = small(out, "deploy_small", 1.0, skin=True)
     print("small_default|%s|%s" % (f, DEFAULT))
+    # a deploy that starts two frames after the clip's first: the exporter cuts every action to the trimmed scene range, and
+    # the role clips keyed at fmin and fmin + 1 alone (deployed, folded) are not written (8a)
+    print("small_start5|%s|5|24|||||||0|||4|0|1" % f)
     # a strip list GIVEN replaces the default one: the bone shape is not in it and stays; "shell" hits a mesh's name
     # (BAKELEFT: the strip list leaves the importer's bone shape in, and the bind folds its icosphere - Blender's vertices)
     print("BAKELEFT:small_strip|%s|0|24|soldier, SHELL ||||||0|||4|0|1" % f)
@@ -775,8 +793,11 @@ def main(out):
     # the bind (part 6): a datablock shared by three meshes (two copies, numbered), the same from a numbered name, the same
     # with one sharer stripped; a mesh under a mesh part and a mesh two static meshes below a part; file normals under an
     # uneven, mirrored matrix; no mesh at all
-    for kind in ("shared", "suffix", "strip", "nested", "normals", "normals_clamp", "normals_clamp_negative", "normals_large", "empty", "longname", "anchor", "near"):
+    # ... and the export's shapes (8a): a two-material mesh part with a line mesh below it; a primitive of 8 corners, whose
+    # export is Blender's by name (the importer's n-gon of the leftover corners)
+    for kind in ("shared", "suffix", "strip", "nested", "normals", "normals_clamp", "normals_clamp_negative", "normals_large", "empty", "longname", "anchor", "near", "export"):
         print("bind_%s|%s|%s" % (kind, bind(out, "deploy_bind_" + kind, kind), DEFAULT))
+    print("EXPORTLEFT:bind_ngon|%s|%s" % (bind(out, "deploy_bind_ngon", "ngon"), DEFAULT))
     # the role clips (7c): the wheel spin - the axle from the verts (AUTO: the thin extent), forced to Y and Z, a bone found
     # by a substring, one not found (logged), 8 frames and -180 degrees, the frame count 0 (the script divides by it:
     # ROLELEFT), a negative count (no keys, the modes set), a wheel named twice, a wheel bone past ASCII (ROLELEFT); the
@@ -874,6 +895,20 @@ def bind(out, name, kind):
         gun = s.node("Gun", turret, mesh=s.mesh("gun", 2.0, normals=True), translation=[1.0, 0.5, 0.0])
         s.anim(gun, "translation", [0.0, 1.0], [(1.0, 0.5, 0.0), (2.5, 0.5, 0.0)])
         s.node("Box", turret, mesh=s.mesh("box", 1.0), translation=[-1.0, 0.0, 0.0])
+    elif kind == "ngon":
+        # a TRIANGLES primitive of 8 corners: the importer's last face takes the two leftover corners as a 5-gon, which the
+        # exporter triangulates into four triangles of eight vertices - the ports' triangle layout does not model it, and the
+        # export is left to Blender by name (EXPORTLEFT:); the earlier steps are compared
+        gun = s.node("Gun", turret, mesh=s.mesh("gun", 0.3, ring=8), translation=[1.0, 0.5, 0.0])
+        s.anim(gun, "translation", [0.0, 1.0], [(1.0, 0.5, 0.0), (2.5, 0.5, 0.0)])
+    elif kind == "export":
+        # the export's shapes (8a): a part whose mesh has two primitives of two materials (two glTF primitives, the
+        # materials numbered at first use), and a mesh of a LINE alone under it (bound, written as a node without a mesh
+        # and without a skin, its transform against the armature's)
+        s.materials = [{"name": "Paint", "pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.1, 0.1, 1.0]}}, {"name": "Steel", "pbrMetallicRoughness": {"metallicFactor": 1.0, "roughnessFactor": 0.3}}]
+        gun = s.node("Gun", turret, mesh=s.mesh("gun", 2.0, material=1, second=0), translation=[1.0, 0.5, 0.0])
+        s.anim(gun, "translation", [0.0, 1.0], [(1.0, 0.5, 0.0), (2.5, 0.5, 0.0)])
+        s.node("Wire", gun, mesh=s.mesh("wire", 1.0, mode=1), translation=[0.0, 0.5, 0.0], rotation=[0.0, 0.3826834, 0.0, 0.9238795])
     else:   # empty: a second animated empty, nothing to bind
         barrel = s.node("Barrel", turret, translation=[1.0, 0.0, 0.0])
         s.anim(barrel, "translation", [0.0, 1.0], [(1.0, 0.0, 0.0), (1.0, 0.5, 0.0)])
@@ -897,7 +932,9 @@ def wheels(out, name, kind):
     if kind == "nonascii":
         s.nodes[lw]["name"] = "L_Wh\u00e9el"
     if kind == "many":
-        t = s.node("Tail_Wheel", hull, mesh=s.mesh("twheel", 0.3, ring=8), translation=[0.0, 0.3, -2.0])
+        # nine vertices, not eight: a TRIANGLES primitive whose corner count is not a multiple of three leaves the
+        # importer a dangling n-gon of the rest (its last face takes the leftover corners), which the ports leave by name
+        t = s.node("Tail_Wheel", hull, mesh=s.mesh("twheel", 0.3, ring=9), translation=[0.0, 0.3, -2.0])
         s.anim(t, "rotation", [0.0, 1.0], [(0.0, 0.0, 0.0, 1.0), (0.0, 0.0, 0.0, 1.0)])
     return s.write(out, name)
 

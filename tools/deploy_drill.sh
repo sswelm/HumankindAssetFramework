@@ -43,7 +43,8 @@ WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"; WTMP="$(cygpath -m "$TMP
 E="$WROOT/editor"
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -optimize+ -out:"$WTMP/deploy.exe" \
   -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
-  "$WROOT/tools/deploy-drill/DeployDrill.cs" "$WROOT/tools/deploy-drill/DecisionsDrill.cs" "$WROOT/tools/deploy-drill/BezierDrill.cs" "$E/BlenderDeploy.cs" "$E/BlenderFCurve.cs" "$E/BlenderExportTree.cs" \
+  "$WROOT/tools/deploy-drill/DeployDrill.cs" "$WROOT/tools/deploy-drill/DecisionsDrill.cs" "$WROOT/tools/deploy-drill/ExportDrill.cs" "$WROOT/tools/deploy-drill/BezierDrill.cs" "$E/BlenderDeploy.cs" "$E/BlenderDeployExport.cs" "$E/BlenderFCurve.cs" "$E/BlenderExportTree.cs" \
+  "$E/BlenderExport.cs" "$E/BlenderReduce.cs" "$E/BlenderDecimate.cs" \
   "$E/HafModel.cs" "$E/GlbReader.cs" "$E/HafTransforms.cs" "$E/BlenderNames.cs" "$E/BlenderPosedState.cs" "$E/BlenderTrig.cs" "$E/BlenderEigen.cs" "$E/BlenderMesh.cs" "$E/BMesh.cs" "$E/BlenderColor.cs" \
   "$E/VehicleProbe.cs" "$E/VehicleProbe.Visibility.cs" "$E/VehicleProbe.Islands.cs" "$E/VehicleProbe.InsideOut.cs" \
   "$E/VehicleProbe.BlenderWorld.cs" "$E/VehicleProbe.BlenderSkin.cs" "$E/VehicleProbe.CustomNormals.cs" "$E/VehicleProbe.Merge.cs" "$E/VehicleProbe.BlenderArmature.cs" "$E/VehicleProbe.BlenderPose.cs" 2>&1); rc=$?
@@ -177,6 +178,20 @@ python "$ROOT/tools/deploy-drill/deploy_fixtures.py" "$WTMP/deploy_fixtures" | t
 n_fx=$(grep -c "" "$TMPD/jobs_fx.txt"); [ "$n_fx" -gt 0 ] || { echo "FAIL — the deploy fixtures gave no job"; exit 1; }
 cat "$TMPD/jobs_fx.txt" >> "$TMPD/jobs.txt"
 n_jobs=$(grep -c "" "$TMPD/jobs.txt")
+# PART 8, THE EXPORT (2026-10-11): tools/deploy-drill/blender_export_dump.py runs THE WHOLE SCRIPT per job and reads the
+# GLB it wrote back row by row. It runs here in EXPORT_JOBS Blender processes BESIDE the decisions dump (a job left to
+# Blender before the export - LEFT:, BAKELEFT: - is not run: the port stops before it; nor is one whose role clips are
+# Blender's - ROLELEFT: - since the whole script keys them for hours past 20,000 frames) and is judged after the decisions.
+grep -vE "^(LEFT|BAKELEFT|ROLELEFT):" "$TMPD/jobs.txt" > "$TMPD/jobs_export.txt"
+n_exp=$(grep -c "" "$TMPD/jobs_export.txt")
+EXPORT_JOBS="${EXPORT_JOBS:-8}"; [ "$EXPORT_JOBS" -ge 1 ] 2>/dev/null || EXPORT_JOBS=1; [ "$EXPORT_JOBS" -le "$n_exp" ] || EXPORT_JOBS="$n_exp"
+mkdir -p "$TMPD/export"
+for ((k = 0; k < EXPORT_JOBS; k++)); do awk -v k="$k" -v n="$EXPORT_JOBS" 'NR % n == k' "$TMPD/jobs_export.txt" > "$TMPD/export/jobs_$k.txt"; done
+EPIDS=(); t_e0=$(date +%s)
+for ((k = 0; k < EXPORT_JOBS; k++)); do
+  "$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_export_dump.py")" -- "$WROOT/editor/Tools~/deploy_convert.py" "$WTMP/export/jobs_$k.txt" "$WTMP/export/glb" > "$TMPD/export/raw_$k.txt" 2> "$TMPD/export/err_$k.txt" &
+  EPIDS+=($!)
+done
 t3=$(date +%s)
 "$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_decisions_dump.py")" -- "$WROOT/editor/Tools~/deploy_convert.py" "$WTMP/jobs.txt" > "$TMPD/decisions_raw.txt" 2> "$TMPD/decisions_err.txt"; drc=$?   # stderr apart: a depsgraph warning lands in the middle of a row otherwise
 t4=$(date +%s)
@@ -208,7 +223,7 @@ prerun_tampers() {  # <dir>
     case "$n" in fire_*) grp=fire;; gun_*) grp=gun;; recoil_*) grp=recoil;; bind_*) grp=bind;; role_*) grp=role;; exit_*) grp=exit;; *) grp=missing;; esac
     jobs="$dir/${grp}_jobs.txt"; [ -f "$jobs" ] || jobs="$dir/jobs.txt"
     printf '%s\0%s\0' "$jobs" "$f"
-  done | PAR="$PAR" EXE="$TMPD/deploy.exe" xargs -0 -P "${DEPLOY_PAR:-8}" -n 2 sh -c 'out="$PAR/$(basename "$1")"; "$EXE" --decisions "$0" "$1" > "$out" 2>&1; echo $? > "$out.rc"'
+  done | PAR="$PAR" EXE="$TMPD/deploy.exe" MODE="${MODE:---decisions}" xargs -0 -P "${DEPLOY_PAR:-8}" -n 2 sh -c 'out="$PAR/$(basename "$1")"; "$EXE" "$MODE" "$0" "$1" > "$out" 2>&1; echo $? > "$out.rc"'
 }
 prerun_tampers "$WTMP/missing_dec"
 # The same one-job lists must accept the intact controls before their mutations are judged.
@@ -468,6 +483,96 @@ for mode in LOG7_missing LOG7C_missing ACTIVE7_wrong DIES7_claimed DIES7C_claime
   fi
 done
 echo "PASS — deploy drill accepts intact purge and role-clip rows and rejects missing, doubled, unknown, truncated or changed object, action, transform, matrix, role-action, role-curve and pose rows, missing log lines, a wrong active action, and a claimed death or skip"
+
+# ---- PART 8a, THE EXPORT (2026-10-11): the GLB the script writes against BlenderDeployExport - the export step's log
+#      lines, the scenes, every node (order, name, children, mesh, skin, transform bits), the skin's joints and inverse
+#      bind matrices, every mesh's primitives (material, mode, the bytes of the indices and of each attribute hashed),
+#      the animations' names. NOT compared yet: the materials' contents, textures, images, the animation channels and the
+#      file's bytes (parts 8b, 8c).
+erc=0; for pid in "${EPIDS[@]}"; do wait "$pid" || erc=$?; done
+t_e1=$(date +%s)
+: > "$TMPD/export.txt"
+for ((k = 0; k < EXPORT_JOBS; k++)); do tr -d '\r' < "$TMPD/export/raw_$k.txt" | grep -E "^(JOB|LOG8|DIES8|EXIT8|GLB|SCENE|NODE|SKIN|IBM|MESH|PRIM|MAT|IMG|TEX|ANIM|CHAN|DONE|FAIL)	" >> "$TMPD/export.txt"; done
+n_edone=$(grep -c "^DONE" "$TMPD/export.txt")
+if [ "$erc" -ne 0 ] || [ "$n_edone" -ne "$n_exp" ]; then
+  cat "$TMPD"/export/raw_*.txt "$TMPD"/export/err_*.txt | grep -E "^FAIL|Traceback|Error" | head -8
+  echo "FAIL — deploy drill: Blender exported $n_edone of $n_exp jobs (exit $erc)"; exit 1
+fi
+t_e2=$(date +%s)
+"$TMPD/deploy.exe" --export "$WTMP/jobs_export.txt" "$WTMP/export.txt" > "$TMPD/exp_raw.txt" 2>&1; rc8=$?
+t_e3=$(date +%s)
+tr -d '\r' < "$TMPD/exp_raw.txt" > "$TMPD/exp.txt"
+grep -E "^FAIL|^LEFT|^BAKELEFT|^ROLELEFT|^EXPORTLEFT|^COVER" "$TMPD/exp.txt"
+TOTAL8=$(grep -E "^TOTAL" "$TMPD/exp.txt" | tail -1); echo "$TOTAL8"
+[ -n "$TOTAL8" ] || { tail -5 "$TMPD/exp.txt"; echo "FAIL — deploy drill: the export comparison gave no total (rc=$rc8)"; exit 1; }
+[ "$rc8" -eq 0 ] || { echo "FAIL — deploy drill: the exported file's structure here differs from deploy_convert.py's"; exit 1; }
+UNCOVERED=$(grep -E "^COVER 0 " "$TMPD/exp.txt" | cut -d' ' -f3- | paste -sd';' -)
+[ -z "$UNCOVERED" ] || { echo "FAIL — deploy drill: no compared export exercised: $UNCOVERED (add a fixture to tools/deploy-drill/deploy_fixtures.py)"; exit 1; }
+# negative guards on the REAL export dump: against an intact one-job control, a row of each kind missing, doubled, changed
+# or cut short; the log lines missing; the written line and the end row missing; a death or an exit of the script claimed
+python "$ROOT/tools/deploy-drill/missing_export.py" "$WTMP/missing_exp" "$WTMP/export.txt" "$WTMP/jobs_export.txt" || { echo "FAIL — could not construct the missing-export regressions"; exit 1; }
+MODE=--export prerun_tampers "$WTMP/missing_exp"
+cp "$PAR/exp_intact.txt" "$TMPD/exp_control.txt" 2>/dev/null; controlrc=$(cat "$PAR/exp_intact.txt.rc" 2>/dev/null || echo 99)
+if [ "$controlrc" != "0" ] || ! grep -qE "^PASS " "$TMPD/exp_control.txt"; then
+  head -5 "$TMPD/exp_control.txt"
+  echo "FAIL — deploy drill rejected the intact export control (rc=$controlrc)"; exit 1
+fi
+for kind in SCENE NODE SKIN IBM MESH PRIM ANIM; do
+  for mode in missing duplicate value short; do
+    case "$kind:$mode" in
+      SCENE:missing) reason="no SCENE row|the scenes \(name";;
+      SCENE:short) reason="SCENE row has";;
+      SCENE:*) reason="the scenes \(name";;
+      NODE:short) reason="node row .* is cut short|the nodes \(index";;   # a row with a transform keeps enough fields to be compared, and differs
+      NODE:*) reason="the nodes \(index";;
+      SKIN:short) reason="skin row has";;
+      SKIN:*) reason="the skins \(index";;
+      IBM:short) reason="inverse bind matrix row has";;
+      IBM:*) reason="the inverse bind matrices";;
+      MESH:short) reason="mesh row has";;
+      MESH:*) reason="the meshes \(index";;
+      PRIM:short) reason="primitive row is cut short|the primitives \(mesh";;
+      PRIM:*) reason="the primitives \(mesh";;
+      ANIM:short) reason="animation row has";;
+      ANIM:*) reason="the animations \(name";;
+    esac
+    cp "$PAR/exp_${kind}_$mode.txt" "$TMPD/exp_${kind}_$mode.txt" 2>/dev/null; badrc=$(cat "$PAR/exp_${kind}_$mode.txt.rc" 2>/dev/null || echo 99)
+    if [ "$badrc" != "1" ] || ! grep -E "^FAIL " "$TMPD/exp_${kind}_$mode.txt" | grep -qE "$reason"; then
+      head -5 "$TMPD/exp_${kind}_$mode.txt"
+      echo "FAIL — deploy drill accepted invalid export evidence ($kind $mode, rc=$badrc)"; exit 1
+    fi
+  done
+done
+for mode in LOG8_missing WROTE_missing DONE_missing DIES8_claimed EXIT8_claimed; do
+  case "$mode" in
+    LOG8_missing) reason="the export.s log";;
+    WROTE_missing) reason="no 'DEPLOY wrote:' line";;
+    DONE_missing) reason="no DONE row";;
+    DIES8_claimed) reason="died in the export step|exported file rows after an exit or death";;
+    EXIT8_claimed) reason="the script stops before the export, the port goes on";;
+  esac
+  cp "$PAR/exp_$mode.txt" "$TMPD/exp_$mode.txt" 2>/dev/null; badrc=$(cat "$PAR/exp_$mode.txt.rc" 2>/dev/null || echo 99)
+  if [ "$badrc" != "1" ] || ! grep -E "^FAIL " "$TMPD/exp_$mode.txt" | grep -qE "$reason"; then
+    head -5 "$TMPD/exp_$mode.txt"; echo "FAIL — deploy drill accepted an export dump with $mode (rc=$badrc)"; exit 1
+  fi
+done
+for mode in DONE_wrong DONE_short DONE_extra DONE_duplicate DONE_trailing FAIL_claimed JOB_extra JOB_duplicate UNKNOWN_claimed GLB_missing GLB_duplicate GLB_invalid GLB_short ANIM_index; do
+  case "$mode" in
+    DONE_*) reason="exactly one matching DONE row";;
+    FAIL_claimed) reason="Blender could not run it";;
+    JOB_extra) reason="invalid JOB row";;
+    JOB_duplicate) reason="repeats a job";;
+    UNKNOWN_claimed) reason="unknown row kind";;
+    GLB_*) reason="single valid GLB written-file row";;
+    ANIM_index) reason="the animations \(name";;
+  esac
+  cp "$PAR/exp_$mode.txt" "$TMPD/exp_$mode.txt" 2>/dev/null; badrc=$(cat "$PAR/exp_$mode.txt.rc" 2>/dev/null || echo 99)
+  if [ "$badrc" != "1" ] || ! grep -E "^FAIL " "$TMPD/exp_$mode.txt" | grep -qE "$reason"; then
+    head -5 "$TMPD/exp_$mode.txt"; echo "FAIL — deploy drill accepted invalid export envelope ($mode, rc=$badrc)"; exit 1
+  fi
+done
+n8_jobs=$(echo "$TOTAL8" | awk '{print $3}'); n8_nodes=$(echo "$TOTAL8" | awk '{print $15}'); n8_prims=$(echo "$TOTAL8" | awk '{print $23}'); n8_verts=$(echo "$TOTAL8" | awk '{print $25}')
+echo "PASS — deploy drill, the export (8a): $n8_jobs jobs' exported files - every node, skin, inverse bind matrix, mesh and primitive (its vertices, normals, UVs, colours, joints, weights and indices as bytes) and the animations' names - equal to Blender's ($n8_nodes nodes, $n8_prims primitives, $n8_verts vertices; Blender took $((t_e1 - t_e0)) s in $EXPORT_JOBS processes beside the decisions, the comparison $((t_e3 - t_e2)) s); the materials' contents, textures, images, animation channels and the bytes are not compared yet (8b, 8c); rejects a dump with a scene, node, skin, inverse bind matrix, mesh, primitive or animation row missing, doubled, changed or cut short, a missing log or written line, a missing end row, and a claimed death or exit of the script"
 
 # ---- the handles of automatic keys: Blender's own calculation (FCurve.update(), keyframe_points.insert(), and
 #      handles_recalc() on keys stored raw) on generated curves against BlenderFCurve.RecalcHandles, both handles of
