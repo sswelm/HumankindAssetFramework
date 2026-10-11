@@ -1145,7 +1145,10 @@ images; 4 left by name.
 `BlenderMaterialExportTests` hold each rule on a material small enough to read, through the drill's canonical form.
 The gate tampers the material rows in both drills (missing, doubled, changed, cut short) and the material dump's end
 row; a claimed import failure counts as not compared. The gate's material sample is part 1's plus every prep fixture
-(`fixtures.py --prep`), where the material shapes live. Planted: 31 in the port, 30 fail the drill (factors in double,
+(`fixtures.py --prep`), where the material shapes live, and the round trip's own two (`--materials`: the edge fixture's
+specularFactor of 1.5 is folded by Blender's importer but refused by the Factory's converter, so the prep drill, whose
+C# prep passes the source material through unchanged, does not get it; the Factory wiring will write the port's
+materials). Planted: 31 in the port, 30 fail the drill (factors in double,
 roughness at 1, the RGB clamp, a flat MASK compared in float32, a textured MASK at cutoff 0, the cutoff at 0.5,
 doubleSided false, the glossiness as roughness, the ior alone, the specular colour at white, the factor at 1, the
 unlit roughness in float32, the empty object, NEAREST as linear, the wrap at REPEAT, the extension on the name, images

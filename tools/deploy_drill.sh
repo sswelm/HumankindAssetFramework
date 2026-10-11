@@ -187,24 +187,15 @@ n_exp=$(grep -c "" "$TMPD/jobs_export.txt")
 EXPORT_JOBS="${EXPORT_JOBS:-8}"; [ "$EXPORT_JOBS" -ge 1 ] 2>/dev/null || EXPORT_JOBS=1; [ "$EXPORT_JOBS" -le "$n_exp" ] || EXPORT_JOBS="$n_exp"
 mkdir -p "$TMPD/export"
 for ((k = 0; k < EXPORT_JOBS; k++)); do awk -v k="$k" -v n="$EXPORT_JOBS" 'NR % n == k' "$TMPD/jobs_export.txt" > "$TMPD/export/jobs_$k.txt"; done
-EPIDS=(); t_e0=$(date +%s)
-for ((k = 0; k < EXPORT_JOBS; k++)); do
-  (
-    "$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_export_dump.py")" -- "$WROOT/editor/Tools~/deploy_convert.py" "$WTMP/export/jobs_$k.txt" "$WTMP/export/glb" > "$TMPD/export/raw_$k.txt" 2> "$TMPD/export/err_$k.txt"
-    shard_rc=$?
-    date +%s > "$TMPD/export/end_$k.txt"
-    exit "$shard_rc"
-  ) &
-  EPIDS+=($!)
-done
 # PART 8a-ii, THE MATERIALS (2026-10-11): tools/deploy-drill/blender_material_dump.py imports every file of part 1's sample
 # into a fresh Blender and exports it again - the round trip every material takes through deploy_convert.py and
 # prep_model.py -, reading the written materials, textures, samplers and images back. The same shards as part 1, beside
-# the dumps above; judged after the export.
+# the export dumps below (launched first, so the export launch stays one block: Tests/test_parallel_gate.py slices it); judged after the export.
 mkdir -p "$TMPD/mat"
 # ... plus the prep fixtures, where the material shapes live (fixtures.py --prep: the alpha modes, the flat colours,
-# specular-glossiness, unlit, the JPEG read for its alpha, the edges of part 8a-ii)
-mapfile -t PREPFX < <(python "$ROOT/tools/glb-reader-drill/fixtures.py" "$WTMP/fixtures_prep" --prep | tr -d '\r')
+# specular-glossiness, unlit, the JPEG read for its alpha), and the material round trip's own (--materials: the edges of
+# part 8a-ii, a uri image typed by its extension - out of the prep drill, whose converter refuses a specularFactor over 1)
+mapfile -t PREPFX < <(python "$ROOT/tools/glb-reader-drill/fixtures.py" "$WTMP/fixtures_prep" --prep --materials | tr -d '\r')
 mapfile -t MSAMPLE < <( { printf '%s\n' "${SAMPLE[@]}"; printf '%s\n' "${PREPFX[@]}"; } | grep -iE '\.(glb|gltf)$' | awk '!seen[tolower($0)]++' )
 for ((k = 0; k < JOBS; k++)); do : > "$TMPD/mshard_$k.txt"; done
 for ((i = 0; i < ${#MSAMPLE[@]}; i++)); do printf '%s\n' "${MSAMPLE[$i]}" >> "$TMPD/mshard_$((i % JOBS)).txt"; done
@@ -218,6 +209,16 @@ for ((k = 0; k < JOBS; k++)); do
     exit "$shard_rc"
   ) &
   MPIDS+=($!)
+done
+EPIDS=(); t_e0=$(date +%s)
+for ((k = 0; k < EXPORT_JOBS; k++)); do
+  (
+    "$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_export_dump.py")" -- "$WROOT/editor/Tools~/deploy_convert.py" "$WTMP/export/jobs_$k.txt" "$WTMP/export/glb" > "$TMPD/export/raw_$k.txt" 2> "$TMPD/export/err_$k.txt"
+    shard_rc=$?
+    date +%s > "$TMPD/export/end_$k.txt"
+    exit "$shard_rc"
+  ) &
+  EPIDS+=($!)
 done
 t3=$(date +%s)
 "$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_decisions_dump.py")" -- "$WROOT/editor/Tools~/deploy_convert.py" "$WTMP/jobs.txt" > "$TMPD/decisions_raw.txt" 2> "$TMPD/decisions_err.txt"; drc=$?   # stderr apart: a depsgraph warning lands in the middle of a row otherwise
@@ -645,7 +646,7 @@ while IFS= read -r l; do
   case " $KNOWN_MATERIAL_LEFT " in *" $bn "*) ;; *) echo "FAIL — deploy drill: '$bn' is left to Blender by the material port, which no known reason covers: $l"; exit 1;; esac
 done < <(grep -E "^LEFT " "$TMPD/mat.txt")
 UNCOVERED=$(grep -E "^COVER 0 " "$TMPD/mat.txt" | cut -d' ' -f3- | paste -sd';' -)
-[ -z "$UNCOVERED" ] || { echo "FAIL — deploy drill: no compared file exercised: $UNCOVERED (add a fixture to tools/glb-reader-drill/fixtures.py --prep)"; exit 1; }
+[ -z "$UNCOVERED" ] || { echo "FAIL — deploy drill: no compared file exercised: $UNCOVERED (add a fixture to tools/glb-reader-drill/fixtures.py --prep or --materials)"; exit 1; }
 python "$ROOT/tools/deploy-drill/missing_materials.py" "$WTMP/missing_mat" "$WTMP/materials.txt" || { echo "FAIL — could not construct the missing-material regressions"; exit 1; }
 : > "$TMPD/missing_mat/jobs.txt"   # the replay passes a jobs file first; the material drill reads only dumps
 MODE=--materials prerun_tampers "$WTMP/missing_mat"

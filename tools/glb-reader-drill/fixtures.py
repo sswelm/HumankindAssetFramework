@@ -1227,12 +1227,16 @@ def fx_posed(out):
 FIXTURES = [fx_two_targets, fx_normalized, fx_interleaved, fx_modes, fx_external, fx_cubic, fx_scenes, fx_materials, fx_skin8, fx_big, fx_names, fx_no_default_scene, fx_dropped, fx_mixed_skin, fx_clip_switch, fx_path_clip, fx_far_clip, fx_unicode_clip, fx_decimate_attrs, fx_decimate_limits, fx_export_layout, fx_export_skin, fx_export_skin_badweights, fx_export_skin_bonechild]
 
 
-def main(out, prep=False, posed=False):
+def main(out, prep=False, posed=False, materials=False):
     os.makedirs(out, exist_ok=True)
     if posed:   # for tools/deploy_drill.sh alone: a doubled channel and merged keys are not for the other drills
         fx_posed(out)
     # Blender drops the line mesh: its vertex bounds are only relevant to the prep export drill.
-    for fx in FIXTURES + ([fx_export_skin_lines, fx_export_bones, fx_export_review, fx_export_skin_twins, fx_export_flat_alpha, fx_export_jpeg_alpha, fx_export_factor_range, fx_export_strip, fx_export_material_edges, fx_export_uri_mime] if prep else []):
+    # --materials: the material round trip's own fixtures (tools/deploy_drill.sh, part 8a-ii), NOT for the prep drill: the edge
+    # fixture carries a specularFactor of 1.5, which the glTF importer tolerates and folds into the colour, while the
+    # Factory's converter (SharpGLTF's validator) refuses it in the C# prep's written file, where the source material
+    # passes through unchanged until the Factory writes BlenderMaterialExport's materials.
+    for fx in FIXTURES + ([fx_export_skin_lines, fx_export_bones, fx_export_review, fx_export_skin_twins, fx_export_flat_alpha, fx_export_jpeg_alpha, fx_export_factor_range, fx_export_strip] if prep else []) + ([fx_export_material_edges, fx_export_uri_mime] if materials else []):
         fx(out)
     for name in sorted(os.listdir(out)):
         if name.endswith((".glb", ".gltf")):
@@ -1240,4 +1244,4 @@ def main(out, prep=False, posed=False):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], prep="--prep" in sys.argv[2:], posed="--posed" in sys.argv[2:])
+    main(sys.argv[1], prep="--prep" in sys.argv[2:], posed="--posed" in sys.argv[2:], materials="--materials" in sys.argv[2:])
