@@ -1088,8 +1088,9 @@ fallback dropped, an action outside the range kept, the unused skin whatever the
 line mesh); three cannot fail it, and say why: the modifier-apply UV merge run on the export's mesh (one glTF vertex per
 Blender vertex - its corners share their UV, so the merge moves nothing on an imported mesh), the group's weight at 0.5
 (the exporter divides by the sum: one group is 1 whatever its weight), and the garbage keyed by the bone's name (no job
-has a garbage bone). A whole `tools/deploy_drill.sh` runs in 10 min 40 s: Blender's export of 197 jobs took 446 s in 8
-processes beside the decisions dump, the comparison 137 s. NOT compared yet, named: the materials' contents, the
+has a garbage bone). A whole `tools/deploy_drill.sh` runs in 10 min 40 s: Blender's export of 197 jobs takes 54 s in 8
+processes beside the decisions dump (the 446 s first written here was the time until the parent collected the shards,
+after the decisions and their tampers - the review of PR #148 made each shard note its own end), the comparison 95-137 s. NOT compared yet, named: the materials' contents, the
 textures and images (8a-ii), the animations' channels (8b), the GLB's bytes - accessor and buffer layout, JSON (8c).
 `BlenderDeployExportTests` hold the walk, the trim's setters, the scenes and the empty role on small models.
 
