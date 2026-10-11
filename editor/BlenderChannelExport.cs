@@ -65,6 +65,7 @@ public static class BlenderChannelExport
         public string Path;                  // translation, rotation, scale
         public string Interpolation;         // LINEAR or STEP
         public float[] Times;                // the input accessor's floats (seconds)
+        public double MinTime, MaxTime;      // the accessor's min and max: the first and last time as Python doubles (frame / 24)
         public float[] Values;               // the output accessor's floats, flattened
         public int Sampler;                  // its sampler's index (one per channel)
     }
@@ -253,7 +254,8 @@ public static class BlenderChannelExport
                         var s = sampled[b.Name][frames[i]];
                         values.AddRange(Transform(path, s, from, corr[b.Name]));
                     }
-                    anim.Channels.Add(new Channel { Node = nodeOf[b.Name], Path = path, Interpolation = interp, Times = times, Values = values.ToArray(), Sampler = anim.Channels.Count });
+                    anim.Channels.Add(new Channel { Node = nodeOf[b.Name], Path = path, Interpolation = interp, Times = times, Values = values.ToArray(), Sampler = anim.Channels.Count,
+                                                    MinTime = (start + frames[0]) / Fps, MaxTime = (start + frames[frames.Count - 1]) / Fps });
                 }
             }
         }
