@@ -8,6 +8,7 @@ mutation: a row of each kind missing, doubled in place of its neighbour, one cha
 lines missing; the written line missing; the end row missing; a death or an exit of the script claimed.
 """
 from pathlib import Path
+import json
 import sys
 
 
@@ -21,7 +22,7 @@ def main(out, dump, jobs):
             cur.append(line)
     def kinds(b):
         return {l.split("\t")[0] for l in b}
-    job = next((b for b in blocks if {"DONE", "SCENE", "NODE", "SKIN", "IBM", "MESH", "PRIM", "ANIM", "LOG8"} <= kinds(b)
+    job = next((b for b in blocks if {"DONE", "SCENE", "NODE", "SKIN", "IBM", "MESH", "PRIM", "ANIM", "LOG8", "MAT", "TEX", "SAMP", "IMG"} <= kinds(b)
                 and ":" not in b[0].split("\t")[1]), None)
     if job is None:
         raise ValueError("no complete exported job with a skinned mesh in the dump for the missing-export regressions")
@@ -76,6 +77,27 @@ def main(out, dump, jobs):
     write("exp_DIES8_claimed", lines)
     lines = [job[0]] + [job[i] for i in log] + ["EXIT8\t1", job[rows("DONE")[0]]]
     write("exp_EXIT8_claimed", lines)
+    # the materials, textures, samplers and images (8a-ii): each kind missing, doubled, one value changed, cut short
+    for kind in ("MAT", "TEX", "SAMP", "IMG"):
+        r = rows(kind)
+        if not r:
+            raise ValueError("the chosen job has no %s row" % kind)
+        lines = list(job); del lines[r[0]]; write("exp_%s_missing" % kind, lines)
+        lines = list(job)
+        if len(r) > 1: lines[r[1]] = job[r[0]]
+        else: lines.insert(r[0] + 1, job[r[0]])
+        write("exp_%s_duplicate" % kind, lines)
+        t = job[r[0]].split("\t")
+        if kind == "MAT":
+            j = json.loads(t[2]); j["name"] = j.get("name", "") + "x"; t[2] = json.dumps(j, sort_keys=True, separators=(",", ":"))
+        elif kind == "SAMP":
+            j = json.loads(t[2]); j["magFilter"] = 9728 if j.get("magFilter") != 9728 else 9729; t[2] = json.dumps(j, sort_keys=True, separators=(",", ":"))
+        elif kind == "TEX":
+            t[2] = str(int(t[2]) + 1)
+        else:
+            t[4] = t[4][:-1] + ("0" if t[4][-1] != "0" else "1")
+        lines = list(job); lines[r[0]] = "\t".join(t); write("exp_%s_value" % kind, lines)
+        lines = list(job); lines[r[0]] = job[r[0]].rsplit("\t", 1)[0]; write("exp_%s_short" % kind, lines)
     # The completion envelope and written-file record must be valid independently of matching data rows.
     end = rows("DONE")[0]
     for mode, replacement in (("wrong", "DONE\tother"), ("short", "DONE"), ("extra", job[end] + "\textra")):

@@ -1094,6 +1094,72 @@ after the decisions and their tampers - the review of PR #148 made each shard no
 textures and images (8a-ii), the animations' channels (8b), the GLB's bytes - accessor and buffer layout, JSON (8c).
 `BlenderDeployExportTests` hold the walk, the trim's setters, the scenes and the empty role on small models.
 
+**Replacing `deploy_convert.py`, part 8a-ii: the materials, textures, samplers and images** (2026-10-11). Every
+source material takes the same round trip in `deploy_convert.py` and `prep_model.py`: the importer builds a node tree
+from it, the exporter reads the tree back and writes a material. The oracle is that round trip alone:
+`tools/deploy-drill/blender_material_dump.py` imports each file of part 1's sample into a fresh Blender, exports it with
+the script's settings and reads the written materials (`MAT`, the JSON), textures (`TEX`), samplers (`SAMP`) and images
+(`IMG`: name, type, bytes) back; it runs in part 1's shards beside the other dumps. A census over the 57 registry,
+recipe and deploy sources came first (1,090 materials: base colour and metallic-roughness textures, normal and
+occlusion textures, KHR_materials_specular on 136, ior on 84, specular-glossiness on 46, clearcoat on 3, alpha modes,
+three sampler shapes, JPEG and PNG) and the rules were MEASURED on those 57 files and 44 prep fixtures before they
+were read: every factor comes back as the socket's float32 (0.3 to 0.30000001192092896), metallic and roughness are
+left out at 1, the base colour at white, doubleSided when false, alphaMode when OPAQUE, alphaCutoff at 0.5; a
+specular-glossiness material becomes metallic-roughness (the diffuse colour and texture, metallic 0, roughness 1 -
+glossiness) with KHR_materials_specular's colour from its specular factor and an IOR of 1000 beside it; 632 of 633
+images are the source's own bytes (the Espana's JPEG read for its alpha is the one encoded again), named without their
+extension (`os.path.splitext`), one per (bytes, type, name) - the T-62 keeps 112 twins of equal bytes under other names;
+textures are one per material slot, samplers one per value (NEAREST only when both filters are NEAREST or the one
+given is; a wrap written only when not both REPEAT, then both). An independent reader then mapped the whole round trip
+in both sources (per feature, with citations); it refined five rules the measurement could not tell apart - a specular
+factor over 1 folds into the colour, a specular colour texture suppresses the colour factor (the exporter compares a
+list to a tuple), clearcoat's weight is written when not 0 and its roughness when not within 1e-5 of Blender's 0.03,
+an occlusion strength is written whenever the JSON double is not 1 (the Mix node exists then, its float32 written
+whatever it is), images are deduplicated by bytes, type and name rather than by source - and gave the emission rule
+(a grey factor folded into the strength on the doubles, colour times strength in double, a component over 1 moved into
+KHR_materials_emissive_strength). `editor/BlenderMaterialExport.cs` (`Build` for a file in the prep's walk order, or
+for the names the deploy export numbered) makes the material JSON, the textures (the occlusion and metallic-roughness
+slots share one when they read one image: the ORM composition), the samplers and the images; `deploy.exe
+--materials` (`MaterialDrill.cs`) compares the JSON structurally (the writer turns an integral float into an int, so
+numbers are compared as doubles and keys as written), the textures' image and sampler, every sampler, every image's
+name, type and SHA-256. The deploy export drill (`--export`) compares the same four row kinds on its jobs through
+`BlenderDeployExport.MaterialRows`. 103 files (57 sources, 44 fixtures; one recipe source is gone), 0 failed: 1,078
+materials, 991 textures, 57 samplers, 635 images; 3 files left by name (a JPEG whose alpha is read - the exporter
+writes it again as PNG -, a material read with two sets of UV indices - written twice). On the deploy jobs: 110
+materials and 143 images of 6 jobs, the howitzer's 24 among them. Left by name, not reached by any source: a
+specular-glossiness texture (the importer bakes a roughness image), an occlusion image beside a metallic-roughness
+image of the same size (composed into a new one), clearcoat textures, transmission, volume, sheen, anisotropy, a WebP
+or any image that is not a PNG or a JPEG; not modelled and not detectable through the reader: KHR_texture_transform.
+A second independent reader then went through the C# against both sources and found seven rules the first reader
+had wrong or the port lacked, every one run through Blender before it was believed (the `export_material_edges` and
+`export_uri_mime` fixtures): beside a specular colour TEXTURE the colour factor IS written whenever the source's is
+not white (the exporter compares the Mix node's list to a tuple: always different) and as (fac, fac, fac) when the
+factor is over 1 (the first reader had read "dropped"); a texCoord the mesh has no UV layer for is written as 0; the
+emissive factor's grey fold runs on the JSON doubles, where 3 times 0.3 is 0.8999999999999999 and its float32
+0.8999999761581421 - the reader kept only the float32, so `HafMaterial.EmissiveFactorJson` carries the doubles now; a
+colour socket clamps a negative component to 0 on the way in; a wrap value the importer does not know reads back as
+CLAMP on both axes; a uri image's type is its file EXTENSION, and bytes of another magic are encoded again (a
+"liar.png" holding JPEG bytes came back a 248-byte PNG: left by name); KHR_texture_transform is left by name, since
+the reader does not carry a texture's transform. 105 files, 0 failed: 1,090 materials, 997 textures, 59 samplers, 637
+images; 4 left by name.
+`BlenderMaterialExportTests` hold each rule on a material small enough to read, through the drill's canonical form.
+The gate tampers the material rows in both drills (missing, doubled, changed, cut short) and the material dump's end
+row; a claimed import failure counts as not compared. The gate's material sample is part 1's plus every prep fixture
+(`fixtures.py --prep`), where the material shapes live. Planted: 31 in the port, 30 fail the drill (factors in double,
+roughness at 1, the RGB clamp, a flat MASK compared in float32, a textured MASK at cutoff 0, the cutoff at 0.5,
+doubleSided false, the glossiness as roughness, the ior alone, the specular colour at white, the factor at 1, the
+unlit roughness in float32, the empty object, NEAREST as linear, the wrap at REPEAT, the extension on the name, images
+by bytes alone, the JPEG with alpha passed, the ORM texture unshared, the normal scale at 1, the occlusion strength in
+float32, the emissive strength unfolded, every source material written, the specular colour dropped beside its texture, the
+factor over 1 not folded there, a texCoord beyond the layers, the grey fold in float32, a negative component kept, an
+unknown wrap as REPEAT, a uri image typed by its bytes); four of them needed a fixture before they
+could fail (`export_material_edges`: a flat MASK under its cutoff by less than float32 tells, an IOR alone, an image
+declared PNG holding JPEG bytes, an occlusion strength of 0.99999999 - the last showed the reader keeping only the
+float32 of the strength, so `HafMaterial.OcclusionStrengthJson` carries the double now); the 24th (the image type by
+the file's word, not the bytes') turns the compared file into a fallback instead of a wrong answer, which the drill
+accepted as "left" - so the gate now requires every file the material port leaves to be one of the KNOWN reasons
+(`KNOWN_MATERIAL_LEFT`), and that plant fails there.
+
 Review of PR #148: the sanitizer now prints the number of escaped path keys, as the script does, when quoted bone
 names share a prefix (one garbage key can remove curves from two bones). Confirmed with the real sanitizer in Blender.
 `ExportDrillTests` run the actual comparator and pin its completion envelope: exactly one matching final `DONE`, one

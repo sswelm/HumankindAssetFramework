@@ -85,6 +85,7 @@ public static class BlenderDeployExport
         public readonly List<Skin> Skins = new List<Skin>();
         public readonly List<Mesh> Meshes = new List<Mesh>();
         public readonly List<string> Materials = new List<string>();   // Blender material names, first use
+        public BlenderMaterialExport.Result MaterialRows;              // the materials, textures, samplers and images as written (8a-ii)
         public readonly List<string> Animations = new List<string>();
         public bool NeutralBone, UnusedSkin;
     }
@@ -344,6 +345,10 @@ public static class BlenderDeployExport
             if (Reaches(role.Curves.Where(kv => !garbage.Contains(kv.Key)).SelectMany(kv => kv.Value.Where(list => list != null)).SelectMany(list => list.Select(k => k.Frame)))) animated.Add(role.Name);
         // sorted by `action.name.lower()` (action.py): the names here are the script's, lower case already
         x.Animations.AddRange(animated.OrderBy(s => s, StringComparer.Ordinal));
+        // ---- the materials, textures, samplers and images as the exporter writes them (BlenderMaterialExport), in the
+        //      order the walk numbered the materials
+        x.MaterialRows = BlenderMaterialExport.Build(m, names, x.Materials);
+        if (x.MaterialRows.Fallback != null) { x.Fallback = x.MaterialRows.Fallback; return x; }
         return x;
     }
 }

@@ -43,7 +43,7 @@ WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"; WTMP="$(cygpath -m "$TMP
 E="$WROOT/editor"
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -optimize+ -out:"$WTMP/deploy.exe" \
   -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
-  "$WROOT/tools/deploy-drill/DeployDrill.cs" "$WROOT/tools/deploy-drill/DecisionsDrill.cs" "$WROOT/tools/deploy-drill/ExportDrill.cs" "$WROOT/tools/deploy-drill/BezierDrill.cs" "$E/BlenderDeploy.cs" "$E/BlenderDeployExport.cs" "$E/BlenderFCurve.cs" "$E/BlenderExportTree.cs" \
+  "$WROOT/tools/deploy-drill/DeployDrill.cs" "$WROOT/tools/deploy-drill/DecisionsDrill.cs" "$WROOT/tools/deploy-drill/ExportDrill.cs" "$WROOT/tools/deploy-drill/MaterialDrill.cs" "$WROOT/tools/deploy-drill/BezierDrill.cs" "$E/BlenderDeploy.cs" "$E/BlenderDeployExport.cs" "$E/BlenderMaterialExport.cs" "$E/BlenderFCurve.cs" "$E/BlenderExportTree.cs" \
   "$E/BlenderExport.cs" "$E/BlenderReduce.cs" "$E/BlenderDecimate.cs" \
   "$E/HafModel.cs" "$E/GlbReader.cs" "$E/HafTransforms.cs" "$E/BlenderNames.cs" "$E/BlenderPosedState.cs" "$E/BlenderTrig.cs" "$E/BlenderEigen.cs" "$E/BlenderMesh.cs" "$E/BMesh.cs" "$E/BlenderColor.cs" \
   "$E/VehicleProbe.cs" "$E/VehicleProbe.Visibility.cs" "$E/VehicleProbe.Islands.cs" "$E/VehicleProbe.InsideOut.cs" \
@@ -196,6 +196,28 @@ for ((k = 0; k < EXPORT_JOBS; k++)); do
     exit "$shard_rc"
   ) &
   EPIDS+=($!)
+done
+# PART 8a-ii, THE MATERIALS (2026-10-11): tools/deploy-drill/blender_material_dump.py imports every file of part 1's sample
+# into a fresh Blender and exports it again - the round trip every material takes through deploy_convert.py and
+# prep_model.py -, reading the written materials, textures, samplers and images back. The same shards as part 1, beside
+# the dumps above; judged after the export.
+mkdir -p "$TMPD/mat"
+# ... plus the prep fixtures, where the material shapes live (fixtures.py --prep: the alpha modes, the flat colours,
+# specular-glossiness, unlit, the JPEG read for its alpha, the edges of part 8a-ii)
+mapfile -t PREPFX < <(python "$ROOT/tools/glb-reader-drill/fixtures.py" "$WTMP/fixtures_prep" --prep | tr -d '\r')
+mapfile -t MSAMPLE < <( { printf '%s\n' "${SAMPLE[@]}"; printf '%s\n' "${PREPFX[@]}"; } | grep -iE '\.(glb|gltf)$' | awk '!seen[tolower($0)]++' )
+for ((k = 0; k < JOBS; k++)); do : > "$TMPD/mshard_$k.txt"; done
+for ((i = 0; i < ${#MSAMPLE[@]}; i++)); do printf '%s\n' "${MSAMPLE[$i]}" >> "$TMPD/mshard_$((i % JOBS)).txt"; done
+MPIDS=(); t_m0=$(date +%s)
+for ((k = 0; k < JOBS; k++)); do
+  (
+    mapfile -t MSHARD < "$TMPD/mshard_$k.txt"
+    "$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_material_dump.py")" -- "${MSHARD[@]}" > "$TMPD/mat/raw_$k.txt" 2> "$TMPD/mat/err_$k.txt"
+    shard_rc=$?
+    date +%s > "$TMPD/mat/end_$k.txt"
+    exit "$shard_rc"
+  ) &
+  MPIDS+=($!)
 done
 t3=$(date +%s)
 "$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_decisions_dump.py")" -- "$WROOT/editor/Tools~/deploy_convert.py" "$WTMP/jobs.txt" > "$TMPD/decisions_raw.txt" 2> "$TMPD/decisions_err.txt"; drc=$?   # stderr apart: a depsgraph warning lands in the middle of a row otherwise
@@ -504,7 +526,7 @@ for ((k = 0; k < EXPORT_JOBS; k++)); do
   [ "$shard_end" -le "$t_e1" ] || t_e1=$shard_end
 done
 : > "$TMPD/export.txt"
-for ((k = 0; k < EXPORT_JOBS; k++)); do tr -d '\r' < "$TMPD/export/raw_$k.txt" | grep -E "^(JOB|LOG8|DIES8|EXIT8|GLB|SCENE|NODE|SKIN|IBM|MESH|PRIM|MAT|IMG|TEX|ANIM|CHAN|DONE|FAIL)	" >> "$TMPD/export.txt"; done
+for ((k = 0; k < EXPORT_JOBS; k++)); do tr -d '\r' < "$TMPD/export/raw_$k.txt" | grep -E "^(JOB|LOG8|DIES8|EXIT8|GLB|SCENE|NODE|SKIN|IBM|MESH|PRIM|MAT|IMG|TEX|SAMP|ANIM|CHAN|DONE|FAIL)	" >> "$TMPD/export.txt"; done
 n_edone=$(grep -c "^DONE" "$TMPD/export.txt")
 if [ "$erc" -ne 0 ] || [ "$n_edone" -ne "$n_exp" ]; then
   cat "$TMPD"/export/raw_*.txt "$TMPD"/export/err_*.txt | grep -E "^FAIL|Traceback|Error" | head -8
@@ -529,9 +551,17 @@ if [ "$controlrc" != "0" ] || ! grep -qE "^PASS " "$TMPD/exp_control.txt"; then
   head -5 "$TMPD/exp_control.txt"
   echo "FAIL — deploy drill rejected the intact export control (rc=$controlrc)"; exit 1
 fi
-for kind in SCENE NODE SKIN IBM MESH PRIM ANIM; do
+for kind in SCENE NODE SKIN IBM MESH PRIM ANIM MAT TEX SAMP IMG; do
   for mode in missing duplicate value short; do
     case "$kind:$mode" in
+      MAT:short) reason="material row has";;
+      MAT:*) reason="the materials \(index";;
+      TEX:short) reason="texture row has";;
+      TEX:*) reason="the textures \(index";;
+      SAMP:short) reason="sampler row has";;
+      SAMP:*) reason="the samplers \(index";;
+      IMG:short) reason="image row has";;
+      IMG:*) reason="the images \(index";;
       SCENE:missing) reason="no SCENE row|the scenes \(name";;
       SCENE:short) reason="SCENE row has";;
       SCENE:*) reason="the scenes \(name";;
@@ -583,8 +613,82 @@ for mode in DONE_wrong DONE_short DONE_extra DONE_duplicate DONE_trailing FAIL_c
     head -5 "$TMPD/exp_$mode.txt"; echo "FAIL — deploy drill accepted invalid export envelope ($mode, rc=$badrc)"; exit 1
   fi
 done
-n8_jobs=$(echo "$TOTAL8" | awk '{print $3}'); n8_nodes=$(echo "$TOTAL8" | awk '{print $15}'); n8_prims=$(echo "$TOTAL8" | awk '{print $23}'); n8_verts=$(echo "$TOTAL8" | awk '{print $25}')
-echo "PASS — deploy drill, the export (8a): $n8_jobs jobs' exported files - every node, skin, inverse bind matrix, mesh and primitive (its vertices, normals, UVs, colours, joints, weights and indices as bytes) and the animations' names - equal to Blender's ($n8_nodes nodes, $n8_prims primitives, $n8_verts vertices; Blender took $((t_e1 - t_e0)) s in $EXPORT_JOBS processes beside the decisions, the comparison $((t_e3 - t_e2)) s); the materials' contents, textures, images, animation channels and the bytes are not compared yet (8b, 8c); rejects a dump with a scene, node, skin, inverse bind matrix, mesh, primitive or animation row missing, doubled, changed or cut short, a missing log or written line, a missing end row, and a claimed death or exit of the script"
+# ---- PART 8a-ii, THE MATERIALS: every file of the sample through the round trip, its materials (the JSON, structurally),
+#      textures (image, sampler), samplers and images (name, type, bytes) against BlenderMaterialExport
+mrc=0; for pid in "${MPIDS[@]}"; do wait "$pid" || mrc=$?; done
+t_m1=$t_m0
+for ((k = 0; k < JOBS; k++)); do
+  shard_end=$(cat "$TMPD/mat/end_$k.txt" 2>/dev/null)
+  if ! [[ "$shard_end" =~ ^[0-9]+$ ]] || [ "$shard_end" -lt "$t_m0" ]; then echo "FAIL — deploy drill: no valid completion time for material shard $k"; exit 1; fi
+  [ "$shard_end" -le "$t_m1" ] || t_m1=$shard_end
+done
+: > "$TMPD/materials.txt"
+for ((k = 0; k < JOBS; k++)); do tr -d '\r' < "$TMPD/mat/raw_$k.txt" | grep -E "^(FILE|DIES|MAT|IMG|TEX|SAMP|MATS|DONE|FAIL)	" >> "$TMPD/materials.txt"; done
+n_mdone=$(grep -c "^DONE" "$TMPD/materials.txt")
+if [ "$mrc" -ne 0 ] || [ "$n_mdone" -ne "${#MSAMPLE[@]}" ]; then
+  cat "$TMPD"/mat/raw_*.txt "$TMPD"/mat/err_*.txt | grep -E "^FAIL|Traceback|Error" | head -8
+  echo "FAIL — deploy drill: Blender round-tripped $n_mdone of ${#MSAMPLE[@]} files' materials (exit $mrc)"; exit 1
+fi
+t_m2=$(date +%s)
+"$TMPD/deploy.exe" --materials "$WTMP/materials.txt" > "$TMPD/mat_raw.txt" 2>&1; rcm=$?
+t_m3=$(date +%s)
+tr -d '\r' < "$TMPD/mat_raw.txt" > "$TMPD/mat.txt"
+grep -E "^FAIL|^LEFT|^NOTE|^COVER" "$TMPD/mat.txt"
+TOTALM=$(grep -E "^TOTAL" "$TMPD/mat.txt" | tail -1); echo "$TOTALM"
+[ -n "$TOTALM" ] || { tail -5 "$TMPD/mat.txt"; echo "FAIL — deploy drill: the material comparison gave no total (rc=$rcm)"; exit 1; }
+[ "$rcm" -eq 0 ] || { echo "FAIL — deploy drill: the materials here differ from the ones Blender writes"; exit 1; }
+# a file left by name must be one KNOWN to be Blender's (a JPEG whose alpha is read, a material written twice for its UV
+# sets): a port regression that turns a compared file into a fallback must not pass as "left" (the mime plant did, 2026-10-11)
+KNOWN_MATERIAL_LEFT="spanish_battleship_espana_split_fused.glb export_jpeg_alpha.glb export_material_uv.glb export_uri_mime.gltf"
+while IFS= read -r l; do
+  f=${l#LEFT }; f=${f%%: *}; bn=$(basename "$f")   # the path ends at the first ": " (a drive letter's colon has no space after it)
+  case " $KNOWN_MATERIAL_LEFT " in *" $bn "*) ;; *) echo "FAIL — deploy drill: '$bn' is left to Blender by the material port, which no known reason covers: $l"; exit 1;; esac
+done < <(grep -E "^LEFT " "$TMPD/mat.txt")
+UNCOVERED=$(grep -E "^COVER 0 " "$TMPD/mat.txt" | cut -d' ' -f3- | paste -sd';' -)
+[ -z "$UNCOVERED" ] || { echo "FAIL — deploy drill: no compared file exercised: $UNCOVERED (add a fixture to tools/glb-reader-drill/fixtures.py --prep)"; exit 1; }
+python "$ROOT/tools/deploy-drill/missing_materials.py" "$WTMP/missing_mat" "$WTMP/materials.txt" || { echo "FAIL — could not construct the missing-material regressions"; exit 1; }
+: > "$TMPD/missing_mat/jobs.txt"   # the replay passes a jobs file first; the material drill reads only dumps
+MODE=--materials prerun_tampers "$WTMP/missing_mat"
+cp "$PAR/mat_intact.txt" "$TMPD/mat_control.txt" 2>/dev/null; controlrc=$(cat "$PAR/mat_intact.txt.rc" 2>/dev/null || echo 99)
+if [ "$controlrc" != "0" ] || ! grep -qE "^PASS " "$TMPD/mat_control.txt"; then
+  head -5 "$TMPD/mat_control.txt"
+  echo "FAIL — deploy drill rejected the intact material control (rc=$controlrc)"; exit 1
+fi
+for kind in MAT TEX SAMP IMG; do
+  for mode in missing duplicate value short; do
+    case "$kind:$mode" in
+      MAT:short) reason="material row|the materials \(index";;
+      MAT:*) reason="the materials \(index";;
+      TEX:short) reason="texture row|the textures \(index";;
+      TEX:*) reason="the textures \(index";;
+      SAMP:short) reason="sampler row|the samplers \(index";;
+      SAMP:*) reason="the samplers \(index";;
+      IMG:short) reason="image row|the images \(index";;
+      IMG:*) reason="the images \(index";;
+    esac
+    cp "$PAR/mat_${kind}_$mode.txt" "$TMPD/mat_${kind}_$mode.txt" 2>/dev/null; badrc=$(cat "$PAR/mat_${kind}_$mode.txt.rc" 2>/dev/null || echo 99)
+    if [ "$badrc" != "1" ] || ! grep -E "^FAIL " "$TMPD/mat_${kind}_$mode.txt" | grep -qE "$reason"; then
+      head -5 "$TMPD/mat_${kind}_$mode.txt"
+      echo "FAIL — deploy drill accepted invalid material evidence ($kind $mode, rc=$badrc)"; exit 1
+    fi
+  done
+done
+for mode in DONE_missing DIES_claimed; do
+  case "$mode" in DONE_missing) reason="no DONE row";; DIES_claimed) reason="NEVER";; esac
+  cp "$PAR/mat_$mode.txt" "$TMPD/mat_$mode.txt" 2>/dev/null; badrc=$(cat "$PAR/mat_$mode.txt.rc" 2>/dev/null || echo 99)
+  if [ "$mode" = "DIES_claimed" ]; then
+    # a claimed death is a NOTE, not a comparison: the file must be counted as not compared, never as equal
+    if [ "$badrc" != "0" ] || ! grep -qE "^NOTE .*could not import or export" "$TMPD/mat_$mode.txt" || grep -qE "^PASS " "$TMPD/mat_$mode.txt"; then
+      head -5 "$TMPD/mat_$mode.txt"; echo "FAIL — deploy drill mishandled a claimed death in a material dump (rc=$badrc)"; exit 1
+    fi
+  elif [ "$badrc" != "1" ] || ! grep -E "^FAIL " "$TMPD/mat_$mode.txt" | grep -qE "$reason"; then
+    head -5 "$TMPD/mat_$mode.txt"; echo "FAIL — deploy drill accepted a material dump with $mode (rc=$badrc)"; exit 1
+  fi
+done
+nm_files=$(echo "$TOTALM" | awk '{print $3}'); nm_mats=$(echo "$TOTALM" | awk '{print $11}'); nm_tex=$(echo "$TOTALM" | awk '{print $13}'); nm_img=$(echo "$TOTALM" | awk '{print $17}')
+echo "PASS — deploy drill, the materials (8a-ii): $nm_files files' materials through Blender's round trip - every material's JSON, every texture, sampler and image (name, type, bytes) - equal to what Blender writes ($nm_mats materials, $nm_tex textures, $nm_img images; Blender took $((t_m1 - t_m0)) s in $JOBS processes beside the other dumps, the comparison $((t_m3 - t_m2)) s); rejects a dump with a material, texture, sampler or image row missing, doubled, changed or cut short, and a missing end row"
+n8_jobs=$(echo "$TOTAL8" | awk '{print $3}'); n8_nodes=$(echo "$TOTAL8" | awk '{print $15}'); n8_prims=$(echo "$TOTAL8" | awk '{print $23}'); n8_verts=$(echo "$TOTAL8" | awk '{print $25}'); n8_mats=$(echo "$TOTAL8" | awk '{print $29}'); n8_imgs=$(echo "$TOTAL8" | awk '{print $31}')
+echo "PASS — deploy drill, the export (8a): $n8_jobs jobs' exported files - every node, skin, inverse bind matrix, mesh and primitive (its vertices, normals, UVs, colours, joints, weights and indices as bytes) the animations' names, and every material, texture, sampler and image (8a-ii) - equal to Blender's ($n8_nodes nodes, $n8_prims primitives, $n8_verts vertices, $n8_mats materials, $n8_imgs images; Blender took $((t_e1 - t_e0)) s in $EXPORT_JOBS processes beside the decisions, the comparison $((t_e3 - t_e2)) s); the animation channels and the bytes are not compared yet (8b, 8c); rejects a dump with a scene, node, skin, inverse bind matrix, mesh, primitive or animation row missing, doubled, changed or cut short, a missing log or written line, a missing end row, and a claimed death or exit of the script"
 
 # ---- the handles of automatic keys: Blender's own calculation (FCurve.update(), keyframe_points.insert(), and
 #      handles_recalc() on keys stored raw) on generated curves against BlenderFCurve.RecalcHandles, both handles of
