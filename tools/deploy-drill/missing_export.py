@@ -22,7 +22,7 @@ def main(out, dump, jobs):
             cur.append(line)
     def kinds(b):
         return {l.split("\t")[0] for l in b}
-    job = next((b for b in blocks if {"DONE", "SCENE", "NODE", "SKIN", "IBM", "MESH", "PRIM", "ANIM", "LOG8", "MAT", "TEX", "SAMP", "IMG"} <= kinds(b)
+    job = next((b for b in blocks if {"DONE", "SCENE", "NODE", "SKIN", "IBM", "MESH", "PRIM", "ANIM", "CHAN", "LOG8", "MAT", "TEX", "SAMP", "IMG"} <= kinds(b)
                 and ":" not in b[0].split("\t")[1]), None)
     if job is None:
         raise ValueError("no complete exported job with a skinned mesh in the dump for the missing-export regressions")
@@ -39,7 +39,7 @@ def main(out, dump, jobs):
         # the last character turned: a hex digit, a name's letter, a count's digit
         c = s[-1]
         return s[:-1] + ("0" if c != "0" else "1")
-    for kind in ("SCENE", "NODE", "SKIN", "IBM", "MESH", "PRIM", "ANIM"):
+    for kind in ("SCENE", "NODE", "SKIN", "IBM", "MESH", "PRIM", "ANIM", "CHAN"):
         r = rows(kind)
         lines = list(job); del lines[r[0]]
         write("exp_%s_missing" % kind, lines)
@@ -50,7 +50,7 @@ def main(out, dump, jobs):
             lines = list(job); lines.insert(r[0] + 1, job[r[0]])
             write("exp_%s_duplicate" % kind, lines)
         # one value of the row changed - a field the drill compares: a joint's translation bit, a scene's name, a skin's
-        # joint index, a mesh's primitive count, an animation's name; the last field (a hash) of an IBM or PRIM row
+        # joint index, a mesh's primitive count, an animation's name; the last field (a hash) of an IBM, PRIM or CHAN row
         if kind == "NODE":
             # a joint's translation: the first node row that carries one
             i = next(i for i in r if job[i].split("\t")[6] != "-")

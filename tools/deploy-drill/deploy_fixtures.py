@@ -807,6 +807,9 @@ def main(out):
     print("wheels_forced_y|%s|0|24|||||||0|||4|0|1||L_Wheel,R_Wheel|y|6|90" % fw)
     print("wheels_forced_z|%s|0|24|||||||0|||4|0|1||L_Wheel| Z ||" % fw)
     print("wheels_substring|%s|0|24|||||||0|||4|0|1||wheel,Nothing,R_W|AUTO|4|360" % fw)
+    # ... and the export cut to ONE frame (8b): a wheel bone in XYZ mode whose rotation_quaternion curves do not count - its
+    # one-sample rotation is STEP (a property without a curve), where a counted Bezier curve would make it LINEAR
+    print("wheels_one_frame|%s|24|24|||||||0|||4|0|1||L_Wheel,R_Wheel|AUTO|8|-180" % fw)
     print("ROLELEFT:wheels_zero|%s|0|24|||||||0|||4|0|1||L_Wheel|AUTO|0|-360" % fw)
     print("wheels_negative|%s|0|24|||||||0|||4|0|1||L_Wheel,R_Wheel|AUTO|-3|-360" % fw)
     # ... and on wheels turned about two axes: the quaternion converted to Euler angles through the other branch, kept (no key overwrites it)

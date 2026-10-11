@@ -166,7 +166,9 @@ the sanitize, every node, skin, inverse bind matrix, mesh, primitive and animati
 deploy export and a standalone material drill judge them) - done 2026-10-11 (open for the Factory wiring: the C# prep writes the
 SOURCE material unchanged, and the Factory's converter refuses what Blender's importer folds - a specularFactor over 1 crashed
 it on the edge fixture, which is therefore `fixtures.py --materials`, not `--prep`; the wiring has to write `BlenderMaterialExport`'s
-materials); next **8b** the animations' channels (sampled every frame, STEP for the constant), **8c** the bytes. **4b the bake takes the selected imported armatures too** (their bones keyed a frame, their object animation
+materials); **8b the animations' channels** (`BlenderChannelExport.cs`: every action sampled frame by frame as the exporter
+does, the reset between actions, the keep of constant channels, STEP or LINEAR, the correction matrices; 197 jobs' 51,801
+channels equal) - done 2026-10-11; next **8c** the bytes. **4b the bake takes the selected imported armatures too** (their bones keyed a frame, their object animation
 dropped) - done 2026-10-11: the dugout canoe is baked in C#, no job is left at the bake; **5a the fire-window
 snapshot** - done 2026-10-11 (the dump's own scene updates between stages were wrong on the contract path and are
 gone); **5b/5c the barrel retarget and the leg scale** - done 2026-10-10 (Bezier keys with their handles to the bit;

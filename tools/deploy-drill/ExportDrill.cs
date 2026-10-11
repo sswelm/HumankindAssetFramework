@@ -24,7 +24,7 @@ static class ExportDrill
         "a job's export compared", "a skinned mesh node", "a bound mesh without a triangle (a node without a mesh)", "the neutral bone (a group that names no bone)",
         "a trim to argv's frames", "the trim's end from the recoil tail", "no trim (two arguments)", "leftover objects purged", "nothing to purge",
         "no mesh with a triangle: the skin written unused", "a primitive with a material", "a primitive without a material", "a mesh of several primitives",
-        "joints as bytes (fewer than 256 bones)", "a UV layer", "a mesh without UVs", "a recoil role among the animations",
+        "joints as bytes (fewer than 256 bones)", "a UV layer", "a mesh without UVs", "a recoil role among the animations", "a channel reduced to its first and last sample", "a channel with every sample", "a channel of one sample", "a STEP channel", "a LINEAR channel", "a bone in an Euler mode", "a bone holding the pose the script left",
         "the script stops before the export (its exit)", "several scenes (an empty one written)", "the export left to Blender by name (EXPORTLEFT)",
     };
 
@@ -48,7 +48,7 @@ static class ExportDrill
         }
         if (jobs.Count == 0) { Console.WriteLine("FAIL jobs: no export jobs to compare"); return 1; }
         var cover = new SortedDictionary<string, long>(); foreach (var k in CoverKeys) cover[k] = 0;
-        int fails = 0, files = 0, left = 0, exits = 0, rolesLeft = 0; long nodes = 0, joints = 0, ibms = 0, meshes = 0, prims = 0, vertices = 0, lines = 0, anims = 0, materials = 0, images = 0;
+        int fails = 0, files = 0, left = 0, exits = 0, rolesLeft = 0; long nodes = 0, joints = 0, ibms = 0, meshes = 0, prims = 0, vertices = 0, lines = 0, anims = 0, materials = 0, images = 0, channels = 0;
         var blocks = new List<List<string>>();
         foreach (var dump in args.Skip(1))
             foreach (var line in File.ReadLines(dump))
@@ -217,6 +217,22 @@ static class ExportDrill
                 int channels3 = 3 * baked.BonesAfterRecoil.Count;
                 Compare(problems, "the animations (name, channels, samplers)", x.Animations.Select((a, i) => $"{i}\t{a}\t{channels3}\t{channels3}").ToList(), animRows.Select(t => string.Join("\t", t.Skip(1))).ToList());
                 anims += animRows.Count;
+                // ---- the channels (8b): per animation and channel the target node, the path, the sampler, its interpolation,
+                //      the input's count, first and last time (float32 hex) and the SHA-256 of the input and output bytes
+                var chanRows = Of("CHAN");
+                foreach (var t in chanRows) if (t.Length != 12) throw new InvalidDataException($"the dump's channel row has {t.Length} fields, expected 12");
+                var mine = new List<string>();
+                for (int ai = 0; ai < x.ChannelRows.Animations.Count; ai++)
+                {
+                    var a = x.ChannelRows.Animations[ai];
+                    for (int ci = 0; ci < a.Channels.Count; ci++)
+                    {
+                        var c = a.Channels[ci];
+                        mine.Add($"{ai}\t{ci}\t{c.Node}\t{c.Path}\t{c.Sampler}\t{c.Interpolation}\t{c.Times.Length}\t{Bits(c.Times[0]):x8}\t{Bits(c.Times[c.Times.Length - 1]):x8}\t{ShaFloats(c.Times)}\t{ShaFloats(c.Values)}");
+                    }
+                }
+                Compare(problems, "the channels (animation, channel, node, path, sampler, interpolation, count, min, max, input sha, output sha)", mine, chanRows.Select(t => string.Join("\t", t.Skip(1))).ToList());
+                channels += chanRows.Count;
                 if (problems.Count > 0) { fails++; Console.WriteLine($"FAIL {key}: " + string.Join("; ", problems.Take(5))); continue; }
                 cover["a job's export compared"]++;
                 if (x.Nodes.Any(n => n.Skin >= 0)) cover["a skinned mesh node"]++;
@@ -227,14 +243,17 @@ static class ExportDrill
                 if (x.UnusedSkin) cover["no mesh with a triangle: the skin written unused"]++;
                 if (x.Meshes.Any(me => me.Primitives.Count > 1)) cover["a mesh of several primitives"]++;
                 if (x.Animations.Contains("recoil")) cover["a recoil role among the animations"]++;
+                var ch = x.ChannelRows;
+                cover["a channel reduced to its first and last sample"] += ch.Reduced; cover["a channel with every sample"] += ch.Full; cover["a channel of one sample"] += ch.Single;
+                cover["a STEP channel"] += ch.Stepped; cover["a LINEAR channel"] += ch.Linear; cover["a bone in an Euler mode"] += ch.EulerBones; cover["a bone holding the pose the script left"] += ch.HeldBones;
                 if (x.Scenes.Count > 1) cover["several scenes (an empty one written)"]++;
-                Console.WriteLine($"PASS {key}: {log8.Count} log lines, {nodeRows.Count} nodes, {skinRows.Count} skin(s), {meshRows.Count} meshes with {primRows.Count} primitives and {animRows.Count} animations equal to Blender's");
+                Console.WriteLine($"PASS {key}: {log8.Count} log lines, {nodeRows.Count} nodes, {skinRows.Count} skin(s), {meshRows.Count} meshes with {primRows.Count} primitives, {animRows.Count} animations with {chanRows.Count} channels equal to Blender's");
             }
             catch (Exception e) { fails++; Console.WriteLine($"FAIL {key}: {e.GetType().Name}: {e.Message}"); }
         }
         foreach (var k in jobs.Keys) if (!dumped.Contains(k)) { fails++; Console.WriteLine($"FAIL {k}: the dump holds no such job"); }
         foreach (var kv in cover) Console.WriteLine($"COVER {kv.Value} {kv.Key}");
-        Console.WriteLine($"TOTAL jobs {files} failed {fails} left {left} exits {exits} rolesleft {rolesLeft} lines {lines} nodes {nodes} joints {joints} ibms {ibms} meshes {meshes} primitives {prims} vertices {vertices} animations {anims} materials {materials} images {images}");
+        Console.WriteLine($"TOTAL jobs {files} failed {fails} left {left} exits {exits} rolesleft {rolesLeft} lines {lines} nodes {nodes} joints {joints} ibms {ibms} meshes {meshes} primitives {prims} vertices {vertices} animations {anims} materials {materials} images {images} channels {channels}");
         return fails == 0 ? 0 : 1;
     }
 

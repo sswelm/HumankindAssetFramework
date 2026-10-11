@@ -1676,7 +1676,7 @@ public static class BlenderDeploy
 
     /// <summary>BKE_bone_parent_transform_apply with one matrix for rotation, scale and location: the matrix times the
     /// channel, the location column through the same matrix apart (mul_v3_m4v3), the axes times a post scale of 1.</summary>
-    static float[] PoseFromChannel(float[] rotscale, float[] chan)
+    internal static float[] PoseFromChannel(float[] rotscale, float[] chan)
     {
         var o = VehicleProbe.MulM4(rotscale, chan);
         float x = chan[12], y = chan[13], z = chan[14];
