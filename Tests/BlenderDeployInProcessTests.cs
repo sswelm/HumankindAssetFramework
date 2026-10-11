@@ -84,6 +84,9 @@ public class BlenderDeployInProcessTests : IDisposable
         var m = Tank(); m.Animations[0].Samplers[0].Times = new[] { 0f, 1000f };   // 24,000 frames at 24 fps
         GlbWriter.Write(m, src);
         var argv = BlenderDeployInProcess.Argv("0", "24000", "", "", "", "", "", "", "", "", "", "4", "", "", "", "", "", "", "");
+        var early = BlenderDeploy.Decide(m, argv, null, false, BlenderDeployInProcess.MaxFramesInProcess);
+        Assert.Contains("24001 frames", early.Fallback);
+        Assert.Empty(early.Objects); // no per-frame scene sweep or later conversion work
         var longOne = BlenderDeployInProcess.Run(src, dst, argv);
         Assert.False(longOne.Written); Assert.Contains("24001 frames", longOne.UseBlender);
         GlbWriter.Write(Tank(), src);

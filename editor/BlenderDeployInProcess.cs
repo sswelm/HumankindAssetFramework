@@ -58,15 +58,11 @@ public static class BlenderDeployInProcess
             Tick();
             var names = BlenderNames.Compute(m);
             // the decisions, then the whole run through the bake, the fire window, the retarget, the recoil and the bind
-            var r = BlenderDeploy.Decide(m, argv, names);
+            var r = BlenderDeploy.Decide(m, argv, names, false, MaxFramesInProcess);
             if (r.Fallback != null) { o.UseBlender = r.Fallback; return o; }
             if (r.Exit) { o.ScriptExit = true; o.Log.AddRange(r.Log.Where(l => l.StartsWith("DEPLOY", StringComparison.Ordinal))); return o; }
-            // the work ahead is per bone per frame, on the editor thread, with the checkpoint only between the steps: a
-            // long animation is Blender's, whose process the Factory bounds with a timeout (the reviewer's note on PR #153)
-            long span = (long)r.FrameMax - r.FrameMin + 1;
-            if (span > MaxFramesInProcess) { o.UseBlender = $"an animation of {span} frames (the in-process conversion takes up to {MaxFramesInProcess}; Blender runs under the Factory's timeout)"; return o; }
             Tick();
-            var baked = BlenderDeploy.Decide(m, argv, names, true);
+            var baked = BlenderDeploy.Decide(m, argv, names, true, MaxFramesInProcess);
             if (baked.Fallback != null) { o.UseBlender = baked.Fallback; return o; }
             Tick();
             void Lines(IEnumerable<string> lines) { o.Log.AddRange(lines.Where(l => l.StartsWith("DEPLOY", StringComparison.Ordinal))); }
