@@ -35,7 +35,7 @@ public static class BlenderPrep
 {
     // Bump when the in-process prep's written output changes. The Factory stores this in its extract
     // fingerprint: a bake with "Reuse extracted" must not keep an OBJ made by an older C# prep.
-    public const string CacheRevision = "2026-10-11.1";
+    public const string CacheRevision = "2026-10-11.2";
 
     public sealed class ObjectRun
     {

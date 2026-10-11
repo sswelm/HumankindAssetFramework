@@ -334,7 +334,8 @@ public class BlenderPrepTests
         var spec = (Newtonsoft.Json.Linq.JObject)ext["KHR_materials_specular"];
         Assert.Null(spec["specularFactor"]);
         Assert.Equal(new[] { 1.5, 1.5, 1.5 }, spec["specularColorFactor"].Select(x => (double)x));
-        Assert.Equal(0.5f, r.Model.Materials[0].MetallicFactor == 1f ? 0.5f : 0.5f);   // the pbr object is the exporter's (metallic 1 and roughness 1 omitted)
+        Assert.Equal(1f, r.Model.Materials[0].MetallicFactor);
+        Assert.Equal(1f, r.Model.Materials[0].RoughnessFactor);   // the exporter omits both default factors
         Assert.Equal("shiny", r.Model.Materials[0].Name);
         // the written file reads back and keeps the folded extension
         var back = GlbReader.Read(GlbWriter.Write(r.Model));

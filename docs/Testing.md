@@ -1265,6 +1265,29 @@ header (the nodes' index order as the walk, every texture and sampler traversed,
 With this the port writes the file the script writes; what is left of `deploy_convert.py` in Blender is named per
 shape (LEFT) and the Factory still calls Blender until the wiring.
 
+**Replacing `deploy_convert.py`: the Factory wiring** (2026-10-11). `BlenderDeployInProcess.Run` is the script in
+this process - the reader, the decisions and the bake (`BlenderDeploy.Decide`), the role clips (`Finish`), the export
+(`BlenderDeployExport`) and the bytes (`BlenderGlbWriter`) -, each held to the script by `tools/deploy_drill.sh`;
+`UniversalBaker.EnsureDeployConverted` runs it first and runs Blender only for what it names (a Fallback at any step:
+the reader's refusal, a shape a part leaves by name, a failure here), exactly as the prep does since part 5. The
+script's own exits (no animated part, no tube for the recoil) stop the bake as the script would, with the DEPLOY log;
+nothing is a half-written file (a temporary file, then an atomic replace: the old file stays until the new one is
+there). The work is bounded as the prep's is: the port refuses an animation past 5,000 frames before the decision
+phase's own frame sweep (every later step walks every frame for every bone on the editor thread; Blender runs it under
+the Factory's five-minute timeout), a bake-test cancel
+passes through the checkpoint between the steps and the same five minutes leave the model to Blender - the review of
+PR #153 asked for both. The script's argv[2:] is one list for both paths
+(`Argv`) and the cache key carries `CacheRevision`, so a changed port converts again where the script's mtime cannot
+tell. `BlenderDeployInProcessTests` hold the argv positions the port reads (13 the return, 15 the settle, 16 the extra
+strip, 17..20 the wheels), a small rig converted end to end (its roles read back), an early long-clip fallback, the refusals that are Blender's,
+and the script's exit. Measured: `Run` over every job of the deploy drill's dump that Blender wrote a file for - 185 of
+185 written files hash-equal to Blender's (the six registry jobs in 20 s, 178 fixture jobs in 75 s).
+`BlenderDeployInProcessTests` hold the seam; the drill holds the parts,
+and the script's exit. Not here: the Bake Tests row in Unity that bakes a registry entry through the in-process
+conversion and compares it with the Blender-converted bake - the gate cannot run Unity, it is the user's to run, as the
+prep's row is; the prep writing the port's materials (the converter refuses a source material Blender would fold) is
+now implemented in PR #155.
+
 **The prep writes the materials as Blender writes them** (2026-10-11). `BlenderPrep.Assemble` takes its materials,
 textures, samplers and images from `BlenderMaterialExport` (part 8a-ii's round trip, held to Blender on 105 files) for
 the materials the stripped tree writes, in its order - so the Factory's converter reads of the prepped file what it
