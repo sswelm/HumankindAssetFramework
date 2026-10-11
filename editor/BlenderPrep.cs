@@ -248,23 +248,45 @@ public static class BlenderPrep
         // extensionsUsed is the writer's to make (from the payloads it carries); nothing is REQUIRED: Blender's exporter
         // marks no material extension required, and a required name the converter's reader does not know would make it
         // refuse this file alone
-        // textures, images and samplers as the source has them, so every material's references hold
-        foreach (var t in m.Textures) o.Textures.Add(new HafTexture { Name = t.Name, Source = t.Source, Sampler = t.Sampler });
-        foreach (var im in m.Images) o.Images.Add(new HafImage { Name = im.Name, MimeType = im.MimeType, Uri = im.Uri, Bytes = im.Bytes });
-        foreach (var s in m.Samplers) o.Samplers.Add(s);
-        // materials: the Blender material of each name back to its glTF material (and whether it is the vertex-colour variant)
-        var sourceOf = new Dictionary<string, (int material, bool vertexColor)>();
-        foreach (var kv in names.MaterialOf) if (!sourceOf.ContainsKey(kv.Value)) sourceOf[kv.Value] = (kv.Key.material, kv.Key.vertexColor);
-        foreach (var name in tree.Materials)
+        // THE MATERIALS AS BLENDER WRITES THEM (2026-10-11, the Factory wiring after part 8a-ii): BlenderMaterialExport is the
+        // importer's node tree read back by the exporter - every factor, texture, sampler and image as prep_model.py's
+        // export writes it, held to Blender on 105 files -, so the converter reads what it would read of Blender's file
+        // (a specularFactor over 1 is folded into the colour there; carried verbatim it made the converter refuse the
+        // file). Where that port names a shape it does not model, the materials are carried as before: the converter's
+        // output was equal on every drilled file either way, only the refusals differ
+        var written = BlenderMaterialExport.Build(m, names, tree.Materials);   // the materials the stripped tree writes, in its order
+        bool roundTrip = written.Fallback == null && written.Names.SequenceEqual(tree.Materials);
+        if (roundTrip)
         {
-            var (src, vertexColor) = sourceOf[name];
-            HafMaterial mat;
-            if (src >= 0) mat = WrittenMaterial(m.Materials[src], vertexColor, res.Notes);
-            // the importer's material for a coloured primitive without one, as the exporter writes it (measured: no base
-            // colour, metallic 0, roughness 0.5, double sided)
-            else mat = new HafMaterial { MetallicFactor = 0f, RoughnessFactor = 0.5f, DoubleSided = true };
-            mat.Name = name; mat.NameAbsent = false;
-            o.Materials.Add(mat);
+            foreach (var (image, sampler) in written.Textures) o.Textures.Add(new HafTexture { Source = image, Sampler = sampler });
+            foreach (var (name, mime, bytes, _) in written.Images) o.Images.Add(new HafImage { Name = name, MimeType = mime, Bytes = bytes });
+            foreach (var s in written.Samplers) o.Samplers.Add(s.ToString(Newtonsoft.Json.Formatting.None));
+            for (int i = 0; i < written.Materials.Count; i++) o.Materials.Add(MaterialFromJson(written.Materials[i], tree.Materials[i]));
+            if (!res.Notes.Contains("materials-as-blender-writes-them")) res.Notes.Add("materials-as-blender-writes-them");
+            // the rules this file took, for the drill's coverage rows as before
+            if (written.SpecularGlossiness > 0 && !res.Notes.Contains("specular-glossiness")) res.Notes.Add("specular-glossiness");
+            if (written.Materials.Any(j => j["extensions"] is Newtonsoft.Json.Linq.JObject ex && ex["KHR_materials_unlit"] != null) && !res.Notes.Contains("unlit")) res.Notes.Add("unlit");
+        }
+        else
+        {
+            // textures, images and samplers as the source has them, so every material's references hold
+            foreach (var t in m.Textures) o.Textures.Add(new HafTexture { Name = t.Name, Source = t.Source, Sampler = t.Sampler });
+            foreach (var im in m.Images) o.Images.Add(new HafImage { Name = im.Name, MimeType = im.MimeType, Uri = im.Uri, Bytes = im.Bytes });
+            foreach (var s in m.Samplers) o.Samplers.Add(s);
+            // materials: the Blender material of each name back to its glTF material (and whether it is the vertex-colour variant)
+            var sourceOf = new Dictionary<string, (int material, bool vertexColor)>();
+            foreach (var kv in names.MaterialOf) if (!sourceOf.ContainsKey(kv.Value)) sourceOf[kv.Value] = (kv.Key.material, kv.Key.vertexColor);
+            foreach (var name in tree.Materials)
+            {
+                var (src, vertexColor) = sourceOf[name];
+                HafMaterial mat;
+                if (src >= 0) mat = WrittenMaterial(m.Materials[src], vertexColor, res.Notes);
+                // the importer's material for a coloured primitive without one, as the exporter writes it (measured: no base
+                // colour, metallic 0, roughness 0.5, double sided)
+                else mat = new HafMaterial { MetallicFactor = 0f, RoughnessFactor = 0.5f, DoubleSided = true };
+                mat.Name = name; mat.NameAbsent = false;
+                o.Materials.Add(mat);
+            }
         }
         // meshes, in the order the serializer reaches them
         var runOfNode = res.Objects.ToDictionary(r => r.Node, r => r);
@@ -324,8 +346,37 @@ public static class BlenderPrep
         return o;
     }
 
+    /// <summary>A written material's JSON (BlenderMaterialExport, the keys the exporter writes) back into the model's
+    /// material, for GlbWriter: the factors as the JSON holds them, the texture infos with their texCoord, the extensions
+    /// carried as JSON.</summary>
+    internal static HafMaterial MaterialFromJson(Newtonsoft.Json.Linq.JObject j, string name)
+    {
+        var mat = new HafMaterial { Name = name, NameAbsent = false };
+        void Tex(Newtonsoft.Json.Linq.JToken t, out int index, out int texCoord) { index = t is Newtonsoft.Json.Linq.JObject o && o["index"] != null ? (int)o["index"] : -1; texCoord = t is Newtonsoft.Json.Linq.JObject o2 && o2["texCoord"] != null ? (int)o2["texCoord"] : 0; }
+        if (j["pbrMetallicRoughness"] is Newtonsoft.Json.Linq.JObject pbr)
+        {
+            if (pbr["baseColorFactor"] is Newtonsoft.Json.Linq.JArray bc) mat.BaseColorFactor = bc.Select(x => (double)x).ToArray();
+            Tex(pbr["baseColorTexture"], out mat.BaseColorTexture, out mat.BaseColorTexCoord);
+            if (pbr["metallicFactor"] != null) mat.MetallicFactor = (float)(double)pbr["metallicFactor"];
+            if (pbr["roughnessFactor"] != null) mat.RoughnessFactor = (float)(double)pbr["roughnessFactor"];
+            Tex(pbr["metallicRoughnessTexture"], out mat.MetallicRoughnessTexture, out mat.MetallicRoughnessTexCoord);
+        }
+        Tex(j["normalTexture"], out mat.NormalTexture, out mat.NormalTexCoord);
+        if (j["normalTexture"] is Newtonsoft.Json.Linq.JObject nt && nt["scale"] != null) mat.NormalScale = (float)(double)nt["scale"];
+        Tex(j["occlusionTexture"], out mat.OcclusionTexture, out mat.OcclusionTexCoord);
+        if (j["occlusionTexture"] is Newtonsoft.Json.Linq.JObject ot && ot["strength"] != null) { mat.OcclusionStrength = (float)(double)ot["strength"]; mat.OcclusionStrengthJson = (double)ot["strength"]; }
+        Tex(j["emissiveTexture"], out mat.EmissiveTexture, out mat.EmissiveTexCoord);
+        if (j["emissiveFactor"] is Newtonsoft.Json.Linq.JArray ef) { mat.EmissiveFactor = ef.Select(x => (float)(double)x).ToArray(); mat.EmissiveFactorJson = ef.Select(x => (double)x).ToArray(); }
+        if (j["alphaMode"] != null) mat.AlphaMode = (string)j["alphaMode"];
+        if (j["alphaCutoff"] != null) mat.AlphaCutoff = (double)j["alphaCutoff"];
+        if (j["doubleSided"] != null) mat.DoubleSided = (bool)j["doubleSided"];
+        if (j["extensions"] is Newtonsoft.Json.Linq.JObject ex && ex.Count > 0) mat.ExtensionsJson = ex.ToString(Newtonsoft.Json.Formatting.None);
+        return mat;
+    }
+
     /// <summary>A source material as it comes back out of Blender, for what the converter reads of it (the rest is the
-    /// source's own): specular-glossiness and unlit, the base colour factor, an alpha mode the schema knows.</summary>
+    /// source's own): specular-glossiness and unlit, the base colour factor, an alpha mode the schema knows. The path
+    /// taken when BlenderMaterialExport names a shape it does not model (see Assemble).</summary>
     static HafMaterial WrittenMaterial(HafMaterial source, bool vertexColor, List<string> notes)
     {
         var mat = Copy(source);

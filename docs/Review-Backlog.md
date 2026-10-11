@@ -170,7 +170,8 @@ materials); **8b the animations' channels** (`BlenderChannelExport.cs`: every ac
 does, the reset between actions, the keep of constant channels, STEP or LINEAR, the correction matrices; 197 jobs' 51,801
 channels equal) - done 2026-10-11; **8c the bytes** (`BlenderGlbWriter.cs`, `PyFloatRepr.cs`: the exporter's traversal,
 the accessor cache, the JSON as json.dumps writes it; 201 jobs byte-identical) - done 2026-10-11. The script is ported: next the
-**Factory wiring** (the deploy conversion in process with Blender as the fallback, writing the port's materials too), then
+**Factory wiring** (the deploy conversion in process with Blender as the fallback; the prep writing the port's materials - done
+2026-10-11: `BlenderPrep.Assemble` takes them from `BlenderMaterialExport`, the edge fixture is the prep drill's again), then
 (4) `rig_anim`, (5) `vehicle_rig`. **4b the bake takes the selected imported armatures too** (their bones keyed a frame, their object animation
 dropped) - done 2026-10-11: the dugout canoe is baked in C#, no job is left at the bake; **5a the fire-window
 snapshot** - done 2026-10-11 (the dump's own scene updates between stages were wrong on the contract path and are

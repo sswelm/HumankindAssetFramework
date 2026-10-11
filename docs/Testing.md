@@ -1265,6 +1265,17 @@ header (the nodes' index order as the walk, every texture and sampler traversed,
 With this the port writes the file the script writes; what is left of `deploy_convert.py` in Blender is named per
 shape (LEFT) and the Factory still calls Blender until the wiring.
 
+**The prep writes the materials as Blender writes them** (2026-10-11). `BlenderPrep.Assemble` takes its materials,
+textures, samplers and images from `BlenderMaterialExport` (part 8a-ii's round trip, held to Blender on 105 files) for
+the materials the stripped tree writes, in its order - so the Factory's converter reads of the prepped file what it
+reads of Blender's: a specularFactor over 1 reaches it folded into the colour (carried verbatim, SharpGLTF's validator
+refused the file - the finding of the 8a-ii review, the edge fixture back among the prep drill's files since), an unlit
+or specular-glossiness material its exporter form, no extras. Where the material port names a shape it does not
+model, the materials are carried as before (the converter's output was equal on every drilled file either way; only the
+refusals differed). The prep drill holds it: 139 runs on 48 files, every written file read by the converter as Blender's;
+`BlenderPrepTests` the fold on a material carrying the factor alone. The rules the old path noted for the drill's
+coverage rows (unlit, specular-glossiness) are noted from the round trip too.
+
 Review of PR #148: the sanitizer now prints the number of escaped path keys, as the script does, when quoted bone
 names share a prefix (one garbage key can remove curves from two bones). Confirmed with the real sanitizer in Blender.
 `ExportDrillTests` run the actual comparator and pin its completion envelope: exactly one matching final `DONE`, one

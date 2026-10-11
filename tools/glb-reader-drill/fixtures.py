@@ -1268,7 +1268,9 @@ def main(out, prep=False, posed=False, materials=False):
     # fixture carries a specularFactor of 1.5, which the glTF importer tolerates and folds into the colour, while the
     # Factory's converter (SharpGLTF's validator) refuses it in the C# prep's written file, where the source material
     # passes through unchanged until the Factory writes BlenderMaterialExport's materials.
-    for fx in FIXTURES + ([fx_export_skin_lines, fx_export_bones, fx_export_review, fx_export_skin_twins, fx_export_flat_alpha, fx_export_jpeg_alpha, fx_export_factor_range, fx_export_strip] if prep else []) + ([fx_export_material_edges, fx_export_uri_mime, fx_export_material_review] if materials else []):
+    # the edge fixture is the prep drill's again since the prep writes the port's materials (2026-10-11): its specularFactor of
+    # 1.5 reaches the converter folded into the colour, as in Blender's file
+    for fx in FIXTURES + ([fx_export_skin_lines, fx_export_bones, fx_export_review, fx_export_skin_twins, fx_export_flat_alpha, fx_export_jpeg_alpha, fx_export_factor_range, fx_export_strip, fx_export_material_edges] if prep else []) + ([fx_export_material_edges, fx_export_uri_mime, fx_export_material_review] if materials else []):
         fx(out)
     for name in sorted(os.listdir(out)):
         if name.endswith((".glb", ".gltf")):
