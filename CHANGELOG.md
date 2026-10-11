@@ -10,6 +10,19 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **A SKIPPED GATE STEP IS NOT A PASS (2026-10-11).** Eight of the push gate's 26 steps — the Blender-parity drills —
+  exited 0 when Blender was not found: three said `SKIP`, five said `PASS … Blender not found, so NO parity
+  comparison`, and `check.sh` judged by exit status alone, so on a machine without Blender the gate reported 26/26
+  with eight claims untested, and PROGRESS.md recorded PASS for a 0-second deploy drill. The seven drills that read
+  the modding project's registry did the same without the project: fixtures only, a NOTE, PASS. Found by the general
+  review's verification pass. A step now has three verdicts: 0 PASS, **3 SKIP** (a prerequisite was absent; the
+  step's own `SKIP —` line says what did run), else FAIL. The gate prints `[SKIP]`, notes `SKIP` in PROGRESS.md,
+  lists every skipped step under the summary and **fails the push** — `HAF_ALLOW_SKIP=1 git push` accepts a partial
+  gate on purpose (`CHECK: PASS WITH n SKIP`), and a FAIL beside a skip still fails. `Tests/test_parallel_gate.py`
+  drives the gate's own functions through each case; the real thing was drilled by hiding Blender from a full gate
+  run (eight `[SKIP]`, `CHECK: FAIL — 8 step(s) SKIPPED`) and again with the override (`PASS WITH 8 SKIP`). The
+  gate's header, the hook and Decisions.md no longer call it "sub-minute": the source-only steps take seconds, the
+  whole gate about 16 minutes.
 - **THE CATALOG GATE READS NAME TABLES (2026-10-11).** `tools/check-catalog.sh` had reported "all 383 catalogued" for
   weeks while `RenderMatFields` — `{ "currentRenderMaterial", "runTimeRenderMaterial" }` — fed three functional reads
   (the retexture recovery in `TickOne`, `PaintLayer`, the grey atlas) through `foreach (var fld in …) GetMember(ro, fld)`,

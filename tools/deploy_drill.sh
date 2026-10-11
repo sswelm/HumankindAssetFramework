@@ -35,7 +35,7 @@ if [ -z "$BLENDER" ]; then
     cand=$(ls -d "$base"/Blender* 2>/dev/null | sort -V | tail -1); [ -n "$cand" ] && [ -x "$cand/blender.exe" ] && { BLENDER="$cand/blender.exe"; break; }
   done
 fi
-[ -n "$BLENDER" ] || { echo "SKIP — deploy drill: Blender not found (BLENDER=<exe> to force); the deploy conversion was NOT drilled"; exit 0; }
+[ -n "$BLENDER" ] || { echo "SKIP — deploy drill: Blender not found (BLENDER=<exe> to force); the deploy conversion was NOT drilled"; exit 3; }
 
 TMPD="$(mktemp -d)"; trap 'rm -rf "$TMPD"' EXIT
 cp "$NEWTONSOFT" "$TMPD/Newtonsoft.Json.dll"
@@ -55,7 +55,8 @@ mapfile -t FIXTURES < <(python "$ROOT/tools/glb-reader-drill/fixtures.py" "$WTMP
 PACK=$(ls "$PROJECT"/Assets/Pack/*/pack.json 2>/dev/null | head -1)
 REGISTRY=(); RECIPE_SOURCES=(); DEPLOY_SOURCES=()
 if [ -n "$PACK" ]; then
-  mapfile -t REGISTRY < <(python "$ROOT/tools/glb-reader-drill/registry_files.py" "$PACK" | tr -d '\r' | awk '!seen[tolower($0)]++')
+  python "$ROOT/tools/glb-reader-drill/registry_files.py" "$PACK" > "$TMPD/registry_files.txt" || { echo "FAIL — cannot read the registry at $PACK"; exit 1; }
+  mapfile -t REGISTRY < <(tr -d '\r' < "$TMPD/registry_files.txt" | awk '!seen[tolower($0)]++')
   mapfile -t RECIPE_SOURCES < <(python "$ROOT/tools/vehicle-probe-drill/recipe_check.py" --list "$PROJECT" | tr -d '\r')
   # the model files the project's deploy conversions were made from: the first field of each recorded argument line
   mapfile -t DEPLOY_SOURCES < <(for a in "$PROJECT"/Assets/FactorySource/*/deploy_converted.args.txt; do [ -f "$a" ] && head -1 "$a" | cut -d'|' -f1; done | tr -d '\r' | awk '!seen[tolower($0)]++' | while IFS= read -r f; do [ -f "$f" ] && printf '%s\n' "$f"; done)
@@ -835,4 +836,6 @@ done
 echo "$(grep "^PASS " "$TMPD/bezier_out.txt") - keys stored raw: backward handles, keys out of order, doubled frames; missing or replaced requests/curves, cut dumps, changed values, unknown rows and rows after the end fail (never reached, ported from the source only: a quadratic's zero discriminant, the 1e-8 key test, the segment miss, no equation left)"
 n_j=$(echo "$TOTAL2" | awk '{print $3}'); n_l=$(echo "$TOTAL2" | awk '{print $7}'); n_o=$(echo "$TOTAL2" | awk '{print $9}'); n_ln=$(echo "$TOTAL2" | awk '{print $13}'); n_bones=$(echo "$TOTAL2" | awk '{print $15}'); n_keys=$(echo "$TOTAL2" | awk '{print $19}'); n_after=$(echo "$TOTAL2" | awk '{print $21}'); n_bl=$(grep -c "^BAKELEFT " "$TMPD/dec.txt")
 NOTE_MISSING=""; [ -z "$MISSING" ] || NOTE_MISSING="; recorded jobs whose source file is GONE, not judged:$MISSING"
-echo "PASS — deploy drill, the decisions: $n_j jobs ($n_rec recorded conversions, $n_fx fixture jobs) decided as deploy_convert.py decides them - $n_ln log lines to the letter, the parts, the cull and the merges, the armature it builds ($n_bones bones at rest, StaticRoot's anchor, the root-motion anchor) $n_o objects with their matrices, transforms and bound boxes to the bit, and the BAKE - $n_keys keys of the action it holds at its step 5a, each to the bit, with $n_after object matrices of the scene it leaves ($n_bl jobs are Blender's from the bake on, as marked: the scene before it is held); $n_l jobs left to Blender as marked (Blender took $((t4 - t3)) s)$NOTE_MISSING"
+RESULT="PASS — deploy drill, the decisions: $n_j jobs ($n_rec recorded conversions, $n_fx fixture jobs) decided as deploy_convert.py decides them - $n_ln log lines to the letter, the parts, the cull and the merges, the armature it builds ($n_bones bones at rest, StaticRoot's anchor, the root-motion anchor) $n_o objects with their matrices, transforms and bound boxes to the bit, and the BAKE - $n_keys keys of the action it holds at its step 5a, each to the bit, with $n_after object matrices of the scene it leaves ($n_bl jobs are Blender's from the bake on, as marked: the scene before it is held); $n_l jobs left to Blender as marked (Blender took $((t4 - t3)) s)$NOTE_MISSING"
+[ "$n_rec" -gt 0 ] || { echo "SKIP — ${RESULT#PASS — } | recorded deploy conversions were NOT drilled: no usable deploy_converted.args.txt source at $PROJECT (set HAF_UNITY_PROJECT)"; exit 3; }
+echo "$RESULT"

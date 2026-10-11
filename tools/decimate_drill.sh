@@ -41,7 +41,10 @@ mapfile -t NAMING < <(python "$ROOT/tools/vehicle-probe-drill/naming_fixtures.py
 [ "${#FIXTURES[@]}" -gt 0 ] && [ "${#NAMING[@]}" -gt 0 ] || { echo "FAIL — could not write the fixtures"; exit 1; }
 PACK=$(ls "$PROJECT"/Assets/Pack/*/pack.json 2>/dev/null | head -1)
 REGISTRY=(); REGISTRY_NOTE="the registry"
-if [ -n "$PACK" ]; then mapfile -t REGISTRY < <(python "$ROOT/tools/glb-reader-drill/registry_files.py" "$PACK" | tr -d '\r' | awk '!seen[tolower($0)]++'); else REGISTRY_NOTE="NO registry (no modding project at $PROJECT; set HAF_UNITY_PROJECT)"; fi
+if [ -n "$PACK" ]; then
+  python "$ROOT/tools/glb-reader-drill/registry_files.py" "$PACK" > "$TMPD/registry_files.txt" || { echo "FAIL — cannot read the registry at $PACK"; exit 1; }
+  mapfile -t REGISTRY < <(tr -d '\r' < "$TMPD/registry_files.txt" | awk '!seen[tolower($0)]++')
+else REGISTRY_NOTE="NO registry (no modding project at $PROJECT; set HAF_UNITY_PROJECT)"; fi
 RECIPE_SOURCES=()
 [ -z "$PACK" ] || mapfile -t RECIPE_SOURCES < <(python "$ROOT/tools/vehicle-probe-drill/recipe_check.py" --list "$PROJECT" | tr -d '\r')
 FILES=("${FIXTURES[@]}" "${NAMING[@]}"); [ "${#REGISTRY[@]}" -eq 0 ] || FILES+=("${REGISTRY[@]}"); [ "${#RECIPE_SOURCES[@]}" -eq 0 ] || FILES+=("${RECIPE_SOURCES[@]}")
@@ -68,7 +71,7 @@ if [ -z "$BLENDER" ]; then
     cand=$(ls -d "$base"/Blender* 2>/dev/null | sort -V | tail -1); [ -n "$cand" ] && [ -x "$cand/blender.exe" ] && { BLENDER="$cand/blender.exe"; break; }
   done
 fi
-if [ -z "$BLENDER" ]; then echo "PASS — mesh layout drill: $n_ok files laid out in C# ($n_rows mesh objects); Blender not found, so NO parity comparison (BLENDER=<exe> to force)"; exit 0; fi
+if [ -z "$BLENDER" ]; then echo "SKIP — mesh layout drill: $n_ok files laid out in C# ($n_rows mesh objects); Blender not found, so NO parity comparison (BLENDER=<exe> to force)"; exit 3; fi
 t0=$(date +%s)
 "$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/decimate-drill/blender_edges_many.py")" -- "${SAMPLE[@]}" > "$TMPD/blender_raw.txt" 2>&1; brc=$?
 t1=$(date +%s)
@@ -117,4 +120,6 @@ if [ "${FULL:-0}" != "1" ]; then
   MONO_NOTE="under Unity's 32-bit Mono $((m_rows - m_skip)) collapses of meshes without normals equal too, $m_skip declined there for the missing cosf"
 fi
 echo "PASS — mesh layout drill: on ${#SAMPLE[@]} files ($(echo "$CMP" | grep -E '^COMPARED' | awk '{print $6, "mesh objects,", $8, "edges"}')) every edge list equals Blender's own, in order, and so does every BMesh link list ($(echo "$CMP" | grep -E '^COMPARED' | awk '{print $10, "objects,", $12, "scripted kill/splice steps"}')) (Blender took $((t1 - t0)) s); ${#FIXTURES[@]} fixtures, ${#NAMING[@]} naming fixtures, $REGISTRY_NOTE (${#REGISTRY[@]}), ${#RECIPE_SOURCES[@]} recipe sources known"
-echo "PASS — decimate drill: $(echo "$DCMP" | grep -E '^COMPARED' | awk '{print $6, "collapses of", $10, "faces"}') equal to Blender's Decimate COLLAPSE as prep_model applies it - positions, faces, UVs, custom normals, materials and sharp faces, vertex groups, colours - $(echo "$DCMP" | grep -E '^COMPARED' | awk '{print $8}') kept for Blender by design (Blender took $((t3 - t2)) s); $MONO_NOTE"
+RESULT="PASS — decimate drill: $(echo "$DCMP" | grep -E '^COMPARED' | awk '{print $6, "collapses of", $10, "faces"}') equal to Blender's Decimate COLLAPSE as prep_model applies it - positions, faces, UVs, custom normals, materials and sharp faces, vertex groups, colours - $(echo "$DCMP" | grep -E '^COMPARED' | awk '{print $8}') kept for Blender by design (Blender took $((t3 - t2)) s); $MONO_NOTE"
+[ "${#REGISTRY[@]}" -gt 0 ] || { echo "SKIP — ${RESULT#PASS — } | the registry population was NOT drilled: no existing registry model files at $PROJECT (set HAF_UNITY_PROJECT)"; exit 3; }
+echo "$RESULT"
