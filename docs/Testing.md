@@ -1103,6 +1103,16 @@ unique file block with one matching final DONE, rejects fatal or contradictory r
 an explicit source manifest. A Blender import/export failure or a missing source fails the material comparison.
 The shell gate also replays twelve malformed envelopes in addition to the existing row mutations; a claimed death
 must fail instead of silently replacing a comparison.
+Verified by execution after the review (not by reading): Blender's round trip of the four fixtures equals the port
+(the ORM texture shared on two UV layers with the occlusion's sampler, the unlit material's one image named
+`shared`, no texCoord from an unreferenced mesh, the two vertex-colour variants at 0 and 1); the port as it was
+before the review fails three of them and leaves the fourth; the 104 files still at 1,090 materials, 997 textures,
+59 samplers, 637 images, none failed; the six deploy jobs' 110 materials and 143 images equal; the importer's unlit
+path (`imp/KHR_materials_unlit.py`) calls `base_color` alone, so no other slot's image is created or numbered.
+Four plants reverting the review's rules: three fail the drill, the ORM one turns a compared file into a LEFT and
+fails the gate's known-left check (as do the plant that writes every source material and the one typing a packed
+image by its declared mime). The full gate passes locally in 10 min 10 s. A source Blender cannot import is a FAIL
+of the comparison now, where it was a NOTE: a sample file that dies in Blender fails the gate.
 
 **Replacing `deploy_convert.py`, part 8a-ii: the materials, textures, samplers and images** (2026-10-11). Every
 source material takes the same round trip in `deploy_convert.py` and `prep_model.py`: the importer builds a node tree
