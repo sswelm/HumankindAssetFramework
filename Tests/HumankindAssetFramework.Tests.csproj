@@ -63,6 +63,7 @@
     <Compile Include="..\editor\BlenderDeploy.cs" Link="BlenderDeploy.cs" />
     <Compile Include="..\editor\BlenderDeployExport.cs" Link="BlenderDeployExport.cs" />
     <Compile Include="..\editor\BlenderMaterialExport.cs" Link="BlenderMaterialExport.cs" />
+    <Compile Include="..\editor\BlenderChannelExport.cs" Link="BlenderChannelExport.cs" />
     <Compile Include="..\tools\deploy-drill\ExportDrill.cs" Link="ExportDrill.cs" />
     <Compile Include="..\tools\deploy-drill\MaterialDrill.cs" Link="MaterialDrill.cs" />
     <Compile Include="..\editor\BlenderFCurve.cs" Link="BlenderFCurve.cs" />

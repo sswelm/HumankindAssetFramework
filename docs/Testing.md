@@ -1183,6 +1183,49 @@ the file's word, not the bytes') turns the compared file into a fallback instead
 accepted as "left" - so the gate now requires every file the material port leaves to be one of the KNOWN reasons
 (`KNOWN_MATERIAL_LEFT`), and that plant fails there.
 
+**Replacing `deploy_convert.py`, part 8b: the animations' channels** (2026-10-11). The export samples every action
+(export_force_sampling, the default): `BlenderChannelExport.cs` holds the rules read in the add-on's
+`exp/animation` (action.py, sampled/armature, sampling_cache.py, fcurves/channels.py, anim_utils.py) and
+`gltf2_blender_math.py`, with Blender's C behind each product. Per action, the range is the first and the last key of
+its curves cut to the scene's (`export_frame_range`: the script's `scene.frame_start/frame_end`), frame by frame. An
+action that is not the armature's active one is switched to after `reset_bone_matrix`: every bone at the identity, so a
+property without a curve in that action reads 0, the identity quaternion, Euler zeros or scale 1; the active one (the
+legacy `deploy`) is first in the sort and is NOT reset: a property without a curve there holds what the script left
+(`BlenderDeploy.Result.ArmPose7`: the garbage bones the sanitize de-animated ride at the role clips' last pose). Each
+sample is `rest_mat.inverted_safe() @ parent.matrix.inverted_safe() @ bone.matrix` (a root bone: `matrix_local`'s
+inverse times its pose matrix) in mathutils float32, decomposed by `mat4_to_loc_rot_size` and
+`mat3_normalized_to_quat_fast`; a bone's pose matrix is its channel matrix (the quaternion normalized, or
+`eulO_to_mat3` for the spun wheels in XYZ) through the pose chain already drilled in part 2. A channel whose samples
+do not change (`np.ptp` of every component below 0.0001, in double) keeps its first and last sample, animated or not;
+its interpolation is STEP where the property has no curve in the action, or where the two kept samples are equal
+within one float step per component (mathutils' `==`), else LINEAR (a Bezier curve's CUBICSPLINE falls back to LINEAR;
+a rotation_quaternion curve does not count on a bone in an Euler mode, nor a rotation_euler one on a QUATERNION bone).
+The values go through `correction_matrix_local` (the Y-up basis change times `matrix_local` for a root bone,
+`parent.matrix_local.inverted_safe() @ matrix_local` under a bone parent) as `transform` does - the translation of
+`correction @ Translation(loc)`, the quaternion of `correction @ the normalized quaternion's matrix` through
+`mat4_to_quat`, the scale of `correction @ Diagonal(scale)` through `mat3_to_rot_size` -, the quaternion written
+(x, y, z, w); the times frame / 24 in double, stored as float32. The channels follow the vtree's bone walk (root bones in
+pose order, each followed by its children), translation, rotation, scale per bone, one sampler per channel. The oracle
+is part 8a's dump, whose `CHAN` rows carry each channel's target, path, interpolation, count, first and last time and
+the SHA-256 of the input and output bytes; `deploy.exe --export` compares them. Measured: 197 jobs, 51,801 channels
+equal to Blender's bit for bit, the howitzer's recoil and spun wheels among them (63 bones in an Euler mode; 36,466
+channels reduced to two samples, 9,566 sampled through, 831 of one sample; 29,773 STEP, 17,090 LINEAR), none left.
+`BlenderChannelExportTests` hold the walk, the keep, the cut and the transform on a hull and a gun. The gate tampers
+the `CHAN` rows (missing, doubled, changed, cut short). Planted: 20 in the port, 18 fail the drill - the fps, the
+quaternion's order, the normalization, the 0.0001 threshold (3 jobs, the howitzer among them), mathutils' one-step equality
+(74 jobs), the reset of the active action or of none, the scene cut, the STEP rules, the channel order, the root's
+basis change, the Euler parity, the Euler rotation ignored, the inverses swapped, the garbage curves kept, the keep
+only when animated; a quaternion curve counted on a bone in an Euler mode passed 197 jobs and needed the new
+`wheels_one_frame` job (the export cut to one frame: STEP for the property without a curve, LINEAR with it) -; two are
+equivalent on whole frames (the times in float32 arithmetic, the channel matrix's zero terms in double). An independent
+reader against the sources found the reset rule tied to the active action's NAME where the exporter ties it to its
+POSITION: the switch runs for every action in the sorted list, so the active one escapes the reset only when it sorts
+first (`deploy` does; a role named below it would reset `deploy` too - latent, held by a unit test that adds such a role);
+an animation the export names but the sampler cannot fill is a contradiction now, not an empty animation; and three
+cases the script cannot produce are named in the file's header (the armature object's own channels, a connected bone,
+accessor sharing - gather_accessor is cached on its bytes, count, min and max for the whole export, which part 8c's
+writer has to reproduce). Not here: the bytes (8c).
+
 Review of PR #148: the sanitizer now prints the number of escaped path keys, as the script does, when quoted bone
 names share a prefix (one garbage key can remove curves from two bones). Confirmed with the real sanitizer in Blender.
 `ExportDrillTests` run the actual comparator and pin its completion envelope: exactly one matching final `DONE`, one

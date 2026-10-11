@@ -65,8 +65,12 @@ public static class BlenderTrig
     [DllImport("ucrtbase.dll", EntryPoint = "cos", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     static extern double ucrt_cos(double x);
 
+    [DllImport("ucrtbase.dll", EntryPoint = "sin", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    static extern double ucrt_sin(double x);
+
     public static double Exp(double x) => Exact ? ucrt_exp(x) : Math.Exp(x);
     public static double Log(double x) => Exact ? ucrt_log(x) : Math.Log(x);
     public static double Acos(double x) => Exact ? ucrt_acos(x) : Math.Acos(x);
     public static double Cos(double x) => Exact ? ucrt_cos(x) : Math.Cos(x);
+    public static double Sin(double x) => Exact ? ucrt_sin(x) : Math.Sin(x);   // eulO_to_mat3 (the spun wheels' Euler angles)
 }

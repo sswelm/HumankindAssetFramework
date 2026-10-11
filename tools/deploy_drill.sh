@@ -43,7 +43,7 @@ WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"; WTMP="$(cygpath -m "$TMP
 E="$WROOT/editor"
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -optimize+ -out:"$WTMP/deploy.exe" \
   -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
-  "$WROOT/tools/deploy-drill/DeployDrill.cs" "$WROOT/tools/deploy-drill/DecisionsDrill.cs" "$WROOT/tools/deploy-drill/ExportDrill.cs" "$WROOT/tools/deploy-drill/MaterialDrill.cs" "$WROOT/tools/deploy-drill/BezierDrill.cs" "$E/BlenderDeploy.cs" "$E/BlenderDeployExport.cs" "$E/BlenderMaterialExport.cs" "$E/BlenderFCurve.cs" "$E/BlenderExportTree.cs" \
+  "$WROOT/tools/deploy-drill/DeployDrill.cs" "$WROOT/tools/deploy-drill/DecisionsDrill.cs" "$WROOT/tools/deploy-drill/ExportDrill.cs" "$WROOT/tools/deploy-drill/MaterialDrill.cs" "$WROOT/tools/deploy-drill/BezierDrill.cs" "$E/BlenderDeploy.cs" "$E/BlenderDeployExport.cs" "$E/BlenderMaterialExport.cs" "$E/BlenderChannelExport.cs" "$E/BlenderFCurve.cs" "$E/BlenderExportTree.cs" \
   "$E/BlenderExport.cs" "$E/BlenderReduce.cs" "$E/BlenderDecimate.cs" \
   "$E/HafModel.cs" "$E/GlbReader.cs" "$E/HafTransforms.cs" "$E/BlenderNames.cs" "$E/BlenderPosedState.cs" "$E/BlenderTrig.cs" "$E/BlenderEigen.cs" "$E/BlenderMesh.cs" "$E/BMesh.cs" "$E/BlenderColor.cs" \
   "$E/VehicleProbe.cs" "$E/VehicleProbe.Visibility.cs" "$E/VehicleProbe.Islands.cs" "$E/VehicleProbe.InsideOut.cs" \
@@ -553,9 +553,11 @@ if [ "$controlrc" != "0" ] || ! grep -qE "^PASS " "$TMPD/exp_control.txt"; then
   head -5 "$TMPD/exp_control.txt"
   echo "FAIL — deploy drill rejected the intact export control (rc=$controlrc)"; exit 1
 fi
-for kind in SCENE NODE SKIN IBM MESH PRIM ANIM MAT TEX SAMP IMG; do
+for kind in SCENE NODE SKIN IBM MESH PRIM ANIM CHAN MAT TEX SAMP IMG; do
   for mode in missing duplicate value short; do
     case "$kind:$mode" in
+      CHAN:short) reason="channel row has";;
+      CHAN:*) reason="the channels \(animation";;
       MAT:short) reason="material row has";;
       MAT:*) reason="the materials \(index";;
       TEX:short) reason="texture row has";;
@@ -695,8 +697,8 @@ for mode in DONE_missing DIES_claimed DONE_wrong DONE_short DONE_extra DONE_dupl
 done
 nm_files=$(echo "$TOTALM" | awk '{print $3}'); nm_mats=$(echo "$TOTALM" | awk '{print $11}'); nm_tex=$(echo "$TOTALM" | awk '{print $13}'); nm_img=$(echo "$TOTALM" | awk '{print $17}')
 echo "PASS — deploy drill, the materials (8a-ii): $nm_files files' materials through Blender's round trip - every material's JSON, every texture, sampler and image (name, type, bytes) - equal to what Blender writes ($nm_mats materials, $nm_tex textures, $nm_img images; Blender took $((t_m1 - t_m0)) s in $JOBS processes beside the other dumps, the comparison $((t_m3 - t_m2)) s); rejects a dump with a material, texture, sampler or image row missing, doubled, changed or cut short, and a missing end row"
-n8_jobs=$(echo "$TOTAL8" | awk '{print $3}'); n8_nodes=$(echo "$TOTAL8" | awk '{print $15}'); n8_prims=$(echo "$TOTAL8" | awk '{print $23}'); n8_verts=$(echo "$TOTAL8" | awk '{print $25}'); n8_mats=$(echo "$TOTAL8" | awk '{print $29}'); n8_imgs=$(echo "$TOTAL8" | awk '{print $31}')
-echo "PASS — deploy drill, the export (8a): $n8_jobs jobs' exported files - every node, skin, inverse bind matrix, mesh and primitive (its vertices, normals, UVs, colours, joints, weights and indices as bytes) the animations' names, and every material, texture, sampler and image (8a-ii) - equal to Blender's ($n8_nodes nodes, $n8_prims primitives, $n8_verts vertices, $n8_mats materials, $n8_imgs images; Blender took $((t_e1 - t_e0)) s in $EXPORT_JOBS processes beside the decisions, the comparison $((t_e3 - t_e2)) s); the animation channels and the bytes are not compared yet (8b, 8c); rejects a dump with a scene, node, skin, inverse bind matrix, mesh, primitive or animation row missing, doubled, changed or cut short, a missing log or written line, a missing end row, and a claimed death or exit of the script"
+n8_jobs=$(echo "$TOTAL8" | awk '{print $3}'); n8_nodes=$(echo "$TOTAL8" | awk '{print $15}'); n8_prims=$(echo "$TOTAL8" | awk '{print $23}'); n8_verts=$(echo "$TOTAL8" | awk '{print $25}'); n8_mats=$(echo "$TOTAL8" | awk '{print $29}'); n8_imgs=$(echo "$TOTAL8" | awk '{print $31}'); n8_chans=$(echo "$TOTAL8" | awk '{print $33}')
+echo "PASS — deploy drill, the export (8a): $n8_jobs jobs' exported files - every node, skin, inverse bind matrix, mesh and primitive (its vertices, normals, UVs, colours, joints, weights and indices as bytes) the animations' names, every material, texture, sampler and image (8a-ii), and every animation channel's sampled keys (8b) - equal to Blender's ($n8_nodes nodes, $n8_prims primitives, $n8_verts vertices, $n8_mats materials, $n8_imgs images, $n8_chans channels; Blender took $((t_e1 - t_e0)) s in $EXPORT_JOBS processes beside the decisions, the comparison $((t_e3 - t_e2)) s); the bytes are not compared yet (8c); rejects a dump with a scene, node, skin, inverse bind matrix, mesh, primitive, animation or channel row missing, doubled, changed or cut short, a missing log or written line, a missing end row, and a claimed death or exit of the script"
 
 # ---- the handles of automatic keys: Blender's own calculation (FCurve.update(), keyframe_points.insert(), and
 #      handles_recalc() on keys stored raw) on generated curves against BlenderFCurve.RecalcHandles, both handles of

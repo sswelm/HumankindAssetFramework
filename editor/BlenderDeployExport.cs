@@ -74,6 +74,8 @@ public static class BlenderDeployExport
         public string Fallback;                        // why the export is Blender's, or null
         public readonly List<string> Log = new List<string>();   // the DEPLOY lines of the export step, as the script prints them (the "wrote" line excepted)
         public bool Trimmed; public int TrimStart; public long TrimEnd;
+        public int SceneStart, SceneEnd;                               // scene.frame_start, frame_end at the export (the range every action is cut to)
+        public BlenderChannelExport.Result ChannelRows;                // the animations' channels as sampled (8b)
         public readonly List<string> Purged = new List<string>();
         public readonly List<string> GarbageBones = new List<string>();   // sorted as Python sorts them
         public int GarbageCurves;
@@ -144,6 +146,7 @@ public static class BlenderDeployExport
             x.Trimmed = true; x.TrimStart = sfra; x.TrimEnd = efra;
             x.Log.Add($"DEPLOY trim to frames {sfra}..{efra}");
         }
+        x.SceneStart = sfra; x.SceneEnd = efra;
 
         // ---- the purge: everything but the meshes and the armature goes
         var arm = r.Objects7.FirstOrDefault(o => o.Type == "ARMATURE" && o.Name == r.Armature.Name);
@@ -349,6 +352,9 @@ public static class BlenderDeployExport
         //      order the walk numbered the materials
         x.MaterialRows = BlenderMaterialExport.Build(m, names, x.Materials);
         if (x.MaterialRows.Fallback != null) { x.Fallback = x.MaterialRows.Fallback; return x; }
+        // ---- the animations' channels as the exporter samples them (BlenderChannelExport, 8b)
+        x.ChannelRows = BlenderChannelExport.Build(r, x, sfra, efra);
+        if (x.ChannelRows.Fallback != null) { x.Fallback = x.ChannelRows.Fallback; return x; }
         return x;
     }
 }
