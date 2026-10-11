@@ -153,4 +153,23 @@ public class BlenderDeployExportTests
         Assert.Equal(ok, BlenderDeploy.PyIntParse(s, out int v));
         if (ok) Assert.Equal(value, v);
     }
+
+    [Fact]
+    public void Sanitization_counts_path_keys_when_quoted_bone_names_share_a_prefix()
+    {
+        var s = new Scene();
+        int hull = s.Node("Hull", mesh: true);
+        foreach (string name in new[] { "Part\"one", "Part\"two" })
+            s.Move(s.Node(name, hull, mesh: true), new[] { 0f, 1f, 0f });
+        s.Finish();
+        var names = BlenderNames.Compute(s.M);
+        var baked = BlenderDeploy.Decide(s.M, Default.Split('|'), names, true);
+        baked.Finish();
+        baked.Keys["Part\"one"][0][0] = 2000000f;
+        var x = BlenderDeployExport.Build(s.M, names, baked, Default.Split('|'));
+        Assert.Null(x.Fallback);
+        Assert.Equal(new[] { "Part\\" }, x.GarbageBones);
+        Assert.StartsWith("DEPLOY sanitized: 1 garbage bone(s)", x.Log.Single(l => l.StartsWith("DEPLOY sanitized:")));
+        Assert.True(x.GarbageCurves >= 14); // both bones lose their channels, though the printed key is shared
+    }
 }

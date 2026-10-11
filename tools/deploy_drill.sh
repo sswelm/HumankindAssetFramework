@@ -548,12 +548,27 @@ for mode in LOG8_missing WROTE_missing DONE_missing DIES8_claimed EXIT8_claimed;
     LOG8_missing) reason="the export.s log";;
     WROTE_missing) reason="no 'DEPLOY wrote:' line";;
     DONE_missing) reason="no DONE row";;
-    DIES8_claimed) reason="died in the export step";;
+    DIES8_claimed) reason="died in the export step|exported file rows after an exit or death";;
     EXIT8_claimed) reason="the script stops before the export, the port goes on";;
   esac
   cp "$PAR/exp_$mode.txt" "$TMPD/exp_$mode.txt" 2>/dev/null; badrc=$(cat "$PAR/exp_$mode.txt.rc" 2>/dev/null || echo 99)
   if [ "$badrc" != "1" ] || ! grep -E "^FAIL " "$TMPD/exp_$mode.txt" | grep -qE "$reason"; then
     head -5 "$TMPD/exp_$mode.txt"; echo "FAIL — deploy drill accepted an export dump with $mode (rc=$badrc)"; exit 1
+  fi
+done
+for mode in DONE_wrong DONE_short DONE_extra DONE_duplicate DONE_trailing FAIL_claimed JOB_extra JOB_duplicate UNKNOWN_claimed GLB_missing GLB_duplicate GLB_invalid GLB_short ANIM_index; do
+  case "$mode" in
+    DONE_*) reason="exactly one matching DONE row";;
+    FAIL_claimed) reason="Blender could not run it";;
+    JOB_extra) reason="invalid JOB row";;
+    JOB_duplicate) reason="repeats a job";;
+    UNKNOWN_claimed) reason="unknown row kind";;
+    GLB_*) reason="single valid GLB written-file row";;
+    ANIM_index) reason="the animations \(name";;
+  esac
+  cp "$PAR/exp_$mode.txt" "$TMPD/exp_$mode.txt" 2>/dev/null; badrc=$(cat "$PAR/exp_$mode.txt.rc" 2>/dev/null || echo 99)
+  if [ "$badrc" != "1" ] || ! grep -E "^FAIL " "$TMPD/exp_$mode.txt" | grep -qE "$reason"; then
+    head -5 "$TMPD/exp_$mode.txt"; echo "FAIL — deploy drill accepted invalid export envelope ($mode, rc=$badrc)"; exit 1
   fi
 done
 n8_jobs=$(echo "$TOTAL8" | awk '{print $3}'); n8_nodes=$(echo "$TOTAL8" | awk '{print $15}'); n8_prims=$(echo "$TOTAL8" | awk '{print $23}'); n8_verts=$(echo "$TOTAL8" | awk '{print $25}')

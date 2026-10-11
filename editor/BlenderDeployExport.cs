@@ -177,8 +177,8 @@ public static class BlenderDeployExport
             foreach (var (bone, _) in curves) if (garbage.Contains(bone)) x.GarbageCurves++;
             x.GarbageBones.AddRange(garbageKeys.OrderBy(s => s, BlenderDeploy.CodePointOrder));
         }
-        x.Log.Add($"DEPLOY sanitized: {garbage.Count} garbage bone(s) de-animated ({x.GarbageCurves} curves) — rest-pose ride: "
-                  + (garbage.Count > 0 ? "[" + string.Join(", ", x.GarbageBones.Select(BlenderDeploy.PyRepr)) + "]" : "none"));
+        x.Log.Add($"DEPLOY sanitized: {garbageKeys.Count} garbage bone(s) de-animated ({x.GarbageCurves} curves) — rest-pose ride: "
+                  + (garbageKeys.Count > 0 ? "[" + string.Join(", ", x.GarbageBones.Select(BlenderDeploy.PyRepr)) + "]" : "none"));
 
         // ---- the bones as the exporter sees them: matrix_world with the basis change, the inverse bind matrix
         var bones = r.BonesAfterRecoil;

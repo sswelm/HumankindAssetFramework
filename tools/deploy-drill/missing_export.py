@@ -76,6 +76,25 @@ def main(out, dump, jobs):
     write("exp_DIES8_claimed", lines)
     lines = [job[0]] + [job[i] for i in log] + ["EXIT8\t1", job[rows("DONE")[0]]]
     write("exp_EXIT8_claimed", lines)
+    # The completion envelope and written-file record must be valid independently of matching data rows.
+    end = rows("DONE")[0]
+    for mode, replacement in (("wrong", "DONE\tother"), ("short", "DONE"), ("extra", job[end] + "\textra")):
+        lines = list(job); lines[end] = replacement
+        write("exp_DONE_" + mode, lines)
+    lines = list(job); lines.insert(end, job[end]); write("exp_DONE_duplicate", lines)
+    lines = list(job); lines.append("LOG8\ttrailing evidence"); write("exp_DONE_trailing", lines)
+    lines = list(job); lines.insert(end, "FAIL\t%s\tplanted failure" % key); write("exp_FAIL_claimed", lines)
+    lines = list(job); lines[0] += "\textra"; write("exp_JOB_extra", lines)
+    write("exp_JOB_duplicate", job + job)
+    lines = list(job); lines.insert(end, "UNKNOWN\tplanted"); write("exp_UNKNOWN_claimed", lines)
+    written = rows("GLB")[0]
+    lines = list(job); del lines[written]; write("exp_GLB_missing", lines)
+    lines = list(job); lines.insert(written, job[written]); write("exp_GLB_duplicate", lines)
+    lines = list(job); lines[written] = "GLB\tgarbage\t0\t0"; write("exp_GLB_invalid", lines)
+    lines = list(job); lines[written] = "GLB\t28\t0"; write("exp_GLB_short", lines)
+    anim = rows("ANIM")[0]
+    t = job[anim].split("\t"); t[1] = "9999"
+    lines = list(job); lines[anim] = "\t".join(t); write("exp_ANIM_index", lines)
 
 
 if __name__ == "__main__":

@@ -1093,6 +1093,14 @@ processes beside the decisions dump, the comparison 137 s. NOT compared yet, nam
 textures and images (8a-ii), the animations' channels (8b), the GLB's bytes - accessor and buffer layout, JSON (8c).
 `BlenderDeployExportTests` hold the walk, the trim's setters, the scenes and the empty role on small models.
 
+Review of PR #148: the sanitizer now prints the number of escaped path keys, as the script does, when quoted bone
+names share a prefix (one garbage key can remove curves from two bones). Confirmed with the real sanitizer in Blender.
+`ExportDrillTests` run the actual comparator and pin its completion envelope: exactly one matching final `DONE`, one
+block per job, no fatal or unknown rows, no contradictory exit/death/file records, a valid written-file row, and an
+explicit `EXPORTLEFT:` marker for a fallback even when the script dies. The live export tamper lane also rejects
+malformed completion and written-file records, duplicate jobs, fatal rows, and changed animation indices.
+
+
 *Review before the PR* (an independent agent; 101 generated jobs through the real script over 13 fixtures, 49,732 role
 curves and 851,116 keys equal): NO executed defect. It confirmed by execution what I had not fixtured: deploy ends at
 fmin and past fmax, the return at 0, 1, 2, 7 and 50, settles of 0.5, 1.5, 2, 0 and -3, three fire segments with steps,
