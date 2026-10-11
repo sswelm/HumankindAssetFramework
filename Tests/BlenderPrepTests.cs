@@ -88,7 +88,7 @@ public class BlenderPrepTests
         Assert.Equal(new[] { "a", "z" }, o.Meshes.Select(x => x.Name));
         Assert.Equal(new[] { "second", "first" }, o.Materials.Select(x => x.Name));         // materials at first use
         Assert.Equal(new[] { 0, 1 }, o.Meshes.Select(x => x.Primitives[0].Material));
-        Assert.True(o.Materials[1].DoubleSided); Assert.Equal("{\"k\":1}", o.Materials[1].ExtrasJson);   // every field of the source material is carried
+        Assert.True(o.Materials[1].DoubleSided); Assert.Null(o.Materials[1].ExtrasJson);   // the materials as Blender writes them: no extras (export_extras is off)
         Assert.Equal(new[] { 2 }, o.Scenes[0].Nodes);
         Assert.Equal(new double[] { 0, 0, 2 }, o.Nodes[1].Translation);
         Assert.Equal(36, r.SourceTriangles); Assert.Equal(36, r.Triangles);                 // the target is a ceiling
@@ -320,11 +320,33 @@ public class BlenderPrepTests
         Assert.Equal(new[] { 0.8, 0.9, 1.0, alpha }, mat.BaseColorFactor);   // the source is not touched
     }
 
+    [Fact]
+    public void The_prepped_file_carries_the_materials_as_Blender_writes_them_a_specular_factor_over_1_folded_into_the_colour()
+    {
+        // carried verbatim, a specularFactor of 1.5 made the Factory's converter refuse the prepped file (SharpGLTF's validator);
+        // Blender's importer folds it into the colour and its exporter writes the colour alone (part 8a-ii, measured)
+        var m = Model(new[] { Grid("g", 0) }, new List<HafNode> { Node("A", 0) });
+        m.Materials.Add(new HafMaterial { Name = "shiny", ExtensionsJson = "{\"KHR_materials_specular\":{\"specularFactor\":1.5}}" });
+        var r = BlenderPrep.Prepare(m, 1000);
+        Assert.Null(r.Fallback);
+        Assert.Contains("materials-as-blender-writes-them", r.Notes);
+        var ext = Newtonsoft.Json.Linq.JObject.Parse(r.Model.Materials[0].ExtensionsJson);
+        var spec = (Newtonsoft.Json.Linq.JObject)ext["KHR_materials_specular"];
+        Assert.Null(spec["specularFactor"]);
+        Assert.Equal(new[] { 1.5, 1.5, 1.5 }, spec["specularColorFactor"].Select(x => (double)x));
+        Assert.Equal(1f, r.Model.Materials[0].MetallicFactor);
+        Assert.Equal(1f, r.Model.Materials[0].RoughnessFactor);   // the exporter omits both default factors
+        Assert.Equal("shiny", r.Model.Materials[0].Name);
+        // the written file reads back and keeps the folded extension
+        var back = GlbReader.Read(GlbWriter.Write(r.Model));
+        Assert.Contains("specularColorFactor", back.Materials[0].ExtensionsJson);
+    }
+
     [Theory]
     [InlineData("", "OPAQUE", 1.0)]          // the importer: `alpha_mode or 'OPAQUE'`
     [InlineData(null, "OPAQUE", 1.0)]
     [InlineData("Blend", "BLEND", 0.5)]      // anything but OPAQUE and MASK blends; the schema knows three values, and the converter's reader refuses a file with a fourth
-    [InlineData("MASK", "MASK", 1.0)]
+    [InlineData("MASK", "OPAQUE", 1.0)]    // a flat MASK at alpha 0.5 under the default cutoff: the importer's constant socket is 1, and the exporter writes OPAQUE (part 8a-ii)
     public void The_written_alpha_mode_is_one_the_schema_knows(string mode, string written, double alpha)
     {
         var m = Model(new[] { Grid("g", 0) }, new List<HafNode> { Node("A", 0) });

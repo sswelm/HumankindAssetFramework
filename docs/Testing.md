@@ -1286,7 +1286,18 @@ and the script's exit. Measured: `Run` over every job of the deploy drill's dump
 and the script's exit. Not here: the Bake Tests row in Unity that bakes a registry entry through the in-process
 conversion and compares it with the Blender-converted bake - the gate cannot run Unity, it is the user's to run, as the
 prep's row is; the prep writing the port's materials (the converter refuses a source material Blender would fold) is
-the next wiring step.
+now implemented in PR #155.
+
+**The prep writes the materials as Blender writes them** (2026-10-11). `BlenderPrep.Assemble` takes its materials,
+textures, samplers and images from `BlenderMaterialExport` (part 8a-ii's round trip, held to Blender on 105 files) for
+the materials the stripped tree writes, in its order - so the Factory's converter reads of the prepped file what it
+reads of Blender's: a specularFactor over 1 reaches it folded into the colour (carried verbatim, SharpGLTF's validator
+refused the file - the finding of the 8a-ii review, the edge fixture back among the prep drill's files since), an unlit
+or specular-glossiness material its exporter form, no extras. Where the material port names a shape it does not
+model, the materials are carried as before (the converter's output was equal on every drilled file either way; only the
+refusals differed). The prep drill holds it: 139 runs on 48 files, every written file read by the converter as Blender's;
+`BlenderPrepTests` the fold on a material carrying the factor alone. The rules the old path noted for the drill's
+coverage rows (unlit, specular-glossiness) are noted from the round trip too.
 
 Review of PR #148: the sanitizer now prints the number of escaped path keys, as the script does, when quoted bone
 names share a prefix (one garbage key can remove curves from two bones). Confirmed with the real sanitizer in Blender.

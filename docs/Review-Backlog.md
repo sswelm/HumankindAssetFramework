@@ -172,8 +172,7 @@ channels equal) - done 2026-10-11; **8c the bytes** (`BlenderGlbWriter.cs`, `PyF
 the accessor cache, the JSON as json.dumps writes it; 201 jobs byte-identical) - done 2026-10-11. The script is ported. **The Factory wiring** (`BlenderDeployInProcess`,
 `EnsureDeployConverted` runs the port first, Blender for what it names) - done 2026-10-11; OPEN after it: the Bake Tests row in
 Unity (an entry baked through the in-process conversion against its Blender-converted bake), the prep writing the port's
-materials (the converter refuses a source material Blender would fold). Next
-**Factory wiring** (the deploy conversion in process with Blender as the fallback, writing the port's materials too), then
+materials (now written through `BlenderMaterialExport` by `BlenderPrep.Assemble`; the edge fixture is back in the prep drill) - done 2026-10-11. Next:
 (4) `rig_anim`, (5) `vehicle_rig`. **4b the bake takes the selected imported armatures too** (their bones keyed a frame, their object animation
 dropped) - done 2026-10-11: the dugout canoe is baked in C#, no job is left at the bake; **5a the fire-window
 snapshot** - done 2026-10-11 (the dump's own scene updates between stages were wrong on the contract path and are
