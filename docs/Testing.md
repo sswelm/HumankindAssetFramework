@@ -1265,6 +1265,24 @@ header (the nodes' index order as the walk, every texture and sampler traversed,
 With this the port writes the file the script writes; what is left of `deploy_convert.py` in Blender is named per
 shape (LEFT) and the Factory still calls Blender until the wiring.
 
+**Replacing `deploy_convert.py`: the Factory wiring** (2026-10-11). `BlenderDeployInProcess.Run` is the script in
+this process - the reader, the decisions and the bake (`BlenderDeploy.Decide`), the role clips (`Finish`), the export
+(`BlenderDeployExport`) and the bytes (`BlenderGlbWriter`) -, each held to the script by `tools/deploy_drill.sh`;
+`UniversalBaker.EnsureDeployConverted` runs it first and runs Blender only for what it names (a Fallback at any step:
+the reader's refusal, a shape a part leaves by name, a failure here), exactly as the prep does since part 5. The
+script's own exits (no animated part, no tube for the recoil) stop the bake as the script would, with the DEPLOY log;
+nothing is a half-written file (a temporary file, then a replace). The script's argv[2:] is one list for both paths
+(`Argv`) and the cache key carries `CacheRevision`, so a changed port converts again where the script's mtime cannot
+tell. `BlenderDeployInProcessTests` hold the argv positions the port reads (13 the return, 15 the settle, 16 the extra
+strip, 17..20 the wheels), a small rig converted end to end (its roles read back), the refusals that are Blender's,
+and the script's exit. Measured: `Run` over every job of the deploy drill's dump that Blender wrote a file for - 185 of
+185 written files hash-equal to Blender's (the six registry jobs in 20 s, 178 fixture jobs in 75 s).
+`BlenderDeployInProcessTests` hold the seam; the drill holds the parts,
+and the script's exit. Not here: the Bake Tests row in Unity that bakes a registry entry through the in-process
+conversion and compares it with the Blender-converted bake - the gate cannot run Unity, it is the user's to run, as the
+prep's row is; the prep writing the port's materials (the converter refuses a source material Blender would fold) is
+the next wiring step.
+
 Review of PR #148: the sanitizer now prints the number of escaped path keys, as the script does, when quoted bone
 names share a prefix (one garbage key can remove curves from two bones). Confirmed with the real sanitizer in Blender.
 `ExportDrillTests` run the actual comparator and pin its completion envelope: exactly one matching final `DONE`, one

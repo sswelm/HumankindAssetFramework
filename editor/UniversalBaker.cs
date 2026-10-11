@@ -334,20 +334,37 @@ public static class UniversalBaker
             File.GetLastWriteTimeUtc(script).Ticks.ToString(), cfg.deployStart.ToString(), cfg.deployEnd.ToString(),
             (cfg.deployStrip ?? "").Trim(), (cfg.deployReadyFrame ?? "").Trim(), (cfg.deployLegScale ?? "").Trim(),
             (cfg.deployBarrelScale ?? "").Trim(), rs, re, (cfg.deployRecoilStep ?? "").Trim(), (cfg.deployRecoilMag ?? "").Trim(), (cfg.deployArcR ?? "").Trim(), (cfg.deployRecoilReturn ?? "").Trim(), (cfg.deploySlamDeg ?? "").Trim(), (cfg.deploySlamSettle ?? "").Trim(), (cfg.deployStripExtra ?? "").Trim(),
-            (cfg.deployWheelBones ?? "").Trim(), (cfg.deployWheelAxis ?? "").Trim(), (cfg.deployWheelFrames ?? "").Trim(), (cfg.deployWheelDegrees ?? "").Trim());
+            (cfg.deployWheelBones ?? "").Trim(), (cfg.deployWheelAxis ?? "").Trim(), (cfg.deployWheelFrames ?? "").Trim(), (cfg.deployWheelDegrees ?? "").Trim(),
+            BlenderDeployInProcess.CacheRevision);   // a changed C# port converts again; the script's mtime cannot see it
         if (File.Exists(outFull) && File.Exists(sidecar) && File.ReadAllText(sidecar) == key)
             return outFull;   // unchanged inputs — reuse (the slim step's own source-newer buster keys off this file's mtime)
+
+        // the script's argv[2:], one list for both paths
+        string[] argv = BlenderDeployInProcess.Argv(cfg.deployStart.ToString(), cfg.deployEnd.ToString(), cfg.deployStrip, cfg.deployReadyFrame, cfg.deployLegScale, cfg.deployBarrelScale,
+            rs, re, cfg.deployRecoilStep, cfg.deployRecoilMag, cfg.deployArcR, cfg.deployRecoilReturn, cfg.deploySlamDeg, cfg.deploySlamSettle, cfg.deployStripExtra,
+            cfg.deployWheelBones, cfg.deployWheelAxis, cfg.deployWheelFrames, cfg.deployWheelDegrees);
+        // THE CONVERSION IN C# (2026-10-11, parts 1-8c of replacing Blender, BlenderDeployInProcess): the port writes the file
+        // the script writes - tools/deploy_drill.sh holds it to the script bit for bit -, and names whatever it cannot
+        // (a Fallback): Blender converts that one, as before. The script's own exits stop the bake here as they would there.
+        try
+        {
+            EditorUtility.DisplayProgressBar("Model Factory", "Deploy conversion (in process): rigid parts → bone-per-part rig…", 0.3f);
+            var inProc = BlenderDeployInProcess.Run(cfg.modelFile, outFull, argv);
+            foreach (var line in inProc.Log) Debug.Log("[Factory] " + line.Trim());
+            if (inProc.Written) { File.WriteAllText(sidecar, key); return outFull; }
+            if (inProc.ScriptExit) { error = "deploy conversion FAILED (the script stops before writing — see the DEPLOY log in the Console)."; return null; }
+            if (!BlenderAvailable()) { error = "deploy conversion: " + inProc.UseBlender + ". That leaves this model to Blender, which is not installed (it is auto-detected, or set EditorPrefs 'HAF.BlenderPath')."; return null; }
+            Debug.Log("[Factory] deploy conversion: using Blender because " + inProc.UseBlender + ".");
+        }
+        catch (OperationCanceledException) { throw; }
+        finally { EditorUtility.ClearProgressBar(); }
 
         try
         {
             EditorUtility.DisplayProgressBar("Model Factory", "Deploy conversion (Blender): rigid parts → bone-per-part rig…", 0.3f);
             var p = new System.Diagnostics.Process();
             p.StartInfo.FileName = FindBlender();
-            p.StartInfo.Arguments = $"{BakerRules.BlenderScript(script)} -- \"{cfg.modelFile}\" \"{outFull}\" " +
-                $"{cfg.deployStart} {cfg.deployEnd} \"{(cfg.deployStrip ?? "").Trim()}\" \"{(cfg.deployReadyFrame ?? "").Trim()}\" " +
-                $"\"{(cfg.deployLegScale ?? "").Trim()}\" \"{(cfg.deployBarrelScale ?? "").Trim()}\" " +
-                $"\"{rs}\" \"{re}\" \"{(cfg.deployRecoilStep ?? "").Trim()}\" \"{(cfg.deployRecoilMag ?? "").Trim()}\" \"{(cfg.deployArcR ?? "").Trim()}\" \"{(cfg.deployRecoilReturn ?? "").Trim()}\" \"{(cfg.deploySlamDeg ?? "").Trim()}\" \"{(cfg.deploySlamSettle ?? "").Trim()}\" \"{(cfg.deployStripExtra ?? "").Trim()}\" " +
-                $"\"{(cfg.deployWheelBones ?? "").Trim()}\" \"{(cfg.deployWheelAxis ?? "").Trim()}\" \"{(cfg.deployWheelFrames ?? "").Trim()}\" \"{(cfg.deployWheelDegrees ?? "").Trim()}\"";
+            p.StartInfo.Arguments = $"{BakerRules.BlenderScript(script)} -- \"{cfg.modelFile}\" \"{outFull}\" " + string.Join(" ", argv.Select(a => "\"" + a + "\""));
             p.StartInfo.UseShellExecute = false; p.StartInfo.CreateNoWindow = true;
             p.StartInfo.RedirectStandardOutput = true; p.StartInfo.RedirectStandardError = true;
             p.Start();
