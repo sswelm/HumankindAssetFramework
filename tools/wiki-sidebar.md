@@ -54,6 +54,7 @@
 - [Code Map](Code-Map)
 - [Shared Schema](Shared-Schema)
 - [Animated Runtime](Animated-Runtime)
+- [Blender-Free Animated Slice](Blender-Free-Animated-Slice)
 - [Testing](Testing)
 - [Decisions](Decisions)
 - [Framework Review](Framework-Review)
