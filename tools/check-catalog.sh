@@ -12,6 +12,13 @@
 # runtime sources, subtract the catalog, subtract an explicit ALLOWLIST (every entry justified), FAIL on anything left.
 # Run in the same gate as bindcheck — together they mean "the catalog COVERS the surface AND RESOLVES against the game".
 #
+# THREE passes (the third since 2026-10-11): 1. the literal inside the reader call, 2. the same in a NESTED call, and
+# 3. a name that is NOT a literal at the call — a loop variable over `new[] { … }`, a `static readonly string[]` table,
+# a local function forwarding its parameter — traced to the literals behind it by tools/find-name-sites.pl. The two
+# literal passes had reported "all 383 catalogued" for weeks while `RenderMatFields` fed three functional reads
+# (the retexture recovery and the district albedo bind) with names no catalog row held. A name the third pass cannot
+# trace to a literal FAILS the gate unless its site is allowlisted below with the reason.
+#
 #   bash tools/check-catalog.sh [--list]     # --list: print every extracted literal with its sites, then exit 0
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 2
@@ -114,6 +121,26 @@ AxeZ@Patches/DistrictInject.Scoped.cs	evolver-material clone, runtime-resolved
 StartSkeletonBoneEntry@Patches/UniversalInject.Pose.cs	read off an element of the engine's skeleton BUFFER (skelBuf.GetValue(id)); the element type is not resolved statically — see Review-Backlog for promoting it to a derived binding
 Data@Patches/UniversalInject.ScaleEra.cs	generic collection walker — tries an indexer first, then Data, then gives up; no single game type owns it
 definition@Patches/DistrictInject.Scoped.cs	tolerant probe: tries Definition ?? definition on a database matrix and copes with both absent
+# ---- surfaced 2026-10-11 by pass 3 (names read through tables and loop variables) ----
+AnimationClipCollections@Prober.cs	Prober.RunScan's dev scan counts (no caller today): tolerant, reads an unknown content type
+AnimatorOverrideControllers@Prober.cs	Prober.RunScan's dev scan counts (no caller today)
+MeshCollections@Prober.cs	Prober.RunScan's dev scan counts (no caller today)
+element@Prober.cs	Prober.ResolveRef's tolerant probe chain over an unknown reference type (element / Element / GetElement / ToElement / GetValue / Resolve, copes with all absent)
+Element@Prober.cs	Prober.ResolveRef's tolerant probe chain
+GetElement@Prober.cs	Prober.ResolveRef's tolerant probe chain
+ToElement@Prober.cs	Prober.ResolveRef's tolerant probe chain
+GetValue@Prober.cs	Prober.ResolveRef's tolerant probe chain
+Resolve@Prober.cs	Prober.ResolveRef's tolerant probe chain
+EOF
+)
+
+# ---- NAME_ARG_ALLOW: a reader whose member NAME pass 3 cannot trace to a literal (2026-10-11) ----
+# `<argument>@File.cs` with the reason. Pass 3 resolves loop variables, tables, constants and forwarded parameters;
+# what is left is a name computed at run time. Each line here is a promise that the name is the caller's literal
+# by another route, or that a rename cannot silently break the site.
+NAME_ARG_ALLOW=$(cat <<'EOF'
+k.Item2@Patches/UniversalInject.Reflection.cs	the member cache's key: GetMember's own parameter, forwarded — the callers' literals are passes 1 and 2
+parts[i]@Patches/FastMember.cs	one hop of the caller's dotted path ("ObjectSpace.Translation"): pass 1 extracts the literal and splits it on '.'
 EOF
 )
 
@@ -179,7 +206,17 @@ extract() {
   | awk -F'\t' '{n=split($1,p,"."); for(i=1;i<=n;i++) if (p[i] != "") print p[i] "\t" $2}'
 }
 
-SITES=$(extract | sort -u)
+# ---- PASS 3: the name is not a literal at the call (2026-10-11) ----
+# tools/find-name-sites.pl prints `<name>\t<file:line>` for every literal a table / loop variable / forwarding
+# function carries into a reader, and `UNRESOLVED\t<arg>\t<file:line>\t<function>` for a name it cannot trace.
+# The resolved names join the literal sites below; an unresolved one not in NAME_ARG_ALLOW fails the gate — after the
+# catalog comparison has printed, so one run names everything that is wrong.
+NAMESITES=$(perl tools/find-name-sites.pl --helpers "$HELPERS" --known "$NOT_MEMBER_READERS" $SRC)
+UNRESOLVED=$(printf '%s\n' "$NAMESITES" | awk -F'\t' '$1 == "UNRESOLVED"' \
+  | awk -F'\t' -v allow="$(printf '%s\n' "$NAME_ARG_ALLOW" | cut -f1)" 'BEGIN{n=split(allow,rows,"\n"); for(i=1;i<=n;i++) ok[rows[i]]=1}
+                                                                       { split($3,s,":"); if (!(($2 "@" s[1]) in ok)) print $2 "\t" $3 "\t" $4 }')
+
+SITES=$( { extract; printf '%s\n' "$NAMESITES" | awk -F'\t' '$1 != "UNRESOLVED"'; } | sort -u)
 [ -n "$SITES" ] || { echo "[FAIL] extracted 0 by-name literals — the extraction regex broke (were the accessors renamed?)"; exit 2; }
 
 if [ "${1:-}" = "--list" ]; then
@@ -219,15 +256,26 @@ MISSING=$(echo "$FILTERED" | awk -F'\t' '{a[$1]=a[$1]" "$2} END{for(k in a) prin
           | join -t$'\t' -v1 - <(printf '%s\n' "$GLOBAL_ALLOW"))
 
 n=$(printf '%s' "$MISSING" | grep -c . || true)
+u=$(printf '%s' "$UNRESOLVED" | grep -c . || true)
 total=$(echo "$SITES" | cut -f1 | sort -u | wc -l)
-if [ "$n" -eq 0 ]; then
+if [ "$n" -eq 0 ] && [ "$u" -eq 0 ]; then
   echo "catalog surface: OK — all $total by-name literal(s) at reflection sites are catalogued or allowlisted."
   exit 0
 fi
-echo "[FAIL] $n by-name member(s) read at a reflection site are NOT in the GameBinding catalog (of $total):"
-printf '%s\n' "$MISSING" | sed 's/^/  /'
-echo
-echo "Each is a game rename that would degrade a feature SILENTLY. Add it to the catalog with its declaring type"
-echo "(bindcheck then validates it against the DLLs — use 'typeprobe --exact <name>' to find the owner), or, if it is"
-echo "not a bindable game member, allowlist it in this script WITH the reason."
+if [ "$n" -gt 0 ]; then
+  echo "[FAIL] $n by-name member(s) read at a reflection site are NOT in the GameBinding catalog (of $total):"
+  printf '%s\n' "$MISSING" | sed 's/^/  /'
+  echo
+  echo "Each is a game rename that would degrade a feature SILENTLY. Add it to the catalog with its declaring type"
+  echo "(bindcheck then validates it against the DLLs — use 'typeprobe --exact <name>' to find the owner), or, if it is"
+  echo "not a bindable game member, allowlist it in this script WITH the reason."
+fi
+if [ "$u" -gt 0 ]; then
+  echo "[FAIL] $u reader call(s) whose member NAME pass 3 cannot trace to a literal (argument, site, enclosing function):"
+  printf '%s\n' "$UNRESOLVED" | sed 's/^/  /'
+  echo
+  echo "A name the gate cannot see is a name it cannot check. Read the member through a literal, a \`new[] { … }\`"
+  echo "loop, a \`static readonly string[]\` table or a forwarding function pass 3 can follow — or, if the name is"
+  echo "genuinely computed at run time, allowlist \`<argument>@<file>\` in NAME_ARG_ALLOW WITH the reason."
+fi
 exit 1

@@ -10,7 +10,12 @@
 #      whose read sits INSIDE an interpolation hole after a `}}` in the string's text (`PeekInterp`): a blanking
 #      that treats the whole `$"…"` as text loses the read, one that treats it as code closes the body early;
 #   2. the headline dead-sentinel `bool x = true; try { x = Convert.ToBoolean(Peek(…)); } catch { }` through it;
-#   3. a by-name literal that is not in the catalog, read through the same wrapper.
+#   3. a by-name literal that is not in the catalog, read through the same wrapper;
+#   4. (2026-10-11) three names that reach the reader WITHOUT a literal at the call — a `new[] { … }` loop, a
+#      `static readonly string[]` table and a local function forwarding its parameter — which pass 3 of the catalog
+#      gate must trace to their literals (the shape that hid `RenderMatFields` from the two literal passes);
+#   5. (2026-10-11) a reader whose name is a parameter nothing in the file ever passes a literal to (`RunDynamic`):
+#      pass 3 must refuse it by name rather than silently not count it.
 #
 # Then removes the plant and re-runs both gates, which must PASS — so a drill that leaves the tree dirty, or a gate
 # that fails for an unrelated reason, is reported as the drill's own failure. The plant is removed on every exit.
@@ -59,6 +64,16 @@ namespace HumankindAssetFramework
             if (!loaded) return;
             var x = Peek(unit, "BogusDrillMember");
         }
+        static readonly string[] DrillFields = { "BogusStaticTableMember" };
+        static void RunTables(object unit)
+        {
+            foreach (var f in new[] { "BogusLoopMember" }) Peek(unit, f);
+            foreach (var f in DrillFields) Peek(unit, f);
+            object Loc(string n) => Peek(unit, n);
+            Loc("BogusLocalMember");
+        }
+        // string FIRST: the `(object, string)` helper self-check must not be the one that refuses this — pass 3 must
+        static void RunDynamic(string dyn, object unit) { Peek(unit, dyn); }
     }
 }
 EOF
@@ -88,6 +103,14 @@ sed -i '/static object MemC(/,/^        }/d; /static object MemS(/,/^        }/d
 out=$(bash tools/check-catalog.sh 2>&1); rc=$?
 if [ $rc -eq 0 ] || ! printf '%s' "$out" | grep -q "BogusDrillMember"; then echo "[FAIL] check-catalog.sh did not report the uncatalogued literal read through a known wrapper:"; printf '%s\n' "$out" | head -6; fail=1
 else echo "ok   — check-catalog.sh sees the literal through the known wrapper 'Mem'"; fi
+# Shape 4: the three table-carried names must be reported by NAME (pass 3 traced them to their literals) …
+for nm in BogusLoopMember BogusStaticTableMember BogusLocalMember; do
+  if printf '%s' "$out" | grep -q "$nm"; then echo "ok   — check-catalog.sh traces $nm through its table / loop / local function"
+  else echo "[FAIL] check-catalog.sh did not report $nm — pass 3 lost a name read without a literal at the call:"; printf '%s\n' "$out" | head -8; fail=1; fi
+done
+# … and shape 5: the parameter nothing passes a literal to is refused by the function's name, not silently uncounted.
+if printf '%s' "$out" | grep -q "RunDynamic"; then echo "ok   — check-catalog.sh refuses the reader whose name has no literal behind it (RunDynamic)"
+else echo "[FAIL] check-catalog.sh did not refuse RunDynamic's computed member name:"; printf '%s\n' "$out" | head -8; fail=1; fi
 out=$(bash tools/check-member-shape.sh 2>&1); rc=$?
 if [ $rc -eq 0 ] || ! printf '%s' "$out" | grep -q "IsLoadedDrill"; then echo "[FAIL] check-member-shape.sh did not report the dead-sentinel through a known wrapper:"; printf '%s\n' "$out" | head -6; fail=1
 else echo "ok   — check-member-shape.sh sees the dead-sentinel through the known wrapper 'Mem'"; fi

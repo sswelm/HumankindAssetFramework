@@ -10,6 +10,20 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE CATALOG GATE READS NAME TABLES (2026-10-11).** `tools/check-catalog.sh` had reported "all 383 catalogued" for
+  weeks while `RenderMatFields` — `{ "currentRenderMaterial", "runTimeRenderMaterial" }` — fed three functional reads
+  (the retexture recovery in `TickOne`, `PaintLayer`, the grey atlas) through `foreach (var fld in …) GetMember(ro, fld)`,
+  and no catalog row held either name: a game rename would have switched retexturing off with a green gate and a clean
+  `bindcheck`. The gate's two passes read the literal INSIDE the reader call and nothing else, so a name carried by a
+  table, a `new[] { … }` loop or a local function's parameter was not reported — it was not counted. The general
+  review's verification pass found it (2026-10-11). A third pass, `tools/find-name-sites.pl`, now traces every
+  identifier name argument to its literals (212 reads through 20 tables in the runtime) and FAILS by function name on
+  one it cannot trace; `drill-reader-gates.sh` plants all three table shapes and one untraceable parameter. What the
+  pass surfaced is catalogued on a new derived type, `FxRenderOutput` (the five material slots the district albedo
+  bind and the private-leaf clone read too), on `MajorEmpire` (`Armies`, `Squadrons`: the era walk), on the database
+  matrices (`Criteria`, `FirstCriteria`, `SecondCriteria`) and on `PawnEntry` (every pose and bone-rotation slot, where
+  only the endpoints were listed); the prober's tolerant probe chain is allowlisted by site. Verified: the gate fails on
+  the planted shapes and passes on the clean tree, and `bindcheck` resolves every new row against game 1.31.
 - **THE HAND PROP SURVIVES THE ADDON'S SECOND LOAD (2026-10-01).** The F8 smoke failed in every session with a Drone Squad on the map — "descriptor no longer draws
   'M60_DistrictMesh' (no live fragment entry on the addon)" — while the soldier visibly held the gun; two diagnoses
   on 09-20 missed it. The game calls the addon's `Load` more than once and the postfix runs each time. The first pass
