@@ -172,6 +172,36 @@ DEPLOY_PAR=2 prerun_tampers "$ROOT/tamper inputs O'Brien"
                 self.assertEqual(result.returncode, expected, result.stderr)
                 self.assertEqual("gate invoked" in result.stdout, expected == 9)
 
+    def test_export_duration_ends_when_workers_finish_not_when_their_results_are_read(self):
+        source = (ROOT / "tools/deploy_drill.sh").read_text(encoding="utf-8")
+        launch = source[source.index("EPIDS=(); t_e0="):source.index("t3=$(date +%s)")]
+        collect = source[source.index('erc=0; for pid in "${EPIDS[@]}"'):source.index(': > "$TMPD/export.txt"')]
+        (self.path / "export").mkdir()
+        self.env["TEST_CLOCK"] = (self.path / "clock").as_posix()
+        for status in (0, 7, None):
+            with self.subTest(status=status):
+                write(self.path / "clock", "100\n")
+                write(self.path / "blender", '#!/usr/bin/env bash\necho 102 > "$TEST_CLOCK"\nexit '+str(status or 0)+'\n')
+                discard = 'rm "$TMPD/export/end_0.txt"\n' if status is None else ''
+                result = self.run_shell('''
+date() { cat "$ROOT/clock"; }
+cygpath() { printf '%s\\n' "$2"; }
+TMPD="$ROOT"; WTMP="$ROOT"; WROOT="$ROOT"; EXPORT_JOBS=1; BLENDER="$ROOT/blender"
+chmod +x "$BLENDER"
+'''+launch+'''
+wait "${EPIDS[0]}"
+echo 110 > "$ROOT/clock"
+'''+discard+collect+'''
+echo "export duration $((t_e1 - t_e0))"
+echo "export status $erc"
+''')
+                self.assertEqual(result.returncode, 1 if status is None else 0, result.stderr)
+                if status is None:
+                    self.assertIn("no valid completion time", result.stdout)
+                else:
+                    self.assertIn("export duration 2", result.stdout)
+                    self.assertIn("export status "+str(status), result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

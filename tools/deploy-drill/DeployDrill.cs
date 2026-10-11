@@ -30,6 +30,7 @@ static class DeployDrill
     {
         Console.OutputEncoding = new UTF8Encoding(false);
         if (args.Length > 0 && args[0] == "--decisions") return DecisionsDrill.Run(args.Skip(1).ToArray());
+        if (args.Length > 0 && args[0] == "--export") return ExportDrill.Run(args.Skip(1).ToArray());
         if (args.Length > 0 && args[0] == "--bezier") return BezierDrill.Run(args.Skip(1).ToArray());
         if (args.Length > 0 && args[0] == "--handles") return BezierDrill.RunHandles(args.Skip(1).ToArray());
         Console.WriteLine($"RUNTIME	{(IntPtr.Size * 8)}-bit");

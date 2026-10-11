@@ -314,7 +314,7 @@ public static class BlenderExportTree
     /// sets is written twice under one name (measured 2026-10-07: TEXCOORD_1 on a mesh of two UV sets and on a mesh of
     /// one). Not modelled: named, per material. A texture inside an extension is not interpreted here, so a material
     /// with one on a non-zero set is named as soon as its meshes differ in their number of UV sets.</summary>
-    static void MaterialUvProblems(HafModel m, List<string> problems)
+    internal static void MaterialUvProblems(HafModel m, List<string> problems)
     {
         var seen = new Dictionary<(int material, bool colour), string>();
         var named = new HashSet<int>();

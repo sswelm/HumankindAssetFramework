@@ -48,6 +48,13 @@ public static class BlenderReduce
     }
 
     /// <summary>Why this port keeps Blender for a mesh, or null when it covers it.</summary>
+    static bool NonFinite(float[] a)
+    {
+        if (a == null) return false;
+        foreach (float v in a) if (float.IsNaN(v) || float.IsInfinity(v)) return true;
+        return false;
+    }
+
     public static string FallbackReason(HafModel m, int node)
     {
         var mesh = m.Meshes[m.Nodes[node].Mesh];
@@ -57,6 +64,12 @@ public static class BlenderReduce
         if (m.Nodes[node].Skin >= 0 && !mesh.Primitives.Exists(p => p.Skinned)) return "a skin on a mesh without weights";
         foreach (var p in mesh.Primitives)
         {
+            // mesh.py: `prim.num_faces = len(indices) // 3` while every corner joins the loops: the importer's last face takes
+            // the leftover corners as an n-gon, which the triangle layout (BlenderMesh) does not model
+            if (p.Mode == 4 && p.Positions != null && (p.Indices != null ? p.Indices.Length : p.VertexCount) % 3 != 0) return "a TRIANGLES primitive whose corner count is not a multiple of three (the importer's last face takes the rest as an n-gon)";
+            // the exporter's mesh.validate() resets a float attribute item with a NaN or an infinity to its default (mesh_validate.cc
+            // validate_float_attribute): a position to the origin, a UV to (0, 0) - not modelled; named (review of part 8a)
+            if (NonFinite(p.Positions) || NonFinite(p.Normals) || NonFinite(p.Uv0) || NonFinite(p.Uv1) || (p.UvMore != null && p.UvMore.Exists(NonFinite))) return "a vertex attribute that is not finite (validate resets it)";
             if (p.Colors != null && !BlenderColor.TableKnown) return "colours on a CPU whose rsqrtps table is not measured";   // BlenderColor.cs
             if (p.MorphTargets > 0) return "morph targets";
             if (p.Normals != null && !BlenderTrig.Exact) return "normals in a process without the 64-bit C runtime's cosf";   // BlenderTrig.cs
@@ -64,7 +77,9 @@ public static class BlenderReduce
         return null;
     }
 
-    public static Result Reduce(HafModel m, int node, float ratio, BlenderNames.Result names, int threads = 0, Action checkpoint = null)
+    /// <summary>... `mergeUvs`: prep_model.py applies the modifier (merge_customdata runs); deploy_convert.py never does,
+    /// and its export reads the mesh as the import left it (BlenderDeployExport, ratio 1).</summary>
+    public static Result Reduce(HafModel m, int node, float ratio, BlenderNames.Result names, int threads = 0, Action checkpoint = null, bool mergeUvs = true)
     {
         var r = new Result { Ratio = ratio };
         r.Fallback = FallbackReason(m, node);
@@ -261,7 +276,7 @@ public static class BlenderReduce
         r.Uv = uvOut; r.CustomNormal = cnOut;
         // bpy.ops.object.modifier_apply's merge_customdata (on by default, so prep_model runs it after EVERY apply, a ratio of
         // 1 included): UVs of the corners at one vertex that lie within 12 ulps of each other are snapped together
-        MergeUvsForApply(count, r.Faces, r.Uv);
+        if (mergeUvs) MergeUvsForApply(count, r.Faces, r.Uv);
         int cornerLayer = 0, pointLayer = 0;
         for (int i = 0; i < colorNames.Count; i++)
         {
