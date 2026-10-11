@@ -122,7 +122,7 @@ if [ -z "$BLENDER" ]; then
     cand=$(ls -d "$base"/Blender* 2>/dev/null | sort -V | tail -1); [ -n "$cand" ] && [ -x "$cand/blender.exe" ] && { BLENDER="$cand/blender.exe"; break; }
   done
 fi
-if [ -z "$BLENDER" ]; then echo "PASS — compaction drill: $SUMMARY; Blender not found, so NO import comparison (BLENDER=<exe> to force)"; exit 0; fi
+if [ -z "$BLENDER" ]; then echo "SKIP — compaction drill: $SUMMARY; Blender not found, so NO import comparison (BLENDER=<exe> to force)"; exit 3; fi
 awk -F'\t' '$3 == "compacted" && $4 != "-" { print $2 "\t" $4 }' "$TMPD/result.txt" > "$TMPD/pairs.txt"
 n_pairs=$(grep -c . "$TMPD/pairs.txt")
 [ "$n_pairs" -gt 0 ] || { echo "FAIL — compaction drill: no compacted pair was kept for Blender"; exit 1; }
@@ -138,4 +138,6 @@ CMP=$(printf '%s' "$CMP" | tr -d '\r')
 echo "$CMP" | grep -E "^FAIL"
 echo "$CMP" | grep -E "^COMPARED"
 [ "$crc" -eq 0 ] || { echo "FAIL — compaction drill: Blender does not see an original and its compacted copy as the same"; exit 1; }
-echo "PASS — compaction drill: $SUMMARY; Blender imports $n_pairs original(s) and their compacted copies and reports the same for both, as printed (triangles, materials, images, box, area, centroid, winding, bones, durations; $((t1 - t0)) s)"
+RESULT="PASS — compaction drill: $SUMMARY; Blender imports $n_pairs original(s) and their compacted copies and reports the same for both, as printed (triangles, materials, images, box, area, centroid, winding, bones, durations; $((t1 - t0)) s)"
+[ -n "$PACK" ] || { echo "SKIP — ${RESULT#PASS — } | the registry population was NOT drilled: no modding project at $PROJECT (set HAF_UNITY_PROJECT)"; exit 3; }
+echo "$RESULT"

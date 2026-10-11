@@ -24,6 +24,7 @@ class ParallelGateTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.path = Path(self.tmp.name)
         self.env = dict(os.environ, HAF_PROGRESS=(self.path / "progress.md").as_posix())
+        self.env.pop("HAF_ALLOW_SKIP", None)   # the machine's own setting must not decide a test
         write(self.path / "progress.md", "")
 
     def script(self, text):
@@ -109,6 +110,79 @@ exit "$fail"
 ''')
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertIn("[FAIL] good", result.stdout)
+
+    # SKIP (exit 3) is a third verdict, not a PASS (2026-10-11): a drill whose prerequisite is absent must be printed as
+    # [SKIP], recorded as SKIP, and must fail the gate unless HAF_ALLOW_SKIP=1 accepts a partial gate on purpose.
+    SKIP_SCRIPT = '''
+run_bg skipper bash -c 'echo "SKIP — nothing to compare on this machine"; exit 3'
+run_bg good bash -c 'echo good-output'
+run_bg_wait
+run serial-skip bash -c 'echo "SKIP — serial"; exit 3'
+verdict; exit $?
+'''
+
+    def test_a_skipped_step_is_reported_as_skip_and_fails_the_verdict(self):
+        result = self.run_shell(self.helpers()+self.SKIP_SCRIPT)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("[SKIP] skipper", result.stdout)
+        self.assertIn("[SKIP] serial-skip", result.stdout)
+        self.assertIn("[PASS] good", result.stdout)
+        self.assertNotIn("[PASS] skipper", result.stdout)
+        self.assertIn("CHECK: FAIL", result.stdout)              # ASCII only: the pipe is decoded in the console's code page
+        self.assertIn("2 step(s) SKIPPED", result.stdout)
+        progress = (self.path / "progress.md").read_text()
+        self.assertIn("SKIP skipper", progress)
+        self.assertIn("SKIP serial-skip", progress)
+        self.assertIn("DONE FAIL (2 skipped)", progress)
+
+    def test_haf_allow_skip_accepts_a_partial_gate_and_says_so(self):
+        self.env["HAF_ALLOW_SKIP"] = "1"
+        result = self.run_shell(self.helpers()+self.SKIP_SCRIPT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("[SKIP] skipper", result.stdout)
+        self.assertIn("CHECK: PASS WITH 2 SKIP", result.stdout)
+        self.assertIn("DONE PASS (2 skipped, allowed by HAF_ALLOW_SKIP=1)", (self.path / "progress.md").read_text())
+
+    def test_a_skip_never_hides_a_failure_even_when_allowed(self):
+        self.env["HAF_ALLOW_SKIP"] = "1"
+        result = self.run_shell(self.helpers()+'''
+run_bg skipper bash -c 'echo "SKIP — nothing to compare"; exit 3'
+run_bg broken bash -c 'echo broken-output; exit 7'
+run_bg_wait
+verdict; exit $?
+''')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("[SKIP] skipper", result.stdout)
+        self.assertIn("[FAIL] broken", result.stdout)
+        self.assertIn("CHECK: FAIL", result.stdout)
+        self.assertIn("fix the [FAIL] step(s)", result.stdout)
+        self.assertNotIn("SKIPPED", result.stdout)                 # the failure verdict, not the skip verdict
+
+    def test_a_skip_with_missing_completion_metadata_fails_closed(self):
+        self.env["HAF_ALLOW_SKIP"] = "1"
+        result = self.run_shell(self.helpers()+'''
+run_bg skipper bash -c 'echo "SKIP — nothing to compare"; exit 3'
+wait "${BG_PID[0]}"
+rm "$BG_LOGS/0.end"
+run_bg_wait
+verdict; exit $?
+''')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("[FAIL] skipper", result.stdout)
+        self.assertNotIn("[SKIP] skipper", result.stdout)
+
+    def test_a_clean_gate_still_passes_with_the_verdict(self):
+        result = self.run_shell(self.helpers()+'''
+run_bg good bash -c 'echo good-output'
+run_bg_wait
+run also-good bash -c 'true'
+verdict; exit $?
+''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("CHECK: PASS", result.stdout)
+        self.assertIn("safe to push.", result.stdout)
+        self.assertNotIn("SKIP", result.stdout)
+        self.assertIn("DONE PASS", (self.path / "progress.md").read_text())
 
     def test_tamper_arguments_preserve_spaces_and_apostrophes_and_select_each_jobs_file(self):
         directory = self.path / "tamper inputs O'Brien"

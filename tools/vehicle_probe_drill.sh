@@ -124,7 +124,7 @@ if [ -z "$BLENDER" ]; then
     cand=$(ls -d "$base"/Blender* 2>/dev/null | sort -V | tail -1); [ -n "$cand" ] && [ -x "$cand/blender.exe" ] && { BLENDER="$cand/blender.exe"; break; }
   done
 fi
-if [ -z "$BLENDER" ]; then echo "PASS — vehicle probe drill: $n_ok files probed in C#; Blender not found, so NO parity comparison (BLENDER=<exe> to force)"; exit 0; fi
+if [ -z "$BLENDER" ]; then echo "SKIP — vehicle probe drill: $n_ok files probed in C#; Blender not found, so NO parity comparison (BLENDER=<exe> to force)"; exit 3; fi
 if [ "${FULL:-0}" = "1" ]; then SAMPLE=("${FILES[@]}"); cp "$WTMP/jobs.json" "$WTMP/jobs_sample.json"
 else
   python - "$WTMP/jobs.json" "$WTMP/jobs_sample.json" <<'PY'
@@ -161,4 +161,6 @@ n_arb=0; n_left=0
 for d in "${DIFFERING[@]}"; do [ -z "$d" ] && continue; if printf '%s\n' "${SAMPLE[@]}" | grep -qixF -- "$d"; then n_arb=$((n_arb + 1)); else n_left=$((n_left + 1)); echo "NOTE — a differing recipe's source was not put to Blender in this run (over 100 MB; FULL=1): $d"; fi; done
 [ "${#DIFFERING[@]}" -eq 0 ] || echo "recipes that differ: $n_arb are STALE (Blender's probe of the source today gives the C# rows, not the recipe's), $n_left left for FULL=1"
 NATIVE_NOTE=""; [ "$N_NATIVE" -eq 0 ] || NATIVE_NOTE=" ($N_NATIVE probed on the 64-bit .NET runtime: too large for Unity's 32-bit standalone Mono)"
-echo "PASS — vehicle probe drill: $n_ok probes in C# (${#FILES[@]} files, ${#JOBS[@]} jobs with a second model, placements or an orientation)$NATIVE_NOTE; on ${#SAMPLE[@]} files and $N_JOBS_SAMPLE jobs the rows equal Blender's own probe (names, order, vertices, visibility, inside-out, boxes, bones, rig bones, matrices and vertex positions bit for bit; Blender took $((t1 - t0)) s for those)${RECIPE_LINE:+; $RECIPE_LINE}"
+RESULT="PASS — vehicle probe drill: $n_ok probes in C# (${#FILES[@]} files, ${#JOBS[@]} jobs with a second model, placements or an orientation)$NATIVE_NOTE; on ${#SAMPLE[@]} files and $N_JOBS_SAMPLE jobs the rows equal Blender's own probe (names, order, vertices, visibility, inside-out, boxes, bones, rig bones, matrices and vertex positions bit for bit; Blender took $((t1 - t0)) s for those)${RECIPE_LINE:+; $RECIPE_LINE}"
+[ -n "$PACK" ] || { echo "SKIP — ${RESULT#PASS — } | the registry population was NOT drilled: no modding project at $PROJECT (set HAF_UNITY_PROJECT)"; exit 3; }
+echo "$RESULT"

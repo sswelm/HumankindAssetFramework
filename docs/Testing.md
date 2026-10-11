@@ -34,6 +34,18 @@ in **GitHub Actions**. Both lanes matter, and for different reasons:
   contributor may never have set, and `git push --no-verify` — or a GitHub web edit, which runs no hook whatsoever —
   walks straight past it. CI is the lane that survives all three.
 
+**A step has three verdicts, and SKIP is not PASS (2026-10-11).** A step exits 0 when its claim held, **3** when a
+prerequisite was absent and its claim was therefore *not tested* (its own `SKIP —` line says what did run: the C# side
+of a parity drill, the fixtures without the registry population), anything else when it failed. The gate prints a
+skipped step as `[SKIP]`, records `SKIP` in `PROGRESS.md`, lists every skipped step under the summary, and **fails the
+push**: on this machine every prerequisite exists, so a SKIP means Blender or the modding project went missing, and a
+port change pushed on that gate would have lost its oracle silently. `HAF_ALLOW_SKIP=1 git push` accepts a partial gate
+on purpose and says so in the summary (`CHECK: PASS WITH n SKIP`); a `[FAIL]` beside a skip still fails. Until 2026-10-11
+eight of the 26 steps printed `PASS … Blender not found, so NO parity comparison` and exited 0 — the general review's
+verification pass counted them — so the gate reported 26/26 while eight claims were untested. `Tests/test_parallel_gate.py`
+drives the real gate functions through a skipped worker, a skipped serial step, a skip beside a failure, a skip with lost
+completion metadata (still a FAIL) and `HAF_ALLOW_SKIP`.
+
 | Surface | `tools/check.sh` (pre-push hook) | also in CI | ~time |
 |---|---|---|---|
 | **Runtime + shared contract** | `dotnet build` · `dotnet test` · docs guard · binding-catalog surface · hot path · parse shape · member shape · schema parity | all source-only checks | seconds |

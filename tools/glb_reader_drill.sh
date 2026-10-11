@@ -93,7 +93,7 @@ if [ -z "$BLENDER" ]; then
     cand=$(ls -d "$base"/Blender* 2>/dev/null | sort -V | tail -1); [ -n "$cand" ] && [ -x "$cand/blender.exe" ] && { BLENDER="$cand/blender.exe"; break; }
   done
 fi
-if [ -z "$BLENDER" ]; then echo "PASS — GLB reader drill: $n_ok files read ($REGISTRY_NOTE, ${#FIXTURES[@]} fixtures, $SAMPLES_NOTE); Blender not found, so no parity comparison (BLENDER=<exe> to force)"; exit 0; fi
+if [ -z "$BLENDER" ]; then echo "SKIP — GLB reader drill: $n_ok files read ($REGISTRY_NOTE, ${#FIXTURES[@]} fixtures, $SAMPLES_NOTE); Blender not found, so no parity comparison (BLENDER=<exe> to force)"; exit 3; fi
 if [ "${FULL:-0}" = "1" ]; then SAMPLE=("${FILES[@]}")
 else
   # every fixture and every Khronos sample (small, and the diversity is the point), the registry's largest and smallest two, four animated ones
@@ -107,4 +107,6 @@ printf '%s
 ' "$BOUT" > "$TMPD/blender.txt"
 python "$ROOT/tools/glb-reader-drill/compare.py" "$TMPD/csharp.txt" "$TMPD/blender.txt"; crc=$?
 if [ "$crc" -ne 0 ]; then echo "FAIL — GLB reader drill: a sampled file disagrees with Blender (or none compared)"; exit 1; fi
-echo "PASS — GLB reader drill: $n_ok files read and checked ($REGISTRY_NOTE, ${#FIXTURES[@]} fixtures, $SAMPLES_NOTE); ${#SAMPLE[@]} of them agree with Blender on counts, box, area, centroid, winding, bones and durations"
+RESULT="PASS — GLB reader drill: $n_ok files read and checked ($REGISTRY_NOTE, ${#FIXTURES[@]} fixtures, $SAMPLES_NOTE); ${#SAMPLE[@]} of them agree with Blender on counts, box, area, centroid, winding, bones and durations"
+[ -n "$PACK" ] || { echo "SKIP — ${RESULT#PASS — } | the registry population was NOT drilled: no modding project at $PROJECT (set HAF_UNITY_PROJECT)"; exit 3; }
+echo "$RESULT"

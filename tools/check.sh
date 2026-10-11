@@ -4,19 +4,53 @@
 # also runnable by hand any time:  bash tools/check.sh   (lowercase tools/ — this repo, unlike ENCReload's Tools/)
 #
 # Deliberately NOT here (too slow / need Unity or the game): deploy_regression.sh (Blender golden-master), the
-# in-editor Feature Test, and the in-game binding report (haf_bindings_report.txt). This is the sub-minute gate.
+# in-editor Feature Test, and the in-game binding report (haf_bindings_report.txt). The source-only steps take
+# seconds; with the Blender-parity drills (in parallel since 2026-10-11) the whole gate takes about 16 minutes.
+#
+# A step's exit status means: 0 PASS (its claim held), 3 SKIP (a prerequisite was absent, so its claim was NOT
+# tested; the step's own SKIP line says what did run), anything else FAIL. SKIP is not PASS (2026-10-11): until then a
+# drill that printed "PASS … Blender not found, so NO parity comparison" and exited 0 kept its green on a machine
+# without Blender, and the gate reported 26/26 while eight steps had lost their defining claim. A SKIP is printed as
+# [SKIP], recorded in PROGRESS.md, and FAILS the push — unless HAF_ALLOW_SKIP=1 says a partial gate is what was meant.
 set -uo pipefail
 cd "$(dirname "$0")/.." && ROOT="$(pwd)" || exit 2
 fail=0
+skipped=()
 # Progress: every step appends a line to PROGRESS.md (the file beside the worktrees, kept open by the user) when it
 # ends, so a 20-minute gate can be watched without asking. Nothing here fails on its absence.
 PROGRESS="${HAF_PROGRESS:-$ROOT/../PROGRESS.md}"
 note() { [ -f "$PROGRESS" ] && printf '%s  gate  %s\n' "$(date +%H:%M)" "$*" >> "$PROGRESS"; return 0; }
+word() { case "$1" in 0) echo PASS;; 3) echo SKIP;; *) echo FAIL;; esac; }
+record() {  # record <label> <rc> <seconds>: the verdict line, counted (the PROGRESS note is the caller's)
+  local label="$1" rc="$2" s="$3"
+  case "$rc" in
+    0) printf '[PASS] %s (%d s)\n' "$label" "$s" ;;
+    3) printf '[SKIP] %s (%d s) — its claim was NOT tested on this machine; the SKIP line above says what did run\n' "$label" "$s"; skipped+=("$label") ;;
+    *) printf '[FAIL] %s (%d s)\n' "$label" "$s"; fail=1 ;;
+  esac
+}
 run() {  # run <label> <command...>: in sequence, the output as it comes
-  local label="$1"; shift; local t0=$(date +%s) t1
+  local label="$1"; shift; local t0=$(date +%s) rc s
   printf '\n=== %s ===\n' "$label"
-  if "$@"; then t1=$(date +%s); printf '[PASS] %s (%d s)\n' "$label" "$((t1 - t0))"; note "PASS $label ($((t1 - t0)) s)"
-  else t1=$(date +%s); printf '[FAIL] %s (%d s)\n' "$label" "$((t1 - t0))"; note "FAIL $label ($((t1 - t0)) s)"; fail=1; fi
+  "$@"; rc=$?; s=$(( $(date +%s) - t0 ))
+  record "$label" "$rc" "$s"; note "$(word "$rc") $label ($s s)"
+}
+verdict() {  # the one summary line, and the status the hook returns
+  local n=${#skipped[@]} list=""
+  [ "$n" -eq 0 ] || list=$(printf '\n  [SKIP] %s' "${skipped[@]}")
+  printf '\n========================================\n'
+  if [ "$fail" -ne 0 ]; then
+    printf 'CHECK: FAIL — fix the [FAIL] step(s) above before pushing (or, only in a real emergency, git push --no-verify).%s\n' "$list"
+    note "DONE FAIL"; return 1
+  fi
+  if [ "$n" -eq 0 ]; then printf 'CHECK: PASS — safe to push.\n'; note "DONE PASS"; return 0; fi
+  if [ "${HAF_ALLOW_SKIP:-0}" = "1" ]; then
+    printf 'CHECK: PASS WITH %d SKIP — accepted by HAF_ALLOW_SKIP=1; these claims were NOT tested on this machine:%s\n' "$n" "$list"
+    note "DONE PASS ($n skipped, allowed by HAF_ALLOW_SKIP=1)"; return 0
+  fi
+  printf 'CHECK: FAIL — %d step(s) SKIPPED: their claim was NOT tested on this machine, and a gate that cannot see is not green:%s\n' "$n" "$list"
+  printf 'Install the missing prerequisite (Blender under Program Files; the modding project, HAF_UNITY_PROJECT), or, meaning it: HAF_ALLOW_SKIP=1 git push\n'
+  note "DONE FAIL ($n skipped)"; return 1
 }
 # The drills are independent of one another (each works in its own mktemp directory and builds its own exe), and the
 # Blender-backed ones took the gate from a minute to 25 in sequence: they run AT ONCE, each into its own log, and the
@@ -28,14 +62,13 @@ run_bg() {  # run_bg <label> <command...>: started now, judged by run_bg_wait
   local t0="${BG_T0[$bg_n]}"
   ( "$@" > "$log.out" 2>&1; rc=$?; t1=$(date +%s)
     echo "$t1" > "$log.end"
-    if [ "$rc" = "0" ]; then note "PASS $label ($((t1 - t0)) s)"
-    else note "FAIL $label ($((t1 - t0)) s)"; fi
+    note "$(word "$rc") $label ($((t1 - t0)) s)"
     echo "$rc" > "$log.rc"
   ) &
   BG_PID[$bg_n]=$!; bg_n=$((bg_n + 1))
 }
 run_bg_wait() {
-  local i t1 completed
+  local i t1 completed rc
   for ((i = 0; i < bg_n; i++)); do
     wait "${BG_PID[$i]}"
     t1=$(cat "$BG_LOGS/$i.end" 2>/dev/null)
@@ -43,8 +76,9 @@ run_bg_wait() {
     completed=1
     if ! [[ "$t1" =~ ^[0-9]+$ ]]; then t1="${BG_T0[$i]}"; completed=0; fi
     printf '\n=== %s ===\n' "${BG_LABEL[$i]}"; cat "$BG_LOGS/$i.out"
-    if [ "$(cat "$BG_LOGS/$i.rc" 2>/dev/null)" = "0" ] && [ "$completed" = "1" ]; then printf '[PASS] %s (%d s)\n' "${BG_LABEL[$i]}" "$((t1 - BG_T0[$i]))"
-    else printf '[FAIL] %s (%d s)\n' "${BG_LABEL[$i]}" "$((t1 - BG_T0[$i]))"; fail=1; fi
+    rc=$(cat "$BG_LOGS/$i.rc" 2>/dev/null)
+    if [ "$completed" = "1" ] && [[ "$rc" =~ ^[0-9]+$ ]]; then record "${BG_LABEL[$i]}" "$rc" "$((t1 - BG_T0[$i]))"
+    else printf '[FAIL] %s (%d s) — no completion status\n' "${BG_LABEL[$i]}" "$((t1 - BG_T0[$i]))"; fail=1; fi
   done
   rm -rf "$BG_LOGS"; bg_n=0
 }
@@ -123,6 +157,4 @@ run "hand-list gate (ownership rebases)" bash "$ROOT/tools/check_handlists.sh"
 run "package meta (every editor/ path has one)" bash "$ROOT/tools/check-package-meta.sh"
 run "exit status (no gate script reads a status from the end of a pipeline)" bash "$ROOT/tools/check-exit-status.sh"
 
-printf '\n========================================\n'
-if [ "$fail" -eq 0 ]; then printf 'CHECK: PASS — safe to push.\n'; note "DONE PASS"; else printf 'CHECK: FAIL — fix the [FAIL] step(s) above before pushing (or, only in a real emergency, git push --no-verify).\n'; note "DONE FAIL"; fi
-exit "$fail"
+verdict; exit $?

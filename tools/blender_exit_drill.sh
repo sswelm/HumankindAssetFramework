@@ -19,7 +19,7 @@ if [ -z "$BLENDER" ]; then
     [ -n "$cand" ] && [ -x "$cand/blender.exe" ] && { BLENDER="$cand/blender.exe"; break; }
   done
 fi
-if [ -z "$BLENDER" ] || [ ! -x "$BLENDER" ]; then echo "SKIP — Blender not found (BakerRules.BlenderScript NOT drilled against a real Blender)"; exit 0; fi
+if [ -z "$BLENDER" ] || [ ! -x "$BLENDER" ]; then echo "SKIP — Blender not found (BakerRules.BlenderScript NOT drilled against a real Blender)"; exit 3; fi
 
 # the head the editor builds, taken from the rule itself: the drill must run what the editor runs
 HEAD=$(grep -o 'return \$"--background --python-exit-code 1 --python' "$ROOT/editor/EditorRules.cs" | head -1)
