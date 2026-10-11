@@ -243,6 +243,7 @@ namespace HumankindAssetFramework
         internal static Type FxEvolverDescriptorLevelBuildElement => Cached("Amplitude.Mercury.Terrain.Fx.FxEvolverDescriptorLevelBuildElement", "FxEvolverDescriptorLevelBuildElement");
         internal static Type FxAtlas                => CachedDerived("FxAtlas",                () => ElementType(FieldOrPropType(FxOutputLayer, "atlases")));   // the B&W footprint's private mask atlas
         internal static Type FxAtlasOutputEntry     => CachedDerived("FxAtlasOutputEntry",     () => ElementType(FieldOrPropType(FxAtlas, "outputEntries")));
+        internal static Type FxRenderOutput         => CachedDerived("FxRenderOutput",         () => ElementType(FieldOrPropType(FxOutputLayer, "RenderOutputs")));   // one render pass of an output layer: the material slots the retexture recovery, the district albedo bind and the private-leaf clone read by name (2026-10-11: read through name TABLES, which the catalog gate could not see until its pass 3)
         internal static Type AssetReferenceRepository => Cached("Amplitude.Mercury.Data.Presentation.AssetReferenceRepository");   // the */District/Main + wonder cell registration
 
         // ---- A7 (2026-08-21): the types behind the ~80 by-name literals the A6 sweep MISSED. A review measured the
@@ -457,8 +458,8 @@ namespace HumankindAssetFramework
             new Dep(AudioEntityGuid, nameof(AudioEntityGuid), "guid", "IsValid"),
             new Dep(AudioEventHandleRef, nameof(AudioEventHandleRef), "Value"),
             new Dep(AtlasEntry, nameof(AtlasEntry), "FullPath", "ShortPath", "Index"),
-            new Dep(DatabaseMatrix1D, nameof(DatabaseMatrix1D), "CriteriaNames", "cells"),
-            new Dep(DatabaseMatrix2D, nameof(DatabaseMatrix2D), "FirstCriteriaNames", "SecondCriteriaNames"),
+            new Dep(DatabaseMatrix1D, nameof(DatabaseMatrix1D), "CriteriaNames", "cells", "Criteria"),                              // Criteria: DumpMatrices' axis read (name loop)
+            new Dep(DatabaseMatrix2D, nameof(DatabaseMatrix2D), "FirstCriteriaNames", "SecondCriteriaNames", "FirstCriteria", "SecondCriteria"),
             // A7 continued — members on types whose Dep entry above spans several lines (kept as their own rows for clarity)
             new Dep(PresentationDistrict, nameof(PresentationDistrict), "ApplyHexagonSculptingDefinition", "RenderMode", "constructibleDefinitionName"),
             new Dep(ContentLayer, nameof(ContentLayer), "currentIndexIndex", "currentMeshAddedCount", "currentVertexIndex"),
@@ -531,6 +532,10 @@ namespace HumankindAssetFramework
             new Dep(RenderFeatureSelector, nameof(RenderFeatureSelector), "SelectionFlags0", "FadingOptions"),
             new Dep(RenderFeatureProvider, nameof(RenderFeatureProvider), "ComputeRenderState"),
             new Dep(FxOutputLayer, nameof(FxOutputLayer), "primitivePerParticleCount", "PrimitivePerParticleCount", "RenderOutputs", "renderOutputs", "atlases", "Atlas", "atlas", "LayerIndex"),
+            // the per-pass material slots: TickOne / PaintLayer / BuildAdjustedAtlas / DumpOutputLayerAtlases (RenderMatFields),
+            // BindScopedSheet / BindAlbedo (all three), and the private-leaf clone's guid reset (mid/highResMaterialGuid).
+            // Read through `foreach (var fld in …)` tables — invisible to the gate's literal passes until 2026-10-11.
+            new Dep(FxRenderOutput, nameof(FxRenderOutput), "currentRenderMaterial", "runTimeRenderMaterial", "highResRunTimeRenderMaterial", "midResMaterialGuid", "highResMaterialGuid"),
             // terrain — the tile-ceiling headroom (Hk_TerrainHexagonHeadroom): buffer sizes live as plain ints on
             // the loaded technical-settings asset, read by the renderer's CreateOrResize* methods.
             new Dep(ProceduralTerrainRenderer, nameof(ProceduralTerrainRenderer),
@@ -540,8 +545,8 @@ namespace HumankindAssetFramework
             new Dep(TerrainRendererTechnicalSettings, nameof(TerrainRendererTechnicalSettings),
                 "VisibleHexagonsBufferSize", "DrawCommandBufferSize"),
             // formation (EntityFactoryControllerSettings / GameObjectPoolController resolve by SIMPLE name — see ResolveType)
-            // ColumnsCountPerRow0/5 are the ENDPOINTS of the six per-row grids the builder writes (like Pose0/Pose8).
-            new Dep(PresentationFormationDefinition, nameof(PresentationFormationDefinition), "Dummies", "ColumnsCountPerRow0", "ColumnsCountPerRow5", "Initialize", "LowSpecFormationDefinition"),
+            // The builder writes all six per-row grids through a bounded computed-name loop.
+            new Dep(PresentationFormationDefinition, nameof(PresentationFormationDefinition), "Dummies", "ColumnsCountPerRow0", "ColumnsCountPerRow1", "ColumnsCountPerRow2", "ColumnsCountPerRow3", "ColumnsCountPerRow4", "ColumnsCountPerRow5", "Initialize", "LowSpecFormationDefinition"),
             new Dep(FormationHelper, nameof(FormationHelper), "InitializeFormation3DForDefinition"),
             new Dep(EntityFactoryControllerSettings, nameof(EntityFactoryControllerSettings), "Instance", "Formation3DPrefab"),
             new Dep(GameObjectPoolController, nameof(GameObjectPoolController), "DoStart"),
@@ -555,8 +560,10 @@ namespace HumankindAssetFramework
             // pose seam writes every frame, the skeleton/bone structs the preflight + injection read, and the
             // army/battle walk the state sampler enumerates. A [MISSING TYPE] on a derived entry means its ANCHOR
             // member was renamed (the derivation chain broke); a [MISSING MEMBER] means the struct itself changed.
-            // Pose0/Pose8 + BoneRotation0/BoneRotation3 are the ENDPOINTS of the slot ranges the code indexes.
-            new Dep(PawnEntry, nameof(PawnEntry), "ObjectSpace", "HideFactor", "SkeletonId", "PawnDescriptorId", "Pose0", "Pose8", "BoneRotation0", "BoneRotation3"),
+            // Every pose and bone-rotation slot: the PoseNames / BoneRotationNames tables (UniversalInject.Pose.cs) index all of
+            // them by name, and since 2026-10-11 the catalog gate reads those tables (pass 3), so the endpoints alone no longer cover.
+            new Dep(PawnEntry, nameof(PawnEntry), "ObjectSpace", "HideFactor", "SkeletonId", "PawnDescriptorId",
+                "Pose0", "Pose1", "Pose2", "Pose3", "Pose4", "Pose5", "Pose6", "Pose7", "Pose8", "BoneRotation0", "BoneRotation1", "BoneRotation2", "BoneRotation3"),
             new Dep(PawnObjectSpace, nameof(PawnObjectSpace), "Translation", "Rotation", "Scale"),
             new Dep(PawnEntryPose, nameof(PawnEntryPose), "AnimationId", "Time", "Weight"),
             new Dep(PawnBoneRotation, nameof(PawnBoneRotation), "Angle", "SkeletonBoneIndex", "AxisIndex"),
@@ -599,7 +606,7 @@ namespace HumankindAssetFramework
             new Dep(PresentationAirPatrolController, nameof(PresentationAirPatrolController), "presentationAirFormations"),
             new Dep(PresentationAirFormation, nameof(PresentationAirFormation), "airFormationUnits"),
             new Dep(PresentationAirUnit, nameof(PresentationAirUnit), "PresentationUnit", "MainPawn"),
-            new Dep(MajorEmpire, nameof(MajorEmpire), "DepartmentOfScience"),
+            new Dep(MajorEmpire, nameof(MajorEmpire), "DepartmentOfScience", "Armies", "Squadrons"),   // Armies/Squadrons: CurrentEra's built-unit walk (ScaleEra.cs), read through a name loop
             new Dep(DepartmentOfScience, nameof(DepartmentOfScience), "GetTechnologicalEra", "CurrentTechnologicalEraIndex"),
             new Dep(Timeline, nameof(Timeline), "GetGlobalEraIndex"),
             new Dep(PresentationLevelBuildComponent, nameof(PresentationLevelBuildComponent), "channels", "RefreshChannel"),

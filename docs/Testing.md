@@ -1601,7 +1601,7 @@ on the rest. Pure source analysis, so it runs in the fast gate. Fault-injected o
 
 Together the two are the whole claim: **covers the code** (this) **and resolves against the game** (bindcheck).
 
-**Its blind spots are its real failure mode, and it has had three (2026-08-22, 08-23, 08-23).** This guard is a set of
+**Its blind spots are its real failure mode, and it has had four (2026-08-22, 08-23, 08-23, 10-11).** This guard is a set of
 regexes over source, so a call shape it does not match is not reported as unchecked — it is silently *not counted*, and
 the pass line still says "all N catalogued" with a smaller N. Each time, the gate went green while the thing it exists
 to catch sat in plain sight:
@@ -1611,12 +1611,20 @@ to catch sat in plain sight:
 | 08-22 | `GetMember(GetMember(x, "Inner"), "Outer")` — pass 1 stopped at the first `)` | `TagAsAbilities`, read that way and only that way |
 | 08-23 | the `CachedField` / `GFA` accessor family, newly added | 16 sites |
 | 08-23 | `AccessTools.Field(x.GetType(), "name")` — pass 1's accessor list stopped at HAF's own helpers, and pass 2 gives up at the first `)` | **146 sites, 70 names** |
+| 10-11 | a name that is not a literal at the call: `foreach (var fld in RenderMatFields) GetMember(ro, fld)` over a `static readonly string[]`, a `new[] { … }` loop, a local function forwarding its parameter — both literal passes see nothing and the count simply shrinks | 212 reads through 20 tables; `currentRenderMaterial` / `runTimeRenderMaterial` / `highResRunTimeRenderMaterial` / `mid`/`highResMaterialGuid` (the retexture recovery, the district albedo bind, the private-leaf clone), `Armies` / `Squadrons` (the era walk) and the middle pose slots held no catalog row |
 
 The third was not found by the gate, by `bindcheck`, or by review. It was found by a **log line**: `allMeshNames` missed
 36 times in one session, and `typeprobe --exact` then said no assembly in the game declares that field at all — a dead
 probe whose fallback branch rebuilt an array by reflection and discarded it. The gate had been reporting "all 331
 catalogued" while never looking at the site. Drilled by putting a bogus member name in that shape: the shipped gate said
 `OK — all 331`, the widened one failed.
+
+The fourth (2026-10-11, found by the general review's verification pass, not by the gate) was closed with a third
+extraction pass, `tools/find-name-sites.pl`: every reader call whose name argument is an identifier is traced — a loop
+variable to its `new[] { … }` or table, a table to its literals, a parameter to the function's callers — and a name the
+pass cannot trace **fails the gate** by the function's name instead of going uncounted (`NAME_ARG_ALLOW` holds the two
+genuinely computed ones, with reasons). `tools/drill-reader-gates.sh` plants all three table shapes plus one untraceable
+parameter and requires each to be named.
 
 The lesson generalises past this script: **a guard that filters before it counts cannot report its own blindness.** When
 adding an accessor helper or a new call shape, add it to `extract()` in the same commit — and prefer a drill that injects
