@@ -45,7 +45,7 @@ cd "$(dirname "$0")/.." || exit 2
 
 # Object-returning member readers: the wrappers a Convert.To*() can sit on. Word-anchored, and followed by `(`, so
 # the typed MemberBool/MemberInt/… (which RETURN the fallback and are the fix) do not match.
-READERS="GetMember GetMemberOrNull Mem Member ReflectMember"   # ReflectMember: the editor's (ModelFactoryWindow) field-then-property probe
+READERS="GetMember GetMemberOrNull Mem Member ReflectMember Call"   # ReflectMember: the editor's (ModelFactoryWindow) field-then-property probe; Call: SDK method invocation in BlenderFreeClipSlice
 READER_RE="(?:\\w+\\.)?(?:$(echo $READERS | tr ' ' '|'))\\b\\s*\\("
 
 # Production C# only. Tests are excluded ON PURPOSE: MemberReadTests must be free to construct the bad shape in a
