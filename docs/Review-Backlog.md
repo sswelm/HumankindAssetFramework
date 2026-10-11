@@ -214,6 +214,35 @@ translation `[-0.739, -0.0, 0.0]` holds `+0, +0` straight after the import, wher
 `-0, -0` - both to be measured together; (4) `rig_anim` (3–4 weeks); (5)
 `vehicle_rig` (4–8 weeks; the Lab already computes much of the geometry in C#).
 
+**(4) `rig_anim` - the plan, decided 2026-10-11 (the FBX-free route, the user's choice).** Measured first: 24 of the
+registry's 38 entries are animated; of those 22 take the conversion path (`convertRig`), 20 are state-driven (roles),
+19 keep translations, 15 carry a rotation, 12 a reduce target, one donor sockets (the armoured car), none `localNodeAnim`
+or `staticParts`. The script (1,243 lines) imports the source, drops material-less meshes, reads the contract marker
+(`DeployArmV2`: clean units), holds the rest pose (localNodeAnim), clears object-level animation (convertRig), converts
+bone-parenting into full-weight skinning, flattens wrapper empties, transplants node animation into flat bones
+(localNodeAnim, through an FBX export-and-reimport round trip INSIDE the script), caps the bones at 256, resolves and
+slices the clips into role actions (frame ranges, the translation amplify or the clean units), clamps the frame range,
+writes the albedo, joins to one mesh (or keeps the material slots), decimates, places (the rotation folded in), and
+exports one FBX per role through Blender's FBX exporter (`bake_anim`, `global_scale` 0.01 on clean units). Its only
+reader is Unity's ModelImporter (Generic rig, MikkT tangents), then the SDK's ClipCollection from a folder of one FBX.
+THE ROUTE: the processing stages are ported under the gate as `deploy_convert` was - Blender runs the script cut
+before the export and dumps the scene at each stage (the RIGANIM log lines to the letter; objects, vertex groups and
+weights after the skin conversion; transforms after the flatten; the role actions' keys; the joined mesh; the
+decimated mesh through `BlenderDecimate`, already exact) -, the FBX export is NOT ported (5,800 lines whose bytes only
+Unity reads): the port writes a GLB with part 8c's writer and the Factory builds the Unity rig from it with
+`HafModelRig` (the clip picker's; PR #151's slice proved the SDK bakes a Skeleton and ClipCollection from such a rig).
+What the gate cannot hold is the Unity side: that the C#-built rig bakes the same Skeleton and pose stream as the FBX
+route - a Bake Tests row the user runs; known differences to expect there: the FBX exporter SIMPLIFIES its baked curves
+(`bake_anim_simplify_factor` 1.0) where the GLB carries every frame, the FBX's centimetre units and Unity's import
+scale against the GLB's metres (the slice saw pose streams of 1,296 against 576 bytes for one clip and named sizing
+as open). Order of work: (a) the stage dump and drill on the 24 entries' recipes (`rig_anim`'s argv from the registry,
+as `deploy_fixtures.py` does for the deploy), (b) stage 1 the import, the junk drop, the contract, the object-animation
+clear, (c) stage 2 the skin conversion and the flatten, (d) stage 3 the bone cap and the role clips, (e) stage 4 the
+join, the albedo (pixel parity, Blender's own save), the decimate, the placement, (f) the GLB writer's output for the
+rig, (g) the Factory's animated path built from the GLB with Blender as the fallback, (h) the Bake Tests row. The
+localNodeAnim transplant (no registry entry) is LEFT by name until last: its FBX round trip is Blender's composition
+of a pathological hierarchy, not a rule to read. Estimate unchanged: 3 to 4 weeks.
+
 - **Blender-exact vertex positions for skinned parts** — OPEN (2026-10-02, found by 3c). Blender's importer skins a
   rigged mesh into its bind pose in numpy float32: per joint, (bind matrix) @ (inverse bind matrix), where the bind
   matrix is GUESSED from the inverse bind matrices (`guess_original_bind_pose`, on by default: Eigen's 4×4 inverse, a
