@@ -236,14 +236,21 @@ route - a Bake Tests row the user runs; known differences to expect there: the F
 (`bake_anim_simplify_factor` 1.0) where the GLB carries every frame, the FBX's centimetre units and Unity's import
 scale against the GLB's metres (the slice saw pose streams of 1,296 against 576 bytes for one clip and named sizing
 as open). Order of work: (a) the stage dump and drill on the 24 entries' recipes (`rig_anim`'s argv from the registry,
-as `deploy_fixtures.py` does for the deploy), (b) stage 1 the import, the junk drop, the contract, the object-animation
+as `deploy_fixtures.py` does for the deploy) - 23 of them .glb sources; the light assault mech's source is an .fbx,
+which the C# does not read until the native FBX reader (the plan's later item): that entry is Blender's by name, the
+drill names it so and reports its coverage as 23 of 24, never as the whole corpus (the review of PR #157), (b) stage 1 the import, the junk drop, the contract, the object-animation
 clear, (c) stage 2 the skin conversion and the flatten, (d) stage 3 the bone cap and the role clips, (e) stage 4 the
 join, the albedo (pixel parity, Blender's own save), the decimate, the placement, (f) the GLB writer's output for the
 rig, (g) the Factory's animated path built from the GLB, BOTH routes kept and configurable (the user's call, 2026-10-11): a
 per-recipe setting with a global default - the in-process GLB rig by default, the shipped Blender FBX route on request -
 so a model whose Unity side differs can be pinned to the proven route while the difference is measured; what the
-port names by name goes to the Blender route whatever the setting, and the slim-step cache key carries the route
-(switching re-bakes, nothing stale is reused), (h) the Bake Tests row. The
+port names by name goes to the Blender route whatever the setting, and the slim-step cache key carries the route AND
+a C# pipeline revision, as the prep's and the deploy's keys do (a switch re-bakes, and so does a changed C# rig or
+writer: nothing stale is reused). THE DEFAULT FLIPS LAST: the shipped Blender route stays the global default, the GLB
+rig opt-in per recipe, until the acceptance gate passes - the Bake Tests row in Unity holding, for every animated
+entry baked both ways, the mesh, the skeleton, the clips, the placement, and an in-game check of a pawn playing its
+roles (PR #151's slice reports different pose bytes and unverified playback: that is the bar, not a hope); only then
+the GLB rig becomes the default (the review of PR #157), (h) the Bake Tests row - the gate above. The
 localNodeAnim transplant (no registry entry) is LEFT by name until last: its FBX round trip is Blender's composition
 of a pathological hierarchy, not a rule to read. Estimate unchanged: 3 to 4 weeks.
 
