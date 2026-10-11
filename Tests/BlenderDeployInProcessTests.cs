@@ -78,6 +78,27 @@ public class BlenderDeployInProcessTests : IDisposable
     }
 
     [Fact]
+    public void A_long_animation_and_a_deadline_are_Blenders_and_a_replace_keeps_the_old_file_until_the_new_one_is_there()
+    {
+        string src = Path.Combine(dir, "tank.glb"), dst = Path.Combine(dir, "deploy_converted.glb");
+        var m = Tank(); m.Animations[0].Samplers[0].Times = new[] { 0f, 1000f };   // 24,000 frames at 24 fps
+        GlbWriter.Write(m, src);
+        var argv = BlenderDeployInProcess.Argv("0", "24000", "", "", "", "", "", "", "", "", "", "4", "", "", "", "", "", "", "");
+        var longOne = BlenderDeployInProcess.Run(src, dst, argv);
+        Assert.False(longOne.Written); Assert.Contains("24001 frames", longOne.UseBlender);
+        GlbWriter.Write(Tank(), src);
+        argv = BlenderDeployInProcess.Argv("0", "24", "", "", "", "", "", "", "", "", "", "4", "", "", "", "", "", "", "");
+        var timedOut = BlenderDeployInProcess.Run(src, dst, argv, () => throw new TimeoutException("the deadline"));
+        Assert.False(timedOut.Written); Assert.Contains("the deadline", timedOut.UseBlender);
+        Assert.Throws<OperationCanceledException>(() => BlenderDeployInProcess.Run(src, dst, argv, () => throw new OperationCanceledException()));
+        Assert.False(File.Exists(dst));
+        // a cached file is replaced in place: the old bytes until the new ones are there
+        File.WriteAllBytes(dst, new byte[] { 9, 9, 9 });
+        var ok = BlenderDeployInProcess.Run(src, dst, argv);
+        Assert.True(ok.Written); Assert.True(File.ReadAllBytes(dst).Length > 3); Assert.False(File.Exists(dst + ".tmp"));
+    }
+
+    [Fact]
     public void The_scripts_own_exit_is_reported_as_such_with_its_log_and_no_file()
     {
         // a model without an animated part: the script's no-parts guard exits (SystemExit), nothing is written

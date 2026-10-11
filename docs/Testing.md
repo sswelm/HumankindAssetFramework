@@ -1271,7 +1271,11 @@ this process - the reader, the decisions and the bake (`BlenderDeploy.Decide`), 
 `UniversalBaker.EnsureDeployConverted` runs it first and runs Blender only for what it names (a Fallback at any step:
 the reader's refusal, a shape a part leaves by name, a failure here), exactly as the prep does since part 5. The
 script's own exits (no animated part, no tube for the recoil) stop the bake as the script would, with the DEPLOY log;
-nothing is a half-written file (a temporary file, then a replace). The script's argv[2:] is one list for both paths
+nothing is a half-written file (a temporary file, then an atomic replace: the old file stays until the new one is
+there). The work is bounded as the prep's is: the port refuses an animation past 5,000 frames (every step walks every
+frame for every bone on the editor thread; Blender runs it under the Factory's five-minute timeout), a bake-test cancel
+passes through the checkpoint between the steps and the same five minutes leave the model to Blender - the review of
+PR #153 asked for both. The script's argv[2:] is one list for both paths
 (`Argv`) and the cache key carries `CacheRevision`, so a changed port converts again where the script's mtime cannot
 tell. `BlenderDeployInProcessTests` hold the argv positions the port reads (13 the return, 15 the settle, 16 the extra
 strip, 17..20 the wheels), a small rig converted end to end (its roles read back), the refusals that are Blender's,

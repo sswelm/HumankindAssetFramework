@@ -15,6 +15,11 @@ public static class BlenderDeployInProcess
     /// cached deploy_converted.glb made by an older port is converted again.</summary>
     public const string CacheRevision = "2026-10-11.1";
 
+    /// <summary>The longest animation converted here (frames from the bake's first to its last): the bake, the fire
+    /// window, the role clips and the export each walk every frame for every bone on the editor thread, where only the
+    /// checkpoint between the steps can stop them. The registry's deploys are 25 to 600 frames long.</summary>
+    public const int MaxFramesInProcess = 5000;
+
     public sealed class Outcome
     {
         public bool Written;                 // the file is there, as the script would have written it
@@ -36,7 +41,8 @@ public static class BlenderDeployInProcess
     }
 
     /// <summary>The conversion of `src` into `outGlb` with the script's arguments (argv[2:]). `checkpoint`, when given,
-    /// runs between the steps (a cancel or a deadline throws through).</summary>
+    /// runs between the steps: a cancel (OperationCanceledException) passes through, a deadline (any other exception)
+    /// leaves the model to Blender.</summary>
     public static Outcome Run(string src, string outGlb, string[] argv, Action checkpoint = null)
     {
         var o = new Outcome();
@@ -55,6 +61,10 @@ public static class BlenderDeployInProcess
             var r = BlenderDeploy.Decide(m, argv, names);
             if (r.Fallback != null) { o.UseBlender = r.Fallback; return o; }
             if (r.Exit) { o.ScriptExit = true; o.Log.AddRange(r.Log.Where(l => l.StartsWith("DEPLOY", StringComparison.Ordinal))); return o; }
+            // the work ahead is per bone per frame, on the editor thread, with the checkpoint only between the steps: a
+            // long animation is Blender's, whose process the Factory bounds with a timeout (the reviewer's note on PR #153)
+            long span = (long)r.FrameMax - r.FrameMin + 1;
+            if (span > MaxFramesInProcess) { o.UseBlender = $"an animation of {span} frames (the in-process conversion takes up to {MaxFramesInProcess}; Blender runs under the Factory's timeout)"; return o; }
             Tick();
             var baked = BlenderDeploy.Decide(m, argv, names, true);
             if (baked.Fallback != null) { o.UseBlender = baked.Fallback; return o; }
@@ -74,11 +84,11 @@ public static class BlenderDeployInProcess
             Tick();
             var w = BlenderGlbWriter.Build(x);
             if (w.Fallback != null) { o.UseBlender = "the file: " + w.Fallback; return o; }
-            // a temporary file, then a replace: never half a file where the slim step looks
+            // a temporary file, then an atomic replace: never half a file where the slim step looks, and the old file
+            // stays until the new one is in place (File.Replace; the reviewer's note on PR #153)
             string tmp = outGlb + ".tmp";
             File.WriteAllBytes(tmp, w.Glb);
-            if (File.Exists(outGlb)) File.Delete(outGlb);
-            File.Move(tmp, outGlb);
+            if (File.Exists(outGlb)) File.Replace(tmp, outGlb, null); else File.Move(tmp, outGlb);
             o.Log.Add("DEPLOY wrote: " + outGlb);
             o.Written = true;
             return o;

@@ -349,7 +349,16 @@ public static class UniversalBaker
         try
         {
             EditorUtility.DisplayProgressBar("Model Factory", "Deploy conversion (in process): rigid parts → bone-per-part rig…", 0.3f);
-            var inProc = BlenderDeployInProcess.Run(cfg.modelFile, outFull, argv);
+            // bounded as the in-process prep is: a bake-test cancel passes through, the deadline (the Blender path's five
+            // minutes) leaves the model to Blender; the port itself refuses an animation past its frame cap
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            void Checkpoint()
+            {
+                try { BakeTestRunnerWindow.Progress.Heartbeat(); } catch { }
+                BakeTestRunnerWindow.Progress.ThrowIfCancelled();
+                if (sw.ElapsedMilliseconds >= 300000) throw new TimeoutException("the in-process deploy conversion exceeded 300 seconds");
+            }
+            var inProc = BlenderDeployInProcess.Run(cfg.modelFile, outFull, argv, Checkpoint);
             foreach (var line in inProc.Log) Debug.Log("[Factory] " + line.Trim());
             if (inProc.Written) { File.WriteAllText(sidecar, key); return outFull; }
             if (inProc.ScriptExit) { error = "deploy conversion FAILED (the script stops before writing — see the DEPLOY log in the Console)."; return null; }
