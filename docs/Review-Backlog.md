@@ -239,7 +239,11 @@ as open). Order of work: (a) the stage dump and drill on the 24 entries' recipes
 as `deploy_fixtures.py` does for the deploy), (b) stage 1 the import, the junk drop, the contract, the object-animation
 clear, (c) stage 2 the skin conversion and the flatten, (d) stage 3 the bone cap and the role clips, (e) stage 4 the
 join, the albedo (pixel parity, Blender's own save), the decimate, the placement, (f) the GLB writer's output for the
-rig, (g) the Factory's animated path built from the GLB with Blender as the fallback, (h) the Bake Tests row. The
+rig, (g) the Factory's animated path built from the GLB, BOTH routes kept and configurable (the user's call, 2026-10-11): a
+per-recipe setting with a global default - the in-process GLB rig by default, the shipped Blender FBX route on request -
+so a model whose Unity side differs can be pinned to the proven route while the difference is measured; what the
+port names by name goes to the Blender route whatever the setting, and the slim-step cache key carries the route
+(switching re-bakes, nothing stale is reused), (h) the Bake Tests row. The
 localNodeAnim transplant (no registry entry) is LEFT by name until last: its FBX round trip is Blender's composition
 of a pathological hierarchy, not a rule to read. Estimate unchanged: 3 to 4 weeks.
 
