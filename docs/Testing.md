@@ -1099,6 +1099,9 @@ names share a prefix (one garbage key can remove curves from two bones). Confirm
 block per job, no fatal or unknown rows, no contradictory exit/death/file records, a valid written-file row, and an
 explicit `EXPORTLEFT:` marker for a fallback even when the script dies. The live export tamper lane also rejects
 malformed completion and written-file records, duplicate jobs, fatal rows, and changed animation indices.
+Export workers record their own completion timestamps; the duration excludes the decision comparisons and replays
+that run before the parent collects their results. The shell regressions pin this timing, preserve failed worker
+statuses, and reject missing completion metadata.
 
 
 *Review before the PR* (an independent agent; 101 generated jobs through the real script over 13 fixtures, 49,732 role

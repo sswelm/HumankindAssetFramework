@@ -189,7 +189,12 @@ mkdir -p "$TMPD/export"
 for ((k = 0; k < EXPORT_JOBS; k++)); do awk -v k="$k" -v n="$EXPORT_JOBS" 'NR % n == k' "$TMPD/jobs_export.txt" > "$TMPD/export/jobs_$k.txt"; done
 EPIDS=(); t_e0=$(date +%s)
 for ((k = 0; k < EXPORT_JOBS; k++)); do
-  "$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_export_dump.py")" -- "$WROOT/editor/Tools~/deploy_convert.py" "$WTMP/export/jobs_$k.txt" "$WTMP/export/glb" > "$TMPD/export/raw_$k.txt" 2> "$TMPD/export/err_$k.txt" &
+  (
+    "$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_export_dump.py")" -- "$WROOT/editor/Tools~/deploy_convert.py" "$WTMP/export/jobs_$k.txt" "$WTMP/export/glb" > "$TMPD/export/raw_$k.txt" 2> "$TMPD/export/err_$k.txt"
+    shard_rc=$?
+    date +%s > "$TMPD/export/end_$k.txt"
+    exit "$shard_rc"
+  ) &
   EPIDS+=($!)
 done
 t3=$(date +%s)
@@ -490,7 +495,14 @@ echo "PASS — deploy drill accepts intact purge and role-clip rows and rejects 
 #      the animations' names. NOT compared yet: the materials' contents, textures, images, the animation channels and the
 #      file's bytes (parts 8b, 8c).
 erc=0; for pid in "${EPIDS[@]}"; do wait "$pid" || erc=$?; done
-t_e1=$(date +%s)
+t_e1=$t_e0
+for ((k = 0; k < EXPORT_JOBS; k++)); do
+  shard_end=$(cat "$TMPD/export/end_$k.txt" 2>/dev/null)
+  if ! [[ "$shard_end" =~ ^[0-9]+$ ]] || [ "$shard_end" -lt "$t_e0" ]; then
+    echo "FAIL — deploy drill: no valid completion time for export shard $k"; exit 1
+  fi
+  [ "$shard_end" -le "$t_e1" ] || t_e1=$shard_end
+done
 : > "$TMPD/export.txt"
 for ((k = 0; k < EXPORT_JOBS; k++)); do tr -d '\r' < "$TMPD/export/raw_$k.txt" | grep -E "^(JOB|LOG8|DIES8|EXIT8|GLB|SCENE|NODE|SKIN|IBM|MESH|PRIM|MAT|IMG|TEX|ANIM|CHAN|DONE|FAIL)	" >> "$TMPD/export.txt"; done
 n_edone=$(grep -c "^DONE" "$TMPD/export.txt")
