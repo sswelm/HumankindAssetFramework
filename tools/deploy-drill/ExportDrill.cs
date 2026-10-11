@@ -38,6 +38,9 @@ static class ExportDrill
 
     public static int Run(string[] args)
     {
+        // --glbdir <dir>: the files Blender wrote (the dump keeps them as <key>.glb): the port's bytes against them (8c)
+        string glbDir = null;
+        if (args.Length >= 2 && args[0] == "--glbdir") { glbDir = args[1]; args = args.Skip(2).ToArray(); }
         var jobs = new Dictionary<string, string[]>(StringComparer.Ordinal);
         foreach (var line in File.ReadAllLines(args[0]))
         {
@@ -48,7 +51,7 @@ static class ExportDrill
         }
         if (jobs.Count == 0) { Console.WriteLine("FAIL jobs: no export jobs to compare"); return 1; }
         var cover = new SortedDictionary<string, long>(); foreach (var k in CoverKeys) cover[k] = 0;
-        int fails = 0, files = 0, left = 0, exits = 0, rolesLeft = 0; long nodes = 0, joints = 0, ibms = 0, meshes = 0, prims = 0, vertices = 0, lines = 0, anims = 0, materials = 0, images = 0, channels = 0;
+        int fails = 0, files = 0, left = 0, exits = 0, rolesLeft = 0; long nodes = 0, joints = 0, ibms = 0, meshes = 0, prims = 0, vertices = 0, lines = 0, anims = 0, materials = 0, images = 0, channels = 0, glbs = 0, glbBytes = 0;
         var blocks = new List<List<string>>();
         foreach (var dump in args.Skip(1))
             foreach (var line in File.ReadLines(dump))
@@ -86,7 +89,7 @@ static class ExportDrill
                     if (rows.Any(t => t[0] != "JOB" && t[0] != "LOG8" && t[0] != "EXIT8" && t[0] != "DIES8" && t[0] != "DONE"))
                         throw new InvalidDataException("the dump claims exported file rows after an exit or death");
                 }
-                else if (glb.Count != 1 || glb[0].Length != 4 || glb[0].Skip(1).Any(v => !long.TryParse(v, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out _)))
+                else if (glb.Count != 1 || glb[0].Length != 5 || glb[0].Skip(1).Take(3).Any(v => !long.TryParse(v, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out _)) || glb[0][4].Length != 64)
                     throw new InvalidDataException("the dump has no single valid GLB written-file row");
                 var log8 = block.Where(l => l.StartsWith("LOG8\t")).Select(l => l.Substring(5)).ToList();
 
@@ -233,6 +236,31 @@ static class ExportDrill
                 }
                 Compare(problems, "the channels (animation, channel, node, path, sampler, interpolation, count, min, max, input sha, output sha)", mine, chanRows.Select(t => string.Join("\t", t.Skip(1))).ToList());
                 channels += chanRows.Count;
+                // ---- the bytes (8c): the GLB row's lengths (the file, the JSON chunk padded, the BIN chunk padded), and the file itself when it is at hand
+                var written = BlenderGlbWriter.Build(x);
+                if (written.Fallback != null) { fails++; Console.WriteLine($"FAIL {key}: the writer leaves it: {written.Fallback}"); continue; }
+                int jsonPadded = (System.Text.Encoding.UTF8.GetByteCount(written.Json) + 3) & ~3, binPadded = (written.Bin.Length + 3) & ~3;
+                Compare(problems, "the GLB (bytes, JSON chunk, BIN chunk, sha256)", new List<string> { $"{written.Glb.Length}\t{jsonPadded}\t{binPadded}\t{Sha(written.Glb)}" }, new List<string> { string.Join("\t", glb[0].Skip(1)) });
+                if (problems.Count == 0) { glbs++; glbBytes += written.Glb.Length; }
+                if (glbDir != null && File.Exists(Path.Combine(glbDir, key + ".glb")))
+                {
+                    var theirs = File.ReadAllBytes(Path.Combine(glbDir, key + ".glb"));
+                    if (!theirs.SequenceEqual(written.Glb))
+                    {
+                        int jl = BitConverter.ToInt32(theirs, 12); string theirJson = System.Text.Encoding.UTF8.GetString(theirs, 20, jl).TrimEnd(' ');
+                        if (theirJson != written.Json)
+                        {
+                            int at = 0; while (at < theirJson.Length && at < written.Json.Length && theirJson[at] == written.Json[at]) at++;
+                            int lo = Math.Max(0, at - 60);
+                            problems.Add($"the JSON differs at {at}: here «{Cut(written.Json.Substring(lo, Math.Min(140, written.Json.Length - lo)))}», Blender «{Cut(theirJson.Substring(lo, Math.Min(140, theirJson.Length - lo)))}»");
+                        }
+                        else
+                        {
+                            int off = 0; while (off < theirs.Length && off < written.Glb.Length && theirs[off] == written.Glb[off]) off++;
+                            problems.Add($"the bytes differ at offset {off} of {theirs.Length} (the JSON is equal; the BIN chunk starts at {28 + jl})");
+                        }
+                    }
+                }
                 if (problems.Count > 0) { fails++; Console.WriteLine($"FAIL {key}: " + string.Join("; ", problems.Take(5))); continue; }
                 cover["a job's export compared"]++;
                 if (x.Nodes.Any(n => n.Skin >= 0)) cover["a skinned mesh node"]++;
@@ -253,7 +281,7 @@ static class ExportDrill
         }
         foreach (var k in jobs.Keys) if (!dumped.Contains(k)) { fails++; Console.WriteLine($"FAIL {k}: the dump holds no such job"); }
         foreach (var kv in cover) Console.WriteLine($"COVER {kv.Value} {kv.Key}");
-        Console.WriteLine($"TOTAL jobs {files} failed {fails} left {left} exits {exits} rolesleft {rolesLeft} lines {lines} nodes {nodes} joints {joints} ibms {ibms} meshes {meshes} primitives {prims} vertices {vertices} animations {anims} materials {materials} images {images} channels {channels}");
+        Console.WriteLine($"TOTAL jobs {files} failed {fails} left {left} exits {exits} rolesleft {rolesLeft} lines {lines} nodes {nodes} joints {joints} ibms {ibms} meshes {meshes} primitives {prims} vertices {vertices} animations {anims} materials {materials} images {images} channels {channels} glbs {glbs} glbbytes {glbBytes}");
         return fails == 0 ? 0 : 1;
     }
 

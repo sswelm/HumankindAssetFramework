@@ -12,6 +12,7 @@
 -r:"@UNITY@/MonoBleedingEdge/lib/mono/4.7.1-api/System.Core.dll"
 -r:"@UNITY@/MonoBleedingEdge/lib/mono/4.7.1-api/System.Xml.dll"
 -r:"@UNITY@/MonoBleedingEdge/lib/mono/4.7.1-api/System.Xml.Linq.dll"
+-r:"@UNITY@/MonoBleedingEdge/lib/mono/4.7.1-api/System.Numerics.dll"
 -r:"@UNITY@/Managed/UnityEditor.dll"
 -r:"@UNITY@/Managed/UnityEngine.dll"
 -r:"@UNITY@/Managed/UnityEngine/Unity.Cecil.Mdb.dll"

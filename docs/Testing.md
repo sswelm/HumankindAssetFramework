@@ -1226,6 +1226,45 @@ cases the script cannot produce are named in the file's header (the armature obj
 accessor sharing - gather_accessor is cached on its bytes, count, min and max for the whole export, which part 8c's
 writer has to reproduce). Not here: the bytes (8c).
 
+**Replacing `deploy_convert.py`, part 8c: the GLB's bytes** (2026-10-11). `BlenderGlbWriter.cs` writes the file the
+exporter writes from what parts 8a, 8a-ii and 8b hold, read in `exporter.py`, `export.py` (both), `buffer.py`,
+`accessors.py`, `cache.py` and `gltf2_io.py`: the scene graph flattened depth first through each object's members in
+dir() order (alphabetical), a child-of-root object appended to its root list when its members are done - a node's
+children, mesh and skin before the node; a primitive's attributes, then its indices, then its material's images; a
+texture's sampler before its image -, binary data appended to the one buffer as met, each view padded to four bytes,
+the animations after the last scene, an unused skin last; `gather_accessor` is cached on (bytes, component type,
+count, max, min, type), so the indices of two primitives with the same index bytes, the animations' inputs with the
+same times and the identical constant outputs share one accessor and one view, while an attribute's (`array_to_accessor`)
+never does. The JSON: every object's keys alphabetical (`to_dict`), the root's in `save_gltf`'s order, a material's
+extensions in their gather order and a primitive's attributes in insertion order; `__fix_json` drops None and the
+empty (`KHR_materials_unlit`'s `{}` kept) and writes an integral float as an int (a negative zero as 0); `json.dumps`
+with `(',', ':')` and `ensure_ascii`; floats as Python's repr - `PyFloatRepr.cs`, the shortest decimal that reads back
+as the double, found by exact integer arithmetic against the double's rounding interval (.NET Framework's `R` is not
+shortest and its `Parse` is not correctly rounded, so neither could judge it), Python's exponent rule - held on the
+6,151 distinct float tokens of 190 Blender files and 39,996 random doubles (float32 values, frame / 24, denormals,
+every binade), all equal to `repr`. The GLB: the header, the JSON chunk padded with spaces, the BIN chunk with zeros.
+The oracle is part 8a's dump, whose `GLB` row carries the file's lengths and its SHA-256 now, and the files themselves
+(`--glbdir`: the first differing JSON character or byte, for the finder). Measured: 201 jobs byte-identical with
+Blender's files (185 of them on disk at the time, 77 MB - the 50 MB tank, the howitzer, the infantry with its images among
+them; the rest by length and SHA-256), the active scene's index in a two-scene file the one rule the first run missed.
+`BlenderGlbWriterTests` hold the key orders, the dropped empties, the escaping, the padding, the sharing and the repr
+on small inputs. The gate tampers the `GLB` row (missing, doubled, changed, cut short). Planted: 17 in the writer and the
+repr, 15 fail the drill (the paddings, the sharing on and off, the key orders, the dropped empties, the generator, the scene
+index, an image view's target, the images before the indices, sampler and source swapped, the input's min and max in
+float32, a float's `.0`, .NET's `R` digits); the exponent threshold is held by a unit test (no float of the population
+sits in 1e15..1e16), and a BIN chunk padded with spaces is equivalent (every view is padded, so the chunk never needs it).
+An independent reader against the sources found three gaps the 201 jobs could not show, each confirmed and fixed:
+the repr's shortcut (the nearest n-digit decimal) is wrong at an exact power of two, where the rounding interval below
+is half as wide - 2^-24 came out as 17 digits where Python writes 16 - so both decimals around the value are tested
+now (held on every power of two and its neighbours, 10,487 values); an integral float of 1e18 or more is Python's
+int of any length (float32's max, 39 digits), not an exponent form; and an extension's own keys follow its gather
+order, not the alphabet - KHR_materials_specular writes specularFactor, specularTexture, specularColorFactor,
+specularColorTexture and meets the images in that order (measured in Blender on a material carrying all four; the
+population's specular materials carry one key each). Three contracts on the earlier parts are named in the file's
+header (the nodes' index order as the walk, every texture and sampler traversed, no explicit null in a material).
+With this the port writes the file the script writes; what is left of `deploy_convert.py` in Blender is named per
+shape (LEFT) and the Factory still calls Blender until the wiring.
+
 Review of PR #148: the sanitizer now prints the number of escaped path keys, as the script does, when quoted bone
 names share a prefix (one garbage key can remove curves from two bones). Confirmed with the real sanitizer in Blender.
 `ExportDrillTests` run the actual comparator and pin its completion envelope: exactly one matching final `DONE`, one

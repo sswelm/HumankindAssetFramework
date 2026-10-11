@@ -39,7 +39,7 @@ def main(out, dump, jobs):
         # the last character turned: a hex digit, a name's letter, a count's digit
         c = s[-1]
         return s[:-1] + ("0" if c != "0" else "1")
-    for kind in ("SCENE", "NODE", "SKIN", "IBM", "MESH", "PRIM", "ANIM", "CHAN"):
+    for kind in ("GLB", "SCENE", "NODE", "SKIN", "IBM", "MESH", "PRIM", "ANIM", "CHAN"):
         r = rows(kind)
         lines = list(job); del lines[r[0]]
         write("exp_%s_missing" % kind, lines)

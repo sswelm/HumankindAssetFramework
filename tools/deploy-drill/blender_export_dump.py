@@ -9,7 +9,7 @@ its bits (the glTF JSON's doubles as the float32 the exporter stored - the write
     JOB     <key>
     LOG8    <a DEPLOY line of the export step: the trim, the purge, the sanitize, the write>
     DIES8   <exception>                      the script died in the export step
-    GLB     <bytes> <json bytes> <bin bytes>
+    GLB     <bytes> <json bytes> <bin bytes> <sha256 of the file>
     SCENE   <name> <root node indices>
     NODE    <index> <name> <children> <mesh or -> <skin or -> <translation 3 or -> <rotation 4 or -> <scale 3 or ->
     SKIN    <index> <name> <joints> <skeleton or ->
@@ -45,7 +45,7 @@ def rows(path):
     bin_ = b""; bl = 0
     if len(b) >= 28 + jl:   # a file without accessors has no BIN chunk
         bl = struct.unpack_from("<I", b, 20 + jl)[0]; bin_ = b[28 + jl:28 + jl + bl]
-    out = ["GLB\t%d\t%d\t%d" % (len(b), jl, bl)]
+    out = ["GLB\t%d\t%d\t%d\t%s" % (len(b), jl, bl, sha(b))]   # ... and the file's SHA-256: the port's bytes against it (8c)
     for s in j.get("scenes", []):
         out.append("SCENE\t%s\t%s" % (s.get("name", "-"), ",".join(str(n) for n in s.get("nodes", []))))
     def v(xs): return "\t".join(h32(x) for x in xs) if xs else "-"

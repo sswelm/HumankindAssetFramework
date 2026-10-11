@@ -168,7 +168,10 @@ SOURCE material unchanged, and the Factory's converter refuses what Blender's im
 it on the edge fixture, which is therefore `fixtures.py --materials`, not `--prep`; the wiring has to write `BlenderMaterialExport`'s
 materials); **8b the animations' channels** (`BlenderChannelExport.cs`: every action sampled frame by frame as the exporter
 does, the reset between actions, the keep of constant channels, STEP or LINEAR, the correction matrices; 197 jobs' 51,801
-channels equal) - done 2026-10-11; next **8c** the bytes. **4b the bake takes the selected imported armatures too** (their bones keyed a frame, their object animation
+channels equal) - done 2026-10-11; **8c the bytes** (`BlenderGlbWriter.cs`, `PyFloatRepr.cs`: the exporter's traversal,
+the accessor cache, the JSON as json.dumps writes it; 201 jobs byte-identical) - done 2026-10-11. The script is ported: next the
+**Factory wiring** (the deploy conversion in process with Blender as the fallback, writing the port's materials too), then
+(4) `rig_anim`, (5) `vehicle_rig`. **4b the bake takes the selected imported armatures too** (their bones keyed a frame, their object animation
 dropped) - done 2026-10-11: the dugout canoe is baked in C#, no job is left at the bake; **5a the fire-window
 snapshot** - done 2026-10-11 (the dump's own scene updates between stages were wrong on the contract path and are
 gone); **5b/5c the barrel retarget and the leg scale** - done 2026-10-10 (Bezier keys with their handles to the bit;
@@ -303,6 +306,19 @@ translation `[-0.739, -0.0, 0.0]` holds `+0, +0` straight after the import, wher
   same output. **Bake-level verification DONE** (same day): smoke test 14/14 with the howitzer fresh-baked
   `animated-legacy` through the gated pipeline. **In-game verification DONE (2026-08-02)** — the howitzer checked out
   correctly after a real re-bake.
+
+### Review of PR #151 (the opt-in C# animated slice, ChatGPT, 2026-10-11) - verified by execution
+The full gate passes on master after the merge (26 checks, the deploy drill in 608 s). Found and NOT changed (the project
+is the user's): (1) a successful slice run leaves its assets in the Unity project - a `__haf_csharp_clip_<stamp>` folder under
+`Assets/FactorySource` and four assets under `Assets/Resources` (atlas, Clips, ClipsPoseData.bytes, Skeleton) - the slice
+deletes them only on failure, and anything under `Resources` ships with the next bundle; one such run (13:38) is in the
+project now. (2) `BlenderPrep.CacheRevision` in the static extract key makes EVERY cached static extract re-extract once on its
+next bake (the stamp differs), which overwrites the extracted OBJ and its sibling textures: the static path has no hand-edit
+guard beyond 'Reuse extracted', which the busters override - the doc's 'keepTexture protection' is the ANIMATED path's
+albedo only. This is the overwrite the 4d note above warned about; a hand-edited static extract is lost once. (3) `Call`
+added to the member-shape gate's readers: harmless, the gate passes. Not measured (needs Unity): `RecalculateTangents` now
+runs in the clip picker's preview for every skinned mesh. Verified: the Documents junction is intact (0xa0000003 -> 
+C:\GameData\Humankind), no temporary Community version folder was left, no slice entry is in the registry.
 
 ## From the 2026-09-14 critical review (confirmed in source, unfixed)
 
