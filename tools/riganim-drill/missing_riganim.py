@@ -105,4 +105,32 @@ if any(l.startswith("K\t") for l in lines):
     write("K_bits", replace(i_k, "\t".join(k[:6] + [("0" if k[6][0] != "0" else "1") + k[6][1:]] + k[7:])))
     write("K_meta", replace(i_k, "\t".join(k[:11] + ["CHANGED"] + k[12:])))
     write("K_orphan", replace(i_k, "\t".join(k[:2] + ["no-such-action"] + k[3:])))
+# Step (b), the stage 1 model (riganim.exe --stage1): a dump that is complete and consistent but says something ELSE about
+# the scene than the C# does must be refused too - one changed value per row kind of stage 1, the dump otherwise valid.
+# Named S1_*: the drill runs these in --stage1 mode, where the reason is "stage 1".
+
+
+def flip_bits(h):
+    """Another valid float32 (or SHA-256) hex: the last digit changed."""
+    return h[:-1] + ("1" if h[-1] != "1" else "2")
+
+
+def with_field(i, j, value):
+    f = lines[i].split("\t"); f[j] = value
+    return replace(i, "\t".join(f))
+
+
+i_log1 = first(lambda l: l.startswith("LOG\t1\t")); write("S1_LOG_text", replace(i_log1, lines[i_log1] + " (changed)"))
+write("S1_SCENE_frame", with_field(i_scene, 3, "251"))
+write("S1_OBJ_matrix", with_field(i_obj, 10, flip_bits(lines[i_obj].split("\t")[10])))
+i_obj_act = first(lambda l: l.startswith("OBJ\t1\t") and l.split("\t")[8] != "-"); write("S1_OBJ_action", with_field(i_obj_act, 8, "-"))
+i_obj2 = first(lambda l: l.startswith("OBJ\t1\t") and l != lines[i_obj])
+write("S1_OBJ_order", [lines[i_obj2] if i == i_obj else lines[i_obj] if i == i_obj2 else l for i, l in enumerate(lines)])
+write("S1_MESH_hash", with_field(i_mesh, 6, flip_bits(lines[i_mesh].split("\t")[6])))
+write("S1_MESH_count", with_field(i_mesh, 3, str(int(lines[i_mesh].split("\t")[3]) + 1)))
+write("S1_VG_count", with_field(i_vg, 4, str(int(lines[i_vg].split("\t")[4]) + 1)))
+write("S1_BONE_length", with_field(i_bone, 6, flip_bits(lines[i_bone].split("\t")[6])))
+write("S1_PB_value", with_field(i_pb, 7, flip_bits(lines[i_pb].split("\t")[7])))
+write("S1_ACT_range", with_field(i_act, 3, flip_bits(lines[i_act].split("\t")[3])))
+write("S1_FC_hash", with_field(i_fc, 6, flip_bits(lines[i_fc].split("\t")[6])))
 sys.stdout.write("".join(f[:-4] + "\n" for f in sorted(os.listdir(out)) if f.endswith(".txt") and f not in ("jobs.txt", "jobs_exit.txt", "intact.txt")))

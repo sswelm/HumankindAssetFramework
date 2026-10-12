@@ -1379,6 +1379,35 @@ with a RIGANIM ERROR (the drill fails it if it runs through or stops elsewhere, 
 a job the C# will leave to Blender by name (localNodeAnim). `RIGANIM_KEYS=1` now records each key's handles,
 interpolation, easing and handle types. In that mode the C# validator requires the keys and reconstructs both `FC`
 hashes from them, so a changed or missing key cannot pass as importer-curve evidence.
+Step (b), stage 1 in C# (2026-10-12): `editor/BlenderRigAnim.cs` is the first stage of the script without Blender - the
+arguments as the script parses them (its WARN lines included), the import, the material-less drop, the armature lookup
+and its exit, the DeployArmV2 marker, the object-animation clear - built from the deploy and prep ports (BlenderNames,
+BlenderPosedState, the posed world matrices, BlenderReduce at a ratio of 1, the armature and the skinner) and the
+importer's rules read for this stage (mesh.py: slots only when a primitive has a material or COLOR_0, a vertex group per
+joint with every non-zero weight added with REPLACE, the modifier named "Armature"; animation.py and its helpers: one
+action per animation, a slot "OB" + name per touched object in node-index order, the fcurves in that order three or four
+per channel, a lone key's handles left at the zeros `keyframe_points.add` gave them, the first animation's action
+restored as the active one and every other touched object keeping animation_data without one). `riganim.exe --stage1`
+renders the model's scene as the dump's own rows - float32 bits and SHA-256 hashes - and compares every job's stage 1
+with Blender's string for string; a differing field names the row and both values, a differing `FC` hash the first
+differing key under `RIGANIM_KEYS=1`. A job the model would leave to Blender FAILS unless its key says `LEFT:`, and a
+`LEFT:` job the model takes fails too. Measured: every dumped recipe (23 of 24 with FULL=1, 19 in the default sample)
+and all 11 fixtures equal row for row - 48,102 rows of the full registry, 428 of the fixtures; two new fixtures for
+the model's branches no recipe takes (`fx_groups`: an unused joint, a repeated joint, zero weights, a mesh without UV,
+COLOR_0 beside a material, keys closer than 0.01 frame, a refused second channel, the armature object's own curves;
+`fx_skinned_anim`: an animated skinned mesh node, a mesh on the armature node, one mesh on two nodes). Eight defects
+planted in the model were each caught (no junk drop, no `OB` slot prefix, a lone key's handles computed, COLOR_0 not a
+material, no animation clear, actions unsorted, fcurves in channel order, weights reversed), and twelve `S1_*` tampers
+(`missing_riganim.py`: one changed value per row kind of stage 1, the dump otherwise valid) are refused in `--stage1`
+mode while the intact control passes in both. Found on the way: the importer's vnode rotations are PRODUCTS with the
+identity (`rotation_before @= rot`, `rotation_after = rot_inv @ rotation_after`), so the conjugate's minus zeros come
+out plus and a bone key's zero takes that sign - four recipes (LightCruisers, SteamTransports, Zeppelin,
+ReconHelicopter) read -0 in C# and +0 in Blender until `ImportRig.FinalTrs` used the products (the posed-state drill
+could not see it: a written zero keeps the sign of the one it replaces); a dropped mesh's children keep their
+`matrix_world` (the same at stages 1 to 3), not their local transform. Not modelled and named, so Blender's: a
+.fbx/.blend source, localNodeAnim, several scenes, cameras, lights, instancing, variants, pointers, CUBICSPLINE, morph
+weights, a sampler without keys, a mesh on a bone node, a twice-listed joint, and what BlenderReduce declines - none
+in the registry. Stages 2 to 4 are not compared yet, and the PASS line says so.
 
 Review of PR #148: the sanitizer now prints the number of escaped path keys, as the script does, when quoted bone
 names share a prefix (one garbage key can remove curves from two bones). Confirmed with the real sanitizer in Blender.

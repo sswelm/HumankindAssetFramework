@@ -34,6 +34,12 @@ public static partial class VehicleProbe
         public static readonly float[] Turn = { (float)(Math.Sqrt(2) / 2), (float)(Math.Sqrt(2) / 2), 0f, 0f };
         static readonly float[] TurnInv = { Turn[0], -Turn[1], -Turn[2], -Turn[3] };
         static readonly float[] One = { 1f, 0f, 0f, 0f };
+        // the vnode's rotations as the importer ACCUMULATES them (vnode.py local_rotation): `rotation_before @= rot` and
+        // `rotation_after = rot_inv @ rotation_after`, each a quaternion PRODUCT with the identity it started from - which
+        // turns the conjugate's minus zeros into plus zeros. A key's zero takes its sign from these (the Sail and Wheel_01
+        // keys of four recipes read -0 here and +0 in Blender until the rig_anim stage 1 drill, 2026-10-12; the posed-state
+        // drill never saw it, a written zero keeping the sign of the one it replaces)
+        static readonly float[] Before = MulQt(One, Turn), After = MulQt(TurnInv, One);
 
         public bool IsBone(int node) => node >= 0 && Names.IsBone[node];
         /// <summary>The bone a node's object hangs from (its parent in the file is a bone), or -1.</summary>
@@ -42,7 +48,7 @@ public static partial class VehicleProbe
         /// <summary>vnode.trs(): the node's transform in Blender's convention through its vnode's rotations.</summary>
         public void FinalTrs(int node, float[] loc, float[] quat, float[] scale, out float[] t, out float[] r, out float[] s)
         {
-            float[] after = ParentBone(node) >= 0 ? TurnInv : One, before = IsBone(node) ? Turn : One;
+            float[] after = ParentBone(node) >= 0 ? After : One, before = IsBone(node) ? Before : One;
             t = MulQtV3(after, loc);
             r = MulQt(MulQt(after, quat), before);
             // scale_rot_swap_matrix(rotation_before) @ s: the turn swaps Y and Z; mathutils sums each row in a double

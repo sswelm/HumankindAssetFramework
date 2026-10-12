@@ -10,7 +10,10 @@ Stage 1 (step (b)): the import, the material-less drop (a lone one, one with a t
 coloured by COLOR_0 - Blender decides whether that counts as a material), the contract marker (an armature named
 DeployArmV2), object-level animation on a mesh node (cleared on the conversion path, kept on the legacy one), several
 animations (the first one's action is the active one; a longer second one), a bone-parented mesh, a scaled wrapper
-empty, a bone in Euler mode, and the exit when there is no armature.
+empty, a bone in Euler mode, and the exit when there is no armature. For the stage 1 MODEL (BlenderRigAnim): the vertex
+group rules (an unused joint, a repeated joint, zero weights), a mesh without UV, COLOR_0 beside a material, merged
+keys, a refused second channel, the armature object's own curves (fx_groups); an animated skinned mesh node, a mesh
+on the armature node, one mesh on two nodes (fx_skinned_anim).
 """
 import math, os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "glb-reader-drill"))
@@ -183,6 +186,41 @@ def v2(out):
     return r.write(out, "riganim_v2")
 
 
+def groups(out):
+    """Stage 1's vertex groups and curves (the stage 1 model's branches no recipe takes): a joint no vertex uses, a vertex
+    weighted twice to one joint (REPLACE: the later weight), a vertex with zero weights (the importer's 1.0 on its first
+    joint), a mesh without UV and with COLOR_0 beside a material, two keys closer than 0.01 frame (merged, the last
+    wins), a second channel on one node and path (refused), the armature object's own curves."""
+    r = Rig()
+    arm = r.node("Armature")
+    j0 = r.node("Root", arm)
+    j1 = r.node("Arm", j0, translation=[0.0, 1.0, 0.0])
+    j2 = r.node("Spare", j0, translation=[1.0, 0.0, 0.0])
+    sk = r.skin("Skin", [j0, j1, j2], [ibm(0.0, 0.0, 0.0), ibm(0.0, 1.0, 0.0), ibm(1.0, 0.0, 0.0)])
+    m = r.material("Paint", (0.2, 0.4, 0.9))
+    per = [[(0, 1.0)]] * 2 + [[(1, 0.3), (1, 0.6)]] * 2 + [[(0, 0.0)]] * 2 + [[(0, 0.5), (1, 0.5)]] * 2
+    r.node("Body", arm, mesh=r.mesh("body", material=m, joints=per), skin=sk)
+    r.node("Tinted", arm, mesh=r.mesh("tinted", at=(3.0, 0.0, 0.0), material=m, colors=True, uv=False), translation=[0.0, 0.0, 3.0])
+    a = r.anim("Spin")
+    r.key(a, j1, "rotation", [0.0, 0.0001, 0.5, 1.0], spin(4, "x", 0.5))
+    r.key(a, j1, "rotation", [0.0, 1.0], spin(2, "y", 0.25))
+    r.key(a, arm, "translation", [0.0, 1.0], [(0.0, 0.0, 0.0), (0.0, 0.5, 0.0)])
+    return r.write(out, "riganim_groups")
+
+
+def skinned_anim(out):
+    """An animated skinned mesh node (the importer leaves the node as an empty with the object animation and puts the mesh on
+    a '.skinned' child of the armature), a mesh on the armature node itself (a '.mesh' child), one mesh on two nodes."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    rider = r.node("Rider", None, mesh=r.mesh("rider", at=(2.0, 0.0, 0.0), material=m, joints=[[(1, 1.0)]]), skin=sk, translation=[0.0, 0.0, 2.0])
+    r.key(0, rider, "translation", [0.0, 1.0], [(0.0, 0.0, 2.0), (0.0, 0.0, 3.0)])
+    r.nodes[arm]["mesh"] = r.mesh("crest", at=(0.0, 2.0, 0.0), material=m)
+    shared = r.mesh("stud", at=(4.0, 0.0, 0.0), size=0.5, material=m)
+    r.node("StudA", arm, mesh=shared, translation=[1.0, 0.0, 0.0])
+    r.node("StudB", arm, mesh=shared, translation=[-1.0, 0.0, 0.0])
+    return r.write(out, "riganim_skinned_anim")
+
+
 def main(out):
     os.makedirs(out, exist_ok=True)
     def job(key, path, clip="Spin", convert="1", local="0"):
@@ -197,6 +235,8 @@ def main(out):
     job("fx_v2", v2(out), convert="0")
     job("EXIT:1:fx_noarm", noarm(out))
     job("LEFT:fx_localnode", p, local="1")
+    job("fx_groups", groups(out))
+    job("fx_skinned_anim", skinned_anim(out))
 
 
 if __name__ == "__main__":
