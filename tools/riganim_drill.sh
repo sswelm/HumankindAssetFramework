@@ -5,7 +5,7 @@
 # cut into its four stages at four of its own lines and the scene written out after each (blender_riganim_dump.py: the
 # RIGANIM lines, every object with its matrices, every mesh's geometry and weights hashed, the bones at rest, the pose,
 # every action's fcurves hashed, the albedo's pixels). The C# side (RigAnimDrill.cs) holds the EVIDENCE: every recipe's
-# block complete and consistent, a stopped script named with its stage and reason - and prints the census of the
+# block complete and consistent, an early stop failed with its stage and reason - and prints the census of the
 # script's branches the recipes take (COVER rows), which the stage ports (b)..(e) build on. No rule of the script is
 # compared yet: the PASS line says so.
 # The light assault mech's source is an .fbx, which the C# does not read until the native FBX reader: that recipe is
@@ -32,6 +32,7 @@ fi
 [ -n "$BLENDER" ] || { echo "SKIP — rig_anim drill: Blender not found (BLENDER=<exe> to force); rig_anim was NOT drilled"; exit 3; }
 SCRIPT="$ROOT/editor/Tools~/rig_anim.py"
 [ -f "$SCRIPT" ] || { echo "FAIL — rig_anim.py not found at $SCRIPT"; exit 1; }
+python "$ROOT/tools/riganim-drill/test_riganim_jobs.py" || { echo "FAIL — rig_anim job mapping regression checks"; exit 1; }
 
 TMPD="$(mktemp -d)"; trap 'rm -rf "$TMPD"' EXIT
 WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"; WTMP="$(cygpath -m "$TMPD" 2>/dev/null || echo "$TMPD")"
@@ -48,7 +49,13 @@ if [ -n "$PACK" ]; then
   else
     python "$ROOT/tools/riganim-drill/riganim_jobs.py" "$PACK" "$PROJECT" > "$TMPD/jobs_raw.txt"; jrc=$?
   fi
-  [ "$jrc" -eq 0 ] || { echo "FAIL — cannot read the registry at $PACK"; exit 1; }
+  if [ "$jrc" -ne 0 ]; then
+    tr -d '\r' < "$TMPD/jobs_raw.txt" | grep -E '^(INVALID|UNAVAILABLE)[[:space:]]' || true
+    if [ "$jrc" -eq 3 ]; then
+      echo "SKIP — rig_anim drill: required registry source is unavailable on this machine; rig_anim was NOT drilled"; exit 3
+    fi
+    echo "FAIL — rig_anim drill: invalid animated registry recipe at $PACK"; exit 1
+  fi
   tr -d '\r' < "$TMPD/jobs_raw.txt" > "$TMPD/jobs.txt"
   n_jobs=$(grep -c "^JOB	" "$TMPD/jobs.txt"); n_left=$(grep -c "^LEFT	" "$TMPD/jobs.txt")
 fi
@@ -93,7 +100,7 @@ TOTAL=$(grep -E "^TOTAL" "$TMPD/cs.txt" | tail -1); echo "$TOTAL"
 [ -n "$TOTAL" ] || { tail -5 "$TMPD/cs.txt"; echo "FAIL — rig_anim drill: the C# side gave no total (rc=$rc)"; exit 1; }
 [ "$rc" -eq 0 ] || { echo "FAIL — rig_anim drill: the stage dump is incomplete or inconsistent"; exit 1; }
 n_full=$(echo "$TOTAL" | awk '{print $5}'); n_stop=$(echo "$TOTAL" | awk '{print $7}'); n_stages=$(echo "$TOTAL" | awk '{print $11}'); n_logs=$(echo "$TOTAL" | awk '{print $13}'); n_bones=$(echo "$TOTAL" | awk '{print $21}'); n_fc=$(echo "$TOTAL" | awk '{print $23}')
-[ "$n_full" -gt 0 ] || { echo "FAIL — rig_anim drill: no job ran through all four stages"; exit 1; }
+[ "$n_full" -eq "$n_jobs" ] && [ "$n_stop" -eq 0 ] || { echo "FAIL — rig_anim drill: not every selected recipe completed all four stages"; exit 1; }
 # Negative guards on the REAL dump: a missing or inconsistent record must never pass as evidence.
 python "$ROOT/tools/riganim-drill/missing_riganim.py" "$WTMP/missing" "$WTMP/jobs.txt" "${DUMPS[@]}" > "$TMPD/tampers_raw.txt" || { echo "FAIL — could not construct the damaged dumps"; exit 1; }
 tr -d '\r' < "$TMPD/tampers_raw.txt" > "$TMPD/tampers.txt"
@@ -114,6 +121,7 @@ while IFS= read -r mode; do
     EXIT_wrong_stage) reason="other than the one after the last dumped";;
     EXIT_code) reason="exits only with code 1";;
     STOP_missing) reason="no EXIT or DIES row";;
+    STOP_valid) reason="stopped at stage 3";;
     LOG_not_riganim) reason="not a RIGANIM line";;
     LOG_misplaced) reason="out of place";;
     SCENE_missing) reason="no SCENE row";;
@@ -140,7 +148,7 @@ while IFS= read -r mode; do
   fi
   n_t=$((n_t + 1))
 done < "$TMPD/tampers.txt"
-echo "PASS — rig_anim drill refuses $n_t kinds of damaged evidence (a missing, doubled, short or misplaced row of every kind; a stop claimed wrongly; an unknown job or row kind)"
+echo "PASS — rig_anim drill refuses $n_t kinds of damaged evidence (a missing, doubled, short or misplaced row of every kind; an early stop; an unknown job or row kind)"
 n_size=$(grep -c "^LEFT	.*	over .* MB" "$TMPD/jobs.txt")
-RESULT="PASS — rig_anim drill, step (a) the stage dump: $n_jobs of $((n_jobs + n_left)) animated recipes run by Blender through rig_anim.py cut at its four stages (Blender took $((t1 - t0)) s), $n_full through all four, $n_stop stopped by the script as it says; $n_stages scene dumps with $n_logs RIGANIM lines, $n_bones bones and $n_fc fcurves on record, every block complete and consistent; $n_left recipe(s) left: $n_size over the size limit (FULL=1 takes them), $((n_left - n_size)) by name (an .fbx source: Blender's until the native FBX reader). NO RULE OF THE SCRIPT IS COMPARED YET: the stage ports (b)..(e) hold theirs against this dump"
+RESULT="PASS — rig_anim drill, step (a) the stage dump: $n_jobs of $((n_jobs + n_left)) animated recipes run by Blender through rig_anim.py cut at its four stages (Blender took $((t1 - t0)) s), $n_full through all four; $n_stages scene dumps with $n_logs RIGANIM lines, $n_bones bones and $n_fc fcurves on record, every block complete and consistent; $n_left recipe(s) left: $n_size over the size limit (FULL=1 takes them), $((n_left - n_size)) by name (Blender-only source until a native reader). NO RULE OF THE SCRIPT IS COMPARED YET: the stage ports (b)..(e) hold theirs against this dump"
 echo "$RESULT"

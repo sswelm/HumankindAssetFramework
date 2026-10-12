@@ -319,7 +319,8 @@ static class RigAnimDrill
                 if (d.StoppedAt > 0)
                 {
                     stopped++;
-                    Console.WriteLine($"STOP {key}: stage {d.StoppedAt} " + (d.Exit != null ? "exits " + d.Exit + ": " + (d.LogsOfStop.LastOrDefault(l => l.StartsWith("RIGANIM ERROR")) ?? "(no RIGANIM ERROR line)") : "dies: " + d.Died));
+                    fails++;
+                    Console.WriteLine($"FAIL {key}: stopped at stage {d.StoppedAt}; " + (d.Exit != null ? "exits " + d.Exit + ": " + (d.LogsOfStop.LastOrDefault(l => l.StartsWith("RIGANIM ERROR")) ?? "(no RIGANIM ERROR line)") : "dies: " + d.Died));
                 }
                 else
                 {

@@ -66,6 +66,7 @@ blk_start = i_job; blk_end = i_done
 i_s3 = first(lambda l: l == "STAGE\t3")
 write("EXIT_wrong_stage", lines[blk_start:i_s3] + ["EXIT\t2\t1", lines[blk_end]] + lines[blk_end + 1:])
 write("EXIT_code", lines[blk_start:i_s3] + ["EXIT\t3\t0", lines[blk_end]] + lines[blk_end + 1:])
+write("STOP_valid", lines[blk_start:i_s3] + ["EXIT\t3\t1", lines[blk_end]] + lines[blk_end + 1:])
 write("STOP_missing", lines[blk_start:i_s3] + [lines[blk_end]] + lines[blk_end + 1:])
 i_log = first(lambda l: l.startswith("LOG\t")); write("LOG_not_riganim", replace(i_log, lines[i_log].rsplit("\t", 1)[0] + "\tInfo: something else"))
 write("LOG_misplaced", replace(i_log, "LOG\t4" + lines[i_log][5:]))

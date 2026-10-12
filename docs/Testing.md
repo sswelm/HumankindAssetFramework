@@ -1350,11 +1350,14 @@ quat, euler, scale, `matrix_basis`), every action's fcurves (keys hashed, handle
 key), the albedo's bytes and 8-bit pixels. A marker not found exactly once fails the dump: a script edit that moves a
 stage line is a FAIL, never a silently different cut. `RigAnimDrill.cs` reads the dump through `RigAnimDump` (the
 class the stage ports will read it through) and holds the EVIDENCE: a block per job of the jobs file, stages 1..k
-without a gap, a stopped job named with its stage and reason (the script exits only with 1), every row's field count
+without a gap, a stopped job named with its stage and reason and failed as an incomplete recipe (the script exits
+only with 1), every row's field count
 and bits, and the rows against each other (a mesh row names an object, a weight row a group its mesh lists, a pose
-bone a bone, an fcurve its action, an action its fcurve count, stage 4's albedo line its image row). 36 damaged copies
+bone a bone, an fcurve its action, an action its fcurve count, stage 4's albedo line its image row). 37 damaged copies
 of a real block (`missing_riganim.py`: a missing, doubled, short or misplaced row of every kind, a stop claimed
-wrongly, an unknown job or row kind) are refused by name; the intact copy passes. NO RULE OF THE SCRIPT IS COMPARED
+wrongly, an actual early stop, an unknown job or row kind) are refused by name; the intact copy passes. Missing local
+sources make the drill SKIP and invalid registry recipes make it FAIL, rather than silently reducing coverage. NO RULE
+OF THE SCRIPT IS COMPARED
 YET, and the PASS line says so. Measured: 23 of the 24 animated recipes (the light assault mech's source is an .fbx:
 LEFT by name until the native FBX reader, reported as such, never as the whole registry) in 17 s over four Blender
 shards, all 23 through all four stages; a second run byte-identical to the first (the oracle is deterministic). The
