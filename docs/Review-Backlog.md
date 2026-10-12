@@ -260,6 +260,13 @@ held complete and consistent, 37 tamper kinds refused; `docs/Testing.md` has the
 17 s, all four stages, deterministic; the mech LEFT by name. The census says which branches need a fixture before their
 port: bone-parent skinning, the bone cap, staticParts, localNodeAnim, the root collapse, the weld, a collapsed material,
 a centred model, the legacy amplify, the script's exits - none of them has a registry recipe. Next: (b) stage 1.
+(b) groundwork DONE 2026-10-12: nine stage 1 fixtures in the drill (`riganim_fixtures.py`), the `EXIT:`/`LEFT:` job
+key markers, the key rows with handles. Measured on the way: the importer gives a COLOR_0 mesh without a material a
+"DefaultMaterial", so the script keeps it; a primitive without a material beside one with keeps the mesh with an empty
+slot; the scene stays at 1..250, frame 1, after every import. The stage 1 C# model is next: what exists (BlenderNames,
+BlenderPosedState, BlenderReduce, BlenderArmature, BlenderSkinner - the deploy and prep drills' proofs) and what does
+not (the importer's fcurve keys and handles as made, the vertex-group lists with the empty groups, the material-less
+drop and the object-animation clear, the pose_position REST hold - left by name with localNodeAnim).
 
 - **Blender-exact vertex positions for skinned parts** — OPEN (2026-10-02, found by 3c). Blender's importer skins a
   rigged mesh into its bind pose in numpy float32: per joint, (bind matrix) @ (inverse bind matrix), where the bind

@@ -46,7 +46,7 @@ public sealed class RigAnimDump
     static readonly Dictionary<string, int> Width = new Dictionary<string, int>(StringComparer.Ordinal)
     {
         { "JOB", 2 }, { "STAGE", 2 }, { "LOG", 3 }, { "SCENE", 6 }, { "OBJ", 42 }, { "MESH", 14 }, { "VG", 6 }, { "BONE", 23 },
-        { "PB", 33 }, { "ACT", 7 }, { "FC", 8 }, { "K", 7 }, { "IMG", 9 }, { "EXIT", 3 }, { "DIES", 3 }, { "DONE", 2 }, { "FAIL", 3 },
+        { "PB", 33 }, { "ACT", 7 }, { "FC", 8 }, { "K", 15 }, { "IMG", 9 }, { "EXIT", 3 }, { "DIES", 3 }, { "DONE", 2 }, { "FAIL", 3 },
     };
 
     static bool IsHex(string s, int n) => s.Length == n && s.All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
@@ -140,7 +140,7 @@ public sealed class RigAnimDump
                 case "FC":
                     if (!IsInt(t[4]) || !IsInt(t[5]) || !IsHex(t[6], 64) || !IsHex(t[7], 64)) throw new InvalidDataException("FC row has an invalid index, count or hash");
                     s.FCurves.Add(t); break;
-                case "K": Floats(t, 5, 2, "K"); s.Keys.Add(t); break;
+                case "K": Floats(t, 5, 6, "K"); s.Keys.Add(t); break;
                 case "IMG":
                     if (n != 4) throw new InvalidDataException("an IMG row outside stage 4");
                     if (s.Image != null) throw new InvalidDataException("stage 4 has two IMG rows");
@@ -316,12 +316,17 @@ static class RigAnimDrill
                 foreach (var c in Cover) if (c.test(d)) cover[c.key]++;
                 stages += d.Stages.Count; logs += d.AllLogs.Count();
                 foreach (var s in d.Stages.Values) { objs += s.Objs.Count; meshes += s.Meshes.Count; groups += s.Groups.Count; bones += s.Bones.Count; fcurves += s.FCurves.Count; keys += s.Keys.Count; }
+                // a job whose key starts with "EXIT:" is one the script is EXPECTED to stop on (a fixture of its own exit);
+                // every other job must run through all four stages: a registry recipe that stops is a broken bake
+                bool expectStop = key.StartsWith("EXIT:", StringComparison.Ordinal);
                 if (d.StoppedAt > 0)
                 {
                     stopped++;
-                    fails++;
-                    Console.WriteLine($"FAIL {key}: stopped at stage {d.StoppedAt}; " + (d.Exit != null ? "exits " + d.Exit + ": " + (d.LogsOfStop.LastOrDefault(l => l.StartsWith("RIGANIM ERROR")) ?? "(no RIGANIM ERROR line)") : "dies: " + d.Died));
+                    string how = d.Exit != null ? "exits " + d.Exit + ": " + (d.LogsOfStop.LastOrDefault(l => l.StartsWith("RIGANIM ERROR")) ?? "(no RIGANIM ERROR line)") : "dies: " + d.Died;
+                    if (expectStop && d.Exit != null) Console.WriteLine($"OK {key}: stops at stage {d.StoppedAt} as expected; {how}");
+                    else { fails++; Console.WriteLine($"FAIL {key}: stopped at stage {d.StoppedAt}" + (expectStop ? " by dying, not by the script's exit; " : "; ") + how); }
                 }
+                else if (expectStop) { fails++; Console.WriteLine($"FAIL {key}: expected to stop (its key says EXIT:), ran through all four stages"); }
                 else
                 {
                     full++;
