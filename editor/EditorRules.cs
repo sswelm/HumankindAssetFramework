@@ -1487,6 +1487,115 @@ public static class BakeGoldenRules
         }
         return picked;
     }
+
+    // ---- GOLDEN PROVENANCE (2026-10-12). The 2026-10-10 Bake Tests run was red on eleven goldens, and the goldens were
+    // then rewritten by hand to the failing values with no run after them: nothing could tell a blessed line from an
+    // edited one, nor whether the SOURCE had moved under the golden or the code had. A golden now starts with one
+    // header line - when it was captured, at which editor commit, a hash of every input the run depended on, and a
+    // checksum of its own lines. Judge reads the header first: a checksum that does not match is an edit outside a
+    // run (named, a FAIL); an input hash that does not match says the golden is stale by input, not by code; a golden
+    // without a header is legacy - compared as before, and given a header the first time a run matches it.
+    public const string HeaderMark = "# golden ";
+
+    public sealed class GoldenHeader
+    {
+        public string Captured;   // "2026-10-12 14:03" (UTC)
+        public string Editor;     // the editor package's git commit, short, or "unknown"
+        public string Sum;        // Checksum(body) when it was written
+        public readonly Dictionary<string, string> Inputs = new Dictionary<string, string>(StringComparer.Ordinal);   // name -> InputHash
+    }
+
+    public enum GoldenVerdict { Match, Changed, InputChanged, Edited }
+
+    /// The golden's lines without its header and comments: what a run is compared against.
+    public static string[] Body(IEnumerable<string> fileLines) =>
+        (fileLines ?? new string[0]).Where(l => l == null || !l.TrimStart().StartsWith("#", StringComparison.Ordinal)).ToArray();
+
+    /// The header of a golden file, or null for a legacy golden (no header line).
+    public static GoldenHeader ParseHeader(IEnumerable<string> fileLines)
+    {
+        string line = (fileLines ?? new string[0]).FirstOrDefault(l => l != null && l.StartsWith(HeaderMark, StringComparison.Ordinal));
+        if (line == null) return null;
+        var h = new GoldenHeader();
+        foreach (string field in line.Substring(HeaderMark.Length).Split(' '))
+        {
+            int eq = field.IndexOf('=');
+            if (eq <= 0) continue;
+            string k = field.Substring(0, eq), v = field.Substring(eq + 1);
+            if (k == "captured") h.Captured = v.Replace('T', ' ');
+            else if (k == "editor") h.Editor = v;
+            else if (k == "sum") h.Sum = v;
+            else if (k.StartsWith("in.", StringComparison.Ordinal) && k.Length > 3) h.Inputs[k.Substring(3)] = v;
+        }
+        return h;
+    }
+
+    /// FNV-1a 64 over the normalised body (trailing whitespace and empty lines dropped, LF between lines): 16 hex digits.
+    public static string Checksum(IEnumerable<string> body)
+    {
+        ulong h = 14695981039346656037UL;
+        foreach (string line in Norm(Body(body)))
+        {
+            foreach (byte b in System.Text.Encoding.UTF8.GetBytes(line)) { h ^= b; h *= 1099511628211UL; }
+            h ^= (byte)'\n'; h *= 1099511628211UL;
+        }
+        return h.ToString("x16");
+    }
+
+    /// A short hash of an input's bytes for the header: the first 16 hex digits of its SHA-256; "-" for none.
+    public static string InputHash(byte[] bytes)
+    {
+        if (bytes == null) return "-";
+        using (var sha = System.Security.Cryptography.SHA256.Create())
+            return BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", "").Substring(0, 16).ToLowerInvariant();
+    }
+
+    /// The file to write for a golden captured from `body`: the header line, then the body as normalised.
+    public static string[] Compose(IEnumerable<string> body, DateTime capturedUtc, string editor, IDictionary<string, string> inputs)
+    {
+        var b = Norm(Body(body));
+        var sb = new System.Text.StringBuilder(HeaderMark);
+        sb.Append("captured=").Append(capturedUtc.ToString("yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture));
+        sb.Append(" editor=").Append(string.IsNullOrWhiteSpace(editor) ? "unknown" : editor.Trim());
+        foreach (var kv in (inputs ?? new Dictionary<string, string>()).OrderBy(k => k.Key, StringComparer.Ordinal))
+            sb.Append(" in.").Append(kv.Key).Append('=').Append(string.IsNullOrEmpty(kv.Value) ? "-" : kv.Value);
+        sb.Append(" sum=").Append(Checksum(b));
+        return new[] { sb.ToString() }.Concat(b).ToArray();
+    }
+
+    /// The verdict on a golden file against this run's lines. `inputs` are the hashes of what the run depended on
+    /// (the source bytes, the recipe); `legacy` is true for a golden without a header. `reason` names the first
+    /// difference and, for a header golden, the capture stamp - the commits since it are the suspects.
+    public static GoldenVerdict Judge(IEnumerable<string> goldenFile, IEnumerable<string> got, IDictionary<string, string> inputs, out string reason, out bool legacy)
+    {
+        var file = (goldenFile ?? new string[0]).ToList();
+        GoldenHeader header = ParseHeader(file); legacy = header == null;
+        string[] body = Body(file);
+        int markers = file.Count(l => l != null && l.StartsWith("# golden", StringComparison.Ordinal));
+        if (markers > 0 && (header == null || markers != 1))
+        {
+            legacy = false;
+            reason = "the golden has a malformed or duplicate provenance header: restore it, or delete it and run again to re-bless";
+            return GoldenVerdict.Edited;
+        }
+        if (header != null && Checksum(body) != header.Sum)
+        {
+            reason = $"the golden's lines were edited outside a run (checksum {Checksum(body)} on disk, {header.Sum ?? "missing"} when it was captured {header.Captured} at editor {header.Editor}): restore it, or delete it and run again to re-bless";
+            return GoldenVerdict.Edited;
+        }
+        string diff = Diff(body, got);
+        if (diff == null) { reason = null; return GoldenVerdict.Match; }
+        string stamp = legacy ? " (a legacy golden: no capture stamp)" : $" (golden captured {header.Captured} at editor {header.Editor})";
+        if (header != null && inputs != null)
+            foreach (var kv in inputs.OrderBy(k => k.Key, StringComparer.Ordinal))
+                if (header.Inputs.TryGetValue(kv.Key, out string was) && was != "-" && !string.IsNullOrEmpty(kv.Value) && was != kv.Value)
+                {
+                    reason = $"{diff}; the {kv.Key} changed since the golden was captured ({was} then, {kv.Value} now){stamp}: stale by input, not by code";
+                    return GoldenVerdict.InputChanged;
+                }
+        reason = diff + stamp;
+        return GoldenVerdict.Changed;
+    }
 }
 
 // ANIMATION LAB RULES (2026-09-26, user: "I have no idea if the elevation axis is the correct one, so in the preview

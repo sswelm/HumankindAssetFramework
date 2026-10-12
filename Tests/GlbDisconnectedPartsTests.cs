@@ -300,6 +300,68 @@ public class GlbDisconnectedPartsTests
         return WriteGlb(root, bin);
     }
 
+    // ---- THE WELD TOLERANCE (2026-10-12): never finer than four float32 ulps at the mesh's coordinate magnitude, and a
+    // distance test across neighbouring cells, not a same-cell test. The salegs_revenge source: a child the split had
+    // just cut as one island read as two to seven on its own, every "gap" 0.1-1.1 ulp (GlbDisconnectedParts.Explain.cs).
+    static float NextFloat(float f) => BitConverter.ToSingle(BitConverter.GetBytes(BitConverter.ToInt32(BitConverter.GetBytes(f), 0) + 1), 0);
+
+    // two triangles that share an edge; the second triangle's copy of the shared vertices sits `dx` further along x
+    static float[] TwoTrianglesSharingAnEdge(float at, float dx) => new[] {
+        at, 0f, 0f,   at + 1f, 0f, 0f,   at, 1f, 0f,
+        at + 1f + dx, 0f, 0f,   at + 1f + dx, 1f, 0f,   at + dx, 1f, 0f };
+
+    [Fact]
+    public void A_shared_edge_one_ulp_apart_far_from_the_origin_is_one_island()
+    {
+        // at x = 600 a float32 ulp is 6.1e-5; the mesh's diagonal is 1.7, whose ten-millionth (1.7e-7) is 360x finer than
+        // what the file can hold - before the floor, the two triangles read as two islands
+        float ulp = NextFloat(601f) - 601f;
+        Assert.InRange(ulp, 6e-5f, 6.2e-5f);
+        var parts = GlbDisconnectedParts.Analyze(TwoTriangles(TwoTrianglesSharingAnEdge(600f, ulp)));
+        Assert.Equal(1, parts[0].Islands);
+        Assert.Contains("islands=1", GlbDisconnectedParts.ExplainIslands(TwoTriangles(TwoTrianglesSharingAnEdge(600f, ulp)), "Hull"));
+    }
+
+    [Fact]
+    public void A_shared_edge_within_the_tolerance_is_one_island_wherever_the_cell_boundary_falls()
+    {
+        // at x ~ 1 the tolerance is four ulps = 4.8e-7; offsets of half of it and of two ulps, over a sweep of base
+        // positions, must all weld - the old same-cell test split a pair whenever a cell boundary fell between them
+        float ulp = NextFloat(1f) - 1f;
+        for (int k = 0; k < 40; k++)
+        {
+            float at = 1f + k * 0.37f;
+            foreach (float dx in new[] { ulp, 2 * ulp })
+                Assert.Equal(1, GlbDisconnectedParts.Analyze(TwoTriangles(TwoTrianglesSharingAnEdge(at, dx)))[0].Islands);
+        }
+    }
+
+    [Fact]
+    public void A_real_gap_is_still_two_islands_and_is_explained_as_one()
+    {
+        var bytes = TwoTriangles(TwoTrianglesSharingAnEdge(600f, 0.05f));   // 0.05 at x = 600: ~820 ulps, ~200 cells
+        Assert.Equal(2, GlbDisconnectedParts.Analyze(bytes)[0].Islands);
+        string why = GlbDisconnectedParts.ExplainIslands(bytes, "Hull");
+        Assert.Contains("islands=2", why);
+        Assert.Contains("above sampled weld tolerance", why);
+        Assert.Contains("float32-ulp=", why);
+        Assert.Equal("Nope: no mesh node of that name", GlbDisconnectedParts.ExplainIslands(bytes, "Nope"));
+    }
+
+    [Theory]
+    [InlineData(0.02f)]
+    [InlineData(16f)]
+    public void A_real_gap_on_a_precise_axis_survives_a_large_other_coordinate(float gap)
+    {
+        var bytes = TwoTriangles(new[] {
+            100000000f, 0f, 0f, 100000512f, 0f, 0f, 100000000f, 512f, 0f,
+            100000000f, 512f + gap, 0f, 100000512f, 512f + gap, 0f, 100000000f, 1024f + gap, 0f
+        });
+        Assert.Equal(2, GlbDisconnectedParts.Analyze(bytes)[0].Islands);
+    }
+
+    static byte[] TwoTriangles(float[] positions) => BuildGlb(positions);
+
     static byte[] WriteGlb(JObject root, byte[] bin)
     {
         byte[] json = Encoding.UTF8.GetBytes(root.ToString(Formatting.None));

@@ -58,7 +58,8 @@ public static class WorkshopGateTest
                 BakeTestRunnerWindow.Progress.Step($"{name} ({i + 1}/{sources.Count}) — split, tear, fuse…", (float)i / sources.Count);
                 var w = System.Diagnostics.Stopwatch.StartNew();
                 var problems = new List<string>(); var snap = new List<string>();
-                try { Exercise(File.ReadAllBytes(src), name, snap, problems); }
+                byte[] bytes = null;
+                try { bytes = File.ReadAllBytes(src); Exercise(bytes, name, snap, problems); }
                 catch (OperationCanceledException) { throw; }
                 catch (Exception ex) { problems.Add("exception " + ex.GetType().Name + ": " + ex.Message); }
                 w.Stop();
@@ -71,23 +72,25 @@ public static class WorkshopGateTest
                 }
                 else
                 {
+                    // the golden's provenance (BakeGoldenFiles, 2026-10-12): the source bytes are the row's one input
+                    var inputs = new Dictionary<string, string> { ["source"] = BakeGoldenRules.InputHash(bytes) };
                     string goldFile = Path.Combine(goldDir, name + ".txt");
                     if (!File.Exists(goldFile))
                     {
-                        Directory.CreateDirectory(goldDir);
-                        File.WriteAllLines(goldFile, snap);
+                        BakeGoldenFiles.Capture(goldFile, snap, inputs);
                         lines.Add($"CAPTURED {name} ({took}) — no golden yet; this run's counts are now {GoldenDir}/{name}.txt (not a pass — run again to verify)");
                         skip++;
                     }
                     else
                     {
-                        string diff = BakeGoldenRules.Diff(File.ReadAllLines(goldFile), snap);
-                        if (diff == null) { lines.Add($"PASS {name} ({took}; {snap.Last()})"); pass++; }
+                        var verdict = BakeGoldenFiles.Judge(goldFile, snap, inputs, out string reason, out string note);
+                        if (verdict == BakeGoldenRules.GoldenVerdict.Match) { lines.Add($"PASS {name} ({took}; {snap.Last()}){note}"); pass++; }
                         else
                         {
                             Directory.CreateDirectory(workDir);
                             File.WriteAllLines(Path.Combine(workDir, name + ".candidate.txt"), snap);
-                            lines.Add($"FAIL {name} ({took}) — the Workshop's result CHANGED vs golden: {diff}. Candidate in {WorkDir}/{name}.candidate.txt; delete {GoldenDir}/{name}.txt and run again to re-bless an intended change.");
+                            string what = verdict == BakeGoldenRules.GoldenVerdict.Edited ? "" : "the Workshop's result CHANGED vs golden: ";
+                            lines.Add($"FAIL {name} ({took}) — {what}{reason}. Candidate in {WorkDir}/{name}.candidate.txt; delete {GoldenDir}/{name}.txt and run again to re-bless an intended change.");
                             fail++;
                         }
                     }
@@ -125,8 +128,13 @@ public static class WorkshopGateTest
             var children = after.Where(p => !before.Contains(p.NodeName ?? "")).ToList();
             if (children.Count != split.ChildPartsCreated) problems.Add($"the split reports {split.ChildPartsCreated} children but the output has {children.Count} new nodes");
             if (children.Any(c => !IsCutChild(c.NodeName))) problems.Add("a new node is not named _Part_NNN");
-            int notOne = children.Count(c => c.Blocked == null && c.Islands != 1);
-            if (notOne > 0) problems.Add($"{notOne} split child(ren) are not one island");
+            // named, not counted (2026-10-12: "23 split child(ren) are not one island" on the salegs source could not be
+            // investigated from the count; GlbDisconnectedParts.ExplainIslands measures the first one)
+            var notOneList = children.Where(c => c.Blocked == null && c.Islands != 1).OrderByDescending(c => c.Islands).ThenBy(c => c.NodeName, StringComparer.Ordinal).ToList();
+            if (notOneList.Count > 0)
+                problems.Add($"{notOneList.Count} split child(ren) are not one island: " +
+                             string.Join(", ", notOneList.Take(5).Select(c => $"{c.NodeName} ({c.Islands})")) + (notOneList.Count > 5 ? ", …" : "") +
+                             "; " + GlbDisconnectedParts.ExplainIslands(split.Bytes, notOneList[0].NodeName, 3));
             var names = after.Select(p => p.NodeName ?? "").Where(n => n.Length > 0).ToList();
             if (names.Distinct(StringComparer.Ordinal).Count() != names.Count) problems.Add("node names are not unique after the split");
             snap.Add($"SPLIT@0 nodes={split.NodesSplit} children={split.ChildPartsCreated} tris={split.OutputTriangles}");

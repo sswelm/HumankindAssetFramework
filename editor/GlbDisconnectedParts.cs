@@ -3478,6 +3478,26 @@ public static partial class GlbDisconnectedParts
     // preview and the output GLB.
     static Vec3 Snap(Vec3 p) => new Vec3 { X = (float)p.X, Y = (float)p.Y, Z = (float)p.Z };
 
+    static double[] WeldCells(double[] min, double[] max, double diagonal)
+    {
+        double floor = Math.Max(diagonal * 1e-7, 1e-9);
+        var cells = new double[3];
+        double maxUlp = 0;
+        for (int axis = 0; axis < 3; axis++)
+        {
+            double magnitude = Math.Max(Math.Abs(min[axis]), Math.Abs(max[axis]));
+            double ulp = magnitude > 0 ? Math.Pow(2, Math.Floor(Math.Log(magnitude, 2)) - 23) : 0;
+            cells[axis] = 4 * ulp;
+            maxUlp = Math.Max(maxUlp, ulp);
+        }
+        // Operations on a mesh can carry noise from a coarse axis into another axis (for example a rotated fuse).
+        // Keep that cross-axis allowance, but cap it by the mesh's own size so a huge world-space offset cannot
+        // swallow a representable gap along a precise axis.
+        double crossAxis = Math.Min(4 * maxUlp, diagonal * 1e-5);
+        for (int axis = 0; axis < 3; axis++) cells[axis] = Math.Max(floor, Math.Max(cells[axis], crossAxis));
+        return cells;
+    }
+
     static MeshPlan AnalyzeMesh(int meshIndex, JObject mesh, Accessors reader, bool keepSingle = false, double mergeFraction = 0)
     {
         JArray primitives = mesh["primitives"] as JArray;
@@ -3518,18 +3538,32 @@ public static partial class GlbDisconnectedParts
         double[] max = { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
         foreach (Vertex vertex in vertices) UpdateBounds(min, max, vertex.Position);
         double diagonal = Math.Sqrt(Math.Pow(max[0] - min[0], 2) + Math.Pow(max[1] - min[1], 2) + Math.Pow(max[2] - min[2], 2));
-        double epsilon = Math.Max(diagonal * 1e-7, 1e-9);
-        var positions = new Dictionary<PositionKey, int>();
+        // Float32 precision is axis-specific. A large X offset must not turn a real gap along a precise Y axis into
+        // a weld: at X=100,000,000 the X ulp is 8, while a 0.02-unit Y gap is still exactly representable. The
+        // cross-axis noise allowance is capped by mesh size; the 26 neighbouring cells make the distance test
+        // independent of grid boundaries.
+        double[] epsilon = WeldCells(min, max, diagonal);
+        double invX = 1 / epsilon[0], invY = 1 / epsilon[1], invZ = 1 / epsilon[2];
+        var cells = new Dictionary<PositionKey, List<int>>();
         for (int i = 0; i < vertices.Count; i++)
         {
             Vec3 p = vertices[i].Position;
-            var key = new PositionKey {
-                X = checked((long)Math.Round((p.X - min[0]) / epsilon)),
-                Y = checked((long)Math.Round((p.Y - min[1]) / epsilon)),
-                Z = checked((long)Math.Round((p.Z - min[2]) / epsilon))
-            };
-            int previous;
-            if (positions.TryGetValue(key, out previous)) dsu.Union(i, previous); else positions.Add(key, i);
+            long cx = checked((long)Math.Floor((p.X - min[0]) * invX)), cy = checked((long)Math.Floor((p.Y - min[1]) * invY)), cz = checked((long)Math.Floor((p.Z - min[2]) * invZ));
+            for (long dx = -1; dx <= 1; dx++)
+                for (long dy = -1; dy <= 1; dy++)
+                    for (long dz = -1; dz <= 1; dz++)
+                    {
+                        if (!cells.TryGetValue(new PositionKey { X = cx + dx, Y = cy + dy, Z = cz + dz }, out List<int> near)) continue;
+                        foreach (int j in near)
+                        {
+                            Vec3 q = vertices[j].Position;
+                            double ex = (p.X - q.X) * invX, ey = (p.Y - q.Y) * invY, ez = (p.Z - q.Z) * invZ;
+                            if (ex * ex + ey * ey + ez * ez <= 1) dsu.Union(i, j);
+                        }
+                    }
+            var own = new PositionKey { X = cx, Y = cy, Z = cz };
+            if (!cells.TryGetValue(own, out List<int> mine)) cells.Add(own, mine = new List<int>(1));
+            mine.Add(i);
         }
 
         var byRoot = new Dictionary<int, Component>();

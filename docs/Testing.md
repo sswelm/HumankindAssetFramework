@@ -1627,9 +1627,50 @@ run`, headless renders of the fused files old against new) and none came from th
 is the underside rule of 2026-09-26 (the HMS Svea crow's nest) and the exposed-hull-panel rule of 2026-10-04, with the
 old and new renders pixel-identical; the Lab rows are the Gun section of 2026-09-26 (the pivot, the GUNSPAN line) and the
 in-process probe's naming (the Wespe); the Khelandion's dissolve row changed without an attributable commit and is noted.
-One standing defect found on the way, in the backlog: the salegs split's "23 split children are not one island" fails on
+One standing defect found on the way: the salegs split's "23 split children are not one island" fails on
 2026-09-25 too. The eleven goldens were re-blessed (`ENCReload/Tools/{workshop,lab}_golden`, the old copies kept as
 `.bak-2026-09-25`); the dragon's preview FBX is stale and the battleship has no preview (both named, not fixed).
+
+**What that re-bless could not say, and now can** (2026-10-12). The eleven files were rewritten by hand to the failing
+run's values — a golden had no way to tell a run's capture from an editor's save, and no run followed. Three things
+changed:
+
+- **A golden carries its provenance.** Every golden the Workshop and Lab rows capture starts with one header line
+  (`BakeGoldenRules.Compose`): `# golden captured=<UTC> editor=<commit> in.source=<hash> [in.recipe=<hash>] sum=<checksum>`.
+  The editor commit comes from git's own files (`GitStamp.ShortHead` on the package's resolved path — a plain checkout or a
+  worktree); the input hashes are the first 16 hex digits of the SHA-256 of the source bytes (and, for the Lab, of the
+  recipe JSON); the checksum is FNV-1a over the golden's own lines. `BakeGoldenRules.Judge` reads the header before any
+  line: a checksum that does not match is **EDITED** (a FAIL even when the run now produces the edited value — "restore
+  it, or delete it and run again to re-bless"); an input hash that does not match makes a changed result **stale by
+  input, not by code**; a changed result against an intact header names the capture stamp, so the suspects are
+  `git log <stamp>..HEAD -- editor/GlbDisconnectedParts*.cs`. A golden without a header is **legacy**: compared as before,
+  and given its header by the first Unity run that matches it (`BakeGoldenFiles.Judge`) — verified, not re-blessed. The
+  checksum detects body edits that leave the header unchanged; it does not authenticate the header or prove that Unity
+  wrote it. Legacy goldens have no such check until a matching Unity run adds a header. The Khelandion dissolve row,
+  "without an attributable commit" above, has one: at capture the project's own
+  `Tools/vehicle_rig.py` (which shadows the package copy, `HafPackageContext.ToolPath`) was the 2026-09-15 sync, whose
+  RIGGING tier welded before the dissolve; the package's did not, and the local copy caught up on 2026-10-03.
+- **The gate reads the headers** — `tools/check-goldens.sh`, seconds, no source needed: every golden under
+  `Tools/{workshop,lab}_golden`, a planted one-character edit must come back EDITED or the step fails itself; SKIP without
+  the project.
+- **The Workshop row runs outside Unity** — `tools/workshop_golden_drill.sh`: the row's own `WorkshopGateTest.Exercise`,
+  compiled from any checkout's `editor/` (`HAF_EDITOR_ROOT=<checkout>`), on every recipe source against the project's
+  goldens, writing nothing into the project (candidates to `--out`, a missing golden is NOGOLDEN, a child that is not
+  one island is named with `GlbDisconnectedParts.ExplainIslands`). Run at five commits it put every moved count on the
+  underside rule (09-26) and the hull-panel rules (10-04), and showed the 64-bit .NET runtime producing Unity's own values
+  on all 21 sources — so a FAIL here is a count that moved, not a runtime. A golden is still blessed by the Unity row only.
+
+The salegs row is **fixed**, not re-blessed: the "children not one island" were the Workshop's weld tolerance — a
+ten-millionth of each mesh's own diagonal, which for a child part 600 units from the origin is 15–28x finer than a
+float32 ulp there, so one-ulp noise from an earlier fuse read as a gap; and a same-grid-cell test, which split two points
+a tenth of a cell apart whenever a cell boundary fell between them. `ExplainIslands` printed the numbers (every gap
+0.1–1.1 ulp); the tolerance now uses each axis's ulp plus a cross-axis noise allowance capped at a hundred-thousandth
+of the mesh diagonal, then tests distance across neighbouring cells (`GlbDisconnectedPartsTests`: a shared edge one ulp
+apart at x = 600 is one island; a 0.02-unit Y gap at x = 100,000,000 remains two islands). The 20 other Workshop goldens
+did not move; the Espana battleship reads 1,838
+source islands for 1,843 (five
+noise-split pieces joined) and is the one golden to re-bless in Unity (delete it, run twice). The dragon's preview FBX
+stays as named above.
 
 The in-editor tests all run from **one window** — `Tools ▸ HAF ▸ Bake Tests…` (Smoke / Features / Conversion rows,
 each with a plain-language explanation, live per-row PASS/FAIL, and a durable `Logs/haf_bake_tests_report.txt` per
