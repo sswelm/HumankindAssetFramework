@@ -267,6 +267,13 @@ slot; the scene stays at 1..250, frame 1, after every import. The stage 1 C# mod
 BlenderPosedState, BlenderReduce, BlenderArmature, BlenderSkinner - the deploy and prep drills' proofs) and what does
 not (the importer's fcurve keys and handles as made, the vertex-group lists with the empty groups, the material-less
 drop and the object-animation clear, the pose_position REST hold - left by name with localNodeAnim).
+(b) stage 1 DONE 2026-10-12: `editor/BlenderRigAnim.cs` + `riganim.exe --stage1` in the drill - every dumped recipe (23 of
+24) and all 11 fixtures equal to Blender row for row (48,102 + 428 rows: objects and matrices, meshes, weights, bones,
+pose, actions, fcurves with keys and handles); 8 planted defects and 12 value tampers caught (`docs/Testing.md`). Found:
+the importer's bone turn quaternions are products with the identity, so a key's -0 is +0 (fixed in ImportRig.FinalTrs);
+a dropped mesh's children keep their matrix_world. Next: (c) stage 2 - the bone-parent -> skin conversion and the
+wrapper flatten (zero registry recipes: fixtures first; fx_multi's Hung and fx_wrapped reach the code), continuing
+from `BlenderRigAnim.Stage1`'s scene state; localNodeAnim stays LEFT by name.
 
 - **Blender-exact vertex positions for skinned parts** — OPEN (2026-10-02, found by 3c). Blender's importer skins a
   rigged mesh into its bind pose in numpy float32: per joint, (bind matrix) @ (inverse bind matrix), where the bind
