@@ -53,7 +53,10 @@ mapfile -t NAMING < <(python "$ROOT/tools/vehicle-probe-drill/naming_fixtures.py
 [ "${#FIXTURES[@]}" -gt 0 ] && [ "${#NAMING[@]}" -gt 0 ] || { echo "FAIL — could not write the fixtures"; exit 1; }
 PACK=$(ls "$PROJECT"/Assets/Pack/*/pack.json 2>/dev/null | head -1)
 REGISTRY=(); REGISTRY_NOTE="the registry"
-if [ -n "$PACK" ]; then mapfile -t REGISTRY < <(python "$ROOT/tools/glb-reader-drill/registry_files.py" "$PACK" | tr -d '\r' | awk '!seen[tolower($0)]++'); else REGISTRY_NOTE="NO registry (no modding project at $PROJECT; set HAF_UNITY_PROJECT)"; fi
+if [ -n "$PACK" ]; then
+  python "$ROOT/tools/glb-reader-drill/registry_files.py" "$PACK" > "$TMPD/registry_files.txt" || { echo "FAIL — cannot read the registry at $PACK"; exit 1; }
+  mapfile -t REGISTRY < <(tr -d '\r' < "$TMPD/registry_files.txt" | awk '!seen[tolower($0)]++')
+else REGISTRY_NOTE="NO registry (no modding project at $PROJECT; set HAF_UNITY_PROJECT)"; fi
 SAMPLES_OK=()
 mapfile -t SLINES < <(python "$ROOT/tools/glb-reader-drill/fetch_samples.py" "$ROOT/References/gltf-samples" --list 2>/dev/null | tr -d '\r')
 for l in "${SLINES[@]}"; do IFS=$'\t' read -r sp st sx <<< "$l"; [ "$st" = "ok" ] && SAMPLES_OK+=("$sp"); done
@@ -124,7 +127,7 @@ if [ -z "$BLENDER" ]; then
     cand=$(ls -d "$base"/Blender* 2>/dev/null | sort -V | tail -1); [ -n "$cand" ] && [ -x "$cand/blender.exe" ] && { BLENDER="$cand/blender.exe"; break; }
   done
 fi
-if [ -z "$BLENDER" ]; then echo "PASS — vehicle probe drill: $n_ok files probed in C#; Blender not found, so NO parity comparison (BLENDER=<exe> to force)"; exit 0; fi
+if [ -z "$BLENDER" ]; then echo "SKIP — vehicle probe drill: $n_ok files probed in C#; Blender not found, so NO parity comparison (BLENDER=<exe> to force)"; exit 3; fi
 if [ "${FULL:-0}" = "1" ]; then SAMPLE=("${FILES[@]}"); cp "$WTMP/jobs.json" "$WTMP/jobs_sample.json"
 else
   python - "$WTMP/jobs.json" "$WTMP/jobs_sample.json" <<'PY'
@@ -161,4 +164,6 @@ n_arb=0; n_left=0
 for d in "${DIFFERING[@]}"; do [ -z "$d" ] && continue; if printf '%s\n' "${SAMPLE[@]}" | grep -qixF -- "$d"; then n_arb=$((n_arb + 1)); else n_left=$((n_left + 1)); echo "NOTE — a differing recipe's source was not put to Blender in this run (over 100 MB; FULL=1): $d"; fi; done
 [ "${#DIFFERING[@]}" -eq 0 ] || echo "recipes that differ: $n_arb are STALE (Blender's probe of the source today gives the C# rows, not the recipe's), $n_left left for FULL=1"
 NATIVE_NOTE=""; [ "$N_NATIVE" -eq 0 ] || NATIVE_NOTE=" ($N_NATIVE probed on the 64-bit .NET runtime: too large for Unity's 32-bit standalone Mono)"
-echo "PASS — vehicle probe drill: $n_ok probes in C# (${#FILES[@]} files, ${#JOBS[@]} jobs with a second model, placements or an orientation)$NATIVE_NOTE; on ${#SAMPLE[@]} files and $N_JOBS_SAMPLE jobs the rows equal Blender's own probe (names, order, vertices, visibility, inside-out, boxes, bones, rig bones, matrices and vertex positions bit for bit; Blender took $((t1 - t0)) s for those)${RECIPE_LINE:+; $RECIPE_LINE}"
+RESULT="PASS — vehicle probe drill: $n_ok probes in C# (${#FILES[@]} files, ${#JOBS[@]} jobs with a second model, placements or an orientation)$NATIVE_NOTE; on ${#SAMPLE[@]} files and $N_JOBS_SAMPLE jobs the rows equal Blender's own probe (names, order, vertices, visibility, inside-out, boxes, bones, rig bones, matrices and vertex positions bit for bit; Blender took $((t1 - t0)) s for those)${RECIPE_LINE:+; $RECIPE_LINE}"
+[ "${#REGISTRY[@]}" -gt 0 ] || { echo "SKIP — ${RESULT#PASS — } | the registry population was NOT drilled: no existing registry model files at $PROJECT (set HAF_UNITY_PROJECT)"; exit 3; }
+echo "$RESULT"

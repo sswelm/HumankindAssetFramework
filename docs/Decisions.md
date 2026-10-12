@@ -190,7 +190,9 @@ glbconv multi-tile warning, the honest "Baked, but REGISTRY SAVE FAILED" status,
 The fast guards (build, tests, editor compile-check, schema parity) run as one `Tools/check.sh` per repo, wired as a
 pre-push hook. **Why:** "discipline you must remember" isn't a net; standing the gate up immediately caught three latent
 schema drifts. Heavy guards (Blender golden-master, in-editor Feature Test, in-game binding report) stay **out** of the
-sub-minute gate on purpose. See [Testing.md](Testing.md).
+gate on purpose. (It was sub-minute when decided; the Blender-parity drills joined it in October 2026 and run in
+parallel — [Testing.md](Testing.md) has the current timing, and since 2026-10-11 a step whose prerequisite is absent
+is a `[SKIP]` that fails the push, never a `[PASS]`.)
 
 ## The Factory owns the model; each Lab owns its axis (settled)
 The Model Factory lists ALL entries and owns model geometry / transform / shading + its bake GUIDs; the Animation Lab

@@ -2,7 +2,9 @@
 # pre-push hook — blocks a push if the fast check gate fails, so a broken build / failing test / drifted schema
 # can't land. Version-controlled: enabled once per clone with
 #     git config core.hooksPath tools/git-hooks
-# Runs tools/check.sh (sub-minute). Bypass ONLY in a genuine emergency:  git push --no-verify
+# Runs tools/check.sh (about 16 minutes with the Blender-parity drills; the source-only steps take seconds). A step
+# whose prerequisite is absent reports [SKIP] and FAILS the push — HAF_ALLOW_SKIP=1 git push accepts a partial gate on
+# purpose. Bypass the gate entirely ONLY in a genuine emergency:  git push --no-verify
 # A push that only DELETES refs (git push origin --delete <branch>) changes nothing the gate guards, yet it ran the full
 # gate on every merged-branch clean-up until 2026-10-11. Git gives the refs on stdin as
 # "<local ref> <local sha> <remote ref> <remote sha>"; a deletion has an all-zero local sha.

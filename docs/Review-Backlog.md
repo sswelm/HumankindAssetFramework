@@ -375,8 +375,12 @@ skipped. Ranked by consequence within each group.
   `test_progress_reports_completion_before_an_earlier_job_finishes_and_uses_real_duration` failed a docs-only push
   (`'PASS fast (2 s)' not found in ''`), 1 of 3 idle reruns, and 1 of 8 under load in the PR #148 review. The test
   already polled the progress file, but gave the background worker only three seconds to start and finish before
-  capturing it. It now waits for the fast worker's completion line, with a generous timeout only to diagnose a stuck worker;
-  a failure still needs investigation, not an automatic retry.
+  capturing it. PR #158 raised the guard to 60 seconds and serialized competing gates; the progress line remains
+  the synchronization point. A timeout still needs investigation, not an automatic retry.
+
+- ~~**The gate-lock test released its mock lock on a timer**~~ — **FIXED 2026-10-12.** A slow child startup could
+  outlast the 1.5-second timer and acquire an already released lock, so the test reported no waiting message. The
+  parent now releases the lock only after observing the child's waiting progress line.
 
 
 - ~~**`check-member-shape.sh` matches only `Convert.To*(GetMember(` — blind to the `Mem(` wrapper, and one live

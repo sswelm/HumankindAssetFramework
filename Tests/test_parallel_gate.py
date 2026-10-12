@@ -24,6 +24,7 @@ class ParallelGateTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.path = Path(self.tmp.name)
         self.env = dict(os.environ, HAF_PROGRESS=(self.path / "progress.md").as_posix())
+        self.env.pop("HAF_ALLOW_SKIP", None)   # the machine's own setting must not decide a test
         write(self.path / "progress.md", "")
 
     def script(self, text):
@@ -31,12 +32,13 @@ class ParallelGateTests(unittest.TestCase):
         write(path, 'set -uo pipefail\nROOT="$1"\n' + text)
         return [BASH, path.as_posix(), self.path.as_posix()]
 
-    def run_shell(self, text):
-        return subprocess.run(self.script(text), env=self.env, capture_output=True, text=True, timeout=15)
+    def run_shell(self, text, timeout=15):
+        return subprocess.run(self.script(text), env=self.env, capture_output=True, text=True, timeout=timeout)
 
     def helpers(self):
+        # every definition of the gate, up to the line where the real gate takes the lock and starts its steps
         source = (ROOT / "tools/check.sh").read_text(encoding="utf-8")
-        return source[source.index("fail=0\n"):source.index('note "started (')]
+        return source[source.index("fail=0\n"):source.index("# ==== the gate itself")]
 
     def tampers(self):
         source = (ROOT / "tools/deploy_drill.sh").read_text(encoding="utf-8")
@@ -44,7 +46,7 @@ class ParallelGateTests(unittest.TestCase):
 
     def test_progress_reports_completion_before_an_earlier_job_finishes_and_uses_real_duration(self):
         write(self.path / "clock", "100\n")
-        # The progress line is the synchronization point; the timeout only guards a stuck worker.
+        # A controlled clock and release file avoid timing assumptions on a busy CI runner.
         text = '''date() { if [ "$1" = +%s ]; then cat "$ROOT/clock"; else echo 00:00; fi; }
 '''+self.helpers()+'''
 run_bg slow bash -c 'while [ ! -f "$1/release" ]; do sleep .05; done; echo slow-output' _ "$ROOT"
@@ -55,19 +57,18 @@ exit "$fail"
 '''
         proc = subprocess.Popen(self.script(text), env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
-            deadline = time.monotonic() + 30
-            before_release = ""
+            # The clock is controlled, so this deadline is only how long the test will WAIT for the worker's note:
+            # 3 s was missed twice on 2026-10-11 under another gate's load (the worker took 100+ s to be scheduled).
+            deadline = time.monotonic() + 60
             while time.monotonic() < deadline:
-                before_release = (self.path / "progress.md").read_text()
-                if "PASS fast" in before_release:
-                    break
-                if proc.poll() is not None:
+                if "PASS fast" in (self.path / "progress.md").read_text():
                     break
                 time.sleep(.05)
+            before_release = (self.path / "progress.md").read_text()
         finally:
             write(self.path / "clock", "110\n")
             write(self.path / "release", "")
-            out, err = proc.communicate(timeout=10)
+            out, err = proc.communicate(timeout=60)
         self.assertEqual(proc.returncode, 0, err)
         self.assertIn("PASS fast (2 s)", before_release)
         self.assertNotIn("PASS slow", before_release)
@@ -112,6 +113,198 @@ exit "$fail"
 ''')
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertIn("[FAIL] good", result.stdout)
+
+    # SKIP (exit 3) is a third verdict, not a PASS (2026-10-11): a drill whose prerequisite is absent must be printed as
+    # [SKIP], recorded as SKIP, and must fail the gate unless HAF_ALLOW_SKIP=1 accepts a partial gate on purpose.
+    SKIP_SCRIPT = '''
+run_bg skipper bash -c 'echo "SKIP — nothing to compare on this machine"; exit 3'
+run_bg good bash -c 'echo good-output'
+run_bg_wait
+run serial-skip bash -c 'echo "SKIP — serial"; exit 3'
+verdict; exit $?
+'''
+
+    def test_a_skipped_step_is_reported_as_skip_and_fails_the_verdict(self):
+        result = self.run_shell(self.helpers()+self.SKIP_SCRIPT)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("[SKIP] skipper", result.stdout)
+        self.assertIn("[SKIP] serial-skip", result.stdout)
+        self.assertIn("[PASS] good", result.stdout)
+        self.assertNotIn("[PASS] skipper", result.stdout)
+        self.assertIn("CHECK: FAIL", result.stdout)              # ASCII only: the pipe is decoded in the console's code page
+        self.assertIn("2 step(s) SKIPPED", result.stdout)
+        progress = (self.path / "progress.md").read_text()
+        self.assertIn("SKIP skipper", progress)
+        self.assertIn("SKIP serial-skip", progress)
+        self.assertIn("DONE FAIL (2 skipped)", progress)
+
+    def test_haf_allow_skip_accepts_a_partial_gate_and_says_so(self):
+        self.env["HAF_ALLOW_SKIP"] = "1"
+        result = self.run_shell(self.helpers()+self.SKIP_SCRIPT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("[SKIP] skipper", result.stdout)
+        self.assertIn("CHECK: PASS WITH 2 SKIP", result.stdout)
+        self.assertIn("DONE PASS (2 skipped, allowed by HAF_ALLOW_SKIP=1)", (self.path / "progress.md").read_text())
+
+    def test_a_skip_never_hides_a_failure_even_when_allowed(self):
+        self.env["HAF_ALLOW_SKIP"] = "1"
+        result = self.run_shell(self.helpers()+'''
+run_bg skipper bash -c 'echo "SKIP — nothing to compare"; exit 3'
+run_bg broken bash -c 'echo broken-output; exit 7'
+run_bg_wait
+verdict; exit $?
+''')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("[SKIP] skipper", result.stdout)
+        self.assertIn("[FAIL] broken", result.stdout)
+        self.assertIn("CHECK: FAIL", result.stdout)
+        self.assertIn("fix the [FAIL] step(s)", result.stdout)
+        self.assertNotIn("SKIPPED", result.stdout)                 # the failure verdict, not the skip verdict
+
+    def test_a_skip_with_missing_completion_metadata_fails_closed(self):
+        self.env["HAF_ALLOW_SKIP"] = "1"
+        result = self.run_shell(self.helpers()+'''
+run_bg skipper bash -c 'echo "SKIP — nothing to compare"; exit 3'
+wait "${BG_PID[0]}"
+rm "$BG_LOGS/0.end"
+run_bg_wait
+verdict; exit $?
+''')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("[FAIL] skipper", result.stdout)
+        self.assertNotIn("[SKIP] skipper", result.stdout)
+
+    def test_project_drills_need_real_project_inputs_even_with_a_pack_file(self):
+        # Exercise the actual final verdict lines without running Unity or Blender.
+        guards = {
+            "glb_reader_drill.sh": "N_REGISTRY",
+            "glb_writer_drill.sh": "N_REGISTRY",
+            "decimate_drill.sh": "REGISTRY",
+            "prep_drill.sh": "REGISTRY",
+            "vehicle_probe_drill.sh": "REGISTRY",
+            "workshop_compact_drill.sh": "WORKSHOP",
+            "deploy_drill.sh": "n_rec",
+        }
+        for name, count in guards.items():
+            source = (ROOT / "tools" / name).read_text(encoding="utf-8")
+            guard = next(line for line in source.splitlines()
+                         if line.startswith("[") and "${RESULT#PASS" in line)
+            if count == "N_REGISTRY":
+                self.assertLess(source.index("N_REGISTRY=${#FILES[@]}"), source.index("FILES+=(\"${FIXTURES[@]}\")"))
+            for present in (False, True):
+                with self.subTest(drill=name, present=present):
+                    value = "one.glb" if present else ""
+                    setup = f'PACK=pack.json; PROJECT=project; RESULT="PASS — fixtures checked"; N_REGISTRY={int(present)}; n_rec={int(present)}; REGISTRY=(); WORKSHOP=()\n'
+                    if present:
+                        setup += f'{count}+=("{value}")\n' if count in ("REGISTRY", "WORKSHOP") else ""
+                    result = self.run_shell(setup + guard + '\necho PASS\n')
+                    self.assertEqual(result.returncode, 0 if present else 3, result.stderr)
+                    self.assertIn("PASS" if present else "SKIP", result.stdout)
+
+    # One gate at a time (2026-10-12): a second gate waits for the lock and says so; a holder that stopped
+    # heartbeating is taken over; only the holder frees the lock.
+    def test_a_second_gate_waits_for_the_lock_then_proceeds_and_frees_it(self):
+        lock = self.path / "gate.lock"
+        self.env.update(HAF_GATE_LOCK=lock.as_posix(), HAF_GATE_LOCK_POLL="0.2", HAF_GATE_LOCK_STALE="600", HAF_GATE_LOCK_BEAT="0.5")
+        lock.mkdir(); write(lock / "holder", "other-gate pid 1"); write(lock / "beat", str(int(time.time())))
+        proc = subprocess.Popen(self.script(self.helpers()+'''
+gate_lock
+echo acquired
+gate_unlock
+[ -d "$LOCK" ] && echo still-locked || echo released
+'''), env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        waiting = "waiting: another gate holds the lock (other-gate pid 1)"
+        progress = ""
+        try:
+            deadline = time.monotonic() + 60  # guard a stuck child; release follows its waiting signal
+            while time.monotonic() < deadline:
+                progress = (self.path / "progress.md").read_text()
+                if waiting in progress or proc.poll() is not None:
+                    break
+                time.sleep(.05)
+        finally:
+            shutil.rmtree(lock, ignore_errors=True)
+            try:
+                out, err = proc.communicate(timeout=30)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.communicate()
+                self.fail("gate did not finish after the other gate released its lock")
+        self.assertIn(waiting, progress)
+        self.assertEqual(proc.returncode, 0, err)
+        self.assertIn("another gate is running (other-gate pid 1); waiting", out)
+        self.assertIn("acquired", out)
+        self.assertIn("released", out)
+
+    def test_a_stale_lock_is_taken_over_and_a_waiter_never_frees_anothers(self):
+        lock = self.path / "gate.lock"
+        self.env.update(HAF_GATE_LOCK=lock.as_posix(), HAF_GATE_LOCK_POLL="0.2", HAF_GATE_LOCK_STALE="2", HAF_GATE_LOCK_BEAT="0.5")
+        lock.mkdir(); write(lock / "holder", "dead-gate pid 2"); write(lock / "beat", "0")
+        result = self.run_shell(self.helpers()+'gate_lock\necho acquired\ngate_unlock\n', timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("took over a stale gate lock (dead-gate pid 2", result.stdout)
+        self.assertIn("acquired", result.stdout)
+        self.assertFalse(lock.exists())
+        # a live lock held by someone else: gate_unlock from a shell that is not the holder leaves it alone
+        lock.mkdir(); write(lock / "holder", "other-gate pid 3"); write(lock / "beat", str(int(time.time())))
+        result = self.run_shell(self.helpers()+'gate_unlock\n[ -d "$LOCK" ] && echo kept || echo freed\n')
+        self.assertIn("kept", result.stdout)
+
+    def test_an_abort_kills_a_workers_grandchild_and_frees_the_lock(self):
+        # The worker's shell is one process; what it spawned through Cygwin's exec has no usable Windows parent, so
+        # the abort must find it another way (its command line names the gate's temp directory). The grandchild here
+        # is a uniquely named copy of sleep, started under the worker's TMPDIR.
+        lock = self.path / "gate.lock"
+        self.env.update(HAF_GATE_LOCK=lock.as_posix(), HAF_GATE_LOCK_POLL="0.2", HAF_GATE_LOCK_BEAT="0.5")
+        tag = f"hafsleep_{os.getpid()}"
+        sleep_exe = Path(BASH).parent.parent / "usr/bin/sleep.exe" if os.name == "nt" else Path(shutil.which("sleep"))
+        result = self.run_shell(self.helpers()+f'''
+gate_lock
+trap gate_abort TERM
+run_bg deep bash -c 'cp "$0" "$TMPDIR/{tag}.exe"; "$TMPDIR/{tag}.exe" 300 & wait' "{sleep_exe.as_posix()}"
+sleep 3
+kill -TERM $$
+sleep 5
+echo "still here"
+''', timeout=60)
+        alive = subprocess.run([BASH, "-c", f"sleep 1; ps -W | grep -c '{tag}'"], capture_output=True, text=True).stdout.strip()
+        subprocess.run([BASH, "-c", f"taskkill /F /IM '{tag}.exe' > /dev/null 2>&1; true"])
+        self.assertEqual(result.returncode, 130, result.stderr)
+        self.assertNotIn("still here", result.stdout)
+        self.assertEqual(alive, "0", "the worker's grandchild survived the abort")
+        self.assertFalse(lock.exists())
+        self.assertIn("DONE ABORTED (interrupted)", (self.path / "progress.md").read_text())
+
+    def test_a_hung_step_is_killed_and_failed_within_the_step_limit(self):
+        self.env["HAF_STEP_TIMEOUT"] = "2"
+        t0 = time.monotonic()
+        result = self.run_shell(self.helpers()+'''
+run_bg hung bash -c 'sleep 60; echo never'
+run_bg good bash -c 'echo good-output'
+run_bg_wait
+run serial-hung bash -c 'sleep 60; echo never'
+verdict; exit $?
+''', timeout=90)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertLess(time.monotonic() - t0, 60)
+        self.assertIn("[FAIL] hung", result.stdout)
+        self.assertIn("[FAIL] serial-hung", result.stdout)
+        self.assertIn("timed out: the step limit is 2 s", result.stdout)
+        self.assertIn("[PASS] good", result.stdout)
+        self.assertNotIn("never", result.stdout)
+
+    def test_a_clean_gate_still_passes_with_the_verdict(self):
+        result = self.run_shell(self.helpers()+'''
+run_bg good bash -c 'echo good-output'
+run_bg_wait
+run also-good bash -c 'true'
+verdict; exit $?
+''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("CHECK: PASS", result.stdout)
+        self.assertIn("safe to push.", result.stdout)
+        self.assertNotIn("SKIP", result.stdout)
+        self.assertIn("DONE PASS", (self.path / "progress.md").read_text())
 
     def test_tamper_arguments_preserve_spaces_and_apostrophes_and_select_each_jobs_file(self):
         directory = self.path / "tamper inputs O'Brien"

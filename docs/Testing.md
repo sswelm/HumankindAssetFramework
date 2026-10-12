@@ -34,6 +34,41 @@ in **GitHub Actions**. Both lanes matter, and for different reasons:
   contributor may never have set, and `git push --no-verify` — or a GitHub web edit, which runs no hook whatsoever —
   walks straight past it. CI is the lane that survives all three.
 
+**A step has three verdicts, and SKIP is not PASS (2026-10-11).** A step exits 0 when its claim held, **3** when a
+prerequisite was absent and its claim was therefore *not tested* (its own `SKIP —` line says what did run: the C# side
+of a parity drill, the fixtures without the registry population), anything else when it failed. The gate prints a
+skipped step as `[SKIP]`, records `SKIP` in `PROGRESS.md`, lists every skipped step under the summary, and **fails the
+push**: on this machine every prerequisite exists, so a SKIP means Blender or the modding project went missing, and a
+port change pushed on that gate would have lost its oracle silently. `HAF_ALLOW_SKIP=1 git push` accepts a partial gate
+on purpose and says so in the summary (`CHECK: PASS WITH n SKIP`); a `[FAIL]` beside a skip still fails. Until 2026-10-11
+eight of the 26 steps printed `PASS … Blender not found, so NO parity comparison` and exited 0 — the general review's
+verification pass counted them — so the gate reported 26/26 while eight claims were untested. `Tests/test_parallel_gate.py`
+drives the real gate functions through a skipped worker, a skipped serial step, a skip beside a failure, a skip with lost
+completion metadata (still a FAIL) and `HAF_ALLOW_SKIP`.
+
+**One gate at a time, and no step runs forever (2026-10-12).** Two gates on one machine — two sessions pushing, or a
+push beside a drill run — failed each other for weeks: the reader-gate drill's plant vanished under the other gate, and
+this file's own timing test missed its three-second deadline under the other gate's thirteen drills (two rejected pushes
+on 2026-10-11). The gate now takes a **lock** — a directory under the user's temp folder, so every checkout and worktree
+shares it (`HAF_GATE_LOCK` overrides) — and a second gate prints `another gate is running (…); waiting for it`, notes the
+same in `PROGRESS.md`, and polls until the first finishes (up to 45 minutes, then it fails and names the holder). The
+holder heartbeats every 20 s; a holder that stopped (a killed shell) is taken over after 3 minutes, and only the holder
+ever removes the lock. Every step runs under a limit (`HAF_STEP_TIMEOUT`, 30 minutes): a hung Blender or Mono is killed
+and reported as `[FAIL] … timed out`, where before it blocked the push with no message. `Ctrl-C` stops the workers, drops
+their logs, frees the lock and notes `DONE ABORTED` — and it stops what the workers spawned, which is the part that
+needed a drill: Windows keeps no usable parent chain for what Cygwin `exec`'d (every drill script, Blender shard and
+Mono run has a parent that is already gone), so `taskkill /T` stops at the worker's shell and the drills ran on
+underneath (a gate killed 60 s into its drills left eleven processes still starting Blender a minute later). Every
+step's `mktemp` now lands under the gate's own temp directory (`TMPDIR`), whose random name is on the command line of
+everything a step runs, and the abort kills by that name — plus any shell or `timeout` whose command line names this
+checkout's `tools/`, which is how the drill scripts themselves are reached (so an abort also stops a drill of the same
+checkout started by hand; another checkout's are untouched). The step limit's own `timeout` reaches only the step's
+shell, so a Blender shard a timed-out step had started finishes on its own. The main checkout's gate now reports to the worktrees' `PROGRESS.md`
+too (its own parent folder has none), and the hook and CI run the same source-only steps again (the vehicle-rig math test
+joined the hook, the exit-status gate joined CI). `Tests/test_parallel_gate.py` drives the lock (a waiter, a stale
+takeover, a non-holder's unlock) and the step limit through the gate's real functions; the lock itself was drilled by
+starting two gates at once and interrupting the first.
+
 | Surface | `tools/check.sh` (pre-push hook) | also in CI | ~time |
 |---|---|---|---|
 | **Runtime + shared contract** | `dotnet build` · `dotnet test` · docs guard · binding-catalog surface · hot path · parse shape · member shape · schema parity | all source-only checks | seconds |

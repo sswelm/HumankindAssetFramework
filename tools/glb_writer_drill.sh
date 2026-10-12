@@ -40,7 +40,11 @@ OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -out:"$WTMP/read.exe" "${REFS[@]
 [ "$rc" -eq 0 ] && [ -s "$TMPD/read.exe" ] || { echo "$OUT" | grep -E "error" | head -20; echo "FAIL — the GLB reader drill did not compile (csc rc=$rc)"; exit 1; }
 
 FILES=()
-[ -z "$PACK" ] || mapfile -t FILES < <(python "$ROOT/tools/glb-reader-drill/registry_files.py" "$PACK" | tr -d '\r')
+if [ -n "$PACK" ]; then
+  python "$ROOT/tools/glb-reader-drill/registry_files.py" "$PACK" > "$TMPD/registry_files.txt" || { echo "FAIL — cannot read the registry at $PACK"; exit 1; }
+  mapfile -t FILES < <(tr -d '\r' < "$TMPD/registry_files.txt")
+fi
+N_REGISTRY=${#FILES[@]}
 [ -n "$PACK" ] && [ "${#FILES[@]}" -eq 0 ] && REGISTRY_NOTE="NO registry (it names no .glb that exists on disk)"
 # plus the SOURCES of the Lab's saved recipes: the registry holds the Lab's outputs, these are its inputs - the unreduced
 # originals every later step reads (review of PR #112: they found shared vertex accessors and a required material
@@ -122,7 +126,7 @@ if [ -z "$BLENDER" ]; then
     cand=$(ls -d "$base"/Blender* 2>/dev/null | sort -V | tail -1); [ -n "$cand" ] && [ -x "$cand/blender.exe" ] && { BLENDER="$cand/blender.exe"; break; }
   done
 fi
-if [ -z "$BLENDER" ]; then echo "PASS — GLB writer drill: $n_wrote files written and read back equal ($REGISTRY_NOTE, ${#FIXTURES[@]} fixtures, $SAMPLES_NOTE); Blender not found, so no import of the written files (BLENDER=<exe> to force)"; exit 0; fi
+if [ -z "$BLENDER" ]; then echo "SKIP — GLB writer drill: $n_wrote files written and read back equal ($REGISTRY_NOTE, ${#FIXTURES[@]} fixtures, $SAMPLES_NOTE); Blender not found, so no import of the written files (BLENDER=<exe> to force)"; exit 3; fi
 if [ "${FULL:-0}" = "1" ]; then SAMPLE=("${WFILES[@]}")
 else
   # the written fixtures and Khronos samples (every one), the largest and smallest two written registry files
@@ -134,4 +138,6 @@ BOUT=$(printf '%s' "$BOUT" | LC_ALL=C sed 's/\xEF\xBB\xBF//g')
 printf '%s\n' "$BOUT" > "$TMPD/blender.txt"
 python "$ROOT/tools/glb-reader-drill/compare.py" "$TMPD/orig.txt" "$TMPD/blender.txt" --basename | grep -E "^FAIL|^PASS |^COMPARED"
 python "$ROOT/tools/glb-reader-drill/compare.py" "$TMPD/orig.txt" "$TMPD/blender.txt" --basename > /dev/null || { echo "FAIL — GLB writer drill: Blender reads a written file differently from its original"; exit 1; }
-echo "PASS — GLB writer drill: $n_wrote files written and read back equal to their originals field by field ($REGISTRY_NOTE, ${#FIXTURES[@]} fixtures, $SAMPLES_NOTE); Blender reads ${#SAMPLE[@]} written file(s) as it read the originals"
+RESULT="PASS — GLB writer drill: $n_wrote files written and read back equal to their originals field by field ($REGISTRY_NOTE, ${#FIXTURES[@]} fixtures, $SAMPLES_NOTE); Blender reads ${#SAMPLE[@]} written file(s) as it read the originals"
+[ "$N_REGISTRY" -gt 0 ] || { echo "SKIP — ${RESULT#PASS — } | the registry population was NOT drilled: no existing registry model files at $PROJECT (set HAF_UNITY_PROJECT)"; exit 3; }
+echo "$RESULT"

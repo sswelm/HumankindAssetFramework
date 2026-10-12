@@ -114,6 +114,12 @@ jobs:
         shell: bash
         run: bash tools/check-package-meta.sh
 
+      # Source-only as well (git ls-files over the gate scripts), and it guards the shape that cost twice; it ran in the
+      # hook alone until 2026-10-12, so a web edit or a --no-verify walked past it.
+      - name: Exit status (no gate script reads a status from the end of a pipeline)
+        shell: bash
+        run: bash tools/check-exit-status.sh
+
   # Publish only code that has already passed the complete source-only CI job. Pull requests never enter this job,
   # so unmerged workflow changes cannot obtain a write token or alter the public wiki. Running on every master push
   # is deliberate: sync_wiki.sh is deterministic and the staged-diff check makes non-doc pushes a cheap no-op.

@@ -4,38 +4,107 @@
 # also runnable by hand any time:  bash tools/check.sh   (lowercase tools/ — this repo, unlike ENCReload's Tools/)
 #
 # Deliberately NOT here (too slow / need Unity or the game): deploy_regression.sh (Blender golden-master), the
-# in-editor Feature Test, and the in-game binding report (haf_bindings_report.txt). This is the sub-minute gate.
+# in-editor Feature Test, and the in-game binding report (haf_bindings_report.txt). The source-only steps take
+# seconds; with the Blender-parity drills (in parallel since 2026-10-11) the whole gate takes about 16 minutes.
+#
+# A step's exit status means: 0 PASS (its claim held), 3 SKIP (a prerequisite was absent, so its claim was NOT
+# tested; the step's own SKIP line says what did run), anything else FAIL. SKIP is not PASS (2026-10-11): until then a
+# drill that printed "PASS … Blender not found, so NO parity comparison" and exited 0 kept its green on a machine
+# without Blender, and the gate reported 26/26 while eight steps had lost their defining claim. A SKIP is printed as
+# [SKIP], recorded in PROGRESS.md, and FAILS the push — unless HAF_ALLOW_SKIP=1 says a partial gate is what was meant.
 set -uo pipefail
 cd "$(dirname "$0")/.." && ROOT="$(pwd)" || exit 2
 fail=0
+skipped=()
 # Progress: every step appends a line to PROGRESS.md (the file beside the worktrees, kept open by the user) when it
-# ends, so a 20-minute gate can be watched without asking. Nothing here fails on its absence.
+# ends, so a 20-minute gate can be watched without asking. Nothing here fails on its absence. The main checkout's
+# parent has no such file; its gate reports to the worktrees' one, so every session sees every gate (2026-10-12).
 PROGRESS="${HAF_PROGRESS:-$ROOT/../PROGRESS.md}"
+[ -f "$PROGRESS" ] || [ ! -f "$ROOT/../haf-wt/PROGRESS.md" ] || PROGRESS="$ROOT/../haf-wt/PROGRESS.md"
+# A step may take this long; a hung Blender or Mono used to block the push forever, with no message (2026-10-12).
+STEP_TIMEOUT="${HAF_STEP_TIMEOUT:-1800}"
 note() { [ -f "$PROGRESS" ] && printf '%s  gate  %s\n' "$(date +%H:%M)" "$*" >> "$PROGRESS"; return 0; }
+word() { case "$1" in 0) echo PASS;; 3) echo SKIP;; *) echo FAIL;; esac; }
+record() {  # record <label> <rc> <seconds>: the verdict line, counted (the PROGRESS note is the caller's)
+  local label="$1" rc="$2" s="$3"
+  case "$rc" in
+    0) printf '[PASS] %s (%d s)\n' "$label" "$s" ;;
+    3) printf '[SKIP] %s (%d s) — its claim was NOT tested on this machine; the SKIP line above says what did run\n' "$label" "$s"; skipped+=("$label") ;;
+    124) printf '[FAIL] %s (%d s) — timed out: the step limit is %s s (HAF_STEP_TIMEOUT)\n' "$label" "$s" "$STEP_TIMEOUT"; fail=1 ;;
+    *) printf '[FAIL] %s (%d s)\n' "$label" "$s"; fail=1 ;;
+  esac
+}
 run() {  # run <label> <command...>: in sequence, the output as it comes
-  local label="$1"; shift; local t0=$(date +%s) t1
+  local label="$1"; shift; local t0=$(date +%s) rc s
   printf '\n=== %s ===\n' "$label"
-  if "$@"; then t1=$(date +%s); printf '[PASS] %s (%d s)\n' "$label" "$((t1 - t0))"; note "PASS $label ($((t1 - t0)) s)"
-  else t1=$(date +%s); printf '[FAIL] %s (%d s)\n' "$label" "$((t1 - t0))"; note "FAIL $label ($((t1 - t0)) s)"; fail=1; fi
+  timeout -k 30 "$STEP_TIMEOUT" "$@"; rc=$?; s=$(( $(date +%s) - t0 ))
+  record "$label" "$rc" "$s"; note "$(word "$rc") $label ($s s)"
+}
+# ---- ONE GATE AT A TIME on this machine (2026-10-12) ----
+# Two gates at once — two sessions pushing, or a push beside a drill run — have failed each other for weeks: the
+# reader-gate drill's plant vanishing under the other gate, and the timing test in Tests/test_parallel_gate.py missing
+# its deadline under the other gate's thirteen drills (two rejected pushes on 2026-10-11 alone). The lock is a DIRECTORY
+# (mkdir is atomic) under the user's temp dir, so every checkout and worktree shares it. A waiter says so once, here and
+# in PROGRESS.md, then polls. The holder heartbeats; a holder that stopped beating (a killed shell) is taken over.
+LOCK="${HAF_GATE_LOCK:-${TEMP:-${TMP:-/tmp}}/haf-gate.lock}"
+LOCK_BEAT_PID=""
+gate_lock() {
+  local t0=$(date +%s) said=0 holder beat now poll="${HAF_GATE_LOCK_POLL:-10}" stale="${HAF_GATE_LOCK_STALE:-180}" max="${HAF_GATE_LOCK_WAIT:-2700}"
+  while ! mkdir "$LOCK" 2>/dev/null; do
+    holder=$(cat "$LOCK/holder" 2>/dev/null || echo unknown); beat=$(cat "$LOCK/beat" 2>/dev/null || echo 0); now=$(date +%s)
+    if [ $(( now - beat )) -gt "$stale" ]; then
+      rm -rf "$LOCK"; printf 'took over a stale gate lock (%s; no heartbeat for %d s)\n' "$holder" "$((now - beat))"; note "took over a stale gate lock ($holder)"; continue
+    fi
+    if [ "$said" = 0 ]; then printf 'another gate is running (%s); waiting for it, polling every %s s\n' "$holder" "$poll"; note "waiting: another gate holds the lock ($holder)"; said=1; fi
+    sleep "$poll"
+    if [ $(( $(date +%s) - t0 )) -gt "$max" ]; then
+      printf 'FAIL — another gate has held %s for over %s s (holder: %s); if it is dead, remove that directory\n' "$LOCK" "$max" "$holder"
+      note "DONE FAIL (the gate lock was held by $holder for over $max s)"; exit 1
+    fi
+  done
+  printf '%s  %s  pid %s\n' "$(date +%H:%M)" "$ROOT" "$$" > "$LOCK/holder"; date +%s > "$LOCK/beat"
+  ( while sleep "${HAF_GATE_LOCK_BEAT:-20}"; do date +%s > "$LOCK/beat" 2>/dev/null || exit 0; done ) & LOCK_BEAT_PID=$!
+}
+gate_unlock() {  # only the holder removes the lock: a waiter that gave up must not free another gate's
+  [ -z "$LOCK_BEAT_PID" ] || kill "$LOCK_BEAT_PID" 2>/dev/null; LOCK_BEAT_PID=""
+  if grep -q "pid $$\$" "$LOCK/holder" 2>/dev/null; then rm -rf "$LOCK"; fi
+  return 0
+}
+verdict() {  # the one summary line, and the status the hook returns
+  local n=${#skipped[@]} list=""
+  [ "$n" -eq 0 ] || list=$(printf '\n  [SKIP] %s' "${skipped[@]}")
+  printf '\n========================================\n'
+  if [ "$fail" -ne 0 ]; then
+    printf 'CHECK: FAIL — fix the [FAIL] step(s) above before pushing (or, only in a real emergency, git push --no-verify).%s\n' "$list"
+    note "DONE FAIL"; return 1
+  fi
+  if [ "$n" -eq 0 ]; then printf 'CHECK: PASS — safe to push.\n'; note "DONE PASS"; return 0; fi
+  if [ "${HAF_ALLOW_SKIP:-0}" = "1" ]; then
+    printf 'CHECK: PASS WITH %d SKIP — accepted by HAF_ALLOW_SKIP=1; these claims were NOT tested on this machine:%s\n' "$n" "$list"
+    note "DONE PASS ($n skipped, allowed by HAF_ALLOW_SKIP=1)"; return 0
+  fi
+  printf 'CHECK: FAIL — %d step(s) SKIPPED: their claim was NOT tested on this machine, and a gate that cannot see is not green:%s\n' "$n" "$list"
+  printf 'Install the missing prerequisite (Blender under Program Files; the modding project, HAF_UNITY_PROJECT), or, meaning it: HAF_ALLOW_SKIP=1 git push\n'
+  note "DONE FAIL ($n skipped)"; return 1
 }
 # The drills are independent of one another (each works in its own mktemp directory and builds its own exe), and the
 # Blender-backed ones took the gate from a minute to 25 in sequence: they run AT ONCE, each into its own log, and the
 # logs are printed in declaration order; each worker reports progress and records its duration when it finishes.
 BG_LOGS=$(mktemp -d); bg_n=0; declare -a BG_LABEL BG_PID BG_T0
+export TMPDIR="$BG_LOGS"   # every step's mktemp lands under the gate's own directory: what an abort has to find (gate_abort)
 run_bg() {  # run_bg <label> <command...>: started now, judged by run_bg_wait
   local label="$1"; shift; local log="$BG_LOGS/$bg_n"
   BG_LABEL[$bg_n]="$label"; BG_T0[$bg_n]=$(date +%s)
   local t0="${BG_T0[$bg_n]}"
-  ( "$@" > "$log.out" 2>&1; rc=$?; t1=$(date +%s)
+  ( timeout -k 30 "$STEP_TIMEOUT" "$@" > "$log.out" 2>&1; rc=$?; t1=$(date +%s)
     echo "$t1" > "$log.end"
-    if [ "$rc" = "0" ]; then note "PASS $label ($((t1 - t0)) s)"
-    else note "FAIL $label ($((t1 - t0)) s)"; fi
+    note "$(word "$rc") $label ($((t1 - t0)) s)"
     echo "$rc" > "$log.rc"
   ) &
   BG_PID[$bg_n]=$!; bg_n=$((bg_n + 1))
 }
 run_bg_wait() {
-  local i t1 completed
+  local i t1 completed rc
   for ((i = 0; i < bg_n; i++)); do
     wait "${BG_PID[$i]}"
     t1=$(cat "$BG_LOGS/$i.end" 2>/dev/null)
@@ -43,11 +112,35 @@ run_bg_wait() {
     completed=1
     if ! [[ "$t1" =~ ^[0-9]+$ ]]; then t1="${BG_T0[$i]}"; completed=0; fi
     printf '\n=== %s ===\n' "${BG_LABEL[$i]}"; cat "$BG_LOGS/$i.out"
-    if [ "$(cat "$BG_LOGS/$i.rc" 2>/dev/null)" = "0" ] && [ "$completed" = "1" ]; then printf '[PASS] %s (%d s)\n' "${BG_LABEL[$i]}" "$((t1 - BG_T0[$i]))"
-    else printf '[FAIL] %s (%d s)\n' "${BG_LABEL[$i]}" "$((t1 - BG_T0[$i]))"; fail=1; fi
+    rc=$(cat "$BG_LOGS/$i.rc" 2>/dev/null)
+    if [ "$completed" = "1" ] && [[ "$rc" =~ ^[0-9]+$ ]]; then record "${BG_LABEL[$i]}" "$rc" "$((t1 - BG_T0[$i]))"
+    else printf '[FAIL] %s (%d s) — no completion status\n' "${BG_LABEL[$i]}" "$((t1 - BG_T0[$i]))"; fail=1; fi
   done
   rm -rf "$BG_LOGS"; bg_n=0
 }
+gate_abort() {  # INT/TERM: stop everything this gate spawned, drop the logs, free the lock, say so
+  # Windows keeps no usable parent chain for what Cygwin exec'd — every drill script, Blender shard and Mono run has
+  # a parent that is already gone — so `taskkill /T` stops at the worker's shell and the drills ran on underneath
+  # (drilled 2026-10-12: a gate killed at 60 s into its drills left eleven processes that were still starting
+  # Blender a minute later). What this gate spawned names, on its command line, this checkout's tools/ or a temp
+  # directory under the gate's own one (TMPDIR, exported for every step): those are killed by name, this process
+  # and the hook's own stub excluded. The other session's gate has another checkout and another temp directory.
+  local self tag rt
+  self=$(ps -W -p $$ 2>/dev/null | awk 'NR == 2 { print $4 }'); [ -n "$self" ] || self=0
+  tag=$(basename "$BG_LOGS"); rt=$(basename "$ROOT")
+  if [ -n "$tag" ] && [ -n "$rt" ]; then
+    # the gate's temp directory name is unique (mktemp): anything naming it is this gate's; the checkout's tools/ path
+    # is shared with the user's own shells, so that match is limited to the kinds of process a step runs
+    powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { \$_.ProcessId -ne $self -and \$_.CommandLine -and -not \$_.CommandLine.Contains('git-hooks/pre-push') -and (\$_.CommandLine.Contains('$tag') -or ((@('bash.exe','sh.exe','timeout.exe','blender.exe','mono.exe','python.exe','perl.exe','dotnet.exe','csc.exe') -contains \$_.Name) -and \$_.CommandLine.Contains('$rt/tools/'))) } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue }" > /dev/null 2>&1
+  fi
+  local p; for p in ${BG_PID[@]+"${BG_PID[@]}"}; do kill "$p" 2>/dev/null; done
+  rm -rf "$BG_LOGS" 2>/dev/null; note "DONE ABORTED (interrupted)"; gate_unlock; exit 130
+}
+
+# ==== the gate itself: the lock, the traps, the steps (everything above is a definition; Tests/test_parallel_gate.py drives those) ====
+gate_lock
+trap gate_abort INT TERM
+trap gate_unlock EXIT
 note "started ($(git rev-parse --short HEAD 2>/dev/null) $(git branch --show-current 2>/dev/null))"
 
 # 1) plugin compiles — dotnet build exits non-zero on ERRORS only (the one benign CS0169 warning is fine).
@@ -91,6 +184,8 @@ run "registry schema parity" bash "$ROOT/tools/check_schema_parity.sh"
 
 # 5) editor source guards — also in-repo since the move. Both guard editor/, so they belong with it.
 run "parallel gate regression tests (completion, paths and verdicts)" python "$ROOT/Tests/test_parallel_gate.py"
+# CI had this one and the hook did not (2026-10-12): a vehicle_rig.py helper change passed the hook and failed after the push.
+run "vehicle lab math tests (oar calibration guard)" python "$ROOT/Tests/test_vehicle_rig_math.py"
 #    5a) The editor compiles. Roslyn against Unity's own reference assemblies — the ONE check that needs a licensed
 #        Unity install (UnityEditor.dll + the MonoBleedingEdge profile), so it stays hook-only and never runs in CI.
 # No guard: the script itself fails LOUD when Unity/dotnet/Newtonsoft are absent. The old guard here was
@@ -123,6 +218,4 @@ run "hand-list gate (ownership rebases)" bash "$ROOT/tools/check_handlists.sh"
 run "package meta (every editor/ path has one)" bash "$ROOT/tools/check-package-meta.sh"
 run "exit status (no gate script reads a status from the end of a pipeline)" bash "$ROOT/tools/check-exit-status.sh"
 
-printf '\n========================================\n'
-if [ "$fail" -eq 0 ]; then printf 'CHECK: PASS — safe to push.\n'; note "DONE PASS"; else printf 'CHECK: FAIL — fix the [FAIL] step(s) above before pushing (or, only in a real emergency, git push --no-verify).\n'; note "DONE FAIL"; fi
-exit "$fail"
+verdict; exit $?
