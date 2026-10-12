@@ -1334,6 +1334,40 @@ refusals differed). The prep drill holds it: 139 runs on 48 files, every written
 `BlenderPrepTests` the fold on a material carrying the factor alone. The rules the old path noted for the drill's
 coverage rows (unlit, specular-glossiness) are noted from the round trip too.
 
+**Replacing `rig_anim.py`, step (a): the stage dump** (2026-10-12; the plan is in `docs/Review-Backlog.md`, item (4)).
+`tools/riganim_drill.sh` is the oracle the stage ports are held to. `riganim_jobs.py` reads the registry and writes,
+for every animated entry, the argument line the Factory hands Blender (UniversalBaker's slim step: the reduce target,
+the bone prefixes, the primary clip, the albedo, the material slots, the rotation in "0.###" form, convertRig, the
+state roles in the Factory's order, auto-ground, the socket bones as typed, keepTranslations, the static parts,
+localNodeAnim; a deploy-converted entry runs on its `deploy_converted.glb`). `blender_riganim_dump.py` then runs the
+script ITSELF on each job - its source cut at four of its own top-level lines into the four stages (the import and the
+object-animation clear; the skin conversion and the flatten; the bone cap, the clips, the rest fold, the strip and the
+frame range; the albedo, the join, the weld, the decimate, the rename, the sockets, the fold and the placement),
+executed in one namespace, the FBX export not run - and writes the scene after each stage: every RIGANIM line in order,
+every object with its two matrices, every mesh's positions, loops, polygons, material indices and UVs hashed, every
+vertex group's weights hashed, the bones at rest (parent, deform flag, length, `matrix_local`), the pose (mode, loc,
+quat, euler, scale, `matrix_basis`), every action's fcurves (keys hashed, handles hashed; `RIGANIM_KEYS=1` adds every
+key), the albedo's bytes and 8-bit pixels. A marker not found exactly once fails the dump: a script edit that moves a
+stage line is a FAIL, never a silently different cut. `RigAnimDrill.cs` reads the dump through `RigAnimDump` (the
+class the stage ports will read it through) and holds the EVIDENCE: a block per job of the jobs file, stages 1..k
+without a gap, a stopped job named with its stage and reason and failed as an incomplete recipe (the script exits
+only with 1), every row's field count
+and bits, and the rows against each other (a mesh row names an object, a weight row a group its mesh lists, a pose
+bone a bone, an fcurve its action, an action its fcurve count, stage 4's albedo line its image row). 37 damaged copies
+of a real block (`missing_riganim.py`: a missing, doubled, short or misplaced row of every kind, a stop claimed
+wrongly, an actual early stop, an unknown job or row kind) are refused by name; the intact copy passes. Missing local
+sources (including a deploy recipe's raw source and generated GLB) make the drill SKIP and invalid registry recipes
+make it FAIL, rather than silently reducing coverage. NO RULE
+OF THE SCRIPT IS COMPARED
+YET, and the PASS line says so. Measured: 23 of the 24 animated recipes (the light assault mech's source is an .fbx:
+LEFT by name until the native FBX reader, reported as such, never as the whole registry) in 17 s over four Blender
+shards, all 23 through all four stages; a second run byte-identical to the first (the oracle is deterministic). The
+census the recipes give the script (COVER rows): 21 take the conversion path, 2 the legacy one (the drone, the deploy
+conversion), 19 carry state roles, 16 slice a clip and pad a held stance, 21 fold the rest, 15 carry a rotation, 23
+are moved by the placement; AT ZERO in the registry, so a fixture before its port: the bone-parent skinning, the bone
+cap, staticParts, localNodeAnim, the no-op root collapse, the weld, a collapsed material, a centred model, the
+legacy amplify, a script exit or death.
+
 Review of PR #148: the sanitizer now prints the number of escaped path keys, as the script does, when quoted bone
 names share a prefix (one garbage key can remove curves from two bones). Confirmed with the real sanitizer in Blender.
 `ExportDrillTests` run the actual comparator and pin its completion envelope: exactly one matching final `DONE`, one
