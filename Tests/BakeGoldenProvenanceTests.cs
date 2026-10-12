@@ -67,6 +67,30 @@ public class BakeGoldenProvenanceTests
     }
 
     [Fact]
+    public void A_header_without_a_checksum_cannot_pass_even_when_its_body_matches()
+    {
+        var file = BakeGoldenRules.Compose(Body, DateTime.UtcNow, "abc1234", Inputs);
+        file[0] = file[0].Substring(0, file[0].IndexOf(" sum=", StringComparison.Ordinal));
+        Assert.Equal(BakeGoldenRules.GoldenVerdict.Edited, BakeGoldenRules.Judge(file, Body, Inputs, out string reason, out bool legacy));
+        Assert.False(legacy);
+        Assert.Contains("checksum", reason);
+    }
+
+    [Fact]
+    public void Malformed_or_duplicate_golden_headers_cannot_be_treated_as_legacy()
+    {
+        var file = BakeGoldenRules.Compose(Body, DateTime.UtcNow, "abc1234", Inputs);
+        foreach (var suspect in new[] {
+            new[] { "# golden", Body[0], Body[1] },
+            new[] { file[0], file[0], Body[0], Body[1] }
+        })
+        {
+            Assert.Equal(BakeGoldenRules.GoldenVerdict.Edited, BakeGoldenRules.Judge(suspect, Body, Inputs, out _, out bool legacy));
+            Assert.False(legacy);
+        }
+    }
+
+    [Fact]
     public void A_changed_result_names_the_first_difference_and_the_capture_stamp()
     {
         var file = BakeGoldenRules.Compose(Body, new DateTime(2026, 9, 25, 16, 1, 0, DateTimeKind.Utc), "11951dd", Inputs);

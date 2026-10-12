@@ -6,8 +6,8 @@
 // of THE MESH'S OWN diagonal (and never under 1e-9): a child is smaller than the node it came from, so its cell is
 // finer, and a part thousands of units from the origin has float32 coordinates whose ulp (the smallest step the
 // format can hold) is LARGER than that cell — two vertices that are one surface, one ulp apart after a fuse's float32
-// write, land in different cells and read as two islands. This measures exactly that for one node: the weld cell, the
-// ulp at the mesh's coordinate magnitude, and the closest approach between every pair of islands.
+// write, land in different cells and read as two islands. This measures the current, axis-specific weld cells and
+// float32 ulps, and the nearest weld-scaled approach between each pair of islands.
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -23,9 +23,8 @@ public static partial class GlbDisconnectedParts
         public override int GetHashCode() => unchecked(X.GetHashCode() * 31 + Y.GetHashCode() * 17 + Z.GetHashCode());
     }
 
-    /// The island count of a node's mesh, explained: the weld cell the count used, the float32 ulp at the mesh's
-    /// coordinate magnitude, and for every pair of islands (up to maxPairs) their closest approach, read against both —
-    /// a pair closer than a few ulps is one surface the cell was too fine to join. Never throws; a problem is the text.
+    /// The island count of a node's mesh, explained: the weld cells and float32 ulps for each axis, and for every
+    /// pair of islands (up to maxPairs) their nearest weld-scaled approach. Never throws; a problem is the text.
     internal static string ExplainIslands(byte[] source, string nodeName, int maxPairs = 12)
     {
         try
@@ -48,7 +47,6 @@ public static partial class GlbDisconnectedParts
             var islands = new List<List<P3>>();
             double[] min = { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity };
             double[] max = { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
-            double maxAbs = 0;
             foreach (Component c in plan.Components)
             {
                 var seen = new HashSet<P3>(); var pts = new List<P3>();
@@ -61,24 +59,25 @@ public static partial class GlbDisconnectedParts
                         var p = new P3 { X = v.X, Y = v.Y, Z = v.Z };
                         if (!seen.Add(p)) continue;
                         pts.Add(p); UpdateBounds(min, max, v);
-                        maxAbs = Math.Max(maxAbs, Math.Max(Math.Abs(p.X), Math.Max(Math.Abs(p.Y), Math.Abs(p.Z))));
                     }
                 }
                 islands.Add(pts);
             }
             double diagonal = Math.Sqrt(Math.Pow(max[0] - min[0], 2) + Math.Pow(max[1] - min[1], 2) + Math.Pow(max[2] - min[2], 2));
-            double cell = Math.Max(diagonal * 1e-7, 1e-9);                                     // AnalyzeMesh's weld cell
-            double ulp = maxAbs > 0 ? Math.Pow(2, Math.Floor(Math.Log(maxAbs, 2)) - 23) : 0;   // float32 at that magnitude
+            double[] cell = WeldCells(min, max, diagonal);
+            double[] ulp = Enumerable.Range(0, 3).Select(axis => {
+                double magnitude = Math.Max(Math.Abs(min[axis]), Math.Abs(max[axis]));
+                return magnitude > 0 ? Math.Pow(2, Math.Floor(Math.Log(magnitude, 2)) - 23) : 0;
+            }).ToArray();
             var sb = new System.Text.StringBuilder();
-            sb.Append(FormattableString.Invariant($"{nodeName}: islands={islands.Count} tris={plan.TriangleCount} diagonal={diagonal:G6} weld-cell={cell:G3} max|coord|={maxAbs:G6} float32-ulp={ulp:G3}"));
-            if (ulp > cell) sb.Append(FormattableString.Invariant($" — the cell is FINER than the ulp ({ulp / cell:0.#}x): one-ulp noise reads as a gap"));
+            sb.Append(FormattableString.Invariant($"{nodeName}: islands={islands.Count} tris={plan.TriangleCount} diagonal={diagonal:G6} weld-cell=({cell[0]:G3},{cell[1]:G3},{cell[2]:G3}) float32-ulp=({ulp[0]:G3},{ulp[1]:G3},{ulp[2]:G3})"));
             int pairs = 0;
             for (int i = 0; i < islands.Count && pairs < maxPairs; i++)
                 for (int j = i + 1; j < islands.Count && pairs < maxPairs; j++, pairs++)
                 {
-                    double d = Closest(islands[i], islands[j]);
-                    string read = d <= cell ? "within the cell (grid rounding split it)" : ulp > 0 && d <= 4 * ulp ? "float noise - one surface" : "a real gap";
-                    sb.Append(FormattableString.Invariant($"\n    islands {i}+{j} ({islands[i].Count}+{islands[j].Count} verts): closest {d:G3} = {(ulp > 0 ? d / ulp : 0):0.#} ulp, {d / cell:0.#} cells — {read}"));
+                    var gap = Closest(islands[i], islands[j], cell);
+                    string read = gap.Item2 <= 1 ? "within weld tolerance (unexpected separate islands)" : "above sampled weld tolerance";
+                    sb.Append(FormattableString.Invariant($"\n    islands {i}+{j} ({islands[i].Count}+{islands[j].Count} verts): nearest weld-scaled approach {gap.Item1:G3}, {gap.Item2:0.#} cells — {read}"));
                 }
             if (pairs < islands.Count * (islands.Count - 1) / 2) sb.Append(FormattableString.Invariant($"\n    … {islands.Count * (islands.Count - 1) / 2 - pairs} more pair(s)"));
             return sb.ToString();
@@ -86,20 +85,21 @@ public static partial class GlbDisconnectedParts
         catch (Exception ex) { return nodeName + ": explain failed (" + ex.GetType().Name + ": " + ex.Message + ")"; }
     }
 
-    // the closest approach between two point sets; each side sampled down to 3,000 points when larger (a bound on cost,
-    // not on truth: the sample keeps the first points in index order, and the question is noise-sized distances)
-    static double Closest(List<P3> a, List<P3> b)
+    // The nearest approach in units of the axis-specific weld cells. Sample each side to at most 3,000 points to
+    // bound the diagnostic cost; this is a hint for investigation, not an exact proof of separation.
+    static Tuple<double, double> Closest(List<P3> a, List<P3> b, double[] cell)
     {
         const int cap = 3000;
-        var sa = a.Count > cap ? a.Where((p, k) => k % Math.Max(1, a.Count / cap) == 0).ToList() : a;
-        var sb = b.Count > cap ? b.Where((p, k) => k % Math.Max(1, b.Count / cap) == 0).ToList() : b;
-        double best = double.PositiveInfinity;
+        var sa = a.Count > cap ? a.Where((p, k) => k % (int)Math.Ceiling((double)a.Count / cap) == 0).ToList() : a;
+        var sb = b.Count > cap ? b.Where((p, k) => k % (int)Math.Ceiling((double)b.Count / cap) == 0).ToList() : b;
+        double bestScaled = double.PositiveInfinity, bestDistance = double.PositiveInfinity;
         foreach (P3 p in sa)
             foreach (P3 q in sb)
             {
-                double dx = p.X - q.X, dy = p.Y - q.Y, dz = p.Z - q.Z, d = dx * dx + dy * dy + dz * dz;
-                if (d < best) best = d;
+                double dx = p.X - q.X, dy = p.Y - q.Y, dz = p.Z - q.Z;
+                double scaled = dx * dx / (cell[0] * cell[0]) + dy * dy / (cell[1] * cell[1]) + dz * dz / (cell[2] * cell[2]);
+                if (scaled < bestScaled) { bestScaled = scaled; bestDistance = dx * dx + dy * dy + dz * dz; }
             }
-        return Math.Sqrt(best);
+        return Tuple.Create(Math.Sqrt(bestDistance), Math.Sqrt(bestScaled));
     }
 }

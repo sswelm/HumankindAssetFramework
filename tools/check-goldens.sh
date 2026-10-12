@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# check-goldens.sh — the Bake Tests' goldens were captured by a run, not edited (2026-10-12).
+# check-goldens.sh — check Bake Tests golden bodies against their recorded checksums (2026-10-12).
 #
 # On 2026-10-10 the in-Unity Bake Tests were red on eleven goldens (Tools/workshop_golden, Tools/lab_golden in the
 # modding project) and the eleven files were then rewritten by hand to the failing values, with no run after them.
@@ -7,8 +7,8 @@
 # (BakeGoldenRules.Compose) - and this step reads every golden's header against its lines, in seconds, no source
 # needed: a checksum that does not match is an edit outside a run and FAILS the push, named. A golden without a
 # header is legacy: counted, allowed, and given its header by the first Unity run that matches it. The rows
-# themselves run in Unity (and, for the Workshop row, in tools/workshop_golden_drill.sh); this is only the question
-# "is what is on disk what a run wrote".
+# themselves run in Unity (and, for the Workshop row, in tools/workshop_golden_drill.sh). This detects edits that
+# leave the recorded checksum unchanged; it cannot authenticate the header or prove which process wrote it.
 # Exit 0 PASS, 1 FAIL (an edited golden), 3 SKIP (no modding project, no goldens) — SKIP is not PASS.
 set -u
 UNITY="${UNITY:-C:/Program Files/Unity 2021.3.1f1/Editor/Data}"
@@ -54,7 +54,7 @@ ARGS=()
 for d in "${DIRS[@]}"; do ARGS+=(--verify-goldens "$d"); done
 "$TMPD/drill.exe" "${ARGS[@]}"; rc=$?
 case "$rc" in
-  0) echo "PASS — every golden with a header is what a run wrote (self-check: a planted edit is flagged)" ;;
+  0) echo "PASS — every header golden matches its recorded checksum (self-check: a planted edit is flagged)" ;;
   3) echo "SKIP — no golden to check" ;;
   *) echo "FAIL — a golden was edited outside a run (rc=$rc); restore it, or delete it and let the Unity row re-bless it" ;;
 esac

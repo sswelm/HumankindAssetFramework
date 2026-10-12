@@ -51,7 +51,7 @@ LOCK_BEAT_PID=""
 gate_lock() {
   local t0=$(date +%s) said=0 holder beat now poll="${HAF_GATE_LOCK_POLL:-10}" stale="${HAF_GATE_LOCK_STALE:-180}" max="${HAF_GATE_LOCK_WAIT:-2700}"
   while ! mkdir "$LOCK" 2>/dev/null; do
-    holder=$(cat "$LOCK/holder" 2>/dev/null || echo unknown); beat=$(cat "$LOCK/beat" 2>/dev/null || echo 0); now=$(date +%s)
+    holder=$(cat "$LOCK/holder" 2>/dev/null || echo unknown); beat=$(cat "$LOCK/beat" 2>/dev/null) || beat=""; now=$(date +%s)
     # an unreadable or empty beat is NOT a dead holder (2026-10-12): the holder rewrites the file every 20 s, and a read
     # that lands on the rewrite (or a sharing violation on Windows) came back empty, read as 0, and took over a LIVE gate
     # eight minutes into its run - two gates then ran side by side. Only a beat that is readable and old is stale.
@@ -225,7 +225,7 @@ run "hand-list gate (ownership rebases)" bash "$ROOT/tools/check_handlists.sh"
 #        authoring side by construction. Broke the install three times on 2026-08-24 (package.json + asmdef, then
 #        HafPackageContext.cs, then the Plugins FOLDER); an ignored asmdef means the package compiles to nothing.
 run "package meta (every editor/ path has one)" bash "$ROOT/tools/check-package-meta.sh"
-run "bake-test goldens (what is on disk is what a run wrote; SKIP without the project)" bash "$ROOT/tools/check-goldens.sh"
+run "bake-test golden checksums (SKIP without the project)" bash "$ROOT/tools/check-goldens.sh"
 run "exit status (no gate script reads a status from the end of a pipeline)" bash "$ROOT/tools/check-exit-status.sh"
 
 verdict; exit $?

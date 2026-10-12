@@ -343,9 +343,21 @@ public class GlbDisconnectedPartsTests
         Assert.Equal(2, GlbDisconnectedParts.Analyze(bytes)[0].Islands);
         string why = GlbDisconnectedParts.ExplainIslands(bytes, "Hull");
         Assert.Contains("islands=2", why);
-        Assert.Contains("a real gap", why);
+        Assert.Contains("above sampled weld tolerance", why);
         Assert.Contains("float32-ulp=", why);
         Assert.Equal("Nope: no mesh node of that name", GlbDisconnectedParts.ExplainIslands(bytes, "Nope"));
+    }
+
+    [Theory]
+    [InlineData(0.02f)]
+    [InlineData(16f)]
+    public void A_real_gap_on_a_precise_axis_survives_a_large_other_coordinate(float gap)
+    {
+        var bytes = TwoTriangles(new[] {
+            100000000f, 0f, 0f, 100000512f, 0f, 0f, 100000000f, 512f, 0f,
+            100000000f, 512f + gap, 0f, 100000512f, 512f + gap, 0f, 100000000f, 1024f + gap, 0f
+        });
+        Assert.Equal(2, GlbDisconnectedParts.Analyze(bytes)[0].Islands);
     }
 
     static byte[] TwoTriangles(float[] positions) => BuildGlb(positions);

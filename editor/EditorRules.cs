@@ -1571,9 +1571,16 @@ public static class BakeGoldenRules
         var file = (goldenFile ?? new string[0]).ToList();
         GoldenHeader header = ParseHeader(file); legacy = header == null;
         string[] body = Body(file);
-        if (header != null && header.Sum != null && Checksum(body) != header.Sum)
+        int markers = file.Count(l => l != null && l.StartsWith("# golden", StringComparison.Ordinal));
+        if (markers > 0 && (header == null || markers != 1))
         {
-            reason = $"the golden's lines were edited outside a run (checksum {Checksum(body)} on disk, {header.Sum} when it was captured {header.Captured} at editor {header.Editor}): restore it, or delete it and run again to re-bless";
+            legacy = false;
+            reason = "the golden has a malformed or duplicate provenance header: restore it, or delete it and run again to re-bless";
+            return GoldenVerdict.Edited;
+        }
+        if (header != null && Checksum(body) != header.Sum)
+        {
+            reason = $"the golden's lines were edited outside a run (checksum {Checksum(body)} on disk, {header.Sum ?? "missing"} when it was captured {header.Captured} at editor {header.Editor}): restore it, or delete it and run again to re-bless";
             return GoldenVerdict.Edited;
         }
         string diff = Diff(body, got);

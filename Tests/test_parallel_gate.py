@@ -255,9 +255,11 @@ gate_unlock
     def test_an_unreadable_beat_is_not_a_dead_holder(self):
         lock = self.path / "gate.lock"
         self.env.update(HAF_GATE_LOCK=lock.as_posix(), HAF_GATE_LOCK_POLL="0.2", HAF_GATE_LOCK_STALE="1", HAF_GATE_LOCK_WAIT="2", HAF_GATE_LOCK_BEAT="0.5")
-        for beat in ("", "not-a-number"):
+        for beat in (None, "", "not-a-number"):
             shutil.rmtree(lock, ignore_errors=True)
-            lock.mkdir(); write(lock / "holder", "live-gate pid 4"); write(lock / "beat", beat)
+            lock.mkdir(); write(lock / "holder", "live-gate pid 4")
+            if beat is not None:
+                write(lock / "beat", beat)
             result = self.run_shell(self.helpers()+'gate_lock\necho acquired\ngate_unlock\n', timeout=30)
             self.assertNotIn("took over", result.stdout, beat)
             self.assertNotIn("acquired", result.stdout, beat)

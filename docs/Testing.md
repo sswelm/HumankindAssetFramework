@@ -1611,7 +1611,9 @@ changed:
   input, not by code**; a changed result against an intact header names the capture stamp, so the suspects are
   `git log <stamp>..HEAD -- editor/GlbDisconnectedParts*.cs`. A golden without a header is **legacy**: compared as before,
   and given its header by the first Unity run that matches it (`BakeGoldenFiles.Judge`) — verified, not re-blessed. The
-  Khelandion dissolve row, "without an attributable commit" above, has one: at capture the project's own
+  checksum detects body edits that leave the header unchanged; it does not authenticate the header or prove that Unity
+  wrote it. Legacy goldens have no such check until a matching Unity run adds a header. The Khelandion dissolve row,
+  "without an attributable commit" above, has one: at capture the project's own
   `Tools/vehicle_rig.py` (which shadows the package copy, `HafPackageContext.ToolPath`) was the 2026-09-15 sync, whose
   RIGGING tier welded before the dissolve; the package's did not, and the local copy caught up on 2026-10-03.
 - **The gate reads the headers** — `tools/check-goldens.sh`, seconds, no source needed: every golden under
@@ -1628,9 +1630,11 @@ The salegs row is **fixed**, not re-blessed: the "children not one island" were 
 ten-millionth of each mesh's own diagonal, which for a child part 600 units from the origin is 15–28x finer than a
 float32 ulp there, so one-ulp noise from an earlier fuse read as a gap; and a same-grid-cell test, which split two points
 a tenth of a cell apart whenever a cell boundary fell between them. `ExplainIslands` printed the numbers (every gap
-0.1–1.1 ulp); the tolerance is now floored at four ulps of the coordinate magnitude and tests distance across the
-neighbouring cells (`GlbDisconnectedPartsTests`: a shared edge one ulp apart at x = 600 is one island; a real gap is
-still two). The 20 other Workshop goldens did not move; the Espana battleship reads 1,838 source islands for 1,843 (five
+0.1–1.1 ulp); the tolerance now uses each axis's ulp plus a cross-axis noise allowance capped at a hundred-thousandth
+of the mesh diagonal, then tests distance across neighbouring cells (`GlbDisconnectedPartsTests`: a shared edge one ulp
+apart at x = 600 is one island; a 0.02-unit Y gap at x = 100,000,000 remains two islands). The 20 other Workshop goldens
+did not move; the Espana battleship reads 1,838
+source islands for 1,843 (five
 noise-split pieces joined) and is the one golden to re-bless in Unity (delete it, run twice). The dragon's preview FBX
 stays as named above.
 

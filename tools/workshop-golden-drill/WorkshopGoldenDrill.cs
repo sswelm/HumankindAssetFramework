@@ -111,11 +111,12 @@ public static class WorkshopGoldenDrill
             {
                 var file = File.ReadAllLines(f);
                 var header = BakeGoldenRules.ParseHeader(file);
-                if (header == null) { legacy++; continue; }
+                int markers = file.Count(l => l != null && l.StartsWith("# golden", StringComparison.Ordinal));
+                if (markers == 0) { legacy++; continue; }
                 string sum = BakeGoldenRules.Checksum(file);
-                if (header.Sum == sum) { ok++; continue; }
+                if (markers == 1 && header != null && header.Sum == sum) { ok++; continue; }
                 edited++;
-                Console.WriteLine($"EDITED {Path.GetFileName(f)} — its lines were changed outside a run (checksum {sum} on disk, {header.Sum} when captured {header.Captured} at editor {header.Editor})");
+                Console.WriteLine($"EDITED {Path.GetFileName(f)} — malformed header or changed lines (checksum {sum} on disk, {header?.Sum ?? "missing"} when captured {header?.Captured ?? "unknown"} at editor {header?.Editor ?? "unknown"})");
             }
         }
         Console.WriteLine($"goldens: {ok} verified by header, {legacy} legacy (no provenance header yet), {edited} EDITED outside a run, {missing} director{(missing == 1 ? "y" : "ies")} missing");

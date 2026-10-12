@@ -58,8 +58,8 @@ public static class WorkshopGateTest
                 BakeTestRunnerWindow.Progress.Step($"{name} ({i + 1}/{sources.Count}) — split, tear, fuse…", (float)i / sources.Count);
                 var w = System.Diagnostics.Stopwatch.StartNew();
                 var problems = new List<string>(); var snap = new List<string>();
-                byte[] bytes = File.ReadAllBytes(src);
-                try { Exercise(bytes, name, snap, problems); }
+                byte[] bytes = null;
+                try { bytes = File.ReadAllBytes(src); Exercise(bytes, name, snap, problems); }
                 catch (OperationCanceledException) { throw; }
                 catch (Exception ex) { problems.Add("exception " + ex.GetType().Name + ": " + ex.Message); }
                 w.Stop();
