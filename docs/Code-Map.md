@@ -74,7 +74,8 @@ only", a freeze-class race). Do not replace it with a `Dictionary` + "main threa
 
 ## Conventions
 
-- **A new Harmony hook only fires if it's added to the `hooks[]` list in `Plugin.cs`** — a missed registration
+- **A new Harmony hook only fires if it's added to `Plugin.Hooks` in `Plugin.cs`** (since 2026-10-12
+  `Tests/HookListTests` fails the build on a `[HarmonyPatch]` class left out, a stray entry or a duplicate) — a missed registration
   is silent. The load line reports `patched/total` counting the methods actually patched (not "didn't throw").
 - Adding a **registry field**: the fields stored identically by both classes are the **shared
   `Haf.Schema.HafModelSchema`** — add it there ONCE (default = the field initializer) and both `ModelDef` (editor) and

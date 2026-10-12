@@ -161,6 +161,51 @@ namespace HumankindAssetFramework
         private string atlasFilter = "";   // Dump Atlases: only layers whose name contains this (blank = all)
         private string previewEvent = "";  // F8 audition: Wwise event name to post via Play Event
 
+        // THE hook list. Every [HarmonyPatch] class the plugin applies, and the one place a new one must be added: a
+        // class left out is never patched and nothing says so (patched/total counts what was attempted). Pinned by
+        // Tests/HookListTests.cs against the assembly's [HarmonyPatch] classes (2026-10-12) - the last hand-list the
+        // general review found with no gate at any tier.
+        [ProcessLived("the Harmony hook list: fixed at compile time, read once in Awake")] internal static readonly System.Type[] Hooks = {
+                typeof(UniRegisterHook), typeof(UniRepointHook), typeof(UniPawnPoseHook),
+                typeof(Hk_ArtilleryStrike),   // firing-on-attack: bombard -> play the model's clip once (docs/Firing-On-Attack.md)
+                typeof(Hk_PawnRangedFight),   // state-driven ATTACK: every pawn ranged shot arms the attack-clip window (per-pawn, main thread)
+                typeof(Hk_PawnMeleeFight),    // state-driven MELEE ATTACK: close-combat pawns (the Abomination animal) arm the attack-clip window (2026-07-22)
+                typeof(Hk_SilenceAudio),      // silenceDonorAudio: drop the borrowed donor's Wwise posts (idle growl + combat maul) on opted-in pawns (2026-07-23)
+                typeof(Hk_EarlyAttackSound),  // early attack roar: UnitActionFaceEnemy.StartUnitAction -> TryEarlyAttackSound, the earliest "our unit commits to the strike" seam (2026-07-21)
+                typeof(Hk_PawnDeath),         // death cue: one-shot as a pawn of ours starts dying (2026-07-23)
+                typeof(Hk_SilenceVfx),        // donor VFX suppression: drop misplaced donor muzzle flashes, sounds untouched (2026-07-24)
+                typeof(Hk_FireProjStash),     // muzzle offset stash: bracket AlterationFireProjectile.StartEvent so the bone redirect can pre-compensate the donor's barrel offset (2026-07-24)
+                typeof(Hk_BattleStarted),     // battle-start war cry: sim-thread match -> main-thread camera-anchored one-shot (2026-07-23)
+                typeof(Hk_AudioTrace),        // diagnostic: live-trace Wwise PostEvent (gated behind the F8 Audio Trace toggle)
+                typeof(Hk_SilenceEvents),     // silence-by-event-name: drop any Wwise post whose name matches Audio/SilenceAudioEvents (POC for era-audio; no-op when empty)
+                typeof(Hk_DistrictRepoint),   // EXPERIMENTAL: replace one district's on-map visual (docs/District-Visuals.md)
+                typeof(Hk_DistrictBufferHeadroom), // EXPERIMENTAL: enlarge the shared 'Visual' mesh buffer so custom district meshes fit (opt-in)
+                typeof(Hk_TerrainHexagonHeadroom), // EXPERIMENTAL: probe + multiply the terrain visible-hexagon/draw-command buffer sizes (the ~21k-tile ceiling lead)
+                typeof(Hk_DistrictGroundMaterial), // EXPERIMENTAL: force a ground material (grass field) under a custom district
+                typeof(Hk_GroundApplyProbe),       // DIAGNOSTIC: log the ground index each district resolves (find the Industry "deadzone")
+                typeof(Hk_DistrictHexSculpt),      // EXPERIMENTAL: force hexagon sculpting (raised platform + strategic footprint) under a custom wonder
+                typeof(Hk_AnimatedBonePoolHeadroom), // enlarge the shared per-frame animated-bone pool (65,535 vanilla) — the spike-plague fix
+                typeof(Hk_PropRegister),           // EXPERIMENTAL: register our prop MeshCollections at AnimationLoad, before pawn resolution (opt-in)
+                typeof(Hk_ProjectileOverride),     // EXPERIMENTAL: re-point a unit's Projectile at our baked ProjectileAsset (kamikaze drone) at AnimationLoad (opt-in)
+                typeof(Hk_MuzzleRelocate),         // muzzleBone: redirect the muzzle-flash bone lookup (donor weapon socket missing on our renamed rig) to OUR bone (2026-07-24)
+                typeof(Hk_FormationPrefabExtend),  // FORMATION axis: grow Formation3DPrefab's dummy pool before the pool clones it, so >9-pawn custom formations fit (2026-07-27)
+                typeof(Hk_FormationInstanceExtend),// FORMATION axis: top up a live pooled Formation3D when its definition outgrows it (belt-and-braces for the prefab surgery) (2026-07-27)
+                typeof(Hk_FormationSpawnDiag),     // FORMATION axis TEMP diagnostic: log dummies/pawns/health at InstantiatePawns for >9-dummy formations (2026-07-27)
+                typeof(Hk_FormationPawnScale),     // FORMATION axis: per-model Scale from the registry link (pawn root localScale -> GPU TRS) (2026-07-28)
+                typeof(Hk_SandboxSave), typeof(Hk_SandboxLoad),  // FACING PERSIST: capture each army's FormationAngle on save, restore on load (the standard save has no facing) (2026-08-01)
+                typeof(Hk_ArtilleryAimPrep),  // BATTLE TURN: arm the strike's aim overrides + ONE shared release clock before flip/teleport/schedules — keeps anim, sound, smoke, shell in lockstep (2026-08-05)
+                typeof(Hk_ArtilleryLaunchPose), // BATTLE TURN: re-capture + re-aim the shell's spawn pose at FIRE time (vanilla captures it pre-pivot; the transform never turns with the eased model) (2026-08-05)
+                typeof(Hk_ArtilleryHold),     // BATTLE TURN (verified): MAP BOMBARD — add the striker's remaining turn-ease time to the artillery launch/hit schedules (2026-08-05, docs/Turn-Ease.md)
+                typeof(Hk_BombardAnimHold),   // BATTLE TURN (verified): defer the bombard's TeleportToSimpleAttack so the donor muzzle flash + shot SOUND also wait for the turn (2026-08-05)
+                typeof(Hk_BattleHullAim),     // BATTLE TURN: arm the aim override for OUR turretless land/ship models when a battle volley is choreographed — vanilla never hull-aims vehicles (2026-08-06)
+                typeof(Hk_BattleHoldFire),    // BATTLE TURN experimental (hold=1): hold a BATTLE ranged attack until the turn completes (rotation FSM OR the hull-aim alignment) (2026-08-05)
+                typeof(Hk_BattleAttackGate),  // BATTLE TURN experimental (hold=1): dynamic gate on the attack FSM's delay step for battle volleys (2026-08-05)
+                typeof(Hk_BattleTurnProbe),   // BATTLE TURN forensics (diag=1): log RotationFSM turn starts (2026-08-05)
+                typeof(Hk_BattleTurnStep),    // BATTLE TURN forensics (diag=1): log StepTurning route (animated vs unanimated) + start/end angles (2026-08-05)
+                typeof(Hk_PivotMoveHold),     // PIVOT IN PLACE: defer a pawn's vanilla move start while its eased yaw turns to the new facing (2026-08-22, docs/Turn-Ease.md)
+                typeof(Hk_MouseCoverExtend),  // F8 window click-through fix: hovering our window counts as the game's own mouse-covered (map stops panning under it) (2026-08-17)
+        };
+
         private void Awake()
         {
             Log = Logger;
@@ -418,46 +463,7 @@ namespace HumankindAssetFramework
             // disables THAT hook -- instead of a null TargetMethod throwing out of PatchAll and failing the whole plugin.
             var harmony = new Harmony(GUID);
             int patched = 0;
-            var hooks = new[] {
-                typeof(UniRegisterHook), typeof(UniRepointHook), typeof(UniPawnPoseHook),
-                typeof(Hk_ArtilleryStrike),   // firing-on-attack: bombard -> play the model's clip once (docs/Firing-On-Attack.md)
-                typeof(Hk_PawnRangedFight),   // state-driven ATTACK: every pawn ranged shot arms the attack-clip window (per-pawn, main thread)
-                typeof(Hk_PawnMeleeFight),    // state-driven MELEE ATTACK: close-combat pawns (the Abomination animal) arm the attack-clip window (2026-07-22)
-                typeof(Hk_SilenceAudio),      // silenceDonorAudio: drop the borrowed donor's Wwise posts (idle growl + combat maul) on opted-in pawns (2026-07-23)
-                typeof(Hk_EarlyAttackSound),  // early attack roar: UnitActionFaceEnemy.StartUnitAction -> TryEarlyAttackSound, the earliest "our unit commits to the strike" seam (2026-07-21)
-                typeof(Hk_PawnDeath),         // death cue: one-shot as a pawn of ours starts dying (2026-07-23)
-                typeof(Hk_SilenceVfx),        // donor VFX suppression: drop misplaced donor muzzle flashes, sounds untouched (2026-07-24)
-                typeof(Hk_FireProjStash),     // muzzle offset stash: bracket AlterationFireProjectile.StartEvent so the bone redirect can pre-compensate the donor's barrel offset (2026-07-24)
-                typeof(Hk_BattleStarted),     // battle-start war cry: sim-thread match -> main-thread camera-anchored one-shot (2026-07-23)
-                typeof(Hk_AudioTrace),        // diagnostic: live-trace Wwise PostEvent (gated behind the F8 Audio Trace toggle)
-                typeof(Hk_SilenceEvents),     // silence-by-event-name: drop any Wwise post whose name matches Audio/SilenceAudioEvents (POC for era-audio; no-op when empty)
-                typeof(Hk_DistrictRepoint),   // EXPERIMENTAL: replace one district's on-map visual (docs/District-Visuals.md)
-                typeof(Hk_DistrictBufferHeadroom), // EXPERIMENTAL: enlarge the shared 'Visual' mesh buffer so custom district meshes fit (opt-in)
-                typeof(Hk_TerrainHexagonHeadroom), // EXPERIMENTAL: probe + multiply the terrain visible-hexagon/draw-command buffer sizes (the ~21k-tile ceiling lead)
-                typeof(Hk_DistrictGroundMaterial), // EXPERIMENTAL: force a ground material (grass field) under a custom district
-                typeof(Hk_GroundApplyProbe),       // DIAGNOSTIC: log the ground index each district resolves (find the Industry "deadzone")
-                typeof(Hk_DistrictHexSculpt),      // EXPERIMENTAL: force hexagon sculpting (raised platform + strategic footprint) under a custom wonder
-                typeof(Hk_AnimatedBonePoolHeadroom), // enlarge the shared per-frame animated-bone pool (65,535 vanilla) — the spike-plague fix
-                typeof(Hk_PropRegister),           // EXPERIMENTAL: register our prop MeshCollections at AnimationLoad, before pawn resolution (opt-in)
-                typeof(Hk_ProjectileOverride),     // EXPERIMENTAL: re-point a unit's Projectile at our baked ProjectileAsset (kamikaze drone) at AnimationLoad (opt-in)
-                typeof(Hk_MuzzleRelocate),         // muzzleBone: redirect the muzzle-flash bone lookup (donor weapon socket missing on our renamed rig) to OUR bone (2026-07-24)
-                typeof(Hk_FormationPrefabExtend),  // FORMATION axis: grow Formation3DPrefab's dummy pool before the pool clones it, so >9-pawn custom formations fit (2026-07-27)
-                typeof(Hk_FormationInstanceExtend),// FORMATION axis: top up a live pooled Formation3D when its definition outgrows it (belt-and-braces for the prefab surgery) (2026-07-27)
-                typeof(Hk_FormationSpawnDiag),     // FORMATION axis TEMP diagnostic: log dummies/pawns/health at InstantiatePawns for >9-dummy formations (2026-07-27)
-                typeof(Hk_FormationPawnScale),     // FORMATION axis: per-model Scale from the registry link (pawn root localScale -> GPU TRS) (2026-07-28)
-                typeof(Hk_SandboxSave), typeof(Hk_SandboxLoad),  // FACING PERSIST: capture each army's FormationAngle on save, restore on load (the standard save has no facing) (2026-08-01)
-                typeof(Hk_ArtilleryAimPrep),  // BATTLE TURN: arm the strike's aim overrides + ONE shared release clock before flip/teleport/schedules — keeps anim, sound, smoke, shell in lockstep (2026-08-05)
-                typeof(Hk_ArtilleryLaunchPose), // BATTLE TURN: re-capture + re-aim the shell's spawn pose at FIRE time (vanilla captures it pre-pivot; the transform never turns with the eased model) (2026-08-05)
-                typeof(Hk_ArtilleryHold),     // BATTLE TURN (verified): MAP BOMBARD — add the striker's remaining turn-ease time to the artillery launch/hit schedules (2026-08-05, docs/Turn-Ease.md)
-                typeof(Hk_BombardAnimHold),   // BATTLE TURN (verified): defer the bombard's TeleportToSimpleAttack so the donor muzzle flash + shot SOUND also wait for the turn (2026-08-05)
-                typeof(Hk_BattleHullAim),     // BATTLE TURN: arm the aim override for OUR turretless land/ship models when a battle volley is choreographed — vanilla never hull-aims vehicles (2026-08-06)
-                typeof(Hk_BattleHoldFire),    // BATTLE TURN experimental (hold=1): hold a BATTLE ranged attack until the turn completes (rotation FSM OR the hull-aim alignment) (2026-08-05)
-                typeof(Hk_BattleAttackGate),  // BATTLE TURN experimental (hold=1): dynamic gate on the attack FSM's delay step for battle volleys (2026-08-05)
-                typeof(Hk_BattleTurnProbe),   // BATTLE TURN forensics (diag=1): log RotationFSM turn starts (2026-08-05)
-                typeof(Hk_BattleTurnStep),    // BATTLE TURN forensics (diag=1): log StepTurning route (animated vs unanimated) + start/end angles (2026-08-05)
-                typeof(Hk_PivotMoveHold),     // PIVOT IN PLACE: defer a pawn's vanilla move start while its eased yaw turns to the new facing (2026-08-22, docs/Turn-Ease.md)
-                typeof(Hk_MouseCoverExtend),  // F8 window click-through fix: hovering our window counts as the game's own mouse-covered (map stops panning under it) (2026-08-17)
-            };
+            var hooks = Hooks;
             int skipped = 0;
             foreach (var t in hooks)
             {
