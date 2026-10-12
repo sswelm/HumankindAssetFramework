@@ -35,7 +35,8 @@ Rows (tab-separated; every float as the hex of its float32 bits, as the other du
     DIES   <n> <exception>                                            the script died in this stage
     DONE   <key>
 
-RIGANIM_KEYS=1 in the environment adds a  K <n> <action> <data_path> <array_index> <frame> <value>  row per key.
+RIGANIM_KEYS=1 in the environment adds a  K <n> <action> <data_path> <array_index> <frame> <value> <handle_left 2>
+<handle_right 2> <interpolation> <easing> <handle_left_type> <handle_right_type>  row per key.
 """
 import bpy, sys, io, os, struct, hashlib, contextlib, traceback
 import numpy as np
@@ -155,8 +156,10 @@ def dump(n):
             meta = "|".join("%s/%s/%s/%s" % (kp.interpolation, kp.easing, kp.handle_left_type, kp.handle_right_type) for kp in fc.keyframe_points)
             rows.append("FC\t%d\t%s\t%s\t%d\t%d\t%s\t%s" % (n, a.name, fc.data_path, fc.array_index, k, sha(co.tobytes()), sha(hl.tobytes() + hr.tobytes() + meta.encode("utf-8"))))
             if KEYS:
-                for j in range(k):
-                    rows.append("K\t%d\t%s\t%s\t%d\t%s\t%s" % (n, a.name, fc.data_path, fc.array_index, h32(co[2 * j]), h32(co[2 * j + 1])))
+                for j, kp in enumerate(fc.keyframe_points):
+                    rows.append("K\t%d\t%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s" % (
+                        n, a.name, fc.data_path, fc.array_index, h32(co[2 * j]), h32(co[2 * j + 1]), h32(hl[2 * j]), h32(hl[2 * j + 1]),
+                        h32(hr[2 * j]), h32(hr[2 * j + 1]), kp.interpolation, kp.easing, kp.handle_left_type, kp.handle_right_type))
     return rows
 
 
@@ -184,9 +187,10 @@ for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
     print("JOB\t%s" % key, flush=True)
     saved = sys.argv
     try:
-        outp = os.path.join(work, key, key + ".fbx").replace("\\", "/")   # never written: the roles' stale clear looks beside it
+        safe = key.replace(":", "_")   # an "EXIT:" or "LEFT:" key is no folder name on Windows
+        outp = os.path.join(work, safe, safe + ".fbx").replace("\\", "/")   # never written: the roles' stale clear looks beside it
         os.makedirs(os.path.dirname(outp), exist_ok=True)
-        albedo = os.path.join(work, key + "_albedo.png").replace("\\", "/") if t[5] == "1" else ""
+        albedo = os.path.join(work, safe + "_albedo.png").replace("\\", "/") if t[5] == "1" else ""
         if albedo and os.path.exists(albedo):
             os.remove(albedo)
         argv = ["blender", "--", t[1], outp] + t[2:5] + [albedo] + t[6:]
