@@ -55,15 +55,16 @@ def jobs(pack, project, max_mb=40.0, everything=False):
         state = bool(m.get("animStateDriven"))
         if state and not (m.get("animClipMove") or "").strip():
             out.append("INVALID\t%s\tstate-driven without a movement clip: the Factory fails before Blender" % key); continue
-        src = (m.get("modelFile") or "").replace("\\", "/")
+        raw_src = (m.get("modelFile") or "").replace("\\", "/")
+        if not raw_src:
+            out.append("INVALID\t%s\tno model file" % key); continue
+        if not os.path.isfile(raw_src):
+            out.append("UNAVAILABLE\t%s\tthe source is not on disk (%s)" % (key, raw_src)); continue
+        src = raw_src
         if m.get("deployConvert"):
             src = os.path.join(project, "Assets", "FactorySource", key, "deploy_converted.glb").replace("\\", "/")
             if not os.path.isfile(src):
                 out.append("UNAVAILABLE\t%s\tthe deploy conversion it bakes from is not on disk (%s)" % (key, src)); continue
-        if not src:
-            out.append("INVALID\t%s\tno model file" % key); continue
-        if not os.path.isfile(src):
-            out.append("UNAVAILABLE\t%s\tthe source is not on disk (%s)" % (key, src)); continue
         ext = os.path.splitext(src)[1].lower()
         if ext in (".fbx", ".blend"):
             out.append("LEFT\t%s\tthe source is %s - Blender-only named fallback (%s)" % (key, ext, src)); continue

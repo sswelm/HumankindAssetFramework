@@ -1356,7 +1356,8 @@ and bits, and the rows against each other (a mesh row names an object, a weight 
 bone a bone, an fcurve its action, an action its fcurve count, stage 4's albedo line its image row). 37 damaged copies
 of a real block (`missing_riganim.py`: a missing, doubled, short or misplaced row of every kind, a stop claimed
 wrongly, an actual early stop, an unknown job or row kind) are refused by name; the intact copy passes. Missing local
-sources make the drill SKIP and invalid registry recipes make it FAIL, rather than silently reducing coverage. NO RULE
+sources (including a deploy recipe's raw source and generated GLB) make the drill SKIP and invalid registry recipes
+make it FAIL, rather than silently reducing coverage. NO RULE
 OF THE SCRIPT IS COMPARED
 YET, and the PASS line says so. Measured: 23 of the 24 animated recipes (the light assault mech's source is an .fbx:
 LEFT by name until the native FBX reader, reported as such, never as the whole registry) in 17 s over four Blender

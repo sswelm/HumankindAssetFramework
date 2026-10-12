@@ -37,6 +37,15 @@ class RigAnimJobsTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertTrue(output.startswith("INVALID\tBroken\t"))
 
+    def test_deploy_output_cannot_hide_missing_raw_source(self):
+        converted = self.root / "Assets" / "FactorySource" / "Deploy" / "deploy_converted.glb"
+        converted.parent.mkdir(parents=True)
+        converted.write_bytes(b"glTF")
+        code, output = self.run_recipe({"animated": True, "resourceName": "Deploy", "deployConvert": True,
+                                        "modelFile": str(self.root / "missing-raw.glb")})
+        self.assertEqual(code, 3)
+        self.assertTrue(output.startswith("UNAVAILABLE\tDeploy\t"))
+
     def test_config_for_trims_arguments_and_reuses_existing_albedo(self):
         albedo = self.root / "Assets" / "FactorySource" / "Unit" / "Unit_albedo.png"
         albedo.parent.mkdir(parents=True)
