@@ -4,7 +4,6 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
-import threading
 import time
 import unittest
 
@@ -206,22 +205,36 @@ verdict; exit $?
     # heartbeating is taken over; only the holder frees the lock.
     def test_a_second_gate_waits_for_the_lock_then_proceeds_and_frees_it(self):
         lock = self.path / "gate.lock"
-        self.env.update(HAF_GATE_LOCK=lock.as_posix(), HAF_GATE_LOCK_POLL="0.2", HAF_GATE_LOCK_STALE="30", HAF_GATE_LOCK_BEAT="0.5")
+        self.env.update(HAF_GATE_LOCK=lock.as_posix(), HAF_GATE_LOCK_POLL="0.2", HAF_GATE_LOCK_STALE="600", HAF_GATE_LOCK_BEAT="0.5")
         lock.mkdir(); write(lock / "holder", "other-gate pid 1"); write(lock / "beat", str(int(time.time())))
-        threading.Timer(1.5, lambda: shutil.rmtree(lock)).start()   # the other gate finishes
-        t0 = time.monotonic()
-        result = self.run_shell(self.helpers()+'''
+        proc = subprocess.Popen(self.script(self.helpers()+'''
 gate_lock
 echo acquired
 gate_unlock
 [ -d "$LOCK" ] && echo still-locked || echo released
-''', timeout=30)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertGreater(time.monotonic() - t0, 1.0)
-        self.assertIn("another gate is running (other-gate pid 1); waiting", result.stdout)
-        self.assertIn("acquired", result.stdout)
-        self.assertIn("released", result.stdout)
-        self.assertIn("waiting: another gate holds the lock (other-gate pid 1)", (self.path / "progress.md").read_text())
+'''), env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        waiting = "waiting: another gate holds the lock (other-gate pid 1)"
+        progress = ""
+        try:
+            deadline = time.monotonic() + 60  # guard a stuck child; release follows its waiting signal
+            while time.monotonic() < deadline:
+                progress = (self.path / "progress.md").read_text()
+                if waiting in progress or proc.poll() is not None:
+                    break
+                time.sleep(.05)
+        finally:
+            shutil.rmtree(lock, ignore_errors=True)
+            try:
+                out, err = proc.communicate(timeout=30)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.communicate()
+                self.fail("gate did not finish after the other gate released its lock")
+        self.assertIn(waiting, progress)
+        self.assertEqual(proc.returncode, 0, err)
+        self.assertIn("another gate is running (other-gate pid 1); waiting", out)
+        self.assertIn("acquired", out)
+        self.assertIn("released", out)
 
     def test_a_stale_lock_is_taken_over_and_a_waiter_never_frees_anothers(self):
         lock = self.path / "gate.lock"

@@ -214,6 +214,47 @@ translation `[-0.739, -0.0, 0.0]` holds `+0, +0` straight after the import, wher
 `-0, -0` - both to be measured together; (4) `rig_anim` (3–4 weeks); (5)
 `vehicle_rig` (4–8 weeks; the Lab already computes much of the geometry in C#).
 
+**(4) `rig_anim` - the plan, decided 2026-10-11 (the FBX-free route, the user's choice).** Measured first: 24 of the
+registry's 38 entries are animated; of those 22 take the conversion path (`convertRig`), 20 are state-driven (roles),
+19 keep translations, 15 carry a rotation, 12 a reduce target, one donor sockets (the armoured car), none `localNodeAnim`
+or `staticParts`. The script (1,243 lines) imports the source, drops material-less meshes, reads the contract marker
+(`DeployArmV2`: clean units), holds the rest pose (localNodeAnim), clears object-level animation (convertRig), converts
+bone-parenting into full-weight skinning, flattens wrapper empties, transplants node animation into flat bones
+(localNodeAnim, through an FBX export-and-reimport round trip INSIDE the script), caps the bones at 256, resolves and
+slices the clips into role actions (frame ranges, the translation amplify or the clean units), clamps the frame range,
+writes the albedo, joins to one mesh (or keeps the material slots), decimates, places (the rotation folded in), and
+exports one FBX per role through Blender's FBX exporter (`bake_anim`, `global_scale` 0.01 on clean units). Its only
+reader is Unity's ModelImporter (Generic rig, MikkT tangents), then the SDK's ClipCollection from a folder of one FBX.
+THE ROUTE: the processing stages are ported under the gate as `deploy_convert` was - Blender runs the script cut
+before the export and dumps the scene at each stage (the RIGANIM log lines to the letter; objects, vertex groups and
+weights after the skin conversion; transforms after the flatten; the role actions' keys; the joined mesh; the
+decimated mesh through `BlenderDecimate`, already exact) -, the FBX export is NOT ported (5,800 lines whose bytes only
+Unity reads): the port writes a GLB with part 8c's writer and the Factory builds the Unity rig from it with
+`HafModelRig` (the clip picker's; PR #151's slice proved the SDK bakes a Skeleton and ClipCollection from such a rig).
+What the gate cannot hold is the Unity side: that the C#-built rig bakes the same Skeleton and pose stream as the FBX
+route - a Bake Tests row the user runs; known differences to expect there: the FBX exporter SIMPLIFIES its baked curves
+(`bake_anim_simplify_factor` 1.0) where the GLB carries every frame, the FBX's centimetre units and Unity's import
+scale against the GLB's metres (the slice saw pose streams of 1,296 against 576 bytes for one clip and named sizing
+as open). Order of work: (a) the stage dump and drill on the 24 entries' recipes (`rig_anim`'s argv from the registry,
+as `deploy_fixtures.py` does for the deploy) - 23 of them .glb sources; the light assault mech's source is an .fbx,
+which the C# does not read until the native FBX reader (the plan's later item): that entry is Blender's by name, the
+drill names it so and reports its coverage as 23 of 24, never as the whole corpus (the review of PR #157), (b) stage 1 the import, the junk drop, the contract, the object-animation
+clear, (c) stage 2 the skin conversion and the flatten, (d) stage 3 the bone cap and the role clips, (e) stage 4 the
+join, the albedo (pixel parity, Blender's own save), the decimate, the placement, (f) the GLB writer's output for the
+rig, (g) the Factory's animated path built from the GLB, BOTH routes kept and configurable (the user's call, 2026-10-11): a
+per-recipe setting with a global default - the shipped Blender FBX route initially, the in-process GLB rig opt-in -
+so selected models can opt into GLB during evaluation and exceptions can stay on Blender after the default flips;
+what the port names by name goes to the Blender route whatever the setting, and the slim-step cache key carries the route AND
+a C# pipeline revision, as the prep's and the deploy's keys do (a switch re-bakes, and so does a changed C# rig or
+writer: nothing stale is reused). THE DEFAULT FLIPS LAST: the shipped Blender route stays the global default, the GLB
+rig opt-in per recipe, until the acceptance gate passes - the Bake Tests row in Unity holding, for all 23 GLB-source
+animated entries baked both ways, the mesh, the skeleton, the clips, the placement, and an in-game check of each
+model playing its roles; the FBX-only light assault mech also passes a Blender-fallback bake and in-game check
+(PR #151's slice reports different pose bytes and unverified playback: that is the bar, not a hope); only then
+the GLB rig becomes the default (the review of PR #157), (h) the Bake Tests row - the gate above. The
+localNodeAnim transplant (no registry entry) is LEFT by name until last: its FBX round trip is Blender's composition
+of a pathological hierarchy, not a rule to read. Estimate unchanged: 3 to 4 weeks.
+
 - **Blender-exact vertex positions for skinned parts** — OPEN (2026-10-02, found by 3c). Blender's importer skins a
   rigged mesh into its bind pose in numpy float32: per joint, (bind matrix) @ (inverse bind matrix), where the bind
   matrix is GUESSED from the inverse bind matrices (`guess_original_bind_pose`, on by default: Eigen's 4×4 inverse, a
@@ -329,6 +370,18 @@ are of that day — re-check before touching, per the rules above). Items alread
 skipped. Ranked by consequence within each group.
 
 ### Verification machinery (fix first — a green gate that cannot see the shape is worse than no gate)
+
+- ~~**`Tests/test_parallel_gate.py` is timing-flaky**~~ — **FIXED 2026-10-12.**
+  `test_progress_reports_completion_before_an_earlier_job_finishes_and_uses_real_duration` failed a docs-only push
+  (`'PASS fast (2 s)' not found in ''`), 1 of 3 idle reruns, and 1 of 8 under load in the PR #148 review. The test
+  already polled the progress file, but gave the background worker only three seconds to start and finish before
+  capturing it. PR #158 raised the guard to 60 seconds and serialized competing gates; the progress line remains
+  the synchronization point. A timeout still needs investigation, not an automatic retry.
+
+- ~~**The gate-lock test released its mock lock on a timer**~~ — **FIXED 2026-10-12.** A slow child startup could
+  outlast the 1.5-second timer and acquire an already released lock, so the test reported no waiting message. The
+  parent now releases the lock only after observing the child's waiting progress line.
+
 
 - ~~**`check-member-shape.sh` matches only `Convert.To*(GetMember(` — blind to the `Mem(` wrapper, and one live
   dead-sentinel sits behind it.**~~ — **FIXED 2026-09-14, drilled.** Worse than reviewed: the regex was also blind to
