@@ -254,6 +254,12 @@ model playing its roles; the FBX-only light assault mech also passes a Blender-f
 the GLB rig becomes the default (the review of PR #157), (h) the Bake Tests row - the gate above. The
 localNodeAnim transplant (no registry entry) is LEFT by name until last: its FBX round trip is Blender's composition
 of a pathological hierarchy, not a rule to read. Estimate unchanged: 3 to 4 weeks.
+(a) DONE 2026-10-12: `tools/riganim_drill.sh` in the gate (jobs from the registry as the Factory formats them, the
+script cut at four of its own lines and run stage by stage by Blender, the scene on record after each, the evidence
+held complete and consistent, 36 tamper kinds refused; `docs/Testing.md` has the measure). 23 of 24 recipes dumped in
+17 s, all four stages, deterministic; the mech LEFT by name. The census says which branches need a fixture before their
+port: bone-parent skinning, the bone cap, staticParts, localNodeAnim, the root collapse, the weld, a collapsed material,
+a centred model, the legacy amplify, the script's exits - none of them has a registry recipe. Next: (b) stage 1.
 
 - **Blender-exact vertex positions for skinned parts** — OPEN (2026-10-02, found by 3c). Blender's importer skins a
   rigged mesh into its bind pose in numpy float32: per joint, (bind matrix) @ (inverse bind matrix), where the bind
