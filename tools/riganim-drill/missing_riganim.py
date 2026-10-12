@@ -133,4 +133,16 @@ write("S1_BONE_length", with_field(i_bone, 6, flip_bits(lines[i_bone].split("\t"
 write("S1_PB_value", with_field(i_pb, 7, flip_bits(lines[i_pb].split("\t")[7])))
 write("S1_ACT_range", with_field(i_act, 3, flip_bits(lines[i_act].split("\t")[3])))
 write("S1_FC_hash", with_field(i_fc, 6, flip_bits(lines[i_fc].split("\t")[6])))
+# Step (c), the stage 2 model: one changed value per row kind of stage 2 (the rows of stage 1 intact), refused in
+# --stages 2 mode with the reason "stage 2".
+i_obj_2 = first(lambda l: l.startswith("OBJ\t2\t")); write("S2_OBJ_matrix", with_field(i_obj_2, 10, flip_bits(lines[i_obj_2].split("\t")[10])))
+write("S2_OBJ_parent", with_field(i_obj_2, 4, "-" if lines[i_obj_2].split("\t")[4] != "-" else lines[i_obj_2].split("\t")[2]))
+write("S2_OBJ_extra", insert(i_obj_2, "\t".join(f if j != 2 else "planted_object" for j, f in enumerate(lines[i_obj_2].split("\t")))))
+i_mesh_2 = first(lambda l: l.startswith("MESH\t2\t")); write("S2_MESH_groups", with_field(i_mesh_2, 12, "planted_group"))
+write("S2_MESH_modifier", with_field(i_mesh_2, 13, "ARMATURE:Armature:planted"))
+i_vg_2 = first(lambda l: l.startswith("VG\t2\t")); write("S2_VG_hash", with_field(i_vg_2, 5, flip_bits(lines[i_vg_2].split("\t")[5])))
+i_pb_2 = first(lambda l: l.startswith("PB\t2\t")); write("S2_PB_value", with_field(i_pb_2, 7, flip_bits(lines[i_pb_2].split("\t")[7])))
+i_fc_2 = first(lambda l: l.startswith("FC\t2\t")); write("S2_FC_hash", with_field(i_fc_2, 7, flip_bits(lines[i_fc_2].split("\t")[7])))
+i_scene_2 = first(lambda l: l.startswith("SCENE\t2\t")); write("S2_SCENE_pose", with_field(i_scene_2, 5, "REST"))
+i_stage_2 = first(lambda l: l == "STAGE\t2"); write("S2_LOG_added", insert(i_stage_2, "LOG\t2\tRIGANIM flattened 1 wrapper empty; rig reparented to root for identity export nodes (planted)"))
 sys.stdout.write("".join(f[:-4] + "\n" for f in sorted(os.listdir(out)) if f.endswith(".txt") and f not in ("jobs.txt", "jobs_exit.txt", "intact.txt")))

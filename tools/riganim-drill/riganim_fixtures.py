@@ -14,12 +14,22 @@ empty, a bone in Euler mode, and the exit when there is no armature. For the sta
 group rules (an unused joint, a repeated joint, zero weights), a mesh without UV, COLOR_0 beside a material, merged
 keys, a refused second channel, the armature object's own curves (fx_groups); an animated skinned mesh node, a mesh
 on the armature node, one mesh on two nodes (fx_skinned_anim).
+
+Stage 2 (step (c), fx_s2_*): staticParts by name and by material (two skipped beside one bound; nine skipped, nothing
+bound, the ellipsis), the governing bone found up a chain (bone -> mesh -> mesh -> mesh, bone -> empty -> mesh, bone ->
+mesh -> empty -> mesh, with rotations and scales on the way), a second armature hung from the first one's bone (a bone
+the script's armature has not: the root-bone fallback; a bone of the same name; its skinned mesh bound through it with
+a vertex group of that name and an Armature modifier already there), an armature hung from another's bone, a scaled and
+rotated wrapper with a hung mesh, a rigid mesh with a child, an empty holding a mesh and a lone empty (several empties
+flattened), a dropped parent's child beside a bind (the update re-evaluates it), the armature itself a dropped parent's
+child (re-rooted before the pin), object animation cleared beside a bind, both blocks under the legacy path (nothing
+happens), and two hung objects sharing one mesh (LEFT: by name).
 """
 import math, os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "glb-reader-drill"))
 from fixtures import Buf, base, write_glb   # noqa: E402
 
-ARGS = "	".join(["0", "", "{clip}", "1", "1", "0,0,0", "{convert}", "", "0", "", "0", "", "{local}"])   # target, prefixes, clip, albedo, keepmats, rot, convertRig, roles, ground, sockets, keepT, static, localNode
+ARGS = "	".join(["0", "", "{clip}", "1", "1", "0,0,0", "{convert}", "", "0", "", "0", "{static}", "{local}"])   # target, prefixes, clip, albedo, keepmats, rot, convertRig, roles, ground, sockets, keepT, static, localNode
 
 
 class Rig:
@@ -221,10 +231,151 @@ def skinned_anim(out):
     return r.write(out, "riganim_skinned_anim")
 
 
+# ---- stage 2 (step (c)): the bone-parent -> skin conversion and the wrapper flatten. No registry recipe takes either.
+
+def s2_static(out):
+    """Bone-hung meshes kept weightless by staticParts: one matched by its NAME, one by its MATERIAL's name (both lowered,
+    substring), one that binds (rotated and scaled: its recomposition carries noise) with a static child mesh that stays
+    under it and is re-evaluated below its new matrix; a non-hung mesh whose name matches is no part of the count."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    glass = r.material("Glass_Pane", (0.2, 0.9, 0.9))
+    r.node("TurretTop", j1, mesh=r.mesh("turret", at=(0.0, 1.5, 0.0), material=m), translation=[0.0, 0.5, 0.0])
+    r.node("Canopy", j0, mesh=r.mesh("canopy", at=(1.0, 0.0, 0.0), material=glass), translation=[1.0, 0.0, 0.0])
+    gun = r.node("Gun", j1, mesh=r.mesh("gun", at=(0.0, 2.0, 0.5), material=m), translation=[0.0, 1.0, 0.5], rotation=[0.1830127, 0.6830127, 0.1830127, 0.6830127], scale=[1.1, 0.9, 1.3])
+    r.node("GunSight", gun, mesh=r.mesh("sight", at=(0.0, 2.5, 0.5), size=0.3, material=glass), translation=[0.0, 0.5, 0.0])
+    r.node("TurretRing", arm, mesh=r.mesh("ring", at=(3.0, 0.0, 0.0), material=m), translation=[3.0, 0.0, 0.0])
+    return r.write(out, "riganim_s2_static")
+
+
+def s2_static_many(out):
+    """Nine bone-hung meshes all static (the log's sorted first eight and the ellipsis), nothing bound: no bind, no update."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    for i in range(9):
+        r.node("plate_%d" % (9 - i), j1 if i % 2 else j0, mesh=r.mesh("plate%d" % i, at=(float(i), 0.0, 0.0), size=0.5, material=m), translation=[float(i), 0.5, 0.0])
+    return r.write(out, "riganim_s2_static_many")
+
+
+def s2_chain(out):
+    """The governing bone found up the parent chain: bone -> mesh -> mesh -> mesh, bone -> empty -> mesh, bone -> mesh ->
+    empty -> mesh; the hung meshes rotated and scaled so the rest-world pin and its decomposition carry real values."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    top = r.node("Hull", j1, mesh=r.mesh("hull", at=(0.0, 1.5, 0.0), material=m), translation=[0.1, 0.5, 0.2], rotation=[0.1830127, 0.6830127, 0.1830127, 0.6830127], scale=[1.1, 0.9, 1.3])
+    mid = r.node("Hatch", top, mesh=r.mesh("hatch", at=(0.5, 2.0, 0.0), size=0.5, material=m), translation=[0.5, 0.5, 0.0], rotation=[0.0, 0.3826834, 0.0, 0.9238795])
+    r.node("Handle", mid, mesh=r.mesh("handle", at=(0.5, 2.5, 0.0), size=0.2, material=m), translation=[0.0, 0.5, 0.0], scale=[2.0, 2.0, 2.0])
+    grp = r.node("WheelGroup", j0, translation=[1.0, 0.0, 0.0], rotation=[0.0, 0.0, 0.2588190, 0.9659258], scale=[0.5, 0.5, 0.5])
+    r.node("Wheel", grp, mesh=r.mesh("wheel", at=(1.0, 0.0, 0.0), material=m), translation=[0.0, 0.0, 1.0])
+    sub = r.node("LampGroup", top, translation=[0.0, 1.0, 0.0])
+    r.node("Lamp", sub, mesh=r.mesh("lamp", at=(0.0, 3.0, 0.0), size=0.3, material=m), translation=[0.3, 0.0, 0.0])
+    return r.write(out, "riganim_s2_chain")
+
+
+def s2_two_arms(out):
+    """A second armature hung from the first one's 'Arm' bone: a mesh hung from a bone of its that the script's armature
+    has no bone of (the root-bone fallback), one from a bone that shares the name 'Arm' (bound to the FIRST armature's),
+    and its own skinned mesh, whose governing bone is found through the armature and whose vertex groups already hold
+    an 'Arm' (the existing-group branch) beside an Armature modifier of its own - all three re-homed onto the first
+    armature, whose pose is the one held at rest while the second stays posed (its root bone animated: the dump tells one
+    action's fcurves apart by path alone, so the shared-name bone is not)."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    arm2 = r.node("Armature2", j1, translation=[4.0, 0.0, 0.0])
+    k0 = r.node("Other", arm2)
+    k1 = r.node("Arm", k0, translation=[0.0, 1.0, 0.0], rotation=[0.0, 0.0, 0.3826834, 0.9238795])
+    sk2 = r.skin("Skin2", [k0, k1], [ibm(4.0, 0.0, 0.0), ibm(4.0, 1.0, 0.0)])
+    r.node("Body2", arm2, mesh=r.mesh("body2", at=(4.0, 0.0, 0.0), material=m, joints=[[(0, 0.7), (1, 0.3)]]), skin=sk2)   # 'Arm' at 0.3: the bind REPLACES it with 1.0
+    r.key(0, k0, "rotation", [0.0, 1.0], spin(2, "y", 0.25))
+    r.node("HungOther", k0, mesh=r.mesh("hungother", at=(4.0, 0.5, 0.0), size=0.5, material=m), translation=[0.0, 0.5, 0.0])
+    r.node("HungArm2", k1, mesh=r.mesh("hungarm2", at=(4.0, 1.5, 0.0), size=0.5, material=m), translation=[0.0, 0.5, 0.0])
+    return r.write(out, "riganim_s2_two_arms")
+
+
+def s2_nested_arms(out):
+    """An armature hung from another armature's bone: its skinned mesh's governing bone is found through it, the mesh
+    already has vertex groups (the skin's) and an Armature modifier - the bind's "existing" branches."""
+    r = Rig()
+    outer = r.node("Carrier")
+    c0 = r.node("Deck", outer)
+    skc = r.skin("SkinC", [c0], [ibm(0.0, 0.0, 0.0)])
+    m = r.material("Paint", (0.2, 0.4, 0.9))
+    r.node("Hull", outer, mesh=r.mesh("hull", size=3.0, material=m, joints=[[(0, 1.0)]]), skin=skc)
+    inner = r.node("Armature", c0, translation=[0.0, 3.0, 0.0], rotation=[0.0, 0.0, 0.3826834, 0.9238795])
+    j0 = r.node("Root", inner)
+    j1 = r.node("Arm", j0, translation=[0.0, 1.0, 0.0])
+    sk = r.skin("Skin", [j0, j1], [ibm(0.0, 3.0, 0.0), ibm(0.0, 4.0, 0.0)])
+    r.node("Body", inner, mesh=r.mesh("body", at=(0.0, 3.0, 0.0), material=m, joints=[[(0, 1.0)]] * 4 + [[(0, 0.5), (1, 0.5)]] * 4), skin=sk)
+    r.node("Hung", j1, mesh=r.mesh("hung", at=(0.0, 4.5, 0.0), size=0.5, material=m), translation=[0.0, 0.5, 0.0])
+    a = r.anim("Spin")
+    r.key(a, j1, "rotation", [0.0, 0.5, 1.0], spin(3, "x", 0.5))
+    r.key(a, c0, "rotation", [0.0, 1.0], spin(2, "y", 0.25))
+    return r.write(out, "riganim_s2_nested_arms")
+
+
+def s2_wrapped_hung(out):
+    """A wrapper empty with an odd scale and rotation over the rig, a bone-hung mesh under it (its rest world carries the
+    wrapper), a rigid mesh under the wrapper with a mesh of its own below (re-evaluated under its recomposed parent), an
+    empty under the wrapper holding a mesh, a lone empty elsewhere: several empties flattened."""
+    r = Rig()
+    wrap = r.node("Wrapper", None, scale=[0.0123, 0.0123, 0.0123], rotation=[0.1830127, 0.6830127, 0.1830127, 0.6830127], translation=[0.7, 0.2, -0.4])
+    arm = r.node("Armature", wrap, translation=[10.0, 0.0, 0.0])
+    j0 = r.node("Root", arm); j1 = r.node("Tip", j0, translation=[0.0, 100.0, 0.0], rotation=[0.0, 0.0, 0.2588190, 0.9659258])
+    sk = r.skin("Skin", [j0, j1], [ibm(10.0, 0.0, 0.0), ibm(10.0, 100.0, 0.0)])
+    m = r.material("Steel")
+    r.node("Body", arm, mesh=r.mesh("body", at=(10.0, 0.0, 0.0), size=100.0, material=m, joints=[[(0, 1.0)]] * 4 + [[(1, 1.0)]] * 4), skin=sk)
+    r.node("Hung", j1, mesh=r.mesh("hung", at=(10.0, 150.0, 0.0), size=30.0, material=m), translation=[5.0, 50.0, 0.0], rotation=[0.0, 0.3826834, 0.0, 0.9238795])
+    rigid = r.node("Rigid", wrap, mesh=r.mesh("rigid", at=(150.0, 0.0, 0.0), size=50.0, material=m), translation=[150.0, 0.0, 0.0], scale=[1.5, 1.5, 1.5])
+    r.node("Bolt", rigid, mesh=r.mesh("bolt", at=(150.0, 60.0, 0.0), size=10.0, material=m), translation=[0.0, 60.0, 0.0])
+    grp = r.node("Crates", wrap, translation=[0.0, 0.0, 200.0], rotation=[0.0, 0.0, 0.3826834, 0.9238795])
+    r.node("Crate", grp, mesh=r.mesh("crate", at=(0.0, 0.0, 200.0), size=20.0, material=m), translation=[20.0, 0.0, 0.0])
+    r.node("Marker", None, translation=[1.0, 2.0, 3.0])
+    a = r.anim("Spin"); r.key(a, j1, "rotation", [0.0, 1.0], spin(2, "z", 0.5))
+    return r.write(out, "riganim_s2_wrapped_hung")
+
+
+def s2_junk_hung(out):
+    """A dropped (material-less) parent's kept child beside a bone-hung mesh: the bind's scene update decides whether the
+    kept child's matrix_world survives it."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    wrap = r.node("Wrap", None, mesh=r.mesh("wrap", at=(5.0, 0.0, 0.0)), translation=[0.0, 2.0, 0.0], scale=[2.0, 2.0, 2.0])
+    r.node("Kept", wrap, mesh=r.mesh("kept", at=(5.0, 2.0, 0.0), material=m), translation=[0.5, 0.0, 0.0])
+    r.node("Hung", j1, mesh=r.mesh("hung", at=(0.0, 1.5, 0.0), material=m), translation=[0.0, 0.5, 0.0])
+    return r.write(out, "riganim_s2_junk_hung")
+
+
+def s2_junk_arm(out):
+    """The ARMATURE itself a dropped (material-less, scaled) mesh's child, with a bone-hung mesh: the bind's update re-roots
+    the armature at its own transform first, and the pin's parent matrix is that one."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    crate = r.node("Crate", None, mesh=r.mesh("crate", at=(5.0, 0.0, 0.0)), translation=[0.0, 2.0, 0.0], scale=[2.0, 2.0, 2.0], rotation=[0.0, 0.3826834, 0.0, 0.9238795])
+    r.roots.remove(arm); r.nodes[crate].setdefault("children", []).append(arm)
+    r.nodes[arm]["translation"] = [0.5, 0.0, 0.0]
+    r.node("Hung", j1, mesh=r.mesh("hung", at=(0.0, 1.5, 0.0), material=m), translation=[0.0, 0.5, 0.0])
+    return r.write(out, "riganim_s2_junk_arm")
+
+
+def s2_objanim_hung(out):
+    """Object-level animation cleared in stage 1 beside a bone-hung mesh: the bind's scene update decides what world the
+    cleared object shows (its frame-1 values, or its authored ones)."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    prop = r.node("Prop", arm, mesh=r.mesh("prop", at=(2.0, 0.0, 0.0), material=m), translation=[2.0, 0.0, 0.0])
+    r.key(0, prop, "rotation", [0.0, 1.0], spin(2, "z", 0.25))
+    r.key(0, prop, "translation", [0.0, 1.0], [(2.0, 0.0, 0.0), (2.0, 1.0, 0.0)])
+    r.node("Hung", j1, mesh=r.mesh("hung", at=(0.0, 1.5, 0.0), material=m), translation=[0.0, 0.5, 0.0])
+    return r.write(out, "riganim_s2_objanim_hung")
+
+
+def s2_shared_hung(out):
+    """Two bone-hung objects sharing one mesh datablock (one vertex group list, one weight layer, two binds): left to
+    Blender by name."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    shared = r.mesh("pad", at=(0.0, 0.0, 0.0), size=0.5, material=m)
+    r.node("PadA", j0, mesh=shared, translation=[1.0, 0.0, 0.0])
+    r.node("PadB", j1, mesh=shared, translation=[-1.0, 0.0, 0.0])
+    return r.write(out, "riganim_s2_shared_hung")
+
+
 def main(out):
     os.makedirs(out, exist_ok=True)
-    def job(key, path, clip="Spin", convert="1", local="0"):
-        print("JOB\t%s\t%s\t%s" % (key, path, ARGS.format(clip=clip, convert=convert, local=local)))
+    def job(key, path, clip="Spin", convert="1", local="0", static=""):
+        print("JOB\t%s\t%s\t%s" % (key, path, ARGS.format(clip=clip, convert=convert, local=local, static=static)))
     job("fx_junk", junk(out))
     p = objanim(out, "riganim_objanim")
     job("fx_objanim_convert", p)
@@ -237,6 +388,19 @@ def main(out):
     job("LEFT:fx_localnode", p, local="1")
     job("fx_groups", groups(out))
     job("fx_skinned_anim", skinned_anim(out))
+    # stage 2
+    job("fx_s2_static", s2_static(out), static="turret,glass")
+    job("fx_s2_static_many", s2_static_many(out), static="plate")
+    job("fx_s2_chain", s2_chain(out))
+    job("fx_s2_two_arms", s2_two_arms(out))
+    job("fx_s2_nested_arms", s2_nested_arms(out))
+    job("fx_s2_wrapped_hung", s2_wrapped_hung(out))
+    job("fx_s2_junk_hung", s2_junk_hung(out))
+    job("fx_s2_junk_arm", s2_junk_arm(out))
+    job("fx_s2_objanim_hung", s2_objanim_hung(out))
+    job("fx_s2_multi_legacy", multi(out), clip="Longer", convert="0")
+    job("fx_s2_wrapped_legacy", wrapped(out), convert="0")
+    job("LEFT:fx_s2_shared_hung", s2_shared_hung(out))
 
 
 if __name__ == "__main__":

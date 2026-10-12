@@ -309,16 +309,17 @@ static class RigAnimDrill
     public static int Main(string[] args)
     {
         Console.OutputEncoding = new UTF8Encoding(false);
-        bool requireKeys = false, stage1 = false;
+        bool requireKeys = false; int stages = 0;   // --stages N: compare the C# model of stages 1..N (N = 1 or 2) with the dump
         int offset = 0;
+        const string usage = "usage: riganim.exe [--keys] [--stages 1|2] <jobs file> <dump>...";
         while (offset < args.Length && args[offset].StartsWith("--", StringComparison.Ordinal))
         {
             if (args[offset] == "--keys") requireKeys = true;
-            else if (args[offset] == "--stage1") stage1 = true;
-            else { Console.WriteLine("usage: riganim.exe [--keys] [--stage1] <jobs file> <dump>..."); return 2; }
+            else if (args[offset] == "--stages" && offset + 1 < args.Length && int.TryParse(args[offset + 1], NumberStyles.None, CultureInfo.InvariantCulture, out stages) && stages >= 1 && stages <= 2) offset++;
+            else { Console.WriteLine(usage); return 2; }
             offset++;
         }
-        if (args.Length < offset + 2) { Console.WriteLine("usage: riganim.exe [--keys] [--stage1] <jobs file> <dump>..."); return 2; }
+        if (args.Length < offset + 2) { Console.WriteLine(usage); return 2; }
         var jobs = new Dictionary<string, string[]>(StringComparer.Ordinal);
         var leftByName = new List<string>();
         foreach (var raw in File.ReadAllLines(args[offset]))
@@ -344,7 +345,7 @@ static class RigAnimDrill
             }
         var cover = new SortedDictionary<string, long>(StringComparer.Ordinal); foreach (var c in Cover) cover[c.key] = 0;
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        long stages = 0, logs = 0, objs = 0, meshes = 0, groups = 0, bones = 0, fcurves = 0, keys = 0; int stopped = 0, full = 0;
+        long stageRows = 0, logs = 0, objs = 0, meshes = 0, groups = 0, bones = 0, fcurves = 0, keys = 0; int stopped = 0, full = 0;
         foreach (var block in blocks)
         {
             string key = block[0].Split('\t').Length > 1 ? block[0].Split('\t')[1] : "?";
@@ -353,7 +354,7 @@ static class RigAnimDrill
                 if (!seen.Add(key)) throw new InvalidDataException("the dump repeats a job");
                 var d = RigAnimDump.Parse(block, jobs, requireKeys);
                 foreach (var c in Cover) if (c.test(d)) cover[c.key]++;
-                stages += d.Stages.Count; logs += d.AllLogs.Count();
+                stageRows += d.Stages.Count; logs += d.AllLogs.Count();
                 foreach (var s in d.Stages.Values) { objs += s.Objs.Count; meshes += s.Meshes.Count; groups += s.Groups.Count; bones += s.Bones.Count; fcurves += s.FCurves.Count; keys += s.Keys.Count; }
                 // EXIT:<stage>: keys name the expected script exit stage. A different exit is a broken fixture too.
                 // Every other job must run through all four stages: a registry recipe that stops is a broken bake.
@@ -380,7 +381,7 @@ static class RigAnimDrill
                     var last = d.Last;
                     Console.WriteLine($"OK {key}: 4 stages, {d.AllLogs.Count()} log lines; at the end {last.Objs.Count} objects, {last.Meshes.Count} mesh(es), {last.Bones.Count} bones, {last.Actions.Count} action(s), {last.FCurves.Count} fcurves, frames {last.Scene[0]}..{last.Scene[1]}");
                 }
-                if (stage1 && !Stage1Drill.Compare(d, key)) fails++;
+                if (stages > 0 && !Stage1Drill.Compare(d, key, stages)) fails++;
             }
             catch (InvalidDataException e) { fails++; Console.WriteLine($"FAIL {key}: {e.Message}"); }
             catch (Exception e) { fails++; Console.WriteLine($"FAIL {key}: {e.GetType().Name}: {e.Message}"); }
@@ -388,10 +389,10 @@ static class RigAnimDrill
         foreach (var k in jobs.Keys.Where(k => !seen.Contains(k))) { fails++; Console.WriteLine($"FAIL {k}: the jobs file names it, the dump has no block for it"); }
         foreach (var l in leftByName) Console.WriteLine("LEFT " + l);
         foreach (var kv in cover) Console.WriteLine($"COVER {kv.Value} {kv.Key}");
-        if (stage1) Stage1Drill.Summary();
-        Console.WriteLine($"TOTAL jobs {blocks.Count} full {full} stopped {stopped} left {leftByName.Count} stages {stages} logs {logs} objects {objs} meshes {meshes} groups {groups} bones {bones} fcurves {fcurves} keys {keys} fails {fails}");
+        if (stages > 0) Stage1Drill.Summary(stages);
+        Console.WriteLine($"TOTAL jobs {blocks.Count} full {full} stopped {stopped} left {leftByName.Count} stages {stageRows} logs {logs} objects {objs} meshes {meshes} groups {groups} bones {bones} fcurves {fcurves} keys {keys} fails {fails}");
         if (fails > 0) { Console.WriteLine($"FAIL — {fails} problem(s)"); return 1; }
-        Console.WriteLine($"PASS — rig_anim stage dump: {blocks.Count} jobs dumped by Blender, {full} through all four stages, {stopped} stopped by the script as it says; {leftByName.Count} recipe(s) left by name" + (stage1 ? $"; stage 1 modelled: {Stage1Drill.Equal} of {Stage1Drill.Compared} jobs equal row for row ({Stage1Drill.RowsEqual} rows)" : ""));
+        Console.WriteLine($"PASS — rig_anim stage dump: {blocks.Count} jobs dumped by Blender, {full} through all four stages, {stopped} stopped by the script as it says; {leftByName.Count} recipe(s) left by name" + (stages > 0 ? $"; stages 1 to {stages} modelled: {Stage1Drill.Equal} of {Stage1Drill.Compared} jobs equal row for row ({Stage1Drill.RowsEqual} rows), {Stage1Drill.Left} left by name" : ""));
         return 0;
     }
 }
@@ -433,24 +434,53 @@ static class Stage1Drill
         return d == null ? " (every K row equal: the hash itself differs)" : "; " + d;
     }
 
-    public static bool Compare(RigAnimDump d, string key)
+    /// <summary>The model's rows of stage `n` against the dump's: every kind, as strings.</summary>
+    static void CompareRows(int n, BlenderRigAnim.Rows rows, List<string> logs, RigAnimDump.Stage s, List<string> problems)
+    {
+        string N = "stage " + n + " ";
+        if (!s.Logs.SequenceEqual(logs)) problems.Add(N + "LOG lines differ: here [" + string.Join(" | ", logs) + "], Blender [" + string.Join(" | ", s.Logs) + "]");
+        if (!s.Scene.SequenceEqual(rows.Scene.Skip(2))) problems.Add(N + "SCENE differs: here [" + string.Join(" ", rows.Scene.Skip(2)) + "], Blender [" + string.Join(" ", s.Scene) + "]");
+        string x;
+        if ((x = Diff("OBJ", rows.Objs, s.Objs, 1)) != null) problems.Add(N + x);
+        if ((x = Diff("MESH", rows.Meshes, s.Meshes, 1)) != null) problems.Add(N + x);
+        if ((x = Diff("VG", rows.Groups, s.Groups, 2)) != null) problems.Add(N + x);
+        if ((x = Diff("BONE", rows.Bones, s.Bones, 2)) != null) problems.Add(N + x);
+        if ((x = Diff("PB", rows.PoseBones, s.PoseBones, 1)) != null) problems.Add(N + x);
+        if ((x = Diff("ACT", rows.Actions, s.Actions, 1)) != null) problems.Add(N + x);
+        if ((x = Diff("FC", rows.FCurves, s.FCurves, 3)) != null)
+        {
+            int at = -1; for (int i = 0; i < Math.Min(rows.FCurves.Count, s.FCurves.Count) && at < 0; i++) if (!rows.FCurves[i].SequenceEqual(s.FCurves[i])) at = i;
+            problems.Add(N + x + (at >= 0 && rows.FCurves[at].Take(5).SequenceEqual(s.FCurves[at].Take(5)) ? ExplainKeys(rows.FCurves[at], rows.Keys, s) : ""));
+        }
+        if (s.Keys.Count > 0 && (x = Diff("K", rows.Keys, s.Keys, 3)) != null) problems.Add(N + x);
+    }
+
+    static long RowCount(RigAnimDump.Stage s) => 1 + s.Objs.Count + s.Meshes.Count + s.Groups.Count + s.Bones.Count + s.PoseBones.Count + s.Actions.Count + s.FCurves.Count + s.Keys.Count;
+    static string Describe(RigAnimDump.Stage s) => $"{s.Objs.Count} objects, {s.Meshes.Count} meshes, {s.Groups.Count} vertex groups, {s.Bones.Count} bones, {s.Actions.Count} actions, {s.FCurves.Count} fcurves" + (s.Keys.Count > 0 ? $", {s.Keys.Count} keys" : "");
+
+    /// <summary>Stages 1..`stages` of the model against the dump. A LEFT: job must be declined by the model at one of
+    /// them (its earlier stages compared all the same); any other decline is a FAIL.</summary>
+    public static bool Compare(RigAnimDump d, string key, int stages)
     {
         Compared++;
         var argv = new List<string> { d.Argv[0], "riganim_drill_output.fbx" }; argv.AddRange(d.Argv.Skip(1));
         var problems = new List<string>();
-        BlenderRigAnim.Stage1 model;
+        BlenderRigAnim.Stage1 model; BlenderRigAnim.Args args;
         try
         {
             var m = GlbReader.Read(d.Argv[0]);
-            model = BlenderRigAnim.RunStage1(m, BlenderRigAnim.ParseArgs(argv));
+            args = BlenderRigAnim.ParseArgs(argv);
+            model = BlenderRigAnim.RunStage1(m, args);
         }
         catch (Exception e) { Console.WriteLine($"FAIL {key}: stage 1 model: {e.GetType().Name}: {e.Message}"); return false; }
-        foreach (var note in model.Notes) Census[note] = (Census.TryGetValue(note, out int c) ? c : 0) + 1;
         // a LEFT: key names a job the C# leaves to Blender by name: the model must say so, and a model that takes it is wrong too
         bool left = key.StartsWith("LEFT:", StringComparison.Ordinal);
-        if (left && model.Fallback == null) { Console.WriteLine($"FAIL {key}: stage 1 model takes a file its key says is left to Blender"); return false; }
-        if (left) { Left++; Console.WriteLine($"STAGE1 {key}: left to Blender by name, as the model says: {model.Fallback}"); return true; }
-        if (model.Fallback != null) { Console.WriteLine($"FAIL {key}: stage 1 model leaves this file to Blender: {model.Fallback}"); return false; }
+        if (model.Fallback != null)
+        {
+            foreach (var note in model.Notes) Census[note] = (Census.TryGetValue(note, out int c) ? c : 0) + 1;
+            if (!left) { Console.WriteLine($"FAIL {key}: stage 1 model leaves this file to Blender: {model.Fallback}"); return false; }
+            Left++; Console.WriteLine($"STAGE1 {key}: left to Blender by name, as the model says: {model.Fallback}"); return true;
+        }
         var rows = model.Exits ? null : BlenderRigAnim.Render(model, 1);
         if (model.Exits)
         {
@@ -460,36 +490,40 @@ static class Stage1Drill
         else if (!d.Stages.TryGetValue(1, out var s)) problems.Add("stage 1 model: the scene runs on here, Blender stopped in stage 1: " + (d.Exit != null ? string.Join(" | ", d.LogsOfStop) : d.Died));
         else
         {
-            if (!s.Logs.SequenceEqual(model.Logs)) problems.Add("stage 1 LOG lines differ: here [" + string.Join(" | ", model.Logs) + "], Blender [" + string.Join(" | ", s.Logs) + "]");
-            if (!s.Scene.SequenceEqual(rows.Scene.Skip(2))) problems.Add("stage 1 SCENE differs: here [" + string.Join(" ", rows.Scene.Skip(2)) + "], Blender [" + string.Join(" ", s.Scene) + "]");
-            string x;
-            if ((x = Diff("OBJ", rows.Objs, s.Objs, 1)) != null) problems.Add("stage 1 " + x);
-            if ((x = Diff("MESH", rows.Meshes, s.Meshes, 1)) != null) problems.Add("stage 1 " + x);
-            if ((x = Diff("VG", rows.Groups, s.Groups, 2)) != null) problems.Add("stage 1 " + x);
-            if ((x = Diff("BONE", rows.Bones, s.Bones, 2)) != null) problems.Add("stage 1 " + x);
-            if ((x = Diff("PB", rows.PoseBones, s.PoseBones, 1)) != null) problems.Add("stage 1 " + x);
-            if ((x = Diff("ACT", rows.Actions, s.Actions, 1)) != null) problems.Add("stage 1 " + x);
-            if ((x = Diff("FC", rows.FCurves, s.FCurves, 3)) != null)
-            {
-                int at = -1; for (int i = 0; i < Math.Min(rows.FCurves.Count, s.FCurves.Count) && at < 0; i++) if (!rows.FCurves[i].SequenceEqual(s.FCurves[i])) at = i;
-                problems.Add("stage 1 " + x + (at >= 0 && rows.FCurves[at].Take(5).SequenceEqual(s.FCurves[at].Take(5)) ? ExplainKeys(rows.FCurves[at], rows.Keys, s) : ""));
-            }
-            if (s.Keys.Count > 0 && (x = Diff("K", rows.Keys, s.Keys, 3)) != null) problems.Add("stage 1 " + x);
-            if (problems.Count == 0)
-            {
-                RowsEqual += 1 + s.Objs.Count + s.Meshes.Count + s.Groups.Count + s.Bones.Count + s.PoseBones.Count + s.Actions.Count + s.FCurves.Count + s.Keys.Count;
-                Console.WriteLine($"STAGE1 {key}: equal - {s.Objs.Count} objects, {s.Meshes.Count} meshes, {s.Groups.Count} vertex groups, {s.Bones.Count} bones, {s.Actions.Count} actions, {s.FCurves.Count} fcurves" + (s.Keys.Count > 0 ? $", {s.Keys.Count} keys" : ""));
-            }
+            CompareRows(1, rows, model.Logs, s, problems);
+            if (problems.Count == 0) { RowsEqual += RowCount(s); Console.WriteLine($"STAGE1 {key}: equal - {Describe(s)}"); }
         }
         if (problems.Count == 0 && model.Exits) { RowsEqual += model.Logs.Count; Console.WriteLine($"STAGE1 {key}: equal - the script's exit in stage 1, {model.Logs.Count} RIGANIM lines"); }
+        // stage 2 on the scene stage 1 left (the script's exit ends the run; its RIGANIM lines are the stop's, compared above)
+        if (problems.Count == 0 && stages >= 2 && !model.Exits)
+        {
+            try { BlenderRigAnim.RunStage2(model, args); }
+            catch (Exception e) { problems.Add($"stage 2 model: {e.GetType().Name}: {e.Message}"); }
+            if (problems.Count == 0 && model.Fallback != null)
+            {
+                foreach (var note in model.Notes) Census[note] = (Census.TryGetValue(note, out int c) ? c : 0) + 1;
+                if (!left) { Console.WriteLine($"FAIL {key}: stage 2 model leaves this file to Blender: {model.Fallback}"); return false; }
+                Left++; Console.WriteLine($"STAGE2 {key}: left to Blender by name, as the model says: {model.Fallback}"); return true;
+            }
+            RigAnimDump.Stage s2 = null;
+            if (problems.Count == 0 && !d.Stages.TryGetValue(2, out s2)) problems.Add("stage 2 model: the scene runs on here, Blender stopped in stage 2: " + (d.Exit != null ? string.Join(" | ", d.LogsOfStop) : d.Died));
+            else if (problems.Count == 0)
+            {
+                var rows2 = BlenderRigAnim.Render(model, 2);
+                CompareRows(2, rows2, model.Logs2, s2, problems);
+                if (problems.Count == 0) { RowsEqual += RowCount(s2); Console.WriteLine($"STAGE2 {key}: equal - {Describe(s2)}"); }
+            }
+        }
+        foreach (var note in model.Notes) Census[note] = (Census.TryGetValue(note, out int c) ? c : 0) + 1;
+        if (problems.Count == 0 && left) { Console.WriteLine($"FAIL {key}: the model takes a file its key says is left to Blender (through stage {Math.Min(stages, model.Exits ? 1 : stages)})"); return false; }
         if (problems.Count == 0) { Equal++; return true; }
         foreach (var p in problems) Console.WriteLine($"FAIL {key}: {p}");
         return false;
     }
 
-    public static void Summary()
+    public static void Summary(int stages)
     {
         foreach (var kv in Census) Console.WriteLine($"MODEL {kv.Value} {kv.Key}");
-        Console.WriteLine($"STAGE1 jobs {Compared} equal {Equal} left {Left} rows {RowsEqual}");
+        Console.WriteLine($"STAGES {stages} jobs {Compared} equal {Equal} left {Left} rows {RowsEqual}");
     }
 }
