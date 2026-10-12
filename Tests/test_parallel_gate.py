@@ -44,7 +44,7 @@ class ParallelGateTests(unittest.TestCase):
 
     def test_progress_reports_completion_before_an_earlier_job_finishes_and_uses_real_duration(self):
         write(self.path / "clock", "100\n")
-        # A controlled clock and release file avoid timing assumptions on a busy CI runner.
+        # The progress line is the synchronization point; the timeout only guards a stuck worker.
         text = '''date() { if [ "$1" = +%s ]; then cat "$ROOT/clock"; else echo 00:00; fi; }
 '''+self.helpers()+'''
 run_bg slow bash -c 'while [ ! -f "$1/release" ]; do sleep .05; done; echo slow-output' _ "$ROOT"
@@ -55,12 +55,15 @@ exit "$fail"
 '''
         proc = subprocess.Popen(self.script(text), env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
-            deadline = time.monotonic() + 3
+            deadline = time.monotonic() + 30
+            before_release = ""
             while time.monotonic() < deadline:
-                if "PASS fast" in (self.path / "progress.md").read_text():
+                before_release = (self.path / "progress.md").read_text()
+                if "PASS fast" in before_release:
+                    break
+                if proc.poll() is not None:
                     break
                 time.sleep(.05)
-            before_release = (self.path / "progress.md").read_text()
         finally:
             write(self.path / "clock", "110\n")
             write(self.path / "release", "")

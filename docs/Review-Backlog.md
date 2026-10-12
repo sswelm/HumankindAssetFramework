@@ -242,14 +242,15 @@ drill names it so and reports its coverage as 23 of 24, never as the whole corpu
 clear, (c) stage 2 the skin conversion and the flatten, (d) stage 3 the bone cap and the role clips, (e) stage 4 the
 join, the albedo (pixel parity, Blender's own save), the decimate, the placement, (f) the GLB writer's output for the
 rig, (g) the Factory's animated path built from the GLB, BOTH routes kept and configurable (the user's call, 2026-10-11): a
-per-recipe setting with a global default - the in-process GLB rig by default, the shipped Blender FBX route on request -
-so a model whose Unity side differs can be pinned to the proven route while the difference is measured; what the
-port names by name goes to the Blender route whatever the setting, and the slim-step cache key carries the route AND
+per-recipe setting with a global default - the shipped Blender FBX route initially, the in-process GLB rig opt-in -
+so selected models can opt into GLB during evaluation and exceptions can stay on Blender after the default flips;
+what the port names by name goes to the Blender route whatever the setting, and the slim-step cache key carries the route AND
 a C# pipeline revision, as the prep's and the deploy's keys do (a switch re-bakes, and so does a changed C# rig or
 writer: nothing stale is reused). THE DEFAULT FLIPS LAST: the shipped Blender route stays the global default, the GLB
-rig opt-in per recipe, until the acceptance gate passes - the Bake Tests row in Unity holding, for every animated
-entry baked both ways, the mesh, the skeleton, the clips, the placement, and an in-game check of a pawn playing its
-roles (PR #151's slice reports different pose bytes and unverified playback: that is the bar, not a hope); only then
+rig opt-in per recipe, until the acceptance gate passes - the Bake Tests row in Unity holding, for all 23 GLB-source
+animated entries baked both ways, the mesh, the skeleton, the clips, the placement, and an in-game check of each
+model playing its roles; the FBX-only light assault mech also passes a Blender-fallback bake and in-game check
+(PR #151's slice reports different pose bytes and unverified playback: that is the bar, not a hope); only then
 the GLB rig becomes the default (the review of PR #157), (h) the Bake Tests row - the gate above. The
 localNodeAnim transplant (no registry entry) is LEFT by name until last: its FBX round trip is Blender's composition
 of a pathological hierarchy, not a rule to read. Estimate unchanged: 3 to 4 weeks.
@@ -370,10 +371,12 @@ skipped. Ranked by consequence within each group.
 
 ### Verification machinery (fix first — a green gate that cannot see the shape is worse than no gate)
 
-- **`Tests/test_parallel_gate.py` is timing-flaky** (2026-10-12): `test_progress_reports_completion_before_an_earlier_job_finishes_and_uses_real_duration`
-  failed a push's gate on a docs-only change (`'PASS fast (2 s)' not found in ''`) and 1 of 3 reruns on an idle machine; it reads the
-  progress output before the writer has flushed it. Needs a deterministic wait on the file, not a sleep; until then a failed push
-  on that check is retried, not debugged (it also failed 1 of 8 once under load in the PR #148 review).
+- ~~**`Tests/test_parallel_gate.py` is timing-flaky**~~ — **FIXED 2026-10-12.**
+  `test_progress_reports_completion_before_an_earlier_job_finishes_and_uses_real_duration` failed a docs-only push
+  (`'PASS fast (2 s)' not found in ''`), 1 of 3 idle reruns, and 1 of 8 under load in the PR #148 review. The test
+  already polled the progress file, but gave the background worker only three seconds to start and finish before
+  capturing it. It now waits for the fast worker's completion line, with a generous timeout only to diagnose a stuck worker;
+  a failure still needs investigation, not an automatic retry.
 
 
 - ~~**`check-member-shape.sh` matches only `Convert.To*(GetMember(` — blind to the `Mem(` wrapper, and one live
