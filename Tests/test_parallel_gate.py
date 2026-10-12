@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 import unittest
 
@@ -32,12 +33,13 @@ class ParallelGateTests(unittest.TestCase):
         write(path, 'set -uo pipefail\nROOT="$1"\n' + text)
         return [BASH, path.as_posix(), self.path.as_posix()]
 
-    def run_shell(self, text):
-        return subprocess.run(self.script(text), env=self.env, capture_output=True, text=True, timeout=15)
+    def run_shell(self, text, timeout=15):
+        return subprocess.run(self.script(text), env=self.env, capture_output=True, text=True, timeout=timeout)
 
     def helpers(self):
+        # every definition of the gate, up to the line where the real gate takes the lock and starts its steps
         source = (ROOT / "tools/check.sh").read_text(encoding="utf-8")
-        return source[source.index("fail=0\n"):source.index('note "started (')]
+        return source[source.index("fail=0\n"):source.index("# ==== the gate itself")]
 
     def tampers(self):
         source = (ROOT / "tools/deploy_drill.sh").read_text(encoding="utf-8")
@@ -56,7 +58,9 @@ exit "$fail"
 '''
         proc = subprocess.Popen(self.script(text), env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
-            deadline = time.monotonic() + 3
+            # The clock is controlled, so this deadline is only how long the test will WAIT for the worker's note:
+            # 3 s was missed twice on 2026-10-11 under another gate's load (the worker took 100+ s to be scheduled).
+            deadline = time.monotonic() + 60
             while time.monotonic() < deadline:
                 if "PASS fast" in (self.path / "progress.md").read_text():
                     break
@@ -65,7 +69,7 @@ exit "$fail"
         finally:
             write(self.path / "clock", "110\n")
             write(self.path / "release", "")
-            out, err = proc.communicate(timeout=10)
+            out, err = proc.communicate(timeout=60)
         self.assertEqual(proc.returncode, 0, err)
         self.assertIn("PASS fast (2 s)", before_release)
         self.assertNotIn("PASS slow", before_release)
@@ -197,6 +201,84 @@ verdict; exit $?
                     result = self.run_shell(setup + guard + '\necho PASS\n')
                     self.assertEqual(result.returncode, 0 if present else 3, result.stderr)
                     self.assertIn("PASS" if present else "SKIP", result.stdout)
+
+    # One gate at a time (2026-10-12): a second gate waits for the lock and says so; a holder that stopped
+    # heartbeating is taken over; only the holder frees the lock.
+    def test_a_second_gate_waits_for_the_lock_then_proceeds_and_frees_it(self):
+        lock = self.path / "gate.lock"
+        self.env.update(HAF_GATE_LOCK=lock.as_posix(), HAF_GATE_LOCK_POLL="0.2", HAF_GATE_LOCK_STALE="30", HAF_GATE_LOCK_BEAT="0.5")
+        lock.mkdir(); write(lock / "holder", "other-gate pid 1"); write(lock / "beat", str(int(time.time())))
+        threading.Timer(1.5, lambda: shutil.rmtree(lock)).start()   # the other gate finishes
+        t0 = time.monotonic()
+        result = self.run_shell(self.helpers()+'''
+gate_lock
+echo acquired
+gate_unlock
+[ -d "$LOCK" ] && echo still-locked || echo released
+''', timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertGreater(time.monotonic() - t0, 1.0)
+        self.assertIn("another gate is running (other-gate pid 1); waiting", result.stdout)
+        self.assertIn("acquired", result.stdout)
+        self.assertIn("released", result.stdout)
+        self.assertIn("waiting: another gate holds the lock (other-gate pid 1)", (self.path / "progress.md").read_text())
+
+    def test_a_stale_lock_is_taken_over_and_a_waiter_never_frees_anothers(self):
+        lock = self.path / "gate.lock"
+        self.env.update(HAF_GATE_LOCK=lock.as_posix(), HAF_GATE_LOCK_POLL="0.2", HAF_GATE_LOCK_STALE="2", HAF_GATE_LOCK_BEAT="0.5")
+        lock.mkdir(); write(lock / "holder", "dead-gate pid 2"); write(lock / "beat", "0")
+        result = self.run_shell(self.helpers()+'gate_lock\necho acquired\ngate_unlock\n', timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("took over a stale gate lock (dead-gate pid 2", result.stdout)
+        self.assertIn("acquired", result.stdout)
+        self.assertFalse(lock.exists())
+        # a live lock held by someone else: gate_unlock from a shell that is not the holder leaves it alone
+        lock.mkdir(); write(lock / "holder", "other-gate pid 3"); write(lock / "beat", str(int(time.time())))
+        result = self.run_shell(self.helpers()+'gate_unlock\n[ -d "$LOCK" ] && echo kept || echo freed\n')
+        self.assertIn("kept", result.stdout)
+
+    def test_an_abort_kills_a_workers_grandchild_and_frees_the_lock(self):
+        # The worker's shell is one process; what it spawned through Cygwin's exec has no usable Windows parent, so
+        # the abort must find it another way (its command line names the gate's temp directory). The grandchild here
+        # is a uniquely named copy of sleep, started under the worker's TMPDIR.
+        lock = self.path / "gate.lock"
+        self.env.update(HAF_GATE_LOCK=lock.as_posix(), HAF_GATE_LOCK_POLL="0.2", HAF_GATE_LOCK_BEAT="0.5")
+        tag = f"hafsleep_{os.getpid()}"
+        sleep_exe = Path(BASH).parent.parent / "usr/bin/sleep.exe" if os.name == "nt" else Path(shutil.which("sleep"))
+        result = self.run_shell(self.helpers()+f'''
+gate_lock
+trap gate_abort TERM
+run_bg deep bash -c 'cp "$0" "$TMPDIR/{tag}.exe"; "$TMPDIR/{tag}.exe" 300 & wait' "{sleep_exe.as_posix()}"
+sleep 3
+kill -TERM $$
+sleep 5
+echo "still here"
+''', timeout=60)
+        alive = subprocess.run([BASH, "-c", f"sleep 1; ps -W | grep -c '{tag}'"], capture_output=True, text=True).stdout.strip()
+        subprocess.run([BASH, "-c", f"taskkill /F /IM '{tag}.exe' > /dev/null 2>&1; true"])
+        self.assertEqual(result.returncode, 130, result.stderr)
+        self.assertNotIn("still here", result.stdout)
+        self.assertEqual(alive, "0", "the worker's grandchild survived the abort")
+        self.assertFalse(lock.exists())
+        self.assertIn("DONE ABORTED (interrupted)", (self.path / "progress.md").read_text())
+
+    def test_a_hung_step_is_killed_and_failed_within_the_step_limit(self):
+        self.env["HAF_STEP_TIMEOUT"] = "2"
+        t0 = time.monotonic()
+        result = self.run_shell(self.helpers()+'''
+run_bg hung bash -c 'sleep 60; echo never'
+run_bg good bash -c 'echo good-output'
+run_bg_wait
+run serial-hung bash -c 'sleep 60; echo never'
+verdict; exit $?
+''', timeout=90)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertLess(time.monotonic() - t0, 60)
+        self.assertIn("[FAIL] hung", result.stdout)
+        self.assertIn("[FAIL] serial-hung", result.stdout)
+        self.assertIn("timed out: the step limit is 2 s", result.stdout)
+        self.assertIn("[PASS] good", result.stdout)
+        self.assertNotIn("never", result.stdout)
 
     def test_a_clean_gate_still_passes_with_the_verdict(self):
         result = self.run_shell(self.helpers()+'''
