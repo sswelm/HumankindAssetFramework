@@ -113,10 +113,6 @@ class VehicleRigMathTests(unittest.TestCase):
             parse("1,2,3,4")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class DissolveOrderGuard(unittest.TestCase):
     # 2026-10-12: the chunked _dissolve_limited handed each cell's edges and verts to bmesh.ops.dissolve_limit in
     # Python SET order - by object address, different in every Blender process - and a limited dissolve is greedy
@@ -130,3 +126,7 @@ class DissolveOrderGuard(unittest.TestCase):
         self.assertNotIn("list(_es)", body)
         self.assertNotIn("list(_vs)", body)
         self.assertLess(body.index("index_update()"), body.index("_jobs = []"), "indices are refreshed before the cells are gathered")
+
+
+if __name__ == "__main__":
+    unittest.main()
