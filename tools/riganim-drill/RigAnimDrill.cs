@@ -13,6 +13,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 
 public sealed class RigAnimDump
@@ -57,7 +58,21 @@ public sealed class RigAnimDump
     }
 
     /// <summary>One job's block (JOB .. DONE), checked for shape and consistency; throws InvalidDataException otherwise.</summary>
-    public static RigAnimDump Parse(List<string> block, Dictionary<string, string[]> jobs)
+    static string FcKey(string[] row) => row[2] + "\u0001" + row[3] + "\u0001" + row[4];
+
+    static byte[] LittleEndianBits(string hex)
+    {
+        var bytes = new byte[4];
+        for (int i = 0; i < 4; i++) bytes[i] = Convert.ToByte(hex.Substring((3 - i) * 2, 2), 16);
+        return bytes;
+    }
+
+    static string Hash(byte[] bytes)
+    {
+        using (var sha = SHA256.Create()) return BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", "").ToLowerInvariant();
+    }
+
+    public static RigAnimDump Parse(List<string> block, Dictionary<string, string[]> jobs, bool requireKeys = false)
     {
         var rows = block.Select(l => l.Split('\t')).ToList();
         if (rows[0][0] != "JOB" || rows[0].Length != 2 || rows[0][1].Length == 0) throw new InvalidDataException("the dump has an invalid JOB row");
@@ -196,15 +211,30 @@ public sealed class RigAnimDump
                 if (have != int.Parse(a[5], CultureInfo.InvariantCulture)) throw new InvalidDataException($"stage {s.N}: action '{a[2]}' says {a[5]} fcurves, {have} FC rows");
             }
             var fcKeys = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var f in s.FCurves) if (!fcKeys.Add(f[2] + "\u0001" + f[3] + "\u0001" + f[4])) throw new InvalidDataException($"stage {s.N}: two FC rows for '{f[3]}'[{f[4]}] of '{f[2]}'");
+            foreach (var f in s.FCurves) if (!fcKeys.Add(FcKey(f))) throw new InvalidDataException($"stage {s.N}: two FC rows for '{f[3]}'[{f[4]}] of '{f[2]}'");
             foreach (var o in s.Objs) if (o[8] != "-" && !actNames.Contains(o[8])) throw new InvalidDataException($"stage {s.N}: object '{o[2]}' holds an action the stage does not list");
-            if (s.Keys.Count > 0)
+            if (requireKeys || s.Keys.Count > 0)
             {
-                var keyCount = s.Keys.GroupBy(x => x[2] + "\u0001" + x[3] + "\u0001" + x[4], StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+                var keyRows = s.Keys.GroupBy(FcKey, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
+                foreach (var id in keyRows.Keys) if (!fcKeys.Contains(id)) throw new InvalidDataException($"stage {s.N}: K row names no FC row");
                 foreach (var f in s.FCurves)
                 {
-                    keyCount.TryGetValue(f[2] + "\u0001" + f[3] + "\u0001" + f[4], out int have);
+                    keyRows.TryGetValue(FcKey(f), out var rowsForCurve);
+                    int have = rowsForCurve == null ? 0 : rowsForCurve.Count;
                     if (have != int.Parse(f[5], CultureInfo.InvariantCulture)) throw new InvalidDataException($"stage {s.N}: fcurve '{f[3]}'[{f[4]}] says {f[5]} keys, {have} K rows");
+                    var co = new List<byte>(); var leftHandles = new List<byte>(); var rightHandles = new List<byte>(); var meta = new List<string>();
+                    if (rowsForCurve != null) foreach (var krow in rowsForCurve)
+                    {
+                        co.AddRange(LittleEndianBits(krow[5])); co.AddRange(LittleEndianBits(krow[6]));
+                        for (int i = 7; i <= 8; i++) leftHandles.AddRange(LittleEndianBits(krow[i]));
+                        for (int i = 9; i <= 10; i++) rightHandles.AddRange(LittleEndianBits(krow[i]));
+                        meta.Add(krow[11] + "/" + krow[12] + "/" + krow[13] + "/" + krow[14]);
+                    }
+                    var handles = new List<byte>(leftHandles.Count + rightHandles.Count);
+                    handles.AddRange(leftHandles); handles.AddRange(rightHandles);
+                    handles.AddRange(Encoding.UTF8.GetBytes(string.Join("|", meta)));
+                    if (Hash(co.ToArray()) != f[6] || Hash(handles.ToArray()) != f[7])
+                        throw new InvalidDataException($"stage {s.N}: K rows do not match FC hashes for '{f[3]}'[{f[4]}]");
                 }
             }
             if (s.N == 4)
@@ -279,10 +309,12 @@ static class RigAnimDrill
     public static int Main(string[] args)
     {
         Console.OutputEncoding = new UTF8Encoding(false);
-        if (args.Length < 2) { Console.WriteLine("usage: riganim.exe <jobs file> <dump>..."); return 2; }
+        bool requireKeys = args.Length > 0 && args[0] == "--keys";
+        int offset = requireKeys ? 1 : 0;
+        if (args.Length < offset + 2) { Console.WriteLine("usage: riganim.exe [--keys] <jobs file> <dump>..."); return 2; }
         var jobs = new Dictionary<string, string[]>(StringComparer.Ordinal);
         var leftByName = new List<string>();
-        foreach (var raw in File.ReadAllLines(args[0]))
+        foreach (var raw in File.ReadAllLines(args[offset]))
         {
             var line = raw.TrimEnd('\r');
             if (line.Trim().Length == 0) continue;
@@ -294,7 +326,7 @@ static class RigAnimDrill
         if (jobs.Count == 0) { Console.WriteLine("FAIL jobs: no rig_anim jobs to read"); return 1; }
         var blocks = new List<List<string>>();
         int fails = 0;
-        foreach (var dump in args.Skip(1))
+        foreach (var dump in args.Skip(offset + 1))
             foreach (var raw in File.ReadLines(dump))
             {
                 var line = raw.TrimEnd('\r');
@@ -312,19 +344,27 @@ static class RigAnimDrill
             try
             {
                 if (!seen.Add(key)) throw new InvalidDataException("the dump repeats a job");
-                var d = RigAnimDump.Parse(block, jobs);
+                var d = RigAnimDump.Parse(block, jobs, requireKeys);
                 foreach (var c in Cover) if (c.test(d)) cover[c.key]++;
                 stages += d.Stages.Count; logs += d.AllLogs.Count();
                 foreach (var s in d.Stages.Values) { objs += s.Objs.Count; meshes += s.Meshes.Count; groups += s.Groups.Count; bones += s.Bones.Count; fcurves += s.FCurves.Count; keys += s.Keys.Count; }
-                // a job whose key starts with "EXIT:" is one the script is EXPECTED to stop on (a fixture of its own exit);
-                // every other job must run through all four stages: a registry recipe that stops is a broken bake
+                // EXIT:<stage>: keys name the expected script exit stage. A different exit is a broken fixture too.
+                // Every other job must run through all four stages: a registry recipe that stops is a broken bake.
                 bool expectStop = key.StartsWith("EXIT:", StringComparison.Ordinal);
+                int expectedStage = 0;
+                if (expectStop)
+                {
+                    int colon = key.IndexOf(':', 5);
+                    if (colon < 0 || !int.TryParse(key.Substring(5, colon - 5), NumberStyles.None, CultureInfo.InvariantCulture, out expectedStage) || expectedStage < 1 || expectedStage > 4)
+                        throw new InvalidDataException("EXIT: key must name its expected stage (EXIT:<stage>:<name>)");
+                }
                 if (d.StoppedAt > 0)
                 {
                     stopped++;
                     string how = d.Exit != null ? "exits " + d.Exit + ": " + (d.LogsOfStop.LastOrDefault(l => l.StartsWith("RIGANIM ERROR")) ?? "(no RIGANIM ERROR line)") : "dies: " + d.Died;
-                    if (expectStop && d.Exit != null) Console.WriteLine($"OK {key}: stops at stage {d.StoppedAt} as expected; {how}");
-                    else { fails++; Console.WriteLine($"FAIL {key}: stopped at stage {d.StoppedAt}" + (expectStop ? " by dying, not by the script's exit; " : "; ") + how); }
+                    if (expectStop && d.Exit != null && d.StoppedAt == expectedStage && d.LogsOfStop.Any(l => l.StartsWith("RIGANIM ERROR", StringComparison.Ordinal)))
+                        Console.WriteLine($"OK {key}: stops at stage {d.StoppedAt} as expected; {how}");
+                    else { fails++; Console.WriteLine($"FAIL {key}: stopped at stage {d.StoppedAt}" + (expectStop ? $", expected to stop at stage {expectedStage} with the script's RIGANIM ERROR; " : "; ") + how); }
                 }
                 else if (expectStop) { fails++; Console.WriteLine($"FAIL {key}: expected to stop (its key says EXIT:), ran through all four stages"); }
                 else

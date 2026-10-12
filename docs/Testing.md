@@ -1373,10 +1373,12 @@ coloured by COLOR_0, which the importer gives a "DefaultMaterial" and the script
 primitive without and one with a material, kept with an empty slot), the DeployArmV2 contract, object-level animation
 on a mesh node (cleared on the conversion path, kept on the legacy one), several animations with a longer second one
 and a STEP sampler, a bone-parented mesh, a scaled and turned wrapper empty, and a file without an armature. That last
-one is the script's own exit: a job key starting with `EXIT:` says the script is expected to stop (the drill fails it
-if it runs through, and fails any other job that stops - a registry recipe that stops is a broken bake); `LEFT:` marks
+one is the script's own exit: a job key starting with `EXIT:<stage>:` says the script is expected to stop at that stage
+with a RIGANIM ERROR (the drill fails it if it runs through or stops elsewhere, and fails any other job that stops);
+`LEFT:` marks
 a job the C# will leave to Blender by name (localNodeAnim). `RIGANIM_KEYS=1` now records each key's handles,
-interpolation, easing and handle types, what the importer-curve port is held to.
+interpolation, easing and handle types. In that mode the C# validator requires the keys and reconstructs both `FC`
+hashes from them, so a changed or missing key cannot pass as importer-curve evidence.
 
 Review of PR #148: the sanitizer now prints the number of escaped path keys, as the script does, when quoted bone
 names share a prefix (one garbage key can remove curves from two bones). Confirmed with the real sanitizer in Blender.

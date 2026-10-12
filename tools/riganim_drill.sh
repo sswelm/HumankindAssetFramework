@@ -5,7 +5,7 @@
 # cut into its four stages at four of its own lines and the scene written out after each (blender_riganim_dump.py: the
 # RIGANIM lines, every object with its matrices, every mesh's geometry and weights hashed, the bones at rest, the pose,
 # every action's fcurves hashed, the albedo's pixels). The C# side (RigAnimDrill.cs) holds the EVIDENCE: every recipe's
-# block complete and consistent, an early stop failed with its stage and reason - and prints the census of the
+# block complete and consistent, an unexpected early stop failed with its stage and reason - and prints the census of the
 # script's branches the recipes take (COVER rows), which the stage ports (b)..(e) build on. No rule of the script is
 # compared yet: the PASS line says so.
 # The light assault mech's source is an .fbx, which the C# does not read until the native FBX reader: that recipe is
@@ -62,7 +62,7 @@ fi
 n_reg=$n_jobs
 [ "$n_reg" -gt 0 ] || { echo "SKIP — rig_anim drill: no animated recipe with a readable source in the registry at $PROJECT (set HAF_UNITY_PROJECT); rig_anim was NOT drilled"; exit 3; }
 grep "^LEFT	" "$TMPD/jobs.txt" | sed 's/^LEFT\t/LEFT /; s/\t/: /'
-# the fixtures: the branches no recipe takes (riganim_fixtures.py); an "EXIT:" key is a job the script is expected to stop on
+# the fixtures: the branches no recipe takes (riganim_fixtures.py); EXIT:<stage>: names the expected exit stage
 python "$ROOT/tools/riganim-drill/riganim_fixtures.py" "$WTMP/fixtures" > "$TMPD/fixtures_raw.txt" || { echo "FAIL — could not write the rig_anim fixtures"; exit 1; }
 tr -d '\r' < "$TMPD/fixtures_raw.txt" >> "$TMPD/jobs.txt"
 n_fx=$(grep -c "^JOB	" "$TMPD/fixtures_raw.txt"); n_jobs=$((n_reg + n_fx))
@@ -98,7 +98,8 @@ if [ "$brc" -ne 0 ] || [ "$n_b" -ne "$n_jobs" ]; then
   echo "FAIL — rig_anim drill: Blender dumped $n_b of $n_jobs jobs (exit $brc)"; exit 1
 fi
 DUMPS=(); for ((k = 0; k < JOBS; k++)); do DUMPS+=("$WTMP/dump_$k.txt"); done
-"$TMPD/riganim.exe" "$WTMP/jobs.txt" "${DUMPS[@]}" > "$TMPD/cs_raw.txt" 2>&1; rc=$?
+KEY_MODE=(); [ "${RIGANIM_KEYS:-0}" != "1" ] || KEY_MODE=(--keys)
+"$TMPD/riganim.exe" "${KEY_MODE[@]}" "$WTMP/jobs.txt" "${DUMPS[@]}" > "$TMPD/cs_raw.txt" 2>&1; rc=$?
 t2=$(date +%s)
 tr -d '\r' < "$TMPD/cs_raw.txt" > "$TMPD/cs.txt"
 grep -E "^FAIL|^STOP|^COVER" "$TMPD/cs.txt"
@@ -130,6 +131,10 @@ while IFS= read -r mode; do
     STOP_missing) reason="no EXIT or DIES row";;
     STOP_valid) reason="stopped at stage 3";;
     EXIT_ran_full) reason="expected to stop";;
+    EXIT_marked_wrong_stage) reason="expected to stop at stage 1";;
+    K_missing) reason="K rows";;
+    K_bits|K_meta) reason="K rows do not match FC hashes";;
+    K_orphan) reason="K row names no FC row";;
     LOG_not_riganim) reason="not a RIGANIM line";;
     LOG_misplaced) reason="out of place";;
     SCENE_missing) reason="no SCENE row";;
@@ -150,8 +155,9 @@ while IFS= read -r mode; do
     IMG_early) reason="not under its STAGE row|IMG row outside stage 4";;
     *) echo "FAIL — rig_anim drill: the tamper '$mode' has no expected reason here (add it)"; exit 1;;
   esac
-  jf="$WTMP/missing/jobs.txt"; [ "$mode" != "EXIT_ran_full" ] || jf="$WTMP/missing/jobs_exit.txt"
-  "$TMPD/riganim.exe" "$jf" "$WTMP/missing/$mode.txt" > "$TMPD/t_$mode.txt" 2>&1; badrc=$?
+  jf="$WTMP/missing/jobs.txt"
+  case "$mode" in EXIT_ran_full|EXIT_marked_wrong_stage) jf="$WTMP/missing/jobs_exit.txt";; esac
+  "$TMPD/riganim.exe" "${KEY_MODE[@]}" "$jf" "$WTMP/missing/$mode.txt" > "$TMPD/t_$mode.txt" 2>&1; badrc=$?
   if [ "$badrc" -ne 1 ] || ! grep -E "^FAIL " "$TMPD/t_$mode.txt" | grep -qE "$reason"; then
     head -3 "$TMPD/t_$mode.txt"; echo "FAIL — rig_anim drill accepted a damaged dump ($mode, rc=$badrc)"; exit 1
   fi

@@ -260,7 +260,7 @@ held complete and consistent, 37 tamper kinds refused; `docs/Testing.md` has the
 17 s, all four stages, deterministic; the mech LEFT by name. The census says which branches need a fixture before their
 port: bone-parent skinning, the bone cap, staticParts, localNodeAnim, the root collapse, the weld, a collapsed material,
 a centred model, the legacy amplify, the script's exits - none of them has a registry recipe. Next: (b) stage 1.
-(b) groundwork DONE 2026-10-12: nine stage 1 fixtures in the drill (`riganim_fixtures.py`), the `EXIT:`/`LEFT:` job
+(b) groundwork DONE 2026-10-12: nine stage 1 fixtures in the drill (`riganim_fixtures.py`), the `EXIT:<stage>:`/`LEFT:` job
 key markers, the key rows with handles. Measured on the way: the importer gives a COLOR_0 mesh without a material a
 "DefaultMaterial", so the script keeps it; a primitive without a material beside one with keeps the mesh with an empty
 slot; the scene stays at 1..250, frame 1, after every import. The stage 1 C# model is next: what exists (BlenderNames,

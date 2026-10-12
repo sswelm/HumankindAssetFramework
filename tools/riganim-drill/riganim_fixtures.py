@@ -1,7 +1,7 @@
 """Fixtures for rig_anim.py (tools/riganim_drill.sh): the branches of the script no registry recipe takes, each a small
 rigged GLB with the arguments that reach the branch. Writes the files and prints JOB lines in riganim_jobs.py's form
-(TAB-separated: JOB <key> <input> <argv[2]> ... <argv[14]>). A key that starts with "EXIT:" names a job the script is
-expected to STOP on (its own sys.exit(1), e.g. no armature): the drill holds that it stops, and fails a full run of it.
+(TAB-separated: JOB <key> <input> <argv[2]> ... <argv[14]>). A key that starts with "EXIT:<stage>:" names a job the
+script is expected to STOP at that stage (its own sys.exit(1), e.g. no armature): the drill fails a different stop.
 A key that starts with "LEFT:" names a job the C# leaves to Blender by name (localNodeAnim).
 
 usage: riganim_fixtures.py <output directory>
@@ -195,7 +195,7 @@ def main(out):
     job("fx_multi_first", multi(out), clip="")
     job("fx_wrapped", wrapped(out))
     job("fx_v2", v2(out), convert="0")
-    job("EXIT:fx_noarm", noarm(out))
+    job("EXIT:1:fx_noarm", noarm(out))
     job("LEFT:fx_localnode", p, local="1")
 
 

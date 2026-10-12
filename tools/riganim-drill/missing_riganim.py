@@ -26,7 +26,7 @@ key = lines[0].split("\t")[1]
 mine = [j for j in jobs if j.split("\t")[1] == key]
 open(os.path.join(out, "jobs.txt"), "w", encoding="utf-8", newline="\n").write("\n".join(mine) + "\n")
 # the same job under an "EXIT:" key (jobs_exit.txt, for EXIT_ran_full): a dump of it running through all four stages must be refused
-open(os.path.join(out, "jobs_exit.txt"), "w", encoding="utf-8", newline="\n").write("\n".join(j.replace("JOB\t" + key + "\t", "JOB\tEXIT:" + key + "\t", 1) for j in mine) + "\n")
+open(os.path.join(out, "jobs_exit.txt"), "w", encoding="utf-8", newline="\n").write("\n".join(j.replace("JOB\t" + key + "\t", "JOB\tEXIT:1:" + key + "\t", 1) for j in mine) + "\n")
 
 
 def first(pred):
@@ -71,7 +71,8 @@ write("EXIT_wrong_stage", lines[blk_start:i_s3] + ["EXIT\t2\t1", lines[blk_end]]
 write("EXIT_code", lines[blk_start:i_s3] + ["EXIT\t3\t0", lines[blk_end]] + lines[blk_end + 1:])
 write("STOP_valid", lines[blk_start:i_s3] + ["EXIT\t3\t1", lines[blk_end]] + lines[blk_end + 1:])
 write("STOP_missing", lines[blk_start:i_s3] + [lines[blk_end]] + lines[blk_end + 1:])
-write("EXIT_ran_full", ["JOB\tEXIT:" + key] + lines[1:blk_end] + ["DONE\tEXIT:" + key] + lines[blk_end + 1:])
+write("EXIT_ran_full", ["JOB\tEXIT:1:" + key] + lines[1:blk_end] + ["DONE\tEXIT:1:" + key] + lines[blk_end + 1:])
+write("EXIT_marked_wrong_stage", ["JOB\tEXIT:1:" + key] + lines[1:i_s3] + ["EXIT\t3\t1", "DONE\tEXIT:1:" + key])
 i_log = first(lambda l: l.startswith("LOG\t")); write("LOG_not_riganim", replace(i_log, lines[i_log].rsplit("\t", 1)[0] + "\tInfo: something else"))
 write("LOG_misplaced", replace(i_log, "LOG\t4" + lines[i_log][5:]))
 # the rows
@@ -97,4 +98,11 @@ write("FC_short", cut_last_field(i_fc))
 i_img = first(lambda l: l.startswith("IMG\t")); write("IMG_missing", drop(i_img))
 write("IMG_short", cut_last_field(i_img))
 write("IMG_early", replace(i_img, "IMG\t3" + lines[i_img][5:]))
+if any(l.startswith("K\t") for l in lines):
+    i_k = first(lambda l: l.startswith("K\t"))
+    write("K_missing", drop(i_k))
+    k = lines[i_k].split("\t")
+    write("K_bits", replace(i_k, "\t".join(k[:6] + [("0" if k[6][0] != "0" else "1") + k[6][1:]] + k[7:])))
+    write("K_meta", replace(i_k, "\t".join(k[:11] + ["CHANGED"] + k[12:])))
+    write("K_orphan", replace(i_k, "\t".join(k[:2] + ["no-such-action"] + k[3:])))
 sys.stdout.write("".join(f[:-4] + "\n" for f in sorted(os.listdir(out)) if f.endswith(".txt") and f not in ("jobs.txt", "jobs_exit.txt", "intact.txt")))
