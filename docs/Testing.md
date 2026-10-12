@@ -1659,9 +1659,14 @@ changed:
   and given its header by the first Unity run that matches it (`BakeGoldenFiles.Judge`) — verified, not re-blessed. The
   checksum detects body edits that leave the header unchanged; it does not authenticate the header or prove that Unity
   wrote it. Legacy goldens have no such check until a matching Unity run adds a header. The Khelandion dissolve row,
-  "without an attributable commit" above, has one: at capture the project's own
-  `Tools/vehicle_rig.py` (which shadows the package copy, `HafPackageContext.ToolPath`) was the 2026-09-15 sync, whose
-  RIGGING tier welded before the dissolve; the package's did not, and the local copy caught up on 2026-10-03.
+  "without an attributable commit" above, had none because the script was NOT deterministic: the first run with headers
+  gave a third value (2236 verts dissolved, after 2252 and 2239), and the Wespe's shroud moved with it. The chunked
+  `_dissolve_limited` in `vehicle_rig.py` handed each cell's edges and verts to Blender in Python set order — by object
+  address, different per process — and a limited dissolve is greedy over that order. Fixed the same day (the lists are
+  sorted by element index after an index refresh; `Tests/test_vehicle_rig_math.py` guards the source); six headless runs
+  of the helper alone measured 2254 / 2258 / 2249 unsorted and 2261 three times sorted. An earlier sentence here blamed
+  the project's local script copy of 2026-09-15; that was wrong. The two Lab goldens are re-blessed once after the
+  project's `Tools/vehicle_rig.py` is synced to the package copy.
 - **The gate reads the headers** — `tools/check-goldens.sh`, seconds, no source needed: every golden under
   `Tools/{workshop,lab}_golden`, a planted one-character edit must come back EDITED or the step fails itself; SKIP without
   the project.
