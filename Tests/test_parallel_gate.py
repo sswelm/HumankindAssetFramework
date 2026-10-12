@@ -250,6 +250,43 @@ gate_unlock
         result = self.run_shell(self.helpers()+'gate_unlock\n[ -d "$LOCK" ] && echo kept || echo freed\n')
         self.assertIn("kept", result.stdout)
 
+    # 2026-10-12: a waiter read an empty beat (the holder was rewriting it) as 0, took over a LIVE gate eight minutes
+    # in, and two gates ran side by side. Only a readable, old beat is stale; the holder's beat is renamed into place.
+    def test_an_unreadable_beat_is_not_a_dead_holder(self):
+        lock = self.path / "gate.lock"
+        self.env.update(HAF_GATE_LOCK=lock.as_posix(), HAF_GATE_LOCK_POLL="0.2", HAF_GATE_LOCK_STALE="1", HAF_GATE_LOCK_WAIT="2", HAF_GATE_LOCK_BEAT="0.5")
+        for beat in ("", "not-a-number"):
+            shutil.rmtree(lock, ignore_errors=True)
+            lock.mkdir(); write(lock / "holder", "live-gate pid 4"); write(lock / "beat", beat)
+            result = self.run_shell(self.helpers()+'gate_lock\necho acquired\ngate_unlock\n', timeout=30)
+            self.assertNotIn("took over", result.stdout, beat)
+            self.assertNotIn("acquired", result.stdout, beat)
+            self.assertIn("another gate is running (live-gate pid 4); waiting", result.stdout, beat)
+            self.assertEqual(result.returncode, 1, result.stderr)      # gave up after HAF_GATE_LOCK_WAIT, never freed it
+            self.assertTrue(lock.exists(), beat)
+        # the holder's own beat advances, written beside and renamed over (the beat.<pid> file is transient; a reader
+        # only ever opens "beat", which is never empty)
+        shutil.rmtree(lock, ignore_errors=True)
+        result = self.run_shell(self.helpers()+'''
+gate_lock
+b0=$(cat "$LOCK/beat"); sleep 1.6; b1=$(cat "$LOCK/beat")
+[ -n "$b1" ] && [ "$b1" -gt "$b0" ] && echo beating || echo "not beating ($b0 -> $b1)"
+gate_unlock
+''', timeout=30)
+        self.assertIn("beating", result.stdout, result.stdout + result.stderr)
+
+    # 2026-10-12: run_bg_wait removed the directory it had exported as every step's TMPDIR; the first tail step to
+    # call mktemp (the goldens check) failed with "No such file or directory". The directory is emptied, kept.
+    def test_tmpdir_survives_the_parallel_phase(self):
+        result = self.run_shell(self.helpers()+'''
+run_bg "a worker" true
+run_bg_wait
+d=$(mktemp -d) && [ -d "$d" ] && echo tmp-ok || echo tmp-gone
+[ "$(ls -A "$BG_LOGS" | grep -v "^tmp\\." | wc -l)" = 0 ] && echo emptied || echo "left: $(ls -A "$BG_LOGS")"
+''', timeout=30)
+        self.assertIn("tmp-ok", result.stdout, result.stdout + result.stderr)
+        self.assertIn("emptied", result.stdout, result.stdout)
+
     def test_an_abort_kills_a_workers_grandchild_and_frees_the_lock(self):
         # The worker's shell is one process; what it spawned through Cygwin's exec has no usable Windows parent, so
         # the abort must find it another way (its command line names the gate's temp directory). The grandchild here

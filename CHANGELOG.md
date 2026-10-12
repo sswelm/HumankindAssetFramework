@@ -29,7 +29,11 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   same-grid-cell test that split two points a tenth of a cell apart. The tolerance is now floored at four ulps of the
   mesh's coordinate magnitude and is a distance test across neighbouring cells; the 20 other Workshop goldens are
   unchanged by it, the salegs row holds its invariant, and the Espana battleship reads 1,838 source islands for
-  1,843 (five noise-split pieces joined) — the one golden to re-bless in Unity.
+  1,843 (five noise-split pieces joined) — the one golden to re-bless in Unity. Two gate defects the first push of
+  this found: `run_bg_wait` removed the directory it had exported as every step's `TMPDIR`, so the first tail step to
+  call `mktemp` failed (now emptied, not removed); and the lock's heartbeat rewrote its file in place and quit on the
+  first failed write, while a waiter read an empty beat as 0 — a live gate eight minutes in was "stale" and taken
+  over, and two gates ran side by side (the beat is now renamed into place and retried; an unreadable beat is fresh).
 - **ONE GATE AT A TIME, NO STEP FOREVER, AND THE HOOK LIST IS PINNED (2026-10-12).** Two gates on one machine failed
   each other for weeks — the reader-gate drill's plant vanishing under the other gate, and `test_parallel_gate.py`'s
   timing test missing a three-second deadline under the other gate's thirteen drills (two rejected pushes on

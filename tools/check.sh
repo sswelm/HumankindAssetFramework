@@ -52,6 +52,10 @@ gate_lock() {
   local t0=$(date +%s) said=0 holder beat now poll="${HAF_GATE_LOCK_POLL:-10}" stale="${HAF_GATE_LOCK_STALE:-180}" max="${HAF_GATE_LOCK_WAIT:-2700}"
   while ! mkdir "$LOCK" 2>/dev/null; do
     holder=$(cat "$LOCK/holder" 2>/dev/null || echo unknown); beat=$(cat "$LOCK/beat" 2>/dev/null || echo 0); now=$(date +%s)
+    # an unreadable or empty beat is NOT a dead holder (2026-10-12): the holder rewrites the file every 20 s, and a read
+    # that lands on the rewrite (or a sharing violation on Windows) came back empty, read as 0, and took over a LIVE gate
+    # eight minutes into its run - two gates then ran side by side. Only a beat that is readable and old is stale.
+    case "$beat" in ''|*[!0-9]*) beat=$now ;; esac
     if [ $(( now - beat )) -gt "$stale" ]; then
       rm -rf "$LOCK"; printf 'took over a stale gate lock (%s; no heartbeat for %d s)\n' "$holder" "$((now - beat))"; note "took over a stale gate lock ($holder)"; continue
     fi
@@ -63,7 +67,10 @@ gate_lock() {
     fi
   done
   printf '%s  %s  pid %s\n' "$(date +%H:%M)" "$ROOT" "$$" > "$LOCK/holder"; date +%s > "$LOCK/beat"
-  ( while sleep "${HAF_GATE_LOCK_BEAT:-20}"; do date +%s > "$LOCK/beat" 2>/dev/null || exit 0; done ) & LOCK_BEAT_PID=$!
+  # the beat is written beside and renamed over (a reader never sees a half-written or truncated file), and a failed
+  # write is retried on the next beat, never a reason to stop beating (2026-10-12: the old `|| exit 0` let one failed
+  # write end the heartbeat, and 180 s later the gate read as dead)
+  ( while sleep "${HAF_GATE_LOCK_BEAT:-20}"; do [ -d "$LOCK" ] || exit 0; date +%s > "$LOCK/beat.$$" 2>/dev/null && mv -f "$LOCK/beat.$$" "$LOCK/beat" 2>/dev/null; done ) & LOCK_BEAT_PID=$!
 }
 gate_unlock() {  # only the holder removes the lock: a waiter that gave up must not free another gate's
   [ -z "$LOCK_BEAT_PID" ] || kill "$LOCK_BEAT_PID" 2>/dev/null; LOCK_BEAT_PID=""
@@ -116,7 +123,9 @@ run_bg_wait() {
     if [ "$completed" = "1" ] && [[ "$rc" =~ ^[0-9]+$ ]]; then record "${BG_LABEL[$i]}" "$rc" "$((t1 - BG_T0[$i]))"
     else printf '[FAIL] %s (%d s) — no completion status\n' "${BG_LABEL[$i]}" "$((t1 - BG_T0[$i]))"; fail=1; fi
   done
-  rm -rf "$BG_LOGS"; bg_n=0
+  # emptied, not removed: TMPDIR still names it for every step after the parallel phase (2026-10-12: the goldens step,
+  # the first tail step to call mktemp, found its TMPDIR gone and failed on "No such file or directory")
+  find "$BG_LOGS" -mindepth 1 -delete 2>/dev/null; bg_n=0
 }
 gate_abort() {  # INT/TERM: stop everything this gate spawned, drop the logs, free the lock, say so
   # Windows keeps no usable parent chain for what Cygwin exec'd — every drill script, Blender shard and Mono run has
