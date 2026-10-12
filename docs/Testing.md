@@ -1443,7 +1443,8 @@ animates the second armature's root instead. Not modelled, named: a bone-hung me
 `fx_s2_unicode_static`: Python `str.lower()` expands U+0130 and applies final-sigma casing, which .NET invariant
 lowercase did not; before the fix the C# model bound two meshes Blender kept weightless. The C# matcher now follows
 those rules. Supplementary-script casing remains a named Blender fallback (`LEFT:fx_s2_supplementary_static`). Stages 3
-and 4 are not compared yet, and the PASS line says so.
+and 4 are not compared yet, and the PASS line says so. The review also corrected the diagnostic census for an EMPTY that
+wrapped nothing: it now counts wrapper parents before unparenting their children.
 
 Review of PR #148: the sanitizer now prints the number of escaped path keys, as the script does, when quoted bone
 names share a prefix (one garbage key can remove curves from two bones). Confirmed with the real sanitizer in Blender.

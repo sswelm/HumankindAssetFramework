@@ -627,6 +627,7 @@ public static class BlenderRigAnim
 
         // ---- the flatten
         var wrapped = s.Objects.Where(o => (o.Type == "MESH" || o.Type == "ARMATURE") && o.Parent != null && o.Parent.Type == "EMPTY").ToList();
+        int wrapperCount = wrapped.Select(o => o.Parent).Distinct().Count();
         foreach (var o in wrapped)
         {
             var mw = o.World;
@@ -646,7 +647,7 @@ public static class BlenderRigAnim
         {
             s.Logs2.Add("RIGANIM flattened " + empties.Count + " wrapper empt" + (empties.Count == 1 ? "y" : "ies") + "; rig reparented to root for identity export nodes");
             Note(s, "wrapper empties flattened");
-            if (empties.Count > wrapped.Select(o => o.Parent).Distinct().Count()) Note(s, "an empty removed that wrapped nothing");
+            if (empties.Count > wrapperCount) Note(s, "an empty removed that wrapped nothing");
         }
     }
 
