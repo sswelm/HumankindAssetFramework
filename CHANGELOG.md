@@ -10,6 +10,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE RIG'S DISSOLVE IS THE SAME IN EVERY RUN (2026-10-12).** The first Bake Tests run with provenance headers
+  (PR #160) failed two Lab goldens that had just been re-blessed on 2026-10-10 — the Khalandion's
+  `Object_12_Part_002` dissolved 2252, then 2239, then 2236 verts in three runs of the same script on the same file;
+  the Wespe's shroud likewise. `vehicle_rig.py`'s chunked `_dissolve_limited` handed each cell's edges and verts to
+  `bmesh.ops.dissolve_limit` in Python SET order — BMesh elements hash by address, a different order in every Blender
+  process — and a limited dissolve is greedy over that order. Six headless runs of the helper alone: 2254 / 2258 /
+  2249 verts unsorted, 2261 three times sorted by element index (indices refreshed first). Parts under the 4,000-face
+  chunk take the whole-mesh call and were never affected. The Khelandion row's earlier attribution to the project's
+  local script copy (docs/Testing.md, 2026-10-12) was wrong and is corrected there; the two Lab goldens are to be
+  re-blessed once, after the project's `Tools/vehicle_rig.py` is synced.
 - **A GOLDEN IS WHAT A RUN WROTE, AND THE WORKSHOP'S ISLANDS NO LONGER DEPEND ON WHERE A PART SITS (2026-10-12).**
   The 2026-10-10 Bake Tests run was red on eleven goldens and the eleven files were rewritten by hand to the failing
   values, with no run after them; a golden had no way to say whether a run or an editor wrote it. Every golden the

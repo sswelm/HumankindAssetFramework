@@ -1387,6 +1387,13 @@ def _dissolve_limited(_rb, _angle_deg):
             _fid[_f] = _li
     # gather every cell's interior edges/verts BEFORE any dissolve runs: each cell's op deletes only elements
     # interior to that cell, so the references collected here for later cells stay valid throughout.
+    # IN INDEX ORDER, NOT SET ORDER (2026-10-12): a limited dissolve is greedy over the order it is handed, and a
+    # Python set of BMesh elements iterates by object address - a different order in every Blender process. The
+    # Bake Tests' Lab goldens recorded three different dissolve counts for the same part in three runs (the
+    # Khalandion's Object_12_Part_002: 2252, 2239, 2236 verts dissolved; the Wespe's shroud likewise); six headless
+    # runs of this helper alone gave 2254/2258/2249 unsorted and 2261 three times sorted. Indices are refreshed first:
+    # a bmesh that went through an earlier op can hold stale ones, and a stale tie would hand the order back to the set.
+    _rb.verts.index_update(); _rb.edges.index_update()
     _jobs = []
     for _li, _leaf in enumerate(_leaves):
         _es = set(); _vs = set()
@@ -1398,7 +1405,7 @@ def _dissolve_limited(_rb, _angle_deg):
             for _v in _f.verts:
                 if all(_fid.get(_vf) == _li for _vf in _v.link_faces):
                     _vs.add(_v)
-        _jobs.append((list(_es), list(_vs)))
+        _jobs.append((sorted(_es, key=lambda _e: _e.index), sorted(_vs, key=lambda _v: _v.index)))
     # run a cell even when it has NO interior edges: a disconnected single-face island (decal/panel shards)
     # has no edge with two linked faces, but its collinear rim verts still dissolve in the VERT phase —
     # skipping those cells left every such island at full density (review P2, reproduced: 4,100 lone

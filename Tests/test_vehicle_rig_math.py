@@ -115,3 +115,18 @@ class VehicleRigMathTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DissolveOrderGuard(unittest.TestCase):
+    # 2026-10-12: the chunked _dissolve_limited handed each cell's edges and verts to bmesh.ops.dissolve_limit in
+    # Python SET order - by object address, different in every Blender process - and a limited dissolve is greedy
+    # over that order. The Lab goldens recorded three dissolve counts for one part in three runs. The lists are
+    # sorted by element index, after an index refresh; this keeps a `list(_es)` from coming back.
+    def test_the_chunked_dissolve_hands_blender_its_cells_in_index_order(self):
+        start = SOURCE.index("def _dissolve_limited(")
+        body = SOURCE[start:SOURCE.index("\n_lap(", start)]
+        self.assertIn("sorted(_es, key=lambda _e: _e.index)", body)
+        self.assertIn("sorted(_vs, key=lambda _v: _v.index)", body)
+        self.assertNotIn("list(_es)", body)
+        self.assertNotIn("list(_vs)", body)
+        self.assertLess(body.index("index_update()"), body.index("_jobs = []"), "indices are refreshed before the cells are gathered")
