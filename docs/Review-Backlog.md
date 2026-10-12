@@ -276,13 +276,16 @@ wrapper flatten (zero registry recipes: fixtures first; fx_multi's Hung and fx_w
 from `BlenderRigAnim.Stage1`'s scene state; localNodeAnim stays LEFT by name.
 (c) stage 2 DONE 2026-10-12: `BlenderRigAnim.RunStage2` + `riganim.exe --stages 2` - the bone-parent -> skin bind (the
 governing bone up the chain, staticParts, the rest-world pin through Blender's matrix_world assignment arithmetic, the
-vertex group and modifier, the re-evaluation) and the wrapper flatten; every dumped recipe and all 23 fixtures (12 new)
-equal at both stages; 13 planted defects and 10 value tampers caught (`docs/Testing.md`). Found: a dropped mesh's child
+vertex group and modifier, the re-evaluation) and the wrapper flatten; every dumped recipe and 25 fixtures (14 new;
+22 equal at both stages, 3 named left) checked; 13 planted defects and 10 value tampers caught (`docs/Testing.md`). Found:
+a dropped mesh's child
 keeps its matrix_world only until the next depsgraph update; the matrix_world setter writes the properties only (the
 flattened objects' matrices are stale until stage 3's first update - `SceneObject.Dirty`); the dump's FC identity has no
 slot (two armatures with an animated bone of one name are an inconsistent dump). Left by name: two hung objects sharing
-one mesh datablock. Next: (d) stage 3 - the bone cap, the clip resolution and slicing, the action prune, the bone
-filter, the rest fold and rebake, the translation strip, the frame range (frame_set evaluations: the Dirty objects'
+one mesh datablock and staticParts names in supplementary Unicode scripts. Review of PR #164: Python lowercases U+0130
+to `i` plus combining dot and contextual Greek sigma to final sigma; both now match in C#, with a Blender fixture.
+Next: (d) stage 3 - the bone cap, the clip resolution and slicing, the action prune, the bone filter, the rest fold and
+rebake, the translation strip, the frame range (frame_set evaluations: the Dirty objects'
 first re-evaluation among them).
 
 - **Blender-exact vertex positions for skinned parts** — OPEN (2026-10-02, found by 3c). Blender's importer skins a

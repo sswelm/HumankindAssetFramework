@@ -1422,9 +1422,9 @@ flattened objects' rows of this stage still show the old matrix (Dirty in the mo
 the recomposed one); `parent =`, `parent_type =`, `parent_bone =` each reset parentinv to the identity; the update
 after the bind re-evaluates what is tagged and what depends on it - the armature's pose (REST: pose_mat = arm_mat) and
 everything hung from its bones, the re-homed meshes and their descendants - and what nothing tags keeps its matrix.
-Measured: every dumped recipe and all 23 fixtures (12 new, `fx_s2_*`) equal row for row at both stages (the fixtures:
-1,814 rows, 21 equal and 2 left by name), among them the chain fixture's three nested hung meshes with rotations and
-scales (bit-exact recomposition), the second armature hung from the first one's bone (its skinned mesh bound through it,
+Measured: every dumped recipe and 25 fixtures (14 new, `fx_s2_*`; 22 equal row for row at both stages and 3 left by name),
+among them the chain fixture's three nested hung meshes with rotations and scales (bit-exact recomposition), the second
+armature hung from the first one's bone (its skinned mesh bound through it,
 its 'Arm' group REPLACED to 1.0 from 0.3, the root-bone fallback for 'Other', a same-named bone bound to the first
 armature's), the wrapper with an odd scale and rotation over a hung mesh and three empties, nine static meshes (the
 log's ellipsis), the armature itself a dropped mesh's child (re-rooted by the bind's update before the pin). Thirteen
@@ -1439,8 +1439,11 @@ evaluates the scene before stage 4, hence "the same at stages 1 to 3"); the impo
 node as an EMPTY, which the flatten removes; the dump tells one action's fcurves apart by data path alone, so two
 armatures with an animated bone of one name make an inconsistent dump (the FC identity carries no slot) - the fixture
 animates the second armature's root instead. Not modelled, named: a bone-hung mesh whose datablock another object shares
-(one vertex-group list and weight layer for two objects; `LEFT:fx_s2_shared_hung`). Stages 3 and 4 are not compared
-yet, and the PASS line says so.
+(one vertex-group list and weight layer for two objects; `LEFT:fx_s2_shared_hung`). Review of PR #164 added
+`fx_s2_unicode_static`: Python `str.lower()` expands U+0130 and applies final-sigma casing, which .NET invariant
+lowercase did not; before the fix the C# model bound two meshes Blender kept weightless. The C# matcher now follows
+those rules. Supplementary-script casing remains a named Blender fallback (`LEFT:fx_s2_supplementary_static`). Stages 3
+and 4 are not compared yet, and the PASS line says so.
 
 Review of PR #148: the sanitizer now prints the number of escaped path keys, as the script does, when quoted bone
 names share a prefix (one garbage key can remove curves from two bones). Confirmed with the real sanitizer in Blender.

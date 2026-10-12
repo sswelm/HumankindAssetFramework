@@ -31,7 +31,8 @@
 // localNodeAnim (the REST hold and the round-trip sampling), several scenes, cameras, lights, mesh instancing,
 // KHR_materials_variants, KHR_animation_pointer, a CUBICSPLINE sampler, morph weights, a sampler without keys or with the
 // wrong component count, a skin whose joints are under no armature or that lists a joint twice, a mesh placed on a bone
-// node, every mesh BlenderReduce declines, and (stage 2) a bone-hung mesh whose datablock another object shares. Held to
+// node, every mesh BlenderReduce declines, and (stage 2) a bone-hung mesh whose datablock another object shares or
+// staticParts matching against supplementary Unicode names. Held to
 // Blender by tools/riganim_drill.sh (--stages 2), every row of both stages.
 using System;
 using System.Collections.Generic;
@@ -46,6 +47,40 @@ public static class BlenderRigAnim
     // Python's str.strip() whitespace (the ASCII information separators included, which .NET's Trim leaves alone)
     static readonly char[] PyWhitespace = new[] { 0x9, 0xa, 0xb, 0xc, 0xd, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x85, 0xa0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000 }.Select(c => (char)c).ToArray();
     static string PyStrip(string s) => s.Trim(PyWhitespace);
+
+    // Python str.lower() uses Unicode's full lowercase mapping. .NET's invariant mapping is simple: notably it leaves
+    // U+0130 unchanged and maps every capital sigma to σ, including the word-final one Python maps to ς. These names
+    // decide whether a bone-hung mesh is kept static or converted to a skin, so the distinction changes the rig.
+    static string PyLower(string s)
+    {
+        bool Cased(char c)
+        {
+            var cat = CharUnicodeInfo.GetUnicodeCategory(c);
+            return cat == UnicodeCategory.UppercaseLetter || cat == UnicodeCategory.LowercaseLetter || cat == UnicodeCategory.TitlecaseLetter;
+        }
+        bool CaseIgnorable(char c)
+        {
+            var cat = CharUnicodeInfo.GetUnicodeCategory(c);
+            return cat == UnicodeCategory.NonSpacingMark || cat == UnicodeCategory.EnclosingMark || cat == UnicodeCategory.Format ||
+                   cat == UnicodeCategory.ModifierLetter || cat == UnicodeCategory.ModifierSymbol || c == '\'' || c == '’';
+        }
+        var sb = new StringBuilder(s.Length);
+        for (int i = 0; i < s.Length; i++)
+        {
+            char c = s[i];
+            if (c == 'İ') { sb.Append("i\u0307"); continue; }
+            if (c == 'Σ')
+            {
+                int before = i - 1, after = i + 1;
+                while (before >= 0 && CaseIgnorable(s[before])) before--;
+                while (after < s.Length && CaseIgnorable(s[after])) after++;
+                sb.Append(before >= 0 && Cased(s[before]) && (after >= s.Length || !Cased(s[after])) ? 'ς' : 'σ');
+                continue;
+            }
+            sb.Append(char.ToLowerInvariant(c));
+        }
+        return sb.ToString();
+    }
 
     /// <summary>The script's arguments as it parses them (`argv = sys.argv[sys.argv.index("--") + 1:]`): argv[0] the input,
     /// argv[1] the output, argv[2] the target, then the optional ones to argv[14]. Logs holds the RIGANIM lines the parsing
@@ -110,8 +145,8 @@ public static class BlenderRigAnim
         a.ConvertRig = Has(8) && (c8 == "0" || c8 == "1") ? c8 == "1" : a.RigRot.Any(v => Math.Abs(v) > 1e-4);
         a.Logs.Add("RIGANIM conversion path: " + (a.ConvertRig ? "ON (raw-rig convert)" : "off (legacy byte-identical)"));
         a.KeepTranslations = Has(12) && PyStrip(At(12)) == "1";
-        // `.lower()` on ASCII is .NET's; this stage reads the list for nothing but the record
-        a.StaticParts = At(13).Split(',').Select(PyStrip).Where(p => p.Length > 0).Select(p => p.ToLowerInvariant()).ToList();
+        // The script lowercases each staticParts substring before matching it against object and material names.
+        a.StaticParts = At(13).Split(',').Select(PyStrip).Where(p => p.Length > 0).Select(PyLower).ToList();
         a.LocalNodeAnim = Has(14) && PyStrip(At(14)) == "1";
         if (Has(9) && PyStrip(At(9)).Length > 0)
             foreach (var raw in At(9).Split(';'))
@@ -485,13 +520,21 @@ public static class BlenderRigAnim
                 if (cur.ParentBone != null && cur.Parent.Type == "ARMATURE") return cur.ParentBone;
             return null;
         }
-        // _is_static_part: a staticParts entry inside the lowered object name or a lowered material name (str.lower() on
-        // the names this reaches is the invariant lowering; the one-to-many lowerings Python knows are not modelled)
+        // The target runtime's char-wise casing has no supplementary-plane mapping. Python lowercases names in those
+        // scripts too (for example Deseret), so leave that rare case to Blender instead of silently binding a static mesh.
+        if (a.StaticParts.Count > 0 && (a.StaticParts.Any(sp => sp.Any(char.IsSurrogate)) ||
+            s.Objects.Any(o => o.Type == "MESH" && Governing(o) != null &&
+                (o.Name.Any(char.IsSurrogate) || o.Mesh.Materials.Any(mat => mat != null && mat.Any(char.IsSurrogate))))))
+        {
+            s.Fallback = "staticParts with a supplementary Unicode name: Python's lowercase mapping is not modelled";
+            return;
+        }
+        // _is_static_part: a staticParts entry inside the Python-lowered object or material name
         bool IsStatic(SceneObject o)
         {
             if (a.StaticParts.Count == 0) return false;
-            var ns = new List<string> { o.Name.ToLowerInvariant() };
-            foreach (var mat in o.Mesh.Materials) if (mat != null) ns.Add(mat.ToLowerInvariant());
+            var ns = new List<string> { PyLower(o.Name) };
+            foreach (var mat in o.Mesh.Materials) if (mat != null) ns.Add(PyLower(mat));
             return a.StaticParts.Any(sp => ns.Any(n => n.Contains(sp)));
         }
         float LengthOf(int boneNode) => rig.ArmatureOfBone[boneNode].Length[boneNode];

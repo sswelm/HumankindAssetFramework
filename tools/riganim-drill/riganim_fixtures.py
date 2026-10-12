@@ -22,8 +22,9 @@ the script's armature has not: the root-bone fallback; a bone of the same name; 
 a vertex group of that name and an Armature modifier already there), an armature hung from another's bone, a scaled and
 rotated wrapper with a hung mesh, a rigid mesh with a child, an empty holding a mesh and a lone empty (several empties
 flattened), a dropped parent's child beside a bind (the update re-evaluates it), the armature itself a dropped parent's
-child (re-rooted before the pin), object animation cleared beside a bind, both blocks under the legacy path (nothing
-happens), and two hung objects sharing one mesh (LEFT: by name).
+child (re-rooted before the pin), object animation cleared beside a bind, Python Unicode lowercasing for staticParts,
+supplementary-script casing (LEFT: by name), both blocks under the legacy path (nothing happens), and two hung objects
+sharing one mesh (LEFT: by name).
 """
 import math, os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "glb-reader-drill"))
@@ -255,6 +256,22 @@ def s2_static_many(out):
     return r.write(out, "riganim_s2_static_many")
 
 
+def s2_unicode_static(out):
+    """Python lower expands U+0130 and uses final sigma; .NET invariant lower does neither."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    r.node("İTurret", j1, mesh=r.mesh("turret", at=(0.0, 1.5, 0.0), material=m), translation=[0.0, 0.5, 0.0])
+    r.node("AΣ", j0, mesh=r.mesh("plate", at=(1.0, 0.0, 0.0), material=m), translation=[1.0, 0.0, 0.0])
+    r.node("Gun", j1, mesh=r.mesh("gun", at=(0.0, 2.0, 0.0), material=m), translation=[0.0, 1.0, 0.0])
+    return r.write(out, "riganim_s2_unicode_static")
+
+
+def s2_supplementary_static(out):
+    """Deseret capital letters lowercase in Python but need a named fallback in the C# stage 2 model."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    r.node("\U00010400Panel", j1, mesh=r.mesh("panel", at=(0.0, 1.5, 0.0), material=m), translation=[0.0, 0.5, 0.0])
+    return r.write(out, "riganim_s2_supplementary_static")
+
+
 def s2_chain(out):
     """The governing bone found up the parent chain: bone -> mesh -> mesh -> mesh, bone -> empty -> mesh, bone -> mesh ->
     empty -> mesh; the hung meshes rotated and scaled so the rest-world pin and its decomposition carry real values."""
@@ -373,6 +390,7 @@ def s2_shared_hung(out):
 
 
 def main(out):
+    sys.stdout.reconfigure(encoding="utf-8")  # JOB records may contain non-ASCII staticParts on Windows
     os.makedirs(out, exist_ok=True)
     def job(key, path, clip="Spin", convert="1", local="0", static=""):
         print("JOB\t%s\t%s\t%s" % (key, path, ARGS.format(clip=clip, convert=convert, local=local, static=static)))
@@ -391,6 +409,8 @@ def main(out):
     # stage 2
     job("fx_s2_static", s2_static(out), static="turret,glass")
     job("fx_s2_static_many", s2_static_many(out), static="plate")
+    job("fx_s2_unicode_static", s2_unicode_static(out), static="i\u0307turret,aς")
+    job("LEFT:fx_s2_supplementary_static", s2_supplementary_static(out), static="\U00010428panel")
     job("fx_s2_chain", s2_chain(out))
     job("fx_s2_two_arms", s2_two_arms(out))
     job("fx_s2_nested_arms", s2_nested_arms(out))
