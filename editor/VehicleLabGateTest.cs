@@ -96,20 +96,27 @@ public static class VehicleLabGateTest
                     if (joints > 256) { lines.Add($"FAIL {name} ({took}) — {joints} joints in the output GLB, over Amplitude's 256"); fail++; continue; }
                     if (bones >= 0 && bones != joints) { lines.Add($"FAIL {name} ({took}) — the log said {bones} bones but the output GLB's skin has {joints} joints"); fail++; continue; }
                     snap = snap.Concat(new[] { $"GLB skins={skins} joints={joints} meshes={meshes} meshNodes={meshNodes} rigged={rigged}" }).ToArray();
+                    // the golden's provenance (BakeGoldenFiles, 2026-10-12): the rig depends on the source model AND the recipe
+                    // (its roles, dials and placements); either moving under a golden is "stale by input", named as such
+                    var inputs = new Dictionary<string, string>
+                    {
+                        ["source"] = BakeGoldenRules.InputHash(File.ReadAllBytes(src)),
+                        ["recipe"] = BakeGoldenRules.InputHash(File.ReadAllBytes(recipe)),
+                    };
                     string goldFile = Path.Combine(goldDir, name + ".txt");
                     if (!File.Exists(goldFile))
                     {
-                        Directory.CreateDirectory(goldDir);
-                        File.WriteAllLines(goldFile, snap);
+                        BakeGoldenFiles.Capture(goldFile, snap, inputs);
                         lines.Add($"CAPTURED {name} ({took}, {joints} joints) — no golden yet; this run's {snap.Length} summary line(s) are now {GoldenDir}/{name}.txt (not a pass — run again to verify)");
                         skip++; continue;
                     }
-                    string diff = BakeGoldenRules.Diff(File.ReadAllLines(goldFile), snap);
-                    if (diff == null) { lines.Add($"PASS {name} ({took}, {joints} joints, golden match)"); pass++; }
+                    var verdict = BakeGoldenFiles.Judge(goldFile, snap, inputs, out string reason, out string note);
+                    if (verdict == BakeGoldenRules.GoldenVerdict.Match) { lines.Add($"PASS {name} ({took}, {joints} joints, golden match){note}"); pass++; }
                     else
                     {
                         File.WriteAllLines(Path.Combine(workDir, name + ".candidate.txt"), snap);
-                        lines.Add($"FAIL {name} ({took}) — the rig CHANGED vs golden: {diff}. Candidate in {WorkDir}/{name}.candidate.txt; delete {GoldenDir}/{name}.txt and run again to re-bless an intended change.");
+                        string what = verdict == BakeGoldenRules.GoldenVerdict.Edited ? "" : "the rig CHANGED vs golden: ";
+                        lines.Add($"FAIL {name} ({took}) — {what}{reason}. Candidate in {WorkDir}/{name}.candidate.txt; delete {GoldenDir}/{name}.txt and run again to re-bless an intended change.");
                         fail++;
                     }
                 }

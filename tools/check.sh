@@ -216,6 +216,7 @@ run "hand-list gate (ownership rebases)" bash "$ROOT/tools/check_handlists.sh"
 #        authoring side by construction. Broke the install three times on 2026-08-24 (package.json + asmdef, then
 #        HafPackageContext.cs, then the Plugins FOLDER); an ignored asmdef means the package compiles to nothing.
 run "package meta (every editor/ path has one)" bash "$ROOT/tools/check-package-meta.sh"
+run "bake-test goldens (what is on disk is what a run wrote; SKIP without the project)" bash "$ROOT/tools/check-goldens.sh"
 run "exit status (no gate script reads a status from the end of a pipeline)" bash "$ROOT/tools/check-exit-status.sh"
 
 verdict; exit $?

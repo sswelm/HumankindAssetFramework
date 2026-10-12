@@ -3518,18 +3518,40 @@ public static partial class GlbDisconnectedParts
         double[] max = { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
         foreach (Vertex vertex in vertices) UpdateBounds(min, max, vertex.Position);
         double diagonal = Math.Sqrt(Math.Pow(max[0] - min[0], 2) + Math.Pow(max[1] - min[1], 2) + Math.Pow(max[2] - min[2], 2));
-        double epsilon = Math.Max(diagonal * 1e-7, 1e-9);
-        var positions = new Dictionary<PositionKey, int>();
+        // THE WELD TOLERANCE (2026-10-12). A ten-millionth of the mesh's own diagonal, and never finer than four float32
+        // ulps at the mesh's coordinate magnitude: the file holds float32, so two vertices one ulp apart ARE one point,
+        // and a child part 600 units from the origin has ulps 15-28x coarser than its own diagonal's ten-millionth
+        // (salegs_revenge: a child the split had just cut as one island read as two to four on its own - every "gap"
+        // measured 0.1-1.1 ulp; GlbDisconnectedParts.ExplainIslands shows the numbers). Welded by DISTANCE: a vertex
+        // joins every vertex within the tolerance, found through its own and the 26 neighbouring cells - the old
+        // same-cell test (Math.Round on a grid) read two points a tenth of a cell apart as separate whenever a cell
+        // boundary fell between them (the same ship's deck: six 4-vertex islands 0.1 cells from the plank).
+        double magnitude = 0;
+        foreach (Vertex vertex in vertices)
+            magnitude = Math.Max(magnitude, Math.Max(Math.Abs(vertex.Position.X), Math.Max(Math.Abs(vertex.Position.Y), Math.Abs(vertex.Position.Z))));
+        double ulp = magnitude > 0 ? Math.Pow(2, Math.Floor(Math.Log(magnitude, 2)) - 23) : 0;
+        double epsilon = Math.Max(Math.Max(diagonal * 1e-7, 4 * ulp), 1e-9);
+        double epsilon2 = epsilon * epsilon;
+        var cells = new Dictionary<PositionKey, List<int>>();
         for (int i = 0; i < vertices.Count; i++)
         {
             Vec3 p = vertices[i].Position;
-            var key = new PositionKey {
-                X = checked((long)Math.Round((p.X - min[0]) / epsilon)),
-                Y = checked((long)Math.Round((p.Y - min[1]) / epsilon)),
-                Z = checked((long)Math.Round((p.Z - min[2]) / epsilon))
-            };
-            int previous;
-            if (positions.TryGetValue(key, out previous)) dsu.Union(i, previous); else positions.Add(key, i);
+            long cx = checked((long)Math.Floor((p.X - min[0]) / epsilon)), cy = checked((long)Math.Floor((p.Y - min[1]) / epsilon)), cz = checked((long)Math.Floor((p.Z - min[2]) / epsilon));
+            for (long dx = -1; dx <= 1; dx++)
+                for (long dy = -1; dy <= 1; dy++)
+                    for (long dz = -1; dz <= 1; dz++)
+                    {
+                        if (!cells.TryGetValue(new PositionKey { X = cx + dx, Y = cy + dy, Z = cz + dz }, out List<int> near)) continue;
+                        foreach (int j in near)
+                        {
+                            Vec3 q = vertices[j].Position;
+                            double ex = p.X - q.X, ey = p.Y - q.Y, ez = p.Z - q.Z;
+                            if (ex * ex + ey * ey + ez * ez <= epsilon2) dsu.Union(i, j);
+                        }
+                    }
+            var own = new PositionKey { X = cx, Y = cy, Z = cz };
+            if (!cells.TryGetValue(own, out List<int> mine)) cells.Add(own, mine = new List<int>(1));
+            mine.Add(i);
         }
 
         var byRoot = new Dictionary<int, Component>();
