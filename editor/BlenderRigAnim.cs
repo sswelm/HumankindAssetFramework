@@ -2,8 +2,8 @@
 // 2026-10-12/13): what the script's first stage leaves in Blender's scene - the arguments as it parses them, the import,
 // the material-less drop, the armature lookup (and the exit without one), the contract marker, the object-animation clear
 // - what its second stage makes of that (RunStage2: the bone-parent -> skin bind, the wrapper flatten), and its third
-// (RunStage3: the clip resolution and slicing, the action prune, the bone filter, the legacy translation rules, the
-// strip and amplify, the frame range; the rest fold and the bone cap deferred by name to step (d2)), row for row
+// (RunStage3: the bone cap, the clip resolution and slicing, the action prune, the bone filter, the rest fold and
+// rebake, the legacy translation rules, the strip and amplify, the frame range), row for row
 // and bit for bit as tools/riganim_drill.sh's dump records it (tools/riganim-drill/blender_riganim_dump.py: the RIGANIM
 // lines, the scene frame, every object with its matrices, every mesh's geometry and weights hashed, the bones at rest,
 // the pose at frame 1, every action's fcurves with their keys and handles). Built from the deploy and prep ports -
@@ -202,6 +202,9 @@ public static class BlenderRigAnim
         public bool Dirty;                        // tagged for the next depsgraph update: World is stale against Local (a parent
                                                   // changed under it, or a matrix_world assigned, with no view_layer.update since)
         public float[][] Props;                   // the object's own location, rotation_quaternion and scale (Local is their matrix)
+        public float[] ParentInverse;             // matrix_parent_inverse when a script set one (the fold's bone-parent fix), else null = the identity
+        public bool EvalStale;                    // the evaluated copy was not refreshed after the original's properties changed (nothing tagged
+        public float[] EvalLocal, EvalParentInverse;   // the object): an evaluation still uses these - the copy's local matrix and parentinv
         public BlenderNames.BlenderObject Source;
         public MeshData Mesh;                     // a mesh object's data
     }
@@ -568,6 +571,7 @@ public static class BlenderRigAnim
             {
                 var pw = Eval(o.Parent, poseOf, memo);
                 var pm = o.ParentBone != null ? VehicleProbe.MulM4(pw, VehicleProbe.ParBone(poseOf(o.ParentBoneNode), LengthOf(o.ParentBoneNode))) : pw;
+                if (o.ParentInverse != null) pm = VehicleProbe.MulM4(pm, o.ParentInverse);
                 w = VehicleProbe.MulM4(pm, o.Local);
             }
             memo[o] = w; return w;
@@ -612,7 +616,7 @@ public static class BlenderRigAnim
                 if (tgt == null) continue;
                 if (tgt != bone) Note(s, "a governing bone the armature does not have: bound to its root bone");
                 if (o.ParentBone == null) Note(s, "a bound mesh governed through its parent chain (not hung from the bone itself)");
-                o.Parent = armObj; o.ParentBone = null; o.ParentBoneNode = -1;
+                o.Parent = armObj; o.ParentBone = null; o.ParentBoneNode = -1; o.ParentInverse = null;
                 ApplyMat4(mw, armWorld, out var loc, out var quat, out var scale);
                 o.Props = new[] { loc, quat, scale }; o.Local = VehicleProbe.ObjectMatrix(loc, quat, scale);
                 rehomed.Add(o);
@@ -651,7 +655,7 @@ public static class BlenderRigAnim
         foreach (var o in wrapped)
         {
             var mw = o.World;
-            o.Parent = null; o.ParentBone = null; o.ParentBoneNode = -1;
+            o.Parent = null; o.ParentBone = null; o.ParentBoneNode = -1; o.ParentInverse = null;
             ApplyMat4(mw, null, out var loc, out var quat, out var scale);
             o.Props = new[] { loc, quat, scale }; o.Local = VehicleProbe.ObjectMatrix(loc, quat, scale);
             o.Dirty = true;   // no update follows in this stage: matrix_world stays the old one
@@ -691,8 +695,26 @@ public static class BlenderRigAnim
     //   * bpy.data.actions.remove(a): every object holding it loses its action (animation_data stays).
     //   * Action.frame_range: the first and the last key frame over every fcurve of every slot; (0, 0) without a key.
     //   * scene.frame_start/end = int(round(v)): Python's round of the float32 range (half to even).
-    // The rest fold and rebake (every conversion recipe with a location key) and the bone cap (over 240 bones) are
-    // step (d2)'s: Deferred names them, nothing of this stage is claimed for such a job.
+    //   * The bone cap (over 240 bones): edit mode entered and left per pass (ED_armature_to_edit / from_edit) - the
+    //     survivors' edit bones are the ones the importer made, so their rest matrices come out the same; a removed
+    //     bone's curves and vertex groups stay behind.
+    //   * modifier_apply on an Armature modifier: BKE_armature_deform_coords_with_mesh with the linear mixer and vertex
+    //     groups only - the mesh's positions into the armature's space (armature_to_target = target.world_to_object *
+    //     armature.object_to_world as blender::math multiplies, target_to_armature its Eigen inverse), every weighted
+    //     bone's chan_mat = pose_mat * invert_m4_m4(arm_mat), the weighted deltas summed and scaled by 1/contrib, the point
+    //     back; a multi-user mesh is copied first (its name from the ID name map). The modifier is then removed and a new
+    //     "Armature" one bound to the script's armature.
+    //   * pose.armature_apply: per bone, head = pose_mat[3], tail = head + pose_mat[1] * length (BKE_pose_where_is_bone_tail),
+    //     roll = mat3_vec_to_roll(pose 3x3, tail - head); ED_armature_from_edit rebuilds the rest (RestFromEditBones); the
+    //     pose channels are reset; applyarmature_fix_boneparents decomposes a bone-parented child's world into its
+    //     properties and takes its parentinv from the EVALUATED armature's parent matrix (the old pose at frame 0), and
+    //     tags nothing on it - the child's evaluated copy keeps its old properties and parentinv until something does
+    //     (SceneObject.EvalStale: the next frame_set evaluates it with those).
+    //   * the rebake: mathutils' Matrix.inverted() (the adjugate over the float32 determinant), Matrix @ Matrix (a double
+    //     dot per item), Vector.length (a double sum from the last component), Matrix.to_quaternion() = mat4_to_quat,
+    //     keyframe_insert per frame; the residual printed with Python's %.6f (PyFixed).
+    //   * frame_set writes an evaluated value back to the ORIGINAL only where it differs (animsys_write_orig_anim_rna):
+    //     a zero of the other sign the script set earlier keeps its sign (TankDestroyers' wheels).
 
     static readonly Regex SliceRe = new Regex(@"^(.*)\[([0-9]+)\.\.([0-9]+)(?:/([0-9]+))?\]$", RegexOptions.Singleline);
 
@@ -714,7 +736,31 @@ public static class BlenderRigAnim
         if (s.Fallback != null || s.Exits) return;
         var ad = s.Armature; var armObj = ad.Object; var rig = s.Rig; var names = s.Names;
         armObj.HasAnimationData = true;   // animation_data_create()
-        if (ad.BoneNodes.Count > 240) { s.Deferred = "the bone cap (an edit-mode round trip of the armature): step (d2)"; return; }
+        // ---- the bone cap: over 240 bones, zero-weight leaf bones removed pass by pass (an edit-mode round trip each; the
+        // survivors' rest stands: the same edit bones give the same matrices), their curves and vertex groups left behind
+        if (ad.BoneNodes.Count > 240)
+        {
+            var weighted = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var mo in s.Objects.Where(x => x.Type == "MESH" && x.Mesh.ArmatureModifier == armObj.Name))
+                if (mo.Mesh.DefNr != null)
+                    for (int v = 0; v < mo.Mesh.Vertices; v++)
+                        for (int i = 0; i < mo.Mesh.DefNr[v].Count; i++)
+                            // Python compares the stored float to a double: nominal 0.001f is above 0.001, not equal.
+                            if (mo.Mesh.DefWeight[v][i] > 0.001 && mo.Mesh.DefNr[v][i] < mo.Mesh.Groups.Count) weighted.Add(mo.Mesh.Groups[mo.Mesh.DefNr[v][i]]);
+            int removed = 0;
+            while (ad.BoneNodes.Count > 240)
+            {
+                var leaves = ad.BoneNodes.Where(b => !ad.BoneNodes.Any(c => ad.Rest.Parent[c] == b) && !weighted.Contains(names.BoneOfJoint[b])).ToList();
+                if (leaves.Count == 0) { Note(s, "the bone cap stopped at weighted bones and their ancestors"); break; }
+                foreach (int b in leaves)
+                {
+                    if (s.Objects.Any(o => o.ParentBoneNode == b)) { s.Fallback = "'" + names.BoneOfJoint[b] + "': a zero-weight leaf bone removed by the cap with an object hung from it"; return; }
+                    ad.BoneNodes.Remove(b); ad.Rest.Bones.Remove(b); ad.PoseProps.Remove(b); ad.PoseMats.Remove(b); removed++;
+                }
+            }
+            s.Logs3.Add("RIGANIM bone-cap: removed " + removed + " zero-weight leaf bones -> " + ad.BoneNodes.Count + " bones (Amplitude 256-bone GPU limit; weighted bones untouched)");
+            Note(s, "the bone cap: zero-weight leaves removed");
+        }
 
         // ---- the evaluation at a frame
         int BoneNodeOf(SceneObject armature, string bone)
@@ -729,10 +775,13 @@ public static class BlenderRigAnim
         void FrameSet(int f)
         {
             s.FrameCurrent = f;
-            var boneProps = ad.PoseProps.ToDictionary(kv => kv.Key, kv => CloneProps(kv.Value));
+            // the evaluated copy takes every curve's value; the ORIGINAL's property is written back only where the value
+            // differs (animsys_write_orig_anim_rna), so a zero of the other sign the script set keeps its sign there
+            var boneProps = ad.PoseProps.ToDictionary(kv => kv.Key, kv => CloneProps(kv.Value));      // the evaluated pose
+            var boneStored = ad.PoseProps.ToDictionary(kv => kv.Key, kv => CloneProps(kv.Value));     // the original's properties
             foreach (var o in s.Objects)
             {
-                var props = CloneProps(o.Props);
+                var props = CloneProps(o.Props); var stored = CloneProps(o.Props);
                 var act = o.Action != null ? ActionOf(o.Action) : null;
                 var slot = act?.Slots.FirstOrDefault(sl => sl.Identifier == o.Slot);
                 if (slot != null)
@@ -740,12 +789,17 @@ public static class BlenderRigAnim
                     {
                         if (fc.Keys.Count == 0) continue;
                         float v = EvaluateCurve(fc.Keys, f);
-                        if (fc.Bone == null) props[ChannelIndex(fc.Prop)][fc.Index] = v;
-                        else if (o.Type == "ARMATURE") { int b = BoneNodeOf(o, fc.Bone); if (b >= 0 && boneProps.ContainsKey(b)) boneProps[b][ChannelIndex(fc.Prop)][fc.Index] = v; }
+                        int ci = ChannelIndex(fc.Prop);
+                        if (fc.Bone == null) { props[ci][fc.Index] = v; if (stored[ci][fc.Index] != v) stored[ci][fc.Index] = v; }
+                        else if (o.Type == "ARMATURE")
+                        {
+                            int b = BoneNodeOf(o, fc.Bone);
+                            if (b >= 0 && boneProps.ContainsKey(b)) { boneProps[b][ci][fc.Index] = v; if (boneStored[b][ci][fc.Index] != v) boneStored[b][ci][fc.Index] = v; }
+                        }
                     }
-                o.Props = props; o.Local = VehicleProbe.ObjectMatrix(props[0], props[1], props[2]);
+                o.Props = stored; o.Local = VehicleProbe.ObjectMatrix(props[0], props[1], props[2]);
             }
-            ad.PoseProps = boneProps;
+            ad.PoseProps = boneStored;
             var pose = new Dictionary<int, float[]>();
             foreach (var arm in rig.Armatures.Values) foreach (var kv in VehicleProbe.PoseMatrices(arm, b => boneProps[b])) pose[kv.Key] = kv.Value;
             ad.PoseMats = pose;
@@ -758,7 +812,9 @@ public static class BlenderRigAnim
                 {
                     var pw = Eval(o.Parent);
                     var pm = o.ParentBone != null ? VehicleProbe.MulM4(pw, VehicleProbe.ParBone(pose[o.ParentBoneNode], LengthOf(o.ParentBoneNode))) : pw;
-                    w = VehicleProbe.MulM4(pm, o.Local);
+                    var pinv = o.EvalStale ? o.EvalParentInverse : o.ParentInverse;
+                    if (pinv != null) pm = VehicleProbe.MulM4(pm, pinv);
+                    w = VehicleProbe.MulM4(pm, o.EvalStale ? o.EvalLocal : o.Local);
                 }
                 memo[o] = w; return w;
             }
@@ -920,13 +976,160 @@ public static class BlenderRigAnim
             }
         }
 
-        // ---- the rest fold (step (d2)): any location curve on a pose bone of the primary, on the conversion path
+        var keepLocPaths = new HashSet<string>(StringComparer.Ordinal);   // _KEEP_LOC_PATHS
+        // ---- the rest fold and rebake (the conversion path): any location curve on a pose bone of the primary
         bool loc0 = primary.FCurves.Any(fc => fc.Bone != null && fc.Prop == "location");
-        if (loc0 && a.ConvertRig) { s.Deferred = "the rest fold and rebake (a location key on a pose bone, the conversion path): step (d2)"; return; }
-        if (loc0) Note(s, "location keys on the legacy path (no fold)");
+        if (loc0 && a.ConvertRig)
+        {
+            // SNAPSHOT every exported clip's pose matrices frame by frame (the original rig and actions)
+            var snaps = new Dictionary<ActionData, SortedDictionary<long, Dictionary<int, float[]>>>();
+            foreach (var sa in allActs)
+            {
+                AssignAction(sa);
+                int sfs = (int)Math.Truncate((double)sa.FrameStart), sfe = (int)Math.Truncate((double)sa.FrameEnd);
+                var per = new SortedDictionary<long, Dictionary<int, float[]>>();
+                for (int f = sfs; f <= sfe; f++) { FrameSet(f); per[f] = ad.BoneNodes.ToDictionary(b => b, b => (float[])ad.PoseMats[b].Clone()); }
+                snaps[sa] = per;
+            }
+            int fs0 = (int)Math.Truncate((double)primary.FrameStart);
+            AssignAction(primary); FrameSet(fs0);
+            // the armature modifiers applied at frame 0: Blender's linear deform on the stored positions, the mesh of a
+            // shared datablock copied first (the copy takes the next free name)
+            var meshNames = new BlenderNames.NamePool();
+            foreach (var dn in names.Objects.Where(x => x.Kind == BlenderNames.ObjectKind.Mesh).Select(x => x.DataName).Distinct()) meshNames.Unique(dn);
+            var rebind = new List<SceneObject>();
+            foreach (var mo in s.Objects.Where(x => x.Type == "MESH").ToList())
+            {
+                if (mo.Mesh.ArmatureModifier == null) continue;
+                var armO = s.Objects.FirstOrDefault(x => x.Name == mo.Mesh.ArmatureModifier && x.Type == "ARMATURE");
+                if (armO == null) { s.Fallback = "'" + mo.Name + "': an Armature modifier without an armature object (modifier_apply's failure path)"; return; }
+                if (s.Objects.Count(x => x.Type == "MESH" && x.DataName == mo.DataName) > 1) { mo.DataName = meshNames.Unique(mo.DataName); Note(s, "a multi-user mesh copied before the modifier is applied"); }
+                ArmatureDeform(s, mo, armO, BoneNodeOf);
+                mo.Mesh.ArmatureModifier = null; rebind.Add(mo);
+            }
+            // pose.armature_apply: every bone's edit position from its pose matrix (head, tail at the bone's length along
+            // Y, the roll of the matrix), the rest rebuilt through the edit-bone round trip, the pose channels reset
+            var head = new Dictionary<int, float[]>(); var tail = new Dictionary<int, float[]>(); var roll = new Dictionary<int, float>();
+            var oldPose = ad.BoneNodes.ToDictionary(b => b, b => (float[])ad.PoseMats[b].Clone()); var oldLength = ad.BoneNodes.ToDictionary(b => b, b => ad.Rest.Length[b]);
+            foreach (int b in ad.BoneNodes)
+            {
+                var pm = ad.PoseMats[b]; float len = ad.Rest.Length[b];
+                var h = new[] { pm[12], pm[13], pm[14] };
+                var t = new[] { (float)(h[0] + (float)(pm[4] * len)), (float)(h[1] + (float)(pm[5] * len)), (float)(h[2] + (float)(pm[6] * len)) };
+                var delta = new[] { (float)(t[0] - h[0]), (float)(t[1] - h[1]), (float)(t[2] - h[2]) };
+                var pmat = new[] { pm[0], pm[1], pm[2], pm[4], pm[5], pm[6], pm[8], pm[9], pm[10] };   // copy_m3_m4
+                head[b] = h; tail[b] = t; roll[b] = Mat3VecToRoll(pmat, delta);
+            }
+            var children = ad.BoneNodes.ToDictionary(b => b, b => new List<int>()); var roots = new List<int>();
+            foreach (int b in ad.BoneNodes) { int p = ad.Rest.Parent[b]; if (p >= 0) children[p].Add(b); else roots.Add(b); }
+            VehicleProbe.RestFromEditBones(ad.BoneNodes, children, roots, head, tail, roll, (b, parent, arm, offs, len) =>
+            {
+                ad.Rest.ArmMat[b] = arm; ad.Rest.OffsBone[b] = offs; ad.Rest.Length[b] = len; ad.Rest.MatrixLocal[b] = VehicleProbe.ToRowMajor(arm);
+                ad.Rest.EditHead[b] = head[b]; ad.Rest.EditTail[b] = tail[b]; ad.Rest.EditRoll[b] = roll[b];
+            });
+            foreach (int b in ad.BoneNodes) ad.PoseProps[b] = new[] { new float[3], new[] { 1f, 0f, 0f, 0f }, new[] { 1f, 1f, 1f } };
+            foreach (var kv in VehicleProbe.PoseMatrices(ad.Rest, b => ad.PoseProps[b])) ad.PoseMats[kv.Key] = kv.Value;   // BKE_pose_where_is
+            // applyarmature_fix_boneparents: an object hung from a bone of this armature keeps its place - its world
+            // decomposed into its properties without a parent, its parentinv the inverse of the parent matrix as the
+            // EVALUATED armature still holds it (BKE_object_workob_calc_parent takes DEG_get_evaluated(ob->parent): the pose
+            // at frame 0 of the old rest, the old bone length - the depsgraph is not evaluated again before this)
+            foreach (var o in s.Objects)
+            {
+                if (o.Parent != armObj || o.ParentBone == null) continue;
+                if (!o.EvalStale) { o.EvalStale = true; o.EvalLocal = o.Local; o.EvalParentInverse = o.ParentInverse; }   // the operator tags nothing on it
+                ApplyMat4(o.World, null, out var loc, out var quat, out var scale);
+                o.Props = new[] { loc, quat, scale }; o.Local = VehicleProbe.ObjectMatrix(loc, quat, scale);
+                o.ParentInverse = BlenderEigen.InvertM4(VehicleProbe.MulM4(armObj.World, VehicleProbe.ParBone(oldPose[o.ParentBoneNode], oldLength[o.ParentBoneNode])));
+                o.Dirty = true; Note(s, "a bone-parented object kept in place by the fold (its parentinv rewritten)");
+            }
+            foreach (var mo in rebind) mo.Mesh.ArmatureModifier = armObj.Name;
+            // the visual rebake: per clip and frame, each bone's basis against the new rest from the snapshots
+            var restLocal = new Dictionary<int, float[]>();
+            foreach (int b in ad.BoneNodes)
+            {
+                int p = ad.Rest.Parent[b];
+                var pinv = p >= 0 ? PyInv(ad.Rest.ArmMat[p]) : null;
+                if (p >= 0 && pinv == null) { s.Fallback = "a rest matrix mathutils cannot invert (a zero determinant)"; return; }
+                restLocal[b] = p >= 0 ? PyMul(pinv, ad.Rest.ArmMat[b]) : (float[])ad.Rest.ArmMat[b].Clone();
+            }
+            var rebaked = new Dictionary<ActionData, ActionData>();
+            foreach (var oa in allActs)
+            {
+                var na = new ActionData { Name = actionNames.Unique(oa.Name + "_rebaked") };
+                s.Actions.Add(na); BlenderExportTree.StableSort(s.Actions, (x, y) => BlenderExportTree.StrCaseCmp(x.Name, y.Name));
+                var slot = new SlotData { Identifier = "OB" + armObj.Name, Object = armObj }; na.Slots.Add(slot);
+                armObj.Action = na.Name; armObj.Slot = slot.Identifier;
+                var frames = snaps[oa].Keys.ToList();
+                if (frames.Count == 1)
+                {
+                    snaps[oa][frames[0] + 1] = snaps[oa][frames[0]]; frames.Add(frames[0] + 1);
+                    s.Logs3.Add("RIGANIM single-frame clip '" + oa.Name + "' padded to 2 identical frames (stance)"); Note(s, "a single-frame clip padded in the rebake");
+                }
+                float[] LocalF(Dictionary<int, float[]> world, int b) { int p = ad.Rest.Parent[b]; if (p < 0) return world[b]; var inv = PyInv(world[p]); return inv == null ? null : PyMul(inv, world[b]); }
+                var transBones = new List<int>();
+                foreach (int b in ad.BoneNodes)
+                {
+                    float[] lo = null, hi = null; double maxoff = 0.0;
+                    var restInv = PyInv(restLocal[b]);
+                    foreach (long f in frames)
+                    {
+                        var localf = LocalF(snaps[oa][f], b);
+                        if (localf == null || restInv == null) { s.Fallback = "a pose matrix mathutils cannot invert (a zero determinant)"; return; }
+                        var tm = PyMul(restInv, localf); var tv = new[] { tm[12], tm[13], tm[14] };
+                        double tl = VecLengthPy(tv); if (tl > maxoff) maxoff = tl;
+                        if (lo == null) { lo = (float[])tv.Clone(); hi = (float[])tv.Clone(); }
+                        else for (int k = 0; k < 3; k++) { lo[k] = Math.Min(lo[k], tv[k]); hi[k] = Math.Max(hi[k], tv[k]); }
+                    }
+                    if (lo != null && (VecLengthPy(new[] { (float)(hi[0] - lo[0]), (float)(hi[1] - lo[1]), (float)(hi[2] - lo[2]) }) > 1e-4 || (a.KeepTranslations && maxoff > 1e-3))) transBones.Add(b);
+                }
+                if (transBones.Count > 0)
+                {
+                    var tnames = transBones.Select(b => names.BoneOfJoint[b]).OrderBy(x => x, StringComparer.Ordinal).ToList();
+                    s.Logs3.Add("RIGANIM TRANSLATION-animated bone(s) in '" + oa.Name + "': " + PyList(tnames) + (a.KeepTranslations ? " (location keys KEPT — keepTranslations)" : " (location keys stripped below — set keepTranslations to keep)"));
+                    Note(s, a.KeepTranslations ? "translation-animated bones, kept" : "translation-animated bones, stripped");
+                    // rig_anim.py builds this set with the literal bone name, unlike keyframe_insert's escaped RNA
+                    // paths. Preserve that behavior here: quoted/backslashed names are stripped by the script below.
+                    foreach (int b in transBones) keepLocPaths.Add("pose.bones[\"" + names.BoneOfJoint[b] + "\"].location");
+                }
+                var transSet = new HashSet<int>(transBones);
+                foreach (long f in frames)
+                    foreach (int b in ad.BoneNodes)
+                    {
+                        var basis = PyMul(PyInv(restLocal[b]), LocalF(snaps[oa][f], b));
+                        ad.PoseProps[b][1] = Mat4ToQuat(basis);
+                        Insert(na, slot, b, "rotation_quaternion", f);
+                        if (transSet.Contains(b)) { ad.PoseProps[b][0] = new[] { basis[12], basis[13], basis[14] }; Insert(na, slot, b, "location", f); }
+                    }
+                rebaked[oa] = na;
+            }
+            primary = rebaked[primary];
+            roleActs = roleActs.Select(r => (r.role, rebaked[r.act])).ToList();
+            allActs = new List<ActionData> { primary };
+            foreach (var (_, ra) in roleActs) if (ra != primary && !allActs.Contains(ra)) allActs.Add(ra);
+            AssignAction(primary); FrameSet(fs0);
+            // VERIFY: the primary's frame-0 pose against the rest (a kept-translation bone sits off it by design)
+            double worst = 0.0, scaleref = 0.0;
+            foreach (int b in ad.BoneNodes)
+            {
+                if (a.KeepTranslations && keepLocPaths.Contains("pose.bones[\"" + names.BoneOfJoint[b] + "\"].location")) continue;
+                var pm = ad.PoseMats[b]; var ml = ad.Rest.ArmMat[b];
+                double d = VecLengthPy(new[] { (float)(pm[12] - ml[12]), (float)(pm[13] - ml[13]), (float)(pm[14] - ml[14]) });
+                if (d > worst) worst = d;
+                double rl = VecLengthPy(new[] { ml[12], ml[13], ml[14] });
+                if (rl > scaleref) scaleref = rl;
+            }
+            s.Logs3.Add("RIGANIM rest-normalized + rebaked " + allActs.Count + " clip(s) x " + ad.BoneNodes.Count + " bones (" + rebind.Count + " meshes re-bound); primary frame-0 residual = " + PyFixed(worst, 6) + " (should be ~0)");
+            Note(s, "the rest fold and rebake");
+            double thr = Math.Max(0.02, 0.25 * scaleref);
+            if (double.IsNaN(worst) || worst > thr)
+            {
+                s.Logs3.Add("RIGANIM ERROR: rest-fold did NOT converge — frame-0 residual " + PyFixed(worst, 6) + " exceeds " + PyFixed(thr, 6) + " (rig bone-scale " + PyFixed(scaleref, 4) + "); a rigidly displaced bone would ship (the 'head off shoulders' bug). Aborting.");
+                s.Exits = true; Note(s, "the rest fold did not converge: the script's exit"); return;
+            }
+        }
+        else if (loc0) Note(s, "location keys on the legacy path (no fold)");
 
         // ---- legacy keepTranslations
-        var keepLocPaths = new HashSet<string>(StringComparer.Ordinal);
         var keepActs = new List<ActionData>();
         bool cleanUnits = armObj.Name.StartsWith("DeployArmV2", StringComparison.Ordinal);
         if (a.KeepTranslations && !a.ConvertRig)
@@ -1004,6 +1207,107 @@ public static class BlenderRigAnim
         s.Logs3.Add("RIGANIM frame range " + s.FrameStart + ".." + s.FrameEnd);
     }
 
+    // ---- the fold's arithmetic
+    /// <summary>mathutils Matrix @ Matrix on Blender's column-major floats (a double dot per item).</summary>
+    static float[] PyMul(float[] colA, float[] colB) => FromRowMajor(VehicleProbe.MatMulMathutils(VehicleProbe.ToRowMajor(colA), VehicleProbe.ToRowMajor(colB)));
+    /// <summary>mathutils Matrix.inverted() (the adjugate over the float32 determinant) on column-major floats; null when singular.</summary>
+    static float[] PyInv(float[] col) { var r = VehicleProbe.Inverted(VehicleProbe.ToRowMajor(col)); return r == null ? null : FromRowMajor(r); }
+    static float[] FromRowMajor(float[] it) { var bm = new float[16]; for (int c = 0; c < 4; c++) for (int w = 0; w < 4; w++) bm[c * 4 + w] = it[w * 4 + c]; return bm; }
+    /// <summary>mathutils Vector.length: sqrt of dot_vn_vn - the float32 products summed in double, the last component first.</summary>
+    static double VecLengthPy(float[] v) { double d = 0.0; for (int i = v.Length - 1; i >= 0; i--) d += (double)(float)(v[i] * v[i]); return Math.Sqrt(d); }
+    /// <summary>Matrix.to_quaternion() of a 4x4: mat4_to_quat - the 3x3 copied, each axis normalized (normalize_m3), then
+    /// mat3_normalized_to_quat_with_checks.</summary>
+    static float[] Mat4ToQuat(float[] bm)
+    {
+        var rot = new float[3][];
+        for (int c = 0; c < 3; c++) { float x = bm[c * 4], y = bm[c * 4 + 1], z = bm[c * 4 + 2]; VehicleProbe.NormalizeV3Blender(ref x, ref y, ref z); rot[c] = new[] { x, y, z }; }
+        return VehicleProbe.Mat3NormalizedToQuat(rot);
+    }
+    /// <summary>mat3_vec_to_roll: the matrix against the zero-roll matrix of the vector (vec_roll_to_mat3, invert_m3_m3,
+    /// mul_m3_m3m3), mat3_to_quat of that, the twist about Y (quat_split_swing_and_twist: the canonical quaternion's
+    /// 2 * atan2f(y, w)). The 3x3s as Blender's float[3][3] (M[col][row], 9 floats).</summary>
+    static float Mat3VecToRoll(float[] mat, float[] vec)
+    {
+        float x = vec[0], y = vec[1], z = vec[2]; VehicleProbe.NormalizeV3Blender(ref x, ref y, ref z);
+        var vecmat = VehicleProbe.VecRollToMat3Normalized(x, y, z, 0f);
+        var rollmat = VehicleProbe.MulM3(VehicleProbe.InvertM3(vecmat), mat);
+        var rot = new float[3][];
+        for (int c = 0; c < 3; c++) { float cx = rollmat[c * 3], cy = rollmat[c * 3 + 1], cz = rollmat[c * 3 + 2]; VehicleProbe.NormalizeV3Blender(ref cx, ref cy, ref cz); rot[c] = new[] { cx, cy, cz }; }
+        var q = VehicleProbe.Mat3NormalizedToQuat(rot);
+        if (q[0] < 0f) for (int i = 0; i < 4; i++) q[i] = -q[i];
+        return (float)(2.0f * BlenderTrig.Atan2f(q[2], q[0]));
+    }
+    /// <summary>blender::math::transform_point(float4x4, float3): the 3x3 times the point (per column, the products summed
+    /// from zero), plus the location.</summary>
+    static float[] TransformPoint(float[] m, float[] p)
+    {
+        var r = new float[3];
+        for (int k = 0; k < 3; k++)
+        {
+            float acc = 0f;
+            for (int c = 0; c < 3; c++) acc = (float)(acc + (float)(p[c] * m[c * 4 + k]));
+            r[k] = (float)(acc + m[12 + k]);
+        }
+        return r;
+    }
+    /// <summary>The Armature modifier applied (BKE_armature_deform_coords_with_mesh, the linear mixer, vertex groups only): every
+    /// vertex into the armature's space (the inverse of target.world_to_object times armature.object_to_world), each
+    /// weighted bone's chan_mat (pose_mat times the inverse of arm_mat) moving it, the sum over the contributions, back
+    /// into the mesh's space. The positions replace the mesh's.</summary>
+    static void ArmatureDeform(Stage1 s, SceneObject mo, SceneObject armO, Func<SceneObject, string, int> boneNodeOf)
+    {
+        var ad = s.Armature; var d = mo.Mesh;
+        var armatureToTarget = VehicleProbe.MulM4(BlenderEigen.InvertM4(mo.World), armO.World);
+        var targetToArmature = BlenderEigen.InvertM4(armatureToTarget);
+        var chan = new Dictionary<int, float[]>();
+        int[] groupBone = new int[d.Groups.Count];
+        for (int g = 0; g < d.Groups.Count; g++)
+        {
+            int b = boneNodeOf(armO, d.Groups[g]); groupBone[g] = b;
+            if (b >= 0 && !chan.ContainsKey(b)) chan[b] = VehicleProbe.MulM4(ad.PoseMats[b], BlenderEigen.InvertM4(s.Rig.ArmatureOfBone[b].ArmMat[b]));
+        }
+        for (int v = 0; v < d.Vertices; v++)
+        {
+            var co = TransformPoint(targetToArmature, new[] { d.Positions[3 * v], d.Positions[3 * v + 1], d.Positions[3 * v + 2] });
+            float contrib = 0f; var delta = new float[3];
+            if (d.DefNr != null)
+                for (int i = 0; i < d.DefNr[v].Count; i++)
+                {
+                    int g = d.DefNr[v][i]; if (g < 0 || g >= groupBone.Length || groupBone[g] < 0) continue;
+                    float w = d.DefWeight[v][i];
+                    if (w != 0f)
+                    {
+                        var tp = TransformPoint(chan[groupBone[g]], co);
+                        for (int k = 0; k < 3; k++) delta[k] = (float)(delta[k] + (float)(w * (float)(tp[k] - co[k])));
+                    }
+                    contrib = (float)(contrib + w);
+                }
+            if (contrib > 0.0001f) { float sf = (float)(1.0f / contrib); for (int k = 0; k < 3; k++) co[k] = (float)(co[k] + (float)(delta[k] * sf)); }
+            co = TransformPoint(armatureToTarget, co);
+            d.Positions[3 * v] = co[0]; d.Positions[3 * v + 1] = co[1]; d.Positions[3 * v + 2] = co[2];
+        }
+        Note(s, "an Armature modifier applied (the linear deform)");
+    }
+    /// <summary>Python's '%.{digits}f' of a double: the exact binary value rounded half to even at that digit.</summary>
+    internal static string PyFixed(double v, int digits)
+    {
+        if (double.IsNaN(v)) return "nan";
+        if (double.IsInfinity(v)) return v > 0 ? "inf" : "-inf";
+        long bits = BitConverter.DoubleToInt64Bits(v); bool neg = bits < 0;
+        int exp = (int)((bits >> 52) & 0x7FF); long frac = bits & 0xFFFFFFFFFFFFFL;
+        System.Numerics.BigInteger m; int e;
+        if (exp == 0) { m = frac; e = -1074; } else { m = frac | (1L << 52); e = exp - 1075; }
+        var scale = System.Numerics.BigInteger.Pow(10, digits);
+        System.Numerics.BigInteger num = m * scale, den = System.Numerics.BigInteger.One;
+        if (e >= 0) num <<= e; else den <<= -e;
+        var q = System.Numerics.BigInteger.DivRem(num, den, out var r);
+        var twice = r * 2;
+        if (twice > den || (twice == den && !q.IsEven)) q += 1;
+        string digitsStr = q.ToString().PadLeft(digits + 1, '0');
+        string text = digitsStr.Substring(0, digitsStr.Length - digits) + (digits > 0 ? "." + digitsStr.Substring(digitsStr.Length - digits) : "");
+        return (neg ? "-" : "") + text;
+    }
+
     /// <summary>BKE_object_apply_mat4 for an object in quaternion mode with the identity parentinv and no deltas: with a
     /// parent, Eigen's inverse of (the parent's matrix times the identity) times the matrix; mat4_to_loc_rot_size;
     /// mat3_normalized_to_quat times the inverse of the identity delta quaternion; dloc subtracted, dscale divided out.</summary>
@@ -1074,7 +1378,7 @@ public static class BlenderRigAnim
         foreach (var o in s.Objects)
         {
             var row = new List<string> { "OBJ", N, o.Name, o.Type, o.Parent?.Name ?? "-", o.ParentBone != null ? "BONE" : "OBJECT", o.ParentBone ?? "-", o.DataName ?? "-", o.Action ?? "-", o.Slot ?? "-" };
-            row.AddRange(HexMatrix(o.World)); row.AddRange(identity);
+            row.AddRange(HexMatrix(o.World)); row.AddRange(o.ParentInverse != null ? HexMatrix(o.ParentInverse) : identity);
             r.Objs.Add(row.ToArray());
             if (o.Mesh == null) continue;
             var d = o.Mesh; int nf = d.Faces.Length / 3;

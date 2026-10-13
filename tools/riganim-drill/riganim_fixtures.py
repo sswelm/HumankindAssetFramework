@@ -34,6 +34,13 @@ animation), the bone filter keeping and matching nothing, the filter over the ar
 keepTranslations kept (with the x100 amplify), nothing kept, kept under the V2 marker (no amplify), the multi-slot trap
 (a mesh node before the armature: the armature takes the mesh's slot), an animated mesh under a slice, and keys off the
 frame grid (the scene range rounded).
+
+Step (d2), the rest fold and rebake and the bone cap (fx_s4_*): two skinned nodes sharing one mesh (copied before the
+modifier is applied), a static part hung from a bone through the fold (its parent inverse rewritten, its evaluated copy
+left unrefreshed), the nested armatures with a location key on the carrier (the inner mesh deformed by its own
+armature, then re-bound), keepTranslations on the conversion path (the kept paths from the rebake, a single-frame role
+clip padded), a rig a thousand times the size (the residual's digits), and 492 bones for the cap (two passes: the
+leaves, then the unweighted middles; a weighted leaf stays).
 """
 import math, os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "glb-reader-drill"))
@@ -460,6 +467,97 @@ def s3_escaped_bone(out, name, suffix):
     return r.write(out, "riganim_s3_filter_" + suffix)
 
 
+# ---- stage 3, step (d2): the rest fold and rebake, the bone cap
+
+def s4_fold_shared(out):
+    """Two skinned nodes sharing one mesh and skin, with a location key on the primary: the fold copies the multi-user
+    mesh before applying the first modifier (the copy takes the next free name)."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    shared = r.mesh("pad", at=(1.0, 0.0, 0.0), size=0.5, material=m, joints=[[(1, 1.0)]])
+    r.node("PadA", arm, mesh=shared, skin=sk, translation=[0.0, 0.0, 1.0])
+    r.node("PadB", arm, mesh=shared, skin=sk, translation=[0.0, 0.0, -1.0])
+    r.key(0, j0, "translation", [0.0, 1.0], [(0.0, 0.0, 0.0), (0.0, 0.3, 0.0)])
+    return r.write(out, "riganim_s4_fold_shared")
+
+
+def s4_fold_static(out):
+    """A static part hung from a bone (kept weightless by staticParts) through the fold: applyarmature_fix_boneparents
+    rewrites its properties and parent inverse so it keeps its place; a location key on the primary brings the fold."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    r.node("Canopy", j1, mesh=r.mesh("canopy", at=(0.0, 1.5, 0.0), material=m), translation=[0.2, 0.5, 0.1], rotation=[0.0, 0.3826834, 0.0, 0.9238795])
+    r.node("Gun", j1, mesh=r.mesh("gun", at=(0.0, 2.0, 0.5), material=m), translation=[0.0, 1.0, 0.5])
+    r.key(0, j1, "translation", [0.0, 1.0], [(0.0, 1.0, 0.0), (0.0, 1.2, 0.0)])
+    return r.write(out, "riganim_s4_fold_static")
+
+
+def s4_fold_nested(out):
+    """The nested armatures with a location key on the carrier's bone: the inner armature's mesh is deformed by ITS
+    armature's modifier, then re-bound to the script's."""
+    r = Rig()
+    outer = r.node("Carrier")
+    c0 = r.node("Deck", outer)
+    skc = r.skin("SkinC", [c0], [ibm(0.0, 0.0, 0.0)])
+    m = r.material("Paint", (0.2, 0.4, 0.9))
+    r.node("Hull", outer, mesh=r.mesh("hull", size=3.0, material=m, joints=[[(0, 1.0)]]), skin=skc)
+    inner = r.node("Armature", c0, translation=[0.0, 3.0, 0.0], rotation=[0.0, 0.0, 0.3826834, 0.9238795])
+    j0 = r.node("Root", inner)
+    j1 = r.node("Arm", j0, translation=[0.0, 1.0, 0.0])
+    sk = r.skin("Skin", [j0, j1], [ibm(0.0, 3.0, 0.0), ibm(0.0, 4.0, 0.0)])
+    r.node("Body", inner, mesh=r.mesh("body", at=(0.0, 3.0, 0.0), material=m, joints=[[(0, 1.0)]] * 4 + [[(0, 0.5), (1, 0.5)]] * 4), skin=sk)
+    a = r.anim("Spin")
+    r.key(a, j1, "rotation", [0.0, 0.5, 1.0], spin(3, "x", 0.5))
+    r.key(a, c0, "rotation", [0.0, 1.0], spin(2, "y", 0.25))
+    r.key(a, c0, "translation", [0.0, 1.0], [(0.0, 0.0, 0.0), (0.5, 0.0, 0.0)])
+    return r.write(out, "riganim_s4_fold_nested")
+
+
+def s4_fold_big(out):
+    """The multi file at a thousand times the size: the fold's frame-0 residual carries digits in its %.6f."""
+    r = Rig()
+    arm = r.node("Armature")
+    j0 = r.node("Root", arm)
+    j1 = r.node("Arm", j0, translation=[0.0, 1000.0, 0.0], rotation=[0.0, 0.0, 0.3826834, 0.9238795])
+    sk = r.skin("Skin", [j0, j1], [ibm(0.0, 0.0, 0.0), ibm(0.0, 1000.0, 0.0)])
+    m = r.material("Paint", (0.2, 0.4, 0.9))
+    r.node("Body", arm, mesh=r.mesh("body", size=1000.0, material=m, joints=[[(0, 1.0)]] * 4 + [[(0, 0.5), (1, 0.5)]] * 4), skin=sk)
+    a = r.anim("Longer")
+    r.key(a, j1, "rotation", [0.0, 2.0, 4.0], spin(3, "y", 1.0))
+    r.key(a, j0, "translation", [0.0, 4.0], [(0.0, 0.0, 0.0), (0.0, 0.0, 2000.0)])
+    r.key(a, j1, "translation", [0.0, 4.0], [(0.3, 1000.0, 0.0), (0.3, 1000.0, 0.0)])
+    return r.write(out, "riganim_s4_fold_big")
+
+
+def s4_bonecap(out, weight=1.0, suffix=""):
+    """492 bones: a root, 245 chains of a middle bone and a leaf, and a weighted leaf. Pass one removes the 245 leaves
+    (the weighted one stays), the count is still over the cap, pass two removes the 238 unweighted middles."""
+    r = Rig()
+    arm = r.node("Armature")
+    root = r.node("Root", arm)
+    joints = [root]; ibms = [ibm(0.0, 0.0, 0.0)]
+    mids = []
+    for i in range(245):
+        mid = r.node("Mid_%03d" % i, root, translation=[float(i), 1.0, 0.0]); joints.append(mid); ibms.append(ibm(float(i), 1.0, 0.0)); mids.append(len(joints) - 1)
+        leaf = r.node("Leaf_%03d" % i, mid, translation=[0.0, 1.0, 0.0]); joints.append(leaf); ibms.append(ibm(float(i), 2.0, 0.0))
+    keep = r.node("KeptLeaf", root, translation=[-1.0, 1.0, 0.0]); joints.append(keep); ibms.append(ibm(-1.0, 1.0, 0.0))
+    sk = r.skin("Skin", joints, ibms)
+    m = r.material("Paint", (0.2, 0.4, 0.9))
+    per = [[(len(joints) - 1, 1.0)]] + [[(mids[v - 1], 1.0)] for v in range(1, 8)]
+    if weight != 1.0:
+        per[0] = [(len(joints) - 1, weight), (0, 1.0 - weight)]   # sum to one so the importer preserves the threshold weight
+    r.node("Body", arm, mesh=r.mesh("body", size=3.0, material=m, joints=per), skin=sk)
+    a = r.anim("Spin"); r.key(a, joints[1], "rotation", [0.0, 1.0], spin(2, "x", 0.25))
+    return r.write(out, "riganim_s4_bonecap" + suffix)
+
+
+def s4_fold_keep_name(out, name, suffix):
+    """A genuinely translating bone after a conversion fold. keepTranslations keeps a plain name's three location
+    curves, but rig_anim.py's literal keep-path set does not match quoted/backslashed names' escaped RNA paths."""
+    r = Rig(); arm, root, child, skin, mat = rigged(r)
+    r.nodes[child]["name"] = name
+    r.key(0, child, "translation", [0.0, 1.0], [(0.0, 1.0, 0.0), (0.0, 1.2, 0.0)])
+    return r.write(out, "riganim_s4_fold_keep_" + suffix)
+
+
 def main(out):
     sys.stdout.reconfigure(encoding="utf-8")  # JOB records may contain non-ASCII staticParts on Windows
     os.makedirs(out, exist_ok=True)
@@ -515,6 +613,19 @@ def main(out):
     job("fx_s3_slice_legacy_held", multi(out), clip="Longer[5..5]", convert="0")
     job("fx_s3_filter_objcurves", groups(out), clip="", prefixes="Arm")
     job("fx_s3_frac", s3_frac(out), clip="")
+    # step (d2): the rest fold and rebake, the bone cap
+    job("fx_s4_fold_shared", s4_fold_shared(out))
+    job("fx_s4_fold_static", s4_fold_static(out), static="canopy")
+    job("fx_s4_fold_nested", s4_fold_nested(out))
+    job("fx_s4_multi_keept", multi(out), clip="Longer", keept="1", roles="attack=Held;move=Spin[0..6]")
+    job("fx_s4_fold_big", s4_fold_big(out), clip="Longer")
+    job("fx_s4_bonecap", s4_bonecap(out))
+    # PR #167 review: Python's double threshold protects nominal 0.001f; the lower neighbor is removed, the upper kept.
+    for weight, suffix in ((0.000999, "below"), (0.001, "exact"), (0.001001, "above")):
+        job("fx_s4_bonecap_" + suffix, s4_bonecap(out, weight, "_" + suffix))
+    # The fold's keep set uses literal bone names while fcurves escape them; include the ordinary-name control.
+    for name, suffix in (("Arm", "plain"), ('Ar"m', "quote"), (r"Ar\m", "slash")):
+        job("fx_s4_fold_keep_" + suffix, s4_fold_keep_name(out, name, suffix), keept="1")
     # Review regressions: dictionary overwrite/order, escaped-path filtering, named fallback from either resolver,
     # and bpy.data.actions.new's UTF-8 truncation and collision suffixes.
     mp = multi(out)
