@@ -1521,8 +1521,58 @@ frame 0, the old bone length) and tags nothing on the child, so its evaluated co
 parent inverse until something refreshes it (`SceneObject.EvalStale`; two fixtures differed by rotation noise until
 modelled). Not fixtured, named: a fold whose residual exceeds its threshold (the fold makes frame 0 the rest by
 construction; only a NaN could trip it), a bone with an object hung from it removed by the cap (a named fallback).
-Stage 4 is not compared yet, and the PASS line says so. Stage 4 is not compared yet, and the PASS
-line says so.
+Stage 4 followed in step (e).
+
+Step (e), stage 4 in C# (2026-10-14): everything rig_anim.py does before its FBX export is modelled (`RunStage4`),
+and `riganim.exe --stages 4` holds it to Blender. The albedo: the first mesh with materials, its first material's
+base-colour image - or, without one, the first image node of the material's tree, an extension's texture included
+(`base_color_image`'s fallback) - its dimensions from the encoded header; the importer's image NAMES made on first use
+in the order the materials are made and, within a material, in `pbr_metallic_roughness`'s node order (emission, base
+colour, metallic-roughness, normal, occlusion, then the extensions' textures; `MaterialTextureOrder`), one Blender image
+per file path; the IMG row is compared by path, width, height and channels (the PNG's bytes and pixels are Blender's
+encoder's). The join (`mesh_join.cc`): the active object - the first with an Armature modifier - first, then scene order;
+the vertices through the active's inverse world with `transform_points`' identity skip at 1e-6 per entry; materials by
+first appearance, vertex groups and UV layers by name (zeros where a mesh has none), custom normals, sharp flags and
+edges carried; the other objects deleted, their children re-rooted. The weld skipped where the script skips it (a
+one-material, one-bone mesh is LEFT by name: bmesh's remove_doubles is not modelled). The material slots kept or
+collapsed to the first. The decimate: `BlenderDecimate` on the joined mesh at `min(1, max(0.02, target/total))`, the UVs
+merged. The rebind. The root collapse (a root with one child, no key in the primary, no weight above 1e-6; the fallback
+for an object hung from the victim stays as a guard - unreachable from a glTF: a hung mesh is joined, a hung empty
+flattened, a hung armature's mesh binds to the carrying bone and weights it). The topological rename (depth-first with
+the children sorted, `A###_` with sockets else `b###_`; Blender's rename fixes the assigned action's paths AND the NLA
+strips' stashed ones - `BKE_animdata_fix_paths_rename_all` - and the script's patch covers the rest over `all_acts`).
+The donor sockets (edit bones: the parent by lowered substring, head = parent head + offset, the direction normalized
+with mathutils' double length and float reciprocal at `max(0.02, length / 4)`, the parent's roll, `use_deform` off; the
+no-parent exit modelled; the sort exit LEFT by name - its message reads `_parent.name` AFTER `mode_set('OBJECT')` freed
+the edit bones, and four Blender runs gave the right name once, an empty name once and a UnicodeDecodeError twice). The
+rotation and scale fold (`Matrix.Rotation`'s angle wrapped to (-pi, pi] in float, then cosf/sinf; the parent-less
+objects' worlds through `BKE_object_apply_mat4`; the primary's object-level fcurves stripped; `transform_apply` parents
+first - `mesh_transform` with the skip rule, `armature_transform_recurse`, the properties reset, the world from the
+UPDATED parent, each child's properties re-decomposed and its parent inverse rebuilt from the updated parent). The
+placement (the bounds in double through mathutils' matrix-vector product, the move in the mesh's and the armature's
+space through the adjugate inverse, `%.4f` and the `%.1f` warning). And the depsgraph evaluations the operators imply:
+before the join, the modifier apply and the transform apply, and once more at the end (a bone-hung object follows the
+bones the placement moved). The dump's MESH row gained a field for this step: every UV layer, name and hash (the
+active layer alone could not see a second layer dropped by the join - a plant found that), and the registry was
+re-dumped. Measured: all 23 dumped recipes equal through stage 4 (6,550,596 rows with key rows), 30
+new fixture jobs (`fx_s4_*`: the albedo on the first mesh, on the second only, from an emissive-only material, the image
+names, a KHR_materials_specular image as the first made, a mesh made after the body but sorting before it, the albedo
+off; keepmats 1 and 0; the decimate on 13 and 12 triangles, on the legacy path and at 1/60 under the ratio's 0.02
+floor; the root collapse done, kept when
+keyed, kept with two children, untouched on the legacy path; the rebind; every mesh culled - the stage 4 exit; a mesh
+already centred; the weld - LEFT; one, two and no UV sets joined; a body under a rigid hull mesh; sockets with an
+offset and a bad one, through a rotation fold, the no-parent exit, the sort exit - LEFT; the fold at 10/90/-30 degrees,
+at 180 on the multi rig, on the legacy path): 28 equal, 2 left by name; the earlier 66 fixture jobs unchanged (61
+equal, 5 left). 20 defects planted in stage 4 were each caught - transform_points without its identity skip, Matrix.Rotation's angle unwrapped, a child's parent inverse kept through the fold, the stashed actions' paths not renamed, the join in scene order (the active object not first), the joined materials sorted instead of by first appearance, no evaluation before the join, no evaluation after the placement, the placement moving bone heads but not tails, a socket's roll zeroed, the images named in reverse material order, the root collapse ignoring the weights, the rename's children unsorted, the decimate ratio without its 0.02 floor, the join keeping only the active object's UV layers, the joined edges not offset, the joined vertex groups not united by name, no evaluation before the transform apply, the rename prefix b###_ with sockets, the script's path patch over the kept actions only - 20 by the fixtures and 0 only by the registry (none). Ten S4_* tampers refused (a placement log line, an object matrix, the mesh's positions, groups and
+UV layers, a vertex group hash, a bone's rest and name, an fcurve path, the IMG row's width). Found on the way: the importer names
+images in the order of first use, not glTF index order (`fx_s4_albedo_names` said `tex.001` where Blender said `tex`
+until modelled); `scene.objects` keeps the creation order, so the first mesh node with materials is the albedo's even
+when it sorts last (`fx_s4_albedo_ext`); `base_color_image`'s fallback is the tree's first image node, an extension's
+texture included (the emissive fixture, first LEFT, is equal); the registry's five KHR_materials_specular recipes turned
+LEFT until the extensions' texture order was read from the importer (`pbrMetallicRoughness.py`: clearcoat,
+transmission, volume, specular, anisotropy, sheen; `KHR_materials_pbrSpecularGlossiness.py`; `KHR_materials_unlit.py`).
+Not fixtured, named: a no-op root bone with an object hung from it (unreachable), the weld (left), a volume thickness
+or sheen texture (read, no source has one).
 
 Review of PR #167 (2026-10-13): six additional stage 3 fixture jobs hold the bone-cap threshold and the conversion
 fold's keepTranslations paths. A stored nominal `0.001f` is slightly above Python's double `0.001` threshold: the

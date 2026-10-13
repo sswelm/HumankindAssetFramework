@@ -24,7 +24,7 @@ Rows (tab-separated; every float as the hex of its float32 bits, as the other du
               <matrix_world 16> <matrix_parent_inverse 16>
     MESH   <n> <object> <verts> <polys> <loops> <sha of positions> <sha of loop vertex indices> <sha of polygon starts
               and sizes> <sha of material indices> <sha of the active UV layer or -> <materials ;-joined or ->
-              <vertex groups ;-joined or -> <modifiers type:name:object ;-joined or ->
+              <vertex groups ;-joined or -> <modifiers type:name:object ;-joined or -> <every UV layer name:sha ;-joined or ->
     VG     <n> <object> <group> <vertices weighted> <sha of (vertex index, weight) in vertex order>
     BONE   <n> <index> <name> <parent or -> <use_deform> <length> <matrix_local 16>
     PB     <n> <name> <rotation_mode> <location 3> <rotation_quaternion 4> <rotation_euler 3> <scale 3> <matrix_basis 16>
@@ -124,12 +124,16 @@ def dump(n):
             uv = "-"
             if me.uv_layers.active is not None:
                 u = np.empty(len(me.loops) * 2, dtype=np.float32); me.uv_layers.active.data.foreach_get("uv", u); uv = sha(u.tobytes())
-            rows.append("MESH\t%d\t%s\t%d\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s" % (
+            layers = []
+            for l in me.uv_layers:
+                u = np.empty(len(me.loops) * 2, dtype=np.float32); l.data.foreach_get("uv", u); layers.append("%s:%s" % (l.name, sha(u.tobytes())))
+            rows.append("MESH\t%d\t%s\t%d\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s" % (
                 n, o.name, len(me.vertices), len(me.polygons), len(me.loops), sha(pos.tobytes()), sha(lv.astype("<i4").tobytes()),
                 sha(ps.astype("<i4").tobytes() + pt.astype("<i4").tobytes()), sha(mi.astype("<i4").tobytes()), uv,
                 ";".join(m.name if m else "(none)" for m in me.materials) or "-",
                 ";".join(g.name for g in o.vertex_groups) or "-",
-                ";".join("%s:%s:%s" % (md.type, md.name, getattr(md, "object", None).name if getattr(md, "object", None) else "-") for md in o.modifiers) or "-"))
+                ";".join("%s:%s:%s" % (md.type, md.name, getattr(md, "object", None).name if getattr(md, "object", None) else "-") for md in o.modifiers) or "-",
+                ";".join(layers) or "-"))
             if len(o.vertex_groups):
                 per = {g.index: [] for g in o.vertex_groups}
                 for v in me.vertices:

@@ -2,7 +2,8 @@
 rigged GLB with the arguments that reach the branch. Writes the files and prints JOB lines in riganim_jobs.py's form
 (TAB-separated: JOB <key> <input> <argv[2]> ... <argv[14]>). A key that starts with "EXIT:<stage>:" names a job the
 script is expected to STOP at that stage (its own sys.exit(1), e.g. no armature): the drill fails a different stop.
-A key that starts with "LEFT:" names a job the C# leaves to Blender by name (localNodeAnim).
+A key that starts with "LEFT:" names a job the C# leaves to Blender by name (localNodeAnim, the weld, a socket sorting
+before its parent): the drill accepts whatever Blender does with it (a run through, an exit, a death).
 
 usage: riganim_fixtures.py <output directory>
 
@@ -41,12 +42,23 @@ left unrefreshed), the nested armatures with a location key on the carrier (the 
 armature, then re-bound), keepTranslations on the conversion path (the kept paths from the rebake, a single-frame role
 clip padded), a rig a thousand times the size (the residual's digits), and 492 bones for the cap (two passes: the
 leaves, then the unweighted middles; a weighted leaf stays).
+
+Step (e), stage 4 (fx_s4_*, the rest): the albedo (a base-colour texture on the first mesh, on the second mesh only, an
+emissive texture without a base colour - the tree's first image node, the importer's image names in the order the
+materials are made, a KHR_materials_specular colour texture as the first image, a mesh made after the body but sorting
+before it, the albedo switched off), keepmats 1 and 0 on two materials, the decimate (on 13 and 12 triangles, on the
+legacy path, at 1/60 under the ratio's 0.02 floor), the root collapse (a pass-through root removed, kept when keyed, kept with two children, untouched on the
+legacy path), the rebind after a join whose active object has no Armature modifier, every mesh culled (the stage 4
+exit), a mesh already centred and grounded, the weld of a one-material, one-bone mesh (LEFT), three meshes with one,
+two and no UV sets joined, a skinned body under a rigid hull mesh, two sockets with an offset and a bad offset, a
+socket through a rotation fold, the two socket exits (no parent; sorting before its parent - LEFT, the script's
+message is undefined), the rotation fold at an odd angle, at 180 degrees on the multi rig, and on the legacy path.
 """
 import math, os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "glb-reader-drill"))
-from fixtures import Buf, base, write_glb   # noqa: E402
+from fixtures import Buf, base, png, write_glb   # noqa: E402
 
-ARGS = "	".join(["0", "{prefixes}", "{clip}", "1", "1", "0,0,0", "{convert}", "{roles}", "0", "", "{keept}", "{static}", "{local}"])   # target, prefixes, clip, albedo, keepmats, rot, convertRig, roles, ground, sockets, keepT, static, localNode
+ARGS = "	".join(["{target}", "{prefixes}", "{clip}", "{albedo}", "{keepmats}", "{rot}", "{convert}", "{roles}", "0", "{sockets}", "{keept}", "{static}", "{local}"])   # target, prefixes, clip, albedo, keepmats, rot, convertRig, roles, ground, sockets, keepT, static, localNode
 
 
 class Rig:
@@ -55,10 +67,30 @@ class Rig:
     def __init__(self):
         self.b = Buf(); self.nodes = []; self.meshes = []; self.materials = []; self.skins = []; self.roots = []
         self.anims = []   # [{"name", "samplers", "channels"}]
+        self.images = []; self.textures = []
 
-    def material(self, name, rgb=(0.8, 0.8, 0.8)):
-        self.materials.append({"name": name, "pbrMetallicRoughness": {"baseColorFactor": [rgb[0], rgb[1], rgb[2], 1.0], "metallicFactor": 0.0}})
+    def material(self, name, rgb=(0.8, 0.8, 0.8), texture=None, emissive=None, extensions=None):
+        m = {"name": name, "pbrMetallicRoughness": {"baseColorFactor": [rgb[0], rgb[1], rgb[2], 1.0], "metallicFactor": 0.0}}
+        if extensions:
+            m["extensions"] = extensions
+        if texture is not None:
+            m["pbrMetallicRoughness"]["baseColorTexture"] = {"index": texture}
+        if emissive is not None:
+            m["emissiveTexture"] = {"index": emissive}; m["emissiveFactor"] = [1.0, 1.0, 1.0]
+        self.materials.append(m)
         return len(self.materials) - 1
+
+    def image(self, name, w=4, h=4, rgb=(200, 40, 40)):
+        """An embedded PNG of one colour (a buffer view); `name` None leaves the image unnamed (the importer names it Image_<index>)."""
+        img = {"bufferView": self.b.blob(png(w, h, rgb)), "mimeType": "image/png"}
+        if name is not None:
+            img["name"] = name
+        self.images.append(img)
+        return len(self.images) - 1
+
+    def texture(self, image):
+        self.textures.append({"source": image})
+        return len(self.textures) - 1
 
     def node(self, name, parent=None, **kw):
         n = {"name": name}; n.update(kw)
@@ -69,15 +101,18 @@ class Rig:
             self.nodes[parent].setdefault("children", []).append(i)
         return i
 
-    def mesh(self, name, at=(0.0, 0.0, 0.0), size=1.0, material=None, joints=None, colors=False, uv=True, second=None):
+    def mesh(self, name, at=(0.0, 0.0, 0.0), size=1.0, material=None, joints=None, colors=False, uv=True, second=None, uv2=False):
         """A small box of 8 vertices and 12 triangles. `joints` = a list of (joint ordinal, weight) sets, one per vertex or a
-        single one for all vertices; `second` a material for a second primitive (a triangle beside the box)."""
+        single one for all vertices; `second` a material for a second primitive (a triangle beside the box); `uv2` a second
+        UV set (TEXCOORD_1)."""
         x, y, z = at; s = size
         pos = [(x + dx * s, y + dy * s, z + dz * s) for dx in (0.0, 1.0) for dy in (0.0, 1.0) for dz in (0.0, 1.0)]
         idx = [0, 1, 3, 0, 3, 2, 4, 6, 7, 4, 7, 5, 0, 4, 5, 0, 5, 1, 2, 3, 7, 2, 7, 6, 0, 2, 6, 0, 6, 4, 1, 5, 7, 1, 7, 3]
         attrs = {"POSITION": self.b.accessor(pos, "f", "VEC3"), "NORMAL": self.b.accessor([(0.0, 0.0, 1.0)] * 8, "f", "VEC3", minmax=False)}
         if uv:
             attrs["TEXCOORD_0"] = self.b.accessor([(dx, dy) for dx in (0.0, 1.0) for dy in (0.0, 1.0) for _ in (0, 1)], "f", "VEC2", minmax=False)
+        if uv2:
+            attrs["TEXCOORD_1"] = self.b.accessor([(0.25 + 0.5 * dz, 0.75 - 0.5 * dx) for dx in (0.0, 1.0) for _ in (0, 1) for dz in (0.0, 1.0)], "f", "VEC2", minmax=False)
         if colors:
             attrs["COLOR_0"] = self.b.accessor([(1.0, 0.5, 0.25, 1.0)] * 8, "f", "VEC4", minmax=False)
         if joints is not None:
@@ -120,6 +155,10 @@ class Rig:
         if self.materials: extra["materials"] = self.materials
         if self.skins: extra["skins"] = self.skins
         if self.anims: extra["animations"] = self.anims
+        if self.images: extra["images"] = self.images
+        if self.textures: extra["textures"] = self.textures
+        used = sorted({k for m in self.materials for k in (m.get("extensions") or {})})
+        if used: extra["extensionsUsed"] = used
         root = base(name, meshes=self.meshes, nodes=self.nodes, scenes=[{"nodes": self.roots}], scene=0, **extra)
         path = os.path.join(out, name + ".glb")
         write_glb(path, root, self.b)
@@ -141,14 +180,14 @@ def spin(n, axis="y", turns=1.0):
     return out
 
 
-def rigged(r, arm_name="Armature", euler_bone=False):
-    """A two-bone rig under `arm_name` with a skinned box: returns (armature node, root joint, child joint, skin)."""
+def rigged(r, arm_name="Armature", euler_bone=False, material=None, second=None, at=(0.0, 0.0, 0.0)):
+    """A two-bone rig under `arm_name` with a skinned box: returns (armature node, root joint, child joint, skin, material)."""
     arm = r.node(arm_name)
     j0 = r.node("Root", arm)
     j1 = r.node("Arm", j0, translation=[0.0, 1.0, 0.0])
     sk = r.skin("Skin", [j0, j1], [ibm(0.0, 0.0, 0.0), ibm(0.0, 1.0, 0.0)])
-    m = r.material("Paint", (0.2, 0.4, 0.9))
-    body = r.node("Body", arm, mesh=r.mesh("body", material=m, joints=[[(0, 1.0)]] * 4 + [[(0, 0.5), (1, 0.5)]] * 4), skin=sk)
+    m = r.material("Paint", (0.2, 0.4, 0.9)) if material is None else material
+    body = r.node("Body", arm, mesh=r.mesh("body", at=at, material=m, second=second, joints=[[(0, 1.0)]] * 4 + [[(0, 0.5), (1, 0.5)]] * 4), skin=sk)
     a = r.anim("Spin")
     r.key(a, j1, "rotation", [0.0, 0.5, 1.0], spin(3, "x", 0.5))
     if euler_bone:
@@ -558,11 +597,169 @@ def s4_fold_keep_name(out, name, suffix):
     return r.write(out, "riganim_s4_fold_keep_" + suffix)
 
 
+def s4_textured(out, variant):
+    """The albedo: a base-colour texture on the first mesh's first material ("albedo", an 8x6 image), on the SECOND mesh
+    only ("second": base_color_image returns None for the first, the next object is tried), an emissive texture without a
+    base colour ("emissive": the script takes the tree's first image node), the importer's image names ("names": an
+    unnamed image is Image_<index>, two images called "tex" are tex and tex.001 in the order the materials are made, the
+    body's first material uses the one made first), a KHR_materials_specular colour texture as the first image made and
+    the first mesh's only texture ("ext": the albedo), and a mesh made after the body but sorting before it ("aft")."""
+    r = Rig()
+    if variant == "albedo":
+        m = r.material("Paint", texture=r.texture(r.image("Paint_tex", 8, 6)))
+        rigged(r, material=m)
+    elif variant == "second":
+        arm, j0, j1, sk, m = rigged(r)
+        tm = r.material("Decal", texture=r.texture(r.image("decal", 4, 2, (10, 200, 30))))
+        r.node("Pad", arm, mesh=r.mesh("pad", at=(1.0, 0.0, 0.0), size=0.5, material=tm, joints=[[(1, 1.0)]]), skin=sk)
+    elif variant == "emissive":
+        m = r.material("Glow", emissive=r.texture(r.image("glow", 2, 2, (0, 255, 0))))
+        rigged(r, material=m)
+    elif variant == "names":
+        # every image used, in an order unlike the index order: the body's first material takes image 2 (made first: "tex"),
+        # its second image 1 ("tex.001"), the pad's material image 0 (unnamed: Image_0)
+        other = r.image(None, 2, 2); first = r.image("tex", 2, 2); used = r.image("tex", 6, 6, (0, 0, 250))
+        m = r.material("Paint", texture=r.texture(used))
+        arm, j0, j1, sk, m = rigged(r, material=m, second=r.material("Trim", texture=r.texture(first)))
+        r.node("Pad", arm, mesh=r.mesh("pad", at=(1.0, 0.0, 0.0), size=0.5, material=r.material("Other", texture=r.texture(other)), joints=[[(1, 1.0)]]), skin=sk)
+    elif variant == "ext":
+        # the first mesh made (scene.objects keeps the creation order) carries a material with a KHR_materials_specular colour
+        # texture and no base colour texture: its image, made first, is "tex" and - the tree's first image node - the albedo;
+        # the body's base colour image, made second, is "tex.001"
+        spec_img = r.image("tex", 2, 2); body_img = r.image("tex", 6, 4, (0, 0, 250))
+        arm = r.node("Armature")
+        j0 = r.node("Root", arm)
+        j1 = r.node("Arm", j0, translation=[0.0, 1.0, 0.0])
+        sk = r.skin("Skin", [j0, j1], [ibm(0.0, 0.0, 0.0), ibm(0.0, 1.0, 0.0)])
+        spec = r.material("Spec", extensions={"KHR_materials_specular": {"specularColorTexture": {"index": r.texture(spec_img)}}})
+        r.node("Zpad", arm, mesh=r.mesh("zpad", at=(1.0, 0.0, 0.0), size=0.5, material=spec, joints=[[(1, 1.0)]]), skin=sk)
+        m = r.material("Paint", texture=r.texture(body_img))
+        r.node("Body", arm, mesh=r.mesh("body", material=m, joints=[[(0, 1.0)]] * 4 + [[(0, 0.5), (1, 0.5)]] * 4), skin=sk)
+        a = r.anim("Spin")
+        r.key(a, j1, "rotation", [0.0, 0.5, 1.0], spin(3, "x", 0.5))
+    elif variant == "aft":
+        # a mesh made AFTER the body but sorting before it: its image is made second ("tex.001") and, the first object with
+        # materials in the scene's order, it is the albedo
+        body_img = r.image("tex", 2, 2); aft_img = r.image("tex", 6, 4, (0, 0, 250))
+        arm, j0, j1, sk, m = rigged(r, material=r.material("Paint", texture=r.texture(body_img)))
+        r.node("Aft", arm, mesh=r.mesh("aft", at=(-1.0, 0.0, 0.0), size=0.5, material=r.material("Stern", texture=r.texture(aft_img)), joints=[[(0, 1.0)]]), skin=sk)
+    return r.write(out, "riganim_s4_tex_" + variant)
+
+
+def s4_mats(out):
+    """Two materials on the skinned box (a triangle beside it in the second): keepmats 1 keeps both slots, keepmats 0
+    collapses them to the first; 13 triangles for the decimate."""
+    r = Rig()
+    second = r.material("Trim", (0.9, 0.2, 0.1))
+    rigged(r, second=second)
+    return r.write(out, "riganim_s4_mats")
+
+
+def s4_root(out, variant):
+    """A pass-through root: Base (no weights, no keys, one child) over Root over Arm. "collapse" removes Base; "animated"
+    keys Base (kept); "two" gives Base a second child (kept)."""
+    r = Rig()
+    arm = r.node("Armature")
+    base_j = r.node("Base", arm)
+    j0 = r.node("Root", base_j, translation=[0.0, 0.5, 0.0])
+    j1 = r.node("Arm", j0, translation=[0.0, 1.0, 0.0])
+    joints = [base_j, j0, j1]; ibms = [ibm(0.0, 0.0, 0.0), ibm(0.0, 0.5, 0.0), ibm(0.0, 1.5, 0.0)]
+    if variant == "two":
+        extra = r.node("Side", base_j, translation=[1.0, 0.0, 0.0]); joints.append(extra); ibms.append(ibm(1.0, 0.0, 0.0))
+    sk = r.skin("Skin", joints, ibms)
+    m = r.material("Paint", (0.2, 0.4, 0.9))
+    r.node("Body", arm, mesh=r.mesh("body", at=(0.0, 0.5, 0.0), material=m, joints=[[(1, 1.0)]] * 4 + [[(1, 0.5), (2, 0.5)]] * 4), skin=sk)
+    a = r.anim("Spin")
+    r.key(a, j1, "rotation", [0.0, 0.5, 1.0], spin(3, "x", 0.5))
+    if variant == "animated":
+        r.key(a, base_j, "rotation", [0.0, 1.0], spin(2, "y", 0.25))
+    return r.write(out, "riganim_s4_root_" + variant)
+
+
+def s4_rebind(out):
+    """The skinned mesh has no material (culled as reference junk after the import); a rigid two-material box is a plain
+    child of the armature object, so the join's active object carries no Armature modifier and the script re-binds one
+    (two materials: the weld is skipped, which the model needs)."""
+    r = Rig()
+    arm = r.node("Armature")
+    j0 = r.node("Root", arm)
+    j1 = r.node("Arm", j0, translation=[0.0, 1.0, 0.0])
+    sk = r.skin("Skin", [j0, j1], [ibm(0.0, 0.0, 0.0), ibm(0.0, 1.0, 0.0)])
+    r.node("Body", arm, mesh=r.mesh("body", joints=[[(0, 1.0)]]), skin=sk)
+    m = r.material("Paint", (0.2, 0.4, 0.9)); trim = r.material("Trim", (0.9, 0.2, 0.1))
+    r.node("Crate", arm, mesh=r.mesh("crate", at=(1.0, 0.0, 0.0), size=0.5, material=m, second=trim))
+    a = r.anim("Spin"); r.key(a, j1, "rotation", [0.0, 0.5, 1.0], spin(3, "x", 0.5))
+    return r.write(out, "riganim_s4_rebind")
+
+
+def s4_nomesh(out):
+    """Every mesh culled (no material): the script exits in stage 4 with no mesh to export."""
+    r = Rig()
+    arm = r.node("Armature")
+    j0 = r.node("Root", arm)
+    j1 = r.node("Arm", j0, translation=[0.0, 1.0, 0.0])
+    sk = r.skin("Skin", [j0, j1], [ibm(0.0, 0.0, 0.0), ibm(0.0, 1.0, 0.0)])
+    r.node("Body", arm, mesh=r.mesh("body", joints=[[(0, 1.0)]]), skin=sk)
+    a = r.anim("Spin"); r.key(a, j1, "rotation", [0.0, 0.5, 1.0], spin(3, "x", 0.5))
+    return r.write(out, "riganim_s4_nomesh")
+
+
+def s4_centred(out):
+    """A box already centred over the origin with its lowest point on the ground (glTF (-0.5, 0, -0.5), size 1): the
+    placement finds nothing to move."""
+    r = Rig(); rigged(r, at=(-0.5, 0.0, -0.5))
+    return r.write(out, "riganim_s4_centred")
+
+
+def s4_onebone(out):
+    """One material, one bone: the weld (bmesh remove_doubles) runs - left by name."""
+    r = Rig()
+    arm = r.node("Armature")
+    j0 = r.node("Root", arm)
+    sk = r.skin("Skin", [j0], [ibm(0.0, 0.0, 0.0)])
+    m = r.material("Paint", (0.2, 0.4, 0.9))
+    r.node("Body", arm, mesh=r.mesh("body", material=m, joints=[[(0, 1.0)]]), skin=sk)
+    a = r.anim("Spin"); r.key(a, j0, "rotation", [0.0, 0.5, 1.0], spin(3, "x", 0.5))
+    return r.write(out, "riganim_s4_onebone")
+
+
+def s4_multi_uv(out):
+    """Three skinned meshes joined: the body with one UV set, a pad with two (TEXCOORD_1 -> a second layer), a plate with
+    none (zeros in every layer); the layers unite by name, the active's active layer stays."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    r.node("Pad", arm, mesh=r.mesh("pad", at=(1.0, 0.0, 0.0), size=0.5, material=m, joints=[[(1, 1.0)]], uv2=True), skin=sk)
+    r.node("Plate", arm, mesh=r.mesh("plate", at=(-1.0, 0.0, 0.0), size=0.5, material=m, joints=[[(0, 1.0)]], uv=False), skin=sk)
+    return r.write(out, "riganim_s4_multi_uv")
+
+
+def s4_many(out):
+    """The body and four pads, 60 triangles: a target of 1 asks for a ratio of 1/60, under the script's 0.02 floor."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    for i in range(4):
+        r.node("Pad%d" % i, arm, mesh=r.mesh("pad%d" % i, at=(1.5 + i, 0.0, 0.0), size=0.5, material=m, joints=[[(i % 2, 1.0)]]), skin=sk)
+    return r.write(out, "riganim_s4_many")
+
+
+def s4_join_parent(out):
+    """The skinned body is a child of a rigid hull mesh (a mesh parent, not a wrapper empty): the hull is joined into the
+    body, the body's parent becomes the hull's."""
+    r = Rig()
+    arm = r.node("Armature")
+    j0 = r.node("Root", arm)
+    j1 = r.node("Arm", j0, translation=[0.0, 1.0, 0.0])
+    sk = r.skin("Skin", [j0, j1], [ibm(0.0, 0.0, 0.0), ibm(0.0, 1.0, 0.0)])
+    m = r.material("Paint", (0.2, 0.4, 0.9))
+    hull = r.node("Hull", arm, mesh=r.mesh("hull", at=(0.0, -1.0, 0.0), size=2.0, material=m))
+    r.node("Body", hull, mesh=r.mesh("body", material=m, joints=[[(0, 1.0)]] * 4 + [[(0, 0.5), (1, 0.5)]] * 4), skin=sk)
+    a = r.anim("Spin"); r.key(a, j1, "rotation", [0.0, 0.5, 1.0], spin(3, "x", 0.5))
+    return r.write(out, "riganim_s4_join_parent")
+
+
 def main(out):
     sys.stdout.reconfigure(encoding="utf-8")  # JOB records may contain non-ASCII staticParts on Windows
     os.makedirs(out, exist_ok=True)
-    def job(key, path, clip="Spin", convert="1", local="0", static="", prefixes="", roles="", keept="0"):
-        print("JOB\t%s\t%s\t%s" % (key, path, ARGS.format(clip=clip, convert=convert, local=local, static=static, prefixes=prefixes, roles=roles, keept=keept)))
+    def job(key, path, clip="Spin", convert="1", local="0", static="", prefixes="", roles="", keept="0", albedo="1", keepmats="1", target="0", rot="0,0,0", sockets=""):
+        print("JOB\t%s\t%s\t%s" % (key, path, ARGS.format(clip=clip, convert=convert, local=local, static=static, prefixes=prefixes, roles=roles, keept=keept, albedo=albedo, keepmats=keepmats, target=target, rot=rot, sockets=sockets)))
     job("fx_junk", junk(out))
     p = objanim(out, "riganim_objanim")
     job("fx_objanim_convert", p)
@@ -640,6 +837,39 @@ def main(out):
     job("LEFT:fx_s3_role_frame_limit", plain, convert="0", roles="attack=Spin[1048575..1048575]")
     long_role = "a" * 250
     job("fx_s3_action_name_limit", plain, convert="0", roles=long_role + "=Spin[0..2];" + long_role + "b=Spin[1..3]")
+    # step (e), stage 4: the albedo, the join, the slots, the decimate, the rebind, the root collapse, the sockets, the
+    # fold with a rotation, the placement
+    job("fx_s4_albedo", s4_textured(out, "albedo"))
+    job("fx_s4_albedo_second", s4_textured(out, "second"))
+    job("fx_s4_albedo_emissive", s4_textured(out, "emissive"))
+    job("fx_s4_albedo_names", s4_textured(out, "names"))
+    job("fx_s4_albedo_aft", s4_textured(out, "aft"))
+    job("fx_s4_albedo_ext", s4_textured(out, "ext"))
+    job("fx_s4_albedo_off", s4_textured(out, "albedo"), albedo="0")
+    mats = s4_mats(out)
+    job("fx_s4_keepmats", mats)
+    job("fx_s4_keepmats0", mats, keepmats="0")
+    job("fx_s4_decimate", mats, target="8")
+    job("fx_s4_decimate_one", plain, target="6")
+    job("fx_s4_decimate_legacy", mats, target="1", convert="0")
+    job("fx_s4_decimate_floor", s4_many(out), target="1")   # 1/60 -> the ratio's 0.02 floor
+    job("fx_s4_root_collapse", s4_root(out, "collapse"))
+    job("fx_s4_root_animated", s4_root(out, "animated"))
+    job("fx_s4_root_two", s4_root(out, "two"))
+    job("fx_s4_root_legacy", s4_root(out, "collapse"), convert="0")   # no collapse, no rename on the legacy path
+    job("fx_s4_rebind", s4_rebind(out))
+    job("EXIT:4:fx_s4_nomesh", s4_nomesh(out))
+    job("fx_s4_centred", s4_centred(out))
+    job("LEFT:fx_s4_weld", s4_onebone(out))
+    job("fx_s4_multi_uv", s4_multi_uv(out))
+    job("fx_s4_join_parent", s4_join_parent(out))
+    job("fx_s4_sockets", plain, sockets="Canon=Arm@0,0.1,0;Flag=Root;Mast=Arm@x,y")
+    job("fx_s4_sockets_rot", plain, sockets="Canon=Arm@0.2,0,0.1", rot="0,90,0")
+    job("EXIT:4:fx_s4_socket_noparent", plain, sockets="Canon=Nope")
+    job("LEFT:fx_s4_socket_sort", plain, sockets="A=Root")   # the script exits, with a message read from a freed edit bone (undefined)
+    job("fx_s4_rot", plain, rot="10,90,-30")
+    job("fx_s4_rot_multi", multi(out), clip="Longer", rot="0,0,180")
+    job("fx_s4_rot_legacy", plain, rot="90,0,0", convert="0")
 
 
 if __name__ == "__main__":

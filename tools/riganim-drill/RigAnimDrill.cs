@@ -46,7 +46,7 @@ public sealed class RigAnimDump
 
     static readonly Dictionary<string, int> Width = new Dictionary<string, int>(StringComparer.Ordinal)
     {
-        { "JOB", 2 }, { "STAGE", 2 }, { "LOG", 3 }, { "SCENE", 6 }, { "OBJ", 42 }, { "MESH", 14 }, { "VG", 6 }, { "BONE", 23 },
+        { "JOB", 2 }, { "STAGE", 2 }, { "LOG", 3 }, { "SCENE", 6 }, { "OBJ", 42 }, { "MESH", 15 }, { "VG", 6 }, { "BONE", 23 },
         { "PB", 33 }, { "ACT", 7 }, { "FC", 8 }, { "K", 15 }, { "IMG", 9 }, { "EXIT", 3 }, { "DIES", 3 }, { "DONE", 2 }, { "FAIL", 3 },
     };
 
@@ -311,11 +311,11 @@ static class RigAnimDrill
         Console.OutputEncoding = new UTF8Encoding(false);
         bool requireKeys = false; int stages = 0;   // --stages N: compare the C# model of stages 1..N (N = 1 or 2) with the dump
         int offset = 0;
-        const string usage = "usage: riganim.exe [--keys] [--stages 1|2|3] <jobs file> <dump>...";
+        const string usage = "usage: riganim.exe [--keys] [--stages 1|2|3|4] <jobs file> <dump>...";
         while (offset < args.Length && args[offset].StartsWith("--", StringComparison.Ordinal))
         {
             if (args[offset] == "--keys") requireKeys = true;
-            else if (args[offset] == "--stages" && offset + 1 < args.Length && int.TryParse(args[offset + 1], NumberStyles.None, CultureInfo.InvariantCulture, out stages) && stages >= 1 && stages <= 3) offset++;
+            else if (args[offset] == "--stages" && offset + 1 < args.Length && int.TryParse(args[offset + 1], NumberStyles.None, CultureInfo.InvariantCulture, out stages) && stages >= 1 && stages <= 4) offset++;
             else { Console.WriteLine(usage); return 2; }
             offset++;
         }
@@ -372,6 +372,8 @@ static class RigAnimDrill
                     string how = d.Exit != null ? "exits " + d.Exit + ": " + (d.LogsOfStop.LastOrDefault(l => l.StartsWith("RIGANIM ERROR")) ?? "(no RIGANIM ERROR line)") : "dies: " + d.Died;
                     if (expectStop && d.Exit != null && d.StoppedAt == expectedStage && d.LogsOfStop.Any(l => l.StartsWith("RIGANIM ERROR", StringComparison.Ordinal)))
                         Console.WriteLine($"OK {key}: stops at stage {d.StoppedAt} as expected; {how}");
+                    else if (key.StartsWith("LEFT:", StringComparison.Ordinal))
+                        Console.WriteLine($"OK {key}: left to Blender by name, and Blender's own run stopped at stage {d.StoppedAt}; {how} (the model's decline is checked)");
                     else { fails++; Console.WriteLine($"FAIL {key}: stopped at stage {d.StoppedAt}" + (expectStop ? $", expected to stop at stage {expectedStage} with the script's RIGANIM ERROR; " : "; ") + how); }
                 }
                 else if (expectStop) { fails++; Console.WriteLine($"FAIL {key}: expected to stop (its key says EXIT:), ran through all four stages"); }
@@ -480,6 +482,15 @@ static class Stage1Drill
     {
         Compared++;
         var argv = new List<string> { d.Argv[0], "riganim_drill_output.fbx" }; argv.AddRange(d.Argv.Skip(1));
+        // argv[5] is the dump script's albedo PATH when the job's flag is 1 (blender_riganim_dump.py builds it): the dump's IMG
+        // row or its albedo line gives it back; a job that wrote none keeps a placeholder (the name never shows)
+        if (argv.Count > 5 && argv[5] == "0") argv[5] = "";   // no albedo asked (reuseExtracted)
+        else if (argv.Count > 5 && argv[5] == "1")
+        {
+            string path = d.Stages.ContainsKey(4) && d.Stages[4].Image != null ? d.Stages[4].Image[2] : null;
+            if (path == null) { var line = d.AllLogs.FirstOrDefault(l => l.StartsWith("RIGANIM albedo -> ", StringComparison.Ordinal)); if (line != null) { int at = line.LastIndexOf(" (", StringComparison.Ordinal); path = at > 0 ? line.Substring(18, at - 18) : null; } }
+            argv[5] = path ?? "riganim_drill_albedo.png";
+        }
         var problems = new List<string>();
         BlenderRigAnim.Stage1 model; BlenderRigAnim.Args args;
         try
@@ -564,6 +575,41 @@ static class Stage1Drill
                     DumpModelRows(key, 3, rows3, model.Logs3);
                     CompareRows(3, rows3, model.Logs3, s3, problems);
                     if (problems.Count == 0) { RowsEqual += RowCount(s3); Console.WriteLine($"STAGE3 {key}: equal - {Describe(s3)}"); }
+                }
+            }
+        }
+        // stage 4 on the scene stage 3 left
+        if (problems.Count == 0 && stages >= 4 && !model.Exits && model.Deferred == null)
+        {
+            try { BlenderRigAnim.RunStage4(model, args); }
+            catch (Exception e) { problems.Add($"stage 4 model: {e.GetType().Name}: {e.Message}"); }
+            if (problems.Count == 0 && model.Fallback != null)
+            {
+                foreach (var note in model.Notes) Census[note] = (Census.TryGetValue(note, out int c) ? c : 0) + 1;
+                if (!left) { Console.WriteLine($"FAIL {key}: stage 4 model leaves this file to Blender: {model.Fallback}"); return false; }
+                Left++; Console.WriteLine($"STAGE4 {key}: left to Blender by name, as the model says: {model.Fallback}"); return true;
+            }
+            if (problems.Count == 0 && model.Exits)
+            {
+                if (d.StoppedAt != 4 || d.Exit == null) problems.Add("stage 4 model: the script exits in stage 4 here, " + (d.StoppedAt == 0 ? "Blender ran it through" : $"Blender stopped at stage {d.StoppedAt}"));
+                else if (!d.LogsOfStop.SequenceEqual(model.Logs4)) problems.Add("stage 4 model: the stop's RIGANIM lines differ: here [" + string.Join(" | ", model.Logs4) + "], Blender [" + string.Join(" | ", d.LogsOfStop) + "]");
+                if (problems.Count == 0) { RowsEqual += model.Logs4.Count; Console.WriteLine($"STAGE4 {key}: equal - the script's exit in stage 4, {model.Logs4.Count} RIGANIM lines"); }
+            }
+            else if (problems.Count == 0)
+            {
+                RigAnimDump.Stage s4 = null;
+                if (!d.Stages.TryGetValue(4, out s4)) problems.Add("stage 4 model: the scene runs on here, Blender stopped in stage 4: " + (d.Exit != null ? string.Join(" | ", d.LogsOfStop) : d.Died));
+                else
+                {
+                    var rows4 = BlenderRigAnim.Render(model, 4);
+                    DumpModelRows(key, 4, rows4, model.Logs4);
+                    CompareRows(4, rows4, model.Logs4, s4, problems);
+                    // the IMG row: the path, the width, the height and the channels; the file's bytes and the pixels are the encoder's
+                    if ((rows4.Image == null) != (s4.Image == null)) problems.Add("stage 4 IMG: " + (rows4.Image == null ? "no albedo here, one in Blender" : "an albedo here, none in Blender"));
+                    else if (rows4.Image != null)
+                        foreach (int fld in new[] { 2, 5, 6, 7 })
+                            if (rows4.Image[fld] != s4.Image[fld]) { problems.Add($"stage 4 IMG field {fld}: here '{rows4.Image[fld]}', Blender '{s4.Image[fld]}'"); break; }
+                    if (problems.Count == 0) { RowsEqual += RowCount(s4) + (s4.Image != null ? 1 : 0); Console.WriteLine($"STAGE4 {key}: equal - {Describe(s4)}" + (s4.Image != null ? $", the albedo {s4.Image[5]}x{s4.Image[6]}" : "")); }
                 }
             }
         }

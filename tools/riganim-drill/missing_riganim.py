@@ -175,4 +175,16 @@ i_fc3 = first(lambda l: l.startswith("FC\t3\t")); write("S3_FC_hash", with_field
 i_pb3 = first(lambda l: l.startswith("PB\t3\t")); write("S3_PB_value", with_field(i_pb3, 5, flip_bits(lines[i_pb3].split("\t")[5])))
 write("S3_FC_extra", insert(i_fc3, "\t".join(f if j != 4 else "9" for j, f in enumerate(lines[i_fc3].split("\t")))))
 lines = saved_lines
+# Step (e), the stage 4 model: one changed value per row kind of stage 4 (the earlier stages intact), refused in --stages 4
+# mode with the reason "stage 4"; the IMG row by its dimensions (its hashes are the encoder's).
+i_log4 = first(lambda l: l.startswith("LOG\t4\tRIGANIM placement")); write("S4_LOG_placement", replace(i_log4, lines[i_log4] + " (changed)"))
+i_obj_4 = first(lambda l: l.startswith("OBJ\t4\t")); write("S4_OBJ_matrix", with_field(i_obj_4, 10, flip_bits(lines[i_obj_4].split("\t")[10])))
+i_mesh_4 = first(lambda l: l.startswith("MESH\t4\t")); write("S4_MESH_positions", with_field(i_mesh_4, 6, flip_bits(lines[i_mesh_4].split("\t")[6])))
+write("S4_MESH_groups", with_field(i_mesh_4, 12, "planted_group"))
+write("S4_MESH_uvlayers", with_field(i_mesh_4, 14, "UVMap:" + flip_bits(lines[i_mesh_4].split("\t")[14].split(":")[1])))
+i_vg_4 = first(lambda l: l.startswith("VG\t4\t")); write("S4_VG_hash", with_field(i_vg_4, 5, flip_bits(lines[i_vg_4].split("\t")[5])))
+i_bone_4 = first(lambda l: l.startswith("BONE\t4\t")); write("S4_BONE_rest", with_field(i_bone_4, 10, flip_bits(lines[i_bone_4].split("\t")[10])))
+write("S4_BONE_name", with_field(i_bone_4, 3, lines[i_bone_4].split("\t")[3] + "_x"))
+i_fc_4 = first(lambda l: l.startswith("FC\t4\t")); write("S4_FC_path", with_field(i_fc_4, 3, lines[i_fc_4].split("\t")[3] + "x"))
+write("S4_IMG_size", with_field(i_img, 5, str(int(lines[i_img].split("\t")[5]) + 1)))
 sys.stdout.write("".join(f[:-4] + "\n" for f in sorted(os.listdir(out)) if f.endswith(".txt") and f not in ("jobs.txt", "jobs_exit.txt", "jobs_s3.txt", "intact.txt")))
