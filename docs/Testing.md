@@ -1470,7 +1470,43 @@ CONSTANT keys sampled between frames were wrong until the segment follows the ke
 never saw it: `keyframe_insert` keys are Bezier). Not fixtured, named: the poison gate's NaN rejection (no glTF
 fixture carries a NaN key), Unicode digits in a slice spec (Python's `\d`). A script finding the fixtures made plain:
 the legacy keepTranslations floor table is keyed by the role clip's SOURCE name, so a SLICED attack or move clip
-(`<source>_<role>_...`) never matches it and keeps nothing (`fx_s3_keept_kept`) - recorded in the backlog. Stage 4 is not compared yet, and the PASS
+(`<source>_<role>_...`) never matches it and keeps nothing (`fx_s3_keept_kept`) - recorded in the backlog.
+
+Step (d2), stage 3 in C# - the rest fold and rebake and the bone cap (2026-10-13): nothing of stage 3 is deferred any
+more. The fold on the conversion path: every exported clip's pose matrices snapshotted frame by frame (the evaluation
+of step (d1)), then at frame 0 every Armature modifier applied as Blender's linear deform (`armature_deform.cc`: the
+mesh's positions into the armature's space through `target.world_to_object * armature.object_to_world` and its Eigen
+inverse, each weighted bone's `chan_mat` = `pose_mat * invert_m4_m4(arm_mat)`, the weighted deltas summed and
+scaled by one over the contribution, the point back; a multi-user mesh copied first, the copy named by the ID name
+map), the pose applied as the rest (`applyarmature_set_edit_position`: head = `pose_mat[3]`, tail = head +
+`pose_mat[1]` times the length, roll = `mat3_vec_to_roll` through `vec_roll_to_mat3`, `invert_m3_m3`, `mul_m3_m3m3`,
+`mat3_to_quat` and `quat_split_swing_and_twist`'s `2 * atan2f(y, w)`; the rest rebuilt by the edit-bone round trip the
+armature port already had), the pose channels reset, the bone-parented children kept in place
+(`applyarmature_fix_boneparents`), the modifiers re-bound to the script's armature, the visual rebake with mathutils'
+arithmetic (the adjugate inverse, the double-dot matrix product, `Vector.length`'s double sum from the last
+component, `to_quaternion` = `mat4_to_quat`) keyed frame by frame, the primary's frame-0 residual printed with an
+exact `%.6f` (`PyFixed`, BigInteger) and checked against its threshold (the exit modelled). The bone cap: zero-weight
+leaf bones removed pass by pass; the survivors' rest stands (the same edit bones give the same matrices). Measured:
+all 23 dumped recipes equal through stage 3 (5,834,428 rows with key rows; every conversion recipe runs the fold),
+six new fixtures (`fx_s4_*`: two skinned nodes sharing one mesh - copied as `pad.001` before the modifier is applied; a
+static part hung from a bone through the fold; the nested armatures with a location key on the carrier - the inner
+mesh deformed by its own armature, then re-bound; keepTranslations on the conversion path with a single-frame role
+clip; a rig a thousand times the size; 492 bones for the cap, two passes with a weighted leaf that stays) - all 51
+fixture jobs: 48 equal at every compared stage, 3 left by name, 0 deferred. Fourteen defects planted in the fold and the cap were each caught - the mesh not taken into the armature's space,
+`chan_mat` without the rest's inverse, the roll zeroed, the tail without the bone's length, the rebake through Eigen's
+inverse instead of mathutils' adjugate, through `mul_m4_m4m4` instead of the double-dot product, the quaternion
+without the normalize and checks, every bone taken as translating, no single-frame pad, the write-back without its
+sign rule, the bone-parent fix skipped, the mesh copy unnamed, the cap ignoring the weights, the child's evaluated copy
+refreshed - twelve by the fixtures and two only by the registry (the inverse's arithmetic on AntiTankIFV, the sign rule
+on TankDestroyers). Found on the way: `frame_set` writes an evaluated value back to the original
+object's property only where it differs, so a zero of the other sign the script set earlier keeps its sign
+(TankDestroyers' mirrored wheels: eight pose rows differed by `-0` until the rule was modelled; the key rows were
+equal); `applyarmature_fix_boneparents` takes the child's parent matrix from the EVALUATED armature (the old pose at
+frame 0, the old bone length) and tags nothing on the child, so its evaluated copy keeps the old transform and
+parent inverse until something refreshes it (`SceneObject.EvalStale`; two fixtures differed by rotation noise until
+modelled). Not fixtured, named: a fold whose residual exceeds its threshold (the fold makes frame 0 the rest by
+construction; only a NaN could trip it), a bone with an object hung from it removed by the cap (a named fallback).
+Stage 4 is not compared yet, and the PASS line says so. Stage 4 is not compared yet, and the PASS
 line says so.
 
 Review of PR #165 (2026-10-13): nine additional stage 3 fixture jobs cover repeated role assignments (last value,

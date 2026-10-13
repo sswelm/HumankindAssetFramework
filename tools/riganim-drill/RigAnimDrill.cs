@@ -455,6 +455,22 @@ static class Stage1Drill
         if (s.Keys.Count > 0 && (x = Diff("K", rows.Keys, s.Keys, 3)) != null) problems.Add(N + x);
     }
 
+    /// <summary>RIGANIM_MODEL_ROWS=&lt;file&gt; writes the model's rendered rows of a stage (for the job RIGANIM_MODEL_JOB, or every
+    /// job) in the dump's own format, to be diffed against the dump when a row differs.</summary>
+    static void DumpModelRows(string key, int n, BlenderRigAnim.Rows rows, List<string> logs)
+    {
+        string path = Environment.GetEnvironmentVariable("RIGANIM_MODEL_ROWS"); string only = Environment.GetEnvironmentVariable("RIGANIM_MODEL_JOB");
+        if (string.IsNullOrEmpty(path) || (!string.IsNullOrEmpty(only) && only != key)) return;
+        var sb = new StringBuilder();
+        sb.Append("JOB").Append('\t').Append(key).Append('\n');
+        foreach (var l in logs) sb.Append("LOG").Append('\t').Append(n).Append('\t').Append(l).Append('\n');
+        sb.Append("STAGE").Append('\t').Append(n).Append('\n');
+        sb.Append(string.Join("\t", rows.Scene)).Append('\n');
+        foreach (var list in new[] { rows.Objs, rows.Meshes, rows.Groups, rows.Bones, rows.PoseBones, rows.Actions, rows.FCurves, rows.Keys })
+            foreach (var r in list) sb.Append(string.Join("\t", r)).Append('\n');
+        File.AppendAllText(path, sb.ToString(), new UTF8Encoding(false));
+    }
+
     static long RowCount(RigAnimDump.Stage s) => 1 + s.Objs.Count + s.Meshes.Count + s.Groups.Count + s.Bones.Count + s.PoseBones.Count + s.Actions.Count + s.FCurves.Count + s.Keys.Count;
     static string Describe(RigAnimDump.Stage s) => $"{s.Objs.Count} objects, {s.Meshes.Count} meshes, {s.Groups.Count} vertex groups, {s.Bones.Count} bones, {s.Actions.Count} actions, {s.FCurves.Count} fcurves" + (s.Keys.Count > 0 ? $", {s.Keys.Count} keys" : "");
 
@@ -545,6 +561,7 @@ static class Stage1Drill
                 else
                 {
                     var rows3 = BlenderRigAnim.Render(model, 3);
+                    DumpModelRows(key, 3, rows3, model.Logs3);
                     CompareRows(3, rows3, model.Logs3, s3, problems);
                     if (problems.Count == 0) { RowsEqual += RowCount(s3); Console.WriteLine($"STAGE3 {key}: equal - {Describe(s3)}"); }
                 }

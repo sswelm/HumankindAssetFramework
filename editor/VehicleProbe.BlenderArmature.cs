@@ -316,7 +316,7 @@ public static partial class VehicleProbe
 
     // ---- Blender's C
     /// <summary>normalize_v3: the length, or 0 when the vector is (nearly) zero - then zeroed.</summary>
-    static float NormalizeV3Blender(ref float x, ref float y, ref float z)
+    internal static float NormalizeV3Blender(ref float x, ref float y, ref float z)
     {
         float d = (float)((float)((float)(x * x) + (float)(y * y)) + (float)(z * z));
         if (d > 1.0e-35f) { d = Sqrtf(d); float f = (float)(1.0f / d); x = (float)(x * f); y = (float)(y * f); z = (float)(z * f); return d; }
@@ -333,7 +333,7 @@ public static partial class VehicleProbe
     }
 
     /// <summary>vec_roll_to_mat3_normalized; the matrix as Blender's float[3][3] (M[col][row], 9 floats).</summary>
-    static float[] VecRollToMat3Normalized(float x, float y, float z, float roll)
+    internal static float[] VecRollToMat3Normalized(float x, float y, float z, float roll)
     {
         const float SAFE_THRESHOLD = 6.1e-3f, CRITICAL_THRESHOLD = 2.5e-4f, THRESHOLD_SQUARED = CRITICAL_THRESHOLD * CRITICAL_THRESHOLD;
         float theta = (float)(1.0f + y);
@@ -367,7 +367,7 @@ public static partial class VehicleProbe
     }
 
     /// <summary>mul_m3_m3m3(R, A, B): R[i][j] = B[i][0] A[0][j] + B[i][1] A[1][j] + B[i][2] A[2][j], left to right; M[col][row].</summary>
-    static float[] MulM3(float[] A, float[] B)
+    internal static float[] MulM3(float[] A, float[] B)
     {
         var R = new float[9];
         for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++)
@@ -376,7 +376,7 @@ public static partial class VehicleProbe
     }
 
     /// <summary>invert_m3_m3: the adjoint, the determinant (determinant_m3_array), each entry times 1 / det; M[col][row].</summary>
-    static float[] InvertM3(float[] m)
+    internal static float[] InvertM3(float[] m)
     {
         float m00 = m[0], m01 = m[1], m02 = m[2], m10 = m[3], m11 = m[4], m12 = m[5], m20 = m[6], m21 = m[7], m22 = m[8];
         var r = new float[9];

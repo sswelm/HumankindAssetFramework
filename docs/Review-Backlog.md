@@ -304,6 +304,14 @@ as the new rest (`applyarmature_set_edit_position`: head, tail, `mat3_vec_to_rol
 visual rebake (mathutils' adjugate inverse and double-dot matmul, `to_quaternion` = `mat4_to_quat`), the residual check
 with its `%.6f`, and the bone cap (the same round trip); the Blender sources are fetched under the scratch folder's
 `s3/src`.
+(d2) stage 3, the rest fold and rebake and the bone cap, DONE 2026-10-13: every conversion recipe now runs the fold in
+C# (the armature modifier as Blender's linear deform, the pose applied as rest through the edit-bone round trip, the
+visual rebake with mathutils' arithmetic, the residual's `%.6f`) and the cap; all 23 dumped recipes equal through stage
+3 (5.83 M rows), all 51 fixture jobs (6 new, `fx_s4_*`) checked: 48 equal at every compared stage, 3 left by name, 0 deferred; 14 planted defects caught (12 by the fixtures, 2 only by the registry: the inverse's arithmetic, the write-back's sign rule) and 10 value tampers refused (`docs/Testing.md`). Found: the depsgraph writes an evaluated value back to the
+original only where it differs (a zero of the other sign survives - TankDestroyers' wheels); the bone-parent fix of
+armature_apply takes the EVALUATED armature's parent matrix and tags nothing on the child (its evaluated copy keeps
+the old transform until something does). Next: (e) stage 4 - the albedo, the join, the weld, the material slots, the
+decimate, the rebind, the root collapse, the rename, the sockets, the rotation and scale fold, the placement.
 - **A sliced attack/move role clip never keeps its translations** — OPEN (2026-10-13, found by the stage 3 fixtures).
   `rig_anim.py`'s legacy keepTranslations keys its role floor table by the clip's SOURCE name (`cn.split('[')[0]`), but a
   sliced role clip is the action `<source>_<role>_<f0>_<f1>_<step>`, which matches neither key, so `_keep_acts` is
