@@ -10,6 +10,18 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE DEPLOY PORT'S LAST METRE (2026-10-13).** The in-process deploy conversion (`BlenderDeployInProcess`, wired into
+  the Factory on 2026-10-11) had run zero times in Unity, had no Bake Tests row, no Mono pass in its drill, and a crash
+  in it became an info-level "using Blender because ..." line. Three changes: a Bake Tests row, *Does the in-process
+  deploy conversion match Blender's?*, converts every deploying registry entry (today the T-62, the >127-bone path the
+  gate sample never reaches) both in process and through `deploy_convert.py` and compares the written GLBs byte for
+  byte, on by default; the argv both paths get comes from one place (`UniversalBaker.DeployArgv`, the recoil field
+  through `BakerRules.DeployRecoilRanges`, pure and tested) and the Blender launch from one place
+  (`UniversalBaker.DeployViaBlender`); a port crash is a `LogWarning` in the Factory and a FAIL in the row, while a
+  shape the port names stays Blender's at info level. Script exits require Blender's completion, exit code 1 and
+  matching error diagnostic, without a file or traceback. `tools/deploy_drill.sh` runs a complete moving-mesh
+  conversion on Unity's bundled 64-bit Mono (via a small embedding bootstrap) and compares the written GLB to
+  Blender's. Missing Mono is SKIP (3); empty or damaged evidence and fallbacks fail the comparison. Testing.md's unit-test count was 801 against 1,617 on disk; it now says to read the live number.
 - **THE RIG'S DISSOLVE IS THE SAME IN EVERY RUN (2026-10-12).** The first Bake Tests run with provenance headers
   (PR #160) failed two Lab goldens that had just been re-blessed on 2026-10-10 — the Khalandion's
   `Object_12_Part_002` dissolved 2252, then 2239, then 2236 verts in three runs of the same script on the same file;

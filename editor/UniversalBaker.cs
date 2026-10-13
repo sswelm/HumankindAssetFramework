@@ -308,41 +308,14 @@ public static class UniversalBaker
         string outFull = Path.Combine(outDir, "deploy_converted.glb");
         string sidecar = Path.Combine(outDir, "deploy_converted.args.txt");
 
-        // recoil range "start..end" -> two ints ("" = no recoil tail)
-        string rs = "", re = "";
-        string recoil = (cfg.deployRecoil ?? "").Trim();
-        if (recoil.Length > 0)
-        {
-            // MULTI-SEGMENT (2026-07-26): "443..530,330..440" — segment 1 is THE fire window (slide/slam derive
-            // from it); further segments append PRISTINE as epilogue choreography (the M114 re-uses its aiming
-            // RAISE to bring the barrel back up after the reload). Passed to deploy_convert as CSV starts/ends.
-            var starts = new List<string>(); var ends = new List<string>();
-            foreach (var seg in recoil.Split(','))
-            {
-                // optional /N speed step per segment (slice convention: every Nth frame = N x faster) — e.g.
-                // "443..530,305..441/2" plays the epilogue raise at double speed.
-                var m = System.Text.RegularExpressions.Regex.Match(seg.Trim(), @"^(\d+)\s*\.\.\s*(\d+)(?:\s*/\s*(\d+))?$");
-                if (!m.Success) { error = "deploy conversion: recoil range must look like 440..510 (or several with speed: 443..530,305..441/2), got '" + seg.Trim() + "'."; return null; }
-                if (int.Parse(m.Groups[1].Value) >= int.Parse(m.Groups[2].Value))
-                { error = $"deploy conversion: recoil range start must be BEFORE end — got {seg.Trim()} (reversed). Each window runs forward in source frames."; return null; }
-                starts.Add(m.Groups[1].Value);
-                ends.Add(m.Groups[2].Value + (m.Groups[3].Success ? "/" + m.Groups[3].Value : ""));
-            }
-            rs = string.Join(",", starts); re = string.Join(",", ends);
-        }
-        string key = string.Join("|", cfg.modelFile, File.GetLastWriteTimeUtc(cfg.modelFile).Ticks.ToString(),
-            File.GetLastWriteTimeUtc(script).Ticks.ToString(), cfg.deployStart.ToString(), cfg.deployEnd.ToString(),
-            (cfg.deployStrip ?? "").Trim(), (cfg.deployReadyFrame ?? "").Trim(), (cfg.deployLegScale ?? "").Trim(),
-            (cfg.deployBarrelScale ?? "").Trim(), rs, re, (cfg.deployRecoilStep ?? "").Trim(), (cfg.deployRecoilMag ?? "").Trim(), (cfg.deployArcR ?? "").Trim(), (cfg.deployRecoilReturn ?? "").Trim(), (cfg.deploySlamDeg ?? "").Trim(), (cfg.deploySlamSettle ?? "").Trim(), (cfg.deployStripExtra ?? "").Trim(),
-            (cfg.deployWheelBones ?? "").Trim(), (cfg.deployWheelAxis ?? "").Trim(), (cfg.deployWheelFrames ?? "").Trim(), (cfg.deployWheelDegrees ?? "").Trim(),
-            BlenderDeployInProcess.CacheRevision);   // a changed C# port converts again; the script's mtime cannot see it
+        // the script's argv[2:], one list for both paths - and the cache key's fields, in the same order (DeployArgv,
+        // shared with the Bake Tests' deploy row since 2026-10-13: the row judges the port on the argv the Factory hands it)
+        string[] argv = DeployArgv(cfg, out string argvErr);
+        if (argv == null) { error = argvErr; return null; }
+        string key = string.Join("|", new[] { cfg.modelFile, File.GetLastWriteTimeUtc(cfg.modelFile).Ticks.ToString(), File.GetLastWriteTimeUtc(script).Ticks.ToString() }
+            .Concat(argv).Concat(new[] { BlenderDeployInProcess.CacheRevision }));   // a changed C# port converts again; the script's mtime cannot see it
         if (File.Exists(outFull) && File.Exists(sidecar) && File.ReadAllText(sidecar) == key)
             return outFull;   // unchanged inputs — reuse (the slim step's own source-newer buster keys off this file's mtime)
-
-        // the script's argv[2:], one list for both paths
-        string[] argv = BlenderDeployInProcess.Argv(cfg.deployStart.ToString(), cfg.deployEnd.ToString(), cfg.deployStrip, cfg.deployReadyFrame, cfg.deployLegScale, cfg.deployBarrelScale,
-            rs, re, cfg.deployRecoilStep, cfg.deployRecoilMag, cfg.deployArcR, cfg.deployRecoilReturn, cfg.deploySlamDeg, cfg.deploySlamSettle, cfg.deployStripExtra,
-            cfg.deployWheelBones, cfg.deployWheelAxis, cfg.deployWheelFrames, cfg.deployWheelDegrees);
         // THE CONVERSION IN C# (2026-10-11, parts 1-8c of replacing Blender, BlenderDeployInProcess): the port writes the file
         // the script writes - tools/deploy_drill.sh holds it to the script bit for bit -, and names whatever it cannot
         // (a Fallback): Blender converts that one, as before. The script's own exits stop the bake here as they would there.
@@ -363,7 +336,12 @@ public static class UniversalBaker
             if (inProc.Written) { File.WriteAllText(sidecar, key); return outFull; }
             if (inProc.ScriptExit) { error = "deploy conversion FAILED (the script stops before writing — see the DEPLOY log in the Console)."; return null; }
             if (!BlenderAvailable()) { error = "deploy conversion: " + inProc.UseBlender + ". That leaves this model to Blender, which is not installed (it is auto-detected, or set EditorPrefs 'HAF.BlenderPath')."; return null; }
-            Debug.Log("[Factory] deploy conversion: using Blender because " + inProc.UseBlender + ".");
+            // a shape the port NAMES is Blender's by design, said at info level; a port that CRASHED is a warning - the
+            // bake still succeeds through Blender, but a regression in the port must not hide behind a working script
+            // (2026-10-13; the Bake Tests' deploy row counts the same case as a FAIL)
+            if (inProc.UseBlender.StartsWith("the C# conversion failed", StringComparison.Ordinal))
+                Debug.LogWarning("[Factory] deploy conversion: the C# port CRASHED, using Blender instead - " + inProc.UseBlender + ". A crash is not a named shape: report it with the model.");
+            else Debug.Log("[Factory] deploy conversion: using Blender because " + inProc.UseBlender + ".");
         }
         catch (OperationCanceledException) { throw; }
         finally { EditorUtility.ClearProgressBar(); }
@@ -371,27 +349,62 @@ public static class UniversalBaker
         try
         {
             EditorUtility.DisplayProgressBar("Model Factory", "Deploy conversion (Blender): rigid parts → bone-per-part rig…", 0.3f);
-            var p = new System.Diagnostics.Process();
-            p.StartInfo.FileName = FindBlender();
-            p.StartInfo.Arguments = $"{BakerRules.BlenderScript(script)} -- \"{cfg.modelFile}\" \"{outFull}\" " + string.Join(" ", argv.Select(a => "\"" + a + "\""));
-            p.StartInfo.UseShellExecute = false; p.StartInfo.CreateNoWindow = true;
-            p.StartInfo.RedirectStandardOutput = true; p.StartInfo.RedirectStandardError = true;
-            p.Start();
-            // Drain BOTH pipes concurrently (RunBounded): the old sequential ReadToEnd(stdout) then ReadToEnd(stderr)
-            // deadlocks when Blender — very chatty on stderr — fills the stderr pipe buffer while we block on stdout.
-            if (!RunBounded(p, 300000, out string so, out string _)) { error = "deploy conversion: Blender timed out (5 min)."; return null; }
+            if (!DeployViaBlender(cfg.modelFile, outFull, argv, out string so, out error)) return null;
             foreach (var line in so.Split('\n')) if (line.StartsWith("DEPLOY")) Debug.Log("[Factory] " + line.Trim());
-            // Blender exits 0 even when the python script DIES on an exception — a crashed conversion then left the
-            // OLD converted GLB in place and the bake silently slimmed stale roles (the reversed-recoil incident).
-            // Success = the script's own final marker, nothing less.
-            if (!File.Exists(outFull) || p.ExitCode != 0 || !so.Contains("DEPLOY wrote:"))
-            { error = "deploy conversion FAILED (script did not complete — see Console for the DEPLOY log / traceback)."; Debug.LogError("[Factory] deploy_convert output:\n" + so); return null; }
             File.WriteAllText(sidecar, key);
             return outFull;
         }
         catch (OperationCanceledException) { throw; }   // a bake-test cancel is not a conversion failure
         catch (Exception e) { error = "deploy conversion: " + e.Message; return null; }
         finally { EditorUtility.ClearProgressBar(); }
+    }
+
+    /// <summary>deploy_convert.py's argv[2:] for an entry, as the Factory hands them to both the in-process port and
+    /// the script: the frames, the strip lists, the dials, and the recoil field as CSV starts and ends
+    /// (BakerRules.DeployRecoilRanges). Null with the Factory's error text for a malformed recoil field.</summary>
+    internal static string[] DeployArgv(BakeConfig cfg, out string error)
+    {
+        if (!BakerRules.DeployRecoilRanges(cfg.deployRecoil, out string rs, out string re, out error)) return null;
+        error = "";
+        return BlenderDeployInProcess.Argv(cfg.deployStart.ToString(), cfg.deployEnd.ToString(), cfg.deployStrip, cfg.deployReadyFrame, cfg.deployLegScale, cfg.deployBarrelScale,
+            rs, re, cfg.deployRecoilStep, cfg.deployRecoilMag, cfg.deployArcR, cfg.deployRecoilReturn, cfg.deploySlamDeg, cfg.deploySlamSettle, cfg.deployStripExtra,
+            cfg.deployWheelBones, cfg.deployWheelAxis, cfg.deployWheelFrames, cfg.deployWheelDegrees);
+    }
+
+    /// <summary>Blender's deploy_convert.py on `src` into `outGlb` with the script's argv[2:], bounded to five minutes,
+    /// both pipes drained. True only on the script's own final marker: Blender exits 0 even when the python dies on an
+    /// exception, and a crashed conversion once left the OLD converted GLB in place for the bake to slim stale roles
+    /// (the reversed-recoil incident). `stdout` holds the DEPLOY log either way.</summary>
+    internal static bool DeployViaBlender(string src, string outGlb, string[] argv, out string stdout, out string error)
+    {
+        var run = RunDeployViaBlender(src, outGlb, argv);
+        stdout = run.Stdout; error = run.Error;
+        if (!run.Written && run.Completed) Debug.LogError("[Factory] deploy_convert output:\n" + run.Stdout + "\n" + run.Stderr);
+        return run.Written;
+    }
+
+    internal static BakerRules.DeployBlenderRun RunDeployViaBlender(string src, string outGlb, string[] argv)
+    {
+        var run = new BakerRules.DeployBlenderRun();
+        string script = HafPackageContext.ToolPath("deploy_convert.py");
+        if (!File.Exists(script)) { run.Error = "deploy conversion: Tools/deploy_convert.py not found."; return run; }
+        using (var p = new System.Diagnostics.Process())
+        {
+            p.StartInfo.FileName = FindBlender();
+            p.StartInfo.Arguments = $"{BakerRules.BlenderScript(script)} -- \"{src}\" \"{outGlb}\" " + string.Join(" ", argv.Select(a => "\"" + a + "\""));
+            p.StartInfo.UseShellExecute = false; p.StartInfo.CreateNoWindow = true;
+            p.StartInfo.RedirectStandardOutput = true; p.StartInfo.RedirectStandardError = true;
+            p.Start();
+            // Drain both pipes concurrently; retain stderr to distinguish a script exit from a Python traceback.
+            bool exited = RunBounded(p, 300000, out run.Stdout, out run.Stderr, out bool pipesDrained);
+            run.Completed = exited && pipesDrained;
+            if (!exited) { run.Error = "deploy conversion: Blender timed out (5 min)."; return run; }
+            run.ExitCode = p.ExitCode;
+            if (!pipesDrained) { run.Error = "deploy conversion: Blender's output pipes did not finish draining."; return run; }
+            run.Written = File.Exists(outGlb) && run.ExitCode == 0 && run.Stdout.Contains("DEPLOY wrote:");
+            if (!run.Written) run.Error = "deploy conversion FAILED (script did not complete — see Console for the DEPLOY log / traceback).";
+            return run;
+        }
     }
 
     static BakeResult BuildAnimatedInner(BakeConfig cfg)
@@ -2599,8 +2612,11 @@ public static class UniversalBaker
     // never exits, stdout never EOFs, and we hang forever). The wait is bounded, so a hung child can't freeze the editor.
     // Returns false (after killing the child) on timeout; otherwise the process has exited and stdout/stderr are filled.
     internal static bool RunBounded(System.Diagnostics.Process p, int timeoutMs, out string stdout, out string stderr)
+        => RunBounded(p, timeoutMs, out stdout, out stderr, out _);
+
+    internal static bool RunBounded(System.Diagnostics.Process p, int timeoutMs, out string stdout, out string stderr, out bool pipesDrained)
     {
-        stdout = ""; stderr = "";
+        stdout = ""; stderr = ""; pipesDrained = false;
         var outTask = System.Threading.Tasks.Task.Run(() => p.StandardOutput.ReadToEnd());
         var errTask = System.Threading.Tasks.Task.Run(() => p.StandardError.ReadToEnd());
         var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -2627,6 +2643,7 @@ public static class UniversalBaker
         bool drained; try { drained = System.Threading.Tasks.Task.WaitAll(new[] { outTask, errTask }, remaining); } catch { drained = true; }
         stdout = outTask.Status == System.Threading.Tasks.TaskStatus.RanToCompletion ? outTask.Result : "";
         stderr = errTask.Status == System.Threading.Tasks.TaskStatus.RanToCompletion ? errTask.Result : "";
+        pipesDrained = drained && outTask.Status == System.Threading.Tasks.TaskStatus.RanToCompletion && errTask.Status == System.Threading.Tasks.TaskStatus.RanToCompletion;
         if (!drained)
         {
             // reads are still blocked on an inherited-open pipe; don't hang. Observe any eventual fault (the caller

@@ -464,6 +464,33 @@ public static class BackupRules
 /// <summary>Bake-pipeline decisions (UniversalBaker calls these; BakerRulesTests locks them).</summary>
 public static class BakerRules
 {
+    // Process facts kept separately from the successful-write verdict: SystemExit(1), a Python exception and a
+    // timeout all fail to write, but only the first can agree with the port's intentional script exit.
+    public sealed class DeployBlenderRun
+    {
+        public bool Completed, Written;
+        public int ExitCode = -1;
+        public string Stdout = "", Stderr = "", Error = "";
+    }
+
+    public static bool DeployScriptExitMatches(IEnumerable<string> portLog, DeployBlenderRun run, bool outputExists, out string error)
+    {
+        error = null;
+        if (!run.Completed) { error = "Blender did not complete: " + run.Error; return false; }
+        if (run.ExitCode != 1) { error = "Blender exited " + run.ExitCode + ", expected the script's SystemExit(1)"; return false; }
+        if (run.Written || outputExists) { error = "Blender wrote a file after the port stopped"; return false; }
+        if ((run.Stdout + "\n" + run.Stderr).Contains("Traceback (most recent call last):"))
+        { error = "Blender raised a Python exception instead of the script's own exit"; return false; }
+        string[] expected = portLog.Where(l => l.StartsWith("DEPLOY", StringComparison.Ordinal)).ToArray();
+        string[] actual = run.Stdout.Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.StartsWith("DEPLOY", StringComparison.Ordinal)).ToArray();
+        if (expected.Length == 0 || !expected.Last().StartsWith("DEPLOY ERROR:", StringComparison.Ordinal))
+        { error = "the port's script exit has no final DEPLOY ERROR diagnostic"; return false; }
+        if (actual.Length == 0 || actual.Last() != expected.Last() ||
+            !actual.Where(l => l.StartsWith("DEPLOY ERROR:", StringComparison.Ordinal)).SequenceEqual(expected.Where(l => l.StartsWith("DEPLOY ERROR:", StringComparison.Ordinal))))
+        { error = "Blender did not report the port's script-exit diagnostic: " + expected.Last(); return false; }
+        return true;
+    }
+
     public enum ExtractionAction
     {
         UseExisting = 0,    // extraction on disk matches the current source — skip hygiene and glbconv
@@ -489,6 +516,30 @@ public static class BakerRules
         if (string.IsNullOrWhiteSpace(scriptPath)) throw new ArgumentException("a Blender run needs a script path");
         if (scriptPath.IndexOf('"') >= 0) throw new ArgumentException("a script path cannot contain a quote");
         return $"--background --python-exit-code 1 --python \"{scriptPath}\"";
+    }
+
+    /// The deploy conversion's recoil field, "start..end" per window with an optional "/N" speed step, several
+    /// windows comma-separated ("443..530,305..441/2"), as deploy_convert.py takes them: CSV starts and CSV ends (the
+    /// step rides on the end, "441/2"). An empty field is no recoil (both empty, true). False with the Factory's own
+    /// error text for a malformed or reversed window. Pure (2026-10-13: lifted out of EnsureDeployConverted so the
+    /// Bake Tests' deploy row builds the SAME argv the Factory hands both the port and the script).
+    public static bool DeployRecoilRanges(string recoil, out string starts, out string ends, out string error)
+    {
+        starts = ""; ends = ""; error = null;
+        string field = (recoil ?? "").Trim();
+        if (field.Length == 0) return true;
+        var ss = new List<string>(); var es = new List<string>();
+        foreach (string seg in field.Split(','))
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(seg.Trim(), @"^(\d+)\s*\.\.\s*(\d+)(?:\s*/\s*(\d+))?$");
+            if (!m.Success) { error = "deploy conversion: recoil range must look like 440..510 (or several with speed: 443..530,305..441/2), got '" + seg.Trim() + "'."; return false; }
+            if (int.Parse(m.Groups[1].Value) >= int.Parse(m.Groups[2].Value))
+            { error = $"deploy conversion: recoil range start must be BEFORE end — got {seg.Trim()} (reversed). Each window runs forward in source frames."; return false; }
+            ss.Add(m.Groups[1].Value);
+            es.Add(m.Groups[2].Value + (m.Groups[3].Success ? "/" + m.Groups[3].Value : ""));
+        }
+        starts = string.Join(",", ss); ends = string.Join(",", es);
+        return true;
     }
 
     /// <summary>The state-driven roles: the folder rig_anim exports each to, and the clip collection the bake mints for it.</summary>

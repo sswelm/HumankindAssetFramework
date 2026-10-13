@@ -4,7 +4,7 @@ HAF is verified in **three tiers**, each a machine, each at the level where its 
 
 | Tier | Runs | Guards |
 |---|---|---|
-| **Unit tests** — **801 as of 2026-09-14** | `dotnet test`, the pre-push gate, CI | the pure logic: registry/parse/era, pack resolution + merge + tuning tables, pose math, dial config, the session-state rule, the smoke **verdict and classifiers**, and since 09-14 the kernels behind the game-touching code: the descriptor repoint, the multi-mesh quad estimator + partition, the district density boost, the Vehicle Lab's probe-row parser |
+| **Unit tests** — **1,621 as of 2026-10-13** (`dotnet test` prints the live number; this one drifts) | `dotnet test`, the pre-push gate, CI | the pure logic: registry/parse/era, pack resolution + merge + tuning tables, pose math, dial config, the session-state rule, the smoke **verdict and classifiers**, and since 09-14 the kernels behind the game-touching code: the descriptor repoint, the multi-mesh quad estimator + partition, the district density boost, the Vehicle Lab's probe-row parser |
 | **Headless game checks** | `tools/check-catalog.sh` in the push gate; `tools/check-bindings.sh` on demand / after a game update | **two halves of one claim**: `check-catalog.sh` proves the catalog **covers the code** (every by-name literal at a reflection site is catalogued or allowlisted with a reason), `bindcheck` proves it **resolves** against the real DLLs; `typeprobe --find` / `--exact` locate a seam or a member's owner before a binding is written |
 | **In-game smoke test** — `[load]` automatic, `[full]` on the F8 button | every load (a few ms, once), and on request | the injecting half, read from the **engine**: bindings, registry, roles, assets, sounds, files, GPU budget, district tiles and textures, patched seams — and, on the button, every live pawn on *our* skeleton, pose-hook liveness, the sub-pawn walk vs a scene scan, the write-back self-test |
 
@@ -431,6 +431,21 @@ for the editor itself is the Bake Tests row *Does the in-process model prep matc
 (`BlenderPrepHeadlessTest`): every static registry entry that reduces is prepared in process AND by Blender, the
 converter runs on both at the entry's grid, and its output folders must be equal byte for byte; an entry left to
 Blender is a SKIP that says why. It needs Blender and is not in the push gate. `FULL=1` (293 runs on 99 files, 74 of them strip runs): 163 written and read by the converter as it reads Blender's - 43 of them stripped -, 106 left to Blender by name, 21 known prep failures (18 strips that leave no mesh), the canoe's 3. The drill's two sides now run as six processes each (`PREP_JOBS`; `tools/prep-drill/merge_shards.py` adds their rows up, and a shard that did not finish is a FAIL): the gate sample in 43 s where it took minutes, that FULL run in 27 minutes.
+The deploy port has the same pair since 2026-10-13. The Bake Tests row *Does the in-process deploy conversion match
+Blender's?* (`BlenderDeployHeadlessTest`, on by default): every registry entry with `deployConvert` on — today the
+T-62, the >127-bone pair-merge path the push gate's sample never reaches — is converted in process AND by
+`deploy_convert.py` with the argv the Factory hands both (`UniversalBaker.DeployArgv`), and the two written GLBs must be
+equal byte for byte (a difference is read back and named field by field); a shape the port leaves to Blender by name
+is a SKIP that says why, a port that CRASHES is a FAIL — in the Factory the same crash is a `LogWarning` and Blender
+converts. An intentional script exit passes only when Blender completes with exit code 1, no output file or Python
+traceback, and the same final `DEPLOY ERROR` diagnostic as the port; timeouts, crashes and incomplete logs fail.
+`tools/deploy_drill.sh` also runs a complete conversion of the moving-mesh fixture under Unity's bundled **64-bit
+Mono**, through `tools/deploy-drill/MonoHost.cs`, and compares its written GLB byte for byte to the real Blender
+export. The standalone `mono.exe` is 32-bit and cannot supply the native float math a full deploy needs. This host
+uses Mono's [embedding API](https://www.mono-project.com/docs/advanced/embedding/), without starting an editor;
+the registry's own deploys still need the Bake Tests row in Unity. Missing runtime prerequisites return SKIP (3).
+The drill requires a written comparison and rejects empty jobs, a missing or changed Blender oracle, and a conversion
+that falls back. The port — wired into the Factory on 2026-10-11 — still needs its first T-62 run in the editor.
 Not covered: district entries in that row (they prep through the same `UniversalBaker.Build`); a strip list that was
 already broken on Blender's command line (a trailing backslash, a double quote) now strips what it says.
 The review of PR #132 (2026-10-09). ChatGPT: the strip list was trimmed with .NET's `Trim()`, which keeps the

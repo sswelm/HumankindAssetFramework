@@ -20,6 +20,8 @@ PROJECT="${HAF_UNITY_PROJECT:-C:/Repo/ENCReload}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WROOT="$(cygpath -m "$ROOT" 2>/dev/null || echo "$ROOT")"
 CSC="$UNITY/DotNetSdkRoslyn/csc.dll"; API="$UNITY/MonoBleedingEdge/lib/mono/4.7.1-api"
+MONO_DLL="$UNITY/MonoBleedingEdge/EmbedRuntime/mono-2.0-bdwgc.dll"
+[ -f "$MONO_DLL" ] || { echo "SKIP — deploy drill: Mono not found at $MONO_DLL; the runtime conversion was NOT drilled"; exit 3; }
 for f in "$CSC" "$API/mscorlib.dll"; do
   [ -f "$f" ] || { echo "FAIL — Unity prerequisite not found: $f   (set UNITY=<Unity 2021.3 .../Editor/Data>; the deploy conversion was NOT drilled)"; exit 2; }
 done
@@ -43,12 +45,16 @@ WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"; WTMP="$(cygpath -m "$TMP
 E="$WROOT/editor"
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -optimize+ -out:"$WTMP/deploy.exe" \
   -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WAPI/System.Numerics.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
-  "$WROOT/tools/deploy-drill/DeployDrill.cs" "$WROOT/tools/deploy-drill/DecisionsDrill.cs" "$WROOT/tools/deploy-drill/ExportDrill.cs" "$WROOT/tools/deploy-drill/MaterialDrill.cs" "$WROOT/tools/deploy-drill/BezierDrill.cs" "$E/BlenderDeploy.cs" "$E/BlenderDeployExport.cs" "$E/BlenderMaterialExport.cs" "$E/BlenderChannelExport.cs" "$E/BlenderGlbWriter.cs" "$E/PyFloatRepr.cs" "$E/BlenderFCurve.cs" "$E/BlenderExportTree.cs" \
+  "$WROOT/tools/deploy-drill/DeployDrill.cs" "$WROOT/tools/deploy-drill/DecisionsDrill.cs" "$WROOT/tools/deploy-drill/ExportDrill.cs" "$WROOT/tools/deploy-drill/MaterialDrill.cs" "$WROOT/tools/deploy-drill/BezierDrill.cs" "$WROOT/tools/deploy-drill/InProcessDrill.cs" "$E/BlenderDeployInProcess.cs" "$E/BlenderDeploy.cs" "$E/BlenderDeployExport.cs" "$E/BlenderMaterialExport.cs" "$E/BlenderChannelExport.cs" "$E/BlenderGlbWriter.cs" "$E/PyFloatRepr.cs" "$E/BlenderFCurve.cs" "$E/BlenderExportTree.cs" \
   "$E/BlenderExport.cs" "$E/BlenderReduce.cs" "$E/BlenderDecimate.cs" \
   "$E/HafModel.cs" "$E/GlbReader.cs" "$E/HafTransforms.cs" "$E/BlenderNames.cs" "$E/BlenderPosedState.cs" "$E/BlenderTrig.cs" "$E/BlenderEigen.cs" "$E/BlenderMesh.cs" "$E/BMesh.cs" "$E/BlenderColor.cs" \
   "$E/VehicleProbe.cs" "$E/VehicleProbe.Visibility.cs" "$E/VehicleProbe.Islands.cs" "$E/VehicleProbe.InsideOut.cs" \
   "$E/VehicleProbe.BlenderWorld.cs" "$E/VehicleProbe.BlenderSkin.cs" "$E/VehicleProbe.CustomNormals.cs" "$E/VehicleProbe.Merge.cs" "$E/VehicleProbe.BlenderArmature.cs" "$E/VehicleProbe.BlenderPose.cs" 2>&1); rc=$?
 if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/deploy.exe" ]; then echo "$OUT" | grep -E "error" | head -20; echo "FAIL — the deploy drill did not compile (csc rc=$rc)"; exit 1; fi
+
+OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -platform:x64 -out:"$WTMP/mono-host.exe" \
+  -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" "$WROOT/tools/deploy-drill/MonoHost.cs" 2>&1); rc=$?
+if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/mono-host.exe" ]; then echo "$OUT"; echo "FAIL — the 64-bit Mono bootstrap did not compile (rc=$rc)"; exit 1; fi
 
 mapfile -t FIXTURES < <(python "$ROOT/tools/glb-reader-drill/fixtures.py" "$WTMP/fixtures" --posed | tr -d '\r')
 [ "${#FIXTURES[@]}" -gt 0 ] || { echo "FAIL — could not write the fixtures"; exit 1; }
@@ -98,6 +104,7 @@ for ((k = 0; k < JOBS; k++)); do
   CPIDS+=($!)
 done
 rc=0; for pid in "${CPIDS[@]}"; do wait "$pid" || rc=$?; done
+
 t2=$(date +%s)
 SHARDS=(); for ((k = 0; k < JOBS; k++)); do SHARDS+=("$WTMP/csharp_raw_$k.txt"); done
 python "$ROOT/tools/prep-drill/merge_shards.py" "${SHARDS[@]}" > "$TMPD/csharp_merged.txt"; mergerc=$?
@@ -535,6 +542,32 @@ if [ "$erc" -ne 0 ] || [ "$n_edone" -ne "$n_exp" ]; then
   cat "$TMPD"/export/raw_*.txt "$TMPD"/export/err_*.txt | grep -E "^FAIL|Traceback|Error" | head -8
   echo "FAIL — deploy drill: Blender exported $n_edone of $n_exp jobs (exit $erc)"; exit 1
 fi
+# Enter Unity's bundled 64-bit Mono via MonoHost (the standalone mono.exe is 32-bit and lacks the native float
+# functions the deploy needs). Run the Factory's COMPLETE conversion: decisions, armature, bake, bind, role clips,
+# export and file write. This is Mono without an editor; the registry's own jobs remain the Bake Tests row's claim.
+# A named fallback, script exit or zero comparisons fails this check; the output must equal the actual Blender export above.
+grep -E '^mono_translation\|' "$TMPD/jobs_fx.txt" > "$TMPD/mono_jobs.txt"
+[ "$(wc -l < "$TMPD/mono_jobs.txt")" -eq 1 ] || { echo "FAIL — missing or duplicate Mono conversion fixture"; exit 1; }
+"$WTMP/mono-host.exe" "$UNITY/MonoBleedingEdge" "$WTMP/deploy.exe" --in-process "$WTMP/mono_jobs.txt" "$WTMP/export/glb" "$WTMP/mono_output" > "$TMPD/mono_raw.txt" 2>&1; mrc=$?
+LC_ALL=C sed 's/\xEF\xBB\xBF//g' "$TMPD/mono_raw.txt" | tr -d '\r' > "$TMPD/mono.txt"
+cat "$TMPD/mono.txt"
+if [ "$mrc" -ne 0 ] || ! awk '/^TOTAL in-process jobs 1 written 1 bytes [0-9]+ failed 0$/ && $8 > 0 {ok=1} END {exit !ok}' "$TMPD/mono.txt"; then
+  echo "FAIL — complete deploy conversion under Unity's bundled Mono did not match Blender (rc=$mrc)"; exit 1
+fi
+# Damaged evidence must fail under the SAME runtime: no jobs, missing Blender file, changed Blender bytes, and
+# an unreadable source (a named fallback is not a successful conversion). The intact control above must write first.
+python "$ROOT/tools/deploy-drill/inprocess_regressions.py" "$WTMP/mono_bad" "$WTMP/mono_jobs.txt" "$WTMP/export/glb" || { echo "FAIL — could not prepare Mono conversion regressions"; exit 1; }
+for mode in empty missing changed fallback; do
+  "$WTMP/mono-host.exe" "$UNITY/MonoBleedingEdge" "$WTMP/deploy.exe" --in-process "$WTMP/mono_bad/$mode/jobs.txt" "$WTMP/mono_bad/$mode/oracle" "$WTMP/mono_bad/$mode/output" > "$TMPD/mono_$mode.txt" 2>&1; badrc=$?
+  case "$mode" in
+    empty) reason='no conversion jobs';; missing) reason="Blender's written GLB is missing";;
+    changed) reason='written GLB bytes differ';; fallback) reason='conversion did not run to completion';;
+  esac
+  if [ "$badrc" -ne 1 ] || ! grep -Fq "$reason" "$TMPD/mono_$mode.txt"; then
+    cat "$TMPD/mono_$mode.txt"; echo "FAIL — Mono conversion accepted damaged evidence ($mode, rc=$badrc)"; exit 1
+  fi
+done
+echo "PASS — complete deploy conversion under Unity's bundled Mono (64-bit, without an editor): written GLB equal to Blender's; missing jobs, missing/changed oracle and fallback rejected"
 t_e2=$(date +%s)
 "$TMPD/deploy.exe" --export --glbdir "$WTMP/export/glb" "$WTMP/jobs_export.txt" "$WTMP/export.txt" > "$TMPD/exp_raw.txt" 2>&1; rc8=$?
 t_e3=$(date +%s)

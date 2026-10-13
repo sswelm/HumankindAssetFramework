@@ -166,6 +166,16 @@ public class BakeTestRunnerWindow : EditorWindow
                        "difference here and none in the push gate means Unity's runtime computes something differently.",
                 run = BlenderPrepHeadlessTest.RunSection },
 
+            // THE DEPLOY CONVERSION IN C# (2026-10-13, after parts 1-8c of replacing Blender): wired into the Factory on 2026-10-11
+            // and never run in Unity until this row; the push gate holds it to the script outside Unity and never on the T-62.
+            new TestRow { name = "Does the in-process deploy conversion match Blender's? (every registry model that deploys, in Unity)", quick = false, on = true, needsBlender = true,
+                cost = "the port and deploy_convert.py once per deploying registry entry - the T-62 alone is minutes",
+                what = "For every registry entry with deployConvert on, builds the argv the Factory hands both paths (UniversalBaker.DeployArgv), " +
+                       "converts the raw source in process (BlenderDeployInProcess) AND with Blender's deploy_convert.py, and compares the two " +
+                       "written GLBs byte for byte (a difference is read back and named field by field). A shape the port leaves to Blender by " +
+                       "name is a SKIP that says why; a port that CRASHES is a FAIL here - the Factory would quietly let Blender convert.",
+                run = BlenderDeployHeadlessTest.RunSection },
+
             // THE IN-PROCESS PROBE PREVIEW (2026-10-03, step 3d): the C# probe's rows are held to Blender's by the push gate; the PREVIEW
             // it builds in Unity - the frame, the facing, the lifecycle of its objects - can only be judged in Unity, against the
             // preview FBX files Blender left under Assets/FactorySource/VehicleLab and Unity imported.
