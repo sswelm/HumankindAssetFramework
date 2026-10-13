@@ -745,7 +745,8 @@ public static class BlenderRigAnim
                 if (mo.Mesh.DefNr != null)
                     for (int v = 0; v < mo.Mesh.Vertices; v++)
                         for (int i = 0; i < mo.Mesh.DefNr[v].Count; i++)
-                            if (mo.Mesh.DefWeight[v][i] > 0.001f && mo.Mesh.DefNr[v][i] < mo.Mesh.Groups.Count) weighted.Add(mo.Mesh.Groups[mo.Mesh.DefNr[v][i]]);
+                            // Python compares the stored float to a double: nominal 0.001f is above 0.001, not equal.
+                            if (mo.Mesh.DefWeight[v][i] > 0.001 && mo.Mesh.DefNr[v][i] < mo.Mesh.Groups.Count) weighted.Add(mo.Mesh.Groups[mo.Mesh.DefNr[v][i]]);
             int removed = 0;
             while (ad.BoneNodes.Count > 240)
             {
@@ -1086,7 +1087,9 @@ public static class BlenderRigAnim
                     var tnames = transBones.Select(b => names.BoneOfJoint[b]).OrderBy(x => x, StringComparer.Ordinal).ToList();
                     s.Logs3.Add("RIGANIM TRANSLATION-animated bone(s) in '" + oa.Name + "': " + PyList(tnames) + (a.KeepTranslations ? " (location keys KEPT — keepTranslations)" : " (location keys stripped below — set keepTranslations to keep)"));
                     Note(s, a.KeepTranslations ? "translation-animated bones, kept" : "translation-animated bones, stripped");
-                    foreach (int b in transBones) keepLocPaths.Add("pose.bones[\"" + EscapeIdentifier(names.BoneOfJoint[b]) + "\"].location");
+                    // rig_anim.py builds this set with the literal bone name, unlike keyframe_insert's escaped RNA
+                    // paths. Preserve that behavior here: quoted/backslashed names are stripped by the script below.
+                    foreach (int b in transBones) keepLocPaths.Add("pose.bones[\"" + names.BoneOfJoint[b] + "\"].location");
                 }
                 var transSet = new HashSet<int>(transBones);
                 foreach (long f in frames)
@@ -1108,7 +1111,7 @@ public static class BlenderRigAnim
             double worst = 0.0, scaleref = 0.0;
             foreach (int b in ad.BoneNodes)
             {
-                if (a.KeepTranslations && keepLocPaths.Contains("pose.bones[\"" + EscapeIdentifier(names.BoneOfJoint[b]) + "\"].location")) continue;
+                if (a.KeepTranslations && keepLocPaths.Contains("pose.bones[\"" + names.BoneOfJoint[b] + "\"].location")) continue;
                 var pm = ad.PoseMats[b]; var ml = ad.Rest.ArmMat[b];
                 double d = VecLengthPy(new[] { (float)(pm[12] - ml[12]), (float)(pm[13] - ml[13]), (float)(pm[14] - ml[14]) });
                 if (d > worst) worst = d;

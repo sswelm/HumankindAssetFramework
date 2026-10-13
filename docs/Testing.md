@@ -1509,6 +1509,13 @@ construction; only a NaN could trip it), a bone with an object hung from it remo
 Stage 4 is not compared yet, and the PASS line says so. Stage 4 is not compared yet, and the PASS
 line says so.
 
+Review of PR #167 (2026-10-13): six additional stage 3 fixture jobs hold the bone-cap threshold and the conversion
+fold's keepTranslations paths. A stored nominal `0.001f` is slightly above Python's double `0.001` threshold: the
+weighted leaf must survive, with weights just below and above as controls. The fold builds its keep-path set from
+literal bone names, while the fcurves use escaped RNA paths; ordinary names keep their location curves, names with
+quotes or backslashes have them stripped as `rig_anim.py` does. Both the set and the residual check use that same
+literal spelling. These are parity fixes in the C# model; the Python script's behavior is held by the oracle.
+
 Review of PR #165 (2026-10-13): nine additional stage 3 fixture jobs cover repeated role assignments (last value,
 first insertion position), quoted and backslash bone names (both the raw prefix's exit and the escaped prefix's match),
 out-of-range primary and role slices (each returns the named Blender fallback), and long role tags whose synthesized

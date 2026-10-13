@@ -527,7 +527,7 @@ def s4_fold_big(out):
     return r.write(out, "riganim_s4_fold_big")
 
 
-def s4_bonecap(out):
+def s4_bonecap(out, weight=1.0, suffix=""):
     """492 bones: a root, 245 chains of a middle bone and a leaf, and a weighted leaf. Pass one removes the 245 leaves
     (the weighted one stays), the count is still over the cap, pass two removes the 238 unweighted middles."""
     r = Rig()
@@ -542,9 +542,20 @@ def s4_bonecap(out):
     sk = r.skin("Skin", joints, ibms)
     m = r.material("Paint", (0.2, 0.4, 0.9))
     per = [[(len(joints) - 1, 1.0)]] + [[(mids[v - 1], 1.0)] for v in range(1, 8)]
+    if weight != 1.0:
+        per[0] = [(len(joints) - 1, weight), (0, 1.0 - weight)]   # sum to one so the importer preserves the threshold weight
     r.node("Body", arm, mesh=r.mesh("body", size=3.0, material=m, joints=per), skin=sk)
     a = r.anim("Spin"); r.key(a, joints[1], "rotation", [0.0, 1.0], spin(2, "x", 0.25))
-    return r.write(out, "riganim_s4_bonecap")
+    return r.write(out, "riganim_s4_bonecap" + suffix)
+
+
+def s4_fold_keep_name(out, name, suffix):
+    """A genuinely translating bone after a conversion fold. keepTranslations keeps a plain name's three location
+    curves, but rig_anim.py's literal keep-path set does not match quoted/backslashed names' escaped RNA paths."""
+    r = Rig(); arm, root, child, skin, mat = rigged(r)
+    r.nodes[child]["name"] = name
+    r.key(0, child, "translation", [0.0, 1.0], [(0.0, 1.0, 0.0), (0.0, 1.2, 0.0)])
+    return r.write(out, "riganim_s4_fold_keep_" + suffix)
 
 
 def main(out):
@@ -609,6 +620,12 @@ def main(out):
     job("fx_s4_multi_keept", multi(out), clip="Longer", keept="1", roles="attack=Held;move=Spin[0..6]")
     job("fx_s4_fold_big", s4_fold_big(out), clip="Longer")
     job("fx_s4_bonecap", s4_bonecap(out))
+    # PR #167 review: Python's double threshold protects nominal 0.001f; the lower neighbor is removed, the upper kept.
+    for weight, suffix in ((0.000999, "below"), (0.001, "exact"), (0.001001, "above")):
+        job("fx_s4_bonecap_" + suffix, s4_bonecap(out, weight, "_" + suffix))
+    # The fold's keep set uses literal bone names while fcurves escape them; include the ordinary-name control.
+    for name, suffix in (("Arm", "plain"), ('Ar"m', "quote"), (r"Ar\m", "slash")):
+        job("fx_s4_fold_keep_" + suffix, s4_fold_keep_name(out, name, suffix), keept="1")
     # Review regressions: dictionary overwrite/order, escaped-path filtering, named fallback from either resolver,
     # and bpy.data.actions.new's UTF-8 truncation and collision suffixes.
     mp = multi(out)
