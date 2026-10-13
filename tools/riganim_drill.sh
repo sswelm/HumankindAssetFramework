@@ -202,11 +202,12 @@ while IFS= read -r mode; do
     S1_*) reason="stage 1";;   # a valid dump that says something else about the scene than the stage 1 model: refused in --stages 2 mode
     S2_*) reason="stage 2";;   # the same for a row of stage 2
     S3_*) reason="stage 3";;   # a row of stage 3, on a job the model compares there (jobs_s3.txt)
+    S3F_*) reason="stage 3";;  # a row of stage 3 on the first dumped job, through the fold (jobs.txt)
     *) echo "FAIL — rig_anim drill: the tamper '$mode' has no expected reason here (add it)"; exit 1;;
   esac
   jf="$WTMP/missing/jobs.txt"
   case "$mode" in EXIT_ran_full|EXIT_marked_wrong_stage) jf="$WTMP/missing/jobs_exit.txt";; S3_*) jf="$WTMP/missing/jobs_s3.txt";; esac
-  S1_MODE=(); case "$mode" in S1_*) S1_MODE=(--stages 3); n_s1t=$((n_s1t + 1));; S2_*) S1_MODE=(--stages 3); n_s2t=$((n_s2t + 1));; S3_*) S1_MODE=(--stages 3); n_s3t=$((n_s3t + 1));; esac
+  S1_MODE=(); case "$mode" in S1_*) S1_MODE=(--stages 3); n_s1t=$((n_s1t + 1));; S2_*) S1_MODE=(--stages 3); n_s2t=$((n_s2t + 1));; S3_*|S3F_*) S1_MODE=(--stages 3); n_s3t=$((n_s3t + 1));; esac
   "$TMPD/riganim.exe" "${S1_MODE[@]}" "${KEY_MODE[@]}" "$jf" "$WTMP/missing/$mode.txt" > "$TMPD/t_$mode.txt" 2>&1; badrc=$?
   if [ "$badrc" -ne 1 ] || ! grep -E "^FAIL " "$TMPD/t_$mode.txt" | grep -qE "$reason"; then
     head -3 "$TMPD/t_$mode.txt"; echo "FAIL — rig_anim drill accepted a damaged dump ($mode, rc=$badrc)"; exit 1

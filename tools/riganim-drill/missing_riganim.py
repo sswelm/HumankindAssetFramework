@@ -144,9 +144,9 @@ i_vg_2 = first(lambda l: l.startswith("VG\t2\t")); write("S2_VG_hash", with_fiel
 i_pb_2 = first(lambda l: l.startswith("PB\t2\t")); write("S2_PB_value", with_field(i_pb_2, 7, flip_bits(lines[i_pb_2].split("\t")[7])))
 i_fc_2 = first(lambda l: l.startswith("FC\t2\t")); write("S2_FC_hash", with_field(i_fc_2, 7, flip_bits(lines[i_fc_2].split("\t")[7])))
 i_scene_2 = first(lambda l: l.startswith("SCENE\t2\t")); write("S2_SCENE_pose", with_field(i_scene_2, 5, "REST"))
-# the fold (stage 3 of this very job, the first dumped: a conversion recipe with location keys): the deformed positions and the new rest
-i_mesh_3 = first(lambda l: l.startswith("MESH\t3\t")); write("S3_MESH_positions", with_field(i_mesh_3, 6, flip_bits(lines[i_mesh_3].split("\t")[6])))
-i_bone_3 = first(lambda l: l.startswith("BONE\t3\t")); write("S3_BONE_rest", with_field(i_bone_3, 7, flip_bits(lines[i_bone_3].split("\t")[7])))
+# the fold (stage 3 of this very job, the first dumped: a conversion recipe with location keys; S3F_*, run with jobs.txt): the deformed positions and the new rest
+i_mesh_3 = first(lambda l: l.startswith("MESH\t3\t")); write("S3F_MESH_positions", with_field(i_mesh_3, 6, flip_bits(lines[i_mesh_3].split("\t")[6])))
+i_bone_3 = first(lambda l: l.startswith("BONE\t3\t")); write("S3F_BONE_rest", with_field(i_bone_3, 7, flip_bits(lines[i_bone_3].split("\t")[7])))
 i_stage_2 = first(lambda l: l == "STAGE\t2"); write("S2_LOG_added", insert(i_stage_2, "LOG\t2\tRIGANIM flattened 1 wrapper empty; rig reparented to root for identity export nodes (planted)"))
 # Step (d), the stage 3 model: one changed value per row kind of stage 3 (stages 1 and 2 intact), refused in --stages 3
 # mode with the reason "stage 3". The job here takes the rest fold (deferred by the model), so the tampers are written on
