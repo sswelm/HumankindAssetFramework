@@ -25,12 +25,21 @@ flattened), a dropped parent's child beside a bind (the update re-evaluates it),
 child (re-rooted before the pin), object animation cleared beside a bind, Python Unicode lowercasing for staticParts,
 supplementary-script casing (LEFT: by name), both blocks under the legacy path (nothing happens), and two hung objects
 sharing one mesh (LEFT: by name).
+
+Stage 3 (step (d), fx_s3_*): slices of the rotation-only rig (a plain range, reversed with a speed step, a single frame
+with the held-stance nudge - these three take the rest fold on the conversion path and are deferred there), slices on
+the legacy path over LINEAR and CONSTANT keys (a plain one, a reversed stepped one that lands on its end frame, a held
+one), four roles sharing slices and the primary, the three exits (a clip not found, a slice source not found, no
+animation), the bone filter keeping and matching nothing, the filter over the armature's own object curves, legacy
+keepTranslations kept (with the x100 amplify), nothing kept, kept under the V2 marker (no amplify), the multi-slot trap
+(a mesh node before the armature: the armature takes the mesh's slot), an animated mesh under a slice, and keys off the
+frame grid (the scene range rounded).
 """
 import math, os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "glb-reader-drill"))
 from fixtures import Buf, base, write_glb   # noqa: E402
 
-ARGS = "	".join(["0", "", "{clip}", "1", "1", "0,0,0", "{convert}", "", "0", "", "0", "{static}", "{local}"])   # target, prefixes, clip, albedo, keepmats, rot, convertRig, roles, ground, sockets, keepT, static, localNode
+ARGS = "	".join(["0", "{prefixes}", "{clip}", "1", "1", "0,0,0", "{convert}", "{roles}", "0", "", "{keept}", "{static}", "{local}"])   # target, prefixes, clip, albedo, keepmats, rot, convertRig, roles, ground, sockets, keepT, static, localNode
 
 
 class Rig:
@@ -389,11 +398,73 @@ def s2_shared_hung(out):
     return r.write(out, "riganim_s2_shared_hung")
 
 
+# ---- stage 3 (step (d)): the clip path
+
+def s3_plain(out):
+    """The two-bone rig with its rotation-only Spin (24 frames): the slices' source."""
+    r = Rig(); rigged(r)
+    return r.write(out, "riganim_s3_plain")
+
+
+def s3_noanim(out):
+    """A rig without an animation: the script's 'no animation action' exit."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    r.anims.clear()
+    return r.write(out, "riganim_s3_noanim")
+
+
+def s3_statues(out):
+    """The multi-slot trap: a mesh node BEFORE the armature carries object-level keys in the same animation, so the action's
+    first slot is the mesh's and assign_action hands the armature that slot - the bones play statues and the armature
+    object itself takes the mesh's location keys."""
+    r = Rig()
+    m = r.material("Paint", (0.2, 0.4, 0.9))
+    prop = r.node("Prop", None, mesh=r.mesh("prop", at=(2.0, 0.0, 0.0), material=m), translation=[2.0, 0.0, 0.0])
+    arm, j0, j1, sk, m2 = rigged(r)
+    r.key(0, prop, "translation", [0.0, 1.0], [(2.0, 0.0, 0.0), (2.0, 1.0, 0.0)])
+    return r.write(out, "riganim_s3_statues")
+
+
+def s3_frac(out):
+    """Keys off the frame grid (0.7 s = frame 16.8): the scene range is Python's round of the action's range."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    r.anims.clear(); a = r.anim("Spin")
+    r.key(a, j1, "rotation", [0.0, 0.7], spin(2, "x", 0.5))
+    return r.write(out, "riganim_s3_frac")
+
+
+def s3_keept(out):
+    """Whole-action role clips for legacy keepTranslations: 'Slide' moves Root from an offset (the rebase bites), 'Creep'
+    moves Arm by 0.2 (under the move role's 0.5 floor, over the attack role's 1e-4). A SLICED role clip is named
+    '<source>_<role>_...' and never matches the floor table keyed by the source name - the script keeps nothing for it
+    (fx_s3_keept_kept records that)."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    a2 = r.anim("Slide"); r.key(a2, j0, "translation", [0.0, 1.0], [(0.5, 0.0, 0.0), (1.5, 0.0, 0.0)])
+    a3 = r.anim("Creep"); r.key(a3, j1, "translation", [0.0, 1.0], [(0.0, 1.0, 0.0), (0.0, 1.2, 0.0)])
+    return r.write(out, "riganim_s3_keept")
+
+
+def s3_v2_multi(out):
+    """The multi file under a DeployArmV2 armature: legacy keepTranslations keeps a path but the amplify is skipped."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r, arm_name="DeployArmV2")
+    a2 = r.anim("Longer")
+    r.key(a2, j1, "rotation", [0.0, 2.0, 4.0], spin(3, "y", 1.0))
+    r.key(a2, j0, "translation", [0.0, 4.0], [(0.0, 0.0, 0.0), (0.0, 0.0, 2.0)])
+    return r.write(out, "riganim_s3_v2_multi")
+
+
+def s3_escaped_bone(out, name, suffix):
+    """The bone filter reads an ESCAPED RNA path, not the original bone name."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    r.nodes[j1]["name"] = name
+    return r.write(out, "riganim_s3_filter_" + suffix)
+
+
 def main(out):
     sys.stdout.reconfigure(encoding="utf-8")  # JOB records may contain non-ASCII staticParts on Windows
     os.makedirs(out, exist_ok=True)
-    def job(key, path, clip="Spin", convert="1", local="0", static=""):
-        print("JOB\t%s\t%s\t%s" % (key, path, ARGS.format(clip=clip, convert=convert, local=local, static=static)))
+    def job(key, path, clip="Spin", convert="1", local="0", static="", prefixes="", roles="", keept="0"):
+        print("JOB\t%s\t%s\t%s" % (key, path, ARGS.format(clip=clip, convert=convert, local=local, static=static, prefixes=prefixes, roles=roles, keept=keept)))
     job("fx_junk", junk(out))
     p = objanim(out, "riganim_objanim")
     job("fx_objanim_convert", p)
@@ -421,6 +492,43 @@ def main(out):
     job("fx_s2_multi_legacy", multi(out), clip="Longer", convert="0")
     job("fx_s2_wrapped_legacy", wrapped(out), convert="0")
     job("LEFT:fx_s2_shared_hung", s2_shared_hung(out))
+    # stage 3 (step (d), the clip path; the rest fold is deferred): slices on the rotation-only rig, the exits, the filter,
+    # legacy keepTranslations, the multi-slot trap
+    plain = s3_plain(out)
+    job("fx_s3_slice", plain, clip="Spin[2..10]")
+    job("fx_s3_slice_rev_step", plain, clip="Spin[24..0/5]")
+    job("fx_s3_slice_held", plain, clip="Spin[5..5]")
+    job("fx_s3_roles", plain, clip="Spin", roles="attack=Spin[0..6];move=Spin[0..6];idle=Spin;deploy=Spin[6..0]")
+    job("EXIT:3:fx_s3_noclip", plain, clip="Nope")
+    job("EXIT:3:fx_s3_noslicesrc", plain, clip="Nope[0..5]")
+    job("EXIT:3:fx_s3_noanim", s3_noanim(out), clip="")
+    job("fx_s3_filter", plain, clip="", prefixes="Ar,Zz")
+    job("EXIT:3:fx_s3_filter_none", plain, clip="", prefixes="Ro")
+    job("fx_s3_slice_legacy", multi(out), clip="Longer[1..7/2]", convert="0")
+    job("fx_s3_slice_objanim", p, clip="Spin[0..8]", convert="0")
+    job("fx_s3_statues", s3_statues(out), clip="Spin[0..5]", convert="0")
+    job("fx_s3_keept_kept", multi(out), clip="Spin", convert="0", keept="1", roles="attack=Longer[10..40];move=Longer[0..10]")   # the attack slide starts off zero (the rebase bites); the move slide stays under its 0.5 floor
+    job("fx_s3_keept_none", multi(out), clip="Longer", convert="0", keept="1", roles="idle=Spin")
+    job("fx_s3_keept_whole", s3_keept(out), clip="Spin", convert="0", keept="1", roles="attack=Slide;move=Creep")
+    job("fx_s3_keept_v2", s3_v2_multi(out), clip="Spin", convert="0", keept="1", roles="attack=Longer")
+    job("fx_s3_slice_legacy_rev", multi(out), clip="Longer[9..0/4]", convert="0")
+    job("fx_s3_slice_legacy_held", multi(out), clip="Longer[5..5]", convert="0")
+    job("fx_s3_filter_objcurves", groups(out), clip="", prefixes="Arm")
+    job("fx_s3_frac", s3_frac(out), clip="")
+    # Review regressions: dictionary overwrite/order, escaped-path filtering, named fallback from either resolver,
+    # and bpy.data.actions.new's UTF-8 truncation and collision suffixes.
+    mp = multi(out)
+    job("fx_s3_roles_overwritten", mp, convert="0", roles="attack=Longer;attack=Held")
+    job("fx_s3_roles_overwrite_order", mp, convert="0", prefixes="Arm", roles="move=Held;attack=Spin[0..2];move=Longer")
+    for name, suffix in [('Ar"m', "quote"), (r"Ar\m", "slash")]:
+        ep = s3_escaped_bone(out, name, suffix)
+        job("EXIT:3:fx_s3_filter_" + suffix, ep, prefixes=name)
+        escaped = name.replace("\\", "\\\\").replace('"', '\\"')
+        job("fx_s3_filter_" + suffix + "_escaped", ep, prefixes=escaped)
+    job("LEFT:fx_s3_primary_frame_limit", plain, clip="Spin[1048575..1048575]", convert="0")
+    job("LEFT:fx_s3_role_frame_limit", plain, convert="0", roles="attack=Spin[1048575..1048575]")
+    long_role = "a" * 250
+    job("fx_s3_action_name_limit", plain, convert="0", roles=long_role + "=Spin[0..2];" + long_role + "b=Spin[1..3]")
 
 
 if __name__ == "__main__":

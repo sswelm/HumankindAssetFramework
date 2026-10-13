@@ -311,11 +311,11 @@ static class RigAnimDrill
         Console.OutputEncoding = new UTF8Encoding(false);
         bool requireKeys = false; int stages = 0;   // --stages N: compare the C# model of stages 1..N (N = 1 or 2) with the dump
         int offset = 0;
-        const string usage = "usage: riganim.exe [--keys] [--stages 1|2] <jobs file> <dump>...";
+        const string usage = "usage: riganim.exe [--keys] [--stages 1|2|3] <jobs file> <dump>...";
         while (offset < args.Length && args[offset].StartsWith("--", StringComparison.Ordinal))
         {
             if (args[offset] == "--keys") requireKeys = true;
-            else if (args[offset] == "--stages" && offset + 1 < args.Length && int.TryParse(args[offset + 1], NumberStyles.None, CultureInfo.InvariantCulture, out stages) && stages >= 1 && stages <= 2) offset++;
+            else if (args[offset] == "--stages" && offset + 1 < args.Length && int.TryParse(args[offset + 1], NumberStyles.None, CultureInfo.InvariantCulture, out stages) && stages >= 1 && stages <= 3) offset++;
             else { Console.WriteLine(usage); return 2; }
             offset++;
         }
@@ -392,7 +392,7 @@ static class RigAnimDrill
         if (stages > 0) Stage1Drill.Summary(stages);
         Console.WriteLine($"TOTAL jobs {blocks.Count} full {full} stopped {stopped} left {leftByName.Count} stages {stageRows} logs {logs} objects {objs} meshes {meshes} groups {groups} bones {bones} fcurves {fcurves} keys {keys} fails {fails}");
         if (fails > 0) { Console.WriteLine($"FAIL — {fails} problem(s)"); return 1; }
-        Console.WriteLine($"PASS — rig_anim stage dump: {blocks.Count} jobs dumped by Blender, {full} through all four stages, {stopped} stopped by the script as it says; {leftByName.Count} recipe(s) left by name" + (stages > 0 ? $"; stages 1 to {stages} modelled: {Stage1Drill.Equal} of {Stage1Drill.Compared} jobs equal row for row ({Stage1Drill.RowsEqual} rows), {Stage1Drill.Left} left by name" : ""));
+        Console.WriteLine($"PASS — rig_anim stage dump: {blocks.Count} jobs dumped by Blender, {full} through all four stages, {stopped} stopped by the script as it says; {leftByName.Count} recipe(s) left by name" + (stages > 0 ? $"; stages 1 to {stages} modelled: {Stage1Drill.Equal} of {Stage1Drill.Compared} jobs equal row for row ({Stage1Drill.RowsEqual} rows), {Stage1Drill.Left} left by name, {Stage1Drill.Deferred} deferred to a later step" : ""));
         return 0;
     }
 }
@@ -402,7 +402,7 @@ static class RigAnimDrill
 /// leaves to Blender is a FAIL here: every dumped recipe and fixture is one the C# must take.</summary>
 static class Stage1Drill
 {
-    public static int Compared, Equal, Left; public static long RowsEqual;
+    public static int Compared, Equal, Left, Deferred; public static long RowsEqual;
     static readonly SortedDictionary<string, int> Census = new SortedDictionary<string, int>(StringComparer.Ordinal);
 
     static float FromHex(string h) => BitConverter.ToSingle(BitConverter.GetBytes(Convert.ToUInt32(h, 16)), 0);
@@ -514,6 +514,42 @@ static class Stage1Drill
                 if (problems.Count == 0) { RowsEqual += RowCount(s2); Console.WriteLine($"STAGE2 {key}: equal - {Describe(s2)}"); }
             }
         }
+        // stage 3 on the scene stage 2 left: a job the model defers by name (the rest fold, the bone cap: step (d2)) is
+        // counted apart, its stages 1 and 2 compared all the same
+        if (problems.Count == 0 && stages >= 3 && !model.Exits)
+        {
+            try { BlenderRigAnim.RunStage3(model, args); }
+            catch (Exception e) { problems.Add($"stage 3 model: {e.GetType().Name}: {e.Message}"); }
+            if (problems.Count == 0 && model.Fallback != null)
+            {
+                foreach (var note in model.Notes) Census[note] = (Census.TryGetValue(note, out int c) ? c : 0) + 1;
+                if (!left) { Console.WriteLine($"FAIL {key}: stage 3 model leaves this file to Blender: {model.Fallback}"); return false; }
+                Left++; Console.WriteLine($"STAGE3 {key}: left to Blender by name, as the model says: {model.Fallback}"); return true;
+            }
+            if (problems.Count == 0 && model.Deferred != null)
+            {
+                foreach (var note in model.Notes) Census[note] = (Census.TryGetValue(note, out int c) ? c : 0) + 1;
+                if (left) { Console.WriteLine($"FAIL {key}: the model defers a file its key says is left to Blender"); return false; }
+                Deferred++; Console.WriteLine($"STAGE3 {key}: deferred - {model.Deferred}"); return true;
+            }
+            if (problems.Count == 0 && model.Exits)
+            {
+                if (d.StoppedAt != 3 || d.Exit == null) problems.Add("stage 3 model: the script exits in stage 3 here, " + (d.StoppedAt == 0 ? "Blender ran it through" : $"Blender stopped at stage {d.StoppedAt}"));
+                else if (!d.LogsOfStop.SequenceEqual(model.Logs3)) problems.Add("stage 3 model: the stop's RIGANIM lines differ: here [" + string.Join(" | ", model.Logs3) + "], Blender [" + string.Join(" | ", d.LogsOfStop) + "]");
+                if (problems.Count == 0) { RowsEqual += model.Logs3.Count; Console.WriteLine($"STAGE3 {key}: equal - the script's exit in stage 3, {model.Logs3.Count} RIGANIM lines"); }
+            }
+            else if (problems.Count == 0)
+            {
+                RigAnimDump.Stage s3 = null;
+                if (!d.Stages.TryGetValue(3, out s3)) problems.Add("stage 3 model: the scene runs on here, Blender stopped in stage 3: " + (d.Exit != null ? string.Join(" | ", d.LogsOfStop) : d.Died));
+                else
+                {
+                    var rows3 = BlenderRigAnim.Render(model, 3);
+                    CompareRows(3, rows3, model.Logs3, s3, problems);
+                    if (problems.Count == 0) { RowsEqual += RowCount(s3); Console.WriteLine($"STAGE3 {key}: equal - {Describe(s3)}"); }
+                }
+            }
+        }
         foreach (var note in model.Notes) Census[note] = (Census.TryGetValue(note, out int c) ? c : 0) + 1;
         if (problems.Count == 0 && left) { Console.WriteLine($"FAIL {key}: the model takes a file its key says is left to Blender (through stage {Math.Min(stages, model.Exits ? 1 : stages)})"); return false; }
         if (problems.Count == 0) { Equal++; return true; }
@@ -524,6 +560,6 @@ static class Stage1Drill
     public static void Summary(int stages)
     {
         foreach (var kv in Census) Console.WriteLine($"MODEL {kv.Value} {kv.Key}");
-        Console.WriteLine($"STAGES {stages} jobs {Compared} equal {Equal} left {Left} rows {RowsEqual}");
+        Console.WriteLine($"STAGES {stages} jobs {Compared} equal {Equal} left {Left} rows {RowsEqual} deferred {Deferred}");
     }
 }

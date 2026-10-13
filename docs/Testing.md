@@ -1446,6 +1446,42 @@ those rules. Supplementary-script casing remains a named Blender fallback (`LEFT
 and 4 are not compared yet, and the PASS line says so. The review also corrected the diagnostic census for an EMPTY that
 wrapped nothing: it now counts wrapper parents before unparenting their children.
 
+Step (d1), stage 3 in C# - the clip path (2026-10-13): `BlenderRigAnim.RunStage3` continues on the scene stage 2 left:
+the clip resolution (a named action, or a slice sampled frame by frame into a new action: the source assigned with its
+FIRST slot, every frame of the span evaluated and every pose bone's `matrix_basis.decompose()` taken, then location and
+rotation keyed with `keyframe_insert` frame by frame, the held-stance nudge on a single-frame slice, the pose restored),
+the action prune (the objects holding a pruned action lose it), the bone filter and its exit, legacy keepTranslations
+(the role floors, the poison gate, the kept paths), the location strip, the delta-rebase and x100 amplify (not under
+the V2 marker), and the scene range as Python rounds the action's. The rest fold and rebake (every conversion recipe
+with a location key on a pose bone of its primary) and the bone cap (over 240 bones) are step (d2)'s: the model DEFERS
+such a job by name, the drill counts it apart (`deferred` in the STAGES line, `$n_s3def` in the script), and its stages
+1 and 2 are compared all the same. Blender's rules read for it: `assign_action` hands the armature the action's first
+slot whichever object it was made for (the multi-slot trap: the bones play statues and the armature object takes that
+object's curves); `frame_set` evaluates every object's active slot (LINEAR and CONSTANT segments as the importer made
+them, `BLI_easing_linear_ease`; the stashed NLA tracks are muted) and the active depsgraph writes the values back to the
+original properties; `Matrix.decompose()` is `mat4_to_loc_rot_size` and `mat3_normalized_to_quat_fast` (no checks);
+`keyframe_insert` makes a path's curves in channel order at the first insert and MOVES a key already on the frame by
+the difference; `bpy.data.actions` keeps its name order on an insert; `Action.frame_range` is the first and the last key
+over every slot's curves, (0, 0) without one. Measured: both legacy registry recipes equal at stage 3 (ReconDrone's
+bone filter keeping 140 of 810 curves; UniversalTanks' 105 kept translation paths, the amplify over its attack and move
+slices, 301,434 keys), the 21 conversion recipes deferred at the fold with stages 1 and 2 equal; 20 new fixtures (`fx_s3_*`: slices plain, reversed with a step, single-frame with the nudge - the three on the conversion path deferred at the fold as Blender's own log shows the rebake there; slices on the legacy path over LINEAR and CONSTANT keys, one landing on its end frame, one held; four roles sharing slices and the primary; the three exits; the bone filter keeping, matching nothing, and over the armature's own curves; legacy keepTranslations kept with the rebase and amplify, nothing kept, under the V2 marker without the amplify; the multi-slot trap; an animated mesh under a slice; keys off the frame grid) - all 45 fixture jobs: 38 equal at every compared stage (5,543 rows), 3 left by name, 4 deferred.
+Twelve defects planted in RunStage3 were each caught (the armature given its own slot instead of the first, a slice not landing on its end frame, no held-stance nudge, LINEAR keys sampled as Bezier, a pruned action left on its objects, the filter keeping object-level curves, the range truncated instead of rounded, every location curve stripped, the amplify without the rebase, the role floors swapped, a new action appended unsorted, no object evaluation at a frame) - three of them invisible until a fixture had the shape (a kept slide starting off zero, a move-role bone under its floor, a whole-action role clip), each added - and eight `S3_*` tampers (one changed value per row kind of stage 3, on the first dumped job the model compares there) are refused. Found on the way: `BlenderFCurve.Evaluate` evaluated every segment as Bezier - the importer's LINEAR and
+CONSTANT keys sampled between frames were wrong until the segment follows the key's interpolation (the deploy drill
+never saw it: `keyframe_insert` keys are Bezier). Not fixtured, named: the poison gate's NaN rejection (no glTF
+fixture carries a NaN key), Unicode digits in a slice spec (Python's `\d`). A script finding the fixtures made plain:
+the legacy keepTranslations floor table is keyed by the role clip's SOURCE name, so a SLICED attack or move clip
+(`<source>_<role>_...`) never matches it and keeps nothing (`fx_s3_keept_kept`) - recorded in the backlog. Stage 4 is not compared yet, and the PASS
+line says so.
+
+Review of PR #165 (2026-10-13): nine additional stage 3 fixture jobs cover repeated role assignments (last value,
+first insertion position), quoted and backslash bone names (both the raw prefix's exit and the escaped prefix's match),
+out-of-range primary and role slices (each returns the named Blender fallback), and long role tags whose synthesized
+action names collide after Blender's 255-byte UTF-8 truncation. Against the original model, eight jobs failed and the
+primary-frame fallback control passed; after the fixes, seven jobs match Blender row for row through stage 3 (including
+the two script exits), and both frame-limit jobs match stages 1 and 2 before returning the named fallback. These jobs
+are part of `riganim_fixtures.py` and run in the normal rig_anim drill, bringing its fixture total to 54. The model still
+reproduces the script's literal escaped-path bone filtering; this review does not change `rig_anim.py`'s behavior.
+
 Review of PR #148: the sanitizer now prints the number of escaped path keys, as the script does, when quoted bone
 names share a prefix (one garbage key can remove curves from two bones). Confirmed with the real sanitizer in Blender.
 `ExportDrillTests` run the actual comparator and pin its completion envelope: exactly one matching final `DONE`, one
