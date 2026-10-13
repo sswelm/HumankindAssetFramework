@@ -172,4 +172,4 @@ i_fc3 = first(lambda l: l.startswith("FC\t3\t")); write("S3_FC_hash", with_field
 i_pb3 = first(lambda l: l.startswith("PB\t3\t")); write("S3_PB_value", with_field(i_pb3, 5, flip_bits(lines[i_pb3].split("\t")[5])))
 write("S3_FC_extra", insert(i_fc3, "\t".join(f if j != 4 else "9" for j, f in enumerate(lines[i_fc3].split("\t")))))
 lines = saved_lines
-sys.stdout.write("".join(f[:-4] + "\n" for f in sorted(os.listdir(out)) if f.endswith(".txt") and f not in ("jobs.txt", "jobs_exit.txt", "intact.txt")))
+sys.stdout.write("".join(f[:-4] + "\n" for f in sorted(os.listdir(out)) if f.endswith(".txt") and f not in ("jobs.txt", "jobs_exit.txt", "jobs_s3.txt", "intact.txt")))
