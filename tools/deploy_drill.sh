@@ -97,7 +97,30 @@ for ((k = 0; k < JOBS; k++)); do
   "$TMPD/deploy.exe" "$WTMP/posed_$k.txt" > "$TMPD/csharp_raw_$k.txt" 2>&1 &
   CPIDS+=($!)
 done
+# The smallest shard once more under the Mono that ships with Unity (2026-10-13; the prep drill has the same pass): the
+# standalone mono.exe is 32-bit (x87 arithmetic, no cosf), NOT the editor's 64-bit runtime - what it holds is that the
+# posed state, the decisions and the export give Blender's answer under a second runtime at all. The editor's own
+# answer is the Bake Tests row "Does the in-process deploy conversion match Blender's?", run in Unity. Beside the C#
+# shards, not after them: no wall time added.
+MONO="$UNITY/MonoBleedingEdge/bin/mono.exe"; MONO_PID=""
+if [ -f "$MONO" ]; then
+  "$MONO" "$TMPD/deploy.exe" "$WTMP/posed_$((JOBS - 1)).txt" > "$TMPD/mono_raw.txt" 2>&1 & MONO_PID=$!
+fi
 rc=0; for pid in "${CPIDS[@]}"; do wait "$pid" || rc=$?; done
+if [ -n "$MONO_PID" ]; then
+  wait "$MONO_PID"; mrc=$?
+  LC_ALL=C sed 's/\xEF\xBB\xBF//g' "$TMPD/mono_raw.txt" | tr -d '\r' > "$TMPD/mono.txt"
+  MTOTAL=$(grep -E "^TOTAL" "$TMPD/mono.txt" | tail -1)
+  m_fails=$(echo "$MTOTAL" | awk '{for (i = 1; i < NF; i++) if ($i == "failed") print $(i + 1)}')
+  m_files=$(echo "$MTOTAL" | awk '{print $3}')
+  if [ "$mrc" -ne 0 ] || [ -z "$m_fails" ] || [ "$m_fails" -ne 0 ] || [ -z "$m_files" ] || [ "$m_files" -lt 1 ]; then
+    grep -E "^FAIL" "$TMPD/mono.txt" | head -6; tail -2 "$TMPD/mono.txt"
+    echo "FAIL — deploy drill under Unity's standalone Mono (32-bit): the posed state or the decisions differ from Blender's there (rc=$mrc, fails ${m_fails:-none})"; exit 1
+  fi
+  echo "PASS — deploy drill under Unity's standalone Mono (32-bit, NOT the editor's runtime): $m_files file(s) of the smallest shard, 0 fails"
+else
+  echo "NOTE — deploy drill: no Mono at $MONO; the Mono pass was NOT run"
+fi
 t2=$(date +%s)
 SHARDS=(); for ((k = 0; k < JOBS; k++)); do SHARDS+=("$WTMP/csharp_raw_$k.txt"); done
 python "$ROOT/tools/prep-drill/merge_shards.py" "${SHARDS[@]}" > "$TMPD/csharp_merged.txt"; mergerc=$?

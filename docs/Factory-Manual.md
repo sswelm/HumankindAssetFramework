@@ -607,6 +607,7 @@ set up. Blender is auto-detected under Program Files; a winget/Steam/portable in
 | *Does the Model Workshop still split, tear and fuse?* | **No** | runs in full on every recipe's source GLB (SKIP while no Vehicle Lab recipe names a `.glb`) |
 | *Does the glTF clip player match the reader?* | **No** | runs on every registry `.glb`/`.gltf` and the fixtures (SKIP per model with morph targets) |
 | *Does the in-process probe preview match the Blender preview?* | **No** | runs on every recipe whose source is a `.glb`/`.gltf` and whose Blender preview FBX exists under `Assets/FactorySource/VehicleLab` (SKIP per recipe without one) |
+| *Does the in-process deploy conversion match Blender's?* | **Yes** | SKIP — and also skip while no registry entry has `deployConvert` on; a shape the port leaves to Blender by name is a SKIP per entry, a port that crashes is a FAIL |
 | *Does the Vehicle Lab still generate?* (representatives / every recipe) | **Yes** | SKIP — and also skip while you have no saved recipes |
 
 The same boundary applies to **baking itself**: a static model at `targetTris 0` with no strip-parts — including the

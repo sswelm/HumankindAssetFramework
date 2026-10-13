@@ -491,6 +491,30 @@ public static class BakerRules
         return $"--background --python-exit-code 1 --python \"{scriptPath}\"";
     }
 
+    /// The deploy conversion's recoil field, "start..end" per window with an optional "/N" speed step, several
+    /// windows comma-separated ("443..530,305..441/2"), as deploy_convert.py takes them: CSV starts and CSV ends (the
+    /// step rides on the end, "441/2"). An empty field is no recoil (both empty, true). False with the Factory's own
+    /// error text for a malformed or reversed window. Pure (2026-10-13: lifted out of EnsureDeployConverted so the
+    /// Bake Tests' deploy row builds the SAME argv the Factory hands both the port and the script).
+    public static bool DeployRecoilRanges(string recoil, out string starts, out string ends, out string error)
+    {
+        starts = ""; ends = ""; error = null;
+        string field = (recoil ?? "").Trim();
+        if (field.Length == 0) return true;
+        var ss = new List<string>(); var es = new List<string>();
+        foreach (string seg in field.Split(','))
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(seg.Trim(), @"^(\d+)\s*\.\.\s*(\d+)(?:\s*/\s*(\d+))?$");
+            if (!m.Success) { error = "deploy conversion: recoil range must look like 440..510 (or several with speed: 443..530,305..441/2), got '" + seg.Trim() + "'."; return false; }
+            if (int.Parse(m.Groups[1].Value) >= int.Parse(m.Groups[2].Value))
+            { error = $"deploy conversion: recoil range start must be BEFORE end — got {seg.Trim()} (reversed). Each window runs forward in source frames."; return false; }
+            ss.Add(m.Groups[1].Value);
+            es.Add(m.Groups[2].Value + (m.Groups[3].Success ? "/" + m.Groups[3].Value : ""));
+        }
+        starts = string.Join(",", ss); ends = string.Join(",", es);
+        return true;
+    }
+
     /// <summary>The state-driven roles: the folder rig_anim exports each to, and the clip collection the bake mints for it.</summary>
     public static readonly string[][] Roles =
     {
