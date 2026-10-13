@@ -1473,6 +1473,15 @@ the legacy keepTranslations floor table is keyed by the role clip's SOURCE name,
 (`<source>_<role>_...`) never matches it and keeps nothing (`fx_s3_keept_kept`) - recorded in the backlog. Stage 4 is not compared yet, and the PASS
 line says so.
 
+Review of PR #165 (2026-10-13): nine additional stage 3 fixture jobs cover repeated role assignments (last value,
+first insertion position), quoted and backslash bone names (both the raw prefix's exit and the escaped prefix's match),
+out-of-range primary and role slices (each returns the named Blender fallback), and long role tags whose synthesized
+action names collide after Blender's 255-byte UTF-8 truncation. Against the original model, eight jobs failed and the
+primary-frame fallback control passed; after the fixes, seven jobs match Blender row for row through stage 3 (including
+the two script exits), and both frame-limit jobs match stages 1 and 2 before returning the named fallback. These jobs
+are part of `riganim_fixtures.py` and run in the normal rig_anim drill, bringing its fixture total to 54. The model still
+reproduces the script's literal escaped-path bone filtering; this review does not change `rig_anim.py`'s behavior.
+
 Review of PR #148: the sanitizer now prints the number of escaped path keys, as the script does, when quoted bone
 names share a prefix (one garbage key can remove curves from two bones). Confirmed with the real sanitizer in Blender.
 `ExportDrillTests` run the actual comparator and pin its completion envelope: exactly one matching final `DONE`, one

@@ -453,6 +453,13 @@ def s3_v2_multi(out):
     return r.write(out, "riganim_s3_v2_multi")
 
 
+def s3_escaped_bone(out, name, suffix):
+    """The bone filter reads an ESCAPED RNA path, not the original bone name."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    r.nodes[j1]["name"] = name
+    return r.write(out, "riganim_s3_filter_" + suffix)
+
+
 def main(out):
     sys.stdout.reconfigure(encoding="utf-8")  # JOB records may contain non-ASCII staticParts on Windows
     os.makedirs(out, exist_ok=True)
@@ -508,6 +515,20 @@ def main(out):
     job("fx_s3_slice_legacy_held", multi(out), clip="Longer[5..5]", convert="0")
     job("fx_s3_filter_objcurves", groups(out), clip="", prefixes="Arm")
     job("fx_s3_frac", s3_frac(out), clip="")
+    # Review regressions: dictionary overwrite/order, escaped-path filtering, named fallback from either resolver,
+    # and bpy.data.actions.new's UTF-8 truncation and collision suffixes.
+    mp = multi(out)
+    job("fx_s3_roles_overwritten", mp, convert="0", roles="attack=Longer;attack=Held")
+    job("fx_s3_roles_overwrite_order", mp, convert="0", prefixes="Arm", roles="move=Held;attack=Spin[0..2];move=Longer")
+    for name, suffix in [('Ar"m', "quote"), (r"Ar\m", "slash")]:
+        ep = s3_escaped_bone(out, name, suffix)
+        job("EXIT:3:fx_s3_filter_" + suffix, ep, prefixes=name)
+        escaped = name.replace("\\", "\\\\").replace('"', '\\"')
+        job("fx_s3_filter_" + suffix + "_escaped", ep, prefixes=escaped)
+    job("LEFT:fx_s3_primary_frame_limit", plain, clip="Spin[1048575..1048575]", convert="0")
+    job("LEFT:fx_s3_role_frame_limit", plain, convert="0", roles="attack=Spin[1048575..1048575]")
+    long_role = "a" * 250
+    job("fx_s3_action_name_limit", plain, convert="0", roles=long_role + "=Spin[0..2];" + long_role + "b=Spin[1..3]")
 
 
 if __name__ == "__main__":

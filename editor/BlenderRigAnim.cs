@@ -723,6 +723,8 @@ public static class BlenderRigAnim
             return -1;
         }
         ActionData ActionOf(string name) => s.Actions.FirstOrDefault(x => x.Name == name);
+        var actionNames = new BlenderNames.NamePool();
+        foreach (var act in s.Actions) actionNames.Unique(act.Name);
         float LengthOf(int boneNode) => rig.ArmatureOfBone[boneNode].Length[boneNode];
         void FrameSet(int f)
         {
@@ -836,7 +838,9 @@ public static class BlenderRigAnim
                 }
                 snap[f] = at;
             }
-            var na = new ActionData { Name = newName };
+            // bpy.data.actions.new uses the ID name map: truncate to 255 UTF-8 bytes and resolve collisions.
+            // The sliced log below still prints newName, as the Python script does.
+            var na = new ActionData { Name = actionNames.Unique(newName) };
             s.Actions.Add(na); BlenderExportTree.StableSort(s.Actions, (x, y) => BlenderExportTree.StrCaseCmp(x.Name, y.Name));   // bpy.data.actions: id_sort_by_name
             var slot = new SlotData { Identifier = "OB" + armObj.Name, Object = armObj }; na.Slots.Add(slot);
             armObj.Action = na.Name; armObj.Slot = slot.Identifier;
@@ -867,13 +871,20 @@ public static class BlenderRigAnim
 
         // ---- the primary and the roles
         ActionData primary = null;
-        if (a.ClipName.Length > 0) { primary = Resolve(a.ClipName, "primary"); if (exitNow) return; }
+        if (a.ClipName.Length > 0) { primary = Resolve(a.ClipName, "primary"); if (exitNow || s.Fallback != null) return; }
         if (primary == null && armObj.Action != null) primary = ActionOf(armObj.Action);
         if (primary == null && s.Actions.Count > 0) { primary = s.Actions[0]; Note(s, "no clip named and no active action: the first action"); }
         if (primary == null) { s.Logs3.Add("RIGANIM ERROR: no animation action found in the model"); s.Exits = true; Note(s, "no action: the script's exit"); return; }
         AssignAction(primary);
         var roleActs = new List<(string role, ActionData act)>();
-        foreach (var (role, clip) in a.RoleSpecs) { var ra = Resolve(clip, role); if (exitNow) return; roleActs.Add((role, ra)); }
+        foreach (var (role, clip) in a.RoleSpecs)
+        {
+            var ra = Resolve(clip, role);
+            if (exitNow || s.Fallback != null) return;
+            // Python's role_acts dictionary overwrites the value without moving the role's insertion position.
+            int previous = roleActs.FindIndex(r => r.role == role);
+            if (previous >= 0) roleActs[previous] = (role, ra); else roleActs.Add((role, ra));
+        }
         var keep = new HashSet<ActionData>(new[] { primary }.Concat(roleActs.Select(r => r.act)));
         foreach (var act in s.Actions.ToList()) if (!keep.Contains(act)) { RemoveAction(act); Note(s, "an action pruned"); }
         var allActs = new List<ActionData> { primary };
@@ -881,16 +892,26 @@ public static class BlenderRigAnim
         s.Logs3.Add("RIGANIM action '" + primary.Name + "'" + (allActs.Count > 1 ? " + " + (allActs.Count - 1) + " state clip(s)" : ""));
 
         // ---- the bone filter
+        string FilterBone(FCurveData fc)
+        {
+            // rig_anim.py's bone_of extracts the escaped RNA path literally; it does not unescape the bone name.
+            // This distinction controls both the prefix match and the available-bones error list.
+            if (!fc.DataPath.Contains("pose.bones[")) return null;
+            int start = fc.DataPath.IndexOf("[\"", StringComparison.Ordinal) + 2;
+            int end = fc.DataPath.IndexOf("\"]", start, StringComparison.Ordinal);
+            return end < 0 ? fc.DataPath.Substring(start) : fc.DataPath.Substring(start, end - start);
+        }
         if (a.Prefixes.Count > 0)
         {
             foreach (var fa in allActs)
             {
                 var owners = fa.Slots.SelectMany(sl => sl.FCurves.Select(fc => (sl, fc))).ToList();
-                var avail = owners.Where(x => x.fc.Bone != null).Select(x => x.fc.Bone).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList();
+                var avail = owners.Select(x => FilterBone(x.fc)).Where(b => b != null).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList();
                 int kept = 0, rem = 0;
                 foreach (var (sl, fc) in owners)
                 {
-                    if (fc.Bone != null && a.Prefixes.Any(p => fc.Bone.StartsWith(p, StringComparison.Ordinal))) kept++;
+                    string bone = FilterBone(fc);
+                    if (bone != null && a.Prefixes.Any(p => bone.StartsWith(p, StringComparison.Ordinal))) kept++;
                     else { sl.FCurves.Remove(fc); rem++; }
                 }
                 s.Logs3.Add("RIGANIM bone-filter " + PyList(a.Prefixes) + " on '" + fa.Name + "': kept " + kept + " fcurves, removed " + rem);

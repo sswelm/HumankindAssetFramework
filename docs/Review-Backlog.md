@@ -292,6 +292,11 @@ resolution and slicing (frame-by-frame evaluation, decompose, keyframe_insert, t
 bone filter, legacy keepTranslations, the strip, the amplify, the frame range; both legacy recipes equal at stage 3,
 the 21 conversion recipes DEFERRED by name at the rest fold (stages 1 and 2 equal); 20 new fixtures (45 jobs: 38 equal, 3 left, 4 deferred); 12 planted defects and 8 value tampers caught
 (`docs/Testing.md`). Found: the curve evaluator took every segment as Bezier (LINEAR/CONSTANT now follow the key).
+Review of PR #165 (2026-10-13): stage 3 now preserves Python's repeated-role overwrite and insertion order,
+filters the escaped RNA bone path as the script does, returns immediately on a slice's named fallback (primary or
+role), and allocates slice action names through Blender's ID name map. Nine new fixture jobs cover these cases;
+eight refused the original model, all pass after the fixes (seven equal through stage 3, two named frame-limit
+fallbacks after equal stages 1 and 2).
 Next: (d2) the rest fold and rebake - the armature modifier applied as Blender's linear deform (chan_mat = pose_mat
 times Eigen's inverse of arm_mat, `armature_deform.cc`'s float32 mixer, the target/armature matrices), the pose applied
 as the new rest (`applyarmature_set_edit_position`: head, tail, `mat3_vec_to_roll` through `invert_m3_m3`,
