@@ -437,9 +437,15 @@ T-62, the >127-bone pair-merge path the push gate's sample never reaches — is 
 `deploy_convert.py` with the argv the Factory hands both (`UniversalBaker.DeployArgv`), and the two written GLBs must be
 equal byte for byte (a difference is read back and named field by field); a shape the port leaves to Blender by name
 is a SKIP that says why, a port that CRASHES is a FAIL — in the Factory the same crash is a `LogWarning` and Blender
-converts. And `tools/deploy_drill.sh` runs its smallest shard once more under Unity's standalone Mono beside the C#
-shards, the prep drill's 32-bit caveat included. Until this, the port — wired into the Factory on 2026-10-11 — had run
-zero times in Unity.
+converts. An intentional script exit passes only when Blender completes with exit code 1, no output file or Python
+traceback, and the same final `DEPLOY ERROR` diagnostic as the port; timeouts, crashes and incomplete logs fail.
+`tools/deploy_drill.sh` also runs a complete conversion of the moving-mesh fixture under Unity's bundled **64-bit
+Mono**, through `tools/deploy-drill/MonoHost.cs`, and compares its written GLB byte for byte to the real Blender
+export. The standalone `mono.exe` is 32-bit and cannot supply the native float math a full deploy needs. This host
+uses Mono's [embedding API](https://www.mono-project.com/docs/advanced/embedding/), without starting an editor;
+the registry's own deploys still need the Bake Tests row in Unity. Missing runtime prerequisites return SKIP (3).
+The drill requires a written comparison and rejects empty jobs, a missing or changed Blender oracle, and a conversion
+that falls back. The port — wired into the Factory on 2026-10-11 — still needs its first T-62 run in the editor.
 Not covered: district entries in that row (they prep through the same `UniversalBaker.Build`); a strip list that was
 already broken on Blender's command line (a trailing backslash, a double quote) now strips what it says.
 The review of PR #132 (2026-10-09). ChatGPT: the strip list was trimmed with .NET's `Trim()`, which keeps the

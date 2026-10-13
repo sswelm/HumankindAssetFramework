@@ -29,7 +29,7 @@ public static class BlenderDeployHeadlessTest
         var jobs = entries.Where(e => e.deployConvert).ToList();
         if (jobs.Count == 0) { s.skip++; s.body = "SKIP: no registry entry deploys (deployConvert) - the port has nothing of yours to be judged on"; return s; }
         string root = Path.Combine(Path.GetTempPath(), "haf_deploy_test");
-        int left = 0;
+        int left = 0, exits = 0;
         for (int i = 0; i < jobs.Count; i++)
         {
             var e = jobs[i];
@@ -58,16 +58,17 @@ public static class BlenderDeployHeadlessTest
                 if (inProc.UseBlender != null) { s.skip++; left++; body.AppendLine($"SKIP: {e.resourceName}: left to Blender - {inProc.UseBlender}"); continue; }
                 BakeTestRunnerWindow.Progress.Step($"{e.resourceName} ({i + 1}/{jobs.Count}) - Blender's deploy_convert.py", (float)(i + 0.5) / Math.Max(1, jobs.Count));
                 sw.Restart();
-                bool okB = UniversalBaker.DeployViaBlender(e.modelFile, glbB, argv, out string stdout, out string bErr);
+                var blender = UniversalBaker.RunDeployViaBlender(e.modelFile, glbB, argv);
                 double secondsB = sw.Elapsed.TotalSeconds;
                 if (inProc.ScriptExit)
                 {
                     // the script stops itself (no animated part, no tube for the recoil): Blender must stop the same way
                     string why = inProc.Log.LastOrDefault() ?? "(no DEPLOY line)";
-                    if (okB || File.Exists(glbB)) { s.fail++; body.AppendLine($"FAIL: {e.resourceName}: the port stopped before writing ({why}) but Blender's script wrote a file"); continue; }
-                    s.pass++; body.AppendLine($"PASS: {e.resourceName}: both stop before writing - {why}"); continue;
+                    if (!BakerRules.DeployScriptExitMatches(inProc.Log, blender, File.Exists(glbB), out string exitError))
+                    { s.fail++; body.AppendLine($"FAIL: {e.resourceName}: the port stopped before writing ({why}); {exitError}"); continue; }
+                    s.pass++; exits++; body.AppendLine($"PASS: {e.resourceName}: both stop before writing - {why}"); continue;
                 }
-                if (!okB) { s.fail++; body.AppendLine($"FAIL: {e.resourceName}: Blender's conversion failed on a file the port wrote - {bErr}"); continue; }
+                if (!blender.Written) { s.fail++; body.AppendLine($"FAIL: {e.resourceName}: Blender's conversion failed on a file the port wrote - {blender.Error}"); continue; }
                 byte[] a = File.ReadAllBytes(glbA), b = File.ReadAllBytes(glbB);
                 if (!a.SequenceEqual(b))
                 {
@@ -82,7 +83,7 @@ public static class BlenderDeployHeadlessTest
             catch (Exception ex) { s.fail++; body.AppendLine($"FAIL: {e.resourceName}: {ex.GetType().Name}: {ex.Message}"); }
         }
         try { if (Directory.Exists(root)) Directory.Delete(root, true); } catch { }
-        body.Insert(0, $"{jobs.Count} registry entr{(jobs.Count == 1 ? "y deploys" : "ies deploy")}; {s.pass} equal byte for byte, {left} left to Blender by name\n");
+        body.Insert(0, $"{jobs.Count} registry entr{(jobs.Count == 1 ? "y deploys" : "ies deploy")}; {s.pass - exits} equal byte for byte, {exits} matching script exits, {left} left to Blender by name\n");
         s.body = body.ToString();
         return s;
     }

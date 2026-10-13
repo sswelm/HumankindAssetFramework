@@ -571,8 +571,19 @@ def half(out):
     return s.write(out, "deploy_half")
 
 
+def mono_translation(out):
+    # A small, deterministic end-to-end control on Unity's bundled 64-bit Mono: decide, build an armature, bake
+    # its moving mesh, bind it, slice role clips and write the GLB. Bigger registry jobs belong in the editor row.
+    s = Scene()
+    s.node("Hull", None, mesh=s.mesh("hull", 4.0, at=(-2.0, 0.0, -0.5)))
+    part = s.node("Slide", None, mesh=s.mesh("slide", 1.0, at=(-0.5, 0.0, -0.125)))
+    s.anim(part, "translation", [0.0, 1.0], [(0.0, 1.0, 0.0), (0.0, 2.0, 0.0)])
+    return s.write(out, "deploy_mono_translation")
+
+
 def main(out):
     os.makedirs(out, exist_ok=True)
+    print("mono_translation|%s|%s" % (mono_translation(out), DEFAULT))
     f = small(out, "deploy_small", 1.0, skin=True)
     print("small_default|%s|%s" % (f, DEFAULT))
     # a deploy that starts two frames after the clip's first: the exporter cuts every action to the trimmed scene range, and

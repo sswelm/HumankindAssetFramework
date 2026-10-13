@@ -377,21 +377,34 @@ public static class UniversalBaker
     /// (the reversed-recoil incident). `stdout` holds the DEPLOY log either way.</summary>
     internal static bool DeployViaBlender(string src, string outGlb, string[] argv, out string stdout, out string error)
     {
-        stdout = ""; error = "";
+        var run = RunDeployViaBlender(src, outGlb, argv);
+        stdout = run.Stdout; error = run.Error;
+        if (!run.Written && run.Completed) Debug.LogError("[Factory] deploy_convert output:\n" + run.Stdout + "\n" + run.Stderr);
+        return run.Written;
+    }
+
+    internal static BakerRules.DeployBlenderRun RunDeployViaBlender(string src, string outGlb, string[] argv)
+    {
+        var run = new BakerRules.DeployBlenderRun();
         string script = HafPackageContext.ToolPath("deploy_convert.py");
-        if (!File.Exists(script)) { error = "deploy conversion: Tools/deploy_convert.py not found."; return false; }
-        var p = new System.Diagnostics.Process();
-        p.StartInfo.FileName = FindBlender();
-        p.StartInfo.Arguments = $"{BakerRules.BlenderScript(script)} -- \"{src}\" \"{outGlb}\" " + string.Join(" ", argv.Select(a => "\"" + a + "\""));
-        p.StartInfo.UseShellExecute = false; p.StartInfo.CreateNoWindow = true;
-        p.StartInfo.RedirectStandardOutput = true; p.StartInfo.RedirectStandardError = true;
-        p.Start();
-        // Drain BOTH pipes concurrently (RunBounded): the old sequential ReadToEnd(stdout) then ReadToEnd(stderr)
-        // deadlocks when Blender — very chatty on stderr — fills the stderr pipe buffer while we block on stdout.
-        if (!RunBounded(p, 300000, out stdout, out string _)) { error = "deploy conversion: Blender timed out (5 min)."; return false; }
-        if (!File.Exists(outGlb) || p.ExitCode != 0 || !stdout.Contains("DEPLOY wrote:"))
-        { error = "deploy conversion FAILED (script did not complete — see Console for the DEPLOY log / traceback)."; Debug.LogError("[Factory] deploy_convert output:\n" + stdout); return false; }
-        return true;
+        if (!File.Exists(script)) { run.Error = "deploy conversion: Tools/deploy_convert.py not found."; return run; }
+        using (var p = new System.Diagnostics.Process())
+        {
+            p.StartInfo.FileName = FindBlender();
+            p.StartInfo.Arguments = $"{BakerRules.BlenderScript(script)} -- \"{src}\" \"{outGlb}\" " + string.Join(" ", argv.Select(a => "\"" + a + "\""));
+            p.StartInfo.UseShellExecute = false; p.StartInfo.CreateNoWindow = true;
+            p.StartInfo.RedirectStandardOutput = true; p.StartInfo.RedirectStandardError = true;
+            p.Start();
+            // Drain both pipes concurrently; retain stderr to distinguish a script exit from a Python traceback.
+            bool exited = RunBounded(p, 300000, out run.Stdout, out run.Stderr, out bool pipesDrained);
+            run.Completed = exited && pipesDrained;
+            if (!exited) { run.Error = "deploy conversion: Blender timed out (5 min)."; return run; }
+            run.ExitCode = p.ExitCode;
+            if (!pipesDrained) { run.Error = "deploy conversion: Blender's output pipes did not finish draining."; return run; }
+            run.Written = File.Exists(outGlb) && run.ExitCode == 0 && run.Stdout.Contains("DEPLOY wrote:");
+            if (!run.Written) run.Error = "deploy conversion FAILED (script did not complete — see Console for the DEPLOY log / traceback).";
+            return run;
+        }
     }
 
     static BakeResult BuildAnimatedInner(BakeConfig cfg)
@@ -2599,8 +2612,11 @@ public static class UniversalBaker
     // never exits, stdout never EOFs, and we hang forever). The wait is bounded, so a hung child can't freeze the editor.
     // Returns false (after killing the child) on timeout; otherwise the process has exited and stdout/stderr are filled.
     internal static bool RunBounded(System.Diagnostics.Process p, int timeoutMs, out string stdout, out string stderr)
+        => RunBounded(p, timeoutMs, out stdout, out stderr, out _);
+
+    internal static bool RunBounded(System.Diagnostics.Process p, int timeoutMs, out string stdout, out string stderr, out bool pipesDrained)
     {
-        stdout = ""; stderr = "";
+        stdout = ""; stderr = ""; pipesDrained = false;
         var outTask = System.Threading.Tasks.Task.Run(() => p.StandardOutput.ReadToEnd());
         var errTask = System.Threading.Tasks.Task.Run(() => p.StandardError.ReadToEnd());
         var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -2627,6 +2643,7 @@ public static class UniversalBaker
         bool drained; try { drained = System.Threading.Tasks.Task.WaitAll(new[] { outTask, errTask }, remaining); } catch { drained = true; }
         stdout = outTask.Status == System.Threading.Tasks.TaskStatus.RanToCompletion ? outTask.Result : "";
         stderr = errTask.Status == System.Threading.Tasks.TaskStatus.RanToCompletion ? errTask.Result : "";
+        pipesDrained = drained && outTask.Status == System.Threading.Tasks.TaskStatus.RanToCompletion && errTask.Status == System.Threading.Tasks.TaskStatus.RanToCompletion;
         if (!drained)
         {
             // reads are still blocked on an inherited-open pipe; don't hang. Observe any eventual fault (the caller

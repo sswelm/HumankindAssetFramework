@@ -438,5 +438,18 @@ echo "export status $erc"
                     self.assertIn("export status "+str(status), result.stdout)
 
 
+class DeployRuntimePrerequisiteTests(unittest.TestCase):
+    def test_missing_Mono_returns_skip_before_any_conversion_claim(self):
+        with tempfile.TemporaryDirectory(prefix="haf-missing-mono-") as directory:
+            env = dict(os.environ, UNITY=directory)
+            result = subprocess.run([BASH, str(ROOT / "tools/deploy_drill.sh")], env=env,
+                                    capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertIn("SKIP", result.stdout)
+        self.assertIn("Mono not found", result.stdout)
+        self.assertIn("NOT drilled", result.stdout)
+        self.assertNotIn("PASS", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -30,6 +30,7 @@ static class DeployDrill
     {
         Console.OutputEncoding = new UTF8Encoding(false);
         if (args.Length > 0 && args[0] == "--decisions") return DecisionsDrill.Run(args.Skip(1).ToArray());
+        if (args.Length > 0 && args[0] == "--in-process") return InProcessDrill.Run(args.Skip(1).ToArray());
         if (args.Length > 0 && args[0] == "--export") return ExportDrill.Run(args.Skip(1).ToArray());
         if (args.Length > 0 && args[0] == "--materials") return MaterialDrill.Run(args.Skip(1).ToArray());
         if (args.Length > 0 && args[0] == "--bezier") return BezierDrill.Run(args.Skip(1).ToArray());

@@ -464,6 +464,33 @@ public static class BackupRules
 /// <summary>Bake-pipeline decisions (UniversalBaker calls these; BakerRulesTests locks them).</summary>
 public static class BakerRules
 {
+    // Process facts kept separately from the successful-write verdict: SystemExit(1), a Python exception and a
+    // timeout all fail to write, but only the first can agree with the port's intentional script exit.
+    public sealed class DeployBlenderRun
+    {
+        public bool Completed, Written;
+        public int ExitCode = -1;
+        public string Stdout = "", Stderr = "", Error = "";
+    }
+
+    public static bool DeployScriptExitMatches(IEnumerable<string> portLog, DeployBlenderRun run, bool outputExists, out string error)
+    {
+        error = null;
+        if (!run.Completed) { error = "Blender did not complete: " + run.Error; return false; }
+        if (run.ExitCode != 1) { error = "Blender exited " + run.ExitCode + ", expected the script's SystemExit(1)"; return false; }
+        if (run.Written || outputExists) { error = "Blender wrote a file after the port stopped"; return false; }
+        if ((run.Stdout + "\n" + run.Stderr).Contains("Traceback (most recent call last):"))
+        { error = "Blender raised a Python exception instead of the script's own exit"; return false; }
+        string[] expected = portLog.Where(l => l.StartsWith("DEPLOY", StringComparison.Ordinal)).ToArray();
+        string[] actual = run.Stdout.Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.StartsWith("DEPLOY", StringComparison.Ordinal)).ToArray();
+        if (expected.Length == 0 || !expected.Last().StartsWith("DEPLOY ERROR:", StringComparison.Ordinal))
+        { error = "the port's script exit has no final DEPLOY ERROR diagnostic"; return false; }
+        if (actual.Length == 0 || actual.Last() != expected.Last() ||
+            !actual.Where(l => l.StartsWith("DEPLOY ERROR:", StringComparison.Ordinal)).SequenceEqual(expected.Where(l => l.StartsWith("DEPLOY ERROR:", StringComparison.Ordinal))))
+        { error = "Blender did not report the port's script-exit diagnostic: " + expected.Last(); return false; }
+        return true;
+    }
+
     public enum ExtractionAction
     {
         UseExisting = 0,    // extraction on disk matches the current source — skip hygiene and glbconv
