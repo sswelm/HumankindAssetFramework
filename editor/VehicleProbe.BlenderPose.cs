@@ -167,6 +167,11 @@ public static partial class VehicleProbe
     /// are its pose bone's. poseOut: per bone node its pose matrix (armature space, column-major); propsOut: per bone
     /// node the pose bone's location, quaternion and scale.</summary>
     internal static float[][] BlenderWorldMatricesPosed(HafModel m, ImportRig rig, Func<int, float[][]> animated, out Dictionary<int, float[]> poseOut, out Dictionary<int, float[][]> propsOut)
+        => BlenderWorldMatricesPosed(m, rig, animated, out poseOut, out propsOut, out _);
+
+    /// <summary>... and every node's local matrix (BKE_object_to_mat4 of the properties the world was built from), which a
+    /// later re-evaluation under a changed parent multiplies again (rig_anim's stage 2).</summary>
+    internal static float[][] BlenderWorldMatricesPosed(HafModel m, ImportRig rig, Func<int, float[][]> animated, out Dictionary<int, float[]> poseOut, out Dictionary<int, float[][]> propsOut, out float[][] localOut)
     {
         float[][] Props(int n)
         {
@@ -176,6 +181,7 @@ public static partial class VehicleProbe
             return new[] { p?[0] ?? l, p?[1] ?? q, p?[2] ?? s };
         }
         var world = BlenderWorldMatrices(m, Props, out var local);
+        localOut = local;
         var pose = new Dictionary<int, float[]>(); var props = new Dictionary<int, float[][]>();
         foreach (var arm in rig.Armatures.Values)
         {

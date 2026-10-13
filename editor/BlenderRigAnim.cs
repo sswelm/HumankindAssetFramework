@@ -1,11 +1,12 @@
-// BlenderRigAnim.cs - rig_anim.py without Blender, stage 1 (step 4 of replacing Blender, step (b), 2026-10-12): what the
-// script's FIRST stage leaves in Blender's scene - the arguments as it parses them, the import, the material-less drop,
-// the armature lookup (and the exit without one), the contract marker, the object-animation clear - row for row and bit
-// for bit as tools/riganim_drill.sh's dump records it (tools/riganim-drill/blender_riganim_dump.py: the RIGANIM lines,
-// the scene frame, every object with its matrices, every mesh's geometry and weights hashed, the bones at rest, the pose
-// at frame 1, every action's fcurves with their keys and handles). Built from the deploy and prep ports - BlenderNames,
-// BlenderPosedState, VehicleProbe.BlenderWorld/Pose/Armature/Skin, BlenderReduce at a ratio of 1 - and these rules of
-// the importer (io_scene_gltf2/blender/imp, Blender 5.1.2) read for this stage:
+// BlenderRigAnim.cs - rig_anim.py without Blender, stages 1 and 2 (step 4 of replacing Blender, steps (b) and (c),
+// 2026-10-12): what the script's first stage leaves in Blender's scene - the arguments as it parses them, the import, the
+// material-less drop, the armature lookup (and the exit without one), the contract marker, the object-animation clear -
+// and what its second stage makes of that (RunStage2: the bone-parent -> skin bind, the wrapper flatten), row for row
+// and bit for bit as tools/riganim_drill.sh's dump records it (tools/riganim-drill/blender_riganim_dump.py: the RIGANIM
+// lines, the scene frame, every object with its matrices, every mesh's geometry and weights hashed, the bones at rest,
+// the pose at frame 1, every action's fcurves with their keys and handles). Built from the deploy and prep ports -
+// BlenderNames, BlenderPosedState, VehicleProbe.BlenderWorld/Pose/Armature/Skin, BlenderReduce at a ratio of 1,
+// BlenderEigen - and these rules of the importer (io_scene_gltf2/blender/imp, Blender 5.1.2) read for stage 1:
 //   * mesh.py: a mesh gets material slots only when a primitive has a material or COLOR_0 (one slot per distinct Blender
 //     material in order of first use, one EMPTY slot shared by the primitives without one); with neither there are no
 //     slots at all, and the script drops the object (`len(o.data.materials) == 0`) - its children become scene roots and
@@ -30,7 +31,9 @@
 // localNodeAnim (the REST hold and the round-trip sampling), several scenes, cameras, lights, mesh instancing,
 // KHR_materials_variants, KHR_animation_pointer, a CUBICSPLINE sampler, morph weights, a sampler without keys or with the
 // wrong component count, a skin whose joints are under no armature or that lists a joint twice, a mesh placed on a bone
-// node, and every mesh BlenderReduce declines. Held to Blender by tools/riganim_drill.sh (--stage1), every row.
+// node, every mesh BlenderReduce declines, and (stage 2) a bone-hung mesh whose datablock another object shares or
+// staticParts matching against supplementary Unicode names. Held to
+// Blender by tools/riganim_drill.sh (--stages 2), every row of both stages.
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -44,6 +47,40 @@ public static class BlenderRigAnim
     // Python's str.strip() whitespace (the ASCII information separators included, which .NET's Trim leaves alone)
     static readonly char[] PyWhitespace = new[] { 0x9, 0xa, 0xb, 0xc, 0xd, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x85, 0xa0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000 }.Select(c => (char)c).ToArray();
     static string PyStrip(string s) => s.Trim(PyWhitespace);
+
+    // Python str.lower() uses Unicode's full lowercase mapping. .NET's invariant mapping is simple: notably it leaves
+    // U+0130 unchanged and maps every capital sigma to σ, including the word-final one Python maps to ς. These names
+    // decide whether a bone-hung mesh is kept static or converted to a skin, so the distinction changes the rig.
+    static string PyLower(string s)
+    {
+        bool Cased(char c)
+        {
+            var cat = CharUnicodeInfo.GetUnicodeCategory(c);
+            return cat == UnicodeCategory.UppercaseLetter || cat == UnicodeCategory.LowercaseLetter || cat == UnicodeCategory.TitlecaseLetter;
+        }
+        bool CaseIgnorable(char c)
+        {
+            var cat = CharUnicodeInfo.GetUnicodeCategory(c);
+            return cat == UnicodeCategory.NonSpacingMark || cat == UnicodeCategory.EnclosingMark || cat == UnicodeCategory.Format ||
+                   cat == UnicodeCategory.ModifierLetter || cat == UnicodeCategory.ModifierSymbol || c == '\'' || c == '’';
+        }
+        var sb = new StringBuilder(s.Length);
+        for (int i = 0; i < s.Length; i++)
+        {
+            char c = s[i];
+            if (c == 'İ') { sb.Append("i\u0307"); continue; }
+            if (c == 'Σ')
+            {
+                int before = i - 1, after = i + 1;
+                while (before >= 0 && CaseIgnorable(s[before])) before--;
+                while (after < s.Length && CaseIgnorable(s[after])) after++;
+                sb.Append(before >= 0 && Cased(s[before]) && (after >= s.Length || !Cased(s[after])) ? 'ς' : 'σ');
+                continue;
+            }
+            sb.Append(char.ToLowerInvariant(c));
+        }
+        return sb.ToString();
+    }
 
     /// <summary>The script's arguments as it parses them (`argv = sys.argv[sys.argv.index("--") + 1:]`): argv[0] the input,
     /// argv[1] the output, argv[2] the target, then the optional ones to argv[14]. Logs holds the RIGANIM lines the parsing
@@ -108,8 +145,8 @@ public static class BlenderRigAnim
         a.ConvertRig = Has(8) && (c8 == "0" || c8 == "1") ? c8 == "1" : a.RigRot.Any(v => Math.Abs(v) > 1e-4);
         a.Logs.Add("RIGANIM conversion path: " + (a.ConvertRig ? "ON (raw-rig convert)" : "off (legacy byte-identical)"));
         a.KeepTranslations = Has(12) && PyStrip(At(12)) == "1";
-        // `.lower()` on ASCII is .NET's; this stage reads the list for nothing but the record
-        a.StaticParts = At(13).Split(',').Select(PyStrip).Where(p => p.Length > 0).Select(p => p.ToLowerInvariant()).ToList();
+        // The script lowercases each staticParts substring before matching it against object and material names.
+        a.StaticParts = At(13).Split(',').Select(PyStrip).Where(p => p.Length > 0).Select(PyLower).ToList();
         a.LocalNodeAnim = Has(14) && PyStrip(At(14)) == "1";
         if (Has(9) && PyStrip(At(9)).Length > 0)
             foreach (var raw in At(9).Split(';'))
@@ -157,7 +194,11 @@ public static class BlenderRigAnim
         public string DataName;                   // the mesh or armature datablock, null for an empty
         public string Action, Slot;               // the active action and its slot identifier, or null
         public bool HasAnimationData;             // animation_data is not None (an NLA track from any animation)
-        public float[] World, Local;              // column-major float32, as VehicleProbe holds matrices
+        public float[] World, Local;              // column-major float32, as VehicleProbe holds matrices: matrix_world as the
+                                                  // original object holds it (the last evaluation), and BKE_object_to_mat4 of
+                                                  // the object's own location, rotation and scale
+        public bool Dirty;                        // tagged for the next depsgraph update: World is stale against Local (a parent
+                                                  // changed under it, or a matrix_world assigned, with no view_layer.update since)
         public BlenderNames.BlenderObject Source;
         public MeshData Mesh;                     // a mesh object's data
     }
@@ -205,7 +246,8 @@ public static class BlenderRigAnim
     public sealed class Stage1
     {
         public string Fallback;                                       // why this file is Blender's to prepare, or null
-        public readonly List<string> Logs = new List<string>();       // the RIGANIM lines of the stage, in order
+        public readonly List<string> Logs = new List<string>();       // the RIGANIM lines of stage 1, in order
+        public readonly List<string> Logs2 = new List<string>();      // the RIGANIM lines of stage 2 (RunStage2), in order
         public bool Exits;                                            // the script's sys.exit(1) in this stage (after its ERROR line)
         public int FrameStart = 1, FrameEnd = 250, FrameCurrent = 1;
         public readonly List<SceneObject> Objects = new List<SceneObject>();   // scene.objects after the stage, in order
@@ -292,7 +334,7 @@ public static class BlenderRigAnim
             if (o.Parent != null)
             {
                 if (byName.TryGetValue(o.Parent, out var p)) so.Parent = p;
-                else Note(s, "a dropped mesh's child, a scene root now (its matrix_world kept)");
+                else { so.Dirty = true; Note(s, "a dropped mesh's child, a scene root now (its matrix_world kept until the next update)"); }
             }
             if (so.ParentBone != null)
             {
@@ -404,14 +446,14 @@ public static class BlenderRigAnim
             var pose = new BlenderPosedState.Pose(imports[0], m, rig);
             set = pose.FrameSet(1f);
         }
-        var world = VehicleProbe.BlenderWorldMatricesPosed(m, rig, set, out var poseMats, out var poseProps);
+        var world = VehicleProbe.BlenderWorldMatricesPosed(m, rig, set, out var poseMats, out var poseProps, out var locals);
         // the identity transform the importer gives a moved skinned mesh and a '.skinned'/'.mesh' vnode, as BKE_object_to_mat4 builds it
         var identity = VehicleProbe.ObjectMatrix(new float[3], new[] { 1f, 0f, 0f, 0f }, new[] { 1f, 1f, 1f });
         foreach (var so in s.Objects)
         {
             var o = so.Source;
             bool skinnedMesh = o.Kind == BlenderNames.ObjectKind.Mesh && o.Skin >= 0 && so.Mesh.DefNr != null;
-            so.Local = o.GltfNode >= 0 && !skinnedMesh ? null : identity;   // an object with its own node keeps the importer's chain (world[]); the others hang at the identity
+            so.Local = o.GltfNode >= 0 && !skinnedMesh ? locals[o.GltfNode] : identity;   // an object with its own node has the importer's properties (posed at frame 1); the others hang at the identity
             if (skinnedMesh) Note(s, o.GltfNode >= 0 ? "a skinned mesh moved under its armature" : "an animated skinned mesh node (its mesh on a '.skinned' child of the armature)");
             else if (o.GltfNode < 0) Note(s, "a mesh on an armature node (a '.mesh' child)");
         }
@@ -420,7 +462,8 @@ public static class BlenderRigAnim
             if (so.World != null) return so.World;
             var o = so.Source;
             // a dropped mesh's child keeps the matrix_world it had under it (measured on the junk fixture: the same matrix at
-            // stages 1 to 3, the parent's scale in it) - the importer's chain stands, with the pose
+            // stages 1 to 3 when nothing evaluates the scene, the parent's scale in it) - the importer's chain stands, with
+            // the pose; the first depsgraph update after the drop re-evaluates it as a root (Dirty; fx_s2_junk_hung)
             bool chained = o.GltfNode < 0 || (o.Kind == BlenderNames.ObjectKind.Mesh && o.Skin >= 0 && so.Mesh.DefNr != null);
             if (!chained) return so.World = world[o.GltfNode];
             if (so.ParentBone != null)
@@ -440,6 +483,190 @@ public static class BlenderRigAnim
         ad.BoneNodes = names.BoneNodesInOrder.Where(b => names.ArmatureNodeOfBone[b] == armNode).ToList();
         s.Armature = ad;
         return s;
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // stage 2: the bone-parent -> skin conversion and the wrapper flatten (both under convertRig); localNodeAnim's
+    // transplant is a Fallback of stage 1. Blender's rules read for this stage:
+    //   * `o.matrix_world = m` is rna_Object_matrix_world_set -> BKE_object_apply_mat4(ob, m, use_compat=false,
+    //     use_parent=true): with a parent, the parent's matrix (BKE_object_get_parent_matrix: its object_to_world, the
+    //     bone's pose matrix moved to its tail for a bone parent) times parentinv, Eigen's inverse of that, times m;
+    //     mat4_to_loc_rot_size; the object is in QUATERNION mode (the importer's set_transforms), so
+    //     mat3_normalized_to_quat times the inverse of the identity delta quaternion; dloc subtracted, dscale divided
+    //     out. The setter writes the PROPERTIES only: object_to_world stays what the last evaluation left until the next
+    //     view_layer.update() (the flattened objects' rows of this stage still show the old matrix).
+    //   * `o.parent = x`, `o.parent_type = ...`, `o.parent_bone = ...` are ED_object_parent: parentinv reset to the
+    //     identity each time, and a transform tag on the object.
+    //   * view_layer.update() re-evaluates what is tagged and what depends on it: the armature's pose when
+    //     pose_position changes (REST: every pose matrix is the bone's arm_mat), with every object hanging from one of
+    //     its bones and their descendants; a re-homed object and its descendants. An object that nothing tags keeps
+    //     its matrix_world - a dropped mesh's child among them (measured, fx_s2_junk_hung).
+    //   * VertexGroup.add(indices, 1.0, 'REPLACE'): the weight set where the vertex has the group, appended where not;
+    //     vertex_groups.new appends the group; the modifier "Armature" is added when none of type ARMATURE is there.
+    //   * The flatten unparents every MESH and ARMATURE whose parent is an EMPTY (its matrix_world assigned without a
+    //     parent: a plain decomposition) and removes every EMPTY of the file - the animated skinned mesh node the importer
+    //     left as an empty among them (fx_skinned_anim).
+
+    /// <summary>Stage 2 of rig_anim.py on the scene stage 1 left: mutates `s` (objects, meshes, Logs2), or sets Fallback.</summary>
+    public static void RunStage2(Stage1 s, Args a)
+    {
+        if (s.Fallback != null || s.Exits) return;
+        if (!a.ConvertRig) { Note(s, "stage 2: the legacy path (nothing bound, nothing flattened)"); return; }
+        var ad = s.Armature; var armObj = ad.Object; var rig = s.Rig;
+        // _governing_bone: up the parent chain to the first object hung from a bone of an armature
+        string Governing(SceneObject o)
+        {
+            for (var cur = o; cur != null && cur.Parent != null; cur = cur.Parent)
+                if (cur.ParentBone != null && cur.Parent.Type == "ARMATURE") return cur.ParentBone;
+            return null;
+        }
+        // The target runtime's char-wise casing has no supplementary-plane mapping. Python lowercases names in those
+        // scripts too (for example Deseret), so leave that rare case to Blender instead of silently binding a static mesh.
+        if (a.StaticParts.Count > 0 && (a.StaticParts.Any(sp => sp.Any(char.IsSurrogate)) ||
+            s.Objects.Any(o => o.Type == "MESH" && Governing(o) != null &&
+                (o.Name.Any(char.IsSurrogate) || o.Mesh.Materials.Any(mat => mat != null && mat.Any(char.IsSurrogate))))))
+        {
+            s.Fallback = "staticParts with a supplementary Unicode name: Python's lowercase mapping is not modelled";
+            return;
+        }
+        // _is_static_part: a staticParts entry inside the Python-lowered object or material name
+        bool IsStatic(SceneObject o)
+        {
+            if (a.StaticParts.Count == 0) return false;
+            var ns = new List<string> { PyLower(o.Name) };
+            foreach (var mat in o.Mesh.Materials) if (mat != null) ns.Add(PyLower(mat));
+            return a.StaticParts.Any(sp => ns.Any(n => n.Contains(sp)));
+        }
+        float LengthOf(int boneNode) => rig.ArmatureOfBone[boneNode].Length[boneNode];
+        // the parent matrix (BKE_object_get_parent_matrix) and the world of an object, evaluated with the given pose
+        // matrices; `keep` holds the objects nothing tags, whose matrix_world stands
+        float[] Eval(SceneObject o, Func<int, float[]> poseOf, Dictionary<SceneObject, float[]> memo)
+        {
+            if (memo.TryGetValue(o, out var w)) return w;
+            if (o.Parent == null) w = o.Local;
+            else
+            {
+                var pw = Eval(o.Parent, poseOf, memo);
+                var pm = o.ParentBone != null ? VehicleProbe.MulM4(pw, VehicleProbe.ParBone(poseOf(o.ParentBoneNode), LengthOf(o.ParentBoneNode))) : pw;
+                w = VehicleProbe.MulM4(pm, o.Local);
+            }
+            memo[o] = w; return w;
+        }
+        bool UnderBone(SceneObject o) { for (var cur = o; cur != null; cur = cur.Parent) if (cur.ParentBone != null) return true; return false; }
+        bool DirtyChain(SceneObject o) { for (var cur = o; cur != null; cur = cur.Parent) if (cur.Dirty) return true; return false; }
+
+        // ---- the bind
+        var bp = s.Objects.Where(o => o.Type == "MESH" && Governing(o) != null && !IsStatic(o)).ToList();
+        var skipped = s.Objects.Where(o => o.Type == "MESH" && Governing(o) != null && IsStatic(o)).Select(o => o.Name).ToList();
+        if (skipped.Count > 0)
+        {
+            skipped.Sort(StringComparer.Ordinal);   // sorted(): by code point
+            s.Logs2.Add("RIGANIM staticParts: " + skipped.Count + " bone-parented mesh(es) kept WEIGHTLESS (authored position, no bind): " + string.Join(", ", skipped.Take(8)) + (skipped.Count > 8 ? "…" : ""));
+            Note(s, "staticParts: bone-hung meshes kept weightless");
+            if (skipped.Count > 8) Note(s, "staticParts: more than eight skipped (the ellipsis)");
+        }
+        if (bp.Count > 0)
+        {
+            // one vertex-group list and one weight layer serve every object of a mesh datablock: two binds on one mesh,
+            // or a bind the other object's rows then show, are not modelled
+            foreach (var o in bp)
+                if (s.Objects.Any(x => x != o && x.Type == "MESH" && x.DataName == o.DataName)) { s.Fallback = "'" + o.Name + "': a bone-hung mesh whose datablock another object shares (one vertex-group list, one weight layer)"; return; }
+            var armBones = new HashSet<string>(ad.BoneNodes.Select(b => s.Names.BoneOfJoint[b]), StringComparer.Ordinal);
+            string rootBone = ad.BoneNodes.Where(b => ad.Rest.Parent[b] < 0).Select(b => s.Names.BoneOfJoint[b]).FirstOrDefault();
+            // pose_position = 'REST' + update: the script's armature at rest (pose_mat = arm_mat), every other one as posed;
+            // what hangs from no bone and carries no tag is not re-evaluated (a dropped mesh's child is tagged: its first
+            // update makes it a root at its own transform)
+            float[] RestPose(int b) => rig.ArmatureOfBone[b] == ad.Rest ? ad.Rest.ArmMat[b] : ad.PoseMats[b];
+            var restMemo = new Dictionary<SceneObject, float[]>();
+            foreach (var o in s.Objects) if (!UnderBone(o) && !DirtyChain(o)) restMemo[o] = o.World;
+            foreach (var o in s.Objects) if (o.Dirty) Note(s, "a tagged object re-evaluated by the bind's update (a dropped mesh's child at its own transform)");
+            var plan = bp.Select(o => (o, bone: Governing(o), mw: Eval(o, RestPose, restMemo))).ToList();
+            // the parent matrix of the assignment is the armature object's matrix_world as that update left it (re-rooted
+            // at its own transform when it was a dropped mesh's child)
+            var armWorld = Eval(armObj, RestPose, restMemo);
+            int bound = 0;
+            var rehomed = new HashSet<SceneObject>();
+            foreach (var (o, bone, mw) in plan)
+            {
+                string tgt = armBones.Contains(bone) ? bone : rootBone;
+                if (tgt == null) continue;
+                if (tgt != bone) Note(s, "a governing bone the armature does not have: bound to its root bone");
+                if (o.ParentBone == null) Note(s, "a bound mesh governed through its parent chain (not hung from the bone itself)");
+                o.Parent = armObj; o.ParentBone = null; o.ParentBoneNode = -1;
+                ApplyMat4(mw, armWorld, out var loc, out var quat, out var scale);
+                o.Local = VehicleProbe.ObjectMatrix(loc, quat, scale);
+                rehomed.Add(o);
+                var d = o.Mesh;
+                int gi = d.Groups.IndexOf(tgt);
+                if (gi < 0) { d.Groups.Add(tgt); gi = d.Groups.Count - 1; }
+                else Note(s, "a bound mesh already having a vertex group of its bone's name");
+                if (d.DefNr == null)
+                {
+                    d.DefNr = new List<int>[d.Vertices]; d.DefWeight = new List<float>[d.Vertices];
+                    for (int v = 0; v < d.Vertices; v++) { d.DefNr[v] = new List<int>(); d.DefWeight[v] = new List<float>(); }
+                }
+                for (int v = 0; v < d.Vertices; v++)
+                {
+                    int at = d.DefNr[v].IndexOf(gi);
+                    if (at >= 0) d.DefWeight[v][at] = 1f; else { d.DefNr[v].Add(gi); d.DefWeight[v].Add(1f); }
+                }
+                if (d.ArmatureModifier == null) d.ArmatureModifier = armObj.Name;
+                else Note(s, "a bound mesh already having an Armature modifier");
+                bound++;
+            }
+            // pose_position back + update: the re-homed objects and their descendants, and everything under the
+            // armature's bones again, evaluated in the pose; the rest keep their matrix_world
+            bool Touched(SceneObject o) { for (var cur = o; cur != null; cur = cur.Parent) if (rehomed.Contains(cur)) return true; return false; }
+            var poseMemo = new Dictionary<SceneObject, float[]>();
+            foreach (var o in s.Objects) if (!UnderBone(o) && !Touched(o) && !DirtyChain(o)) poseMemo[o] = o.World;
+            foreach (var o in s.Objects) { o.World = Eval(o, b => ad.PoseMats[b], poseMemo); o.Dirty = false; }
+            s.Logs2.Add("RIGANIM bone-parent->skin: bound " + bound + " rigidly-hung mesh(es) full-weight to their governing bones (was: no weights -> bone #0)");
+            Note(s, "bone-parent -> skin: meshes bound");
+            if (s.Objects.Any(o => o.Type == "MESH" && Governing(o) != null && !rehomed.Contains(o))) Note(s, "a bone-hung mesh left hung (static) beside the bind");
+        }
+
+        // ---- the flatten
+        var wrapped = s.Objects.Where(o => (o.Type == "MESH" || o.Type == "ARMATURE") && o.Parent != null && o.Parent.Type == "EMPTY").ToList();
+        int wrapperCount = wrapped.Select(o => o.Parent).Distinct().Count();
+        foreach (var o in wrapped)
+        {
+            var mw = o.World;
+            o.Parent = null; o.ParentBone = null; o.ParentBoneNode = -1;
+            ApplyMat4(mw, null, out var loc, out var quat, out var scale);
+            o.Local = VehicleProbe.ObjectMatrix(loc, quat, scale);
+            o.Dirty = true;   // no update follows in this stage: matrix_world stays the old one
+            Note(s, o.Type == "ARMATURE" ? "the armature unparented from a wrapper empty" : "a mesh unparented from a wrapper empty");
+        }
+        var empties = s.Objects.Where(o => o.Type == "EMPTY").ToList();
+        foreach (var e in empties)
+        {
+            foreach (var c in s.Objects.Where(x => x.Parent == e)) { c.Parent = null; c.ParentBone = null; c.ParentBoneNode = -1; }   // only empties are left under it
+            s.Objects.Remove(e);
+        }
+        if (empties.Count > 0)
+        {
+            s.Logs2.Add("RIGANIM flattened " + empties.Count + " wrapper empt" + (empties.Count == 1 ? "y" : "ies") + "; rig reparented to root for identity export nodes");
+            Note(s, "wrapper empties flattened");
+            if (empties.Count > wrapperCount) Note(s, "an empty removed that wrapped nothing");
+        }
+    }
+
+    /// <summary>BKE_object_apply_mat4 for an object in quaternion mode with the identity parentinv and no deltas: with a
+    /// parent, Eigen's inverse of (the parent's matrix times the identity) times the matrix; mat4_to_loc_rot_size;
+    /// mat3_normalized_to_quat times the inverse of the identity delta quaternion; dloc subtracted, dscale divided out.</summary>
+    static void ApplyMat4(float[] mat, float[] parentWorld, out float[] loc, out float[] quat, out float[] scale)
+    {
+        var rmat = mat;
+        if (parentWorld != null)
+        {
+            var diff = VehicleProbe.MulM4(parentWorld, VehicleProbe.IdentityF());
+            rmat = VehicleProbe.MulM4(BlenderEigen.InvertM4(diff), mat);
+        }
+        VehicleProbe.Mat4ToLocRotSize(rmat, out var l, out var rot, out var size);
+        var q = VehicleProbe.Mat3NormalizedToQuat(rot);
+        quat = BlenderPosedState.MulQtQt(new[] { 1f, -0f, -0f, -0f }, q);
+        loc = new[] { (float)(l[0] - 0f), (float)(l[1] - 0f), (float)(l[2] - 0f) };
+        scale = new[] { (float)(size[0] / 1f), (float)(size[1] / 1f), (float)(size[2] / 1f) };
     }
 
     /// <summary>bpy.utils.escape_identifier (BLI_str_escape): a backslash before a quote or a backslash, the C escapes for

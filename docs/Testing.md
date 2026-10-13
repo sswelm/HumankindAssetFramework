@@ -1409,6 +1409,43 @@ could not see it: a written zero keeps the sign of the one it replaces); a dropp
 weights, a sampler without keys, a mesh on a bone node, a twice-listed joint, and what BlenderReduce declines - none
 in the registry. Stages 2 to 4 are not compared yet, and the PASS line says so.
 
+Step (c), stage 2 in C# (2026-10-12): `BlenderRigAnim.RunStage2` continues on the scene stage 1 left - the bone-parent ->
+skin bind (the governing bone up the parent chain, staticParts by lowered object and material names, the rest-world pin,
+the full-weight vertex group on the governing bone or the root bone when the armature has no bone of that name, the
+Armature modifier when none is there) and the wrapper flatten (every MESH and ARMATURE under an EMPTY unparented with
+its world kept, every EMPTY removed) - and `riganim.exe --stages 2` compares stage 2's rows as stage 1's; a `LEFT:` job
+may be declined at either stage, its earlier stage compared all the same. Blender's rules read for it: `matrix_world = m`
+is BKE_object_apply_mat4 (the parent's matrix times the identity parentinv, Eigen's inverse of that times m,
+mat4_to_loc_rot_size, mat3_normalized_to_quat times the inverse of the identity delta quaternion) and it writes the
+PROPERTIES only - the object's matrix_world stays the last evaluation's until the next `view_layer.update()`, so the
+flattened objects' rows of this stage still show the old matrix (Dirty in the model; stage 3's first update will use
+the recomposed one); `parent =`, `parent_type =`, `parent_bone =` each reset parentinv to the identity; the update
+after the bind re-evaluates what is tagged and what depends on it - the armature's pose (REST: pose_mat = arm_mat) and
+everything hung from its bones, the re-homed meshes and their descendants - and what nothing tags keeps its matrix.
+Measured: every dumped recipe and 25 fixtures (14 new, `fx_s2_*`; 22 equal row for row at both stages and 3 left by name),
+among them the chain fixture's three nested hung meshes with rotations and scales (bit-exact recomposition), the second
+armature hung from the first one's bone (its skinned mesh bound through it,
+its 'Arm' group REPLACED to 1.0 from 0.3, the root-bone fallback for 'Other', a same-named bone bound to the first
+armature's), the wrapper with an odd scale and rotation over a hung mesh and three empties, nine static meshes (the
+log's ellipsis), the armature itself a dropped mesh's child (re-rooted by the bind's update before the pin). Thirteen
+defects planted in RunStage2 were each caught (the pin taken in the pose instead of at rest, no decomposition, a
+duplicate group entry instead of REPLACE, the modifier overwritten, the static list unsorted, the governing bone read on
+the mesh only, the flatten evaluating the world, the orphan kept, no root fallback, the empties kept, staticParts
+ignored, a bound mesh's descendants left stale, the pin against the armature's stale matrix) - three of them invisible
+until a fixture had the shape (a weight other than 1.0 on an existing group, a static child under a bound mesh, the
+orphaned armature), each added - and ten `S2_*` tampers (one changed value per row kind of stage 2) are refused. Found on the way: a dropped mesh's child keeps its matrix_world ONLY until the next depsgraph
+update - the bind's update makes it a root at its own transform (`fx_s2_junk_hung`; the junk fixture of stage 1 never
+evaluates the scene before stage 4, hence "the same at stages 1 to 3"); the importer leaves an animated skinned mesh
+node as an EMPTY, which the flatten removes; the dump tells one action's fcurves apart by data path alone, so two
+armatures with an animated bone of one name make an inconsistent dump (the FC identity carries no slot) - the fixture
+animates the second armature's root instead. Not modelled, named: a bone-hung mesh whose datablock another object shares
+(one vertex-group list and weight layer for two objects; `LEFT:fx_s2_shared_hung`). Review of PR #164 added
+`fx_s2_unicode_static`: Python `str.lower()` expands U+0130 and applies final-sigma casing, which .NET invariant
+lowercase did not; before the fix the C# model bound two meshes Blender kept weightless. The C# matcher now follows
+those rules. Supplementary-script casing remains a named Blender fallback (`LEFT:fx_s2_supplementary_static`). Stages 3
+and 4 are not compared yet, and the PASS line says so. The review also corrected the diagnostic census for an EMPTY that
+wrapped nothing: it now counts wrapper parents before unparenting their children.
+
 Review of PR #148: the sanitizer now prints the number of escaped path keys, as the script does, when quoted bone
 names share a prefix (one garbage key can remove curves from two bones). Confirmed with the real sanitizer in Blender.
 `ExportDrillTests` run the actual comparator and pin its completion envelope: exactly one matching final `DONE`, one
