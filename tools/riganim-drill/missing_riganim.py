@@ -145,4 +145,31 @@ i_pb_2 = first(lambda l: l.startswith("PB\t2\t")); write("S2_PB_value", with_fie
 i_fc_2 = first(lambda l: l.startswith("FC\t2\t")); write("S2_FC_hash", with_field(i_fc_2, 7, flip_bits(lines[i_fc_2].split("\t")[7])))
 i_scene_2 = first(lambda l: l.startswith("SCENE\t2\t")); write("S2_SCENE_pose", with_field(i_scene_2, 5, "REST"))
 i_stage_2 = first(lambda l: l == "STAGE\t2"); write("S2_LOG_added", insert(i_stage_2, "LOG\t2\tRIGANIM flattened 1 wrapper empty; rig reparented to root for identity export nodes (planted)"))
+# Step (d), the stage 3 model: one changed value per row kind of stage 3 (stages 1 and 2 intact), refused in --stages 3
+# mode with the reason "stage 3". The job here takes the rest fold (deferred by the model), so the tampers are written on
+# a copy of the block whose stage 3 the model does compare: the first dumped block with stage 3 rows and no rebake line.
+plain = None
+for d in sys.argv[3:]:
+    rows = [l.rstrip("\r") for l in open(d, encoding="utf-8").read().split("\n") if l.strip()]
+    starts = [i for i, l in enumerate(rows) if l.startswith("JOB\t")] + [len(rows)]
+    for a, b in zip(starts, starts[1:]):
+        block = rows[a:b]
+        if "STAGE\t3" in block and not any(l.startswith("LOG\t3\tRIGANIM rest-normalized") or l.startswith("LOG\t3\tRIGANIM bone-cap") for l in block):
+            plain = block; break
+    if plain is not None:
+        break
+if plain is None:
+    raise RuntimeError("no job whose stage 3 the model compares: nothing to damage for S3_*")
+pkey = plain[0].split("\t")[1]
+open(os.path.join(out, "jobs_s3.txt"), "w", encoding="utf-8", newline="\n").write("\n".join(j for j in jobs if j.split("\t")[1] == pkey) + "\n")
+saved_lines = lines; lines = plain
+i_log3 = first(lambda l: l.startswith("LOG\t3\t")); write("S3_LOG_text", replace(i_log3, lines[i_log3] + " (changed)"))
+i_scene3 = first(lambda l: l.startswith("SCENE\t3\t")); write("S3_SCENE_end", with_field(i_scene3, 3, str(int(lines[i_scene3].split("\t")[3]) + 1)))
+i_obj3 = first(lambda l: l.startswith("OBJ\t3\t")); write("S3_OBJ_matrix", with_field(i_obj3, 10, flip_bits(lines[i_obj3].split("\t")[10])))
+i_obj3a = first(lambda l: l.startswith("OBJ\t3\t") and l.split("\t")[8] != "-"); write("S3_OBJ_action", with_field(i_obj3a, 8, "-"))
+i_act3 = first(lambda l: l.startswith("ACT\t3\t")); write("S3_ACT_range", with_field(i_act3, 4, flip_bits(lines[i_act3].split("\t")[4])))
+i_fc3 = first(lambda l: l.startswith("FC\t3\t")); write("S3_FC_hash", with_field(i_fc3, 6, flip_bits(lines[i_fc3].split("\t")[6])))
+i_pb3 = first(lambda l: l.startswith("PB\t3\t")); write("S3_PB_value", with_field(i_pb3, 5, flip_bits(lines[i_pb3].split("\t")[5])))
+write("S3_FC_extra", insert(i_fc3, "\t".join(f if j != 4 else "9" for j, f in enumerate(lines[i_fc3].split("\t")))))
+lines = saved_lines
 sys.stdout.write("".join(f[:-4] + "\n" for f in sorted(os.listdir(out)) if f.endswith(".txt") and f not in ("jobs.txt", "jobs_exit.txt", "intact.txt")))

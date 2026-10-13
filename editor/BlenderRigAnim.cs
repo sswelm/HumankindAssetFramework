@@ -1,7 +1,9 @@
-// BlenderRigAnim.cs - rig_anim.py without Blender, stages 1 and 2 (step 4 of replacing Blender, steps (b) and (c),
-// 2026-10-12): what the script's first stage leaves in Blender's scene - the arguments as it parses them, the import, the
-// material-less drop, the armature lookup (and the exit without one), the contract marker, the object-animation clear -
-// and what its second stage makes of that (RunStage2: the bone-parent -> skin bind, the wrapper flatten), row for row
+// BlenderRigAnim.cs - rig_anim.py without Blender, stages 1 to 3 (step 4 of replacing Blender, steps (b) to (d),
+// 2026-10-12/13): what the script's first stage leaves in Blender's scene - the arguments as it parses them, the import,
+// the material-less drop, the armature lookup (and the exit without one), the contract marker, the object-animation clear
+// - what its second stage makes of that (RunStage2: the bone-parent -> skin bind, the wrapper flatten), and its third
+// (RunStage3: the clip resolution and slicing, the action prune, the bone filter, the legacy translation rules, the
+// strip and amplify, the frame range; the rest fold and the bone cap deferred by name to step (d2)), row for row
 // and bit for bit as tools/riganim_drill.sh's dump records it (tools/riganim-drill/blender_riganim_dump.py: the RIGANIM
 // lines, the scene frame, every object with its matrices, every mesh's geometry and weights hashed, the bones at rest,
 // the pose at frame 1, every action's fcurves with their keys and handles). Built from the deploy and prep ports -
@@ -199,6 +201,7 @@ public static class BlenderRigAnim
                                                   // the object's own location, rotation and scale
         public bool Dirty;                        // tagged for the next depsgraph update: World is stale against Local (a parent
                                                   // changed under it, or a matrix_world assigned, with no view_layer.update since)
+        public float[][] Props;                   // the object's own location, rotation_quaternion and scale (Local is their matrix)
         public BlenderNames.BlenderObject Source;
         public MeshData Mesh;                     // a mesh object's data
     }
@@ -218,11 +221,16 @@ public static class BlenderRigAnim
     public sealed class KeyData
     {
         public float Frame, Value, LeftX, LeftY, RightX, RightY;
-        public string Interpolation;              // LINEAR or CONSTANT
+        public string Interpolation;              // LINEAR or CONSTANT (the importer's), BEZIER (keyframe_insert's)
         public const string Easing = "AUTO", HandleType = "AUTO_CLAMPED";
     }
 
-    public sealed class FCurveData { public string DataPath; public int Index; public List<KeyData> Keys = new List<KeyData>(); }
+    public sealed class FCurveData
+    {
+        public string DataPath; public int Index; public List<KeyData> Keys = new List<KeyData>();
+        public string Bone;                       // the pose bone the path names, or null for an object-level path
+        public string Prop;                       // location, rotation_quaternion or scale
+    }
 
     public sealed class SlotData { public string Identifier; public SceneObject Object; public List<FCurveData> FCurves = new List<FCurveData>(); }
 
@@ -248,6 +256,8 @@ public static class BlenderRigAnim
         public string Fallback;                                       // why this file is Blender's to prepare, or null
         public readonly List<string> Logs = new List<string>();       // the RIGANIM lines of stage 1, in order
         public readonly List<string> Logs2 = new List<string>();      // the RIGANIM lines of stage 2 (RunStage2), in order
+        public readonly List<string> Logs3 = new List<string>();      // the RIGANIM lines of stage 3 (RunStage3), in order
+        public string Deferred;                                       // stage 3: a branch a later step models (the rest fold, the bone cap), or null
         public bool Exits;                                            // the script's sys.exit(1) in this stage (after its ERROR line)
         public int FrameStart = 1, FrameEnd = 250, FrameCurrent = 1;
         public readonly List<SceneObject> Objects = new List<SceneObject>();   // scene.objects after the stage, in order
@@ -404,7 +414,7 @@ public static class BlenderRigAnim
                     if (ipo == "CONSTANT") Note(s, "a STEP sampler (CONSTANT keys)");
                     for (int c = 0; c < comps; c++)
                     {
-                        var fc = new FCurveData { DataPath = blenderPath, Index = c };
+                        var fc = new FCurveData { DataPath = blenderPath, Index = c, Bone = names.IsBone[n] ? names.BoneOfJoint[n] : null, Prop = ch.Path == "translation" ? "location" : ch.Path == "rotation" ? "rotation_quaternion" : "scale" };
                         var cv = curves[c];
                         var keys = new List<BlenderDeploy.ArmKey>();
                         for (int k = 0; k < cv.Frames.Length; k++) keys.Add(new BlenderDeploy.ArmKey { Frame = cv.Frames[k], Value = cv.Values[k] });
@@ -454,6 +464,16 @@ public static class BlenderRigAnim
             var o = so.Source;
             bool skinnedMesh = o.Kind == BlenderNames.ObjectKind.Mesh && o.Skin >= 0 && so.Mesh.DefNr != null;
             so.Local = o.GltfNode >= 0 && !skinnedMesh ? locals[o.GltfNode] : identity;   // an object with its own node has the importer's properties (posed at frame 1); the others hang at the identity
+            // the properties themselves, as BlenderWorldMatricesPosed composes them: a bone's child from the importer's
+            // adjusted transform, a plain object from the node's, the animated channels over them
+            if (o.GltfNode >= 0 && !skinnedMesh)
+            {
+                int n = o.GltfNode; float[] l, q, sc;
+                if (rig.IsBone(n) || rig.ParentBone(n) >= 0) rig.StaticProperty(n, out l, out q, out sc); else VehicleProbe.BlenderTrs(m.Nodes[n], out l, out q, out sc);
+                var p = set?.Invoke(n);
+                so.Props = new[] { p?[0] ?? l, p?[1] ?? q, p?[2] ?? sc };
+            }
+            else so.Props = new[] { new float[3], new[] { 1f, 0f, 0f, 0f }, new[] { 1f, 1f, 1f } };
             if (skinnedMesh) Note(s, o.GltfNode >= 0 ? "a skinned mesh moved under its armature" : "an animated skinned mesh node (its mesh on a '.skinned' child of the armature)");
             else if (o.GltfNode < 0) Note(s, "a mesh on an armature node (a '.mesh' child)");
         }
@@ -594,7 +614,7 @@ public static class BlenderRigAnim
                 if (o.ParentBone == null) Note(s, "a bound mesh governed through its parent chain (not hung from the bone itself)");
                 o.Parent = armObj; o.ParentBone = null; o.ParentBoneNode = -1;
                 ApplyMat4(mw, armWorld, out var loc, out var quat, out var scale);
-                o.Local = VehicleProbe.ObjectMatrix(loc, quat, scale);
+                o.Props = new[] { loc, quat, scale }; o.Local = VehicleProbe.ObjectMatrix(loc, quat, scale);
                 rehomed.Add(o);
                 var d = o.Mesh;
                 int gi = d.Groups.IndexOf(tgt);
@@ -633,7 +653,7 @@ public static class BlenderRigAnim
             var mw = o.World;
             o.Parent = null; o.ParentBone = null; o.ParentBoneNode = -1;
             ApplyMat4(mw, null, out var loc, out var quat, out var scale);
-            o.Local = VehicleProbe.ObjectMatrix(loc, quat, scale);
+            o.Props = new[] { loc, quat, scale }; o.Local = VehicleProbe.ObjectMatrix(loc, quat, scale);
             o.Dirty = true;   // no update follows in this stage: matrix_world stays the old one
             Note(s, o.Type == "ARMATURE" ? "the armature unparented from a wrapper empty" : "a mesh unparented from a wrapper empty");
         }
@@ -649,6 +669,318 @@ public static class BlenderRigAnim
             Note(s, "wrapper empties flattened");
             if (empties.Count > wrapperCount) Note(s, "an empty removed that wrapped nothing");
         }
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // stage 3: the bone cap, the clip resolution (a named action, or a slice sampled frame by frame into a new action),
+    // the action prune, the bone filter, the rest fold and rebake, the translation rules, the frame range. Blender's
+    // rules read for this stage:
+    //   * assign_action: arm.animation_data.action = a and action_slot = a.slots[0] - the FIRST slot, whichever object
+    //     it was made for; an evaluation applies that channelbag's curves to the armature object (its own transform for
+    //     object-level paths, its bones for pose.bones paths of bones it has).
+    //   * scene.frame_set(f) + view_layer.update(): every object with an active action evaluates its slot's curves
+    //     (fcurve_eval_keyframes: an exact hit returns the key, LINEAR and CONSTANT segments as the importer made them,
+    //     keyframe_insert's BEZIER ones; CONSTANT extrapolation past the ends), the values written back to the original
+    //     object's properties by the active depsgraph (so a frame_set leaves the properties at that frame), then every
+    //     pose and every matrix_world re-evaluated. The importer's stashed NLA tracks are MUTED and evaluate nothing.
+    //   * PoseBone.matrix_basis.decompose(): BKE_pchan_to_mat4 of the properties, mat4_to_loc_rot_size, then
+    //     mat3_normalized_to_quat_fast (mathutils' Matrix.decompose, no checks).
+    //   * keyframe_insert(path, frame): the property's value keyed on that frame of the active action's slot - the
+    //     curves made in channel order at the first insert (location 0..2, rotation_quaternion 0..3), a key on a frame
+    //     already keyed MOVED by the difference (float32), BEZIER keys with AUTO_CLAMPED handles recalculated.
+    //   * bpy.data.actions.remove(a): every object holding it loses its action (animation_data stays).
+    //   * Action.frame_range: the first and the last key frame over every fcurve of every slot; (0, 0) without a key.
+    //   * scene.frame_start/end = int(round(v)): Python's round of the float32 range (half to even).
+    // The rest fold and rebake (every conversion recipe with a location key) and the bone cap (over 240 bones) are
+    // step (d2)'s: Deferred names them, nothing of this stage is claimed for such a job.
+
+    static readonly Regex SliceRe = new Regex(@"^(.*)\[([0-9]+)\.\.([0-9]+)(?:/([0-9]+))?\]$", RegexOptions.Singleline);
+
+    static List<BlenderDeploy.ArmKey> ToArm(List<KeyData> keys) => keys.Select(k => new BlenderDeploy.ArmKey { Frame = k.Frame, Value = k.Value, LeftX = k.LeftX, LeftY = k.LeftY, RightX = k.RightX, RightY = k.RightY, Interpolation = k.Interpolation }).ToList();
+    static void FromArm(List<BlenderDeploy.ArmKey> arm, List<KeyData> keys)
+    {
+        keys.Clear();
+        foreach (var k in arm) keys.Add(new KeyData { Frame = k.Frame, Value = k.Value, LeftX = k.LeftX, LeftY = k.LeftY, RightX = k.RightX, RightY = k.RightY, Interpolation = k.Interpolation });
+    }
+    static float EvaluateCurve(List<KeyData> keys, float frame) => BlenderFCurve.Evaluate(ToArm(keys), frame, constant: true);
+    static string PyList(IEnumerable<string> items) => "[" + string.Join(", ", items.Select(BlenderDeploy.PyRepr)) + "]";
+    static int ChannelIndex(string prop) => prop == "location" ? 0 : prop == "rotation_quaternion" ? 1 : 2;
+    static float[][] CloneProps(float[][] p) => new[] { (float[])p[0].Clone(), (float[])p[1].Clone(), (float[])p[2].Clone() };
+
+    /// <summary>Stage 3 of rig_anim.py on the scene stage 2 left: mutates `s` (actions, the armature's action, the pose,
+    /// the frames, Logs3), or sets Exits (the script's exits of this stage), Deferred or Fallback.</summary>
+    public static void RunStage3(Stage1 s, Args a)
+    {
+        if (s.Fallback != null || s.Exits) return;
+        var ad = s.Armature; var armObj = ad.Object; var rig = s.Rig; var names = s.Names;
+        armObj.HasAnimationData = true;   // animation_data_create()
+        if (ad.BoneNodes.Count > 240) { s.Deferred = "the bone cap (an edit-mode round trip of the armature): step (d2)"; return; }
+
+        // ---- the evaluation at a frame
+        int BoneNodeOf(SceneObject armature, string bone)
+        {
+            foreach (var kv in names.BoneOfJoint) if (kv.Value == bone && names.ArmatureNodeOfBone[kv.Key] == armature.Source.GltfNode) return kv.Key;
+            return -1;
+        }
+        ActionData ActionOf(string name) => s.Actions.FirstOrDefault(x => x.Name == name);
+        float LengthOf(int boneNode) => rig.ArmatureOfBone[boneNode].Length[boneNode];
+        void FrameSet(int f)
+        {
+            s.FrameCurrent = f;
+            var boneProps = ad.PoseProps.ToDictionary(kv => kv.Key, kv => CloneProps(kv.Value));
+            foreach (var o in s.Objects)
+            {
+                var props = CloneProps(o.Props);
+                var act = o.Action != null ? ActionOf(o.Action) : null;
+                var slot = act?.Slots.FirstOrDefault(sl => sl.Identifier == o.Slot);
+                if (slot != null)
+                    foreach (var fc in slot.FCurves)
+                    {
+                        if (fc.Keys.Count == 0) continue;
+                        float v = EvaluateCurve(fc.Keys, f);
+                        if (fc.Bone == null) props[ChannelIndex(fc.Prop)][fc.Index] = v;
+                        else if (o.Type == "ARMATURE") { int b = BoneNodeOf(o, fc.Bone); if (b >= 0 && boneProps.ContainsKey(b)) boneProps[b][ChannelIndex(fc.Prop)][fc.Index] = v; }
+                    }
+                o.Props = props; o.Local = VehicleProbe.ObjectMatrix(props[0], props[1], props[2]);
+            }
+            ad.PoseProps = boneProps;
+            var pose = new Dictionary<int, float[]>();
+            foreach (var arm in rig.Armatures.Values) foreach (var kv in VehicleProbe.PoseMatrices(arm, b => boneProps[b])) pose[kv.Key] = kv.Value;
+            ad.PoseMats = pose;
+            var memo = new Dictionary<SceneObject, float[]>();
+            float[] Eval(SceneObject o)
+            {
+                if (memo.TryGetValue(o, out var w)) return w;
+                if (o.Parent == null) w = o.Local;
+                else
+                {
+                    var pw = Eval(o.Parent);
+                    var pm = o.ParentBone != null ? VehicleProbe.MulM4(pw, VehicleProbe.ParBone(pose[o.ParentBoneNode], LengthOf(o.ParentBoneNode))) : pw;
+                    w = VehicleProbe.MulM4(pm, o.Local);
+                }
+                memo[o] = w; return w;
+            }
+            foreach (var o in s.Objects) { o.World = Eval(o); o.Dirty = false; }
+        }
+        void AssignAction(ActionData act) { armObj.Action = act.Name; armObj.Slot = act.Slots.Count > 0 ? act.Slots[0].Identifier : null; if (act.Slots.Count > 0 && act.Slots[0].Object != armObj) Note(s, "assign_action: the action's first slot is another object's (the multi-slot trap)"); }
+        // pb.keyframe_insert(prop, frame=frame) on the armature's active action and slot
+        void Insert(ActionData act, SlotData slot, int boneNode, string prop, float frame)
+        {
+            string bone = names.BoneOfJoint[boneNode];
+            string path = "pose.bones[\"" + EscapeIdentifier(bone) + "\"]." + prop;
+            int comps = prop == "rotation_quaternion" ? 4 : 3;
+            var vals = ad.PoseProps[boneNode][ChannelIndex(prop)];
+            for (int c = 0; c < comps; c++)
+            {
+                var fc = slot.FCurves.FirstOrDefault(x => x.DataPath == path && x.Index == c);
+                if (fc == null) { fc = new FCurveData { DataPath = path, Index = c, Bone = bone, Prop = prop }; slot.FCurves.Add(fc); }
+                var keys = ToArm(fc.Keys);
+                var key = keys.FirstOrDefault(k => k.Frame == frame);
+                if (key == null) { keys.Add(new BlenderDeploy.ArmKey { Frame = frame, Value = vals[c] }); keys.Sort((x, y) => x.Frame.CompareTo(y.Frame)); }
+                else { float dy = (float)(vals[c] - key.Value); key.Value = (float)(key.Value + dy); Note(s, "keyframe_insert on a frame already keyed (the key moved by the difference)"); }
+                if (keys.Count >= 2) BlenderFCurve.RecalcHandles(keys, constant: true);
+                FromArm(keys, fc.Keys);
+            }
+        }
+        void FrameRange(ActionData act)
+        {
+            float min = 999999999.0f, max = -999999999.0f; bool found = false;
+            foreach (var fc in act.FCurves) if (fc.Keys.Count > 0) { min = Math.Min(min, fc.Keys[0].Frame); max = Math.Max(max, fc.Keys[fc.Keys.Count - 1].Frame); found = true; }
+            if (found) { act.FrameStart = Math.Max(min, -1048574f); act.FrameEnd = Math.Min(max, 1048574f); } else { act.FrameStart = 0f; act.FrameEnd = 0f; }
+        }
+        void RemoveAction(ActionData act)
+        {
+            s.Actions.Remove(act);
+            foreach (var o in s.Objects) if (o.Action == act.Name) { o.Action = null; o.Slot = null; }
+        }
+        var available = s.Actions.Select(x => x.Name).ToList();   // bpy.data.actions' names, for the ERROR lines
+        bool exitNow = false;
+
+        // ---- resolve_clip
+        ActionData Resolve(string spec, string tag)
+        {
+            var mt = SliceRe.Match(PyStrip(spec));
+            if (!mt.Success)
+            {
+                var act = ActionOf(spec);
+                if (act == null) { s.Logs3.Add("RIGANIM ERROR: clip '" + spec + "' (" + tag + ") not found. Available: " + PyList(s.Actions.Select(x => x.Name))); s.Exits = true; exitNow = true; Note(s, "a clip not found: the script's exit"); }
+                return act;
+            }
+            string srcName = mt.Groups[1].Value; long f0 = long.Parse(mt.Groups[2].Value, CultureInfo.InvariantCulture), f1 = long.Parse(mt.Groups[3].Value, CultureInfo.InvariantCulture);
+            long step = mt.Groups[4].Success ? Math.Max(1, long.Parse(mt.Groups[4].Value, CultureInfo.InvariantCulture)) : 1;
+            var src = ActionOf(srcName);
+            if (src == null) { s.Logs3.Add("RIGANIM ERROR: slice source '" + srcName + "' (" + tag + ") not found. Available: " + PyList(s.Actions.Select(x => x.Name))); s.Exits = true; exitNow = true; Note(s, "a slice source not found: the script's exit"); return null; }
+            var frames = new List<long>();
+            if (f1 >= f0) for (long f = f0; f <= f1; f += step) frames.Add(f); else for (long f = f0; f >= f1; f -= step) frames.Add(f);
+            if (frames[frames.Count - 1] != f1) frames.Add(f1);
+            if (frames.Count == 1) { frames.Add(frames[0]); Note(s, "a single-frame slice (two identical frames)"); }
+            if (f1 < f0) Note(s, "a reversed slice");
+            if (step > 1) Note(s, "a slice with a speed step");
+            string newName = srcName + "_" + tag + "_" + f0 + "_" + f1 + "_" + step;
+            var old = ActionOf(newName);
+            if (old != null) { Note(s, "a slice shared by two roles"); return old; }
+            if (frames.Any(f => f < -1048574 || f > 1048574)) { s.Fallback = "a slice frame past Blender's frame range (frame_set clamps it)"; return null; }
+            var saved = ad.BoneNodes.ToDictionary(b => b, b => CloneProps(ad.PoseProps[b]));
+            AssignAction(src);
+            var snap = new Dictionary<long, Dictionary<int, float[][]>>();
+            long lo = frames.Min(), hi = frames.Max();
+            for (long f = lo; f <= hi; f++)
+            {
+                FrameSet((int)f);
+                var at = new Dictionary<int, float[][]>();
+                foreach (int b in ad.BoneNodes)
+                {
+                    var p = ad.PoseProps[b];
+                    VehicleProbe.Mat4ToLocRotSize(VehicleProbe.ObjectMatrix(p[0], p[1], p[2], true), out var loc, out var rot, out var size);
+                    at[b] = new[] { loc, VehicleProbe.Mat3NormalizedToQuatFast(rot), size };
+                }
+                snap[f] = at;
+            }
+            var na = new ActionData { Name = newName };
+            s.Actions.Add(na); BlenderExportTree.StableSort(s.Actions, (x, y) => BlenderExportTree.StrCaseCmp(x.Name, y.Name));   // bpy.data.actions: id_sort_by_name
+            var slot = new SlotData { Identifier = "OB" + armObj.Name, Object = armObj }; na.Slots.Add(slot);
+            armObj.Action = na.Name; armObj.Slot = slot.Identifier;
+            for (int i = 0; i < frames.Count; i++)
+                foreach (int b in ad.BoneNodes)
+                {
+                    var sn = snap[frames[i]][b];
+                    ad.PoseProps[b][0] = (float[])sn[0].Clone(); ad.PoseProps[b][1] = (float[])sn[1].Clone();
+                    Insert(na, slot, b, "location", i); Insert(na, slot, b, "rotation_quaternion", i);
+                }
+            if (frames.Count >= 2 && frames.Distinct().Count() == 1)
+            {
+                int b0 = ad.BoneNodes[0];
+                var r2 = (float[])snap[frames[0]][b0][1].Clone();
+                r2[0] = (float)((double)r2[0] + 3e-4);   // _r2.w += 3e-4: Python's double, stored as float32
+                VehicleProbe.NormalizeQt(r2);
+                ad.PoseProps[b0][1] = r2;
+                Insert(na, slot, b0, "rotation_quaternion", frames.Count - 1);
+                s.Logs3.Add("RIGANIM held-stance pad: epsilon nudge on '" + names.BoneOfJoint[b0] + "' frame " + (frames.Count - 1) + " (defeats Unity's constant-curve collapse)");
+                Note(s, "the held-stance epsilon nudge");
+            }
+            foreach (int b in ad.BoneNodes) ad.PoseProps[b] = saved[b];
+            FrameRange(na);
+            s.Logs3.Add("RIGANIM sliced '" + spec + "' -> '" + newName + "' (" + frames.Count + " frames" + (f1 < f0 ? ", reversed" : "") + ")");
+            Note(s, "a clip sliced");
+            return na;
+        }
+
+        // ---- the primary and the roles
+        ActionData primary = null;
+        if (a.ClipName.Length > 0) { primary = Resolve(a.ClipName, "primary"); if (exitNow) return; }
+        if (primary == null && armObj.Action != null) primary = ActionOf(armObj.Action);
+        if (primary == null && s.Actions.Count > 0) { primary = s.Actions[0]; Note(s, "no clip named and no active action: the first action"); }
+        if (primary == null) { s.Logs3.Add("RIGANIM ERROR: no animation action found in the model"); s.Exits = true; Note(s, "no action: the script's exit"); return; }
+        AssignAction(primary);
+        var roleActs = new List<(string role, ActionData act)>();
+        foreach (var (role, clip) in a.RoleSpecs) { var ra = Resolve(clip, role); if (exitNow) return; roleActs.Add((role, ra)); }
+        var keep = new HashSet<ActionData>(new[] { primary }.Concat(roleActs.Select(r => r.act)));
+        foreach (var act in s.Actions.ToList()) if (!keep.Contains(act)) { RemoveAction(act); Note(s, "an action pruned"); }
+        var allActs = new List<ActionData> { primary };
+        foreach (var (_, ra) in roleActs) if (ra != primary && !allActs.Contains(ra)) allActs.Add(ra);
+        s.Logs3.Add("RIGANIM action '" + primary.Name + "'" + (allActs.Count > 1 ? " + " + (allActs.Count - 1) + " state clip(s)" : ""));
+
+        // ---- the bone filter
+        if (a.Prefixes.Count > 0)
+        {
+            foreach (var fa in allActs)
+            {
+                var owners = fa.Slots.SelectMany(sl => sl.FCurves.Select(fc => (sl, fc))).ToList();
+                var avail = owners.Where(x => x.fc.Bone != null).Select(x => x.fc.Bone).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList();
+                int kept = 0, rem = 0;
+                foreach (var (sl, fc) in owners)
+                {
+                    if (fc.Bone != null && a.Prefixes.Any(p => fc.Bone.StartsWith(p, StringComparison.Ordinal))) kept++;
+                    else { sl.FCurves.Remove(fc); rem++; }
+                }
+                s.Logs3.Add("RIGANIM bone-filter " + PyList(a.Prefixes) + " on '" + fa.Name + "': kept " + kept + " fcurves, removed " + rem);
+                Note(s, "the bone filter");
+                if (kept == 0) { s.Logs3.Add("RIGANIM ERROR: bone-filter " + PyList(a.Prefixes) + " matched no animated bone in '" + fa.Name + "' — every fcurve was stripped, the clip would be frozen. Animated bones: " + PyList(avail)); s.Exits = true; Note(s, "the bone filter matched nothing: the script's exit"); return; }
+            }
+        }
+
+        // ---- the rest fold (step (d2)): any location curve on a pose bone of the primary, on the conversion path
+        bool loc0 = primary.FCurves.Any(fc => fc.Bone != null && fc.Prop == "location");
+        if (loc0 && a.ConvertRig) { s.Deferred = "the rest fold and rebake (a location key on a pose bone, the conversion path): step (d2)"; return; }
+        if (loc0) Note(s, "location keys on the legacy path (no fold)");
+
+        // ---- legacy keepTranslations
+        var keepLocPaths = new HashSet<string>(StringComparer.Ordinal);
+        var keepActs = new List<ActionData>();
+        bool cleanUnits = armObj.Name.StartsWith("DeployArmV2", StringComparison.Ordinal);
+        if (a.KeepTranslations && !a.ConvertRig)
+        {
+            var roleFloor = new Dictionary<string, double>(StringComparer.Ordinal);
+            foreach (var (role, clip) in a.RoleSpecs)
+                if ((role == "attack" || role == "move") && PyStrip(clip).Length > 0)
+                {
+                    string bn = PyStrip(clip.Split('[')[0]);
+                    double fl = role == "attack" ? 1e-4 : 0.5;
+                    roleFloor[bn] = Math.Min(roleFloor.TryGetValue(bn, out var prev) ? prev : 1e9, fl);
+                }
+            string Base(string name) { int at = name.IndexOf("_rebaked", StringComparison.Ordinal); return at < 0 ? name : name.Substring(0, at); }
+            keepActs = allActs.Where(x => roleFloor.ContainsKey(Base(x.Name)) || roleFloor.ContainsKey(x.Name)).ToList();
+            if (keepActs.Count == 0) { s.Logs3.Add("RIGANIM legacy keepTranslations: no attack/move-role clip found — nothing kept (translations live in the fire cycle / drive cycle)"); Note(s, "legacy keepTranslations: nothing kept"); }
+            var poison = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var sa in keepActs)
+                foreach (var fc in sa.FCurves)
+                {
+                    if (!(fc.Bone != null && fc.Prop == "location") || fc.Keys.Count == 0) continue;
+                    var vals = fc.Keys.Select(k => (double)k.Value).ToList();
+                    if (vals.Any(v => double.IsNaN(v) || Math.Abs(v) > 1e5)) { poison.Add(fc.DataPath); continue; }
+                    double floor = roleFloor.TryGetValue(Base(sa.Name), out var f1) ? f1 : roleFloor.TryGetValue(sa.Name, out var f2) ? f2 : 1e-4;
+                    double range = vals.Max() - vals.Min();
+                    if (floor < range && range < 1e4) keepLocPaths.Add(fc.DataPath);
+                }
+            keepLocPaths.ExceptWith(poison);
+            string BoneOfPath(string p) { int q = p.IndexOf('"'); return q < 0 ? null : p.Split('"')[1]; }
+            if (poison.Count > 0) { s.Logs3.Add("RIGANIM legacy keepTranslations: " + poison.Count + " path(s) REJECTED as decomposition garbage (NaN/huge): " + PyList(poison.Where(p => p.IndexOf('"') >= 0).Select(BoneOfPath).Distinct().OrderBy(x => x, StringComparer.Ordinal))); Note(s, "legacy keepTranslations: garbage rejected"); }
+            if (keepLocPaths.Count > 0) { s.Logs3.Add("RIGANIM legacy keepTranslations: " + keepLocPaths.Count + " varying location path(s) kept: " + PyList(keepLocPaths.Where(p => p.IndexOf('"') >= 0).Select(BoneOfPath).Distinct().OrderBy(x => x, StringComparer.Ordinal))); Note(s, "legacy keepTranslations: paths kept"); }
+        }
+
+        // ---- the strip
+        int locs = 0, keptLocs = 0;
+        foreach (var sa in allActs)
+            foreach (var sl in sa.Slots)
+                foreach (var fc in sl.FCurves.ToList())
+                {
+                    if (!(fc.Bone != null && fc.Prop == "location")) continue;
+                    if (a.KeepTranslations && keepLocPaths.Contains(fc.DataPath)) { keptLocs++; continue; }
+                    sl.FCurves.Remove(fc); locs++;
+                }
+        if (locs > 0 || keptLocs > 0)
+        {
+            s.Logs3.Add("RIGANIM stripped " + locs + " bone-LOCATION fcurves across " + allActs.Count + " clip(s)" + (keptLocs > 0 ? ", KEPT " + keptLocs + " translation curve(s) (keepTranslations)" : " (rotation-only; translations bake unscaled)"));
+            Note(s, keptLocs > 0 ? "bone-location fcurves stripped, some kept" : "bone-location fcurves stripped");
+        }
+
+        // ---- the legacy sandwich compensation
+        if (a.KeepTranslations && !a.ConvertRig && !cleanUnits && keepLocPaths.Count > 0)
+        {
+            int scaled = 0;
+            foreach (var sa in keepActs)
+                foreach (var fc in sa.FCurves)
+                {
+                    if (!keepLocPaths.Contains(fc.DataPath) || fc.Prop != "location") continue;
+                    if (fc.Keys.Count == 0) continue;
+                    double v0 = fc.Keys.OrderBy(k => k.Frame).First().Value;
+                    foreach (var k in fc.Keys)
+                    {
+                        k.Value = (float)(((double)k.Value - v0) * 100.0);
+                        k.LeftY = (float)(((double)k.LeftY - v0) * 100.0);
+                        k.RightY = (float)(((double)k.RightY - v0) * 100.0);
+                    }
+                    scaled++;
+                }
+            s.Logs3.Add("RIGANIM legacy keepTranslations: " + scaled + " kept curve(s) delta-rebased + amplified x100 (attack clip only)");
+            Note(s, "kept curves delta-rebased and amplified");
+        }
+
+        // ---- the frame range
+        foreach (var act in s.Actions) FrameRange(act);
+        s.FrameStart = (int)Math.Round((double)primary.FrameStart, MidpointRounding.ToEven);
+        s.FrameEnd = (int)Math.Round((double)primary.FrameEnd, MidpointRounding.ToEven);
+        s.Logs3.Add("RIGANIM frame range " + s.FrameStart + ".." + s.FrameEnd);
     }
 
     /// <summary>BKE_object_apply_mat4 for an object in quaternion mode with the identity parentinv and no deltas: with a

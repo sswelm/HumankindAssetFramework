@@ -137,24 +137,25 @@ n_exit=$(grep -c "^JOB	EXIT:" "$TMPD/jobs.txt")
 # STEPS (b) AND (c), STAGES 1 AND 2: the C# model of the first two stages (editor/BlenderRigAnim.cs) against every job's
 # rows of those stages, as strings - the dump's own float32 bits and hashes. Every dumped job must be equal row for row
 # at both stages, or left by name (LEFT:) at one of them, its earlier stage equal.
-"$TMPD/riganim.exe" --stages 2 "${KEY_MODE[@]}" "$WTMP/jobs.txt" "${DUMPS[@]}" > "$TMPD/s1_raw.txt" 2>&1; s1rc=$?
+"$TMPD/riganim.exe" --stages 3 "${KEY_MODE[@]}" "$WTMP/jobs.txt" "${DUMPS[@]}" > "$TMPD/s1_raw.txt" 2>&1; s1rc=$?
 t3=$(date +%s)
 tr -d '\r' < "$TMPD/s1_raw.txt" > "$TMPD/s1.txt"
 grep -E "^FAIL|^MODEL" "$TMPD/s1.txt"
-S1=$(grep -E "^STAGES 2 jobs" "$TMPD/s1.txt" | tail -1); echo "$S1"
+S1=$(grep -E "^STAGES 3 jobs" "$TMPD/s1.txt" | tail -1); echo "$S1"
 [ -n "$S1" ] || { tail -5 "$TMPD/s1.txt"; echo "FAIL — rig_anim drill: the stage 1-2 model gave no total (rc=$s1rc)"; exit 1; }
 [ "$s1rc" -eq 0 ] || { echo "FAIL — rig_anim drill: the stage 1-2 model differs from Blender, or leaves a dumped job to it"; exit 1; }
-n_s1=$(echo "$S1" | awk '{print $4}'); n_s1eq=$(echo "$S1" | awk '{print $6}'); n_s1left=$(echo "$S1" | awk '{print $8}'); n_s1rows=$(echo "$S1" | awk '{print $10}')
-[ "$n_s1" -eq "$n_jobs" ] && [ $((n_s1eq + n_s1left)) -eq "$n_jobs" ] || { echo "FAIL — rig_anim drill: the stage 1-2 model compared $n_s1 of $n_jobs jobs ($n_s1eq equal, $n_s1left left)"; exit 1; }
+n_s1=$(echo "$S1" | awk '{print $4}'); n_s1eq=$(echo "$S1" | awk '{print $6}'); n_s1left=$(echo "$S1" | awk '{print $8}'); n_s1rows=$(echo "$S1" | awk '{print $10}'); n_s3def=$(echo "$S1" | awk '{print $12}')
+[ "$n_s1" -eq "$n_jobs" ] && [ $((n_s1eq + n_s1left + n_s3def)) -eq "$n_jobs" ] || { echo "FAIL — rig_anim drill: the stage 1-3 model compared $n_s1 of $n_jobs jobs ($n_s1eq equal, $n_s1left left, $n_s3def deferred)"; exit 1; }
+n_s3eq=$(grep -c "^STAGE3 .*: equal" "$TMPD/s1.txt")
 n_s2eq=$(grep -c "^STAGE2 .*: equal" "$TMPD/s1.txt")
 # Negative guards on the REAL dump: a missing or inconsistent record must never pass as evidence.
 python "$ROOT/tools/riganim-drill/missing_riganim.py" "$WTMP/missing" "$WTMP/jobs.txt" "${DUMPS[@]}" > "$TMPD/tampers_raw.txt" || { echo "FAIL — could not construct the damaged dumps"; exit 1; }
 tr -d '\r' < "$TMPD/tampers_raw.txt" > "$TMPD/tampers.txt"
 "$TMPD/riganim.exe" "$WTMP/missing/jobs.txt" "$WTMP/missing/intact.txt" > "$TMPD/intact_out.txt" 2>&1; controlrc=$?
 if [ "$controlrc" -ne 0 ] || ! grep -qE "^PASS " "$TMPD/intact_out.txt"; then head -5 "$TMPD/intact_out.txt"; echo "FAIL — rig_anim drill rejected the intact control (rc=$controlrc)"; exit 1; fi
-"$TMPD/riganim.exe" --stages 2 "$WTMP/missing/jobs.txt" "$WTMP/missing/intact.txt" > "$TMPD/intact_s1.txt" 2>&1; controlrc=$?
+"$TMPD/riganim.exe" --stages 3 "$WTMP/missing/jobs.txt" "$WTMP/missing/intact.txt" > "$TMPD/intact_s1.txt" 2>&1; controlrc=$?
 if [ "$controlrc" -ne 0 ] || ! grep -qE "^PASS " "$TMPD/intact_s1.txt"; then head -5 "$TMPD/intact_s1.txt"; echo "FAIL — rig_anim drill: the stage 1-2 model rejected the intact control (rc=$controlrc)"; exit 1; fi
-n_t=0; n_s1t=0; n_s2t=0
+n_t=0; n_s1t=0; n_s2t=0; n_s3t=0
 while IFS= read -r mode; do
   [ -n "$mode" ] || continue
   case "$mode" in
@@ -195,11 +196,12 @@ while IFS= read -r mode; do
     IMG_early) reason="not under its STAGE row|IMG row outside stage 4";;
     S1_*) reason="stage 1";;   # a valid dump that says something else about the scene than the stage 1 model: refused in --stages 2 mode
     S2_*) reason="stage 2";;   # the same for a row of stage 2
+    S3_*) reason="stage 3";;   # a row of stage 3, on a job the model compares there (jobs_s3.txt)
     *) echo "FAIL — rig_anim drill: the tamper '$mode' has no expected reason here (add it)"; exit 1;;
   esac
   jf="$WTMP/missing/jobs.txt"
-  case "$mode" in EXIT_ran_full|EXIT_marked_wrong_stage) jf="$WTMP/missing/jobs_exit.txt";; esac
-  S1_MODE=(); case "$mode" in S1_*) S1_MODE=(--stages 2); n_s1t=$((n_s1t + 1));; S2_*) S1_MODE=(--stages 2); n_s2t=$((n_s2t + 1));; esac
+  case "$mode" in EXIT_ran_full|EXIT_marked_wrong_stage) jf="$WTMP/missing/jobs_exit.txt";; S3_*) jf="$WTMP/missing/jobs_s3.txt";; esac
+  S1_MODE=(); case "$mode" in S1_*) S1_MODE=(--stages 3); n_s1t=$((n_s1t + 1));; S2_*) S1_MODE=(--stages 3); n_s2t=$((n_s2t + 1));; S3_*) S1_MODE=(--stages 3); n_s3t=$((n_s3t + 1));; esac
   "$TMPD/riganim.exe" "${S1_MODE[@]}" "${KEY_MODE[@]}" "$jf" "$WTMP/missing/$mode.txt" > "$TMPD/t_$mode.txt" 2>&1; badrc=$?
   if [ "$badrc" -ne 1 ] || ! grep -E "^FAIL " "$TMPD/t_$mode.txt" | grep -qE "$reason"; then
     head -3 "$TMPD/t_$mode.txt"; echo "FAIL — rig_anim drill accepted a damaged dump ($mode, rc=$badrc)"; exit 1
@@ -208,7 +210,8 @@ while IFS= read -r mode; do
 done < "$TMPD/tampers.txt"
 [ "$n_s1t" -ge 10 ] || { echo "FAIL — rig_anim drill: only $n_s1t stage 1 tampers were run (missing_riganim.py writes S1_* copies)"; exit 1; }
 [ "$n_s2t" -ge 8 ] || { echo "FAIL — rig_anim drill: only $n_s2t stage 2 tampers were run (missing_riganim.py writes S2_* copies)"; exit 1; }
-echo "PASS — rig_anim drill refuses $n_t kinds of damaged evidence (a missing, doubled, short or misplaced row of every kind; an early stop; an unknown job or row kind; $n_s1t changed values of stage 1 rows and $n_s2t of stage 2 rows, each caught by the model of its stage)"
+[ "$n_s3t" -ge 6 ] || { echo "FAIL — rig_anim drill: only $n_s3t stage 3 tampers were run (missing_riganim.py writes S3_* copies)"; exit 1; }
+echo "PASS — rig_anim drill refuses $n_t kinds of damaged evidence (a missing, doubled, short or misplaced row of every kind; an early stop; an unknown job or row kind; $n_s1t changed values of stage 1 rows, $n_s2t of stage 2 rows and $n_s3t of stage 3 rows, each caught by the model of its stage)"
 n_size=$(grep -c "^LEFT	.*	over .* MB" "$TMPD/jobs.txt")
-RESULT="PASS — rig_anim drill, step (a) the stage dump: $n_reg of $((n_reg + n_left)) animated recipes and $n_fx fixture jobs run by Blender through rig_anim.py cut at its four stages (Blender took $((t1 - t0)) s), $n_full through all four, $n_stop stopped by the script's own exit as their EXIT: key expects; $n_stages scene dumps with $n_logs RIGANIM lines, $n_bones bones and $n_fc fcurves on record, every block complete and consistent; $n_left recipe(s) left: $n_size over the size limit (FULL=1 takes them), $((n_left - n_size)) by name (Blender-only source until a native reader). Steps (b) and (c), stages 1 and 2 in C# (editor/BlenderRigAnim.cs: the arguments, the import, the material-less drop, the armature and its exit, the contract marker, the object-animation clear; the bone-parent -> skin bind with its rest-world pin, the wrapper flatten): $n_s1eq of $n_jobs jobs equal to Blender row for row at both stages ($n_s1rows rows of objects, meshes, weights, bones, pose, actions and fcurves, as bits and hashes, $n_s2eq stage 2 scenes among them; $((t3 - t2)) s), $n_s1left left by name. Stages 3 and 4 are not compared yet"
+RESULT="PASS — rig_anim drill, step (a) the stage dump: $n_reg of $((n_reg + n_left)) animated recipes and $n_fx fixture jobs run by Blender through rig_anim.py cut at its four stages (Blender took $((t1 - t0)) s), $n_full through all four, $n_stop stopped by the script's own exit as their EXIT: key expects; $n_stages scene dumps with $n_logs RIGANIM lines, $n_bones bones and $n_fc fcurves on record, every block complete and consistent; $n_left recipe(s) left: $n_size over the size limit (FULL=1 takes them), $((n_left - n_size)) by name (Blender-only source until a native reader). Steps (b) to (d), stages 1 to 3 in C# (editor/BlenderRigAnim.cs: the arguments, the import, the material-less drop, the armature and its exit, the contract marker, the object-animation clear; the bone-parent -> skin bind with its rest-world pin, the wrapper flatten; the clip resolution and slicing, the action prune, the bone filter, the legacy translation rules, the strip, the frame range): $n_s1eq of $n_jobs jobs equal to Blender row for row at every compared stage ($n_s1rows rows of objects, meshes, weights, bones, pose, actions and fcurves, as bits and hashes, $n_s2eq stage 2 and $n_s3eq stage 3 scenes among them; $((t3 - t2)) s), $n_s1left left by name, $n_s3def deferred at stage 3 by name (the rest fold and rebake, the bone cap: step (d2), their stages 1 and 2 equal). Stage 4 is not compared yet"
 echo "$RESULT"

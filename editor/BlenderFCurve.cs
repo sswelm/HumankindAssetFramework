@@ -70,7 +70,13 @@ public static class BlenderFCurve
         if (Math.Abs((float)(bezt.Frame - evaltime)) < 1.0e-8f) { Hit(3); return bezt.Value; }
         if (evaltime < prev.Frame || bezt.Frame < evaltime) { Hit(4); return 0.0f; }
         float duration = (float)(bezt.Frame - prev.Frame);
-        if (duration == 0f) { Hit(5); return prev.Value; }
+        if (duration == 0f || prev.Interpolation == "CONSTANT") { Hit(5); return prev.Value; }
+        if (prev.Interpolation == "LINEAR")
+        {
+            // BLI_easing_linear_ease(time, begin, change, duration): change * time / duration + begin
+            float change = (float)(bezt.Value - prev.Value), time = (float)(evaltime - prev.Frame);
+            return (float)((float)((float)(change * time) / duration) + prev.Value);
+        }
 
         float v1x = prev.Frame, v1y = prev.Value, v2x = prev.RightX, v2y = prev.RightY;
         float v3x = bezt.LeftX, v3y = bezt.LeftY, v4x = bezt.Frame, v4y = bezt.Value;
