@@ -163,7 +163,7 @@ public class AnimationLabWindow : EditorWindow
         fitRolesFor = res; fitRoles = new List<(string, string)>();
         if (res.Length > 0)
             foreach (var (label, dir) in FitAnimRoleDirs)
-                if (AssetDatabase.LoadAssetAtPath<GameObject>($"Assets/FactorySource/{res}/{dir}/{res}_anim.fbx") != null)
+                if (UniversalBaker.RigPreviewPath(res, dir, out _) != null)   // the FBX route's file, or the GLB route's prefab with that role's clip (step (g))
                     fitRoles.Add((label, dir));
         return fitRoles;
     }
@@ -175,15 +175,15 @@ public class AnimationLabWindow : EditorWindow
         fitAnimRole = dir ?? "";
         if (fitAnimRole.Length == 0) { Repaint(); return; }
         string res = (cur?.resourceName ?? "").Trim();
-        string path = $"Assets/FactorySource/{res}/{fitAnimRole}/{res}_anim.fbx";
-        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+        // the FBX route's file in the role's folder, or the GLB route's prefab under anim/ with the role's clip container (step (g))
+        string path = UniversalBaker.RigPreviewPath(res, fitAnimRole, out var roleClip);
+        var prefab = path != null ? AssetDatabase.LoadAssetAtPath<GameObject>(path) : null;
         if (prefab == null)
         {   // the role isn't baked (yet) — say so once and fall back instead of retrying every repaint
-            status = $"Play clip: nothing baked at {path} — Bake this entry first.";
+            status = $"Play clip: nothing baked for '{res}' ({fitAnimRole}) — Bake this entry first.";
             fitAnimRole = ""; Repaint(); return;
         }
-        fitAnimClip = AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>()
-                                   .FirstOrDefault(c => c != null && !c.name.StartsWith("__preview"));
+        fitAnimClip = roleClip;
         if (fitPRU == null) fitPRU = new PreviewRenderUtility();
         fitAnimInst = Instantiate(prefab);
         fitAnimInst.hideFlags = HideFlags.HideAndDontSave;
@@ -596,8 +596,8 @@ public class AnimationLabWindow : EditorWindow
             string prop = (cur.handPropName ?? "").Trim();
             if (res.Length == 0) { status = "Preview needs a loaded entry."; return; }
             bool withProp = prop.Length > 0 && !string.IsNullOrEmpty((cur.handPropGuid ?? "").Trim());
-            string fbxRel = "Assets/FactorySource/" + res + "/anim/" + res + "_anim.fbx";
-            var fbxGo = AssetDatabase.LoadAssetAtPath<GameObject>(fbxRel);
+            string fbxRel = UniversalBaker.RigPreviewPath(res, "anim", out _);   // the FBX route's rig, or the GLB route's prefab (step (g))
+            var fbxGo = fbxRel != null ? AssetDatabase.LoadAssetAtPath<GameObject>(fbxRel) : null;
             if (fbxGo == null)
             {
                 // No rig FBX (a STATIC model): the baked preview prefab is all there is. Animated models always
@@ -1414,6 +1414,25 @@ public class AnimationLabWindow : EditorWindow
             "Tick it when a rig plays fine in the preview but tears apart / displaces in-game; usually paired with " +
             "Fix 100× OFF. Re-bake after changing."),
             cur.convertRig);
+        // THE RIG ROUTE (step (g) of replacing Blender, 2026-10-14): the same slim done by rig_anim.py in Blender (an FBX per
+        // clip) or by the in-process port (one GLB with every clip; BlenderRigAnimInProcess, held to the script row for row
+        // by tools/riganim_drill.sh). Per recipe, with an editor-wide default that stays Blender until the GLB route has
+        // passed its Unity acceptance (the Bake Tests row): a model can opt in during evaluation, an exception can stay on
+        // Blender after the default flips. A shape the port names goes to Blender whatever is chosen (the bake says so).
+        {
+            string[] routeLabels = { "Editor default", "Blender (rig_anim.py FBX)", "C# in-process (GLB)" };
+            string[] routeKeys = { "", "blender", "csharp" };
+            int ri = Array.IndexOf(routeKeys, (cur.rigRoute ?? "").Trim()); if (ri < 0) ri = 0;
+            ri = EditorGUILayout.Popup(new GUIContent("Rig route (this recipe)", "Which pipeline slims the rig at bake time. Editor default = the setting below. " +
+                "Both routes are kept: the FBX route is the shipped one; the GLB route is the C# port of rig_anim.py (every stage held to Blender by the rig_anim drill), " +
+                "writing one GLB the Factory reads without Blender. A shape the port cannot do goes to Blender anyway, and the Console says why. Re-bake after changing."), ri, routeLabels);
+            cur.rigRoute = routeKeys[ri];
+            string def = EditorPrefs.GetString(UniversalBaker.RigRouteDefaultPref, "blender");
+            int di = def == "csharp" ? 1 : 0;
+            int ndi = EditorGUILayout.Popup(new GUIContent("Rig route (editor default)", "The route a recipe with 'Editor default' takes. Blender until the GLB route passes its Unity acceptance."), di, new[] { "Blender (rig_anim.py FBX)", "C# in-process (GLB)" });
+            if (ndi != di) EditorPrefs.SetString(UniversalBaker.RigRouteDefaultPref, ndi == 1 ? "csharp" : "blender");
+            EditorGUILayout.LabelField(" ", "Effective: " + (UniversalBaker.UseGlbRigRoute(cur.rigRoute) ? "C# in-process (GLB)" : "Blender (rig_anim.py FBX)"), EditorStyles.miniLabel);
+        }
         // AUTO-GROUND WAS RETIRED HERE (2026-09-20): every animated bake now centres the model's box on the origin
         // and drops its lowest point to the skeleton origin, exactly as the static bake does, so there is nothing
         // left to tick. The flying height of a flyer is the Position z dial — the same dial the static path uses.
@@ -1617,7 +1636,7 @@ public class AnimationLabWindow : EditorWindow
         // Blender the OLD file and failed with "no clip". Keep the Lab's chosen file so Browse actually sticks.
         if (!string.IsNullOrWhiteSpace(mine.modelFile)) cur.modelFile = mine.modelFile;
         cur.animClip = mine.animClip; cur.animateBones = mine.animateBones; cur.staticParts = mine.staticParts; cur.localNodeAnim = mine.localNodeAnim; cur.animUnitFix = mine.animUnitFix;
-        cur.convertRig = mine.convertRig; cur.autoGroundWheels = mine.autoGroundWheels; cur.keepTranslations = mine.keepTranslations;
+        cur.convertRig = mine.convertRig; cur.autoGroundWheels = mine.autoGroundWheels; cur.keepTranslations = mine.keepTranslations; cur.rigRoute = mine.rigRoute;
         cur.deployConvert = mine.deployConvert; cur.deployStart = mine.deployStart; cur.deployEnd = mine.deployEnd;
         cur.deployStrip = mine.deployStrip; cur.deployStripExtra = mine.deployStripExtra; cur.deployReadyFrame = mine.deployReadyFrame; cur.deployLegScale = mine.deployLegScale; cur.deployBarrelScale = mine.deployBarrelScale;
         cur.deployWheelBones = mine.deployWheelBones; cur.deployWheelAxis = mine.deployWheelAxis; cur.deployWheelFrames = mine.deployWheelFrames; cur.deployWheelDegrees = mine.deployWheelDegrees;

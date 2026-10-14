@@ -14,10 +14,11 @@ written out after each stage. The stages, by the script's own headings:
     4  the albedo, the join, the weld, the material slots, the decimate, the rebind, the root collapse, the rename,
        the sockets, the rotation and scale fold, the placement
 
-After stage 4 (step (f), the GLB rig route) the scene is exported ONCE as a GLB by Blender's glTF exporter - the scene's
-frame range widened to every action's rounded range, the first frame evaluated (the script's own export pins the pose
-so), `export_scene.gltf(GLB, animations, frame range, Y up)` as deploy_convert.py calls it - and the file read back row
-by row (tools/deploy-drill/glb_rows.py), each row under an X:
+After stage 4 (step (f), the GLB rig route) the scene is exported ONCE as a GLB by Blender's glTF exporter - the export
+step of the shipped editor/Tools~/rig_anim_glb.py beside rig_anim.py (the scene's frame range widened to every action's
+rounded range, the first frame evaluated as the script's own export pins the pose, `export_scene.gltf(GLB, animations,
+frame range, Y up)` as deploy_convert.py calls it; the Factory's Bake Tests row runs the same script as its oracle) - and
+the file read back row by row (tools/deploy-drill/glb_rows.py), each row under an X:
 
     XLOG   <a RIGANIM line of the export step>
     XDIES  <exception>                                                the export died (Blender's exporter raised)
@@ -87,38 +88,18 @@ for i in range(4):
 def h32(v): return struct.pack(">f", float(v)).hex()
 
 
-# The export step (step (f)): run in the script's namespace after stage 4. Every action (bpy.data.actions after the prune)
-# is exported; the scene's range is widened to cover their rounded ranges (the script's per-clip FBX export sets each
-# clip's own; one GLB carries them all), the first frame evaluated as the script pins the pose before each export.
-EXPORT_CODE = '''
-_acts5 = list(bpy.data.actions)
-_ranges5 = [[int(round(v)) for v in _a.frame_range] for _a in _acts5]
-if _ranges5:
-    bpy.context.scene.frame_start = min(r[0] for r in _ranges5)
-    bpy.context.scene.frame_end = max(r[1] for r in _ranges5)
-bpy.context.scene.frame_set(bpy.context.scene.frame_start)
-bpy.context.view_layer.update()
-print("RIGANIM glb: %d action(s), frames %d..%d" % (len(_acts5), bpy.context.scene.frame_start, bpy.context.scene.frame_end))
-bpy.ops.export_scene.gltf(filepath=_GLB_OUT, export_format='GLB', export_animations=True, export_frame_range=True, export_yup=True)
-print("RIGANIM glb wrote %s" % _GLB_OUT)
-'''
-EXPORT_CHUNK = compile(EXPORT_CODE, "<riganim export>", "exec")
+# The export step (step (f)): the shipped editor/Tools~/rig_anim_glb.py beside rig_anim.py - one export, one oracle for the
+# drill and for the Factory's Bake Tests row (step (g))
+sys.path.insert(0, os.path.dirname(os.path.abspath(script)))
+import rig_anim_glb   # noqa: E402
 
 
 def export_glb(g, path):
     """The X rows: the export's RIGANIM lines, its death, the GLB read back."""
-    out = io.StringIO(); died = None
-    g["_GLB_OUT"] = path
-    try:
-        with contextlib.redirect_stdout(out):
-            exec(EXPORT_CHUNK, g)
-    except Exception as e:
-        died = "%s: %s" % (type(e).__name__, e)
-    lines = ["XLOG\t%s" % l for l in out.getvalue().split("\n") if l.startswith("RIGANIM")]
+    log, died = rig_anim_glb.export_glb(g, path)
+    lines = ["XLOG\t%s" % l for l in log]
     if died is not None:
         return lines + ["XDIES\t%s" % died]
-    if not os.path.exists(path):
-        return lines + ["XDIES\tno GLB written"]
     return lines + ["X\t%s" % r for r in glb_rows(path)]
 
 

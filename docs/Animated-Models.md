@@ -31,6 +31,12 @@ actual rigger, or anything you rig yourself.
 - **What you do:** pick the model and the clip in the Factory / Animation Lab, Bake. Done.
 - **Settings:** "Convert raw rig" **OFF**. "Fix 100× oversize" per model (tick it if the bake comes out ~100× too
   big — the Lab auto-suggests it for GLB files).
+- **Rig route** (Animation Lab, 2026-10-14): which pipeline slims the rig at bake time. "Blender (rig_anim.py FBX)" is
+  the shipped route; "C# in-process (GLB)" runs the same steps inside Unity without Blender and writes one GLB with
+  every clip (`editor/BlenderRigAnimInProcess.cs`, held to the script row for row by the rig_anim drill). Per recipe,
+  with an editor-wide default that stays Blender until the Bake Tests row "Does the in-process rig slim match
+  Blender's GLB export?" has passed on every rig; a shape the port cannot do goes to Blender anyway and the Console
+  says why. Re-bake after changing it (the slim cache is keyed on the route).
 
 ### Level 2 — Rigid-part animations *(vehicles, artillery, machines)*
 

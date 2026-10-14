@@ -26,7 +26,7 @@ public static class HafModelRig
         public string Note = "";
     }
 
-    public static Result Build(HafModel m, List<UnityEngine.Object> assets, float fps = 24f)
+    public static Result Build(HafModel m, List<UnityEngine.Object> assets, float fps = 24f, bool forFactory = false)
     {
         var r = new Result();
         var root = new GameObject("__hafRig") { hideFlags = HideFlags.HideAndDontSave }; assets.Add(root);
@@ -36,8 +36,9 @@ public static class HafModelRig
         var tr = new Transform[m.Nodes.Count]; r.Nodes = tr; r.MeshOf = new Transform[m.Nodes.Count];
         for (int i = 0; i < m.Nodes.Count; i++)
         {
-            // '/' separates AnimationClip paths. The index keeps names unique after sanitizing that separator.
-            var go = new GameObject((m.Nodes[i].Name.Length > 0 ? m.Nodes[i].Name.Replace('/', '_') : "node") + " #" + i) { hideFlags = HideFlags.HideAndDontSave };
+            // Preview paths sanitize separators and add an index. Factory rigs retain the exporter's bone/socket names.
+            // The Factory consumes already-exported rigs: their action names are IDs, not the importer's 63-byte tracks.
+            var go = new GameObject(forFactory ? m.Nodes[i].Name : (m.Nodes[i].Name.Length > 0 ? m.Nodes[i].Name.Replace('/', '_') : "node") + " #" + i) { hideFlags = HideFlags.HideAndDontSave };
             tr[i] = go.transform;
         }
         for (int i = 0; i < m.Nodes.Count; i++)
@@ -61,7 +62,7 @@ public static class HafModelRig
             var key = (node.Mesh, skinned ? node.Skin : -1);
             if (!built.TryGetValue(key, out var mb))
             {
-                mb = BuildMesh(m, node.Mesh, skinned ? node.Skin : -1, sh, textures, materials, assets);
+                mb = BuildMesh(m, node.Mesh, skinned ? node.Skin : -1, sh, textures, materials, assets, forFactory);
                 built[key] = mb;
                 r.Meshes++; r.Vertices += mb.mesh.vertexCount; r.Triangles += (int)hm.Primitives.Sum(p => p.TriangleCount);
             }
@@ -90,7 +91,7 @@ public static class HafModelRig
             }
         }
         // ---- the clips: one legacy clip per animation, every animated node's position, rotation and scale keyed at every frame
-        var names = BlenderNames.TrackNames(m);
+        var names = forFactory ? m.Animations.Select(a => a.Name).ToArray() : BlenderNames.TrackNames(m);
         var clips = new List<AnimationClip>();
         // Every clip must restore properties another clip animates. SampleAnimation changes only its bound curves;
         // without these defaults, selecting a second clip leaves the first clip's pose on untouched nodes/properties.
@@ -172,7 +173,7 @@ public static class HafModelRig
         return new AnimationCurve(arr);
     }
 
-    static (Mesh mesh, Material[] mats) BuildMesh(HafModel m, int meshIndex, int skinIndex, Shader sh, Dictionary<int, Texture2D> textures, Dictionary<int, Material> materials, List<UnityEngine.Object> assets)
+    static (Mesh mesh, Material[] mats) BuildMesh(HafModel m, int meshIndex, int skinIndex, Shader sh, Dictionary<int, Texture2D> textures, Dictionary<int, Material> materials, List<UnityEngine.Object> assets, bool forFactory)
     {
         var hm = m.Meshes[meshIndex];
         var mesh = new Mesh { name = hm.Name.Length > 0 ? hm.Name : "mesh " + meshIndex, hideFlags = HideFlags.HideAndDontSave, indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
@@ -213,7 +214,9 @@ public static class HafModelRig
             var tri = new List<int>((int)p.TriangleCount * 3);
             foreach (var (a, b, c) in p.Triangles()) { tri.Add(baseIndex + a); tri.Add(baseIndex + c); tri.Add(baseIndex + b); }   // rewound for the mirror
             subs.Add(tri.ToArray());
-            mats.Add(ModelPreview.MaterialFor(m, p.Material, true, sh, textures, materials, assets));
+            var material = ModelPreview.MaterialFor(m, p.Material, true, sh, textures, materials, assets);
+            if (forFactory) material.name = p.Material >= 0 && p.Material < m.Materials.Count ? m.Materials[p.Material].Name : "Material";
+            mats.Add(material);
         }
         mesh.SetVertices(verts);
         mesh.SetUVs(0, uvs);

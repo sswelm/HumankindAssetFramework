@@ -344,7 +344,7 @@ static class RigAnimDrill
         while (offset < args.Length && args[offset].StartsWith("--", StringComparison.Ordinal))
         {
             if (args[offset] == "--keys") requireKeys = true;
-            else if (args[offset] == "--export") { Stage1Drill.Export = true; stages = 4; }   // step (f): the GLB export after stage 4, against the X rows
+            else if (args[offset] == "--export") { Stage1Drill.Export = true; Stage1Drill.InProcess = true; stages = 4; }   // step (f): the GLB export after stage 4, against the X rows; step (g): the Factory's wrapper on each
             else if (args[offset] == "--stages" && offset + 1 < args.Length && int.TryParse(args[offset + 1], NumberStyles.None, CultureInfo.InvariantCulture, out stages) && stages >= 1 && stages <= 4) offset++;
             else { Console.WriteLine(usage); return 2; }
             offset++;
@@ -509,6 +509,7 @@ static class Stage1Drill
     /// <summary>Stages 1..`stages` of the model against the dump. A LEFT: job must be declined by the model at one of
     /// them (its earlier stages compared all the same); any other decline is a FAIL.</summary>
     public static bool Export;                                   // --export: BlenderRigExport against the dump's X rows after stage 4
+    public static bool InProcess; public static int InProcessEqual;   // --export also runs BlenderRigAnimInProcess on every exported job (step (g))
     public static int Exported; public static long ExportRows;
     public static readonly SortedDictionary<string, long> ExportCover = new SortedDictionary<string, long>(StringComparer.Ordinal);
 
@@ -692,7 +693,62 @@ static class Stage1Drill
                                         Cover("an image (the albedo among them)", st.Images); Cover("several animations", x.Animations.Count > 1 ? 1 : 0); Cover("no animation", x.Animations.Count == 0 ? 1 : 0);
                                         var ch = x.ChannelRows; Cover("a channel reduced to its first and last sample", ch.Reduced); Cover("a channel with every sample", ch.Full); Cover("a channel of one sample", ch.Single);
                                         Cover("a STEP channel", ch.Stepped); Cover("a LINEAR channel", ch.Linear); Cover("a bone holding the pose the script left", ch.HeldBones);
-                                        Exported++; ExportRows += d.ExportRows.Count; Console.WriteLine($"EXPORT {key}: equal - {st.Nodes} nodes, {st.Joints} joints, {x.Skins.Count} skin(s), {st.Meshes} mesh(es) with {st.Prims} primitives, {st.Materials} materials, {st.Images} images, {st.Anims} animations with {st.Channels} channels" + (st.GlbEqual ? $", the GLB's {st.GlbBytes} bytes" : ""));
+                                        // step (g): the Factory's wrapper over the same stages and export (BlenderRigAnimInProcess) writes this job's file - its
+                                        // bytes the dump's GLB row's when they were compared -, names the primary's action and each role's
+                                        if (InProcess)
+                                        {
+                                            string tmpGlb = Path.Combine(Path.GetTempPath(), "riganim_inproc_" + Guid.NewGuid().ToString("N") + ".glb");
+                                            try
+                                            {
+                                                var o = BlenderRigAnimInProcess.Run(d.Argv[0], tmpGlb, argv.Skip(2).ToArray());
+                                                if (!o.Written) problems.Add("the in-process wrapper did not write the file: " + (o.ScriptExit ? "the script's exit" : o.UseBlender));
+                                                else
+                                                {
+                                                    if (st.GlbEqual)
+                                                    {
+                                                        var glbRow = d.ExportRows.First(r => r[0] == "GLB");
+                                                        string sha; using (var h = SHA256.Create()) sha = BitConverter.ToString(h.ComputeHash(File.ReadAllBytes(tmpGlb))).Replace("-", "").ToLowerInvariant();
+                                                        if (sha != glbRow[4]) problems.Add("the in-process wrapper's file differs from the dump's GLB (sha " + sha + " against " + glbRow[4] + ")");
+                                                    }
+                                                    else
+                                                    {
+                                                        // a JPEG albedo: the file carries the source's JPEG where Blender's has its PNG re-encode - it must read back whole
+                                                        try
+                                                        {
+                                                            var back = GlbReader.Read(tmpGlb);
+                                                            if (back.Images.Count != x.MaterialRows.Images.Count) problems.Add("the in-process wrapper's file reads back with " + back.Images.Count + " image(s), the export has " + x.MaterialRows.Images.Count);
+                                                            else if (back.Images.Any(im => im.Bytes == null || im.Bytes.Length == 0)) problems.Add("the in-process wrapper's file has an image without bytes");
+                                                            else if (back.Animations.Count != x.Animations.Count) problems.Add("the in-process wrapper's file reads back with " + back.Animations.Count + " animation(s), the export has " + x.Animations.Count);
+                                                            else
+                                                            {
+                                                                var expectedImages = x.MaterialRows.Images.ToArray();
+                                                                try
+                                                                {
+                                                                    for (int ii = 0; ii < expectedImages.Length; ii++)
+                                                                        if (expectedImages[ii].bytes == null)
+                                                                        {
+                                                                            var im = expectedImages[ii]; var srcIm = model.Model.Images[im.source];
+                                                                            x.MaterialRows.Images[ii] = (im.name, BlenderRigAnimInProcess.ImageMime(srcIm.Bytes), srcIm.Bytes, im.source);
+                                                                        }
+                                                                    var expectedFile = BlenderGlbWriter.Build(x);
+                                                                    if (expectedFile.Fallback != null || !File.ReadAllBytes(tmpGlb).SequenceEqual(expectedFile.Glb)) problems.Add("the in-process wrapper's JPEG file differs from the oracle-checked export with its source image bytes");
+                                                                    else Cover("the in-process wrapper's file read back (a JPEG albedo: the source's bytes, not Blender's PNG)");
+                                                                }
+                                                                finally { for (int ii = 0; ii < expectedImages.Length; ii++) x.MaterialRows.Images[ii] = expectedImages[ii]; }
+                                                            }
+                                                        }
+                                                        catch (Exception rx) { problems.Add("the in-process wrapper's file does not read back: " + rx.GetType().Name + ": " + rx.Message); }
+                                                    }
+                                                    if (o.PrimaryAction != (model.PrimaryAction ?? "")) problems.Add("the in-process wrapper names the primary '" + o.PrimaryAction + "', the model '" + model.PrimaryAction + "'");
+                                                    if (!o.RoleActions.SequenceEqual(model.RoleActions)) problems.Add("the in-process wrapper names " + o.RoleActions.Count + " role(s), the model " + model.RoleActions.Count);
+                                                    if (!BlenderRigAnimInProcess.ParseRolesSidecar(BlenderRigAnimInProcess.RolesSidecar(o.PrimaryAction, o.RoleActions), out string pr, out var rl) || pr != o.PrimaryAction || !rl.SequenceEqual(o.RoleActions)) problems.Add("the roles sidecar does not read back");
+                                                    if ((o.AlbedoBytes != null) != (model.Albedo.path != null)) problems.Add("the in-process wrapper's albedo " + (o.AlbedoBytes != null ? "written" : "not written") + ", the model's " + (model.Albedo.path != null ? "written" : "not written"));
+                                                    if (problems.Count == 0) { InProcessEqual++; Cover("the in-process wrapper's file (step (g))"); }
+                                                }
+                                            }
+                                            finally { try { if (File.Exists(tmpGlb)) File.Delete(tmpGlb); } catch { } }
+                                        }
+                                        if (problems.Count == 0) { Exported++; ExportRows += d.ExportRows.Count; Console.WriteLine($"EXPORT {key}: equal - {st.Nodes} nodes, {st.Joints} joints, {x.Skins.Count} skin(s), {st.Meshes} mesh(es) with {st.Prims} primitives, {st.Materials} materials, {st.Images} images, {st.Anims} animations with {st.Channels} channels" + (st.GlbEqual ? $", the GLB's {st.GlbBytes} bytes" : "")); }
                                     }
                                 }
                                 catch (InvalidDataException e) { problems.Add("the export's dump: " + e.Message); }
@@ -712,7 +768,7 @@ static class Stage1Drill
     public static void Summary(int stages)
     {
         foreach (var kv in Census) Console.WriteLine($"MODEL {kv.Value} {kv.Key}");
-        if (Export) { foreach (var kv in ExportCover) Console.WriteLine($"XCOVER {kv.Value} {kv.Key}"); Console.WriteLine($"EXPORTS jobs {Exported} rows {ExportRows}"); }
+        if (Export) { foreach (var kv in ExportCover) Console.WriteLine($"XCOVER {kv.Value} {kv.Key}"); Console.WriteLine($"EXPORTS jobs {Exported} rows {ExportRows} inprocess {InProcessEqual}"); }
         Console.WriteLine($"STAGES {stages} jobs {Compared} equal {Equal} left {Left} rows {RowsEqual} deferred {Deferred}");
     }
 }

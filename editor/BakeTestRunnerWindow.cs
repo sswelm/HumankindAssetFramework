@@ -176,6 +176,18 @@ public class BakeTestRunnerWindow : EditorWindow
                        "name is a SKIP that says why; a port that CRASHES is a FAIL here - the Factory would quietly let Blender convert.",
                 run = BlenderDeployHeadlessTest.RunSection },
 
+            // THE RIG SLIM IN C# (2026-10-14, step (g) of the rig_anim port): the Factory's GLB rig route, opt-in per recipe until this
+            // row has passed on every animated registry rig; the push gate holds the port to rig_anim.py outside Unity.
+            new TestRow { name = "Does the in-process rig slim match Blender's GLB export? (every animated registry rig with a glTF source, in Unity)", quick = false, on = true, needsBlender = true,
+                cost = "the port and Blender's rig_anim_glb.py once per animated registry entry - a minute or two each in Blender",
+                what = "For every animated registry entry with a .glb/.gltf source (a deploying entry's converted rig, from its cache), builds the argv the " +
+                       "Factory hands both routes (UniversalBaker.RigAnimArgv), slims the rig in process (BlenderRigAnimInProcess, the GLB route) AND with " +
+                       "Blender's Tools/rig_anim_glb.py (rig_anim.py cut before its FBX export, then one glTF export), and compares the two written GLBs byte " +
+                       "for byte (a difference is read back and named field by field) and the extracted albedo. A shape the port leaves to Blender by name is a " +
+                       "SKIP that says why; a port that CRASHES is a FAIL here - the Factory would quietly take the FBX route. The GLB route becomes the editor " +
+                       "default only once this row is green.",
+                run = BlenderRigAnimHeadlessTest.RunSection },
+
             // THE IN-PROCESS PROBE PREVIEW (2026-10-03, step 3d): the C# probe's rows are held to Blender's by the push gate; the PREVIEW
             // it builds in Unity - the frame, the facing, the lifecycle of its objects - can only be judged in Unity, against the
             // preview FBX files Blender left under Assets/FactorySource/VehicleLab and Unity imported.

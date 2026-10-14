@@ -861,14 +861,31 @@ def f_review_join_uv(out, variant):
     return r.write(out, "riganim_f_review_uv_" + variant)
 
 
-def f_review_jpeg(out):
+def f_review_jpeg(out, declared="image/jpeg", suffix=""):
     """An albedo encoded as PNG by Blender still needs a GLB evidence row even though its bytes cannot be compared."""
     import base64
     r = Rig()
     jpeg = base64.b64decode("/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/yQALCAABAAEBAREA/8wABgAQEAX/2gAIAQEAAD8A0s8g/9k=")
-    r.images.append({"bufferView": r.b.blob(jpeg), "mimeType": "image/jpeg", "name": "tiny"})
+    r.images.append({"bufferView": r.b.blob(jpeg), "mimeType": declared, "name": "tiny"})
     mat = r.material("Paint", texture=r.texture(0)); rigged(r, material=mat)
-    return r.write(out, "riganim_f_review_jpeg")
+    return r.write(out, "riganim_f_review_jpeg" + suffix)
+
+
+def unity_import_fixtures(out):
+    """Small raw GLBs for UnityRigImportTests: names, atlas slot order, translation scaling, and clip rebasing."""
+    os.makedirs(out, exist_ok=True)
+    for case in ("plain", "long", "late", "underscore"):
+        r = Rig(); arm, j0, j1, sk, m = rigged(r)
+        if case == "long": r.anims[0]["name"] = "Spin_" + "a" * 120
+        if case == "underscore": r.anims[0]["name"] = "_Spin"
+        times = [0.5, 1.0] if case == "late" else [0.0, 1.0]
+        if case == "late":
+            r.anims = []; a = r.anim("Spin"); r.key(a, j1, "rotation", times, spin(2, "x", 0.25))
+        r.key(0, j1, "translation", times, [(0.0, 1.0, 0.0), (2.0, 1.0, 0.0)])
+        r.write(out, case)
+    r = Rig(); red = r.material("Red", (1.0, 0.0, 0.0)); blue = r.material("Blue", (0.0, 0.0, 1.0))
+    rigged(r, material=blue, second=red)  # submesh order opposite the extraction's material order
+    r.write(out, "materials")
 
 
 def main(out):
@@ -1016,6 +1033,7 @@ def main(out):
     for variant in ("added", "present", "missing", "shared"):
         job("fx_f_review_uv_" + variant, f_review_join_uv(out, variant))
     job("fx_f_review_jpeg", f_review_jpeg(out))
+    job("fx_g_jpeg_declared_png", f_review_jpeg(out, "image/png", "_declared_png"))
 
 
 if __name__ == "__main__":

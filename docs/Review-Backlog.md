@@ -334,6 +334,21 @@ a second armature's unused skin (gathered after the animation export). Next: (g)
 C# route - the GLB rig read by HafModelRig in place of the FBX, both routes configurable per recipe with the Blender
 FBX route the global default, the slim-step cache key carrying the route and a C# pipeline revision; then (h) the
 Bake Tests row and the Unity acceptance gate.
+(g) the Factory's animated path on the GLB route, DONE 2026-10-14 (the Unity acceptance OWED): `editor/BlenderRigAnimInProcess.cs`
+runs the four stages and the export in process and the Factory's animated path takes its GLB - per recipe (`rigRoute`,
+the Lab's "Rig route" popups) with an editor default (EditorPrefs `HAF.RigRouteDefault`) that STAYS BLENDER; the slim
+cache key carries the route and the port's `CacheRevision`; a named fallback takes the FBX route for that bake, a crash
+is a Console warning; the GLB is imported by `HafModelRig`, persisted under `anim/` with one clip per role, the clip
+collections pointing at them. The drill runs the wrapper on every exported job (23 of 23 recipes - 17 byte-identical,
+the six JPEG-albedo rigs read back -, 95 fixtures, 9 review fixtures); the dump exports through the shipped
+`Tools~/rig_anim_glb.py`, the oracle the new Bake Tests row ("Does the in-process rig slim match Blender's GLB
+export?", `BlenderRigAnimHeadlessTest`) runs against the port on every animated registry rig with the Factory's own
+argv. Found: a JPEG albedo's PNG inside Blender's GLB is its encoder's - the port's file carries the source JPEG, the
+row compares with the image bytes aside; a pre-PR review found and fixed three Factory-side defects the drill cannot see
+(a stale GLB reused after a fallback, the GLB's absolute clip times, previews reading only the FBX - `docs/Testing.md`).
+Next: (h) the row's run in Unity by the user and the acceptance gate above
+(every GLB-source entry baked both ways, mesh, skeleton, clips, placement, an in-game check of each model playing its
+roles); only then the default flips.
 - **rig_anim.py's socket sort exit reads a freed edit bone** — OPEN (2026-10-14, found by the stage 4 fixtures). The
   "would sort BEFORE its parent" error prints `_parent.name` after `bpy.ops.object.mode_set(mode='OBJECT')` has freed
   the edit bones: four Blender runs of `fx_s4_socket_sort` printed the right name once, an empty name once, and twice
