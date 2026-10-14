@@ -40,7 +40,8 @@
 // (bmesh remove_doubles), a socket sorting before its parent (the script exits with a message read from a freed edit
 // bone), a no-op root bone with an object hung from it. Held to Blender by tools/riganim_drill.sh (--stages 4), every
 // row of every stage; the albedo PNG by its dimensions (its bytes are Blender's encoder's). BlenderRigExport.cs writes
-// the stage 4 scene as the GLB Blender's glTF exporter would (step (f)): `riganim.exe --export`.
+// the stage 4 scene as the GLB Blender's glTF exporter would (step (f)): `riganim.exe --export`. BlenderRigAnimInProcess.cs
+// runs it all for the Factory's GLB rig route (step (g)); the drill runs that wrapper too on every exported job.
 // Stage 4 rules read from Blender's sources (5.1): mesh_join.cc (the active object first, then scene order; the
 // vertices through the active's inverse world, blender::math::transform_points, which leaves them untouched when the
 // matrix is within 1e-6 of the identity; materials by first appearance, vertex groups and UV layers by name, custom
@@ -300,6 +301,8 @@ public static class BlenderRigAnim
         public int AlbedoImage = -1;                                  // stage 4: the glTF image the albedo came from
         public string AlbedoBlenderName;                              // ... and the Blender image's name (several glTF images can alias one)
         public List<ActionData> AllActs = new List<ActionData>();   // stage 3's all_acts: the primary and the role clips (rebaked when folded)
+        public string PrimaryAction;                                 // stage 3: the primary clip's action as it ends (the GLB route's clip name)
+        public List<(string role, string action)> RoleActions = new List<(string, string)>();   // stage 3: each state role's action (role_acts), in the script's order
     }
 
     static void Note(Stage1 s, string what) { if (!s.Notes.Contains(what)) s.Notes.Add(what); }
@@ -1200,6 +1203,7 @@ public static class BlenderRigAnim
         }
 
         s.AllActs = allActs;
+        s.PrimaryAction = primary.Name; s.RoleActions = roleActs.Select(r => (r.role, r.act.Name)).ToList();
         // ---- the frame range
         foreach (var act in s.Actions) FrameRange(act);
         s.FrameStart = (int)Math.Round((double)primary.FrameStart, MidpointRounding.ToEven);

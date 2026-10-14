@@ -52,6 +52,7 @@ public struct BakeConfig
     public string  deployStrip, deployReadyFrame, deployLegScale, deployBarrelScale, deployRecoil, deployRecoilStep, deployRecoilMag, deployArcR, deployRecoilReturn, deploySlamDeg, deploySlamSettle;
     public string  deployWheelBones, deployWheelAxis, deployWheelFrames, deployWheelDegrees;   // wheel roll keyed into the 'folded' role (deploy_convert argv[17..20])
     public string  deployStripExtra;   // deployConvert: parts to remove ON TOP of the default kill-list (deploy_convert argv[16]) — the picked control wheels etc. Empty = defaults only.
+    public string  rigRoute;        // ANIMATED only (BAKE-TIME): "" (the editor's default), "blender" or "csharp" - UniversalBaker.UseGlbRigRoute
     public bool    animStateDriven; // ANIMATED only (Phase 2): bake one ClipCollection PER ROLE (idle = animClip, move = animClipMove, optional after = animClipAfter), all sharing the ONE baked skeleton — the runtime picks per state.
     public string  animClipMove;    // STATE-DRIVEN only: the MOVEMENT clip name (required when animStateDriven)
     public string  animClipAfter;   // STATE-DRIVEN only: the optional AFTER-MOVEMENT one-shot clip name ("" = none)
@@ -416,7 +417,8 @@ public static class UniversalBaker
             if (!(char.IsLetterOrDigit(c) || c == '_' || c == '-'))
                 return Fail($"resource name '{cfg.resourceName}' contains an invalid character ('{c}'). " +
                             "Use letters, digits, '_' or '-' only — no spaces (e.g. 'AttackHelicopter').");
-        if (!BlenderAvailable()) return Fail("Animated import needs Blender installed (auto-detected, or set EditorPrefs 'HAF.BlenderPath').");
+        bool glbRoute = UseGlbRigRoute(cfg.rigRoute);   // step (g): the in-process port's GLB, or rig_anim.py's FBX
+        if (!glbRoute && !BlenderAvailable()) return Fail("Animated import needs Blender installed (auto-detected, or set EditorPrefs 'HAF.BlenderPath').");
         if (cfg.deployConvert)
         {
             // recipe-driven pre-step: convert the raw rigid-parts source, then bake the CONVERTED rig. Overwriting
@@ -451,6 +453,11 @@ public static class UniversalBaker
 
         string fbxRel = animDir + "/" + name + "_anim.fbx";
         string fbxFull = Path.Combine(projRoot, fbxRel);
+        // the GLB route's outputs (step (g)): ONE file with every clip, and the roles sidecar naming the primary's and each role's animation
+        string glbRel = animDir + "/" + name + "_anim.glb";
+        string glbFull = Path.Combine(projRoot, glbRel);
+        string rolesSidecarFull = Path.Combine(fsDir, name + "_anim.roles.txt");
+        string slimOut = glbRoute ? glbFull : fbxFull;
         // STATE-DRIVEN role outputs (Phase 2): rig_anim exports each role's clip to a sibling anim_<role>/ folder —
         // one FBX per folder, so each ClipCollection folder-scan sees exactly one clip.
         if (cfg.animStateDriven && string.IsNullOrWhiteSpace(cfg.animClipMove))
@@ -470,7 +477,7 @@ public static class UniversalBaker
         bool wantIdle = cfg.animStateDriven && !string.IsNullOrWhiteSpace(cfg.animClipIdle);
         bool wantIdleAlt = cfg.animStateDriven && !string.IsNullOrWhiteSpace(cfg.animClipIdleAlt);
         bool wantIdleAlt2 = cfg.animStateDriven && !string.IsNullOrWhiteSpace(cfg.animClipIdleAlt2);
-        bool roleFbxMissing = cfg.animStateDriven &&
+        bool RoleFbxMissing() => cfg.animStateDriven &&
             (!File.Exists(Path.Combine(projRoot, moveFbxRel)) || (wantAfter && !File.Exists(Path.Combine(projRoot, afterFbxRel)))
                                                               || (wantAttack && !File.Exists(Path.Combine(projRoot, attackFbxRel)))
                                                               || (wantCombat && !File.Exists(Path.Combine(projRoot, combatFbxRel)))
@@ -478,19 +485,20 @@ public static class UniversalBaker
                                                               || (wantIdle && !File.Exists(Path.Combine(projRoot, idleFbxRel)))
                                                               || (wantIdleAlt && !File.Exists(Path.Combine(projRoot, idleAltFbxRel)))
                                                               || (wantIdleAlt2 && !File.Exists(Path.Combine(projRoot, idleAlt2FbxRel))));
+        bool roleFbxMissing = !glbRoute && RoleFbxMissing();
         // TOOL-VERSION CACHE-BUSTER (2026-07-19): a cached slim FBX older than rig_anim.py itself is stale — a
         // pipeline fix would otherwise be silently skipped by the reuse path and re-wrap the old (possibly broken)
         // FBX (exactly how the frozen-runner fix got bypassed on its first bake).
         string rigScript = HafPackageContext.ToolPath("rig_anim.py");
-        bool toolNewer = File.Exists(rigScript) && File.Exists(fbxFull) &&
-                         File.GetLastWriteTimeUtc(rigScript) > File.GetLastWriteTimeUtc(fbxFull);
+        bool toolNewer = File.Exists(rigScript) && File.Exists(slimOut) &&
+                         File.GetLastWriteTimeUtc(rigScript) > File.GetLastWriteTimeUtc(slimOut);
         if (toolNewer) Debug.Log($"[Factory] {name}: rig_anim.py is newer than the cached slim FBX — re-slimming (tool changed).");
         // SOURCE-FILE CACHE-BUSTER (2026-07-19): same trap class as the tool buster — the slim cache keyed only on
         // SETTINGS, so replacing the source model file with identical settings silently reused the OLD slim (the
         // howitzer re-baked from a stale migration-era FBX after its GLB was restored). Re-slim when the source
         // model is newer than the cached FBX.
-        bool srcNewer = !string.IsNullOrEmpty(cfg.modelFile) && File.Exists(cfg.modelFile) && File.Exists(fbxFull) &&
-                        File.GetLastWriteTimeUtc(cfg.modelFile) > File.GetLastWriteTimeUtc(fbxFull);
+        bool srcNewer = !string.IsNullOrEmpty(cfg.modelFile) && File.Exists(cfg.modelFile) && File.Exists(slimOut) &&
+                        File.GetLastWriteTimeUtc(cfg.modelFile) > File.GetLastWriteTimeUtc(slimOut);
         if (srcNewer) Debug.Log($"[Factory] {name}: the source model file is newer than the cached slim FBX — re-slimming (source changed).");
         // SETTINGS-FINGERPRINT CACHE-BUSTER (2026-08-01, review MED): the busters above catch a changed TOOL or SOURCE
         // FILE, but the slim FBX was never keyed on the rig_anim ARGUMENTS — so with 'Reuse extracted' on, changing the
@@ -509,13 +517,29 @@ public static class UniversalBaker
             cfg.animStateDriven ? "1" : "0",
             (cfg.animClipMove ?? "").Trim(), (cfg.animClipAfter ?? "").Trim(), (cfg.animClipAttack ?? "").Trim(),
             (cfg.animClipCombat ?? "").Trim(), (cfg.animClipPreMove ?? "").Trim(), (cfg.animClipIdle ?? "").Trim(),
-            (cfg.animClipIdleAlt ?? "").Trim(), (cfg.animClipIdleAlt2 ?? "").Trim());
+            (cfg.animClipIdleAlt ?? "").Trim(), (cfg.animClipIdleAlt2 ?? "").Trim(),
+            glbRoute ? "route=csharp:" + BlenderRigAnimInProcess.CacheRevision : "route=blender");   // the route and the C# port's revision: a switch re-slims, and so does a changed port
         string slimArgsFull = Path.Combine(fsDir, name + "_anim.args.txt");
-        bool argsChanged = File.Exists(fbxFull) && (!File.Exists(slimArgsFull) || File.ReadAllText(slimArgsFull) != slimArgsKey);
+        bool argsChanged = File.Exists(slimOut) && (!File.Exists(slimArgsFull) || File.ReadAllText(slimArgsFull) != slimArgsKey);
+        bool sidecarMissing = glbRoute && !File.Exists(rolesSidecarFull);   // the GLB without its roles sidecar is half an output
         if (argsChanged) Debug.Log($"[Factory] {name}: a slim setting changed (clip/rotation/rig args) — re-slimming.");
+        // THE PORT'S LAST WORD (review of step (g)): a bake on the GLB route that the port left to Blender stamps the FBX it got
+        // with the FALLBACK key - the same settings and port revision take the FBX route up front next time (the port is
+        // deterministic: its decline would be the same) and reuse that FBX; a changed setting or a bumped CacheRevision asks
+        // the port again. Without it the next bake found the csharp stamp and a GLB of an OLDER key beside it, and reused that.
+        bool rigFellBack = false;
+        string slimArgsKeyFallback = slimArgsKey.Replace("route=csharp:", "route=csharp-fallback:");
+        if (glbRoute && File.Exists(fbxFull) && File.Exists(slimArgsFull) && File.ReadAllText(slimArgsFull) == slimArgsKeyFallback)
+        {
+            Debug.Log($"[Factory] {name}: the C# rig port left this model to Blender at these settings (its last bake) - taking the FBX route up front; a changed setting or a changed port asks it again.");
+            glbRoute = false; slimOut = fbxFull; rigFellBack = true;
+            argsChanged = false; sidecarMissing = false; roleFbxMissing = RoleFbxMissing();
+            toolNewer = File.Exists(rigScript) && File.GetLastWriteTimeUtc(rigScript) > File.GetLastWriteTimeUtc(fbxFull);
+            srcNewer = !string.IsNullOrEmpty(cfg.modelFile) && File.Exists(cfg.modelFile) && File.GetLastWriteTimeUtc(cfg.modelFile) > File.GetLastWriteTimeUtc(fbxFull);
+        }
 
         // --- 1) Blender: slim the rigged model (keep armature + clip, clamp frame range, optional bone strip, albedo) ---
-        if (!string.IsNullOrEmpty(cfg.modelFile) && (!cfg.reuseExtracted || !File.Exists(fbxFull) || roleFbxMissing || toolNewer || srcNewer || argsChanged))
+        if (!string.IsNullOrEmpty(cfg.modelFile) && (!cfg.reuseExtracted || !File.Exists(slimOut) || roleFbxMissing || sidecarMissing || toolNewer || srcNewer || argsChanged))
         {
             // 0 = decimation OFF, honoring the Factory's "(0 = off)" label — it silently meant 12,000 here for
             // years, which shredded the tank's subdivided link-cell treads into cross-cell spikes (2026-07-26).
@@ -528,23 +552,59 @@ public static class UniversalBaker
             { Debug.Log($"[Factory] {name}: keeping the existing extracted albedo (hand-edit protection)."); albedoOut = ""; }
             bool keepMats = cfg.materialMode != MaterialMode.Single;   // Auto/Multi keep the material slots so the atlas step can pack them (Single collapses to 1, the old default)
             // state roles for rig_anim's argv[9]: "move=<clip>[;after=<clip>]" — one shared rest, one FBX per role
-            string stateRoles = "";
-            if (cfg.animStateDriven)
-            {
-                stateRoles = "move=" + cfg.animClipMove.Trim();
-                if (wantAfter) stateRoles += ";after=" + cfg.animClipAfter.Trim();
-                if (wantAttack) stateRoles += ";attack=" + cfg.animClipAttack.Trim();
-                if (wantCombat) stateRoles += ";combat=" + cfg.animClipCombat.Trim();
-                if (wantPreMove) stateRoles += ";premove=" + cfg.animClipPreMove.Trim();
-                if (wantIdle) stateRoles += ";idle=" + cfg.animClipIdle.Trim();
-                if (wantIdleAlt) stateRoles += ";idlealt=" + cfg.animClipIdleAlt.Trim();
-                if (wantIdleAlt2) stateRoles += ";idlealt2=" + cfg.animClipIdleAlt2.Trim();
-            }
+            string stateRoles = RigAnimStateRoles(cfg);
             // The args sidecar is a SUCCESS stamp. Invalidate it before Blender starts: a failed run may leave a
             // newer primary and every role filename on disk, making the timestamp and presence checks above pass
             // on the next bake even though the last role FBX may be only partly written.
             if (File.Exists(slimArgsFull)) File.Delete(slimArgsFull);
             bool slimOk = false;
+            if (glbRoute)
+            {
+                // THE SLIM IN C# (step (g) of replacing Blender, 2026-10-14; BlenderRigAnimInProcess): the port runs the script's
+                // four stages and writes the GLB its stage 4 scene exports to - every stage and the file held to Blender by
+                // tools/riganim_drill.sh. What it names as Blender's (a Fallback) takes the FBX route for THIS bake, said in the
+                // Console; the script's own exits stop the bake here as they would there.
+                try
+                {
+                    EditorUtility.DisplayProgressBar("Model Factory", "Rig slim (in process): the clip, the rig, the join, the export…", 0.3f);
+                    var swRig = System.Diagnostics.Stopwatch.StartNew();
+                    void RigCheckpoint()
+                    {
+                        try { BakeTestRunnerWindow.Progress.Heartbeat(); } catch { }
+                        BakeTestRunnerWindow.Progress.ThrowIfCancelled();
+                        if (swRig.ElapsedMilliseconds >= ProcTimeoutMs) throw new TimeoutException("the in-process rig slim exceeded " + (ProcTimeoutMs / 1000) + " seconds");
+                    }
+                    var inProc = BlenderRigAnimInProcess.Run(cfg.modelFile, glbFull, RigAnimArgv(cfg, target, albedoOut, keepMats), RigCheckpoint);
+                    foreach (var line in inProc.Log) Debug.Log("[rig_anim] " + line.Trim());
+                    if (inProc.Written)
+                    {
+                        if (inProc.AlbedoBytes != null && !WriteAlbedoPng(inProc, out string albErr)) return Fail($"{name}: the rig slim's albedo could not be written - {albErr}");
+                        File.WriteAllText(rolesSidecarFull, BlenderRigAnimInProcess.RolesSidecar(inProc.PrimaryAction, inProc.RoleActions));
+                        slimOk = true;
+                    }
+                    else if (inProc.ScriptExit)
+                    {
+                        LastRigAnimError = inProc.Log.LastOrDefault(l => l.Contains("RIGANIM ERROR"))?.Trim() ?? "";
+                        return Fail(LastRigAnimError.Length > 0 ? "rig slim failed: " + LastRigAnimError : "rig slim failed: the script stops before writing (see the [rig_anim] log).");
+                    }
+                    else
+                    {
+                        // a shape the port NAMES is Blender's by design, said at info level; a port that CRASHED is a warning - the
+                        // bake still goes through Blender, but a regression in the port must not hide behind a working script
+                        if (inProc.UseBlender.StartsWith("the C# rig run failed", StringComparison.Ordinal))
+                            Debug.LogWarning("[Factory] rig slim: the C# port CRASHED, using Blender's FBX route instead - " + inProc.UseBlender + ". A crash is not a named shape: report it with the model.");
+                        else Debug.Log("[Factory] rig slim: using Blender's FBX route because " + inProc.UseBlender + ".");
+                        if (!BlenderAvailable()) return Fail("rig slim: " + inProc.UseBlender + ". That leaves this model to Blender, which is not installed (it is auto-detected, or set EditorPrefs 'HAF.BlenderPath').");
+                        glbRoute = false; slimOut = fbxFull; rigFellBack = true;
+                        // a GLB and sidecar of an earlier key must not survive the fallback: the next bake would find them under the csharp stamp
+                        foreach (var stale in new[] { glbFull, rolesSidecarFull })
+                            try { if (File.Exists(stale)) File.Delete(stale); } catch (Exception ex) { Debug.LogWarning("[Factory] could not remove the stale slim GLB output " + stale + ": " + ex.Message); }
+                    }
+                }
+                catch (OperationCanceledException) { throw; }
+                finally { EditorUtility.ClearProgressBar(); }
+            }
+            if (!glbRoute)
             try
             {
                 slimOk = RigAnimViaBlender(cfg.modelFile, fbxFull, target, cfg.animateBones ?? "", cfg.animClip ?? "", albedoOut, keepMats, cfg.rotationEuler, cfg.convertRig, stateRoles, cfg.autoGroundWheels, cfg.socketBones, cfg.keepTranslations, cfg.staticParts ?? "", cfg.localNodeAnim);
@@ -564,10 +624,14 @@ public static class UniversalBaker
                     ? "Blender animated slim failed: " + LastRigAnimError
                     : "Blender animated slim failed (see console). Is the model rigged with the named animation clip(s)?");
             AssetDatabase.Refresh();   // the role folders are new on disk — let Unity discover them before importing
-            try { File.WriteAllText(slimArgsFull, slimArgsKey); } catch { }   // restore the success stamp only after Blender completes
+            try { File.WriteAllText(slimArgsFull, rigFellBack ? slimArgsKeyFallback : slimArgsKey); } catch { }   // restore the success stamp only after the slim completes (the fallback key when the port declined)
         }
-        if (!File.Exists(fbxFull)) return Fail("no slim FBX at " + fbxRel + " — bake with a Model file first (Reuse extracted needs an existing one).");
-        AssetDatabase.ImportAsset(fbxRel, ImportAssetOptions.ForceUpdate);
+        if (!glbRoute)
+        {
+            if (!File.Exists(fbxFull)) return Fail("no slim FBX at " + fbxRel + " — bake with a Model file first (Reuse extracted needs an existing one).");
+            AssetDatabase.ImportAsset(fbxRel, ImportAssetOptions.ForceUpdate);
+        }
+        else if (!File.Exists(glbFull) || !File.Exists(rolesSidecarFull)) return Fail("no slim GLB (with its roles sidecar) at " + glbRel + " — bake with a Model file first (Reuse extracted needs an existing one).");
         TestPoll();
         // ROLES THIS RECIPE NO LONGER WANTS (review of PR #107): rig_anim clears the previous run's clip for every role it is
         // about to write; a role DROPPED from the recipe (or state-driven mode switched off) is not among those, and its
@@ -585,7 +649,7 @@ public static class UniversalBaker
                 if (File.Exists(Path.Combine(projRoot, rel)) && AssetDatabase.DeleteAsset(rel)) swept.Add(rel);
             if (swept.Count > 0) Debug.Log($"[Factory] {name}: removed the FBX of {swept.Count} role(s) this recipe no longer uses (the delete guard keeps a copy): {string.Join(", ", swept)}");
         }
-        if (cfg.animStateDriven)
+        if (cfg.animStateDriven && !glbRoute)   // the FBX route's role files; the GLB carries every role in one file
         {
             if (!File.Exists(Path.Combine(projRoot, moveFbxRel))) return Fail("state-driven: the Blender step produced no Movement FBX (" + moveFbxRel + ") — check the Movement clip name.");
             AssetDatabase.ImportAsset(moveFbxRel, ImportAssetOptions.ForceUpdate);
@@ -702,7 +766,28 @@ public static class UniversalBaker
                              "Single — baking ONE atlas that every part samples whole. If parts come out mis-coloured, " +
                              "set Material mode to Multi (or Auto) and re-bake.");
 
-        // --- 2) import the FBX: Generic rig, import animation, scale so the longest axis ~= size ---
+        // --- 2) import the rig: the FBX through Unity's ModelImporter (Generic rig, animation, the Scale Factor), or the GLB
+        //        through HafModelRig with the scale folded into the data (step (g), ImportGlbRig below) ---
+        GameObject fbxGo = null; string rigRel = fbxRel;
+        Dictionary<string, UnityEngine.Object> glbClipByRole = null; List<Mesh> glbMeshes = null;
+        if (glbRoute)
+        {
+            if (cfg.animUnitFix) Debug.Log($"[Factory] {name}: 'Fix 100x oversize' is an FBX import setting - the GLB route folds the scale into the data (clean units) and ignores it.");
+            if (!BlenderRigAnimInProcess.ParseRolesSidecar(File.ReadAllText(rolesSidecarFull), out string primaryAction, out var roleActions))
+                return Fail($"{name}: the roles sidecar beside the slim GLB is not readable ({rolesSidecarFull}) - re-bake without 'Reuse extracted'.");
+            rigRel = animDir + "/" + name + "_anim.prefab";
+            fbxGo = ImportGlbRig(name, animDir, glbFull, size, primaryAction, roleActions, out glbClipByRole, out glbMeshes, out string rigErr);
+            if (fbxGo == null) return Fail($"{name}: the GLB rig could not be imported - {rigErr}");
+            // ONE ROUTE'S OUTPUT AT A TIME (review of step (g)): the Lab's and the Factory's previews read whichever route's rig is
+            // there (RigPreviewPath) - the other route's files go, or a preview would show an earlier bake's rig and clips as this one's
+            var fbxGone = new List<string>();
+            foreach (var rel in new[] { fbxRel }.Concat(BakerRules.StaleRoleFbx(resDir, name, new string[0])))
+                if (File.Exists(Path.Combine(projRoot, rel)) && AssetDatabase.DeleteAsset(rel)) fbxGone.Add(rel);
+            if (fbxGone.Count > 0) Debug.Log($"[Factory] {name}: the GLB route replaced the FBX route's {fbxGone.Count} file(s) (the delete guard keeps a copy): {string.Join(", ", fbxGone)}");
+        }
+        else
+        {
+        DeleteGlbRigAssets(animDir);   // the GLB route's prefab, meshes, material and clip containers of an earlier bake (one route's output at a time)
         var imp = AssetImporter.GetAtPath(fbxRel) as ModelImporter;
         if (imp == null) return Fail("could not get ModelImporter for " + fbxRel);
         imp.animationType = ModelImporterAnimationType.Generic;
@@ -722,7 +807,7 @@ public static class UniversalBaker
         //   tolerates the sandwich). No single rule fits both — hence the toggle stays per-model.
         imp.useFileScale = false;   // ALWAYS measure raw; the bake either keeps this (OFF) or re-enables it (ON, below)
         imp.SaveAndReimport();
-        var fbxGo = AssetDatabase.LoadAssetAtPath<GameObject>(fbxRel);
+        fbxGo = AssetDatabase.LoadAssetAtPath<GameObject>(fbxRel);
         float longest = MeasureLongestAxis(fbxGo);
         if (cfg.animUnitFix) imp.useFileScale = true;   // bake with the embedded unit scale on (required for the correct render size)
         if (longest > 1e-4f)
@@ -757,6 +842,7 @@ public static class UniversalBaker
                 rimp.globalScale = imp.globalScale;
                 rimp.SaveAndReimport();
             }
+        }
         }
 
         // --- 3) atlas: SINGLE albedo, or (for a multi-material OPEN model like a towed gun) a PACKED atlas with the skinned
@@ -924,46 +1010,80 @@ public static class UniversalBaker
             collOut = cc;
             return null;
         }
-        string cerr = BakeClipCollection(animDir, "_Clips", out var clipColl);
+        // THE GLB ROUTE'S COLLECTIONS (step (g)): SetFromDirectory scans *.fbx only, so a clip asset is entered by its Amplitude
+        // guid and Reimport reads it - the C# clip slice's proven path (PR #151, measured in Unity: frames, bones, Load)
+        string BakeClipCollectionFromClip(UnityEngine.Object clipAsset, string suffix, out UnityEngine.Object collOut)
+        {
+            collOut = null;
+            string p = "Assets/Resources/" + name + suffix + ".asset";
+            AssetDatabase.DeleteAsset(p);
+            var cc = ScriptableObject.CreateInstance(clipType);
+            AssetDatabase.CreateAsset(cc, p);
+            skelField.SetValue(cc, skelGuidObj);
+            var entriesField = clipType.GetField("animationClipEntries", BindingFlags.NonPublic | BindingFlags.Instance);
+            if (entriesField == null) return "could not bind ClipCollection.animationClipEntries";
+            var clipGuidObj = adbType?.GetMethod("GetAssetGUID", new[] { typeof(UnityEngine.Object) })?.Invoke(null, new object[] { clipAsset });
+            if (clipGuidObj == null) return "the clip asset has no Amplitude guid";
+            Type entryType = entriesField.FieldType.GetElementType();
+            var entries = Array.CreateInstance(entryType, 1);
+            object entry = Activator.CreateInstance(entryType);
+            var clipField = entryType.GetField("UnityAnimationClip", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (clipField == null) return "could not bind the clip entry's UnityAnimationClip";
+            clipField.SetValue(entry, clipGuidObj);
+            entries.SetValue(entry, 0);
+            entriesField.SetValue(cc, entries);
+            if (!InvokeReq(clipType, "Reimport", Type.EmptyTypes, cc, null, out var e2)) return e2;
+            EditorUtility.SetDirty(cc);
+            collOut = cc;
+            return null;
+        }
+        string RoleCollection(string role, string dir, string suffix, out UnityEngine.Object coll)
+        {
+            if (!glbRoute) return BakeClipCollection(dir, suffix, out coll);
+            coll = null;
+            if (!glbClipByRole.TryGetValue(role, out var c)) return "the GLB route has no clip for the role '" + role + "' (the slim named none: check the clip name)";
+            return BakeClipCollectionFromClip(c, suffix, out coll);
+        }
+        string cerr = RoleCollection("primary", animDir, "_Clips", out var clipColl);
         if (cerr != null) return Fail(cerr);
         UnityEngine.Object clipMoveColl = null, clipAfterColl = null, clipAttackColl = null, clipCombatColl = null, clipPreMoveColl = null, clipIdleColl = null, clipIdleAltColl = null, clipIdleAlt2Coll = null;
         if (cfg.animStateDriven)
         {
-            cerr = BakeClipCollection(resDir + "/anim_move", "_ClipsMove", out clipMoveColl);
+            cerr = RoleCollection("move", resDir + "/anim_move", "_ClipsMove", out clipMoveColl);
             if (cerr != null) return Fail("Movement clip collection: " + cerr);
             if (wantAfter)
             {
-                cerr = BakeClipCollection(resDir + "/anim_after", "_ClipsAfter", out clipAfterColl);
+                cerr = RoleCollection("after", resDir + "/anim_after", "_ClipsAfter", out clipAfterColl);
                 if (cerr != null) return Fail("After clip collection: " + cerr);
             }
             if (wantAttack)
             {
-                cerr = BakeClipCollection(resDir + "/anim_attack", "_ClipsAttack", out clipAttackColl);
+                cerr = RoleCollection("attack", resDir + "/anim_attack", "_ClipsAttack", out clipAttackColl);
                 if (cerr != null) return Fail("Attack clip collection: " + cerr);
             }
             if (wantCombat)
             {
-                cerr = BakeClipCollection(resDir + "/anim_combat", "_ClipsCombat", out clipCombatColl);
+                cerr = RoleCollection("combat", resDir + "/anim_combat", "_ClipsCombat", out clipCombatColl);
                 if (cerr != null) return Fail("Combat clip collection: " + cerr);
             }
             if (wantPreMove)
             {
-                cerr = BakeClipCollection(resDir + "/anim_premove", "_ClipsPreMove", out clipPreMoveColl);
+                cerr = RoleCollection("premove", resDir + "/anim_premove", "_ClipsPreMove", out clipPreMoveColl);
                 if (cerr != null) return Fail("Pre-movement clip collection: " + cerr);
             }
             if (wantIdle)
             {
-                cerr = BakeClipCollection(resDir + "/anim_idle", "_ClipsIdle", out clipIdleColl);
+                cerr = RoleCollection("idle", resDir + "/anim_idle", "_ClipsIdle", out clipIdleColl);
                 if (cerr != null) return Fail("Idle-override clip collection: " + cerr);
             }
             if (wantIdleAlt)
             {
-                cerr = BakeClipCollection(resDir + "/anim_idlealt", "_ClipsIdleAlt", out clipIdleAltColl);
+                cerr = RoleCollection("idlealt", resDir + "/anim_idlealt", "_ClipsIdleAlt", out clipIdleAltColl);
                 if (cerr != null) return Fail("Idle-alt clip collection: " + cerr);
             }
             if (wantIdleAlt2)
             {
-                cerr = BakeClipCollection(resDir + "/anim_idlealt2", "_ClipsIdleAlt2", out clipIdleAlt2Coll);
+                cerr = RoleCollection("idlealt2", resDir + "/anim_idlealt2", "_ClipsIdleAlt2", out clipIdleAlt2Coll);
                 if (cerr != null) return Fail("Idle-alt-2 clip collection: " + cerr);
             }
         }
@@ -975,7 +1095,7 @@ public static class UniversalBaker
         //        runtime ignores it entirely — it's purely a modeling aid.
         // Rotation is now baked INTO the rig by rig_anim.py (cfg.rotationEuler passed to the Blender step above), so
         // the preview must NOT apply it again — pass zero. What the preview shows is now what the game gets.
-        GeneratePreviewPrefab(name, resDir, fbxRel, atlas, Vector3.zero, previewMeshes);
+        GeneratePreviewPrefab(name, resDir, rigRel, atlas, Vector3.zero, previewMeshes ?? glbMeshes);   // the GLB route's meshes are assets already (ImportGlbRig)
 
         string skelGuid = AmplitudeGuid(skel), atlasGuid = AmplitudeGuid(atlas), clipGuid = AmplitudeGuid(clipColl);
         // an empty GUID means the SDK skeleton/clip bake produced nothing — fail loudly rather than write a dead registry entry.
@@ -1026,6 +1146,165 @@ public static class UniversalBaker
                   (cfg.animStateDriven ? $" [state-driven: move={clipMoveGuid}{(wantAfter ? " after=" + clipAfterGuid : "")}{(wantAttack ? " attack=" + clipAttackGuid : "")}{(wantCombat ? " combat=" + clipCombatGuid : "")}{(wantPreMove ? " premove=" + clipPreMoveGuid : "")}{(wantIdle ? " idle=" + clipIdleGuid : "")}{(wantIdleAlt ? " idlealt=" + clipIdleAltGuid : "")}{(wantIdleAlt2 ? " idlealt2=" + clipIdleAlt2Guid : "")}]" : ""));
         return new BakeResult { ok = true, skeletonGuid = skelGuid, atlasGuid = atlasGuid, clipGuid = clipGuid, bbox = Vector3.zero,
                                 clipMoveGuid = clipMoveGuid, clipAfterGuid = clipAfterGuid, clipAttackGuid = clipAttackGuid, clipCombatGuid = clipCombatGuid, clipPreMoveGuid = clipPreMoveGuid, clipIdleGuid = clipIdleGuid, clipIdleAltGuid = clipIdleAltGuid, clipIdleAlt2Guid = clipIdleAlt2Guid };
+    }
+
+    /// <summary>The GLB route's albedo (step (g)): the source's PNG bytes as they are, a JPEG encoded as a PNG - what the script's
+    /// image.save leaves at argv[5].</summary>
+    internal static bool WriteAlbedoPng(BlenderRigAnimInProcess.Outcome o, out string error)
+    {
+        error = null;
+        try
+        {
+            byte[] png = o.AlbedoBytes;
+            if (o.AlbedoMime != "image/png")
+            {
+                var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                bool ok = tex.LoadImage(o.AlbedoBytes);
+                png = ok ? tex.EncodeToPNG() : null;
+                UnityEngine.Object.DestroyImmediate(tex);
+                if (png == null) { error = "the albedo image could not be decoded (" + o.AlbedoMime + ")"; return false; }
+            }
+            File.WriteAllBytes(o.AlbedoPath, png);
+            return true;
+        }
+        catch (Exception e) { error = e.Message; return false; }
+    }
+
+    /// <summary>The GLB route's import (step (g)): the file the in-process port wrote, as a Unity rig through HafModelRig (the frame
+    /// Unity's FBX import of a Blender export lands in: X mirrored), the Scale Factor's work folded into the DATA as the FBX
+    /// importer folds it - positions, node translations, bindpose translations and position curves times k, every node scale
+    /// 1 (no scaled root: Amplitude's uniform-scale TRS composition mangles a sandwich on deep chains) -, then persisted under
+    /// anim/ as a prefab with its meshes, one plain material (the atlas step dresses the mesh) and one clip asset per role:
+    /// the glTF animation named after the role's action (the roles sidecar), held by a container clip whose name begins with
+    /// '_' (the SDK ignores such sub-asset names and reads the clip through the container's guid - the C# clip slice's way).
+    /// Returns the prefab's GameObject (what the atlas, the split and the skeleton bake read, as they read the FBX's).</summary>
+    /// <summary>The GLB route's persisted rig under anim/ - the prefab, the meshes, the material, the clip containers - removed
+    /// (the FBX route's .fbx files are not under these extensions).</summary>
+    static void DeleteGlbRigAssets(string animDir)
+    {
+        if (!AssetDatabase.IsValidFolder(animDir)) return;
+        foreach (var guid in AssetDatabase.FindAssets("", new[] { animDir }))
+        {
+            string old = AssetDatabase.GUIDToAssetPath(guid);
+            if (old.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase) || old.EndsWith(".asset", StringComparison.OrdinalIgnoreCase) || old.EndsWith(".mat", StringComparison.OrdinalIgnoreCase)) AssetDatabase.DeleteAsset(old);
+        }
+    }
+
+    /// <summary>The baked rig a preview reads for a role folder ("anim" = the primary clip, "anim_&lt;role&gt;" = a state role): the
+    /// FBX route's file in that folder with its clip, else the GLB route's prefab under anim/ with the role's clip from its
+    /// container (step (g); the bake leaves one route's output at a time). Null when that role is not baked.</summary>
+    internal static string RigPreviewPath(string res, string roleDir, out AnimationClip clip)
+    {
+        clip = null;
+        string fbx = $"Assets/FactorySource/{res}/{roleDir}/{res}_anim.fbx";
+        if (AssetDatabase.LoadAssetAtPath<GameObject>(fbx) != null)
+        {
+            clip = AssetDatabase.LoadAllAssetsAtPath(fbx).OfType<AnimationClip>().FirstOrDefault(c => c != null && !c.name.StartsWith("__preview", StringComparison.Ordinal));
+            return fbx;
+        }
+        string prefab = $"Assets/FactorySource/{res}/anim/{res}_anim.prefab";
+        if (AssetDatabase.LoadAssetAtPath<GameObject>(prefab) == null) return null;
+        string role = roleDir == "anim" ? "primary" : roleDir.StartsWith("anim_", StringComparison.Ordinal) ? roleDir.Substring(5) : roleDir;
+        string container = $"Assets/FactorySource/{res}/anim/{res}_Clip_{role}.asset";
+        if (AssetDatabase.LoadMainAssetAtPath(container) == null) return null;   // this role is not baked on the GLB route
+        clip = AssetDatabase.LoadAllAssetsAtPath(container).OfType<AnimationClip>().FirstOrDefault(c => c != null && !c.name.StartsWith("_", StringComparison.Ordinal));
+        return prefab;
+    }
+
+    static GameObject ImportGlbRig(string name, string animDir, string glbFull, float size, string primaryAction, List<(string role, string action)> roleActions,
+                                   out Dictionary<string, UnityEngine.Object> clipByRole, out List<Mesh> meshes, out string error)
+    {
+        clipByRole = new Dictionary<string, UnityEngine.Object>(StringComparer.Ordinal); meshes = new List<Mesh>(); error = null;
+        var temp = new List<UnityEngine.Object>();
+        GameObject root = null;
+        try
+        {
+            var m = GlbReader.Read(glbFull);
+            var rig = HafModelRig.Build(m, temp);
+            root = rig.Root;
+            if (rig.SkinnedMeshes == 0) { error = "the GLB rig has no skinned mesh"; return null; }
+            float longest = MeasureLongestAxis(root);
+            float k = longest > 1e-4f ? size / longest : 1f;
+            foreach (var tr in root.GetComponentsInChildren<Transform>(true)) if (tr != root.transform) tr.localPosition *= k;
+            var seen = new HashSet<Mesh>();
+            foreach (var r in root.GetComponentsInChildren<Renderer>(true))
+            {
+                var mesh = r is SkinnedMeshRenderer smr ? smr.sharedMesh : r.GetComponent<MeshFilter>()?.sharedMesh;
+                if (mesh == null || !seen.Add(mesh)) continue;
+                var v = mesh.vertices; for (int i = 0; i < v.Length; i++) v[i] *= k; mesh.vertices = v;
+                var bp = mesh.bindposes;
+                for (int i = 0; i < bp.Length; i++) { var b = bp[i]; b.m03 *= k; b.m13 *= k; b.m23 *= k; bp[i] = b; }
+                if (bp.Length > 0) mesh.bindposes = bp;
+                mesh.RecalculateBounds();
+            }
+            foreach (var clip in rig.Clips)
+                foreach (var b in AnimationUtility.GetCurveBindings(clip))
+                {
+                    if (!b.propertyName.StartsWith("m_LocalPosition", StringComparison.Ordinal)) continue;
+                    var c = AnimationUtility.GetEditorCurve(clip, b); var keys = c.keys;
+                    for (int i = 0; i < keys.Length; i++) { keys[i].value *= k; keys[i].inTangent *= k; keys[i].outTangent *= k; }
+                    c.keys = keys; AnimationUtility.SetEditorCurve(clip, b, c);
+                }
+            // THE CLIP'S ZERO (review of step (g)): Blender's exporter writes absolute times (frame / fps, no slide to zero) and
+            // HafModelRig samples each clip from 0 to its last key, so an UNSLICED action whose first key is at frame F would hold its
+            // first pose for F frames and run F frames long - the FBX route's take starts at the action's first frame and Unity's
+            // import at 0 (a slice is re-keyed from 0 by the script and has no prefix). Each clip is rebased on its animation's
+            // first key: the sampled keys before it are dropped, the rest shifted.
+            if (rig.Clips.Length != m.Animations.Count) { error = $"the rig builder made {rig.Clips.Length} clip(s) of {m.Animations.Count} animation(s) - the clips cannot be matched to their first keys"; return null; }
+            var rebased = new List<string>();
+            for (int ci = 0; ci < rig.Clips.Length; ci++)
+            {
+                var anim = m.Animations[ci]; var clip = rig.Clips[ci];
+                float t0 = float.MaxValue;
+                foreach (var ch in anim.Channels)
+                    if (ch.Sampler >= 0 && ch.Sampler < anim.Samplers.Count && anim.Samplers[ch.Sampler].KeyCount > 0) t0 = Math.Min(t0, anim.Samplers[ch.Sampler].Times[0]);
+                float eps = 0.5f / Math.Max(1f, clip.frameRate);
+                if (t0 == float.MaxValue || t0 <= eps) continue;
+                foreach (var b in AnimationUtility.GetCurveBindings(clip))
+                {
+                    var c = AnimationUtility.GetEditorCurve(clip, b);
+                    var kept = c.keys.Where(key => key.time >= t0 - eps).Select(key => { key.time = Math.Max(0f, key.time - t0); return key; }).ToArray();
+                    if (kept.Length == 0) { var last = c.keys[c.keys.Length - 1]; last.time = 0f; kept = new[] { last }; }
+                    c.keys = kept; AnimationUtility.SetEditorCurve(clip, b, c);
+                }
+                rebased.Add(FormattableString.Invariant($"{clip.name} from {t0:0.###} s"));
+            }
+            if (rebased.Count > 0) Debug.Log($"[Factory] {name} GLB rig: {rebased.Count} clip(s) rebased on their first key (Blender's exporter writes absolute times): {string.Join(", ", rebased)}");
+            Debug.Log($"[Factory] {name} GLB rig: scale {k:0.###} folded into the data (native longest {longest:0.###} -> {size} units), {rig.SkinnedMeshes} skinned mesh(es), {rig.Clips.Length} clip(s): {string.Join(", ", rig.ClipNames)}");
+            DeleteGlbRigAssets(animDir);   // a previous bake's rig assets under anim/ go first (the FBX route's .fbx goes after the import, by the caller)
+            int n = 0;
+            foreach (var mesh in seen) { mesh.hideFlags = HideFlags.None; AssetDatabase.CreateAsset(mesh, animDir + "/" + name + "_rigmesh" + (n++) + ".asset"); meshes.Add(mesh); }
+            var plain = new Material(Shader.Find("Standard")) { name = name + "_rigmat" };
+            AssetDatabase.CreateAsset(plain, animDir + "/" + name + "_rigmat.mat");
+            foreach (var r in root.GetComponentsInChildren<Renderer>(true)) r.sharedMaterials = Enumerable.Repeat(plain, Math.Max(1, r.sharedMaterials.Length)).ToArray();
+            foreach (var tr in root.GetComponentsInChildren<Transform>(true)) tr.gameObject.hideFlags = HideFlags.None;
+            root.name = name + "_anim";
+            if (root.GetComponent<Animator>() == null) root.AddComponent<Animator>();
+            var wanted = new List<(string role, string action)> { ("primary", primaryAction) }; wanted.AddRange(roleActions);
+            var used = new HashSet<AnimationClip>();
+            foreach (var (role, action) in wanted)
+            {
+                int ci = Array.IndexOf(rig.ClipNames, action);
+                if (ci < 0) { error = "the GLB has no animation named '" + action + "' for the role '" + role + "' (it carries: " + string.Join(", ", rig.ClipNames) + ")"; return null; }
+                var clip = rig.Clips[ci];
+                if (!used.Add(clip)) { var dup = UnityEngine.Object.Instantiate(clip); dup.name = clip.name; temp.Add(dup); clip = dup; }   // two roles on one action: a copy each (a clip is one container's sub-asset)
+                clip.legacy = false; clip.hideFlags = HideFlags.None;
+                var container = new AnimationClip { name = "_" + name + "_" + role };
+                AssetDatabase.CreateAsset(container, animDir + "/" + name + "_Clip_" + role + ".asset");
+                AssetDatabase.AddObjectToAsset(clip, container);
+                clipByRole[role] = container;
+            }
+            var prefab = PrefabUtility.SaveAsPrefabAsset(root, animDir + "/" + name + "_anim.prefab");
+            AssetDatabase.SaveAssets();
+            if (prefab == null) { error = "Unity did not save the rig prefab"; return null; }
+            return prefab;
+        }
+        catch (Exception e) { error = e.GetType().Name + ": " + e.Message; return null; }
+        finally
+        {
+            if (root != null) UnityEngine.Object.DestroyImmediate(root);
+            foreach (var a in temp) if (a != null && !AssetDatabase.Contains(a)) UnityEngine.Object.DestroyImmediate(a);
+        }
     }
 
     // Longest axis of the FBX's combined mesh bounds (native scale), so we can compute the Scale Factor that hits `size`.
@@ -1258,6 +1537,62 @@ public static class UniversalBaker
     // the pawn each frame (UniversalInject ApplyPositionOffset — pawn frame, z = world-up), so baking it too made
     // every animated model carry the offset twice (the helicopter flew at exactly 2x its dialed height). The runtime
     // mechanism is the keeper: correct frame (turns with the unit), true game units, and no re-bake to nudge.
+    /// <summary>rig_anim's argv[9] from the recipe: "move=&lt;clip&gt;[;after=&lt;clip&gt;...]" when state-driven, "" otherwise - one
+    /// shared rest, one clip per role.</summary>
+    internal static string RigAnimStateRoles(BakeConfig cfg)
+    {
+        if (!cfg.animStateDriven) return "";
+        string stateRoles = "move=" + (cfg.animClipMove ?? "").Trim();
+        if (!string.IsNullOrWhiteSpace(cfg.animClipAfter)) stateRoles += ";after=" + cfg.animClipAfter.Trim();
+        if (!string.IsNullOrWhiteSpace(cfg.animClipAttack)) stateRoles += ";attack=" + cfg.animClipAttack.Trim();
+        if (!string.IsNullOrWhiteSpace(cfg.animClipCombat)) stateRoles += ";combat=" + cfg.animClipCombat.Trim();
+        if (!string.IsNullOrWhiteSpace(cfg.animClipPreMove)) stateRoles += ";premove=" + cfg.animClipPreMove.Trim();
+        if (!string.IsNullOrWhiteSpace(cfg.animClipIdle)) stateRoles += ";idle=" + cfg.animClipIdle.Trim();
+        if (!string.IsNullOrWhiteSpace(cfg.animClipIdleAlt)) stateRoles += ";idlealt=" + cfg.animClipIdleAlt.Trim();
+        if (!string.IsNullOrWhiteSpace(cfg.animClipIdleAlt2)) stateRoles += ";idlealt2=" + cfg.animClipIdleAlt2.Trim();
+        return stateRoles;
+    }
+
+    /// <summary>rig_anim.py's argv[2..14] as the Factory hands them to both routes (step (g)): the slim block's and the Bake
+    /// Tests row's one source, so the row judges the port on the arguments a bake would use. `albedoOut` is "" when no
+    /// albedo is to be written (the 'Keep texture' case).</summary>
+    internal static string[] RigAnimArgv(BakeConfig cfg, int targetTris, string albedoOut, bool keepMaterials)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;   // never the OS locale — a Dutch comma-decimal would corrupt the arg
+        string rotArg = string.Format(inv, "{0:0.###},{1:0.###},{2:0.###}", cfg.rotationEuler.x, cfg.rotationEuler.y, cfg.rotationEuler.z);
+        return BlenderRigAnimInProcess.Argv(targetTris, cfg.animateBones ?? "", cfg.animClip ?? "", albedoOut ?? "", keepMaterials, rotArg, cfg.convertRig, RigAnimStateRoles(cfg),
+                                            cfg.autoGroundWheels, cfg.socketBones ?? "", cfg.keepTranslations, cfg.staticParts ?? "", cfg.localNodeAnim);
+    }
+
+    /// <summary>The GLB route's oracle (step (g)): Blender runs Tools/rig_anim_glb.py - rig_anim.py's own source cut before
+    /// its FBX export, then the one glTF export the rig_anim drill's dump runs - on `src` with the script's argv[2..14] into
+    /// `outGlb`. Written when the file is there, Blender exited 0 and the export said so.</summary>
+    internal static BakerRules.DeployBlenderRun RunRigAnimGlbViaBlender(string src, string outGlb, string[] argv)
+    {
+        var run = new BakerRules.DeployBlenderRun();
+        string script = HafPackageContext.ToolPath("rig_anim_glb.py"), rig = HafPackageContext.ToolPath("rig_anim.py");
+        if (!File.Exists(script)) { run.Error = "rig slim: Tools/rig_anim_glb.py not found."; return run; }
+        if (!File.Exists(rig)) { run.Error = "rig slim: Tools/rig_anim.py not found."; return run; }
+        if (rig.IndexOf('"') >= 0 || src.IndexOf('"') >= 0 || outGlb.IndexOf('"') >= 0 || argv.Any(a => a.IndexOf('"') >= 0)) { run.Error = "rig slim: an argument contains a quote."; return run; }
+        using (var p = new System.Diagnostics.Process())
+        {
+            p.StartInfo.FileName = FindBlender();
+            p.StartInfo.Arguments = $"{BakerRules.BlenderScript(script)} -- \"{rig}\" \"{src}\" \"{outGlb}\" " + string.Join(" ", argv.Select(a => "\"" + a + "\""));
+            p.StartInfo.UseShellExecute = false; p.StartInfo.CreateNoWindow = true;
+            p.StartInfo.RedirectStandardOutput = true; p.StartInfo.RedirectStandardError = true;
+            try { if (File.Exists(outGlb)) File.Delete(outGlb); } catch { }
+            p.Start();
+            bool exited = RunBounded(p, 600000, out run.Stdout, out run.Stderr, out bool pipesDrained);
+            run.Completed = exited && pipesDrained;
+            if (!exited) { run.Error = "rig slim: Blender timed out (10 min)."; return run; }
+            run.ExitCode = p.ExitCode;
+            if (!pipesDrained) { run.Error = "rig slim: Blender's output pipes did not finish draining."; return run; }
+            run.Written = File.Exists(outGlb) && run.ExitCode == 0 && run.Stdout.Contains("RIGANIM glb wrote ");
+            if (!run.Written) run.Error = "rig slim FAILED in Blender (exit " + run.ExitCode + "; " + (run.Stdout.Split('\n').Select(l => l.Trim()).LastOrDefault(l => l.StartsWith("RIGANIM ERROR", StringComparison.Ordinal)) ?? "no RIGANIM ERROR line - see the Console for the traceback") + ").";
+            return run;
+        }
+    }
+
     static bool RigAnimViaBlender(string src, string outFbx, int targetTris, string bonePrefixes, string clipName, string albedoOut, bool keepMaterials, Vector3 rotation, bool convertRig, string stateRoles = "", bool autoGround = false, string socketBones = "", bool keepTranslations = false, string staticParts = "", bool localNodeAnim = false)
     {
         string proj = Directory.GetParent(Application.dataPath).FullName;
@@ -2657,6 +2992,20 @@ public static class UniversalBaker
 
     // Locate blender.exe with zero config: explicit EditorPrefs override, else the newest install under Program Files,
     // else fall back to "blender" on PATH. So .blend import "just works" whenever Blender is installed.
+    /// <summary>The editor-wide rig route for a recipe that says "" (EditorPrefs): "blender" until the GLB route has passed its
+    /// Unity acceptance (the Bake Tests row), "csharp" after.</summary>
+    public const string RigRouteDefaultPref = "HAF.RigRouteDefault";
+
+    /// <summary>Whether an animated bake takes the GLB route (BlenderRigAnimInProcess) for a recipe's rigRoute: "csharp" yes,
+    /// "blender" no, "" the editor's default. A shape the port names goes to Blender whatever this says.</summary>
+    public static bool UseGlbRigRoute(string rigRoute)
+    {
+        string r = (rigRoute ?? "").Trim();
+        if (r == "csharp") return true;
+        if (r == "blender") return false;
+        return EditorPrefs.GetString(RigRouteDefaultPref, "blender") == "csharp";
+    }
+
     public static string FindBlender()
     {
         // Neutral key first; the historical "ENC.blenderPath" still read so an existing setup keeps working.

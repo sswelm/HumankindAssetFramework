@@ -246,7 +246,8 @@ public class ModelFactoryWindow : EditorWindow
         // tiling-UV rigs (see animlab notes); the FBX needs no reimport insurance anyway, every animated bake
         // regenerates it from scratch. The old display-flipped <name>_Preview.prefab is only a fallback for entries
         // whose rig FBX is gone; the static _Model.prefab is a shipped OUTPUT and stays in Resources root.
-        string animFbx = "Assets/FactorySource/" + name + "/anim/" + name + "_anim.fbx";
+        // the FBX route's rig, or the GLB route's prefab under anim/ with the primary clip from its container (step (g))
+        string animFbx = UniversalBaker.RigPreviewPath(name, "anim", out var animIdleClip) ?? "Assets/FactorySource/" + name + "/anim/" + name + "_anim.fbx";
         string animPath = "Assets/FactorySource/" + name + "/" + name + "_Preview.prefab";
         string staticPath = "Assets/Resources/" + name + "_Model.prefab";
         // (2026-08-18: a first attempt preferred the texture-correct _Preview.prefab here — REVERTED same hour:
@@ -291,7 +292,7 @@ public class ModelFactoryWindow : EditorWindow
         // the pose the GAME composes at idle — the honest static view (and it stays honest about a damaged bake:
         // a struck reference still shows struck). Falls back to the raw rest when the FBX carries no clip.
         var idleClip = path == animFbx
-            ? AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>().FirstOrDefault(c => c != null && !c.name.StartsWith("__preview"))
+            ? animIdleClip
             : null;
         if (go != null)
         {
@@ -2123,7 +2124,7 @@ public class ModelFactoryWindow : EditorWindow
         deployStrip = (cur.deployStrip ?? "").Trim(), deployReadyFrame = (cur.deployReadyFrame ?? "").Trim(), deployLegScale = (cur.deployLegScale ?? "").Trim(), deployBarrelScale = (cur.deployBarrelScale ?? "").Trim(),
         deployRecoil = (cur.deployRecoil ?? "").Trim(), deployRecoilStep = (cur.deployRecoilStep ?? "").Trim(), deployRecoilMag = (cur.deployRecoilMag ?? "").Trim(), deployArcR = (cur.deployArcR ?? "").Trim(), deployRecoilReturn = (cur.deployRecoilReturn ?? "").Trim(), deploySlamDeg = (cur.deploySlamDeg ?? "").Trim(), deploySlamSettle = (cur.deploySlamSettle ?? "").Trim(),
         deployWheelBones = (cur.deployWheelBones ?? "").Trim(), deployWheelAxis = (cur.deployWheelAxis ?? "").Trim(), deployWheelFrames = (cur.deployWheelFrames ?? "").Trim(), deployWheelDegrees = (cur.deployWheelDegrees ?? "").Trim(), deployStripExtra = (cur.deployStripExtra ?? "").Trim(),
-        animStateDriven = cur.animStateDriven, animClipMove = (cur.animClipMove ?? "").Trim(), animClipAfter = (cur.animClipAfter ?? "").Trim(), animClipAttack = (cur.animClipAttack ?? "").Trim(), animClipCombat = (cur.animClipCombat ?? "").Trim(), animClipPreMove = (cur.animClipPreMove ?? "").Trim(), animClipIdle = (cur.animClipIdle ?? "").Trim(), animClipIdleAlt = (cur.animClipIdleAlt ?? "").Trim(), animClipIdleAlt2 = (cur.animClipIdleAlt2 ?? "").Trim(),
+        rigRoute = (cur.rigRoute ?? "").Trim(), animStateDriven = cur.animStateDriven, animClipMove = (cur.animClipMove ?? "").Trim(), animClipAfter = (cur.animClipAfter ?? "").Trim(), animClipAttack = (cur.animClipAttack ?? "").Trim(), animClipCombat = (cur.animClipCombat ?? "").Trim(), animClipPreMove = (cur.animClipPreMove ?? "").Trim(), animClipIdle = (cur.animClipIdle ?? "").Trim(), animClipIdleAlt = (cur.animClipIdleAlt ?? "").Trim(), animClipIdleAlt2 = (cur.animClipIdleAlt2 ?? "").Trim(),
         keepTexture = cur.reuseExtracted   // on the ANIMATED path the checkbox's ONLY meaning is 'protect the hand-edited extracted texture'
     };
 

@@ -1618,6 +1618,46 @@ of a skinned mesh node, the re-basing of a bone-parented object itself (only a
 second armature hangs from a bone once the join and the flatten are through - EXPORTLEFT, so no compared file reaches
 it; its product order is read, not measured).
 
+**Step (g), the Factory's animated path on the GLB route (2026-10-14).** `editor/BlenderRigAnimInProcess.cs` is
+rig_anim.py in this process: the four stages (`BlenderRigAnim`) then the export (`BlenderRigExport` +
+`BlenderGlbWriter`), one GLB with every kept action, written atomically, with the RIGANIM lines, the primary action's
+name and each state role's (the FBX route wrote one file per role; the GLB names its animations after the actions),
+and the albedo the script would have saved (a PNG source's bytes as they are; a JPEG source's the Factory encodes to
+a PNG with `Texture2D.EncodeToPNG` - and inside the GLB the source JPEG, typed image/jpeg, where Blender's file
+carries its own PNG re-encode). What a stage or the export names as Blender's is Blender's: the bake takes the FBX
+route for that model and the Console says why (at info level for a named shape, as a WARNING for a crash - a crash is
+not a named shape). The script's own exits stop the bake as they would in Blender. The route is chosen per recipe
+(`rigRoute`: the editor's default, `blender`, `csharp`; the Lab's "Rig route" popups) with an editor-wide default
+(EditorPrefs `HAF.RigRouteDefault`, Blender until the Unity acceptance below passes); the slim cache key carries the
+route and `BlenderRigAnimInProcess.CacheRevision`, so a switch or a changed port re-slims. On the GLB route the Factory
+imports the rig with `HafModelRig` (the Unity-space frame of the clip picker; the bake scale folded into the vertices,
+the node positions, the bind-pose translations and the position curves), persists it under `anim/` as a prefab, its
+meshes and material and one clip per role, and the clip collections point at those clips (the PR #151 slice's path).
+The drill holds the wrapper on every exported job: `riganim.exe --export` also runs `BlenderRigAnimInProcess.Run`
+with the job's arguments and requires the file written, its SHA-256 the dump's GLB's when the export compared the
+bytes (a JPEG albedo's file is read back instead: every image with bytes, the export's animation count), the primary
+and the roles named as the model names them, the roles sidecar reading back, the albedo written when the model says
+so (`EXPORTS jobs N rows R inprocess N`; the PASS line says how many). The dump's export step is the shipped
+`editor/Tools~/rig_anim_glb.py` (rig_anim.py's source cut before its FBX export marker, then the one glTF export),
+imported by `blender_riganim_dump.py` from the rig_anim.py argument's folder, so the drill and the Factory's Bake
+Tests row have one oracle; the registry re-dumped through it gave the same 11,133 X rows. Measured: all 23 registry
+jobs through the wrapper (17 files byte-identical to Blender's, the six JPEG-albedo rigs read back whole), 95 of 116
+fixture jobs (every exported one) and the 9 review fixtures. The Bake Tests row "Does the in-process rig slim match
+Blender's GLB export?" (`editor/BlenderRigAnimHeadlessTest.cs`) is the acceptance the backlog asks for before the
+default flips: for every animated registry entry with a glTF source (a deploying entry's converted rig from its
+cache), `UniversalBaker.RigAnimArgv` - the slim block's own argv builder - runs the port and Blender's
+`rig_anim_glb.py` and holds the two GLBs byte for byte (a JPEG albedo's with the image bytes aside, read back and
+named field by field), the albedo PNG byte for byte or by its size, the script's exits on both sides; a named
+fallback is a SKIP that says why, a crash a FAIL. A source-reading review before the PR found three defects the drill cannot see (the GLB is Blender's byte for byte; they
+are in the Factory's use of it), each fixed: a fallback mid-bake left the earlier key's GLB and sidecar beside a csharp
+stamp, so the next bake with 'Reuse extracted' took the stale GLB (now the fallback deletes them and stamps a fallback
+key, which the next bake at the same settings and port revision honours by taking the FBX route up front); Blender's
+exporter writes absolute times and `HafModelRig` samples from 0, so an unsliced action starting at frame F baked F
+frames of held pose (each clip is rebased on its animation's first key); the Lab's and the Factory's previews read only
+`anim/<name>_anim.fbx` (a shared `RigPreviewPath` resolves either route's output, and each route removes the other's
+files when it writes). Owed: the row's run in Unity, then the in-game check of each model
+playing its roles, then the default.
+
 Review of PR #169 added nine `fx_f_review_*` export fixtures. The four Unicode clip cases hold action ID ordering,
 Python lowercase (including dotted I, final sigma and Deseret), and code-point ordering to Blender. The four UV cases
 hold a texture naming `UVMap.001` to the **joined** mesh's layers (added by another mesh, already present, absent,
