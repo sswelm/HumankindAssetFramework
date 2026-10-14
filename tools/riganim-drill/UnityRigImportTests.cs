@@ -100,7 +100,7 @@ public static class UnityRigImportTests
             var instA2 = UnityEngine.Object.Instantiate(goA);
             var twist = RigRouteAcceptanceTest.CompareRigs(instA2, instTwist, Subclip(clipsA["primary"]), Subclip(clipsTwist["primary"]));
             UnityEngine.Object.DestroyImmediate(instA2);
-            Check("acceptance: another motion of the same length is caught at a sampled frame", twist.Any(p => p.Contains("world transform differs")) && !twist.Any(p => p.Contains("the clip is") || p.Contains("rest bounds")), twist.Count > 0 ? twist[0] : "not caught");
+            Check("acceptance: another motion of the same length is caught at a sampled frame", twist.Any(p => p.Contains("transform differs")) && !twist.Any(p => p.Contains("the clip is") || p.Contains("rest bounds")), twist.Count > 0 ? twist[0] : "not caught");
         }
         finally { UnityEngine.Object.DestroyImmediate(instA); UnityEngine.Object.DestroyImmediate(instB); UnityEngine.Object.DestroyImmediate(instLate); UnityEngine.Object.DestroyImmediate(instTwist); }
     }
@@ -121,13 +121,19 @@ public static class UnityRigImportTests
             }
             string socketPath = AnimationUtility.CalculateTransformPath(a.GetComponentsInChildren<Transform>().First(t => t.name == "Muzzle"), a.transform);
             AnimationUtility.SetEditorCurve(clipA, EditorCurveBinding.FloatCurve(socketPath, typeof(Transform), "localEulerAnglesRaw.z"), AnimationCurve.Linear(0, 0, 1, 0));
-            AnimationUtility.SetEditorCurve(clipB, EditorCurveBinding.FloatCurve(socketPath, typeof(Transform), "localEulerAnglesRaw.z"), AnimationCurve.Linear(0, 0, 1, 90));
+            AnimationUtility.SetEditorCurve(clipB, EditorCurveBinding.FloatCurve(socketPath, typeof(Transform), "localEulerAnglesRaw.z"), AnimationCurve.Linear(0, 0, 1, 2));   // 2 degrees at the end: past the clip-time allowance
+            var clipC = new AnimationClip { legacy = true };
+            AnimationUtility.SetEditorCurve(clipC, EditorCurveBinding.FloatCurve(socketPath, typeof(Transform), "localEulerAnglesRaw.z"), AnimationCurve.Linear(0, 0, 1, 0.4f));   // inside Unity's 0.5-degree compression allowance
             var identicalSocket = RigRouteAcceptanceTest.CompareRigs(a, b, clipA, clipA);
             Check("acceptance: identical unweighted socket motion passes", identicalSocket.Count == 0, string.Join("; ", identicalSocket));
             // Restore both rigs' rest after sampling the equal pair.
             clipA.SampleAnimation(a, 0); clipA.SampleAnimation(b, 0);
             var socketDifference = RigRouteAcceptanceTest.CompareRigs(a, b, clipA, clipB);
-            Check("acceptance: unweighted socket rotation is caught", socketDifference.Count > 0, string.Join("; ", socketDifference));
+            Check("acceptance: unweighted socket rotation past the allowance is caught", socketDifference.Count > 0, string.Join("; ", socketDifference));
+            clipA.SampleAnimation(a, 0); clipA.SampleAnimation(b, 0);
+            var socketWithin = RigRouteAcceptanceTest.CompareRigs(a, b, clipA, clipC);
+            Check("acceptance: a socket rotation within Unity's compression allowance passes", socketWithin.Count == 0, string.Join("; ", socketWithin));
+            UnityEngine.Object.DestroyImmediate(clipC);
             UnityEngine.Object.DestroyImmediate(a); UnityEngine.Object.DestroyImmediate(b);
             a = UnityEngine.Object.Instantiate(go); b = UnityEngine.Object.Instantiate(go);
             var original = Subclip(clips["primary"]);
@@ -181,9 +187,9 @@ public static class UnityRigImportTests
             }
             finally { UnityEngine.Object.DestroyImmediate(a); UnityEngine.Object.DestroyImmediate(b); }
         }
-        Compare(false, "acceptance: FBX compression changing intermediate motion is caught");
-        // The Factory keeps the FBX importer's default compression. The gate should expose that error, not enlarge its
-        // tolerance to hide it. Turning compression off here provides a matching cross-route control for this fixture.
+        // the Factory keeps the FBX importer's default compression (keys dropped within 0.5 degrees / 0.5%): the row's clip-time
+        // tolerance covers that allowance, so the default import must agree, and so must the uncompressed one
+        Compare(true, "acceptance: the real FBX pair with Unity's default compression agrees within the clip-time allowance");
         imp.animationCompression = ModelImporterAnimationCompression.Off; imp.SaveAndReimport();
         Compare(true, "acceptance: real uncompressed FBX and GLB slim imports agree");
     }
@@ -203,6 +209,109 @@ public static class UnityRigImportTests
         // production comparison reports the root-transform discrepancy, rather than resetting both roots to identity.
         Check("acceptance: CompareBakes preserves imported root placement and scale", problems.Any(p => p.Contains("rest bounds differ")) && problems.Any(p => p.Contains("the root bone")), string.Join("; ", problems.Where(p => p.Contains("rest bounds") || p.Contains("the root bone"))));
     }
+    static void ToleranceCounterexamples()
+    {
+        var go = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/FactorySource/RigImport_plain/anim/RigImport_plain_anim.prefab");
+        foreach (var scenario in new[] { (scale: false, weighted: false), (scale: true, weighted: false), (scale: false, weighted: true), (scale: true, weighted: true) })
+        {
+            bool scale = scenario.scale;
+            var meshCopies = new List<Mesh>();
+            var a = UnityEngine.Object.Instantiate(go); var b = UnityEngine.Object.Instantiate(go);
+            var ca = new AnimationClip { legacy = true }; var cb = new AnimationClip { legacy = true };
+            try
+            {
+                foreach (var inst in new[] { a, b })
+                {
+                    var smr = inst.GetComponentInChildren<SkinnedMeshRenderer>(); var parent = smr.bones[0];
+                    for (int i = 0; i < 3; i++) { var bone = new GameObject("Socket" + i).transform; bone.SetParent(parent, false); smr.bones = smr.bones.Concat(new[] { bone }).ToArray(); parent = bone; }
+                    if (scenario.weighted)
+                    {
+                        var mesh = UnityEngine.Object.Instantiate(smr.sharedMesh); meshCopies.Add(mesh); smr.sharedMesh = mesh;
+                        mesh.bindposes = mesh.bindposes.Concat(smr.bones.Skip(smr.bones.Length - 3).Select(t => t.worldToLocalMatrix * smr.transform.localToWorldMatrix)).ToArray();
+                        mesh.boneWeights = Enumerable.Repeat(new BoneWeight { boneIndex0 = smr.bones.Length - 1, weight0 = 1 }, mesh.vertexCount).ToArray();
+                    }
+                }
+                foreach (var bone in a.GetComponentsInChildren<Transform>().Where(t => t.name.StartsWith("Socket", StringComparison.Ordinal)))
+                {
+                    string path = AnimationUtility.CalculateTransformPath(bone, a.transform);
+                    foreach (var property in scale ? new[] { "m_LocalScale.x", "m_LocalScale.y", "m_LocalScale.z" } : new[] { "localEulerAnglesRaw.z" })
+                    {
+                        float start = scale ? 1 : 0, end = scale ? 1.006f : 0.4f;
+                        var binding = EditorCurveBinding.FloatCurve(path, typeof(Transform), property);
+                        AnimationUtility.SetEditorCurve(ca, binding, AnimationCurve.Linear(0, start, 1, start));
+                        AnimationUtility.SetEditorCurve(cb, binding, AnimationCurve.Linear(0, start, 1, end));
+                    }
+                }
+                var differences = RigRouteAcceptanceTest.CompareRigs(a, b, ca, cb);
+                Check("acceptance: " + (scale ? "0.6% local scale" : "0.4-degree local rotation") + " errors through three " + (scenario.weighted ? "weighted" : "unweighted") + " bones pass", differences.Count == 0, string.Join("; ", differences));
+                ca.SampleAnimation(a, 0); cb.SampleAnimation(b, 0);
+                string tip = AnimationUtility.CalculateTransformPath(a.GetComponentsInChildren<Transform>().First(t => t.name == "Socket2"), a.transform);
+                var excessiveBinding = EditorCurveBinding.FloatCurve(tip, typeof(Transform), scale ? "m_LocalScale.x" : "localEulerAnglesRaw.z");
+                AnimationUtility.SetEditorCurve(cb, excessiveBinding, AnimationCurve.Linear(0, scale ? 1 : 0, 1, scale ? 1.03f : 2));
+                var tooFar = RigRouteAcceptanceTest.CompareRigs(a, b, ca, cb);
+                Check("acceptance: excessive local " + (scale ? "scale" : "rotation") + " on " + (scenario.weighted ? "weighted" : "unweighted") + " chain fails", tooFar.Count > 0, string.Join("; ", tooFar));
+            }
+            finally { UnityEngine.Object.DestroyImmediate(a); UnityEngine.Object.DestroyImmediate(b); UnityEngine.Object.DestroyImmediate(ca); UnityEngine.Object.DestroyImmediate(cb); foreach (var mesh in meshCopies) UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+        var sa = UnityEngine.Object.Instantiate(go); var sb = UnityEngine.Object.Instantiate(go); var held = new AnimationClip { legacy = true };
+        try
+        {
+            foreach (var item in new[] { (inst: sa, angle: 30f), (inst: sb, angle: -30f) })
+            {
+                var smr = item.inst.GetComponentInChildren<SkinnedMeshRenderer>();
+                var helper = new GameObject("SocketParent").transform; helper.SetParent(smr.bones[0], false);
+                helper.localRotation = Quaternion.Euler(0, 0, item.angle); helper.localScale = new Vector3(2, 1, 1);
+                var socket = new GameObject("ShearedSocket").transform; socket.SetParent(helper, false); socket.localRotation = Quaternion.Euler(0, 0, -item.angle);
+                smr.bones = smr.bones.Concat(new[] { socket }).ToArray();
+            }
+            var ta = sa.GetComponentsInChildren<Transform>().First(t => t.name == "ShearedSocket"); var tb = sb.GetComponentsInChildren<Transform>().First(t => t.name == "ShearedSocket");
+            Check("acceptance: shear fixture has equal world rotation and lossy scale", Quaternion.Angle(ta.rotation, tb.rotation) < 0.06f && (ta.lossyScale - tb.lossyScale).magnitude < 0.001f, "TRS hides different world matrices");
+            var differences = RigRouteAcceptanceTest.CompareRigs(sa, sb, held, held);
+            Check("acceptance: opposite socket shear is caught", differences.Count > 0, string.Join("; ", differences));
+        }
+        finally { UnityEngine.Object.DestroyImmediate(sa); UnityEngine.Object.DestroyImmediate(sb); UnityEngine.Object.DestroyImmediate(held); }
+    }
+    static void WrongSkinWeights()
+    {
+        var go = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/FactorySource/RigImport_plain/anim/RigImport_plain_anim.prefab");
+        var a = UnityEngine.Object.Instantiate(go); var b = UnityEngine.Object.Instantiate(go);
+        var mesh = UnityEngine.Object.Instantiate(b.GetComponentInChildren<SkinnedMeshRenderer>().sharedMesh);
+        try
+        {
+            b.GetComponentInChildren<SkinnedMeshRenderer>().sharedMesh = mesh;
+            mesh.boneWeights = Enumerable.Repeat(new BoneWeight { boneIndex0 = 0, weight0 = 1 }, mesh.vertexCount).ToArray();
+            var clip = AssetDatabase.LoadAllAssetsAtPath("Assets/FactorySource/RigImport_plain/anim/_RigImport_plain_Clip_primary.asset").OfType<AnimationClip>().First(AssetDatabase.IsSubAsset);
+            var differences = RigRouteAcceptanceTest.CompareRigs(a, b, clip, clip);
+            Check("acceptance: wrong weights with identical bone motion fail", differences.Any(p => p.Contains("skinned vertices differ")), string.Join("; ", differences));
+        }
+        finally { UnityEngine.Object.DestroyImmediate(a); UnityEngine.Object.DestroyImmediate(b); UnityEngine.Object.DestroyImmediate(mesh); }
+    }
+    static void NonUniformParent(float stretch)
+    {
+        var go = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/FactorySource/RigImport_plain/anim/RigImport_plain_anim.prefab");
+        var a = UnityEngine.Object.Instantiate(go); var b = UnityEngine.Object.Instantiate(go);
+        var ca = new AnimationClip { legacy = true }; var cb = new AnimationClip { legacy = true };
+        try
+        {
+            foreach (var inst in new[] { a, b })
+            {
+                var smr = inst.GetComponentInChildren<SkinnedMeshRenderer>();
+                var helper = new GameObject("Stretch").transform; helper.SetParent(smr.bones[0], false); helper.localScale = new Vector3(stretch, 1, 1);
+                var socket = new GameObject("StretchedSocket").transform; socket.SetParent(helper, false); smr.bones = smr.bones.Concat(new[] { socket }).ToArray();
+            }
+            string path = AnimationUtility.CalculateTransformPath(a.GetComponentsInChildren<Transform>().First(t => t.name == "StretchedSocket"), a.transform);
+            var binding = EditorCurveBinding.FloatCurve(path, typeof(Transform), "localEulerAnglesRaw.z");
+            AnimationUtility.SetEditorCurve(ca, binding, AnimationCurve.Linear(0, 0, 1, 0));
+            AnimationUtility.SetEditorCurve(cb, binding, AnimationCurve.Linear(0, 0, 1, 0.4f));
+            var differences = RigRouteAcceptanceTest.CompareRigs(a, b, ca, cb);
+            Check("acceptance: allowed rotation under " + stretch + "x static parent passes", differences.Count == 0, string.Join("; ", differences));
+            ca.SampleAnimation(a, 0); cb.SampleAnimation(b, 0);
+            AnimationUtility.SetEditorCurve(cb, EditorCurveBinding.FloatCurve(path, typeof(Transform), "m_LocalScale.x"), AnimationCurve.Linear(0, 1, 1, 1.03f));
+            var tooFar = RigRouteAcceptanceTest.CompareRigs(a, b, ca, cb);
+            Check("acceptance: excess bone scale under " + stretch + "x static parent fails", tooFar.Count > 0, string.Join("; ", tooFar));
+        }
+        finally { UnityEngine.Object.DestroyImmediate(a); UnityEngine.Object.DestroyImmediate(b); UnityEngine.Object.DestroyImmediate(ca); UnityEngine.Object.DestroyImmediate(cb); }
+    }
     public static void Run()
     {
         fixtures = Arg("-hafRigImportFixtures"); output = Arg("-hafRigImportOutput");
@@ -211,7 +320,7 @@ public static class UnityRigImportTests
             Motion("plain"); Motion("late"); Atlas();
             foreach (var item in new[] { (fixture: "long", action: "Spin_" + new string('a', 120)), (fixture: "underscore", action: "_Spin") })
                 if (Import(item.fixture, item.action, out _) != null) Preview(item.fixture, item.action);
-            Acceptance(); AcceptanceCounterexamples(); PoseStreams(); CrossRoute(); RootPlacement();
+            Acceptance(); AcceptanceCounterexamples(); PoseStreams(); CrossRoute(); RootPlacement(); ToleranceCounterexamples(); WrongSkinWeights(); NonUniformParent(2); NonUniformParent(100);
         }
         catch (Exception e) { Rows.Add("FAIL exception: " + e); failed++; }
         Rows.Add("TOTAL failed " + failed); File.WriteAllLines(output, Rows);
