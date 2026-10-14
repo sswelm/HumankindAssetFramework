@@ -154,11 +154,12 @@ static class GlbRowsCompare
             st.Channels = chanRows.Count;
         }
         // ---- the bytes (8c): the GLB row's lengths (the file, the JSON chunk padded, the BIN chunk padded), and the file itself when it is at hand
+        var glbRow = Of("GLB");
+        // The file still exists when its re-encoded image bytes cannot be compared. Require its evidence in either case.
+        if (glb && (glbRow.Count != 1 || glbRow[0].Length != 5)) throw new InvalidDataException("the dump has no single valid GLB row");
         if (glb && x.MaterialRows != null && x.MaterialRows.Images.Any(im => im.bytes == null)) { Count(cover, "the GLB's bytes not compared (an image's bytes are Blender's encoder's)"); glb = false; }
         if (glb)
         {
-            var glbRow = Of("GLB");
-            if (glbRow.Count != 1 || glbRow[0].Length != 5) throw new InvalidDataException("the dump has no single valid GLB row");
             var written = BlenderGlbWriter.Build(x);
             if (written.Fallback != null) { problems.Add("the writer leaves it: " + written.Fallback); return st; }
             int jsonPadded = (System.Text.Encoding.UTF8.GetByteCount(written.Json) + 3) & ~3, binPadded = (written.Bin.Length + 3) & ~3;

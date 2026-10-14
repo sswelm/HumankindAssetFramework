@@ -71,7 +71,7 @@ public static class BlenderRigAnim
     // Python str.lower() uses Unicode's full lowercase mapping. .NET's invariant mapping is simple: notably it leaves
     // U+0130 unchanged and maps every capital sigma to σ, including the word-final one Python maps to ς. These names
     // decide whether a bone-hung mesh is kept static or converted to a skin, so the distinction changes the rig.
-    static string PyLower(string s)
+    internal static string PyLower(string s)
     {
         bool Cased(char c)
         {
@@ -88,6 +88,7 @@ public static class BlenderRigAnim
         for (int i = 0; i < s.Length; i++)
         {
             char c = s[i];
+            if (char.IsSurrogatePair(s, i)) { sb.Append(s.Substring(i, 2).ToLowerInvariant()); i++; continue; }
             if (c == 'İ') { sb.Append("i\u0307"); continue; }
             if (c == 'Σ')
             {
@@ -466,7 +467,7 @@ public static class BlenderRigAnim
         }
         if (m.Animations.Count > 1) Note(s, "several animations (the first one's action is the active one)");
         // bpy.data.actions: sorted by name, case-insensitively, a stable insertion
-        BlenderExportTree.StableSort(s.Actions, (x, y) => BlenderExportTree.StrCaseCmp(x.Name, y.Name));
+        BlenderExportTree.StableSort(s.Actions, (x, y) => BlenderDeploy.IdNameCmp(x.Name, y.Name));
         // the first animation's action is the active one on the objects it has a slot for
         if (slotObjectsOf.Count > 0 && m.Animations.Count > 0)
         {
@@ -757,7 +758,7 @@ public static class BlenderRigAnim
     }
     internal static float EvaluateCurve(List<KeyData> keys, float frame) => BlenderFCurve.Evaluate(ToArm(keys), frame, constant: true);
     // Python compares Unicode code points, while .NET ordinal comparison compares UTF-16 code units.
-    static readonly IComparer<string> PyStringOrder = Comparer<string>.Create((a, b) =>
+    internal static readonly IComparer<string> PyStringOrder = Comparer<string>.Create((a, b) =>
     {
         int i = 0, j = 0;
         while (i < a.Length && j < b.Length)
@@ -895,7 +896,7 @@ public static class BlenderRigAnim
             // bpy.data.actions.new uses the ID name map: truncate to 255 UTF-8 bytes and resolve collisions.
             // The sliced log below still prints newName, as the Python script does.
             var na = new ActionData { Name = actionNames.Unique(newName) };
-            s.Actions.Add(na); BlenderExportTree.StableSort(s.Actions, (x, y) => BlenderExportTree.StrCaseCmp(x.Name, y.Name));   // bpy.data.actions: id_sort_by_name
+            s.Actions.Add(na); BlenderExportTree.StableSort(s.Actions, (x, y) => BlenderDeploy.IdNameCmp(x.Name, y.Name));   // bpy.data.actions: id_sort_by_name
             var slot = new SlotData { Identifier = "OB" + armObj.Name, Object = armObj }; na.Slots.Add(slot);
             armObj.Action = na.Name; armObj.Slot = slot.Identifier;
             for (int i = 0; i < frames.Count; i++)
@@ -1054,7 +1055,7 @@ public static class BlenderRigAnim
             foreach (var oa in allActs)
             {
                 var na = new ActionData { Name = actionNames.Unique(oa.Name + "_rebaked") };
-                s.Actions.Add(na); BlenderExportTree.StableSort(s.Actions, (x, y) => BlenderExportTree.StrCaseCmp(x.Name, y.Name));
+                s.Actions.Add(na); BlenderExportTree.StableSort(s.Actions, (x, y) => BlenderDeploy.IdNameCmp(x.Name, y.Name));
                 var slot = new SlotData { Identifier = "OB" + armObj.Name, Object = armObj }; na.Slots.Add(slot);
                 armObj.Action = na.Name; armObj.Slot = slot.Identifier;
                 var frames = snaps[oa].Keys.ToList();

@@ -61,8 +61,6 @@ public static class BlenderRigExport
         if (s.Fallback != null) { x.Fallback = s.Fallback; return x; }
         if (s.Exits) { x.Fallback = "the script exits before any export"; return x; }
         var m = s.Model; var names = s.Names; var rig = s.Rig;
-        var uvProblems = new List<string>(); BlenderExportTree.MaterialUvProblems(m, uvProblems);
-        if (uvProblems.Count > 0) { x.Fallback = uvProblems[0]; return x; }
 
         // ---- the export step: the scene's range over every action's rounded range, the first frame evaluated
         if (s.Actions.Count > 0)
@@ -272,14 +270,20 @@ public static class BlenderRigExport
             var (start, end) = ActionRange(act);
             if (Math.Max(s.FrameStart, start) <= Math.Min(s.FrameEnd, end)) animated.Add(act.Name);
         }
-        BlenderExportTree.StableSort(animated, (p, q) => string.CompareOrdinal(p.ToLowerInvariant(), q.ToLowerInvariant()));
+        BlenderExportTree.StableSort(animated, (p, q) => BlenderRigAnim.PyStringOrder.Compare(BlenderRigAnim.PyLower(p), BlenderRigAnim.PyLower(q)));
         x.Animations.AddRange(animated);
 
         // ---- the animations' channels as the exporter samples them (BlenderChannelExport's sampler over the rig's Spec)
         x.ChannelRows = BlenderChannelExport.Build(ChannelSpec(s, x), x, x.SceneStart, x.SceneEnd);
         if (x.ChannelRows.Fallback != null) { x.Fallback = x.ChannelRows.Fallback; return x; }
         // ---- the materials, textures, samplers and images as the exporter writes them
-        x.MaterialRows = BlenderMaterialExport.Build(m, names, x.Materials);
+        // Texture nodes refer to UV layer names on the final mesh. The join may add a layer which a material's
+        // original mesh lacked; selecting from the imported meshes would incorrectly clamp that texture to UVMap.
+        var materialUvs = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var o in objs.Where(o => o.Type == "MESH"))
+            foreach (var name in o.Mesh.Materials.Where(name => name != null))
+                materialUvs[name] = o.Mesh.UvAll.Count;
+        x.MaterialRows = BlenderMaterialExport.Build(m, names, x.Materials, materialUvs);
         if (x.MaterialRows.Fallback != null) { x.Fallback = x.MaterialRows.Fallback; return x; }
         // the albedo: stage 4 saved the image as a PNG (image.save), so the exporter names it after the file's stem and
         // packs the bytes Blender's encoder wrote - unknown here (null: compared by name and type)
@@ -323,7 +327,7 @@ public static class BlenderRigExport
         }
         Visit(-1);
         foreach (var act in s.Actions) if (act.Slots.Any(sl => sl.Object == armObj)) spec.Visited.Add(act.Name);
-        BlenderExportTree.StableSort(spec.Visited, (p, q) => string.CompareOrdinal(p.ToLowerInvariant(), q.ToLowerInvariant()));
+        BlenderExportTree.StableSort(spec.Visited, (p, q) => BlenderRigAnim.PyStringOrder.Compare(BlenderRigAnim.PyLower(p), BlenderRigAnim.PyLower(q)));
         spec.SourceOf = name =>
         {
             var act = s.Actions.FirstOrDefault(a => a.Name == name);

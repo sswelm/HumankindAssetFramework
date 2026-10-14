@@ -82,12 +82,28 @@ public sealed class RigAnimDump
         if (rows[0][0] != "JOB" || rows[0].Length != 2 || rows[0][1].Length == 0) throw new InvalidDataException("the dump has an invalid JOB row");
         var d = new RigAnimDump { Key = rows[0][1] };
         // the export's rows (step (f)): after stage 4 only, the GLB rows after the logs and only without a death
+        var exportKinds = new HashSet<string>(new[] { "GLB", "SCENE", "NODE", "SKIN", "IBM", "MESH", "PRIM", "MAT", "IMG", "TEX", "SAMP", "ANIM", "CHAN" }, StringComparer.Ordinal);
+        bool exportStarted = false, stage4Seen = false, doneSeen = false; string exportFramingProblem = null;
         foreach (var t in all)
         {
+            bool isExport = t[0] == "X" || t[0] == "XLOG" || t[0] == "XDIES";
+            if (isExport)
+            {
+                if (doneSeen) throw new InvalidDataException("the export row follows DONE");
+                if (!stage4Seen) throw new InvalidDataException("the export row is before stage 4");
+                exportStarted = true;
+            }
+            else
+            {
+                if (exportStarted && t[0] != "DONE") exportFramingProblem = "a stage row follows the export";
+                if (t[0] == "STAGE" && t.Length > 1 && t[1] == "4") stage4Seen = true;
+                if (t[0] == "DONE") doneSeen = true;
+            }
             if (t[0] == "XLOG") { if (t.Length != 2 || !t[1].StartsWith("RIGANIM", StringComparison.Ordinal)) throw new InvalidDataException("an XLOG row that is not a RIGANIM line"); d.ExportLogs.Add(t[1]); }
             else if (t[0] == "XDIES") { if (t.Length != 2 || t[1].Length == 0 || d.ExportDied != null) throw new InvalidDataException("an invalid or repeated XDIES row"); d.ExportDied = t[1]; }
-            else if (t[0] == "X") { if (t.Length < 2 || d.ExportDied != null) throw new InvalidDataException("an X row after the export died, or an empty one"); d.ExportRows.Add(t.Skip(1).ToArray()); }
+            else if (t[0] == "X") { if (t.Length < 2 || d.ExportDied != null) throw new InvalidDataException("an X row after the export died, or an empty one"); if (!exportKinds.Contains(t[1])) throw new InvalidDataException("the export has an unknown row kind: " + t[1]); d.ExportRows.Add(t.Skip(1).ToArray()); }
         }
+        if (d.ExportDied != null && d.ExportRows.Count > 0) throw new InvalidDataException("the export both died and has GLB rows");
         if (!jobs.TryGetValue(d.Key, out d.Argv)) throw new InvalidDataException("the dump has a job the jobs file does not");
         var fail = rows.FirstOrDefault(t => t[0] == "FAIL");
         if (fail != null) throw new InvalidDataException("Blender could not run it: " + fail.Last());
@@ -121,6 +137,8 @@ public sealed class RigAnimDump
             if (dies[0][2].Length == 0) throw new InvalidDataException("the DIES row names no exception");
             d.StoppedAt = k + 1; d.Died = dies[0][2];
         }
+        // Report the existing envelope/stop errors first; export framing supplements those guarantees.
+        if (exportFramingProblem != null) throw new InvalidDataException(exportFramingProblem);
         for (int n = 1; n <= k; n++) d.Stages[n] = new Stage { N = n };
         int current = 0;   // the stage whose rows we are in: STAGE n opens n; LOG rows of stage n come before STAGE n
         foreach (var t in rows)

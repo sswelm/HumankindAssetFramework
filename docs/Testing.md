@@ -1614,9 +1614,19 @@ the four stages equal): a second armature no mesh uses - its skin is gathered af
 scene the sampler leaves, and neither the first frame's posed nor its rest world gives those matrices (three
 fixtures; no registry rig has a second armature). Not fixtured, named: a mesh of 65,535 vertices or more (the
 registry covers the unsigned-int indices), a bone-parented object with children of its own (their delta), a child
-of a skinned mesh node, a JPEG albedo (the registry's six), the re-basing of a bone-parented object itself (only a
+of a skinned mesh node, the re-basing of a bone-parented object itself (only a
 second armature hangs from a bone once the join and the flatten are through - EXPORTLEFT, so no compared file reaches
 it; its product order is read, not measured).
+
+Review of PR #169 added nine `fx_f_review_*` export fixtures. The four Unicode clip cases hold action ID ordering,
+Python lowercase (including dotted I, final sigma and Deseret), and code-point ordering to Blender. The four UV cases
+hold a texture naming `UVMap.001` to the **joined** mesh's layers (added by another mesh, already present, absent,
+and shared by two original meshes). All eight exports are byte-identical to Blender; the JPEG albedo case compares
+structure with its encoded image bytes explicitly unmeasured. Five `S5_X_*` plants reject unknown export row kinds,
+export rows before stage 4 or after DONE, stage rows after the export, and a claimed export death with file rows. `GlbRowsCompareTests`
+also refuses missing, doubled and short GLB rows when JPEG encoding prevents a byte comparison; its intact control
+reports that limitation without claiming byte equality. The drill counts byte-identical files from `EXPORT ...: equal`
+rows only, excluding the coverage-summary row about unmeasured image bytes.
 
 Review of PR #168 (2026-10-14): seventeen additional rig-animation fixture jobs hold bone-name allocation (the 63-byte
 UTF-8 limit, the exact-limit control, a sequential collision and a dormant role clip), socket names (long ASCII and

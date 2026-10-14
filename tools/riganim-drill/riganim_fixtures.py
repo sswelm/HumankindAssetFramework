@@ -842,6 +842,35 @@ def s4_image_paths(out, variant):
     return r.write(out, "riganim_s4_image_paths_" + variant)
 
 
+def f_review_actions(out, names, suffix):
+    """Distinct clips expose ID ordering, Python lowercase, and Unicode code-point export ordering."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    for i, name in enumerate(names):
+        a = r.anim(name); r.key(a, j1, "rotation", [0.0, 1.0], spin(2, "y", 0.125 * (i + 1)))
+    return r.write(out, "riganim_f_review_" + suffix)
+
+
+def f_review_join_uv(out, variant):
+    """A texture naming UVMap.001 sees the joined mesh's layers, including layers from other objects."""
+    r = Rig(); image = r.image("texture"); mat = r.material("Tex", texture=r.texture(image))
+    r.materials[mat]["pbrMetallicRoughness"]["baseColorTexture"]["texCoord"] = 1
+    arm, j0, j1, sk, m = rigged(r, material=mat if variant == "shared" else None)
+    if variant != "missing":
+        r.meshes[0]["primitives"][0]["attributes"]["TEXCOORD_1"] = r.b.accessor([(0.2, 0.8)] * 8, "f", "VEC2", minmax=False)
+    r.node("Zbody", arm, mesh=r.mesh("zbody", material=mat, joints=[[(0, 0.5), (1, 0.5)]], uv2=variant == "present"), skin=sk)
+    return r.write(out, "riganim_f_review_uv_" + variant)
+
+
+def f_review_jpeg(out):
+    """An albedo encoded as PNG by Blender still needs a GLB evidence row even though its bytes cannot be compared."""
+    import base64
+    r = Rig()
+    jpeg = base64.b64decode("/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/yQALCAABAAEBAREA/8wABgAQEAX/2gAIAQEAAD8A0s8g/9k=")
+    r.images.append({"bufferView": r.b.blob(jpeg), "mimeType": "image/jpeg", "name": "tiny"})
+    mat = r.material("Paint", texture=r.texture(0)); rigged(r, material=mat)
+    return r.write(out, "riganim_f_review_jpeg")
+
+
 def main(out):
     sys.stdout.reconfigure(encoding="utf-8")  # JOB records may contain non-ASCII staticParts on Windows
     os.makedirs(out, exist_ok=True)
@@ -979,6 +1008,14 @@ def main(out):
     job("LEFT:fx_s4_socket_unicode_sort", up, sockets="\ue000=\U00010000", convert="0", albedo="0")
     for variant in ("dot", "dotdot", "distinct"):
         job("fx_s4_image_paths_" + variant, s4_image_paths(out, variant))
+
+    # PR #169 review: clips and texture coordinates whose export differs despite otherwise equal stages.
+    for suffix, names in (("unicode_order", ["\ue000", "\U00010000"]), ("unicode_lower", ["\u0130A", "iz"]),
+                          ("unicode_deseret", ["\U00010400z", "\U00010428a"]), ("unicode_sigma", ["αΣ", "ασ"])):
+        job("fx_f_review_" + suffix, f_review_actions(out, names, suffix), convert="0", roles="attack=" + names[0] + ";move=" + names[1])
+    for variant in ("added", "present", "missing", "shared"):
+        job("fx_f_review_uv_" + variant, f_review_join_uv(out, variant))
+    job("fx_f_review_jpeg", f_review_jpeg(out))
 
 
 if __name__ == "__main__":

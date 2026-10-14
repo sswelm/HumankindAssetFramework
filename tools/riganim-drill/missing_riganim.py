@@ -198,4 +198,13 @@ i_xchan = first(lambda l: l.startswith("X\tCHAN\t")); write("S5_XCHAN_output", w
 write("S5_XCHAN_interpolation", with_field(i_xchan, 7, "STEP" if lines[i_xchan].split("\t")[7] == "LINEAR" else "LINEAR"))
 i_xanim = first(lambda l: l.startswith("X\tANIM\t")); write("S5_XANIM_channels", with_field(i_xanim, 4, str(int(lines[i_xanim].split("\t")[4]) + 1)))
 i_xglb = first(lambda l: l.startswith("X\tGLB\t")); write("S5_XGLB_sha", with_field(i_xglb, 5, flip_bits(lines[i_xglb].split("\t")[5])))
+# Export framing and row kinds must be checked even when all compared values are intact.
+write("S5_X_unknown", insert(i_xglb, "X\tUNKNOWN\tignored"))
+write("S5_X_early", insert(first(lambda l: l == "STAGE\t1"), lines[i_xglb]))
+i_scene4 = first(lambda l: l.startswith("SCENE\t4\t"))
+late = drop(i_scene4)
+late.insert(late.index(lines[i_xglb]) + 1, lines[i_scene4])
+write("S5_X_late_stage", late)
+write("S5_X_after_done", drop(i_xglb) + [lines[i_xglb]])
+write("S5_X_died_with_rows", insert(i_xglb + 1, "XDIES\tclaimed failure"))
 sys.stdout.write("".join(f[:-4] + "\n" for f in sorted(os.listdir(out)) if f.endswith(".txt") and f not in ("jobs.txt", "jobs_exit.txt", "jobs_s3.txt", "intact.txt")))

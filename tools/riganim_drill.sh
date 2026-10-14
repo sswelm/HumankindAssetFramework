@@ -155,7 +155,7 @@ tr -d '\r' < "$TMPD/s1_raw.txt" > "$TMPD/s1.txt"
 grep -E "^FAIL|^MODEL" "$TMPD/s1.txt"
 S1=$(grep -E "^STAGES 4 jobs" "$TMPD/s1.txt" | tail -1); echo "$S1"
 XS=$(grep -E "^EXPORTS jobs" "$TMPD/s1.txt" | tail -1); echo "$XS"
-n_exp=$(echo "$XS" | awk '{print $3}'); n_exprows=$(echo "$XS" | awk '{print $5}'); n_glb=$(grep -c "the GLB's" "$TMPD/s1.txt"); n_expleft=$(grep -c "^EXPORT .*left to Blender by name" "$TMPD/s1.txt")
+n_exp=$(echo "$XS" | awk '{print $3}'); n_exprows=$(echo "$XS" | awk '{print $5}'); n_glb=$(grep -c "^EXPORT .*: equal .*the GLB's" "$TMPD/s1.txt"); n_expleft=$(grep -c "^EXPORT .*left to Blender by name" "$TMPD/s1.txt")
 [ -n "$n_exp" ] || { echo "FAIL — rig_anim drill: the export comparison gave no EXPORTS line"; exit 1; }
 [ -n "$S1" ] || { tail -5 "$TMPD/s1.txt"; echo "FAIL — rig_anim drill: the stage 1-2 model gave no total (rc=$s1rc)"; exit 1; }
 [ "$s1rc" -eq 0 ] || { echo "FAIL — rig_anim drill: the stage 1-2 model differs from Blender, or leaves a dumped job to it"; exit 1; }
