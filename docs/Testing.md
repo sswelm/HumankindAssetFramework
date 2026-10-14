@@ -1670,24 +1670,28 @@ seams, the glTF carries them split already: duplicate counts may differ, the pos
 within 1e-3 of the rig's extent, both ways), the root bone's placement and every bone's rest transform, the clip's
 length and, at every clip frame (at least 24 Hz) and both imports' curve keys, every bone's world transform (position,
 rotation and scale) and the skinned vertices (`SkinnedMeshRenderer.BakeMesh`); and each role's non-empty baked clip
-collection and pose stream length (frames x bones). The basis-vector tolerance is 1e-3 relative to bone scale.
+collection and pose stream length (frames x bones). Two tolerances: the REST pose to float precision (1e-3 of the
+extent, 0.06 degrees, 1e-3 of scale); the CLIP within Unity's FBX keyframe reduction, which the Factory's FBX import
+has always applied by default (keys dropped while the curve stays within 0.5 degrees and 0.5% of position and scale) -
+0.6 degrees per bone, 1.5% of the extent for bone and vertex positions, 1% of scale, and no more: a port defect moves a
+bone by bone lengths, a compression error by a fraction of a degree.
 `BakeResult.rigRoute` says which route a bake took ("blender", "csharp",
 "csharp-fallback" with the port's reason in `rigRouteNote`): a recipe the port leaves to Blender by name bakes through
 the FBX route both times and is a SKIP that says why; a port crash is a FAIL. The in-game check of each model playing
 its roles stays the user's; the row green on every entry and that check together flip the default. The comparison
 itself is executed by `tools/riganim_unity_import_drill.sh` (licensed Unity and Blender, a temporary project): equal
-imports and a real uncompressed FBX/GLB pair pass; size, duration, unweighted socket rotation, intermediate motion,
-subframe keyed excursions and absent/empty role pose streams fail. The real FBX pair also demonstrates a motion
-difference from Unity's default FBX animation compression; the acceptance row exposes that difference at the declared
-tolerance. The test switches compression off only for its matching control, leaving the Factory's settings as they
-are. A cancel keeps the verdicts made so far. Owed: the row's run.
+imports and a real FBX/GLB pair (the same fixture slimmed by rig_anim.py and by rig_anim_glb.py) pass, with Unity's
+default FBX compression and without it; a socket rotation of 0.4 degrees passes and one of 2 degrees fails; size,
+duration, intermediate motion, subframe keyed excursions and absent/empty role pose streams fail. A cancel keeps the
+verdicts made so far. Owed: the row's run.
 
 Review of PR #171 (2026-10-14): native Unity counterexamples reproduced false passes for a rotating unweighted
 socket and motion that agreed at only the first/middle/last frames. The row now checks full world transforms at rest,
 every clip frame and source key. Missing or empty pose streams on both routes no longer compare equal (`-1 == -1`);
 all baked roles require their own non-empty collection and pose stream. Instantiated roots retain their imported
 position, rotation and scale; resetting them to identity previously hid placement errors. The same native drill covers these regressions
-and a real Blender FBX/GLB pair, including the FBX compression difference described above.
+and a real Blender FBX/GLB pair. The clip-time tolerance was then widened to Unity's compression allowance (the
+user's call, 2026-10-14: the difference is the FBX import's keyframe reduction, not floating point and not the port).
 
 Review of PR #170 (2026-10-14): `tools/riganim_unity_import_drill.sh` runs the real Factory GLB import in an
 isolated Unity project. Five fixtures check exact bone names (no picker-only `#index` suffix), 125-byte action names,

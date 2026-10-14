@@ -163,28 +163,38 @@ public static class RigRouteAcceptanceTest
         return times;
     }
 
+    // TWO TOLERANCES (2026-10-14). The REST pose is the file's: both routes must agree to float precision - 1e-3 of the rig's
+    // extent, 0.06 degrees, 1e-3 of scale. The CLIP is not: Unity's FBX importer reduces keyframes by default ("Optimal",
+    // keys dropped while the curve stays within 0.5 degrees of rotation and 0.5% of position and scale), so the FBX route has
+    // always shipped slightly simplified curves while the GLB route carries the exact samples. The drill's real pair (the same
+    // fixture slimmed by rig_anim.py and by rig_anim_glb.py) agrees to float precision with that compression off and differs
+    // with it on; the clip-time tolerance therefore covers that allowance with a margin - 0.6 degrees per bone, 1.5% of the
+    // extent for positions (0.5% plus a 0.5-degree swing at the far end of the rig), 1% of scale - and no more: a defect of the
+    // port moves a bone by bone lengths, not by a compression error.
+    const float RestFraction = 1e-3f, RestAngle = 0.06f, RestScale = 1e-3f;
+    internal const float ClipFraction = 0.015f, ClipAngle = 0.6f, ClipScale = 0.01f;
+
     static void CompareBones(string label, Dictionary<string, Transform> a, Dictionary<string, Transform> b,
-                             float tol, List<string> problems, ref double worst)
+                             float tol, float angleTol, float scaleTol, List<string> problems, ref double worst)
     {
         foreach (var name in a.Keys)
         {
             var ta = a[name]; var tb = b[name];
             float distance = (ta.position - tb.position).magnitude;
             worst = Math.Max(worst, distance);
-            // Basis vectors include rotation and scale, including sockets with no weighted vertices.
-            var ma = ta.localToWorldMatrix; var mb = tb.localToWorldMatrix;
-            bool basisDiffers = new[] { Vector3.right, Vector3.up, Vector3.forward }.Any(axis =>
+            // the world rotation and scale as well: a socket with no weighted vertex moves nothing, but the game hangs a prop on it
+            float angle = Quaternion.Angle(ta.rotation, tb.rotation);
+            var sa = ta.lossyScale; var sb = tb.lossyScale;
+            float scaleDiff = Mathf.Max(Rel(sa.x, sb.x), Mathf.Max(Rel(sa.y, sb.y), Rel(sa.z, sb.z)));
+            if (distance > tol || angle > angleTol || scaleDiff > scaleTol)
             {
-                var va = ma.MultiplyVector(axis); var vb = mb.MultiplyVector(axis);
-                return (va - vb).magnitude > 1e-3f * Mathf.Max(1e-3f, Mathf.Max(va.magnitude, vb.magnitude));
-            });
-            if (distance > tol || basisDiffers)
-            {
-                problems.Add(FormattableString.Invariant($"{label}: bone '{name}' world transform differs (position {distance:0.####} apart, rotation/scale differs: {basisDiffers})"));
+                problems.Add(FormattableString.Invariant($"{label}: bone '{name}' world transform differs (position {distance:0.####} apart, rotation {angle:0.###} degrees, scale {scaleDiff * 100:0.##}% - tolerance {tol:0.####}, {angleTol:0.##} degrees, {scaleTol * 100:0.#}%)"));
                 break;
             }
         }
     }
+
+    static float Rel(float x, float y) => Mathf.Abs(x - y) / Mathf.Max(1e-6f, Mathf.Max(Mathf.Abs(x), Mathf.Abs(y)));
 
     static void CompareRole(string dir, GameObject a, GameObject b, AnimationClip clipA, AnimationClip clipB, List<string> problems, ref int vertexSamples, ref double worst)
     {
@@ -194,7 +204,7 @@ public static class RigRouteAcceptanceTest
         // the extent, for the tolerance: both rigs are scaled to the recipe's size
         var boundsA = WorldBounds(smrA); var boundsB = WorldBounds(smrB);
         float ext = Mathf.Max(1e-3f, Mathf.Max(boundsA.size.x, Mathf.Max(boundsA.size.y, boundsA.size.z)));
-        float tol = 1e-3f * ext;
+        float tol = RestFraction * ext, tolClip = ClipFraction * ext;   // the rest to float precision; the clip within Unity's FBX compression allowance (above)
         // the bones by name
         var bonesA = smrA.SelectMany(r => r.bones).Where(t => t != null).Select(t => t.name).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToArray();
         var bonesB = smrB.SelectMany(r => r.bones).Where(t => t != null).Select(t => t.name).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToArray();
@@ -214,7 +224,7 @@ public static class RigRouteAcceptanceTest
         if (rootA != null && rootB != null && (rootA.position - rootB.position).magnitude > tol)
             problems.Add(FormattableString.Invariant($"role '{dir}': the root bone '{rootA.name}' sits at {rootA.position} on the FBX route, {rootB.position} on the GLB route"));
         var byNameA = BonesByName(smrA); var byNameB = BonesByName(smrB);
-        CompareBones($"role '{dir}' at rest", byNameA, byNameB, tol, problems, ref worst);
+        CompareBones($"role '{dir}' at rest", byNameA, byNameB, tol, RestAngle, RestScale, problems, ref worst);
         string restProblem = ComparePositionSets(Positions(smrA), Positions(smrB), tol, out double restWorst);
         worst = Math.Max(worst, restWorst);
         if (restProblem != null) problems.Add($"role '{dir}': the rest vertices differ - {restProblem}");
@@ -226,10 +236,10 @@ public static class RigRouteAcceptanceTest
             BakeTestRunnerWindow.Progress.ThrowIfCancelled();
             clipA.SampleAnimation(a, t); clipB.SampleAnimation(b, t);
             int before = problems.Count;
-            CompareBones(FormattableString.Invariant($"role '{dir}' at {t:0.###} s"), byNameA, byNameB, tol, problems, ref worst);
+            CompareBones(FormattableString.Invariant($"role '{dir}' at {t:0.###} s"), byNameA, byNameB, tolClip, ClipAngle, ClipScale, problems, ref worst);
             var cloudA = Positions(smrA); var cloudB = Positions(smrB);
             vertexSamples += cloudA.Count;
-            string cloudProblem = ComparePositionSets(cloudA, cloudB, tol, out double cloudWorst);
+            string cloudProblem = ComparePositionSets(cloudA, cloudB, tolClip, out double cloudWorst);
             worst = Math.Max(worst, cloudWorst);
             if (cloudProblem != null) problems.Add(FormattableString.Invariant($"role '{dir}' at {t:0.###} s: the skinned vertices differ - {cloudProblem}"));
             if (problems.Count > before) break;

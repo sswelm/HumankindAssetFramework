@@ -121,13 +121,19 @@ public static class UnityRigImportTests
             }
             string socketPath = AnimationUtility.CalculateTransformPath(a.GetComponentsInChildren<Transform>().First(t => t.name == "Muzzle"), a.transform);
             AnimationUtility.SetEditorCurve(clipA, EditorCurveBinding.FloatCurve(socketPath, typeof(Transform), "localEulerAnglesRaw.z"), AnimationCurve.Linear(0, 0, 1, 0));
-            AnimationUtility.SetEditorCurve(clipB, EditorCurveBinding.FloatCurve(socketPath, typeof(Transform), "localEulerAnglesRaw.z"), AnimationCurve.Linear(0, 0, 1, 90));
+            AnimationUtility.SetEditorCurve(clipB, EditorCurveBinding.FloatCurve(socketPath, typeof(Transform), "localEulerAnglesRaw.z"), AnimationCurve.Linear(0, 0, 1, 2));   // 2 degrees at the end: past the clip-time allowance
+            var clipC = new AnimationClip { legacy = true };
+            AnimationUtility.SetEditorCurve(clipC, EditorCurveBinding.FloatCurve(socketPath, typeof(Transform), "localEulerAnglesRaw.z"), AnimationCurve.Linear(0, 0, 1, 0.4f));   // inside Unity's 0.5-degree compression allowance
             var identicalSocket = RigRouteAcceptanceTest.CompareRigs(a, b, clipA, clipA);
             Check("acceptance: identical unweighted socket motion passes", identicalSocket.Count == 0, string.Join("; ", identicalSocket));
             // Restore both rigs' rest after sampling the equal pair.
             clipA.SampleAnimation(a, 0); clipA.SampleAnimation(b, 0);
             var socketDifference = RigRouteAcceptanceTest.CompareRigs(a, b, clipA, clipB);
-            Check("acceptance: unweighted socket rotation is caught", socketDifference.Count > 0, string.Join("; ", socketDifference));
+            Check("acceptance: unweighted socket rotation past the allowance is caught", socketDifference.Count > 0, string.Join("; ", socketDifference));
+            clipA.SampleAnimation(a, 0); clipA.SampleAnimation(b, 0);
+            var socketWithin = RigRouteAcceptanceTest.CompareRigs(a, b, clipA, clipC);
+            Check("acceptance: a socket rotation within Unity's compression allowance passes", socketWithin.Count == 0, string.Join("; ", socketWithin));
+            UnityEngine.Object.DestroyImmediate(clipC);
             UnityEngine.Object.DestroyImmediate(a); UnityEngine.Object.DestroyImmediate(b);
             a = UnityEngine.Object.Instantiate(go); b = UnityEngine.Object.Instantiate(go);
             var original = Subclip(clips["primary"]);
@@ -181,9 +187,9 @@ public static class UnityRigImportTests
             }
             finally { UnityEngine.Object.DestroyImmediate(a); UnityEngine.Object.DestroyImmediate(b); }
         }
-        Compare(false, "acceptance: FBX compression changing intermediate motion is caught");
-        // The Factory keeps the FBX importer's default compression. The gate should expose that error, not enlarge its
-        // tolerance to hide it. Turning compression off here provides a matching cross-route control for this fixture.
+        // the Factory keeps the FBX importer's default compression (keys dropped within 0.5 degrees / 0.5%): the row's clip-time
+        // tolerance covers that allowance, so the default import must agree, and so must the uncompressed one
+        Compare(true, "acceptance: the real FBX pair with Unity's default compression agrees within the clip-time allowance");
         imp.animationCompression = ModelImporterAnimationCompression.Off; imp.SaveAndReimport();
         Compare(true, "acceptance: real uncompressed FBX and GLB slim imports agree");
     }
