@@ -92,7 +92,7 @@ public static class BlenderChannelExport
     /// <summary>One action's curves as the depsgraph evaluates them: `Has` tells whether a curve exists for a bone's
     /// channel (the Role layout), `Eval` its value at a frame, `Keys` the curve's keys (null for the bake's dense
     /// curves, which are Bezier keys on every frame of Lo..Hi).</summary>
-    sealed class Source
+    public sealed class Source
     {
         public string Name; public bool Reset;
         public Func<string, int, bool> Has;
@@ -110,6 +110,29 @@ public static class BlenderChannelExport
         return res;
     }
 
+    /// <summary>What the sampler needs of a rig, whoever made it (the deploy port's Finish, or rig_anim's stage 4): the
+    /// bones in the vtree's walk - root bones in pose order, each followed by its children -, each with its parent, its
+    /// matrix_local and its offset matrix (BKE_bone_offset_matrix_get); a bone's rotation mode and the pose the script
+    /// left on it (13 values: location, quaternion, scale, Euler); the actions the exporter visits (every action with a
+    /// slot of the armature, sorted by name lower-cased) and the active one; the curves of an action by name.</summary>
+    public sealed class BoneSpec { public string Name; public BoneSpec Parent; public float[] MatrixLocal, Offs; }
+    public sealed class Spec
+    {
+        public readonly List<BoneSpec> Walk = new List<BoneSpec>();
+        public Func<string, string> ModeOf; public Func<string, float[]> HeldOf;
+        public string Active; public readonly List<string> Visited = new List<string>();
+        public Func<string, Source> SourceOf;
+    }
+
+    public static Result Build(Spec spec, BlenderDeployExport.Result x, int sfra, int efra)
+    {
+        var res = new Result();
+        try { BuildCore(res, spec, x, sfra, efra); }
+        catch (LeftException e) { res.Fallback = e.Message; }
+        catch (InvalidOperationException e) { res.Fallback = e.Message; }   // the Spec's own refusals (the rig's: curves it does not model)
+        return res;
+    }
+
     static void BuildInto(Result res, BlenderDeploy.Result r, BlenderDeployExport.Result x, int sfra, int efra)
     {
         if (x.Animations.Count == 0) return;
@@ -122,9 +145,6 @@ public static class BlenderChannelExport
         void Visit(BlenderDeploy.Bone parent) { foreach (string n in order) { var b = byName[n]; if (b.Parent == parent) { walk.Add(b); Visit(b); } } }
         Visit(null);
         if (walk.Count != bones.Count) throw new LeftException("a bone outside the pose order (the vtree's walk is not modelled)");
-        var nodeOf = new Dictionary<string, int>(StringComparer.Ordinal);
-        for (int i = 0; i < x.Nodes.Count; i++) if (x.Nodes[i].Joint) nodeOf[x.Nodes[i].Name] = i;
-        foreach (var b in walk) if (!nodeOf.ContainsKey(b.Name)) throw new LeftException($"the bone '{b.Name}' has no node");
         var garbage = new HashSet<string>(x.GarbageBones ?? new List<string>(), StringComparer.Ordinal);
 
         // the pose the script left: (mode, 13 values: location, quaternion, Euler, scale) after the role clips, else the
@@ -150,10 +170,25 @@ public static class BlenderChannelExport
         if (r.Actions7 != null) visited.AddRange(r.Actions7);
         foreach (var role in r.Roles) visited.Add(role.Name);
         BlenderExportTree.StableSort(visited, (a, b) => string.CompareOrdinal(a.ToLowerInvariant(), b.ToLowerInvariant()));
+        var spec = new Spec { Active = active, ModeOf = ModeOf, HeldOf = HeldOf, SourceOf = name => SourceOf(r, name, active, garbage, byName.Keys) };
+        spec.Visited.AddRange(visited);
+        var specOf = new Dictionary<string, BoneSpec>(StringComparer.Ordinal);
+        foreach (var b in walk) { var bs = new BoneSpec { Name = b.Name, MatrixLocal = b.MatrixLocal, Offs = b.Offs, Parent = b.Parent != null ? specOf[b.Parent.Name] : null }; specOf[b.Name] = bs; spec.Walk.Add(bs); }
+        BuildCore(res, spec, x, sfra, efra);
+    }
+
+    static void BuildCore(Result res, Spec spec, BlenderDeployExport.Result x, int sfra, int efra)
+    {
+        if (x.Animations.Count == 0) return;
+        var walk = spec.Walk; string active = spec.Active; var visited = spec.Visited;
+        if (walk.Count == 0) throw new LeftException("an animation without bones (the armature's object channels are not modelled)");
+        var nodeOf = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (int i = 0; i < x.Nodes.Count; i++) if (x.Nodes[i].Joint) nodeOf[x.Nodes[i].Name] = i;
+        foreach (var b in walk) if (!nodeOf.ContainsKey(b.Name)) throw new LeftException($"the bone '{b.Name}' has no node");
         bool activeUnreset = active != null && visited.Count > 0 && visited[0] == active;
         foreach (string name in x.Animations)
         {
-            var src = SourceOf(r, name, active, garbage, byName.Keys);
+            var src = spec.SourceOf(name);
             if (src == null) throw new LeftException($"the animation '{name}' names no action the port holds");
             src.Reset = !(name == active && activeUnreset);
             var anim = new Animation { Name = name };
@@ -190,9 +225,9 @@ public static class BlenderChannelExport
                 pose.Clear();
                 foreach (var b in walk)
                 {
-                    var v = src.Reset ? Identity() : HeldOf(b.Name);
+                    var v = src.Reset ? Identity() : spec.HeldOf(b.Name);
                     for (int c = 0; c < 13; c++) if (src.Has(b.Name, c)) v[c] = src.Eval(b.Name, c, f);
-                    string mode = ModeOf(b.Name);
+                    string mode = spec.ModeOf(b.Name);
                     float[][] rot;
                     if (mode == "QUATERNION") rot = QuatToMat3Normalized(new[] { v[QUAT], v[QUAT + 1], v[QUAT + 2], v[QUAT + 3] });
                     else if (mode == "XYZ") rot = EulXyzToMat3(new[] { v[EUL], v[EUL + 1], v[EUL + 2] });
@@ -214,7 +249,7 @@ public static class BlenderChannelExport
             // per bone: location, rotation_quaternion, scale
             foreach (var b in walk)
             {
-                string mode = ModeOf(b.Name);
+                string mode = spec.ModeOf(b.Name);
                 if (mode != "QUATERNION") res.EulerBones++;
                 if (!src.Reset && Enumerable.Range(0, 13).All(c => !src.Has(b.Name, c))) res.HeldBones++;
                 foreach (var (path, from, count) in new[] { ("translation", LOC, 3), ("rotation", QUAT, 4), ("scale", SCALE, 3) })

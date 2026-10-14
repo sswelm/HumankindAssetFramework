@@ -3,7 +3,8 @@ rigged GLB with the arguments that reach the branch. Writes the files and prints
 (TAB-separated: JOB <key> <input> <argv[2]> ... <argv[14]>). A key that starts with "EXIT:<stage>:" names a job the
 script is expected to STOP at that stage (its own sys.exit(1), e.g. no armature): the drill fails a different stop.
 A key that starts with "LEFT:" names a job the C# leaves to Blender by name (localNodeAnim, the weld, a socket sorting
-before its parent): the drill accepts whatever Blender does with it (a run through, an exit, a death).
+before its parent): the drill accepts whatever Blender does with it (a run through, an exit, a death). "EXPORTLEFT:" names
+a job whose four stages are compared and whose GLB export alone is left by name (a second armature's unused skin).
 
 usage: riganim_fixtures.py <output directory>
 
@@ -53,6 +54,10 @@ exit), a mesh already centred and grounded, the weld of a one-material, one-bone
 two and no UV sets joined, a skinned body under a rigid hull mesh, two sockets with an offset and a bad offset, a
 socket through a rotation fold, the two socket exits (no parent; sorting before its parent - LEFT, the script's
 message is undefined), the rotation fold at an odd angle, at 180 degrees on the multi rig, and on the legacy path.
+
+Step (f), the GLB export (fx_f_*): 300 weighted bones (the joints as unsigned shorts), an animation of one key (the
+exporter's undo of frame_range's +1), sparse STEP keys (CONSTANT segments sampled between the keys). Every other job's
+export is compared too; the three second-armature jobs are EXPORTLEFT: (their unused skin).
 """
 import math, os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "glb-reader-drill"))
@@ -740,6 +745,40 @@ def s4_many(out):
     return r.write(out, "riganim_s4_many")
 
 
+def s4_manybones(out):
+    """300 weighted bones (the cap keeps a weighted bone): the joints are written as unsigned shorts, every box's vertex on
+    its own bone."""
+    r = Rig()
+    arm = r.node("Armature")
+    root = r.node("Root", arm)
+    joints = [root]; ibms = [ibm(0.0, 0.0, 0.0)]
+    for i in range(300):
+        joints.append(r.node("J%03d" % i, root, translation=[float(i % 20), 1.0 + i // 20, 0.0])); ibms.append(ibm(float(i % 20), 1.0 + i // 20, 0.0))
+    sk = r.skin("Skin", joints, ibms)
+    m = r.material("Paint", (0.2, 0.4, 0.9))
+    for box in range(38):
+        per = [[(1 + (8 * box + v) % 300, 1.0)] for v in range(8)]
+        r.node("Box%02d" % box, arm, mesh=r.mesh("box%02d" % box, at=(float(box % 8), 0.0, float(box // 8)), size=0.5, material=m, joints=per), skin=sk)
+    a = r.anim("Spin"); r.key(a, joints[1], "rotation", [0.0, 1.0], spin(2, "x", 0.25))
+    return r.write(out, "riganim_s4_manybones")
+
+
+def f_onekey(out):
+    """An animation of one key: Blender's frame_range is (0, 1) for it, the exporter samples frame 0 alone."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    r.anims = []
+    a = r.anim("Spin"); r.key(a, j1, "rotation", [0.0], [spin(2, "x", 0.25)[1]])
+    return r.write(out, "riganim_f_onekey")
+
+
+def f_step(out):
+    """Sparse STEP keys (the importer's CONSTANT segments): the sampler holds the value between frames 0 and 24."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    r.anims = []
+    a = r.anim("Spin"); r.key(a, j1, "rotation", [0.0, 1.0], spin(2, "x", 0.25), interpolation="STEP")
+    return r.write(out, "riganim_f_step")
+
+
 def s4_join_parent(out):
     """The skinned body is a child of a rigid hull mesh (a mesh parent, not a wrapper empty): the hull is joined into the
     body, the body's parent becomes the hull's."""
@@ -803,6 +842,35 @@ def s4_image_paths(out, variant):
     return r.write(out, "riganim_s4_image_paths_" + variant)
 
 
+def f_review_actions(out, names, suffix):
+    """Distinct clips expose ID ordering, Python lowercase, and Unicode code-point export ordering."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    for i, name in enumerate(names):
+        a = r.anim(name); r.key(a, j1, "rotation", [0.0, 1.0], spin(2, "y", 0.125 * (i + 1)))
+    return r.write(out, "riganim_f_review_" + suffix)
+
+
+def f_review_join_uv(out, variant):
+    """A texture naming UVMap.001 sees the joined mesh's layers, including layers from other objects."""
+    r = Rig(); image = r.image("texture"); mat = r.material("Tex", texture=r.texture(image))
+    r.materials[mat]["pbrMetallicRoughness"]["baseColorTexture"]["texCoord"] = 1
+    arm, j0, j1, sk, m = rigged(r, material=mat if variant == "shared" else None)
+    if variant != "missing":
+        r.meshes[0]["primitives"][0]["attributes"]["TEXCOORD_1"] = r.b.accessor([(0.2, 0.8)] * 8, "f", "VEC2", minmax=False)
+    r.node("Zbody", arm, mesh=r.mesh("zbody", material=mat, joints=[[(0, 0.5), (1, 0.5)]], uv2=variant == "present"), skin=sk)
+    return r.write(out, "riganim_f_review_uv_" + variant)
+
+
+def f_review_jpeg(out):
+    """An albedo encoded as PNG by Blender still needs a GLB evidence row even though its bytes cannot be compared."""
+    import base64
+    r = Rig()
+    jpeg = base64.b64decode("/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/yQALCAABAAEBAREA/8wABgAQEAX/2gAIAQEAAD8A0s8g/9k=")
+    r.images.append({"bufferView": r.b.blob(jpeg), "mimeType": "image/jpeg", "name": "tiny"})
+    mat = r.material("Paint", texture=r.texture(0)); rigged(r, material=mat)
+    return r.write(out, "riganim_f_review_jpeg")
+
+
 def main(out):
     sys.stdout.reconfigure(encoding="utf-8")  # JOB records may contain non-ASCII staticParts on Windows
     os.makedirs(out, exist_ok=True)
@@ -826,8 +894,8 @@ def main(out):
     job("fx_s2_unicode_static", s2_unicode_static(out), static="i\u0307turret,aς")
     job("LEFT:fx_s2_supplementary_static", s2_supplementary_static(out), static="\U00010428panel")
     job("fx_s2_chain", s2_chain(out))
-    job("fx_s2_two_arms", s2_two_arms(out))
-    job("fx_s2_nested_arms", s2_nested_arms(out))
+    job("EXPORTLEFT:fx_s2_two_arms", s2_two_arms(out))
+    job("EXPORTLEFT:fx_s2_nested_arms", s2_nested_arms(out))
     job("fx_s2_wrapped_hung", s2_wrapped_hung(out))
     job("fx_s2_junk_hung", s2_junk_hung(out))
     job("fx_s2_junk_arm", s2_junk_arm(out))
@@ -861,7 +929,7 @@ def main(out):
     # step (d2): the rest fold and rebake, the bone cap
     job("fx_s4_fold_shared", s4_fold_shared(out))
     job("fx_s4_fold_static", s4_fold_static(out), static="canopy")
-    job("fx_s4_fold_nested", s4_fold_nested(out))
+    job("EXPORTLEFT:fx_s4_fold_nested", s4_fold_nested(out))
     job("fx_s4_multi_keept", multi(out), clip="Longer", keept="1", roles="attack=Held;move=Spin[0..6]")
     job("fx_s4_fold_big", s4_fold_big(out), clip="Longer")
     job("fx_s4_bonecap", s4_bonecap(out))
@@ -918,6 +986,10 @@ def main(out):
     job("fx_s4_rot", plain, rot="10,90,-30")
     job("fx_s4_rot_multi", multi(out), clip="Longer", rot="0,0,180")
     job("fx_s4_rot_legacy", plain, rot="90,0,0", convert="0")
+    # step (f), the GLB export: 300 weighted bones (joints as shorts), the lone branch no other fixture reaches
+    job("fx_f_manybones", s4_manybones(out), albedo="0")
+    job("fx_f_onekey", f_onekey(out), albedo="0", convert="0")   # the legacy path keeps the single key as it is (no fold, no pad)
+    job("fx_f_step", f_step(out), albedo="0", convert="0")
     # PR #168 review: bone RNA setters cap names at 63 UTF-8 bytes and allocate collisions against live names.
     for name, suffix in (("Arm", "plain"), ("Ar" + "x" * 56, "exact_limit"), ("Arm" + "x" * 60, "long_ascii"),
                          ("é" * 31 + "X", "long_unicode"), ("b000_Root", "collision")):
@@ -936,6 +1008,14 @@ def main(out):
     job("LEFT:fx_s4_socket_unicode_sort", up, sockets="\ue000=\U00010000", convert="0", albedo="0")
     for variant in ("dot", "dotdot", "distinct"):
         job("fx_s4_image_paths_" + variant, s4_image_paths(out, variant))
+
+    # PR #169 review: clips and texture coordinates whose export differs despite otherwise equal stages.
+    for suffix, names in (("unicode_order", ["\ue000", "\U00010000"]), ("unicode_lower", ["\u0130A", "iz"]),
+                          ("unicode_deseret", ["\U00010400z", "\U00010428a"]), ("unicode_sigma", ["αΣ", "ασ"])):
+        job("fx_f_review_" + suffix, f_review_actions(out, names, suffix), convert="0", roles="attack=" + names[0] + ";move=" + names[1])
+    for variant in ("added", "present", "missing", "shared"):
+        job("fx_f_review_uv_" + variant, f_review_join_uv(out, variant))
+    job("fx_f_review_jpeg", f_review_jpeg(out))
 
 
 if __name__ == "__main__":

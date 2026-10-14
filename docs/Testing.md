@@ -1574,6 +1574,60 @@ transmission, volume, specular, anisotropy, sheen; `KHR_materials_pbrSpecularGlo
 Not fixtured, named: a no-op root bone with an object hung from it (unreachable), the weld (left), a volume thickness
 or sheen texture (read, no source has one).
 
+Step (f), the GLB rig route (2026-10-14): the stage 4 scene written as a GLB - the file the Factory's animated path will
+read instead of rig_anim.py's FBX. The oracle is Blender's own glTF exporter run on that scene:
+`blender_riganim_dump.py` exports once after stage 4 (every action in the file, the scene's frame range widened to
+their rounded ranges, the first frame evaluated as the script's export pins the pose, `export_scene.gltf` as
+deploy_convert.py calls it) and reads the file back row by row (`tools/deploy-drill/glb_rows.py`, the deploy export
+dump's reader shared; the rows under `X`). `editor/BlenderRigExport.cs` makes the same file from stage 4's state
+through the deploy port's exporter model: the vtree (`tree.py`: roots and children in `bpy.data.objects` order, an
+armature's objects then its root bones, a bone's bone children then the objects parented to it - their world
+re-based on the REST bone, `rest @ pose.inverted_safe() @ matrix_world`), the serializer's numbering (a node after
+its children, mesh and skin; a skin after its joints, each bone after its bone children, the neutral bone last), the
+skins and inverse bind matrices (`skins.py`, the armature object's world), the joined mesh's primitives with its real
+weights (`BlenderExport.MeshPrimitives`: the groups above 0.0001 that name a joint, the strongest four normalized, a
+vertex without one on the neutral bone; a group naming no bone - the root collapse's - counts for nothing), the
+materials by first use, the animations (`action.py`: every action with a slot of the armature, an empty one too, by
+name lower-cased, cut to the scene's range) and their channels through `BlenderChannelExport`'s sampler - split from
+the deploy's state into a Spec (the bones in the vtree's walk with matrix_local and offset, the modes, the pose the
+script left, the actions visited, each one's curves) so the deploy and the rig share every rule of part 8b -, then
+`BlenderGlbWriter` for the bytes. `riganim.exe --export` compares every row (the scene, the nodes, the skins and
+inverse bind matrices, the primitives' bytes, the materials, textures, samplers and images, the animations, the
+channels sample for sample) and the GLB's lengths and SHA-256; `RIGANIM_GLB_DIR` names the first differing byte.
+Measured: all 23 dumped recipes equal (11,133 rows), 17 of them byte-identical GLBs (the six with a JPEG albedo are
+compared without the file: stage 4's `image.save` makes a PNG of Blender's encoder, whose bytes the exporter packs; a
+PNG albedo's bytes stay the source's and its file is byte-identical); 95 of 116 fixture jobs' exports equal and
+byte-identical (three new fixtures, `fx_f_*`: 300 weighted bones - the joints as unsigned shorts -, an animation of
+one key - the exporter undoes frame_range's +1 -, sparse STEP keys - CONSTANT segments sampled between the keys; the
+EXIT jobs have no file; 11 left by name). 17 defects planted in the export were each caught - an armature's bones listed before its objects, a node numbered before its children, the inverse bind matrix with the basis change on the other side, a joint's transform snapped like an object's, no neutral bone, vertex groups mapped to joints by index instead of by name, the scene's range not widened to every action, the animations sorted case-sensitively, the albedo image not renamed after the saved file, a missing colour layer filled white instead of zeros, the render colour index kept at 0 through the join, a mesh without vertex groups given a skin, the active action's bones reset like the others', the pose the script left taken as the identity, an action without curves not exported, materials numbered by slot instead of first use, colour layers dropped by the decimate - 12 by the fixtures and 5 only by the registry (the animations sorted case-sensitively, the active action's bones reset like the others', the pose the script left taken as the identity, materials numbered by slot instead of first use, colour layers dropped by the decimate). Three more plants were no defects and were dropped: a single-key action's range (Blender 5.1's frame_range is (f, f) for it - the exporter's +1 undo is dead code here), a CONSTANT key evaluated without the flag (BlenderFCurve honours the key's interpolation itself), and the hung object's re-basing order (no compared file reaches it). Nine S5_* tampers refused (the export's RIGANIM line, a node's translation and
+children, an inverse bind matrix, a primitive's indices, a channel's output and interpolation, an animation's channel
+count, the GLB's hash). Rules found on the way, each by a differing row: the importer's image is renamed after the
+saved file's stem (stage 4's `image.save`) and typed image/png; `__fix_json` walks dicts and lists but not tuples, so
+a colour factor the exporter builds as a tuple (`specular.py`: the socket's `default_value[:3]`) keeps every float's
+repr while a scalar ior of 1000.0 becomes `1000` (two registry rigs' JSON differed by `[0,0,0]` against `[0.0,0.0,0.0]`);
+a mesh with the Armature modifier but no vertex groups gets joint attributes on the would-be neutral index and no skin;
+the join unites colour layers by name and zero-fills a layer a mesh lacks (not white: `fx_groups` said so), and keeps
+the active object's render colour index, which decides whether a material's Color Attribute node finds a layer (none:
+COLOR_0 is the forced 255s and the layer follows as COLOR_1); an action with a slot and no curves is exported with
+every bone's three constant channels; a slot of an object the join removed animates nothing. Left by name (EXPORTLEFT:,
+the four stages equal): a second armature no mesh uses - its skin is gathered after the animation export, from the
+scene the sampler leaves, and neither the first frame's posed nor its rest world gives those matrices (three
+fixtures; no registry rig has a second armature). Not fixtured, named: a mesh of 65,535 vertices or more (the
+registry covers the unsigned-int indices), a bone-parented object with children of its own (their delta), a child
+of a skinned mesh node, the re-basing of a bone-parented object itself (only a
+second armature hangs from a bone once the join and the flatten are through - EXPORTLEFT, so no compared file reaches
+it; its product order is read, not measured).
+
+Review of PR #169 added nine `fx_f_review_*` export fixtures. The four Unicode clip cases hold action ID ordering,
+Python lowercase (including dotted I, final sigma and Deseret), and code-point ordering to Blender. The four UV cases
+hold a texture naming `UVMap.001` to the **joined** mesh's layers (added by another mesh, already present, absent,
+and shared by two original meshes). All eight exports are byte-identical to Blender; the JPEG albedo case compares
+structure with its encoded image bytes explicitly unmeasured. Five `S5_X_*` plants reject unknown export row kinds,
+export rows before stage 4 or after DONE, stage rows after the export, and a claimed export death with file rows. `GlbRowsCompareTests`
+also refuses missing, doubled and short GLB rows when JPEG encoding prevents a byte comparison; its intact control
+reports that limitation without claiming byte equality. The drill counts byte-identical files from `EXPORT ...: equal`
+rows only, excluding the coverage-summary row about unmeasured image bytes.
+
 Review of PR #168 (2026-10-14): seventeen additional rig-animation fixture jobs hold bone-name allocation (the 63-byte
 UTF-8 limit, the exact-limit control, a sequential collision and a dormant role clip), socket names (long ASCII and
 Unicode names, a repeated overlong request), Python's Unicode code-point ordering (sibling prefixes and the socket's

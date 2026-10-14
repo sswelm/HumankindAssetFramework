@@ -87,11 +87,12 @@ public static class BlenderMaterialExport
         return Build(m, names, tree.Materials);
     }
 
-    /// <summary>The materials named, in that order (the Blender material names BlenderNames gives).</summary>
-    public static Result Build(HafModel m, BlenderNames.Result names, IList<string> blenderNames)
+    /// <summary>The materials named, in that order (the Blender material names BlenderNames gives). meshUvSets, when
+    /// supplied, describes the final meshes by material name instead of the imported meshes (the rig join).</summary>
+    public static Result Build(HafModel m, BlenderNames.Result names, IList<string> blenderNames, IDictionary<string, int> meshUvSets = null)
     {
         var r = new Result();
-        var problems = new List<string>(); BlenderExportTree.MaterialUvProblems(m, problems);
+        var problems = new List<string>(); if (meshUvSets == null) BlenderExportTree.MaterialUvProblems(m, problems);
         if (problems.Count > 0) { r.Fallback = problems[0]; return r; }
         if (m.ExtensionsUsed.Contains("KHR_texture_transform")) { r.Fallback = "KHR_texture_transform (the reader does not carry a texture's transform, which the importer turns into a mapping node)"; return r; }
         var sourceOf = new Dictionary<string, (int material, bool vertexColor)>(StringComparer.Ordinal);
@@ -117,8 +118,11 @@ public static class BlenderMaterialExport
         {
             if (!sourceOf.TryGetValue(name, out var src)) { r.Fallback = $"the material '{name}' has no source material"; return r; }
             if (src.vertexColor) r.VertexColourVariants++;
+            int sets;
+            if (meshUvSets != null) meshUvSets.TryGetValue(name, out sets);
+            else uvSets.TryGetValue((src.material, src.vertexColor), out sets);
             JObject j;
-            try { j = src.material < 0 ? DefaultMaterial(name) : One(ctx, m.Materials[src.material], name, src.vertexColor, uvSets.TryGetValue((src.material, src.vertexColor), out int sets) ? sets : 0); }
+            try { j = src.material < 0 ? DefaultMaterial(name) : One(ctx, m.Materials[src.material], name, src.vertexColor, sets); }
             catch (LeftException e) { r.Fallback = $"material '{name}': {e.Message}"; return r; }
             if (src.material >= 0 && (m.Materials[src.material].NameAbsent || m.Materials[src.material].Name.Length == 0)) r.Unnamed++;
             r.Names.Add(name); r.Materials.Add(j);
@@ -428,7 +432,8 @@ public static class BlenderMaterialExport
             if (ext["KHR_materials_sheen"] != null) throw new LeftException("KHR_materials_sheen (not measured yet)");
             if (ext["KHR_materials_anisotropy"] != null) throw new LeftException("KHR_materials_anisotropy (not measured yet)");
             // KHR_materials_ior: only beside specular, transmission or volume; a specular-glossiness material gets 1000
-            if (sg != null) { if (outExt["KHR_materials_specular"] != null) outExt["KHR_materials_ior"] = new JObject { ["ior"] = 1000.0 }; }
+            // ... as the Python int 1000 the exporter writes there (an Extension's values keep their type: BlenderGlbWriter)
+            if (sg != null) { if (outExt["KHR_materials_specular"] != null) outExt["KHR_materials_ior"] = new JObject { ["ior"] = 1000L }; }
             else if (ext["KHR_materials_ior"] is JObject io && outExt["KHR_materials_specular"] != null)
             {
                 float ior = (float)((double?)io["ior"] ?? 1.5);

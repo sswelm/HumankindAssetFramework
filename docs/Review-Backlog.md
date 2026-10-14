@@ -317,11 +317,23 @@ collapse, the topological rename (the stashed actions renamed by Blender too), t
 fold (`transform_apply` with the angle wrap and the updated-parent parent inverse), the placement, the operators'
 depsgraph evaluations; all 23 dumped recipes equal through stage 4 (6.55 M rows), 96 fixture jobs (30 new): 89 equal,
 7 left by name, 0 deferred; 20 planted defects caught (20 by the fixtures, 0 only by the registry) and 10 value
-tampers refused (`docs/Testing.md`); the dump's MESH row gained every UV layer (name and hash). Left by name: the weld of a one-material, one-bone mesh, a socket sorting before its
+tampers refused (`docs/Testing.md`); the dump's MESH row gained every UV layer (name and hash). Step (f) below. Left by name: the weld of a one-material, one-bone mesh, a socket sorting before its
 parent (the script's message is undefined - below). Next: (f) the GLB writer output - the stage 4 scene written as a
 .glb by BlenderGlbWriter (the FBX-free route), compared with what Blender's FBX carries; then (g) the Factory's
 animated path on the C# route (both routes configurable, Blender the default until the Unity acceptance gate), (h) a
 Bake Tests row.
+(f) the GLB writer's output for the rig, DONE 2026-10-14: `editor/BlenderRigExport.cs` writes the stage 4 scene as
+the GLB Blender's glTF exporter writes of it (the deploy port's exporter model reused: the vtree, the numbering, the
+skins, `MeshPrimitives` with the real weights, the materials, `BlenderChannelExport`'s sampler split into a Spec the
+deploy and the rig share, `BlenderGlbWriter`); the dump exports the scene after stage 4 and `riganim.exe --export`
+holds every row and the bytes: all 23 recipes equal (17 byte-identical GLBs, the six JPEG-albedo rigs compared without
+the file - Blender's PNG encoder), 95 fixture exports equal and byte-identical, 17 planted defects caught, 9 tampers
+refused (`docs/Testing.md`). Found: `__fix_json` skips tuples (a colour factor's floats stay floats, an ior of 1000
+becomes an int); the join zero-fills a missing colour layer and keeps the active's render colour index. Left by name:
+a second armature's unused skin (gathered after the animation export). Next: (g) the Factory's animated path on the
+C# route - the GLB rig read by HafModelRig in place of the FBX, both routes configurable per recipe with the Blender
+FBX route the global default, the slim-step cache key carrying the route and a C# pipeline revision; then (h) the
+Bake Tests row and the Unity acceptance gate.
 - **rig_anim.py's socket sort exit reads a freed edit bone** — OPEN (2026-10-14, found by the stage 4 fixtures). The
   "would sort BEFORE its parent" error prints `_parent.name` after `bpy.ops.object.mode_set(mode='OBJECT')` has freed
   the edit bones: four Blender runs of `fx_s4_socket_sort` printed the right name once, an empty name once, and twice

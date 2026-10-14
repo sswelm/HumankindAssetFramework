@@ -70,6 +70,7 @@
     <Compile Include="..\editor\BlenderDeployInProcess.cs" Link="BlenderDeployInProcess.cs" />
     <Compile Include="..\editor\PyFloatRepr.cs" Link="PyFloatRepr.cs" />
     <Compile Include="..\tools\deploy-drill\ExportDrill.cs" Link="ExportDrill.cs" />
+    <Compile Include="..\tools\deploy-drill\GlbRowsCompare.cs" Link="GlbRowsCompare.cs" />
     <Compile Include="..\tools\deploy-drill\MaterialDrill.cs" Link="MaterialDrill.cs" />
     <Compile Include="..\editor\BlenderFCurve.cs" Link="BlenderFCurve.cs" />
     <Compile Include="..\editor\VehicleProbe.BlenderPose.cs" Link="VehicleProbe.BlenderPose.cs" />

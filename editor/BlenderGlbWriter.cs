@@ -343,12 +343,25 @@ public static class BlenderGlbWriter
                 foreach (var e in (JArray)t) { if (!f2) sb.Append(','); f2 = false; WriteValue(sb, e, path + "/[]"); }
                 sb.Append(']'); break;
             case JTokenType.Integer: sb.Append(((long)t).ToString(CultureInfo.InvariantCulture)); break;
-            case JTokenType.Float: sb.Append(PyFloatRepr.Json((double)t)); break;
+            // __fix_json turns an integral float into an int, walking dicts and LISTS - not tuples: a colour factor the exporter
+            // builds as a tuple (specular.py: the socket's default_value[:3], or (r * f, g * f, b * f)) keeps every float's
+            // repr - KHR_materials_specular's [0.0, 0.0, 0.0] beside an ior of 1000 (measured on three registry rigs, 2026-10-14)
+            case JTokenType.Float: sb.Append(TupleFloat(path) ? PyFloatRepr.Repr((double)t) : PyFloatRepr.Json((double)t)); break;
             case JTokenType.Boolean: sb.Append((bool)t ? "true" : "false"); break;
             case JTokenType.String: WriteString(sb, (string)t); break;
             case JTokenType.Null: sb.Append("null"); break;
             default: throw new NotSupportedException("a JSON token of type " + t.Type);
         }
+    }
+
+    /// <summary>An item of an extension's tuple-valued factor (specularColorFactor; sheenColorFactor and attenuationColor are
+    /// slices too, read in sheen.py and volume.py, unmeasured - the material export leaves sheen and volume by name).</summary>
+    static bool TupleFloat(string path)
+    {
+        int i = path.LastIndexOf("/[]", StringComparison.Ordinal);
+        if (i < 0 || path.IndexOf("/extensions/", StringComparison.Ordinal) < 0) return false;
+        string key = path.Substring(0, i); key = key.Substring(key.LastIndexOf('/') + 1);
+        return key == "specularColorFactor" || key == "sheenColorFactor" || key == "attenuationColor";
     }
 
     static bool Dropped(string key, JToken v)

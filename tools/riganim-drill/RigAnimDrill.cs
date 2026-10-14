@@ -41,6 +41,9 @@ public sealed class RigAnimDump
     public string Exit;                               // the exit code, or null
     public string Died;                               // the exception, or null
     public List<string> LogsOfStop = new List<string>();
+    public List<string> ExportLogs = new List<string>();     // XLOG: the export step's RIGANIM lines (step (f))
+    public string ExportDied;                                 // XDIES, or null
+    public List<string[]> ExportRows = new List<string[]>();  // X: the GLB read back (glb_rows.py), the X stripped
     public IEnumerable<string> AllLogs => Stages.Values.SelectMany(s => s.Logs).Concat(LogsOfStop);
     public Stage Last => Stages.Count == 0 ? null : Stages[Stages.Keys.Max()];
 
@@ -74,9 +77,33 @@ public sealed class RigAnimDump
 
     public static RigAnimDump Parse(List<string> block, Dictionary<string, string[]> jobs, bool requireKeys = false)
     {
-        var rows = block.Select(l => l.Split('\t')).ToList();
+        var all = block.Select(l => l.Split('\t')).ToList();
+        var rows = all.Where(t => t[0] != "X" && t[0] != "XLOG" && t[0] != "XDIES").ToList();
         if (rows[0][0] != "JOB" || rows[0].Length != 2 || rows[0][1].Length == 0) throw new InvalidDataException("the dump has an invalid JOB row");
         var d = new RigAnimDump { Key = rows[0][1] };
+        // the export's rows (step (f)): after stage 4 only, the GLB rows after the logs and only without a death
+        var exportKinds = new HashSet<string>(new[] { "GLB", "SCENE", "NODE", "SKIN", "IBM", "MESH", "PRIM", "MAT", "IMG", "TEX", "SAMP", "ANIM", "CHAN" }, StringComparer.Ordinal);
+        bool exportStarted = false, stage4Seen = false, doneSeen = false; string exportFramingProblem = null;
+        foreach (var t in all)
+        {
+            bool isExport = t[0] == "X" || t[0] == "XLOG" || t[0] == "XDIES";
+            if (isExport)
+            {
+                if (doneSeen) throw new InvalidDataException("the export row follows DONE");
+                if (!stage4Seen) throw new InvalidDataException("the export row is before stage 4");
+                exportStarted = true;
+            }
+            else
+            {
+                if (exportStarted && t[0] != "DONE") exportFramingProblem = "a stage row follows the export";
+                if (t[0] == "STAGE" && t.Length > 1 && t[1] == "4") stage4Seen = true;
+                if (t[0] == "DONE") doneSeen = true;
+            }
+            if (t[0] == "XLOG") { if (t.Length != 2 || !t[1].StartsWith("RIGANIM", StringComparison.Ordinal)) throw new InvalidDataException("an XLOG row that is not a RIGANIM line"); d.ExportLogs.Add(t[1]); }
+            else if (t[0] == "XDIES") { if (t.Length != 2 || t[1].Length == 0 || d.ExportDied != null) throw new InvalidDataException("an invalid or repeated XDIES row"); d.ExportDied = t[1]; }
+            else if (t[0] == "X") { if (t.Length < 2 || d.ExportDied != null) throw new InvalidDataException("an X row after the export died, or an empty one"); if (!exportKinds.Contains(t[1])) throw new InvalidDataException("the export has an unknown row kind: " + t[1]); d.ExportRows.Add(t.Skip(1).ToArray()); }
+        }
+        if (d.ExportDied != null && d.ExportRows.Count > 0) throw new InvalidDataException("the export both died and has GLB rows");
         if (!jobs.TryGetValue(d.Key, out d.Argv)) throw new InvalidDataException("the dump has a job the jobs file does not");
         var fail = rows.FirstOrDefault(t => t[0] == "FAIL");
         if (fail != null) throw new InvalidDataException("Blender could not run it: " + fail.Last());
@@ -110,6 +137,8 @@ public sealed class RigAnimDump
             if (dies[0][2].Length == 0) throw new InvalidDataException("the DIES row names no exception");
             d.StoppedAt = k + 1; d.Died = dies[0][2];
         }
+        // Report the existing envelope/stop errors first; export framing supplements those guarantees.
+        if (exportFramingProblem != null) throw new InvalidDataException(exportFramingProblem);
         for (int n = 1; n <= k; n++) d.Stages[n] = new Stage { N = n };
         int current = 0;   // the stage whose rows we are in: STAGE n opens n; LOG rows of stage n come before STAGE n
         foreach (var t in rows)
@@ -311,10 +340,11 @@ static class RigAnimDrill
         Console.OutputEncoding = new UTF8Encoding(false);
         bool requireKeys = false; int stages = 0;   // --stages N: compare the C# model of stages 1..N (N = 1 or 2) with the dump
         int offset = 0;
-        const string usage = "usage: riganim.exe [--keys] [--stages 1|2|3|4] <jobs file> <dump>...";
+        const string usage = "usage: riganim.exe [--keys] [--stages 1|2|3|4] [--export] <jobs file> <dump>...";
         while (offset < args.Length && args[offset].StartsWith("--", StringComparison.Ordinal))
         {
             if (args[offset] == "--keys") requireKeys = true;
+            else if (args[offset] == "--export") { Stage1Drill.Export = true; stages = 4; }   // step (f): the GLB export after stage 4, against the X rows
             else if (args[offset] == "--stages" && offset + 1 < args.Length && int.TryParse(args[offset + 1], NumberStyles.None, CultureInfo.InvariantCulture, out stages) && stages >= 1 && stages <= 4) offset++;
             else { Console.WriteLine(usage); return 2; }
             offset++;
@@ -478,6 +508,10 @@ static class Stage1Drill
 
     /// <summary>Stages 1..`stages` of the model against the dump. A LEFT: job must be declined by the model at one of
     /// them (its earlier stages compared all the same); any other decline is a FAIL.</summary>
+    public static bool Export;                                   // --export: BlenderRigExport against the dump's X rows after stage 4
+    public static int Exported; public static long ExportRows;
+    public static readonly SortedDictionary<string, long> ExportCover = new SortedDictionary<string, long>(StringComparer.Ordinal);
+
     public static bool Compare(RigAnimDump d, string key, int stages)
     {
         Compared++;
@@ -502,6 +536,7 @@ static class Stage1Drill
         catch (Exception e) { Console.WriteLine($"FAIL {key}: stage 1 model: {e.GetType().Name}: {e.Message}"); return false; }
         // a LEFT: key names a job the C# leaves to Blender by name: the model must say so, and a model that takes it is wrong too
         bool left = key.StartsWith("LEFT:", StringComparison.Ordinal);
+        bool exportLeft = key.StartsWith("EXPORTLEFT:", StringComparison.Ordinal);   // step (f): left at the export alone, the four stages equal
         if (model.Fallback != null)
         {
             foreach (var note in model.Notes) Census[note] = (Census.TryGetValue(note, out int c) ? c : 0) + 1;
@@ -610,6 +645,60 @@ static class Stage1Drill
                         foreach (int fld in new[] { 2, 5, 6, 7 })
                             if (rows4.Image[fld] != s4.Image[fld]) { problems.Add($"stage 4 IMG field {fld}: here '{rows4.Image[fld]}', Blender '{s4.Image[fld]}'"); break; }
                     if (problems.Count == 0) { RowsEqual += RowCount(s4) + (s4.Image != null ? 1 : 0); Console.WriteLine($"STAGE4 {key}: equal - {Describe(s4)}" + (s4.Image != null ? $", the albedo {s4.Image[5]}x{s4.Image[6]}" : "")); }
+                    // ---- the export (step (f)): the GLB Blender's exporter writes of this scene, structure first
+                    if (problems.Count == 0 && Export)
+                    {
+                        BlenderDeployExport.Result x = null;
+                        try { x = BlenderRigExport.Build(model, args); }
+                        catch (Exception e) { problems.Add($"the export model: {e.GetType().Name}: {e.Message}"); }
+                        if (problems.Count == 0 && d.ExportDied != null)
+                        {
+                            if (x.Fallback == null) problems.Add("the export: Blender's exporter died (" + d.ExportDied + ") and the model went on");
+                            else if (!left) problems.Add("the export is left by name (" + x.Fallback + "), which the key does not say; Blender's exporter died: " + d.ExportDied);
+                            else { Left++; Console.WriteLine($"EXPORT {key}: left to Blender by name, as the model says: {x.Fallback} (Blender's exporter died: {d.ExportDied})"); return true; }
+                        }
+                        else if (problems.Count == 0 && x.Fallback != null)
+                        {
+                            if (!left && !exportLeft) problems.Add("the export is left by name, which the key does not say: " + x.Fallback);
+                            else { Left++; Console.WriteLine($"EXPORT {key}: left to Blender by name, as the model says: {x.Fallback}"); return true; }
+                        }
+                        else if (problems.Count == 0 && exportLeft) problems.Add("the jobs file expects the export left to Blender (EXPORTLEFT:), and it is made here (take the mark away once it holds)");
+                        else if (problems.Count == 0)
+                        {
+                            if (d.ExportRows.Count == 0) problems.Add("the export: the dump has no X rows for it");
+                            else
+                            {
+                                try
+                                {
+                                    List<string> mineOut = null; string rowsFile = Environment.GetEnvironmentVariable("RIGANIM_EXPORT_ROWS");
+                                    if (!string.IsNullOrEmpty(rowsFile) && Environment.GetEnvironmentVariable("RIGANIM_MODEL_JOB") == key) mineOut = new List<string>();
+                                    // RIGANIM_GLB_DIR=<the dump's work dir>: the file Blender wrote (<key>/<key>.glb, the colons underscored), for the first differing byte
+                                    byte[] theirGlb = null; string glbDir = Environment.GetEnvironmentVariable("RIGANIM_GLB_DIR");
+                                    if (!string.IsNullOrEmpty(glbDir)) { string safe = key.Replace(':', '_'); string gp = Path.Combine(glbDir, safe, safe + ".glb"); if (File.Exists(gp)) theirGlb = File.ReadAllBytes(gp); }
+                                    GlbRowsCompare.Compare(problems, "the export's RIGANIM lines", x.Log, d.ExportLogs.Where(l => !l.StartsWith("RIGANIM glb wrote ", StringComparison.Ordinal)).ToList());
+                                    var xp = new List<string>();   // every difference named as the export's (the drill's tampers look for the word)
+                                    var st = GlbRowsCompare.Compare(x, d.ExportRows, xp, ExportCover, name => BlenderRigExport.ChannelCount(model, name), true, true, theirGlb, mineOut);
+                                    foreach (var xpr in xp) problems.Add("the export: " + xpr);
+                                    if (mineOut != null) { mineOut.AddRange(BlenderRigExport.DebugBoneRows(model)); File.WriteAllLines(rowsFile, mineOut); }
+                                    if (problems.Count == 0)
+                                    {
+                                        void Cover(string k, long n = 1) { if (n > 0) ExportCover[k] = (ExportCover.TryGetValue(k, out long c) ? c : 0) + n; }
+                                        Cover("a job's export compared"); Cover("the GLB byte-identical", st.GlbEqual ? 1 : 0);
+                                        Cover("a skinned mesh node", x.Nodes.Count(n => n.Skin >= 0)); Cover("a mesh node without a skin (no vertex groups)", x.Nodes.Count(n => n.Mesh >= 0 && n.Skin < 0));
+                                        Cover("the neutral bone (a vertex without a bone)", x.NeutralBone ? 1 : 0); Cover("a mesh of several primitives", x.Meshes.Count(me => me.Primitives.Count > 1));
+                                        Cover("joints as shorts (256 bones or more)", x.Meshes.Sum(me => me.Primitives.Count(p => p.Joints != null && p.Joints.Max() >= 256)));
+                                        Cover("indices as unsigned ints (65535 vertices or more)", x.Meshes.Sum(me => me.Primitives.Count(p => p.Indices.Length > 0 && p.Indices.Max() >= 65535)));
+                                        Cover("a second UV layer", x.Meshes.Sum(me => me.Primitives.Count(p => p.Uv.Count > 1))); Cover("a colour set", x.Meshes.Sum(me => me.Primitives.Count(p => p.Colors.Count > 0)));
+                                        Cover("an image (the albedo among them)", st.Images); Cover("several animations", x.Animations.Count > 1 ? 1 : 0); Cover("no animation", x.Animations.Count == 0 ? 1 : 0);
+                                        var ch = x.ChannelRows; Cover("a channel reduced to its first and last sample", ch.Reduced); Cover("a channel with every sample", ch.Full); Cover("a channel of one sample", ch.Single);
+                                        Cover("a STEP channel", ch.Stepped); Cover("a LINEAR channel", ch.Linear); Cover("a bone holding the pose the script left", ch.HeldBones);
+                                        Exported++; ExportRows += d.ExportRows.Count; Console.WriteLine($"EXPORT {key}: equal - {st.Nodes} nodes, {st.Joints} joints, {x.Skins.Count} skin(s), {st.Meshes} mesh(es) with {st.Prims} primitives, {st.Materials} materials, {st.Images} images, {st.Anims} animations with {st.Channels} channels" + (st.GlbEqual ? $", the GLB's {st.GlbBytes} bytes" : ""));
+                                    }
+                                }
+                                catch (InvalidDataException e) { problems.Add("the export's dump: " + e.Message); }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -623,6 +712,7 @@ static class Stage1Drill
     public static void Summary(int stages)
     {
         foreach (var kv in Census) Console.WriteLine($"MODEL {kv.Value} {kv.Key}");
+        if (Export) { foreach (var kv in ExportCover) Console.WriteLine($"XCOVER {kv.Value} {kv.Key}"); Console.WriteLine($"EXPORTS jobs {Exported} rows {ExportRows}"); }
         Console.WriteLine($"STAGES {stages} jobs {Compared} equal {Equal} left {Left} rows {RowsEqual} deferred {Deferred}");
     }
 }
