@@ -312,6 +312,21 @@ public static class UnityRigImportTests
         }
         finally { UnityEngine.Object.DestroyImmediate(a); UnityEngine.Object.DestroyImmediate(b); UnityEngine.Object.DestroyImmediate(ca); UnityEngine.Object.DestroyImmediate(cb); }
     }
+    // the Vehicle Lab's rig arguments: the window's fields against the recipe reader (VehicleRigArgLine.RigArgsFromRecipe) on every
+    // saved recipe the run is pointed at (-hafRecipes <dir>) - the drill's jobs come from the reader, a Generate from the window
+    static void RecipeArgsParity()
+    {
+        string dir = Arg("-hafRecipes");
+        if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) { Rows.Add("SKIP recipe args parity: no -hafRecipes directory"); return; }
+        var files = Directory.GetFiles(dir, "*.json").OrderBy(f => f, StringComparer.Ordinal).ToArray();
+        int agree = 0;
+        foreach (var f in files)
+        {
+            string why = VehicleLabWindow.RecipeArgsDisagreement(f);
+            if (why == null) agree++; else Check("recipe args parity " + Path.GetFileNameWithoutExtension(f), false, why);
+        }
+        Check("recipe args parity", agree == files.Length && files.Length > 0, agree + " of " + files.Length + " saved recipes: the window's rig arguments equal the recipe reader's");
+    }
     public static void Run()
     {
         fixtures = Arg("-hafRigImportFixtures"); output = Arg("-hafRigImportOutput");
@@ -321,6 +336,7 @@ public static class UnityRigImportTests
             foreach (var item in new[] { (fixture: "long", action: "Spin_" + new string('a', 120)), (fixture: "underscore", action: "_Spin") })
                 if (Import(item.fixture, item.action, out _) != null) Preview(item.fixture, item.action);
             Acceptance(); AcceptanceCounterexamples(); PoseStreams(); CrossRoute(); RootPlacement(); ToleranceCounterexamples(); WrongSkinWeights(); NonUniformParent(2); NonUniformParent(100);
+            RecipeArgsParity();
         }
         catch (Exception e) { Rows.Add("FAIL exception: " + e); failed++; }
         Rows.Add("TOTAL failed " + failed); File.WriteAllLines(output, Rows);

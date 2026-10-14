@@ -29,6 +29,7 @@
     <!-- Pure editor decision kernels (extraction freshness, natural ordering) — same pattern. -->
     <Compile Include="..\editor\GlbDisconnectedParts.Explain.cs" Link="GlbDisconnectedParts.Explain.cs" />
     <Compile Include="..\editor\EditorRules.cs" Link="EditorRules.cs" />
+    <Compile Include="..\editor\VehicleRigArgs.cs" Link="VehicleRigArgs.cs" />
     <Compile Include="..\editor\GitStamp.cs" Link="GitStamp.cs" />
     <!-- The multi-mesh split's estimator + BSP partition (2026-09-14): the quad ceiling that the Bremen depends on. -->
     <Compile Include="..\editor\QuadEstimate.cs" Link="QuadEstimate.cs" />

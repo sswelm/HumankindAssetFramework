@@ -384,6 +384,16 @@ Lab's Generate on the C# route - per recipe with an editor default that stays Bl
 (`Tools/lab_golden`, the Lab gate rows) and the output GLB read back as the acceptance, every recipe generated both
 ways; (h) the default flip, after the user's check. Estimate: rig_anim's 1,234 lines took three days of sessions at
 this rigor (10-12 to 10-14); three times the lines and heavier geometry: 2 to 4 weeks, inside the 4-8 above.
+(a) DONE 2026-10-14: `tools/vehiclerig_drill.sh` in the gate (jobs from the 24 saved recipes by the Lab's own builder -
+`editor/VehicleRigArgs.cs`, which `VehicleLabWindow.Vehicleize` now uses too, the two fillings held equal on every
+recipe by the headless Generate and by the batch-Unity harness; the script cut at four of its own lines into five
+stages, the scene on record after each with the rig_anim dump's rows and the exported GLB read back; the evidence held
+complete and consistent, 45 tamper kinds refused; `docs/Testing.md` has the measure). All 24 recipes dumped in 90 s
+(FULL=1; 18 under 40 MB in 47 s by default), 23 through all five stages and the Ehrhardt on the fast path, deterministic
+(two full dumps equal with the work folder masked). Found on the way: a Blender 5 action with several slots repeats a
+curve path per slot (the dugout canoe's 'Take 001'), so the FC and K rows carry the slot. The census says which branches
+need a fixture before their port: the modifier bake, the script's own exits and deaths (no recipe takes them), and the
+roles the plan lists with one or no recipe. Next: (b) stage 1.
 - **rig_anim.py's socket sort exit reads a freed edit bone** — OPEN (2026-10-14, found by the stage 4 fixtures). The
   "would sort BEFORE its parent" error prints `_parent.name` after `bpy.ops.object.mode_set(mode='OBJECT')` has freed
   the edit bones: four Blender runs of `fx_s4_socket_sort` printed the right name once, an empty name once, and twice

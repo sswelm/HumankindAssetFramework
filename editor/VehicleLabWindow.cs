@@ -2322,7 +2322,18 @@ public class VehicleLabWindow : EditorWindow
         string axis = axisChoice == 0 ? "AUTO" : AxisOptions[axisChoice];
         string tailAxis = tailAxisChoice == 0 ? "AUTO" : AxisOptions[tailAxisChoice];
         var inv = System.Globalization.CultureInfo.InvariantCulture;
-        if (!RunBlender($"{(fast ? "rigfast" : "rig")} \"{srcFile}\" \"{lastOutGlb}\" \"{prevFull}\" \"@{wheelsFile}\" \"@{turretsFile}\" {axis} {frames} {(spinEnabled ? degrees : 0f).ToString("0.#", inv)} \"@{ignoreFile}\" \"@{tracksFile}\" \"@{gunsFile}\" {treadAdvCells} 1 1 {treadCellsPerLink.ToString("0.##", inv)} {(tracksStatic || !spinEnabled ? "1" : "0")} {(waveEnabled ? rockDegrees : 0f).ToString("0.##", inv)} {rockFrames} {(rockAxisChoice == 1 ? "X" : rockAxisChoice == 2 ? "Y" : "AUTO")} {rockHeading.ToString("0.##", inv)} {(waveEnabled ? rockPitchDeg : 0f).ToString("0.##", inv)} {rockPitchCycles} \"{modelRot.x.ToString("0.##", inv)},{modelRot.y.ToString("0.##", inv)},{modelRot.z.ToString("0.##", inv)}\" {rockPitchPhase.ToString("0.##", inv)} {rockRollCycles} \"@{rotorsFile}\" \"@{tailrotorsFile}\" {tailAxis} {tailYawAdj.ToString("0.##", inv)} {tailPitchAdj.ToString("0.##", inv)} \"@{trailsFile}\" {trailSpreadDeg.ToString("0.##", inv)} {trailFrames} {gunPivot.ToString("0.###", inv)} {gunDeployElev.ToString("0.##", inv)} \"@{muzzlesFile}\" \"@{cradlesFile}\" {recoilDist.ToString("0.###", inv)} {recoilFrames} {recoilLead} {(doubleSided ? "1" : "0")} \"@{oarsFile}\" {oarSweepDeg.ToString("0.##", inv)} {oarDipDeg.ToString("0.##", inv)} {oarFrames} {(fixInsideOut ? "1" : "0")} {oarBladeRollDeg.ToString("0.##", inv)} \"@{sailsFile}\" \"@{riggingFile}\" {riggingReducePct.ToString("0.#", inv)} \"@{structureFile}\" {structureReducePct.ToString("0.#", inv)} \"@{bodiesFile}\" {bodyReducePct.ToString("0.#", inv)} \"@{flagsFile}\" {oarLiftDeg.ToString("0.##", inv)} {oarRakeDeg.ToString("0.##", inv)} {oarPivotPct.ToString("0.#", inv)} {oarLengthPct.ToString("0.#", inv)} \"@{ruddersFile}\" {oarReducePct.ToString("0.#", inv)} {sailReducePct.ToString("0.#", inv)} \"@{preserveFile}\" {rudderReducePct.ToString("0.#", inv)} {wheelReducePct.ToString("0.#", inv)} \"@{flipFile}\" {flipReducePct.ToString("0.#", inv)} {preserveReducePct.ToString("0.#", inv)} \"@{detailFile}\" {detailReducePct.ToString("0.#", inv)} {(sailFoldIdle ? "1" : "0")} {Mathf.Max(1, sailFoldFrames)} {sailFoldAngleDeg.ToString("0.#", inv)} {(sailFoldReverse ? "1" : "0")} {sailFoldSag.ToString("0.##", inv)}{Merge2Arg()}{BrightArg()}{FlagFoldArg()}{DefaultReduceArg(defaultFile)}{ShroudReduceArg(shroudFile)}{GunReduceArg()}{WindowReduceArg(windowFile)}{PartTxArg(projRoot, prevDir, baseName)}", out string stdout)) return;   // argv[41]: double-sided; argv[42..45]: oar parts, sweep, dip, frames; argv[46]: inside-out fix; argv[47]: blade roll; argv[48]: sail parts; argv[49..50]: rigging parts, reduce %; argv[51..52]: structure parts, reduce %; argv[53..54]: body parts, reduce %; argv[55]: flag parts; argv[61..62]: oar reduce %, sail reduce %; argv[63]: preserve parts; argv[64]: rudder reduce %; argv[65]: wheel reduce %; argv[66..67]: flip parts, reduce %; argv[68]: preserve reduce %; argv[69..70]: detail parts, reduce %; argv[71..75]: fold sail at idle, fold frames, curl total, curl reverse, sag
+        // THE COMMAND LINE, FROM ONE PLACE (step (a) of the vehicle_rig port, 2026-10-14): VehicleRigArgLine builds it for the
+        // window and for the drill's jobs writer (tools/vehiclerig-drill/VehicleRigJobs.cs, from the saved recipe), so the drill
+        // runs vehicle_rig.py on exactly what a Generate runs it on; GenerateHeadless holds the two fillings to the same line.
+        var rigArgs = RigArgsFromFields(fast, lastOutGlb, prevFull, new Dictionary<string, string>
+        {
+            { "wheels", wheelsFile }, { "turrets", turretsFile }, { "ignore", ignoreFile }, { "tracks", tracksFile }, { "guns", gunsFile }, { "rotors", rotorsFile },
+            { "tailrotors", tailrotorsFile }, { "trails", trailsFile }, { "muzzles", muzzlesFile }, { "cradles", cradlesFile }, { "oars", oarsFile }, { "sails", sailsFile },
+            { "rigging", riggingFile }, { "structure", structureFile }, { "bodies", bodiesFile }, { "flags", flagsFile }, { "rudders", ruddersFile }, { "preserve", preserveFile },
+            { "flip", flipFile }, { "detail", detailFile }, { "default", defaultFile }, { "shroud", shroudFile }, { "window", windowFile },
+        }, PartTxFile(projRoot, prevDir, baseName));
+        lastRigArgLine = VehicleRigArgLine.RigArgLine(rigArgs);
+        if (!RunBlender(lastRigArgLine, out string stdout)) return;   // argv[41]: double-sided; argv[42..45]: oar parts, sweep, dip, frames; argv[46]: inside-out fix; argv[47]: blade roll; argv[48]: sail parts; argv[49..50]: rigging parts, reduce %; argv[51..52]: structure parts, reduce %; argv[53..54]: body parts, reduce %; argv[55]: flag parts; argv[61..62]: oar reduce %, sail reduce %; argv[63]: preserve parts; argv[64]: rudder reduce %; argv[65]: wheel reduce %; argv[66..67]: flip parts, reduce %; argv[68]: preserve reduce %; argv[69..70]: detail parts, reduce %; argv[71..75]: fold sail at idle, fold frames, curl total, curl reverse, sag
         // SUCCESS = THE SCRIPT'S OWN FINAL MARKER (the documented Blender trap: it exits 0 even when the python
         // script crashes mid-way — without this gate a half-run printed a fake "DONE" with no file on disk).
         string done = stdout.Split('\n').FirstOrDefault(l => l.Contains("VEHICLE RIG DONE"));
@@ -2390,75 +2401,86 @@ public class VehicleLabWindow : EditorWindow
     // PER-PART PLACEMENT argument (2026-09-20): tagged like merge2= (position-independent in the long argv), travels by
     // FILE like the role lists (hundreds of rows would pass the command-line limit). Only placed parts are written;
     // with none, the stale file is removed and NO argument is passed, so the script never parses an empty list.
-    string PartTxArg(string projRoot, string prevDir, string baseName)
+    /// <summary>The placement lines' file for the parttx= argument, written when a part is placed; null (and the stale file removed) when none is.</summary>
+    string PartTxFile(string projRoot, string prevDir, string baseName)
     {
         string file = Path.Combine(projRoot, prevDir, baseName + "_parttx.txt").Replace('\\', '/');
         var placed = parts.Where(IsPlaced).ToList();
-        if (placed.Count == 0) { try { if (File.Exists(file)) File.Delete(file); } catch { } return ""; }
+        if (placed.Count == 0) { try { if (File.Exists(file)) File.Delete(file); } catch { } return null; }
         File.WriteAllLines(file, placed.Select(x => VehicleLabRules.PartPlacementLine(x.name, x.offset.x, x.offset.y, x.offset.z, x.scale.x, x.scale.y, x.scale.z)).ToArray());
-        return $" \"parttx=@{file}\"";
+        return file;
     }
 
-    string Merge2Arg() { var t = Merge2Text(); return t == null ? "" : $" \"merge2={t}\""; }
-    // The TEXT both paths read - the in-process probe parses these very characters as the script does, so the two never
-    // disagree on a rounded fifth decimal.
-    string Merge2Text()
+    // THE RIG ARGUMENTS FROM THE WINDOW'S FIELDS: every value the command line is made of, as loaded and normalised here; the
+    // same class the drill's jobs writer fills from the recipe's JSON (VehicleRigArgLine.RigArgsFromRecipe).
+    VehicleRigArgs RigArgsFromFields(bool fast, string outGlbPath, string previewFbx, Dictionary<string, string> namesFiles, string partTxFile) => new VehicleRigArgs
     {
-        if (string.IsNullOrWhiteSpace(srcFile2)) return null;
-        var inv = System.Globalization.CultureInfo.InvariantCulture;
-        string F(float v) => v.ToString("0.#####", inv);   // 0.### rounded a sub-0.0005 scale to a literal "0" (review finding 7) — 5 places covers any sane unit factor
-        return $"{srcFile2.Trim().Replace('\\', '/')}|{F(model2Off.x)},{F(model2Off.y)},{F(model2Off.z)}|{F(model2Rot.x)},{F(model2Rot.y)},{F(model2Rot.z)}|{VehicleLabRules.Merge2ScaleField(model2Scale.x, model2Scale.y, model2Scale.z)}";
+        fast = fast, srcFile = srcFile, outGlb = outGlbPath, previewFbx = previewFbx, frames = frames, axisChoice = axisChoice, minVerts = minVerts, degrees = degrees,
+        treadAdvCells = treadAdvCells, treadCellsPerLink = treadCellsPerLink, tracksStatic = tracksStatic, spinEnabled = spinEnabled,
+        waveEnabled = waveEnabled, rockDegrees = rockDegrees, rockFrames = rockFrames, rockAxisChoice = rockAxisChoice, rockHeading = rockHeading, rockPitchDeg = rockPitchDeg,
+        rockPitchCycles = rockPitchCycles, rockRollCycles = rockRollCycles, rockPitchPhase = rockPitchPhase, modelRotX = modelRot.x, modelRotY = modelRot.y, modelRotZ = modelRot.z,
+        tailAxisChoice = tailAxisChoice, tailYawAdj = tailYawAdj, tailPitchAdj = tailPitchAdj, trailSpreadDeg = trailSpreadDeg, trailFrames = trailFrames,
+        gunPivot = gunPivot, gunDeployElev = gunDeployElev, recoilDist = recoilDist, recoilFrames = recoilFrames, recoilLead = recoilLead, doubleSided = doubleSided, fixInsideOut = fixInsideOut,
+        oarSweepDeg = oarSweepDeg, oarDipDeg = oarDipDeg, oarFrames = oarFrames, oarBladeRollDeg = oarBladeRollDeg, oarLiftDeg = oarLiftDeg, oarRakeDeg = oarRakeDeg, oarPivotPct = oarPivotPct, oarLengthPct = oarLengthPct,
+        riggingReducePct = riggingReducePct, structureReducePct = structureReducePct, bodyReducePct = bodyReducePct, oarReducePct = oarReducePct, sailReducePct = sailReducePct, rudderReducePct = rudderReducePct,
+        wheelReducePct = wheelReducePct, flipReducePct = flipReducePct, preserveReducePct = preserveReducePct, detailReducePct = detailReducePct, shroudReducePct = shroudReducePct, gunReducePct = gunReducePct,
+        windowReducePct = windowReducePct, defaultReducePct = defaultReducePct, sailFoldIdle = sailFoldIdle, sailFoldFrames = sailFoldFrames, sailFoldAngleDeg = sailFoldAngleDeg, sailFoldReverse = sailFoldReverse, sailFoldSag = sailFoldSag,
+        flagFoldOn = flagFoldOn, flagFoldDeg = flagFoldDeg, flagFoldFrames = flagFoldFrames, srcFile2 = srcFile2, model2OffX = model2Off.x, model2OffY = model2Off.y, model2OffZ = model2Off.z,
+        model2RotX = model2Rot.x, model2RotY = model2Rot.y, model2RotZ = model2Rot.z, model2ScaleX = model2Scale.x, model2ScaleY = model2Scale.y, model2ScaleZ = model2Scale.z,
+        model1Bright = model1Bright, model2Bright = model2Bright, namesFiles = namesFiles, partTxFile = partTxFile,
+    };
+    internal string lastRigArgLine = "";   // the command line of the last Vehicleize (the Lab gate rows hold it to the recipe reader's)
+
+    /// <summary>The window's fields against the recipe reader (VehicleRigArgLine.RigArgsFromRecipe) on the same recipe file - the
+    /// drill's jobs come from the reader, so the two must agree to the character (the names files and placement file aside:
+    /// both sides are given placeholders here). Null when they agree, else the first difference.</summary>
+    /// <summary>The parity check alone, on a recipe file, without a Generate: a window instance loads it as the Lab does and
+    /// its fields are held to the recipe reader's (tools/riganim_unity_import_drill.sh runs this on every saved recipe).</summary>
+    internal static string RecipeArgsDisagreement(string recipePath)
+    {
+        var w = CreateInstance<VehicleLabWindow>();
+        try
+        {
+            w.headless = true; w.headlessDir = "Logs/bake_tests/lab";
+            w.LoadRecipeFromPath(recipePath);
+            if (!w.recipeReadThisSession) return "the recipe did not load: " + w.status;
+            w.lastOutGlb = (w.outGlb ?? "").Replace('\\', '/');
+            return w.ArgsDisagreeWithReader(recipePath);
+        }
+        finally { try { w.DestroyPreview(); } catch { } DestroyImmediate(w); }
     }
 
-    // The per-source BRIGHTNESS argument — tagged like merge2 (probe and rig both need it so the preview
-    // matches the bake). Empty when both factors are 1, so untouched recipes send nothing.
-    string BrightArg()
+    internal string ArgsDisagreeWithReader(string recipePath)
     {
-        bool b1 = Mathf.Abs(model1Bright - 1f) > 0.005f;
-        bool b2 = !string.IsNullOrWhiteSpace(srcFile2) && Mathf.Abs(model2Bright - 1f) > 0.005f;
-        if (!b1 && !b2) return "";
-        var inv = System.Globalization.CultureInfo.InvariantCulture;
-        return $" \"bright={model1Bright.ToString("0.###", inv)}|{(b2 ? model2Bright : 1f).ToString("0.###", inv)}\"";
+        try
+        {
+            var reader = VehicleRigArgLine.RigArgsFromRecipe(File.ReadAllText(recipePath));
+            var mine = RigArgsFromFields(FastPath, lastOutGlb, "", new Dictionary<string, string>(), null);
+            var theirs = reader.args; theirs.outGlb = lastOutGlb; theirs.previewFbx = "";
+            foreach (var role in VehicleRigArgLine.NamesRoles) { mine.namesFiles[role] = "@" + role; theirs.namesFiles[role] = "@" + role; }
+            mine.partTxFile = parts.Any(IsPlaced) ? "placed" : null; theirs.partTxFile = VehicleRigArgLine.PlacementLines(reader).Length > 0 ? "placed" : null;
+            var a = VehicleRigArgLine.RigArgv(mine).Select(x => x.value).ToList(); var b = VehicleRigArgLine.RigArgv(theirs).Select(x => x.value).ToList();
+            for (int i = 0; i < Math.Max(a.Count, b.Count); i++)
+                if (i >= a.Count || i >= b.Count || a[i] != b[i]) return $"argument {i}: the window says '{(i < a.Count ? a[i] : "(none)")}', the recipe reader '{(i < b.Count ? b[i] : "(none)")}'";
+            foreach (var role in VehicleRigArgLine.NamesRoles)
+            {
+                var m1 = ActiveParts.Where(x => (int)x.role == VehicleRigArgLine.RoleOfNamesFile[role]).Select(x => x.name).ToArray();
+                var m2 = VehicleRigArgLine.NamesOf(reader, role);
+                if (!m1.SequenceEqual(m2)) return $"the '{role}' names file: the window lists {m1.Length} name(s), the recipe reader {m2.Length}";
+            }
+            var p1 = parts.Where(IsPlaced).Select(x => VehicleLabRules.PartPlacementLine(x.name, x.offset.x, x.offset.y, x.offset.z, x.scale.x, x.scale.y, x.scale.z)).ToArray();
+            if (!p1.SequenceEqual(VehicleRigArgLine.PlacementLines(reader))) return "the placement lines differ";
+            return null;
+        }
+        catch (Exception e) { return "the recipe reader failed: " + e.GetType().Name + ": " + e.Message; }
     }
 
-    // The FLAG FOLD argument — tagged like merge2/bright; empty at the legacy 0 so ships send nothing.
-    // the catch-all reduce tier, tagged: defaultreduce=@<names file>|<percent>. Absent while the dial is 0, so a
-    // recipe that never touched it produces a byte-identical command line (and an older rig script ignores the tag).
-    string DefaultReduceArg(string namesFile)
-    {
-        if (defaultReducePct <= 0f) return "";
-        var inv = System.Globalization.CultureInfo.InvariantCulture;
-        return $" \"defaultreduce=@{namesFile}|{defaultReducePct.ToString("0.#", inv)}\"";
-    }
-    // Same shape for the Shroud tier: shroudreduce=@<names file>|<percent>. Sent at every dial setting (percent 0 when
-    // the dial is off) so the marked names always reach the script's artifact purge (review of PR #89); an older
-    // script ignores the tag, a newer one skips the tier at 0.
-    string ShroudReduceArg(string namesFile)
-    {
-        var inv = System.Globalization.CultureInfo.InvariantCulture;
-        return $" \"shroudreduce=@{namesFile}|{shroudReducePct.ToString("0.#", inv)}\"";
-    }
-    // GUN (2026-09-25): gunreduce=<percent>, absent while the dial is 0. No names file: the Gun parts already travel
-    // positionally as "@guns.txt" (argv[11]), and the script reduces that list before it measures the Gun bone.
-    string GunReduceArg()
-    {
-        if (gunReducePct <= 0f) return "";
-        var inv = System.Globalization.CultureInfo.InvariantCulture;
-        return $" \"gunreduce={gunReducePct.ToString("0.#", inv)}\"";
-    }
-    // WINDOW (2026-09-25): windowreduce=@<names file>|<percent>, the Shroud shape (Window parts travel nowhere else), sent at every dial setting.
-    string WindowReduceArg(string namesFile)
-    {
-        var inv = System.Globalization.CultureInfo.InvariantCulture;
-        return $" \"windowreduce=@{namesFile}|{windowReducePct.ToString("0.#", inv)}\"";
-    }
-
-    string FlagFoldArg()
-    {
-        if (!flagFoldOn) return "";   // MODE is the checkbox — the tag's presence switches the rig script; angle 0 in fold mode = stays deployed
-        var inv = System.Globalization.CultureInfo.InvariantCulture;
-        return $" \"flagfold={flagFoldDeg.ToString("0.#", inv)}|{Mathf.Max(1, flagFoldFrames)}\"";
-    }
+    // The TEXT both paths read - the in-process probe parses these very characters as the script does (VehicleRigArgLine.Merge2Text).
+    string Merge2Text() => VehicleRigArgLine.Merge2Text(srcFile2, model2Off.x, model2Off.y, model2Off.z, model2Rot.x, model2Rot.y, model2Rot.z, model2Scale.x, model2Scale.y, model2Scale.z);
+    // the probe command's tagged arguments (the rig's come from VehicleRigArgLine.RigArgv, the same texts)
+    string Merge2Arg() { var m2 = Merge2Text(); return m2 == null ? "" : $" \"merge2={m2}\""; }
+    string BrightArg() { var b = VehicleRigArgLine.BrightText(srcFile2, model1Bright, model2Bright); return b == null ? "" : $" \"bright={b}\""; }
+    string PartTxArg(string projRoot, string prevDir, string baseName) { var f = PartTxFile(projRoot, prevDir, baseName); return f == null ? "" : $" \"parttx=@{f}\""; }
 
     // THE BAKE TESTS' ENTRY (2026-09-25): the saved recipe's source model and the roles it marks, by name - the
     // representative pick and the Workshop row read them without a window (the DTO is private to this one).
@@ -2497,7 +2519,11 @@ public class VehicleLabWindow : EditorWindow
             w.outGlb = outGlbPath;
             w.Vehicleize();
             stdout = w.lastStdout; statusText = w.status;
-            return w.status.StartsWith("DONE", StringComparison.Ordinal) && File.Exists(outGlbPath);
+            bool ok = w.status.StartsWith("DONE", StringComparison.Ordinal) && File.Exists(outGlbPath);
+            // the drill's jobs writer reads the recipe without a window: its arguments must be this window's, to the character
+            string disagree = w.ArgsDisagreeWithReader(recipePath);
+            if (disagree != null) { statusText = "the rig arguments of the window and of the recipe reader differ - " + disagree; return false; }
+            return ok;
         }
         finally { try { w.DestroyPreview(); } catch { } DestroyImmediate(w); }
     }

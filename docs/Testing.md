@@ -1658,6 +1658,28 @@ frames of held pose (each clip is rebased on its animation's first key); the Lab
 files when it writes). Owed: the row's run in Unity, then the in-game check of each model
 playing its roles, then the default.
 
+**The vehicle_rig drill, step (a) of item (5) (2026-10-14).** `tools/vehiclerig_drill.sh` is the oracle the vehicle_rig
+ports will be held to, built as the rig_anim drill was. The jobs are the 24 saved Vehicle Lab recipes
+(`Assets/FactorySource/VehicleLab/Recipes`), each the argument vector a Generate hands Blender: `editor/VehicleRigArgs.cs`
+is the ONE builder of that command line - `VehicleLabWindow.Vehicleize` fills it from its fields, the drill's jobs writer
+(`tools/vehiclerig-drill/VehicleRigJobs.cs`) from the recipe's JSON read as the window loads it (absent keys keep the
+initializers, the load guards repeated) - and the two fillings are held equal to the character on every recipe by the
+headless Generate (the Lab gate rows) and by `tools/riganim_unity_import_drill.sh` (24 of 24). The names files and the
+placement file are written as the window writes them. Blender runs the script's own source
+(`tools/vehiclerig-drill/blender_vehiclerig_dump.py`) cut at four of its top-level lines into five stages - the import,
+merge and flatten; the reduction tiers; the rig; the actions; the export - the scene dumped after each with the shared
+rows of `tools/riganim-drill/scene_rows.py` (now imported by the rig_anim dump too) and the exported GLB read back
+(`glb_rows.py`, the X rows); the source-skeleton fast path exits 0 in stage 1 after its own export and is read back the
+same. A Blender 5 action with several slots repeats a curve path per slot (the dugout canoe's 'Take 001'), so this
+dump's FC and K rows carry the slot after the action. `VehicleRigDrill.cs` holds the evidence: every recipe's block
+complete and consistent (the rig_anim parser's rules), a run to its end with its GLB rows, a stop named with the
+script's exit, and the census (COVER rows) of the branches the recipes take by the script's own VEHICLE lines; 45 damaged
+copies of the real dump are each refused (`missing_vehiclerig.py`). Measured: all 24 recipes dumped in 90 s with four
+Blenders (FULL=1; the 18 under 40 MB in 47 s by default), 23 through all five stages and the Ehrhardt on the fast path;
+115 scene dumps, 2,624 VEHICLE lines, 870 bones, 3,151 fcurves and 3,804 GLB rows on record; deterministic: two full
+dumps are equal with the work folder masked (the output path in the script's DONE line is the only difference).
+Branches at zero in the census - fixtures before their port: the modifier bake, the script's own exits and deaths.
+
 **Step (h), the acceptance row (2026-10-14).** `editor/RigRouteAcceptanceTest.cs`, the Bake Tests row "Does the GLB
 rig route bake what the FBX route bakes?" (off by default: two full animated bakes per entry), is the backlog's gate
 before the GLB route becomes the editor default. For every animated registry entry with a .glb/.gltf source it bakes
