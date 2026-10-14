@@ -1666,17 +1666,28 @@ the recipe twice under throwaway names (`BakeSmokeTest.PREFIX`, the delete guard
 does, and compares what the Factory made in Unity: the Amplitude outputs present and non-empty on both
 (`BakeSmokeTest.MissingAssets`); for every role (`RigPreviewPath` resolves either route's rig and clip) the bones by
 name, the skinned mesh's triangle count, rest bounds and the SET of vertex positions (the FBX import splits vertices at
-seams, the glTF carries them split already: counts may differ, the multiset of positions may not - a grid lookup within
-1e-3 of the rig's extent, both ways), the root bone's placement, the clip's length and, at its first, middle and last
-frame, every bone's world position and the skinned vertices (`SkinnedMeshRenderer.BakeMesh`); and each role's baked
-pose stream length (frames x bones). `BakeResult.rigRoute` says which route a bake took ("blender", "csharp",
+seams, the glTF carries them split already: duplicate counts may differ, the position sets may not - a grid lookup
+within 1e-3 of the rig's extent, both ways), the root bone's placement and every bone's rest transform, the clip's
+length and, at every clip frame (at least 24 Hz) and both imports' curve keys, every bone's world transform (position,
+rotation and scale) and the skinned vertices (`SkinnedMeshRenderer.BakeMesh`); and each role's non-empty baked clip
+collection and pose stream length (frames x bones). The basis-vector tolerance is 1e-3 relative to bone scale.
+`BakeResult.rigRoute` says which route a bake took ("blender", "csharp",
 "csharp-fallback" with the port's reason in `rigRouteNote`): a recipe the port leaves to Blender by name bakes through
 the FBX route both times and is a SKIP that says why; a port crash is a FAIL. The in-game check of each model playing
 its roles stays the user's; the row green on every entry and that check together flip the default. The comparison
-itself is executed by `tools/riganim_unity_import_drill.sh` (batch-mode Unity, a temporary project): two imports of
-one fixture are equal, a rig 2% larger is caught by its bounds, a clip of another length by its length, another
-motion of the same length and rest by the bones at its middle frame. A cancel keeps the verdicts made so far. Owed:
-the row's run.
+itself is executed by `tools/riganim_unity_import_drill.sh` (licensed Unity and Blender, a temporary project): equal
+imports and a real uncompressed FBX/GLB pair pass; size, duration, unweighted socket rotation, intermediate motion,
+subframe keyed excursions and absent/empty role pose streams fail. The real FBX pair also demonstrates a motion
+difference from Unity's default FBX animation compression; the acceptance row exposes that difference at the declared
+tolerance. The test switches compression off only for its matching control, leaving the Factory's settings as they
+are. A cancel keeps the verdicts made so far. Owed: the row's run.
+
+Review of PR #171 (2026-10-14): native Unity counterexamples reproduced false passes for a rotating unweighted
+socket and motion that agreed at only the first/middle/last frames. The row now checks full world transforms at rest,
+every clip frame and source key. Missing or empty pose streams on both routes no longer compare equal (`-1 == -1`);
+all baked roles require their own non-empty collection and pose stream. Instantiated roots retain their imported
+position, rotation and scale; resetting them to identity previously hid placement errors. The same native drill covers these regressions
+and a real Blender FBX/GLB pair, including the FBX compression difference described above.
 
 Review of PR #170 (2026-10-14): `tools/riganim_unity_import_drill.sh` runs the real Factory GLB import in an
 isolated Unity project. Five fixtures check exact bone names (no picker-only `#index` suffix), 125-byte action names,

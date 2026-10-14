@@ -7,9 +7,9 @@
 // "blender" and then "csharp" - and compares the outputs in Unity: the Amplitude assets present and non-empty on both; the
 // imported rig of every role (UniversalBaker.RigPreviewPath resolves either route's): the bones by name, the skinned mesh's
 // triangle count, bounds and the SET of vertex positions (the FBX import splits vertices at seams, the glTF carries them
-// split already - the multiset of positions is what both must share), the root's placement; every role's clip: its length
-// and, at its first, middle and last frame, the skinned vertices (SkinnedMeshRenderer.BakeMesh) and every bone's world
-// position; and each role's baked pose stream length (frames x bones). Positions within 1e-3 of the rig's extent.
+// split already - duplicate seam vertices may differ), the root's placement; every role's clip: its length
+// and, at every clip frame (at least 24 Hz) and source curve key, the skinned vertices (SkinnedMeshRenderer.BakeMesh) and every
+// bone's world transform; and each role's non-empty baked collection and pose stream length (frames x bones).
 // A recipe the port leaves to Blender by name bakes through the FBX route both times: SKIP, saying why. A port crash is a
 // FAIL. The in-game check of each model playing its roles stays the user's; only the two together flip the default.
 using System;
@@ -37,7 +37,7 @@ public static class RigRouteAcceptanceTest
         for (int i = 0; i < jobs.Count && !cancelled; i++)
         {
             var e = jobs[i];
-            if (BakeTestRunnerWindow.Progress.CancelRequested) break;
+            if (BakeTestRunnerWindow.Progress.CancelRequested) { cancelled = true; body.AppendLine("CANCELLED by the user - remaining entries were not run"); break; }
             if (string.IsNullOrWhiteSpace(e.modelFile) || !File.Exists(e.modelFile)) { s.skip++; body.AppendLine($"SKIP: {e.resourceName}: {e.modelFile} is not on this machine"); continue; }
             string ext = Path.GetExtension(e.modelFile).ToLowerInvariant();
             if (ext != ".glb" && ext != ".gltf") { s.skip++; notGlb++; body.AppendLine($"SKIP: {e.resourceName}: {Path.GetFileName(e.modelFile)} is not a glTF file - the port reads .glb/.gltf only, the FBX route stays Blender's"); continue; }
@@ -91,7 +91,7 @@ public static class RigRouteAcceptanceTest
         return UniversalBaker.BuildAnimated(cfg);
     }
 
-    /// <summary>The two bakes' outputs side by side: the rig of every role, its clip, the pose stream lengths.</summary>
+    /// <summary>The two bakes' outputs side by side: the rig of every role, its clip and non-empty baked outputs.</summary>
     static void CompareBakes(string nameA, string nameB, List<string> problems, List<string> notes)
     {
         string root = Directory.GetParent(Application.dataPath).FullName;
@@ -110,7 +110,8 @@ public static class RigRouteAcceptanceTest
             {
                 instA = UnityEngine.Object.Instantiate(goA); instB = UnityEngine.Object.Instantiate(goB);
                 instA.hideFlags = instB.hideFlags = HideFlags.HideAndDontSave;
-                instA.transform.position = instB.transform.position = Vector3.zero; instA.transform.rotation = instB.transform.rotation = Quaternion.identity; instA.transform.localScale = instB.transform.localScale = Vector3.one;
+                // Preserve each imported root's authored transform: normalizing it here would hide placement/scale errors.
+                // Both clones have no scene parent, so their asset transforms already share the same world space.
                 CompareRole(dir, instA, instB, clipA, clipB, problems, ref vertexSamples, ref worst);
             }
             finally
@@ -118,22 +119,71 @@ public static class RigRouteAcceptanceTest
                 if (instA != null) UnityEngine.Object.DestroyImmediate(instA);
                 if (instB != null) UnityEngine.Object.DestroyImmediate(instB);
             }
-            // the baked pose stream: frames x bones x the stride - the same clip through the same skeleton gives the same length
+            foreach (var name in new[] { nameA, nameB })
+            {
+                string collection = Path.Combine(root, "Assets", "Resources", name + RoleSuffixes[ri] + ".asset");
+                if (!File.Exists(collection) || new FileInfo(collection).Length < 1024)
+                    problems.Add($"role '{dir}': the {(name == nameA ? "FBX" : "GLB")} route's baked clip collection is missing or empty");
+            }
             string poseA = Path.Combine(root, "Assets", "Resources", nameA + RoleSuffixes[ri] + "PoseData.bytes"), poseB = Path.Combine(root, "Assets", "Resources", nameB + RoleSuffixes[ri] + "PoseData.bytes");
-            long lenA = File.Exists(poseA) ? new FileInfo(poseA).Length : -1, lenB = File.Exists(poseB) ? new FileInfo(poseB).Length : -1;
-            if (lenA != lenB) problems.Add($"role '{dir}': the baked pose stream is {lenA} bytes on the FBX route, {lenB} on the GLB route");
+            string poseProblem = ComparePoseStreams(poseA, poseB);
+            if (poseProblem != null) problems.Add($"role '{dir}': {poseProblem}");
         }
         if (roles == 0) problems.Add("no role's rig could be found on either route");
-        notes.Add(FormattableString.Invariant($"{roles} role(s) equal: bones, mesh, placement and clips, {vertexSamples} skinned vertex samples within {worst:0.#####} of each other; the pose streams of the same length"));
+        notes.Add(FormattableString.Invariant($"{roles} role(s) equal: bones, mesh, placement and clips, {vertexSamples} skinned vertex samples within {worst:0.#####} of each other; non-empty role collections and pose streams of the same length"));
     }
 
     /// <summary>Two instantiated rigs with a clip each, judged as the row judges a role (tools/riganim_unity_import_drill.sh runs
-    /// this on two imports of one fixture, then on a scaled one and on a clip of another length).</summary>
+    /// this on equal imports and counterexamples for size, duration, socket rotation, intermediate motion and FBX compression).</summary>
     internal static List<string> CompareRigs(GameObject a, GameObject b, AnimationClip clipA, AnimationClip clipB)
     {
         var problems = new List<string>(); int samples = 0; double worst = 0;
         CompareRole("test", a, b, clipA, clipB, problems, ref samples, ref worst);
         return problems;
+    }
+
+    internal static string ComparePoseStreams(string pathA, string pathB)
+    {
+        long a = File.Exists(pathA) ? new FileInfo(pathA).Length : -1, b = File.Exists(pathB) ? new FileInfo(pathB).Length : -1;
+        if (a < 32 || b < 32) return $"the baked pose stream is missing or empty (FBX {a} bytes, GLB {b} bytes)";
+        return a == b ? null : $"the baked pose stream is {a} bytes on the FBX route, {b} on the GLB route";
+    }
+
+    // Use at least the Factory's 24 Hz clip rate, plus both imports' curve keys and any higher declared frame rate.
+    static IEnumerable<float> SampleTimes(AnimationClip a, AnimationClip b)
+    {
+        float len = Mathf.Min(a.length, b.length);
+        var times = new SortedSet<float> { 0, len / 2, len };
+        float fps = Mathf.Max(24f, Mathf.Max(a.frameRate, b.frameRate));
+        for (int frame = 0; frame / fps < len; frame++) times.Add(frame / fps);
+        foreach (var clip in new[] { a, b })
+            foreach (var binding in AnimationUtility.GetCurveBindings(clip))
+                foreach (var key in AnimationUtility.GetEditorCurve(clip, binding).keys)
+                    if (key.time >= 0 && key.time <= len) times.Add(key.time);
+        return times;
+    }
+
+    static void CompareBones(string label, Dictionary<string, Transform> a, Dictionary<string, Transform> b,
+                             float tol, List<string> problems, ref double worst)
+    {
+        foreach (var name in a.Keys)
+        {
+            var ta = a[name]; var tb = b[name];
+            float distance = (ta.position - tb.position).magnitude;
+            worst = Math.Max(worst, distance);
+            // Basis vectors include rotation and scale, including sockets with no weighted vertices.
+            var ma = ta.localToWorldMatrix; var mb = tb.localToWorldMatrix;
+            bool basisDiffers = new[] { Vector3.right, Vector3.up, Vector3.forward }.Any(axis =>
+            {
+                var va = ma.MultiplyVector(axis); var vb = mb.MultiplyVector(axis);
+                return (va - vb).magnitude > 1e-3f * Mathf.Max(1e-3f, Mathf.Max(va.magnitude, vb.magnitude));
+            });
+            if (distance > tol || basisDiffers)
+            {
+                problems.Add(FormattableString.Invariant($"{label}: bone '{name}' world transform differs (position {distance:0.####} apart, rotation/scale differs: {basisDiffers})"));
+                break;
+            }
+        }
     }
 
     static void CompareRole(string dir, GameObject a, GameObject b, AnimationClip clipA, AnimationClip clipB, List<string> problems, ref int vertexSamples, ref double worst)
@@ -163,25 +213,26 @@ public static class RigRouteAcceptanceTest
         var rootA = RootBone(smrA[0]); var rootB = RootBone(smrB[0]);
         if (rootA != null && rootB != null && (rootA.position - rootB.position).magnitude > tol)
             problems.Add(FormattableString.Invariant($"role '{dir}': the root bone '{rootA.name}' sits at {rootA.position} on the FBX route, {rootB.position} on the GLB route"));
-        // the clip: its length, then the skinned vertices and the bone positions at its first, middle and last frame
+        var byNameA = BonesByName(smrA); var byNameB = BonesByName(smrB);
+        CompareBones($"role '{dir}' at rest", byNameA, byNameB, tol, problems, ref worst);
+        string restProblem = ComparePositionSets(Positions(smrA), Positions(smrB), tol, out double restWorst);
+        worst = Math.Max(worst, restWorst);
+        if (restProblem != null) problems.Add($"role '{dir}': the rest vertices differ - {restProblem}");
+        // Sample the full bake timeline, not only endpoints and midpoint.
         if (Mathf.Abs(clipA.length - clipB.length) > 1f / 48f + 1e-4f) problems.Add(FormattableString.Invariant($"role '{dir}': the clip is {clipA.length:0.####} s on the FBX route, {clipB.length:0.####} s on the GLB route"));
-        float len = Mathf.Min(clipA.length, clipB.length);
-        foreach (float t in new[] { 0f, len / 2f, len })
+        foreach (float t in SampleTimes(clipA, clipB))
         {
+            BakeTestRunnerWindow.Progress.Poll();
+            BakeTestRunnerWindow.Progress.ThrowIfCancelled();
             clipA.SampleAnimation(a, t); clipB.SampleAnimation(b, t);
-            var byNameA = BonesByName(smrA); var byNameB = BonesByName(smrB);
-            foreach (var name in bonesA)
-            {
-                if (!byNameA.TryGetValue(name, out var ta) || !byNameB.TryGetValue(name, out var tb)) continue;
-                float d = (ta.position - tb.position).magnitude;
-                if (d > tol) { problems.Add(FormattableString.Invariant($"role '{dir}' at {t:0.###} s: bone '{name}' is {d:0.####} apart ({ta.position} against {tb.position}; tolerance {tol:0.####})")); break; }
-                worst = Math.Max(worst, d);
-            }
+            int before = problems.Count;
+            CompareBones(FormattableString.Invariant($"role '{dir}' at {t:0.###} s"), byNameA, byNameB, tol, problems, ref worst);
             var cloudA = Positions(smrA); var cloudB = Positions(smrB);
             vertexSamples += cloudA.Count;
             string cloudProblem = ComparePositionSets(cloudA, cloudB, tol, out double cloudWorst);
             worst = Math.Max(worst, cloudWorst);
-            if (cloudProblem != null) { problems.Add(FormattableString.Invariant($"role '{dir}' at {t:0.###} s: the skinned vertices differ - {cloudProblem}")); break; }
+            if (cloudProblem != null) problems.Add(FormattableString.Invariant($"role '{dir}' at {t:0.###} s: the skinned vertices differ - {cloudProblem}"));
+            if (problems.Count > before) break;
         }
     }
 
@@ -243,7 +294,7 @@ public static class RigRouteAcceptanceTest
             if (best > tol) { unmatched++; if (best > worstD) { worstD = best; worstPoint = p; } }
             else worst = Math.Max(worst, best);
         }
-        return unmatched == 0 ? null : FormattableString.Invariant($"{unmatched} of {from.Count} vertices of the {side} route have no counterpart within {tol:0.####} (the farthest at {worstPoint}, {worstD:0.####} away)");
+        return unmatched == 0 ? null : FormattableString.Invariant($"{unmatched} of {from.Count} vertices of the {side} route have no counterpart within {tol:0.####} (example at {worstPoint})");
     }
 
     static (int, int, int) Key(Vector3 p, float cell) => (Mathf.FloorToInt(p.x / cell), Mathf.FloorToInt(p.y / cell), Mathf.FloorToInt(p.z / cell));

@@ -195,7 +195,7 @@ public class BakeTestRunnerWindow : EditorWindow
                 what = "For every animated registry entry with a .glb/.gltf source, bakes it twice under throwaway names - once on the Blender FBX route, once on " +
                        "the C# in-process GLB route - and compares what the Factory made: the Amplitude outputs present on both, the rig Unity imported (the bones " +
                        "by name, the skinned mesh's triangles, bounds and vertex positions, the placement), every role's clip (its length, and the skinned " +
-                       "vertices and bone positions at its first, middle and last frame), and each role's baked pose stream length. An entry the port leaves " +
+                       "vertices and bone world transforms at every clip frame and curve key), and each role's non-empty baked collection and pose stream length. An entry the port leaves " +
                        "to Blender by name is a SKIP that says why (the bake then took the FBX route twice); a crash is a FAIL. This row green on every entry, " +
                        "plus the in-game check of each model playing its roles, is what flips the editor default to the GLB route.",
                 run = RigRouteAcceptanceTest.RunSection },

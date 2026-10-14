@@ -100,9 +100,108 @@ public static class UnityRigImportTests
             var instA2 = UnityEngine.Object.Instantiate(goA);
             var twist = RigRouteAcceptanceTest.CompareRigs(instA2, instTwist, Subclip(clipsA["primary"]), Subclip(clipsTwist["primary"]));
             UnityEngine.Object.DestroyImmediate(instA2);
-            Check("acceptance: another motion of the same length is caught at a sampled frame", twist.Any(p => p.Contains(" at 0.5 s")) && !twist.Any(p => p.Contains("the clip is") || p.Contains("rest bounds")), twist.Count > 0 ? twist[0] : "not caught");
+            Check("acceptance: another motion of the same length is caught at a sampled frame", twist.Any(p => p.Contains("world transform differs")) && !twist.Any(p => p.Contains("the clip is") || p.Contains("rest bounds")), twist.Count > 0 ? twist[0] : "not caught");
         }
         finally { UnityEngine.Object.DestroyImmediate(instA); UnityEngine.Object.DestroyImmediate(instB); UnityEngine.Object.DestroyImmediate(instLate); UnityEngine.Object.DestroyImmediate(instTwist); }
+    }
+    // Counterexamples for the route acceptance gate: invisible sockets, motion between the original three samples,
+    // and absent role pose streams. Use real AnimationClip sampling and BakeMesh in native Unity.
+    static void AcceptanceCounterexamples()
+    {
+        var go = Import("plain", "Spin", out var clips); if (go == null) return;
+        var a = UnityEngine.Object.Instantiate(go); var b = UnityEngine.Object.Instantiate(go);
+        var clipA = new AnimationClip { legacy = true }; var clipB = new AnimationClip { legacy = true };
+        try
+        {
+            foreach (var inst in new[] { a, b })
+            {
+                var smr = inst.GetComponentInChildren<SkinnedMeshRenderer>();
+                var socket = new GameObject("Muzzle").transform; socket.SetParent(smr.bones[0], false);
+                smr.bones = smr.bones.Concat(new[] { socket }).ToArray();
+            }
+            string socketPath = AnimationUtility.CalculateTransformPath(a.GetComponentsInChildren<Transform>().First(t => t.name == "Muzzle"), a.transform);
+            AnimationUtility.SetEditorCurve(clipA, EditorCurveBinding.FloatCurve(socketPath, typeof(Transform), "localEulerAnglesRaw.z"), AnimationCurve.Linear(0, 0, 1, 0));
+            AnimationUtility.SetEditorCurve(clipB, EditorCurveBinding.FloatCurve(socketPath, typeof(Transform), "localEulerAnglesRaw.z"), AnimationCurve.Linear(0, 0, 1, 90));
+            var identicalSocket = RigRouteAcceptanceTest.CompareRigs(a, b, clipA, clipA);
+            Check("acceptance: identical unweighted socket motion passes", identicalSocket.Count == 0, string.Join("; ", identicalSocket));
+            // Restore both rigs' rest after sampling the equal pair.
+            clipA.SampleAnimation(a, 0); clipA.SampleAnimation(b, 0);
+            var socketDifference = RigRouteAcceptanceTest.CompareRigs(a, b, clipA, clipB);
+            Check("acceptance: unweighted socket rotation is caught", socketDifference.Count > 0, string.Join("; ", socketDifference));
+            UnityEngine.Object.DestroyImmediate(a); UnityEngine.Object.DestroyImmediate(b);
+            a = UnityEngine.Object.Instantiate(go); b = UnityEngine.Object.Instantiate(go);
+            var original = Subclip(clips["primary"]);
+            UnityEngine.Object.DestroyImmediate(clipA); UnityEngine.Object.DestroyImmediate(clipB);
+            clipA = UnityEngine.Object.Instantiate(original); clipB = UnityEngine.Object.Instantiate(original);
+            var binding = AnimationUtility.GetCurveBindings(clipB).First(x => x.propertyName == "m_LocalPosition.x" && x.path.EndsWith("Arm", StringComparison.Ordinal));
+            var curve = AnimationUtility.GetEditorCurve(clipA, binding);
+            AnimationUtility.SetEditorCurve(clipB, binding, new AnimationCurve(new Keyframe(0, curve.Evaluate(0)), new Keyframe(0.25f, curve.Evaluate(0.25f) + 2), new Keyframe(0.5f, curve.Evaluate(0.5f)), new Keyframe(1, curve.Evaluate(1))));
+            var pulseDifference = RigRouteAcceptanceTest.CompareRigs(a, b, clipA, clipB);
+            Check("acceptance: motion between first/middle/last is caught", pulseDifference.Count > 0, string.Join("; ", pulseDifference));
+            UnityEngine.Object.DestroyImmediate(a); UnityEngine.Object.DestroyImmediate(b);
+            a = UnityEngine.Object.Instantiate(go); b = UnityEngine.Object.Instantiate(go);
+            AnimationUtility.SetEditorCurve(clipB, binding, new AnimationCurve(new Keyframe(0, curve.Evaluate(0)), new Keyframe(0.01f, curve.Evaluate(0.01f) + 2), new Keyframe(0.02f, curve.Evaluate(0.02f)), new Keyframe(0.5f, curve.Evaluate(0.5f)), new Keyframe(1, curve.Evaluate(1))));
+            var subframeDifference = RigRouteAcceptanceTest.CompareRigs(a, b, clipA, clipB);
+            Check("acceptance: a keyed excursion between bake frames is caught", subframeDifference.Any(x => x.Contains(" at 0.01 s")), string.Join("; ", subframeDifference));
+        }
+        finally { if (a != null) UnityEngine.Object.DestroyImmediate(a); if (b != null) UnityEngine.Object.DestroyImmediate(b); UnityEngine.Object.DestroyImmediate(clipA); UnityEngine.Object.DestroyImmediate(clipB); }
+    }
+    static void PoseStreams()
+    {
+        string a = Path.Combine(fixtures, "pose_a.bytes"), b = Path.Combine(fixtures, "pose_b.bytes");
+        Check("acceptance: absent pose streams fail", RigRouteAcceptanceTest.ComparePoseStreams(a, b) != null, "both roles missing");
+        File.WriteAllBytes(a, new byte[0]); File.WriteAllBytes(b, new byte[0]);
+        Check("acceptance: empty pose streams fail", RigRouteAcceptanceTest.ComparePoseStreams(a, b) != null, "both roles empty");
+        File.WriteAllBytes(a, new byte[48]); File.WriteAllBytes(b, new byte[48]);
+        Check("acceptance: valid one-frame pose streams pass", RigRouteAcceptanceTest.ComparePoseStreams(a, b) == null, "48 bytes each");
+        File.WriteAllBytes(b, new byte[96]);
+        Check("acceptance: different pose stream lengths fail", RigRouteAcceptanceTest.ComparePoseStreams(a, b) != null, "48 vs 96 bytes");
+        File.Delete(b);
+        Check("acceptance: one missing pose stream fails", RigRouteAcceptanceTest.ComparePoseStreams(a, b) != null, "one role missing");
+    }
+    static void CrossRoute()
+    {
+        var glb = Import("route", "Spin", out var clips); if (glb == null) return;
+        string path = "Assets/FactorySource/RigImport_fbx/anim/RigImport_fbx_anim.fbx";
+        Directory.CreateDirectory(Path.GetDirectoryName(path)); File.Copy(Path.Combine(fixtures, "route.fbx"), path, true);
+        AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
+        var imp = (ModelImporter)AssetImporter.GetAtPath(path);
+        imp.animationType = ModelImporterAnimationType.Generic; imp.importAnimation = true; imp.useFileScale = false; imp.globalScale = 1; imp.SaveAndReimport();
+        var fbx = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+        float longest = (float)Baker("MeasureLongestAxis").Invoke(null, new object[] { fbx });
+        imp.globalScale = 10f / longest; imp.SaveAndReimport(); fbx = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+        void Compare(bool expectEqual, string label)
+        {
+            var fbxClip = AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>().First(c => !c.name.StartsWith("__preview", StringComparison.Ordinal));
+            var a = UnityEngine.Object.Instantiate(AssetDatabase.LoadAssetAtPath<GameObject>(path)); var b = UnityEngine.Object.Instantiate(glb);
+            try
+            {
+                var differences = RigRouteAcceptanceTest.CompareRigs(a, b, fbxClip, Subclip(clips["primary"]));
+                Check(label, expectEqual ? differences.Count == 0 : differences.Count > 0, string.Join("; ", differences));
+            }
+            finally { UnityEngine.Object.DestroyImmediate(a); UnityEngine.Object.DestroyImmediate(b); }
+        }
+        Compare(false, "acceptance: FBX compression changing intermediate motion is caught");
+        // The Factory keeps the FBX importer's default compression. The gate should expose that error, not enlarge its
+        // tolerance to hide it. Turning compression off here provides a matching cross-route control for this fixture.
+        imp.animationCompression = ModelImporterAnimationCompression.Off; imp.SaveAndReimport();
+        Compare(true, "acceptance: real uncompressed FBX and GLB slim imports agree");
+    }
+
+    static void RootPlacement()
+    {
+        File.Copy(Path.Combine(fixtures, "plain.glb"), Path.Combine(fixtures, "placed.glb"), true);
+        if (Import("placed", "Spin", out _) == null) return;
+        string path = "Assets/FactorySource/RigImport_placed/anim/RigImport_placed_anim.prefab";
+        var root = PrefabUtility.LoadPrefabContents(path);
+        try { root.transform.position += new Vector3(0, 3, 0); root.transform.localScale *= 1.02f; PrefabUtility.SaveAsPrefabAsset(root, path); }
+        finally { PrefabUtility.UnloadPrefabContents(root); }
+        var problems = new List<string>(); var notes = new List<string>();
+        typeof(RigRouteAcceptanceTest).GetMethod("CompareBakes", BindingFlags.Static | BindingFlags.NonPublic)
+            .Invoke(null, new object[] { "RigImport_plain", "RigImport_placed", problems, notes });
+        // This lightweight project lacks the Amplitude SDK: disregard missing baked collections and assert the actual
+        // production comparison reports the root-transform discrepancy, rather than resetting both roots to identity.
+        Check("acceptance: CompareBakes preserves imported root placement and scale", problems.Any(p => p.Contains("rest bounds differ")) && problems.Any(p => p.Contains("the root bone")), string.Join("; ", problems.Where(p => p.Contains("rest bounds") || p.Contains("the root bone"))));
     }
     public static void Run()
     {
@@ -112,7 +211,7 @@ public static class UnityRigImportTests
             Motion("plain"); Motion("late"); Atlas();
             foreach (var item in new[] { (fixture: "long", action: "Spin_" + new string('a', 120)), (fixture: "underscore", action: "_Spin") })
                 if (Import(item.fixture, item.action, out _) != null) Preview(item.fixture, item.action);
-            Acceptance();
+            Acceptance(); AcceptanceCounterexamples(); PoseStreams(); CrossRoute(); RootPlacement();
         }
         catch (Exception e) { Rows.Add("FAIL exception: " + e); failed++; }
         Rows.Add("TOTAL failed " + failed); File.WriteAllLines(output, Rows);

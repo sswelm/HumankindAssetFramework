@@ -348,8 +348,8 @@ row compares with the image bytes aside; a pre-PR review found and fixed three F
 (a stale GLB reused after a fallback, the GLB's absolute clip times, previews reading only the FBX - `docs/Testing.md`).
 (h) the acceptance row, built 2026-10-14: `editor/RigRouteAcceptanceTest.cs`, the Bake Tests row "Does the GLB rig
 route bake what the FBX route bakes?" - every animated glTF entry baked both ways under throwaway names, the Amplitude
-outputs, the imported rig (bones, mesh, placement), every role's clip (length; bones and skinned vertices at its first,
-middle and last frame) and the pose stream lengths compared in Unity (`docs/Testing.md`); `BakeResult.rigRoute` names the
+outputs, the imported rig (bones, mesh, placement), every role's clip (length; bone world transforms and skinned vertices at
+every clip frame and curve key) and non-empty role collections and pose stream lengths compared in Unity (`docs/Testing.md`); `BakeResult.rigRoute` names the
 route a bake took. OWED, the user's: the row's run in Unity on every entry and the in-game check of each model playing
 its roles; only then the default flips.
 - **rig_anim.py's socket sort exit reads a freed edit bone** — OPEN (2026-10-14, found by the stage 4 fixtures). The
