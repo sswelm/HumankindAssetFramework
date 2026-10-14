@@ -34,7 +34,7 @@ public static class BlenderRigAnimHeadlessTest
         var jobs = entries.Where(e => e.animated).ToList();
         if (jobs.Count == 0) { s.skip++; s.body = "SKIP: no registry entry is animated - the port has nothing of yours to be judged on"; return s; }
         string root = Path.Combine(Path.GetTempPath(), "haf_riganim_test");
-        int left = 0, exits = 0, notGlb = 0;
+        int left = 0, exits = 0, notGlb = 0, byteEqual = 0, imageAside = 0;
         for (int i = 0; i < jobs.Count; i++)
         {
             var e = jobs[i];
@@ -103,8 +103,7 @@ public static class BlenderRigAnimHeadlessTest
                         if (jpegAlbedo)
                         {
                             // Blender's file carries its PNG re-encode of the JPEG albedo, the port's the source JPEG: the models must agree with the image bytes aside
-                            foreach (var im in ma.Images.Concat(mb.Images)) { im.Bytes = null; im.MimeType = ""; }
-                            reason = HafModelDiff.FirstDifference(ma, mb);
+                            reason = HafModelDiff.FirstDifference(ma, mb, inProc.SourceImageFallbacks);
                             if (reason == null) bytesNote = " with the albedo's bytes aside (a JPEG source: Blender re-encodes it, the port keeps it)";
                         }
                         else reason = HafModelDiff.FirstDifference(ma, mb) ?? reason;
@@ -130,6 +129,7 @@ public static class BlenderRigAnimHeadlessTest
                     }
                 }
                 s.pass++;
+                if (bytesNote.Length == 0) byteEqual++; else imageAside++;
                 int roles = inProc.RoleActions.Count;
                 body.AppendLine(FormattableString.Invariant($"PASS: {e.resourceName}: {a.Length:N0} bytes{(bytesNote.Length > 0 ? bytesNote : " equal")} (primary '{inProc.PrimaryAction}'{(roles > 0 ? ", " + roles + " role clip(s)" : "")}{albedoNote}; in process {secondsA:0.0} s, Blender {secondsB:0.0} s)"));
             }
@@ -137,7 +137,7 @@ public static class BlenderRigAnimHeadlessTest
             catch (Exception ex) { s.fail++; body.AppendLine($"FAIL: {e.resourceName}: {ex.GetType().Name}: {ex.Message}"); }
         }
         try { if (Directory.Exists(root)) Directory.Delete(root, true); } catch { }
-        body.Insert(0, $"{jobs.Count} animated registry entr{(jobs.Count == 1 ? "y" : "ies")}; {s.pass - exits} equal byte for byte, {exits} matching script exits, {left} left to Blender by name, {notGlb} not glTF sources\n");
+        body.Insert(0, $"{jobs.Count} animated registry entr{(jobs.Count == 1 ? "y" : "ies")}; {byteEqual} equal byte for byte, {imageAside} equal with re-encoded image payloads aside, {exits} matching script exits, {left} left to Blender by name, {notGlb} not glTF sources\n");
         s.body = body.ToString();
         return s;
     }

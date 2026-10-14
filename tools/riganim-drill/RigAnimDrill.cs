@@ -719,13 +719,29 @@ static class Stage1Drill
                                                             if (back.Images.Count != x.MaterialRows.Images.Count) problems.Add("the in-process wrapper's file reads back with " + back.Images.Count + " image(s), the export has " + x.MaterialRows.Images.Count);
                                                             else if (back.Images.Any(im => im.Bytes == null || im.Bytes.Length == 0)) problems.Add("the in-process wrapper's file has an image without bytes");
                                                             else if (back.Animations.Count != x.Animations.Count) problems.Add("the in-process wrapper's file reads back with " + back.Animations.Count + " animation(s), the export has " + x.Animations.Count);
-                                                            else Cover("the in-process wrapper's file read back (a JPEG albedo: the source's bytes, not Blender's PNG)");
+                                                            else
+                                                            {
+                                                                var expectedImages = x.MaterialRows.Images.ToArray();
+                                                                try
+                                                                {
+                                                                    for (int ii = 0; ii < expectedImages.Length; ii++)
+                                                                        if (expectedImages[ii].bytes == null)
+                                                                        {
+                                                                            var im = expectedImages[ii]; var srcIm = model.Model.Images[im.source];
+                                                                            x.MaterialRows.Images[ii] = (im.name, BlenderRigAnimInProcess.ImageMime(srcIm.Bytes), srcIm.Bytes, im.source);
+                                                                        }
+                                                                    var expectedFile = BlenderGlbWriter.Build(x);
+                                                                    if (expectedFile.Fallback != null || !File.ReadAllBytes(tmpGlb).SequenceEqual(expectedFile.Glb)) problems.Add("the in-process wrapper's JPEG file differs from the oracle-checked export with its source image bytes");
+                                                                    else Cover("the in-process wrapper's file read back (a JPEG albedo: the source's bytes, not Blender's PNG)");
+                                                                }
+                                                                finally { for (int ii = 0; ii < expectedImages.Length; ii++) x.MaterialRows.Images[ii] = expectedImages[ii]; }
+                                                            }
                                                         }
                                                         catch (Exception rx) { problems.Add("the in-process wrapper's file does not read back: " + rx.GetType().Name + ": " + rx.Message); }
                                                     }
                                                     if (o.PrimaryAction != (model.PrimaryAction ?? "")) problems.Add("the in-process wrapper names the primary '" + o.PrimaryAction + "', the model '" + model.PrimaryAction + "'");
-                                                    if (o.RoleActions.Count != model.RoleActions.Count) problems.Add("the in-process wrapper names " + o.RoleActions.Count + " role(s), the model " + model.RoleActions.Count);
-                                                    if (!BlenderRigAnimInProcess.ParseRolesSidecar(BlenderRigAnimInProcess.RolesSidecar(o.PrimaryAction, o.RoleActions), out string pr, out var rl) || pr != o.PrimaryAction || rl.Count != o.RoleActions.Count) problems.Add("the roles sidecar does not read back");
+                                                    if (!o.RoleActions.SequenceEqual(model.RoleActions)) problems.Add("the in-process wrapper names " + o.RoleActions.Count + " role(s), the model " + model.RoleActions.Count);
+                                                    if (!BlenderRigAnimInProcess.ParseRolesSidecar(BlenderRigAnimInProcess.RolesSidecar(o.PrimaryAction, o.RoleActions), out string pr, out var rl) || pr != o.PrimaryAction || !rl.SequenceEqual(o.RoleActions)) problems.Add("the roles sidecar does not read back");
                                                     if ((o.AlbedoBytes != null) != (model.Albedo.path != null)) problems.Add("the in-process wrapper's albedo " + (o.AlbedoBytes != null ? "written" : "not written") + ", the model's " + (model.Albedo.path != null ? "written" : "not written"));
                                                     if (problems.Count == 0) { InProcessEqual++; Cover("the in-process wrapper's file (step (g))"); }
                                                 }

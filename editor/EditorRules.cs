@@ -464,6 +464,11 @@ public static class BackupRules
 /// <summary>Bake-pipeline decisions (UniversalBaker calls these; BakerRulesTests locks them).</summary>
 public static class BakerRules
 {
+    /// <summary>A named rig fallback can be reused only with reuse requested and the same settings, source and tool.
+    /// A forced rebuild or a changed source must ask the C# port again: its earlier unsupported shape may be gone.</summary>
+    public static bool CanReuseRigFallback(bool reuse, bool fbxExists, bool keyMatches, bool toolChanged, bool sourceChanged)
+        => reuse && fbxExists && keyMatches && !toolChanged && !sourceChanged;
+
     // Process facts kept separately from the successful-write verdict: SystemExit(1), a Python exception and a
     // timeout all fail to write, but only the first can agree with the port's intentional script exit.
     public sealed class DeployBlenderRun

@@ -13,14 +13,17 @@ public static class HafModelDiff
     /// writer stamps its own), an image's Uri (an embedded image has none) and an image's MimeType the source never
     /// declared (the writer must) are the fields allowed to differ;
     /// extensionsUsed may shrink to what is carried (a name the source declared without any payload) but never grow.</summary>
-    public static string FirstDifference(HafModel a, HafModel b)
+    public static string FirstDifference(HafModel a, HafModel b) => FirstDifference(a, b, null);
+
+    /// <summary>Ignore bytes and MIME only at the explicitly named image indices, for the rig albedo re-encoded by Blender.</summary>
+    public static string FirstDifference(HafModel a, HafModel b, ISet<int> unmeasuredImages)
     {
         equalPairs = null;   // per comparison: the arrays of a model that was edited since are compared afresh
-        try { return Compare(a, b); }
+        try { return Compare(a, b, unmeasuredImages); }
         finally { equalPairs = null; }   // and not kept alive after it: the set holds both models' arrays
     }
 
-    static string Compare(HafModel a, HafModel b)
+    static string Compare(HafModel a, HafModel b, ISet<int> unmeasuredImages)
     {
         string d;
         if ((d = Count("nodes", a.Nodes.Count, b.Nodes.Count)) != null) return d;
@@ -118,6 +121,7 @@ public static class HafModelDiff
         {
             HafImage x = a.Images[i], y = b.Images[i]; string w = $"image {i} ({x.Name})";
             if (x.Name != y.Name) return w + " name";
+            if (unmeasuredImages != null && unmeasuredImages.Contains(i)) continue;   // the name and image count still agree
             // a .gltf image by uri declares no type; the writer embeds it and must say the one the bytes are (PNG or JPEG by signature)
             if (x.MimeType != y.MimeType && !(x.MimeType.Length == 0 && y.MimeType == MimeOf(x.Bytes))) return w + $" mimeType '{x.MimeType}' -> '{y.MimeType}' (the bytes are {MimeOf(x.Bytes) ?? "neither PNG nor JPEG"})";
             if ((d = Arr(w + " bytes", x.Bytes, y.Bytes)) != null) return d;

@@ -22,7 +22,7 @@ public static class BlenderRigAnimInProcess
 {
     /// <summary>Bump when the in-process run's written file changes: the Factory's slim cache key carries it, so a cached
     /// GLB made by an older port is made again.</summary>
-    public const string CacheRevision = "2026-10-14.1";
+    public const string CacheRevision = "2026-10-14.2";
 
     public sealed class Outcome
     {
@@ -32,6 +32,7 @@ public static class BlenderRigAnimInProcess
         public readonly List<string> Log = new List<string>();   // the RIGANIM lines, in the script's order
         public string PrimaryAction = "";    // the action the primary clip ended as (the glTF animation's name)
         public readonly List<(string role, string action)> RoleActions = new List<(string, string)>();   // each state role's action, in the script's order
+        public readonly HashSet<int> SourceImageFallbacks = new HashSet<int>();   // only these exported images differ from Blender's PNG encoding
         public byte[] AlbedoBytes; public string AlbedoMime = ""; public string AlbedoPath; public int AlbedoWidth, AlbedoHeight;   // the albedo the script would save (null bytes: none written)
     }
 
@@ -103,7 +104,10 @@ public static class BlenderRigAnimInProcess
                 if (im.bytes != null) continue;
                 var srcImage = im.source >= 0 && im.source < m.Images.Count ? m.Images[im.source] : null;
                 if (srcImage == null || srcImage.Bytes == null) { o.UseBlender = "the file: image '" + im.name + "' has no bytes to write"; return o; }
-                x.MaterialRows.Images[i] = (im.name, string.IsNullOrEmpty(srcImage.MimeType) ? o.AlbedoMime : srcImage.MimeType, srcImage.Bytes, im.source);
+                string mime = ImageMime(srcImage.Bytes);
+                if (mime == null) { o.UseBlender = "the file: image '" + im.name + "' has no known PNG/JPEG encoding"; return o; }
+                x.MaterialRows.Images[i] = (im.name, mime, srcImage.Bytes, im.source);
+                o.SourceImageFallbacks.Add(i);
                 o.Log.Add("RIGANIM glb: image '" + im.name + "' carries the source's " + x.MaterialRows.Images[i].mime + " bytes (Blender's PNG re-encode is not reproduced)");
             }
             Tick();
@@ -127,14 +131,18 @@ public static class BlenderRigAnimInProcess
         }
     }
 
-    /// <summary>The roles sidecar the Factory keeps beside the GLB: `primary\t&lt;action&gt;`, then `&lt;role&gt;\t&lt;action&gt;` per
-    /// state role, one per line - a later bake with 'Reuse extracted' reads the clip names from it.</summary>
+    internal static string ImageMime(byte[] bytes)
+        => bytes != null && bytes.Length >= 8 && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47 ? "image/png"
+         : bytes != null && bytes.Length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF ? "image/jpeg" : null;
+
+    /// <summary>The roles sidecar the Factory keeps beside the GLB: JSON with the primary action and every role/action pair - a later bake with 'Reuse extracted' reads the clip names from it.</summary>
     public static string RolesSidecar(string primary, IEnumerable<(string role, string action)> roles)
     {
-        var sb = new System.Text.StringBuilder();
-        sb.Append("primary\t").Append(primary ?? "").Append('\n');
-        foreach (var (role, action) in roles) sb.Append(role).Append('\t').Append(action).Append('\n');
-        return sb.ToString();
+        return new Newtonsoft.Json.Linq.JObject
+        {
+            ["primary"] = primary ?? "",
+            ["roles"] = new Newtonsoft.Json.Linq.JArray(roles.Select(r => new Newtonsoft.Json.Linq.JObject { ["role"] = r.role, ["action"] = r.action }))
+        }.ToString(Newtonsoft.Json.Formatting.None) + "\n";
     }
 
     /// <summary>The sidecar read back; false when it is not in the form RolesSidecar writes.</summary>
@@ -142,6 +150,25 @@ public static class BlenderRigAnimInProcess
     {
         primary = null; roles = new List<(string, string)>();
         if (text == null) return false;
+        if (text.TrimStart().StartsWith("{", StringComparison.Ordinal))
+        {
+            try
+            {
+                var j = Newtonsoft.Json.Linq.JObject.Parse(text);
+                if (j["primary"]?.Type != Newtonsoft.Json.Linq.JTokenType.String || !(j["roles"] is Newtonsoft.Json.Linq.JArray array)) return false;
+                var seen = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var row in array)
+                {
+                    if (!(row is Newtonsoft.Json.Linq.JObject item) || item["role"]?.Type != Newtonsoft.Json.Linq.JTokenType.String || item["action"]?.Type != Newtonsoft.Json.Linq.JTokenType.String) return false;
+                    string role = (string)item["role"];
+                    if (role.Length == 0 || !seen.Add(role)) return false;
+                    roles.Add((role, (string)item["action"]));
+                }
+                primary = (string)j["primary"]; return true;
+            }
+            catch (Newtonsoft.Json.JsonException) { return false; }
+        }
+        // Read caches written by the first GLB route version as well.
         foreach (var raw in text.Split('\n'))
         {
             var line = raw.TrimEnd('\r');

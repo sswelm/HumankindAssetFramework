@@ -529,7 +529,10 @@ public static class UniversalBaker
         // the port again. Without it the next bake found the csharp stamp and a GLB of an OLDER key beside it, and reused that.
         bool rigFellBack = false;
         string slimArgsKeyFallback = slimArgsKey.Replace("route=csharp:", "route=csharp-fallback:");
-        if (glbRoute && File.Exists(fbxFull) && File.Exists(slimArgsFull) && File.ReadAllText(slimArgsFull) == slimArgsKeyFallback)
+        if (glbRoute && BakerRules.CanReuseRigFallback(cfg.reuseExtracted, File.Exists(fbxFull),
+            File.Exists(slimArgsFull) && File.ReadAllText(slimArgsFull) == slimArgsKeyFallback,
+            File.Exists(rigScript) && File.Exists(fbxFull) && File.GetLastWriteTimeUtc(rigScript) > File.GetLastWriteTimeUtc(fbxFull),
+            !string.IsNullOrEmpty(cfg.modelFile) && File.Exists(cfg.modelFile) && File.Exists(fbxFull) && File.GetLastWriteTimeUtc(cfg.modelFile) > File.GetLastWriteTimeUtc(fbxFull)))
         {
             Debug.Log($"[Factory] {name}: the C# rig port left this model to Blender at these settings (its last bake) - taking the FBX route up front; a changed setting or a changed port asks it again.");
             glbRoute = false; slimOut = fbxFull; rigFellBack = true;
@@ -595,7 +598,8 @@ public static class UniversalBaker
                             Debug.LogWarning("[Factory] rig slim: the C# port CRASHED, using Blender's FBX route instead - " + inProc.UseBlender + ". A crash is not a named shape: report it with the model.");
                         else Debug.Log("[Factory] rig slim: using Blender's FBX route because " + inProc.UseBlender + ".");
                         if (!BlenderAvailable()) return Fail("rig slim: " + inProc.UseBlender + ". That leaves this model to Blender, which is not installed (it is auto-detected, or set EditorPrefs 'HAF.BlenderPath').");
-                        glbRoute = false; slimOut = fbxFull; rigFellBack = true;
+                        glbRoute = false; slimOut = fbxFull;
+                        rigFellBack = !inProc.UseBlender.StartsWith("the C# rig run failed", StringComparison.Ordinal);   // transient crashes retry the port next bake
                         // a GLB and sidecar of an earlier key must not survive the fallback: the next bake would find them under the csharp stamp
                         foreach (var stale in new[] { glbFull, rolesSidecarFull })
                             try { if (File.Exists(stale)) File.Delete(stale); } catch (Exception ex) { Debug.LogWarning("[Factory] could not remove the stale slim GLB output " + stale + ": " + ex.Message); }
@@ -1205,9 +1209,9 @@ public static class UniversalBaker
         string prefab = $"Assets/FactorySource/{res}/anim/{res}_anim.prefab";
         if (AssetDatabase.LoadAssetAtPath<GameObject>(prefab) == null) return null;
         string role = roleDir == "anim" ? "primary" : roleDir.StartsWith("anim_", StringComparison.Ordinal) ? roleDir.Substring(5) : roleDir;
-        string container = $"Assets/FactorySource/{res}/anim/{res}_Clip_{role}.asset";
+        string container = $"Assets/FactorySource/{res}/anim/_{res}_Clip_{role}.asset";
         if (AssetDatabase.LoadMainAssetAtPath(container) == null) return null;   // this role is not baked on the GLB route
-        clip = AssetDatabase.LoadAllAssetsAtPath(container).OfType<AnimationClip>().FirstOrDefault(c => c != null && !c.name.StartsWith("_", StringComparison.Ordinal));
+        clip = AssetDatabase.LoadAllAssetsAtPath(container).OfType<AnimationClip>().FirstOrDefault(c => c != null && AssetDatabase.IsSubAsset(c));
         return prefab;
     }
 
@@ -1220,7 +1224,7 @@ public static class UniversalBaker
         try
         {
             var m = GlbReader.Read(glbFull);
-            var rig = HafModelRig.Build(m, temp);
+            var rig = HafModelRig.Build(m, temp, forFactory: true);
             root = rig.Root;
             if (rig.SkinnedMeshes == 0) { error = "the GLB rig has no skinned mesh"; return null; }
             float longest = MeasureLongestAxis(root);
@@ -1274,9 +1278,28 @@ public static class UniversalBaker
             DeleteGlbRigAssets(animDir);   // a previous bake's rig assets under anim/ go first (the FBX route's .fbx goes after the import, by the caller)
             int n = 0;
             foreach (var mesh in seen) { mesh.hideFlags = HideFlags.None; AssetDatabase.CreateAsset(mesh, animDir + "/" + name + "_rigmesh" + (n++) + ".asset"); meshes.Add(mesh); }
-            var plain = new Material(Shader.Find("Standard")) { name = name + "_rigmat" };
-            AssetDatabase.CreateAsset(plain, animDir + "/" + name + "_rigmat.mat");
-            foreach (var r in root.GetComponentsInChildren<Renderer>(true)) r.sharedMaterials = Enumerable.Repeat(plain, Math.Max(1, r.sharedMaterials.Length)).ToArray();
+            // Atlas rects are selected by the exported material names, which may have a different order from the
+            // original extraction. Persist a plain material per source identity, retaining each renderer's slot order.
+            var plainOf = new Dictionary<Material, Material>();
+            foreach (var r in root.GetComponentsInChildren<Renderer>(true))
+            {
+                var slots = r.sharedMaterials;
+                for (int si = 0; si < slots.Length; si++)
+                {
+                    var source = slots[si];
+                    if (!plainOf.TryGetValue(source, out var plain))
+                    {
+                        plain = new Material(Shader.Find("Standard")) { name = source.name };
+                        string materialPath = animDir + "/" + name + "_rigmat" + plainOf.Count + ".mat";
+                        AssetDatabase.CreateAsset(plain, materialPath);
+                        // CreateAsset makes Unity's main-asset name follow the filename; restore the material identity.
+                        plain.name = source.name; EditorUtility.SetDirty(plain);
+                        plainOf[source] = plain;
+                    }
+                    slots[si] = plain;
+                }
+                r.sharedMaterials = slots;
+            }
             foreach (var tr in root.GetComponentsInChildren<Transform>(true)) tr.gameObject.hideFlags = HideFlags.None;
             root.name = name + "_anim";
             if (root.GetComponent<Animator>() == null) root.AddComponent<Animator>();
@@ -1288,9 +1311,11 @@ public static class UniversalBaker
                 if (ci < 0) { error = "the GLB has no animation named '" + action + "' for the role '" + role + "' (it carries: " + string.Join(", ", rig.ClipNames) + ")"; return null; }
                 var clip = rig.Clips[ci];
                 if (!used.Add(clip)) { var dup = UnityEngine.Object.Instantiate(clip); dup.name = clip.name; temp.Add(dup); clip = dup; }   // two roles on one action: a copy each (a clip is one container's sub-asset)
+                // The SDK skips every asset name beginning with underscore, including a legitimate source action.
+                if (clip.name.StartsWith("_", StringComparison.Ordinal)) clip.name = "HAF" + clip.name;
                 clip.legacy = false; clip.hideFlags = HideFlags.None;
                 var container = new AnimationClip { name = "_" + name + "_" + role };
-                AssetDatabase.CreateAsset(container, animDir + "/" + name + "_Clip_" + role + ".asset");
+                AssetDatabase.CreateAsset(container, animDir + "/_" + name + "_Clip_" + role + ".asset");
                 AssetDatabase.AddObjectToAsset(clip, container);
                 clipByRole[role] = container;
             }

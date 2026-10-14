@@ -1658,6 +1658,23 @@ frames of held pose (each clip is rebased on its animation's first key); the Lab
 files when it writes). Owed: the row's run in Unity, then the in-game check of each model
 playing its roles, then the default.
 
+Review of PR #170 (2026-10-14): `tools/riganim_unity_import_drill.sh` runs the real Factory GLB import in an
+isolated Unity project. Five fixtures check exact bone names (no picker-only `#index` suffix), 125-byte action names,
+action names starting with `_`, independently persisted role subassets, primary/movement previews, translation scaling,
+and zero-based clip times. A two-material fixture deliberately reverses the material order and samples the atlas:
+the blue submesh stays blue and the red submesh stays red after saving/reimporting the materials. The clip container's
+asset filename starts with `_`, so Unity cannot rename it into a playable empty clip; previews select the subasset by
+identity instead of name. A playable action beginning with `_` gets a non-reserved Unity clip alias, while its
+GLB/sidecar identifier stays intact. The ordinary picker keeps its indexed node paths and Blender track names.
+
+`RigAnimIntegrationRulesTests` checks that forced rebuilds or changed sources/tools retry a cached Blender fallback,
+sidecars round-trip full action IDs (tabs/newlines included; old TSV caches remain readable), and the JPEG acceptance
+exception ignores only explicitly re-encoded image indices without mutating the compared models. Other image bytes,
+names and all scene/animation fields remain compared. `fx_g_jpeg_declared_png` holds a JPEG whose source declares PNG:
+the wrapper's GLB still carries the correct JPEG type inferred from its bytes. JPEG wrapper files are checked against
+the already oracle-verified export with the source image payload substituted, and complete role/action mappings are
+compared. The Unity acceptance summary counts byte equality and image-excepted equality separately.
+
 Review of PR #169 added nine `fx_f_review_*` export fixtures. The four Unicode clip cases hold action ID ordering,
 Python lowercase (including dotted I, final sigma and Deseret), and code-point ordering to Blender. The four UV cases
 hold a texture naming `UVMap.001` to the **joined** mesh's layers (added by another mesh, already present, absent,

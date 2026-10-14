@@ -67,6 +67,9 @@
     <Compile Include="..\editor\BlenderMaterialExport.cs" Link="BlenderMaterialExport.cs" />
     <Compile Include="..\editor\BlenderChannelExport.cs" Link="BlenderChannelExport.cs" />
     <Compile Include="..\editor\BlenderGlbWriter.cs" Link="BlenderGlbWriter.cs" />
+    <Compile Include="..\editor\BlenderRigAnim.cs" Link="BlenderRigAnim.cs" />
+    <Compile Include="..\editor\BlenderRigExport.cs" Link="BlenderRigExport.cs" />
+    <Compile Include="..\editor\BlenderRigAnimInProcess.cs" Link="BlenderRigAnimInProcess.cs" />
     <Compile Include="..\editor\BlenderDeployInProcess.cs" Link="BlenderDeployInProcess.cs" />
     <Compile Include="..\editor\PyFloatRepr.cs" Link="PyFloatRepr.cs" />
     <Compile Include="..\tools\deploy-drill\ExportDrill.cs" Link="ExportDrill.cs" />
