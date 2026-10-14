@@ -43,7 +43,9 @@ for f in "$ROOT"/editor/*.cs; do printf '"%s/editor/%s"\n' "$WROOT" "$(basename 
 printf '"%s/tools/riganim-drill/UnityRigImportTests.cs"\n' "$WROOT" >> "$TMPD/compile.rsp"
 dotnet "$UNITY/DotNetSdkRoslyn/csc.dll" "@$WTMP/compile.rsp" > "$TMPD/compile.log" 2>&1; rc=$?
 [ "$rc" -eq 0 ] || { cat "$TMPD/compile.log"; echo 'FAIL — native rig import harness did not compile'; exit 1; }
-"$EDITOR" -batchmode -nographics -projectPath "$WTMP/project" -executeMethod UnityRigImportTests.Run -hafRigImportFixtures "$WTMP/fixtures" -hafRigImportOutput "$WTMP/result.txt" -logFile "$WTMP/unity.log"; rc=$?
+# the Vehicle Lab's saved recipes (the window's rig arguments against the recipe reader's): the ENCReload project's, when present
+RECIPES="${HAF_UNITY_PROJECT:-C:/Repo/ENCReload}/Assets/FactorySource/VehicleLab/Recipes"; [ -d "$RECIPES" ] || RECIPES=""
+"$EDITOR" -batchmode -nographics -projectPath "$WTMP/project" -executeMethod UnityRigImportTests.Run -hafRigImportFixtures "$WTMP/fixtures" -hafRigImportOutput "$WTMP/result.txt" -hafRecipes "$(cygpath -m "$RECIPES" 2>/dev/null || echo "$RECIPES")" -logFile "$WTMP/unity.log"; rc=$?
 [ -f "$TMPD/result.txt" ] || { tail -30 "$TMPD/unity.log"; echo 'FAIL — Unity did not execute the rig import regressions'; exit 1; }
 cat "$TMPD/result.txt"
 [ "$rc" -eq 0 ] && grep -q '^TOTAL failed 0' "$TMPD/result.txt" || { echo "FAIL — native Unity rig import regressions (rc=$rc)"; exit 1; }

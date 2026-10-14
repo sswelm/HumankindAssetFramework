@@ -85,7 +85,10 @@ for i in range(4):
     chunks.append(compile("\n" * pad + text, script, "exec"))   # the line numbers of a traceback stay the script's
 
 
-def h32(v): return struct.pack(">f", float(v)).hex()
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import scene_rows   # noqa: E402
+from scene_rows import h32, hv, hm, sha, f32, fcurves_of, dump, dump_image   # noqa: E402
+scene_rows.KEYS = KEYS
 
 
 # The export step (step (f)): the shipped editor/Tools~/rig_anim_glb.py beside rig_anim.py - one export, one oracle for the
@@ -101,111 +104,6 @@ def export_glb(g, path):
     if died is not None:
         return lines + ["XDIES\t%s" % died]
     return lines + ["X\t%s" % r for r in glb_rows(path)]
-
-
-def hv(xs): return "\t".join(h32(x) for x in xs)
-
-
-def hm(m): return "\t".join(h32(m[r][c]) for r in range(4) for c in range(4))
-
-
-def sha(b): return hashlib.sha256(b).hexdigest()
-
-
-def f32(a): return np.asarray(a, dtype=np.float32).tobytes()
-
-
-def fcurves_of(action):
-    """Every fcurve of a (Blender 5 slotted) action, with its owning collection - the script's all_fcurve_owners."""
-    if getattr(action, "fcurves", None) is not None and len(action.fcurves):
-        return list(action.fcurves)
-    out = []
-    for layer in getattr(action, "layers", []):
-        for strip in layer.strips:
-            for cb in getattr(strip, "channelbags", []):
-                out.extend(list(cb.fcurves))
-    return out
-
-
-def dump(n):
-    rows = []
-    sc = bpy.context.scene
-    arm = next((o for o in sc.objects if o.type == 'ARMATURE'), None)
-    rows.append("SCENE\t%d\t%d\t%d\t%d\t%s" % (n, sc.frame_start, sc.frame_end, sc.frame_current, arm.data.pose_position if arm else "-"))
-    for o in sc.objects:
-        ad = o.animation_data
-        act = ad.action.name if (ad and ad.action) else "-"
-        slot = "-"
-        if ad and ad.action and getattr(ad, "action_slot", None) is not None:
-            slot = ad.action_slot.identifier
-        rows.append("OBJ\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s" % (
-            n, o.name, o.type, o.parent.name if o.parent else "-", o.parent_type, o.parent_bone or "-",
-            o.data.name if o.data else "-", act, slot, hm(o.matrix_world), hm(o.matrix_parent_inverse)))
-        if o.type == 'MESH':
-            me = o.data
-            pos = np.empty(len(me.vertices) * 3, dtype=np.float32); me.vertices.foreach_get("co", pos)
-            lv = np.empty(len(me.loops), dtype=np.int32); me.loops.foreach_get("vertex_index", lv)
-            ps = np.empty(len(me.polygons), dtype=np.int32); me.polygons.foreach_get("loop_start", ps)
-            pt = np.empty(len(me.polygons), dtype=np.int32); me.polygons.foreach_get("loop_total", pt)
-            mi = np.empty(len(me.polygons), dtype=np.int32); me.polygons.foreach_get("material_index", mi)
-            uv = "-"
-            if me.uv_layers.active is not None:
-                u = np.empty(len(me.loops) * 2, dtype=np.float32); me.uv_layers.active.data.foreach_get("uv", u); uv = sha(u.tobytes())
-            layers = []
-            for l in me.uv_layers:
-                u = np.empty(len(me.loops) * 2, dtype=np.float32); l.data.foreach_get("uv", u); layers.append("%s:%s" % (l.name, sha(u.tobytes())))
-            rows.append("MESH\t%d\t%s\t%d\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s" % (
-                n, o.name, len(me.vertices), len(me.polygons), len(me.loops), sha(pos.tobytes()), sha(lv.astype("<i4").tobytes()),
-                sha(ps.astype("<i4").tobytes() + pt.astype("<i4").tobytes()), sha(mi.astype("<i4").tobytes()), uv,
-                ";".join(m.name if m else "(none)" for m in me.materials) or "-",
-                ";".join(g.name for g in o.vertex_groups) or "-",
-                ";".join("%s:%s:%s" % (md.type, md.name, getattr(md, "object", None).name if getattr(md, "object", None) else "-") for md in o.modifiers) or "-",
-                ";".join(layers) or "-"))
-            if len(o.vertex_groups):
-                per = {g.index: [] for g in o.vertex_groups}
-                for v in me.vertices:
-                    for ge in v.groups:
-                        if ge.group in per:
-                            per[ge.group].append((v.index, ge.weight))
-                for g in o.vertex_groups:
-                    lst = per[g.index]
-                    b = b"".join(struct.pack("<If", i, w) for i, w in lst)
-                    rows.append("VG\t%d\t%s\t%s\t%d\t%s" % (n, o.name, g.name, len(lst), sha(b)))
-    if arm is not None:
-        for i, b in enumerate(arm.data.bones):
-            rows.append("BONE\t%d\t%d\t%s\t%s\t%d\t%s\t%s" % (n, i, b.name, b.parent.name if b.parent else "-", 1 if b.use_deform else 0, h32(b.length), hm(b.matrix_local)))
-        for pb in arm.pose.bones:
-            rows.append("PB\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s" % (n, pb.name, pb.rotation_mode, hv(pb.location), hv(pb.rotation_quaternion), hv(pb.rotation_euler), hv(pb.scale), hm(pb.matrix_basis)))
-    for a in bpy.data.actions:
-        fcs = fcurves_of(a)
-        rows.append("ACT\t%d\t%s\t%s\t%d\t%d" % (n, a.name, hv(a.frame_range), len(fcs), len(getattr(a, "slots", []) or [])))
-        for fc in fcs:
-            k = len(fc.keyframe_points)
-            co = np.empty(k * 2, dtype=np.float32); fc.keyframe_points.foreach_get("co", co)
-            hl = np.empty(k * 2, dtype=np.float32); fc.keyframe_points.foreach_get("handle_left", hl)
-            hr = np.empty(k * 2, dtype=np.float32); fc.keyframe_points.foreach_get("handle_right", hr)
-            meta = "|".join("%s/%s/%s/%s" % (kp.interpolation, kp.easing, kp.handle_left_type, kp.handle_right_type) for kp in fc.keyframe_points)
-            rows.append("FC\t%d\t%s\t%s\t%d\t%d\t%s\t%s" % (n, a.name, fc.data_path, fc.array_index, k, sha(co.tobytes()), sha(hl.tobytes() + hr.tobytes() + meta.encode("utf-8"))))
-            if KEYS:
-                for j, kp in enumerate(fc.keyframe_points):
-                    rows.append("K\t%d\t%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s" % (
-                        n, a.name, fc.data_path, fc.array_index, h32(co[2 * j]), h32(co[2 * j + 1]), h32(hl[2 * j]), h32(hl[2 * j + 1]),
-                        h32(hr[2 * j]), h32(hr[2 * j + 1]), kp.interpolation, kp.easing, kp.handle_left_type, kp.handle_right_type))
-    return rows
-
-
-def dump_image(n, path):
-    if not path or not os.path.isfile(path):
-        return []
-    b = open(path, "rb").read()
-    img = bpy.data.images.load(path)
-    try:
-        w, h = img.size
-        px = np.empty(w * h * img.channels, dtype=np.float32); img.pixels.foreach_get(px)
-        q = np.clip(np.rint(px * 255.0), 0, 255).astype(np.uint8)
-        return ["IMG\t%d\t%s\t%d\t%s\t%d\t%d\t%d\t%s" % (n, path, len(b), sha(b), w, h, img.channels, sha(q.tobytes()))]
-    finally:
-        bpy.data.images.remove(img)
 
 
 fails = 0
