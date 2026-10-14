@@ -203,7 +203,7 @@ public static class BlenderExport
         var v = new BlenderReduce.Result
         {
             VertexCount = r.VertexCount, FaceCount = kept, Positions = r.Positions, Edges = r.Edges, DefNr = r.DefNr, DefWeight = r.DefWeight,
-            Slots = r.Slots, SlotAlpha = r.SlotAlpha, Ratio = r.Ratio, Collapsed = r.Collapsed, Fallback = r.Fallback,
+            Slots = r.Slots, SlotAlpha = r.SlotAlpha, Ratio = r.Ratio, Collapsed = r.Collapsed, Fallback = r.Fallback, ActiveColor = r.ActiveColor,
             Faces = PerFace(r.Faces, 3), FaceMaterial = PerFace(r.FaceMaterial, 1), FaceSharp = PerFace(r.FaceSharp, 1), CustomNormal = PerFace(r.CustomNormal, 6),
         };
         foreach (var uv in r.Uv) v.Uv.Add(PerFace(uv, 6));
@@ -233,8 +233,11 @@ public static class BlenderExport
             bool hasMaterial = material >= 0 || vertexColor;   // the importer invents a material for a coloured primitive without one
             if (hasMaterial) noMaterials = false;
             if (decided) continue;
-            if (vertexColor) { plan.Add((0, material >= 0 && VertexAlphaWired(r.SlotAlpha[slot].mode, r.SlotAlpha[slot].cutoff, r.SlotAlpha[slot].factor))); decided = true; }   // the material's own vertex colour: RGB, or RGBA when its alpha is wired
-            else if (!hasMaterial) { plan.Add((0, true)); decided = true; }     // no material: the active (render) layer, with alpha
+            // the material's own vertex colour: its Color Attribute node names no layer, so the mesh's render colour index decides
+            // (primitive_extract.py: color_type "active"); a mesh without one - the join's result when the active object had no
+            // colours - leaves the material's vertex colour unmet, and the next material is looked at
+            if (vertexColor) { if (r.ActiveColor >= 0) { plan.Add((r.ActiveColor, material >= 0 && VertexAlphaWired(r.SlotAlpha[slot].mode, r.SlotAlpha[slot].cutoff, r.SlotAlpha[slot].factor))); decided = true; } }   // the material's own vertex colour: RGB, or RGBA when its alpha is wired
+            else if (!hasMaterial) { if (r.ActiveColor >= 0) plan.Add((r.ActiveColor, true)); decided = true; }     // no material: the active (render) layer, with alpha
         }
         if (!noMaterials && plan.Count == 0) plan.Add((-1, true));              // a forced COLOR_0 of 255s
         for (int layer = 0; layer < r.Colors.Count; layer++)

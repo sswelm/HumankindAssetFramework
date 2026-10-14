@@ -26,6 +26,7 @@ public static class BlenderReduce
         public List<(string name, bool point, byte[] bytes)> Colors = new List<(string, bool, byte[])>();   // per colour layer: 4 bytes per corner, or per vertex for the point domain
         public List<(int material, bool vertexColor)> Slots = new List<(int, bool)>();   // the mesh's material slots: the glTF material (-1 none) and whether the importer built it WITH the vertex colour
         public List<(string mode, double cutoff, double factor)> SlotAlpha = new List<(string, double, double)>();   // per slot: the material's alphaMode, alphaCutoff and effective source alpha factor ("OPAQUE" without a material)
+        public int ActiveColor;                   // color_attributes.render_color_index: the layer the exporter's "active" vertex colour means (-1: none; the importer's is 0 with a layer)
         public float Ratio;                       // the modifier's ratio as stored (float32)
         public bool Collapsed;                    // false when the modifier would return the mesh untouched
         public string Fallback;                   // non-null: the mesh is outside this port; why

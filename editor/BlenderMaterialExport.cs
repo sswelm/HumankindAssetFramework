@@ -428,7 +428,8 @@ public static class BlenderMaterialExport
             if (ext["KHR_materials_sheen"] != null) throw new LeftException("KHR_materials_sheen (not measured yet)");
             if (ext["KHR_materials_anisotropy"] != null) throw new LeftException("KHR_materials_anisotropy (not measured yet)");
             // KHR_materials_ior: only beside specular, transmission or volume; a specular-glossiness material gets 1000
-            if (sg != null) { if (outExt["KHR_materials_specular"] != null) outExt["KHR_materials_ior"] = new JObject { ["ior"] = 1000.0 }; }
+            // ... as the Python int 1000 the exporter writes there (an Extension's values keep their type: BlenderGlbWriter)
+            if (sg != null) { if (outExt["KHR_materials_specular"] != null) outExt["KHR_materials_ior"] = new JObject { ["ior"] = 1000L }; }
             else if (ext["KHR_materials_ior"] is JObject io && outExt["KHR_materials_specular"] != null)
             {
                 float ior = (float)((double?)io["ior"] ?? 1.5);

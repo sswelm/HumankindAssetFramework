@@ -39,7 +39,8 @@
 // staticParts matching against supplementary Unicode names, and (stage 4) the weld of a one-material, one-bone mesh
 // (bmesh remove_doubles), a socket sorting before its parent (the script exits with a message read from a freed edit
 // bone), a no-op root bone with an object hung from it. Held to Blender by tools/riganim_drill.sh (--stages 4), every
-// row of every stage; the albedo PNG by its dimensions (its bytes are Blender's encoder's).
+// row of every stage; the albedo PNG by its dimensions (its bytes are Blender's encoder's). BlenderRigExport.cs writes
+// the stage 4 scene as the GLB Blender's glTF exporter would (step (f)): `riganim.exe --export`.
 // Stage 4 rules read from Blender's sources (5.1): mesh_join.cc (the active object first, then scene order; the
 // vertices through the active's inverse world, blender::math::transform_points, which leaves them untouched when the
 // matrix is within 1e-6 of the identity; materials by first appearance, vertex groups and UV layers by name, custom
@@ -240,6 +241,8 @@ public static class BlenderRigAnim
         public bool[] FaceSharp;                  // sharp_face per face
         public short[] CustomNormal;              // 2 per corner, or null (no normals)
         public List<float[]> UvAll = new List<float[]>();   // every UV layer: UVMap, UVMap.001, ... (Uv is the first)
+        public List<(string name, bool point, byte[] bytes)> Colors = new List<(string, bool, byte[])>();   // the colour layers (BlenderReduce's), for the export
+        public int ActiveColor = -1;              // color_attributes.render_color_index: 0 when the importer made a layer, kept from the active object through the join
     }
 
     public sealed class KeyData
@@ -293,6 +296,8 @@ public static class BlenderRigAnim
         public BlenderNames.Result Names; public VehicleProbe.ImportRig Rig; public HafModel Model;
         public readonly List<string> Logs4 = new List<string>();      // the RIGANIM lines of stage 4 (RunStage4), in order
         public (string path, int w, int h) Albedo;                    // stage 4: the albedo written (its dimensions), or path null
+        public int AlbedoImage = -1;                                  // stage 4: the glTF image the albedo came from
+        public string AlbedoBlenderName;                              // ... and the Blender image's name (several glTF images can alias one)
         public List<ActionData> AllActs = new List<ActionData>();   // stage 3's all_acts: the primary and the role clips (rebaked when folded)
     }
 
@@ -336,7 +341,7 @@ public static class BlenderRigAnim
             if (why != null) { s.Fallback = "'" + o.Name + "': " + why; return s; }
             var r = BlenderReduce.Reduce(m, o.MeshNode, 1f, names, 0, null, mergeUvs: false);
             if (r.Fallback != null) { s.Fallback = "'" + o.Name + "': " + r.Fallback; return s; }
-            var d = new MeshData { Vertices = r.VertexCount, Faces = r.Faces, Positions = r.Positions, FaceMaterial = r.FaceMaterial, Uv = r.Uv.Count > 0 ? r.Uv[0] : null, DefNr = r.DefNr, DefWeight = r.DefWeight, Edges = r.Edges, FaceSharp = r.FaceSharp, CustomNormal = r.CustomNormal, UvAll = r.Uv };
+            var d = new MeshData { Vertices = r.VertexCount, Faces = r.Faces, Positions = r.Positions, FaceMaterial = r.FaceMaterial, Uv = r.Uv.Count > 0 ? r.Uv[0] : null, DefNr = r.DefNr, DefWeight = r.DefWeight, Edges = r.Edges, FaceSharp = r.FaceSharp, CustomNormal = r.CustomNormal, UvAll = r.Uv, Colors = r.Colors, ActiveColor = r.Colors.Count > 0 ? 0 : -1 };
             // mesh.py: slots only when a primitive has a material or COLOR_0; else none - and the script drops the object
             bool hasMaterials = mesh.Primitives.Exists(p => p.Material >= 0) || mesh.Primitives.Exists(p => p.Colors != null);
             if (hasMaterials)
@@ -744,13 +749,13 @@ public static class BlenderRigAnim
 
     static readonly Regex SliceRe = new Regex(@"^(.*)\[([0-9]+)\.\.([0-9]+)(?:/([0-9]+))?\]$", RegexOptions.Singleline);
 
-    static List<BlenderDeploy.ArmKey> ToArm(List<KeyData> keys) => keys.Select(k => new BlenderDeploy.ArmKey { Frame = k.Frame, Value = k.Value, LeftX = k.LeftX, LeftY = k.LeftY, RightX = k.RightX, RightY = k.RightY, Interpolation = k.Interpolation }).ToList();
+    internal static List<BlenderDeploy.ArmKey> ToArm(List<KeyData> keys) => keys.Select(k => new BlenderDeploy.ArmKey { Frame = k.Frame, Value = k.Value, LeftX = k.LeftX, LeftY = k.LeftY, RightX = k.RightX, RightY = k.RightY, Interpolation = k.Interpolation }).ToList();
     static void FromArm(List<BlenderDeploy.ArmKey> arm, List<KeyData> keys)
     {
         keys.Clear();
         foreach (var k in arm) keys.Add(new KeyData { Frame = k.Frame, Value = k.Value, LeftX = k.LeftX, LeftY = k.LeftY, RightX = k.RightX, RightY = k.RightY, Interpolation = k.Interpolation });
     }
-    static float EvaluateCurve(List<KeyData> keys, float frame) => BlenderFCurve.Evaluate(ToArm(keys), frame, constant: true);
+    internal static float EvaluateCurve(List<KeyData> keys, float frame) => BlenderFCurve.Evaluate(ToArm(keys), frame, constant: true);
     // Python compares Unicode code points, while .NET ordinal comparison compares UTF-16 code units.
     static readonly IComparer<string> PyStringOrder = Comparer<string>.Create((a, b) =>
     {
@@ -1399,7 +1404,7 @@ public static class BlenderRigAnim
 
     /// <summary>The bones of an armature in `armature.bones` order from the parent map: depth first, a parent before its
     /// children, the children in the given order.</summary>
-    static List<int> DepthFirst(IEnumerable<int> bones, Dictionary<int, int> parent)
+    internal static List<int> DepthFirst(IEnumerable<int> bones, Dictionary<int, int> parent)
     {
         var order = bones.ToList(); var children = order.ToDictionary(b => b, b => new List<int>()); var roots = new List<int>();
         foreach (int b in order) { if (parent.TryGetValue(b, out int p) && p >= 0 && children.ContainsKey(p)) children[p].Add(b); else roots.Add(b); }
@@ -1524,7 +1529,7 @@ public static class BlenderRigAnim
                 if (size == null) { s.Fallback = "an albedo image whose size the header does not give"; return; }
                 string imgName = ImageName(s, image, out string trouble);
                 if (imgName == null) { s.Fallback = trouble; return; }
-                s.Albedo = (a.AlbedoOut, size.Value.w, size.Value.h);
+                s.Albedo = (a.AlbedoOut, size.Value.w, size.Value.h); s.AlbedoImage = image; s.AlbedoBlenderName = imgName;
                 s.Logs4.Add("RIGANIM albedo -> " + a.AlbedoOut + " (" + imgName + ")");
                 Note(s, "the albedo written");
             }
@@ -1557,6 +1562,31 @@ public static class BlenderRigAnim
             // the UV layers by name
             int numUv = order.Max(o => o.Mesh.UvAll.Count);
             for (int i = 0; i < numUv; i++) d.UvAll.Add(new float[2 * 3 * nf]);
+            // the colour layers: CustomData_merge_layout unites them by name (the active's first, then each other mesh's new
+            // ones); a mesh without a layer gets zeros - {0, 0, 0, 0} per corner (measured on fx_groups: the result's layer is
+            // allocated clear and a source's bytes copied only where it has the layer); a layer held per vertex by one mesh and
+            // per corner by another is left by name
+            if (order.Any(o => o.Mesh.Colors.Count > 0))
+            {
+                var layers = new List<(string name, bool point)>();
+                foreach (var o in order) foreach (var c in o.Mesh.Colors) if (!layers.Any(l => l.name == c.name)) layers.Add((c.name, c.point));
+                foreach (var (name, point) in layers)
+                {
+                    var bytes = new List<byte>();
+                    foreach (var o in order)
+                    {
+                        var have = o.Mesh.Colors.FirstOrDefault(c => c.name == name);
+                        if (have.name != null)
+                        {
+                            if (have.point != point) { s.Fallback = "the join unites a colour layer held per vertex with one held per corner"; return; }
+                            bytes.AddRange(have.bytes);
+                        }
+                        else for (int i = 0, n = 4 * (point ? o.Mesh.Vertices : o.Mesh.Faces.Length); i < n; i++) bytes.Add(0);
+                    }
+                    d.Colors.Add((name, point, bytes.ToArray()));
+                }
+                Note(s, "colour layers through the join" + (layers.Count > 0 && order.Any(o => o.Mesh.Colors.Count < layers.Count) ? " (a mesh without one: zeros)" : ""));
+            }
             bool anyNormals = order.Any(o => o.Mesh.CustomNormal != null);
             if (anyNormals) d.CustomNormal = new short[2 * 3 * nf];
             var edges = new List<int>();
@@ -1597,6 +1627,7 @@ public static class BlenderRigAnim
             d.Uv = active.Mesh.UvAll.Count > 0 ? d.UvAll[0] : null;   // the active's active UV layer, by its name
             if (active.Mesh.UvAll.Count == 0 && numUv > 0) Note(s, "the join's active object has no UV layer (no active layer on the result)");
             d.ArmatureModifier = active.Mesh.ArmatureModifier;
+            d.ActiveColor = active.Mesh.ActiveColor;   // the result is the active's mesh: its render colour index stays, a merged layer or not
             joined.Mesh = d;
             foreach (var o in order) if (o != active) { foreach (var c in s.Objects) if (c.Parent == o) { c.Parent = null; c.Dirty = true; } s.Objects.Remove(o); }
             Note(s, "meshes joined");
@@ -1920,7 +1951,7 @@ public static class BlenderRigAnim
     /// Blender image per path (images.load with check_existing). The textures of a material in MaterialTextureOrder's
     /// order (the extensions' after the standard ones). Null, with `trouble`, when no material the importer made uses the
     /// image.</summary>
-    static string ImageName(Stage1 s, int image, out string trouble)
+    internal static string ImageName(Stage1 s, int image, out string trouble)
     {
         var m = s.Model; var pool = new BlenderNames.NamePool();
         var created = new Dictionary<int, string>(); var byPath = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -1971,6 +2002,7 @@ public static class BlenderRigAnim
         BlenderDecimate.FaceNormalsUpdate(bm);
         var d = new BlenderDecimate.MeshData { CustomNormal = me.CustomNormal, DefNr = me.DefNr, DefWeight = me.DefWeight };
         foreach (var uv in me.UvAll) d.Uv.Add(uv);
+        foreach (var c in me.Colors) if (c.point) d.PointColor.Add(c.bytes); else d.CornerColor.Add(c.bytes);
         if (!BlenderDecimate.WouldRun(bm.TotFace, ratio)) return;
         BlenderDecimate.Collapse(bm, ratio, d);
         var newIndex = new int[bm.VertCount]; int count = 0;
@@ -2006,6 +2038,28 @@ public static class BlenderRigAnim
         BlenderReduce.MergeUvsForApply(count, faces, uvOut);
         var edges = new List<int>();
         for (int e = 0; e < bm.EdgeCount; e++) if (bm.EAlive[e]) { edges.Add(newIndex[bm.EV1[e]]); edges.Add(newIndex[bm.EV2[e]]); }
+        var colorsOut = new List<(string name, bool point, byte[] bytes)>(); int cornerLayer = 0, pointLayer = 0;
+        foreach (var c in me.Colors)
+        {
+            if (c.point)
+            {
+                var src = d.PointColor[pointLayer++]; var outb = new byte[4 * count];
+                for (int v = 0; v < bm.VertCount; v++) if (bm.VAlive[v]) Array.Copy(src, 4 * v, outb, 4 * newIndex[v], 4);
+                colorsOut.Add((c.name, true, outb));
+            }
+            else
+            {
+                var src = d.CornerColor[cornerLayer++]; var outb = new byte[4 * 3 * bm.TotFace]; int o = 0;
+                for (int f = 0; f < bm.FaceCount; f++)
+                {
+                    if (!bm.FAlive[f]) continue;
+                    int l = bm.FLFirst[f];
+                    for (int k = 0; k < 3; k++) { Array.Copy(src, 4 * l, outb, 4 * o, 4); o++; l = bm.LNext[l]; }
+                }
+                colorsOut.Add((c.name, false, outb));
+            }
+        }
+        me.Colors = colorsOut;
         me.Vertices = count; me.Positions = pos; me.Faces = faces; me.FaceMaterial = fmat; me.FaceSharp = fsharp; me.UvAll = uvOut; me.Uv = uvOut.Count > 0 ? uvOut[0] : null; me.CustomNormal = cnOut; me.DefNr = defNr; me.DefWeight = defW; me.Edges = edges.ToArray();
     }
 
