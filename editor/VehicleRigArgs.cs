@@ -10,6 +10,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.IO;
 using Newtonsoft.Json.Linq;
 
 /// <summary>Every value the rig command line is made of, as the window holds it after a recipe load.</summary>
@@ -149,6 +150,7 @@ public static class VehicleRigArgLine
     public static Recipe RigArgsFromRecipe(string json)
     {
         var o = JObject.Parse(json);
+        if (!(o["parts"] is JArray)) throw new InvalidDataException("not a Vehicle Lab recipe: parts must be an array");
         var r = new Recipe(); var a = r.args;
         a.srcFile = Str(o, "srcFile", ""); a.outGlb = Str(o, "outGlb", "");
         a.frames = Int(o, "frames", 0); a.axisChoice = Int(o, "axisChoice", 0); a.minVerts = Int(o, "minVerts", 0); a.degrees = Flt(o, "degrees", 0f);
@@ -192,10 +194,11 @@ public static class VehicleRigArgLine
     static List<RecipePart> Parts(JToken t)
     {
         var list = new List<RecipePart>();
-        if (!(t is JArray arr)) return list;
+        if (t == null || t.Type == JTokenType.Null) return list;
+        if (!(t is JArray arr)) throw new InvalidDataException("recipe parts must be an array");
         foreach (var item in arr)
         {
-            if (!(item is JObject p)) continue;
+            if (!(item is JObject p)) throw new InvalidDataException("a recipe part must be an object");
             var off = Vec(p, "offset", 0, 0, 0); var sc = Vec(p, "scale", 1, 1, 1);
             list.Add(new RecipePart { name = Str(p, "name", "") ?? "", role = Int(p, "role", 0), offX = off[0], offY = off[1], offZ = off[2], scaleX = sc[0], scaleY = sc[1], scaleZ = sc[2] });
         }

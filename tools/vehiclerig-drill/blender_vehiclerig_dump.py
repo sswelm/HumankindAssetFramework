@@ -21,9 +21,10 @@ is read back row by row (tools/deploy-drill/glb_rows.py, the X rows). The stages
 Rows: the scene rows of tools/riganim-drill/scene_rows.py (SCENE, OBJ, MESH, VG, BONE, PB, ACT, FC, K under VEHICLERIG_KEYS=1; the FC
 and K rows carry the fcurve's SLOT after the action - a slotted action repeats a data path per slot),
 and  JOB <key> / STAGE <n> / LOG <n> <a VEHICLE line the stage printed, in order; the timing lines left out> /
-EXIT <n> <code> / DIES <n> <exception> / X <a GLB row> / XDIES <why no GLB> / DONE <key>.
+EXIT <n> <code> / DIES <n> <exception> / X <a GLB row> / XDIES <why no GLB> /
+EVIDENCE <key> <preceding row count> <sha256 of UTF-8 LF rows, including final newline> / DONE <key>.
 """
-import bpy, sys, io, os, contextlib, traceback
+import bpy, sys, io, os, contextlib, traceback, hashlib
 
 sys.stdout.reconfigure(encoding="utf-8")
 args = sys.argv[sys.argv.index("--") + 1:]
@@ -80,7 +81,11 @@ for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
         continue
     t = line.split("\t")
     key = t[1]
-    print("JOB\t%s" % key, flush=True)
+    evidence = []
+    def emit(row):
+        evidence.append(row)
+        print(row)
+    emit("JOB\t%s" % key)
     saved = sys.argv
     try:
         safe = key.replace(":", "_")
@@ -104,21 +109,23 @@ for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
                 died = "%s: %s" % (type(e).__name__, e)
             for l in out.getvalue().split("\n"):
                 if l.startswith("VEHICLE") and not l.startswith("VEHICLE timing:"):
-                    print("LOG\t%d\t%s" % (n, l))
+                    emit("LOG\t%d\t%s" % (n, l))
             if code_exit is not None:
-                print("EXIT\t%d\t%s" % (n, code_exit))
+                emit("EXIT\t%d\t%s" % (n, code_exit))
                 exported = code_exit == 0   # the fast path exports its own GLB and exits 0
                 break
             if died is not None:
-                print("DIES\t%d\t%s" % (n, died)); break
-            print("STAGE\t%d" % n)
+                emit("DIES\t%d\t%s" % (n, died)); break
+            emit("STAGE\t%d" % n)
             for r in dump(n):
-                print(r)
+                emit(r)
             if n == 5:
                 exported = True
         if exported:
             for r in export_rows(out_glb):
-                print(r)
+                emit(r)
+        digest = hashlib.sha256(("\n".join(evidence) + "\n").encode("utf-8")).hexdigest()
+        print("EVIDENCE\t%s\t%d\t%s" % (key, len(evidence), digest))
         print("DONE\t%s" % key, flush=True)
     except Exception as e:
         traceback.print_exc()

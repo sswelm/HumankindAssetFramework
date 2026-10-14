@@ -17,6 +17,7 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using Newtonsoft.Json.Linq;
 
 public sealed class VehicleRigDump
 {
@@ -45,7 +46,7 @@ public sealed class VehicleRigDump
     static readonly Dictionary<string, int> Width = new Dictionary<string, int>(StringComparer.Ordinal)
     {
         { "JOB", 2 }, { "STAGE", 2 }, { "LOG", 3 }, { "SCENE", 6 }, { "OBJ", 42 }, { "MESH", 15 }, { "VG", 6 }, { "BONE", 23 },
-        { "PB", 33 }, { "ACT", 7 }, { "FC", 9 }, { "K", 16 }, { "EXIT", 3 }, { "DIES", 3 }, { "DONE", 2 }, { "FAIL", 3 },
+        { "PB", 33 }, { "ACT", 7 }, { "FC", 9 }, { "K", 16 }, { "EXIT", 3 }, { "DIES", 3 }, { "DONE", 2 }, { "FAIL", 3 }, { "EVIDENCE", 4 },
     };
     static readonly HashSet<string> ExportKinds = new HashSet<string>(new[] { "GLB", "SCENE", "NODE", "SKIN", "IBM", "MESH", "PRIM", "MAT", "IMG", "TEX", "SAMP", "ANIM", "CHAN" }, StringComparer.Ordinal);
 
@@ -83,7 +84,7 @@ public sealed class VehicleRigDump
             }
             else
             {
-                if (exportStarted && t[0] != "DONE") throw new InvalidDataException("a stage row follows the export rows");
+                if (exportStarted && t[0] != "DONE" && t[0] != "EVIDENCE") throw new InvalidDataException("a stage row follows the export rows");
                 if (t[0] == "DONE") doneSeen = true;
             }
         }
@@ -122,7 +123,7 @@ public sealed class VehicleRigDump
         int current = 0;
         foreach (var t in rows)
         {
-            if (t[0] == "JOB" || t[0] == "DONE" || t[0] == "FAIL") continue;
+            if (t[0] == "JOB" || t[0] == "DONE" || t[0] == "FAIL" || t[0] == "EVIDENCE") continue;
             if (t[0] == "STAGE") { current = int.Parse(t[1], CultureInfo.InvariantCulture); continue; }
             int n = int.Parse(t[1], CultureInfo.InvariantCulture);
             if (t[0] == "LOG" || t[0] == "EXIT" || t[0] == "DIES")
@@ -244,9 +245,100 @@ public sealed class VehicleRigDump
         {
             if (d.ExportDied != null) throw new InvalidDataException("the export: " + d.ExportDied);
             if (d.ExportRows.Count == 0 || d.ExportRows[0][0] != "GLB") throw new InvalidDataException("the export: no GLB rows for a run that completed");
+            ValidateExport(d.ExportRows);
         }
         else if (d.ExportRows.Count > 0 || d.ExportDied != null) throw new InvalidDataException("export rows on a run that stopped");
+        var seals = all.Where(t => t[0] == "EVIDENCE").ToList();
+        if (seals.Count != 1 || all.Count < 3 || all[all.Count - 2] != seals[0] || seals[0][1] != d.Key)
+            throw new InvalidDataException("the dump must end with one matching EVIDENCE row before DONE");
+        var seal = seals[0];
+        string recorded = string.Join("\n", all.Take(all.Count - 2).Select(t => string.Join("\t", t))) + "\n";
+        if (!IsInt(seal[2]) || long.Parse(seal[2], CultureInfo.InvariantCulture) != all.Count - 2 || !IsHex(seal[3], 64) || Hash(Encoding.UTF8.GetBytes(recorded)) != seal[3])
+            throw new InvalidDataException("the evidence row count or checksum differs from the recorded job");
         return d;
+    }
+
+    // Validate the GLB row grammar and references as well as the complete-job checksum. The checksum prevents lost
+    // unreferenced rows; these checks still reject malformed evidence when its envelope is otherwise consistent.
+    static void ValidateExport(List<string[]> rows)
+    {
+        int Number(string text) { if (!int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out int n)) throw new InvalidDataException("the export has an invalid non-negative integer"); return n; }
+        void Need(bool ok, string why) { if (!ok) throw new InvalidDataException("the export: " + why); }
+        var indexed = new HashSet<string>(new[] { "NODE", "SKIN", "MESH", "MAT", "IMG", "TEX", "SAMP", "ANIM" });
+        var tables = indexed.ToDictionary(k => k, k => rows.Where(r => r[0] == k).ToList());
+        void Ref(string text, string kind, bool optional = false) { if (optional && text == "-") return; Need(Number(text) < tables[kind].Count, "invalid " + kind + " reference"); }
+        int[] Indices(string text) => text == "-" || text.Length == 0 ? new int[0] : text.Split(',').Select(Number).ToArray();
+        foreach (var r in rows)
+        {
+            int expected = r[0] == "GLB" ? 5 : r[0] == "SCENE" ? 3 : r[0] == "SKIN" ? 5 : r[0] == "IBM" ? 19 :
+                r[0] == "MESH" ? 4 : r[0] == "MAT" || r[0] == "SAMP" ? 3 : r[0] == "IMG" || r[0] == "TEX" || r[0] == "ANIM" ? 5 : r[0] == "CHAN" ? 12 : 0;
+            if (expected > 0) Need(r.Length == expected, r[0] + " row has an invalid field count");
+            if (r[0] == "NODE")
+            {
+                Need(r.Length >= 9, "NODE row has an invalid field count");
+                int at = 6;
+                foreach (int count in new[] { 3, 4, 3 })
+                {
+                    Need(at < r.Length, "NODE row has an invalid field count");
+                    if (r[at] == "-") at++; else { Need(at + count <= r.Length, "NODE row has an invalid field count"); Floats(r, at, count, "export NODE"); at += count; }
+                }
+                Need(at == r.Length, "NODE row has an invalid field count");
+            }
+            if (r[0] == "PRIM") Need(r.Length >= 8, "PRIM row has an invalid field count");
+        }
+        foreach (var table in tables) for (int i = 0; i < table.Value.Count; i++) Need(Number(table.Value[i][1]) == i, table.Key + " indices are not contiguous or unique");
+        Need(rows.Count(r => r[0] == "GLB") == 1, "must have exactly one GLB header");
+        var header = rows[0]; int bytes = Number(header[1]), json = Number(header[2]), bin = Number(header[3]);
+        Need(json > 0 && json % 4 == 0 && bin % 4 == 0 && ((long)bytes == 28L + json + bin || bin == 0 && (long)bytes == 20L + json) && IsHex(header[4], 64), "invalid GLB size or hash");
+        Need(rows.Any(r => r[0] == "SCENE"), "missing SCENE rows");
+        foreach (var r in rows)
+        {
+            switch (r[0])
+            {
+                case "SCENE": foreach (int i in Indices(r[2])) Ref(i.ToString(CultureInfo.InvariantCulture), "NODE"); break;
+                case "NODE": foreach (int i in Indices(r[3])) Ref(i.ToString(CultureInfo.InvariantCulture), "NODE"); Ref(r[4], "MESH", true); Ref(r[5], "SKIN", true); break;
+                case "SKIN":
+                    var joints = Indices(r[3]); Need(joints.Length > 0 && joints.Distinct().Count() == joints.Length, "invalid SKIN joints");
+                    foreach (int i in joints) Ref(i.ToString(CultureInfo.InvariantCulture), "NODE"); Ref(r[4], "NODE", true); break;
+                case "IBM": Ref(r[1], "SKIN"); Floats(r, 3, 16, "export IBM"); break;
+                case "MESH": Number(r[3]); break;
+                case "PRIM":
+                    Ref(r[1], "MESH"); Number(r[2]); Ref(r[3], "MAT", true); Need(Number(r[4]) <= 6, "invalid primitive mode");
+                    int indices = Number(r[5]); Need(indices == 0 && r[6] == "-" || IsHex(r[6], 64), "invalid index hash");
+                    var attributes = new HashSet<string>();
+                    for (int i = 7; i < r.Length; i++)
+                    {
+                        var a = r[i].Split(':'); Need(a.Length == 4 && attributes.Add(a[0]), "invalid or duplicate primitive attribute"); Number(a[1]);
+                        Need(System.Text.RegularExpressions.Regex.IsMatch(a[2], @"^(SCALAR|VEC[234]|MAT[234])/(5120|5121|5122|5123|5125|5126)n?$"), "invalid attribute type"); Need(IsHex(a[3], 64), "invalid attribute hash");
+                    }
+                    Need(attributes.Contains("POSITION"), "primitive has no POSITION attribute"); break;
+                case "MAT": case "SAMP": JObject.Parse(r[2]); break;
+                case "IMG": Need(IsHex(r[4], 64), "invalid image hash"); break;
+                case "TEX": Ref(r[2], "IMG", true); Ref(r[3], "SAMP", true); JObject.Parse(r[4]); break;
+                case "ANIM": Number(r[3]); Number(r[4]); break;
+                case "CHAN":
+                    Ref(r[1], "ANIM"); Number(r[2]); Ref(r[3], "NODE", true); Need(new[] { "translation", "rotation", "scale", "weights" }.Contains(r[4]), "invalid animation path");
+                    Need(Number(r[5]) < Number(tables["ANIM"][Number(r[1])][4]), "invalid animation sampler"); Need(new[] { "LINEAR", "STEP", "CUBICSPLINE" }.Contains(r[6]), "invalid interpolation");
+                    Need(Number(r[7]) > 0, "empty channel inputs"); Floats(r, 8, 2, "export CHAN"); Need(IsHex(r[10], 64) && IsHex(r[11], 64), "invalid channel hash"); break;
+            }
+        }
+        void Children(string parentKind, string childKind, int countField)
+        {
+            foreach (var parent in tables[parentKind])
+            {
+                var children = rows.Where(r => r[0] == childKind && r[1] == parent[1]).ToList();
+                Need(children.Count == Number(parent[countField]), "missing or duplicate " + childKind + " rows");
+                for (int i = 0; i < children.Count; i++) Need(Number(children[i][2]) == i, childKind + " indices are not contiguous or unique");
+            }
+        }
+        Children("MESH", "PRIM", 3); Children("ANIM", "CHAN", 3);
+        foreach (var skin in tables["SKIN"])
+        {
+            var ibms = rows.Where(r => r[0] == "IBM" && r[1] == skin[1]).ToList();
+            if (ibms.Count == 0) continue;   // inverseBindMatrices may be absent in a GLB; the job checksum detects their loss
+            Need(ibms.Count == Indices(skin[3]).Length, "missing or duplicate IBM rows");
+            for (int i = 0; i < ibms.Count; i++) Need(Number(ibms[i][2]) == i, "IBM indices are not contiguous or unique");
+        }
     }
 }
 
@@ -323,7 +415,7 @@ static class VehicleRigDrill
             var t = line.Split('\t');
             if (t[0] == "LEFT" && t.Length == 3) { leftByName.Add(t[1] + ": " + t[2]); continue; }
             if ((t[0] != "JOB" && t[0] != "FAST") || t.Length < 78 || t[1].Length == 0 || jobs.ContainsKey(t[1])) { Console.WriteLine("FAIL jobs: an invalid or duplicate job definition"); return 1; }
-            if ((t[0] == "FAST") != (t[2] == "rigfast")) { Console.WriteLine("FAIL jobs: a FAST line must run rigfast, a JOB line rig"); return 1; }
+            if (t[2] != (t[0] == "FAST" ? "rigfast" : "rig")) { Console.WriteLine("FAIL jobs: a FAST line must run rigfast, a JOB line rig"); return 1; }
             jobs.Add(t[1], (t[0] == "FAST", t.Skip(2).ToArray()));
         }
         if (jobs.Count == 0) { Console.WriteLine("FAIL jobs: no vehicle_rig jobs to read"); return 1; }

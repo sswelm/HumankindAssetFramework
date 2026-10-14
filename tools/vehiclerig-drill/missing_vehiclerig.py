@@ -5,7 +5,7 @@ groups, fcurves and GLB rows: every row kind present).
 
 usage: missing_vehiclerig.py <output directory> <jobs file> <dump>...
 """
-import os, sys
+import os, sys, hashlib
 
 out = sys.argv[1]
 os.makedirs(out, exist_ok=True)
@@ -38,7 +38,15 @@ def first(pred):
     raise RuntimeError("the dump has no row for this tamper")
 
 
-def write(name, rows):
+def write(name, rows, repair=True):
+    if repair:
+        rows = [r for r in rows if not r.startswith("EVIDENCE\t")]
+        # Keep structural tamper tests independent of the integrity check. Intentionally broken DONE framing is
+        # left broken; every otherwise framed mutant receives a matching seal and must fail its semantic check.
+        if sum(r.startswith("DONE\t") for r in rows) == 1 and rows[-1].startswith("DONE\t"):
+            body = rows[:-1]
+            digest = hashlib.sha256(("\n".join(body) + "\n").encode("utf-8")).hexdigest()
+            rows = body + ["EVIDENCE\t%s\t%d\t%s" % (rows[0].split("\t")[1], len(body), digest), rows[-1]]
     open(os.path.join(out, name + ".txt"), "w", encoding="utf-8", newline="\n").write("\n".join(rows) + "\n")
 
 
@@ -113,6 +121,22 @@ if any(l.startswith("K\t") for l in lines):
     write("K_bits", replace(i_k, "\t".join(k[:7] + [("0" if k[7][0] != "0" else "1") + k[7][1:]] + k[8:])))
     write("K_meta", replace(i_k, "\t".join(k[:12] + ["CHANGED"] + k[13:])))
     write("K_orphan", replace(i_k, "\t".join(k[:2] + ["no-such-action"] + k[3:])))
+# Integrity counterexamples: retain the oracle's seal so even complete-looking losses/edits are refused.
+i_evidence = first(lambda l: l.startswith("EVIDENCE\t"))
+write("EVIDENCE_missing", drop(i_evidence), False)
+fields = lines[i_evidence].split("\t")
+write("EVIDENCE_count", replace(i_evidence, "\t".join(fields[:2] + [str(int(fields[2]) + 1), fields[3]])), False)
+write("EVIDENCE_hash", replace(i_evidence, "\t".join(fields[:3] + ["0" * 64])), False)
+write("LOG_lost", drop(i_log), False)
+fields = lines[i_obj].split("\t"); fields[-1] = "00000000" if fields[-1] != "00000000" else "3f800000"
+write("OBJ_changed", replace(i_obj, "\t".join(fields)), False)
+write("X_header_only", [l for l in lines if not l.startswith("X\t") or l.startswith("X\tGLB\t")])
+for kind in ("NODE", "SKIN", "IBM", "MESH", "PRIM", "MAT", "IMG", "TEX", "SAMP", "ANIM", "CHAN"):
+    candidates = [i for i, line in enumerate(lines) if line.startswith("X\t" + kind + "\t")]
+    if candidates:
+        i = candidates[0]
+        write("X_short_" + kind, cut_last_field(i), repair=kind != "PRIM")
+        write("X_duplicate_" + kind, insert(i, lines[i]))
 for name in sorted(os.listdir(out)):
     if name.endswith(".txt") and name not in ("intact.txt", "jobs.txt", "jobs_exit.txt", "jobs_fast.txt"):
         print(name[:-4])

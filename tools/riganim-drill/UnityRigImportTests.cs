@@ -327,6 +327,17 @@ public static class UnityRigImportTests
         }
         Check("recipe args parity", agree == files.Length && files.Length > 0, agree + " of " + files.Length + " saved recipes: the window's rig arguments equal the recipe reader's");
     }
+    static void SparseRecipeParity()
+    {
+        var cases = new[] { "{\"srcFile\":\"C:/source.glb\",\"parts\":[]}",
+            "{\"srcFile\":\"C:/source.glb\",\"parts\":[{\"name\":\"P\",\"scale\":{\"x\":2}}],\"model2ScaleXYZ\":{\"x\":2}}" };
+        for (int i = 0; i < cases.Length; i++)
+        {
+            string path = Path.Combine(fixtures, "sparse_recipe_" + i + ".json"); File.WriteAllText(path, cases[i]);
+            string why = VehicleLabWindow.RecipeArgsDisagreement(path);
+            Check("sparse recipe parity " + i, why == null, why ?? "window and recipe reader agree");
+        }
+    }
     public static void Run()
     {
         fixtures = Arg("-hafRigImportFixtures"); output = Arg("-hafRigImportOutput");
@@ -336,7 +347,7 @@ public static class UnityRigImportTests
             foreach (var item in new[] { (fixture: "long", action: "Spin_" + new string('a', 120)), (fixture: "underscore", action: "_Spin") })
                 if (Import(item.fixture, item.action, out _) != null) Preview(item.fixture, item.action);
             Acceptance(); AcceptanceCounterexamples(); PoseStreams(); CrossRoute(); RootPlacement(); ToleranceCounterexamples(); WrongSkinWeights(); NonUniformParent(2); NonUniformParent(100);
-            RecipeArgsParity();
+            RecipeArgsParity(); SparseRecipeParity();
         }
         catch (Exception e) { Rows.Add("FAIL exception: " + e); failed++; }
         Rows.Add("TOTAL failed " + failed); File.WriteAllLines(output, Rows);

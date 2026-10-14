@@ -122,4 +122,10 @@ public class VehicleRigArgsTests
         var a = Sample(); a.namesFiles.Remove("cradles");
         Assert.Throws<ArgumentException>(() => VehicleRigArgLine.RigArgv(a));
     }
+    [Theory]
+    [InlineData("{}")][InlineData("{\"parts\":null}")][InlineData("{\"parts\":{}}")]
+    [InlineData("{\"parts\":[null]}")][InlineData("{\"parts\":[42]}")]
+    public void Invalid_part_lists_are_not_silently_changed_to_empty_recipes(string json)
+        => Assert.Throws<System.IO.InvalidDataException>(() => VehicleRigArgLine.RigArgsFromRecipe(json));
+
 }

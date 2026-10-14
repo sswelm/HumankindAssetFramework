@@ -45,7 +45,7 @@ OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -optimize+ -out:"$WTMP/VehicleRi
 if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/VehicleRigJobs.exe" ]; then echo "$OUT" | grep -E "error" | head -20; echo "FAIL — the vehicle_rig jobs writer did not compile (csc rc=$rc)"; exit 1; fi
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -optimize+ -out:"$WTMP/vehiclerig.exe" \
   -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" \
-  "$WROOT/tools/vehiclerig-drill/VehicleRigDrill.cs" 2>&1); rc=$?
+  -r:"$WTMP/Newtonsoft.Json.dll" "$WROOT/tools/vehiclerig-drill/VehicleRigDrill.cs" 2>&1); rc=$?
 if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/vehiclerig.exe" ]; then echo "$OUT" | grep -E "error" | head -20; echo "FAIL — the vehicle_rig drill did not compile (csc rc=$rc)"; exit 1; fi
 
 MAXMB="${VEHICLERIG_MAX_MB:-40}"
@@ -81,7 +81,7 @@ brc=0; for pid in "${BPIDS[@]}"; do wait "$pid" || brc=$?; done
 t1=$(date +%s)
 n_b=0
 for ((k = 0; k < JOBS; k++)); do
-  tr -d '\r' < "$TMPD/blender_raw_$k.txt" | grep -E "^(JOB|STAGE|LOG|SCENE|OBJ|MESH|VG|BONE|PB|ACT|FC|K|EXIT|DIES|DONE|FAIL|X|XDIES)	" > "$TMPD/dump_$k.txt"
+  tr -d '\r' < "$TMPD/blender_raw_$k.txt" | grep -E "^(JOB|STAGE|LOG|SCENE|OBJ|MESH|VG|BONE|PB|ACT|FC|K|EXIT|DIES|DONE|FAIL|X|XDIES|EVIDENCE)	" > "$TMPD/dump_$k.txt"
   n_b=$((n_b + $(grep -c "^DONE" "$TMPD/dump_$k.txt")))
 done
 if [ "$brc" -ne 0 ] || [ "$n_b" -ne "$n_jobs" ]; then
@@ -151,6 +151,10 @@ while IFS= read -r mode; do
     K_missing) reason="K rows";;
     K_bits|K_meta) reason="K rows do not match FC hashes";;
     K_orphan) reason="K row names no FC row";;
+    EVIDENCE_missing) reason="matching EVIDENCE row";;
+    EVIDENCE_count|EVIDENCE_hash|LOG_lost|OBJ_changed) reason="evidence row count or checksum";;
+    X_short_PRIM) reason="the export:|evidence row count or checksum";;
+    X_header_only|X_short_*|X_duplicate_*) reason="the export:|export (NODE|IBM|CHAN)|JsonReaderException";;
     *) echo "FAIL — vehicle_rig drill: the tamper '$mode' has no expected reason here (add it)"; exit 1;;
   esac
   jf="$WTMP/missing/jobs.txt"

@@ -46,7 +46,6 @@ static class VehicleRigJobs
                 var r = VehicleRigArgLine.RigArgsFromRecipe(File.ReadAllText(file));
                 var a = r.args;
                 if (string.IsNullOrWhiteSpace(a.srcFile)) { Console.WriteLine($"INVALID\t{key}\tno source model"); invalid++; continue; }
-                a.srcFile = a.srcFile.Trim().Replace('\\', '/');
                 if (!File.Exists(a.srcFile)) { Console.WriteLine($"UNAVAILABLE\t{key}\tsource missing: {a.srcFile}"); unavailable++; continue; }
                 if (a.srcFile2.Length > 0 && !File.Exists(a.srcFile2)) { Console.WriteLine($"UNAVAILABLE\t{key}\tsecond model missing: {a.srcFile2}"); unavailable++; continue; }
                 double mb = new FileInfo(a.srcFile).Length / 1048576.0 + (a.srcFile2.Length > 0 ? new FileInfo(a.srcFile2).Length / 1048576.0 : 0);

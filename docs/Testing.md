@@ -1658,6 +1658,17 @@ frames of held pose (each clip is rebased on its animation's first key); the Lab
 files when it writes). Owed: the row's run in Unity, then the in-game check of each model
 playing its roles, then the default.
 
+Review of PR #174 (2026-10-14): the new validator accepted truncated exports (even a GLB header alone),
+missing unreferenced objects/actions/logs, and malformed GLB records. Each completed or stopped job now ends in an
+`EVIDENCE <key> <row-count> <sha256>` row before `DONE`, sealing every preceding row (including logs and export rows,
+UTF-8 with LF and a final newline). Export rows also receive independent field, integer, float-bit, hash, JSON,
+index/reference and child-count checks. The negative drill repairs seals for semantic counterexamples and preserves
+them for corruption counterexamples, so the checksum cannot replace structural validation. Old unsealed dumps must
+be regenerated. When masking work paths for deterministic comparisons, regenerate the seal after masking too.
+The recipe reader rejects absent or malformed part lists as invalid, and the jobs writer retains the window's raw
+primary source-path spelling. JOB/FAST definitions must use exactly `rig`/`rigfast`. Focused unit regressions and
+native Unity recipe parity cover these contracts, including sparse recipes and partial vectors.
+
 **The vehicle_rig drill, step (a) of item (5) (2026-10-14).** `tools/vehiclerig_drill.sh` is the oracle the vehicle_rig
 ports will be held to, built as the rig_anim drill was. The jobs are the 24 saved Vehicle Lab recipes
 (`Assets/FactorySource/VehicleLab/Recipes`), each the argument vector a Generate hands Blender: `editor/VehicleRigArgs.cs`
