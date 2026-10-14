@@ -54,6 +54,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
@@ -750,6 +751,20 @@ public static class BlenderRigAnim
         foreach (var k in arm) keys.Add(new KeyData { Frame = k.Frame, Value = k.Value, LeftX = k.LeftX, LeftY = k.LeftY, RightX = k.RightX, RightY = k.RightY, Interpolation = k.Interpolation });
     }
     static float EvaluateCurve(List<KeyData> keys, float frame) => BlenderFCurve.Evaluate(ToArm(keys), frame, constant: true);
+    // Python compares Unicode code points, while .NET ordinal comparison compares UTF-16 code units.
+    static readonly IComparer<string> PyStringOrder = Comparer<string>.Create((a, b) =>
+    {
+        int i = 0, j = 0;
+        while (i < a.Length && j < b.Length)
+        {
+            int ca = char.IsSurrogatePair(a, i) ? char.ConvertToUtf32(a, i) : a[i];
+            int cb = char.IsSurrogatePair(b, j) ? char.ConvertToUtf32(b, j) : b[j];
+            if (ca != cb) return ca.CompareTo(cb);
+            i += ca > 0xffff ? 2 : 1; j += cb > 0xffff ? 2 : 1;
+        }
+        return (a.Length - i).CompareTo(b.Length - j);
+    });
+
     static string PyList(IEnumerable<string> items) => "[" + string.Join(", ", items.Select(BlenderDeploy.PyRepr)) + "]";
     static int ChannelIndex(string prop) => prop == "location" ? 0 : prop == "rotation_quaternion" ? 1 : 2;
     static float[][] CloneProps(float[][] p) => new[] { (float[])p[0].Clone(), (float[])p[1].Clone(), (float[])p[2].Clone() };
@@ -940,7 +955,7 @@ public static class BlenderRigAnim
             foreach (var fa in allActs)
             {
                 var owners = fa.Slots.SelectMany(sl => sl.FCurves.Select(fc => (sl, fc))).ToList();
-                var avail = owners.Select(x => FilterBone(x.fc)).Where(b => b != null).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList();
+                var avail = owners.Select(x => FilterBone(x.fc)).Where(b => b != null).Distinct().OrderBy(x => x, PyStringOrder).ToList();
                 int kept = 0, rem = 0;
                 foreach (var (sl, fc) in owners)
                 {
@@ -1062,7 +1077,7 @@ public static class BlenderRigAnim
                 }
                 if (transBones.Count > 0)
                 {
-                    var tnames = transBones.Select(b => names.BoneOfJoint[b]).OrderBy(x => x, StringComparer.Ordinal).ToList();
+                    var tnames = transBones.Select(b => names.BoneOfJoint[b]).OrderBy(x => x, PyStringOrder).ToList();
                     s.Logs3.Add("RIGANIM TRANSLATION-animated bone(s) in '" + oa.Name + "': " + PyList(tnames) + (a.KeepTranslations ? " (location keys KEPT — keepTranslations)" : " (location keys stripped below — set keepTranslations to keep)"));
                     Note(s, a.KeepTranslations ? "translation-animated bones, kept" : "translation-animated bones, stripped");
                     // rig_anim.py builds this set with the literal bone name, unlike keyframe_insert's escaped RNA
@@ -1136,8 +1151,8 @@ public static class BlenderRigAnim
                 }
             keepLocPaths.ExceptWith(poison);
             string BoneOfPath(string p) { int q = p.IndexOf('"'); return q < 0 ? null : p.Split('"')[1]; }
-            if (poison.Count > 0) { s.Logs3.Add("RIGANIM legacy keepTranslations: " + poison.Count + " path(s) REJECTED as decomposition garbage (NaN/huge): " + PyList(poison.Where(p => p.IndexOf('"') >= 0).Select(BoneOfPath).Distinct().OrderBy(x => x, StringComparer.Ordinal))); Note(s, "legacy keepTranslations: garbage rejected"); }
-            if (keepLocPaths.Count > 0) { s.Logs3.Add("RIGANIM legacy keepTranslations: " + keepLocPaths.Count + " varying location path(s) kept: " + PyList(keepLocPaths.Where(p => p.IndexOf('"') >= 0).Select(BoneOfPath).Distinct().OrderBy(x => x, StringComparer.Ordinal))); Note(s, "legacy keepTranslations: paths kept"); }
+            if (poison.Count > 0) { s.Logs3.Add("RIGANIM legacy keepTranslations: " + poison.Count + " path(s) REJECTED as decomposition garbage (NaN/huge): " + PyList(poison.Where(p => p.IndexOf('"') >= 0).Select(BoneOfPath).Distinct().OrderBy(x => x, PyStringOrder))); Note(s, "legacy keepTranslations: garbage rejected"); }
+            if (keepLocPaths.Count > 0) { s.Logs3.Add("RIGANIM legacy keepTranslations: " + keepLocPaths.Count + " varying location path(s) kept: " + PyList(keepLocPaths.Where(p => p.IndexOf('"') >= 0).Select(BoneOfPath).Distinct().OrderBy(x => x, PyStringOrder))); Note(s, "legacy keepTranslations: paths kept"); }
         }
 
         // ---- the strip
@@ -1648,14 +1663,18 @@ public static class BlenderRigAnim
             }
             // ---- the topological rename
             var order = new List<int>();
-            void Walk(int b) { order.Add(b); foreach (int c in ad.BoneNodes.Where(c => ad.Rest.Parent[c] == b).OrderBy(c => names.BoneOfJoint[c], StringComparer.Ordinal)) Walk(c); }
+            void Walk(int b) { order.Add(b); foreach (int c in ad.BoneNodes.Where(c => ad.Rest.Parent[c] == b).OrderBy(c => names.BoneOfJoint[c], PyStringOrder)) Walk(c); }
             foreach (int r in ad.BoneNodes.Where(b => ad.Rest.Parent[b] < 0 || !ad.BoneNodes.Contains(ad.Rest.Parent[b]))) Walk(r);
             string prefix = a.SocketSpecs.Count > 0 ? "A" : "b";
             var newName = new Dictionary<string, string>(StringComparer.Ordinal);
             for (int i = 0; i < order.Count; i++) newName[names.BoneOfJoint[order[i]]] = prefix + i.ToString("000", CultureInfo.InvariantCulture) + "_" + names.BoneOfJoint[order[i]];
+            // Bone RNA names are limited to 63 UTF-8 bytes and unique within this armature. Allocate in the same
+            // sequence as the setters: a requested name can collide with a bone that has not been renamed yet.
+            var boneNames = new HashSet<string>(ad.BoneNodes.Select(b => names.BoneOfJoint[b]), StringComparer.Ordinal);
             foreach (int b in order)
             {
-                string old = names.BoneOfJoint[b], nw = newName[old];
+                string old = names.BoneOfJoint[b]; boneNames.Remove(old);
+                string nw = BlenderNames.UniqueBone(boneNames, newName[old]);
                 names.BoneOfJoint[b] = nw;
                 foreach (var o in s.Objects)
                 {
@@ -1687,6 +1706,7 @@ public static class BlenderRigAnim
         {
             int made = 0; int nextNode = 1000000 + names.BoneOfJoint.Count;
             var newBones = new List<int>();
+            var socketNames = new HashSet<string>(ad.BoneNodes.Select(b => names.BoneOfJoint[b]), StringComparer.Ordinal);
             foreach (var (dn, ps, off) in a.SocketSpecs)
             {
                 string psl = PyLower(ps);
@@ -1700,9 +1720,11 @@ public static class BlenderRigAnim
                 string pn = names.BoneOfJoint[parent];
                 // the script exits here, but its message reads `_parent.name` AFTER mode_set('OBJECT') freed the edit bones: an
                 // empty name, garbage, or a UnicodeDecodeError in the caller (both seen) - undefined, so left by name
-                if (!(string.CompareOrdinal(dn, pn) > 0)) { s.Fallback = "socket '" + dn + "' sorts before its parent '" + pn + "': the script's exit message reads a freed edit bone (undefined)"; Note(s, "a socket sorting before its parent: the script's exit (left by name)"); return; }
+                if (!(PyStringOrder.Compare(dn, pn) > 0)) { s.Fallback = "socket '" + dn + "' sorts before its parent '" + pn + "': the script's exit message reads a freed edit bone (undefined)"; Note(s, "a socket sorting before its parent: the script's exit (left by name)"); return; }
+                // Lookup is literal, then new() bounds and uniquifies the name. Repeating an overlong request creates
+                // a second suffixed bone because the first bone's bounded name does not equal that request.
                 int sb = ad.BoneNodes.Concat(newBones).Where(b => names.BoneOfJoint[b] == dn).DefaultIfEmpty(-1).First();
-                if (sb < 0) { sb = nextNode++; names.BoneOfJoint[sb] = dn; newBones.Add(sb); } else Note(s, "a socket bone that already existed (its edit bone reused)");
+                if (sb < 0) { sb = nextNode++; names.BoneOfJoint[sb] = BlenderNames.UniqueBone(socketNames, dn); newBones.Add(sb); } else Note(s, "a socket bone that already existed (its edit bone reused)");
                 var ph = ad.Rest.EditHead[parent]; var pt = ad.Rest.EditTail[parent];
                 var dir = Sub3(pt, ph);
                 double len = VecLengthPy(dir);
@@ -1916,8 +1938,10 @@ public static class BlenderRigAnim
                 if (!string.IsNullOrEmpty(hi.Uri) && !hi.Uri.StartsWith("data:", StringComparison.Ordinal))
                 {
                     string file = Uri.UnescapeDataString(hi.Uri).Replace('\\', '/');
-                    if (byPath.TryGetValue(file, out var existing)) { created[img] = existing; if (img == image) return existing; continue; }
-                    n = pool.Unique(!string.IsNullOrEmpty(hi.Name) ? hi.Name : file.Substring(file.LastIndexOf('/') + 1)); byPath[file] = n;
+                    // images.load(check_existing=True) compares resolved file paths, so URI aliases share one image ID.
+                    string path = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(m.SourcePath) ?? "", file));
+                    if (byPath.TryGetValue(path, out var existing)) { created[img] = existing; if (img == image) return existing; continue; }
+                    n = pool.Unique(!string.IsNullOrEmpty(hi.Name) ? hi.Name : file.Substring(file.LastIndexOf('/') + 1)); byPath[path] = n;
                 }
                 else n = pool.Unique(!string.IsNullOrEmpty(hi.Name) ? hi.Name : "Image_" + img.ToString(CultureInfo.InvariantCulture));
                 created[img] = n;

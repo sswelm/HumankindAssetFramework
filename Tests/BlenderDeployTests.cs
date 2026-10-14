@@ -513,6 +513,18 @@ public class BlenderDeployTests
     }
 
     [Theory]
+    [InlineData("\u0085", "'\\x85'")]
+    [InlineData("\ue000", "'\\ue000'")]
+    [InlineData("\U000f0000", "'\\U000f0000'")]
+    [InlineData("\U00100000", "'\\U00100000'")]
+    [InlineData("é", "'é'")]
+    [InlineData("\U0001fae0", "'\U0001fae0'")]
+    public void Python_repr_escapes_control_and_private_use_names_but_keeps_printable_unicode(string name, string expected)
+    {
+        Assert.Equal(expected, BlenderDeploy.PyRepr(name));
+    }
+
+    [Theory]
     // Python's own `%g` on these doubles (printed by Python 3, as hex and string)
     [InlineData(0x41cdcd6500000000UL, "1e+09")]
     [InlineData(0x3ff0000000000000UL, "1")]

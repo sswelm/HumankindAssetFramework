@@ -1574,6 +1574,15 @@ transmission, volume, specular, anisotropy, sheen; `KHR_materials_pbrSpecularGlo
 Not fixtured, named: a no-op root bone with an object hung from it (unreachable), the weld (left), a volume thickness
 or sheen texture (read, no source has one).
 
+Review of PR #168 (2026-10-14): seventeen additional rig-animation fixture jobs hold bone-name allocation (the 63-byte
+UTF-8 limit, the exact-limit control, a sequential collision and a dormant role clip), socket names (long ASCII and
+Unicode names, a repeated overlong request), Python's Unicode code-point ordering (sibling prefixes and the socket's
+parent-first gate, translation and filter diagnostics), and external image identity (dot and parent-directory URI aliases, distinct-file control).
+Bone setters and new sockets use Blender's bounded, unique names; the script's dormant-curve patch still uses its
+literal requested-name map. Images are shared by resolved file path, as `images.load(check_existing=True)` does.
+The shared Python-name formatter also escapes private-use and control code points; six unit cases cover those
+spellings and verify that printable Unicode, including newer supplementary characters, remains literal.
+
 Review of PR #167 (2026-10-13): six additional stage 3 fixture jobs hold the bone-cap threshold and the conversion
 fold's keepTranslations paths. A stored nominal `0.001f` is slightly above Python's double `0.001` threshold: the
 weighted leaf must survive, with weights just below and above as controls. The fold builds its keep-path set from

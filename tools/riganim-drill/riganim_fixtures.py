@@ -755,6 +755,54 @@ def s4_join_parent(out):
     return r.write(out, "riganim_s4_join_parent")
 
 
+def s4_rename_name(out, name, suffix):
+    """Topological prefixes exercise bone-name truncation and sequential name collisions."""
+    r = Rig(); arm, root, child, skin, mat = rigged(r)
+    r.nodes[child]["name"] = name
+    return r.write(out, "riganim_s4_rename_" + suffix)
+
+
+def s4_unicode_siblings(out, translate=False):
+    """Python orders U+E000 before U+10000; UTF-16 ordinal comparison reverses those siblings."""
+    r = Rig(); arm = r.node("Armature"); root = r.node("Root", arm)
+    sup = r.node("\U00010000", root, translation=[0.0, 1.0, 0.0])
+    bmp = r.node("\ue000", root, translation=[1.0, 0.0, 0.0])
+    skin = r.skin("Skin", [root, sup, bmp], [ibm(0, 0, 0), ibm(0, 1, 0), ibm(1, 0, 0)])
+    mat = r.material("Paint")
+    r.node("Body", arm, mesh=r.mesh("body", material=mat, joints=[[(0, 1.0)]]), skin=skin)
+    a = r.anim("Spin")
+    if translate:
+        r.key(a, sup, "translation", [0.0, 1.0], [(0.0, 1.0, 0.0), (0.0, 1.2, 0.0)])
+        r.key(a, bmp, "translation", [0.0, 1.0], [(1.0, 0.0, 0.0), (1.1, 0.0, 0.0)])
+    else:
+        r.key(a, sup, "rotation", [0.0, 1.0], spin(2, "x", 0.25))
+    return r.write(out, "riganim_s4_unicode_siblings" + ("_translate" if translate else ""))
+
+
+def s4_image_paths(out, variant):
+    """The first mesh's second material loads an image; the second mesh supplies albedo. URI aliases share one image,
+    distinct files with the same image name must get two names. This checks the importer's check_existing behavior."""
+    r = Rig(); arm = r.node("Armature"); root = r.node("Root", arm)
+    child = r.node("Arm", root, translation=[0.0, 1.0, 0.0])
+    skin = r.skin("Skin", [root, child], [ibm(0, 0, 0), ibm(0, 1, 0)])
+    first = "image_" + variant + ".png"
+    with open(os.path.join(out, first), "wb") as f: f.write(png(4, 4, (200, 40, 40)))
+    if variant == "distinct":
+        second = "image_distinct_other.png"
+        with open(os.path.join(out, second), "wb") as f: f.write(png(4, 4, (40, 200, 40)))
+    elif variant == "dotdot":
+        os.makedirs(os.path.join(out, "nested"), exist_ok=True)
+        second = "nested/../" + first
+    else:
+        second = "./" + first
+    r.images = [{"name": "tex", "uri": first}, {"name": "tex", "uri": second}]
+    blank = r.material("Blank"); trim = r.material("Trim", texture=r.texture(0)); paint = r.material("Paint", texture=r.texture(1))
+    r.node("Zpad", arm, mesh=r.mesh("zpad", material=blank, joints=[[(0, 1.0)]], second=trim), skin=skin)
+    r.node("Body", arm, mesh=r.mesh("body", at=(2.0, 0.0, 0.0), material=paint, joints=[[(0, 0.5), (1, 0.5)]]), skin=skin)
+    a = r.anim("Spin"); r.key(a, child, "rotation", [0.0, 1.0], spin(2, "x", 0.25))
+    return r.write(out, "riganim_s4_image_paths_" + variant)
+
+
 def main(out):
     sys.stdout.reconfigure(encoding="utf-8")  # JOB records may contain non-ASCII staticParts on Windows
     os.makedirs(out, exist_ok=True)
@@ -870,6 +918,24 @@ def main(out):
     job("fx_s4_rot", plain, rot="10,90,-30")
     job("fx_s4_rot_multi", multi(out), clip="Longer", rot="0,0,180")
     job("fx_s4_rot_legacy", plain, rot="90,0,0", convert="0")
+    # PR #168 review: bone RNA setters cap names at 63 UTF-8 bytes and allocate collisions against live names.
+    for name, suffix in (("Arm", "plain"), ("Ar" + "x" * 56, "exact_limit"), ("Arm" + "x" * 60, "long_ascii"),
+                         ("é" * 31 + "X", "long_unicode"), ("b000_Root", "collision")):
+        job("fx_s4_rename_" + suffix, s4_rename_name(out, name, suffix), albedo="0")
+    job("fx_s4_rename_dormant", s4_rename_name(out, "Arm" + "x" * 60, "dormant"), roles="attack=Spin[0..2]", albedo="0")
+    job("fx_s4_unicode_siblings", s4_unicode_siblings(out), albedo="0")
+    utf = s4_unicode_siblings(out, translate=True)
+    job("fx_s4_unicode_fold", utf, keept="1", albedo="0")
+    job("EXIT:3:fx_s4_unicode_filter", utf, prefixes="NoBone", albedo="0")
+    job("fx_s4_unicode_legacy_keep", utf, convert="0", keept="1", roles="attack=Spin", albedo="0")
+    long_socket = "Canon" + "x" * 70
+    job("fx_s4_socket_long", plain, sockets=long_socket + "=Arm", albedo="0")
+    job("fx_s4_socket_long_twice", plain, sockets=long_socket + "=Arm;" + long_socket + "=Arm@0.1,0,0", albedo="0")
+    job("fx_s4_socket_long_unicode", plain, sockets="Canon" + "é" * 35 + "=Arm", albedo="0")
+    up = s4_rename_name(out, "\U00010000", "socket_unicode")
+    job("LEFT:fx_s4_socket_unicode_sort", up, sockets="\ue000=\U00010000", convert="0", albedo="0")
+    for variant in ("dot", "dotdot", "distinct"):
+        job("fx_s4_image_paths_" + variant, s4_image_paths(out, variant))
 
 
 if __name__ == "__main__":
