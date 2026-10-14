@@ -1923,21 +1923,27 @@ public static class BlenderDeploy
     }
 
     /// <summary>Python's repr of a str: single quotes, unless it holds one and no double quote; the backslash, the quote
-    /// and the C0 control characters escaped (a tab as backslash-t). Other characters Python holds unprintable are not
+    /// and control and private-use code points escaped (a tab as backslash-t). Other characters Python holds unprintable are not
     /// escaped here.</summary>
     internal static string PyRepr(string s)
     {
         bool dq = s.IndexOf('\'') >= 0 && s.IndexOf('"') < 0;
         char q = dq ? '"' : '\'';
         var b = new StringBuilder(); b.Append(q);
-        foreach (char c in s)
+        for (int i = 0; i < s.Length; i++)
         {
+            char c = s[i];
+            int size = char.IsSurrogatePair(s, i) ? 2 : 1;
+            int cp = size == 2 ? char.ConvertToUtf32(s, i) : c;
+            bool privateUse = (cp >= 0xe000 && cp <= 0xf8ff) || (cp >= 0xf0000 && cp <= 0xffffd) || (cp >= 0x100000 && cp <= 0x10fffd);
             if (c == '\\' || c == q) b.Append('\\').Append(c);
             else if (c == '\t') b.Append("\\t");
             else if (c == '\n') b.Append("\\n");
             else if (c == '\r') b.Append("\\r");
-            else if (c < 0x20 || c == 0x7f) b.Append("\\x").Append(((int)c).ToString("x2"));
-            else b.Append(c);
+            else if (cp < 0x20 || (cp >= 0x7f && cp <= 0x9f)) b.Append("\\x").Append(cp.ToString("x2"));
+            else if (privateUse) b.Append(cp <= 0xffff ? "\\u" : "\\U").Append(cp.ToString(cp <= 0xffff ? "x4" : "x8"));
+            else b.Append(s, i, size);
+            i += size - 1;
         }
         return b.Append(q).ToString();
     }

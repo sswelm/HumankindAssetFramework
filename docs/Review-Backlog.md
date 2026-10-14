@@ -310,8 +310,24 @@ visual rebake with mathutils' arithmetic, the residual's `%.6f`) and the cap; al
 3 (5.83 M rows), all 51 fixture jobs (6 new, `fx_s4_*`) checked: 48 equal at every compared stage, 3 left by name, 0 deferred; 14 planted defects caught (12 by the fixtures, 2 only by the registry: the inverse's arithmetic, the write-back's sign rule) and 10 value tampers refused (`docs/Testing.md`). Found: the depsgraph writes an evaluated value back to the
 original only where it differs (a zero of the other sign survives - TankDestroyers' wheels); the bone-parent fix of
 armature_apply takes the EVALUATED armature's parent matrix and tags nothing on the child (its evaluated copy keeps
-the old transform until something does). Next: (e) stage 4 - the albedo, the join, the weld, the material slots, the
-decimate, the rebind, the root collapse, the rename, the sockets, the rotation and scale fold, the placement.
+the old transform until something does).
+(e) stage 4, DONE 2026-10-14: the albedo (the image's name in the importer's creation order, its dimensions), the
+join (`mesh_join.cc` with `transform_points`' identity skip), the material slots, the decimate, the rebind, the root
+collapse, the topological rename (the stashed actions renamed by Blender too), the donor sockets, the rotation and scale
+fold (`transform_apply` with the angle wrap and the updated-parent parent inverse), the placement, the operators'
+depsgraph evaluations; all 23 dumped recipes equal through stage 4 (6.55 M rows), 96 fixture jobs (30 new): 89 equal,
+7 left by name, 0 deferred; 20 planted defects caught (20 by the fixtures, 0 only by the registry) and 10 value
+tampers refused (`docs/Testing.md`); the dump's MESH row gained every UV layer (name and hash). Left by name: the weld of a one-material, one-bone mesh, a socket sorting before its
+parent (the script's message is undefined - below). Next: (f) the GLB writer output - the stage 4 scene written as a
+.glb by BlenderGlbWriter (the FBX-free route), compared with what Blender's FBX carries; then (g) the Factory's
+animated path on the C# route (both routes configurable, Blender the default until the Unity acceptance gate), (h) a
+Bake Tests row.
+- **rig_anim.py's socket sort exit reads a freed edit bone** — OPEN (2026-10-14, found by the stage 4 fixtures). The
+  "would sort BEFORE its parent" error prints `_parent.name` after `bpy.ops.object.mode_set(mode='OBJECT')` has freed
+  the edit bones: four Blender runs of `fx_s4_socket_sort` printed the right name once, an empty name once, and twice
+  the dump died of a UnicodeDecodeError reading the garbage. The exit itself is right (code 1); only the message is
+  undefined. Fix: take `_parent.name` before leaving edit mode (one line, as the no-parent exit already does with its
+  bone list). The C# model leaves the case by name until then.
 - **A sliced attack/move role clip never keeps its translations** — OPEN (2026-10-13, found by the stage 3 fixtures).
   `rig_anim.py`'s legacy keepTranslations keys its role floor table by the clip's SOURCE name (`cn.split('[')[0]`), but a
   sliced role clip is the action `<source>_<role>_<f0>_<f1>_<step>`, which matches neither key, so `_keep_acts` is

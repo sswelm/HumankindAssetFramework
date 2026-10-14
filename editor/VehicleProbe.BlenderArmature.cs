@@ -147,7 +147,7 @@ public static partial class VehicleProbe
     /// edit bones given by head, tail (armature space) and roll - per bone, a parent before its children, its
     /// matrix_local (column-major), its offset matrix in the parent and its length. Shared by the importer's armatures
     /// and by the armature deploy_convert.py builds (BlenderDeploy).</summary>
-    internal static void RestFromEditBones(List<int> bones, Dictionary<int, List<int>> children, List<int> roots, Dictionary<int, float[]> head, Dictionary<int, float[]> tail, Dictionary<int, float> roll, Action<int, int, float[], float[], float> onBone)
+    internal static void RestFromEditBones(List<int> bones, Dictionary<int, List<int>> children, List<int> roots, Dictionary<int, float[]> head, Dictionary<int, float[]> tail, Dictionary<int, float> roll, Action<int, int, float[], float[], float> onBone, Dictionary<int, (float[] head, float[] tail, float roll)> localsOut = null)
     {
         // ---- ED_armature_from_edit, "avoid (almost) zero sized bones" (5.x elongates them; it deleted them before): an edit
         // bone no longer than 1e-6 gets its tail moved to 2e-6 from the head - along the bone, or along Z when it has no
@@ -203,6 +203,7 @@ public static partial class VehicleProbe
             float boneRoll = -BlenderTrig.Atan2f(difmat[2 * 3 + 0], difmat[2 * 3 + 2]);
             arm = WhereIsBone(bh, bt, boneRoll, parent >= 0 ? armMat[parent] : null, parent >= 0 ? bLength[parent] : 0f, out float len1, out var offs);
             armMat[b] = arm; bLength[b] = len1;
+            if (localsOut != null) localsOut[b] = (bh, bt, boneRoll);   // bone.head, bone.tail, bone.roll as the Bone holds them
             onBone(b, parent, arm, offs, len1);
             foreach (int c in children[b]) Finalize(c, b);
         }
@@ -395,7 +396,7 @@ public static partial class VehicleProbe
     /// (16 floats, M[col][row]) and length; returns arm_mat and the bone's length.</summary>
     static float[] WhereIsBone(float[] head, float[] tail, float roll, float[] parentArm, float parentLength, out float length) => WhereIsBone(head, tail, roll, parentArm, parentLength, out length, out _);
 
-    static float[] WhereIsBone(float[] head, float[] tail, float roll, float[] parentArm, float parentLength, out float length, out float[] offsBone)
+    internal static float[] WhereIsBone(float[] head, float[] tail, float roll, float[] parentArm, float parentLength, out float length, out float[] offsBone)
     {
         float vx = (float)(tail[0] - head[0]), vy = (float)(tail[1] - head[1]), vz = (float)(tail[2] - head[2]);
         length = Sqrtf((float)((float)((float)(vx * vx) + (float)(vy * vy)) + (float)(vz * vz)));

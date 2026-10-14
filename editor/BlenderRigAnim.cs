@@ -1,9 +1,11 @@
-// BlenderRigAnim.cs - rig_anim.py without Blender, stages 1 to 3 (step 4 of replacing Blender, steps (b) to (d),
-// 2026-10-12/13): what the script's first stage leaves in Blender's scene - the arguments as it parses them, the import,
+// BlenderRigAnim.cs - rig_anim.py without Blender, all four stages (step 4 of replacing Blender, steps (b) to (e),
+// 2026-10-12/14): what the script's first stage leaves in Blender's scene - the arguments as it parses them, the import,
 // the material-less drop, the armature lookup (and the exit without one), the contract marker, the object-animation clear
-// - what its second stage makes of that (RunStage2: the bone-parent -> skin bind, the wrapper flatten), and its third
+// - what its second stage makes of that (RunStage2: the bone-parent -> skin bind, the wrapper flatten), its third
 // (RunStage3: the bone cap, the clip resolution and slicing, the action prune, the bone filter, the rest fold and
-// rebake, the legacy translation rules, the strip and amplify, the frame range), row for row
+// rebake, the legacy translation rules, the strip and amplify, the frame range) and its fourth (RunStage4: the albedo
+// image, the join, the material slots, the decimate, the rebind, the root collapse, the topological rename, the donor
+// sockets, the rotation and scale fold, the placement - everything before the FBX export), row for row
 // and bit for bit as tools/riganim_drill.sh's dump records it (tools/riganim-drill/blender_riganim_dump.py: the RIGANIM
 // lines, the scene frame, every object with its matrices, every mesh's geometry and weights hashed, the bones at rest,
 // the pose at frame 1, every action's fcurves with their keys and handles). Built from the deploy and prep ports -
@@ -33,16 +35,31 @@
 // localNodeAnim (the REST hold and the round-trip sampling), several scenes, cameras, lights, mesh instancing,
 // KHR_materials_variants, KHR_animation_pointer, a CUBICSPLINE sampler, morph weights, a sampler without keys or with the
 // wrong component count, a skin whose joints are under no armature or that lists a joint twice, a mesh placed on a bone
-// node, every mesh BlenderReduce declines, and (stage 2) a bone-hung mesh whose datablock another object shares or
-// staticParts matching against supplementary Unicode names. Held to
-// Blender by tools/riganim_drill.sh (--stages 2), every row of both stages.
+// node, every mesh BlenderReduce declines, (stage 2) a bone-hung mesh whose datablock another object shares or
+// staticParts matching against supplementary Unicode names, and (stage 4) the weld of a one-material, one-bone mesh
+// (bmesh remove_doubles), a socket sorting before its parent (the script exits with a message read from a freed edit
+// bone), a no-op root bone with an object hung from it. Held to Blender by tools/riganim_drill.sh (--stages 4), every
+// row of every stage; the albedo PNG by its dimensions (its bytes are Blender's encoder's).
+// Stage 4 rules read from Blender's sources (5.1): mesh_join.cc (the active object first, then scene order; the
+// vertices through the active's inverse world, blender::math::transform_points, which leaves them untouched when the
+// matrix is within 1e-6 of the identity; materials by first appearance, vertex groups and UV layers by name, custom
+// normals and sharp flags copied); object_transform.cc (transform_apply: parents first, each object's rotation and
+// scale into its data - mesh_transform / armature_transform_recurse - its properties reset, its world recomputed from
+// the UPDATED parent, every child's properties re-decomposed and its parentinv rebuilt from the updated parent, the
+// ignore_parent_tx path); math_rotation_c.cc (Matrix.Rotation's angle wrapped to (-pi, pi] in float, then cosf/sinf);
+// anim_data.cc (a bone rename fixes the paths of the assigned action AND the NLA strips' stashed ones); the operators
+// evaluate the depsgraph before they run (the join, the modifier apply, the transform apply) and the scene is evaluated
+// once more at the end (a bone-hung object follows the bones the placement moved). The importer's image names:
+// MaterialTextureOrder.
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using Newtonsoft.Json.Linq;
 
 public static class BlenderRigAnim
 {
@@ -219,6 +236,10 @@ public static class BlenderRigAnim
         public List<string> Groups = new List<string>();      // the vertex groups, in order
         public List<int>[] DefNr; public List<float>[] DefWeight;   // per vertex: group index and weight, or null without groups
         public string ArmatureModifier;           // the armature object's name, or null
+        public int[] Edges;                       // pairs, Blender's order (the join concatenates them)
+        public bool[] FaceSharp;                  // sharp_face per face
+        public short[] CustomNormal;              // 2 per corner, or null (no normals)
+        public List<float[]> UvAll = new List<float[]>();   // every UV layer: UVMap, UVMap.001, ... (Uv is the first)
     }
 
     public sealed class KeyData
@@ -240,6 +261,7 @@ public static class BlenderRigAnim
     public sealed class ActionData
     {
         public string Name; public float FrameStart, FrameEnd;
+        public bool Stashed;                      // an imported animation: the importer's NLA strip on each touched object holds it
         public List<SlotData> Slots = new List<SlotData>();   // in creation order (the channelbags)
         public IEnumerable<FCurveData> FCurves => Slots.SelectMany(s => s.FCurves);
     }
@@ -252,6 +274,7 @@ public static class BlenderRigAnim
         public Dictionary<int, float[][]> PoseProps;                  // per bone node: the pose bone's location, rotation_quaternion, scale
         public Dictionary<int, float[]> PoseMats;                     // per bone node: pose_mat (armature space, column-major)
         public string PosePosition = "POSE";
+        public HashSet<int> NoDeform = new HashSet<int>();                // use_deform False (the donor sockets)
     }
 
     public sealed class Stage1
@@ -267,7 +290,10 @@ public static class BlenderRigAnim
         public ArmatureData Armature;                                 // the armature the script takes (the first one), or null
         public readonly List<ActionData> Actions = new List<ActionData>();     // bpy.data.actions, in its order
         public readonly List<string> Notes = new List<string>();      // the branches this file took (the drill's census)
-        public BlenderNames.Result Names; public VehicleProbe.ImportRig Rig;
+        public BlenderNames.Result Names; public VehicleProbe.ImportRig Rig; public HafModel Model;
+        public readonly List<string> Logs4 = new List<string>();      // the RIGANIM lines of stage 4 (RunStage4), in order
+        public (string path, int w, int h) Albedo;                    // stage 4: the albedo written (its dimensions), or path null
+        public List<ActionData> AllActs = new List<ActionData>();   // stage 3's all_acts: the primary and the role clips (rebaked when folded)
     }
 
     static void Note(Stage1 s, string what) { if (!s.Notes.Contains(what)) s.Notes.Add(what); }
@@ -275,7 +301,7 @@ public static class BlenderRigAnim
     /// <summary>Stage 1 of rig_anim.py on a glTF model: the scene the script's second stage starts from, or Fallback.</summary>
     public static Stage1 RunStage1(HafModel m, Args a)
     {
-        var s = new Stage1();
+        var s = new Stage1 { Model = m };
         if (a.Problem != null) { s.Fallback = a.Problem; return s; }
         string ext = System.IO.Path.GetExtension(a.Input).ToLowerInvariant();
         if (ext == ".fbx" || ext == ".blend") { s.Fallback = "a " + ext + " source: Blender's own importer, until the native reader"; return s; }
@@ -310,7 +336,7 @@ public static class BlenderRigAnim
             if (why != null) { s.Fallback = "'" + o.Name + "': " + why; return s; }
             var r = BlenderReduce.Reduce(m, o.MeshNode, 1f, names, 0, null, mergeUvs: false);
             if (r.Fallback != null) { s.Fallback = "'" + o.Name + "': " + r.Fallback; return s; }
-            var d = new MeshData { Vertices = r.VertexCount, Faces = r.Faces, Positions = r.Positions, FaceMaterial = r.FaceMaterial, Uv = r.Uv.Count > 0 ? r.Uv[0] : null, DefNr = r.DefNr, DefWeight = r.DefWeight };
+            var d = new MeshData { Vertices = r.VertexCount, Faces = r.Faces, Positions = r.Positions, FaceMaterial = r.FaceMaterial, Uv = r.Uv.Count > 0 ? r.Uv[0] : null, DefNr = r.DefNr, DefWeight = r.DefWeight, Edges = r.Edges, FaceSharp = r.FaceSharp, CustomNormal = r.CustomNormal, UvAll = r.Uv };
             // mesh.py: slots only when a primitive has a material or COLOR_0; else none - and the script drops the object
             bool hasMaterials = mesh.Primitives.Exists(p => p.Material >= 0) || mesh.Primitives.Exists(p => p.Colors != null);
             if (hasMaterials)
@@ -381,7 +407,7 @@ public static class BlenderRigAnim
             var imp = BlenderPosedState.Import(m, ai, 24.0, rig);
             if (imp.NotModelled != null) { s.Fallback = "animation " + ai + ": " + imp.NotModelled; return s; }
             imports.Add(imp);
-            var act = new ActionData { Name = trackNames[ai], FrameStart = imp.FrameStart, FrameEnd = imp.FrameEnd };
+            var act = new ActionData { Name = trackNames[ai], FrameStart = imp.FrameStart, FrameEnd = imp.FrameEnd, Stashed = true };
             var slotOf = new Dictionary<SceneObject, SlotData>();
             var taken = new HashSet<(int, string)>();
             var slotObjects = new List<SceneObject>();
@@ -725,6 +751,20 @@ public static class BlenderRigAnim
         foreach (var k in arm) keys.Add(new KeyData { Frame = k.Frame, Value = k.Value, LeftX = k.LeftX, LeftY = k.LeftY, RightX = k.RightX, RightY = k.RightY, Interpolation = k.Interpolation });
     }
     static float EvaluateCurve(List<KeyData> keys, float frame) => BlenderFCurve.Evaluate(ToArm(keys), frame, constant: true);
+    // Python compares Unicode code points, while .NET ordinal comparison compares UTF-16 code units.
+    static readonly IComparer<string> PyStringOrder = Comparer<string>.Create((a, b) =>
+    {
+        int i = 0, j = 0;
+        while (i < a.Length && j < b.Length)
+        {
+            int ca = char.IsSurrogatePair(a, i) ? char.ConvertToUtf32(a, i) : a[i];
+            int cb = char.IsSurrogatePair(b, j) ? char.ConvertToUtf32(b, j) : b[j];
+            if (ca != cb) return ca.CompareTo(cb);
+            i += ca > 0xffff ? 2 : 1; j += cb > 0xffff ? 2 : 1;
+        }
+        return (a.Length - i).CompareTo(b.Length - j);
+    });
+
     static string PyList(IEnumerable<string> items) => "[" + string.Join(", ", items.Select(BlenderDeploy.PyRepr)) + "]";
     static int ChannelIndex(string prop) => prop == "location" ? 0 : prop == "rotation_quaternion" ? 1 : 2;
     static float[][] CloneProps(float[][] p) => new[] { (float[])p[0].Clone(), (float[])p[1].Clone(), (float[])p[2].Clone() };
@@ -772,54 +812,7 @@ public static class BlenderRigAnim
         var actionNames = new BlenderNames.NamePool();
         foreach (var act in s.Actions) actionNames.Unique(act.Name);
         float LengthOf(int boneNode) => rig.ArmatureOfBone[boneNode].Length[boneNode];
-        void FrameSet(int f)
-        {
-            s.FrameCurrent = f;
-            // the evaluated copy takes every curve's value; the ORIGINAL's property is written back only where the value
-            // differs (animsys_write_orig_anim_rna), so a zero of the other sign the script set keeps its sign there
-            var boneProps = ad.PoseProps.ToDictionary(kv => kv.Key, kv => CloneProps(kv.Value));      // the evaluated pose
-            var boneStored = ad.PoseProps.ToDictionary(kv => kv.Key, kv => CloneProps(kv.Value));     // the original's properties
-            foreach (var o in s.Objects)
-            {
-                var props = CloneProps(o.Props); var stored = CloneProps(o.Props);
-                var act = o.Action != null ? ActionOf(o.Action) : null;
-                var slot = act?.Slots.FirstOrDefault(sl => sl.Identifier == o.Slot);
-                if (slot != null)
-                    foreach (var fc in slot.FCurves)
-                    {
-                        if (fc.Keys.Count == 0) continue;
-                        float v = EvaluateCurve(fc.Keys, f);
-                        int ci = ChannelIndex(fc.Prop);
-                        if (fc.Bone == null) { props[ci][fc.Index] = v; if (stored[ci][fc.Index] != v) stored[ci][fc.Index] = v; }
-                        else if (o.Type == "ARMATURE")
-                        {
-                            int b = BoneNodeOf(o, fc.Bone);
-                            if (b >= 0 && boneProps.ContainsKey(b)) { boneProps[b][ci][fc.Index] = v; if (boneStored[b][ci][fc.Index] != v) boneStored[b][ci][fc.Index] = v; }
-                        }
-                    }
-                o.Props = stored; o.Local = VehicleProbe.ObjectMatrix(props[0], props[1], props[2]);
-            }
-            ad.PoseProps = boneStored;
-            var pose = new Dictionary<int, float[]>();
-            foreach (var arm in rig.Armatures.Values) foreach (var kv in VehicleProbe.PoseMatrices(arm, b => boneProps[b])) pose[kv.Key] = kv.Value;
-            ad.PoseMats = pose;
-            var memo = new Dictionary<SceneObject, float[]>();
-            float[] Eval(SceneObject o)
-            {
-                if (memo.TryGetValue(o, out var w)) return w;
-                if (o.Parent == null) w = o.Local;
-                else
-                {
-                    var pw = Eval(o.Parent);
-                    var pm = o.ParentBone != null ? VehicleProbe.MulM4(pw, VehicleProbe.ParBone(pose[o.ParentBoneNode], LengthOf(o.ParentBoneNode))) : pw;
-                    var pinv = o.EvalStale ? o.EvalParentInverse : o.ParentInverse;
-                    if (pinv != null) pm = VehicleProbe.MulM4(pm, pinv);
-                    w = VehicleProbe.MulM4(pm, o.EvalStale ? o.EvalLocal : o.Local);
-                }
-                memo[o] = w; return w;
-            }
-            foreach (var o in s.Objects) { o.World = Eval(o); o.Dirty = false; }
-        }
+        void FrameSet(int f) => EvaluateFrame(s, f);
         void AssignAction(ActionData act) { armObj.Action = act.Name; armObj.Slot = act.Slots.Count > 0 ? act.Slots[0].Identifier : null; if (act.Slots.Count > 0 && act.Slots[0].Object != armObj) Note(s, "assign_action: the action's first slot is another object's (the multi-slot trap)"); }
         // pb.keyframe_insert(prop, frame=frame) on the armature's active action and slot
         void Insert(ActionData act, SlotData slot, int boneNode, string prop, float frame)
@@ -962,7 +955,7 @@ public static class BlenderRigAnim
             foreach (var fa in allActs)
             {
                 var owners = fa.Slots.SelectMany(sl => sl.FCurves.Select(fc => (sl, fc))).ToList();
-                var avail = owners.Select(x => FilterBone(x.fc)).Where(b => b != null).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList();
+                var avail = owners.Select(x => FilterBone(x.fc)).Where(b => b != null).Distinct().OrderBy(x => x, PyStringOrder).ToList();
                 int kept = 0, rem = 0;
                 foreach (var (sl, fc) in owners)
                 {
@@ -1084,7 +1077,7 @@ public static class BlenderRigAnim
                 }
                 if (transBones.Count > 0)
                 {
-                    var tnames = transBones.Select(b => names.BoneOfJoint[b]).OrderBy(x => x, StringComparer.Ordinal).ToList();
+                    var tnames = transBones.Select(b => names.BoneOfJoint[b]).OrderBy(x => x, PyStringOrder).ToList();
                     s.Logs3.Add("RIGANIM TRANSLATION-animated bone(s) in '" + oa.Name + "': " + PyList(tnames) + (a.KeepTranslations ? " (location keys KEPT — keepTranslations)" : " (location keys stripped below — set keepTranslations to keep)"));
                     Note(s, a.KeepTranslations ? "translation-animated bones, kept" : "translation-animated bones, stripped");
                     // rig_anim.py builds this set with the literal bone name, unlike keyframe_insert's escaped RNA
@@ -1158,8 +1151,8 @@ public static class BlenderRigAnim
                 }
             keepLocPaths.ExceptWith(poison);
             string BoneOfPath(string p) { int q = p.IndexOf('"'); return q < 0 ? null : p.Split('"')[1]; }
-            if (poison.Count > 0) { s.Logs3.Add("RIGANIM legacy keepTranslations: " + poison.Count + " path(s) REJECTED as decomposition garbage (NaN/huge): " + PyList(poison.Where(p => p.IndexOf('"') >= 0).Select(BoneOfPath).Distinct().OrderBy(x => x, StringComparer.Ordinal))); Note(s, "legacy keepTranslations: garbage rejected"); }
-            if (keepLocPaths.Count > 0) { s.Logs3.Add("RIGANIM legacy keepTranslations: " + keepLocPaths.Count + " varying location path(s) kept: " + PyList(keepLocPaths.Where(p => p.IndexOf('"') >= 0).Select(BoneOfPath).Distinct().OrderBy(x => x, StringComparer.Ordinal))); Note(s, "legacy keepTranslations: paths kept"); }
+            if (poison.Count > 0) { s.Logs3.Add("RIGANIM legacy keepTranslations: " + poison.Count + " path(s) REJECTED as decomposition garbage (NaN/huge): " + PyList(poison.Where(p => p.IndexOf('"') >= 0).Select(BoneOfPath).Distinct().OrderBy(x => x, PyStringOrder))); Note(s, "legacy keepTranslations: garbage rejected"); }
+            if (keepLocPaths.Count > 0) { s.Logs3.Add("RIGANIM legacy keepTranslations: " + keepLocPaths.Count + " varying location path(s) kept: " + PyList(keepLocPaths.Where(p => p.IndexOf('"') >= 0).Select(BoneOfPath).Distinct().OrderBy(x => x, PyStringOrder))); Note(s, "legacy keepTranslations: paths kept"); }
         }
 
         // ---- the strip
@@ -1200,6 +1193,7 @@ public static class BlenderRigAnim
             Note(s, "kept curves delta-rebased and amplified");
         }
 
+        s.AllActs = allActs;
         // ---- the frame range
         foreach (var act in s.Actions) FrameRange(act);
         s.FrameStart = (int)Math.Round((double)primary.FrameStart, MidpointRounding.ToEven);
@@ -1236,6 +1230,15 @@ public static class BlenderRigAnim
         var q = VehicleProbe.Mat3NormalizedToQuat(rot);
         if (q[0] < 0f) for (int i = 0; i < 4; i++) q[i] = -q[i];
         return (float)(2.0f * BlenderTrig.Atan2f(q[2], q[0]));
+    }
+    /// <summary>blender::math::transform_points: nothing moves when every entry of the transform lies within 1e-6 of the
+    /// identity's (skip_transform); else transform_point on each.</summary>
+    static void TransformPoints(float[] m, float[] positions, int count)
+    {
+        var id = VehicleProbe.IdentityF(); bool skip = true;
+        for (int i = 0; i < 16 && skip; i++) if (Math.Abs((float)(m[i] - id[i])) > 1e-6f) skip = false;
+        if (skip) return;
+        for (int v = 0; v < count; v++) { var p = TransformPoint(m, new[] { positions[3 * v], positions[3 * v + 1], positions[3 * v + 2] }); positions[3 * v] = p[0]; positions[3 * v + 1] = p[1]; positions[3 * v + 2] = p[2]; }
     }
     /// <summary>blender::math::transform_point(float4x4, float3): the 3x3 times the point (per column, the products summed
     /// from zero), plus the location.</summary>
@@ -1308,6 +1311,759 @@ public static class BlenderRigAnim
         return (neg ? "-" : "") + text;
     }
 
+    // ---------------------------------------------------------------------------------------------------------------
+    // stage 4: the albedo, the join, the weld, the material slots, the decimate, the rebind, the root collapse, the
+    // rename, the sockets, the rotation and scale fold, the placement. Blender's rules read for this stage:
+    //   * base_color_image: the Principled BSDF's Base Color input followed upstream to the nearest image - the material's
+    //     baseColorTexture (the importer's node chain) - else the first image node; the first MESH object in scene order
+    //     with a material decides. The image's name as the importer made it (the glTF image's name, or Image_<index>, made
+    //     unique among the images); img.save() writes a PNG whose bytes and pixels this model does not produce - the IMG
+    //     row's dimensions and channels are compared, its hashes are the encoder's.
+    //   * object.join (mesh_join.cc): the active object first, then the others in scene order; every vertex through
+    //     world_to_active (Eigen's inverse of the active's world) times the object's world, as blender::math transforms
+    //     a point; materials by first appearance (one slot per distinct material, the index attribute dropped when there
+    //     is one at most), vertex groups by name in object order, UV layers by name (zeros where an object lacks one),
+    //     the custom-normal shorts copied, the sharp-face flags copied; the other objects deleted.
+    //   * the weld (bmesh remove_doubles) is not modelled: a one-material, one-bone rig is left to Blender by name.
+    //   * modifier_apply on a DECIMATE modifier: BM_mesh_decimate_collapse as BlenderDecimate ports it, the vertex normals
+    //     from the custom normals, merge_customdata on the UVs afterwards.
+    //   * the root collapse, the sockets and the placement enter edit mode: a bone removed re-parents its children to its
+    //     parent; an edit bone made gets head, tail, roll and parent; leaving edit mode rebuilds every rest from head,
+    //     tail and roll (RestFromEditBones).
+    //   * Bone.name = x (ED_armature_bone_rename): the pose channel, the vertex groups of the meshes the armature deforms,
+    //     the parent_bone of its children, and the paths of the ASSIGNED action (with the names escaped) follow; the
+    //     script's own patch of the other actions reads the path's literal segment.
+    //   * Matrix.Rotation(angle, 4, axis) = axis_angle_to_mat3_single with cosf and sinf of the float angle; `rot @
+    //     matrix_world` the double-dot product, assigned as BKE_object_apply_mat4 without a parent.
+    //   * transform_apply(rotation, scale) (object_transform.cc apply_objects_internal): the selected objects parents
+    //     first; each object's rotation-scale matrix (BKE_object_to_mat3) applied to its data (mesh_transform; for an
+    //     armature BKE_armature_transform: every bone's roll matrix kept, arm_head and arm_tail transformed, the local
+    //     head and tail against the parent's new tail, the roll re-derived, where_is_bone), its rotation and scale
+    //     reset, its matrix recomputed from its parent's; then ignore_parent_tx on its children: each child's EVALUATED
+    //     world decomposed into the child's properties and its parentinv set to the inverse of the parent matrix as the
+    //     evaluated parent still holds it.
+    //   * the placement: the joined mesh's vertices through its matrix_world (mathutils' double dot), the box's centre and
+    //     floor, the move said in mesh-local and armature-local terms through the adjugate inverses' 3x3, added in float32.
+
+    static float[] MatVecPy(float[] bm, float[] v)
+    {
+        var r = new float[3];
+        for (int row = 0; row < 3; row++)
+        {
+            double dot = 0.0;
+            for (int col = 0; col < 4; col++) dot += (double)(float)(bm[col * 4 + row] * (col == 3 ? 1f : v[col]));
+            r[row] = (float)dot;
+        }
+        return r;
+    }
+    static float[] Mat3VecPy(float[] bm, float[] v)
+    {
+        var r = new float[3];
+        for (int row = 0; row < 3; row++)
+        {
+            double dot = 0.0;
+            for (int col = 0; col < 3; col++) dot += (double)(float)(bm[col * 4 + row] * v[col]);
+            r[row] = (float)dot;
+        }
+        return r;
+    }
+    /// <summary>mul_m4_v3: the point through the matrix, the translation added last.</summary>
+    static float[] MulM4V3(float[] m, float[] v)
+    {
+        var r = new float[3];
+        for (int k = 0; k < 3; k++) r[k] = (float)((float)((float)((float)(v[0] * m[k]) + (float)(v[1] * m[4 + k])) + (float)(m[8 + k] * v[2])) + m[12 + k]);
+        return r;
+    }
+    /// <summary>mathutils Matrix.Rotation(angle, 4, axis): the angle wrapped into [-pi, pi] in float32 (angle_wrap_rad:
+    /// mod_inline(a + pi, 2 pi) - pi, mod_inline = a - b * floorf(a / b)), then axis_angle_to_mat3_single with cosf and
+    /// sinf of it. 180 degrees comes out as -pi (its sine's residual flipped), 360 as an exact identity.</summary>
+    static float[] RotationMatrix(char axis, double angleDouble)
+    {
+        const float pi = 3.14159274f, twoPi = 6.28318548f;
+        float a = (float)((float)angleDouble + pi);
+        float wrapped = (float)((float)(a - (float)(twoPi * (float)Math.Floor((float)(a / twoPi)))) - pi);
+        float angle = wrapped;
+        float c = BlenderTrig.Cosf(angle), si = BlenderTrig.Sinf(angle);
+        var m = VehicleProbe.IdentityF();
+        switch (axis)
+        {
+            case 'X': m[5] = c; m[6] = si; m[9] = -si; m[10] = c; break;
+            case 'Y': m[0] = c; m[2] = -si; m[8] = si; m[10] = c; break;
+            default: m[0] = c; m[1] = si; m[4] = -si; m[5] = c; break;
+        }
+        return m;
+    }
+    static float[] VecRollToMat3(float[] vec, float roll) { float x = vec[0], y = vec[1], z = vec[2]; VehicleProbe.NormalizeV3Blender(ref x, ref y, ref z); return VehicleProbe.VecRollToMat3Normalized(x, y, z, roll); }
+    static float[] Sub3(float[] a, float[] b) => new[] { (float)(a[0] - b[0]), (float)(a[1] - b[1]), (float)(a[2] - b[2]) };
+    static float[] Add3(float[] a, float[] b) => new[] { (float)(a[0] + b[0]), (float)(a[1] + b[1]), (float)(a[2] + b[2]) };
+
+    /// <summary>The bones of an armature in `armature.bones` order from the parent map: depth first, a parent before its
+    /// children, the children in the given order.</summary>
+    static List<int> DepthFirst(IEnumerable<int> bones, Dictionary<int, int> parent)
+    {
+        var order = bones.ToList(); var children = order.ToDictionary(b => b, b => new List<int>()); var roots = new List<int>();
+        foreach (int b in order) { if (parent.TryGetValue(b, out int p) && p >= 0 && children.ContainsKey(p)) children[p].Add(b); else roots.Add(b); }
+        var result = new List<int>();
+        void Walk(int b) { result.Add(b); foreach (int c in children[b]) Walk(c); }
+        foreach (int r in roots) Walk(r);
+        return result;
+    }
+
+    /// <summary>ED_armature_from_edit on the armature's current edit bones (EditHead, EditTail, EditRoll in armature space):
+    /// every rest rebuilt; the local frames kept for the next transform.</summary>
+    static void RebuildRest(ArmatureData ad, List<int> boneNodes, Dictionary<int, (float[] head, float[] tail, float roll)> localsOut = null)
+    {
+        var rest = ad.Rest;
+        var children = boneNodes.ToDictionary(b => b, b => new List<int>()); var roots = new List<int>();
+        foreach (int b in boneNodes) { int p = rest.Parent[b]; if (p >= 0 && children.ContainsKey(p)) children[p].Add(b); else roots.Add(b); }
+        var head = boneNodes.ToDictionary(b => b, b => (float[])rest.EditHead[b].Clone()); var tail = boneNodes.ToDictionary(b => b, b => (float[])rest.EditTail[b].Clone()); var roll = boneNodes.ToDictionary(b => b, b => rest.EditRoll[b]);
+        VehicleProbe.RestFromEditBones(boneNodes, children, roots, head, tail, roll, (b, parent, arm, offs, len) =>
+        {
+            rest.ArmMat[b] = arm; rest.OffsBone[b] = offs; rest.Length[b] = len; rest.MatrixLocal[b] = VehicleProbe.ToRowMajor(arm);
+            rest.EditTail[b] = tail[b];   // a bone of no length had its tail moved
+        }, localsOut);
+    }
+
+    /// <summary>BKE_armature_transform: armature_transform_recurse over the bones in `armature.bones` order.</summary>
+    static void ArmatureTransform(VehicleProbe.ArmatureResult rest, List<int> boneNodes, float[] mat, Dictionary<int, (float[] head, float[] tail, float roll)> locals)
+    {
+        var mat3n = new float[9];
+        for (int c = 0; c < 3; c++) { float x = mat[c * 4], y = mat[c * 4 + 1], z = mat[c * 4 + 2]; VehicleProbe.NormalizeV3Blender(ref x, ref y, ref z); mat3n[c * 3] = x; mat3n[c * 3 + 1] = y; mat3n[c * 3 + 2] = z; }
+        var children = boneNodes.ToDictionary(b => b, b => new List<int>()); var roots = new List<int>();
+        foreach (int b in boneNodes) { int p = rest.Parent[b]; if (p >= 0 && children.ContainsKey(p)) children[p].Add(b); else roots.Add(b); }
+        void Rec(int b, int parent, float[] parentArmInv)
+        {
+            var (lh, lt, lroll) = locals[b];
+            var pre = VecRollToMat3(Sub3(lt, lh), lroll);
+            if (parent < 0) pre = VehicleProbe.MulM3(mat3n, pre);
+            var armHead = MulM4V3(mat, rest.EditHead[b]); var armTail = MulM4V3(mat, rest.EditTail[b]);
+            float[] head, tail;
+            if (parent >= 0)
+            {
+                head = Sub3(armHead, rest.EditTail[parent]); tail = Sub3(armTail, rest.EditTail[parent]);
+                MulMat3M4V3(parentArmInv, head); MulMat3M4V3(parentArmInv, tail);
+            }
+            else { head = (float[])armHead.Clone(); tail = (float[])armTail.Clone(); }
+            var post = VecRollToMat3(Sub3(tail, head), 0f);
+            var dm = VehicleProbe.MulM3(VehicleProbe.InvertM3(post), pre);
+            float roll = BlenderTrig.Atan2f(dm[2 * 3 + 0], dm[2 * 3 + 2]);
+            var arm = VehicleProbe.WhereIsBone(head, tail, roll, parent >= 0 ? rest.ArmMat[parent] : null, parent >= 0 ? rest.Length[parent] : 0f, out float len, out var offs);
+            rest.EditHead[b] = armHead; rest.EditTail[b] = armTail;
+            rest.ArmMat[b] = arm; rest.OffsBone[b] = offs; rest.Length[b] = len; rest.MatrixLocal[b] = VehicleProbe.ToRowMajor(arm);
+            var arm3 = new[] { arm[0], arm[1], arm[2], arm[4], arm[5], arm[6], arm[8], arm[9], arm[10] };
+            rest.EditRoll[b] = Mat3VecToRoll(arm3, new[] { arm[4], arm[5], arm[6] });
+            locals[b] = (head, tail, roll);
+            var armInv = BlenderEigen.InvertM4(arm);
+            foreach (int c in children[b]) Rec(c, b, armInv);
+        }
+        foreach (int r in roots) Rec(r, -1, null);
+    }
+    static void MulMat3M4V3(float[] mat, float[] v)
+    {
+        float x = v[0], y = v[1];
+        v[0] = (float)((float)((float)(x * mat[0]) + (float)(y * mat[4])) + (float)(mat[8] * v[2]));
+        v[1] = (float)((float)((float)(x * mat[1]) + (float)(y * mat[5])) + (float)(mat[9] * v[2]));
+        v[2] = (float)((float)((float)(x * mat[2]) + (float)(y * mat[6])) + (float)(mat[10] * v[2]));
+    }
+
+    /// <summary>Stage 4 of rig_anim.py on the scene stage 3 left: mutates `s` (one joined mesh, the armature's bones renamed
+    /// and moved, the actions' paths, Logs4, Albedo), or sets Exits or Fallback.</summary>
+    public static void RunStage4(Stage1 s, Args a)
+    {
+        if (s.Fallback != null || s.Exits || s.Deferred != null) return;
+        var ad = s.Armature; var armObj = ad.Object; var rig = s.Rig; var names = s.Names; var m = s.Model;
+        float LengthOf(int boneNode) => rig.ArmatureOfBone[boneNode].Length[boneNode];
+        // the worlds as a depsgraph evaluation leaves them (the properties as they stand; no curve evaluated)
+        void EvalWorlds()
+        {
+            var memo = new Dictionary<SceneObject, float[]>();
+            float[] Eval(SceneObject o)
+            {
+                if (memo.TryGetValue(o, out var w)) return w;
+                if (o.Parent == null) w = o.EvalStale ? o.EvalLocal : o.Local;
+                else
+                {
+                    var pw = Eval(o.Parent);
+                    var pm = o.ParentBone != null ? VehicleProbe.MulM4(pw, VehicleProbe.ParBone(ad.PoseMats[o.ParentBoneNode], LengthOf(o.ParentBoneNode))) : pw;
+                    var pinv = o.EvalStale ? o.EvalParentInverse : o.ParentInverse;
+                    if (pinv != null) pm = VehicleProbe.MulM4(pm, pinv);
+                    w = VehicleProbe.MulM4(pm, o.EvalStale ? o.EvalLocal : o.Local);
+                }
+                memo[o] = w; return w;
+            }
+            foreach (var o in s.Objects) { o.World = Eval(o); o.Dirty = false; }
+        }
+        ActionData ActionOf(string name) => s.Actions.FirstOrDefault(x => x.Name == name);
+        var primary = armObj.Action != null ? ActionOf(armObj.Action) : null;
+
+        // ---- the albedo
+        if (a.AlbedoOut.Length > 0)
+        {
+            var matIndex = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var kv in names.MaterialOf) if (kv.Key.material >= 0 && !matIndex.ContainsKey(kv.Value)) matIndex[kv.Value] = kv.Key.material;
+            int image = -1; bool found = false;
+            foreach (var o in s.Objects)
+            {
+                if (o.Type != "MESH" || o.Mesh.Materials.Count == 0) continue;
+                string mat0 = o.Mesh.Materials[0];
+                if (mat0 != null && matIndex.TryGetValue(mat0, out int gm))
+                {
+                    var gmat = m.Materials[gm];
+                    // base_color_image: the image upstream of the Principled node's Base Color; without one, the FIRST image node of
+                    // the tree (node_tree.nodes in creation order = MaterialTextureOrder), whatever it textures
+                    int bc = BaseColourTexture(gmat);
+                    if (bc >= 0 && bc < m.Textures.Count) image = m.Textures[bc].Source;
+                    else foreach (int t in MaterialTextureOrder(gmat)) if (t >= 0 && t < m.Textures.Count && m.Textures[t].Source >= 0) { image = m.Textures[t].Source; Note(s, "the albedo from a material without a base colour texture (its first image node)"); break; }
+                }
+                if (image >= 0) { found = true; break; }
+                // base_color_image returns None: the next object is tried
+            }
+            if (found)
+            {
+                var size = BlenderMaterialExport.ImageSize(m, image);
+                if (size == null) { s.Fallback = "an albedo image whose size the header does not give"; return; }
+                string imgName = ImageName(s, image, out string trouble);
+                if (imgName == null) { s.Fallback = trouble; return; }
+                s.Albedo = (a.AlbedoOut, size.Value.w, size.Value.h);
+                s.Logs4.Add("RIGANIM albedo -> " + a.AlbedoOut + " (" + imgName + ")");
+                Note(s, "the albedo written");
+            }
+            else { s.Logs4.Add("RIGANIM no albedo image found (model may be untextured)"); Note(s, "no albedo image"); }
+        }
+
+        // ---- the join
+        var meshes = s.Objects.Where(o => o.Type == "MESH").ToList();
+        if (meshes.Count == 0) { s.Logs4.Add("RIGANIM ERROR: no mesh to export"); s.Exits = true; Note(s, "no mesh to export: the script's exit"); return; }
+        var active = meshes.FirstOrDefault(o => o.Mesh.ArmatureModifier != null) ?? meshes[0];
+        if (active.Mesh.ArmatureModifier == null) Note(s, "the join's active object has no Armature modifier (the rebind)");
+        var joined = active;
+        if (meshes.Count > 1)
+        {
+            var order = new List<SceneObject> { active }; order.AddRange(meshes.Where(o => o != active));
+            if (order.Contains(active.Parent)) { s.Fallback = "the join's active object is parented to a joined mesh"; return; }
+            EvaluateFrame(s, s.FrameCurrent);   // the operator's evaluated depsgraph
+            var worldToActive = BlenderEigen.InvertM4(active.World);
+            int nv = order.Sum(o => o.Mesh.Vertices), nf = order.Sum(o => o.Mesh.Faces.Length / 3);
+            var d = new MeshData { Vertices = nv, Positions = new float[3 * nv], Faces = new int[3 * nf], FaceMaterial = new int[nf], FaceSharp = new bool[nf] };
+            // the materials by first appearance
+            var mats = new List<string>(); var matSeen = new HashSet<string>(StringComparer.Ordinal); bool hasNull = false;
+            foreach (var o in order) foreach (var mt in o.Mesh.Materials) { if (mt == null) { if (!hasNull) { hasNull = true; mats.Add(null); } } else if (matSeen.Add(mt)) mats.Add(mt); }
+            d.Materials = mats;
+            // the vertex groups by name in object order
+            var groups = new List<string>(); var groupIndex = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var o in order) foreach (var g in o.Mesh.Groups) if (!groupIndex.ContainsKey(g)) { groupIndex[g] = groups.Count; groups.Add(g); }
+            d.Groups = groups;
+            if (groups.Count > 0) { d.DefNr = new List<int>[nv]; d.DefWeight = new List<float>[nv]; for (int v = 0; v < nv; v++) { d.DefNr[v] = new List<int>(); d.DefWeight[v] = new List<float>(); } }
+            // the UV layers by name
+            int numUv = order.Max(o => o.Mesh.UvAll.Count);
+            for (int i = 0; i < numUv; i++) d.UvAll.Add(new float[2 * 3 * nf]);
+            bool anyNormals = order.Any(o => o.Mesh.CustomNormal != null);
+            if (anyNormals) d.CustomNormal = new short[2 * 3 * nf];
+            var edges = new List<int>();
+            int vo = 0, fo = 0;
+            foreach (var o in order)
+            {
+                var src = o.Mesh; int snf = src.Faces.Length / 3;
+                var transform = VehicleProbe.MulM4(worldToActive, o.World);
+                var moved = (float[])src.Positions.Clone(); TransformPoints(transform, moved, src.Vertices);   // join_positions: transform_points
+                for (int v = 0; v < src.Vertices; v++)
+                {
+                    d.Positions[3 * (vo + v)] = moved[3 * v]; d.Positions[3 * (vo + v) + 1] = moved[3 * v + 1]; d.Positions[3 * (vo + v) + 2] = moved[3 * v + 2];
+                    if (d.DefNr != null && src.DefNr != null)
+                        for (int i = 0; i < src.DefNr[v].Count; i++) { d.DefNr[vo + v].Add(groupIndex[src.Groups[src.DefNr[v][i]]]); d.DefWeight[vo + v].Add(src.DefWeight[v][i]); }
+                }
+                int[] indexMap = null;
+                if (mats.Count > 1)
+                {
+                    indexMap = new int[src.Materials.Count];
+                    for (int k = 0; k < src.Materials.Count; k++) indexMap[k] = src.Materials[k] == null ? mats.IndexOf(null) : mats.IndexOf(src.Materials[k]);
+                }
+                for (int f = 0; f < snf; f++)
+                {
+                    for (int k = 0; k < 3; k++)
+                    {
+                        int c = 3 * (fo + f) + k, sc = 3 * f + k;
+                        d.Faces[c] = src.Faces[sc] + vo;
+                        for (int i = 0; i < numUv; i++) if (i < src.UvAll.Count) { d.UvAll[i][2 * c] = src.UvAll[i][2 * sc]; d.UvAll[i][2 * c + 1] = src.UvAll[i][2 * sc + 1]; }
+                        if (anyNormals && src.CustomNormal != null) { d.CustomNormal[2 * c] = src.CustomNormal[2 * sc]; d.CustomNormal[2 * c + 1] = src.CustomNormal[2 * sc + 1]; }
+                    }
+                    d.FaceMaterial[fo + f] = indexMap == null ? 0 : (src.Materials.Count == 0 ? 0 : indexMap[Math.Max(0, Math.Min(src.FaceMaterial[f], src.Materials.Count - 1))]);
+                    d.FaceSharp[fo + f] = src.FaceSharp != null && src.FaceSharp[f];
+                }
+                if (src.Edges != null) foreach (int e in src.Edges) edges.Add(e + vo);
+                vo += src.Vertices; fo += snf;
+            }
+            d.Edges = edges.ToArray();
+            d.Uv = active.Mesh.UvAll.Count > 0 ? d.UvAll[0] : null;   // the active's active UV layer, by its name
+            if (active.Mesh.UvAll.Count == 0 && numUv > 0) Note(s, "the join's active object has no UV layer (no active layer on the result)");
+            d.ArmatureModifier = active.Mesh.ArmatureModifier;
+            joined.Mesh = d;
+            foreach (var o in order) if (o != active) { foreach (var c in s.Objects) if (c.Parent == o) { c.Parent = null; c.Dirty = true; } s.Objects.Remove(o); }
+            Note(s, "meshes joined");
+        }
+        var me = joined.Mesh;
+        // ---- the weld
+        int nvg = me.Groups.Count;
+        if (me.Materials.Count <= 1 && nvg <= 1) { s.Fallback = "a one-material, one-bone mesh: the weld (bmesh remove_doubles) is not modelled"; return; }
+        s.Logs4.Add("RIGANIM weld: SKIPPED (" + me.Materials.Count + " materials, " + nvg + " bones -> preserve seams)");
+        // ---- the material slots
+        if (!a.KeepMaterials)
+        {
+            if (me.Materials.Count > 1) { me.Materials = me.Materials.Take(1).ToList(); Note(s, "the materials collapsed to one"); }
+            for (int f = 0; f < me.FaceMaterial.Length; f++) me.FaceMaterial[f] = 0;
+        }
+        else { s.Logs4.Add("RIGANIM keeping " + me.Materials.Count + " material slots (multi-material)"); Note(s, "the material slots kept"); }
+        // ---- the decimate
+        int total = me.Faces.Length / 3;
+        if (a.Target <= 0 || total <= a.Target) { s.Logs4.Add("RIGANIM decimate SKIPPED (" + total + " tris, target " + (a.Target <= 0 ? "OFF" : a.Target.ToString(CultureInfo.InvariantCulture)) + ")"); Note(s, "the decimate skipped"); }
+        else
+        {
+            double ratio = Math.Min(1.0, Math.Max(0.02, (double)a.Target / Math.Max(1, total)));
+            EvaluateFrame(s, s.FrameCurrent);   // modifier_apply's evaluated depsgraph
+            Decimate(me, (float)ratio);
+            s.Logs4.Add("RIGANIM decimate " + total + " -> " + (me.Faces.Length / 3) + " tris (ratio " + PyFixed(ratio, 3) + ")");
+            Note(s, "the decimate done");
+        }
+        // ---- the rebind
+        if (me.ArmatureModifier == null) { me.ArmatureModifier = armObj.Name; s.Logs4.Add("RIGANIM re-bound armature modifier (join had dropped it)"); Note(s, "the armature modifier re-bound after the join"); }
+
+        bool cleanUnits = armObj.Name.StartsWith("DeployArmV2", StringComparison.Ordinal);
+        if (a.ConvertRig)
+        {
+            // ---- the root collapse
+            var animated = new HashSet<string>(StringComparer.Ordinal);
+            if (primary != null) foreach (var fc in primary.FCurves) if (fc.DataPath.StartsWith("pose.bones[", StringComparison.Ordinal)) animated.Add(fc.DataPath.Split(new[] { "[\"" }, 2, StringSplitOptions.None)[1].Split(new[] { "\"]" }, 2, StringSplitOptions.None)[0]);
+            var weighted = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var o in s.Objects.Where(x => x.Type == "MESH"))
+                if (o.Mesh.DefNr != null)
+                    for (int v = 0; v < o.Mesh.Vertices; v++)
+                        for (int i = 0; i < o.Mesh.DefNr[v].Count; i++)
+                            if (o.Mesh.DefWeight[v][i] > 1e-6) weighted.Add(o.Mesh.Groups[o.Mesh.DefNr[v][i]]);
+            int removed = 0;
+            while (true)
+            {
+                int victim = -1;
+                foreach (int b in ad.BoneNodes)
+                {
+                    if (ad.Rest.Parent[b] >= 0 && ad.BoneNodes.Contains(ad.Rest.Parent[b])) continue;
+                    string bn = names.BoneOfJoint[b];
+                    if (ad.BoneNodes.Count(c => ad.Rest.Parent[c] == b) == 1 && !animated.Contains(bn) && !weighted.Contains(bn)) { victim = b; break; }
+                }
+                if (victim < 0) break;
+                if (s.Objects.Any(o => o.ParentBoneNode == victim)) { s.Fallback = "'" + names.BoneOfJoint[victim] + "': a no-op root bone collapsed with an object hung from it"; return; }
+                foreach (int c in ad.BoneNodes) if (ad.Rest.Parent[c] == victim) ad.Rest.Parent[c] = ad.Rest.Parent[victim];
+                ad.BoneNodes.Remove(victim); ad.Rest.Bones.Remove(victim); ad.PoseProps.Remove(victim); ad.PoseMats.Remove(victim); removed++;
+            }
+            if (removed > 0)
+            {
+                RebuildRest(ad, ad.BoneNodes);
+                foreach (var kv in VehicleProbe.PoseMatrices(ad.Rest, b => ad.PoseProps[b])) ad.PoseMats[kv.Key] = kv.Value;
+                s.Logs4.Add("RIGANIM collapsed " + removed + " no-op root bone(s) — every chain is now " + removed + " level(s) shallower");
+                Note(s, "no-op root bones collapsed");
+            }
+            // ---- the topological rename
+            var order = new List<int>();
+            void Walk(int b) { order.Add(b); foreach (int c in ad.BoneNodes.Where(c => ad.Rest.Parent[c] == b).OrderBy(c => names.BoneOfJoint[c], PyStringOrder)) Walk(c); }
+            foreach (int r in ad.BoneNodes.Where(b => ad.Rest.Parent[b] < 0 || !ad.BoneNodes.Contains(ad.Rest.Parent[b]))) Walk(r);
+            string prefix = a.SocketSpecs.Count > 0 ? "A" : "b";
+            var newName = new Dictionary<string, string>(StringComparer.Ordinal);
+            for (int i = 0; i < order.Count; i++) newName[names.BoneOfJoint[order[i]]] = prefix + i.ToString("000", CultureInfo.InvariantCulture) + "_" + names.BoneOfJoint[order[i]];
+            // Bone RNA names are limited to 63 UTF-8 bytes and unique within this armature. Allocate in the same
+            // sequence as the setters: a requested name can collide with a bone that has not been renamed yet.
+            var boneNames = new HashSet<string>(ad.BoneNodes.Select(b => names.BoneOfJoint[b]), StringComparer.Ordinal);
+            foreach (int b in order)
+            {
+                string old = names.BoneOfJoint[b]; boneNames.Remove(old);
+                string nw = BlenderNames.UniqueBone(boneNames, newName[old]);
+                names.BoneOfJoint[b] = nw;
+                foreach (var o in s.Objects)
+                {
+                    if (o.Parent == armObj && o.ParentBone == old) o.ParentBone = nw;
+                    if (o.Type == "MESH" && o.Mesh.ArmatureModifier == armObj.Name) { int gi = o.Mesh.Groups.IndexOf(old); if (gi >= 0 && !o.Mesh.Groups.Contains(nw)) o.Mesh.Groups[gi] = nw; }
+                }
+                // BKE_animdata_fix_paths_rename_all: the assigned action's paths and the NLA strips' (the importer's stashed
+                // animations), the names escaped; a slice or a rebake no strip holds is left to the script's patch
+                foreach (var pa in s.Actions)
+                    if (pa == primary || pa.Stashed)
+                        foreach (var fc in pa.FCurves) if (fc.Bone == old) { fc.Bone = nw; fc.DataPath = "pose.bones[\"" + EscapeIdentifier(nw) + "\"]." + fc.Prop; }
+            }
+            s.Logs4.Add("RIGANIM bones renamed with topological prefixes (" + order.Count + " bones, prefix " + prefix + "###_) — parents now sort before children");
+            Note(s, "bones renamed with topological prefixes");
+            // the script's patch of every kept action: the path's literal segment looked up among the old names
+            int patched = 0;
+            foreach (var pa in s.AllActs)
+                foreach (var fc in pa.FCurves)
+                {
+                    if (!fc.DataPath.Contains("pose.bones[\"")) continue;
+                    string seg = fc.DataPath.Split(new[] { "[\"" }, 2, StringSplitOptions.None)[1].Split(new[] { "\"]" }, 2, StringSplitOptions.None)[0];
+                    if (newName.TryGetValue(seg, out var nn)) { fc.DataPath = fc.DataPath.Replace("pose.bones[\"" + seg + "\"]", "pose.bones[\"" + nn + "\"]"); fc.Bone = nn; patched++; }
+                }
+            if (patched > 0) { s.Logs4.Add("RIGANIM patched " + patched + " dormant fcurve path(s) onto the renamed bones (state-role clips)"); Note(s, "dormant fcurve paths patched"); }
+        }
+
+        // ---- the donor sockets
+        if (a.SocketSpecs.Count > 0)
+        {
+            int made = 0; int nextNode = 1000000 + names.BoneOfJoint.Count;
+            var newBones = new List<int>();
+            var socketNames = new HashSet<string>(ad.BoneNodes.Select(b => names.BoneOfJoint[b]), StringComparer.Ordinal);
+            foreach (var (dn, ps, off) in a.SocketSpecs)
+            {
+                string psl = PyLower(ps);
+                int parent = -1;
+                foreach (int b in ad.BoneNodes.Concat(newBones)) if (PyLower(names.BoneOfJoint[b]).Contains(psl)) { parent = b; break; }
+                if (parent < 0)
+                {
+                    var all = ad.BoneNodes.Concat(newBones).Select(b => names.BoneOfJoint[b]).Take(40);
+                    s.Logs4.Add("RIGANIM ERROR: socket '" + dn + "': parent substring '" + ps + "' matches no bone. Bones: " + PyList(all)); s.Exits = true; Note(s, "a socket without a parent: the script's exit"); return;
+                }
+                string pn = names.BoneOfJoint[parent];
+                // the script exits here, but its message reads `_parent.name` AFTER mode_set('OBJECT') freed the edit bones: an
+                // empty name, garbage, or a UnicodeDecodeError in the caller (both seen) - undefined, so left by name
+                if (!(PyStringOrder.Compare(dn, pn) > 0)) { s.Fallback = "socket '" + dn + "' sorts before its parent '" + pn + "': the script's exit message reads a freed edit bone (undefined)"; Note(s, "a socket sorting before its parent: the script's exit (left by name)"); return; }
+                // Lookup is literal, then new() bounds and uniquifies the name. Repeating an overlong request creates
+                // a second suffixed bone because the first bone's bounded name does not equal that request.
+                int sb = ad.BoneNodes.Concat(newBones).Where(b => names.BoneOfJoint[b] == dn).DefaultIfEmpty(-1).First();
+                if (sb < 0) { sb = nextNode++; names.BoneOfJoint[sb] = BlenderNames.UniqueBone(socketNames, dn); newBones.Add(sb); } else Note(s, "a socket bone that already existed (its edit bone reused)");
+                var ph = ad.Rest.EditHead[parent]; var pt = ad.Rest.EditTail[parent];
+                var dir = Sub3(pt, ph);
+                double len = VecLengthPy(dir);
+                float[] dirv;
+                if (len > 1e-6)
+                {
+                    float x = dir[0], y = dir[1], z = dir[2];   // normalized(): normalize_vn_vn - a double length, a float reciprocal
+                    double d2 = (double)(float)(z * z) + (double)(float)(y * y) + (double)(float)(x * x); double ds = Math.Sqrt(d2); float fi = (float)(1.0f / (float)ds);
+                    var nrm = new[] { (float)(x * fi), (float)(y * fi), (float)(z * fi) };
+                    float sc = (float)Math.Max(0.02, len * 0.25);
+                    dirv = new[] { (float)(nrm[0] * sc), (float)(nrm[1] * sc), (float)(nrm[2] * sc) };
+                }
+                else dirv = new[] { 0f, 0.05f, 0f };
+                var head = Add3(ph, new[] { (float)off[0], (float)off[1], (float)off[2] });
+                var tail = Add3(head, dirv);
+                ad.Rest.EditHead[sb] = head; ad.Rest.EditTail[sb] = tail; ad.Rest.EditRoll[sb] = ad.Rest.EditRoll[parent]; ad.Rest.Parent[sb] = parent;
+                ad.NoDeform.Add(sb); rig.ArmatureOfBone[sb] = ad.Rest;
+                made++;
+                s.Logs4.Add("RIGANIM socket '" + dn + "' -> parent '" + pn + "' head=(" + PyFixed(head[0], 3) + ", " + PyFixed(head[1], 3) + ", " + PyFixed(head[2], 3) + ")");
+                Note(s, "a socket created");
+            }
+            // leaving edit mode: the new bones last in the edit list, so last among their parents' children
+            var all2 = ad.BoneNodes.Concat(newBones).ToList();
+            ad.BoneNodes = DepthFirst(all2, ad.Rest.Parent);
+            foreach (int b in newBones) { ad.Rest.Bones.Add(b); ad.PoseProps[b] = new[] { new float[3], new[] { 1f, 0f, 0f, 0f }, new[] { 1f, 1f, 1f } }; }
+            ad.Rest.Bones = DepthFirst(ad.Rest.Bones, ad.Rest.Parent);
+            RebuildRest(ad, ad.BoneNodes);
+            foreach (var kv in VehicleProbe.PoseMatrices(ad.Rest, b => ad.PoseProps[b])) ad.PoseMats[kv.Key] = kv.Value;
+            s.Logs4.Add("RIGANIM donor sockets: " + made + " created");
+        }
+
+        // ---- the rig rotation and the transform fold
+        if (a.ConvertRig || cleanUnits)
+        {
+            var rz = RotationMatrix('Z', a.RigRot[1] * Math.PI / 180.0); var rx = RotationMatrix('X', a.RigRot[0] * Math.PI / 180.0); var ry = RotationMatrix('Y', a.RigRot[2] * Math.PI / 180.0);   // math.radians: x * pi / 180 in double
+            var rot = PyMul(PyMul(rz, rx), ry);
+            foreach (var o in s.Objects)
+            {
+                if (o.Parent != null) continue;
+                ApplyMat4(PyMul(rot, o.World), null, out var loc, out var quat, out var scale);
+                o.Props = new[] { loc, quat, scale }; o.Local = VehicleProbe.ObjectMatrix(loc, quat, scale); o.ParentInverse = null; o.EvalStale = false; o.Dirty = true;
+            }
+            s.Logs4.Add("RIGANIM rig rotation: x=" + PyFloatRepr.Repr(a.RigRot[0]) + " y=" + PyFloatRepr.Repr(a.RigRot[1]) + " z=" + PyFloatRepr.Repr(a.RigRot[2]) + " (deg, registry semantics)");
+            if (a.RigRot.Any(v => v != 0.0)) Note(s, "a non-zero rotation");
+            if (primary != null)
+            {
+                int rm = 0;
+                foreach (var sl in primary.Slots) foreach (var fc in sl.FCurves.ToList()) if (!fc.DataPath.StartsWith("pose.bones", StringComparison.Ordinal)) { sl.FCurves.Remove(fc); rm++; }
+                if (rm > 0) { s.Logs4.Add("RIGANIM stripped " + rm + " OBJECT-level fcurves (non-bone) so the rig orientation can bake"); Note(s, "object-level fcurves stripped for the fold"); }
+            }
+            // the operator's evaluated depsgraph: every world with the rotated properties
+            EvaluateFrame(s, s.FrameCurrent);
+            // transform_apply(rotation, scale): the objects parents first
+            var sorted = new List<SceneObject>();
+            void AddSorted(SceneObject o) { if (sorted.Contains(o)) return; if (o.Parent != null) AddSorted(o.Parent); sorted.Add(o); }
+            foreach (var o in s.Objects) AddSorted(o);
+            foreach (var o in sorted)
+            {
+                var rs = VehicleProbe.ObjectMatrix(o.Props[0], o.Props[1], o.Props[2]);
+                var mat = (float[])rs.Clone(); mat[12] = mat[13] = mat[14] = 0f;
+                if (o.Type == "MESH") TransformPoints(mat, o.Mesh.Positions, o.Mesh.Vertices);   // mesh_transform: transform_points
+                else if (o.Type == "ARMATURE")
+                {
+                    var rest = rig.Armatures[o.Source.GltfNode];
+                    var bonesOf = rest == ad.Rest ? ad.BoneNodes : DepthFirst(rest.Bones, rest.Parent);
+                    var locals = new Dictionary<int, (float[] head, float[] tail, float roll)>();
+                    { var tmp = new ArmatureData { Rest = rest }; RebuildRest(tmp, bonesOf, locals); }
+                    ArmatureTransform(rest, bonesOf, mat, locals);
+                    if (rest == ad.Rest) foreach (var kv in VehicleProbe.PoseMatrices(rest, b => ad.PoseProps[b])) ad.PoseMats[kv.Key] = kv.Value;
+                    else foreach (var kv in VehicleProbe.PoseMatrices(rest, b => ad.PoseProps[b])) ad.PoseMats[kv.Key] = kv.Value;
+                }
+                o.Props = new[] { (float[])o.Props[0].Clone(), new[] { 1f, 0f, 0f, 0f }, new[] { 1f, 1f, 1f } };
+                o.Local = VehicleProbe.ObjectMatrix(o.Props[0], o.Props[1], o.Props[2]);
+                // BKE_object_where_is_calc: this object's matrix from its parent's (updated before it)
+                float[] pm = null;
+                if (o.Parent != null)
+                {
+                    pm = o.ParentBone != null ? VehicleProbe.MulM4(o.Parent.World, VehicleProbe.ParBone(ad.PoseMats[o.ParentBoneNode], LengthOf(o.ParentBoneNode))) : o.Parent.World;
+                    if (o.ParentInverse != null) pm = VehicleProbe.MulM4(pm, o.ParentInverse);
+                }
+                // BKE_object_transform_copy + BKE_object_where_is_calc on the EVALUATED object: its world from its (updated) parent
+                o.World = pm == null ? o.Local : VehicleProbe.MulM4(pm, o.Local);
+                // ignore_parent_tx: each child's evaluated world (as the operator's start left it) decomposed into its own
+                // properties, its parentinv the inverse of the parent matrix the updated evaluated parent gives
+                foreach (var c in s.Objects.Where(c => c.Parent == o))
+                {
+                    var cw = c.World;
+                    ApplyMat4(cw, null, out var loc, out var quat, out var scale);
+                    c.Props = new[] { loc, quat, scale }; c.Local = VehicleProbe.ObjectMatrix(loc, quat, scale);
+                    var parentMat = c.ParentBone != null ? VehicleProbe.MulM4(o.World, VehicleProbe.ParBone(ad.PoseMats[c.ParentBoneNode], LengthOf(c.ParentBoneNode))) : o.World;
+                    c.ParentInverse = BlenderEigen.InvertM4(parentMat);
+                    c.EvalStale = false;
+                    c.World = VehicleProbe.MulM4(VehicleProbe.MulM4(parentMat, c.ParentInverse), c.Local);
+                }
+            }
+            s.Logs4.Add("RIGANIM rig rotation+scale APPLIED TO DATA (identity nodes)");
+            Note(s, "the rotation and scale folded into the data");
+        }
+
+        // ---- the placement
+        if (me.Vertices > 0)
+        {
+            var mw = joined.World;
+            double minx = double.PositiveInfinity, maxx = double.NegativeInfinity, miny = double.PositiveInfinity, maxy = double.NegativeInfinity, minz = double.PositiveInfinity, maxz = double.NegativeInfinity;
+            for (int v = 0; v < me.Vertices; v++)
+            {
+                var p = MatVecPy(mw, new[] { me.Positions[3 * v], me.Positions[3 * v + 1], me.Positions[3 * v + 2] });
+                minx = Math.Min(minx, p[0]); maxx = Math.Max(maxx, p[0]); miny = Math.Min(miny, p[1]); maxy = Math.Max(maxy, p[1]); minz = Math.Min(minz, p[2]); maxz = Math.Max(maxz, p[2]);
+            }
+            double dx = -(minx + maxx) / 2.0, dy = -(miny + maxy) / 2.0, dz = -minz;
+            if (Math.Max(Math.Abs(dx), Math.Max(Math.Abs(dy), Math.Abs(dz))) > 1e-3)
+            {
+                var dworld = new[] { (float)dx, (float)dy, (float)dz };
+                var mwInv = PyInv(mw); var armInv = PyInv(armObj.World);
+                if (mwInv == null || armInv == null) { s.Fallback = "a matrix mathutils cannot invert in the placement"; return; }
+                var dmesh = Mat3VecPy(mwInv, dworld); var darm = Mat3VecPy(armInv, dworld);
+                for (int v = 0; v < me.Vertices; v++) for (int k = 0; k < 3; k++) me.Positions[3 * v + k] = (float)(me.Positions[3 * v + k] + dmesh[k]);
+                foreach (int b in ad.BoneNodes) { ad.Rest.EditHead[b] = Add3(ad.Rest.EditHead[b], darm); ad.Rest.EditTail[b] = Add3(ad.Rest.EditTail[b], darm); }
+                RebuildRest(ad, ad.BoneNodes);
+                foreach (var kv in VehicleProbe.PoseMatrices(ad.Rest, b => ad.PoseProps[b])) ad.PoseMats[kv.Key] = kv.Value;
+                s.Logs4.Add("RIGANIM placement: world centre (" + PyFixed(-dx, 4) + ", " + PyFixed(-dy, 4) + ") -> origin, lowest point " + PyFixed(minz, 4) + " -> 0 (moved " + PyFixed(dx, 4) + ", " + PyFixed(dy, 4) + ", " + PyFixed(dz, 4) + ")");
+                Note(s, "the placement moved the model");
+                double h = maxz - minz;
+                if (h > 1e-6 && dz > 0.25 * h)
+                {
+                    s.Logs4.Add("RIGANIM WARNING: grounding lifted this model by " + PyFixed(100.0 * dz / h, 1) + "% of its own height. That is the signature of a REFERENCE clip holding a struck/folded pose (a part hanging below the keel) — reference the DEPLOYED frame instead (Furl[0..0], not Spin[0..0] or Furl[N..N]) and re-bake.");
+                    Note(s, "the grounding warning");
+                }
+            }
+            else { s.Logs4.Add("RIGANIM placement: already centred and grounded"); Note(s, "the placement found it centred"); }
+        }
+        else { s.Logs4.Add("RIGANIM placement: SKIPPED (no armature or no vertices) — the file's own placement is kept"); Note(s, "the placement skipped"); }
+        // the scene as the next evaluation leaves it: an object hung from a bone follows the bones the placement moved
+        EvaluateFrame(s, s.FrameCurrent);
+    }
+
+    /// <summary>The material's `extensions` parsed, or null.</summary>
+    static JObject MaterialExtensions(HafMaterial mat)
+    {
+        if (mat.ExtensionsJson == null) return null;
+        try { return JObject.Parse(mat.ExtensionsJson); } catch (Exception) { return null; }
+    }
+
+    static int ExtensionTexture(JObject ext, string name, string tex)
+    {
+        var e = ext?[name] as JObject; var ti = e?[tex] as JObject; var idx = ti?["index"];
+        return idx == null || (idx.Type != JTokenType.Integer && idx.Type != JTokenType.Float) ? -1 : (int)idx;
+    }
+
+    /// <summary>The texture the importer links to the Principled node's Base Color: the pbr block's, or a specular-glossiness
+    /// material's diffuse texture (imp/KHR_materials_pbrSpecularGlossiness.py calls base_color with it).</summary>
+    static int BaseColourTexture(HafMaterial mat)
+    {
+        var ext = MaterialExtensions(mat);
+        if (ext != null && ext["KHR_materials_unlit"] == null && ext["KHR_materials_pbrSpecularGlossiness"] is JObject) return ExtensionTexture(ext, "KHR_materials_pbrSpecularGlossiness", "diffuseTexture");
+        return mat.BaseColorTexture;
+    }
+
+    /// <summary>The material's textures (indices, -1 where absent) in the order the importer makes their nodes - and so their
+    /// images. imp/material.py: an unlit material (KHR_materials_unlit) makes the base colour alone; a specular-glossiness
+    /// material the diffuse, the emission, the normal, the occlusion and the specular-glossiness; every other
+    /// pbr_metallic_roughness's order - the emission, the base colour, the metallic-roughness, the normal, the occlusion, then
+    /// the extensions: clearcoat (its texture, its roughness texture; the clearcoat normal is not imported), transmission,
+    /// volume (its thickness texture, only with a non-zero thicknessFactor), specular (its texture, its colour texture),
+    /// anisotropy, sheen (its colour texture, its roughness texture).</summary>
+    static IEnumerable<int> MaterialTextureOrder(HafMaterial mat)
+    {
+        var ext = MaterialExtensions(mat);
+        if (ext != null && ext["KHR_materials_unlit"] != null) { yield return mat.BaseColorTexture; yield break; }
+        if (ext != null && ext["KHR_materials_pbrSpecularGlossiness"] is JObject)
+        {
+            yield return ExtensionTexture(ext, "KHR_materials_pbrSpecularGlossiness", "diffuseTexture"); yield return mat.EmissiveTexture; yield return mat.NormalTexture; yield return mat.OcclusionTexture;
+            yield return ExtensionTexture(ext, "KHR_materials_pbrSpecularGlossiness", "specularGlossinessTexture");
+            yield break;
+        }
+        yield return mat.EmissiveTexture; yield return mat.BaseColorTexture; yield return mat.MetallicRoughnessTexture; yield return mat.NormalTexture; yield return mat.OcclusionTexture;
+        if (ext == null) yield break;
+        yield return ExtensionTexture(ext, "KHR_materials_clearcoat", "clearcoatTexture"); yield return ExtensionTexture(ext, "KHR_materials_clearcoat", "clearcoatRoughnessTexture");
+        yield return ExtensionTexture(ext, "KHR_materials_transmission", "transmissionTexture");
+        var vol = ext["KHR_materials_volume"] as JObject; double thickness = 0;
+        if (vol != null && vol["thicknessFactor"] != null && (vol["thicknessFactor"].Type == JTokenType.Float || vol["thicknessFactor"].Type == JTokenType.Integer)) thickness = (double)vol["thicknessFactor"];
+        if (thickness != 0) yield return ExtensionTexture(ext, "KHR_materials_volume", "thicknessTexture");
+        yield return ExtensionTexture(ext, "KHR_materials_specular", "specularTexture"); yield return ExtensionTexture(ext, "KHR_materials_specular", "specularColorTexture");
+        yield return ExtensionTexture(ext, "KHR_materials_anisotropy", "anisotropyTexture");
+        yield return ExtensionTexture(ext, "KHR_materials_sheen", "sheenColorTexture"); yield return ExtensionTexture(ext, "KHR_materials_sheen", "sheenRoughnessTexture");
+    }
+
+    /// <summary>The importer's name for an image. Images are made on FIRST USE (imp/image.py: BlenderImage.create returns
+    /// when the image already has a Blender name), in the order the materials are made - the node walk, each mesh's
+    /// primitives (BlenderNames' MaterialsInOrder) - and within a material in pbr_metallic_roughness's order: emission, base
+    /// colour, metallic-roughness, normal, occlusion (an unlit material: the base colour alone); an unused image is never
+    /// made. Embedded data takes the glTF name or Image_&lt;index&gt;; a file uri the glTF name or the file's basename, one
+    /// Blender image per path (images.load with check_existing). The textures of a material in MaterialTextureOrder's
+    /// order (the extensions' after the standard ones). Null, with `trouble`, when no material the importer made uses the
+    /// image.</summary>
+    static string ImageName(Stage1 s, int image, out string trouble)
+    {
+        var m = s.Model; var pool = new BlenderNames.NamePool();
+        var created = new Dictionary<int, string>(); var byPath = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        trouble = null;
+        foreach (var matName in s.Names.MaterialsInOrder)
+        {
+            int mi = -1; foreach (var kv in s.Names.MaterialOf) if (kv.Value == matName) { mi = kv.Key.material; break; }
+            if (mi < 0 || mi >= m.Materials.Count) continue;   // DefaultMaterial (a coloured primitive without one): no textures
+            foreach (int t in MaterialTextureOrder(m.Materials[mi]))
+            {
+                if (t < 0 || t >= m.Textures.Count) continue;
+                int img = m.Textures[t].Source;
+                if (img < 0 || img >= m.Images.Count || created.ContainsKey(img)) continue;
+                var hi = m.Images[img]; string n;
+                if (!string.IsNullOrEmpty(hi.Uri) && !hi.Uri.StartsWith("data:", StringComparison.Ordinal))
+                {
+                    string file = Uri.UnescapeDataString(hi.Uri).Replace('\\', '/');
+                    // images.load(check_existing=True) compares resolved file paths, so URI aliases share one image ID.
+                    string path = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(m.SourcePath) ?? "", file));
+                    if (byPath.TryGetValue(path, out var existing)) { created[img] = existing; if (img == image) return existing; continue; }
+                    n = pool.Unique(!string.IsNullOrEmpty(hi.Name) ? hi.Name : file.Substring(file.LastIndexOf('/') + 1)); byPath[path] = n;
+                }
+                else n = pool.Unique(!string.IsNullOrEmpty(hi.Name) ? hi.Name : "Image_" + img.ToString(CultureInfo.InvariantCulture));
+                created[img] = n;
+                if (img == image) return n;
+            }
+        }
+        trouble = "the albedo image is used by no material the importer made"; return null;
+    }
+
+    /// <summary>The DECIMATE modifier applied on the joined mesh: the BMesh with the vertex normals from the custom normals,
+    /// BM_mesh_decimate_collapse, the elements back in creation order, merge_customdata on the UVs.</summary>
+    static void Decimate(MeshData me, float ratio)
+    {
+        int nv = me.Vertices, nf = me.Faces.Length / 3;
+        var layout = new BlenderMesh { VertexCount = nv, Faces = me.Faces, ValidEdges = me.Edges ?? new int[0] };
+        var sharp = me.FaceSharp ?? new bool[nf];
+        float[] vno;
+        if (me.CustomNormal != null)
+        {
+            var d0 = new short[3 * nf]; var d1 = new short[3 * nf];
+            for (int c = 0; c < 3 * nf; c++) { d0[c] = me.CustomNormal[2 * c]; d1[c] = me.CustomNormal[2 * c + 1]; }
+            vno = VehicleProbe.DecodeCustomShorts(me.Positions, me.Faces, sharp, d0, d1);
+        }
+        else vno = VehicleProbe.BlenderVertexNormals(me.Positions, me.Faces, null);
+        var bm = BMesh.FromMesh(layout, me.Positions, sharp, me.FaceMaterial);
+        Array.Copy(vno, bm.VNo, vno.Length);
+        BlenderDecimate.FaceNormalsUpdate(bm);
+        var d = new BlenderDecimate.MeshData { CustomNormal = me.CustomNormal, DefNr = me.DefNr, DefWeight = me.DefWeight };
+        foreach (var uv in me.UvAll) d.Uv.Add(uv);
+        if (!BlenderDecimate.WouldRun(bm.TotFace, ratio)) return;
+        BlenderDecimate.Collapse(bm, ratio, d);
+        var newIndex = new int[bm.VertCount]; int count = 0;
+        for (int v = 0; v < bm.VertCount; v++) newIndex[v] = bm.VAlive[v] ? count++ : -1;
+        var pos = new float[3 * count];
+        List<int>[] defNr = me.DefNr != null ? new List<int>[count] : null; List<float>[] defW = me.DefNr != null ? new List<float>[count] : null;
+        for (int v = 0; v < bm.VertCount; v++)
+        {
+            if (!bm.VAlive[v]) continue;
+            int i = newIndex[v];
+            pos[3 * i] = bm.VCo[3 * v]; pos[3 * i + 1] = bm.VCo[3 * v + 1]; pos[3 * i + 2] = bm.VCo[3 * v + 2];
+            if (defNr != null) { defNr[i] = d.DefNr[v]; defW[i] = d.DefWeight[v]; }
+        }
+        var faces = new int[3 * bm.TotFace]; var fmat = new int[bm.TotFace]; var fsharp = new bool[bm.TotFace];
+        var uvOut = me.UvAll.Select(_ => new float[2 * 3 * bm.TotFace]).ToList();
+        var cnOut = me.CustomNormal != null ? new short[2 * 3 * bm.TotFace] : null;
+        int fo = 0;
+        for (int f = 0; f < bm.FaceCount; f++)
+        {
+            if (!bm.FAlive[f]) continue;
+            int l = bm.FLFirst[f];
+            for (int k = 0; k < 3; k++)
+            {
+                int c = 3 * fo + k;
+                faces[c] = newIndex[bm.LV[l]];
+                for (int i = 0; i < uvOut.Count; i++) { uvOut[i][2 * c] = d.Uv[i][2 * l]; uvOut[i][2 * c + 1] = d.Uv[i][2 * l + 1]; }
+                if (cnOut != null) { cnOut[2 * c] = me.CustomNormal[2 * l]; cnOut[2 * c + 1] = me.CustomNormal[2 * l + 1]; }
+                l = bm.LNext[l];
+            }
+            fmat[fo] = bm.FMat[f]; fsharp[fo] = (bm.FFlag[f] & BMesh.FlagSmooth) == 0;
+            fo++;
+        }
+        BlenderReduce.MergeUvsForApply(count, faces, uvOut);
+        var edges = new List<int>();
+        for (int e = 0; e < bm.EdgeCount; e++) if (bm.EAlive[e]) { edges.Add(newIndex[bm.EV1[e]]); edges.Add(newIndex[bm.EV2[e]]); }
+        me.Vertices = count; me.Positions = pos; me.Faces = faces; me.FaceMaterial = fmat; me.FaceSharp = fsharp; me.UvAll = uvOut; me.Uv = uvOut.Count > 0 ? uvOut[0] : null; me.CustomNormal = cnOut; me.DefNr = defNr; me.DefWeight = defW; me.Edges = edges.ToArray();
+    }
+
+    /// <summary>scene.frame_set(f) and a depsgraph evaluation: every object's active slot evaluated (the values written back to the
+    /// original where they differ), every pose and every matrix_world recomputed, the tagged objects included.</summary>
+    internal static void EvaluateFrame(Stage1 s, int f)
+        {
+            var ad = s.Armature; var armObj = ad.Object; var rig = s.Rig; var names = s.Names;
+            int BoneNodeOf(SceneObject armature, string bone) { foreach (var kv in names.BoneOfJoint) if (kv.Value == bone && (kv.Key >= 1000000 ? rig.ArmatureOfBone.TryGetValue(kv.Key, out var ar) && ar == rig.Armatures[armature.Source.GltfNode] : names.ArmatureNodeOfBone[kv.Key] == armature.Source.GltfNode)) return kv.Key; return -1; }
+            ActionData ActionOf(string name) => s.Actions.FirstOrDefault(x => x.Name == name);
+            float LengthOf(int boneNode) => rig.ArmatureOfBone[boneNode].Length[boneNode];
+            s.FrameCurrent = f;
+            // the evaluated copy takes every curve's value; the ORIGINAL's property is written back only where the value
+            // differs (animsys_write_orig_anim_rna), so a zero of the other sign the script set keeps its sign there
+            var boneProps = ad.PoseProps.ToDictionary(kv => kv.Key, kv => CloneProps(kv.Value));      // the evaluated pose
+            var boneStored = ad.PoseProps.ToDictionary(kv => kv.Key, kv => CloneProps(kv.Value));     // the original's properties
+            foreach (var o in s.Objects)
+            {
+                var props = CloneProps(o.Props); var stored = CloneProps(o.Props);
+                var act = o.Action != null ? ActionOf(o.Action) : null;
+                var slot = act?.Slots.FirstOrDefault(sl => sl.Identifier == o.Slot);
+                if (slot != null)
+                    foreach (var fc in slot.FCurves)
+                    {
+                        if (fc.Keys.Count == 0) continue;
+                        float v = EvaluateCurve(fc.Keys, f);
+                        int ci = ChannelIndex(fc.Prop);
+                        if (fc.Bone == null) { props[ci][fc.Index] = v; if (stored[ci][fc.Index] != v) stored[ci][fc.Index] = v; }
+                        else if (o.Type == "ARMATURE")
+                        {
+                            int b = BoneNodeOf(o, fc.Bone);
+                            if (b >= 0 && boneProps.ContainsKey(b)) { boneProps[b][ci][fc.Index] = v; if (boneStored[b][ci][fc.Index] != v) boneStored[b][ci][fc.Index] = v; }
+                        }
+                    }
+                o.Props = stored; o.Local = VehicleProbe.ObjectMatrix(props[0], props[1], props[2]);
+            }
+            ad.PoseProps = boneStored;
+            var pose = new Dictionary<int, float[]>();
+            foreach (var arm in rig.Armatures.Values) foreach (var kv in VehicleProbe.PoseMatrices(arm, b => boneProps[b])) pose[kv.Key] = kv.Value;
+            ad.PoseMats = pose;
+            var memo = new Dictionary<SceneObject, float[]>();
+            float[] Eval(SceneObject o)
+            {
+                if (memo.TryGetValue(o, out var w)) return w;
+                if (o.Parent == null) w = o.Local;
+                else
+                {
+                    var pw = Eval(o.Parent);
+                    var pm = o.ParentBone != null ? VehicleProbe.MulM4(pw, VehicleProbe.ParBone(pose[o.ParentBoneNode], LengthOf(o.ParentBoneNode))) : pw;
+                    var pinv = o.EvalStale ? o.EvalParentInverse : o.ParentInverse;
+                    if (pinv != null) pm = VehicleProbe.MulM4(pm, pinv);
+                    w = VehicleProbe.MulM4(pm, o.EvalStale ? o.EvalLocal : o.Local);
+                }
+                memo[o] = w; return w;
+            }
+            foreach (var o in s.Objects) { o.World = Eval(o); o.Dirty = false; }
+        }
+
     /// <summary>BKE_object_apply_mat4 for an object in quaternion mode with the identity parentinv and no deltas: with a
     /// parent, Eigen's inverse of (the parent's matrix times the identity) times the matrix; mat4_to_loc_rot_size;
     /// mat3_normalized_to_quat times the inverse of the identity delta quaternion; dloc subtracted, dscale divided out.</summary>
@@ -1355,7 +2111,7 @@ public static class BlenderRigAnim
 
     public sealed class Rows
     {
-        public string[] Scene;
+        public string[] Scene, Image;   // Image: stage 4's IMG row (file bytes and hashes unknown here: '-')
         public readonly List<string[]> Objs = new List<string[]>(), Meshes = new List<string[]>(), Groups = new List<string[]>(), Bones = new List<string[]>(),
             PoseBones = new List<string[]>(), Actions = new List<string[]>(), FCurves = new List<string[]>(), Keys = new List<string[]>();
     }
@@ -1390,6 +2146,8 @@ public static class BlenderRigAnim
                 Sha(Bytes(d.Positions)), Sha(Bytes(d.Faces)), Sha(Bytes(starts).Concat(Bytes(totals)).ToArray()), Sha(Bytes(d.FaceMaterial)), d.Uv == null ? "-" : Sha(Bytes(d.Uv)),
                 d.Materials.Count == 0 ? "-" : string.Join(";", d.Materials.Select(x => x ?? "(none)")), d.Groups.Count == 0 ? "-" : string.Join(";", d.Groups),
                 d.ArmatureModifier == null ? "-" : "ARMATURE:Armature:" + d.ArmatureModifier,
+                // every UV layer by the importer's names (uv_layers.new('UVMap') per TEXCOORD_n: UVMap, UVMap.001, ...), the join uniting them by name
+                d.UvAll.Count == 0 ? "-" : string.Join(";", d.UvAll.Select((uv, i) => (i == 0 ? "UVMap" : "UVMap." + i.ToString("000", CultureInfo.InvariantCulture)) + ":" + Sha(Bytes(uv)))),
             });
             for (int g = 0; g < d.Groups.Count; g++)
             {
@@ -1409,7 +2167,7 @@ public static class BlenderRigAnim
             for (int i = 0; i < ad.BoneNodes.Count; i++)
             {
                 int b = ad.BoneNodes[i];
-                var row = new List<string> { "BONE", N, i.ToString(CultureInfo.InvariantCulture), s.Names.BoneOfJoint[b], ad.Rest.Parent[b] >= 0 ? s.Names.BoneOfJoint[ad.Rest.Parent[b]] : "-", "1", Hex(ad.Rest.Length[b]) };
+                var row = new List<string> { "BONE", N, i.ToString(CultureInfo.InvariantCulture), s.Names.BoneOfJoint[b], ad.Rest.Parent[b] >= 0 ? s.Names.BoneOfJoint[ad.Rest.Parent[b]] : "-", ad.NoDeform.Contains(b) ? "0" : "1", Hex(ad.Rest.Length[b]) };
                 row.AddRange(HexRowMajor(ad.Rest.MatrixLocal[b]));
                 r.Bones.Add(row.ToArray());
             }
@@ -1422,6 +2180,7 @@ public static class BlenderRigAnim
                 r.PoseBones.Add(row.ToArray());
             }
         }
+        if (n == 4 && s.Albedo.path != null) r.Image = new[] { "IMG", N, s.Albedo.path, "-", "-", s.Albedo.w.ToString(CultureInfo.InvariantCulture), s.Albedo.h.ToString(CultureInfo.InvariantCulture), "4", "-" };
         foreach (var act in s.Actions)
         {
             r.Actions.Add(new[] { "ACT", N, act.Name, Hex(act.FrameStart), Hex(act.FrameEnd), act.FCurves.Count().ToString(CultureInfo.InvariantCulture), act.Slots.Count.ToString(CultureInfo.InvariantCulture) });
