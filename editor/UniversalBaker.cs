@@ -68,6 +68,7 @@ public struct BakeConfig
 public struct BakeResult
 {
     public bool ok; public string error; public string skeletonGuid, atlasGuid, clipGuid; public Vector3 bbox;
+    public string rigRoute, rigRouteNote;   // ANIMATED only (step (h)): "blender", "csharp", or "csharp-fallback" with the port's reason in the note
     public string clipMoveGuid, clipAfterGuid, clipAttackGuid, clipCombatGuid, clipPreMoveGuid, clipIdleGuid, clipIdleAltGuid, clipIdleAlt2Guid;   // STATE-DRIVEN only: the per-role ClipCollection GUIDs ("" when not baked)
 }
 
@@ -527,7 +528,7 @@ public static class UniversalBaker
         // with the FALLBACK key - the same settings and port revision take the FBX route up front next time (the port is
         // deterministic: its decline would be the same) and reuse that FBX; a changed setting or a bumped CacheRevision asks
         // the port again. Without it the next bake found the csharp stamp and a GLB of an OLDER key beside it, and reused that.
-        bool rigFellBack = false;
+        bool rigFellBack = false; string rigFallbackWhy = null;   // the port's reason when this bake takes the FBX route in its place (the result says so)
         string slimArgsKeyFallback = slimArgsKey.Replace("route=csharp:", "route=csharp-fallback:");
         if (glbRoute && BakerRules.CanReuseRigFallback(cfg.reuseExtracted, File.Exists(fbxFull),
             File.Exists(slimArgsFull) && File.ReadAllText(slimArgsFull) == slimArgsKeyFallback,
@@ -535,7 +536,7 @@ public static class UniversalBaker
             !string.IsNullOrEmpty(cfg.modelFile) && File.Exists(cfg.modelFile) && File.Exists(fbxFull) && File.GetLastWriteTimeUtc(cfg.modelFile) > File.GetLastWriteTimeUtc(fbxFull)))
         {
             Debug.Log($"[Factory] {name}: the C# rig port left this model to Blender at these settings (its last bake) - taking the FBX route up front; a changed setting or a changed port asks it again.");
-            glbRoute = false; slimOut = fbxFull; rigFellBack = true;
+            glbRoute = false; slimOut = fbxFull; rigFellBack = true; rigFallbackWhy = "the port left this model to Blender at these settings on its last bake";
             argsChanged = false; sidecarMissing = false; roleFbxMissing = RoleFbxMissing();
             toolNewer = File.Exists(rigScript) && File.GetLastWriteTimeUtc(rigScript) > File.GetLastWriteTimeUtc(fbxFull);
             srcNewer = !string.IsNullOrEmpty(cfg.modelFile) && File.Exists(cfg.modelFile) && File.GetLastWriteTimeUtc(cfg.modelFile) > File.GetLastWriteTimeUtc(fbxFull);
@@ -600,6 +601,7 @@ public static class UniversalBaker
                         if (!BlenderAvailable()) return Fail("rig slim: " + inProc.UseBlender + ". That leaves this model to Blender, which is not installed (it is auto-detected, or set EditorPrefs 'HAF.BlenderPath').");
                         glbRoute = false; slimOut = fbxFull;
                         rigFellBack = !inProc.UseBlender.StartsWith("the C# rig run failed", StringComparison.Ordinal);   // transient crashes retry the port next bake
+                        rigFallbackWhy = inProc.UseBlender;
                         // a GLB and sidecar of an earlier key must not survive the fallback: the next bake would find them under the csharp stamp
                         foreach (var stale in new[] { glbFull, rolesSidecarFull })
                             try { if (File.Exists(stale)) File.Delete(stale); } catch (Exception ex) { Debug.LogWarning("[Factory] could not remove the stale slim GLB output " + stale + ": " + ex.Message); }
@@ -1149,6 +1151,7 @@ public static class UniversalBaker
         Debug.Log($"[Factory] {name} ANIMATED DONE. skeleton={skelGuid} clip={clipGuid} atlas={atlasGuid}" +
                   (cfg.animStateDriven ? $" [state-driven: move={clipMoveGuid}{(wantAfter ? " after=" + clipAfterGuid : "")}{(wantAttack ? " attack=" + clipAttackGuid : "")}{(wantCombat ? " combat=" + clipCombatGuid : "")}{(wantPreMove ? " premove=" + clipPreMoveGuid : "")}{(wantIdle ? " idle=" + clipIdleGuid : "")}{(wantIdleAlt ? " idlealt=" + clipIdleAltGuid : "")}{(wantIdleAlt2 ? " idlealt2=" + clipIdleAlt2Guid : "")}]" : ""));
         return new BakeResult { ok = true, skeletonGuid = skelGuid, atlasGuid = atlasGuid, clipGuid = clipGuid, bbox = Vector3.zero,
+                                rigRoute = glbRoute ? "csharp" : rigFallbackWhy != null ? "csharp-fallback" : "blender", rigRouteNote = rigFallbackWhy ?? "",
                                 clipMoveGuid = clipMoveGuid, clipAfterGuid = clipAfterGuid, clipAttackGuid = clipAttackGuid, clipCombatGuid = clipCombatGuid, clipPreMoveGuid = clipPreMoveGuid, clipIdleGuid = clipIdleGuid, clipIdleAltGuid = clipIdleAltGuid, clipIdleAlt2Guid = clipIdleAlt2Guid };
     }
 

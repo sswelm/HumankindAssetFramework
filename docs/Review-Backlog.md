@@ -346,9 +346,12 @@ export?", `BlenderRigAnimHeadlessTest`) runs against the port on every animated 
 argv. Found: a JPEG albedo's PNG inside Blender's GLB is its encoder's - the port's file carries the source JPEG, the
 row compares with the image bytes aside; a pre-PR review found and fixed three Factory-side defects the drill cannot see
 (a stale GLB reused after a fallback, the GLB's absolute clip times, previews reading only the FBX - `docs/Testing.md`).
-Next: (h) the row's run in Unity by the user and the acceptance gate above
-(every GLB-source entry baked both ways, mesh, skeleton, clips, placement, an in-game check of each model playing its
-roles); only then the default flips.
+(h) the acceptance row, built 2026-10-14: `editor/RigRouteAcceptanceTest.cs`, the Bake Tests row "Does the GLB rig
+route bake what the FBX route bakes?" - every animated glTF entry baked both ways under throwaway names, the Amplitude
+outputs, the imported rig (bones, mesh, placement), every role's clip (length; bone world transforms and skinned vertices at
+every clip frame and curve key) and non-empty role collections and pose stream lengths compared in Unity (`docs/Testing.md`); `BakeResult.rigRoute` names the
+route a bake took. OWED, the user's: the row's run in Unity on every entry and the in-game check of each model playing
+its roles; only then the default flips.
 - **rig_anim.py's socket sort exit reads a freed edit bone** — OPEN (2026-10-14, found by the stage 4 fixtures). The
   "would sort BEFORE its parent" error prints `_parent.name` after `bpy.ops.object.mode_set(mode='OBJECT')` has freed
   the edit bones: four Blender runs of `fx_s4_socket_sort` printed the right name once, an empty name once, and twice
