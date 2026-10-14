@@ -194,7 +194,7 @@ public static class BakeSmokeTest
     }
 
     // Delete every throwaway artifact for this test name: the baked Resources assets and the FactorySource extraction dir.
-    static void CleanupTestAssets(string testName)
+    internal static void CleanupTestAssets(string testName)
     {
         try
         {

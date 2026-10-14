@@ -188,6 +188,18 @@ public class BakeTestRunnerWindow : EditorWindow
                        "default only once this row is green.",
                 run = BlenderRigAnimHeadlessTest.RunSection },
 
+            // THE RIG ROUTE ACCEPTANCE (2026-10-14, step (h) of the rig_anim port): the backlog's gate before the GLB route becomes the
+            // editor default - every animated glTF entry baked BOTH ways under throwaway names, the Factory's outputs compared in Unity.
+            new TestRow { name = "Does the GLB rig route bake what the FBX route bakes? (every animated glTF entry, both routes, in Unity)", quick = false, on = false, needsBlender = true,
+                cost = "two full animated bakes per animated glTF registry entry (Blender's slim, the atlas, the Amplitude skeleton and clips) - an hour or more for the whole registry",
+                what = "For every animated registry entry with a .glb/.gltf source, bakes it twice under throwaway names - once on the Blender FBX route, once on " +
+                       "the C# in-process GLB route - and compares what the Factory made: the Amplitude outputs present on both, the rig Unity imported (the bones " +
+                       "by name, the skinned mesh's triangles, bounds and vertex positions, the placement), every role's clip (its length, and the skinned " +
+                       "vertices and bone positions at its first, middle and last frame), and each role's baked pose stream length. An entry the port leaves " +
+                       "to Blender by name is a SKIP that says why (the bake then took the FBX route twice); a crash is a FAIL. This row green on every entry, " +
+                       "plus the in-game check of each model playing its roles, is what flips the editor default to the GLB route.",
+                run = RigRouteAcceptanceTest.RunSection },
+
             // THE IN-PROCESS PROBE PREVIEW (2026-10-03, step 3d): the C# probe's rows are held to Blender's by the push gate; the PREVIEW
             // it builds in Unity - the frame, the facing, the lifecycle of its objects - can only be judged in Unity, against the
             // preview FBX files Blender left under Assets/FactorySource/VehicleLab and Unity imported.

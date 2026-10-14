@@ -874,14 +874,15 @@ def f_review_jpeg(out, declared="image/jpeg", suffix=""):
 def unity_import_fixtures(out):
     """Small raw GLBs for UnityRigImportTests: names, atlas slot order, translation scaling, and clip rebasing."""
     os.makedirs(out, exist_ok=True)
-    for case in ("plain", "long", "late", "underscore"):
+    for case in ("plain", "long", "late", "underscore", "twist"):
         r = Rig(); arm, j0, j1, sk, m = rigged(r)
         if case == "long": r.anims[0]["name"] = "Spin_" + "a" * 120
         if case == "underscore": r.anims[0]["name"] = "_Spin"
         times = [0.5, 1.0] if case == "late" else [0.0, 1.0]
         if case == "late":
             r.anims = []; a = r.anim("Spin"); r.key(a, j1, "rotation", times, spin(2, "x", 0.25))
-        r.key(0, j1, "translation", times, [(0.0, 1.0, 0.0), (2.0, 1.0, 0.0)])
+        # "twist": the same rest and length as "plain", another motion - the acceptance row's per-frame comparison must catch it
+        r.key(0, j1, "translation", times, [(0.0, 1.0, 0.0), (0.0, 1.0, 2.0) if case == "twist" else (2.0, 1.0, 0.0)])
         r.write(out, case)
     r = Rig(); red = r.material("Red", (1.0, 0.0, 0.0)); blue = r.material("Blue", (0.0, 0.0, 1.0))
     rigged(r, material=blue, second=red)  # submesh order opposite the extraction's material order

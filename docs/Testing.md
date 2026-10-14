@@ -1658,6 +1658,26 @@ frames of held pose (each clip is rebased on its animation's first key); the Lab
 files when it writes). Owed: the row's run in Unity, then the in-game check of each model
 playing its roles, then the default.
 
+**Step (h), the acceptance row (2026-10-14).** `editor/RigRouteAcceptanceTest.cs`, the Bake Tests row "Does the GLB
+rig route bake what the FBX route bakes?" (off by default: two full animated bakes per entry), is the backlog's gate
+before the GLB route becomes the editor default. For every animated registry entry with a .glb/.gltf source it bakes
+the recipe twice under throwaway names (`BakeSmokeTest.PREFIX`, the delete guard's and the registry filter's), `rigRoute`
+"blender" then "csharp", through `ModelFactoryWindow.ConfigFor` and `UniversalBaker.BuildAnimated` as the Bake button
+does, and compares what the Factory made in Unity: the Amplitude outputs present and non-empty on both
+(`BakeSmokeTest.MissingAssets`); for every role (`RigPreviewPath` resolves either route's rig and clip) the bones by
+name, the skinned mesh's triangle count, rest bounds and the SET of vertex positions (the FBX import splits vertices at
+seams, the glTF carries them split already: counts may differ, the multiset of positions may not - a grid lookup within
+1e-3 of the rig's extent, both ways), the root bone's placement, the clip's length and, at its first, middle and last
+frame, every bone's world position and the skinned vertices (`SkinnedMeshRenderer.BakeMesh`); and each role's baked
+pose stream length (frames x bones). `BakeResult.rigRoute` says which route a bake took ("blender", "csharp",
+"csharp-fallback" with the port's reason in `rigRouteNote`): a recipe the port leaves to Blender by name bakes through
+the FBX route both times and is a SKIP that says why; a port crash is a FAIL. The in-game check of each model playing
+its roles stays the user's; the row green on every entry and that check together flip the default. The comparison
+itself is executed by `tools/riganim_unity_import_drill.sh` (batch-mode Unity, a temporary project): two imports of
+one fixture are equal, a rig 2% larger is caught by its bounds, a clip of another length by its length, another
+motion of the same length and rest by the bones at its middle frame. A cancel keeps the verdicts made so far. Owed:
+the row's run.
+
 Review of PR #170 (2026-10-14): `tools/riganim_unity_import_drill.sh` runs the real Factory GLB import in an
 isolated Unity project. Five fixtures check exact bone names (no picker-only `#index` suffix), 125-byte action names,
 action names starting with `_`, independently persisted role subassets, primary/movement previews, translation scaling,

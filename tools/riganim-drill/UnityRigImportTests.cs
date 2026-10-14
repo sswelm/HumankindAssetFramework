@@ -78,6 +78,32 @@ public static class UnityRigImportTests
         UnityEngine.Object.DestroyImmediate(inst); foreach (var meshCopy in (List<Mesh>)args[4]) if (meshCopy != null && !AssetDatabase.Contains(meshCopy)) UnityEngine.Object.DestroyImmediate(meshCopy);
         UnityEngine.Object.DestroyImmediate(atlas);
     }
+    // step (h): the acceptance row's comparison on two imports of one fixture (equal), a scaled rig and a clip of another length (not)
+    static void Acceptance()
+    {
+        File.Copy(Path.Combine(fixtures, "plain.glb"), Path.Combine(fixtures, "plain_b.glb"), true);
+        var goA = Import("plain", "Spin", out var clipsA); var goB = Import("plain_b", "Spin", out var clipsB); var goLate = Import("late", "Spin", out var clipsLate); var goTwist = Import("twist", "Spin", out var clipsTwist);
+        if (goA == null || goB == null || goLate == null || goTwist == null) return;
+        var instA = UnityEngine.Object.Instantiate(goA); var instB = UnityEngine.Object.Instantiate(goB); var instLate = UnityEngine.Object.Instantiate(goLate); var instTwist = UnityEngine.Object.Instantiate(goTwist);
+        try
+        {
+            var same = RigRouteAcceptanceTest.CompareRigs(instA, instB, Subclip(clipsA["primary"]), Subclip(clipsB["primary"]));
+            Check("acceptance: two imports of one rig are equal", same.Count == 0, same.Count == 0 ? "no difference" : string.Join("; ", same));
+            instB.transform.localScale = Vector3.one * 1.02f;
+            var scaled = RigRouteAcceptanceTest.CompareRigs(instA, instB, Subclip(clipsA["primary"]), Subclip(clipsB["primary"]));
+            Check("acceptance: a rig 2% larger is caught", scaled.Count > 0, scaled.Count > 0 ? scaled[0] : "not caught");
+            instB.transform.localScale = Vector3.one;
+            var other = RigRouteAcceptanceTest.CompareRigs(instA, instLate, Subclip(clipsA["primary"]), Subclip(clipsLate["primary"]));
+            Check("acceptance: a clip of another length is caught", other.Any(p => p.Contains("the clip is")), other.Count > 0 ? other[0] : "not caught");
+            // the same rest, the same length, another motion: only the sampled frames can tell them apart
+            // a fresh instance: the checks above left instA posed at its clip's end, and the row judges the REST of a fresh instance
+            var instA2 = UnityEngine.Object.Instantiate(goA);
+            var twist = RigRouteAcceptanceTest.CompareRigs(instA2, instTwist, Subclip(clipsA["primary"]), Subclip(clipsTwist["primary"]));
+            UnityEngine.Object.DestroyImmediate(instA2);
+            Check("acceptance: another motion of the same length is caught at a sampled frame", twist.Any(p => p.Contains(" at 0.5 s")) && !twist.Any(p => p.Contains("the clip is") || p.Contains("rest bounds")), twist.Count > 0 ? twist[0] : "not caught");
+        }
+        finally { UnityEngine.Object.DestroyImmediate(instA); UnityEngine.Object.DestroyImmediate(instB); UnityEngine.Object.DestroyImmediate(instLate); UnityEngine.Object.DestroyImmediate(instTwist); }
+    }
     public static void Run()
     {
         fixtures = Arg("-hafRigImportFixtures"); output = Arg("-hafRigImportOutput");
@@ -86,6 +112,7 @@ public static class UnityRigImportTests
             Motion("plain"); Motion("late"); Atlas();
             foreach (var item in new[] { (fixture: "long", action: "Spin_" + new string('a', 120)), (fixture: "underscore", action: "_Spin") })
                 if (Import(item.fixture, item.action, out _) != null) Preview(item.fixture, item.action);
+            Acceptance();
         }
         catch (Exception e) { Rows.Add("FAIL exception: " + e); failed++; }
         Rows.Add("TOTAL failed " + failed); File.WriteAllLines(output, Rows);
