@@ -1671,12 +1671,15 @@ within 1e-3 of the rig's extent, both ways), the root bone's placement and every
 length and, at every clip frame (at least 24 Hz) and both imports' curve keys, every bone's world transform (position,
 rotation and scale) and the skinned vertices (`SkinnedMeshRenderer.BakeMesh`); and each role's non-empty baked clip
 collection and pose stream length (frames x bones). Two tolerances: the REST pose stays strict (1e-3 of the
-extent, 0.06 degrees for rotation and matrix axes, 1e-3 relative axis scale); the CLIP accepts 0.6 degrees of rotation
-and matrix-axis direction, 1.5% of the extent for position and 1% relative axis scale **in each bone's matched parent
-space**. For root bones this is world space. Non-bone wrapper transforms are included in that relative matrix.
+extent, 0.06 degrees for rotation and matrix axes, 1e-3 relative axis scale); the CLIP accepts 0.6 degrees of rotation,
+1.5% of the extent for position and 1% relative scale **in each bone's matched parent space**. For root bones this is world space.
+Non-bone wrapper transforms are included in that relative matrix.
 Unity's keyframe reduction acts on local curves, so allowed errors accumulate through a bone chain; a fixed world-angle
 or world-scale cap incorrectly rejects deep rigs. Rotation and `lossyScale` alone also miss shear: matrix axes remain
-part of both comparisons. See Unity's [rotation compression metric](https://docs.unity3d.com/2021.3/Documentation/ScriptReference/ModelImporter-animationRotationError.html)
+part of both comparisons. In clips, the observed allowed quaternion difference can be amplified by a non-uniform
+static helper; its stretch bounds the additional matrix-axis and axis-length changes. With no quaternion difference,
+the axis-direction check stays at the strict rest margin. Bone-local scale changes, normalized to each rig's rest,
+still have a direct 1% cap. See Unity's [rotation compression metric](https://docs.unity3d.com/2021.3/Documentation/ScriptReference/ModelImporter-animationRotationError.html)
 and [position compression metric](https://docs.unity3d.com/2021.3/Documentation/ScriptReference/ModelImporter-animationPositionError.html).
 The positional and scale margins are this row's acceptance policy; they do not equate Unity's percentage errors to mesh
 extent. Skinned vertices retain the 1.5% base allowance, expanded only as needed by the **observed** displacement of
@@ -1695,7 +1698,8 @@ verdicts made so far. Owed: the row's run.
 Review of PR #172 (2026-10-14): native Unity reproduced false failures for three-bone chains with 0.4-degree
 local rotation errors or 0.6% local scale errors, and a false pass for opposite socket shear despite equal world
 rotation and lossy scale. The parent-space and matrix-axis checks above fix both. Native regressions cover weighted
-and unweighted chains, excessive local errors, opposite shear, and wrong weights with identical bone motion. The
+and unweighted chains, excessive local errors, opposite shear, wrong weights with identical bone motion, and
+allowed rotations versus excessive bone scales beneath static parents stretched 2x and 100x. The
 real FBX/GLB pair still agrees with the default FBX compression and without it.
 
 Review of PR #171 (2026-10-14): native Unity counterexamples reproduced false passes for a rotating unweighted

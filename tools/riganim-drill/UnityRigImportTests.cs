@@ -286,6 +286,32 @@ public static class UnityRigImportTests
         }
         finally { UnityEngine.Object.DestroyImmediate(a); UnityEngine.Object.DestroyImmediate(b); UnityEngine.Object.DestroyImmediate(mesh); }
     }
+    static void NonUniformParent(float stretch)
+    {
+        var go = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/FactorySource/RigImport_plain/anim/RigImport_plain_anim.prefab");
+        var a = UnityEngine.Object.Instantiate(go); var b = UnityEngine.Object.Instantiate(go);
+        var ca = new AnimationClip { legacy = true }; var cb = new AnimationClip { legacy = true };
+        try
+        {
+            foreach (var inst in new[] { a, b })
+            {
+                var smr = inst.GetComponentInChildren<SkinnedMeshRenderer>();
+                var helper = new GameObject("Stretch").transform; helper.SetParent(smr.bones[0], false); helper.localScale = new Vector3(stretch, 1, 1);
+                var socket = new GameObject("StretchedSocket").transform; socket.SetParent(helper, false); smr.bones = smr.bones.Concat(new[] { socket }).ToArray();
+            }
+            string path = AnimationUtility.CalculateTransformPath(a.GetComponentsInChildren<Transform>().First(t => t.name == "StretchedSocket"), a.transform);
+            var binding = EditorCurveBinding.FloatCurve(path, typeof(Transform), "localEulerAnglesRaw.z");
+            AnimationUtility.SetEditorCurve(ca, binding, AnimationCurve.Linear(0, 0, 1, 0));
+            AnimationUtility.SetEditorCurve(cb, binding, AnimationCurve.Linear(0, 0, 1, 0.4f));
+            var differences = RigRouteAcceptanceTest.CompareRigs(a, b, ca, cb);
+            Check("acceptance: allowed rotation under " + stretch + "x static parent passes", differences.Count == 0, string.Join("; ", differences));
+            ca.SampleAnimation(a, 0); cb.SampleAnimation(b, 0);
+            AnimationUtility.SetEditorCurve(cb, EditorCurveBinding.FloatCurve(path, typeof(Transform), "m_LocalScale.x"), AnimationCurve.Linear(0, 1, 1, 1.03f));
+            var tooFar = RigRouteAcceptanceTest.CompareRigs(a, b, ca, cb);
+            Check("acceptance: excess bone scale under " + stretch + "x static parent fails", tooFar.Count > 0, string.Join("; ", tooFar));
+        }
+        finally { UnityEngine.Object.DestroyImmediate(a); UnityEngine.Object.DestroyImmediate(b); UnityEngine.Object.DestroyImmediate(ca); UnityEngine.Object.DestroyImmediate(cb); }
+    }
     public static void Run()
     {
         fixtures = Arg("-hafRigImportFixtures"); output = Arg("-hafRigImportOutput");
@@ -294,7 +320,7 @@ public static class UnityRigImportTests
             Motion("plain"); Motion("late"); Atlas();
             foreach (var item in new[] { (fixture: "long", action: "Spin_" + new string('a', 120)), (fixture: "underscore", action: "_Spin") })
                 if (Import(item.fixture, item.action, out _) != null) Preview(item.fixture, item.action);
-            Acceptance(); AcceptanceCounterexamples(); PoseStreams(); CrossRoute(); RootPlacement(); ToleranceCounterexamples(); WrongSkinWeights();
+            Acceptance(); AcceptanceCounterexamples(); PoseStreams(); CrossRoute(); RootPlacement(); ToleranceCounterexamples(); WrongSkinWeights(); NonUniformParent(2); NonUniformParent(100);
         }
         catch (Exception e) { Rows.Add("FAIL exception: " + e); failed++; }
         Rows.Add("TOTAL failed " + failed); File.WriteAllLines(output, Rows);
