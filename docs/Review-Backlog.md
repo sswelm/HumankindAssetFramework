@@ -352,6 +352,38 @@ outputs, the imported rig (bones, mesh, placement), every role's clip (length; b
 every clip frame and curve key) and non-empty role collections and pose stream lengths compared in Unity (`docs/Testing.md`); `BakeResult.rigRoute` names the
 route a bake took. OWED, the user's: the row's run in Unity on every entry and the in-game check of each model playing
 its roles; only then the default flips.
+
+**(5) `vehicle_rig` - the plan, decided 2026-10-14 (the Lab's Generate without Blender, by (4)'s method).** Measured
+first: `vehicle_rig.py` is 3,846 lines; `mode = argv[0]` is probe (ported, 3a-3d), rigfast (the SKM fast path) or
+rig; the rig path (line 1131 to the end) is 156 top-level statements, three of them guarded functions, 34 defs in all,
+argv[1..67] built in one place (`VehicleLabWindow.Vehicleize`, line 2325). 24 saved recipes
+(`Assets/FactorySource/VehicleLab/Recipes`); by marked role - Body 22, Ignore 16, Structure 12, Wheel 10, Default 9,
+Preserve 9, Detail 9, Sail 5, Rudder 5, Gun 4, TailRotor 3, Turret 2, Edgecase 2, Caterpillar 2, Rotor 2, Oar 2,
+Flip 2, Window 2, Trail 1, Cradle 1, Rigging 1, Flag 1, Shroud 1, Muzzle 0; a second model 2, useSourceRig 1; sail
+folds in 12, oar strokes 15, gun recoil 18, wave rock 1 of 23, static tracks 1. The script's stages, to be cut at its
+own top-level lines as the rig_anim drill cuts rig_anim.py: (1) the import, the second-model merge, per-part placement,
+the modifier bake, rigged-source detection, the flatten, the orientation (1131-1337); (2) the reduction tiers per role
+- limited dissolve, welds, decimate (1338-1514); (3) the rig - wheel clustering (axle axis, PCA, spoke symmetry), the
+sail, rigging, flag, oar, rudder, preserve and flip name sets, the gun, turret and rotor bones, tread cells and
+path-instanced link bones, the join per bone (1515-2896); (4) the actions - Spin with rolling-contact speeds, wave
+rock, rowing, Furl, the flag strike, recoil and trails (2897 on); (5) the export - the GLB through Blender's glTF
+exporter, which `BlenderRigExport` + `BlenderGlbWriter` already model, and the preview FBX, which the in-process
+probe preview (3d) no longer needs. Already in C#: the probe's scene model (`VehicleProbe.*`: the import, merge2,
+placement, islands, visibility, inside-out, custom normals, the Blender world, armature, skin and pose),
+`BlenderDecimate`, `BlenderFCurve` and the deploy's keyframe insertion, the glTF export model, the GLB reader and
+writer. Not yet: bmesh's limited dissolve and remove_doubles (the weld rig_anim's port leaves by name), the
+clustering, PCA and autocorrelation geometry - numpy double arithmetic, the first port whose oracle is numpy rather
+than Blender's C, its rules measured per operation -, the FBX preview export (LEFT by name until nothing reads it).
+Steps: (a) the stage dump drill `tools/vehiclerig_drill.sh` - jobs from the 24 recipes exactly as Vehicleize formats
+argv (the builder factored out for the jobs writer, as the probe jobs are), the script cut at five of its own lines,
+the scene on record after each with the rig_anim dump's rows (objects, meshes, vertex groups, bones, actions,
+fcurves), tamper refusal, and the census of branches no recipe takes = fixtures first (Muzzle, Trail, Cradle, Rigging,
+Flag, Shroud, the second model, useSourceRig, Turret, Rotor, Oar, Caterpillar); (b)-(f) the five stages in C#
+(`editor/BlenderVehicleRig.cs`), each held row for row with EXIT:/LEFT: keys and fixtures per branch as (4)'s; (g) the
+Lab's Generate on the C# route - per recipe with an editor default that stays Blender, the lab goldens
+(`Tools/lab_golden`, the Lab gate rows) and the output GLB read back as the acceptance, every recipe generated both
+ways; (h) the default flip, after the user's check. Estimate: rig_anim's 1,234 lines took three days of sessions at
+this rigor (10-12 to 10-14); three times the lines and heavier geometry: 2 to 4 weeks, inside the 4-8 above.
 - **rig_anim.py's socket sort exit reads a freed edit bone** — OPEN (2026-10-14, found by the stage 4 fixtures). The
   "would sort BEFORE its parent" error prints `_parent.name` after `bpy.ops.object.mode_set(mode='OBJECT')` has freed
   the edit bones: four Blender runs of `fx_s4_socket_sort` printed the right name once, an empty name once, and twice
