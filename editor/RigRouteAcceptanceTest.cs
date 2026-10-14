@@ -163,35 +163,109 @@ public static class RigRouteAcceptanceTest
         return times;
     }
 
-    // TWO TOLERANCES (2026-10-14). The REST pose is the file's: both routes must agree to float precision - 1e-3 of the rig's
-    // extent, 0.06 degrees, 1e-3 of scale. The CLIP is not: Unity's FBX importer reduces keyframes by default ("Optimal",
-    // keys dropped while the curve stays within 0.5 degrees of rotation and 0.5% of position and scale), so the FBX route has
-    // always shipped slightly simplified curves while the GLB route carries the exact samples. The drill's real pair (the same
-    // fixture slimmed by rig_anim.py and by rig_anim_glb.py) agrees to float precision with that compression off and differs
-    // with it on; the clip-time tolerance therefore covers that allowance with a margin - 0.6 degrees per bone, 1.5% of the
-    // extent for positions (0.5% plus a 0.5-degree swing at the far end of the rig), 1% of scale - and no more: a defect of the
-    // port moves a bone by bone lengths, not by a compression error.
+    // Rest transforms must agree strictly. Clip compression operates on LOCAL curves: allowed local errors accumulate
+    // through a hierarchy, so applying the same cap to world rotation/scale rejects valid deep rigs. The positional
+    // and scale margins remain the row's acceptance policy, not a claim that Unity's percentage metrics use mesh extent.
     const float RestFraction = 1e-3f, RestAngle = 0.06f, RestScale = 1e-3f;
     internal const float ClipFraction = 0.015f, ClipAngle = 0.6f, ClipScale = 0.01f;
 
+    static Transform BoneParent(Transform bone, Dictionary<string, Transform> bones)
+    {
+        for (var t = bone.parent; t != null; t = t.parent)
+            if (bones.TryGetValue(t.name, out var known) && known == t) return t;
+        return null;
+    }
+
+    static float AxisAngle(Matrix4x4 a, Matrix4x4 b)
+    {
+        float worst = 0;
+        for (int i = 0; i < 3; i++)
+        {
+            Vector3 va = a.GetColumn(i), vb = b.GetColumn(i);
+            // Scale comparison handles a zero axis. Never normalize it to manufacture an angle.
+            if (va.sqrMagnitude > 1e-12f && vb.sqrMagnitude > 1e-12f) worst = Mathf.Max(worst, Vector3.Angle(va, vb));
+        }
+        return worst;
+    }
+
+    static float AxisScaleDifference(Matrix4x4 a, Matrix4x4 b) => Mathf.Max(Rel(a.GetColumn(0).magnitude, b.GetColumn(0).magnitude),
+        Mathf.Max(Rel(a.GetColumn(1).magnitude, b.GetColumn(1).magnitude), Rel(a.GetColumn(2).magnitude, b.GetColumn(2).magnitude)));
+
     static void CompareBones(string label, Dictionary<string, Transform> a, Dictionary<string, Transform> b,
-                             float tol, float angleTol, float scaleTol, List<string> problems, ref double worst)
+                             float tol, float angleTol, float scaleTol, bool local, List<string> problems, ref double worst)
     {
         foreach (var name in a.Keys)
         {
             var ta = a[name]; var tb = b[name];
-            float distance = (ta.position - tb.position).magnitude;
-            worst = Math.Max(worst, distance);
-            // the world rotation and scale as well: a socket with no weighted vertex moves nothing, but the game hangs a prop on it
-            float angle = Quaternion.Angle(ta.rotation, tb.rotation);
-            var sa = ta.lossyScale; var sb = tb.lossyScale;
-            float scaleDiff = Mathf.Max(Rel(sa.x, sb.x), Mathf.Max(Rel(sa.y, sb.y), Rel(sa.z, sb.z)));
-            if (distance > tol || angle > angleTol || scaleDiff > scaleTol)
+            var pa = local ? BoneParent(ta, a) : null; var pb = local ? BoneParent(tb, b) : null;
+            if (local && (pa?.name != pb?.name)) { problems.Add($"{label}: bone '{name}' has different bone parents"); break; }
+            var ma = ta.localToWorldMatrix; var mb = tb.localToWorldMatrix;
+            var qa = ta.rotation; var qb = tb.rotation;
+            if (pa != null) { ma = pa.worldToLocalMatrix * ma; qa = Quaternion.Inverse(pa.rotation) * qa; }
+            if (pb != null) { mb = pb.worldToLocalMatrix * mb; qb = Quaternion.Inverse(pb.rotation) * qb; }
+            Vector3 delta = ma.GetColumn(3) - mb.GetColumn(3);
+            // Keep positions in the recipe's units even when the matched parent's coordinate system is scaled.
+            float distance = (pa != null ? pa.localToWorldMatrix.MultiplyVector(delta) : delta).magnitude;
+            worst = Math.Max(worst, (ta.position - tb.position).magnitude);
+            float angle = Quaternion.Angle(qa, qb), axisAngle = AxisAngle(ma, mb), scaleDiff = AxisScaleDifference(ma, mb);
+            // The actual matrix axes include shear and reflections that rotation plus lossyScale cannot describe.
+            if (distance > tol || angle > angleTol || axisAngle > angleTol || scaleDiff > scaleTol)
             {
-                problems.Add(FormattableString.Invariant($"{label}: bone '{name}' world transform differs (position {distance:0.####} apart, rotation {angle:0.###} degrees, scale {scaleDiff * 100:0.##}% - tolerance {tol:0.####}, {angleTol:0.##} degrees, {scaleTol * 100:0.#}%)"));
+                problems.Add(FormattableString.Invariant($"{label}: bone '{name}' {(local ? "parent-space" : "world")} transform differs (position {distance:0.####} apart, rotation {angle:0.###} degrees, axes {axisAngle:0.###} degrees, scale {scaleDiff * 100:0.##}% - tolerance {tol:0.####}, {angleTol:0.##} degrees, {scaleTol * 100:0.#}%)"));
                 break;
             }
         }
+    }
+
+    sealed class SkinEnvelope
+    {
+        public Transform a, b;
+        public Bounds points;
+    }
+
+    // Cache each weighted bone's bind-space vertex bounds. At a sampled frame the largest displacement of their eight
+    // corners bounds the motion caused by the *observed* allowed bone errors, including accumulated rotation/scale.
+    // Convex skin weights cannot exceed this bound. Unweighted socket errors do not widen the mesh's allowance.
+    static List<SkinEnvelope> SkinEnvelopes(SkinnedMeshRenderer[] renderers, Dictionary<string, Transform> other)
+    {
+        var result = new List<SkinEnvelope>();
+        foreach (var r in renderers)
+        {
+            var mesh = r.sharedMesh; var vertices = mesh.vertices; var weights = mesh.boneWeights; var bind = mesh.bindposes;
+            var byIndex = new Dictionary<int, SkinEnvelope>();
+            void Add(int vertex, int index, float weight)
+            {
+                if (weight <= 0) return;
+                if (index < 0 || index >= r.bones.Length || index >= bind.Length || r.bones[index] == null || !other.TryGetValue(r.bones[index].name, out var paired))
+                    throw new InvalidDataException("the skinned mesh has an invalid weighted bone");
+                Vector3 point = bind[index].MultiplyPoint3x4(vertices[vertex]);
+                if (!byIndex.TryGetValue(index, out var envelope))
+                    byIndex[index] = new SkinEnvelope { a = r.bones[index], b = paired, points = new Bounds(point, Vector3.zero) };
+                else envelope.points.Encapsulate(point);
+            }
+            for (int i = 0; i < weights.Length; i++)
+            {
+                var w = weights[i]; Add(i, w.boneIndex0, w.weight0); Add(i, w.boneIndex1, w.weight1); Add(i, w.boneIndex2, w.weight2); Add(i, w.boneIndex3, w.weight3);
+            }
+            result.AddRange(byIndex.Values);
+        }
+        return result;
+    }
+
+    static float SkinMotionAllowance(List<SkinEnvelope> envelopes)
+    {
+        float worst = 0;
+        foreach (var envelope in envelopes)
+        {
+            var ma = envelope.a.localToWorldMatrix; var mb = envelope.b.localToWorldMatrix;
+            Vector3 min = envelope.points.min, max = envelope.points.max;
+            for (int corner = 0; corner < 8; corner++)
+            {
+                var p = new Vector3((corner & 1) == 0 ? min.x : max.x, (corner & 2) == 0 ? min.y : max.y, (corner & 4) == 0 ? min.z : max.z);
+                worst = Mathf.Max(worst, (ma.MultiplyPoint3x4(p) - mb.MultiplyPoint3x4(p)).magnitude);
+            }
+        }
+        return worst;
     }
 
     static float Rel(float x, float y) => Mathf.Abs(x - y) / Mathf.Max(1e-6f, Mathf.Max(Mathf.Abs(x), Mathf.Abs(y)));
@@ -224,10 +298,11 @@ public static class RigRouteAcceptanceTest
         if (rootA != null && rootB != null && (rootA.position - rootB.position).magnitude > tol)
             problems.Add(FormattableString.Invariant($"role '{dir}': the root bone '{rootA.name}' sits at {rootA.position} on the FBX route, {rootB.position} on the GLB route"));
         var byNameA = BonesByName(smrA); var byNameB = BonesByName(smrB);
-        CompareBones($"role '{dir}' at rest", byNameA, byNameB, tol, RestAngle, RestScale, problems, ref worst);
+        CompareBones($"role '{dir}' at rest", byNameA, byNameB, tol, RestAngle, RestScale, false, problems, ref worst);
         string restProblem = ComparePositionSets(Positions(smrA), Positions(smrB), tol, out double restWorst);
         worst = Math.Max(worst, restWorst);
         if (restProblem != null) problems.Add($"role '{dir}': the rest vertices differ - {restProblem}");
+        var envelopes = SkinEnvelopes(smrA, byNameB);
         // Sample the full bake timeline, not only endpoints and midpoint.
         if (Mathf.Abs(clipA.length - clipB.length) > 1f / 48f + 1e-4f) problems.Add(FormattableString.Invariant($"role '{dir}': the clip is {clipA.length:0.####} s on the FBX route, {clipB.length:0.####} s on the GLB route"));
         foreach (float t in SampleTimes(clipA, clipB))
@@ -236,10 +311,11 @@ public static class RigRouteAcceptanceTest
             BakeTestRunnerWindow.Progress.ThrowIfCancelled();
             clipA.SampleAnimation(a, t); clipB.SampleAnimation(b, t);
             int before = problems.Count;
-            CompareBones(FormattableString.Invariant($"role '{dir}' at {t:0.###} s"), byNameA, byNameB, tolClip, ClipAngle, ClipScale, problems, ref worst);
+            CompareBones(FormattableString.Invariant($"role '{dir}' at {t:0.###} s"), byNameA, byNameB, tolClip, ClipAngle, ClipScale, true, problems, ref worst);
             var cloudA = Positions(smrA); var cloudB = Positions(smrB);
             vertexSamples += cloudA.Count;
-            string cloudProblem = ComparePositionSets(cloudA, cloudB, tolClip, out double cloudWorst);
+            float meshTol = Mathf.Max(tolClip, SkinMotionAllowance(envelopes) + tol);
+            string cloudProblem = ComparePositionSets(cloudA, cloudB, meshTol, out double cloudWorst);
             worst = Math.Max(worst, cloudWorst);
             if (cloudProblem != null) problems.Add(FormattableString.Invariant($"role '{dir}' at {t:0.###} s: the skinned vertices differ - {cloudProblem}"));
             if (problems.Count > before) break;

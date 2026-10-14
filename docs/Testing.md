@@ -1670,11 +1670,18 @@ seams, the glTF carries them split already: duplicate counts may differ, the pos
 within 1e-3 of the rig's extent, both ways), the root bone's placement and every bone's rest transform, the clip's
 length and, at every clip frame (at least 24 Hz) and both imports' curve keys, every bone's world transform (position,
 rotation and scale) and the skinned vertices (`SkinnedMeshRenderer.BakeMesh`); and each role's non-empty baked clip
-collection and pose stream length (frames x bones). Two tolerances: the REST pose to float precision (1e-3 of the
-extent, 0.06 degrees, 1e-3 of scale); the CLIP within Unity's FBX keyframe reduction, which the Factory's FBX import
-has always applied by default (keys dropped while the curve stays within 0.5 degrees and 0.5% of position and scale) -
-0.6 degrees per bone, 1.5% of the extent for bone and vertex positions, 1% of scale, and no more: a port defect moves a
-bone by bone lengths, a compression error by a fraction of a degree.
+collection and pose stream length (frames x bones). Two tolerances: the REST pose stays strict (1e-3 of the
+extent, 0.06 degrees for rotation and matrix axes, 1e-3 relative axis scale); the CLIP accepts 0.6 degrees of rotation
+and matrix-axis direction, 1.5% of the extent for position and 1% relative axis scale **in each bone's matched parent
+space**. For root bones this is world space. Non-bone wrapper transforms are included in that relative matrix.
+Unity's keyframe reduction acts on local curves, so allowed errors accumulate through a bone chain; a fixed world-angle
+or world-scale cap incorrectly rejects deep rigs. Rotation and `lossyScale` alone also miss shear: matrix axes remain
+part of both comparisons. See Unity's [rotation compression metric](https://docs.unity3d.com/2021.3/Documentation/ScriptReference/ModelImporter-animationRotationError.html)
+and [position compression metric](https://docs.unity3d.com/2021.3/Documentation/ScriptReference/ModelImporter-animationPositionError.html).
+The positional and scale margins are this row's acceptance policy; they do not equate Unity's percentage errors to mesh
+extent. Skinned vertices retain the 1.5% base allowance, expanded only as needed by the **observed** displacement of
+weighted bones' bind-space bounds, plus the strict rest allowance. This covers accumulated accepted pose errors without
+letting unweighted sockets widen the mesh tolerance; wrong weights with identical bone motion still fail.
 `BakeResult.rigRoute` says which route a bake took ("blender", "csharp",
 "csharp-fallback" with the port's reason in `rigRouteNote`): a recipe the port leaves to Blender by name bakes through
 the FBX route both times and is a SKIP that says why; a port crash is a FAIL. The in-game check of each model playing
@@ -1684,6 +1691,12 @@ imports and a real FBX/GLB pair (the same fixture slimmed by rig_anim.py and by 
 default FBX compression and without it; a socket rotation of 0.4 degrees passes and one of 2 degrees fails; size,
 duration, intermediate motion, subframe keyed excursions and absent/empty role pose streams fail. A cancel keeps the
 verdicts made so far. Owed: the row's run.
+
+Review of PR #172 (2026-10-14): native Unity reproduced false failures for three-bone chains with 0.4-degree
+local rotation errors or 0.6% local scale errors, and a false pass for opposite socket shear despite equal world
+rotation and lossy scale. The parent-space and matrix-axis checks above fix both. Native regressions cover weighted
+and unweighted chains, excessive local errors, opposite shear, and wrong weights with identical bone motion. The
+real FBX/GLB pair still agrees with the default FBX compression and without it.
 
 Review of PR #171 (2026-10-14): native Unity counterexamples reproduced false passes for a rotating unweighted
 socket and motion that agreed at only the first/middle/last frames. The row now checks full world transforms at rest,
