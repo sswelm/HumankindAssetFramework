@@ -409,8 +409,8 @@ exits and deaths no fixture had.
 (c) stage 2, part 1 DONE 2026-10-15: the WELD tiers in C# (`editor/BlenderVehicleRig.Stage2.cs`, `editor/BlenderWeld.cs`:
 bmesh remove_doubles through a port of BLI_kdtree and weld_verts, the sharp marking, the decimate modifier through
 BlenderDecimate, the new datablock's name) + `vehiclerig.exe --stages 2` in the drill: 20 of 24 recipes equal row for
-row after stage 2 (306,717 rows), 2 FBX left by name, 2 left by name at stage 2 (the dissolve tiers), 30 fixtures equal,
-7 kinds of stage-2 tamper refused (6 in the gate) (`docs/Testing.md` has the measure and the rules: the pool's free list, the balanced-order
+row after stage 2 (306,717 rows), 2 FBX left by name, 2 left by name at stage 2 (the dissolve tiers), 31 fixtures equal,
+9 stage-2 tamper kinds refused (the rows now carry the edges, the sharp_edge attribute and the custom-normal shorts) (`docs/Testing.md` has the measure and the rules: the pool's free list, the balanced-order
 duplicates search, NORMALS_CALC after the operator, the custom-normal fans stopping at sharp edges). Found: the C# BMesh
 could not create after a kill (now BLI_mempool's free list); a packed vertex pair as a plain `long` key hashes its halves
 together (6 s to 83 ms with the mesh's comparer). Next: (c) part 2 - the SOUP tiers (RIGGING, SHROUD): `_dissolve_limited`

@@ -1780,7 +1780,17 @@ with a doubled seam row welded then collapsed to the dial, four tiers in one sce
 120 dial clamped to 95). The S2_* tampers (7 kinds; 6 on the gate's sample, whose damaged job prints no tier line) are each
 refused in `--stages 2` mode. A Blender probe of the weld steps alone
 (`weld_probe.py`, scratch) was the arbiter for the Romanic: the welded mesh's positions, corners, UVs and edges hashed
-equal from the first run, the sharp count and the normals did not until the two rules above.
+equal from the first run, the sharp count and the normals did not until the two rules above. The review of that work found
+the gate blind to the weld's edge order, its sharp_edge set and the custom-normal shorts it carries (the MESH row hashed
+positions, corners, materials and UVs only, so a mis-copied normal on a part under its target passed): the row now carries
+the edge list, the sharp_edge attribute (the importer writes it, all false, beside the custom normals - so only on a mesh
+with file normals; a mesh-level operation keeps it; a BMesh round trip - the edit-mode split, the decimate, the weld - writes
+it back only when an edge is marked: three Blender probes of the fixtures settled the rule) and the shorts per corner,
+in both dumps and both renders - the rig_anim drill's 145 jobs hold them through its four stages too -, with S2_* tampers
+on each; a fixture with a scaled, turned node in a weld tier holds the distance rule (o.dimensions after transform_apply).
+Scoped out, named: a bad reduce dial beside a missing names file dies on the names file here and on the dial in Blender
+(the script interleaves the reads; the Lab writes both); a name listed twice in one tier's list would name its second
+datablock differently (the Lab lists a part once).
 
 **Step (h), the acceptance row (2026-10-14).** `editor/RigRouteAcceptanceTest.cs`, the Bake Tests row "Does the GLB
 rig route bake what the FBX route bakes?" (off by default: two full animated bakes per entry), is the backlog's gate

@@ -49,7 +49,7 @@ public sealed class RigAnimDump
 
     static readonly Dictionary<string, int> Width = new Dictionary<string, int>(StringComparer.Ordinal)
     {
-        { "JOB", 2 }, { "STAGE", 2 }, { "LOG", 3 }, { "SCENE", 6 }, { "OBJ", 42 }, { "MESH", 15 }, { "VG", 6 }, { "BONE", 23 },
+        { "JOB", 2 }, { "STAGE", 2 }, { "LOG", 3 }, { "SCENE", 6 }, { "OBJ", 42 }, { "MESH", 18 }, { "VG", 6 }, { "BONE", 23 },
         { "PB", 33 }, { "ACT", 7 }, { "FC", 8 }, { "K", 15 }, { "IMG", 9 }, { "EXIT", 3 }, { "DIES", 3 }, { "DONE", 2 }, { "FAIL", 3 },
     };
 

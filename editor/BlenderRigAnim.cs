@@ -241,7 +241,7 @@ public static class BlenderRigAnim
         public string ArmatureModifier;           // the armature object's name, or null
         public int[] Edges;                       // pairs, Blender's order (the join concatenates them)
         public bool[] FaceSharp;                  // sharp_face per face
-        public bool[] EdgeSharp;                  // sharp_edge per edge (Edges' order), or null: none marked
+        public bool[] EdgeSharp;                  // the sharp_edge attribute per edge (Edges' order), or null when the mesh has none: the importer writes it (all false) beside the custom normals, so only on a mesh with file normals; a mesh-level operation keeps it; a BMesh round trip (the edit-mode split, the decimate, the weld) writes it only when an edge is marked
         public short[] CustomNormal;              // 2 per corner, or null (no normals)
         public List<float[]> UvAll = new List<float[]>();   // every UV layer: UVMap, UVMap.001, ... (Uv is the first)
         public List<(string name, bool point, byte[] bytes)> Colors = new List<(string, bool, byte[])>();   // the colour layers (BlenderReduce's), for the export
@@ -356,7 +356,7 @@ public static class BlenderRigAnim
             if (why != null) { s.Fallback = "'" + o.Name + "': " + why; return s; }
             var r = BlenderReduce.Reduce(m, o.MeshNode, 1f, names, 0, null, mergeUvs: false);
             if (r.Fallback != null) { s.Fallback = "'" + o.Name + "': " + r.Fallback; return s; }
-            var d = new MeshData { Vertices = r.VertexCount, Faces = r.Faces, Positions = r.Positions, FaceMaterial = r.FaceMaterial, Uv = r.Uv.Count > 0 ? r.Uv[0] : null, DefNr = r.DefNr, DefWeight = r.DefWeight, Edges = r.Edges, FaceSharp = r.FaceSharp, CustomNormal = r.CustomNormal, UvAll = r.Uv, Colors = r.Colors, ActiveColor = r.Colors.Count > 0 ? 0 : -1 };
+            var d = new MeshData { Vertices = r.VertexCount, Faces = r.Faces, Positions = r.Positions, FaceMaterial = r.FaceMaterial, Uv = r.Uv.Count > 0 ? r.Uv[0] : null, DefNr = r.DefNr, DefWeight = r.DefWeight, Edges = r.Edges, EdgeSharp = r.CustomNormal != null ? new bool[r.Edges.Length / 2] : null, FaceSharp = r.FaceSharp, CustomNormal = r.CustomNormal, UvAll = r.Uv, Colors = r.Colors, ActiveColor = r.Colors.Count > 0 ? 0 : -1 };
             // mesh.py: slots only when a primitive has a material or COLOR_0; else none - and the script drops the object
             bool hasMaterials = mesh.Primitives.Exists(p => p.Material >= 0) || mesh.Primitives.Exists(p => p.Colors != null);
             if (hasMaterials)
@@ -1648,6 +1648,13 @@ public static class BlenderRigAnim
                 vo += src.Vertices; fo += snf;
             }
             d.Edges = edges.ToArray();
+            // the sharp_edge attribute joins when any source has it (the importer's, all false), the others' edges reading false
+            if (order.Any(o => o.Mesh.EdgeSharp != null))
+            {
+                var es = new List<bool>();
+                foreach (var o in order) { int ne = o.Mesh.Edges == null ? 0 : o.Mesh.Edges.Length / 2; for (int e = 0; e < ne; e++) es.Add(o.Mesh.EdgeSharp != null && o.Mesh.EdgeSharp[e]); }
+                d.EdgeSharp = es.ToArray();
+            }
             d.Uv = active.Mesh.UvAll.Count > 0 ? d.UvAll[0] : null;   // the active's active UV layer, by its name
             if (active.Mesh.UvAll.Count == 0 && numUv > 0) Note(s, "the join's active object has no UV layer (no active layer on the result)");
             d.ArmatureModifier = active.Mesh.ArmatureModifier;
@@ -2084,6 +2091,7 @@ public static class BlenderRigAnim
             }
         }
         me.Colors = colorsOut;
+        me.EdgeSharp = null;   // BM_mesh_bm_to_me_for_eval writes sharp_edge only when an edge is marked; the collapse marks none
         me.Vertices = count; me.Positions = pos; me.Faces = faces; me.FaceMaterial = fmat; me.FaceSharp = fsharp; me.UvAll = uvOut; me.Uv = uvOut.Count > 0 ? uvOut[0] : null; me.CustomNormal = cnOut; me.DefNr = defNr; me.DefWeight = defW; me.Edges = edges.ToArray();
     }
 
@@ -2198,6 +2206,7 @@ public static class BlenderRigAnim
     static string[] WithSlot(bool on, string slot, string[] row) { if (!on) return row; var l = row.ToList(); l.Insert(3, slot); return l.ToArray(); }
 
     public static string Hex(float f) => BitConverter.ToUInt32(BitConverter.GetBytes(f), 0).ToString("x8");
+    static byte[] Bytes(short[] a) { var b = new byte[2 * a.Length]; Buffer.BlockCopy(a, 0, b, 0, b.Length); return b; }
     static string Sha(byte[] b) { using (var sha = SHA256.Create()) return BitConverter.ToString(sha.ComputeHash(b)).Replace("-", "").ToLowerInvariant(); }
     static byte[] Bytes(float[] a) { var b = new byte[4 * a.Length]; for (int i = 0; i < a.Length; i++) Array.Copy(BitConverter.GetBytes(a[i]), 0, b, 4 * i, 4); return b; }
     static byte[] Bytes(int[] a) { var b = new byte[4 * a.Length]; for (int i = 0; i < a.Length; i++) Array.Copy(BitConverter.GetBytes(a[i]), 0, b, 4 * i, 4); return b; }
@@ -2229,6 +2238,9 @@ public static class BlenderRigAnim
                 d.ArmatureModifier == null ? "-" : "ARMATURE:Armature:" + d.ArmatureModifier,
                 // every UV layer by the importer's names (uv_layers.new('UVMap') per TEXCOORD_n: UVMap, UVMap.001, ...), the join uniting them by name
                 d.UvAll.Count == 0 ? "-" : string.Join(";", d.UvAll.Select((uv, i) => (i == 0 ? "UVMap" : "UVMap." + i.ToString("000", CultureInfo.InvariantCulture)) + ":" + Sha(Bytes(uv)))),
+                // the edges in order, the sharp_edge attribute when the mesh has one (the importer's all-false one included), the custom-normal shorts
+                d.Edges == null ? "-" : Sha(Bytes(d.Edges)), d.EdgeSharp == null ? "-" : Sha(d.EdgeSharp.Select(x => x ? (byte)1 : (byte)0).ToArray()),
+                d.CustomNormal == null ? "-" : Sha(Bytes(d.CustomNormal)),
             });
             for (int g = 0; g < d.Groups.Count; g++)
             {

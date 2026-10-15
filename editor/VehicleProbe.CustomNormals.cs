@@ -283,13 +283,22 @@ public static partial class VehicleProbe
     /// mix_normals_corner_to_vert. The same geometry gives the file normal back to the quantization; a transformed one (the Lab's
     /// second model: Mesh.transform moves the vertices and leaves the shorts, flip_normals reverses the corners and carries
     /// each corner's shorts with it) gives what Blender then holds.</summary>
+    /// <summary>A packed vertex pair hashes badly as a plain long (its halves XOR together); the same multiplicative hash as
+    /// BlenderMesh.EdgeKeyComparer, kept here because the probe drill compiles this file without BlenderMesh.cs.</summary>
+    internal sealed class PairKeyComparer : IEqualityComparer<long>
+    {
+        public static readonly PairKeyComparer Instance = new PairKeyComparer();
+        public bool Equals(long a, long b) => a == b;
+        public int GetHashCode(long k) => unchecked((int)(((ulong)k * 0x9E3779B97F4A7C15UL) >> 32));
+    }
+
     internal static long SharpEdgeKey(int a, int b) { int lo = Math.Min(a, b), hi = Math.Max(a, b); return ((long)lo << 32) | (uint)hi; }
 
     /// <summary>The sharp_edge set of a mesh as the fan walk keys it (by vertex pair), or null when none is marked.</summary>
     internal static HashSet<long> SharpEdgeSet(int[] edges, bool[] edgeSharp)
     {
         if (edges == null || edgeSharp == null) return null;
-        var set = new HashSet<long>(BlenderMesh.EdgeKeyComparer.Instance);
+        var set = new HashSet<long>(PairKeyComparer.Instance);
         for (int e = 0; e < edgeSharp.Length; e++) if (edgeSharp[e]) set.Add(SharpEdgeKey(edges[2 * e], edges[2 * e + 1]));
         return set.Count > 0 ? set : null;
     }

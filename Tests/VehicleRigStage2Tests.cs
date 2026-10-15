@@ -48,7 +48,7 @@ public class VehicleRigStage2Tests
         }
         for (int c = 0; c < 36; c++) { uv[2 * c] = c * 0.01f; uv[2 * c + 1] = 1f - c * 0.01f; }
         d.UvAll.Add(uv); d.Uv = uv;
-        // the edges as the importer lists them: per face, each corner's edge once (low, high)
+        // an edge list for the test (per face, each corner's edge once, low then high) - the importer's own order is mesh_calc_edges'
         var edges = new List<int>(); var seen = new HashSet<long>();
         for (int f = 0; f < 12; f++)
             for (int k = 0; k < 3; k++)
@@ -93,8 +93,10 @@ public class VehicleRigStage2Tests
         var m = typeof(BlenderVehicleRig).GetMethod("ToMeshData", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         var r = (BlenderRigAnim.MeshData)m.Invoke(null, new object[] { bm, layers, d });
         Assert.Equal(8, r.Vertices); Assert.Equal(36, r.Faces.Length); Assert.Equal(18, r.EdgeSharp.Length); Assert.Equal(12, r.EdgeSharp.Count(x => x));
-        // the corner UVs travelled with their corners: the first face's UVs are its own
-        Assert.Equal(d.Uv.Take(6).ToArray(), r.Uv.Take(6).ToArray());
+        // the corner UVs travelled with their corners on every face - the kept ones and the re-made ones (a face with a merged corner
+        // is re-made from the mapped corners and swapped into its old slot, each new loop taking the old corner's data)
+        Assert.Equal(d.Uv, r.Uv);
+        Assert.Equal(d.FaceMaterial, r.FaceMaterial);
         // a face's three corners name three distinct vertices, each within the unit box
         for (int f = 0; f < 12; f++) Assert.Equal(3, new HashSet<int> { r.Faces[3 * f], r.Faces[3 * f + 1], r.Faces[3 * f + 2] }.Count);
     }

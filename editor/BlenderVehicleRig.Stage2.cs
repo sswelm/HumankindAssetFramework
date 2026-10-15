@@ -220,7 +220,7 @@ public static partial class BlenderVehicleRig
             edges.Add(newIndex[bm.EV1[e]]); edges.Add(newIndex[bm.EV2[e]]);
             bool sharp = (bm.EFlag[e] & BMesh.FlagSmooth) == 0; edgeSharp.Add(sharp); anySharp |= sharp;
         }
-        r.Edges = edges.ToArray(); r.EdgeSharp = anySharp ? edgeSharp.ToArray() : null;
+        r.Edges = edges.ToArray(); r.EdgeSharp = anySharp ? edgeSharp.ToArray() : null;   // BM_mesh_bm_to_me: the attribute only when an edge is marked
         int nf = bm.TotFace;
         r.Faces = new int[3 * nf]; r.FaceMaterial = new int[nf]; r.FaceSharp = new bool[nf];
         var uvOut = new List<float[]>(); foreach (var _ in layers.Uv) uvOut.Add(new float[2 * 3 * nf]);

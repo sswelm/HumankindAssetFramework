@@ -70,13 +70,24 @@ def dump(n):
             layers = []
             for l in me.uv_layers:
                 u = np.empty(len(me.loops) * 2, dtype=np.float32); l.data.foreach_get("uv", u); layers.append("%s:%s" % (l.name, sha(u.tobytes())))
-            rows.append("MESH\t%d\t%s\t%d\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s" % (
+            # the edges in order (v1, v2), the sharp_edge set (absent on a mesh with no edge marked) and the custom-normal shorts
+            # per corner (absent without custom normals): the weld's order and marks, the data the export reads (step (c) review)
+            ev = np.empty(len(me.edges) * 2, dtype=np.int32); me.edges.foreach_get("vertices", ev)
+            sharp = "-"
+            se = me.attributes.get("sharp_edge")
+            if se is not None and se.domain == 'EDGE' and se.data_type == 'BOOLEAN':
+                sb = np.empty(len(me.edges), dtype=bool); se.data.foreach_get("value", sb); sharp = sha(sb.astype(np.uint8).tobytes())
+            cns = "-"
+            cn = me.attributes.get("custom_normal")
+            if cn is not None and cn.domain == 'CORNER' and cn.data_type == 'INT16_2D':
+                ca = np.empty(len(me.loops) * 2, dtype=np.int32); cn.data.foreach_get("value", ca); cns = sha(ca.astype("<i2").tobytes())
+            rows.append("MESH\t%d\t%s\t%d\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s" % (
                 n, o.name, len(me.vertices), len(me.polygons), len(me.loops), sha(pos.tobytes()), sha(lv.astype("<i4").tobytes()),
                 sha(ps.astype("<i4").tobytes() + pt.astype("<i4").tobytes()), sha(mi.astype("<i4").tobytes()), uv,
                 ";".join(m.name if m else "(none)" for m in me.materials) or "-",
                 ";".join(g.name for g in o.vertex_groups) or "-",
                 ";".join("%s:%s:%s" % (md.type, md.name, getattr(md, "object", None).name if getattr(md, "object", None) else "-") for md in o.modifiers) or "-",
-                ";".join(layers) or "-"))
+                ";".join(layers) or "-", sha(ev.astype("<i4").tobytes()), sharp, cns))
             if len(o.vertex_groups):
                 per = {g.index: [] for g in o.vertex_groups}
                 for v in me.vertices:

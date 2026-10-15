@@ -45,7 +45,7 @@ public sealed class VehicleRigDump
 
     static readonly Dictionary<string, int> Width = new Dictionary<string, int>(StringComparer.Ordinal)
     {
-        { "JOB", 2 }, { "STAGE", 2 }, { "LOG", 3 }, { "SCENE", 6 }, { "OBJ", 42 }, { "MESH", 15 }, { "VG", 6 }, { "BONE", 23 },
+        { "JOB", 2 }, { "STAGE", 2 }, { "LOG", 3 }, { "SCENE", 6 }, { "OBJ", 42 }, { "MESH", 18 }, { "VG", 6 }, { "BONE", 23 },
         { "PB", 33 }, { "ACT", 7 }, { "FC", 9 }, { "K", 16 }, { "EXIT", 3 }, { "DIES", 3 }, { "DONE", 2 }, { "FAIL", 3 }, { "EVIDENCE", 4 },
     };
     static readonly HashSet<string> ExportKinds = new HashSet<string>(new[] { "GLB", "SCENE", "NODE", "SKIN", "IBM", "MESH", "PRIM", "MAT", "IMG", "TEX", "SAMP", "ANIM", "CHAN" }, StringComparer.Ordinal);

@@ -23,7 +23,10 @@ Stage 1 (step (b)):
   fx_b_orient also names an Ignore part the file has not (0 deleted); fx_b_placement also places a part with a zero scale (the WARN, scale 1)
 Stage 2 (step (c), the weld tiers):
   fx_c_weld          a box of 24 per-face vertices (a glTF's seams) over two materials, BODY at 50: the weld within each material
-                     (the material border stays split), every box edge sharp (90 degrees), the target reached without a decimate
+                     to 16 (the material border stays split), every box edge sharp (90 degrees), then the decimate at ratio 0.5 on
+                     it; the 8-vertex box beside it sits at its target and keeps its datablock
+  fx_c_scaled        the seamed grid on a node scaled (2, 1, 0.5) and turned: the weld distance from o.dimensions after
+                     transform_apply (the extents of the baked mesh at an identity matrix), BODY at 60
   fx_c_grid          a bumpy 9 x 9 grid with its middle row of vertices doubled (one seam), BODY at 60: the weld, then the decimate
                      collapse to the dial, the new mesh datablock named after the old
   fx_c_tiers         four tiers in one scene: BODY at 50 and STRUCTURE at 30 on two grids, a STRUCTURE name the scene has not (the
@@ -185,6 +188,9 @@ def main(out):
     # a part holds ONE role, so a name reaches one tier; four tiers share the scene instead
     recipe(out, "fx_c_tiers", r.write(models, "fx_c_tiers"), [("Deck", 0, {}), ("Fin", 16, {}), ("Ghost", 16, {}), ("Keel", 21, {}), ("Helm", 18, {})],
            bodyReducePct=50.0, structureReducePct=30.0, detailReducePct=0.5, rudderReducePct=120.0)
+    r = Rig(); ma = r.material("Paint", (0.3, 0.5, 0.7))
+    r.node("Deck", mesh=grid_seam(r, "Deck", ma), scale=[2.0, 1.0, 0.5], rotation=[0.0, 0.258819, 0.0, 0.9659258])
+    recipe(out, "fx_c_scaled", r.write(models, "fx_c_scaled"), [("Deck", 0, {})], bodyReducePct=60.0)
     # brightness on three material chains
     r = Rig(); img = r.image("Albedo", rgb=(120, 80, 40)); tex = r.texture(img)
     flat = r.material("Flat", (0.6, 0.4, 0.2)); direct = r.material("Direct", (1.0, 1.0, 1.0), texture=tex); tint = r.material("Tint", (0.5, 0.25, 0.9), texture=tex)

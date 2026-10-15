@@ -535,6 +535,7 @@ public static partial class BlenderVehicleRig
             }
             groups.Add(verts); groupFaces.Add(faces); groupEdges.Add(edgeList);
         }
+        o.Mesh.EdgeSharp = null;   // the edit-mode round trip (separate LOOSE) writes sharp_edge back only when an edge is marked: none is
         if (groups.Count <= 1) return;
         groups[0].Sort();
         int at = s.Objects.IndexOf(o);
@@ -659,7 +660,7 @@ public static partial class BlenderVehicleRig
     {
         Vertices = d.Vertices, Faces = (int[])d.Faces.Clone(), Positions = (float[])d.Positions.Clone(), FaceMaterial = (int[])d.FaceMaterial.Clone(), Uv = d.Uv == null ? null : (float[])d.Uv.Clone(),
         Materials = new List<string>(d.Materials), Groups = new List<string>(d.Groups), DefNr = d.DefNr, DefWeight = d.DefWeight, ArmatureModifier = d.ArmatureModifier,
-        Edges = d.Edges == null ? null : (int[])d.Edges.Clone(), FaceSharp = d.FaceSharp == null ? null : (bool[])d.FaceSharp.Clone(), CustomNormal = d.CustomNormal == null ? null : (short[])d.CustomNormal.Clone(),
+        Edges = d.Edges == null ? null : (int[])d.Edges.Clone(), EdgeSharp = d.EdgeSharp == null ? null : (bool[])d.EdgeSharp.Clone(), FaceSharp = d.FaceSharp == null ? null : (bool[])d.FaceSharp.Clone(), CustomNormal = d.CustomNormal == null ? null : (short[])d.CustomNormal.Clone(),
         UvAll = d.UvAll.Select(u => (float[])u.Clone()).ToList(), Colors = d.Colors.Select(c => (c.name, c.point, (byte[])c.bytes.Clone())).ToList(), ActiveColor = d.ActiveColor,
     };
 
