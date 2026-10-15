@@ -1795,7 +1795,10 @@ Review of PR #176 (2026-10-15): a full run found the organ gun's newly recorded 
 stage one's loose split. Blender's separate operator decodes the source BMesh normals into a vector layer and
 re-encodes that layer on each copied component; copying the original shorts misses that quantization. The model now
 uses BMesh's triangle normals, reciprocal-length normalization and fan averaging for that round trip; the surviving
-first component keeps its original data. A measured two-triangle regression and `fx_b_split_normals` cover it.
+first component keeps its original data. A measured two-triangle regression (a unit test) and the organ gun in the FULL run hold
+it - the pre-review build fails the organ gun's custom-normal hash after the split and the fixed one does not (verified by
+running both builds on its dump); `fx_b_split_normals` exercises the path but its small panels re-encode to the same shorts, so
+it passes either way.
 The documented bad-dial/later-missing-file mismatch is fixed too: the first positional read failure wins in the
 script's interleaved order, held by a unit test and `fx_d_reduce_before_names`. Both dump parsers now validate the
 three added MESH hashes (edges required, sharp edges/custom normals optional); sealed unit counterexamples and four
