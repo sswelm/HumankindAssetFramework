@@ -43,9 +43,15 @@ OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -optimize+ -out:"$WTMP/VehicleRi
   -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WAPI/System.Numerics.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
   "$WROOT/tools/vehiclerig-drill/VehicleRigJobs.cs" "$E/VehicleRigArgs.cs" "$E/EditorRules.cs" 2>&1); rc=$?
 if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/VehicleRigJobs.exe" ]; then echo "$OUT" | grep -E "error" | head -20; echo "FAIL — the vehicle_rig jobs writer did not compile (csc rc=$rc)"; exit 1; fi
+# the drill with the stage models (editor/BlenderVehicleRig.cs) and the editor files they are built from - the rig_anim drill's list
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -optimize+ -out:"$WTMP/vehiclerig.exe" \
-  -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" \
-  -r:"$WTMP/Newtonsoft.Json.dll" "$WROOT/tools/vehiclerig-drill/VehicleRigDrill.cs" 2>&1); rc=$?
+  -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WAPI/System.Numerics.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
+  "$WROOT/tools/vehiclerig-drill/VehicleRigDrill.cs" "$E/BlenderVehicleRig.cs" "$E/VehicleRigArgs.cs" "$E/EditorRules.cs" \
+  "$E/BlenderRigAnim.cs" "$E/BlenderRigExport.cs" "$E/BlenderRigAnimInProcess.cs" "$E/BlenderDeploy.cs" "$E/BlenderDeployExport.cs" "$E/BlenderMaterialExport.cs" "$E/BlenderChannelExport.cs" "$E/BlenderGlbWriter.cs" "$E/PyFloatRepr.cs" "$E/BlenderFCurve.cs" \
+  "$E/BlenderExport.cs" "$E/BlenderReduce.cs" "$E/BlenderDecimate.cs" "$E/BlenderExportTree.cs" \
+  "$E/HafModel.cs" "$E/GlbReader.cs" "$E/HafTransforms.cs" "$E/BlenderNames.cs" "$E/BlenderPosedState.cs" "$E/BlenderTrig.cs" "$E/BlenderEigen.cs" "$E/BlenderMesh.cs" "$E/BMesh.cs" "$E/BlenderColor.cs" \
+  "$E/VehicleProbe.cs" "$E/VehicleProbe.Visibility.cs" "$E/VehicleProbe.Islands.cs" "$E/VehicleProbe.InsideOut.cs" \
+  "$E/VehicleProbe.BlenderWorld.cs" "$E/VehicleProbe.BlenderSkin.cs" "$E/VehicleProbe.CustomNormals.cs" "$E/VehicleProbe.Merge.cs" "$E/VehicleProbe.BlenderArmature.cs" "$E/VehicleProbe.BlenderPose.cs" 2>&1); rc=$?
 if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/vehiclerig.exe" ]; then echo "$OUT" | grep -E "error" | head -20; echo "FAIL — the vehicle_rig drill did not compile (csc rc=$rc)"; exit 1; fi
 
 MAXMB="${VEHICLERIG_MAX_MB:-40}"
@@ -55,9 +61,24 @@ tr -d '\r' < "$TMPD/jobs_raw.txt" > "$TMPD/jobs.txt"
 grep -E '^(INVALID|UNAVAILABLE)[[:space:]]' "$TMPD/jobs.txt" || true
 if [ "$jrc" -eq 1 ]; then echo "FAIL — vehicle_rig drill: a saved recipe cannot be read (INVALID above)"; exit 1; fi
 if [ "$jrc" -eq 3 ]; then echo "SKIP — vehicle_rig drill: a recipe's source model is not on this machine (UNAVAILABLE above); vehicle_rig was NOT drilled"; exit 3; fi
-n_jobs=$(grep -cE "^(JOB|FAST)	" "$TMPD/jobs.txt"); n_left=$(grep -c "^LEFT	" "$TMPD/jobs.txt"); n_fast=$(grep -c "^FAST	" "$TMPD/jobs.txt")
-[ "$n_jobs" -gt 0 ] || { echo "SKIP — vehicle_rig drill: no recipe with a readable source under $RECIPES; vehicle_rig was NOT drilled"; exit 3; }
+n_reg=$(grep -cE "^(JOB|FAST)	" "$TMPD/jobs.txt"); n_left=$(grep -c "^LEFT	" "$TMPD/jobs.txt")
+[ "$n_reg" -gt 0 ] || { echo "SKIP — vehicle_rig drill: no recipe with a readable source under $RECIPES; vehicle_rig was NOT drilled"; exit 3; }
 grep "^LEFT	" "$TMPD/jobs.txt" | sed 's/^LEFT\t/LEFT /; s/\t/: /'
+# the fixtures: the branches no saved recipe takes (vehiclerig_fixtures.py), recipes the jobs writer turns into jobs like the saved ones
+python "$ROOT/tools/vehiclerig-drill/vehiclerig_fixtures.py" "$WTMP/fixtures" > "$TMPD/fixtures_raw.txt" || { echo "FAIL — could not write the vehicle_rig fixtures"; exit 1; }
+"$TMPD/VehicleRigJobs.exe" "$WTMP/fixtures/recipes" "$WTMP/fxwork" --all > "$TMPD/fxjobs_raw.txt"; fjrc=$?
+tr -d '\r' < "$TMPD/fxjobs_raw.txt" >> "$TMPD/jobs.txt"
+[ "$fjrc" -eq 0 ] || { grep -E '^(INVALID|UNAVAILABLE)' "$TMPD/fxjobs_raw.txt"; echo "FAIL — vehicle_rig drill: a fixture recipe did not become a job (rc=$fjrc)"; exit 1; }
+# the exit and death fixtures: recipes the writer turns into jobs, then post-edited (vehiclerig_fixtures.py --exits) into the malformed
+# tagged tokens and dials the Lab's builder never writes, their keys EXIT:1: / DIES:1: naming what the script must do with them
+"$TMPD/VehicleRigJobs.exe" "$WTMP/fixtures/recipes_exit" "$WTMP/fxwork" --all > "$TMPD/fxexit_raw.txt"; ferc=$?
+[ "$ferc" -eq 0 ] || { grep -E '^(INVALID|UNAVAILABLE)' "$TMPD/fxexit_raw.txt"; echo "FAIL — vehicle_rig drill: an exit fixture recipe did not become a job (rc=$ferc)"; exit 1; }
+tr -d '\r' < "$TMPD/fxexit_raw.txt" > "$TMPD/fxexit_jobs_in.txt"
+python "$ROOT/tools/vehiclerig-drill/vehiclerig_fixtures.py" --exits "$TMPD/fxexit_jobs_in.txt" > "$TMPD/fxexit_jobs.txt" || { echo "FAIL — could not derive the vehicle_rig exit fixtures"; exit 1; }
+cat "$TMPD/fxexit_jobs.txt" >> "$TMPD/jobs.txt"
+n_fx=$(( $(grep -cE "^(JOB|FAST)	" "$TMPD/fxjobs_raw.txt") + $(grep -cE "^JOB	" "$TMPD/fxexit_jobs.txt") )); n_jobs=$((n_reg + n_fx)); n_fast=$(grep -c "^FAST	" "$TMPD/jobs.txt")
+[ "$n_fx" -gt 0 ] || { echo "FAIL — the vehicle_rig fixtures gave no job"; exit 1; }
+[ "$(grep -cE "^JOB	(EXIT|DIES):" "$TMPD/fxexit_jobs.txt")" -ge 8 ] || { echo "FAIL — the vehicle_rig exit fixtures gave fewer than 8 EXIT:/DIES: jobs"; exit 1; }
 
 # Blender: the shards, the largest sources first, round robin
 JOBS="${VEHICLERIG_JOBS:-4}"; [ "$JOBS" -ge 1 ] 2>/dev/null || JOBS=1
@@ -99,14 +120,26 @@ TOTAL=$(grep -E "^TOTAL" "$TMPD/cs.txt" | tail -1); echo "$TOTAL"
 [ "$rc" -eq 0 ] || { echo "FAIL — vehicle_rig drill: the stage dump is incomplete or inconsistent"; exit 1; }
 n_full=$(echo "$TOTAL" | awk '{print $5}'); n_fastrun=$(echo "$TOTAL" | awk '{print $7}'); n_stop=$(echo "$TOTAL" | awk '{print $9}')
 n_stages=$(echo "$TOTAL" | awk '{print $13}'); n_logs=$(echo "$TOTAL" | awk '{print $15}'); n_bones=$(echo "$TOTAL" | awk '{print $23}'); n_fc=$(echo "$TOTAL" | awk '{print $25}'); n_glb=$(echo "$TOTAL" | awk '{print $29}')
-n_exit=$(grep -c "^JOB	EXIT:" "$TMPD/jobs.txt")
+n_exit=$(grep -cE "^JOB	(EXIT|DIES):" "$TMPD/jobs.txt")
 [ "$n_full" -eq $((n_jobs - n_fast - n_exit)) ] && [ "$n_fastrun" -eq "$n_fast" ] && [ "$n_stop" -eq "$n_exit" ] || { echo "FAIL — vehicle_rig drill: not every recipe completed (full $n_full of $((n_jobs - n_fast - n_exit)), fast $n_fastrun of $n_fast, stopped $n_stop of $n_exit)"; exit 1; }
+# STEP (b), STAGE 1: the C# model of the first stage (editor/BlenderVehicleRig.cs) against every job's rows of that stage, as
+# strings - the dump's own float32 bits and hashes. Every dumped job must be equal row for row, or left by name (a source the
+# C# does not read: .fbx/.obj/.blend, the source-skeleton fast path); any other decline is a FAIL.
+"$TMPD/vehiclerig.exe" --stages 1 "${KEY_MODE[@]}" "$WTMP/jobs.txt" "${DUMPS[@]}" > "$TMPD/s1_raw.txt" 2>&1; s1rc=$?
+t3=$(date +%s)
+tr -d '\r' < "$TMPD/s1_raw.txt" > "$TMPD/s1.txt"
+grep -E "^FAIL|^MODEL" "$TMPD/s1.txt"
+S1=$(grep -E "^STAGES 1 jobs" "$TMPD/s1.txt" | tail -1); echo "$S1"
+[ -n "$S1" ] || { tail -5 "$TMPD/s1.txt"; echo "FAIL — vehicle_rig drill: the stage 1 model gave no total (rc=$s1rc)"; exit 1; }
+[ "$s1rc" -eq 0 ] || { echo "FAIL — vehicle_rig drill: the stage 1 model differs from Blender, or leaves a dumped job to it"; exit 1; }
+n_s1=$(echo "$S1" | awk '{print $4}'); n_s1eq=$(echo "$S1" | awk '{print $6}'); n_s1left=$(echo "$S1" | awk '{print $8}'); n_s1rows=$(echo "$S1" | awk '{print $10}')
+[ "$n_s1" -eq "$n_jobs" ] && [ $((n_s1eq + n_s1left)) -eq "$n_jobs" ] || { echo "FAIL — vehicle_rig drill: the stage 1 model compared $n_s1 of $n_jobs jobs ($n_s1eq equal, $n_s1left left)"; exit 1; }
 # Negative guards on the REAL dump: a missing or inconsistent record must never pass as evidence.
 python "$ROOT/tools/vehiclerig-drill/missing_vehiclerig.py" "$WTMP/missing" "$WTMP/jobs.txt" "${DUMPS[@]}" > "$TMPD/tampers_raw.txt" || { echo "FAIL — could not construct the damaged dumps"; exit 1; }
 tr -d '\r' < "$TMPD/tampers_raw.txt" > "$TMPD/tampers.txt"
 "$TMPD/vehiclerig.exe" "$WTMP/missing/jobs.txt" "$WTMP/missing/intact.txt" > "$TMPD/intact_out.txt" 2>&1; controlrc=$?
 if [ "$controlrc" -ne 0 ] || ! grep -qE "^PASS " "$TMPD/intact_out.txt"; then head -5 "$TMPD/intact_out.txt"; echo "FAIL — vehicle_rig drill rejected the intact control (rc=$controlrc)"; exit 1; fi
-n_t=0
+n_t=0; n_s1t=0
 while IFS= read -r mode; do
   [ -n "$mode" ] || continue
   case "$mode" in
@@ -148,6 +181,7 @@ while IFS= read -r mode; do
     X_unknown_kind) reason="unknown row kind";;
     X_after_done) reason="follows DONE";;
     X_died_and_rows) reason="an X row after the export died|both died and has GLB rows";;
+    S1_*) reason="stage 1 (model|LOG|SCENE|OBJ|MESH|ACT|FC)";;   # a valid dump that says something else about the scene than the stage 1 model: refused BY THE MODEL in --stages 1 mode
     K_missing) reason="K rows";;
     K_bits|K_meta) reason="K rows do not match FC hashes";;
     K_orphan) reason="K row names no FC row";;
@@ -159,13 +193,15 @@ while IFS= read -r mode; do
   esac
   jf="$WTMP/missing/jobs.txt"
   case "$mode" in EXIT_ran_full|EXIT_marked_wrong_stage) jf="$WTMP/missing/jobs_exit.txt";; FAST_mode_mismatch) jf="$WTMP/missing/jobs_fast.txt";; esac
-  "$TMPD/vehiclerig.exe" "${KEY_MODE[@]}" "$jf" "$WTMP/missing/$mode.txt" > "$TMPD/t_$mode.txt" 2>&1; badrc=$?
+  S1_MODE=(); case "$mode" in S1_*) S1_MODE=(--stages 1); n_s1t=$((n_s1t + 1));; esac
+  "$TMPD/vehiclerig.exe" "${S1_MODE[@]}" "${KEY_MODE[@]}" "$jf" "$WTMP/missing/$mode.txt" > "$TMPD/t_$mode.txt" 2>&1; badrc=$?
   if [ "$badrc" -ne 1 ] || ! grep -E "^FAIL " "$TMPD/t_$mode.txt" | grep -qE "$reason"; then
     head -3 "$TMPD/t_$mode.txt"; echo "FAIL — vehicle_rig drill accepted a damaged dump ($mode, rc=$badrc)"; exit 1
   fi
   n_t=$((n_t + 1))
 done < "$TMPD/tampers.txt"
 [ "$n_t" -ge 40 ] || { echo "FAIL — vehicle_rig drill: only $n_t tampers were run (missing_vehiclerig.py writes more)"; exit 1; }
-echo "PASS — vehicle_rig drill refuses $n_t kinds of damaged evidence (a missing, doubled, short or misplaced row of every kind; an early stop; a stop with export rows; a completed run without its GLB rows; an unknown job, row kind or mode)"
+[ "$n_s1t" -ge 10 ] || { echo "FAIL — vehicle_rig drill: only $n_s1t stage 1 tampers were run (missing_vehiclerig.py writes S1_* copies)"; exit 1; }
+echo "PASS — vehicle_rig drill refuses $n_t kinds of damaged evidence (a missing, doubled, short or misplaced row of every kind; an early stop; a stop with export rows; a completed run without its GLB rows; an unknown job, row kind or mode; $n_s1t changed values of stage 1 rows, each caught by the model of that stage)"
 n_size=$(grep -c "^LEFT	.*	over .* MB" "$TMPD/jobs.txt")
-echo "PASS — vehicle_rig drill, step (a) the stage dump: $n_jobs of $((n_jobs + n_left)) saved recipes run by Blender through vehicle_rig.py cut at its five stages (Blender took $((t1 - t0)) s, $JOBS at a time), $n_full through all five and $n_fastrun on the source-skeleton fast path, $n_stop stopped by the script's own exit; $n_stages scene dumps with $n_logs VEHICLE lines, $n_bones bones and $n_fc fcurves on record and $n_glb rows of the exported GLBs read back, every block complete and consistent; $n_left recipe(s) left: $n_size over the size limit (FULL=1 takes them)"
+echo "PASS — vehicle_rig drill, step (a) the stage dump: $n_reg of $((n_reg + n_left)) saved recipes and $n_fx fixture jobs run by Blender through vehicle_rig.py cut at its five stages (Blender took $((t1 - t0)) s, $JOBS at a time), $n_full through all five and $n_fastrun on the source-skeleton fast path, $n_stop stopped by the script's own exit; $n_stages scene dumps with $n_logs VEHICLE lines, $n_bones bones and $n_fc fcurves on record and $n_glb rows of the exported GLBs read back, every block complete and consistent; $n_left recipe(s) left: $n_size over the size limit (FULL=1 takes them). Step (b), stage 1 in C# (editor/BlenderVehicleRig.cs: the import, the bone-shape purge, the brightness line, the second-model merge, the flatten, the loose split, the placements, the ignored parts, the orientation, transform_apply): $n_s1eq of $n_jobs jobs equal to Blender row for row ($n_s1rows rows of objects, meshes and actions, as bits and hashes; $((t3 - t2)) s), $n_s1left left by name (a source the C# does not read, or the rigfast fast path)"

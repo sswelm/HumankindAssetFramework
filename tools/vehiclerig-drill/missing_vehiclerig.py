@@ -137,6 +137,43 @@ for kind in ("NODE", "SKIN", "IBM", "MESH", "PRIM", "MAT", "IMG", "TEX", "SAMP",
         i = candidates[0]
         write("X_short_" + kind, cut_last_field(i), repair=kind != "PRIM")
         write("X_duplicate_" + kind, insert(i, lines[i]))
+# Step (b), the stage 1 model (vehiclerig.exe --stages 1): a complete and consistent dump that says something ELSE about the
+# scene than the C# does must be refused too - one changed value per row kind of stage 1, the seal repaired. Named S1_*: the
+# drill runs these in --stages 1 mode, where the reason is "stage 1".
+
+
+def flip_bits(h):
+    """Another valid float32 (or SHA-256) hex: the last digit changed."""
+    return h[:-1] + ("1" if h[-1] != "1" else "2")
+
+
+def with_field(i, j, value):
+    f = lines[i].split("\t"); f[j] = value
+    return replace(i, "\t".join(f))
+
+
+i_st1 = first(lambda l: l == "STAGE\t1"); write("S1_LOG_extra", insert(i_st1, "LOG\t1\tVEHICLE planted: a line the script never printed"))   # LOG rows precede their stage's row
+if any(l.startswith("LOG\t1\t") for l in lines):   # a clean import prints no VEHICLE line in stage 1
+    i_log1 = first(lambda l: l.startswith("LOG\t1\t")); write("S1_LOG_text", replace(i_log1, lines[i_log1] + " (changed)"))
+    write("S1_LOG_dropped", drop(i_log1))
+write("S1_SCENE_start", with_field(i_scene, 2, "2"))
+write("S1_SCENE_frame", with_field(i_scene, 3, "251"))
+write("S1_OBJ_matrix", with_field(i_obj, 10, flip_bits(lines[i_obj].split("\t")[10])))
+write("S1_OBJ_data", with_field(i_obj, 7, "planted_mesh"))
+if sum(l.startswith("OBJ\t1\t") for l in lines) > 1:
+    i_obj2 = first(lambda l: l.startswith("OBJ\t1\t") and l != lines[i_obj])
+    write("S1_OBJ_order", [lines[i_obj2] if i == i_obj else lines[i_obj] if i == i_obj2 else l for i, l in enumerate(lines)])
+# an object more, WITH its mesh row (so the dump stays consistent and only the model can refuse it)
+_extra_obj = "\t".join(f if j != 2 else "planted_object" for j, f in enumerate(lines[i_obj].split("\t")))
+_extra_mesh = "\t".join(f if j != 2 else "planted_object" for j, f in enumerate(lines[i_mesh].split("\t")))
+write("S1_OBJ_extra", insert(i_mesh, _extra_mesh)[:i_obj] + [_extra_obj] + insert(i_mesh, _extra_mesh)[i_obj:])
+write("S1_MESH_hash", with_field(i_mesh, 6, flip_bits(lines[i_mesh].split("\t")[6])))
+write("S1_MESH_loops", with_field(i_mesh, 7, flip_bits(lines[i_mesh].split("\t")[7])))
+write("S1_MESH_count", with_field(i_mesh, 3, str(int(lines[i_mesh].split("\t")[3]) + 1)))
+write("S1_MESH_materials", with_field(i_mesh, 11, "planted_material"))
+if any(l.startswith("ACT\t1\t") for l in lines):
+    i_act1 = first(lambda l: l.startswith("ACT\t1\t")); write("S1_ACT_range", with_field(i_act1, 3, flip_bits(lines[i_act1].split("\t")[3])))
+    i_fc1 = first(lambda l: l.startswith("FC\t1\t")); write("S1_FC_hash", with_field(i_fc1, 7, flip_bits(lines[i_fc1].split("\t")[7])))
 for name in sorted(os.listdir(out)):
     if name.endswith(".txt") and name not in ("intact.txt", "jobs.txt", "jobs_exit.txt", "jobs_fast.txt"):
         print(name[:-4])

@@ -164,7 +164,7 @@ public static partial class VehicleProbe
             return v;
         }
 
-        static string PyRepr(string s) => "'" + (s ?? "").Replace("\\", "\\\\").Replace("'", "\\'") + "'";
+        internal static string PyRepr(string s) => "'" + (s ?? "").Replace("\\", "\\\\").Replace("'", "\\'") + "'";
         static string PyFloatRepr(double v) => v == Math.Floor(v) && Math.Abs(v) < 1e16 ? v.ToString("0.0", CultureInfo.InvariantCulture) : v.ToString("R", CultureInfo.InvariantCulture);
     }
 

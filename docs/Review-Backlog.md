@@ -394,6 +394,20 @@ complete and consistent, 45 tamper kinds refused; `docs/Testing.md` has the meas
 curve path per slot (the dugout canoe's 'Take 001'), so the FC and K rows carry the slot. The census says which branches
 need a fixture before their port: the modifier bake, the script's own exits and deaths (no recipe takes them), and the
 roles the plan lists with one or no recipe. Next: (b) stage 1.
+(b) stage 1 DONE 2026-10-15: `editor/BlenderVehicleRig.cs` + `vehiclerig.exe --stages 1` in the drill - the arguments,
+the import (rig_anim's `ImportScene`, factored out), the bone-shape purge, the brightness line, the second-model merge,
+the flatten, the loose split, the placements, the ignored parts, the orientation and transform_apply; 22 of the 24
+recipes equal to Blender row for row (153,497 rows), the 2 .fbx sources left by name, the 20 fixtures for the branches no
+recipe takes equal (`tools/vehiclerig-drill/vehiclerig_fixtures.py`: nine scenes and eleven of the script's exits and
+deaths, keyed EXIT:1: / DIES:1:), 13 kinds of stage-1 tamper refused (11 in the gate) (`docs/Testing.md` has the
+measure). Found: transform_apply skips a matrix within 1e-6 of the identity; separate LOOSE's face order is the
+walk's with each edge's faces in radial order; a slot identifier does not follow its object's rename; an animated
+object's import world is its first clip at frame 1 (keys from frame 0); a root's `matrix_world = mw` is a quaternion
+round trip - the fixtures caught the last three after every recipe agreed; the review then found the rig path's
+argument-time lines belong after the merge lines, the orientation's pad/cut, Python's half-to-even `%.Nf` and the
+exits and deaths no fixture had. Next: (c) stage 2 - the reduction tiers per
+role (limited dissolve, the welds, decimate; bmesh's dissolve_limit and remove_doubles have no C# yet - the rig_anim
+port leaves the weld by name - so their rules are measured per operation), continuing from the stage 1 scene.
 - **rig_anim.py's socket sort exit reads a freed edit bone** — OPEN (2026-10-14, found by the stage 4 fixtures). The
   "would sort BEFORE its parent" error prints `_parent.name` after `bpy.ops.object.mode_set(mode='OBJECT')` has freed
   the edit bones: four Blender runs of `fx_s4_socket_sort` printed the right name once, an empty name once, and twice

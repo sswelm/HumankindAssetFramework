@@ -1691,6 +1691,48 @@ Blenders (FULL=1; the 18 under 40 MB in 47 s by default), 23 through all five st
 dumps are equal with the work folder masked (the output path in the script's DONE line is the only difference).
 Branches at zero in the census - fixtures before their port: the modifier bake, the script's own exits and deaths.
 
+**Step (b), stage 1 of item (5) (2026-10-15).** `editor/BlenderVehicleRig.cs` is the first stage of `vehicle_rig.py` in
+C#: the arguments (`ParseArgs` - the names files by role, the orientation padded or cut to three values with the WARN for
+one float() refuses, the tagged merge2/bright/flagfold/parttx and reduce tokens; the script's own exits in their places:
+bright= and flagfold= before the import, the merge2 field count and a missing second model before the second import,
+its offset and rotation deaths and its scale exit after that import's lines, the four reduce tags after the merge, the
+dial and names-file deaths before the orientation, the all-Ignored crash in `_guard`; the rig path's own lines - a bad
+orientation, static tracks - AFTER the merge lines), the import through `BlenderRigAnim.ImportScene`
+(factored out of rig_anim's stage 1: no material-less drop, no armature required, every clip's objects posed at frame 1),
+the importer's bone-shape placeholders purged (by name at import, by signature after), the brightness line's counts from
+each material's Base Color chain (a flat colour, a texture linked straight in, a MULTIPLY tint absorbing what it can),
+the second model merged (imported into the same name pools and posed at frame 1 like the first, renamed B_ in
+bpy.data order with the slot identifiers left as imported, its target matrix baked into the vertices, a negative
+determinant's faces flipped, the helpers dropped, the MERGE lines), the flatten (every mesh a root holding its world,
+the vertex groups and modifiers cleared, the armature dropped), the single-mesh loose split (the walk of
+BM_mesh_calc_edge_groups_as_arrays: group 0 stays with its vertices sorted and the face order kept, every other group a
+new object with the walk's vertex order, the edges in walk order and the faces in discovery order, each edge's faces
+in radial order - the last created first), the per-part placements (the detach round trip, the world box, the PLACED
+line, the WARN for a part the split has not), the ignored parts, the orientation on the roots, and transform_apply (a
+shared datablock copied, a matrix within 1e-6 of the identity left untouched as BKE_mesh_transform does, a negative
+determinant's faces flipped). `vehiclerig.exe --stages 1` holds it against every dumped job's stage 1 rows as strings -
+the dump's own float32 bits and hashes: 22 of the 24 recipes equal (153,497 rows of objects, meshes and actions), the
+2 `.fbx` sources left by NAME (`SourceFallback`; any other decline the model makes is a FAIL), and the 20 fixtures of
+`tools/vehiclerig-drill/vehiclerig_fixtures.py` equal - the branches no recipe takes: a placement beside a missing
+part and one with a zero scale, the orientation beside an Ignore name nothing matches, a shared mesh with a mirrored
+instance, a second model with a turned root, an empty, an animated node and an icosphere placeholder, static tracks
+beside a mirrored, instanced and separately brightened second model, a skinned source, one mesh of three loose boxes,
+brightness on flat, direct and tinted materials, and eleven exits and deaths (`--exits`: the writer's jobs post-edited
+into the malformed tokens the Lab never writes, keyed EXIT:1: / DIES:1: - every part Ignored, bright, flagfold, the four
+reduce tags, a second model that is not there; int("15.0") for the frames, a merge2 offset float() refuses, a wheels
+file that is not there); the fixtures are recipes the jobs writer turns into jobs like the saved ones. The S1_*
+tampers (`missing_vehiclerig.py`: one changed value per row kind of stage 1 on a valid, re-sealed dump - 13 kinds, 11 on
+the gate's default sample, whose damaged job prints no VEHICLE line in stage 1) are each refused in `--stages 1` mode. Found: transform_apply leaves a matrix within 1e-6 of the identity untouched (the bell's
+1.0000001 scale); separate LOOSE's face order is the walk's discovery order with each edge's faces in radial order;
+a slot identifier does not follow its object's rename; the import's world of an animated object is its first clip at
+the scene frame (the importer's keys start at frame 0, so frame 1 is interpolated); `rel.matrix_world = mw` on a root
+is a quaternion round trip, not a no-op. The fixtures caught the last three after all 22 recipes agreed; a source-reading
+review then found the argument-time lines placed before the import's (no recipe or fixture combined static tracks with a
+merge), the orientation's pad/cut, .NET's half-away rounding where Python's `%.Nf` rounds half to even (`PyFixed` now at
+every line), the unmodelled exits and deaths above, and static tracks still in `_role_marked` - each fixtured. Not
+modelled, named: a brightness texture without an image (the script's WARN chain) is a Fallback; a zero-size image the
+script skips cannot be told from this side.
+
 **Step (h), the acceptance row (2026-10-14).** `editor/RigRouteAcceptanceTest.cs`, the Bake Tests row "Does the GLB
 rig route bake what the FBX route bakes?" (off by default: two full animated bakes per entry), is the backlog's gate
 before the GLB route becomes the editor default. For every animated registry entry with a .glb/.gltf source it bakes

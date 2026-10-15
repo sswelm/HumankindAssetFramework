@@ -398,11 +398,13 @@ static class VehicleRigDrill
     public static int Main(string[] args)
     {
         Console.OutputEncoding = new UTF8Encoding(false);
-        bool requireKeys = false; int offset = 0;
-        const string usage = "usage: vehiclerig.exe [--keys] <jobs file> <dump>...";
+        bool requireKeys = false; int offset = 0; int stages = 0;   // --stages N: the C# model of stages 1..N (editor/BlenderVehicleRig.cs) against the dump
+        const string usage = "usage: vehiclerig.exe [--keys] [--stages 1] <jobs file> <dump>...";
         while (offset < args.Length && args[offset].StartsWith("--", StringComparison.Ordinal))
         {
-            if (args[offset] == "--keys") requireKeys = true; else { Console.WriteLine(usage); return 2; }
+            if (args[offset] == "--keys") requireKeys = true;
+            else if (args[offset] == "--stages" && offset + 1 < args.Length && int.TryParse(args[offset + 1], NumberStyles.None, CultureInfo.InvariantCulture, out stages) && stages >= 1 && stages <= 1) offset++;
+            else { Console.WriteLine(usage); return 2; }
             offset++;
         }
         if (args.Length < offset + 2) { Console.WriteLine(usage); return 2; }
@@ -444,17 +446,18 @@ static class VehicleRigDrill
                 stageRows += d.Stages.Count; logs += d.AllLogs.Count(); glbRows += d.ExportRows.Count;
                 foreach (var s in d.Stages.Values) { objs += s.Objs.Count; meshes += s.Meshes.Count; groups += s.Groups.Count; bones += s.Bones.Count; fcurves += s.FCurves.Count; keys += s.Keys.Count; }
                 // EXIT:<stage>: keys name the expected script exit stage (a fixture); every other job must run to its end
-                bool expectStop = key.StartsWith("EXIT:", StringComparison.Ordinal);
+                // DIES:<stage>: keys name the expected stage of the script's own death (an uncaught exception: a fixture)
+                bool expectStop = key.StartsWith("EXIT:", StringComparison.Ordinal), expectDie = key.StartsWith("DIES:", StringComparison.Ordinal);
                 int expectedStage = 0;
-                if (expectStop)
+                if (expectStop || expectDie)
                 {
                     int colon = key.IndexOf(':', 5);
                     if (colon < 0 || !int.TryParse(key.Substring(5, colon - 5), NumberStyles.None, CultureInfo.InvariantCulture, out expectedStage) || expectedStage < 1 || expectedStage > VehicleRigDump.StageCount)
-                        throw new InvalidDataException("EXIT: key must name its expected stage (EXIT:<stage>:<name>)");
+                        throw new InvalidDataException((expectStop ? "EXIT:" : "DIES:") + " key must name its expected stage (EXIT:<stage>:<name>, DIES:<stage>:<name>)");
                 }
                 if (d.Fast && d.Completed)
                 {
-                    if (expectStop) { fails++; Console.WriteLine($"FAIL {key}: expected to stop (its key says EXIT:), ran the fast path to its export"); }
+                    if (expectStop || expectDie) { fails++; Console.WriteLine($"FAIL {key}: expected to stop (its key says EXIT: or DIES:), ran the fast path to its export"); }
                     else { fast++; Console.WriteLine($"OK {key}: the fast path (rigfast) exported, {d.AllLogs.Count()} log lines, {d.ExportRows.Count} GLB rows"); }
                 }
                 else if (d.StoppedAt > 0)
@@ -463,15 +466,18 @@ static class VehicleRigDrill
                     string how = d.Exit != null ? "exits " + d.Exit + ": " + (d.LogsOfStop.LastOrDefault(l => l.StartsWith("VEHICLE ERROR")) ?? "(no VEHICLE ERROR line)") : "dies: " + d.Died;
                     if (expectStop && d.Exit == "1" && d.StoppedAt == expectedStage && d.LogsOfStop.Any(l => l.StartsWith("VEHICLE ERROR", StringComparison.Ordinal)))
                         Console.WriteLine($"OK {key}: stops at stage {d.StoppedAt} as expected; {how}");
-                    else { fails++; Console.WriteLine($"FAIL {key}: stopped at stage {d.StoppedAt}" + (expectStop ? $", expected to stop at stage {expectedStage} with the script's VEHICLE ERROR; " : "; ") + how); }
+                    else if (expectDie && d.Died != null && d.StoppedAt == expectedStage)
+                        Console.WriteLine($"OK {key}: dies in stage {d.StoppedAt} as expected; {how}");
+                    else { fails++; Console.WriteLine($"FAIL {key}: stopped at stage {d.StoppedAt}" + (expectStop ? $", expected to stop at stage {expectedStage} with the script's VEHICLE ERROR; " : expectDie ? $", expected to die in stage {expectedStage}; " : "; ") + how); }
                 }
-                else if (expectStop) { fails++; Console.WriteLine($"FAIL {key}: expected to stop (its key says EXIT:), ran through all five stages"); }
+                else if (expectStop || expectDie) { fails++; Console.WriteLine($"FAIL {key}: expected to stop (its key says EXIT: or DIES:), ran through all five stages"); }
                 else
                 {
                     full++;
                     var last = d.Last;
                     Console.WriteLine($"OK {key}: 5 stages, {d.AllLogs.Count()} log lines; at the end {last.Objs.Count} objects, {last.Meshes.Count} mesh(es), {last.Bones.Count} bones, {last.Actions.Count} action(s), {last.FCurves.Count} fcurves; {d.ExportRows.Count} GLB rows");
                 }
+                if (stages > 0 && !StageDrill.Compare(d, key, stages)) fails++;
             }
             catch (InvalidDataException e) { fails++; Console.WriteLine($"FAIL {key}: {e.Message}"); }
             catch (Exception e) { fails++; Console.WriteLine($"FAIL {key}: {e.GetType().Name}: {e.Message}"); }
@@ -479,9 +485,138 @@ static class VehicleRigDrill
         foreach (var k in jobs.Keys.Where(k => !seen.Contains(k))) { fails++; Console.WriteLine($"FAIL {k}: the jobs file names it, the dump has no block for it"); }
         foreach (var l in leftByName) Console.WriteLine("LEFT " + l);
         foreach (var kv in cover) Console.WriteLine($"COVER {kv.Value} {kv.Key}");
+        if (stages > 0) StageDrill.Summary(stages);
         Console.WriteLine($"TOTAL jobs {blocks.Count} full {full} fast {fast} stopped {stopped} left {leftByName.Count} stages {stageRows} logs {logs} objects {objs} meshes {meshes} groups {groups} bones {bones} fcurves {fcurves} keys {keys} glbrows {glbRows}");
         if (fails > 0) { Console.WriteLine($"FAIL — {fails} problem(s)"); return 1; }
         Console.WriteLine($"PASS — vehicle_rig stage dump: {blocks.Count} jobs dumped by Blender, {full} through all five stages, {fast} on the fast path, {stopped} stopped by the script as it says; {leftByName.Count} recipe(s) left by name" + (leftByName.Count > 0 ? " (" + string.Join("; ", leftByName) + ")" : ""));
         return 0;
+    }
+}
+
+/// <summary>Step (b): the stage 1 model (BlenderVehicleRig.RunStage1) against the dump, every row of stage 1 as a string - the
+/// dump's own encoding, float32 bits and SHA-256 hashes - so that equal means equal to the bit. A job the model leaves to
+/// Blender by name is counted LEFT and said; the census (MODEL rows) names the branches the jobs took and the reasons left.</summary>
+static class StageDrill
+{
+    public static int Compared, Equal, Left; public static long RowsEqual;
+    static readonly SortedDictionary<string, int> Census = new SortedDictionary<string, int>(StringComparer.Ordinal);
+
+    static float FromHex(string h) => BitConverter.ToSingle(BitConverter.GetBytes(Convert.ToUInt32(h, 16)), 0);
+    static string Show(string f) => f.Length == 8 && f.All(c => Uri.IsHexDigit(c)) ? f + " (" + FromHex(f).ToString("R", CultureInfo.InvariantCulture) + ")" : f.Length == 64 ? "a hash " + f.Substring(0, 12) + "…" : "'" + f + "'";
+
+    static string Diff(string kind, List<string[]> mine, List<string[]> theirs, int idFields)
+    {
+        int n = Math.Min(mine.Count, theirs.Count);
+        for (int i = 0; i < n; i++)
+        {
+            var a = mine[i]; var b = theirs[i];
+            string id = string.Join("/", b.Skip(2).Take(idFields));
+            if (a.Length != b.Length) return $"{kind} row {i} ({id}): {a.Length} fields here, {b.Length} in Blender";
+            for (int j = 0; j < a.Length; j++)
+                if (a[j] != b[j]) return $"{kind} row {i} ({string.Join("/", a.Skip(2).Take(idFields))} here, {id} in Blender) field {j}: here {Show(a[j])}, Blender {Show(b[j])}";
+        }
+        if (mine.Count != theirs.Count) return $"{kind}: {mine.Count} rows here, {theirs.Count} in Blender" + (mine.Count > n ? $"; the first extra here: {string.Join("/", mine[n].Skip(2).Take(idFields))}" : $"; the first extra in Blender: {string.Join("/", theirs[n].Skip(2).Take(idFields))}");
+        return null;
+    }
+
+    static string ExplainKeys(string[] fcMine, List<string[]> keysMine, VehicleRigDump.Stage s)
+    {
+        if (s.Keys.Count == 0) return " (VEHICLERIG_KEYS=1 shows the key)";
+        string Id(string[] k) => k[2] + "\u0001" + k[3] + "\u0001" + k[4] + "\u0001" + k[5];
+        var mine = keysMine.Where(k => Id(k) == Id(fcMine)).ToList(); var theirs = s.Keys.Where(k => Id(k) == Id(fcMine)).ToList();
+        string d = Diff("K", mine, theirs, 4);
+        return d == null ? " (every K row equal: the hash itself differs)" : "; " + d;
+    }
+
+    static void CompareRows(int n, BlenderRigAnim.Rows rows, List<string> logs, VehicleRigDump.Stage s, List<string> problems)
+    {
+        string N = "stage " + n + " ";
+        if (!s.Logs.SequenceEqual(logs)) problems.Add(N + "LOG lines differ: here [" + string.Join(" | ", logs) + "], Blender [" + string.Join(" | ", s.Logs) + "]");
+        if (!s.Scene.SequenceEqual(rows.Scene.Skip(2))) problems.Add(N + "SCENE differs: here [" + string.Join(" ", rows.Scene.Skip(2)) + "], Blender [" + string.Join(" ", s.Scene) + "]");
+        string x;
+        if ((x = Diff("OBJ", rows.Objs, s.Objs, 1)) != null) problems.Add(N + x);
+        if ((x = Diff("MESH", rows.Meshes, s.Meshes, 1)) != null) problems.Add(N + x);
+        if ((x = Diff("VG", rows.Groups, s.Groups, 2)) != null) problems.Add(N + x);
+        if ((x = Diff("BONE", rows.Bones, s.Bones, 2)) != null) problems.Add(N + x);
+        if ((x = Diff("PB", rows.PoseBones, s.PoseBones, 1)) != null) problems.Add(N + x);
+        if ((x = Diff("ACT", rows.Actions, s.Actions, 1)) != null) problems.Add(N + x);
+        if ((x = Diff("FC", rows.FCurves, s.FCurves, 4)) != null)
+        {
+            int at = -1; for (int i = 0; i < Math.Min(rows.FCurves.Count, s.FCurves.Count) && at < 0; i++) if (!rows.FCurves[i].SequenceEqual(s.FCurves[i])) at = i;
+            problems.Add(N + x + (at >= 0 && rows.FCurves[at].Take(6).SequenceEqual(s.FCurves[at].Take(6)) ? ExplainKeys(rows.FCurves[at], rows.Keys, s) : ""));
+        }
+        if (s.Keys.Count > 0 && (x = Diff("K", rows.Keys, s.Keys, 4)) != null) problems.Add(N + x);
+    }
+
+    /// <summary>VEHICLERIG_MODEL_ROWS=&lt;file&gt; writes the model's rendered rows of a stage (for the job VEHICLERIG_MODEL_JOB, or every
+    /// job) in the dump's own format, to be diffed against the dump when a row differs.</summary>
+    static void DumpModelRows(string key, int n, BlenderRigAnim.Rows rows, List<string> logs)
+    {
+        string path = Environment.GetEnvironmentVariable("VEHICLERIG_MODEL_ROWS"); string only = Environment.GetEnvironmentVariable("VEHICLERIG_MODEL_JOB");
+        if (string.IsNullOrEmpty(path) || (!string.IsNullOrEmpty(only) && only != key)) return;
+        var sb = new StringBuilder();
+        sb.Append("JOB").Append('\t').Append(key).Append('\n');
+        foreach (var l in logs) sb.Append("LOG").Append('\t').Append(n).Append('\t').Append(l).Append('\n');
+        sb.Append("STAGE").Append('\t').Append(n).Append('\n');
+        sb.Append(string.Join("\t", rows.Scene)).Append('\n');
+        foreach (var list in new[] { rows.Objs, rows.Meshes, rows.Groups, rows.Bones, rows.PoseBones, rows.Actions, rows.FCurves, rows.Keys })
+            foreach (var r in list) sb.Append(string.Join("\t", r)).Append('\n');
+        File.AppendAllText(path, sb.ToString(), new UTF8Encoding(false));
+    }
+
+    static long RowCount(VehicleRigDump.Stage s) => 1 + s.Objs.Count + s.Meshes.Count + s.Groups.Count + s.Bones.Count + s.PoseBones.Count + s.Actions.Count + s.FCurves.Count + s.Keys.Count;
+    static string Describe(VehicleRigDump.Stage s) => $"{s.Objs.Count} objects, {s.Meshes.Count} meshes, {s.Groups.Count} vertex groups, {s.Bones.Count} bones, {s.Actions.Count} actions, {s.FCurves.Count} fcurves" + (s.Keys.Count > 0 ? $", {s.Keys.Count} keys" : "");
+
+    public static bool Compare(VehicleRigDump d, string key, int stages)
+    {
+        Compared++;
+        var problems = new List<string>();
+        BlenderRigAnim.Stage1 model; BlenderVehicleRig.Args args;
+        try
+        {
+            args = BlenderVehicleRig.ParseArgs(d.Argv);
+            var m = BlenderVehicleRig.SourceFallback(args) == null ? GlbReader.Read(args.Input) : null;   // a .fbx/.obj/.blend source: not read, the model declines it by name
+            model = BlenderVehicleRig.RunStage1(m, args, GlbReader.Read);
+        }
+        catch (Exception e) { Console.WriteLine($"FAIL {key}: stage 1 model: {e.GetType().Name}: {e.Message}"); return false; }
+        foreach (var note in model.Notes) Census[note] = (Census.TryGetValue(note, out int c) ? c : 0) + 1;
+        if (model.Fallback != null)
+        {
+            Census["LEFT: " + model.Fallback] = (Census.TryGetValue("LEFT: " + model.Fallback, out int c) ? c : 0) + 1;
+            // left by NAME: a source the C# does not read (until the native readers); every other decline is a model that is wrong
+            bool named = BlenderVehicleRig.SourceFallback(args) != null || model.Fallback.StartsWith("the source-skeleton fast path", StringComparison.Ordinal);
+            if (!named) { Console.WriteLine($"FAIL {key}: stage 1 model leaves this job to Blender: {model.Fallback}"); return false; }
+            Left++; Console.WriteLine($"STAGE1 {key}: left to Blender by name: {model.Fallback}"); return true;
+        }
+        var rows = model.Exits || model.Dies != null ? null : BlenderRigAnim.Render(model, 1, fcSlot: true);
+        if (rows != null) DumpModelRows(key, 1, rows, model.Logs);
+        if (model.Dies != null)
+        {
+            // the model dies here (an uncaught exception in the script): Blender must have died in stage 1 after the same lines
+            Census["the script's death: " + model.Dies.Split(':')[0]] = (Census.TryGetValue("the script's death: " + model.Dies.Split(':')[0], out int cd) ? cd : 0) + 1;
+            if (d.StoppedAt != 1 || d.Died == null) problems.Add("stage 1 model: the script dies in stage 1 here (" + model.Dies + "), " + (d.StoppedAt == 0 ? "Blender ran it through" : d.Died != null ? $"Blender died in stage {d.StoppedAt}" : $"Blender exited {d.Exit} in stage {d.StoppedAt}"));
+            else if (!d.LogsOfStop.SequenceEqual(model.Logs)) problems.Add("stage 1 model: the lines before the death differ: here [" + string.Join(" | ", model.Logs) + "], Blender [" + string.Join(" | ", d.LogsOfStop) + "]");
+            if (problems.Count == 0) { RowsEqual += model.Logs.Count; Equal++; Console.WriteLine($"STAGE1 {key}: equal - the script dies in stage 1 ({d.Died}), {model.Logs.Count} VEHICLE lines before it"); }
+        }
+        else if (model.Exits)
+        {
+            if (d.StoppedAt != 1 || d.Exit != "1") problems.Add("stage 1 model: the script exits in stage 1 here, " + (d.StoppedAt == 0 ? "Blender ran it through" : $"Blender stopped at stage {d.StoppedAt}" + (d.Died != null ? " by dying" : "")));
+            else if (!d.LogsOfStop.SequenceEqual(model.Logs)) problems.Add("stage 1 model: the stop's VEHICLE lines differ: here [" + string.Join(" | ", model.Logs) + "], Blender [" + string.Join(" | ", d.LogsOfStop) + "]");
+        }
+        else if (!d.Stages.TryGetValue(1, out var s)) problems.Add("stage 1 model: the scene runs on here, Blender stopped in stage 1: " + (d.Exit != null ? string.Join(" | ", d.LogsOfStop) : d.Died));
+        else
+        {
+            CompareRows(1, rows, model.Logs, s, problems);
+            if (problems.Count == 0) { RowsEqual += RowCount(s); Equal++; Console.WriteLine($"STAGE1 {key}: equal - {Describe(s)}"); }
+        }
+        if (problems.Count == 0 && model.Exits) { RowsEqual += model.Logs.Count; Equal++; Console.WriteLine($"STAGE1 {key}: equal - the script's exit in stage 1, {model.Logs.Count} VEHICLE lines"); }
+        if (problems.Count > 0) { foreach (var p in problems) Console.WriteLine($"FAIL {key}: {p}"); return false; }
+        return true;
+    }
+
+    public static void Summary(int stages)
+    {
+        foreach (var kv in Census) Console.WriteLine($"MODEL {kv.Value} {kv.Key}");
+        Console.WriteLine($"STAGES {stages} jobs {Compared} equal {Equal} left {Left} rows {RowsEqual}");
     }
 }
