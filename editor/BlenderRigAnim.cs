@@ -241,6 +241,7 @@ public static class BlenderRigAnim
         public string ArmatureModifier;           // the armature object's name, or null
         public int[] Edges;                       // pairs, Blender's order (the join concatenates them)
         public bool[] FaceSharp;                  // sharp_face per face
+        public bool[] EdgeSharp;                  // sharp_edge per edge (Edges' order), or null: none marked
         public short[] CustomNormal;              // 2 per corner, or null (no normals)
         public List<float[]> UvAll = new List<float[]>();   // every UV layer: UVMap, UVMap.001, ... (Uv is the first)
         public List<(string name, bool point, byte[] bytes)> Colors = new List<(string, bool, byte[])>();   // the colour layers (BlenderReduce's), for the export

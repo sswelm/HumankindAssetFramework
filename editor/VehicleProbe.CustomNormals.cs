@@ -283,7 +283,18 @@ public static partial class VehicleProbe
     /// mix_normals_corner_to_vert. The same geometry gives the file normal back to the quantization; a transformed one (the Lab's
     /// second model: Mesh.transform moves the vertices and leaves the shorts, flip_normals reverses the corners and carries
     /// each corner's shorts with it) gives what Blender then holds.</summary>
-    internal static float[] DecodeCustomShorts(float[] P, int[] tris, bool[] sharpFace, short[] d0, short[] d1)
+    internal static long SharpEdgeKey(int a, int b) { int lo = Math.Min(a, b), hi = Math.Max(a, b); return ((long)lo << 32) | (uint)hi; }
+
+    /// <summary>The sharp_edge set of a mesh as the fan walk keys it (by vertex pair), or null when none is marked.</summary>
+    internal static HashSet<long> SharpEdgeSet(int[] edges, bool[] edgeSharp)
+    {
+        if (edges == null || edgeSharp == null) return null;
+        var set = new HashSet<long>(BlenderMesh.EdgeKeyComparer.Instance);
+        for (int e = 0; e < edgeSharp.Length; e++) if (edgeSharp[e]) set.Add(SharpEdgeKey(edges[2 * e], edges[2 * e + 1]));
+        return set.Count > 0 ? set : null;
+    }
+
+    internal static float[] DecodeCustomShorts(float[] P, int[] tris, bool[] sharpFace, short[] d0, short[] d1, HashSet<long> sharpEdges = null)
     {
         int nv = P.Length / 3, nf = tris.Length / 3;
         var cornerNormal = new float[nf * 3 * 3];
@@ -314,7 +325,7 @@ public static partial class VehicleProbe
         {
             float px = P[v * 3], py = P[v * 3 + 1], pz = P[v * 3 + 2]; Normalize3(ref px, ref py, ref pz);
             result[v * 3] = px; result[v * 3 + 1] = py; result[v * 3 + 2] = pz;
-        });
+        }, sharpEdges);
         return result;
     }
 
@@ -378,7 +389,7 @@ public static partial class VehicleProbe
     /// third face, a winding mismatch), the fans (traverse_fan_local_corners), each fan's normal (accumulate_fan_normal) and
     /// space (corner_fan_space_define) - handed to onFan with the corners in the fan; onVertex after a vertex's fans; onLone
     /// for a vertex of no face.</summary>
-    static void WalkFans(float[] P, int[] tris, bool[] sharpFace, Action<int, List<VertCornerInfo>, List<int>, FanSpace> onFan, Action<int, List<VertCornerInfo>> onVertex, Action<int> onLone)
+    static void WalkFans(float[] P, int[] tris, bool[] sharpFace, Action<int, List<VertCornerInfo>, List<int>, FanSpace> onFan, Action<int, List<VertCornerInfo>> onVertex, Action<int> onLone, HashSet<long> sharpEdges = null)
     {
         int nv = P.Length / 3, nf = tris.Length / 3;
         var FN = FaceNormals(P, tris);
@@ -422,6 +433,8 @@ public static partial class VehicleProbe
                 AddCornerToEdge(ci.edgePrev, lc, true);
                 AddCornerToEdge(ci.edgeNext, lc, false);
             }
+            // a sharp_edge (the weld tiers mark them over 40 degrees) ends the fans on both sides, whatever its corners say
+            if (sharpEdges != null) for (int e = 0; e < ne; e++) if (sharpEdges.Contains(SharpEdgeKey(v, localEdgeVerts[e]))) kind[e] = 3;
             // calc_edge_directions
             var edgeDirs = new float[ne][];
             for (int e = 0; e < ne; e++)

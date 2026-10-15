@@ -17,13 +17,14 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 
-public static class BlenderVehicleRig
+public static partial class BlenderVehicleRig
 {
     public sealed class Args
     {
         public string Mode = "rig", Input = "", OutGlb = "", PreviewFbx = "";
         public double[] ModelRot = { 0.0, 0.0, 0.0 };
         public Dictionary<string, List<string>> Names = new Dictionary<string, List<string>>(StringComparer.Ordinal);   // by role key (the jobs writer's)
+        public Dictionary<string, double> Reduce = new Dictionary<string, double>(StringComparer.Ordinal);   // the reduce dial per role key, min(95, max(0, float)): 0 when absent
         public HashSet<string> Marked = new HashSet<string>(StringComparer.Ordinal);   // every role list's names (the artifact purge spares them)
         public HashSet<string> Ignore = new HashSet<string>(StringComparer.Ordinal);
         public string Merge2;                       // the merge2= text, or null
@@ -70,6 +71,15 @@ public static class BlenderVehicleRig
             a.Names[role] = list;
         }
         a.Ignore = new HashSet<string>(a.Names["ignore"], StringComparer.Ordinal);
+        // the positional reduce dials, read among the names (vehicle_rig.py 871-922): min(95, max(0, float(x))) when present and
+        // non-blank, else 0; float() of a non-number dies there, like a missing names file
+        foreach (var (role, idx) in new[] { ("rigging", 50), ("structure", 52), ("bodies", 54), ("oars", 61), ("sails", 62), ("rudders", 64), ("wheels", 65), ("flip", 67), ("preserve", 68), ("detail", 70) })
+        {
+            a.Reduce[role] = 0.0;
+            if (!(argv.Count > idx && At(idx).Trim().Length > 0)) continue;
+            if (!TryPyFloat(At(idx), out double v)) { if (a.NamesDie == null) a.NamesDie = "ValueError: could not convert string to float: " + VehicleProbe.Input.PyRepr(At(idx)); continue; }
+            a.Reduce[role] = PyClamp95(v);
+        }
         a.TracksStatic = argv.Count > 16 && At(16).Trim() == "1";
         // the reduce tags in the script's order - defaultreduce, shroudreduce, gunreduce, windowreduce -, the names before the LAST
         // '|', the percent after it; the first malformed one is the script's VEHICLE ERROR after the merge (its exit)
@@ -87,6 +97,7 @@ public static class BlenderVehicleRig
                 {
                     double pct = VehicleProbe.Input.PyFloat(spec);
                     if (double.IsNaN(pct) || double.IsInfinity(pct)) err = "not a finite percent: " + VehicleProbe.Input.PyRepr(arg);
+                    else a.Reduce["guns"] = PyClamp95(pct);
                 }
                 else if (tag == "windowreduce")
                 {
@@ -95,7 +106,7 @@ public static class BlenderVehicleRig
                     {
                         double pct = VehicleProbe.Input.PyFloat(spec.Substring(bar + 1));
                         if (double.IsNaN(pct) || double.IsInfinity(pct)) err = "not a finite percent: " + VehicleProbe.Input.PyRepr(arg);
-                        else if (namesText.Trim().Length > 0) a.Names[role] = NameList(namesText);
+                        else { a.Reduce[role] = PyClamp95(pct); if (namesText.Trim().Length > 0) a.Names[role] = NameList(namesText); }
                     }
                 }
                 else
@@ -104,7 +115,7 @@ public static class BlenderVehicleRig
                     else
                     {
                         if (namesText.Trim().Length > 0) a.Names[role] = NameList(namesText);
-                        VehicleProbe.Input.PyFloat(spec.Substring(bar + 1));   // min(95, max(0, float(pct))): inf and nan pass here
+                        a.Reduce[role] = PyClamp95(VehicleProbe.Input.PyFloat(spec.Substring(bar + 1)));   // min(95, max(0, float(pct))): inf and nan pass here
                     }
                 }
             }
@@ -174,6 +185,9 @@ public static class BlenderVehicleRig
     {
         try { v = VehicleProbe.Input.PyFloat(s); return true; } catch (FormatException) { v = 0; return false; }
     }
+
+    /// <summary>min(95.0, max(0.0, v)) as Python evaluates it: max keeps 0.0 unless v is greater (so nan gives 0), min keeps 95 unless v is less.</summary>
+    static double PyClamp95(double v) { double m = v > 0.0 ? v : 0.0; return m < 95.0 ? m : 95.0; }
 
     /// <summary>int(str): whitespace around, a sign, digits with single underscores between them - nothing else.</summary>
     internal static bool TryPyInt(string t)

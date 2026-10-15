@@ -405,7 +405,19 @@ walk's with each edge's faces in radial order; a slot identifier does not follow
 object's import world is its first clip at frame 1 (keys from frame 0); a root's `matrix_world = mw` is a quaternion
 round trip - the fixtures caught the last three after every recipe agreed; the review then found the rig path's
 argument-time lines belong after the merge lines, the orientation's pad/cut, Python's half-to-even `%.Nf` and the
-exits and deaths no fixture had. Next: (c) stage 2 - the reduction tiers per
+exits and deaths no fixture had.
+(c) stage 2, part 1 DONE 2026-10-15: the WELD tiers in C# (`editor/BlenderVehicleRig.Stage2.cs`, `editor/BlenderWeld.cs`:
+bmesh remove_doubles through a port of BLI_kdtree and weld_verts, the sharp marking, the decimate modifier through
+BlenderDecimate, the new datablock's name) + `vehiclerig.exe --stages 2` in the drill: 20 of 24 recipes equal row for
+row after stage 2 (306,717 rows), 2 FBX left by name, 2 left by name at stage 2 (the dissolve tiers), 30 fixtures equal,
+7 kinds of stage-2 tamper refused (6 in the gate) (`docs/Testing.md` has the measure and the rules: the pool's free list, the balanced-order
+duplicates search, NORMALS_CALC after the operator, the custom-normal fans stopping at sharp edges). Found: the C# BMesh
+could not create after a kill (now BLI_mempool's free list); a packed vertex pair as a plain `long` key hashes its halves
+together (6 s to 83 ms with the mesh's comparer). Next: (c) part 2 - the SOUP tiers (RIGGING, SHROUD): `_dissolve_limited`
+= BM_mesh_decimate_dissolve_ex (the edge heap by -cos of the face angle, BM_faces_join_pair, the vertex heap by the edge
+angle, the degenerate checks; BSP-chunked over 4,000 faces with interior elements in index order) and then
+`bmesh.ops.triangulate` on the n-gons (BM_face_triangulate BEAUTY = polyfill_2d + beautify); two recipes, 72 parts. Then
+(d) stage 3, the rig. The plan's line for (c) as a whole stood: the reduction tiers per
 role (limited dissolve, the welds, decimate; bmesh's dissolve_limit and remove_doubles have no C# yet - the rig_anim
 port leaves the weld by name - so their rules are measured per operation), continuing from the stage 1 scene.
 - **rig_anim.py's socket sort exit reads a freed edit bone** — OPEN (2026-10-14, found by the stage 4 fixtures). The

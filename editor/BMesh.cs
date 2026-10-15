@@ -3,8 +3,8 @@
 // (the disk and radial cycles), bmesh_iterators.cc (LOOPS_OF_VERT and friends), bmesh_query.cc / bmesh_query_inline.hh
 // (the edge queries, the fan step), bmesh_mesh_convert.cc (BM_mesh_bm_from_me).
 //   * An element is an integer into arrays (Blender's pointer); its number is its CREATION order, which is the order
-//     BM_ITER_MESH walks (the element pool, freed slots skipped) as long as nothing is created after a kill - the collapse
-//     creates nothing, and Create throws once anything has died rather than model the pool's free list.
+//     BM_ITER_MESH walks (the element pool, freed slots skipped); a creation after a kill takes the last freed slot, as
+//     BLI_mempool hands it back (the weld of vehicle_rig's stage 2 re-makes faces and edges after kills).
 //   * The DISK cycle of a vertex (the edges around it) is a circular doubly linked list with its head at v->e; a new edge
 //     is appended at the END (before the head); removing the head moves it to the next edge. Each edge carries two links,
 //     one per end: here EDiskNext/EDiskPrev[2e] for v1's and [2e + 1] for v2's.
@@ -47,7 +47,6 @@ public sealed class BMesh
     public byte[] FFlag = new byte[0];
     public int FaceCount, TotFace;
 
-    bool anyKilled;
 
     // ---------------------------------------------------------------- BM_mesh_bm_from_me
 
@@ -105,36 +104,41 @@ public sealed class BMesh
 
     static void Grow<T>(ref T[] a, int need) { if (a.Length >= need) return; int n = Math.Max(need, Math.Max(8, a.Length * 2)); Array.Resize(ref a, n); }
 
-    void NoCreateAfterKill() { if (anyKilled) throw new InvalidOperationException("BMesh: creating an element after a kill would land in the pool's free list, which this port does not model"); }
+    // BLI_mempool: a freed element goes to the HEAD of the pool's free list and the next allocation takes it (last freed, first
+    // reused); with the free list empty the next slot in address order is taken. The iteration (BM_ITER_MESH) walks the slots
+    // in address order, the free ones skipped - so a slot's number is its place in every walk, whoever lives there now.
+    readonly Stack<int> freeV = new Stack<int>(), freeE = new Stack<int>(), freeL = new Stack<int>(), freeF = new Stack<int>();
+    /// <summary>The loop slot a creation would take next (the callers of FaceCreate size their per-loop layers by it).</summary>
+    public int LoopSlotCapacity => LoopCount + 3;
 
     /// <summary>BM_vert_create: no edges, flags 0.</summary>
     public int VertCreate(float x, float y, float z)
     {
-        NoCreateAfterKill();
-        int v = VertCount++;
+        int v = freeV.Count > 0 ? freeV.Pop() : VertCount++;
         Grow(ref VE, VertCount); Grow(ref VAlive, VertCount); Grow(ref VCo, 3 * VertCount); Grow(ref VNo, 3 * VertCount); Grow(ref VFlag, VertCount);
         VE[v] = None; VAlive[v] = true; VCo[3 * v] = x; VCo[3 * v + 1] = y; VCo[3 * v + 2] = z; VNo[3 * v] = VNo[3 * v + 1] = VNo[3 * v + 2] = 0; VFlag[v] = 0;
         TotVert++;
         return v;
     }
 
-    /// <summary>BM_edge_create: v1, v2, no loops, appended to both disk cycles; flags SMOOTH.</summary>
-    public int EdgeCreate(int v1, int v2)
+    /// <summary>BM_edge_create: v1, v2, no loops, appended to both disk cycles; flags SMOOTH, or the example's (BM_elem_attrs_copy:
+    /// every flag but SELECT).</summary>
+    public int EdgeCreate(int v1, int v2, int example = None)
     {
-        NoCreateAfterKill();
-        int e = EdgeCount++;
+        int e = freeE.Count > 0 ? freeE.Pop() : EdgeCount++;
         Grow(ref EV1, EdgeCount); Grow(ref EV2, EdgeCount); Grow(ref EL, EdgeCount); Grow(ref EDiskNext, 2 * EdgeCount); Grow(ref EDiskPrev, 2 * EdgeCount); Grow(ref EAlive, EdgeCount); Grow(ref EFlag, EdgeCount);
         EV1[e] = v1; EV2[e] = v2; EL[e] = None; EFlag[e] = FlagSmooth; EAlive[e] = true;
         EDiskNext[2 * e] = EDiskPrev[2 * e] = EDiskNext[2 * e + 1] = EDiskPrev[2 * e + 1] = None;
         DiskEdgeAppend(e, v1);
         DiskEdgeAppend(e, v2);
         TotEdge++;
+        if (example != None) EFlag[e] = (byte)((EFlag[e] & FlagSelect) | (EFlag[example] & ~FlagSelect));
         return e;
     }
 
     int LoopCreate(int v, int e, int f)
     {
-        int l = LoopCount++;
+        int l = freeL.Count > 0 ? freeL.Pop() : LoopCount++;
         Grow(ref LV, LoopCount); Grow(ref LE, LoopCount); Grow(ref LF, LoopCount); Grow(ref LNext, LoopCount); Grow(ref LPrev, LoopCount); Grow(ref LRadialNext, LoopCount); Grow(ref LRadialPrev, LoopCount); Grow(ref LAlive, LoopCount);
         LV[l] = v; LE[l] = e; LF[l] = f; LNext[l] = LPrev[l] = LRadialNext[l] = LRadialPrev[l] = None; LAlive[l] = true;
         TotLoop++;
@@ -142,27 +146,93 @@ public sealed class BMesh
     }
 
     /// <summary>BM_face_create(verts, edges, len): corner k is verts[k] on edges[k] (which joins verts[k] and verts[k + 1]);
-    /// each loop is appended to its edge's radial cycle in corner order; flags 0, normal zero.</summary>
-    public int FaceCreate(int[] verts, int[] edges, int len)
+    /// each loop is appended to its edge's radial cycle in corner order; flags 0, normal zero - or the example's flags (but
+    /// SELECT), normal and material (BM_elem_attrs_copy). The loops' slots are in `loopSlots` (for the caller's layers).</summary>
+    public int FaceCreate(int[] verts, int[] edges, int len, int example = None, int[] loopSlots = null)
     {
-        NoCreateAfterKill();
         if (len == 0) return None;
-        int f = FaceCount++;
+        int f = freeF.Count > 0 ? freeF.Pop() : FaceCount++;
         Grow(ref FLFirst, FaceCount); Grow(ref FLen, FaceCount); Grow(ref FMat, FaceCount); Grow(ref FNo, 3 * FaceCount); Grow(ref FAlive, FaceCount); Grow(ref FFlag, FaceCount);
         FLen[f] = len; FMat[f] = 0; FNo[3 * f] = FNo[3 * f + 1] = FNo[3 * f + 2] = 0; FAlive[f] = true; FFlag[f] = 0;
         TotFace++;
         int startl = LoopCreate(verts[0], edges[0], f);   // bm_face_boundary_add
         RadialLoopAppend(edges[0], startl);
         FLFirst[f] = startl;
+        if (loopSlots != null) loopSlots[0] = startl;
         int lastl = startl;
         for (int i = 1; i < len; i++)
         {
             int l = LoopCreate(verts[i], edges[i], f);
             RadialLoopAppend(edges[i], l);
             LPrev[l] = lastl; LNext[lastl] = l; lastl = l;
+            if (loopSlots != null) loopSlots[i] = l;
         }
         LPrev[startl] = lastl; LNext[lastl] = startl;
+        if (example != None)
+        {
+            FFlag[f] = (byte)((FFlag[f] & FlagSelect) | (FFlag[example] & ~FlagSelect));
+            FNo[3 * f] = FNo[3 * example]; FNo[3 * f + 1] = FNo[3 * example + 1]; FNo[3 * f + 2] = FNo[3 * example + 2];
+            FMat[f] = FMat[example];
+        }
         return f;
+    }
+
+    /// <summary>bmesh_face_swap_data: the two faces trade everything (their loops now name the other face), but the custom data
+    /// and the index stay with the slot - here the slot's number IS its identity, so the fields swap and the loops' owner too.</summary>
+    public void FaceSwapData(int a, int b)
+    {
+        int l = FLFirst[a]; if (l != None) { int l0 = l; do { LF[l] = b; l = LNext[l]; } while (l != l0); }
+        l = FLFirst[b]; if (l != None) { int l0 = l; do { LF[l] = a; l = LNext[l]; } while (l != l0); }
+        (FLFirst[a], FLFirst[b]) = (FLFirst[b], FLFirst[a]); (FLen[a], FLen[b]) = (FLen[b], FLen[a]); (FMat[a], FMat[b]) = (FMat[b], FMat[a]);
+        (FFlag[a], FFlag[b]) = (FFlag[b], FFlag[a]);
+        for (int k = 0; k < 3; k++) (FNo[3 * a + k], FNo[3 * b + k]) = (FNo[3 * b + k], FNo[3 * a + k]);
+    }
+
+    /// <summary>BM_face_vert_share_loop: the loop of f at v, or None.</summary>
+    public int FaceVertShareLoop(int f, int v)
+    {
+        int l = FLFirst[f], l0 = l;
+        do { if (LV[l] == v) return l; l = LNext[l]; } while (l != l0);
+        return None;
+    }
+
+    /// <summary>BM_loop_is_adjacent: b is a's next or prev.</summary>
+    public bool LoopIsAdjacent(int a, int b) => LNext[a] == b || LPrev[a] == b;
+
+    /// <summary>BM_face_exists: a face with exactly these vertices in this cyclic order, either way round - found through the
+    /// first vertex's disk and each edge's radial cycle, in that order.</summary>
+    public int FaceExists(int[] varr, int len)
+    {
+        if (VE[varr[0]] == None) return None;
+        int eFirst = VE[varr[0]], eIter = eFirst;
+        do
+        {
+            if (EL[eIter] != None)
+            {
+                int lFirst = EL[eIter], lIter = lFirst;
+                do
+                {
+                    if (LV[lIter] == varr[0] && FLen[LF[lIter]] == len)
+                    {
+                        int iWalk = 2;
+                        if (LV[LNext[lIter]] == varr[1])
+                        {
+                            int lWalk = LNext[LNext[lIter]];
+                            do { if (LV[lWalk] != varr[iWalk]) break; lWalk = LNext[lWalk]; } while (++iWalk != len);
+                        }
+                        else if (LV[LPrev[lIter]] == varr[1])
+                        {
+                            int lWalk = LPrev[LPrev[lIter]];
+                            do { if (LV[lWalk] != varr[iWalk]) break; lWalk = LPrev[lWalk]; } while (++iWalk != len);
+                        }
+                        if (iWalk == len) return LF[lIter];
+                    }
+                    lIter = LRadialNext[lIter];
+                } while (lIter != lFirst);
+            }
+            eIter = DiskEdgeNext(eIter, varr[0]);
+        } while (eIter != eFirst);
+        return None;
     }
 
     // ---------------------------------------------------------------- the disk cycle (bmesh_structure.cc)
@@ -447,10 +517,10 @@ public sealed class BMesh
 
     // ---------------------------------------------------------------- kill and splice (bmesh_core.cc)
 
-    void KillOnlyVert(int v) { VAlive[v] = false; TotVert--; anyKilled = true; }
-    void KillOnlyEdge(int e) { EAlive[e] = false; TotEdge--; anyKilled = true; }
-    void KillOnlyFace(int f) { FAlive[f] = false; TotFace--; anyKilled = true; }
-    void KillOnlyLoop(int l) { LAlive[l] = false; TotLoop--; anyKilled = true; }
+    void KillOnlyVert(int v) { VAlive[v] = false; TotVert--; freeV.Push(v); }
+    void KillOnlyEdge(int e) { EAlive[e] = false; TotEdge--; freeE.Push(e); }
+    void KillOnlyFace(int f) { FAlive[f] = false; TotFace--; freeF.Push(f); }
+    void KillOnlyLoop(int l) { LAlive[l] = false; TotLoop--; freeL.Push(l); }
 
     /// <summary>BM_face_kill: each loop leaves its radial cycle (in face order), then the face dies.</summary>
     public void FaceKill(int f)

@@ -174,6 +174,15 @@ write("S1_MESH_materials", with_field(i_mesh, 11, "planted_material"))
 if any(l.startswith("ACT\t1\t") for l in lines):
     i_act1 = first(lambda l: l.startswith("ACT\t1\t")); write("S1_ACT_range", with_field(i_act1, 3, flip_bits(lines[i_act1].split("\t")[3])))
     i_fc1 = first(lambda l: l.startswith("FC\t1\t")); write("S1_FC_hash", with_field(i_fc1, 7, flip_bits(lines[i_fc1].split("\t")[7])))
+# Step (c), the stage 2 model (vehiclerig.exe --stages 2): one changed value per row kind of stage 2, refused by that model
+i_st2 = first(lambda l: l == "STAGE\t2"); write("S2_LOG_extra", insert(i_st2, "LOG\t2\tVEHICLE planted: a tier line the script never printed"))
+if any(l.startswith("LOG\t2\t") for l in lines):
+    i_log2 = first(lambda l: l.startswith("LOG\t2\t")); write("S2_LOG_text", replace(i_log2, lines[i_log2] + " (changed)"))
+i_obj2s = first(lambda l: l.startswith("OBJ\t2\t")); write("S2_OBJ_data", with_field(i_obj2s, 7, "planted_mesh"))
+i_mesh2 = first(lambda l: l.startswith("MESH\t2\t")); write("S2_MESH_hash", with_field(i_mesh2, 6, flip_bits(lines[i_mesh2].split("\t")[6])))
+write("S2_MESH_loops", with_field(i_mesh2, 7, flip_bits(lines[i_mesh2].split("\t")[7])))
+write("S2_MESH_count", with_field(i_mesh2, 3, str(int(lines[i_mesh2].split("\t")[3]) + 1)))
+write("S2_MESH_uv", with_field(i_mesh2, 10, flip_bits(lines[i_mesh2].split("\t")[10])))
 for name in sorted(os.listdir(out)):
     if name.endswith(".txt") and name not in ("intact.txt", "jobs.txt", "jobs_exit.txt", "jobs_fast.txt"):
         print(name[:-4])

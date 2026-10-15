@@ -21,6 +21,13 @@ Stage 1 (step (b)):
   fx_b_merge2        static tracks (the STATIC line AFTER the merge lines) beside a second model of two nodes instancing ONE mesh,
                      one mirrored (the merge's own datablock copy and flip_normals), brightened on its own (the second-model line)
   fx_b_orient also names an Ignore part the file has not (0 deleted); fx_b_placement also places a part with a zero scale (the WARN, scale 1)
+Stage 2 (step (c), the weld tiers):
+  fx_c_weld          a box of 24 per-face vertices (a glTF's seams) over two materials, BODY at 50: the weld within each material
+                     (the material border stays split), every box edge sharp (90 degrees), the target reached without a decimate
+  fx_c_grid          a bumpy 9 x 9 grid with its middle row of vertices doubled (one seam), BODY at 60: the weld, then the decimate
+                     collapse to the dial, the new mesh datablock named after the old
+  fx_c_tiers         four tiers in one scene: BODY at 50 and STRUCTURE at 30 on two grids, a STRUCTURE name the scene has not (the
+                     WARN), a DETAIL dial of exactly 0.5 (the tier skipped), a RUDDER dial of 120 (clamped: "dial 95%")
 Exits and deaths (recipes_exit, keys renamed by --exits): fx_x_allignored (every part Ignored: the _guard crash), fx_x_bright (bright=1.5|x),
   fx_x_flagfold (flagfold=a|b), fx_x_defaultreduce (no '|'), fx_x_shroudreduce (a percent float() refuses), fx_x_gunreduce (likewise),
   fx_x_windowreduce (no '|'), fx_x_merge_missing (a second model path that is not there); fx_d_frames (argv[7] "15.0": int() dies),
@@ -48,6 +55,55 @@ def icosahedron(r, name):
     pos = [(x / 2.0, y / 2.0, z / 2.0) for x, y, z in raw]
     idx = [0, 11, 5, 0, 5, 1, 0, 1, 7, 0, 7, 10, 0, 10, 11, 1, 5, 9, 5, 11, 4, 11, 10, 2, 10, 7, 6, 7, 1, 8, 3, 9, 4, 3, 4, 2, 3, 2, 6, 3, 6, 8, 3, 8, 9, 4, 9, 5, 2, 4, 11, 6, 2, 10, 8, 6, 7, 9, 8, 1]
     prim = {"attributes": {"POSITION": r.b.accessor(pos, "f", "VEC3")}, "indices": r.b.accessor(idx, "H", "SCALAR", minmax=False)}
+    r.meshes.append({"name": name, "primitives": [prim]})
+    return len(r.meshes) - 1
+
+
+def box_split(r, name, materials):
+    """A unit box of 24 vertices - four per face, as a glTF with per-face UVs carries it - with the first three faces on
+    materials[0] and the last three on materials[1] (two primitives)."""
+    faces = [((0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)), ((0, 0, 1), (0, 1, 1), (1, 1, 1), (1, 0, 1)), ((0, 0, 0), (0, 0, 1), (1, 0, 1), (1, 0, 0)),
+             ((0, 1, 0), (1, 1, 0), (1, 1, 1), (0, 1, 1)), ((0, 0, 0), (0, 1, 0), (0, 1, 1), (0, 0, 1)), ((1, 0, 0), (1, 0, 1), (1, 1, 1), (1, 1, 0))]
+    prims = []
+    for half in (0, 1):
+        pos = []; uv = []; idx = []
+        for fi in range(3 * half, 3 * half + 3):
+            base = len(pos)
+            pos += [tuple(float(c) for c in v) for v in faces[fi]]
+            uv += [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
+            idx += [base, base + 1, base + 2, base, base + 2, base + 3]
+        prims.append({"attributes": {"POSITION": r.b.accessor(pos, "f", "VEC3"), "TEXCOORD_0": r.b.accessor(uv, "f", "VEC2", minmax=False)},
+                      "indices": r.b.accessor(idx, "H", "SCALAR", minmax=False), "material": materials[half]})
+    r.meshes.append({"name": name, "primitives": prims})
+    return len(r.meshes) - 1
+
+
+def grid_seam(r, name, material, n=9):
+    """An n x n heightfield (z = a bump) whose middle row of vertices is carried twice - the faces above the row use one
+    copy, the faces below the other - a seam the weld closes; one material, per-vertex UVs."""
+    import math as _m
+    pos = []; uv = []
+    def vert(i, j):
+        x, y = i / (n - 1.0), j / (n - 1.0)
+        return (x, y, 0.25 * _m.sin(3.0 * x) * _m.cos(2.0 * y))
+    rows = []
+    mid = n // 2
+    for j in range(n):
+        row = []
+        for i in range(n):
+            row.append(len(pos)); pos.append(vert(i, j)); uv.append((i / (n - 1.0), j / (n - 1.0)))
+        rows.append(row)
+    dup = []
+    for i in range(n):
+        dup.append(len(pos)); pos.append(vert(i, mid)); uv.append((i / (n - 1.0), mid / (n - 1.0)))
+    idx = []
+    for j in range(n - 1):
+        for i in range(n - 1):
+            a = rows[j][i]; b = rows[j][i + 1]; c = rows[j + 1][i + 1]; d = rows[j + 1][i]
+            if j + 1 == mid: c = dup[i + 1]; d = dup[i]   # the faces below the seam row use the copies
+            idx += [a, b, c, a, c, d]
+    prim = {"attributes": {"POSITION": r.b.accessor(pos, "f", "VEC3"), "TEXCOORD_0": r.b.accessor(uv, "f", "VEC2", minmax=False)},
+            "indices": r.b.accessor(idx, "H", "SCALAR", minmax=False), "material": material}
     r.meshes.append({"name": name, "primitives": [prim]})
     return len(r.meshes) - 1
 
@@ -116,6 +172,19 @@ def main(out):
     r = Rig(); rigged(r); primary_skin = r.write(models, "fx_b_first_skin")
     r = Rig(); rigged(r); second_skin = r.write(models, "fx_b_second_skin")
     recipe(out, "fx_b_merge_skinned", primary_skin, [("Body", 0, {})], srcFile2=second_skin)
+    # stage 2: the weld tiers
+    r = Rig(); ma = r.material("Paint", (0.3, 0.5, 0.7)); mb = r.material("Steel", (0.5, 0.5, 0.55))
+    r.node("Hull", mesh=box_split(r, "Hull", (ma, mb))); r.node("Other", mesh=r.mesh("Other", at=(3.0, 0.0, 0.0), material=ma))
+    recipe(out, "fx_c_weld", r.write(models, "fx_c_weld"), [("Hull", 0, {}), ("Other", 0, {})], bodyReducePct=50.0)
+    r = Rig(); ma = r.material("Paint", (0.3, 0.5, 0.7))
+    r.node("Deck", mesh=grid_seam(r, "Deck", ma)); r.node("Other", mesh=r.mesh("Other", at=(3.0, 0.0, 0.0), material=ma))
+    recipe(out, "fx_c_grid", r.write(models, "fx_c_grid"), [("Deck", 0, {}), ("Other", 16, {})], bodyReducePct=60.0, structureReducePct=0.0)
+    r = Rig(); ma = r.material("Paint", (0.3, 0.5, 0.7))
+    r.node("Deck", mesh=grid_seam(r, "Deck", ma, 11)); r.node("Fin", mesh=grid_seam(r, "Fin", ma, 7), translation=[0.0, 0.0, 2.0])
+    r.node("Keel", mesh=grid_seam(r, "Keel", ma, 5), translation=[0.0, 0.0, -2.0]); r.node("Helm", mesh=grid_seam(r, "Helm", ma, 6), translation=[2.0, 0.0, 0.0])
+    # a part holds ONE role, so a name reaches one tier; four tiers share the scene instead
+    recipe(out, "fx_c_tiers", r.write(models, "fx_c_tiers"), [("Deck", 0, {}), ("Fin", 16, {}), ("Ghost", 16, {}), ("Keel", 21, {}), ("Helm", 18, {})],
+           bodyReducePct=50.0, structureReducePct=30.0, detailReducePct=0.5, rudderReducePct=120.0)
     # brightness on three material chains
     r = Rig(); img = r.image("Albedo", rgb=(120, 80, 40)); tex = r.texture(img)
     flat = r.material("Flat", (0.6, 0.4, 0.2)); direct = r.material("Direct", (1.0, 1.0, 1.0), texture=tex); tint = r.material("Tint", (0.5, 0.25, 0.9), texture=tex)

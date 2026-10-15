@@ -399,11 +399,11 @@ static class VehicleRigDrill
     {
         Console.OutputEncoding = new UTF8Encoding(false);
         bool requireKeys = false; int offset = 0; int stages = 0;   // --stages N: the C# model of stages 1..N (editor/BlenderVehicleRig.cs) against the dump
-        const string usage = "usage: vehiclerig.exe [--keys] [--stages 1] <jobs file> <dump>...";
+        const string usage = "usage: vehiclerig.exe [--keys] [--stages 1|2] <jobs file> <dump>...";
         while (offset < args.Length && args[offset].StartsWith("--", StringComparison.Ordinal))
         {
             if (args[offset] == "--keys") requireKeys = true;
-            else if (args[offset] == "--stages" && offset + 1 < args.Length && int.TryParse(args[offset + 1], NumberStyles.None, CultureInfo.InvariantCulture, out stages) && stages >= 1 && stages <= 1) offset++;
+            else if (args[offset] == "--stages" && offset + 1 < args.Length && int.TryParse(args[offset + 1], NumberStyles.None, CultureInfo.InvariantCulture, out stages) && stages >= 1 && stages <= 2) offset++;
             else { Console.WriteLine(usage); return 2; }
             offset++;
         }
@@ -611,6 +611,33 @@ static class StageDrill
             if (problems.Count == 0) { RowsEqual += RowCount(s); Equal++; Console.WriteLine($"STAGE1 {key}: equal - {Describe(s)}"); }
         }
         if (problems.Count == 0 && model.Exits) { RowsEqual += model.Logs.Count; Equal++; Console.WriteLine($"STAGE1 {key}: equal - the script's exit in stage 1, {model.Logs.Count} VEHICLE lines"); }
+        // stage 2 on the scene stage 1 left (step (c)): the reduction tiers; a tier the model names as Blender's (the dissolve pass,
+        // until it is ported) is LEFT, any other decline a FAIL
+        if (problems.Count == 0 && stages >= 2 && !model.Exits && model.Dies == null)
+        {
+            int notes0 = model.Notes.Count;
+            try { BlenderVehicleRig.RunStage2(model, args); }
+            catch (Exception e) { problems.Add($"stage 2 model: {e.GetType().Name}: {e.Message}"); }
+            for (int i = notes0; i < model.Notes.Count; i++) Census[model.Notes[i]] = (Census.TryGetValue(model.Notes[i], out int c2) ? c2 : 0) + 1;
+            if (problems.Count == 0 && model.Fallback != null)
+            {
+                Census["LEFT: " + model.Fallback] = (Census.TryGetValue("LEFT: " + model.Fallback, out int c) ? c : 0) + 1;
+                bool named2 = model.Fallback.StartsWith("the dissolve pass", StringComparison.Ordinal);
+                if (!named2) { Console.WriteLine($"FAIL {key}: stage 2 model leaves this job to Blender: {model.Fallback}"); return false; }
+                Equal--; Left++; Console.WriteLine($"STAGE2 {key}: left to Blender by name: {model.Fallback}"); return true;
+            }
+            if (problems.Count == 0)
+            {
+                if (!d.Stages.TryGetValue(2, out var s2)) problems.Add("stage 2 model: the scene runs on here, Blender stopped in stage 2: " + (d.Exit != null ? string.Join(" | ", d.LogsOfStop) : d.Died));
+                else
+                {
+                    var rows2 = BlenderRigAnim.Render(model, 2, fcSlot: true);
+                    DumpModelRows(key, 2, rows2, model.Logs2);
+                    CompareRows(2, rows2, model.Logs2, s2, problems);
+                    if (problems.Count == 0) { RowsEqual += RowCount(s2); Console.WriteLine($"STAGE2 {key}: equal - {Describe(s2)}"); }
+                }
+            }
+        }
         if (problems.Count > 0) { foreach (var p in problems) Console.WriteLine($"FAIL {key}: {p}"); return false; }
         return true;
     }
