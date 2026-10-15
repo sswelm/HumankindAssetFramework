@@ -1746,6 +1746,71 @@ with all animation keys emitted. Color layers are also retained in their own poi
 corner colors move with mirrored faces, and mesh copies own their color buffers; focused unit tests cover these
 attributes, which the current scene-row format does not record.
 
+**Step (c), stage 2 of item (5), the weld tiers (2026-10-15).** `editor/BlenderVehicleRig.Stage2.cs` + `editor/BlenderWeld.cs`
+are the script's SOURCE-SIDE reduction tiers in C#, held by `vehiclerig.exe --stages 2` after stage 1 on the same rows. Per
+tier (DEFAULT, RIGGING, SHROUD, STRUCTURE, BODY, OAR, SAIL, RUDDER, WHEEL, GUN, WINDOW, FLIP, PRESERVE, DETAIL; skipped without
+names or at 0.5 % or less, the dials read as `min(95, max(0, float))` - a `nan` is 0, as Python's max keeps its first
+argument) and per named part (the first object of the name; a name the scene has not is the WARN): the mesh into a bmesh;
+the WELD tiers (all but RIGGING and SHROUD) run `remove_doubles` within each material - the vertices whose corners all
+share one material, grouped in the order the materials are first met, at 1e-5 of the part's largest extent -, then mark
+the manifold edges over 40 degrees sharp; triangulate (a no-op on triangles); the bmesh back into the mesh, every face
+smooth; the dial's target `max(8, int(v0 * (1 - pct / 100)))` from the welded count and, above it, the DECIMATE modifier at
+`ratio = max(0.02, target / vmid)` (a float32 property) - `BlenderDecimate`'s collapse on the mesh as the modifier converts
+it -, the evaluated mesh into a new datablock named after the old through the mesh name pool and the old removed; the lines
+per part and per tier (`%.0f` through `PyFixed`). Rules read from Blender 5.1.2 and measured: `BMesh` now carries
+BLI_mempool's free list (a killed slot is reused by the next creation, last freed first; the walks stay in slot order),
+since the weld creates faces after kills; `find_doubles` is BLI_kdtree's median-balanced tree searched in the BALANCED
+node order, a cluster of two keeping the lower index, a larger one the member nearest its float32 centroid (the search's
+origin first, then the lowest index); `weld_verts` re-makes each edge between the targets (an existing edge reused, a new
+one with the old flags) and each face from its mapped corners (an identical face reused, else the new face takes the old
+face's attributes and the corners' data, then the two SWAP so the old slot lives on with the new corners), then kills the
+tagged faces, edges and vertices in that order; the operator is flagged NORMALS_CALC, so every face normal is recomputed
+when it finishes - the sharp test reads those, not the copied ones (8,062 sharp edges on the Romanic's hull against 8,041
+before that line, and two vertices of difference after the collapse); `calc_face_angle` is `angle_normalized_v3v3` on the
+stored normals (2 asinf(|a - b| / 2) through the C runtime's asinf) against `math.radians(40)` in double; the vertex
+normals the modifier reads are `Mesh::vert_normals()` = the custom normals mixed per vertex, whose fans now stop at the
+weld's sharp EDGES as at sharp faces (`VehicleProbe.DecodeCustomShorts` learned the edge set) - the true normals broke a
+matching part, the fans without the edges left the Romanic two vertices off; a packed vertex pair must hash through
+`BlenderMesh.EdgeKeyComparer` (the plain `long` hash XORs its halves: a 65k-vertex part took 6 s to convert, 83 ms after).
+Measured on the registry dump: 20 of the 24 recipes equal row for row after stage 2 (306,717 rows; the two FBX sources
+left by name), 2 left by name at stage 2 - the khelandion's RIGGING and the Wespe's SHROUD tier run the limited dissolve,
+`bmesh.ops.dissolve_limit`, not ported yet -, and the 30 fixtures equal, three of them for this stage
+(`vehiclerig_fixtures.py`: a 24-vertex split box over two materials welded to 16 with every box edge sharp, a bumpy grid
+with a doubled seam row welded then collapsed to the dial, four tiers in one scene with a WARN, a 0.5 dial skipped and a
+120 dial clamped to 95). The S2_* tampers (7 kinds; 6 on the gate's sample, whose damaged job prints no tier line) are each
+refused in `--stages 2` mode. A Blender probe of the weld steps alone
+(`weld_probe.py`, scratch) was the arbiter for the Romanic: the welded mesh's positions, corners, UVs and edges hashed
+equal from the first run, the sharp count and the normals did not until the two rules above. The review of that work found
+the gate blind to the weld's edge order, its sharp_edge set and the custom-normal shorts it carries (the MESH row hashed
+positions, corners, materials and UVs only, so a mis-copied normal on a part under its target passed): the row now carries
+the edge list, the sharp_edge attribute (the importer writes it, all false, beside the custom normals - so only on a mesh
+with file normals; a mesh-level operation keeps it; a BMesh round trip - the edit-mode split, the decimate, the weld - writes
+it back only when an edge is marked: three Blender probes of the fixtures settled the rule) and the shorts per corner,
+in both dumps and both renders - the rig_anim drill's 145 jobs hold them through its four stages too -, with S2_* tampers
+on each; a fixture with a scaled, turned node in a weld tier holds the distance rule (o.dimensions after transform_apply).
+Scoped out, named: a name listed twice in one tier's list would name its second datablock differently
+(the Lab lists a part once).
+
+Review of PR #176 (2026-10-15): a full run found the organ gun's newly recorded custom-normal shorts differed after
+stage one's loose split. Blender's separate operator decodes the source BMesh normals into a vector layer and
+re-encodes that layer on each copied component; copying the original shorts misses that quantization. The model now
+uses BMesh's triangle normals, reciprocal-length normalization and fan averaging for that round trip; the surviving
+first component keeps its original data. A measured two-triangle regression (a unit test) and the organ gun in the FULL run hold
+it - the pre-review build fails the organ gun's custom-normal hash after the split and the fixed one does not (verified by
+running both builds on its dump); `fx_b_split_normals` exercises the path but its small panels re-encode to the same shorts, so
+it passes either way.
+The documented bad-dial/later-missing-file mismatch is fixed too: the first positional read failure wins in the
+script's interleaved order, held by a unit test and `fx_d_reduce_before_names`. Both dump parsers now validate the
+three added MESH hashes (edges required, sharp edges/custom normals optional); sealed unit counterexamples and four
+new negative cases per drill prove malformed hashes cannot pass even without a stage model. Optional-hash model
+tampers now turn an absent attribute into a valid alleged hash instead of malformed text, so their rejection tests
+the stage comparison independently of the parser. Independent Blender
+probes also matched the weld's target maps on 120 near-coincident point sets and its topology/UVs on 60 seamed boxes,
+including duplicate surfaces.
+The full stage comparison runs all 24 recipes and 33 fixtures with every key recorded: 53 jobs agree on 307,213 rows,
+with two FBX sources and two dissolve jobs left by name. The focused organ-gun/fixture drill rejects 102 damaged
+evidence cases, including eight stage-two model mutations.
+
 **Step (h), the acceptance row (2026-10-14).** `editor/RigRouteAcceptanceTest.cs`, the Bake Tests row "Does the GLB
 rig route bake what the FBX route bakes?" (off by default: two full animated bakes per entry), is the backlog's gate
 before the GLB route becomes the editor default. For every animated registry entry with a .glb/.gltf source it bakes

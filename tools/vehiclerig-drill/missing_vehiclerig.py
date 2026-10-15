@@ -16,7 +16,12 @@ for d in sys.argv[3:]:
     starts = [i for i, l in enumerate(rows) if l.startswith("JOB\t")] + [len(rows)]
     for a, b in zip(starts, starts[1:]):
         block = rows[a:b]
-        if "STAGE\t5" in block and any(l.startswith("VG\t") for l in block) and any(l.startswith("FC\t") for l in block) and any(l.startswith("X\tGLB\t") for l in block):
+        # a glTF job that runs every stage model (no FBX source, no dissolve tier): the S1_/S2_ tampers must reach the MODEL's compare
+        key0 = block[0].split("\t")[1]
+        job0 = next((j for j in jobs if j.split("\t")[1] == key0), None)
+        src_ok = job0 is not None and job0.split("\t")[3].lower().rsplit(".", 1)[-1] in ("glb", "gltf")
+        soup = any(l.startswith("LOG\t2\tVEHICLE RIGGING ") or l.startswith("LOG\t2\tVEHICLE SHROUD ") for l in block)
+        if src_ok and not soup and "STAGE\t5" in block and any(l.startswith("VG\t") for l in block) and any(l.startswith("FC\t") for l in block) and any(l.startswith("X\tGLB\t") for l in block):
             lines = block; break
     if lines is not None:
         break
@@ -95,6 +100,9 @@ i_obj = first(lambda l: l.startswith("OBJ\t1\t")); write("OBJ_short", cut_last_f
 write("OBJ_bits", replace(i_obj, "\t".join(lines[i_obj].split("\t")[:-1] + ["zz000000"])))
 write("OBJ_duplicate", insert(i_obj, lines[i_obj]))
 i_mesh = first(lambda l: l.startswith("MESH\t1\t")); write("MESH_missing", drop(i_mesh))
+for name, field, value in (("MESH_edges_hash", 15, "not-a-hash"), ("MESH_sharp_hash", 16, "not-a-hash"),
+                           ("MESH_normals_hash", 17, "not-a-hash"), ("MESH_edges_absent", 15, "-")):
+    fields = lines[i_mesh].split("\t"); fields[field] = value; write(name, replace(i_mesh, "\t".join(fields)))
 write("MESH_hash", replace(i_mesh, "\t".join(f if j != 6 else "0" * 63 for j, f in enumerate(lines[i_mesh].split("\t")))))
 write("MESH_orphan", replace(i_mesh, "\t".join(f if j != 2 else "no-such-object" for j, f in enumerate(lines[i_mesh].split("\t")))))
 i_vg = first(lambda l: l.startswith("VG\t")); write("VG_missing", drop(i_vg))
@@ -144,6 +152,8 @@ for kind in ("NODE", "SKIN", "IBM", "MESH", "PRIM", "MAT", "IMG", "TEX", "SAMP",
 
 def flip_bits(h):
     """Another valid float32 (or SHA-256) hex: the last digit changed."""
+    if h == "-":
+        return "0" * 64   # optional UV/normal/sharp attributes: absent -> a valid alleged hash, for the MODEL to reject
     return h[:-1] + ("1" if h[-1] != "1" else "2")
 
 
@@ -174,6 +184,21 @@ write("S1_MESH_materials", with_field(i_mesh, 11, "planted_material"))
 if any(l.startswith("ACT\t1\t") for l in lines):
     i_act1 = first(lambda l: l.startswith("ACT\t1\t")); write("S1_ACT_range", with_field(i_act1, 3, flip_bits(lines[i_act1].split("\t")[3])))
     i_fc1 = first(lambda l: l.startswith("FC\t1\t")); write("S1_FC_hash", with_field(i_fc1, 7, flip_bits(lines[i_fc1].split("\t")[7])))
+# Step (c), the stage 2 model (vehiclerig.exe --stages 2): one changed value per row kind of stage 2, refused by that model
+i_st2 = first(lambda l: l == "STAGE\t2"); write("S2_LOG_extra", insert(i_st2, "LOG\t2\tVEHICLE planted: a tier line the script never printed"))
+if any(l.startswith("LOG\t2\t") for l in lines):
+    i_log2 = first(lambda l: l.startswith("LOG\t2\t")); write("S2_LOG_text", replace(i_log2, lines[i_log2] + " (changed)"))
+i_obj2s = first(lambda l: l.startswith("OBJ\t2\t")); write("S2_OBJ_data", with_field(i_obj2s, 7, "planted_mesh"))
+i_mesh2 = first(lambda l: l.startswith("MESH\t2\t")); write("S2_MESH_hash", with_field(i_mesh2, 6, flip_bits(lines[i_mesh2].split("\t")[6])))
+write("S2_MESH_loops", with_field(i_mesh2, 7, flip_bits(lines[i_mesh2].split("\t")[7])))
+write("S2_MESH_count", with_field(i_mesh2, 3, str(int(lines[i_mesh2].split("\t")[3]) + 1)))
+write("S2_MESH_uv", with_field(i_mesh2, 10, flip_bits(lines[i_mesh2].split("\t")[10])))
+write("S2_MESH_edges", with_field(i_mesh2, 15, flip_bits(lines[i_mesh2].split("\t")[15])))
+# the sharp set and the custom normals of the first stage 2 mesh that has them (a weld tier marks edges; the importer sets normals)
+i_sharp = next((i for i, l in enumerate(lines) if l.startswith("MESH\t2\t") and l.split("\t")[16] != "-"), -1)
+if i_sharp >= 0: write("S2_MESH_sharp", with_field(i_sharp, 16, flip_bits(lines[i_sharp].split("\t")[16])))
+i_cn = next((i for i, l in enumerate(lines) if l.startswith("MESH\t2\t") and l.split("\t")[17] != "-"), -1)
+if i_cn >= 0: write("S2_MESH_normals", with_field(i_cn, 17, flip_bits(lines[i_cn].split("\t")[17])))
 for name in sorted(os.listdir(out)):
     if name.endswith(".txt") and name not in ("intact.txt", "jobs.txt", "jobs_exit.txt", "jobs_fast.txt"):
         print(name[:-4])

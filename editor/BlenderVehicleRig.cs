@@ -17,13 +17,14 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 
-public static class BlenderVehicleRig
+public static partial class BlenderVehicleRig
 {
     public sealed class Args
     {
         public string Mode = "rig", Input = "", OutGlb = "", PreviewFbx = "";
         public double[] ModelRot = { 0.0, 0.0, 0.0 };
         public Dictionary<string, List<string>> Names = new Dictionary<string, List<string>>(StringComparer.Ordinal);   // by role key (the jobs writer's)
+        public Dictionary<string, double> Reduce = new Dictionary<string, double>(StringComparer.Ordinal);   // the reduce dial per role key, min(95, max(0, float)): 0 when absent
         public HashSet<string> Marked = new HashSet<string>(StringComparer.Ordinal);   // every role list's names (the artifact purge spares them)
         public HashSet<string> Ignore = new HashSet<string>(StringComparer.Ordinal);
         public string Merge2;                       // the merge2= text, or null
@@ -58,6 +59,7 @@ public static class BlenderVehicleRig
     {
         var a = new Args { Mode = argv[0], Input = argv[1], OutGlb = argv.Count > 2 ? argv[2] : "", PreviewFbx = argv.Count > 3 ? argv[3] : "" };
         string At(int i) => i < argv.Count ? argv[i] : "";
+        int namesFailureIndex = int.MaxValue;   // positional names and reduce dials are interleaved in the script
         foreach (var (role, index) in NamesArgv)
         {
             List<string> list;
@@ -66,10 +68,19 @@ public static class BlenderVehicleRig
                 list = index < argv.Count && At(index).Trim().Length > 0 ? NameList(At(index)) : new List<string>();
                 if (index == 4 || index == 5) list = NameList(At(index));   // wheel_names, turret_names: read unconditionally
             }
-            catch (System.IO.IOException) { list = new List<string>(); if (a.NamesDie == null) a.NamesDie = "FileNotFoundError: " + PyFileNotFound(At(index).Substring(1)); }   // namelist() opens it in the rig path: the script dies there
+            catch (System.IO.IOException) { list = new List<string>(); if (index < namesFailureIndex) { namesFailureIndex = index; a.NamesDie = "FileNotFoundError: " + PyFileNotFound(At(index).Substring(1)); } }   // namelist() opens it in the rig path: the script dies there
             a.Names[role] = list;
         }
         a.Ignore = new HashSet<string>(a.Names["ignore"], StringComparer.Ordinal);
+        // the positional reduce dials, read among the names (vehicle_rig.py 871-922): min(95, max(0, float(x))) when present and
+        // non-blank, else 0; float() of a non-number dies there, like a missing names file
+        foreach (var (role, idx) in new[] { ("rigging", 50), ("structure", 52), ("bodies", 54), ("oars", 61), ("sails", 62), ("rudders", 64), ("wheels", 65), ("flip", 67), ("preserve", 68), ("detail", 70) })
+        {
+            a.Reduce[role] = 0.0;
+            if (!(argv.Count > idx && At(idx).Trim().Length > 0)) continue;
+            if (!TryPyFloat(At(idx), out double v)) { if (idx < namesFailureIndex) { namesFailureIndex = idx; a.NamesDie = "ValueError: could not convert string to float: " + VehicleProbe.Input.PyRepr(At(idx)); } continue; }
+            a.Reduce[role] = PyClamp95(v);
+        }
         a.TracksStatic = argv.Count > 16 && At(16).Trim() == "1";
         // the reduce tags in the script's order - defaultreduce, shroudreduce, gunreduce, windowreduce -, the names before the LAST
         // '|', the percent after it; the first malformed one is the script's VEHICLE ERROR after the merge (its exit)
@@ -87,6 +98,7 @@ public static class BlenderVehicleRig
                 {
                     double pct = VehicleProbe.Input.PyFloat(spec);
                     if (double.IsNaN(pct) || double.IsInfinity(pct)) err = "not a finite percent: " + VehicleProbe.Input.PyRepr(arg);
+                    else a.Reduce["guns"] = PyClamp95(pct);
                 }
                 else if (tag == "windowreduce")
                 {
@@ -95,7 +107,7 @@ public static class BlenderVehicleRig
                     {
                         double pct = VehicleProbe.Input.PyFloat(spec.Substring(bar + 1));
                         if (double.IsNaN(pct) || double.IsInfinity(pct)) err = "not a finite percent: " + VehicleProbe.Input.PyRepr(arg);
-                        else if (namesText.Trim().Length > 0) a.Names[role] = NameList(namesText);
+                        else { a.Reduce[role] = PyClamp95(pct); if (namesText.Trim().Length > 0) a.Names[role] = NameList(namesText); }
                     }
                 }
                 else
@@ -104,7 +116,7 @@ public static class BlenderVehicleRig
                     else
                     {
                         if (namesText.Trim().Length > 0) a.Names[role] = NameList(namesText);
-                        VehicleProbe.Input.PyFloat(spec.Substring(bar + 1));   // min(95, max(0, float(pct))): inf and nan pass here
+                        a.Reduce[role] = PyClamp95(VehicleProbe.Input.PyFloat(spec.Substring(bar + 1)));   // min(95, max(0, float(pct))): inf and nan pass here
                     }
                 }
             }
@@ -174,6 +186,9 @@ public static class BlenderVehicleRig
     {
         try { v = VehicleProbe.Input.PyFloat(s); return true; } catch (FormatException) { v = 0; return false; }
     }
+
+    /// <summary>min(95.0, max(0.0, v)) as Python evaluates it: max keeps 0.0 unless v is greater (so nan gives 0), min keeps 95 unless v is less.</summary>
+    static double PyClamp95(double v) { double m = v > 0.0 ? v : 0.0; return m < 95.0 ? m : 95.0; }
 
     /// <summary>int(str): whitespace around, a sign, digits with single underscores between them - nothing else.</summary>
     internal static bool TryPyInt(string t)
@@ -521,8 +536,10 @@ public static class BlenderVehicleRig
             }
             groups.Add(verts); groupFaces.Add(faces); groupEdges.Add(edgeList);
         }
+        o.Mesh.EdgeSharp = null;   // the edit-mode round trip (separate LOOSE) writes sharp_edge back only when an edge is marked: none is
         if (groups.Count <= 1) return;
         groups[0].Sort();
+        var customVectors = d.CustomNormal == null ? null : VehicleProbe.DecodeBMeshCustomNormals(d.Positions, d.Faces, d.FaceSharp ?? new bool[d.Faces.Length / 3], d.CustomNormal);
         int at = s.Objects.IndexOf(o);
         var made = new List<BlenderRigAnim.SceneObject>();
         for (int g = 0; g < groups.Count; g++)
@@ -530,6 +547,13 @@ public static class BlenderVehicleRig
             // the staying group keeps the mesh's own face and edge order; a copied group gets the walk's discovery order
             var sub = SubMesh(d, groups[g], g == 0 ? null : groupFaces[g], g == 0 ? null : groupEdges[g].Select(e => (edges[e].a, edges[e].b)).ToList());
             if (g == 0) { o.Mesh = sub; continue; }
+            if (customVectors != null)
+            {
+                var vectors = new float[3 * sub.Faces.Length]; int atCorner = 0;
+                foreach (int f in groupFaces[g]) for (int k = 0; k < 3; k++)
+                { Array.Copy(customVectors, 3 * (3 * f + k), vectors, 3 * atCorner, 3); atCorner++; }
+                sub.CustomNormal = VehicleProbe.EncodeBMeshCustomNormals(sub.Positions, sub.Faces, sub.FaceSharp ?? new bool[sub.Faces.Length / 3], vectors);
+            }
             var copy = new BlenderRigAnim.SceneObject
             {
                 Name = names.ObjectPool.Unique(o.Name), Type = "MESH", DataName = names.MeshPool.Unique(o.DataName), Mesh = sub, Source = o.Source,
@@ -645,7 +669,7 @@ public static class BlenderVehicleRig
     {
         Vertices = d.Vertices, Faces = (int[])d.Faces.Clone(), Positions = (float[])d.Positions.Clone(), FaceMaterial = (int[])d.FaceMaterial.Clone(), Uv = d.Uv == null ? null : (float[])d.Uv.Clone(),
         Materials = new List<string>(d.Materials), Groups = new List<string>(d.Groups), DefNr = d.DefNr, DefWeight = d.DefWeight, ArmatureModifier = d.ArmatureModifier,
-        Edges = d.Edges == null ? null : (int[])d.Edges.Clone(), FaceSharp = d.FaceSharp == null ? null : (bool[])d.FaceSharp.Clone(), CustomNormal = d.CustomNormal == null ? null : (short[])d.CustomNormal.Clone(),
+        Edges = d.Edges == null ? null : (int[])d.Edges.Clone(), EdgeSharp = d.EdgeSharp == null ? null : (bool[])d.EdgeSharp.Clone(), FaceSharp = d.FaceSharp == null ? null : (bool[])d.FaceSharp.Clone(), CustomNormal = d.CustomNormal == null ? null : (short[])d.CustomNormal.Clone(),
         UvAll = d.UvAll.Select(u => (float[])u.Clone()).ToList(), Colors = d.Colors.Select(c => (c.name, c.point, (byte[])c.bytes.Clone())).ToList(), ActiveColor = d.ActiveColor,
     };
 

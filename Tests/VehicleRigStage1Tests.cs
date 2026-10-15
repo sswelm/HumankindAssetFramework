@@ -227,4 +227,20 @@ public class VehicleRigStage1Tests
         Assert.Null(stage.Fallback); Assert.Single(stage.Actions); Assert.Equal("Swing.001", stage.Actions[0].Name);
         if (!emptyFirst) Assert.Equal("Swing.001", stage.Objects[0].Action);
     }
+
+    [Fact]
+    public void A_separated_part_reencodes_custom_normals_through_the_BMesh_vector_layer()
+    {
+        // A two-triangle panel measured in Blender 5.1.2. Copying the imported shorts leaves beta one unit off.
+        var positions = new[] { 1.4683560132980347f, .8409349918365479f, .8594070076942444f,
+            1.4669770002365112f, .8475130200386047f, .8834919929504395f,
+            1.2615940570831299f, .8405349850654602f, .8318470120429993f,
+            1.2584340572357178f, .8467140197753906f, .856561005115509f };
+        var faces = new[] { 1, 0, 2, 2, 3, 1 }; var sharp = new bool[2];
+        var before = new short[] { 213, -22835, 254, 28961, 207, -22677, 207, -22677, 245, 30192, 213, -22835 };
+        var vectors = VehicleProbe.DecodeBMeshCustomNormals(positions, faces, sharp, before);
+        var after = VehicleProbe.EncodeBMeshCustomNormals(positions, faces, sharp, vectors);
+        Assert.Equal(new short[] { 213, -22835, 254, 28962, 207, -22677, 207, -22677, 245, 30193, 213, -22835 }, after);
+        Assert.NotEqual(before, after);
+    }
 }

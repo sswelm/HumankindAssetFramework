@@ -283,7 +283,27 @@ public static partial class VehicleProbe
     /// mix_normals_corner_to_vert. The same geometry gives the file normal back to the quantization; a transformed one (the Lab's
     /// second model: Mesh.transform moves the vertices and leaves the shorts, flip_normals reverses the corners and carries
     /// each corner's shorts with it) gives what Blender then holds.</summary>
-    internal static float[] DecodeCustomShorts(float[] P, int[] tris, bool[] sharpFace, short[] d0, short[] d1)
+    /// <summary>A packed vertex pair hashes badly as a plain long (its halves XOR together); the same multiplicative hash as
+    /// BlenderMesh.EdgeKeyComparer, kept here because the probe drill compiles this file without BlenderMesh.cs.</summary>
+    internal sealed class PairKeyComparer : IEqualityComparer<long>
+    {
+        public static readonly PairKeyComparer Instance = new PairKeyComparer();
+        public bool Equals(long a, long b) => a == b;
+        public int GetHashCode(long k) => unchecked((int)(((ulong)k * 0x9E3779B97F4A7C15UL) >> 32));
+    }
+
+    internal static long SharpEdgeKey(int a, int b) { int lo = Math.Min(a, b), hi = Math.Max(a, b); return ((long)lo << 32) | (uint)hi; }
+
+    /// <summary>The sharp_edge set of a mesh as the fan walk keys it (by vertex pair), or null when none is marked.</summary>
+    internal static HashSet<long> SharpEdgeSet(int[] edges, bool[] edgeSharp)
+    {
+        if (edges == null || edgeSharp == null) return null;
+        var set = new HashSet<long>(PairKeyComparer.Instance);
+        for (int e = 0; e < edgeSharp.Length; e++) if (edgeSharp[e]) set.Add(SharpEdgeKey(edges[2 * e], edges[2 * e + 1]));
+        return set.Count > 0 ? set : null;
+    }
+
+    internal static float[] DecodeCustomShorts(float[] P, int[] tris, bool[] sharpFace, short[] d0, short[] d1, HashSet<long> sharpEdges = null)
     {
         int nv = P.Length / 3, nf = tris.Length / 3;
         var cornerNormal = new float[nf * 3 * 3];
@@ -314,8 +334,47 @@ public static partial class VehicleProbe
         {
             float px = P[v * 3], py = P[v * 3 + 1], pz = P[v * 3 + 2]; Normalize3(ref px, ref py, ref pz);
             result[v * 3] = px; result[v * 3 + 1] = py; result[v * 3 + 2] = pz;
-        });
+        }, sharpEdges);
         return result;
+    }
+
+    // BMesh's normalize_v3 multiplies by the reciprocal length; its decoded custom normals are normalized this way
+    // before loose separation re-encodes them, unlike mesh_normals' component-wise division.
+    static void NormalizeBMesh(ref float x, ref float y, ref float z)
+    {
+        float len2 = Dot3(x, y, z, x, y, z);
+        if (len2 > 1e-35f) { float inv = (float)(1f / Sqrtf(len2)); x = (float)(x * inv); y = (float)(y * inv); z = (float)(z * inv); }
+        else x = y = z = 0f;
+    }
+
+    internal static float[] DecodeBMeshCustomNormals(float[] P, int[] tris, bool[] sharpFace, short[] data)
+    {
+        var vectors = new float[3 * tris.Length];
+        WalkFans(P, tris, sharpFace, (v, infos, fan, space) =>
+        {
+            int a = 0, b = 0;
+            foreach (int lc in fan) { int c = infos[lc].corner; a += data[2 * c]; b += data[2 * c + 1]; }
+            DecodeCustom(space, (short)(a / fan.Count), (short)(b / fan.Count), out float x, out float y, out float z);
+            foreach (int lc in fan) { int c = infos[lc].corner; vectors[3 * c] = x; vectors[3 * c + 1] = y; vectors[3 * c + 2] = z; }
+        }, null, null, bmesh: true);
+        return vectors;
+    }
+
+    internal static short[] EncodeBMeshCustomNormals(float[] P, int[] tris, bool[] sharpFace, float[] vectors)
+    {
+        vectors = (float[])vectors.Clone();
+        for (int c = 0; c < tris.Length; c++) NormalizeBMesh(ref vectors[3 * c], ref vectors[3 * c + 1], ref vectors[3 * c + 2]);
+        var data = new short[2 * tris.Length];
+        WalkFans(P, tris, sharpFace, (v, infos, fan, space) =>
+        {
+            float x = 0, y = 0, z = 0;
+            // BKE_lnor_space_add_loop prepends the fan's loops; assign_normal_data averages in that reverse order.
+            for (int i = fan.Count - 1; i >= 0; i--) { int c = infos[fan[i]].corner; x = (float)(x + vectors[3 * c]); y = (float)(y + vectors[3 * c + 1]); z = (float)(z + vectors[3 * c + 2]); }
+            float inv = (float)(1f / fan.Count); x = (float)(x * inv); y = (float)(y * inv); z = (float)(z * inv);
+            EncodeCustom(space, x, y, z, out short a, out short b);
+            foreach (int lc in fan) { int c = infos[lc].corner; data[2 * c] = a; data[2 * c + 1] = b; }
+        }, null, null, bmesh: true);
+        return data;
     }
 
     /// <summary>Mesh::corner_normals(): per corner (3 per face, 3 floats each), by the mesh's normal domain. With custom
@@ -378,10 +437,18 @@ public static partial class VehicleProbe
     /// third face, a winding mismatch), the fans (traverse_fan_local_corners), each fan's normal (accumulate_fan_normal) and
     /// space (corner_fan_space_define) - handed to onFan with the corners in the fan; onVertex after a vertex's fans; onLone
     /// for a vertex of no face.</summary>
-    static void WalkFans(float[] P, int[] tris, bool[] sharpFace, Action<int, List<VertCornerInfo>, List<int>, FanSpace> onFan, Action<int, List<VertCornerInfo>> onVertex, Action<int> onLone)
+    static void WalkFans(float[] P, int[] tris, bool[] sharpFace, Action<int, List<VertCornerInfo>, List<int>, FanSpace> onFan, Action<int, List<VertCornerInfo>> onVertex, Action<int> onLone, HashSet<long> sharpEdges = null, bool bmesh = false)
     {
         int nv = P.Length / 3, nf = tris.Length / 3;
-        var FN = FaceNormals(P, tris);
+        var FN = bmesh ? new float[3 * nf] : FaceNormals(P, tris);
+        if (bmesh) for (int f = 0; f < nf; f++)
+        {
+            int a = tris[3 * f], b = tris[3 * f + 1], c = tris[3 * f + 2];
+            float ax = (float)(P[3 * a] - P[3 * b]), ay = (float)(P[3 * a + 1] - P[3 * b + 1]), az = (float)(P[3 * a + 2] - P[3 * b + 2]);
+            float bx = (float)(P[3 * b] - P[3 * c]), by = (float)(P[3 * b + 1] - P[3 * c + 1]), bz = (float)(P[3 * b + 2] - P[3 * c + 2]);
+            float x = (float)((float)(ay * bz) - (float)(az * by)), y = (float)((float)(az * bx) - (float)(ax * bz)), z = (float)((float)(ax * by) - (float)(ay * bx));
+            NormalizeBMesh(ref x, ref y, ref z); FN[3 * f] = x; FN[3 * f + 1] = y; FN[3 * f + 2] = z;
+        }
         // the faces around each vertex, ascending (build_vert_to_face_map sorts each group)
         var vertFaces = new List<int>[nv];
         for (int f = 0; f < nf; f++) for (int k = 0; k < 3; k++) { int v = tris[f * 3 + k]; (vertFaces[v] ?? (vertFaces[v] = new List<int>())).Add(f); }
@@ -422,13 +489,15 @@ public static partial class VehicleProbe
                 AddCornerToEdge(ci.edgePrev, lc, true);
                 AddCornerToEdge(ci.edgeNext, lc, false);
             }
+            // a sharp_edge (the weld tiers mark them over 40 degrees) ends the fans on both sides, whatever its corners say
+            if (sharpEdges != null) for (int e = 0; e < ne; e++) if (sharpEdges.Contains(SharpEdgeKey(v, localEdgeVerts[e]))) kind[e] = 3;
             // calc_edge_directions
             var edgeDirs = new float[ne][];
             for (int e = 0; e < ne; e++)
             {
                 int o = localEdgeVerts[e];
                 float dx = (float)(P[o * 3] - P[v * 3]), dy = (float)(P[o * 3 + 1] - P[v * 3 + 1]), dz = (float)(P[o * 3 + 2] - P[v * 3 + 2]);
-                Normalize3(ref dx, ref dy, ref dz);
+                if (bmesh) NormalizeBMesh(ref dx, ref dy, ref dz); else Normalize3(ref dx, ref dy, ref dz);
                 edgeDirs[e] = new[] { dx, dy, dz };
             }
             var visited = new bool[infos.Count]; int visitedCount = 0, start = 0;
@@ -473,7 +542,7 @@ public static partial class VehicleProbe
                         float factor = SafeAcosApprox(Dot3(dp[0], dp[1], dp[2], dn[0], dn[1], dn[2]));
                         fx = (float)(fx + (float)(FN[ci.face * 3] * factor)); fy = (float)(fy + (float)(FN[ci.face * 3 + 1] * factor)); fz = (float)(fz + (float)(FN[ci.face * 3 + 2] * factor));
                     }
-                    Normalize3(ref fx, ref fy, ref fz);
+                    if (bmesh) NormalizeBMesh(ref fx, ref fy, ref fz); else Normalize3(ref fx, ref fy, ref fz);
                 }
                 // the fan's space: corner_fan_space_define over the first and last edge and, for a fan of several corners, every edge
                 int edgeFirst = infos[fan[0]].edgeNext, edgeLast = infos[fan[fan.Count - 1]].edgePrev;

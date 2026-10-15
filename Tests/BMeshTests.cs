@@ -118,7 +118,7 @@ public class BMeshTests
     }
 
     [Fact]
-    public void Kills_cascade_and_nothing_may_be_created_afterwards()
+    public void Kills_cascade_and_a_creation_afterwards_takes_the_freed_slot()
     {
         var bm = Fan();
         bm.VertKill(2);                                                  // both faces; edges (0,2) (1,2) (2,3)
@@ -126,7 +126,8 @@ public class BMeshTests
         Assert.Equal(new[] { 1, 3 }, L(bm, bm.EdgesOfVert, 0));
         Assert.True(bm.EdgeIsWire(1));
         Assert.Equal(BMesh.None, bm.EL[1]);
-        Assert.Throws<InvalidOperationException>(() => bm.VertCreate(0, 0, 0));
+        // BLI_mempool: the freed slot is the next one allocated (the weld creates faces and edges after kills)
+        Assert.Equal(2, bm.VertCreate(0, 0, 0)); Assert.Equal(4, bm.TotVert); Assert.True(bm.VAlive[2]);
     }
 
     [Fact]

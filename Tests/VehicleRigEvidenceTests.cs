@@ -95,4 +95,17 @@ public class VehicleRigEvidenceTests
         var rows = Fixture(); int i = rows.FindIndex(l => l.StartsWith("X\tCHAN\t")); rows[i] = rows[i].Substring(0, rows[i].LastIndexOf('\t'));
         Assert.Throws<InvalidDataException>(() => Parse(Seal(rows)));
     }
+
+    [Theory]
+    [InlineData(15, "not-a-hash")][InlineData(16, "not-a-hash")][InlineData(17, "not-a-hash")][InlineData(15, "-")]
+    public void New_mesh_evidence_hashes_must_be_valid_even_with_a_matching_job_seal(int field, string value)
+    {
+        var rows = Fixture(); int at = rows.FindIndex(r => r.StartsWith("OBJ\t1\tRoot\t"));
+        var obj = rows[at].Split('\t'); obj[3] = "MESH"; obj[7] = "Mesh"; rows[at] = string.Join("\t", obj);
+        var mesh = new[] { "MESH", "1", "Root", "3", "1", "3", H, H, H, H, "-", "-", "-", "-", "-", H, "-", "-" };
+        rows.Insert(at + 1, string.Join("\t", mesh));
+        Assert.True(Parse(Seal(rows)).Completed);
+        mesh[field] = value; rows[at + 1] = string.Join("\t", mesh);
+        Assert.Throws<InvalidDataException>(() => Parse(Seal(rows)));
+    }
 }

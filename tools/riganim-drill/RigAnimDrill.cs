@@ -49,7 +49,7 @@ public sealed class RigAnimDump
 
     static readonly Dictionary<string, int> Width = new Dictionary<string, int>(StringComparer.Ordinal)
     {
-        { "JOB", 2 }, { "STAGE", 2 }, { "LOG", 3 }, { "SCENE", 6 }, { "OBJ", 42 }, { "MESH", 15 }, { "VG", 6 }, { "BONE", 23 },
+        { "JOB", 2 }, { "STAGE", 2 }, { "LOG", 3 }, { "SCENE", 6 }, { "OBJ", 42 }, { "MESH", 18 }, { "VG", 6 }, { "BONE", 23 },
         { "PB", 33 }, { "ACT", 7 }, { "FC", 8 }, { "K", 15 }, { "IMG", 9 }, { "EXIT", 3 }, { "DIES", 3 }, { "DONE", 2 }, { "FAIL", 3 },
     };
 
@@ -169,6 +169,8 @@ public sealed class RigAnimDump
                     if (!IsInt(t[3]) || !IsInt(t[4]) || !IsInt(t[5])) throw new InvalidDataException("MESH row has a count that is not an integer");
                     for (int i = 6; i <= 9; i++) if (!IsHex(t[i], 64)) throw new InvalidDataException("MESH row has a hash that is not SHA-256");
                     if (t[10] != "-" && !IsHex(t[10], 64)) throw new InvalidDataException("MESH row has a UV hash that is not SHA-256");
+                    if (!IsHex(t[15], 64)) throw new InvalidDataException("MESH row has an edge hash that is not SHA-256");
+                    for (int i = 16; i <= 17; i++) if (t[i] != "-" && !IsHex(t[i], 64)) throw new InvalidDataException("MESH row has a sharp-edge or custom-normal hash that is not SHA-256");
                     s.Meshes.Add(t); break;
                 case "VG":
                     if (!IsInt(t[4]) || !IsHex(t[5], 64)) throw new InvalidDataException("VG row has an invalid count or hash");
