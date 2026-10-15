@@ -323,7 +323,7 @@ public static class BlenderRigAnim
     /// order with the importer's properties posed at frame 1, every mesh in the importer's layout, the actions with a slot per
     /// touched object. rig_anim.py's stage 1 adds the material-less drop, its no-armature exit and the object-animation clear;
     /// vehicle_rig.py's (BlenderVehicleRig) takes the scene as imported.</summary>
-    internal static Stage1 ImportScene(HafModel m, Stage1 s, List<string> argLogs, bool dropMaterialLess, bool requireArmature, bool convertRig, BlenderNames.Result seed = null, bool posed = true)
+    internal static Stage1 ImportScene(HafModel m, Stage1 s, List<string> argLogs, bool dropMaterialLess, bool requireArmature, bool convertRig, BlenderNames.Result seed = null, bool posed = true, IEnumerable<string> existingActions = null)
     {
         s.Logs.AddRange(argLogs);
         if (m.Scenes.Count > 1) { s.Fallback = "a file of several scenes: which one Blender makes active is not modelled"; return s; }
@@ -407,12 +407,16 @@ public static class BlenderRigAnim
             s.Exits = true; Note(s, "no armature: the script's exit");
             return s;
         }
-        if (armObj != null && armObj.Name.StartsWith("DeployArmV2", StringComparison.Ordinal)) { s.Logs.Add("RIGANIM contract: V2 (clean-unit deploy conversion)"); Note(s, "the V2 contract marker"); }
+        if (requireArmature && armObj != null && armObj.Name.StartsWith("DeployArmV2", StringComparison.Ordinal)) { s.Logs.Add("RIGANIM contract: V2 (clean-unit deploy conversion)"); Note(s, "the V2 contract marker"); }
         if (s.Objects.Count(x => x.Type == "ARMATURE") > 1) Note(s, "several armatures (the first one is the script's)");
 
         // ---- the actions: one per animation, a slot per object touched, the fcurves in the order the importer makes them
         var rig = VehicleProbe.BuildImportRig(m, names); s.Rig = rig;
         var trackNames = BlenderNames.TrackNames(m);
+        // NLA track names are local to this file, but actions share Blender's Main datablock namespace across imports.
+        var actionPool = new BlenderNames.NamePool();
+        if (existingActions != null) foreach (string name in existingActions) actionPool.Unique(name);
+        var actionNames = new string[trackNames.Length];
         var imports = new List<BlenderPosedState.Action>();
         var slotObjectsOf = new List<List<SceneObject>>();   // per animation: the objects with a slot, in creation order
         SceneObject ObjectOfNode(int n)
@@ -476,6 +480,7 @@ public static class BlenderRigAnim
                 }
             if (act.Slots.Count == 0) { Note(s, "an animation without a channel on a node (no action)"); slotObjectsOf.Add(slotObjects); continue; }
             if (act.Slots.Count > 1) Note(s, "an action with several slots");
+            act.Name = actionNames[ai] = actionPool.Unique(trackNames[ai]);
             s.Actions.Add(act); slotObjectsOf.Add(slotObjects);
         }
         if (m.Animations.Count > 1) Note(s, "several animations (the first one's action is the active one)");
@@ -484,7 +489,7 @@ public static class BlenderRigAnim
         // the first animation's action is the active one on the objects it has a slot for
         if (slotObjectsOf.Count > 0 && m.Animations.Count > 0)
         {
-            var first = s.Actions.FirstOrDefault(x => x.Name == trackNames[0]);
+            var first = s.Actions.FirstOrDefault(x => x.Name == actionNames[0]);
             if (first != null) foreach (var slot in first.Slots) { slot.Object.Action = first.Name; slot.Object.Slot = slot.Identifier; }
         }
 
@@ -499,7 +504,7 @@ public static class BlenderRigAnim
 
         // ---- the pose at frame 1 (import_scene.gltf leaves every animated property at the scene's frame) and every matrix_world
         Func<int, float[][]> set = null;
-        if (posed && imports.Count > 0 && s.Actions.Exists(x => x.Name == trackNames[0]))
+        if (posed && imports.Count > 0 && s.Actions.Exists(x => x.Name == actionNames[0]))
         {
             var pose = new BlenderPosedState.Pose(imports[0], m, rig);
             set = pose.FrameSet(1f);

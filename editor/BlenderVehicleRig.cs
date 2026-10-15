@@ -155,7 +155,7 @@ public static class BlenderVehicleRig
             {
                 if (!(argv.Count > idx && At(idx).Trim().Length > 0)) continue;
                 if (!TryPyFloat(At(idx), out double v)) { a.DialsDie = "ValueError: could not convert string to float: " + VehicleProbe.Input.PyRepr(At(idx)); break; }
-                if (integral && (double.IsNaN(v) || double.IsInfinity(v))) { a.DialsDie = (double.IsNaN(v) ? "ValueError: cannot convert float NaN to integer" : "OverflowError: cannot convert float infinity to integer") + " (argv[" + idx + "])"; break; }
+                if (integral && (double.IsNaN(v) || double.IsInfinity(v))) { a.DialsDie = (double.IsNaN(v) ? "ValueError: cannot convert float NaN to integer" : "OverflowError: cannot convert float infinity to integer"); break; }
             }
         // MODEL ORIENTATION (argv[23] "rx,ry,rz" degrees): [float(v) for v in split(",")] padded with zeros and cut to three - two
         // values are read, a fourth is dropped; only a value float() refuses is the WARN
@@ -235,7 +235,7 @@ public static class BlenderVehicleRig
         var names = s.Names;
         // ---- imp(): the importer's bone-shape placeholders (one 42-vertex icosphere per armature, hidden, no vertex groups: the
         //      signature holds by construction) purged with their lines, then any mesh of that signature without vertex groups
-        foreach (var shape in names.BoneShapes) { s.Logs.Add("VEHICLE purged glTF importer bone-shape artifact: " + shape); Note(s, "a bone-shape placeholder purged at import"); }
+        foreach (var shape in names.BoneShapes) { names.ObjectPool.Remove(shape); s.Logs.Add("VEHICLE purged glTF importer bone-shape artifact: " + shape); Note(s, "a bone-shape placeholder purged at import"); }
         foreach (var o in s.Objects.ToList())
         {
             if (o.Type != "MESH" || o.Mesh.Groups.Count > 0 || !IsIcosphereArtifact(o.Name, o.Mesh)) continue;
@@ -261,7 +261,7 @@ public static class BlenderVehicleRig
             if (loadSecond == null) { s.Fallback = "a second model (merge2): no loader given"; return s; }
             var m2 = loadSecond(path2);
             var s2 = new BlenderRigAnim.Stage1 { Model = m2 };
-            BlenderRigAnim.ImportScene(m2, s2, new List<string>(), dropMaterialLess: false, requireArmature: false, convertRig: false, seed: names);   // posed at frame 1 like the first: its first clip is the active action when it is imported
+            BlenderRigAnim.ImportScene(m2, s2, new List<string>(), dropMaterialLess: false, requireArmature: false, convertRig: false, seed: names, existingActions: s.Actions.Select(x => x.Name));   // posed at frame 1 like the first: its first clip is the active action when it is imported
             if (s2.Fallback != null) { s.Fallback = "the second model: " + s2.Fallback; return s; }
             foreach (var n in s2.Notes) Note(s, "second model: " + n);
             // the pools continue from the second import's (its names unique against the first model's)
@@ -463,6 +463,8 @@ public static class BlenderVehicleRig
             int a = f * 3 + 1, b = f * 3 + 2;
             r[a] = tris[b]; r[b] = tris[a];
             foreach (var u in uvs) for (int k = 0; k < 2; k++) { float t = u[2 * a + k]; u[2 * a + k] = u[2 * b + k]; u[2 * b + k] = t; }
+            foreach (var color in d.Colors) if (!color.point)
+                for (int k = 0; k < 4; k++) { byte t = color.bytes[4 * a + k]; color.bytes[4 * a + k] = color.bytes[4 * b + k]; color.bytes[4 * b + k] = t; }
             if (d.CustomNormal != null) for (int k = 0; k < 2; k++) { short t = d.CustomNormal[2 * a + k]; d.CustomNormal[2 * a + k] = d.CustomNormal[2 * b + k]; d.CustomNormal[2 * b + k] = t; }
         }
         return r;
@@ -574,6 +576,13 @@ public static class BlenderVehicleRig
             corners.Add(3 * f); corners.Add(3 * f + 1); corners.Add(3 * f + 2);
         }
         sub.Faces = faces.ToArray(); sub.FaceMaterial = faceMat.ToArray(); sub.FaceSharp = d.FaceSharp == null ? null : sharp.ToArray();
+        foreach (var color in d.Colors)
+        {
+            var indices = color.point ? verts : corners;
+            var bytes = new byte[4 * indices.Count];
+            for (int i = 0; i < indices.Count; i++) Array.Copy(color.bytes, 4 * indices[i], bytes, 4 * i, 4);
+            sub.Colors.Add((color.name, color.point, bytes));
+        }
         float[] Corners2(float[] src) { if (src == null) return null; var r = new float[2 * corners.Count]; for (int i = 0; i < corners.Count; i++) { r[2 * i] = src[2 * corners[i]]; r[2 * i + 1] = src[2 * corners[i] + 1]; } return r; }
         sub.Uv = Corners2(d.Uv); sub.UvAll = d.UvAll.Select(Corners2).ToList();
         if (d.Uv != null && d.UvAll.Count > 0 && ReferenceEquals(d.Uv, d.UvAll[0])) sub.Uv = sub.UvAll[0];
@@ -637,7 +646,7 @@ public static class BlenderVehicleRig
         Vertices = d.Vertices, Faces = (int[])d.Faces.Clone(), Positions = (float[])d.Positions.Clone(), FaceMaterial = (int[])d.FaceMaterial.Clone(), Uv = d.Uv == null ? null : (float[])d.Uv.Clone(),
         Materials = new List<string>(d.Materials), Groups = new List<string>(d.Groups), DefNr = d.DefNr, DefWeight = d.DefWeight, ArmatureModifier = d.ArmatureModifier,
         Edges = d.Edges == null ? null : (int[])d.Edges.Clone(), FaceSharp = d.FaceSharp == null ? null : (bool[])d.FaceSharp.Clone(), CustomNormal = d.CustomNormal == null ? null : (short[])d.CustomNormal.Clone(),
-        UvAll = d.UvAll.Select(u => (float[])u.Clone()).ToList(), Colors = new List<(string, bool, byte[])>(d.Colors), ActiveColor = d.ActiveColor,
+        UvAll = d.UvAll.Select(u => (float[])u.Clone()).ToList(), Colors = d.Colors.Select(c => (c.name, c.point, (byte[])c.bytes.Clone())).ToList(), ActiveColor = d.ActiveColor,
     };
 
     /// <summary>`o.matrix_world = m`: the properties through BKE_object_apply_mat4 (the object is a root here), the world
@@ -657,6 +666,7 @@ public static class BlenderVehicleRig
     static void RemoveObject(BlenderRigAnim.Stage1 s, BlenderRigAnim.SceneObject o)
     {
         s.Objects.Remove(o);
+        s.Names.ObjectPool.Remove(o.Name);   // bpy.data.objects.remove frees the object name; orphan mesh datablocks remain reserved
         foreach (var c in s.Objects) if (c.Parent == o) { c.Parent = null; c.Dirty = true; }   // a removed parent leaves its children roots (their world kept until the next update)
         foreach (var act in s.Actions) foreach (var slot in act.Slots) if (slot.Object == o) slot.Object = null;
     }

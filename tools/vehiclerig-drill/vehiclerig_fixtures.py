@@ -92,7 +92,7 @@ def main(out):
     # the exits and deaths: plain recipes the --exits mode edits into the malformed shapes
     recipe(out, "fx_x_allignored", src, [("A", 3, {}), ("B", 3, {})], sub="recipes_exit")
     recipe(out, "fx_x_bright", src, [("A", 0, {}), ("B", 0, {})], sub="recipes_exit", model1Bright=1.5)
-    for k in ("fx_x_flagfold", "fx_x_defaultreduce", "fx_x_shroudreduce", "fx_x_gunreduce", "fx_x_windowreduce", "fx_d_frames", "fx_d_names"):
+    for k in ("fx_x_flagfold", "fx_x_defaultreduce", "fx_x_shroudreduce", "fx_x_gunreduce", "fx_x_windowreduce", "fx_d_frames", "fx_d_names", "fx_d_infinite_count", "fx_d_nan_count", "fx_d_flagfold_infinite"):
         recipe(out, k, src, [("A", 0, {}), ("B", 0, {})], sub="recipes_exit")
     for k in ("fx_x_merge_missing", "fx_d_merge_offset"):
         recipe(out, k, src, [("A", 0, {}), ("B", 0, {})], sub="recipes_exit", srcFile2=second)
@@ -102,6 +102,20 @@ def main(out):
     # one mesh object of three loose boxes
     r = Rig(); m = r.material("Paint", (0.3, 0.5, 0.7)); r.node("Hull", mesh=boxes_in_one(r, "Hull", m, 3))
     recipe(out, "fx_b_single", r.write(models, "fx_b_single"), [("Hull", 0, {}), ("Hull.001", 1, {}), ("Hull.002", 0, {})])
+    # Review counterexamples: names released by a helper purge must be available to the loose split.
+    r = Rig(); m = r.material("Paint"); r.node("Hull", mesh=boxes_in_one(r, "Hull", m, 3)); r.node("Hull.001")
+    recipe(out, "fx_b_reused_helper", r.write(models, "fx_b_reused_helper"), [("Hull", 0, {}), ("Hull.001", 0, {}), ("Hull.002", 0, {})])
+    # The V2 marker is a rig_anim rule, absent from vehicle_rig's import.
+    r = Rig(); rigged(r, arm_name="DeployArmV2")
+    recipe(out, "fx_b_contract", r.write(models, "fx_b_contract"), [("Body", 0, {})])
+    # Two files sharing action names still create distinct Blender action datablocks.
+    r = Rig(); m = r.material("Paint"); n = r.node("First", mesh=r.mesh("First", material=m)); r.node("Other", mesh=r.mesh("Other", at=(3, 0, 0), material=m))
+    anim = r.anim("Swing"); r.key(anim, n, "translation", [0, 1], [(0, 0, 0), (1, 0, 0)])
+    recipe(out, "fx_b_merge_actions", r.write(models, "fx_b_merge_actions"), [("First", 0, {}), ("Other", 0, {})], srcFile2=second)
+    # A deleted importer bone shape releases its object name before the second import.
+    r = Rig(); rigged(r); primary_skin = r.write(models, "fx_b_first_skin")
+    r = Rig(); rigged(r); second_skin = r.write(models, "fx_b_second_skin")
+    recipe(out, "fx_b_merge_skinned", primary_skin, [("Body", 0, {})], srcFile2=second_skin)
     # brightness on three material chains
     r = Rig(); img = r.image("Albedo", rgb=(120, 80, 40)); tex = r.texture(img)
     flat = r.material("Flat", (0.6, 0.4, 0.2)); direct = r.material("Direct", (1.0, 1.0, 1.0), texture=tex); tint = r.material("Tint", (0.5, 0.25, 0.9), texture=tex)
@@ -127,6 +141,9 @@ EXITS = {
     "fx_x_windowreduce": ("EXIT", lambda a: set_tag(a, "windowreduce", "nopipe")),
     "fx_x_merge_missing": ("EXIT", lambda a: set_tag(a, "merge2", "|".join([a[[t.startswith("merge2=") for t in a].index(True)][7:].split("|")[0] + ".missing.glb"] + a[[t.startswith("merge2=") for t in a].index(True)][7:].split("|")[1:]))),
     "fx_d_frames": ("DIES", lambda a: a.__setitem__(7, "15.0")),
+    "fx_d_infinite_count": ("DIES", lambda a: a.__setitem__(12, "inf")),
+    "fx_d_nan_count": ("DIES", lambda a: a.__setitem__(22, "nan")),
+    "fx_d_flagfold_infinite": ("DIES", lambda a: set_tag(a, "flagfold", "10|inf")),
     "fx_d_merge_offset": ("DIES", lambda a: set_tag(a, "merge2", "|".join([a[[t.startswith("merge2=") for t in a].index(True)][7:].split("|")[0], "a,0,0"] + a[[t.startswith("merge2=") for t in a].index(True)][7:].split("|")[2:]))),
     "fx_d_names": ("DIES", lambda a: a.__setitem__(4, a[4] + ".missing.txt")),
 }

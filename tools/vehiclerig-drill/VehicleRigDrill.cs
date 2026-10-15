@@ -595,6 +595,7 @@ static class StageDrill
             // the model dies here (an uncaught exception in the script): Blender must have died in stage 1 after the same lines
             Census["the script's death: " + model.Dies.Split(':')[0]] = (Census.TryGetValue("the script's death: " + model.Dies.Split(':')[0], out int cd) ? cd : 0) + 1;
             if (d.StoppedAt != 1 || d.Died == null) problems.Add("stage 1 model: the script dies in stage 1 here (" + model.Dies + "), " + (d.StoppedAt == 0 ? "Blender ran it through" : d.Died != null ? $"Blender died in stage {d.StoppedAt}" : $"Blender exited {d.Exit} in stage {d.StoppedAt}"));
+            else if (d.Died != model.Dies) problems.Add("stage 1 model: the death differs: here '" + model.Dies + "', Blender '" + d.Died + "'");
             else if (!d.LogsOfStop.SequenceEqual(model.Logs)) problems.Add("stage 1 model: the lines before the death differ: here [" + string.Join(" | ", model.Logs) + "], Blender [" + string.Join(" | ", d.LogsOfStop) + "]");
             if (problems.Count == 0) { RowsEqual += model.Logs.Count; Equal++; Console.WriteLine($"STAGE1 {key}: equal - the script dies in stage 1 ({d.Died}), {model.Logs.Count} VEHICLE lines before it"); }
         }

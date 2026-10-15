@@ -1733,6 +1733,19 @@ every line), the unmodelled exits and deaths above, and static tracks still in `
 modelled, named: a brightness texture without an image (the script's WARN chain) is a Fallback; a zero-size image the
 script skips cannot be told from this side.
 
+Review of PR #175 (2026-10-15): four added Blender fixtures failed the original model: a removed helper still
+reserved the loose split's object name; an imported bone-shape name stayed reserved before the second import; two
+files with the same animation name made duplicate action names; and a `DeployArmV2` source printed rig_anim's
+contract line on the vehicle path. Object deletion now releases its name while leaving orphan mesh datablocks
+reserved, the second import shares the existing action namespace (empty animations reserve no action), and the
+contract line stays on the rig_anim path. Three more death fixtures cover infinite/NaN integer dials and an infinite
+flagfold count. The drill compares the exception's type and message as well as its stage and preceding log lines;
+a unit counterexample proved the original drill accepted a different exception. The expanded full run compares all
+24 recipes and 27 fixtures: 49 equal, two FBX fallbacks, 153,697 stage-one rows, and 90 damaged-evidence cases refused
+with all animation keys emitted. Color layers are also retained in their own point/corner order through loose splits,
+corner colors move with mirrored faces, and mesh copies own their color buffers; focused unit tests cover these
+attributes, which the current scene-row format does not record.
+
 **Step (h), the acceptance row (2026-10-14).** `editor/RigRouteAcceptanceTest.cs`, the Bake Tests row "Does the GLB
 rig route bake what the FBX route bakes?" (off by default: two full animated bakes per entry), is the backlog's gate
 before the GLB route becomes the editor default. For every animated registry entry with a .glb/.gltf source it bakes

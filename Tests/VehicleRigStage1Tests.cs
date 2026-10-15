@@ -161,4 +161,70 @@ public class VehicleRigStage1Tests
         Assert.Equal(new[] { 2, 1 }, BlenderVehicleRig.RadialOrder(new List<int> { 1, 2 }));
         Assert.Equal(new[] { 4, 1, 2, 3 }, BlenderVehicleRig.RadialOrder(new List<int> { 1, 2, 3, 4 }));
     }
+
+    [Fact]
+    public void Stage_comparison_rejects_a_changed_exception_with_identical_preceding_logs()
+    {
+        string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".gltf");
+        try
+        {
+            File.WriteAllText(path, "{\"asset\":{\"version\":\"2.0\"}}");
+            var argv = Argv(new Dictionary<int, string> { [1] = path }); argv.Add("flagfold=10|inf");
+            var dump = new VehicleRigDump { Key = "DIES:1:flagfold", Argv = argv.ToArray(), StoppedAt = 1,
+                Died = "OverflowError: cannot convert float infinity to integer" };
+            Assert.True(StageDrill.Compare(dump, dump.Key, 1));
+            dump.Died = "ValueError: a different failure";
+            Assert.False(StageDrill.Compare(dump, dump.Key, 1));
+            dump.Died = "OverflowError: a different failure";
+            Assert.False(StageDrill.Compare(dump, dump.Key, 1));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Loose_split_preserves_point_and_corner_color_layers_in_their_own_orders()
+    {
+        var d = Mesh(6, new[] { 1f, 1f, 1f }); d.Faces = new[] { 0, 1, 2, 3, 4, 5 }; d.FaceMaterial = new[] { 0, 0 }; d.ActiveColor = 1;
+        byte[] ColorBytes(int[] values) => values.SelectMany(v => new[] { (byte)v, (byte)v, (byte)v, (byte)255 }).ToArray();
+        d.Colors.Add(("Point", true, ColorBytes(new[] { 0, 1, 2, 3, 4, 5 })));
+        d.Colors.Add(("Corner", false, ColorBytes(new[] { 10, 11, 12, 13, 14, 15 })));
+        var sub = (BlenderRigAnim.MeshData)typeof(BlenderVehicleRig).GetMethod("SubMesh", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+            .Invoke(null, new object[] { d, new List<int> { 5, 3, 4 }, null, null });
+        Assert.Equal(2, sub.Colors.Count); Assert.Equal(1, sub.ActiveColor);
+        Assert.Equal(("Point", true), (sub.Colors[0].name, sub.Colors[0].point));
+        Assert.Equal(ColorBytes(new[] { 5, 3, 4 }), sub.Colors[0].bytes);
+        Assert.Equal(("Corner", false), (sub.Colors[1].name, sub.Colors[1].point));
+        Assert.Equal(ColorBytes(new[] { 13, 14, 15 }), sub.Colors[1].bytes);
+    }
+
+    [Fact]
+    public void Mirroring_faces_moves_corner_colors_with_the_corners_and_leaves_a_shared_mesh_untouched()
+    {
+        var d = Mesh(3, new[] { 1f, 1f, 1f }); d.Faces = new[] { 0, 1, 2 };
+        var color = new byte[] { 1, 2, 3, 255, 4, 5, 6, 255, 7, 8, 9, 255 };
+        d.Colors.Add(("Color", false, color));
+        var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static;
+        var copy = (BlenderRigAnim.MeshData)typeof(BlenderVehicleRig).GetMethod("CloneMesh", flags).Invoke(null, new object[] { d });
+        var faces = (int[])typeof(BlenderVehicleRig).GetMethod("FlipFaces", flags).Invoke(null, new object[] { copy });
+        Assert.Equal(new[] { 0, 2, 1 }, faces);
+        Assert.Equal(new byte[] { 1, 2, 3, 255, 7, 8, 9, 255, 4, 5, 6, 255 }, copy.Colors[0].bytes);
+        Assert.Equal(new byte[] { 1, 2, 3, 255, 4, 5, 6, 255, 7, 8, 9, 255 }, d.Colors[0].bytes);
+        Assert.NotSame(d.Colors[0].bytes, copy.Colors[0].bytes);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Second_import_action_names_share_the_scene_pool_but_empty_animations_create_no_datablock(bool emptyFirst)
+    {
+        var m = new HafModel(); m.Nodes.Add(new HafNode { Name = "Animated" });
+        if (emptyFirst) m.Animations.Add(new HafAnimation { Name = "Swing" });
+        var anim = new HafAnimation { Name = emptyFirst ? "Swing.001" : "Swing" };
+        anim.Samplers.Add(new HafSampler { Times = new[] { 0f, 1f }, Values = new[] { 0f, 0f, 0f, 1f, 0f, 0f }, Components = 3 });
+        anim.Channels.Add(new HafChannel { Node = 0, Sampler = 0, Path = "translation" }); m.Animations.Add(anim);
+        var stage = new BlenderRigAnim.Stage1 { Model = m };
+        BlenderRigAnim.ImportScene(m, stage, new List<string>(), false, false, false, existingActions: new[] { "Swing" });
+        Assert.Null(stage.Fallback); Assert.Single(stage.Actions); Assert.Equal("Swing.001", stage.Actions[0].Name);
+        if (!emptyFirst) Assert.Equal("Swing.001", stage.Objects[0].Action);
+    }
 }
