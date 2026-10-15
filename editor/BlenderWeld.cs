@@ -17,7 +17,8 @@
 //     with the new corners and the new slot dies with the old; finally the tagged faces, edges and vertices die in that order.
 //   * The sharp marking: `e.calc_face_angle(None)` is None off a manifold edge; the angle between the two faces' stored
 //     normals (unit, so angle_normalized_v3v3: 2 asinf(|a - b| / 2), or pi minus that of -b when they face apart) over 40
-//     degrees clears the edge's SMOOTH flag. A face made by the weld carries its example's normal; none is recomputed.
+//     degrees clears the edge's SMOOTH flag. The remove_doubles operator's NORMALS_CALC finish recomputes the normals
+//     after welding, before this sharp marking reads them.
 using System;
 using System.Collections.Generic;
 

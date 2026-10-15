@@ -59,6 +59,7 @@ public static partial class BlenderVehicleRig
     {
         var a = new Args { Mode = argv[0], Input = argv[1], OutGlb = argv.Count > 2 ? argv[2] : "", PreviewFbx = argv.Count > 3 ? argv[3] : "" };
         string At(int i) => i < argv.Count ? argv[i] : "";
+        int namesFailureIndex = int.MaxValue;   // positional names and reduce dials are interleaved in the script
         foreach (var (role, index) in NamesArgv)
         {
             List<string> list;
@@ -67,7 +68,7 @@ public static partial class BlenderVehicleRig
                 list = index < argv.Count && At(index).Trim().Length > 0 ? NameList(At(index)) : new List<string>();
                 if (index == 4 || index == 5) list = NameList(At(index));   // wheel_names, turret_names: read unconditionally
             }
-            catch (System.IO.IOException) { list = new List<string>(); if (a.NamesDie == null) a.NamesDie = "FileNotFoundError: " + PyFileNotFound(At(index).Substring(1)); }   // namelist() opens it in the rig path: the script dies there
+            catch (System.IO.IOException) { list = new List<string>(); if (index < namesFailureIndex) { namesFailureIndex = index; a.NamesDie = "FileNotFoundError: " + PyFileNotFound(At(index).Substring(1)); } }   // namelist() opens it in the rig path: the script dies there
             a.Names[role] = list;
         }
         a.Ignore = new HashSet<string>(a.Names["ignore"], StringComparer.Ordinal);
@@ -77,7 +78,7 @@ public static partial class BlenderVehicleRig
         {
             a.Reduce[role] = 0.0;
             if (!(argv.Count > idx && At(idx).Trim().Length > 0)) continue;
-            if (!TryPyFloat(At(idx), out double v)) { if (a.NamesDie == null) a.NamesDie = "ValueError: could not convert string to float: " + VehicleProbe.Input.PyRepr(At(idx)); continue; }
+            if (!TryPyFloat(At(idx), out double v)) { if (idx < namesFailureIndex) { namesFailureIndex = idx; a.NamesDie = "ValueError: could not convert string to float: " + VehicleProbe.Input.PyRepr(At(idx)); } continue; }
             a.Reduce[role] = PyClamp95(v);
         }
         a.TracksStatic = argv.Count > 16 && At(16).Trim() == "1";
@@ -538,6 +539,7 @@ public static partial class BlenderVehicleRig
         o.Mesh.EdgeSharp = null;   // the edit-mode round trip (separate LOOSE) writes sharp_edge back only when an edge is marked: none is
         if (groups.Count <= 1) return;
         groups[0].Sort();
+        var customVectors = d.CustomNormal == null ? null : VehicleProbe.DecodeBMeshCustomNormals(d.Positions, d.Faces, d.FaceSharp ?? new bool[d.Faces.Length / 3], d.CustomNormal);
         int at = s.Objects.IndexOf(o);
         var made = new List<BlenderRigAnim.SceneObject>();
         for (int g = 0; g < groups.Count; g++)
@@ -545,6 +547,13 @@ public static partial class BlenderVehicleRig
             // the staying group keeps the mesh's own face and edge order; a copied group gets the walk's discovery order
             var sub = SubMesh(d, groups[g], g == 0 ? null : groupFaces[g], g == 0 ? null : groupEdges[g].Select(e => (edges[e].a, edges[e].b)).ToList());
             if (g == 0) { o.Mesh = sub; continue; }
+            if (customVectors != null)
+            {
+                var vectors = new float[3 * sub.Faces.Length]; int atCorner = 0;
+                foreach (int f in groupFaces[g]) for (int k = 0; k < 3; k++)
+                { Array.Copy(customVectors, 3 * (3 * f + k), vectors, 3 * atCorner, 3); atCorner++; }
+                sub.CustomNormal = VehicleProbe.EncodeBMeshCustomNormals(sub.Positions, sub.Faces, sub.FaceSharp ?? new bool[sub.Faces.Length / 3], vectors);
+            }
             var copy = new BlenderRigAnim.SceneObject
             {
                 Name = names.ObjectPool.Unique(o.Name), Type = "MESH", DataName = names.MeshPool.Unique(o.DataName), Mesh = sub, Source = o.Source,

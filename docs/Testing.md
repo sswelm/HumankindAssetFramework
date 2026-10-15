@@ -1788,9 +1788,25 @@ with file normals; a mesh-level operation keeps it; a BMesh round trip - the edi
 it back only when an edge is marked: three Blender probes of the fixtures settled the rule) and the shorts per corner,
 in both dumps and both renders - the rig_anim drill's 145 jobs hold them through its four stages too -, with S2_* tampers
 on each; a fixture with a scaled, turned node in a weld tier holds the distance rule (o.dimensions after transform_apply).
-Scoped out, named: a bad reduce dial beside a missing names file dies on the names file here and on the dial in Blender
-(the script interleaves the reads; the Lab writes both); a name listed twice in one tier's list would name its second
-datablock differently (the Lab lists a part once).
+Scoped out, named: a name listed twice in one tier's list would name its second datablock differently
+(the Lab lists a part once).
+
+Review of PR #176 (2026-10-15): a full run found the organ gun's newly recorded custom-normal shorts differed after
+stage one's loose split. Blender's separate operator decodes the source BMesh normals into a vector layer and
+re-encodes that layer on each copied component; copying the original shorts misses that quantization. The model now
+uses BMesh's triangle normals, reciprocal-length normalization and fan averaging for that round trip; the surviving
+first component keeps its original data. A measured two-triangle regression and `fx_b_split_normals` cover it.
+The documented bad-dial/later-missing-file mismatch is fixed too: the first positional read failure wins in the
+script's interleaved order, held by a unit test and `fx_d_reduce_before_names`. Both dump parsers now validate the
+three added MESH hashes (edges required, sharp edges/custom normals optional); sealed unit counterexamples and four
+new negative cases per drill prove malformed hashes cannot pass even without a stage model. Optional-hash model
+tampers now turn an absent attribute into a valid alleged hash instead of malformed text, so their rejection tests
+the stage comparison independently of the parser. Independent Blender
+probes also matched the weld's target maps on 120 near-coincident point sets and its topology/UVs on 60 seamed boxes,
+including duplicate surfaces.
+The full stage comparison runs all 24 recipes and 33 fixtures with every key recorded: 53 jobs agree on 307,213 rows,
+with two FBX sources and two dissolve jobs left by name. The focused organ-gun/fixture drill rejects 102 damaged
+evidence cases, including eight stage-two model mutations.
 
 **Step (h), the acceptance row (2026-10-14).** `editor/RigRouteAcceptanceTest.cs`, the Bake Tests row "Does the GLB
 rig route bake what the FBX route bakes?" (off by default: two full animated bakes per entry), is the backlog's gate

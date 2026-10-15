@@ -169,6 +169,8 @@ public sealed class RigAnimDump
                     if (!IsInt(t[3]) || !IsInt(t[4]) || !IsInt(t[5])) throw new InvalidDataException("MESH row has a count that is not an integer");
                     for (int i = 6; i <= 9; i++) if (!IsHex(t[i], 64)) throw new InvalidDataException("MESH row has a hash that is not SHA-256");
                     if (t[10] != "-" && !IsHex(t[10], 64)) throw new InvalidDataException("MESH row has a UV hash that is not SHA-256");
+                    if (!IsHex(t[15], 64)) throw new InvalidDataException("MESH row has an edge hash that is not SHA-256");
+                    for (int i = 16; i <= 17; i++) if (t[i] != "-" && !IsHex(t[i], 64)) throw new InvalidDataException("MESH row has a sharp-edge or custom-normal hash that is not SHA-256");
                     s.Meshes.Add(t); break;
                 case "VG":
                     if (!IsInt(t[4]) || !IsHex(t[5], 64)) throw new InvalidDataException("VG row has an invalid count or hash");

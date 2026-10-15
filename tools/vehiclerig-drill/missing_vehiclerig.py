@@ -100,6 +100,9 @@ i_obj = first(lambda l: l.startswith("OBJ\t1\t")); write("OBJ_short", cut_last_f
 write("OBJ_bits", replace(i_obj, "\t".join(lines[i_obj].split("\t")[:-1] + ["zz000000"])))
 write("OBJ_duplicate", insert(i_obj, lines[i_obj]))
 i_mesh = first(lambda l: l.startswith("MESH\t1\t")); write("MESH_missing", drop(i_mesh))
+for name, field, value in (("MESH_edges_hash", 15, "not-a-hash"), ("MESH_sharp_hash", 16, "not-a-hash"),
+                           ("MESH_normals_hash", 17, "not-a-hash"), ("MESH_edges_absent", 15, "-")):
+    fields = lines[i_mesh].split("\t"); fields[field] = value; write(name, replace(i_mesh, "\t".join(fields)))
 write("MESH_hash", replace(i_mesh, "\t".join(f if j != 6 else "0" * 63 for j, f in enumerate(lines[i_mesh].split("\t")))))
 write("MESH_orphan", replace(i_mesh, "\t".join(f if j != 2 else "no-such-object" for j, f in enumerate(lines[i_mesh].split("\t")))))
 i_vg = first(lambda l: l.startswith("VG\t")); write("VG_missing", drop(i_vg))
@@ -149,6 +152,8 @@ for kind in ("NODE", "SKIN", "IBM", "MESH", "PRIM", "MAT", "IMG", "TEX", "SAMP",
 
 def flip_bits(h):
     """Another valid float32 (or SHA-256) hex: the last digit changed."""
+    if h == "-":
+        return "0" * 64   # optional UV/normal/sharp attributes: absent -> a valid alleged hash, for the MODEL to reject
     return h[:-1] + ("1" if h[-1] != "1" else "2")
 
 

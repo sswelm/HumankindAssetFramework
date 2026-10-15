@@ -135,4 +135,13 @@ public class VehicleRigStage2Tests
         Assert.Equal((float)Math.PI, BlenderWeld.AngleNormalized(0, 0, 1, 0, 0, -1), 6);
         Assert.Equal((float)(Math.PI / 2), BlenderWeld.AngleNormalized(1, 0, 0, 0, 1, 0), 6);
     }
+
+    [Fact]
+    public void A_bad_reduce_dial_dies_before_a_later_names_file_is_opened()
+    {
+        var a = BlenderVehicleRig.ParseArgs(Argv(new Dictionary<int, string> { [52] = "half", [69] = "@C:/no/such/detail.txt" }));
+        Assert.Equal("ValueError: could not convert string to float: 'half'", a.NamesDie);
+        var b = BlenderVehicleRig.ParseArgs(Argv(new Dictionary<int, string> { [51] = "@C:/no/such/structure.txt", [52] = "half" }));
+        Assert.Equal("FileNotFoundError: [Errno 2] No such file or directory: 'C:/no/such/structure.txt'", b.NamesDie);
+    }
 }

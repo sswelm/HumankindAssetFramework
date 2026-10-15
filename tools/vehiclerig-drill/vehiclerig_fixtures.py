@@ -151,7 +151,7 @@ def main(out):
     # the exits and deaths: plain recipes the --exits mode edits into the malformed shapes
     recipe(out, "fx_x_allignored", src, [("A", 3, {}), ("B", 3, {})], sub="recipes_exit")
     recipe(out, "fx_x_bright", src, [("A", 0, {}), ("B", 0, {})], sub="recipes_exit", model1Bright=1.5)
-    for k in ("fx_x_flagfold", "fx_x_defaultreduce", "fx_x_shroudreduce", "fx_x_gunreduce", "fx_x_windowreduce", "fx_d_frames", "fx_d_names", "fx_d_infinite_count", "fx_d_nan_count", "fx_d_flagfold_infinite"):
+    for k in ("fx_x_flagfold", "fx_x_defaultreduce", "fx_x_shroudreduce", "fx_x_gunreduce", "fx_x_windowreduce", "fx_d_frames", "fx_d_names", "fx_d_infinite_count", "fx_d_nan_count", "fx_d_flagfold_infinite", "fx_d_reduce_before_names"):
         recipe(out, k, src, [("A", 0, {}), ("B", 0, {})], sub="recipes_exit")
     for k in ("fx_x_merge_missing", "fx_d_merge_offset"):
         recipe(out, k, src, [("A", 0, {}), ("B", 0, {})], sub="recipes_exit", srcFile2=second)
@@ -175,6 +175,20 @@ def main(out):
     r = Rig(); rigged(r); primary_skin = r.write(models, "fx_b_first_skin")
     r = Rig(); rigged(r); second_skin = r.write(models, "fx_b_second_skin")
     recipe(out, "fx_b_merge_skinned", primary_skin, [("Body", 0, {})], srcFile2=second_skin)
+    # A loose split with imported custom normals: the copied parts decode then re-encode through BMesh's spaces.
+    r = Rig(); ma = r.material("Paint")
+    pos = []; normals = []; idx = []
+    for k in range(4):
+        start = len(pos)
+        pos += [(3.0 * k + 0.123, 0.019, 0.0), (3.0 * k + 1.124, 0.021, 0.007),
+                (3.0 * k + 1.122, 1.017, 0.014), (3.0 * k + 0.127, 1.016, 0.011)]
+        normals += [(0.2, -0.4, 0.8944272)] * 4
+        idx += [start, start + 1, start + 2, start, start + 2, start + 3]
+    r.meshes.append({"name": "Panels", "primitives": [{"attributes": {
+        "POSITION": r.b.accessor(pos, "f", "VEC3"), "NORMAL": r.b.accessor(normals, "f", "VEC3", minmax=False)},
+        "indices": r.b.accessor(idx, "H", "SCALAR", minmax=False), "material": ma}]})
+    r.node("Panels", mesh=0)
+    recipe(out, "fx_b_split_normals", r.write(models, "fx_b_split_normals"), [("Panels", 0, {})])
     # stage 2: the weld tiers
     r = Rig(); ma = r.material("Paint", (0.3, 0.5, 0.7)); mb = r.material("Steel", (0.5, 0.5, 0.55))
     r.node("Hull", mesh=box_split(r, "Hull", (ma, mb))); r.node("Other", mesh=r.mesh("Other", at=(3.0, 0.0, 0.0), material=ma))
@@ -216,6 +230,7 @@ EXITS = {
     "fx_x_windowreduce": ("EXIT", lambda a: set_tag(a, "windowreduce", "nopipe")),
     "fx_x_merge_missing": ("EXIT", lambda a: set_tag(a, "merge2", "|".join([a[[t.startswith("merge2=") for t in a].index(True)][7:].split("|")[0] + ".missing.glb"] + a[[t.startswith("merge2=") for t in a].index(True)][7:].split("|")[1:]))),
     "fx_d_frames": ("DIES", lambda a: a.__setitem__(7, "15.0")),
+    "fx_d_reduce_before_names": ("DIES", lambda a: (a.__setitem__(52, "half"), a.__setitem__(69, a[69] + ".missing.txt"))),
     "fx_d_infinite_count": ("DIES", lambda a: a.__setitem__(12, "inf")),
     "fx_d_nan_count": ("DIES", lambda a: a.__setitem__(22, "nan")),
     "fx_d_flagfold_infinite": ("DIES", lambda a: set_tag(a, "flagfold", "10|inf")),
