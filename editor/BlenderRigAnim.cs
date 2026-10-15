@@ -290,6 +290,7 @@ public static class BlenderRigAnim
         public readonly List<string> Logs3 = new List<string>();      // the RIGANIM lines of stage 3 (RunStage3), in order
         public string Deferred;                                       // stage 3: a branch a later step models (the rest fold, the bone cap), or null
         public bool Exits;                                            // the script's sys.exit(1) in this stage (after its ERROR line)
+        public string Dies;                                           // the uncaught exception the script dies of in this stage, or null
         public int FrameStart = 1, FrameEnd = 250, FrameCurrent = 1;
         public readonly List<SceneObject> Objects = new List<SceneObject>();   // scene.objects after the stage, in order
         public ArmatureData Armature;                                 // the armature the script takes (the first one), or null
@@ -315,12 +316,21 @@ public static class BlenderRigAnim
         string ext = System.IO.Path.GetExtension(a.Input).ToLowerInvariant();
         if (ext == ".fbx" || ext == ".blend") { s.Fallback = "a " + ext + " source: Blender's own importer, until the native reader"; return s; }
         if (a.LocalNodeAnim) { s.Fallback = "localNodeAnim: the REST hold and the inspection round trip are Blender's"; return s; }
-        s.Logs.AddRange(a.Logs);
+        return ImportScene(m, s, a.Logs, dropMaterialLess: true, requireArmature: true, convertRig: a.ConvertRig);
+    }
+
+    /// <summary>The scene Blender's glTF importer makes of `m` (import_scene.gltf), as the script finds it: the objects in creation
+    /// order with the importer's properties posed at frame 1, every mesh in the importer's layout, the actions with a slot per
+    /// touched object. rig_anim.py's stage 1 adds the material-less drop, its no-armature exit and the object-animation clear;
+    /// vehicle_rig.py's (BlenderVehicleRig) takes the scene as imported.</summary>
+    internal static Stage1 ImportScene(HafModel m, Stage1 s, List<string> argLogs, bool dropMaterialLess, bool requireArmature, bool convertRig, BlenderNames.Result seed = null, bool posed = true, IEnumerable<string> existingActions = null)
+    {
+        s.Logs.AddRange(argLogs);
         if (m.Scenes.Count > 1) { s.Fallback = "a file of several scenes: which one Blender makes active is not modelled"; return s; }
         foreach (var ext2 in new[] { "KHR_materials_variants", "KHR_animation_pointer", "KHR_lights_punctual", "EXT_mesh_gpu_instancing" })
             if (m.ExtensionsUsed.Contains(ext2)) { s.Fallback = ext2 + ": not modelled"; return s; }
         if (m.Nodes.Exists(n => n.Camera >= 0)) { s.Fallback = "a camera: the importer's camera correction is not modelled"; return s; }
-        var names = BlenderNames.Compute(m); s.Names = names;
+        var names = BlenderNames.Compute(m, seed); s.Names = names;
         // a skin's joints must be bones of an armature (the importer fails otherwise), each listed once (a vertex group per joint)
         for (int si = 0; si < m.Skins.Count; si++)
         {
@@ -355,7 +365,7 @@ public static class BlenderRigAnim
                     else d.Materials.Add(names.MaterialOf[(mat < 0 ? names.MeshDatablockNode[o.MeshNode] : -1, mat, vc)]);
                     if (mat < 0 && vc) Note(s, "a COLOR_0 primitive without a material (DefaultMaterial, kept)");
                 }
-            if (d.Materials.Count == 0) { dropped.Add(o); Note(s, "a material-less mesh dropped"); continue; }
+            if (d.Materials.Count == 0 && dropMaterialLess) { dropped.Add(o); Note(s, "a material-less mesh dropped"); continue; }
             if (r.DefNr != null)
             {
                 foreach (int j in m.Skins[o.Skin].Joints) d.Groups.Add(names.BoneOfJoint[j]);
@@ -391,18 +401,22 @@ public static class BlenderRigAnim
             }
         }
         var armObj = s.Objects.FirstOrDefault(x => x.Type == "ARMATURE");
-        if (armObj == null)
+        if (armObj == null && requireArmature)
         {
             s.Logs.Add("RIGANIM ERROR: no armature found — the model is not rigged, use the normal (static) bake instead");
             s.Exits = true; Note(s, "no armature: the script's exit");
             return s;
         }
-        if (armObj.Name.StartsWith("DeployArmV2", StringComparison.Ordinal)) { s.Logs.Add("RIGANIM contract: V2 (clean-unit deploy conversion)"); Note(s, "the V2 contract marker"); }
+        if (requireArmature && armObj != null && armObj.Name.StartsWith("DeployArmV2", StringComparison.Ordinal)) { s.Logs.Add("RIGANIM contract: V2 (clean-unit deploy conversion)"); Note(s, "the V2 contract marker"); }
         if (s.Objects.Count(x => x.Type == "ARMATURE") > 1) Note(s, "several armatures (the first one is the script's)");
 
         // ---- the actions: one per animation, a slot per object touched, the fcurves in the order the importer makes them
         var rig = VehicleProbe.BuildImportRig(m, names); s.Rig = rig;
         var trackNames = BlenderNames.TrackNames(m);
+        // NLA track names are local to this file, but actions share Blender's Main datablock namespace across imports.
+        var actionPool = new BlenderNames.NamePool();
+        if (existingActions != null) foreach (string name in existingActions) actionPool.Unique(name);
+        var actionNames = new string[trackNames.Length];
         var imports = new List<BlenderPosedState.Action>();
         var slotObjectsOf = new List<List<SceneObject>>();   // per animation: the objects with a slot, in creation order
         SceneObject ObjectOfNode(int n)
@@ -447,7 +461,7 @@ public static class BlenderRigAnim
                     var curves = (ch.Path == "translation" ? imp.Translation : ch.Path == "rotation" ? imp.Rotation : imp.Scale)[n];
                     string blenderPath = ch.Path == "translation" ? "location" : ch.Path == "rotation" ? "rotation_quaternion" : "scale";
                     if (names.IsBone[n]) blenderPath = "pose.bones[\"" + EscapeIdentifier(names.BoneOfJoint[n]) + "\"]." + blenderPath;
-                    else Note(s, names.ObjectOfNode[n] == armObj.Name ? "the armature object's own curves" : "object-level curves");
+                    else Note(s, armObj != null && names.ObjectOfNode[n] == armObj.Name ? "the armature object's own curves" : "object-level curves");
                     string ipo = sampler.Interpolation == "STEP" ? "CONSTANT" : "LINEAR";
                     if (ipo == "CONSTANT") Note(s, "a STEP sampler (CONSTANT keys)");
                     for (int c = 0; c < comps; c++)
@@ -466,6 +480,7 @@ public static class BlenderRigAnim
                 }
             if (act.Slots.Count == 0) { Note(s, "an animation without a channel on a node (no action)"); slotObjectsOf.Add(slotObjects); continue; }
             if (act.Slots.Count > 1) Note(s, "an action with several slots");
+            act.Name = actionNames[ai] = actionPool.Unique(trackNames[ai]);
             s.Actions.Add(act); slotObjectsOf.Add(slotObjects);
         }
         if (m.Animations.Count > 1) Note(s, "several animations (the first one's action is the active one)");
@@ -474,12 +489,12 @@ public static class BlenderRigAnim
         // the first animation's action is the active one on the objects it has a slot for
         if (slotObjectsOf.Count > 0 && m.Animations.Count > 0)
         {
-            var first = s.Actions.FirstOrDefault(x => x.Name == trackNames[0]);
+            var first = s.Actions.FirstOrDefault(x => x.Name == actionNames[0]);
             if (first != null) foreach (var slot in first.Slots) { slot.Object.Action = first.Name; slot.Object.Slot = slot.Identifier; }
         }
 
         // ---- the object-animation clear (the conversion path): every non-armature object with animation_data
-        if (a.ConvertRig)
+        if (convertRig)
         {
             var objanim = s.Objects.Where(x => x.Type != "ARMATURE" && x.HasAnimationData).ToList();
             foreach (var x in objanim) { x.Action = null; x.Slot = null; x.HasAnimationData = false; }
@@ -489,7 +504,7 @@ public static class BlenderRigAnim
 
         // ---- the pose at frame 1 (import_scene.gltf leaves every animated property at the scene's frame) and every matrix_world
         Func<int, float[][]> set = null;
-        if (imports.Count > 0 && s.Actions.Exists(x => x.Name == trackNames[0]))
+        if (posed && imports.Count > 0 && s.Actions.Exists(x => x.Name == actionNames[0]))
         {
             var pose = new BlenderPosedState.Pose(imports[0], m, rig);
             set = pose.FrameSet(1f);
@@ -535,11 +550,14 @@ public static class BlenderRigAnim
         foreach (var so in s.Objects) WorldOf(so);
 
         // ---- the armature's bones and pose bones
-        int armNode = armObj.Source.GltfNode;
-        var ad = new ArmatureData { Object = armObj, PoseProps = poseProps, PoseMats = poseMats };
-        if (!rig.Armatures.TryGetValue(armNode, out ad.Rest)) { s.Fallback = "'" + armObj.Name + "': an armature without bones"; return s; }
-        ad.BoneNodes = names.BoneNodesInOrder.Where(b => names.ArmatureNodeOfBone[b] == armNode).ToList();
-        s.Armature = ad;
+        if (armObj != null)
+        {
+            int armNode = armObj.Source.GltfNode;
+            var ad = new ArmatureData { Object = armObj, PoseProps = poseProps, PoseMats = poseMats };
+            if (!rig.Armatures.TryGetValue(armNode, out ad.Rest)) { s.Fallback = "'" + armObj.Name + "': an armature without bones"; return s; }
+            ad.BoneNodes = names.BoneNodesInOrder.Where(b => names.ArmatureNodeOfBone[b] == armNode).ToList();
+            s.Armature = ad;
+        }
         return s;
     }
 
@@ -1213,7 +1231,7 @@ public static class BlenderRigAnim
 
     // ---- the fold's arithmetic
     /// <summary>mathutils Matrix @ Matrix on Blender's column-major floats (a double dot per item).</summary>
-    static float[] PyMul(float[] colA, float[] colB) => FromRowMajor(VehicleProbe.MatMulMathutils(VehicleProbe.ToRowMajor(colA), VehicleProbe.ToRowMajor(colB)));
+    internal static float[] PyMul(float[] colA, float[] colB) => FromRowMajor(VehicleProbe.MatMulMathutils(VehicleProbe.ToRowMajor(colA), VehicleProbe.ToRowMajor(colB)));
     /// <summary>mathutils Matrix.inverted() (the adjugate over the float32 determinant) on column-major floats; null when singular.</summary>
     static float[] PyInv(float[] col) { var r = VehicleProbe.Inverted(VehicleProbe.ToRowMajor(col)); return r == null ? null : FromRowMajor(r); }
     static float[] FromRowMajor(float[] it) { var bm = new float[16]; for (int c = 0; c < 4; c++) for (int w = 0; w < 4; w++) bm[c * 4 + w] = it[w * 4 + c]; return bm; }
@@ -1243,7 +1261,7 @@ public static class BlenderRigAnim
     }
     /// <summary>blender::math::transform_points: nothing moves when every entry of the transform lies within 1e-6 of the
     /// identity's (skip_transform); else transform_point on each.</summary>
-    static void TransformPoints(float[] m, float[] positions, int count)
+    internal static void TransformPoints(float[] m, float[] positions, int count)
     {
         var id = VehicleProbe.IdentityF(); bool skip = true;
         for (int i = 0; i < 16 && skip; i++) if (Math.Abs((float)(m[i] - id[i])) > 1e-6f) skip = false;
@@ -2126,7 +2144,7 @@ public static class BlenderRigAnim
     /// <summary>BKE_object_apply_mat4 for an object in quaternion mode with the identity parentinv and no deltas: with a
     /// parent, Eigen's inverse of (the parent's matrix times the identity) times the matrix; mat4_to_loc_rot_size;
     /// mat3_normalized_to_quat times the inverse of the identity delta quaternion; dloc subtracted, dscale divided out.</summary>
-    static void ApplyMat4(float[] mat, float[] parentWorld, out float[] loc, out float[] quat, out float[] scale)
+    internal static void ApplyMat4(float[] mat, float[] parentWorld, out float[] loc, out float[] quat, out float[] scale)
     {
         var rmat = mat;
         if (parentWorld != null)
@@ -2175,6 +2193,9 @@ public static class BlenderRigAnim
             PoseBones = new List<string[]>(), Actions = new List<string[]>(), FCurves = new List<string[]>(), Keys = new List<string[]>();
     }
 
+    /// <summary>The slot identifier inserted after the action's name (the vehicle dump's FC and K rows carry it).</summary>
+    static string[] WithSlot(bool on, string slot, string[] row) { if (!on) return row; var l = row.ToList(); l.Insert(3, slot); return l.ToArray(); }
+
     public static string Hex(float f) => BitConverter.ToUInt32(BitConverter.GetBytes(f), 0).ToString("x8");
     static string Sha(byte[] b) { using (var sha = SHA256.Create()) return BitConverter.ToString(sha.ComputeHash(b)).Replace("-", "").ToLowerInvariant(); }
     static byte[] Bytes(float[] a) { var b = new byte[4 * a.Length]; for (int i = 0; i < a.Length; i++) Array.Copy(BitConverter.GetBytes(a[i]), 0, b, 4 * i, 4); return b; }
@@ -2184,7 +2205,7 @@ public static class BlenderRigAnim
     static IEnumerable<string> HexRowMajor(float[] items) { for (int i = 0; i < 16; i++) yield return Hex(items[i]); }
 
     /// <summary>The rows the dump prints for the scene after stage `n`.</summary>
-    public static Rows Render(Stage1 s, int n = 1)
+    public static Rows Render(Stage1 s, int n = 1, bool fcSlot = false)
     {
         var r = new Rows();
         string N = n.ToString(CultureInfo.InvariantCulture);
@@ -2243,7 +2264,7 @@ public static class BlenderRigAnim
         foreach (var act in s.Actions)
         {
             r.Actions.Add(new[] { "ACT", N, act.Name, Hex(act.FrameStart), Hex(act.FrameEnd), act.FCurves.Count().ToString(CultureInfo.InvariantCulture), act.Slots.Count.ToString(CultureInfo.InvariantCulture) });
-            foreach (var fc in act.FCurves)
+            foreach (var slot in act.Slots) foreach (var fc in slot.FCurves)
             {
                 var co = new List<byte>(); var hl = new List<byte>(); var hr = new List<byte>(); var meta = new List<string>();
                 foreach (var k in fc.Keys)
@@ -2252,10 +2273,10 @@ public static class BlenderRigAnim
                     hl.AddRange(BitConverter.GetBytes(k.LeftX)); hl.AddRange(BitConverter.GetBytes(k.LeftY));
                     hr.AddRange(BitConverter.GetBytes(k.RightX)); hr.AddRange(BitConverter.GetBytes(k.RightY));
                     meta.Add(k.Interpolation + "/" + KeyData.Easing + "/" + KeyData.HandleType + "/" + KeyData.HandleType);
-                    r.Keys.Add(new[] { "K", N, act.Name, fc.DataPath, fc.Index.ToString(CultureInfo.InvariantCulture), Hex(k.Frame), Hex(k.Value), Hex(k.LeftX), Hex(k.LeftY), Hex(k.RightX), Hex(k.RightY), k.Interpolation, KeyData.Easing, KeyData.HandleType, KeyData.HandleType });
+                    r.Keys.Add(WithSlot(fcSlot, slot.Identifier, new[] { "K", N, act.Name, fc.DataPath, fc.Index.ToString(CultureInfo.InvariantCulture), Hex(k.Frame), Hex(k.Value), Hex(k.LeftX), Hex(k.LeftY), Hex(k.RightX), Hex(k.RightY), k.Interpolation, KeyData.Easing, KeyData.HandleType, KeyData.HandleType }));
                 }
                 string idx = fc.Index.ToString(CultureInfo.InvariantCulture);
-                r.FCurves.Add(new[] { "FC", N, act.Name, fc.DataPath, idx, fc.Keys.Count.ToString(CultureInfo.InvariantCulture), Sha(co.ToArray()), Sha(hl.Concat(hr).Concat(Encoding.UTF8.GetBytes(string.Join("|", meta))).ToArray()) });
+                r.FCurves.Add(WithSlot(fcSlot, slot.Identifier, new[] { "FC", N, act.Name, fc.DataPath, idx, fc.Keys.Count.ToString(CultureInfo.InvariantCulture), Sha(co.ToArray()), Sha(hl.Concat(hr).Concat(Encoding.UTF8.GetBytes(string.Join("|", meta))).ToArray()) }));
             }
         }
         return r;
