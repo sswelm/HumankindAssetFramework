@@ -25,6 +25,12 @@ Stage 2 (step (c), the weld tiers):
   fx_c_weld          a box of 24 per-face vertices (a glTF's seams) over two materials, BODY at 50: the weld within each material
                      to 16 (the material border stays split), every box edge sharp (90 degrees), then the decimate at ratio 0.5 on
                      it; the 8-vertex box beside it sits at its target and keeps its datablock
+  fx_c_soup_flat     a flat 6 x 6 grid of triangles in the RIGGING tier at 90: the limited dissolve joins every coplanar face into
+                     one n-gon and collapses the straight-run vertices, the triangulate cuts the square, the decimate follows
+  fx_c_soup_L        a flat L-shaped strip in the SHROUD tier at 50: the dissolve leaves a CONCAVE n-gon, so the ear clipping's
+                     kd-tree of concave corners decides the ears; a lone flat quad beside it takes the quad rule
+  fx_c_soup_bumpy    a 60 x 40 bumpy grid (4,800 faces) in the RIGGING tier at 80: over the 4,000-face cap, the dissolve runs
+                     per BSP cell on the cell's interior edges and vertices
   fx_c_scaled        the seamed grid on a node scaled (2, 1, 0.5) and turned: the weld distance from o.dimensions after
                      transform_apply (the extents of the baked mesh at an identity matrix), BODY at 60
   fx_c_grid          a bumpy 9 x 9 grid with its middle row of vertices doubled (one seam), BODY at 60: the weld, then the decimate
@@ -107,6 +113,29 @@ def grid_seam(r, name, material, n=9):
             idx += [a, b, c, a, c, d]
     prim = {"attributes": {"POSITION": r.b.accessor(pos, "f", "VEC3"), "TEXCOORD_0": r.b.accessor(uv, "f", "VEC2", minmax=False)},
             "indices": r.b.accessor(idx, "H", "SCALAR", minmax=False), "material": material}
+    r.meshes.append({"name": name, "primitives": [prim]})
+    return len(r.meshes) - 1
+
+
+def flat_grid(r, name, material, nx, ny, bump=0.0, mask=None):
+    """An (nx x ny)-vertex grid of two triangles per cell, z = bump * sin/cos (flat at 0); `mask(i, j)` keeps a cell or not."""
+    import math as _m
+    pos = []; uv = []; rows = []
+    for j in range(ny):
+        row = []
+        for i in range(nx):
+            x, y = i / (nx - 1.0), j / (ny - 1.0)
+            row.append(len(pos)); pos.append((x, y, bump * _m.sin(5.0 * x) * _m.cos(4.0 * y))); uv.append((x, y))
+        rows.append(row)
+    idx = []
+    for j in range(ny - 1):
+        for i in range(nx - 1):
+            if mask is not None and not mask(i, j):
+                continue
+            a = rows[j][i]; b = rows[j][i + 1]; c = rows[j + 1][i + 1]; d = rows[j + 1][i]
+            idx += [a, b, c, a, c, d]
+    prim = {"attributes": {"POSITION": r.b.accessor(pos, "f", "VEC3"), "TEXCOORD_0": r.b.accessor(uv, "f", "VEC2", minmax=False)},
+            "indices": r.b.accessor(idx, "H" if len(pos) < 65536 else "I", "SCALAR", minmax=False), "material": material}
     r.meshes.append({"name": name, "primitives": [prim]})
     return len(r.meshes) - 1
 
@@ -205,6 +234,16 @@ def main(out):
     r = Rig(); ma = r.material("Paint", (0.3, 0.5, 0.7))
     r.node("Deck", mesh=grid_seam(r, "Deck", ma), scale=[2.0, 1.0, 0.5], rotation=[0.0, 0.258819, 0.0, 0.9659258])
     recipe(out, "fx_c_scaled", r.write(models, "fx_c_scaled"), [("Deck", 0, {})], bodyReducePct=60.0)
+    # the soup tiers: the limited dissolve, the n-gon triangulation, the chunked path
+    r = Rig(); ma = r.material("Rope", (0.4, 0.3, 0.2))
+    r.node("Net", mesh=flat_grid(r, "Net", ma, 6, 6)); r.node("Other", mesh=r.mesh("Other", at=(3.0, 0.0, 0.0), material=ma))
+    recipe(out, "fx_c_soup_flat", r.write(models, "fx_c_soup_flat"), [("Net", 15, {}), ("Other", 0, {})], riggingReducePct=90.0)
+    r = Rig(); ma = r.material("Rope", (0.4, 0.3, 0.2))
+    r.node("Stay", mesh=flat_grid(r, "Stay", ma, 7, 7, mask=lambda i, j: i < 2 or j < 2)); r.node("Pane", mesh=flat_grid(r, "Pane", ma, 2, 2), translation=[2.0, 0.0, 0.0])
+    recipe(out, "fx_c_soup_L", r.write(models, "fx_c_soup_L"), [("Stay", 22, {}), ("Pane", 22, {})], shroudReducePct=50.0)
+    r = Rig(); ma = r.material("Rope", (0.4, 0.3, 0.2))
+    r.node("Shroud", mesh=flat_grid(r, "Shroud", ma, 61, 41, bump=0.02))
+    recipe(out, "fx_c_soup_bumpy", r.write(models, "fx_c_soup_bumpy"), [("Shroud", 15, {})], riggingReducePct=80.0)
     # brightness on three material chains
     r = Rig(); img = r.image("Albedo", rgb=(120, 80, 40)); tex = r.texture(img)
     flat = r.material("Flat", (0.6, 0.4, 0.2)); direct = r.material("Direct", (1.0, 1.0, 1.0), texture=tex); tint = r.material("Tint", (0.5, 0.25, 0.9), texture=tex)

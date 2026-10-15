@@ -4,9 +4,11 @@
 // part (the first object of that name; a name the scene has not is a WARN): the mesh into a bmesh; the WELD tiers (all but
 // RIGGING and SHROUD) weld coincident vertices within each material (the vertices whose corners all share one material,
 // grouped in the order the materials are first met, remove_doubles per group at 1e-5 of the part's largest extent) and
-// mark the manifold edges over 40 degrees sharp; the SOUP tiers run the limited dissolve instead (not modelled yet: left to
-// Blender by name); triangulate (nothing to do on triangles); the bmesh back into the mesh, every face smooth on a weld
-// tier; then the dial's target from the welded count (max(8, int(v0 * (1 - pct / 100)))) and, when the mesh is still above
+// mark the manifold edges over 40 degrees sharp; the SOUP tiers (RIGGING, SHROUD) run the limited dissolve at 5 degrees
+// instead (BlenderDissolve: one dissolve_limit over every vertex and edge, or past 4,000 faces one per BSP cell of the face
+// centres on the cell's interior edges and vertices, as _dissolve_limited chunks it); triangulate (BlenderPolyfill: nothing to
+// do on triangles, the quads and n-gons the dissolve left cut by BEAUTY); the bmesh back into the mesh, every face smooth on a
+// weld tier; then the dial's target (max(8, int(v0 * (1 - pct / 100))) from the welded count, or the raw count on a soup tier) and, when the mesh is still above
 // it, a DECIMATE modifier at ratio max(0.02, target / vmid) - BlenderDecimate's collapse on the mesh as the modifier
 // converts it (face normals recomputed, the vertex normals the mesh reports) -, the evaluated mesh copied into a new
 // datablock named after the old one (meshes.new_from_object) and the old one removed; the lines per part and per tier.
@@ -41,7 +43,6 @@ public static partial class BlenderVehicleRig
             foreach (string rn in rnames)
             {
                 if (!byName.TryGetValue(rn, out var o)) { s.Logs2.Add("VEHICLE WARN: " + label.ToLowerInvariant() + " part '" + rn + "' not found — skipped"); continue; }
-                if (!weld) { s.Fallback = "the dissolve pass (the " + label + " tier): bmesh.ops.dissolve_limit is not modelled yet"; return; }
                 int vraw = o.Mesh.Vertices;
                 var sw = System.Diagnostics.Stopwatch.StartNew(); bool timing = Environment.GetEnvironmentVariable("VEHICLERIG_DEBUG_TIME") == "1";
                 var layers = new BlenderWeld.Layers();
@@ -68,16 +69,30 @@ public static partial class BlenderVehicleRig
                     groups[g].verts.Add(v);
                 }
                 if (timing) Console.Error.WriteLine($"TIME   grouping {sw.ElapsedMilliseconds} ms ({groups.Count} groups)");
-                int welded = 0;
-                foreach (var g in groups) welded += BlenderWeld.RemoveDoubles(bm, layers, g.verts, dist);
-                if (timing) Console.Error.WriteLine($"TIME {rn}: {vraw} verts, weld {sw.ElapsedMilliseconds} ms ({welded} merged)");
-                int sharp = BlenderWeld.MarkSharpOverAngle(bm, 40.0);
-                // triangulate: every face is still a triangle (a weld re-makes a face with as many corners as it keeps)
-                for (int f = 0; f < bm.FaceCount; f++) if (bm.FAlive[f] && bm.FLen[f] != 3) { s.Fallback = "triangulate: a face of " + bm.FLen[f] + " corners after the weld (BM_face_triangulate is not modelled)"; return; }
-                if (timing) Console.Error.WriteLine($"TIME   sharp marked {sw.ElapsedMilliseconds} ms");
+                int welded = 0, sharp = 0;
+                if (weld)
+                {
+                    foreach (var g in groups) welded += BlenderWeld.RemoveDoubles(bm, layers, g.verts, dist);
+                    if (timing) Console.Error.WriteLine($"TIME {rn}: {vraw} verts, weld {sw.ElapsedMilliseconds} ms ({welded} merged)");
+                    sharp = BlenderWeld.MarkSharpOverAngle(bm, 40.0);
+                    if (timing) Console.Error.WriteLine($"TIME   sharp marked {sw.ElapsedMilliseconds} ms");
+                }
+                else
+                {
+                    // the SOUP tiers: _dissolve_limited(_rb, 5.0) - one dissolve_limit over every vertex and edge, or, past 4,000 faces, the
+                    // faces split by their median centre into cells and each cell's interior edges and vertices dissolved apart
+                    DissolveLimited(bm, layers, 5.0);
+                    if (timing) Console.Error.WriteLine($"TIME {rn}: {vraw} verts, dissolve {sw.ElapsedMilliseconds} ms ({bm.TotVert} left, {bm.TotFace} faces)");
+                    Note(s, "a soup tier: the limited dissolve");
+                }
+                // bmesh.ops.triangulate on every face: a no-op on triangles, the quads and n-gons the dissolve left cut by BEAUTY; the
+                // operator's NORMALS_CALC finish recomputes the face normals
+                int cut = BlenderPolyfill.TriangulateAll(bm, layers);
+                if (cut > 0) { BlenderDissolve.FaceNormalsUpdateAll(bm); Note(s, "n-gons triangulated"); }
+                if (timing) Console.Error.WriteLine($"TIME   triangulated {sw.ElapsedMilliseconds} ms ({cut} faces cut)");
                 var d2 = ToMeshData(bm, layers, o.Mesh);
                 if (timing) Console.Error.WriteLine($"TIME   to_mesh {sw.ElapsedMilliseconds} ms");
-                for (int f = 0; f < d2.FaceSharp.Length; f++) d2.FaceSharp[f] = false;   // p.use_smooth = True
+                if (weld) for (int f = 0; f < d2.FaceSharp.Length; f++) d2.FaceSharp[f] = false;   // p.use_smooth = True (the weld tiers)
                 o.Mesh = d2;
                 if (Environment.GetEnvironmentVariable("VEHICLERIG_DEBUG_WELD") == rn)
                 {
@@ -86,7 +101,7 @@ public static partial class BlenderVehicleRig
                 }
                 if (welded > 0) Note(s, "a weld tier: coincident vertices merged");
                 if (sharp > 0) Note(s, "a weld tier: edges marked sharp");
-                int vmid = d2.Vertices, v0 = vmid;
+                int vmid = d2.Vertices, v0 = weld ? vmid : vraw;   // the dial's base: the welded count, or the raw count on the soup pass
                 int target = Math.Max(8, (int)(v0 * (1.0 - pct / 100.0)));
                 if (vmid > target)
                 {
@@ -119,6 +134,95 @@ public static partial class BlenderVehicleRig
             }
             if (rrN > 0) s.Logs2.Add("VEHICLE " + label + ": " + rrN + " part(s) reduced, " + rrV0 + " -> " + rrV1 + " verts total (" + Py(100.0 * (1.0 - (double)rrV1 / Math.Max(1L, rrV0)), 0) + "% cut)");
             Note(s, "the " + label + " tier");
+        }
+    }
+
+    const int DissolveChunkFaces = 4000;
+
+    /// <summary>vehicle_rig.py's _dissolve_limited: at or under the cap one dissolve_limit over every vertex and edge (slot order); past
+    /// it the faces' median centres (BM_face_calc_center_median) BSP-split at the median along the widest axis - a Python stack,
+    /// the second half popped first - until every cell holds at most the cap, then per leaf (in leaf order) the edges whose two
+    /// faces are in the cell and the vertices whose faces all are, each list in index order, dissolved when either is non-empty.
+    /// Every operator call recomputes the face normals when it finishes (NORMALS_CALC).</summary>
+    static void DissolveLimited(BMesh bm, BlenderWeld.Layers layers, double angleDeg)
+    {
+        float angle = (float)(angleDeg * (Math.PI / 180.0));   // math.radians(5.0) into the float slot
+        if (bm.TotFace <= DissolveChunkFaces)
+        {
+            var verts = new List<int>(); var edges = new List<int>();
+            for (int v = 0; v < bm.VertCount; v++) if (bm.VAlive[v]) verts.Add(v);
+            for (int e = 0; e < bm.EdgeCount; e++) if (bm.EAlive[e]) edges.Add(e);
+            BlenderDissolve.DissolveLimit(bm, layers, angle, verts, edges);
+            BlenderDissolve.FaceNormalsUpdateAll(bm);
+            return;
+        }
+        // (face, centre) for every face, in slot order
+        var all = new List<(int f, float cx, float cy, float cz)>();
+        for (int f = 0; f < bm.FaceCount; f++)
+        {
+            if (!bm.FAlive[f]) continue;
+            float sx = 0f, sy = 0f, sz = 0f; int l = bm.FLFirst[f], l0 = l;
+            do { int v = bm.LV[l]; sx = (float)(sx + bm.VCo[3 * v]); sy = (float)(sy + bm.VCo[3 * v + 1]); sz = (float)(sz + bm.VCo[3 * v + 2]); l = bm.LNext[l]; } while (l != l0);
+            float inv = (float)(1.0f / (float)bm.FLen[f]);
+            all.Add((f, (float)(sx * inv), (float)(sy * inv), (float)(sz * inv)));
+        }
+        var cells = new Stack<List<(int f, float cx, float cy, float cz)>>(); cells.Push(all);
+        var leaves = new List<List<(int f, float cx, float cy, float cz)>>();
+        while (cells.Count > 0)
+        {
+            var cell = cells.Pop();
+            if (cell.Count <= DissolveChunkFaces) { leaves.Add(cell); continue; }
+            // the spans per axis as Python computes them (max - min over the Python floats of float32 values), the first widest axis
+            double[] spans = new double[3];
+            for (int ax = 0; ax < 3; ax++)
+            {
+                double mn = double.PositiveInfinity, mx = double.NegativeInfinity;
+                foreach (var c in cell) { double x = ax == 0 ? c.cx : ax == 1 ? c.cy : c.cz; if (x < mn) mn = x; if (x > mx) mx = x; }
+                spans[ax] = mx - mn;
+            }
+            int axis = 0; for (int ax = 1; ax < 3; ax++) if (spans[ax] > spans[axis]) axis = ax;
+            // list.sort by the centre's coordinate: a stable sort
+            var sorted = new List<(int f, float cx, float cy, float cz)>(cell);
+            BlenderExportTree.StableSort(sorted, (a, b) => (axis == 0 ? a.cx : axis == 1 ? a.cy : a.cz).CompareTo(axis == 0 ? b.cx : axis == 1 ? b.cy : b.cz));
+            int mid = sorted.Count / 2;
+            cells.Push(sorted.GetRange(0, mid)); cells.Push(sorted.GetRange(mid, sorted.Count - mid));
+        }
+        var fid = new Dictionary<int, int>();
+        for (int li = 0; li < leaves.Count; li++) foreach (var c in leaves[li]) fid[c.f] = li;
+        // index_update: the vertex and edge indices in slot order
+        var vIndex = new int[bm.VertCount]; int vc = 0; for (int v = 0; v < bm.VertCount; v++) vIndex[v] = bm.VAlive[v] ? vc++ : -1;
+        var eIndex = new int[bm.EdgeCount]; int ec = 0; for (int e = 0; e < bm.EdgeCount; e++) eIndex[e] = bm.EAlive[e] ? ec++ : -1;
+        var jobs = new List<(List<int> es, List<int> vs)>();
+        var loops = new List<int>();
+        for (int li = 0; li < leaves.Count; li++)
+        {
+            var es = new HashSet<int>(); var vs = new HashSet<int>();
+            foreach (var c in leaves[li])
+            {
+                int l = bm.FLFirst[c.f], l0 = l;
+                do
+                {
+                    int e = bm.LE[l];
+                    // _e.link_faces: two faces, both in this leaf
+                    int le = bm.EL[e]; int nf = 0; bool both = true;
+                    if (le != BMesh.None) { int lr = le; do { nf++; if (!fid.TryGetValue(bm.LF[lr], out int fl) || fl != li) both = false; lr = bm.LRadialNext[lr]; } while (lr != le); }
+                    if (nf == 2 && both) es.Add(e);
+                    int v = bm.LV[l];
+                    loops.Clear(); bm.LoopsOfVert(v, loops);
+                    bool inLeaf = true; foreach (int lv in loops) if (!fid.TryGetValue(bm.LF[lv], out int fl) || fl != li) { inLeaf = false; break; }
+                    if (inLeaf) vs.Add(v);
+                    l = bm.LNext[l];
+                } while (l != l0);
+            }
+            var esl = new List<int>(es); esl.Sort((a, b) => eIndex[a].CompareTo(eIndex[b]));
+            var vsl = new List<int>(vs); vsl.Sort((a, b) => vIndex[a].CompareTo(vIndex[b]));
+            jobs.Add((esl, vsl));
+        }
+        foreach (var (es, vs) in jobs)
+        {
+            if (es.Count == 0 && vs.Count == 0) continue;
+            BlenderDissolve.DissolveLimit(bm, layers, angle, vs, es);
+            BlenderDissolve.FaceNormalsUpdateAll(bm);
         }
     }
 

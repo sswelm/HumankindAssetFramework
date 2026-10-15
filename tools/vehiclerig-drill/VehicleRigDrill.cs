@@ -613,8 +613,7 @@ static class StageDrill
             if (problems.Count == 0) { RowsEqual += RowCount(s); Equal++; Console.WriteLine($"STAGE1 {key}: equal - {Describe(s)}"); }
         }
         if (problems.Count == 0 && model.Exits) { RowsEqual += model.Logs.Count; Equal++; Console.WriteLine($"STAGE1 {key}: equal - the script's exit in stage 1, {model.Logs.Count} VEHICLE lines"); }
-        // stage 2 on the scene stage 1 left (step (c)): the reduction tiers; a tier the model names as Blender's (the dissolve pass,
-        // until it is ported) is LEFT, any other decline a FAIL
+        // stage 2 on the scene stage 1 left (step (c)): the reduction tiers; any decline is a FAIL
         if (problems.Count == 0 && stages >= 2 && !model.Exits && model.Dies == null)
         {
             int notes0 = model.Notes.Count;
@@ -624,9 +623,8 @@ static class StageDrill
             if (problems.Count == 0 && model.Fallback != null)
             {
                 Census["LEFT: " + model.Fallback] = (Census.TryGetValue("LEFT: " + model.Fallback, out int c) ? c : 0) + 1;
-                bool named2 = model.Fallback.StartsWith("the dissolve pass", StringComparison.Ordinal);
-                if (!named2) { Console.WriteLine($"FAIL {key}: stage 2 model leaves this job to Blender: {model.Fallback}"); return false; }
-                Equal--; Left++; Console.WriteLine($"STAGE2 {key}: left to Blender by name: {model.Fallback}"); return true;
+                // part 2 ported the dissolve: no stage 2 decline is named any more
+                Console.WriteLine($"FAIL {key}: stage 2 model leaves this job to Blender: {model.Fallback}"); return false;
             }
             if (problems.Count == 0)
             {

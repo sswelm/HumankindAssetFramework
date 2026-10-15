@@ -517,6 +517,11 @@ public sealed class BMesh
 
     // ---------------------------------------------------------------- kill and splice (bmesh_core.cc)
 
+    /// <summary>bm_kill_only_vert / edge / loop for the kernels that unlink by hand (bmesh_kernel_join_edge_kill_vert).</summary>
+    internal void VertKillOnly(int v) => KillOnlyVert(v);
+    internal void EdgeKillOnly(int e) => KillOnlyEdge(e);
+    internal void LoopKillOnly(int l) => KillOnlyLoop(l);
+
     void KillOnlyVert(int v) { VAlive[v] = false; TotVert--; freeV.Push(v); }
     void KillOnlyEdge(int e) { EAlive[e] = false; TotEdge--; freeE.Push(e); }
     void KillOnlyFace(int f) { FAlive[f] = false; TotFace--; freeF.Push(f); }

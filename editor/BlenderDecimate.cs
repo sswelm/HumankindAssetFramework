@@ -139,6 +139,7 @@ public static class BlenderDecimate
         public bool IsEmpty => size == 0;
         public int Count => size;
         public float TopValue => nodeValue[tree[0]];
+        public int TopNode => tree[0];
         public float NodeValue(int node) => nodeValue[node];
         public int NodePtr(int node) => nodePtr[node];
 
