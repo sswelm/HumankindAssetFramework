@@ -31,8 +31,7 @@ public static partial class BlenderVehicleRig
     /// <summary>The branches of stage 3 the C# does not model yet: the role list that takes each, and the part that will.</summary>
     static readonly (string role, string branch)[] Stage3Later =
     {
-        ("turrets", "the turret bone (d3)"), ("guns", "the gun assembly (d3)"), ("muzzles", "the muzzle sockets (d3)"), ("cradles", "the gun cradle (d3)"),
-        ("trails", "the trail bones (d3)"), ("rotors", "the main rotor (d4)"), ("tailrotors", "the tail rotor (d4)"),
+        ("rotors", "the main rotor (d4)"), ("tailrotors", "the tail rotor (d4)"),
         ("oars", "the oar bones (d5)"), ("tracks", "the tread rig (d6)"),
     };
 
@@ -122,6 +121,149 @@ public static partial class BlenderVehicleRig
             int id = AddBone(string.Format(CultureInfo.InvariantCulture, "Wheel_{0:00}", i), (float[])cl.c.Clone(), t, body);
             foreach (var wn in cl.names) boneOf[wn] = boneNames[id - RigBoneBase];
         }
+        // ---- the TURRET bone: the turret parts' combined box (_combined_bbox: each part's world_bbox, min(c - s/2) and max(c + s/2) in
+        // Python floats, the Vectors' (mn + mx) / 2 and mx - mn in float32), the tail up by max(0.05, its largest extent * 0.25)
+        bool CombinedBox(List<string> partNames, out float[] cc, out float[] cs)
+        {
+            cc = cs = null;
+            double[] mn = { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity }, mx = { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
+            foreach (var pn in partNames)
+            {
+                var o = Find(pn); if (o == null) return false;
+                WorldBbox(o, out var c, out var sz);
+                for (int k = 0; k < 3; k++) { double lo = c[k] - sz[k] / 2.0, hi = c[k] + sz[k] / 2.0; if (lo < mn[k]) mn[k] = lo; if (hi > mx[k]) mx[k] = hi; }
+            }
+            var fmn = new[] { (float)mn[0], (float)mn[1], (float)mn[2] }; var fmx = new[] { (float)mx[0], (float)mx[1], (float)mx[2] };
+            cc = new float[3]; cs = new float[3];
+            for (int k = 0; k < 3; k++) { cc[k] = (float)((float)(fmn[k] + fmx[k]) * 0.5f); cs[k] = (float)(fmx[k] - fmn[k]); }
+            return true;
+        }
+        float[] Up(float[] h, float[] size) { double q = MaxOf(size) * 0.25; float r = (float)(q > 0.05 ? q : 0.05); return new[] { (float)(h[0] + 0f), (float)(h[1] + 0f), (float)(h[2] + r) }; }
+        var turretNames = a.Names.TryGetValue("turrets", out var tnl) ? tnl : new List<string>();
+        int turretBone = -1;
+        if (turretNames.Count > 0)
+        {
+            if (!CombinedBox(turretNames, out var tc, out var ts)) return;
+            turretBone = AddBone("Turret", tc, Up(tc, ts), body);
+            foreach (var tn in turretNames) boneOf[tn] = "Turret";
+            Note(s, "the turret bone");
+        }
+        // ---- the GUN assembly: ONE Gun bone for barrel + brake + cradle, its head slid along the TUBE's breech->muzzle span by gun_pivot
+        // (the breech the end nearer the body bone's head, a marked brake pinning the tip), parented to the Turret when there is one;
+        // under recoil the tube moves to a Barrel bone hung under a far RecoilArm pivot (the slide faked as a shallow arc)
+        var gunNames0 = a.Names.TryGetValue("guns", out var gl0) ? gl0 : new List<string>();
+        var muzzleNames = a.Names.TryGetValue("muzzles", out var ml0) ? ml0 : new List<string>();
+        var cradleNames = a.Names.TryGetValue("cradles", out var cl0) ? cl0 : new List<string>();
+        if (gunNames0.Count > 0 || muzzleNames.Count > 0 || cradleNames.Count > 0)
+        {
+            var tubeNames = gunNames0.Concat(muzzleNames.Where(m => !gunNames0.Contains(m))).ToList();
+            var gunNames = tubeNames.Concat(cradleNames.Where(c => !tubeNames.Contains(c))).ToList();
+            if (!CombinedBox(gunNames, out var gc, out var gs)) return;
+            float[][] gunAxis = null, gunBore = null;
+            List<float[]> Points(List<string> partNames)
+            {
+                var pts = new List<float[]>();
+                foreach (var pn in partNames)
+                {
+                    var o = Find(pn); if (o == null) return null;
+                    var it = VehicleProbe.ToRowMajor(o.World); var P = o.Mesh.Positions;
+                    for (int v = 0; v < o.Mesh.Vertices; v++)
+                        pts.Add(new[] { MulPointRow(it, 0, P[3 * v], P[3 * v + 1], P[3 * v + 2]), MulPointRow(it, 1, P[3 * v], P[3 * v + 1], P[3 * v + 2]), MulPointRow(it, 2, P[3 * v], P[3 * v + 1], P[3 * v + 2]) });
+                }
+                return pts;
+            }
+            float[] Sub(float[] p, float[] q) => new[] { (float)(p[0] - q[0]), (float)(p[1] - q[1]), (float)(p[2] - q[2]) };
+            var gpts = Points(tubeNames.Count > 0 ? tubeNames : gunNames); if (gpts == null) return;
+            var bodyHead = head[body];
+            if (gpts.Count >= 4)
+            {
+                int glong = LongAxis(gpts);
+                float[] breech = gpts[0], muzzle = gpts[0];
+                foreach (var p in gpts) { if (p[glong] > breech[glong]) breech = p; if (p[glong] < muzzle[glong]) muzzle = p; }   // max / min: the first of a tie
+                if (VecLength(Sub(muzzle, bodyHead)) < VecLength(Sub(breech, bodyHead))) { var sw = breech; breech = muzzle; muzzle = sw; }
+                if (muzzleNames.Count > 0)
+                {
+                    var mpts = Points(muzzleNames); if (mpts == null) return;
+                    if (mpts.Count > 0)
+                    {
+                        float[] far = mpts[0]; double fd = VecLength(Sub(far, breech));
+                        foreach (var p in mpts) { double d = VecLength(Sub(p, breech)); if (d > fd) { fd = d; far = p; } }
+                        muzzle = far;
+                        s.Logs3.Add("VEHICLE MUZZLE " + muzzleNames.Count + " part(s) -> tip=(" + P2(muzzle[0]) + ", " + P2(muzzle[1]) + ", " + P2(muzzle[2]) + ") (welded to the Gun bone: a brake elevates and recoils with the tube)");
+                        Note(s, "a muzzle brake pinning the tip");
+                    }
+                }
+                float piv = (float)a.GunPivot; var span = Sub(muzzle, breech);
+                gc = new[] { (float)(breech[0] + (float)(span[0] * piv)), (float)(breech[1] + (float)(span[1] * piv)), (float)(breech[2] + (float)(span[2] * piv)) };
+                gunAxis = new[] { (float[])gc.Clone(), (float[])muzzle.Clone() }; gunBore = new[] { (float[])breech.Clone(), (float[])muzzle.Clone() };
+                s.Logs3.Add("VEHICLE gun pivot " + BlenderRigAnim.PyFixed(a.GunPivot, 2) + " -> head=(" + P2(gc[0]) + ", " + P2(gc[1]) + ", " + P2(gc[2]) + ") (breech (" +
+                            P2(breech[0]) + ", " + P2(breech[1]) + ", " + P2(breech[2]) + ") .. muzzle (" + P2(muzzle[0]) + ", " + P2(muzzle[1]) + ", " + P2(muzzle[2]) + "))");
+                var off = Sub(muzzle, gc);
+                s.Logs3.Add("VEHICLE MUZZLE fire origin (gun-local, SOURCE units — scale by the bake's size): " + BlenderRigAnim.PyFixed(off[0], 3) + ", " + BlenderRigAnim.PyFixed(off[1], 3) + ", " + BlenderRigAnim.PyFixed(off[2], 3));
+                if (cradleNames.Count > 0) s.Logs3.Add("VEHICLE CRADLE " + cradleNames.Count + " part(s) welded to the Gun bone (elevates with the tube; excluded from the breech->muzzle span, and it is what will STAY when the barrel recoils)");
+                var asm = Points(gunNames); if (asm == null) return;
+                var bl = Sub(breech, gc); var ml = Sub(muzzle, gc); var dvec = Sub(ml, bl);
+                if (VecLength(dvec) > 1e-9 && asm.Count > 0)
+                {
+                    var dn = Normalized(dvec);
+                    double lo = double.PositiveInfinity, hi = double.NegativeInfinity;
+                    foreach (var p in asm) { double pr = Dot(Sub(p, gc), dn); if (pr < lo) lo = pr; if (pr > hi) hi = pr; }
+                    s.Logs3.Add("VEHICLE GUNSPAN bone=Gun breech=" + P6(bl[0]) + "," + P6(bl[1]) + "," + P6(bl[2]) + " muzzle=" + P6(ml[0]) + "," + P6(ml[1]) + "," + P6(ml[2]) + " extent=" + BlenderRigAnim.PyFixed(hi - lo, 6));
+                }
+            }
+            int gunBone = AddBone("Gun", gc, Up(gc, gs), turretBone >= 0 ? turretBone : body);
+            foreach (var gn in gunNames) boneOf[gn] = "Gun";
+            Note(s, turretBone >= 0 ? "the gun bone on the turret" : "the gun bone");
+            if (a.RecoilDist > 0.0 && tubeNames.Count > 0)
+            {
+                if (!CombinedBox(tubeNames, out var tc2, out var ts2)) return;
+                float[] boreD = gunAxis != null ? Normalized(Sub(gunAxis[1], gunAxis[0])) : new[] { 0f, -1f, 0f };
+                double slide = gunBore != null ? VecLength(Sub(gunBore[1], gunBore[0])) * a.RecoilDist : 1.0;
+                double R = slide / BitConverter.Int64BitsToDouble(0x3faad53144273e73L);   // math.tan(math.radians(3.0)), as Blender's Python computes it
+                var axis = Cross(boreD, new[] { 0f, 0f, 1f });
+                if (VecLength(axis) < 1e-4) axis = Cross(boreD, new[] { 0f, 1f, 0f });
+                axis = Normalized(axis);
+                var offd = Normalized(Cross(axis, boreD));
+                float Rf = (float)R;
+                var pivot = new[] { (float)(tc2[0] + (float)(offd[0] * Rf)), (float)(tc2[1] + (float)(offd[1] * Rf)), (float)(tc2[2] + (float)(offd[2] * Rf)) };
+                int arm = AddBone("RecoilArm", pivot, Up(pivot, ts2), gunBone);
+                s.Logs3.Add("VEHICLE RECOIL ARM: pivot (" + P2(pivot[0]) + ", " + P2(pivot[1]) + ", " + P2(pivot[2]) + "), R=" + BlenderRigAnim.PyFixed(R, 1) + " for a " + BlenderRigAnim.PyFixed(slide, 2) +
+                            "-unit slide (residual tilt 3.0 deg) — a bone's own translation does not render; an ancestor's rotation does");
+                AddBone("Barrel", tc2, Up(tc2, ts2), arm);
+                foreach (var tn in tubeNames) boneOf[tn] = "Barrel";
+                s.Logs3.Add("VEHICLE BARREL bone split off for recoil: " + tubeNames.Count + " tube part(s) slide, " + cradleNames.Count + " cradle part(s) stay");
+                Note(s, "recoil: the RecoilArm and Barrel bones");
+            }
+        }
+        // ---- the TRAIL bones: one per trail name (find: a missing one is the exit), hinged at the arm's end nearer the body bone's head,
+        // the tail half way down the arm (at least 0.05); fewer than 4 vertices, or ends closer than 1e-5, take no bone
+        var trailNames = a.Names.TryGetValue("trails", out var trl) ? trl : new List<string>();
+        for (int ti = 0; ti < trailNames.Count; ti++)
+        {
+            var o = Find(trailNames[ti]); if (o == null) return;
+            var it = VehicleProbe.ToRowMajor(o.World); var P = o.Mesh.Positions; var pts = new List<float[]>();
+            for (int v = 0; v < o.Mesh.Vertices; v++)
+                pts.Add(new[] { MulPointRow(it, 0, P[3 * v], P[3 * v + 1], P[3 * v + 2]), MulPointRow(it, 1, P[3 * v], P[3 * v + 1], P[3 * v + 2]), MulPointRow(it, 2, P[3 * v], P[3 * v + 1], P[3 * v + 2]) });
+            if (pts.Count < 4) { Note(s, "a trail of fewer than 4 vertices (no bone)"); continue; }
+            int lng = LongAxis(pts);
+            float[] lo = pts[0], hi = pts[0];
+            foreach (var p in pts) { if (p[lng] < lo[lng]) lo = p; if (p[lng] > hi[lng]) hi = p; }
+            var refH = head[body];
+            float[] hinge, spade;
+            var dl = new[] { (float)(lo[0] - refH[0]), (float)(lo[1] - refH[1]), (float)(lo[2] - refH[2]) };
+            var dh = new[] { (float)(hi[0] - refH[0]), (float)(hi[1] - refH[1]), (float)(hi[2] - refH[2]) };
+            if (VecLength(dl) <= VecLength(dh)) { hinge = lo; spade = hi; } else { hinge = hi; spade = lo; }
+            var dir = new[] { (float)(spade[0] - hinge[0]), (float)(spade[1] - hinge[1]), (float)(spade[2] - hinge[2]) };
+            double dlen = VecLength(dir);
+            if (dlen < 1e-5) { Note(s, "a trail whose ends meet (no bone)"); continue; }
+            var dn = Normalized(dir); double tl = dlen * 0.5; float tlf = (float)(tl > 0.05 ? tl : 0.05);
+            string bn = string.Format(CultureInfo.InvariantCulture, "Trail_{0:00}", ti);
+            int tb = AddBone(bn, hinge, new[] { (float)(hinge[0] + (float)(dn[0] * tlf)), (float)(hinge[1] + (float)(dn[1] * tlf)), (float)(hinge[2] + (float)(dn[2] * tlf)) }, body);
+            boneOf[trailNames[ti]] = boneNames[tb - RigBoneBase];
+            s.Logs3.Add("VEHICLE trail '" + trailNames[ti] + "' -> " + boneNames[tb - RigBoneBase] + " hinge=(" + P2(hinge[0]) + ", " + P2(hinge[1]) + ", " + P2(hinge[2]) + ") spade=(" + P2(spade[0]) + ", " + P2(spade[1]) + ", " + P2(spade[2]) + ")");
+            Note(s, "a trail bone");
+        }
+
         // ---- the SAIL bone: every found sail part on it; the head at the keel line (the lowest world bound_box corner of every mesh
         // with vertices) less 0.05 under the sails' box centre, the tail up by max(0.3, a quarter of the sails' height); with the fold,
         // SailF1..F3 chained below it with their heads on the fold lines (a quarter, half, three quarters down from the top)
@@ -335,6 +477,39 @@ public static partial class BlenderVehicleRig
         d += (double)(float)(it[row * 4 + 0] * x); d += (double)(float)(it[row * 4 + 1] * y); d += (double)(float)(it[row * 4 + 2] * z); d += (double)(float)(it[row * 4 + 3] * 1f);
         return (float)d;
     }
+
+    static string P2(float v) => BlenderRigAnim.PyFixed(v, 2);
+    static string P6(float v) => BlenderRigAnim.PyFixed(v, 6);
+
+    /// <summary>max(range(3), key=lambda i: mx[i] - mn[i]) over the points' component extremes (float32 values, the difference in
+    /// double): the first of a tie.</summary>
+    static int LongAxis(List<float[]> pts)
+    {
+        var mn = new[] { float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity }; var mx = new[] { float.NegativeInfinity, float.NegativeInfinity, float.NegativeInfinity };
+        foreach (var p in pts) for (int k = 0; k < 3; k++) { if (p[k] < mn[k]) mn[k] = p[k]; if (p[k] > mx[k]) mx[k] = p[k]; }
+        int best = 0; for (int k = 1; k < 3; k++) if ((double)mx[k] - mn[k] > (double)mx[best] - mn[best]) best = k;
+        return best;
+    }
+
+    /// <summary>Vector.normalized(): normalize_vn_vn - the squares summed in DOUBLE from the last component, sqrt to float, each component
+    /// times 1.0f / that; zero below 1e-35.</summary>
+    static float[] Normalized(float[] v)
+    {
+        double d = 0.0; for (int i = v.Length - 1; i >= 0; i--) d += (double)v[i] * (double)v[i];
+        if (!(d > 1.0e-35)) return new float[v.Length];
+        float s = (float)Math.Sqrt(d), f = (float)(1.0f / s); var r = new float[v.Length];
+        for (int i = 0; i < v.Length; i++) r[i] = (float)(v[i] * f);
+        return r;
+    }
+
+    /// <summary>Vector.cross(): cross_v3_v3v3 in float32.</summary>
+    static float[] Cross(float[] a, float[] b) => new[]
+    {
+        (float)((float)(a[1] * b[2]) - (float)(a[2] * b[1])), (float)((float)(a[2] * b[0]) - (float)(a[0] * b[2])), (float)((float)(a[0] * b[1]) - (float)(a[1] * b[0])),
+    };
+
+    /// <summary>Vector.dot(): dot_vn_vn - the float32 products summed in double from the last component.</summary>
+    static double Dot(float[] a, float[] b) { double d = 0.0; for (int i = a.Length - 1; i >= 0; i--) d += (double)(float)(a[i] * b[i]); return d; }
 
     /// <summary>axle_axis(s): the forced axis (X, Y, Z), else the thinnest extent - min over range(3) keeps the first on a tie.</summary>
     static float[] AxleAxis(string axisArg, float[] s)

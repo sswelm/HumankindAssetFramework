@@ -1992,6 +1992,38 @@ The corrected parser matches all 3,080 independent cases; 1,854 unit tests pass.
 compares 70 of 80 jobs through stage 3 (454,499 rows): all 56 fixtures and 14 saved recipes equal, eight recipes left
 by name for later stage-three branches and two for the FBX importer.
 
+**Step (d), stage 3 of item (5), part d3: the turret, the gun assembly, the trails (2026-10-16).** Against vehicle_rig.py
+1657-1850. `_combined_bbox`: each part's world box, `min(c - s/2)` and `max(c + s/2)` over Python floats, the Vectors'
+`(mn + mx) / 2.0` and `mx - mn` in float32 - one `Turret` bone at the turret parts' centre, its tail up by `max(0.05, extent *
+0.25)` (`find()`: a missing name is the stage 3 exit). The gun assembly is the guns, then the muzzles not already listed (the
+TUBE), then the cradles (one `Gun` bone for all of it, on the Turret when there is one). With four or more tube vertices (their
+world points by `Matrix @ Vector`, per part in list order and per vertex in index order) the longest extent's axis (the first
+on a tie) gives the two ends - `max`/`min` keep the FIRST point of a tie - and the end nearer the body bone's head is the BREECH;
+a marked brake pins the muzzle at its point farthest from the breech; the head sits at `breech + (muzzle - breech) * gun_pivot`
+in float32, and the script prints the pivot, the gun-local fire origin and, over the WHOLE assembly, the GUNSPAN line (the
+breech and muzzle bone-local, and the extent `max - min` of the points' `dot` with the span's normalized direction, in double).
+mathutils' rules, from the source: `length` and `dot` sum float32 products in double from the last component; `normalized()`
+sums the SQUARES in double (`len_squared_vn`) and multiplies by `1.0f / float(sqrt)`; `cross()` is float32. Under `recoil_dist >
+0` with a tube: the bore direction, the slide `|bore| * recoil_dist`, the arc radius `slide / tan(radians(3.0))` (the tangent as
+Blender's Python computes it, 0.05240777928304121), the arc axis `bore x Z` (`bore x Y` when that is shorter than 1e-4, a vertical
+bore), the pivot `tube centre + normalize(axis x bore) * R`, a `RecoilArm` bone there on the Gun and a `Barrel` bone at the tube's
+centre on it carrying the tube and the brake (the cradle stays on Gun). The trail bones: per trail name (`find()`), the arm's
+points, fewer than 4 skipped, its longest axis, the end nearer the body bone's head (`<=`) the HINGE, a zero-length arm
+skipped, `Trail_%02d` by the name's index (skipped names keep theirs), the tail `max(len * 0.5, 0.05)` down the arm. Measured: 17
+of the 24 recipes equal row for row through stage 3 - M114 (recoil, a cradle, two trails), the Wespe (a gun, pivot 0.36) and the
+Jagdpanzer (its static tracks rig as body parts since d1's review) new, equal on the first run -; `fx_r_turret` (two turret
+parts, a gun on the turret with a brake capping the tube's far end and recoil, a trail arm, a three-vertex trail and a trail of
+four coincident vertices, neither boned), `fx_r_cradle_only` (a cradle and no tube: the span from the cradle, recoil on but no
+split), `fx_r_vertical` (an upright tube: the arc axis from the Y fallback), `fx_r_missing_turret` / `fx_r_missing_trail` (the
+stage 3 exits) equal on the first run. `fx_r_turret`'s first tube put its offset through the node scale, so the brake sat near
+the breech, not at the far end its comment claimed - every rule still ran equal, but the fixture now has the geometry its
+comment names. The same pass found thirteen more dials Python reads among the names (`float()` of argv 29, 30, 32, 34, 35, 38,
+43, 44, 47, `int(float())` of 33, 39, 40, 45): a bad one now dies where Python reads it, in argv order with the names files and
+the reduce dials (`fx_d_trail_frames`: int(float("nan")), `fx_d_gun_pivot`: float("x")). Ten plants, one per rule, each caught on
+its job (the breech end, the brake's pin, the brake on the tube, the pivot, the gun on the turret, the recoil radius, the vertical
+bore's axis fallback, the trail hinge, the trail's four-vertex minimum, the dial death). 63 of 63 fixture jobs and 80
+of 87 jobs equal (FULL, 454,850 rows); 1,854 tests.
+
 Review of PR #176 (2026-10-15): a full run found the organ gun's newly recorded custom-normal shorts differed after
 stage one's loose split. Blender's separate operator decodes the source BMesh normals into a vector layer and
 re-encodes that layer on each copied component; copying the original shorts misses that quantization. The model now

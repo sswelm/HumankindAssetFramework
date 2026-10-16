@@ -40,6 +40,8 @@ public static partial class BlenderVehicleRig
         public string DialsDie;                     // a dial (argv[7..25]) Python cannot parse: the exception it dies of before the orientation, or null
         public string AxisArg = "";                 // argv[6].upper(): the wheels' axle override (X, Y, Z) or anything else = AUTO (the thinnest extent)
         public bool RockOn;                         // the WAVE ROCK is on: a RootHull bone under Root carries everything that would skin to Root
+        public double GunPivot = 0.5;               // min(1, max(0, float(argv[34]))) or 0.5: where along the tube (breech 0 .. muzzle 1) the Gun bone's head sits
+        public double RecoilDist;                   // min(1, max(0, float(argv[38]))) or 0: recoil on (the RecoilArm + Barrel split) when above 0
         public bool SailFold;                       // argv[71].strip() == "1": the Sail bone gets the SailF1..F3 fold chain, the canvas skins by height band
         public bool FlagFoldOn;                     // a flagfold= tag is present: the Flag bone hinges at the flag's top (else it strikes below the keel)
         public double FlagFoldDeg;                  // max(-175, min(175, float(deg))) or 0 when blank (a NaN clamps to 175)
@@ -81,6 +83,18 @@ public static partial class BlenderVehicleRig
         a.Ignore = new HashSet<string>(a.Names["ignore"], StringComparer.Ordinal);
         // the positional reduce dials, read among the names (vehicle_rig.py 871-922): min(95, max(0, float(x))) when present and
         // non-blank, else 0; float() of a non-number dies there, like a missing names file
+        // the other dials read among the names (vehicle_rig.py 802-860), in argv order: float() of 29, 30, 32, 34, 35, 38, 43, 44, 47 and
+        // int(float()) of 33, 39, 40, 45 when present and non-blank - a value Python cannot parse dies where it is read
+        foreach (var (idx, integral) in new[] { (29, false), (30, false), (32, false), (33, true), (34, false), (35, false), (38, false), (39, true), (40, true), (43, false), (44, false), (45, true), (47, false) })
+        {
+            if (!(argv.Count > idx && PyNonBlank(At(idx)))) continue;
+            string death = null;
+            if (!TryPyFloat(At(idx), out double dv)) death = "ValueError: could not convert string to float: " + PyStrRepr(At(idx));
+            else if (integral && (double.IsNaN(dv) || double.IsInfinity(dv))) death = double.IsNaN(dv) ? "ValueError: cannot convert float NaN to integer" : "OverflowError: cannot convert float infinity to integer";
+            if (death != null) { if (idx < namesFailureIndex) { namesFailureIndex = idx; a.NamesDie = death; } continue; }
+            if (idx == 34) a.GunPivot = PyMin(1.0, PyMax(0.0, dv));
+            if (idx == 38) a.RecoilDist = PyMin(1.0, PyMax(0.0, dv));
+        }
         foreach (var (role, idx) in new[] { ("rigging", 50), ("structure", 52), ("bodies", 54), ("oars", 61), ("sails", 62), ("rudders", 64), ("wheels", 65), ("flip", 67), ("preserve", 68), ("detail", 70) })
         {
             a.Reduce[role] = 0.0;
