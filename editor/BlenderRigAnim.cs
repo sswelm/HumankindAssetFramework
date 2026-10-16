@@ -2241,6 +2241,8 @@ public static class BlenderRigAnim
                 // the edges in order, the sharp_edge attribute when the mesh has one (the importer's all-false one included), the custom-normal shorts
                 d.Edges == null ? "-" : Sha(Bytes(d.Edges)), d.EdgeSharp == null ? "-" : Sha(d.EdgeSharp.Select(x => x ? (byte)1 : (byte)0).ToArray()),
                 d.CustomNormal == null ? "-" : Sha(Bytes(d.CustomNormal)),
+                // every colour layer by name (ordinal), its domain and its bytes (4 per vertex, or 4 per corner in face order)
+                d.Colors.Count == 0 ? "-" : string.Join(";", d.Colors.OrderBy(c => c.name, StringComparer.Ordinal).Select(c => c.name + ":" + (c.point ? "POINT" : "CORNER") + ":" + Sha(c.bytes))),
             });
             for (int g = 0; g < d.Groups.Count; g++)
             {

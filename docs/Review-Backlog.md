@@ -433,7 +433,8 @@ to one quad and back to two triangles, an L-shaped strip's concave hexagon throu
 `docs/Testing.md`. Review of PR #177 (2026-10-16) reproduces the cross-cell splice on a valid 4,002-triangle source:
 the model records Blender's exact TypeError (a stage 2 death) before mesh write-back, held by a unit test and the real-script
 `fx_d_chunk_splice` fixture. A second unit test pins the author's two-disk edge lookup fix; `fx_c_soup_attributes` holds
-custom normals, colours and two UV layers. Full positive comparison: 60 of 62 jobs equal (24 recipes, 38 fixtures; two FBX
+custom normals, colours and two UV layers - the colours only since the verification of that review added a colour field to
+the MESH row (no stage row had compared colours; a colour plant passed every drill until then). Full positive comparison: 60 of 62 jobs equal (24 recipes, 38 fixtures; two FBX
 left by name), 307,490 rows; 1,762 unit tests. OPEN: dedicated fixtures for the remaining rare dissolve/triangulation branches
 (double-face reuse, degenerate refusals, kill-degenerate/kill-duplicate, wire cleanup, tangential/desperate polyfill,
 concave-quad flips, triangulate doubles). Independent temporary probes matched 4,400 cases; branch coverage was not measured.

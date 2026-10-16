@@ -1838,7 +1838,16 @@ than leaving the case unmodelled. The stage comparison checks its exact exceptio
 regression and `DIES:2:fx_d_chunk_splice` hold the case. `BMeshTests` also pins the two-disk edge lookup after a topology edit
 puts duplicate edges in different disk orders (the author's concurrent follow-up supplied the lookup fix).
 `fx_c_soup_attributes` holds custom normals, vertex colours and two UV layers through the soup's joins, collapse and
-triangulation. Full positive comparison: all 24 saved recipes and 38 fixture jobs, 60 of 62 equal after both stages,
+triangulation. The colours part was not true when the review wrote it: the stage rows' MESH row carried no colour layer at
+all, so a plant that stopped the vertex collapse copying corner colours passed every drill (found verifying the review by
+plant, 2026-10-16; the weld tiers of part 1 had moved colours unseen too). The MESH row now ends in a colour field, shared
+by both dumps (`tools/riganim-drill/scene_rows.py`) and the C# render: every colour attribute in code-point order of its
+name, its domain and the SHA-256 of its bytes (a BYTE_COLOR read back exactly as round(color_srgb * 255), the decimate
+drill's reading; any other type hashed as floats under its type's name, so it cannot match a model holding bytes). Every
+stage stayed equal with colours compared (rig_anim 134 of 145 through four stages, vehicle_rig 60 of 62), the same colour
+plant now FAILs on `fx_c_soup_attributes` alone, and a format tamper is refused by both drills. The stage 2 value tamper
+(`S2_MESH_colours`) is written only when the job the tamper copies come from has a colour layer, and today's (the first
+all-stage glTF job) has none, so it does not run; the plant above is the evidence that a changed colour is caught. Full positive comparison: all 24 saved recipes and 38 fixture jobs, 60 of 62 equal after both stages,
 307,490 rows, the two FBX sources left by name; 1,762 unit tests pass. Independent temporary Blender probes also matched
 4,400 polygon/grid/soup cases in vertex and edge order, face winding, material/smooth flags and UVs, including degenerate,
 non-manifold and inconsistently wound meshes. These probes are review evidence; the committed regressions run in the gate.
