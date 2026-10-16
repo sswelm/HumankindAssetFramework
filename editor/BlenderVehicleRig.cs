@@ -89,9 +89,9 @@ public static partial class BlenderVehicleRig
             a.Reduce[role] = PyClamp95(v);
         }
         a.TracksStatic = argv.Count > 16 && At(16).Trim() == "1";
-        // the reduce tags in the script's order - defaultreduce, shroudreduce, gunreduce, windowreduce -, the names before the LAST
+        // the reduce tags in the script's order - defaultreduce, shroudreduce, gunreduce, turretreduce, windowreduce -, the names before the LAST
         // '|', the percent after it; the first malformed one is the script's VEHICLE ERROR after the merge (its exit)
-        foreach (var tag in new[] { "defaultreduce", "shroudreduce", "gunreduce", "windowreduce" })
+        foreach (var tag in new[] { "defaultreduce", "shroudreduce", "gunreduce", "turretreduce", "windowreduce" })
         {
             string role = tag == "shroudreduce" ? "shroud" : tag == "windowreduce" ? "window" : tag == "defaultreduce" ? "default" : null;
             if (role != null) a.Names[role] = new List<string>();
@@ -101,11 +101,11 @@ public static partial class BlenderVehicleRig
             string namesText = bar >= 0 ? spec.Substring(0, bar) : null, err = null;
             try
             {
-                if (tag == "gunreduce")
+                if (tag == "gunreduce" || tag == "turretreduce")   // percent-only: the parts travel positionally (argv[11], argv[5])
                 {
                     double pct = VehicleProbe.Input.PyFloat(spec);
                     if (double.IsNaN(pct) || double.IsInfinity(pct)) err = "not a finite percent: " + VehicleProbe.Input.PyRepr(arg);
-                    else a.Reduce["guns"] = PyClamp95(pct);
+                    else a.Reduce[tag == "gunreduce" ? "guns" : "turrets"] = PyClamp95(pct);
                 }
                 else if (tag == "windowreduce")
                 {
@@ -130,7 +130,7 @@ public static partial class BlenderVehicleRig
             catch (FormatException e) { err = e.Message; }
             catch (System.IO.IOException) { err = PyFileNotFound(namesText.Trim().Substring(1)); }
             if (err != null && a.TagError == null)
-                a.TagError = tag == "gunreduce" || tag == "windowreduce" ? "VEHICLE ERROR: malformed " + tag + " argument: " + err
+                a.TagError = tag == "gunreduce" || tag == "turretreduce" || tag == "windowreduce" ? "VEHICLE ERROR: malformed " + tag + " argument: " + err
                            : "VEHICLE ERROR: malformed " + tag + " argument: " + arg + " (" + err + ")";
         }
         // _role_marked: every role list but ignore (the tagged shroud/window lists too); static tracks are emptied before it is built

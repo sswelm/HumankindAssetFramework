@@ -22,7 +22,7 @@ public static partial class BlenderVehicleRig
     static readonly (string label, string role)[] Tiers =
     {
         ("DEFAULT", "default"), ("RIGGING", "rigging"), ("SHROUD", "shroud"), ("STRUCTURE", "structure"), ("BODY", "bodies"), ("OAR", "oars"), ("SAIL", "sails"),
-        ("RUDDER", "rudders"), ("WHEEL", "wheels"), ("GUN", "guns"), ("WINDOW", "window"), ("FLIP", "flip"), ("PRESERVE", "preserve"), ("DETAIL", "detail"),
+        ("RUDDER", "rudders"), ("WHEEL", "wheels"), ("TURRET", "turrets"), ("GUN", "guns"), ("WINDOW", "window"), ("FLIP", "flip"), ("PRESERVE", "preserve"), ("DETAIL", "detail"),
     };
 
     /// <summary>Stage 2 on the scene stage 1 left: the reduction tiers. Lines go to s.Logs2; a branch not modelled sets s.Fallback.</summary>
