@@ -305,12 +305,19 @@ public sealed class BMesh
         DiskVertReplace(e, vDst, vSrc);
     }
 
-    /// <summary>bmesh_disk_edge_exists / BM_edge_exists: an edge joining v1 and v2, walking v1's cycle, or None.</summary>
+    /// <summary>BM_edge_exists (bmesh_query.cc, the active branch): an edge joining v1 and v2, or None - BOTH disk cycles walked a step at
+    /// a time from their heads, v1's edge tested first, the first hit returned; the walk stops when either cycle wraps. With one edge
+    /// between the two the walk order cannot matter; with a double edge it picks the one Blender picks.</summary>
     public int EdgeExists(int v1, int v2)
     {
-        if (VE[v1] == None) return None;
-        int eFirst = VE[v1], eIter = eFirst;
-        do { if (EV1[eIter] == v2 || EV2[eIter] == v2) return eIter; } while ((eIter = DiskEdgeNext(eIter, v1)) != eFirst);
+        int ea = VE[v1], eb = VE[v2];
+        if (ea == None || eb == None) return None;
+        int eaIter = ea, ebIter = eb;
+        do
+        {
+            if (EV1[eaIter] == v2 || EV2[eaIter] == v2) return eaIter;
+            if (EV1[ebIter] == v1 || EV2[ebIter] == v1) return ebIter;
+        } while ((eaIter = DiskEdgeNext(eaIter, v1)) != ea && (ebIter = DiskEdgeNext(ebIter, v2)) != eb);
         return None;
     }
 
