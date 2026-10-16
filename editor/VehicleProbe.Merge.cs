@@ -22,6 +22,7 @@
 //   * the arguments as the script parses them: `float()` of the Lab's formatted text, a non-positive scale component made 1
 //     with a warning, a malformed placement line ignored with a warning.
 using System;
+using BigInteger = System.Numerics.BigInteger;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -164,12 +165,99 @@ public static partial class VehicleProbe
             bool neg = s.Length > 0 && s[0] == '-';
             string low = body.ToLowerInvariant();
             if (low == "inf" || low == "infinity") return neg ? double.NegativeInfinity : double.PositiveInfinity;
-            if (low == "nan") return double.NaN;
+            if (low == "nan") { double nan = BitConverter.Int64BitsToDouble(0x7ff8000000000000L); return neg ? -nan : nan; }
             const string D = "[0-9](?:_?[0-9])*";
             if (!System.Text.RegularExpressions.Regex.IsMatch(body, "^(?:" + D + "(?:\\.(?:" + D + ")?)?|\\." + D + ")(?:[eE][+-]?" + D + ")?$"))
                 throw new FormatException($"could not convert string to float: {PyRepr(t)}");
-            double v = double.Parse(body.Replace("_", ""), NumberStyles.Float, CultureInfo.InvariantCulture);
+            double v = PyDecimal(body.Replace("_", ""));
             return neg ? -v : v;
+        }
+
+        // Correctly rounded decimal -> binary64. Framework/Mono's parser can round a decimal differently from CPython,
+        // and raises on overflow where float() returns infinity. Keep the exact rational until one ties-to-even rounding.
+        static double PyDecimal(string text)
+        {
+            int ei = text.IndexOfAny(new[] { 'e', 'E' });
+            string mantissa = ei < 0 ? text : text.Substring(0, ei);
+            int dot = mantissa.IndexOf('.');
+            int fractional = dot < 0 ? 0 : mantissa.Length - dot - 1;
+            string digits = mantissa.Replace(".", "").TrimStart('0');
+            if (digits.Length == 0) return 0.0;
+            long exponent = 0;
+            if (ei >= 0)
+            {
+                int i = ei + 1; bool negative = text[i] == '-';
+                if (text[i] == '+' || text[i] == '-') i++;
+                // A longer exponent cannot cancel the mantissa's digit count. Saturate it without parsing an unbounded int.
+                long cap = text.Length + 400L;
+                for (; i < text.Length; i++) exponent = Math.Min(cap, exponent * 10 + text[i] - '0');
+                if (negative) exponent = -exponent;
+            }
+            exponent -= fractional;
+            int end = digits.Length;
+            while (digits[end - 1] == '0') end--;
+            exponent += digits.Length - end; digits = digits.Substring(0, end);
+            long magnitude = exponent + digits.Length - 1;
+            if (magnitude > 308) return double.PositiveInfinity;
+            if (magnitude < -324) return 0.0;
+            BigInteger n = BigInteger.Parse(digits, CultureInfo.InvariantCulture), d = BigInteger.One;
+            if (exponent >= 0) n *= BigInteger.Pow(10, (int)exponent);
+            else d = BigInteger.Pow(10, (int)-exponent);
+            int e = BitLength(n) - BitLength(d);
+            if (e >= 0 ? n < (d << e) : (n << -e) < d) e--;
+            if (e > 1023) return double.PositiveInfinity;
+            long bits;
+            if (e < -1022) bits = (long)RoundRatio(n << 1074, d); // subnormal, including rounding into the smallest normal
+            else
+            {
+                int shift = 52 - e;
+                BigInteger q = shift >= 0 ? RoundRatio(n << shift, d) : RoundRatio(n, d << -shift);
+                if (q == (BigInteger.One << 53)) { q >>= 1; e++; }
+                if (e > 1023) return double.PositiveInfinity;
+                bits = ((long)(e + 1023) << 52) | ((long)q - (1L << 52));
+            }
+            return BitConverter.Int64BitsToDouble(bits);
+        }
+
+        static int BitLength(BigInteger value)
+        {
+            byte[] bytes = value.ToByteArray(); int n = bytes.Length;
+            while (n > 1 && bytes[n - 1] == 0) n--;
+            int bits = (n - 1) * 8; for (int b = bytes[n - 1]; b != 0; b >>= 1) bits++;
+            return bits;
+        }
+
+        static BigInteger RoundRatio(BigInteger n, BigInteger d)
+        {
+            BigInteger q = BigInteger.DivRem(n, d, out BigInteger rem);
+            int cmp = (rem << 1).CompareTo(d);
+            return cmp > 0 || (cmp == 0 && !q.IsEven) ? q + 1 : q;
+        }
+
+        // Unicode 15.1 decimal-zero codepoints, measured in Blender 5.1.2's Python 3.13.9. Each starts ten Nd digits.
+        // The host Framework/Mono Unicode tables omit newer blocks such as Adlam, Tangsa and Kawi.
+        static readonly int[] PyDecimalZeroes =
+        {
+            0x30, 0x660, 0x6f0, 0x7c0, 0x966, 0x9e6, 0xa66, 0xae6, 0xb66, 0xbe6,
+            0xc66, 0xce6, 0xd66, 0xde6, 0xe50, 0xed0, 0xf20, 0x1040, 0x1090, 0x17e0,
+            0x1810, 0x1946, 0x19d0, 0x1a80, 0x1a90, 0x1b50, 0x1bb0, 0x1c40, 0x1c50, 0xa620,
+            0xa8d0, 0xa900, 0xa9d0, 0xa9f0, 0xaa50, 0xabf0, 0xff10, 0x104a0, 0x10d30, 0x11066,
+            0x110f0, 0x11136, 0x111d0, 0x112f0, 0x11450, 0x114d0, 0x11650, 0x116c0, 0x11730, 0x118e0,
+            0x11950, 0x11c50, 0x11d50, 0x11da0, 0x11f50, 0x16a60, 0x16ac0, 0x16b50, 0x1d7ce, 0x1d7d8,
+            0x1d7e2, 0x1d7ec, 0x1d7f6, 0x1e140, 0x1e2f0, 0x1e4f0, 0x1e950, 0x1fbf0,
+        };
+
+        static int PyDecimalDigit(int cp)
+        {
+            int lo = 0, hi = PyDecimalZeroes.Length - 1;
+            while (lo <= hi)
+            {
+                int mid = lo + (hi - lo) / 2, digit = cp - PyDecimalZeroes[mid];
+                if (digit < 0) hi = mid - 1;
+                else if (digit > 9) lo = mid + 1;
+                else return digit;
+            }
+            return -1;
         }
 
         /// <summary>The text float() and int() parse: each non-ASCII Unicode space to ' ', each Unicode decimal digit to its ASCII digit
@@ -181,7 +269,9 @@ public static partial class VehicleProbe
             {
                 char c = t[i];
                 if (c < 128) { b.Append(c); continue; }
-                int dv = CharUnicodeInfo.GetDecimalDigitValue(t, i);
+                int cp = c;
+                if (char.IsHighSurrogate(c) && i + 1 < t.Length && char.IsLowSurrogate(t[i + 1])) cp = char.ConvertToUtf32(c, t[i + 1]);
+                int dv = PyDecimalDigit(cp);
                 if (dv >= 0) { b.Append((char)('0' + dv)); if (char.IsHighSurrogate(c) && i + 1 < t.Length && char.IsLowSurrogate(t[i + 1])) i++; continue; }
                 if (PyIsSpace(c)) { b.Append(' '); continue; }
                 return null;

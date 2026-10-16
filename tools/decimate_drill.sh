@@ -29,7 +29,7 @@ TMPD="$(mktemp -d)"; trap 'rm -rf "$TMPD"' EXIT
 cp "$NEWTONSOFT" "$TMPD/Newtonsoft.Json.dll"
 WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"; WTMP="$(cygpath -m "$TMPD" 2>/dev/null || echo "$TMPD")"
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -out:"$WTMP/edges.exe" \
-  -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
+  -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WAPI/System.Numerics.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
   "$WROOT/tools/decimate-drill/EdgesDrill.cs" "$WROOT/tools/decimate-drill/BMeshDrill.cs" "$WROOT/tools/decimate-drill/DecimateDrill.cs" \
   "$WROOT/editor/HafModel.cs" "$WROOT/editor/GlbReader.cs" "$WROOT/editor/HafTransforms.cs" "$WROOT/editor/BlenderNames.cs" "$WROOT/editor/BlenderMesh.cs" "$WROOT/editor/BMesh.cs" \
   "$WROOT/editor/BlenderColor.cs" "$WROOT/editor/BlenderDecimate.cs" "$WROOT/editor/BlenderReduce.cs" "$WROOT/editor/VehicleProbe.cs" "$WROOT/editor/VehicleProbe.Visibility.cs" "$WROOT/editor/VehicleProbe.Islands.cs" \

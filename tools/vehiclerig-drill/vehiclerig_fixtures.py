@@ -5,7 +5,7 @@ recipes into jobs exactly as it turns the saved ones, so a fixture runs the scri
     python vehiclerig_fixtures.py <out dir>          -> writes the models and recipes; prints one line per recipe: FIXTURE <key>
     python vehiclerig_fixtures.py --exits <jobs>     -> the jobs of <out>/recipes_exit post-edited into what the Lab's builder never
                                                         writes (a malformed tagged token, a dial Python cannot parse), their keys
-                                                        EXIT:1:<key> / DIES:1:<key>; printed as JOB lines for the drill's jobs file
+                                                        EXIT:1:<key> / DIES:1:<key> for stops, unchanged for valid argument variants
 
 Stage 1 (step (b)):
   fx_b_ignore        two boxes under a turned root; one Ignored (deleted), one Body
@@ -51,12 +51,17 @@ Stage 3 (step (d), part d2: the sail, rigging on the sail, the flag):
                      wheel, a jib also a rudder, a burgee sail and flag, an animated sail part, rigging on the sail, a halyard rigging
                      and flag, missing sail and rigging names, a struck flag on the 0.3 floor, a wheel
   fx_r_flagfold      the flag hinged at its top (flagfold=-30|8), a missing flag name, rigging with no sail (stays on the body)
+  fx_r_flat_sail     a zero-height sail taking the 1e-6 fold-height clamp, all rigging missing, flagfold=| taking its defaults
+Argument variants (recipes_exit, post-edited by --exits): fx_r_numeric_pct (the decimal above 0.5 whose rounding decides whether
+  to weld); fx_d_sailfold_overflow (1e309 becomes infinity before int() raises); fx_d_unicode_fold (a Kawi digit accepted before
+  the next dial raises ValueError)
 Exits and deaths (recipes_exit, keys renamed by --exits): fx_x_allignored (every part Ignored: the _guard crash), fx_x_bright (bright=1.5|x),
   fx_x_flagfold (flagfold=a|b), fx_x_defaultreduce (no '|'), fx_x_shroudreduce (a percent float() refuses), fx_x_gunreduce (likewise),
   fx_x_windowreduce (no '|'), fx_x_merge_missing (a second model path that is not there); fx_d_frames (argv[7] "15.0": int() dies),
   fx_d_merge_offset (merge2 offset "a,0,0": float() dies), fx_d_names (a wheels file that is not there: namelist() dies)
 """
 import json, math, os, sys
+sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "riganim-drill"))
 from riganim_fixtures import Rig, rigged   # noqa: E402
 
@@ -367,7 +372,7 @@ def main(out):
     r.node("Hull", mesh=r.mesh("Hull", at=(-1.0, -1.0, 0.0), size=2.0, material=ma)); r.node("Tire", mesh=r.mesh("Tire", at=(-0.5, 2.0, -0.5), material=ma)); r.roots.clear()
     recipe(out, "fx_r_noscene", r.write(models, "fx_r_noscene"), [("Hull", 0, {}), ("Tire", 1, {})], sub="recipes_exit")
     # the sail-fold and oar dials Python reads unconditionally (argv 72, 73, 75, 56-59): a bad one kills the script before the dials
-    for key in ("fx_d_sailfold_frames", "fx_d_sailfold_inf", "fx_d_oar_lift"):
+    for key in ("fx_d_sailfold_frames", "fx_d_sailfold_inf", "fx_d_oar_lift", "fx_d_sailfold_overflow", "fx_d_unicode_fold"):
         r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
         r.node("Hull", mesh=r.mesh("Hull", material=ma)); r.node("Tire", mesh=r.mesh("Tire", at=(3.0, 0.0, 0.0), material=ma))
         recipe(out, key, r.write(models, key), [("Hull", 0, {}), ("Tire", 1, {})], sub="recipes_exit")
@@ -406,6 +411,21 @@ def main(out):
     r.node("Rope", mesh=r.mesh("Rope", at=(1.5, 0.0, 1.0), size=0.2, material=ma))
     recipe(out, "fx_r_flagfold", r.write(models, "fx_r_flagfold"), [("Hull", 0, {}), ("Tripod", 17, {}), ("GhostFlag", 17, {}), ("Rope", 15, {})],
            flagFoldOn=True, flagFoldDeg=-30.0, flagFoldFrames=8)
+    # A decimal just above the halfway rounding boundary above 0.5: Python keeps it > 0.5, so the weld runs (24 -> 8
+    # vertices), while Framework's double.Parse rounded it to 0.5 and skipped the entire tier.
+    r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
+    r.node("Hull", mesh=box_split(r, "Hull", (ma, ma))); r.node("Other", mesh=r.mesh("Other", at=(3.0, 0.0, 0.0), material=ma))
+    recipe(out, "fx_r_numeric_pct", r.write(models, "fx_r_numeric_pct"), [("Hull", 0, {}), ("Other", 16, {})], sub="recipes_exit")
+    # A sail with exactly zero world height (glTF XZ -> Blender XY): the 1e-6 fold-height clamp; every rigging name
+    # missing; an enabled flagfold whose blank fields take the script's defaults. These are valid argument variants.
+    r = Rig(); ma = r.material("Cloth", (0.8, 0.2, 0.2))
+    r.node("Hull", mesh=r.mesh("Hull", material=ma))
+    p = r.b.accessor([(-1, 0, 0), (1, 0, 0), (1, 0, 1), (-1, 0, 1)], "f", "VEC3")
+    idx = r.b.accessor([0, 1, 2, 0, 2, 3], "H", "SCALAR", minmax=False)
+    mesh = len(r.meshes); r.meshes.append({"name": "Sheet", "primitives": [{"attributes": {"POSITION": p}, "indices": idx, "material": ma}]})
+    r.node("Sheet", mesh=mesh); r.node("Flag", mesh=r.mesh("Flag", at=(3.0, 0.0, 0.0), material=ma))
+    recipe(out, "fx_r_flat_sail", r.write(models, "fx_r_flat_sail"), [("Hull", 0, {}), ("Sheet", 14, {}), ("GhostRope", 15, {}), ("Flag", 17, {})],
+           sailFoldIdle=True, flagFoldOn=True, sub="recipes_exit")
     # brightness on three material chains
     r = Rig(); img = r.image("Albedo", rgb=(120, 80, 40)); tex = r.texture(img)
     flat = r.material("Flat", (0.6, 0.4, 0.2)); direct = r.material("Direct", (1.0, 1.0, 1.0), texture=tex); tint = r.material("Tint", (0.5, 0.25, 0.9), texture=tex)
@@ -422,6 +442,11 @@ def set_tag(argv, tag, value):
 
 
 EXITS = {
+    # None leaves the job positive: only its argument text is changed after the Lab's builder runs.
+    "fx_r_numeric_pct": (None, lambda a: a.__setitem__(54, "0.500000000000000055511151231257827021181583404541015625000000000000000000001")),
+    "fx_r_flat_sail": (None, lambda a: set_tag(a, "flagfold", "|")),
+    "fx_d_sailfold_overflow": ("DIES", lambda a: a.__setitem__(72, "1e309")),
+    "fx_d_unicode_fold": ("DIES", lambda a: (a.__setitem__(72, "\U00011f51"), a.__setitem__(73, "later"))),
     "fx_d_chunk_splice": ("DIES", lambda a: None),
     "fx_r_missing_wheel": ("EXIT", lambda a: None),
     "fx_r_orphan": ("EXIT", lambda a: None),
@@ -462,7 +487,7 @@ def exits(jobs_path):
             raise SystemExit("an exit recipe %s has no edit in EXITS" % key)
         kind, edit = EXITS[key]; edit(argv); n += 1
         stage = STAGE_OF.get(key, 1)
-        print("\t".join(["JOB", "%s:%d:%s" % (kind, stage, key)] + argv))
+        print("\t".join(["JOB", key if kind is None else "%s:%d:%s" % (kind, stage, key)] + argv))
     if n != len(EXITS):
         raise SystemExit("expected %d exit jobs, got %d" % (len(EXITS), n))
 

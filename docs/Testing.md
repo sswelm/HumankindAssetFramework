@@ -1976,6 +1976,22 @@ animated sail part; `fx_r_flagfold`'s flag stands 3 tall (rise 0.75). Plants: th
 dials' death and the sail rise pinned to its floor (the drill). After: 66 of 76 jobs equal through stage 3 (457,837 rows);
 1,838 tests.
 
+Critical review of PR #179 (2026-10-16): the shared float parser still used Framework's decimal conversion and Unicode
+tables. Against Blender 5.1.2's Python 3.13.9, 3,080 independent decimal/special/Unicode cases found 485 differences:
+414 overflow exceptions, 13 rejected digit blocks, and 58 different bit patterns (including signed NaNs). The parser now
+rounds an exact decimal rational once to binary64, ties to even, returns infinity on overflow, preserves signed zero and
+NaN, and uses Python's Unicode 15.1 decimal blocks. Standalone probe/prep/decimate compilers reference System.Numerics.
+Permanent tests pin 1,200 generated decimal results and the numeric character transform for all 0x110000 codepoints to
+native Python SHA256 checksums. `fx_r_numeric_pct` proves the geometry consequence: a decimal just above the rounding
+boundary above 0.5 must run the BODY weld (24 vertices to 8); Framework rounded it to 0.5 and skipped the tier.
+`fx_d_sailfold_overflow` proves 1e309 becomes infinity before int() raises the script's OverflowError, and
+`fx_d_unicode_fold` accepts a Kawi digit before the next dial raises ValueError. All three fail against the original PR.
+`fx_r_flat_sail` also covers the zero-height sail's 1e-6 clamp, an entirely missing rigging list, and flagfold=| defaults.
+Argument variants can remain positive after the fixture editor runs; its Unicode output is explicitly UTF-8.
+The corrected parser matches all 3,080 independent cases; 1,854 unit tests pass. The FULL native run with key rows
+compares 70 of 80 jobs through stage 3 (454,499 rows): all 56 fixtures and 14 saved recipes equal, eight recipes left
+by name for later stage-three branches and two for the FBX importer.
+
 Review of PR #176 (2026-10-15): a full run found the organ gun's newly recorded custom-normal shorts differed after
 stage one's loose split. Blender's separate operator decodes the source BMesh normals into a vector layer and
 re-encodes that layer on each copied component; copying the original shorts misses that quantization. The model now
