@@ -83,7 +83,7 @@ write("OBJ_bits", replace(i_obj, "\t".join(lines[i_obj].split("\t")[:-1] + ["zz0
 write("OBJ_duplicate", insert(i_obj, lines[i_obj]))
 i_mesh = first(lambda l: l.startswith("MESH\t1\t")); write("MESH_missing", drop(i_mesh))
 for name, field, value in (("MESH_edges_hash", 15, "not-a-hash"), ("MESH_sharp_hash", 16, "not-a-hash"),
-                           ("MESH_normals_hash", 17, "not-a-hash"), ("MESH_edges_absent", 15, "-")):
+                           ("MESH_normals_hash", 17, "not-a-hash"), ("MESH_edges_absent", 15, "-"), ("MESH_colours_hash", 18, "Color:CORNER:not-a-hash")):
     fields = lines[i_mesh].split("\t"); fields[field] = value; write(name, replace(i_mesh, "\t".join(fields)))
 write("MESH_hash", replace(i_mesh, "\t".join(f if j != 6 else "0" * 63 for j, f in enumerate(lines[i_mesh].split("\t")))))
 write("MESH_orphan", replace(i_mesh, "\t".join(f if j != 2 else "no-such-object" for j, f in enumerate(lines[i_mesh].split("\t")))))

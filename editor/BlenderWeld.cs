@@ -40,6 +40,15 @@ public static class BlenderWeld
             if (CustomNormal != null && 2 * slot + 1 >= CustomNormal.Length) Array.Resize(ref CustomNormal, Math.Max(2 * slot + 2, CustomNormal.Length * 2));
         }
 
+        /// <summary>CustomData_bmesh_interp on a corner with weights {0, 1}: the layers that interpolate (UVs, byte colours) take the
+        /// second source's values exactly (0 a + 1 b); the custom-normal shorts have no interpolation and stay.</summary>
+        public void InterpLoopAtOne(int dst, int src)
+        {
+            EnsureLoop(dst);
+            foreach (var u in Uv) { u[2 * dst] = u[2 * src]; u[2 * dst + 1] = u[2 * src + 1]; }
+            foreach (var c in CornerColor) for (int k = 0; k < 4; k++) c[4 * dst + k] = c[4 * src + k];
+        }
+
         public void CopyLoop(int src, int dst)
         {
             EnsureLoop(dst);

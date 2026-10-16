@@ -101,7 +101,7 @@ write("OBJ_bits", replace(i_obj, "\t".join(lines[i_obj].split("\t")[:-1] + ["zz0
 write("OBJ_duplicate", insert(i_obj, lines[i_obj]))
 i_mesh = first(lambda l: l.startswith("MESH\t1\t")); write("MESH_missing", drop(i_mesh))
 for name, field, value in (("MESH_edges_hash", 15, "not-a-hash"), ("MESH_sharp_hash", 16, "not-a-hash"),
-                           ("MESH_normals_hash", 17, "not-a-hash"), ("MESH_edges_absent", 15, "-")):
+                           ("MESH_normals_hash", 17, "not-a-hash"), ("MESH_edges_absent", 15, "-"), ("MESH_colours_hash", 18, "Color:CORNER:not-a-hash")):
     fields = lines[i_mesh].split("\t"); fields[field] = value; write(name, replace(i_mesh, "\t".join(fields)))
 write("MESH_hash", replace(i_mesh, "\t".join(f if j != 6 else "0" * 63 for j, f in enumerate(lines[i_mesh].split("\t")))))
 write("MESH_orphan", replace(i_mesh, "\t".join(f if j != 2 else "no-such-object" for j, f in enumerate(lines[i_mesh].split("\t")))))
@@ -199,6 +199,11 @@ i_sharp = next((i for i, l in enumerate(lines) if l.startswith("MESH\t2\t") and 
 if i_sharp >= 0: write("S2_MESH_sharp", with_field(i_sharp, 16, flip_bits(lines[i_sharp].split("\t")[16])))
 i_cn = next((i for i, l in enumerate(lines) if l.startswith("MESH\t2\t") and l.split("\t")[17] != "-"), -1)
 if i_cn >= 0: write("S2_MESH_normals", with_field(i_cn, 17, flip_bits(lines[i_cn].split("\t")[17])))
+# the colour layers of the first stage 2 mesh that has them, the hash's last digit changed - only when the copied job has one
+# (the job picked above has none today: the colour compare is held by the fixtures, fx_c_soup_attributes)
+i_col = next((i for i, l in enumerate(lines) if l.startswith("MESH\t2\t") and l.split("\t")[18] != "-"), -1)
+if i_col >= 0:
+    v = lines[i_col].split("\t")[18]; write("S2_MESH_colours", with_field(i_col, 18, v[:-1] + ("0" if v[-1] != "0" else "1")))
 for name in sorted(os.listdir(out)):
     if name.endswith(".txt") and name not in ("intact.txt", "jobs.txt", "jobs_exit.txt", "jobs_fast.txt"):
         print(name[:-4])

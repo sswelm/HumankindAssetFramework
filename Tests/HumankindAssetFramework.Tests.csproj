@@ -33,6 +33,8 @@
     <Compile Include="..\editor\BlenderVehicleRig.cs" Link="BlenderVehicleRig.cs" />
     <Compile Include="..\editor\BlenderVehicleRig.Stage2.cs" Link="BlenderVehicleRig.Stage2.cs" />
     <Compile Include="..\editor\BlenderWeld.cs" Link="BlenderWeld.cs" />
+    <Compile Include="..\editor\BlenderDissolve.cs" Link="BlenderDissolve.cs" />
+    <Compile Include="..\editor\BlenderPolyfill.cs" Link="BlenderPolyfill.cs" />
     <Compile Include="../tools/vehiclerig-drill/VehicleRigDrill.cs" Link="VehicleRigDrill.cs" />
     <Compile Include="..\editor\GitStamp.cs" Link="GitStamp.cs" />
     <!-- The multi-mesh split's estimator + BSP partition (2026-09-14): the quad ceiling that the Bremen depends on. -->

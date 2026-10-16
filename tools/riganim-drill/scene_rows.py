@@ -81,13 +81,24 @@ def dump(n):
             cn = me.attributes.get("custom_normal")
             if cn is not None and cn.domain == 'CORNER' and cn.data_type == 'INT16_2D':
                 ca = np.empty(len(me.loops) * 2, dtype=np.int32); cn.data.foreach_get("value", ca); cns = sha(ca.astype("<i2").tobytes())
-            rows.append("MESH\t%d\t%s\t%d\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s" % (
+            # every colour attribute by name (code-point order), its domain and its bytes: a BYTE_COLOR's stored bytes come back exactly
+            # as round(color_srgb * 255) (the decimate drill's reading); any other type is hashed as floats under its type's name, so a
+            # model holding bytes differs from it
+            cols = []
+            for a in sorted(me.color_attributes, key=lambda a: a.name):
+                if a.data_type == 'BYTE_COLOR':
+                    ca = np.empty(len(a.data) * 4, dtype=np.float32); a.data.foreach_get("color_srgb", ca)
+                    cols.append("%s:%s:%s" % (a.name, a.domain, sha(np.round(ca.astype(np.float64) * 255.0).astype(np.uint8).tobytes())))
+                else:
+                    ca = np.empty(len(a.data) * 4, dtype=np.float32); a.data.foreach_get("color", ca)
+                    cols.append("%s:%s/%s:%s" % (a.name, a.data_type, a.domain, sha(ca.tobytes())))
+            rows.append("MESH\t%d\t%s\t%d\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s" % (
                 n, o.name, len(me.vertices), len(me.polygons), len(me.loops), sha(pos.tobytes()), sha(lv.astype("<i4").tobytes()),
                 sha(ps.astype("<i4").tobytes() + pt.astype("<i4").tobytes()), sha(mi.astype("<i4").tobytes()), uv,
                 ";".join(m.name if m else "(none)" for m in me.materials) or "-",
                 ";".join(g.name for g in o.vertex_groups) or "-",
                 ";".join("%s:%s:%s" % (md.type, md.name, getattr(md, "object", None).name if getattr(md, "object", None) else "-") for md in o.modifiers) or "-",
-                ";".join(layers) or "-", sha(ev.astype("<i4").tobytes()), sharp, cns))
+                ";".join(layers) or "-", sha(ev.astype("<i4").tobytes()), sharp, cns, ";".join(cols) or "-"))
             if len(o.vertex_groups):
                 per = {g.index: [] for g in o.vertex_groups}
                 for v in me.vertices:

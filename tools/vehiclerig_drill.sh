@@ -46,7 +46,7 @@ if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/VehicleRigJobs.exe" ]; then echo "$OUT" | gr
 # the drill with the stage models (editor/BlenderVehicleRig.cs) and the editor files they are built from - the rig_anim drill's list
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -optimize+ -out:"$WTMP/vehiclerig.exe" \
   -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WAPI/System.Numerics.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
-  "$WROOT/tools/vehiclerig-drill/VehicleRigDrill.cs" "$E/BlenderVehicleRig.cs" "$E/BlenderVehicleRig.Stage2.cs" "$E/BlenderWeld.cs" "$E/VehicleRigArgs.cs" "$E/EditorRules.cs" \
+  "$WROOT/tools/vehiclerig-drill/VehicleRigDrill.cs" "$E/BlenderVehicleRig.cs" "$E/BlenderVehicleRig.Stage2.cs" "$E/BlenderWeld.cs" "$E/BlenderDissolve.cs" "$E/BlenderPolyfill.cs" "$E/VehicleRigArgs.cs" "$E/EditorRules.cs" \
   "$E/BlenderRigAnim.cs" "$E/BlenderRigExport.cs" "$E/BlenderRigAnimInProcess.cs" "$E/BlenderDeploy.cs" "$E/BlenderDeployExport.cs" "$E/BlenderMaterialExport.cs" "$E/BlenderChannelExport.cs" "$E/BlenderGlbWriter.cs" "$E/PyFloatRepr.cs" "$E/BlenderFCurve.cs" \
   "$E/BlenderExport.cs" "$E/BlenderReduce.cs" "$E/BlenderDecimate.cs" "$E/BlenderExportTree.cs" \
   "$E/HafModel.cs" "$E/GlbReader.cs" "$E/HafTransforms.cs" "$E/BlenderNames.cs" "$E/BlenderPosedState.cs" "$E/BlenderTrig.cs" "$E/BlenderEigen.cs" "$E/BlenderMesh.cs" "$E/BMesh.cs" "$E/BlenderColor.cs" \
@@ -124,8 +124,7 @@ n_exit=$(grep -cE "^JOB	(EXIT|DIES):" "$TMPD/jobs.txt")
 [ "$n_full" -eq $((n_jobs - n_fast - n_exit)) ] && [ "$n_fastrun" -eq "$n_fast" ] && [ "$n_stop" -eq "$n_exit" ] || { echo "FAIL — vehicle_rig drill: not every recipe completed (full $n_full of $((n_jobs - n_fast - n_exit)), fast $n_fastrun of $n_fast, stopped $n_stop of $n_exit)"; exit 1; }
 # STEPS (b) and (c), STAGES 1 and 2: the C# model of the first two stages (editor/BlenderVehicleRig.cs, .Stage2.cs) against every
 # job's rows of those stages, as strings - the dump's own float32 bits and hashes. Every dumped job must be equal row for row,
-# or left by name (a source the C# does not read: .fbx/.obj/.blend, the source-skeleton fast path; the dissolve pass of the
-# RIGGING and SHROUD tiers until it is ported); any other decline is a FAIL.
+# or left by name (a source the C# does not read: .fbx/.obj/.blend, the source-skeleton fast path); any other decline is a FAIL.
 "$TMPD/vehiclerig.exe" --stages 2 "${KEY_MODE[@]}" "$WTMP/jobs.txt" "${DUMPS[@]}" > "$TMPD/s1_raw.txt" 2>&1; s1rc=$?
 t3=$(date +%s)
 tr -d '\r' < "$TMPD/s1_raw.txt" > "$TMPD/s1.txt"
@@ -135,7 +134,6 @@ S1=$(grep -E "^STAGES 2 jobs" "$TMPD/s1.txt" | tail -1); echo "$S1"
 [ "$s1rc" -eq 0 ] || { echo "FAIL — vehicle_rig drill: a stage model differs from Blender, or leaves a dumped job to it"; exit 1; }
 n_s1=$(echo "$S1" | awk '{print $4}'); n_s1eq=$(echo "$S1" | awk '{print $6}'); n_s1left=$(echo "$S1" | awk '{print $8}'); n_s1rows=$(echo "$S1" | awk '{print $10}')
 [ "$n_s1" -eq "$n_jobs" ] && [ $((n_s1eq + n_s1left)) -eq "$n_jobs" ] || { echo "FAIL — vehicle_rig drill: the stage models compared $n_s1 of $n_jobs jobs ($n_s1eq equal, $n_s1left left)"; exit 1; }
-n_s2left=$(grep -c "^STAGE2 .*left to Blender by name" "$TMPD/s1.txt")
 # Negative guards on the REAL dump: a missing or inconsistent record must never pass as evidence.
 python "$ROOT/tools/vehiclerig-drill/missing_vehiclerig.py" "$WTMP/missing" "$WTMP/jobs.txt" "${DUMPS[@]}" > "$TMPD/tampers_raw.txt" || { echo "FAIL — could not construct the damaged dumps"; exit 1; }
 tr -d '\r' < "$TMPD/tampers_raw.txt" > "$TMPD/tampers.txt"
@@ -170,7 +168,7 @@ while IFS= read -r mode; do
     OBJ_bits) reason="not float32 bits";;
     OBJ_duplicate) reason="two objects named";;
     MESH_missing) reason="mesh objects, .* MESH rows";;
-    MESH_hash|MESH_edges_hash|MESH_sharp_hash|MESH_normals_hash|MESH_edges_absent) reason="fields, .* expected|not SHA-256";;
+    MESH_hash|MESH_edges_hash|MESH_sharp_hash|MESH_normals_hash|MESH_edges_absent|MESH_colours_hash) reason="fields, .* expected|not SHA-256";;
     MESH_orphan) reason="names no mesh object";;
     VG_missing) reason="vertex groups listed, .* VG rows";;
     VG_orphan) reason="a group its mesh does not list";;
@@ -208,4 +206,4 @@ done < "$TMPD/tampers.txt"
 [ "$n_s2t" -ge 6 ] || { echo "FAIL — vehicle_rig drill: only $n_s2t stage 2 tampers were run (missing_vehiclerig.py writes S2_* copies)"; exit 1; }
 echo "PASS — vehicle_rig drill refuses $n_t kinds of damaged evidence (a missing, doubled, short or misplaced row of every kind; an early stop; a stop with export rows; a completed run without its GLB rows; an unknown job, row kind or mode; $n_s1t changed values of stage 1 rows and $n_s2t of stage 2 rows, each caught by the model of that stage)"
 n_size=$(grep -c "^LEFT	.*	over .* MB" "$TMPD/jobs.txt")
-echo "PASS — vehicle_rig drill, step (a) the stage dump: $n_reg of $((n_reg + n_left)) saved recipes and $n_fx fixture jobs run by Blender through vehicle_rig.py cut at its five stages (Blender took $((t1 - t0)) s, $JOBS at a time), $n_full through all five and $n_fastrun on the source-skeleton fast path, $n_stop stopped by the script's own exit; $n_stages scene dumps with $n_logs VEHICLE lines, $n_bones bones and $n_fc fcurves on record and $n_glb rows of the exported GLBs read back, every block complete and consistent; $n_left recipe(s) left: $n_size over the size limit (FULL=1 takes them). Steps (b) and (c), stages 1 and 2 in C# (editor/BlenderVehicleRig.cs: the import, the bone-shape purge, the brightness line, the second-model merge, the flatten, the loose split, the placements, the ignored parts, the orientation, transform_apply; BlenderVehicleRig.Stage2.cs + BlenderWeld.cs: the reduction tiers - the weld within each material, the sharp edges over 40 degrees, the dial's target and the decimate): $n_s1eq of $n_jobs jobs equal to Blender row for row after both stages ($n_s1rows rows of objects, meshes and actions, as bits and hashes; $((t3 - t2)) s), $n_s1left left by name ($n_s2left at stage 2: the dissolve pass of a RIGGING or SHROUD tier, not ported yet; the rest a source the C# does not read, or the rigfast fast path)"
+echo "PASS — vehicle_rig drill, step (a) the stage dump: $n_reg of $((n_reg + n_left)) saved recipes and $n_fx fixture jobs run by Blender through vehicle_rig.py cut at its five stages (Blender took $((t1 - t0)) s, $JOBS at a time), $n_full through all five and $n_fastrun on the source-skeleton fast path, $n_stop stopped by the script's own exit; $n_stages scene dumps with $n_logs VEHICLE lines, $n_bones bones and $n_fc fcurves on record and $n_glb rows of the exported GLBs read back, every block complete and consistent; $n_left recipe(s) left: $n_size over the size limit (FULL=1 takes them). Steps (b) and (c), stages 1 and 2 in C# (editor/BlenderVehicleRig.cs: the import, the bone-shape purge, the brightness line, the second-model merge, the flatten, the loose split, the placements, the ignored parts, the orientation, transform_apply; BlenderVehicleRig.Stage2.cs + BlenderWeld.cs + BlenderDissolve.cs + BlenderPolyfill.cs: the reduction tiers - the weld within each material and the sharp edges over 40 degrees on the weld tiers, the limited dissolve (plain or per BSP cell past 4,000 faces) and the BEAUTY triangulation on the soup tiers, the dial's target and the decimate): $n_s1eq of $n_jobs jobs equal to Blender row for row after both stages ($n_s1rows rows of objects, meshes and actions, as bits and hashes; $((t3 - t2)) s), $n_s1left left by name (a source the C# does not read, or the rigfast fast path)"

@@ -1788,6 +1788,72 @@ with file normals; a mesh-level operation keeps it; a BMesh round trip - the edi
 it back only when an edge is marked: three Blender probes of the fixtures settled the rule) and the shorts per corner,
 in both dumps and both renders - the rig_anim drill's 145 jobs hold them through its four stages too -, with S2_* tampers
 on each; a fixture with a scaled, turned node in a weld tier holds the distance rule (o.dimensions after transform_apply).
+
+**Step (c), stage 2 of item (5), the soup tiers (2026-10-16).** The RIGGING and SHROUD tiers run no weld: the script hands the raw
+mesh to `_dissolve_limited(_rb, 5.0)` and then `bmesh.ops.triangulate` on every face, and part 1 left both recipes that take
+them to Blender by name. `editor/BlenderDissolve.cs` is `bmesh.ops.dissolve_limit` (`BM_mesh_decimate_dissolve_ex`, Blender
+5.1.2): the EDGE phase heaps every input edge with two faces by `bm_edge_calc_dissolve_error` (-cos of the face angle when
+the faces are contiguous, invalid otherwise) against -cosf(angle) - the angle `math.radians(5.0)` into the float property -
+and joins pairs from the top while the cost holds (`BM_faces_join_pair`: when the faces share the vertex twice over the edge
+one is reversed; `BM_faces_join` builds the n-gon from the two rings' edges minus the shared one, sorted by winding
+(`bm_edges_sort_winding`), reuses a double when `BM_face_exists` finds one, copies each new corner's data from the old corner
+at the same vertex, kills the old faces and leaves the shared edge wire; the joined face re-enters the heap through its edges,
+whose costs are recomputed from the new normal), then kills the edges left wire in reverse slot order and the vertices left
+alone; the VERT phase heaps every input vertex with exactly two edges by `bm_vert_edge_face_angle` (pi minus the angle at the
+vertex, scaled down by the face angle where the two faces meet) and collapses from the top while under the limit and not
+degenerate (`bm_vert_collapse_is_degenerate`: the vertex's two faces projected on their dominant axis, the sign of each
+corner's cross product before and after the collapse, and a point-in-triangle test for the other faces' corners);
+`BM_vert_collapse_edge` -> `bmesh_kernel_join_edge_kill_vert` splices the edge, drops a degenerate loop or a duplicate edge
+it makes, and the kernel's own kills reuse slots through BLI_mempool's free list as every creation here does. Face normals
+are tri/quad/Newell (`normal_tri_v3`, `normal_quad_v3`, `normal_poly_v3`) and the operator's NORMALS_CALC recomputes them
+all when it finishes. `editor/BlenderPolyfill.cs` is `bmesh.ops.triangulate` (`BM_mesh_triangulate` tag_only on every face
+of four or more corners, the mapping variant: a double it would make is kept): a quad takes `BM_face_triangulate`'s BEAUTY
+rule (`is_quad_flip_v3` first, then `BM_verts_calc_rotate_beauty` on the projected corners: the diagonal whose two
+triangles score better by area and perimeter), an n-gon goes through `axis_dominant_v3_to_m3_negate` into 2D, then
+`BLI_polyfill_calc` (sign 1: ear clipping that alternates CLIP_EVEN and the sweep, the concave and tangential corners in a
+balanced kd-tree whose ear test is precomputed per candidate) and `BLI_polyfill_beautify` (every interior half-edge in a heap
+by `BLI_polyfill_beautify_quad_rotate_calc_ex`, rotated while negative, the neighbours re-costed); the triangles become
+faces through `BM_face_create_verts` in the polyfill's order (edges ensured (v2 v0), (v0 v1), (v1 v2)), the last one swapped
+into the original face's slot and the rest killed. `BlenderVehicleRig.Stage2.cs` runs `_dissolve_limited` exactly as the
+script chunks it: at or under 4,000 faces one call over every vertex and edge in slot order; above it, the faces'
+`calc_center_median` (float32 sum, times 1/len) are BSP-split at the median along the widest span (Python's `max - min` in
+double, the first widest axis, a stable sort, `len // 2`, the second half popped first) until every cell holds at most
+4,000, then per leaf the edges whose two faces lie in the cell and the vertices whose faces all do, each list in index
+order, one dissolve_limit per leaf when either list is non-empty - the greedy order the script fixed on 2026-10-12. The
+dial's base is the raw count on a soup tier, `use_smooth` is set on the weld tiers only. Measured: the drill's "dissolve
+pass" named-left rule is gone, so any stage 2 decline FAILs; 22 of the 24 recipes equal row for row after both stages
+(307,475 rows, the two FBX left by name) - the khelandion's 91 and the Wespe's 26 parts through the dissolve, the Wespe's
+141k-vertex shroud through the BSP cells -, 36 fixtures equal, three new (`fx_c_soup_flat`: a flat 6 x 6 grid dissolved to one
+quad - 50 faces to 2 - and cut back to two triangles with its UVs; `fx_c_soup_L`: an L-shaped strip whose concave hexagon takes
+the ear clipping's kd-tree, 40 faces to 4, beside a lone flat quad on the quad rule; `fx_c_soup_bumpy`: a 4,800-face bumpy
+grid, over the cap, dissolved per BSP cell to 182 faces), equal from the first run of each. `Tests/VehicleRigDissolveTests.cs`
+holds the flat grid's dissolve to one quad (4 vertices, the Newell normal, the UVs carried) and its triangulation, the
+bumpy grid's four coplanar strips with their straight-run vertices collapsed, the hexagon's Newell normal, the ear clipping's
+cover of a square, an L and a U (n - 2 triangles inside the ring, the area summed; sign 0 detects the ring's direction as
+sign -1), and the beautify's choice of the short diagonal on a kite with the rotate rule's contract both ways.
+Review of PR #177 (2026-10-16): a valid 4,002-triangle source reproduces a cross-cell splice. The first BSP cell joins two
+triangles, collapses their collinear rim vertex, and splices away an existing edge queued for the second cell. Blender's
+wrapper raises `TypeError: edges: 0 BMEdge has been removed`; the model now records the same death before `to_mesh`, rather
+than leaving the case unmodelled. The stage comparison checks its exact exception and preceding log lines. A permanent unit
+regression and `DIES:2:fx_d_chunk_splice` hold the case. `BMeshTests` also pins the two-disk edge lookup after a topology edit
+puts duplicate edges in different disk orders (the author's concurrent follow-up supplied the lookup fix).
+`fx_c_soup_attributes` holds custom normals, vertex colours and two UV layers through the soup's joins, collapse and
+triangulation. The colours part was not true when the review wrote it: the stage rows' MESH row carried no colour layer at
+all, so a plant that stopped the vertex collapse copying corner colours passed every drill (found verifying the review by
+plant, 2026-10-16; the weld tiers of part 1 had moved colours unseen too). The MESH row now ends in a colour field, shared
+by both dumps (`tools/riganim-drill/scene_rows.py`) and the C# render: every colour attribute in code-point order of its
+name, its domain and the SHA-256 of its bytes (a BYTE_COLOR read back exactly as round(color_srgb * 255), the decimate
+drill's reading; any other type hashed as floats under its type's name, so it cannot match a model holding bytes). Every
+stage stayed equal with colours compared (rig_anim 134 of 145 through four stages, vehicle_rig 60 of 62), the same colour
+plant now FAILs on `fx_c_soup_attributes` alone, and a format tamper is refused by both drills. The stage 2 value tamper
+(`S2_MESH_colours`) is written only when the job the tamper copies come from has a colour layer, and today's (the first
+all-stage glTF job) has none, so it does not run; the plant above is the evidence that a changed colour is caught. Full positive comparison: all 24 saved recipes and 38 fixture jobs, 60 of 62 equal after both stages,
+307,490 rows, the two FBX sources left by name; 1,762 unit tests pass. Independent temporary Blender probes also matched
+4,400 polygon/grid/soup cases in vertex and edge order, face winding, material/smooth flags and UVs, including degenerate,
+non-manifold and inconsistently wound meshes. These probes are review evidence; the committed regressions run in the gate.
+Remaining source-read branches still need dedicated fixtures (double-face reuse, degenerate refusals, kill-degenerate and
+kill-duplicate, wire cleanup, tangential/desperate polyfill, concave-quad flips, triangulate doubles); randomized matches
+do not prove each branch was reached.
 Scoped out, named: a name listed twice in one tier's list would name its second datablock differently
 (the Lab lists a part once).
 

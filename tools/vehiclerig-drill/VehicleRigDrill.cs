@@ -45,7 +45,7 @@ public sealed class VehicleRigDump
 
     static readonly Dictionary<string, int> Width = new Dictionary<string, int>(StringComparer.Ordinal)
     {
-        { "JOB", 2 }, { "STAGE", 2 }, { "LOG", 3 }, { "SCENE", 6 }, { "OBJ", 42 }, { "MESH", 18 }, { "VG", 6 }, { "BONE", 23 },
+        { "JOB", 2 }, { "STAGE", 2 }, { "LOG", 3 }, { "SCENE", 6 }, { "OBJ", 42 }, { "MESH", 19 }, { "VG", 6 }, { "BONE", 23 },
         { "PB", 33 }, { "ACT", 7 }, { "FC", 9 }, { "K", 16 }, { "EXIT", 3 }, { "DIES", 3 }, { "DONE", 2 }, { "FAIL", 3 }, { "EVIDENCE", 4 },
     };
     static readonly HashSet<string> ExportKinds = new HashSet<string>(new[] { "GLB", "SCENE", "NODE", "SKIN", "IBM", "MESH", "PRIM", "MAT", "IMG", "TEX", "SAMP", "ANIM", "CHAN" }, StringComparer.Ordinal);
@@ -152,6 +152,7 @@ public sealed class VehicleRigDump
                     if (t[10] != "-" && !IsHex(t[10], 64)) throw new InvalidDataException("MESH row has a UV hash that is not SHA-256");
                     if (!IsHex(t[15], 64)) throw new InvalidDataException("MESH row has an edge hash that is not SHA-256");
                     for (int i = 16; i <= 17; i++) if (t[i] != "-" && !IsHex(t[i], 64)) throw new InvalidDataException("MESH row has a sharp-edge or custom-normal hash that is not SHA-256");
+                    if (t[18] != "-" && !t[18].Split(';').All(c => { var p = c.Split(':'); return p.Length >= 3 && IsHex(p[p.Length - 1], 64); })) throw new InvalidDataException("MESH row has a colour hash that is not SHA-256");
                     s.Meshes.Add(t); break;
                 case "VG":
                     if (!IsInt(t[4]) || !IsHex(t[5], 64)) throw new InvalidDataException("VG row has an invalid count or hash");
@@ -613,8 +614,7 @@ static class StageDrill
             if (problems.Count == 0) { RowsEqual += RowCount(s); Equal++; Console.WriteLine($"STAGE1 {key}: equal - {Describe(s)}"); }
         }
         if (problems.Count == 0 && model.Exits) { RowsEqual += model.Logs.Count; Equal++; Console.WriteLine($"STAGE1 {key}: equal - the script's exit in stage 1, {model.Logs.Count} VEHICLE lines"); }
-        // stage 2 on the scene stage 1 left (step (c)): the reduction tiers; a tier the model names as Blender's (the dissolve pass,
-        // until it is ported) is LEFT, any other decline a FAIL
+        // stage 2 on the scene stage 1 left (step (c)): the reduction tiers; any decline is a FAIL
         if (problems.Count == 0 && stages >= 2 && !model.Exits && model.Dies == null)
         {
             int notes0 = model.Notes.Count;
@@ -624,13 +624,18 @@ static class StageDrill
             if (problems.Count == 0 && model.Fallback != null)
             {
                 Census["LEFT: " + model.Fallback] = (Census.TryGetValue("LEFT: " + model.Fallback, out int c) ? c : 0) + 1;
-                bool named2 = model.Fallback.StartsWith("the dissolve pass", StringComparison.Ordinal);
-                if (!named2) { Console.WriteLine($"FAIL {key}: stage 2 model leaves this job to Blender: {model.Fallback}"); return false; }
-                Equal--; Left++; Console.WriteLine($"STAGE2 {key}: left to Blender by name: {model.Fallback}"); return true;
+                // part 2 ported the dissolve: no stage 2 decline is named any more
+                Console.WriteLine($"FAIL {key}: stage 2 model leaves this job to Blender: {model.Fallback}"); return false;
             }
             if (problems.Count == 0)
             {
-                if (!d.Stages.TryGetValue(2, out var s2)) problems.Add("stage 2 model: the scene runs on here, Blender stopped in stage 2: " + (d.Exit != null ? string.Join(" | ", d.LogsOfStop) : d.Died));
+                if (model.Dies != null)
+                {
+                    if (d.StoppedAt != 2 || d.Died != model.Dies) problems.Add("stage 2 model: the death differs: here '" + model.Dies + "', Blender '" + d.Died + "' in stage " + d.StoppedAt);
+                    else if (!d.LogsOfStop.SequenceEqual(model.Logs2)) problems.Add("stage 2 model: the lines before the death differ");
+                    else { RowsEqual += model.Logs2.Count; Console.WriteLine($"STAGE2 {key}: equal - the script dies in stage 2 ({d.Died}), {model.Logs2.Count} VEHICLE lines before it"); }
+                }
+                else if (!d.Stages.TryGetValue(2, out var s2)) problems.Add("stage 2 model: the scene runs on here, Blender stopped in stage 2: " + (d.Exit != null ? string.Join(" | ", d.LogsOfStop) : d.Died));
                 else
                 {
                     var rows2 = BlenderRigAnim.Render(model, 2, fcSlot: true);

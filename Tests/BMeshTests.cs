@@ -145,4 +145,18 @@ public class BMeshTests
         Assert.True(bm.VertPairShareFaceCheck(1, 2)); Assert.False(bm.VertPairShareFaceCheck(1, 3));
         Assert.Equal(0, bm.EdgeExists(2, 0)); Assert.Equal(BMesh.None, bm.EdgeExists(1, 3));
     }
+
+    [Fact]
+    public void Edge_exists_checks_both_disks_before_advancing_either()
+    {
+        var bm = new BMesh(); for (int i=0; i<5; i++) bm.VertCreate(i,0,0);
+        bm.EdgeCreate(0,3);
+        int moved = bm.EdgeCreate(0,2);
+        int existing = bm.EdgeCreate(0,1);
+        // A topology edit can put the two copies in different orders around their endpoints.
+        bm.DiskVertReplace(moved, 1, 2);
+        Assert.Equal(existing, bm.EdgeExists(0,1)); // a's head misses; b's head wins before a's next
+        Assert.Equal(existing, bm.EdgeExists(1,0));
+        Assert.Equal(BMesh.None, bm.EdgeExists(0,4));
+    }
 }
