@@ -39,6 +39,10 @@ public static partial class BlenderVehicleRig
         public string DialsDie;                     // a dial (argv[7..25]) Python cannot parse: the exception it dies of before the orientation, or null
         public string AxisArg = "";                 // argv[6].upper(): the wheels' axle override (X, Y, Z) or anything else = AUTO (the thinnest extent)
         public bool RockOn;                         // the WAVE ROCK is on: a RootHull bone under Root carries everything that would skin to Root
+        public bool SailFold;                       // argv[71].strip() == "1": the Sail bone gets the SailF1..F3 fold chain, the canvas skins by height band
+        public bool FlagFoldOn;                     // a flagfold= tag is present: the Flag bone hinges at the flag's top (else it strikes below the keel)
+        public double FlagFoldDeg;                  // max(-175, min(175, float(deg))) or 0 when blank (a NaN clamps to 175)
+        public int FlagFoldFrames = 12;             // max(1, int(float(frames))) or 12 when blank
     }
 
     static readonly (string role, int index)[] NamesArgv =
@@ -153,6 +157,9 @@ public static partial class BlenderVehicleRig
                 if (ok && double.IsInfinity(fr)) { a.PreDie = "OverflowError: cannot convert float infinity to integer"; return a; }
             }
             if (!ok) { a.Logs.Add("VEHICLE ERROR: malformed flagfold argument: " + ff); a.Problem = "malformed flagfold argument"; return a; }
+            a.FlagFoldOn = true;
+            if (f[0].Trim().Length > 0 && TryPyFloat(f[0], out double fd)) a.FlagFoldDeg = PyMax(-175.0, PyMin(175.0, fd));
+            if (f[1].Trim().Length > 0 && TryPyFloat(f[1], out double ffr)) { double tr = Math.Truncate(ffr); a.FlagFoldFrames = tr < 1.0 ? 1 : tr > int.MaxValue ? int.MaxValue : (int)tr; }
         }
         string tx = argv.FirstOrDefault(x => x.StartsWith("parttx=", StringComparison.Ordinal));
         if (tx != null)
@@ -177,6 +184,7 @@ public static partial class BlenderVehicleRig
         // amplitude is positive; rock_on = (rock_deg > 0 or pitch > 0) and rock_frames >= 2. Python's min/max keep their FIRST
         // argument unless the second compares past it, so a NaN amplitude clamps to 45.
         a.AxisArg = PyUpper(At(6));
+        a.SailFold = argv.Count > 71 && At(71).Trim() == "1";
         if (a.DialsDie == null)
         {
             double Amp(int i, double dflt) => argv.Count > i && At(i).Trim().Length > 0 && TryPyFloat(At(i), out double v) ? PyMax(0.0, PyMin(45.0, v)) : dflt;

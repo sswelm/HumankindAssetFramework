@@ -1936,6 +1936,30 @@ of the parser and checksum. All 15 fail for the intended reason; the intact cont
 match for freed object-name reuse, blank pitch's default RootHull, and NaN pitch with a one-frame cycle. Those branches
 still lack committed native fixtures.
 
+**Step (d), stage 3 of item (5), part d2: the sail, rigging on the sail, the flag (2026-10-16).** Against vehicle_rig.py
+1895-2023 and the skinning loop's fold bands: the sail parts (`find_opt`: a missing name is a WARN) go on ONE `Sail` bone
+whose head sits at the sails' box centre in x and y and at the KEEL LINE less 0.05 in z - the keel the lowest z of every
+mesh's eight world `bound_box` corners (`matrix_world @ Vector(c)`: the float32 products summed in double, rounded to float),
+the box from the same corners, `0.5 * (a + b)` and `keel - 0.05` in double before `Vector((...))` rounds them - and whose tail
+rises by `max(0.3, 0.25 * height)` (a float32 add). Under argv[71] == "1" (`sail_fold`) three bones chain below it,
+`SailF1..F3`, their heads at the box centre on the fold cuts `top - h * q / 4.0` (h = `max(1e-6, height)`), each tail
+`max(0.1, 0.25 * h / 4.0)` down; each sail vertex then skins to the bone owning its height band (its world z against the cuts,
+`<`), a group per non-empty band in band order, and the join unites the bands by name in object order. A sail part also listed
+as a wheel keeps its wheel cluster's bone but skins to the Sail. With a sail found, the rigging parts ride the Sail bone
+(`find_opt`, a missing name skipped silently) as ONE mesh of their own (`__rigsail__`, never `Mesh_Sail`, which the export
+doubles); without one, rigging stays on the body. The flag parts go on one `Flag` bone - struck: the head at the keel line
+less 0.05; under `flagfold=`, hinged at the flags' top - its tail up by `max(0.3, 0.25 * height)`; `flagfold=` reads
+`max(-175, min(175, float(deg)))` and `max(1, int(float(frames)))` (blank: 0 and 12). The lines keep the script's order:
+SAIL, RIGGING, then RUDDER, PRESERVE and FLIP, then FLAG; the fold bands print per sail part in the skinning. Measured: 14 of
+the 24 recipes equal row for row through stage 3 (the 1861 frigate, Salegs and the Great Eastern with a sail, the BGM-71 with a
+struck flag - all equal on the first run), 8 left at stage 3 by name, the 2 FBX by name; `fx_r_sail` (an upright canvas grid
+and a topsail falling into all four bands, the topsail also a wheel, rigging on the sail, a missing sail and a missing rigging
+name, a struck flag, a wheel) and `fx_r_flagfold` (a flag folding -30 degrees over 8 frames, a missing flag name, rigging
+without a sail) equal on the first run; 63 of 73 jobs equal (FULL, 457,785 rows); 1,785 tests. Nine plants, one per rule,
+each caught on its job (the keel's offset and its set of meshes, the fold cuts, the band direction, the rigging's own mesh, the
+sail winning over a wheel, the flag's hinge, the 0.3 rise floor, the sail WARN). No recipe takes the fold, rigging on a sail
+or the flag fold (Triconter folds and the Khelandion rigs, both left for their oars).
+
 Review of PR #176 (2026-10-15): a full run found the organ gun's newly recorded custom-normal shorts differed after
 stage one's loose split. Blender's separate operator decodes the source BMesh normals into a vector layer and
 re-encodes that layer on each copied component; copying the original shorts misses that quantization. The model now
