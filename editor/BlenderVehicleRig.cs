@@ -70,6 +70,22 @@ public static partial class BlenderVehicleRig
         return arg.Split(';').Where(PyNonBlank).ToList();
     }
 
+    static bool NamesFileException(Exception e) => e is System.IO.IOException || e is ArgumentException || e is UnauthorizedAccessException;
+
+    // The same open()/decode errors apply to positional names and names inside reduce tags. The callers decide
+    // whether Python lets the exception escape, prints it in a tagged-argument error, or needs a named fallback.
+    static string NamesFileError(Exception e, string arg, out string unsupported)
+    {
+        unsupported = null; string path = arg.Substring(1);
+        if (e is UnauthorizedAccessException) return "PermissionError: [Errno 13] Permission denied: " + PyStrRepr(path);
+        if (e is System.Text.DecoderFallbackException)
+            unsupported = "a names file that is not UTF-8 (Python's UnicodeDecodeError is not modelled)";
+        else if (e is ArgumentException && path.Length > 0)
+            unsupported = "a names file path .NET refuses (Python's OSError is not modelled)";
+        else return "FileNotFoundError: " + PyFileNotFound(path);
+        return null;
+    }
+
     /// <summary>The script's reading of its argv (argv[0] = the mode onward): the role lists (@file), the orientation, the tagged
     /// arguments; the exits it takes on a malformed tagged argument.</summary>
     public static Args ParseArgs(IList<string> argv)
@@ -86,17 +102,14 @@ public static partial class BlenderVehicleRig
                 list = index < argv.Count && PyNonBlank(At(index)) ? NameList(At(index)) : new List<string>();
                 if (index == 4 || index == 5) list = NameList(At(index));   // wheel_names, turret_names: read unconditionally
             }
-            catch (Exception e) when (e is System.IO.IOException || e is ArgumentException || e is UnauthorizedAccessException || e is System.Text.DecoderFallbackException)
+            catch (Exception e) when (NamesFileException(e))
             {
                 // open() of the path: a missing file or an empty path is FileNotFoundError, a directory (or a denied file) PermissionError;
                 // a file that is not UTF-8 is Python's UnicodeDecodeError, whose text (the byte, its offset in the reader's chunk) is not
                 // modelled - the job is left to Blender by name
                 list = new List<string>();
-                string path = At(index).Substring(1), death;
-                if (e is UnauthorizedAccessException) death = "PermissionError: [Errno 13] Permission denied: " + PyStrRepr(path);
-                else if (e is System.Text.DecoderFallbackException) { death = null; if (a.Unsupported == null) { a.Unsupported = "a names file that is not UTF-8 (Python's UnicodeDecodeError is not modelled)"; unsupportedAt = index; } }
-                else if (e is ArgumentException && path.Length > 0) { death = null; if (a.Unsupported == null) { a.Unsupported = "a names file path .NET refuses (Python's OSError is not modelled)"; unsupportedAt = index; } }
-                else death = "FileNotFoundError: " + PyFileNotFound(path);
+                string death = NamesFileError(e, At(index), out string unsupported);
+                if (unsupported != null && a.Unsupported == null) { a.Unsupported = unsupported; unsupportedAt = index; }
                 if (death != null && index < namesFailureIndex) { namesFailureIndex = index; a.NamesDie = death; }
             }   // namelist() opens it in the rig path: the script dies there
             a.Names[role] = list;
@@ -130,6 +143,8 @@ public static partial class BlenderVehicleRig
         {
             string role = tag == "shroudreduce" ? "shroud" : tag == "windowreduce" ? "window" : tag == "defaultreduce" ? "default" : null;
             if (role != null) a.Names[role] = new List<string>();
+            // Python never opens a later tagged file after a positional error or the first malformed tag.
+            if (a.NamesDie != null || a.Unsupported != null || a.TagError != null) continue;
             string arg = argv.FirstOrDefault(x => x.StartsWith(tag + "=", StringComparison.Ordinal));
             if (arg == null) continue;
             string spec = arg.Substring(tag.Length + 1); int bar = spec.LastIndexOf('|');
@@ -163,7 +178,12 @@ public static partial class BlenderVehicleRig
                 }
             }
             catch (FormatException e) { err = e.Message; }
-            catch (System.IO.IOException) { err = PyFileNotFound(namesText.Trim().Substring(1)); }
+            catch (Exception e) when (NamesFileException(e))
+            {
+                string death = NamesFileError(e, namesText, out string unsupported);
+                if (unsupported != null) a.Unsupported = unsupported;
+                else err = death.Substring(death.IndexOf(": ", StringComparison.Ordinal) + 2);   // str(exception), without its type
+            }
             if (err != null && a.TagError == null)
                 a.TagError = tag == "gunreduce" || tag == "windowreduce" ? "VEHICLE ERROR: malformed " + tag + " argument: " + err
                            : "VEHICLE ERROR: malformed " + tag + " argument: " + arg + " (" + err + ")";

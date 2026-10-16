@@ -62,6 +62,9 @@ Stage 3 (step (d), part d3: the turret, the gun assembly, the trails):
   fx_r_spike         a three-vertex muzzle brake and no gun under recoil (fewer than 4 tube points: the defaults)
   fx_r_gunpoint      a tube of four coincident vertices under recoil (no GUNSPAN line, a zero bore; stage 4 then dies dividing by it: DIES:4:)
   fx_r_pivot_end     the pivot at the muzzle under recoil (the script's bore from gc ~ muzzle - an open script defect, reproduced)
+  fx_x_default_names_dir / fx_x_shroud_names_dir / fx_x_window_names_dir: directory names in reduce tags print their caught error
+  fx_d_dial_before_tag_names / fx_x_tag_before_bad_names: an earlier error wins over a later non-UTF-8 tagged names file
+  fx_d_pos_names_utf8 / fx_x_tag_names_utf8: native decode death/exit; the C# model explicitly leaves decoding to Blender
   fx_r_names_ws / fx_r_names_bom   a names file line wrapped in \\x1c..\\x1f (stripped) / starting with a BOM (kept: the exit)
   fx_d_names_empty / fx_d_names_dir / fx_d_dial_before_names   open("") / open(a directory) / a dial dying before a later names file
   fx_r_flat_sail     a zero-height sail taking the 1e-6 fold-height clamp, all rigging missing, flagfold=| taking its defaults
@@ -503,11 +506,15 @@ def main(out):
         r = Rig(); ma = r.material("Steel", (0.4, 0.4, 0.45))
         r.node("Hull", mesh=r.mesh("Hull", material=ma)); r.node("Part", mesh=r.mesh("Part", at=(3.0, 0.0, 0.0), material=ma))
         recipe(out, key, r.write(models, key), [("Hull", 0, {}), ("Part", role, {}), ("Ghost", role, {})], sub="recipes_exit")
-    # the dials read among the names: int(float(nan)) of the trail frames, float() of the gun pivot
-    for key in ("fx_d_trail_frames", "fx_d_gun_pivot"):
+    # The dials read among the names, plus tagged-file failures. Invalid UTF-8 escapes from positional namelist(),
+    # but the reduce tags catch it and print VEHICLE ERROR. Earlier positional/tag errors must win over later files.
+    for key in ("fx_d_trail_frames", "fx_d_gun_pivot", "fx_x_default_names_dir", "fx_x_shroud_names_dir", "fx_x_window_names_dir",
+                "fx_d_dial_before_tag_names", "fx_x_tag_before_bad_names", "fx_d_pos_names_utf8", "fx_x_tag_names_utf8"):
         r = Rig(); ma = r.material("Steel", (0.4, 0.4, 0.45))
         r.node("Hull", mesh=r.mesh("Hull", material=ma)); r.node("Tire", mesh=r.mesh("Tire", at=(3.0, 0.0, 0.0), material=ma))
         recipe(out, key, r.write(models, key), [("Hull", 0, {}), ("Tire", 1, {})], sub="recipes_exit")
+    with open(os.path.join(models, "names_bad_utf8.txt"), "wb") as f:
+        f.write(b"\xff")
     # brightness on three material chains
     r = Rig(); img = r.image("Albedo", rgb=(120, 80, 40)); tex = r.texture(img)
     flat = r.material("Flat", (0.6, 0.4, 0.2)); direct = r.material("Direct", (1.0, 1.0, 1.0), texture=tex); tint = r.material("Tint", (0.5, 0.25, 0.9), texture=tex)
@@ -524,6 +531,13 @@ def set_tag(argv, tag, value):
 
 
 EXITS = {
+    "fx_x_default_names_dir": ("EXIT", lambda a: set_tag(a, "defaultreduce", "@" + os.path.dirname(a[1]).replace("\\", "/") + "|20")),
+    "fx_x_shroud_names_dir": ("EXIT", lambda a: set_tag(a, "shroudreduce", "@" + os.path.dirname(a[1]).replace("\\", "/") + "|20")),
+    "fx_x_window_names_dir": ("EXIT", lambda a: set_tag(a, "windowreduce", "@" + os.path.dirname(a[1]).replace("\\", "/") + "|20")),
+    "fx_d_dial_before_tag_names": ("DIES", lambda a: (a.__setitem__(34, "bad pivot"), set_tag(a, "shroudreduce", "@" + os.path.join(os.path.dirname(a[1]), "names_bad_utf8.txt").replace("\\", "/") + "|20"))),
+    "fx_x_tag_before_bad_names": ("EXIT", lambda a: (set_tag(a, "defaultreduce", "nopipe"), set_tag(a, "shroudreduce", "@" + os.path.join(os.path.dirname(a[1]), "names_bad_utf8.txt").replace("\\", "/") + "|20"))),
+    "fx_d_pos_names_utf8": ("DIES", lambda a: a.__setitem__(4, "@" + os.path.join(os.path.dirname(a[1]), "names_bad_utf8.txt").replace("\\", "/"))),
+    "fx_x_tag_names_utf8": ("EXIT", lambda a: set_tag(a, "shroudreduce", "@" + os.path.join(os.path.dirname(a[1]), "names_bad_utf8.txt").replace("\\", "/") + "|20")),
     # None leaves the job positive: only its argument text is changed after the Lab's builder runs.
     "fx_r_numeric_pct": (None, lambda a: a.__setitem__(54, "0.500000000000000055511151231257827021181583404541015625000000000000000000001")),
     "fx_r_flat_sail": (None, lambda a: set_tag(a, "flagfold", "|")),

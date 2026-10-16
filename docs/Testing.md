@@ -2042,6 +2042,20 @@ defects found on the way, reproduced bit for bit and recorded in the backlog. Pl
 directory's PermissionError (the drill fails on each target). After: 71 of 71 fixture jobs and 88 of 95 jobs equal
 through stage 3 (FULL, 454,970 rows); 1,854 tests.
 
+Critical review of PR #181 (2026-10-17): the strict names reader's exception handling covered positional arguments but
+not names inside defaultreduce/shroudreduce/windowreduce tags. Directories and non-UTF-8 files could escape as CLR
+exceptions, even when Python had already stopped at an earlier dial or tag. Both paths now use the same error
+classification; reduce tags print str(exception) as the script does, unsupported decoding leaves a named fallback,
+and later tagged files are not opened after an earlier error. Six unit cases and seven native fixtures reproduce
+the original failures, including the first-error precedence. The native cases also exposed that VehicleRigDrill
+rejected Args.Unsupported itself: it now accepts that exact parser-produced reason, while retaining rejection of
+unexpected stage-one declines. Positional UnicodeDecodeError and a tag's caught decode error are both exercised.
+All 1,860 unit tests pass. An independent 64-scene sweep of rotated guns and trails, varied sizes and pivots,
+turrets, cradles, recoil, and wave rock matches Blender through stage 3.
+The FULL recipe/fixture run with key rows compares 93 of 102 jobs through stage 3 (454,974 rows): 17 saved recipes
+and 76 fixtures equal, five recipes left for later stage-three branches, two FBX sources, and two names-file
+decoding cases explicitly left to Blender. The new directory and error-precedence fixtures compare exactly.
+
 Review of PR #176 (2026-10-15): a full run found the organ gun's newly recorded custom-normal shorts differed after
 stage one's loose split. Blender's separate operator decodes the source BMesh normals into a vector layer and
 re-encodes that layer on each copied component; copying the original shorts misses that quantization. The model now

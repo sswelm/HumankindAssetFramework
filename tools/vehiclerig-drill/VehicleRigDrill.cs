@@ -587,7 +587,8 @@ static class StageDrill
         {
             Census["LEFT: " + model.Fallback] = (Census.TryGetValue("LEFT: " + model.Fallback, out int c) ? c : 0) + 1;
             // left by NAME: a source the C# does not read (until the native readers); every other decline is a model that is wrong
-            bool named = BlenderVehicleRig.SourceFallback(args) != null || model.Fallback.StartsWith("the source-skeleton fast path", StringComparison.Ordinal);
+            bool named = BlenderVehicleRig.SourceFallback(args) != null || model.Fallback.StartsWith("the source-skeleton fast path", StringComparison.Ordinal)
+                || (args.Unsupported != null && model.Fallback == args.Unsupported);
             if (!named) { Console.WriteLine($"FAIL {key}: stage 1 model leaves this job to Blender: {model.Fallback}"); return false; }
             Left++; Console.WriteLine($"STAGE1 {key}: left to Blender by name: {model.Fallback}"); return true;
         }
