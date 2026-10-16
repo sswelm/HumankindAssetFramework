@@ -440,6 +440,24 @@ left by name), 307,490 rows; 1,762 unit tests. OPEN: dedicated fixtures for the 
 concave-quad flips, triangulate doubles). Independent temporary probes matched 4,400 cases; branch coverage was not measured.
 Next: (d) stage 3, the rig (wheel clustering: axle axis, PCA, spoke symmetry; the role sets; the join per bone) - numpy double
 rules, measured per operation against the stage 3 dump.
+(d) stage 3 is split by branch, each part turning more jobs equal (a census of the recipes' stage 3 roles, 2026-10-16): d1 the
+frame every rig shares (the armature, Root and the rock's RootHull, the wheel clusters and their bones, the rudder/preserve/flip
+sets, the rigid skinning, the join per bone: 10 recipes), d2 sail, rigging on the sail and flag (1861, Salegs, Great Eastern,
+BGM-71), d3 turret, gun, muzzle, cradle and trails (M114, Wespe), d4 the rotors (Bell, RAH-66, Ilya Muromets), d5 the oars
+(Khelandion, Triconter), d6 the tread rig and its path-instanced link bones (Jagdpanzer); a job taking a later part's branch is
+left by name until then. (d) part d1 DONE 2026-10-16: `editor/BlenderVehicleRig.Stage3.cs` (the join is rig_anim's, factored
+out of its stage 4 into `BlenderRigAnim.JoinMeshes`) + `vehiclerig.exe --stages 3` in the drill: 10 of 24 recipes equal row for
+row through stage 3, 12 left at stage 3 by name, the 2 FBX by name; 41 of 42 fixture jobs equal (four new for stage 3:
+`fx_r_wheels`, `fx_r_axis`, `fx_r_many`, `fx_r_missing_wheel`), the tread fixture left; 457,526 rows; eleven plants, one per
+rule, each caught on its own job; 1,776 tests. The review before the PR found four defects, fixed with a fixture and a plant
+each: the join's empty slot for a slot-less mesh, the exit line's plain name, `bound_box` stale after stage 2 (Blender measures
+a wheel on its pre-reduction box), and nodes in no scene - the script CRASHES in stage 1 on them (the Orphan Nodes collection is
+not in the view layer); static tracks now rig as body parts. After: 47 of 47 fixture jobs equal through stage 3, 457,633 rows;
+1,776 tests. Review of PR #178 fixes Python repr escaping for non-printable Unicode part names (a real-script regression
+and an independent exhaustive Unicode checksum), and adds 15 stage-three semantic counterexamples plus an intact supported
+control to the gate; altered bones previously passed its stage-two-only tamper checks. After: 1,785 unit tests, 57 of 71
+full jobs equal through stage 3 (457,633 rows; all 47 fixtures, 10 saved recipes; 12 later branches and two FBX left by name).
+Temporary probes also match freed-name reuse, blank pitch and NaN pitch with a one-frame cycle. Rules in `docs/Testing.md`. Next: (d) part d2, the sail, rigging and flag bones.
 - **rig_anim.py's socket sort exit reads a freed edit bone** — OPEN (2026-10-14, found by the stage 4 fixtures). The
   "would sort BEFORE its parent" error prints `_parent.name` after `bpy.ops.object.mode_set(mode='OBJECT')` has freed
   the edit bones: four Blender runs of `fx_s4_socket_sort` printed the right name once, an empty name once, and twice

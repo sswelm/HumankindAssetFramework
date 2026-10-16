@@ -134,6 +134,7 @@ for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
                 code_exit = e.code
             except Exception as e:
                 died = "%s: %s" % (type(e).__name__, e)
+                died = died.replace(chr(10), chr(92) + "n")   # one row: a newline in the text (Blender's operator errors end in one) as a backslash and an n
             for l in out.getvalue().split("\n"):
                 if l.startswith("RIGANIM"):
                     print("LOG\t%d\t%s" % (n, l))

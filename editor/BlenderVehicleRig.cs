@@ -37,6 +37,8 @@ public static partial class BlenderVehicleRig
         public string TagError;                     // the first malformed reduce tag's VEHICLE ERROR after the merge (defaultreduce, shroudreduce, gunreduce, windowreduce), or null
         public string NamesDie;                     // a positional names file the script cannot open: the FileNotFoundError it dies of after the merge, or null
         public string DialsDie;                     // a dial (argv[7..25]) Python cannot parse: the exception it dies of before the orientation, or null
+        public string AxisArg = "";                 // argv[6].upper(): the wheels' axle override (X, Y, Z) or anything else = AUTO (the thinnest extent)
+        public bool RockOn;                         // the WAVE ROCK is on: a RootHull bone under Root carries everything that would skin to Root
     }
 
     static readonly (string role, int index)[] NamesArgv =
@@ -169,6 +171,22 @@ public static partial class BlenderVehicleRig
                 if (!TryPyFloat(At(idx), out double v)) { a.DialsDie = "ValueError: could not convert string to float: " + VehicleProbe.Input.PyRepr(At(idx)); break; }
                 if (integral && (double.IsNaN(v) || double.IsInfinity(v))) { a.DialsDie = (double.IsNaN(v) ? "ValueError: cannot convert float NaN to integer" : "OverflowError: cannot convert float infinity to integer"); break; }
             }
+        // the stage 3 readings (when the dials parse): axis_arg = argv[6].upper(); rock_on (vehicle_rig.py 1085-1107) - rock_deg =
+        // max(0, min(45, float(argv[17]))) or 0, rock_frames = max(0, int(float(argv[18]))) or 0, the pitch max(0, min(45,
+        // float(argv[21]))) or 2.4 when blank; a frame count of 0 or less takes `frames` (max(2, int(argv[7])) >= 2) once either
+        // amplitude is positive; rock_on = (rock_deg > 0 or pitch > 0) and rock_frames >= 2. Python's min/max keep their FIRST
+        // argument unless the second compares past it, so a NaN amplitude clamps to 45.
+        a.AxisArg = PyUpper(At(6));
+        if (a.DialsDie == null)
+        {
+            double Amp(int i, double dflt) => argv.Count > i && At(i).Trim().Length > 0 && TryPyFloat(At(i), out double v) ? PyMax(0.0, PyMin(45.0, v)) : dflt;
+            double rockDeg = Amp(17, 0.0), pitch = Amp(21, 2.4);
+            double rockFrames = 0.0;
+            if (argv.Count > 18 && At(18).Trim().Length > 0 && TryPyFloat(At(18), out double rf)) rockFrames = Math.Max(0.0, Math.Truncate(rf));
+            bool any = rockDeg > 0.0 || pitch > 0.0;
+            if (any && rockFrames <= 0.0) rockFrames = 2.0;   // `frames`, at least 2
+            a.RockOn = any && rockFrames >= 2.0;
+        }
         // MODEL ORIENTATION (argv[23] "rx,ry,rz" degrees): [float(v) for v in split(",")] padded with zeros and cut to three - two
         // values are read, a fourth is dropped; only a value float() refuses is the WARN
         if (argv.Count > 23 && At(23).Trim().Length > 0)
@@ -188,6 +206,11 @@ public static partial class BlenderVehicleRig
     }
 
     /// <summary>min(95.0, max(0.0, v)) as Python evaluates it: max keeps 0.0 unless v is greater (so nan gives 0), min keeps 95 unless v is less.</summary>
+    /// <summary>Python's max(a, b) / min(a, b) on two floats: the first argument unless the second compares past it.</summary>
+    static double PyMax(double a, double b) => b > a ? b : a;
+    static double PyMin(double a, double b) => b < a ? b : a;
+    /// <summary>str.upper() for the axle override; only "X", "Y" and "Z" are told apart, and only x, y and z upper-case to those.</summary>
+    static string PyUpper(string s) => s.ToUpperInvariant();
     static double PyClamp95(double v) { double m = v > 0.0 ? v : 0.0; return m < 95.0 ? m : 95.0; }
 
     /// <summary>int(str): whitespace around, a sign, digits with single underscores between them - nothing else.</summary>
@@ -337,7 +360,9 @@ public static partial class BlenderVehicleRig
                 path2.Replace('\\', '/').Split('/').Last(), meshes2.Count, f2[1], f2[2], VehicleProbe.G5(scl2[0]), VehicleProbe.G5(scl2[1]), VehicleProbe.G5(scl2[2])));
             if (bmn != null) s.Logs.Add("VEHICLE MERGE: B bbox min (" + Py(bmn[0], 2) + ", " + Py(bmn[1], 2) + ", " + Py(bmn[2], 2) + ") max (" + Py(bmx[0], 2) + ", " + Py(bmx[1], 2) + ", " + Py(bmx[2], 2) + ")");
             // the second import's objects join the scene after the first's; its actions join bpy.data.actions (sorted by name)
+            foreach (var o2 in s2.Objects) if (o2.Collection > 0) o2.Collection += 100;   // the second file's Orphan Nodes: linked after the first's
             s.Objects.AddRange(s2.Objects);
+            BlenderRigAnim.SortByCollection(s.Objects);
             s.Actions.AddRange(s2.Actions);
             BlenderExportTree.StableSort(s.Actions, (x, y) => BlenderDeploy.IdNameCmp(x.Name, y.Name));
             Note(s, "a second model merged");
@@ -375,6 +400,10 @@ public static partial class BlenderVehicleRig
         {
             var own = objs.Where(o => o.Name.StartsWith("B_", StringComparison.Ordinal) == (prefix == "B_")).ToList();
             if (own.Count != 1) continue;
+            // view_layer.objects.active = the one object (unguarded): an object of the Orphan Nodes collection (a node in no scene) is
+            // not in the view layer, and the assignment raises - the script dies here
+            // (Blender's operator error ends in a newline; the dump writes it as a backslash and an n)
+            if (own[0].Collection > 0) { s.Dies = "RuntimeError: Error: ViewLayer 'ViewLayer' does not contain object '" + own[0].Name + "'\\n"; Note(s, "the one part a node in no scene: the split's death"); return s; }
             SplitLoose(s, own[0], names);
             objs = s.Objects.Where(o => o.Type == "MESH" && o.Mesh.Vertices > 0).ToList();
             Note(s, "a single mesh object split into its loose parts");
@@ -432,6 +461,9 @@ public static partial class BlenderVehicleRig
         // _apply_transforms makes `objs[0]` active: with every part Ignored the list is empty and the IndexError lands in _guard - its
         // ERROR line (the traceback goes to stderr), exit 1
         if (objs.Count == 0) { s.Logs.Add("VEHICLE ERROR: rig step crashed:"); s.Exits = true; Note(s, "every part ignored: the script's crash"); return s; }
+        // ... and selects every part: an object of the importer's Orphan Nodes collection (a node in no scene) is not in the view
+        // layer, so select_set raises ("cannot be selected because it is not in View Layer") - the same crash line, exit 1
+        if (objs.Any(o => o.Collection > 0)) { s.Logs.Add("VEHICLE ERROR: rig step crashed:"); s.Exits = true; Note(s, "a part of a node in no scene: select_set's crash"); return s; }
         // ---- transform_apply(location, rotation, scale): a multi-user mesh copied first, the whole matrix into the data
         var dataUsers = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var o in objs) dataUsers[o.DataName] = (dataUsers.TryGetValue(o.DataName, out int c) ? c : 0) + 1;
@@ -556,12 +588,13 @@ public static partial class BlenderVehicleRig
             }
             var copy = new BlenderRigAnim.SceneObject
             {
-                Name = names.ObjectPool.Unique(o.Name), Type = "MESH", DataName = names.MeshPool.Unique(o.DataName), Mesh = sub, Source = o.Source,
+                Name = names.ObjectPool.Unique(o.Name), Type = "MESH", DataName = names.MeshPool.Unique(o.DataName), Mesh = sub, Source = o.Source, Collection = o.Collection,
                 Props = new[] { (float[])o.Props[0].Clone(), (float[])o.Props[1].Clone(), (float[])o.Props[2].Clone() }, Local = (float[])o.Local.Clone(), World = (float[])o.World.Clone(),
             };
             made.Add(copy);
         }
-        s.Objects.AddRange(made);   // linked after every object the scene holds
+        s.Objects.AddRange(made);   // linked after every object of the original's collection (separate links the copies to its collections)
+        BlenderRigAnim.SortByCollection(s.Objects);
         string dbg = Environment.GetEnvironmentVariable("VEHICLERIG_DEBUG_FACES");
         if (!string.IsNullOrEmpty(dbg))
             foreach (var x in new[] { o }.Concat(made))

@@ -38,6 +38,8 @@ public static partial class BlenderVehicleRig
             var rnames = a.Names.TryGetValue(role, out var nl) ? nl : new List<string>();
             double pct = a.Reduce.TryGetValue(role, out double p) ? p : 0.0;
             if (rnames.Count == 0 || pct <= 0.5) continue;
+            // bpy.ops.object.mode_set: the operator call updates the view layer first - every object's bounds_eval is current again
+            foreach (var so in s.Objects) { so.EvalMin = null; so.EvalMax = null; }
             bool weld = label != "RIGGING" && label != "SHROUD";
             var rows = new List<(BlenderRigAnim.SceneObject o, int v0, int vmid, int target, int v1, int vraw, bool weld, string name, float ratio)>();
             foreach (string rn in rnames)
@@ -49,7 +51,10 @@ public static partial class BlenderVehicleRig
                 var bm = FromMeshData(o.Mesh, layers, faceNormals: true, vertexNormals: false);
                 if (timing) Console.Error.WriteLine($"TIME   from_mesh {sw.ElapsedMilliseconds} ms");
                 // weld within each material: the vertices whose corners all share one material index, grouped as first met
-                LocalBox(o.Mesh, out var mn, out var mx);
+                // o.dimensions reads the bounds as last evaluated (bounds_eval): a part listed twice in one tier sees its first pass's
+                // input
+                float[] mn, mx;
+                if (o.EvalMin != null) { mn = o.EvalMin; mx = o.EvalMax; } else LocalBox(o.Mesh, out mn, out mx);
                 float dim = 0f;
                 for (int k = 0; k < 3; k++) { float ext = (float)(mx[k] - mn[k]); if (ext > dim) dim = ext; }   // o.dimensions at an identity transform, max()
                 double dimD = dim == 0f ? 1.0 : dim;
@@ -94,6 +99,8 @@ public static partial class BlenderVehicleRig
                 var d2 = ToMeshData(bm, layers, o.Mesh);
                 if (timing) Console.Error.WriteLine($"TIME   to_mesh {sw.ElapsedMilliseconds} ms");
                 if (weld) for (int f = 0; f < d2.FaceSharp.Length; f++) d2.FaceSharp[f] = false;   // p.use_smooth = True (the weld tiers)
+                // bm.to_mesh only TAGS the mesh: Object.bound_box keeps the last evaluation's bounds until the next update
+                if (o.EvalMin == null) { LocalBox(o.Mesh, out var emn, out var emx); o.EvalMin = emn; o.EvalMax = emx; }
                 o.Mesh = d2;
                 if (Environment.GetEnvironmentVariable("VEHICLERIG_DEBUG_WELD") == rn)
                 {
@@ -126,6 +133,9 @@ public static partial class BlenderVehicleRig
                 rows[i] = (r.o, r.v0, r.vmid, r.target, d3.Vertices, r.vraw, r.weld, r.name, r.ratio);
                 Note(s, "a reduce tier: the decimate modifier applied");
             }
+            // evaluated_depsgraph_get(), when a decimate is pending: every tagged object evaluated, its bounds current
+            if (rows.Any(r => r.o != null)) foreach (var so in s.Objects) { so.EvalMin = null; so.EvalMax = null; }
+            if (s.Objects.Any(so => so.EvalMin != null)) Note(s, "a part's bound_box left stale by the tier (no evaluation after its to_mesh)");
             long rrV0 = 0, rrV1 = 0; int rrN = 0;
             foreach (var r in rows)
             {

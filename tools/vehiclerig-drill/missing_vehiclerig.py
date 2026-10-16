@@ -1,7 +1,8 @@
 """Damaged copies of a vehicle_rig stage dump (tools/vehiclerig_drill.sh): each must be REFUSED by vehiclerig.exe, so that a
 missing or inconsistent record can never pass as evidence. Also writes intact.txt, the control, which must pass, and
 jobs.txt, the jobs file naming just the job the copies hold (the first block that ran all five stages with bones, vertex
-groups, fcurves and GLB rows: every row kind present).
+groups, fcurves and GLB rows: every row kind present). Stage-three controls additionally require the fx_r_wheels fixture;
+intact_s3.txt/jobs_s3.txt hold its supported rig and S3_* copies alter one stage-three value, with the seal repaired.
 
 usage: missing_vehiclerig.py <output directory> <jobs file> <dump>...
 """
@@ -10,7 +11,7 @@ import os, sys, hashlib
 out = sys.argv[1]
 os.makedirs(out, exist_ok=True)
 jobs = [l.rstrip("\r") for l in open(sys.argv[2], encoding="utf-8").read().split("\n") if l.startswith("JOB\t") or l.startswith("FAST\t")]
-lines = None
+lines = None; stage3_lines = None
 for d in sys.argv[3:]:
     rows = [l.rstrip("\r") for l in open(d, encoding="utf-8").read().split("\n") if l.strip()]
     starts = [i for i, l in enumerate(rows) if l.startswith("JOB\t")] + [len(rows)]
@@ -21,10 +22,9 @@ for d in sys.argv[3:]:
         job0 = next((j for j in jobs if j.split("\t")[1] == key0), None)
         src_ok = job0 is not None and job0.split("\t")[3].lower().rsplit(".", 1)[-1] in ("glb", "gltf")
         soup = any(l.startswith("LOG\t2\tVEHICLE RIGGING ") or l.startswith("LOG\t2\tVEHICLE SHROUD ") for l in block)
-        if src_ok and not soup and "STAGE\t5" in block and any(l.startswith("VG\t") for l in block) and any(l.startswith("FC\t") for l in block) and any(l.startswith("X\tGLB\t") for l in block):
-            lines = block; break
-    if lines is not None:
-        break
+        if key0 == "fx_r_wheels" and "STAGE\t3" in block: stage3_lines = block
+        if lines is None and src_ok and not soup and "STAGE\t5" in block and any(l.startswith("VG\t") for l in block) and any(l.startswith("FC\t") for l in block) and any(l.startswith("X\tGLB\t") for l in block):
+            lines = block
 if lines is None:
     raise RuntimeError("no job ran through all five stages with groups, fcurves and a GLB: nothing to damage")
 key = lines[0].split("\t")[1]
@@ -204,6 +204,33 @@ if i_cn >= 0: write("S2_MESH_normals", with_field(i_cn, 17, flip_bits(lines[i_cn
 i_col = next((i for i, l in enumerate(lines) if l.startswith("MESH\t2\t") and l.split("\t")[18] != "-"), -1)
 if i_col >= 0:
     v = lines[i_col].split("\t")[18]; write("S2_MESH_colours", with_field(i_col, 18, v[:-1] + ("0" if v[-1] != "0" else "1")))
+# Stage 3 needs a supported seed: the first full recipe may take a branch left to a later port.
+# The wheel fixture exercises the frame, role sets and join, including colours and an imported action.
+if stage3_lines is None:
+    raise RuntimeError("no fx_r_wheels stage 3 dump: no supported evidence for the stage 3 guards")
+stage3_key = stage3_lines[0].split("\t")[1]
+stage3_job = next(j for j in jobs if j.split("\t")[1] == stage3_key)
+open(os.path.join(out, "jobs_s3.txt"), "w", encoding="utf-8", newline="\n").write(stage3_job + "\n")
+write("intact_s3", stage3_lines)
+lines = stage3_lines  # first/with_field/insert below address the supported stage-three seed
+st3 = first(lambda l: l == "STAGE\t3")
+write("S3_LOG_extra", insert(st3, "LOG\t3\tVEHICLE planted: a rig line the script never printed"))
+i_log3 = first(lambda l: l.startswith("LOG\t3\t")); write("S3_LOG_text", replace(i_log3, lines[i_log3] + " (changed)"))
+i_scene3 = first(lambda l: l.startswith("SCENE\t3\t")); write("S3_SCENE_frame", with_field(i_scene3, 3, "251"))
+i_obj3 = first(lambda l: l.startswith("OBJ\t3\t")); write("S3_OBJ_matrix", with_field(i_obj3, 10, flip_bits(lines[i_obj3].split("\t")[10])))
+write("S3_OBJ_parent", with_field(i_obj3, 4, "-"))
+i_mesh3 = first(lambda l: l.startswith("MESH\t3\t")); write("S3_MESH_hash", with_field(i_mesh3, 6, flip_bits(lines[i_mesh3].split("\t")[6])))
+write("S3_MESH_loops", with_field(i_mesh3, 7, flip_bits(lines[i_mesh3].split("\t")[7])))
+write("S3_MESH_uv", with_field(i_mesh3, 10, flip_bits(lines[i_mesh3].split("\t")[10])))
+i_color3 = first(lambda l: l.startswith("MESH\t3\t") and l.split("\t")[18] != "-")
+v = lines[i_color3].split("\t")[18]; write("S3_MESH_colours", with_field(i_color3, 18, flip_bits(v)))
+i_vg3 = first(lambda l: l.startswith("VG\t3\t")); write("S3_VG_weights", with_field(i_vg3, 5, flip_bits(lines[i_vg3].split("\t")[5])))
+i_bone3 = first(lambda l: l.startswith("BONE\t3\t") and l.split("\t")[3].startswith("Wheel_"))
+write("S3_BONE_length", with_field(i_bone3, 6, flip_bits(lines[i_bone3].split("\t")[6])))
+write("S3_BONE_rest", with_field(i_bone3, 10, flip_bits(lines[i_bone3].split("\t")[10])))
+write("S3_BONE_parent", with_field(i_bone3, 4, "Root"))
+i_pb3 = first(lambda l: l.startswith("PB\t3\t")); write("S3_PB_location", with_field(i_pb3, 4, flip_bits(lines[i_pb3].split("\t")[4])))
+i_act3 = first(lambda l: l.startswith("ACT\t3\t")); write("S3_ACT_range", with_field(i_act3, 3, flip_bits(lines[i_act3].split("\t")[3])))
 for name in sorted(os.listdir(out)):
-    if name.endswith(".txt") and name not in ("intact.txt", "jobs.txt", "jobs_exit.txt", "jobs_fast.txt"):
+    if name.endswith(".txt") and name not in ("intact.txt", "jobs.txt", "jobs_exit.txt", "jobs_fast.txt", "jobs_s3.txt", "intact_s3.txt"):
         print(name[:-4])

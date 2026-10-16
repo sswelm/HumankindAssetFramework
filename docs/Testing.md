@@ -1857,6 +1857,85 @@ do not prove each branch was reached.
 Scoped out, named: a name listed twice in one tier's list would name its second datablock differently
 (the Lab lists a part once).
 
+**Step (d), stage 3 of item (5), part d1: the frame every rig shares (2026-10-16).** Stage 3 is 1,382 lines of branches keyed on
+the role lists, so it is ported by branch: `editor/BlenderVehicleRig.Stage3.cs` declines a job by name ("stage 3: the ... is not
+modelled yet") when a list a later part ports is non-empty - turrets, guns, muzzles, cradles, trails, rotors, tail rotors,
+sails, flags, oars, tracks - and the drill (`--stages 3`) counts that job as left, any other decline as a FAIL. What part d1
+runs, against vehicle_rig.py 1515-2896: the wheel clustering - per wheel name `find()` (a missing one is the script's VEHICLE
+ERROR with the part list as Python prints a list of str, and exit 1), the part's `world_bbox` (`VehicleProbe.WorldBox`: the
+local bound_box corners through matrix_world), `(max(s), c, s, name)` sorted by `-max(s)` (Python's stable sort keeps the list
+order on a tie), a part joining the FIRST cluster whose anchor centre lies within `0.75 * m` of it (Vector.length: float32
+products summed in double from the last component) - the armature `VehicleRig` (object and datablock names made unique),
+`Root` (0,0,0)-(0,0.25,0) and, under the wave rock, `RootHull` (0,0,0)-(0,0.2,0) beneath it as the body bone; `rock_on` is
+`(rock_deg > 0 or pitch > 0) and rock_frames >= 2` with Python's `min(45, max(0, x))` (a NaN amplitude clamps to 45), a blank
+pitch reading 2.4, and a frame count of 0 or less taking the clip's (at least 2) - so the Lab's one-frame cycle leaves the rock
+off; one `Wheel_%02d` bone per cluster at the anchor's centre, its tail `c + axle * max(0.05, max(s) * 0.25)` in float32
+(`axle_axis`: X, Y or Z forced by argv[6].upper(), else the thinnest extent, the first on a tie), parented to the body bone;
+leaving edit mode is `RestFromEditBones`, the BONE and PB rows in depth-first order with children in creation order. The
+RUDDER, PRESERVE and FLIP sets resolve their names through `find_opt` (a missing one is a WARN) and print their lines (the
+preserve dial as `%.0f`). The skinning gives every part the script holds (the scene's meshes with vertices, in scene order)
+one vertex group - its cluster's bone, else the body bone - at weight 1, an Armature modifier on VehicleRig and VehicleRig as
+parent (local transform and parent inverse kept; the armature is the identity). The join per bone groups the parts by bone, a
+rudder, preserve or flip part keyed apart (`__rud__`, `__keep__`, `__flip__` + its name, in that precedence), joins each group
+into its first member - `BlenderRigAnim.JoinMeshes`, rig_anim's join factored out of its stage 4 unchanged (the rig_anim drill
+equal as before, 134 of 145) - frees the joined objects' names and renames the survivor `Mesh_<key>`, the object's own name freed
+first and the new one made unique (a part still holding `Mesh_Wheel_00` gives the wheel group `Mesh_Wheel_00.001`). Measured:
+10 of the 24 recipes equal row for row through stage 3 (Ribauldequin, the organ gun with 147 wheel parts in two clusters,
+the Jurassic gatling, Bremen, the Teutonic's 21 meshes, the Romanic, the Svea, the Dragon, the Espana, the canoe with its
+RootHull), 12 left at stage 3 by name, the 2 FBX by name; 41 of 42 fixture jobs equal, the tread fixture left; 457,526 rows
+(FULL). Four fixtures hold the branches no recipe takes: `fx_r_wheels` (two tires thin along Y, an off-centre bolt joining
+the first, a cube wheel whose tied extents give X, the tire listed twice, the rock's RootHull, a rudder also listed as preserve,
+a missing name in each set, a body part named `Mesh_Wheel_00`, an animated part joined into the hull), `fx_r_axis` (the axle
+forced to Z; a one-frame rock cycle), `fx_r_many` (101 clusters, the last `Wheel_100`; a 0.1-wide wheel on the 0.05 length
+floor; a hundred tied sizes), `fx_r_missing_wheel` (find()'s exit in stage 3, `EXIT:3:`; the exit fixtures now name their
+stage in a table). Eleven plants, one per rule, each caught on its own job with a row difference: the axle tie, the RootHull,
+the one-frame cycle, the rudder/preserve precedence, the length floor, the stable sort, the 0.75 threshold, the name
+collision, the WARN lines, the exit, and a wheel bone's head moved by 1e-6 (caught on Ribauldequin). The first plant run
+reported all eleven caught when every job had died of a missing Newtonsoft.Json beside the plant's exe; the harness now
+refuses an exception as a verdict. `Tests/VehicleRigStage3Tests.cs` holds the axle on ties and Python's repr of a part name
+(quotes, backslash, control characters; the missing-wheel fixture also names a part with a quote). Not held by a committed fixture: a mesh object without
+vertices (left in the scene unskinned by `mesh_objects()`; a glTF primitive cannot carry none), the blank argv[21] (the Lab
+always writes the pitch), the joined objects' freed names being reused later in stage 3.
+A source-reading review of part d1 before its PR found four defects; each is now fixed, fixtured and planted. (1) The join
+drops nothing: Blender's `join_materials` adds the EMPTY slot for a member without material slots (its faces take it) and drops
+the set again only when the active has none and nothing else joined - vehicle_rig keeps material-less meshes, rig_anim drops
+them, so only the vehicle path meets it (`fx_r_slotless`: a slot-less active, a slot-less second member, two slot-less parts).
+(2) find()'s exit prints the missing name with a plain `'%s'` (the part list is repr'd): `fx_r_missing_wheel` misses
+"Ghost's wheel" beside a part named Bob's. (3) `Object.bound_box` is the bounds of the LAST EVALUATION (`bounds_eval`), not of
+the mesh: `bm.to_mesh` only tags, every `bpy.ops` call updates the view layer before it runs (`bpy_operator_function.cc`), so a
+part reduced by stage 2's last active tier with no decimate after it reaches stage 3 with its pre-reduction box - measured
+(`fx_r_stale`: a wheel whose weld drops its extreme corner; Blender's Wheel_00 length 0.25000125 is the stale extent's, the
+current mesh gives 0.25). The model keeps each part's pre-change box from its tier's to_mesh until the next evaluation (the next
+active tier's `mode_set`, the decimate's `evaluated_depsgraph_get`, stage 3's `mode_set`); stage 2's own `o.dimensions` reads it
+too; six jobs reach stage 3 with a stale box, one wheel is measured on it. (4) Nodes in no glTF scene go to the importer's
+"Orphan Nodes" collection, listed after the scene's own objects - and that collection is NOT in the view layer when the script
+runs (measured, the reviewer's reading was the scene order only): `_apply_transforms`' `select_set` raises inside `_guard` (the
+crash line, exit 1: `fx_r_orphan`, and `fx_r_noscene` whose one scene lists no node), and a source whose ONE mesh is such a
+node dies unguarded at the split's `view_layer.objects.active =` (`fx_r_noscene1`: "RuntimeError: Error: ViewLayer
+'ViewLayer' does not contain object 'Hull'" - Blender's operator error ends in a newline, which the dump harnesses now write as
+a backslash and an n, keeping the DIES row one row under its seal). The stage model orders scene objects by collection
+(`SceneObject.Collection`) at the import, the second model, the split and the armature's link. Also: static tracks rig as plain
+body parts (`tracks_static` empties `track_names`; `fx_b_merge2` is now equal through stage 3), and `max(0.05, nan)` is 0.05.
+Six plants, one per fix, each caught on its fixture - the stale-box plant first passed: the fixture's twin was the vertex the
+weld KEEPS, so the mesh still reached the extreme; the corner and the twin swapped, it bites. Measured after: 10 of 24
+recipes and 47 of 47 fixture jobs equal through stage 3 (457,633 rows), 12 recipes left at stage 3 by name, the 2 FBX by name;
+1,776 tests.
+
+Review of PR #178 (2026-10-16): `find()`'s missing-part list differed for valid names containing non-breaking spaces or
+invisible format characters: Python repr escapes them, while the port wrote them literally. The missing-wheel fixture now
+contains both and failed before the fix. `PyStrRepr` uses the pinned Blender runtime's Unicode 15.1 printability ranges;
+.NET Framework and Mono carry older Unicode data, so their category tables would also misclassify newer printable names.
+Eight additional examples and an independent checksum of repr over all 1,112,064 Unicode scalars hold the escaping,
+quote choice and supplementary characters (Blender 5.1.2 / Python 3.13.9). Unit suite: 1,785 passing.
+The gate previously tested damaged rows only through stages 1 and 2; a sealed stage-three bone edit passed that comparison.
+It now requires the intact `fx_r_wheels` seed to be fully compared with no named decline, then rejects 15 independently
+sealed stage-three changes: added/changed logs, frame, object matrix/parent, mesh positions/loops/UV/colours, weights,
+wheel-bone length/rest/parent, pose location and action range. Each must fail in the stage-three comparison, independently
+of the parser and checksum. All 15 fail for the intended reason; the intact control passes. FULL=1 VEHICLERIG_KEYS=1 positive comparison: 57 of 71 jobs equal through stage 3, 457,633 rows (all 47 fixtures and 10 of
+24 saved recipes; 12 later rig branches and two FBX sources left by name). Three independent temporary native jobs also
+match for freed object-name reuse, blank pitch's default RootHull, and NaN pitch with a one-frame cycle. Those branches
+still lack committed native fixtures.
+
 Review of PR #176 (2026-10-15): a full run found the organ gun's newly recorded custom-normal shorts differed after
 stage one's loose split. Blender's separate operator decodes the source BMesh normals into a vector layer and
 re-encodes that layer on each copied component; copying the original shorts misses that quantization. The model now

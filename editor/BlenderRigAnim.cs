@@ -227,6 +227,10 @@ public static class BlenderRigAnim
         public float[] EvalLocal, EvalParentInverse;   // the object): an evaluation still uses these - the copy's local matrix and parentinv
         public BlenderNames.BlenderObject Source;
         public MeshData Mesh;                     // a mesh object's data
+        public int Collection;                    // the collection it is linked to: 0 the scene's own, 1.. a child collection in link
+                                                  // order (the glTF importer's "Orphan Nodes"); scene.objects lists the scene's own first
+        public float[] EvalMin, EvalMax;          // Object.bound_box when the mesh changed after the last depsgraph evaluation (the
+                                                  // object's bounds_eval, the local box of the mesh as last evaluated), else null
     }
 
     public sealed class MeshData
@@ -305,6 +309,120 @@ public static class BlenderRigAnim
         public List<ActionData> AllActs = new List<ActionData>();   // stage 3's all_acts: the primary and the role clips (rebaked when folded)
         public string PrimaryAction;                                 // stage 3: the primary clip's action as it ends (the GLB route's clip name)
         public List<(string role, string action)> RoleActions = new List<(string, string)>();   // stage 3: each state role's action (role_acts), in the script's order
+    }
+
+    /// <summary>bpy.ops.object.join with `active` the active object and `order` the joined meshes, the active first and the rest
+    /// in scene order: the vertices moved into the active's space (join_positions), the materials by first appearance, the
+    /// vertex groups united by name, the UV layers by index, the colour layers by name (CustomData_merge_layout), the
+    /// custom normals, the edges and the sharp_edge attribute; the active keeps its object, its armature modifier and its
+    /// render colour; the other objects leave the scene (their children become roots). Shared by rig_anim's stage 4 and
+    /// vehicle_rig's join per bone. Returns null, or the reason the case is Blender's.</summary>
+    /// <summary>scene.objects order: the scene's own collection first, then each child collection in link order; within one, link order.</summary>
+    internal static void SortByCollection(List<SceneObject> objects) => BlenderExportTree.StableSort(objects, (x, y) => x.Collection.CompareTo(y.Collection));
+
+    internal static string JoinMeshes(Stage1 s, SceneObject active, List<SceneObject> order)
+    {
+        var joined = active;
+        var worldToActive = BlenderEigen.InvertM4(active.World);
+        int nv = order.Sum(o => o.Mesh.Vertices), nf = order.Sum(o => o.Mesh.Faces.Length / 3);
+        var d = new MeshData { Vertices = nv, Positions = new float[3 * nv], Faces = new int[3 * nf], FaceMaterial = new int[nf], FaceSharp = new bool[nf] };
+        // the materials by first appearance
+        // (join_materials: a member without slots adds the empty one - its faces take it; the set is dropped again only when the
+        // active has no slots and nothing else joined it)
+        var mats = new List<string>(); var matSeen = new HashSet<string>(StringComparer.Ordinal); bool hasNull = false;
+        foreach (var o in order)
+        {
+            if (o.Mesh.Materials.Count == 0) { if (!hasNull) { hasNull = true; mats.Add(null); } continue; }
+            foreach (var mt in o.Mesh.Materials) { if (mt == null) { if (!hasNull) { hasNull = true; mats.Add(null); } } else if (matSeen.Add(mt)) mats.Add(mt); }
+        }
+        if (active.Mesh.Materials.Count == 0 && mats.Count == 1 && mats[0] == null) mats.Clear();
+        if (order.Any(o => o.Mesh.Materials.Count == 0) && mats.Count > 0) Note(s, "a mesh without material slots joined (the empty slot)");
+        d.Materials = mats;
+        // the vertex groups by name in object order
+        var groups = new List<string>(); var groupIndex = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var o in order) foreach (var g in o.Mesh.Groups) if (!groupIndex.ContainsKey(g)) { groupIndex[g] = groups.Count; groups.Add(g); }
+        d.Groups = groups;
+        if (groups.Count > 0) { d.DefNr = new List<int>[nv]; d.DefWeight = new List<float>[nv]; for (int v = 0; v < nv; v++) { d.DefNr[v] = new List<int>(); d.DefWeight[v] = new List<float>(); } }
+        // the UV layers by name
+        int numUv = order.Max(o => o.Mesh.UvAll.Count);
+        for (int i = 0; i < numUv; i++) d.UvAll.Add(new float[2 * 3 * nf]);
+        // the colour layers: CustomData_merge_layout unites them by name (the active's first, then each other mesh's new
+        // ones); a mesh without a layer gets zeros - {0, 0, 0, 0} per corner (measured on fx_groups: the result's layer is
+        // allocated clear and a source's bytes copied only where it has the layer); a layer held per vertex by one mesh and
+        // per corner by another is left by name
+        if (order.Any(o => o.Mesh.Colors.Count > 0))
+        {
+            var layers = new List<(string name, bool point)>();
+            foreach (var o in order) foreach (var c in o.Mesh.Colors) if (!layers.Any(l => l.name == c.name)) layers.Add((c.name, c.point));
+            foreach (var (name, point) in layers)
+            {
+                var bytes = new List<byte>();
+                foreach (var o in order)
+                {
+                    var have = o.Mesh.Colors.FirstOrDefault(c => c.name == name);
+                    if (have.name != null)
+                    {
+                        if (have.point != point) { return "the join unites a colour layer held per vertex with one held per corner"; }
+                        bytes.AddRange(have.bytes);
+                    }
+                    else for (int i = 0, n = 4 * (point ? o.Mesh.Vertices : o.Mesh.Faces.Length); i < n; i++) bytes.Add(0);
+                }
+                d.Colors.Add((name, point, bytes.ToArray()));
+            }
+            Note(s, "colour layers through the join" + (layers.Count > 0 && order.Any(o => o.Mesh.Colors.Count < layers.Count) ? " (a mesh without one: zeros)" : ""));
+        }
+        bool anyNormals = order.Any(o => o.Mesh.CustomNormal != null);
+        if (anyNormals) d.CustomNormal = new short[2 * 3 * nf];
+        var edges = new List<int>();
+        int vo = 0, fo = 0;
+        foreach (var o in order)
+        {
+            var src = o.Mesh; int snf = src.Faces.Length / 3;
+            var transform = VehicleProbe.MulM4(worldToActive, o.World);
+            var moved = (float[])src.Positions.Clone(); TransformPoints(transform, moved, src.Vertices);   // join_positions: transform_points
+            for (int v = 0; v < src.Vertices; v++)
+            {
+                d.Positions[3 * (vo + v)] = moved[3 * v]; d.Positions[3 * (vo + v) + 1] = moved[3 * v + 1]; d.Positions[3 * (vo + v) + 2] = moved[3 * v + 2];
+                if (d.DefNr != null && src.DefNr != null)
+                    for (int i = 0; i < src.DefNr[v].Count; i++) { d.DefNr[vo + v].Add(groupIndex[src.Groups[src.DefNr[v][i]]]); d.DefWeight[vo + v].Add(src.DefWeight[v][i]); }
+            }
+            int[] indexMap = null;
+            if (mats.Count > 1 && src.Materials.Count == 0) indexMap = new[] { mats.IndexOf(null) };   // the slot-less member's faces: the empty slot
+            else if (mats.Count > 1)
+            {
+                indexMap = new int[src.Materials.Count];
+                for (int k = 0; k < src.Materials.Count; k++) indexMap[k] = src.Materials[k] == null ? mats.IndexOf(null) : mats.IndexOf(src.Materials[k]);
+            }
+            for (int f = 0; f < snf; f++)
+            {
+                for (int k = 0; k < 3; k++)
+                {
+                    int c = 3 * (fo + f) + k, sc = 3 * f + k;
+                    d.Faces[c] = src.Faces[sc] + vo;
+                    for (int i = 0; i < numUv; i++) if (i < src.UvAll.Count) { d.UvAll[i][2 * c] = src.UvAll[i][2 * sc]; d.UvAll[i][2 * c + 1] = src.UvAll[i][2 * sc + 1]; }
+                    if (anyNormals && src.CustomNormal != null) { d.CustomNormal[2 * c] = src.CustomNormal[2 * sc]; d.CustomNormal[2 * c + 1] = src.CustomNormal[2 * sc + 1]; }
+                }
+                d.FaceMaterial[fo + f] = indexMap == null ? 0 : (src.Materials.Count == 0 ? indexMap[0] : indexMap[Math.Max(0, Math.Min(src.FaceMaterial[f], src.Materials.Count - 1))]);
+                d.FaceSharp[fo + f] = src.FaceSharp != null && src.FaceSharp[f];
+            }
+            if (src.Edges != null) foreach (int e in src.Edges) edges.Add(e + vo);
+            vo += src.Vertices; fo += snf;
+        }
+        d.Edges = edges.ToArray();
+        // the sharp_edge attribute joins when any source has it (the importer's, all false), the others' edges reading false
+        if (order.Any(o => o.Mesh.EdgeSharp != null))
+        {
+            var es = new List<bool>();
+            foreach (var o in order) { int ne = o.Mesh.Edges == null ? 0 : o.Mesh.Edges.Length / 2; for (int e = 0; e < ne; e++) es.Add(o.Mesh.EdgeSharp != null && o.Mesh.EdgeSharp[e]); }
+            d.EdgeSharp = es.ToArray();
+        }
+        d.Uv = active.Mesh.UvAll.Count > 0 ? d.UvAll[0] : null;   // the active's active UV layer, by its name
+        if (active.Mesh.UvAll.Count == 0 && numUv > 0) Note(s, "the join's active object has no UV layer (no active layer on the result)");
+        d.ArmatureModifier = active.Mesh.ArmatureModifier;
+        d.ActiveColor = active.Mesh.ActiveColor;   // the result is the active's mesh: its render colour index stays, a merged layer or not
+        joined.Mesh = d;
+        foreach (var o in order) if (o != active) { foreach (var c in s.Objects) if (c.Parent == o) { c.Parent = null; c.Dirty = true; } s.Objects.Remove(o); }
+        return null;
     }
 
     static void Note(Stage1 s, string what) { if (!s.Notes.Contains(what)) s.Notes.Add(what); }
@@ -386,6 +504,19 @@ public static class BlenderRigAnim
             so.Type = o.Kind == BlenderNames.ObjectKind.Mesh ? "MESH" : o.Kind == BlenderNames.ObjectKind.Armature ? "ARMATURE" : "EMPTY";
             if (o.Kind == BlenderNames.ObjectKind.Mesh) so.Mesh = meshOf[o];
             s.Objects.Add(so); byName[o.Name] = so;
+        }
+        // nodes in no scene (none, or not under the one scene's roots) go to the importer's "Orphan Nodes" collection, a child of
+        // the active one: scene.objects lists them after every object of the scene's own collection
+        {
+            var inScene = m.Scenes.Count == 0 ? new HashSet<int>() : m.NodesInScene(m.Scene >= 0 ? m.Scene : 0);
+            bool orphans = s.Objects.Any(so => so.Source.GltfNode >= 0 && !inScene.Contains(so.Source.GltfNode));
+            if (orphans)
+            {
+                if (s.Objects.Any(so => so.Source.GltfNode < 0)) { s.Fallback = "nodes in no scene beside an object no node makes: its collection is not modelled"; return s; }
+                foreach (var so in s.Objects) so.Collection = inScene.Contains(so.Source.GltfNode) ? 0 : 1;
+                SortByCollection(s.Objects);
+                Note(s, "nodes in no scene (the Orphan Nodes collection)");
+            }
         }
         foreach (var so in s.Objects)
         {
@@ -1571,96 +1702,8 @@ public static class BlenderRigAnim
             var order = new List<SceneObject> { active }; order.AddRange(meshes.Where(o => o != active));
             if (order.Contains(active.Parent)) { s.Fallback = "the join's active object is parented to a joined mesh"; return; }
             EvaluateFrame(s, s.FrameCurrent);   // the operator's evaluated depsgraph
-            var worldToActive = BlenderEigen.InvertM4(active.World);
-            int nv = order.Sum(o => o.Mesh.Vertices), nf = order.Sum(o => o.Mesh.Faces.Length / 3);
-            var d = new MeshData { Vertices = nv, Positions = new float[3 * nv], Faces = new int[3 * nf], FaceMaterial = new int[nf], FaceSharp = new bool[nf] };
-            // the materials by first appearance
-            var mats = new List<string>(); var matSeen = new HashSet<string>(StringComparer.Ordinal); bool hasNull = false;
-            foreach (var o in order) foreach (var mt in o.Mesh.Materials) { if (mt == null) { if (!hasNull) { hasNull = true; mats.Add(null); } } else if (matSeen.Add(mt)) mats.Add(mt); }
-            d.Materials = mats;
-            // the vertex groups by name in object order
-            var groups = new List<string>(); var groupIndex = new Dictionary<string, int>(StringComparer.Ordinal);
-            foreach (var o in order) foreach (var g in o.Mesh.Groups) if (!groupIndex.ContainsKey(g)) { groupIndex[g] = groups.Count; groups.Add(g); }
-            d.Groups = groups;
-            if (groups.Count > 0) { d.DefNr = new List<int>[nv]; d.DefWeight = new List<float>[nv]; for (int v = 0; v < nv; v++) { d.DefNr[v] = new List<int>(); d.DefWeight[v] = new List<float>(); } }
-            // the UV layers by name
-            int numUv = order.Max(o => o.Mesh.UvAll.Count);
-            for (int i = 0; i < numUv; i++) d.UvAll.Add(new float[2 * 3 * nf]);
-            // the colour layers: CustomData_merge_layout unites them by name (the active's first, then each other mesh's new
-            // ones); a mesh without a layer gets zeros - {0, 0, 0, 0} per corner (measured on fx_groups: the result's layer is
-            // allocated clear and a source's bytes copied only where it has the layer); a layer held per vertex by one mesh and
-            // per corner by another is left by name
-            if (order.Any(o => o.Mesh.Colors.Count > 0))
-            {
-                var layers = new List<(string name, bool point)>();
-                foreach (var o in order) foreach (var c in o.Mesh.Colors) if (!layers.Any(l => l.name == c.name)) layers.Add((c.name, c.point));
-                foreach (var (name, point) in layers)
-                {
-                    var bytes = new List<byte>();
-                    foreach (var o in order)
-                    {
-                        var have = o.Mesh.Colors.FirstOrDefault(c => c.name == name);
-                        if (have.name != null)
-                        {
-                            if (have.point != point) { s.Fallback = "the join unites a colour layer held per vertex with one held per corner"; return; }
-                            bytes.AddRange(have.bytes);
-                        }
-                        else for (int i = 0, n = 4 * (point ? o.Mesh.Vertices : o.Mesh.Faces.Length); i < n; i++) bytes.Add(0);
-                    }
-                    d.Colors.Add((name, point, bytes.ToArray()));
-                }
-                Note(s, "colour layers through the join" + (layers.Count > 0 && order.Any(o => o.Mesh.Colors.Count < layers.Count) ? " (a mesh without one: zeros)" : ""));
-            }
-            bool anyNormals = order.Any(o => o.Mesh.CustomNormal != null);
-            if (anyNormals) d.CustomNormal = new short[2 * 3 * nf];
-            var edges = new List<int>();
-            int vo = 0, fo = 0;
-            foreach (var o in order)
-            {
-                var src = o.Mesh; int snf = src.Faces.Length / 3;
-                var transform = VehicleProbe.MulM4(worldToActive, o.World);
-                var moved = (float[])src.Positions.Clone(); TransformPoints(transform, moved, src.Vertices);   // join_positions: transform_points
-                for (int v = 0; v < src.Vertices; v++)
-                {
-                    d.Positions[3 * (vo + v)] = moved[3 * v]; d.Positions[3 * (vo + v) + 1] = moved[3 * v + 1]; d.Positions[3 * (vo + v) + 2] = moved[3 * v + 2];
-                    if (d.DefNr != null && src.DefNr != null)
-                        for (int i = 0; i < src.DefNr[v].Count; i++) { d.DefNr[vo + v].Add(groupIndex[src.Groups[src.DefNr[v][i]]]); d.DefWeight[vo + v].Add(src.DefWeight[v][i]); }
-                }
-                int[] indexMap = null;
-                if (mats.Count > 1)
-                {
-                    indexMap = new int[src.Materials.Count];
-                    for (int k = 0; k < src.Materials.Count; k++) indexMap[k] = src.Materials[k] == null ? mats.IndexOf(null) : mats.IndexOf(src.Materials[k]);
-                }
-                for (int f = 0; f < snf; f++)
-                {
-                    for (int k = 0; k < 3; k++)
-                    {
-                        int c = 3 * (fo + f) + k, sc = 3 * f + k;
-                        d.Faces[c] = src.Faces[sc] + vo;
-                        for (int i = 0; i < numUv; i++) if (i < src.UvAll.Count) { d.UvAll[i][2 * c] = src.UvAll[i][2 * sc]; d.UvAll[i][2 * c + 1] = src.UvAll[i][2 * sc + 1]; }
-                        if (anyNormals && src.CustomNormal != null) { d.CustomNormal[2 * c] = src.CustomNormal[2 * sc]; d.CustomNormal[2 * c + 1] = src.CustomNormal[2 * sc + 1]; }
-                    }
-                    d.FaceMaterial[fo + f] = indexMap == null ? 0 : (src.Materials.Count == 0 ? 0 : indexMap[Math.Max(0, Math.Min(src.FaceMaterial[f], src.Materials.Count - 1))]);
-                    d.FaceSharp[fo + f] = src.FaceSharp != null && src.FaceSharp[f];
-                }
-                if (src.Edges != null) foreach (int e in src.Edges) edges.Add(e + vo);
-                vo += src.Vertices; fo += snf;
-            }
-            d.Edges = edges.ToArray();
-            // the sharp_edge attribute joins when any source has it (the importer's, all false), the others' edges reading false
-            if (order.Any(o => o.Mesh.EdgeSharp != null))
-            {
-                var es = new List<bool>();
-                foreach (var o in order) { int ne = o.Mesh.Edges == null ? 0 : o.Mesh.Edges.Length / 2; for (int e = 0; e < ne; e++) es.Add(o.Mesh.EdgeSharp != null && o.Mesh.EdgeSharp[e]); }
-                d.EdgeSharp = es.ToArray();
-            }
-            d.Uv = active.Mesh.UvAll.Count > 0 ? d.UvAll[0] : null;   // the active's active UV layer, by its name
-            if (active.Mesh.UvAll.Count == 0 && numUv > 0) Note(s, "the join's active object has no UV layer (no active layer on the result)");
-            d.ArmatureModifier = active.Mesh.ArmatureModifier;
-            d.ActiveColor = active.Mesh.ActiveColor;   // the result is the active's mesh: its render colour index stays, a merged layer or not
-            joined.Mesh = d;
-            foreach (var o in order) if (o != active) { foreach (var c in s.Objects) if (c.Parent == o) { c.Parent = null; c.Dirty = true; } s.Objects.Remove(o); }
+            var why = JoinMeshes(s, active, order);
+            if (why != null) { s.Fallback = why; return; }
             Note(s, "meshes joined");
         }
         var me = joined.Mesh;

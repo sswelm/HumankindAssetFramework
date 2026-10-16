@@ -402,11 +402,11 @@ static class VehicleRigDrill
     {
         Console.OutputEncoding = new UTF8Encoding(false);
         bool requireKeys = false; int offset = 0; int stages = 0;   // --stages N: the C# model of stages 1..N (editor/BlenderVehicleRig.cs) against the dump
-        const string usage = "usage: vehiclerig.exe [--keys] [--stages 1|2] <jobs file> <dump>...";
+        const string usage = "usage: vehiclerig.exe [--keys] [--stages 1|2|3] <jobs file> <dump>...";
         while (offset < args.Length && args[offset].StartsWith("--", StringComparison.Ordinal))
         {
             if (args[offset] == "--keys") requireKeys = true;
-            else if (args[offset] == "--stages" && offset + 1 < args.Length && int.TryParse(args[offset + 1], NumberStyles.None, CultureInfo.InvariantCulture, out stages) && stages >= 1 && stages <= 2) offset++;
+            else if (args[offset] == "--stages" && offset + 1 < args.Length && int.TryParse(args[offset + 1], NumberStyles.None, CultureInfo.InvariantCulture, out stages) && stages >= 1 && stages <= 3) offset++;
             else { Console.WriteLine(usage); return 2; }
             offset++;
         }
@@ -501,7 +501,7 @@ static class VehicleRigDrill
 /// Blender by name is counted LEFT and said; the census (MODEL rows) names the branches the jobs took and the reasons left.</summary>
 static class StageDrill
 {
-    public static int Compared, Equal, Left; public static long RowsEqual;
+    public static int Compared, Equal, Left, Left3; public static long RowsEqual;
     static readonly SortedDictionary<string, int> Census = new SortedDictionary<string, int>(StringComparer.Ordinal);
 
     static float FromHex(string h) => BitConverter.ToSingle(BitConverter.GetBytes(Convert.ToUInt32(h, 16)), 0);
@@ -645,6 +645,39 @@ static class StageDrill
                 }
             }
         }
+        // stage 3 on the scene stage 2 left (step (d)): the rig; a decline naming a branch a later part ports ("stage 3: the ... is not
+        // modelled yet") is LEFT, any other decline a FAIL
+        if (problems.Count == 0 && stages >= 3 && !model.Exits && model.Dies == null)
+        {
+            int notes0 = model.Notes.Count;
+            try { BlenderVehicleRig.RunStage3(model, args); }
+            catch (Exception e) { problems.Add($"stage 3 model: {e.GetType().Name}: {e.Message}"); }
+            for (int i = notes0; i < model.Notes.Count; i++) Census[model.Notes[i]] = (Census.TryGetValue(model.Notes[i], out int c3) ? c3 : 0) + 1;
+            if (problems.Count == 0 && model.Fallback != null)
+            {
+                Census["LEFT: " + model.Fallback] = (Census.TryGetValue("LEFT: " + model.Fallback, out int c) ? c : 0) + 1;
+                bool named3 = model.Fallback.StartsWith("stage 3: the ", StringComparison.Ordinal) && model.Fallback.EndsWith(" is not modelled yet", StringComparison.Ordinal);
+                if (!named3) { Console.WriteLine($"FAIL {key}: stage 3 model leaves this job to Blender: {model.Fallback}"); return false; }
+                Equal--; Left++; Left3++; Console.WriteLine($"STAGE3 {key}: left to Blender by name: {model.Fallback}"); return true;
+            }
+            if (problems.Count == 0)
+            {
+                if (model.Exits)
+                {
+                    if (d.StoppedAt != 3 || d.Exit != "1") problems.Add("stage 3 model: the script exits in stage 3 here, " + (d.StoppedAt == 0 ? "Blender ran it through" : $"Blender stopped at stage {d.StoppedAt}" + (d.Died != null ? " by dying" : "")));
+                    else if (!d.LogsOfStop.SequenceEqual(model.Logs3)) problems.Add("stage 3 model: the stop's VEHICLE lines differ: here [" + string.Join(" | ", model.Logs3) + "], Blender [" + string.Join(" | ", d.LogsOfStop) + "]");
+                    else { RowsEqual += model.Logs3.Count; Console.WriteLine($"STAGE3 {key}: equal - the script's exit in stage 3, {model.Logs3.Count} VEHICLE lines"); }
+                }
+                else if (!d.Stages.TryGetValue(3, out var s3)) problems.Add("stage 3 model: the scene runs on here, Blender stopped in stage 3: " + (d.Exit != null ? string.Join(" | ", d.LogsOfStop) : d.Died));
+                else
+                {
+                    var rows3 = BlenderRigAnim.Render(model, 3, fcSlot: true);
+                    DumpModelRows(key, 3, rows3, model.Logs3);
+                    CompareRows(3, rows3, model.Logs3, s3, problems);
+                    if (problems.Count == 0) { RowsEqual += RowCount(s3); Console.WriteLine($"STAGE3 {key}: equal - {Describe(s3)}"); }
+                }
+            }
+        }
         if (problems.Count > 0) { foreach (var p in problems) Console.WriteLine($"FAIL {key}: {p}"); return false; }
         return true;
     }
@@ -652,6 +685,6 @@ static class StageDrill
     public static void Summary(int stages)
     {
         foreach (var kv in Census) Console.WriteLine($"MODEL {kv.Value} {kv.Key}");
-        Console.WriteLine($"STAGES {stages} jobs {Compared} equal {Equal} left {Left} rows {RowsEqual}");
+        Console.WriteLine($"STAGES {stages} jobs {Compared} equal {Equal} left {Left} rows {RowsEqual} left3 {Left3}");
     }
 }
