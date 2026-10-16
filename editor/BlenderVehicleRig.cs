@@ -34,7 +34,7 @@ public static partial class BlenderVehicleRig
         public readonly List<string> Logs = new List<string>();   // the VEHICLE lines the rig path prints at argument time (a bad orientation, static tracks), after the merge
         public string Problem;                      // the script's own exit on its arguments before the import (bright=, flagfold=: a VEHICLE ERROR), or null
         public string PreDie;                       // an exception before the import (int(float(inf)) of a flagfold frame count), or null
-        public string TagError;                     // the first malformed reduce tag's VEHICLE ERROR after the merge (defaultreduce, shroudreduce, gunreduce, windowreduce), or null
+        public string TagError;                     // the first malformed reduce tag's VEHICLE ERROR after the merge (defaultreduce, shroudreduce, gunreduce, turretreduce, windowreduce), or null
         public string NamesDie;                     // a positional names file the script cannot open: the FileNotFoundError it dies of after the merge, or null
         public string Unsupported;                  // an argument the C# does not read as Python does (a names file that is not UTF-8): left to Blender by name
         public string FoldDie;                      // a sail-fold or oar dial (argv 72, 73, 75, 56-59, read unconditionally) Python cannot parse: the exception, or null
@@ -137,9 +137,9 @@ public static partial class BlenderVehicleRig
             a.Reduce[role] = PyClamp95(v);
         }
         a.TracksStatic = argv.Count > 16 && At(16).Trim() == "1";
-        // the reduce tags in the script's order - defaultreduce, shroudreduce, gunreduce, windowreduce -, the names before the LAST
+        // the reduce tags in the script's order - defaultreduce, shroudreduce, gunreduce, turretreduce, windowreduce -, the names before the LAST
         // '|', the percent after it; the first malformed one is the script's VEHICLE ERROR after the merge (its exit)
-        foreach (var tag in new[] { "defaultreduce", "shroudreduce", "gunreduce", "windowreduce" })
+        foreach (var tag in new[] { "defaultreduce", "shroudreduce", "gunreduce", "turretreduce", "windowreduce" })
         {
             string role = tag == "shroudreduce" ? "shroud" : tag == "windowreduce" ? "window" : tag == "defaultreduce" ? "default" : null;
             if (role != null) a.Names[role] = new List<string>();
@@ -151,20 +151,20 @@ public static partial class BlenderVehicleRig
             string namesText = bar >= 0 ? spec.Substring(0, bar) : null, err = null;
             try
             {
-                if (tag == "gunreduce")
+                if (tag == "gunreduce" || tag == "turretreduce")   // percent-only: the parts travel positionally (argv[11], argv[5])
                 {
                     double pct = VehicleProbe.Input.PyFloat(spec);
-                    if (double.IsNaN(pct) || double.IsInfinity(pct)) err = "not a finite percent: " + VehicleProbe.Input.PyRepr(arg);
-                    else a.Reduce["guns"] = PyClamp95(pct);
+                    if (double.IsNaN(pct) || double.IsInfinity(pct)) err = "not a finite percent: " + PyStrRepr(arg);
+                    else a.Reduce[tag == "gunreduce" ? "guns" : "turrets"] = PyClamp95(pct);
                 }
                 else if (tag == "windowreduce")
                 {
-                    if (bar < 0) err = "no '|' between the names and the percent: " + VehicleProbe.Input.PyRepr(arg);
+                    if (bar < 0) err = "no '|' between the names and the percent: " + PyStrRepr(arg);
                     else
                     {
                         double pct = VehicleProbe.Input.PyFloat(spec.Substring(bar + 1));
-                        if (double.IsNaN(pct) || double.IsInfinity(pct)) err = "not a finite percent: " + VehicleProbe.Input.PyRepr(arg);
-                        else { a.Reduce[role] = PyClamp95(pct); if (namesText.Trim().Length > 0) a.Names[role] = NameList(namesText); }
+                        if (double.IsNaN(pct) || double.IsInfinity(pct)) err = "not a finite percent: " + PyStrRepr(arg);
+                        else { a.Reduce[role] = PyClamp95(pct); if (PyNonBlank(namesText)) a.Names[role] = NameList(namesText); }
                     }
                 }
                 else
@@ -172,12 +172,14 @@ public static partial class BlenderVehicleRig
                     if (bar < 0) err = "not enough values to unpack (expected 2, got 1)";   // `names, pct = spec.rsplit("|", 1)`
                     else
                     {
-                        if (namesText.Trim().Length > 0) a.Names[role] = NameList(namesText);
+                        if (PyNonBlank(namesText)) a.Names[role] = NameList(namesText);
                         a.Reduce[role] = PyClamp95(VehicleProbe.Input.PyFloat(spec.Substring(bar + 1)));   // min(95, max(0, float(pct))): inf and nan pass here
                     }
                 }
             }
-            catch (FormatException e) { err = e.Message; }
+            // float() errors quote the offending percent with Python's repr(), including its quote choice and Unicode
+            // escapes. The shared probe parser's legacy error formatter is not the script's exact representation.
+            catch (FormatException) { err = "could not convert string to float: " + PyStrRepr(tag == "gunreduce" || tag == "turretreduce" ? spec : spec.Substring(bar + 1)); }
             catch (Exception e) when (NamesFileException(e))
             {
                 string death = NamesFileError(e, namesText, out string unsupported);
@@ -185,7 +187,7 @@ public static partial class BlenderVehicleRig
                 else err = death.Substring(death.IndexOf(": ", StringComparison.Ordinal) + 2);   // str(exception), without its type
             }
             if (err != null && a.TagError == null)
-                a.TagError = tag == "gunreduce" || tag == "windowreduce" ? "VEHICLE ERROR: malformed " + tag + " argument: " + err
+                a.TagError = tag == "gunreduce" || tag == "turretreduce" || tag == "windowreduce" ? "VEHICLE ERROR: malformed " + tag + " argument: " + err
                            : "VEHICLE ERROR: malformed " + tag + " argument: " + arg + " (" + err + ")";
         }
         // _role_marked: every role list but ignore (the tagged shroud/window lists too); static tracks are emptied before it is built

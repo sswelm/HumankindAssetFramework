@@ -28,7 +28,7 @@ public sealed class VehicleRigArgs
     public float gunPivot = 0.5f, gunDeployElev; public float recoilDist; public int recoilFrames = 16, recoilLead;
     public bool doubleSided, fixInsideOut;
     public float oarSweepDeg = 24f, oarDipDeg = 18f; public int oarFrames = 24; public float oarBladeRollDeg, oarLiftDeg, oarRakeDeg, oarPivotPct = 30f, oarLengthPct = 100f;
-    public float riggingReducePct = 75f, structureReducePct = 50f, bodyReducePct, oarReducePct, sailReducePct, rudderReducePct, wheelReducePct, flipReducePct, preserveReducePct, detailReducePct, shroudReducePct, gunReducePct, windowReducePct, defaultReducePct;
+    public float riggingReducePct = 75f, structureReducePct = 50f, bodyReducePct, oarReducePct, sailReducePct, rudderReducePct, wheelReducePct, flipReducePct, preserveReducePct, detailReducePct, shroudReducePct, gunReducePct, turretReducePct, windowReducePct, defaultReducePct;
     public bool sailFoldIdle; public int sailFoldFrames = 12; public float sailFoldAngleDeg = 270f; public bool sailFoldReverse; public float sailFoldSag;
     public bool flagFoldOn; public float flagFoldDeg; public int flagFoldFrames = 12;
     public string srcFile2 = ""; public float model2OffX, model2OffY, model2OffZ, model2RotX, model2RotY, model2RotZ, model2ScaleX = 1f, model2ScaleY = 1f, model2ScaleZ = 1f;
@@ -85,6 +85,7 @@ public static class VehicleRigArgLine
         if (a.defaultReducePct > 0f) Q("defaultreduce=" + Names(a, "default") + "|" + F1(a.defaultReducePct));
         Q("shroudreduce=" + Names(a, "shroud") + "|" + F1(a.shroudReducePct));
         if (a.gunReducePct > 0f) Q("gunreduce=" + F1(a.gunReducePct));
+        if (a.turretReducePct > 0f) Q("turretreduce=" + F1(a.turretReducePct));
         Q("windowreduce=" + Names(a, "window") + "|" + F1(a.windowReducePct));
         if (a.partTxFile != null) Q("parttx=@" + a.partTxFile);
         return t;
@@ -163,7 +164,7 @@ public static class VehicleRigArgLine
         a.oarPivotPct = Flt(o, "oarPivotPct", 30f); a.oarLengthPct = Flt(o, "oarLengthPct", 100f);
         a.riggingReducePct = Flt(o, "riggingReducePct", 75f); a.structureReducePct = Flt(o, "structureReducePct", 50f); a.bodyReducePct = Flt(o, "bodyReducePct", 0f);
         a.oarReducePct = Flt(o, "oarReducePct", 0f); a.sailReducePct = Flt(o, "sailReducePct", 0f); a.rudderReducePct = Flt(o, "rudderReducePct", 0f); a.wheelReducePct = Flt(o, "wheelReducePct", 0f);
-        a.flipReducePct = Flt(o, "flipReducePct", 0f); a.defaultReducePct = Flt(o, "defaultReducePct", 0f); a.shroudReducePct = Flt(o, "shroudReducePct", 0f); a.gunReducePct = Flt(o, "gunReducePct", 0f);
+        a.flipReducePct = Flt(o, "flipReducePct", 0f); a.defaultReducePct = Flt(o, "defaultReducePct", 0f); a.shroudReducePct = Flt(o, "shroudReducePct", 0f); a.gunReducePct = Flt(o, "gunReducePct", 0f); a.turretReducePct = Flt(o, "turretReducePct", 0f);
         a.windowReducePct = Flt(o, "windowReducePct", 0f); a.preserveReducePct = Flt(o, "preserveReducePct", 0f); a.detailReducePct = Flt(o, "detailReducePct", 0f);
         a.sailFoldIdle = Bool(o, "sailFoldIdle", false);
         int sff = Int(o, "sailFoldFrames", 12); a.sailFoldFrames = sff <= 0 ? 12 : sff;

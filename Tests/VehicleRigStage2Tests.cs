@@ -29,8 +29,14 @@ public class VehicleRigStage2Tests
         Assert.Null(b.TagError);
         argv.Add("defaultreduce=|x");
         Assert.StartsWith("VEHICLE ERROR: malformed defaultreduce argument", BlenderVehicleRig.ParseArgs(argv).TagError);
+        // turretreduce= (2026-10-16): percent-only like gunreduce, clamped the same way, absent = 0
+        Assert.Equal(40.0, BlenderVehicleRig.ParseArgs(With("turretreduce=40")).Reduce["turrets"]);
+        Assert.Equal(95.0, BlenderVehicleRig.ParseArgs(With("turretreduce=150")).Reduce["turrets"]);
+        Assert.False(BlenderVehicleRig.ParseArgs(Argv()).Reduce.TryGetValue("turrets", out double none) && none != 0.0);
         Assert.StartsWith("ValueError", BlenderVehicleRig.ParseArgs(Argv(new Dictionary<int, string> { [52] = "half" })).NamesDie);
     }
+
+    static List<string> With(string token) { var argv = Argv(); argv.Add(token); return argv; }
 
     /// <summary>A unit box as a glTF carries it: four vertices per face, 24 in all, twelve triangles; vertex v of face f at 4f + v.</summary>
     static BlenderRigAnim.MeshData SplitBox(int[] faceMaterial = null)

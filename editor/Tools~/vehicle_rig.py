@@ -975,6 +975,14 @@ try:
     gun_reduce = _tagged_reduce_pct(argv, "gunreduce")
 except Exception as _e:
     print("VEHICLE ERROR: malformed gunreduce argument: %s" % _e); sys.exit(1)
+# TURRET (2026-10-16, user: "could you add a turret reduce slider"): the turret parts as a WELD tier of their own,
+# exactly as GUN - solid geometry, the names already sent positionally at argv[5], so the tag carries the percent
+# alone. Runs in the tier loop before the Turret bone is measured, so its pivot comes from the reduced mesh.
+#   turretreduce=<percent>
+try:
+    turret_reduce = _tagged_reduce_pct(argv, "turretreduce")
+except Exception as _e:
+    print("VEHICLE ERROR: malformed turretreduce argument: %s" % _e); sys.exit(1)
 # WINDOW (2026-09-25, user: "add the reducable part type Window"): glazing - portholes, bridge windows, windshields -
 # as a WELD tier of its own (a pane is a sheet, not rope soup). Its parts travel nowhere else, so the tag carries the
 # names file like shroudreduce=, sent at every dial setting so the names reach _role_marked (review of PR #89: at 0 %
@@ -1426,7 +1434,7 @@ _lap("prep")
 _by_name = {}
 for _o in objs:
     _by_name.setdefault(_o.name, _o)   # first wins, matching find_opt's linear-scan order
-for _rlabel, _rnames, _rpct in (("DEFAULT", default_names, default_reduce), ("RIGGING", rigging_names, rigging_reduce), ("SHROUD", shroud_names, shroud_reduce), ("STRUCTURE", structure_names, structure_reduce), ("BODY", body_names, body_reduce), ("OAR", oar_names, oar_reduce), ("SAIL", sail_names, sail_reduce), ("RUDDER", rudder_names, rudder_reduce), ("WHEEL", wheel_names, wheel_reduce), ("GUN", gun_names, gun_reduce), ("WINDOW", window_names, window_reduce), ("FLIP", flip_names, flip_reduce), ("PRESERVE", preserve_names, preserve_reduce), ("DETAIL", detail_names, detail_reduce)):
+for _rlabel, _rnames, _rpct in (("DEFAULT", default_names, default_reduce), ("RIGGING", rigging_names, rigging_reduce), ("SHROUD", shroud_names, shroud_reduce), ("STRUCTURE", structure_names, structure_reduce), ("BODY", body_names, body_reduce), ("OAR", oar_names, oar_reduce), ("SAIL", sail_names, sail_reduce), ("RUDDER", rudder_names, rudder_reduce), ("WHEEL", wheel_names, wheel_reduce), ("TURRET", turret_names, turret_reduce), ("GUN", gun_names, gun_reduce), ("WINDOW", window_names, window_reduce), ("FLIP", flip_names, flip_reduce), ("PRESERVE", preserve_names, preserve_reduce), ("DETAIL", detail_names, detail_reduce)):
     if not _rnames or _rpct <= 0.5:
         continue
     try:

@@ -67,6 +67,18 @@ public class VehicleRigArgsTests
     }
 
     [Fact]
+    public void The_turret_dial_is_a_percent_only_tag_after_the_gun_dial_and_absent_at_zero()
+    {
+        // 2026-10-16: the Turret tier, as gunreduce - the turret names already travel positionally at argv[5]
+        var a = Sample();
+        Assert.DoesNotContain(VehicleRigArgLine.RigArgv(a).Select(x => x.value), v => v.StartsWith("turretreduce=", StringComparison.Ordinal));
+        a.gunReducePct = 20f; a.turretReducePct = 33.333f;
+        var t = VehicleRigArgLine.RigArgv(a).Select(x => x.value).ToList();
+        int gun = t.IndexOf("gunreduce=20"), tur = t.IndexOf("turretreduce=33.3");
+        Assert.True(gun > 0 && tur == gun + 1, string.Join(" ", t.Skip(76)));
+    }
+
+    [Fact]
     public void The_second_model_brightness_and_placement_tags_appear_in_the_windows_order()
     {
         var a = Sample();

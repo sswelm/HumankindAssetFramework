@@ -5,6 +5,12 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Vehicle Lab: Turret is a reduce tier** (user: "could you add a turret reduce slider"). A **Turret reduce (%)** slider
+  in *Vertices control*, enabled when a part is marked Turret: a weld tier like Gun (seams welded within each material, then
+  collapse), run before the Turret bone is measured, so its pivot comes from the reduced mesh. Saved in the recipe;
+  reaches the rig script as a tagged `turretreduce=<percent>`, absent while the dial is 0, so every existing recipe and
+  golden generates exactly as before. The C# port of the rig carries the same tier.
+
 - **Model Fuser view modes:** "Not in a fuse group" is replaced by "Deleted Parts" and "Not marked".
   "Not marked" shows ungrouped parts without a deletion mark, keeping the remaining parts to review separate
   from the deletion queue. Existing marks, group assignments and part numbering stay unchanged.
