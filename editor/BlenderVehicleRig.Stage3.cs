@@ -42,7 +42,11 @@ public static partial class BlenderVehicleRig
     {
         if (s.Fallback != null || s.Exits || s.Dies != null) return;
         foreach (var (role, branch) in Stage3Later)
+        {
+            if (role == "tracks" && a.TracksStatic) continue;   // tracks_static empties track_names: the treads rig as plain body parts
             if (a.Names.TryGetValue(role, out var l) && l.Count > 0) { s.Fallback = "stage 3: " + branch + " is not modelled yet"; return; }
+        }
+        if (a.TracksStatic && a.Names.TryGetValue("tracks", out var st) && st.Count > 0) Note(s, "static tracks rigged as body parts");
         if (s.Armature != null || s.Objects.Any(o => o.Type == "ARMATURE")) { s.Fallback = "stage 3: an armature in the scene before the rig"; return; }
         var names = s.Names;
         // objs: mesh_objects() at the split, less the ignored parts - the scene's meshes with vertices, in scene order
@@ -54,14 +58,16 @@ public static partial class BlenderVehicleRig
         BlenderRigAnim.SceneObject Find(string name)
         {
             foreach (var o in objs) if (o.Name == name) return o;
-            s.Logs3.Add("VEHICLE ERROR: part " + PyStrRepr(name) + " not found. Parts: [" + string.Join(", ", objs.Select(o => PyStrRepr(o.Name))) + "]");
+            s.Logs3.Add("VEHICLE ERROR: part '" + name + "' not found. Parts: [" + string.Join(", ", objs.Select(o => PyStrRepr(o.Name))) + "]");   // '%s' of the name, repr of the list
             s.Exits = true; Note(s, "a missing structural part: the script's exit in stage 3");
             return null;
         }
         BlenderRigAnim.SceneObject FindOpt(string name) => objs.FirstOrDefault(o => o.Name == name);
         void WorldBbox(BlenderRigAnim.SceneObject o, out float[] c, out float[] size)
         {
-            LocalBox(o.Mesh, out var lmn, out var lmx);
+            // Object.bound_box: the bounds as last evaluated - stage 2's last tier can leave a part's stale (no operator since its to_mesh)
+            float[] lmn, lmx;
+            if (o.EvalMin != null) { lmn = o.EvalMin; lmx = o.EvalMax; Note(s, "a wheel measured on its stale bound_box"); } else LocalBox(o.Mesh, out lmn, out lmx);
             VehicleProbe.WorldBox(VehicleProbe.ToRowMajor(o.World), lmn, lmx, out c, out size);
         }
         double MaxOf(float[] v) { double m = v[0]; if (v[1] > m) m = v[1]; if (v[2] > m) m = v[2]; return m; }   // max(Vector): the first on a tie
@@ -110,7 +116,7 @@ public static partial class BlenderVehicleRig
         {
             var cl = clusters[i];
             var ax = AxleAxis(a.AxisArg, cl.sz);
-            float len = (float)Math.Max(0.05, cl.m * 0.25);   // max(0.05, max(s) * 0.25) into the float multiply
+            double q = cl.m * 0.25; float len = (float)(q > 0.05 ? q : 0.05);   // max(0.05, max(s) * 0.25) into the float multiply (Python: 0.05 on a NaN)
             var t = new[] { (float)(cl.c[0] + (float)(ax[0] * len)), (float)(cl.c[1] + (float)(ax[1] * len)), (float)(cl.c[2] + (float)(ax[2] * len)) };
             int id = AddBone(string.Format(CultureInfo.InvariantCulture, "Wheel_{0:00}", i), (float[])cl.c.Clone(), t, body);
             foreach (var wn in cl.names) boneOf[wn] = boneNames[id - RigBoneBase];
@@ -136,7 +142,9 @@ public static partial class BlenderVehicleRig
             Name = armObjName, Type = "ARMATURE", DataName = armDataName, World = (float[])identity.Clone(), Local = (float[])identity.Clone(),
             Props = new[] { new float[3], new[] { 1f, 0f, 0f, 0f }, new[] { 1f, 1f, 1f } },
         };
-        s.Objects.Add(armObj);
+        s.Objects.Add(armObj);   // scene.collection.objects.link: the scene's own collection, after its objects, before any child collection's
+        BlenderRigAnim.SortByCollection(s.Objects);
+        foreach (var so in s.Objects) { so.EvalMin = null; so.EvalMax = null; }   // mode_set(EDIT): the view layer updated
         var ad = new BlenderRigAnim.ArmatureData
         {
             Object = armObj, Rest = rest, BoneNodes = order, PoseProps = new Dictionary<int, float[][]>(), PoseMats = new Dictionary<int, float[]>(),

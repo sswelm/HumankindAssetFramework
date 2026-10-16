@@ -227,6 +227,10 @@ public static class BlenderRigAnim
         public float[] EvalLocal, EvalParentInverse;   // the object): an evaluation still uses these - the copy's local matrix and parentinv
         public BlenderNames.BlenderObject Source;
         public MeshData Mesh;                     // a mesh object's data
+        public int Collection;                    // the collection it is linked to: 0 the scene's own, 1.. a child collection in link
+                                                  // order (the glTF importer's "Orphan Nodes"); scene.objects lists the scene's own first
+        public float[] EvalMin, EvalMax;          // Object.bound_box when the mesh changed after the last depsgraph evaluation (the
+                                                  // object's bounds_eval, the local box of the mesh as last evaluated), else null
     }
 
     public sealed class MeshData
@@ -313,6 +317,9 @@ public static class BlenderRigAnim
     /// custom normals, the edges and the sharp_edge attribute; the active keeps its object, its armature modifier and its
     /// render colour; the other objects leave the scene (their children become roots). Shared by rig_anim's stage 4 and
     /// vehicle_rig's join per bone. Returns null, or the reason the case is Blender's.</summary>
+    /// <summary>scene.objects order: the scene's own collection first, then each child collection in link order; within one, link order.</summary>
+    internal static void SortByCollection(List<SceneObject> objects) => BlenderExportTree.StableSort(objects, (x, y) => x.Collection.CompareTo(y.Collection));
+
     internal static string JoinMeshes(Stage1 s, SceneObject active, List<SceneObject> order)
     {
         var joined = active;
@@ -320,8 +327,16 @@ public static class BlenderRigAnim
         int nv = order.Sum(o => o.Mesh.Vertices), nf = order.Sum(o => o.Mesh.Faces.Length / 3);
         var d = new MeshData { Vertices = nv, Positions = new float[3 * nv], Faces = new int[3 * nf], FaceMaterial = new int[nf], FaceSharp = new bool[nf] };
         // the materials by first appearance
+        // (join_materials: a member without slots adds the empty one - its faces take it; the set is dropped again only when the
+        // active has no slots and nothing else joined it)
         var mats = new List<string>(); var matSeen = new HashSet<string>(StringComparer.Ordinal); bool hasNull = false;
-        foreach (var o in order) foreach (var mt in o.Mesh.Materials) { if (mt == null) { if (!hasNull) { hasNull = true; mats.Add(null); } } else if (matSeen.Add(mt)) mats.Add(mt); }
+        foreach (var o in order)
+        {
+            if (o.Mesh.Materials.Count == 0) { if (!hasNull) { hasNull = true; mats.Add(null); } continue; }
+            foreach (var mt in o.Mesh.Materials) { if (mt == null) { if (!hasNull) { hasNull = true; mats.Add(null); } } else if (matSeen.Add(mt)) mats.Add(mt); }
+        }
+        if (active.Mesh.Materials.Count == 0 && mats.Count == 1 && mats[0] == null) mats.Clear();
+        if (order.Any(o => o.Mesh.Materials.Count == 0) && mats.Count > 0) Note(s, "a mesh without material slots joined (the empty slot)");
         d.Materials = mats;
         // the vertex groups by name in object order
         var groups = new List<string>(); var groupIndex = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -372,7 +387,8 @@ public static class BlenderRigAnim
                     for (int i = 0; i < src.DefNr[v].Count; i++) { d.DefNr[vo + v].Add(groupIndex[src.Groups[src.DefNr[v][i]]]); d.DefWeight[vo + v].Add(src.DefWeight[v][i]); }
             }
             int[] indexMap = null;
-            if (mats.Count > 1)
+            if (mats.Count > 1 && src.Materials.Count == 0) indexMap = new[] { mats.IndexOf(null) };   // the slot-less member's faces: the empty slot
+            else if (mats.Count > 1)
             {
                 indexMap = new int[src.Materials.Count];
                 for (int k = 0; k < src.Materials.Count; k++) indexMap[k] = src.Materials[k] == null ? mats.IndexOf(null) : mats.IndexOf(src.Materials[k]);
@@ -386,7 +402,7 @@ public static class BlenderRigAnim
                     for (int i = 0; i < numUv; i++) if (i < src.UvAll.Count) { d.UvAll[i][2 * c] = src.UvAll[i][2 * sc]; d.UvAll[i][2 * c + 1] = src.UvAll[i][2 * sc + 1]; }
                     if (anyNormals && src.CustomNormal != null) { d.CustomNormal[2 * c] = src.CustomNormal[2 * sc]; d.CustomNormal[2 * c + 1] = src.CustomNormal[2 * sc + 1]; }
                 }
-                d.FaceMaterial[fo + f] = indexMap == null ? 0 : (src.Materials.Count == 0 ? 0 : indexMap[Math.Max(0, Math.Min(src.FaceMaterial[f], src.Materials.Count - 1))]);
+                d.FaceMaterial[fo + f] = indexMap == null ? 0 : (src.Materials.Count == 0 ? indexMap[0] : indexMap[Math.Max(0, Math.Min(src.FaceMaterial[f], src.Materials.Count - 1))]);
                 d.FaceSharp[fo + f] = src.FaceSharp != null && src.FaceSharp[f];
             }
             if (src.Edges != null) foreach (int e in src.Edges) edges.Add(e + vo);
@@ -488,6 +504,19 @@ public static class BlenderRigAnim
             so.Type = o.Kind == BlenderNames.ObjectKind.Mesh ? "MESH" : o.Kind == BlenderNames.ObjectKind.Armature ? "ARMATURE" : "EMPTY";
             if (o.Kind == BlenderNames.ObjectKind.Mesh) so.Mesh = meshOf[o];
             s.Objects.Add(so); byName[o.Name] = so;
+        }
+        // nodes in no scene (none, or not under the one scene's roots) go to the importer's "Orphan Nodes" collection, a child of
+        // the active one: scene.objects lists them after every object of the scene's own collection
+        {
+            var inScene = m.Scenes.Count == 0 ? new HashSet<int>() : m.NodesInScene(m.Scene >= 0 ? m.Scene : 0);
+            bool orphans = s.Objects.Any(so => so.Source.GltfNode >= 0 && !inScene.Contains(so.Source.GltfNode));
+            if (orphans)
+            {
+                if (s.Objects.Any(so => so.Source.GltfNode < 0)) { s.Fallback = "nodes in no scene beside an object no node makes: its collection is not modelled"; return s; }
+                foreach (var so in s.Objects) so.Collection = inScene.Contains(so.Source.GltfNode) ? 0 : 1;
+                SortByCollection(s.Objects);
+                Note(s, "nodes in no scene (the Orphan Nodes collection)");
+            }
         }
         foreach (var so in s.Objects)
         {

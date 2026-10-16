@@ -1896,6 +1896,30 @@ refuses an exception as a verdict. `Tests/VehicleRigStage3Tests.cs` holds the ax
 (quotes, backslash, control characters - no fixture names a part with a quote). Not reached by any job: a mesh object without
 vertices (left in the scene unskinned by `mesh_objects()`; a glTF primitive cannot carry none), the blank argv[21] (the Lab
 always writes the pitch), the joined objects' freed names being reused later in stage 3.
+A source-reading review of part d1 before its PR found four defects; each is now fixed, fixtured and planted. (1) The join
+drops nothing: Blender's `join_materials` adds the EMPTY slot for a member without material slots (its faces take it) and drops
+the set again only when the active has none and nothing else joined - vehicle_rig keeps material-less meshes, rig_anim drops
+them, so only the vehicle path meets it (`fx_r_slotless`: a slot-less active, a slot-less second member, two slot-less parts).
+(2) find()'s exit prints the missing name with a plain `'%s'` (the part list is repr'd): `fx_r_missing_wheel` misses
+"Ghost's wheel" beside a part named Bob's. (3) `Object.bound_box` is the bounds of the LAST EVALUATION (`bounds_eval`), not of
+the mesh: `bm.to_mesh` only tags, every `bpy.ops` call updates the view layer before it runs (`bpy_operator_function.cc`), so a
+part reduced by stage 2's last active tier with no decimate after it reaches stage 3 with its pre-reduction box - measured
+(`fx_r_stale`: a wheel whose weld drops its extreme corner; Blender's Wheel_00 length 0.25000125 is the stale extent's, the
+current mesh gives 0.25). The model keeps each part's pre-change box from its tier's to_mesh until the next evaluation (the next
+active tier's `mode_set`, the decimate's `evaluated_depsgraph_get`, stage 3's `mode_set`); stage 2's own `o.dimensions` reads it
+too; six jobs reach stage 3 with a stale box, one wheel is measured on it. (4) Nodes in no glTF scene go to the importer's
+"Orphan Nodes" collection, listed after the scene's own objects - and that collection is NOT in the view layer when the script
+runs (measured, the reviewer's reading was the scene order only): `_apply_transforms`' `select_set` raises inside `_guard` (the
+crash line, exit 1: `fx_r_orphan`, and `fx_r_noscene` whose one scene lists no node), and a source whose ONE mesh is such a
+node dies unguarded at the split's `view_layer.objects.active =` (`fx_r_noscene1`: "RuntimeError: Error: ViewLayer
+'ViewLayer' does not contain object 'Hull'" - Blender's operator error ends in a newline, which the dump harnesses now write as
+a backslash and an n, keeping the DIES row one row under its seal). The stage model orders scene objects by collection
+(`SceneObject.Collection`) at the import, the second model, the split and the armature's link. Also: static tracks rig as plain
+body parts (`tracks_static` empties `track_names`; `fx_b_merge2` is now equal through stage 3), and `max(0.05, nan)` is 0.05.
+Six plants, one per fix, each caught on its fixture - the stale-box plant first passed: the fixture's twin was the vertex the
+weld KEEPS, so the mesh still reached the extreme; the corner and the twin swapped, it bites. Measured after: 10 of 24
+recipes and 47 of 47 fixture jobs equal through stage 3 (457,633 rows), 12 recipes left at stage 3 by name, the 2 FBX by name;
+1,776 tests.
 
 Review of PR #176 (2026-10-15): a full run found the organ gun's newly recorded custom-normal shorts differed after
 stage one's loose split. Blender's separate operator decodes the source BMesh normals into a vector layer and
