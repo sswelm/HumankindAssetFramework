@@ -39,6 +39,13 @@ Stage 2 (step (c), the weld tiers):
                      collapse to the dial, the new mesh datablock named after the old
   fx_c_tiers         four tiers in one scene: BODY at 50 and STRUCTURE at 30 on two grids, a STRUCTURE name the scene has not (the
                      WARN), a DETAIL dial of exactly 0.5 (the tier skipped), a RUDDER dial of 120 (clamped: "dial 95%")
+Stage 3 (step (d), part d1: the frame every rig shares):
+  fx_r_wheels        two tires thin along Y, an off-centre bolt joining the first (the 0.75 rule), a cube wheel (tied extents: axle X),
+                     the tire listed twice; the wave rock (RootHull); a rudder also listed as preserve, a missing name in each set (the
+                     WARNs); a body part named Mesh_Wheel_00 (the wheel group renamed Mesh_Wheel_00.001); an animated part joined
+  fx_r_axis          the axle forced to Z; the wave on with a one-frame cycle (no RootHull)
+  fx_r_many          101 clusters (the last bone Wheel_100); a 0.1-wide wheel on the 0.05 length floor; a hundred tied sizes
+  fx_r_missing_wheel a wheel name the scene has not: find()'s VEHICLE ERROR and exit in stage 3 (EXIT:3:)
 Exits and deaths (recipes_exit, keys renamed by --exits): fx_x_allignored (every part Ignored: the _guard crash), fx_x_bright (bright=1.5|x),
   fx_x_flagfold (flagfold=a|b), fx_x_defaultreduce (no '|'), fx_x_shroudreduce (a percent float() refuses), fx_x_gunreduce (likewise),
   fx_x_windowreduce (no '|'), fx_x_merge_missing (a second model path that is not there); fx_d_frames (argv[7] "15.0": int() dies),
@@ -273,6 +280,45 @@ def main(out):
     attrs["TEXCOORD_1"] = r.b.accessor([(i / 7.0, 1.0 - i / 35.0) for i in range(36)], "f", "VEC2", minmax=False)
     r.node("ColouredNet", mesh=mesh); r.node("Other", mesh=r.mesh("Other", at=(3, 0, 0), material=ma))
     recipe(out, "fx_c_soup_attributes", r.write(models, "fx_c_soup_attributes"), [("ColouredNet", 15, {}), ("Other", 0, {})], riggingReducePct=90.0)
+    # ---- stage 3 (step (d), part d1: the frame every rig shares)
+    # fx_r_wheels: two tires thin along Y with an off-centre bolt joining the first (the 0.75 rule), a cube wheel (its extents tie:
+    # the axle is the first, X), the tire listed twice; the wave rock on (RootHull carries the body); a rudder that is also listed as
+    # preserve (the rudder key wins), a preserve and a flip part, a missing name in each of the three lists (the WARNs); a body part
+    # named Mesh_Wheel_00 still in the scene when the first wheel group is renamed (Mesh_Wheel_00.001), joined away later; an
+    # animated body part joined into the hull (its world at the current frame)
+    r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
+    r.node("TireL", mesh=r.mesh("TireL", at=(-0.5, -0.5, -0.5), material=ma), translation=[0.0, 2.0, 0.0], scale=[1.0, 0.3, 1.0])
+    r.node("BoltL", mesh=r.mesh("BoltL", at=(0.2, -0.05, 0.2), size=0.1, material=ma), translation=[0.0, 2.0, 0.0])
+    r.node("TireR", mesh=r.mesh("TireR", at=(-0.5, -0.5, -0.5), material=ma), translation=[0.0, -2.0, 0.0], scale=[1.0, 0.3, 1.0])
+    r.node("Cube", mesh=r.mesh("Cube", at=(-0.25, -0.25, -0.25), size=0.5, material=ma), translation=[5.0, 0.0, 0.0])
+    r.node("Hull", mesh=r.mesh("Hull", at=(-1.0, -1.0, 0.0), size=2.0, material=ma))
+    r.node("Mesh_Wheel_00", mesh=r.mesh("Taken", at=(1.5, 0.0, 0.0), size=0.3, material=ma))
+    anim_node = r.node("Turn", mesh=r.mesh("Turn", at=(-1.5, 0.0, 0.0), size=0.3, material=ma))
+    a0 = r.anim("Bob"); r.key(a0, anim_node, "translation", [0.0, 1.0], [(0.0, 0.0, 0.5), (0.0, 0.0, 1.5)])
+    r.node("Rud", mesh=r.mesh("Rud", at=(-3.0, 0.0, 0.0), size=0.4, material=ma))
+    r.node("Keep", mesh=r.mesh("Keep", at=(-3.0, 1.0, 0.0), size=0.4, material=ma))
+    r.node("Flp", mesh=r.mesh("Flp", at=(-3.0, -1.0, 0.0), size=0.4, material=ma))
+    recipe(out, "fx_r_wheels", r.write(models, "fx_r_wheels"),
+           [("TireL", 1, {}), ("BoltL", 1, {}), ("TireR", 1, {}), ("TireL", 1, {}), ("Cube", 1, {}), ("Hull", 0, {}), ("Mesh_Wheel_00", 0, {}),
+            ("Turn", 0, {}), ("Rud", 18, {}), ("Rud", 19, {}), ("Keep", 19, {}), ("Flp", 20, {}), ("GhostRudder", 18, {}), ("GhostKeep", 19, {}),
+            ("GhostFlip", 20, {})],
+           waveEnabled=True, rockDegrees=5.0, rockFrames=15, rockPitchDeg=2.4, preserveReducePct=30.0)
+    # fx_r_axis: the axle forced to Z on a tire thin along Y; the wave on with a one-frame cycle (rock_frames 1 < 2: no RootHull)
+    r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
+    r.node("Tire", mesh=r.mesh("Tire", at=(-0.5, -0.5, -0.5), material=ma), translation=[0.0, 2.0, 0.0], scale=[1.0, 0.3, 1.0])
+    r.node("Hull", mesh=r.mesh("Hull", at=(-1.0, -1.0, 0.0), size=2.0, material=ma))
+    recipe(out, "fx_r_axis", r.write(models, "fx_r_axis"), [("Tire", 1, {}), ("Hull", 0, {})], axisChoice=3, waveEnabled=True, rockDegrees=5.0, rockFrames=1)
+    # fx_r_many: 101 wheels far apart - 101 clusters, the last bone Wheel_100 (the %02d field widens); the first only 0.1 wide (its bone
+    # takes the 0.05 floor; sorted last, it is Wheel_100); the other 100 tie on size (the stable sort keeps their list order)
+    r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
+    for i in range(101):
+        r.node("W%03d" % i, mesh=r.mesh("W%03d" % i, at=(3.0 * i, 0.0, 0.0), size=0.1 if i == 0 else 0.5, material=ma))
+    r.node("Hull", mesh=r.mesh("Hull", at=(0.0, 3.0, 0.0), size=2.0, material=ma))
+    recipe(out, "fx_r_many", r.write(models, "fx_r_many"), [("W%03d" % i, 1, {}) for i in range(101)] + [("Hull", 0, {})])
+    # fx_r_missing_wheel: a wheel name the scene has not - find()'s VEHICLE ERROR and exit in stage 3
+    r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
+    r.node("Hull", mesh=r.mesh("Hull", material=ma)); r.node("Tire", mesh=r.mesh("Tire", at=(3.0, 0.0, 0.0), material=ma))
+    recipe(out, "fx_r_missing_wheel", r.write(models, "fx_r_missing_wheel"), [("Hull", 0, {}), ("Tire", 1, {}), ("Ghost", 1, {})], sub="recipes_exit")
     # brightness on three material chains
     r = Rig(); img = r.image("Albedo", rgb=(120, 80, 40)); tex = r.texture(img)
     flat = r.material("Flat", (0.6, 0.4, 0.2)); direct = r.material("Direct", (1.0, 1.0, 1.0), texture=tex); tint = r.material("Tint", (0.5, 0.25, 0.9), texture=tex)
@@ -290,6 +336,7 @@ def set_tag(argv, tag, value):
 
 EXITS = {
     "fx_d_chunk_splice": ("DIES", lambda a: None),
+    "fx_r_missing_wheel": ("EXIT", lambda a: None),
     "fx_x_allignored": ("EXIT", lambda a: None),
     "fx_x_bright": ("EXIT", lambda a: set_tag(a, "bright", "1.5|x")),
     "fx_x_flagfold": ("EXIT", lambda a: set_tag(a, "flagfold", "a|b")),
@@ -308,6 +355,10 @@ EXITS = {
 }
 
 
+# the stage an exit or death fixture stops in, when not stage 1
+STAGE_OF = {"fx_d_chunk_splice": 2, "fx_r_missing_wheel": 3}
+
+
 def exits(jobs_path):
     n = 0
     for line in open(jobs_path, encoding="utf-8").read().split("\n"):
@@ -317,7 +368,7 @@ def exits(jobs_path):
         if key not in EXITS:
             raise SystemExit("an exit recipe %s has no edit in EXITS" % key)
         kind, edit = EXITS[key]; edit(argv); n += 1
-        stage = 2 if key == "fx_d_chunk_splice" else 1
+        stage = STAGE_OF.get(key, 1)
         print("\t".join(["JOB", "%s:%d:%s" % (kind, stage, key)] + argv))
     if n != len(EXITS):
         raise SystemExit("expected %d exit jobs, got %d" % (len(EXITS), n))

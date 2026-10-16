@@ -37,6 +37,8 @@ public static partial class BlenderVehicleRig
         public string TagError;                     // the first malformed reduce tag's VEHICLE ERROR after the merge (defaultreduce, shroudreduce, gunreduce, windowreduce), or null
         public string NamesDie;                     // a positional names file the script cannot open: the FileNotFoundError it dies of after the merge, or null
         public string DialsDie;                     // a dial (argv[7..25]) Python cannot parse: the exception it dies of before the orientation, or null
+        public string AxisArg = "";                 // argv[6].upper(): the wheels' axle override (X, Y, Z) or anything else = AUTO (the thinnest extent)
+        public bool RockOn;                         // the WAVE ROCK is on: a RootHull bone under Root carries everything that would skin to Root
     }
 
     static readonly (string role, int index)[] NamesArgv =
@@ -169,6 +171,22 @@ public static partial class BlenderVehicleRig
                 if (!TryPyFloat(At(idx), out double v)) { a.DialsDie = "ValueError: could not convert string to float: " + VehicleProbe.Input.PyRepr(At(idx)); break; }
                 if (integral && (double.IsNaN(v) || double.IsInfinity(v))) { a.DialsDie = (double.IsNaN(v) ? "ValueError: cannot convert float NaN to integer" : "OverflowError: cannot convert float infinity to integer"); break; }
             }
+        // the stage 3 readings (when the dials parse): axis_arg = argv[6].upper(); rock_on (vehicle_rig.py 1085-1107) - rock_deg =
+        // max(0, min(45, float(argv[17]))) or 0, rock_frames = max(0, int(float(argv[18]))) or 0, the pitch max(0, min(45,
+        // float(argv[21]))) or 2.4 when blank; a frame count of 0 or less takes `frames` (max(2, int(argv[7])) >= 2) once either
+        // amplitude is positive; rock_on = (rock_deg > 0 or pitch > 0) and rock_frames >= 2. Python's min/max keep their FIRST
+        // argument unless the second compares past it, so a NaN amplitude clamps to 45.
+        a.AxisArg = PyUpper(At(6));
+        if (a.DialsDie == null)
+        {
+            double Amp(int i, double dflt) => argv.Count > i && At(i).Trim().Length > 0 && TryPyFloat(At(i), out double v) ? PyMax(0.0, PyMin(45.0, v)) : dflt;
+            double rockDeg = Amp(17, 0.0), pitch = Amp(21, 2.4);
+            double rockFrames = 0.0;
+            if (argv.Count > 18 && At(18).Trim().Length > 0 && TryPyFloat(At(18), out double rf)) rockFrames = Math.Max(0.0, Math.Truncate(rf));
+            bool any = rockDeg > 0.0 || pitch > 0.0;
+            if (any && rockFrames <= 0.0) rockFrames = 2.0;   // `frames`, at least 2
+            a.RockOn = any && rockFrames >= 2.0;
+        }
         // MODEL ORIENTATION (argv[23] "rx,ry,rz" degrees): [float(v) for v in split(",")] padded with zeros and cut to three - two
         // values are read, a fourth is dropped; only a value float() refuses is the WARN
         if (argv.Count > 23 && At(23).Trim().Length > 0)
@@ -188,6 +206,11 @@ public static partial class BlenderVehicleRig
     }
 
     /// <summary>min(95.0, max(0.0, v)) as Python evaluates it: max keeps 0.0 unless v is greater (so nan gives 0), min keeps 95 unless v is less.</summary>
+    /// <summary>Python's max(a, b) / min(a, b) on two floats: the first argument unless the second compares past it.</summary>
+    static double PyMax(double a, double b) => b > a ? b : a;
+    static double PyMin(double a, double b) => b < a ? b : a;
+    /// <summary>str.upper() for the axle override; only "X", "Y" and "Z" are told apart, and only x, y and z upper-case to those.</summary>
+    static string PyUpper(string s) => s.ToUpperInvariant();
     static double PyClamp95(double v) { double m = v > 0.0 ? v : 0.0; return m < 95.0 ? m : 95.0; }
 
     /// <summary>int(str): whitespace around, a sign, digits with single underscores between them - nothing else.</summary>
