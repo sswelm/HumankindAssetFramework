@@ -10,6 +10,12 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **A TURRET REDUCE TIER IN THE VEHICLE LAB (2026-10-16).** User: "could you add a turret reduce slider". The Gun tier's twin:
+  a **Turret reduce (%)** dial, a `turretreduce=<percent>` tag parsed right after `gunreduce=` in `vehicle_rig.py`, and a
+  TURRET weld tier running right before GUN in the tier loop, on the turret names the Lab already sends positionally -
+  before the Turret bone is measured. The C# port (`BlenderVehicleRig`: the tag parser and the Stage 2 tier table) mirrors
+  both orders. Absent at 0, so no existing recipe or golden moves. Drill fixtures: `fx_r_turret_reduce` (a seamed grid
+  marked Turret at 60 %) and `fx_x_turretreduce` (an infinite percent: the script's VEHICLE ERROR).
 - **THE DEPLOY PORT'S LAST METRE (2026-10-13).** The in-process deploy conversion (`BlenderDeployInProcess`, wired into
   the Factory on 2026-10-11) had run zero times in Unity, had no Bake Tests row, no Mono pass in its drill, and a crash
   in it became an info-level "using Blender because ..." line. Three changes: a Bake Tests row, *Does the in-process

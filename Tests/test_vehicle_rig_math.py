@@ -128,5 +128,21 @@ class DissolveOrderGuard(unittest.TestCase):
         self.assertLess(body.index("index_update()"), body.index("_jobs = []"), "indices are refreshed before the cells are gathered")
 
 
+class TurretTierGuard(unittest.TestCase):
+    # 2026-10-16 (user: "could you add a turret reduce slider"): turretreduce=<percent> is parsed right after gunreduce
+    # and the TURRET tier runs in the tier loop right before GUN, on the positional turret_names - both before the
+    # Turret bone is measured. The C# port (BlenderVehicleRig) mirrors both orders; this keeps the script's side.
+    def test_turretreduce_is_parsed_after_gunreduce_and_the_tier_runs_before_gun(self):
+        gun = SOURCE.index('gun_reduce = _tagged_reduce_pct(argv, "gunreduce")')
+        tur = SOURCE.index('turret_reduce = _tagged_reduce_pct(argv, "turretreduce")')
+        win = SOURCE.index('_tagged_names_pct(argv, "windowreduce")')
+        self.assertLess(gun, tur); self.assertLess(tur, win)
+        loop = SOURCE[SOURCE.index("for _rlabel, _rnames, _rpct in ("):]
+        loop = loop[:loop.index(chr(10))]
+        self.assertIn('("WHEEL", wheel_names, wheel_reduce), ("TURRET", turret_names, turret_reduce), ("GUN", gun_names, gun_reduce)', loop)
+        self.assertLess(SOURCE.index("for _rlabel, _rnames, _rpct in ("), SOURCE.index("tc, ts = _combined_bbox(turret_names)"))
+        self.assertEqual(35.5, NAMESPACE["_tagged_reduce_pct"](["rig", "turretreduce=35.5", "gunreduce=10"], "turretreduce"))
+
+
 if __name__ == "__main__":
     unittest.main()

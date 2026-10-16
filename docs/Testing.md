@@ -1976,6 +1976,18 @@ animated sail part; `fx_r_flagfold`'s flag stands 3 tall (rise 0.75). Plants: th
 dials' death and the sail rise pinned to its floor (the drill). After: 66 of 76 jobs equal through stage 3 (457,837 rows);
 1,838 tests.
 
+Critical review of PR #180 (2026-10-16): malformed turretreduce tags exposed error text that did not match Python's
+repr(): an apostrophe must select double quotes when possible, and non-printable Unicode spaces and control characters
+must be escaped. The C# reduce-tag parser now uses the existing Python repr implementation for these diagnostics,
+including the shared Gun and Window paths. Five new unit cases fail before the fix and pass after it; the full script
+also reproduces the quote and non-breaking-space mismatches (`fx_x_turret_quote`, `fx_x_turret_space`). Additional native
+fixtures exercise Wheel -> Turret -> Gun order, the 95% clamp with two material regions, and exactly 0.5% skipping the
+whole turret tier, including its weld. 1,862 unit tests pass. The Turret bone remains the separately deferred stage-three
+part d3; reduction is compared before that named decline.
+The FULL native run with key rows covers all 24 recipes and 62 fixtures: 72 of 86 jobs equal through stage 3
+(454,529 rows), 14 explicitly left by name (12 later stage-three branches, two FBX). All three turret geometry
+fixtures equal at stages 1 and 2 before their named stage-three decline.
+
 Critical review of PR #179 (2026-10-16): the shared float parser still used Framework's decimal conversion and Unicode
 tables. Against Blender 5.1.2's Python 3.13.9, 3,080 independent decimal/special/Unicode cases found 485 differences:
 414 overflow exceptions, 13 rejected digit blocks, and 58 different bit patterns (including signed NaNs). The parser now
