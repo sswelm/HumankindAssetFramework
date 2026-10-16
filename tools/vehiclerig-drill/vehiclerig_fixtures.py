@@ -47,8 +47,9 @@ Stage 3 (step (d), part d1: the frame every rig shares):
   fx_r_many          101 clusters (the last bone Wheel_100); a 0.1-wide wheel on the 0.05 length floor; a hundred tied sizes
   fx_r_missing_wheel a wheel name the scene has not: find()'s VEHICLE ERROR and exit in stage 3 (EXIT:3:)
 Stage 3 (step (d), part d2: the sail, rigging on the sail, the flag):
-  fx_r_sail          an upright canvas grid under the sail fold (all four height bands), a sail part also marked as a wheel, rigging
-                     riding the sail, missing sail and rigging names, a struck flag, a wheel
+  fx_r_sail          an upright canvas grid under the sail fold (all four bands; the quarter-height rise and drop), a sail part also a
+                     wheel, a jib also a rudder, a burgee sail and flag, an animated sail part, rigging on the sail, a halyard rigging
+                     and flag, missing sail and rigging names, a struck flag on the 0.3 floor, a wheel
   fx_r_flagfold      the flag hinged at its top (flagfold=-30|8), a missing flag name, rigging with no sail (stays on the body)
 Exits and deaths (recipes_exit, keys renamed by --exits): fx_x_allignored (every part Ignored: the _guard crash), fx_x_bright (bright=1.5|x),
   fx_x_flagfold (flagfold=a|b), fx_x_defaultreduce (no '|'), fx_x_shroudreduce (a percent float() refuses), fx_x_gunreduce (likewise),
@@ -365,29 +366,43 @@ def main(out):
     r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
     r.node("Hull", mesh=r.mesh("Hull", at=(-1.0, -1.0, 0.0), size=2.0, material=ma)); r.node("Tire", mesh=r.mesh("Tire", at=(-0.5, 2.0, -0.5), material=ma)); r.roots.clear()
     recipe(out, "fx_r_noscene", r.write(models, "fx_r_noscene"), [("Hull", 0, {}), ("Tire", 1, {})], sub="recipes_exit")
+    # the sail-fold and oar dials Python reads unconditionally (argv 72, 73, 75, 56-59): a bad one kills the script before the dials
+    for key in ("fx_d_sailfold_frames", "fx_d_sailfold_inf", "fx_d_oar_lift"):
+        r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
+        r.node("Hull", mesh=r.mesh("Hull", material=ma)); r.node("Tire", mesh=r.mesh("Tire", at=(3.0, 0.0, 0.0), material=ma))
+        recipe(out, key, r.write(models, key), [("Hull", 0, {}), ("Tire", 1, {})], sub="recipes_exit")
     # fx_r_noscene1: one mesh node in no scene - the source's single object, so the loose split (unguarded) selects it first
     r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
     r.node("Hull", mesh=r.mesh("Hull", material=ma)); r.roots.clear()
     recipe(out, "fx_r_noscene1", r.write(models, "fx_r_noscene1"), [("Hull", 0, {})], sub="recipes_exit")
     # ---- stage 3, part d2 (the sail, rigging on the sail, the flag)
-    # fx_r_sail: a standing canvas (a 5 x 9 grid turned upright, 4 tall) with the sail fold - its vertices fall in all four height bands;
-    # a second sail part also marked as a wheel (the Sail bone wins); rigging riding the sail (its own mesh) and a rigging name the
-    # scene has not (skipped silently); a missing sail name (the WARN); a struck flag beside them; a wheel
+    # fx_r_sail (glTF is Y-up: Blender's z is the glTF y): a standing canvas (a 5 x 9 grid in the glTF XY plane, 4 tall) under the sail
+    # fold - its rows fall in all four height bands, the sail's rise and the fold drop take their quarter-height branches; a topsail
+    # above it also marked as a wheel (the Sail bone wins); a jib that is also a rudder (banded, keyed apart); a burgee that is sail and
+    # flag (the Flag bone, banded inside Mesh_Flag); rigging riding the sail (its own mesh), a halyard that is rigging and flag, and a
+    # rigging name the scene has not (skipped silently); a missing sail name (the WARN); an animated sail part (its world off the
+    # identity in the bands and the box); a struck flag (the 0.3 rise floor); a wheel
     r = Rig(); ma = r.material("Canvas", (0.9, 0.9, 0.8))
     r.node("Hull", mesh=r.mesh("Hull", at=(-2.0, -1.0, 0.0), size=2.0, material=ma))
-    r.node("Canvas", mesh=flat_grid(r, "Canvas", ma, 5, 9), translation=[-1.0, 0.0, 2.0], scale=[2.0, 4.0, 1.0], rotation=[0.7071068, 0.0, 0.0, 0.7071068])
-    r.node("Topsail", mesh=r.mesh("Topsail", at=(-0.2, -0.2, 6.2), size=0.4, material=ma))
+    r.node("Canvas", mesh=flat_grid(r, "Canvas", ma, 5, 9), translation=[-1.0, 0.0, 2.0], scale=[2.0, 4.0, 1.0])
+    r.node("Topsail", mesh=r.mesh("Topsail", at=(-0.2, 4.2, 1.8), size=0.4, material=ma))
+    r.node("Jib", mesh=r.mesh("Jib", at=(1.2, 1.0, 1.8), size=0.6, material=ma))
+    r.node("Burgee", mesh=r.mesh("Burgee", at=(-1.6, 2.5, 1.8), size=0.3, material=ma))
+    streamer = r.node("Streamer", mesh=r.mesh("Streamer", at=(0.8, 3.0, 1.8), size=0.3, material=ma))
+    a1 = r.anim("Flutter"); r.key(a1, streamer, "translation", [0.0, 1.0], [(0.0, 0.5, 0.0), (0.0, 0.9, 0.0)])
     r.node("Rope", mesh=r.mesh("Rope", at=(1.5, 0.0, 1.0), size=0.2, material=ma))
+    r.node("Halyard", mesh=r.mesh("Halyard", at=(1.9, 0.5, 1.0), size=0.2, material=ma))
     r.node("Pennant", mesh=r.mesh("Pennant", at=(-3.0, 0.0, 3.0), size=0.5, material=ma))
     r.node("Wheel", mesh=r.mesh("Wheel", at=(-0.5, -1.5, -0.5), material=ma), scale=[1.0, 0.3, 1.0])
     recipe(out, "fx_r_sail", r.write(models, "fx_r_sail"),
-           [("Hull", 0, {}), ("Canvas", 14, {}), ("Topsail", 14, {}), ("Topsail", 1, {}), ("GhostSail", 14, {}), ("Rope", 15, {}), ("GhostRope", 15, {}),
-            ("Pennant", 17, {}), ("Wheel", 1, {})], sailFoldIdle=True)
+           [("Hull", 0, {}), ("Canvas", 14, {}), ("Topsail", 14, {}), ("Topsail", 1, {}), ("Jib", 14, {}), ("Jib", 18, {}), ("Burgee", 14, {}),
+            ("Burgee", 17, {}), ("Streamer", 14, {}), ("GhostSail", 14, {}), ("Rope", 15, {}), ("Halyard", 15, {}), ("Halyard", 17, {}),
+            ("GhostRope", 15, {}), ("Pennant", 17, {}), ("Wheel", 1, {})], sailFoldIdle=True)
     # fx_r_flagfold: the flag hinged at its top under flagfold= (-30 degrees over 8 frames); a missing flag name (the WARN); rigging with
     # no sail stays on the body
     r = Rig(); ma = r.material("Cloth", (0.8, 0.2, 0.2))
     r.node("Hull", mesh=r.mesh("Hull", at=(-2.0, -1.0, 0.0), size=2.0, material=ma))
-    r.node("Tripod", mesh=r.mesh("Tripod", at=(0.5, -0.25, 2.0), size=0.5, material=ma), scale=[1.0, 2.0, 1.0])
+    r.node("Tripod", mesh=r.mesh("Tripod", at=(0.5, -0.25, 2.0), size=0.5, material=ma), scale=[1.0, 6.0, 1.0])   # 3 tall: the quarter-height rise
     r.node("Rope", mesh=r.mesh("Rope", at=(1.5, 0.0, 1.0), size=0.2, material=ma))
     recipe(out, "fx_r_flagfold", r.write(models, "fx_r_flagfold"), [("Hull", 0, {}), ("Tripod", 17, {}), ("GhostFlag", 17, {}), ("Rope", 15, {})],
            flagFoldOn=True, flagFoldDeg=-30.0, flagFoldFrames=8)
@@ -412,6 +427,9 @@ EXITS = {
     "fx_r_orphan": ("EXIT", lambda a: None),
     "fx_r_noscene": ("EXIT", lambda a: None),
     "fx_r_noscene1": ("DIES", lambda a: None),
+    "fx_d_sailfold_frames": ("DIES", lambda a: a.__setitem__(72, "x")),
+    "fx_d_sailfold_inf": ("DIES", lambda a: a.__setitem__(72, "inf")),
+    "fx_d_oar_lift": ("DIES", lambda a: a.__setitem__(56, "1__0")),
     "fx_x_allignored": ("EXIT", lambda a: None),
     "fx_x_bright": ("EXIT", lambda a: set_tag(a, "bright", "1.5|x")),
     "fx_x_flagfold": ("EXIT", lambda a: set_tag(a, "flagfold", "a|b")),

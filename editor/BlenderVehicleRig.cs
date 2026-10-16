@@ -36,13 +36,14 @@ public static partial class BlenderVehicleRig
         public string PreDie;                       // an exception before the import (int(float(inf)) of a flagfold frame count), or null
         public string TagError;                     // the first malformed reduce tag's VEHICLE ERROR after the merge (defaultreduce, shroudreduce, gunreduce, windowreduce), or null
         public string NamesDie;                     // a positional names file the script cannot open: the FileNotFoundError it dies of after the merge, or null
+        public string FoldDie;                      // a sail-fold or oar dial (argv 72, 73, 75, 56-59, read unconditionally) Python cannot parse: the exception, or null
         public string DialsDie;                     // a dial (argv[7..25]) Python cannot parse: the exception it dies of before the orientation, or null
         public string AxisArg = "";                 // argv[6].upper(): the wheels' axle override (X, Y, Z) or anything else = AUTO (the thinnest extent)
         public bool RockOn;                         // the WAVE ROCK is on: a RootHull bone under Root carries everything that would skin to Root
         public bool SailFold;                       // argv[71].strip() == "1": the Sail bone gets the SailF1..F3 fold chain, the canvas skins by height band
         public bool FlagFoldOn;                     // a flagfold= tag is present: the Flag bone hinges at the flag's top (else it strikes below the keel)
         public double FlagFoldDeg;                  // max(-175, min(175, float(deg))) or 0 when blank (a NaN clamps to 175)
-        public int FlagFoldFrames = 12;             // max(1, int(float(frames))) or 12 when blank
+        public System.Numerics.BigInteger FlagFoldFrames = 12;   // max(1, int(float(frames))) or 12 when blank - Python's exact int
     }
 
     static readonly (string role, int index)[] NamesArgv =
@@ -71,7 +72,7 @@ public static partial class BlenderVehicleRig
             List<string> list;
             try
             {
-                list = index < argv.Count && At(index).Trim().Length > 0 ? NameList(At(index)) : new List<string>();
+                list = index < argv.Count && PyNonBlank(At(index)) ? NameList(At(index)) : new List<string>();
                 if (index == 4 || index == 5) list = NameList(At(index));   // wheel_names, turret_names: read unconditionally
             }
             catch (System.IO.IOException) { list = new List<string>(); if (index < namesFailureIndex) { namesFailureIndex = index; a.NamesDie = "FileNotFoundError: " + PyFileNotFound(At(index).Substring(1)); } }   // namelist() opens it in the rig path: the script dies there
@@ -83,8 +84,8 @@ public static partial class BlenderVehicleRig
         foreach (var (role, idx) in new[] { ("rigging", 50), ("structure", 52), ("bodies", 54), ("oars", 61), ("sails", 62), ("rudders", 64), ("wheels", 65), ("flip", 67), ("preserve", 68), ("detail", 70) })
         {
             a.Reduce[role] = 0.0;
-            if (!(argv.Count > idx && At(idx).Trim().Length > 0)) continue;
-            if (!TryPyFloat(At(idx), out double v)) { if (idx < namesFailureIndex) { namesFailureIndex = idx; a.NamesDie = "ValueError: could not convert string to float: " + VehicleProbe.Input.PyRepr(At(idx)); } continue; }
+            if (!(argv.Count > idx && PyNonBlank(At(idx)))) continue;
+            if (!TryPyFloat(At(idx), out double v)) { if (idx < namesFailureIndex) { namesFailureIndex = idx; a.NamesDie = "ValueError: could not convert string to float: " + PyStrRepr(At(idx)); } continue; }
             a.Reduce[role] = PyClamp95(v);
         }
         a.TracksStatic = argv.Count > 16 && At(16).Trim() == "1";
@@ -141,7 +142,7 @@ public static partial class BlenderVehicleRig
         if (br != null)
         {
             var f = br.Substring(7).Split('|');
-            if (f.Length != 2 || (f[0].Trim().Length > 0 && !TryPyFloat(f[0], out a.Bright1)) || (f[1].Trim().Length > 0 && !TryPyFloat(f[1], out a.Bright2)))
+            if (f.Length != 2 || (PyNonBlank(f[0]) && !TryPyFloat(f[0], out a.Bright1)) || (PyNonBlank(f[1]) && !TryPyFloat(f[1], out a.Bright2)))
             { a.Logs.Add("VEHICLE ERROR: malformed bright argument: " + br); a.Problem = "malformed bright argument"; return a; }
         }
         string ff = argv.FirstOrDefault(x => x.StartsWith("flagfold=", StringComparison.Ordinal));
@@ -150,16 +151,16 @@ public static partial class BlenderVehicleRig
             // `deg, frames = spec.split("|")`, float(deg) when non-blank, int(float(frames)) when non-blank: a ValueError is the exit, int() of
             // an infinite float an OverflowError the script does not catch (it dies before the import)
             var f = ff.Substring(9).Split('|'); bool ok = f.Length == 2;
-            if (ok && f[0].Trim().Length > 0) ok = TryPyFloat(f[0], out _);
-            if (ok && f[1].Trim().Length > 0)
+            if (ok && PyNonBlank(f[0])) ok = TryPyFloat(f[0], out _);
+            if (ok && PyNonBlank(f[1]))
             {
                 ok = TryPyFloat(f[1], out double fr) && !double.IsNaN(fr);
                 if (ok && double.IsInfinity(fr)) { a.PreDie = "OverflowError: cannot convert float infinity to integer"; return a; }
             }
             if (!ok) { a.Logs.Add("VEHICLE ERROR: malformed flagfold argument: " + ff); a.Problem = "malformed flagfold argument"; return a; }
             a.FlagFoldOn = true;
-            if (f[0].Trim().Length > 0 && TryPyFloat(f[0], out double fd)) a.FlagFoldDeg = PyMax(-175.0, PyMin(175.0, fd));
-            if (f[1].Trim().Length > 0 && TryPyFloat(f[1], out double ffr)) { double tr = Math.Truncate(ffr); a.FlagFoldFrames = tr < 1.0 ? 1 : tr > int.MaxValue ? int.MaxValue : (int)tr; }
+            if (PyNonBlank(f[0]) && TryPyFloat(f[0], out double fd)) a.FlagFoldDeg = PyMax(-175.0, PyMin(175.0, fd));
+            if (PyNonBlank(f[1]) && TryPyFloat(f[1], out double ffr)) { var tr = new System.Numerics.BigInteger(Math.Truncate(ffr)); a.FlagFoldFrames = tr < 1 ? 1 : tr; }
         }
         string tx = argv.FirstOrDefault(x => x.StartsWith("parttx=", StringComparison.Ordinal));
         if (tx != null)
@@ -169,13 +170,13 @@ public static partial class BlenderVehicleRig
         }
         // the dials the rig path reads before the orientation: int(argv[7]) and float(argv[8]) unconditionally, the rest when present and
         // non-blank; a value Python cannot parse - or int(float()) of inf or nan - is an uncaught exception: the script dies there
-        if (!TryPyInt(At(7))) a.DialsDie = "ValueError: invalid literal for int() with base 10: " + VehicleProbe.Input.PyRepr(At(7));
-        else if (!TryPyFloat(At(8), out _)) a.DialsDie = "ValueError: could not convert string to float: " + VehicleProbe.Input.PyRepr(At(8));
+        if (!TryPyInt(At(7))) a.DialsDie = "ValueError: invalid literal for int() with base 10: " + PyStrRepr(At(7));
+        else if (!TryPyFloat(At(8), out _)) a.DialsDie = "ValueError: could not convert string to float: " + PyStrRepr(At(8));
         else
             foreach (var (idx, integral) in new[] { (12, true), (13, false), (14, false), (15, false), (17, false), (18, true), (20, false), (21, false), (22, true), (25, true), (24, false) })
             {
-                if (!(argv.Count > idx && At(idx).Trim().Length > 0)) continue;
-                if (!TryPyFloat(At(idx), out double v)) { a.DialsDie = "ValueError: could not convert string to float: " + VehicleProbe.Input.PyRepr(At(idx)); break; }
+                if (!(argv.Count > idx && PyNonBlank(At(idx)))) continue;
+                if (!TryPyFloat(At(idx), out double v)) { a.DialsDie = "ValueError: could not convert string to float: " + PyStrRepr(At(idx)); break; }
                 if (integral && (double.IsNaN(v) || double.IsInfinity(v))) { a.DialsDie = (double.IsNaN(v) ? "ValueError: cannot convert float NaN to integer" : "OverflowError: cannot convert float infinity to integer"); break; }
             }
         // the stage 3 readings (when the dials parse): axis_arg = argv[6].upper(); rock_on (vehicle_rig.py 1085-1107) - rock_deg =
@@ -184,20 +185,28 @@ public static partial class BlenderVehicleRig
         // amplitude is positive; rock_on = (rock_deg > 0 or pitch > 0) and rock_frames >= 2. Python's min/max keep their FIRST
         // argument unless the second compares past it, so a NaN amplitude clamps to 45.
         a.AxisArg = PyUpper(At(6));
-        a.SailFold = argv.Count > 71 && At(71).Trim() == "1";
+        a.SailFold = argv.Count > 71 && VehicleProbe.Input.PyStrip(At(71)) == "1";
+        // the sail-fold and oar dials, read unconditionally after the reduce tags and before the dials (vehicle_rig.py 1010-1017):
+        // int(float(argv[72])), float(argv[73]), float(argv[75]), float(argv[56..59]) when present and non-blank
+        foreach (var (idx, integral) in new[] { (72, true), (73, false), (75, false), (56, false), (57, false), (58, false), (59, false) })
+        {
+            if (!(argv.Count > idx && PyNonBlank(At(idx)))) continue;
+            if (!TryPyFloat(At(idx), out double v)) { a.FoldDie = "ValueError: could not convert string to float: " + PyStrRepr(At(idx)); break; }
+            if (integral && (double.IsNaN(v) || double.IsInfinity(v))) { a.FoldDie = double.IsNaN(v) ? "ValueError: cannot convert float NaN to integer" : "OverflowError: cannot convert float infinity to integer"; break; }
+        }
         if (a.DialsDie == null)
         {
-            double Amp(int i, double dflt) => argv.Count > i && At(i).Trim().Length > 0 && TryPyFloat(At(i), out double v) ? PyMax(0.0, PyMin(45.0, v)) : dflt;
+            double Amp(int i, double dflt) => argv.Count > i && PyNonBlank(At(i)) && TryPyFloat(At(i), out double v) ? PyMax(0.0, PyMin(45.0, v)) : dflt;
             double rockDeg = Amp(17, 0.0), pitch = Amp(21, 2.4);
             double rockFrames = 0.0;
-            if (argv.Count > 18 && At(18).Trim().Length > 0 && TryPyFloat(At(18), out double rf)) rockFrames = Math.Max(0.0, Math.Truncate(rf));
+            if (argv.Count > 18 && PyNonBlank(At(18)) && TryPyFloat(At(18), out double rf)) rockFrames = Math.Max(0.0, Math.Truncate(rf));
             bool any = rockDeg > 0.0 || pitch > 0.0;
             if (any && rockFrames <= 0.0) rockFrames = 2.0;   // `frames`, at least 2
             a.RockOn = any && rockFrames >= 2.0;
         }
         // MODEL ORIENTATION (argv[23] "rx,ry,rz" degrees): [float(v) for v in split(",")] padded with zeros and cut to three - two
         // values are read, a fourth is dropped; only a value float() refuses is the WARN
-        if (argv.Count > 23 && At(23).Trim().Length > 0)
+        if (argv.Count > 23 && PyNonBlank(At(23)))
         {
             var parts = At(23).Split(','); var vals = new double[3]; bool ok = true;
             for (int i = 0; ok && i < parts.Length; i++) { ok = TryPyFloat(parts[i], out double v); if (ok && i < 3) vals[i] = v; }
@@ -224,10 +233,15 @@ public static partial class BlenderVehicleRig
     /// <summary>int(str): whitespace around, a sign, digits with single underscores between them - nothing else.</summary>
     internal static bool TryPyInt(string t)
     {
-        string s = (t ?? "").Trim();
+        // int(text): the same Unicode digit and space transform as float(), one optional sign, digits with underscores only between them
+        string s = VehicleProbe.Input.PyNumberAscii(t);
+        if (s == null) return false;
         if (s.StartsWith("+", StringComparison.Ordinal) || s.StartsWith("-", StringComparison.Ordinal)) s = s.Substring(1);
         return s.Length > 0 && System.Text.RegularExpressions.Regex.IsMatch(s, "^[0-9]+(_[0-9]+)*$");
     }
+
+    /// <summary>`argv[i].strip()` is non-empty (str.strip(): every str.isspace() character).</summary>
+    static bool PyNonBlank(string t) => VehicleProbe.Input.PyStrip(t).Length > 0;
 
     /// <summary>Python's "%.Nf": the exact binary value rounded half to even, a negative zero kept.</summary>
     static string Py(double v, int digits) => BlenderRigAnim.PyFixed(v, digits);
@@ -379,6 +393,7 @@ public static partial class BlenderVehicleRig
         //      (the first malformed one is the script's exit), the dials (an unparsable one is a death), then the argument-time lines
         if (a.NamesDie != null) { s.Dies = a.NamesDie; return s; }
         if (a.TagError != null) { s.Logs.Add(a.TagError); s.Exits = true; return s; }
+        if (a.FoldDie != null) { s.Dies = a.FoldDie; return s; }
         if (a.DialsDie != null) { s.Dies = a.DialsDie; return s; }
         s.Logs.AddRange(a.Logs);
         // ---- the flatten: every mesh a root keeping its world transform, skinning and modifiers cleared; the helpers dropped

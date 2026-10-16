@@ -152,16 +152,54 @@ public static partial class VehicleProbe
             if (ProbeRotation != null && ProbeRotation.All(v => v == 0.0)) ProbeRotation = null;
         }
 
-        /// <summary>Python's float(text): decimal, exponent, inf/nan, surrounding whitespace; anything else raises.</summary>
+        /// <summary>Python's float(text): _PyUnicode_TransformDecimalAndSpaceToASCII (a non-ASCII Unicode space becomes ' ', a Unicode
+        /// decimal digit its ASCII digit, any other non-ASCII character fails), the ASCII whitespace stripped (space, \t \n \v \f \r -
+        /// not \x1c-\x1f, which str.strip() would take), one optional sign, then inf/infinity/nan (any case) or a decimal whose
+        /// underscores stand only between digits; anything else raises. Measured against Blender 5.1.2's Python 3.13.9.</summary>
         internal static double PyFloat(string t)
         {
-            string s = (t ?? "").Trim();
-            if (s.Length == 0) throw new FormatException($"could not convert string to float: {PyRepr(t)}");
-            string low = s.ToLowerInvariant().TrimStart('+', '-');
-            if (low == "inf" || low == "infinity") return s.StartsWith("-") ? double.NegativeInfinity : double.PositiveInfinity;
+            string s = PyNumberAscii(t);
+            if (s == null) throw new FormatException($"could not convert string to float: {PyRepr(t)}");
+            string body = s.Length > 0 && (s[0] == '+' || s[0] == '-') ? s.Substring(1) : s;
+            bool neg = s.Length > 0 && s[0] == '-';
+            string low = body.ToLowerInvariant();
+            if (low == "inf" || low == "infinity") return neg ? double.NegativeInfinity : double.PositiveInfinity;
             if (low == "nan") return double.NaN;
-            if (s.Contains("_") || !double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out double v)) throw new FormatException($"could not convert string to float: {PyRepr(t)}");
-            return v;
+            const string D = "[0-9](?:_?[0-9])*";
+            if (!System.Text.RegularExpressions.Regex.IsMatch(body, "^(?:" + D + "(?:\\.(?:" + D + ")?)?|\\." + D + ")(?:[eE][+-]?" + D + ")?$"))
+                throw new FormatException($"could not convert string to float: {PyRepr(t)}");
+            double v = double.Parse(body.Replace("_", ""), NumberStyles.Float, CultureInfo.InvariantCulture);
+            return neg ? -v : v;
+        }
+
+        /// <summary>The text float() and int() parse: each non-ASCII Unicode space to ' ', each Unicode decimal digit to its ASCII digit
+        /// (a supplementary one too), null on any other non-ASCII character; then the ASCII whitespace stripped.</summary>
+        internal static string PyNumberAscii(string t)
+        {
+            var b = new System.Text.StringBuilder(); t = t ?? "";
+            for (int i = 0; i < t.Length; i++)
+            {
+                char c = t[i];
+                if (c < 128) { b.Append(c); continue; }
+                int dv = CharUnicodeInfo.GetDecimalDigitValue(t, i);
+                if (dv >= 0) { b.Append((char)('0' + dv)); if (char.IsHighSurrogate(c) && i + 1 < t.Length && char.IsLowSurrogate(t[i + 1])) i++; continue; }
+                if (PyIsSpace(c)) { b.Append(' '); continue; }
+                return null;
+            }
+            return b.ToString().Trim(' ', '\t', '\n', '\v', '\f', '\r');
+        }
+
+        /// <summary>str.isspace() of one character (Python 3.13: bidi WS, B, S or category Zs): .NET's IsWhiteSpace plus \x1c-\x1f,
+        /// less U+180E (no longer a space since Unicode 6.3).</summary>
+        internal static bool PyIsSpace(char c) => (c >= '\x1c' && c <= '\x1f') || (c != '\u180e' && char.IsWhiteSpace(c));
+
+        /// <summary>str.strip() with no argument: every str.isspace() character off both ends.</summary>
+        internal static string PyStrip(string t)
+        {
+            t = t ?? ""; int a = 0, z = t.Length;
+            while (a < z && PyIsSpace(t[a])) a++;
+            while (z > a && PyIsSpace(t[z - 1])) z--;
+            return t.Substring(a, z - a);
         }
 
         internal static string PyRepr(string s) => "'" + (s ?? "").Replace("\\", "\\\\").Replace("'", "\\'") + "'";

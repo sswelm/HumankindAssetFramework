@@ -1959,6 +1959,22 @@ without a sail) equal on the first run; 63 of 73 jobs equal (FULL, 457,785 rows)
 each caught on its job (the keel's offset and its set of meshes, the fold cuts, the band direction, the rigging's own mesh, the
 sail winning over a wheel, the flag's hinge, the 0.3 rise floor, the sail WARN). No recipe takes the fold, rigging on a sail
 or the flag fold (Triconter folds and the Khelandion rigs, both left for their oars).
+The source-reading review of d2 found no geometry or skinning divergence, but argument parsing that was not Python's: (1)
+float() is not .NET's TryParse - Python first turns a non-ASCII space into ' ' and a Unicode decimal digit into its ASCII
+digit, strips only the ASCII whitespace (so "\x1c3\x1f", which str.strip() reduces to "3", is NOT a number), takes one sign,
+then inf/infinity/nan or a decimal whose underscores stand only between digits ("1_0" is 10.0; "1__0", "1_", "--inf", "+-nan"
+raise); int() is the same with digits only; str.strip() is str.isspace() (.NET's whitespace plus \x1c-\x1f, less U+180E).
+`VehicleProbe.Input.PyFloat`, `PyNumberAscii`, `PyStrip` and `TryPyInt` now follow it, every case measured against Blender's
+Python 3.13.9 (`Tests/VehicleRigPythonArgsTests.cs`, 53 cases; the vehicle probe drill holds the shared parser). (2) The
+sail-fold and oar dials (argv 72, 73, 75 and 56-59) are parsed unconditionally between the reduce tags and the dials, so a value
+Python cannot parse kills the script there - `Args.FoldDie`, fixtures `fx_d_sailfold_frames`, `fx_d_sailfold_inf`
+(OverflowError) and `fx_d_oar_lift` ("1__0"). (3) flagfold= frame counts keep Python's exact int (3e9 prints 3000000000).
+(4) `fx_r_sail`'s canvas lay FLAT: glTF is Y-up, and the rotation meant to stand it up laid it down, so the sail's rise and the
+fold drop sat on their 0.3 and 0.1 floors; it now stands 4 tall (rise 1.15, drop 0.2875), with a jib that is also a rudder
+(banded, keyed apart), a burgee that is sail and flag (banded inside Mesh_Flag), a halyard that is rigging and flag, and an
+animated sail part; `fx_r_flagfold`'s flag stands 3 tall (rise 0.75). Plants: the underscore rule (three tests), the fold
+dials' death and the sail rise pinned to its floor (the drill). After: 66 of 76 jobs equal through stage 3 (457,837 rows);
+1,838 tests.
 
 Review of PR #176 (2026-10-15): a full run found the organ gun's newly recorded custom-normal shorts differed after
 stage one's loose split. Blender's separate operator decodes the source BMesh normals into a vector layer and
