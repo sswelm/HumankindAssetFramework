@@ -2023,6 +2023,24 @@ the reduce dials (`fx_d_trail_frames`: int(float("nan")), `fx_d_gun_pivot`: floa
 its job (the breech end, the brake's pin, the brake on the tube, the pivot, the gun on the turret, the recoil radius, the vertical
 bore's axis fallback, the trail hinge, the trail's four-vertex minimum, the dial death). 63 of 63 fixture jobs and 80
 of 87 jobs equal (FULL, 454,850 rows); 1,854 tests.
+The source-reading review of d3 found no divergence in its arithmetic, branches, lines, bones or overrides (both breech ends,
+both hinge ends, the marked tip, the vertical fallback, recoil with a cradle and the exits all traced), but the NAMES FILES were
+not read as Python reads them: `open(path, encoding="utf-8")` iterated by line - universal newlines, a BOM kept as U+FEFF on the
+first name (it is neither a space nor a newline), each line `str.strip()`ped (which takes \x1c-\x1f, .NET's Trim() does not) - and
+open()'s errors: an empty path ("@" alone) is `FileNotFoundError: ... ''`, a directory `PermissionError: [Errno 13] Permission
+denied`, where the C# crashed with ArgumentException / UnauthorizedAccessException (both measured in Blender's Python). A file
+that is not UTF-8 dies of a UnicodeDecodeError whose text names the byte's offset in the reader's chunk: not modelled, the job is
+left to Blender by name (`Args.Unsupported`, only when nothing earlier in argv died). Fixtures: `fx_r_names_ws` (a line wrapped
+in \x1c..\x1f finds its wheel), `fx_r_names_bom` (the BOM stays: the wheel is not found, the exit), `fx_d_names_empty`,
+`fx_d_names_dir`, `fx_d_dial_before_names` (a dial dying before a later names file). The review's unexercised d3 branches got
+fixtures too: `fx_r_turret` now carries the rock (RootHull under the turret, gun and trail), a turret part also a wheel, the brake
+also listed as a gun and a mantlet as gun and cradle (the de-duplication), and its three-vertex trail first (the arm is
+Trail_01); `fx_r_spike` (a three-vertex brake and no gun under recoil: fewer than 4 tube points, the defaults);
+`fx_r_gunpoint` (a tube of four coincident vertices: no GUNSPAN, a zero bore - and stage 4 then DIES dividing by it,
+`DIES:4:`); `fx_r_pivot_end` (the pivot at the muzzle under recoil); `fx_r_turret`'s Ring now rings the dome. Two script
+defects found on the way, reproduced bit for bit and recorded in the backlog. Plants: the old Trim(), the BOM stripped, the
+directory's PermissionError (the drill fails on each target). After: 71 of 71 fixture jobs and 88 of 95 jobs equal
+through stage 3 (FULL, 454,970 rows); 1,854 tests.
 
 Review of PR #176 (2026-10-15): a full run found the organ gun's newly recorded custom-normal shorts differed after
 stage one's loose split. Blender's separate operator decodes the source BMesh normals into a vector layer and
