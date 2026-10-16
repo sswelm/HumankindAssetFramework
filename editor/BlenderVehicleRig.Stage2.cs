@@ -1,6 +1,6 @@
 // BlenderVehicleRig.Stage2.cs - vehicle_rig.py's stage 2, the SOURCE-SIDE reduction tiers (lines 1338-1514), in C# (step (c) of
 // the vehicle_rig port, 2026-10-15; docs/Review-Backlog.md item (5)). Per tier - DEFAULT, RIGGING, SHROUD, STRUCTURE, BODY, OAR,
-// SAIL, RUDDER, WHEEL, GUN, WINDOW, FLIP, PRESERVE, DETAIL, skipped without names or at a dial of 0.5 % or less - and per named
+// SAIL, RUDDER, WHEEL, TURRET, GUN, WINDOW, FLIP, PRESERVE, DETAIL, skipped without names or at a dial of 0.5 % or less - and per named
 // part (the first object of that name; a name the scene has not is a WARN): the mesh into a bmesh; the WELD tiers (all but
 // RIGGING and SHROUD) weld coincident vertices within each material (the vertices whose corners all share one material,
 // grouped in the order the materials are first met, remove_doubles per group at 1e-5 of the part's largest extent) and

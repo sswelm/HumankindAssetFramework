@@ -83,6 +83,11 @@ public class VehicleRigStage1Tests
     [InlineData("gunreduce=inf", "VEHICLE ERROR: malformed gunreduce argument: not a finite percent: 'gunreduce=inf'")]
     [InlineData("turretreduce=abc", "VEHICLE ERROR: malformed turretreduce argument: could not convert string to float: 'abc'")]
     [InlineData("turretreduce=-inf", "VEHICLE ERROR: malformed turretreduce argument: not a finite percent: 'turretreduce=-inf'")]
+    [InlineData("turretreduce=can't", "VEHICLE ERROR: malformed turretreduce argument: could not convert string to float: \"can't\"")]
+    [InlineData("turretreduce=\u00a0inf", "VEHICLE ERROR: malformed turretreduce argument: not a finite percent: 'turretreduce=\\xa0inf'")]
+    [InlineData("turretreduce=x\u200b", "VEHICLE ERROR: malformed turretreduce argument: could not convert string to float: 'x\\u200b'")]
+    [InlineData("turretreduce=\u001c3", "VEHICLE ERROR: malformed turretreduce argument: could not convert string to float: '\\x1c3'")]
+    [InlineData("turretreduce=nan\u00a0", "VEHICLE ERROR: malformed turretreduce argument: not a finite percent: 'turretreduce=nan\\xa0'")]
     [InlineData("windowreduce=nopipe", "VEHICLE ERROR: malformed windowreduce argument: no '|' between the names and the percent: 'windowreduce=nopipe'")]
     [InlineData("windowreduce=|nan", "VEHICLE ERROR: malformed windowreduce argument: not a finite percent: 'windowreduce=|nan'")]
     public void A_malformed_reduce_tag_is_the_scripts_error_line_after_the_merge(string token, string line)

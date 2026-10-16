@@ -40,6 +40,8 @@ Stage 2 (step (c), the weld tiers):
   fx_c_tiers         four tiers in one scene: BODY at 50 and STRUCTURE at 30 on two grids, a STRUCTURE name the scene has not (the
                      WARN), a DETAIL dial of exactly 0.5 (the tier skipped), a RUDDER dial of 120 (clamped: "dial 95%")
   fx_r_turret_reduce the TURRET tier (2026-10-16): a seamed 11x11 grid marked Turret at 60 % beside a hull - weld, then collapse
+  fx_r_turret_tiers  Wheel -> Turret -> Gun order, turret dial clamped at 95, material borders kept split during the weld
+  fx_r_turret_threshold exactly 0.5 skips the turret tier entirely, including the weld
 Stage 3 (step (d), part d1: the frame every rig shares):
   fx_r_wheels        two tires thin along Y, an off-centre bolt joining the first (the 0.75 rule), a cube wheel (tied extents: axle X),
                      the tire listed twice; the wave rock (RootHull); a rudder also listed as preserve, a missing name in each set (the
@@ -56,6 +58,7 @@ Stage 3 (step (d), part d2: the sail, rigging on the sail, the flag):
 Argument variants (recipes_exit, post-edited by --exits): fx_r_numeric_pct (the decimal above 0.5 whose rounding decides whether
   to weld); fx_d_sailfold_overflow (1e309 becomes infinity before int() raises); fx_d_unicode_fold (a Kawi digit accepted before
   the next dial raises ValueError)
+  fx_x_turret_quote / fx_x_turret_space hold Python's quote choice and non-ASCII whitespace escapes in malformed-tag errors.
 Exits and deaths (recipes_exit, keys renamed by --exits): fx_x_allignored (every part Ignored: the _guard crash), fx_x_bright (bright=1.5|x),
   fx_x_flagfold (flagfold=a|b), fx_x_defaultreduce (no '|'), fx_x_shroudreduce (a percent float() refuses), fx_x_gunreduce (likewise), fx_x_turretreduce (an infinite percent),
   fx_x_windowreduce (no '|'), fx_x_merge_missing (a second model path that is not there); fx_d_frames (argv[7] "15.0": int() dies),
@@ -226,7 +229,7 @@ def main(out):
     # the exits and deaths: plain recipes the --exits mode edits into the malformed shapes
     recipe(out, "fx_x_allignored", src, [("A", 3, {}), ("B", 3, {})], sub="recipes_exit")
     recipe(out, "fx_x_bright", src, [("A", 0, {}), ("B", 0, {})], sub="recipes_exit", model1Bright=1.5)
-    for k in ("fx_x_flagfold", "fx_x_defaultreduce", "fx_x_shroudreduce", "fx_x_gunreduce", "fx_x_turretreduce", "fx_x_windowreduce", "fx_d_frames", "fx_d_names", "fx_d_infinite_count", "fx_d_nan_count", "fx_d_flagfold_infinite", "fx_d_reduce_before_names"):
+    for k in ("fx_x_flagfold", "fx_x_defaultreduce", "fx_x_shroudreduce", "fx_x_gunreduce", "fx_x_turretreduce", "fx_x_turret_quote", "fx_x_turret_space", "fx_x_windowreduce", "fx_d_frames", "fx_d_names", "fx_d_infinite_count", "fx_d_nan_count", "fx_d_flagfold_infinite", "fx_d_reduce_before_names"):
         recipe(out, k, src, [("A", 0, {}), ("B", 0, {})], sub="recipes_exit")
     for k in ("fx_x_merge_missing", "fx_d_merge_offset"):
         recipe(out, k, src, [("A", 0, {}), ("B", 0, {})], sub="recipes_exit", srcFile2=second)
@@ -367,6 +370,18 @@ def main(out):
     r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
     r.node("Hull", mesh=r.mesh("Hull", at=(-1.0, -1.0, 0.0), size=2.0, material=ma)); r.node("Cupola", mesh=grid_seam(r, "Cupola", ma, 11), translation=[0.0, 0.0, 2.0])
     recipe(out, "fx_r_turret_reduce", r.write(models, "fx_r_turret_reduce"), [("Hull", 0, {}), ("Cupola", 2, {})], turretReducePct=60.0)
+    # The turret tier between Wheel and Gun, clamped at 95; its two materials keep their seam split during the weld.
+    r = Rig(); ma = r.material("Paint", (0.3, 0.5, 0.7)); mb = r.material("Trim", (0.8, 0.6, 0.2))
+    r.node("Hull", mesh=r.mesh("Hull", at=(0, -3, 0), material=ma))
+    r.node("Cupola", mesh=box_split(r, "Cupola", (ma, mb)))
+    r.node("Wheel", mesh=box_split(r, "Wheel", (ma, ma)), translation=[3, 0, 0])
+    r.node("Barrel", mesh=grid_seam(r, "Barrel", ma, 5), translation=[0, 3, 0])
+    recipe(out, "fx_r_turret_tiers", r.write(models, "fx_r_turret_tiers"), [("Hull", 0, {}), ("Cupola", 2, {}), ("Wheel", 1, {}), ("Barrel", 7, {})],
+           wheelReducePct=40.0, turretReducePct=120.0, gunReducePct=30.0)
+    # Exactly 0.5 skips the whole tier, including the weld: the seamed turret must stay at 24 vertices.
+    r = Rig(); ma = r.material("Paint", (0.3, 0.5, 0.7))
+    r.node("Hull", mesh=r.mesh("Hull", at=(0, -3, 0), material=ma)); r.node("Cupola", mesh=box_split(r, "Cupola", (ma, ma)))
+    recipe(out, "fx_r_turret_threshold", r.write(models, "fx_r_turret_threshold"), [("Hull", 0, {}), ("Cupola", 2, {})], turretReducePct=0.5)
     # fx_r_orphan: a node in no scene, created FIRST (the Orphan Nodes collection: listed after the scene's own objects), kept as a
     # rudder so it survives the join: VehicleRig links between the two
     r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
@@ -468,6 +483,8 @@ EXITS = {
     "fx_x_shroudreduce": ("EXIT", lambda a: set_tag(a, "shroudreduce", "|abc")),
     "fx_x_gunreduce": ("EXIT", lambda a: set_tag(a, "gunreduce", "abc")),
     "fx_x_turretreduce": ("EXIT", lambda a: set_tag(a, "turretreduce", "inf")),
+    "fx_x_turret_quote": ("EXIT", lambda a: set_tag(a, "turretreduce", "can't")),
+    "fx_x_turret_space": ("EXIT", lambda a: set_tag(a, "turretreduce", "\u00a0inf")),
     "fx_x_windowreduce": ("EXIT", lambda a: set_tag(a, "windowreduce", "nopipe")),
     "fx_x_merge_missing": ("EXIT", lambda a: set_tag(a, "merge2", "|".join([a[[t.startswith("merge2=") for t in a].index(True)][7:].split("|")[0] + ".missing.glb"] + a[[t.startswith("merge2=") for t in a].index(True)][7:].split("|")[1:]))),
     "fx_d_frames": ("DIES", lambda a: a.__setitem__(7, "15.0")),
