@@ -453,7 +453,11 @@ rule, each caught on its own job; 1,776 tests. The review before the PR found fo
 each: the join's empty slot for a slot-less mesh, the exit line's plain name, `bound_box` stale after stage 2 (Blender measures
 a wheel on its pre-reduction box), and nodes in no scene - the script CRASHES in stage 1 on them (the Orphan Nodes collection is
 not in the view layer); static tracks now rig as body parts. After: 47 of 47 fixture jobs equal through stage 3, 457,633 rows;
-1,776 tests. Rules in `docs/Testing.md`. Next: (d) part d2, the sail, rigging and flag bones.
+1,776 tests. Review of PR #178 fixes Python repr escaping for non-printable Unicode part names (a real-script regression
+and an independent exhaustive Unicode checksum), and adds 15 stage-three semantic counterexamples plus an intact supported
+control to the gate; altered bones previously passed its stage-two-only tamper checks. After: 1,785 unit tests, 57 of 71
+full jobs equal through stage 3 (457,633 rows; all 47 fixtures, 10 saved recipes; 12 later branches and two FBX left by name).
+Temporary probes also match freed-name reuse, blank pitch and NaN pitch with a one-frame cycle. Rules in `docs/Testing.md`. Next: (d) part d2, the sail, rigging and flag bones.
 - **rig_anim.py's socket sort exit reads a freed edit bone** — OPEN (2026-10-14, found by the stage 4 fixtures). The
   "would sort BEFORE its parent" error prints `_parent.name` after `bpy.ops.object.mode_set(mode='OBJECT')` has freed
   the edit bones: four Blender runs of `fx_s4_socket_sort` printed the right name once, an empty name once, and twice

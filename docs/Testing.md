@@ -1893,7 +1893,7 @@ the one-frame cycle, the rudder/preserve precedence, the length floor, the stabl
 collision, the WARN lines, the exit, and a wheel bone's head moved by 1e-6 (caught on Ribauldequin). The first plant run
 reported all eleven caught when every job had died of a missing Newtonsoft.Json beside the plant's exe; the harness now
 refuses an exception as a verdict. `Tests/VehicleRigStage3Tests.cs` holds the axle on ties and Python's repr of a part name
-(quotes, backslash, control characters - no fixture names a part with a quote). Not reached by any job: a mesh object without
+(quotes, backslash, control characters; the missing-wheel fixture also names a part with a quote). Not held by a committed fixture: a mesh object without
 vertices (left in the scene unskinned by `mesh_objects()`; a glTF primitive cannot carry none), the blank argv[21] (the Lab
 always writes the pitch), the joined objects' freed names being reused later in stage 3.
 A source-reading review of part d1 before its PR found four defects; each is now fixed, fixtured and planted. (1) The join
@@ -1920,6 +1920,21 @@ Six plants, one per fix, each caught on its fixture - the stale-box plant first 
 weld KEEPS, so the mesh still reached the extreme; the corner and the twin swapped, it bites. Measured after: 10 of 24
 recipes and 47 of 47 fixture jobs equal through stage 3 (457,633 rows), 12 recipes left at stage 3 by name, the 2 FBX by name;
 1,776 tests.
+
+Review of PR #178 (2026-10-16): `find()`'s missing-part list differed for valid names containing non-breaking spaces or
+invisible format characters: Python repr escapes them, while the port wrote them literally. The missing-wheel fixture now
+contains both and failed before the fix. `PyStrRepr` uses the pinned Blender runtime's Unicode 15.1 printability ranges;
+.NET Framework and Mono carry older Unicode data, so their category tables would also misclassify newer printable names.
+Eight additional examples and an independent checksum of repr over all 1,112,064 Unicode scalars hold the escaping,
+quote choice and supplementary characters (Blender 5.1.2 / Python 3.13.9). Unit suite: 1,785 passing.
+The gate previously tested damaged rows only through stages 1 and 2; a sealed stage-three bone edit passed that comparison.
+It now requires the intact `fx_r_wheels` seed to be fully compared with no named decline, then rejects 15 independently
+sealed stage-three changes: added/changed logs, frame, object matrix/parent, mesh positions/loops/UV/colours, weights,
+wheel-bone length/rest/parent, pose location and action range. Each must fail in the stage-three comparison, independently
+of the parser and checksum. All 15 fail for the intended reason; the intact control passes. FULL=1 VEHICLERIG_KEYS=1 positive comparison: 57 of 71 jobs equal through stage 3, 457,633 rows (all 47 fixtures and 10 of
+24 saved recipes; 12 later rig branches and two FBX sources left by name). Three independent temporary native jobs also
+match for freed object-name reuse, blank pitch's default RootHull, and NaN pitch with a one-frame cycle. Those branches
+still lack committed native fixtures.
 
 Review of PR #176 (2026-10-15): a full run found the organ gun's newly recorded custom-normal shorts differed after
 stage one's loose split. Blender's separate operator decodes the source BMesh normals into a vector layer and

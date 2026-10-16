@@ -334,9 +334,9 @@ def main(out):
     recipe(out, "fx_r_many", r.write(models, "fx_r_many"), [("W%03d" % i, 1, {}) for i in range(101)] + [("Hull", 0, {})])
     # fx_r_missing_wheel: a wheel name the scene has not - find()'s VEHICLE ERROR and exit in stage 3
     r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
-    r.node("Hull", mesh=r.mesh("Hull", material=ma)); r.node("Tire", mesh=r.mesh("Tire", at=(3.0, 0.0, 0.0), material=ma))
+    r.node("Hull\u00a0Gap\u200bX", mesh=r.mesh("Hull\u00a0Gap\u200bX", material=ma)); r.node("Tire", mesh=r.mesh("Tire", at=(3.0, 0.0, 0.0), material=ma))
     r.node("Bob's", mesh=r.mesh("Bobs", at=(6.0, 0.0, 0.0), material=ma))
-    recipe(out, "fx_r_missing_wheel", r.write(models, "fx_r_missing_wheel"), [("Hull", 0, {}), ("Tire", 1, {}), ("Bob's", 0, {}), ("Ghost's wheel", 1, {})], sub="recipes_exit")
+    recipe(out, "fx_r_missing_wheel", r.write(models, "fx_r_missing_wheel"), [("Hull\u00a0Gap\u200bX", 0, {}), ("Tire", 1, {}), ("Bob's", 0, {}), ("Ghost's wheel", 1, {})], sub="recipes_exit")
     # fx_r_slotless: meshes without material slots joined - a wheel cluster whose active has none (the empty slot first), a hull
     # whose second member has none (the empty slot after Paint), a second cluster of two slot-less parts (the set dropped again)
     r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
