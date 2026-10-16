@@ -458,6 +458,13 @@ and an independent exhaustive Unicode checksum), and adds 15 stage-three semanti
 control to the gate; altered bones previously passed its stage-two-only tamper checks. After: 1,785 unit tests, 57 of 71
 full jobs equal through stage 3 (457,633 rows; all 47 fixtures, 10 saved recipes; 12 later branches and two FBX left by name).
 Temporary probes also match freed-name reuse, blank pitch and NaN pitch with a one-frame cycle. Rules in `docs/Testing.md`. Next: (d) part d2, the sail, rigging and flag bones.
+(d) part d2 DONE 2026-10-16: the SAIL bone (its head on the keel line under the sails' box, the SailF1..F3 fold chain and the
+canvas's height bands under argv[71]), RIGGING riding the sail as its own mesh, the FLAG bone (struck below the keel, or hinged
+at its top under flagfold=). 14 of 24 recipes equal row for row through stage 3 (the 1861 frigate, Salegs, the Great Eastern
+and the BGM-71 new), 8 left at stage 3 by name, the 2 FBX by name; two fixtures for the branches no recipe takes (`fx_r_sail`:
+the fold's four bands, a sail part also a wheel, rigging on the sail, missing names, a struck flag; `fx_r_flagfold`: the
+folding flag, rigging without a sail); 63 of 73 jobs equal (FULL, 457,785 rows); nine plants caught; 1,785 tests. Next: (d)
+part d3, the turret, gun, muzzle, cradle and trails.
 - **rig_anim.py's socket sort exit reads a freed edit bone** — OPEN (2026-10-14, found by the stage 4 fixtures). The
   "would sort BEFORE its parent" error prints `_parent.name` after `bpy.ops.object.mode_set(mode='OBJECT')` has freed
   the edit bones: four Blender runs of `fx_s4_socket_sort` printed the right name once, an empty name once, and twice

@@ -69,8 +69,8 @@ python "$ROOT/tools/vehiclerig-drill/vehiclerig_fixtures.py" "$WTMP/fixtures" > 
 "$TMPD/VehicleRigJobs.exe" "$WTMP/fixtures/recipes" "$WTMP/fxwork" --all > "$TMPD/fxjobs_raw.txt"; fjrc=$?
 tr -d '\r' < "$TMPD/fxjobs_raw.txt" >> "$TMPD/jobs.txt"
 [ "$fjrc" -eq 0 ] || { grep -E '^(INVALID|UNAVAILABLE)' "$TMPD/fxjobs_raw.txt"; echo "FAIL — vehicle_rig drill: a fixture recipe did not become a job (rc=$fjrc)"; exit 1; }
-# the exit and death fixtures: recipes the writer turns into jobs, then post-edited (vehiclerig_fixtures.py --exits) into the malformed
-# tagged tokens and dials the Lab's builder never writes, their keys EXIT:1: / DIES:1: naming what the script must do with them
+# argument fixtures: post-edited (vehiclerig_fixtures.py --exits) into text the Lab's builder never writes. EXIT:/DIES:
+# keys name a required stop; unprefixed keys are valid argument variants and must complete like every positive fixture.
 "$TMPD/VehicleRigJobs.exe" "$WTMP/fixtures/recipes_exit" "$WTMP/fxwork" --all > "$TMPD/fxexit_raw.txt"; ferc=$?
 [ "$ferc" -eq 0 ] || { grep -E '^(INVALID|UNAVAILABLE)' "$TMPD/fxexit_raw.txt"; echo "FAIL — vehicle_rig drill: an exit fixture recipe did not become a job (rc=$ferc)"; exit 1; }
 tr -d '\r' < "$TMPD/fxexit_raw.txt" > "$TMPD/fxexit_jobs_in.txt"

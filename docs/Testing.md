@@ -1936,6 +1936,62 @@ of the parser and checksum. All 15 fail for the intended reason; the intact cont
 match for freed object-name reuse, blank pitch's default RootHull, and NaN pitch with a one-frame cycle. Those branches
 still lack committed native fixtures.
 
+**Step (d), stage 3 of item (5), part d2: the sail, rigging on the sail, the flag (2026-10-16).** Against vehicle_rig.py
+1895-2023 and the skinning loop's fold bands: the sail parts (`find_opt`: a missing name is a WARN) go on ONE `Sail` bone
+whose head sits at the sails' box centre in x and y and at the KEEL LINE less 0.05 in z - the keel the lowest z of every
+mesh's eight world `bound_box` corners (`matrix_world @ Vector(c)`: the float32 products summed in double, rounded to float),
+the box from the same corners, `0.5 * (a + b)` and `keel - 0.05` in double before `Vector((...))` rounds them - and whose tail
+rises by `max(0.3, 0.25 * height)` (a float32 add). Under argv[71] == "1" (`sail_fold`) three bones chain below it,
+`SailF1..F3`, their heads at the box centre on the fold cuts `top - h * q / 4.0` (h = `max(1e-6, height)`), each tail
+`max(0.1, 0.25 * h / 4.0)` down; each sail vertex then skins to the bone owning its height band (its world z against the cuts,
+`<`), a group per non-empty band in band order, and the join unites the bands by name in object order. A sail part also listed
+as a wheel keeps its wheel cluster's bone but skins to the Sail. With a sail found, the rigging parts ride the Sail bone
+(`find_opt`, a missing name skipped silently) as ONE mesh of their own (`__rigsail__`, never `Mesh_Sail`, which the export
+doubles); without one, rigging stays on the body. The flag parts go on one `Flag` bone - struck: the head at the keel line
+less 0.05; under `flagfold=`, hinged at the flags' top - its tail up by `max(0.3, 0.25 * height)`; `flagfold=` reads
+`max(-175, min(175, float(deg)))` and `max(1, int(float(frames)))` (blank: 0 and 12). The lines keep the script's order:
+SAIL, RIGGING, then RUDDER, PRESERVE and FLIP, then FLAG; the fold bands print per sail part in the skinning. Measured: 14 of
+the 24 recipes equal row for row through stage 3 (the 1861 frigate, Salegs and the Great Eastern with a sail, the BGM-71 with a
+struck flag - all equal on the first run), 8 left at stage 3 by name, the 2 FBX by name; `fx_r_sail` (an upright canvas grid
+and a topsail falling into all four bands, the topsail also a wheel, rigging on the sail, a missing sail and a missing rigging
+name, a struck flag, a wheel) and `fx_r_flagfold` (a flag folding -30 degrees over 8 frames, a missing flag name, rigging
+without a sail) equal on the first run; 63 of 73 jobs equal (FULL, 457,785 rows); 1,785 tests. Nine plants, one per rule,
+each caught on its job (the keel's offset and its set of meshes, the fold cuts, the band direction, the rigging's own mesh, the
+sail winning over a wheel, the flag's hinge, the 0.3 rise floor, the sail WARN). No recipe takes the fold, rigging on a sail
+or the flag fold (Triconter folds and the Khelandion rigs, both left for their oars).
+The source-reading review of d2 found no geometry or skinning divergence, but argument parsing that was not Python's: (1)
+float() is not .NET's TryParse - Python first turns a non-ASCII space into ' ' and a Unicode decimal digit into its ASCII
+digit, strips only the ASCII whitespace (so "\x1c3\x1f", which str.strip() reduces to "3", is NOT a number), takes one sign,
+then inf/infinity/nan or a decimal whose underscores stand only between digits ("1_0" is 10.0; "1__0", "1_", "--inf", "+-nan"
+raise); int() is the same with digits only; str.strip() is str.isspace() (.NET's whitespace plus \x1c-\x1f, less U+180E).
+`VehicleProbe.Input.PyFloat`, `PyNumberAscii`, `PyStrip` and `TryPyInt` now follow it, every case measured against Blender's
+Python 3.13.9 (`Tests/VehicleRigPythonArgsTests.cs`, 53 cases; the vehicle probe drill holds the shared parser). (2) The
+sail-fold and oar dials (argv 72, 73, 75 and 56-59) are parsed unconditionally between the reduce tags and the dials, so a value
+Python cannot parse kills the script there - `Args.FoldDie`, fixtures `fx_d_sailfold_frames`, `fx_d_sailfold_inf`
+(OverflowError) and `fx_d_oar_lift` ("1__0"). (3) flagfold= frame counts keep Python's exact int (3e9 prints 3000000000).
+(4) `fx_r_sail`'s canvas lay FLAT: glTF is Y-up, and the rotation meant to stand it up laid it down, so the sail's rise and the
+fold drop sat on their 0.3 and 0.1 floors; it now stands 4 tall (rise 1.15, drop 0.2875), with a jib that is also a rudder
+(banded, keyed apart), a burgee that is sail and flag (banded inside Mesh_Flag), a halyard that is rigging and flag, and an
+animated sail part; `fx_r_flagfold`'s flag stands 3 tall (rise 0.75). Plants: the underscore rule (three tests), the fold
+dials' death and the sail rise pinned to its floor (the drill). After: 66 of 76 jobs equal through stage 3 (457,837 rows);
+1,838 tests.
+
+Critical review of PR #179 (2026-10-16): the shared float parser still used Framework's decimal conversion and Unicode
+tables. Against Blender 5.1.2's Python 3.13.9, 3,080 independent decimal/special/Unicode cases found 485 differences:
+414 overflow exceptions, 13 rejected digit blocks, and 58 different bit patterns (including signed NaNs). The parser now
+rounds an exact decimal rational once to binary64, ties to even, returns infinity on overflow, preserves signed zero and
+NaN, and uses Python's Unicode 15.1 decimal blocks. Standalone probe/prep/decimate compilers reference System.Numerics.
+Permanent tests pin 1,200 generated decimal results and the numeric character transform for all 0x110000 codepoints to
+native Python SHA256 checksums. `fx_r_numeric_pct` proves the geometry consequence: a decimal just above the rounding
+boundary above 0.5 must run the BODY weld (24 vertices to 8); Framework rounded it to 0.5 and skipped the tier.
+`fx_d_sailfold_overflow` proves 1e309 becomes infinity before int() raises the script's OverflowError, and
+`fx_d_unicode_fold` accepts a Kawi digit before the next dial raises ValueError. All three fail against the original PR.
+`fx_r_flat_sail` also covers the zero-height sail's 1e-6 clamp, an entirely missing rigging list, and flagfold=| defaults.
+Argument variants can remain positive after the fixture editor runs; its Unicode output is explicitly UTF-8.
+The corrected parser matches all 3,080 independent cases; 1,854 unit tests pass. The FULL native run with key rows
+compares 70 of 80 jobs through stage 3 (454,499 rows): all 56 fixtures and 14 saved recipes equal, eight recipes left
+by name for later stage-three branches and two for the FBX importer.
+
 Review of PR #176 (2026-10-15): a full run found the organ gun's newly recorded custom-normal shorts differed after
 stage one's loose split. Blender's separate operator decodes the source BMesh normals into a vector layer and
 re-encodes that layer on each copied component; copying the original shorts misses that quantization. The model now

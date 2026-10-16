@@ -32,8 +32,8 @@ public static partial class BlenderVehicleRig
     static readonly (string role, string branch)[] Stage3Later =
     {
         ("turrets", "the turret bone (d3)"), ("guns", "the gun assembly (d3)"), ("muzzles", "the muzzle sockets (d3)"), ("cradles", "the gun cradle (d3)"),
-        ("trails", "the trail bones (d3)"), ("rotors", "the main rotor (d4)"), ("tailrotors", "the tail rotor (d4)"), ("sails", "the sail bone (d2)"),
-        ("flags", "the flag bone (d2)"), ("oars", "the oar bones (d5)"), ("tracks", "the tread rig (d6)"),
+        ("trails", "the trail bones (d3)"), ("rotors", "the main rotor (d4)"), ("tailrotors", "the tail rotor (d4)"),
+        ("oars", "the oar bones (d5)"), ("tracks", "the tread rig (d6)"),
     };
 
     /// <summary>Stage 3 on the scene stage 2 left: the rig. Lines go to s.Logs3; a branch not modelled sets s.Fallback; the script's exit
@@ -95,7 +95,8 @@ public static partial class BlenderVehicleRig
         }
         if (clusters.Count > 0) Note(s, "wheel clusters");
 
-        // ---- the armature
+        // ---- the armature (mode_set(EDIT) first: the view layer updated - every bound_box current again)
+        foreach (var so in s.Objects) { so.EvalMin = null; so.EvalMax = null; }
         var armObjName = names.ObjectPool.Unique("VehicleRig");
         var armDataName = names.ArmaturePool.Unique("VehicleRig");
         var boneNames = new List<string>(); var parentOf = new List<int>();
@@ -121,36 +122,57 @@ public static partial class BlenderVehicleRig
             int id = AddBone(string.Format(CultureInfo.InvariantCulture, "Wheel_{0:00}", i), (float[])cl.c.Clone(), t, body);
             foreach (var wn in cl.names) boneOf[wn] = boneNames[id - RigBoneBase];
         }
-        // ED_armature_from_edit: the rest; armature.bones in depth-first order (children in creation order)
-        var ids = Enumerable.Range(RigBoneBase, boneNames.Count).ToList();
-        var children = ids.ToDictionary(b => b, b => new List<int>()); var roots = new List<int>();
-        foreach (int b in ids) { int p = parentOf[b - RigBoneBase]; if (p >= 0) children[p].Add(b); else roots.Add(b); }
-        var rest = new VehicleProbe.ArmatureResult();
-        VehicleProbe.RestFromEditBones(ids, children, roots, head, tail, roll, (b, parent, arm, offs, len) =>
+        // ---- the SAIL bone: every found sail part on it; the head at the keel line (the lowest world bound_box corner of every mesh
+        // with vertices) less 0.05 under the sails' box centre, the tail up by max(0.3, a quarter of the sails' height); with the fold,
+        // SailF1..F3 chained below it with their heads on the fold lines (a quarter, half, three quarters down from the top)
+        var sailFound = new List<string>(); double[] sailCuts = null;
+        foreach (var n in a.Names.TryGetValue("sails", out var sl) ? sl : new List<string>())
         {
-            rest.Bones.Add(b); rest.Parent[b] = parent;
-            rest.ArmMat[b] = arm; rest.OffsBone[b] = offs; rest.Length[b] = len; rest.MatrixLocal[b] = VehicleProbe.ToRowMajor(arm);
-            rest.EditHead[b] = head[b]; rest.EditTail[b] = tail[b]; rest.EditRoll[b] = roll[b];
-        });
-        var order = new List<int>();
-        void Walk(int b) { order.Add(b); foreach (int c in children[b]) Walk(c); }
-        foreach (int r in roots) Walk(r);
-        foreach (int b in ids) names.BoneOfJoint[b] = boneNames[b - RigBoneBase];
-        var identity = new float[16]; identity[0] = identity[5] = identity[10] = identity[15] = 1f;
-        var armObj = new BlenderRigAnim.SceneObject
+            var o = FindOpt(n);
+            if (o == null) { s.Logs3.Add("VEHICLE WARN: sail part '" + n + "' not found — skipped"); Note(s, "a missing sail part (a WARN)"); continue; }
+            sailFound.Add(o.Name); boneOf[o.Name] = "Sail";
+        }
+        double Keel() { double k = double.PositiveInfinity; foreach (var o in objs) foreach (var p in WorldCorners(o)) if (p[2] < k) k = p[2]; return k; }
+        void BoxOf(List<string> partNames, out double[] mn, out double[] mx)
         {
-            Name = armObjName, Type = "ARMATURE", DataName = armDataName, World = (float[])identity.Clone(), Local = (float[])identity.Clone(),
-            Props = new[] { new float[3], new[] { 1f, 0f, 0f, 0f }, new[] { 1f, 1f, 1f } },
-        };
-        s.Objects.Add(armObj);   // scene.collection.objects.link: the scene's own collection, after its objects, before any child collection's
-        BlenderRigAnim.SortByCollection(s.Objects);
-        foreach (var so in s.Objects) { so.EvalMin = null; so.EvalMax = null; }   // mode_set(EDIT): the view layer updated
-        var ad = new BlenderRigAnim.ArmatureData
+            mn = new[] { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity }; mx = new[] { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
+            foreach (var pn in partNames) foreach (var p in WorldCorners(objs.First(o => o.Name == pn)))
+                for (int k = 0; k < 3; k++) { if (p[k] < mn[k]) mn[k] = p[k]; if (p[k] > mx[k]) mx[k] = p[k]; }
+        }
+        if (sailFound.Count > 0)
         {
-            Object = armObj, Rest = rest, BoneNodes = order, PoseProps = new Dictionary<int, float[][]>(), PoseMats = new Dictionary<int, float[]>(),
-        };
-        foreach (int b in order) ad.PoseProps[b] = new[] { new float[3], new[] { 1f, 0f, 0f, 0f }, new[] { 1f, 1f, 1f } };
-        s.Armature = ad;
+            BoxOf(sailFound, out var smn, out var smx);
+            double keel = Keel();
+            var sh0 = new[] { (float)(0.5 * (smn[0] + smx[0])), (float)(0.5 * (smn[1] + smx[1])), (float)(keel - 0.05) };
+            float rise = (float)PyMax(0.3, 0.25 * (smx[2] - smn[2]));
+            int sailBone = AddBone("Sail", sh0, new[] { (float)(sh0[0] + 0f), (float)(sh0[1] + 0f), (float)(sh0[2] + rise) }, body);
+            if (a.SailFold)
+            {
+                double sh = PyMax(1e-6, smx[2] - smn[2]);
+                sailCuts = new[] { smx[2] - sh * 1 / 4.0, smx[2] - sh * 2 / 4.0, smx[2] - sh * 3 / 4.0 };
+                double scx = 0.5 * (smn[0] + smx[0]), scy = 0.5 * (smn[1] + smx[1]);
+                float drop = (float)(-PyMax(0.1, 0.25 * sh / 4.0));
+                int prev = sailBone;
+                for (int fi = 0; fi < 3; fi++)
+                {
+                    var fh = new[] { (float)scx, (float)scy, (float)sailCuts[fi] };
+                    prev = AddBone("SailF" + (fi + 1).ToString(CultureInfo.InvariantCulture), fh, new[] { (float)(fh[0] + 0f), (float)(fh[1] + 0f), (float)(fh[2] + drop) }, prev);
+                }
+                Note(s, "the sail's fold chain");
+            }
+            s.Logs3.Add("VEHICLE SAIL: " + sailFound.Count + " part(s) on one Sail bone" + (a.SailFold ? " + SailF1..F3 fold chain" : "") +
+                        " (double-sided at export; " + (a.SailFold ? "FOLDED at the yard" : "struck/raised") + " by the 'Furl' clip)");
+            Note(s, "the sail bone");
+        }
+        // ---- RIGGING rides the Sail bone when there is one: its own mesh, never Mesh_Sail (find_opt: a missing name is skipped silently)
+        var rigOnSail = new HashSet<string>(StringComparer.Ordinal);
+        if (sailFound.Count > 0)
+            foreach (var n in a.Names.TryGetValue("rigging", out var rl) ? rl : new List<string>())
+            {
+                var o = FindOpt(n); if (o == null) continue;
+                boneOf[o.Name] = "Sail"; rigOnSail.Add(o.Name);
+            }
+        if (rigOnSail.Count > 0) { s.Logs3.Add("VEHICLE RIGGING: " + rigOnSail.Count + " part(s) ride the Sail bone — struck/raised with the canvas, SINGLE-sided (own mesh, never doubled with Mesh_Sail)"); Note(s, "rigging on the sail bone"); }
 
         // ---- the RUDDER, PRESERVE and FLIP name sets
         HashSet<string> NameSet(string role, string label)
@@ -176,14 +198,87 @@ public static partial class BlenderVehicleRig
         var flip = NameSet("flip", "flip");
         if (flip.Count > 0) s.Logs3.Add("VEHICLE FLIP: " + flip.Count + " part(s) — winding reversed once at export (XOR with the inside-out fix)");
 
+        // ---- the FLAG bone: every found flag part on it; struck (the head at the keel line less 0.05) or, under flagfold=, hinged at
+        // the flags' top; the tail up by max(0.3, a quarter of the flags' height)
+        var flagFound = new List<string>();
+        foreach (var n in a.Names.TryGetValue("flags", out var fl) ? fl : new List<string>())
+        {
+            var o = FindOpt(n);
+            if (o == null) { s.Logs3.Add("VEHICLE WARN: flag part '" + n + "' not found — skipped"); Note(s, "a missing flag part (a WARN)"); continue; }
+            flagFound.Add(o.Name); boneOf[o.Name] = "Flag";
+        }
+        if (flagFound.Count > 0)
+        {
+            BoxOf(flagFound, out var gmn, out var gmx);
+            double keel = Keel();
+            var fh = new[] { (float)(0.5 * (gmn[0] + gmx[0])), (float)(0.5 * (gmn[1] + gmx[1])), (float)(a.FlagFoldOn ? gmx[2] : keel - 0.05) };
+            float rise = (float)PyMax(0.3, 0.25 * (gmx[2] - gmn[2]));
+            AddBone("Flag", fh, new[] { (float)(fh[0] + 0f), (float)(fh[1] + 0f), (float)(fh[2] + rise) }, body);
+            s.Logs3.Add("VEHICLE FLAG: " + flagFound.Count + " part(s) on one Flag bone — " +
+                        (a.FlagFoldOn ? "FOLDS " + BlenderRigAnim.PyFixed(a.FlagFoldDeg, 0) + " deg at the top hinge over " + a.FlagFoldFrames + " frame(s) (deployed at idle, folded underway)"
+                                      : "flies at anchor, struck below the keel through Spin (the opposite of sails)") + "; double-sided at export");
+            Note(s, a.FlagFoldOn ? "the flag bone (folding)" : "the flag bone (struck)");
+        }
+
+        // ED_armature_from_edit: the rest; armature.bones in depth-first order (children in creation order)
+        var ids = Enumerable.Range(RigBoneBase, boneNames.Count).ToList();
+        var children = ids.ToDictionary(b => b, b => new List<int>()); var roots = new List<int>();
+        foreach (int b in ids) { int p = parentOf[b - RigBoneBase]; if (p >= 0) children[p].Add(b); else roots.Add(b); }
+        var rest = new VehicleProbe.ArmatureResult();
+        VehicleProbe.RestFromEditBones(ids, children, roots, head, tail, roll, (b, parent, arm, offs, len) =>
+        {
+            rest.Bones.Add(b); rest.Parent[b] = parent;
+            rest.ArmMat[b] = arm; rest.OffsBone[b] = offs; rest.Length[b] = len; rest.MatrixLocal[b] = VehicleProbe.ToRowMajor(arm);
+            rest.EditHead[b] = head[b]; rest.EditTail[b] = tail[b]; rest.EditRoll[b] = roll[b];
+        });
+        var order = new List<int>();
+        void Walk(int b) { order.Add(b); foreach (int c in children[b]) Walk(c); }
+        foreach (int r in roots) Walk(r);
+        foreach (int b in ids) names.BoneOfJoint[b] = boneNames[b - RigBoneBase];
+        var identity = new float[16]; identity[0] = identity[5] = identity[10] = identity[15] = 1f;
+        var armObj = new BlenderRigAnim.SceneObject
+        {
+            Name = armObjName, Type = "ARMATURE", DataName = armDataName, World = (float[])identity.Clone(), Local = (float[])identity.Clone(),
+            Props = new[] { new float[3], new[] { 1f, 0f, 0f, 0f }, new[] { 1f, 1f, 1f } },
+        };
+        s.Objects.Add(armObj);   // scene.collection.objects.link: the scene's own collection, after its objects, before any child collection's
+        BlenderRigAnim.SortByCollection(s.Objects);
+        var ad = new BlenderRigAnim.ArmatureData
+        {
+            Object = armObj, Rest = rest, BoneNodes = order, PoseProps = new Dictionary<int, float[][]>(), PoseMats = new Dictionary<int, float[]>(),
+        };
+        foreach (int b in order) ad.PoseProps[b] = new[] { new float[3], new[] { 1f, 0f, 0f, 0f }, new[] { 1f, 1f, 1f } };
+        s.Armature = ad;
+
         // ---- rigid skinning: one group per part, its bone, every vertex at 1.0; the Armature modifier; parented to the rig
         foreach (var o in objs)
         {
             string bname = boneOf.TryGetValue(o.Name, out var wb) ? wb : bodyBone;
             var d = o.Mesh;
-            d.Groups = new List<string> { bname };
             d.DefNr = new List<int>[d.Vertices]; d.DefWeight = new List<float>[d.Vertices];
-            for (int v = 0; v < d.Vertices; v++) { d.DefNr[v] = new List<int> { 0 }; d.DefWeight[v] = new List<float> { 1f }; }
+            if (a.SailFold && sailFound.Contains(o.Name))
+            {
+                // the CANVAS bands: each vertex to the bone owning its height band (its world z against the fold cuts), a group per
+                // non-empty band in band order
+                var bandNames = new[] { "Sail", "SailF1", "SailF2", "SailF3" };
+                var band = new int[d.Vertices]; var used = new bool[4];
+                var it = VehicleProbe.ToRowMajor(o.World);
+                for (int v = 0; v < d.Vertices; v++)
+                {
+                    float wz = MulPointRow(it, 2, d.Positions[3 * v], d.Positions[3 * v + 1], d.Positions[3 * v + 2]);
+                    int bi = 0; foreach (double cz in sailCuts) if (wz < cz) bi++;
+                    band[v] = bi; used[bi] = true;
+                }
+                var groupOf = new int[4]; d.Groups = new List<string>();
+                for (int k = 0; k < 4; k++) if (used[k]) { groupOf[k] = d.Groups.Count; d.Groups.Add(bandNames[k]); }
+                for (int v = 0; v < d.Vertices; v++) { d.DefNr[v] = new List<int> { groupOf[band[v]] }; d.DefWeight[v] = new List<float> { 1f }; }
+                s.Logs3.Add("VEHICLE SAIL fold bands '" + o.Name + "': " + string.Join(" ", Enumerable.Range(0, 4).Select(k => bandNames[k] + "=" + band.Count(x => x == k))) + " vert(s)");
+            }
+            else
+            {
+                d.Groups = new List<string> { bname };
+                for (int v = 0; v < d.Vertices; v++) { d.DefNr[v] = new List<int> { 0 }; d.DefWeight[v] = new List<float> { 1f }; }
+            }
             d.ArmatureModifier = armObjName;
             o.Parent = armObj;   // `o.parent = arm`: the local transform and the parent inverse kept; the armature is the identity
         }
@@ -196,6 +291,7 @@ public static partial class BlenderVehicleRig
             string key = rudders.Contains(o.Name) ? "__rud__" + o.Name
                        : preserve.Contains(o.Name) ? "__keep__" + o.Name
                        : flip.Contains(o.Name) ? "__flip__" + o.Name
+                       : rigOnSail.Contains(o.Name) ? "__rigsail__"
                        : boneOf.TryGetValue(o.Name, out var wb) ? wb : bodyBone;
             if (!groupAt.TryGetValue(key, out int gi)) { groupAt[key] = groups.Count; groups.Add((key, new List<BlenderRigAnim.SceneObject> { o })); }
             else groups[gi].members.Add(o);
@@ -215,6 +311,29 @@ public static partial class BlenderVehicleRig
             if (active.Name != want) Note(s, "a joined mesh's name taken (Mesh_<bone>.NNN)");
         }
         s.Logs3.Add("VEHICLE join: " + groups.Count + " mesh(es), one per bone");
+    }
+
+    /// <summary>`o.matrix_world @ Vector(c)` for the 8 corners of o.bound_box (the bounds as last evaluated): mathutils' Matrix @ Vector,
+    /// the float32 products summed in double, each component rounded to float. Only the corners' min and max are ever taken.</summary>
+    static List<float[]> WorldCorners(BlenderRigAnim.SceneObject o)
+    {
+        float[] mn, mx;
+        if (o.EvalMin != null) { mn = o.EvalMin; mx = o.EvalMax; } else LocalBox(o.Mesh, out mn, out mx);
+        var it = VehicleProbe.ToRowMajor(o.World); var r = new List<float[]>(8);
+        for (int c = 0; c < 8; c++)
+        {
+            float x = (c & 4) == 0 ? mn[0] : mx[0], y = (c & 2) == 0 ? mn[1] : mx[1], z = (c & 1) == 0 ? mn[2] : mx[2];
+            r.Add(new[] { MulPointRow(it, 0, x, y, z), MulPointRow(it, 1, x, y, z), MulPointRow(it, 2, x, y, z) });
+        }
+        return r;
+    }
+
+    /// <summary>One row of mathutils' Matrix(4x4) @ Vector(3): the float32 products and the translation summed in double, rounded to float.</summary>
+    static float MulPointRow(float[] it, int row, float x, float y, float z)
+    {
+        double d = 0.0;
+        d += (double)(float)(it[row * 4 + 0] * x); d += (double)(float)(it[row * 4 + 1] * y); d += (double)(float)(it[row * 4 + 2] * z); d += (double)(float)(it[row * 4 + 3] * 1f);
+        return (float)d;
     }
 
     /// <summary>axle_axis(s): the forced axis (X, Y, Z), else the thinnest extent - min over range(3) keeps the first on a tie.</summary>
