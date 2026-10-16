@@ -1830,14 +1830,21 @@ grid, over the cap, dissolved per BSP cell to 182 faces), equal from the first r
 holds the flat grid's dissolve to one quad (4 vertices, the Newell normal, the UVs carried) and its triangulation, the
 bumpy grid's four coplanar strips with their straight-run vertices collapsed, the hexagon's Newell normal, the ear clipping's
 cover of a square, an L and a U (n - 2 triangles inside the ring, the area summed; sign 0 detects the ring's direction as
-sign -1), and the beautify's choice of the short diagonal on a kite with the rotate rule's contract both ways. A source-reading review
-before the PR found no divergence and two latent holes no valid source reaches, closed the same night: `BMesh.EdgeExists` now walks
-BOTH disk cycles a step at a time as `BM_edge_exists`'s active branch does (the one-disk walk picked a different edge only beside a
-double edge), and the chunked dissolve refuses a later cell's list that names an element an earlier cell's collapse spliced away
-(Blender's Python wrapper raises there and the script dies in its guard; the C# marks the fallback, so the drill FAILs instead of
-running on). The branches no fixture reaches (a failed join, the double-face reuse, the loop reverse, the degenerate refusals, the
-splice, kill-degenerate and kill-duplicate, wire edges through the cleanup, the polyfill's tangential pass and desperate mode, the
-concave-quad flips, a triangulate double) rest on the 24 recipes until a fixture each.
+sign -1), and the beautify's choice of the short diagonal on a kite with the rotate rule's contract both ways.
+Review of PR #177 (2026-10-16): a valid 4,002-triangle source reproduces a cross-cell splice. The first BSP cell joins two
+triangles, collapses their collinear rim vertex, and splices away an existing edge queued for the second cell. Blender's
+wrapper raises `TypeError: edges: 0 BMEdge has been removed`; the model now records the same death before `to_mesh`, rather
+than leaving the case unmodelled. The stage comparison checks its exact exception and preceding log lines. A permanent unit
+regression and `DIES:2:fx_d_chunk_splice` hold the case. `BMeshTests` also pins the two-disk edge lookup after a topology edit
+puts duplicate edges in different disk orders (the author's concurrent follow-up supplied the lookup fix).
+`fx_c_soup_attributes` holds custom normals, vertex colours and two UV layers through the soup's joins, collapse and
+triangulation. Full positive comparison: all 24 saved recipes and 38 fixture jobs, 60 of 62 equal after both stages,
+307,490 rows, the two FBX sources left by name; 1,762 unit tests pass. Independent temporary Blender probes also matched
+4,400 polygon/grid/soup cases in vertex and edge order, face winding, material/smooth flags and UVs, including degenerate,
+non-manifold and inconsistently wound meshes. These probes are review evidence; the committed regressions run in the gate.
+Remaining source-read branches still need dedicated fixtures (double-face reuse, degenerate refusals, kill-degenerate and
+kill-duplicate, wire cleanup, tangential/desperate polyfill, concave-quad flips, triangulate doubles); randomized matches
+do not prove each branch was reached.
 Scoped out, named: a name listed twice in one tier's list would name its second datablock differently
 (the Lab lists a part once).
 

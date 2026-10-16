@@ -81,8 +81,8 @@ public static partial class BlenderVehicleRig
                 {
                     // the SOUP tiers: _dissolve_limited(_rb, 5.0) - one dissolve_limit over every vertex and edge, or, past 4,000 faces, the
                     // faces split by their median centre into cells and each cell's interior edges and vertices dissolved apart
-                    var dead = DissolveLimited(bm, layers, 5.0);
-                    if (dead != null) { s.Fallback = dead; return; }
+                    string death = DissolveLimited(bm, layers, 5.0);
+                    if (death != null) { s.Dies = death; return; }
                     if (timing) Console.Error.WriteLine($"TIME {rn}: {vraw} verts, dissolve {sw.ElapsedMilliseconds} ms ({bm.TotVert} left, {bm.TotFace} faces)");
                     Note(s, "a soup tier: the limited dissolve");
                 }
@@ -144,8 +144,8 @@ public static partial class BlenderVehicleRig
     /// it the faces' median centres (BM_face_calc_center_median) BSP-split at the median along the widest axis - a Python stack,
     /// the second half popped first - until every cell holds at most the cap, then per leaf (in leaf order) the edges whose two
     /// faces are in the cell and the vertices whose faces all are, each list in index order, dissolved when either is non-empty.
-    /// Every operator call recomputes the face normals when it finishes (NORMALS_CALC). Returns null, or the reason the script would
-    /// die here: a later cell's list naming an element an earlier cell's dissolve killed (bmesh.ops' element check raises).</summary>
+    /// Every operator call recomputes the face normals when it finishes (NORMALS_CALC). Returns null on success, or the Python
+    /// TypeError raised when a later cell names an element removed by an earlier collapse.</summary>
     static string DissolveLimited(BMesh bm, BlenderWeld.Layers layers, double angleDeg)
     {
         float angle = (float)(angleDeg * (Math.PI / 180.0));   // math.radians(5.0) into the float slot
@@ -223,10 +223,11 @@ public static partial class BlenderVehicleRig
         foreach (var (es, vs) in jobs)
         {
             if (es.Count == 0 && vs.Count == 0) continue;
-            // the lists were taken before any cell ran; an earlier cell's collapse can splice away an edge of this one (BM_edge_exists in
-            // bmesh_kernel_join_edge_kill_vert) - the Python wrapper then raises "has been removed" and the script dies in its guard
-            foreach (int e in es) if (!bm.EAlive[e]) return "the chunked dissolve: a cell's edge list names an edge an earlier cell removed (bmesh.ops raises ValueError there; the script's death is not modelled)";
-            foreach (int v in vs) if (!bm.VAlive[v]) return "the chunked dissolve: a cell's vertex list names a vertex an earlier cell removed (bmesh.ops raises ValueError there; the script's death is not modelled)";
+            // A collapse can splice away an existing edge used by a later cell, even though its input vertices
+            // were interior to the first cell. Python validates the stored BMVert/BMEdge wrappers before each op;
+            // integer slots alone would silently reuse a removed element. Match that TypeError before mutating.
+            for (int i = 0; i < vs.Count; i++) if (!bm.VAlive[vs[i]]) return "TypeError: verts: " + i + " BMVert has been removed";
+            for (int i = 0; i < es.Count; i++) if (!bm.EAlive[es[i]]) return "TypeError: edges: " + i + " BMEdge has been removed";
             BlenderDissolve.DissolveLimit(bm, layers, angle, vs, es);
             BlenderDissolve.FaceNormalsUpdateAll(bm);
         }

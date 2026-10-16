@@ -628,7 +628,13 @@ static class StageDrill
             }
             if (problems.Count == 0)
             {
-                if (!d.Stages.TryGetValue(2, out var s2)) problems.Add("stage 2 model: the scene runs on here, Blender stopped in stage 2: " + (d.Exit != null ? string.Join(" | ", d.LogsOfStop) : d.Died));
+                if (model.Dies != null)
+                {
+                    if (d.StoppedAt != 2 || d.Died != model.Dies) problems.Add("stage 2 model: the death differs: here '" + model.Dies + "', Blender '" + d.Died + "' in stage " + d.StoppedAt);
+                    else if (!d.LogsOfStop.SequenceEqual(model.Logs2)) problems.Add("stage 2 model: the lines before the death differ");
+                    else { RowsEqual += model.Logs2.Count; Console.WriteLine($"STAGE2 {key}: equal - the script dies in stage 2 ({d.Died}), {model.Logs2.Count} VEHICLE lines before it"); }
+                }
+                else if (!d.Stages.TryGetValue(2, out var s2)) problems.Add("stage 2 model: the scene runs on here, Blender stopped in stage 2: " + (d.Exit != null ? string.Join(" | ", d.LogsOfStop) : d.Died));
                 else
                 {
                     var rows2 = BlenderRigAnim.Render(model, 2, fcSlot: true);

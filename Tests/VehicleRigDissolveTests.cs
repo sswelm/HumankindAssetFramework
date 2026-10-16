@@ -134,4 +134,36 @@ public class VehicleRigDissolveTests
         Assert.True(BlenderPolyfill.QuadRotateCalcXY(4, -0.2f, 0, 0, 4, 0.2f, 8, 0, false, out _) < 0f, "from the long diagonal, the short one is better");
         Assert.True(BlenderPolyfill.QuadRotateCalcXY(0, 0, 4, -0.2f, 8, 0, 4, 0.2f, false, out _) > 0f, "from the short diagonal, the long one is worse");
     }
+
+    [Fact]
+    public void A_chunk_cannot_reuse_an_edge_spliced_away_by_an_earlier_chunk()
+    {
+        // Blender 5.1.2: the right cell joins (0,1,3) and (1,2,3), then removes collinear vertex 1.
+        // Its new (0,2) edge splices away the existing edge used by BOTH faces of the left cell.
+        // The next Python operator rejects that removed BMEdge before it can change the mesh.
+        var positions = new List<float> { 0,0,0, 1.5f,0,0, 3,0,0, 1.5f,2,0, -10,1,0, -10,-1,0 };
+        var faces = new List<int> { 0,1,3, 1,2,3, 0,2,4, 0,5,2 };
+        foreach (int side in new[] { -1, 1 }) for (int i = 0; i < 1999; i++)
+        {
+            float x = side * (10f + i * .002f); int v = positions.Count / 3;
+            positions.AddRange(new[] { x,10f,0f, x+.001f,10f,0f, x,10.001f,0f });
+            faces.AddRange(new[] { v, v+1, v+2 });
+        }
+        var edges = new List<int>(); var seen = new HashSet<long>();
+        for (int c = 0; c < faces.Count; c++)
+        {
+            int a = faces[c], b = faces[c - c%3 + (c%3+1)%3];
+            long key = ((long)Math.Min(a,b)<<32) | (uint)Math.Max(a,b);
+            if (seen.Add(key)) edges.AddRange(new[] { a, b });
+        }
+        var mesh = new BlenderRigAnim.MeshData { Vertices = positions.Count/3, Positions = positions.ToArray(), Faces = faces.ToArray(), Edges = edges.ToArray(), FaceMaterial = new int[faces.Count/3], FaceSharp = new bool[faces.Count/3] };
+        var scene = new BlenderRigAnim.Stage1();
+        var obj = new BlenderRigAnim.SceneObject { Name = "Shroud", Type = "MESH", Mesh = mesh };
+        scene.Objects.Add(obj);
+        var args = new BlenderVehicleRig.Args(); args.Names["rigging"] = new List<string> { "Shroud" }; args.Reduce["rigging"] = 80;
+        BlenderVehicleRig.RunStage2(scene, args);
+        Assert.Equal("TypeError: edges: 0 BMEdge has been removed", scene.Dies);
+        Assert.Same(mesh, obj.Mesh); // the script never reaches to_mesh on the failed object
+        Assert.Empty(scene.Logs2);
+    }
 }

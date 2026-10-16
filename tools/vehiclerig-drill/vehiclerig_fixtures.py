@@ -29,6 +29,8 @@ Stage 2 (step (c), the weld tiers):
                      one n-gon and collapses the straight-run vertices, the triangulate cuts the square, the decimate follows
   fx_c_soup_L        a flat L-shaped strip in the SHROUD tier at 50: the dissolve leaves a CONCAVE n-gon, so the ear clipping's
                      kd-tree of concave corners decides the ears; a lone flat quad beside it takes the quad rule
+  fx_c_soup_attributes custom normals, vertex colours and two UV layers through the soup operators
+  fx_d_chunk_splice  an earlier BSP cell deletes an edge queued for a later cell: the script dies in stage 2
   fx_c_soup_bumpy    a 60 x 40 bumpy grid (4,800 faces) in the RIGGING tier at 80: over the 4,000-face cap, the dissolve runs
                      per BSP cell on the cell's interior edges and vertices
   fx_c_scaled        the seamed grid on a node scaled (2, 1, 0.5) and turned: the weld distance from o.dimensions after
@@ -140,6 +142,20 @@ def flat_grid(r, name, material, nx, ny, bump=0.0, mask=None):
     return len(r.meshes) - 1
 
 
+def chunk_splice(r, material):
+    """4,002 triangles: a right cell's collapse removes an edge queued for the left cell (PR #177 regression)."""
+    pos = [(0, 0, 0), (1.5, 0, 0), (3, 0, 0), (1.5, 2, 0), (-10, 1, 0), (-10, -1, 0)]
+    idx = [0, 1, 3, 1, 2, 3, 0, 2, 4, 0, 5, 2]
+    for side in (-1, 1):
+        for i in range(1999):
+            x = side * (10 + i * .002); base = len(pos)
+            pos += [(x, 10, 0), (x + .001, 10, 0), (x, 10.001, 0)]
+            idx += [base, base + 1, base + 2]
+    r.meshes.append({"name": "Shroud", "primitives": [{"attributes": {"POSITION": r.b.accessor(pos, "f", "VEC3")},
+        "indices": r.b.accessor(idx, "H", "SCALAR", minmax=False), "material": material}]})
+    return len(r.meshes) - 1
+
+
 def boxes_in_one(r, name, material, count):
     """One primitive of `count` separate boxes (loose parts of one mesh)."""
     pos = []; idx = []
@@ -244,6 +260,19 @@ def main(out):
     r = Rig(); ma = r.material("Rope", (0.4, 0.3, 0.2))
     r.node("Shroud", mesh=flat_grid(r, "Shroud", ma, 61, 41, bump=0.02))
     recipe(out, "fx_c_soup_bumpy", r.write(models, "fx_c_soup_bumpy"), [("Shroud", 15, {})], riggingReducePct=80.0)
+    # A collapse in the first BSP cell splices away an edge queued for a later one. The script dies in stage 2.
+    r = Rig(); ma = r.material("Rope")
+    r.node("Shroud", mesh=chunk_splice(r, ma)); r.node("Other", mesh=r.mesh("Other", at=(30, 0, 0), material=ma))
+    recipe(out, "fx_d_chunk_splice", r.write(models, "fx_d_chunk_splice"), [("Shroud", 15, {}), ("Other", 0, {})], sub="recipes_exit", riggingReducePct=80.0)
+    # Corner data through the soup's joins, vertex collapse and triangulation: custom normals, colours and two UV layers.
+    r = Rig(); ma = r.material("Rope")
+    mesh = flat_grid(r, "ColouredNet", ma, 6, 6)
+    attrs = r.meshes[mesh]["primitives"][0]["attributes"]
+    attrs["NORMAL"] = r.b.accessor([(0.2, -0.4, 0.8944272)] * 36, "f", "VEC3", minmax=False)
+    attrs["COLOR_0"] = r.b.accessor([(i / 35.0, .5, .25, 1.0) for i in range(36)], "f", "VEC4", minmax=False)
+    attrs["TEXCOORD_1"] = r.b.accessor([(i / 7.0, 1.0 - i / 35.0) for i in range(36)], "f", "VEC2", minmax=False)
+    r.node("ColouredNet", mesh=mesh); r.node("Other", mesh=r.mesh("Other", at=(3, 0, 0), material=ma))
+    recipe(out, "fx_c_soup_attributes", r.write(models, "fx_c_soup_attributes"), [("ColouredNet", 15, {}), ("Other", 0, {})], riggingReducePct=90.0)
     # brightness on three material chains
     r = Rig(); img = r.image("Albedo", rgb=(120, 80, 40)); tex = r.texture(img)
     flat = r.material("Flat", (0.6, 0.4, 0.2)); direct = r.material("Direct", (1.0, 1.0, 1.0), texture=tex); tint = r.material("Tint", (0.5, 0.25, 0.9), texture=tex)
@@ -260,6 +289,7 @@ def set_tag(argv, tag, value):
 
 
 EXITS = {
+    "fx_d_chunk_splice": ("DIES", lambda a: None),
     "fx_x_allignored": ("EXIT", lambda a: None),
     "fx_x_bright": ("EXIT", lambda a: set_tag(a, "bright", "1.5|x")),
     "fx_x_flagfold": ("EXIT", lambda a: set_tag(a, "flagfold", "a|b")),
@@ -287,7 +317,8 @@ def exits(jobs_path):
         if key not in EXITS:
             raise SystemExit("an exit recipe %s has no edit in EXITS" % key)
         kind, edit = EXITS[key]; edit(argv); n += 1
-        print("\t".join(["JOB", "%s:1:%s" % (kind, key)] + argv))
+        stage = 2 if key == "fx_d_chunk_splice" else 1
+        print("\t".join(["JOB", "%s:%d:%s" % (kind, stage, key)] + argv))
     if n != len(EXITS):
         raise SystemExit("expected %d exit jobs, got %d" % (len(EXITS), n))
 

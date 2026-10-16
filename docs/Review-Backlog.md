@@ -430,11 +430,15 @@ edges and vertices in index order). No stage 2 decline is named any more: 22 of 
 both stages (307,475 rows; the 2 FBX left by name), 36 fixtures equal with three new for the soup tiers (a flat grid
 to one quad and back to two triangles, an L-shaped strip's concave hexagon through the kd-tree beside a quad, a
 4,800-face grid through the BSP cells), 7 unit tests (`Tests/VehicleRigDissolveTests.cs`; 1,760 tests). Rules in
-`docs/Testing.md`. OPEN from the pre-PR review: fixtures for the dissolve branches no recipe-shaped source reaches (a failed join,
-the double-face reuse, the loop reverse on inconsistently wound neighbours, the degenerate refusals, the splice, kill-degenerate /
-kill-duplicate, the polyfill's tangential and desperate modes, the concave-quad flips, a triangulate double). Next: (d) stage 3,
-the rig (wheel clustering: axle axis, PCA, spoke symmetry; the role sets; the join per bone) - numpy double rules, measured per
-operation against the stage 3 dump.
+`docs/Testing.md`. Review of PR #177 (2026-10-16) reproduces the cross-cell splice on a valid 4,002-triangle source:
+the model records Blender's exact TypeError (a stage 2 death) before mesh write-back, held by a unit test and the real-script
+`fx_d_chunk_splice` fixture. A second unit test pins the author's two-disk edge lookup fix; `fx_c_soup_attributes` holds
+custom normals, colours and two UV layers. Full positive comparison: 60 of 62 jobs equal (24 recipes, 38 fixtures; two FBX
+left by name), 307,490 rows; 1,762 unit tests. OPEN: dedicated fixtures for the remaining rare dissolve/triangulation branches
+(double-face reuse, degenerate refusals, kill-degenerate/kill-duplicate, wire cleanup, tangential/desperate polyfill,
+concave-quad flips, triangulate doubles). Independent temporary probes matched 4,400 cases; branch coverage was not measured.
+Next: (d) stage 3, the rig (wheel clustering: axle axis, PCA, spoke symmetry; the role sets; the join per bone) - numpy double
+rules, measured per operation against the stage 3 dump.
 - **rig_anim.py's socket sort exit reads a freed edit bone** — OPEN (2026-10-14, found by the stage 4 fixtures). The
   "would sort BEFORE its parent" error prints `_parent.name` after `bpy.ops.object.mode_set(mode='OBJECT')` has freed
   the edit bones: four Blender runs of `fx_s4_socket_sort` printed the right name once, an empty name once, and twice
