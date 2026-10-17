@@ -51,7 +51,9 @@ public static class BlenderNumpy
     }
 
     /// <summary>np.linalg.eigh(a) of a symmetric 3x3 (row-major), UPLO 'L': the eigenvalues ascending and the eigenvectors as
-    /// columns (v[3 * row + col]). Null when a rescaling branch would run (DSYEVD's, DLARFG's, DLARTG's) or DSTEQR does not converge.</summary>
+    /// columns (v[3 * row + col]). Null when a rescaling branch would run (DSYEVD's, DSTEQR's own DLASCL, DLARFG's, DLARTG's) or DSTEQR
+    /// does not converge (a NaN entry: numpy raises LinAlgError there). None of the scaling guards is reachable from float32 vertex
+    /// coordinates: the smallest non-zero covariance they give is near 1e-112, above DSTEQR's 1.2e-122 and DSYEVD's 1e-146.</summary>
     public static (double[] w, double[] v)? Eigh3(double[] a)
     {
         const int n = 3;

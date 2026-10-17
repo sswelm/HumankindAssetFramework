@@ -80,6 +80,9 @@ Stage 3 (step (d), part d4: the rotors):
   fx_r_rotor_centred two unit-cube blades tied on their distance to the mean (the first is the hub; three equal eigenvalues), the tail
                      fan right above the model's centre (no boom direction: the axle (0, 1, 0))
   fx_r_missing_rotor a tail rotor name the scene has not: find()'s exit in stage 3
+  fx_r_rotor_point   a main rotor whose hub (listed second, strictly nearest the mean) is ONE vertex: np.cov gives NaN, eigh raises,
+                     and the script's except takes the axis of least spread of the parts' centres; no tail rotor
+  fx_r_tail_only     a tail rotor and no main rotor
   fx_r_tail_args     argument variant: the tail axis "x" (upper(): forced X), the trim yaw "-inf" and pitch "nan" (a NaN axle the
                      normalize zeroes; align_roll on a zero vector)
 Argument variants (recipes_exit, post-edited by --exits): fx_r_numeric_pct (the decimal above 0.5 whose rounding decides whether
@@ -555,7 +558,7 @@ def main(out):
     r.node("FanB", mesh=r.mesh("FanB", at=(-0.5, -0.5, -0.5), material=ma), translation=[7.4, 1.35, 0.3], scale=[0.08, 0.9, 0.03])
     r.node("Skid", mesh=r.mesh("Skid", at=(-0.5, -0.5, -0.5), material=ma), translation=[0.0, -0.2, 0.9], scale=[2.0, 0.1, 0.1])
     recipe(out, "fx_r_rotor", r.write(models, "fx_r_rotor"),
-           [("Hull", 0, {}), ("Boom", 0, {}), ("Mast", 8, {}), ("BladeA", 8, {}), ("BladeB", 8, {}), ("Mast", 1, {}), ("BladeB", 2, {}),
+           [("Hull", 0, {}), ("Boom", 0, {}), ("BladeA", 8, {}), ("Mast", 8, {}), ("BladeB", 8, {}), ("Mast", 1, {}), ("BladeB", 2, {}),
             ("FanHub", 9, {}), ("FanA", 9, {}), ("FanB", 9, {}), ("Skid", 1, {})],
            tailYawAdj=12.5, tailPitchAdj=-7.25, waveEnabled=True, rockDegrees=5.0, rockFrames=15)
     # fx_r_rotor_forced: the main axle forced to X (axisChoice: the wheels' override too), the tail forced to Z and trimmed
@@ -574,6 +577,19 @@ def main(out):
     r.node("BladeR", mesh=r.mesh("BladeR", at=(-0.5, -0.5, -0.5), material=ma), translation=[3.0, 2.5, 0.0])
     r.node("Fan", mesh=r.mesh("Fan", at=(-0.5, -0.5, -0.5), material=ma), translation=[0.0, 4.0, 0.0], scale=[0.6, 0.6, 0.05])
     recipe(out, "fx_r_rotor_centred", r.write(models, "fx_r_rotor_centred"), [("Hull", 0, {}), ("BladeL", 8, {}), ("BladeR", 8, {}), ("Fan", 9, {})])
+    # fx_r_rotor_point: the hub a single vertex (a POINTS primitive), listed second and strictly nearest the blades' mean
+    r = Rig(); ma = r.material("Paint", (0.4, 0.45, 0.3))
+    r.node("Hull", mesh=r.mesh("Hull", at=(-1.0, 0.0, -1.0), size=2.0, material=ma))
+    r.node("BladeL", mesh=r.mesh("BladeL", at=(-0.5, -0.5, -0.5), material=ma), translation=[-3.0, 2.5, 0.0], scale=[2.0, 0.05, 0.4])
+    r.node("BladeR", mesh=r.mesh("BladeR", at=(-0.5, -0.5, -0.5), material=ma), translation=[3.0, 2.7, 0.4], scale=[2.0, 0.05, 0.4])
+    r.meshes.append({"name": "Pin", "primitives": [{"attributes": {"POSITION": r.b.accessor([(0.0, 2.6, 0.1)], "f", "VEC3")}, "mode": 0, "material": ma}]})
+    r.node("Pin", mesh=len(r.meshes) - 1)
+    recipe(out, "fx_r_rotor_point", r.write(models, "fx_r_rotor_point"), [("Hull", 0, {}), ("BladeL", 8, {}), ("Pin", 8, {}), ("BladeR", 8, {})])
+    # fx_r_tail_only: a tail fan and no main rotor
+    r = Rig(); ma = r.material("Paint", (0.4, 0.45, 0.3))
+    r.node("Hull", mesh=r.mesh("Hull", at=(-1.0, 0.0, -1.0), size=2.0, material=ma))
+    r.node("Fan", mesh=r.mesh("Fan", at=(-0.5, -0.5, -0.5), material=ma), translation=[5.0, 1.2, -0.4], scale=[0.7, 0.7, 0.04])
+    recipe(out, "fx_r_tail_only", r.write(models, "fx_r_tail_only"), [("Hull", 0, {}), ("Fan", 9, {})])
     # fx_r_missing_rotor: a tail rotor name the scene has not - find()'s exit in stage 3, after the main rotor measured
     r = Rig(); ma = r.material("Paint", (0.4, 0.45, 0.3))
     r.node("Hull", mesh=r.mesh("Hull", at=(-1.0, 0.0, -1.0), size=2.0, material=ma))

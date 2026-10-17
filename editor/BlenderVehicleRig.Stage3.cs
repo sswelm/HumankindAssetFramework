@@ -23,7 +23,8 @@
 //     (argv[6] for the main, argv[28] for the tail), the tail trim (Vector.rotate by Quaternion(axis, radians(deg)): yaw, then
 //     pitch), the main bone along -axle, the tail bone along the in-disc direction nearest up with align_roll(axle x it).
 // The oars (d5) and the tread rig (d6) are left to Blender by name, as is a scene this part does not expect (an armature still
-// there, a parented part, a mesh still carrying an Armature modifier, a main rotor hub numpy's eigh takes a branch of not ported).
+// there, a parented part, a mesh still carrying an Armature modifier, a main rotor hub whose covariance is non-finite with two or
+// more vertices, or whose eigh takes a LAPACK branch not ported: rescaling a tiny or huge entry, DSTEQR not converging).
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -137,8 +138,8 @@ public static partial class BlenderVehicleRig
                 if (over == "X" || over == "Y" || over == "Z") { autoAxle = null; axleSrc = null; }   // forced: the eigh's result (or its caught failure) is discarded
                 else
                 {
-                    // hub_obj.matrix_world @ v.co: the identity on every input that reaches here (transform_apply leaves every mesh's world
-                    // at the identity, an animated one too: Blender's dump), kept as the script writes it
+                    // hub_obj.matrix_world @ v.co: transform_apply leaves a mesh's world at the identity - fx_r_rotor's animated mast too
+                    // (Blender's stage 1 and 2 dumps) -, kept as the script writes it
                     var it = VehicleProbe.ToRowMajor(hub.World); var pts = new List<double[]>(hub.Mesh.Vertices);
                     for (int v = 0; v < hub.Mesh.Vertices; v++)
                     {
@@ -146,14 +147,29 @@ public static partial class BlenderVehicleRig
                         pts.Add(new double[] { MulPointRow(it, 0, x, y, z), MulPointRow(it, 1, x, y, z), MulPointRow(it, 2, x, y, z) });
                     }
                     var cov = BlenderNumpy.CovOfCentred(pts);
-                    if (cov == null || cov.Any(x => double.IsNaN(x) || double.IsInfinity(x)))
-                    { s.Fallback = "stage 3: the main rotor hub's covariance of " + pts.Count + " vertex(es) or a non-finite one is not modelled yet"; return; }
-                    var eig = BlenderNumpy.Eigh3(cov);
-                    if (eig == null) { s.Fallback = "stage 3: the main rotor hub's eigh (a rescaled or unconverged LAPACK branch) is not modelled yet"; return; }
-                    var ev = eig.Value.v;
-                    autoAxle = Normalized(new[] { (float)ev[0], (float)ev[3], (float)ev[6] });
-                    axleSrc = "hub pole-to-pole";
-                    Note(s, "a main rotor's hub axle (numpy's eigh)");
+                    if (cov == null)
+                    {
+                        // one vertex: np.cov divides by n - 1 = 0 (warnings only), every entry NaN, eigh raises LinAlgError (DSTEQR never
+                        // converges: measured in Blender's numpy) and the script's except takes the axis of least spread of the parts'
+                        // centres - sum((c[i] - mean[i]) ** 2) in Python floats (float ** is the C runtime's pow), min over range(3) keeping the first of a tie
+                        var spread = new double[3];
+                        for (int k = 0; k < 3; k++) { double sum = 0.0; foreach (var b in boxes) { sum += BlenderTrig.Pow((double)b.c[k] - mean[k], 2.0); } spread[k] = sum; }
+                        int least = 0; for (int k = 1; k < 3; k++) if (spread[k] < spread[least]) least = k;
+                        autoAxle = new float[3]; autoAxle[least] = 1f;
+                        axleSrc = "least-spread (numpy missing)";
+                        Note(s, "a one-vertex main rotor hub (the script's least-spread fallback)");
+                    }
+                    else if (cov.Any(x => double.IsNaN(x) || double.IsInfinity(x)))
+                    { s.Fallback = "stage 3: the main rotor hub's non-finite covariance is not modelled yet"; return; }
+                    else
+                    {
+                        var eig = BlenderNumpy.Eigh3(cov);
+                        if (eig == null) { s.Fallback = "stage 3: the main rotor hub's eigh (a rescaled or unconverged LAPACK branch) is not modelled yet"; return; }
+                        var ev = eig.Value.v;
+                        autoAxle = Normalized(new[] { (float)ev[0], (float)ev[3], (float)ev[6] });
+                        axleSrc = "hub pole-to-pole";
+                        Note(s, "a main rotor's hub axle (numpy's eigh)");
+                    }
                 }
             }
             float[] axle;

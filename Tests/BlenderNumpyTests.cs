@@ -48,6 +48,18 @@ public class BlenderNumpyTests
     }
 
     [Fact]
+    public void A_zero_matrix_gives_the_identity_and_a_NaN_one_declines()
+    {
+        // Blender's numpy: eigh(zeros((3, 3))) = ([0, 0, 0], identity); eigh of all NaN raises LinAlgError (no convergence)
+        var r = BlenderNumpy.Eigh3(new double[9]);
+        Assert.True(r.HasValue);
+        Assert.Equal(new double[3], r.Value.w);
+        Assert.Equal(new double[] { 1, 0, 0, 0, 1, 0, 0, 0, 1 }, r.Value.v);
+        var nan = new double[9]; for (int i = 0; i < 9; i++) nan[i] = double.NaN;
+        Assert.False(BlenderNumpy.Eigh3(nan).HasValue);
+    }
+
+    [Fact]
     public void One_point_has_no_covariance()
     {
         Assert.Null(BlenderNumpy.CovOfCentred(new List<double[]> { new[] { 1.0, 2.0, 3.0 } }));

@@ -477,7 +477,10 @@ Blender-numpy clouds under .NET and Mono), the tail's 90 degrees to the boom rin
 along -axle and the tail fan's align_roll. 20 of 24 recipes equal row for row through stage 3 (Bell, RAH-66 and the Ilya
 Muromets new, equal on the first run), 2 left at stage 3 by name (the oars), the 2 FBX by name; five fixtures, all equal;
 107 of 113 jobs (FULL, 455,358 rows); 27 of 30 drill plants caught (one equivalent; two hidden by the axle's float32, caught by the unit
-test) plus two more numpy plants caught by the unit test; 1,885 tests. Next: (d) part d5, the oars.
+test) plus two more numpy plants caught by the unit test; 1,885 tests. The source-reading review found no divergence; its gaps closed: a ONE-VERTEX
+hub (np.cov gives NaN, eigh raises LinAlgError - measured in Blender's numpy - and the script's except takes the axis of least
+spread of the parts' centres, now ported instead of declined), the hub listed after a blade, a tail rotor alone, Eigh3's decline
+on NaN. Next: (d) part d5, the oars.
 - **vehicle_rig.py: two gun-recoil defects** — OPEN (2026-10-16, found porting stage 3 part d3; the C# port reproduces both bit
   for bit, so fixing them is a script change plus a port change). (1) With `gun_pivot` at 1.0 and recoil on, the bore direction is
   `(gun_axis[1] - gun_axis[0]).normalized()` with `gun_axis[0]` the head - at the muzzle - so the bore is the float32 residue of

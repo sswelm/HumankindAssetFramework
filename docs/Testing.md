@@ -2105,6 +2105,17 @@ bare vertex is equivalent (every mesh's world is the identity after transform_ap
 descending eigen sort and a dropped DLARTG sign fix. 87 of 89 fixture jobs and 107 of 113 jobs equal through stage 3 (FULL,
 455,358 rows; left by name: the two oar recipes, the two FBX sources, the two non-UTF-8 names files); 1,885 tests. Next: (d) part d5,
 the oars.
+The source-reading review of d4 traced every operation against the script and Blender's C sources and found no divergence (the
+plain wheels' path byte-identical, the forced main axle's skipped eigh equivalent). Its gaps: the hub chosen after a part listed
+before it was reached only by RAH-66 - `fx_r_rotor` now lists a blade first -; no tail-only rig - `fx_r_tail_only` -; and the main
+hub of fewer than two vertices was declined although the script handles it: Blender's numpy (measured) gives an all-NaN covariance
+for one point, `eigh` raises LinAlgError (DSTEQR never converges) and the script's `except` takes the axis of least spread of the
+parts' centres - `sum((c[i] - mean[i]) ** 2)` in Python floats (`**` is the C runtime's `pow`, now `BlenderTrig.Pow`), `min` over
+range(3) keeping the first of a tie - with axle_src "least-spread (numpy missing)". Ported, with `fx_r_rotor_point` (a POINTS
+primitive of one vertex as the hub, listed second, strictly nearest the mean) equal; two plants on it caught (the most spread
+instead of the least, the first listed part as the hub). A unit test pins Eigh3 on a zero matrix (the identity, as numpy returns
+it) and its decline on NaN; the scaling guards are documented unreachable from float32 coordinates. After: 89 of 91 fixture jobs
+and 109 of 115 jobs equal through stage 3 (FULL, 455,410 rows); 1,886 tests.
 
 Review of PR #176 (2026-10-15): a full run found the organ gun's newly recorded custom-normal shorts differed after
 stage one's loose split. Blender's separate operator decodes the source BMesh normals into a vector layer and

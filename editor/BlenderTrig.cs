@@ -73,4 +73,10 @@ public static class BlenderTrig
     public static double Acos(double x) => Exact ? ucrt_acos(x) : Math.Acos(x);
     public static double Cos(double x) => Exact ? ucrt_cos(x) : Math.Cos(x);
     public static double Sin(double x) => Exact ? ucrt_sin(x) : Math.Sin(x);   // eulO_to_mat3 (the spun wheels' Euler angles)
+
+    // Python's float ** float (CPython's float_pow calls the C runtime's pow): vehicle_rig.py's least-spread rotor axle
+    [DllImport("ucrtbase.dll", EntryPoint = "pow", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    static extern double ucrt_pow(double x, double y);
+
+    public static double Pow(double x, double y) => Exact ? ucrt_pow(x, y) : Math.Pow(x, y);
 }
