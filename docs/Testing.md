@@ -2242,6 +2242,35 @@ The drill now requires intact row and Furl controls and nine S4_E2* counterexamp
 both FC hashes and the outer seal, so they must be rejected by the model; together with the existing controls, all 136
 damaged-evidence kinds are refused (129 without K rows). The stage-four census reports rowing, Furl and curled sails separately.
 
+**Step (e), stage 4, part e3: Deploy and Recoil (2026-10-18).** Stage 3 retains the trail hinges/spades, gun axis and
+bore, and recoil pivot/axis/centre/slide/radius. Deploy uses the source's five-degree direction tests, local world-up axis,
+gun-elevation axis and sign, two keys per quaternion channel and LINEAR interpolation. The gun is raised only when Deploy
+actually exists (trails and spread greater than .01). Recoil keys rest, optional held lead-in, a 15%-duration kick rounded
+half-even, and the return; it holds every deployed trail/gun quaternion at both endpoints. Spin is restored afterwards.
+
+Neither action calls frame_set. Recoil's view-layer update evaluates the active armature action at the existing frame,
+without advancing unrelated object animations. The first independent run caught three such object-matrix mismatches;
+fx_e3_action_names and two unit cases now distinguish this from a wheel's actual frame_set. Source collisions with Deploy,
+Recoil and Spin preserve the original actions and purge the newly suffixed authored actions, including unlinking Spin.
+The native fixtures fx_e3_deploy, fx_e3_deploy_only, fx_e3_offaxis, fx_e3_no_spread, fx_e3_negative, fx_e3_no_gun,
+fx_e3_long_lead and fx_e3_vertical cover timing, direction warnings, elevation signs, disabled branches and the vertical
+fallback. The existing fx_r_gunpoint now compares the script's stage-four ZeroDivisionError; a unit case holds that failure.
+
+Sixteen new unit cases bring the suite to 1,981 passing tests; all 117 editor sources compile. Another 120 deterministic
+independent scenes vary trail count, yaw/tilt, pivot, elevation, recoil fraction/timing, source actions, rock, wheels, flags
+and oars. Every supported row/key matches Blender on CLR and Unity's 64-bit Mono. Ten temporary implementation plants
+(wrong trail direction, missing elevation, floor instead of half-even kick, missing lead hold, missing deployed holds,
+reversed kick, non-LINEAR Recoil, omitted armature update, unrelated object animation evaluated, and inclusive spread
+threshold) are all caught. The drill requires intact e3 Deploy/warning seeds and ten S4_E3* counterexamples; changed key
+values/interpolation repair both FC hashes and the outer seal before comparison. Non-finite Deploy angles and endpoints
+past 100,000 frames remain named limits. The script's clearance search names Mesh_RecoilArm rather than Mesh_Barrel;
+normal rigs consequently produce no clearance line (recorded as a source defect in Review-Backlog).
+
+FULL=1 VEHICLERIG_KEYS=1: all 25 saved recipes (now including rq4_global_hawk) and 127 fixture jobs run natively;
+23 of 25 recipes and 146 of 152 jobs match through stage 4, with 501,773 compared rows. The six named deferrals are two
+FBX, two non-UTF-8 names files, infinite blade roll and the long-Spin limit. The drill refuses 146 damaged-evidence kinds
+(139 without key rows), including all ten new e3 controls.
+
 Review of PR #176 (2026-10-15): a full run found the organ gun's newly recorded custom-normal shorts differed after
 stage one's loose split. Blender's separate operator decodes the source BMesh normals into a vector layer and
 re-encodes that layer on each copied component; copying the original shorts misses that quantization. The model now

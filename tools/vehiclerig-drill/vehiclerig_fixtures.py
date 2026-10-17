@@ -620,6 +620,33 @@ def main(out):
     r.node("Hull", mesh=r.mesh("Hull", at=(-2.0, -1.0, -1.0), size=2.0, material=ma))
     r.node("Tube", mesh=r.mesh("Tube", at=(0.5 / 15.0, 1.4, -0.1), size=0.2, material=ma), scale=[15.0, 1.0, 1.0])
     recipe(out, "fx_r_pivot_end", r.write(models, "fx_r_pivot_end"), [("Hull", 0, {}), ("Tube", 7, {})], recoilDist=0.3, gunPivot=1.0)
+    # Stage 4 e3: Deploy direction/elevation and Recoil timing/stance; no frame_set in either action.
+    for key, yaw, elev, spread, recoil, lead, recframes, wheel, gun in (
+        ("fx_e3_deploy", 0, 32, 35, .25, 5, 10, True, True),
+        ("fx_e3_deploy_only", 90, -24, 42, 0, 0, 16, False, True),
+        ("fx_e3_offaxis", 27, 18, 35, .2, 0, 16, False, True),
+        ("fx_e3_no_spread", 0, 45, .01, .25, 3, 30, True, True),
+        ("fx_e3_negative", 0, 30, -35, .25, 0, 3, False, True),
+        ("fx_e3_no_gun", 180, 45, 35, .25, 0, 16, False, False),
+        ("fx_e3_long_lead", 270, 45, 35, .3, 24, 30, True, True),
+        ("fx_e3_vertical", 0, 25, 35, .3, 0, 10, False, True),
+        ("fx_e3_action_names", 0, 32, 35, .25, 5, 10, False, True),
+    ):
+        r = Rig(); ma = r.material("Steel", (.4, .4, .45))
+        r.node("Hull", mesh=r.mesh("Hull", material=ma), translation=[0, .5, 0], scale=[2, 1, 2])
+        r.node("Tube", mesh=r.mesh("Tube", material=ma), translation=[0, 1.5, -2], scale=[.25, 4, .25] if key == "fx_e3_vertical" else [.25, .25, 4])
+        for x, name in ((-.7, "Left"), (.7, "Right")):
+            r.node(name, mesh=r.mesh(name, material=ma), translation=[x, .3, 2], scale=[.2, .2, 4])
+        parts = [("Hull", 0, {}), ("Left", 10, {}), ("Right", 10, {})]
+        if gun: parts.append(("Tube", 7, {}))
+        if wheel:
+            r.node("Wheel", mesh=r.mesh("Wheel", material=ma), translation=[1.2, .4, 0], scale=[.2, .8, .8]); parts.append(("Wheel", 1, {}))
+        if key == "fx_e3_action_names":
+            mast = r.node("Mast", mesh=r.mesh("Mast", size=.1, material=ma)); parts.append(("Mast", 19, {}))
+            for name in ("Deploy", "Recoil", "Spin"):
+                ak = r.anim(name); r.key(ak, mast, "translation", [0, 2], [(0, 0, 0), (.3, 0, 0)])
+        recipe(out, key, r.write(models, key), parts, modelRot={"x": 0, "y": 0, "z": yaw}, gunDeployElev=elev, trailSpreadDeg=spread,
+               recoilDist=recoil, recoilLead=lead, recoilFrames=recframes, trailFrames=13, waveEnabled=wheel, rockFrames=15, rockDegrees=3.0)
     # ---- stage 3 (step (d), part d4: the rotors)
     # fx_r_rotor: a tilted mast hub (8 degrees about a leaning axis) between two blades; a three-part tail fan on the boom, trimmed
     r = Rig(); ma = r.material("Paint", (0.4, 0.45, 0.3))

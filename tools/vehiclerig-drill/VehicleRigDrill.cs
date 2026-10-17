@@ -699,7 +699,12 @@ static class StageDrill
             }
             if (problems.Count == 0)
             {
-                if (!d.Stages.TryGetValue(4, out var s4)) problems.Add("stage 4 model: the scene runs on here, Blender stopped in stage 4: " + (d.Exit != null ? string.Join(" | ", d.LogsOfStop) : d.Died));
+                if (model.Dies != null)
+                {
+                    if (d.StoppedAt != 4 || d.Died != model.Dies) problems.Add("stage 4 model: the death differs: here '" + model.Dies + "', Blender '" + d.Died + "' in stage " + d.StoppedAt);
+                    else Console.WriteLine($"STAGE4 {key}: equal - dies: {model.Dies}");
+                }
+                else if (!d.Stages.TryGetValue(4, out var s4)) problems.Add("stage 4 model: the scene runs on here, Blender stopped in stage 4: " + (d.Exit != null ? string.Join(" | ", d.LogsOfStop) : d.Died));
                 else
                 {
                     var rows4 = BlenderRigAnim.Render(model, 4, fcSlot: true);

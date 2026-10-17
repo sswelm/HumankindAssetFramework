@@ -45,6 +45,8 @@ public static partial class BlenderVehicleRig
         public bool RockOn;                         // the WAVE ROCK is on: a RootHull bone under Root carries everything that would skin to Root
         public double GunPivot = 0.5;               // min(1, max(0, float(argv[34]))) or 0.5: where along the tube (breech 0 .. muzzle 1) the Gun bone's head sits
         public double RecoilDist;                   // min(1, max(0, float(argv[38]))) or 0: recoil on (the RecoilArm + Barrel split) when above 0
+        public double TrailSpread = 35.0, GunDeployElev;
+        public System.Numerics.BigInteger TrailFrames = 12, RecoilFrames = 16, RecoilLead;
         public bool SailFold;                       // argv[71].strip() == "1": the Sail bone gets the SailF1..F3 fold chain, the canvas skins by height band
         public bool FlagFoldOn;                     // a flagfold= tag is present: the Flag bone hinges at the flag's top (else it strikes below the keel)
         public double FlagFoldDeg;                  // max(-175, min(175, float(deg))) or 0 when blank (a NaN clamps to 175)
@@ -149,6 +151,11 @@ public static partial class BlenderVehicleRig
             if (idx == 45) a.OarFrames = System.Numerics.BigInteger.Max(4, new System.Numerics.BigInteger(Math.Truncate(dv)));
             if (idx == 34) a.GunPivot = PyMin(1.0, PyMax(0.0, dv));
             if (idx == 38) a.RecoilDist = PyMin(1.0, PyMax(0.0, dv));
+            if (idx == 32) a.TrailSpread = dv;
+            if (idx == 33) a.TrailFrames = System.Numerics.BigInteger.Max(2, new System.Numerics.BigInteger(Math.Truncate(dv)));
+            if (idx == 35) a.GunDeployElev = dv;
+            if (idx == 39) a.RecoilFrames = System.Numerics.BigInteger.Max(3, new System.Numerics.BigInteger(Math.Truncate(dv)));
+            if (idx == 40) a.RecoilLead = System.Numerics.BigInteger.Max(0, new System.Numerics.BigInteger(Math.Truncate(dv)));
         }
         foreach (var (role, idx) in new[] { ("rigging", 50), ("structure", 52), ("bodies", 54), ("oars", 61), ("sails", 62), ("rudders", 64), ("wheels", 65), ("flip", 67), ("preserve", 68), ("detail", 70) })
         {

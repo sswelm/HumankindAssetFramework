@@ -114,6 +114,118 @@ public class VehicleRigStage4Tests
         Assert.Equal(sf, (int)a.SailFoldFrames); Assert.Equal(sa, a.SailFoldAngle); Assert.Equal(ss, a.SailFoldSag); Assert.Equal(of, (int)a.OarFrames);
     }
 
+    [Theory]
+    [InlineData(0, 10, false)] // 1.5 rounds to an even two-frame kick; scene remains at frame 1
+    [InlineData(5, 30, true)] // 4.5 rounds to four; the current frame is on the return
+    [InlineData(24, 16, true)] // current frame is still in the lead-in hold
+    public void Recoil_holds_the_deployed_stance_and_evaluates_at_the_existing_frame(int lead, int frames, bool wheel)
+    {
+        var a = E2Args(); a.RecoilDist = .25; a.GunDeployElev = 32; a.TrailFrames = 13; a.RecoilLead = lead; a.RecoilFrames = frames;
+        var s = E3Rig(a, wheel); var st = (BlenderVehicleRig.RigState)s.VehicleState;
+        var dep = Assert.Single(s.Actions.Where(x => x.Name == "Deploy")); var rec = Assert.Single(s.Actions.Where(x => x.Name == "Recoil"));
+        Assert.Equal("Spin", st.Arm.Action); Assert.Equal(wheel ? 15 : 1, s.FrameCurrent); Assert.Equal(15, s.FrameEnd);
+        Assert.Equal(13f, dep.FrameEnd); Assert.Equal((float)(lead + frames), rec.FrameEnd);
+        int kick = frames == 10 ? 2 : frames == 30 ? 4 : 2;
+        Assert.Equal(lead > 0 ? new float[] { 0, lead, lead + kick, lead + frames } : new float[] { 0, kick, frames }, Curve(rec, "RecoilArm", 0).Keys.Select(k => k.Frame));
+        foreach (string bone in new[] { "Trail_00", "Trail_01", "Gun" })
+            for (int i = 0; i < 4; i++)
+            {
+                float q = Curve(dep, bone, i).Keys.Last().Value;
+                Assert.All(Curve(rec, bone, i).Keys, k => Assert.Equal(q, k.Value));
+                Assert.Equal(q, s.Armature.PoseProps[st.BoneId[bone]][1][i]);
+            }
+        for (int i = 0; i < 4; i++)
+        {
+            var keys = Curve(rec, "RecoilArm", i).Keys;
+            Assert.Equal(BlenderRigAnim.EvaluateCurve(keys, s.FrameCurrent), s.Armature.PoseProps[st.BoneId["RecoilArm"]][1][i]);
+        }
+        Assert.All(s.Actions.SelectMany(x => x.Slots).SelectMany(x => x.FCurves).SelectMany(x => x.Keys), k => Assert.Equal("LINEAR", k.Interpolation));
+        Assert.All(Assert.Single(s.Actions.Where(x => x.Name == "Spin")).Slots.SelectMany(x => x.FCurves), fc => Assert.DoesNotContain(fc.Bone, new[] { "Gun", "RecoilArm", "Trail_00", "Trail_01" }));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(.01)]
+    [InlineData(-35)]
+    [InlineData(double.NaN)]
+    public void Disabled_spread_skips_Deploy_and_its_gun_hold(double spread)
+    {
+        var a = E2Args(); a.RecoilDist = .25; a.TrailSpread = spread; a.GunDeployElev = 45;
+        var s = E3Rig(a, false);
+        Assert.DoesNotContain(s.Actions, x => x.Name == "Deploy");
+        Assert.All(Assert.Single(s.Actions.Where(x => x.Name == "Recoil")).Slots.SelectMany(x => x.FCurves), fc => Assert.Equal("RecoilArm", fc.Bone));
+    }
+
+    [Fact]
+    public void Deploy_without_Recoil_keeps_its_final_assignment_without_moving_the_scene_frame()
+    {
+        var a = E2Args(); a.GunDeployElev = -24;
+        var s = E3Rig(a, false); var st = (BlenderVehicleRig.RigState)s.VehicleState;
+        Assert.Equal(1, s.FrameCurrent); Assert.DoesNotContain(s.Actions, x => x.Name == "Recoil");
+        var dep = Assert.Single(s.Actions.Where(x => x.Name == "Deploy"));
+        foreach (string bone in new[] { "Trail_00", "Trail_01", "Gun" })
+            for (int i = 0; i < 4; i++) Assert.Equal(Curve(dep, bone, i).Keys.Last().Value, s.Armature.PoseProps[st.BoneId[bone]][1][i]);
+        Assert.DoesNotContain(s.Logs4, l => l.StartsWith("VEHICLE TRAIL *** WARNING:"));
+    }
+
+    [Theory]
+    [InlineData("", "", "", "", "", 35, 12, 0, 16, 0)]
+    [InlineData("-2", "1.9", "-30", "2.9", "-2.9", -2, 2, -30, 3, 0)]
+    [InlineData("nan", "7.9", "45", "30.9", "5.9", double.NaN, 7, 45, 30, 5)]
+    public void E3_dials_follow_Python_defaults_and_integer_clamps(string spread, string tf, string elev, string rf, string lead, double es, int et, double ee, int er, int el)
+    {
+        var argv = Enumerable.Repeat("", 76).ToList(); argv[0] = "rig"; argv[1] = "scene.glb"; argv[7] = "15"; argv[8] = "-360";
+        argv[32] = spread; argv[33] = tf; argv[35] = elev; argv[39] = rf; argv[40] = lead;
+        var a = BlenderVehicleRig.ParseArgs(argv); Assert.Null(a.NamesDie);
+        Assert.Equal(es, a.TrailSpread); Assert.Equal(et, (int)a.TrailFrames); Assert.Equal(ee, a.GunDeployElev); Assert.Equal(er, (int)a.RecoilFrames); Assert.Equal(el, (int)a.RecoilLead);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void E3_limits_apply_only_to_an_enabled_action(bool enabled)
+    {
+        var m = new HafModel { Scene = 0 }; m.Scenes.Add(new HafScene()); Box(m, "Hull", 0, .5f, 0, 2, 1, 2); Box(m, "Trail", .7f, .3f, 2, .2f, .2f, 4);
+        var a = E2Args(); Mark(a, "trails", "Trail"); a.TrailFrames = 100001; a.TrailSpread = enabled ? 35 : 0;
+        var s = BlenderVehicleRig.RunStage1(m, a); BlenderVehicleRig.RunStage2(s, a); BlenderVehicleRig.RunStage3(s, a); BlenderVehicleRig.RunStage4(s, a);
+        if (enabled) Assert.StartsWith("stage 4: the Deploy or Recoil clip", s.Fallback); else Assert.Null(s.Fallback);
+    }
+
+    [Fact]
+    public void Zero_span_tube_reproduces_the_scripts_stage_four_division_failure()
+    {
+        var m = new HafModel { Scene = 0 }; m.Scenes.Add(new HafScene()); Box(m, "Hull", 0, .5f, 0, 2, 1, 2); Box(m, "Dot", 1.5f, 1.2f, 0, 0, 0, 0);
+        var a = E2Args(); Mark(a, "guns", "Dot"); a.RecoilDist = .4;
+        var s = BlenderVehicleRig.RunStage1(m, a); BlenderVehicleRig.RunStage2(s, a); BlenderVehicleRig.RunStage3(s, a);
+        Assert.Null(s.Dies); BlenderVehicleRig.RunStage4(s, a);
+        Assert.Null(s.Fallback); Assert.Equal("ZeroDivisionError: float division by zero", s.Dies);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Recoil_view_layer_update_does_not_advance_unrelated_object_animation(bool frameSet)
+    {
+        var m = new HafModel { Scene = 0 }; m.Scenes.Add(new HafScene()); Box(m, "Hull", 0, .5f, 0, 2, 1, 2); Box(m, "Tube", 0, 1.5f, -2, .25f, .25f, 4); Box(m, "Mast", 0, 2, 0, .1f, .1f, .1f);
+        var a = E2Args(); a.RecoilDist = .25; Mark(a, "guns", "Tube"); Mark(a, "preserve", "Mast");
+        var anim = new HafAnimation { Name = "Deploy" }; anim.Samplers.Add(new HafSampler { Times = new[] { 0f, 2f }, Values = new[] { 0f, 0f, 0f, .3f, 0f, 0f }, Components = 3 });
+        anim.Channels.Add(new HafChannel { Node = 2, Sampler = 0, Path = "translation" }); m.Animations.Add(anim);
+        if (frameSet) { Box(m, "Wheel", 1.2f, .4f, 0, .2f, .8f, .8f); Mark(a, "wheels", "Wheel"); }
+        var s = Rig(m, a); var mast = Assert.Single(s.Objects.Where(o => o.Name == "Mesh___keep__Mast"));
+        // Native probes 022, 055, 077: no frame_set keeps zero. A wheel does advance the object action.
+        Assert.Equal(frameSet ? .09375f : 0f, mast.World[12]);
+    }
+
+    static BlenderRigAnim.Stage1 E3Rig(BlenderVehicleRig.Args a, bool wheel)
+    {
+        var m = new HafModel { Scene = 0 }; m.Scenes.Add(new HafScene());
+        Box(m, "Hull", 0, .5f, 0, 2, 1, 2); Box(m, "Tube", 0, 1.5f, -2, .25f, .25f, 4);
+        Box(m, "Left", -.7f, .3f, 2, .2f, .2f, 4); Box(m, "Right", .7f, .3f, 2, .2f, .2f, 4);
+        Mark(a, "guns", "Tube"); Mark(a, "trails", "Left", "Right");
+        if (wheel) { Box(m, "Wheel", 1.2f, .4f, 0, .2f, .8f, .8f); Mark(a, "wheels", "Wheel"); }
+        return Rig(m, a);
+    }
+
     static BlenderVehicleRig.Args E2Args()
     {
         var argv = Enumerable.Repeat("", 76).ToList(); argv[0] = "rig"; argv[1] = "scene.glb"; argv[6] = "AUTO"; argv[7] = "15"; argv[8] = "-360"; argv[17] = "0"; argv[21] = "0";
