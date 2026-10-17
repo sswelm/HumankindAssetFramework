@@ -520,6 +520,10 @@ action survives the join ends stage 4 moved by it (fx_r_rotor's mast, fx_e_speed
 through stage 4 (FULL, 461,465 rows); 27 of 29 plants caught (a sequential sum below the drill, the unit tests hold PySum; a replaced
 key equals its last sample on every input the rock reaches); the source-reading review's three divergences fixed (the ground band on
 the rock-DEFORMED meshes, frame_set's curve values in the final pose, non-finite dials declined); 1,945 tests. Next: (e) part e2, the rowing stroke and the Furl clip.
+PR #184 review fixes the evaluated-pose timing within that ground band: it retains the pose from the last `frame_set`, before
+the final rock assignment to the original pose. The wrong pose changed wheel speeds in 29 of 160 independent scenes; all now
+match Blender on CLR and Unity's 64-bit Mono. Three native fixtures and unit cases cover ordinary and repeated-frame sampling
+plus a no-rock control; 1,948 tests pass.
 - **vehicle_rig.py: two gun-recoil defects** — OPEN (2026-10-16, found porting stage 3 part d3; the C# port reproduces both bit
   for bit, so fixing them is a script change plus a port change). (1) With `gun_pivot` at 1.0 and recoil on, the bore direction is
   `(gun_axis[1] - gun_axis[0]).normalized()` with `gun_axis[0]` the head - at the muzzle - so the bore is the float32 residue of

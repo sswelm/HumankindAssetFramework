@@ -111,6 +111,9 @@ Stage 4 (step (e), part e1: the Spin action, the wheels, the rock):
   fx_e_rockdefault   argument variant: the rock on with its frames blank (rock_frames = the Spin's frames), forced about Y
   fx_e_ground        a long flat hull pitched by the rock and a small wheel just above the undeformed ground band: after the rock's
                      frame_set the bounds are the DEFORMED meshes', the band drops below every wheel and all three keep the dial
+  fx_e_groundeval / fx_e_groundeval_dense / fx_e_groundeval_off
+                     a final rock sample at rest while the evaluated hull remains tilted from frame_set; normal and two-frame
+                     clips leave all wheels airborne (the small wheel keeps -360, not -960 degrees); a no-rock control still rolls
   fx_e_rock2         heading 0, four pitch cycles at phase 0.01: four samples share the clip's last frame, each replacing its key
                      (value + float(delta)), and the wheels' frame_set leaves the hull at that key; the hull longer along Y (the
                      auto roll axis Y); the rock repeating 3 times. The replaced key equals the last sample here and on every
@@ -756,6 +759,12 @@ def main(out):
     r.node("Small", mesh=r.mesh("Small", at=(-0.5, 0.0, -0.5), material=ma), translation=[0.0, 0.07, 1.2], scale=[0.3, 0.3, 0.2])
     recipe(out, "fx_e_ground", r.write(models, "fx_e_ground"), [("Hull", 0, {}), ("Big0", 1, {}), ("Big1", 1, {}), ("Small", 1, {})],
            waveEnabled=True, rockDegrees=0.5, rockPitchDeg=3.0, rockFrames=15, rockPitchPhase=90.0)
+    # fx_e_groundeval{,_dense,_off}: the ground band reads the depsgraph's pose from the last frame_set, BEFORE the last rock sample is assigned.
+    # That sample brings the original pose back to rest, but the evaluated hull is still tilted below the wheels.
+    # The two-frame case also replaces several keys at the last frame; the no-rock control must keep rolling contact.
+    for key, nf, wave in (("fx_e_groundeval", 15, True), ("fx_e_groundeval_dense", 2, True), ("fx_e_groundeval_off", 15, False)):
+        recipe(out, key, r.write(models, key), [("Hull", 0, {}), ("Big0", 1, {}), ("Big1", 1, {}), ("Small", 1, {})],
+               frames=nf, waveEnabled=wave, rockDegrees=0.0, rockPitchDeg=20.0, rockFrames=nf, rockPitchPhase=0.0)
     # fx_e_rock2: the hull longer along Blender Y (glTF z), heading 0, roll 2 / pitch 4 cycles over rock frames 10 under a 30-frame Spin
     r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
     r.node("Hull", mesh=r.mesh("Hull", at=(-0.5, 0.0, -0.5), material=ma), scale=[2.0, 1.0, 6.0])

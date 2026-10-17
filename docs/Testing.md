@@ -2201,6 +2201,15 @@ frames had been quadratic), the worlds recompute after every frame_set, a stale 
 a heading under the auto axis), `fx_e_rockdefault` forced about Y. No fixture for a rock past 1,000,000 samples or 100,000 frames:
 Blender samples every one (a 200,000-frame rock took 40 minutes in the dump). 103 of 129 jobs equal through stage 4 (FULL, 461,465 rows); 127 kinds of damaged evidence refused; 1,945 tests.
 
+Review of PR #184: the ground band must use the evaluated armature pose from the final `frame_set`, before the final rock sample
+is assigned to the original pose. Using that new assignment instead changed grounded/airborne classification and wheel speeds in
+29 of 160 independent animation scenes. The port now snapshots the evaluated pose before that assignment and retains the final
+sample in the original pose. `fx_e_groundeval` and `fx_e_groundeval_dense` reproduce the defect: a small wheel incorrectly turned
+-960 degrees instead of Blender's -360, both with distinct frame keys and with repeated replacements at the final frame. The
+no-rock control (`fx_e_groundeval_off`) still rolls at -960 degrees. Three unit cases cover the same behavior and the final pose;
+the two rock cases fail before the fix and all pass afterwards (1,948 tests). All 160 independent scenes match Blender after the
+fix, including every animation key, on both CLR and Unity's 64-bit Mono.
+
 Review of PR #176 (2026-10-15): a full run found the organ gun's newly recorded custom-normal shorts differed after
 stage one's loose split. Blender's separate operator decodes the source BMesh normals into a vector layer and
 re-encodes that layer on each copied component; copying the original shorts misses that quantization. The model now

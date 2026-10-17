@@ -13,8 +13,8 @@
 //     clip on rotation_euler (XYZ); a ROTOR keyed every frame on rotation_quaternion about its local axle (Y, a tail X);
 //   - every Spin key made LINEAR; the objects that are neither the rig's meshes nor the armature removed; the actions not named
 //     Spin/Deploy/Recoil/Furl purged (a line each); every non-armature object's animation data cleared.
-// The pose at the end: each keyed channel holds its last key (the last frame_set evaluates at the clip's end, where every curve has a
-// key), the rest as stage 3 left them.
+// The original pose keeps channels assigned after the last frame_set; other keyed channels take their curves at that frame. Evaluated
+// mesh bounds retain the pose from frame_set, before any subsequent assignment to the original pose.
 // Left to Blender by name (parts e2, e3): the rowing stroke, the Furl clip with the sail and flag holds, the Deploy clip, the Recoil
 // clip; a clip longer than 100,000 frames.
 using System;
@@ -78,6 +78,7 @@ public static partial class BlenderVehicleRig
         var curveOrder = new List<(string bone, string prop, int index)>();
         var dirty = new HashSet<(string bone, string prop, int index)>();
         bool anyFrameSet = false;
+        Dictionary<int, float[]> evaluatedGroundPose = null;
         void Insert(string bone, string prop, float[] values, int frame)
         {
             if (arm.Slot == null) { act.Slots.Add(new BlenderRigAnim.SlotData { Identifier = "OB" + arm.Name, Object = arm }); arm.Slot = "OB" + arm.Name; }
@@ -167,6 +168,10 @@ public static partial class BlenderVehicleRig
                 double t = i / (double)steps;
                 int f = (int)PyRound(t * clip);
                 FrameSet(f);
+                // The ground test reads the evaluated mesh left by this frame_set, before the final rock sample is assigned.
+                // At the clip's end the curves still hold the preceding sample (also when several samples share that frame).
+                // Keep that evaluated pose separately: the original pose below must retain the final assigned sample.
+                if (i == steps) { EvaluatePose(f); evaluatedGroundPose = VehiclePoseMats(ad); }
                 var q1 = BlenderDeploy.QuaternionAxisAngle(rollAx, rollAmp * BlenderTrig.Sin(2.0 * Math.PI * rc2 * rockRepeats * t));
                 var q2 = BlenderDeploy.QuaternionAxisAngle(pitchAx, pitchAmp * BlenderTrig.Sin(2.0 * Math.PI * pc2 * rockRepeats * t + phase));
                 var eul = BlenderDeploy.QuatToEulXYZ((float[])BlenderPosedState.MulQtQt(q1, q2).Clone());   // to_euler('XYZ'): normalize_qt_qt, quat_to_eul
@@ -201,9 +206,8 @@ public static partial class BlenderVehicleRig
             Note(s, "static tracks: the wrap carriers classified");
         }
         // the ground band: every scene mesh's bound_box corners in the world - Object.bound_box is the last evaluation's: after the rock's
-        // frame_set the meshes skinned to the rig are deformed by the posed armature (the evaluated mesh's bounds)
-        Dictionary<int, float[]> poseMats = null;
-        if (anyFrameSet) { EvaluatePose(s.FrameCurrent); poseMats = VehiclePoseMats(ad); }
+        // frame_set the meshes skinned to the rig are deformed by its evaluated pose, before the final rock assignment
+        var poseMats = evaluatedGroundPose;
         double gzMin = 0.0, gzH = 1.0; bool anyG = false; double gzMax = 0.0;
         foreach (var o in s.Objects)
         {
