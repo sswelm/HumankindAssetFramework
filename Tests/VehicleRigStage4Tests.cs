@@ -42,6 +42,115 @@ public class VehicleRigStage4Tests
         }
     }
 
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(false, false, true)]
+    [InlineData(true, false, false)]
+    [InlineData(true, false, true)]
+    [InlineData(false, true, false)]
+    [InlineData(false, true, true)]
+    [InlineData(true, true, false)]
+    [InlineData(true, true, true)]
+    public void Furl_is_separate_and_Spin_holds_sails_raised_and_flags_struck_or_folded(bool fold, bool flagFold, bool wheel)
+    {
+        var m = new HafModel { Scene = 0 }; m.Scenes.Add(new HafScene());
+        Box(m, "Hull", 0, .5f, 0, 4, 1, 2);
+        Box(m, "Canvas", 0, 3, 0, .04f, 3, 4);
+        Box(m, "Banner", 0, 5, 0, .04f, 1, 2);
+        var a = E2Args();
+        a.SailFold = fold; a.SailFoldFrames = 7; a.SailFoldAngle = 180; a.SailFoldSag = .5;
+        a.FlagFoldOn = flagFold; a.FlagFoldDeg = 110; a.FlagFoldFrames = 17;
+        Mark(a, "sails", "Canvas"); Mark(a, "flags", "Banner");
+        if (wheel) { Box(m, "Wheel", 2, .3f, 1.3f, .6f, .6f, .1f); Mark(a, "wheels", "Wheel"); }
+        var s = Rig(m, a);
+        Assert.Equal(wheel ? 15 : 1, s.FrameCurrent); // authoring Furl/holds never calls frame_set
+        var spin = Assert.Single(s.Actions.Where(x => x.Name == "Spin"));
+        var furl = Assert.Single(s.Actions.Where(x => x.Name == "Furl"));
+        Assert.Equal(flagFold ? 17f : fold ? 7f : 1f, furl.FrameEnd);
+        Assert.Equal(15f, spin.FrameEnd);
+        var all = s.Actions.SelectMany(x => x.Slots).SelectMany(x => x.FCurves).SelectMany(x => x.Keys);
+        Assert.All(all, k => Assert.Equal("LINEAR", k.Interpolation));
+        Assert.All(Curve(spin, "Sail", 0).Keys, k => Assert.Equal(1f, k.Value));
+        Assert.Equal(1f, Curve(furl, "Flag", 0).Keys[0].Value);
+        if (fold) Assert.NotEqual(1f, Curve(furl, "SailF1", 0).Keys.Last().Value);
+        var state = (BlenderVehicleRig.RigState)s.VehicleState;
+        var flag = s.Armature.PoseProps[state.BoneId["Flag"]][1];
+        if (wheel) Assert.True(Math.Abs(flag[0]) < .99f); else Assert.Equal(new[] { 1f, 0f, 0f, 0f }, flag);
+        // Constant signed-zero Spin channels must not overwrite the original +0 left by the explicit identity reset.
+        Assert.All(flag.Where(v => v == 0f), v => Assert.Equal(0, BitConverter.ToInt32(BitConverter.GetBytes(v), 0)));
+    }
+
+    [Fact]
+    public void Rowing_keys_every_frame_of_the_shared_clip_without_changing_the_current_frame()
+    {
+        var m = new HafModel { Scene = 0 }; m.Scenes.Add(new HafScene());
+        Box(m, "Hull", 0, .5f, 0, 4, 1, 2);
+        Box(m, "Left", 0, 1.2f, 2, .03f, .03f, 2);
+        Box(m, "Right", 0, 1.2f, -2, .03f, .03f, 2);
+        var a = E2Args(); a.OarSweep = 48; a.OarDip = 12; a.OarLift = 15; a.OarRake = -20;
+        Mark(a, "oars", "Left", "Right");
+        var s = Rig(m, a); var state = (BlenderVehicleRig.RigState)s.VehicleState;
+        Assert.Equal(2, state.Oars.Count); Assert.Equal(1, s.FrameCurrent); Assert.Equal(24, s.FrameEnd);
+        var spin = Assert.Single(s.Actions);
+        foreach (var oar in state.Oars)
+            for (int c = 0; c < 4; c++)
+            {
+                var curve = Curve(spin, oar.bone, c); Assert.Equal(25, curve.Keys.Count);
+                Assert.All(curve.Keys, k => Assert.Equal("LINEAR", k.Interpolation));
+                Assert.Equal(curve.Keys.Last().Value, s.Armature.PoseProps[state.BoneId[oar.bone]][1][c]);
+            }
+    }
+
+    [Theory]
+    [InlineData("", "", "", "", 12, 270, 0, 24)]
+    [InlineData("0", "nan", "inf", "3", 1, 30, 1, 4)]
+    [InlineData("7.9", "inf", "nan", "5.9", 7, 360, 0, 5)]
+    [InlineData("-2", "-inf", "-inf", "-4", 1, 30, 0, 4)]
+    public void E2_dials_follow_Pythons_defaults_truncation_and_clamps(string frames, string angle, string sag, string oarFrames, int sf, double sa, double ss, int of)
+    {
+        var argv = Enumerable.Repeat("", 76).ToList(); argv[0] = "rig"; argv[1] = "scene.glb"; argv[6] = "AUTO"; argv[7] = "15"; argv[8] = "-360";
+        argv[72] = frames; argv[73] = angle; argv[75] = sag; argv[45] = oarFrames;
+        var a = BlenderVehicleRig.ParseArgs(argv); Assert.Null(a.FoldDie); Assert.Null(a.NamesDie);
+        Assert.Equal(sf, (int)a.SailFoldFrames); Assert.Equal(sa, a.SailFoldAngle); Assert.Equal(ss, a.SailFoldSag); Assert.Equal(of, (int)a.OarFrames);
+    }
+
+    static BlenderVehicleRig.Args E2Args()
+    {
+        var argv = Enumerable.Repeat("", 76).ToList(); argv[0] = "rig"; argv[1] = "scene.glb"; argv[6] = "AUTO"; argv[7] = "15"; argv[8] = "-360"; argv[17] = "0"; argv[21] = "0";
+        return BlenderVehicleRig.ParseArgs(argv);
+    }
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(false, false)]
+    public void E2_limits_decline_only_when_the_corresponding_parts_exist(bool rowing, bool parts)
+    {
+        var m = new HafModel { Scene = 0 }; m.Scenes.Add(new HafScene()); Box(m, "Hull", 0, .5f, 0, 4, 1, 2);
+        var a = E2Args();
+        if (rowing)
+        {
+            a.OarSweep = double.NaN;
+            if (parts) { Box(m, "Oar", 0, 1.2f, 2, .03f, .03f, 2); Mark(a, "oars", "Oar"); }
+        }
+        else
+        {
+            a.FlagFoldOn = true; a.FlagFoldFrames = 100001;
+            if (parts) { Box(m, "Banner", 0, 5, 0, .04f, 1, 2); Mark(a, "flags", "Banner"); }
+        }
+        var s = BlenderVehicleRig.RunStage1(m, a); BlenderVehicleRig.RunStage2(s, a); BlenderVehicleRig.RunStage3(s, a); BlenderVehicleRig.RunStage4(s, a);
+        Assert.Null(s.Dies);
+        if (parts) Assert.StartsWith(rowing ? "stage 4: the rowing stroke" : "stage 4: the Furl clip", s.Fallback); else Assert.Null(s.Fallback);
+    }
+    static void Mark(BlenderVehicleRig.Args a, string role, params string[] names) { a.Names[role] = names.ToList(); foreach (string n in names) a.Marked.Add(n); }
+    static BlenderRigAnim.Stage1 Rig(HafModel m, BlenderVehicleRig.Args a)
+    {
+        var s = BlenderVehicleRig.RunStage1(m, a); BlenderVehicleRig.RunStage2(s, a); BlenderVehicleRig.RunStage3(s, a); BlenderVehicleRig.RunStage4(s, a);
+        Assert.Null(s.Fallback); Assert.Null(s.Dies); Assert.False(s.Exits); return s;
+    }
+    static BlenderRigAnim.FCurveData Curve(BlenderRigAnim.ActionData a, string bone, int c)
+        => Assert.Single(Assert.Single(a.Slots).FCurves.Where(fc => fc.Bone == bone && fc.Prop == "rotation_quaternion" && fc.Index == c));
+
     static void Box(HafModel m, string name, float x, float y, float z, float sx, float sy, float sz)
     {
         var p = new List<float>();

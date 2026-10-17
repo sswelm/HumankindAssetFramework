@@ -524,6 +524,19 @@ PR #184 review fixes the evaluated-pose timing within that ground band: it retai
 the final rock assignment to the original pose. The wrong pose changed wheel speeds in 29 of 160 independent scenes; all now
 match Blender on CLR and Unity's 64-bit Mono. Three native fixtures and unit cases cover ordinary and repeated-frame sampling
 plus a no-rock control; 1,948 tests pass.
+(e) part e2 DONE 2026-10-17: rowing on Spin (sweep mirrored per bank, dip about the already mirrored local axis, lift and rake,
+one quaternion key per frame, the oar period fitted over the shared clip); the separate Furl stance (sail strike or three-joint
+curl with drape/reverse, flag flying or folded); explicit raised-sail and struck/folded-flag Spin holds. Stage 3 retains the
+oars' dip axes and the sail/flag hinge axes, and each authored action owns its keys and handles. Rowing and Furl INSERT keys
+without frame_set; only actual frame_set evaluations affect evaluated bounds. Original RNA values are written only when
+unequal, including signed-zero history under the lazy evaluator. Ten new native fixtures, seventeen unit cases (1,965 tests),
+ten of ten implementation plants caught, and nine repaired e2 corruption controls with intact supported row/Furl seeds.
+FULL: 21 of 24 recipes and 130 of 142 total jobs equal through stage 4 (499,914 rows, every key compared); the twelve named
+deferrals are two FBX, two non-UTF-8 names files, an infinite blade roll at stage 3, six e3 jobs and the long-Spin fixture.
+All 160 independent e2 scenes match on CLR and Unity's 64-bit Mono; the previous 160 e1 probes still match. The full drill
+rejects 136 kinds of damaged evidence. Non-finite rowing angles and Furl clips past 100,000 frames remain named limits.
+Next: (e) part e3, the trails' Deploy and the gun's Recoil clips. d6 remains deferred; Generate wiring and acceptance follow
+the action and export ports, with Blender the default until the acceptance checks pass.
 - **vehicle_rig.py: two gun-recoil defects** — OPEN (2026-10-16, found porting stage 3 part d3; the C# port reproduces both bit
   for bit, so fixing them is a script change plus a port change). (1) With `gun_pivot` at 1.0 and recoil on, the bore direction is
   `(gun_axis[1] - gun_axis[0]).normalized()` with `gun_axis[0]` the head - at the muzzle - so the bore is the float32 residue of

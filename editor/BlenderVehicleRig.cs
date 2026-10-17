@@ -52,6 +52,10 @@ public static partial class BlenderVehicleRig
         public double OarRoll;                      // float(argv[47]) or 0: the oars' blade roll in degrees (applied above 0.01)
         public double OarPivot = 30.0;              // min(95, max(0, float(argv[58]))) or 30: the oarlock along the oar's beam extent, percent
         public double OarLength = 100.0;            // min(300, max(25, float(argv[59]))) or 100: the oar stretched about its oarlock, percent
+        public double OarSweep = 24.0, OarDip = 18.0, OarLift, OarRake;
+        public System.Numerics.BigInteger OarFrames = 24, SailFoldFrames = 12;
+        public double SailFoldAngle = 270.0, SailFoldSag;
+        public bool SailFoldFlip;
         public System.Numerics.BigInteger Frames = 15;   // max(2, int(argv[7])): the Spin clip's frames - Python's exact int
         public double Degrees;                      // float(argv[8]): the largest wheel's turn over the clip
         public double RoadSpeedMul = 1.0, IdlerSpeedMul = 1.0;   // max(0.1, min(4.0, float(argv[13] / [14]))) or 1
@@ -140,6 +144,9 @@ public static partial class BlenderVehicleRig
             if (idx == 29) a.TailYaw = dv;
             if (idx == 30) a.TailPitch = dv;
             if (idx == 47) a.OarRoll = dv;
+            if (idx == 43) a.OarSweep = dv;
+            if (idx == 44) a.OarDip = dv;
+            if (idx == 45) a.OarFrames = System.Numerics.BigInteger.Max(4, new System.Numerics.BigInteger(Math.Truncate(dv)));
             if (idx == 34) a.GunPivot = PyMin(1.0, PyMax(0.0, dv));
             if (idx == 38) a.RecoilDist = PyMin(1.0, PyMax(0.0, dv));
         }
@@ -259,6 +266,7 @@ public static partial class BlenderVehicleRig
         a.AxisArg = PyUpper(At(6));
         a.TailAxisArg = argv.Count > 28 && PyNonBlank(At(28)) ? PyUpper(At(28)) : "AUTO";
         a.SailFold = argv.Count > 71 && VehicleProbe.Input.PyStrip(At(71)) == "1";
+        a.SailFoldFlip = argv.Count > 74 && VehicleProbe.Input.PyStrip(At(74)) == "1";
         // the sail-fold and oar dials, read unconditionally after the reduce tags and before the dials (vehicle_rig.py 1010-1017):
         // int(float(argv[72])), float(argv[73]), float(argv[75]), float(argv[56..59]) when present and non-blank
         foreach (var (idx, integral) in new[] { (72, true), (73, false), (75, false), (56, false), (57, false), (58, false), (59, false) })
@@ -268,6 +276,11 @@ public static partial class BlenderVehicleRig
             if (integral && (double.IsNaN(v) || double.IsInfinity(v))) { a.FoldDie = double.IsNaN(v) ? "ValueError: cannot convert float NaN to integer" : "OverflowError: cannot convert float infinity to integer"; break; }
             if (idx == 58) a.OarPivot = PyMin(95.0, PyMax(0.0, v));
             if (idx == 59) a.OarLength = PyMin(300.0, PyMax(25.0, v));
+            if (idx == 56) a.OarLift = v;
+            if (idx == 57) a.OarRake = v;
+            if (idx == 72) a.SailFoldFrames = System.Numerics.BigInteger.Max(1, new System.Numerics.BigInteger(Math.Truncate(v)));
+            if (idx == 73) a.SailFoldAngle = PyMin(360.0, PyMax(30.0, v));
+            if (idx == 75) a.SailFoldSag = PyMin(1.0, PyMax(0.0, v));
         }
         if (a.DialsDie == null)
         {

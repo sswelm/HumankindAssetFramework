@@ -405,6 +405,7 @@ public static partial class BlenderVehicleRig
         // with vertices) less 0.05 under the sails' box centre, the tail up by max(0.3, a quarter of the sails' height); with the fold,
         // SailF1..F3 chained below it with their heads on the fold lines (a quarter, half, three quarters down from the top)
         var sailFound = new List<string>(); double[] sailCuts = null;
+        var sailYard = new[] { 1f, 0f, 0f }; var flagAxis = new[] { 1f, 0f, 0f };
         foreach (var n in a.Names.TryGetValue("sails", out var sl) ? sl : new List<string>())
         {
             var o = FindOpt(n);
@@ -427,6 +428,7 @@ public static partial class BlenderVehicleRig
             int sailBone = AddBone("Sail", sh0, new[] { (float)(sh0[0] + 0f), (float)(sh0[1] + 0f), (float)(sh0[2] + rise) }, body);
             if (a.SailFold)
             {
+                sailYard = smx[0] - smn[0] >= smx[1] - smn[1] ? new[] { 1f, 0f, 0f } : new[] { 0f, 1f, 0f };
                 double sh = PyMax(1e-6, smx[2] - smn[2]);
                 sailCuts = new[] { smx[2] - sh * 1 / 4.0, smx[2] - sh * 2 / 4.0, smx[2] - sh * 3 / 4.0 };
                 double scx = 0.5 * (smn[0] + smx[0]), scy = 0.5 * (smn[1] + smx[1]);
@@ -489,6 +491,7 @@ public static partial class BlenderVehicleRig
         if (flagFound.Count > 0)
         {
             BoxOf(flagFound, out var gmn, out var gmx);
+            flagAxis = gmx[0] - gmn[0] >= gmx[1] - gmn[1] ? new[] { 1f, 0f, 0f } : new[] { 0f, 1f, 0f };
             double keel = Keel();
             var fh = new[] { (float)(0.5 * (gmn[0] + gmx[0])), (float)(0.5 * (gmn[1] + gmx[1])), (float)(a.FlagFoldOn ? gmx[2] : keel - 0.05) };
             float rise = (float)PyMax(0.3, 0.25 * (gmx[2] - gmn[2]));
@@ -505,6 +508,7 @@ public static partial class BlenderVehicleRig
         var oarParts = new HashSet<string>(StringComparer.Ordinal);                                                      // oar_by_name
         var oarSkin = new Dictionary<string, (List<int> order, Dictionary<int, string> bone)>(StringComparer.Ordinal);   // oar_skin
         var oarNames = a.Names.TryGetValue("oars", out var onl) ? onl : new List<string>();
+        var oarStrokes = new List<(string bone, float side, float[] dip)>();
         if (oarNames.Count > 0)
         {
             var oarObjs = new List<BlenderRigAnim.SceneObject>();
@@ -642,6 +646,9 @@ public static partial class BlenderVehicleRig
                     var dd = OarPc1(allwc);
                     double sgn = side > 0 ? 1.0 : -1.0;
                     if ((double)dd[1] * sgn < 0) dd = Neg(dd);   // outboard on this bank
+                    var horizontal = new[] { dd[0], dd[1], 0f };
+                    horizontal = VecLength(horizontal) > 1e-6 ? Normalized(horizontal) : new[] { 1f, 0f, 0f };
+                    var dipAxis = Normalized(new[] { -horizontal[1], horizontal[0], 0f });
                     var mctr = SumOver(allwc, allwc.Count);
                     double yt = mid + sgn * yg;
                     float[] piv;
@@ -672,6 +679,7 @@ public static partial class BlenderVehicleRig
                         Note(s, "an oar length stretch (the rest geometry moved)");
                     }
                     AddBone(bn, piv, Add(piv, Scale(dd, 0.6f)), body);
+                    oarStrokes.Add((bn, (float)side, dipAxis));
                     oarPivots.Add(piv);
                 }
             }
@@ -799,6 +807,7 @@ public static partial class BlenderVehicleRig
             OarBones = oarParts.Count > 0 ? boneNames.Count(n => n.StartsWith("Oar_", StringComparison.Ordinal)) : 0,
             TrailBones = boneNames.Count(n => n.StartsWith("Trail_", StringComparison.Ordinal)),
             SailClip = sailFound.Count > 0, FlagClip = flagFound.Count > 0, Recoil = boneNames.Contains("RecoilArm"),
+            Oars = oarStrokes, SailYard = sailYard, FlagAxis = flagAxis,
         };
         foreach (int id in clusterBoneIds) rs.ClusterBones.Add(boneNames[id - RigBoneBase]);
         for (int i = 0; i < boneNames.Count; i++) rs.BoneId[boneNames[i]] = RigBoneBase + i;

@@ -122,6 +122,14 @@ Stage 4 (step (e), part e1: the Spin action, the wheels, the rock):
   (no fixture for the rock past 1,000,000 samples or 100,000 frames: Blender samples every one of them - a 200,000-frame rock took
   40 minutes in the dump)
   fx_e_long          argument variant: a Spin of 200,000 frames - left to Blender by name
+Stage 4 e2:
+  fx_e2_rowing / fx_e2_rowing_still   mirrored strokes with lift/rake; shared rock period and wheels, or no frame_set at all
+  fx_e2_stances      a reversed 360-degree curl with sag .98 about a Y yard, a folding flag, different Furl endpoints and a wheel
+  fx_e2_sail_strike / fx_e2_sail_curl  sail-only strike or 180-degree draped curl; explicit raised Spin holds
+  fx_e2_flag_flying / fx_e2_flag_fold flag-only flying or folding stances; the latter evaluated by a wheel's frame_set
+  fx_e2_action_names source Spin and Furl actions collide with both authored names (the .001 actions are purged)
+  fx_e2_clamps       argument variant: blank fold frames, NaN curl (30 degrees), infinite sag (1, drape capped at .98)
+  fx_e2_missing      missing sail and flag names make WARNs, no Furl action and an empty Spin
 Argument variants (recipes_exit, post-edited by --exits): fx_r_numeric_pct (the decimal above 0.5 whose rounding decides whether
   to weld); fx_d_sailfold_overflow (1e309 becomes infinity before int() raises); fx_d_unicode_fold (a Kawi digit accepted before
   the next dial raises ValueError)
@@ -777,6 +785,49 @@ def main(out):
     r.node("Hull", mesh=r.mesh("Hull", at=(-0.5, 0.0, -0.5), material=ma), scale=[5.0, 1.0, 2.0])
     recipe(out, "fx_e_rock3", r.write(models, "fx_e_rock3"), [("Hull", 0, {})], waveEnabled=True, rockDegrees=2.0, rockFrames=20, rockHeading=15.0)
     wheeled("fx_e_long", sub="recipes_exit", tracksStatic=True)
+    # ---- stage 4 e2: rowing, the separate Furl stance, and explicit Spin holds
+    for key, rock, wheels in (("fx_e2_rowing", True, True), ("fx_e2_rowing_still", False, False)):
+        r = Rig(); ma = r.material("Wood", (0.5, 0.35, 0.2))
+        r.node("Hull", mesh=r.mesh("Hull", at=(-2, 0, -1), material=ma), scale=[4, 1, 2])
+        r.node("Oars", mesh=oar_bank(r, "Oars", ma, [(0, 1, .3, .2, False), (1.1, 1, -.2, .4, False), (.1, -1, .3, .2, False), (1.2, -1, -.2, .4, False)]))
+        parts = [("Hull", 0, {}), ("Oars", 13, {})]
+        if wheels:
+            r.node("Wheel", mesh=r.mesh("Wheel", at=(-.5, -.5, -.5), material=ma), translation=[0, .2, 2], scale=[.7, .7, .1])
+            parts.append(("Wheel", 1, {}))
+        recipe(out, key, r.write(models, key), parts, frames=15, oarFrames=24, oarSweepDeg=48, oarDipDeg=12,
+               oarLiftDeg=15, oarRakeDeg=-20, waveEnabled=rock, rockDegrees=3, rockFrames=60)
+
+    def stance(key, sail=True, flag=True, fold=True, wheel=False, collide=False, sub="recipes", **fields):
+        r = Rig(); ma = r.material("Canvas", (.7, .65, .5))
+        r.node("Hull", mesh=r.mesh("Hull", at=(-2, 0, -1), material=ma), scale=[4, 1, 2])
+        parts = [("Hull", 0, {})]
+        if sail:
+            r.node("Canvas", mesh=r.mesh("Canvas", at=(-.5, 1, -1), size=2, material=ma), scale=[.03, 1.5, 2])
+            parts.append(("Canvas", 14, {}))  # yard along Blender Y, not X
+        if flag:
+            r.node("Banner", mesh=r.mesh("Banner", at=(-.5, 3, -.5), material=ma), scale=[.03, 1, 2])
+            parts.append(("Banner", 17, {}))
+        if wheel:
+            r.node("Wheel", mesh=r.mesh("Wheel", at=(-.5, -.5, -.5), material=ma), translation=[2, .2, 1.3], scale=[.6, .6, .1])
+            parts.append(("Wheel", 1, {}))
+        if collide:
+            mast = r.node("Mast", mesh=r.mesh("Mast", at=(-.1, 0, -.1), size=.2, material=ma))
+            parts.append(("Mast", 19, {}))
+            for clip in ("Spin", "Furl"):
+                ak = r.anim(clip); r.key(ak, mast, "translation", [0, 1], [(0, 0, 0), (.2, 0, 0)])
+        recipe(out, key, r.write(models, key), parts, sub=sub, sailFoldIdle=fold, **fields)
+
+    stance("fx_e2_stances", wheel=True, sailFoldFrames=8, sailFoldAngleDeg=360, sailFoldSag=.98, sailFoldReverse=True,
+           flagFoldOn=True, flagFoldDeg=-90, flagFoldFrames=13)
+    stance("fx_e2_sail_strike", flag=False, fold=False)
+    stance("fx_e2_sail_curl", flag=False, sailFoldFrames=7, sailFoldAngleDeg=180, sailFoldSag=.5)
+    stance("fx_e2_flag_flying", sail=False, fold=False)
+    stance("fx_e2_flag_fold", sail=False, wheel=True, flagFoldOn=True, flagFoldDeg=110, flagFoldFrames=6)
+    stance("fx_e2_action_names", fold=False, collide=True)
+    stance("fx_e2_clamps", flag=False, sub="recipes_exit")
+    r = Rig(); ma = r.material("Hull"); r.node("Hull", mesh=r.mesh("Hull", material=ma))
+    recipe(out, "fx_e2_missing", r.write(models, "fx_e2_missing"), [("Hull", 0, {}), ("GhostSail", 14, {}), ("GhostFlag", 17, {})],
+           sailFoldIdle=True, flagFoldOn=True, flagFoldDeg=-90)
     # fx_r_missing_rotor: a tail rotor name the scene has not - find()'s exit in stage 3, after the main rotor measured
     r = Rig(); ma = r.material("Paint", (0.4, 0.45, 0.3))
     r.node("Hull", mesh=r.mesh("Hull", at=(-1.0, 0.0, -1.0), size=2.0, material=ma))
@@ -826,6 +877,7 @@ def set_tag(argv, tag, value):
 
 
 EXITS = {
+    "fx_e2_clamps": (None, lambda a: (a.__setitem__(72, ""), a.__setitem__(73, "nan"), a.__setitem__(75, "inf"))),
     "fx_x_default_names_dir": ("EXIT", lambda a: set_tag(a, "defaultreduce", "@" + os.path.dirname(a[1]).replace("\\", "/") + "|20")),
     "fx_x_shroud_names_dir": ("EXIT", lambda a: set_tag(a, "shroudreduce", "@" + os.path.dirname(a[1]).replace("\\", "/") + "|20")),
     "fx_x_window_names_dir": ("EXIT", lambda a: set_tag(a, "windowreduce", "@" + os.path.dirname(a[1]).replace("\\", "/") + "|20")),
