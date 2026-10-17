@@ -12,9 +12,9 @@
 //   - rigid skinning: every mesh the script holds (the scene's meshes with vertices, in scene order) loses its vertex groups
 //     and gets one group, its bone (its wheel cluster's, else the body bone), every vertex at weight 1, an Armature modifier
 //     on VehicleRig, and VehicleRig as its parent (the local transform kept: the armature sits at the identity);
-//   - the join per bone: the meshes grouped by their bone - a rudder, preserve or flip part keyed apart on its own -, each group
+//   - the join per bone: the meshes grouped by their bone - an oar, rudder, preserve or flip part keyed apart on its own -, each group
 //     joined into its first member (BlenderRigAnim.JoinMeshes, bpy.ops.object.join) and renamed Mesh_<key>.
-// Parts d2 to d4 add their branches between the wheels and the armature's rest:
+// Parts d2 to d5 add their branches between the wheels and the armature's rest:
 //   - d2: the sail (its SailF1..F3 fold chain and the canvas skinned by height band), rigging on the sail, the flag;
 //   - d3: the turret, the gun (the muzzle pin, the pivot along the tube, the recoil arm and barrel), the trails;
 //   - d4: the main and tail rotors - one cluster per group after the wheels, its bones named on from them: the main hub (the part
@@ -22,9 +22,14 @@
 //     BlenderNumpy), the tail at the blades' mean with its axle 90 degrees about the vertical from the boom; the forced axes
 //     (argv[6] for the main, argv[28] for the tail), the tail trim (Vector.rotate by Quaternion(axis, radians(deg)): yaw, then
 //     pitch), the main bone along -axle, the tail bone along the in-disc direction nearest up with align_roll(axle x it).
-// The oars (d5) and the tread rig (d6) are left to Blender by name, as is a scene this part does not expect (an armature still
+//   - d5: the oars - the marked oar parts' connected islands (bmesh's disk order), per bank a pole direction from the islands'
+//     power-iteration PC1s, the islands projected across it and clustered single-linkage (a grid of merge-eps cells, CPython's
+//     math.hypot), one Oar_%03d bone per cluster at its oarlock; the blade roll and the length rewrite the rest geometry; each oar
+//     part skins per vertex and keeps its own mesh (__oar__<part>) through the join. Python's float sum() is compensated: PySum.
+// The tread rig (d6) is left to Blender by name, as is a scene this part does not expect (an armature still
 // there, a parented part, a mesh still carrying an Armature modifier, a main rotor hub whose covariance is non-finite with two or
-// more vertices, or whose eigh takes a LAPACK branch not ported: rescaling a tiny or huge entry, DSTEQR not converging).
+// more vertices, or whose eigh takes a LAPACK branch not ported: rescaling a tiny or huge entry, DSTEQR not converging; an oar
+// part without its edge list, a non-finite projected centre, a world with no inverse, an infinite blade roll).
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -39,7 +44,7 @@ public static partial class BlenderVehicleRig
     /// <summary>The branches of stage 3 the C# does not model yet: the role list that takes each, and the part that will.</summary>
     static readonly (string role, string branch)[] Stage3Later =
     {
-        ("oars", "the oar bones (d5)"), ("tracks", "the tread rig (d6)"),
+        ("tracks", "the tread rig (d6)"),
     };
 
     /// <summary>Stage 3 on the scene stage 2 left: the rig. Lines go to s.Logs3; a branch not modelled sets s.Fallback; the script's exit
@@ -151,9 +156,9 @@ public static partial class BlenderVehicleRig
                     {
                         // one vertex: np.cov divides by n - 1 = 0 (warnings only), every entry NaN, eigh raises LinAlgError (DSTEQR never
                         // converges: measured in Blender's numpy) and the script's except takes the axis of least spread of the parts'
-                        // centres - sum((c[i] - mean[i]) ** 2) in Python floats (float ** is the C runtime's pow), min over range(3) keeping the first of a tie
+                        // centres - sum((c[i] - mean[i]) ** 2) in Python floats (float ** is the C runtime's pow, sum() compensated: PySum), min over range(3) keeping the first of a tie
                         var spread = new double[3];
-                        for (int k = 0; k < 3; k++) { double sum = 0.0; foreach (var b in boxes) { sum += BlenderTrig.Pow((double)b.c[k] - mean[k], 2.0); } spread[k] = sum; }
+                        for (int k = 0; k < 3; k++) spread[k] = PySum(boxes.Select(b => BlenderTrig.Pow((double)b.c[k] - mean[k], 2.0)));
                         int least = 0; for (int k = 1; k < 3; k++) if (spread[k] < spread[least]) least = k;
                         autoAxle = new float[3]; autoAxle[least] = 1f;
                         axleSrc = "least-spread (numpy missing)";
@@ -493,6 +498,193 @@ public static partial class BlenderVehicleRig
             Note(s, a.FlagFoldOn ? "the flag bone (folding)" : "the flag bone (struck)");
         }
 
+        // ---- the OAR bones (d5, vehicle_rig.py 2033-2230): the marked oar parts' connected islands, per bank (the island centre's y
+        // against the oar points' beam centre) projected on the plane across the bank's common pole direction and clustered single-
+        // linkage within the merge eps; one Oar_%03d bone per cluster at its oarlock, every vertex of the cluster skinned to it
+        var oarParts = new HashSet<string>(StringComparer.Ordinal);                                                      // oar_by_name
+        var oarSkin = new Dictionary<string, (List<int> order, Dictionary<int, string> bone)>(StringComparer.Ordinal);   // oar_skin
+        var oarNames = a.Names.TryGetValue("oars", out var onl) ? onl : new List<string>();
+        if (oarNames.Count > 0)
+        {
+            var oarObjs = new List<BlenderRigAnim.SceneObject>();
+            foreach (var n in oarNames)
+            {
+                var o = FindOpt(n);
+                if (o == null) { s.Logs3.Add("VEHICLE WARN: oar part '" + n + "' not found — skipped"); Note(s, "a missing oar part (a WARN)"); continue; }
+                oarParts.Add(o.Name); oarSkin[o.Name] = (new List<int>(), new Dictionary<int, string>()); oarObjs.Add(o);
+            }
+            var isl = new Dictionary<string, List<OarIsland>>(StringComparer.Ordinal);
+            var objByName = new Dictionary<string, BlenderRigAnim.SceneObject>(StringComparer.Ordinal);
+            foreach (var o in oarObjs)
+            {
+                var il = OarIslands(o);
+                if (il == null) { s.Fallback = "stage 3: an oar part without its edge list is not modelled yet"; return; }
+                isl[o.Name] = il; objByName[o.Name] = o;   // a name listed twice: computed again, the last one kept (the dict)
+            }
+            // the recovery tolerances: fractions of the oar points' diagonal; the beam centre their y midpoint
+            var oarPoints = new List<float[]>();
+            foreach (var o in oarObjs) foreach (var il in isl[o.Name]) oarPoints.AddRange(il.Wc);
+            double eps = 1e-6, minSpan = 1e-6, mid = 0.0;
+            if (oarPoints.Count > 0)
+            {
+                var omn = new double[3]; var omx = new double[3];
+                for (int k = 0; k < 3; k++) { omn[k] = PyMinOf(oarPoints.Select(p => (double)p[k])); omx[k] = PyMaxOf(oarPoints.Select(p => (double)p[k])); }
+                double diag = PyMax(Math.Sqrt(PySum(Enumerable.Range(0, 3).Select(k => BlenderTrig.Pow(omx[k] - omn[k], 2.0)))), 1e-6);
+                eps = 0.00786 * diag; minSpan = 0.01387 * diag; mid = 0.5 * (omn[1] + omx[1]);
+                s.Logs3.Add("VEHICLE ROWING recovery scale: diagonal " + BlenderRigAnim.PyFixed(diag, 4) + ", merge eps " + BlenderRigAnim.PyFixed(eps, 5)
+                            + ", min span " + BlenderRigAnim.PyFixed(minSpan, 5) + ", beam centre Y " + BlenderRigAnim.PyFixed(mid, 4));
+            }
+            var oarPivots = new List<float[]>();
+            int oid = 0;
+            foreach (int side in new[] { 1, -1 })
+            {
+                // the bank's common pole direction: each long-enough island's own PC1, signed to the first, weighted by its span
+                var dp = new float[3]; float[] refv = null;
+                foreach (var o in oarObjs)
+                    foreach (var il in isl[o.Name])
+                    {
+                        if ((il.Ctr[1] >= mid) != (side > 0)) continue;
+                        var pv = OarPc1(il.Wc); var mm = SumOver(il.Wc, il.Wc.Count);
+                        double span = PyMaxOf(il.Wc.Select(p => Dot(Sub(p, mm), pv))) - PyMinOf(il.Wc.Select(p => Dot(Sub(p, mm), pv)));
+                        if (span < minSpan) continue;
+                        if (refv == null) refv = pv;
+                        if (Dot(pv, refv) < 0) pv = Neg(pv);
+                        dp = Add(dp, Scale(pv, (float)span));
+                    }
+                if (VecLength(dp) < 1e-6) continue;
+                dp = Normalized(dp);
+                double adx = Math.Abs((double)dp[0]), ady = Math.Abs((double)dp[1]);
+                double rakeDeg = adx + ady > 1e-6 ? BlenderTrig.Atan2(adx, ady) * (180.0 / Math.PI) : 0.0;   // math.degrees(math.atan2(...))
+                s.Logs3.Add("VEHICLE ROWING side " + (side > 0 ? "+1" : "-1") + ": modelled oar rake " + BlenderRigAnim.PyFixed(rakeDeg, 0)
+                            + " deg off the perpendicular — Rake ~" + BlenderRigAnim.PyFixed(rakeDeg, 0) + " (sign per bow) centres the stroke on the beam line");
+                var tmpv = Math.Abs((double)dp[2]) < 0.9 ? new[] { 0f, 0f, 1f } : new[] { 1f, 0f, 0f };
+                var e1 = Normalized(Cross(dp, tmpv)); var e2 = Normalized(Cross(dp, e1));
+                var items = new List<(string obj, int[] idx, List<float[]> wc, double u, double v)>();
+                foreach (var o in oarObjs)
+                    foreach (var il in isl[o.Name])
+                        if ((il.Ctr[1] >= mid) == (side > 0)) items.Add((o.Name, il.Idx, il.Wc, Dot(il.Ctr, e1), Dot(il.Ctr, e2)));
+                int nIt = items.Count;
+                if (nIt == 0) continue;
+                // single linkage over a grid of eps cells: (int(u / eps), int(v / eps)), the 3x3 neighbourhood, j > i within eps (math.hypot)
+                var parent = Enumerable.Range(0, nIt).ToArray();
+                int FindRoot(int x) { while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
+                var grid = new Dictionary<(long, long), List<int>>();
+                var cell = new (long, long)[nIt];
+                for (int i = 0; i < nIt; i++)
+                {
+                    double gu = items[i].u / eps, gv = items[i].v / eps;
+                    if (double.IsNaN(gu) || double.IsInfinity(gu) || double.IsNaN(gv) || double.IsInfinity(gv) || Math.Abs(gu) >= 9e18 || Math.Abs(gv) >= 9e18)
+                    { s.Fallback = "stage 3: the oar clustering of a non-finite or huge projected centre is not modelled yet"; return; }
+                    cell[i] = ((long)gu, (long)gv);   // int(): toward zero
+                    if (!grid.TryGetValue(cell[i], out var cl)) grid[cell[i]] = cl = new List<int>();
+                    cl.Add(i);
+                }
+                for (int i = 0; i < nIt; i++)
+                    for (long dx = -1; dx <= 1; dx++)
+                        for (long dy = -1; dy <= 1; dy++)
+                            if (grid.TryGetValue((cell[i].Item1 + dx, cell[i].Item2 + dy), out var cl))
+                                foreach (int j in cl)
+                                    if (j > i && PyHypot(items[i].u - items[j].u, items[i].v - items[j].v) <= eps)
+                                    {
+                                        int ra = FindRoot(i), rb = FindRoot(j);
+                                        if (ra != rb) parent[ra] = rb;
+                                    }
+                var labels = new List<List<int>>(); var labelAt = new Dictionary<int, int>();
+                for (int i = 0; i < nIt; i++)
+                {
+                    int r = FindRoot(i);
+                    if (!labelAt.TryGetValue(r, out int li)) { labelAt[r] = labels.Count; labels.Add(new List<int>()); li = labels.Count - 1; }
+                    labels[li].Add(i);
+                }
+                foreach (var mem in labels)
+                {
+                    string bn = "Oar_" + oid.ToString("000", CultureInfo.InvariantCulture); oid++;
+                    var allwc = new List<float[]>();
+                    foreach (int i in mem)
+                    {
+                        var sk = oarSkin[items[i].obj];
+                        foreach (int vi in items[i].idx) { if (!sk.bone.ContainsKey(vi)) sk.order.Add(vi); sk.bone[vi] = bn; }
+                        allwc.AddRange(items[i].wc);
+                    }
+                    // BLADE ROLL (argv[47]): the whole oar about its own outboard axis, the angle signed per bank; the rest geometry rewritten
+                    if (Math.Abs(a.OarRoll) > 0.01)
+                    {
+                        var rax = OarPc1(allwc);
+                        double rsgn = side > 0 ? 1.0 : -1.0;
+                        if ((double)rax[1] * rsgn < 0) rax = Neg(rax);
+                        var rc = SumOver(allwc, allwc.Count);
+                        double rollRad = a.OarRoll * (Math.PI / 180.0) * rsgn;
+                        if (float.IsInfinity((float)rollRad))
+                        {
+                            // angle_wrap_rad of an infinite float angle is NaN: every rewritten coordinate NaN, and which NaN (its sign bit)
+                            // follows each compiler's operand order - not something to claim bit for bit (Blender then dies in stage 4)
+                            s.Fallback = "stage 3: the oar blade roll of an infinite angle (NaN rest geometry) is not modelled yet"; return;
+                        }
+                        var rq = BlenderDeploy.QuaternionAxisAngle(rax, rollRad);
+                        foreach (int i in mem)
+                        {
+                            var minv = VehicleProbe.Inverted(VehicleProbe.ToRowMajor(objByName[items[i].obj].World));
+                            if (minv == null) { s.Fallback = "stage 3: an oar part whose world has no inverse is not modelled yet"; return; }
+                            var wc = items[i].wc; var idx = items[i].idx; var pos = objByName[items[i].obj].Mesh.Positions;
+                            for (int k = 0; k < idx.Length; k++)
+                            {
+                                wc[k] = Add(rc, BlenderPosedState.MulQtV3(rq, Sub(wc[k], rc)));
+                                SetCo(pos, idx[k], minv, wc[k]);
+                            }
+                        }
+                        allwc = new List<float[]>();
+                        foreach (int i in mem) allwc.AddRange(items[i].wc);
+                        Note(s, "an oar blade roll (the rest geometry rotated)");
+                    }
+                    var ys = allwc.Select(p => Math.Abs(p[1] - mid)).ToList();
+                    double yg = PyMinOf(ys) + (a.OarPivot / 100.0) * (PyMaxOf(ys) - PyMinOf(ys));
+                    var dd = OarPc1(allwc);
+                    double sgn = side > 0 ? 1.0 : -1.0;
+                    if ((double)dd[1] * sgn < 0) dd = Neg(dd);   // outboard on this bank
+                    var mctr = SumOver(allwc, allwc.Count);
+                    double yt = mid + sgn * yg;
+                    float[] piv;
+                    if (Math.Abs((double)dd[1]) > 1e-5) piv = Add(mctr, Scale(dd, (float)((yt - mctr[1]) / dd[1])));
+                    else
+                    {
+                        // an oar parallel to the hull: the vertex nearest the target beam distance (min: the first of a tie)
+                        piv = null; double bestK = 0.0;
+                        foreach (var p in allwc) { double k = Math.Abs(Math.Abs(p[1] - mid) - yg); if (piv == null || k < bestK) { piv = p; bestK = k; } }
+                        piv = (float[])piv.Clone();
+                        Note(s, "an oar parallel to the hull (the pivot snapped to a vertex)");
+                    }
+                    // LENGTH (argv[59]): the oar stretched along its axis about the oarlock
+                    if (Math.Abs(a.OarLength - 100.0) > 0.1)
+                    {
+                        double lsc = a.OarLength / 100.0;
+                        foreach (int i in mem)
+                        {
+                            var minv = VehicleProbe.Inverted(VehicleProbe.ToRowMajor(objByName[items[i].obj].World));
+                            if (minv == null) { s.Fallback = "stage 3: an oar part whose world has no inverse is not modelled yet"; return; }
+                            var wc = items[i].wc; var idx = items[i].idx; var pos = objByName[items[i].obj].Mesh.Positions;
+                            for (int k = 0; k < idx.Length; k++)
+                            {
+                                wc[k] = Add(wc[k], Scale(dd, (float)(Dot(Sub(wc[k], piv), dd) * (lsc - 1.0))));
+                                SetCo(pos, idx[k], minv, wc[k]);
+                            }
+                        }
+                        Note(s, "an oar length stretch (the rest geometry moved)");
+                    }
+                    AddBone(bn, piv, Add(piv, Scale(dd, 0.6f)), body);
+                    oarPivots.Add(piv);
+                }
+            }
+            if (oarPivots.Count > 0)
+            {
+                var pvy = oarPivots.Select(p => Math.Abs(p[1] - mid)).ToList();
+                double sumy = PySum(pvy);
+                s.Logs3.Add("VEHICLE ROWING pivots: chosen beam-distance mean " + BlenderRigAnim.PyFixed(sumy / pvy.Count, 3) + ", range [" + BlenderRigAnim.PyFixed(PyMinOf(pvy), 3)
+                            + " .. " + BlenderRigAnim.PyFixed(PyMaxOf(pvy), 3) + "] (dial " + BlenderRigAnim.PyFixed(a.OarPivot, 0) + "%)");
+            }
+            s.Logs3.Add("VEHICLE ROWING: recovered " + oarPivots.Count + " oar(s) from " + oarObjs.Count + " part(s) into individual bones");
+            Note(s, "the oar bones");
+        }
+
         // ED_armature_from_edit: the rest; armature.bones in depth-first order (children in creation order)
         var ids = Enumerable.Range(RigBoneBase, boneNames.Count).ToList();
         var children = ids.ToDictionary(b => b, b => new List<int>()); var roots = new List<int>();
@@ -529,7 +721,21 @@ public static partial class BlenderVehicleRig
             string bname = boneOf.TryGetValue(o.Name, out var wb) ? wb : bodyBone;
             var d = o.Mesh;
             d.DefNr = new List<int>[d.Vertices]; d.DefWeight = new List<float>[d.Vertices];
-            if (a.SailFold && sailFound.Contains(o.Name))
+            if (oarParts.Contains(o.Name))
+            {
+                // OARS: per vertex into their oar bones, a group per bone in the order its first vertex was assigned; a vertex of an
+                // island no bank took (its side had no pole direction) is in no group
+                var sk = oarSkin.TryGetValue(o.Name, out var osk) ? osk : (order: new List<int>(), bone: new Dictionary<int, string>());
+                d.Groups = new List<string>(); var groupIx = new Dictionary<string, int>(StringComparer.Ordinal);
+                for (int v = 0; v < d.Vertices; v++) { d.DefNr[v] = new List<int>(); d.DefWeight[v] = new List<float>(); }
+                foreach (int vi in sk.order)
+                {
+                    string bn = sk.bone[vi];
+                    if (!groupIx.TryGetValue(bn, out int g)) { groupIx[bn] = g = d.Groups.Count; d.Groups.Add(bn); }
+                    d.DefNr[vi].Add(g); d.DefWeight[vi].Add(1f);
+                }
+            }
+            else if (a.SailFold && sailFound.Contains(o.Name))
             {
                 // the CANVAS bands: each vertex to the bone owning its height band (its world z against the fold cuts), a group per
                 // non-empty band in band order
@@ -561,7 +767,8 @@ public static partial class BlenderVehicleRig
         var groupAt = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var o in objs)
         {
-            string key = rudders.Contains(o.Name) ? "__rud__" + o.Name
+            string key = oarParts.Contains(o.Name) ? "__oar__" + o.Name
+                       : rudders.Contains(o.Name) ? "__rud__" + o.Name
                        : preserve.Contains(o.Name) ? "__keep__" + o.Name
                        : flip.Contains(o.Name) ? "__flip__" + o.Name
                        : rigOnSail.Contains(o.Name) ? "__rigsail__"
@@ -610,6 +817,144 @@ public static partial class BlenderVehicleRig
     }
 
     static string P2(float v) => BlenderRigAnim.PyFixed(v, 2);
+
+    /// <summary>One connected island of an oar part (_oar_islands): its vertex indices in walk order, their world points (shared by
+    /// reference: the roll and the length rewrite them in place) and the points' mean.</summary>
+    sealed class OarIsland { public int[] Idx; public List<float[]> Wc; public float[] Ctr; }
+
+    /// <summary>_oar_islands: bmesh.from_mesh (the vertices, then the edges in mesh order - each appended to both disk cycles), then per
+    /// vertex in index order not yet seen a depth-first walk (a stack popped from its end, each vertex's link_edges in disk order from
+    /// v->e); the island's points `matrix_world @ co`, its centre their float32 mean. Null without an edge list.</summary>
+    static List<OarIsland> OarIslands(BlenderRigAnim.SceneObject o)
+    {
+        var d = o.Mesh; int nv = d.Vertices;
+        if (d.Edges == null) return null;
+        var bm = new BMesh();
+        for (int v = 0; v < nv; v++) bm.VertCreate(d.Positions[3 * v], d.Positions[3 * v + 1], d.Positions[3 * v + 2]);
+        for (int e = 0; e < d.Edges.Length / 2; e++) bm.EdgeCreate(d.Edges[2 * e], d.Edges[2 * e + 1]);
+        var it = VehicleProbe.ToRowMajor(o.World);
+        var seen = new bool[nv]; var outl = new List<OarIsland>(); var link = new List<int>();
+        for (int v = 0; v < nv; v++)
+        {
+            if (seen[v]) continue;
+            var stack = new List<int> { v }; seen[v] = true; var idx = new List<int>();
+            while (stack.Count > 0)
+            {
+                int x = stack[stack.Count - 1]; stack.RemoveAt(stack.Count - 1); idx.Add(x);
+                bm.EdgesOfVert(x, link);
+                foreach (int e in link) { int w = bm.EdgeOtherVert(e, x); if (!seen[w]) { seen[w] = true; stack.Add(w); } }
+            }
+            var wc = new List<float[]>(idx.Count);
+            foreach (int i in idx)
+            {
+                float px = d.Positions[3 * i], py = d.Positions[3 * i + 1], pz = d.Positions[3 * i + 2];
+                wc.Add(new[] { MulPointRow(it, 0, px, py, pz), MulPointRow(it, 1, px, py, pz), MulPointRow(it, 2, px, py, pz) });
+            }
+            outl.Add(new OarIsland { Idx = idx.ToArray(), Wc = wc, Ctr = SumOver(wc, wc.Count) });
+        }
+        return outl;
+    }
+
+    /// <summary>_oar_pc1: the points' float32 mean, the 3x3 scatter of (p - mean) summed in Python floats, then 40 rounds of the power
+    /// iteration from (1, 0.3, 0.1): each row's sum over k of cov * v (sum(): PySum, compensated) into a float32 Vector, a stop at a zero
+    /// length, normalize(). Points of no scatter stop at once and return (1, 0.3, 0.1) unnormalized.</summary>
+    static float[] OarPc1(List<float[]> pts)
+    {
+        var m = SumOver(pts, pts.Count);
+        var cov = new double[3, 3];
+        foreach (var p in pts)
+        {
+            var dv = Sub(p, m);
+            for (int x = 0; x < 3; x++) for (int y = 0; y < 3; y++) cov[x, y] += (double)dv[x] * (double)dv[y];
+        }
+        var v = new[] { 1f, 0.3f, 0.1f };
+        for (int r = 0; r < 40; r++)
+        {
+            var nv = new float[3];
+            for (int x = 0; x < 3; x++) nv[x] = (float)PySum(Enumerable.Range(0, 3).Select(k => cov[x, k] * (double)v[k]));
+            if (VecLength(nv) == 0) break;
+            v = Normalized(nv);
+        }
+        return v;
+    }
+
+    /// <summary>`data.vertices[i].co = minv @ wc`: mathutils' Matrix @ Vector into the float32 position.</summary>
+    static void SetCo(float[] pos, int i, float[] minv, float[] w)
+    {
+        pos[3 * i] = MulPointRow(minv, 0, w[0], w[1], w[2]); pos[3 * i + 1] = MulPointRow(minv, 1, w[0], w[1], w[2]); pos[3 * i + 2] = MulPointRow(minv, 2, w[0], w[1], w[2]);
+    }
+
+    static float[] Neg(float[] v) => new[] { -v[0], -v[1], -v[2] };
+    static float[] Add(float[] a, float[] b) => new[] { (float)(a[0] + b[0]), (float)(a[1] + b[1]), (float)(a[2] + b[2]) };
+
+    /// <summary>CPython 3.12+'s sum() of floats from the int start 0 (bltinmodule.c builtin_sum_impl): the first float taken exactly
+    /// (0 + x), every later one by Neumaier's compensated addition, the compensation added once at the end when non-zero and finite.
+    /// 0 for no items. Not a plain sequential sum: [1.0, 1e-16, 1e-16] gives 1.0000000000000002 (measured in Blender's Python).</summary>
+    internal static double PySum(IEnumerable<double> xs)
+    {
+        bool first = true; double f = 0.0, c = 0.0;
+        foreach (var x in xs)
+        {
+            if (first) { f = 0.0 + x; first = false; continue; }
+            double t = f + x;
+            if (Math.Abs(f) >= Math.Abs(x)) c += (f - t) + x; else c += (x - t) + f;
+            f = t;
+        }
+        if (c != 0.0 && !double.IsNaN(c) && !double.IsInfinity(c)) f += c;
+        return f;
+    }
+
+    /// <summary>Python's min() over floats: the first kept unless a later one is smaller (a NaN first stays).</summary>
+    static double PyMinOf(IEnumerable<double> xs) { bool first = true; double m = 0.0; foreach (var x in xs) { if (first || x < m) m = x; first = false; } return m; }
+    static double PyMaxOf(IEnumerable<double> xs) { bool first = true; double m = 0.0; foreach (var x in xs) { if (first || x > m) m = x; first = false; } return m; }
+
+    /// <summary>CPython 3.13's math.hypot for two arguments (vector_norm): the absolute values, the larger's binary exponent scaled
+    /// out, the squares split exactly (fma's error term, here Dekker's), Neumaier sums, the root with one differential correction.</summary>
+    internal static double PyHypot(double a, double b)
+    {
+        double x0 = Math.Abs(a), x1 = Math.Abs(b);
+        if (double.IsNaN(x0) || double.IsNaN(x1)) return double.IsInfinity(x0) || double.IsInfinity(x1) ? double.PositiveInfinity : BitConverter.Int64BitsToDouble(0x7ff8000000000000L);   // Py_NAN: a positive quiet NaN (.NET's NaN is negative)
+        double max = 0.0; if (x0 > max) max = x0; if (x1 > max) max = x1;
+        if (double.IsInfinity(max)) return max;
+        if (max == 0.0) return max;
+        int maxE = FrexpExp(max);
+        if (maxE < -1023) { const double dblMin = 2.2250738585072014e-308; return dblMin * PyHypot(x0 / dblMin, x1 / dblMin); }
+        double scale = Ldexp1(-maxE), csum = 1.0, frac1 = 0.0, frac2 = 0.0;
+        foreach (double xi in new[] { x0, x1 })
+        {
+            double x = xi * scale;
+            TwoProd(x, x, out double ph, out double pl);
+            double sh = csum + ph, sl = (csum - sh) + ph;
+            csum = sh; frac1 += pl; frac2 += sl;
+        }
+        double h = Math.Sqrt(csum - 1.0 + (frac1 + frac2));
+        TwoProd(-h, h, out double qh, out double ql);
+        double th = csum + qh, tl = (csum - th) + qh;
+        csum = th; frac1 += ql; frac2 += tl;
+        double xc = csum - 1.0 + (frac1 + frac2);
+        h += xc / (2.0 * h);
+        return h / scale;
+    }
+
+    /// <summary>frexp's exponent: max = m * 2^e with 0.5 <= m < 1.</summary>
+    static int FrexpExp(double v)
+    {
+        long bits = BitConverter.DoubleToInt64Bits(v); int e = (int)((bits >> 52) & 0x7FF);
+        if (e == 0) { int k = 0; while (v < 0.5) { v *= 2.0; k--; } while (v >= 1.0) { v *= 0.5; k++; } return k; }
+        return e - 1022;
+    }
+
+    static double Ldexp1(int e) { double r = 1.0; if (e > 0) for (int i = 0; i < e; i++) r *= 2.0; else for (int i = 0; i < -e; i++) r *= 0.5; return r; }
+
+    /// <summary>The exact product and its rounding error (dl_mul: z = x * y, zz = fma(x, y, -z); Dekker's split gives the same error
+    /// for these scaled, finite operands).</summary>
+    static void TwoProd(double x, double y, out double z, out double zz)
+    {
+        z = x * y;
+        double tx = x * 134217729.0, xh = tx - (tx - x), xl = x - xh;
+        double ty = y * 134217729.0, yh = ty - (ty - y), yl = y - yh;
+        zz = ((xh * yh - z) + xh * yl + xl * yh) + xl * yl;
+    }
     static string P3(float v) => BlenderRigAnim.PyFixed(v, 3);
 
     /// <summary>repr() of a Python float (a mathutils component): nan and inf as Python writes them.</summary>

@@ -49,6 +49,9 @@ public static partial class BlenderVehicleRig
         public bool FlagFoldOn;                     // a flagfold= tag is present: the Flag bone hinges at the flag's top (else it strikes below the keel)
         public double FlagFoldDeg;                  // max(-175, min(175, float(deg))) or 0 when blank (a NaN clamps to 175)
         public System.Numerics.BigInteger FlagFoldFrames = 12;   // max(1, int(float(frames))) or 12 when blank - Python's exact int
+        public double OarRoll;                      // float(argv[47]) or 0: the oars' blade roll in degrees (applied above 0.01)
+        public double OarPivot = 30.0;              // min(95, max(0, float(argv[58]))) or 30: the oarlock along the oar's beam extent, percent
+        public double OarLength = 100.0;            // min(300, max(25, float(argv[59]))) or 100: the oar stretched about its oarlock, percent
     }
 
     static readonly (string role, int index)[] NamesArgv =
@@ -130,6 +133,7 @@ public static partial class BlenderVehicleRig
             if (death != null) { if (idx < namesFailureIndex) { namesFailureIndex = idx; a.NamesDie = death; } continue; }
             if (idx == 29) a.TailYaw = dv;
             if (idx == 30) a.TailPitch = dv;
+            if (idx == 47) a.OarRoll = dv;
             if (idx == 34) a.GunPivot = PyMin(1.0, PyMax(0.0, dv));
             if (idx == 38) a.RecoilDist = PyMin(1.0, PyMax(0.0, dv));
         }
@@ -256,6 +260,8 @@ public static partial class BlenderVehicleRig
             if (!(argv.Count > idx && PyNonBlank(At(idx)))) continue;
             if (!TryPyFloat(At(idx), out double v)) { a.FoldDie = "ValueError: could not convert string to float: " + PyStrRepr(At(idx)); break; }
             if (integral && (double.IsNaN(v) || double.IsInfinity(v))) { a.FoldDie = double.IsNaN(v) ? "ValueError: cannot convert float NaN to integer" : "OverflowError: cannot convert float infinity to integer"; break; }
+            if (idx == 58) a.OarPivot = PyMin(95.0, PyMax(0.0, v));
+            if (idx == 59) a.OarLength = PyMin(300.0, PyMax(25.0, v));
         }
         if (a.DialsDie == null)
         {

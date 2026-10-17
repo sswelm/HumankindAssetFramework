@@ -79,4 +79,10 @@ public static class BlenderTrig
     static extern double ucrt_pow(double x, double y);
 
     public static double Pow(double x, double y) => Exact ? ucrt_pow(x, y) : Math.Pow(x, y);
+
+    // Python's math.atan2 (the C runtime's): vehicle_rig.py's oar rake line
+    [DllImport("ucrtbase.dll", EntryPoint = "atan2", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    static extern double ucrt_atan2(double y, double x);
+
+    public static double Atan2(double y, double x) => Exact ? ucrt_atan2(y, x) : Math.Atan2(y, x);
 }

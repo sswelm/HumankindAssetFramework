@@ -83,6 +83,23 @@ Stage 3 (step (d), part d4: the rotors):
   fx_r_rotor_point   a main rotor whose hub (listed second, strictly nearest the mean) is ONE vertex: np.cov gives NaN, eigh raises,
                      and the script's except takes the axis of least spread of the parts' centres; no tail rotor
   fx_r_tail_only     a tail rotor and no main rotor
+Stage 3 (step (d), part d5: the oars):
+  fx_r_oars          two oar parts, three raked oars per bank (a pole, a blade and an oarlock ring below the min span, three islands
+                     clustered into one oar) and one raked the other way (its PC1 opposite: the sign alignment), no roll, the pivot
+                     at 30 %; a missing oar name (the WARN); one part also a wheel
+  fx_r_oars_roll     ONE part with oars on both banks, listed twice (its islands twice: the roll rotates them twice), roll 25,
+                     pivot 60, length 150, its node 1e-7 off the identity (stage 1 still leaves an identity world: measured)
+  fx_r_oars_odd      exactly vertical oars on one bank (the cross axis (1, 0, 0), a zero rake, the pivot snapped to a vertex) and only
+                     ring-sized islands on the other (no pole direction: the bank skipped, its vertices in no group); pivot 120 and
+                     length 10 clamp to 95 and 25
+  fx_r_oars_ghost    an oar list naming only a part the scene has not: no recovery line, 0 oars from 0 parts
+  fx_r_oars_args     argument variant: the roll "nan" (no roll), the pivot "nan" (max(0, nan) = 0) and the length "inf" (300)
+  fx_r_oars_split    the shafts (poles + rings) and the blades in two parts: every cluster spans both (each part's own inverse
+                     and skin under the roll and the length); a one-vertex island far out (no scatter: PC1 stops at (1, 0.3, 0.1));
+                     two exactly vertical ring stubs placed in eps units beside a vertical pole - one in the neighbouring grid cell
+                     but farther than eps (rejected), one merged with it across the next cell boundary
+  fx_r_oars_inf      the roll "inf": angle_wrap_rad gives NaN, every rewritten coordinate NaN, and stage 4 dies inverting a NaN bone
+                     matrix (DIES:4:); the C# leaves stage 3 to Blender by name - a NaN's sign bit follows each compiler's operand order
   fx_r_tail_args     argument variant: the tail axis "x" (upper(): forced X), the trim yaw "-inf" and pitch "nan" (a NaN axle the
                      normalize zeroes; align_roll on a zero vector)
 Argument variants (recipes_exit, post-edited by --exits): fx_r_numeric_pct (the decimal above 0.5 whose rounding decides whether
@@ -233,6 +250,43 @@ def ring_hub(r, name, material, radius, height, n=16):
     for i in range(n):
         j = (i + 1) % n
         idx += [i, j, n + j, i, n + j, n + i]
+    return raw_mesh(r, name, material, pos, idx)
+
+
+def _slab(pos, idx, c, ax, ay, az):
+    base = len(pos)
+    pos += [tuple(c[i] + sx * ax[i] + sy * ay[i] + sz * az[i] for i in range(3)) for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)]
+    idx += [base + i for i in [0, 1, 3, 0, 3, 2, 4, 6, 7, 4, 7, 5, 0, 4, 5, 0, 5, 1, 2, 3, 7, 2, 7, 6, 0, 2, 6, 0, 6, 4, 1, 5, 7, 1, 7, 3]]
+
+
+def _norm(v):
+    l = math.sqrt(sum(x * x for x in v)); return tuple(x / l for x in v)
+
+
+def _cross(a, b):
+    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+
+
+def oar_bank(r, name, material, oars, parts=("pole", "blade", "ring")):
+    """One mesh of oars, each three islands: a pole, a blade at its outboard end and a small ring at the oarlock (glTF y up; a
+    bank's side is -z for Blender +y). oars = [(x, side, rake, lift, vertical)]."""
+    pos = []; idx = []
+    for x, side, rake, lift, vertical in oars:
+        lock = (x, 1.25, -side * 0.875)   # dyadic sizes below: an axis-aligned pole's float32 mean is exact, its PC1 exactly the axis
+        d = (0.0, 1.0, 0.0) if vertical else _norm((rake, -lift, -side * 1.0))
+        a = _norm(_cross(d, (0.0, 0.0, 1.0) if vertical else (0.0, 1.0, 0.0))); b = _cross(a, d)
+        mul = lambda v, s: tuple(t * s for t in v)
+        if "pole" in parts: _slab(pos, idx, tuple(lock[i] + d[i] * 0.75 for i in range(3)), mul(d, 1.5), mul(a, 0.03125), mul(b, 0.03125))
+        if "blade" in parts: _slab(pos, idx, tuple(lock[i] + d[i] * 2.25 for i in range(3)), mul(d, 0.25), mul(a, 0.125), mul(b, 0.0078125))
+        if "ring" in parts: _slab(pos, idx, lock, (0.015625, 0.0, 0.0), (0.0, 0.015625, 0.0), (0.0, 0.0, 0.015625))
+    return raw_mesh(r, name, material, pos, idx)
+
+
+def oar_rings(r, name, material, rings):
+    """Only ring-sized islands (below the oar min span): [(x, side)]."""
+    pos = []; idx = []
+    for x, side in rings:
+        _slab(pos, idx, (x, 1.25, -side * 0.875), (0.015625, 0.0, 0.0), (0.0, 0.015625, 0.0), (0.0, 0.0, 0.015625))
     return raw_mesh(r, name, material, pos, idx)
 
 
@@ -590,6 +644,71 @@ def main(out):
     r.node("Hull", mesh=r.mesh("Hull", at=(-1.0, 0.0, -1.0), size=2.0, material=ma))
     r.node("Fan", mesh=r.mesh("Fan", at=(-0.5, -0.5, -0.5), material=ma), translation=[5.0, 1.2, -0.4], scale=[0.7, 0.7, 0.04])
     recipe(out, "fx_r_tail_only", r.write(models, "fx_r_tail_only"), [("Hull", 0, {}), ("Fan", 9, {})])
+    # ---- stage 3 (step (d), part d5: the oars)
+    # fx_r_oars: two parts, three raked oars per bank, no roll; a missing name; the starboard part also a wheel
+    def oars_model(key):
+        r = Rig(); ma = r.material("Wood", (0.5, 0.35, 0.2))
+        r.node("Hull", mesh=r.mesh("Hull", at=(-0.5, 0.0, -0.8), size=1.6, material=ma), scale=[2.5, 1.0, 1.0])
+        r.node("OarsA", mesh=oar_bank(r, "OarsA", ma, [(k * 1.0, 1, 0.3, 0.25, False) for k in range(3)] + [(5.0, 1, -0.9, 0.25, False)]))
+        r.node("OarsB", mesh=oar_bank(r, "OarsB", ma, [(k * 1.0 + 0.1, -1, 0.3, 0.25, False) for k in range(3)]))
+        return r.write(models, key)
+    recipe(out, "fx_r_oars", oars_model("fx_r_oars"), [("Hull", 0, {}), ("OarsA", 13, {}), ("OarsB", 13, {}), ("GhostOar", 13, {}), ("OarsB", 1, {})],
+           oarBladeRollDeg=0.0, oarPivotPct=30.0, oarLengthPct=100.0)
+    # fx_r_oars_roll: one part, both banks, listed twice; roll 25, pivot 60, length 150; the node 1e-7 off the identity (its world
+    # after stage 1 is still the identity - Blender's dump -, so the rewrite's inverse is the identity's)
+    r = Rig(); ma = r.material("Wood", (0.5, 0.35, 0.2))
+    r.node("Hull", mesh=r.mesh("Hull", at=(-0.5, 0.0, -0.8), size=1.6, material=ma), scale=[2.5, 1.0, 1.0])
+    r.node("Bank", mesh=oar_bank(r, "Bank", ma, [(0.0, 1, 0.2, 0.3, False), (1.1, 1, 0.25, 0.3, False), (0.05, -1, 0.2, 0.3, False), (1.15, -1, 0.25, 0.3, False)]),
+           translation=[1e-7, 0.0, 0.0])
+    recipe(out, "fx_r_oars_roll", r.write(models, "fx_r_oars_roll"), [("Hull", 0, {}), ("Bank", 13, {}), ("Bank", 13, {})],
+           oarBladeRollDeg=25.0, oarPivotPct=60.0, oarLengthPct=150.0)
+    # fx_r_oars_odd: vertical oars on one bank, only rings on the other; the pivot and length dials clamped
+    r = Rig(); ma = r.material("Wood", (0.5, 0.35, 0.2))
+    r.node("Hull", mesh=r.mesh("Hull", at=(-0.5, 0.0, -0.8), size=1.6, material=ma), scale=[2.5, 1.0, 1.0])
+    r.node("Poles", mesh=oar_bank(r, "Poles", ma, [(0.0, 1, 0.0, 0.0, True), (1.2, 1, 0.0, 0.0, True)]))
+    r.node("Rings", mesh=oar_rings(r, "Rings", ma, [(0.0, -1), (1.2, -1)]))
+    recipe(out, "fx_r_oars_odd", r.write(models, "fx_r_oars_odd"), [("Hull", 0, {}), ("Poles", 13, {}), ("Rings", 13, {})],
+           oarBladeRollDeg=10.0, oarPivotPct=120.0, oarLengthPct=10.0)
+    # fx_r_oars_ghost: only a missing oar name
+    r = Rig(); ma = r.material("Wood", (0.5, 0.35, 0.2))
+    r.node("Hull", mesh=r.mesh("Hull", at=(-0.5, 0.0, -0.8), size=1.6, material=ma))
+    recipe(out, "fx_r_oars_ghost", r.write(models, "fx_r_oars_ghost"), [("Hull", 0, {}), ("GhostOar", 13, {})])
+    # fx_r_oars_args: the oar dials as the Lab never writes them (post-edited by --exits)
+    recipe(out, "fx_r_oars_args", oars_model("fx_r_oars_args"), [("Hull", 0, {}), ("OarsA", 13, {}), ("OarsB", 13, {})], sub="recipes_exit")
+    # fx_r_oars_split: shafts and blades in two parts (clusters across parts), roll 15, length 130; a one-vertex island; ring stubs
+    # beside a vertical pole on the other bank, placed against the merge eps's grid (eps computed here as the script will: 0.00786 x
+    # the oar points' diagonal - the pole and the stubs stay inside the other points' x range, so their x does not move it)
+    raked = [(0.0, 1, 0.3, 0.25, False), (1.0, 1, 0.3, 0.25, False), (2.0, 1, 0.3, 0.25, False)]
+    pts = []
+    for oars_, parts_ in ((raked + [(0.5, -1, 0.0, 0.0, True)], ("pole", "ring")), (raked, ("blade",))):
+        pp = []; ii = []
+        for x, side, rake, lift, vertical in oars_:
+            lock = (x, 1.25, -side * 0.875)
+            dd = (0.0, 1.0, 0.0) if vertical else _norm((rake, -lift, -side * 1.0))
+            aa = _norm(_cross(dd, (0.0, 0.0, 1.0) if vertical else (0.0, 1.0, 0.0))); bb = _cross(aa, dd)
+            mul = lambda v, s: tuple(t * s for t in v)
+            if "pole" in parts_: _slab(pp, ii, tuple(lock[i] + dd[i] * 0.75 for i in range(3)), mul(dd, 1.5), mul(aa, 0.03125), mul(bb, 0.03125))
+            if "blade" in parts_: _slab(pp, ii, tuple(lock[i] + dd[i] * 2.25 for i in range(3)), mul(dd, 0.25), mul(aa, 0.125), mul(bb, 0.0078125))
+            if "ring" in parts_: _slab(pp, ii, lock, (0.015625, 0.0, 0.0), (0.0, 0.015625, 0.0), (0.0, 0.0, 0.015625))
+        pts += pp
+    lo = [min(p[k] for p in pts) for k in range(3)]; hi = [max(p[k] for p in pts) for k in range(3)]
+    eps = 0.00786 * math.sqrt(sum((hi[k] - lo[k]) ** 2 for k in range(3)))
+    # the vertical bank: its pole direction exactly (0, 0, 1) in Blender, e1 = (0, 1, 0), e2 = (-1, 0, 0), so an island's v = -x and its
+    # cell int(-x / eps) (toward zero: cell c holds v in ((c - 1) eps, c eps] for c <= 0). The pole at v = (c - 0.1) eps; stub A at
+    # (c - 1.25) eps - the next cell, 1.15 eps away: rejected; stub B at (c - 2.15) eps - the cell after, 0.9 eps from A: merged
+    c = -round(0.5 / eps)
+    vert = [((0.1 - c) * eps, -1, 0.0, 0.0, True)]
+    r = Rig(); ma = r.material("Wood", (0.5, 0.35, 0.2))
+    r.node("Hull", mesh=r.mesh("Hull", at=(-0.5, 0.0, -0.8), size=1.6, material=ma), scale=[2.5, 1.0, 1.0])
+    r.node("Shafts", mesh=oar_bank(r, "Shafts", ma, raked + vert, parts=("pole", "ring")))
+    r.node("Blades", mesh=oar_bank(r, "Blades", ma, raked, parts=("blade",)))
+    r.node("Stubs", mesh=oar_rings(r, "Stubs", ma, [((1.25 - c) * eps, -1), ((2.15 - c) * eps, -1)]))
+    r.meshes.append({"name": "Dot", "primitives": [{"attributes": {"POSITION": r.b.accessor([(2.5, 1.25, -2.0)], "f", "VEC3")}, "mode": 0, "material": ma}]})
+    r.node("Dot", mesh=len(r.meshes) - 1)
+    recipe(out, "fx_r_oars_split", r.write(models, "fx_r_oars_split"), [("Hull", 0, {}), ("Shafts", 13, {}), ("Blades", 13, {}), ("Stubs", 13, {}), ("Dot", 13, {})],
+           oarBladeRollDeg=15.0, oarPivotPct=40.0, oarLengthPct=130.0)
+    # fx_r_oars_inf: the roll as the Lab never writes it (post-edited by --exits)
+    recipe(out, "fx_r_oars_inf", oars_model("fx_r_oars_inf"), [("Hull", 0, {}), ("OarsA", 13, {}), ("OarsB", 13, {})], sub="recipes_exit")
     # fx_r_missing_rotor: a tail rotor name the scene has not - find()'s exit in stage 3, after the main rotor measured
     r = Rig(); ma = r.material("Paint", (0.4, 0.45, 0.3))
     r.node("Hull", mesh=r.mesh("Hull", at=(-1.0, 0.0, -1.0), size=2.0, material=ma))
@@ -664,6 +783,8 @@ EXITS = {
     "fx_d_gun_pivot": ("DIES", lambda a: a.__setitem__(34, "x")),
     "fx_r_missing_wheel": ("EXIT", lambda a: None),
     "fx_r_missing_rotor": ("EXIT", lambda a: None),
+    "fx_r_oars_inf": ("DIES", lambda a: a.__setitem__(47, "inf")),
+    "fx_r_oars_args": (None, lambda a: (a.__setitem__(47, "nan"), a.__setitem__(58, "nan"), a.__setitem__(59, "inf"))),
     "fx_r_tail_args": (None, lambda a: (a.__setitem__(28, "x"), a.__setitem__(29, "-inf"), a.__setitem__(30, "nan"))),
     "fx_r_orphan": ("EXIT", lambda a: None),
     "fx_r_noscene": ("EXIT", lambda a: None),
@@ -693,7 +814,7 @@ EXITS = {
 
 
 # the stage an exit or death fixture stops in, when not stage 1
-STAGE_OF = {"fx_d_chunk_splice": 2, "fx_r_missing_wheel": 3, "fx_r_missing_rotor": 3, "fx_r_missing_turret": 3, "fx_r_missing_trail": 3, "fx_r_names_bom": 3, "fx_r_gunpoint": 4}
+STAGE_OF = {"fx_r_oars_inf": 4, "fx_d_chunk_splice": 2, "fx_r_missing_wheel": 3, "fx_r_missing_rotor": 3, "fx_r_missing_turret": 3, "fx_r_missing_trail": 3, "fx_r_names_bom": 3, "fx_r_gunpoint": 4}
 
 
 def exits(jobs_path):

@@ -327,7 +327,7 @@ public static class BlenderPosedState
     }
 
     /// <summary>mul_qt_v3 (mathutils' Quaternion @ Vector), float32 term by term.</summary>
-    static float[] MulQtV3(float[] q, float[] v)
+    internal static float[] MulQtV3(float[] q, float[] v)
     {
         float[] r = { v[0], v[1], v[2] };
         float t0 = (float)((float)((float)((float)(-q[1] * r[0]) - (float)(q[2] * r[1])) - (float)(q[3] * r[2])));
