@@ -71,6 +71,17 @@ Stage 3 (step (d), part d3: the turret, the gun assembly, the trails):
   fx_r_names_ws / fx_r_names_bom   a names file line wrapped in \\x1c..\\x1f (stripped) / starting with a BOM (kept: the exit)
   fx_d_names_empty / fx_d_names_dir / fx_d_dial_before_names   open("") / open(a directory) / a dial dying before a later names file
   fx_r_flat_sail     a zero-height sail taking the 1e-6 fold-height clamp, all rigging missing, flagfold=| taking its defaults
+Stage 3 (step (d), part d4: the rotors):
+  fx_r_rotor         a main rotor of a tilted, animated 16-sided mast hub (numpy's cov and eigh on a real cloud) and two blades, the hub also a
+                     wheel and a blade also a turret part (the later bones win); a three-part tail fan trimmed yaw 12.5, pitch -7.25;
+                     a skid wheel; the wave rock on (RootHull carries every cluster)
+  fx_r_rotor_forced  the main axle forced to X (the wheels' override, a wheel beside it), the tail forced to Z: the tail bone's in-disc
+                     direction falls back to +Y, the yaw trim leaves Z as it is and the pitch has no axis ((0, 0, 1) x Z is zero)
+  fx_r_rotor_centred two unit-cube blades tied on their distance to the mean (the first is the hub; three equal eigenvalues), the tail
+                     fan right above the model's centre (no boom direction: the axle (0, 1, 0))
+  fx_r_missing_rotor a tail rotor name the scene has not: find()'s exit in stage 3
+  fx_r_tail_args     argument variant: the tail axis "x" (upper(): forced X), the trim yaw "-inf" and pitch "nan" (a NaN axle the
+                     normalize zeroes; align_roll on a zero vector)
 Argument variants (recipes_exit, post-edited by --exits): fx_r_numeric_pct (the decimal above 0.5 whose rounding decides whether
   to weld); fx_d_sailfold_overflow (1e309 becomes infinity before int() raises); fx_d_unicode_fold (a Kawi digit accepted before
   the next dial raises ValueError)
@@ -210,6 +221,16 @@ def raw_mesh(r, name, material, pos, idx):
     prim = {"attributes": {"POSITION": r.b.accessor(pos, "f", "VEC3")}, "indices": r.b.accessor(idx, "H", "SCALAR", minmax=False), "material": material}
     r.meshes.append({"name": name, "primitives": [prim]})
     return len(r.meshes) - 1
+
+
+def ring_hub(r, name, material, radius, height, n=16):
+    """A hub: two rings of n vertices (glTF y up) joined by a band of quads, open at both ends."""
+    pos = [(radius * math.cos(2 * math.pi * i / n), y, radius * math.sin(2 * math.pi * i / n)) for y in (0.0, height) for i in range(n)]
+    idx = []
+    for i in range(n):
+        j = (i + 1) % n
+        idx += [i, j, n + j, i, n + j, n + i]
+    return raw_mesh(r, name, material, pos, idx)
 
 
 def boxes_in_one(r, name, material, count):
@@ -514,6 +535,56 @@ def main(out):
     r.node("Hull", mesh=r.mesh("Hull", at=(-2.0, -1.0, -1.0), size=2.0, material=ma))
     r.node("Tube", mesh=r.mesh("Tube", at=(0.5 / 15.0, 1.4, -0.1), size=0.2, material=ma), scale=[15.0, 1.0, 1.0])
     recipe(out, "fx_r_pivot_end", r.write(models, "fx_r_pivot_end"), [("Hull", 0, {}), ("Tube", 7, {})], recoilDist=0.3, gunPivot=1.0)
+    # ---- stage 3 (step (d), part d4: the rotors)
+    # fx_r_rotor: a tilted mast hub (8 degrees about a leaning axis) between two blades; a three-part tail fan on the boom, trimmed
+    r = Rig(); ma = r.material("Paint", (0.4, 0.45, 0.3))
+    tilt_axis = (1.0, 0.0, 0.25); tl = math.sqrt(sum(x * x for x in tilt_axis)); half = math.radians(8.0) / 2.0
+    tilt = [tilt_axis[0] / tl * math.sin(half), tilt_axis[1] / tl * math.sin(half), tilt_axis[2] / tl * math.sin(half), math.cos(half)]
+    r.node("Hull", mesh=r.mesh("Hull", at=(-1.0, 0.0, -1.0), size=2.0, material=ma), scale=[1.5, 1.0, 1.0])
+    r.node("Boom", mesh=r.mesh("Boom", material=ma), translation=[1.5, 1.2, -0.15], scale=[6.0, 0.3, 0.3])
+    mast = r.node("Mast", mesh=ring_hub(r, "Mast", ma, 0.3, 0.15), translation=[0.1, 2.4, -0.05], rotation=tilt)
+    # the mast animated (a turn about a second leaning axis): transform_apply bakes the action's first key, not the node's own
+    # rotation, into the hub, and leaves its world at the identity (Blender's dump: the hub's matrix_world after stage 1)
+    turn_axis = (0.3, 0.2, 1.0); ql = math.sqrt(sum(x * x for x in turn_axis)); h2 = math.radians(20.0) / 2.0
+    turned = [turn_axis[0] / ql * math.sin(h2), turn_axis[1] / ql * math.sin(h2), turn_axis[2] / ql * math.sin(h2), math.cos(h2)]
+    a_mast = r.anim("MastTurn"); r.key(a_mast, mast, "rotation", [0.0, 1.0], [tuple(turned), tuple(tilt)])
+    r.node("BladeA", mesh=r.mesh("BladeA", material=ma), translation=[0.4, 2.55, -0.2], scale=[4.0, 0.04, 0.4])
+    r.node("BladeB", mesh=r.mesh("BladeB", material=ma), translation=[-4.2, 2.55, -0.2], scale=[4.0, 0.04, 0.4])
+    r.node("FanHub", mesh=r.mesh("FanHub", at=(-0.075, -0.075, -0.075), size=0.15, material=ma), translation=[7.4, 1.35, 0.3])
+    r.node("FanA", mesh=r.mesh("FanA", at=(-0.5, -0.5, -0.5), material=ma), translation=[7.4, 1.35, 0.3], scale=[0.9, 0.08, 0.03])
+    r.node("FanB", mesh=r.mesh("FanB", at=(-0.5, -0.5, -0.5), material=ma), translation=[7.4, 1.35, 0.3], scale=[0.08, 0.9, 0.03])
+    r.node("Skid", mesh=r.mesh("Skid", at=(-0.5, -0.5, -0.5), material=ma), translation=[0.0, -0.2, 0.9], scale=[2.0, 0.1, 0.1])
+    recipe(out, "fx_r_rotor", r.write(models, "fx_r_rotor"),
+           [("Hull", 0, {}), ("Boom", 0, {}), ("Mast", 8, {}), ("BladeA", 8, {}), ("BladeB", 8, {}), ("Mast", 1, {}), ("BladeB", 2, {}),
+            ("FanHub", 9, {}), ("FanA", 9, {}), ("FanB", 9, {}), ("Skid", 1, {})],
+           tailYawAdj=12.5, tailPitchAdj=-7.25, waveEnabled=True, rockDegrees=5.0, rockFrames=15)
+    # fx_r_rotor_forced: the main axle forced to X (axisChoice: the wheels' override too), the tail forced to Z and trimmed
+    r = Rig(); ma = r.material("Paint", (0.4, 0.45, 0.3))
+    r.node("Hull", mesh=r.mesh("Hull", at=(-1.0, 0.0, -1.0), size=2.0, material=ma))
+    r.node("Disc", mesh=r.mesh("Disc", at=(-0.5, -0.5, -0.5), material=ma), translation=[0.0, 2.5, 0.0], scale=[3.0, 0.05, 3.0])
+    r.node("Tire", mesh=r.mesh("Tire", at=(-0.5, -0.5, -0.5), material=ma), translation=[0.0, 0.0, 1.2], scale=[0.6, 0.6, 0.2])
+    r.node("Fan", mesh=r.mesh("Fan", at=(-0.5, -0.5, -0.5), material=ma), translation=[6.0, 1.5, 0.3], scale=[0.8, 0.8, 0.04])
+    recipe(out, "fx_r_rotor_forced", r.write(models, "fx_r_rotor_forced"), [("Hull", 0, {}), ("Disc", 8, {}), ("Tire", 1, {}), ("Fan", 9, {})],
+           axisChoice=1, tailAxisChoice=3, tailYawAdj=30.0, tailPitchAdj=10.0)
+    # fx_r_rotor_centred: two unit-cube blades the same distance from their mean (min keeps the first: a cube hub, cov = c * I), the
+    # tail fan straight above the model's centre (the model centre minus the fan's has no horizontal part)
+    r = Rig(); ma = r.material("Paint", (0.4, 0.45, 0.3))
+    r.node("Hull", mesh=r.mesh("Hull", at=(-1.0, -1.0, -1.0), size=2.0, material=ma))
+    r.node("BladeL", mesh=r.mesh("BladeL", at=(-0.5, -0.5, -0.5), material=ma), translation=[-3.0, 2.5, 0.0])
+    r.node("BladeR", mesh=r.mesh("BladeR", at=(-0.5, -0.5, -0.5), material=ma), translation=[3.0, 2.5, 0.0])
+    r.node("Fan", mesh=r.mesh("Fan", at=(-0.5, -0.5, -0.5), material=ma), translation=[0.0, 4.0, 0.0], scale=[0.6, 0.6, 0.05])
+    recipe(out, "fx_r_rotor_centred", r.write(models, "fx_r_rotor_centred"), [("Hull", 0, {}), ("BladeL", 8, {}), ("BladeR", 8, {}), ("Fan", 9, {})])
+    # fx_r_missing_rotor: a tail rotor name the scene has not - find()'s exit in stage 3, after the main rotor measured
+    r = Rig(); ma = r.material("Paint", (0.4, 0.45, 0.3))
+    r.node("Hull", mesh=r.mesh("Hull", at=(-1.0, 0.0, -1.0), size=2.0, material=ma))
+    r.node("Disc", mesh=r.mesh("Disc", at=(-0.5, -0.5, -0.5), material=ma), translation=[0.0, 2.5, 0.0], scale=[3.0, 0.05, 3.0])
+    recipe(out, "fx_r_missing_rotor", r.write(models, "fx_r_missing_rotor"), [("Hull", 0, {}), ("Disc", 8, {}), ("GhostFan", 9, {})], sub="recipes_exit")
+    # fx_r_tail_args: the tail's own axis and trim dials as the Lab never writes them (post-edited by --exits)
+    r = Rig(); ma = r.material("Paint", (0.4, 0.45, 0.3))
+    r.node("Hull", mesh=r.mesh("Hull", at=(-1.0, 0.0, -1.0), size=2.0, material=ma))
+    r.node("Disc", mesh=r.mesh("Disc", at=(-0.5, -0.5, -0.5), material=ma), translation=[0.0, 2.5, 0.0], scale=[3.0, 0.05, 3.0])
+    r.node("Fan", mesh=r.mesh("Fan", at=(-0.5, -0.5, -0.5), material=ma), translation=[6.0, 1.5, 0.3], scale=[0.8, 0.8, 0.04])
+    recipe(out, "fx_r_tail_args", r.write(models, "fx_r_tail_args"), [("Hull", 0, {}), ("Disc", 8, {}), ("Fan", 9, {})], sub="recipes_exit")
     # names files as Python reads them: a line wrapped in \x1c..\x1f (str.strip() takes them), and one starting with a BOM (kept: the
     # wheel is not found - the exit)
     io_w = os.path.join(models, "names_ws.txt"); open(io_w, "w", encoding="utf-8", newline="\n").write("\x1cTire\x1f\n")
@@ -576,6 +647,8 @@ EXITS = {
     "fx_d_trail_frames": ("DIES", lambda a: a.__setitem__(33, "nan")),
     "fx_d_gun_pivot": ("DIES", lambda a: a.__setitem__(34, "x")),
     "fx_r_missing_wheel": ("EXIT", lambda a: None),
+    "fx_r_missing_rotor": ("EXIT", lambda a: None),
+    "fx_r_tail_args": (None, lambda a: (a.__setitem__(28, "x"), a.__setitem__(29, "-inf"), a.__setitem__(30, "nan"))),
     "fx_r_orphan": ("EXIT", lambda a: None),
     "fx_r_noscene": ("EXIT", lambda a: None),
     "fx_r_noscene1": ("DIES", lambda a: None),
@@ -604,7 +677,7 @@ EXITS = {
 
 
 # the stage an exit or death fixture stops in, when not stage 1
-STAGE_OF = {"fx_d_chunk_splice": 2, "fx_r_missing_wheel": 3, "fx_r_missing_turret": 3, "fx_r_missing_trail": 3, "fx_r_names_bom": 3, "fx_r_gunpoint": 4}
+STAGE_OF = {"fx_d_chunk_splice": 2, "fx_r_missing_wheel": 3, "fx_r_missing_rotor": 3, "fx_r_missing_turret": 3, "fx_r_missing_trail": 3, "fx_r_names_bom": 3, "fx_r_gunpoint": 4}
 
 
 def exits(jobs_path):

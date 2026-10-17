@@ -14,9 +14,16 @@
 //     on VehicleRig, and VehicleRig as its parent (the local transform kept: the armature sits at the identity);
 //   - the join per bone: the meshes grouped by their bone - a rudder, preserve or flip part keyed apart on its own -, each group
 //     joined into its first member (BlenderRigAnim.JoinMeshes, bpy.ops.object.join) and renamed Mesh_<key>.
-// Every other branch of stage 3 - the turret, the gun with its muzzle and cradle, the trails, the tracks, the rotors, the sail,
-// the flag, the oars - is left to Blender by name (parts d2-d6), as is a scene this part does not expect (an armature still
-// there, an animated mesh at the join, a mesh still carrying an Armature modifier).
+// Parts d2 to d4 add their branches between the wheels and the armature's rest:
+//   - d2: the sail (its SailF1..F3 fold chain and the canvas skinned by height band), rigging on the sail, the flag;
+//   - d3: the turret, the gun (the muzzle pin, the pivot along the tube, the recoil arm and barrel), the trails;
+//   - d4: the main and tail rotors - one cluster per group after the wheels, its bones named on from them: the main hub (the part
+//     nearest the group's mean) with its vertices' least-variance axle (np.cov and np.linalg.eigh as Blender's numpy computes them:
+//     BlenderNumpy), the tail at the blades' mean with its axle 90 degrees about the vertical from the boom; the forced axes
+//     (argv[6] for the main, argv[28] for the tail), the tail trim (Vector.rotate by Quaternion(axis, radians(deg)): yaw, then
+//     pitch), the main bone along -axle, the tail bone along the in-disc direction nearest up with align_roll(axle x it).
+// The oars (d5) and the tread rig (d6) are left to Blender by name, as is a scene this part does not expect (an armature still
+// there, a parented part, a mesh still carrying an Armature modifier, a main rotor hub numpy's eigh takes a branch of not ported).
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -31,7 +38,6 @@ public static partial class BlenderVehicleRig
     /// <summary>The branches of stage 3 the C# does not model yet: the role list that takes each, and the part that will.</summary>
     static readonly (string role, string branch)[] Stage3Later =
     {
-        ("rotors", "the main rotor (d4)"), ("tailrotors", "the tail rotor (d4)"),
         ("oars", "the oar bones (d5)"), ("tracks", "the tread rig (d6)"),
     };
 
@@ -80,7 +86,7 @@ public static partial class BlenderVehicleRig
             wheelInfo.Add((MaxOf(sz), c, sz, wn));
         }
         wheelInfo = wheelInfo.Select((w, i) => (w, i)).OrderBy(x => -x.w.m).ThenBy(x => x.i).Select(x => x.w).ToList();   // list.sort(key=-m): stable
-        var clusters = new List<(double m, float[] c, float[] sz, List<string> names)>();
+        var clusters = new List<(double m, float[] c, float[] sz, List<string> names, float[] axle, bool rotor, bool tail)>();
         foreach (var (m, c, sz, wn) in wheelInfo)
         {
             int home = -1;
@@ -89,10 +95,101 @@ public static partial class BlenderVehicleRig
                 var d = new[] { (float)(c[0] - clusters[k].c[0]), (float)(c[1] - clusters[k].c[1]), (float)(c[2] - clusters[k].c[2]) };
                 if (VecLength(d) <= 0.75 * clusters[k].m) { home = k; break; }
             }
-            if (home < 0) clusters.Add((m, c, sz, new List<string> { wn }));
+            if (home < 0) clusters.Add((m, c, sz, new List<string> { wn }, null, false, false));
             else clusters[home].names.Add(wn);
         }
         if (clusters.Count > 0) Note(s, "wheel clusters");
+
+        // ---- ROTOR / TAIL ROTOR (d4, vehicle_rig.py 1545-1608): each group ONE cluster after the wheels, its axle precomputed
+        foreach (var (role, isTail) in new[] { ("rotors", false), ("tailrotors", true) })
+        {
+            if (!a.Names.TryGetValue(role, out var grp) || grp.Count == 0) continue;
+            var boxes = new List<(float[] c, float[] sz)>();
+            foreach (var n in grp) { var o = Find(n); if (o == null) return; WorldBbox(o, out var bc, out var bs); boxes.Add((bc, bs)); }
+            var mean = SumOver(boxes.Select(b => b.c), boxes.Count);   // sum(centers, Vector((0, 0, 0))) / len(centers)
+            string over = isTail ? a.TailAxisArg : a.AxisArg;
+            float[] hubC, autoAxle; string axleSrc;
+            if (isTail)
+            {
+                // the pivot is the blades' mean centre; the axle 90 degrees about the vertical from the boom (fan -> the model's centre)
+                hubC = mean;
+                var centres = new List<float[]>();
+                foreach (var o in objs) { WorldBbox(o, out var oc, out _); centres.Add(oc); }
+                var modelC = SumOver(centres, Math.Max(1, objs.Count));
+                var dd = Sub(modelC, mean);
+                var dxy = new[] { dd[0], dd[1], 0f };
+                autoAxle = VecLength(dxy) > 1e-6 ? Normalized(Cross(new[] { 0f, 0f, 1f }, dxy)) : new[] { 0f, 1f, 0f };
+                axleSrc = "90 deg to the boom ring (lateral)";
+            }
+            else
+            {
+                // the hub: the part whose centre lies nearest the mean (min: the first of a tie); the axle its vertices' least-variance
+                // direction - np.cov / np.linalg.eigh as Blender's numpy computes them (BlenderNumpy), the first eigenvector normalized
+                string hubName = null; double best = 0.0;
+                foreach (var n in grp)
+                {
+                    WorldBbox(Find(n), out var hc, out _);
+                    double k = VecLength(Sub(hc, mean));
+                    if (hubName == null || k < best) { hubName = n; best = k; }
+                }
+                var hub = Find(hubName);
+                WorldBbox(hub, out hubC, out _);
+                if (over == "X" || over == "Y" || over == "Z") { autoAxle = null; axleSrc = null; }   // forced: the eigh's result (or its caught failure) is discarded
+                else
+                {
+                    // hub_obj.matrix_world @ v.co: the identity on every input that reaches here (transform_apply leaves every mesh's world
+                    // at the identity, an animated one too: Blender's dump), kept as the script writes it
+                    var it = VehicleProbe.ToRowMajor(hub.World); var pts = new List<double[]>(hub.Mesh.Vertices);
+                    for (int v = 0; v < hub.Mesh.Vertices; v++)
+                    {
+                        float x = hub.Mesh.Positions[3 * v], y = hub.Mesh.Positions[3 * v + 1], z = hub.Mesh.Positions[3 * v + 2];
+                        pts.Add(new double[] { MulPointRow(it, 0, x, y, z), MulPointRow(it, 1, x, y, z), MulPointRow(it, 2, x, y, z) });
+                    }
+                    var cov = BlenderNumpy.CovOfCentred(pts);
+                    if (cov == null || cov.Any(x => double.IsNaN(x) || double.IsInfinity(x)))
+                    { s.Fallback = "stage 3: the main rotor hub's covariance of " + pts.Count + " vertex(es) or a non-finite one is not modelled yet"; return; }
+                    var eig = BlenderNumpy.Eigh3(cov);
+                    if (eig == null) { s.Fallback = "stage 3: the main rotor hub's eigh (a rescaled or unconverged LAPACK branch) is not modelled yet"; return; }
+                    var ev = eig.Value.v;
+                    autoAxle = Normalized(new[] { (float)ev[0], (float)ev[3], (float)ev[6] });
+                    axleSrc = "hub pole-to-pole";
+                    Note(s, "a main rotor's hub axle (numpy's eigh)");
+                }
+            }
+            float[] axle;
+            if (over == "X" || over == "Y" || over == "Z") { axle = AxleAxis(over, null); axleSrc = "forced " + over; }
+            else axle = autoAxle;
+            // the tail trim: yaw about the vertical, then pitch about (0, 0, 1) x axle; Vector.rotate(Quaternion(axis, radians(deg)))
+            if (isTail && (Math.Abs(a.TailYaw) > 1e-6 || Math.Abs(a.TailPitch) > 1e-6))
+            {
+                axle = RotateQt(axle, BlenderDeploy.QuaternionAxisAngle(new[] { 0f, 0f, 1f }, a.TailYaw * (Math.PI / 180.0)));
+                var pax = Cross(new[] { 0f, 0f, 1f }, axle);
+                if (VecLength(pax) > 1e-6) axle = RotateQt(axle, BlenderDeploy.QuaternionAxisAngle(Normalized(pax), a.TailPitch * (Math.PI / 180.0)));
+                axle = Normalized(axle);
+                axleSrc += " + trim yaw " + BlenderRigAnim.PyFixed(a.TailYaw, 1) + " pitch " + BlenderRigAnim.PyFixed(a.TailPitch, 1);
+                Note(s, "a trimmed tail rotor axle");
+            }
+            // the group's combined box: min(c - s / 2) and max(c + s / 2) in Python floats (min/max keep the first of a tie or NaN), as Vectors
+            var gmn = new float[3]; var gmx = new float[3];
+            for (int k = 0; k < 3; k++)
+            {
+                double lo = 0.0, hi = 0.0;
+                for (int b = 0; b < boxes.Count; b++)
+                {
+                    double l = boxes[b].c[k] - boxes[b].sz[k] / 2.0, h = boxes[b].c[k] + boxes[b].sz[k] / 2.0;
+                    if (b == 0 || l < lo) lo = l;
+                    if (b == 0 || h > hi) hi = h;
+                }
+                gmn[k] = (float)lo; gmx[k] = (float)hi;
+            }
+            var gs = Sub(gmx, gmn);
+            clusters.Add((MaxOf(gs), hubC, gs, new List<string>(grp), axle, true, isTail));
+            s.Logs3.Add("VEHICLE " + (isTail ? "tail" : "main") + " rotor: " + grp.Count + " part(s), pivot (" + P2(hubC[0]) + "," + P2(hubC[1]) + "," + P2(hubC[2])
+                + "), axle (" + P3(axle[0]) + "," + P3(axle[1]) + "," + P3(axle[2]) + ") [" + axleSrc + "]");
+            s.Logs3.Add("VEHICLE rotor hub: " + grp.Count + " part(s) -> bone at hub (" + P2(hubC[0]) + "," + P2(hubC[1]) + "," + P2(hubC[2]) + "), axle=("
+                + PyRepr(axle[0]) + ", " + PyRepr(axle[1]) + ", " + PyRepr(axle[2]) + ") (least-spread of centres)");
+            Note(s, isTail ? "a tail rotor" : "a main rotor");
+        }
 
         // ---- the armature (mode_set(EDIT) first: the view layer updated - every bound_box current again)
         foreach (var so in s.Objects) { so.EvalMin = null; so.EvalMax = null; }
@@ -115,10 +212,28 @@ public static partial class BlenderVehicleRig
         for (int i = 0; i < clusters.Count; i++)
         {
             var cl = clusters[i];
-            var ax = AxleAxis(a.AxisArg, cl.sz);
+            var ax = cl.axle ?? AxleAxis(a.AxisArg, cl.sz);   // a rotor carries its axle; a wheel infers it
             double q = cl.m * 0.25; float len = (float)(q > 0.05 ? q : 0.05);   // max(0.05, max(s) * 0.25) into the float multiply (Python: 0.05 on a NaN)
-            var t = new[] { (float)(cl.c[0] + (float)(ax[0] * len)), (float)(cl.c[1] + (float)(ax[1] * len)), (float)(cl.c[2] + (float)(ax[2] * len)) };
+            float[] t; float tailRoll = 0f;
+            if (cl.rotor && cl.tail)
+            {
+                // the TAIL FAN: the bone runs along the in-disc direction nearest world up (else nearest +Y), align_roll(axle x that)
+                var nax = Normalized(ax);
+                var yb = Sub(new[] { 0f, 0f, 1f }, Scale(nax, nax[2]));
+                if (VecLength(yb) < 1e-3) yb = Sub(new[] { 0f, 1f, 0f }, Scale(nax, nax[1]));
+                yb = Normalized(yb);
+                var zb = Normalized(Cross(nax, yb));
+                t = new[] { (float)(cl.c[0] + (float)(yb[0] * len)), (float)(cl.c[1] + (float)(yb[1] * len)), (float)(cl.c[2] + (float)(yb[2] * len)) };
+                tailRoll = VehicleProbe.RollToVector(cl.c, t, zb);   // EditBone.align_roll: ED_armature_ebone_roll_to_vector(bone, vector, false)
+            }
+            else
+            {
+                // wheels along +axle; the MAIN rotor along -axle (ax * -1.0 first, then the length)
+                float dirn = cl.rotor ? -1f : 1f;
+                t = new[] { (float)(cl.c[0] + (float)((float)(ax[0] * dirn) * len)), (float)(cl.c[1] + (float)((float)(ax[1] * dirn) * len)), (float)(cl.c[2] + (float)((float)(ax[2] * dirn) * len)) };
+            }
             int id = AddBone(string.Format(CultureInfo.InvariantCulture, "Wheel_{0:00}", i), (float[])cl.c.Clone(), t, body);
+            roll[id] = tailRoll;
             foreach (var wn in cl.names) boneOf[wn] = boneNames[id - RigBoneBase];
         }
         // ---- the TURRET bone: the turret parts' combined box (_combined_bbox: each part's world_bbox, min(c - s/2) and max(c + s/2) in
@@ -479,6 +594,34 @@ public static partial class BlenderVehicleRig
     }
 
     static string P2(float v) => BlenderRigAnim.PyFixed(v, 2);
+    static string P3(float v) => BlenderRigAnim.PyFixed(v, 3);
+
+    /// <summary>repr() of a Python float (a mathutils component): nan and inf as Python writes them.</summary>
+    static string PyRepr(double v) => double.IsNaN(v) ? "nan" : double.IsInfinity(v) ? (v > 0 ? "inf" : "-inf") : PyFloatRepr.Repr(v);
+
+    /// <summary>sum(vectors, Vector((0, 0, 0))) / n: float32 sums from zero in order, then times 1.0f / n (Vector division).</summary>
+    static float[] SumOver(IEnumerable<float[]> vs, int n)
+    {
+        var r = new float[3];
+        foreach (var v in vs) for (int k = 0; k < 3; k++) r[k] = (float)(r[k] + v[k]);
+        float f = (float)(1.0f / (float)n);
+        return new[] { (float)(r[0] * f), (float)(r[1] * f), (float)(r[2] * f) };
+    }
+
+    static float[] Sub(float[] a, float[] b) => new[] { (float)(a[0] - b[0]), (float)(a[1] - b[1]), (float)(a[2] - b[2]) };
+
+    /// <summary>Vector * float: each component times the float32 scalar.</summary>
+    static float[] Scale(float[] v, float f) => new[] { (float)(v[0] * f), (float)(v[1] * f), (float)(v[2] * f) };
+
+    /// <summary>Vector.rotate(Quaternion): mathutils_any_to_rotmat (normalize_qt_qt, quat_to_mat3), then mul_m3_v3 in float32.</summary>
+    static float[] RotateQt(float[] v, float[] quat)
+    {
+        var q = (float[])quat.Clone(); VehicleProbe.NormalizeQt(q);
+        var m = BlenderChannelExport.QuatToMat3(q);   // m[col][row]
+        float[] r = new float[3];
+        for (int k = 0; k < 3; k++) r[k] = (float)((float)((float)(m[0][k] * v[0]) + (float)(m[1][k] * v[1])) + (float)(m[2][k] * v[2]));
+        return r;
+    }
     static string P6(float v) => BlenderRigAnim.PyFixed(v, 6);
 
     /// <summary>max(range(3), key=lambda i: mx[i] - mn[i]) over the points' component extremes (float32 values, the difference in

@@ -40,6 +40,8 @@ public static partial class BlenderVehicleRig
         public string FoldDie;                      // a sail-fold or oar dial (argv 72, 73, 75, 56-59, read unconditionally) Python cannot parse: the exception, or null
         public string DialsDie;                     // a dial (argv[7..25]) Python cannot parse: the exception it dies of before the orientation, or null
         public string AxisArg = "";                 // argv[6].upper(): the wheels' axle override (X, Y, Z) or anything else = AUTO (the thinnest extent)
+        public string TailAxisArg = "AUTO";         // argv[28].upper() when not blank: the tail rotor's own axle override (X, Y, Z), else AUTO
+        public double TailYaw, TailPitch;           // float(argv[29]), float(argv[30]) or 0: the tail axle's trim in degrees (yaw about the vertical, then pitch)
         public bool RockOn;                         // the WAVE ROCK is on: a RootHull bone under Root carries everything that would skin to Root
         public double GunPivot = 0.5;               // min(1, max(0, float(argv[34]))) or 0.5: where along the tube (breech 0 .. muzzle 1) the Gun bone's head sits
         public double RecoilDist;                   // min(1, max(0, float(argv[38]))) or 0: recoil on (the RecoilArm + Barrel split) when above 0
@@ -126,6 +128,8 @@ public static partial class BlenderVehicleRig
             if (!TryPyFloat(At(idx), out double dv)) death = "ValueError: could not convert string to float: " + PyStrRepr(At(idx));
             else if (integral && (double.IsNaN(dv) || double.IsInfinity(dv))) death = double.IsNaN(dv) ? "ValueError: cannot convert float NaN to integer" : "OverflowError: cannot convert float infinity to integer";
             if (death != null) { if (idx < namesFailureIndex) { namesFailureIndex = idx; a.NamesDie = death; } continue; }
+            if (idx == 29) a.TailYaw = dv;
+            if (idx == 30) a.TailPitch = dv;
             if (idx == 34) a.GunPivot = PyMin(1.0, PyMax(0.0, dv));
             if (idx == 38) a.RecoilDist = PyMin(1.0, PyMax(0.0, dv));
         }
@@ -243,6 +247,7 @@ public static partial class BlenderVehicleRig
         // argument unless the second compares past it, so a NaN amplitude clamps to 45.
         if (a.Unsupported != null && unsupportedAt > namesFailureIndex) a.Unsupported = null;   // Python died earlier, at a name or dial
         a.AxisArg = PyUpper(At(6));
+        a.TailAxisArg = argv.Count > 28 && PyNonBlank(At(28)) ? PyUpper(At(28)) : "AUTO";
         a.SailFold = argv.Count > 71 && VehicleProbe.Input.PyStrip(At(71)) == "1";
         // the sail-fold and oar dials, read unconditionally after the reduce tags and before the dials (vehicle_rig.py 1010-1017):
         // int(float(argv[72])), float(argv[73]), float(argv[75]), float(argv[56..59]) when present and non-blank

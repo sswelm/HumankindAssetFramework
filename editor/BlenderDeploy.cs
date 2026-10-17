@@ -1632,7 +1632,7 @@ public static class BlenderDeploy
 
     /// <summary>mathutils' Quaternion(axis, angle): the angle wrapped into -pi..pi in float32 (angle_wrap_rad), the axis
     /// normalized, (cosf, axis sinf) of the half angle; the identity for an axis of no length.</summary>
-    static float[] QuaternionAxisAngle(float[] axis, double angle)
+    internal static float[] QuaternionAxisAngle(float[] axis, double angle)
     {
         const float pi = (float)Math.PI;
         float a = (float)angle;

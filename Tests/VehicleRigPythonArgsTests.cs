@@ -142,4 +142,19 @@ public class VehicleRigPythonArgsTests
         Assert.Null(BlenderVehicleRig.ParseArgs(Argv((56, "1_0"), (72, " 8 "))).FoldDie);
         Assert.Equal("ValueError: could not convert string to float: 'later'", BlenderVehicleRig.ParseArgs(Argv((72, "\U00011f51"), (73, "later"))).FoldDie);
     }
+
+    // tail_axis_arg = argv[28].upper() if argv[28].strip() else "AUTO": the token upper-cased as written, not stripped
+    [Theory]
+    [InlineData("", "AUTO")] [InlineData(" \u2003", "AUTO")] [InlineData("x", "X")] [InlineData(" z", " Z")] [InlineData("y\u001f", "Y\u001f")]
+    public void The_tail_axis_is_upper_cased_as_written_or_AUTO_when_blank(string text, string axis)
+        => Assert.Equal(axis, BlenderVehicleRig.ParseArgs(Argv((28, text))).TailAxisArg);
+
+    [Fact]
+    public void The_tail_trim_is_float_of_29_and_30_or_zero()
+    {
+        var a = BlenderVehicleRig.ParseArgs(Argv((29, "-inf"), (30, " 7.25 ")));
+        Assert.True(double.IsNegativeInfinity(a.TailYaw)); Assert.Equal(7.25, a.TailPitch);
+        Assert.Equal(0.0, BlenderVehicleRig.ParseArgs(Argv()).TailYaw);
+        Assert.Equal("ValueError: could not convert string to float: 'x'", BlenderVehicleRig.ParseArgs(Argv((30, "x"))).NamesDie);
+    }
 }
