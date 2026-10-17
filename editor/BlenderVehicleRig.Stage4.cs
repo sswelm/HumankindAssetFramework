@@ -1,5 +1,5 @@
 // BlenderVehicleRig.Stage4.cs - vehicle_rig.py's stage 4, the ACTIONS (lines 2905-3711), in C# (step (e) of the vehicle_rig port,
-// 2026-10-17; docs/Review-Backlog.md item (5)). Part e1, the frame every animated rig shares:
+// 2026-10-17; docs/Review-Backlog.md item (5)). Parts e1 and e2:
 //   - the Spin action (bpy.data.actions.new: a name the existing actions take is made unique; bpy.data.actions stays sorted by name),
 //     the armature's active action; its slot (OB<armature>) appears with the first key;
 //   - the shared clip: frame_start 0, frame_end the longest period (the Spin frames, the rock's when it is on), each subsystem
@@ -11,12 +11,13 @@
 //     (the angular autocorrelation of its mesh's rim vertices: CPython's cos/sin sums, compensated, and hypot), an airborne wheel
 //     keeps the dial, the idler (static tracks: the rearmost cluster per side) the dial x the idler speed, snapped; keys at 0 and the
 //     clip on rotation_euler (XYZ); a ROTOR keyed every frame on rotation_quaternion about its local axle (Y, a tail X);
+//   - the ROWING stroke on Spin: the mirrored sweep and the lifted dip about each oar's local axes, keyed every frame;
+//   - Furl: the sail struck or curled with drape, the flag flying or folded; explicit raised-sail and struck/folded-flag holds on Spin;
 //   - every Spin key made LINEAR; the objects that are neither the rig's meshes nor the armature removed; the actions not named
 //     Spin/Deploy/Recoil/Furl purged (a line each); every non-armature object's animation data cleared.
 // The original pose keeps channels assigned after the last frame_set; other keyed channels take their curves at that frame. Evaluated
 // mesh bounds retain the pose from frame_set, before any subsequent assignment to the original pose.
-// Left to Blender by name (parts e2, e3): the rowing stroke, the Furl clip with the sail and flag holds, the Deploy clip, the Recoil
-// clip; a clip longer than 100,000 frames.
+// Left to Blender by name (part e3): the Deploy and Recoil clips; non-finite rowing angles and clips longer than 100,000 frames.
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -37,90 +38,157 @@ public static partial class BlenderVehicleRig
         public Dictionary<string, int> BoneId = new Dictionary<string, int>(StringComparer.Ordinal);
         public int OarBones, TrailBones;
         public bool SailClip, FlagClip, Recoil;
+        public List<(string bone, float side, float[] dip)> Oars = new List<(string, float, float[])>();
+        public float[] SailYard = { 1f, 0f, 0f }, FlagAxis = { 1f, 0f, 0f };
     }
 
     const int MaxClipFrames = 100000;
 
-    public static void RunStage4(BlenderRigAnim.Stage1 s, Args a)
+    // Each authored action owns its curves, insertion order and replacement lookup. frame_set below evaluates Spin;
+    // Furl is authored without frame_set, then Spin is restored before its holds and the wheel keys.
+    sealed class VehicleActionKeys
     {
-        if (s.Fallback != null || s.Exits || s.Dies != null) return;
-        var st = s.VehicleState as RigState;
-        if (st == null) { s.Fallback = "stage 4: no rig from stage 3"; return; }
-        if (st.OarBones > 0) { s.Fallback = "stage 4: the rowing stroke (e2) is not modelled yet"; return; }
-        if (st.SailClip || st.FlagClip) { s.Fallback = "stage 4: the Furl clip and the sail and flag holds (e2) is not modelled yet"; return; }
-        if (st.TrailBones > 0) { s.Fallback = "stage 4: the Deploy clip (e3) is not modelled yet"; return; }
-        if (st.Recoil) { s.Fallback = "stage 4: the Recoil clip (e3) is not modelled yet"; return; }
-        if (double.IsNaN(a.Degrees) || double.IsInfinity(a.Degrees) || double.IsNaN(a.RockHeading) || double.IsInfinity(a.RockHeading)
-            || double.IsNaN(a.RockPitchPhase) || double.IsInfinity(a.RockPitchPhase))
-        { s.Fallback = "stage 4: the clip of a non-finite Spin angle, rock heading or rock phase is not modelled yet"; return; }   // round()/sin() raise in Python
-        if (s.Objects.Any(o => o.EvalStale)) { s.Fallback = "stage 4: the evaluation of an object with a stale evaluated copy is not modelled yet"; return; }
-        var ad = s.Armature; var arm = st.Arm;
-        // the shared clip
-        BigInteger frames = a.Frames;
-        var periods = new List<BigInteger> { frames };
-        if (a.RockOn) periods.Add(a.RockFrames);
-        BigInteger clipBig = periods.Max();
-        if (clipBig > MaxClipFrames) { s.Fallback = "stage 4: the clip of more than 100,000 frames is not modelled yet"; return; }
-        int clip = (int)clipBig;
-        int Fitted(BigInteger period) { double r = PyRound((double)clip / (double)BigInteger.Max(BigInteger.One, period)); return (int)Math.Max(1.0, r); }
-        int spinRepeats = Fitted(frames);
-        int rockRepeats = a.RockOn ? Fitted(a.RockFrames) : 0;
+        public BlenderRigAnim.ActionData Data;
+        public readonly Dictionary<(string bone, string prop, int index), List<BlenderDeploy.ArmKey>> Curves = new Dictionary<(string, string, int), List<BlenderDeploy.ArmKey>>();
+        public readonly List<(string bone, string prop, int index)> Order = new List<(string, string, int)>();
+        public readonly HashSet<(string bone, string prop, int index)> Dirty = new HashSet<(string, string, int)>();
+        readonly Dictionary<(string bone, string prop, int index), Dictionary<int, BlenderDeploy.ArmKey>> keyAt = new Dictionary<(string, string, int), Dictionary<int, BlenderDeploy.ArmKey>>();
 
-        // bpy.data.actions.new("Spin"): unique among the actions there are; the armature's active action
-        var pool = new BlenderNames.NamePool();
-        foreach (var x in s.Actions) pool.Unique(x.Name);
-        var act = new BlenderRigAnim.ActionData { Name = pool.Unique("Spin") };
-        s.Actions.Add(act); BlenderExportTree.StableSort(s.Actions, (x, y) => BlenderDeploy.IdNameCmp(x.Name, y.Name));
-        arm.Action = act.Name; arm.Slot = null;
-        s.FrameStart = 0; s.FrameEnd = clip;
-        var curves = new Dictionary<(string bone, string prop, int index), List<BlenderDeploy.ArmKey>>();
-        var keyAt = new Dictionary<(string bone, string prop, int index), Dictionary<int, BlenderDeploy.ArmKey>>();
-        var curveOrder = new List<(string bone, string prop, int index)>();
-        var dirty = new HashSet<(string bone, string prop, int index)>();
-        bool anyFrameSet = false;
-        Dictionary<int, float[]> evaluatedGroundPose = null;
-        void Insert(string bone, string prop, float[] values, int frame)
+        public VehicleActionKeys(BlenderRigAnim.Stage1 s, BlenderNames.NamePool pool, string name)
         {
-            if (arm.Slot == null) { act.Slots.Add(new BlenderRigAnim.SlotData { Identifier = "OB" + arm.Name, Object = arm }); arm.Slot = "OB" + arm.Name; }
+            Data = new BlenderRigAnim.ActionData { Name = pool.Unique(name) }; s.Actions.Add(Data);
+            BlenderExportTree.StableSort(s.Actions, (x, y) => BlenderDeploy.IdNameCmp(x.Name, y.Name));
+        }
+
+        public void Insert(BlenderRigAnim.SceneObject arm, string bone, string prop, float[] values, int frame)
+        {
+            if (Data.Slots.Count == 0) Data.Slots.Add(new BlenderRigAnim.SlotData { Identifier = "OB" + arm.Name, Object = arm });
+            arm.Slot = Data.Slots[0].Identifier;
             for (int i = 0; i < values.Length; i++)
             {
                 var k3 = (bone, prop, i);
-                if (!curves.TryGetValue(k3, out var list)) { curves[k3] = list = new List<BlenderDeploy.ArmKey>(); keyAt[k3] = new Dictionary<int, BlenderDeploy.ArmKey>(); curveOrder.Add(k3); }
-                // insert_vert_fcurve: a key within BEZT_BINARYSEARCH_THRESH of the frame (the frames are whole: the same frame) is REPLACED -
-                // its value moved by the float delta (replace_bezt_keyframe_ypos); else a new BEZIER key in frame order
+                if (!Curves.TryGetValue(k3, out var list)) { Curves[k3] = list = new List<BlenderDeploy.ArmKey>(); keyAt[k3] = new Dictionary<int, BlenderDeploy.ArmKey>(); Order.Add(k3); }
+                // replace_bezt_keyframe_ypos moves the value by its float delta, rather than assigning the new value.
                 if (keyAt[k3].TryGetValue(frame, out var key)) { float dy = (float)(values[i] - key.Value); key.Value = (float)(key.Value + dy); }
                 else
                 {
                     key = new BlenderDeploy.ArmKey { Frame = frame, Value = values[i] }; keyAt[k3][frame] = key;
                     if (list.Count == 0 || list[list.Count - 1].Frame < frame) list.Add(key); else { list.Add(key); list.Sort((p, q) => p.Frame.CompareTo(q.Frame)); }
                 }
-                dirty.Add(k3);
+                Dirty.Add(k3);
             }
         }
+
+        public void Recalc() { foreach (var k in Dirty) BlenderFCurve.RecalcHandles(Curves[k]); Dirty.Clear(); }
+        public void Linear(Func<(string bone, string prop, int index), bool> select = null)
+        {
+            Recalc(); // changing interpolation leaves the auto-clamped handles in place
+            foreach (var k in Order) if (select == null || select(k)) foreach (var key in Curves[k]) key.Interpolation = "LINEAR";
+        }
+        public void Finish()
+        {
+            Linear();
+            foreach (var k in Order)
+            {
+                var fc = new BlenderRigAnim.FCurveData { DataPath = "pose.bones[\"" + k.bone + "\"]." + k.prop, Index = k.index, Bone = k.bone, Prop = k.prop };
+                foreach (var key in Curves[k]) fc.Keys.Add(new BlenderRigAnim.KeyData { Frame = key.Frame, Value = key.Value, LeftX = key.LeftX, LeftY = key.LeftY, RightX = key.RightX, RightY = key.RightY, Interpolation = key.Interpolation });
+                Data.Slots[0].FCurves.Add(fc);
+            }
+            Data.FrameStart = Order.Count == 0 ? 0f : Curves.Values.Min(l => l[0].Frame);
+            Data.FrameEnd = Order.Count == 0 ? 0f : Curves.Values.Max(l => l[l.Count - 1].Frame);
+        }
+    }
+
+    public static void RunStage4(BlenderRigAnim.Stage1 s, Args a)
+    {
+        if (s.Fallback != null || s.Exits || s.Dies != null) return;
+        var st = s.VehicleState as RigState;
+        if (st == null) { s.Fallback = "stage 4: no rig from stage 3"; return; }
+        if (st.TrailBones > 0) { s.Fallback = "stage 4: the Deploy clip (e3) is not modelled yet"; return; }
+        if (st.Recoil) { s.Fallback = "stage 4: the Recoil clip (e3) is not modelled yet"; return; }
+        if (double.IsNaN(a.Degrees) || double.IsInfinity(a.Degrees) || double.IsNaN(a.RockHeading) || double.IsInfinity(a.RockHeading)
+            || double.IsNaN(a.RockPitchPhase) || double.IsInfinity(a.RockPitchPhase))
+        { s.Fallback = "stage 4: the clip of a non-finite Spin angle, rock heading or rock phase is not modelled yet"; return; }   // round()/sin() raise in Python
+        if (s.Objects.Any(o => o.EvalStale)) { s.Fallback = "stage 4: the evaluation of an object with a stale evaluated copy is not modelled yet"; return; }
+        if (st.Oars.Count > 0 && new[] { a.OarSweep, a.OarDip, a.OarLift, a.OarRake }.Any(v => double.IsNaN(v) || double.IsInfinity(v) || float.IsInfinity((float)(v * (Math.PI / 180.0)))))
+        { s.Fallback = "stage 4: the rowing stroke of non-finite angles is not modelled yet"; return; }
+        if ((st.SailClip && a.SailFold && a.SailFoldFrames > MaxClipFrames) || (st.FlagClip && a.FlagFoldOn && a.FlagFoldFrames > MaxClipFrames))
+        { s.Fallback = "stage 4: the Furl clip of more than 100,000 frames is not modelled yet"; return; }
+        var ad = s.Armature; var arm = st.Arm;
+        // the shared clip
+        BigInteger frames = a.Frames;
+        var periods = new List<BigInteger> { frames };
+        if (a.RockOn) periods.Add(a.RockFrames);
+        if (st.Oars.Count > 0) periods.Add(a.OarFrames);
+        BigInteger clipBig = periods.Max();
+        if (clipBig > MaxClipFrames) { s.Fallback = "stage 4: the clip of more than 100,000 frames is not modelled yet"; return; }
+        int clip = (int)clipBig;
+        int Fitted(BigInteger period) { double r = PyRound((double)clip / (double)BigInteger.Max(BigInteger.One, period)); return (int)Math.Max(1.0, r); }
+        int spinRepeats = Fitted(frames);
+        int rockRepeats = a.RockOn ? Fitted(a.RockFrames) : 0;
+        int oarRepeats = st.Oars.Count > 0 ? Fitted(a.OarFrames) : 0;
+
+        // bpy.data.actions.new("Spin"): unique among the actions there are; the armature's active action
+        var pool = new BlenderNames.NamePool();
+        foreach (var x in s.Actions) pool.Unique(x.Name);
+        var spin = new VehicleActionKeys(s, pool, "Spin"); var authored = new List<VehicleActionKeys> { spin }; var active = spin;
+        void Activate(VehicleActionKeys x) { active = x; arm.Action = x.Data.Name; arm.Slot = x.Data.Slots.FirstOrDefault()?.Identifier; }
+        Activate(spin);
+        s.FrameStart = 0; s.FrameEnd = clip;
+        var curves = spin.Curves; var curveOrder = spin.Order;
+        bool anyFrameSet = false;
+        Dictionary<int, float[]> evaluatedGroundPose = null;
+        void Insert(string bone, string prop, float[] values, int frame) => active.Insert(arm, bone, prop, values, frame);
         // frame_set(f) writes every keyed channel's curve value into the pose; a property the script assigns afterwards holds the assigned
         // value until the next frame_set. Only the states something reads are materialised: the channels assigned since the last frame_set
         // are kept, the rest take their curves at that frame (any key added since went to an assigned channel)
         var assignedSince = new HashSet<(string bone, string prop)>();
-        void FrameSet(int f) { anyFrameSet = true; s.FrameCurrent = f; assignedSince.Clear(); }
+        var frameHistory = new List<int>();
+        var assignedAt = new Dictionary<(string bone, string prop), int>();
+        var evaluatedAt = new Dictionary<(string bone, string prop, int index), int>();
+        void FrameSet(int f) { anyFrameSet = true; s.FrameCurrent = f; frameHistory.Add(f); assignedSince.Clear(); }
         // frame_set(f) for the armature: every keyed channel takes its curve's value at f (BKE_fcurve evaluation of the BEZIER keys)
         void EvaluatePose(int f)
         {
-            foreach (var k3 in dirty) BlenderFCurve.RecalcHandles(curves[k3]);
-            dirty.Clear();
+            spin.Recalc();
             foreach (var k3 in curveOrder)
             {
                 float v = BlenderFCurve.Evaluate(curves[k3], f, constant: true);
                 int id = st.BoneId[k3.bone];
                 if (assignedSince.Contains((k3.bone, k3.prop))) continue;
-                if (k3.prop == "rotation_euler") { var e0 = ad.PoseEuler.TryGetValue(id, out var pe) ? (float[])pe.Clone() : new float[3]; e0[k3.index] = v; ad.PoseEuler[id] = e0; }
-                else if (k3.prop == "rotation_quaternion") { var q0 = (float[])ad.PoseProps[id][1].Clone(); q0[k3.index] = v; ad.PoseProps[id][1] = q0; }
+                var values = k3.prop == "rotation_euler" ? (ad.PoseEuler.TryGetValue(id, out var pe) ? (float[])pe.Clone() : new float[3]) : (float[])ad.PoseProps[id][1].Clone();
+                // animsys_write_orig_anim_rna writes only unequal values. For a zero, intervening frame_set evaluations
+                // matter: a constant -0 channel preserves an original +0, while a nonzero sample followed by -0 writes it.
+                // Replay only that ambiguity, after the last assignment/materialization; ordinary values need only the end.
+                if (v == 0f)
+                {
+                    assignedAt.TryGetValue((k3.bone, k3.prop), out int assigned);
+                    evaluatedAt.TryGetValue(k3, out int evaluated);
+                    int start = Math.Max(assigned, evaluated);
+                    int zeroBits = BitConverter.ToInt32(BitConverter.GetBytes(v), 0);
+                    bool constantZero = curves[k3].All(k => BitConverter.ToInt32(BitConverter.GetBytes(k.Value), 0) == zeroBits);
+                    if (constantZero) { if (values[k3.index] == 0f) v = values[k3.index]; }
+                    else
+                    {
+                        float held = values[k3.index];
+                        for (int h = start; h < frameHistory.Count; h++)
+                        {
+                            float next = BlenderFCurve.Evaluate(curves[k3], frameHistory[h], constant: true);
+                            if (held != next) held = next;
+                        }
+                        v = held;
+                    }
+                }
+                values[k3.index] = v;
+                if (k3.prop == "rotation_euler") ad.PoseEuler[id] = values; else ad.PoseProps[id][1] = values;
+                evaluatedAt[k3] = frameHistory.Count;
             }
         }
         void SetPose(string bone, string mode, float[] eul, float[] quat)
         {
             int id = st.BoneId[bone];
-            if (eul != null) assignedSince.Add((bone, "rotation_euler"));
-            if (quat != null) assignedSince.Add((bone, "rotation_quaternion"));
+            if (eul != null) { assignedSince.Add((bone, "rotation_euler")); assignedAt[(bone, "rotation_euler")] = frameHistory.Count; }
+            if (quat != null) { assignedSince.Add((bone, "rotation_quaternion")); assignedAt[(bone, "rotation_quaternion")] = frameHistory.Count; }
             ad.RotMode[id] = mode;
             if (eul != null) ad.PoseEuler[id] = eul;
             if (quat != null) ad.PoseProps[id][1] = quat;
@@ -184,6 +252,116 @@ public static partial class BlenderVehicleRig
                 + (Math.Abs(a.RockHeading) > 1e-6 ? ", heading " + PySigned(BlenderRigAnim.PyFixed(a.RockHeading, 0)) + " deg" : ""));
             Note(s, "the wave rock keys");
             if (!EvaluateObjects(s, s.FrameCurrent)) return;
+        }
+
+        // ---- ROWING, then Furl and the holds through Spin (vehicle_rig.py 2986-3177)
+        float[] LocalAxis(string bone, float[] axis)
+        {
+            var m = MulMat4Row(VehicleProbe.ToRowMajor(arm.World), ad.Rest.MatrixLocal[st.BoneId[bone]]);
+            var m3 = new[] { m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10] };
+            var inv = VehicleProbe.Inverted3(m3);
+            if (inv == null) { s.Fallback = "stage 4: the stance axis of a bone with no inverse is not modelled yet"; return null; }
+            var v = new float[3];
+            for (int r = 0; r < 3; r++) { double d = 0.0; for (int k = 0; k < 3; k++) d += (double)(float)(inv[3 * r + k] * axis[k]); v[r] = (float)d; }
+            return Normalized(v);
+        }
+        void KeyQ(string bone, float[] q, int f) { SetPose(bone, "QUATERNION", null, q); Insert(bone, "rotation_quaternion", q, f); }
+        float[] IdentityQ() => new[] { 1f, 0f, 0f, 0f };
+        if (st.Oars.Count > 0)
+        {
+            double sweep = -a.OarSweep * (Math.PI / 180.0) * 0.5, dip = a.OarDip * (Math.PI / 180.0);
+            double lift = a.OarLift * (Math.PI / 180.0), rake = a.OarRake * (Math.PI / 180.0);
+            for (int oi = 0; oi < st.Oars.Count; oi++)
+            {
+                var oar = st.Oars[oi];
+                var lz = LocalAxis(oar.bone, new[] { 0f, 0f, 1f }); var ld = LocalAxis(oar.bone, oar.dip);
+                if (lz == null || ld == null) return;
+                SetPose(oar.bone, "QUATERNION", null, null);
+                for (int f = 0; f <= clip; f++)
+                {
+                    double t = f / (double)clip, phi = 2.0 * Math.PI * oarRepeats * t;
+                    double ths = (rake + sweep * (-BlenderTrig.Cos(phi))) * oar.side;
+                    double thd = -lift + dip * BlenderTrig.Sin(phi); // dip axis already mirrors: no second side factor
+                    var q = BlenderPosedState.MulQtQt(BlenderDeploy.QuaternionAxisAngle(lz, ths), BlenderDeploy.QuaternionAxisAngle(ld, thd));
+                    if (q.Any(v => float.IsNaN(v) || float.IsInfinity(v))) { s.Fallback = "stage 4: the rowing stroke of non-finite angles is not modelled yet"; return; }
+                    KeyQ(oar.bone, q, f);
+                }
+            }
+            spin.Linear(k => k.bone.StartsWith("Oar_", StringComparison.Ordinal));
+            s.Logs4.Add("VEHICLE ROWING clip: " + st.Oars.Count + " oars sweep " + BlenderRigAnim.PyFixed(Math.Abs(a.OarSweep), 0)
+                + " deg total arc (" + BlenderRigAnim.PyFixed(Math.Abs(a.OarSweep) * 0.5, 0) + " each way of centre) + dip " + BlenderRigAnim.PyFixed(a.OarDip, 0)
+                + " deg, lift " + BlenderRigAnim.PyFixed(a.OarLift, 0) + " deg, rake " + BlenderRigAnim.PyFixed(a.OarRake, 0) + " deg, pivot " + BlenderRigAnim.PyFixed(a.OarPivot, 0)
+                + "%, length " + BlenderRigAnim.PyFixed(a.OarLength, 0) + "%, " + oarRepeats + " cycle(s) over shared " + clip + "-frame 'Spin'");
+            Note(s, "the rowing stroke keys");
+        }
+
+        int furlFrames = st.SailClip && a.SailFold ? (int)a.SailFoldFrames : 1;
+        if (st.SailClip || st.FlagClip)
+        {
+            var furl = new VehicleActionKeys(s, pool, "Furl"); authored.Add(furl); Activate(furl);
+            if (st.SailClip)
+            {
+                var flipAxis = LocalAxis("Sail", new[] { 1f, 0f, 0f }); if (flipAxis == null) return;
+                KeyQ("Sail", IdentityQ(), 0);
+                if (a.SailFold && st.BoneId.ContainsKey("SailF1"))
+                {
+                    KeyQ("Sail", IdentityQ(), furlFrames);
+                    double squash = BlenderTrig.Pow(1.0 - PyMin(0.98, a.SailFoldSag), 2.0);
+                    double jbase = (a.SailFoldAngle / 3.0) * (Math.PI / 180.0), previous = 0.0;
+                    for (int k = 1; k <= 3; k++)
+                    {
+                        double th = jbase * k, draped = PyAtan2(BlenderTrig.Sin(th) * squash, BlenderTrig.Cos(th));
+                        while (draped < th - Math.PI) draped += 2.0 * Math.PI;
+                        while (draped > th + Math.PI) draped -= 2.0 * Math.PI;
+                        double delta = (draped - previous) * (a.SailFoldFlip ? -1.0 : 1.0); previous = draped;
+                        string bone = "SailF" + k;
+                        var axis = LocalAxis(bone, st.SailYard); if (axis == null) return;
+                        KeyQ(bone, IdentityQ(), 0); KeyQ(bone, BlenderDeploy.QuaternionAxisAngle(axis, delta), furlFrames);
+                        SetPose(bone, "QUATERNION", null, IdentityQ());
+                    }
+                    Note(s, "the sail curled in Furl");
+                }
+                else { KeyQ("Sail", BlenderDeploy.QuaternionAxisAngle(flipAxis, Math.PI), furlFrames); Note(s, "the sail struck in Furl"); }
+                SetPose("Sail", "QUATERNION", null, IdentityQ());
+            }
+            if (st.FlagClip)
+            {
+                KeyQ("Flag", IdentityQ(), 0);
+                if (a.FlagFoldOn)
+                {
+                    var axis = LocalAxis("Flag", st.FlagAxis); if (axis == null) return;
+                    KeyQ("Flag", BlenderDeploy.QuaternionAxisAngle(axis, a.FlagFoldDeg * (Math.PI / 180.0)), (int)a.FlagFoldFrames);
+                    SetPose("Flag", "QUATERNION", null, IdentityQ()); Note(s, "the flag folded in Furl");
+                }
+                else KeyQ("Flag", IdentityQ(), furlFrames);
+            }
+            furl.Linear(); Activate(spin);
+            if (a.FlagFoldOn && st.FlagClip && !st.SailClip)
+                s.Logs4.Add("VEHICLE 'Furl' stance: flags FOLD " + BlenderRigAnim.PyFixed(a.FlagFoldDeg, 0) + " deg at the top hinge over " + a.FlagFoldFrames
+                    + " frame(s) — Idle/reference Furl[0..0] (deployed), Movement Spin (folded), Pre-move Furl[0.." + a.FlagFoldFrames
+                    + "] (folds — the unit waits), After-move Furl[" + a.FlagFoldFrames + "..0] (redeploys), Keep bone translations OFF");
+            else
+            {
+                string description = st.SailClip ? (a.SailFold ? "sails CURLED to the yard (hand-close roll, " + furlFrames + " frame(s), "
+                    + BlenderRigAnim.PyFixed(a.SailFoldAngle, 0) + " deg total, sag " + BlenderRigAnim.PyFixed(a.SailFoldSag, 2) + ")" : "sails FLIPPED below the keel")
+                    + (st.FlagClip ? ", flags keyed flying" : "") : "flags keyed flying (no sails)";
+                s.Logs4.Add("VEHICLE 'Furl' stance: " + description + " — Idle/reference Furl[0..0] (deployed), "
+                    + (st.SailClip ? "Idle stance (override) Furl[" + furlFrames + ".." + furlFrames + "] (furled at anchor), " : "") + "Movement Spin, "
+                    + (a.SailFold && st.SailClip ? "Pre-move Furl[" + furlFrames + "..0] / After-move Furl[0.." + furlFrames + "] to PLAY the gather (or EMPTY for a one-tick swap)" : "After-move/Pre-move EMPTY")
+                    + ", Keep bone translations OFF");
+            }
+            Note(s, "the Furl stance");
+        }
+        if (st.SailClip)
+            foreach (string bone in a.SailFold ? new[] { "Sail", "SailF1", "SailF2", "SailF3" } : new[] { "Sail" })
+                if (st.BoneId.ContainsKey(bone)) { KeyQ(bone, IdentityQ(), 0); KeyQ(bone, IdentityQ(), clip); }
+        if (st.FlagClip)
+        {
+            var axis = LocalAxis("Flag", a.FlagFoldOn ? st.FlagAxis : new[] { 1f, 0f, 0f }); if (axis == null) return;
+            var q = BlenderDeploy.QuaternionAxisAngle(axis, a.FlagFoldOn ? a.FlagFoldDeg * (Math.PI / 180.0) : Math.PI);
+            KeyQ("Flag", q, 0); KeyQ("Flag", q, clip); SetPose("Flag", "QUATERNION", null, IdentityQ());
+            string description = a.FlagFoldOn ? "held FOLDED (" + BlenderRigAnim.PyFixed(a.FlagFoldDeg, 0) + " deg at the top hinge)" : "held below the keel";
+            s.Logs4.Add("VEHICLE FLAG clip: banners " + description + " through Spin 0.." + clip + " — visible/deployed at idle only");
         }
 
         // ---- the WHEELS: rolling contact, the spoke-symmetry snap, the rotors keyed every frame
@@ -306,19 +484,7 @@ public static partial class BlenderVehicleRig
 
         if (anyFrameSet && !EvaluateObjects(s, s.FrameCurrent)) return;
         if (anyFrameSet) { EvaluatePose(s.FrameCurrent); ad.PoseMats = VehiclePoseMats(ad); }
-        foreach (var k3 in dirty) BlenderFCurve.RecalcHandles(curves[k3]);
-
-        // the curves into the action, every Spin key LINEAR (the handles stay where the auto-clamped recalculation put them)
-        var slot = act.Slots.FirstOrDefault();
-        foreach (var k3 in curveOrder)
-        {
-            var fc = new BlenderRigAnim.FCurveData { DataPath = "pose.bones[\"" + k3.bone + "\"]." + k3.prop, Index = k3.index, Bone = k3.bone, Prop = k3.prop };
-            foreach (var k in curves[k3]) fc.Keys.Add(new BlenderRigAnim.KeyData { Frame = k.Frame, Value = k.Value, LeftX = k.LeftX, LeftY = k.LeftY, RightX = k.RightX, RightY = k.RightY, Interpolation = "LINEAR" });
-            slot.FCurves.Add(fc);
-        }
-        // Action.frame_range: the keys' extent, (0, 0) for an action without keys (Blender's dump)
-        if (curveOrder.Count > 0) { act.FrameStart = curves.Values.Min(l => l[0].Frame); act.FrameEnd = curves.Values.Max(l => l[l.Count - 1].Frame); }
-        else { act.FrameStart = 0f; act.FrameEnd = 0f; }
+        foreach (var x in authored) x.Finish();
 
         // strip the leftovers: every object that is neither a kept mesh nor the armature
         var keep = new HashSet<BlenderRigAnim.SceneObject>(st.Objs) { arm };

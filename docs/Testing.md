@@ -2210,6 +2210,38 @@ no-rock control (`fx_e_groundeval_off`) still rolls at -960 degrees. Three unit 
 the two rock cases fail before the fix and all pass afterwards (1,948 tests). All 160 independent scenes match Blender after the
 fix, including every animation key, on both CLR and Unity's 64-bit Mono.
 
+**Step (e), stage 4, part e2: rowing, Furl and the Spin holds (2026-10-17).** `BlenderVehicleRig.Stage4` now models
+vehicle_rig.py 2986-3177: each oar's local vertical/dip axes, the mirrored sweep, lift/rake offsets and per-frame quaternion
+keys over the shared clip; a separate Furl action with sail strike or draped three-joint curl (including reverse), a flying
+or folding flag, and explicit sail/flag Spin holds. Stage 3 retains the measured dip and hinge axes. Furl's range includes
+the longer of its sail and flag endpoints. Both actions preserve Blender's name allocation, slot, curve and key order, auto
+handles and final LINEAR interpolation; the existing purge removes colliding `.001` actions as Blender does.
+
+The native fixtures `fx_e2_rowing` and `fx_e2_rowing_still` distinguish key insertion from evaluation: rowing never calls
+frame_set, so the scene can remain at frame 1 despite keys through frame 24. With the rock's shared 60-frame clip, a 24-frame
+oar period repeats twice (round(2.5) is even). `fx_e2_stances` combines a reversed 360-degree curl, sag .98, a Y yard, a folding
+flag with a different endpoint, and a wheel that evaluates Spin. `fx_e2_sail_strike`, `fx_e2_sail_curl`, `fx_e2_flag_flying`
+and `fx_e2_flag_fold` cover the separate stances and holds; `fx_e2_action_names` collides with both authored names;
+`fx_e2_clamps` post-edits blank frames, NaN curl and infinite sag; `fx_e2_missing` has no found sail/flag and creates no Furl.
+
+Furl exposes a signed-zero rule in original-pose write-back: a constant negative-zero Spin channel cannot overwrite the
+positive zero explicitly restored after authoring the stance. A nonzero evaluation followed by zero must still write that
+zero. The lazy evaluator records actual frame_set calls and replays the intervening values only for that zero ambiguity;
+it keeps handle recalculation outside per-frame loops. Unit cases cover wheel evaluation versus no frame_set, both sail/flag
+modes, per-frame rowing, Python argument defaults/clamps, and limit checks only when the relevant parts exist. All 1,965
+tests pass. Non-finite rowing angles and clips beyond 100,000 frames are left by name; e3 still owns Deploy and Recoil.
+
+FULL=1 VEHICLERIG_KEYS=1: 24 saved recipes and 118 fixture jobs run natively; 21 of 24 recipes and 130 of 142 jobs match
+through stage 4 (499,914 rows). Twelve named deferrals: two FBX, two non-UTF-8 names files, the infinite blade roll, six e3
+jobs and the long-Spin limit. Another 160 deterministic random e2 scenes vary banks, rake/dip/lift, roll/stretch, clip periods,
+curl/sag/reverse, flag folds, wheel/rotor evaluations and source action collisions; every key matches on CLR and Unity's
+64-bit Mono. The previous 160 independent e1 scenes also still match. Ten temporary implementation plants (missing sweep
+mirror, wrong lift sign, full instead of half sweep, omitted drape, omitted reverse, omitted strike, wrong flag hold,
+unallocated action names, reversed quaternion composition and unconditional zero write-back) are all caught by native fixtures.
+The drill now requires intact row and Furl controls and nine S4_E2* counterexamples. Changed key values/interpolation repair
+both FC hashes and the outer seal, so they must be rejected by the model; together with the existing controls, all 136
+damaged-evidence kinds are refused (129 without K rows). The stage-four census reports rowing, Furl and curled sails separately.
+
 Review of PR #176 (2026-10-15): a full run found the organ gun's newly recorded custom-normal shorts differed after
 stage one's loose split. Blender's separate operator decodes the source BMesh normals into a vector layer and
 re-encodes that layer on each copied component; copying the original shorts misses that quantization. The model now

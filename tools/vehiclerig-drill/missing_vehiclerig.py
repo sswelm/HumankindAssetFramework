@@ -11,7 +11,7 @@ import os, sys, hashlib
 out = sys.argv[1]
 os.makedirs(out, exist_ok=True)
 jobs = [l.rstrip("\r") for l in open(sys.argv[2], encoding="utf-8").read().split("\n") if l.startswith("JOB\t") or l.startswith("FAST\t")]
-lines = None; stage3_lines = None
+lines = None; stage3_lines = None; e2_seeds = {}
 for d in sys.argv[3:]:
     rows = [l.rstrip("\r") for l in open(d, encoding="utf-8").read().split("\n") if l.strip()]
     starts = [i for i, l in enumerate(rows) if l.startswith("JOB\t")] + [len(rows)]
@@ -23,6 +23,7 @@ for d in sys.argv[3:]:
         src_ok = job0 is not None and job0.split("\t")[3].lower().rsplit(".", 1)[-1] in ("glb", "gltf")
         soup = any(l.startswith("LOG\t2\tVEHICLE RIGGING ") or l.startswith("LOG\t2\tVEHICLE SHROUD ") for l in block)
         if key0 == "fx_r_wheels" and "STAGE\t3" in block: stage3_lines = block
+        if key0 in ("fx_e2_rowing", "fx_e2_stances") and "STAGE\t4" in block: e2_seeds[key0] = block
         if lines is None and src_ok and not soup and "STAGE\t5" in block and any(l.startswith("VG\t") for l in block) and any(l.startswith("FC\t") for l in block) and any(l.startswith("X\tGLB\t") for l in block):
             lines = block
 if lines is None:
@@ -241,6 +242,45 @@ i_pb4 = first(lambda l: l.startswith("PB\t4\t") and l.split("\t")[2].startswith(
 write("S4_PB_euler", with_field(i_pb4, 12, flip_bits(lines[i_pb4].split("\t")[12])))
 write("S4_PB_mode", with_field(i_pb4, 3, "QUATERNION"))
 i_act4 = first(lambda l: l.startswith("ACT\t4\t")); write("S4_ACT_range", with_field(i_act4, 4, flip_bits(lines[i_act4].split("\t")[4])))
+
+# Supported e2 controls: repair BOTH the key hashes and the envelope so a changed key reaches the model comparison.
+def curve_change(name, action, bone, component, interpolation=False):
+    i = first(lambda l: l.startswith("FC\t4\t") and l.split("\t")[2] == action and l.split("\t")[4] == 'pose.bones["%s"].rotation_quaternion' % bone and l.split("\t")[5] == str(component))
+    fc = lines[i].split("\t"); identity = fc[2:6]; changed = list(lines)
+    kr = [j for j, l in enumerate(lines) if l.startswith("K\t4\t") and l.split("\t")[2:6] == identity]
+    if kr:
+        k = changed[kr[0]].split("\t")
+        if interpolation: k[12] = "BEZIER"
+        else: k[7] = flip_bits(k[7])
+        changed[kr[0]] = "\t".join(k)
+        keys = [changed[j].split("\t") for j in kr]
+        word = lambda h: bytes.fromhex(h)[::-1]
+        co = b"".join(word(k[c]) for k in keys for c in (6, 7))
+        left = b"".join(word(k[c]) for k in keys for c in (8, 9))
+        right = b"".join(word(k[c]) for k in keys for c in (10, 11))
+        meta = "|".join("/".join(k[12:16]) for k in keys).encode("utf-8")
+        fc[7] = hashlib.sha256(co).hexdigest(); fc[8] = hashlib.sha256(left + right + meta).hexdigest()
+    else:
+        field = 8 if interpolation else 7; fc[field] = flip_bits(fc[field])
+    changed[i] = "\t".join(fc); write(name, changed)
+
+for suffix, seed in (("row", "fx_e2_rowing"), ("furl", "fx_e2_stances")):
+    if seed not in e2_seeds: raise RuntimeError("no supported e2 seed: " + seed)
+    lines = e2_seeds[seed]
+    job = next(j for j in jobs if j.split("\t")[1] == seed)
+    open(os.path.join(out, "jobs_e2_" + suffix + ".txt"), "w", encoding="utf-8", newline="\n").write(job + "\n")
+    write("intact_e2_" + suffix, lines)
+    if suffix == "row":
+        curve_change("S4_E2ROW_quat", "Spin", "Oar_000", 0)
+        curve_change("S4_E2ROW_linear", "Spin", "Oar_000", 0, True)
+        i = first(lambda l: l.startswith("PB\t4\tOar_000\t")); write("S4_E2ROW_pose", with_field(i, 7, flip_bits(lines[i].split("\t")[7])))
+        i = first(lambda l: l.startswith("LOG\t4\tVEHICLE ROWING clip:")); write("S4_E2ROW_log", replace(i, lines[i] + " (changed)"))
+    else:
+        curve_change("S4_E2FURL_curl", "Furl", "SailF1", 0)
+        curve_change("S4_E2FURL_linear", "Furl", "SailF1", 0, True)
+        curve_change("S4_E2FURL_flag_hold", "Spin", "Flag", 0)
+        curve_change("S4_E2FURL_sail_hold", "Spin", "Sail", 0)
+        i = first(lambda l: l.startswith("ACT\t4\tFurl\t")); write("S4_E2FURL_range", with_field(i, 4, flip_bits(lines[i].split("\t")[4])))
 for name in sorted(os.listdir(out)):
-    if name.endswith(".txt") and name not in ("intact.txt", "jobs.txt", "jobs_exit.txt", "jobs_fast.txt", "jobs_s3.txt", "intact_s3.txt"):
+    if name.endswith(".txt") and not name.startswith(("jobs", "intact")):
         print(name[:-4])
