@@ -414,7 +414,7 @@ public static partial class VehicleProbe
     }
 
     /// <summary>ED_armature_ebone_roll_to_vector(bone, align_axis, false).</summary>
-    static float RollToVector(float[] head, float[] tail, float[] alignAxis)
+    internal static float RollToVector(float[] head, float[] tail, float[] alignAxis)
     {
         float nx = (float)(tail[0] - head[0]), ny = (float)(tail[1] - head[1]), nz = (float)(tail[2] - head[2]);
         if (NormalizeV3Blender(ref nx, ref ny, ref nz) <= 1.1920929e-7f) return 0f;

@@ -2068,6 +2068,55 @@ The FULL recipe/fixture run with key rows compares 93 of 102 jobs through stage 
 and 76 fixtures equal, five recipes left for later stage-three branches, two FBX sources, and two names-file
 decoding cases explicitly left to Blender. The new directory and error-precedence fixtures compare exactly.
 
+**Step (d), stage 3 of item (5), part d4: the rotors (2026-10-17).** Against vehicle_rig.py 1545-1608 and the cluster bone loop.
+Each non-empty group (the main rotors, then the tail rotors) is ONE cluster appended after the wheel clusters, its bone named on
+from theirs (`Wheel_%02d`). The pivot: per name `find()` (a missing one is the stage 3 exit), the parts' world boxes, their
+centres summed in float32 from zero and times `1.0f / len` (mathutils' Vector division). MAIN: the hub is the part whose centre
+lies nearest that mean (`min` keeps the first of a tie), the pivot its box centre, the axle its vertices' least-variance direction:
+`np.cov` of the points through `matrix_world` minus their mean, `np.linalg.eigh`, the first eigenvector's components as float32,
+`normalized()`. Blender's numpy 2.3.4 has no external BLAS: `cov` is a sequential mean, a sequential `average`, `X -= avg`, a
+sequential `dot` and `* (1 / (n - 1))`; `eigh` is lapack_lite's DSYEVD('V', 'L'), which for a 3x3 runs DSYTD2, DSTEQR (implicit
+QL/QR, its selection sort) and DORM2R - ported line for line in `editor/BlenderNumpy.cs` (f2c LAPACK 3.2.2, the old DNRM2's
+scale/ssq) and matched bit for bit, covariance, eigenvalues, eigenvectors and axle, on 3,000 Blender-numpy clouds of ten shapes
+(random boxes, flat and banded discs, the same turned, blade strips, near lines, axis boxes, centimetre models, tiny clouds)
+under .NET and Unity's Mono; ten of them pin it in `Tests/BlenderNumpyTests.cs`. Branches it does not port (DSYEVD's, DLARFG's
+or DLARTG's rescaling of a tiny or huge entry, DSTEQR's non-convergence, a covariance of fewer than two points or a non-finite
+one) leave the job to Blender by name; no recipe or fixture reaches them. TAIL: the pivot is the mean, the axle 90 degrees about
+the vertical from the boom - `(0, 0, 1) x (model centre - mean)` flattened to horizontal, the model centre the mean of every mesh's
+box centre - or (0, 1, 0) when that is shorter than 1e-6. `axis_arg` (argv[6], the wheels' override) forces the main axle,
+`tail_axis_arg` (argv[28].upper() when not blank) the tail's; a forced main axle skips the eigh (the script computes it and
+discards it, catching any failure). The tail trim (argv[29], [30]) when either exceeds 1e-6: `Vector.rotate(Quaternion((0, 0, 1),
+radians(yaw)))` - `angle_wrap_rad` in float32, `normalize_qt_qt`, `quat_to_mat3`, `mul_m3_v3` -, then the pitch about `(0, 0, 1) x
+axle` when that is longer than 1e-6, then `normalize()`. The bones: the main rotor's tail along `ax * -1.0 * max(0.05, extent *
+0.25)`; the tail fan's along the in-disc direction nearest up (`(0, 0, 1) - ax * ax.z`, or `(0, 1, 0) - ax * ax.y` below 1e-3,
+normalized) with `align_roll(ax x that)` - `ED_armature_ebone_roll_to_vector`, the importer's port. Two VEHICLE lines per group,
+the second with the axle as Python's `repr` of a tuple. Measured: 20 of the 24 recipes equal row for row through stage 3 - Bell
+(the main axle forced Z), RAH-66 (the hub's eigh axle, an eight-part tail) and the Ilya Muromets (a tail rotor, a preserve part)
+new, equal on the first run. Fixtures for the branches no recipe takes: `fx_r_rotor` (a tilted 16-sided mast hub with an action
+- transform_apply bakes the action's first key and leaves the world at the identity -, two blades, the hub also a wheel and a
+blade also a turret part, a three-part tail trimmed yaw 12.5 / pitch -7.25, the wave rock), `fx_r_rotor_forced` (the main forced
+X beside a wheel, the tail forced Z: the in-disc fallback to +Y, the yaw leaving Z as it is and no pitch axis),
+`fx_r_rotor_centred` (two unit-cube blades tied on their distance - the first is the hub, three equal eigenvalues - and a tail
+above the model's centre: the (0, 1, 0) axle), `fx_r_missing_rotor` (the stage 3 exit) and the argument variant
+`fx_r_tail_args` (the tail axis "x", the trim yaw "-inf" and pitch "nan": a NaN axle that `normalize()` zeroes, `align_roll` on a
+zero vector) - all equal on the first run. Thirty plants: 27 caught on their jobs; `matrix_world @ v.co` replaced by the
+bare vertex is equivalent (every mesh's world is the identity after transform_apply, the animated mast's too); dropping
+`X -= avg` and dividing by n instead of n - 1 move only bits the axle's float32 hides, and the unit test catches both, with a
+descending eigen sort and a dropped DLARTG sign fix. 87 of 89 fixture jobs and 107 of 113 jobs equal through stage 3 (FULL,
+455,358 rows; left by name: the two oar recipes, the two FBX sources, the two non-UTF-8 names files); 1,885 tests. Next: (d) part d5,
+the oars.
+The source-reading review of d4 traced every operation against the script and Blender's C sources and found no divergence (the
+plain wheels' path byte-identical, the forced main axle's skipped eigh equivalent). Its gaps: the hub chosen after a part listed
+before it was reached only by RAH-66 - `fx_r_rotor` now lists a blade first -; no tail-only rig - `fx_r_tail_only` -; and the main
+hub of fewer than two vertices was declined although the script handles it: Blender's numpy (measured) gives an all-NaN covariance
+for one point, `eigh` raises LinAlgError (DSTEQR never converges) and the script's `except` takes the axis of least spread of the
+parts' centres - `sum((c[i] - mean[i]) ** 2)` in Python floats (`**` is the C runtime's `pow`, now `BlenderTrig.Pow`), `min` over
+range(3) keeping the first of a tie - with axle_src "least-spread (numpy missing)". Ported, with `fx_r_rotor_point` (a POINTS
+primitive of one vertex as the hub, listed second, strictly nearest the mean) equal; two plants on it caught (the most spread
+instead of the least, the first listed part as the hub). A unit test pins Eigh3 on a zero matrix (the identity, as numpy returns
+it) and its decline on NaN; the scaling guards are documented unreachable from float32 coordinates. After: 89 of 91 fixture jobs
+and 109 of 115 jobs equal through stage 3 (FULL, 455,410 rows); 1,886 tests.
+
 Review of PR #176 (2026-10-15): a full run found the organ gun's newly recorded custom-normal shorts differed after
 stage one's loose split. Blender's separate operator decodes the source BMesh normals into a vector layer and
 re-encodes that layer on each copied component; copying the original shorts misses that quantization. The model now
