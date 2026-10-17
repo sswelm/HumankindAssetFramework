@@ -2004,6 +2004,70 @@ The corrected parser matches all 3,080 independent cases; 1,854 unit tests pass.
 compares 70 of 80 jobs through stage 3 (454,499 rows): all 56 fixtures and 14 saved recipes equal, eight recipes left
 by name for later stage-three branches and two for the FBX importer.
 
+**Step (d), stage 3 of item (5), part d3: the turret, the gun assembly, the trails (2026-10-16).** Against vehicle_rig.py
+1657-1850. `_combined_bbox`: each part's world box, `min(c - s/2)` and `max(c + s/2)` over Python floats, the Vectors'
+`(mn + mx) / 2.0` and `mx - mn` in float32 - one `Turret` bone at the turret parts' centre, its tail up by `max(0.05, extent *
+0.25)` (`find()`: a missing name is the stage 3 exit). The gun assembly is the guns, then the muzzles not already listed (the
+TUBE), then the cradles (one `Gun` bone for all of it, on the Turret when there is one). With four or more tube vertices (their
+world points by `Matrix @ Vector`, per part in list order and per vertex in index order) the longest extent's axis (the first
+on a tie) gives the two ends - `max`/`min` keep the FIRST point of a tie - and the end nearer the body bone's head is the BREECH;
+a marked brake pins the muzzle at its point farthest from the breech; the head sits at `breech + (muzzle - breech) * gun_pivot`
+in float32, and the script prints the pivot, the gun-local fire origin and, over the WHOLE assembly, the GUNSPAN line (the
+breech and muzzle bone-local, and the extent `max - min` of the points' `dot` with the span's normalized direction, in double).
+mathutils' rules, from the source: `length` and `dot` sum float32 products in double from the last component; `normalized()`
+sums the SQUARES in double (`len_squared_vn`) and multiplies by `1.0f / float(sqrt)`; `cross()` is float32. Under `recoil_dist >
+0` with a tube: the bore direction, the slide `|bore| * recoil_dist`, the arc radius `slide / tan(radians(3.0))` (the tangent as
+Blender's Python computes it, 0.05240777928304121), the arc axis `bore x Z` (`bore x Y` when that is shorter than 1e-4, a vertical
+bore), the pivot `tube centre + normalize(axis x bore) * R`, a `RecoilArm` bone there on the Gun and a `Barrel` bone at the tube's
+centre on it carrying the tube and the brake (the cradle stays on Gun). The trail bones: per trail name (`find()`), the arm's
+points, fewer than 4 skipped, its longest axis, the end nearer the body bone's head (`<=`) the HINGE, a zero-length arm
+skipped, `Trail_%02d` by the name's index (skipped names keep theirs), the tail `max(len * 0.5, 0.05)` down the arm. Measured: 17
+of the 24 recipes equal row for row through stage 3 - M114 (recoil, a cradle, two trails), the Wespe (a gun, pivot 0.36) and the
+Jagdpanzer (its static tracks rig as body parts since d1's review) new, equal on the first run -; `fx_r_turret` (two turret
+parts, a gun on the turret with a brake capping the tube's far end and recoil, a trail arm, a three-vertex trail and a trail of
+four coincident vertices, neither boned), `fx_r_cradle_only` (a cradle and no tube: the span from the cradle, recoil on but no
+split), `fx_r_vertical` (an upright tube: the arc axis from the Y fallback), `fx_r_missing_turret` / `fx_r_missing_trail` (the
+stage 3 exits) equal on the first run. `fx_r_turret`'s first tube put its offset through the node scale, so the brake sat near
+the breech, not at the far end its comment claimed - every rule still ran equal, but the fixture now has the geometry its
+comment names. The same pass found thirteen more dials Python reads among the names (`float()` of argv 29, 30, 32, 34, 35, 38,
+43, 44, 47, `int(float())` of 33, 39, 40, 45): a bad one now dies where Python reads it, in argv order with the names files and
+the reduce dials (`fx_d_trail_frames`: int(float("nan")), `fx_d_gun_pivot`: float("x")). Ten plants, one per rule, each caught on
+its job (the breech end, the brake's pin, the brake on the tube, the pivot, the gun on the turret, the recoil radius, the vertical
+bore's axis fallback, the trail hinge, the trail's four-vertex minimum, the dial death). 63 of 63 fixture jobs and 80
+of 87 jobs equal (FULL, 454,850 rows); 1,854 tests.
+The source-reading review of d3 found no divergence in its arithmetic, branches, lines, bones or overrides (both breech ends,
+both hinge ends, the marked tip, the vertical fallback, recoil with a cradle and the exits all traced), but the NAMES FILES were
+not read as Python reads them: `open(path, encoding="utf-8")` iterated by line - universal newlines, a BOM kept as U+FEFF on the
+first name (it is neither a space nor a newline), each line `str.strip()`ped (which takes \x1c-\x1f, .NET's Trim() does not) - and
+open()'s errors: an empty path ("@" alone) is `FileNotFoundError: ... ''`, a directory `PermissionError: [Errno 13] Permission
+denied`, where the C# crashed with ArgumentException / UnauthorizedAccessException (both measured in Blender's Python). A file
+that is not UTF-8 dies of a UnicodeDecodeError whose text names the byte's offset in the reader's chunk: not modelled, the job is
+left to Blender by name (`Args.Unsupported`, only when nothing earlier in argv died). Fixtures: `fx_r_names_ws` (a line wrapped
+in \x1c..\x1f finds its wheel), `fx_r_names_bom` (the BOM stays: the wheel is not found, the exit), `fx_d_names_empty`,
+`fx_d_names_dir`, `fx_d_dial_before_names` (a dial dying before a later names file). The review's unexercised d3 branches got
+fixtures too: `fx_r_turret` now carries the rock (RootHull under the turret, gun and trail), a turret part also a wheel, the brake
+also listed as a gun and a mantlet as gun and cradle (the de-duplication), and its three-vertex trail first (the arm is
+Trail_01); `fx_r_spike` (a three-vertex brake and no gun under recoil: fewer than 4 tube points, the defaults);
+`fx_r_gunpoint` (a tube of four coincident vertices: no GUNSPAN, a zero bore - and stage 4 then DIES dividing by it,
+`DIES:4:`); `fx_r_pivot_end` (the pivot at the muzzle under recoil); `fx_r_turret`'s Ring now rings the dome. Two script
+defects found on the way, reproduced bit for bit and recorded in the backlog. Plants: the old Trim(), the BOM stripped, the
+directory's PermissionError (the drill fails on each target). After: 71 of 71 fixture jobs and 88 of 95 jobs equal
+through stage 3 (FULL, 454,970 rows); 1,854 tests.
+
+Critical review of PR #181 (2026-10-17): the strict names reader's exception handling covered positional arguments but
+not names inside defaultreduce/shroudreduce/windowreduce tags. Directories and non-UTF-8 files could escape as CLR
+exceptions, even when Python had already stopped at an earlier dial or tag. Both paths now use the same error
+classification; reduce tags print str(exception) as the script does, unsupported decoding leaves a named fallback,
+and later tagged files are not opened after an earlier error. Six unit cases and seven native fixtures reproduce
+the original failures, including the first-error precedence. The native cases also exposed that VehicleRigDrill
+rejected Args.Unsupported itself: it now accepts that exact parser-produced reason, while retaining rejection of
+unexpected stage-one declines. Positional UnicodeDecodeError and a tag's caught decode error are both exercised.
+All 1,860 unit tests pass. An independent 64-scene sweep of rotated guns and trails, varied sizes and pivots,
+turrets, cradles, recoil, and wave rock matches Blender through stage 3.
+The FULL recipe/fixture run with key rows compares 93 of 102 jobs through stage 3 (454,974 rows): 17 saved recipes
+and 76 fixtures equal, five recipes left for later stage-three branches, two FBX sources, and two names-file
+decoding cases explicitly left to Blender. The new directory and error-precedence fixtures compare exactly.
+
 Review of PR #176 (2026-10-15): a full run found the organ gun's newly recorded custom-normal shorts differed after
 stage one's loose split. Blender's separate operator decodes the source BMesh normals into a vector layer and
 re-encodes that layer on each copied component; copying the original shorts misses that quantization. The model now

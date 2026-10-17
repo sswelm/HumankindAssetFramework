@@ -54,6 +54,22 @@ Stage 3 (step (d), part d2: the sail, rigging on the sail, the flag):
                      wheel, a jib also a rudder, a burgee sail and flag, an animated sail part, rigging on the sail, a halyard rigging
                      and flag, missing sail and rigging names, a struck flag on the 0.3 floor, a wheel
   fx_r_flagfold      the flag hinged at its top (flagfold=-30|8), a missing flag name, rigging with no sail (stays on the body)
+Stage 3 (step (d), part d3: the turret, the gun assembly, the trails):
+  fx_r_turret        two turret parts, a gun on the turret with a muzzle brake and recoil (RecoilArm + Barrel), a trail arm, a trail of
+                     three vertices and one of four coincident vertices (no bone for either)
+  fx_r_cradle_only   a cradle and no tube (the span from the cradle; recoil on, no split), the gun on the body
+  fx_r_vertical      an upright tube under recoil (the arc's axis from the fallback cross)
+  fx_r_missing_turret / fx_r_missing_trail   find()'s exit in stage 3; fx_d_trail_frames (int(float("nan"))), fx_d_gun_pivot (float("x"))
+  fx_r_turret also: the rock's RootHull under the turret, gun and trail; a turret part also a wheel; the brake also a gun, a mantlet gun and
+                     cradle (the de-duplication); the three-vertex trail first (the arm is Trail_01)
+  fx_r_spike         a three-vertex muzzle brake and no gun under recoil (fewer than 4 tube points: the defaults)
+  fx_r_gunpoint      a tube of four coincident vertices under recoil (no GUNSPAN line, a zero bore; stage 4 then dies dividing by it: DIES:4:)
+  fx_r_pivot_end     the pivot at the muzzle under recoil (the script's bore from gc ~ muzzle - an open script defect, reproduced)
+  fx_x_default_names_dir / fx_x_shroud_names_dir / fx_x_window_names_dir: directory names in reduce tags print their caught error
+  fx_d_dial_before_tag_names / fx_x_tag_before_bad_names: an earlier error wins over a later non-UTF-8 tagged names file
+  fx_d_pos_names_utf8 / fx_x_tag_names_utf8: native decode death/exit; the C# model explicitly leaves decoding to Blender
+  fx_r_names_ws / fx_r_names_bom   a names file line wrapped in \\x1c..\\x1f (stripped) / starting with a BOM (kept: the exit)
+  fx_d_names_empty / fx_d_names_dir / fx_d_dial_before_names   open("") / open(a directory) / a dial dying before a later names file
   fx_r_flat_sail     a zero-height sail taking the 1e-6 fold-height clamp, all rigging missing, flagfold=| taking its defaults
 Argument variants (recipes_exit, post-edited by --exits): fx_r_numeric_pct (the decimal above 0.5 whose rounding decides whether
   to weld); fx_d_sailfold_overflow (1e309 becomes infinity before int() raises); fx_d_unicode_fold (a Kawi digit accepted before
@@ -184,6 +200,13 @@ def box_with_double(r, name, material):
     pos[4] = (0.500005, -0.5, -0.5)   # the corner 5e-6 out; the weld keeps the twin's position (index 8, measured) and the extreme goes
     pos.append((0.5, -0.5, -0.5))
     idx = [0, 1, 3, 0, 3, 2, 4, 6, 7, 4, 7, 5, 0, 4, 5, 0, 5, 1, 2, 3, 7, 2, 7, 6, 0, 2, 6, 0, 6, 4, 1, 5, 7, 1, 7, 3, 8, 6, 5]
+    prim = {"attributes": {"POSITION": r.b.accessor(pos, "f", "VEC3")}, "indices": r.b.accessor(idx, "H", "SCALAR", minmax=False), "material": material}
+    r.meshes.append({"name": name, "primitives": [prim]})
+    return len(r.meshes) - 1
+
+
+def raw_mesh(r, name, material, pos, idx):
+    """A mesh of the given glTF positions and triangle indices (one primitive)."""
     prim = {"attributes": {"POSITION": r.b.accessor(pos, "f", "VEC3")}, "indices": r.b.accessor(idx, "H", "SCALAR", minmax=False), "material": material}
     r.meshes.append({"name": name, "primitives": [prim]})
     return len(r.meshes) - 1
@@ -447,6 +470,72 @@ def main(out):
     r.node("Sheet", mesh=mesh); r.node("Flag", mesh=r.mesh("Flag", at=(3.0, 0.0, 0.0), material=ma))
     recipe(out, "fx_r_flat_sail", r.write(models, "fx_r_flat_sail"), [("Hull", 0, {}), ("Sheet", 14, {}), ("GhostRope", 15, {}), ("Flag", 17, {})],
            sailFoldIdle=True, flagFoldOn=True, sub="recipes_exit")
+    # ---- stage 3, part d3 (the turret, the gun assembly, the trails); glTF is Y-up: Blender's z is the glTF y, its y the glTF -z
+    # fx_r_turret: two turret parts (one Turret bone at their combined box), a tube along x on the turret with a wide muzzle brake at its
+    # far end (the brake pins the tip) and recoil at 0.2 (RecoilArm + Barrel; the brake rides the Barrel), the pivot at 0.3; a trail arm
+    # (a bone hinged at its end nearer the body), a trail of three vertices and one whose four vertices coincide (no bone for either)
+    r = Rig(); ma = r.material("Steel", (0.4, 0.4, 0.45))
+    r.node("Hull", mesh=r.mesh("Hull", at=(-2.0, -1.0, -1.0), size=2.0, material=ma))
+    r.node("Dome", mesh=r.mesh("Dome", at=(-0.5, 1.0, -0.5), size=1.0, material=ma)); r.node("Ring", mesh=r.mesh("Ring", at=(-0.1, 1.0, -0.1), size=0.2, material=ma), scale=[7.0, 1.0, 7.0])   # x, z -0.7 .. 0.7 round the dome
+    r.node("Tube", mesh=r.mesh("Tube", at=(0.5 / 15.0, 1.4, -0.1), size=0.2, material=ma), scale=[15.0, 1.0, 1.0])   # x 0.5 .. 3.5 (the node scale scales the offset too)
+    r.node("Brake", mesh=r.mesh("Brake", at=(3.5, 1.3, -0.2), size=0.4, material=ma))
+    r.node("Arm", mesh=r.mesh("Arm", at=(-1.0, -0.8, 0.2), size=0.2, material=ma), scale=[1.0, 1.0, 20.0])
+    r.node("Stub", mesh=raw_mesh(r, "Stub", ma, [(-1.5, -0.8, 0.5), (-1.4, -0.8, 0.5), (-1.5, -0.7, 0.5)], [0, 1, 2]))
+    r.node("Pin", mesh=raw_mesh(r, "Pin", ma, [(-1.8, -0.5, 0.5)] * 4, [0, 1, 2, 0, 2, 3]))
+    r.node("Mantlet", mesh=r.mesh("Mantlet", at=(0.3, 1.3, -0.3), size=0.6, material=ma))
+    recipe(out, "fx_r_turret", r.write(models, "fx_r_turret"),
+           [("Hull", 0, {}), ("Dome", 2, {}), ("Ring", 2, {}), ("Ring", 1, {}), ("Tube", 7, {}), ("Brake", 11, {}), ("Brake", 7, {}), ("Mantlet", 7, {}),
+            ("Mantlet", 12, {}), ("Stub", 10, {}), ("Arm", 10, {}), ("Pin", 10, {})],
+           gunPivot=0.3, recoilDist=0.2, waveEnabled=True, rockDegrees=4.0, rockFrames=15)
+    # fx_r_cradle_only: only a cradle marked (the span from the cradle: no tube), recoil on (no tube: no split); a gun with no turret
+    r = Rig(); ma = r.material("Steel", (0.4, 0.4, 0.45))
+    r.node("Hull", mesh=r.mesh("Hull", at=(-2.0, -1.0, -1.0), size=2.0, material=ma))
+    r.node("Cradle", mesh=r.mesh("Cradle", at=(0.5, 1.0, -0.2), size=0.4, material=ma), scale=[5.0, 1.0, 1.0])
+    recipe(out, "fx_r_cradle_only", r.write(models, "fx_r_cradle_only"), [("Hull", 0, {}), ("Cradle", 12, {})], recoilDist=0.5)
+    # fx_r_vertical: a tube standing upright (its bore along z: the recoil arc's axis takes the fallback cross with y)
+    r = Rig(); ma = r.material("Steel", (0.4, 0.4, 0.45))
+    r.node("Hull", mesh=r.mesh("Hull", at=(-2.0, -1.0, -1.0), size=2.0, material=ma))
+    r.node("Mortar", mesh=r.mesh("Mortar", at=(-0.1, 1.0, -0.1), size=0.2, material=ma), scale=[1.0, 15.0, 1.0])
+    recipe(out, "fx_r_vertical", r.write(models, "fx_r_vertical"), [("Hull", 0, {}), ("Mortar", 7, {})], recoilDist=0.3, gunPivot=0.0)
+    # fx_r_spike: a muzzle brake and no gun (the tube is the brake), a three-vertex one - fewer than 4 tube points: the head stays at the
+    # box centre, nothing printed, recoil on its defaults ((0, -1, 0), a slide of 1)
+    r = Rig(); ma = r.material("Steel", (0.4, 0.4, 0.45))
+    r.node("Hull", mesh=r.mesh("Hull", at=(-2.0, -1.0, -1.0), size=2.0, material=ma))
+    r.node("Spike", mesh=raw_mesh(r, "Spike", ma, [(1.0, 1.2, 0.0), (2.0, 1.2, 0.0), (1.0, 1.4, 0.0)], [0, 1, 2]))
+    recipe(out, "fx_r_spike", r.write(models, "fx_r_spike"), [("Hull", 0, {}), ("Spike", 11, {})], recoilDist=0.4)
+    # fx_r_gunpoint: a tube of four coincident vertices (a zero span: no GUNSPAN line; a zero bore under recoil)
+    r = Rig(); ma = r.material("Steel", (0.4, 0.4, 0.45))
+    r.node("Hull", mesh=r.mesh("Hull", at=(-2.0, -1.0, -1.0), size=2.0, material=ma))
+    r.node("Dot", mesh=raw_mesh(r, "Dot", ma, [(1.5, 1.2, 0.0)] * 4, [0, 1, 2, 0, 2, 3]))
+    recipe(out, "fx_r_gunpoint", r.write(models, "fx_r_gunpoint"), [("Hull", 0, {}), ("Dot", 7, {})], recoilDist=0.4, sub="recipes_exit")   # stage 4 divides by the zero bore: the script dies there
+    # fx_r_pivot_end: the pivot at the muzzle (1.0) under recoil - the script's bore comes from gc ~ muzzle (an open script defect,
+    # recorded in the backlog); the port reproduces it bit for bit
+    r = Rig(); ma = r.material("Steel", (0.4, 0.4, 0.45))
+    r.node("Hull", mesh=r.mesh("Hull", at=(-2.0, -1.0, -1.0), size=2.0, material=ma))
+    r.node("Tube", mesh=r.mesh("Tube", at=(0.5 / 15.0, 1.4, -0.1), size=0.2, material=ma), scale=[15.0, 1.0, 1.0])
+    recipe(out, "fx_r_pivot_end", r.write(models, "fx_r_pivot_end"), [("Hull", 0, {}), ("Tube", 7, {})], recoilDist=0.3, gunPivot=1.0)
+    # names files as Python reads them: a line wrapped in \x1c..\x1f (str.strip() takes them), and one starting with a BOM (kept: the
+    # wheel is not found - the exit)
+    io_w = os.path.join(models, "names_ws.txt"); open(io_w, "w", encoding="utf-8", newline="\n").write("\x1cTire\x1f\n")
+    io_b = os.path.join(models, "names_bom.txt"); open(io_b, "w", encoding="utf-8", newline="\n").write("\ufeffTire\n")
+    for key in ("fx_r_names_ws", "fx_r_names_bom", "fx_d_names_empty", "fx_d_names_dir", "fx_d_dial_before_names"):
+        r = Rig(); ma = r.material("Steel", (0.4, 0.4, 0.45))
+        r.node("Hull", mesh=r.mesh("Hull", material=ma)); r.node("Tire", mesh=r.mesh("Tire", at=(3.0, 0.0, 0.0), material=ma))
+        recipe(out, key, r.write(models, key), [("Hull", 0, {}), ("Tire", 1, {})], sub="recipes_exit")
+    # the missing-part exits in stage 3 (find): a turret name, a trail name the scene has not
+    for key, role in (("fx_r_missing_turret", 2), ("fx_r_missing_trail", 10)):
+        r = Rig(); ma = r.material("Steel", (0.4, 0.4, 0.45))
+        r.node("Hull", mesh=r.mesh("Hull", material=ma)); r.node("Part", mesh=r.mesh("Part", at=(3.0, 0.0, 0.0), material=ma))
+        recipe(out, key, r.write(models, key), [("Hull", 0, {}), ("Part", role, {}), ("Ghost", role, {})], sub="recipes_exit")
+    # The dials read among the names, plus tagged-file failures. Invalid UTF-8 escapes from positional namelist(),
+    # but the reduce tags catch it and print VEHICLE ERROR. Earlier positional/tag errors must win over later files.
+    for key in ("fx_d_trail_frames", "fx_d_gun_pivot", "fx_x_default_names_dir", "fx_x_shroud_names_dir", "fx_x_window_names_dir",
+                "fx_d_dial_before_tag_names", "fx_x_tag_before_bad_names", "fx_d_pos_names_utf8", "fx_x_tag_names_utf8"):
+        r = Rig(); ma = r.material("Steel", (0.4, 0.4, 0.45))
+        r.node("Hull", mesh=r.mesh("Hull", material=ma)); r.node("Tire", mesh=r.mesh("Tire", at=(3.0, 0.0, 0.0), material=ma))
+        recipe(out, key, r.write(models, key), [("Hull", 0, {}), ("Tire", 1, {})], sub="recipes_exit")
+    with open(os.path.join(models, "names_bad_utf8.txt"), "wb") as f:
+        f.write(b"\xff")
     # brightness on three material chains
     r = Rig(); img = r.image("Albedo", rgb=(120, 80, 40)); tex = r.texture(img)
     flat = r.material("Flat", (0.6, 0.4, 0.2)); direct = r.material("Direct", (1.0, 1.0, 1.0), texture=tex); tint = r.material("Tint", (0.5, 0.25, 0.9), texture=tex)
@@ -463,12 +552,29 @@ def set_tag(argv, tag, value):
 
 
 EXITS = {
+    "fx_x_default_names_dir": ("EXIT", lambda a: set_tag(a, "defaultreduce", "@" + os.path.dirname(a[1]).replace("\\", "/") + "|20")),
+    "fx_x_shroud_names_dir": ("EXIT", lambda a: set_tag(a, "shroudreduce", "@" + os.path.dirname(a[1]).replace("\\", "/") + "|20")),
+    "fx_x_window_names_dir": ("EXIT", lambda a: set_tag(a, "windowreduce", "@" + os.path.dirname(a[1]).replace("\\", "/") + "|20")),
+    "fx_d_dial_before_tag_names": ("DIES", lambda a: (a.__setitem__(34, "bad pivot"), set_tag(a, "shroudreduce", "@" + os.path.join(os.path.dirname(a[1]), "names_bad_utf8.txt").replace("\\", "/") + "|20"))),
+    "fx_x_tag_before_bad_names": ("EXIT", lambda a: (set_tag(a, "defaultreduce", "nopipe"), set_tag(a, "shroudreduce", "@" + os.path.join(os.path.dirname(a[1]), "names_bad_utf8.txt").replace("\\", "/") + "|20"))),
+    "fx_d_pos_names_utf8": ("DIES", lambda a: a.__setitem__(4, "@" + os.path.join(os.path.dirname(a[1]), "names_bad_utf8.txt").replace("\\", "/"))),
+    "fx_x_tag_names_utf8": ("EXIT", lambda a: set_tag(a, "shroudreduce", "@" + os.path.join(os.path.dirname(a[1]), "names_bad_utf8.txt").replace("\\", "/") + "|20")),
     # None leaves the job positive: only its argument text is changed after the Lab's builder runs.
     "fx_r_numeric_pct": (None, lambda a: a.__setitem__(54, "0.500000000000000055511151231257827021181583404541015625000000000000000000001")),
     "fx_r_flat_sail": (None, lambda a: set_tag(a, "flagfold", "|")),
     "fx_d_sailfold_overflow": ("DIES", lambda a: a.__setitem__(72, "1e309")),
     "fx_d_unicode_fold": ("DIES", lambda a: (a.__setitem__(72, "\U00011f51"), a.__setitem__(73, "later"))),
     "fx_d_chunk_splice": ("DIES", lambda a: None),
+    "fx_r_names_ws": (None, lambda a: a.__setitem__(4, "@" + os.path.join(os.path.dirname(a[1]), "names_ws.txt").replace("\\", "/"))),
+    "fx_r_names_bom": ("EXIT", lambda a: a.__setitem__(4, "@" + os.path.join(os.path.dirname(a[1]), "names_bom.txt").replace("\\", "/"))),
+    "fx_d_names_empty": ("DIES", lambda a: a.__setitem__(4, "@")),
+    "fx_d_names_dir": ("DIES", lambda a: a.__setitem__(4, "@" + os.path.dirname(a[1]).replace("\\", "/"))),
+    "fx_d_dial_before_names": ("DIES", lambda a: (a.__setitem__(45, "x"), a.__setitem__(63, "@" + os.path.join(os.path.dirname(a[1]), "absent.txt").replace("\\", "/")))),
+    "fx_r_gunpoint": ("DIES", lambda a: None),
+    "fx_r_missing_turret": ("EXIT", lambda a: None),
+    "fx_r_missing_trail": ("EXIT", lambda a: None),
+    "fx_d_trail_frames": ("DIES", lambda a: a.__setitem__(33, "nan")),
+    "fx_d_gun_pivot": ("DIES", lambda a: a.__setitem__(34, "x")),
     "fx_r_missing_wheel": ("EXIT", lambda a: None),
     "fx_r_orphan": ("EXIT", lambda a: None),
     "fx_r_noscene": ("EXIT", lambda a: None),
@@ -498,7 +604,7 @@ EXITS = {
 
 
 # the stage an exit or death fixture stops in, when not stage 1
-STAGE_OF = {"fx_d_chunk_splice": 2, "fx_r_missing_wheel": 3}
+STAGE_OF = {"fx_d_chunk_splice": 2, "fx_r_missing_wheel": 3, "fx_r_missing_turret": 3, "fx_r_missing_trail": 3, "fx_r_names_bom": 3, "fx_r_gunpoint": 4}
 
 
 def exits(jobs_path):

@@ -465,6 +465,19 @@ and the BGM-71 new), 8 left at stage 3 by name, the 2 FBX by name; two fixtures 
 the fold's four bands, a sail part also a wheel, rigging on the sail, missing names, a struck flag; `fx_r_flagfold`: the
 folding flag, rigging without a sail); 63 of 73 jobs equal (FULL, 457,785 rows); nine plants caught; 1,785 tests. Next: (d)
 part d3, the turret, gun, muzzle, cradle and trails.
+(d) part d3 DONE 2026-10-16: the TURRET bone, the GUN assembly (the pivot slid along the tube, a marked brake pinning the tip,
+the published pivot / fire-origin / cradle / GUNSPAN lines, under recoil the RecoilArm + Barrel split) and the TRAIL bones; the
+thirteen dials Python reads among the names (argv 29-47) now die where it does. 17 of 24 recipes equal row for row through
+stage 3 (M114 - recoil, a cradle, two trails -, the Wespe and the Jagdpanzer - its static tracks rig as body parts - new), 5 left
+at stage 3 by name (the rotors and the oars), the 2 FBX by name; 63 of 63 fixture jobs equal; 80 of 87 jobs (FULL, 454,850
+rows); ten plants caught; 1,854 tests. Next: (d) part d4, the rotors.
+- **vehicle_rig.py: two gun-recoil defects** — OPEN (2026-10-16, found porting stage 3 part d3; the C# port reproduces both bit
+  for bit, so fixing them is a script change plus a port change). (1) With `gun_pivot` at 1.0 and recoil on, the bore direction is
+  `(gun_axis[1] - gun_axis[0]).normalized()` with `gun_axis[0]` the head - at the muzzle - so the bore is the float32 residue of
+  muzzle - head: +Y on `fx_r_pivot_end`, exactly zero on the Wespe's coordinates (the RecoilArm then sits on the Barrel, no arc).
+  The bore should come from `gun_bore` (breech -> muzzle). (2) A tube whose points coincide (a zero span) gives a zero bore, and
+  stage 4 dies of `ZeroDivisionError: float division by zero` (`fx_r_gunpoint`, keyed DIES:4:). Neither is reachable on a real
+  gun's geometry at pivots below 1.
 - **rig_anim.py's socket sort exit reads a freed edit bone** — OPEN (2026-10-14, found by the stage 4 fixtures). The
   "would sort BEFORE its parent" error prints `_parent.name` after `bpy.ops.object.mode_set(mode='OBJECT')` has freed
   the edit bones: four Blender runs of `fx_s4_socket_sort` printed the right name once, an empty name once, and twice

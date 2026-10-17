@@ -23,10 +23,12 @@ public class VehicleRigStage2Tests
         Assert.Equal(75.0, a.Reduce["rigging"]); Assert.Equal(95.0, a.Reduce["bodies"]); Assert.Equal(0.0, a.Reduce["oars"]);
         Assert.Equal(0.0, a.Reduce["sails"]); Assert.Equal(95.0, a.Reduce["rudders"]); Assert.Equal(12.5, a.Reduce["detail"]); Assert.Equal(0.0, a.Reduce["wheels"]);
         Assert.Null(a.NamesDie);
-        var argv = Argv(); argv.Add("gunreduce=30"); argv.Add("windowreduce=|99.5"); argv.Add("shroudreduce=|7"); argv.Add("defaultreduce=|x");
+        var argv = Argv(); argv.Add("gunreduce=30"); argv.Add("windowreduce=|99.5"); argv.Add("shroudreduce=|7");
         var b = BlenderVehicleRig.ParseArgs(argv);
         Assert.Equal(30.0, b.Reduce["guns"]); Assert.Equal(95.0, b.Reduce["window"]); Assert.Equal(7.0, b.Reduce["shroud"]);
-        Assert.StartsWith("VEHICLE ERROR: malformed defaultreduce argument", b.TagError);
+        Assert.Null(b.TagError);
+        argv.Add("defaultreduce=|x");
+        Assert.StartsWith("VEHICLE ERROR: malformed defaultreduce argument", BlenderVehicleRig.ParseArgs(argv).TagError);
         // turretreduce= (2026-10-16): percent-only like gunreduce, clamped the same way, absent = 0
         Assert.Equal(40.0, BlenderVehicleRig.ParseArgs(With("turretreduce=40")).Reduce["turrets"]);
         Assert.Equal(95.0, BlenderVehicleRig.ParseArgs(With("turretreduce=150")).Reduce["turrets"]);

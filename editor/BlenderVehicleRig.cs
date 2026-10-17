@@ -36,10 +36,13 @@ public static partial class BlenderVehicleRig
         public string PreDie;                       // an exception before the import (int(float(inf)) of a flagfold frame count), or null
         public string TagError;                     // the first malformed reduce tag's VEHICLE ERROR after the merge (defaultreduce, shroudreduce, gunreduce, turretreduce, windowreduce), or null
         public string NamesDie;                     // a positional names file the script cannot open: the FileNotFoundError it dies of after the merge, or null
+        public string Unsupported;                  // an argument the C# does not read as Python does (a names file that is not UTF-8): left to Blender by name
         public string FoldDie;                      // a sail-fold or oar dial (argv 72, 73, 75, 56-59, read unconditionally) Python cannot parse: the exception, or null
         public string DialsDie;                     // a dial (argv[7..25]) Python cannot parse: the exception it dies of before the orientation, or null
         public string AxisArg = "";                 // argv[6].upper(): the wheels' axle override (X, Y, Z) or anything else = AUTO (the thinnest extent)
         public bool RockOn;                         // the WAVE ROCK is on: a RootHull bone under Root carries everything that would skin to Root
+        public double GunPivot = 0.5;               // min(1, max(0, float(argv[34]))) or 0.5: where along the tube (breech 0 .. muzzle 1) the Gun bone's head sits
+        public double RecoilDist;                   // min(1, max(0, float(argv[38]))) or 0: recoil on (the RecoilArm + Barrel split) when above 0
         public bool SailFold;                       // argv[71].strip() == "1": the Sail bone gets the SailF1..F3 fold chain, the canvas skins by height band
         public bool FlagFoldOn;                     // a flagfold= tag is present: the Flag bone hinges at the flag's top (else it strikes below the keel)
         public double FlagFoldDeg;                  // max(-175, min(175, float(deg))) or 0 when blank (a NaN clamps to 175)
@@ -53,11 +56,34 @@ public static partial class BlenderVehicleRig
         ("flip", 66), ("detail", 69),
     };
 
+    /// <summary>namelist(arg): "@path" = `open(path, encoding="utf-8")` iterated by line (universal newlines: \n, \r, \r\n), each line
+    /// str.strip()ped, the empty ones dropped - a UTF-8 BOM is NOT a newline or a space, so it stays on the first name; else the
+    /// ';'-separated names kept as written, the blank ones dropped. Throws what open() would raise, as .NET's exceptions.</summary>
     static List<string> NameList(string arg)
     {
         if (arg.StartsWith("@", StringComparison.Ordinal))
-            return System.IO.File.ReadAllLines(arg.Substring(1)).Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
-        return arg.Split(';').Where(n => n.Trim().Length > 0).ToList();
+        {
+            var bytes = System.IO.File.ReadAllBytes(arg.Substring(1));
+            string text = new System.Text.UTF8Encoding(false, true).GetString(bytes);   // strict: invalid UTF-8 throws; a BOM decodes to U+FEFF
+            return System.Text.RegularExpressions.Regex.Split(text, "\r\n|\r|\n").Select(VehicleProbe.Input.PyStrip).Where(l => l.Length > 0).ToList();
+        }
+        return arg.Split(';').Where(PyNonBlank).ToList();
+    }
+
+    static bool NamesFileException(Exception e) => e is System.IO.IOException || e is ArgumentException || e is UnauthorizedAccessException;
+
+    // The same open()/decode errors apply to positional names and names inside reduce tags. The callers decide
+    // whether Python lets the exception escape, prints it in a tagged-argument error, or needs a named fallback.
+    static string NamesFileError(Exception e, string arg, out string unsupported)
+    {
+        unsupported = null; string path = arg.Substring(1);
+        if (e is UnauthorizedAccessException) return "PermissionError: [Errno 13] Permission denied: " + PyStrRepr(path);
+        if (e is System.Text.DecoderFallbackException)
+            unsupported = "a names file that is not UTF-8 (Python's UnicodeDecodeError is not modelled)";
+        else if (e is ArgumentException && path.Length > 0)
+            unsupported = "a names file path .NET refuses (Python's OSError is not modelled)";
+        else return "FileNotFoundError: " + PyFileNotFound(path);
+        return null;
     }
 
     /// <summary>The script's reading of its argv (argv[0] = the mode onward): the role lists (@file), the orientation, the tagged
@@ -67,6 +93,7 @@ public static partial class BlenderVehicleRig
         var a = new Args { Mode = argv[0], Input = argv[1], OutGlb = argv.Count > 2 ? argv[2] : "", PreviewFbx = argv.Count > 3 ? argv[3] : "" };
         string At(int i) => i < argv.Count ? argv[i] : "";
         int namesFailureIndex = int.MaxValue;   // positional names and reduce dials are interleaved in the script
+        int unsupportedAt = int.MaxValue;       // a names file the C# leaves to Blender: only when nothing earlier in argv died
         foreach (var (role, index) in NamesArgv)
         {
             List<string> list;
@@ -75,12 +102,33 @@ public static partial class BlenderVehicleRig
                 list = index < argv.Count && PyNonBlank(At(index)) ? NameList(At(index)) : new List<string>();
                 if (index == 4 || index == 5) list = NameList(At(index));   // wheel_names, turret_names: read unconditionally
             }
-            catch (System.IO.IOException) { list = new List<string>(); if (index < namesFailureIndex) { namesFailureIndex = index; a.NamesDie = "FileNotFoundError: " + PyFileNotFound(At(index).Substring(1)); } }   // namelist() opens it in the rig path: the script dies there
+            catch (Exception e) when (NamesFileException(e))
+            {
+                // open() of the path: a missing file or an empty path is FileNotFoundError, a directory (or a denied file) PermissionError;
+                // a file that is not UTF-8 is Python's UnicodeDecodeError, whose text (the byte, its offset in the reader's chunk) is not
+                // modelled - the job is left to Blender by name
+                list = new List<string>();
+                string death = NamesFileError(e, At(index), out string unsupported);
+                if (unsupported != null && a.Unsupported == null) { a.Unsupported = unsupported; unsupportedAt = index; }
+                if (death != null && index < namesFailureIndex) { namesFailureIndex = index; a.NamesDie = death; }
+            }   // namelist() opens it in the rig path: the script dies there
             a.Names[role] = list;
         }
         a.Ignore = new HashSet<string>(a.Names["ignore"], StringComparer.Ordinal);
         // the positional reduce dials, read among the names (vehicle_rig.py 871-922): min(95, max(0, float(x))) when present and
         // non-blank, else 0; float() of a non-number dies there, like a missing names file
+        // the other dials read among the names (vehicle_rig.py 802-860), in argv order: float() of 29, 30, 32, 34, 35, 38, 43, 44, 47 and
+        // int(float()) of 33, 39, 40, 45 when present and non-blank - a value Python cannot parse dies where it is read
+        foreach (var (idx, integral) in new[] { (29, false), (30, false), (32, false), (33, true), (34, false), (35, false), (38, false), (39, true), (40, true), (43, false), (44, false), (45, true), (47, false) })
+        {
+            if (!(argv.Count > idx && PyNonBlank(At(idx)))) continue;
+            string death = null;
+            if (!TryPyFloat(At(idx), out double dv)) death = "ValueError: could not convert string to float: " + PyStrRepr(At(idx));
+            else if (integral && (double.IsNaN(dv) || double.IsInfinity(dv))) death = double.IsNaN(dv) ? "ValueError: cannot convert float NaN to integer" : "OverflowError: cannot convert float infinity to integer";
+            if (death != null) { if (idx < namesFailureIndex) { namesFailureIndex = idx; a.NamesDie = death; } continue; }
+            if (idx == 34) a.GunPivot = PyMin(1.0, PyMax(0.0, dv));
+            if (idx == 38) a.RecoilDist = PyMin(1.0, PyMax(0.0, dv));
+        }
         foreach (var (role, idx) in new[] { ("rigging", 50), ("structure", 52), ("bodies", 54), ("oars", 61), ("sails", 62), ("rudders", 64), ("wheels", 65), ("flip", 67), ("preserve", 68), ("detail", 70) })
         {
             a.Reduce[role] = 0.0;
@@ -95,6 +143,8 @@ public static partial class BlenderVehicleRig
         {
             string role = tag == "shroudreduce" ? "shroud" : tag == "windowreduce" ? "window" : tag == "defaultreduce" ? "default" : null;
             if (role != null) a.Names[role] = new List<string>();
+            // Python never opens a later tagged file after a positional error or the first malformed tag.
+            if (a.NamesDie != null || a.Unsupported != null || a.TagError != null) continue;
             string arg = argv.FirstOrDefault(x => x.StartsWith(tag + "=", StringComparison.Ordinal));
             if (arg == null) continue;
             string spec = arg.Substring(tag.Length + 1); int bar = spec.LastIndexOf('|');
@@ -114,7 +164,7 @@ public static partial class BlenderVehicleRig
                     {
                         double pct = VehicleProbe.Input.PyFloat(spec.Substring(bar + 1));
                         if (double.IsNaN(pct) || double.IsInfinity(pct)) err = "not a finite percent: " + PyStrRepr(arg);
-                        else { a.Reduce[role] = PyClamp95(pct); if (namesText.Trim().Length > 0) a.Names[role] = NameList(namesText); }
+                        else { a.Reduce[role] = PyClamp95(pct); if (PyNonBlank(namesText)) a.Names[role] = NameList(namesText); }
                     }
                 }
                 else
@@ -122,7 +172,7 @@ public static partial class BlenderVehicleRig
                     if (bar < 0) err = "not enough values to unpack (expected 2, got 1)";   // `names, pct = spec.rsplit("|", 1)`
                     else
                     {
-                        if (namesText.Trim().Length > 0) a.Names[role] = NameList(namesText);
+                        if (PyNonBlank(namesText)) a.Names[role] = NameList(namesText);
                         a.Reduce[role] = PyClamp95(VehicleProbe.Input.PyFloat(spec.Substring(bar + 1)));   // min(95, max(0, float(pct))): inf and nan pass here
                     }
                 }
@@ -130,7 +180,12 @@ public static partial class BlenderVehicleRig
             // float() errors quote the offending percent with Python's repr(), including its quote choice and Unicode
             // escapes. The shared probe parser's legacy error formatter is not the script's exact representation.
             catch (FormatException) { err = "could not convert string to float: " + PyStrRepr(tag == "gunreduce" || tag == "turretreduce" ? spec : spec.Substring(bar + 1)); }
-            catch (System.IO.IOException) { err = PyFileNotFound(namesText.Trim().Substring(1)); }
+            catch (Exception e) when (NamesFileException(e))
+            {
+                string death = NamesFileError(e, namesText, out string unsupported);
+                if (unsupported != null) a.Unsupported = unsupported;
+                else err = death.Substring(death.IndexOf(": ", StringComparison.Ordinal) + 2);   // str(exception), without its type
+            }
             if (err != null && a.TagError == null)
                 a.TagError = tag == "gunreduce" || tag == "turretreduce" || tag == "windowreduce" ? "VEHICLE ERROR: malformed " + tag + " argument: " + err
                            : "VEHICLE ERROR: malformed " + tag + " argument: " + arg + " (" + err + ")";
@@ -186,6 +241,7 @@ public static partial class BlenderVehicleRig
         // float(argv[21]))) or 2.4 when blank; a frame count of 0 or less takes `frames` (max(2, int(argv[7])) >= 2) once either
         // amplitude is positive; rock_on = (rock_deg > 0 or pitch > 0) and rock_frames >= 2. Python's min/max keep their FIRST
         // argument unless the second compares past it, so a NaN amplitude clamps to 45.
+        if (a.Unsupported != null && unsupportedAt > namesFailureIndex) a.Unsupported = null;   // Python died earlier, at a name or dial
         a.AxisArg = PyUpper(At(6));
         a.SailFold = argv.Count > 71 && VehicleProbe.Input.PyStrip(At(71)) == "1";
         // the sail-fold and oar dials, read unconditionally after the reduce tags and before the dials (vehicle_rig.py 1010-1017):
@@ -249,7 +305,7 @@ public static partial class BlenderVehicleRig
     static string Py(double v, int digits) => BlenderRigAnim.PyFixed(v, digits);
 
     /// <summary>str(FileNotFoundError) for open(path): "[Errno 2] No such file or directory: 'path'".</summary>
-    static string PyFileNotFound(string path) => "[Errno 2] No such file or directory: " + VehicleProbe.Input.PyRepr(path);
+    static string PyFileNotFound(string path) => "[Errno 2] No such file or directory: " + PyStrRepr(path);
 
     /// <summary>is_icosphere_artifact: the importer's bone-shape placeholder by signature - the name, an icosphere's vertex count,
     /// a sphere's near-equal local extents (bound_box: the mesh's float32 position extremes).</summary>
@@ -393,6 +449,7 @@ public static partial class BlenderVehicleRig
         }
         // ---- between the merge and the rig path: the positional names files (namelist() dies of a missing one), the reduce tags
         //      (the first malformed one is the script's exit), the dials (an unparsable one is a death), then the argument-time lines
+        if (a.Unsupported != null) { s.Fallback = a.Unsupported; return s; }
         if (a.NamesDie != null) { s.Dies = a.NamesDie; return s; }
         if (a.TagError != null) { s.Logs.Add(a.TagError); s.Exits = true; return s; }
         if (a.FoldDie != null) { s.Dies = a.FoldDie; return s; }
