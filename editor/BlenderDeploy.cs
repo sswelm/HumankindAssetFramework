@@ -1775,7 +1775,7 @@ public static class BlenderDeploy
 
     /// <summary>mat3_normalized_to_eulO for the XYZ order (mat3_normalized_to_eulo2, i j k = 0 1 2, no parity): hypotf and
     /// atan2f from the C runtime, the candidate with the smaller sum of magnitudes (eul1 on a tie). `rot` in rows.</summary>
-    static float[] Mat3ToEulXYZ(float[][] m)
+    internal static float[] Mat3ToEulXYZ(float[][] m)
     {
         if (!BlenderTrig.Exact) throw new NotPortedException("an Euler extraction in a process without the 64-bit Windows C runtime (atan2f, hypotf)");
         const float eps = 0.0000375f;   // EULER_HYPOT_EPSILON
@@ -1798,7 +1798,7 @@ public static class BlenderDeploy
     /// <summary>BKE_rotMode_change_values from QUATERNION to XYZ: the quaternion normalized IN PLACE (normalize_qt: the float32
     /// root of the float32 dot, each component scaled by its reciprocal; a zero one becomes (0, 1, 0, 0)), quat_to_mat3 (the
     /// products in double through M_SQRT2), then the Euler extraction.</summary>
-    static float[] QuatToEulXYZ(float[] q)
+    internal static float[] QuatToEulXYZ(float[] q)
     {
         float dot = (float)((float)((float)((float)(q[0] * q[0]) + (float)(q[1] * q[1])) + (float)(q[2] * q[2])) + (float)(q[3] * q[3]));
         float len = VehicleProbe.Sqrtf(dot);

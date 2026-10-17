@@ -492,6 +492,38 @@ source-reading review found CPython 3.12+'s sum() of floats COMPENSATED (Neumaie
 sum (the oar metrics, the PC1 rows, the pivots mean, and d4's least-spread rotor axle), pinned by Blender-measured unit cases. An
 infinite blade roll (NaN geometry; Blender then dies in stage 4) is left to Blender by name: a NaN's sign bit follows each
 compiler's operand order. Next: (d) part d6, the tread rig.
+(d) part d6, the TREAD RIG - DEFERRED 2026-10-17 (step (e) taken first). Measured before starting: no comparable job reaches it -
+the Bradley, the one recipe with live tracks, is an FBX source (the C# reads none: left at stage 1 by name), the Jagdpanzer's
+tracks are static -, so it would turn no recipe equal; and it is structural, not one more branch: the tread's
+`bmesh.ops.subdivide_edges(cuts=1, use_grid_fill=True)` (bmo_subdivide.cc, 1,435 lines) leaves N-GONS where a face has one or
+two long edges, and the stage model holds triangles only (MeshData, the rows, the join), so d6 needs polygon meshes, BM_edge_split
+and BM_face_split with their UV / colour / custom-normal interpolation, the operator's patterns (quad grid fill, tri 3-edge, the
+two-edge connect), the link pitch's trigonometric autocorrelation (UCRT cos/sin, compensated sums), the wrap bands, the
+belt-around-pulleys path, the link cells and the link/shuttle split, and a second edit-mode session (every bone's rest through
+ED_armature_to_edit and back). Worth it once a glTF tank with live tracks exists, or with the native FBX reader.
+- **vehicle_rig.py: the tread's carrier-blend skinning is NON-DETERMINISTIC** - OPEN (2026-10-17, found sizing d6). The carrier
+  vertex groups are created by iterating a SET of bone names (`_vgs = {n: o.vertex_groups.new(name=n) for n in _names}`), and
+  Blender's Python has string-hash randomization on (`sys.flags.hash_randomization` 1: two runs printed the same four names in
+  two orders), so the group order - and every vertex's group indices - changes from run to run. Only the fallback writes those
+  groups (no link pitch found: `_link_fund <= 0.03`); link mode removes them and builds its own in a deterministic order. The fix
+  is one word: `for n in sorted(_names)`. A port can only decline the fallback until then.
+(e) stage 4, the ACTIONS, is split like (d): e1 the frame every animated rig shares (the Spin action, the shared clip, the wave
+rock, the wheels and rotors, the LINEAR keys, the leftover strip and the action purge), e2 the clips riding Spin and the Furl
+stance (the rowing stroke, the sail and flag holds), e3 the separate clips (the trails' Deploy, the gun's Recoil). (e) part e1
+DONE 2026-10-17: `editor/BlenderVehicleRig.Stage4.cs` + `vehiclerig.exe --stages 4` in the drill (the gate now compares stage 4,
+with an intact stage 4 control and seven S4_* tampers on the fx_r_wheels seed). 15 of 24 recipes equal row for row through stage 4
+(the Jagdpanzer - static tracks: the wrap carriers and its idler's 14-fold snap -, the RAH-66, Bell and Ilya Muromets rotors keyed
+every frame, the Wespe, the canoe, the gatling and organ guns, the Ribauldequin, the Romanic, Dragon, Teutonic, Svea, Bremen and the
+Espana); 7 left at stage 4 by name for e2/e3, the 2 FBX. Found on the way: `frame_set` evaluates object actions too - a part whose
+action survives the join ends stage 4 moved by it (fx_r_rotor's mast, fx_e_speeds' preserved mast); purging a colliding "Spin.001"
+(an imported clip named Spin) unlinks the armature. Seven fixtures (fx_e_rock, fx_e_rock2, fx_e_rock3, fx_e_ground, fx_e_speeds, fx_e_rockdefault, fx_e_long); 103 of 129 jobs equal
+through stage 4 (FULL, 461,465 rows); 27 of 29 plants caught (a sequential sum below the drill, the unit tests hold PySum; a replaced
+key equals its last sample on every input the rock reaches); the source-reading review's three divergences fixed (the ground band on
+the rock-DEFORMED meshes, frame_set's curve values in the final pose, non-finite dials declined); 1,945 tests. Next: (e) part e2, the rowing stroke and the Furl clip.
+PR #184 review fixes the evaluated-pose timing within that ground band: it retains the pose from the last `frame_set`, before
+the final rock assignment to the original pose. The wrong pose changed wheel speeds in 29 of 160 independent scenes; all now
+match Blender on CLR and Unity's 64-bit Mono. Three native fixtures and unit cases cover ordinary and repeated-frame sampling
+plus a no-rock control; 1,948 tests pass.
 - **vehicle_rig.py: two gun-recoil defects** — OPEN (2026-10-16, found porting stage 3 part d3; the C# port reproduces both bit
   for bit, so fixing them is a script change plus a port change). (1) With `gun_pivot` at 1.0 and recoil on, the bore direction is
   `(gun_axis[1] - gun_axis[0]).normalized()` with `gun_axis[0]` the head - at the muzzle - so the bore is the float32 residue of

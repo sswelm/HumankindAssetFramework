@@ -102,6 +102,26 @@ Stage 3 (step (d), part d5: the oars):
                      matrix (DIES:4:); the C# leaves stage 3 to Blender by name - a NaN's sign bit follows each compiler's operand order
   fx_r_tail_args     argument variant: the tail axis "x" (upper(): forced X), the trim yaw "-inf" and pitch "nan" (a NaN axle the
                      normalize zeroes; align_roll on a zero vector)
+Stage 4 (step (e), part e1: the Spin action, the wheels, the rock):
+  fx_e_rock          the rock forced about X, turned by a 30-degree heading, rolling twice and pitching three times at a 45-degree
+                     phase over 24 frames while the Spin's 15 repeat twice (the shared clip); four wheels
+  fx_e_speeds        argument variant: static tracks (the rearmost wheel per side the idler), road wheels between, the road speed
+                     1.5 and the idler speed 0.5 as the Lab never writes them (no symmetry snap off 1); an animated part and no
+                     rock (only the last frame_set's evaluation moves it)
+  fx_e_rockdefault   argument variant: the rock on with its frames blank (rock_frames = the Spin's frames), forced about Y
+  fx_e_ground        a long flat hull pitched by the rock and a small wheel just above the undeformed ground band: after the rock's
+                     frame_set the bounds are the DEFORMED meshes', the band drops below every wheel and all three keep the dial
+  fx_e_groundeval / fx_e_groundeval_dense / fx_e_groundeval_off
+                     a final rock sample at rest while the evaluated hull remains tilted from frame_set; normal and two-frame
+                     clips leave all wheels airborne (the small wheel keeps -360, not -960 degrees); a no-rock control still rolls
+  fx_e_rock2         heading 0, four pitch cycles at phase 0.01: four samples share the clip's last frame, each replacing its key
+                     (value + float(delta)), and the wheels' frame_set leaves the hull at that key; the hull longer along Y (the
+                     auto roll axis Y); the rock repeating 3 times. The replaced key equals the last sample here and on every
+                     fixture: the angles pass angle_wrap_rad's float32 (multiples of pi's ulp), so the delta is exact
+  fx_e_rock3         the rock with no wheels (no frame_set after it), the auto axis turned by a 15-degree heading
+  (no fixture for the rock past 1,000,000 samples or 100,000 frames: Blender samples every one of them - a 200,000-frame rock took
+  40 minutes in the dump)
+  fx_e_long          argument variant: a Spin of 200,000 frames - left to Blender by name
 Argument variants (recipes_exit, post-edited by --exits): fx_r_numeric_pct (the decimal above 0.5 whose rounding decides whether
   to weld); fx_d_sailfold_overflow (1e309 becomes infinity before int() raises); fx_d_unicode_fold (a Kawi digit accepted before
   the next dial raises ValueError)
@@ -709,6 +729,54 @@ def main(out):
            oarBladeRollDeg=15.0, oarPivotPct=40.0, oarLengthPct=130.0)
     # fx_r_oars_inf: the roll as the Lab never writes it (post-edited by --exits)
     recipe(out, "fx_r_oars_inf", oars_model("fx_r_oars_inf"), [("Hull", 0, {}), ("OarsA", 13, {}), ("OarsB", 13, {})], sub="recipes_exit")
+    # ---- stage 4 (step (e), part e1)
+    def wheeled(key, sub="recipes", mid=False, anim=False, **fields):
+        r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
+        r.node("Hull", mesh=r.mesh("Hull", at=(-1.5, 0.0, -1.0), size=2.0, material=ma), scale=[1.5, 1.0, 1.0])
+        for i, (x, z) in enumerate(((1.6, 1.2), (-1.6, 1.2), (1.6, -1.2), (-1.6, -1.2))):
+            r.node("W%d" % i, mesh=r.mesh("W%d" % i, at=(-0.5, -0.5, -0.5), material=ma), translation=[x, 0.0, z], scale=[0.8 if i < 2 else 0.6, 0.8 if i < 2 else 0.6, 0.25])
+        r.node("Belt", mesh=r.mesh("Belt", at=(-0.5, -0.5, -0.5), material=ma), translation=[0.0, -0.3, 1.25], scale=[4.0, 0.1, 0.2])
+        parts = [("Hull", 0, {})] + [("W%d" % i, 1, {}) for i in range(4)] + [("Belt", 6, {})]
+        if mid:   # road wheels between the carriers on each side
+            for i, z in ((4, 1.2), (5, -1.2)):
+                r.node("W%d" % i, mesh=r.mesh("W%d" % i, at=(-0.5, -0.5, -0.5), material=ma), translation=[0.0, -0.1, z], scale=[0.5, 0.5, 0.25])
+                parts.append(("W%d" % i, 1, {}))
+        if anim:  # an animated body part: frame_set moves it, and nothing else in the job evaluates it
+            an = r.node("Mast", mesh=r.mesh("Mast", at=(-0.2, 1.0, -0.2), size=0.4, material=ma))
+            ak = r.anim("Sway"); r.key(ak, an, "translation", [0.0, 2.0], [(0.0, 0.0, 0.0), (0.3, 0.0, 0.0)])
+            parts.append(("Mast", 19, {}))   # PRESERVE: its own mesh through the join, so it keeps its action (a body part joins into the hull and loses it)
+        recipe(out, key, r.write(models, key), parts, sub=sub, **fields)
+    wheeled("fx_e_rock", waveEnabled=True, rockDegrees=4.0, rockFrames=24, rockAxisChoice=1, rockHeading=30.0, rockPitchDeg=3.0,
+            rockPitchCycles=3, rockRollCycles=2, rockPitchPhase=45.0, tracksStatic=True)
+    wheeled("fx_e_speeds", sub="recipes_exit", mid=True, anim=True, tracksStatic=True)
+    wheeled("fx_e_rockdefault", sub="recipes_exit", waveEnabled=True, rockDegrees=3.0, rockFrames=24, rockAxisChoice=2, tracksStatic=True)
+    # fx_e_ground: a 10-long, 1-high hull, two big wheels on the ground, a small one at 0.07 above it (under the undeformed band 0.15);
+    # the rock pitches 3 degrees (full at the clip's end, phase 90): the deformed bounds drop the band below the small wheel
+    r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
+    r.node("Hull", mesh=r.mesh("Hull", at=(-0.5, 0.0, -0.5), material=ma), scale=[10.0, 1.0, 2.0])
+    r.node("Big0", mesh=r.mesh("Big0", at=(-0.5, 0.0, -0.5), material=ma), translation=[3.0, 0.0, 1.2], scale=[0.8, 0.8, 0.2])
+    r.node("Big1", mesh=r.mesh("Big1", at=(-0.5, 0.0, -0.5), material=ma), translation=[-3.0, 0.0, 1.2], scale=[0.8, 0.8, 0.2])
+    r.node("Small", mesh=r.mesh("Small", at=(-0.5, 0.0, -0.5), material=ma), translation=[0.0, 0.07, 1.2], scale=[0.3, 0.3, 0.2])
+    recipe(out, "fx_e_ground", r.write(models, "fx_e_ground"), [("Hull", 0, {}), ("Big0", 1, {}), ("Big1", 1, {}), ("Small", 1, {})],
+           waveEnabled=True, rockDegrees=0.5, rockPitchDeg=3.0, rockFrames=15, rockPitchPhase=90.0)
+    # fx_e_groundeval{,_dense,_off}: the ground band reads the depsgraph's pose from the last frame_set, BEFORE the last rock sample is assigned.
+    # That sample brings the original pose back to rest, but the evaluated hull is still tilted below the wheels.
+    # The two-frame case also replaces several keys at the last frame; the no-rock control must keep rolling contact.
+    for key, nf, wave in (("fx_e_groundeval", 15, True), ("fx_e_groundeval_dense", 2, True), ("fx_e_groundeval_off", 15, False)):
+        recipe(out, key, r.write(models, key), [("Hull", 0, {}), ("Big0", 1, {}), ("Big1", 1, {}), ("Small", 1, {})],
+               frames=nf, waveEnabled=wave, rockDegrees=0.0, rockPitchDeg=20.0, rockFrames=nf, rockPitchPhase=0.0)
+    # fx_e_rock2: the hull longer along Blender Y (glTF z), heading 0, roll 2 / pitch 4 cycles over rock frames 10 under a 30-frame Spin
+    r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
+    r.node("Hull", mesh=r.mesh("Hull", at=(-0.5, 0.0, -0.5), material=ma), scale=[2.0, 1.0, 6.0])
+    for i, z in enumerate((2.0, -2.0)):
+        r.node("W%d" % i, mesh=r.mesh("W%d" % i, at=(-0.5, -0.5, -0.5), material=ma), translation=[1.3, 0.3, z], scale=[0.2, 0.6, 0.6])
+    recipe(out, "fx_e_rock2", r.write(models, "fx_e_rock2"), [("Hull", 0, {}), ("W0", 1, {}), ("W1", 1, {})],
+           frames=30, waveEnabled=True, rockDegrees=4.0, rockPitchDeg=2.0, rockFrames=10, rockRollCycles=2, rockPitchCycles=4, rockPitchPhase=0.01)
+    # fx_e_rock3: a hull and nothing else - the rock, no wheels; the auto axis turned by 15 degrees
+    r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
+    r.node("Hull", mesh=r.mesh("Hull", at=(-0.5, 0.0, -0.5), material=ma), scale=[5.0, 1.0, 2.0])
+    recipe(out, "fx_e_rock3", r.write(models, "fx_e_rock3"), [("Hull", 0, {})], waveEnabled=True, rockDegrees=2.0, rockFrames=20, rockHeading=15.0)
+    wheeled("fx_e_long", sub="recipes_exit", tracksStatic=True)
     # fx_r_missing_rotor: a tail rotor name the scene has not - find()'s exit in stage 3, after the main rotor measured
     r = Rig(); ma = r.material("Paint", (0.4, 0.45, 0.3))
     r.node("Hull", mesh=r.mesh("Hull", at=(-1.0, 0.0, -1.0), size=2.0, material=ma))
@@ -783,6 +851,9 @@ EXITS = {
     "fx_d_gun_pivot": ("DIES", lambda a: a.__setitem__(34, "x")),
     "fx_r_missing_wheel": ("EXIT", lambda a: None),
     "fx_r_missing_rotor": ("EXIT", lambda a: None),
+    "fx_e_speeds": (None, lambda a: (a.__setitem__(13, "1.5"), a.__setitem__(14, "0.5"))),
+    "fx_e_rockdefault": (None, lambda a: a.__setitem__(18, "")),
+    "fx_e_long": (None, lambda a: a.__setitem__(7, "200000")),
     "fx_r_oars_inf": ("DIES", lambda a: a.__setitem__(47, "inf")),
     "fx_r_oars_args": (None, lambda a: (a.__setitem__(47, "nan"), a.__setitem__(58, "nan"), a.__setitem__(59, "inf"))),
     "fx_r_tail_args": (None, lambda a: (a.__setitem__(28, "x"), a.__setitem__(29, "-inf"), a.__setitem__(30, "nan"))),

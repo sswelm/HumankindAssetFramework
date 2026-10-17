@@ -231,6 +231,16 @@ write("S3_BONE_rest", with_field(i_bone3, 10, flip_bits(lines[i_bone3].split("\t
 write("S3_BONE_parent", with_field(i_bone3, 4, "Root"))
 i_pb3 = first(lambda l: l.startswith("PB\t3\t")); write("S3_PB_location", with_field(i_pb3, 4, flip_bits(lines[i_pb3].split("\t")[4])))
 i_act3 = first(lambda l: l.startswith("ACT\t3\t")); write("S3_ACT_range", with_field(i_act3, 3, flip_bits(lines[i_act3].split("\t")[3])))
+# Stage 4 on the same seed (its rock line, the Spin action, the wheels' Euler keys): one value each, refused by the stage 4 model
+st4 = first(lambda l: l == "STAGE\t4")
+write("S4_LOG_extra", insert(st4, "LOG\t4\tVEHICLE planted: an action line the script never printed"))
+i_log4 = first(lambda l: l.startswith("LOG\t4\t")); write("S4_LOG_text", replace(i_log4, lines[i_log4] + " (changed)"))
+i_scene4 = first(lambda l: l.startswith("SCENE\t4\t")); write("S4_SCENE_frame", with_field(i_scene4, 4, str(int(lines[i_scene4].split("\t")[4]) - 1)))
+i_obj4 = first(lambda l: l.startswith("OBJ\t4\t") and l.split("\t")[8] != "-"); write("S4_OBJ_action", with_field(i_obj4, 8, "-"))
+i_pb4 = first(lambda l: l.startswith("PB\t4\t") and l.split("\t")[2].startswith("Wheel_"))
+write("S4_PB_euler", with_field(i_pb4, 12, flip_bits(lines[i_pb4].split("\t")[12])))
+write("S4_PB_mode", with_field(i_pb4, 3, "QUATERNION"))
+i_act4 = first(lambda l: l.startswith("ACT\t4\t")); write("S4_ACT_range", with_field(i_act4, 4, flip_bits(lines[i_act4].split("\t")[4])))
 for name in sorted(os.listdir(out)):
     if name.endswith(".txt") and name not in ("intact.txt", "jobs.txt", "jobs_exit.txt", "jobs_fast.txt", "jobs_s3.txt", "intact_s3.txt"):
         print(name[:-4])

@@ -425,7 +425,7 @@ public static class BlenderChannelExport
 
     /// <summary>BKE_pchan_to_mat4: the rotation times the size matrix (mul_m3_m3m3, left to right in float32), copied into
     /// a 4x4 with the location in the fourth column; column-major as the probe holds matrices.</summary>
-    static float[] PchanToMat4(float[] loc, float[][] rot, float[] size)
+    internal static float[] PchanToMat4(float[] loc, float[][] rot, float[] size)
     {
         var bm = new float[16];
         for (int i = 0; i < 3; i++)

@@ -402,11 +402,11 @@ static class VehicleRigDrill
     {
         Console.OutputEncoding = new UTF8Encoding(false);
         bool requireKeys = false; int offset = 0; int stages = 0;   // --stages N: the C# model of stages 1..N (editor/BlenderVehicleRig.cs) against the dump
-        const string usage = "usage: vehiclerig.exe [--keys] [--stages 1|2|3] <jobs file> <dump>...";
+        const string usage = "usage: vehiclerig.exe [--keys] [--stages 1|2|3|4] <jobs file> <dump>...";
         while (offset < args.Length && args[offset].StartsWith("--", StringComparison.Ordinal))
         {
             if (args[offset] == "--keys") requireKeys = true;
-            else if (args[offset] == "--stages" && offset + 1 < args.Length && int.TryParse(args[offset + 1], NumberStyles.None, CultureInfo.InvariantCulture, out stages) && stages >= 1 && stages <= 3) offset++;
+            else if (args[offset] == "--stages" && offset + 1 < args.Length && int.TryParse(args[offset + 1], NumberStyles.None, CultureInfo.InvariantCulture, out stages) && stages >= 1 && stages <= 4) offset++;
             else { Console.WriteLine(usage); return 2; }
             offset++;
         }
@@ -501,7 +501,7 @@ static class VehicleRigDrill
 /// Blender by name is counted LEFT and said; the census (MODEL rows) names the branches the jobs took and the reasons left.</summary>
 static class StageDrill
 {
-    public static int Compared, Equal, Left, Left3; public static long RowsEqual;
+    public static int Compared, Equal, Left, Left3, Left4; public static long RowsEqual;
     static readonly SortedDictionary<string, int> Census = new SortedDictionary<string, int>(StringComparer.Ordinal);
 
     static float FromHex(string h) => BitConverter.ToSingle(BitConverter.GetBytes(Convert.ToUInt32(h, 16)), 0);
@@ -679,6 +679,33 @@ static class StageDrill
                 }
             }
         }
+        // stage 4 on the scene stage 3 left (step (e)): the actions; a decline naming a branch a later part ports ("stage 4: the ... is not
+        // modelled yet") is LEFT, any other decline a FAIL
+        if (problems.Count == 0 && stages >= 4 && !model.Exits && model.Dies == null)
+        {
+            int notes0 = model.Notes.Count;
+            try { BlenderVehicleRig.RunStage4(model, args); }
+            catch (Exception e) { problems.Add($"stage 4 model: {e.GetType().Name}: {e.Message}"); }
+            for (int i = notes0; i < model.Notes.Count; i++) Census[model.Notes[i]] = (Census.TryGetValue(model.Notes[i], out int c4) ? c4 : 0) + 1;
+            if (problems.Count == 0 && model.Fallback != null)
+            {
+                Census["LEFT: " + model.Fallback] = (Census.TryGetValue("LEFT: " + model.Fallback, out int c) ? c : 0) + 1;
+                bool named4 = model.Fallback.StartsWith("stage 4: the ", StringComparison.Ordinal) && model.Fallback.EndsWith(" is not modelled yet", StringComparison.Ordinal);
+                if (!named4) { Console.WriteLine($"FAIL {key}: stage 4 model leaves this job to Blender: {model.Fallback}"); return false; }
+                Equal--; Left++; Left4++; Console.WriteLine($"STAGE4 {key}: left to Blender by name: {model.Fallback}"); return true;
+            }
+            if (problems.Count == 0)
+            {
+                if (!d.Stages.TryGetValue(4, out var s4)) problems.Add("stage 4 model: the scene runs on here, Blender stopped in stage 4: " + (d.Exit != null ? string.Join(" | ", d.LogsOfStop) : d.Died));
+                else
+                {
+                    var rows4 = BlenderRigAnim.Render(model, 4, fcSlot: true);
+                    DumpModelRows(key, 4, rows4, model.Logs4);
+                    CompareRows(4, rows4, model.Logs4, s4, problems);
+                    if (problems.Count == 0) { RowsEqual += RowCount(s4); Console.WriteLine($"STAGE4 {key}: equal - {Describe(s4)}"); }
+                }
+            }
+        }
         if (problems.Count > 0) { foreach (var p in problems) Console.WriteLine($"FAIL {key}: {p}"); return false; }
         return true;
     }
@@ -686,6 +713,6 @@ static class StageDrill
     public static void Summary(int stages)
     {
         foreach (var kv in Census) Console.WriteLine($"MODEL {kv.Value} {kv.Key}");
-        Console.WriteLine($"STAGES {stages} jobs {Compared} equal {Equal} left {Left} rows {RowsEqual} left3 {Left3}");
+        Console.WriteLine($"STAGES {stages} jobs {Compared} equal {Equal} left {Left} rows {RowsEqual} left3 {Left3} left4 {Left4}");
     }
 }
