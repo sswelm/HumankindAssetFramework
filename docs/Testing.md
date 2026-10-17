@@ -2117,6 +2117,46 @@ instead of the least, the first listed part as the hub). A unit test pins Eigh3 
 it) and its decline on NaN; the scaling guards are documented unreachable from float32 coordinates. After: 89 of 91 fixture jobs
 and 109 of 115 jobs equal through stage 3 (FULL, 455,410 rows); 1,886 tests.
 
+**Step (d), stage 3 of item (5), part d5: the oars (2026-10-17).** Against vehicle_rig.py 2033-2230 (the bones), 2244-2256 (the
+skinning) and 2877 (the join key). The oar parts (find_opt: a missing one is a WARN; a name listed twice is two entries, its islands
+twice) are split into connected islands as `_oar_islands` walks them: `bmesh.from_mesh` (the edges created in mesh order, each
+appended to both vertices' disk cycles), then per vertex in index order a depth-first walk - a stack popped from its end, each
+vertex's `link_edges` in disk order from v->e -, the island's points `matrix_world @ co` and their float32 mean. The recovery
+tolerances are fractions of the oar points' diagonal (`math.sqrt(sum(... ** 2))`: UCRT `pow`, a compensated sum): merge eps
+0.00786, min span 0.01387, the beam centre the y midpoint. Per bank (+1 first; an island's side by its centre's y against the
+centre, `>=`): the pole direction is the span-weighted sum of each long-enough island's PC1 (`_oar_pc1`: the float32 mean, the
+scatter in Python floats, 40 rounds of the power iteration from (1, 0.3, 0.1) - each row a compensated sum into a float32 Vector,
+a zero length stops it, so a point of no scatter returns (1, 0.3, 0.1) unnormalized), each signed to the first; a bank whose sum is
+shorter than 1e-6 is skipped (its islands' vertices end in no group). The rake line uses `math.atan2` (UCRT) and `degrees`. The
+islands' centres are projected on the plane across the direction (`e1 = dp x (0, 0, 1)` or `x (1, 0, 0)` past |z| 0.9) and joined
+single-linkage: a grid of `int(u / eps)` cells (toward zero), the 3x3 neighbourhood, `j > i` within eps by `math.hypot` - CPython
+3.13's own `vector_norm` (the larger's exponent scaled out, exact squares, Neumaier sums, one differential correction), not
+`sqrt(a * a + b * b)` -, union-find with path halving (`parent[ra] = rb`), the clusters in the order of their first member. Per
+cluster an `Oar_%03d` bone: every vertex of its islands skinned to it (oar_skin's insertion order makes the group order); under
+`abs(roll) > 0.01` the whole oar turned about its outboard PC1 by the roll signed per bank (`Quaternion(axis, angle)` and `mul_qt_v3`)
+and written back through `matrix_world.inverted()` (the adjugate) - the island lists are shared, so a part listed twice turns twice -;
+the oarlock at the dialled beam distance on the oar's outboard axis (or, for an oar parallel to the hull, the vertex nearest it);
+under a length off 100 the oar stretched along its axis about the oarlock; the tail `0.6` down the axis. Then the pivots line
+(its mean a compensated sum) and the recovered line. CPython 3.12+'s `sum()` of floats is NOT a sequential sum: from the int start
+0 the first float is taken exactly and every later one by Neumaier's compensated addition, the compensation added once at the end
+(`[1.0, 1e-16, 1e-16]` gives 1.0000000000000002); `BlenderVehicleRig.PySum` ports it, and d4's least-spread rotor fallback uses it
+too. Measured: 22 of the 24 recipes equal row for row through stage 3 - the Khelandion (three parts, 96 oars, roll 90, length 120)
+and the Triconter (41 parts, 32 oars, roll 35, pivot 0) new, equal on the first run. Fixtures: `fx_r_oars` (two parts, raked oars
+of pole, blade and oarlock ring - three islands each - and one raked the other way, a missing name, a part also a wheel),
+`fx_r_oars_roll` (one part on both banks listed twice, roll 25, pivot 60, length 150; its node 1e-7 off the identity, which stage 1
+still turns into an identity world), `fx_r_oars_odd` (exactly vertical oars - dyadic sizes make the float32 mean and so the PC1
+exact -, the other bank only rings: skipped, its vertices in no group; the pivot and length dials clamped), `fx_r_oars_ghost` (no
+oar found), `fx_r_oars_split` (shafts and blades in two parts - every cluster spans both -, a one-vertex island, ring stubs placed
+in eps units against the grid: one in the next cell but farther than eps, one merged across the following cell boundary),
+`fx_r_oars_args` ("nan" roll and pivot, "inf" length) and `fx_r_oars_inf` (an infinite roll: NaN geometry, Blender dies in stage
+4 - DIES:4: -, left at stage 3 by name because which NaN, its sign bit, follows each compiler's operand order). Thirty-four plants:
+32 caught on their jobs (the infinite roll's decline among them); the union direction is equivalent (the clusters come out in the
+order of their first member either way); a sequential sum is below the drill (the unit test catches it: its 20 random cases are lists
+where the two differ). `Tests/VehicleRigOarTests.cs` pins `math.hypot` (24 random pairs where it differs from the naive root, plus
+zeros, subnormals, a huge pair, infinity beside NaN) and `sum()` (20 random lists, negative zeros, infinities, an overflow, NaN), as
+Blender's Python computes them. 117 of 122 jobs equal through stage 3 (FULL, 456,386 rows; 1,945 tests; left by name: the infinite roll, the two FBX sources,
+the two non-UTF-8 names files). Next: (d) part d6, the tread rig.
+
 Review of PR #176 (2026-10-15): a full run found the organ gun's newly recorded custom-normal shorts differed after
 stage one's loose split. Blender's separate operator decodes the source BMesh normals into a vector layer and
 re-encodes that layer on each copied component; copying the original shorts misses that quantization. The model now

@@ -481,6 +481,17 @@ test) plus two more numpy plants caught by the unit test; 1,885 tests. The sourc
 hub (np.cov gives NaN, eigh raises LinAlgError - measured in Blender's numpy - and the script's except takes the axis of least
 spread of the parts' centres, now ported instead of declined), the hub listed after a blade, a tail rotor alone, Eigh3's decline
 on NaN. Next: (d) part d5, the oars.
+(d) part d5 DONE 2026-10-17: the OAR bones - the marked parts' connected islands (bmesh's disk order), per bank the pole direction
+from the islands' power-iteration PC1s, the islands projected across it and clustered single-linkage on a grid of merge-eps cells
+(CPython's math.hypot, ported from vector_norm), one Oar_%03d bone per cluster at its oarlock; the blade roll and the length rewrite
+the rest geometry through Quaternion @ Vector and matrix_world.inverted(); oar parts skin per vertex and keep their own mesh. 22 of
+24 recipes equal row for row through stage 3 (the Khelandion, 96 oars, and the Triconter, 32, equal on the first run); no recipe is
+left at stage 3 by name, the 2 FBX by name; seven fixtures; 117 of 122 jobs (FULL); 32 of 34 drill plants caught (the union
+direction is equivalent - groups follow their first member -; a sequential sum is below the drill, the unit test catches it); the
+source-reading review found CPython 3.12+'s sum() of floats COMPENSATED (Neumaier), not sequential: PySum now at every ported float
+sum (the oar metrics, the PC1 rows, the pivots mean, and d4's least-spread rotor axle), pinned by Blender-measured unit cases. An
+infinite blade roll (NaN geometry; Blender then dies in stage 4) is left to Blender by name: a NaN's sign bit follows each
+compiler's operand order. Next: (d) part d6, the tread rig.
 - **vehicle_rig.py: two gun-recoil defects** — OPEN (2026-10-16, found porting stage 3 part d3; the C# port reproduces both bit
   for bit, so fixing them is a script change plus a port change). (1) With `gun_pivot` at 1.0 and recoil on, the bore direction is
   `(gun_axis[1] - gun_axis[0]).normalized()` with `gun_axis[0]` the head - at the muzzle - so the bore is the float32 residue of
