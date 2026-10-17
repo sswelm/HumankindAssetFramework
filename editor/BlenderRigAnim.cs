@@ -285,6 +285,8 @@ public static class BlenderRigAnim
         public Dictionary<int, float[]> PoseMats;                     // per bone node: pose_mat (armature space, column-major)
         public string PosePosition = "POSE";
         public HashSet<int> NoDeform = new HashSet<int>();                // use_deform False (the donor sockets)
+        public Dictionary<int, string> RotMode = new Dictionary<int, string>();     // a pose bone's rotation_mode when not QUATERNION (vehicle_rig stage 4: XYZ)
+        public Dictionary<int, float[]> PoseEuler = new Dictionary<int, float[]>(); // ... and its rotation_euler
     }
 
     public sealed class Stage1
@@ -309,6 +311,7 @@ public static class BlenderRigAnim
         public List<ActionData> AllActs = new List<ActionData>();   // stage 3's all_acts: the primary and the role clips (rebaked when folded)
         public string PrimaryAction;                                 // stage 3: the primary clip's action as it ends (the GLB route's clip name)
         public List<(string role, string action)> RoleActions = new List<(string, string)>();   // stage 3: each state role's action (role_acts), in the script's order
+        public object VehicleState;                                  // vehicle_rig: what stage 3 hands stage 4 (BlenderVehicleRig.RigState)
     }
 
     /// <summary>bpy.ops.object.join with `active` the active object and `order` the joined meshes, the active first and the rest
@@ -925,8 +928,8 @@ public static class BlenderRigAnim
     });
 
     static string PyList(IEnumerable<string> items) => "[" + string.Join(", ", items.Select(BlenderDeploy.PyRepr)) + "]";
-    static int ChannelIndex(string prop) => prop == "location" ? 0 : prop == "rotation_quaternion" ? 1 : 2;
-    static float[][] CloneProps(float[][] p) => new[] { (float[])p[0].Clone(), (float[])p[1].Clone(), (float[])p[2].Clone() };
+    internal static int ChannelIndex(string prop) => prop == "location" ? 0 : prop == "rotation_quaternion" ? 1 : 2;
+    internal static float[][] CloneProps(float[][] p) => new[] { (float[])p[0].Clone(), (float[])p[1].Clone(), (float[])p[2].Clone() };
 
     /// <summary>Stage 3 of rig_anim.py on the scene stage 2 left: mutates `s` (actions, the armature's action, the pose,
     /// the frames, Logs3), or sets Exits (the script's exits of this stage), Deferred or Fallback.</summary>
@@ -1402,7 +1405,7 @@ public static class BlenderRigAnim
     }
     /// <summary>blender::math::transform_point(float4x4, float3): the 3x3 times the point (per column, the products summed
     /// from zero), plus the location.</summary>
-    static float[] TransformPoint(float[] m, float[] p)
+    internal static float[] TransformPoint(float[] m, float[] p)
     {
         var r = new float[3];
         for (int k = 0; k < 3; k++)
@@ -2312,9 +2315,12 @@ public static class BlenderRigAnim
             foreach (int b in ad.BoneNodes)
             {
                 var p = ad.PoseProps[b];
-                var row = new List<string> { "PB", N, s.Names.BoneOfJoint[b], "QUATERNION" };
-                row.AddRange(p[0].Select(Hex)); row.AddRange(p[1].Select(Hex)); row.AddRange(new[] { Hex(0f), Hex(0f), Hex(0f) }); row.AddRange(p[2].Select(Hex));
-                row.AddRange(HexMatrix(VehicleProbe.ObjectMatrix(p[0], p[1], p[2], true)));   // matrix_basis: BKE_pchan_to_mat4 of the properties
+                string mode = ad.RotMode.TryGetValue(b, out var rm) ? rm : "QUATERNION";
+                var eul = ad.PoseEuler.TryGetValue(b, out var pe) ? pe : new float[3];
+                var row = new List<string> { "PB", N, s.Names.BoneOfJoint[b], mode };
+                row.AddRange(p[0].Select(Hex)); row.AddRange(p[1].Select(Hex)); row.AddRange(eul.Select(Hex)); row.AddRange(p[2].Select(Hex));
+                // matrix_basis: BKE_pchan_to_mat4 of the properties - the Euler's matrix for an XYZ bone
+                row.AddRange(HexMatrix(mode == "XYZ" ? BlenderChannelExport.PchanToMat4(p[0], BlenderChannelExport.EulXyzToMat3(eul), p[2]) : VehicleProbe.ObjectMatrix(p[0], p[1], p[2], true)));
                 r.PoseBones.Add(row.ToArray());
             }
         }

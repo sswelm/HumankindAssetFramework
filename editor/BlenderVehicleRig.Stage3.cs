@@ -226,6 +226,7 @@ public static partial class BlenderVehicleRig
             head[id] = h; tail[id] = t; roll[id] = 0f;
             return id;
         }
+        var clusterBoneIds = new List<int>();
         int root = AddBone("Root", new float[3], new[] { 0f, 0.25f, 0f }, -1);
         int body = root; string bodyBone = "Root";
         if (a.RockOn) { body = AddBone("RootHull", new float[3], new[] { 0f, 0.2f, 0f }, root); bodyBone = "RootHull"; Note(s, "the wave rock's RootHull bone"); }
@@ -254,7 +255,7 @@ public static partial class BlenderVehicleRig
                 t = new[] { (float)(cl.c[0] + (float)((float)(ax[0] * dirn) * len)), (float)(cl.c[1] + (float)((float)(ax[1] * dirn) * len)), (float)(cl.c[2] + (float)((float)(ax[2] * dirn) * len)) };
             }
             int id = AddBone(string.Format(CultureInfo.InvariantCulture, "Wheel_{0:00}", i), (float[])cl.c.Clone(), t, body);
-            roll[id] = tailRoll;
+            roll[id] = tailRoll; clusterBoneIds.Add(id);
             foreach (var wn in cl.names) boneOf[wn] = boneNames[id - RigBoneBase];
         }
         // ---- the TURRET bone: the turret parts' combined box (_combined_bbox: each part's world_bbox, min(c - s/2) and max(c + s/2) in
@@ -791,6 +792,17 @@ public static partial class BlenderVehicleRig
             if (active.Name != want) Note(s, "a joined mesh's name taken (Mesh_<bone>.NNN)");
         }
         s.Logs3.Add("VEHICLE join: " + groups.Count + " mesh(es), one per bone");
+        // what stage 4 reads: the clusters and their bones, the joined meshes (objs = joined), the branches a later part ports
+        var rs = new RigState
+        {
+            Clusters = clusters, Objs = groups.Select(g => g.members[0]).ToList(), Arm = armObj, BodyBone = bodyBone,
+            OarBones = oarParts.Count > 0 ? boneNames.Count(n => n.StartsWith("Oar_", StringComparison.Ordinal)) : 0,
+            TrailBones = boneNames.Count(n => n.StartsWith("Trail_", StringComparison.Ordinal)),
+            SailClip = sailFound.Count > 0, FlagClip = flagFound.Count > 0, Recoil = boneNames.Contains("RecoilArm"),
+        };
+        foreach (int id in clusterBoneIds) rs.ClusterBones.Add(boneNames[id - RigBoneBase]);
+        for (int i = 0; i < boneNames.Count; i++) rs.BoneId[boneNames[i]] = RigBoneBase + i;
+        s.VehicleState = rs;
     }
 
     /// <summary>`o.matrix_world @ Vector(c)` for the 8 corners of o.bound_box (the bounds as last evaluated): mathutils' Matrix @ Vector,

@@ -52,6 +52,12 @@ public static partial class BlenderVehicleRig
         public double OarRoll;                      // float(argv[47]) or 0: the oars' blade roll in degrees (applied above 0.01)
         public double OarPivot = 30.0;              // min(95, max(0, float(argv[58]))) or 30: the oarlock along the oar's beam extent, percent
         public double OarLength = 100.0;            // min(300, max(25, float(argv[59]))) or 100: the oar stretched about its oarlock, percent
+        public System.Numerics.BigInteger Frames = 15;   // max(2, int(argv[7])): the Spin clip's frames - Python's exact int
+        public double Degrees;                      // float(argv[8]): the largest wheel's turn over the clip
+        public double RoadSpeedMul = 1.0, IdlerSpeedMul = 1.0;   // max(0.1, min(4.0, float(argv[13] / [14]))) or 1
+        public double RockDeg, RockPitchDeg = 2.4, RockHeading, RockPitchPhase = 90.0;   // argv 17, 21 (max(0, min(45, ...))), 20, 24
+        public System.Numerics.BigInteger RockFrames, RockPitchCycles = 1, RockRollCycles = 1;   // argv 18 (or the frames), 22, 25
+        public string RockAxisArg = "AUTO";         // argv[19].strip().upper() when not blank
     }
 
     static readonly (string role, int index)[] NamesArgv =
@@ -272,6 +278,22 @@ public static partial class BlenderVehicleRig
             bool any = rockDeg > 0.0 || pitch > 0.0;
             if (any && rockFrames <= 0.0) rockFrames = 2.0;   // `frames`, at least 2
             a.RockOn = any && rockFrames >= 2.0;
+            // the values stage 4 reads (vehicle_rig.py 1068-1121), each parsed as above
+            string fs = VehicleProbe.Input.PyNumberAscii(At(7)).Replace("_", "");
+            a.Frames = System.Numerics.BigInteger.Max(2, System.Numerics.BigInteger.Parse(fs.TrimStart('+'), CultureInfo.InvariantCulture));
+            a.Degrees = VehicleProbe.Input.PyFloat(At(8));
+            double Clamp(int i, double lo, double hi, double dflt) => argv.Count > i && PyNonBlank(At(i)) && TryPyFloat(At(i), out double v) ? PyMax(lo, PyMin(hi, v)) : dflt;
+            a.RoadSpeedMul = Clamp(13, 0.1, 4.0, 1.0); a.IdlerSpeedMul = Clamp(14, 0.1, 4.0, 1.0);
+            a.RockDeg = rockDeg; a.RockPitchDeg = pitch;
+            System.Numerics.BigInteger IntOf(int i, System.Numerics.BigInteger dflt) => argv.Count > i && PyNonBlank(At(i)) && TryPyFloat(At(i), out double v) ? new System.Numerics.BigInteger(Math.Truncate(v)) : dflt;
+            a.RockFrames = System.Numerics.BigInteger.Max(0, IntOf(18, 0));
+            if (a.RockDeg > 0.0 && a.RockFrames <= 0) a.RockFrames = a.Frames;
+            a.RockPitchCycles = System.Numerics.BigInteger.Max(1, IntOf(22, 1)); a.RockRollCycles = System.Numerics.BigInteger.Max(1, IntOf(25, 1));
+            if (a.RockPitchDeg > 0.0 && a.RockFrames <= 0) a.RockFrames = a.Frames;
+            a.RockOn = (a.RockDeg > 0.0 || a.RockPitchDeg > 0.0) && a.RockFrames >= 2;
+            a.RockHeading = argv.Count > 20 && PyNonBlank(At(20)) && TryPyFloat(At(20), out double hd) ? hd : 0.0;
+            a.RockPitchPhase = argv.Count > 24 && PyNonBlank(At(24)) && TryPyFloat(At(24), out double ph) ? ph : 90.0;
+            a.RockAxisArg = argv.Count > 19 && PyNonBlank(At(19)) ? PyUpper(VehicleProbe.Input.PyStrip(At(19))) : "AUTO";
         }
         // MODEL ORIENTATION (argv[23] "rx,ry,rz" degrees): [float(v) for v in split(",")] padded with zeros and cut to three - two
         // values are read, a fourth is dropped; only a value float() refuses is the WARN

@@ -2157,6 +2157,50 @@ zeros, subnormals, a huge pair, infinity beside NaN) and `sum()` (20 random list
 Blender's Python computes them. 117 of 122 jobs equal through stage 3 (FULL, 456,386 rows; 1,945 tests; left by name: the infinite roll, the two FBX sources,
 the two non-UTF-8 names files). Next: (d) part d6, the tread rig.
 
+**Step (e), stage 4 of item (5), part e1: the Spin action, the wheels, the rock (2026-10-17).** Against vehicle_rig.py 2905-2978,
+3179-3357, 3459-3477 and 3705-3710 (the drill's stage 4 ends before the inside-out fix). `bpy.data.actions.new("Spin")` takes a
+name the existing actions leave free (an imported clip named Spin makes ours Spin.001 - and the purge later removes it, unlinking
+the armature); the action's slot (OB<armature>) appears with the first key; frame_start 0, frame_end the longest period (the Spin
+frames, the rock's when it is on), each subsystem repeating `max(1, int(round(clip / period)))` times. The WAVE ROCK keys the body
+bone: the roll axis forced (X/Y) or the meshes' longer horizontal extent (world_bbox over objs, min/max into float32 Vectors), turned
+by the heading (`Vector.rotate(Quaternion)`), the pitch axis `(0, 0, 1) x roll`; per sample `Quaternion(roll, A sin(...)) @
+Quaternion(pitch, B sin(... + phase))`, `to_euler('XYZ')` (normalize_qt_qt, quat_to_eul's two solutions), keyed at
+`int(round(t * clip))` - a sample on a frame already keyed moves that key, value and handles by the delta. The WHEELS: an idler
+(static tracks: the rearmost cluster per side, the frontmost the other carrier) turns at the dial x the idler speed, snapped to its
+spoke symmetry; a wheel whose cluster bottom sits above the ground band (15 % of the scene meshes' height over their lowest corner)
+keeps the dial; any other non-carrier, non-rotor wheel rolls at the dial x (largest / its own size) x the road speed, snapped only at
+road speed 1. `_wheel_symmetry` looks `Mesh_<bone>` up by name, takes the bone's armature matrix (Matrix @ Matrix, double-summed),
+its local Y as the axle, every max(1, n // 1500)-th vertex across it (CPython's hypot and atan2), the rim beyond 0.45 of the largest
+radius, and for n = 2..24 the mean resultant of cos/sin(n theta) - sums COMPENSATED (PySum), UCRT cos/sin -; the smallest n within
+0.8 of the best, none below 24 rim vertices or a best under 0.4. A wheel is keyed on rotation_euler (XYZ) at 0 and the clip; a ROTOR
+on rotation_quaternion every frame about its local axle (Y, a tail X). Every Spin key is then LINEAR (the auto-clamped handles kept),
+the objects that are neither the joined meshes nor the armature removed, the actions not named Spin/Deploy/Recoil/Furl purged with
+a line each (their users unlinked), every non-armature object's animation data cleared. `frame_set` evaluates EVERY active action:
+an object whose action survived the join ends stage 4 at its last evaluated frame (the C# evaluates the objects after the rock and
+at the end - the only states anything reads); the pose ends at each channel's last key (the last frame_set lands on the clip's end,
+where every curve has a key). The PB row now carries the rotation mode and the Euler (matrix_basis by eulO_to_mat3). Measured: 15
+of the 24 recipes equal through stage 4; the census reaches the idler and ground-wheel snaps, airborne wheels (the Sikorsky's
+propellers), the rock with keys replaced, rotors, an animated object, purged clips. Fixtures: `fx_e_rock` (forced X, heading 30,
+two roll and three pitch cycles at a 45-degree phase over 24 frames, the Spin repeating twice), `fx_e_speeds` (static tracks with
+road wheels between the carriers, road speed 1.5 and idler 0.5 as the Lab never writes them, a preserved animated part and no rock -
+a body part joins into the hull and loses its action), `fx_e_rockdefault` (rock frames blank: the Spin's) and `fx_e_long` (200,000
+frames: left by name). Twenty-seven plants: 26 caught; a sequential sum is below the drill (the unit tests hold PySum). The gate
+compares stage 4 now, with an intact stage 4 control and seven S4_* tampers (a planted and a changed rock line, the current frame,
+the armature's action, a wheel's Euler and rotation mode, the action's range). 100 of 126 jobs equal through stage 4 (FULL, 461,052
+rows; left by name: 21 for e2/e3, the infinite oar roll at stage 3, the two FBX, the two non-UTF-8 names files); 1,945 tests. Next: (e) part e2.
+The source-reading review of e1 found three divergences, all fixed: (1) after the rock's frame_set, `Object.bound_box` is the
+EVALUATED mesh's - the meshes skinned to the rig DEFORMED by the posed hull (measured in Blender: a skinned cube's min z -1.0 before,
+-1.345 after) - so the ground band now reads the linear deform (each weighted bone's pose_mat x inverse arm_mat, VehiclePoseMats with
+the hull's Euler) - `fx_e_ground`: a long hull pitched 3 degrees drops the band below every wheel (all grounded on the undeformed
+bounds); (2) frame_set writes each keyed channel's CURVE value, and a property assigned after the last frame_set keeps the assigned
+one - the final pose is modelled that way (`fx_e_rock2`: four samples replace the key on the clip's last frame; on every fixture the
+replaced key equals the last sample, the rock's angles being float32-quantised by angle_wrap_rad so the delta is exact - the plant
+is equivalent there); (3) a non-finite Spin angle, rock heading or phase makes Python raise in round()/sin() - declined by name (the
+Lab writes finite values). Also: keys insert in near-constant time with one handle recalculation per curve (a rotor at 100,000
+frames had been quadratic), the worlds recompute after every frame_set, a stale evaluated copy is declined, `fx_e_rock3` (no wheels;
+a heading under the auto axis), `fx_e_rockdefault` forced about Y. No fixture for a rock past 1,000,000 samples or 100,000 frames:
+Blender samples every one (a 200,000-frame rock took 40 minutes in the dump). 103 of 129 jobs equal through stage 4 (FULL, 461,465 rows); 127 kinds of damaged evidence refused; 1,945 tests.
+
 Review of PR #176 (2026-10-15): a full run found the organ gun's newly recorded custom-normal shorts differed after
 stage one's loose split. Blender's separate operator decodes the source BMesh normals into a vector layer and
 re-encodes that layer on each copied component; copying the original shorts misses that quantization. The model now
