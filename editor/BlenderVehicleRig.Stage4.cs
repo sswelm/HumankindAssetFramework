@@ -1,5 +1,5 @@
 // BlenderVehicleRig.Stage4.cs - vehicle_rig.py's stage 4, the ACTIONS (lines 2905-3711), in C# (step (e) of the vehicle_rig port,
-// 2026-10-17; docs/Review-Backlog.md item (5)). Parts e1 and e2:
+// 2026-10-17; docs/Review-Backlog.md item (5)). Parts e1 to e3:
 //   - the Spin action (bpy.data.actions.new: a name the existing actions take is made unique; bpy.data.actions stays sorted by name),
 //     the armature's active action; its slot (OB<armature>) appears with the first key;
 //   - the shared clip: frame_start 0, frame_end the longest period (the Spin frames, the rock's when it is on), each subsystem
@@ -13,11 +13,14 @@
 //     clip on rotation_euler (XYZ); a ROTOR keyed every frame on rotation_quaternion about its local axle (Y, a tail X);
 //   - the ROWING stroke on Spin: the mirrored sweep and the lifted dip about each oar's local axes, keyed every frame;
 //   - Furl: the sail struck or curled with drape, the flag flying or folded; explicit raised-sail and struck/folded-flag holds on Spin;
-//   - every Spin key made LINEAR; the objects that are neither the rig's meshes nor the armature removed; the actions not named
+//   - Deploy: trails swung about world up, a signed gun elevation on the same frames, and the same-direction warning;
+//   - Recoil: the far arm rotates for the kick and return, an optional lead-in, the deployed trails/gun held throughout;
+//   - every authored key made LINEAR; the objects that are neither the rig's meshes nor the armature removed; the actions not named
 //     Spin/Deploy/Recoil/Furl purged (a line each); every non-armature object's animation data cleared.
 // The original pose keeps channels assigned after the last frame_set; other keyed channels take their curves at that frame. Evaluated
 // mesh bounds retain the pose from frame_set, before any subsequent assignment to the original pose.
-// Left to Blender by name (part e3): the Deploy and Recoil clips; non-finite rowing angles and clips longer than 100,000 frames.
+// Named limits: non-finite rowing/Deploy angles, clips longer than 100,000 frames, and the source's recoil-clearance search
+// if an unusual rig actually has Mesh_RecoilArm (the ordinary tube is Mesh_Barrel).
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -40,12 +43,16 @@ public static partial class BlenderVehicleRig
         public bool SailClip, FlagClip, Recoil;
         public List<(string bone, float side, float[] dip)> Oars = new List<(string, float, float[])>();
         public float[] SailYard = { 1f, 0f, 0f }, FlagAxis = { 1f, 0f, 0f };
+        public List<(string bone, float[] hinge, float[] spade)> Trails = new List<(string, float[], float[])>();
+        public float[][] GunAxis, GunBore;
+        public float[] RecoilPivot, RecoilAxis, RecoilBore, RecoilCentre;
+        public double RecoilSlide, RecoilRadius;
     }
 
     const int MaxClipFrames = 100000;
 
-    // Each authored action owns its curves, insertion order and replacement lookup. frame_set below evaluates Spin;
-    // Furl is authored without frame_set, then Spin is restored before its holds and the wheel keys.
+    // Each authored action owns its curves, insertion order and replacement lookup. Only Spin uses frame_set;
+    // Recoil later forces a view-layer update at the current frame, while its own action is active.
     sealed class VehicleActionKeys
     {
         public BlenderRigAnim.ActionData Data;
@@ -104,8 +111,13 @@ public static partial class BlenderVehicleRig
         if (s.Fallback != null || s.Exits || s.Dies != null) return;
         var st = s.VehicleState as RigState;
         if (st == null) { s.Fallback = "stage 4: no rig from stage 3"; return; }
-        if (st.TrailBones > 0) { s.Fallback = "stage 4: the Deploy clip (e3) is not modelled yet"; return; }
-        if (st.Recoil) { s.Fallback = "stage 4: the Recoil clip (e3) is not modelled yet"; return; }
+        bool deployOn = st.Trails.Count > 0 && a.TrailSpread > 0.01;
+        bool recoilOn = st.Recoil && st.GunAxis != null;
+        if (deployOn && (double.IsInfinity(a.TrailSpread) || float.IsInfinity((float)(a.TrailSpread * (Math.PI / 180.0)))
+            || (st.GunAxis != null && (double.IsNaN(a.GunDeployElev) || double.IsInfinity(a.GunDeployElev) || float.IsInfinity((float)(a.GunDeployElev * (Math.PI / 180.0)))))))
+        { s.Fallback = "stage 4: the Deploy clip of non-finite angles is not modelled yet"; return; }
+        if ((deployOn && a.TrailFrames > MaxClipFrames) || (recoilOn && a.RecoilLead + a.RecoilFrames > MaxClipFrames))
+        { s.Fallback = "stage 4: the Deploy or Recoil clip of more than 100,000 frames is not modelled yet"; return; }
         if (double.IsNaN(a.Degrees) || double.IsInfinity(a.Degrees) || double.IsNaN(a.RockHeading) || double.IsInfinity(a.RockHeading)
             || double.IsNaN(a.RockPitchPhase) || double.IsInfinity(a.RockPitchPhase))
         { s.Fallback = "stage 4: the clip of a non-finite Spin angle, rock heading or rock phase is not modelled yet"; return; }   // round()/sin() raise in Python
@@ -484,12 +496,93 @@ public static partial class BlenderVehicleRig
 
         if (anyFrameSet && !EvaluateObjects(s, s.FrameCurrent)) return;
         if (anyFrameSet) { EvaluatePose(s.FrameCurrent); ad.PoseMats = VehiclePoseMats(ad); }
-        foreach (var x in authored) x.Finish();
+        spin.Linear();
 
         // strip the leftovers: every object that is neither a kept mesh nor the armature
         var keep = new HashSet<BlenderRigAnim.SceneObject>(st.Objs) { arm };
         foreach (var o in s.Objects.ToList())
             if (!keep.Contains(o)) { s.Objects.Remove(o); s.Names.ObjectPool.Remove(o.Name); Note(s, "a leftover object removed before export"); }
+
+        // Deploy inserts keys without frame_set: the original trails and gun keep their deployed assignments.
+        var deployed = new List<(string bone, float[] q)>();
+        if (deployOn)
+        {
+            var dep = new VehicleActionKeys(s, pool, "Deploy"); authored.Add(dep); Activate(dep);
+            var opened = new List<string>(); var signs = new List<double>();
+            var up = new[] { 0f, 0f, 1f };
+            foreach (var trail in st.Trails)
+            {
+                var test = RotateQt(Sub(trail.spade, trail.hinge), BlenderDeploy.QuaternionAxisAngle(up, 5.0 * (Math.PI / 180.0)));
+                double sign = Math.Abs(Add(trail.hinge, test)[0]) > Math.Abs(trail.spade[0]) ? 1.0 : -1.0;
+                var local = LocalAxis(trail.bone, up); if (local == null) return;
+                KeyQ(trail.bone, IdentityQ(), 0);
+                var q = BlenderDeploy.QuaternionAxisAngle(local, a.TrailSpread * (Math.PI / 180.0) * sign);
+                KeyQ(trail.bone, q, (int)a.TrailFrames); deployed.Add((trail.bone, (float[])q.Clone()));
+                opened.Add(PyStrRepr(trail.bone) + ": " + PyStrRepr((sign > 0 ? "out" : "in") + " " + BlenderRigAnim.PyFixed(a.TrailSpread, 0) + " deg")); signs.Add(sign);
+            }
+            if (a.GunDeployElev != 0.0 && st.GunAxis != null)
+            {
+                var bar = Sub(st.GunAxis[1], st.GunAxis[0]); var axis = Cross(bar, up);
+                if (VecLength(axis) < 1e-4) axis = new[] { 1f, 0f, 0f };
+                axis = Normalized(axis);
+                var test = RotateQt(bar, BlenderDeploy.QuaternionAxisAngle(axis, 5.0 * (Math.PI / 180.0)));
+                double sign = test[2] > bar[2] ? 1.0 : -1.0;
+                var local = LocalAxis("Gun", axis); if (local == null) return;
+                KeyQ("Gun", IdentityQ(), 0);
+                var q = BlenderDeploy.QuaternionAxisAngle(local, Math.Abs(a.GunDeployElev) * (Math.PI / 180.0) * sign * (a.GunDeployElev > 0 ? 1.0 : -1.0));
+                KeyQ("Gun", q, (int)a.TrailFrames); deployed.Add(("Gun", (float[])q.Clone()));
+                s.Logs4.Add("VEHICLE DEPLOY gun: elevate " + BlenderRigAnim.PyFixed(a.GunDeployElev, 1) + " deg about world (" + P2(axis[0]) + ", " + P2(axis[1]) + ", " + P2(axis[2]) + ") over 0.." + a.TrailFrames + " frames");
+            }
+            dep.Linear(); Activate(spin);
+            s.Logs4.Add("VEHICLE DEPLOY clip: " + opened.Count + " trail(s) {" + string.Join(", ", opened) + "} over 0.." + a.TrailFrames + " frames");
+            if (signs.Count == 2 && signs[0] == signs[1])
+                s.Logs4.Add("VEHICLE TRAIL *** WARNING: both trails were given the SAME swing direction (" + (signs[0] > 0 ? "out" : "in") + ") — a split-trail carriage must MIRROR, so one of these is sweeping INWARD through the other. The sign test assumes the gun is square to an axis; straighten it with the Orientation dials (yaw to a multiple of 90) and re-generate, then check the Deploy clip on the turntable.");
+            Note(s, "the Deploy clip");
+            if (deployed.Any(d => d.bone == "Gun")) Note(s, "the gun raised through Deploy");
+            if (signs.Count == 2 && signs[0] == signs[1]) Note(s, "the same-direction trail warning");
+        }
+        if (recoilOn)
+        {
+            var rec = new VehicleActionKeys(s, pool, "Recoil"); authored.Add(rec); Activate(rec);
+            var local = LocalAxis("RecoilArm", st.RecoilAxis); if (local == null) return;
+            // Preserve Python's zero-span failure instead of silently producing a NaN key.
+            if (st.RecoilRadius == 0.0) { s.Dies = "ZeroDivisionError: float division by zero"; return; }
+            double theta = st.RecoilSlide / st.RecoilRadius;
+            var test = RotateQt(Sub(st.RecoilCentre, st.RecoilPivot), BlenderDeploy.QuaternionAxisAngle(st.RecoilAxis, theta));
+            double sign = Dot(Sub(Add(st.RecoilPivot, test), st.RecoilCentre), st.RecoilBore) < 0 ? 1.0 : -1.0;
+            int kick = (int)Math.Max(1.0, PyRound((double)a.RecoilFrames * 0.15));
+            int lead = (int)a.RecoilLead, total = (int)(a.RecoilLead + a.RecoilFrames);
+            KeyQ("RecoilArm", IdentityQ(), 0);
+            if (lead > 0) KeyQ("RecoilArm", IdentityQ(), lead);
+            KeyQ("RecoilArm", BlenderDeploy.QuaternionAxisAngle(local, theta * sign), lead + kick);
+            KeyQ("RecoilArm", IdentityQ(), total);
+            foreach (var d in deployed) { KeyQ(d.bone, (float[])d.q.Clone(), 0); Insert(d.bone, "rotation_quaternion", d.q, total); }
+            rec.Linear();
+            double length = st.GunBore != null ? VecLength(Sub(st.GunBore[1], st.GunBore[0])) : st.RecoilSlide;
+            s.Logs4.Add("VEHICLE RECOIL clip: 'RecoilArm' slides " + BlenderRigAnim.PyFixed(a.RecoilDist, 2) + " of a " + BlenderRigAnim.PyFixed(length, 1) + "-unit tube (" + BlenderRigAnim.PyFixed(length * a.RecoilDist, 2)
+                + " units) back over " + kick + " frame(s), returns over " + (a.RecoilFrames - kick) + " after a " + lead + "-frame lead-in, holding the deployed pose ("
+                + (deployed.Count == 0 ? "nothing to hold" : string.Join(", ", deployed.Select(d => d.bone).OrderBy(b => b, StringComparer.Ordinal))) + ") — needs Keep bone translations at bake");
+            // view_layer.update evaluates the active Recoil action at the current frame, without changing that frame.
+            // RNA writeback only changes unequal values (in particular, constant -0 keeps an original +0).
+            // This is an armature action-change update, not a time change. Unrelated object actions are not
+            // evaluated here; without an earlier frame_set their matrices still hold the stage-three values.
+            foreach (var k in rec.Order)
+            {
+                float v = BlenderFCurve.Evaluate(rec.Curves[k], s.FrameCurrent, constant: true);
+                var q = ad.PoseProps[st.BoneId[k.bone]][1]; if (q[k.index] != v) q[k.index] = v;
+            }
+            ad.PoseMats = VehiclePoseMats(ad);
+            // The script searches for Mesh_RecoilArm here, although the tube was joined as Mesh_Barrel. Normally
+            // that means no clearance line; do not invent one for the differently named barrel.
+            if (s.Objects.Any(o => o.Type == "MESH" && o.Name == "Mesh_RecoilArm"))
+            { s.Fallback = "stage 4: the recoil clearance of a mesh named Mesh_RecoilArm is not modelled yet"; return; }
+            Activate(spin); Note(s, "the Recoil clip");
+            if (lead > 0) Note(s, "the recoil lead-in hold");
+            if (deployed.Count > 0) Note(s, "the deployed pose held through Recoil");
+        }
+        ad.PoseMats = VehiclePoseMats(ad);
+        foreach (var x in authored) x.Finish();
+
         // the actions not authored here
         foreach (var x in s.Actions.ToList())
         {

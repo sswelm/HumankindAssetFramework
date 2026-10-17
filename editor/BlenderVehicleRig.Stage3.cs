@@ -291,6 +291,10 @@ public static partial class BlenderVehicleRig
         var gunNames0 = a.Names.TryGetValue("guns", out var gl0) ? gl0 : new List<string>();
         var muzzleNames = a.Names.TryGetValue("muzzles", out var ml0) ? ml0 : new List<string>();
         var cradleNames = a.Names.TryGetValue("cradles", out var cl0) ? cl0 : new List<string>();
+        float[][] retainedGunAxis = null, retainedGunBore = null;
+        float[] recoilPivot = null, recoilAxis = null, recoilBore = null, recoilCentre = null;
+        double recoilSlide = 0.0, recoilRadius = 0.0;
+        var trails = new List<(string bone, float[] hinge, float[] spade)>();
         if (gunNames0.Count > 0 || muzzleNames.Count > 0 || cradleNames.Count > 0)
         {
             var tubeNames = gunNames0.Concat(muzzleNames.Where(m => !gunNames0.Contains(m))).ToList();
@@ -364,6 +368,7 @@ public static partial class BlenderVehicleRig
                 float Rf = (float)R;
                 var pivot = new[] { (float)(tc2[0] + (float)(offd[0] * Rf)), (float)(tc2[1] + (float)(offd[1] * Rf)), (float)(tc2[2] + (float)(offd[2] * Rf)) };
                 int arm = AddBone("RecoilArm", pivot, Up(pivot, ts2), gunBone);
+                recoilPivot = pivot; recoilAxis = axis; recoilBore = boreD; recoilCentre = tc2; recoilSlide = slide; recoilRadius = R;
                 s.Logs3.Add("VEHICLE RECOIL ARM: pivot (" + P2(pivot[0]) + ", " + P2(pivot[1]) + ", " + P2(pivot[2]) + "), R=" + BlenderRigAnim.PyFixed(R, 1) + " for a " + BlenderRigAnim.PyFixed(slide, 2) +
                             "-unit slide (residual tilt 3.0 deg) — a bone's own translation does not render; an ancestor's rotation does");
                 AddBone("Barrel", tc2, Up(tc2, ts2), arm);
@@ -371,6 +376,7 @@ public static partial class BlenderVehicleRig
                 s.Logs3.Add("VEHICLE BARREL bone split off for recoil: " + tubeNames.Count + " tube part(s) slide, " + cradleNames.Count + " cradle part(s) stay");
                 Note(s, "recoil: the RecoilArm and Barrel bones");
             }
+            retainedGunAxis = gunAxis; retainedGunBore = gunBore;
         }
         // ---- the TRAIL bones: one per trail name (find: a missing one is the exit), hinged at the arm's end nearer the body bone's head,
         // the tail half way down the arm (at least 0.05); fewer than 4 vertices, or ends closer than 1e-5, take no bone
@@ -397,6 +403,7 @@ public static partial class BlenderVehicleRig
             string bn = string.Format(CultureInfo.InvariantCulture, "Trail_{0:00}", ti);
             int tb = AddBone(bn, hinge, new[] { (float)(hinge[0] + (float)(dn[0] * tlf)), (float)(hinge[1] + (float)(dn[1] * tlf)), (float)(hinge[2] + (float)(dn[2] * tlf)) }, body);
             boneOf[trailNames[ti]] = boneNames[tb - RigBoneBase];
+            trails.Add((boneNames[tb - RigBoneBase], hinge, spade));
             s.Logs3.Add("VEHICLE trail '" + trailNames[ti] + "' -> " + boneNames[tb - RigBoneBase] + " hinge=(" + P2(hinge[0]) + ", " + P2(hinge[1]) + ", " + P2(hinge[2]) + ") spade=(" + P2(spade[0]) + ", " + P2(spade[1]) + ", " + P2(spade[2]) + ")");
             Note(s, "a trail bone");
         }
@@ -808,6 +815,9 @@ public static partial class BlenderVehicleRig
             TrailBones = boneNames.Count(n => n.StartsWith("Trail_", StringComparison.Ordinal)),
             SailClip = sailFound.Count > 0, FlagClip = flagFound.Count > 0, Recoil = boneNames.Contains("RecoilArm"),
             Oars = oarStrokes, SailYard = sailYard, FlagAxis = flagAxis,
+            Trails = trails, GunAxis = retainedGunAxis, GunBore = retainedGunBore,
+            RecoilPivot = recoilPivot, RecoilAxis = recoilAxis, RecoilBore = recoilBore, RecoilCentre = recoilCentre,
+            RecoilSlide = recoilSlide, RecoilRadius = recoilRadius,
         };
         foreach (int id in clusterBoneIds) rs.ClusterBones.Add(boneNames[id - RigBoneBase]);
         for (int i = 0; i < boneNames.Count; i++) rs.BoneId[boneNames[i]] = RigBoneBase + i;

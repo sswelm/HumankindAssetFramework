@@ -535,8 +535,20 @@ FULL: 21 of 24 recipes and 130 of 142 total jobs equal through stage 4 (499,914 
 deferrals are two FBX, two non-UTF-8 names files, an infinite blade roll at stage 3, six e3 jobs and the long-Spin fixture.
 All 160 independent e2 scenes match on CLR and Unity's 64-bit Mono; the previous 160 e1 probes still match. The full drill
 rejects 136 kinds of damaged evidence. Non-finite rowing angles and Furl clips past 100,000 frames remain named limits.
-Next: (e) part e3, the trails' Deploy and the gun's Recoil clips. d6 remains deferred; Generate wiring and acceptance follow
-the action and export ports, with Blender the default until the acceptance checks pass.
+(e) part e3 DONE 2026-10-18: the separate Deploy action (trails swung about world up, direction chosen by the spade test,
+the gun raised on the same frames, the same-direction warning), and Recoil (the far arm's signed kick and return, a held
+lead-in, deployed trails/gun held through the shot). Stage 3 retains the hinges, gun span and recoil geometry. Both clips
+insert keys without frame_set; Recoil's view-layer update evaluates its own action at the existing frame. It does not
+advance unrelated object actions: three independent probes caught that distinction, now held by fx_e3_action_names and
+two unit cases. The zero-span tube's stage-four division failure is reproduced and compared by the drill. Nine native
+fixtures, sixteen unit cases (1,981 tests), ten of ten implementation plants caught and ten repaired e3 corruption controls.
+All 120 independent e3 scenes match Blender on CLR and Unity's 64-bit Mono, including source action collisions, tilted and
+vertical guns, trail counts, disabled spread, negative elevation, lead-in and half-even kick timing, rock, flags and oars.
+FULL: 25 saved recipes (including the newly saved Global Hawk) plus 127 fixture jobs; 23 of 25 recipes and 146 of 152 jobs
+equal through stage 4 (501,773 rows, every key compared). Six named deferrals remain: two FBX, two non-UTF-8 names files,
+the infinite blade roll and the long-Spin limit. The full drill rejects 146 damaged-evidence kinds (139 without key rows).
+Next: stage 5, the export. d6 remains deferred; Generate wiring and acceptance follow the export port, with Blender the
+default until the acceptance checks pass.
 - **vehicle_rig.py: two gun-recoil defects** — OPEN (2026-10-16, found porting stage 3 part d3; the C# port reproduces both bit
   for bit, so fixing them is a script change plus a port change). (1) With `gun_pivot` at 1.0 and recoil on, the bore direction is
   `(gun_axis[1] - gun_axis[0]).normalized()` with `gun_axis[0]` the head - at the muzzle - so the bore is the float32 residue of
@@ -544,6 +556,10 @@ the action and export ports, with Blender the default until the acceptance check
   The bore should come from `gun_bore` (breech -> muzzle). (2) A tube whose points coincide (a zero span) gives a zero bore, and
   stage 4 dies of `ZeroDivisionError: float division by zero` (`fx_r_gunpoint`, keyed DIES:4:). Neither is reachable on a real
   gun's geometry at pivots below 1.
+- **vehicle_rig.py: recoil clearance looks for the wrong joined mesh** — OPEN (2026-10-18, found porting e3). The tube
+  joins as `Mesh_Barrel`, but the clearance code searches for `Mesh_RecoilArm`. Ordinary rigs therefore never print a breech
+  clearance result or ground warning. The port preserves that omission; an unusual scene actually carrying `Mesh_RecoilArm`
+  is declined by name until that branch is verified. Fixing the script and port together belongs with the recoil defects above.
 - **rig_anim.py's socket sort exit reads a freed edit bone** — OPEN (2026-10-14, found by the stage 4 fixtures). The
   "would sort BEFORE its parent" error prints `_parent.name` after `bpy.ops.object.mode_set(mode='OBJECT')` has freed
   the edit bones: four Blender runs of `fx_s4_socket_sort` printed the right name once, an empty name once, and twice

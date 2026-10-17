@@ -11,7 +11,7 @@ import os, sys, hashlib
 out = sys.argv[1]
 os.makedirs(out, exist_ok=True)
 jobs = [l.rstrip("\r") for l in open(sys.argv[2], encoding="utf-8").read().split("\n") if l.startswith("JOB\t") or l.startswith("FAST\t")]
-lines = None; stage3_lines = None; e2_seeds = {}
+lines = None; stage3_lines = None; e2_seeds = {}; e3_seeds = {}
 for d in sys.argv[3:]:
     rows = [l.rstrip("\r") for l in open(d, encoding="utf-8").read().split("\n") if l.strip()]
     starts = [i for i, l in enumerate(rows) if l.startswith("JOB\t")] + [len(rows)]
@@ -24,6 +24,7 @@ for d in sys.argv[3:]:
         soup = any(l.startswith("LOG\t2\tVEHICLE RIGGING ") or l.startswith("LOG\t2\tVEHICLE SHROUD ") for l in block)
         if key0 == "fx_r_wheels" and "STAGE\t3" in block: stage3_lines = block
         if key0 in ("fx_e2_rowing", "fx_e2_stances") and "STAGE\t4" in block: e2_seeds[key0] = block
+        if key0 in ("fx_e3_deploy", "fx_e3_offaxis") and "STAGE\t4" in block: e3_seeds[key0] = block
         if lines is None and src_ok and not soup and "STAGE\t5" in block and any(l.startswith("VG\t") for l in block) and any(l.startswith("FC\t") for l in block) and any(l.startswith("X\tGLB\t") for l in block):
             lines = block
 if lines is None:
@@ -281,6 +282,25 @@ for suffix, seed in (("row", "fx_e2_rowing"), ("furl", "fx_e2_stances")):
         curve_change("S4_E2FURL_flag_hold", "Spin", "Flag", 0)
         curve_change("S4_E2FURL_sail_hold", "Spin", "Sail", 0)
         i = first(lambda l: l.startswith("ACT\t4\tFurl\t")); write("S4_E2FURL_range", with_field(i, 4, flip_bits(lines[i].split("\t")[4])))
+# Separate supported e3 seeds: the off-axis sign warning is deliberately native behavior.
+for suffix, seed in (("deploy", "fx_e3_deploy"), ("warning", "fx_e3_offaxis")):
+    if seed not in e3_seeds: raise RuntimeError("no supported e3 seed: " + seed)
+    lines = e3_seeds[seed]
+    job = next(j for j in jobs if j.split("\t")[1] == seed)
+    open(os.path.join(out, "jobs_e3_" + suffix + ".txt"), "w", encoding="utf-8", newline="\n").write(job + "\n")
+    write("intact_e3_" + suffix, lines)
+    if suffix == "deploy":
+        curve_change("S4_E3DEPLOY_trail", "Deploy", "Trail_00", 0)
+        curve_change("S4_E3DEPLOY_gun", "Deploy", "Gun", 0)
+        curve_change("S4_E3DEPLOY_linear", "Deploy", "Gun", 0, True)
+        curve_change("S4_E3DEPLOY_kick", "Recoil", "RecoilArm", 0)
+        curve_change("S4_E3DEPLOY_recoil_linear", "Recoil", "RecoilArm", 0, True)
+        curve_change("S4_E3DEPLOY_hold", "Recoil", "Trail_00", 0)
+        i = first(lambda l: l.startswith("ACT\t4\tRecoil\t")); write("S4_E3DEPLOY_range", with_field(i, 4, flip_bits(lines[i].split("\t")[4])))
+        i = first(lambda l: l.startswith("PB\t4\tRecoilArm\t")); write("S4_E3DEPLOY_pose", with_field(i, 7, flip_bits(lines[i].split("\t")[7])))
+        i = first(lambda l: l.startswith("LOG\t4\tVEHICLE RECOIL clip:")); write("S4_E3DEPLOY_log", replace(i, lines[i] + " (changed)"))
+    else:
+        i = first(lambda l: l.startswith("LOG\t4\tVEHICLE TRAIL *** WARNING:")); write("S4_E3WARNING_log", replace(i, lines[i] + " (changed)"))
 for name in sorted(os.listdir(out)):
     if name.endswith(".txt") and not name.startswith(("jobs", "intact")):
         print(name[:-4])
