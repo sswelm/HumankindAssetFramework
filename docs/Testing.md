@@ -3143,3 +3143,29 @@ These are local measurements, including Blender on the fallback row. Startup, in
 are outside this measure; machine load and Blender runtime can vary. A separate stage profile of Saleg's Revenge
 went from 47.8 to 28.2 seconds, with identical GLB bytes. All 22 supported saved recipes retained their complete
 GLB hashes through the native C# wrapper.
+
+
+Parallel normal processing partitions vertices into disjoint ranges, with private scratch per range and shared
+read-only face adjacency. Each vertex retains its original face/fan order and floating-point arithmetic; its output
+corners belong to that vertex. Automatic workers run on the default task scheduler, capped at eight and the available CPUs.
+Automatic processing keeps meshes below 16,384 vertices or 16,384 triangles serial to avoid scheduling overhead.
+Scene mutation, naming, animation evaluation, file replacement and Unity APIs remain on the calling thread.
+
+`ParallelNormalsTests` compares all encode/decode/fan/corner/BMesh paths against a one-worker reference, including
+sharp edges, missing normals, tiny geometry, lone vertices, repeated runs and concurrent calls. Native `RunChecks`
+and full `Run` repeat bit comparisons on Unity's actual worker threads for explicit 2/4/8 workers and automatic
+selection, alongside Generate/preview/fallback regressions. The existing Blender parity drills also cover the shared
+kernel. No editor preferences or global thread-pool settings change.
+
+Local Unity measurements against merged `6f536b6` (PR #191), using the same isolated project and recipes, median of
+three Generate runs. Every route remained C#, with identical complete GLB hashes; startup, preview and game baking
+are excluded:
+
+| Recipe (C#) | Serial | Parallel normals | Less elapsed time |
+| --- | ---: | ---: | ---: |
+| Khelandion | 4.76 s | 3.75 s | 21% |
+| Triconter | 2.50 s | 2.44 s | 3% |
+| Saleg's Revenge | 31.17 s | 19.33 s | 38% |
+
+The gain depends on mesh size and how much time normals take. This parallelizes the pure normal kernel; it does
+not parallelize Blender fallback, animation evaluation or a mesh's ordered decimation operations.
