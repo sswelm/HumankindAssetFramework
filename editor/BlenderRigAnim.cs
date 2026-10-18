@@ -312,6 +312,7 @@ public static class BlenderRigAnim
         public string PrimaryAction;                                 // stage 3: the primary clip's action as it ends (the GLB route's clip name)
         public List<(string role, string action)> RoleActions = new List<(string, string)>();   // stage 3: each state role's action (role_acts), in the script's order
         public object VehicleState;                                  // vehicle_rig: what stage 3 hands stage 4 (BlenderVehicleRig.RigState)
+        public readonly List<string> Logs5 = new List<string>();      // vehicle_rig's finishing/export stage
     }
 
     /// <summary>bpy.ops.object.join with `active` the active object and `order` the joined meshes, the active first and the rest

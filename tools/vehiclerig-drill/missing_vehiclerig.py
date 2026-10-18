@@ -11,7 +11,7 @@ import os, sys, hashlib
 out = sys.argv[1]
 os.makedirs(out, exist_ok=True)
 jobs = [l.rstrip("\r") for l in open(sys.argv[2], encoding="utf-8").read().split("\n") if l.startswith("JOB\t") or l.startswith("FAST\t")]
-lines = None; stage3_lines = None; e2_seeds = {}; e3_seeds = {}
+lines = None; stage3_lines = None; e2_seeds = {}; e3_seeds = {}; s5_seeds = {}
 for d in sys.argv[3:]:
     rows = [l.rstrip("\r") for l in open(d, encoding="utf-8").read().split("\n") if l.strip()]
     starts = [i for i, l in enumerate(rows) if l.startswith("JOB\t")] + [len(rows)]
@@ -25,6 +25,7 @@ for d in sys.argv[3:]:
         if key0 == "fx_r_wheels" and "STAGE\t3" in block: stage3_lines = block
         if key0 in ("fx_e2_rowing", "fx_e2_stances") and "STAGE\t4" in block: e2_seeds[key0] = block
         if key0 in ("fx_e3_deploy", "fx_e3_offaxis") and "STAGE\t4" in block: e3_seeds[key0] = block
+        if key0 in ("fx_f_layers", "fx_f_merge_textures") and "STAGE\t5" in block: s5_seeds[key0] = block
         if lines is None and src_ok and not soup and "STAGE\t5" in block and any(l.startswith("VG\t") for l in block) and any(l.startswith("FC\t") for l in block) and any(l.startswith("X\tGLB\t") for l in block):
             lines = block
 if lines is None:
@@ -301,6 +302,26 @@ for suffix, seed in (("deploy", "fx_e3_deploy"), ("warning", "fx_e3_offaxis")):
         i = first(lambda l: l.startswith("LOG\t4\tVEHICLE RECOIL clip:")); write("S4_E3DEPLOY_log", replace(i, lines[i] + " (changed)"))
     else:
         i = first(lambda l: l.startswith("LOG\t4\tVEHICLE TRAIL *** WARNING:")); write("S4_E3WARNING_log", replace(i, lines[i] + " (changed)"))
+# Stage five: require a supported full pipeline, not a seed declined at mesh finishing or export.
+for suffix, seed in (("layers", "fx_f_layers"), ("merge", "fx_f_merge_textures")):
+    if seed not in s5_seeds: raise RuntimeError("no supported stage-five seed: " + seed)
+    lines = s5_seeds[seed]
+    job = next(j for j in jobs if j.split("\t")[1] == seed)
+    open(os.path.join(out, "jobs_s5_" + suffix + ".txt"), "w", encoding="utf-8", newline="\n").write(job + "\n")
+    write("intact_s5_" + suffix, lines)
+    if suffix == "layers":
+        i = first(lambda l: l.startswith("LOG\t5\tVEHICLE export totals:")); write("S5_LAYERS_log", replace(i, lines[i] + " (changed)"))
+        i = first(lambda l: l.startswith("MESH\t5\t"))
+        for name, field in (("positions",6),("faces",7),("uv",10),("normals",17)):
+            write("S5_LAYERS_" + name, with_field(i, field, flip_bits(lines[i].split("\t")[field])))
+        value = lines[i].split("\t")[18]; write("S5_LAYERS_colours", with_field(i, 18, value[:-1] + ("0" if value[-1] != "0" else "1")))
+        i = first(lambda l: l.startswith("VG\t5\t")); write("S5_LAYERS_weights", with_field(i, 5, flip_bits(lines[i].split("\t")[5])))
+        i = first(lambda l: l.startswith("X\tPRIM\t")); write("S5_LAYERS_primitive", with_field(i, 7, flip_bits(lines[i].split("\t")[7])))
+        i = first(lambda l: l.startswith("X\tGLB\t")); write("S5_LAYERS_bytes", with_field(i, 5, flip_bits(lines[i].split("\t")[5])))
+    else:
+        i = first(lambda l: l.startswith("X\tMAT\t")); write("S5_MERGE_material", replace(i, lines[i].replace('"name":', '"planted":', 1)))
+        i = first(lambda l: l.startswith("X\tIMG\t")); write("S5_MERGE_image", with_field(i, 5, flip_bits(lines[i].split("\t")[5])))
+        i = first(lambda l: l.startswith("X\tTEX\t")); write("S5_MERGE_texture", with_field(i, 3, "1" if lines[i].split("\t")[3] == "0" else "0"))
 for name in sorted(os.listdir(out)):
     if name.endswith(".txt") and not name.startswith(("jobs", "intact")):
         print(name[:-4])

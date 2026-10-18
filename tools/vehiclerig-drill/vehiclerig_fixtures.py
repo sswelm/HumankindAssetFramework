@@ -894,6 +894,54 @@ def main(out):
     r.node("A", mesh=r.mesh("A", material=flat)); r.node("B", mesh=r.mesh("B", at=(3.0, 0.0, 0.0), material=direct)); r.node("C", mesh=r.mesh("C", at=(6.0, 0.0, 0.0), material=tint))
     recipe(out, "fx_b_bright", r.write(models, "fx_b_bright"), [("A", 0, {}), ("B", 0, {}), ("C", 0, {})], model1Bright=1.5)
 
+    # Stage 5: finishing role exclusions, XOR flips, attributes, evaluated bounds, materials and action ranges.
+    for key, global_double, fix in (("fx_f_roles", False, True), ("fx_f_global", True, True), ("fx_f_xor", False, True), ("fx_f_layers", True, False)):
+        r = Rig(); ma = r.material("Paint", (.5, .4, .3)); parts = []
+        for name, role, at, scale in (("Hull", 0, (-2, 0, -1), [4, 1, 2]), ("Flip", 20, (2, 0, -1), [2, 1, 1])):
+            mi = r.mesh(name, material=ma, colors=key == "fx_f_layers", uv2=True)
+            idx = [0,3,1,0,2,3,4,7,6,4,5,7,0,5,4,0,1,5,2,7,3,2,6,7,0,6,2,0,4,6,1,7,5,1,3,7]
+            r.meshes[mi]["primitives"][0]["indices"] = r.b.accessor(idx, "H", "SCALAR", minmax=False)
+            r.node(name, mesh=mi, translation=list(at), scale=scale); parts.append((name, role, {}))
+        if key in ("fx_f_roles", "fx_f_global"):
+            for name, role, at in (("Canvas",14,(0,3,0)),("Banner",17,(0,5,0)),("Rudder",18,(0,1,3)),("Keep",19,(0,2,0)),("Rope",15,(1,3,0))):
+                r.node(name,mesh=r.mesh(name,material=ma),translation=list(at),scale=[.05,1,1]);parts.append((name,role,{}))
+            r.node("Oars",mesh=oar_bank(r,"Oars",ma,[(0,1,.2,.1,False),(0,-1,.2,.1,False)]));parts.append(("Oars",13,{}))
+        recipe(out,key,r.write(models,key),parts,doubleSided=global_double,fixInsideOut=fix)
+    r = Rig(); ma = r.material("Paint", (.5,.4,.3))
+    r.node("Hull",mesh=r.mesh("Hull",material=ma),translation=[-5,0,-1],scale=[10,1,2])
+    r.node("Rudder",mesh=r.mesh("Rudder",material=ma),translation=[0,0,3],scale=[.1,1,.1])
+    recipe(out,"fx_f_bounds",r.write(models,"fx_f_bounds"),[("Hull",0,{}),("Rudder",18,{})],waveEnabled=True,rockDegrees=0,rockPitchDeg=20,rockPitchPhase=0,rockFrames=15)
+    r = Rig(); ma = r.material("Paint", (.2,.4,.6))
+    r.node("Hull",mesh=r.mesh("Hull",material=ma))
+    recipe(out,"fx_f_bright_flat",r.write(models,"fx_f_bright_flat"),[("Hull",0,{})],model1Bright=1.5)
+    r = Rig(); ma = r.material("Paint", (.4,.5,.6)); r.node("Hull",mesh=r.mesh("Hull",material=ma)); r.node("Banner",mesh=r.mesh("Banner",material=ma),translation=[0,3,0])
+    recipe(out,"fx_f_long_furl",r.write(models,"fx_f_long_furl"),[("Hull",0,{}),("Banner",17,{})],flagFoldOn=True,flagFoldFrames=100,flagFoldDeg=110)
+    models_pair = []
+    for i, color in enumerate(((180,40,40),(40,180,40))):
+        r = Rig(); tx = r.texture(r.image("Albedo",rgb=color)); ma = r.material("Paint",(1,1,1),texture=tx)
+        r.node("Hull" if i == 0 else "Deck",mesh=r.mesh("Panel",material=ma,colors=True,uv2=True))
+        models_pair.append(r.write(models,"fx_f_texture_source%d"%i))
+    recipe(out,"fx_f_merge_textures",models_pair[0],[("Hull",0,{}),("B_Deck",0,{})],srcFile2=models_pair[1],model2Off={"x":3,"y":0,"z":0})
+    unnamed = []
+    for i, color in enumerate(((180,40,40),(40,180,40))):
+        r = Rig(); tx = r.texture(r.image(None,rgb=color)); ma = r.material("Paint",(1,1,1),texture=tx)
+        r.node("Hull" if i == 0 else "Deck",mesh=r.mesh("Panel",material=ma))
+        unnamed.append(r.write(models,"fx_f_unnamed_source%d"%i))
+    recipe(out,"fx_f_merge_unnamed",unnamed[0],[("Hull",0,{}),("B_Deck",0,{})],srcFile2=unnamed[1],model2Off={"x":3,"y":0,"z":0})
+    # A join can add UVMap without making any layer active; a BMesh round trip must preserve that.
+    r = Rig(); ma = r.material("Paint",(.5,.4,.3))
+    r.node("Hull",mesh=r.mesh("Hull",material=ma,uv=False))
+    r.node("Panel",mesh=r.mesh("Panel",material=ma),translation=[3,0,0])
+    recipe(out,"fx_f_uv_inactive",r.write(models,"fx_f_uv_inactive"),[("Hull",0,{}),("Panel",0,{})],doubleSided=True)
+    # From independent probe 042: export samples nonzero Oar_001.x before ending at -0.
+    r = Rig(); ma = r.material("Paint",(.5,.4,.3))
+    for name, at, scale in (("Hull",[-2,0,-1],[4.131197958073587,2.846877953526476,2.897513393422865]),("Canvas",[0,3,0],[1.260743856890973,3,.05]),("Rudder",[3,1,0],[.1,1,1])):
+        r.node(name,mesh=r.mesh(name,material=ma,colors=True),translation=at,scale=scale)
+    r.node("Oars",mesh=oar_bank(r,"Oars",ma,[(0,1,.2,.1,False),(0,-1,.2,.1,False)]))
+    r.node("Wheel",mesh=r.mesh("Wheel",material=ma,colors=True),translation=[2,.5,1],scale=[.2,1,1])
+    recipe(out,"fx_f_signed_zero",r.write(models,"fx_f_signed_zero"),[("Hull",0,{}),("Canvas",14,{}),("Rudder",18,{}),("Oars",13,{}),("Wheel",1,{})],frames=15,wheelReducePct=60,modelRot={"x":0,"y":0,"z":90},sailFoldFrames=1,sailFoldAngleDeg=180)
+
+
 
 def set_tag(argv, tag, value):
     """The one <tag>=... token (the script takes the FIRST), replaced or appended."""

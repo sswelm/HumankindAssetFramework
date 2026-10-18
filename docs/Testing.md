@@ -2271,6 +2271,38 @@ FULL=1 VEHICLERIG_KEYS=1: all 25 saved recipes (now including rq4_global_hawk) a
 FBX, two non-UTF-8 names files, infinite blade roll and the long-Spin limit. The drill refuses 146 damaged-evidence kinds
 (139 without key rows), including all ten new e3 controls.
 
+
+**Step (f), stage 5: mesh finishing and GLB export (2026-10-18).** BlenderVehicleRig.Stage5.cs ports the inside-out
+island test, XOR marked winding flip and inset duplicate back shells, including oar/preserve/rigging exclusions. BMesh
+vertex/edge/face discovery and reversal preserve UVs, colours, raw custom-normal shorts and deform weights. Whole-model
+inset bounds use the evaluated pose left by the last actual update; local inset divides by mean absolute world scale.
+Welded sharp edges participate in export normals, and BMesh finishing activates the first UV layer while an untouched joined mesh keeps its inactive UV state.
+
+The shared GLB exporter accepts the vehicle's full action ranges without changing the scene range; its rig_anim route keeps
+its existing behavior. Orphan pose actions still export the current skeleton, material-less slots and neutral joints follow
+the vehicle exporter, and mesh validation updates the final scene after the totals line. Export's action switching and final
+frame restoration preserve the original pose, including negative zero reached after a nonzero animation sample. Curves are
+converted once for sampling, avoiding quadratic allocation on per-frame rotor/rowing keys.
+
+Both material scopes are combined with texture/image/sampler offsets rebased, including texture indices in extension objects.
+Unnamed embedded images keep their import-local Image_N name before collision naming; a Wespe recipe exposed the difference.
+Flat brightness and brightness absorbed by a texture tint are exported without mutating source material metadata. Pixel-edited
+brightness, JPEG alpha requiring PNG re-encoding, and an auxiliary FBX preview are named deferrals; Blender remains the default
+backend; Generate wiring follows this stage.
+
+The eleven fx_f_* fixtures cover role/global doubling, winding XOR, corner layers, evaluated bounds, flat brightness, a Furl
+action longer than Spin, merged textures and unnamed images, inactive UV state and sampled signed-zero write-back. Sixteen
+unit cases bring the suite to 1,997 passing tests. Eighty independent scenes vary geometry, role mixes, yaw/tilt, wave pose,
+sharp welds, layer combinations, action ranges and merged materials. Every supported scene/key/export row and every complete
+GLB matches Blender on CLR and Unity's 64-bit Mono. Twelve S5_* corrupted copies change totals, geometry/layers/weights,
+primitive/GLB hashes and material/image/texture metadata with repaired evidence seals; intact layer/merge seeds must first
+compare fully, so a named decline cannot masquerade as detection.
+Eleven independent implementation plants are caught: oar/preserve exclusions, winding XOR, inset size, evaluated bounds,
+duplicated fold-chain weights, import-local image names, BMesh UV activation, sampled signed zero, sharp normals and full
+action ranges. FULL=1 VEHICLERIG_KEYS=1 runs 25 saved recipes and 138 fixtures; 155 of 163 jobs compare through stage 5
+with every scene/key row compared. All 112 supported exports match as complete GLB bytes. Eight named deferrals include the six from e3 plus pixel-edited brightness
+and JPEG-alpha re-encoding. All 158 damaged-evidence kinds are rejected (151 in the default run without key rows).
+
 Review of PR #176 (2026-10-15): a full run found the organ gun's newly recorded custom-normal shorts differed after
 stage one's loose split. Blender's separate operator decodes the source BMesh normals into a vector layer and
 re-encodes that layer on each copied component; copying the original shorts misses that quantization. The model now

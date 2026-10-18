@@ -547,8 +547,20 @@ vertical guns, trail counts, disabled spread, negative elevation, lead-in and ha
 FULL: 25 saved recipes (including the newly saved Global Hawk) plus 127 fixture jobs; 23 of 25 recipes and 146 of 152 jobs
 equal through stage 4 (501,773 rows, every key compared). Six named deferrals remain: two FBX, two non-UTF-8 names files,
 the infinite blade roll and the long-Spin limit. The full drill rejects 146 damaged-evidence kinds (139 without key rows).
-Next: stage 5, the export. d6 remains deferred; Generate wiring and acceptance follow the export port, with Blender the
-default until the acceptance checks pass.
+(f) stage 5 DONE 2026-10-18: inside-out island correction, marked flips and inset back shells with the source's role
+exclusions, followed by GLB export through the shared exporter. BMesh duplication preserves corner layers, raw custom-normal
+shorts and rigid/fold-chain weights; welded sharp edges split export normals. The inset uses the last evaluated pose's
+whole-model bounds. Material scopes from both imports retain texture/image indices, local unnamed-image names and flat or
+tint-absorbed brightness; brightness requiring edited image bytes, JPEG-alpha image re-encoding and auxiliary FBX preview
+remain explicit named limits. Export samples full action ranges without widening the scene range, handles orphan pose actions
+and neutral joints, and preserves validation and post-export pose effects, including sampled signed-zero write-back.
+Eleven native fixtures and sixteen unit cases (1,997 tests) hold finishing, export and material regressions. All 80 independent
+export probes match Blender on CLR and Unity's 64-bit Mono. The drill compares every exported GLB row and the complete file
+bytes, with twelve repaired stage-five corruption controls and intact supported seeds. All eleven implementation plants
+are caught. FULL: 25 saved recipes plus 138 fixtures; 155 of 163 jobs compare through stage 5 (eight named deferrals),
+with all 112 supported GLBs byte-identical. The complete drill rejects 158 damaged-evidence kinds (151 without key rows).
+Next: Generate's in-process vehicle wrapper, wiring and acceptance. d6 remains deferred; Blender stays the default until
+acceptance checks pass.
 - **vehicle_rig.py: two gun-recoil defects** — OPEN (2026-10-16, found porting stage 3 part d3; the C# port reproduces both bit
   for bit, so fixing them is a script change plus a port change). (1) With `gun_pivot` at 1.0 and recoil on, the bore direction is
   `(gun_axis[1] - gun_axis[0]).normalized()` with `gun_axis[0]` the head - at the muzzle - so the bore is the float32 residue of

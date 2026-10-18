@@ -33,7 +33,7 @@ public static partial class VehicleProbe
     }
 
     /// <summary>safe_acos_approx (BLI_math_base.hh): the polynomial Blender uses for corner angles, max error 4.5e-5.</summary>
-    static float SafeAcosApprox(float x)
+    internal static float SafeAcosApprox(float x)
     {
         float f = Math.Abs(x);
         float m = f < 1.0f ? (float)(1.0f - (float)(1.0f - f)) : 1.0f;
@@ -381,7 +381,7 @@ public static partial class VehicleProbe
     /// normals (the two shorts per corner) always the fan walk: each fan's shorts averaged and decoded against its space - an
     /// invalid space decodes to a ZERO vector, which the glTF exporter later replaces. Without them: every face sharp gives
     /// the face normals, none sharp the vertex normals, a mix the fan walk with each fan's own normal.</summary>
-    internal static float[] BlenderCornerNormals(float[] P, int[] tris, bool[] sharpFace, short[] d0, short[] d1)
+    internal static float[] BlenderCornerNormals(float[] P, int[] tris, bool[] sharpFace, short[] d0, short[] d1, HashSet<long> sharpEdges = null)
     {
         int nf = tris.Length / 3;
         var cn = new float[nf * 9];
@@ -396,7 +396,7 @@ public static partial class VehicleProbe
                 for (int c = 0; c < nf * 3; c++) { cn[c * 3] = FN[(c / 3) * 3]; cn[c * 3 + 1] = FN[(c / 3) * 3 + 1]; cn[c * 3 + 2] = FN[(c / 3) * 3 + 2]; }
                 return cn;
             }
-            if (!any)
+            if (!any && (sharpEdges == null || sharpEdges.Count == 0))
             {
                 var VN = BlenderVertexNormals(P, tris, null);
                 for (int c = 0; c < nf * 3; c++) { int v = tris[c]; cn[c * 3] = VN[v * 3]; cn[c * 3 + 1] = VN[v * 3 + 1]; cn[c * 3 + 2] = VN[v * 3 + 2]; }
@@ -405,7 +405,7 @@ public static partial class VehicleProbe
             WalkFans(P, tris, sharpFace, (v, infos, fan, space) =>
             {
                 foreach (int lc in fan) { int c = infos[lc].corner; cn[c * 3] = space.fnx; cn[c * 3 + 1] = space.fny; cn[c * 3 + 2] = space.fnz; }
-            }, null, null);
+            }, null, null, sharpEdges);
             return cn;
         }
         WalkFans(P, tris, sharpFace, (v, infos, fan, space) =>
@@ -415,7 +415,7 @@ public static partial class VehicleProbe
             short a0 = (short)(s0 / fan.Count), a1 = (short)(s1 / fan.Count);
             float dx, dy, dz; DecodeCustom(space, a0, a1, out dx, out dy, out dz);
             foreach (int lc in fan) { int c = infos[lc].corner; cn[c * 3] = dx; cn[c * 3 + 1] = dy; cn[c * 3 + 2] = dz; }
-        }, null, null);
+        }, null, null, sharpEdges);
         return cn;
     }
 

@@ -82,7 +82,7 @@ public static class BlenderExport
     static float NoNegativeZero(float f) => f == 0f ? 0f : f;   // arr[arr == -0.0] = 0.0
 
     /// <summary>The exporter's normals for every corner of a mesh in Blender's frame (3 per corner, already Y up).</summary>
-    public static float[] CornerNormals(float[] positions, int[] faces, bool[] faceSharp, short[] customNormal, float[] skinTransform = null)
+    public static float[] CornerNormals(float[] positions, int[] faces, bool[] faceSharp, short[] customNormal, float[] skinTransform = null, HashSet<long> sharpEdges = null)
     {
         int nc = faces.Length;
         short[] d0 = null, d1 = null;
@@ -91,7 +91,7 @@ public static class BlenderExport
             d0 = new short[nc]; d1 = new short[nc];
             for (int c = 0; c < nc; c++) { d0[c] = customNormal[2 * c]; d1[c] = customNormal[2 * c + 1]; }
         }
-        var cn = VehicleProbe.BlenderCornerNormals(positions, faces, faceSharp, d0, d1);
+        var cn = VehicleProbe.BlenderCornerNormals(positions, faces, faceSharp, d0, d1, sharpEdges);
         var outN = new float[nc * 3];
         for (int c = 0; c < nc; c++)
         {
@@ -202,7 +202,7 @@ public static class BlenderExport
         }
         var v = new BlenderReduce.Result
         {
-            VertexCount = r.VertexCount, FaceCount = kept, Positions = r.Positions, Edges = r.Edges, DefNr = r.DefNr, DefWeight = r.DefWeight,
+            VertexCount = r.VertexCount, FaceCount = kept, Positions = r.Positions, Edges = r.Edges, EdgeSharp = r.EdgeSharp, DefNr = r.DefNr, DefWeight = r.DefWeight,
             Slots = r.Slots, SlotAlpha = r.SlotAlpha, Ratio = r.Ratio, Collapsed = r.Collapsed, Fallback = r.Fallback, ActiveColor = r.ActiveColor,
             Faces = PerFace(r.Faces, 3), FaceMaterial = PerFace(r.FaceMaterial, 1), FaceSharp = PerFace(r.FaceSharp, 1), CustomNormal = PerFace(r.CustomNormal, 6),
         };
@@ -256,7 +256,7 @@ public static class BlenderExport
         int nc = r.Faces.Length, nf = nc / 3;
         var plan = ColorPlan(r);
         float[] nt = skin != null ? VehicleProbe.ExporterNormalTransform(skin.ArmatureWorld, skin.ObjectWorld) : null;
-        var normals = CornerNormals(r.Positions, r.Faces, r.FaceSharp, r.CustomNormal, nt);
+        var normals = CornerNormals(r.Positions, r.Faces, r.FaceSharp, r.CustomNormal, nt, r.EdgeSharp == null ? null : VehicleProbe.SharpEdgeSet(r.Edges, r.EdgeSharp));
         float[] locs = r.Positions; ushort[] vertJoints = null; float[] vertWeights = null; bool neutral = false;
         if (skin != null) { locs = SkinnedPositions(r.Positions, skin.ObjectWorld); VertexBones(r, skin, out vertJoints, out vertWeights, out neutral); }
         int colorAt = 1 + 3 + 2 * r.Uv.Count;

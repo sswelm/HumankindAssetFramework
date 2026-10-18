@@ -20,6 +20,7 @@ public static class BlenderReduce
         public int[] Edges;                       // pairs
         public int[] FaceMaterial;                // material slot per face
         public bool[] FaceSharp;                  // sharp_face per face
+        public bool[] EdgeSharp;                  // optional sharp_edge bits, in Edges order
         public List<float[]> Uv = new List<float[]>();   // per UV layer, 2 per corner
         public short[] CustomNormal;              // 2 per corner, or null when no primitive had normals
         public List<int>[] DefNr; public List<float>[] DefWeight;   // per vertex, or null when the object has no vertex groups
