@@ -3048,13 +3048,13 @@ public static class UniversalBaker
                 .OrderByDescending(p => p).FirstOrDefault();   // newest version folder wins ("Blender 5.1" > "Blender 4.2")
             if (exe != null) return exe;
         }
-        return "blender";   // on PATH
+        return BlenderExecutable.FindOnPath(Environment.GetEnvironmentVariable("PATH")) ?? "blender";
     }
 
     public static bool BlenderAvailable()
     {
         string b = FindBlender();
-        return b != "blender" || File.Exists(b);   // an absolute hit, or assume PATH has it
+        return File.Exists(b);
     }
 
     // prep_model.py — strip named objects (+ their children) AND/OR per-object quadric-decimate to ~targetTris, all in

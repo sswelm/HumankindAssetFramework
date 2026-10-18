@@ -14,6 +14,35 @@ public static class UnityVehicleGenerateTests
     static void Check(string name,bool ok,string detail) { Row((ok?"PASS ":"FAIL ")+name+": "+detail);if(!ok)failed++; }
     static FieldInfo Field(string name)=>typeof(VehicleLabWindow).GetField(name,BindingFlags.Instance|BindingFlags.NonPublic|BindingFlags.Public);
     static MethodInfo Method(string name)=>typeof(VehicleLabWindow).GetMethod(name,BindingFlags.Instance|BindingFlags.NonPublic);
+    static void Availability()
+    {
+        foreach(string editorDefault in new[]{"csharp","blender"})
+        {
+            var labels=VehicleLabWindow.GenerateBackendLabels(false,editorDefault);
+            Check("missing Blender labels "+editorDefault,labels[0].Contains("unavailable")&&labels[1].Contains("unavailable")&&labels[2].Contains("unavailable"),string.Join("; ",labels));
+        }
+        var present=VehicleLabWindow.GenerateBackendLabels(true,"csharp");
+        Check("available Blender labels",present[0].Contains("fallback to Blender")&&present[2].Contains("fallback to Blender")&&!present.Any(l=>l.Contains("unavailable")),string.Join("; ",present));
+        var w=ScriptableObject.CreateInstance<VehicleLabWindow>();
+        try
+        {
+            Field("headless").SetValue(w,true);Field("headlessDir").SetValue(w,"Logs/availability");
+            Field("findBlender").SetValue(w,new Func<string>(()=>null));
+            Method("LoadRecipeFromPath").Invoke(w,new object[]{Path.Combine(fixtures,"recipes/fx_e2_stances.json")});
+            string path=Path.GetFullPath("Logs/availability/rig.glb");Field("outGlb").SetValue(w,path);Field("generateRoute").SetValue(w,"csharp");
+            Method("Vehicleize").Invoke(w,null);
+            Check("C# without Blender",w.lastGenerateRoute=="csharp"&&File.Exists(path)&&((string)Field("status").GetValue(w)).Contains("DONE"),(string)Field("status").GetValue(w));
+            if(!File.Exists(path))return;
+            byte[] original=File.ReadAllBytes(path);
+            string unsupported=Path.Combine(fixtures,"no_blender.fbx");File.WriteAllText(unsupported,"not launched");Field("srcFile").SetValue(w,unsupported);
+            Method("Vehicleize").Invoke(w,null);string status=(string)Field("status").GetValue(w);
+            Check("unavailable fallback explains why",w.lastGenerateRoute=="csharp"&&status.Contains("Blender fallback is unavailable")&&status.Contains(".fbx")&&!status.Contains("DONE"),status);
+            Check("unavailable fallback preserves output",original.SequenceEqual(File.ReadAllBytes(path)),"previous GLB remains intact");
+            Field("generateRoute").SetValue(w,"blender");Method("Vehicleize").Invoke(w,null);status=(string)Field("status").GetValue(w);
+            Check("direct Blender unavailable",status.Contains("Blender is unavailable")&&!status.Contains("DONE")&&original.SequenceEqual(File.ReadAllBytes(path)),status);
+        }
+        finally{UnityEngine.Object.DestroyImmediate(w);}
+    }
     static void Recipes(string label,string[] jobs,string golden)
     {
         var captured=jobs.Where(j=>!File.Exists(Path.Combine(golden,Path.GetFileNameWithoutExtension(j)+".txt"))).ToArray();
@@ -138,7 +167,7 @@ public static class UnityVehicleGenerateTests
         output=Arg("-hafGenerateOutput");fixtures=Arg("-hafGenerateFixtures");
         try
         {
-            SecondSourceFingerprint();foreach(string key in new[]{"fx_e2_stances","fx_e3_deploy","fx_f_layers"})Preview(key);
+            Availability();SecondSourceFingerprint();foreach(string key in new[]{"fx_e2_stances","fx_e3_deploy","fx_f_layers"})Preview(key);
             StaleBaseline();
         }
         catch(Exception e){Check("exception",false,e.ToString());}
@@ -153,6 +182,13 @@ public static class UnityVehicleGenerateTests
         Row("TOTAL failed "+failed);EditorApplication.Exit(failed==0?0:1);
     }
 
+    public static void RunAvailability()
+    {
+        output=Arg("-hafGenerateOutput");fixtures=Arg("-hafGenerateFixtures");
+        try{Availability();}catch(Exception e){Check("exception",false,e.ToString());}
+        Row("TOTAL failed "+failed);EditorApplication.Exit(failed==0?0:1);
+    }
+
     public static void Run()
     {
         output=Arg("-hafGenerateOutput");fixtures=Arg("-hafGenerateFixtures");
@@ -160,7 +196,7 @@ public static class UnityVehicleGenerateTests
         {
             var keys=new[]{"fx_e2_stances","fx_e3_deploy","fx_f_global","fx_f_layers","fx_f_merge_textures","fx_f_uv_inactive","fx_f_signed_zero"};
             var jobs=keys.Select(k=>Path.Combine(fixtures,"recipes",k+".json")).ToArray();
-            SecondSourceFingerprint();Persistence(jobs[0]);StaleBaseline();Recipes("fixtures",jobs,"Tools/fixture_goldens");
+            Availability();SecondSourceFingerprint();Persistence(jobs[0]);StaleBaseline();Recipes("fixtures",jobs,"Tools/fixture_goldens");
             foreach(string key in new[]{"fx_e2_stances","fx_e3_deploy","fx_f_layers"})Preview(key);
             string saved=Arg("-hafGenerateRecipes");if(Directory.Exists(saved))Recipes("saved",Directory.GetFiles(saved,"*.json"),"Tools/lab_golden");else Check("saved recipes",false,"recipes not found");
         }

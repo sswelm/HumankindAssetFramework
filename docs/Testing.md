@@ -2337,6 +2337,14 @@ regression uses a changed synthetic recipe, preserves its old golden, retains a 
 so repairing a project golden cannot invalidate the regression. The [acceptance record](Vehicle-Generate-Acceptance.md)
 describes the baseline review and the user's visual/runtime checks still required before changing the default; d6 stays deferred.
 
+Vehicle Generate's backend labels reflect detected Blender availability, including the editor-default choice.
+`BlenderExecutable.FindOnPath` resolves an actual file instead of treating the bare command name as an installed
+executable. Three filesystem unit cases cover missing executables, quoted paths with spaces, PATH order, invalid
+entries and removal. Native `RunAvailability` checks the unavailable/available labels, generates a supported rig
+with no Blender resolver, and verifies that an unsupported input and a direct Blender request explain unavailability
+without claiming completion or replacing the previous GLB. It runs in the normal native suite, or on its own with
+`HAF_GENERATE_TEST_METHOD=RunAvailability bash tools/vehiclerig_unity_generate_drill.sh`.
+
 Review of PR #176 (2026-10-15): a full run found the organ gun's newly recorded custom-normal shorts differed after
 stage one's loose split. Blender's separate operator decodes the source BMesh normals into a vector layer and
 re-encodes that layer on each copied component; copying the original shorts misses that quantization. The model now

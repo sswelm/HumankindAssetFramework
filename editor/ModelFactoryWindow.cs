@@ -1575,7 +1575,7 @@ public class ModelFactoryWindow : EditorWindow
             using (new EditorGUILayout.HorizontalScope())
             {
                 string bov = EditorPrefs.GetString("HAF.BlenderPath", EditorPrefs.GetString("ENC.blenderPath", ""));
-                string nb = EditorGUILayout.TextField(new GUIContent("Override (blender.exe)", "Leave empty to auto-detect the newest install under Program Files. Set this if Blender is elsewhere or only on PATH."), bov);
+                string nb = EditorGUILayout.TextField(new GUIContent("Override (blender.exe)", "Leave empty to auto-detect the newest install under Program Files or Blender on PATH. Set this if Blender is elsewhere."), bov);
                 if (nb != bov) EditorPrefs.SetString("HAF.BlenderPath", nb ?? "");
                 if (GUILayout.Button("Browse", GUILayout.Width(70)))
                 {
