@@ -107,18 +107,39 @@ public static class UnityVehicleGenerateTests
         byte[] bytes=File.ReadAllBytes(second);try{var changed=(byte[])bytes.Clone();changed[changed.Length-1]^=1;File.WriteAllBytes(second,changed);var after=VehicleGenerateAcceptanceTest.GoldenInputs(recipe,source);Check("second source mutation",before["source2"]!=after["source2"]&&before["recipe"]==after["recipe"],"changed second model invalidates provenance without a recipe edit");}finally{File.WriteAllBytes(second,bytes);}
     }
 
+    static void StaleBaseline()
+    {
+        // Own every input: repairing a saved project's golden must not break this regression check.
+        string work="Logs/stale_fixture/"+Guid.NewGuid().ToString("N");
+        string recipe=Path.Combine(fixtures,"stale_baseline.json"),goldenDir=work+"/goldens";
+        string golden=Path.Combine(goldenDir,"stale_baseline.txt");
+        var json=Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(Path.Combine(fixtures,"recipes/fx_e2_stances.json")));
+        File.WriteAllText(recipe,json.ToString());
+        var captured=VehicleGenerateAcceptanceTest.RunRecipes(new[]{recipe},work+"/capture",goldenDir);
+        Check("stale fixture captured",captured.fail==0&&captured.skip==1&&File.Exists(golden),captured.body);
+        if(!File.Exists(golden))return;
+        var intact=VehicleGenerateAcceptanceTest.RunRecipes(new[]{recipe},work+"/intact",goldenDir);
+        Check("stale fixture intact",intact.fail==0&&intact.pass==1,intact.body);
+        byte[] original=File.ReadAllBytes(golden);
+        json["degrees"]=-180;File.WriteAllText(recipe,json.ToString());
+        var stale=VehicleGenerateAcceptanceTest.RunRecipes(new[]{recipe},work+"/changed",goldenDir);
+        Check("stale baseline rejected",stale.fail==1&&stale.body.Contains("stale by input"),stale.body);
+        Check("stale golden preserved",original.SequenceEqual(File.ReadAllBytes(golden)),"existing golden is unchanged");
+        var candidates=Directory.Exists(work+"/changed")?Directory.GetFiles(work+"/changed","*.candidate.txt",SearchOption.AllDirectories):new string[0];
+        Check("stale candidate retained",candidates.Length==1,candidates.FirstOrDefault()??"none");
+        if(candidates.Length!=1)return;
+        File.Copy(candidates[0],golden,true); // This synthetic golden alone is deliberately refreshed.
+        var refreshed=VehicleGenerateAcceptanceTest.RunRecipes(new[]{recipe},work+"/refreshed",goldenDir);
+        Check("refreshed baseline verified",refreshed.fail==0&&refreshed.pass==1,refreshed.body);
+    }
+
     public static void RunChecks()
     {
         output=Arg("-hafGenerateOutput");fixtures=Arg("-hafGenerateFixtures");
         try
         {
             SecondSourceFingerprint();foreach(string key in new[]{"fx_e2_stances","fx_e3_deploy","fx_f_layers"})Preview(key);
-            string recipe=Path.Combine(Arg("-hafGenerateRecipes"),"spanish_battleship_espana_split_fused.json");
-            string golden="Tools/lab_golden/spanish_battleship_espana_split_fused.txt";byte[] original=File.ReadAllBytes(golden);
-            var r=VehicleGenerateAcceptanceTest.RunRecipes(new[]{recipe},"Logs/stale_baseline","Tools/lab_golden");foreach(string l in r.body.Split('\n'))Row(l);
-            Check("stale baseline rejected",r.fail==1&&r.body.Contains("stale"),"changed input provenance is not accepted");
-            Check("stale golden preserved",original.SequenceEqual(File.ReadAllBytes(golden)),"existing golden is unchanged");
-            var candidates=Directory.GetFiles("Logs/stale_baseline","*.candidate.txt",SearchOption.AllDirectories);Check("stale candidate retained",candidates.Length==1,candidates.FirstOrDefault()??"none");
+            StaleBaseline();
         }
         catch(Exception e){Check("exception",false,e.ToString());}
         Row("TOTAL failed "+failed);EditorApplication.Exit(failed==0?0:1);
@@ -139,7 +160,7 @@ public static class UnityVehicleGenerateTests
         {
             var keys=new[]{"fx_e2_stances","fx_e3_deploy","fx_f_global","fx_f_layers","fx_f_merge_textures","fx_f_uv_inactive","fx_f_signed_zero"};
             var jobs=keys.Select(k=>Path.Combine(fixtures,"recipes",k+".json")).ToArray();
-            SecondSourceFingerprint();Persistence(jobs[0]);Recipes("fixtures",jobs,"Tools/fixture_goldens");
+            SecondSourceFingerprint();Persistence(jobs[0]);StaleBaseline();Recipes("fixtures",jobs,"Tools/fixture_goldens");
             foreach(string key in new[]{"fx_e2_stances","fx_e3_deploy","fx_f_layers"})Preview(key);
             string saved=Arg("-hafGenerateRecipes");if(Directory.Exists(saved))Recipes("saved",Directory.GetFiles(saved,"*.json"),"Tools/lab_golden");else Check("saved recipes",false,"recipes not found");
         }

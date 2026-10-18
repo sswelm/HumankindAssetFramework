@@ -572,8 +572,12 @@ every preview frame against independently sampled Blender GLB poses, and file/lo
 All 25 saved recipes produce matching GLBs/logs/sidecars on both route selections: 22 use C#, two FBX sources and Espana's
 JPEG-alpha path use Blender. Espana's existing golden has stale source and recipe fingerprints; acceptance correctly flags
 that baseline for review. The isolated run retains its candidate; the project's golden is unchanged.
-Next: review that stale baseline and perform the user's visual/runtime acceptance before (h), the default flip. d6 remains
-deferred; the shipped Generate default stays Blender.
+Baseline review DONE 2026-10-18: Espana's fused source and recipe names were audited; a fresh Blender golden and Global
+Hawk's missing golden matched independent generations and were installed in the local modding project. All 25 recipes
+complete with no failures (22 C#, three named Blender fallbacks), and all 52 input fingerprints remain unchanged. The native
+stale-baseline regression now changes its own fixture instead of requiring the user's Espana golden to stay stale; it also
+verifies a refreshed baseline. Details and the remaining checklist: [Vehicle Generate acceptance](Vehicle-Generate-Acceptance.md).
+Next: the user's visual/runtime acceptance before (h), the default flip. d6 remains deferred; the shipped Generate default stays Blender.
 - **vehicle_rig.py: two gun-recoil defects** — OPEN (2026-10-16, found porting stage 3 part d3; the C# port reproduces both bit
   for bit, so fixing them is a script change plus a port change). (1) With `gun_pivot` at 1.0 and recoil on, the bore direction is
   `(gun_axis[1] - gun_axis[0]).normalized()` with `gun_axis[0]` the head - at the muzzle - so the bore is the float32 residue of
