@@ -559,8 +559,21 @@ export probes match Blender on CLR and Unity's 64-bit Mono. The drill compares e
 bytes, with twelve repaired stage-five corruption controls and intact supported seeds. All eleven implementation plants
 are caught. FULL: 25 saved recipes plus 138 fixtures; 155 of 163 jobs compare through stage 5 (eight named deferrals),
 with all 112 supported GLBs byte-identical. The complete drill rejects 158 damaged-evidence kinds (151 without key rows).
-Next: Generate's in-process vehicle wrapper, wiring and acceptance. d6 remains deferred; Blender stays the default until
-acceptance checks pass.
+(g) Generate wiring implemented 2026-10-18: BlenderVehicleRigInProcess runs the five stages and atomically replaces the GLB;
+script exits/deaths remain failures, cancellation propagates, and named limits/read failures use Blender. Each recipe stores
+Generate backend (editor default/Blender/C#); HAF.VehicleGenerateRouteDefault remains Blender unless explicitly changed.
+The C# preview reads the generated GLB through HafModelRig, with Spin first and owned assets cleaned up. Diagnostics and the
+gun-span sidecar keep the existing contract. The every-recipe backend acceptance row forces both routes through the actual
+Vehicleize entry point, compares GLB bytes/read-back, ordered summaries and sidecars, and judges the Blender reference against
+Lab goldens. Fallbacks are separate from C# passes; unexpected port failures fail acceptance. Merged sources are fingerprinted.
+The vehicle drill now exercises the wrapper on all 112 supported full-corpus exports; all files/logs match. Sixteen wrapper
+unit cases bring the suite to 2,013. Native Unity checks cover seven fixtures, recipe persistence, preview ownership/order,
+every preview frame against independently sampled Blender GLB poses, and file/log/sidecar/preview-scale counterexamples.
+All 25 saved recipes produce matching GLBs/logs/sidecars on both route selections: 22 use C#, two FBX sources and Espana's
+JPEG-alpha path use Blender. Espana's existing golden has stale source and recipe fingerprints; acceptance correctly flags
+that baseline for review. The isolated run retains its candidate; the project's golden is unchanged.
+Next: review that stale baseline and perform the user's visual/runtime acceptance before (h), the default flip. d6 remains
+deferred; the shipped Generate default stays Blender.
 - **vehicle_rig.py: two gun-recoil defects** — OPEN (2026-10-16, found porting stage 3 part d3; the C# port reproduces both bit
   for bit, so fixing them is a script change plus a port change). (1) With `gun_pivot` at 1.0 and recoil on, the bore direction is
   `(gun_axis[1] - gun_axis[0]).normalized()` with `gun_axis[0]` the head - at the muzzle - so the bore is the float32 residue of

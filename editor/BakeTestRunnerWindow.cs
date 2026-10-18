@@ -214,6 +214,11 @@ public class BakeTestRunnerWindow : EditorWindow
                        "Parts on one side only are counted, not held. A leaked Unity mesh fails.",
                 run = VehicleProbePreviewGateTest.RunSection },
 
+            new TestRow { name = "Vehicle Generate backend acceptance (every recipe)", needsBlender = true, thorough = true,
+                cost = "Generate twice per saved recipe — slow",
+                what = "Forces Blender and C# through the same Generate entry point. Compares the written GLB bytes, read-back rig, diagnostics, gun span sidecars and existing Lab goldens. Named fallbacks are reported separately and never count as C# acceptance. Blender remains the default.",
+                run = VehicleGenerateAcceptanceTest.RunSection },
+
             new TestRow { name = "Does the Vehicle Lab still generate? (representative recipes)", quick = true, on = true, needsBlender = true, group = "lab",
                 cost = "one Blender rig run per representative recipe (up to six) — minutes",
                 what = "Runs the Vehicle Lab's Generate — the SAME code the button runs, headless: no dialogs, no " +

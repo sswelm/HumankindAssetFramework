@@ -2303,6 +2303,36 @@ action ranges. FULL=1 VEHICLERIG_KEYS=1 runs 25 saved recipes and 138 fixtures; 
 with every scene/key row compared. All 112 supported exports match as complete GLB bytes. Eight named deferrals include the six from e3 plus pixel-edited brightness
 and JPEG-alpha re-encoding. All 158 damaged-evidence kinds are rejected (151 in the default run without key rows).
 
+**Step (g), Vehicle Generate wiring and backend acceptance (2026-10-18).** BlenderVehicleRigInProcess runs the same full
+argv tokens as Generate, with the auxiliary preview request empty because the C# preview reads its output GLB. It collects
+the five stages' ordered VEHICLE lines, distinguishes script exits/deaths from named fallbacks, preserves cancellation and
+writes through a unique same-directory temporary file before replacing the output. Sixteen unit cases cover routing,
+read-back, replacement, a cancellation/deadline after the temporary write, terminal script outcomes, reader/FBX/rigfast
+fallbacks and merged inputs; 2,013 tests pass.
+
+The recipe's generateRoute and HAF.VehicleGenerateRouteDefault select the backend; absent fields/preferences retain Blender.
+New/load/save normalize that state without leaking a previous recipe's choice. Headless acceptance can force a route and
+reports the route actually used and its fallback reason. The existing window success marker, argument parity and gun-span
+sidecar are shared by both paths. A successful C# run builds its live preview through HafModelRig and attaches its owned
+assets with Spin first. The vehicle parity drill's --inprocess mode writes and reads every supported export, compares its
+bytes and complete diagnostic order, and requires its wrapper/export counts to agree: 112 of 112 FULL exports match.
+
+VehicleGenerateAcceptanceTest is a Bake Tests row that runs every recipe both ways. It compares complete GLB bytes, reads
+both actual files, requires a bound rig within 256 joints, checks bone totals and gun sidecars, compares summary lines and
+judges the Blender reference against the Lab golden. Named fallbacks never count as C# acceptance; a port crash fails.
+Missing goldens are captured from Blender and require a second run. Provenance includes the recipe, primary source and any
+second model. tools/vehiclerig_unity_generate_drill.sh runs this in an isolated licensed Unity project with copied goldens.
+Seven fixtures exercise geometry, rowing/Furl, Deploy/Recoil, layers and merged materials; native checks cover recipe route
+persistence/reset and the actual window preview. Unity's skinned vertices are compared at every 24-Hz frame against the
+independent HafTransforms sampler of Blender's GLB, with action names/order, rest pose and source units checked. Mutated
+GLBs, summary lines, sidecars and preview scale are rejected, and a second-model edit changes the provenance fingerprint.
+
+On all 25 saved recipes, both route selections generate byte-identical GLBs, diagnostics and sidecars; 22 use C#, two FBX
+sources and Espana's JPEG-alpha export use Blender. Current Blender outputs match the valid Lab goldens. Espana's golden
+records older primary-source and recipe hashes; the acceptance row reports it as stale by input, retaining evidence for
+review instead of re-blessing it. The original project and goldens are not edited by the isolated drill. Visual/runtime
+acceptance and resolving that baseline remain required before changing the shipped default; d6 stays deferred.
+
 Review of PR #176 (2026-10-15): a full run found the organ gun's newly recorded custom-normal shorts differed after
 stage one's loose split. Blender's separate operator decodes the source BMesh normals into a vector layer and
 re-encodes that layer on each copied component; copying the original shorts misses that quantization. The model now

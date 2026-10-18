@@ -348,6 +348,7 @@ public class VehicleLabWindow : EditorWindow
     // ship it next to the model so a collaborator reproduces the exact rig. ──
     [Serializable] class Recipe
     {
+        public string generateRoute = ""; // absent: editor default, Blender until acceptance
         public string srcFile, outGlb; public int frames, axisChoice, minVerts; public float degrees;
         public List<Part> parts; public List<Part> boneParts; public bool useSourceRig;
         public int treadAdvCells = 3; public float treadCellsPerLink = 4f;
@@ -429,7 +430,10 @@ public class VehicleLabWindow : EditorWindow
     // (VehicleLabGateTest). Nothing else reads these.
     bool headless;
     string headlessDir = "";      // project-relative (like PrevDir's Assets/ path): the names files, the preview FBX, the output
-    string lastStdout = "";       // the last Blender run's stdout, for the headless caller
+    public const string GenerateRouteDefaultPref = "HAF.VehicleGenerateRouteDefault";
+    [SerializeField] string generateRoute = "";
+    internal string lastGenerateRoute = "", lastGenerateFallback = "";
+    string lastStdout = "";       // the last Generate/probe output, for the headless caller
     string PrevDir => headless ? headlessDir : "Assets/FactorySource/VehicleLab";
     string lastOutGlb = "";
 
@@ -1393,6 +1397,10 @@ public class VehicleLabWindow : EditorWindow
             if (fastFlagFold)
                 EditorGUILayout.HelpBox("Flag fold needs the generated Flag bone + Furl clip — not available on the " +
                     "source-skeleton fast path. Disable Use source skeleton, or set Flag fold back to 0.", MessageType.Warning);
+            string defaultRoute = BlenderVehicleRigInProcess.NormalizeRoute(EditorPrefs.GetString(GenerateRouteDefaultPref, "blender"));
+            string normalized = BlenderVehicleRigInProcess.NormalizeRoute(generateRoute);
+            generateRoute = new[] { "", "blender", "csharp" }[EditorGUILayout.Popup("Generate backend", normalized == "blender" ? 1 : normalized == "csharp" ? 2 : 0,
+                new[] { "Editor default (" + (defaultRoute == "csharp" ? "C#" : "Blender") + ")", "Blender", "C# (fallback to Blender)" })];
             using (new EditorGUI.DisabledScope(!canRig || string.IsNullOrEmpty(outGlb)))
                 if (GUILayout.Button(new GUIContent($"Generate rig{(useSourceRig && boneParts.Count > 0 ? " (fast path)" : "")}  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
                         fastPathOars ? "Disable the source-skeleton fast path before recovering oars from merged mesh geometry."
@@ -1403,7 +1411,7 @@ public class VehicleLabWindow : EditorWindow
                         : fastModel2 ? "Disable the source-skeleton fast path to merge a second model."
                         : !canRig ? (FastPath ? "Mark at least one source bone as Wheel — the fast path spins wheel bones."
                                               : "Mark at least one entry as Wheel / Rotor / Tail rotor / Oar, set a Wave rock amplitude — or request geometry work (Flip, a facing fix, an active reduce dial): a Generate can be pure geometry surgery.")
-                        : "Runs Blender: rig + Spin action + GLB export + preview."), GUILayout.Height(28)))
+                        : "Generates the rig, actions, GLB and preview with the selected backend."), GUILayout.Height(28)))
                     Vehicleize();
         }
 
@@ -1832,6 +1840,7 @@ public class VehicleLabWindow : EditorWindow
     // bug this button exists to kill (stale bone rows silently kept the SKM fast path on for an unrigged model).
     void NewModel()
     {
+        generateRoute = "";
         srcFile = ""; outGlb = ""; lastOutGlb = ""; loadedRecipe = ""; recipeReadThisSession = false; savedRecipeJson = "";
         parts.Clear(); boneParts.Clear(); useSourceRig = false;
         frames = 15; degrees = -360f; axisChoice = 0;
@@ -1966,6 +1975,7 @@ public class VehicleLabWindow : EditorWindow
     // round-trip gate, same as before the extraction.
     Recipe BuildRecipe() => new Recipe
     {
+        generateRoute = generateRoute,
         srcFile = srcFile, outGlb = outGlb, frames = frames, axisChoice = axisChoice, minVerts = minVerts, degrees = degrees,
         parts = parts, boneParts = boneParts, useSourceRig = useSourceRig, treadAdvCells = treadAdvCells, treadCellsPerLink = treadCellsPerLink,
         // orientation + tread isolation + wave rock — the rest of what the bake command consumes
@@ -2064,6 +2074,7 @@ public class VehicleLabWindow : EditorWindow
             // orientation + tread isolation + wave rock: fully RESTORE them (so a wheeled recipe overwrites a boat's
             // rock and vice-versa — no leak between models). off/zero is the safe neutral for a pre-2026-08-01 recipe;
             // the counted fields guard against a missing-key 0 the way treadAdvCells does.
+            generateRoute = BlenderVehicleRigInProcess.NormalizeRoute(r.generateRoute);
             modelRot = r.modelRot; tracksStatic = r.tracksStatic; spinEnabled = r.spinEnabled; doubleSided = r.doubleSided; fixInsideOut = r.fixInsideOut;
             // MEASURED (review finding 10, Unity 2021.3.1f1 batch probe 2026-09-07): JsonUtility.FromJson DOES
             // run field initializers — a key absent from an old recipe keeps the DTO initializer, which is that
@@ -2200,8 +2211,18 @@ public class VehicleLabWindow : EditorWindow
         return boneShards;
     }
 
+    [MenuItem("Tools/HAF/Vehicle Generate default/Blender")]
+    static void DefaultGenerateBlender() => EditorPrefs.SetString(GenerateRouteDefaultPref, "blender");
+    [MenuItem("Tools/HAF/Vehicle Generate default/Blender", true)]
+    static bool CheckDefaultBlender() { Menu.SetChecked("Tools/HAF/Vehicle Generate default/Blender", !BlenderVehicleRigInProcess.UseCSharp("", EditorPrefs.GetString(GenerateRouteDefaultPref, "blender"))); return true; }
+    [MenuItem("Tools/HAF/Vehicle Generate default/C# with Blender fallback")]
+    static void DefaultGenerateCSharp() => EditorPrefs.SetString(GenerateRouteDefaultPref, "csharp");
+    [MenuItem("Tools/HAF/Vehicle Generate default/C# with Blender fallback", true)]
+    static bool CheckDefaultCSharp() { Menu.SetChecked("Tools/HAF/Vehicle Generate default/C# with Blender fallback", BlenderVehicleRigInProcess.UseCSharp("", EditorPrefs.GetString(GenerateRouteDefaultPref, "blender"))); return true; }
+
     void Vehicleize()
     {
+        lastStdout = ""; lastGenerateRoute = ""; lastGenerateFallback = "";
         if (FastPath && ActiveParts.Any(p => p.role == Role.Oar))
         {
             status = "Oar recovery needs mesh parts. Disable Use source skeleton, Probe parts, then mark the merged oar meshes.";
@@ -2343,7 +2364,44 @@ public class VehicleLabWindow : EditorWindow
             { "flip", flipFile }, { "detail", detailFile }, { "default", defaultFile }, { "shroud", shroudFile }, { "window", windowFile },
         }, PartTxFile(projRoot, prevDir, baseName));
         lastRigArgLine = VehicleRigArgLine.RigArgLine(rigArgs);
-        if (!RunBlender(lastRigArgLine, out string stdout)) return;   // argv[41]: double-sided; argv[42..45]: oar parts, sweep, dip, frames; argv[46]: inside-out fix; argv[47]: blade roll; argv[48]: sail parts; argv[49..50]: rigging parts, reduce %; argv[51..52]: structure parts, reduce %; argv[53..54]: body parts, reduce %; argv[55]: flag parts; argv[61..62]: oar reduce %, sail reduce %; argv[63]: preserve parts; argv[64]: rudder reduce %; argv[65]: wheel reduce %; argv[66..67]: flip parts, reduce %; argv[68]: preserve reduce %; argv[69..70]: detail parts, reduce %; argv[71..75]: fold sail at idle, fold frames, curl total, curl reverse, sag
+        string stdout;
+        bool generatedInProcess = false;
+        if (BlenderVehicleRigInProcess.UseCSharp(generateRoute, EditorPrefs.GetString(GenerateRouteDefaultPref, "blender")))
+        {
+            var tokens = VehicleRigArgLine.RigArgv(rigArgs).Select(t => t.value).ToList();
+            tokens[3] = ""; // HafModelRig previews the generated GLB; no auxiliary FBX is needed.
+            var watch = System.Diagnostics.Stopwatch.StartNew(); int step = 0;
+            void Checkpoint()
+            {
+                BakeTestRunnerWindow.Progress.ThrowIfCancelled();
+                if (!headless && EditorUtility.DisplayCancelableProgressBar("Vehicle Lab", "Generating in C#…", Mathf.Clamp01(++step / 9f))) throw new OperationCanceledException();
+                if (watch.ElapsedMilliseconds > 300000) throw new TimeoutException("Generate exceeded five minutes");
+            }
+            BlenderVehicleRigInProcess.Outcome result;
+            try { result = BlenderVehicleRigInProcess.Run(tokens, Checkpoint); }
+            catch (OperationCanceledException) { if (headless) throw; status = "Generate cancelled."; return; }
+            finally { if (!headless) EditorUtility.ClearProgressBar(); }
+            if (result.Written)
+            {
+                generatedInProcess = true; lastGenerateRoute = "csharp";
+                stdout = string.Join("\n", result.Log) + "\n"; lastStdout = stdout;
+                Debug.Log("[VehicleLab] Generate (C#, in-process)\n" + stdout);
+            }
+            else if (result.ScriptExit)
+            {
+                lastGenerateRoute = "csharp"; lastStdout = string.Join("\n", result.Log);
+                status = result.ScriptError ?? result.Log.LastOrDefault(l => l.StartsWith("VEHICLE ERROR", StringComparison.Ordinal)) ?? "Generate stopped before export.";
+                Debug.LogError("[VehicleLab] Generate failed: " + status + "\n" + lastStdout); return;
+            }
+            else
+            {
+                lastGenerateFallback = result.UseBlender ?? "the C# run did not produce a file";
+                lastGenerateRoute = "csharp-fallback";
+                Debug.Log("[VehicleLab] Generate: using Blender because " + lastGenerateFallback);
+                if (!RunBlender(lastRigArgLine, out stdout)) return;
+            }
+        }
+        else { lastGenerateRoute = "blender"; if (!RunBlender(lastRigArgLine, out stdout)) return; }   // argv[41]: double-sided; argv[42..45]: oar parts, sweep, dip, frames; argv[46]: inside-out fix; argv[47]: blade roll; argv[48]: sail parts; argv[49..50]: rigging parts, reduce %; argv[51..52]: structure parts, reduce %; argv[53..54]: body parts, reduce %; argv[55]: flag parts; argv[61..62]: oar reduce %, sail reduce %; argv[63]: preserve parts; argv[64]: rudder reduce %; argv[65]: wheel reduce %; argv[66..67]: flip parts, reduce %; argv[68]: preserve reduce %; argv[69..70]: detail parts, reduce %; argv[71..75]: fold sail at idle, fold frames, curl total, curl reverse, sag
         // SUCCESS = THE SCRIPT'S OWN FINAL MARKER (the documented Blender trap: it exits 0 even when the python
         // script crashes mid-way — without this gate a half-run printed a fake "DONE" with no file on disk).
         string done = stdout.Split('\n').FirstOrDefault(l => l.Contains("VEHICLE RIG DONE"));
@@ -2363,13 +2421,22 @@ public class VehicleLabWindow : EditorWindow
             else if (File.Exists(spanFile)) File.Delete(spanFile);   // no gun in this rig any more: a stale span would lie
         }
         catch (Exception spanEx) { Debug.LogWarning("[VehicleLab] could not write the gun span sidecar: " + spanEx.Message); }
+        string previewProblem = null;
         if (!headless)   // the preview is the window's; a Bake Tests run has no window and writes nothing under Assets/
         {
-            AssetDatabase.ImportAsset(prevRel, ImportAssetOptions.ForceUpdate);
-            var imp = AssetImporter.GetAtPath(prevRel) as ModelImporter;
-            if (imp != null && (imp.animationType != ModelImporterAnimationType.Generic || !imp.importAnimation))
-            { imp.animationType = ModelImporterAnimationType.Generic; imp.importAnimation = true; imp.SaveAndReimport(); }
-            BuildPreview(prevRel);
+            if (generatedInProcess)
+            {
+                try { BuildGlbPreview(lastOutGlb); }
+                catch (Exception e) { DestroyPreview(); previewProblem = e.Message; Debug.LogWarning("[VehicleLab] GLB generated, but preview failed: " + e.Message); }
+            }
+            else
+            {
+                AssetDatabase.ImportAsset(prevRel, ImportAssetOptions.ForceUpdate);
+                var imp = AssetImporter.GetAtPath(prevRel) as ModelImporter;
+                if (imp != null && (imp.animationType != ModelImporterAnimationType.Generic || !imp.importAnimation))
+                { imp.animationType = ModelImporterAnimationType.Generic; imp.importAnimation = true; imp.SaveAndReimport(); }
+                BuildPreview(prevRel);
+            }
         }
         // surface the BONE TOTAL prominently (user request): the budget lines are the difference between a
         // clean unit and the 256-wall / twitch-ceiling diseases — they were buried in the Console until now
@@ -2389,7 +2456,9 @@ public class VehicleLabWindow : EditorWindow
             .Where(l => l.Contains("VEHICLE MUZZLE") || l.Contains("VEHICLE CRADLE")
                      || l.Contains("*** WARNING") || l.Contains("DEPLOY gun: SKIPPED"))
             .Select(l => l.Trim()));
-        status = $"DONE → {lastOutGlb}\n{bones}\n{hybrid}\n{done}\n{muzzle}\n\nNext: Factory ▸ Browse this GLB, Size as usual; " + bakeRecipe;
+        string backend = lastGenerateRoute == "csharp" ? "C#" : lastGenerateRoute == "csharp-fallback" ? "Blender (C# fallback: " + lastGenerateFallback + ")" : "Blender";
+        status = $"DONE → {lastOutGlb}\nBackend: {backend}\n{bones}\n{hybrid}\n{done}\n{muzzle}\n\nNext: Factory ▸ Browse this GLB, Size as usual; " + bakeRecipe;
+        if (previewProblem != null) status += "\nPreview unavailable: " + previewProblem;
         if (!headless) EditorGUIUtility.systemCopyBuffer = lastOutGlb;   // ready to paste into the Factory's Browse field
     }
 
@@ -2514,8 +2583,11 @@ public class VehicleLabWindow : EditorWindow
     // stdout and the status line. True when the script's completion marker and the file both arrived (the button's
     // own success rule). A cancel from the Bake Tests' bar propagates as OperationCanceledException.
     internal static bool GenerateHeadless(string recipePath, string workDirRel, out string stdout, out string statusText, out string outGlbPath)
+        => GenerateHeadless(recipePath, workDirRel, null, out stdout, out statusText, out outGlbPath, out _, out _);
+
+    internal static bool GenerateHeadless(string recipePath, string workDirRel, string routeOverride, out string stdout, out string statusText, out string outGlbPath, out string actualRoute, out string fallback)
     {
-        stdout = ""; statusText = ""; outGlbPath = "";
+        stdout = ""; statusText = ""; outGlbPath = ""; actualRoute = ""; fallback = "";
         var w = CreateInstance<VehicleLabWindow>();
         try
         {
@@ -2527,7 +2599,9 @@ public class VehicleLabWindow : EditorWindow
             outGlbPath = Path.Combine(projRoot, w.headlessDir, Path.GetFileNameWithoutExtension(recipePath) + "_Spin.glb").Replace('\\', '/');
             try { if (File.Exists(outGlbPath)) File.Delete(outGlbPath); } catch { }
             w.outGlb = outGlbPath;
+            if (routeOverride != null) w.generateRoute = BlenderVehicleRigInProcess.NormalizeRoute(routeOverride);
             w.Vehicleize();
+            actualRoute = w.lastGenerateRoute; fallback = w.lastGenerateFallback;
             stdout = w.lastStdout; statusText = w.status;
             bool ok = w.status.StartsWith("DONE", StringComparison.Ordinal) && File.Exists(outGlbPath);
             // the drill's jobs writer reads the recipe without a window: its arguments must be this window's, to the character
@@ -2675,6 +2749,22 @@ public class VehicleLabWindow : EditorWindow
 
     // ---- turntable preview: the imported preview FBX rendered as a REAL instance (AddSingleGO — Law 4: never
     // hand-rolled mesh draws), its Spin clip sampled on a loop so the wheels visibly turn. Drag orbits, wheel zooms.
+    internal void BuildGlbPreview(string glb)
+    {
+        DestroyPreview(); var owned = new List<UnityEngine.Object>();
+        try
+        {
+            var rig = HafModelRig.Build(GlbReader.Read(glb), owned, forFactory: true);
+            var clips = rig.Clips.OrderBy(c => c.name.EndsWith("Spin", StringComparison.Ordinal) ? 0 : 1).ThenBy(c => c.name, StringComparer.Ordinal).ToList();
+            AttachPreview(rig.Root, clips, owned);
+        }
+        catch
+        {
+            foreach (var asset in owned) if (asset != null) DestroyImmediate(asset);
+            throw;
+        }
+    }
+
     void BuildPreview(string prevRel)
     {
         DestroyPreview();

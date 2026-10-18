@@ -18,7 +18,7 @@ the HAF atlas, build the Humankind mod, or deploy anything to the game. Those ha
 | 4. Package and deploy | Humankind Mod Editor or `haf build` | Updated mod in Humankind's `Community` folder |
 | 5. Verify | Humankind + F8 | The real runtime model, animation, and shared mesh-budget cost |
 
-Blender must be installed for Generate and animated bakes. Probe parts uses an in-process path for supported `.glb`/`.gltf`
+Blender is the default Generate backend and is still needed for named fallback cases and the Blender bake route. Generate can opt into C# per recipe (see below). Probe parts uses an in-process path for supported `.glb`/`.gltf`
 sources; morph targets, bone-parented meshes, animated or placed skinned meshes, animated second models and reader-refused
 features keep the Blender path. HAF auto-detects it; use the override in the HAF
 settings only when detection fails.
@@ -230,6 +230,14 @@ an arbitrary side and culls half the blades. The rest of the model follows the D
 geometry, not the source skeleton's bone rows. If wheel spin or wave rock requests a longer `Spin` clip, Stroke frames
 is treated as the preferred period and the nearest whole number of strokes is fitted across the shared clip so it
 loops without a pause or snap.
+
+**Generate backend** is saved with the recipe: **Editor default**, **Blender**, or **C# (fallback to Blender)**.
+The editor default remains Blender. Change it explicitly through **Tools ▸ HAF ▸ Vehicle Generate default**.
+The C# path generates supported glTF rigs in-process and previews the written GLB. Source-skeleton rigs, other source
+formats, moving treads and named image-editing limits use Blender; the status names the backend and fallback reason.
+C# replaces the output after the new GLB is complete; cancellation preserves the previous file. The backend acceptance row in **Bake Tests** generates
+every saved recipe both ways and checks its GLB, diagnostics, gun span sidecar and Lab golden. A named fallback is
+reported separately from a C# pass.
 
 Press **Verify**, resolve meaningful warnings, optionally **Save recipe**, then press **Generate rig**. The output path is
 copied to the clipboard and the generated animation appears in the preview. Re-run **Generate rig** after changing any
