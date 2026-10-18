@@ -55,6 +55,8 @@ public static class BlenderVehicleRigInProcess
                 return false;
             }
             if (Stop()) return o;
+            string materialLimit = BlenderVehicleRig.ExportMaterialFallback(s, a);
+            if (materialLimit != null) { o.UseBlender = materialLimit; return o; }
             Tick(); BlenderVehicleRig.RunStage2(s, a); o.Log.AddRange(s.Logs2); if (Stop()) return o;
             Tick(); BlenderVehicleRig.RunStage3(s, a); o.Log.AddRange(s.Logs3); if (Stop()) return o;
             Tick(); BlenderVehicleRig.RunStage4(s, a); o.Log.AddRange(s.Logs4); if (Stop()) return o;

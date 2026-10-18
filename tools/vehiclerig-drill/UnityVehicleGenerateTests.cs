@@ -162,6 +162,41 @@ public static class UnityVehicleGenerateTests
         Check("refreshed baseline verified",refreshed.fail==0&&refreshed.pass==1,refreshed.body);
     }
 
+    // Real Generate entry point, including any Blender fallback, in the isolated project. These are measurements,
+    // not timing assertions: CPU load changes timings. Every repeated run must keep its route and complete GLB bytes.
+    public static void RunPerformance()
+    {
+        output = Arg("-hafGenerateOutput");
+        try
+        {
+            string recipes = Arg("-hafGenerateRecipes");
+            string requested = Arg("-hafGeneratePerformanceModels");
+            var keys = (string.IsNullOrEmpty(requested) ? "khelandion_2,triconter_split,salegs_revenge_split_fused,spanish_battleship_espana_split_fused" : requested).Split(',');
+            string runsText = Arg("-hafGeneratePerformanceRuns");
+            int runs = string.IsNullOrEmpty(runsText) ? 3 : int.Parse(runsText, System.Globalization.CultureInfo.InvariantCulture);
+            if (runs < 1 || runs > 10) throw new ArgumentOutOfRangeException("runs", "Use 1 to 10 repetitions.");
+            foreach (string key in keys)
+            {
+                string referenceHash = null, referenceRoute = null;
+                for (int i = 0; i < runs; i++)
+                {
+                    var watch = System.Diagnostics.Stopwatch.StartNew();
+                    bool ok = VehicleLabWindow.GenerateHeadless(Path.Combine(recipes, key + ".json"), "Logs/performance/" + key, "csharp",
+                        out _, out string status, out string path, out string route, out string fallback);
+                    watch.Stop();
+                    if (!ok) { Check("performance " + key, false, status); break; }
+                    string hash;
+                    using (var sha = System.Security.Cryptography.SHA256.Create()) hash = BitConverter.ToString(sha.ComputeHash(File.ReadAllBytes(path))).Replace("-", "");
+                    Check("performance " + key + " run " + (i + 1), referenceHash == null || (referenceHash == hash && referenceRoute == route),
+                        watch.ElapsedMilliseconds + " ms; route=" + route + "; sha256=" + hash + (string.IsNullOrEmpty(fallback) ? "" : "; fallback=" + fallback));
+                    referenceHash = hash; referenceRoute = route;
+                }
+            }
+        }
+        catch (Exception e) { Check("exception", false, e.ToString()); }
+        Row("TOTAL failed " + failed); EditorApplication.Exit(failed == 0 ? 0 : 1);
+    }
+
     public static void RunChecks()
     {
         output=Arg("-hafGenerateOutput");fixtures=Arg("-hafGenerateFixtures");
