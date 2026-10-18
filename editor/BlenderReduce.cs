@@ -92,6 +92,7 @@ public static class BlenderReduce
         var layout = BlenderMesh.FromGltf(m, meshIndex, threads);
         checkpoint?.Invoke();
         int nv = layout.VertexCount, nf = layout.Faces.Length / 3;
+        bool collapse = BlenderDecimate.WouldRun(nf, ratio);
 
         // --- the vertices as the importer stores them: Blender's frame, the bind pose for a skinned mesh
         // skin_into_bind_pose runs when the node has a skin AND a primitive has joints (num_joint_sets); every primitive of
@@ -114,7 +115,7 @@ public static class BlenderReduce
         checkpoint?.Invoke();
         var sharp = VehicleProbe.SharpFaces(P, layout.Faces, N);
         short[] customNormal = null;
-        float[] vno;
+        float[] vno = null;
         if (hasNormals)
         {
             var (d0, d1) = VehicleProbe.EncodeCustomShorts(P, layout.Faces, N, sharp);
@@ -123,9 +124,9 @@ public static class BlenderReduce
             // BM_mesh_bm_from_me copies mesh->vert_normals(): with custom normals, their corner normals mixed per vertex (the
             // shorts decoded) - the topology fallback cost reads these on tiny or flat geometry (the Cobra's 3 mm parts
             // collapsed differently with the plain normals)
-            vno = VehicleProbe.DecodeCustomShorts(P, layout.Faces, sharp, d0, d1);
+            if (collapse) vno = VehicleProbe.DecodeCustomShorts(P, layout.Faces, sharp, d0, d1);
         }
-        else vno = VehicleProbe.BlenderVertexNormals(P, layout.Faces, null);   // the angle-weighted face normals
+        else if (collapse) vno = VehicleProbe.BlenderVertexNormals(P, layout.Faces, null);   // the angle-weighted face normals
 
         checkpoint?.Invoke();
         // --- material slots: with import_merge_material_slots, one slot per distinct material in order of first appearance
@@ -229,6 +230,22 @@ public static class BlenderReduce
                 }
                 d.DefNr[v] = nrs; d.DefWeight[v] = ws;
             }
+        }
+
+        // Without a collapse the BMesh round trip preserves every validated element in its creation order.
+        // Keep the imported layers directly; vertex/face normals and BMesh connectivity are only needed by collapse.
+        if (!collapse)
+        {
+            checkpoint?.Invoke();
+            r.VertexCount = nv; r.FaceCount = nf; r.Positions = P; r.Faces = layout.Faces;
+            r.Edges = layout.ValidEdges; r.FaceMaterial = faceMaterial; r.FaceSharp = sharp;
+            r.Uv = d.Uv; r.CustomNormal = customNormal; r.DefNr = d.DefNr; r.DefWeight = d.DefWeight;
+            if (mergeUvs) MergeUvsForApply(nv, r.Faces, r.Uv);
+            int corner = 0, point = 0;
+            for (int i = 0; i < colorNames.Count; i++)
+                r.Colors.Add((colorNames[i], colorPoint[i], colorPoint[i] ? d.PointColor[point++] : d.CornerColor[corner++]));
+            checkpoint?.Invoke();
+            return r;
         }
 
         // --- the BMesh as the modifier converts it: positions, the face normals recomputed (normal_tri_v3), the vertex normals copied

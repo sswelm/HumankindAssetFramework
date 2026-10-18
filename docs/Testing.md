@@ -3110,3 +3110,36 @@ This boundary is intentional. Adding tests past it would be green ceremony that 
 
 See also: `docs/Building.md` (build/run), `docs/Code-Map.md` (where the tested functions live),
 `docs/Framework-Review.md` (the dated changelog of what each test batch added).
+
+
+### Vehicle Generate performance
+
+`HAF_GENERATE_TEST_METHOD=RunPerformance bash tools/vehiclerig_unity_generate_drill.sh` measures the real
+Generate entry point in an isolated Unity project, including a named Blender fallback when required. The default
+models are Khelandion, Triconter, Saleg's Revenge and Espana, with three runs each. Override the comma-separated
+recipe stems with `HAF_GENERATE_PERFORMANCE_MODELS` and the repetition count (1 to 10) with
+`HAF_GENERATE_PERFORMANCE_RUNS`. Each result records elapsed milliseconds, the actual backend, fallback reason and
+SHA-256 of the complete GLB; repeated runs must keep the same route and bytes. It excludes the interactive preview,
+Unity startup and the final game bake. Run it without another gate or benchmark competing for CPU. Set
+`HAF_KEEP_UNITY_GENERATE=1` to retain its logs and generated files.
+
+The import's no-collapse path skips BMesh construction and decimation-only normals while retaining validation,
+custom normals, vertex groups, UV merging and colour layers. Custom-normal fan walks reuse local buffers and flat
+face adjacency without changing arithmetic or traversal order. Generate checks surviving, face-referenced
+materials after import so known export limitations can select Blender before reduction and rigging. Ignored
+unsupported materials do not force a fallback. Unit tests hold early fallback/output preservation and import
+context ownership; the mesh, prep, deploy, rig and vehicle drills compare the shared optimizations with Blender.
+
+October 18, 2026 local Unity 2021.3.1f1 / Blender 5.1.2 measurements against merged `a8fb6d6`, using the same
+isolated project and benchmark (median of three runs; complete output hashes and actual backends unchanged):
+
+| Recipe / actual backend | Before | After | Less elapsed time |
+| --- | ---: | ---: | ---: |
+| Khelandion (C#) | 7.25 s | 4.55 s | 37% |
+| Triconter (C#) | 3.51 s | 2.44 s | 30% |
+| Espana (Blender fallback) | 44.96 s | 31.70 s | 29% |
+
+These are local measurements, including Blender on the fallback row. Startup, interactive preview and game baking
+are outside this measure; machine load and Blender runtime can vary. A separate stage profile of Saleg's Revenge
+went from 47.8 to 28.2 seconds, with identical GLB bytes. All 22 supported saved recipes retained their complete
+GLB hashes through the native C# wrapper.

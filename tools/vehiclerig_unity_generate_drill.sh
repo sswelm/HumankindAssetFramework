@@ -3,7 +3,7 @@
 # Requires an installed, licensed Unity editor and Blender. Does not open or edit the user's project.
 set -uo pipefail
 METHOD="${HAF_GENERATE_TEST_METHOD:-Run}"
-case "$METHOD" in Run|RunChecks|RunPreview|RunAvailability) ;; *) echo "FAIL — unknown Vehicle Generate test method: $METHOD"; exit 2;; esac
+case "$METHOD" in Run|RunChecks|RunPreview|RunAvailability|RunPerformance) ;; *) echo "FAIL — unknown Vehicle Generate test method: $METHOD"; exit 2;; esac
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 UNITY="${UNITY:-/c/Program Files/Unity 2021.3.1f1/Editor/Data}"
 EDITOR="${UNITY_EDITOR:-$UNITY/../Unity.exe}"
@@ -40,7 +40,7 @@ dotnet "$UNITY/DotNetSdkRoslyn/csc.dll" "@$WTMP/compile.rsp" > "$TMPD/compile.lo
 [ "$rc" -eq 0 ] || { cat "$TMPD/compile.log"; echo 'FAIL — native Vehicle Generate harness did not compile'; exit 1; }
 # the Vehicle Lab's saved recipes (the window's rig arguments against the recipe reader's): the ENCReload project's, when present
 RECIPES="${HAF_UNITY_PROJECT:-C:/Repo/ENCReload}/Assets/FactorySource/VehicleLab/Recipes"; [ -d "$RECIPES" ] || RECIPES=""
-"$EDITOR" -batchmode -nographics -projectPath "$WTMP/project" -executeMethod "UnityVehicleGenerateTests.$METHOD" -hafGenerateFixtures "$WTMP/fixtures" -hafGenerateOutput "$WTMP/result.txt" -hafGenerateRecipes "$(cygpath -m "$RECIPES" 2>/dev/null || echo "$RECIPES")" -logFile "$WTMP/unity.log"; rc=$?
+"$EDITOR" -batchmode -nographics -projectPath "$WTMP/project" -executeMethod "UnityVehicleGenerateTests.$METHOD" -hafGenerateFixtures "$WTMP/fixtures" -hafGenerateOutput "$WTMP/result.txt" -hafGenerateRecipes "$(cygpath -m "$RECIPES" 2>/dev/null || echo "$RECIPES")" -hafGeneratePerformanceModels "${HAF_GENERATE_PERFORMANCE_MODELS:-}" -hafGeneratePerformanceRuns "${HAF_GENERATE_PERFORMANCE_RUNS:-3}" -logFile "$WTMP/unity.log"; rc=$?
 [ -f "$TMPD/result.txt" ] || { tail -30 "$TMPD/unity.log"; echo 'FAIL — Unity did not execute the Vehicle Generate acceptance'; exit 1; }
 cat "$TMPD/result.txt"
 [ "$rc" -eq 0 ] && grep -q '^TOTAL failed 0' "$TMPD/result.txt" || { echo "FAIL — native Unity Vehicle Generate acceptance (rc=$rc)"; exit 1; }

@@ -450,19 +450,30 @@ public static partial class VehicleProbe
             NormalizeBMesh(ref x, ref y, ref z); FN[3 * f] = x; FN[3 * f + 1] = y; FN[3 * f + 2] = z;
         }
         // the faces around each vertex, ascending (build_vert_to_face_map sorts each group)
-        var vertFaces = new List<int>[nv];
-        for (int f = 0; f < nf; f++) for (int k = 0; k < 3; k++) { int v = tris[f * 3 + k]; (vertFaces[v] ?? (vertFaces[v] = new List<int>())).Add(f); }
-        var infos = new List<VertCornerInfo>(); var localEdgeVerts = new List<int>(); var fan = new List<int>();
+        // Flat adjacency preserves ascending face order without one List allocation per vertex.
+        var offsets = new int[nv + 1];
+        foreach (int v in tris) offsets[v + 1]++;
+        for (int v = 0; v < nv; v++) offsets[v + 1] += offsets[v];
+        var fill = (int[])offsets.Clone(); var vertFaces = new int[tris.Length];
+        for (int c = 0; c < tris.Length; c++) vertFaces[fill[tris[c]]++] = c / 3;
+        var infos = new List<VertCornerInfo>(); var infoPool = new List<VertCornerInfo>();
+        var localEdgeVerts = new List<int>(); var fan = new List<int>(); var rotated = new List<int>();
+        var fanEdgeDirs = new List<float[]>();
+        int[] kind = new int[0], c1 = new int[0], c2 = new int[0];
+        bool[] towards = new bool[0], visited = new bool[0];
+        float[][] edgeDirs = new float[0][];
         for (int v = 0; v < nv; v++)
         {
-            var faces = vertFaces[v];
-            if (faces == null) { onLone?.Invoke(v); continue; }
+            if (offsets[v] == offsets[v + 1]) { onLone?.Invoke(v); continue; }
             // collect_corner_info
             infos.Clear();
-            foreach (int f in faces)
+            for (int at = offsets[v]; at < offsets[v + 1]; at++)
             {
+                int f = vertFaces[at];
                 int k = tris[f * 3] == v ? 0 : tris[f * 3 + 1] == v ? 1 : 2;
-                var ci = new VertCornerInfo { face = f, corner = f * 3 + k, cornerPrev = f * 3 + (k + 2) % 3, cornerNext = f * 3 + (k + 1) % 3 };
+                if (infos.Count == infoPool.Count) infoPool.Add(new VertCornerInfo());
+                var ci = infoPool[infos.Count];
+                ci.face = f; ci.corner = f * 3 + k; ci.cornerPrev = f * 3 + (k + 2) % 3; ci.cornerNext = f * 3 + (k + 1) % 3;
                 ci.vertPrev = tris[ci.cornerPrev]; ci.vertNext = tris[ci.cornerNext];
                 infos.Add(ci);
             }
@@ -475,7 +486,13 @@ public static partial class VehicleProbe
             }
             // calc_connecting_edge_info: 0 uninitialized, 1 one corner, 2 two corners, 3 sharp (a sharp face, a third face, a winding mismatch)
             int ne = localEdgeVerts.Count;
-            var kind = new int[ne]; var c1 = new int[ne]; var c2 = new int[ne]; var towards = new bool[ne];
+            if (ne > kind.Length)
+            {
+                int capacity = Math.Max(ne, Math.Max(8, kind.Length * 2));
+                Array.Resize(ref kind, capacity); Array.Resize(ref c1, capacity); Array.Resize(ref c2, capacity);
+                Array.Resize(ref towards, capacity); Array.Resize(ref edgeDirs, capacity);
+            }
+            Array.Clear(kind, 0, ne);
             void AddCornerToEdge(int e, int lc, bool windingTowardsVert)
             {
                 if (kind[e] == 0) { kind[e] = 1; c1[e] = lc; towards[e] = windingTowardsVert; }
@@ -492,15 +509,17 @@ public static partial class VehicleProbe
             // a sharp_edge (the weld tiers mark them over 40 degrees) ends the fans on both sides, whatever its corners say
             if (sharpEdges != null) for (int e = 0; e < ne; e++) if (sharpEdges.Contains(SharpEdgeKey(v, localEdgeVerts[e]))) kind[e] = 3;
             // calc_edge_directions
-            var edgeDirs = new float[ne][];
             for (int e = 0; e < ne; e++)
             {
                 int o = localEdgeVerts[e];
                 float dx = (float)(P[o * 3] - P[v * 3]), dy = (float)(P[o * 3 + 1] - P[v * 3 + 1]), dz = (float)(P[o * 3 + 2] - P[v * 3 + 2]);
                 if (bmesh) NormalizeBMesh(ref dx, ref dy, ref dz); else Normalize3(ref dx, ref dy, ref dz);
-                edgeDirs[e] = new[] { dx, dy, dz };
+                var dir = edgeDirs[e] ?? (edgeDirs[e] = new float[3]);
+                dir[0] = dx; dir[1] = dy; dir[2] = dz;
             }
-            var visited = new bool[infos.Count]; int visitedCount = 0, start = 0;
+            if (infos.Count > visited.Length) Array.Resize(ref visited, Math.Max(infos.Count, Math.Max(8, visited.Length * 2)));
+            Array.Clear(visited, 0, infos.Count);
+            int visitedCount = 0, start = 0;
             while (true)
             {
                 // traverse_fan_local_corners: forward over next edges, reversed; a cycle rotates to its lowest corner; else backward over prev edges
@@ -518,7 +537,7 @@ public static partial class VehicleProbe
                 {
                     int best = 0;
                     for (int i = 1; i < fan.Count; i++) if (infos[fan[i]].corner < infos[fan[best]].corner) best = i;
-                    var rotated = new List<int>(); for (int i = 0; i < fan.Count; i++) rotated.Add(fan[(best + i) % fan.Count]);
+                    rotated.Clear(); for (int i = 0; i < fan.Count; i++) rotated.Add(fan[(best + i) % fan.Count]);
                     fan.Clear(); fan.AddRange(rotated);
                 }
                 else
@@ -546,7 +565,7 @@ public static partial class VehicleProbe
                 }
                 // the fan's space: corner_fan_space_define over the first and last edge and, for a fan of several corners, every edge
                 int edgeFirst = infos[fan[0]].edgeNext, edgeLast = infos[fan[fan.Count - 1]].edgePrev;
-                var fanEdgeDirs = new List<float[]>();
+                fanEdgeDirs.Clear();
                 if (fan.Count > 1)
                 {
                     foreach (int lc in fan) fanEdgeDirs.Add(edgeDirs[infos[lc].edgeNext]);

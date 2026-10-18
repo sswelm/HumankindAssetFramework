@@ -67,4 +67,48 @@ public class VehicleRigInProcessTests : IDisposable
         var o=BlenderVehicleRigInProcess.Run(merged); Assert.True(o.Written,o.UseBlender); Assert.Contains(o.Log,l=>l.StartsWith("VEHICLE MERGE:"));
         merged[76]="merge2="+a[1]+".missing|0,0,0|0,0,0|1"; var bad=BlenderVehicleRigInProcess.Run(merged); Assert.True(bad.ScriptExit); Assert.Null(bad.UseBlender);
     }
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public void JPEG_alpha_declines_before_reduction_and_preserves_the_previous_output(bool ignore)
+    {
+        var a = Args(); var m = GlbReader.Read(a[1]);
+        m.Materials.Add(new HafMaterial { Name = "Glass", AlphaMode = "BLEND", BaseColorTexture = 0 });
+        m.Textures.Add(new HafTexture { Source = 0 });
+        m.Images.Add(new HafImage { Name = "Photo", MimeType = "image/jpeg", Bytes = new byte[] { 255, 216, 255, 224, 0, 0 } });
+        m.Meshes[0].Primitives[0].Material = 0;
+        if (ignore)
+        {
+            m.Nodes[0].Name = "Discard"; a[9] = "Discard";
+            m.Nodes.Add(new HafNode { Name = "Hull", Mesh = 1 }); m.Scenes[0].Nodes.Add(1);
+            var mesh = new HafMesh { Name = "Hull" }; m.Meshes.Add(mesh);
+            mesh.Primitives.Add(new HafPrimitive { VertexCount = 3, Positions = new float[] { -1,0,0, 1,0,0, 0,1,1 }, Indices = new[] { 0,1,2 } });
+        }
+        GlbWriter.Write(m, a[1]); File.WriteAllText(a[2], "old"); int ticks = 0;
+        var result = BlenderVehicleRigInProcess.Run(a, () => ticks++);
+        if (ignore) { Assert.True(result.Written, result.UseBlender); Assert.Null(result.UseBlender); }
+        else
+        {
+            Assert.Contains("JPEG whose alpha is read", result.UseBlender); Assert.False(result.Written);
+            Assert.Equal(2, ticks); Assert.Equal("old", File.ReadAllText(a[2]));
+            Assert.DoesNotContain(result.Log, l => l.StartsWith("VEHICLE armature:") || l.StartsWith("VEHICLE RIG DONE:"));
+        }
+    }
+
+    [Fact]
+    public void Material_preflight_keeps_the_import_context_and_supported_output_unchanged()
+    {
+        var tokens = Args(); var m = GlbReader.Read(tokens[1]);
+        m.Materials.Add(new HafMaterial { Name = "Paint", BaseColorFactor = new double[] { .2,.4,.6,1 } });
+        m.Meshes[0].Primitives[0].Material = 0;
+        var a = BlenderVehicleRig.ParseArgs(tokens.ToList()); a.Bright1 = 1.5;
+        var s = BlenderVehicleRig.RunStage1(m, a); var names = s.Names.MaterialOf; var order = s.Names.MaterialsInOrder;
+        Assert.Null(BlenderVehicleRig.ExportMaterialFallback(s, a));
+        Assert.Same(m, s.Model); Assert.Same(names, s.Names.MaterialOf); Assert.Same(order, s.Names.MaterialsInOrder);
+        Assert.Equal(.2, m.Materials[0].BaseColorFactor[0]);
+        BlenderVehicleRig.RunStage2(s, a); BlenderVehicleRig.RunStage3(s, a); BlenderVehicleRig.RunStage4(s, a);
+        var export = BlenderVehicleRig.RunStage5(s, a);
+        Assert.Null(s.Fallback); Assert.Null(export.Fallback);
+        Assert.Equal((double)(float)((double)(float).2 * 1.5), (double)export.MaterialRows.Materials[0]["pbrMetallicRoughness"]["baseColorFactor"][0]);
+    }
+
 }
