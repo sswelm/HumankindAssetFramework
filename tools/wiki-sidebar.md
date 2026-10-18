@@ -19,6 +19,7 @@
 - [Editor Tools](Editor-Tools)
 - [Factory Manual](Factory-Manual)
 - [Vehicle Lab Quickstart](Vehicle-Lab-Quickstart)
+- [Vehicle Generate Acceptance](Vehicle-Generate-Acceptance)
 - [Animated Models](Animated-Models)
 - [Animation Pitfalls](Animation-Pitfalls)
 - [Textures](Textures)

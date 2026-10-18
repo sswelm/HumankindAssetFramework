@@ -2328,10 +2328,14 @@ independent HafTransforms sampler of Blender's GLB, with action names/order, res
 GLBs, summary lines, sidecars and preview scale are rejected, and a second-model edit changes the provenance fingerprint.
 
 On all 25 saved recipes, both route selections generate byte-identical GLBs, diagnostics and sidecars; 22 use C#, two FBX
-sources and Espana's JPEG-alpha export use Blender. Current Blender outputs match the valid Lab goldens. Espana's golden
-records older primary-source and recipe hashes; the acceptance row reports it as stale by input, retaining evidence for
-review instead of re-blessing it. The original project and goldens are not edited by the isolated drill. Visual/runtime
-acceptance and resolving that baseline remain required before changing the shipped default; d6 stays deferred.
+sources and Espana's JPEG-alpha export use Blender. The initial run correctly rejected Espana's older primary-source and
+recipe hashes. After reviewing its October 18 re-fusion and recipe, a fresh Espana golden and Global Hawk's missing golden
+were captured in an isolated Unity project and matched independent generations. All 25 recipes now complete with zero
+failures; all 52 input fingerprints remain unchanged. The two verified captures were then copied into the local modding
+project, preserving the old Espana golden separately; the isolated drill itself does not edit that project. The stale-golden
+regression uses a changed synthetic recipe, preserves its old golden, retains a candidate and verifies the refreshed one,
+so repairing a project golden cannot invalidate the regression. The [acceptance record](Vehicle-Generate-Acceptance.md)
+describes the baseline review and the user's visual/runtime checks still required before changing the default; d6 stays deferred.
 
 Review of PR #176 (2026-10-15): a full run found the organ gun's newly recorded custom-normal shorts differed after
 stage one's loose split. Blender's separate operator decodes the source BMesh normals into a vector layer and
