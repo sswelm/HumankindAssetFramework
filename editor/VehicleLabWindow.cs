@@ -433,6 +433,22 @@ public class VehicleLabWindow : EditorWindow
     public const string GenerateRouteDefaultPref = "HAF.VehicleGenerateRouteDefault";
     [SerializeField] string generateRoute = "";
     internal string lastGenerateRoute = "", lastGenerateFallback = "";
+    Func<string> findBlender = UniversalBaker.FindBlender;
+    string cachedBlender;
+    double nextBlenderCheck;
+    string BlenderExecutablePath(bool refresh = false)
+    {
+        if (refresh || EditorApplication.timeSinceStartup >= nextBlenderCheck)
+        { cachedBlender = findBlender(); nextBlenderCheck = EditorApplication.timeSinceStartup + 1; }
+        return cachedBlender;
+    }
+    internal static string[] GenerateBackendLabels(bool blenderAvailable, string editorDefault)
+    {
+        string csharp = blenderAvailable ? "C# (fallback to Blender)" : "C# (Blender fallback unavailable)";
+        string blender = blenderAvailable ? "Blender" : "Blender (unavailable)";
+        bool csharpDefault = BlenderVehicleRigInProcess.UseCSharp("", editorDefault);
+        return new[] { "Editor default (" + (csharpDefault ? csharp : blender) + ")", blender, csharp };
+    }
     string lastStdout = "";       // the last Generate/probe output, for the headless caller
     string PrevDir => headless ? headlessDir : "Assets/FactorySource/VehicleLab";
     string lastOutGlb = "";
@@ -1397,10 +1413,12 @@ public class VehicleLabWindow : EditorWindow
             if (fastFlagFold)
                 EditorGUILayout.HelpBox("Flag fold needs the generated Flag bone + Furl clip — not available on the " +
                     "source-skeleton fast path. Disable Use source skeleton, or set Flag fold back to 0.", MessageType.Warning);
-            string defaultRoute = BlenderVehicleRigInProcess.NormalizeRoute(EditorPrefs.GetString(GenerateRouteDefaultPref, "blender"));
+            bool blenderAvailable = File.Exists(BlenderExecutablePath());
             string normalized = BlenderVehicleRigInProcess.NormalizeRoute(generateRoute);
             generateRoute = new[] { "", "blender", "csharp" }[EditorGUILayout.Popup("Generate backend", normalized == "blender" ? 1 : normalized == "csharp" ? 2 : 0,
-                new[] { "Editor default (" + (defaultRoute == "csharp" ? "C#" : "Blender") + ")", "Blender", "C# (fallback to Blender)" })];
+                GenerateBackendLabels(blenderAvailable, EditorPrefs.GetString(GenerateRouteDefaultPref, "blender")))];
+            if (!blenderAvailable)
+                EditorGUILayout.HelpBox("Blender was not found. Supported models can generate in C#. Models that require Blender cannot generate until Blender is installed or its executable is set in the Model Factory Settings.", MessageType.Warning);
             using (new EditorGUI.DisabledScope(!canRig || string.IsNullOrEmpty(outGlb)))
                 if (GUILayout.Button(new GUIContent($"Generate rig{(useSourceRig && boneParts.Count > 0 ? " (fast path)" : "")}  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
                         fastPathOars ? "Disable the source-skeleton fast path before recovering oars from merged mesh geometry."
@@ -2215,10 +2233,10 @@ public class VehicleLabWindow : EditorWindow
     static void DefaultGenerateBlender() => EditorPrefs.SetString(GenerateRouteDefaultPref, "blender");
     [MenuItem("Tools/HAF/Vehicle Generate default/Blender", true)]
     static bool CheckDefaultBlender() { Menu.SetChecked("Tools/HAF/Vehicle Generate default/Blender", !BlenderVehicleRigInProcess.UseCSharp("", EditorPrefs.GetString(GenerateRouteDefaultPref, "blender"))); return true; }
-    [MenuItem("Tools/HAF/Vehicle Generate default/C# with Blender fallback")]
+    [MenuItem("Tools/HAF/Vehicle Generate default/C#")]
     static void DefaultGenerateCSharp() => EditorPrefs.SetString(GenerateRouteDefaultPref, "csharp");
-    [MenuItem("Tools/HAF/Vehicle Generate default/C# with Blender fallback", true)]
-    static bool CheckDefaultCSharp() { Menu.SetChecked("Tools/HAF/Vehicle Generate default/C# with Blender fallback", BlenderVehicleRigInProcess.UseCSharp("", EditorPrefs.GetString(GenerateRouteDefaultPref, "blender"))); return true; }
+    [MenuItem("Tools/HAF/Vehicle Generate default/C#", true)]
+    static bool CheckDefaultCSharp() { Menu.SetChecked("Tools/HAF/Vehicle Generate default/C#", BlenderVehicleRigInProcess.UseCSharp("", EditorPrefs.GetString(GenerateRouteDefaultPref, "blender"))); return true; }
 
     void Vehicleize()
     {
@@ -2396,9 +2414,8 @@ public class VehicleLabWindow : EditorWindow
             else
             {
                 lastGenerateFallback = result.UseBlender ?? "the C# run did not produce a file";
-                lastGenerateRoute = "csharp-fallback";
-                Debug.Log("[VehicleLab] Generate: using Blender because " + lastGenerateFallback);
-                if (!RunBlender(lastRigArgLine, out stdout)) return;
+                lastGenerateRoute = "csharp";
+                if (!RunBlender(lastRigArgLine, out stdout, lastGenerateFallback)) return;
             }
         }
         else { lastGenerateRoute = "blender"; if (!RunBlender(lastRigArgLine, out stdout)) return; }   // argv[41]: double-sided; argv[42..45]: oar parts, sweep, dip, frames; argv[46]: inside-out fix; argv[47]: blade roll; argv[48]: sail parts; argv[49..50]: rigging parts, reduce %; argv[51..52]: structure parts, reduce %; argv[53..54]: body parts, reduce %; argv[55]: flag parts; argv[61..62]: oar reduce %, sail reduce %; argv[63]: preserve parts; argv[64]: rudder reduce %; argv[65]: wheel reduce %; argv[66..67]: flip parts, reduce %; argv[68]: preserve reduce %; argv[69..70]: detail parts, reduce %; argv[71..75]: fold sail at idle, fold frames, curl total, curl reverse, sag
@@ -2705,7 +2722,7 @@ public class VehicleLabWindow : EditorWindow
         finally { DestroyImmediate(w); }
     }
 
-    bool RunBlender(string args, out string stdout)
+    bool RunBlender(string args, out string stdout, string fallbackReason = null)
     {
         stdout = "";
         string projRoot = Directory.GetParent(Application.dataPath).FullName;
@@ -2713,14 +2730,27 @@ public class VehicleLabWindow : EditorWindow
         if (!File.Exists(script)) { status = "Tools/vehicle_rig.py missing."; return false; }
         try
         {
+            string blender = BlenderExecutablePath(true);
+            if (!File.Exists(blender))
+            {
+                status = string.IsNullOrEmpty(fallbackReason) ? "Blender is unavailable. "
+                    : "Blender fallback is unavailable. C# cannot complete this model: " + fallbackReason + ". ";
+                status += "Install Blender or set its executable in the Model Factory Settings.";
+                return false;
+            }
             if (!headless) EditorUtility.DisplayProgressBar("Vehicle Lab", "Running Blender…", 0.4f);   // headless: the Bake Tests' own bar is up
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var p = new System.Diagnostics.Process();
-            p.StartInfo.FileName = UniversalBaker.FindBlender();
+            p.StartInfo.FileName = blender;
             p.StartInfo.Arguments = $"{BakerRules.BlenderScript(script)} -- {args}";
             p.StartInfo.UseShellExecute = false; p.StartInfo.CreateNoWindow = true;
             p.StartInfo.RedirectStandardOutput = true; p.StartInfo.RedirectStandardError = true;
             p.Start();
+            if (!string.IsNullOrEmpty(fallbackReason))
+            {
+                lastGenerateRoute = "csharp-fallback";
+                Debug.Log("[VehicleLab] Generate: using Blender because " + fallbackReason);
+            }
             if (!UniversalBaker.RunBounded(p, 300000, out stdout, out string stderr)) { status = "Blender timed out (5 min)."; return false; }
             lastStdout = stdout;
             // THE SCRIPT'S OWN DIAGNOSIS FIRST: vehicle_rig says "VEHICLE ERROR: <why>" and sys.exit(1)s - that exit was

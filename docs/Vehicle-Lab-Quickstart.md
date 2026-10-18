@@ -232,6 +232,11 @@ is treated as the preferred period and the nearest whole number of strokes is fi
 loops without a pause or snap.
 
 **Generate backend** is saved with the recipe: **Editor default**, **Blender**, or **C# (fallback to Blender)**.
+The fallback label appears only when Blender is detected through its saved executable path, a standard installation,
+or `PATH`. Without it, the choices say **Blender (unavailable)** and **C# (Blender fallback unavailable)**;
+**Editor default** also reflects that availability. Supported C# models still generate. If a model needs Blender,
+generation stops with the unsupported-operation reason and instructions to install Blender or set its executable
+in the Model Factory Settings. An existing output GLB is preserved when Blender cannot start.
 The editor default remains Blender. Change it explicitly through **Tools ▸ HAF ▸ Vehicle Generate default**.
 The C# path generates supported glTF rigs in-process and previews the written GLB. Source-skeleton rigs, other source
 formats, moving treads and named image-editing limits use Blender; the status names the backend and fallback reason.

@@ -28,6 +28,7 @@
     <Compile Include="..\editor\GlbDisconnectedParts.Compact.cs" Link="GlbDisconnectedParts.Compact.cs" />
     <!-- Pure editor decision kernels (extraction freshness, natural ordering) — same pattern. -->
     <Compile Include="..\editor\GlbDisconnectedParts.Explain.cs" Link="GlbDisconnectedParts.Explain.cs" />
+    <Compile Include="..\editor\BlenderExecutable.cs" Link="BlenderExecutable.cs" />
     <Compile Include="..\editor\EditorRules.cs" Link="EditorRules.cs" />
     <Compile Include="..\editor\VehicleRigArgs.cs" Link="VehicleRigArgs.cs" />
     <Compile Include="..\editor\BlenderVehicleRig.cs" Link="BlenderVehicleRig.cs" />
