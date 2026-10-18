@@ -15,6 +15,7 @@
 // cosf/sinf are the C runtime's, here the double ones rounded; normal differences are still counted by the drill.
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 
 public static partial class VehicleProbe
 {
@@ -241,7 +242,7 @@ public static partial class VehicleProbe
     /// mesh_normals_corner_custom_set replaces a zero one - the importer's zeros for a primitive without normals (NaN here)
     /// - with the mesh's own vertex normal (vert_normals_true); without both, a unit-ish file normal encodes one short off
     /// (found by the Decimate drill, step 5 c: 35 of 642 corners on the LCAC).</summary>
-    internal static (short[] d0, short[] d1) EncodeCustomShorts(float[] P, int[] tris, float[] N, bool[] sharpFace)
+    internal static (short[] d0, short[] d1) EncodeCustomShorts(float[] P, int[] tris, float[] N, bool[] sharpFace, int threads = 0)
     {
         var d0 = new short[tris.Length]; var d1 = new short[tris.Length];
         int nv = P.Length / 3;
@@ -274,7 +275,7 @@ public static partial class VehicleProbe
             }
             short e0, e1; EncodeCustom(space, cx, cy, cz, out e0, out e1);
             foreach (int lc in fan) { int c = infos[lc].corner; d0[c] = e0; d1[c] = e1; }
-        }, null, null);
+        }, null, null, threads: threads);
         return (d0, d1);
     }
 
@@ -303,7 +304,7 @@ public static partial class VehicleProbe
         return set.Count > 0 ? set : null;
     }
 
-    internal static float[] DecodeCustomShorts(float[] P, int[] tris, bool[] sharpFace, short[] d0, short[] d1, HashSet<long> sharpEdges = null)
+    internal static float[] DecodeCustomShorts(float[] P, int[] tris, bool[] sharpFace, short[] d0, short[] d1, HashSet<long> sharpEdges = null, int threads = 0)
     {
         int nv = P.Length / 3, nf = tris.Length / 3;
         var cornerNormal = new float[nf * 3 * 3];
@@ -334,7 +335,7 @@ public static partial class VehicleProbe
         {
             float px = P[v * 3], py = P[v * 3 + 1], pz = P[v * 3 + 2]; Normalize3(ref px, ref py, ref pz);
             result[v * 3] = px; result[v * 3 + 1] = py; result[v * 3 + 2] = pz;
-        }, sharpEdges);
+        }, sharpEdges, threads: threads);
         return result;
     }
 
@@ -347,7 +348,7 @@ public static partial class VehicleProbe
         else x = y = z = 0f;
     }
 
-    internal static float[] DecodeBMeshCustomNormals(float[] P, int[] tris, bool[] sharpFace, short[] data)
+    internal static float[] DecodeBMeshCustomNormals(float[] P, int[] tris, bool[] sharpFace, short[] data, int threads = 0)
     {
         var vectors = new float[3 * tris.Length];
         WalkFans(P, tris, sharpFace, (v, infos, fan, space) =>
@@ -356,11 +357,11 @@ public static partial class VehicleProbe
             foreach (int lc in fan) { int c = infos[lc].corner; a += data[2 * c]; b += data[2 * c + 1]; }
             DecodeCustom(space, (short)(a / fan.Count), (short)(b / fan.Count), out float x, out float y, out float z);
             foreach (int lc in fan) { int c = infos[lc].corner; vectors[3 * c] = x; vectors[3 * c + 1] = y; vectors[3 * c + 2] = z; }
-        }, null, null, bmesh: true);
+        }, null, null, bmesh: true, threads: threads);
         return vectors;
     }
 
-    internal static short[] EncodeBMeshCustomNormals(float[] P, int[] tris, bool[] sharpFace, float[] vectors)
+    internal static short[] EncodeBMeshCustomNormals(float[] P, int[] tris, bool[] sharpFace, float[] vectors, int threads = 0)
     {
         vectors = (float[])vectors.Clone();
         for (int c = 0; c < tris.Length; c++) NormalizeBMesh(ref vectors[3 * c], ref vectors[3 * c + 1], ref vectors[3 * c + 2]);
@@ -373,7 +374,7 @@ public static partial class VehicleProbe
             float inv = (float)(1f / fan.Count); x = (float)(x * inv); y = (float)(y * inv); z = (float)(z * inv);
             EncodeCustom(space, x, y, z, out short a, out short b);
             foreach (int lc in fan) { int c = infos[lc].corner; data[2 * c] = a; data[2 * c + 1] = b; }
-        }, null, null, bmesh: true);
+        }, null, null, bmesh: true, threads: threads);
         return data;
     }
 
@@ -381,7 +382,7 @@ public static partial class VehicleProbe
     /// normals (the two shorts per corner) always the fan walk: each fan's shorts averaged and decoded against its space - an
     /// invalid space decodes to a ZERO vector, which the glTF exporter later replaces. Without them: every face sharp gives
     /// the face normals, none sharp the vertex normals, a mix the fan walk with each fan's own normal.</summary>
-    internal static float[] BlenderCornerNormals(float[] P, int[] tris, bool[] sharpFace, short[] d0, short[] d1, HashSet<long> sharpEdges = null)
+    internal static float[] BlenderCornerNormals(float[] P, int[] tris, bool[] sharpFace, short[] d0, short[] d1, HashSet<long> sharpEdges = null, int threads = 0)
     {
         int nf = tris.Length / 3;
         var cn = new float[nf * 9];
@@ -405,7 +406,7 @@ public static partial class VehicleProbe
             WalkFans(P, tris, sharpFace, (v, infos, fan, space) =>
             {
                 foreach (int lc in fan) { int c = infos[lc].corner; cn[c * 3] = space.fnx; cn[c * 3 + 1] = space.fny; cn[c * 3 + 2] = space.fnz; }
-            }, null, null, sharpEdges);
+            }, null, null, sharpEdges, threads: threads);
             return cn;
         }
         WalkFans(P, tris, sharpFace, (v, infos, fan, space) =>
@@ -415,21 +416,21 @@ public static partial class VehicleProbe
             short a0 = (short)(s0 / fan.Count), a1 = (short)(s1 / fan.Count);
             float dx, dy, dz; DecodeCustom(space, a0, a1, out dx, out dy, out dz);
             foreach (int lc in fan) { int c = infos[lc].corner; cn[c * 3] = dx; cn[c * 3 + 1] = dy; cn[c * 3 + 2] = dz; }
-        }, null, null, sharpEdges);
+        }, null, null, sharpEdges, threads: threads);
         return cn;
     }
 
     /// <summary>Every corner's FAN normal (accumulate_fan_normal), 3 per corner: what the corner's normal is before the
     /// custom normals are decoded against it. For telling a decoded zero on a fan that points somewhere from one that
     /// points up anyway (tools/prep-drill).</summary>
-    internal static float[] BlenderFanNormals(float[] P, int[] tris, bool[] sharpFace)
+    internal static float[] BlenderFanNormals(float[] P, int[] tris, bool[] sharpFace, int threads = 0)
     {
         var fn = new float[tris.Length * 3];
         if (tris.Length == 0) return fn;
         WalkFans(P, tris, sharpFace, (v, infos, fan, space) =>
         {
             foreach (int lc in fan) { int c = infos[lc].corner; fn[c * 3] = space.fnx; fn[c * 3 + 1] = space.fny; fn[c * 3 + 2] = space.fnz; }
-        }, null, null);
+        }, null, null, threads: threads);
         return fn;
     }
 
@@ -437,7 +438,7 @@ public static partial class VehicleProbe
     /// third face, a winding mismatch), the fans (traverse_fan_local_corners), each fan's normal (accumulate_fan_normal) and
     /// space (corner_fan_space_define) - handed to onFan with the corners in the fan; onVertex after a vertex's fans; onLone
     /// for a vertex of no face.</summary>
-    static void WalkFans(float[] P, int[] tris, bool[] sharpFace, Action<int, List<VertCornerInfo>, List<int>, FanSpace> onFan, Action<int, List<VertCornerInfo>> onVertex, Action<int> onLone, HashSet<long> sharpEdges = null, bool bmesh = false)
+    static void WalkFans(float[] P, int[] tris, bool[] sharpFace, Action<int, List<VertCornerInfo>, List<int>, FanSpace> onFan, Action<int, List<VertCornerInfo>> onVertex, Action<int> onLone, HashSet<long> sharpEdges = null, bool bmesh = false, int threads = 0)
     {
         int nv = P.Length / 3, nf = tris.Length / 3;
         var FN = bmesh ? new float[3 * nf] : FaceNormals(P, tris);
@@ -456,130 +457,150 @@ public static partial class VehicleProbe
         for (int v = 0; v < nv; v++) offsets[v + 1] += offsets[v];
         var fill = (int[])offsets.Clone(); var vertFaces = new int[tris.Length];
         for (int c = 0; c < tris.Length; c++) vertFaces[fill[tris[c]]++] = c / 3;
-        var infos = new List<VertCornerInfo>(); var infoPool = new List<VertCornerInfo>();
-        var localEdgeVerts = new List<int>(); var fan = new List<int>(); var rotated = new List<int>();
-        var fanEdgeDirs = new List<float[]>();
-        int[] kind = new int[0], c1 = new int[0], c2 = new int[0];
-        bool[] towards = new bool[0], visited = new bool[0];
-        float[][] edgeDirs = new float[0][];
-        for (int v = 0; v < nv; v++)
+        // Each vertex owns its corners and output slice. Keep its face/fan order intact, with private scratch
+        // per range; no Unity API, scene mutation or cross-vertex floating-point reduction runs on workers.
+        void Range(int first, int last)
         {
-            if (offsets[v] == offsets[v + 1]) { onLone?.Invoke(v); continue; }
-            // collect_corner_info
-            infos.Clear();
-            for (int at = offsets[v]; at < offsets[v + 1]; at++)
+            var infos = new List<VertCornerInfo>(); var infoPool = new List<VertCornerInfo>();
+            var localEdgeVerts = new List<int>(); var fan = new List<int>(); var rotated = new List<int>();
+            var fanEdgeDirs = new List<float[]>();
+            int[] kind = new int[0], c1 = new int[0], c2 = new int[0];
+            bool[] towards = new bool[0], visited = new bool[0];
+            float[][] edgeDirs = new float[0][];
+            for (int v = first; v < last; v++)
             {
-                int f = vertFaces[at];
-                int k = tris[f * 3] == v ? 0 : tris[f * 3 + 1] == v ? 1 : 2;
-                if (infos.Count == infoPool.Count) infoPool.Add(new VertCornerInfo());
-                var ci = infoPool[infos.Count];
-                ci.face = f; ci.corner = f * 3 + k; ci.cornerPrev = f * 3 + (k + 2) % 3; ci.cornerNext = f * 3 + (k + 1) % 3;
-                ci.vertPrev = tris[ci.cornerPrev]; ci.vertNext = tris[ci.cornerNext];
-                infos.Add(ci);
-            }
-            // calc_local_edge_indices: a VectorSet keyed by the other vertex, in encounter order
-            localEdgeVerts.Clear();
-            foreach (var ci in infos)
-            {
-                ci.edgePrev = localEdgeVerts.IndexOf(ci.vertPrev); if (ci.edgePrev < 0) { localEdgeVerts.Add(ci.vertPrev); ci.edgePrev = localEdgeVerts.Count - 1; }
-                ci.edgeNext = localEdgeVerts.IndexOf(ci.vertNext); if (ci.edgeNext < 0) { localEdgeVerts.Add(ci.vertNext); ci.edgeNext = localEdgeVerts.Count - 1; }
-            }
-            // calc_connecting_edge_info: 0 uninitialized, 1 one corner, 2 two corners, 3 sharp (a sharp face, a third face, a winding mismatch)
-            int ne = localEdgeVerts.Count;
-            if (ne > kind.Length)
-            {
-                int capacity = Math.Max(ne, Math.Max(8, kind.Length * 2));
-                Array.Resize(ref kind, capacity); Array.Resize(ref c1, capacity); Array.Resize(ref c2, capacity);
-                Array.Resize(ref towards, capacity); Array.Resize(ref edgeDirs, capacity);
-            }
-            Array.Clear(kind, 0, ne);
-            void AddCornerToEdge(int e, int lc, bool windingTowardsVert)
-            {
-                if (kind[e] == 0) { kind[e] = 1; c1[e] = lc; towards[e] = windingTowardsVert; }
-                else if (kind[e] == 1) { if (towards[e] == windingTowardsVert) kind[e] = 3; else { kind[e] = 2; c2[e] = lc; } }
-                else kind[e] = 3;
-            }
-            for (int lc = 0; lc < infos.Count; lc++)
-            {
-                var ci = infos[lc];
-                if (sharpFace[ci.face]) { kind[ci.edgePrev] = 3; kind[ci.edgeNext] = 3; continue; }
-                AddCornerToEdge(ci.edgePrev, lc, true);
-                AddCornerToEdge(ci.edgeNext, lc, false);
-            }
-            // a sharp_edge (the weld tiers mark them over 40 degrees) ends the fans on both sides, whatever its corners say
-            if (sharpEdges != null) for (int e = 0; e < ne; e++) if (sharpEdges.Contains(SharpEdgeKey(v, localEdgeVerts[e]))) kind[e] = 3;
-            // calc_edge_directions
-            for (int e = 0; e < ne; e++)
-            {
-                int o = localEdgeVerts[e];
-                float dx = (float)(P[o * 3] - P[v * 3]), dy = (float)(P[o * 3 + 1] - P[v * 3 + 1]), dz = (float)(P[o * 3 + 2] - P[v * 3 + 2]);
-                if (bmesh) NormalizeBMesh(ref dx, ref dy, ref dz); else Normalize3(ref dx, ref dy, ref dz);
-                var dir = edgeDirs[e] ?? (edgeDirs[e] = new float[3]);
-                dir[0] = dx; dir[1] = dy; dir[2] = dz;
-            }
-            if (infos.Count > visited.Length) Array.Resize(ref visited, Math.Max(infos.Count, Math.Max(8, visited.Length * 2)));
-            Array.Clear(visited, 0, infos.Count);
-            int visitedCount = 0, start = 0;
-            while (true)
-            {
-                // traverse_fan_local_corners: forward over next edges, reversed; a cycle rotates to its lowest corner; else backward over prev edges
-                fan.Clear(); fan.Add(start);
-                bool cyclic = false;
-                int current = start, le = infos[current].edgeNext;
-                while (kind[le] == 2)
+                if (offsets[v] == offsets[v + 1]) { onLone?.Invoke(v); continue; }
+                // collect_corner_info
+                infos.Clear();
+                for (int at = offsets[v]; at < offsets[v + 1]; at++)
                 {
-                    current = c1[le] == current ? c2[le] : c1[le];
-                    if (current == start) { cyclic = true; break; }
-                    fan.Add(current); le = infos[current].edgeNext;
+                    int f = vertFaces[at];
+                    int k = tris[f * 3] == v ? 0 : tris[f * 3 + 1] == v ? 1 : 2;
+                    if (infos.Count == infoPool.Count) infoPool.Add(new VertCornerInfo());
+                    var ci = infoPool[infos.Count];
+                    ci.face = f; ci.corner = f * 3 + k; ci.cornerPrev = f * 3 + (k + 2) % 3; ci.cornerNext = f * 3 + (k + 1) % 3;
+                    ci.vertPrev = tris[ci.cornerPrev]; ci.vertNext = tris[ci.cornerNext];
+                    infos.Add(ci);
                 }
-                fan.Reverse();
-                if (cyclic)
+                // calc_local_edge_indices: a VectorSet keyed by the other vertex, in encounter order
+                localEdgeVerts.Clear();
+                foreach (var ci in infos)
                 {
-                    int best = 0;
-                    for (int i = 1; i < fan.Count; i++) if (infos[fan[i]].corner < infos[fan[best]].corner) best = i;
-                    rotated.Clear(); for (int i = 0; i < fan.Count; i++) rotated.Add(fan[(best + i) % fan.Count]);
-                    fan.Clear(); fan.AddRange(rotated);
+                    ci.edgePrev = localEdgeVerts.IndexOf(ci.vertPrev); if (ci.edgePrev < 0) { localEdgeVerts.Add(ci.vertPrev); ci.edgePrev = localEdgeVerts.Count - 1; }
+                    ci.edgeNext = localEdgeVerts.IndexOf(ci.vertNext); if (ci.edgeNext < 0) { localEdgeVerts.Add(ci.vertNext); ci.edgeNext = localEdgeVerts.Count - 1; }
                 }
-                else
+                // calc_connecting_edge_info: 0 uninitialized, 1 one corner, 2 two corners, 3 sharp (a sharp face, a third face, a winding mismatch)
+                int ne = localEdgeVerts.Count;
+                if (ne > kind.Length)
                 {
-                    current = start; le = infos[current].edgePrev;
+                    int capacity = Math.Max(ne, Math.Max(8, kind.Length * 2));
+                    Array.Resize(ref kind, capacity); Array.Resize(ref c1, capacity); Array.Resize(ref c2, capacity);
+                    Array.Resize(ref towards, capacity); Array.Resize(ref edgeDirs, capacity);
+                }
+                Array.Clear(kind, 0, ne);
+                void AddCornerToEdge(int e, int lc, bool windingTowardsVert)
+                {
+                    if (kind[e] == 0) { kind[e] = 1; c1[e] = lc; towards[e] = windingTowardsVert; }
+                    else if (kind[e] == 1) { if (towards[e] == windingTowardsVert) kind[e] = 3; else { kind[e] = 2; c2[e] = lc; } }
+                    else kind[e] = 3;
+                }
+                for (int lc = 0; lc < infos.Count; lc++)
+                {
+                    var ci = infos[lc];
+                    if (sharpFace[ci.face]) { kind[ci.edgePrev] = 3; kind[ci.edgeNext] = 3; continue; }
+                    AddCornerToEdge(ci.edgePrev, lc, true);
+                    AddCornerToEdge(ci.edgeNext, lc, false);
+                }
+                // a sharp_edge (the weld tiers mark them over 40 degrees) ends the fans on both sides, whatever its corners say
+                if (sharpEdges != null) for (int e = 0; e < ne; e++) if (sharpEdges.Contains(SharpEdgeKey(v, localEdgeVerts[e]))) kind[e] = 3;
+                // calc_edge_directions
+                for (int e = 0; e < ne; e++)
+                {
+                    int o = localEdgeVerts[e];
+                    float dx = (float)(P[o * 3] - P[v * 3]), dy = (float)(P[o * 3 + 1] - P[v * 3 + 1]), dz = (float)(P[o * 3 + 2] - P[v * 3 + 2]);
+                    if (bmesh) NormalizeBMesh(ref dx, ref dy, ref dz); else Normalize3(ref dx, ref dy, ref dz);
+                    var dir = edgeDirs[e] ?? (edgeDirs[e] = new float[3]);
+                    dir[0] = dx; dir[1] = dy; dir[2] = dz;
+                }
+                if (infos.Count > visited.Length) Array.Resize(ref visited, Math.Max(infos.Count, Math.Max(8, visited.Length * 2)));
+                Array.Clear(visited, 0, infos.Count);
+                int visitedCount = 0, start = 0;
+                while (true)
+                {
+                    // traverse_fan_local_corners: forward over next edges, reversed; a cycle rotates to its lowest corner; else backward over prev edges
+                    fan.Clear(); fan.Add(start);
+                    bool cyclic = false;
+                    int current = start, le = infos[current].edgeNext;
                     while (kind[le] == 2)
                     {
-                        current = current == c1[le] ? c2[le] : c1[le];
-                        fan.Add(current); le = infos[current].edgePrev;
+                        current = c1[le] == current ? c2[le] : c1[le];
+                        if (current == start) { cyclic = true; break; }
+                        fan.Add(current); le = infos[current].edgeNext;
                     }
-                }
-                // accumulate_fan_normal
-                float fx, fy, fz;
-                if (fan.Count == 1) { int f0 = infos[fan[0]].face; fx = FN[f0 * 3]; fy = FN[f0 * 3 + 1]; fz = FN[f0 * 3 + 2]; }
-                else
-                {
-                    fx = fy = fz = 0f;
-                    foreach (int lc in fan)
+                    fan.Reverse();
+                    if (cyclic)
                     {
-                        var ci = infos[lc]; var dp = edgeDirs[ci.edgePrev]; var dn = edgeDirs[ci.edgeNext];
-                        float factor = SafeAcosApprox(Dot3(dp[0], dp[1], dp[2], dn[0], dn[1], dn[2]));
-                        fx = (float)(fx + (float)(FN[ci.face * 3] * factor)); fy = (float)(fy + (float)(FN[ci.face * 3 + 1] * factor)); fz = (float)(fz + (float)(FN[ci.face * 3 + 2] * factor));
+                        int best = 0;
+                        for (int i = 1; i < fan.Count; i++) if (infos[fan[i]].corner < infos[fan[best]].corner) best = i;
+                        rotated.Clear(); for (int i = 0; i < fan.Count; i++) rotated.Add(fan[(best + i) % fan.Count]);
+                        fan.Clear(); fan.AddRange(rotated);
                     }
-                    if (bmesh) NormalizeBMesh(ref fx, ref fy, ref fz); else Normalize3(ref fx, ref fy, ref fz);
+                    else
+                    {
+                        current = start; le = infos[current].edgePrev;
+                        while (kind[le] == 2)
+                        {
+                            current = current == c1[le] ? c2[le] : c1[le];
+                            fan.Add(current); le = infos[current].edgePrev;
+                        }
+                    }
+                    // accumulate_fan_normal
+                    float fx, fy, fz;
+                    if (fan.Count == 1) { int f0 = infos[fan[0]].face; fx = FN[f0 * 3]; fy = FN[f0 * 3 + 1]; fz = FN[f0 * 3 + 2]; }
+                    else
+                    {
+                        fx = fy = fz = 0f;
+                        foreach (int lc in fan)
+                        {
+                            var ci = infos[lc]; var dp = edgeDirs[ci.edgePrev]; var dn = edgeDirs[ci.edgeNext];
+                            float factor = SafeAcosApprox(Dot3(dp[0], dp[1], dp[2], dn[0], dn[1], dn[2]));
+                            fx = (float)(fx + (float)(FN[ci.face * 3] * factor)); fy = (float)(fy + (float)(FN[ci.face * 3 + 1] * factor)); fz = (float)(fz + (float)(FN[ci.face * 3 + 2] * factor));
+                        }
+                        if (bmesh) NormalizeBMesh(ref fx, ref fy, ref fz); else Normalize3(ref fx, ref fy, ref fz);
+                    }
+                    // the fan's space: corner_fan_space_define over the first and last edge and, for a fan of several corners, every edge
+                    int edgeFirst = infos[fan[0]].edgeNext, edgeLast = infos[fan[fan.Count - 1]].edgePrev;
+                    fanEdgeDirs.Clear();
+                    if (fan.Count > 1)
+                    {
+                        foreach (int lc in fan) fanEdgeDirs.Add(edgeDirs[infos[lc].edgeNext]);
+                        if (edgeLast != edgeFirst) fanEdgeDirs.Add(edgeDirs[edgeLast]);
+                    }
+                    var space = DefineSpace(fx, fy, fz, edgeDirs[edgeFirst][0], edgeDirs[edgeFirst][1], edgeDirs[edgeFirst][2], edgeDirs[edgeLast][0], edgeDirs[edgeLast][1], edgeDirs[edgeLast][2], fanEdgeDirs);
+                    space.fnx = fx; space.fny = fy; space.fnz = fz;
+                    onFan(v, infos, fan, space);
+                    visitedCount += fan.Count;
+                    if (visitedCount == infos.Count) break;
+                    foreach (int lc in fan) visited[lc] = true;
+                    while (visited[start]) start++;
                 }
-                // the fan's space: corner_fan_space_define over the first and last edge and, for a fan of several corners, every edge
-                int edgeFirst = infos[fan[0]].edgeNext, edgeLast = infos[fan[fan.Count - 1]].edgePrev;
-                fanEdgeDirs.Clear();
-                if (fan.Count > 1)
-                {
-                    foreach (int lc in fan) fanEdgeDirs.Add(edgeDirs[infos[lc].edgeNext]);
-                    if (edgeLast != edgeFirst) fanEdgeDirs.Add(edgeDirs[edgeLast]);
-                }
-                var space = DefineSpace(fx, fy, fz, edgeDirs[edgeFirst][0], edgeDirs[edgeFirst][1], edgeDirs[edgeFirst][2], edgeDirs[edgeLast][0], edgeDirs[edgeLast][1], edgeDirs[edgeLast][2], fanEdgeDirs);
-                space.fnx = fx; space.fny = fy; space.fnz = fz;
-                onFan(v, infos, fan, space);
-                visitedCount += fan.Count;
-                if (visitedCount == infos.Count) break;
-                foreach (int lc in fan) visited[lc] = true;
-                while (visited[start]) start++;
+                onVertex?.Invoke(v, infos);
             }
-            onVertex?.Invoke(v, infos);
+        }
+        int workers = Math.Min(nv, Math.Min(8, threads > 0 ? threads : Environment.ProcessorCount));
+        if (workers <= 1 || (threads == 0 && (nv < 16384 || tris.Length < 49152))) Range(0, nv);
+        else
+        {
+            try
+            {
+                Parallel.For(0, workers, new ParallelOptions { MaxDegreeOfParallelism = workers, TaskScheduler = TaskScheduler.Default },
+                    block => Range((int)((long)nv * block / workers), (int)((long)nv * (block + 1) / workers)));
+            }
+            catch (AggregateException e) when (e.InnerExceptions.Count == 1)
+            {
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(e.InnerExceptions[0]).Throw();
+                throw;
+            }
         }
     }
 }

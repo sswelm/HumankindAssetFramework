@@ -14,6 +14,51 @@ public static class UnityVehicleGenerateTests
     static void Check(string name,bool ok,string detail) { Row((ok?"PASS ":"FAIL ")+name+": "+detail);if(!ok)failed++; }
     static FieldInfo Field(string name)=>typeof(VehicleLabWindow).GetField(name,BindingFlags.Instance|BindingFlags.NonPublic|BindingFlags.Public);
     static MethodInfo Method(string name)=>typeof(VehicleLabWindow).GetMethod(name,BindingFlags.Instance|BindingFlags.NonPublic);
+    static void ParallelNormals()
+    {
+        bool Same(float[] a, float[] b)
+        {
+            if (a.Length != b.Length) return false;
+            var x = new byte[4 * a.Length]; var y = new byte[4 * b.Length];
+            Buffer.BlockCopy(a, 0, x, 0, x.Length); Buffer.BlockCopy(b, 0, y, 0, y.Length);
+            return x.SequenceEqual(y);
+        }
+        foreach (float scale in new[] { 1f, 1e-18f })
+        {
+            const int size = 129;
+            var points = new List<float>(); var normals = new List<float>(); var faces = new List<int>();
+            for (int y = 0; y <= size; y++) for (int x = 0; x <= size; x++)
+            {
+                points.AddRange(new[] { x * scale, y * scale, (float)((x % 3 - y % 4) * .125) * scale });
+                normals.AddRange((x + y) % 11 == 0 ? new[] { float.NaN, float.NaN, float.NaN } : new[] { .25f, -.5f, 1f });
+            }
+            points.AddRange(new[] { -0f, 0f, 0f, 2f, 3f, 4f }); normals.AddRange(new[] { 0f, 0f, 0f, 0f, 0f, 1f });
+            for (int y = 0; y < size; y++) for (int x = 0; x < size; x++)
+            {
+                int a = y * (size + 1) + x, b = a + 1, c = a + size + 1, d = c + 1;
+                faces.AddRange(new[] { a, b, d, a, d, c });
+            }
+            var p = points.ToArray(); var f = faces.ToArray(); var n = normals.ToArray();
+            var sharp = Enumerable.Range(0, f.Length / 3).Select(i => i % 7 == 0).ToArray();
+            var encoded = VehicleProbe.EncodeCustomShorts(p, f, n, sharp, 1);
+            var decoded = VehicleProbe.DecodeCustomShorts(p, f, sharp, encoded.d0, encoded.d1, threads: 1);
+            var corners = VehicleProbe.BlenderCornerNormals(p, f, sharp, encoded.d0, encoded.d1, threads: 1);
+            var data = new short[2 * f.Length]; for (int i = 0; i < f.Length; i++) { data[2 * i] = encoded.d0[i]; data[2 * i + 1] = encoded.d1[i]; }
+            var vectors = VehicleProbe.DecodeBMeshCustomNormals(p, f, sharp, data, 1);
+            var bmesh = VehicleProbe.EncodeBMeshCustomNormals(p, f, sharp, vectors, 1);
+            foreach (int workers in new[] { 2, 4, 8, 0 })
+            {
+                var actual = VehicleProbe.EncodeCustomShorts(p, f, n, sharp, workers);
+                bool equal = encoded.d0.SequenceEqual(actual.d0) && encoded.d1.SequenceEqual(actual.d1)
+                    && Same(decoded, VehicleProbe.DecodeCustomShorts(p, f, sharp, actual.d0, actual.d1, threads: workers))
+                    && Same(corners, VehicleProbe.BlenderCornerNormals(p, f, sharp, actual.d0, actual.d1, threads: workers))
+                    && Same(vectors, VehicleProbe.DecodeBMeshCustomNormals(p, f, sharp, data, workers))
+                    && bmesh.SequenceEqual(VehicleProbe.EncodeBMeshCustomNormals(p, f, sharp, vectors, workers));
+                Check("parallel normals " + scale + " workers=" + workers, equal, "serial and parallel shorts and float bits agree");
+            }
+        }
+    }
+
     static void Availability()
     {
         foreach(string editorDefault in new[]{"csharp","blender"})
@@ -202,7 +247,7 @@ public static class UnityVehicleGenerateTests
         output=Arg("-hafGenerateOutput");fixtures=Arg("-hafGenerateFixtures");
         try
         {
-            Availability();SecondSourceFingerprint();foreach(string key in new[]{"fx_e2_stances","fx_e3_deploy","fx_f_layers"})Preview(key);
+            ParallelNormals();Availability();SecondSourceFingerprint();foreach(string key in new[]{"fx_e2_stances","fx_e3_deploy","fx_f_layers"})Preview(key);
             StaleBaseline();
         }
         catch(Exception e){Check("exception",false,e.ToString());}
@@ -231,7 +276,7 @@ public static class UnityVehicleGenerateTests
         {
             var keys=new[]{"fx_e2_stances","fx_e3_deploy","fx_f_global","fx_f_layers","fx_f_merge_textures","fx_f_uv_inactive","fx_f_signed_zero"};
             var jobs=keys.Select(k=>Path.Combine(fixtures,"recipes",k+".json")).ToArray();
-            Availability();SecondSourceFingerprint();Persistence(jobs[0]);StaleBaseline();Recipes("fixtures",jobs,"Tools/fixture_goldens");
+            ParallelNormals();Availability();SecondSourceFingerprint();Persistence(jobs[0]);StaleBaseline();Recipes("fixtures",jobs,"Tools/fixture_goldens");
             foreach(string key in new[]{"fx_e2_stances","fx_e3_deploy","fx_f_layers"})Preview(key);
             string saved=Arg("-hafGenerateRecipes");if(Directory.Exists(saved))Recipes("saved",Directory.GetFiles(saved,"*.json"),"Tools/lab_golden");else Check("saved recipes",false,"recipes not found");
         }
