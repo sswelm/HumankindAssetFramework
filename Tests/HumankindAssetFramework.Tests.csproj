@@ -35,6 +35,7 @@
     <Compile Include="..\editor\BlenderVehicleRig.Stage3.cs" Link="BlenderVehicleRig.Stage3.cs" />
     <Compile Include="..\editor\BlenderVehicleRig.Stage4.cs" Link="BlenderVehicleRig.Stage4.cs" />
     <Compile Include="..\editor\BlenderVehicleRig.Stage5.cs" Link="BlenderVehicleRig.Stage5.cs" />
+    <Compile Include="..\editor\BlenderVehicleRigInProcess.cs" Link="BlenderVehicleRigInProcess.cs" />
     <Compile Include="..\editor\BlenderNumpy.cs" Link="BlenderNumpy.cs" />
     <Compile Include="..\editor\BlenderWeld.cs" Link="BlenderWeld.cs" />
     <Compile Include="..\editor\BlenderDissolve.cs" Link="BlenderDissolve.cs" />
