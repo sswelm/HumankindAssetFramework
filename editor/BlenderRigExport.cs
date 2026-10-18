@@ -56,6 +56,11 @@ public static class BlenderRigExport
     /// <summary>The export of the stage 4 scene (RunStage4 ran through). Evaluates the scene at the widened range's first
     /// frame, as the export step does.</summary>
     public static BlenderDeployExport.Result Build(BlenderRigAnim.Stage1 s, BlenderRigAnim.Args a)
+        => BuildCore(s, false, null);
+
+    public static BlenderDeployExport.Result BuildVehicle(BlenderRigAnim.Stage1 s, Action<int> evaluateFrame) => BuildCore(s, true, evaluateFrame);
+
+    static BlenderDeployExport.Result BuildCore(BlenderRigAnim.Stage1 s, bool vehicle, Action<int> evaluateFrame)
     {
         var x = new BlenderDeployExport.Result();
         if (s.Fallback != null) { x.Fallback = s.Fallback; return x; }
@@ -63,15 +68,16 @@ public static class BlenderRigExport
         var m = s.Model; var names = s.Names; var rig = s.Rig;
 
         // ---- the export step: the scene's range over every action's rounded range, the first frame evaluated
-        if (s.Actions.Count > 0)
+        if (!vehicle && s.Actions.Count > 0)
         {
             int lo = int.MaxValue, hi = int.MinValue;
             foreach (var act in s.Actions) { lo = Math.Min(lo, PyRound(act.FrameStart)); hi = Math.Max(hi, PyRound(act.FrameEnd)); }
             s.FrameStart = lo; s.FrameEnd = hi;
         }
-        BlenderRigAnim.EvaluateFrame(s, s.FrameStart);
+        if (vehicle) evaluateFrame(0); else BlenderRigAnim.EvaluateFrame(s, s.FrameStart);
         x.SceneStart = s.FrameStart; x.SceneEnd = s.FrameEnd;
-        x.Log.Add("RIGANIM glb: " + s.Actions.Count.ToString(CultureInfo.InvariantCulture) + " action(s), frames " + s.FrameStart.ToString(CultureInfo.InvariantCulture) + ".." + s.FrameEnd.ToString(CultureInfo.InvariantCulture));
+        if (vehicle && s.Actions.Count > 0) { x.SceneStart = s.Actions.Min(act => ActionRange(act).start); x.SceneEnd = s.Actions.Max(act => ActionRange(act).end); }
+        if (!vehicle) x.Log.Add("RIGANIM glb: " + s.Actions.Count.ToString(CultureInfo.InvariantCulture) + " action(s), frames " + s.FrameStart.ToString(CultureInfo.InvariantCulture) + ".." + s.FrameEnd.ToString(CultureInfo.InvariantCulture));
 
         // ---- the vtree: objects in bpy.data.objects order, every armature's bones
         var objs = s.Objects.ToList(); BlenderExportTree.StableSort(objs, (p, q) => BlenderDeploy.IdNameCmp(p.Name, q.Name));
@@ -143,7 +149,7 @@ public static class BlenderRigExport
             var r = new BlenderReduce.Result
             {
                 VertexCount = me.Vertices, FaceCount = nf, Positions = me.Positions, Faces = me.Faces, Edges = me.Edges ?? new int[0], FaceMaterial = me.FaceMaterial,
-                FaceSharp = me.FaceSharp ?? new bool[nf], CustomNormal = me.CustomNormal, DefNr = me.DefNr, DefWeight = me.DefWeight, Ratio = 1f,
+                FaceSharp = me.FaceSharp ?? new bool[nf], EdgeSharp = vehicle ? me.EdgeSharp : null, CustomNormal = me.CustomNormal, DefNr = me.DefNr, DefWeight = me.DefWeight, Ratio = 1f,
             };
             foreach (var uv in me.UvAll) r.Uv.Add(uv);
             foreach (var c in me.Colors) r.Colors.Add(c);
@@ -155,6 +161,7 @@ public static class BlenderRigExport
                 r.Slots.Add(key);
                 r.SlotAlpha.Add(key.material >= 0 ? (m.Materials[key.material].AlphaMode, m.Materials[key.material].AlphaCutoff, BlenderReduce.MaterialAlphaFactor(m.Materials[key.material])) : ("OPAQUE", 0.5, 1.0));
             }
+            if (vehicle && r.Slots.Count == 0) { r.Slots.Add((-1, false)); r.SlotAlpha.Add(("OPAQUE", .5, 1)); }
             var (rest, bones) = armOf[armObj];
             var jointOf = new Dictionary<string, int>(StringComparer.Ordinal);
             for (int i = 0; i < bones.Count; i++) jointOf[names.BoneOfJoint[bones[i]]] = i;
@@ -164,10 +171,11 @@ public static class BlenderRigExport
             prims[o] = p; slotsOf[o] = r.Slots;
             // no vertex groups: the joint attributes are written (every vertex on the would-be neutral index) but the mesh gets
             // no skin (skins.py gathers none without vertex groups) and no neutral bone (measured, fx_s4_rebind)
+            if (vehicle && me.Vertices > 0) { BlenderExport.VertexBones(r, skin, out _, out _, out bool missing); if (missing) needNeutral[armObj] = true; }
             if (me.Groups.Count == 0) continue;
             armatureOfMesh[o] = armObj;
             bool neutral = false;
-            if (p.Count > 0) neutral = p[0].NeutralBone;
+            if (!vehicle && p.Count > 0) neutral = p[0].NeutralBone;
             else if (me.Vertices > 0) BlenderExport.VertexBones(r, skin, out _, out _, out neutral);
             if (neutral) needNeutral[armObj] = true;
         }
@@ -217,7 +225,7 @@ public static class BlenderRigExport
             {
                 var p = prims[v.Object];
                 var mesh = new BlenderDeployExport.Mesh { Name = v.Object.DataName, Primitives = p, Slots = slotsOf[v.Object] };
-                foreach (var prim in p) { string matName = v.Object.Mesh.Materials[prim.MaterialSlot]; mesh.Material.Add(matName == null ? -1 : MaterialIndex(matName)); }
+                foreach (var prim in p) { string matName = prim.MaterialSlot < v.Object.Mesh.Materials.Count ? v.Object.Mesh.Materials[prim.MaterialSlot] : null; mesh.Material.Add(matName == null ? -1 : MaterialIndex(matName)); }
                 n.Mesh = x.Meshes.Count; x.Meshes.Add(mesh);
                 if (armatureOfMesh.TryGetValue(v.Object, out var armObj))
                 {
@@ -265,7 +273,7 @@ public static class BlenderRigExport
         var animated = new List<string>();
         foreach (var act in s.Actions)
         {
-            bool armatureSlot = act.Slots.Any(sl => sl.Object != null && sl.Object.Type == "ARMATURE" && byObj.ContainsKey(sl.Object));
+            bool armatureSlot = act.Slots.Any(sl => vehicle ? sl.FCurves.Any(fc => fc.Bone != null) : sl.Object != null && sl.Object.Type == "ARMATURE" && byObj.ContainsKey(sl.Object));
             if (!armatureSlot) continue;
             var (start, end) = ActionRange(act);
             if (Math.Max(s.FrameStart, start) <= Math.Min(s.FrameEnd, end)) animated.Add(act.Name);
@@ -274,7 +282,7 @@ public static class BlenderRigExport
         x.Animations.AddRange(animated);
 
         // ---- the animations' channels as the exporter samples them (BlenderChannelExport's sampler over the rig's Spec)
-        x.ChannelRows = BlenderChannelExport.Build(ChannelSpec(s, x), x, x.SceneStart, x.SceneEnd);
+        x.ChannelRows = BlenderChannelExport.Build(ChannelSpec(s, x, vehicle), x, x.SceneStart, x.SceneEnd);
         if (x.ChannelRows.Fallback != null) { x.Fallback = x.ChannelRows.Fallback; return x; }
         // ---- the materials, textures, samplers and images as the exporter writes them
         // Texture nodes refer to UV layer names on the final mesh. The join may add a layer which a material's
@@ -303,16 +311,18 @@ public static class BlenderRigExport
     /// action's curves - a curve per (bone, channel) of its armature slot, evaluated as the depsgraph does (LINEAR and
     /// CONSTANT segments included). An action with curves on any other object (the armature's own object channels, a
     /// second armature) is left by name.</summary>
-    static BlenderChannelExport.Spec ChannelSpec(BlenderRigAnim.Stage1 s, BlenderDeployExport.Result x)
+    static BlenderChannelExport.Spec ChannelSpec(BlenderRigAnim.Stage1 s, BlenderDeployExport.Result x, bool vehicle)
     {
         var ad = s.Armature; var armObj = ad.Object; var names = s.Names;
-        var spec = new BlenderChannelExport.Spec { Active = armObj.Action, ModeOf = _ => "QUATERNION" };
+        var spec = new BlenderChannelExport.Spec { Active = armObj.Action };
         var nodeOfBone = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (int b in ad.BoneNodes) nodeOfBone[names.BoneOfJoint[b]] = b;
+        spec.ModeOf = bone => vehicle && ad.RotMode.TryGetValue(nodeOfBone[bone], out var mode) ? mode : "QUATERNION";
         spec.HeldOf = bone =>
         {
             var p = ad.PoseProps[nodeOfBone[bone]];
-            return new[] { p[0][0], p[0][1], p[0][2], p[1][0], p[1][1], p[1][2], p[1][3], p[2][0], p[2][1], p[2][2], 0f, 0f, 0f };
+            var e = vehicle && ad.PoseEuler.TryGetValue(nodeOfBone[bone], out var eul) ? eul : new float[3];
+            return new[] { p[0][0], p[0][1], p[0][2], p[1][0], p[1][1], p[1][2], p[1][3], p[2][0], p[2][1], p[2][2], e[0], e[1], e[2] };
         };
         var specOf = new Dictionary<int, BlenderChannelExport.BoneSpec>();
         void Visit(int parent)
@@ -326,7 +336,7 @@ public static class BlenderRigExport
             }
         }
         Visit(-1);
-        foreach (var act in s.Actions) if (act.Slots.Any(sl => sl.Object == armObj)) spec.Visited.Add(act.Name);
+        foreach (var act in s.Actions) if (act.Slots.Any(sl => vehicle ? sl.FCurves.Any(fc => fc.Bone != null) : sl.Object == armObj)) spec.Visited.Add(act.Name);
         BlenderExportTree.StableSort(spec.Visited, (p, q) => BlenderRigAnim.PyStringOrder.Compare(BlenderRigAnim.PyLower(p), BlenderRigAnim.PyLower(q)));
         spec.SourceOf = name =>
         {
@@ -337,7 +347,7 @@ public static class BlenderRigExport
             foreach (var sl in act.Slots)
             {
                 // a slot of an object the scene no longer holds (joined away, flattened) animates nothing; one of a live object does
-                if (sl.Object != armObj) { if (sl.FCurves.Count > 0 && sl.Object != null && s.Objects.Contains(sl.Object)) throw new InvalidOperationException("'" + name + "': curves on '" + sl.Object.Name + "' beside the armature's (its object channels, or a second armature, are not modelled)"); continue; }
+                if (!vehicle && sl.Object != armObj) { if (sl.FCurves.Count > 0 && sl.Object != null && s.Objects.Contains(sl.Object)) throw new InvalidOperationException("'" + name + "': curves on '" + sl.Object.Name + "' beside the armature's (its object channels, or a second armature, are not modelled)"); continue; }
                 foreach (var fc in sl.FCurves)
                 {
                     if (fc.Bone == null) throw new InvalidOperationException("'" + name + "': an object-level curve on the armature (" + fc.DataPath + ": the armature node's channels are not modelled)");
@@ -349,7 +359,10 @@ public static class BlenderRigExport
             }
             var (start, end) = ActionRange(act); src.Lo = start; src.Hi = end; src.Any = true;   // the exporter's range: int() of frame_range, the single frame's +1 undone
             src.Has = (bone, c) => curves.ContainsKey((bone, c));
-            src.Eval = (bone, c, f) => BlenderRigAnim.EvaluateCurve(curves[(bone, c)], (float)f);
+            // Vehicle actions can key every bone on every frame. Convert each curve once rather than
+            // cloning all its keys on every sample (quadratic allocation on a long rowing/rotor clip).
+            var vehicleCurves = vehicle ? curves.ToDictionary(kv => kv.Key, kv => BlenderRigAnim.ToArm(kv.Value)) : null;
+            src.Eval = (bone, c, f) => vehicle ? BlenderFCurve.Evaluate(vehicleCurves[(bone, c)], f, constant: true) : BlenderRigAnim.EvaluateCurve(curves[(bone, c)], (float)f);
             src.Keys = (bone, c) => curves.TryGetValue((bone, c), out var keys) ? BlenderRigAnim.ToArm(keys) : null;
             src.DenseCount = (bone, c) => 0;
             return src;

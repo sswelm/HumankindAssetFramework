@@ -405,11 +405,11 @@ static class VehicleRigDrill
     {
         Console.OutputEncoding = new UTF8Encoding(false);
         bool requireKeys = false; int offset = 0; int stages = 0;   // --stages N: the C# model of stages 1..N (editor/BlenderVehicleRig.cs) against the dump
-        const string usage = "usage: vehiclerig.exe [--keys] [--stages 1|2|3|4] <jobs file> <dump>...";
+        const string usage = "usage: vehiclerig.exe [--keys] [--stages 1|2|3|4|5] <jobs file> <dump>...";
         while (offset < args.Length && args[offset].StartsWith("--", StringComparison.Ordinal))
         {
             if (args[offset] == "--keys") requireKeys = true;
-            else if (args[offset] == "--stages" && offset + 1 < args.Length && int.TryParse(args[offset + 1], NumberStyles.None, CultureInfo.InvariantCulture, out stages) && stages >= 1 && stages <= 4) offset++;
+            else if (args[offset] == "--stages" && offset + 1 < args.Length && int.TryParse(args[offset + 1], NumberStyles.None, CultureInfo.InvariantCulture, out stages) && stages >= 1 && stages <= 5) offset++;
             else { Console.WriteLine(usage); return 2; }
             offset++;
         }
@@ -573,6 +573,9 @@ static class StageDrill
     static long RowCount(VehicleRigDump.Stage s) => 1 + s.Objs.Count + s.Meshes.Count + s.Groups.Count + s.Bones.Count + s.PoseBones.Count + s.Actions.Count + s.FCurves.Count + s.Keys.Count;
     static string Describe(VehicleRigDump.Stage s) => $"{s.Objs.Count} objects, {s.Meshes.Count} meshes, {s.Groups.Count} vertex groups, {s.Bones.Count} bones, {s.Actions.Count} actions, {s.FCurves.Count} fcurves" + (s.Keys.Count > 0 ? $", {s.Keys.Count} keys" : "");
 
+    static int Exported5, BytesEqual5;
+    static long ExportRows5;
+
     public static bool Compare(VehicleRigDump d, string key, int stages)
     {
         Compared++;
@@ -714,6 +717,42 @@ static class StageDrill
                 }
             }
         }
+        if (problems.Count == 0 && stages >= 5 && !model.Exits && model.Dies == null)
+        {
+            BlenderDeployExport.Result exported = null;
+            try { exported = BlenderVehicleRig.RunStage5(model, args); }
+            catch (Exception e) { problems.Add("stage 5 model: " + e.GetType().Name + ": " + e.Message); }
+            if (model.Fallback != null)
+            {
+                if (!model.Fallback.StartsWith("stage 5: the ", StringComparison.Ordinal) || !model.Fallback.EndsWith(" is not modelled yet", StringComparison.Ordinal)) problems.Add("stage 5 model: " + model.Fallback);
+                else { Equal--; Left++; Console.WriteLine("STAGE5 " + key + ": left to Blender by name: " + model.Fallback); return true; }
+            }
+            else if (problems.Count == 0 && d.Stages.TryGetValue(5, out var s5))
+            {
+                // The oracle remaps out_glb to its temporary job directory. Compare the complete DONE
+                // message with that directory normalized; require the oracle's documented job basename.
+                var copy = s5.Logs.ToList();
+                for (int i = 0; i < copy.Count; i++) if (copy[i].StartsWith("VEHICLE RIG DONE:", StringComparison.Ordinal))
+                {
+                    int at = copy[i].LastIndexOf(" -> ", StringComparison.Ordinal);
+                    string path = at >= 0 ? copy[i].Substring(at + 4) : "";
+                    if (!path.EndsWith("/" + key.Replace(':', '_') + "_Spin.glb", StringComparison.Ordinal)) problems.Add("stage 5 model: the DONE output basename differs");
+                    else copy[i] = copy[i].Substring(0, at + 4) + args.OutGlb;
+                }
+                var rows5 = BlenderRigAnim.Render(model, 5, fcSlot: true); DumpModelRows(key, 5, rows5, model.Logs5);
+                var originalLogs = s5.Logs; s5.Logs = copy;
+                try { CompareRows(5, rows5, model.Logs5, s5, problems); } finally { s5.Logs = originalLogs; }
+                if (problems.Count == 0)
+                {
+                    RowsEqual += RowCount(s5); Console.WriteLine("STAGE5 " + key + ": equal - " + Describe(s5));
+                    var xp = new List<string>();
+                    var stats = GlbRowsCompare.Compare(exported, d.ExportRows, xp, new Dictionary<string, long>(), name => exported.ChannelRows.Animations.First(an => an.Name == name).Channels.Count, true, true, null);
+                    foreach (string issue in xp) problems.Add("stage 5 export: " + issue);
+                    if (problems.Count == 0) { Exported5++; ExportRows5 += d.ExportRows.Count; if (stats.GlbEqual) BytesEqual5++; Console.WriteLine("EXPORT " + key + ": equal - " + stats.Nodes + " nodes, " + stats.Channels + " channels" + (stats.GlbEqual ? ", byte-identical GLB" : "")); }
+                }
+            }
+            else if (problems.Count == 0) problems.Add("stage 5 model: Blender stopped before the export");
+        }
         if (problems.Count > 0) { foreach (var p in problems) Console.WriteLine($"FAIL {key}: {p}"); return false; }
         return true;
     }
@@ -721,6 +760,7 @@ static class StageDrill
     public static void Summary(int stages)
     {
         foreach (var kv in Census) Console.WriteLine($"MODEL {kv.Value} {kv.Key}");
+        if (stages >= 5) Console.WriteLine($"EXPORTS jobs {Exported5} rows {ExportRows5} bytesEqual {BytesEqual5}");
         Console.WriteLine($"STAGES {stages} jobs {Compared} equal {Equal} left {Left} rows {RowsEqual} left3 {Left3} left4 {Left4}");
     }
 }

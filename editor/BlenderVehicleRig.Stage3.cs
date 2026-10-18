@@ -226,7 +226,7 @@ public static partial class BlenderVehicleRig
             head[id] = h; tail[id] = t; roll[id] = 0f;
             return id;
         }
-        var clusterBoneIds = new List<int>();
+        var clusterBoneIds = new List<int>(); var wheelAxes = new List<float[]>();
         int root = AddBone("Root", new float[3], new[] { 0f, 0.25f, 0f }, -1);
         int body = root; string bodyBone = "Root";
         if (a.RockOn) { body = AddBone("RootHull", new float[3], new[] { 0f, 0.2f, 0f }, root); bodyBone = "RootHull"; Note(s, "the wave rock's RootHull bone"); }
@@ -234,7 +234,7 @@ public static partial class BlenderVehicleRig
         for (int i = 0; i < clusters.Count; i++)
         {
             var cl = clusters[i];
-            var ax = cl.axle ?? AxleAxis(a.AxisArg, cl.sz);   // a rotor carries its axle; a wheel infers it
+            var ax = cl.axle ?? AxleAxis(a.AxisArg, cl.sz); wheelAxes.Add((float[])ax.Clone());   // a rotor carries its axle; a wheel infers it
             double q = cl.m * 0.25; float len = (float)(q > 0.05 ? q : 0.05);   // max(0.05, max(s) * 0.25) into the float multiply (Python: 0.05 on a NaN)
             float[] t; float tailRoll = 0f;
             if (cl.rotor && cl.tail)
@@ -814,7 +814,7 @@ public static partial class BlenderVehicleRig
             OarBones = oarParts.Count > 0 ? boneNames.Count(n => n.StartsWith("Oar_", StringComparison.Ordinal)) : 0,
             TrailBones = boneNames.Count(n => n.StartsWith("Trail_", StringComparison.Ordinal)),
             SailClip = sailFound.Count > 0, FlagClip = flagFound.Count > 0, Recoil = boneNames.Contains("RecoilArm"),
-            Oars = oarStrokes, SailYard = sailYard, FlagAxis = flagAxis,
+            Oars = oarStrokes, SailYard = sailYard, FlagAxis = flagAxis, WheelAxes = wheelAxes,
             Trails = trails, GunAxis = retainedGunAxis, GunBore = retainedGunBore,
             RecoilPivot = recoilPivot, RecoilAxis = recoilAxis, RecoilBore = recoilBore, RecoilCentre = recoilCentre,
             RecoilSlide = recoilSlide, RecoilRadius = recoilRadius,

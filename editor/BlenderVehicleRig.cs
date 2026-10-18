@@ -31,6 +31,8 @@ public static partial class BlenderVehicleRig
         public double Bright1 = 1.0, Bright2 = 1.0;
         public List<string> PartTx;                 // the parttx= lines, or null
         public bool TracksStatic;                   // argv[16] "1": the tread loops rigid, no link bones (the line at argument time)
+        public bool DoubleSided, FixInsideOut;
+        internal readonly List<(HafModel model, BlenderNames.Result names, double bright)> MaterialInputs = new List<(HafModel, BlenderNames.Result, double)>();
         public readonly List<string> Logs = new List<string>();   // the VEHICLE lines the rig path prints at argument time (a bad orientation, static tracks), after the merge
         public string Problem;                      // the script's own exit on its arguments before the import (bright=, flagfold=: a VEHICLE ERROR), or null
         public string PreDie;                       // an exception before the import (int(float(inf)) of a flagfold frame count), or null
@@ -165,6 +167,8 @@ public static partial class BlenderVehicleRig
             a.Reduce[role] = PyClamp95(v);
         }
         a.TracksStatic = argv.Count > 16 && At(16).Trim() == "1";
+        a.DoubleSided = VehicleProbe.Input.PyStrip(At(41)) == "1";
+        a.FixInsideOut = VehicleProbe.Input.PyStrip(At(46)) == "1";
         // the reduce tags in the script's order - defaultreduce, shroudreduce, gunreduce, turretreduce, windowreduce -, the names before the LAST
         // '|', the percent after it; the first malformed one is the script's VEHICLE ERROR after the merge (its exit)
         foreach (var tag in new[] { "defaultreduce", "shroudreduce", "gunreduce", "turretreduce", "windowreduce" })
@@ -416,6 +420,7 @@ public static partial class BlenderVehicleRig
         // convert_renderables: a glTF holds no curve, surface, text or metaball object
         // ---- apply_brightness on the first model: the base-colour edits leave this stage's rows as they are (a flat colour's value,
         //      a tint's value and an image's pixels are the export's), the line's counts come from each material's chain
+        a.MaterialInputs.Clear(); a.MaterialInputs.Add((m, names, a.Bright1));
         if (!Brightness(s, m, names, s.Objects, a.Bright1, "")) return s;
         // the modifier bake: no glTF carries a modifier
         // ---- the second model merged in (merge2=): imported into the same scene, its parts prefixed B_, each mesh's target world
@@ -438,6 +443,7 @@ public static partial class BlenderVehicleRig
             // the pools continue from the second import's (its names unique against the first model's)
             names = s2.Names; s.Names = names;
             var newObjs = s2.Objects.ToList();
+            a.MaterialInputs.Add((m2, s2.Names, a.Bright2));
             if (!Brightness(s, m2, s2.Names, newObjs, a.Bright2, " (second model)")) return s;
             // its bone-shape placeholders purged (second model)
             foreach (var shape in s2.Names.BoneShapes) { s.Logs.Add("VEHICLE purged glTF importer bone-shape artifact (second model): " + shape); names.ObjectPool.Remove(shape); }

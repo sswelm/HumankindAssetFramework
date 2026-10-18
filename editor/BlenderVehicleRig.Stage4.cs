@@ -47,6 +47,8 @@ public static partial class BlenderVehicleRig
         public float[][] GunAxis, GunBore;
         public float[] RecoilPivot, RecoilAxis, RecoilBore, RecoilCentre;
         public double RecoilSlide, RecoilRadius;
+        public Dictionary<int, float[]> EvaluatedPose;
+        public List<float[]> WheelAxes = new List<float[]>();
     }
 
     const int MaxClipFrames = 100000;
@@ -127,6 +129,7 @@ public static partial class BlenderVehicleRig
         if ((st.SailClip && a.SailFold && a.SailFoldFrames > MaxClipFrames) || (st.FlagClip && a.FlagFoldOn && a.FlagFoldFrames > MaxClipFrames))
         { s.Fallback = "stage 4: the Furl clip of more than 100,000 frames is not modelled yet"; return; }
         var ad = s.Armature; var arm = st.Arm;
+        st.EvaluatedPose = VehiclePoseMats(ad);
         // the shared clip
         BigInteger frames = a.Frames;
         var periods = new List<BigInteger> { frames };
@@ -251,7 +254,7 @@ public static partial class BlenderVehicleRig
                 // The ground test reads the evaluated mesh left by this frame_set, before the final rock sample is assigned.
                 // At the clip's end the curves still hold the preceding sample (also when several samples share that frame).
                 // Keep that evaluated pose separately: the original pose below must retain the final assigned sample.
-                if (i == steps) { EvaluatePose(f); evaluatedGroundPose = VehiclePoseMats(ad); }
+                if (i == steps) { EvaluatePose(f); evaluatedGroundPose = VehiclePoseMats(ad); st.EvaluatedPose = evaluatedGroundPose; }
                 var q1 = BlenderDeploy.QuaternionAxisAngle(rollAx, rollAmp * BlenderTrig.Sin(2.0 * Math.PI * rc2 * rockRepeats * t));
                 var q2 = BlenderDeploy.QuaternionAxisAngle(pitchAx, pitchAmp * BlenderTrig.Sin(2.0 * Math.PI * pc2 * rockRepeats * t + phase));
                 var eul = BlenderDeploy.QuatToEulXYZ((float[])BlenderPosedState.MulQtQt(q1, q2).Clone());   // to_euler('XYZ'): normalize_qt_qt, quat_to_eul
@@ -467,6 +470,7 @@ public static partial class BlenderVehicleRig
                 for (int f = 0; f <= clip; f++)
                 {
                     FrameSet(f);
+                    if (bname == st.ClusterBones.Last() && f == clip) { EvaluatePose(f); st.EvaluatedPose = VehiclePoseMats(ad); }
                     var q = BlenderDeploy.QuaternionAxisAngle(lax, tot * (f / (double)clip));
                     SetPose(bname, "QUATERNION", null, q);
                     Insert(bname, "rotation_quaternion", q, f);
@@ -479,6 +483,7 @@ public static partial class BlenderVehicleRig
             SetPose(bname, "XYZ", new float[3], null);
             Insert(bname, "rotation_euler", new float[3], 0);
             FrameSet(clip);
+            if (bname == st.ClusterBones.Last()) { EvaluatePose(clip); st.EvaluatedPose = VehiclePoseMats(ad); }
             var e = new[] { 0f, (float)((dg * spinRepeats) * (Math.PI / 180.0)), 0f };
             SetPose(bname, "XYZ", e, null);
             Insert(bname, "rotation_euler", e, clip);
@@ -572,6 +577,7 @@ public static partial class BlenderVehicleRig
                 var q = ad.PoseProps[st.BoneId[k.bone]][1]; if (q[k.index] != v) q[k.index] = v;
             }
             ad.PoseMats = VehiclePoseMats(ad);
+            st.EvaluatedPose = ad.PoseMats;
             // The script searches for Mesh_RecoilArm here, although the tube was joined as Mesh_Barrel. Normally
             // that means no clearance line; do not invent one for the differently named barrel.
             if (s.Objects.Any(o => o.Type == "MESH" && o.Name == "Mesh_RecoilArm"))
