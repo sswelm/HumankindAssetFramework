@@ -24,7 +24,7 @@ public static class BlenderRigAnimInProcess
 {
     /// <summary>Bump when the in-process run's written file changes: the Factory's slim cache key carries it, so a cached
     /// GLB made by an older port is made again.</summary>
-    public const string CacheRevision = "2026-10-19.jpeg-alpha";
+    public const string CacheRevision = "2026-10-19.jpeg-alpha.2";
 
     public sealed class Outcome
     {

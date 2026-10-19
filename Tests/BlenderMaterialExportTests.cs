@@ -153,6 +153,19 @@ public class BlenderMaterialExportTests
     }
 
     [Theory]
+    [InlineData(21, 0xc9)] // arithmetic coding
+    [InlineData(24, 12)]   // high precision
+    [InlineData(29, 4)]    // CMYK
+    [InlineData(26, 0)]    // undeclared height
+    public void Native_alpha_does_not_keep_a_nonportable_JPEG_header(int offset, byte value)
+    {
+        var f = new File(); var image = (byte[])Jpeg.Clone(); image[offset] = value;
+        var mat = f.Material("glass"); mat.AlphaMode = "BLEND";
+        mat.BaseColorTexture = f.Texture(f.Image("photo.jpg", image));
+        Assert.Contains("JPEG whose alpha is read", f.Build(true).Fallback);
+    }
+
+    [Theory]
     [InlineData(null, "{\"magFilter\":9729,\"minFilter\":9987}")]
     [InlineData("{\"magFilter\":9729,\"minFilter\":9987,\"wrapS\":10497,\"wrapT\":10497}", "{\"magFilter\":9729,\"minFilter\":9987}")]
     [InlineData("{\"magFilter\":9728,\"minFilter\":9728}", "{\"magFilter\":9728,\"minFilter\":9984}")]

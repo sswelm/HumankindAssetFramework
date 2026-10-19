@@ -126,6 +126,9 @@ public static class UnityVehicleGenerateTests
             void Write(string path, string mime, byte[] bytes) { image.MimeType = mime; image.Bytes = bytes; GlbWriter.Write(model, path); }
             Write(a, "image/png", png); Write(b, "image/jpeg", jpeg);
             Check("image encoding exact RGBA control", VehicleGenerateAcceptanceTest.CompareOutputs(a, log, b, log, out _).Count == 0, "source JPEG and PNG decoded from it match, all other bytes held");
+            texture.SetPixels32(decoded.GetPixels32()); texture.Apply();
+            Write(b, "image/jpeg", ImageConversion.EncodeToPNG(texture));
+            Check("image encoding MIME mutation", VehicleGenerateAcceptanceTest.CompareOutputs(a, log, b, log, out _).Count > 0, "equal-pixel PNG payload falsely labelled JPEG is rejected");
             colors = Enumerable.Repeat(new Color32(240, 10, 20, 255), 64).ToArray(); texture.SetPixels32(colors); texture.Apply();
             Write(b, "image/jpeg", ImageConversion.EncodeToJPG(texture, 95));
             Check("image encoding RGB mutation", VehicleGenerateAcceptanceTest.CompareOutputs(a, log, b, log, out _).Count > 0, "different JPEG pixels rejected");

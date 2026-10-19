@@ -93,6 +93,9 @@ public static class VehicleGenerateAcceptanceTest
             if (x.Bytes == null || y.Bytes == null) return "image bytes unavailable";
             if (x.Bytes.SequenceEqual(y.Bytes)) continue;
             if (x.MimeType != "image/png" || y.MimeType != "image/jpeg") return "image " + i + " is not a PNG to source JPEG change";
+            if (x.Bytes.Length < 8 || x.Bytes[0] != 0x89 || x.Bytes[1] != 0x50 || x.Bytes[2] != 0x4e || x.Bytes[3] != 0x47 ||
+                y.Bytes.Length < 3 || y.Bytes[0] != 0xff || y.Bytes[1] != 0xd8 || y.Bytes[2] != 0xff)
+                return "image " + i + " MIME type does not match its encoded format";
             var tx = new Texture2D(2, 2, TextureFormat.RGBA32, false);
             var ty = new Texture2D(2, 2, TextureFormat.RGBA32, false);
             try

@@ -3195,3 +3195,7 @@ under the existing owned `anim/` cache, including no-UV meshes that do not appea
 saves the prefab. Existing persistent meshes are retained. The native harness saves/reimports a two-renderer
 prefab and checks both references, UV data, no-UV data and idempotence. The isolated Espana SDK smoke test enables
 wave rock only in its throwaway variant and requests 20,000 triangles to stay within the fragment budget.
+
+The JPEG-retention guard keeps the glTF 8-bit grayscale/YCbCr SOF0/SOF1/SOF2 subset; CMYK, high-precision,
+arithmetic-coded and undeclared-dimension headers retain the named Blender fallback. Image acceptance checks the
+actual PNG/JPEG byte signatures as well as MIME labels; a same-pixel PNG falsely labelled JPEG is a native negative case.
