@@ -289,7 +289,14 @@ public static partial class BlenderVehicleRig
             var v = BlenderExport.Validated(r);
             if (!ReferenceEquals(v, r)) { me.Faces = v.Faces; me.FaceMaterial = v.FaceMaterial; me.FaceSharp = v.FaceSharp; me.CustomNormal = v.CustomNormal; me.UvAll = v.Uv; me.Uv = me.Uv == null ? null : v.Uv.FirstOrDefault(); me.Colors = v.Colors; }
         }
-        int Count(string role) => role == "guns" ? a.Names["guns"].Concat(a.Names["muzzles"]).Concat(a.Names["cradles"]).Distinct(StringComparer.Ordinal).Count() : a.Names[role].Count;
+        // gun_names as the script builds it (1691-1692): the tube = guns + the muzzles not among them, + the cradles not among those; a
+        // name repeated within one list stays repeated ("Tube;Tube" prints 2 gun parts - Distinct printed 1; review of #187)
+        int Count(string role)
+        {
+            if (role != "guns") return a.Names[role].Count;
+            var tube = a.Names["guns"].Concat(a.Names["muzzles"].Where(m => !a.Names["guns"].Contains(m))).ToList();
+            return tube.Count + a.Names["cradles"].Count(c => !tube.Contains(c));
+        }
         string F(float v) => PyFloatRepr.Repr(v);
         var axes = new List<string>();
         for (int i = 0; i < st.ClusterBones.Count; i++) axes.Add(PyStrRepr(st.ClusterBones[i]) + ": (" + string.Join(", ", st.WheelAxes[i].Select(F)) + ")");

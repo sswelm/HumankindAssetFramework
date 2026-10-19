@@ -459,6 +459,7 @@ public static partial class VehicleProbe
         for (int c = 0; c < tris.Length; c++) vertFaces[fill[tris[c]]++] = c / 3;
         // Each vertex owns its corners and output slice. Keep its face/fan order intact, with private scratch
         // per range; no Unity API, scene mutation or cross-vertex floating-point reduction runs on workers.
+        Exception fault = null;   // the first worker's exception: the other workers stop at their next vertex, the caller gets it as itself
         void Range(int first, int last)
         {
             var infos = new List<VertCornerInfo>(); var infoPool = new List<VertCornerInfo>();
@@ -469,6 +470,7 @@ public static partial class VehicleProbe
             float[][] edgeDirs = new float[0][];
             for (int v = first; v < last; v++)
             {
+                if (System.Threading.Volatile.Read(ref fault) != null) return;
                 if (offsets[v] == offsets[v + 1]) { onLone?.Invoke(v); continue; }
                 // collect_corner_info
                 infos.Clear();
@@ -591,16 +593,15 @@ public static partial class VehicleProbe
         if (workers <= 1 || (threads == 0 && (nv < 16384 || tris.Length < 49152))) Range(0, nv);
         else
         {
-            try
+            // A malformed input faults every worker at once: the first fault is kept, the others return at their next vertex, and the
+            // caller sees the one exception as itself - never an AggregateException of eight (review of #192), nor seven workers
+            // walking their whole range after the first failed
+            Parallel.For(0, workers, new ParallelOptions { MaxDegreeOfParallelism = workers, TaskScheduler = TaskScheduler.Default }, block =>
             {
-                Parallel.For(0, workers, new ParallelOptions { MaxDegreeOfParallelism = workers, TaskScheduler = TaskScheduler.Default },
-                    block => Range((int)((long)nv * block / workers), (int)((long)nv * (block + 1) / workers)));
-            }
-            catch (AggregateException e) when (e.InnerExceptions.Count == 1)
-            {
-                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(e.InnerExceptions[0]).Throw();
-                throw;
-            }
+                try { Range((int)((long)nv * block / workers), (int)((long)nv * (block + 1) / workers)); }
+                catch (Exception e) { System.Threading.Interlocked.CompareExchange(ref fault, e, null); }
+            });
+            if (fault != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(fault).Throw();
         }
     }
 }

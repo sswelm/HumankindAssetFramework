@@ -18,10 +18,21 @@ public static class BlenderVehicleRigInProcess
         return (route.Length > 0 ? route : NormalizeRoute(editorDefault)) == "csharp";
     }
 
+    // The one Blender fallback acceptance EXPECTS: a source the C# does not read (SourceFallback: .fbx/.obj/.blend). Every other
+    // reason - a reader refusal, the material preflight, a stage's named limit, a crash - is C# coverage lost, and the acceptance
+    // row fails on it until it is fixed or this rule is widened on purpose (review of #188/#191).
+    public static bool ExpectedFallback(string source, string reason)
+    {
+        if (string.IsNullOrWhiteSpace(source) || string.IsNullOrEmpty(reason)) return false;
+        return reason == BlenderVehicleRig.SourceFallback(new BlenderVehicleRig.Args { Input = source });
+    }
+
     public sealed class Outcome
     {
         public bool Written, ScriptExit;
-        public string ScriptError, UseBlender;
+        // Error: a Generate that FAILED in C# and is reported as such - the Lab's deadline, an output the file system refused -
+        // not handed to Blender (which would run its own five minutes, to write to the same refused place)
+        public string ScriptError, UseBlender, Error;
         public readonly List<string> Log = new List<string>();
     }
 
@@ -57,7 +68,7 @@ public static class BlenderVehicleRigInProcess
             if (Stop()) return o;
             string materialLimit = BlenderVehicleRig.ExportMaterialFallback(s, a, preserveJpegAlpha: true);
             if (materialLimit != null) { o.UseBlender = materialLimit; return o; }
-            Tick(); BlenderVehicleRig.RunStage2(s, a); o.Log.AddRange(s.Logs2); if (Stop()) return o;
+            Tick(); BlenderVehicleRig.RunStage2(s, a, Tick); o.Log.AddRange(s.Logs2); if (Stop()) return o;
             Tick(); BlenderVehicleRig.RunStage3(s, a); o.Log.AddRange(s.Logs3); if (Stop()) return o;
             Tick(); BlenderVehicleRig.RunStage4(s, a); o.Log.AddRange(s.Logs4); if (Stop()) return o;
             Tick(); var x = BlenderVehicleRig.RunStage5(s, a, preserveJpegAlpha: true);
@@ -67,14 +78,19 @@ public static class BlenderVehicleRigInProcess
             if (file.Fallback != null) { o.UseBlender = "the file: " + file.Fallback; return o; }
             // Do not touch a previous successful result on a decline, error, cancellation or failed write.
             temporary = a.OutGlb + "." + Guid.NewGuid().ToString("N") + ".tmp";
-            File.WriteAllBytes(temporary, file.Glb);
-            Tick();
-            if (File.Exists(a.OutGlb)) File.Replace(temporary, a.OutGlb, null); else File.Move(temporary, a.OutGlb);
+            try
+            {
+                File.WriteAllBytes(temporary, file.Glb);
+                Tick();
+                if (File.Exists(a.OutGlb)) File.Replace(temporary, a.OutGlb, null); else File.Move(temporary, a.OutGlb);
+            }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException) { o.Error = "the output could not be written (" + e.GetType().Name + ": " + e.Message + ")"; return o; }
             o.Written = true;
             if (completed != null) o.Log.Add(completed);
             return o;
         }
         catch (OperationCanceledException) { throw; }
+        catch (TimeoutException e) { o.Error = e.Message; return o; }
         catch (ReaderLimit e) { o.UseBlender = "the C# reader cannot handle this input: " + e.Message; return o; }
         catch (Exception e) { o.UseBlender = "the C# rig run failed (" + e.GetType().Name + ": " + e.Message + ")"; return o; }
         finally { if (temporary != null) try { if (File.Exists(temporary)) File.Delete(temporary); } catch { } }

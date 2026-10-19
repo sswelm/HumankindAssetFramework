@@ -3199,3 +3199,38 @@ wave rock only in its throwaway variant and requests 20,000 triangles to stay wi
 The JPEG-retention guard keeps the glTF 8-bit grayscale/YCbCr SOF0/SOF1/SOF2 subset; CMYK, high-precision,
 arithmetic-coded and undeclared-dimension headers retain the named Blender fallback. Image acceptance checks the
 actual PNG/JPEG byte signatures as well as MIME labels; a same-pixel PNG falsely labelled JPEG is a native negative case.
+
+**Review of #185-#193, the fixes (2026-10-19).** Four reviewer agents read the nine merged PRs against the script, Blender's
+sources and probes in Blender 5.1 (no P1; the findings are in docs/Review-Backlog.md). Addressed: (1) the two Lab goldens stale
+by input - Espana's edited recipe, the Dragon's re-fused source - re-blessed through the isolated Unity run,
+`HAF_GENERATE_TEST_METHOD=RunSaved HAF_GENERATE_ONLY=a,b HAF_GENERATE_REBLESS=a,b bash tools/vehiclerig_unity_generate_drill.sh`:
+the named goldens are deleted from the drill's COPY of the project, captured from Blender, verified by a second generation on both
+backends (`saved verified PASS`) and left in `$TMPD/rebless` with their SHA-256 for the user to install - the drill never writes into
+the project (docs/Vehicle-Generate-Acceptance.md has the hashes); (2) the acceptance row FAILS on a Blender fallback it does not
+expect - `BlenderVehicleRigInProcess.ExpectedFallback`: a source the C# does not read, nothing else - and ends with the tally of C#
+passes against expected fallbacks, so lost coverage can no longer pass as a skip; (3) the vehicle drill accepts a stage 5 decline
+only from the named deferral texts (`StageDrill.NamedStage5Deferral`: the two fixed ones, the shared exporter's own limits - an
+image it would encode again, an extension not measured, a mode not modelled, a sampler that would run for hours -, an export shape
+named not modelled; a refusal of the model's own consistency FAILS) and requires every exported GLB byte-identical (`EXPORTS ...
+bytesEqual` equal to its jobs); (4) the script's Recoil `_tc` rebinding recorded as a source defect and a d6 requirement; (5) the
+JPEG guard refuses an RGB JPEG (an Adobe APP14 transform 0, or 'R','G','B' component IDs without one) - decoders need not agree on
+it, and production has no second decoder; (6) the Lab's five-minute deadline and a write the file system refuses end as a reported
+failure (`Outcome.Error`, the old output kept), not a Blender run with a fresh five minutes; stage 2 polls the checkpoint between
+the parts of a tier; (7) the quick Lab row pins route "blender" and fails on any other; (8) one normals worker's fault stops the
+others at their next vertex and is rethrown as itself (eight faulting at once arrived as an AggregateException); (9) the preview
+prefab COPIES a mesh that is an asset already (the GLB route's rig meshes under anim/, wiped by the next bake), and
+PersistNativeRigMeshes deletes the `_rigmeshN` assets the atlas clones replaced. Also: the DONE line's gun count follows the
+script's lists (Distinct printed 1 for "Tube;Tube"), the two dead `FindBlender()` emptiness checks use `BlenderAvailable()`, the
+stage 4 header names the oar period. Forty-nine unit cases (the deferral texts both ways, fourteen JPEG headers, the locked output,
+the expected-fallback rule, the parallel fault as itself): 2,091 tests. Not re-run here: the full vehicle drill (the gate runs it
+on the push) and anything inside the user's Unity.
+
+The critical review of PR #194 added regressions for cleanup of a native prefab containing both skinned and rigid
+geometry, unused numbered meshes after a gap, source names containing deferral keywords, unrelated errors on FBX
+sources, and APP14 colour metadata after SOF. The original PR failed 13 focused unit cases and three native Unity
+checks. Cleanup now follows both SkinnedMeshRenderer and MeshFilter references and enumerates only owned numbered
+mesh assets; acceptance requires the exact source-import fallback reason; stage 5 deferrals match complete known
+diagnostic templates. JPEG classification reads through the header to the first scan and the rig-cache revision
+changes with that policy. All 2,107 unit tests and isolated native Unity RunChecks pass. RunChecks also exercises
+the real preview writer, verifies independent copies of every mesh, deletes the source rig meshes and reimports
+the preview to verify its references survive. No user project assets or goldens are changed by these checks.

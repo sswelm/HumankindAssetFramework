@@ -726,7 +726,7 @@ static class StageDrill
             catch (Exception e) { problems.Add("stage 5 model: " + e.GetType().Name + ": " + e.Message); }
             if (model.Fallback != null)
             {
-                if (!model.Fallback.StartsWith("stage 5: the ", StringComparison.Ordinal) || !model.Fallback.EndsWith(" is not modelled yet", StringComparison.Ordinal)) problems.Add("stage 5 model: " + model.Fallback);
+                if (!NamedStage5Deferral(model.Fallback)) problems.Add("stage 5 model: " + model.Fallback);
                 else { Equal--; Left++; Console.WriteLine("STAGE5 " + key + ": left to Blender by name: " + model.Fallback); return true; }
             }
             else if (problems.Count == 0 && d.Stages.TryGetValue(5, out var s5))
@@ -778,6 +778,40 @@ static class StageDrill
         }
         if (problems.Count > 0) { foreach (var p in problems) Console.WriteLine($"FAIL {key}: {p}"); return false; }
         return true;
+    }
+
+    // Stage 5 leaves a job to Blender BY NAME for these alone (docs/Testing.md, step (f)): its two fixed deferrals, a material or
+    // animation the shared exporter names as a limit of its own (BlenderMaterialExport / BlenderChannelExport's LeftException texts:
+    // an image it would encode again, an extension not measured, a mode not modelled, a sampler that would run for hours) and an
+    // export shape the GLB export names as not modelled. Any other fallback text is a refusal of the model's own consistency - a mesh
+    // without its Armature modifier, a material the importer never made, a bone without a node - and FAILS the job (review of #187:
+    // every "stage 5: the GLB export (...) is not modelled yet" used to pass as a deferral, whatever stood in the brackets).
+    internal static bool NamedStage5Deferral(string fallback)
+    {
+        if (fallback == null) return false;
+        if (fallback == "stage 5: the export of brightness-edited image bytes is not modelled yet" || fallback == "stage 5: the FBX preview export is not modelled yet") return true;
+        const string head = "stage 5: the GLB export (", tail = ") is not modelled yet";
+        if (!fallback.StartsWith(head, StringComparison.Ordinal) || !fallback.EndsWith(tail, StringComparison.Ordinal) || fallback.Length <= head.Length + tail.Length) return false;
+        string why = fallback.Substring(head.Length, fallback.Length - head.Length - tail.Length);
+        // Match the complete diagnostic template, including its suffix: object/material names are source data and may themselves
+        // contain "not modelled" or "the exporter". Those words must not turn a consistency error into successful deferral.
+        const string name = @"'[\s\S]*'";
+        const string material = @"(?:material '[\s\S]*': )?";
+        foreach (string pattern in new[]
+        {
+            material + @"image [0-9]+: (?:neither a PNG nor a JPEG \(the exporter encodes it again\)|a \.webp file \(the exporter writes WebP\)|a JPEG whose alpha is read \(the exporter writes it again as PNG\)|a file named as a PNG that holds JPEG bytes \(encoded again\)|a file named as a JPEG that holds PNG bytes \(encoded again\))",
+            material + @"(?:a specular-glossiness texture \(not modelled\)|a clearcoat texture \(not measured\)|KHR_materials_(?:transmission|volume|sheen|anisotropy) \(not measured yet\)|an occlusion image beside a metallic-roughness image of the same size \(the exporter composes a new image\))",
+            @"KHR_texture_transform \(the reader does not carry a texture's transform, which the importer turns into a mapping node\)",
+            name + @": (?:an object hung from a bone with children of its own \(their delta is not modelled\)|hung from a bone of an armature that hangs from a bone itself \(the delta's order is not modelled\)|an armature no mesh uses - its skin is written after the animation export, from the scene the sampler leaves \(not modelled\)|a child of a skinned mesh node \(its transform against the armature is not modelled\))",
+            @"an animation without bones \(the armature's object channels are not modelled\)",
+            @"a bone outside the pose order \(the vtree's walk is not modelled\)",
+            @"the animation " + name + @" (?:has no curve left|reaches no frame of the scene's range) \(the export named it all the same\)",
+            @"an action starting below frame 0 \(" + name + @" at -[0-9]+: the SLIDE of negative frames is not modelled\)",
+            @"an action of [0-9]+ frames \(" + name + @": the sampler would run for hours\)",
+            @"a bone in rotation mode [^\s]+ \(" + name + @": only QUATERNION and XYZ are modelled\)"
+        })
+            if (System.Text.RegularExpressions.Regex.IsMatch(why, @"\A(?:" + pattern + @")\z")) return true;
+        return false;
     }
 
     public static void Summary(int stages)

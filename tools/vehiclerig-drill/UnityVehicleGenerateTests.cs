@@ -71,7 +71,13 @@ public static class UnityVehicleGenerateTests
             source.vertices = new[] { Vector3.zero, Vector3.right, Vector3.up }; source.triangles = new[] { 0, 1, 2 };
             source.uv = new[] { Vector2.zero, Vector2.right, Vector2.up }; source.bindposes = new[] { Matrix4x4.identity };
             source.boneWeights = Enumerable.Repeat(new BoneWeight { boneIndex0 = 0, weight0 = 1 }, 3).ToArray();
-            AssetDatabase.CreateAsset(source, folder + "/source.asset");
+            AssetDatabase.CreateAsset(source, folder + "/test_rigmesh0.asset");
+            var rigid = UnityEngine.Object.Instantiate(source); rigid.name = "Rigid";
+            AssetDatabase.CreateAsset(rigid, folder + "/test_rigmesh1.asset");
+            var unused = UnityEngine.Object.Instantiate(source);
+            AssetDatabase.CreateAsset(unused, folder + "/test_rigmesh3.asset"); // a gap is not the end of the owned set
+            var rigidChild = new GameObject("Rigid"); rigidChild.transform.SetParent(root.transform, false);
+            rigidChild.AddComponent<MeshFilter>().sharedMesh = rigid; rigidChild.AddComponent<MeshRenderer>();
             for (int i = 0; i < 2; i++)
             {
                 var child = new GameObject("Body" + i); child.transform.SetParent(root.transform, false);
@@ -87,15 +93,37 @@ public static class UnityVehicleGenerateTests
                 renderers[i].sharedMesh = clone;
             }
             Check("native rig persists every transient mesh", UniversalBaker.PersistNativeRigMeshes(prefab, folder, "test") == 2, "both UV and no-UV clones become assets");
+            Check("native rig retains rigid mesh assets", AssetDatabase.LoadAssetAtPath<Mesh>(folder + "/test_rigmesh1.asset") != null,
+                "MeshFilter references keep their original mesh alive");
+            Check("native rig removes replaced originals across gaps", AssetDatabase.LoadAssetAtPath<Mesh>(folder + "/test_rigmesh0.asset") == null && AssetDatabase.LoadAssetAtPath<Mesh>(folder + "/test_rigmesh3.asset") == null,
+                "only unused numbered import meshes are removed");
             AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
             var loaded = AssetDatabase.LoadAssetAtPath<GameObject>(path); renderers = loaded.GetComponentsInChildren<SkinnedMeshRenderer>(true);
             bool intact = renderers.Length == 2 && renderers.All(r => r.sharedMesh != null && AssetDatabase.Contains(r.sharedMesh) && r.sharedMesh.vertexCount == 3);
             Check("native rig meshes survive prefab reload", intact, "SDK source retains persistent mesh references");
+            Check("native rig rigid mesh survives prefab reload", loaded.GetComponentInChildren<MeshFilter>(true)?.sharedMesh != null,
+                "rigid geometry remains on the saved prefab");
             if (intact)
             {
                 Check("native rig remapped UVs survive", renderers[0].sharedMesh.uv[0] == new Vector2(.25f, .75f) && renderers[1].sharedMesh.uv.Length == 0, "data preserved across SaveAssets and reimport");
                 Check("native rig persistence is idempotent", UniversalBaker.PersistNativeRigMeshes(loaded, folder, "test") == 0, "existing assets are retained");
+                // Exercise the real preview writer: the rig cache is disposable, the preview's copied meshes are independent.
+                string previewDir = folder + "/Preview"; AssetDatabase.CreateFolder(folder, "Preview");
+                var atlas = new Texture2D(2, 2); AssetDatabase.CreateAsset(atlas, previewDir + "/atlas.asset");
+                var originals = renderers.Select(r => r.sharedMesh).ToList();
+                var originalPaths = originals.Select(AssetDatabase.GetAssetPath).ToArray();
+                typeof(UniversalBaker).GetMethod("GeneratePreviewPrefab", BindingFlags.Static | BindingFlags.NonPublic)
+                    .Invoke(null, new object[] { "test", previewDir, path, atlas, Vector3.zero, originals });
+                var copies = Enumerable.Range(0, originals.Count).Select(i => AssetDatabase.LoadAssetAtPath<Mesh>(UniversalBaker.PreviewMeshPath(previewDir, "test", i))).ToArray();
+                bool copied = copies.All(m => m != null) && copies.Zip(originals, (copy, original) => copy != original && copy.vertices.SequenceEqual(original.vertices) && copy.uv.SequenceEqual(original.uv) && copy.bindposes.SequenceEqual(original.bindposes)).All(equal => equal);
+                Check("native preview copies persistent meshes", copied && originalPaths.All(p => AssetDatabase.LoadAssetAtPath<Mesh>(p) != null), "all preview meshes are independent assets with the rig's data");
+                foreach (string originalPath in originalPaths) AssetDatabase.DeleteAsset(originalPath);
+                string previewPath = previewDir + "/test_Preview.prefab";
+                AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
+                AssetDatabase.ImportAsset(previewPath, ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
+                var preview = AssetDatabase.LoadAssetAtPath<GameObject>(previewPath);
+                Check("native preview survives rig cache deletion", preview != null && preview.GetComponentInChildren<MeshFilter>()?.sharedMesh != null && copies.All(m => m != null && m.vertexCount == 3), "saved preview and every substitute survive deletion of their rig sources");
             }
         }
         finally
@@ -334,6 +362,27 @@ public static class UnityVehicleGenerateTests
         {
             ParallelNormals();NativeRigMeshPersistence();ImageEncodingParity();Availability();SecondSourceFingerprint();foreach(string key in new[]{"fx_e2_stances","fx_e3_deploy","fx_f_layers"})Preview(key);
             StaleBaseline();
+        }
+        catch(Exception e){Check("exception",false,e.ToString());}
+        Row("TOTAL failed "+failed);EditorApplication.Exit(failed==0?0:1);
+    }
+
+    // The saved recipes alone, or the subset -hafGenerateOnly names (comma-separated recipe stems): the way a stale Lab golden is
+    // re-blessed - the drill deletes the named goldens from ITS copy of the project, this captures them from Blender and verifies
+    // the capture by a second generation on both backends (Recipes). Nothing here touches the user's project.
+    public static void RunSaved()
+    {
+        output=Arg("-hafGenerateOutput");fixtures=Arg("-hafGenerateFixtures");
+        try
+        {
+            string saved=Arg("-hafGenerateRecipes");var only=(Arg("-hafGenerateOnly")??"").Split(new[]{','},StringSplitOptions.RemoveEmptyEntries).Select(s=>s.Trim()).Where(s=>s.Length>0).ToArray();
+            if(!Directory.Exists(saved))Check("saved recipes",false,"recipes not found");
+            else
+            {
+                var jobs=Directory.GetFiles(saved,"*.json").Where(j=>only.Length==0||only.Contains(Path.GetFileNameWithoutExtension(j),StringComparer.OrdinalIgnoreCase)).ToArray();
+                Check("saved recipes selected",jobs.Length>0&&(only.Length==0||jobs.Length==only.Length),jobs.Length+" recipe(s)"+(only.Length>0?" of "+string.Join(",",only):""));
+                if(jobs.Length>0)Recipes("saved",jobs,"Tools/lab_golden");
+            }
         }
         catch(Exception e){Check("exception",false,e.ToString());}
         Row("TOTAL failed "+failed);EditorApplication.Exit(failed==0?0:1);
