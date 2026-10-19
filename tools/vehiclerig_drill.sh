@@ -135,8 +135,10 @@ S1=$(grep -E "^STAGES 5 jobs" "$TMPD/s1.txt" | tail -1); echo "$S1"
 n_s1=$(echo "$S1" | awk '{print $4}'); n_s1eq=$(echo "$S1" | awk '{print $6}'); n_s1left=$(echo "$S1" | awk '{print $8}'); n_s1rows=$(echo "$S1" | awk '{print $10}'); n_s3left=$(echo "$S1" | awk '{print $12}'); n_s4left=$(echo "$S1" | awk '{print $14}')
 [ "$n_s1" -eq "$n_jobs" ] && [ $((n_s1eq + n_s1left)) -eq "$n_jobs" ] || { echo "FAIL — vehicle_rig drill: the stage models compared $n_s1 of $n_jobs jobs ($n_s1eq equal, $n_s1left left)"; exit 1; }
 X5=$(grep -E "^EXPORTS jobs " "$TMPD/s1.txt" | tail -1); echo "$X5"
-n_export=$(echo "$X5" | awk '{print $3}'); n_inprocess=$(echo "$X5" | awk '{print $9}')
+n_export=$(echo "$X5" | awk '{print $3}'); n_bytes=$(echo "$X5" | awk '{print $7}'); n_inprocess=$(echo "$X5" | awk '{print $9}')
 [ -n "$n_export" ] && [ "$n_export" -gt 0 ] && [ "$n_export" = "$n_inprocess" ] || { echo "FAIL — not every supported export was written by the Generate wrapper ($X5)"; exit 1; }
+# every compared export is the COMPLETE file, byte for byte (review of #187: the row comparison passed a GLB whose bytes were never equal)
+[ "$n_bytes" = "$n_export" ] || { echo "FAIL — vehicle_rig drill: $n_bytes of $n_export exported GLBs are byte-identical to Blender's ($X5)"; exit 1; }
 # Negative guards on the REAL dump: a missing or inconsistent record must never pass as evidence.
 python "$ROOT/tools/vehiclerig-drill/missing_vehiclerig.py" "$WTMP/missing" "$WTMP/jobs.txt" "${DUMPS[@]}" > "$TMPD/tampers_raw.txt" || { echo "FAIL — could not construct the damaged dumps"; exit 1; }
 tr -d '\r' < "$TMPD/tampers_raw.txt" > "$TMPD/tampers.txt"

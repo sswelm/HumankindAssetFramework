@@ -726,7 +726,7 @@ static class StageDrill
             catch (Exception e) { problems.Add("stage 5 model: " + e.GetType().Name + ": " + e.Message); }
             if (model.Fallback != null)
             {
-                if (!model.Fallback.StartsWith("stage 5: the ", StringComparison.Ordinal) || !model.Fallback.EndsWith(" is not modelled yet", StringComparison.Ordinal)) problems.Add("stage 5 model: " + model.Fallback);
+                if (!NamedStage5Deferral(model.Fallback)) problems.Add("stage 5 model: " + model.Fallback);
                 else { Equal--; Left++; Console.WriteLine("STAGE5 " + key + ": left to Blender by name: " + model.Fallback); return true; }
             }
             else if (problems.Count == 0 && d.Stages.TryGetValue(5, out var s5))
@@ -778,6 +778,26 @@ static class StageDrill
         }
         if (problems.Count > 0) { foreach (var p in problems) Console.WriteLine($"FAIL {key}: {p}"); return false; }
         return true;
+    }
+
+    // Stage 5 leaves a job to Blender BY NAME for these alone (docs/Testing.md, step (f)): its two fixed deferrals, a material or
+    // animation the shared exporter names as a limit of its own (BlenderMaterialExport / BlenderChannelExport's LeftException texts:
+    // an image it would encode again, an extension not measured, a mode not modelled, a sampler that would run for hours) and an
+    // export shape the GLB export names as not modelled. Any other fallback text is a refusal of the model's own consistency - a mesh
+    // without its Armature modifier, a material the importer never made, a bone without a node - and FAILS the job (review of #187:
+    // every "stage 5: the GLB export (...) is not modelled yet" used to pass as a deferral, whatever stood in the brackets).
+    internal static bool NamedStage5Deferral(string fallback)
+    {
+        if (fallback == null) return false;
+        if (fallback == "stage 5: the export of brightness-edited image bytes is not modelled yet" || fallback == "stage 5: the FBX preview export is not modelled yet") return true;
+        const string head = "stage 5: the GLB export (", tail = ") is not modelled yet";
+        if (!fallback.StartsWith(head, StringComparison.Ordinal) || !fallback.EndsWith(tail, StringComparison.Ordinal) || fallback.Length <= head.Length + tail.Length) return false;
+        string why = fallback.Substring(head.Length, fallback.Length - head.Length - tail.Length);
+        if (why.StartsWith("image ", StringComparison.Ordinal) || why.StartsWith("a texture index outside the file", StringComparison.Ordinal)
+            || why.StartsWith("an image index outside the file", StringComparison.Ordinal) || why.StartsWith("KHR_materials_", StringComparison.Ordinal)) return true;
+        foreach (string named in new[] { "not modelled", "not measured", "the exporter ", "the sampler would run", "only QUATERNION and XYZ", "the export named it all the same" })
+            if (why.Contains(named)) return true;
+        return false;
     }
 
     public static void Summary(int stages)

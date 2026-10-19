@@ -1215,6 +1215,16 @@ public static class UniversalBaker
             AssetDatabase.CreateAsset(mesh, path);
         }
         PrefabUtility.SavePrefabAsset(prefab);
+        // the meshes the clones replaced (ImportGlbRig's <name>_rigmeshN.asset, numbered from 0) are referenced by nothing now: gone,
+        // or they sit beside the rig as stale copies until the next bake (review of #193)
+        var referenced = new HashSet<Mesh>(prefab.GetComponentsInChildren<SkinnedMeshRenderer>(true).Select(r => r.sharedMesh));
+        for (int i = 0; i < 256; i++)
+        {
+            string old = animDir + "/" + name + "_rigmesh" + i + ".asset";
+            var mesh = AssetDatabase.LoadAssetAtPath<Mesh>(old);
+            if (mesh == null) break;
+            if (!referenced.Contains(mesh)) AssetDatabase.DeleteAsset(old);
+        }
         return count;
     }
 
@@ -1407,21 +1417,28 @@ public static class UniversalBaker
             // multi-material bake hands us the already-remapped, single-submesh meshes (ONE PER SKINNED RENDERER —
             // the multi-SMR slice) so the preview shows all parts with the right UVs; otherwise load the largest
             // mesh from the FBX (the body). The inspectable prefab displays the largest clone; ALL clones persist.
-            var mesh = overrideMeshes != null && overrideMeshes.Count > 0
-                ? overrideMeshes.OrderByDescending(m => m.vertexCount).First()
-                : AssetDatabase.LoadAllAssetsAtPath(fbxRel).OfType<Mesh>().OrderByDescending(m => m.vertexCount).FirstOrDefault();
-            if (mesh == null) { Debug.LogWarning("[Factory] preview: no mesh found in " + fbxRel); return; }
+            Mesh mesh;
             if (overrideMeshes != null && overrideMeshes.Count > 0)
             {
                 // Sweep the whole numbered set FIRST (a re-bake with fewer renderers must not leave stale clones
-                // that could vertex-match a future mesh by accident), then persist every clone.
+                // that could vertex-match a future mesh by accident), then persist every clone. A runtime clone can't be referenced
+                // by the saved prefab -> it becomes the _PreviewMesh asset; a mesh that is an asset ALREADY (the GLB route's rig meshes
+                // under anim/, a folder the next bake of either route empties first) is COPIED into one, so the preview never points
+                // into that folder - a bake failing midway left the preview with missing meshes (review of #193)
                 for (int i = 0; i < 32; i++) AssetDatabase.DeleteAsset(PreviewMeshPath(resDir, name, i));
+                var persisted = new List<Mesh>(); int copied = 0;
                 for (int i = 0; i < overrideMeshes.Count; i++)
-                    if (!AssetDatabase.Contains(overrideMeshes[i]))   // a runtime clone can't be referenced by the saved prefab -> persist as an asset
-                        AssetDatabase.CreateAsset(overrideMeshes[i], PreviewMeshPath(resDir, name, i));
+                {
+                    var m = overrideMeshes[i];
+                    if (AssetDatabase.Contains(m)) { var copy = UnityEngine.Object.Instantiate(m); copy.name = m.name; m = copy; copied++; }
+                    AssetDatabase.CreateAsset(m, PreviewMeshPath(resDir, name, i)); persisted.Add(m);
+                }
                 AssetDatabase.SaveAssets();
-                if (overrideMeshes.Count > 1) Debug.Log($"[Factory] {name}: persisted {overrideMeshes.Count} atlas-remapped preview meshes (one per skinned renderer)");
+                if (persisted.Count > 1 || copied > 0) Debug.Log($"[Factory] {name}: persisted {persisted.Count} atlas-remapped preview meshes (one per skinned renderer{(copied > 0 ? $"; {copied} copied from rig assets" : "")})");
+                mesh = persisted.OrderByDescending(m => m.vertexCount).First();
             }
+            else mesh = AssetDatabase.LoadAllAssetsAtPath(fbxRel).OfType<Mesh>().OrderByDescending(m => m.vertexCount).FirstOrDefault();
+            if (mesh == null) { Debug.LogWarning("[Factory] preview: no mesh found in " + fbxRel); return; }
             var mat = new Material(Shader.Find("Standard")) { name = name + "_PreviewMat", mainTexture = atlas };
             mat.SetFloat("_Glossiness", 0f); mat.SetFloat("_Metallic", 0f);   // matte (Standard defaults to 0.5 smoothness -> glossy on dark textures, e.g. tyres)
             string matPath = resDir + "/" + name + "_PreviewMat.mat";

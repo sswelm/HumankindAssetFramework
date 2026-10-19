@@ -513,11 +513,14 @@ public static class BlenderMaterialExport
     }
 
     // The glTF JPEG subset: 8-bit grayscale/YCbCr with SOF0, SOF1 or SOF2 and declared dimensions.
-    // In particular, do not replace Blender's CMYK/high-precision conversion with a nonportable JPEG.
-    static bool PortableJpegHeader(byte[] d)
+    // In particular, do not replace Blender's CMYK/high-precision conversion with a nonportable JPEG. A three-component JPEG is
+    // YCbCr unless it says otherwise - an Adobe APP14 segment with transform 0, or component IDs 'R','G','B' without one (libjpeg's
+    // rule) - and such an RGB JPEG stays with Blender too: decoders need not agree on it, and the bake keeps these bytes for Unity
+    // to decode (review of #193; the acceptance compares Unity's decode with Blender's per recipe, production has no second decoder).
+    internal static bool PortableJpegHeader(byte[] d)
     {
         if (d == null || d.Length < 4 || d[0] != 0xff || d[1] != 0xd8) return false;
-        int p = 2;
+        int p = 2, adobeTransform = -1;
         while (p + 4 <= d.Length)
         {
             if (d[p++] != 0xff) return false;
@@ -528,12 +531,19 @@ public static class BlenderMaterialExport
             if (marker == 0xda || marker == 0xd9 || p + 2 > d.Length) return false;
             int length = (d[p] << 8) | d[p + 1];
             if (length < 2 || length > d.Length - p) return false;
+            if (marker == 0xee && length >= 14 && d[p + 2] == 'A' && d[p + 3] == 'd' && d[p + 4] == 'o' && d[p + 5] == 'b' && d[p + 6] == 'e') adobeTransform = d[p + 13];
             if (marker >= 0xc0 && marker <= 0xcf && marker != 0xc4 && marker != 0xc8 && marker != 0xcc)
             {
                 if (length < 8) return false;
                 int components = d[p + 7];
-                return marker <= 0xc2 && d[p + 2] == 8 && (components == 1 || components == 3) && length == 8 + 3 * components &&
-                    ((d[p + 3] << 8) | d[p + 4]) > 0 && ((d[p + 5] << 8) | d[p + 6]) > 0;
+                if (!(marker <= 0xc2 && d[p + 2] == 8 && (components == 1 || components == 3) && length == 8 + 3 * components &&
+                    ((d[p + 3] << 8) | d[p + 4]) > 0 && ((d[p + 5] << 8) | d[p + 6]) > 0)) return false;
+                if (components == 3)
+                {
+                    bool rgbIds = d[p + 8] == 'R' && d[p + 11] == 'G' && d[p + 14] == 'B';
+                    if (adobeTransform == 0 || (adobeTransform < 0 && rgbIds)) return false;
+                }
+                return true;
             }
             p += length;
         }

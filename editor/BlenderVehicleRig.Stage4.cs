@@ -2,7 +2,7 @@
 // 2026-10-17; docs/Review-Backlog.md item (5)). Parts e1 to e3:
 //   - the Spin action (bpy.data.actions.new: a name the existing actions take is made unique; bpy.data.actions stays sorted by name),
 //     the armature's active action; its slot (OB<armature>) appears with the first key;
-//   - the shared clip: frame_start 0, frame_end the longest period (the Spin frames, the rock's when it is on), each subsystem
+//   - the shared clip: frame_start 0, frame_end the longest period (the Spin frames, the rock's when it is on, the oars' stroke - e2), each subsystem
 //     repeating a whole number of times over it (_fitted_cycle_count: max(1, int(round(clip / period))));
 //   - the WAVE ROCK on the body bone: the roll axis (forced X/Y, else the meshes' longer horizontal extent), turned by the heading,
 //     the pitch axis across it; per sample Quaternion(roll axis, A sin) @ Quaternion(pitch axis, B sin(... + phase)), to_euler('XYZ'),

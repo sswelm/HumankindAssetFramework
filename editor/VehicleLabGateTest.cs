@@ -41,7 +41,7 @@ public static class VehicleLabGateTest
         BakeTestSection Skip(string why) { Debug.LogWarning("[LabGate] " + why); return new BakeTestSection { title = title, skip = 1, body = "SKIP — " + why }; }
         // Absent prerequisites are a SKIP in an installed package (Tools/ does not ship yet; Blender may not be
         // installed) and a loud FAIL at home, where their absence means the dev machine is broken (as in ConversionGateTest).
-        if (string.IsNullOrEmpty(UniversalBaker.FindBlender()))
+        if (!UniversalBaker.BlenderAvailable())   // FindBlender never returns empty (review of #188)
             return HafPackageContext.RunningAsPackage ? Skip("Blender was not found on this machine.") : Bad("Blender not found — the Vehicle Lab rows need it");
         if (!File.Exists(HafPackageContext.ToolPath("vehicle_rig.py")))
             return HafPackageContext.RunningAsPackage ? Skip("the Blender helper scripts (Tools/) are not in the installed package yet.") : Bad("Tools/vehicle_rig.py missing");
@@ -80,12 +80,15 @@ public static class VehicleLabGateTest
                 if (!VehicleLabWindow.ReadRecipe(recipe, out string src, out _)) { lines.Add($"SKIP {name} — not a Vehicle Lab recipe"); skip++; continue; }
                 if (string.IsNullOrWhiteSpace(src) || !File.Exists(src)) { lines.Add($"SKIP {name} — source model missing ({src})"); skip++; continue; }
                 var w = System.Diagnostics.Stopwatch.StartNew();
-                bool ok = VehicleLabWindow.GenerateHeadless(recipe, WorkDir, out string stdout, out string status, out string outGlb);
+                // this row PINS Blender - the golden is Blender's; with the route left to the recipe or the editor default it would
+                // silently stop exercising Blender after the default flip, and a named C# fallback would pass it (review of #188)
+                bool ok = VehicleLabWindow.GenerateHeadless(recipe, WorkDir, "blender", out string stdout, out string status, out string outGlb, out string route, out string fallback);
                 w.Stop();
                 string took = FormattableString.Invariant($"{w.Elapsed.TotalSeconds:0}s");
                 try
                 {
                     if (!ok) { lines.Add($"FAIL {name} ({took}) — Generate did not complete: {FirstLine(status)}"); fail++; continue; }
+                    if (route != "blender") { lines.Add($"FAIL {name} ({took}) — this row pins Blender, but the run reports route '{route}'{(string.IsNullOrEmpty(fallback) ? "" : " (" + fallback + ")")}"); fail++; continue; }
                     var snap = BakeGoldenRules.LabSnapshotLines(stdout);
                     int bones = BakeGoldenRules.ArmatureBones(snap);   // the tracked-vehicle path's line; -1 elsewhere, and the file decides
                     // the file itself, not the log: a rigged mesh must be in the GLB the bake will read

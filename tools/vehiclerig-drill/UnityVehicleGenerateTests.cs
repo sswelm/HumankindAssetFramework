@@ -339,6 +339,27 @@ public static class UnityVehicleGenerateTests
         Row("TOTAL failed "+failed);EditorApplication.Exit(failed==0?0:1);
     }
 
+    // The saved recipes alone, or the subset -hafGenerateOnly names (comma-separated recipe stems): the way a stale Lab golden is
+    // re-blessed - the drill deletes the named goldens from ITS copy of the project, this captures them from Blender and verifies
+    // the capture by a second generation on both backends (Recipes). Nothing here touches the user's project.
+    public static void RunSaved()
+    {
+        output=Arg("-hafGenerateOutput");fixtures=Arg("-hafGenerateFixtures");
+        try
+        {
+            string saved=Arg("-hafGenerateRecipes");var only=(Arg("-hafGenerateOnly")??"").Split(new[]{','},StringSplitOptions.RemoveEmptyEntries).Select(s=>s.Trim()).Where(s=>s.Length>0).ToArray();
+            if(!Directory.Exists(saved))Check("saved recipes",false,"recipes not found");
+            else
+            {
+                var jobs=Directory.GetFiles(saved,"*.json").Where(j=>only.Length==0||only.Contains(Path.GetFileNameWithoutExtension(j),StringComparer.OrdinalIgnoreCase)).ToArray();
+                Check("saved recipes selected",jobs.Length>0&&(only.Length==0||jobs.Length==only.Length),jobs.Length+" recipe(s)"+(only.Length>0?" of "+string.Join(",",only):""));
+                if(jobs.Length>0)Recipes("saved",jobs,"Tools/lab_golden");
+            }
+        }
+        catch(Exception e){Check("exception",false,e.ToString());}
+        Row("TOTAL failed "+failed);EditorApplication.Exit(failed==0?0:1);
+    }
+
     public static void RunPreview()
     {
         output=Arg("-hafGenerateOutput");fixtures=Arg("-hafGenerateFixtures");

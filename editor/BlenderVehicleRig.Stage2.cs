@@ -26,7 +26,11 @@ public static partial class BlenderVehicleRig
     };
 
     /// <summary>Stage 2 on the scene stage 1 left: the reduction tiers. Lines go to s.Logs2; a branch not modelled sets s.Fallback.</summary>
-    public static void RunStage2(BlenderRigAnim.Stage1 s, Args a)
+    public static void RunStage2(BlenderRigAnim.Stage1 s, Args a) => RunStage2(s, a, null);
+
+    // checkpoint: the Lab's cancel and deadline, polled between the parts of a tier - the reduction is the long stage, and a stage
+    // boundary alone let a long one run past both (review of #188)
+    public static void RunStage2(BlenderRigAnim.Stage1 s, Args a, System.Action checkpoint)
     {
         if (s.Fallback != null || s.Exits || s.Dies != null) return;
         var names = s.Names;
@@ -44,6 +48,7 @@ public static partial class BlenderVehicleRig
             var rows = new List<(BlenderRigAnim.SceneObject o, int v0, int vmid, int target, int v1, int vraw, bool weld, string name, float ratio)>();
             foreach (string rn in rnames)
             {
+                checkpoint?.Invoke();
                 if (!byName.TryGetValue(rn, out var o)) { s.Logs2.Add("VEHICLE WARN: " + label.ToLowerInvariant() + " part '" + rn + "' not found — skipped"); continue; }
                 int vraw = o.Mesh.Vertices;
                 var sw = System.Diagnostics.Stopwatch.StartNew(); bool timing = Environment.GetEnvironmentVariable("VEHICLERIG_DEBUG_TIME") == "1";

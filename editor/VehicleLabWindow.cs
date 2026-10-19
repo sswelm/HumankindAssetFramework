@@ -2411,6 +2411,14 @@ public class VehicleLabWindow : EditorWindow
                 status = result.ScriptError ?? result.Log.LastOrDefault(l => l.StartsWith("VEHICLE ERROR", StringComparison.Ordinal)) ?? "Generate stopped before export.";
                 Debug.LogError("[VehicleLab] Generate failed: " + status + "\n" + lastStdout); return;
             }
+            else if (result.Error != null)
+            {
+                // the deadline or a refused write: reported as a failed Generate (the old output kept), not a Blender run with a fresh
+                // five minutes to the same refused place (review of #188: a timeout took ten minutes to fail)
+                lastGenerateRoute = "csharp"; lastStdout = string.Join("\n", result.Log);
+                status = "Generate FAILED in C#: " + result.Error + ". The previous output is kept; pick Blender as the backend to retry there.";
+                Debug.LogError("[VehicleLab] Generate failed: " + status + "\n" + lastStdout); return;
+            }
             else
             {
                 lastGenerateFallback = result.UseBlender ?? "the C# run did not produce a file";

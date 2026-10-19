@@ -34,7 +34,7 @@ public class VehicleRigInProcessTests : IDisposable
     public void A_failed_final_write_does_not_claim_completion_or_leave_a_temporary_file()
     {
         var a=Args(); Directory.CreateDirectory(a[2]); var o=BlenderVehicleRigInProcess.Run(a);
-        Assert.False(o.Written); Assert.NotNull(o.UseBlender); Assert.DoesNotContain(o.Log,l=>l.StartsWith("VEHICLE RIG DONE:"));
+        Assert.False(o.Written); Assert.Null(o.UseBlender); Assert.Contains("could not be written",o.Error); Assert.DoesNotContain(o.Log,l=>l.StartsWith("VEHICLE RIG DONE:"));
         Assert.True(Directory.Exists(a[2])); Assert.Empty(Directory.GetFiles(dir,"*.tmp"));
     }
     [Theory] [InlineData(false)] [InlineData(true)]
@@ -43,7 +43,7 @@ public class VehicleRigInProcessTests : IDisposable
         var a=Args(); File.WriteAllText(a[2],"old"); int ticks=0;
         Action checkpoint=()=> { if (++ticks==8) { if(cancel) throw new OperationCanceledException(); throw new TimeoutException("deadline"); } };
         if(cancel) Assert.Throws<OperationCanceledException>(()=>BlenderVehicleRigInProcess.Run(a,checkpoint));
-        else { var o=BlenderVehicleRigInProcess.Run(a,checkpoint); Assert.False(o.Written); Assert.Contains("deadline",o.UseBlender); }
+        else { var o=BlenderVehicleRigInProcess.Run(a,checkpoint); Assert.False(o.Written); Assert.Contains("deadline",o.Error); Assert.Null(o.UseBlender); }
         Assert.Equal(8,ticks); Assert.Equal("old",File.ReadAllText(a[2])); Assert.Empty(Directory.GetFiles(dir,"*.tmp"));
     }
     [Theory] [InlineData(false)] [InlineData(true)]
@@ -60,6 +60,25 @@ public class VehicleRigInProcessTests : IDisposable
         var a=Args(); File.WriteAllText(a[2],"old"); if(kind=="preview")a[3]="preview.fbx";else if(kind=="fast")a[0]="rigfast";else File.WriteAllText(a[1],"broken");
         var o=BlenderVehicleRigInProcess.Run(a); Assert.False(o.Written); Assert.False(o.ScriptExit); Assert.NotNull(o.UseBlender); Assert.Equal("old",File.ReadAllText(a[2]));
     }
+    // review of #188: a locked output is a reported write failure, not a Blender run with a fresh five minutes to the same locked file
+    [Fact]
+    public void A_locked_output_is_a_reported_failure_not_a_Blender_fallback()
+    {
+        var a=Args(); File.WriteAllText(a[2],"old");
+        using(var hold=new FileStream(a[2],FileMode.Open,FileAccess.Read,FileShare.None))
+        {
+            var o=BlenderVehicleRigInProcess.Run(a);
+            Assert.False(o.Written); Assert.False(o.ScriptExit); Assert.Null(o.UseBlender); Assert.Contains("could not be written",o.Error);
+        }
+        Assert.Equal("old",File.ReadAllText(a[2])); Assert.Empty(Directory.GetFiles(dir,"*.tmp"));
+    }
+    // review of #188/#191: acceptance expects a Blender fallback only for a source the C# does not read
+    [Theory]
+    [InlineData("m.fbx","a .fbx source: Blender's own importer, until the native reader",true)] [InlineData("m.FBX","anything",true)] [InlineData("m.obj","x",true)]
+    [InlineData("m.glb","the C# reader cannot handle this input: x",false)] [InlineData("m.gltf","the C# rig run failed (Exception: x)",false)]
+    [InlineData("m.glb","stage 5: the GLB export (image 3: a JPEG whose alpha is read (the exporter writes it again as PNG)) is not modelled yet",false)]
+    [InlineData("m.glb","stage 3: the tread rig is not modelled yet",false)] [InlineData("m.fbx","",false)] [InlineData("m.fbx",null,false)] [InlineData(null,"x",true)]
+    public void Only_an_unreadable_source_is_an_expected_fallback(string source,string reason,bool expected) => Assert.Equal(expected,BlenderVehicleRigInProcess.ExpectedFallback(source,reason));
     [Fact]
     public void Merge_uses_the_same_reader_and_a_missing_second_model_is_the_scripts_exit()
     {

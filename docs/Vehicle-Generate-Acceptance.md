@@ -13,9 +13,39 @@ its original fallback status.
 The matching native rig-preparation policy is also enabled and its cache revision is bumped.
 
 The current 25-recipe backend comparison matches all outputs: 23 take C#, including Espana, and the two FBX
-sources retain named Blender fallbacks. Existing historical goldens for `sns_dragon_split_fused` and Espana are
-stale against the current source/recipe fingerprints. Their candidates are retained for review; the project's
-goldens are not rewritten. This is separate from the successful current Blender/C# output comparison.
+sources retain named Blender fallbacks. The historical goldens for `sns_dragon_split_fused` and Espana were
+stale against the current source/recipe fingerprints; they were re-blessed on October 19 (below).
+
+## Baselines re-blessed and the acceptance rule tightened (October 19, 2026)
+
+Both stale goldens were stale by INPUT, not by a changed result: Espana's recipe was edited after its October 18
+golden (recipe `520cd585d24e6e99` -> `b4e270fb6df686c6`, the source `170364a379ce29ef` unchanged - parts moved
+between the Default, Body, Detail and Rudder tiers, a gun added, dials changed), and the Dragon's source was
+re-fused (`630587301be574b3` -> `48f5404248150c23`; the recipe names `Fused_F_Material2_55`, a structure part the
+new source no longer has - the run warns and skips it, the user may want to re-pick that part). Both were
+re-captured through the isolated Unity run on the current package sources (RunSaved with HAF_GENERATE_REBLESS):
+captured from Blender, then verified by a second generation on both backends (`saved verified PASS`, the C# route
+byte-identical or pixel-verified). The drill leaves the captures in `$TMPD/rebless`; installing them into the
+project's `Tools/lab_golden` is the user's step (this session was not permitted to write there).
+
+| Golden | Old SHA-256 | Verified capture SHA-256 |
+| --- | --- | --- |
+| `spanish_battleship_espana_split_fused.txt` | `06f379b4fe516543db242a2c5e4fa5a00a87354c89380651fc0418f6e8b40003` | `93e863ad70a5795322ccc0fc612f08c577e30531942388abdad7d4623aae0d9f` |
+| `sns_dragon_split_fused.txt` | `d4d6ceaa4ffe51025bdb6a095e99db12398d6895d99f8d0b1ce9e46257966dff` | `628c64b4e7494cbe3cd4ba4284e9fe6eb31567194f8966d46b33aadb24561077` |
+
+The acceptance row now FAILS on any Blender fallback it does not expect (`BlenderVehicleRigInProcess.ExpectedFallback`:
+a source the C# does not read, i.e. the two FBX recipes), where a named fallback used to count as a skip - 22 C#
+recipes could have dropped to one with "0 failures". Its body ends with the tally of C# passes against expected
+fallbacks. The quick "Vehicle Lab - representative recipes" row pins the Blender route and fails on any other.
+A C# run that hits the five-minute deadline, or whose output the file system refuses, is reported as a failed
+Generate with the previous output kept - no Blender run follows it.
+
+To re-bless a golden after an intended input change:
+
+```bash
+HAF_KEEP_UNITY_GENERATE=1 HAF_GENERATE_TEST_METHOD=RunSaved HAF_GENERATE_ONLY=<recipe> HAF_GENERATE_REBLESS=<recipe> bash tools/vehiclerig_unity_generate_drill.sh
+# then copy $TMPD/rebless/<recipe>.txt into <project>/Tools/lab_golden/ and commit it there
+```
 
 
 Acceptance requires exact decoded RGBA pixels for each changed PNG/JPEG pair. It then normalizes only those

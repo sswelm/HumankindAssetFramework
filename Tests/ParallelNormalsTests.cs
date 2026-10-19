@@ -24,6 +24,14 @@ public class ParallelNormalsTests
         }
         return (positions.ToArray(), faces.ToArray(), normals.ToArray(), Enumerable.Range(0, faces.Count / 3).Select(f => f % 7 == 0).ToArray());
     }
+    // review of #192: a malformed input faults every worker at once; the caller gets the one exception as itself, not an AggregateException
+    [Theory] [InlineData(1)] [InlineData(8)]
+    public void A_malformed_input_throws_the_same_exception_type_serially_and_in_parallel(int threads)
+    {
+        var (p, f, _, sharp) = Grid(12, false);
+        var ex = Record.Exception(() => VehicleProbe.DecodeCustomShorts(p, f, sharp, new short[1], new short[1], threads: threads));
+        Assert.IsType<IndexOutOfRangeException>(ex);
+    }
     static void Bits(float[] expected, float[] actual)
     {
         var left = new byte[expected.Length * 4]; var right = new byte[actual.Length * 4];

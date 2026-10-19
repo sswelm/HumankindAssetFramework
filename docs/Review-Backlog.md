@@ -507,6 +507,16 @@ ED_armature_to_edit and back). Worth it once a glTF tank with live tracks exists
   two orders), so the group order - and every vertex's group indices - changes from run to run. Only the fallback writes those
   groups (no link pitch found: `_link_fund <= 0.03`); link mode removes them and builds its own in a deterministic order. The fix
   is one word: `for n in sorted(_names)`. A port can only decline the fallback until then.
+- **vehicle_rig.py: the Recoil sign test reads a `_tc` the tread loops have rebound** - OPEN (2026-10-19, review of #186; a d6
+  port requirement). `_tc` is the tube centre (1786, `_combined_bbox(tube_names)`) and the recoil sign test means it so
+  (3620-3621: `_test = (_tc - _pivot)...; _rsign = ... (_pivot + _test - _tc).dot(_bore_d)`), but the track skinning loop (2258,
+  `_tn, _tnames, _fcl, _rcl, _tc, ... = _track_by_name[o.name]`) and the conveyor loop (3371) rebind the module-level `_tc` to the
+  LAST track's bbox centre on the way. Unreachable today: the port declines non-static tracks (d6) and `tracks_static` empties
+  `track_names` (1134-1136), so every comparable job keeps the tube centre - as the C# does (Stage4.cs, `st.RecoilCentre`). Once d6
+  is ported, a tracked gun with recoil (tracks + guns + recoilDist > 0) diverges: Blender's kick direction is then decided by a track's
+  centre, and may kick the barrel the wrong way. Fix in the script: a local name in the recoil block (`_gun_c`), or `_tc` re-read
+  from the tube span. The d6 port needs a fixture with live tracks AND recoil, and a decision - model the script's rebound `_tc`
+  (bit-exact) or fix the script first (the Blender route then changes for such models).
 (e) stage 4, the ACTIONS, is split like (d): e1 the frame every animated rig shares (the Spin action, the shared clip, the wave
 rock, the wheels and rotors, the LINEAR keys, the leftover strip and the action purge), e2 the clips riding Spin and the Furl
 stance (the rowing stroke, the sail and flag holds), e3 the separate clips (the trails' Deploy, the gun's Recoil). (e) part e1
@@ -582,6 +592,16 @@ Native JPEG-alpha export (2026-10-19): production Generate retains the original 
 than requiring Blender's PNG re-encoding. Espana now generates through C#. Acceptance checks identical decoded RGBA
 pixels and strict non-image GLB bytes/JSON; the stage oracle keeps its original byte-exact rules. Image brightness
 editing, moving treads and the other named limits remain separate work. Neither backend default changes.
+Review of #185-#193 DONE 2026-10-19 (four reviewer agents; no P1): the two stale Lab goldens re-blessed through the drill's
+RunSaved/HAF_GENERATE_REBLESS path (verified captures for the user to install), the acceptance fails on an unexpected Blender
+fallback (`ExpectedFallback`) and the quick Lab row pins Blender, the vehicle drill accepts only the named stage 5 deferrals and
+requires byte-identical exports, the Recoil `_tc` source defect recorded (above, beside d6), the JPEG guard refuses RGB JPEGs,
+the deadline / refused write fail the Generate instead of running Blender (stage 2 polls the checkpoint per part), a normals
+worker's fault stops the others and is rethrown as itself, the preview copies meshes that are assets already and the replaced
+`_rigmeshN` assets are deleted; the DONE line's gun count follows the script's lists. Open from the review (P3): the Lab window
+goes blank after a failed Generate although the old GLB is kept; `BlenderAvailable()` is now `File.Exists` for all 17 callers
+(a .cmd shim reads as "no Blender"); detection is polled on repaint; the "80 export probes" / "11 plants" of #187 rest on
+tooling that is not committed; fixtures missing an X-axis sail yard or flag axis and trails + gun + recoil at elevation 0.
 - **Native SDK skeleton smoke test** — FIXED (2026-10-19). Native multi-material atlas remapping assigned transient
   meshes to the saved GLB rig prefab; SaveAssets could serialize missing mesh references before skeleton import,
   producing a NullReferenceException in `Skeleton.FillBoneEntry` at IL 0x1b (also reproduced with a PNG control).

@@ -20,14 +20,14 @@ public static class VehicleGenerateAcceptanceTest
     {
         var result = new BakeTestSection { title = "Vehicle Generate: Blender and C# outputs, logs, gun sidecars and Lab goldens" };
         var lines = new List<string>();
-        if (string.IsNullOrEmpty(UniversalBaker.FindBlender()) || !File.Exists(HafPackageContext.ToolPath("vehicle_rig.py")))
+        if (!UniversalBaker.BlenderAvailable() || !File.Exists(HafPackageContext.ToolPath("vehicle_rig.py")))   // FindBlender never returns empty (review of #188)
         { result.fail++; result.body = "FAIL: Blender and vehicle_rig.py are required for backend acceptance"; return result; }
         var jobs = recipes.OrderBy(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase).ToList();
         string project = Path.GetFullPath(Directory.GetParent(Application.dataPath).FullName);
         string runRelative = workRelative.TrimEnd('/', '\\') + "/" + Guid.NewGuid().ToString("N");
         string work = Path.GetFullPath(Path.Combine(project, runRelative));
         if (!work.StartsWith(project + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("acceptance output must stay in the project");
-        bool retain = false;
+        bool retain = false; int expectedFallbacks = 0;
         try
         {
             foreach (string recipe in jobs)
@@ -44,7 +44,11 @@ public static class VehicleGenerateAcceptanceTest
                     var problems = CompareOutputs(pathA, logA, pathB, logB, out var snapshot);
                     if (routeA != "blender") problems.Add("the reference run did not use Blender");
                     bool usedFallback = routeB != "csharp";
-                    if (usedFallback && (string.IsNullOrEmpty(fallback) || fallback.StartsWith("the C# rig run failed", StringComparison.Ordinal))) problems.Add("C# failed unexpectedly: " + fallback);
+                    // a Blender fallback passes only where the C# cannot run at all (a source it does not read); any other reason - a
+                    // reader refusal, the material preflight, a stage's named limit, a crash - is C# coverage LOST, and fails here rather
+                    // than passing as a skip (review of #188/#191: 22 C# recipes could have dropped to 1 under "0 failures")
+                    if (usedFallback && !BlenderVehicleRigInProcess.ExpectedFallback(source, fallback))
+                        problems.Add((string.IsNullOrEmpty(fallback) || fallback.StartsWith("the C# rig run failed", StringComparison.Ordinal) ? "C# failed unexpectedly: " : "C# coverage lost - the recipe fell back to Blender: ") + fallback);
                     if (problems.Count > 0) { result.fail++; retain = true; lines.Add("FAIL " + name + ": " + string.Join("; ", problems)); continue; }
                     string golden = Path.Combine(goldenDir, name + ".txt");
                     var inputs = GoldenInputs(recipe, source);
@@ -56,7 +60,7 @@ public static class VehicleGenerateAcceptanceTest
                         string candidate = Path.Combine(work, name + ".candidate.txt"); BakeGoldenFiles.Capture(candidate, snapshot, inputs);
                         result.fail++; retain = true; lines.Add("FAIL " + name + ": Lab golden — " + reason + "; candidate " + candidate); continue;
                     }
-                    if (usedFallback) { result.skip++; lines.Add("FALLBACK " + name + ": Blender outputs and golden match; C# acceptance not exercised — " + fallback); continue; }
+                    if (usedFallback) { result.skip++; expectedFallbacks++; lines.Add("FALLBACK " + name + ": expected (a source the C# does not read) — Blender outputs and golden match; C# acceptance not exercised — " + fallback); continue; }
                     result.pass++; lines.Add("PASS " + name + ": GLB matches (byte-identical or pixel-verified source JPEG), diagnostics and gun sidecar; read-back rig and Lab golden match" + note);
                 }
                 catch (OperationCanceledException) { throw; }
@@ -69,6 +73,7 @@ public static class VehicleGenerateAcceptanceTest
             if (!retain && Directory.Exists(work)) try { Directory.Delete(work, true); } catch (IOException e) { lines.Add("Cleanup retained " + work + ": " + e.Message); }
         }
         if (jobs.Count == 0) { result.skip++; lines.Add("SKIP: no recipes"); }
+        else lines.Add(result.pass + " recipe(s) generated in C# and accepted, " + expectedFallbacks + " expected Blender fallback(s); any other fallback is a FAIL above");
         if (retain) lines.Add("Evidence retained in " + work);
         result.body = string.Join("\n", lines); return result;
     }
