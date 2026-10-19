@@ -34,7 +34,7 @@ project's `Tools/lab_golden` is the user's step (this session was not permitted 
 | `sns_dragon_split_fused.txt` | `d4d6ceaa4ffe51025bdb6a095e99db12398d6895d99f8d0b1ce9e46257966dff` | `628c64b4e7494cbe3cd4ba4284e9fe6eb31567194f8966d46b33aadb24561077` |
 
 The acceptance row now FAILS on any Blender fallback it does not expect (`BlenderVehicleRigInProcess.ExpectedFallback`:
-a source the C# does not read, i.e. the two FBX recipes), where a named fallback used to count as a skip - 22 C#
+a source the C# does not read, with the exact source-import fallback reason, i.e. the two FBX recipes), where a named fallback used to count as a skip - 22 C#
 recipes could have dropped to one with "0 failures". Its body ends with the tally of C# passes against expected
 fallbacks. The quick "Vehicle Lab - representative recipes" row pins the Blender route and fails on any other.
 A C# run that hits the five-minute deadline, or whose output the file system refuses, is reported as a failed

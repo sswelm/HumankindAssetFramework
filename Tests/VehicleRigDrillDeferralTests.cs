@@ -13,6 +13,8 @@ public class VehicleRigDrillDeferralTests
     [InlineData("stage 5: the GLB export ('Mesh_Flag': a child of a skinned mesh node (its transform against the armature is not modelled)) is not modelled yet")]
     [InlineData("stage 5: the GLB export (an action of 200000 frames ('Spin': the sampler would run for hours)) is not modelled yet")]
     [InlineData("stage 5: the GLB export (a bone in rotation mode ZXY ('Wheel_0': only QUATERNION and XYZ are modelled)) is not modelled yet")]
+    [InlineData("stage 5: the GLB export (material 'Paint': image 0: a file named as a JPEG that holds PNG bytes (encoded again)) is not modelled yet")]
+    [InlineData("stage 5: the GLB export (KHR_texture_transform (the reader does not carry a texture's transform, which the importer turns into a mapping node)) is not modelled yet")]
     public void Named_deferrals_are_left_to_Blender(string fallback) => Assert.True(StageDrill.NamedStage5Deferral(fallback));
 
     [Theory]
@@ -24,6 +26,13 @@ public class VehicleRigDrillDeferralTests
     [InlineData("stage 5: the GLB export (the bone 'Root' has no node) is not modelled yet")]
     [InlineData("stage 5: the GLB export (the animation 'Spin' names no action the port holds) is not modelled yet")]
     [InlineData("stage 5: the GLB export (the script exits before any export) is not modelled yet")]
+    [InlineData("stage 5: the GLB export ('the exporter hull': a mesh without an Armature modifier at the export) is not modelled yet")]
+    [InlineData("stage 5: the GLB export ('not modelled': the material 'Paint' is none the importer made) is not modelled yet")]
+    [InlineData("stage 5: the GLB export (material 'Paint': image 0: its bytes could not be read) is not modelled yet")]
+    [InlineData("stage 5: the GLB export (image 0: its bytes could not be read) is not modelled yet")]
+    [InlineData("stage 5: the GLB export (a texture index outside the file (99)) is not modelled yet")]
+    [InlineData("stage 5: the GLB export (an image index outside the file (99)) is not modelled yet")]
+    [InlineData("stage 5: the GLB export (KHR_materials_unknown internal consistency failure) is not modelled yet")]
     [InlineData("stage 5: the GLB export () is not modelled yet")]
     [InlineData("stage 5: the something else is not modelled yet")]
     [InlineData("stage 4: the clip of more than 100,000 frames is not modelled yet")]

@@ -74,10 +74,15 @@ public class VehicleRigInProcessTests : IDisposable
     }
     // review of #188/#191: acceptance expects a Blender fallback only for a source the C# does not read
     [Theory]
-    [InlineData("m.fbx","a .fbx source: Blender's own importer, until the native reader",true)] [InlineData("m.FBX","anything",true)] [InlineData("m.obj","x",true)]
+    [InlineData("m.fbx","a .fbx source: Blender's own importer, until the native reader",true)]
+    [InlineData("m.FBX","a .fbx source: Blender's own importer, until the native reader",true)]
+    [InlineData("m.obj","a .obj source: Blender's own importer, until the native reader",true)]
+    [InlineData("m.fbx","the C# rig run failed (Exception: x)",false)]
+    [InlineData("m.fbx","a .obj source: Blender's own importer, until the native reader",false)]
+    [InlineData("m.obj","x",false)]
     [InlineData("m.glb","the C# reader cannot handle this input: x",false)] [InlineData("m.gltf","the C# rig run failed (Exception: x)",false)]
     [InlineData("m.glb","stage 5: the GLB export (image 3: a JPEG whose alpha is read (the exporter writes it again as PNG)) is not modelled yet",false)]
-    [InlineData("m.glb","stage 3: the tread rig is not modelled yet",false)] [InlineData("m.fbx","",false)] [InlineData("m.fbx",null,false)] [InlineData(null,"x",true)]
+    [InlineData("m.glb","stage 3: the tread rig is not modelled yet",false)] [InlineData("m.fbx","",false)] [InlineData("m.fbx",null,false)] [InlineData(null,"x",false)]
     public void Only_an_unreadable_source_is_an_expected_fallback(string source,string reason,bool expected) => Assert.Equal(expected,BlenderVehicleRigInProcess.ExpectedFallback(source,reason));
     [Fact]
     public void Merge_uses_the_same_reader_and_a_missing_second_model_is_the_scripts_exit()

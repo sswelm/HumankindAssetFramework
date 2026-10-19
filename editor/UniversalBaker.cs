@@ -1217,13 +1217,17 @@ public static class UniversalBaker
         PrefabUtility.SavePrefabAsset(prefab);
         // the meshes the clones replaced (ImportGlbRig's <name>_rigmeshN.asset, numbered from 0) are referenced by nothing now: gone,
         // or they sit beside the rig as stale copies until the next bake (review of #193)
-        var referenced = new HashSet<Mesh>(prefab.GetComponentsInChildren<SkinnedMeshRenderer>(true).Select(r => r.sharedMesh));
-        for (int i = 0; i < 256; i++)
+        var referenced = new HashSet<Mesh>(prefab.GetComponentsInChildren<SkinnedMeshRenderer>(true).Select(r => r.sharedMesh)
+            .Concat(prefab.GetComponentsInChildren<MeshFilter>(true).Select(f => f.sharedMesh)));
+        string prefix = animDir + "/" + name + "_rigmesh";
+        foreach (string guid in AssetDatabase.FindAssets("t:Mesh", new[] { animDir }))
         {
-            string old = animDir + "/" + name + "_rigmesh" + i + ".asset";
+            string old = AssetDatabase.GUIDToAssetPath(guid);
+            if (!old.StartsWith(prefix, StringComparison.Ordinal) || !old.EndsWith(".asset", StringComparison.Ordinal)) continue;
+            string number = old.Substring(prefix.Length, old.Length - prefix.Length - ".asset".Length);
+            if (number.Length == 0 || number.Any(c => c < '0' || c > '9')) continue;
             var mesh = AssetDatabase.LoadAssetAtPath<Mesh>(old);
-            if (mesh == null) break;
-            if (!referenced.Contains(mesh)) AssetDatabase.DeleteAsset(old);
+            if (mesh != null && !referenced.Contains(mesh)) AssetDatabase.DeleteAsset(old);
         }
         return count;
     }

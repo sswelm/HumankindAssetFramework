@@ -19,11 +19,24 @@ public class PortableJpegHeaderTests
     }
     static readonly byte[] Rgb = { (byte)'R', (byte)'G', (byte)'B' };
 
+    [Theory] [InlineData(0, false)] [InlineData(1, true)]
+    public void Adobe_colour_transform_is_honoured_after_the_frame_header(int transform, bool expected)
+    {
+        var jpeg = new List<byte>(Jpeg(3));
+        var app14 = new List<byte> { 0xff, 0xee, 0, 14 };
+        app14.AddRange(Encoding.ASCII.GetBytes("Adobe"));
+        app14.AddRange(new byte[] { 0, 100, 0, 0, 0, 0, (byte)transform });
+        jpeg.InsertRange(jpeg.Count - 4, app14);
+        Assert.Equal(expected, BlenderMaterialExport.PortableJpegHeader(jpeg.ToArray()));
+    }
+
     [Fact] public void Grayscale_baseline_passes() => Assert.True(BlenderMaterialExport.PortableJpegHeader(Jpeg(1)));
     [Fact] public void YCbCr_baseline_passes() => Assert.True(BlenderMaterialExport.PortableJpegHeader(Jpeg(3)));
     [Fact] public void YCbCr_progressive_passes() => Assert.True(BlenderMaterialExport.PortableJpegHeader(Jpeg(3, sof: 0xc2)));
     [Fact] public void Adobe_transform_1_passes_even_with_RGB_ids() => Assert.True(BlenderMaterialExport.PortableJpegHeader(Jpeg(3, Rgb, adobe: 1)));
     [Fact] public void Adobe_transform_0_is_RGB_and_stays_with_Blender() => Assert.False(BlenderMaterialExport.PortableJpegHeader(Jpeg(3, adobe: 0)));
+    [Theory] [InlineData(2)] [InlineData(255)]
+    public void Unsupported_Adobe_colour_transforms_stay_with_Blender(int transform) => Assert.False(BlenderMaterialExport.PortableJpegHeader(Jpeg(3, adobe: transform)));
     [Fact] public void RGB_component_ids_without_Adobe_stay_with_Blender() => Assert.False(BlenderMaterialExport.PortableJpegHeader(Jpeg(3, Rgb)));
     [Fact] public void Four_components_fail() => Assert.False(BlenderMaterialExport.PortableJpegHeader(Jpeg(4)));
     [Fact] public void Twelve_bit_precision_fails() => Assert.False(BlenderMaterialExport.PortableJpegHeader(Jpeg(3, precision: 12)));

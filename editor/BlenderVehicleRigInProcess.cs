@@ -23,9 +23,8 @@ public static class BlenderVehicleRigInProcess
     // row fails on it until it is fixed or this rule is widened on purpose (review of #188/#191).
     public static bool ExpectedFallback(string source, string reason)
     {
-        if (string.IsNullOrEmpty(reason)) return false;
-        string ext = Path.GetExtension(source ?? "").ToLowerInvariant();
-        return ext != ".glb" && ext != ".gltf";
+        if (string.IsNullOrWhiteSpace(source) || string.IsNullOrEmpty(reason)) return false;
+        return reason == BlenderVehicleRig.SourceFallback(new BlenderVehicleRig.Args { Input = source });
     }
 
     public sealed class Outcome

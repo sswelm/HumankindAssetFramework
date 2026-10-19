@@ -3223,4 +3223,14 @@ PersistNativeRigMeshes deletes the `_rigmeshN` assets the atlas clones replaced.
 script's lists (Distinct printed 1 for "Tube;Tube"), the two dead `FindBlender()` emptiness checks use `BlenderAvailable()`, the
 stage 4 header names the oar period. Forty-nine unit cases (the deferral texts both ways, fourteen JPEG headers, the locked output,
 the expected-fallback rule, the parallel fault as itself): 2,091 tests. Not re-run here: the full vehicle drill (the gate runs it
-on the push) and anything inside the user's Unity; the preview copy is exercised by the next Factory bake only.
+on the push) and anything inside the user's Unity.
+
+The critical review of PR #194 added regressions for cleanup of a native prefab containing both skinned and rigid
+geometry, unused numbered meshes after a gap, source names containing deferral keywords, unrelated errors on FBX
+sources, and APP14 colour metadata after SOF. The original PR failed 13 focused unit cases and three native Unity
+checks. Cleanup now follows both SkinnedMeshRenderer and MeshFilter references and enumerates only owned numbered
+mesh assets; acceptance requires the exact source-import fallback reason; stage 5 deferrals match complete known
+diagnostic templates. JPEG classification reads through the header to the first scan and the rig-cache revision
+changes with that policy. All 2,107 unit tests and isolated native Unity RunChecks pass. RunChecks also exercises
+the real preview writer, verifies independent copies of every mesh, deletes the source rig meshes and reimports
+the preview to verify its references survive. No user project assets or goldens are changed by these checks.

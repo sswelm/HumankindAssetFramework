@@ -793,10 +793,24 @@ static class StageDrill
         const string head = "stage 5: the GLB export (", tail = ") is not modelled yet";
         if (!fallback.StartsWith(head, StringComparison.Ordinal) || !fallback.EndsWith(tail, StringComparison.Ordinal) || fallback.Length <= head.Length + tail.Length) return false;
         string why = fallback.Substring(head.Length, fallback.Length - head.Length - tail.Length);
-        if (why.StartsWith("image ", StringComparison.Ordinal) || why.StartsWith("a texture index outside the file", StringComparison.Ordinal)
-            || why.StartsWith("an image index outside the file", StringComparison.Ordinal) || why.StartsWith("KHR_materials_", StringComparison.Ordinal)) return true;
-        foreach (string named in new[] { "not modelled", "not measured", "the exporter ", "the sampler would run", "only QUATERNION and XYZ", "the export named it all the same" })
-            if (why.Contains(named)) return true;
+        // Match the complete diagnostic template, including its suffix: object/material names are source data and may themselves
+        // contain "not modelled" or "the exporter". Those words must not turn a consistency error into successful deferral.
+        const string name = @"'[\s\S]*'";
+        const string material = @"(?:material '[\s\S]*': )?";
+        foreach (string pattern in new[]
+        {
+            material + @"image [0-9]+: (?:neither a PNG nor a JPEG \(the exporter encodes it again\)|a \.webp file \(the exporter writes WebP\)|a JPEG whose alpha is read \(the exporter writes it again as PNG\)|a file named as a PNG that holds JPEG bytes \(encoded again\)|a file named as a JPEG that holds PNG bytes \(encoded again\))",
+            material + @"(?:a specular-glossiness texture \(not modelled\)|a clearcoat texture \(not measured\)|KHR_materials_(?:transmission|volume|sheen|anisotropy) \(not measured yet\)|an occlusion image beside a metallic-roughness image of the same size \(the exporter composes a new image\))",
+            @"KHR_texture_transform \(the reader does not carry a texture's transform, which the importer turns into a mapping node\)",
+            name + @": (?:an object hung from a bone with children of its own \(their delta is not modelled\)|hung from a bone of an armature that hangs from a bone itself \(the delta's order is not modelled\)|an armature no mesh uses - its skin is written after the animation export, from the scene the sampler leaves \(not modelled\)|a child of a skinned mesh node \(its transform against the armature is not modelled\))",
+            @"an animation without bones \(the armature's object channels are not modelled\)",
+            @"a bone outside the pose order \(the vtree's walk is not modelled\)",
+            @"the animation " + name + @" (?:has no curve left|reaches no frame of the scene's range) \(the export named it all the same\)",
+            @"an action starting below frame 0 \(" + name + @" at -[0-9]+: the SLIDE of negative frames is not modelled\)",
+            @"an action of [0-9]+ frames \(" + name + @": the sampler would run for hours\)",
+            @"a bone in rotation mode [^\s]+ \(" + name + @": only QUATERNION and XYZ are modelled\)"
+        })
+            if (System.Text.RegularExpressions.Regex.IsMatch(why, @"\A(?:" + pattern + @")\z")) return true;
         return false;
     }
 
