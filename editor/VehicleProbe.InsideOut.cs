@@ -84,7 +84,8 @@ public static partial class VehicleProbe
             int nf = pm.Tris.Length / 3;
             if (nf == 0) { parts[pi].Flip = 0; return; }
             // faces sharing an edge are one island: union-find over the faces, the corners' edges bucketed by their lower vertex (a
-            // counting sort: two passes) and, within a bucket, matched on the higher one - the same pairs a full sort would find
+            // counting sort: two passes) and, within a bucket, matched on the higher one - the same pairs a full sort would find.
+            // Small buckets have bounded pairwise work; sort large ones so a fan hub cannot turn this into a quadratic scan.
             int nv = pm.Count;
             var bucketStart = new int[nv + 1];
             for (int c = 0; c < nf * 3; c++) { int f = c / 3, k = c - f * 3; bucketStart[Math.Min(pm.Tris[c], pm.Tris[f * 3 + (k + 1) % 3]) + 1]++; }
@@ -97,10 +98,20 @@ public static partial class VehicleProbe
             }
             var parent = new int[nf]; for (int i = 0; i < nf; i++) parent[i] = i;
             int Find(int x) { while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
+            void Join(int a, int b) { int ra = Find(a), rb = Find(b); if (ra != rb) parent[Math.Max(ra, rb)] = Math.Min(ra, rb); }
             for (int lo = 0; lo < nv; lo++)
-                for (int i = bucketStart[lo]; i < bucketStart[lo + 1]; i++)
-                    for (int j = i + 1; j < bucketStart[lo + 1]; j++)
-                        if (high[i] == high[j]) { int ra = Find(owner[i]), rb = Find(owner[j]); if (ra != rb) parent[Math.Max(ra, rb)] = Math.Min(ra, rb); }
+            {
+                int first = bucketStart[lo], last = bucketStart[lo + 1];
+                if (last - first <= 16)
+                {
+                    for (int i = first; i < last; i++) for (int j = i + 1; j < last; j++) if (high[i] == high[j]) Join(owner[i], owner[j]);
+                }
+                else
+                {
+                    Array.Sort(high, owner, first, last - first);
+                    for (int i = first + 1; i < last; i++) if (high[i] == high[i - 1]) Join(owner[i], owner[i - 1]);
+                }
+            }
             // per face: the dot of its world normal with the radial, or NaN for a face that does not count (a degenerate radial or normal)
             var dots = new double[nf];
             void Face(int f)

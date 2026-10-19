@@ -3255,3 +3255,18 @@ hull's gather and normals are the critical path now), the Bremen 1.17 -> 0.30 s,
 0.83 -> 0.24 s, the `big` fixture 2.49 -> 0.22 s. Three unit cases (the packed face set against the tuple set on a grid with
 twins, the parallel BVH's rays against the plate, two box islands through the bucketed edges): 2,110 tests; the probe drill's
 Blender comparison runs in the gate.
+
+The critical review of PR #195 added a high-valence cone, tiny loose parts and non-polygon primitives. Matching every
+pair of edges in one lower-vertex bucket made a 32,000-face fan take 3.90 s against 9 ms before the parallelization.
+Buckets of up to 16 edges keep the small fast path; larger buckets sort their higher endpoints and join adjacent
+matches, preserving the minimum-face island roots and face-order sums. The same fan now takes about 5 ms. The
+64,000-face cone test checks both winding verdicts within a generous five-second regression budget (the original
+pairwise implementation took about 30 s for both; the fixed test takes about 28 ms).
+
+Loose parts no longer reserve triangle/material/hash buffers for the entire source primitive: the initial estimate
+is bounded by the selected vertex count, with lists and the packed face set growing as needed. A one-face part from
+a million-face primitive allocates 12.00 MB instead of 44.78 MB; the existing full-vertex rank lookup remains. Points
+and lines reserve no face buffers. Per-thread allocation guards cover both cases, and a dense selected mesh with
+560 unique faces over 16 vertices checks packed-set growth, first-twin retention and tuple-set parity. Six of the
+seven new unit cases fail on the original PR; all 2,117 tests pass after the fixes. The normal probe drill continues
+to compare the rows against Blender under the full pre-push gate.

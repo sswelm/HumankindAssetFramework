@@ -74,12 +74,15 @@ public static partial class VehicleProbe
             if (onlyPrim >= 0 && pi != onlyPrim) continue;
             var p = mesh.Primitives[pi]; total += (onlyVerts ?? Used(p)).Length;
             int corners = p.Indices != null ? p.Indices.Length : p.VertexCount;
-            totalFaces += p.Mode == 4 ? corners / 3 : Math.Max(0, corners - 2);   // a strip or fan makes a face per corner
+            totalFaces += p.Mode == 4 ? corners / 3 : p.Mode == 5 || p.Mode == 6 ? Math.Max(0, corners - 2) : 0;
         }
-        var local = new List<double>(total * 3); var fileNormal = new List<double>(total * 3); var tris = new List<int>(totalFaces * 3); var uv = new List<float>(total * 2); var triMaterial = new List<int>(totalFaces);
+        // A loose part may retain only one face of a million-face primitive. Reserve from its selected vertices instead;
+        // lists and the packed set grow with faces actually kept, including unusually dense/non-manifold parts.
+        int faceCapacity = onlyVerts == null ? totalFaces : (int)Math.Min(totalFaces, 2L * total);
+        var local = new List<double>(total * 3); var fileNormal = new List<double>(total * 3); var tris = new List<int>(faceCapacity * 3); var uv = new List<float>(total * 2); var triMaterial = new List<int>(faceCapacity);
         // mesh.validate() drops a second face over the same three vertices, whichever way it winds: the FIRST stays
         var faces = total < PackedFaceLimit ? null : new HashSet<(int, int, int)>();
-        var packed = faces == null ? new FaceSet(totalFaces) : null;
+        var packed = faces == null ? new FaceSet(faceCapacity) : null;
         int offset = 0;
         for (int pi = 0; pi < mesh.Primitives.Count; pi++)
         {
@@ -182,21 +185,29 @@ public static partial class VehicleProbe
 
 
     /// <summary>A set of packed face keys (three 21-bit vertex ranks, sorted) with open addressing: Add is false for a key seen
-    /// before. The table holds twice the faces, so a probe ends within a few slots; -1 marks an empty slot.</summary>
+    /// before. The table stays at most half full and grows when its initial estimate is exceeded; -1 marks an empty slot.</summary>
     sealed class FaceSet
     {
-        readonly long[] slots; readonly int mask;
-        public FaceSet(int faces) { int cap = 16; while (cap < 2 * faces) cap <<= 1; slots = new long[cap]; mask = cap - 1; for (int i = 0; i < cap; i++) slots[i] = -1; }
-        public bool Add(long key)
+        long[] slots; int mask, count;
+        public FaceSet(int faces) { int cap = 16; while (cap < 2L * faces) cap = checked(cap * 2); Allocate(cap); }
+        void Allocate(int capacity) { slots = new long[capacity]; mask = capacity - 1; for (int i = 0; i < capacity; i++) slots[i] = -1; }
+        int Slot(long key)
         {
             ulong h = (ulong)key * 0x9E3779B97F4A7C15UL; int i = (int)(h >> 40) & mask;
-            while (true)
+            while (slots[i] != -1 && slots[i] != key) i = (i + 1) & mask;
+            return i;
+        }
+        public bool Add(long key)
+        {
+            int i = Slot(key);
+            if (slots[i] == key) return false;
+            if (count == slots.Length / 2)
             {
-                long s = slots[i];
-                if (s == key) return false;
-                if (s == -1) { slots[i] = key; return true; }
-                i = (i + 1) & mask;
+                var previous = slots; Allocate(checked(previous.Length * 2));
+                foreach (long old in previous) if (old != -1) slots[Slot(old)] = old;
+                i = Slot(key);
             }
+            slots[i] = key; count++; return true;
         }
     }
 
