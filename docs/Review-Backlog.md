@@ -582,13 +582,14 @@ Native JPEG-alpha export (2026-10-19): production Generate retains the original 
 than requiring Blender's PNG re-encoding. Espana now generates through C#. Acceptance checks identical decoded RGBA
 pixels and strict non-image GLB bytes/JSON; the stage oracle keeps its original byte-exact rules. Image brightness
 editing, moving treads and the other named limits remain separate work. Neither backend default changes.
-- **Native SDK skeleton smoke test** — OPEN (2026-10-19). An isolated Espana wave-rock test variant reaches native
-  rig preparation and texture extraction, then `Amplitude.Mercury.Animation.Skeleton.FillBoneEntry` throws a
-  NullReferenceException at IL 0x1b during `Skeleton.Reimport`. An equivalent all-PNG control fails at the same
-  location, so this is not caused by retaining JPEG alpha. The current user's Espana recipe has no animated
-  channels; only the throwaway test variant enables wave rock. Investigate the native rig/SDK setup before
-  claiming full end-to-end acceptance. Neither the user's source/recipe nor production goldens were changed.
-
+- **Native SDK skeleton smoke test** — FIXED (2026-10-19). Native multi-material atlas remapping assigned transient
+  meshes to the saved GLB rig prefab; SaveAssets could serialize missing mesh references before skeleton import,
+  producing a NullReferenceException in `Skeleton.FillBoneEntry` at IL 0x1b (also reproduced with a PNG control).
+  Persist every transient skinned mesh in the owned native `anim/` cache and save the prefab before the atlas
+  SaveAssets/Refresh. A native regression reloads two renderers, including a no-UV mesh, and checks data and
+  idempotence. An isolated Espana wave variant reduced to 20,000 triangles completes the C# SDK skeleton/clip bake.
+  The unreduced variant exceeds the ordinary eight-fragment budget; the current user's recipe has no animated
+  channels. Only the throwaway smoke test enables wave rock; no user source/recipe or production golden changed.
 
 - **vehicle_rig.py: two gun-recoil defects** — OPEN (2026-10-16, found porting stage 3 part d3; the C# port reproduces both bit
   for bit, so fixing them is a script change plus a port change). (1) With `gun_pivot` at 1.0 and recoil on, the bore direction is

@@ -3188,3 +3188,10 @@ The native animated rig wrapper opts into the same policy so the generated JPEG 
 next preparation step. Its `CacheRevision` changes with the policy. `BlenderRigAnimHeadlessTest` applies exact
 pixel/non-image comparison when that wrapper retains an alpha-reading JPEG; its older albedo-save handling is
 otherwise unchanged. Unit cases carry both MASK and BLEND models through Generate and native rig preparation.
+
+Native atlas mesh persistence: the GLB rig is a writable prefab asset, so transient atlas-remapped mesh references
+must become assets before SaveAssets/Refresh. `UniversalBaker.PersistNativeRigMeshes` stores every such SMR mesh
+under the existing owned `anim/` cache, including no-UV meshes that do not appear in the preview-remap list, then
+saves the prefab. Existing persistent meshes are retained. The native harness saves/reimports a two-renderer
+prefab and checks both references, UV data, no-UV data and idempotence. The isolated Espana SDK smoke test enables
+wave rock only in its throwaway variant and requests 20,000 triangles to stay within the fragment budget.

@@ -59,6 +59,53 @@ public static class UnityVehicleGenerateTests
         }
     }
 
+    static void NativeRigMeshPersistence()
+    {
+        string folder = "Assets/__haf_native_mesh_" + Guid.NewGuid().ToString("N");
+        AssetDatabase.CreateFolder("Assets", Path.GetFileName(folder));
+        GameObject root = null; var clones = new List<Mesh>();
+        try
+        {
+            root = new GameObject("Root");
+            var source = new Mesh { name = "Source" };
+            source.vertices = new[] { Vector3.zero, Vector3.right, Vector3.up }; source.triangles = new[] { 0, 1, 2 };
+            source.uv = new[] { Vector2.zero, Vector2.right, Vector2.up }; source.bindposes = new[] { Matrix4x4.identity };
+            source.boneWeights = Enumerable.Repeat(new BoneWeight { boneIndex0 = 0, weight0 = 1 }, 3).ToArray();
+            AssetDatabase.CreateAsset(source, folder + "/source.asset");
+            for (int i = 0; i < 2; i++)
+            {
+                var child = new GameObject("Body" + i); child.transform.SetParent(root.transform, false);
+                var smr = child.AddComponent<SkinnedMeshRenderer>(); smr.sharedMesh = source; smr.bones = new[] { root.transform }; smr.rootBone = root.transform;
+            }
+            string path = folder + "/rig.prefab"; var prefab = PrefabUtility.SaveAsPrefabAsset(root, path);
+            UnityEngine.Object.DestroyImmediate(root); root = null;
+            var renderers = prefab.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                var clone = UnityEngine.Object.Instantiate(renderers[i].sharedMesh); clones.Add(clone);
+                clone.uv = i == 0 ? new[] { new Vector2(.25f, .75f), Vector2.right, Vector2.up } : new Vector2[0];
+                renderers[i].sharedMesh = clone;
+            }
+            Check("native rig persists every transient mesh", UniversalBaker.PersistNativeRigMeshes(prefab, folder, "test") == 2, "both UV and no-UV clones become assets");
+            AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
+            var loaded = AssetDatabase.LoadAssetAtPath<GameObject>(path); renderers = loaded.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+            bool intact = renderers.Length == 2 && renderers.All(r => r.sharedMesh != null && AssetDatabase.Contains(r.sharedMesh) && r.sharedMesh.vertexCount == 3);
+            Check("native rig meshes survive prefab reload", intact, "SDK source retains persistent mesh references");
+            if (intact)
+            {
+                Check("native rig remapped UVs survive", renderers[0].sharedMesh.uv[0] == new Vector2(.25f, .75f) && renderers[1].sharedMesh.uv.Length == 0, "data preserved across SaveAssets and reimport");
+                Check("native rig persistence is idempotent", UniversalBaker.PersistNativeRigMeshes(loaded, folder, "test") == 0, "existing assets are retained");
+            }
+        }
+        finally
+        {
+            if (root != null) UnityEngine.Object.DestroyImmediate(root);
+            foreach (var mesh in clones) if (mesh != null && !AssetDatabase.Contains(mesh)) UnityEngine.Object.DestroyImmediate(mesh);
+            AssetDatabase.DeleteAsset(folder);
+        }
+    }
+
     static void ImageEncodingParity()
     {
         string recipe = Path.Combine(fixtures, "recipes", "fx_e2_stances.json");
@@ -282,7 +329,7 @@ public static class UnityVehicleGenerateTests
         output=Arg("-hafGenerateOutput");fixtures=Arg("-hafGenerateFixtures");
         try
         {
-            ParallelNormals();ImageEncodingParity();Availability();SecondSourceFingerprint();foreach(string key in new[]{"fx_e2_stances","fx_e3_deploy","fx_f_layers"})Preview(key);
+            ParallelNormals();NativeRigMeshPersistence();ImageEncodingParity();Availability();SecondSourceFingerprint();foreach(string key in new[]{"fx_e2_stances","fx_e3_deploy","fx_f_layers"})Preview(key);
             StaleBaseline();
         }
         catch(Exception e){Check("exception",false,e.ToString());}
@@ -311,7 +358,7 @@ public static class UnityVehicleGenerateTests
         {
             var keys=new[]{"fx_e2_stances","fx_e3_deploy","fx_f_global","fx_f_layers","fx_f_merge_textures","fx_f_uv_inactive","fx_f_signed_zero"};
             var jobs=keys.Select(k=>Path.Combine(fixtures,"recipes",k+".json")).ToArray();
-            ParallelNormals();ImageEncodingParity();Availability();SecondSourceFingerprint();Persistence(jobs[0]);StaleBaseline();Recipes("fixtures",jobs,"Tools/fixture_goldens");
+            ParallelNormals();NativeRigMeshPersistence();ImageEncodingParity();Availability();SecondSourceFingerprint();Persistence(jobs[0]);StaleBaseline();Recipes("fixtures",jobs,"Tools/fixture_goldens");
             foreach(string key in new[]{"fx_e2_stances","fx_e3_deploy","fx_f_layers"})Preview(key);
             string saved=Arg("-hafGenerateRecipes");if(Directory.Exists(saved))Recipes("saved",Directory.GetFiles(saved,"*.json"),"Tools/lab_golden");else Check("saved recipes",false,"recipes not found");
         }

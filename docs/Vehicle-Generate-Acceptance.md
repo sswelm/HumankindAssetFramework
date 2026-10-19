@@ -23,9 +23,13 @@ verified image payloads, MIME types and resulting buffer offsets/lengths; every 
 must match. Native counterexamples change RGB, alpha, image metadata and geometry. The original byte comparison
 still applies when no image encoding changed. No Lab golden or source fingerprint is relaxed or rewritten.
 
-The additional animated SDK smoke test is not a pass: a throwaway Espana wave variant reaches native rig
-preparation, then fails in `Skeleton.FillBoneEntry`. An equivalent PNG control fails in the same place.
-This separately tracked native rig/SDK issue leaves full bake and in-game acceptance outstanding.
+The additional SDK smoke test exposed a native prefab persistence defect, also reproduced with a PNG control:
+atlas-remapped transient meshes became missing references before `Skeleton.FillBoneEntry`. Those meshes are now
+persisted in the owned native rig cache and the prefab saved before atlas SaveAssets/Refresh. A focused native
+test reloads both UV and no-UV mesh references. An isolated Espana wave variant reduced to 20,000 triangles then
+completes the C# SDK skeleton/clip bake. The unreduced variant hits the ordinary fragment budget guard. The user's
+current recipe has no animated channels; only the throwaway test enables wave rock. Full corpus bake and in-game
+acceptance remain outstanding.
 
 
 ## Automated acceptance
