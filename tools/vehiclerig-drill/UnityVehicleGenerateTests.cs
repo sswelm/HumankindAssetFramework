@@ -59,6 +59,41 @@ public static class UnityVehicleGenerateTests
         }
     }
 
+    static void ImageEncodingParity()
+    {
+        string recipe = Path.Combine(fixtures, "recipes", "fx_e2_stances.json");
+        bool ok = VehicleLabWindow.GenerateHeadless(recipe, "Logs/image_encoding/source", "csharp", out string log, out string status, out string source, out string route, out _);
+        Check("image encoding source", ok && route == "csharp", status); if (!ok || route != "csharp") return;
+        var model = GlbReader.Read(source);
+        if (model.Images.Count == 0) model.Images.Add(new HafImage { Name = "Encoding" });
+        var image = model.Images[0]; image.Uri = "";
+        var texture = new Texture2D(8, 8, TextureFormat.RGBA32, false);
+        var decoded = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+        try
+        {
+            var colors = Enumerable.Range(0, 64).Select(i => new Color32((byte)(i * 3), (byte)(255 - i * 2), (byte)(i * 4), 255)).ToArray();
+            texture.SetPixels32(colors); texture.Apply(); byte[] jpeg = ImageConversion.EncodeToJPG(texture, 95);
+            if (!ImageConversion.LoadImage(decoded, jpeg)) throw new Exception("Synthetic JPEG did not decode.");
+            byte[] png = ImageConversion.EncodeToPNG(decoded);
+            string a = source + ".png.glb", b = source + ".jpeg.glb";
+            void Write(string path, string mime, byte[] bytes) { image.MimeType = mime; image.Bytes = bytes; GlbWriter.Write(model, path); }
+            Write(a, "image/png", png); Write(b, "image/jpeg", jpeg);
+            Check("image encoding exact RGBA control", VehicleGenerateAcceptanceTest.CompareOutputs(a, log, b, log, out _).Count == 0, "source JPEG and PNG decoded from it match, all other bytes held");
+            colors = Enumerable.Repeat(new Color32(240, 10, 20, 255), 64).ToArray(); texture.SetPixels32(colors); texture.Apply();
+            Write(b, "image/jpeg", ImageConversion.EncodeToJPG(texture, 95));
+            Check("image encoding RGB mutation", VehicleGenerateAcceptanceTest.CompareOutputs(a, log, b, log, out _).Count > 0, "different JPEG pixels rejected");
+            Write(b, "image/jpeg", jpeg); var pixels = decoded.GetPixels32(); pixels[0].a = 127; texture.SetPixels32(pixels); texture.Apply();
+            Write(a, "image/png", ImageConversion.EncodeToPNG(texture));
+            Check("image encoding alpha mutation", VehicleGenerateAcceptanceTest.CompareOutputs(a, log, b, log, out _).Count > 0, "lost alpha rejected");
+            Write(a, "image/png", png); image.Name += " changed"; Write(b, "image/jpeg", jpeg);
+            Check("image encoding metadata mutation", VehicleGenerateAcceptanceTest.CompareOutputs(a, log, b, log, out _).Count > 0, "renamed image rejected");
+            image.Name = image.Name.Substring(0, image.Name.Length - " changed".Length);
+            model.Meshes[0].Primitives[0].Positions[0] += .125f; Write(b, "image/jpeg", jpeg);
+            Check("image encoding mesh mutation", VehicleGenerateAcceptanceTest.CompareOutputs(a, log, b, log, out _).Count > 0, "geometry change beside equal pixels rejected");
+        }
+        finally { UnityEngine.Object.DestroyImmediate(texture); UnityEngine.Object.DestroyImmediate(decoded); }
+    }
+
     static void Availability()
     {
         foreach(string editorDefault in new[]{"csharp","blender"})
@@ -165,7 +200,7 @@ public static class UnityVehicleGenerateTests
             var expected=Expected(reference,clips.Count>0?reference.Animations.FindIndex(an=>an.Name==clips[0].name):-1,0);
             go.transform.localScale*=1.1f;Check(key+" preview scale mutation",RigRouteAcceptanceTest.ComparePositionSets(expected,Rendered(go),tolerance,out _)!=null,"incorrect preview placement/scale rejected");go.transform.localScale=Vector3.one;
             Check(key+" no auxiliary FBX",!File.Exists(Path.Combine(Path.GetDirectoryName(pb),key+"_Spin_preview.fbx")),"C# preview consumes its GLB");
-            string copy=pb+".compare.glb";File.Copy(pb,copy,true);string gun=pb+".gun.txt";if(File.Exists(gun))File.Copy(gun,copy+".gun.txt",true);
+            string copy=pb+".compare.glb";File.Copy(pb,copy,true);string gun=pb+".gun.txt";if(File.Exists(gun))File.Copy(gun,copy+".gun.txt",true);else if(File.Exists(copy+".gun.txt"))File.Delete(copy+".gun.txt");
             Check("acceptance intact control",VehicleGenerateAcceptanceTest.CompareOutputs(pb,lb,copy,lb,out _).Count==0,"real written rig");
             Check("acceptance log mutation",VehicleGenerateAcceptanceTest.CompareOutputs(pb,lb,copy,lb.Replace("VEHICLE export totals:","VEHICLE export totals: changed"),out _).Count>0,"changed diagnostics rejected");
             File.WriteAllText(copy+".gun.txt","changed");Check("acceptance gun mutation",VehicleGenerateAcceptanceTest.CompareOutputs(pb,lb,copy,lb,out _).Count>0,"changed or spurious gun span rejected");
@@ -247,7 +282,7 @@ public static class UnityVehicleGenerateTests
         output=Arg("-hafGenerateOutput");fixtures=Arg("-hafGenerateFixtures");
         try
         {
-            ParallelNormals();Availability();SecondSourceFingerprint();foreach(string key in new[]{"fx_e2_stances","fx_e3_deploy","fx_f_layers"})Preview(key);
+            ParallelNormals();ImageEncodingParity();Availability();SecondSourceFingerprint();foreach(string key in new[]{"fx_e2_stances","fx_e3_deploy","fx_f_layers"})Preview(key);
             StaleBaseline();
         }
         catch(Exception e){Check("exception",false,e.ToString());}
@@ -276,7 +311,7 @@ public static class UnityVehicleGenerateTests
         {
             var keys=new[]{"fx_e2_stances","fx_e3_deploy","fx_f_global","fx_f_layers","fx_f_merge_textures","fx_f_uv_inactive","fx_f_signed_zero"};
             var jobs=keys.Select(k=>Path.Combine(fixtures,"recipes",k+".json")).ToArray();
-            ParallelNormals();Availability();SecondSourceFingerprint();Persistence(jobs[0]);StaleBaseline();Recipes("fixtures",jobs,"Tools/fixture_goldens");
+            ParallelNormals();ImageEncodingParity();Availability();SecondSourceFingerprint();Persistence(jobs[0]);StaleBaseline();Recipes("fixtures",jobs,"Tools/fixture_goldens");
             foreach(string key in new[]{"fx_e2_stances","fx_e3_deploy","fx_f_layers"})Preview(key);
             string saved=Arg("-hafGenerateRecipes");if(Directory.Exists(saved))Recipes("saved",Directory.GetFiles(saved,"*.json"),"Tools/lab_golden");else Check("saved recipes",false,"recipes not found");
         }

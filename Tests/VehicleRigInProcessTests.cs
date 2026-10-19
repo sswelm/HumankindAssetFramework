@@ -94,6 +94,34 @@ public class VehicleRigInProcessTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData("BLEND")]
+    [InlineData("MASK")]
+    public void JPEG_alpha_generation_writes_a_native_rig_and_keeps_its_source_encoding(string mode)
+    {
+        var a = Args(); var m = GlbReader.Read(a[1]);
+        m.Materials.Add(new HafMaterial { Name = "Glass", AlphaMode = mode, BaseColorTexture = 0, BaseColorFactor = new[] { 1d,1d,1d,.5 } });
+        m.Textures.Add(new HafTexture { Source = 0 });
+        byte[] jpeg = { 255,216,255,224,0,16,74,70,73,70,0,1,1,0,0,1,0,1,0,0,255,192,0,17,8,0,2,0,4,3,1,34,0,2,17,1,3,17,1,255,217 };
+        m.Images.Add(new HafImage { Name = "Photo", MimeType = "image/jpeg", Bytes = jpeg });
+        m.Meshes[0].Primitives[0].Material = 0;
+        GlbWriter.Write(m,a[1]); File.WriteAllText(a[2],"old"); a[17] = "2";
+        var result = BlenderVehicleRigInProcess.Run(a);
+        Assert.True(result.Written,result.UseBlender); Assert.Null(result.UseBlender);
+        var written = GlbReader.Read(a[2]);
+        Assert.Equal(mode,written.Materials[0].AlphaMode);
+        Assert.Equal(.5,written.Materials[0].BaseColorFactor[3]);
+        Assert.Single(written.Images); Assert.Equal("image/jpeg",written.Images[0].MimeType);
+        Assert.Equal(jpeg,written.Images[0].Bytes);
+        Assert.NotEmpty(written.Meshes); Assert.NotEmpty(written.Nodes);
+        var slim = BlenderRigAnimInProcess.Run(a[2], a[2] + ".slim.glb",
+            BlenderRigAnimInProcess.Argv(0,"","Spin","",true,"0,0,0",true,"",false,"",true,"",false));
+        Assert.True(slim.Written, slim.UseBlender ?? string.Join("\n",slim.Log));
+        Assert.Single(slim.RetainedJpegAlphaImages);
+        var prepared = GlbReader.Read(a[2] + ".slim.glb");
+        Assert.Equal(jpeg, prepared.Images[0].Bytes); Assert.Equal("image/jpeg", prepared.Images[0].MimeType);
+    }
+
     [Fact]
     public void Material_preflight_keeps_the_import_context_and_supported_output_unchanged()
     {

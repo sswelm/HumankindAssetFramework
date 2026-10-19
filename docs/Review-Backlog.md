@@ -578,6 +578,18 @@ complete with no failures (22 C#, three named Blender fallbacks), and all 52 inp
 stale-baseline regression now changes its own fixture instead of requiring the user's Espana golden to stay stale; it also
 verifies a refreshed baseline. Details and the remaining checklist: [Vehicle Generate acceptance](Vehicle-Generate-Acceptance.md).
 Next: the user's visual/runtime acceptance before (h), the default flip. d6 remains deferred; the shipped Generate default stays Blender.
+Native JPEG-alpha export (2026-10-19): production Generate retains the original JPEG, whose glTF alpha is 1, rather
+than requiring Blender's PNG re-encoding. Espana now generates through C#. Acceptance checks identical decoded RGBA
+pixels and strict non-image GLB bytes/JSON; the stage oracle keeps its original byte-exact rules. Image brightness
+editing, moving treads and the other named limits remain separate work. Neither backend default changes.
+- **Native SDK skeleton smoke test** — OPEN (2026-10-19). An isolated Espana wave-rock test variant reaches native
+  rig preparation and texture extraction, then `Amplitude.Mercury.Animation.Skeleton.FillBoneEntry` throws a
+  NullReferenceException at IL 0x1b during `Skeleton.Reimport`. An equivalent all-PNG control fails at the same
+  location, so this is not caused by retaining JPEG alpha. The current user's Espana recipe has no animated
+  channels; only the throwaway test variant enables wave rock. Investigate the native rig/SDK setup before
+  claiming full end-to-end acceptance. Neither the user's source/recipe nor production goldens were changed.
+
+
 - **vehicle_rig.py: two gun-recoil defects** — OPEN (2026-10-16, found porting stage 3 part d3; the C# port reproduces both bit
   for bit, so fixing them is a script change plus a port change). (1) With `gun_pivot` at 1.0 and recoil on, the bore direction is
   `(gun_axis[1] - gun_axis[0]).normalized()` with `gun_axis[0]` the head - at the muzzle - so the bore is the float32 residue of

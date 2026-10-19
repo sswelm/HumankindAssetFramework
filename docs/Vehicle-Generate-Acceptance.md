@@ -4,6 +4,30 @@ This records the acceptance work following PR #188, against merged commit `70dc2
 The Generate default remains Blender. Phase (h) requires the user's visual and in-game check.
 Moving tread/conveyor support (d6) remains deferred.
 
+## Native JPEG-alpha support (October 19, 2026)
+
+C# Generate now retains a source JPEG when a material reads its alpha. The glTF specification defines JPEG alpha
+as 1; the material's alpha factor, cutoff, vertex colours, UVs and sampler remain unchanged. Blender instead writes
+that image as PNG. Espana no longer needs that image-encoding fallback. The earlier dated results below record
+its original fallback status.
+The matching native rig-preparation policy is also enabled and its cache revision is bumped.
+
+The current 25-recipe backend comparison matches all outputs: 23 take C#, including Espana, and the two FBX
+sources retain named Blender fallbacks. Existing historical goldens for `sns_dragon_split_fused` and Espana are
+stale against the current source/recipe fingerprints. Their candidates are retained for review; the project's
+goldens are not rewritten. This is separate from the successful current Blender/C# output comparison.
+
+
+Acceptance requires exact decoded RGBA pixels for each changed PNG/JPEG pair. It then normalizes only those
+verified image payloads, MIME types and resulting buffer offsets/lengths; every other JSON field and buffer byte
+must match. Native counterexamples change RGB, alpha, image metadata and geometry. The original byte comparison
+still applies when no image encoding changed. No Lab golden or source fingerprint is relaxed or rewritten.
+
+The additional animated SDK smoke test is not a pass: a throwaway Espana wave variant reaches native rig
+preparation, then fails in `Skeleton.FillBoneEntry`. An equivalent PNG control fails in the same place.
+This separately tracked native rig/SDK issue leaves full bake and in-game acceptance outstanding.
+
+
 ## Automated acceptance
 
 The October 18, 2026 native run completed with **zero failures** on all 25 saved recipes:

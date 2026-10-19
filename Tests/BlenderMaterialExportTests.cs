@@ -27,10 +27,10 @@ public class BlenderMaterialExportTests
             M.Nodes.Add(new HafNode { Name = "N" + M.Nodes.Count, Mesh = M.Meshes.Count - 1 });
             return mat;
         }
-        public BlenderMaterialExport.Result Build()
+        public BlenderMaterialExport.Result Build(bool preserveJpegAlpha = false)
         {
             if (M.Scenes.Count == 0) { var sc = new HafScene(); sc.Nodes.AddRange(Enumerable.Range(0, M.Nodes.Count)); M.Scenes.Add(sc); M.Scene = 0; }
-            return BlenderMaterialExport.Build(M, BlenderNames.Compute(M));
+            return BlenderMaterialExport.Build(M, BlenderNames.Compute(M), preserveJpegAlpha);
         }
     }
 
@@ -104,6 +104,52 @@ public class BlenderMaterialExportTests
         Assert.Null(x.Fallback);
         Assert.Equal(("photo", "image/jpeg"), (x.Images[0].name, x.Images[0].mime));   // the name without its extension, the bytes' own type
         Assert.Same(Jpeg, x.Images[0].bytes);
+    }
+
+    [Theory]
+    [InlineData("BLEND")]
+    [InlineData("MASK")]
+    public void Native_generation_can_keep_JPEG_RGB_with_implicit_opaque_alpha(string mode)
+    {
+        var f = new File();
+        var mat = f.Material("glass"); mat.AlphaMode = mode; mat.AlphaCutoff = .3;
+        mat.BaseColorFactor = new[] { .2, .4, .6, .5 };
+        mat.BaseColorTexture = f.Texture(f.Image("photo.jpg", Jpeg));
+        Assert.NotNull(f.Build().Fallback); // the Blender-exact oracle still requires PNG
+        var x = f.Build(preserveJpegAlpha: true);
+        Assert.Null(x.Fallback);
+        Assert.Equal(("photo", "image/jpeg"), (x.Images[0].name, x.Images[0].mime));
+        Assert.Same(Jpeg, x.Images[0].bytes);
+        Assert.Equal(mode, (string)x.Materials[0]["alphaMode"]);
+        Assert.Equal(.5, (double)x.Materials[0]["pbrMetallicRoughness"]["baseColorFactor"][3]);
+        Assert.Equal(mode == "MASK" ? (double?)(float).3 : null, (double?)x.Materials[0]["alphaCutoff"]);
+        Assert.Same(Jpeg, f.M.Images[0].Bytes); Assert.Equal(mode, mat.AlphaMode);
+    }
+
+    [Fact]
+    public void Retained_JPEG_keeps_the_oracle_image_indices_for_opaque_and_alpha_uses()
+    {
+        var f = new File(); int texture = f.Texture(f.Image("shared.jpg", Jpeg));
+        f.Material("opaque").BaseColorTexture = texture;
+        var alpha = f.Material("alpha"); alpha.BaseColorTexture = texture; alpha.AlphaMode = "BLEND";
+        var other = f.Material("alpha2"); other.BaseColorTexture = texture; other.AlphaMode = "MASK";
+        var x = f.Build(true); Assert.Null(x.Fallback);
+        Assert.Equal(2, x.Images.Count);
+        Assert.Equal(new[] { 0, 1, 1 }, x.Textures.Select(t => t.image));
+        Assert.Equal(new[] { 1 }, x.RetainedJpegAlphaImages);
+        Assert.All(x.Images, im => { Assert.Equal("image/jpeg", im.mime); Assert.Same(Jpeg, im.bytes); });
+    }
+
+    [Fact]
+    public void Retention_does_not_accept_a_truncated_JPEG_or_relax_other_reencoding_limits()
+    {
+        var f = new File(); var mat = f.Material("broken"); mat.AlphaMode = "BLEND";
+        mat.BaseColorTexture = f.Texture(f.Image("broken.jpg", new byte[] { 255, 216, 255, 224 }));
+        Assert.Contains("JPEG whose alpha is read", f.Build(true).Fallback);
+        f.M.Images[0].Bytes = Jpeg; f.M.Images[0].Uri = "misnamed.png"; mat.AlphaMode = "OPAQUE";
+        Assert.Contains("named as a PNG", f.Build(true).Fallback);
+        f.M.Images[0].Bytes = Png; f.M.Images[0].Uri = "misnamed.jpg";
+        Assert.Contains("named as a JPEG", f.Build(true).Fallback);
     }
 
     [Theory]

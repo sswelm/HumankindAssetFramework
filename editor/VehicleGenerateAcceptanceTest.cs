@@ -57,7 +57,7 @@ public static class VehicleGenerateAcceptanceTest
                         result.fail++; retain = true; lines.Add("FAIL " + name + ": Lab golden — " + reason + "; candidate " + candidate); continue;
                     }
                     if (usedFallback) { result.skip++; lines.Add("FALLBACK " + name + ": Blender outputs and golden match; C# acceptance not exercised — " + fallback); continue; }
-                    result.pass++; lines.Add("PASS " + name + ": byte-identical GLB, diagnostics and gun sidecar; read-back rig and Lab golden match" + note);
+                    result.pass++; lines.Add("PASS " + name + ": GLB matches (byte-identical or pixel-verified source JPEG), diagnostics and gun sidecar; read-back rig and Lab golden match" + note);
                 }
                 catch (OperationCanceledException) { throw; }
                 catch (Exception e) { result.fail++; retain = true; lines.Add("FAIL " + name + ": " + e.GetType().Name + ": " + e.Message); }
@@ -81,12 +81,42 @@ public static class VehicleGenerateAcceptanceTest
         return inputs;
     }
 
+    // JPEG's implicit alpha is 1. Verify the decoded RGBA exactly, then retain strict JSON/non-image
+    // buffer comparison. A MIME change never creates a blanket exemption for textures, meshes or animations.
+    internal static string ImageEncodingDifference(HafModel left, HafModel right, byte[] a, byte[] b)
+    {
+        if (left.Images.Count != right.Images.Count) return "image counts differ";
+        var verified = new HashSet<int>();
+        for (int i = 0; i < left.Images.Count; i++)
+        {
+            var x = left.Images[i]; var y = right.Images[i];
+            if (x.Bytes == null || y.Bytes == null) return "image bytes unavailable";
+            if (x.Bytes.SequenceEqual(y.Bytes)) continue;
+            if (x.MimeType != "image/png" || y.MimeType != "image/jpeg") return "image " + i + " is not a PNG to source JPEG change";
+            var tx = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+            var ty = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+            try
+            {
+                if (!ImageConversion.LoadImage(tx, x.Bytes) || !ImageConversion.LoadImage(ty, y.Bytes)) return "image " + i + " cannot be decoded";
+                if (tx.width != ty.width || tx.height != ty.height || !tx.GetPixels32().SequenceEqual(ty.GetPixels32()))
+                    return "image " + i + " decoded RGBA pixels differ";
+                verified.Add(i);
+            }
+            finally { UnityEngine.Object.DestroyImmediate(tx); UnityEngine.Object.DestroyImmediate(ty); }
+        }
+        return GlbDisconnectedParts.ImageEncodingDifference(a, b, verified);
+    }
+
     internal static List<string> CompareOutputs(string pathA, string logA, string pathB, string logB, out string[] snapshot)
     {
         var problems = new List<string>();
         var a = File.ReadAllBytes(pathA); var b = File.ReadAllBytes(pathB);
-        if (!a.SequenceEqual(b)) problems.Add("output GLB bytes differ");
-        GlbReader.Read(pathA); GlbReader.Read(pathB); // validate both actual written files
+        var modelA = GlbReader.Read(pathA); var modelB = GlbReader.Read(pathB); // validate both written files
+        if (!a.SequenceEqual(b))
+        {
+            string imageDifference = ImageEncodingDifference(modelA, modelB, a, b);
+            if (imageDifference != null) problems.Add("output GLB differs: " + imageDifference);
+        }
         GlbDisconnectedParts.RigSummary(a, out int skins, out int joints, out int meshes, out int meshNodes, out int rigged);
         if (rigged == 0 || joints > 256) problems.Add("the written GLB lacks a bound rig or exceeds 256 joints");
         var linesA = BakeGoldenRules.LabSnapshotLines(logA); var linesB = BakeGoldenRules.LabSnapshotLines(logB);

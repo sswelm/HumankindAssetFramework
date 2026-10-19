@@ -12,6 +12,8 @@
 // JPEG source's PNG is Blender's encoder's and is not reproduced - the file carries the SOURCE JPEG under the same name,
 // typed image/jpeg (the Factory's import reads either), and the Bake Tests row holds the two models with the image bytes
 // aside. The drill marks such a job "the GLB's bytes not compared" and reads the written file back instead.
+// Alpha-reading source JPEGs also retain their encoding; the native acceptance row requires exact RGBA pixels
+// and strict non-image JSON/buffer parity for those conversions, rather than ignoring their image bytes.
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -22,7 +24,7 @@ public static class BlenderRigAnimInProcess
 {
     /// <summary>Bump when the in-process run's written file changes: the Factory's slim cache key carries it, so a cached
     /// GLB made by an older port is made again.</summary>
-    public const string CacheRevision = "2026-10-14.2";
+    public const string CacheRevision = "2026-10-19.jpeg-alpha";
 
     public sealed class Outcome
     {
@@ -32,6 +34,7 @@ public static class BlenderRigAnimInProcess
         public readonly List<string> Log = new List<string>();   // the RIGANIM lines, in the script's order
         public string PrimaryAction = "";    // the action the primary clip ended as (the glTF animation's name)
         public readonly List<(string role, string action)> RoleActions = new List<(string, string)>();   // each state role's action, in the script's order
+        public readonly HashSet<int> RetainedJpegAlphaImages = new HashSet<int>(); // PNG/JPEG pairs require exact pixel and non-image byte checks
         public readonly HashSet<int> SourceImageFallbacks = new HashSet<int>();   // only these exported images differ from Blender's PNG encoding
         public byte[] AlbedoBytes; public string AlbedoMime = ""; public string AlbedoPath; public int AlbedoWidth, AlbedoHeight;   // the albedo the script would save (null bytes: none written)
     }
@@ -94,8 +97,9 @@ public static class BlenderRigAnimInProcess
                 o.AlbedoBytes = im.Bytes; o.AlbedoPath = s.Albedo.path; o.AlbedoWidth = s.Albedo.w; o.AlbedoHeight = s.Albedo.h;
                 o.AlbedoMime = im.Bytes.Length >= 4 && im.Bytes[0] == 0x89 && im.Bytes[1] == 0x50 ? "image/png" : im.Bytes.Length >= 2 && im.Bytes[0] == 0xFF && im.Bytes[1] == 0xD8 ? "image/jpeg" : (im.MimeType ?? "");
             }
-            var x = BlenderRigExport.Build(s, a);
+            var x = BlenderRigExport.Build(s, a, preserveJpegAlpha: true);
             if (x.Fallback != null) { o.UseBlender = "the export: " + x.Fallback; return o; }
+            o.RetainedJpegAlphaImages.UnionWith(x.MaterialRows.RetainedJpegAlphaImages);
             o.Log.AddRange(x.Log);
             // an image whose bytes the export does not know (a JPEG albedo: Blender's PNG re-encode) carries the SOURCE's bytes and type
             for (int i = 0; i < x.MaterialRows.Images.Count; i++)

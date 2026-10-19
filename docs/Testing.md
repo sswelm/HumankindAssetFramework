@@ -3169,3 +3169,22 @@ are excluded:
 
 The gain depends on mesh size and how much time normals take. This parallelizes the pure normal kernel; it does
 not parallelize Blender fallback, animation evaluation or a mesh's ordered decimation operations.
+
+### Vehicle Generate source JPEG alpha
+
+The production C# wrapper opts into `preserveJpegAlpha`: a JPEG's implicit glTF alpha is 1, so keeping the original
+JPEG preserves material/vertex alpha without Blender's PNG re-encoding. The stage-model oracle remains strict by
+default. Image names, ordering, UVs, samplers, colour factors and alpha modes/cutoffs are preserved. Shared opaque
+and alpha-reading uses keep separate export image indices, matching Blender's layout.
+
+`VehicleGenerateAcceptanceTest` decodes changed PNG/JPEG pairs in Unity and compares all RGBA pixels exactly.
+`GlbDisconnectedParts.ImageEncodingDifference` then normalizes only those explicitly verified images and checks
+all remaining JSON and non-image bytes, including float sign bits and padding. Native tests reject RGB changes,
+lost alpha, renamed images and changed geometry; unit cases also reject missing verification and nonzero padding.
+PNG-only and ordinary JPEG exports retain their byte-identical comparison. The governing format rule is in the
+[glTF JPEG specification](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#images-jpeg).
+
+The native animated rig wrapper opts into the same policy so the generated JPEG does not force Blender at the
+next preparation step. Its `CacheRevision` changes with the policy. `BlenderRigAnimHeadlessTest` applies exact
+pixel/non-image comparison when that wrapper retains an alpha-reading JPEG; its older albedo-save handling is
+otherwise unchanged. Unit cases carry both MASK and BLEND models through Generate and native rig preparation.
