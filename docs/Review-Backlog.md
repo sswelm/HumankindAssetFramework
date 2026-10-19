@@ -602,6 +602,11 @@ worker's fault stops the others and is rethrown as itself, the preview copies me
 goes blank after a failed Generate although the old GLB is kept; `BlenderAvailable()` is now `File.Exists` for all 17 callers
 (a .cmd shim reads as "no Blender"); detection is polled on repaint; the "80 export probes" / "11 plants" of #187 rest on
 tooling that is not committed; fixtures missing an X-axis sail yard or flag axis and trails + gun + recoil at elevation 0.
+The probe on all cores DONE 2026-10-19 (the user, after a reviewer's remark that the probe was not optimised): measured
+first - the BVH build, the inside-out verdict and the part meshes ran on one core, and the island walk's `HashSet<long>` used
+long's own hash (2.1 s on a 72k grid); every phase now parallel or bucketed, every row byte-identical on the 84 drill inputs,
+16.25 s -> 4.66 s (details in docs/Testing.md). Left: the biggest part's gather and normals are the critical path of the part
+meshes (0.6 s of the Salegs' 1.55 s) - the per-vertex delegates allocate a double[3] each; GlbReader's parse (0.3 s there).
 - **Native SDK skeleton smoke test** — FIXED (2026-10-19). Native multi-material atlas remapping assigned transient
   meshes to the saved GLB rig prefab; SaveAssets could serialize missing mesh references before skeleton import,
   producing a NullReferenceException in `Skeleton.FillBoneEntry` at IL 0x1b (also reproduced with a PNG control).

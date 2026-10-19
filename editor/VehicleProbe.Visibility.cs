@@ -61,11 +61,25 @@ public static partial class VehicleProbe
     /// triangles, and its normal rays - from the object's local space through `objWorld` into Blender's frame.
     /// `dataPosition` gives a primitive's vertex in the object's local space (the file's position, or the bind pose);
     /// `dataNormal` the file's normal there (skinned into the bind pose for a skinned vertex), or null without one.</summary>
-    static PartMesh BuildPartMesh(HafModel m, int node, int onlyPrim, int[] onlyVerts, Func<HafPrimitive, int, double[]> dataPosition, Func<HafPrimitive, int, double[]> dataNormal, float[] mb, float[] bake)
+    /// <summary>A part under this many vertices keys its faces as packed longs (FaceSet); a larger one in the tuple set. Internal
+    /// for the test that runs both on one mesh.</summary>
+    internal static int PackedFaceLimit = 1 << 21;
+
+    internal static PartMesh BuildPartMesh(HafModel m, int node, int onlyPrim, int[] onlyVerts, Func<HafPrimitive, int, double[]> dataPosition, Func<HafPrimitive, int, double[]> dataNormal, float[] mb, float[] bake)
     {
         var mesh = m.Meshes[m.Nodes[node].Mesh];
-        var local = new List<double>(); var fileNormal = new List<double>(); var tris = new List<int>(); var uv = new List<float>(); var triMaterial = new List<int>();
-        var faces = new HashSet<(int, int, int)>();   // mesh.validate() drops a second face over the same three vertices, whichever way it winds: the FIRST stays
+        int total = 0, totalFaces = 0;
+        for (int pi = 0; pi < mesh.Primitives.Count; pi++)
+        {
+            if (onlyPrim >= 0 && pi != onlyPrim) continue;
+            var p = mesh.Primitives[pi]; total += (onlyVerts ?? Used(p)).Length;
+            int corners = p.Indices != null ? p.Indices.Length : p.VertexCount;
+            totalFaces += p.Mode == 4 ? corners / 3 : Math.Max(0, corners - 2);   // a strip or fan makes a face per corner
+        }
+        var local = new List<double>(total * 3); var fileNormal = new List<double>(total * 3); var tris = new List<int>(totalFaces * 3); var uv = new List<float>(total * 2); var triMaterial = new List<int>(totalFaces);
+        // mesh.validate() drops a second face over the same three vertices, whichever way it winds: the FIRST stays
+        var faces = total < PackedFaceLimit ? null : new HashSet<(int, int, int)>();
+        var packed = faces == null ? new FaceSet(totalFaces) : null;
         int offset = 0;
         for (int pi = 0; pi < mesh.Primitives.Count; pi++)
         {
@@ -92,8 +106,9 @@ public static partial class VehicleProbe
                 if (a < 0 || b < 0 || c < 0 || a >= rank.Length || b >= rank.Length || c >= rank.Length) return;
                 int ra = rank[a], rb = rank[b], rc = rank[c];
                 if (ra < 0 || rb < 0 || rc < 0 || ra == rb || rb == rc || ra == rc) return;   // another island's, or degenerate (mesh.validate drops it)
-                int lo = Math.Min(ra, Math.Min(rb, rc)), hi = Math.Max(ra, Math.Max(rb, rc));
-                if (!faces.Add((lo, ra + rb + rc - lo - hi, hi))) return;   // a duplicate (external review of PR #115: two twins wound against each other summed to no normal at all)
+                int lo = Math.Min(ra, Math.Min(rb, rc)), hi = Math.Max(ra, Math.Max(rb, rc)), mid = ra + rb + rc - lo - hi;
+                // a duplicate (external review of PR #115: two twins wound against each other summed to no normal at all)
+                if (packed != null ? !packed.Add(((long)lo << 42) | ((long)mid << 21) | (uint)hi) : !faces.Add((lo, mid, hi))) return;
                 tris.Add(ra); tris.Add(rb); tris.Add(rc); triMaterial.Add(p.Material);
             }
             switch (p.Mode)   // the importer's points_edges_tris: strips and fans become triangles, lines and points no polygon
@@ -136,7 +151,13 @@ public static partial class VehicleProbe
             blenderN = Nb != null ? DecodeCustomShorts(Pb, pm.Tris, sharp, d0, d1) : BlenderVertexNormals(Pb, pm.Tris, null);
         }
         var inverse = InvertedSafe(mb);
-        for (int i = 0; i < n; i++)
+        int workers = Math.Min(8, Environment.ProcessorCount);
+        if (n >= 16384 && workers > 1)
+            System.Threading.Tasks.Parallel.For(0, workers, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = workers }, block => VertexRange((int)((long)n * block / workers), (int)((long)n * (block + 1) / workers)));
+        else VertexRange(0, n);
+        void VertexRange(int first, int last)
+        {
+        for (int i = first; i < last; i++)
         {
             float bx = Pb[i * 3], by = Pb[i * 3 + 1], bz = Pb[i * 3 + 2];
             pm.Local[i * 3] = bx; pm.Local[i * 3 + 1] = bz; pm.Local[i * 3 + 2] = -by;   // glTF's frame: (x, z, -y) of Blender's - exact
@@ -155,9 +176,29 @@ public static partial class VehicleProbe
             NormalizeVn(ref wx, ref wy, ref wz);
             pm.PreviewNormal[i * 3] = wx; pm.PreviewNormal[i * 3 + 1] = wy; pm.PreviewNormal[i * 3 + 2] = wz;
         }
+        }
         return pm;
     }
 
+
+    /// <summary>A set of packed face keys (three 21-bit vertex ranks, sorted) with open addressing: Add is false for a key seen
+    /// before. The table holds twice the faces, so a probe ends within a few slots; -1 marks an empty slot.</summary>
+    sealed class FaceSet
+    {
+        readonly long[] slots; readonly int mask;
+        public FaceSet(int faces) { int cap = 16; while (cap < 2 * faces) cap <<= 1; slots = new long[cap]; mask = cap - 1; for (int i = 0; i < cap; i++) slots[i] = -1; }
+        public bool Add(long key)
+        {
+            ulong h = (ulong)key * 0x9E3779B97F4A7C15UL; int i = (int)(h >> 40) & mask;
+            while (true)
+            {
+                long s = slots[i];
+                if (s == key) return false;
+                if (s == -1) { slots[i] = key; return true; }
+                i = (i + 1) & mask;
+            }
+        }
+    }
 
     // ---------------------------------------------------------------- one BVH over every part's triangles
 
@@ -173,21 +214,27 @@ public static partial class VehicleProbe
             v = vertices;
             int nt = triangles.Length / 3;
             var cx = new float[nt]; var cy = new float[nt]; var cz = new float[nt];
-            for (int i = 0; i < nt; i++)
+            int workers = Math.Min(8, Environment.ProcessorCount);
+            PerTriangle(nt, workers, (first, last) =>
             {
-                int a = triangles[i * 3] * 3, b = triangles[i * 3 + 1] * 3, c = triangles[i * 3 + 2] * 3;
-                cx[i] = (v[a] + v[b] + v[c]) / 3f; cy[i] = (v[a + 1] + v[b + 1] + v[c + 1]) / 3f; cz[i] = (v[a + 2] + v[b + 2] + v[c + 2]) / 3f;
-            }
+                for (int i = first; i < last; i++)
+                {
+                    int a = triangles[i * 3] * 3, b = triangles[i * 3 + 1] * 3, c = triangles[i * 3 + 2] * 3;
+                    cx[i] = (v[a] + v[b] + v[c]) / 3f; cy[i] = (v[a + 1] + v[b + 1] + v[c + 1]) / 3f; cz[i] = (v[a + 2] + v[b + 2] + v[c + 2]) / 3f;
+                }
+            });
             var order = new int[nt]; for (int i = 0; i < nt; i++) order[i] = i;
-            int cap = Math.Max(1, 2 * nt);
+            // the slots: node 0 is the root; a subtree over n triangles owns exactly 2n - 2 slots for its descendants (a tree with
+            // L leaves has 2L - 1 nodes, and a split's children hold two triangles or more, so L <= n), handed down as the two
+            // children, then the left child's 2 n_l - 2, then the right child's - the numbering depends on the data alone
+            int cap = Math.Max(1, 2 * nt - 1);
             bmin = new float[cap * 3]; bmax = new float[cap * 3]; left = new int[cap]; start = new int[cap]; count = new int[cap];
-            int nodes = 1;
-            var stack = new Stack<(int node, int lo, int hi)>();
-            stack.Push((0, 0, nt));
             var centroid = new[] { cx, cy, cz };
-            while (stack.Count > 0)
+            // one node over order[lo..hi): its bounds; a leaf (four triangles or fewer, or no centroid extent), or the median split
+            // with its children allocated at next and next + 1
+            bool Node(int node, int lo, int hi, int next, out int mid)
             {
-                var (node, lo, hi) = stack.Pop();
+                mid = -1;
                 float x0 = float.PositiveInfinity, y0 = x0, z0 = x0, x1 = float.NegativeInfinity, y1 = x1, z1 = x1;
                 float c0x = x0, c0y = x0, c0z = x0, c1x = x1, c1y = x1, c1z = x1;
                 for (int i = lo; i < hi; i++)
@@ -212,15 +259,34 @@ public static partial class VehicleProbe
                 float ex = c1x - c0x, ey = c1y - c0y, ez = c1z - c0z;
                 int axis = ex >= ey && ex >= ez ? 0 : ey >= ez ? 1 : 2;
                 float extent = axis == 0 ? ex : axis == 1 ? ey : ez;
-                if (n <= 4 || !(extent > 0)) { start[node] = lo; count[node] = n; continue; }
-                int mid = lo + n / 2;
+                if (n <= 4 || !(extent > 0)) { start[node] = lo; count[node] = n; return false; }
+                mid = lo + n / 2;
                 Select(order, centroid[axis], lo, hi - 1, mid);   // median split on the widest axis of the centroids
-                int l = nodes; nodes += 2;
-                left[node] = l; count[node] = 0;
-                stack.Push((l, lo, mid)); stack.Push((l + 1, mid, hi));
+                left[node] = next; count[node] = 0;
+                return true;
             }
+            // the subtree at node over order[lo..hi), its descendants in the slots from `next`: the children at next and next + 1,
+            // the left child's descendants from next + 2, the right child's from next + 2 n_l. The two children of a large node
+            // build on two cores (the shape is the data's: a node's bounds and split depend on its triangles alone, and AnyHit
+            // asks for ANY hit, so the order of the work changes nothing); the median split halves the range, so the depth is log2 n
+            int grain = Math.Max(4096, nt / (8 * workers));
+            void Build(int node, int lo, int hi, int next)
+            {
+                if (!Node(node, lo, hi, next, out int mid)) return;
+                int l = left[node], nextLeft = next + 2, nextRight = next + 2 * (mid - lo);
+                if (hi - lo >= grain && workers > 1)
+                    System.Threading.Tasks.Parallel.Invoke(() => Build(l, lo, mid, nextLeft), () => Build(l + 1, mid, hi, nextRight));
+                else { Build(l, lo, mid, nextLeft); Build(l + 1, mid, hi, nextRight); }
+            }
+            Build(0, 0, nt, 1);
             t = new int[triangles.Length];
-            for (int i = 0; i < nt; i++) { t[i * 3] = triangles[order[i] * 3]; t[i * 3 + 1] = triangles[order[i] * 3 + 1]; t[i * 3 + 2] = triangles[order[i] * 3 + 2]; }
+            PerTriangle(nt, workers, (first, last) => { for (int i = first; i < last; i++) { t[i * 3] = triangles[order[i] * 3]; t[i * 3 + 1] = triangles[order[i] * 3 + 1]; t[i * 3 + 2] = triangles[order[i] * 3 + 2]; } });
+        }
+
+        static void PerTriangle(int nt, int workers, Action<int, int> range)
+        {
+            if (nt >= 16384 && workers > 1) System.Threading.Tasks.Parallel.For(0, workers, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = workers }, block => range((int)((long)nt * block / workers), (int)((long)nt * (block + 1) / workers)));
+            else range(0, nt);
         }
 
         static void Select(int[] order, float[] key, int lo, int hi, int k)   // quickselect: order[k] takes the k-th smallest key, the rest partition around it
@@ -330,7 +396,9 @@ public static partial class VehicleProbe
             for (int i = 0; i < pm.Tris.Length; i++) t[to + i] = pm.Tris[i] + vo;
             vo += pm.Count; to += pm.Tris.Length;
         }
+        var swv = System.Diagnostics.Stopwatch.StartNew();
         var bvh = new TriangleBvh(v, t);
+        Time(swv, $"  bvh build ({totalTris / 3} tris)");
         double largest = 0; foreach (var p in parts) largest = Math.Max(largest, Math.Max(p.Size[0], Math.Max(p.Size[1], p.Size[2])));
         double eps = Math.Max(1e-4, largest * 1e-3);
         for (int pi = 0; pi < parts.Count; pi++)
@@ -354,5 +422,6 @@ public static partial class VehicleProbe
             }
             parts[pi].Vis = seen ? 1 : 0;
         }
+        Time(swv, "  rays");
     }
 }

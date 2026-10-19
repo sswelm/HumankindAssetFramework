@@ -138,11 +138,23 @@ public static partial class VehicleProbe
     /// <summary>Mesh::face_normals() uses normal_calc_ngon even for triangles: Newell's sum, then normalize_v3
     /// (multiply by the reciprocal length). MeshPolygon.normal uses a triangle cross product instead; using that here
     /// changes fan spaces on thin triangles far from the origin. A zero normal is (0, 0, 1).</summary>
+    // A per-face loop of a large mesh on all cores, in ranges (the same bits whichever core computes a face: each face's result
+    // is its own corners' float32 arithmetic); below the threshold the custom-normal walk also keeps, serial.
+    static void PerFace(int nf, Action<int, int> range)
+    {
+        int workers = Math.Min(8, Environment.ProcessorCount);
+        if (nf >= 16384 && workers > 1)
+            Parallel.For(0, workers, new ParallelOptions { MaxDegreeOfParallelism = workers }, block => range((int)((long)nf * block / workers), (int)((long)nf * (block + 1) / workers)));
+        else range(0, nf);
+    }
+
     internal static float[] FaceNormals(float[] P, int[] tris)
     {
         int nf = tris.Length / 3;
         var FN = new float[nf * 3];
-        for (int f = 0; f < nf; f++)
+        PerFace(nf, (first, last) =>
+        {
+        for (int f = first; f < last; f++)
         {
             float nx = 0f, ny = 0f, nz = 0f;
             int prev = tris[f * 3 + 2] * 3;
@@ -158,6 +170,7 @@ public static partial class VehicleProbe
             if (nx == 0f && ny == 0f && nz == 0f) nz = 1.0f;
             FN[f * 3] = nx; FN[f * 3 + 1] = ny; FN[f * 3 + 2] = nz;
         }
+        });
         return FN;
     }
 
@@ -219,7 +232,9 @@ public static partial class VehicleProbe
         var FN = FaceNormals(P, tris);
         var sharpFace = new bool[nf];
         const float flatDot = 0.9999999f;
-        for (int f = 0; f < nf; f++)
+        PerFace(nf, (first, last) =>
+        {
+        for (int f = first; f < last; f++)
         {
             bool smooth = false, hasNormals = true;
             for (int k = 0; k < 3; k++)
@@ -230,6 +245,7 @@ public static partial class VehicleProbe
             }
             sharpFace[f] = !hasNormals || !smooth;
         }
+        });
         return sharpFace;
     }
 
