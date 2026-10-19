@@ -55,12 +55,12 @@ public static class BlenderVehicleRigInProcess
                 return false;
             }
             if (Stop()) return o;
-            string materialLimit = BlenderVehicleRig.ExportMaterialFallback(s, a);
+            string materialLimit = BlenderVehicleRig.ExportMaterialFallback(s, a, preserveJpegAlpha: true);
             if (materialLimit != null) { o.UseBlender = materialLimit; return o; }
             Tick(); BlenderVehicleRig.RunStage2(s, a); o.Log.AddRange(s.Logs2); if (Stop()) return o;
             Tick(); BlenderVehicleRig.RunStage3(s, a); o.Log.AddRange(s.Logs3); if (Stop()) return o;
             Tick(); BlenderVehicleRig.RunStage4(s, a); o.Log.AddRange(s.Logs4); if (Stop()) return o;
-            Tick(); var x = BlenderVehicleRig.RunStage5(s, a);
+            Tick(); var x = BlenderVehicleRig.RunStage5(s, a, preserveJpegAlpha: true);
             string completed = s.Logs5.LastOrDefault(l => l.StartsWith("VEHICLE RIG DONE:", StringComparison.Ordinal));
             o.Log.AddRange(s.Logs5.Where(l => !l.StartsWith("VEHICLE RIG DONE:", StringComparison.Ordinal))); if (Stop()) return o;
             Tick(); var file = BlenderGlbWriter.Build(x);

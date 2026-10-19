@@ -59,6 +59,91 @@ public static class UnityVehicleGenerateTests
         }
     }
 
+    static void NativeRigMeshPersistence()
+    {
+        string folder = "Assets/__haf_native_mesh_" + Guid.NewGuid().ToString("N");
+        AssetDatabase.CreateFolder("Assets", Path.GetFileName(folder));
+        GameObject root = null; var clones = new List<Mesh>();
+        try
+        {
+            root = new GameObject("Root");
+            var source = new Mesh { name = "Source" };
+            source.vertices = new[] { Vector3.zero, Vector3.right, Vector3.up }; source.triangles = new[] { 0, 1, 2 };
+            source.uv = new[] { Vector2.zero, Vector2.right, Vector2.up }; source.bindposes = new[] { Matrix4x4.identity };
+            source.boneWeights = Enumerable.Repeat(new BoneWeight { boneIndex0 = 0, weight0 = 1 }, 3).ToArray();
+            AssetDatabase.CreateAsset(source, folder + "/source.asset");
+            for (int i = 0; i < 2; i++)
+            {
+                var child = new GameObject("Body" + i); child.transform.SetParent(root.transform, false);
+                var smr = child.AddComponent<SkinnedMeshRenderer>(); smr.sharedMesh = source; smr.bones = new[] { root.transform }; smr.rootBone = root.transform;
+            }
+            string path = folder + "/rig.prefab"; var prefab = PrefabUtility.SaveAsPrefabAsset(root, path);
+            UnityEngine.Object.DestroyImmediate(root); root = null;
+            var renderers = prefab.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                var clone = UnityEngine.Object.Instantiate(renderers[i].sharedMesh); clones.Add(clone);
+                clone.uv = i == 0 ? new[] { new Vector2(.25f, .75f), Vector2.right, Vector2.up } : new Vector2[0];
+                renderers[i].sharedMesh = clone;
+            }
+            Check("native rig persists every transient mesh", UniversalBaker.PersistNativeRigMeshes(prefab, folder, "test") == 2, "both UV and no-UV clones become assets");
+            AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
+            var loaded = AssetDatabase.LoadAssetAtPath<GameObject>(path); renderers = loaded.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+            bool intact = renderers.Length == 2 && renderers.All(r => r.sharedMesh != null && AssetDatabase.Contains(r.sharedMesh) && r.sharedMesh.vertexCount == 3);
+            Check("native rig meshes survive prefab reload", intact, "SDK source retains persistent mesh references");
+            if (intact)
+            {
+                Check("native rig remapped UVs survive", renderers[0].sharedMesh.uv[0] == new Vector2(.25f, .75f) && renderers[1].sharedMesh.uv.Length == 0, "data preserved across SaveAssets and reimport");
+                Check("native rig persistence is idempotent", UniversalBaker.PersistNativeRigMeshes(loaded, folder, "test") == 0, "existing assets are retained");
+            }
+        }
+        finally
+        {
+            if (root != null) UnityEngine.Object.DestroyImmediate(root);
+            foreach (var mesh in clones) if (mesh != null && !AssetDatabase.Contains(mesh)) UnityEngine.Object.DestroyImmediate(mesh);
+            AssetDatabase.DeleteAsset(folder);
+        }
+    }
+
+    static void ImageEncodingParity()
+    {
+        string recipe = Path.Combine(fixtures, "recipes", "fx_e2_stances.json");
+        bool ok = VehicleLabWindow.GenerateHeadless(recipe, "Logs/image_encoding/source", "csharp", out string log, out string status, out string source, out string route, out _);
+        Check("image encoding source", ok && route == "csharp", status); if (!ok || route != "csharp") return;
+        var model = GlbReader.Read(source);
+        if (model.Images.Count == 0) model.Images.Add(new HafImage { Name = "Encoding" });
+        var image = model.Images[0]; image.Uri = "";
+        var texture = new Texture2D(8, 8, TextureFormat.RGBA32, false);
+        var decoded = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+        try
+        {
+            var colors = Enumerable.Range(0, 64).Select(i => new Color32((byte)(i * 3), (byte)(255 - i * 2), (byte)(i * 4), 255)).ToArray();
+            texture.SetPixels32(colors); texture.Apply(); byte[] jpeg = ImageConversion.EncodeToJPG(texture, 95);
+            if (!ImageConversion.LoadImage(decoded, jpeg)) throw new Exception("Synthetic JPEG did not decode.");
+            byte[] png = ImageConversion.EncodeToPNG(decoded);
+            string a = source + ".png.glb", b = source + ".jpeg.glb";
+            void Write(string path, string mime, byte[] bytes) { image.MimeType = mime; image.Bytes = bytes; GlbWriter.Write(model, path); }
+            Write(a, "image/png", png); Write(b, "image/jpeg", jpeg);
+            Check("image encoding exact RGBA control", VehicleGenerateAcceptanceTest.CompareOutputs(a, log, b, log, out _).Count == 0, "source JPEG and PNG decoded from it match, all other bytes held");
+            texture.SetPixels32(decoded.GetPixels32()); texture.Apply();
+            Write(b, "image/jpeg", ImageConversion.EncodeToPNG(texture));
+            Check("image encoding MIME mutation", VehicleGenerateAcceptanceTest.CompareOutputs(a, log, b, log, out _).Count > 0, "equal-pixel PNG payload falsely labelled JPEG is rejected");
+            colors = Enumerable.Repeat(new Color32(240, 10, 20, 255), 64).ToArray(); texture.SetPixels32(colors); texture.Apply();
+            Write(b, "image/jpeg", ImageConversion.EncodeToJPG(texture, 95));
+            Check("image encoding RGB mutation", VehicleGenerateAcceptanceTest.CompareOutputs(a, log, b, log, out _).Count > 0, "different JPEG pixels rejected");
+            Write(b, "image/jpeg", jpeg); var pixels = decoded.GetPixels32(); pixels[0].a = 127; texture.SetPixels32(pixels); texture.Apply();
+            Write(a, "image/png", ImageConversion.EncodeToPNG(texture));
+            Check("image encoding alpha mutation", VehicleGenerateAcceptanceTest.CompareOutputs(a, log, b, log, out _).Count > 0, "lost alpha rejected");
+            Write(a, "image/png", png); image.Name += " changed"; Write(b, "image/jpeg", jpeg);
+            Check("image encoding metadata mutation", VehicleGenerateAcceptanceTest.CompareOutputs(a, log, b, log, out _).Count > 0, "renamed image rejected");
+            image.Name = image.Name.Substring(0, image.Name.Length - " changed".Length);
+            model.Meshes[0].Primitives[0].Positions[0] += .125f; Write(b, "image/jpeg", jpeg);
+            Check("image encoding mesh mutation", VehicleGenerateAcceptanceTest.CompareOutputs(a, log, b, log, out _).Count > 0, "geometry change beside equal pixels rejected");
+        }
+        finally { UnityEngine.Object.DestroyImmediate(texture); UnityEngine.Object.DestroyImmediate(decoded); }
+    }
+
     static void Availability()
     {
         foreach(string editorDefault in new[]{"csharp","blender"})
@@ -165,7 +250,7 @@ public static class UnityVehicleGenerateTests
             var expected=Expected(reference,clips.Count>0?reference.Animations.FindIndex(an=>an.Name==clips[0].name):-1,0);
             go.transform.localScale*=1.1f;Check(key+" preview scale mutation",RigRouteAcceptanceTest.ComparePositionSets(expected,Rendered(go),tolerance,out _)!=null,"incorrect preview placement/scale rejected");go.transform.localScale=Vector3.one;
             Check(key+" no auxiliary FBX",!File.Exists(Path.Combine(Path.GetDirectoryName(pb),key+"_Spin_preview.fbx")),"C# preview consumes its GLB");
-            string copy=pb+".compare.glb";File.Copy(pb,copy,true);string gun=pb+".gun.txt";if(File.Exists(gun))File.Copy(gun,copy+".gun.txt",true);
+            string copy=pb+".compare.glb";File.Copy(pb,copy,true);string gun=pb+".gun.txt";if(File.Exists(gun))File.Copy(gun,copy+".gun.txt",true);else if(File.Exists(copy+".gun.txt"))File.Delete(copy+".gun.txt");
             Check("acceptance intact control",VehicleGenerateAcceptanceTest.CompareOutputs(pb,lb,copy,lb,out _).Count==0,"real written rig");
             Check("acceptance log mutation",VehicleGenerateAcceptanceTest.CompareOutputs(pb,lb,copy,lb.Replace("VEHICLE export totals:","VEHICLE export totals: changed"),out _).Count>0,"changed diagnostics rejected");
             File.WriteAllText(copy+".gun.txt","changed");Check("acceptance gun mutation",VehicleGenerateAcceptanceTest.CompareOutputs(pb,lb,copy,lb,out _).Count>0,"changed or spurious gun span rejected");
@@ -247,7 +332,7 @@ public static class UnityVehicleGenerateTests
         output=Arg("-hafGenerateOutput");fixtures=Arg("-hafGenerateFixtures");
         try
         {
-            ParallelNormals();Availability();SecondSourceFingerprint();foreach(string key in new[]{"fx_e2_stances","fx_e3_deploy","fx_f_layers"})Preview(key);
+            ParallelNormals();NativeRigMeshPersistence();ImageEncodingParity();Availability();SecondSourceFingerprint();foreach(string key in new[]{"fx_e2_stances","fx_e3_deploy","fx_f_layers"})Preview(key);
             StaleBaseline();
         }
         catch(Exception e){Check("exception",false,e.ToString());}
@@ -276,7 +361,7 @@ public static class UnityVehicleGenerateTests
         {
             var keys=new[]{"fx_e2_stances","fx_e3_deploy","fx_f_global","fx_f_layers","fx_f_merge_textures","fx_f_uv_inactive","fx_f_signed_zero"};
             var jobs=keys.Select(k=>Path.Combine(fixtures,"recipes",k+".json")).ToArray();
-            ParallelNormals();Availability();SecondSourceFingerprint();Persistence(jobs[0]);StaleBaseline();Recipes("fixtures",jobs,"Tools/fixture_goldens");
+            ParallelNormals();NativeRigMeshPersistence();ImageEncodingParity();Availability();SecondSourceFingerprint();Persistence(jobs[0]);StaleBaseline();Recipes("fixtures",jobs,"Tools/fixture_goldens");
             foreach(string key in new[]{"fx_e2_stances","fx_e3_deploy","fx_f_layers"})Preview(key);
             string saved=Arg("-hafGenerateRecipes");if(Directory.Exists(saved))Recipes("saved",Directory.GetFiles(saved,"*.json"),"Tools/lab_golden");else Check("saved recipes",false,"recipes not found");
         }

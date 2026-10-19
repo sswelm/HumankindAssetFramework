@@ -51,6 +51,7 @@ public static class BlenderMaterialExport
     public sealed class Result
     {
         public string Fallback;
+        public readonly HashSet<int> RetainedJpegAlphaImages = new HashSet<int>();
         public readonly List<string> Names = new List<string>();            // the Blender material names, in the written order
         public readonly List<JObject> Materials = new List<JObject>();
         public readonly List<(int image, int sampler)> Textures = new List<(int, int)>();
@@ -60,8 +61,9 @@ public static class BlenderMaterialExport
     }
 
     /// <summary>The materials of a file as prep_model.py's export writes them: in the order the exporter's tree lists them
-    /// (first use along the serializer's walk), a texture per slot, an image per source image, a sampler per value.</summary>
-    public static Result Build(HafModel m, BlenderNames.Result names)
+    /// (first use along the serializer's walk), a texture per slot, an image per source image, a sampler per value.
+    /// Production callers can preserve alpha-reading JPEGs (glTF alpha=1); the default keeps the strict Blender oracle.</summary>
+    public static Result Build(HafModel m, BlenderNames.Result names, bool preserveJpegAlpha = false)
     {
         var world = VehicleProbe.BlenderWorldMatrices(m, null);
         var materialsOfMesh = new Dictionary<int, List<string>>();
@@ -84,12 +86,12 @@ public static class BlenderMaterialExport
             materialsOfMesh[n] = list;
         }
         var tree = BlenderExportTree.Build(m, names, world, withFaces, null, mn => materialsOfMesh.TryGetValue(mn, out var l) ? l : new List<string>(), bones: false);
-        return Build(m, names, tree.Materials);
+        return Build(m, names, tree.Materials, preserveJpegAlpha: preserveJpegAlpha);
     }
 
     /// <summary>The materials named, in that order (the Blender material names BlenderNames gives). meshUvSets, when
     /// supplied, describes the final meshes by material name instead of the imported meshes (the rig join).</summary>
-    public static Result Build(HafModel m, BlenderNames.Result names, IList<string> blenderNames, IDictionary<string, int> meshUvSets = null)
+    public static Result Build(HafModel m, BlenderNames.Result names, IList<string> blenderNames, IDictionary<string, int> meshUvSets = null, bool preserveJpegAlpha = false)
     {
         var r = new Result();
         var problems = new List<string>(); if (meshUvSets == null) BlenderExportTree.MaterialUvProblems(m, problems);
@@ -112,7 +114,7 @@ public static class BlenderMaterialExport
                 uvSets[variant] = Math.Max(uvSets.TryGetValue(variant, out int s) ? s : 0, sets);
             }
         }
-        var ctx = new Context(m, r);
+        var ctx = new Context(m, r, preserveJpegAlpha);
         ctx.PreNumber(names.MaterialsInOrder, sourceOf);
         foreach (string name in blenderNames)
         {
@@ -146,7 +148,8 @@ public static class BlenderMaterialExport
         readonly Dictionary<string, int> samplerOf = new Dictionary<string, int>(StringComparer.Ordinal);
         readonly BlenderNames.NamePool imagePool = new BlenderNames.NamePool();
         readonly Dictionary<int, string> blenderImageName = new Dictionary<int, string>();
-        public Context(HafModel m, Result r) { M = m; R = r; }
+        readonly bool preserveJpegAlpha;
+        public Context(HafModel m, Result r, bool preserveJpegAlpha) { M = m; R = r; this.preserveJpegAlpha = preserveJpegAlpha; }
 
         /// <summary>The importer makes the images as it builds the materials - in the order the meshes use them, each
         /// material's slots emissive, base colour (or the diffuse), metallic-roughness, normal, occlusion, then the
@@ -217,6 +220,12 @@ public static class BlenderMaterialExport
                 saysJpeg = lower.EndsWith(".jpg") || lower.EndsWith(".jpeg") || lower.EndsWith(".jpe");
             }
             string mime = alphaRead ? "image/png" : saysJpeg ? "image/jpeg" : "image/png";
+            // A JPEG has alpha=1 in glTF. Production Generate may keep those source bytes rather than
+            // recompress RGB into Blender's PNG. Retain the requested MIME in the dedup key so an opaque
+            // and an alpha-reading use still have the same separate image indices as Blender's export.
+            string requestedMime = mime;
+            if (preserveJpegAlpha && alphaRead && jpeg && PortableJpegHeader(im.Bytes))
+                mime = "image/jpeg";
             if (mime == "image/png" && !png) throw new LeftException($"image {source}: " + (alphaRead ? "a JPEG whose alpha is read (the exporter writes it again as PNG)" : "a file named as a PNG that holds JPEG bytes (encoded again)"));
             if (mime == "image/jpeg" && !jpeg) throw new LeftException($"image {source}: a file named as a JPEG that holds PNG bytes (encoded again)");
             // __gather_name: the file's stem when the image came from a .png/.jpg/.jpeg file, else the Blender name without its extension
@@ -231,9 +240,10 @@ public static class BlenderMaterialExport
             if (name == null) { name = SplitExt(blenderName); if (name.Length == 0) name = "Image"; }
             // __make_image is cached on the bytes, the MIME type and the name: two source images alike in all three are one
             // written image (BinaryData compares its bytes); alike in bytes alone they are two (the T-62: 112 twins)
-            string key = mime + "\t" + name + "\t" + Sha(im.Bytes);
-            if (imageOf.TryGetValue(key, out int done)) return done;
+            string key = requestedMime + "\t" + name + "\t" + Sha(im.Bytes);
+            if (imageOf.TryGetValue(key, out int done)) { if (requestedMime != mime) R.RetainedJpegAlphaImages.Add(done); return done; }
             R.Images.Add((name, mime, im.Bytes, source));
+            if (requestedMime != mime) R.RetainedJpegAlphaImages.Add(R.Images.Count - 1);
             imageOf[key] = R.Images.Count - 1;
             return R.Images.Count - 1;
         }
@@ -500,6 +510,34 @@ public static class BlenderMaterialExport
     {
         var a = ImageSize(m, m.Textures[textureA].Source); var b = ImageSize(m, m.Textures[textureB].Source);
         return a.HasValue && b.HasValue && a.Value == b.Value;
+    }
+
+    // The glTF JPEG subset: 8-bit grayscale/YCbCr with SOF0, SOF1 or SOF2 and declared dimensions.
+    // In particular, do not replace Blender's CMYK/high-precision conversion with a nonportable JPEG.
+    static bool PortableJpegHeader(byte[] d)
+    {
+        if (d == null || d.Length < 4 || d[0] != 0xff || d[1] != 0xd8) return false;
+        int p = 2;
+        while (p + 4 <= d.Length)
+        {
+            if (d[p++] != 0xff) return false;
+            while (p < d.Length && d[p] == 0xff) p++;
+            if (p >= d.Length) return false;
+            int marker = d[p++];
+            if (marker == 0xd8 || marker == 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+            if (marker == 0xda || marker == 0xd9 || p + 2 > d.Length) return false;
+            int length = (d[p] << 8) | d[p + 1];
+            if (length < 2 || length > d.Length - p) return false;
+            if (marker >= 0xc0 && marker <= 0xcf && marker != 0xc4 && marker != 0xc8 && marker != 0xcc)
+            {
+                if (length < 8) return false;
+                int components = d[p + 7];
+                return marker <= 0xc2 && d[p + 2] == 8 && (components == 1 || components == 3) && length == 8 + 3 * components &&
+                    ((d[p + 3] << 8) | d[p + 4]) > 0 && ((d[p + 5] << 8) | d[p + 6]) > 0;
+            }
+            p += length;
+        }
+        return false;
     }
 
     internal static (int w, int h)? ImageSize(HafModel m, int image)

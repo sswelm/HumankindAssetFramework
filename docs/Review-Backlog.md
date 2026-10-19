@@ -578,6 +578,19 @@ complete with no failures (22 C#, three named Blender fallbacks), and all 52 inp
 stale-baseline regression now changes its own fixture instead of requiring the user's Espana golden to stay stale; it also
 verifies a refreshed baseline. Details and the remaining checklist: [Vehicle Generate acceptance](Vehicle-Generate-Acceptance.md).
 Next: the user's visual/runtime acceptance before (h), the default flip. d6 remains deferred; the shipped Generate default stays Blender.
+Native JPEG-alpha export (2026-10-19): production Generate retains the original JPEG, whose glTF alpha is 1, rather
+than requiring Blender's PNG re-encoding. Espana now generates through C#. Acceptance checks identical decoded RGBA
+pixels and strict non-image GLB bytes/JSON; the stage oracle keeps its original byte-exact rules. Image brightness
+editing, moving treads and the other named limits remain separate work. Neither backend default changes.
+- **Native SDK skeleton smoke test** — FIXED (2026-10-19). Native multi-material atlas remapping assigned transient
+  meshes to the saved GLB rig prefab; SaveAssets could serialize missing mesh references before skeleton import,
+  producing a NullReferenceException in `Skeleton.FillBoneEntry` at IL 0x1b (also reproduced with a PNG control).
+  Persist every transient skinned mesh in the owned native `anim/` cache and save the prefab before the atlas
+  SaveAssets/Refresh. A native regression reloads two renderers, including a no-UV mesh, and checks data and
+  idempotence. An isolated Espana wave variant reduced to 20,000 triangles completes the C# SDK skeleton/clip bake.
+  The unreduced variant exceeds the ordinary eight-fragment budget; the current user's recipe has no animated
+  channels. Only the throwaway smoke test enables wave rock; no user source/recipe or production golden changed.
+
 - **vehicle_rig.py: two gun-recoil defects** — OPEN (2026-10-16, found porting stage 3 part d3; the C# port reproduces both bit
   for bit, so fixing them is a script change plus a port change). (1) With `gun_pivot` at 1.0 and recoil on, the bore direction is
   `(gun_axis[1] - gun_axis[0]).normalized()` with `gun_axis[0]` the head - at the muzzle - so the bore is the float32 residue of

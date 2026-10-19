@@ -217,7 +217,7 @@ public static partial class BlenderVehicleRig
     // Generate can decline known material limits before reduction/rigging. Use only slots referenced by faces
     // after stage 1 (ignored parts are already gone); unused and vertex-only slots cannot force a fallback.
     // This builds the same material context as stage 5 without replacing the import scene's model or name maps.
-    internal static string ExportMaterialFallback(BlenderRigAnim.Stage1 s, Args a)
+    internal static string ExportMaterialFallback(BlenderRigAnim.Stage1 s, Args a, bool preserveJpegAlpha = false)
     {
         if (!PrepareExportMaterials(s, a, out var model, out var names)) return s.Fallback;
         var used = new List<string>(); var uvSets = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -232,11 +232,11 @@ public static partial class BlenderVehicleRig
                 uvSets[name] = Math.Max(uvSets.TryGetValue(name, out int count) ? count : 0, mesh.UvAll.Count);
             }
         }
-        string why = BlenderMaterialExport.Build(model, names, used, uvSets).Fallback;
+        string why = BlenderMaterialExport.Build(model, names, used, uvSets, preserveJpegAlpha).Fallback;
         return why == null ? null : "stage 5: the GLB export (" + why + ") is not modelled yet";
     }
 
-    public static BlenderDeployExport.Result RunStage5(BlenderRigAnim.Stage1 s, Args a)
+    public static BlenderDeployExport.Result RunStage5(BlenderRigAnim.Stage1 s, Args a, bool preserveJpegAlpha = false)
     {
         if (s.Fallback != null || s.Exits || s.Dies != null) return null;
         if (!PrepareExportMaterials(s, a, out var materials, out var materialNames)) return null;
@@ -278,7 +278,7 @@ public static partial class BlenderVehicleRig
         var all = s.Objects.Where(o => o.Type == "MESH" && o.Mesh.Vertices > 0).ToList(); int verts = all.Sum(o => o.Mesh.Vertices), tris = all.Sum(o => o.Mesh.Faces.Length / 3);
         s.Logs5.Add("VEHICLE export totals: " + verts + " verts, " + tris + " tris across " + all.Count + " mesh(es)");
         int current = s.FrameCurrent;
-        var x = BlenderRigExport.BuildVehicle(s, f => EvaluateExportFrame(s, f));
+        var x = BlenderRigExport.BuildVehicle(s, f => EvaluateExportFrame(s, f), preserveJpegAlpha);
         if (x.Fallback != null) { s.Fallback = "stage 5: the GLB export (" + x.Fallback + ") is not modelled yet"; return x; }
         // The exporter validates the original mesh; totals above were printed before that validation.
         foreach (var o in all)

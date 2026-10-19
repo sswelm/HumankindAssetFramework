@@ -240,6 +240,10 @@ in the Model Factory Settings. An existing output GLB is preserved when Blender 
 The editor default remains Blender. Change it explicitly through **Tools ▸ HAF ▸ Vehicle Generate default**.
 The C# path generates supported glTF rigs in-process and previews the written GLB. Source-skeleton rigs, other source
 formats, moving treads and named image-editing limits use Blender; the status names the backend and fallback reason.
+For alpha-reading JPEG textures, C# retains the original JPEG: glTF defines its texture alpha as 1, so material
+and vertex alpha still apply normally. Blender converts that image to PNG instead. Backend acceptance verifies
+identical decoded RGBA pixels and checks every other GLB field and non-image buffer byte. Brightness edits that
+require changing texture pixels remain a named Blender limit.
 C# replaces the output after the new GLB is complete; cancellation preserves the previous file. The backend acceptance row in **Bake Tests** generates
 every saved recipe both ways and checks its GLB, diagnostics, gun span sidecar and Lab golden. A named fallback is
 reported separately from a C# pass.

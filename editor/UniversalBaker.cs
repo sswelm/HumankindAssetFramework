@@ -859,6 +859,7 @@ public static class UniversalBaker
         Texture2D atlas = multiMat
             ? BuildMultiAtlasAndRemap(fbxGo, orderedAlb, name, cfg, out previewMeshes)   // pack + remap the skinned mesh UVs in place (SetPrefab below reads them)
             : BuildAtlas(resDir, name, cfg.albedoBrightness, cfg.albedoSaturation);
+        if (glbRoute && multiMat) PersistNativeRigMeshes(fbxGo, animDir, name);
         atlas = FinalizeAtlas(atlas, name, cfg.atlasMaxDim);   // cap resolution + DXT1-compress (keeps the shipped _Atlas.asset small)
         string atlasPath = "Assets/Resources/" + name + "_Atlas.asset";
         AssetDatabase.DeleteAsset(atlasPath);
@@ -1195,6 +1196,26 @@ public static class UniversalBaker
             string old = AssetDatabase.GUIDToAssetPath(guid);
             if (old.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase) || old.EndsWith(".asset", StringComparison.OrdinalIgnoreCase) || old.EndsWith(".mat", StringComparison.OrdinalIgnoreCase)) AssetDatabase.DeleteAsset(old);
         }
+    }
+
+    // A native rig is an editable prefab asset. Atlas remapping assigns transient mesh clones;
+    // persist every such SMR mesh before SaveAssets/Refresh can serialize a missing mesh reference.
+    internal static int PersistNativeRigMeshes(GameObject prefab, string animDir, string name)
+    {
+        int count = 0;
+        var seen = new HashSet<Mesh>();
+        foreach (var renderer in prefab.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+        {
+            var mesh = renderer.sharedMesh;
+            if (mesh == null) throw new InvalidOperationException("Native rig renderer '" + renderer.name + "' has no mesh before atlas persistence.");
+            if (AssetDatabase.Contains(mesh) || !seen.Add(mesh)) continue;
+            mesh.hideFlags = HideFlags.None;
+            string path = animDir + "/" + name + "_rigmesh_atlas" + count++ + ".asset";
+            AssetDatabase.DeleteAsset(path);
+            AssetDatabase.CreateAsset(mesh, path);
+        }
+        PrefabUtility.SavePrefabAsset(prefab);
+        return count;
     }
 
     /// <summary>The baked rig a preview reads for a role folder ("anim" = the primary clip, "anim_&lt;role&gt;" = a state role): the

@@ -55,12 +55,12 @@ public static class BlenderRigExport
 
     /// <summary>The export of the stage 4 scene (RunStage4 ran through). Evaluates the scene at the widened range's first
     /// frame, as the export step does.</summary>
-    public static BlenderDeployExport.Result Build(BlenderRigAnim.Stage1 s, BlenderRigAnim.Args a)
-        => BuildCore(s, false, null);
+    public static BlenderDeployExport.Result Build(BlenderRigAnim.Stage1 s, BlenderRigAnim.Args a, bool preserveJpegAlpha = false)
+        => BuildCore(s, false, null, preserveJpegAlpha);
 
-    public static BlenderDeployExport.Result BuildVehicle(BlenderRigAnim.Stage1 s, Action<int> evaluateFrame) => BuildCore(s, true, evaluateFrame);
+    public static BlenderDeployExport.Result BuildVehicle(BlenderRigAnim.Stage1 s, Action<int> evaluateFrame, bool preserveJpegAlpha = false) => BuildCore(s, true, evaluateFrame, preserveJpegAlpha);
 
-    static BlenderDeployExport.Result BuildCore(BlenderRigAnim.Stage1 s, bool vehicle, Action<int> evaluateFrame)
+    static BlenderDeployExport.Result BuildCore(BlenderRigAnim.Stage1 s, bool vehicle, Action<int> evaluateFrame, bool preserveJpegAlpha = false)
     {
         var x = new BlenderDeployExport.Result();
         if (s.Fallback != null) { x.Fallback = s.Fallback; return x; }
@@ -291,7 +291,7 @@ public static class BlenderRigExport
         foreach (var o in objs.Where(o => o.Type == "MESH"))
             foreach (var name in o.Mesh.Materials.Where(name => name != null))
                 materialUvs[name] = o.Mesh.UvAll.Count;
-        x.MaterialRows = BlenderMaterialExport.Build(m, names, x.Materials, materialUvs);
+        x.MaterialRows = BlenderMaterialExport.Build(m, names, x.Materials, materialUvs, preserveJpegAlpha);
         if (x.MaterialRows.Fallback != null) { x.Fallback = x.MaterialRows.Fallback; return x; }
         // the albedo: stage 4 saved the image as a PNG (image.save), so the exporter names it after the file's stem and
         // packs the bytes Blender's encoder wrote - unknown here (null: compared by name and type)

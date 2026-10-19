@@ -100,7 +100,12 @@ public static class BlenderRigAnimHeadlessTest
                     try
                     {
                         HafModel ma = GlbReader.Read(glbA), mb = GlbReader.Read(glbB);
-                        if (jpegAlbedo)
+                        if (inProc.RetainedJpegAlphaImages.Count > 0)
+                        {
+                            reason = VehicleGenerateAcceptanceTest.ImageEncodingDifference(mb, ma, b, a);
+                            if (reason == null) bytesNote = " with exact RGBA source-JPEG parity and strict non-image bytes";
+                        }
+                        else if (jpegAlbedo)
                         {
                             // Blender's file carries its PNG re-encode of the JPEG albedo, the port's the source JPEG: the models must agree with the image bytes aside
                             reason = HafModelDiff.FirstDifference(ma, mb, inProc.SourceImageFallbacks);
