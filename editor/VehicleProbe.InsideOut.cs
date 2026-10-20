@@ -75,29 +75,48 @@ public static partial class VehicleProbe
         if (ys.Count == 0) return;
         double cy = 0.5 * ((double)ys.Min() + (double)ys.Max());
         zs.Sort(); double cz = zs[zs.Count / 4];
-        for (int pi = 0; pi < parts.Count; pi++)
+        int workers = Math.Min(8, Environment.ProcessorCount);
+        // every part's verdict is its own (the hull axis above is the one shared input): the parts run on all cores, and a part's
+        // faces too - each face's dot is pure float32/double arithmetic, the same on any thread; only the SUM keeps face order
+        System.Threading.Tasks.Parallel.For(0, parts.Count, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = workers }, pi =>
         {
             var pm = meshes[pi]; var mb = mats[pi];
             int nf = pm.Tris.Length / 3;
-            if (nf == 0) { parts[pi].Flip = 0; continue; }
-            // faces sharing an edge are one island: union-find over the faces, the edges keyed by their vertex pair and sorted
-            var keys = new long[nf * 3]; var owner = new int[nf * 3];
-            for (int f = 0; f < nf; f++)
-                for (int k = 0; k < 3; k++)
-                {
-                    int a = pm.Tris[f * 3 + k], b = pm.Tris[f * 3 + (k + 1) % 3];
-                    keys[f * 3 + k] = (long)Math.Min(a, b) << 32 | (uint)Math.Max(a, b); owner[f * 3 + k] = f;
-                }
-            Array.Sort(keys, owner);
+            if (nf == 0) { parts[pi].Flip = 0; return; }
+            // faces sharing an edge are one island: union-find over the faces, the corners' edges bucketed by their lower vertex (a
+            // counting sort: two passes) and, within a bucket, matched on the higher one - the same pairs a full sort would find.
+            // Small buckets have bounded pairwise work; sort large ones so a fan hub cannot turn this into a quadratic scan.
+            int nv = pm.Count;
+            var bucketStart = new int[nv + 1];
+            for (int c = 0; c < nf * 3; c++) { int f = c / 3, k = c - f * 3; bucketStart[Math.Min(pm.Tris[c], pm.Tris[f * 3 + (k + 1) % 3]) + 1]++; }
+            for (int i = 0; i < nv; i++) bucketStart[i + 1] += bucketStart[i];
+            var fill = (int[])bucketStart.Clone(); var high = new int[nf * 3]; var owner = new int[nf * 3];
+            for (int c = 0; c < nf * 3; c++)
+            {
+                int f = c / 3, k = c - f * 3, a = pm.Tris[c], b = pm.Tris[f * 3 + (k + 1) % 3];
+                int slot = fill[Math.Min(a, b)]++; high[slot] = Math.Max(a, b); owner[slot] = f;
+            }
             var parent = new int[nf]; for (int i = 0; i < nf; i++) parent[i] = i;
             int Find(int x) { while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
-            for (int i = 1; i < keys.Length; i++)
-                if (keys[i] == keys[i - 1]) { int ra = Find(owner[i]), rb = Find(owner[i - 1]); if (ra != rb) parent[Math.Max(ra, rb)] = Math.Min(ra, rb); }
-            var dsum = new Dictionary<int, double>(); var dn = new Dictionary<int, int>();
-            for (int f = 0; f < nf; f++)
+            void Join(int a, int b) { int ra = Find(a), rb = Find(b); if (ra != rb) parent[Math.Max(ra, rb)] = Math.Min(ra, rb); }
+            for (int lo = 0; lo < nv; lo++)
             {
-                int root = Find(f);
-                if (!dn.ContainsKey(root)) { dsum[root] = 0; dn[root] = 0; }
+                int first = bucketStart[lo], last = bucketStart[lo + 1];
+                if (last - first <= 16)
+                {
+                    for (int i = first; i < last; i++) for (int j = i + 1; j < last; j++) if (high[i] == high[j]) Join(owner[i], owner[j]);
+                }
+                else
+                {
+                    Array.Sort(high, owner, first, last - first);
+                    for (int i = first + 1; i < last; i++) if (high[i] == high[i - 1]) Join(owner[i], owner[i - 1]);
+                }
+            }
+            // per face: the dot of its world normal with the radial, or NaN for a face that does not count (a degenerate radial or normal)
+            var dots = new double[nf];
+            void Face(int f)
+            {
+                dots[f] = double.NaN;
                 int ia = pm.Tris[f * 3], ib = pm.Tris[f * 3 + 1], ic = pm.Tris[f * 3 + 2];
                 // the corners in Blender's frame, float32 as the mesh holds them
                 float ax = pm.Local[ia * 3], ay = -pm.Local[ia * 3 + 2], az = pm.Local[ia * 3 + 1];
@@ -124,12 +143,21 @@ public static partial class VehicleProbe
                 if (radLen > 1e-6 && wnLen > 1e-9)
                 {
                     float rx = 0f; NormalizeVn(ref wx, ref wy, ref wz); NormalizeVn(ref rx, ref ry, ref rz);
-                    dsum[root] += DotVn(wx, wy, wz, rx, ry, rz); dn[root]++;
+                    dots[f] = DotVn(wx, wy, wz, rx, ry, rz);
                 }
+            }
+            if (nf >= 16384) System.Threading.Tasks.Parallel.For(0, nf, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = workers }, Face);
+            else for (int f = 0; f < nf; f++) Face(f);
+            var dsum = new Dictionary<int, double>(); var dn = new Dictionary<int, int>();
+            for (int f = 0; f < nf; f++)
+            {
+                int root = Find(f);
+                if (!dn.ContainsKey(root)) { dsum[root] = 0; dn[root] = 0; }
+                if (!double.IsNaN(dots[f])) { dsum[root] += dots[f]; dn[root]++; }
             }
             int reversed = 0;
             foreach (var root in dn.Keys) if (dn[root] > 0 && dsum[root] / dn[root] < -0.25) reversed++;
             parts[pi].Flip = reversed;
-        }
+        });
     }
 }

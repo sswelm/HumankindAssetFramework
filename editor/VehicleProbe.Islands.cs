@@ -53,7 +53,8 @@ public static partial class VehicleProbe
         // ---- mesh_calc_edges: the edge array, then each vertex's edges in creation order (its BMesh disk cycle)
         int faceCount = faces.Count / 3;
         int maps = faceCount < 1000 ? 1 : 8; int mask = maps - 1;
-        var seen = new HashSet<long>(); var perMap = new List<(int a, int b)>[maps + 1];   // [0]: the file's loose edges, then the buckets
+        // long's own hash XORs its halves, so a grid's (lo, hi) keys collide into a few chains (2.1 s for 216k edges): the mixing comparer
+        var seen = new HashSet<long>(PairKeyComparer.Instance); var perMap = new List<(int a, int b)>[maps + 1];   // [0]: the file's loose edges, then the buckets
         for (int i = 0; i <= maps; i++) perMap[i] = new List<(int, int)>();
         void Add(int a, int b, int map)
         {

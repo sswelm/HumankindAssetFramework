@@ -107,11 +107,15 @@ public static partial class VehicleProbe
         finally { usedCache = previous; }
     }
 
+    static readonly bool DebugTime = Environment.GetEnvironmentVariable("VEHICLEPROBE_DEBUG_TIME") == "1";
+    static void Time(System.Diagnostics.Stopwatch sw, string what) { if (DebugTime) Console.Error.WriteLine($"TIME   {what} {sw.ElapsedMilliseconds} ms"); sw.Restart(); }
+
     static Result RunCore(Input input)
     {
         var r = new Result();
         foreach (var w in input.Warnings) r.Notes.Add("WARN: " + w);
         input.Progress?.Invoke("naming");
+        var swn = System.Diagnostics.Stopwatch.StartNew();
         var A = MakeSource(input.Model, 0, null, posed: true);
         var objsA = MeshObjects(A, r, "");
         var pool = A.Names.ObjectPool;   // every object name in the scene, as Blender's name map holds them
@@ -174,6 +178,7 @@ public static partial class VehicleProbe
             else foreach (var (node, name) in objs) specs.Add(new PartSpec { Src = src, Node = node, Name = name });
         }
         specs.AddRange(extras);
+        Time(swn, "naming and split");
 
         // ---- the parts: name, vertex count, world box, dominant bone - the box through the double chain (tolerance in the drill)
         input.Progress?.Invoke("parts");
@@ -224,14 +229,20 @@ public static partial class VehicleProbe
         //      escape rays; then the inside-out verdict in the Lab's orientation
         if (specs.Count > 0)
         {
+            var swp = System.Diagnostics.Stopwatch.StartNew();
             var partMeshes = new List<PartMesh>(); var mats = new List<float[]>();   // per part: Blender's matrix_world (the armature's for a skinned part; identity for a baked one)
             float[] orient = input.ProbeRotation != null ? ProbeOrientMatrix(input.ProbeRotation) : null;
-            foreach (var s in specs)
+            // the per-part inputs first, serially (the skinner is built once per skin and cached on the source), then every part's
+            // mesh on its own core - BuildPartMesh reads the model and the skinner's tables only; a worker's Used() cache is its
+            // own (thread-static), computed again per primitive it meets - and the Parts written back in order
+            var positions = new Func<HafPrimitive, int, double[]>[specs.Count]; var normals = new Func<HafPrimitive, int, double[]>[specs.Count];
+            var mbs = new float[specs.Count][]; var pms = new PartMesh[specs.Count];
+            for (int si = 0; si < specs.Count; si++)
             {
-                var m = s.Src.M; var mesh = m.Meshes[m.Nodes[s.Node].Mesh]; int skin = m.Nodes[s.Node].Skin; bool skinned = s.Skinned;
+                var s = specs[si]; var m = s.Src.M; int skin = m.Nodes[s.Node].Skin;
                 Func<HafPrimitive, int, double[]> position = (p, v) => new double[] { p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2] };
                 Func<HafPrimitive, int, double[]> normal = (p, v) => p.Normals == null ? null : new double[] { p.Normals[v * 3], p.Normals[v * 3 + 1], p.Normals[v * 3 + 2] };
-                if (skinned)
+                if (s.Skinned)
                 {
                     // the mesh data as the importer stores it: positions and normals skinned into the bind pose in numpy float32, with
                     // the joint matrices mathutils gave it (VehicleProbe.BlenderSkin.cs) - a zero-area triangle's verdict hangs on these
@@ -241,8 +252,19 @@ public static partial class VehicleProbe
                     position = (p, v) => GltfOf(sknr.Position(p, v));   // an unskinned primitive of the mesh too: joint 0 (BlenderSkinner's rule)
                     normal = (p, v) => p.Normals == null ? null : GltfOf(sknr.Normal(p, v));
                 }
-                var mb = MatrixOf(s);
-                var pm = BuildPartMesh(m, s.Node, s.Prim, s.Verts, position, normal, mb, s.Src.Index == 1 ? s.Src.Target[s.Node] : null);
+                positions[si] = position; normals[si] = normal; mbs[si] = MatrixOf(s);
+            }
+            System.Threading.Tasks.Parallel.For(0, specs.Count, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = Math.Min(8, Environment.ProcessorCount) }, si =>
+            {
+                var s = specs[si];
+                var previous = usedCache; usedCache = new Dictionary<HafPrimitive, int[]>();
+                try { pms[si] = BuildPartMesh(s.Src.M, s.Node, s.Prim, s.Verts, positions[si], normals[si], mbs[si], s.Src.Index == 1 ? s.Src.Target[s.Node] : null); }
+                finally { usedCache = previous; }
+            });
+            for (int si = 0; si < specs.Count; si++)
+            {
+                var s = specs[si]; var m = s.Src.M; bool skinned = s.Skinned;
+                var mb = mbs[si]; var pm = pms[si];
                 pm.Source = s.Src.Index;
                 partMeshes.Add(pm); mats.Add(orient == null ? mb : MatMulMathutils(orient, mb));
                 s.Part.BlenderMatrix = mb; s.Part.Mesh = pm;
@@ -254,11 +276,14 @@ public static partial class VehicleProbe
                 for (int a = m.Nodes[s.Node].Parent; a >= 0 && !underBone; a = m.Nodes[a].Parent) underBone = names.IsBone[a];
                 s.Part.UnderBone = !skinned && underBone;
             }
+            Time(swp, "part meshes");
             input.Progress?.Invoke("visibility");
             Visibility(r.Parts, partMeshes);
+            Time(swp, "visibility");
             r.Notes.Add($"visibility: {r.Parts.Count(p => p.Vis == 1)} external / {r.Parts.Count(p => p.Vis != 1)} interior part(s)");
             input.Progress?.Invoke("inside-out");
             InsideOut(r.Parts, partMeshes, mats);
+            Time(swp, "inside-out");
             r.Notes.Add($"inside-out verdicts: {r.Parts.Count(p => p.Flip > 0)} part(s) hold interior-facing islands (the fix would reverse them)");
         }
 

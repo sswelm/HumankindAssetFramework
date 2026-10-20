@@ -3234,3 +3234,39 @@ diagnostic templates. JPEG classification reads through the header to the first 
 changes with that policy. All 2,107 unit tests and isolated native Unity RunChecks pass. RunChecks also exercises
 the real preview writer, verifies independent copies of every mesh, deletes the source rig meshes and reimports
 the preview to verify its references survive. No user project assets or goldens are changed by these checks.
+
+**The probe on all cores (2026-10-19).** Measured first (`VEHICLEPROBE_DEBUG_TIME=1` prints the phases on stderr, as the rig's
+switch does): on the Salegs (121 MB, 3.6M triangles) the C# probe took 4.1 s - the part meshes 1.5 s wall for 5.4 s CPU (the
+custom-normal walk alone ran in parallel), the visibility 1.5 s of which the BVH build 1.46 s and the rays 5 ms, the inside-out
+verdict 0.7 s, all on one core; and the `big` fixture (a 72k-vertex grid, one island) took 2.5 s, 2.1 s of it in the island
+walk's edge set: `HashSet<long>` with long's own hash, which XORs the halves of a packed (lo, hi) key - a grid's keys collide
+into a few chains (the lesson of BlenderMesh.EdgeKeyComparer, 2026-10-16, in a file that predates it). Changed, every bit the
+same: the BVH builds its subtrees on two cores per split (`Parallel.Invoke`), each subtree owning exactly 2n - 2 slots so the
+numbering is the data's, with the centroid and leaf-order loops per triangle in ranges (the shape - every node's bounds, split
+axis and median - depends on its triangles alone, and AnyHit asks for ANY hit); the inside-out verdict runs the parts on all
+cores and a large part's faces in ranges, the island average still SUMMED in face order, the islands found by bucketing each
+corner's edge under its lower vertex (a counting sort) instead of sorting every packed key; the part meshes build per part on a
+worker with its own thread-static Used() cache, the per-face loops (face normals, the sharp-face test) and the per-vertex
+transform in ranges past 16,384 elements, the lists sized up front and the duplicate-face test an open-addressing table of
+packed 63-bit keys (a part under 2^21 vertices; the tuple set otherwise); the island walk's edge set takes PairKeyComparer.
+Measured after: the 84 drill inputs (25 recipe sources, the reader and naming fixtures) 16.25 s -> 4.66 s, every one of the
+12,967 probe rows byte-identical; the Salegs 4.08 -> 1.55 s (BVH 0.24 s, inside-out 0.17 s, part meshes 0.73 s - its 1.15M-vertex
+hull's gather and normals are the critical path now), the Bremen 1.17 -> 0.30 s, the Espana 1.12 -> 0.39 s, the Khelandion
+0.83 -> 0.24 s, the `big` fixture 2.49 -> 0.22 s. Three unit cases (the packed face set against the tuple set on a grid with
+twins, the parallel BVH's rays against the plate, two box islands through the bucketed edges): 2,110 tests; the probe drill's
+Blender comparison runs in the gate.
+
+The critical review of PR #195 added a high-valence cone, tiny loose parts and non-polygon primitives. Matching every
+pair of edges in one lower-vertex bucket made a 32,000-face fan take 3.90 s against 9 ms before the parallelization.
+Buckets of up to 16 edges keep the small fast path; larger buckets sort their higher endpoints and join adjacent
+matches, preserving the minimum-face island roots and face-order sums. The same fan now takes about 5 ms. The
+64,000-face cone test checks both winding verdicts within a generous five-second regression budget (the original
+pairwise implementation took about 30 s for both; the fixed test takes about 28 ms).
+
+Loose parts no longer reserve triangle/material/hash buffers for the entire source primitive: the initial estimate
+is bounded by the selected vertex count, with lists and the packed face set growing as needed. A one-face part from
+a million-face primitive allocates 12.00 MB instead of 44.78 MB; the existing full-vertex rank lookup remains. Points
+and lines reserve no face buffers. Per-thread allocation guards cover both cases, and a dense selected mesh with
+560 unique faces over 16 vertices checks packed-set growth, first-twin retention and tuple-set parity. Six of the
+seven new unit cases fail on the original PR; all 2,117 tests pass after the fixes. The normal probe drill continues
+to compare the rows against Blender under the full pre-push gate.
