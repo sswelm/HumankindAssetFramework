@@ -100,16 +100,16 @@ public static class BlenderReduce
         bool skinned = skin >= 0 && skin < m.Skins.Count && mesh.Primitives.Exists(p => p.Skinned);
         var sknr = skinned ? VehicleProbe.BlenderSkinner.Build(m, skin, names) : null;
         var P = new float[nv * 3]; var N = new float[nv * 3];
+        var skinScratch = skinned ? new float[16] : null;
         bool hasNormals = false;
         for (int v = 0; v < nv; v++)
         {
             var p = mesh.Primitives[layout.RankPrimitive[v]]; int idx = layout.RankIndex[v];
-            if (skinned) { var co = sknr.Position(p, idx); P[3 * v] = co[0]; P[3 * v + 1] = co[1]; P[3 * v + 2] = co[2]; }
+            if (skinned) sknr.Vertex(p, idx, skinScratch, P, N, 3 * v);
             else { P[3 * v] = p.Positions[3 * idx]; P[3 * v + 1] = -p.Positions[3 * idx + 2]; P[3 * v + 2] = p.Positions[3 * idx + 1]; }
             if (p.Normals == null) { N[3 * v] = N[3 * v + 1] = N[3 * v + 2] = float.NaN; continue; }
             hasNormals = true;
-            if (skinned) { var no = sknr.Normal(p, idx); N[3 * v] = no[0]; N[3 * v + 1] = no[1]; N[3 * v + 2] = no[2]; }
-            else { N[3 * v] = p.Normals[3 * idx]; N[3 * v + 1] = -p.Normals[3 * idx + 2]; N[3 * v + 2] = p.Normals[3 * idx + 1]; }
+            if (!skinned) { N[3 * v] = p.Normals[3 * idx]; N[3 * v + 1] = -p.Normals[3 * idx + 2]; N[3 * v + 2] = p.Normals[3 * idx + 1]; }
         }
         // set_poly_smoothing, then normals_split_custom_set_from_vertices (the shorts per corner), then the mesh's own vertex normals
         checkpoint?.Invoke();

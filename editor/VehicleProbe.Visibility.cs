@@ -57,15 +57,15 @@ public static partial class VehicleProbe
         return raw;
     }
 
-    /// <summary>The data vertices of one part (the node's whole mesh, or one island of it) in Blender's order, its
-    /// triangles, and its normal rays - from the object's local space through `objWorld` into Blender's frame.
-    /// `dataPosition` gives a primitive's vertex in the object's local space (the file's position, or the bind pose);
-    /// `dataNormal` the file's normal there (skinned into the bind pose for a skinned vertex), or null without one.</summary>
     /// <summary>A part under this many vertices keys its faces as packed longs (FaceSet); a larger one in the tuple set. Internal
     /// for the test that runs both on one mesh.</summary>
     internal static int PackedFaceLimit = 1 << 21;
 
-    internal static PartMesh BuildPartMesh(HafModel m, int node, int onlyPrim, int[] onlyVerts, Func<HafPrimitive, int, double[]> dataPosition, Func<HafPrimitive, int, double[]> dataNormal, float[] mb, float[] bake)
+    /// <summary>The data vertices of one part (the node's whole mesh, or one island of it) in Blender's order, its
+    /// triangles, and its normal rays - from the object's local space through `mb` into Blender's frame.
+    /// Vertices go directly into flat Blender-frame buffers, through the bind pose when a skinner is supplied.
+    /// The matrix scratch belongs to this part, never the shared skinner (several part workers can use it).</summary>
+    internal static PartMesh BuildPartMesh(HafModel m, int node, int onlyPrim, int[] onlyVerts, BlenderSkinner skinner, float[] mb, float[] bake)
     {
         var mesh = m.Meshes[m.Nodes[node].Mesh];
         int total = 0, totalFaces = 0;
@@ -79,7 +79,9 @@ public static partial class VehicleProbe
         // A loose part may retain only one face of a million-face primitive. Reserve from its selected vertices instead;
         // lists and the packed set grow with faces actually kept, including unusually dense/non-manifold parts.
         int faceCapacity = onlyVerts == null ? totalFaces : (int)Math.Min(totalFaces, 2L * total);
-        var local = new List<double>(total * 3); var fileNormal = new List<double>(total * 3); var tris = new List<int>(faceCapacity * 3); var uv = new List<float>(total * 2); var triMaterial = new List<int>(faceCapacity);
+        var Pb = new float[total * 3]; var Nb = new float[total * 3];
+        var skinScratch = skinner == null ? null : new float[16]; bool anyFileNormal = false;
+        var tris = new List<int>(faceCapacity * 3); var uv = new List<float>(total * 2); var triMaterial = new List<int>(faceCapacity);
         // mesh.validate() drops a second face over the same three vertices, whichever way it winds: the FIRST stays
         var faces = total < PackedFaceLimit ? null : new HashSet<(int, int, int)>();
         var packed = faces == null ? new FaceSet(faceCapacity) : null;
@@ -95,11 +97,17 @@ public static partial class VehicleProbe
             for (int k = 0; k < verts.Length; k++)
             {
                 rank[verts[k]] = offset + k;
-                var co = dataPosition(p, verts[k]);
-                local.Add(co[0]); local.Add(co[1]); local.Add(co[2]);
-                var fn = dataNormal(p, verts[k]);
-                if (fn != null) { fileNormal.Add(fn[0]); fileNormal.Add(fn[1]); fileNormal.Add(fn[2]); }
-                else { fileNormal.Add(double.NaN); fileNormal.Add(double.NaN); fileNormal.Add(double.NaN); }
+                int at = (offset + k) * 3, src = verts[k] * 3;
+                if (skinner != null) skinner.Vertex(p, verts[k], skinScratch, Pb, Nb, at);
+                else
+                {
+                    Pb[at] = p.Positions[src]; Pb[at + 1] = -p.Positions[src + 2]; Pb[at + 2] = p.Positions[src + 1];
+                    if (p.Normals == null) Nb[at] = Nb[at + 1] = Nb[at + 2] = float.NaN;
+                    else { Nb[at] = p.Normals[src]; Nb[at + 1] = -p.Normals[src + 2]; Nb[at + 2] = p.Normals[src + 1]; }
+                }
+                // A missing (or NaN) custom normal marks all three components, as the former double-buffer path did.
+                if (float.IsNaN(Nb[at])) Nb[at] = Nb[at + 1] = Nb[at + 2] = float.NaN;
+                else anyFileNormal = true;
                 if (uvSet != null) { uv.Add(uvSet[verts[k] * 2]); uv.Add(uvSet[verts[k] * 2 + 1]); } else { uv.Add(0f); uv.Add(0f); }
             }
             int count = p.Indices != null ? p.Indices.Length : p.VertexCount;
@@ -124,17 +132,7 @@ public static partial class VehicleProbe
         }
         int n = offset;
         var pm = new PartMesh { Count = n, World = new float[n * 3], Normal = new float[n * 3], PreviewNormal = new float[n * 3], Local = new float[n * 3], Tris = tris.ToArray(), Uv = uv.ToArray(), TriMaterial = triMaterial.ToArray() };
-        // the mesh data as imported, Blender's frame, float32: positions and - when the file has them - the normals the importer
-        // sets as custom normals
-        bool anyFileNormal = false; for (int i = 0; i < n && !anyFileNormal; i++) anyFileNormal = !double.IsNaN(fileNormal[i * 3]);
-        var Pb = new float[n * 3]; var Nb = anyFileNormal ? new float[n * 3] : null;
-        for (int i = 0; i < n; i++)
-        {
-            Pb[i * 3] = (float)local[i * 3]; Pb[i * 3 + 1] = (float)-local[i * 3 + 2]; Pb[i * 3 + 2] = (float)local[i * 3 + 1];
-            if (Nb == null) continue;
-            if (double.IsNaN(fileNormal[i * 3])) { Nb[i * 3] = Nb[i * 3 + 1] = Nb[i * 3 + 2] = float.NaN; }
-            else { Nb[i * 3] = (float)fileNormal[i * 3]; Nb[i * 3 + 1] = (float)-fileNormal[i * 3 + 2]; Nb[i * 3 + 2] = (float)fileNormal[i * 3 + 1]; }
-        }
+        if (!anyFileNormal) Nb = null;
         float[] blenderN;
         if (bake == null)
             // a mesh with file normals: Blender's vertex.normal is the file's normal through its two-short custom-normal encoding and the

@@ -64,9 +64,6 @@ public static partial class VehicleProbe
         public bool Split;                  // a single mesh object was split into loose parts (names synthetic)
     }
 
-    /// <summary>A Blender-frame vector (x, y, z) back in glTF's frame (x, z, -y): exact.</summary>
-    static double[] GltfOf(float[] b) => new double[] { b[0], b[2], -b[1] };
-
     static string F(double[] v) => string.Join(",", v.Select(x => x.ToString("0.0000", System.Globalization.CultureInfo.InvariantCulture)));
 
     /// <summary>The probe of one source model, in the pose Blender's import shows: the first animation's start (the
@@ -235,30 +232,20 @@ public static partial class VehicleProbe
             // the per-part inputs first, serially (the skinner is built once per skin and cached on the source), then every part's
             // mesh on its own core - BuildPartMesh reads the model and the skinner's tables only; a worker's Used() cache is its
             // own (thread-static), computed again per primitive it meets - and the Parts written back in order
-            var positions = new Func<HafPrimitive, int, double[]>[specs.Count]; var normals = new Func<HafPrimitive, int, double[]>[specs.Count];
+            var skinners = new BlenderSkinner[specs.Count];
             var mbs = new float[specs.Count][]; var pms = new PartMesh[specs.Count];
             for (int si = 0; si < specs.Count; si++)
             {
                 var s = specs[si]; var m = s.Src.M; int skin = m.Nodes[s.Node].Skin;
-                Func<HafPrimitive, int, double[]> position = (p, v) => new double[] { p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2] };
-                Func<HafPrimitive, int, double[]> normal = (p, v) => p.Normals == null ? null : new double[] { p.Normals[v * 3], p.Normals[v * 3 + 1], p.Normals[v * 3 + 2] };
-                if (s.Skinned)
-                {
-                    // the mesh data as the importer stores it: positions and normals skinned into the bind pose in numpy float32, with
-                    // the joint matrices mathutils gave it (VehicleProbe.BlenderSkin.cs) - a zero-area triangle's verdict hangs on these
-                    // bits (3 skinned parts of 14,023 read differently from the double chain; external review of PR #115 had first
-                    // found the normals left unskinned)
-                    var sknr = SkinnerOf(s.Src, skin);
-                    position = (p, v) => GltfOf(sknr.Position(p, v));   // an unskinned primitive of the mesh too: joint 0 (BlenderSkinner's rule)
-                    normal = (p, v) => p.Normals == null ? null : GltfOf(sknr.Normal(p, v));
-                }
-                positions[si] = position; normals[si] = normal; mbs[si] = MatrixOf(s);
+                // The importer skins the whole mesh, including a primitive without joints (joint 0 at weight 1).
+                if (s.Skinned) skinners[si] = SkinnerOf(s.Src, skin);
+                mbs[si] = MatrixOf(s);
             }
             System.Threading.Tasks.Parallel.For(0, specs.Count, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = Math.Min(8, Environment.ProcessorCount) }, si =>
             {
                 var s = specs[si];
                 var previous = usedCache; usedCache = new Dictionary<HafPrimitive, int[]>();
-                try { pms[si] = BuildPartMesh(s.Src.M, s.Node, s.Prim, s.Verts, positions[si], normals[si], mbs[si], s.Src.Index == 1 ? s.Src.Target[s.Node] : null); }
+                try { pms[si] = BuildPartMesh(s.Src.M, s.Node, s.Prim, s.Verts, skinners[si], mbs[si], s.Src.Index == 1 ? s.Src.Target[s.Node] : null); }
                 finally { usedCache = previous; }
             });
             for (int si = 0; si < specs.Count; si++)
@@ -387,6 +374,7 @@ public static partial class VehicleProbe
         var m = B.M; var mesh = m.Meshes[m.Nodes[node].Mesh]; int skin = m.Nodes[node].Skin;
         bool skinned = skin >= 0 && skin < m.Skins.Count && mesh.Primitives.Any(p => p.Skinned);
         var target = B.Target[node];
+        var skinScratch = skinned ? new float[16] : null;
         var g = new NodeGeometry { Skin = skin, Skinned = false, ObjWorld = HafTransforms.Identity, Local = new double[mesh.Primitives.Count][] };
         for (int pi = 0; pi < mesh.Primitives.Count; pi++)
         {
@@ -396,7 +384,7 @@ public static partial class VehicleProbe
             foreach (int v in Used(p))
             {
                 float bx, by, bz;
-                if (sknr != null) { var q = sknr.Position(p, v); bx = q[0]; by = q[1]; bz = q[2]; }
+                if (sknr != null) sknr.Position(p, v, skinScratch, out bx, out by, out bz);
                 else { bx = p.Positions[v * 3]; by = -p.Positions[v * 3 + 2]; bz = p.Positions[v * 3 + 1]; }
                 TransformPoint(target, bx, by, bz, out float tx, out float ty, out float tz);
                 local[v * 3] = tx; local[v * 3 + 1] = tz; local[v * 3 + 2] = -ty;   // back to glTF's frame: (x, z, -y) of Blender's
@@ -449,7 +437,7 @@ public static partial class VehicleProbe
             if (!g.Skinned) continue;   // no copy: 925 MB of Lab sources as doubles is what ran the drill out of memory
             var local = new double[p.VertexCount * 3];
             var posed = HafTransforms.WorldPositions(m, node, p, world);
-            for (int v = 0; v < p.VertexCount; v++) { var q = HafTransforms.Apply(toLocal, posed[v * 3], posed[v * 3 + 1], posed[v * 3 + 2], 1.0); local[v * 3] = q[0]; local[v * 3 + 1] = q[1]; local[v * 3 + 2] = q[2]; }
+            for (int v = 0; v < p.VertexCount; v++) HafTransforms.Apply(toLocal, posed[v * 3], posed[v * 3 + 1], posed[v * 3 + 2], 1.0, out local[v * 3], out local[v * 3 + 1], out local[v * 3 + 2]);
             g.Local[pi] = local;
         }
         return g;
@@ -724,8 +712,8 @@ public static partial class VehicleProbe
     }
 
     /// <summary>`v.co` of a skinned vertex: skinned into the importer's bind pose, in the armature's space.</summary>
-    static double[] BindPosition(HafPrimitive p, int v, double[][] jointMats)
-        => HafTransforms.Apply(BindMatrix(p, v, jointMats), p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2], 1.0);
+    static void BindPosition(HafPrimitive p, int v, double[][] jointMats, double[] scratch, out double x, out double y, out double z)
+        => HafTransforms.Apply(BindMatrix(p, v, jointMats, scratch), p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2], 1.0, out x, out y, out z);
 
     // skin_into_bind_pose also updates the weights used for vertex groups: a zero sum gives the first influence 1.
     static bool HasZeroWeights(HafPrimitive p, int v)
@@ -739,10 +727,10 @@ public static partial class VehicleProbe
     /// <summary>A skinned vertex's skinning matrix into the importer's bind pose: the weighted joint matrices, the weights
     /// normalized by their sum (a zero sum = all on the first influence). Positions go through it with w = 1, normals with
     /// w = 0 (skin_into_bind_pose: the 3x3, no translation).</summary>
-    static double[] BindMatrix(HafPrimitive p, int v, double[][] jointMats)
+    static double[] BindMatrix(HafPrimitive p, int v, double[][] jointMats, double[] acc)
     {
-        if (!p.Skinned) return (double[])jointMats[0].Clone();   // an unskinned primitive of a skinned mesh: joint 0 (the zero-weight rule)
-        var acc = new double[16]; double wsum = 0;
+        if (!p.Skinned) return jointMats[0];   // an unskinned primitive of a skinned mesh: joint 0 (the zero-weight rule)
+        Array.Clear(acc, 0, 16); double wsum = 0;
         for (int set = 0; set < 2; set++)
         {
             var js = set == 0 ? p.Joints : p.Joints1; var ws = set == 0 ? p.Weights : p.Weights1;
@@ -755,7 +743,7 @@ public static partial class VehicleProbe
                 wsum += w;
             }
         }
-        if (wsum == 0) { int j0 = p.Joints[v * 4]; acc = (double[])jointMats[j0 < jointMats.Length ? j0 : 0].Clone(); wsum = 1; }
+        if (wsum == 0) { int j0 = p.Joints[v * 4]; Array.Copy(jointMats[j0 < jointMats.Length ? j0 : 0], acc, 16); wsum = 1; }
         for (int e = 0; e < 16; e++) acc[e] /= wsum;
         return acc;
     }
@@ -779,6 +767,7 @@ public static partial class VehicleProbe
             var sk = m.Skins[skin];
             if (!sk.Joints.Any(j => names.BoneOfJoint.TryGetValue(j, out var bn) && boneNames.Contains(bn))) continue;   // no vertex group of the first armature's bones
             var jointMats = BindJointMatrices(m, sk, bindArma);
+            var skinScratch = new double[16];
             foreach (var p in m.Meshes[m.Nodes[node].Mesh].Primitives)
             {
                 foreach (int v in Used(p))
@@ -802,9 +791,9 @@ public static partial class VehicleProbe
                     // armature object's world matrix. Two files taught this: combine_soldier, whose root node carries a quarter
                     // turn the inverse bind matrices do not (Y and Z came out swapped from the raw vertices), and drone_clean,
                     // whose armature carries a 0.01 scale they DO account for (the raw vertices through it came out 100x small)
-                    var co = BindPosition(p, v, jointMats);
-                    var q = HafTransforms.Apply(armaWorld[skin], co[0], co[1], co[2], 1.0);
-                    double x = q[0], y = -q[2], z = q[1];   // Blender frame
+                    BindPosition(p, v, jointMats, skinScratch, out double cx, out double cy, out double cz);
+                    HafTransforms.Apply(armaWorld[skin], cx, cy, cz, 1.0, out double x, out double gz, out double gy);
+                    double y = -gy, z = gz;   // Blender frame
                     if (!stats.TryGetValue(best, out var st)) { st = (0, new[] { x, y, z }, new[] { x, y, z }); order.Add(best); }
                     st.count++;
                     st.mn[0] = Math.Min(st.mn[0], x); st.mn[1] = Math.Min(st.mn[1], y); st.mn[2] = Math.Min(st.mn[2], z);

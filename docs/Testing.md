@@ -3277,3 +3277,42 @@ and lines reserve no face buffers. Per-thread allocation guards cover both cases
 560 unique faces over 16 vertices checks packed-set growth, first-twin retention and tuple-set parity. Six of the
 seven new unit cases fail on the original PR; all 2,117 tests pass after the fixes. The normal probe drill continues
 to compare the rows against Blender under the full pre-push gate.
+
+
+### Vehicle Probe allocation performance
+
+Probe gathers positions and file normals directly into flat float buffers in Blender's frame. It blends a skinned
+vertex's matrix once for both position and normal, with scratch owned by the part worker; the shared joint tables
+remain read-only. Posed bounds and rig reports reuse matrix/vector scratch, and meshes without file normals use
+flat face adjacency instead of a list per vertex. The float/double arithmetic and face/fan order stay unchanged.
+The shared skinning caller in Generate uses the same allocation-free vertex path.
+
+`VehicleProbeAllocationTests` guards allocation budgets, both influence sets, zero-weight recovery, mixed skinned
+and unskinned primitives, private scratch across concurrent workers, and generated/lone-vertex normals. The existing
+Blender mesh tests still compare float bits. An x64 .NET Framework allocation check of 20,000 posed vertices drops
+from 4,640,232 to 480,360 bytes (the latter includes the required output buffer); generated normals for 30,000 vertices
+without file normals drop from 3,120,256 to 840,320 bytes. These are isolated kernel measurements, not whole-probe
+allocation totals.
+
+For repeatable timings, run `bash tools/vehicle_probe_performance.sh <file.glb> [...]`. Set `HAF_PROBE_PERF_UNITY=1`
+to run in an isolated Unity editor project, and optionally `HAF_PROBE_PERF_OUT=<new directory>` to choose where the
+compiled harness, results and editor log are retained. The default host is x64 .NET Framework. Each file receives
+one warm-up and five measured reads/probes, with a full collection before each run. The benchmark reports separate
+probe and read-plus-probe medians, collection counts, and hashes covering all rows, bounds and preview mesh buffers.
+Hashing, forced collection, Unity startup and interactive preview are outside timing. Run without a competing gate
+or benchmark; the harness fails if output changes between repetitions, and compare hashes between builds as well.
+
+October 20, 2026, Unity 2021.3.1f1, against `21014c1` (merged PRs #195–197), same four source files and harness,
+median of five measured runs after one warm-up:
+
+| Source | Probe before | Probe after | Read + probe before | Read + probe after | Less total time |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Saleg's Revenge | 3.264 s | 2.927 s | 3.784 s | 3.433 s | 9% |
+| Khelandion | 0.777 s | 0.723 s | 0.888 s | 0.831 s | 6% |
+| Triconter | 0.400 s | 0.369 s | 0.451 s | 0.421 s | 7% |
+| Dragon | 0.484 s | 0.434 s | 0.574 s | 0.522 s | 9% |
+
+All four output hashes match between the builds and across all repetitions, including every mesh's positions,
+normal rays, preview normals, local positions, UVs, triangles and material indices. These timings use Unity's actual
+64-bit Mono runtime; the earlier PR #195 standalone drill timings use a different host and are not directly comparable.
+The standalone x64 .NET Framework check also retained all four hashes and reduced probe medians by about 5–10%.
