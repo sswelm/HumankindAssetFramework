@@ -200,13 +200,13 @@ i_xprim = first(lambda l: l.startswith("X\tPRIM\t")); write("S5_XPRIM_indices", 
 i_xchan = first(lambda l: l.startswith("X\tCHAN\t")); write("S5_XCHAN_output", with_field(i_xchan, 12, flip_bits(lines[i_xchan].split("\t")[12])))
 write("S5_XCHAN_interpolation", with_field(i_xchan, 7, "STEP" if lines[i_xchan].split("\t")[7] == "LINEAR" else "LINEAR"))
 i_xanim = first(lambda l: l.startswith("X\tANIM\t")); write("S5_XANIM_channels", with_field(i_xanim, 4, str(int(lines[i_xanim].split("\t")[4]) + 1)))
-i_xglb = first(lambda l: l.startswith("X	GLB	"))
+i_xglb = first(lambda l: l.startswith("X\tGLB\t"))
 # EVERY job's GLB row, not the first: a job whose bytes the model cannot compare (an image Blender re-encoded - the fused galley's
 # JPEG alpha, 2026-10-20) skips the hash, and a flip seeded on that job alone passed as intact
 _xglb_all = list(lines)
 for _i, _l in enumerate(lines):
-    if _l.startswith("X	GLB	"):
-        _f = _l.split("	"); _f[5] = flip_bits(_f[5]); _xglb_all[_i] = "	".join(_f)
+    if _l.startswith("X\tGLB\t"):
+        _f = _l.split("\t"); _f[5] = flip_bits(_f[5]); _xglb_all[_i] = "\t".join(_f)
 write("S5_XGLB_sha", _xglb_all)
 # Export framing and row kinds must be checked even when all compared values are intact.
 write("S5_X_unknown", insert(i_xglb, "X\tUNKNOWN\tignored"))
