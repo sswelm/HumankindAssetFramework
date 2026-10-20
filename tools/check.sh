@@ -195,6 +195,7 @@ run "registry schema parity" bash "$ROOT/tools/check_schema_parity.sh"
 run "parallel gate regression tests (completion, paths and verdicts)" python "$ROOT/Tests/test_parallel_gate.py"
 # CI had this one and the hook did not (2026-10-12): a vehicle_rig.py helper change passed the hook and failed after the push.
 run "vehicle lab math tests (oar calibration guard)" python "$ROOT/Tests/test_vehicle_rig_math.py"
+run "recipe migration tests (a Vehicle Lab recipe across a Model Workshop fuse)" python "$ROOT/Tests/test_recipe_migrate.py"
 #    5a) The editor compiles. Roslyn against Unity's own reference assemblies — the ONE check that needs a licensed
 #        Unity install (UnityEditor.dll + the MonoBleedingEdge profile), so it stays hook-only and never runs in CI.
 # No guard: the script itself fails LOUD when Unity/dotnet/Newtonsoft are absent. The old guard here was
