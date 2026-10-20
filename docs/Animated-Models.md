@@ -81,7 +81,8 @@ legs, landing gear, a crane, turrets. Very common for Sketchfab vehicles.
   `Spin[5..15]`). Author the spin in Blender by rotating each wheel bone about its own axle axis (LINEAR = seamless
   loop). **The non-obvious trap:** rotating bones **fling off in-game** on the legacy path even though the rig is
   clean and previews perfectly — the metre→centimetre export sandwich. Bake such a rig with **Convert raw rig ON +
-  Fix 100× oversize OFF** (full explanation: [Animation-Pitfalls](Animation-Pitfalls.md) → "the rotating-bone
+  Fix 100× oversize OFF** — Browse guesses that box from the model's size, except for a Vehicle Lab `_Spin.glb`, which it
+  leaves OFF since 2026-10-20 (re-browsing the galley's fused output had armed it and the bake came out a hundredth of its size) (full explanation: [Animation-Pitfalls](Animation-Pitfalls.md) → "the rotating-bone
   fling"). It sits on the terrain by itself: every animated bake centres the model's box on the
   origin and drops its lowest point (the tyre contact) to it — the same placement the static bake applies, so a
   model baked either way lands in the same spot. Self-correcting and **size-proof** (no manual Position-offset
