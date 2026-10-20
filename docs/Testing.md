@@ -3316,3 +3316,9 @@ All four output hashes match between the builds and across all repetitions, incl
 normal rays, preview normals, local positions, UVs, triangles and material indices. These timings use Unity's actual
 64-bit Mono runtime; the earlier PR #195 standalone drill timings use a different host and are not directly comparable.
 The standalone x64 .NET Framework check also retained all four hashes and reduced probe medians by about 5–10%.
+
+
+The rig-animation drill's GLB SHA corruption check uses a separate image-free export and an intact control for that
+same job. Registry order can otherwise select a re-encoded albedo whose complete file bytes are intentionally not
+compared, making a valid-but-changed SHA an ineffective negative test. Other stage and export mutations retain the
+albedo-bearing control; the hash check remains mandatory.

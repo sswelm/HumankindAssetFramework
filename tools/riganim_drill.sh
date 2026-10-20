@@ -170,6 +170,9 @@ tr -d '\r' < "$TMPD/tampers_raw.txt" > "$TMPD/tampers.txt"
 if [ "$controlrc" -ne 0 ] || ! grep -qE "^PASS " "$TMPD/intact_out.txt"; then head -5 "$TMPD/intact_out.txt"; echo "FAIL — rig_anim drill rejected the intact control (rc=$controlrc)"; exit 1; fi
 "$TMPD/riganim.exe" --export "$WTMP/missing/jobs.txt" "$WTMP/missing/intact.txt" > "$TMPD/intact_s1.txt" 2>&1; controlrc=$?
 if [ "$controlrc" -ne 0 ] || ! grep -qE "^PASS " "$TMPD/intact_s1.txt"; then head -5 "$TMPD/intact_s1.txt"; echo "FAIL — rig_anim drill: the stage 1-2 model rejected the intact control (rc=$controlrc)"; exit 1; fi
+# The SHA corruption control uses an image-free export whose complete bytes can be compared.
+"$TMPD/riganim.exe" --export "$WTMP/missing/jobs_sha.txt" "$WTMP/missing/intact_sha.txt" > "$TMPD/intact_sha.txt" 2>&1; controlrc=$?
+if [ "$controlrc" -ne 0 ] || ! grep -qE "^PASS " "$TMPD/intact_sha.txt" || ! grep -qE "^EXPORT .*the GLB.s [0-9]+ bytes$" "$TMPD/intact_sha.txt"; then head -5 "$TMPD/intact_sha.txt"; echo "FAIL — rig_anim drill rejected the byte-comparable SHA control (rc=$controlrc)"; exit 1; fi
 n_t=0; n_s1t=0; n_s2t=0; n_s3t=0; n_s4t=0; n_s5t=0
 while IFS= read -r mode; do
   [ -n "$mode" ] || continue
@@ -218,7 +221,7 @@ while IFS= read -r mode; do
     *) echo "FAIL — rig_anim drill: the tamper '$mode' has no expected reason here (add it)"; exit 1;;
   esac
   jf="$WTMP/missing/jobs.txt"
-  case "$mode" in EXIT_ran_full|EXIT_marked_wrong_stage) jf="$WTMP/missing/jobs_exit.txt";; S3_*) jf="$WTMP/missing/jobs_s3.txt";; esac
+  case "$mode" in S5_XGLB_sha) jf="$WTMP/missing/jobs_sha.txt";; EXIT_ran_full|EXIT_marked_wrong_stage) jf="$WTMP/missing/jobs_exit.txt";; S3_*) jf="$WTMP/missing/jobs_s3.txt";; esac
   S1_MODE=(); case "$mode" in S1_*) S1_MODE=(--export); n_s1t=$((n_s1t + 1));; S2_*) S1_MODE=(--export); n_s2t=$((n_s2t + 1));; S3_*|S3F_*) S1_MODE=(--export); n_s3t=$((n_s3t + 1));; S4_*) S1_MODE=(--export); n_s4t=$((n_s4t + 1));; S5_*) S1_MODE=(--export); n_s5t=$((n_s5t + 1));; esac
   "$TMPD/riganim.exe" "${S1_MODE[@]}" "${KEY_MODE[@]}" "$jf" "$WTMP/missing/$mode.txt" > "$TMPD/t_$mode.txt" 2>&1; badrc=$?
   if [ "$badrc" -ne 1 ] || ! grep -E "^FAIL " "$TMPD/t_$mode.txt" | grep -qE "$reason"; then
