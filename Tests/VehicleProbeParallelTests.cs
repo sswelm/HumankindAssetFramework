@@ -52,8 +52,7 @@ public class VehicleProbeParallelTests
 
     static (VehicleProbe.PartMesh mesh, long bytes) AllocatePart(HafModel m, int[] selected)
     {
-        Func<HafPrimitive, int, double[]> position = (p, v) => new double[] { p.Positions[3 * v], p.Positions[3 * v + 1], p.Positions[3 * v + 2] };
-        VehicleProbe.PartMesh Build() => VehicleProbe.BuildPartMesh(m, 0, 0, selected, position, (p, v) => null, Identity(), null);
+        VehicleProbe.PartMesh Build() => VehicleProbe.BuildPartMesh(m, 0, 0, selected, null, Identity(), null);
         Build(); // warm the path before counting; .NET Framework 4.8 supplies this API beyond the project's 4.7.1 reference surface
         var counterMethod = typeof(GC).GetMethod("GetAllocatedBytesForCurrentThread", BindingFlags.Static | BindingFlags.Public);
         Assert.NotNull(counterMethod);
@@ -96,12 +95,11 @@ public class VehicleProbeParallelTests
         for (int i = 0; i < vertices; i++) { p.Positions[3 * i] = i; p.Positions[3 * i + 1] = i * i % 17; p.Positions[3 * i + 2] = i * i * i % 19; }
         for (int a = 0; a < vertices; a++) for (int b = a + 1; b < vertices; b++) for (int c = b + 1; c < vertices; c++) faces.AddRange(new[] { a, b, c, c, b, a });
         p.Indices = faces.ToArray(); mesh.Primitives.Add(p); m.Meshes.Add(mesh); m.Nodes.Add(new HafNode { Mesh = 0 });
-        Func<HafPrimitive, int, double[]> position = (q, v) => new double[] { q.Positions[3 * v], q.Positions[3 * v + 1], q.Positions[3 * v + 2] };
         int limit = VehicleProbe.PackedFaceLimit;
         try
         {
-            VehicleProbe.PackedFaceLimit = 0; var tuples = VehicleProbe.BuildPartMesh(m, 0, 0, null, position, (q, v) => null, Identity(), null);
-            VehicleProbe.PackedFaceLimit = 1 << 21; var selected = VehicleProbe.BuildPartMesh(m, 0, 0, Enumerable.Range(0, vertices).ToArray(), position, (q, v) => null, Identity(), null);
+            VehicleProbe.PackedFaceLimit = 0; var tuples = VehicleProbe.BuildPartMesh(m, 0, 0, null, null, Identity(), null);
+            VehicleProbe.PackedFaceLimit = 1 << 21; var selected = VehicleProbe.BuildPartMesh(m, 0, 0, Enumerable.Range(0, vertices).ToArray(), null, Identity(), null);
             Assert.Equal(560 * 3, selected.Tris.Length); // far more faces than the selected vertex count estimates
             Assert.Equal(tuples.Tris, selected.Tris); Assert.Equal(tuples.World, selected.World); Assert.Equal(tuples.Normal, selected.Normal);
         }
@@ -112,13 +110,11 @@ public class VehicleProbeParallelTests
     public void The_packed_face_set_drops_the_same_twins_as_the_tuple_set()
     {
         var m = Grid(40, twins: true);
-        Func<HafPrimitive, int, double[]> position = (p, v) => new double[] { p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2] };
-        Func<HafPrimitive, int, double[]> normal = (p, v) => null;
         int limit = VehicleProbe.PackedFaceLimit;
         try
         {
-            VehicleProbe.PackedFaceLimit = 1 << 21; var packed = VehicleProbe.BuildPartMesh(m, 0, -1, null, position, normal, Identity(), null);
-            VehicleProbe.PackedFaceLimit = 0; var tuples = VehicleProbe.BuildPartMesh(m, 0, -1, null, position, normal, Identity(), null);
+            VehicleProbe.PackedFaceLimit = 1 << 21; var packed = VehicleProbe.BuildPartMesh(m, 0, -1, null, null, Identity(), null);
+            VehicleProbe.PackedFaceLimit = 0; var tuples = VehicleProbe.BuildPartMesh(m, 0, -1, null, null, Identity(), null);
             Assert.Equal(2 * 40 * 40, packed.Tris.Length / 3);   // the twins are gone, the first of each pair stays
             Assert.Equal(tuples.Tris, packed.Tris); Assert.Equal(tuples.World, packed.World); Assert.Equal(tuples.Normal, packed.Normal);
         }

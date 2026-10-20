@@ -606,7 +606,9 @@ The probe on all cores DONE 2026-10-19 (the user, after a reviewer's remark that
 first - the BVH build, the inside-out verdict and the part meshes ran on one core, and the island walk's `HashSet<long>` used
 long's own hash (2.1 s on a 72k grid); every phase now parallel or bucketed, every row byte-identical on the 84 drill inputs,
 16.25 s -> 4.66 s (details in docs/Testing.md). Left: the biggest part's gather and normals are the critical path of the part
-meshes (0.6 s of the Salegs' 1.55 s) - the per-vertex delegates allocate a double[3] each; GlbReader's parse (0.3 s there).
+meshes (0.6 s of the Salegs' 1.55 s). The per-vertex delegate arrays, skinning/bounds scratch allocations and no-file-normal
+vertex lists were removed on 2026-10-20: the Unity benchmark reduces read + probe time by 6–9% across four source models,
+with identical output hashes (docs/Testing.md, Vehicle Probe allocation performance). GlbReader parsing remains a separate cost.
 - **Native SDK skeleton smoke test** — FIXED (2026-10-19). Native multi-material atlas remapping assigned transient
   meshes to the saved GLB rig prefab; SaveAssets could serialize missing mesh references before skeleton import,
   producing a NullReferenceException in `Skeleton.FillBoneEntry` at IL 0x1b (also reproduced with a PNG control).

@@ -190,6 +190,14 @@ public static class HafTransforms
     public static double[] Apply(double[] m, double x, double y, double z, double w) =>
         new[] { m[0] * x + m[4] * y + m[8] * z + m[12] * w, m[1] * x + m[5] * y + m[9] * z + m[13] * w, m[2] * x + m[6] * y + m[10] * z + m[14] * w };
 
+    /// <summary>The same arithmetic into caller-owned storage: no temporary vector per vertex.</summary>
+    public static void Apply(double[] m, double x, double y, double z, double w, out double rx, out double ry, out double rz)
+    {
+        rx = m[0] * x + m[4] * y + m[8] * z + m[12] * w;
+        ry = m[1] * x + m[5] * y + m[9] * z + m[13] * w;
+        rz = m[2] * x + m[6] * y + m[10] * z + m[14] * w;
+    }
+
     /// <summary>The general 4x4 inverse (column-major, cofactors); null when singular (a zero scale).</summary>
     public static double[] Invert(double[] m)
     {
@@ -269,12 +277,12 @@ public static class HafTransforms
     public static double[] WorldPositions(HafModel m, int nodeIndex, HafPrimitive p, double[][] world)
     {
         var outp = new double[p.VertexCount * 3];
-        var blend = BlendMatrices(m, nodeIndex, p, world);
+        var joints = BlendJoints(m, nodeIndex, p, world);
+        var scratch = joints != null && p.Skinned ? new double[16] : null;
         for (int v = 0; v < p.VertexCount; v++)
         {
-            var mv = blend != null ? blend[v] : world[nodeIndex];
-            var q = Apply(mv, p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2], 1.0);
-            outp[v * 3] = q[0]; outp[v * 3 + 1] = q[1]; outp[v * 3 + 2] = q[2];
+            var mv = joints == null ? world[nodeIndex] : p.Skinned ? BlendMatrix(p, v, joints, scratch) : joints[0];
+            Apply(mv, p.Positions[v * 3], p.Positions[v * 3 + 1], p.Positions[v * 3 + 2], 1.0, out outp[v * 3], out outp[v * 3 + 1], out outp[v * 3 + 2]);
         }
         return outp;
     }
@@ -302,39 +310,45 @@ public static class HafTransforms
     /// no file of the registry, the recipes or the Khronos samples has the shape).</summary>
     public static double[][] BlendMatrices(HafModel m, int nodeIndex, HafPrimitive p, double[][] world)
     {
+        var jm = BlendJoints(m, nodeIndex, p, world);
+        if (jm == null) return null;
+        var result = new double[p.VertexCount][];
+        for (int v = 0; v < p.VertexCount; v++) result[v] = p.Skinned ? BlendMatrix(p, v, jm, new double[16]) : jm[0];
+        return result;
+    }
+
+    static double[][] BlendJoints(HafModel m, int nodeIndex, HafPrimitive p, double[][] world)
+    {
         int skin = m.Nodes[nodeIndex].Skin;
         if (skin < 0 || skin >= m.Skins.Count) return null;
         if (!p.Skinned)
         {
             int meshIdx = m.Nodes[nodeIndex].Mesh;
-            if (meshIdx < 0 || meshIdx >= m.Meshes.Count || !m.Meshes[meshIdx].Primitives.Contains(p) || !m.Meshes[meshIdx].Primitives.Exists(q => q.Skinned)) return null;   // one of the mesh's own primitives, beside a skinned one
-            var jm0 = SkinMatrices(m, skin, world);
-            var all0 = new double[p.VertexCount][]; for (int v = 0; v < p.VertexCount; v++) all0[v] = jm0[0];
-            return all0;
+            if (meshIdx < 0 || meshIdx >= m.Meshes.Count || !m.Meshes[meshIdx].Primitives.Contains(p) || !m.Meshes[meshIdx].Primitives.Exists(q => q.Skinned)) return null;
         }
-        var jm = SkinMatrices(m, skin, world);
-        var result = new double[p.VertexCount][];
-        for (int v = 0; v < p.VertexCount; v++)
+        return SkinMatrices(m, skin, world);
+    }
+
+    static double[] BlendMatrix(HafPrimitive p, int v, double[][] jm, double[] acc)
+    {
+        Array.Clear(acc, 0, 16); double wsum = 0;
+        for (int set = 0; set < 2; set++)
         {
-            var acc = new double[16]; double wsum = 0;
-            for (int set = 0; set < 2; set++)
+            var joints = set == 0 ? p.Joints : p.Joints1; var weights = set == 0 ? p.Weights : p.Weights1;
+            if (joints == null || weights == null) continue;
+            for (int k = 0; k < 4; k++)
             {
-                var joints = set == 0 ? p.Joints : p.Joints1; var weights = set == 0 ? p.Weights : p.Weights1;
-                if (joints == null || weights == null) continue;
-                for (int k = 0; k < 4; k++)
-                {
-                    double w = weights[v * 4 + k];
-                    if (w <= 0) continue;
-                    int j = joints[v * 4 + k];
-                    if (j >= jm.Length) continue;
-                    for (int i = 0; i < 16; i++) acc[i] += w * jm[j][i];
-                    wsum += w;
-                }
+                double w = weights[v * 4 + k];
+                if (w <= 0) continue;
+                int j = joints[v * 4 + k];
+                if (j >= jm.Length) continue;
+                for (int i = 0; i < 16; i++) acc[i] += w * jm[j][i];
+                wsum += w;
             }
-            // Blender recovers unweighted vertices by assigning their first JOINTS_0 influence a weight of 1.
-            if (wsum <= 0) { int first = p.Joints[v * 4]; result[v] = jm[first < jm.Length ? first : 0]; }
-            else { if (Math.Abs(wsum - 1.0) > 1e-6) for (int i = 0; i < 16; i++) acc[i] /= wsum; result[v] = acc; }
         }
-        return result;
+        // Keep Blender's zero-weight recovery and original normalization threshold.
+        if (wsum <= 0) { int first = p.Joints[v * 4]; return jm[first < jm.Length ? first : 0]; }
+        if (Math.Abs(wsum - 1.0) > 1e-6) for (int i = 0; i < 16; i++) acc[i] /= wsum;
+        return acc;
     }
 }
