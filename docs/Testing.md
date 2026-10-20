@@ -3256,6 +3256,13 @@ hull's gather and normals are the critical path now), the Bremen 1.17 -> 0.30 s,
 twins, the parallel BVH's rays against the plate, two box islands through the bucketed edges): 2,110 tests; the probe drill's
 Blender comparison runs in the gate.
 
+**A recipe across a fuse (2026-10-20).** `tools/recipe_migrate.py` rewrites a Vehicle Lab recipe for a fused source from
+the Fuser's report: a part outside every group keeps its entry by name, a group becomes one entry carrying its members'
+majority role (a mixed group, or members placed differently, is flagged and exits 3), the dials and clip settings pass
+through, srcFile/outGlb point at the fused file. Six unittest cases (`Tests/test_recipe_migrate.py`, in the gate): the
+kept entries and dials, a mixed group's majority and flag, differing placements, groups outside the recipe and members
+new to it, a non-report input, the command's file and exit code.
+
 The critical review of PR #195 added a high-valence cone, tiny loose parts and non-polygon primitives. Matching every
 pair of edges in one lower-vertex bucket made a 32,000-face fan take 3.90 s against 9 ms before the parallelization.
 Buckets of up to 16 edges keep the small fast path; larger buckets sort their higher endpoints and join adjacent

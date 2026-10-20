@@ -384,6 +384,48 @@ Beyond the single-fragment ceiling, the engine-native path is multiple meshes pe
 bake paths (static since 0.5.7, animated since 2026-09-20; see the top of this section), at the cost of the
 duplicated seam vertices it adds to the shared pawn buffer.
 
+## 10. A worked recipe — the Khelandion galley (2026-10-20)
+
+The settings a 149-part galley source (`khelandion_2_split.glb`, 34 MB, split on 2026-09-06 before the Fuser existed)
+plays right with in game — sails struck at anchor, raised and drawing under way, oars on the water. Kept here so a
+re-mark after a re-fuse or a lost recipe starts from numbers that worked, not from zero.
+
+**Roles.** Body: the hull (`Object_7`, `Object_12_Part_003`, `Object_27`). Structure: decks and benches
+(`Object_20_Part_003` is the main deck, a thin slab; `Object_3`, `Object_18_Part_001`, `Object_23`, `Object_28`,
+`Object_29`). Shroud (`H`): masts, stays, ratlines — the standing rigging, which stays up while the sail furls.
+Rigging (`R`): only the spars and ropes that belong to the canvas (they ride the Sail bone and strike with it; marking a
+mast Rigging swings it under the hull at idle). Sail: the canvas. Oar: the three merged oar meshes (`Object_22`,
+`Object_23`, `Object_24` in the source's node names). Rudder: four. Preserve: `Object_4`, `Object_5`. Ignore: 58 interior
+and duplicate parts. Fix inside-out faces: on (128 parts flagged). Double-sided: off — the open oar ports show water
+through them up close; that is the source's own geometry, and doubling the hull would cost a fragment.
+
+**Reduction (%).** Rigging 90 · Shroud 85 · Structure 80 · Body 70 · Oar 63 · Sail 50 · Rudder 40 · Detail 10 ·
+Default, Turret, Gun, Window, Wheel, Flip, Preserve 0. Structure and Body are weld tiers (seams welded, then
+collapse); Shroud and Rigging are soup tiers (dissolve first, then collapse) — the dissolve keeps a planked flat
+surface's edges straighter at the same percentage, so a deck that smears on Structure can go to Shroud instead
+(it stays rigid with the hull either way; only the reduction differs).
+
+**Oars.** Sweep 50° · Dip 18° · Lift 24° · Rake 50° · Pivot 30 % · Length 120 % · Stroke 50 frames · Blade roll 90°.
+
+**Furl.** Fold sail at idle: off — the naval strike, a 180° flip of the Sail bone about the keel line, puts the struck
+canvas under the water where the game does not draw it. (The Lab and Animation Lab previews have no water, so they
+show it hanging below the hull; that is not a fault.) Fold angle 270°, 12 frames, sag 0, reverse off.
+
+**Animation Lab.** State-driven; Idle / reference `Spin[0..0]` (the deployed frame defines the rest — never a struck
+frame, it turns the bind upside-down); Idle stance (override) `Furl[1..1]`; Movement `Spin`; the rest empty.
+Blender rig route; Keep bone translations on; Convert raw rig on.
+
+**Registry (Model Factory).** Size 9; Position offset x 0, y 0.5 (fore/aft), **z −0.2** — the keel sits 0.2 below the
+water plane (0.16), so the blades cross the surface on the pull and clear it on the return. An animated bake grounds
+itself (keel → 0) since 2026-09-20; the +2.1 this entry carried from its 09-06 bake was the old hand-dialled lift and
+floated the ship by exactly that much.
+
+**Re-fusing it.** The source predates the Fuser. If it is ever fused, leave the oar, sail and rudder meshes OUT of every
+⊕ group — unfused parts keep their names and so keep their recipe entries — and run
+`python tools/recipe_migrate.py <recipe.json> <fused.glb.fuse-report.txt> <new recipe.json>` for the rest: each group
+becomes one entry carrying its members' role (a mixed group is flagged), the dials and clips are untouched, the Lab's
+Probe refreshes the part boxes on the next load.
+
 ## Fast symptom map
 
 | Symptom | First check |

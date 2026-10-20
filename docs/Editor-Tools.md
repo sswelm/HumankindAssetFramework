@@ -457,7 +457,8 @@ windows. **Deep dive:**
   winding it renders with, its authored normals taking the sign of the final winding (a mirrored port side ships
   normals pointing up over a winding that renders down). A report beside the output (`<output>.glb.fuse-report.txt`) lists, per group, every
   sheet's verdict, every warning, every stitched candidate's numbers and the faces rewound per part, one item per line; the status box keeps
-  one line per group. The part list carries the Lab's filters — hide under a vertex count or a size, hide OVER a size (logarithmic, with an
+  one line per group. A Vehicle Lab recipe marked on the unfused source follows the fuse through `tools/recipe_migrate.py`
+  (the report in, the recipe out: unfused parts keep their entries, each group becomes one entry with its members' role). The part list carries the Lab's filters — hide under a vertex count or a size, hide OVER a size (logarithmic, with an
   exact entry box: drag it down and only the small clutter remains, ready to mark for deletion), a height
   band, a side band, **Only flat parts (≥ % level)** — the Lab's deck finder, measured on the preview meshes, so
   the deck plate a fuse group is still missing shows up among a dozen rows — and a **Show only** popup by mark or
