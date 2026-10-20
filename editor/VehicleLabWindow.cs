@@ -718,7 +718,7 @@ public class VehicleLabWindow : EditorWindow
                     }
                 if (useSourceRig && boneParts.Count > 0)   // 2026-08-20: a user hunted for the turret's shards here — in this mode they are ONE row
                     EditorGUILayout.LabelField("Each row is one BONE of the shipped skeleton; all the shards skinned to it count as that row (the turret's parts = the Turret bone). Untick the fast path to list and mark individual parts.", EditorStyles.wordWrappedMiniLabel);
-                EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   W/T/B = Wheel/Turret/Body   ·   R = Rigging   ·   L = taiL rotor (spins about the lateral axis)   ·   G = Gun (rides the Turret; muzzle/socket anchor)   ·   C = Caterpillar (tread loop)   ·   O = Oar   ·   S = Structure   ·   F = Flip (reverse winding)   ·   P = Preserve (ship byte-identical)   ·   I = Ignore (DELETED)   ·   D = Default   ·   E = Edgecase", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   W/T/B = Wheel/Turret/Body   ·   R = Rigging   ·   L = taiL rotor (spins about the lateral axis)   ·   G = Gun (rides the Turret; muzzle/socket anchor)   ·   C = Caterpillar (tread loop)   ·   O = Oar   ·   S = Structure   ·   F = Flip (reverse winding)   ·   P = Preserve (ship byte-identical)   ·   I = Ignore (DELETED)   ·   D = shrouD (standing rigging, soup-reduced; Default is dropdown-only)   ·   E = Edgecase", EditorStyles.miniLabel);
                 // Keyboard review loop: ↑/↓ step the selection (zoom+highlight follows), W/T/B/I mark the selected
                 // part's role — the whole list can be reviewed without mousing between rows and dropdowns.
                 var ev = Event.current;
@@ -738,7 +738,7 @@ public class VehicleLabWindow : EditorWindow
                         shown[idx].role = ev.keyCode == KeyCode.W ? Role.Wheel
                                         : ev.keyCode == KeyCode.T ? Role.Turret
                                         : ev.keyCode == KeyCode.I ? Role.Ignore
-                                        : ev.keyCode == KeyCode.D ? Role.Default
+                                        : ev.keyCode == KeyCode.D ? Role.Shroud      // D = shrouD (2026-10-20 user request, reclassifying the galley: masts and stays are marked by the dozen; Default - the undecided bucket - is dropdown-only now)
                                         : ev.keyCode == KeyCode.E ? Role.Edgecase
                                         : ev.keyCode == KeyCode.C ? Role.Caterpillar
                                         : ev.keyCode == KeyCode.G ? Role.Gun

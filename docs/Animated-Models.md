@@ -99,8 +99,8 @@ escape-ray visibility pass now shoots through one combined BVH and the preview e
 - **Review UI** — click a row to zoom + yellow-highlight that part in the turntable (on the source-skeleton fast
   path a **bone** row highlights every shard weighted to that bone — since 2026-08-20; bone rows never could before); **↑/↓** walk the list;
   **W/T/B/I** mark Wheel/Turret/Body/Ignore, **C** = Caterpillar (tread loop — see the treadize section below),
-  **G** = Gun (the elevation assembly, rides the Turret when there is one; recoil can add a child `Barrel`), **D** = Default
-  (undecided), **E** = Edgecase ("not sure, revisit later" — rigs static like Body and stays visible in the
+  **G** = Gun (the elevation assembly, rides the Turret when there is one; recoil can add a child `Barrel`), **D** = Shroud (standing rigging: the soup reduction, stays standing while the sail furls; Default, the undecided
+  bucket, is dropdown-only since 2026-10-20), **E** = Edgecase ("not sure, revisit later" — rigs static like Body and stays visible in the
   undecided filter). Four hide sliders (min verts, min
   size, height-below, height-above — the height pair brackets a horizontal slab: turret-only or chassis-only
   views) plus a **Show only** classification filter with auto-advance (marking a part out of the active filter
