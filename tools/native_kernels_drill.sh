@@ -83,6 +83,39 @@ sum_m=$(grep '^MEDIAN ' "$TMPD/managed.txt" | sed -E 's/.*probe_ms=([0-9.]+).*/\
 sum_n=$(grep '^MEDIAN ' "$TMPD/native.txt"  | sed -E 's/.*probe_ms=([0-9.]+).*/\1/' | awk '{s+=$1} END {printf "%.0f", s}')
 t1=$(date +%s)
 
+# ---- claim 3: the same from UNITY'S MONO, the host the Lab runs in. The .NET Framework and Mono marshal differently: a
+#      bool[] with MarshalAs(LPArray, I1) crossed one byte per flag on .NET and FOUR on Mono, every hash above agreed and
+#      the Khelandion's and Triconter's differed in the editor (2026-10-21, found after the first push). The harness runs
+#      as a library in an isolated project with the DLL under Assets/Plugins/x86_64 (imported by name, as the package's),
+#      natively, on every fixture and the three smallest recipe sources; its hashes must equal the managed ones above.
+UNITY_EXE="${UNITY%/Data}/Unity.exe"
+[ -x "$UNITY_EXE" ] || { echo "FAIL — $UNITY_EXE not found (the native kernels were NOT drilled in Unity's Mono)"; exit 2; }
+UFILES=("${FIXTURES[@]}")
+[ "${#RECIPE_SOURCES[@]}" -eq 0 ] || mapfile -t -O "${#UFILES[@]}" UFILES < <(ls -Sr "${RECIPE_SOURCES[@]}" | head -3)
+mkdir -p "$TMPD/unity/project/Assets/Editor" "$TMPD/unity/project/Assets/Plugins/x86_64" "$TMPD/unity/project/Packages" "$TMPD/unity/project/ProjectSettings"
+OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -optimize+ -platform:x64 -target:library -out:"$WTMP/unity/project/Assets/Editor/ProbePerformance.dll" \
+  -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/System.Numerics.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
+  "${files[@]}" 2>&1); rc=$?
+if [ "$rc" -ne 0 ]; then echo "$OUT" | grep -E "error" | head -20; echo "FAIL — the native kernels drill's Unity harness did not compile (csc rc=$rc)"; exit 1; fi
+cp "$TMPD/Newtonsoft.Json.dll" "$TMPD/unity/project/Assets/Editor/"
+cp "$DLL" "$ROOT/editor/Plugins/x86_64/hafkernels.dll.meta" "$TMPD/unity/project/Assets/Plugins/x86_64/"
+printf '{"dependencies":{}}\n' > "$TMPD/unity/project/Packages/manifest.json"
+printf 'm_EditorVersion: 2021.3.1f1\n' > "$TMPD/unity/project/ProjectSettings/ProjectVersion.txt"
+HAF_PROBE_PERF_RUNS=1 "$UNITY_EXE" -batchmode -nographics -quit -projectPath "$WTMP/unity/project" -logFile "$WTMP/unity/unity.log" \
+  -executeMethod ProbePerformance.RunUnity -- "${UFILES[@]}" > /dev/null 2>&1; rc_u=$?
+grep -q "^BENCHMARK PASS files=${#UFILES[@]}\$" "$TMPD/unity/unity.log" || { grep -E "^(KERNELS|MEASURE|Exception|.*Error)" "$TMPD/unity/unity.log" | head -10; echo "FAIL — the Unity run did not probe all ${#UFILES[@]} files (Unity rc=$rc_u; log in the drill's temp folder)"; exit 1; }
+K_U=$(grep -m1 '^KERNELS ' "$TMPD/unity/unity.log")
+case "$K_U" in "KERNELS native ("*) ;; *) echo "FAIL — Unity's Mono did not run hafkernels.dll: '$K_U'"; exit 1;; esac
+grep '^MEDIAN ' "$TMPD/unity/unity.log" | awk '{print $2, $NF}' | sort > "$TMPD/h_unity.txt"
+n_u=$(wc -l < "$TMPD/h_unity.txt"); [ "$n_u" -eq "${#UFILES[@]}" ] || { echo "FAIL — $n_u Unity hashes for ${#UFILES[@]} files"; exit 1; }
+u_bad=0
+while read -r name hash; do
+  want=$(awk -v n="$name" '$1 == n {print $2}' "$TMPD/h_managed.txt" | head -1)
+  [ "$hash" = "$want" ] || { echo "DIFF $name: Unity native $hash, managed $want"; u_bad=$((u_bad + 1)); }
+done < "$TMPD/h_unity.txt"
+[ "$u_bad" -eq 0 ] || { echo "FAIL — $u_bad of ${#UFILES[@]} files hash differently between hafkernels.dll under Unity's Mono and the managed twins"; exit 1; }
+t2=$(date +%s)
+
 # ---- the committed DLL against a fresh build (deterministic: tools/build_native_kernels.sh)
 if command -v g++ >/dev/null 2>&1; then
   mkdir -p "$TMPD/fresh"
@@ -90,8 +123,8 @@ if command -v g++ >/dev/null 2>&1; then
   if ! cmp -s "$TMPD/fresh/hafkernels.dll" "$DLL"; then
     echo "FAIL — editor/Plugins/x86_64/hafkernels.dll is not a build of native/ as committed ($(stat -c %s "$DLL") vs $(stat -c %s "$TMPD/fresh/hafkernels.dll") bytes; bash tools/build_native_kernels.sh, then commit the DLL)"; exit 1
   fi
-  echo "PASS — native kernels: ${#FILES[@]} files (${#FIXTURES[@]} fixtures, $NOTE) hash equal between the managed twins and hafkernels.dll; probe sum managed ${sum_m} ms, native ${sum_n} ms; the committed DLL equals a fresh build of native/ ($(stat -c %s "$DLL") bytes); $((t1 - t0)) s"
+  echo "PASS — native kernels: ${#FILES[@]} files (${#FIXTURES[@]} fixtures, $NOTE) hash equal between the managed twins and hafkernels.dll on .NET ($((t1 - t0)) s; probe sum managed ${sum_m} ms, native ${sum_n} ms); ${#UFILES[@]} of them equal again from hafkernels.dll under Unity's Mono ($((t2 - t1)) s); the committed DLL equals a fresh build of native/ ($(stat -c %s "$DLL") bytes)"
   exit 0
 fi
-echo "SKIP — native kernels: ${#FILES[@]} files (${#FIXTURES[@]} fixtures, $NOTE) hash equal between the managed twins and hafkernels.dll (probe sum managed ${sum_m} ms, native ${sum_n} ms), but g++ is not on PATH, so the committed DLL was NOT compared with a build of native/"
+echo "SKIP — native kernels: ${#FILES[@]} files (${#FIXTURES[@]} fixtures, $NOTE) hash equal between the managed twins and hafkernels.dll on .NET, ${#UFILES[@]} of them again under Unity's Mono (probe sum managed ${sum_m} ms, native ${sum_n} ms), but g++ is not on PATH, so the committed DLL was NOT compared with a build of native/"
 exit 3

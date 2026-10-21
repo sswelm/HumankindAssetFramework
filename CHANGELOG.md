@@ -18,7 +18,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   with the managed twins kept as specification, oracle and fallback. Unity 2021.3, median of five: the Saleg's Revenge
   probe 2.86 s to 0.87 s, the Khelandion 0.75 s to 0.24 s, every output hash equal. Guards: ten unit cases holding both
   twins bit for bit (planted: the DLL off, a constant off), and a gate drill that hashes every fixture and recipe source
-  both ways and rebuilds the deterministic DLL to compare with the committed one (docs/Testing.md, Native kernels).
+  both ways on .NET AND natively in Unity's own Mono, and rebuilds the deterministic DLL to compare with the committed one
+  (docs/Testing.md, Native kernels). The Unity leg earned its place on the first push: Mono marshals a `bool[]` as four
+  bytes per flag whatever `MarshalAs` says, the C++ read every fourth sharp-face flag, and every .NET-side guard was green
+  while the editor's Khelandion and Triconter hashes were wrong; the flags cross as bytes now.
 
 - **A TURRET REDUCE TIER IN THE VEHICLE LAB (2026-10-16).** User: "could you add a turret reduce slider". The Gun tier's twin:
   a **Turret reduce (%)** dial, a `turretreduce=<percent>` tag parsed right after `gunreduce=` in `vehicle_rig.py`, and a

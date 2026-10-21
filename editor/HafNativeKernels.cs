@@ -43,10 +43,15 @@ public static class HafNativeKernels
     static extern void haf_world_transform(float[] Pb, float[] blenderN, float[] mb, float[] inverse, int first, int last, float[] Local, float[] World, float[] Normal, float[] PreviewNormal);
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     static extern void haf_bvh_build(float[] v, int[] tris, int nt, int workers, float[] bmin, float[] bmax, int[] left, int[] start, int[] count, int[] tOut);
+    // The sharp-face flags cross as a byte array: a bool[] with MarshalAs(LPArray, I1) is marshalled one byte per flag by
+    // the .NET Framework and FOUR bytes per flag by Unity's Mono, which ignores the sub-type - the C++ then read every
+    // fourth flag and the Khelandion's and Triconter's hashes differed in Unity only (2026-10-21, caught after the first
+    // push because the drill ran on .NET alone; the drill's Unity leg exists for this).
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    static extern void haf_encode_custom(float[] P, int nv, int[] tris, int nf, float[] N, [MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.I1)] bool[] sharpFace, short[] d0, short[] d1, int threads);
+    static extern void haf_encode_custom(float[] P, int nv, int[] tris, int nf, float[] N, byte[] sharpFace, short[] d0, short[] d1, int threads);
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    static extern void haf_decode_custom(float[] P, int nv, int[] tris, int nf, [MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.I1)] bool[] sharpFace, short[] d0, short[] d1, float[] result, int threads);
+    static extern void haf_decode_custom(float[] P, int nv, int[] tris, int nf, byte[] sharpFace, short[] d0, short[] d1, float[] result, int threads);
+    static byte[] Flags(bool[] sharpFace, int nf) { var bytes = new byte[nf]; for (int f = 0; f < nf; f++) bytes[f] = sharpFace[f] ? (byte)1 : (byte)0; return bytes; }
 
     // The C++ has no bounds checks: a malformed input that the managed twin answers with IndexOutOfRangeException (a corner
     // index past the vertices, a shorts array shorter than the corners - Tests/ParallelNormalsTests plants one) would read
@@ -66,7 +71,7 @@ public static class HafNativeKernels
         Need(N.Length >= nv * 3, "normals: " + N.Length + " floats for " + nv + " vertices");
         Need(sharpFace.Length >= nf, "sharp faces: " + sharpFace.Length + " flags for " + nf + " faces");
         Need(d0.Length >= nf * 3 && d1.Length >= nf * 3, "custom shorts: " + d0.Length + "/" + d1.Length + " for " + nf * 3 + " corners");
-        haf_encode_custom(P, nv, tris, nf, N, sharpFace, d0, d1, threads);
+        haf_encode_custom(P, nv, tris, nf, N, Flags(sharpFace, nf), d0, d1, threads);
     }
 
     /// <summary>DecodeCustomShorts without sharp edges: result holds 3 floats per vertex.</summary>
@@ -77,7 +82,7 @@ public static class HafNativeKernels
         Need(sharpFace.Length >= nf, "sharp faces: " + sharpFace.Length + " flags for " + nf + " faces");
         Need(d0.Length >= nf * 3 && d1.Length >= nf * 3, "custom shorts: " + d0.Length + "/" + d1.Length + " for " + nf * 3 + " corners");
         Need(result.Length >= nv * 3, "result: " + result.Length + " floats for " + nv + " vertices");
-        haf_decode_custom(P, nv, tris, nf, sharpFace, d0, d1, result, threads);
+        haf_decode_custom(P, nv, tris, nf, Flags(sharpFace, nf), d0, d1, result, threads);
     }
 
     /// <summary>TriangleBvh's constructor: the per-node arrays hold capacity = max(1, 2 nt - 1) slots, tOut the triangles in leaf order.</summary>

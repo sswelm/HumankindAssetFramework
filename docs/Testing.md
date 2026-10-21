@@ -3365,6 +3365,13 @@ and a host that cannot load it FAILS the first case, never skips. Planted: `HAF_
 (`tools/native_kernels_drill.sh`) probes every reader fixture and every recipe source twice - the managed twins and the
 DLL - through the benchmark harness and compares every row, bound and preview buffer hash (46 files on 2026-10-21, probe
 sum 3,090 ms managed against 1,910 ms native on the .NET host), requires each run to SAY which path it took, and
-rebuilds the DLL from `native/` to compare it with the committed one (a SKIP without g++, after the hashes compared).
-The Blender-parity drills (vehicle probe, prep, decimate, deploy, rig_anim, vehicle_rig) copy the DLL beside their exe
-and so hold the native path to Blender; the managed twins stay drilled by the native kernels drill and the unit tests.
+runs the same harness in UNITY'S MONO (an isolated batch project with the DLL under Assets/Plugins/x86_64 and the
+package's .meta, every fixture and the three smallest recipe sources, natively) and holds those hashes to the managed
+ones, and rebuilds the DLL from `native/` to compare it with the committed one (a SKIP without g++, after the hashes
+compared). The Unity leg exists because the first push of this change passed every .NET-side guard with wrong editor
+output: a `bool[]` parameter marked `MarshalAs(LPArray, I1)` crosses one byte per flag on the .NET Framework and four
+on Unity's Mono, which ignores the sub-type, so the C++ read every fourth sharp-face flag and the Khelandion's and
+Triconter's hashes differed in the editor only. The flags cross as a `byte[]` now; the drill's Unity leg fails on the
+old shape. The Blender-parity drills (vehicle probe, prep, decimate, deploy, rig_anim, vehicle_rig) copy the DLL beside
+their exe and so hold the native path to Blender; the managed twins stay drilled by the native kernels drill and the unit
+tests.
