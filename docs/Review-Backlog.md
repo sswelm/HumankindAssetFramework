@@ -609,6 +609,18 @@ long's own hash (2.1 s on a 72k grid); every phase now parallel or bucketed, eve
 meshes (0.6 s of the Salegs' 1.55 s). The per-vertex delegate arrays, skinning/bounds scratch allocations and no-file-normal
 vertex lists were removed on 2026-10-20: the Unity benchmark reduces read + probe time by 6–9% across four source models,
 with identical output hashes (docs/Testing.md, Vehicle Probe allocation performance). GlbReader parsing remains a separate cost.
+The heaviest kernels went native on 2026-10-21 (ChatGPT's C++ hypothesis, measured first: Unity's Mono ran the same C# 2.5-3.4x
+slower than the .NET JIT, and the fan walk of the custom-normal encode/decode was 90% of the part-mesh CPU, not the vertex
+transform the suggestion named): encode/decode, the BVH build and the world transform run from native/ through
+HafNativeKernels.cs, the Saleg's probe 2.86 s -> 0.87 s in Unity, every hash equal (docs/Testing.md, Native kernels). Left, and
+now the largest cost on the bake path: the prep's edge-collapse loop (BlenderDecimate), 22.3 s in Unity on the Saleg's to
+24,000 triangles, three quarters of it the serial heap walk; a native port of it is unmeasured and would be a port of
+BMesh + the collapse (about 1,500 drilled lines). GlbReader's read is 0.47 s of the Saleg's 1.34 s now.
+- **`VehicleProbeAllocationTests.Skinning_reuses_private_scratch_..._on_multiple_workers` flaked once in a push gate (2026-10-21)**
+  - the per-thread allocation budget (0..1024 bytes over 3,000 skinner calls on 8 workers) failed in the gate's `dotnet test`
+  step and passed in 10 full-suite runs afterwards on the same branch and on master. The test calls only `BlenderSkinner.Vertex`
+  (PR #198); nothing in the native-kernels change runs in it. Not reproduced; if it fails again, widen the budget or pin the
+  measurement to one warmed worker before blaming the skinner.
 - **Native SDK skeleton smoke test** — FIXED (2026-10-19). Native multi-material atlas remapping assigned transient
   meshes to the saved GLB rig prefab; SaveAssets could serialize missing mesh references before skeleton import,
   producing a NullReferenceException in `Skeleton.FillBoneEntry` at IL 0x1b (also reproduced with a PNG control).

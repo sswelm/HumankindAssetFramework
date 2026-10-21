@@ -8,6 +8,8 @@ using System.Security.Cryptography;
 // Compile with the same sources/references as ProbeDrill.cs. One warm-up and five measured reads + probes per file.
 // Run as an x64 executable, or as a DLL in an isolated Unity project with -executeMethod ProbePerformance.RunUnity -- <files>.
 // Hashing includes every preview buffer and happens AFTER timing. Compare hashes across builds as well as repeated runs.
+// HAF_PROBE_PERF_RUNS=<n> measured runs after the warm-up (default 5; the native kernels drill uses 1). The KERNELS line
+// says whether the native kernels (HafNativeKernels) or the managed twins ran.
 public static class ProbePerformance
 {
     public static void RunUnity() => Run(Environment.GetCommandLineArgs().SkipWhile(a => a != "--").Skip(1).ToArray());
@@ -17,11 +19,13 @@ public static class ProbePerformance
     {
         if (files.Length == 0) throw new ArgumentException("Pass one or more GLB/glTF files.");
         Console.WriteLine("RUNTIME " + Environment.Version + " x64=" + (IntPtr.Size == 8));
+        Console.WriteLine("KERNELS " + HafNativeKernels.Status);
+        int runs = int.TryParse(Environment.GetEnvironmentVariable("HAF_PROBE_PERF_RUNS"), out int r) && r >= 1 ? r : 5;
         foreach (var file in files)
         {
             string expected = null;
-            var totals = new double[5]; var probes = new double[5];
-            for (int run = -1; run < 5; run++)
+            var totals = new double[runs]; var probes = new double[runs];
+            for (int run = -1; run < runs; run++)
             {
                 GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
                 int gc0 = GC.CollectionCount(0), gc1 = GC.CollectionCount(1), gc2 = GC.CollectionCount(2);
@@ -41,7 +45,7 @@ public static class ProbePerformance
                 if (run >= 0) { totals[run] = total; probes[run] = probe; }
             }
             Array.Sort(totals); Array.Sort(probes);
-            Console.WriteLine(string.Format(CultureInfo.InvariantCulture, "MEDIAN {0} probe_ms={1:F3} total_ms={2:F3} sha256={3}", Path.GetFileName(file), probes[2], totals[2], expected));
+            Console.WriteLine(string.Format(CultureInfo.InvariantCulture, "MEDIAN {0} probe_ms={1:F3} total_ms={2:F3} sha256={3}", Path.GetFileName(file), probes[runs / 2], totals[runs / 2], expected));
         }
         Console.WriteLine("BENCHMARK PASS files=" + files.Length);
     }

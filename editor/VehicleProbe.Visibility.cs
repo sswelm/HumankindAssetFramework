@@ -158,6 +158,8 @@ public static partial class VehicleProbe
         else VertexRange(0, n);
         void VertexRange(int first, int last)
         {
+        // native/hafkernels.cpp: MatRow, NormalizeVn and the inverse-transpose preview normal, the same float32 steps (HafNativeKernels.cs)
+        if (HafNativeKernels.Available) { HafNativeKernels.WorldTransform(Pb, blenderN, mb, inverse, first, last, pm.Local, pm.World, pm.Normal, pm.PreviewNormal); return; }
         for (int i = first; i < last; i++)
         {
             float bx = Pb[i * 3], by = Pb[i * 3 + 1], bz = Pb[i * 3 + 2];
@@ -222,6 +224,15 @@ public static partial class VehicleProbe
         {
             v = vertices;
             int nt = triangles.Length / 3;
+            if (HafNativeKernels.Available)
+            {
+                // native/hafkernels.cpp: the same centroids, slots, median splits and leaf bounds (HafNativeKernels.cs)
+                int capacity = Math.Max(1, 2 * nt - 1);
+                bmin = new float[capacity * 3]; bmax = new float[capacity * 3]; left = new int[capacity]; start = new int[capacity]; count = new int[capacity];
+                t = new int[triangles.Length];
+                HafNativeKernels.BvhBuild(v, triangles, Math.Min(8, Environment.ProcessorCount), bmin, bmax, left, start, count, t);
+                return;
+            }
             var cx = new float[nt]; var cy = new float[nt]; var cz = new float[nt];
             int workers = Math.Min(8, Environment.ProcessorCount);
             PerTriangle(nt, workers, (first, last) =>

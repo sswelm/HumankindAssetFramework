@@ -10,6 +10,20 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE PROBE'S HEAVIEST KERNELS RUN AS C++ (2026-10-21).** ChatGPT's suggestion, tested by measurement before any
+  port: the same C# ran 2.5-3.4x slower on Unity's Mono than on the .NET Framework's JIT, and the hot kernel was not the
+  vertex transform the suggestion named (5% of the probe) but the custom-normal encode and decode (90% of the part-mesh
+  CPU). Those two, the visibility BVH's constructor and the world transform now run from `native/` (g++, `-ffp-contract=off`,
+  ucrtbase's cosf/sinf) through `editor/HafNativeKernels.cs` over the package's `editor/Plugins/x86_64/hafkernels.dll`,
+  with the managed twins kept as specification, oracle and fallback. Unity 2021.3, median of five: the Saleg's Revenge
+  probe 2.86 s to 0.87 s, the Khelandion 0.75 s to 0.24 s, every output hash equal. Guards: twelve unit cases holding both
+  twins bit for bit (planted: the DLL off, a constant off), and a gate drill that hashes every fixture and recipe source
+  both ways on .NET AND natively in Unity's own Mono, and rebuilds the deterministic DLL to compare with the committed one
+  (docs/Testing.md, Native kernels). The Unity leg earned its place on the first push: Mono marshals a `bool[]` as four
+  bytes per flag whatever `MarshalAs` says, the C++ read every fourth sharp-face flag, and every .NET-side guard was green
+  while the editor's Khelandion and Triconter hashes were wrong; the flags cross as bytes now. Review of PR #199 added
+  partial-NaN normal cases: the native clamp preserves NaN so it selects the managed geometry-normal fallback.
+
 - **A TURRET REDUCE TIER IN THE VEHICLE LAB (2026-10-16).** User: "could you add a turret reduce slider". The Gun tier's twin:
   a **Turret reduce (%)** dial, a `turretreduce=<percent>` tag parsed right after `gunreduce=` in `vehicle_rig.py`, and a
   TURRET weld tier running right before GUN in the tier loop, on the turret names the Lab already sends positionally -
