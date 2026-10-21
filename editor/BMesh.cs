@@ -108,6 +108,13 @@ public sealed class BMesh
     // reused); with the free list empty the next slot in address order is taken. The iteration (BM_ITER_MESH) walks the slots
     // in address order, the free ones skipped - so a slot's number is its place in every walk, whoever lives there now.
     readonly Stack<int> freeV = new Stack<int>(), freeE = new Stack<int>(), freeL = new Stack<int>(), freeF = new Stack<int>();
+    // The native collapse edits the alive arrays directly. Replay each pool's deaths in their original order,
+    // retaining any earlier frees, so a later edit takes the same slots as after the managed collapse.
+    internal void RecordNativeKills(int kind, int[] killed)
+    {
+        var pool = kind == 0 ? freeV : kind == 1 ? freeE : kind == 2 ? freeL : freeF;
+        foreach (int index in killed) pool.Push(index);
+    }
     /// <summary>The loop slot a creation would take next (the callers of FaceCreate size their per-loop layers by it).</summary>
     public int LoopSlotCapacity => LoopCount + 3;
 

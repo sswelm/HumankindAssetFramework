@@ -11,6 +11,9 @@ using Xunit;
 // host that cannot load it FAILS here (Available false), never skips: the managed path is the one every other test
 // exercises, and a silently managed run would prove nothing about the DLL (tools/native_kernels_drill.sh holds it to the
 // recipe sources the same way).
+// Both native-kernel test classes flip the static HafNativeKernels.Available switch; xunit runs classes in parallel, so they share
+// one collection and run one after the other (a loader assertion met the other class's managed window in a push gate, 2026-10-21).
+[Collection("native kernels switch")]
 public class NativeKernelsTests
 {
     // The managed twins, reached by switching Available off for the call: the production methods read it once per call,
@@ -64,7 +67,7 @@ public class NativeKernelsTests
     public void The_dll_loads_in_the_test_host()
     {
         Assert.True(HafNativeKernels.Available, HafNativeKernels.Status);
-        Assert.StartsWith("native (hafkernels.dll version 1", HafNativeKernels.Status);
+        Assert.StartsWith("native (hafkernels.dll version " + HafNativeKernels.Version, HafNativeKernels.Status);
     }
 
     [Theory]

@@ -14,7 +14,7 @@ mkdir -p "$OUT"
 WROOT="$(cygpath -m "$ROOT")"; WOUT="$(cygpath -m "$OUT")"
 sources=(HafModel GlbReader HafTransforms BlenderNames VehicleProbe VehicleProbe.Visibility VehicleProbe.Islands
   VehicleProbe.InsideOut VehicleProbe.BlenderWorld VehicleProbe.BlenderSkin VehicleProbe.CustomNormals VehicleProbe.Merge
-  VehicleProbe.BlenderArmature BlenderEigen BlenderTrig HafNativeKernels)
+  VehicleProbe.BlenderArmature BlenderEigen BlenderTrig HafNativeKernels BlenderMesh BMesh BlenderColor BlenderDecimate BlenderReduce BlenderExport BlenderExportTree BlenderPrep BlenderMaterialExport GlbWriter HafNativeKernels.Collapse)
 args=(-nologo -noconfig -nostdlib -optimize+ -platform:x64)
 for ref in mscorlib System System.Core System.Numerics; do args+=("-r:$API/$ref.dll"); done
 args+=("-r:$API/Facades/netstandard.dll" "-r:$WROOT/References/Newtonsoft.Json.dll")

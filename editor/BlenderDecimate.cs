@@ -675,6 +675,9 @@ public static class BlenderDecimate
     /// modifier's ratio as the float32 it is stored as.</summary>
     public static void Collapse(BMesh bm, float factor, MeshData d, Action checkpoint = null)
     {
+        // native/hafdecimate.cpp: the same quadrics, heap, checks, collapse and custom-data walk (HafNativeKernels.Collapse.cs); the
+        // checkpoint is polled from inside the native loop at every collapse, as below
+        if (HafNativeKernels.Available) { HafNativeKernels.Collapse(bm, factor, d, checkpoint); return; }
         var vq = new Quadric[bm.VertCount];
         var heap = new Heap(bm.TotEdge);
         var table = new int[bm.EdgeCount];

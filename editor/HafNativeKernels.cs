@@ -1,6 +1,6 @@
 // HafNativeKernels.cs - the native plugin behind the probe's heaviest kernels (2026-10-21): the custom-normal encode and
 // decode (VehicleProbe.CustomNormals.cs), the visibility BVH's constructor and BuildPartMesh's world transform
-// (VehicleProbe.Visibility.cs). Measured in Unity 2021.3's Mono before this: the Saleg's Revenge probe took 2.86 s, of which
+// (VehicleProbe.Visibility.cs), and the prep's edge collapse (HafNativeKernels.Collapse.cs). Measured in Unity 2021.3's Mono before this: the Saleg's Revenge probe took 2.86 s, of which
 // the fan walk alone was 5.4 s of CPU; the same C++ (native/hafnormals.cpp, native/hafkernels.cpp) runs it in 0.59 s and
 // the whole probe in 0.87 s, every output hash equal (docs/Testing.md, Native kernels). Mono's code generation, not the
 // algorithm, was the cost: the same C# runs 2.5-3.4x faster on the .NET Framework's JIT.
@@ -14,7 +14,7 @@
 // Loading: Unity resolves DllImport("hafkernels") to the package's native plugin (editor/Plugins/x86_64/hafkernels.dll,
 // Editor-only, x86_64). Outside Unity - the tests and the drills, each compiled into its own folder - the DLL is loaded
 // by path first: HAF_KERNELS_DLL, or hafkernels.dll beside this assembly; the import by name then binds to the module
-// already loaded. The DLL's haf_kernels_version must say 1, which also means ucrtbase's cosf/sinf resolved (the decode
+// already loaded. The DLL's haf_kernels_version must match Version, which also means ucrtbase's cosf/sinf resolved (the decode
 // computes with Blender's C runtime, as BlenderTrig does); any other answer keeps the managed path.
 //
 // The arrays cross as pinned pointers (blittable float/int/short), the sharp-face flags as one byte each; no unsafe code,
@@ -24,16 +24,16 @@ using System;
 using System.IO;
 using System.Runtime.InteropServices;
 
-public static class HafNativeKernels
+public static partial class HafNativeKernels
 {
     public const string DllName = "hafkernels";
-    public const int Version = 1;
+    public const int Version = 3;   // 3: collapse death-order exports preserve the BMesh's free lists
 
-    /// <summary>True when the kernels run natively: the DLL loaded, 64-bit, version 1, trig resolved, not switched off. Set once
+    /// <summary>True when the kernels run natively: the DLL loaded, 64-bit, version matched, trig resolved, not switched off. Set once
     /// here; not readonly only so that Tests/NativeKernelsTests.cs can call both twins in one host (the JIT bakes a static
     /// readonly bool into code compiled after type initialization, and reflection would then change nothing).</summary>
     public static bool Available;
-    /// <summary>One line saying which path runs and why ("native (hafkernels.dll version 1)" or "managed (...)").</summary>
+    /// <summary>One line saying which path runs and why ("native (hafkernels.dll version ...)" or "managed (...)").</summary>
     public static readonly string Status;
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr LoadLibraryW(string path);
