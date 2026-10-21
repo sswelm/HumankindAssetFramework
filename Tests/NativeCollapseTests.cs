@@ -30,7 +30,7 @@ public class NativeCollapseTests
         double J(double amount) => regular ? 0.0 : rnd.NextDouble() * amount;
         var m = new HafModel();
         int nv = w * h;
-        var p = new HafPrimitive { VertexCount = nv, Positions = new float[3 * nv], Normals = new float[3 * nv], Uv0 = new float[2 * nv], Colors = new float[4 * nv], Material = 0 };
+        var p = new HafPrimitive { VertexCount = nv, Positions = new float[3 * nv], Normals = new float[3 * nv], Uv0 = new float[2 * nv], Colors = BlenderColor.TableKnown ? new float[4 * nv] : null, Material = 0 };
         var q = new HafPrimitive { VertexCount = nv, Positions = new float[3 * nv], Normals = new float[3 * nv], Uv0 = new float[2 * nv], Material = 1 };
         foreach (var prim in new[] { p, q })
             for (int y = 0; y < h; y++) for (int x = 0; x < w; x++)
@@ -135,5 +135,118 @@ public class NativeCollapseTests
         bm.LV[3] = bm.VertCount + 7;   // a corner naming a vertex that does not exist
         var d = new BlenderDecimate.MeshData();
         Assert.Throws<IndexOutOfRangeException>(() => HafNativeKernels.Collapse(bm, 0.5f, d));
+    }
+
+    static BMesh MeshForCollapse(int width = 12, int height = 10)
+    {
+        var m = Grid(width, height, false, 5);
+        m.Meshes[0].Primitives.RemoveAt(1);
+        var layout = BlenderMesh.FromGltf(m, 0);
+        var bm = BMesh.FromMesh(layout, m.Meshes[0].Primitives[0].Positions);
+        BlenderDecimate.FaceNormalsUpdate(bm);
+        for (int v = 0; v < bm.VertCount; v++) bm.VNo[3 * v + 2] = 1f;
+        return bm;
+    }
+
+    [Theory]
+    [InlineData("VE")]
+    [InlineData("EV1")]
+    [InlineData("EV2")]
+    [InlineData("EDiskNext")]
+    [InlineData("EDiskPrev")]
+    [InlineData("LV")]
+    [InlineData("LE")]
+    [InlineData("LF")]
+    [InlineData("LNext")]
+    [InlineData("LPrev")]
+    [InlineData("LRadialNext")]
+    [InlineData("LRadialPrev")]
+    [InlineData("FLFirst")]
+    public void A_required_link_cannot_be_the_none_sentinel(string field)
+    {
+        var bm = MeshForCollapse();
+        ((int[])typeof(BMesh).GetField(field).GetValue(bm))[0] = BMesh.None;
+        bool entered = false;
+        // Stop at the first native callback if validation fails to reject the input, before it can index -1.
+        Assert.Throws<IndexOutOfRangeException>(() => HafNativeKernels.Collapse(bm, .5f,
+            new BlenderDecimate.MeshData(), () => { entered = true; throw new OperationCanceledException(); }));
+        Assert.False(entered);
+    }
+
+    [Fact]
+    public void Quadric_construction_keeps_the_managed_checkpoint_schedule()
+    {
+        int managed = 0, native = 0;
+        // Ratio 1 still builds the costs, but performs no collapse: all polls belong to initialization.
+        WithKernels(false, () => BlenderDecimate.Collapse(MeshForCollapse(40, 30), 1f, new BlenderDecimate.MeshData(), () => managed++));
+        WithKernels(true, () => BlenderDecimate.Collapse(MeshForCollapse(40, 30), 1f, new BlenderDecimate.MeshData(), () => native++));
+        Assert.Equal(managed, native);
+    }
+
+    static void SameMesh(BMesh a, BMesh b)
+    {
+        foreach (var field in typeof(BMesh).GetFields())
+        {
+            var av = field.GetValue(a); var bv = field.GetValue(b);
+            if (av is float[] af) Assert.Equal(Bits(af), Bits((float[])bv));
+            else if (av is Array aa) Assert.Equal(aa, (Array)bv);
+            else Assert.Equal(av, bv);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Native_deletions_preserve_slot_reuse_when_the_mesh_is_edited_again(bool cancelled)
+    {
+        var managed = MeshForCollapse(); var native = MeshForCollapse();
+        // Preserve frees that predate the collapse as well as the deaths made by it.
+        foreach (var bm in new[] { managed, native })
+        {
+            var old = AddTriangle(bm);
+            for (int i = 0; i < 3; i++) bm.VertKill(old[i]);
+        }
+        void Reduce(BMesh bm)
+        {
+            int before = bm.TotFace;
+            Action poll = cancelled ? (Action)(() => { if (bm.TotFace < before) throw new OperationCanceledException(); }) : null;
+            if (cancelled) Assert.Throws<OperationCanceledException>(() => BlenderDecimate.Collapse(bm, .5f, new BlenderDecimate.MeshData(), poll));
+            else BlenderDecimate.Collapse(bm, .5f, new BlenderDecimate.MeshData());
+        }
+        WithKernels(false, () => Reduce(managed));
+        WithKernels(true, () => Reduce(native));
+        SameMesh(managed, native);
+        int[] AddTriangle(BMesh bm)
+        {
+            var verts = new[] { bm.VertCreate(20, 0, 0), bm.VertCreate(21, 0, 0), bm.VertCreate(20, 1, 0) };
+            var edges = new[] { bm.EdgeCreate(verts[0], verts[1]), bm.EdgeCreate(verts[1], verts[2]), bm.EdgeCreate(verts[2], verts[0]) };
+            var loops = new int[3]; int face = bm.FaceCreate(verts, edges, 3, loopSlots: loops);
+            return verts.Concat(edges).Concat(loops).Concat(new[] { face }).ToArray();
+        }
+        Assert.Equal(AddTriangle(managed), AddTriangle(native));
+        SameMesh(managed, native);
+    }
+
+    [Fact]
+    public void Byte_colour_interpolation_is_drilled_without_the_CPU_specific_importer()
+    {
+        // Collapse consumes bytes already stored on the BMesh. Test those on every CPU, independently of
+        // BlenderColor.TableKnown (which gates the importer's linear-float to byte-colour conversion).
+        BlenderDecimate.MeshData Data(BMesh bm)
+        {
+            var d = new BlenderDecimate.MeshData();
+            var point = new byte[4 * bm.VertCount]; var corner = new byte[4 * bm.LoopCount];
+            for (int v = 0; v < bm.VertCount; v++)
+            { point[4 * v] = (byte)(v * 29); point[4 * v + 1] = 17; point[4 * v + 2] = 31; point[4 * v + 3] = 255; }
+            for (int l = 0; l < bm.LoopCount; l++) Array.Copy(point, 4 * bm.LV[l], corner, 4 * l, 4);
+            d.PointColor.Add(point); d.CornerColor.Add(corner); return d;
+        }
+        var managed = MeshForCollapse(); var native = MeshForCollapse();
+        var md = Data(managed); var nd = Data(native); var before = (byte[])md.PointColor[0].Clone();
+        WithKernels(false, () => BlenderDecimate.Collapse(managed, .4f, md));
+        WithKernels(true, () => BlenderDecimate.Collapse(native, .4f, nd));
+        Assert.False(before.SequenceEqual(md.PointColor[0]));
+        Assert.Equal(md.PointColor[0], nd.PointColor[0]); Assert.Equal(md.CornerColor[0], nd.CornerColor[0]);
+        SameMesh(managed, native);
     }
 }

@@ -18,6 +18,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   kernels gave 9x, because this loop is bound by memory latency (a five-million-node heap, random walks over the link
   arrays), not by Mono's code generation: the native loop runs at the .NET JIT's speed. The native kernels drill now
   hashes the prep's output as well as the probe's, on .NET and in Unity's Mono (docs/Testing.md, Native kernels).
+  PR #201 review fixes restore checkpoint polling during quadric construction, reject missing required links before
+  C++, and replay native deletions into BMesh's free lists for identical later edits (DLL version 3). The collapse tests
+  run on unmeasured CPUs too; byte-colour interpolation is tested directly without the CPU-specific importer.
 - **THE PROBE'S HEAVIEST KERNELS RUN AS C++ (2026-10-21).** ChatGPT's suggestion, tested by measurement before any
   port: the same C# ran 2.5-3.4x slower on Unity's Mono than on the .NET Framework's JIT, and the hot kernel was not the
   vertex transform the suggestion named (5% of the probe) but the custom-normal encode and decode (90% of the part-mesh

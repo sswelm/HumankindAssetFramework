@@ -36,6 +36,7 @@ struct BM
     int *EV1, *EV2, *EL, *EDiskNext, *EDiskPrev; uint8_t* EAlive; uint8_t* EFlag; int EdgeCount, TotEdge;
     int *LV, *LE, *LF, *LNext, *LPrev, *LRadialNext, *LRadialPrev; uint8_t* LAlive; int LoopCount, TotLoop;
     int *FLFirst, *FLen, *FMat; float* FNo; uint8_t* FAlive; uint8_t* FFlag; int FaceCount, TotFace;
+    std::vector<int>* killed;   // per-pool death order, returned for the managed BMesh's free lists
 
     int DiskLink(int e, int v) const { return 2 * e + (EV1[e] == v ? 0 : 1); }
     int DiskEdgeNext(int e, int v) const { return EDiskNext[DiskLink(e, v)]; }
@@ -177,10 +178,10 @@ struct BM
         if (EdgeIsManifold(eNext)) { eStep = eNext; return EdgeOtherLoop(eNext, l); }
         return None;
     }
-    void KillOnlyVert(int v) { VAlive[v] = 0; TotVert--; }
-    void KillOnlyEdge(int e) { EAlive[e] = 0; TotEdge--; }
-    void KillOnlyFace(int f) { FAlive[f] = 0; TotFace--; }
-    void KillOnlyLoop(int l) { LAlive[l] = 0; TotLoop--; }
+    void KillOnlyVert(int v) { VAlive[v] = 0; TotVert--; killed[0].push_back(v); }
+    void KillOnlyEdge(int e) { EAlive[e] = 0; TotEdge--; killed[1].push_back(e); }
+    void KillOnlyFace(int f) { FAlive[f] = 0; TotFace--; killed[3].push_back(f); }
+    void KillOnlyLoop(int l) { LAlive[l] = 0; TotLoop--; killed[2].push_back(l); }
     void FaceKill(int f)
     {
         if (FLFirst[f] != None)
@@ -351,10 +352,11 @@ struct Heap
 };
 
 // ---------------------------------------------------------------- the quadrics and the costs
-static void BuildQuadrics(BM& bm, std::vector<Quadric>& vq)
+template <class PollFn> static bool BuildQuadrics(BM& bm, std::vector<Quadric>& vq, PollFn poll)
 {
     for (int f = 0; f < bm.FaceCount; f++)
     {
+        if ((f & 1023) == 0 && poll()) return false;
         if (!bm.FAlive[f]) continue;
         float cx = 0.f, cy = 0.f, cz = 0.f;
         int lFirst = bm.FLFirst[f], l = lFirst;
@@ -369,6 +371,7 @@ static void BuildQuadrics(BM& bm, std::vector<Quadric>& vq)
     }
     for (int e = 0; e < bm.EdgeCount; e++)
     {
+        if ((e & 1023) == 0 && poll()) return false;
         if (!bm.EAlive[e] || !bm.EdgeIsBoundary(e)) continue;
         int v1 = bm.EV1[e], v2 = bm.EV2[e];
         float evx = (float)(bm.VCo[3 * v2] - bm.VCo[3 * v1]), evy = (float)(bm.VCo[3 * v2 + 1] - bm.VCo[3 * v1 + 1]), evz = (float)(bm.VCo[3 * v2 + 2] - bm.VCo[3 * v1 + 2]);
@@ -393,6 +396,7 @@ static void BuildQuadrics(BM& bm, std::vector<Quadric>& vq)
             vq[v2].Add(q);
         }
     }
+    return true;
 }
 
 static void CalcTargetCoDb(const BM& bm, int e, const std::vector<Quadric>& vq, double& x, double& y, double& z)
@@ -708,7 +712,7 @@ static int FaceTarget(int totFace, float factor) { return (int)(float)((float)to
 // haf_collapse_def_size / haf_collapse_def_copy / haf_collapse_free. checkpoint (may be null) is the managed loop's poll - the
 // Bake Tests' cancel, PrepInProcess's deadline: called at the start, every 1024 faces and edges of the cost build, and every
 // `every` collapses; a non-zero return stops the collapse where it is (the C# side rethrows what its checkpoint threw).
-struct DefResult { std::vector<Def> def; };
+struct DefResult { std::vector<Def> def; std::vector<int> killed[4]; };
 typedef int (__cdecl *CheckpointFn)();
 
 static inline void Publish(const BM& bm, int* counts) { counts[1] = bm.TotVert; counts[3] = bm.TotEdge; counts[5] = bm.TotLoop; counts[7] = bm.TotFace; }
@@ -735,6 +739,7 @@ EXPORT void* haf_collapse(
     for (int i = 0; i < nCornerColor; i++) d.CornerColor.push_back(cornerColor[i]);
     for (int i = 0; i < nPointColor; i++) d.PointColor.push_back(pointColor[i]);
     DefResult* result = new DefResult();
+    bm.killed = result->killed;
     if (hasDef)
     {
         result->def.resize(bm.VertCount);
@@ -752,7 +757,7 @@ EXPORT void* haf_collapse(
     Heap heap(bm.TotEdge);
     std::vector<int> table(bm.EdgeCount, -1);
     if (Poll()) return result;
-    BuildQuadrics(bm, vq);   // the managed twin polls every 1024 faces and edges inside; the quadrics are a fraction of the collapse
+    if (!BuildQuadrics(bm, vq, Poll)) return result;
     for (int e = 0; e < bm.EdgeCount; e++)
     {
         if ((e & 1023) == 0 && Poll()) return result;
@@ -790,3 +795,11 @@ EXPORT void haf_collapse_def_copy(void* handle, int* offsets, int* nr, float* we
     offsets[r->def.size()] = at;
 }
 EXPORT void haf_collapse_free(void* handle) { delete (DefResult*)handle; }
+
+// Each pool keeps the same last-freed-first reuse order as the managed BMesh, including after cancellation.
+EXPORT int haf_collapse_killed_size(void* handle, int kind) { return (int)((DefResult*)handle)->killed[kind].size(); }
+EXPORT void haf_collapse_killed_copy(void* handle, int kind, int* indices)
+{
+    const auto& killed = ((DefResult*)handle)->killed[kind];
+    std::copy(killed.begin(), killed.end(), indices);
+}

@@ -3358,13 +3358,17 @@ build 572 ms to 146 ms, the world transform 150 ms to 19 ms. On the x64 .NET Fra
 `HafNativeKernels.Collapse.cs`, 2026-10-21): the double quadrics, BLI_heap with its insertion-order ties, the degenerate
 checks, bm_edge_collapse's disk and radial edits and the custom-data walk (UVs, byte colours, vertex groups) ported step
 for step. The BMesh arrays are pinned and edited in place (the collapse creates no element), the alive flags cross as
-bytes, the layers as pinned pointers, the vertex groups as CSR in and through a handle out. Every link the C++ follows is
-range-checked first. The checkpoint the managed loop polls (the Bake Tests' cancel, PrepInProcess's deadline) is polled
+bytes, the layers as pinned pointers, the vertex groups as CSR in and through a handle out. Link validation rejects
+missing required links and references to dead elements before entering C++; optional empty disk/radial heads remain
+valid. DLL version 3 also returns each element pool's death order to the managed BMesh, preserving slot reuse if the
+mesh is edited again, including after cancellation. The checkpoint (the Bake Tests' cancel, PrepInProcess's deadline) is polled
 from inside the native loop through a callback at every collapse, as the twin polls it (measured: 2.6 million reverse
 P/Invokes on the Saleg's cost nothing visible, 11.70 s against 11.74 s at every 16th), with the BMesh's counts current
-when it runs; what it throws stops the collapse there and is rethrown after the arrays are copied back, so
+when it runs, and every 1,024 faces and edges during quadric construction; what it throws stops the collapse there and
+is rethrown after the arrays and free lists are copied back, so
 `BlenderPrepTests`' cancel and timeout cases hold for the native path too (a first cut polling every 16th collapse
-overshot their small grid and failed them). Measured on the Saleg's to 24,000 triangles, the written GLB byte-equal on
+overshot their small grid and failed them). Measured before the PR #201 review fixes on the Saleg's to 24,000 triangles,
+the written GLB byte-equal on
 every run:
 
 | Host | Prep, managed | Prep, native | Collapse alone, managed | Collapse alone, native |
@@ -3373,15 +3377,23 @@ every run:
 | .NET Framework x64 | 13.7 s | 11.4 s | 10.0 s | 8.4 s |
 
 The native figures carry the per-collapse checkpoint callback (2.6 million reverse P/Invokes; 13.4 s without it in Unity).
+After the review fixes (DLL version 3), one Unity 2021.3 smoke run per route on the same Saleg's input to 24,000 triangles
+took 23.319 s managed and 13.653 s native. Both made exactly 2,640,592 checkpoint calls and wrote the same GLB
+(SHA-256 `9a2cd7aa3e6b95abe7a15e7f1fbbe6917b63122fabfd4e9f24b6dc8aa46a7cdf`). This is a single-run regression check.
 The collapse is bound by memory latency (a 5-million-node heap and random walks over the link arrays), not by code
 generation: the native loop runs at the .NET JIT's speed, 1.6x Mono's. The rest of the prep (the layout, the exporter's
 mesh layout, the GLB assembly) is managed and now the larger half of the Unity prep time.
 
-Guards. `Tests/NativeCollapseTests.cs` (seven cases) reduces a textured two-material grid with holes and a skinned one
+Guards. `Tests/NativeCollapseTests.cs` (24 cases) reduces a textured two-material grid with holes and a skinned one
 with two joints through BlenderReduce both ways at two ratios, jittered and as a regular lattice (identical quads:
 equal costs, so the heap's insertion-order tie-break decides), and compares the whole result (positions, faces, edges,
-materials, sharpness, UV and colour layers, vertex groups) bit for bit; a corrupt link must throw before the C++ runs.
-Planted in the C++: the boundary weight halved fails four cases, the flip check loosened fails two, the heap's
+materials, sharpness, UV and colour layers, vertex groups) bit for bit. Imported colours are included only when
+BlenderColor.TableKnown; a separate direct BMesh test compares point/corner byte-colour interpolation on every CPU,
+so an unmeasured CPU neither skips the collapse comparisons nor loses colour coverage. Further cases reject corrupt
+and missing required links before C++, compare checkpoint schedules across multiple construction batches, and edit a
+reduced or cancelled mesh again to check vertex/edge/face/loop slot reuse. All 2,156 unit tests also pass with an
+unrecognized PROCESSOR_IDENTIFIER. Planted against the original seven cases in the C++: the boundary weight halved
+fails four cases, the flip check loosened fails two, the heap's
 tie-break turned the other way fails the two lattice cases and none of the jittered ones (which is why the lattice is
 there); OptimizeEps off by 100x fails none - the grids give no optimum with a determinant in that band - and the
 byte-equal Saleg's and the drill's 46 sources are what hold that constant. The native kernels drill's PREP
