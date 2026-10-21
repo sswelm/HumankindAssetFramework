@@ -10,6 +10,9 @@ using Xunit;
 // materials, and a skinned grid with two joints (vertex groups merge and reorder as vertices collapse). The DLL must
 // load (NativeKernelsTests asserts it); here a managed fallback would compare the managed path with itself, so each
 // case also asserts Available.
+// Both native-kernel test classes flip the static HafNativeKernels.Available switch; xunit runs classes in parallel, so they share
+// one collection and run one after the other (a loader assertion met the other class's managed window in a push gate, 2026-10-21).
+[Collection("native kernels switch")]
 public class NativeCollapseTests
 {
     static void WithKernels(bool on, Action body)
