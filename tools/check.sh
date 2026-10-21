@@ -211,6 +211,7 @@ run_bg "GLB reader drill (every registry GLB read; a sample compared with Blende
 run_bg "GLB writer drill (every registry GLB written, read back equal; a sample re-imported by Blender; SKIP without the project)" bash "$ROOT/tools/glb_writer_drill.sh"
 run_bg "vehicle probe drill (the Lab's probe in C#: every source probed, a sample's rows equal to Blender's own probe)" bash "$ROOT/tools/vehicle_probe_drill.sh"
 run_bg "vehicle probe comparator tests (diagnostic rows must be complete)" python "$ROOT/Tests/test_compare_vehicle_probe.py"
+run_bg "native kernels drill (the probe's C++ kernels: hafkernels.dll equal to a fresh build of native/, and every output hash on every recipe source equal to the managed twins'; SKIP without g++)" bash "$ROOT/tools/native_kernels_drill.sh"
 run_bg "vehicle probe jobs tests (the recipes' arguments as the Lab formats them)" python "$ROOT/Tests/test_probe_jobs.py"
 run_bg "mesh layout drill (Blender's vertex and edge order in C#: a sample's edge lists equal to Blender's own)" bash "$ROOT/tools/decimate_drill.sh"
 run_bg "prep drill (the reduce plus the glTF exporter's mesh layout in C#: a sample equal to what Blender's prep_model.py wrote)" bash "$ROOT/tools/prep_drill.sh"

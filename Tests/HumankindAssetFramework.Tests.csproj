@@ -18,6 +18,8 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.6" />
     <None Include="eigen_inverses.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Include="blender_handle_releases.txt" CopyToOutputDirectory="PreserveNewest" />
+    <!-- the native kernels beside the test host: NativeKernelsTests holds hafkernels.dll to the managed twins (and FAILS when it cannot load) -->
+    <None Include="..\editor\Plugins\x86_64\hafkernels.dll" Link="hafkernels.dll" CopyToOutputDirectory="PreserveNewest" />
 </ItemGroup>
 
   <ItemGroup>
@@ -61,6 +63,7 @@
     <Compile Include="..\editor\VehicleProbe.BlenderWorld.cs" Link="VehicleProbe.BlenderWorld.cs" />
     <Compile Include="..\editor\VehicleProbe.BlenderSkin.cs" Link="VehicleProbe.BlenderSkin.cs" />
     <Compile Include="..\editor\VehicleProbe.CustomNormals.cs" Link="VehicleProbe.CustomNormals.cs" />
+    <Compile Include="..\editor\HafNativeKernels.cs" Link="HafNativeKernels.cs" />
     <Compile Include="..\editor\VehicleProbe.Merge.cs" Link="VehicleProbe.Merge.cs" />
     <Compile Include="..\editor\VehicleProbe.BlenderArmature.cs" Link="VehicleProbe.BlenderArmature.cs" />
     <Compile Include="..\editor\HafUnityFrame.cs" Link="HafUnityFrame.cs" />

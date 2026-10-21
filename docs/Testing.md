@@ -3322,3 +3322,49 @@ The rig-animation drill's GLB SHA corruption check uses a separate image-free ex
 same job. Registry order can otherwise select a re-encoded albedo whose complete file bytes are intentionally not
 compared, making a valid-but-changed SHA an ineffective negative test. Other stage and export mutations retain the
 albedo-bearing control; the hash check remains mandatory.
+
+
+### Native kernels
+
+The probe's three heaviest kernels run as C++ since 2026-10-21: the custom-normal encode and decode (the fan walk of
+`VehicleProbe.CustomNormals.cs`), the visibility BVH's constructor and BuildPartMesh's world transform
+(`VehicleProbe.Visibility.cs`). The sources are `native/hafkernels.cpp` and `native/hafnormals.cpp`, built by
+`bash tools/build_native_kernels.sh` (WinLibs g++, `-O2 -ffp-contract=off`, cosf/sinf resolved from ucrtbase.dll at
+load as BlenderTrig does) into `editor/Plugins/x86_64/hafkernels.dll`, an Editor-only x86_64 native plugin of the
+package; `editor/HafNativeKernels.cs` loads it, checks its version and validates every input the C++ will index (a
+malformed input throws the managed twin's IndexOutOfRangeException instead of reading past a buffer). Each kernel keeps
+its managed twin, which is the specification, the oracle and the fallback: no DLL, a 32-bit host, a wrong version or
+`HAF_NATIVE_KERNELS=0` keep the C#. `HafNativeKernels.Status` says which path runs; the probe benchmark and the native
+kernels drill print it as a KERNELS line. The decode with a sharp-edge set (the weld tiers, BlenderVehicleRig.Stage2) is
+not ported and stays managed. The build is deterministic (no timestamps, fixed image base and random seed, stripped;
+`native/deterministic.py` zeroes the export directory's stamp and the checksum), so a committed DLL can be held to the
+sources byte for byte. A native DLL loaded by the Unity editor is never unloaded: a rebuilt DLL takes effect after an
+editor restart.
+
+Why: the same C# runs 2.5-3.4x slower on Unity's Mono than on the .NET Framework's JIT, and the fan walk was 90% of the
+part-mesh CPU. Measured 2026-10-21 with `tools/vehicle_probe_performance.sh` in Unity 2021.3.1f1 (`HAF_PROBE_PERF_UNITY=1`),
+median of five, every output hash equal between the managed twins and the DLL on every run:
+
+| Source | Probe, managed | Probe, native | Read + probe, managed | Read + probe, native |
+| --- | ---: | ---: | ---: | ---: |
+| Saleg's Revenge (3.59M tris) | 2.864 s | 0.865 s | 3.335 s | 1.339 s |
+| Khelandion (622k tris) | 0.749 s | 0.236 s | 0.856 s | 0.340 s |
+
+Per kernel on the Saleg's in Unity (CPU, summed over the part workers): encode + decode 5,404 ms to 586 ms, the BVH
+build 572 ms to 146 ms, the world transform 150 ms to 19 ms. On the x64 .NET Framework host the whole probe gains 1.8x
+(1.157 s to 0.643 s). Not ported, and the largest remaining cost on the bake path: the in-process prep's edge-collapse
+loop (BlenderDecimate), 22.3 s in Unity on the Saleg's to 24,000 triangles, about three quarters of it the serial heap
+walk; its native gain is unmeasured.
+
+Guards. `Tests/NativeKernelsTests.cs` (ten cases) runs both twins in one host on meshes built to reach every branch the
+C++ ports - file normals and none, the clamp and the true-normal fallback, sharp faces, cyclic and open fans, lone
+vertices, a mirrored sheared matrix, and sizes above both sides' parallel thresholds - and compares the shorts, the
+normals, the BVH's slots and verdicts and the transformed buffers bit for bit; the DLL is copied beside the test host
+and a host that cannot load it FAILS the first case, never skips. Planted: `HAF_NATIVE_KERNELS=0` fails that case
+(1 of 10); a DLL built with LNOR_TRIGO off by 1e-3 fails six of ten. The push gate's native kernels drill
+(`tools/native_kernels_drill.sh`) probes every reader fixture and every recipe source twice - the managed twins and the
+DLL - through the benchmark harness and compares every row, bound and preview buffer hash (46 files on 2026-10-21, probe
+sum 3,090 ms managed against 1,910 ms native on the .NET host), requires each run to SAY which path it took, and
+rebuilds the DLL from `native/` to compare it with the committed one (a SKIP without g++, after the hashes compared).
+The Blender-parity drills (vehicle probe, prep, decimate, deploy, rig_anim, vehicle_rig) copy the DLL beside their exe
+and so hold the native path to Blender; the managed twins stay drilled by the native kernels drill and the unit tests.
