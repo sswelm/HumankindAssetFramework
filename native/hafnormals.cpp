@@ -56,6 +56,10 @@ static inline float SafeAcosApprox(float x)
 }
 static inline short UnitFloatToShort(float v) { return (short)std::floor((double)(float)((float)(v * 32767.f) + 0.5f)); }
 
+// Match Math.Max(-1, Math.Min(1, v)), including NaN: std::min(1, NaN) returns 1 instead.
+// Preserve a NaN component so Normalize3 selects the managed twin's geometry-normal fallback.
+static inline float ClampNormal(float v) { return v < -1.f ? -1.f : v > 1.f ? 1.f : v; }
+
 struct FanSpace { float lx, ly, lz, rx, ry, rz, ox, oy, oz, refAlpha, refBeta; float fnx, fny, fnz; };
 
 static FanSpace DefineSpace(float lx, float ly, float lz, float vrx, float vry, float vrz, float vox, float voy, float voz, const std::vector<const float*>& edgeVectors)
@@ -341,7 +345,7 @@ EXPORT void haf_encode_custom(const float* P, int nv, const int* tris, int nf, c
     {
         bool none = std::isnan(N[v * 3]);
         float x = none ? 0.f : N[v * 3], y = none ? 0.f : N[v * 3 + 1], z = none ? 0.f : N[v * 3 + 2];
-        x = std::max(-1.f, std::min(1.f, x)); y = std::max(-1.f, std::min(1.f, y)); z = std::max(-1.f, std::min(1.f, z));
+        x = ClampNormal(x); y = ClampNormal(y); z = ClampNormal(z);
         Normalize3(x, y, z);
         if (x == 0.f && y == 0.f && z == 0.f)
         {

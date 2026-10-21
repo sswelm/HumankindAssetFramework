@@ -87,6 +87,36 @@ public class NativeKernelsTests
         Assert.Contains(md, x => float.IsNaN(x) == false && x != 0f);
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void Partial_NaN_normals_keep_the_managed_geometry_fallback(int component)
+    {
+        // GlbReader accepts non-finite attributes. NaN only in Y/Z must survive the RNA clamp so Normalize3
+        // selects the geometry normal, just as the managed path does (NaN in X is the missing-normal sentinel).
+        var P = new float[] { 0, 0, 0, 1, 0, 0, 0, 1, 0 };
+        var tris = new[] { 0, 1, 2 };
+        var N = new float[] { .5f, .25f, 1f, .5f, .25f, 1f, .5f, .25f, 1f };
+        for (int v = 0; v < 3; v++) N[3 * v + component] = float.NaN;
+        var sharp = VehicleProbe.SharpFaces(P, tris, N);
+        short[] m0 = null, m1 = null, n0 = null, n1 = null;
+        WithKernels(false, () => (m0, m1) = VehicleProbe.EncodeCustomShorts(P, tris, N, sharp));
+        WithKernels(true, () => (n0, n1) = VehicleProbe.EncodeCustomShorts(P, tris, N, sharp));
+        Assert.All(m0, x => Assert.Equal((short)0, x));
+        Assert.All(m1, x => Assert.Equal((short)0, x));
+        Assert.Equal(m0, n0); Assert.Equal(m1, n1);
+
+        var model = new HafModel(); var mesh = new HafMesh();
+        mesh.Primitives.Add(new HafPrimitive { VertexCount = 3, Positions = P, Normals = N, Indices = tris });
+        model.Meshes.Add(mesh); model.Nodes.Add(new HafNode { Mesh = 0 });
+        var identity = new float[] { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+        VehicleProbe.PartMesh managed = null, native = null;
+        WithKernels(false, () => managed = VehicleProbe.BuildPartMesh(model, 0, -1, null, null, identity, null));
+        WithKernels(true, () => native = VehicleProbe.BuildPartMesh(model, 0, -1, null, null, identity, null));
+        Assert.Equal(Bits(managed.Normal), Bits(native.Normal));
+        Assert.Equal(Bits(managed.PreviewNormal), Bits(native.PreviewNormal));
+    }
+
     [Fact]
     public void Decode_with_sharp_edges_stays_managed_and_equal()
     {

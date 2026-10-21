@@ -3356,12 +3356,13 @@ build 572 ms to 146 ms, the world transform 150 ms to 19 ms. On the x64 .NET Fra
 loop (BlenderDecimate), 22.3 s in Unity on the Saleg's to 24,000 triangles, about three quarters of it the serial heap
 walk; its native gain is unmeasured.
 
-Guards. `Tests/NativeKernelsTests.cs` (ten cases) runs both twins in one host on meshes built to reach every branch the
+Guards. `Tests/NativeKernelsTests.cs` (twelve cases) runs both twins in one host on meshes built to reach every branch the
 C++ ports - file normals and none, the clamp and the true-normal fallback, sharp faces, cyclic and open fans, lone
-vertices, a mirrored sheared matrix, and sizes above both sides' parallel thresholds - and compares the shorts, the
-normals, the BVH's slots and verdicts and the transformed buffers bit for bit; the DLL is copied beside the test host
-and a host that cannot load it FAILS the first case, never skips. Planted: `HAF_NATIVE_KERNELS=0` fails that case
-(1 of 10); a DLL built with LNOR_TRIGO off by 1e-3 fails six of ten. The push gate's native kernels drill
+vertices, partially NaN file normals (preserving the managed geometry-normal fallback), a mirrored sheared matrix, and
+sizes above both sides' parallel thresholds - and compares the shorts, normals, the BVH's slots and verdicts and the
+transformed buffers bit for bit; the DLL is copied beside the test host and a host that cannot load it FAILS the first
+case, never skips. Planted against the original ten-case suite: `HAF_NATIVE_KERNELS=0` failed that case
+(1 of 10); a DLL built with LNOR_TRIGO off by 1e-3 failed six of ten. The push gate's native kernels drill
 (`tools/native_kernels_drill.sh`) probes every reader fixture and every recipe source twice - the managed twins and the
 DLL - through the benchmark harness and compares every row, bound and preview buffer hash (46 files on 2026-10-21, probe
 sum 3,090 ms managed against 1,910 ms native on the .NET host), requires each run to SAY which path it took, and
