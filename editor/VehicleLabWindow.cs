@@ -2689,7 +2689,8 @@ public class VehicleLabWindow : EditorWindow
             preview = VehicleProbePreview.Build(r, PreviewModels(input), PreviewBrightness(input), previewObjects);
             sw.Stop();
             // console headline = the OUTCOME, as the Blender path logs it (the rows themselves would bury it)
-            Debug.Log($"[VehicleLab] probe (C#, in-process): {r.Parts.Count} part(s) found   ({sw.Elapsed.TotalSeconds:0.00}s)\n" + string.Join("\n", r.Notes.Select(n => "VEHICLE " + n)));
+            // the kernels line says whether hafkernels.dll ran (a managed probe is correct, and three times slower: PR #199)
+            Debug.Log($"[VehicleLab] probe (C#, in-process): {r.Parts.Count} part(s) found   ({sw.Elapsed.TotalSeconds:0.00}s, read + probe + preview; kernels {HafNativeKernels.Status})\n" + string.Join("\n", r.Notes.Select(n => "VEHICLE " + n)));
             return true;
         }
         catch (Exception e)
