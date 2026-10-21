@@ -38,7 +38,7 @@ cp "$DLL" "$TMPD/hafkernels.dll"
 # ---- the harness: ProbePerformance as an x64 exe (the .NET Framework's 64-bit runtime, the DLL's architecture), one run per file
 sources=(HafModel GlbReader HafTransforms BlenderNames VehicleProbe VehicleProbe.Visibility VehicleProbe.Islands
   VehicleProbe.InsideOut VehicleProbe.BlenderWorld VehicleProbe.BlenderSkin VehicleProbe.CustomNormals VehicleProbe.Merge
-  VehicleProbe.BlenderArmature BlenderEigen BlenderTrig HafNativeKernels)
+  VehicleProbe.BlenderArmature BlenderEigen BlenderTrig HafNativeKernels BlenderMesh BMesh BlenderColor BlenderDecimate BlenderReduce BlenderExport BlenderExportTree BlenderPrep BlenderMaterialExport GlbWriter HafNativeKernels.Collapse)
 files=("$WROOT/tools/vehicle-probe-drill/ProbePerformance.cs")
 for source in "${sources[@]}"; do files+=("$WROOT/editor/$source.cs"); done
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -optimize+ -platform:x64 -out:"$WTMP/kernels.exe" \
@@ -58,8 +58,8 @@ missing=0; for f in "${FILES[@]}"; do [ -f "$f" ] || { echo "FAIL — source not
 [ "$missing" -eq 0 ] || exit 1
 
 t0=$(date +%s)
-HAF_PROBE_PERF_RUNS=1 HAF_NATIVE_KERNELS=0 "$TMPD/kernels.exe" "${FILES[@]}" > "$TMPD/managed.txt" 2>&1; rc_m=$?
-HAF_PROBE_PERF_RUNS=1 "$TMPD/kernels.exe" "${FILES[@]}" > "$TMPD/native.txt" 2>&1; rc_n=$?
+HAF_PROBE_PERF_RUNS=1 HAF_PROBE_PERF_PREP=1 HAF_NATIVE_KERNELS=0 "$TMPD/kernels.exe" "${FILES[@]}" > "$TMPD/managed.txt" 2>&1; rc_m=$?
+HAF_PROBE_PERF_RUNS=1 HAF_PROBE_PERF_PREP=1 "$TMPD/kernels.exe" "${FILES[@]}" > "$TMPD/native.txt" 2>&1; rc_n=$?
 for side in managed native; do
   f="$TMPD/$side.txt"
   if [ "$side" = managed ] && [ "$rc_m" -ne 0 ] || [ "$side" = native ] && [ "$rc_n" -ne 0 ]; then tail -5 "$f"; echo "FAIL — the $side run failed (rc managed=$rc_m native=$rc_n)"; exit 1; fi
@@ -70,13 +70,13 @@ case "$K_M" in "KERNELS managed (HAF_NATIVE_KERNELS=0)") ;; *) echo "FAIL — th
 case "$K_N" in "KERNELS native ("*) ;; *) echo "FAIL — the native run did not run hafkernels.dll: '$K_N' (the DLL did not load, so the drill would compare the managed path with itself)"; exit 1;; esac
 
 # ---- every file's hash, both sides
-grep '^MEDIAN ' "$TMPD/managed.txt" | awk '{print $2, $NF}' | sort > "$TMPD/h_managed.txt"
-grep '^MEDIAN ' "$TMPD/native.txt"  | awk '{print $2, $NF}' | sort > "$TMPD/h_native.txt"
+grep -E '^(MEDIAN|PREP) ' "$TMPD/managed.txt" | awk '{print $2 "/" $1, $NF}' | sort > "$TMPD/h_managed.txt"
+grep -E '^(MEDIAN|PREP) ' "$TMPD/native.txt"  | awk '{print $2 "/" $1, $NF}' | sort > "$TMPD/h_native.txt"
 n_m=$(wc -l < "$TMPD/h_managed.txt"); n_n=$(wc -l < "$TMPD/h_native.txt")
-[ "$n_m" -eq "${#FILES[@]}" ] && [ "$n_n" -eq "${#FILES[@]}" ] || { echo "FAIL — $n_m managed / $n_n native hashes for ${#FILES[@]} files"; exit 1; }
+[ "$n_m" -eq $((2 * ${#FILES[@]})) ] && [ "$n_n" -eq $((2 * ${#FILES[@]})) ] || { echo "FAIL — $n_m managed / $n_n native hashes for ${#FILES[@]} files (a probe and a prep each)"; exit 1; }
 if ! diff "$TMPD/h_managed.txt" "$TMPD/h_native.txt" > "$TMPD/h_diff.txt"; then
   grep '^[<>]' "$TMPD/h_diff.txt" | head -10
-  echo "FAIL — $(grep -c '^<' "$TMPD/h_diff.txt") of ${#FILES[@]} files hash differently between the managed twins and hafkernels.dll"
+  echo "FAIL — $(grep -c '^<' "$TMPD/h_diff.txt") of $((2 * ${#FILES[@]})) probe/prep outputs hash differently between the managed twins and hafkernels.dll"
   exit 1
 fi
 sum_m=$(grep '^MEDIAN ' "$TMPD/managed.txt" | sed -E 's/.*probe_ms=([0-9.]+).*/\1/' | awk '{s+=$1} END {printf "%.0f", s}')
@@ -101,19 +101,19 @@ cp "$TMPD/Newtonsoft.Json.dll" "$TMPD/unity/project/Assets/Editor/"
 cp "$DLL" "$ROOT/editor/Plugins/x86_64/hafkernels.dll.meta" "$TMPD/unity/project/Assets/Plugins/x86_64/"
 printf '{"dependencies":{}}\n' > "$TMPD/unity/project/Packages/manifest.json"
 printf 'm_EditorVersion: 2021.3.1f1\n' > "$TMPD/unity/project/ProjectSettings/ProjectVersion.txt"
-HAF_PROBE_PERF_RUNS=1 "$UNITY_EXE" -batchmode -nographics -quit -projectPath "$WTMP/unity/project" -logFile "$WTMP/unity/unity.log" \
+HAF_PROBE_PERF_RUNS=1 HAF_PROBE_PERF_PREP=1 "$UNITY_EXE" -batchmode -nographics -quit -projectPath "$WTMP/unity/project" -logFile "$WTMP/unity/unity.log" \
   -executeMethod ProbePerformance.RunUnity -- "${UFILES[@]}" > /dev/null 2>&1; rc_u=$?
 grep -q "^BENCHMARK PASS files=${#UFILES[@]}\$" "$TMPD/unity/unity.log" || { grep -E "^(KERNELS|MEASURE|Exception|.*Error)" "$TMPD/unity/unity.log" | head -10; echo "FAIL — the Unity run did not probe all ${#UFILES[@]} files (Unity rc=$rc_u; log in the drill's temp folder)"; exit 1; }
 K_U=$(grep -m1 '^KERNELS ' "$TMPD/unity/unity.log")
 case "$K_U" in "KERNELS native ("*) ;; *) echo "FAIL — Unity's Mono did not run hafkernels.dll: '$K_U'"; exit 1;; esac
-grep '^MEDIAN ' "$TMPD/unity/unity.log" | awk '{print $2, $NF}' | sort > "$TMPD/h_unity.txt"
-n_u=$(wc -l < "$TMPD/h_unity.txt"); [ "$n_u" -eq "${#UFILES[@]}" ] || { echo "FAIL — $n_u Unity hashes for ${#UFILES[@]} files"; exit 1; }
+grep -E '^(MEDIAN|PREP) ' "$TMPD/unity/unity.log" | awk '{print $2 "/" $1, $NF}' | sort > "$TMPD/h_unity.txt"
+n_u=$(wc -l < "$TMPD/h_unity.txt"); [ "$n_u" -eq $((2 * ${#UFILES[@]})) ] || { echo "FAIL — $n_u Unity hashes for ${#UFILES[@]} files (a probe and a prep each)"; exit 1; }
 u_bad=0
 while read -r name hash; do
   want=$(awk -v n="$name" '$1 == n {print $2}' "$TMPD/h_managed.txt" | head -1)
   [ "$hash" = "$want" ] || { echo "DIFF $name: Unity native $hash, managed $want"; u_bad=$((u_bad + 1)); }
 done < "$TMPD/h_unity.txt"
-[ "$u_bad" -eq 0 ] || { echo "FAIL — $u_bad of ${#UFILES[@]} files hash differently between hafkernels.dll under Unity's Mono and the managed twins"; exit 1; }
+[ "$u_bad" -eq 0 ] || { echo "FAIL — $u_bad of $((2 * ${#UFILES[@]})) probe/prep outputs hash differently between hafkernels.dll under Unity's Mono and the managed twins"; exit 1; }
 t2=$(date +%s)
 
 # ---- the committed DLL against a fresh build (deterministic: tools/build_native_kernels.sh)
@@ -123,7 +123,7 @@ if command -v g++ >/dev/null 2>&1; then
   if ! cmp -s "$TMPD/fresh/hafkernels.dll" "$DLL"; then
     echo "FAIL — editor/Plugins/x86_64/hafkernels.dll is not a build of native/ as committed ($(stat -c %s "$DLL") vs $(stat -c %s "$TMPD/fresh/hafkernels.dll") bytes; bash tools/build_native_kernels.sh, then commit the DLL)"; exit 1
   fi
-  echo "PASS — native kernels: ${#FILES[@]} files (${#FIXTURES[@]} fixtures, $NOTE) hash equal between the managed twins and hafkernels.dll on .NET ($((t1 - t0)) s; probe sum managed ${sum_m} ms, native ${sum_n} ms); ${#UFILES[@]} of them equal again from hafkernels.dll under Unity's Mono ($((t2 - t1)) s); the committed DLL equals a fresh build of native/ ($(stat -c %s "$DLL") bytes)"
+  echo "PASS — native kernels: ${#FILES[@]} files (${#FIXTURES[@]} fixtures, $NOTE) probe and prep hashes equal between the managed twins and hafkernels.dll on .NET ($((t1 - t0)) s; probe sum managed ${sum_m} ms, native ${sum_n} ms); ${#UFILES[@]} of them equal again from hafkernels.dll under Unity's Mono ($((t2 - t1)) s); the committed DLL equals a fresh build of native/ ($(stat -c %s "$DLL") bytes)"
   exit 0
 fi
 echo "SKIP — native kernels: ${#FILES[@]} files (${#FIXTURES[@]} fixtures, $NOTE) hash equal between the managed twins and hafkernels.dll on .NET, ${#UFILES[@]} of them again under Unity's Mono (probe sum managed ${sum_m} ms, native ${sum_n} ms), but g++ is not on PATH, so the committed DLL was NOT compared with a build of native/"

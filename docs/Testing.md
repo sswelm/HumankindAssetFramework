@@ -3352,11 +3352,42 @@ median of five, every output hash equal between the managed twins and the DLL on
 
 Per kernel on the Saleg's in Unity (CPU, summed over the part workers): encode + decode 5,404 ms to 586 ms, the BVH
 build 572 ms to 146 ms, the world transform 150 ms to 19 ms. On the x64 .NET Framework host the whole probe gains 1.8x
-(1.157 s to 0.643 s). Not ported, and the largest remaining cost on the bake path: the in-process prep's edge-collapse
-loop (BlenderDecimate), 22.3 s in Unity on the Saleg's to 24,000 triangles, about three quarters of it the serial heap
-walk; its native gain is unmeasured.
+(1.157 s to 0.643 s).
 
-Guards. `Tests/NativeKernelsTests.cs` (twelve cases) runs both twins in one host on meshes built to reach every branch the
+**The collapse** (the prep's `BlenderDecimate.Collapse` over a BMesh, `native/hafdecimate.cpp` through
+`HafNativeKernels.Collapse.cs`, 2026-10-21): the double quadrics, BLI_heap with its insertion-order ties, the degenerate
+checks, bm_edge_collapse's disk and radial edits and the custom-data walk (UVs, byte colours, vertex groups) ported step
+for step. The BMesh arrays are pinned and edited in place (the collapse creates no element), the alive flags cross as
+bytes, the layers as pinned pointers, the vertex groups as CSR in and through a handle out. Every link the C++ follows is
+range-checked first. The checkpoint the managed loop polls (the Bake Tests' cancel, PrepInProcess's deadline) is polled
+from inside the native loop through a callback at every collapse, as the twin polls it (measured: 2.6 million reverse
+P/Invokes on the Saleg's cost nothing visible, 11.70 s against 11.74 s at every 16th), with the BMesh's counts current
+when it runs; what it throws stops the collapse there and is rethrown after the arrays are copied back, so
+`BlenderPrepTests`' cancel and timeout cases hold for the native path too (a first cut polling every 16th collapse
+overshot their small grid and failed them). Measured on the Saleg's to 24,000 triangles, the written GLB byte-equal on
+every run:
+
+| Host | Prep, managed | Prep, native | Collapse alone, managed | Collapse alone, native |
+| --- | ---: | ---: | ---: | ---: |
+| Unity 2021.3 Mono | 21.2 s | 13.8 s | 14.2 s | 9.2 s |
+| .NET Framework x64 | 13.7 s | 11.4 s | 10.0 s | 8.4 s |
+
+The native figures carry the per-collapse checkpoint callback (2.6 million reverse P/Invokes; 13.4 s without it in Unity).
+The collapse is bound by memory latency (a 5-million-node heap and random walks over the link arrays), not by code
+generation: the native loop runs at the .NET JIT's speed, 1.6x Mono's. The rest of the prep (the layout, the exporter's
+mesh layout, the GLB assembly) is managed and now the larger half of the Unity prep time.
+
+Guards. `Tests/NativeCollapseTests.cs` (seven cases) reduces a textured two-material grid with holes and a skinned one
+with two joints through BlenderReduce both ways at two ratios, jittered and as a regular lattice (identical quads:
+equal costs, so the heap's insertion-order tie-break decides), and compares the whole result (positions, faces, edges,
+materials, sharpness, UV and colour layers, vertex groups) bit for bit; a corrupt link must throw before the C++ runs.
+Planted in the C++: the boundary weight halved fails four cases, the flip check loosened fails two, the heap's
+tie-break turned the other way fails the two lattice cases and none of the jittered ones (which is why the lattice is
+there); OptimizeEps off by 100x fails none - the grids give no optimum with a determinant in that band - and the
+byte-equal Saleg's and the drill's 46 sources are what hold that constant. The native kernels drill's PREP
+line (HAF_PROBE_PERF_PREP=1 in the benchmark harness: the in-process prep to a third of the triangles, the written GLB
+hashed) is compared the same way as the probe hashes, on .NET for every file and in Unity's Mono for its sample.
+`Tests/NativeKernelsTests.cs` (twelve cases) runs both twins in one host on meshes built to reach every branch the
 C++ ports - file normals and none, the clamp and the true-normal fallback, sharp faces, cyclic and open fans, lone
 vertices, partially NaN file normals (preserving the managed geometry-normal fallback), a mirrored sheared matrix, and
 sizes above both sides' parallel thresholds - and compares the shorts, normals, the BVH's slots and verdicts and the

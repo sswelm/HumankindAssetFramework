@@ -10,6 +10,14 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE PREP'S COLLAPSE RUNS AS C++, AND THE REASON IT GAINS LESS (2026-10-21).** The decimator's edge collapse
+  (`BlenderDecimate.Collapse` over the BMesh: quadrics, BLI_heap, the degenerate checks, the disk/radial edits, the
+  custom-data walk) is ported step for step to `native/hafdecimate.cpp`, the BMesh arrays pinned and edited in place.
+  Byte-equal output on the Saleg's Revenge and in five reduce cases both ways; the Unity prep of the Saleg's to 24,000
+  triangles drops from 21.2 s to 13.8 s, the collapse itself from 14.2 s to 9.2 s. That is 1.6x where the probe's
+  kernels gave 9x, because this loop is bound by memory latency (a five-million-node heap, random walks over the link
+  arrays), not by Mono's code generation: the native loop runs at the .NET JIT's speed. The native kernels drill now
+  hashes the prep's output as well as the probe's, on .NET and in Unity's Mono (docs/Testing.md, Native kernels).
 - **THE PROBE'S HEAVIEST KERNELS RUN AS C++ (2026-10-21).** ChatGPT's suggestion, tested by measurement before any
   port: the same C# ran 2.5-3.4x slower on Unity's Mono than on the .NET Framework's JIT, and the hot kernel was not the
   vertex transform the suggestion named (5% of the probe) but the custom-normal encode and decode (90% of the part-mesh

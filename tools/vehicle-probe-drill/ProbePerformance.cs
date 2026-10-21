@@ -9,7 +9,9 @@ using System.Security.Cryptography;
 // Run as an x64 executable, or as a DLL in an isolated Unity project with -executeMethod ProbePerformance.RunUnity -- <files>.
 // Hashing includes every preview buffer and happens AFTER timing. Compare hashes across builds as well as repeated runs.
 // HAF_PROBE_PERF_RUNS=<n> measured runs after the warm-up (default 5; the native kernels drill uses 1). The KERNELS line
-// says whether the native kernels (HafNativeKernels) or the managed twins ran.
+// says whether the native kernels (HafNativeKernels) or the managed twins ran. HAF_PROBE_PERF_PREP=1 also runs the in-process
+// prep (BlenderPrep, the collapse to a third of the triangles) once per file after the timed runs and prints a PREP line with the
+// written GLB's hash - the native kernels drill compares it both ways; the probe timings are untouched by it.
 public static class ProbePerformance
 {
     public static void RunUnity() => Run(Environment.GetCommandLineArgs().SkipWhile(a => a != "--").Skip(1).ToArray());
@@ -44,11 +46,22 @@ public static class ProbePerformance
                     Path.GetFileName(file), run, read, probe, total, collections0, collections1, collections2, hash));
                 if (run >= 0) { totals[run] = total; probes[run] = probe; }
             }
+            if (Environment.GetEnvironmentVariable("HAF_PROBE_PERF_PREP") == "1")
+            {
+                var model = GlbReader.Read(file);
+                long tris = model.Meshes.Sum(me => me.Primitives.Sum(p => (long)(p.Indices != null ? p.Indices.Length : p.VertexCount) / 3));
+                var clock = Stopwatch.StartNew();
+                var prep = BlenderPrep.Prepare(model, Math.Max(1, tris / 3));
+                string prepHash = prep.Model == null ? "fallback:" + (prep.Fallback ?? "").Replace(' ', '_') : Sha(GlbWriter.Write(prep.Model));
+                Console.WriteLine(string.Format(CultureInfo.InvariantCulture, "PREP {0} prep_ms={1:F0} tris_out={2} sha256={3}", Path.GetFileName(file), clock.Elapsed.TotalMilliseconds, prep.Triangles, prepHash));
+            }
             Array.Sort(totals); Array.Sort(probes);
             Console.WriteLine(string.Format(CultureInfo.InvariantCulture, "MEDIAN {0} probe_ms={1:F3} total_ms={2:F3} sha256={3}", Path.GetFileName(file), probes[runs / 2], totals[runs / 2], expected));
         }
         Console.WriteLine("BENCHMARK PASS files=" + files.Length);
     }
+
+    static string Sha(byte[] bytes) { using (var sha = SHA256.Create()) return BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", "").ToLowerInvariant(); }
 
     static string Hash(VehicleProbe.Result result)
     {

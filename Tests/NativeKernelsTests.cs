@@ -64,7 +64,7 @@ public class NativeKernelsTests
     public void The_dll_loads_in_the_test_host()
     {
         Assert.True(HafNativeKernels.Available, HafNativeKernels.Status);
-        Assert.StartsWith("native (hafkernels.dll version 1", HafNativeKernels.Status);
+        Assert.StartsWith("native (hafkernels.dll version " + HafNativeKernels.Version, HafNativeKernels.Status);
     }
 
     [Theory]

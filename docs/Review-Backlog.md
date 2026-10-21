@@ -612,10 +612,11 @@ with identical output hashes (docs/Testing.md, Vehicle Probe allocation performa
 The heaviest kernels went native on 2026-10-21 (ChatGPT's C++ hypothesis, measured first: Unity's Mono ran the same C# 2.5-3.4x
 slower than the .NET JIT, and the fan walk of the custom-normal encode/decode was 90% of the part-mesh CPU, not the vertex
 transform the suggestion named): encode/decode, the BVH build and the world transform run from native/ through
-HafNativeKernels.cs, the Saleg's probe 2.86 s -> 0.87 s in Unity, every hash equal (docs/Testing.md, Native kernels). Left, and
-now the largest cost on the bake path: the prep's edge-collapse loop (BlenderDecimate), 22.3 s in Unity on the Saleg's to
-24,000 triangles, three quarters of it the serial heap walk; a native port of it is unmeasured and would be a port of
-BMesh + the collapse (about 1,500 drilled lines). GlbReader's read is 0.47 s of the Saleg's 1.34 s now.
+HafNativeKernels.cs, the Saleg's probe 2.86 s -> 0.87 s in Unity, every hash equal (docs/Testing.md, Native kernels). The prep's
+edge collapse followed the same day (native/hafdecimate.cpp, byte-equal): the Unity prep of the Saleg's to 24,000 triangles
+21.2 s -> 13.8 s, the collapse itself 14.2 s -> 9.2 s - only 1.5x, because the loop is bound by memory latency (a 5-million-node
+heap, random walks over the link arrays), not by Mono's codegen. Left on the prep: its managed half (the layout, the exporter's
+mesh layout, the GLB assembly: about 4.6 s of the 13.8 s in Unity), and GlbReader's read, 0.47 s of the Saleg's 1.34 s probe.
 - **`VehicleProbeAllocationTests.Skinning_reuses_private_scratch_..._on_multiple_workers` flaked once in a push gate (2026-10-21)**
   - the per-thread allocation budget (0..1024 bytes over 3,000 skinner calls on 8 workers) failed in the gate's `dotnet test`
   step and passed in 10 full-suite runs afterwards on the same branch and on master. The test calls only `BlenderSkinner.Vertex`

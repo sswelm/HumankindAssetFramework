@@ -1,6 +1,6 @@
 // HafNativeKernels.cs - the native plugin behind the probe's heaviest kernels (2026-10-21): the custom-normal encode and
 // decode (VehicleProbe.CustomNormals.cs), the visibility BVH's constructor and BuildPartMesh's world transform
-// (VehicleProbe.Visibility.cs). Measured in Unity 2021.3's Mono before this: the Saleg's Revenge probe took 2.86 s, of which
+// (VehicleProbe.Visibility.cs), and the prep's edge collapse (HafNativeKernels.Collapse.cs, version 2). Measured in Unity 2021.3's Mono before this: the Saleg's Revenge probe took 2.86 s, of which
 // the fan walk alone was 5.4 s of CPU; the same C++ (native/hafnormals.cpp, native/hafkernels.cpp) runs it in 0.59 s and
 // the whole probe in 0.87 s, every output hash equal (docs/Testing.md, Native kernels). Mono's code generation, not the
 // algorithm, was the cost: the same C# runs 2.5-3.4x faster on the .NET Framework's JIT.
@@ -24,10 +24,10 @@ using System;
 using System.IO;
 using System.Runtime.InteropServices;
 
-public static class HafNativeKernels
+public static partial class HafNativeKernels
 {
     public const string DllName = "hafkernels";
-    public const int Version = 1;
+    public const int Version = 2;   // 2: the collapse (HafNativeKernels.Collapse.cs, native/hafdecimate.cpp)
 
     /// <summary>True when the kernels run natively: the DLL loaded, 64-bit, version 1, trig resolved, not switched off. Set once
     /// here; not readonly only so that Tests/NativeKernelsTests.cs can call both twins in one host (the JIT bakes a static
