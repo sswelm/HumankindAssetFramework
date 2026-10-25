@@ -18,6 +18,6 @@ g++ -dumpmachine | grep -q x86_64 || { echo "FAIL - g++ is not an x86_64 compile
 mkdir -p "$(dirname "$OUT")"
 g++ -O2 -ffp-contract=off -fno-fast-math -fexcess-precision=standard -std=c++17 -frandom-seed=hafkernels -shared -static -s \
   -Wl,--no-insert-timestamp -Wl,--image-base,0x180000000 \
-  -o "$OUT" "$ROOT/native/hafkernels.cpp" "$ROOT/native/hafnormals.cpp" "$ROOT/native/hafdecimate.cpp"
+  -o "$OUT" "$ROOT/native/hafkernels.cpp" "$ROOT/native/hafnormals.cpp" "$ROOT/native/hafdecimate.cpp" "$ROOT/native/hafcolumn.cpp" "$ROOT/native/haftwin.cpp"
 python -I "$ROOT/native/deterministic.py" "$OUT"
 echo "built $OUT ($(stat -c %s "$OUT") bytes, $(g++ --version | head -1))"

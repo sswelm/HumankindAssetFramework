@@ -10,6 +10,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE WORKSHOP FUSE'S COLUMN AND TWIN CENSUS RUN AS C++ (2026-10-25).** Measured first: a 600,000-triangle fuse
+  of the Saleg's Revenge spent 6.2 s in the exposure stage and 4.8 s in the twin census in Unity. The column grid with its
+  vertical ray query and the twin census now run from `native/hafcolumn.cpp` and `native/haftwin.cpp` (DLL version 4),
+  the same registration order, candidate order, rejections and double arithmetic as the C#. The written GLB is
+  byte-equal; that fuse drops from 14.3 s to 9.3 s in Unity, the twin census from 4.8 s to 1.4 s. The occluder read and
+  the side view stay managed. The Workshop golden drill now runs the native path and prints which one ran
+  (docs/Testing.md, Native kernels).
 - **THE PREP'S COLLAPSE RUNS AS C++, AND THE REASON IT GAINS LESS (2026-10-21).** The decimator's edge collapse
   (`BlenderDecimate.Collapse` over the BMesh: quadrics, BLI_heap, the degenerate checks, the disk/radial edits, the
   custom-data walk) is ported step for step to `native/hafdecimate.cpp`, the BMesh arrays pinned and edited in place.

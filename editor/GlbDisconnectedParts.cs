@@ -1973,6 +1973,8 @@ public static partial class GlbDisconnectedParts
         // became 129 s. Lazily still, then, behind a lock, with the finished array published last so a thread that
         // sees it non-null sees everything the build wrote.
         object columnsGate = new object();
+        HafNativeKernels.ColumnIndex columnIndex = null;   // the ladder flattened for the native query, built with the grids when the DLL is there
+        var skipArrays = new Dictionary<HashSet<int>, int[]>();   // a sheet's skip set as the sorted array the native query reads, once per set
         Dictionary<long, List<int>>[] EnsureOccluders()
         {
             var built = System.Threading.Volatile.Read(ref columns);
@@ -2030,8 +2032,20 @@ public static partial class GlbDisconnectedParts
                 for (long x = x0; x <= x1; x++) for (long z = z0; z <= z1; z++)
                 { long key = (x << 32) ^ (z & 0xffffffffL); if (!grid.TryGetValue(key, out List<int> l)) grid.Add(key, l = new List<int>()); l.Add(id); }
             }
-            for (int t = 0; t < occluders.Count; t += 3) Register(t, occluders[t], occluders[t + 1], occluders[t + 2]);
-            for (int f = 0; f < faceCount; f++) Register(-1 - f, P(f, 0), P(f, 1), P(f, 2));
+            if (HafNativeKernels.Available)
+            {
+                // native/hafcolumn.cpp registers the same ladder from the corners and answers the queries; the dictionaries stay empty
+                var occFlat = new double[occluders.Count * 3];
+                for (int i = 0; i < occluders.Count; i++) { occFlat[3 * i] = occluders[i].X; occFlat[3 * i + 1] = occluders[i].Y; occFlat[3 * i + 2] = occluders[i].Z; }
+                var faceFlat = new double[faceCount * 9];
+                for (int f = 0; f < faceCount; f++) for (int c = 0; c < 3; c++) { Vec3 v = P(f, c); faceFlat[9 * f + 3 * c] = v.X; faceFlat[9 * f + 3 * c + 1] = v.Y; faceFlat[9 * f + 3 * c + 2] = v.Z; }
+                columnIndex = new HafNativeKernels.ColumnIndex(columnCells, occFlat, faceFlat, modelTop, modelBottom);
+            }
+            else
+            {
+                for (int t = 0; t < occluders.Count; t += 3) Register(t, occluders[t], occluders[t + 1], occluders[t + 2]);
+                for (int f = 0; f < faceCount; f++) Register(-1 - f, P(f, 0), P(f, 1), P(f, 2));
+            }
             System.Threading.Volatile.Write(ref columns, grids);   // published last: a thread that sees this sees the whole build
         }
         // ...and from BELOW, the same column upward from the model's bottom: what tells a well's floor (the hull
@@ -2051,6 +2065,18 @@ public static partial class GlbDisconnectedParts
         double Column(int f, bool upward, HashSet<int> skip)
         {
             Dictionary<long, List<int>>[] grids = EnsureOccluders();
+            if (columnIndex != null)
+            {
+                int[] skipSorted = null;
+                if (skip != null)
+                {
+                    lock (skipArrays)
+                    {
+                        if (!skipArrays.TryGetValue(skip, out skipSorted)) skipArrays[skip] = skipSorted = columnIndex.SkipArray(skip);
+                    }
+                }
+                return columnIndex.Query(f, upward, skipSorted);
+            }
             Vec3 c = FScale(FAdd(FAdd(P(f, 0), P(f, 1)), P(f, 2)), 1.0 / 3.0);
             var d = new Vec3 { X = 0, Y = upward ? 1 : -1, Z = 0 };
             double best = double.PositiveInfinity, skin = 1e-6 * Math.Max(1.0, modelTop - modelBottom);
@@ -2446,7 +2472,8 @@ public static partial class GlbDisconnectedParts
                 sizes.Add(Math.Max(Math.Max(a.X, Math.Max(b.X, cc.X)) - Math.Min(a.X, Math.Min(b.X, cc.X)), Math.Max(Math.Max(a.Y, Math.Max(b.Y, cc.Y)) - Math.Min(a.Y, Math.Min(b.Y, cc.Y)), Math.Max(a.Z, Math.Max(b.Z, cc.Z)) - Math.Min(a.Z, Math.Min(b.Z, cc.Z)))));
             }
             sizes.Sort(); twinCell = Math.Max(twinReach, sizes.Count > 0 ? sizes[sizes.Count / 2] : twinReach);
-            for (int f = 0; f < faceCount; f++)
+            // native/haftwin.cpp builds this grid itself (HafNativeKernels.Twin.cs): the managed one stays empty then
+            if (!HafNativeKernels.Available) for (int f = 0; f < faceCount; f++)
             {
                 Vec3 a = P(f, 0), b = P(f, 1), cc = P(f, 2);
                 PositionKey lo = CellOf(new Vec3 { X = Math.Min(a.X, Math.Min(b.X, cc.X)), Y = Math.Min(a.Y, Math.Min(b.Y, cc.Y)), Z = Math.Min(a.Z, Math.Min(b.Z, cc.Z)) }, twinCell);
@@ -2530,7 +2557,13 @@ public static partial class GlbDisconnectedParts
                 }
             twinBest[f] = best; twinProj[f] = proj; twinBestG[f] = double.IsPositiveInfinity(best) ? -1 : bestG;
         }
-        System.Threading.Tasks.Parallel.For(0, faceCount, FuseParallel,
+        if (HafNativeKernels.Available)
+        {
+            var faceFlat = new double[faceCount * 9];
+            for (int f = 0; f < faceCount; f++) for (int c = 0; c < 3; c++) { Vec3 v = P(f, c); faceFlat[9 * f + 3 * c] = v.X; faceFlat[9 * f + 3 * c + 1] = v.Y; faceFlat[9 * f + 3 * c + 2] = v.Z; }
+            HafNativeKernels.TwinCensus(faceFlat, flip, twinCell, twinReach, twinPad, FuseParallel.MaxDegreeOfParallelism, twinBest, twinProj, twinBestG);
+        }
+        else System.Threading.Tasks.Parallel.For(0, faceCount, FuseParallel,
             () => { int[] seen; return twinSeenPool.TryTake(out seen) ? seen : new int[faceCount]; },
             (f, loop, seen) => { TwinOfFace(f, seen); return seen; },
             seen => twinSeenPool.Add(seen));

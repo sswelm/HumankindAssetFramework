@@ -49,13 +49,14 @@ done
 # the editor files the row needs; the ones a checkout does not have yet (Compact.cs and the reader are from
 # 2026-10-01/02) are left out, so a checkout from before them compiles too
 SRCS=()
-for f in WorkshopGateTest.cs BakeGoldenFiles.cs GitStamp.cs EditorRules.cs QuadEstimate.cs GlbDisconnectedParts.cs GlbDisconnectedParts.Compact.cs GlbDisconnectedParts.Explain.cs HafModel.cs GlbReader.cs HafTransforms.cs HafModelDiff.cs; do
+for f in WorkshopGateTest.cs BakeGoldenFiles.cs GitStamp.cs EditorRules.cs QuadEstimate.cs GlbDisconnectedParts.cs GlbDisconnectedParts.Compact.cs GlbDisconnectedParts.Explain.cs HafModel.cs GlbReader.cs HafTransforms.cs HafModelDiff.cs HafNativeKernels.cs HafNativeKernels.Column.cs HafNativeKernels.Twin.cs; do
   [ -f "$EDITOR_ROOT/editor/$f" ] && SRCS+=("$WEDITOR/editor/$f")
 done
 TMPD="$(mktemp -d 2>/dev/null)" || TMPD="$(mktemp -d -p "$ROOT/obj" 2>/dev/null)" || TMPD=""
 [ -n "$TMPD" ] && [ -d "$TMPD" ] || { echo "FAIL — no temp directory could be made (TMPDIR=${TMPDIR:-unset}); nothing was checked"; exit 1; }
 trap 'rm -rf "$TMPD"' EXIT
 cp "$NEWTONSOFT" "$TMPD/Newtonsoft.Json.dll"
+[ -f "$EDITOR_ROOT/editor/Plugins/x86_64/hafkernels.dll" ] && cp "$EDITOR_ROOT/editor/Plugins/x86_64/hafkernels.dll" "$TMPD/hafkernels.dll"   # the fuse's native column and twin kernels beside the exe; HAF_NATIVE_KERNELS=0 runs the managed fuse
 WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"; WTMP="$(cygpath -m "$TMPD" 2>/dev/null || echo "$TMPD")"
 OUTC=$(dotnet "$CSC" -nologo -noconfig -nostdlib -out:"$WTMP/drill.exe" -platform:x64 \
   -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
