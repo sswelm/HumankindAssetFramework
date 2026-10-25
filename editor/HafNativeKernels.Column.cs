@@ -19,10 +19,11 @@ public static partial class HafNativeKernels
     static extern void haf_column_query(IntPtr handle, int nQueries, int[] faces, byte[] upward, int[] skip, int nSkip, double[] best);
 
     /// <summary>A fuse group's column ladder, built and queried natively.</summary>
-    internal sealed class ColumnIndex
+    internal sealed class ColumnIndex : IDisposable
     {
         IntPtr handle; GCHandle occPin, facePin; readonly int faceCount;
         internal static long BuildTicks, QueryTicks, QueryCalls;   // the harness and the drill read these
+        internal static int Built, Disposed;   // indexes built, and released by their owner (not by the finalizer): Tests/GlbFuseTests holds them equal
 
         /// <summary>occluders: 9 doubles per occluder triangle; faces: 9 doubles per group face; cells: the rung sizes, finest last.</summary>
         internal ColumnIndex(double[] cells, double[] occluders, double[] faces, double top, double bottom)
@@ -33,9 +34,12 @@ public static partial class HafNativeKernels
             faceCount = faces.Length / 9;
             occPin = GCHandle.Alloc(occluders, GCHandleType.Pinned); facePin = GCHandle.Alloc(faces, GCHandleType.Pinned);
             handle = haf_column_build(cells.Length, cells, occPin.AddrOfPinnedObject(), occluders.Length / 9, facePin.AddrOfPinnedObject(), faceCount, top, bottom);
+            System.Threading.Interlocked.Increment(ref Built);
             System.Threading.Interlocked.Add(ref BuildTicks, clock.ElapsedTicks);
         }
         ~ColumnIndex() { Release(); }
+        /// <summary>The owner's release (PlanFuse, when the plan ends); the finalizer is only the backstop.</summary>
+        public void Dispose() { if (handle != IntPtr.Zero) System.Threading.Interlocked.Increment(ref Disposed); Release(); GC.SuppressFinalize(this); }
         internal void Release()
         {
             if (handle != IntPtr.Zero) { haf_column_free(handle); handle = IntPtr.Zero; }

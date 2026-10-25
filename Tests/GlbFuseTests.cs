@@ -1926,6 +1926,7 @@ public class GlbFuseTests
             (BuildGlb(Box("Roof", 50, -20, 20, -20, inward: false), OpenBox("Tray", 4, 0, 0, 0, inward: true)), new[] { 1 }, 0.001),
         };
         long columnBefore = HafNativeKernels.ColumnIndex.QueryCalls, twinBefore = HafNativeKernels.TwinTicks;
+        int builtBefore = HafNativeKernels.ColumnIndex.Built, disposedBefore = HafNativeKernels.ColumnIndex.Disposed;
         foreach (var (src, nodes, weld) in cases)
         {
             byte[] native = GlbDisconnectedParts.FuseNodes(src, nodes, weld).Bytes, managed = null;
@@ -1937,6 +1938,10 @@ public class GlbFuseTests
             Assert.Equal(managed, native);
         }
         Assert.True(HafNativeKernels.ColumnIndex.QueryCalls > columnBefore, "no fixture asked the native column");
+        // every plan released its index on the way out - counted only on the owner's Dispose, so a finalizer that happens to run
+        // first cannot stand in for it (a plant that never registered the index passed a live-instance count)
+        Assert.True(HafNativeKernels.ColumnIndex.Built > builtBefore, "no column index was built");
+        Assert.Equal(HafNativeKernels.ColumnIndex.Built - builtBefore, HafNativeKernels.ColumnIndex.Disposed - disposedBefore);
         Assert.True(HafNativeKernels.TwinTicks > twinBefore, "the native twin census never ran");
     }
 }

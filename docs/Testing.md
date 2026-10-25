@@ -3431,7 +3431,11 @@ rungs, candidates, rejections and Moeller-Trumbore arithmetic; the managed dicti
 census: the same grid (the median-size cell, the 40-cell cap, candidates in face order), the same float prefilter and
 double tests, the 27 cells in the same order, the first of equal distances kept. The fuse still chooses the cell, the
 reach and the pad and reads the three result arrays as before. Not ported: reading the occluders from the file, and the
-side view (`ExposedFromSide` and its grid), which stay managed.
+side view (`ExposedFromSide` and its grid), which stay managed. The column index pins the occluder and face corners (a
+quarter of a gigabyte on the Saleg's) and owns the C++ ladder: PlanFuse releases it when the plan ends, on every exit,
+and the finalizer is only a backstop; the twin census runs on the caller's thread below 16,384 faces (both from the
+review of PR #202). The test counts owner releases against builds: a live-instance count passed a planted leak, because
+the finalizer had already run.
 
 Saleg's Revenge, the Bake Tests' selection rule, the written GLB byte-equal managed and native on both hosts:
 

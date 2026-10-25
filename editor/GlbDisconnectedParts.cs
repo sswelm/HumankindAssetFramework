@@ -1469,6 +1469,15 @@ public static partial class GlbDisconnectedParts
     // null = decide from this group alone (a single-group fuse, where the group IS the run).
     static FusePlan PlanFuse(byte[] source, IList<int> nodeIndices, double weldFraction, string fusedName, bool checkMirrored, bool? runVerdict)
     {
+        // The native column index pins the occluder and face corners (a quarter of a gigabyte on a 3.6-million-triangle ship)
+        // and holds the C++ ladder: released when the plan ends, on every exit, not left to a finalizer (review of PR #202).
+        var native = new List<IDisposable>();
+        try { return PlanFuseCore(source, nodeIndices, weldFraction, fusedName, checkMirrored, runVerdict, native); }
+        finally { foreach (var owned in native) owned.Dispose(); }
+    }
+
+    static FusePlan PlanFuseCore(byte[] source, IList<int> nodeIndices, double weldFraction, string fusedName, bool checkMirrored, bool? runVerdict, List<IDisposable> native)
+    {
         if (source == null) throw new ArgumentNullException(nameof(source));
         if (nodeIndices == null || nodeIndices.Count == 0) throw new ArgumentException("Nothing to fuse — no node indices.", nameof(nodeIndices));
         if (double.IsNaN(weldFraction) || weldFraction < 0) throw new ArgumentOutOfRangeException(nameof(weldFraction));
@@ -2040,6 +2049,7 @@ public static partial class GlbDisconnectedParts
                 var faceFlat = new double[faceCount * 9];
                 for (int f = 0; f < faceCount; f++) for (int c = 0; c < 3; c++) { Vec3 v = P(f, c); faceFlat[9 * f + 3 * c] = v.X; faceFlat[9 * f + 3 * c + 1] = v.Y; faceFlat[9 * f + 3 * c + 2] = v.Z; }
                 columnIndex = new HafNativeKernels.ColumnIndex(columnCells, occFlat, faceFlat, modelTop, modelBottom);
+                lock (native) native.Add(columnIndex);   // released by PlanFuse when the plan ends
             }
             else
             {

@@ -147,7 +147,10 @@ static void TwinOfFace(const TwinGrid& g, int f, std::vector<int>& seen, double*
 EXPORT void haf_twin_all(void* handle, int workers, double* best, double* proj, int* bestG)
 {
     const TwinGrid& g = *(const TwinGrid*)handle;
-    int n = g.nFaces; if (workers < 1) workers = 1; if (workers > n) workers = std::max(1, n);
+    // Threads only where they pay: below the other kernels' 16,384 a group is answered on the caller's thread (review of
+    // PR #202 - a handful of faces started a thread per core, each with a scratch array the size of the group). Each face's
+    // answer is its own, so the worker count never changes the result.
+    int n = g.nFaces; if (workers < 1 || n < 16384) workers = 1; if (workers > n) workers = std::max(1, n);
     auto range = [&](int first, int last) { std::vector<int> seen(n, 0); for (int f = first; f < last; f++) TwinOfFace(g, f, seen, best, proj, bestG); };
     if (workers == 1) { range(0, n); return; }
     std::vector<std::thread> th;
