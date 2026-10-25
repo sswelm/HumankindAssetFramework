@@ -9,6 +9,8 @@ using Xunit;
 // FUSE (2026-09-15): several parts -> one welded shell with consistent winding, at the SOURCE (the Model Workshop).
 // Fixtures are hand-built GLBs: a handful of quads whose positions, winding, UVs and materials are chosen so each
 // rule has exactly one thing to prove. Outputs are read back from the written bytes, never from the inputs.
+// one collection with the native kernel tests: the native/managed comparison below flips HafNativeKernels.Available
+[Collection("native kernels switch")]
 public class GlbFuseTests
 {
     // ---- fixtures ----
@@ -1903,5 +1905,43 @@ public class GlbFuseTests
             if (fn[t][1] > 0) roofUp++; else roofDown++;
         }
         Assert.Equal(2, roofUp); Assert.Equal(0, roofDown);
+    }
+
+    // ---- the native column and twin kernels (native/hafcolumn.cpp, native/haftwin.cpp, 2026-10-25) ----
+
+    // Every fixture here fused twice - with the native kernels, then with the managed twins - and the written bytes
+    // compared. The set reaches both kernels: the deck that asks the column from above (with a frame of other nodes as
+    // occluders), the doubled and open boxes the twin census pairs, inward and outward boxes, and a broadside.
+    [Fact]
+    public void The_native_column_and_twin_kernels_write_the_managed_fuse_byte_for_byte()
+    {
+        Assert.True(HafNativeKernels.Available, HafNativeKernels.Status);
+        var cases = new List<(byte[] src, int[] nodes, double weld)>
+        {
+            (BuildGlb(Box("Hull", 400, -200, -450, -200, inward: false),
+                      Wall("Tub", new (float x, float z)[] { (0f, 0f), (0f, 10f), (10f, 10f), (10f, 0f), (0f, 0f) }, 0, 10, 1, new[] { 1, 1, 1, 1 }, flip: false),
+                      Level("Tub", 0, 10, 0, 10, 0, down: false)), new[] { 1, 2 }, 0.0),
+            (BuildGlb(OpenBox("Outer", 2, 0, 0, 0, inward: false), OpenBox("Inner", 1.9f, 0.05f, 0.05f, 0.05f, inward: true)), new[] { 0, 1 }, 0.001),
+            (BuildGlb(Box("A", 2, 0, 0, 0, inward: true), Box("B", 2, 3, 0, 0, inward: false)), new[] { 0, 1 }, 0.001),
+            (BuildGlb(Box("Roof", 50, -20, 20, -20, inward: false), OpenBox("Tray", 4, 0, 0, 0, inward: true)), new[] { 1 }, 0.001),
+        };
+        long columnBefore = HafNativeKernels.ColumnIndex.QueryCalls, twinBefore = HafNativeKernels.TwinTicks;
+        int builtBefore = HafNativeKernels.ColumnIndex.Built, disposedBefore = HafNativeKernels.ColumnIndex.Disposed;
+        foreach (var (src, nodes, weld) in cases)
+        {
+            byte[] native = GlbDisconnectedParts.FuseNodes(src, nodes, weld).Bytes, managed = null;
+            bool was = HafNativeKernels.Available;
+            HafNativeKernels.Available = false;
+            try { managed = GlbDisconnectedParts.FuseNodes(src, nodes, weld).Bytes; }
+            finally { HafNativeKernels.Available = was; }
+            Assert.NotNull(native);
+            Assert.Equal(managed, native);
+        }
+        Assert.True(HafNativeKernels.ColumnIndex.QueryCalls > columnBefore, "no fixture asked the native column");
+        // every plan released its index on the way out - counted only on the owner's Dispose, so a finalizer that happens to run
+        // first cannot stand in for it (a plant that never registered the index passed a live-instance count)
+        Assert.True(HafNativeKernels.ColumnIndex.Built > builtBefore, "no column index was built");
+        Assert.Equal(HafNativeKernels.ColumnIndex.Built - builtBefore, HafNativeKernels.ColumnIndex.Disposed - disposedBefore);
+        Assert.True(HafNativeKernels.TwinTicks > twinBefore, "the native twin census never ran");
     }
 }

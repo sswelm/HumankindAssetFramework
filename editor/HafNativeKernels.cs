@@ -27,7 +27,7 @@ using System.Runtime.InteropServices;
 public static partial class HafNativeKernels
 {
     public const string DllName = "hafkernels";
-    public const int Version = 3;   // 3: collapse death-order exports preserve the BMesh's free lists
+    public const int Version = 4;   // 4: the fuse's column ray query (HafNativeKernels.Column.cs, native/hafcolumn.cpp)
 
     /// <summary>True when the kernels run natively: the DLL loaded, 64-bit, version matched, trig resolved, not switched off. Set once
     /// here; not readonly only so that Tests/NativeKernelsTests.cs can call both twins in one host (the JIT bakes a static

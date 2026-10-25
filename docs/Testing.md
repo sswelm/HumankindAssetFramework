@@ -3419,3 +3419,39 @@ Triconter's hashes differed in the editor only. The flags cross as a `byte[]` no
 old shape. The Blender-parity drills (vehicle probe, prep, decimate, deploy, rig_anim, vehicle_rig) copy the DLL beside
 their exe and so hold the native path to Blender; the managed twins stay drilled by the native kernels drill and the unit
 tests.
+
+**The fuse's column and twin census** (`native/hafcolumn.cpp` and `native/haftwin.cpp`, through
+`HafNativeKernels.Column.cs` and `HafNativeKernels.Twin.cs`, DLL version 4, 2026-10-25). Measured first: on the Saleg's
+Revenge in Unity, a fuse of 600,000 triangles spent 6.2 s in "sheets" (reading every other node of the file as an
+occluder, registering 3.4 million triangles into the column grids, and the vertical exposure rays) and 4.8 s in "twin
+stats" (every face's nearest facing-back twin). Two pieces run natively now. The column grid and its query: the C++
+registers the occluder corners and the group's faces exactly as BuildOccluders does (the finest rung a triangle fits,
+the sliver drop on rung 0, the candidates of a cell in registration order through a stable sort) and walks the same
+rungs, candidates, rejections and Moeller-Trumbore arithmetic; the managed dictionaries are not built then. The twin
+census: the same grid (the median-size cell, the 40-cell cap, candidates in face order), the same float prefilter and
+double tests, the 27 cells in the same order, the first of equal distances kept. The fuse still chooses the cell, the
+reach and the pad and reads the three result arrays as before. Not ported: reading the occluders from the file, and the
+side view (`ExposedFromSide` and its grid), which stay managed. The column index pins the occluder and face corners (a
+quarter of a gigabyte on the Saleg's) and owns the C++ ladder: PlanFuse releases it when the plan ends, on every exit,
+and the finalizer is only a backstop; the twin census runs on the caller's thread below 16,384 faces (both from the
+review of PR #202). The test counts owner releases against builds: a live-instance count passed a planted leak, because
+the finalizer had already run.
+
+Saleg's Revenge, the Bake Tests' selection rule, the written GLB byte-equal managed and native on both hosts:
+
+| Host | Fuse selection | Managed | Native | Twin stats, managed | Twin stats, native |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Unity 2021.3 Mono | 150,000 triangles | 6.18 s | 5.01 s | 1.26 s | 0.36 s |
+| Unity 2021.3 Mono | 600,000 triangles | 14.32 s | 9.30 s | 4.75 s | 1.38 s |
+| .NET Framework x64 | 600,000 triangles | 7.96 s | 6.72 s | 2.24 s | 1.29 s |
+
+Guards. `GlbFuseTests` (88 cases) runs on the native path wherever the DLL loads, and a new case fuses a deck under a
+frame of other nodes, doubled and open boxes, inward and outward boxes, both ways, compares the written bytes, and
+asserts the native column was asked and the native census ran. Planted in the C++: other nodes never occluding fails
+8 fuse cases, a tenth of the twin reach fails 5. Three tolerance plants pass the fixtures (a barycentric slack of 0.2,
+a twin that must lie within 8 degrees of the normal, a facing test of -0.80); their geometry is too clean to tell the
+tolerances apart, and the 21 recipe sources of the Workshop golden drill are their check: the wide slack changes 6
+rows, the stricter twin direction 10, the looser facing test 6 (beside the two stale rows below). The Workshop
+golden drill compiles the wrappers, copies the DLL beside its exe and prints which path ran; on 2026-10-25 its 20 rows
+with current goldens equal them both ways, and the Espana's and the Dragon's rows are stale by input on master as well
+(both sources re-fused on 10-18 and 10-19, after their goldens of 10-12).
