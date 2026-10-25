@@ -49,7 +49,7 @@ done
 # the editor files the row needs; the ones a checkout does not have yet (Compact.cs and the reader are from
 # 2026-10-01/02) are left out, so a checkout from before them compiles too
 SRCS=()
-for f in WorkshopGateTest.cs BakeGoldenFiles.cs GitStamp.cs EditorRules.cs QuadEstimate.cs GlbDisconnectedParts.cs GlbDisconnectedParts.Compact.cs GlbDisconnectedParts.Explain.cs HafModel.cs GlbReader.cs HafTransforms.cs HafModelDiff.cs HafNativeKernels.cs HafNativeKernels.Column.cs HafNativeKernels.Twin.cs; do
+for f in WorkshopGateTest.cs BakeGoldenFiles.cs GitStamp.cs EditorRules.cs QuadEstimate.cs GlbDisconnectedParts.cs GlbDisconnectedParts.Compact.cs GlbDisconnectedParts.Occluders.cs GlbDisconnectedParts.Explain.cs HafModel.cs GlbReader.cs HafTransforms.cs HafModelDiff.cs HafNativeKernels.cs HafNativeKernels.Column.cs HafNativeKernels.Twin.cs; do
   [ -f "$EDITOR_ROOT/editor/$f" ] && SRCS+=("$WEDITOR/editor/$f")
 done
 TMPD="$(mktemp -d 2>/dev/null)" || TMPD="$(mktemp -d -p "$ROOT/obj" 2>/dev/null)" || TMPD=""

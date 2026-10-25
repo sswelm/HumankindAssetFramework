@@ -3455,3 +3455,21 @@ rows, the stricter twin direction 10, the looser facing test 6 (beside the two s
 golden drill compiles the wrappers, copies the DLL beside its exe and prints which path ran; on 2026-10-25 its 20 rows
 with current goldens equal them both ways, and the Espana's and the Dragon's rows are stale by input on master as well
 (both sources re-fused on 10-18 and 10-19, after their goldens of 10-12).
+
+**The occluders read once per fuse** (`GlbDisconnectedParts.Occluders.cs`, 2026-10-26). Measured first on the Saleg's
+Revenge fused whole (22 groups, 707 parts, 3.9 million triangles in the file): 1,888 s of stage time in the editor, 836 s
+of it "sheets", and the SMALL groups the slowest there - a six-part group spent a minute on the exposure stage, a
+152-part group ten seconds - because each group read every other node of the file as its occluders, and FuseGroups
+plans its groups at once: 84 million triangles read in 22 parallel copies of 700 MB. The file's nodes are read once
+now, lazily, under a lock, one array of world-space corners per node; a group sees the nodes that are not its own as
+segments in node order, so triangle t of its occluder set is the t-th across those segments and the registration and
+candidate order every verdict reads is exactly what the per-group read produced; the managed walk indexes the
+segments through a prefix table and the native ladder (`native/hafcolumn.cpp`) takes the segment pointers, nothing
+copied per group. A group's bounds are those of the nodes it sees (the per-node bounds merged), never its own pre-weld
+corners, because the skin and the cell size follow the bounds. Unity 2021.3, the same 22-group job through the
+benchmark harness, hash unchanged: wall 148.7 s to 117.9 s, the sheets stage summed over the groups 769 s to 517 s;
+the x64 .NET host 86.7 s to 71.3 s, the galley's 15-group fuse 21.3 s to 18.4 s. What bounds the wall now is the
+largest group's own chain (gather 65 s and weld 38 s on its 9.7 million vertices), and the side grid is still built
+per group. Guards: `GlbFuseTests` checks the view directly (segments in node order, the corner numbering, the bounds
+from the other nodes alone, one read shared) and fuses two groups through one read against each group fused alone;
+the 15- and 22-group jobs above hash as before on both paths; the Workshop golden drill's rows are unchanged.

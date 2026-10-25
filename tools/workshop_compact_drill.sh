@@ -42,7 +42,7 @@ cp "$NEWTONSOFT" "$TMPD/Newtonsoft.Json.dll"
 WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"; WTMP="$(cygpath -m "$TMPD" 2>/dev/null || echo "$TMPD")"
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -out:"$WTMP/drill.exe" \
   -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
-  "$WROOT/tools/workshop-compact-drill/CompactDrill.cs" "$WROOT/editor/GlbDisconnectedParts.cs" "$WROOT/editor/GlbDisconnectedParts.Compact.cs" "$WROOT/editor/HafNativeKernels.cs" "$WROOT/editor/HafNativeKernels.Column.cs" "$WROOT/editor/HafNativeKernels.Twin.cs" \
+  "$WROOT/tools/workshop-compact-drill/CompactDrill.cs" "$WROOT/editor/GlbDisconnectedParts.cs" "$WROOT/editor/GlbDisconnectedParts.Compact.cs" "$WROOT/editor/GlbDisconnectedParts.Occluders.cs" "$WROOT/editor/HafNativeKernels.cs" "$WROOT/editor/HafNativeKernels.Column.cs" "$WROOT/editor/HafNativeKernels.Twin.cs" \
   "$WROOT/editor/HafModel.cs" "$WROOT/editor/GlbReader.cs" "$WROOT/editor/HafTransforms.cs" "$WROOT/editor/HafModelDiff.cs" 2>&1); rc=$?
 if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/drill.exe" ]; then echo "$OUT" | grep -E "error" | head -20; echo "FAIL — the compaction drill did not compile (csc rc=$rc)"; exit 1; fi
 

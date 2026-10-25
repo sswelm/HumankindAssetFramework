@@ -28,6 +28,7 @@
          UNITY_EDITOR absent, so the menu wrapper is excluded and the binary transformation remains testable. -->
     <Compile Include="..\editor\GlbDisconnectedParts.cs" Link="GlbDisconnectedParts.cs" />
     <Compile Include="..\editor\GlbDisconnectedParts.Compact.cs" Link="GlbDisconnectedParts.Compact.cs" />
+    <Compile Include="..\editor\GlbDisconnectedParts.Occluders.cs" Link="GlbDisconnectedParts.Occluders.cs" />
     <!-- Pure editor decision kernels (extraction freshness, natural ordering) — same pattern. -->
     <Compile Include="..\editor\GlbDisconnectedParts.Explain.cs" Link="GlbDisconnectedParts.Explain.cs" />
     <Compile Include="..\editor\BlenderExecutable.cs" Link="BlenderExecutable.cs" />

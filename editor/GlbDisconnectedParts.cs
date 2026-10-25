@@ -82,7 +82,7 @@ public static partial class GlbDisconnectedParts
         }
     }
 
-    struct Vec3
+    internal struct Vec3
     {
         public double X, Y, Z;
         public double this[int axis] => axis == 0 ? X : axis == 1 ? Y : Z;
@@ -1377,10 +1377,11 @@ public static partial class GlbDisconnectedParts
         }
         var plans = new FusePlan[jobs.Count]; int done = 0;
         var tasks = new System.Threading.Tasks.Task[jobs.Count];
+        var shared = new OccluderCache(source);   // the file's other nodes read once, for every group (GlbDisconnectedParts.Occluders.cs)
         for (int i = 0; i < jobs.Count; i++)
         {
             int at = i; FuseJob job = jobs[i];
-            tasks[i] = System.Threading.Tasks.Task.Run(() => { plans[at] = PlanFuse(source, job.NodeIndices, weldFraction, job.Name, job.CheckMirrored); System.Threading.Interlocked.Increment(ref done); });
+            tasks[i] = System.Threading.Tasks.Task.Run(() => { plans[at] = PlanFuse(source, job.NodeIndices, weldFraction, job.Name, job.CheckMirrored, null, shared); System.Threading.Interlocked.Increment(ref done); });
         }
         while (true)
         {
@@ -1419,7 +1420,7 @@ public static partial class GlbDisconnectedParts
                     for (int k = 0; k < again.Count; k++)
                     {
                         int at = again[k]; FusePlan pl = plans[at];
-                        redo[k] = System.Threading.Tasks.Task.Run(() => plans[at] = PlanFuse(source, pl.NodeIndices, weldFraction, pl.FusedName, true, true));
+                        redo[k] = System.Threading.Tasks.Task.Run(() => plans[at] = PlanFuse(source, pl.NodeIndices, weldFraction, pl.FusedName, true, true, shared));
                     }
                     System.Threading.Tasks.Task.WaitAll(redo);
                     foreach (var t in redo) if (t.Exception != null) throw t.Exception.InnerExceptions.Count == 1 ? t.Exception.InnerExceptions[0] : t.Exception;
@@ -1467,16 +1468,18 @@ public static partial class GlbDisconnectedParts
     // `runVerdict`: the whole fuse run's answer to "does this FILE store its mirrored parts already facing outward",
     // pooled by FuseGroups from every group's evidence and handed back to the groups that had none of their own.
     // null = decide from this group alone (a single-group fuse, where the group IS the run).
-    static FusePlan PlanFuse(byte[] source, IList<int> nodeIndices, double weldFraction, string fusedName, bool checkMirrored, bool? runVerdict)
+    static FusePlan PlanFuse(byte[] source, IList<int> nodeIndices, double weldFraction, string fusedName, bool checkMirrored, bool? runVerdict, OccluderCache shared = null)
     {
         // The native column index pins the occluder and face corners (a quarter of a gigabyte on a 3.6-million-triangle ship)
         // and holds the C++ ladder: released when the plan ends, on every exit, not left to a finalizer (review of PR #202).
         var native = new List<IDisposable>();
-        try { return PlanFuseCore(source, nodeIndices, weldFraction, fusedName, checkMirrored, runVerdict, native); }
+        try { return PlanFuseCore(source, nodeIndices, weldFraction, fusedName, checkMirrored, runVerdict, native, shared); }
         finally { foreach (var owned in native) owned.Dispose(); }
     }
 
-    static FusePlan PlanFuseCore(byte[] source, IList<int> nodeIndices, double weldFraction, string fusedName, bool checkMirrored, bool? runVerdict, List<IDisposable> native)
+    // `shared`: the file's occluders read once for every group of a FuseGroups run (GlbDisconnectedParts.Occluders.cs); null
+    // for a single plan, which then reads them for itself.
+    static FusePlan PlanFuseCore(byte[] source, IList<int> nodeIndices, double weldFraction, string fusedName, bool checkMirrored, bool? runVerdict, List<IDisposable> native, OccluderCache shared)
     {
         if (source == null) throw new ArgumentNullException(nameof(source));
         if (nodeIndices == null || nodeIndices.Count == 0) throw new ArgumentException("Nothing to fuse — no node indices.", nameof(nodeIndices));
@@ -1973,7 +1976,8 @@ public static partial class GlbDisconnectedParts
         Dictionary<long, List<int>>[] columns = null; var columnCells = new double[ColumnLevels];
         Dictionary<long, List<int>>[] sideColumns = null;
         var sideCells = new double[ColumnLevels];
-        var occluders = new List<Vec3>(); double columnCell = 1, modelTop = 0, modelBottom = 0;
+        OccluderView occluders = null; double columnCell = 1, modelTop = 0, modelBottom = 0;
+        var occluderCache = shared ?? new OccluderCache(source);
         // BUILT ON FIRST USE, AND ONLY THEN (outside review of PR #96). Reading every mesh node of the file and
         // transforming its triangles is not cheap - on a 230 MB ship it is ten seconds and hundreds of megabytes - and
         // a group whose sheets are all closed and consistently wound never asks the column a thing. A first cut of the
@@ -1996,33 +2000,9 @@ public static partial class GlbDisconnectedParts
             for (int k = 0; k < ColumnLevels; k++) grids[k] = new Dictionary<long, List<int>>();
             var lo = new[] { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity }; var hi = new[] { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
             var fusedNodes = new HashSet<int>(picked);
-            try
-            {
-                for (int ni = 0; ni < nodes.Count; ni++)
-                {
-                    if (fusedNodes.Contains(ni)) continue;   // the group's faces are added below, welded
-                    var node = nodes[ni] as JObject; if (node?["mesh"] == null) continue;
-                    int mi = node.Value<int>("mesh"); if (mi < 0 || mi >= meshes.Count) continue;
-                    var pl = (meshes[mi] as JObject)?["primitives"] as JArray; if (pl == null) continue;
-                    double[] world = NodeWorldMatrix(nodes, ni);
-                    foreach (JObject prim in TrianglesOnly(pl))
-                    {
-                        var attrs = prim["attributes"] as JObject; if (attrs?["POSITION"] == null) continue;
-                        int posAcc = attrs.Value<int>("POSITION"); int vertCount = reader.Count(posAcc);
-                        int idxAcc = prim["indices"] == null ? -1 : prim.Value<int>("indices");
-                        int faceN = (idxAcc < 0 ? vertCount : reader.Count(idxAcc)) / 3;
-                        for (int f = 0; f < faceN; f++)
-                        {
-                            uint i0 = idxAcc < 0 ? (uint)(f * 3) : reader.Index(idxAcc, (uint)(f * 3)), i1 = idxAcc < 0 ? (uint)(f * 3 + 1) : reader.Index(idxAcc, (uint)(f * 3 + 1)), i2 = idxAcc < 0 ? (uint)(f * 3 + 2) : reader.Index(idxAcc, (uint)(f * 3 + 2));
-                            if (i0 >= vertCount || i1 >= vertCount || i2 >= vertCount) continue;
-                            Vec3 a = XForm(world, reader.Position(posAcc, i0)), b = XForm(world, reader.Position(posAcc, i1)), c = XForm(world, reader.Position(posAcc, i2));
-                            occluders.Add(a); occluders.Add(b); occluders.Add(c);
-                            UpdateBounds(lo, hi, a); UpdateBounds(lo, hi, b); UpdateBounds(lo, hi, c);
-                        }
-                    }
-                }
-            }
-            catch (Exception) { occluders.Clear(); }
+            // every other node of the file, read once per fuse and shared between its groups (GlbDisconnectedParts.Occluders.cs);
+            // the group's own faces are added below, welded
+            occluders = occluderCache.View(fusedNodes, lo, hi);
             for (int f = 0; f < faceCount; f++) for (int c = 0; c < 3; c++) UpdateBounds(lo, hi, P(f, c));
             modelTop = hi[1]; modelBottom = lo[1];
             columnCell = Math.Max(Math.Max(hi[0] - lo[0], hi[2] - lo[2]) / 256.0, 1e-9);
@@ -2043,12 +2023,10 @@ public static partial class GlbDisconnectedParts
             }
             if (HafNativeKernels.Available)
             {
-                // native/hafcolumn.cpp registers the same ladder from the corners and answers the queries; the dictionaries stay empty
-                var occFlat = new double[occluders.Count * 3];
-                for (int i = 0; i < occluders.Count; i++) { occFlat[3 * i] = occluders[i].X; occFlat[3 * i + 1] = occluders[i].Y; occFlat[3 * i + 2] = occluders[i].Z; }
+                // native/hafcolumn.cpp registers the same ladder from the shared segments and answers the queries; the dictionaries stay empty
                 var faceFlat = new double[faceCount * 9];
                 for (int f = 0; f < faceCount; f++) for (int c = 0; c < 3; c++) { Vec3 v = P(f, c); faceFlat[9 * f + 3 * c] = v.X; faceFlat[9 * f + 3 * c + 1] = v.Y; faceFlat[9 * f + 3 * c + 2] = v.Z; }
-                columnIndex = new HafNativeKernels.ColumnIndex(columnCells, occFlat, faceFlat, modelTop, modelBottom);
+                columnIndex = new HafNativeKernels.ColumnIndex(columnCells, occluders.Segments, faceFlat, modelTop, modelBottom);
                 lock (native) native.Add(columnIndex);   // released by PlanFuse when the plan ends
             }
             else
