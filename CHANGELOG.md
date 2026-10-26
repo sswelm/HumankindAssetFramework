@@ -10,6 +10,11 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE FUSE PLANS A FEW GROUPS AT A TIME, LARGEST FIRST (2026-10-26).** All 22 groups of the Saleg's Revenge used to
+  start at once, and starved each other of the editor's garbage collector: the largest group took 52 s alone and 112 s
+  among the others. Four workers taking the groups largest first brought the whole fuse from 123.9 s to 88.1 s in Unity,
+  the written file identical; the galley's fuse is unchanged. A parallel gather was measured on the way and dropped: it
+  moved the wait into the weld (docs/Testing.md, Native kernels).
 - **THE FUSE READS ITS OCCLUDERS ONCE (2026-10-26).** On the Saleg's Revenge fused whole, each of the 22 groups read every
   other node of the file for its exposure test, all at once: 84 million triangles in 22 copies of 700 MB, and a six-part
   group spent a minute on the rest of the ship. The nodes are read once per fuse now and shared as segments in node order,

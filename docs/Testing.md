@@ -3478,3 +3478,23 @@ selects the managed fallback until Unity restarts; version 4 code likewise decli
 group skips that group's source nodes entirely, avoiding an unused copy of their corners; this applies to both
 `FuseNodes` and a one-job `FuseGroups`. An allocation regression uses 120,000 excluded triangles and permits the file
 parse and fixed scratch, while rejecting an expansion of the excluded geometry. Shared-group parity runs on both backends.
+
+**The groups' schedule** (`FuseGroups`, 2026-10-26). Every group of a fuse used to start at once. Measured in Unity on the
+Saleg's Revenge fused whole (22 groups, 705 parts): its largest group took 52 s fused alone and 112 s beside the other 21
+(its gather 6 s alone, 65 s there), because the groups starve each other of the editor's stop-the-world garbage collector,
+not only of cores. A parallel gather inside a group was tried first and measured: the gather of the largest groups fell
+25-30 % and their weld, untouched, grew by the same amount, the wall 3 % - the waiting moved, it did not go away. A few
+workers now take the groups largest first (by part count, ties by group order) from one queue, a quarter of the logical
+processors and at least two (`FuseGroupWorkers`, 4 on a 16-thread machine). The same job at each limit, Unity 2021.3,
+written bytes identical at every setting:
+
+| Groups at once | 22 | 8 | 4 | 2 | 1 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Saleg's Revenge, 22 groups | 123.9 s | 93.0 s | 88.1 s | 131.3 s | 225.2 s |
+
+The galley's 15 groups: 24.6 s all at once, 24.8 s four at a time. Each group's plan is its own (the occluders it reads
+are shared and read-only), so the order cannot change a result; the mirrored-verdict re-plans use the same schedule and
+read the first plans' names and nodes. A failure is kept per group and the first in GROUP order is thrown, as before.
+Guards: `GlbFuseTests` writes one eight-group fuse with one, four and eight workers and compares the bytes, and makes the
+largest group fail first in time while an earlier, smaller group also fails - the earlier group's error must surface
+(planted: reporting failures in run order fails it).

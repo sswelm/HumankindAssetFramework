@@ -1376,22 +1376,37 @@ public static partial class GlbDisconnectedParts
                 else owner[ni] = i;
         }
         var plans = new FusePlan[jobs.Count]; int done = 0;
-        var tasks = new System.Threading.Tasks.Task[jobs.Count];
         var shared = jobs.Count > 1 ? new OccluderCache(source) : null;   // a lone group keeps its own source corners out of the read
-        for (int i = 0; i < jobs.Count; i++)
+        // THE GROUPS' SCHEDULE (2026-10-26). Every group used to start at once. Measured in Unity on the Saleg's Revenge fused
+        // whole (22 groups): its largest group took 52 s alone and 112 s beside the other 21 - its gather 6 s alone, 65 s
+        // there - because the groups starve each other of the editor's garbage collector, not just of cores. A few workers
+        // now take the groups LARGEST FIRST from one queue: 4 at a time took the fuse from 123.9 s to 88.1 s (8: 93.0 s,
+        // 2: 131.3 s), the galley's 15 groups unchanged (24.6 s, 24.8 s), the written bytes identical at every setting
+        // (docs/Testing.md). Each group's plan is its own, so the order cannot change a result; a failure is kept per group
+        // and the first in GROUP order is thrown, as before.
+        void RunScheduled(IList<int> indices, Func<int, FusePlan> plan, bool poll)
         {
-            int at = i; FuseJob job = jobs[i];
-            tasks[i] = System.Threading.Tasks.Task.Run(() => { plans[at] = PlanFuse(source, job.NodeIndices, weldFraction, job.Name, job.CheckMirrored, null, shared); System.Threading.Interlocked.Increment(ref done); });
+            var order = indices.OrderByDescending(k => jobs[k].NodeIndices.Count).ThenBy(k => k).ToArray();
+            var failed = new Exception[jobs.Count]; int next = -1;
+            int workers = Math.Max(1, Math.Min(order.Length, FuseGroupWorkers > 0 ? FuseGroupWorkers : Math.Max(2, Environment.ProcessorCount / 4)));
+            var tasks = new System.Threading.Tasks.Task[workers];
+            for (int w = 0; w < workers; w++)
+                tasks[w] = System.Threading.Tasks.Task.Run(() =>
+                {
+                    int k;
+                    while ((k = System.Threading.Interlocked.Increment(ref next)) < order.Length)
+                    {
+                        int at = order[k];
+                        try { plans[at] = plan(at); } catch (Exception e) { failed[at] = e; }
+                        System.Threading.Interlocked.Increment(ref done);
+                    }
+                });
+            if (poll) while (!System.Threading.Tasks.Task.WaitAll(tasks, 100)) onTick?.Invoke(done);
+            else System.Threading.Tasks.Task.WaitAll(tasks);
+            if (poll) onTick?.Invoke(done);
+            foreach (int at in indices.OrderBy(k => k)) if (failed[at] != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failed[at]).Throw();
         }
-        while (true)
-        {
-            bool all;
-            try { all = System.Threading.Tasks.Task.WaitAll(tasks, 100); }
-            catch (AggregateException) { all = true; }   // a faulted plan: surfaced below as its own exception, not wrapped
-            onTick?.Invoke(done);
-            if (all) break;
-        }
-        foreach (var t in tasks) if (t.Exception != null) throw t.Exception.InnerExceptions.Count == 1 ? t.Exception.InnerExceptions[0] : t.Exception;
+        RunScheduled(Enumerable.Range(0, jobs.Count).ToList(), at => PlanFuse(source, jobs[at].NodeIndices, weldFraction, jobs[at].Name, jobs[at].CheckMirrored, null, shared), true);
         // THE RUN'S MIRRORED VERDICT (2026-09-20, the frigate's deck). Pool every group's evidence: if the file clearly
         // stores its mirrored parts already facing outward, the groups that had too little evidence of their own are
         // re-planned with that answer. Only those groups are re-planned, and only when they hold mirrored parts.
@@ -1416,14 +1431,8 @@ public static partial class GlbDisconnectedParts
                 }
                 if (again.Count > 0)
                 {
-                    var redo = new System.Threading.Tasks.Task[again.Count];
-                    for (int k = 0; k < again.Count; k++)
-                    {
-                        int at = again[k]; FusePlan pl = plans[at];
-                        redo[k] = System.Threading.Tasks.Task.Run(() => plans[at] = PlanFuse(source, pl.NodeIndices, weldFraction, pl.FusedName, true, true, shared));
-                    }
-                    System.Threading.Tasks.Task.WaitAll(redo);
-                    foreach (var t in redo) if (t.Exception != null) throw t.Exception.InnerExceptions.Count == 1 ? t.Exception.InnerExceptions[0] : t.Exception;
+                    var previous = plans.ToArray();   // the re-plans read the first plans' names and nodes, never what a re-plan wrote
+                    RunScheduled(again, at => PlanFuse(source, previous[at].NodeIndices, weldFraction, previous[at].FusedName, true, true, shared), false);
                 }
             }
         }
@@ -1448,6 +1457,9 @@ public static partial class GlbDisconnectedParts
     // to itself it kept injecting threads - forty of them on a sixteen-thread machine - which on this work only adds
     // cache pressure. Measured on the Saleg's Revenge.
     static readonly System.Threading.Tasks.ParallelOptions FuseParallel = new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount) };
+    /// <summary>How many fuse groups FuseGroups plans at once; 0 = a quarter of the logical processors, at least two (4 on the
+    /// author's 16, measured best). Settable for the tests and the benchmark.</summary>
+    internal static int FuseGroupWorkers = 0;
 
     sealed class FusePlan
     {
