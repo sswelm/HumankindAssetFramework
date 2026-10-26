@@ -1965,23 +1965,58 @@ public class GlbFuseTests
         Assert.Equal(new[] { 1 }, again.NodeOf); Assert.Same(view.Segments[0], cache.View(new HashSet<int> { 1 }, lo, hi).Segments[0]);   // read once, shared
     }
 
-    // Several groups planned at once through one cache fuse to the same bytes as each group planned alone (its own read).
+    // A private cache must not expand selected geometry that no query will read.
     [Fact]
-    public void Groups_sharing_one_occluder_read_fuse_as_groups_reading_for_themselves()
+    public void A_single_groups_cache_does_not_read_or_allocate_its_own_triangles()
     {
-        var hull = Box("Hull", 400, -200, -450, -200, inward: false);
-        var walls = Wall("Tub", new (float x, float z)[] { (0f, 0f), (0f, 10f), (10f, 10f), (10f, 0f), (0f, 0f) }, 0, 10, 1, new[] { 1, 1, 1, 1 }, flip: false);
-        var floor = Level("Tub", 0, 10, 0, 10, 0, down: false);
-        var lid = OpenBox("Lid", 4, 20, 0, 20, inward: true);
-        var src = BuildGlb(hull, walls, floor, lid);
-        var jobs = new List<GlbDisconnectedParts.FuseJob> {
-            new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 1, 2 }, Name = "Tub_Fused" },
-            new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 3 }, Name = "Lid_Fused" } };
-        byte[] together = GlbDisconnectedParts.FuseGroups(src, jobs, 0.0, out var results);
-        var aloneTub = GlbDisconnectedParts.FuseNodes(src, new[] { 1, 2 }, 0.0, "Tub_Fused");
-        var aloneLid = GlbDisconnectedParts.FuseNodes(src, new[] { 3 }, 0.0, "Lid_Fused");
-        Assert.Equal(aloneTub.FacesRewound, results[0].FacesRewound); Assert.Equal(aloneLid.FacesRewound, results[1].FacesRewound);
-        Assert.Equal(FusedFaces(aloneTub, "Tub_Fused").Select(f => string.Join(",", f.n.Select(v => v.ToString("R")))).ToList(),
-                     FusedFaces(new GlbDisconnectedParts.Result { Bytes = together }, "Tub_Fused").Select(f => string.Join(",", f.n.Select(v => v.ToString("R")))).ToList());
+        var own = Box("Own", 1, 0, 0, 0, inward: false);
+        own.Indices = Enumerable.Range(0, 10000).SelectMany(_ => own.Indices).ToArray();
+        var src = BuildGlb(own, Box("Other", 1, 10, 0, 0, inward: false));
+        var excluded = new HashSet<int> { 0 };
+        GlbDisconnectedParts.OccluderView View() => new GlbDisconnectedParts.OccluderCache(src, excluded).View(
+            excluded, new[] { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity },
+            new[] { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity });
+        View();
+        var counter = (Func<long>)Delegate.CreateDelegate(typeof(Func<long>), typeof(GC).GetMethod("GetAllocatedBytesForCurrentThread"));
+        long before = counter();
+        var view = View();
+        long bytes = counter() - before;
+        Assert.Equal(new[] { 1 }, view.NodeOf);
+        Assert.Equal(36, view.Count);
+        // Allow parsing/copying the file and fixed scratch; expanding Own's 120k triangles into double corners costs 25+ MB.
+        Assert.True(bytes < 4L * src.Length + 262144, "Excluded triangles allocated " + bytes + " bytes for a " + src.Length + " byte file");
+    }
+
+    // Several groups planned at once through one cache fuse to the same bytes as each group planned alone (its own read).
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Groups_sharing_one_occluder_read_fuse_as_groups_reading_for_themselves(bool nativeKernels)
+    {
+        bool was = HafNativeKernels.Available;
+        Assert.True(was, HafNativeKernels.Status);
+        HafNativeKernels.Available = nativeKernels;
+        try
+        {
+            var hull = Box("Hull", 400, -200, -450, -200, inward: false);
+            var walls = Wall("Tub", new (float x, float z)[] { (0f, 0f), (0f, 10f), (10f, 10f), (10f, 0f), (0f, 0f) }, 0, 10, 1, new[] { 1, 1, 1, 1 }, flip: false);
+            var floor = Level("Tub", 0, 10, 0, 10, 0, down: false);
+            var lid = OpenBox("Lid", 4, 20, 0, 20, inward: true);
+            var src = BuildGlb(hull, walls, floor, lid);
+            var jobs = new List<GlbDisconnectedParts.FuseJob> {
+                new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 1, 2 }, Name = "Tub_Fused" },
+                new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 3 }, Name = "Lid_Fused" } };
+            byte[] together = GlbDisconnectedParts.FuseGroups(src, jobs, 0.0, out var results);
+            var aloneTub = GlbDisconnectedParts.FuseNodes(src, new[] { 1, 2 }, 0.0, "Tub_Fused");
+            var aloneLid = GlbDisconnectedParts.FuseNodes(src, new[] { 3 }, 0.0, "Lid_Fused");
+            Assert.Equal(aloneTub.FacesRewound, results[0].FacesRewound); Assert.Equal(aloneLid.FacesRewound, results[1].FacesRewound);
+            Assert.Equal(FusedFaces(aloneTub, "Tub_Fused").Select(f => string.Join(",", f.n.Select(v => v.ToString("R")))).ToList(),
+                         FusedFaces(new GlbDisconnectedParts.Result { Bytes = together }, "Tub_Fused").Select(f => string.Join(",", f.n.Select(v => v.ToString("R")))).ToList());
+            Assert.Equal(FusedFaces(aloneLid, "Lid_Fused").Select(f => string.Join(",", f.n.Select(v => v.ToString("R")))).ToList(),
+                         FusedFaces(new GlbDisconnectedParts.Result { Bytes = together }, "Lid_Fused").Select(f => string.Join(",", f.n.Select(v => v.ToString("R")))).ToList());
+            Assert.Equal(aloneTub.Bytes, GlbDisconnectedParts.FuseGroups(src, new[] { jobs[0] }, 0.0, out _));
+            Assert.Equal(aloneLid.Bytes, GlbDisconnectedParts.FuseGroups(src, new[] { jobs[1] }, 0.0, out _));
+        }
+        finally { HafNativeKernels.Available = was; }
     }
 }

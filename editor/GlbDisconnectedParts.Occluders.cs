@@ -24,10 +24,17 @@ public static partial class GlbDisconnectedParts
     internal sealed class OccluderCache
     {
         readonly byte[] source; readonly object gate = new object();
+        readonly HashSet<int> excluded;
         double[][] nodes;   // published last: a reader that sees it non-null sees every array
         double[][] lo, hi;  // per node: the bounds of its corners (a group's bounds are those of the nodes it sees, as the per-group read's were)
 
-        public OccluderCache(byte[] source) { this.source = source; }
+        // A cache private to one group never needs that group's source corners: its welded faces are registered separately.
+        // Shared caches leave excluded null because every group's nodes can occlude another group.
+        public OccluderCache(byte[] source, IEnumerable<int> excluded = null)
+        {
+            this.source = source;
+            this.excluded = excluded == null ? null : new HashSet<int>(excluded);
+        }
 
         /// <summary>The segments of every node not in `picked`, in node order; boundsLo/Hi widened by those nodes' corners.</summary>
         public OccluderView View(ISet<int> picked, double[] boundsLo, double[] boundsHi)
@@ -56,6 +63,11 @@ public static partial class GlbDisconnectedParts
                 Accessors reader = BinReader(document, root, out byte[] _);
                 for (int ni = 0; ni < fileNodes.Count; ni++)
                 {
+                    if (excluded != null && excluded.Contains(ni))
+                    {
+                        read.Add(Array.Empty<double>()); readLo.Add(null); readHi.Add(null);
+                        continue;
+                    }
                     var corners = new List<double>();
                     var l = new[] { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity }; var h = new[] { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
                     var node = fileNodes[ni] as JObject;

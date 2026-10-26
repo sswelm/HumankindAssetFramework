@@ -14,7 +14,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   other node of the file for its exposure test, all at once: 84 million triangles in 22 copies of 700 MB, and a six-part
   group spent a minute on the rest of the ship. The nodes are read once per fuse now and shared as segments in node order,
   so every candidate order and verdict is unchanged (`GlbDisconnectedParts.Occluders.cs`; the native ladder takes the
-  segments). Unity wall for that job 148.7 s to 117.9 s, hash unchanged (docs/Testing.md, Native kernels).
+  segments). Single-group fuses omit their own source corners from the cache. The segmented native entry uses DLL
+  version 5, so a loaded version 4 safely selects the managed path until Unity restarts. Unity wall for that job
+  148.7 s to 117.9 s, hash unchanged (docs/Testing.md, Native kernels).
 - **THE WORKSHOP FUSE'S COLUMN AND TWIN CENSUS RUN AS C++ (2026-10-25).** Measured first: a 600,000-triangle fuse
   of the Saleg's Revenge spent 6.2 s in the exposure stage and 4.8 s in the twin census in Unity. The column grid with its
   vertical ray query and the twin census now run from `native/hafcolumn.cpp` and `native/haftwin.cpp` (DLL version 4),

@@ -1377,7 +1377,7 @@ public static partial class GlbDisconnectedParts
         }
         var plans = new FusePlan[jobs.Count]; int done = 0;
         var tasks = new System.Threading.Tasks.Task[jobs.Count];
-        var shared = new OccluderCache(source);   // the file's other nodes read once, for every group (GlbDisconnectedParts.Occluders.cs)
+        var shared = jobs.Count > 1 ? new OccluderCache(source) : null;   // a lone group keeps its own source corners out of the read
         for (int i = 0; i < jobs.Count; i++)
         {
             int at = i; FuseJob job = jobs[i];
@@ -1977,7 +1977,7 @@ public static partial class GlbDisconnectedParts
         Dictionary<long, List<int>>[] sideColumns = null;
         var sideCells = new double[ColumnLevels];
         OccluderView occluders = null; double columnCell = 1, modelTop = 0, modelBottom = 0;
-        var occluderCache = shared ?? new OccluderCache(source);
+        var occluderCache = shared ?? new OccluderCache(source, picked);
         // BUILT ON FIRST USE, AND ONLY THEN (outside review of PR #96). Reading every mesh node of the file and
         // transforming its triangles is not cheap - on a 230 MB ship it is ten seconds and hundreds of megabytes - and
         // a group whose sheets are all closed and consistently wound never asks the column a thing. A first cut of the

@@ -3473,3 +3473,8 @@ largest group's own chain (gather 65 s and weld 38 s on its 9.7 million vertices
 per group. Guards: `GlbFuseTests` checks the view directly (segments in node order, the corner numbering, the bounds
 from the other nodes alone, one read shared) and fuses two groups through one read against each group fused alone;
 the 15- and 22-group jobs above hash as before on both paths; the Workshop golden drill's rows are unchanged.
+Review fixes: the segmented column entry changes the native ABI and requires DLL version 5. An already-loaded version 4
+selects the managed fallback until Unity restarts; version 4 code likewise declines the new DLL. A cache serving one
+group skips that group's source nodes entirely, avoiding an unused copy of their corners; this applies to both
+`FuseNodes` and a one-job `FuseGroups`. An allocation regression uses 120,000 excluded triangles and permits the file
+parse and fixed scratch, while rejecting an expansion of the excluded geometry. Shared-group parity runs on both backends.
