@@ -2019,4 +2019,58 @@ public class GlbFuseTests
         }
         finally { HafNativeKernels.Available = was; }
     }
+
+    // ---- the groups' schedule (FuseGroups, 2026-10-26): a few workers, largest group first ----
+
+    // The order the groups are planned in cannot change a result: the same eight-group fuse written with one, four and
+    // eight workers is the same bytes.
+    [Fact]
+    public void The_fuse_writes_the_same_bytes_whatever_the_number_of_group_workers()
+    {
+        var parts = new List<Part>(); var jobs = new List<GlbDisconnectedParts.FuseJob>();
+        for (int g = 0; g < 8; g++)
+        {
+            var nodes = new List<int>();
+            for (int k = 0; k <= g % 3; k++) { nodes.Add(parts.Count); parts.Add(k % 2 == 0 ? Box("B" + g + "_" + k, 1 + k, g * 6, 0, 0, inward: g % 2 == 0) : OpenBox("O" + g + "_" + k, 1.5f, g * 6, 0.2f, 0.2f, inward: true)); }
+            jobs.Add(new GlbDisconnectedParts.FuseJob { NodeIndices = nodes, Name = "G" + g + "_Fused" });
+        }
+        byte[] src = BuildGlb(parts.ToArray());
+        int was = GlbDisconnectedParts.FuseGroupWorkers;
+        try
+        {
+            var written = new List<byte[]>();
+            foreach (int workers in new[] { 1, 4, 8 })
+            {
+                GlbDisconnectedParts.FuseGroupWorkers = workers;
+                written.Add(GlbDisconnectedParts.FuseGroups(src, jobs, 0.001, out var _));
+            }
+            Assert.Equal(written[0], written[1]); Assert.Equal(written[0], written[2]);
+        }
+        finally { GlbDisconnectedParts.FuseGroupWorkers = was; }
+    }
+
+    // A failure is still reported for the first group in GROUP order, although the largest group is now planned first:
+    // group 0 (one bad node index) and group 2 (three parts, one skinned) both fail; group 2 fails first in time.
+    [Fact]
+    public void The_first_failing_group_in_group_order_is_reported_whatever_ran_first()
+    {
+        var a = Box("A", 1, 0, 0, 0, inward: false); var b = Box("B", 1, 3, 0, 0, inward: false); var c = Box("C", 1, 6, 0, 0, inward: false);
+        var d = Box("D", 1, 9, 0, 0, inward: false); d.Skinned = true;
+        byte[] src = BuildGlb(a, b, c, d);
+        var jobs = new List<GlbDisconnectedParts.FuseJob> {
+            new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 999 }, Name = "First_Fused" },
+            new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 0 }, Name = "Fine_Fused" },
+            new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 1, 2, 3 }, Name = "Large_Fused" } };
+        int was = GlbDisconnectedParts.FuseGroupWorkers;
+        try
+        {
+            foreach (int workers in new[] { 1, 3 })
+            {
+                GlbDisconnectedParts.FuseGroupWorkers = workers;
+                var thrown = Assert.ThrowsAny<Exception>(() => GlbDisconnectedParts.FuseGroups(src, jobs, 0.001, out var _));
+                Assert.Equal("Node index is out of range.", thrown.Message);
+            }
+        }
+        finally { GlbDisconnectedParts.FuseGroupWorkers = was; }
+    }
 }
