@@ -1638,13 +1638,23 @@ public static partial class GlbDisconnectedParts
 
         Mark("gather");
         // 2) weld classes — union-find over vertices within `weld` (a hash grid, the 27 neighbouring cells)
+        double[] weldFlat = null;   // the positions flat for the native weld, built once for both passes (pos does not move between them)
         int[] WeldClasses(double distance)
         {
+            double cellSize = distance > 0 ? distance : longest * 1e-7;
+            double thresh2 = distance > 0 ? distance * distance : 0.0;
+            if (HafNativeKernels.Available)   // native/hafweld.cpp: the same cells in the same order, the same unions (HafNativeKernels.Weld.cs)
+            {
+                if (weldFlat == null)
+                {
+                    weldFlat = new double[3 * pos.Count];
+                    for (int i = 0; i < pos.Count; i++) { Vec3 p = pos[i]; weldFlat[3 * i] = p.X; weldFlat[3 * i + 1] = p.Y; weldFlat[3 * i + 2] = p.Z; }
+                }
+                return HafNativeKernels.WeldClasses(weldFlat, pos.Count, cellSize, thresh2);
+            }
             var parent = new int[pos.Count];
             for (int i = 0; i < parent.Length; i++) parent[i] = i;
             int Find(int i) { while (parent[i] != i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; }
-            double cellSize = distance > 0 ? distance : longest * 1e-7;
-            double thresh2 = distance > 0 ? distance * distance : 0.0;
             // flat: no List per cell (GlbDisconnectedParts.Weld.cs); each cell is walked in ascending vertex order, as the Lists were
             var grid = new CellGrid(pos, cellSize); int[] members = grid.Members; long[] keys = grid.Keys; bool wide = grid.Wide;
             for (int i = 0; i < pos.Count; i++)
@@ -2018,6 +2028,7 @@ public static partial class GlbDisconnectedParts
         // sees it non-null sees everything the build wrote.
         object columnsGate = new object();
         HafNativeKernels.ColumnIndex columnIndex = null;   // the ladder flattened for the native query, built with the grids when the DLL is there
+        HafNativeKernels.SideIndex sideIndex = null; double[] ladderFaces = null;   // the side ladder likewise, on first use, over the same face corners
         var skipArrays = new Dictionary<HashSet<int>, int[]>();   // a sheet's skip set as the sorted array the native query reads, once per set
         Dictionary<long, List<int>>[] EnsureOccluders()
         {
@@ -2055,9 +2066,9 @@ public static partial class GlbDisconnectedParts
             if (HafNativeKernels.Available)
             {
                 // native/hafcolumn.cpp registers the same ladder from the shared segments and answers the queries; the dictionaries stay empty
-                var faceFlat = new double[faceCount * 9];
-                for (int f = 0; f < faceCount; f++) for (int c = 0; c < 3; c++) { Vec3 v = P(f, c); faceFlat[9 * f + 3 * c] = v.X; faceFlat[9 * f + 3 * c + 1] = v.Y; faceFlat[9 * f + 3 * c + 2] = v.Z; }
-                columnIndex = new HafNativeKernels.ColumnIndex(columnCells, occluders.Segments, faceFlat, modelTop, modelBottom);
+                ladderFaces = new double[faceCount * 9];
+                for (int f = 0; f < faceCount; f++) for (int c = 0; c < 3; c++) { Vec3 v = P(f, c); ladderFaces[9 * f + 3 * c] = v.X; ladderFaces[9 * f + 3 * c + 1] = v.Y; ladderFaces[9 * f + 3 * c + 2] = v.Z; }
+                columnIndex = new HafNativeKernels.ColumnIndex(columnCells, occluders.Segments, ladderFaces, modelTop, modelBottom);
                 lock (native) native.Add(columnIndex);   // released by PlanFuse when the plan ends
             }
             else
@@ -2168,6 +2179,15 @@ public static partial class GlbDisconnectedParts
                 double baseCell = Math.Max(columnCell, (modelTop - modelBottom) / 256.0);
                 for (int k = 0; k < ColumnLevels; k++)
                 { grids[k] = new Dictionary<long, List<int>>(); sideCells[k] = baseCell / (1 << k); }
+                if (columnIndex != null)
+                {
+                    // native/hafcolumn.cpp registers the same ladder over (length, height) from the shared segments and answers the
+                    // side queries (measured 2026-10-27: 61 s of the Saleg's 22 groups in this view, managed); the dictionaries stay empty
+                    sideIndex = new HafNativeKernels.SideIndex(sideCells, occluders.Segments, ladderFaces, modelTop, modelBottom, width);
+                    lock (native) native.Add(sideIndex);   // released by PlanFuse when the plan ends
+                    System.Threading.Volatile.Write(ref sideColumns, grids);
+                    return grids;
+                }
                 void Register(int id, Vec3 a, Vec3 b, Vec3 c)
                 {
                     double low = Math.Min(Horizontal(a, length), Math.Min(Horizontal(b, length), Horizontal(c, length)));
@@ -2195,6 +2215,7 @@ public static partial class GlbDisconnectedParts
         bool ExposedFromSide(int f, int width, bool positive)
         {
             var grids = EnsureSideOccluders(width); int length = width == 0 ? 2 : 0;
+            if (sideIndex != null) return sideIndex.Query(f, positive);
             Vec3 c = FScale(FAdd(FAdd(P(f, 0), P(f, 1)), P(f, 2)), 1.0 / 3.0);
             var d = width == 0 ? new Vec3 { X = positive ? 1 : -1 } : new Vec3 { Z = positive ? 1 : -1 };
             double skin = 1e-6 * Math.Max(1.0, modelTop - modelBottom), along = Horizontal(c, length);

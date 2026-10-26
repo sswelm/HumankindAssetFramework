@@ -69,6 +69,7 @@
     <Compile Include="..\editor\HafNativeKernels.Collapse.cs" Link="HafNativeKernels.Collapse.cs" />
     <Compile Include="..\editor\HafNativeKernels.Column.cs" Link="HafNativeKernels.Column.cs" />
     <Compile Include="..\editor\HafNativeKernels.Twin.cs" Link="HafNativeKernels.Twin.cs" />
+    <Compile Include="..\editor\HafNativeKernels.Weld.cs" Link="HafNativeKernels.Weld.cs" />
     <Compile Include="..\editor\VehicleProbe.Merge.cs" Link="VehicleProbe.Merge.cs" />
     <Compile Include="..\editor\VehicleProbe.BlenderArmature.cs" Link="VehicleProbe.BlenderArmature.cs" />
     <Compile Include="..\editor\HafUnityFrame.cs" Link="HafUnityFrame.cs" />

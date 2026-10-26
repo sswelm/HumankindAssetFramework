@@ -190,4 +190,63 @@ public class NativeKernelsTests
     }
 
     static int[] Bits(float[] v) => v.Select(x => BitConverter.ToInt32(BitConverter.GetBytes(x), 0)).ToArray();
+
+    // The weld classes (native/hafweld.cpp) against the fuse's original walk, written out here as the reference: a Dictionary
+    // of cell -> ascending vertex list, vertex i ascending, the 27 cells in dx, dy, dz order, only j > i, the union
+    // parent[Find(i)] = Find(j). The fixture is chains of points a little under the weld distance apart, crossing cell
+    // borders, with exact duplicates: which vertex ends up as a chain's representative depends on the union ORDER, so a
+    // kernel that visited the cells or the vertices in any other order would answer differently.
+    [Theory]
+    [InlineData(1), InlineData(2), InlineData(3)]
+    public void Weld_classes_match_the_managed_walk_union_for_union(int seed)
+    {
+        Assert.True(HafNativeKernels.Available, HafNativeKernels.Status);
+        var rnd = new Random(seed); var pts = new List<double>();
+        double weld = 0.05;
+        for (int chain = 0; chain < 400; chain++)
+        {
+            double x = rnd.NextDouble() * 10, y = rnd.NextDouble() * 10, z = rnd.NextDouble() * 10;
+            int links = 1 + rnd.Next(6);
+            for (int l = 0; l < links; l++)
+            {
+                pts.Add(x); pts.Add(y); pts.Add(z);
+                if (rnd.Next(4) == 0) { pts.Add(x); pts.Add(y); pts.Add(z); }   // an exact duplicate
+                int axis = rnd.Next(3); double step = weld * (0.3 + 0.65 * rnd.NextDouble()) * (rnd.Next(2) == 0 ? 1 : -1);
+                if (axis == 0) x += step; else if (axis == 1) y += step; else z += step;
+            }
+        }
+        // shuffle, so that a chain's vertices are scattered through the index order
+        int n = pts.Count / 3; var order = Enumerable.Range(0, n).OrderBy(_ => rnd.Next()).ToArray();
+        var pos = new double[3 * n];
+        for (int i = 0; i < n; i++) for (int a = 0; a < 3; a++) pos[3 * i + a] = pts[3 * order[i] + a];
+        foreach (double distance in new[] { weld, 1e-6 })
+        {
+            double cell = distance, thresh2 = distance * distance;
+            int[] native = HafNativeKernels.WeldClasses(pos, n, cell, thresh2);
+            // the reference
+            var parent = Enumerable.Range(0, n).ToArray();
+            int Find(int i) { while (parent[i] != i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; }
+            (long, long, long) Cell(int i) => ((long)Math.Floor(pos[3 * i] / cell), (long)Math.Floor(pos[3 * i + 1] / cell), (long)Math.Floor(pos[3 * i + 2] / cell));
+            var grid = new Dictionary<(long, long, long), List<int>>();
+            for (int i = 0; i < n; i++) { var k = Cell(i); if (!grid.TryGetValue(k, out var l)) grid.Add(k, l = new List<int>()); l.Add(i); }
+            for (int i = 0; i < n; i++)
+            {
+                var k = Cell(i);
+                for (long dx = -1; dx <= 1; dx++) for (long dy = -1; dy <= 1; dy++) for (long dz = -1; dz <= 1; dz++)
+                {
+                    if (!grid.TryGetValue((k.Item1 + dx, k.Item2 + dy, k.Item3 + dz), out var l)) continue;
+                    foreach (int j in l)
+                    {
+                        if (j <= i) continue;
+                        double ddx = pos[3 * i] - pos[3 * j], ddy = pos[3 * i + 1] - pos[3 * j + 1], ddz = pos[3 * i + 2] - pos[3 * j + 2];
+                        if (ddx * ddx + ddy * ddy + ddz * ddz <= thresh2) { int a = Find(i), b = Find(j); if (a != b) parent[a] = b; }
+                    }
+                }
+            }
+            var expected = new int[n]; for (int i = 0; i < n; i++) expected[i] = Find(i);
+            Assert.Equal(expected, native);
+            int classes = expected.Distinct().Count();
+            Assert.True(classes < n && classes > 100, "the fixture welds nothing or everything: " + classes + " classes of " + n);
+        }
+    }
 }

@@ -1927,6 +1927,8 @@ public class GlbFuseTests
         };
         long columnBefore = HafNativeKernels.ColumnIndex.QueryCalls, twinBefore = HafNativeKernels.TwinTicks;
         int builtBefore = HafNativeKernels.ColumnIndex.Built, disposedBefore = HafNativeKernels.ColumnIndex.Disposed;
+        long sideBefore = HafNativeKernels.SideIndex.QueryCalls, weldBefore = HafNativeKernels.WeldCalls;
+        int sideBuiltBefore = HafNativeKernels.SideIndex.Built, sideDisposedBefore = HafNativeKernels.SideIndex.Disposed;
         foreach (var (src, nodes, weld) in cases)
         {
             byte[] native = GlbDisconnectedParts.FuseNodes(src, nodes, weld).Bytes, managed = null;
@@ -1943,6 +1945,11 @@ public class GlbFuseTests
         Assert.True(HafNativeKernels.ColumnIndex.Built > builtBefore, "no column index was built");
         Assert.Equal(HafNativeKernels.ColumnIndex.Built - builtBefore, HafNativeKernels.ColumnIndex.Disposed - disposedBefore);
         Assert.True(HafNativeKernels.TwinTicks > twinBefore, "the native twin census never ran");
+        // the weld (native/hafweld.cpp) and the side ladder (hafcolumn.cpp, 2026-10-27) are on the same native path and released the same way
+        Assert.True(HafNativeKernels.WeldCalls > weldBefore, "the native weld never ran");
+        Assert.True(HafNativeKernels.SideIndex.QueryCalls > sideBefore, "no fixture asked the native side view");
+        Assert.True(HafNativeKernels.SideIndex.Built > sideBuiltBefore, "no side index was built");
+        Assert.Equal(HafNativeKernels.SideIndex.Built - sideBuiltBefore, HafNativeKernels.SideIndex.Disposed - sideDisposedBefore);
     }
 
     // ---- the occluders read once per fuse (GlbDisconnectedParts.Occluders.cs, 2026-10-26) ----
