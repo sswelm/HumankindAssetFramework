@@ -3532,3 +3532,9 @@ grid with duplicates against a Dictionary built the old way, packed and wide (pl
 fails both rows and the triple test, while every fixture fuse of the suite still passed - the small fixtures are insensitive
 to the union order, the unit tests are not); the triple index against a Dictionary of sorted triples, leaders ascending; and a
 colour attribute first seen on the second part pads the first part's vertices white and keeps the seam's vertices apart.
+Review guards: the sizing pass checks the first and last position/index elements before using declared counts as list capacities,
+and adds totals with checked arithmetic. Invalid ranges or totals fall back to the normal gather so its data error is
+preserved. Tests cover impossible and negative counts (including two oversized parts), negative starts concealed by a
+valid final element, and negative index-accessor references, which must remain errors rather than being treated as an
+absent indices property. All eight cases fail on
+the original PR: allocation exceptions or a negative capacity replace the bounds error, or the invalid reference is accepted.

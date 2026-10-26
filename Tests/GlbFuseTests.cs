@@ -2076,6 +2076,53 @@ public class GlbFuseTests
 
     // ---- the gather's and the weld's flat tables (GlbDisconnectedParts.Weld.cs, 2026-10-27) ----
 
+    [Theory]
+    [InlineData("POSITION", 1, int.MaxValue)]
+    [InlineData("indices", 1, int.MaxValue - 1)]
+    [InlineData("POSITION", 2, int.MaxValue)]
+    [InlineData("POSITION", 1, -1)]
+    [InlineData("indices", 1, -1)]
+    public void Impossible_accessor_counts_are_refused_without_reserving_the_declared_arrays(string attribute, int parts, int declaredCount)
+    {
+        var src = Read(BuildGlb(Enumerable.Range(0, parts).Select(i => Quad("P" + i, 0, 1, 0, 1, i)).ToArray()));
+        foreach (JObject mesh in (JArray)src.Root["meshes"])
+        {
+            var primitive = (JObject)mesh["primitives"][0];
+            int accessor = attribute == "indices" ? primitive.Value<int>("indices") : primitive["attributes"].Value<int>(attribute);
+            // Above the CLR's array-length limit, so the broken sizing pass throws immediately rather than consuming RAM.
+            src.Root["accessors"][accessor]["count"] = declaredCount;
+        }
+        byte[] malformed = WriteGlb(src.Root, src.Bin);
+        var error = Assert.Throws<System.IO.InvalidDataException>(() => GlbDisconnectedParts.FuseNodes(malformed, Enumerable.Range(0, parts).ToArray(), 0));
+        if (declaredCount > 0) Assert.Contains("BIN chunk", error.Message);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(-7)]
+    public void A_negative_index_accessor_is_not_treated_as_an_unindexed_primitive(int accessor)
+    {
+        var src = Read(BuildGlb(new Part { Name = "Triangle", Positions = new float[] { 0, 0, 0, 1, 0, 0, 0, 1, 0 }, Indices = new[] { 0, 1, 2 } }));
+        src.Root["meshes"][0]["primitives"][0]["indices"] = accessor;
+        var error = Assert.Throws<System.IO.InvalidDataException>(() => GlbDisconnectedParts.FuseNodes(WriteGlb(src.Root, src.Bin), new[] { 0 }, 0));
+        Assert.Equal("Accessor index is out of range.", error.Message);
+    }
+
+    [Fact]
+    public void An_accessor_must_fit_at_both_ends_before_its_count_is_used_as_capacity()
+    {
+        var src = Read(BuildGlb(Quad("P", 0, 1, 0, 1, 0)));
+        int index = src.Root["meshes"][0]["primitives"][0].Value<int>("indices");
+        var accessor = (JObject)src.Root["accessors"][index];
+        accessor["count"] = int.MaxValue - 1;
+        // The last ushort lands at BIN offset zero, while the first is far before the BIN. Checking only the last
+        // element would approve a huge allocation even though the original reader refuses its very first read.
+        accessor["byteOffset"] = int.MinValue;
+        src.Root["bufferViews"][accessor.Value<int>("bufferView")]["byteOffset"] = int.MinValue + 6;
+        var error = Assert.Throws<System.IO.InvalidDataException>(() => GlbDisconnectedParts.FuseNodes(WriteGlb(src.Root, src.Bin), new[] { 0 }, 0));
+        Assert.Contains("BIN chunk", error.Message);
+    }
+
     // Every cell of the grid lists its vertices in ascending order, the order the Dictionary's Lists held and the order
     // the weld's unions depend on; a cell nobody fell in is empty. Jittered positions with duplicates over a coarse cell
     // (packed keys, as every fuse has them) and over a cell a billionth of the span (the wide keys: 34 bits per axis).

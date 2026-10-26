@@ -1605,13 +1605,14 @@ public static partial class GlbDisconnectedParts
                         else { for (int c = 0; c < comps; c++) values.Add(0.0); extraHas[k].Add(false); }
                     }
                 }
-                int indexAcc = primitive["indices"] == null ? -1 : primitive.Value<int>("indices");
-                int indexCount = indexAcc < 0 ? vertCount : reader.Count(indexAcc);
+                bool indexed = primitive["indices"] != null;
+                int indexAcc = indexed ? primitive.Value<int>("indices") : -1;
+                int indexCount = indexed ? reader.Count(indexAcc) : vertCount;
                 if (indexCount % 3 != 0) throw new InvalidDataException("Triangle primitive index count is not divisible by three.");
                 int triStart = tris.Count;
                 for (uint i = 0; i < indexCount; i++)
                 {
-                    uint idx = indexAcc < 0 ? i : reader.Index(indexAcc, i);
+                    uint idx = indexed ? reader.Index(indexAcc, i) : i;
                     if (idx >= vertCount) throw new InvalidDataException("Primitive index exceeds its POSITION accessor.");
                     tris.Add(baseV + (int)idx);
                 }
@@ -3405,9 +3406,9 @@ public static partial class GlbDisconnectedParts
         return new Accessors(root, originalData);
     }
 
-    // The vertex and index totals of the parts the fuse is about to gather, so its lists are sized once. Counts only:
-    // whatever the gather would refuse is left for the gather to refuse with its own message; a zero here only means
-    // the lists grow as they used to.
+    // The vertex and index totals of the parts the fuse is about to gather, so its lists are sized once. Refusals are
+    // left for the gather with its own message; zero here only means the lists grow as they used to. A declared count
+    // is not an allocation size until both ends of its element range fit the BIN.
     static void CountGathered(JArray nodes, JArray meshes, Accessors reader, List<int> picked, out int vertices, out int indices)
     {
         vertices = 0; indices = 0;
@@ -3422,9 +3423,17 @@ public static partial class GlbDisconnectedParts
                 {
                     var attrs = primitive["attributes"] as JObject;
                     if (attrs == null || attrs["POSITION"] == null) continue;
-                    int count = reader.Count(attrs.Value<int>("POSITION"));
-                    vertices += count;
-                    indices += primitive["indices"] == null ? count : reader.Count(primitive.Value<int>("indices"));
+                    int posAcc = attrs.Value<int>("POSITION"), count = reader.Count(posAcc);
+                    bool indexed = primitive["indices"] != null;
+                    int indexAcc = indexed ? primitive.Value<int>("indices") : -1;
+                    int indexCount = indexed ? reader.Count(indexAcc) : count;
+                    if (count < 0 || indexCount < 0) throw new InvalidDataException("Negative accessor count.");
+                    // Metadata can name billions of elements in a tiny BIN. Fall back to the ordinary gather on an
+                    // invalid range, so it raises its original data error without trying to reserve those arrays.
+                    if (count > 0) { reader.Position(posAcc, 0); if (count > 1) reader.Position(posAcc, (uint)(count - 1)); }
+                    if (indexed && indexCount > 0) { reader.Index(indexAcc, 0); if (indexCount > 1) reader.Index(indexAcc, (uint)(indexCount - 1)); }
+                    vertices = checked(vertices + count);
+                    indices = checked(indices + indexCount);
                 }
             }
         }

@@ -16,7 +16,8 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   once and keeps every attribute flat; the weld buckets its vertices as one packed long each over a counting sort and the twin
   pass walks a chained index - every bucket ascending, as the Lists were, so both jobs hash as before. In Unity the Saleg's fuse
   went from 92.5 s to 65.2 s, the galley's from 23.8 s to 19.6 s. Lesson kept in the source: a first grid of linked chains was
-  faster on .NET and 30 % slower in Unity's Mono (docs/Testing.md, Native kernels).
+  faster on .NET and 30 % slower in Unity's Mono (docs/Testing.md, Native kernels). The sizing pass checks accessor ranges
+  before reserving arrays, and a negative index-accessor reference remains an input error rather than an unindexed mesh.
 - **THE FUSE PLANS A FEW GROUPS AT A TIME, LARGEST FIRST (2026-10-26).** All 22 groups of the Saleg's Revenge used to
   start at once, and starved each other of the editor's garbage collector: the largest group took 52 s alone and 112 s
   among the others. Four workers taking the groups largest first brought the whole fuse from 123.9 s to 88.1 s in Unity,
