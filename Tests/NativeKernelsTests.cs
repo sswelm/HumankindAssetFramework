@@ -190,4 +190,96 @@ public class NativeKernelsTests
     }
 
     static int[] Bits(float[] v) => v.Select(x => BitConverter.ToInt32(BitConverter.GetBytes(x), 0)).ToArray();
+
+    // Native boundary guards: reject impossible buffers before allocation and keep the side query free of per-face garbage.
+    [Theory]
+    [InlineData(715827883)]
+    [InlineData(1431655766)]
+    public void Weld_rejects_vertex_counts_whose_component_product_would_overflow(int count)
+    {
+        // The test host's default CLR array-size limit also makes the old implementation fail immediately without
+        // consuming RAM, but it must reject the short input before even attempting to reserve the result array.
+        Assert.Throws<IndexOutOfRangeException>(() => HafNativeKernels.WeldClasses(new double[3], count, 1, 1));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(2)]
+    public void Side_queries_do_not_allocate_per_face(int width)
+    {
+        Assert.True(HafNativeKernels.Available, HafNativeKernels.Status);
+        var face = new double[] { 0, 0, 0, 0, 1, 0, 0, 0, 1 };
+        var blocker = new double[] { 1, 0, 0, 1, 1, 0, 1, 0, 1 };
+        if (width == 2) for (int i = 0; i < 9; i += 3)
+        {
+            double x = face[i]; face[i] = face[i + 2]; face[i + 2] = x;
+            x = blocker[i]; blocker[i] = blocker[i + 2]; blocker[i + 2] = x;
+        }
+        using (var index = new HafNativeKernels.SideIndex(new[] { 2.0 }, new[] { blocker }, face, 1, 0, width))
+        {
+            for (int i = 0; i < 100; i++) index.Query(0, i % 2 == 0);
+            var allocated = (Func<long>)Delegate.CreateDelegate(typeof(Func<long>), typeof(GC).GetMethod("GetAllocatedBytesForCurrentThread"));
+            long before = allocated(); int exposed = 0;
+            for (int i = 0; i < 10000; i++) if (index.Query(0, i % 2 == 0)) exposed++;
+            long bytes = allocated() - before;
+            Assert.Equal(5000, exposed);   // the blocker is ahead; the opposite ray is open
+            Assert.InRange(bytes, 0, 1024);
+        }
+    }
+
+    // The reference is the original Dictionary walk: i ascending, neighbours in dx/dy/dz order, j ascending, and
+    // parent[Find(i)] = Find(j). Shuffled chains and duplicates make each representative depend on that union order.
+    [Theory]
+    [InlineData(1), InlineData(2), InlineData(3)]
+    public void Weld_classes_match_the_managed_walk_union_for_union(int seed)
+    {
+        Assert.True(HafNativeKernels.Available, HafNativeKernels.Status);
+        var rnd = new Random(seed); var pts = new List<double>();
+        double weld = 0.05;
+        for (int chain = 0; chain < 400; chain++)
+        {
+            double x = rnd.NextDouble() * 10, y = rnd.NextDouble() * 10, z = rnd.NextDouble() * 10;
+            int links = 1 + rnd.Next(6);
+            for (int l = 0; l < links; l++)
+            {
+                pts.Add(x); pts.Add(y); pts.Add(z);
+                if (rnd.Next(4) == 0) { pts.Add(x); pts.Add(y); pts.Add(z); }   // an exact duplicate
+                int axis = rnd.Next(3); double step = weld * (0.3 + 0.65 * rnd.NextDouble()) * (rnd.Next(2) == 0 ? 1 : -1);
+                if (axis == 0) x += step; else if (axis == 1) y += step; else z += step;
+            }
+        }
+        // shuffle, so that a chain's vertices are scattered through the index order
+        int n = pts.Count / 3; var order = Enumerable.Range(0, n).OrderBy(_ => rnd.Next()).ToArray();
+        var pos = new double[3 * n];
+        for (int i = 0; i < n; i++) for (int a = 0; a < 3; a++) pos[3 * i + a] = pts[3 * order[i] + a];
+        foreach (double distance in new[] { weld, 1e-6 })
+        {
+            double cell = distance, thresh2 = distance * distance;
+            int[] native = HafNativeKernels.WeldClasses(pos, n, cell, thresh2);
+            // the reference
+            var parent = Enumerable.Range(0, n).ToArray();
+            int Find(int i) { while (parent[i] != i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; }
+            (long, long, long) Cell(int i) => ((long)Math.Floor(pos[3 * i] / cell), (long)Math.Floor(pos[3 * i + 1] / cell), (long)Math.Floor(pos[3 * i + 2] / cell));
+            var grid = new Dictionary<(long, long, long), List<int>>();
+            for (int i = 0; i < n; i++) { var k = Cell(i); if (!grid.TryGetValue(k, out var l)) grid.Add(k, l = new List<int>()); l.Add(i); }
+            for (int i = 0; i < n; i++)
+            {
+                var k = Cell(i);
+                for (long dx = -1; dx <= 1; dx++) for (long dy = -1; dy <= 1; dy++) for (long dz = -1; dz <= 1; dz++)
+                {
+                    if (!grid.TryGetValue((k.Item1 + dx, k.Item2 + dy, k.Item3 + dz), out var l)) continue;
+                    foreach (int j in l)
+                    {
+                        if (j <= i) continue;
+                        double ddx = pos[3 * i] - pos[3 * j], ddy = pos[3 * i + 1] - pos[3 * j + 1], ddz = pos[3 * i + 2] - pos[3 * j + 2];
+                        if (ddx * ddx + ddy * ddy + ddz * ddz <= thresh2) { int a = Find(i), b = Find(j); if (a != b) parent[a] = b; }
+                    }
+                }
+            }
+            var expected = new int[n]; for (int i = 0; i < n; i++) expected[i] = Find(i);
+            Assert.Equal(expected, native);
+            int classes = expected.Distinct().Count();
+            Assert.True(classes < n && classes > 100, "the fixture welds nothing or everything: " + classes + " classes of " + n);
+        }
+    }
 }

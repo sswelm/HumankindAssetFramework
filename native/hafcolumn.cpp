@@ -45,23 +45,27 @@ struct Rung { const int64_t* keys; const int* offsets; const int* ids; int nKeys
 // fits inside (rung 0 takes the rest, and drops a sliver wider than 256 cells), into every cell its x/z box covers; the
 // occluders in triangle order, then the group's faces. A stable sort of (key, id) pairs by key gives each cell its
 // candidates in that registration order - the order the managed dictionaries' lists hold, which the walk reads.
+// THE SAME LADDER SEEN FROM THE SIDE (2026-10-27): ExposedFromSide's grid is this one over (length, height) instead of
+// (x, z), without the sliver rule, asked along the width axis and answered "anything there past the skin" instead of the
+// nearest distance. u and v name the two grid components (0 = x, 1 = y, 2 = z).
+static inline double comp(V3 p, int a) { return a == 0 ? p.x : a == 1 ? p.y : p.z; }
 struct Ladder
 {
-    int levels; std::vector<double> cells;
+    int levels; std::vector<double> cells; int u, v; bool sliver;
     std::vector<std::vector<int64_t>> keys; std::vector<std::vector<int>> offsets, ids;
     std::vector<const double*> segs; std::vector<int> first; int nOcc;   // the occluder segments and each one's first triangle number
     const double* P; int nFaces; double top, bottom;
 };
 static void Register(Ladder& L, std::vector<std::vector<std::pair<int64_t, int>>>& pairs, int id, V3 a, V3 b, V3 c)
 {
-    double mnX = min3(a.x, b.x, c.x), mxX = max3(a.x, b.x, c.x);
-    double mnZ = min3(a.z, b.z, c.z), mxZ = max3(a.z, b.z, c.z);
+    double mnX = min3(comp(a, L.u), comp(b, L.u), comp(c, L.u)), mxX = max3(comp(a, L.u), comp(b, L.u), comp(c, L.u));
+    double mnZ = min3(comp(a, L.v), comp(b, L.v), comp(c, L.v)), mxZ = max3(comp(a, L.v), comp(b, L.v), comp(c, L.v));
     int lev = L.levels - 1;
     while (lev > 0 && (mxX - mnX > L.cells[lev] || mxZ - mnZ > L.cells[lev])) lev--;
     double cell = L.cells[lev];
     int64_t x0 = (int64_t)std::floor(mnX / cell), x1 = (int64_t)std::floor(mxX / cell);
     int64_t z0 = (int64_t)std::floor(mnZ / cell), z1 = (int64_t)std::floor(mxZ / cell);
-    if (lev == 0 && (x1 - x0 > 256 || z1 - z0 > 256)) return;
+    if (L.sliver && lev == 0 && (x1 - x0 > 256 || z1 - z0 > 256)) return;
     for (int64_t x = x0; x <= x1; x++) for (int64_t z = z0; z <= z1; z++)
         pairs[lev].push_back({ (x << 32) ^ (z & 0xffffffffLL), id });
 }
@@ -75,10 +79,11 @@ static inline const double* Corners(const Ladder& L, int t)
     return L.segs[lo] + 9 * (t - L.first[lo]);
 }
 // segs: nSegs segment pointers, segTris triangles each (9 doubles a triangle); P: nFaces group faces; cells: one size per rung.
-EXPORT void* haf_column_build(int levels, const double* cells, int nSegs, const double** segs, const int* segTris, const double* P, int nFaces, double top, double bottom)
+static Ladder* Build(int levels, const double* cells, int nSegs, const double** segs, const int* segTris, const double* P, int nFaces, double top, double bottom, int u, int v, bool sliver)
 {
     Ladder* L = new Ladder();
     L->levels = levels; L->cells.assign(cells, cells + levels); L->P = P; L->nFaces = nFaces; L->top = top; L->bottom = bottom;
+    L->u = u; L->v = v; L->sliver = sliver;
     int nOcc = 0;
     for (int s = 0; s < nSegs; s++) { if (segTris[s] <= 0) continue; L->segs.push_back(segs[s]); L->first.push_back(nOcc); nOcc += segTris[s]; }
     L->nOcc = nOcc;
@@ -109,6 +114,15 @@ EXPORT void* haf_column_build(int levels, const double* cells, int nSegs, const 
         if (ks.empty()) { ks.push_back(0); off.assign(2, 0); id.push_back(0); }
     }
     return L;
+}
+EXPORT void* haf_column_build(int levels, const double* cells, int nSegs, const double** segs, const int* segTris, const double* P, int nFaces, double top, double bottom)
+{
+    return Build(levels, cells, nSegs, segs, segTris, P, nFaces, top, bottom, 0, 2, true);
+}
+// The side ladder: over (length, height), the length axis being z when the width axis is x and x otherwise; no sliver rule.
+EXPORT void* haf_side_build(int levels, const double* cells, int nSegs, const double** segs, const int* segTris, const double* P, int nFaces, double top, double bottom, int width)
+{
+    return Build(levels, cells, nSegs, segs, segTris, P, nFaces, top, bottom, width == 0 ? 2 : 0, 1, false);
 }
 EXPORT void haf_column_free(void* handle) { delete (Ladder*)handle; }
 
@@ -174,5 +188,48 @@ EXPORT void haf_column_query(void* handle, int nQueries, const int* faces, const
             }
         }
         best[i] = b;
+    }
+}
+
+// ExposedFromSide(f, width, positive) for each query: from face faces[i]'s centroid along the width axis (positive[i] = towards
+// +width), is anything of the model there past the skin? The candidates of the (length, height) cell on every rung; the face
+// itself is not an occluder; the first hit decides, as the managed walk returns on it. exposed[i] = 1 when nothing was hit.
+EXPORT void haf_side_query(void* handle, int nQueries, const int* faces, const uint8_t* positive, int width, uint8_t* exposed)
+{
+    const Ladder& L = *(const Ladder*)handle;
+    int levels = L.levels; const double* P = L.P;
+    int length = width == 0 ? 2 : 0;
+    double skin = 1e-6 * std::fmax(1.0, L.top - L.bottom);
+    for (int i = 0; i < nQueries; i++)
+    {
+        int f = faces[i];
+        V3 p0 = { P[9 * f], P[9 * f + 1], P[9 * f + 2] }, p1 = { P[9 * f + 3], P[9 * f + 4], P[9 * f + 5] }, p2 = { P[9 * f + 6], P[9 * f + 7], P[9 * f + 8] };
+        V3 s = { (p0.x + p1.x) + p2.x, (p0.y + p1.y) + p2.y, (p0.z + p1.z) + p2.z };
+        const double third = 1.0 / 3.0;
+        V3 c = { s.x * third, s.y * third, s.z * third };
+        double sign = positive[i] != 0 ? 1.0 : -1.0;
+        V3 d = width == 0 ? V3{ sign, 0, 0 } : V3{ 0, 0, sign };
+        double along = comp(c, length);
+        bool open = true;
+        for (int k = 0; k < levels && open; k++)
+        {
+            Rung r = { L.keys[k].data(), L.offsets[k].data(), L.ids[k].data(), (int)L.keys[k].size(), L.cells[k] };
+            int count; const int* list = Find(r, Key(along, c.y, r.cell), count);
+            for (int j = 0; j < count; j++)
+            {
+                int t = list[j]; V3 a, bb, cc;
+                if (t >= 0) { const double* o = Corners(L, t / 3); a = { o[0], o[1], o[2] }; bb = { o[3], o[4], o[5] }; cc = { o[6], o[7], o[8] }; }
+                else
+                {
+                    int g = -1 - t; if (g == f) continue;
+                    a = { P[9 * g], P[9 * g + 1], P[9 * g + 2] }; bb = { P[9 * g + 3], P[9 * g + 4], P[9 * g + 5] }; cc = { P[9 * g + 6], P[9 * g + 7], P[9 * g + 8] };
+                }
+                if (along < min3(comp(a, length), comp(bb, length), comp(cc, length)) - skin ||
+                    along > max3(comp(a, length), comp(bb, length), comp(cc, length)) + skin ||
+                    c.y < min3(a.y, bb.y, cc.y) - skin || c.y > max3(a.y, bb.y, cc.y) + skin) continue;
+                if (RayTriangle(c, d, a, bb, cc) > skin) { open = false; break; }
+            }
+        }
+        exposed[i] = open ? 1 : 0;
     }
 }

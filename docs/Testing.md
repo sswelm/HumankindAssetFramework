@@ -3532,9 +3532,48 @@ grid with duplicates against a Dictionary built the old way, packed and wide (pl
 fails both rows and the triple test, while every fixture fuse of the suite still passed - the small fixtures are insensitive
 to the union order, the unit tests are not); the triple index against a Dictionary of sorted triples, leaders ascending; and a
 colour attribute first seen on the second part pads the first part's vertices white and keeps the seam's vertices apart.
-Review guards: the sizing pass checks the first and last position/index elements before using declared counts as list capacities,
+
+**The weld and the side view as kernels** (`native/hafweld.cpp`, `native/hafcolumn.cpp`, DLL version 6, 2026-10-27). Measured
+first with the stages split further (a scratch copy of the fuse with extra marks, the Saleg's 22 groups in Unity, four
+workers, summed over the groups): the two weld passes 49.1 s and 47.8 s - the 27-cell walk itself, no longer its allocations;
+inside "sheets" the managed side view 60.7 s, the native column queries 16.1 s, the sheet walk 0.5 s; and 30.4 s between the
+"stitched" mark and the partner table (the three `fEdgeFaces` lookups per face and `ModelBelly`, not a kernel's work - left).
+The weld walk is now `haf_weld_classes`: the same cells, the vertices ascending, the 27 cells in dx, dy, dz order, only j > i,
+the squared distance as (dx*dx + dy*dy) + dz*dz, the same union with path halving - the order decides a class's
+representative and the written bytes follow it. The positions cross once per group as one flat array for both passes (they
+do not move between them). The side view is the column ladder generalised: the C++ ladder takes its two grid components and
+whether the sliver rule applies, so `haf_side_build` registers the same (length, height) rungs ExposedFromSide built in
+dictionaries, and `haf_side_query` answers "anything there past the skin" along the width axis, the face itself excluded,
+on the first hit as the managed walk returned. The side index is built on first use under the same lock as the column's,
+over the same pinned segments and face corners, and released with the plan.
+
+| Unity 2021.3, four workers, bytes identical | before | kernels |
+| --- | ---: | ---: |
+| Saleg's Revenge, 22 groups, wall | 65.2 s | 47.5 s |
+| its weld, summed over the groups | 90.8 s | 42.1 s |
+| its "sheets", summed | 101.5 s | 76.7 s |
+| its largest group's weld | 21.2 s | 7.2 s |
+| the galley, 15 groups, wall | 19.6 s | 9.6 s |
+| its weld, summed | 17.6 s | 7.4 s |
+
+x64 .NET: the Saleg's 58.0 s -> 36.9 s, the galley 12.4 s -> 9.5 s. Guards: `NativeKernelsTests` holds the kernel to the
+fuse's original walk written out as the reference (a Dictionary of cells, the unions in the same order) on chains of points a
+little under the weld distance apart with duplicates, shuffled, at the weld distance and at a millionth of it (planted: visiting
+the vertices in descending order fails all three seeds while the fixture fuses still pass); `GlbFuseTests`' native-against-managed
+fuse now also requires the weld kernel to have run and the side index to have been built, asked and released; the Workshop golden
+drill's 19 rows are unchanged. The twin census (6.7 s on the largest group) and the partner stage are the next candidates.
+PR #205 review guards: the sizing pass checks the first and last position/index elements before using declared counts as list capacities,
 and adds totals with checked arithmetic. Invalid ranges or totals fall back to the normal gather so its data error is
 preserved. Tests cover impossible and negative counts (including two oversized parts), negative starts concealed by a
 valid final element, and negative index-accessor references, which must remain errors rather than being treated as an
 absent indices property. All eight cases fail on
-the original PR: allocation exceptions or a negative capacity replace the bounds error, or the invalid reference is accepted.
+the original PR #205: allocation exceptions or a negative capacity replace the bounds error, or the invalid reference is accepted.
+
+PR #206 review guards: the weld wrapper validates `n <= pos.Length / 3` before allocating, so a wrapped component product
+cannot approve a short buffer. Two overflowing counts failed with allocation errors on the original PR and now raise the
+buffer error first. The side query uses scalar references with the existing pointer ABI, timestamp values and diagnostics
+created only on invalid input. Each 10,000-query test allocated 2,720,000 bytes before the change and at most 1,024 after,
+while checking both blocked and open rays on width axes X and Z. An isolated Unity run measured zero bytes on both axes
+and identical managed/native fuse bytes; an independent 1,200-case weld comparison also matched the original managed walk.
+The editor compile check collects filenames with Bash suffix expansion instead of a subprocess per file. A planted
+`basename` failure reproduced the empty `editor/` source argument; the same control now compiles all 128 sources.

@@ -83,4 +83,59 @@ public static partial class HafNativeKernels
             System.Threading.Interlocked.Add(ref QueryTicks, clock.ElapsedTicks); System.Threading.Interlocked.Add(ref QueryCalls, n);
         }
     }
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern IntPtr haf_side_build(int levels, double[] cells, int nSegs, IntPtr[] segs, int[] segTris, IntPtr P, int nFaces, double top, double bottom, int width);
+    // One synchronous query: scalar references have the same pointer ABI as the native arrays without allocating arrays.
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    static extern void haf_side_query(IntPtr handle, int nQueries, ref int face, ref byte positive, int width, out byte exposed);
+
+    /// <summary>A fuse group's side ladder (ExposedFromSide: the same rungs over length and height, asked along the width axis),
+    /// built and queried natively (2026-10-27). The same segments and face corners as the ColumnIndex, pinned for its life.</summary>
+    internal sealed class SideIndex : IDisposable
+    {
+        IntPtr handle; GCHandle[] occPins; GCHandle facePin; readonly int faceCount, width;
+        internal static long BuildTicks, QueryTicks, QueryCalls;
+        internal static int Built, Disposed;
+
+        internal SideIndex(double[] cells, double[][] occluders, double[] faces, double top, double bottom, int width)
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            Need(cells.Length >= 1 && cells.Length <= 16, "side rungs: " + cells.Length);
+            Need(faces.Length % 9 == 0, "side faces: " + faces.Length + " doubles");
+            Need(width == 0 || width == 2, "side width axis " + width);
+            faceCount = faces.Length / 9; this.width = width;
+            occPins = new GCHandle[occluders.Length]; var segs = new IntPtr[Math.Max(1, occluders.Length)]; var segTris = new int[Math.Max(1, occluders.Length)];
+            for (int s = 0; s < occluders.Length; s++)
+            {
+                Need(occluders[s].Length % 9 == 0, "side segment " + s + ": " + occluders[s].Length + " doubles");
+                occPins[s] = GCHandle.Alloc(occluders[s], GCHandleType.Pinned); segs[s] = occPins[s].AddrOfPinnedObject(); segTris[s] = occluders[s].Length / 9;
+            }
+            facePin = GCHandle.Alloc(faces, GCHandleType.Pinned);
+            handle = haf_side_build(cells.Length, cells, occluders.Length, segs, segTris, facePin.AddrOfPinnedObject(), faceCount, top, bottom, width);
+            System.Threading.Interlocked.Increment(ref Built);
+            System.Threading.Interlocked.Add(ref BuildTicks, clock.ElapsedTicks);
+        }
+        ~SideIndex() { Release(); }
+        public void Dispose() { if (handle != IntPtr.Zero) System.Threading.Interlocked.Increment(ref Disposed); Release(); GC.SuppressFinalize(this); }
+        internal void Release()
+        {
+            if (handle != IntPtr.Zero) { haf_column_free(handle); handle = IntPtr.Zero; }
+            if (occPins != null) foreach (var pin in occPins) if (pin.IsAllocated) pin.Free();
+            occPins = null;
+            if (facePin.IsAllocated) facePin.Free();
+        }
+
+        /// <summary>ExposedFromSide(f, width, positive) for one face.</summary>
+        internal bool Query(int f, bool positive)
+        {
+            Need(handle != IntPtr.Zero, "side index released");
+            if ((uint)f >= (uint)faceCount) Need(false, "side query face " + f + " of " + faceCount);
+            byte direction = positive ? (byte)1 : (byte)0;
+            long started = System.Diagnostics.Stopwatch.GetTimestamp();
+            haf_side_query(handle, 1, ref f, ref direction, width, out byte exposed);
+            System.Threading.Interlocked.Add(ref QueryTicks, System.Diagnostics.Stopwatch.GetTimestamp() - started); System.Threading.Interlocked.Increment(ref QueryCalls);
+            return exposed != 0;
+        }
+    }
 }

@@ -36,7 +36,7 @@ trap 'rm -rf "$TMPD"' EXIT
 cp "$NEWTONSOFT" "$TMPD/Newtonsoft.Json.dll"
 WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"; WTMP="$(cygpath -m "$TMPD" 2>/dev/null || echo "$TMPD")"
 SRCS=()
-for f in WorkshopGateTest.cs BakeGoldenFiles.cs GitStamp.cs EditorRules.cs QuadEstimate.cs GlbDisconnectedParts.cs GlbDisconnectedParts.Compact.cs GlbDisconnectedParts.Occluders.cs GlbDisconnectedParts.Weld.cs GlbDisconnectedParts.Explain.cs HafNativeKernels.cs HafNativeKernels.Column.cs HafNativeKernels.Twin.cs HafModel.cs GlbReader.cs HafTransforms.cs HafModelDiff.cs; do
+for f in WorkshopGateTest.cs BakeGoldenFiles.cs GitStamp.cs EditorRules.cs QuadEstimate.cs GlbDisconnectedParts.cs GlbDisconnectedParts.Compact.cs GlbDisconnectedParts.Occluders.cs GlbDisconnectedParts.Weld.cs GlbDisconnectedParts.Explain.cs HafNativeKernels.cs HafNativeKernels.Column.cs HafNativeKernels.Twin.cs HafNativeKernels.Weld.cs HafModel.cs GlbReader.cs HafTransforms.cs HafModelDiff.cs; do
   SRCS+=("$WROOT/editor/$f")
 done
 OUTC=$(dotnet "$CSC" -nologo -noconfig -nostdlib -out:"$WTMP/drill.exe" -platform:x64 \
