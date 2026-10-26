@@ -3575,3 +3575,5 @@ buffer error first. The side query uses scalar references with the existing poin
 created only on invalid input. Each 10,000-query test allocated 2,720,000 bytes before the change and at most 1,024 after,
 while checking both blocked and open rays on width axes X and Z. An isolated Unity run measured zero bytes on both axes
 and identical managed/native fuse bytes; an independent 1,200-case weld comparison also matched the original managed walk.
+The editor compile check collects filenames with Bash suffix expansion instead of a subprocess per file. A planted
+`basename` failure reproduced the empty `editor/` source argument; the same control now compiles all 128 sources.

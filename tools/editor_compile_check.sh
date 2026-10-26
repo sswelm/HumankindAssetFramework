@@ -49,7 +49,10 @@ WOUT="$(cygpath -m "$OUTDLL" 2>/dev/null || echo "$OUTDLL")"
 FULL="$TMPD/full.rsp"
 sed -e "s|@UNITY@|$WUNITY|g" -e "s|@ROOT@|$WROOT|g" -e "s|@NEWTONSOFT@|$NEWTONSOFT|g" -e "s|@OUT@|$WOUT|g" "$RSP_IN" > "$FULL"
 n_src=0
-for f in "$ROOT"/editor/*.cs; do printf '"%s/editor/%s"\n' "$WROOT" "$(basename "$f")" >> "$FULL"; n_src=$((n_src+1)); done
+# Do not spawn basename for every source while the other drills run: a failed subprocess would append editor/ alone.
+for f in "$ROOT"/editor/*.cs; do
+  printf '"%s/editor/%s"\n' "$WROOT" "${f##*/}" >> "$FULL"; n_src=$((n_src+1))
+done
 [ "$n_src" -gt 0 ] || { echo "FAIL — no editor/*.cs sources found (editor compile NOT verified)"; exit 2; }
 
 OUT=$(dotnet "$CSC" "@$FULL" 2>&1); rc=$?
