@@ -13,7 +13,7 @@ using System.Runtime.InteropServices;
 public static partial class HafNativeKernels
 {
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    static extern IntPtr haf_column_build(int levels, double[] cells, IntPtr occ, int nOcc, IntPtr P, int nFaces, double top, double bottom);
+    static extern IntPtr haf_column_build(int levels, double[] cells, int nSegs, IntPtr[] segs, int[] segTris, IntPtr P, int nFaces, double top, double bottom);
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)] static extern void haf_column_free(IntPtr handle);
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     static extern void haf_column_query(IntPtr handle, int nQueries, int[] faces, byte[] upward, int[] skip, int nSkip, double[] best);
@@ -21,19 +21,26 @@ public static partial class HafNativeKernels
     /// <summary>A fuse group's column ladder, built and queried natively.</summary>
     internal sealed class ColumnIndex : IDisposable
     {
-        IntPtr handle; GCHandle occPin, facePin; readonly int faceCount;
+        IntPtr handle; GCHandle[] occPins; GCHandle facePin; readonly int faceCount;
         internal static long BuildTicks, QueryTicks, QueryCalls;   // the harness and the drill read these
         internal static int Built, Disposed;   // indexes built, and released by their owner (not by the finalizer): Tests/GlbFuseTests holds them equal
 
-        /// <summary>occluders: 9 doubles per occluder triangle; faces: 9 doubles per group face; cells: the rung sizes, finest last.</summary>
-        internal ColumnIndex(double[] cells, double[] occluders, double[] faces, double top, double bottom)
+        /// <summary>occluders: the fuse's shared per-node segments in node order, 9 doubles per triangle each (an empty one is
+        /// skipped); faces: 9 doubles per group face; cells: the rung sizes, finest last. The segments are pinned for the index's life.</summary>
+        internal ColumnIndex(double[] cells, double[][] occluders, double[] faces, double top, double bottom)
         {
             var clock = System.Diagnostics.Stopwatch.StartNew();
             Need(cells.Length >= 1 && cells.Length <= 16, "column rungs: " + cells.Length);
-            Need(occluders.Length % 9 == 0 && faces.Length % 9 == 0, "column corners: " + occluders.Length + " and " + faces.Length + " doubles");
+            Need(faces.Length % 9 == 0, "column faces: " + faces.Length + " doubles");
             faceCount = faces.Length / 9;
-            occPin = GCHandle.Alloc(occluders, GCHandleType.Pinned); facePin = GCHandle.Alloc(faces, GCHandleType.Pinned);
-            handle = haf_column_build(cells.Length, cells, occPin.AddrOfPinnedObject(), occluders.Length / 9, facePin.AddrOfPinnedObject(), faceCount, top, bottom);
+            occPins = new GCHandle[occluders.Length]; var segs = new IntPtr[Math.Max(1, occluders.Length)]; var segTris = new int[Math.Max(1, occluders.Length)];
+            for (int s = 0; s < occluders.Length; s++)
+            {
+                Need(occluders[s].Length % 9 == 0, "column segment " + s + ": " + occluders[s].Length + " doubles");
+                occPins[s] = GCHandle.Alloc(occluders[s], GCHandleType.Pinned); segs[s] = occPins[s].AddrOfPinnedObject(); segTris[s] = occluders[s].Length / 9;
+            }
+            facePin = GCHandle.Alloc(faces, GCHandleType.Pinned);
+            handle = haf_column_build(cells.Length, cells, occluders.Length, segs, segTris, facePin.AddrOfPinnedObject(), faceCount, top, bottom);
             System.Threading.Interlocked.Increment(ref Built);
             System.Threading.Interlocked.Add(ref BuildTicks, clock.ElapsedTicks);
         }
@@ -43,7 +50,8 @@ public static partial class HafNativeKernels
         internal void Release()
         {
             if (handle != IntPtr.Zero) { haf_column_free(handle); handle = IntPtr.Zero; }
-            if (occPin.IsAllocated) occPin.Free();
+            if (occPins != null) foreach (var pin in occPins) if (pin.IsAllocated) pin.Free();
+            occPins = null;
             if (facePin.IsAllocated) facePin.Free();
         }
 

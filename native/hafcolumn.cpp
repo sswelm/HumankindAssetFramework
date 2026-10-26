@@ -49,7 +49,8 @@ struct Ladder
 {
     int levels; std::vector<double> cells;
     std::vector<std::vector<int64_t>> keys; std::vector<std::vector<int>> offsets, ids;
-    const double* occ; int nOcc; const double* P; int nFaces; double top, bottom;
+    std::vector<const double*> segs; std::vector<int> first; int nOcc;   // the occluder segments and each one's first triangle number
+    const double* P; int nFaces; double top, bottom;
 };
 static void Register(Ladder& L, std::vector<std::vector<std::pair<int64_t, int>>>& pairs, int id, V3 a, V3 b, V3 c)
 {
@@ -64,15 +65,27 @@ static void Register(Ladder& L, std::vector<std::vector<std::pair<int64_t, int>>
     for (int64_t x = x0; x <= x1; x++) for (int64_t z = z0; z <= z1; z++)
         pairs[lev].push_back({ (x << 32) ^ (z & 0xffffffffLL), id });
 }
-// occ: nOcc occluder triangles, 9 doubles each; P: nFaces group faces, 9 doubles each; cells: one size per rung.
-EXPORT void* haf_column_build(int levels, const double* cells, const double* occ, int nOcc, const double* P, int nFaces, double top, double bottom)
+// The occluders come as SEGMENTS - one per file node the fuse reads once and shares between its groups - in the order the
+// managed walk numbers them: triangle t of the whole set is the t-th across the segments in sequence, its corners at
+// segs[s] + 9 (t - first[s]). A triangle's corners are found through the prefix table, never copied.
+static inline const double* Corners(const Ladder& L, int t)
+{
+    int lo = 0, hi = (int)L.first.size() - 1;   // the last segment whose first triangle is <= t
+    while (lo < hi) { int mid = (lo + hi + 1) >> 1; if (L.first[mid] <= t) lo = mid; else hi = mid - 1; }
+    return L.segs[lo] + 9 * (t - L.first[lo]);
+}
+// segs: nSegs segment pointers, segTris triangles each (9 doubles a triangle); P: nFaces group faces; cells: one size per rung.
+EXPORT void* haf_column_build(int levels, const double* cells, int nSegs, const double** segs, const int* segTris, const double* P, int nFaces, double top, double bottom)
 {
     Ladder* L = new Ladder();
-    L->levels = levels; L->cells.assign(cells, cells + levels); L->occ = occ; L->nOcc = nOcc; L->P = P; L->nFaces = nFaces; L->top = top; L->bottom = bottom;
+    L->levels = levels; L->cells.assign(cells, cells + levels); L->P = P; L->nFaces = nFaces; L->top = top; L->bottom = bottom;
+    int nOcc = 0;
+    for (int s = 0; s < nSegs; s++) { if (segTris[s] <= 0) continue; L->segs.push_back(segs[s]); L->first.push_back(nOcc); nOcc += segTris[s]; }
+    L->nOcc = nOcc;
     std::vector<std::vector<std::pair<int64_t, int>>> pairs(levels);
     for (int t = 0; t < nOcc; t++)
     {
-        const double* o = occ + 9 * t;
+        const double* o = Corners(*L, t);
         Register(*L, pairs, 3 * t, { o[0], o[1], o[2] }, { o[3], o[4], o[5] }, { o[6], o[7], o[8] });
     }
     for (int f = 0; f < nFaces; f++)
@@ -129,7 +142,7 @@ static inline bool Skipped(const int* skip, int nSkip, int g)
 EXPORT void haf_column_query(void* handle, int nQueries, const int* faces, const uint8_t* upward, const int* skip, int nSkip, double* best)
 {
     const Ladder& L = *(const Ladder*)handle;
-    int levels = L.levels; const double* occ = L.occ; const double* P = L.P;
+    int levels = L.levels; const double* P = L.P;
     const double inf = std::numeric_limits<double>::infinity();
     double skin = 1e-6 * std::fmax(1.0, L.top - L.bottom);
     for (int i = 0; i < nQueries; i++)
@@ -149,7 +162,7 @@ EXPORT void haf_column_query(void* handle, int nQueries, const int* faces, const
             for (int j = 0; j < count; j++)
             {
                 int t = list[j]; V3 a, bb, cc;
-                if (t >= 0) { a = { occ[3 * t], occ[3 * t + 1], occ[3 * t + 2] }; bb = { occ[3 * t + 3], occ[3 * t + 4], occ[3 * t + 5] }; cc = { occ[3 * t + 6], occ[3 * t + 7], occ[3 * t + 8] }; }
+                if (t >= 0) { const double* o = Corners(L, t / 3); a = { o[0], o[1], o[2] }; bb = { o[3], o[4], o[5] }; cc = { o[6], o[7], o[8] }; }
                 else
                 {
                     int g = -1 - t; if (g == f || (nSkip > 0 && Skipped(skip, nSkip, g))) continue;
