@@ -86,8 +86,9 @@ public static partial class HafNativeKernels
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     static extern IntPtr haf_side_build(int levels, double[] cells, int nSegs, IntPtr[] segs, int[] segTris, IntPtr P, int nFaces, double top, double bottom, int width);
+    // One synchronous query: scalar references have the same pointer ABI as the native arrays without allocating arrays.
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    static extern void haf_side_query(IntPtr handle, int nQueries, int[] faces, byte[] positive, int width, byte[] exposed);
+    static extern void haf_side_query(IntPtr handle, int nQueries, ref int face, ref byte positive, int width, out byte exposed);
 
     /// <summary>A fuse group's side ladder (ExposedFromSide: the same rungs over length and height, asked along the width axis),
     /// built and queried natively (2026-10-27). The same segments and face corners as the ColumnIndex, pinned for its life.</summary>
@@ -129,12 +130,12 @@ public static partial class HafNativeKernels
         internal bool Query(int f, bool positive)
         {
             Need(handle != IntPtr.Zero, "side index released");
-            Need((uint)f < (uint)faceCount, "side query face " + f + " of " + faceCount);
-            var exposed = new byte[1];
-            var clock = System.Diagnostics.Stopwatch.StartNew();
-            haf_side_query(handle, 1, new[] { f }, new[] { positive ? (byte)1 : (byte)0 }, width, exposed);
-            System.Threading.Interlocked.Add(ref QueryTicks, clock.ElapsedTicks); System.Threading.Interlocked.Increment(ref QueryCalls);
-            return exposed[0] != 0;
+            if ((uint)f >= (uint)faceCount) Need(false, "side query face " + f + " of " + faceCount);
+            byte direction = positive ? (byte)1 : (byte)0;
+            long started = System.Diagnostics.Stopwatch.GetTimestamp();
+            haf_side_query(handle, 1, ref f, ref direction, width, out byte exposed);
+            System.Threading.Interlocked.Add(ref QueryTicks, System.Diagnostics.Stopwatch.GetTimestamp() - started); System.Threading.Interlocked.Increment(ref QueryCalls);
+            return exposed != 0;
         }
     }
 }

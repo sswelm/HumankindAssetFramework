@@ -14,7 +14,8 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   fuse the two weld passes took 97 s summed in Unity and the managed side view 61 s. `native/hafweld.cpp` walks the same
   27 cells in the same order and makes the same unions; the column ladder in `native/hafcolumn.cpp` took its grid axes as
   parameters and now also serves the side view (DLL version 6, restart Unity). Saleg's 65.2 s -> 47.5 s, the galley
-  19.6 s -> 9.6 s, bytes unchanged (docs/Testing.md, Native kernels).
+  19.6 s -> 9.6 s, bytes unchanged (docs/Testing.md, Native kernels). The weld buffer check is overflow-safe; side queries
+  use scalar references without per-call array, timer or diagnostic-string allocations.
 - **THE FUSE'S GATHER AND WELD STOPPED MAKING GARBAGE (2026-10-27).** An allocation census of the Saleg's Revenge fuse: 48 GB
   allocated over its 22 groups, 13 GB of it a `double[]` per normal, UV and extra attribute of every gathered vertex and the
   lists doubling themselves, 4.3 GB the weld's Dictionary of Lists per cell and per face triple. The gather now sizes its lists

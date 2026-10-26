@@ -17,7 +17,7 @@ public static partial class HafNativeKernels
     /// distance (0 = coincident within the cell). Returns the class per vertex, a vertex index.</summary>
     internal static int[] WeldClasses(double[] pos, int n, double cellSize, double thresh2)
     {
-        Need(n >= 0 && pos.Length >= 3 * n, "weld positions: " + pos.Length + " doubles for " + n + " vertices");
+        Need(n >= 0 && n <= pos.Length / 3, "weld positions: " + pos.Length + " doubles for " + n + " vertices");
         Need(cellSize > 0 && !double.IsInfinity(cellSize) && !double.IsNaN(cellSize), "weld cell " + cellSize);
         Need(thresh2 >= 0, "weld threshold " + thresh2);
         var cls = new int[n];

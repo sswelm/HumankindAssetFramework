@@ -3562,9 +3562,16 @@ little under the weld distance apart with duplicates, shuffled, at the weld dist
 the vertices in descending order fails all three seeds while the fixture fuses still pass); `GlbFuseTests`' native-against-managed
 fuse now also requires the weld kernel to have run and the side index to have been built, asked and released; the Workshop golden
 drill's 19 rows are unchanged. The twin census (6.7 s on the largest group) and the partner stage are the next candidates.
-Review guards: the sizing pass checks the first and last position/index elements before using declared counts as list capacities,
+PR #205 review guards: the sizing pass checks the first and last position/index elements before using declared counts as list capacities,
 and adds totals with checked arithmetic. Invalid ranges or totals fall back to the normal gather so its data error is
 preserved. Tests cover impossible and negative counts (including two oversized parts), negative starts concealed by a
 valid final element, and negative index-accessor references, which must remain errors rather than being treated as an
 absent indices property. All eight cases fail on
-the original PR: allocation exceptions or a negative capacity replace the bounds error, or the invalid reference is accepted.
+the original PR #205: allocation exceptions or a negative capacity replace the bounds error, or the invalid reference is accepted.
+
+PR #206 review guards: the weld wrapper validates `n <= pos.Length / 3` before allocating, so a wrapped component product
+cannot approve a short buffer. Two overflowing counts failed with allocation errors on the original PR and now raise the
+buffer error first. The side query uses scalar references with the existing pointer ABI, timestamp values and diagnostics
+created only on invalid input. Each 10,000-query test allocated 2,720,000 bytes before the change and at most 1,024 after,
+while checking both blocked and open rays on width axes X and Z. An isolated Unity run measured zero bytes on both axes
+and identical managed/native fuse bytes; an independent 1,200-case weld comparison also matched the original managed walk.

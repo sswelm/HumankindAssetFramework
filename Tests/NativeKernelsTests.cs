@@ -191,11 +191,44 @@ public class NativeKernelsTests
 
     static int[] Bits(float[] v) => v.Select(x => BitConverter.ToInt32(BitConverter.GetBytes(x), 0)).ToArray();
 
-    // The weld classes (native/hafweld.cpp) against the fuse's original walk, written out here as the reference: a Dictionary
-    // of cell -> ascending vertex list, vertex i ascending, the 27 cells in dx, dy, dz order, only j > i, the union
-    // parent[Find(i)] = Find(j). The fixture is chains of points a little under the weld distance apart, crossing cell
-    // borders, with exact duplicates: which vertex ends up as a chain's representative depends on the union ORDER, so a
-    // kernel that visited the cells or the vertices in any other order would answer differently.
+    // Native boundary guards: reject impossible buffers before allocation and keep the side query free of per-face garbage.
+    [Theory]
+    [InlineData(715827883)]
+    [InlineData(1431655766)]
+    public void Weld_rejects_vertex_counts_whose_component_product_would_overflow(int count)
+    {
+        // The test host's default CLR array-size limit also makes the old implementation fail immediately without
+        // consuming RAM, but it must reject the short input before even attempting to reserve the result array.
+        Assert.Throws<IndexOutOfRangeException>(() => HafNativeKernels.WeldClasses(new double[3], count, 1, 1));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(2)]
+    public void Side_queries_do_not_allocate_per_face(int width)
+    {
+        Assert.True(HafNativeKernels.Available, HafNativeKernels.Status);
+        var face = new double[] { 0, 0, 0, 0, 1, 0, 0, 0, 1 };
+        var blocker = new double[] { 1, 0, 0, 1, 1, 0, 1, 0, 1 };
+        if (width == 2) for (int i = 0; i < 9; i += 3)
+        {
+            double x = face[i]; face[i] = face[i + 2]; face[i + 2] = x;
+            x = blocker[i]; blocker[i] = blocker[i + 2]; blocker[i + 2] = x;
+        }
+        using (var index = new HafNativeKernels.SideIndex(new[] { 2.0 }, new[] { blocker }, face, 1, 0, width))
+        {
+            for (int i = 0; i < 100; i++) index.Query(0, i % 2 == 0);
+            var allocated = (Func<long>)Delegate.CreateDelegate(typeof(Func<long>), typeof(GC).GetMethod("GetAllocatedBytesForCurrentThread"));
+            long before = allocated(); int exposed = 0;
+            for (int i = 0; i < 10000; i++) if (index.Query(0, i % 2 == 0)) exposed++;
+            long bytes = allocated() - before;
+            Assert.Equal(5000, exposed);   // the blocker is ahead; the opposite ray is open
+            Assert.InRange(bytes, 0, 1024);
+        }
+    }
+
+    // The reference is the original Dictionary walk: i ascending, neighbours in dx/dy/dz order, j ascending, and
+    // parent[Find(i)] = Find(j). Shuffled chains and duplicates make each representative depend on that union order.
     [Theory]
     [InlineData(1), InlineData(2), InlineData(3)]
     public void Weld_classes_match_the_managed_walk_union_for_union(int seed)
