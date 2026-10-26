@@ -3498,3 +3498,37 @@ read the first plans' names and nodes. A failure is kept per group and the first
 Guards: `GlbFuseTests` writes one eight-group fuse with one, four and eight workers and compares the bytes, and makes the
 largest group fail first in time while an earlier, smaller group also fails - the earlier group's error must surface
 (planted: reporting failures in run order fails it).
+
+**The gather's and the weld's flat tables** (`GlbDisconnectedParts.Weld.cs`, 2026-10-27). Measured first with an allocation
+census (`AppDomain.MonitoringTotalAllocatedMemorySize` per stage, one group at a time, x64 .NET): the 22-group Saleg's fuse
+allocated 48 GB, 13.0 GB of it in the gather and 4.3 GB in the weld (14.9 GB in "sheets", 7.8 GB in the per-group JSON parse,
+both left for later). The largest group's gather alone allocated 3.7 GB for 9.7 million vertices: a `double[]` per normal, per
+UV and per extra attribute of every vertex, an empty `double[][]` per vertex even without extras, and every list doubling
+itself on the way. The weld bucketed its vertices through a `Dictionary` of cell -> `List<int>` and the twin pass its faces
+through a `Dictionary` of class triple -> `List<int>`: a List object and a growing array per cell and per face. Now the gather
+counts the accessors first and sizes every list once, reads each element into one reused buffer, keeps UVs as two doubles per
+vertex and each extra attribute as one flat list plus a carried flag (an attribute first seen on a later part is padded back
+over the earlier vertices); the weld's grid is one packed long per vertex (the cell coordinates relative to the lowest cell,
+at most 21 bits per axis since the cell is at least a millionth of the longest side; a model whose cells do not fit 63 bits
+keeps the three coordinates and compares them, `Wide`) over a counting sort by bucket, each bucket's members ascending; the
+twin pass is a chained index over the sorted triples, each chain ascending. Ascending is the order the Lists held, so every
+union and every pairing happens as before: both jobs hash exactly as on master in both hosts. A first grid with a linked chain
+per bucket and three long compares per member was faster on .NET and 30 % SLOWER in Unity's Mono (the galley's two weld passes
+9.9 s and 9.4 s -> 13.1 s and 11.2 s: Mono inlines none of the small calls and lifts no bounds check), which is why the shipped
+grid is read by the weld loop as two arrays and one range per cell. Unity 2021.3, the benchmark harness, four group workers:
+
+| | master | flat tables |
+| --- | ---: | ---: |
+| Saleg's Revenge, 22 groups, wall | 92.5 s | 65.2 s |
+| its gather, summed over the groups | 47.3 s | 14.4 s |
+| its weld, summed | 134.7 s | 90.8 s |
+| its "sheets", summed (untouched: less waiting for the collector) | 116.7 s | 101.5 s |
+| its largest group: gather / weld | 12.9 s / 31.7 s | 3.2 s / 21.2 s |
+| the galley, 15 groups, wall | 23.8 s | 19.6 s |
+
+x64 .NET: the Saleg's 74.6 s -> 58.0 s (3,760 gen-0 and 1,096 gen-1 collections -> 2,896 and 814), the galley 18.2 s -> 12.4 s
+(306 and 117 -> 161 and 61). Guards: `GlbFuseTests` walks every cell of a jittered
+grid with duplicates against a Dictionary built the old way, packed and wide (planted: filling the buckets in descending order
+fails both rows and the triple test, while every fixture fuse of the suite still passed - the small fixtures are insensitive
+to the union order, the unit tests are not); the triple index against a Dictionary of sorted triples, leaders ascending; and a
+colour attribute first seen on the second part pads the first part's vertices white and keeps the seam's vertices apart.

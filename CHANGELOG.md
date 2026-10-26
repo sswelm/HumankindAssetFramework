@@ -10,6 +10,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE FUSE'S GATHER AND WELD STOPPED MAKING GARBAGE (2026-10-27).** An allocation census of the Saleg's Revenge fuse: 48 GB
+  allocated over its 22 groups, 13 GB of it a `double[]` per normal, UV and extra attribute of every gathered vertex and the
+  lists doubling themselves, 4.3 GB the weld's Dictionary of Lists per cell and per face triple. The gather now sizes its lists
+  once and keeps every attribute flat; the weld buckets its vertices as one packed long each over a counting sort and the twin
+  pass walks a chained index - every bucket ascending, as the Lists were, so both jobs hash as before. In Unity the Saleg's fuse
+  went from 92.5 s to 65.2 s, the galley's from 23.8 s to 19.6 s. Lesson kept in the source: a first grid of linked chains was
+  faster on .NET and 30 % slower in Unity's Mono (docs/Testing.md, Native kernels).
 - **THE FUSE PLANS A FEW GROUPS AT A TIME, LARGEST FIRST (2026-10-26).** All 22 groups of the Saleg's Revenge used to
   start at once, and starved each other of the editor's garbage collector: the largest group took 52 s alone and 112 s
   among the others. Four workers taking the groups largest first brought the whole fuse from 123.9 s to 88.1 s in Unity,

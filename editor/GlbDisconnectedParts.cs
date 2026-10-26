@@ -280,6 +280,16 @@ public static partial class GlbDisconnectedParts
             return result;
         }
 
+        // The same element decoded into the caller's buffer (its leading `Have` slots), so a read per vertex allocates
+        // nothing: the fuse's gather made a double[] per normal, UV and extra attribute of every vertex (2026-10-27).
+        public void Vector(int accessorIndex, uint index, int components, double[] into)
+        {
+            Layout a = Resolve(accessorIndex);
+            if (a.Have < components) throw new InvalidDataException("Accessor " + a.Type + " holds fewer than " + components + " components.");
+            int at = ElementOffset(a, index, a.Have);
+            for (int i = 0; i < a.Have; i++) into[i] = ReadComponent(bin, at + i * a.Bytes, a.ComponentType, a.Normalized);
+        }
+
         Layout Resolve(int index)
         {
             if (layouts.TryGetValue(index, out Layout cached)) return cached;
@@ -1510,19 +1520,25 @@ public static partial class GlbDisconnectedParts
         Mark("parse");
 
         // 1) gather every triangle of every chosen part in WORLD space, with normal / UV / material per vertex
-        var pos = new List<Vec3>(); var nrm = new List<Vec3?>(); var uv = new List<double[]>(); var mat = new List<int>();
-        var partOf = new List<int>();   // which chosen part each vertex came from (the lap-strip warning below)
+        // Sized once from the accessors' counts so that no list grows and copies itself on the way, and every vertex
+        // attribute kept flat: the gather used to make a double[] per normal, UV and extra attribute of every vertex and
+        // allocated 3.7 GB for the Saleg's Revenge's largest group (9.7 million vertices), garbage the editor's
+        // stop-the-world collector made every other group wait for (measured 2026-10-27).
+        var picked = nodeIndices.Distinct().ToList();
+        CountGathered(nodes, meshes, reader, picked, out int totalVertices, out int totalIndices);
+        var pos = new List<Vec3>(totalVertices); var nrm = new List<Vec3?>(totalVertices); var mat = new List<int>(totalVertices);
+        var uv = new List<double>(2 * totalVertices); var hasUv = new List<bool>(totalVertices);   // two per vertex, (0,0) where the part had no TEXCOORD_0
+        var partOf = new List<int>(totalVertices);   // which chosen part each vertex came from (the lap-strip warning below)
         // Every OTHER vertex attribute (COLOR_n, TEXCOORD_1.., custom _NAMEs) rides along untouched and takes part in
         // the merge decision — the first fuse silently dropped vertex colours and second UV sets (review of 3052ed0).
         // TANGENT is the one exception: it is derived from winding + UVs, both of which this pass may change, so it is
         // dropped with a warning and left for the importer to recompute. JOINTS/WEIGHTS cannot occur (skins refused).
         var extraNames = new List<string>(); var extraComps = new List<int>();
-        var extra = new List<double[][]>();   // per vertex, per extra attribute (null where the part lacked it)
+        var extraValues = new List<List<double>>(); var extraHas = new List<List<bool>>();   // per extra attribute: its components per vertex, and whether the vertex's part carried it
         bool tangentsDropped = false;
-        var tris = new List<int>();
+        var tris = new List<int>(totalIndices);
         var partNames = new List<string>();
         var partMirrored = new List<bool>();   // per part: its world transform mirrors (the gather reversed its winding)
-        var picked = nodeIndices.Distinct().ToList();
         var fusedMeshes = new HashSet<int>();
         foreach (int ni in picked)
         {
@@ -1560,30 +1576,42 @@ public static partial class GlbDisconnectedParts
                     if (vertCount == 0 || reader.Count(acc) != vertCount) continue;
                     int comps = reader.Vector(acc, 0, 1).Length;
                     int k = extraNames.IndexOf(name);
-                    if (k < 0) { extraNames.Add(name); extraComps.Add(comps); Array.Resize(ref extraAcc, extraNames.Count); k = extraNames.Count - 1; }
+                    if (k < 0)
+                    {
+                        extraNames.Add(name); extraComps.Add(comps); Array.Resize(ref extraAcc, extraNames.Count); k = extraNames.Count - 1;
+                        var values = new List<double>(comps * totalVertices); var has = new List<bool>(totalVertices);
+                        for (int v = 0; v < pos.Count; v++) { has.Add(false); for (int c = 0; c < comps; c++) values.Add(0.0); }   // the parts gathered before this attribute appeared lack it
+                        extraValues.Add(values); extraHas.Add(has);
+                    }
                     else if (extraComps[k] != comps) throw new InvalidDataException("'" + nodeName + "' stores " + name + " with " + comps + " components where an earlier part had " + extraComps[k] + " — fuse parts that agree.");
                     extraAcc[k] = acc;
                 }
                 double[] normalMatrix = NormalMatrix(world);   // inverse transpose: a (2,1,1) scale turned a sloped normal 35° off the surface through the plain matrix (review of 3052ed0)
                 int baseV = pos.Count;
+                var element = new double[4];   // one element's components, decoded in place for every vertex of the primitive
                 for (uint v = 0; v < vertCount; v++)
                 {
                     pos.Add(XForm(world, reader.Position(posAcc, v)));
-                    if (nAcc >= 0) { double[] n = reader.Vector(nAcc, v, 3); nrm.Add(XFormDir(normalMatrix, new Vec3 { X = n[0], Y = n[1], Z = n[2] })); }
+                    if (nAcc >= 0) { reader.Vector(nAcc, v, 3, element); nrm.Add(XFormDir(normalMatrix, new Vec3 { X = element[0], Y = element[1], Z = element[2] })); }
                     else nrm.Add(null);
-                    uv.Add(uvAcc >= 0 ? reader.Vector(uvAcc, v, 2) : null);
+                    if (uvAcc >= 0) { reader.Vector(uvAcc, v, 2, element); uv.Add(element[0]); uv.Add(element[1]); hasUv.Add(true); }
+                    else { uv.Add(0.0); uv.Add(0.0); hasUv.Add(false); }
                     mat.Add(material);
                     partOf.Add(partNames.Count - 1);
-                    var ex = new double[extraNames.Count][];
-                    for (int k = 0; k < extraAcc.Length; k++) if (extraAcc[k] >= 0) ex[k] = reader.Vector(extraAcc[k], v, extraComps[k]);
-                    extra.Add(ex);
+                    for (int k = 0; k < extraAcc.Length; k++)   // every attribute known so far (extraAcc was sized to them above)
+                    {
+                        List<double> values = extraValues[k]; int comps = extraComps[k];
+                        if (extraAcc[k] >= 0) { reader.Vector(extraAcc[k], v, comps, element); for (int c = 0; c < comps; c++) values.Add(element[c]); extraHas[k].Add(true); }
+                        else { for (int c = 0; c < comps; c++) values.Add(0.0); extraHas[k].Add(false); }
+                    }
                 }
-                int indexCount = primitive["indices"] == null ? vertCount : reader.Count(primitive.Value<int>("indices"));
+                int indexAcc = primitive["indices"] == null ? -1 : primitive.Value<int>("indices");
+                int indexCount = indexAcc < 0 ? vertCount : reader.Count(indexAcc);
                 if (indexCount % 3 != 0) throw new InvalidDataException("Triangle primitive index count is not divisible by three.");
                 int triStart = tris.Count;
                 for (uint i = 0; i < indexCount; i++)
                 {
-                    uint idx = primitive["indices"] == null ? i : reader.Index(primitive.Value<int>("indices"), i);
+                    uint idx = indexAcc < 0 ? i : reader.Index(indexAcc, i);
                     if (idx >= vertCount) throw new InvalidDataException("Primitive index exceeds its POSITION accessor.");
                     tris.Add(baseV + (int)idx);
                 }
@@ -1594,7 +1622,6 @@ public static partial class GlbDisconnectedParts
         result.SourceTriangles = faceCount;
         result.VerticesBefore = pos.Count;
         if (tangentsDropped) result.Warnings.Add("TANGENT dropped from the fused mesh: tangents follow winding and UVs, which this pass may change — the importer recomputes them.");
-        for (int v = 0; v < pos.Count; v++) { double[][] ex = extra[v]; if (ex.Length < extraNames.Count) { Array.Resize(ref ex, extraNames.Count); extra[v] = ex; } }   // parts read before a later part introduced an attribute
         if (faceCount == 0) { result.Warnings.Add("Nothing to fuse: the chosen parts carry no triangles."); plan.Empty = true; return plan; }   // nothing to apply: Changed stays false
 
         double[] mn = { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity };
@@ -1617,22 +1644,18 @@ public static partial class GlbDisconnectedParts
             int Find(int i) { while (parent[i] != i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; }
             double cellSize = distance > 0 ? distance : longest * 1e-7;
             double thresh2 = distance > 0 ? distance * distance : 0.0;
-            var grid = new Dictionary<PositionKey, List<int>>();
+            // flat: no List per cell (GlbDisconnectedParts.Weld.cs); each cell is walked in ascending vertex order, as the Lists were
+            var grid = new CellGrid(pos, cellSize); int[] members = grid.Members; long[] keys = grid.Keys; bool wide = grid.Wide;
             for (int i = 0; i < pos.Count; i++)
             {
-                PositionKey k = CellOf(pos[i], cellSize);
-                if (!grid.TryGetValue(k, out List<int> l)) grid.Add(k, l = new List<int>());
-                l.Add(i);
-            }
-            for (int i = 0; i < pos.Count; i++)
-            {
-                PositionKey k = CellOf(pos[i], cellSize);
+                grid.Cell(i, out long kx, out long ky, out long kz);
                 for (long dx = -1; dx <= 1; dx++) for (long dy = -1; dy <= 1; dy++) for (long dz = -1; dz <= 1; dz++)
                 {
-                    if (!grid.TryGetValue(new PositionKey { X = k.X + dx, Y = k.Y + dy, Z = k.Z + dz }, out List<int> l)) continue;
-                    foreach (int j in l)
+                    long key = grid.Range(kx + dx, ky + dy, kz + dz, out int from, out int to);
+                    for (int s = from; s < to; s++)
                     {
-                        if (j <= i) continue;
+                        int j = members[s];
+                        if (j <= i || keys[j] != key || (wide && !grid.SameCell(j, kx + dx, ky + dy, kz + dz))) continue;
                         if (FDist2(pos[i], pos[j]) <= thresh2) { int a = Find(i), b = Find(j); if (a != b) parent[a] = b; }
                     }
                 }
@@ -1704,15 +1727,7 @@ public static partial class GlbDisconnectedParts
         // stays welded, so a copy that shares vertices with its neighbour is not torn from it.
         var twinFace = new bool[faceCount];   // BOTH copies of every opposite-wound coincident pair: authored two-sided, never turned (see the flip stage)
         {
-            var byTriple = new Dictionary<(int, int, int), List<int>>();
-            for (int f = 0; f < faceCount; f++)
-            {
-                int a = classes[tris[f * 3]], b = classes[tris[f * 3 + 1]], c = classes[tris[f * 3 + 2]];
-                if (a == b || b == c || a == c) continue;   // collapsed or needle: no face to pair with
-                var key = SortedTriple(a, b, c);
-                if (!byTriple.TryGetValue(key, out var l)) byTriple.Add(key, l = new List<int>());
-                l.Add(f);
-            }
+            var byTriple = new TripleIndex(classes, tris, faceCount);   // flat: no List per face (GlbDisconnectedParts.Weld.cs); a collapsed or needle face has no triple and pairs with nothing
             // ...and COINCIDE (review of PR #82, P2): the classes say "within the weld radius", which at a non-zero weld
             // is not the same thing - a thin plate's two skins 0.05 apart under a 0.08 weld share every class, wound the
             // opposite way, and are not a doubled face but the very seam the weld was asked to close. A twin is a copy
@@ -1734,8 +1749,11 @@ public static partial class GlbDisconnectedParts
             // pair behind it - three quads, 12 vertices, welded to 4, one copy rewound, duplicate faces left for the
             // importer. A face that already is somebody's second copy is not paired again.
             var secondFace = new bool[faceCount]; int twinFaces = 0;
-            foreach (var group in byTriple.Values)
+            var group = new List<int>();   // the faces on one triple, ascending; one list reused for every group
+            for (int lead = 0; lead < faceCount; lead++)
             {
+                if (!byTriple.Registered(lead) || byTriple.First(lead) != lead) continue;   // a group is read once, at its lowest face, in the order the Dictionary's insertion gave
+                group.Clear(); for (int m = lead; m >= 0; m = byTriple.Next(m)) group.Add(m);
                 if (group.Count < 2) continue;
                 for (int gi = 1; gi < group.Count; gi++)
                 {
@@ -2962,6 +2980,18 @@ public static partial class GlbDisconnectedParts
 
         Mark("normals");
         // 7) output vertices: one per welded class + material + matching UV + matching normal; one primitive per material
+        bool ExtrasSame(int a, int b)   // every extra attribute carried by both within 1e-4, or by neither
+        {
+            for (int k = 0; k < extraNames.Count; k++)
+            {
+                List<bool> has = extraHas[k];
+                if (!has[a] && !has[b]) continue;
+                if (!has[a] || !has[b]) return false;
+                List<double> values = extraValues[k]; int comps = extraComps[k];
+                for (int c = 0; c < comps; c++) if (Math.Abs(values[a * comps + c] - values[b * comps + c]) >= 1e-4) return false;
+            }
+            return true;
+        }
         var primitiveOf = new Dictionary<int, FusePrimitive>();
         var vertexMap = new int[pos.Count];
         var reps = new Dictionary<long, List<int>>(PairKeyComparer.Instance);   // (class, material) -> representative original vertices already emitted
@@ -2975,8 +3005,8 @@ public static partial class GlbDisconnectedParts
             int found = -1;
             foreach (int r in group)
             {
-                bool uvSame = (uv[v] == null && uv[r] == null) || (uv[v] != null && uv[r] != null && Math.Abs(uv[v][0] - uv[r][0]) < 1e-4 && Math.Abs(uv[v][1] - uv[r][1]) < 1e-4);
-                if (uvSame && FDot(finalNormal[v], finalNormal[r]) > 0.999 && ExtrasSame(extra[v], extra[r])) { found = r; break; }
+                bool uvSame = (!hasUv[v] && !hasUv[r]) || (hasUv[v] && hasUv[r] && Math.Abs(uv[2 * v] - uv[2 * r]) < 1e-4 && Math.Abs(uv[2 * v + 1] - uv[2 * r + 1]) < 1e-4);
+                if (uvSame && FDot(finalNormal[v], finalNormal[r]) > 0.999 && ExtrasSame(v, r)) { found = r; break; }
             }
             if (found >= 0) { vertexMap[v] = vertexMap[found]; continue; }
             group.Add(v);
@@ -2986,14 +3016,14 @@ public static partial class GlbDisconnectedParts
             prim.Normals.Add((float)nn.X); prim.Normals.Add((float)nn.Y); prim.Normals.Add((float)nn.Z);
             // a vertex from a part without UVs is padded (0,0) — the primitive used to drop TEXCOORD_0 for EVERY part of the
             // material when one contributor lacked it (review of 82088d4); only a primitive no vertex of which had UVs ships without
-            if (uv[v] != null) { prim.Uvs.Add((float)uv[v][0]); prim.Uvs.Add((float)uv[v][1]); prim.UvSeen = true; } else { prim.Uvs.Add(0f); prim.Uvs.Add(0f); }
+            if (hasUv[v]) { prim.Uvs.Add((float)uv[2 * v]); prim.Uvs.Add((float)uv[2 * v + 1]); prim.UvSeen = true; } else { prim.Uvs.Add(0f); prim.Uvs.Add(0f); }
             for (int k = 0; k < extraNames.Count; k++)
             {
                 if (!prim.Extras.TryGetValue(extraNames[k], out List<float> list)) prim.Extras.Add(extraNames[k], list = new List<float>());
-                double[] value = extra[v][k];
-                if (value != null) prim.ExtrasSeen.Add(extraNames[k]);
+                bool carried = extraHas[k][v]; List<double> values = extraValues[k]; int comps = extraComps[k];
+                if (carried) prim.ExtrasSeen.Add(extraNames[k]);
                 // a vertex from a part without the attribute: white for a colour, zero for anything else
-                for (int c = 0; c < extraComps[k]; c++) list.Add(value != null ? (float)value[c] : extraNames[k].StartsWith("COLOR_", StringComparison.Ordinal) ? 1f : 0f);
+                for (int c = 0; c < comps; c++) list.Add(carried ? (float)values[v * comps + c] : extraNames[k].StartsWith("COLOR_", StringComparison.Ordinal) ? 1f : 0f);
             }
         }
         for (int f = 0; f < faceCount; f++)
@@ -3185,17 +3215,6 @@ public static partial class GlbDisconnectedParts
         public readonly HashSet<string> ExtrasSeen = new HashSet<string>();                                // …that at least one vertex actually carried
     }
 
-    static bool ExtrasSame(double[][] a, double[][] b)
-    {
-        for (int k = 0; k < a.Length; k++)
-        {
-            if (a[k] == null && b[k] == null) continue;
-            if (a[k] == null || b[k] == null) return false;
-            for (int c = 0; c < a[k].Length; c++) if (Math.Abs(a[k][c] - b[k][c]) >= 1e-4) return false;
-        }
-        return true;
-    }
-
     static PositionKey CellOf(Vec3 p, double cell) => new PositionKey { X = (long)Math.Floor(p.X / cell), Y = (long)Math.Floor(p.Y / cell), Z = (long)Math.Floor(p.Z / cell) };
     static double FDist2(Vec3 a, Vec3 b) { double dx = a.X - b.X, dy = a.Y - b.Y, dz = a.Z - b.Z; return dx * dx + dy * dy + dz * dz; }
     static Vec3 FSub(Vec3 a, Vec3 b) => new Vec3 { X = a.X - b.X, Y = a.Y - b.Y, Z = a.Z - b.Z };
@@ -3384,6 +3403,32 @@ public static partial class GlbDisconnectedParts
             throw new InvalidDataException("buffers[0].byteLength exceeds the BIN chunk.");
         originalData = Prefix(sourceBin, declaredBinLength);
         return new Accessors(root, originalData);
+    }
+
+    // The vertex and index totals of the parts the fuse is about to gather, so its lists are sized once. Counts only:
+    // whatever the gather would refuse is left for the gather to refuse with its own message; a zero here only means
+    // the lists grow as they used to.
+    static void CountGathered(JArray nodes, JArray meshes, Accessors reader, List<int> picked, out int vertices, out int indices)
+    {
+        vertices = 0; indices = 0;
+        try
+        {
+            foreach (int ni in picked)
+            {
+                NodeWithMesh(nodes, ni, out int mi);
+                var primitives = (meshes[mi] as JObject)?["primitives"] as JArray;
+                if (primitives == null) continue;
+                foreach (JObject primitive in TrianglePrimitives(primitives))
+                {
+                    var attrs = primitive["attributes"] as JObject;
+                    if (attrs == null || attrs["POSITION"] == null) continue;
+                    int count = reader.Count(attrs.Value<int>("POSITION"));
+                    vertices += count;
+                    indices += primitive["indices"] == null ? count : reader.Count(primitive.Value<int>("indices"));
+                }
+            }
+        }
+        catch (Exception) { vertices = 0; indices = 0; }
     }
 
     static JObject NodeWithMesh(JArray nodes, int nodeIndex, out int meshIndex)

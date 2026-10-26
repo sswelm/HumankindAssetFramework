@@ -2073,4 +2073,110 @@ public class GlbFuseTests
         }
         finally { GlbDisconnectedParts.FuseGroupWorkers = was; }
     }
+
+    // ---- the gather's and the weld's flat tables (GlbDisconnectedParts.Weld.cs, 2026-10-27) ----
+
+    // Every cell of the grid lists its vertices in ascending order, the order the Dictionary's Lists held and the order
+    // the weld's unions depend on; a cell nobody fell in is empty. Jittered positions with duplicates over a coarse cell
+    // (packed keys, as every fuse has them) and over a cell a billionth of the span (the wide keys: 34 bits per axis).
+    [Theory]
+    [InlineData(0.5, false)]
+    [InlineData(1e-9, true)]
+    public void The_cell_grid_lists_each_cells_vertices_ascending_as_the_dictionary_did(double cell, bool wide)
+    {
+        var rng = new Random(7); var pos = new List<GlbDisconnectedParts.Vec3>();
+        for (int i = 0; i < 5000; i++)
+        {
+            var p = new GlbDisconnectedParts.Vec3 { X = rng.NextDouble() * 10 - 5, Y = rng.NextDouble() * 10 - 5, Z = rng.NextDouble() * 10 - 5 };
+            pos.Add(p); if (i % 7 == 0) pos.Add(p);   // a duplicate: the same cell, a higher index
+        }
+        long Floor(double v) => (long)Math.Floor(v / cell);
+        var expected = new Dictionary<(long, long, long), List<int>>();
+        for (int i = 0; i < pos.Count; i++)
+        {
+            var k = (Floor(pos[i].X), Floor(pos[i].Y), Floor(pos[i].Z));
+            if (!expected.TryGetValue(k, out var l)) expected.Add(k, l = new List<int>());
+            l.Add(i);
+        }
+        var grid = new GlbDisconnectedParts.CellGrid(pos, cell);
+        Assert.Equal(wide, grid.Wide);
+        int walked = 0;
+        for (int i = 0; i < pos.Count; i++)
+        {
+            grid.Cell(i, out long x, out long y, out long z);
+            Assert.Equal((Floor(pos[i].X), Floor(pos[i].Y), Floor(pos[i].Z)), (x, y, z));
+            for (long dx = -1; dx <= 1; dx++) for (long dy = -1; dy <= 1; dy++) for (long dz = -1; dz <= 1; dz++)
+            {
+                var got = new List<int>();
+                long key = grid.Range(x + dx, y + dy, z + dz, out int from, out int to);
+                for (int s = from; s < to; s++)
+                {
+                    int j = grid.Members[s];
+                    if (grid.Keys[j] == key && (!grid.Wide || grid.SameCell(j, x + dx, y + dy, z + dz))) got.Add(j);
+                }
+                Assert.Equal(expected.TryGetValue((x + dx, y + dy, z + dz), out var want) ? want : new List<int>(), got);
+                walked += got.Count;
+            }
+        }
+        Assert.True(walked > (wide ? pos.Count : pos.Count * 4), "the fixture's cells are too sparse to exercise the buckets");
+    }
+
+    // Faces on one sorted class triple come out ascending from their lowest face, however the three classes were ordered
+    // on each face; a collapsed or needle face is on no triple.
+    [Fact]
+    public void The_triple_index_groups_faces_by_sorted_class_triple_ascending()
+    {
+        var rng = new Random(11); int faces = 3000; var tris = new List<int>(); var classes = new int[faces * 3];
+        for (int f = 0; f < faces; f++)
+        {
+            int a = rng.Next(40), b = rng.Next(40), c = rng.Next(40);   // 40 classes: many faces share a triple, some are needles
+            int[] cycle = rng.Next(2) == 0 ? new[] { a, b, c } : new[] { b, c, a };
+            for (int k = 0; k < 3; k++) { tris.Add(f * 3 + k); classes[f * 3 + k] = cycle[k]; }
+        }
+        (int, int, int)? Triple(int f)
+        {
+            int[] s = { classes[f * 3], classes[f * 3 + 1], classes[f * 3 + 2] }; Array.Sort(s);
+            return s[0] == s[1] || s[1] == s[2] ? ((int, int, int)?)null : (s[0], s[1], s[2]);
+        }
+        var expected = new Dictionary<(int, int, int), List<int>>();
+        for (int f = 0; f < faces; f++)
+        {
+            var t = Triple(f); if (t == null) continue;
+            if (!expected.TryGetValue(t.Value, out var l)) expected.Add(t.Value, l = new List<int>());
+            l.Add(f);
+        }
+        var index = new GlbDisconnectedParts.TripleIndex(classes, tris, faces);
+        var leaders = new List<int>();
+        for (int f = 0; f < faces; f++)
+        {
+            var t = Triple(f);
+            if (t == null) { Assert.False(index.Registered(f)); continue; }
+            Assert.True(index.Registered(f));
+            var want = expected[t.Value];
+            Assert.Equal(want[0], index.First(f));
+            if (want[0] != f) continue;
+            leaders.Add(f);
+            var got = new List<int>(); for (int m = f; m >= 0; m = index.Next(m)) got.Add(m);
+            Assert.Equal(want, got);
+        }
+        Assert.Equal(expected.Values.Select(l => l[0]).OrderBy(x => x).ToList(), leaders);
+        Assert.Contains(expected.Values, l => l.Count >= 3);
+    }
+
+    // The colour attribute first appears on the SECOND part: the first part's vertices were gathered before the attribute
+    // was known and ship white, and the seam keeps the two colours apart (the mixed case above has the coloured part first).
+    [Fact]
+    public void An_attribute_first_seen_on_a_later_part_pads_the_earlier_parts_vertices()
+    {
+        var plain = Quad("C", 0, 1, 0, 1, 0);
+        var red = Quad("A", 1, 2, 0, 1, 0); red.Colors = Enumerable.Repeat(new[] { 1f, 0f, 0f, 1f }, 4).SelectMany(c => c).ToArray();
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(plain, red), new[] { 0, 1 }, 0.0);
+        Assert.Equal(1, r.IslandsAfter);
+        Assert.Equal(8, r.VerticesAfter);   // the seam vertices differ in colour on each side
+        var g = Read(r.Bytes);
+        var attrs = (JObject)((JObject)g.Primitives(g.Node("C_Fused"))[0])["attributes"];
+        float[] col = g.Floats(attrs.Value<int>("COLOR_0"), 4);
+        Assert.Equal(4, Enumerable.Range(0, 8).Count(i => col[i * 4] > 0.99f && col[i * 4 + 1] > 0.99f && col[i * 4 + 2] > 0.99f));   // four white
+        Assert.Equal(4, Enumerable.Range(0, 8).Count(i => col[i * 4] > 0.99f && col[i * 4 + 1] < 0.01f));   // four red, nothing blended
+    }
 }
