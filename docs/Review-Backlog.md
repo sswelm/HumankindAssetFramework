@@ -617,6 +617,12 @@ edge collapse followed the same day (native/hafdecimate.cpp, byte-equal): the Un
 21.2 s -> 13.8 s, the collapse itself 14.2 s -> 9.2 s - only 1.5x, because the loop is bound by memory latency (a 5-million-node
 heap, random walks over the link arrays), not by Mono's codegen. Left on the prep: its managed half (the layout, the exporter's
 mesh layout, the GLB assembly: about 4.6 s of the 13.8 s in Unity), and GlbReader's read, 0.47 s of the Saleg's 1.34 s probe.
+The Workshop fuse followed (2026-10-25 to 27: column and twin census native, the occluders read once, four groups at a time,
+the gather and weld without per-vertex garbage; the Saleg's 22-group fuse 148.7 s -> 65.2 s in Unity, bytes unchanged). Left
+on the fuse, by the allocation census of 2026-10-27 (docs/Testing.md, Native kernels): "sheets" allocates 14.9 GB over the 22
+groups (the managed side view and the per-face scratch of the exposure stage) and is now the largest stage at 101 s summed;
+each group parses the 175 MB file's JSON for itself (356 MB and 50-90 ms per group, 7.8 GB over the job); the weld's two
+passes are still 91 s summed (the 27-cell walk itself, no longer its allocations) and are the next candidate for a kernel.
 - **`VehicleProbeAllocationTests.Skinning_reuses_private_scratch_..._on_multiple_workers` flaked once in a push gate (2026-10-21)**
   - the per-thread allocation budget (0..1024 bytes over 3,000 skinner calls on 8 workers) failed in the gate's `dotnet test`
   step and passed in 10 full-suite runs afterwards on the same branch and on master. The test calls only `BlenderSkinner.Vertex`
