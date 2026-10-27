@@ -38,7 +38,7 @@ cp "$DLL" "$TMPD/hafkernels.dll"
 # ---- the harness: ProbePerformance as an x64 exe (the .NET Framework's 64-bit runtime, the DLL's architecture), one run per file
 sources=(HafModel GlbReader HafTransforms BlenderNames VehicleProbe VehicleProbe.Visibility VehicleProbe.Islands
   VehicleProbe.InsideOut VehicleProbe.BlenderWorld VehicleProbe.BlenderSkin VehicleProbe.CustomNormals VehicleProbe.Merge
-  VehicleProbe.BlenderArmature BlenderEigen BlenderTrig HafNativeKernels BlenderMesh BMesh BlenderColor BlenderDecimate BlenderReduce BlenderExport BlenderExportTree BlenderPrep BlenderMaterialExport GlbWriter HafNativeKernels.Collapse)
+  VehicleProbe.BlenderArmature BlenderEigen BlenderTrig HafNativeKernels BlenderMesh BMesh BlenderColor BlenderDecimate BlenderReduce BlenderExport BlenderExportTree BlenderPrep BlenderMaterialExport GlbWriter HafNativeKernels.Collapse HafNativeKernels.BMesh)
 files=("$WROOT/tools/vehicle-probe-drill/ProbePerformance.cs")
 for source in "${sources[@]}"; do files+=("$WROOT/editor/$source.cs"); done
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -optimize+ -platform:x64 -out:"$WTMP/kernels.exe" \

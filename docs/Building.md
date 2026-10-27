@@ -137,9 +137,10 @@ the guest pack identity. The deleted `baker/` editor snapshot must not return: i
 
 The editor package ships `editor/Plugins/x86_64/hafkernels.dll` (Windows Editor-only, x86_64), built from [`native/`](https://github.com/sswelm/HumankindAssetFramework/tree/master/native)
 by `bash tools/build_native_kernels.sh`. It holds the kernels that were measured to be the editor tools' hot spots
-(2026-10-21 to 27): the Lab probe's custom-normal encode and decode, visibility BVH build and world transform
+(2026-10-21 to 28): the Lab probe's custom-normal encode and decode, visibility BVH build and world transform
 (`hafkernels.cpp`, `hafnormals.cpp`); the reduce's edge collapse (`hafdecimate.cpp`); the Workshop fuse's exposure
-ladders from above and from the side (`hafcolumn.cpp`), twin census (`haftwin.cpp`) and weld classes (`hafweld.cpp`).
+ladders from above and from the side (`hafcolumn.cpp`), twin census (`haftwin.cpp`) and weld classes (`hafweld.cpp`);
+the Vehicle Lab reduce stage's BMesh build, double search and limited dissolve (`hafbmesh.cpp`).
 Nothing is installed for it: the DLL is part of the package.
 
 - **Compiler:** WinLibs GCC (MinGW-W64 x86_64-ucrt, `g++` on PATH), `-O2 -ffp-contract=off -fno-fast-math` and SSE only,
@@ -158,7 +159,7 @@ Nothing is installed for it: the DLL is part of the package.
   differently: a `bool[]` crosses as four bytes a flag in Mono, so native array parameters use blittable elements,
   with flags as `byte[]`. `HafNativeKernels.Status` says which path runs; the `HafNativeKernels` wrappers validate buffers
   before entering C++.
-- **Version contract:** `haf_kernels_version()` must equal `HafNativeKernels.Version` (6 since 2026-10-27); bump both
+- **Version contract:** `haf_kernels_version()` must equal `HafNativeKernels.Version` (7 since 2026-10-28); bump both
   on any ABI change. A mismatch is not an error, it is the managed path — and a Unity editor never unloads a native
   plugin, so after rebuilding or updating the DLL **restart Unity**. An ABI-version mismatch selects managed fallback;
   an update that keeps the same ABI version can continue running the old native implementation until that restart.

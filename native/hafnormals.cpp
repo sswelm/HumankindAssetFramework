@@ -20,7 +20,7 @@ static void LoadTrig()
 }
 // The contract the C# side checks before using any kernel: the matching version, with Blender's C runtime trig resolved;
 // -1 = ucrtbase.dll did not give cosf/sinf (then nothing here may run: DecodeCustom would compute with the wrong library).
-#define HAF_KERNELS_VERSION 6
+#define HAF_KERNELS_VERSION 7
 EXPORT int haf_kernels_version() { LoadTrig(); return ucrt_cosf && ucrt_sinf ? HAF_KERNELS_VERSION : -1; }
 
 static const float PI2F = (float)(3.14159265358979323846 * 2.0);
