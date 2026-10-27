@@ -444,7 +444,8 @@ public class VehicleLabWindow : EditorWindow
     }
     internal static string[] GenerateBackendLabels(bool blenderAvailable, string editorDefault)
     {
-        string csharp = blenderAvailable ? "C# + C++ kernels (fallback to Blender)" : "C# + C++ kernels (Blender fallback unavailable)";
+        string csharp = BlenderVehicleRigInProcess.CSharpBackendName(HafNativeKernels.Available)
+            + (blenderAvailable ? " (fallback to Blender)" : " (Blender fallback unavailable)");
         string blender = blenderAvailable ? "Blender" : "Blender (unavailable)";
         bool csharpDefault = BlenderVehicleRigInProcess.UseCSharp("", editorDefault);
         return new[] { "Editor default (" + (csharpDefault ? csharp : blender) + ")", blender, csharp };
@@ -2484,8 +2485,8 @@ public class VehicleLabWindow : EditorWindow
             .Where(l => l.Contains("VEHICLE MUZZLE") || l.Contains("VEHICLE CRADLE")
                      || l.Contains("*** WARNING") || l.Contains("DEPLOY gun: SKIPPED"))
             .Select(l => l.Trim()));
-        // the C# route names the kernels it ran with: "C# + C++ kernels (native (hafkernels.dll version 6))", or "managed (...)" when the plugin did not load
-        string backend = lastGenerateRoute == "csharp" ? "C# + C++ kernels (" + HafNativeKernels.Status + ")" : lastGenerateRoute == "csharp-fallback" ? "Blender (C# fallback: " + lastGenerateFallback + ")" : "Blender";
+        // Native availability is reported separately from the selected route; managed runs must not claim C++ kernels.
+        string backend = lastGenerateRoute == "csharp" ? BlenderVehicleRigInProcess.CSharpBackendName(HafNativeKernels.Available) + " (" + HafNativeKernels.Status + ")" : lastGenerateRoute == "csharp-fallback" ? "Blender (C# fallback: " + lastGenerateFallback + ")" : "Blender";
         status = $"DONE → {lastOutGlb}\nBackend: {backend}\n{bones}\n{hybrid}\n{done}\n{muzzle}\n\nNext: Factory ▸ Browse this GLB, Size as usual; " + bakeRecipe;
         if (previewProblem != null) status += "\nPreview unavailable: " + previewProblem;
         if (!headless) EditorGUIUtility.systemCopyBuffer = lastOutGlb;   // ready to paste into the Factory's Browse field

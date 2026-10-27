@@ -18,9 +18,9 @@ public class VehicleRigInProcessTests : IDisposable
         var a = Enumerable.Repeat("",76).ToArray(); a[0]="rig"; a[1]=src; a[2]=Path.Combine(dir,"out.glb"); a[7]="15"; a[8]="-360"; a[17]="0"; a[21]="0"; return a;
     }
     [Theory]
-    [InlineData(null,null,false)] [InlineData("", "csharp",true)] [InlineData("blender","csharp",false)]
-    [InlineData("csharp","blender",true)] [InlineData(" CSharp ","blender",true)] [InlineData("unknown", "bad",false)]
-    public void Route_overrides_default_without_changing_the_missing_preference_default(string recipe,string editor,bool expected)
+    [InlineData(null,null,true)] [InlineData("", "csharp",true)] [InlineData("blender","csharp",false)]
+    [InlineData("csharp","blender",true)] [InlineData(" CSharp ","blender",true)] [InlineData("unknown", "bad",true)]
+    public void Route_precedence_preserves_explicit_choices_and_uses_the_factory_default(string recipe,string editor,bool expected)
         => Assert.Equal(expected,BlenderVehicleRigInProcess.UseCSharp(recipe,editor));
     // the factory default - neither the recipe nor the preference names a backend - is the C# route (2026-10-27); a recipe pinned
     // to Blender still wins over it
@@ -31,6 +31,25 @@ public class VehicleRigInProcessTests : IDisposable
         Assert.True(BlenderVehicleRigInProcess.UseCSharp("", BlenderVehicleRigInProcess.FactoryDefaultRoute));
         Assert.True(BlenderVehicleRigInProcess.UseCSharp(null, BlenderVehicleRigInProcess.FactoryDefaultRoute));
         Assert.False(BlenderVehicleRigInProcess.UseCSharp("blender", BlenderVehicleRigInProcess.FactoryDefaultRoute));
+    }
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("", "")]
+    [InlineData(" ", " ")]
+    [InlineData("unknown", "invalid")]
+    public void Missing_or_unrecognized_routes_reach_the_factory_default(string recipe, string preference)
+        => Assert.True(BlenderVehicleRigInProcess.UseCSharp(recipe, preference));
+
+    [Fact]
+    public void Timing_labels_describe_the_CSharp_stage_boundaries_and_keep_completion_last()
+    {
+        var result = BlenderVehicleRigInProcess.Run(Args());
+        Assert.True(result.Written, result.UseBlender ?? result.Error);
+        var timing = result.Log.Where(l => l.StartsWith("VEHICLE timing:", StringComparison.Ordinal)).ToList();
+        var labels = timing.Select(l => System.Text.RegularExpressions.Regex.Match(l,
+            @"^VEHICLE timing: (.+?)\s+[0-9]+\.[0-9]s$").Groups[1].Value).ToArray();
+        Assert.Equal(new[] { "import", "prep", "reduce", "rig + skin + join", "clips", "mesh + export prep", "export (glb)" }, labels);
+        Assert.StartsWith("VEHICLE RIG DONE:", result.Log.Last());
     }
     [Fact]
     public void Writes_and_atomically_replaces_a_readable_rig_with_ordered_completion_log()

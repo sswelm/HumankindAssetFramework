@@ -1,7 +1,8 @@
 # Vehicle Generate acceptance
 
 This records the acceptance work following PR #188, against merged commit `70dc263`.
-The Generate default remains Blender. Phase (h) requires the user's visual and in-game check.
+The factory default changed to C# on 2026-10-27; valid saved preferences and recipe choices still override it.
+The dated results and per-model visual/in-game checklist below retain their recorded acceptance status.
 Moving tread/conveyor support (d6) remains deferred.
 
 ## Native JPEG-alpha support (October 19, 2026)
@@ -128,10 +129,10 @@ hashes and the snapshot checksum are still captured by `BakeGoldenFiles`.
 
 ## Visual and runtime acceptance still required
 
-In Vehicle Lab, select **C# with fallback** per recipe, Generate, and check the reported actual backend.
+In Vehicle Lab, select the **C#** route per recipe (or **Editor default** when it resolves to C#), Generate, and check the reported actual backend.
 Check every saved recipe's preview and its generated asset in game. The automated check covers file
 and pose parity; the user still needs to judge appearance, placement and the model playing its roles.
-Record the checked package commit and each model's result before changing the global default.
+Record the checked package commit and each model's result as those checks are completed.
 
 | Feature | Saved recipes to check closely | Observe |
 | --- | --- | --- |
@@ -141,8 +142,8 @@ Record the checked package commit and each model's result before changing the gl
 | Wheels and static tracks | `jagdpanzer_iv_late_prod3`, `ozhiga_organ_gun_1`, `Ribauldequin_textured`, gatling-gun recipe | Wheel direction/speed, stable geometry, intended static tracks |
 | Rotors | `bell_h-13_animation-ready`, `rah66`, `sikorsky_ilya_muromets_split` | Main/tail axes, continuous rotation, scale and placement |
 | Wave | `dug-out_canoe` | Hull sway and loop continuity |
-| Blender fallbacks | `Bredley_Low`, `SKM_Ehrhardt_E_V_Games`, Espana | Named fallback, complete generation and usable preview |
-| Remaining hulls and aircraft | All other saved recipes, including `rq4_global_hawk` | Materials, winding, scale, placement and intended motion |
+| Blender fallbacks | `Bredley_Low`, `SKM_Ehrhardt_E_V_Games` | Named fallback, complete generation and usable preview |
+| Remaining hulls and aircraft | All other saved recipes, including Espana and `rq4_global_hawk` | Materials, winding, scale, placement and intended motion |
 
 The seven synthetic native fixtures also exercise combinations absent from the saved recipes, including
 folded flags and Deploy/Recoil together. They supplement the user's saved-model checks.
