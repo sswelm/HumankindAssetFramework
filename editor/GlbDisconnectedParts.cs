@@ -3285,8 +3285,14 @@ public static partial class GlbDisconnectedParts
     {
         var pts = new List<Vec3>(); var wts = new List<double>();
         ModelBellySamples(nodes, meshes, reader, pts, wts);
-        if (pts.Count == 0) { pts = fallback; wts = new List<double>(fallback.Count); foreach (Vec3 _ in fallback) wts.Add(1.0); }
+        if (pts.Count == 0) { FallbackBellyFrame(fallback, out lengthAxis, out widthAxis, out centreW, out bellyY, out floorY); return; }
         BellyFrame(pts, wts, out lengthAxis, out widthAxis, out centreW, out bellyY, out floorY);
+    }
+
+    static void FallbackBellyFrame(List<Vec3> fallback, out int lengthAxis, out int widthAxis, out double centreW, out double bellyY, out double floorY)
+    {
+        var wts = new List<double>(fallback.Count); foreach (Vec3 _ in fallback) wts.Add(1.0);
+        BellyFrame(fallback, wts, out lengthAxis, out widthAxis, out centreW, out bellyY, out floorY);
     }
 
     static void ModelBellySamples(JArray nodes, JArray meshes, Accessors reader, List<Vec3> pts, List<double> wts)

@@ -70,6 +70,40 @@ public class NativeKernelsTests
         Assert.StartsWith("native (hafkernels.dll version " + HafNativeKernels.Version, HafNativeKernels.Status);
     }
 
+    [Fact]
+    public void Twin_chunks_match_serial_with_pairs_across_chunks_and_a_partial_last_chunk()
+    {
+        Assert.True(HafNativeKernels.Available, HafNativeKernels.Status);
+        const int pairs = 8501, n = pairs * 2 + 1; // enters the native parallel path; neither half ends on a 2048-face boundary
+        var faces = new double[n * 9]; var flipped = new bool[n];
+        for (int f = 0; f < n; f++)
+        {
+            int pair = f == n - 1 ? pairs : f % pairs;
+            double x = pair * .5, z = f >= pairs ? .01 : 0;
+            bool reverse = f >= pairs;
+            int at = f * 9;
+            faces[at] = x; faces[at + 2] = z;
+            faces[at + 3] = x + (reverse ? 0 : .1); faces[at + 4] = reverse ? .1 : 0; faces[at + 5] = z;
+            faces[at + 6] = x + (reverse ? .1 : 0); faces[at + 7] = reverse ? 0 : .1; faces[at + 8] = z;
+            flipped[f] = pair % 3 == 0;
+        }
+        var serial = new double[n]; var serialProj = new double[n]; var serialId = new int[n];
+        HafNativeKernels.TwinCensus(faces, flipped, .25, .1, .00001f, 1, serial, serialProj, serialId);
+        for (int f = 0; f < n - 1; f++)
+        {
+            Assert.Equal(f < pairs ? f + pairs : f - pairs, serialId[f]);
+            Assert.Equal(.01, serial[f], 9);
+            Assert.Equal(flipped[f] ? -.01 : .01, serialProj[f], 9);
+        }
+        Assert.Equal(-1, serialId[n - 1]); Assert.True(double.IsPositiveInfinity(serial[n - 1]));
+        foreach (int workers in new[] { 2, 4, 16 })
+        {
+            var best = new double[n]; var proj = new double[n]; var ids = new int[n];
+            HafNativeKernels.TwinCensus(faces, flipped, .25, .1, .00001f, workers, best, proj, ids);
+            Assert.Equal(serial, best); Assert.Equal(serialProj, proj); Assert.Equal(serialId, ids);
+        }
+    }
+
     [Theory]
     [InlineData(23, 17, true, 1)]      // small: both sides serial
     [InlineData(23, 17, false, 2)]     // without file normals: the fallback normals, every face sharp at import

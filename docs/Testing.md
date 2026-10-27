@@ -3605,3 +3605,9 @@ while checking both blocked and open rays on width axes X and Z. An isolated Uni
 and identical managed/native fuse bytes; an independent 1,200-case weld comparison also matched the original managed walk.
 The editor compile check collects filenames with Bash suffix expansion instead of a subprocess per file. A planted
 `basename` failure reproduced the empty `editor/` source argument; the same control now compiles all 128 sources.
+
+PR #207 review guards: a cached empty frame goes directly to the group's fallback vertices instead of sampling the whole
+file again. A 500-node zero-area fixture checks distinct axes and heights for two groups and bounds the second fallback's
+allocation to 32 KiB (988,296 bytes on the original PR). The native twin test uses 17,003 faces, pairs across chunk boundaries,
+flipped normals and an unpaired final face; distances, projections and twin IDs match serial results at 2, 4 and 16 workers.
+An isolated Unity 2021.3 run also produces identical managed/native fuse bytes.

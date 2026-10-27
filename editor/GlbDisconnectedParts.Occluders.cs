@@ -73,7 +73,7 @@ public static partial class GlbDisconnectedParts
                 }
                 if (bellyFromFile) { lengthAxis = bellyLength; widthAxis = bellyWidth; centreW = bellyCentre; bellyYOut = bellyY; floorY = bellyFloor; return; }
             }
-            ModelBelly(nodes, meshes, reader, fallback, out lengthAxis, out widthAxis, out centreW, out bellyYOut, out floorY);
+            FallbackBellyFrame(fallback, out lengthAxis, out widthAxis, out centreW, out bellyYOut, out floorY);
         }
 
         /// <summary>The segments of every node not in `picked`, in node order; boundsLo/Hi widened by those nodes' corners.</summary>

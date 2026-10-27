@@ -1954,6 +1954,32 @@ public class GlbFuseTests
 
     // ---- the occluders read once per fuse (GlbDisconnectedParts.Occluders.cs, 2026-10-26) ----
 
+    [Fact]
+    public void A_cached_empty_frame_uses_each_groups_vertices_without_reading_the_file_again()
+    {
+        var source = BuildGlb(Enumerable.Range(0, 500).Select(i => new Part {
+            Name = "Point" + i, Positions = new float[9], Indices = new[] { 0, 1, 2 }
+        }).ToArray());   // triangles exist, but none has area: the frame must use each group's fallback
+        var cache = new GlbDisconnectedParts.OccluderCache(source);
+        var root = cache.Document.Root; var nodes = (JArray)root["nodes"]; var meshes = (JArray)root["meshes"];
+        var first = new List<GlbDisconnectedParts.Vec3> {
+            new GlbDisconnectedParts.Vec3(), new GlbDisconnectedParts.Vec3 { X = 4, Y = 2, Z = 1 }, new GlbDisconnectedParts.Vec3()
+        };
+        cache.Belly(nodes, meshes, new GlbDisconnectedParts.Accessors(root, cache.Bin), first, out int length, out int width, out double centre, out double belly, out double floor);
+        Assert.Equal(0, length); Assert.Equal(2, width); Assert.Equal(0.5, centre, 9); Assert.Equal(0.5, belly, 9); Assert.Equal(0.1, floor, 9);
+        var second = new List<GlbDisconnectedParts.Vec3> {
+            new GlbDisconnectedParts.Vec3 { Y = 10, Z = 10 }, new GlbDisconnectedParts.Vec3 { X = 1, Y = 18, Z = 30 }, new GlbDisconnectedParts.Vec3 { Y = 10, Z = 10 }
+        };
+        var reader = new GlbDisconnectedParts.Accessors(root, cache.Bin);
+        var allocated = (Func<long>)Delegate.CreateDelegate(typeof(Func<long>), typeof(GC).GetMethod("GetAllocatedBytesForCurrentThread"));
+        long before = allocated();
+        cache.Belly(nodes, meshes, reader, second, out length, out width, out centre, out belly, out floor);
+        long bytes = allocated() - before;
+        Assert.Equal(2, length); Assert.Equal(0, width); Assert.Equal(0.5, centre, 9); Assert.Equal(12, belly, 9); Assert.Equal(10.4, floor, 9);
+        Assert.Equal(1, GlbDisconnectedParts.CountsOf(source).BellyReads);
+        Assert.InRange(bytes, 0, 32768);   // tiny fallback scratch; resampling 500 nodes allocates hundreds of KB
+    }
+
     // A group sees every other node of the file as segments in node order, numbered as the per-group read numbered them, and
     // its bounds are those nodes' corners only (the group's own pre-weld corners stay out: they would move the skin and the cell).
     [Fact]
