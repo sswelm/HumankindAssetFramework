@@ -126,11 +126,14 @@ public static class RigRouteAcceptanceTest
                     problems.Add($"role '{dir}': the {(name == nameA ? "FBX" : "GLB")} route's baked clip collection is missing or empty");
             }
             string poseA = Path.Combine(root, "Assets", "Resources", nameA + RoleSuffixes[ri] + "PoseData.bytes"), poseB = Path.Combine(root, "Assets", "Resources", nameB + RoleSuffixes[ri] + "PoseData.bytes");
-            string poseProblem = ComparePoseStreams(poseA, poseB);
+            bool entryA = ReadClipEntry("Assets/Resources/" + nameA + RoleSuffixes[ri] + ".asset", out int framesA, out int bonesA);
+            bool entryB = ReadClipEntry("Assets/Resources/" + nameB + RoleSuffixes[ri] + ".asset", out int framesB, out int bonesB);
+            if (!entryA || !entryB) { problems.Add($"role '{dir}': the {(entryA ? "GLB" : "FBX")} route's baked clip collection has no readable clip entry (frame and bone counts)"); continue; }
+            string poseProblem = ComparePoseStreams(poseA, poseB, framesA, bonesA, framesB, bonesB);
             if (poseProblem != null) problems.Add($"role '{dir}': {poseProblem}");
         }
         if (roles == 0) problems.Add("no role's rig could be found on either route");
-        notes.Add(FormattableString.Invariant($"{roles} role(s) equal: bones, mesh, placement and clips, {vertexSamples} skinned vertex samples within {worst:0.#####} of each other; non-empty role collections and pose streams of the same length"));
+        notes.Add(FormattableString.Invariant($"{roles} role(s) equal: bones, mesh, placement and clips, {vertexSamples} skinned vertex samples within {worst:0.#####} of each other; non-empty role collections and pose streams with equal bone counts and encoding-compatible lengths (frame counts equal or one apart, the SDK's rounding)"));
     }
 
     /// <summary>Two instantiated rigs with a clip each, judged as the row judges a role (tools/riganim_unity_import_drill.sh runs
@@ -142,11 +145,29 @@ public static class RigRouteAcceptanceTest
         return problems;
     }
 
-    internal static string ComparePoseStreams(string pathA, string pathB)
+    /// <summary>The two routes' pose streams: present and non-empty on both, then PoseStreamParity's rule on their frame and
+    /// bone counts (the SDK's ClipEntry of each baked collection) and bytes.</summary>
+    internal static string ComparePoseStreams(string pathA, string pathB, int framesA, int bonesA, int framesB, int bonesB)
     {
         long a = File.Exists(pathA) ? new FileInfo(pathA).Length : -1, b = File.Exists(pathB) ? new FileInfo(pathB).Length : -1;
-        if (a < 32 || b < 32) return $"the baked pose stream is missing or empty (FBX {a} bytes, GLB {b} bytes)";
-        return a == b ? null : $"the baked pose stream is {a} bytes on the FBX route, {b} on the GLB route";
+        if (a <= 0 || b <= 0) return $"the baked pose stream is missing or empty (FBX {a} bytes, GLB {b} bytes)";
+        return PoseStreamParity.Compare(framesA, bonesA, a, framesB, bonesB, b);
+    }
+
+    /// <summary>The first clip entry's frame and bone counts of a baked ClipCollection asset (the SDK's serialized ClipEntry[],
+    /// read by reflection as UniversalBaker writes it); false when the asset or its entries cannot be read.</summary>
+    internal static bool ReadClipEntry(string assetPath, out int frames, out int bones)
+    {
+        frames = 0; bones = 0;
+        var cc = AssetDatabase.LoadMainAssetAtPath(assetPath);
+        if (cc == null) return false;
+        var field = cc.GetType().GetField("animationClipEntries", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        if (!(field?.GetValue(cc) is Array entries) || entries.Length == 0) return false;
+        var e = entries.GetValue(0); var t = e.GetType();
+        var frameField = t.GetField("FrameCount"); var boneField = t.GetField("BonesCount");
+        if (frameField == null || boneField == null) return false;
+        frames = Convert.ToInt32(frameField.GetValue(e)); bones = Convert.ToInt32(boneField.GetValue(e));
+        return true;
     }
 
     // Use at least the Factory's 24 Hz clip rate, plus both imports' curve keys and any higher declared frame rate.
@@ -317,6 +338,13 @@ public static class RigRouteAcceptanceTest
         var smrA = a.GetComponentsInChildren<SkinnedMeshRenderer>(true).Where(r => r.sharedMesh != null).ToArray();
         var smrB = b.GetComponentsInChildren<SkinnedMeshRenderer>(true).Where(r => r.sharedMesh != null).ToArray();
         if (smrA.Length == 0 || smrB.Length == 0) { problems.Add($"role '{dir}': no skinned mesh on the {(smrA.Length == 0 ? "FBX" : "GLB")} route's rig"); return; }
+        // THE FIRST FRAME, not the unposed prefab (2026-10-27): the two exporters define a bone's default transform differently -
+        // Blender's FBX exporter writes the POSED matrix at the frame the script pins (the clip's first frame), the glTF exporter
+        // the armature's edit rest - and the game never shows either: the SDK encodes every clip against the skeleton prefab's
+        // pose and plays the clip. Both rigs are posed at their clip's first frame before anything is compared; the FBX route's
+        // prefab already sits there, the GLB route's is pinned there by the Factory (ImportGlbRig), and a role's own clip may
+        // start elsewhere than the primary's.
+        clipA.SampleAnimation(a, 0f); clipB.SampleAnimation(b, 0f);
         // the extent, for the tolerance: both rigs are scaled to the recipe's size
         var boundsA = WorldBounds(smrA); var boundsB = WorldBounds(smrB);
         float ext = Mathf.Max(1e-3f, Mathf.Max(boundsA.size.x, Mathf.Max(boundsA.size.y, boundsA.size.z)));
@@ -334,16 +362,16 @@ public static class RigRouteAcceptanceTest
         int triB = smrB.Sum(r => Enumerable.Range(0, r.sharedMesh.subMeshCount).Sum(si => (int)r.sharedMesh.GetIndexCount(si) / 3));
         if (triA != triB) problems.Add($"role '{dir}': {triA} triangles on the FBX route, {triB} on the GLB route");
         if ((boundsA.min - boundsB.min).magnitude > tol || (boundsA.max - boundsB.max).magnitude > tol)
-            problems.Add(FormattableString.Invariant($"role '{dir}': the rest bounds differ - FBX route {boundsA.min}..{boundsA.max}, GLB route {boundsB.min}..{boundsB.max} (tolerance {tol:0.####})"));
+            problems.Add(FormattableString.Invariant($"role '{dir}': the first-frame bounds differ - FBX route {boundsA.min}..{boundsA.max}, GLB route {boundsB.min}..{boundsB.max} (tolerance {tol:0.####})"));
         // the placement: the root-most bone's world position (the model's box is centred by the slim; the Factory grounds the rest)
         var rootA = RootBone(smrA[0]); var rootB = RootBone(smrB[0]);
         if (rootA != null && rootB != null && (rootA.position - rootB.position).magnitude > tol)
             problems.Add(FormattableString.Invariant($"role '{dir}': the root bone '{rootA.name}' sits at {rootA.position} on the FBX route, {rootB.position} on the GLB route"));
         var byNameA = BonesByName(smrA); var byNameB = BonesByName(smrB);
-        CompareBones($"role '{dir}' at rest", byNameA, byNameB, tol, RestAngle, RestScale, false, null, null, problems, ref worst);
+        CompareBones($"role '{dir}' at the first frame", byNameA, byNameB, tol, RestAngle, RestScale, false, null, null, problems, ref worst);
         string restProblem = ComparePositionSets(Positions(smrA), Positions(smrB), tol, out double restWorst);
         worst = Math.Max(worst, restWorst);
-        if (restProblem != null) problems.Add($"role '{dir}': the rest vertices differ - {restProblem}");
+        if (restProblem != null) problems.Add($"role '{dir}': the first-frame vertices differ - {restProblem}");
         var envelopes = SkinEnvelopes(smrA, byNameB);
         var restScalesA = byNameA.ToDictionary(x => x.Key, x => x.Value.localScale);
         var restScalesB = byNameB.ToDictionary(x => x.Key, x => x.Value.localScale);

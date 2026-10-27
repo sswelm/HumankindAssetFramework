@@ -10,6 +10,17 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE GLB RIG ROUTE'S FIRST ACCEPTANCE RUN, FIFTEEN FINDINGS, FIVE CAUSES (2026-10-27).** The Bake Tests row that bakes
+  every animated glTF entry on the Blender FBX route and on the C# GLB route failed 15 of 23 the first time the user ran
+  it. Drilled on both routes' files imported the Factory's way in a batch Unity project: the row compared the UNPOSED
+  prefabs, which the two exporters define differently (eleven entries - the Factory's GLB import now poses its prefab at
+  the primary clip's first frame, the SDK's reference, and the row samples the first frame first); the FBX route shipped a
+  STALE bone location into a one-frame idle slice (the AntiTankIFV's tread links; the script resets its pose bones after
+  the rebake, the port mirrors it); an FBX-born glTF's 0.01 root wrapper is folded into the rig (the ReconDrone); the
+  Factory's GLB mesh welds equal vertices and drops collapsed triangles as Unity's FBX import does (the Lembos' four
+  triangles, the GreatGalley back under the eight-fragment cap); and pose streams one frame apart - the SDK's ceil of
+  length x frame rate on a float ulp - are accepted as such. Review guards preserve distinct vertex attributes, fold shared
+  bind poses once, retain nonuniform wrappers, and validate the SDK's packed word lengths symmetrically. `docs/Testing.md`, step (h).
 - **TWO BAKE TESTS ROWS READ RIGHT AGAIN (2026-10-27).** The "in-process rig slim" row failed twelve rigs on the albedo
   PNG's bytes: Blender's `image.save` re-encodes the source through its own PNG writer, the port keeps the source's
   bytes, and the pixels were identical (LightCruisers, proven pixel for pixel). The row holds the PNG pixel for pixel now.

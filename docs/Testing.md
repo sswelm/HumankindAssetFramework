@@ -2386,13 +2386,16 @@ before the GLB route becomes the editor default. For every animated registry ent
 the recipe twice under throwaway names (`BakeSmokeTest.PREFIX`, the delete guard's and the registry filter's), `rigRoute`
 "blender" then "csharp", through `ModelFactoryWindow.ConfigFor` and `UniversalBaker.BuildAnimated` as the Bake button
 does, and compares what the Factory made in Unity: the Amplitude outputs present and non-empty on both
-(`BakeSmokeTest.MissingAssets`); for every role (`RigPreviewPath` resolves either route's rig and clip) the bones by
-name, the skinned mesh's triangle count, rest bounds and the SET of vertex positions (the FBX import splits vertices at
-seams, the glTF carries them split already: duplicate counts may differ, the position sets may not - a grid lookup
-within 1e-3 of the rig's extent, both ways), the root bone's placement and every bone's rest transform, the clip's
-length and, at every clip frame (at least 24 Hz) and both imports' curve keys, every bone's world transform (position,
-rotation and scale) and the skinned vertices (`SkinnedMeshRenderer.BakeMesh`); and each role's non-empty baked clip
-collection and pose stream length (frames x bones). Two tolerances: the REST pose stays strict (1e-3 of the
+(`BakeSmokeTest.MissingAssets`); for every role (`RigPreviewPath` resolves either route's rig and clip), both rigs posed
+at the role's clip's FIRST FRAME (since 2026-10-27, below), the bones by name, the skinned mesh's triangle count, bounds
+and the SET of vertex positions (the FBX import splits vertices at seams, the glTF carries them split already: duplicate
+counts may differ, the position sets may not - a grid lookup within 1e-3 of the rig's extent, both ways), the root
+bone's placement and every bone's first-frame transform, the clip's length and, at every clip frame (at least 24 Hz) and
+both imports' curve keys, every bone's world transform (position, rotation and scale) and the skinned vertices
+(`SkinnedMeshRenderer.BakeMesh`); and each role's non-empty baked clip collection and pose stream: the same bone count,
+frame counts equal or ONE apart, and byte lengths compatible with that (`PoseStreamParity.Compare`, unit-tested: the SDK's
+`FrameCount` is ceil(length x frame rate), and Unity's FBX import reads a 212-frame clip as 8.833334 s where the GLB
+route's is 8.833333 s). Two tolerances: the FIRST FRAME stays strict (1e-3 of the
 extent, 0.06 degrees for rotation and matrix axes, 1e-3 relative axis scale); the CLIP accepts 0.6 degrees of rotation,
 1.5% of the extent for position and 1% relative scale **in each bone's matched parent space**. For root bones this is world space.
 Non-bone wrapper transforms are included in that relative matrix.
@@ -2409,13 +2412,52 @@ weighted bones' bind-space bounds, plus the strict rest allowance. This covers a
 letting unweighted sockets widen the mesh tolerance; wrong weights with identical bone motion still fail.
 `BakeResult.rigRoute` says which route a bake took ("blender", "csharp",
 "csharp-fallback" with the port's reason in `rigRouteNote`): a recipe the port leaves to Blender by name bakes through
-the FBX route both times and is a SKIP that says why; a port crash is a FAIL. The in-game check of each model playing
+the FBX route both times and is a SKIP that says why; a port crash is a FAIL.
+
+**The row's first run (2026-10-27): 8 of 23 entries equal, 15 not - five causes, each drilled on the two routes' files
+imported the Factory's way in a batch Unity project, then fixed where it belonged.** (1) The two exporters define a
+bone's default transform differently: Blender's FBX exporter writes the POSED matrix at the frame the script pins (the
+clip's first frame - `rig_anim.py`'s `_export_one`), the glTF exporter the armature's edit rest; the SDK's skeleton takes
+its per-bone Local from the skeleton prefab and encodes every role's clip relative to it (`ClipCollection.Reimport`
+instantiates `skeleton.Prefab`), so the Factory's GLB import now poses its prefab at the primary clip's first frame
+(`UniversalBaker.ImportGlbRig`, the clip sampled at 0 before the prefab is saved) and the row samples both rigs at the
+role's clip's first frame before its "rest" clauses (a role's clip may start elsewhere than the primary's; eleven of the
+fifteen were this: LightCruisers, SteamFrigates, SteamTransports, TOW-Infantry, SiegeHowitzersCar, TowedGunHowitzers,
+Abominations, DroneSquadFPV, Lembos' oar and sail, part of ReconDrone and AntiTankIFV). (2) The FBX route shipped a
+STALE translation: the rebake keys the pose bone's CURRENT value, a bone translating in one clip left its last-frame
+location on the pose bone, and the one-frame idle slice `Spin[0..0]` - no location curve for it - evaluated that value
+at export (the AntiTankIFV's tread links sat 0.45 units from Spin's frame 0; probed in Blender: `pb.location` =
+`(-0.544, -0.124, 0)` before the export, no fcurve). The glTF exporter resets pose bones between actions, and the port
+models that; the script now resets every pose bone's channels after the rebake, mirrored in `BlenderRigAnim.RunStage3`.
+(3) An FBX-born glTF keeps its centimetre root (the ReconDrone's `RootNode.0` at 0.01) above the whole rig; the FBX
+route has no such node (the script exports armatures and meshes only) and the SDK composes uniform-scale TRS per bone, so
+`ImportGlbRig` folds a uniformly scaled, unanimated, mesh-less, joint-less wrapper of every joint and renderer into the
+rig (`FoldScaledWrappers`: translations, bind pose rows, rigid vertices and position curves x the factor). (4) Unity's FBX
+import welds vertices equal in every attribute across the whole mesh and drops the triangles that collapse; Blender's
+glTF exporter deduplicates per primitive. The Lembos imported 27,424 triangles from the GLB against 27,420 from the FBX,
+and the GreatGalley's duplicates cost enough quad pairs (the SDK pairs triangles on shared edges, `QuadEstimate`) to
+push 233,398 triangles past the eight-fragment cap the FBX import's mesh fits (129,934 estimated quads against 120,914;
+welded 129,865 with exact attributes, eight chunks). `HafModelRig.BuildMesh` welds the Factory's mesh the same way
+(`WeldEqualVertices`: exact position, normal, uv and influences). (5) The pose stream frame count, above. `tools/
+riganim_unity_import_drill.sh` holds (1), (3) and (4) on fixtures ("offset", "wrapped", "dupes") and (5) on the rule's
+cases; the push gate's rig_anim drill holds (2) row for row. The in-game check of each model playing
 its roles stays the user's; the row green on every entry and that check together flip the default. The comparison
 itself is executed by `tools/riganim_unity_import_drill.sh` (licensed Unity and Blender, a temporary project): equal
 imports and a real FBX/GLB pair (the same fixture slimmed by rig_anim.py and by rig_anim_glb.py) pass, with Unity's
 default FBX compression and without it; a socket rotation of 0.4 degrees passes and one of 2 degrees fails; size,
 duration, intermediate motion, subframe keyed excursions and absent/empty role pose streams fail. A cancel keeps the
 verdicts made so far. Owed: the row's run.
+
+Review of PR #214: six native Unity counterexamples fail the original code and pass the fixes. Welding preserves close
+but distinct positions, normals and UVs, and removes collapsed index triangles even without duplicate vertices. Wrapper
+folding adjusts a shared skin's bind poses once and tests scale uniformity relative to its magnitude; shared meshes and
+tiny nonuniform wrappers retain their animated world geometry. Four added unit cases catch asymmetric rounding and
+impossible encoded frame lengths (2,208 cases pass). The installed SDK's `ClipEntry.Reimport` stores held bones once,
+rotation-only frames in pairs of three words, and translating/scaling frames in three/four words; an extra frame can add
+zero, 12 or 16 bytes per bone. Native checks cover both directions, valid twelve-byte streams and incomplete words.
+The port revision invalidates pre-reset slim caches. A focused native run on the registry's GreatGalley, Lembos,
+AntiTankIFV and ReconDrone still generates/imports all four: the Lembos has 27,420 triangles and GreatGalley fits eight
+fragments. This is automated compatibility evidence; the complete acceptance row and in-game check remain owed.
 
 Review of PR #172 (2026-10-14): native Unity reproduced false failures for three-bone chains with 0.4-degree
 local rotation errors or 0.6% local scale errors, and a false pass for opposite socket shear despite equal world

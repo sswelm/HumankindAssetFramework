@@ -351,16 +351,17 @@ route bake what the FBX route bakes?" - every animated glTF entry baked both way
 outputs, the imported rig (bones, mesh, placement), every role's clip (length; bone world transforms and skinned vertices at
 every clip frame and curve key) and non-empty role collections and pose stream lengths compared in Unity (`docs/Testing.md`); `BakeResult.rigRoute` names the
 route a bake took. OWED, the user's: the row's run in Unity on every entry and the in-game check of each model playing
-its roles; only then the default flips. RUN 2026-10-27 (the user's Bake Tests): 8 of 23 entries equal, 15 differ, one
-SKIP by name. The findings, by class: the rest bounds differ with the GLB route's minimum Y at 0.00 where the FBX route's
-is negative and the X/Z extents differ too (Abominations, AntiTankIFV, DroneSquadFPV, LightCruisers, ReconDrone,
-SteamFrigates, SteamTransports, TOW-Infantry: a rest pose placed differently); a bone's world transform at rest differs
-by a rotation (11.6, 15.1, 53.6, 180 degrees); the baked pose stream's length differs (ArmouredCar 1632 vs 1428 bytes,
-GatlingGuns 1248 vs 1200); triangle counts differ by four (Lembos 27420 vs 27424); the GreatGalley's GLB bake exceeds the
-draw-fragment cap the FBX bake stays under (233,398 triangles); UniversalTanks crashed on a missing output folder (fixed
-the same day: the port creates it). These are the route differences this row exists to surface, to be worked through
-before the GLB route becomes the default; the same run's "in-process rig slim" row failed twelve rigs on the albedo
-PNG's BYTES while the pixels were identical (fixed: pixel for pixel).
+its roles; only then the default flips. RUN 2026-10-27 by the user: 8 of 23 entries equal, 15 not, 1 not glTF. The
+fifteen, drilled on both routes' files in a batch Unity project (`docs/Testing.md`, step (h), the first run): eleven were
+the row comparing the UNPOSED prefabs - the FBX exporter writes the posed first frame, the glTF exporter the edit rest -
+fixed on both sides (the GLB import poses its prefab at the primary's first frame, the SDK's reference; the row samples
+the first frame before its rest clauses); the AntiTankIFV was a REAL FBX-route defect (a stale pose-bone location
+exported into the idle slice; the script resets its pose bones after the rebake, the port mirrors it); the ReconDrone's
+0.01 `RootNode` wrapper is folded into the rig; the Lembos' four collapsed triangles and the GreatGalley's fragment cap
+were Unity's FBX-import weld, which the Factory's GLB mesh now applies; three pose streams were one frame apart, the
+SDK's ceil of length x frame rate on a float ulp (the rule now allows exactly that, `PoseStreamParity`). STILL OWED: the
+row's re-run on every entry after this, and the in-game check. UniversalTanks' missing output directory is created by
+the port (PR #213); that PR also compares the albedo PNG's decoded pixels instead of its encoder-dependent bytes.
 
 **(5) `vehicle_rig` - the plan, decided 2026-10-14 (the Lab's Generate without Blender, by (4)'s method).** Measured
 first: `vehicle_rig.py` is 3,846 lines; `mode = argv[0]` is probe (ported, 3a-3d), rigfast (the SKM fast path) or

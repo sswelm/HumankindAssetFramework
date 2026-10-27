@@ -13,7 +13,7 @@
 # Usage: blender -b --python rig_anim.py -- <input> <output.fbx> <targetTris> [bonePrefixesCSV] [clipName] [albedoOut.png] [keepMats] [rotXdeg,rotYdeg,rotZdeg] [convertRig]
 import bpy, bmesh, sys, os
 from math import radians
-from mathutils import Matrix, Vector
+from mathutils import Matrix, Vector, Quaternion
 
 argv = sys.argv[sys.argv.index("--") + 1:]
 inp, outp, target = argv[0], argv[1], int(argv[2])
@@ -727,6 +727,16 @@ try:
                         pb.location = _basis.to_translation()
                         pb.keyframe_insert("location", frame=_f)
             _rebaked[_oa] = _na
+        # RESET the pose channels the loop leaves behind (2026-10-27, the AntiTankIFV finding): keyframe_insert keys the
+        # CURRENT value, and a bone that translates in one clip but holds still in another keeps the LAST clip's last-frame
+        # location on the pose bone. A clip without a location curve for that bone then evaluates the stale value, and the
+        # FBX export shipped it: the idle slice Spin[0..0] carried the tread links at Spin's last frame, 0.45 units from
+        # frame 0. The glTF exporter resets pose bones between actions; the FBX export gets the same reset here, so an
+        # unkeyed channel evaluates at rest on both routes.
+        for pb in arm.pose.bones:
+            pb.location = Vector((0.0, 0.0, 0.0))
+            pb.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))
+            pb.scale = Vector((1.0, 1.0, 1.0))
         act = _rebaked[all_acts[0]]
         role_acts = {r: _rebaked[a] for r, a in role_acts.items()}
         all_acts = [act] + [a for a in dict.fromkeys(role_acts.values()) if a is not act]

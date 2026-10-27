@@ -1258,6 +1258,10 @@ public static class BlenderRigAnim
                     }
                 rebaked[oa] = na;
             }
+            // the script resets every pose bone's channels after the rebake (2026-10-27): keyframe_insert keys the CURRENT value, so a
+            // bone translating in one clip left its last-frame location on the pose bone, and a clip without a location curve for it
+            // evaluated that stale value (the AntiTankIFV's idle slice shipped the tread links at Spin's last frame on the FBX route)
+            foreach (int b in ad.BoneNodes) ad.PoseProps[b] = new[] { new float[3], new[] { 1f, 0f, 0f, 0f }, new[] { 1f, 1f, 1f } };
             primary = rebaked[primary];
             roleActs = roleActs.Select(r => (r.role, rebaked[r.act])).ToList();
             allActs = new List<ActionData> { primary };
