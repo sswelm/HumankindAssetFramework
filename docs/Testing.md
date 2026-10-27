@@ -3584,6 +3584,15 @@ sat finished); each face's answer is its own, so the chunking changes no result.
 | its largest group's twin census | 7.4 s | 6.1 s |
 | the galley, 15 groups, wall | 9.6 s | 9.7 s |
 
+**The groups' schedule, re-measured** (2026-10-27, after the kernels and the shared file). The four-at-a-time limit was chosen
+when the groups starved each other of the collector; with the weld, side view and gather making no garbage, the same 22-group
+job in Unity, bytes identical at every setting: 4 at once 37.0 / 36.1 / 36.1 s, 8 at once 34.2 / 35.5 / 35.0 s, 16 at once
+35.7 s, all 22 at once 36.0 s. The largest group's native weld grows from 7.5 s to 11 s as more groups run beside it - memory
+bandwidth now, not the collector - and the wall is that group's chain. The default is half the logical processors
+(`GlbDisconnectedParts.DefaultFuseGroupWorkers`, 8 on 16 threads), and the Model Fuser's **groups at once** setting
+(EditorPrefs `HAF.ModelFuser.GroupsAtOnce`, 0 = the default) overrides it per machine (user: "8 sounds right for an 8-core
+CPU, make this configurable"). `GlbFuseTests` holds the default to at least two and to half the processors.
+
 x64 .NET, back to back: the Saleg's 43.6 s -> 36.9 s, the galley 10.7 s -> 10.1 s. Guards: `GlbFuseTests`' shared-read test now
 also counts: a two-group fuse parses its source twice whatever the group count (the groups' shared read and the apply's own;
 the written file's validation parses the output) and reads the frame once. The counts are kept per source ARRAY

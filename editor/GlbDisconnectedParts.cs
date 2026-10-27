@@ -1398,7 +1398,7 @@ public static partial class GlbDisconnectedParts
         {
             var order = indices.OrderByDescending(k => jobs[k].NodeIndices.Count).ThenBy(k => k).ToArray();
             var failed = new Exception[jobs.Count]; int next = -1;
-            int workers = Math.Max(1, Math.Min(order.Length, FuseGroupWorkers > 0 ? FuseGroupWorkers : Math.Max(2, Environment.ProcessorCount / 4)));
+            int workers = Math.Max(1, Math.Min(order.Length, FuseGroupWorkers > 0 ? FuseGroupWorkers : DefaultFuseGroupWorkers));
             var tasks = new System.Threading.Tasks.Task[workers];
             for (int w = 0; w < workers; w++)
                 tasks[w] = System.Threading.Tasks.Task.Run(() =>
@@ -1467,9 +1467,14 @@ public static partial class GlbDisconnectedParts
     // to itself it kept injecting threads - forty of them on a sixteen-thread machine - which on this work only adds
     // cache pressure. Measured on the Saleg's Revenge.
     static readonly System.Threading.Tasks.ParallelOptions FuseParallel = new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount) };
-    /// <summary>How many fuse groups FuseGroups plans at once; 0 = a quarter of the logical processors, at least two (4 on the
-    /// author's 16, measured best). Settable for the tests and the benchmark.</summary>
-    internal static int FuseGroupWorkers = 0;
+    /// <summary>How many fuse groups FuseGroups plans at once; 0 = DefaultFuseGroupWorkers. The Model Fuser sets it from its
+    /// "groups at once" setting; the tests and the benchmark set it directly.</summary>
+    public static int FuseGroupWorkers = 0;
+    /// <summary>Half the logical processors, at least two (8 on the author's 16). A quarter was best on 2026-10-26, when the
+    /// groups starved each other of the garbage collector; with the weld, side view and gather making none (2026-10-27) the
+    /// Saleg's 22 groups measured 36-37 s at 4, 34-35.5 s at 8, 35.7 s at 16 and 36.0 s at all 22 - above 8 the largest group's
+    /// native weld slows (7.5 s -> 11 s) as the others compete for memory bandwidth, and the wall is that group's chain.</summary>
+    public static int DefaultFuseGroupWorkers => Math.Max(2, Environment.ProcessorCount / 2);
 
     sealed class FusePlan
     {
