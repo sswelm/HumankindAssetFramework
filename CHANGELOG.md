@@ -12,8 +12,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 - **THE WORKSHOP'S PROBE IN A THIRD OF THE TIME (2026-10-27).** The Saleg's Revenge's Probe spent 12.1 s analysing its
   1,868 meshes on one thread, and analysing them on every core gained only 15 % - collector-bound, an object per vertex and
-  triangle. Structs, one id array per accessor and the fuse's flat cell grid brought one thread to 8.7 s and every core to
+  triangle. Structs, dense/sparse vertex-ID maps and the fuse's flat cell grid brought one thread to 8.7 s and every core to
   4.5 s; every part's island count unchanged on 22 sources (docs/Testing.md, Native kernels).
+  Review guards bound ID-map allocation, preserve checked coordinate failures, and defer malformed node extensions to node order.
 - **THE NATIVE KERNELS AND THE WORKSHOP'S SPEED DOCUMENTED WHERE A USER LOOKS (2026-10-27).** Native kernel details
   previously sat mainly in Testing.md. Editor-Tools (the Workshop: what runs native, the measured times, the restart-after-update
   rule, the timing line, the groups-at-once knob), Building (a Native kernels section: compiler, determinism, the

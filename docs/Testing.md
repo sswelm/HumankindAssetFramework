@@ -3601,6 +3601,16 @@ unchanged and the three stale rows' candidates byte-identical to the previous ru
 lines mesh; 2,186 tests. The split after, one worker: gather 2.4 s, weld 2.2 s, merge 2.7 s, components 1.0 s. Left in the
 probe: the distance merge's dictionaries (now the largest piece) and the component build's per-corner lists.
 
+PR #211 review guards: a dense POSITION-to-ID map is bounded by the primitive's corner count, with the POSITION and index
+ranges checked before allocation. Sparse or invalid ranges use a dictionary of referenced IDs, preserving the existing
+lazy data errors. Two meshes sharing a million-position accessor but referencing only three vertices each must fit within
+the parse/BIN-copy allocation plus 1 MiB; oversized declared counts must report the data error instead of attempting a giant
+array. Checked cell-coordinate conversion preserves the probe's blocked rows and the splitter's warnings for NaN/infinity.
+Malformed node extensions are deferred by the parallel pre-pass so an earlier node's error still wins. The eight new cases
+bring the suite to 2,194. A separate 48-fixture comparison holds probe rows at one/eight workers and split bytes at zero/1%
+merge equal to both the serial base and the original PR, on .NET and Unity. The 1,868-mesh ship's complete probe rows also
+match the original PR in Unity at one/eight workers; single-run timings remain about 8.7 s and 2.9 s respectively.
+
 **The groups' schedule, re-measured** (2026-10-27, after the kernels and the shared file). The four-at-a-time limit was chosen
 when the groups starved each other of the collector; with the weld, side view and gather making no garbage, the same 22-group
 job in Unity, bytes identical at every setting: 4 at once 37.0 / 36.1 / 36.1 s, 8 at once 34.2 / 35.5 / 35.0 s, 16 at once

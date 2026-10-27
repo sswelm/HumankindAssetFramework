@@ -30,14 +30,14 @@ public static partial class GlbDisconnectedParts
         readonly long minX, minY, minZ, maxX, maxY, maxZ;
         readonly int bitsX, bitsY, mask;
 
-        public CellGrid(List<Vec3> pos, double cellSize)
+        public CellGrid(List<Vec3> pos, double cellSize, bool checkedCoordinates = false)
         {
             int n = pos.Count;
             var raw = new long[3 * n];
             minX = minY = minZ = long.MaxValue; maxX = maxY = maxZ = long.MinValue;
             for (int i = 0; i < n; i++)
             {
-                PositionKey k = CellOf(pos[i], cellSize);
+                PositionKey k = checkedCoordinates ? CheckedCellOf(pos[i], cellSize) : CellOf(pos[i], cellSize);
                 raw[3 * i] = k.X; raw[3 * i + 1] = k.Y; raw[3 * i + 2] = k.Z;
                 if (k.X < minX) minX = k.X; if (k.X > maxX) maxX = k.X;
                 if (k.Y < minY) minY = k.Y; if (k.Y > maxY) maxY = k.Y;
@@ -56,6 +56,12 @@ public static partial class GlbDisconnectedParts
             var fill = new int[buckets]; Array.Copy(start, fill, buckets);
             for (int i = 0; i < n; i++) Members[fill[Bucket(Keys[i])]++] = i;   // in vertex order: every bucket ascends
         }
+
+        // AnalyzeMesh historically rejected non-finite/out-of-range cells through checked casts. The fuse's existing
+        // unchecked grid remains unchanged; the probe/split/tear caller opts into its original failure behaviour.
+        static PositionKey CheckedCellOf(Vec3 p, double size) => new PositionKey {
+            X = checked((long)Math.Floor(p.X / size)), Y = checked((long)Math.Floor(p.Y / size)), Z = checked((long)Math.Floor(p.Z / size))
+        };
 
         // How many bits a coordinate in [lo, hi] takes relative to lo; 64 when the span does not fit a long at all.
         static int Bits(long lo, long hi)

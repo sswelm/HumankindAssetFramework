@@ -421,7 +421,9 @@ public static partial class GlbDisconnectedParts
         {
             var node = nodes[nodeIndex] as JObject; if (node?["mesh"] == null) continue;
             int mi; try { mi = node.Value<int>("mesh"); } catch (Exception) { continue; }
-            if (mi < 0 || mi >= meshes.Count || !(meshes[mi] is JObject) || node["extensions"]?["EXT_mesh_gpu_instancing"] != null) continue;
+            var extensions = node["extensions"];
+            if (mi < 0 || mi >= meshes.Count || !(meshes[mi] is JObject) ||
+                (extensions != null && !(extensions is JObject)) || extensions?["EXT_mesh_gpu_instancing"] != null) continue;
             if (seen.Add(mi)) wanted.Add(mi);
         }
         var planOf = new MeshPlan[meshes.Count]; var analysed = new bool[meshes.Count]; var blockedOf = new string[meshes.Count]; var failedOf = new Exception[meshes.Count];
@@ -3678,7 +3680,7 @@ public static partial class GlbDisconnectedParts
         JArray primitives = mesh["primitives"] as JArray;
         if (primitives == null || primitives.Count == 0) return null;
         var vertices = new List<Vertex>();
-        var vertexIds = new Dictionary<int, int[]>();
+        var vertexIds = new Dictionary<int, VertexMap>();
         var triangles = new List<Triangle>();
         var dsu = new DisjointSet();
         int order = 0;
@@ -3702,9 +3704,9 @@ public static partial class GlbDisconnectedParts
                 uint a = indexed ? reader.Index(indexAccessor, i) : i;
                 uint b = indexed ? reader.Index(indexAccessor, i + 1) : i + 1;
                 uint c = indexed ? reader.Index(indexAccessor, i + 2) : i + 2;
-                int va = VertexId(positionAccessor, a, reader, vertexIds, vertices, dsu);
-                int vb = VertexId(positionAccessor, b, reader, vertexIds, vertices, dsu);
-                int vc = VertexId(positionAccessor, c, reader, vertexIds, vertices, dsu);
+                int va = VertexId(positionAccessor, a, indexAccessor, indexCount, reader, vertexIds, vertices, dsu);
+                int vb = VertexId(positionAccessor, b, indexAccessor, indexCount, reader, vertexIds, vertices, dsu);
+                int vc = VertexId(positionAccessor, c, indexAccessor, indexCount, reader, vertexIds, vertices, dsu);
                 dsu.Union(va, vb); dsu.Union(vb, vc);
                 triangles.Add(new Triangle { Primitive = primitiveIndex, A = a, B = b, C = c, VA = va, VB = vb, VC = vc, Order = order++ });
             }
@@ -3732,7 +3734,7 @@ public static partial class GlbDisconnectedParts
             Vec3 p = vertices[i].Position;
             scaled.Add(new Vec3 { X = (p.X - min[0]) * invX, Y = (p.Y - min[1]) * invY, Z = (p.Z - min[2]) * invZ });
         }
-        var grid = new CellGrid(scaled, 1.0); int[] members = grid.Members; long[] keys = grid.Keys; bool wide = grid.Wide;
+        var grid = new CellGrid(scaled, 1.0, checkedCoordinates: true); int[] members = grid.Members; long[] keys = grid.Keys; bool wide = grid.Wide;
         for (int i = 0; i < vertices.Count; i++)
         {
             Vec3 p = vertices[i].Position;
@@ -3888,18 +3890,43 @@ public static partial class GlbDisconnectedParts
         };
     }
 
-    // ids: per POSITION accessor, the vertex id of each of its elements, -1 until seen (one array per accessor instead of
-    // a hashed lookup per corner: 15.5 million lookups on the Saleg's Revenge's probe)
-    static int VertexId(int accessor, uint index, Accessors reader, Dictionary<int, int[]> ids, List<Vertex> vertices, DisjointSet dsu)
+    sealed class VertexMap
+    {
+        public readonly int[] Dense;
+        public readonly Dictionary<uint, int> Sparse;
+        public VertexMap(int count, bool dense)
+        {
+            if (dense) { Dense = new int[count]; for (int k = 0; k < count; k++) Dense[k] = -1; }
+            else Sparse = new Dictionary<uint, int>();
+        }
+    }
+
+    // Dense maps avoid a hashed lookup per corner, but a mesh can reference only three vertices of a large shared
+    // POSITION accessor. Bound the dense allocation by this primitive's references and validate the ranges first;
+    // otherwise keep IDs only for vertices actually read, preserving the old lazy diagnostics on malformed data.
+    static int VertexId(int accessor, uint index, int indexAccessor, int indexCount, Accessors reader, Dictionary<int, VertexMap> ids, List<Vertex> vertices, DisjointSet dsu)
     {
         int count = reader.Count(accessor);
         if (index >= count) throw new InvalidDataException("Primitive index exceeds its POSITION accessor.");
-        if (!ids.TryGetValue(accessor, out int[] map)) { map = new int[count]; for (int k = 0; k < count; k++) map[k] = -1; ids.Add(accessor, map); }
-        int id = map[index];
-        if (id >= 0) return id;
+        if (!ids.TryGetValue(accessor, out VertexMap map))
+        {
+            bool dense = count <= 4L * indexCount;
+            if (dense) try
+            {
+                reader.Position(accessor, 0);
+                reader.Position(accessor, (uint)(count - 1));
+                if (indexAccessor >= 0) reader.Index(indexAccessor, (uint)(indexCount - 1));
+            }
+            catch (Exception ex) when (ex is InvalidDataException || ex is OverflowException) { dense = false; }
+            ids.Add(accessor, map = new VertexMap(count, dense));
+        }
+        int id;
+        if (map.Dense != null) { id = map.Dense[index]; if (id >= 0) return id; }
+        else if (map.Sparse.TryGetValue(index, out id)) return id;
+        Vec3 position = reader.Position(accessor, index);
         id = dsu.Add();
-        map[index] = id;
-        vertices.Add(new Vertex { Key = new VertexKey { Accessor = accessor, Index = index }, Position = reader.Position(accessor, index) });
+        if (map.Dense != null) map.Dense[index] = id; else map.Sparse.Add(index, id);
+        vertices.Add(new Vertex { Key = new VertexKey { Accessor = accessor, Index = index }, Position = position });
         return id;
     }
 
