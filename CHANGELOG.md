@@ -10,8 +10,8 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
-- **THE NATIVE KERNELS AND THE WORKSHOP'S SPEED DOCUMENTED WHERE A USER LOOKS (2026-10-27).** Until now only Testing.md
-  knew the plugin existed. Editor-Tools (the Workshop: what runs native, the measured times, the restart-after-update
+- **THE NATIVE KERNELS AND THE WORKSHOP'S SPEED DOCUMENTED WHERE A USER LOOKS (2026-10-27).** Native kernel details
+  previously sat mainly in Testing.md. Editor-Tools (the Workshop: what runs native, the measured times, the restart-after-update
   rule, the timing line, the groups-at-once knob), Building (a Native kernels section: compiler, determinism, the
   twins, the version contract), Code-Map (`native/`), Troubleshooting (a slow tool or a `managed` kernels line; "Probe
   failed"), the docs index and Performance (the editor-side axis) now carry it.

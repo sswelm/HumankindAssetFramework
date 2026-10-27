@@ -472,20 +472,24 @@ windows. **Deep dive:**
   letters travel with a cut or split output, and a fused output's sidecar names each shell under its group's letter, so
   either order works (the Cutter re-reads the sidecar on every Probe, so after changing groups in the Fuser,
   re-Probe in the Cutter before cutting; the Fuser keeps your edits across a re-Probe and reloads through Load groups).
-  **How long a fuse takes, and the native plugin** (2026-10): the heavy stages of a Probe and a Fuse — the weld, the
-  exposure views from above and from the side, the twin census — and of the Vehicle Lab's probe and the Factory's
-  reduce run as C++ from the package's own plugin, `Plugins/x86_64/hafkernels.dll` (Editor-only, x86_64; nothing to
-  install). Every kernel keeps its C# twin as the fallback (a 32-bit host, a missing or stale DLL), and the output is
-  byte-identical either way: a managed run is correct, only several times slower. Measured on the Saleg's Revenge
-  (22 groups, 705 parts, 3.9 million triangles): 148.7 s before the kernels, 37 s after; the galley's 15 groups 24.6 s
-  to 9.6 s (the numbers and their method in [Testing → Native kernels](Testing.md#native-kernels)). **After a package
-  update that changes the DLL, restart Unity**: the editor never unloads a native plugin, so the old one keeps answering
-  with its old version and everything silently runs managed. The Vehicle Lab's probe logs a `kernels native
-  (hafkernels.dll version N)` line to the Console; the Workshop prints none, so a fuse several times slower than the
-  figures above is the sign. The fuse plans its groups a few at a time, largest first (**Fuse — groups at once**,
-  above), and each group's report line ends with its stage timing (`timing: parse … gather … weld … sheets …`), which
-  is where to look when a fuse is slow — the wall is the largest group's own chain, never the group count. A Probe that
-  fails logs its exception with the stack trace to the Console, not only its message.
+  **How long a fuse takes, and the native plugin** (2026-10): Fuse's weld, exposure views from above and from the side,
+  and twin census run as C++ from the package's `Plugins/x86_64/hafkernels.dll`, alongside kernels used by the Vehicle
+  Lab's C# probe and the Factory's reduce. The Workshop's **Probe** (island analysis and preview) stays managed C#.
+  The DLL supports the Windows x86_64 editor and ships with the package. Its C# twins provide the same output when
+  native kernels are unavailable or disabled; the speed difference depends on the operation. Across successive fuse
+  optimizations — shared reads, scheduling, allocation reductions and native kernels — the Saleg's Revenge (22 groups,
+  about 705 parts, 3.9 million triangles) fell from 148.7 s to 37 s with four group workers; the galley's 15 groups fell
+  from 24.6 s to 9.6 s. On the Saleg's, eight workers later measured 34.2–35.5 s (the settings and method are in
+  [Testing → Native kernels](Testing.md#native-kernels)). **After an update that changes the DLL, restart Unity**:
+  the editor keeps the loaded plugin. An ABI-version mismatch uses managed fallback; an unchanged ABI version can
+  keep the old native implementation running. To check the backend, run a **C# Vehicle Lab probe in the same editor
+  session** and inspect its Console line containing `kernels native (…)` or `kernels managed (…)`. The Workshop prints
+  no backend line; elapsed time alone does not identify which path ran.
+  Fuse plans groups a few at a time, largest first (**Fuse — groups at once**, above). Each group in
+  `<output GLB>.fuse-report.txt` has a separate stage timing line (`timing: parse … gather … weld … sheets …`). Groups
+  overlap, so their elapsed times must not be summed to get wall time. The largest group's chain dominated the ship
+  measurement above; other models and worker settings can have a different balance. A Probe that fails logs its
+  exception with the stack trace to the Console, not only its message.
   **Delete** (0.5.7): the Delete key, or the row popup, marks a part for deletion in either window — it loses its mesh
   in the output, whatever writes it (Split, Plane cut or Fuse); Insert marks the highlighted row for split, – / 0 /
   Backspace clear every mark. The Split checks and the deletion marks persist in `<source>.marks.txt` (S = split,

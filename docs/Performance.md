@@ -548,12 +548,14 @@ unread.
 ## 8. The other axis — how long the editor tools take
 
 This page is the game's per-frame cost. The editor tools' speed — the Vehicle Lab's probe, the Factory's reduce, the
-Model Workshop's fuse — is measured the same way (never estimated, always in Unity's Mono, where the same C# runs
-2.5-3.4x slower than on the .NET Framework) and lives in [Testing → Native kernels](Testing.md#native-kernels): the
+Model Workshop's fuse — is measured in Unity's Mono as well as on the .NET Framework (the probe's managed code measured
+2.5-3.4x slower in Mono) and lives in [Testing → Native kernels](Testing.md#native-kernels): the
 heavy stages run as C++ from the package's `hafkernels.dll` since 2026-10-21, with the C# kept as the fallback and the
 oracle, byte-identical. The headline numbers on the Saleg's Revenge: the probe 2.86 s to 0.87 s, the reduce to 24,000
-triangles 21.2 s to 13.8 s, the 22-group fuse 148.7 s to 37 s. What bounds the fuse now is its largest group's own
-chain, and the Model Fuser's **groups at once** setting is the one knob ([Editor-Tools](Editor-Tools.md)).
+triangles 21.2 s to 13.8 s. Across the combined fuse optimizations (shared reads, scheduling, allocation reductions and
+native kernels), its 22-group fuse fell from 148.7 s to 37 s with four group workers; this is not a native-only comparison.
+The largest group's chain dominated that measurement. The Model Fuser's **groups at once** setting controls concurrency
+([Editor-Tools](Editor-Tools.md)); the best setting depends on the model and machine.
 
 Related: [Architecture](Architecture.md) (§2 threads, §2b per-frame), [Testing](Testing.md) (the headless tools),
 [Vertex-Budget](Vertex-Budget.md) (the *GPU* budget — a different axis: mesh memory, not frame time).
