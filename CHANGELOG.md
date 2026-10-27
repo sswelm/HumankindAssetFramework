@@ -10,6 +10,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **TWO BAKE TESTS ROWS READ RIGHT AGAIN (2026-10-27).** The "in-process rig slim" row failed twelve rigs on the albedo
+  PNG's bytes: Blender's `image.save` re-encodes the source through its own PNG writer, the port keeps the source's
+  bytes, and the pixels were identical (LightCruisers, proven pixel for pixel). The row holds the PNG pixel for pixel now.
+  In the "GLB rig route" row the port crashed on UniversalTanks because the output's folder did not exist yet under the
+  row's throwaway name; the port creates it. The row's other fifteen differences (rest bounds, pose streams, triangle
+  counts between the FBX and GLB routes) are the acceptance findings the backlog says that row exists to surface, not
+  regressions: the GLB route is not the default, and they are worked through before it becomes one.
 - **THE WORKSHOP'S PROBE IN A THIRD OF THE TIME (2026-10-27).** The Saleg's Revenge's Probe spent 12.1 s analysing its
   1,868 meshes on one thread, and analysing them on every core gained only 15 % - collector-bound, an object per vertex and
   triangle. Structs, dense/sparse vertex-ID maps and the fuse's flat cell grid brought one thread to 8.7 s and every core to

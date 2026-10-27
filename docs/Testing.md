@@ -1647,7 +1647,10 @@ Blender's GLB export?" (`editor/BlenderRigAnimHeadlessTest.cs`) is the acceptanc
 default flips: for every animated registry entry with a glTF source (a deploying entry's converted rig from its
 cache), `UniversalBaker.RigAnimArgv` - the slim block's own argv builder - runs the port and Blender's
 `rig_anim_glb.py` and holds the two GLBs byte for byte (a JPEG albedo's with the image bytes aside, read back and
-named field by field), the albedo PNG byte for byte or by its size, the script's exits on both sides; a named
+named field by field), the albedo PNG pixel for pixel (byte for byte until 2026-10-27: Blender's `image.save` re-encodes the
+source through its own PNG writer - LightCruisers 493,369 bytes from the source's 422,645 - while the port keeps the source's
+bytes; the pixels were identical and the byte rule failed twelve rigs that were right) or a JPEG albedo by its size, the
+script's exits on both sides; a named
 fallback is a SKIP that says why, a crash a FAIL. A source-reading review before the PR found three defects the drill cannot see (the GLB is Blender's byte for byte; they
 are in the Factory's use of it), each fixed: a fallback mid-bake left the earlier key's GLB and sidecar beside a csharp
 stamp, so the next bake with 'Reuse extracted' took the stale GLB (now the fallback deletes them and stamps a fallback

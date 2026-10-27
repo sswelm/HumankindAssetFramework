@@ -124,13 +124,26 @@ public static class BlenderRigAnimHeadlessTest
                     if (hasA != hasB) { s.fail++; body.AppendLine($"FAIL: {e.resourceName}: the albedo is {(hasA ? "written" : "not written")} in process and {(hasB ? "written" : "not written")} by Blender"); continue; }
                     if (hasA)
                     {
-                        if (inProc.AlbedoMime == "image/png" && !File.ReadAllBytes(albedoA).SequenceEqual(File.ReadAllBytes(albedoB)))
-                        { s.fail++; body.AppendLine($"FAIL: {e.resourceName}: the albedo PNG differs from Blender's ({new FileInfo(albedoA).Length} bytes in process, {new FileInfo(albedoB).Length} from Blender)"); continue; }
+                        // A PNG albedo is held PIXEL for pixel, not byte for byte (2026-10-27): Blender's image.save re-encodes the
+                        // source through its own PNG writer (LightCruisers: 493,369 bytes from 422,645) while the port keeps the
+                        // source's bytes; the pixels are the same and the byte rule failed twelve rigs that were right. Equal bytes
+                        // still pass without a decode.
+                        string pixelNote = "";
+                        if (inProc.AlbedoMime == "image/png")
+                        {
+                            byte[] pa = File.ReadAllBytes(albedoA), pb = File.ReadAllBytes(albedoB);
+                            if (!pa.SequenceEqual(pb))
+                            {
+                                string why = PngPixelDifference(pa, pb);
+                                if (why != null) { s.fail++; body.AppendLine($"FAIL: {e.resourceName}: the albedo PNG differs from Blender's - {why} ({pa.Length} bytes in process, {pb.Length} from Blender)"); continue; }
+                                pixelNote = $" (re-encoded by Blender: {pb.Length} bytes from the source's {pa.Length})";
+                            }
+                        }
                         var texB = new Texture2D(2, 2); bool okB = texB.LoadImage(File.ReadAllBytes(albedoB));
                         if (!okB || texB.width != inProc.AlbedoWidth || texB.height != inProc.AlbedoHeight)
                         { s.fail++; body.AppendLine($"FAIL: {e.resourceName}: Blender's albedo is {(okB ? texB.width + "x" + texB.height : "unreadable")}, the port says {inProc.AlbedoWidth}x{inProc.AlbedoHeight}"); UnityEngine.Object.DestroyImmediate(texB); continue; }
                         UnityEngine.Object.DestroyImmediate(texB);
-                        albedoNote = inProc.AlbedoMime == "image/png" ? ", the albedo PNG byte for byte" : $", the albedo ({inProc.AlbedoMime}) re-encoded at Blender's {inProc.AlbedoWidth}x{inProc.AlbedoHeight}";
+                        albedoNote = inProc.AlbedoMime == "image/png" ? ", the albedo PNG pixel for pixel" + pixelNote : $", the albedo ({inProc.AlbedoMime}) re-encoded at Blender's {inProc.AlbedoWidth}x{inProc.AlbedoHeight}";
                     }
                 }
                 s.pass++;
@@ -162,5 +175,24 @@ public static class BlenderRigAnimHeadlessTest
         if (expected.Length == 0) { error = "the port's script exit has no RIGANIM ERROR diagnostic"; return false; }
         if (!actual.SequenceEqual(expected)) { error = "Blender did not report the port's script-exit diagnostic: " + expected.Last() + (actual.Length > 0 ? " (Blender said: " + actual.Last() + ")" : " (Blender said nothing)"); return false; }
         return true;
+    }
+
+    // Two PNGs decoded by Unity and held pixel for pixel: null when equal, else what differs. Both sides decode the same way,
+    // so an encoder's choice (Blender's zlib level, the port's source bytes) cannot tell them apart; a changed pixel can.
+    internal static string PngPixelDifference(byte[] a, byte[] b)
+    {
+        var ta = new Texture2D(2, 2); var tb = new Texture2D(2, 2);
+        try
+        {
+            bool okA = ta.LoadImage(a), okB = tb.LoadImage(b);
+            if (!okA || !okB) return (okA ? "" : "the port's PNG is unreadable") + (!okA && !okB ? "; " : "") + (okB ? "" : "Blender's PNG is unreadable");
+            if (ta.width != tb.width || ta.height != tb.height) return $"{ta.width}x{ta.height} in process, {tb.width}x{tb.height} from Blender";
+            Color32[] pa = ta.GetPixels32(), pb = tb.GetPixels32();
+            int differing = 0, first = -1;
+            for (int i = 0; i < pa.Length; i++)
+                if (pa[i].r != pb[i].r || pa[i].g != pb[i].g || pa[i].b != pb[i].b || pa[i].a != pb[i].a) { if (first < 0) first = i; differing++; }
+            return differing == 0 ? null : $"{differing} of {pa.Length} pixels differ (first at {first % ta.width},{first / ta.width})";
+        }
+        finally { UnityEngine.Object.DestroyImmediate(ta); UnityEngine.Object.DestroyImmediate(tb); }
     }
 }
