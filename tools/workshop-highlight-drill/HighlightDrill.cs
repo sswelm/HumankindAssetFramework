@@ -18,12 +18,58 @@ public static class HighlightDrill
     {
         try
         {
+            CheckLifecycle();
             Require(SystemInfo.graphicsDeviceType != UnityEngine.Rendering.GraphicsDeviceType.Null, "graphics device required; omit -nographics");
             foreach (var type in new[] { typeof(ModelFuserWindow), typeof(ModelSplitterWindow) }) Exercise(type);
             Debug.Log("HIGHLIGHT_DRILL PASS: both sides visible over coincident twins, depth occlusion retained, original material restored in both windows");
             EditorApplication.Exit(0);
         }
         catch (Exception e) { Debug.LogException(e); EditorApplication.Exit(1); }
+    }
+
+    // No graphics required: also run with -batchmode -nographics -executeMethod HighlightDrill.RunLifecycle.
+    // EditorPrefs in a ScriptableObject initializer throws in Unity even when compilation and every .NET test pass.
+    public static void RunLifecycle()
+    {
+        try { CheckLifecycle(); EditorApplication.Exit(0); }
+        catch (Exception e) { Debug.LogException(e); EditorApplication.Exit(1); }
+    }
+
+    static void CheckLifecycle()
+    {
+        const string key = "HAF.ModelFuser.GroupsAtOnce";
+        bool hadPreference = EditorPrefs.HasKey(key); int oldPreference = EditorPrefs.GetInt(key, 0);
+        var setting = typeof(ModelWorkshopWindow).GetField("groupsAtOnce", Flags);
+        var live = new List<UnityEngine.Object>();
+        string saved = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "haf_window_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            foreach (var type in new[] { typeof(ModelFuserWindow), typeof(ModelSplitterWindow) })
+            {
+                EditorPrefs.DeleteKey(key);
+                var defaults = ScriptableObject.CreateInstance(type); live.Add(defaults);
+                Require((int)setting.GetValue(defaults) == 0, type.Name + " must default to auto");
+                UnityEngine.Object.DestroyImmediate(defaults);
+                EditorPrefs.SetInt(key, 3);
+                var window = ScriptableObject.CreateInstance(type); live.Add(window);
+                Require((int)setting.GetValue(window) == 3, type.Name + " must load the saved setting on creation");
+                UnityEditorInternal.InternalEditorUtility.SaveToSerializedFileAndForget(new[] { window }, saved, true);
+                UnityEngine.Object.DestroyImmediate(window);
+                EditorPrefs.SetInt(key, 1);
+                var restored = UnityEditorInternal.InternalEditorUtility.LoadSerializedFileAndForget(saved); live.AddRange(restored);
+                Require(restored.Length == 1 && type.IsInstanceOfType(restored[0]), type.Name + " must restore its serialized window");
+                Require((int)setting.GetValue(restored[0]) == 1, type.Name + " must reload the preference on restoration");
+                UnityEngine.Object.DestroyImmediate(restored[0]);
+                Debug.Log("WINDOW_LIFECYCLE " + type.Name + " default=auto saved=3 restored=1");
+            }
+            Debug.Log("WINDOW_LIFECYCLE PASS: both windows initialize and restore their saved fuse setting");
+        }
+        finally
+        {
+            foreach (var window in live) if (window != null) UnityEngine.Object.DestroyImmediate(window);
+            if (hadPreference) EditorPrefs.SetInt(key, oldPreference); else EditorPrefs.DeleteKey(key);
+            if (System.IO.File.Exists(saved)) System.IO.File.Delete(saved);
+        }
     }
 
     static void Exercise(Type windowType)

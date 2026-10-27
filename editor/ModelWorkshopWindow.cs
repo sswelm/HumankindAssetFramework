@@ -106,9 +106,9 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // coincident positions only: measured on the Teutonic, its plates already touch exactly (the majority rule found
     // the 1,613-face hole at 0), while 0.5‰ collapsed 1,564 rivet-sized triangles and broke the hull island apart.
     [SerializeField] float weldPermille = 0f;
-    // how many fuse groups are planned at once (0 = GlbDisconnectedParts.DefaultFuseGroupWorkers); an EditorPrefs setting, read once per window
+    // how many fuse groups are planned at once (0 = GlbDisconnectedParts.DefaultFuseGroupWorkers); loaded when the window is enabled
     const string GroupsAtOncePref = "HAF.ModelFuser.GroupsAtOnce";
-    int groupsAtOnce = EditorPrefs.GetInt(GroupsAtOncePref, 0);
+    int groupsAtOnce;
     // CHECK MIRRORED PARTS (2026-09-19, the Confederate frigate; user: "make it an option"). Off by default: every file
     // fuses exactly as before. On, the fuse compares each mirrored part with the plain parts it is welded to and, when
     // they clearly agree the file stores mirrored parts already facing outward, undoes the glTF reversal that would turn
@@ -159,7 +159,11 @@ public abstract class ModelWorkshopWindow : EditorWindow
     bool cutNormalsDone;
     bool CutModeActive => cutGO != null;
 
-    void OnEnable() { if (rows.Count > 0 && triangleFreeCleanupVersion < 1) analyzePending = true; }
+    void OnEnable()
+    {
+        groupsAtOnce = EditorPrefs.GetInt(GroupsAtOncePref, 0);   // Unity forbids EditorPrefs reads in ScriptableObject field initializers
+        if (rows.Count > 0 && triangleFreeCleanupVersion < 1) analyzePending = true;
+    }
     void OnDisable() => DestroyPreview();
 
     // P1 OF THE REVIEW OF PR #97: the stamp check in Analyze() decides what a re-Probe shows, and an operation

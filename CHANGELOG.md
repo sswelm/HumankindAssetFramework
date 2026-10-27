@@ -14,7 +14,8 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   was right when the groups starved each other of the collector; now 8 at once is a second faster on the Saleg's 22 groups
   and 16 or all 22 are no faster (the largest group's weld slows as the others compete for memory bandwidth). The default
   is half the logical processors; the Model Fuser's **groups at once** slider overrides it (0 = auto). Bytes never depend
-  on it (docs/Testing.md, Native kernels).
+  on it (docs/Testing.md, Native kernels). The saved setting loads in `OnEnable`: Unity forbids preference reads in
+  a window's field initializer; a real-Unity drill checks creation and serialized restoration of both Workshop windows.
 - **THE PROBE BROKE IN THE EDITOR AND NOT IN ANY TEST (2026-10-27).** The parse counter PR #207 added used a
   `ConditionalWeakTable`; Unity's Mono throws from inside it once the collector has run over the table, so every Probe
   and Fuse in the editor failed with "Specified cast is not valid" while the .NET tests and a Unity batch run passed. A

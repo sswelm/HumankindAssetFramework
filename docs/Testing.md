@@ -3593,6 +3593,14 @@ bandwidth now, not the collector - and the wall is that group's chain. The defau
 (EditorPrefs `HAF.ModelFuser.GroupsAtOnce`, 0 = the default) overrides it per machine (user: "8 sounds right for an 8-core
 CPU, make this configurable"). `GlbFuseTests` holds the default to at least two and to half the processors.
 
+PR #209 review: loading that preference in a field initializer threw Unity's "GetInt is not allowed to be called from a
+ScriptableObject constructor" and left both Workshop windows partly initialized. The read now runs in `OnEnable`.
+The real-Unity drill `tools/workshop-highlight-drill/HighlightDrill.cs` includes `HighlightDrill.RunLifecycle`, runnable
+with `-batchmode -nographics -executeMethod HighlightDrill.RunLifecycle` in a scratch project with the authoring package
+and drill installed. It creates both windows with no preference (auto) and a saved value, serializes and restores them
+after changing the preference, and verifies the restored value. It restores the original preference and removes its
+temporary file. The full graphics drill runs the same lifecycle check before testing selection rendering.
+
 x64 .NET, back to back: the Saleg's 43.6 s -> 36.9 s, the galley 10.7 s -> 10.1 s. Guards: `GlbFuseTests`' shared-read test now
 also counts: a two-group fuse parses its source twice whatever the group count (the groups' shared read and the apply's own;
 the written file's validation parses the output) and reads the frame once. The counts are kept per source ARRAY
