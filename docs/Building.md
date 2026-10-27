@@ -133,6 +133,39 @@ Manager. They compile and run in the host Unity project; ENCReload is the refere
 converter helpers live under `editor/Tools~`, and `HafPackageContext` supplies safe guest-project defaults and derives
 the guest pack identity. The deleted `baker/` editor snapshot must not return: it was a drifting second source.
 
+## Native kernels
+
+The editor package ships `editor/Plugins/x86_64/hafkernels.dll` (Windows Editor-only, x86_64), built from [`native/`](https://github.com/sswelm/HumankindAssetFramework/tree/master/native)
+by `bash tools/build_native_kernels.sh`. It holds the kernels that were measured to be the editor tools' hot spots
+(2026-10-21 to 27): the Lab probe's custom-normal encode and decode, visibility BVH build and world transform
+(`hafkernels.cpp`, `hafnormals.cpp`); the reduce's edge collapse (`hafdecimate.cpp`); the Workshop fuse's exposure
+ladders from above and from the side (`hafcolumn.cpp`), twin census (`haftwin.cpp`) and weld classes (`hafweld.cpp`).
+Nothing is installed for it: the DLL is part of the package.
+
+- **Compiler:** WinLibs GCC (MinGW-W64 x86_64-ucrt, `g++` on PATH), `-O2 -ffp-contract=off -fno-fast-math` and SSE only,
+  so the C++ rounds exactly as the C# it replaces; `cosf`/`sinf` are resolved from `ucrtbase.dll` at load, never from
+  mingw's libm (the decode computes with Blender's C runtime). Without `g++` the script fails loud and builds nothing.
+- **Deterministic:** no timestamp, fixed image base and random seed, stripped, the export directory's stamp and the
+  checksum zeroed (`native/deterministic.py`), so a fresh build with the same toolchain equals the committed DLL byte for byte. The native
+  kernels drill in the push gate rebuilds and compares; a DLL that does not match its sources fails the push.
+- **Every kernel keeps its C# twin.** The C# is the specification, the oracle and the fallback: an unavailable DLL,
+  an unsupported host (including a 32-bit process or a non-Windows editor), a wrong version or `HAF_NATIVE_KERNELS=0`
+  keep the managed path. The native kernels drill compares probe and prep outputs on its reader fixtures (excluding
+  `export_skin_bonechild.glb`) and saved GLB/glTF recipe sources on x64 .NET Framework; its Unity Mono leg checks the
+  same fixtures and the three smallest recipe sources against those managed hashes. Fuse kernels have separate unit
+  and Workshop golden checks; [Testing](Testing.md#native-kernels)
+  records their Unity comparisons. This is not an automated Unity fuse check on every recipe source. The hosts marshal
+  differently: a `bool[]` crosses as four bytes a flag in Mono, so native array parameters use blittable elements,
+  with flags as `byte[]`. `HafNativeKernels.Status` says which path runs; the `HafNativeKernels` wrappers validate buffers
+  before entering C++.
+- **Version contract:** `haf_kernels_version()` must equal `HafNativeKernels.Version` (6 since 2026-10-27); bump both
+  on any ABI change. A mismatch is not an error, it is the managed path — and a Unity editor never unloads a native
+  plugin, so after rebuilding or updating the DLL **restart Unity**. An ABI-version mismatch selects managed fallback;
+  an update that keeps the same ABI version can continue running the old native implementation until that restart.
+- **Measure in Unity, not only on .NET:** the probe's managed C# measured 2.5-3.4x slower on Unity's Mono, and a data-structure change
+  can be faster on .NET and slower in Mono (it happened: a linked-chain grid, 30 % slower in Mono). The method and
+  every measurement are in [Testing → Native kernels](Testing.md#native-kernels).
+
 ## What `baker/` still holds
 
 Two live things that exist **only** here, and are built from here:

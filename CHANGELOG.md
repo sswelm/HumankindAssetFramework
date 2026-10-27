@@ -10,6 +10,11 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE NATIVE KERNELS AND THE WORKSHOP'S SPEED DOCUMENTED WHERE A USER LOOKS (2026-10-27).** Native kernel details
+  previously sat mainly in Testing.md. Editor-Tools (the Workshop: what runs native, the measured times, the restart-after-update
+  rule, the timing line, the groups-at-once knob), Building (a Native kernels section: compiler, determinism, the
+  twins, the version contract), Code-Map (`native/`), Troubleshooting (a slow tool or a `managed` kernels line; "Probe
+  failed"), the docs index and Performance (the editor-side axis) now carry it.
 - **FUSE GROUPS AT ONCE: HALF THE PROCESSORS, AND A SETTING (2026-10-27).** Re-measured after the kernels: four at once
   was right when the groups starved each other of the collector; now 8 at once is a second faster on the Saleg's 22 groups
   and 16 or all 22 are no faster (the largest group's weld slows as the others compete for memory bandwidth). The default
