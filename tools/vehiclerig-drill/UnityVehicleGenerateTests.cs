@@ -174,22 +174,40 @@ public static class UnityVehicleGenerateTests
 
     static void Availability()
     {
-        foreach(string editorDefault in new[]{"csharp","blender"})
+        bool native = HafNativeKernels.Available;
+        try
         {
-            var labels=VehicleLabWindow.GenerateBackendLabels(false,editorDefault);
-            Check("missing Blender labels "+editorDefault,labels[0].Contains("unavailable")&&labels[1].Contains("unavailable")&&labels[2].Contains("unavailable"),string.Join("; ",labels));
+            foreach(bool available in new[]{false,true})
+            foreach(bool blender in new[]{false,true})
+            foreach(string editorDefault in new[]{"csharp","blender","","invalid"})
+            {
+                HafNativeKernels.Available=available;
+                var labels=VehicleLabWindow.GenerateBackendLabels(blender,editorDefault);
+                bool csharpDefault=editorDefault!="blender";
+                Check("backend labels native="+available+" blender="+blender+" default="+editorDefault,
+                    labels[2].Contains("C++")==available && labels[2].Contains("managed")==!available
+                    && labels[2].Contains("unavailable")==!blender
+                    && labels[1].Contains("unavailable")==!blender && labels[0].Contains("unavailable")==!blender
+                    && labels[0].Contains("C#")==csharpDefault
+                    && (!csharpDefault || labels[0].Contains("C++")==available)
+                    && (!blender || (labels[2].Contains("fallback to Blender") && (!csharpDefault || labels[0].Contains("fallback to Blender")))),string.Join("; ",labels));
+            }
         }
-        var present=VehicleLabWindow.GenerateBackendLabels(true,"csharp");
-        Check("available Blender labels",present[0].Contains("fallback to Blender")&&present[2].Contains("fallback to Blender")&&!present.Any(l=>l.Contains("unavailable")),string.Join("; ",present));
+        finally { HafNativeKernels.Available=native; }
+        bool hadPreference=EditorPrefs.HasKey(VehicleLabWindow.GenerateRouteDefaultPref);
+        string oldPreference=EditorPrefs.GetString(VehicleLabWindow.GenerateRouteDefaultPref,"");
         var w=ScriptableObject.CreateInstance<VehicleLabWindow>();
         try
         {
             Field("headless").SetValue(w,true);Field("headlessDir").SetValue(w,"Logs/availability");
             Field("findBlender").SetValue(w,new Func<string>(()=>null));
             Method("LoadRecipeFromPath").Invoke(w,new object[]{Path.Combine(fixtures,"recipes/fx_e2_stances.json")});
-            string path=Path.GetFullPath("Logs/availability/rig.glb");Field("outGlb").SetValue(w,path);Field("generateRoute").SetValue(w,"csharp");
+            string path=Path.GetFullPath("Logs/availability/rig.glb");Field("outGlb").SetValue(w,path);Field("generateRoute").SetValue(w,"");
+            EditorPrefs.SetString(VehicleLabWindow.GenerateRouteDefaultPref,"");
             Method("Vehicleize").Invoke(w,null);
-            Check("C# without Blender",w.lastGenerateRoute=="csharp"&&File.Exists(path)&&((string)Field("status").GetValue(w)).Contains("DONE"),(string)Field("status").GetValue(w));
+            string generatedStatus=(string)Field("status").GetValue(w);
+            Check("factory default without Blender",w.lastGenerateRoute=="csharp"&&File.Exists(path)&&generatedStatus.Contains("DONE"),generatedStatus);
+            Check("result native availability",generatedStatus.Contains("C++")==native && (native || generatedStatus.Contains("managed")),generatedStatus);
             if(!File.Exists(path))return;
             byte[] original=File.ReadAllBytes(path);
             string unsupported=Path.Combine(fixtures,"no_blender.fbx");File.WriteAllText(unsupported,"not launched");Field("srcFile").SetValue(w,unsupported);
@@ -199,7 +217,11 @@ public static class UnityVehicleGenerateTests
             Field("generateRoute").SetValue(w,"blender");Method("Vehicleize").Invoke(w,null);status=(string)Field("status").GetValue(w);
             Check("direct Blender unavailable",status.Contains("Blender is unavailable")&&!status.Contains("DONE")&&original.SequenceEqual(File.ReadAllBytes(path)),status);
         }
-        finally{UnityEngine.Object.DestroyImmediate(w);}
+        finally
+        {
+            try { UnityEngine.Object.DestroyImmediate(w); }
+            finally { if(hadPreference)EditorPrefs.SetString(VehicleLabWindow.GenerateRouteDefaultPref,oldPreference);else EditorPrefs.DeleteKey(VehicleLabWindow.GenerateRouteDefaultPref); }
+        }
     }
     static void Recipes(string label,string[] jobs,string golden)
     {

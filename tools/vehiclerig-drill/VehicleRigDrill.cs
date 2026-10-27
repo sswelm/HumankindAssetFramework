@@ -764,7 +764,9 @@ static class StageDrill
                                 if (expectedFile.Fallback != null || !File.ReadAllBytes(path).SequenceEqual(expectedFile.Glb)) problems.Add("the in-process wrapper's file differs from the oracle-checked export");
                                 var back = GlbReader.Read(path);
                                 if (back.Meshes.Count != exported.Meshes.Count || back.Animations.Count != exported.ChannelRows.Animations.Count) problems.Add("the wrapper's file does not read back with its meshes/actions");
-                                var logs = result.Log.Select(l => l.StartsWith("VEHICLE RIG DONE:", StringComparison.Ordinal) ? l.Substring(0, l.LastIndexOf(" -> ", StringComparison.Ordinal) + 4) + args.OutGlb : l);
+                                // the wrapper's stage timing lines are not evidence (as the dump's are not): the ordered VEHICLE lines are compared without them
+                                var logs = result.Log.Where(l => !l.StartsWith("VEHICLE timing:", StringComparison.Ordinal))
+                                    .Select(l => l.StartsWith("VEHICLE RIG DONE:", StringComparison.Ordinal) ? l.Substring(0, l.LastIndexOf(" -> ", StringComparison.Ordinal) + 4) + args.OutGlb : l);
                                 if (!logs.SequenceEqual(model.Logs.Concat(model.Logs2).Concat(model.Logs3).Concat(model.Logs4).Concat(model.Logs5))) problems.Add("the wrapper's ordered VEHICLE lines differ from the stage models");
                                 if (problems.Count == 0) InProcessEqual++;
                             }

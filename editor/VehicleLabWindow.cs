@@ -444,7 +444,8 @@ public class VehicleLabWindow : EditorWindow
     }
     internal static string[] GenerateBackendLabels(bool blenderAvailable, string editorDefault)
     {
-        string csharp = blenderAvailable ? "C# (fallback to Blender)" : "C# (Blender fallback unavailable)";
+        string csharp = BlenderVehicleRigInProcess.CSharpBackendName(HafNativeKernels.Available)
+            + (blenderAvailable ? " (fallback to Blender)" : " (Blender fallback unavailable)");
         string blender = blenderAvailable ? "Blender" : "Blender (unavailable)";
         bool csharpDefault = BlenderVehicleRigInProcess.UseCSharp("", editorDefault);
         return new[] { "Editor default (" + (csharpDefault ? csharp : blender) + ")", blender, csharp };
@@ -1417,7 +1418,7 @@ public class VehicleLabWindow : EditorWindow
             bool blenderAvailable = File.Exists(BlenderExecutablePath());
             string normalized = BlenderVehicleRigInProcess.NormalizeRoute(generateRoute);
             generateRoute = new[] { "", "blender", "csharp" }[EditorGUILayout.Popup("Generate backend", normalized == "blender" ? 1 : normalized == "csharp" ? 2 : 0,
-                GenerateBackendLabels(blenderAvailable, EditorPrefs.GetString(GenerateRouteDefaultPref, "blender")))];
+                GenerateBackendLabels(blenderAvailable, EditorPrefs.GetString(GenerateRouteDefaultPref, BlenderVehicleRigInProcess.FactoryDefaultRoute)))];
             if (!blenderAvailable)
                 EditorGUILayout.HelpBox("Blender was not found. Supported models can generate in C#. Models that require Blender cannot generate until Blender is installed or its executable is set in the Model Factory Settings.", MessageType.Warning);
             using (new EditorGUI.DisabledScope(!canRig || string.IsNullOrEmpty(outGlb)))
@@ -2233,11 +2234,11 @@ public class VehicleLabWindow : EditorWindow
     [MenuItem("Tools/HAF/Vehicle Generate default/Blender")]
     static void DefaultGenerateBlender() => EditorPrefs.SetString(GenerateRouteDefaultPref, "blender");
     [MenuItem("Tools/HAF/Vehicle Generate default/Blender", true)]
-    static bool CheckDefaultBlender() { Menu.SetChecked("Tools/HAF/Vehicle Generate default/Blender", !BlenderVehicleRigInProcess.UseCSharp("", EditorPrefs.GetString(GenerateRouteDefaultPref, "blender"))); return true; }
+    static bool CheckDefaultBlender() { Menu.SetChecked("Tools/HAF/Vehicle Generate default/Blender", !BlenderVehicleRigInProcess.UseCSharp("", EditorPrefs.GetString(GenerateRouteDefaultPref, BlenderVehicleRigInProcess.FactoryDefaultRoute))); return true; }
     [MenuItem("Tools/HAF/Vehicle Generate default/C#")]
     static void DefaultGenerateCSharp() => EditorPrefs.SetString(GenerateRouteDefaultPref, "csharp");
     [MenuItem("Tools/HAF/Vehicle Generate default/C#", true)]
-    static bool CheckDefaultCSharp() { Menu.SetChecked("Tools/HAF/Vehicle Generate default/C#", BlenderVehicleRigInProcess.UseCSharp("", EditorPrefs.GetString(GenerateRouteDefaultPref, "blender"))); return true; }
+    static bool CheckDefaultCSharp() { Menu.SetChecked("Tools/HAF/Vehicle Generate default/C#", BlenderVehicleRigInProcess.UseCSharp("", EditorPrefs.GetString(GenerateRouteDefaultPref, BlenderVehicleRigInProcess.FactoryDefaultRoute))); return true; }
 
     void Vehicleize()
     {
@@ -2385,7 +2386,7 @@ public class VehicleLabWindow : EditorWindow
         lastRigArgLine = VehicleRigArgLine.RigArgLine(rigArgs);
         string stdout;
         bool generatedInProcess = false;
-        if (BlenderVehicleRigInProcess.UseCSharp(generateRoute, EditorPrefs.GetString(GenerateRouteDefaultPref, "blender")))
+        if (BlenderVehicleRigInProcess.UseCSharp(generateRoute, EditorPrefs.GetString(GenerateRouteDefaultPref, BlenderVehicleRigInProcess.FactoryDefaultRoute)))
         {
             var tokens = VehicleRigArgLine.RigArgv(rigArgs).Select(t => t.value).ToList();
             tokens[3] = ""; // HafModelRig previews the generated GLB; no auxiliary FBX is needed.
@@ -2404,7 +2405,9 @@ public class VehicleLabWindow : EditorWindow
             {
                 generatedInProcess = true; lastGenerateRoute = "csharp";
                 stdout = string.Join("\n", result.Log) + "\n"; lastStdout = stdout;
-                Debug.Log("[VehicleLab] Generate (C#, in-process)\n" + stdout);
+                // the time and the kernels on the headline, as the probe's line has them: the Blender route's script prints its own
+                // "VEHICLE timing:" lines, the C# route printed nothing a reader could compare (2026-10-27)
+                Debug.Log($"[VehicleLab] Generate (C#, in-process)   ({watch.Elapsed.TotalSeconds:0.0}s; kernels {HafNativeKernels.Status})\n" + stdout);
             }
             else if (result.ScriptExit)
             {
@@ -2482,7 +2485,8 @@ public class VehicleLabWindow : EditorWindow
             .Where(l => l.Contains("VEHICLE MUZZLE") || l.Contains("VEHICLE CRADLE")
                      || l.Contains("*** WARNING") || l.Contains("DEPLOY gun: SKIPPED"))
             .Select(l => l.Trim()));
-        string backend = lastGenerateRoute == "csharp" ? "C#" : lastGenerateRoute == "csharp-fallback" ? "Blender (C# fallback: " + lastGenerateFallback + ")" : "Blender";
+        // Native availability is reported separately from the selected route; managed runs must not claim C++ kernels.
+        string backend = lastGenerateRoute == "csharp" ? BlenderVehicleRigInProcess.CSharpBackendName(HafNativeKernels.Available) + " (" + HafNativeKernels.Status + ")" : lastGenerateRoute == "csharp-fallback" ? "Blender (C# fallback: " + lastGenerateFallback + ")" : "Blender";
         status = $"DONE → {lastOutGlb}\nBackend: {backend}\n{bones}\n{hybrid}\n{done}\n{muzzle}\n\nNext: Factory ▸ Browse this GLB, Size as usual; " + bakeRecipe;
         if (previewProblem != null) status += "\nPreview unavailable: " + previewProblem;
         if (!headless) EditorGUIUtility.systemCopyBuffer = lastOutGlb;   // ready to paste into the Factory's Browse field

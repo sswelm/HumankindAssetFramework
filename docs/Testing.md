@@ -2310,7 +2310,8 @@ writes through a unique same-directory temporary file before replacing the outpu
 read-back, replacement, a cancellation/deadline after the temporary write, terminal script outcomes, reader/FBX/rigfast
 fallbacks and merged inputs; 2,013 tests pass.
 
-The recipe's generateRoute and HAF.VehicleGenerateRouteDefault select the backend; absent fields/preferences retain Blender.
+The recipe's generateRoute and HAF.VehicleGenerateRouteDefault select the backend. Absent fields/preferences retained
+Blender at the initial rollout; the factory default changed to C# on 2026-10-27.
 New/load/save normalize that state without leaking a previous recipe's choice. Headless acceptance can force a route and
 reports the route actually used and its fallback reason. The existing window success marker, argument parity and gun-span
 sidecar are shared by both paths. A successful C# run builds its live preview through HafModelRig and attaches its owned
@@ -2344,6 +2345,14 @@ entries and removal. Native `RunAvailability` checks the unavailable/available l
 with no Blender resolver, and verifies that an unsupported input and a direct Blender request explain unavailability
 without claiming completion or replacing the previous GLB. It runs in the normal native suite, or on its own with
 `HAF_GENERATE_TEST_METHOD=RunAvailability bash tools/vehiclerig_unity_generate_drill.sh`.
+
+PR #212 review guards: missing, blank and unrecognized backend preferences use the C# factory default, while valid
+recipe/editor choices keep their precedence. The wrapper's timing labels describe its actual stage boundaries (rig,
+skinning and join together; then clips; then mesh/export preparation), and completion remains the last log line.
+The suite has 2,200 cases. Unity `RunAvailability` covers native/managed labels, Blender availability and valid/blank/
+invalid defaults, generates with a blank preference and no Blender, and checks preservation of an existing output on
+unavailable fallback. The original PR fails five new unit cases and fourteen Unity availability checks. With the fixes,
+the Unity check passes with `HAF_NATIVE_KERNELS=0` and with the shipped DLL loaded; the generated GLB bytes match.
 
 Review of PR #176 (2026-10-15): a full run found the organ gun's newly recorded custom-normal shorts differed after
 stage one's loose split. Blender's separate operator decodes the source BMesh normals into a vector layer and

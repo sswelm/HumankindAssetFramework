@@ -380,7 +380,7 @@ the scene on record after each with the rig_anim dump's rows (objects, meshes, v
 fcurves), tamper refusal, and the census of branches no recipe takes = fixtures first (Muzzle, Trail, Cradle, Rigging,
 Flag, Shroud, the second model, useSourceRig, Turret, Rotor, Oar, Caterpillar); (b)-(f) the five stages in C#
 (`editor/BlenderVehicleRig.cs`), each held row for row with EXIT:/LEFT: keys and fixtures per branch as (4)'s; (g) the
-Lab's Generate on the C# route - per recipe with an editor default that stays Blender, the lab goldens
+Lab's Generate on the C# route - per recipe with an editor default initially set to Blender (C# since 2026-10-27), the lab goldens
 (`Tools/lab_golden`, the Lab gate rows) and the output GLB read back as the acceptance, every recipe generated both
 ways; (h) the default flip, after the user's check. Estimate: rig_anim's 1,234 lines took three days of sessions at
 this rigor (10-12 to 10-14); three times the lines and heavier geometry: 2 to 4 weeks, inside the 4-8 above.
@@ -571,7 +571,7 @@ are caught. FULL: 25 saved recipes plus 138 fixtures; 155 of 163 jobs compare th
 with all 112 supported GLBs byte-identical. The complete drill rejects 158 damaged-evidence kinds (151 without key rows).
 (g) Generate wiring implemented 2026-10-18: BlenderVehicleRigInProcess runs the five stages and atomically replaces the GLB;
 script exits/deaths remain failures, cancellation propagates, and named limits/read failures use Blender. Each recipe stores
-Generate backend (editor default/Blender/C#); HAF.VehicleGenerateRouteDefault remains Blender unless explicitly changed.
+Generate backend (editor default/Blender/C#); HAF.VehicleGenerateRouteDefault, when unset, blank or unrecognized, means the C# route since 2026-10-27 (it was Blender until then; a valid saved choice still wins; the user: "by this point the factory default should also be C#").
 The C# preview reads the generated GLB through HafModelRig, with Spin first and owned assets cleaned up. Diagnostics and the
 gun-span sidecar keep the existing contract. The every-recipe backend acceptance row forces both routes through the actual
 Vehicleize entry point, compares GLB bytes/read-back, ordered summaries and sidecars, and judges the Blender reference against
@@ -587,7 +587,7 @@ Hawk's missing golden matched independent generations and were installed in the 
 complete with no failures (22 C#, three named Blender fallbacks), and all 52 input fingerprints remain unchanged. The native
 stale-baseline regression now changes its own fixture instead of requiring the user's Espana golden to stay stale; it also
 verifies a refreshed baseline. Details and the remaining checklist: [Vehicle Generate acceptance](Vehicle-Generate-Acceptance.md).
-Next: the user's visual/runtime acceptance before (h), the default flip. d6 remains deferred; the shipped Generate default stays Blender.
+(h) default flip DONE 2026-10-27: C# is the factory default, with valid saved recipe/editor choices preserved. The linked checklist retains the per-model visual/runtime acceptance record. d6 remains deferred.
 Native JPEG-alpha export (2026-10-19): production Generate retains the original JPEG, whose glTF alpha is 1, rather
 than requiring Blender's PNG re-encoding. Espana now generates through C#. Acceptance checks identical decoded RGBA
 pixels and strict non-image GLB bytes/JSON; the stage oracle keeps its original byte-exact rules. Image brightness
