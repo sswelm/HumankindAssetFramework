@@ -2266,6 +2266,39 @@ public class GlbFuseTests
         Assert.Equal(4, Enumerable.Range(0, 8).Count(i => col[i * 4] > 0.99f && col[i * 4 + 1] < 0.01f));   // four red, nothing blended
     }
 
+    // ---- the probe's meshes analysed at once (Analyze, 2026-10-27) ----
+
+    // The probe's rows do not depend on how many meshes are analysed at a time: the same file - two quads, a box, a mesh
+    // named by two nodes, a far quad, and one mesh whose primitive is lines (blocked, "Only TRIANGLES primitives...") - gives
+    // the same rows, in the same order, with the same blocked message, on one worker and on eight.
+    [Fact]
+    public void The_probe_gives_the_same_rows_whatever_the_number_of_mesh_workers()
+    {
+        var src = BuildGlb(Quad("A", 0, 1, 0, 1, 0), Quad("B", 1, 2, 0, 1, 0), Box("Box", 2, 5, 0, 0, inward: false), Quad("Far", 50, 51, 0, 1, 0), Quad("Lines", 0, 1, 5, 6, 0));
+        var g = Read(src);
+        var nodes = (JArray)g.Root["nodes"]; var meshes = (JArray)g.Root["meshes"];
+        ((JObject)((JArray)((JObject)meshes[4])["primitives"])[0])["mode"] = 1;                       // the last mesh is lines: blocked
+        nodes.Add(new JObject { ["name"] = "A_again", ["mesh"] = 0 });                                   // a second node on the first mesh
+        ((JArray)g.Root["scenes"][0]["nodes"]).Add(nodes.Count - 1);
+        src = WriteGlb(g.Root, g.Bin);
+        int was = GlbDisconnectedParts.AnalyzeWorkers;
+        var rows = new Dictionary<int, List<string>>();
+        try
+        {
+            foreach (int workers in new[] { 1, 8 })
+            {
+                GlbDisconnectedParts.AnalyzeWorkers = workers;
+                rows[workers] = GlbDisconnectedParts.Analyze(src, 0.01)
+                    .Select(p => p.NodeIndex + "|" + p.NodeName + "|" + p.Triangles + "|" + p.Islands + "|" + p.Blocked + "|" + p.TriangleFree).ToList();
+            }
+        }
+        finally { GlbDisconnectedParts.AnalyzeWorkers = was; }
+        Assert.Equal(rows[1], rows[8]);
+        Assert.Equal(6, rows[8].Count);
+        Assert.Contains(rows[8], r => r.Contains("Only TRIANGLES"));
+        Assert.Equal(4, rows[8].Count(r => r.Contains("|2|1|")));   // A, A_again, B and Far: two triangles, one island each
+    }
+
     // The groups planned at once by default: half the logical processors and at least two (2026-10-27, measured on the Saleg's
     // 22 groups: 8 at once beat 4 by a second, 16 and 22 were no faster). The Model Fuser's setting overrides it through
     // FuseGroupWorkers; 0 there means this default.

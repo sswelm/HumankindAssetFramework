@@ -383,6 +383,9 @@ public static partial class GlbDisconnectedParts
 
     public static List<PartInfo> Analyze(byte[] source) => Analyze(source, 0);
 
+    /// <summary>How many meshes Analyze examines at once; 0 = every logical processor. Settable for the tests.</summary>
+    internal static int AnalyzeWorkers = 0;
+
     public static List<PartInfo> Analyze(byte[] source, double mergeFraction)
     {
         if (source == null) throw new ArgumentNullException(nameof(source));
@@ -394,7 +397,8 @@ public static partial class GlbDisconnectedParts
         if (buffers.Count != 1 || buffers[0]?["uri"] != null)
             throw new InvalidDataException("Lossless splitting requires one embedded GLB buffer.");
         byte[] sourceBin = document.Chunks[document.BinIndex].Data;
-        var reader = new Accessors(root, Prefix(sourceBin, buffers[0].Value<int>("byteLength")));
+        byte[] bin = Prefix(sourceBin, buffers[0].Value<int>("byteLength"));
+        var reader = new Accessors(root, bin);
 
         var byMesh = new Dictionary<int, MeshPlan>();
         var blockedByMesh = new Dictionary<int, string>();
@@ -403,6 +407,30 @@ public static partial class GlbDisconnectedParts
         for (int i = 0; i < nodes.Count; i++)
             if ((nodes[i] as JObject)?["children"] is JArray kids)
                 foreach (JToken kid in kids) { int ci = kid.Value<int>(); if (!parentOf.ContainsKey(ci)) parentOf.Add(ci, i); }
+        // THE MESHES ANALYSED AT ONCE (2026-10-27, user: "the probe still takes quite some time"): the Saleg's Revenge's probe
+        // spent 12.1 s in AnalyzeMesh on one thread - 1,868 meshes, 5.2 million triangles, the largest mesh 1.4 % of them.
+        // Each mesh's analysis is its own (a reader per thread: the layout cache is not shared; the JSON is only read), so
+        // the meshes every plain node names are analysed on every core first, by mesh index, and the node loop below reads
+        // the results in node order - every row, every blocked message and every exception lands where the serial loop put
+        // it. A mesh the pre-pass did not analyse (an index the loop below refuses or throws for) still goes the old way there.
+        var wanted = new List<int>(); var seen = new HashSet<int>();
+        for (int nodeIndex = 0; nodeIndex < nodes.Count; nodeIndex++)
+        {
+            var node = nodes[nodeIndex] as JObject; if (node?["mesh"] == null) continue;
+            int mi; try { mi = node.Value<int>("mesh"); } catch (Exception) { continue; }
+            if (mi < 0 || mi >= meshes.Count || !(meshes[mi] is JObject) || node["extensions"]?["EXT_mesh_gpu_instancing"] != null) continue;
+            if (seen.Add(mi)) wanted.Add(mi);
+        }
+        var planOf = new MeshPlan[meshes.Count]; var analysed = new bool[meshes.Count]; var blockedOf = new string[meshes.Count]; var failedOf = new Exception[meshes.Count];
+        var options = new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, AnalyzeWorkers > 0 ? AnalyzeWorkers : Environment.ProcessorCount) };
+        System.Threading.Tasks.Parallel.For(0, wanted.Count, options, () => new Accessors(root, bin), (k, loop, local) =>
+        {
+            int mi = wanted[k];
+            try { planOf[mi] = AnalyzeMesh(mi, (JObject)meshes[mi], local, keepSingle: true, mergeFraction: mergeFraction); analysed[mi] = true; }
+            catch (Exception ex) when (ex is InvalidDataException || ex is OverflowException) { blockedOf[mi] = ex.Message; }
+            catch (Exception ex) { failedOf[mi] = ex; }
+            return local;
+        }, local => { });
         for (int nodeIndex = 0; nodeIndex < nodes.Count; nodeIndex++)
         {
             var node = nodes[nodeIndex] as JObject;
@@ -420,9 +448,15 @@ public static partial class GlbDisconnectedParts
                 info.Blocked = why;
             else if (!byMesh.TryGetValue(meshIndex, out MeshPlan plan))
             {
-                try { byMesh[meshIndex] = plan = AnalyzeMesh(meshIndex, (JObject)meshes[meshIndex], reader, keepSingle: true, mergeFraction: mergeFraction); }
-                catch (Exception ex) when (ex is InvalidDataException || ex is OverflowException)
-                { blockedByMesh[meshIndex] = info.Blocked = ex.Message; }
+                if (failedOf[meshIndex] != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failedOf[meshIndex]).Throw();   // as the serial analysis threw here
+                if (blockedOf[meshIndex] != null) blockedByMesh[meshIndex] = info.Blocked = blockedOf[meshIndex];
+                else if (analysed[meshIndex]) byMesh[meshIndex] = plan = planOf[meshIndex];
+                else
+                {
+                    try { byMesh[meshIndex] = plan = AnalyzeMesh(meshIndex, (JObject)meshes[meshIndex], reader, keepSingle: true, mergeFraction: mergeFraction); }
+                    catch (Exception ex) when (ex is InvalidDataException || ex is OverflowException)
+                    { blockedByMesh[meshIndex] = info.Blocked = ex.Message; }
+                }
             }
             if (info.Blocked == null && byMesh.TryGetValue(meshIndex, out MeshPlan p) && p != null)
             { info.Triangles = p.TriangleCount; info.Islands = p.Components.Count; }
