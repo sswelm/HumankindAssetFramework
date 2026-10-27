@@ -338,6 +338,37 @@ public static class UnityRigImportTests
             Check("sparse recipe parity " + i, why == null, why ?? "window and recipe reader agree");
         }
     }
+    static void AlbedoPixelsAndOutputDirectory()
+    {
+        byte[] Image(Color32[] pixels, int width, int height, TextureFormat format)
+        {
+            var texture = new Texture2D(width, height, format, false);
+            try { texture.SetPixels32(pixels); texture.Apply(); return texture.EncodeToPNG(); }
+            finally { UnityEngine.Object.DestroyImmediate(texture); }
+        }
+        var pixels = new[] { new Color32(1, 2, 3, 255), new Color32(4, 5, 6, 255), new Color32(7, 8, 9, 255), new Color32(10, 11, 12, 255) };
+        byte[] rgba = Image(pixels, 2, 2, TextureFormat.RGBA32), rgb = Image(pixels, 2, 2, TextureFormat.RGB24);
+        Check("albedo: equal pixels with different PNG encodings pass", !rgba.SequenceEqual(rgb) && BlenderRigAnimHeadlessTest.PngPixelDifference(rgba, rgb) == null, "RGB and RGBA PNGs decode equally");
+        pixels[0].r++;
+        Check("albedo: a changed color fails", BlenderRigAnimHeadlessTest.PngPixelDifference(rgba, Image(pixels, 2, 2, TextureFormat.RGBA32)) != null, "one red byte differs");
+        pixels[0].r--; pixels[0].a--;
+        Check("albedo: a changed alpha fails", BlenderRigAnimHeadlessTest.PngPixelDifference(rgba, Image(pixels, 2, 2, TextureFormat.RGBA32)) != null, "one alpha byte differs");
+        Check("albedo: different dimensions fail", BlenderRigAnimHeadlessTest.PngPixelDifference(rgba, Image(pixels, 4, 1, TextureFormat.RGBA32)) != null, "same pixel count, different dimensions");
+        Check("albedo: unreadable PNG fails", BlenderRigAnimHeadlessTest.PngPixelDifference(rgba, new byte[] { 1, 2, 3 }) != null, "invalid image bytes");
+        string nested = Path.Combine(fixtures, "new-output", "nested", "rig.glb");
+        var argv = BlenderRigAnimInProcess.Argv(0, "", "Spin", "", true, "0,0,0", true, "", false, "", true, "", false);
+        Check("output: parent starts absent", !Directory.Exists(Path.GetDirectoryName(nested)), nested);
+        var written = BlenderRigAnimInProcess.Run(Path.Combine(fixtures, "plain.glb"), nested, argv);
+        Check("output: missing parent created", written.Written && File.Exists(nested), written.UseBlender ?? nested);
+        if (written.Written)
+        {
+            byte[] expected = File.ReadAllBytes(nested);
+            File.WriteAllText(nested, "previous output");
+            var replaced = BlenderRigAnimInProcess.Run(Path.Combine(fixtures, "plain.glb"), nested, argv);
+            Check("output: existing GLB atomically replaced", replaced.Written && expected.SequenceEqual(File.ReadAllBytes(nested)) && !File.Exists(nested + ".tmp"), replaced.UseBlender ?? nested);
+        }
+    }
+
     public static void Run()
     {
         fixtures = Arg("-hafRigImportFixtures"); output = Arg("-hafRigImportOutput");
@@ -347,7 +378,7 @@ public static class UnityRigImportTests
             foreach (var item in new[] { (fixture: "long", action: "Spin_" + new string('a', 120)), (fixture: "underscore", action: "_Spin") })
                 if (Import(item.fixture, item.action, out _) != null) Preview(item.fixture, item.action);
             Acceptance(); AcceptanceCounterexamples(); PoseStreams(); CrossRoute(); RootPlacement(); ToleranceCounterexamples(); WrongSkinWeights(); NonUniformParent(2); NonUniformParent(100);
-            RecipeArgsParity(); SparseRecipeParity();
+            RecipeArgsParity(); SparseRecipeParity(); AlbedoPixelsAndOutputDirectory();
         }
         catch (Exception e) { Rows.Add("FAIL exception: " + e); failed++; }
         Rows.Add("TOTAL failed " + failed); File.WriteAllLines(output, Rows);
