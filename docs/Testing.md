@@ -2387,7 +2387,7 @@ counts may differ, the position sets may not - a grid lookup within 1e-3 of the 
 bone's placement and every bone's first-frame transform, the clip's length and, at every clip frame (at least 24 Hz) and
 both imports' curve keys, every bone's world transform (position, rotation and scale) and the skinned vertices
 (`SkinnedMeshRenderer.BakeMesh`); and each role's non-empty baked clip collection and pose stream: the same bone count,
-frame counts equal or ONE apart, and the bytes agreeing with that (`PoseStreamParity.Compare`, unit-tested: the SDK's
+frame counts equal or ONE apart, and byte lengths compatible with that (`PoseStreamParity.Compare`, unit-tested: the SDK's
 `FrameCount` is ceil(length x frame rate), and Unity's FBX import reads a 212-frame clip as 8.833334 s where the GLB
 route's is 8.833333 s). Two tolerances: the FIRST FRAME stays strict (1e-3 of the
 extent, 0.06 degrees for rotation and matrix axes, 1e-3 relative axis scale); the CLIP accepts 0.6 degrees of rotation,
@@ -2431,8 +2431,8 @@ import welds vertices equal in every attribute across the whole mesh and drops t
 glTF exporter deduplicates per primitive. The Lembos imported 27,424 triangles from the GLB against 27,420 from the FBX,
 and the GreatGalley's duplicates cost enough quad pairs (the SDK pairs triangles on shared edges, `QuadEstimate`) to
 push 233,398 triangles past the eight-fragment cap the FBX import's mesh fits (129,934 estimated quads against 120,914;
-welded 129,864, eight chunks). `HafModelRig.BuildMesh` welds the Factory's mesh the same way (`WeldEqualVertices`:
-position within 1e-6 of the extent, normal, uv, influences). (5) The pose stream frame count, above. `tools/
+welded 129,865 with exact attributes, eight chunks). `HafModelRig.BuildMesh` welds the Factory's mesh the same way
+(`WeldEqualVertices`: exact position, normal, uv and influences). (5) The pose stream frame count, above. `tools/
 riganim_unity_import_drill.sh` holds (1), (3) and (4) on fixtures ("offset", "wrapped", "dupes") and (5) on the rule's
 cases; the push gate's rig_anim drill holds (2) row for row. The in-game check of each model playing
 its roles stays the user's; the row green on every entry and that check together flip the default. The comparison
@@ -2441,6 +2441,17 @@ imports and a real FBX/GLB pair (the same fixture slimmed by rig_anim.py and by 
 default FBX compression and without it; a socket rotation of 0.4 degrees passes and one of 2 degrees fails; size,
 duration, intermediate motion, subframe keyed excursions and absent/empty role pose streams fail. A cancel keeps the
 verdicts made so far. Owed: the row's run.
+
+Review of PR #214: six native Unity counterexamples fail the original code and pass the fixes. Welding preserves close
+but distinct positions, normals and UVs, and removes collapsed index triangles even without duplicate vertices. Wrapper
+folding adjusts a shared skin's bind poses once and tests scale uniformity relative to its magnitude; shared meshes and
+tiny nonuniform wrappers retain their animated world geometry. Four added unit cases catch asymmetric rounding and
+impossible encoded frame lengths (2,208 cases pass). The installed SDK's `ClipEntry.Reimport` stores held bones once,
+rotation-only frames in pairs of three words, and translating/scaling frames in three/four words; an extra frame can add
+zero, 12 or 16 bytes per bone. Native checks cover both directions, valid twelve-byte streams and incomplete words.
+The port revision invalidates pre-reset slim caches. A focused native run on the registry's GreatGalley, Lembos,
+AntiTankIFV and ReconDrone still generates/imports all four: the Lembos has 27,420 triangles and GreatGalley fits eight
+fragments. This is automated compatibility evidence; the complete acceptance row and in-game check remain owed.
 
 Review of PR #172 (2026-10-14): native Unity reproduced false failures for three-bone chains with 0.4-degree
 local rotation errors or 0.6% local scale errors, and a false pass for opposite socket shear despite equal world

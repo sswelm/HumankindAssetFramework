@@ -38,5 +38,24 @@ namespace HumankindAssetFramework.Tests
             Assert.Contains("bones", PoseStreamParity.Compare(7, 16, 1428, 7, 17, 1428));
             Assert.NotNull(PoseStreamParity.Compare(0, 16, 0, 7, 16, 1428));
         }
+
+        [Fact]
+        public void Held_streams_allow_the_rounding_frame_in_either_direction()
+        {
+            Assert.Null(PoseStreamParity.Compare(8, 3, 48, 7, 3, 48));
+            Assert.Null(PoseStreamParity.Compare(7, 3, 48, 8, 3, 48));
+            Assert.Null(PoseStreamParity.Compare(4, 1, 24, 3, 1, 24)); // the fourth rotation-only frame shares the second pair
+            Assert.Null(PoseStreamParity.Compare(3, 1, 24, 4, 1, 24));
+        }
+
+        [Theory]
+        [InlineData(1, 113, 112)] // not a whole encoded word
+        [InlineData(1, 100, 96)]  // four bytes cannot encode an animated bone's frame
+        [InlineData(2, 120, 100)] // twenty bytes cannot be a sum of 12/16-byte bone frames
+        public void Rounding_requires_a_possible_encoded_frame(int bones, long longer, long shorter)
+        {
+            Assert.NotNull(PoseStreamParity.Compare(8, bones, longer, 7, bones, shorter));
+            Assert.NotNull(PoseStreamParity.Compare(7, bones, shorter, 8, bones, longer));
+        }
     }
 }

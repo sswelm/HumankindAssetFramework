@@ -133,7 +133,7 @@ public static class RigRouteAcceptanceTest
             if (poseProblem != null) problems.Add($"role '{dir}': {poseProblem}");
         }
         if (roles == 0) problems.Add("no role's rig could be found on either route");
-        notes.Add(FormattableString.Invariant($"{roles} role(s) equal: bones, mesh, placement and clips, {vertexSamples} skinned vertex samples within {worst:0.#####} of each other; non-empty role collections and pose streams of the same bones and bytes per frame (frame counts equal or one apart, the SDK's rounding)"));
+        notes.Add(FormattableString.Invariant($"{roles} role(s) equal: bones, mesh, placement and clips, {vertexSamples} skinned vertex samples within {worst:0.#####} of each other; non-empty role collections and pose streams with equal bone counts and encoding-compatible lengths (frame counts equal or one apart, the SDK's rounding)"));
     }
 
     /// <summary>Two instantiated rigs with a clip each, judged as the row judges a role (tools/riganim_unity_import_drill.sh runs
@@ -150,7 +150,7 @@ public static class RigRouteAcceptanceTest
     internal static string ComparePoseStreams(string pathA, string pathB, int framesA, int bonesA, int framesB, int bonesB)
     {
         long a = File.Exists(pathA) ? new FileInfo(pathA).Length : -1, b = File.Exists(pathB) ? new FileInfo(pathB).Length : -1;
-        if (a < 32 || b < 32) return $"the baked pose stream is missing or empty (FBX {a} bytes, GLB {b} bytes)";
+        if (a <= 0 || b <= 0) return $"the baked pose stream is missing or empty (FBX {a} bytes, GLB {b} bytes)";
         return PoseStreamParity.Compare(framesA, bonesA, a, framesB, bonesB, b);
     }
 

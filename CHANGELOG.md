@@ -19,7 +19,8 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   the rebake, the port mirrors it); an FBX-born glTF's 0.01 root wrapper is folded into the rig (the ReconDrone); the
   Factory's GLB mesh welds equal vertices and drops collapsed triangles as Unity's FBX import does (the Lembos' four
   triangles, the GreatGalley back under the eight-fragment cap); and pose streams one frame apart - the SDK's ceil of
-  length x frame rate on a float ulp - are accepted as such. `docs/Testing.md`, step (h).
+  length x frame rate on a float ulp - are accepted as such. Review guards preserve distinct vertex attributes, fold shared
+  bind poses once, retain nonuniform wrappers, and validate the SDK's packed word lengths symmetrically. `docs/Testing.md`, step (h).
 - **THE VEHICLE LAB GENERATES IN C# BY DEFAULT (2026-10-27).** The factory default of the Generate backend (neither the
   recipe nor **Tools ▸ HAF ▸ Vehicle Generate default** naming one) is the C# port, with native kernels when available;
   it was Blender until now, and a valid preference or recipe set earlier still wins. The backend labels say

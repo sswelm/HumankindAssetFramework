@@ -1403,7 +1403,8 @@ public static class UniversalBaker
         foreach (int i in Enumerable.Range(0, Math.Min(m.Nodes.Count, rig.Nodes.Length)).OrderBy(i => Depth(rig.Nodes[i])))
         {
             var t = rig.Nodes[i]; var s = t.localScale;
-            bool uniform = Mathf.Abs(s.x - s.y) <= 1e-6f && Mathf.Abs(s.y - s.z) <= 1e-6f, unit = Mathf.Abs(s.x - 1f) <= 1e-6f;
+            float scaleTolerance = Mathf.Max(Mathf.Abs(s.x), Mathf.Max(Mathf.Abs(s.y), Mathf.Abs(s.z))) * 1e-6f;
+            bool uniform = Mathf.Abs(s.x - s.y) <= scaleTolerance && Mathf.Abs(s.y - s.z) <= scaleTolerance, unit = Mathf.Abs(s.x - 1f) <= 1e-6f;
             if (!uniform || unit || s.x <= 0f || joints.Contains(t) || m.Nodes[i].Mesh >= 0 || animated.Contains(i)) continue;
             if (!targets.All(x => x != t && x.IsChildOf(t))) continue;
             float f = s.x;
@@ -1411,8 +1412,10 @@ public static class UniversalBaker
             int moved = 0;
             foreach (var d in t.GetComponentsInChildren<Transform>(true)) if (d != t) { d.localPosition *= f; moved++; }
             int poses = 0;
+            var posedMeshes = new HashSet<Mesh>();
             foreach (var r in skinned)
             {
+                if (!posedMeshes.Add(r.sharedMesh)) continue;
                 var bp = r.sharedMesh.bindposes; bool any = false;
                 for (int bi = 0; bi < bp.Length && bi < r.bones.Length; bi++)
                 {
