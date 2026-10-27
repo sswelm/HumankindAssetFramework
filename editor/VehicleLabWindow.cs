@@ -2404,7 +2404,9 @@ public class VehicleLabWindow : EditorWindow
             {
                 generatedInProcess = true; lastGenerateRoute = "csharp";
                 stdout = string.Join("\n", result.Log) + "\n"; lastStdout = stdout;
-                Debug.Log("[VehicleLab] Generate (C#, in-process)\n" + stdout);
+                // the time and the kernels on the headline, as the probe's line has them: the Blender route's script prints its own
+                // "VEHICLE timing:" lines, the C# route printed nothing a reader could compare (2026-10-27)
+                Debug.Log($"[VehicleLab] Generate (C#, in-process)   ({watch.Elapsed.TotalSeconds:0.0}s; kernels {HafNativeKernels.Status})\n" + stdout);
             }
             else if (result.ScriptExit)
             {
