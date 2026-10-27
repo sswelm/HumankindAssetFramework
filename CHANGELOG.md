@@ -10,6 +10,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE PROBE BROKE IN THE EDITOR AND NOT IN ANY TEST (2026-10-27).** The parse counter PR #207 added used a
+  `ConditionalWeakTable`; Unity's Mono throws from inside it once the collector has run over the table, so every Probe
+  and Fuse in the editor failed with "Specified cast is not valid" while the .NET tests and a Unity batch run passed. A
+  weak list replaces it; the Workshop window now logs a failed probe's stack trace to the console (docs/Review-Backlog.md).
 - **THE FUSE READS ITS FILE ONCE: THE PARSE AND THE MODEL'S FRAME (2026-10-27).** Split and measured: every group of the
   Saleg's fuse sampled the whole file for the model's frame (40 s summed over 22 groups) and parsed the JSON and copied the BIN
   for itself (356 MB of garbage a group). The cache the groups already share parses the file once and reads the frame once; the

@@ -619,7 +619,15 @@ heap, random walks over the link arrays), not by Mono's codegen. Left on the pre
 mesh layout, the GLB assembly: about 4.6 s of the 13.8 s in Unity), and GlbReader's read, 0.47 s of the Saleg's 1.34 s probe.
 The Workshop fuse followed (2026-10-25 to 27: column and twin census native, the occluders read once, four groups at a time,
 the gather and weld without per-vertex garbage, then the weld walk and the side view as kernels, then the file parsed and
-its frame read once per fuse; the Saleg's 22-group fuse 148.7 s -> 37.0 s in Unity, bytes unchanged). Left on the fuse, by
+its frame read once per fuse; the Saleg's 22-group fuse 148.7 s -> 37.0 s in Unity, bytes unchanged).
+- **THE WORKSHOP HAS NO UNITY-MONO LEG IN THE GATE (2026-10-27).** PR #207's per-source parse counter used a
+  `ConditionalWeakTable`; Unity's Mono throws `InvalidCastException` from inside its `TryGetValue` once the collector has
+  run over the table, so every Probe and Fuse in the editor failed with "Specified cast is not valid" - while 2,184 .NET
+  tests passed and a Unity BATCH run of the same probe and fuse passed too (one parse, then quit, before any collection).
+  Fixed by a weak list (`GlbDisconnectedParts.CountsOf`). The lesson is wider than the table: Mono-only failures that need a
+  collection or a second call will not show in a batch harness that does one thing and quits. Wanted: a Unity-Mono leg
+  for the Workshop in a gate drill (as the native kernels drill has for the probe), running a probe, a fuse and a second
+  probe in one editor session with a forced `GC.Collect()` between them. Left on the fuse, by
 the splits of 2026-10-27 (docs/Testing.md, Native kernels), summed over the 22 groups: the weld kernel 43 s (the walk at memory
 speed; 7.2 s on the largest group), the exposure stage 39 s (the native column and side queries, the sheet walk), the twin
 census 17 s (6.1 s on the largest group), the gather 14 s. The wall is the largest group's own chain (37 s of stage time);
