@@ -488,8 +488,9 @@ windows. **Deep dive:**
   Fuse plans groups a few at a time, largest first (**Fuse — groups at once**, above). Each group in
   `<output GLB>.fuse-report.txt` has a separate stage timing line (`timing: parse … gather … weld … sheets …`). Groups
   overlap, so their elapsed times must not be summed to get wall time. The largest group's chain dominated the ship
-  measurement above; other models and worker settings can have a different balance. A Probe that fails logs its
-  exception with the stack trace to the Console, not only its message.
+  measurement above; other models and worker settings can have a different balance. **Probe parts** analyses the file's
+  meshes on every core (the Saleg's 1,868 meshes: 12 s on one thread before 2026-10-27, 4.5 s now). A Probe that fails
+  logs its exception with the stack trace to the Console, not only its message.
   **Delete** (0.5.7): the Delete key, or the row popup, marks a part for deletion in either window — it loses its mesh
   in the output, whatever writes it (Split, Plane cut or Fuse); Insert marks the highlighted row for split, – / 0 /
   Backspace clear every mark. The Split checks and the deletion marks persist in `<source>.marks.txt` (S = split,

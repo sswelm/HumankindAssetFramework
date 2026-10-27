@@ -88,13 +88,16 @@ public static partial class GlbDisconnectedParts
         public double this[int axis] => axis == 0 ? X : axis == 1 ? Y : Z;
     }
 
-    sealed class Vertex
+    // STRUCTS, not classes (2026-10-27): AnalyzeMesh made an object per vertex and per triangle - 5.2 million triangles on
+    // the Saleg's Revenge's probe - and Unity's collector made the probe collector-bound (analysing the meshes on every
+    // core gained 15 %). As structs in lists they are plain memory; nothing reads them by reference.
+    struct Vertex
     {
         public VertexKey Key;
         public Vec3 Position;
     }
 
-    sealed class Triangle
+    struct Triangle
     {
         public int Primitive;
         public uint A, B, C;
@@ -3675,7 +3678,7 @@ public static partial class GlbDisconnectedParts
         JArray primitives = mesh["primitives"] as JArray;
         if (primitives == null || primitives.Count == 0) return null;
         var vertices = new List<Vertex>();
-        var vertexIds = new Dictionary<VertexKey, int>();
+        var vertexIds = new Dictionary<int, int[]>();
         var triangles = new List<Triangle>();
         var dsu = new DisjointSet();
         int order = 0;
@@ -3690,13 +3693,15 @@ public static partial class GlbDisconnectedParts
             var attributes = primitive["attributes"] as JObject ?? throw new InvalidDataException("Primitive has no attributes.");
             if (attributes["POSITION"] == null) throw new InvalidDataException("Primitive has no POSITION attribute.");
             int positionAccessor = attributes.Value<int>("POSITION");
-            int indexCount = primitive["indices"] == null ? reader.Count(positionAccessor) : reader.Count(primitive.Value<int>("indices"));
+            bool indexed = primitive["indices"] != null;   // the accessor looked up once, not three times per triangle
+            int indexAccessor = indexed ? primitive.Value<int>("indices") : -1;
+            int indexCount = indexed ? reader.Count(indexAccessor) : reader.Count(positionAccessor);
             if (indexCount % 3 != 0) throw new InvalidDataException("Triangle primitive index count is not divisible by three.");
             for (uint i = 0; i < indexCount; i += 3)
             {
-                uint a = primitive["indices"] == null ? i : reader.Index(primitive.Value<int>("indices"), i);
-                uint b = primitive["indices"] == null ? i + 1 : reader.Index(primitive.Value<int>("indices"), i + 1);
-                uint c = primitive["indices"] == null ? i + 2 : reader.Index(primitive.Value<int>("indices"), i + 2);
+                uint a = indexed ? reader.Index(indexAccessor, i) : i;
+                uint b = indexed ? reader.Index(indexAccessor, i + 1) : i + 1;
+                uint c = indexed ? reader.Index(indexAccessor, i + 2) : i + 2;
                 int va = VertexId(positionAccessor, a, reader, vertexIds, vertices, dsu);
                 int vb = VertexId(positionAccessor, b, reader, vertexIds, vertices, dsu);
                 int vc = VertexId(positionAccessor, c, reader, vertexIds, vertices, dsu);
@@ -3716,26 +3721,34 @@ public static partial class GlbDisconnectedParts
         // independent of grid boundaries.
         double[] epsilon = WeldCells(min, max, diagonal);
         double invX = 1 / epsilon[0], invY = 1 / epsilon[1], invZ = 1 / epsilon[2];
-        var cells = new Dictionary<PositionKey, List<int>>();
+        // The cells through the fuse's flat grid (GlbDisconnectedParts.Weld.cs) instead of a Dictionary of a List per cell
+        // (2026-10-27): the grid is keyed on the positions scaled into cell units, so its cells are the very
+        // floor((p - min) * inv) the Dictionary was keyed on, while the distance test below reads the original positions
+        // as before. A pair is tested once, from its higher vertex, as the Dictionary's insert-after-scan order had it;
+        // the unions are the same set, so the classes are the same.
+        var scaled = new List<Vec3>(vertices.Count);
         for (int i = 0; i < vertices.Count; i++)
         {
             Vec3 p = vertices[i].Position;
-            long cx = checked((long)Math.Floor((p.X - min[0]) * invX)), cy = checked((long)Math.Floor((p.Y - min[1]) * invY)), cz = checked((long)Math.Floor((p.Z - min[2]) * invZ));
-            for (long dx = -1; dx <= 1; dx++)
-                for (long dy = -1; dy <= 1; dy++)
-                    for (long dz = -1; dz <= 1; dz++)
-                    {
-                        if (!cells.TryGetValue(new PositionKey { X = cx + dx, Y = cy + dy, Z = cz + dz }, out List<int> near)) continue;
-                        foreach (int j in near)
-                        {
-                            Vec3 q = vertices[j].Position;
-                            double ex = (p.X - q.X) * invX, ey = (p.Y - q.Y) * invY, ez = (p.Z - q.Z) * invZ;
-                            if (ex * ex + ey * ey + ez * ez <= 1) dsu.Union(i, j);
-                        }
-                    }
-            var own = new PositionKey { X = cx, Y = cy, Z = cz };
-            if (!cells.TryGetValue(own, out List<int> mine)) cells.Add(own, mine = new List<int>(1));
-            mine.Add(i);
+            scaled.Add(new Vec3 { X = (p.X - min[0]) * invX, Y = (p.Y - min[1]) * invY, Z = (p.Z - min[2]) * invZ });
+        }
+        var grid = new CellGrid(scaled, 1.0); int[] members = grid.Members; long[] keys = grid.Keys; bool wide = grid.Wide;
+        for (int i = 0; i < vertices.Count; i++)
+        {
+            Vec3 p = vertices[i].Position;
+            grid.Cell(i, out long cx, out long cy, out long cz);
+            for (long dx = -1; dx <= 1; dx++) for (long dy = -1; dy <= 1; dy++) for (long dz = -1; dz <= 1; dz++)
+            {
+                long key = grid.Range(cx + dx, cy + dy, cz + dz, out int from, out int to);
+                for (int s = from; s < to; s++)
+                {
+                    int j = members[s];
+                    if (j >= i || keys[j] != key || (wide && !grid.SameCell(j, cx + dx, cy + dy, cz + dz))) continue;
+                    Vec3 q = vertices[j].Position;
+                    double ex = (p.X - q.X) * invX, ey = (p.Y - q.Y) * invY, ez = (p.Z - q.Z) * invZ;
+                    if (ex * ex + ey * ey + ez * ez <= 1) dsu.Union(i, j);
+                }
+            }
         }
 
         var byRoot = new Dictionary<int, Component>();
@@ -3875,15 +3888,18 @@ public static partial class GlbDisconnectedParts
         };
     }
 
-    static int VertexId(int accessor, uint index, Accessors reader, Dictionary<VertexKey, int> ids, List<Vertex> vertices, DisjointSet dsu)
+    // ids: per POSITION accessor, the vertex id of each of its elements, -1 until seen (one array per accessor instead of
+    // a hashed lookup per corner: 15.5 million lookups on the Saleg's Revenge's probe)
+    static int VertexId(int accessor, uint index, Accessors reader, Dictionary<int, int[]> ids, List<Vertex> vertices, DisjointSet dsu)
     {
-        if (index >= reader.Count(accessor)) throw new InvalidDataException("Primitive index exceeds its POSITION accessor.");
-        var key = new VertexKey { Accessor = accessor, Index = index };
-        int id;
-        if (ids.TryGetValue(key, out id)) return id;
+        int count = reader.Count(accessor);
+        if (index >= count) throw new InvalidDataException("Primitive index exceeds its POSITION accessor.");
+        if (!ids.TryGetValue(accessor, out int[] map)) { map = new int[count]; for (int k = 0; k < count; k++) map[k] = -1; ids.Add(accessor, map); }
+        int id = map[index];
+        if (id >= 0) return id;
         id = dsu.Add();
-        ids.Add(key, id);
-        vertices.Add(new Vertex { Key = key, Position = reader.Position(accessor, index) });
+        map[index] = id;
+        vertices.Add(new Vertex { Key = new VertexKey { Accessor = accessor, Index = index }, Position = reader.Position(accessor, index) });
         return id;
     }
 

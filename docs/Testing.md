@@ -3584,6 +3584,23 @@ sat finished); each face's answer is its own, so the chunking changes no result.
 | its largest group's twin census | 7.4 s | 6.1 s |
 | the galley, 15 groups, wall | 9.6 s | 9.7 s |
 
+**The Workshop's probe** (`Analyze`, `AnalyzeMesh`, 2026-10-27; user: "the probe still takes quite some time to load the
+Saleg model in the fusor"). Measured in Unity batch through the harness: of the Fuser's Probe on the Saleg's Revenge, reading
+the file, the node names and the unique renaming take 0.2 s and the per-mesh analysis 12.1 s - 1,868 meshes, 5.2 million
+triangles, the largest mesh 1.4 % of them, on one thread: gather 4.9 s, the weld grid 3.1 s, the distance merge 2.8 s, the
+component build 0.9 s. Analysing the meshes on every core FIRST gained 15 % (12.1 -> 9.6-11.2 s): collector-bound, as the
+fuse's gather was, with an object per vertex and per triangle, a hashed lookup per corner and a Dictionary of a List per
+weld cell. Now `Vertex` and `Triangle` are structs, the corner-to-vertex map is one array per POSITION accessor, the
+`indices` accessor is looked up once per primitive, and the weld cells go through the fuse's `CellGrid` (keyed on the
+positions scaled into cell units, so the cells are the very `floor((p - min) * inv)` the Dictionary used, the distance test
+reading the original positions): 12.1 s -> 8.7 s on one worker, and with the meshes analysed on every core (`AnalyzeWorkers`,
+0 = every logical processor; the plans gathered by mesh index, the node loop reading them in node order so every row,
+blocked message and exception lands where the serial loop put it) **4.5 s**. Guards: the Workshop golden drill's 19 rows
+unchanged and the three stale rows' candidates byte-identical to the previous run (every part's triangle and island count on
+22 sources); `GlbFuseTests` holds the rows equal on one and eight workers on a file with a mesh named twice and a blocked
+lines mesh; 2,186 tests. The split after, one worker: gather 2.4 s, weld 2.2 s, merge 2.7 s, components 1.0 s. Left in the
+probe: the distance merge's dictionaries (now the largest piece) and the component build's per-corner lists.
+
 **The groups' schedule, re-measured** (2026-10-27, after the kernels and the shared file). The four-at-a-time limit was chosen
 when the groups starved each other of the collector; with the weld, side view and gather making no garbage, the same 22-group
 job in Unity, bytes identical at every setting: 4 at once 37.0 / 36.1 / 36.1 s, 8 at once 34.2 / 35.5 / 35.0 s, 16 at once
