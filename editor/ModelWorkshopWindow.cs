@@ -828,7 +828,9 @@ public abstract class ModelWorkshopWindow : EditorWindow
             Repaint();
             return true;
         }
-        catch (Exception e) { rows.Clear(); status = "Probe failed: " + e.Message; return false; }
+        // the exception goes to the console with its stack trace: "Probe failed: Specified cast is not valid" said nothing of where
+        // (2026-10-27, a Mono ConditionalWeakTable inside Parse), and the window was the only place that saw it
+        catch (Exception e) { UnityEngine.Debug.LogException(e); rows.Clear(); status = "Probe failed: " + e.Message; return false; }
     }
 
     // "Object_12" -> ("Object_", 12): sort names by prefix, then by the trailing number as a NUMBER.

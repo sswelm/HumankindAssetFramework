@@ -3972,9 +3972,28 @@ public static partial class GlbDisconnectedParts
     // How often a given file (by array) was parsed and had its frame read: Tests/GlbFuseTests holds a multi-group fuse to two
     // parses (the groups' shared read, the apply's own) and one frame. Per array, not process-wide: the test classes run in
     // parallel and each parses files of its own.
+    // Keyed by the array itself and held weakly, so a count never keeps a parsed file alive: a plain list under a lock, swept of
+    // dead entries whenever one is added. NOT a ConditionalWeakTable: Unity's Mono throws "Specified cast is not valid" from
+    // inside its TryGetValue once the collector has run over the table (a castclass on a collected ephemeron), which broke
+    // every probe and fuse in the editor on 2026-10-27 while the .NET tests AND the Unity batch harness passed - a batch run
+    // parses once and quits before any collection. The fuse has no Unity-Mono leg in the gate (docs/Review-Backlog.md).
     internal sealed class SourceCounts { public int Parses, BellyReads; }
-    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<byte[], SourceCounts> sourceCounts = new System.Runtime.CompilerServices.ConditionalWeakTable<byte[], SourceCounts>();
-    internal static SourceCounts CountsOf(byte[] source) => sourceCounts.GetValue(source, _ => new SourceCounts());
+    static readonly List<KeyValuePair<WeakReference, SourceCounts>> sourceCounts = new List<KeyValuePair<WeakReference, SourceCounts>>();
+    internal static SourceCounts CountsOf(byte[] source)
+    {
+        lock (sourceCounts)
+        {
+            for (int i = sourceCounts.Count - 1; i >= 0; i--)
+            {
+                object target = sourceCounts[i].Key.Target;
+                if (target == null) sourceCounts.RemoveAt(i);
+                else if (ReferenceEquals(target, source)) return sourceCounts[i].Value;
+            }
+            var counts = new SourceCounts();
+            sourceCounts.Add(new KeyValuePair<WeakReference, SourceCounts>(new WeakReference(source), counts));
+            return counts;
+        }
+    }
     static Document Parse(byte[] bytes)
     {
         System.Threading.Interlocked.Increment(ref CountsOf(bytes).Parses);
