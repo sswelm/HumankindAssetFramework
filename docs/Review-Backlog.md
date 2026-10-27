@@ -351,7 +351,16 @@ route bake what the FBX route bakes?" - every animated glTF entry baked both way
 outputs, the imported rig (bones, mesh, placement), every role's clip (length; bone world transforms and skinned vertices at
 every clip frame and curve key) and non-empty role collections and pose stream lengths compared in Unity (`docs/Testing.md`); `BakeResult.rigRoute` names the
 route a bake took. OWED, the user's: the row's run in Unity on every entry and the in-game check of each model playing
-its roles; only then the default flips.
+its roles; only then the default flips. RUN 2026-10-27 by the user: 8 of 23 entries equal, 15 not, 1 not glTF. The
+fifteen, drilled on both routes' files in a batch Unity project (`docs/Testing.md`, step (h), the first run): eleven were
+the row comparing the UNPOSED prefabs - the FBX exporter writes the posed first frame, the glTF exporter the edit rest -
+fixed on both sides (the GLB import poses its prefab at the primary's first frame, the SDK's reference; the row samples
+the first frame before its rest clauses); the AntiTankIFV was a REAL FBX-route defect (a stale pose-bone location
+exported into the idle slice; the script resets its pose bones after the rebake, the port mirrors it); the ReconDrone's
+0.01 `RootNode` wrapper is folded into the rig; the Lembos' four collapsed triangles and the GreatGalley's fragment cap
+were Unity's FBX-import weld, which the Factory's GLB mesh now applies; three pose streams were one frame apart, the
+SDK's ceil of length x frame rate on a float ulp (the rule now allows exactly that, `PoseStreamParity`). STILL OWED: the
+row's re-run on every entry after this, and the in-game check.
 
 **(5) `vehicle_rig` - the plan, decided 2026-10-14 (the Lab's Generate without Blender, by (4)'s method).** Measured
 first: `vehicle_rig.py` is 3,846 lines; `mode = argv[0]` is probe (ported, 3a-3d), rigfast (the SKM fast path) or

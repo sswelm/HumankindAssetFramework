@@ -155,15 +155,20 @@ public static class UnityRigImportTests
     static void PoseStreams()
     {
         string a = Path.Combine(fixtures, "pose_a.bytes"), b = Path.Combine(fixtures, "pose_b.bytes");
-        Check("acceptance: absent pose streams fail", RigRouteAcceptanceTest.ComparePoseStreams(a, b) != null, "both roles missing");
+        Check("acceptance: absent pose streams fail", RigRouteAcceptanceTest.ComparePoseStreams(a, b, 1, 3, 1, 3) != null, "both roles missing");
         File.WriteAllBytes(a, new byte[0]); File.WriteAllBytes(b, new byte[0]);
-        Check("acceptance: empty pose streams fail", RigRouteAcceptanceTest.ComparePoseStreams(a, b) != null, "both roles empty");
+        Check("acceptance: empty pose streams fail", RigRouteAcceptanceTest.ComparePoseStreams(a, b, 1, 3, 1, 3) != null, "both roles empty");
         File.WriteAllBytes(a, new byte[48]); File.WriteAllBytes(b, new byte[48]);
-        Check("acceptance: valid one-frame pose streams pass", RigRouteAcceptanceTest.ComparePoseStreams(a, b) == null, "48 bytes each");
+        Check("acceptance: valid one-frame pose streams pass", RigRouteAcceptanceTest.ComparePoseStreams(a, b, 1, 3, 1, 3) == null, "48 bytes each");
         File.WriteAllBytes(b, new byte[96]);
-        Check("acceptance: different pose stream lengths fail", RigRouteAcceptanceTest.ComparePoseStreams(a, b) != null, "48 vs 96 bytes");
+        Check("acceptance: different pose stream lengths at equal frames fail", RigRouteAcceptanceTest.ComparePoseStreams(a, b, 1, 3, 1, 3) != null, "48 vs 96 bytes, one frame each");
+        // the SDK's ceil(length x frame rate) lands either side of a whole number: one frame apart with one frame's bytes passes, more does not
+        Check("acceptance: one frame apart with one frame's bytes passes", RigRouteAcceptanceTest.ComparePoseStreams(a, b, 1, 3, 2, 3) == null, "48 vs 96 bytes, 1 vs 2 frames of 3 bones");
+        Check("acceptance: one frame apart with the wrong bytes fails", RigRouteAcceptanceTest.ComparePoseStreams(b, a, 1, 3, 2, 3) != null, "96 vs 48 bytes, 1 vs 2 frames (the extra frame has fewer bytes)");
+        Check("acceptance: two frames apart fail", RigRouteAcceptanceTest.ComparePoseStreams(a, b, 1, 3, 3, 3) != null, "1 vs 3 frames");
+        Check("acceptance: different bone counts fail", RigRouteAcceptanceTest.ComparePoseStreams(a, b, 1, 3, 1, 4) != null, "3 vs 4 bones");
         File.Delete(b);
-        Check("acceptance: one missing pose stream fails", RigRouteAcceptanceTest.ComparePoseStreams(a, b) != null, "one role missing");
+        Check("acceptance: one missing pose stream fails", RigRouteAcceptanceTest.ComparePoseStreams(a, b, 1, 3, 1, 3) != null, "one role missing");
     }
     static void CrossRoute()
     {
@@ -207,7 +212,7 @@ public static class UnityRigImportTests
             .Invoke(null, new object[] { "RigImport_plain", "RigImport_placed", problems, notes });
         // This lightweight project lacks the Amplitude SDK: disregard missing baked collections and assert the actual
         // production comparison reports the root-transform discrepancy, rather than resetting both roots to identity.
-        Check("acceptance: CompareBakes preserves imported root placement and scale", problems.Any(p => p.Contains("rest bounds differ")) && problems.Any(p => p.Contains("the root bone")), string.Join("; ", problems.Where(p => p.Contains("rest bounds") || p.Contains("the root bone"))));
+        Check("acceptance: CompareBakes preserves imported root placement and scale", problems.Any(p => p.Contains("first-frame bounds differ")) && problems.Any(p => p.Contains("the root bone")), string.Join("; ", problems.Where(p => p.Contains("rest bounds") || p.Contains("the root bone"))));
     }
     static void ToleranceCounterexamples()
     {
@@ -338,6 +343,41 @@ public static class UnityRigImportTests
             Check("sparse recipe parity " + i, why == null, why ?? "window and recipe reader agree");
         }
     }
+    // 2026-10-27, the acceptance row's first run: the Factory's GLB import follows the FBX route's conventions - the prefab posed at
+    // the primary clip's first frame (the SDK's reference pose), a uniformly scaled wrapper folded into the rig, vertices equal in
+    // every attribute welded and the triangles that collapse dropped (Unity's FBX import does both)
+    static void FbxRouteConventions()
+    {
+        var offset = Import("offset", "Spin", out var clipsOffset);
+        if (offset != null)
+        {
+            var arm = offset.GetComponentsInChildren<Transform>(true).First(t => t.name == "Arm");
+            var clip = Subclip(clipsOffset["primary"]);
+            var x = AnimationUtility.GetEditorCurve(clip, AnimationUtility.GetCurveBindings(clip).First(b => b.path.EndsWith("Arm", StringComparison.Ordinal) && b.propertyName == "m_LocalPosition.x"));
+            Check("the prefab sits at the primary clip's first frame", Mathf.Abs(arm.localPosition.x - x.keys[0].value) < 1e-4f && Mathf.Abs(x.keys[0].value) > 0.1f,
+                FormattableString.Invariant($"Arm x {arm.localPosition.x} against the first key {x.keys[0].value} (the rest is 0)"));
+        }
+        var plain = Import("plain", "Spin", out var clipsPlain); var wrapped = Import("wrapped", "Spin", out var clipsWrapped);
+        if (plain != null && wrapped != null)
+        {
+            var scaled = wrapped.GetComponentsInChildren<Transform>(true).Where(t => (t.lossyScale - Vector3.one).magnitude >= 1e-4f).ToList();
+            Check("a scaled wrapper is folded: no scaled transform remains", scaled.Count == 0, scaled.Count == 0 ? "every transform at unit scale" : string.Join(",", scaled.Select(t => t.name + t.lossyScale)));
+            var a = UnityEngine.Object.Instantiate(plain); var b = UnityEngine.Object.Instantiate(wrapped);
+            try
+            {
+                var differences = RigRouteAcceptanceTest.CompareRigs(a, b, Subclip(clipsPlain["primary"]), Subclip(clipsWrapped["primary"]));
+                Check("a folded wrapper equals the plain rig", differences.Count == 0, differences.Count == 0 ? "equal" : string.Join("; ", differences));
+            }
+            finally { UnityEngine.Object.DestroyImmediate(a); UnityEngine.Object.DestroyImmediate(b); }
+        }
+        var dupes = Import("dupes", "Spin", out _);
+        if (dupes != null)
+        {
+            var mesh = dupes.GetComponentInChildren<SkinnedMeshRenderer>().sharedMesh;
+            Check("equal vertices welded and the collapsed triangle dropped", mesh.vertexCount == 8 && mesh.triangles.Length / 3 == 14,
+                $"{mesh.vertexCount} vertices, {mesh.triangles.Length / 3} triangles (16 vertices and 15 triangles in the file)");
+        }
+    }
     public static void Run()
     {
         fixtures = Arg("-hafRigImportFixtures"); output = Arg("-hafRigImportOutput");
@@ -347,6 +387,7 @@ public static class UnityRigImportTests
             foreach (var item in new[] { (fixture: "long", action: "Spin_" + new string('a', 120)), (fixture: "underscore", action: "_Spin") })
                 if (Import(item.fixture, item.action, out _) != null) Preview(item.fixture, item.action);
             Acceptance(); AcceptanceCounterexamples(); PoseStreams(); CrossRoute(); RootPlacement(); ToleranceCounterexamples(); WrongSkinWeights(); NonUniformParent(2); NonUniformParent(100);
+            FbxRouteConventions();
             RecipeArgsParity(); SparseRecipeParity();
         }
         catch (Exception e) { Rows.Add("FAIL exception: " + e); failed++; }

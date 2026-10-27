@@ -64,7 +64,9 @@ public static class HafModelRig
             {
                 mb = BuildMesh(m, node.Mesh, skinned ? node.Skin : -1, sh, textures, materials, assets, forFactory);
                 built[key] = mb;
-                r.Meshes++; r.Vertices += mb.mesh.vertexCount; r.Triangles += (int)hm.Primitives.Sum(p => p.TriangleCount);
+                r.Meshes++; r.Vertices += mb.mesh.vertexCount; r.Triangles += (int)hm.Primitives.Sum(p => p.TriangleCount) - WeldReport.dropped;
+                if (WeldReport.welded > 0 || WeldReport.dropped > 0)
+                    r.Note += (r.Note.Length > 0 ? "; " : "") + $"'{mb.mesh.name}': {WeldReport.welded} equal vertex(es) welded, {WeldReport.dropped} collapsed triangle(s) dropped";
             }
             if (skinned)
             {
@@ -218,11 +220,20 @@ public static class HafModelRig
             if (forFactory) material.name = p.Material >= 0 && p.Material < m.Materials.Count ? m.Materials[p.Material].Name : "Material";
             mats.Add(material);
         }
+        // THE FACTORY'S MESH WELDS WHAT UNITY'S FBX IMPORT WELDS (2026-10-27): vertices equal in position, normal, uv and bone
+        // weights become one, and a triangle that collapses onto two of them is dropped. Blender's glTF exporter deduplicates
+        // per primitive only; Unity's importer welds the whole FBX mesh and drops the collapsed triangles - measured on the
+        // acceptance row: the Lembos imported 27,424 triangles from the GLB against 27,420 from the FBX (four collapsed), and
+        // the GreatGalley's unwelded duplicates cost enough quad pairs (the SDK pairs triangles on shared edges) to push its
+        // 233,398 triangles past the eight-fragment cap that the FBX import's mesh fits.
+        int welded = 0, dropped = 0;
+        if (forFactory) WeldEqualVertices(verts, norms, uvs, perVertex, influences, subs, out welded, out dropped);
         mesh.SetVertices(verts);
         mesh.SetUVs(0, uvs);
         mesh.subMeshCount = subs.Count;
         for (int si = 0; si < subs.Count; si++) mesh.SetTriangles(subs[si], si, false);
         if (allNormals && norms.Count == verts.Count) mesh.SetNormals(norms); else mesh.RecalculateNormals();
+        WeldReport = (welded, dropped);   // Build reports the counts through the Result's Note
         if (skinIndex >= 0)
         {
             // The game SDK's skinned MeshCollection.ImportMeshes indexes tangents
@@ -244,6 +255,65 @@ public static class HafModelRig
         }
         mesh.RecalculateBounds();
         return (mesh, mats.ToArray());
+    }
+
+    [ThreadStatic] static (int welded, int dropped) WeldReport;
+
+    /// <summary>Vertices equal in position (within 1e-6 of the mesh's extent), normal (1e-4), uv (1e-6) and bone influences
+    /// become one - the first occurrence kept, in order - and every triangle is remapped; a triangle left with two equal
+    /// corners is dropped. Pure list arithmetic; `perVertex`/`influences` may be empty (an unskinned mesh).</summary>
+    internal static void WeldEqualVertices(List<Vector3> verts, List<Vector3> norms, List<Vector2> uvs, List<byte> perVertex, List<BoneWeight1> influences, List<int[]> subs, out int welded, out int dropped)
+    {
+        welded = 0; dropped = 0;
+        int n = verts.Count;
+        if (n == 0) return;
+        bool hasNormals = norms.Count == n, hasUv = uvs.Count == n, skinned = perVertex.Count == n;
+        var lo = verts[0]; var hi = verts[0];
+        foreach (var v in verts) { lo = Vector3.Min(lo, v); hi = Vector3.Max(hi, v); }
+        double q = Math.Max(1e-9, Math.Max(hi.x - lo.x, Math.Max(hi.y - lo.y, hi.z - lo.z)) * 1e-6);
+        var offsets = new int[n + 1];
+        if (skinned) for (int i = 0; i < n; i++) offsets[i + 1] = offsets[i] + perVertex[i];
+        var first = new Dictionary<string, int>(n);
+        var map = new int[n];
+        var keptIndex = new List<int>(n);
+        var sb = new System.Text.StringBuilder();
+        for (int i = 0; i < n; i++)
+        {
+            sb.Clear();
+            var v = verts[i];
+            sb.Append(Math.Round(v.x / q)).Append(',').Append(Math.Round(v.y / q)).Append(',').Append(Math.Round(v.z / q));
+            if (hasNormals) { var nm = norms[i]; sb.Append('|').Append(Math.Round(nm.x * 1e4)).Append(',').Append(Math.Round(nm.y * 1e4)).Append(',').Append(Math.Round(nm.z * 1e4)); }
+            if (hasUv) { var uv = uvs[i]; sb.Append('|').Append(Math.Round(uv.x * 1e6)).Append(',').Append(Math.Round(uv.y * 1e6)); }
+            if (skinned) for (int k = offsets[i]; k < offsets[i + 1]; k++) sb.Append('|').Append(influences[k].boneIndex).Append(':').Append(influences[k].weight.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+            string key = sb.ToString();
+            if (first.TryGetValue(key, out int at)) { map[i] = at; welded++; }
+            else { map[i] = keptIndex.Count; first[key] = keptIndex.Count; keptIndex.Add(i); }
+        }
+        if (welded == 0) return;
+        var nv = new List<Vector3>(keptIndex.Count); var nn = new List<Vector3>(hasNormals ? keptIndex.Count : 0); var nu = new List<Vector2>(hasUv ? keptIndex.Count : 0);
+        var np = new List<byte>(skinned ? keptIndex.Count : 0); var ni = new List<BoneWeight1>(skinned ? influences.Count : 0);
+        foreach (int i in keptIndex)
+        {
+            nv.Add(verts[i]);
+            if (hasNormals) nn.Add(norms[i]);
+            if (hasUv) nu.Add(uvs[i]);
+            if (skinned) { np.Add(perVertex[i]); for (int k = offsets[i]; k < offsets[i + 1]; k++) ni.Add(influences[k]); }
+        }
+        verts.Clear(); verts.AddRange(nv);
+        if (hasNormals) { norms.Clear(); norms.AddRange(nn); }
+        if (hasUv) { uvs.Clear(); uvs.AddRange(nu); }
+        if (skinned) { perVertex.Clear(); perVertex.AddRange(np); influences.Clear(); influences.AddRange(ni); }
+        for (int si = 0; si < subs.Count; si++)
+        {
+            var tri = subs[si]; var kept = new List<int>(tri.Length);
+            for (int t = 0; t + 2 < tri.Length; t += 3)
+            {
+                int a = map[tri[t]], b = map[tri[t + 1]], c = map[tri[t + 2]];
+                if (a == b || b == c || a == c) { dropped++; continue; }
+                kept.Add(a); kept.Add(b); kept.Add(c);
+            }
+            subs[si] = kept.ToArray();
+        }
     }
 
     static Vector3 V3(double[] v) => new Vector3((float)v[0], (float)v[1], (float)v[2]);

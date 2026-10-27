@@ -49,6 +49,8 @@
     <Compile Include="..\editor\GitStamp.cs" Link="GitStamp.cs" />
     <!-- The multi-mesh split's estimator + BSP partition (2026-09-14): the quad ceiling that the Bremen depends on. -->
     <Compile Include="..\editor\QuadEstimate.cs" Link="QuadEstimate.cs" />
+    <!-- The rig route acceptance row's pose stream rule (2026-10-27): frame counts equal or one apart, the SDK's rounding. -->
+    <Compile Include="..\editor\PoseStreamParity.cs" Link="PoseStreamParity.cs" />
     <!-- The registry source's write, checked by what it displaced (review of PR #100): driven against real files. -->
     <Compile Include="..\editor\CheckedReplace.cs" Link="CheckedReplace.cs" />
     <!-- The in-memory model and the GLB reader (2026-09-30, step 1 of replacing Blender): pure C#, driven against synthetic files. -->
