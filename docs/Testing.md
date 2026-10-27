@@ -3584,6 +3584,33 @@ sat finished); each face's answer is its own, so the chunking changes no result.
 | its largest group's twin census | 7.4 s | 6.1 s |
 | the galley, 15 groups, wall | 9.6 s | 9.7 s |
 
+**The Workshop's probe** (`Analyze`, `AnalyzeMesh`, 2026-10-27; user: "the probe still takes quite some time to load the
+Saleg model in the fusor"). Measured in Unity batch through the harness: of the Fuser's Probe on the Saleg's Revenge, reading
+the file, the node names and the unique renaming take 0.2 s and the per-mesh analysis 12.1 s - 1,868 meshes, 5.2 million
+triangles, the largest mesh 1.4 % of them, on one thread: gather 4.9 s, the weld grid 3.1 s, the distance merge 2.8 s, the
+component build 0.9 s. Analysing the meshes on every core FIRST gained 15 % (12.1 -> 9.6-11.2 s): collector-bound, as the
+fuse's gather was, with an object per vertex and per triangle, a hashed lookup per corner and a Dictionary of a List per
+weld cell. Now `Vertex` and `Triangle` are structs, the corner-to-vertex map is one array per POSITION accessor, the
+`indices` accessor is looked up once per primitive, and the weld cells go through the fuse's `CellGrid` (keyed on the
+positions scaled into cell units, so the cells are the very `floor((p - min) * inv)` the Dictionary used, the distance test
+reading the original positions): 12.1 s -> 8.7 s on one worker, and with the meshes analysed on every core (`AnalyzeWorkers`,
+0 = every logical processor; the plans gathered by mesh index, the node loop reading them in node order so every row,
+blocked message and exception lands where the serial loop put it) **4.5 s**. Guards: the Workshop golden drill's 19 rows
+unchanged and the three stale rows' candidates byte-identical to the previous run (every part's triangle and island count on
+22 sources); `GlbFuseTests` holds the rows equal on one and eight workers on a file with a mesh named twice and a blocked
+lines mesh; 2,186 tests. The split after, one worker: gather 2.4 s, weld 2.2 s, merge 2.7 s, components 1.0 s. Left in the
+probe: the distance merge's dictionaries (now the largest piece) and the component build's per-corner lists.
+
+PR #211 review guards: a dense POSITION-to-ID map is bounded by the primitive's corner count, with the POSITION and index
+ranges checked before allocation. Sparse or invalid ranges use a dictionary of referenced IDs, preserving the existing
+lazy data errors. Two meshes sharing a million-position accessor but referencing only three vertices each must fit within
+the parse/BIN-copy allocation plus 1 MiB; oversized declared counts must report the data error instead of attempting a giant
+array. Checked cell-coordinate conversion preserves the probe's blocked rows and the splitter's warnings for NaN/infinity.
+Malformed node extensions are deferred by the parallel pre-pass so an earlier node's error still wins. The eight new cases
+bring the suite to 2,194. A separate 48-fixture comparison holds probe rows at one/eight workers and split bytes at zero/1%
+merge equal to both the serial base and the original PR, on .NET and Unity. The 1,868-mesh ship's complete probe rows also
+match the original PR in Unity at one/eight workers; single-run timings remain about 8.7 s and 2.9 s respectively.
+
 **The groups' schedule, re-measured** (2026-10-27, after the kernels and the shared file). The four-at-a-time limit was chosen
 when the groups starved each other of the collector; with the weld, side view and gather making no garbage, the same 22-group
 job in Unity, bytes identical at every setting: 4 at once 37.0 / 36.1 / 36.1 s, 8 at once 34.2 / 35.5 / 35.0 s, 16 at once
