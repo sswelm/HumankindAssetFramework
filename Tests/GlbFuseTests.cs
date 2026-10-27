@@ -2265,4 +2265,15 @@ public class GlbFuseTests
         Assert.Equal(4, Enumerable.Range(0, 8).Count(i => col[i * 4] > 0.99f && col[i * 4 + 1] > 0.99f && col[i * 4 + 2] > 0.99f));   // four white
         Assert.Equal(4, Enumerable.Range(0, 8).Count(i => col[i * 4] > 0.99f && col[i * 4 + 1] < 0.01f));   // four red, nothing blended
     }
+
+    // The groups planned at once by default: half the logical processors and at least two (2026-10-27, measured on the Saleg's
+    // 22 groups: 8 at once beat 4 by a second, 16 and 22 were no faster). The Model Fuser's setting overrides it through
+    // FuseGroupWorkers; 0 there means this default.
+    [Fact]
+    public void The_default_number_of_groups_at_once_is_half_the_processors_and_at_least_two()
+    {
+        int expected = Math.Max(2, Environment.ProcessorCount / 2);
+        Assert.Equal(expected, GlbDisconnectedParts.DefaultFuseGroupWorkers);
+        Assert.True(GlbDisconnectedParts.DefaultFuseGroupWorkers >= 2);
+    }
 }

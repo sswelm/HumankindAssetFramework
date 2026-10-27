@@ -429,6 +429,10 @@ windows. **Deep dive:**
   tick **Check mirrored parts** if one side of a symmetric hull comes out see-through (0.5.7: some files store their
   mirrored parts already facing outward, and the glTF reversal then turns them inward; the fuse checks them against
   the plain parts they touch and acts only on a clear verdict, and warns you when a group would need it),
+  leave **Fuse — groups at once** at **0** (auto: half the logical processors; measured on a 22-group ship, 8 at once is
+  the sweet spot on 16 threads and more is no faster, since the largest group's weld slows as the others compete for
+  memory bandwidth — lower it when the editor must stay responsive during a fuse or memory is short; the output never
+  depends on it),
   press **Fuse … into one shell each**: every group becomes ONE mesh in the output GLB, their seam vertices
   welded (a UV seam or a hard edge keeps its own vertex; connectivity is by position regardless), the winding
   made **consistent by majority**
