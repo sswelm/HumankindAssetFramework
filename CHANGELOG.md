@@ -10,6 +10,11 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE VEHICLE LAB GENERATES IN C# BY DEFAULT (2026-10-27).** The factory default of the Generate backend (neither the
+  recipe nor **Tools ▸ HAF ▸ Vehicle Generate default** naming one) is the C# port, whose weld, collapse and probe
+  kernels run as C++; it was Blender until now, and a preference or recipe set earlier still wins. The backend labels say
+  "C# + C++ kernels", and the Lab's result line names the kernels it ran with (user: "by this point the factory default
+  should also be C#").
 - **THE WORKSHOP'S PROBE IN A THIRD OF THE TIME (2026-10-27).** The Saleg's Revenge's Probe spent 12.1 s analysing its
   1,868 meshes on one thread, and analysing them on every core gained only 15 % - collector-bound, an object per vertex and
   triangle. Structs, dense/sparse vertex-ID maps and the fuse's flat cell grid brought one thread to 8.7 s and every core to

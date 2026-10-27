@@ -12,6 +12,10 @@ public static class BlenderVehicleRigInProcess
         string value = (route ?? "").Trim().ToLowerInvariant();
         return value == "csharp" || value == "blender" ? value : "";
     }
+    /// <summary>The Generate backend when neither the recipe nor the editor preference names one: the C# route (with its C++
+    /// kernels) since 2026-10-27 - accepted in-game on the galley and the Saleg's Revenge, every other reason to run Blender is a
+    /// named fallback the route takes by itself. Until then "blender".</summary>
+    public const string FactoryDefaultRoute = "csharp";
     public static bool UseCSharp(string recipeRoute, string editorDefault)
     {
         string route = NormalizeRoute(recipeRoute);

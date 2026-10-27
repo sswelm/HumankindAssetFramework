@@ -22,6 +22,16 @@ public class VehicleRigInProcessTests : IDisposable
     [InlineData("csharp","blender",true)] [InlineData(" CSharp ","blender",true)] [InlineData("unknown", "bad",false)]
     public void Route_overrides_default_without_changing_the_missing_preference_default(string recipe,string editor,bool expected)
         => Assert.Equal(expected,BlenderVehicleRigInProcess.UseCSharp(recipe,editor));
+    // the factory default - neither the recipe nor the preference names a backend - is the C# route (2026-10-27); a recipe pinned
+    // to Blender still wins over it
+    [Fact]
+    public void The_factory_default_backend_is_csharp_and_a_pinned_recipe_still_wins()
+    {
+        Assert.Equal("csharp", BlenderVehicleRigInProcess.FactoryDefaultRoute);
+        Assert.True(BlenderVehicleRigInProcess.UseCSharp("", BlenderVehicleRigInProcess.FactoryDefaultRoute));
+        Assert.True(BlenderVehicleRigInProcess.UseCSharp(null, BlenderVehicleRigInProcess.FactoryDefaultRoute));
+        Assert.False(BlenderVehicleRigInProcess.UseCSharp("blender", BlenderVehicleRigInProcess.FactoryDefaultRoute));
+    }
     [Fact]
     public void Writes_and_atomically_replaces_a_readable_rig_with_ordered_completion_log()
     {

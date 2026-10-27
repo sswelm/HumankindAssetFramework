@@ -18,7 +18,7 @@ the HAF atlas, build the Humankind mod, or deploy anything to the game. Those ha
 | 4. Package and deploy | Humankind Mod Editor or `haf build` | Updated mod in Humankind's `Community` folder |
 | 5. Verify | Humankind + F8 | The real runtime model, animation, and shared mesh-budget cost |
 
-Blender is the default Generate backend and is still needed for named fallback cases and the Blender bake route. Generate can opt into C# per recipe (see below). Probe parts uses an in-process path for supported `.glb`/`.gltf`
+The C# port is the default Generate backend since 2026-10-27 (its heavy stages run as C++ through the package's native plugin); Blender is still needed for the named fallback cases, which the C# route hands over by itself, and for the Blender bake route. A recipe can pin either backend (see below). Probe parts uses an in-process path for supported `.glb`/`.gltf`
 sources; morph targets, bone-parented meshes, animated or placed skinned meshes, animated second models and reader-refused
 features keep the Blender path. HAF auto-detects it; use the override in the HAF
 settings only when detection fails.
@@ -231,13 +231,13 @@ geometry, not the source skeleton's bone rows. If wheel spin or wave rock reques
 is treated as the preferred period and the nearest whole number of strokes is fitted across the shared clip so it
 loops without a pause or snap.
 
-**Generate backend** is saved with the recipe: **Editor default**, **Blender**, or **C# (fallback to Blender)**.
+**Generate backend** is saved with the recipe: **Editor default**, **Blender**, or **C# + C++ kernels (fallback to Blender)**.
 The fallback label appears only when Blender is detected through its saved executable path, a standard installation,
 or `PATH`. Without it, the choices say **Blender (unavailable)** and **C# (Blender fallback unavailable)**;
 **Editor default** also reflects that availability. Supported C# models still generate. If a model needs Blender,
 generation stops with the unsupported-operation reason and instructions to install Blender or set its executable
 in the Model Factory Settings. An existing output GLB is preserved when Blender cannot start.
-The editor default remains Blender. Change it explicitly through **Tools ▸ HAF ▸ Vehicle Generate default**.
+The editor default is C# unless changed through **Tools ▸ HAF ▸ Vehicle Generate default** (before 2026-10-27 it was Blender; a preference set earlier still wins). There is no separate C++ backend: the C# route is the one whose weld, collapse and probe kernels run as C++, and the result line names the kernels it ran with.
 The C# path generates supported glTF rigs in-process and previews the written GLB. Source-skeleton rigs, other source
 formats, moving treads and named image-editing limits use Blender; the status names the backend and fallback reason.
 For alpha-reading JPEG textures, C# retains the original JPEG: glTF defines its texture alpha as 1, so material

@@ -571,7 +571,7 @@ are caught. FULL: 25 saved recipes plus 138 fixtures; 155 of 163 jobs compare th
 with all 112 supported GLBs byte-identical. The complete drill rejects 158 damaged-evidence kinds (151 without key rows).
 (g) Generate wiring implemented 2026-10-18: BlenderVehicleRigInProcess runs the five stages and atomically replaces the GLB;
 script exits/deaths remain failures, cancellation propagates, and named limits/read failures use Blender. Each recipe stores
-Generate backend (editor default/Blender/C#); HAF.VehicleGenerateRouteDefault remains Blender unless explicitly changed.
+Generate backend (editor default/Blender/C#); HAF.VehicleGenerateRouteDefault, when unset, means the C# route since 2026-10-27 (it was Blender until then; the user: "by this point the factory default should also be C#").
 The C# preview reads the generated GLB through HafModelRig, with Spin first and owned assets cleaned up. Diagnostics and the
 gun-span sidecar keep the existing contract. The every-recipe backend acceptance row forces both routes through the actual
 Vehicleize entry point, compares GLB bytes/read-back, ordered summaries and sidecars, and judges the Blender reference against
