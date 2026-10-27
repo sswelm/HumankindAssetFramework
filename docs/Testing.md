@@ -3585,10 +3585,11 @@ sat finished); each face's answer is its own, so the chunking changes no result.
 | the galley, 15 groups, wall | 9.6 s | 9.7 s |
 
 x64 .NET, back to back: the Saleg's 43.6 s -> 36.9 s, the galley 10.7 s -> 10.1 s. Guards: `GlbFuseTests`' shared-read test now
-also counts: a two-group fuse parses the file three times whatever the group count (the groups' shared read, the apply's own, the
-written file's validation; `GlbDisconnectedParts.Parses` counts every parse, not only the cache's) and reads the frame once
-(`OccluderCache.BellyReads`); the fused bytes of the groups together still equal each group fused alone, both backends; the
-Workshop golden drill's 19 rows are unchanged.
+also counts: a two-group fuse parses its source twice whatever the group count (the groups' shared read and the apply's own;
+the written file's validation parses the output) and reads the frame once. The counts are kept per source ARRAY
+(`GlbDisconnectedParts.CountsOf`, every `Parse` counted, not only the cache's): a first version counted process-wide and failed
+in the push gate, where the other test classes parse their own files in parallel. The fused bytes of the groups together still
+equal each group fused alone, both backends; the Workshop golden drill's 19 rows are unchanged.
 PR #205 review guards: the sizing pass checks the first and last position/index elements before using declared counts as list capacities,
 and adds totals with checked arithmetic. Invalid ranges or totals fall back to the normal gather so its data error is
 preserved. Tests cover impossible and negative counts (including two oversized parts), negative starts concealed by a

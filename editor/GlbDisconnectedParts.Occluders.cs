@@ -42,7 +42,6 @@ public static partial class GlbDisconnectedParts
         Document document; byte[] bin;
         internal Document Document { get { Parsed(); return document; } }
         internal byte[] Bin { get { Parsed(); return bin; } }
-        internal static int BellyReads;   // frames read from a file, over every cache: Tests/GlbFuseTests holds a multi-group fuse to one
         void Parsed()
         {
             if (System.Threading.Volatile.Read(ref bin) != null) return;
@@ -67,7 +66,7 @@ public static partial class GlbDisconnectedParts
                 if (!bellyRead)
                 {
                     var pts = new List<Vec3>(); var wts = new List<double>();
-                    ModelBellySamples(nodes, meshes, reader, pts, wts); System.Threading.Interlocked.Increment(ref BellyReads);
+                    ModelBellySamples(nodes, meshes, reader, pts, wts); System.Threading.Interlocked.Increment(ref CountsOf(source).BellyReads);
                     bellyFromFile = pts.Count > 0;
                     if (bellyFromFile) BellyFrame(pts, wts, out bellyLength, out bellyWidth, out bellyCentre, out bellyY, out bellyFloor);
                     bellyRead = true;

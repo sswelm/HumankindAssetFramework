@@ -3963,10 +3963,15 @@ public static partial class GlbDisconnectedParts
         catch (InvalidDataException e) { return e.Message; }
     }
 
-    internal static int Parses;   // every GLB parsed, counted: Tests/GlbFuseTests holds a multi-group fuse to two (the groups' shared read, the apply's own)
+    // How often a given file (by array) was parsed and had its frame read: Tests/GlbFuseTests holds a multi-group fuse to two
+    // parses (the groups' shared read, the apply's own) and one frame. Per array, not process-wide: the test classes run in
+    // parallel and each parses files of its own.
+    internal sealed class SourceCounts { public int Parses, BellyReads; }
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<byte[], SourceCounts> sourceCounts = new System.Runtime.CompilerServices.ConditionalWeakTable<byte[], SourceCounts>();
+    internal static SourceCounts CountsOf(byte[] source) => sourceCounts.GetValue(source, _ => new SourceCounts());
     static Document Parse(byte[] bytes)
     {
-        System.Threading.Interlocked.Increment(ref Parses);
+        System.Threading.Interlocked.Increment(ref CountsOf(bytes).Parses);
         if (bytes.Length < 20 || ReadUInt32(bytes, 0) != Magic || ReadUInt32(bytes, 4) != 2)
             throw new InvalidDataException("Input is not a GLB 2.0 file.");
         uint total = ReadUInt32(bytes, 8);
