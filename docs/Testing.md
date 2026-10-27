@@ -1651,7 +1651,10 @@ named field by field), the albedo PNG pixel for pixel (byte for byte until 2026-
 source through its own PNG writer - LightCruisers 493,369 bytes from the source's 422,645 - while the port keeps the source's
 bytes; the pixels were identical and the byte rule failed twelve rigs that were right) or a JPEG albedo by its size, the
 script's exits on both sides; a named
-fallback is a SKIP that says why, a crash a FAIL. A source-reading review before the PR found three defects the drill cannot see (the GLB is Blender's byte for byte; they
+fallback is a SKIP that says why, a crash a FAIL. The native Unity import drill also checks differently encoded RGB/RGBA PNGs
+with equal pixels, changed color/alpha, changed dimensions and unreadable input; and exercises the in-process writer with
+an absent nested output directory and replacement of a previous GLB (`tools/riganim_unity_import_drill.sh`).
+A source-reading review before the PR found three defects the drill cannot see (the GLB is Blender's byte for byte; they
 are in the Factory's use of it), each fixed: a fallback mid-bake left the earlier key's GLB and sidecar beside a csharp
 stamp, so the next bake with 'Reuse extracted' took the stale GLB (now the fallback deletes them and stamps a fallback
 key, which the next bake at the same settings and port revision honours by taking the FBX route up front); Blender's
@@ -2313,7 +2316,8 @@ writes through a unique same-directory temporary file before replacing the outpu
 read-back, replacement, a cancellation/deadline after the temporary write, terminal script outcomes, reader/FBX/rigfast
 fallbacks and merged inputs; 2,013 tests pass.
 
-The recipe's generateRoute and HAF.VehicleGenerateRouteDefault select the backend; absent fields/preferences retain Blender.
+The recipe's generateRoute and HAF.VehicleGenerateRouteDefault select the backend. Absent fields/preferences retained
+Blender at the initial rollout; the factory default changed to C# on 2026-10-27.
 New/load/save normalize that state without leaking a previous recipe's choice. Headless acceptance can force a route and
 reports the route actually used and its fallback reason. The existing window success marker, argument parity and gun-span
 sidecar are shared by both paths. A successful C# run builds its live preview through HafModelRig and attaches its owned
@@ -2347,6 +2351,14 @@ entries and removal. Native `RunAvailability` checks the unavailable/available l
 with no Blender resolver, and verifies that an unsupported input and a direct Blender request explain unavailability
 without claiming completion or replacing the previous GLB. It runs in the normal native suite, or on its own with
 `HAF_GENERATE_TEST_METHOD=RunAvailability bash tools/vehiclerig_unity_generate_drill.sh`.
+
+PR #212 review guards: missing, blank and unrecognized backend preferences use the C# factory default, while valid
+recipe/editor choices keep their precedence. The wrapper's timing labels describe its actual stage boundaries (rig,
+skinning and join together; then clips; then mesh/export preparation), and completion remains the last log line.
+The suite has 2,200 cases. Unity `RunAvailability` covers native/managed labels, Blender availability and valid/blank/
+invalid defaults, generates with a blank preference and no Blender, and checks preservation of an existing output on
+unavailable fallback. The original PR fails five new unit cases and fourteen Unity availability checks. With the fixes,
+the Unity check passes with `HAF_NATIVE_KERNELS=0` and with the shipped DLL loaded; the generated GLB bytes match.
 
 Review of PR #176 (2026-10-15): a full run found the organ gun's newly recorded custom-normal shorts differed after
 stage one's loose split. Blender's separate operator decodes the source BMesh normals into a vector layer and

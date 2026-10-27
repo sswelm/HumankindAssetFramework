@@ -10,7 +10,7 @@
 // the port NAMES is a SKIP that says why (that is the fallback working); a port that CRASHES is a FAIL here even though
 // the Factory would quietly take the FBX route - a crash is not a named shape. The script's own exits must be the
 // script's on both sides. This row is the acceptance the backlog asks for before the GLB route becomes the default; the
-// albedo is judged as the Factory writes it (a PNG source byte for byte; a JPEG one is Blender's encoder's and only its
+// albedo is judged as the Factory writes it (a PNG source pixel for pixel; a JPEG one is Blender's encoder's and only its
 // size is held).
 using System;
 using System.Collections.Generic;
@@ -116,7 +116,7 @@ public static class BlenderRigAnimHeadlessTest
                     catch (Exception dx) { reason += " (" + dx.GetType().Name + " reading them back)"; }
                     if (reason != null) { s.fail++; body.AppendLine($"FAIL: {e.resourceName}: the written files differ - {reason}"); continue; }
                 }
-                // the albedo: the script wrote its PNG at argv[5] when asked; the port's must be there too, a PNG source byte for byte
+                // The script wrote its PNG at argv[5] when asked; the port's must be there too, with equal decoded PNG pixels.
                 string albedoNote = "";
                 if (argvA[3].Length > 0)
                 {
