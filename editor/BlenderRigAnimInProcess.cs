@@ -119,6 +119,10 @@ public static class BlenderRigAnimInProcess
             if (w.Fallback != null) { o.UseBlender = "the file: " + w.Fallback; return o; }
             // a temporary file, then an atomic replace: never half a file where the import looks
             string tmp = outGlb + ".tmp";
+            // the output's folder may not exist yet (the acceptance row bakes under throwaway names; the FBX route creates its
+            // folder on its own side): the port crashed on UniversalTanks with DirectoryNotFound and the bake fell back (2026-10-27)
+            string outDir = Path.GetDirectoryName(outGlb);
+            if (!string.IsNullOrEmpty(outDir)) Directory.CreateDirectory(outDir);
             File.WriteAllBytes(tmp, w.Glb);
             if (File.Exists(outGlb)) File.Replace(tmp, outGlb, null); else File.Move(tmp, outGlb);
             o.Log.Add("RIGANIM wrote " + outGlb + " ('" + o.PrimaryAction + "', " + x.Animations.Count.ToString(CultureInfo.InvariantCulture) + " animation(s))");

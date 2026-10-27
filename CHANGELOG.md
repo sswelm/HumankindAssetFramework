@@ -21,6 +21,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   triangles, the GreatGalley back under the eight-fragment cap); and pose streams one frame apart - the SDK's ceil of
   length x frame rate on a float ulp - are accepted as such. Review guards preserve distinct vertex attributes, fold shared
   bind poses once, retain nonuniform wrappers, and validate the SDK's packed word lengths symmetrically. `docs/Testing.md`, step (h).
+- **TWO BAKE TESTS ROWS READ RIGHT AGAIN (2026-10-27).** The "in-process rig slim" row failed twelve rigs on the albedo
+  PNG's bytes: Blender's `image.save` re-encodes the source through its own PNG writer, the port keeps the source's
+  bytes, and the pixels were identical (LightCruisers, proven pixel for pixel). The row holds the PNG pixel for pixel now.
+  In the "GLB rig route" row the port crashed on UniversalTanks because the output's folder did not exist yet under the
+  row's throwaway name; the port creates it. The row's other fifteen differences (rest bounds, pose streams, triangle
+  counts between the FBX and GLB routes) are the acceptance findings the backlog says that row exists to surface, not
+  regressions: the GLB route is not the default, and they are worked through before it becomes one.
 - **THE VEHICLE LAB GENERATES IN C# BY DEFAULT (2026-10-27).** The factory default of the Generate backend (neither the
   recipe nor **Tools ▸ HAF ▸ Vehicle Generate default** naming one) is the C# port, with native kernels when available;
   it was Blender until now, and a valid preference or recipe set earlier still wins. The backend labels say

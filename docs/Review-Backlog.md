@@ -360,7 +360,8 @@ exported into the idle slice; the script resets its pose bones after the rebake,
 0.01 `RootNode` wrapper is folded into the rig; the Lembos' four collapsed triangles and the GreatGalley's fragment cap
 were Unity's FBX-import weld, which the Factory's GLB mesh now applies; three pose streams were one frame apart, the
 SDK's ceil of length x frame rate on a float ulp (the rule now allows exactly that, `PoseStreamParity`). STILL OWED: the
-row's re-run on every entry after this, and the in-game check.
+row's re-run on every entry after this, and the in-game check. UniversalTanks' missing output directory is created by
+the port (PR #213); that PR also compares the albedo PNG's decoded pixels instead of its encoder-dependent bytes.
 
 **(5) `vehicle_rig` - the plan, decided 2026-10-14 (the Lab's Generate without Blender, by (4)'s method).** Measured
 first: `vehicle_rig.py` is 3,846 lines; `mode = argv[0]` is probe (ported, 3a-3d), rigfast (the SKM fast path) or
