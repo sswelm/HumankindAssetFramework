@@ -2013,7 +2013,12 @@ public class GlbFuseTests
             var jobs = new List<GlbDisconnectedParts.FuseJob> {
                 new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 1, 2 }, Name = "Tub_Fused" },
                 new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 3 }, Name = "Lid_Fused" } };
+            int parsesBefore = GlbDisconnectedParts.Parses, bellyBefore = GlbDisconnectedParts.OccluderCache.BellyReads;
             byte[] together = GlbDisconnectedParts.FuseGroups(src, jobs, 0.0, out var results);
+            // three parses whatever the group count - the groups' shared read, the apply's own, the written file's validation -
+            // and the model's frame read once (2026-10-27: every group used to parse the file and sample the frame for itself)
+            Assert.Equal(3, GlbDisconnectedParts.Parses - parsesBefore);
+            Assert.Equal(1, GlbDisconnectedParts.OccluderCache.BellyReads - bellyBefore);
             var aloneTub = GlbDisconnectedParts.FuseNodes(src, new[] { 1, 2 }, 0.0, "Tub_Fused");
             var aloneLid = GlbDisconnectedParts.FuseNodes(src, new[] { 3 }, 0.0, "Lid_Fused");
             Assert.Equal(aloneTub.FacesRewound, results[0].FacesRewound); Assert.Equal(aloneLid.FacesRewound, results[1].FacesRewound);

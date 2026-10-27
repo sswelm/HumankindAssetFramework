@@ -10,6 +10,7 @@
 #include <vector>
 #include <algorithm>
 #include <thread>
+#include <atomic>
 #define EXPORT extern "C" __declspec(dllexport)
 
 struct TV3 { double x, y, z; };
@@ -153,7 +154,21 @@ EXPORT void haf_twin_all(void* handle, int workers, double* best, double* proj, 
     int n = g.nFaces; if (workers < 1 || n < 16384) workers = 1; if (workers > n) workers = std::max(1, n);
     auto range = [&](int first, int last) { std::vector<int> seen(n, 0); for (int f = first; f < last; f++) TwinOfFace(g, f, seen, best, proj, bestG); };
     if (workers == 1) { range(0, n); return; }
+    // The faces are taken in chunks from one counter, not in one fixed slice per worker (2026-10-27): a ship is dense in
+    // places, a worker whose slice held the superstructure answered thousands of candidates a face while the others sat
+    // finished - the census of the Saleg's largest group took 7.4 s on 16 threads. Each face's answer is its own, so the
+    // chunking never changes a result; one scratch array per worker, as before.
+    std::atomic<int> next(0); const int chunk = 2048;
+    auto worker = [&] {
+        std::vector<int> seen(n, 0);
+        for (;;)
+        {
+            int first = next.fetch_add(chunk); if (first >= n) return;
+            int last = std::min(n, first + chunk);
+            for (int f = first; f < last; f++) TwinOfFace(g, f, seen, best, proj, bestG);
+        }
+    };
     std::vector<std::thread> th;
-    for (int w = 0; w < workers; w++) th.emplace_back([=, &range] { range((int)((int64_t)n * w / workers), (int)((int64_t)n * (w + 1) / workers)); });
+    for (int w = 0; w < workers; w++) th.emplace_back(worker);
     for (auto& t : th) t.join();
 }

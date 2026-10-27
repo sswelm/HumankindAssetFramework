@@ -10,6 +10,11 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE FUSE READS ITS FILE ONCE: THE PARSE AND THE MODEL'S FRAME (2026-10-27).** Split and measured: every group of the
+  Saleg's fuse sampled the whole file for the model's frame (40 s summed over 22 groups) and parsed the JSON and copied the BIN
+  for itself (356 MB of garbage a group). The cache the groups already share parses the file once and reads the frame once; the
+  twin census takes its faces in chunks from one counter instead of a fixed slice per thread. Saleg's 47.5 s -> 37.0 s in Unity,
+  bytes unchanged (docs/Testing.md, Native kernels).
 - **THE FUSE'S WELD WALK AND SIDE VIEW RUN AS C++ (2026-10-27).** Split further and measured first: of the Saleg's 22-group
   fuse the two weld passes took 97 s summed in Unity and the managed side view 61 s. `native/hafweld.cpp` walks the same
   27 cells in the same order and makes the same unions; the column ladder in `native/hafcolumn.cpp` took its grid axes as
