@@ -3562,6 +3562,34 @@ little under the weld distance apart with duplicates, shuffled, at the weld dist
 the vertices in descending order fails all three seeds while the fixture fuses still pass); `GlbFuseTests`' native-against-managed
 fuse now also requires the weld kernel to have run and the side index to have been built, asked and released; the Workshop golden
 drill's 19 rows are unchanged. The twin census (6.7 s on the largest group) and the partner stage are the next candidates.
+
+**The file read once per fuse: its parse, its frame** (`GlbDisconnectedParts.Occluders.cs`, 2026-10-27). The split of the
+remaining stages (the Saleg's 22 groups, Unity, four workers, summed): of the 30 s between the "stitched" mark and the partner
+table, 40.0 s (the first split's 30 s plus the belly's own mark now) was `ModelBelly` - every group sampling every mesh node of
+the whole file for the model's frame (length and width axes, belly and floor heights) - and 0.7 s the partner loop; the per-group
+JSON parse 3.7 s plus 1.0 s copying the BIN prefix, 356 MB of garbage a group; the native twin census 17.0 s, 7.4 s on the
+largest group, on 16 threads each given one fixed slice of the faces. Now the `OccluderCache` every fuse already shares parses
+the file ONCE under its lock (the JSON and the BIN prefix, read-only; each group keeps its own `Accessors`, whose layout cache
+is not shared; the groups' meshes are applied to the caller's own document afterwards, as before) and reads the model's frame
+once from the file (a file that yields no samples is measured per group on the group's own vertices, as before); a lone group's
+cache does the same and no longer parses twice. The twin census takes its faces in chunks of 2,048 from one counter instead of
+a fixed slice per worker (a worker whose slice held the superstructure answered thousands of candidates a face while the others
+sat finished); each face's answer is its own, so the chunking changes no result.
+
+| Unity 2021.3, four workers, bytes identical | before | this change |
+| --- | ---: | ---: |
+| Saleg's Revenge, 22 groups, wall | 47.5 s | 37.0 s |
+| its "sheets", summed over the groups (the frame was charged there) | 76.7 s | 39.1 s |
+| its "parse", summed | 4.7 s | 0.4 s |
+| its largest group's twin census | 7.4 s | 6.1 s |
+| the galley, 15 groups, wall | 9.6 s | 9.7 s |
+
+x64 .NET, back to back: the Saleg's 43.6 s -> 36.9 s, the galley 10.7 s -> 10.1 s. Guards: `GlbFuseTests`' shared-read test now
+also counts: a two-group fuse parses its source twice whatever the group count (the groups' shared read and the apply's own;
+the written file's validation parses the output) and reads the frame once. The counts are kept per source ARRAY
+(`GlbDisconnectedParts.CountsOf`, every `Parse` counted, not only the cache's): a first version counted process-wide and failed
+in the push gate, where the other test classes parse their own files in parallel. The fused bytes of the groups together still
+equal each group fused alone, both backends; the Workshop golden drill's 19 rows are unchanged.
 PR #205 review guards: the sizing pass checks the first and last position/index elements before using declared counts as list capacities,
 and adds totals with checked arithmetic. Invalid ranges or totals fall back to the normal gather so its data error is
 preserved. Tests cover impossible and negative counts (including two oversized parts), negative starts concealed by a
@@ -3577,3 +3605,9 @@ while checking both blocked and open rays on width axes X and Z. An isolated Uni
 and identical managed/native fuse bytes; an independent 1,200-case weld comparison also matched the original managed walk.
 The editor compile check collects filenames with Bash suffix expansion instead of a subprocess per file. A planted
 `basename` failure reproduced the empty `editor/` source argument; the same control now compiles all 128 sources.
+
+PR #207 review guards: a cached empty frame goes directly to the group's fallback vertices instead of sampling the whole
+file again. A 500-node zero-area fixture checks distinct axes and heights for two groups and bounds the second fallback's
+allocation to 32 KiB (988,296 bytes on the original PR). The native twin test uses 17,003 faces, pairs across chunk boundaries,
+flipped normals and an unpaired final face; distances, projections and twin IDs match serial results at 2, 4 and 16 workers.
+An isolated Unity 2021.3 run also produces identical managed/native fuse bytes.

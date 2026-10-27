@@ -36,6 +36,46 @@ public static partial class GlbDisconnectedParts
             this.excluded = excluded == null ? null : new HashSet<int>(excluded);
         }
 
+        // THE FILE PARSED ONCE (2026-10-27): the JSON and the BIN prefix every group used to parse and copy for itself (356 MB
+        // a group on the Saleg's), read here on first use under the lock and shared read-only; a parse that fails throws to
+        // every caller as the per-group parse did. Each group makes its own Accessors over the shared BIN.
+        Document document; byte[] bin;
+        internal Document Document { get { Parsed(); return document; } }
+        internal byte[] Bin { get { Parsed(); return bin; } }
+        void Parsed()
+        {
+            if (System.Threading.Volatile.Read(ref bin) != null) return;
+            lock (gate)
+            {
+                if (bin != null) return;
+                Document parsed = Parse(source);
+                BinReader(parsed, parsed.Root, out byte[] prefix);
+                document = parsed;
+                System.Threading.Volatile.Write(ref bin, prefix);   // published last: a reader that sees it sees the document
+            }
+        }
+
+        // THE MODEL'S FRAME ONCE (2026-10-27): ModelBelly samples every mesh node of the file, and every group did it for itself
+        // (40 s summed over the Saleg's 22 groups). The frame read from the file is the same for every group, so it is read
+        // once; a file that yields no samples is measured per group on the group's own vertices, as before.
+        bool bellyRead, bellyFromFile; int bellyLength, bellyWidth; double bellyCentre, bellyY, bellyFloor;
+        internal void Belly(JArray nodes, JArray meshes, Accessors reader, List<Vec3> fallback, out int lengthAxis, out int widthAxis, out double centreW, out double bellyYOut, out double floorY)
+        {
+            lock (gate)
+            {
+                if (!bellyRead)
+                {
+                    var pts = new List<Vec3>(); var wts = new List<double>();
+                    ModelBellySamples(nodes, meshes, reader, pts, wts); System.Threading.Interlocked.Increment(ref CountsOf(source).BellyReads);
+                    bellyFromFile = pts.Count > 0;
+                    if (bellyFromFile) BellyFrame(pts, wts, out bellyLength, out bellyWidth, out bellyCentre, out bellyY, out bellyFloor);
+                    bellyRead = true;
+                }
+                if (bellyFromFile) { lengthAxis = bellyLength; widthAxis = bellyWidth; centreW = bellyCentre; bellyYOut = bellyY; floorY = bellyFloor; return; }
+            }
+            FallbackBellyFrame(fallback, out lengthAxis, out widthAxis, out centreW, out bellyYOut, out floorY);
+        }
+
         /// <summary>The segments of every node not in `picked`, in node order; boundsLo/Hi widened by those nodes' corners.</summary>
         public OccluderView View(ISet<int> picked, double[] boundsLo, double[] boundsHi)
         {
@@ -56,11 +96,11 @@ public static partial class GlbDisconnectedParts
             var read = new List<double[]>(); var readLo = new List<double[]>(); var readHi = new List<double[]>();
             try
             {
-                Document document = Parse(source);
+                Parsed();   // the fuse's one parse (already done when a plan is reading; a cache asked first parses here)
                 JObject root = document.Root;
                 JArray fileNodes = root["nodes"] as JArray ?? new JArray();
                 JArray meshes = root["meshes"] as JArray ?? new JArray();
-                Accessors reader = BinReader(document, root, out byte[] _);
+                Accessors reader = new Accessors(root, bin);
                 for (int ni = 0; ni < fileNodes.Count; ni++)
                 {
                     if (excluded != null && excluded.Contains(ni))

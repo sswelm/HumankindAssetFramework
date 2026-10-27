@@ -618,11 +618,12 @@ edge collapse followed the same day (native/hafdecimate.cpp, byte-equal): the Un
 heap, random walks over the link arrays), not by Mono's codegen. Left on the prep: its managed half (the layout, the exporter's
 mesh layout, the GLB assembly: about 4.6 s of the 13.8 s in Unity), and GlbReader's read, 0.47 s of the Saleg's 1.34 s probe.
 The Workshop fuse followed (2026-10-25 to 27: column and twin census native, the occluders read once, four groups at a time,
-the gather and weld without per-vertex garbage, then the weld walk and the side view as kernels; the Saleg's 22-group fuse
-148.7 s -> 47.5 s in Unity, bytes unchanged). Left on the fuse, by the split of 2026-10-27 (docs/Testing.md, Native kernels):
-the 30 s summed between the "stitched" mark and the partner table (three `fEdgeFaces` Dictionary lookups per face, and
-`ModelBelly` sampling the whole file per group); the native twin census, 6.7 s on the largest group; each group parsing the
-175 MB file's JSON for itself (356 MB and 50-90 ms per group); the weld kernel's 42 s summed is now the walk at memory speed.
+the gather and weld without per-vertex garbage, then the weld walk and the side view as kernels, then the file parsed and
+its frame read once per fuse; the Saleg's 22-group fuse 148.7 s -> 37.0 s in Unity, bytes unchanged). Left on the fuse, by
+the splits of 2026-10-27 (docs/Testing.md, Native kernels), summed over the 22 groups: the weld kernel 43 s (the walk at memory
+speed; 7.2 s on the largest group), the exposure stage 39 s (the native column and side queries, the sheet walk), the twin
+census 17 s (6.1 s on the largest group), the gather 14 s. The wall is the largest group's own chain (37 s of stage time);
+below that only intra-group parallelism of the weld or the gather would pay.
 - **`VehicleProbeAllocationTests.Skinning_reuses_private_scratch_..._on_multiple_workers` flaked once in a push gate (2026-10-21)**
   - the per-thread allocation budget (0..1024 bytes over 3,000 skinner calls on 8 workers) failed in the gate's `dotnet test`
   step and passed in 10 full-suite runs afterwards on the same branch and on master. The test calls only `BlenderSkinner.Vertex`

@@ -38,13 +38,13 @@ public static partial class GlbDisconnectedParts
         public Compaction Compaction;   // what writing the output left out (never null on a written result); its line is the LAST of Details when it has one
     }
 
-    sealed class Chunk
+    internal sealed class Chunk
     {
         public uint Type;
         public byte[] Data;
     }
 
-    sealed class Document
+    internal sealed class Document
     {
         public JObject Root;
         public readonly List<Chunk> Chunks = new List<Chunk>();
@@ -224,7 +224,7 @@ public static partial class GlbDisconnectedParts
         }
     }
 
-    sealed class Accessors
+    internal sealed class Accessors
     {
         readonly byte[] bin;
         readonly JArray accessors;
@@ -1510,12 +1510,17 @@ public static partial class GlbDisconnectedParts
         // 2026-09-18. Each mark is charged to the work since the previous one, the clock running from before the parse.
         var stageClock = System.Diagnostics.Stopwatch.StartNew(); var timing = new List<string>();
         void Mark(string what) { timing.Add(what + " " + stageClock.ElapsedMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture) + " ms"); stageClock.Restart(); }
-        Document document = Parse(source);
+        // The file parsed ONCE per fuse and read by every group (2026-10-27: each of the Saleg's 22 groups parsed the 175 MB
+        // file's JSON and copied its BIN for itself, 356 MB of garbage a group). The plan only reads the JSON - the groups'
+        // meshes are applied to the caller's own document afterwards (ApplyPlan) - and each group has its own Accessors
+        // (its layout cache is not shared). A lone group's cache parses here and reads its occluders from the same parse.
+        var fileCache = shared ?? new OccluderCache(source, nodeIndices.Distinct());
+        Document document = fileCache.Document;
         JObject root = document.Root;
         JArray nodes = root["nodes"] as JArray ?? new JArray();
         JArray meshes = root["meshes"] as JArray ?? throw new InvalidDataException("GLB has no meshes array.");
-        byte[] originalData;
-        Accessors reader = BinReader(document, root, out originalData);
+        byte[] originalData = fileCache.Bin;
+        Accessors reader = new Accessors(root, originalData);
         var plan = new FusePlan { NodeIndices = nodeIndices, FusedName = fusedName, CheckMirrored = checkMirrored }; Result result = plan.Result;
         Mark("parse");
 
@@ -2018,7 +2023,7 @@ public static partial class GlbDisconnectedParts
         Dictionary<long, List<int>>[] sideColumns = null;
         var sideCells = new double[ColumnLevels];
         OccluderView occluders = null; double columnCell = 1, modelTop = 0, modelBottom = 0;
-        var occluderCache = shared ?? new OccluderCache(source, picked);
+        var occluderCache = fileCache;   // the parse above; a lone group's cache keeps its own source corners out of the read
         // BUILT ON FIRST USE, AND ONLY THEN (outside review of PR #96). Reading every mesh node of the file and
         // transforming its triangles is not cheap - on a 230 MB ship it is ten seconds and hundreds of megabytes - and
         // a group whose sheets are all closed and consistently wound never asks the column a thing. A first cut of the
@@ -2237,7 +2242,7 @@ public static partial class GlbDisconnectedParts
             }
             return true;
         }
-        ModelBelly(nodes, meshes, reader, pos, out int lengthAxis, out int widthAxis, out double centreW, out double bellyY, out double floorY);
+        fileCache.Belly(nodes, meshes, reader, pos, out int lengthAxis, out int widthAxis, out double centreW, out double bellyY, out double floorY);   // the file's frame, read once per fuse
         var flip = new bool[faceCount];
         int sideJoinsKept = 0;
         int islandsMadeConsistent = 0, islandsNotOrientable = 0, asAuthoredSheets = 0, fromAboveKept = 0, reversalsVetoed = 0, sideReversalsVetoed = 0, undersidesKept = 0;
@@ -3272,13 +3277,30 @@ public static partial class GlbDisconnectedParts
     // The hull's frame for the inside-out score: length = the longer horizontal extent (glTF is Y-up), the side centre
     // = the middle of the width extent, the belly = the 25th percentile of height over sampled vertices of EVERY mesh
     // node (≤ ~50k samples), i.e. inside the hull mass, below the decks. Falls back to the given vertices.
+    // The model's frame: its length and width axes, the centre of its width, its belly and floor heights. Read from the
+    // FILE (every mesh node, sampled), so every group of a fuse gets the same frame; a fuse's groups share one reading
+    // through OccluderCache.Belly (2026-10-27: 22 groups each sampled the Saleg's whole file, 40 s summed). A file
+    // that yields no samples is measured on the group's own vertices instead, as before.
     static void ModelBelly(JArray nodes, JArray meshes, Accessors reader, List<Vec3> fallback, out int lengthAxis, out int widthAxis, out double centreW, out double bellyY, out double floorY)
+    {
+        var pts = new List<Vec3>(); var wts = new List<double>();
+        ModelBellySamples(nodes, meshes, reader, pts, wts);
+        if (pts.Count == 0) { FallbackBellyFrame(fallback, out lengthAxis, out widthAxis, out centreW, out bellyY, out floorY); return; }
+        BellyFrame(pts, wts, out lengthAxis, out widthAxis, out centreW, out bellyY, out floorY);
+    }
+
+    static void FallbackBellyFrame(List<Vec3> fallback, out int lengthAxis, out int widthAxis, out double centreW, out double bellyY, out double floorY)
+    {
+        var wts = new List<double>(fallback.Count); foreach (Vec3 _ in fallback) wts.Add(1.0);
+        BellyFrame(fallback, wts, out lengthAxis, out widthAxis, out centreW, out bellyY, out floorY);
+    }
+
+    static void ModelBellySamples(JArray nodes, JArray meshes, Accessors reader, List<Vec3> pts, List<double> wts)
     {
         // AREA-WEIGHTED (review of 9cacd9f): the frame is measured on FACE samples weighted by their area, not on
         // vertices — a coarse hull of a few hundred triangles outweighs a dense cabin of thousands, and a chain of 144
         // tiny links weighs almost nothing however many vertices it carries. Vertex-density filtering had discarded a
         // coarse hull under a dense superstructure (belly 10.6 on a deck at 10).
-        var pts = new List<Vec3>(); var wts = new List<double>();
         try
         {
             long total = 0; var prims = new List<KeyValuePair<int, JObject>>();   // (node, primitive)
@@ -3315,7 +3337,10 @@ public static partial class GlbDisconnectedParts
             }
         }
         catch (Exception) { pts.Clear(); wts.Clear(); }
-        if (pts.Count == 0) { pts = fallback; wts = new List<double>(fallback.Count); foreach (Vec3 _ in fallback) wts.Add(1.0); }
+    }
+
+    static void BellyFrame(List<Vec3> pts, List<double> wts, out int lengthAxis, out int widthAxis, out double centreW, out double bellyY, out double floorY)
+    {
         // STRAY GEOMETRY (2026-09-17, the SS Romanic's anchor chain 3 km off): a sample farther from the area-weighted
         // median centre than 4x the area-weighted median distance is not the model, and is dropped
         if (pts.Count > 8)
@@ -3944,8 +3969,15 @@ public static partial class GlbDisconnectedParts
         catch (InvalidDataException e) { return e.Message; }
     }
 
+    // How often a given file (by array) was parsed and had its frame read: Tests/GlbFuseTests holds a multi-group fuse to two
+    // parses (the groups' shared read, the apply's own) and one frame. Per array, not process-wide: the test classes run in
+    // parallel and each parses files of its own.
+    internal sealed class SourceCounts { public int Parses, BellyReads; }
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<byte[], SourceCounts> sourceCounts = new System.Runtime.CompilerServices.ConditionalWeakTable<byte[], SourceCounts>();
+    internal static SourceCounts CountsOf(byte[] source) => sourceCounts.GetValue(source, _ => new SourceCounts());
     static Document Parse(byte[] bytes)
     {
+        System.Threading.Interlocked.Increment(ref CountsOf(bytes).Parses);
         if (bytes.Length < 20 || ReadUInt32(bytes, 0) != Magic || ReadUInt32(bytes, 4) != 2)
             throw new InvalidDataException("Input is not a GLB 2.0 file.");
         uint total = ReadUInt32(bytes, 8);
