@@ -10,6 +10,11 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE BAKE TESTS SAY WHICH KERNELS THEY RAN (2026-10-28).** The whole window went green (252 passed) with the C++
+  kernels loaded, but nothing in the report said so - a stale or missing hafkernels.dll would have made every row a
+  managed run that still passed. A Kernels dropdown now picks what the rows that can reach a kernel exercise: the C++
+  kernels, the C# twins, or both in turn under distinct titles against the same goldens; a first row fails when the DLL
+  did not load; the report header names the mode and the loaded status. The dropdown's table is pure code under unit test.
 - **THE GLB RIG ROUTE'S THIRD ACCEPTANCE RUN, ONE FINDING (2026-10-28).** 22 of 23 equal after PR #216; the UniversalTanks'
   hull measured 1.018 degrees between the routes at 12.083 s against the 1-degree clip tolerance - the source and the GLB
   route agree to the thousandth there, the FBX route is 1.0 degrees off (Unity's keyframe reduction kept 105 of 378 keys).

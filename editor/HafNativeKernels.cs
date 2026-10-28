@@ -33,8 +33,13 @@ public static partial class HafNativeKernels
     /// here; not readonly only so that Tests/NativeKernelsTests.cs can call both twins in one host (the JIT bakes a static
     /// readonly bool into code compiled after type initialization, and reflection would then change nothing).</summary>
     public static bool Available;
-    /// <summary>One line saying which path runs and why ("native (hafkernels.dll version ...)" or "managed (...)").</summary>
-    public static readonly string Status;
+    /// <summary>What the loader found, once: "native (hafkernels.dll version ...)" or "managed (...)" with the reason.</summary>
+    public static readonly string LoadStatus;
+    /// <summary>One line saying which path RUNS NOW and why. Equal to LoadStatus unless a caller switched Available off while
+    /// the DLL is loaded (the Bake Tests' "C# only" pass, the unit tests' twin comparisons): then it says so, so a log line
+    /// written during such a pass ("kernels managed (switched off ...)") cannot claim the native path ran.</summary>
+    public static string Status => Available || LoadStatus == null || !LoadStatus.StartsWith("native", StringComparison.Ordinal)
+        ? LoadStatus : "managed (switched off by the caller; loaded: " + LoadStatus + ")";
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr LoadLibraryW(string path);
 
@@ -107,8 +112,8 @@ public static partial class HafNativeKernels
     static HafNativeKernels()
     {
         Available = false;
-        if (Environment.GetEnvironmentVariable("HAF_NATIVE_KERNELS") == "0") { Status = "managed (HAF_NATIVE_KERNELS=0)"; return; }
-        if (IntPtr.Size != 8) { Status = "managed (32-bit process; the DLL is x86_64)"; return; }
+        if (Environment.GetEnvironmentVariable("HAF_NATIVE_KERNELS") == "0") { LoadStatus = "managed (HAF_NATIVE_KERNELS=0)"; return; }
+        if (IntPtr.Size != 8) { LoadStatus = "managed (32-bit process; the DLL is x86_64)"; return; }
         string loaded = null;
         foreach (var candidate in Candidates())
         {
@@ -118,10 +123,10 @@ public static partial class HafNativeKernels
         try
         {
             int version = haf_kernels_version();
-            if (version == Version) { Available = true; Status = "native (" + DllName + ".dll version " + version + (loaded != null ? ", " + loaded : "") + ")"; }
-            else Status = "managed (" + DllName + ".dll answered version " + version + ", expected " + Version + (version == -1 ? ": ucrtbase cosf/sinf did not resolve" : "") + ")";
+            if (version == Version) { Available = true; LoadStatus = "native (" + DllName + ".dll version " + version + (loaded != null ? ", " + loaded : "") + ")"; }
+            else LoadStatus = "managed (" + DllName + ".dll answered version " + version + ", expected " + Version + (version == -1 ? ": ucrtbase cosf/sinf did not resolve" : "") + ")";
         }
-        catch (Exception e) { Status = "managed (" + e.GetType().Name + ": " + e.Message + ")"; }
+        catch (Exception e) { LoadStatus = "managed (" + e.GetType().Name + ": " + e.Message + ")"; }
     }
 
     static System.Collections.Generic.IEnumerable<string> Candidates()

@@ -3441,12 +3441,31 @@ load as BlenderTrig does) into `editor/Plugins/x86_64/hafkernels.dll`, an Editor
 package; `editor/HafNativeKernels.cs` loads it, checks its version and validates every input the C++ will index (a
 malformed input throws the managed twin's IndexOutOfRangeException instead of reading past a buffer). Each kernel keeps
 its managed twin, which is the specification, the oracle and the fallback: no DLL, a 32-bit host, a wrong version or
-`HAF_NATIVE_KERNELS=0` keep the C#. `HafNativeKernels.Status` says which path runs; the probe benchmark and the native
+`HAF_NATIVE_KERNELS=0` keep the C#. `HafNativeKernels.Status` says which path runs NOW (since 2026-10-28 it reports
+"managed (switched off by the caller; loaded: ...)" while a caller holds `Available` off with the DLL loaded, so a log line
+written during the Bake Tests' C# pass cannot claim the native path; `LoadStatus` is what the loader found); the probe benchmark and the native
 kernels drill print it as a KERNELS line. The decode with a sharp-edge set (the weld tiers, BlenderVehicleRig.Stage2) is
 not ported and stays managed. The build is deterministic (no timestamps, fixed image base and random seed, stripped;
 `native/deterministic.py` zeroes the export directory's stamp and the checksum), so a committed DLL can be held to the
 sources byte for byte. A native DLL loaded by the Unity editor is never unloaded: a rebuilt DLL takes effect after an
 editor restart.
+
+**The Bake Tests' Kernels dropdown** (2026-10-28, user: "it should now also test with c++", "make it configurable with a
+combobox"). The window ran whatever `HafNativeKernels.Available` held, and the report never said which: the 2026-10-28
+run that went green on 252 rows had run native (the Generate lines in the actions log said so), but a stale DLL or a
+missing plugin would have made the same rows a managed run that still passed. `editor/BakeTestKernelPlan.cs` (pure, held by
+`Tests/BakeTestKernelPlanTests.cs`) turns the dropdown into passes per row: *C++ kernels (native)* runs the rows as before
+and, when the DLL did not load, runs them managed with `[C# only: the C++ kernels did not load]` in their titles; *C# only
+(managed)* switches the kernels off for the rows that can reach one (`[C# only]`); *Both - kernel rows twice* runs each of
+those rows with the kernels (`[C++ kernels]`) and then with the twins (`[C# only]`), two sections in the report, each against
+the same oracle - the goldens are byte-exact, so two green passes mean the two paths produced the same bytes. The rows that
+can reach a kernel: both smoke rows and the Blender + animation options (UniversalBaker's in-process prep), the Model
+Workshop (fuse), the in-process prep and rig slim (decimate), the GLB rig route, the probe preview, the Vehicle Generate
+acceptance and both Vehicle Lab rows. The switch is set between rows on the main thread (no row's workers are alive then)
+and restored after the run. The first row, *Do the C++ kernels load?*, reads `HafNativeKernels.LoadStatus`: PASS for native,
+FAIL with the reason and the remedy otherwise, SKIP only for `HAF_NATIVE_KERNELS=0`; the report header carries
+`Kernels: <mode>; loaded in this editor process: <status>`. Not covered: a direct native-versus-managed byte comparison
+inside the window - the oracle stands in for it, exact where the golden is, within the row's tolerance where Blender is.
 
 Why: the same C# runs 2.5-3.4x slower on Unity's Mono than on the .NET Framework's JIT, and the fan walk was 90% of the
 part-mesh CPU. Measured 2026-10-21 with `tools/vehicle_probe_performance.sh` in Unity 2021.3.1f1 (`HAF_PROBE_PERF_UNITY=1`),
