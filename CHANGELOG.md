@@ -10,6 +10,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE GLB RIG ROUTE'S SECOND ACCEPTANCE RUN, TWO FINDINGS (2026-10-28).** 21 of 23 equal after PR #214; the two drilled the
+  same way. The folded wrapper's node was still in the chain and the SDK's skeleton counted it as a bone (the ReconDrone's
+  89 against 88): the fold removes the node now, its children up to its place, the curve paths re-rooted. The UniversalTanks'
+  right drive gear sat 0.0061 units off at the first frame: the pose-bone reset after the rebake came too early - the slicing
+  refilled the pose bones and the strip of constant location curves left a stale location (probed in Blender) - so the
+  script resets again after the strip, the port mirrors it. The clip rotation tolerance is 1 degree: Unity's FBX import
+  keeps 117 of a spinning wheel's 378 keys and deviates 0.617 degrees from the source where the GLB route is exact.
 - **THE GLB RIG ROUTE'S FIRST ACCEPTANCE RUN, FIFTEEN FINDINGS, FIVE CAUSES (2026-10-27).** The Bake Tests row that bakes
   every animated glTF entry on the Blender FBX route and on the C# GLB route failed 15 of 23 the first time the user ran
   it. Drilled on both routes' files imported the Factory's way in a batch Unity project: the row compared the UNPOSED

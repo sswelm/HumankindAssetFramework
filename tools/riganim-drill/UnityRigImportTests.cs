@@ -426,6 +426,9 @@ public static class UnityRigImportTests
         {
             var scaled = wrapped.GetComponentsInChildren<Transform>(true).Where(t => (t.lossyScale - Vector3.one).magnitude >= 1e-4f).ToList();
             Check("a scaled wrapper is folded: no scaled transform remains", scaled.Count == 0, scaled.Count == 0 ? "every transform at unit scale" : string.Join(",", scaled.Select(t => t.name + t.lossyScale)));
+            // the SDK's skeleton counts every transform under the root as a bone (the ReconDrone: 89 against the FBX route's 88, 2026-10-28)
+            int plainCount = plain.GetComponentsInChildren<Transform>(true).Length, wrappedCount = wrapped.GetComponentsInChildren<Transform>(true).Length;
+            Check("the folded wrapper node is gone: the same transforms as the plain rig", plainCount == wrappedCount, $"plain {plainCount} transform(s), wrapped {wrappedCount}");
             var a = UnityEngine.Object.Instantiate(plain); var b = UnityEngine.Object.Instantiate(wrapped);
             try
             {

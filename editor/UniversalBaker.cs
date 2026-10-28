@@ -1402,7 +1402,8 @@ public static class UniversalBaker
         int Depth(Transform t) { int d = 0; for (var p = t.parent; p != null; p = p.parent) d++; return d; }
         foreach (int i in Enumerable.Range(0, Math.Min(m.Nodes.Count, rig.Nodes.Length)).OrderBy(i => Depth(rig.Nodes[i])))
         {
-            var t = rig.Nodes[i]; var s = t.localScale;
+            var t = rig.Nodes[i]; if (t == null) continue;   // a wrapper removed below
+            var s = t.localScale;
             float scaleTolerance = Mathf.Max(Mathf.Abs(s.x), Mathf.Max(Mathf.Abs(s.y), Mathf.Abs(s.z))) * 1e-6f;
             bool uniform = Mathf.Abs(s.x - s.y) <= scaleTolerance && Mathf.Abs(s.y - s.z) <= scaleTolerance, unit = Mathf.Abs(s.x - 1f) <= 1e-6f;
             if (!uniform || unit || s.x <= 0f || joints.Contains(t) || m.Nodes[i].Mesh >= 0 || animated.Contains(i)) continue;
@@ -1442,7 +1443,27 @@ public static class UniversalBaker
                     for (int k = 0; k < keys.Length; k++) { keys[k].value *= f; keys[k].inTangent *= f; keys[k].outTangent *= f; }
                     c.keys = keys; AnimationUtility.SetEditorCurve(clip, b, c); curves++;
                 }
-            lines.Add(FormattableString.Invariant($"the wrapper '{t.name}' at uniform scale {f:0.####} folded into the rig: {moved} node translation(s), {poses} bind pose(s), {rigid.Count} rigid mesh(es), {curves} position curve(s)"));
+            // THE NODE ITSELF GOES (2026-10-28, the acceptance row's second run): the FBX route has no such transform, and the SDK's
+            // skeleton counts every transform under the root as a bone - the ReconDrone's pose stream held 89 bones on this route
+            // against 88 on the FBX route with the folded 'RootNode' still in the chain. Its children move up to its parent at its
+            // place, world transforms kept (the wrapper's own translation and rotation compose into theirs, as the dropped empty's
+            // did into the armature on the FBX route), the clips' curve paths lose its segment, and the node is destroyed.
+            string wrapperPath = AnimationUtility.CalculateTransformPath(t, rig.Root.transform);
+            var parent = t.parent; int place = t.GetSiblingIndex();
+            var children = new List<Transform>(); for (int c = 0; c < t.childCount; c++) children.Add(t.GetChild(c));
+            foreach (var child in children) { child.SetParent(parent, true); child.SetSiblingIndex(place++); }
+            int repathed = 0;
+            foreach (var clip in rig.Clips)
+                foreach (var b in AnimationUtility.GetCurveBindings(clip))
+                {
+                    if (!b.path.StartsWith(wrapperPath + "/", StringComparison.Ordinal)) continue;
+                    var c = AnimationUtility.GetEditorCurve(clip, b);
+                    AnimationUtility.SetEditorCurve(clip, b, null);
+                    var moved2 = b; moved2.path = b.path.Substring(wrapperPath.Length + 1);
+                    AnimationUtility.SetEditorCurve(clip, moved2, c); repathed++;
+                }
+            string wrapperName = t.name; UnityEngine.Object.DestroyImmediate(t.gameObject); rig.Nodes[i] = null;
+            lines.Add(FormattableString.Invariant($"the wrapper '{wrapperName}' at uniform scale {f:0.####} folded into the rig and removed: {moved} node translation(s), {poses} bind pose(s), {rigid.Count} rigid mesh(es), {curves} position curve(s), {children.Count} child(ren) up to its place, {repathed} curve path(s)"));
         }
         return lines;
     }

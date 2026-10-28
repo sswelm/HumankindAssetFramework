@@ -2448,6 +2448,25 @@ default FBX compression and without it; a socket rotation of 0.4 degrees passes 
 duration, intermediate motion, subframe keyed excursions and absent/empty role pose streams fail. A cancel keeps the
 verdicts made so far. Owed: the row's run.
 
+**The row's second run (2026-10-28, after PR #214 and the Factory's deployment): 21 of 23 equal, two not - both drilled the
+same way.** (6) The folded wrapper's NODE was still in the chain: `FoldScaledWrappers` zeroed its scale and left the transform,
+the FBX route has no such node, and the SDK's skeleton counts every transform under the root as a bone - the ReconDrone's
+pose stream held 89 bones on the GLB route against 88. The fold now removes the node: its children move up to its parent at
+its place with their world transforms kept (the wrapper's own translation and rotation compose into theirs, as the dropped
+empty's did into the armature on the FBX route), the clips' curve paths lose its segment, and the import drill holds the
+wrapped fixture to the plain one's transform count. (7) The UniversalTanks (the T-62's deploy conversion) had its right drive
+gear 0.0061 units from the GLB route's at the first frame, with 1,390 vertices off: the reset of (2) ran after the rebake, but
+the slicing evaluated frames again and refilled the pose bones from the curves that still existed, and the strip of
+constant location curves then left a bone's location on the pose bone - probed in Blender before the export: `pb.location`
+= `(0.0034, -0.0092, -0.0003)`, no fcurve, the active action the idle slice; the GLB route (and the source's node) had the
+gear at rest. The script resets every pose bone's channels AGAIN after the strip, mirrored in `BlenderRigAnim.RunStage3`;
+the rig_anim drill holds the two to each other. What remained was the row's own tolerance: the same entry's `Box_001.030`
+(a drive wheel spinning 9 degrees a frame, then jittering by tenths) measured 0.617 degrees between the routes at 1.875 s
+against a 0.6-degree clip tolerance; measured against the source's own keys (slerp between the glTF's samples), the GLB
+route was exact to the thousandth and the FBX route 0.617 degrees off - Unity's FBX import keeps 117 of its 378 keys (the
+importer's default keyframe reduction, rotation error 0.5 degrees) and interpolates between them. The clip tolerance is 1
+degree now, with that measurement in the comment.
+
 Review of PR #214: six native Unity counterexamples fail the original code and pass the fixes. Welding preserves close
 but distinct positions, normals and UVs, and removes collapsed index triangles even without duplicate vertices. Wrapper
 folding adjusts a shared skin's bind poses once and tests scale uniformity relative to its magnitude; shared meshes and
