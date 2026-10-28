@@ -26,7 +26,10 @@ WROOT="$(cygpath -m "$ROOT")"; WTMP="$(cygpath -m "$TMPD")"; WUNITY="$(cygpath -
 NEWTONSOFT="$ROOT/References/Newtonsoft.Json.dll"
 [ -f "$NEWTONSOFT" ] || NEWTONSOFT="C:/Repo/ENCReload/Assets/Plugins/Json.Net 11.0.1/Newtonsoft.Json.dll"
 [ -f "$NEWTONSOFT" ] || { echo 'FAIL — Newtonsoft.Json is missing'; exit 2; }
-mkdir -p "$TMPD/project/Assets/Editor" "$TMPD/project/Assets/Plugins" "$TMPD/project/Packages" "$TMPD/project/ProjectSettings"
+mkdir -p "$TMPD/project/Assets/Editor" "$TMPD/project/Assets/Plugins/x86_64" "$TMPD/project/Packages" "$TMPD/project/ProjectSettings"
+# the native kernels beside the editor code, as the package ships them: without the plugin the C# route runs MANAGED in this
+# project and the drill measures nothing of the kernels (2026-10-27: every earlier run said "kernels managed (DllNotFoundException)")
+cp "$ROOT/editor/Plugins/x86_64/hafkernels.dll" "$ROOT/editor/Plugins/x86_64/hafkernels.dll.meta" "$TMPD/project/Assets/Plugins/x86_64/"
 printf '%s\n' '{"dependencies":{}}' > "$TMPD/project/Packages/manifest.json"
 printf '%s\n' 'm_EditorVersion: 2021.3.1f1' > "$TMPD/project/ProjectSettings/ProjectVersion.txt"
 cp "$NEWTONSOFT" "$TMPD/project/Assets/Plugins/Newtonsoft.Json.dll"

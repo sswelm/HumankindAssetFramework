@@ -3712,3 +3712,64 @@ file again. A 500-node zero-area fixture checks distinct axes and heights for tw
 allocation to 32 KiB (988,296 bytes on the original PR). The native twin test uses 17,003 faces, pairs across chunk boundaries,
 flipped normals and an unpaired final face; distances, projections and twin IDs match serial results at 2, 4 and 16 workers.
 An isolated Unity 2021.3 run also produces identical managed/native fuse bytes.
+
+**The Vehicle Lab reduce stage's kernels** (`native/hafbmesh.cpp` through `HafNativeKernels.BMesh.cs`, DLL version 7,
+2026-10-28; the user: "finally add a C++ Generate feature"). Measured first in Unity's Mono with the stage's own
+`VEHICLERIG_DEBUG_TIME` marks, summed over the parts (the Generate drill's `RunPerformance`, which until this change ran the
+C# route MANAGED - its project had no copy of the DLL, every earlier run said "kernels managed (DllNotFoundException)";
+it copies the plugin now): the Espana's 6.7 s reduce was the limited dissolve of its 170,923-vertex shroud 2.8 s, the
+collapse with its mesh build 1.8 s, the weld 1.0 s (the kd-tree search 0.35 s, the welding 0.6 s), the BMesh builds
+0.5 s; the Saleg's (the saved September recipe: one 1.15-million-vertex part) 10.4 s was the collapse 5.1 s, the weld
+2.7 s, the builds 1.7 s. Three steps run natively now, each exact: **the BMesh build** of a stage mesh (`haf_bmesh_build`:
+the vertices, the edges in the mesh's order appended to the same disk cycles - a pair listed twice resolves to the last,
+as the managed dictionary did - the triangles' corners on their edges, normal_tri_v3 when asked; the managed BMesh adopts
+the exact-size arrays, so the next creation takes the slot it would have taken) and the weld grouping's per-vertex
+material (`haf_bmesh_vert_material`); **the double search** (`haf_find_doubles`: BLI_kdtree's balance by quick-select,
+the range walk with the left side pushed first, the cluster's target by the lower index of two or the one nearest the
+float32 centroid starting from the search's origin); **the limited dissolve** (`haf_dissolve_limit`: the whole of
+`BlenderDissolve` - the edge heap, the face joins with their n-gon winding and corner-data copies, the wire cleanup in
+reverse slot order, the vertex heap with the degenerate checks in the face's plane, the NORMALS_CALC finish - over the
+chunk jobs in one call, the Python wrapper's "has been removed" check before each job). The dissolve creates faces and
+corners, so it runs on a copy with growable pools and the same last-freed-first free lists, and the mesh adopts the
+result, free lists included. The vertex welding itself (`WeldVerts`), the sharp marking, the triangulation and the collapse's
+custom-normal decode with a sharp-edge set stay managed.
+
+| Unity 2021.3, bytes identical | managed | kernels |
+| --- | ---: | ---: |
+| Espana, Generate (C#, in-process) | 8.9 s | 6.3 s |
+| its reduce stage | 6.7 s | 4.4 s |
+| its limited dissolve, summed | 2.76 s | 1.23 s |
+| its BMesh builds (stage 2), summed | 0.54 s | 0.18 s |
+| its weld (search and welding), summed | 0.98 s | 0.78 s |
+| Saleg's (September recipe), Generate | 20.0 s | 15.3 s |
+| its reduce stage | 10.4 s | 6.7 s |
+| its collapse with its BMesh build | 5.09 s | 3.71 s |
+| its BMesh builds (stage 2), summed | 1.69 s | 0.32 s |
+| its weld, summed | 2.72 s | 1.97 s |
+
+x64 .NET: the Espana's reduce 4.0 s -> 3.0 s, the Saleg's 6.5 s -> 4.7 s; both GLBs byte-equal managed and native, and
+equal to the Unity runs' (`sha256 BE9C5EB3...` and `E29C6DB5...`). Guards: `NativeBMeshTests` holds each kernel to its twin on
+grids (flat, waved, ridged; holes; two materials; sharp edges and faces; a repeated edge pair; UV, colour and custom-normal
+layers) - every pool array bit for bit up to the counts, the free lists, and a face created on both meshes afterwards in
+the same slot and corners; the chunked job path with an empty job; the "has been removed" death on a second job naming
+an element the first removed; the missing-edge exception's text. Planted: the wire cleanup walked forwards fails all four
+dissolve cases; the target tie-break flipped fails the double search only on its tie-prone fixture (four vertices on the
+corners of an exact square in empty space, every member the same float32 distance from the centroid) - the jittered
+clusters never tie. The vehicle_rig drill holds the DLL to Blender's stage dumps on every saved recipe (it copies the
+plugin beside its exe), the native kernels drill rebuilds the DLL and compares it with the committed one. The Saleg's
+September recipe is stale against its re-fused source (one part named differently, 1.2 million vertices exported
+unreduced): the numbers above are that job's, not the user's current Generate; the user's Lab holds the right part names
+until the recipe is saved again.
+
+Review of PR #215 (2026-10-28): the DLL's dissolve initialization published its "tried" flag before resolving both
+trig functions. Parallel first calls could return status 3 while the first worker was still loading them (six of 64 fresh
+32-worker processes reproduced this with the original DLL). C++ local-static initialization now waits for completion;
+all 64 fixed runs passed. `tools/native-kernels-drill/FirstUseDrill.cs` runs that fresh-process test in the native gate.
+The build's edge lookup also scanned an entire vertex bucket for every face, making triangle fans quadratic. Sorted
+buckets and binary search preserve original edge order and last-repeated-pair selection. Exact pool/free-list parity
+holds on 8,192- and 65,536-spoke fans; the larger native build measured 905 ms before and 13 ms after in a local run.
+This measurement covers fan construction. The managed test oracle now uses the production edge-key comparer as well.
+All 2,221 unit cases pass with the rebuilt DLL.
+Two native and two managed Unity Generate runs per model retained identical GLBs for Espana and the saved September
+Saleg's recipe, with the actual kernel mode checked in each Unity log. Native Generate took 5.9–6.4 s and 13.5–14.4 s,
+respectively, versus 9.5–9.6 s and 19.0 s managed in this control run. The saved-recipe limitation above still applies.

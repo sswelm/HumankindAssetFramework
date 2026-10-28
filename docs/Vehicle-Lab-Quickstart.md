@@ -18,7 +18,7 @@ the HAF atlas, build the Humankind mod, or deploy anything to the game. Those ha
 | 4. Package and deploy | Humankind Mod Editor or `haf build` | Updated mod in Humankind's `Community` folder |
 | 5. Verify | Humankind + F8 | The real runtime model, animation, and shared mesh-budget cost |
 
-The C# port is the default Generate backend since 2026-10-27. It uses available C++ kernels from the package's native plugin, with managed kernels otherwise; Blender is still needed for named fallback cases and for the Blender bake route. A recipe can pin either backend (see below). Probe parts uses an in-process path for supported `.glb`/`.gltf`
+The C# port is the default Generate backend since 2026-10-27. It uses available C++ kernels from the package's native plugin (the reduce stage's BMesh builds, double search, limited dissolve and edge collapse since 2026-10-28), with managed kernels otherwise; Blender is still needed for named fallback cases and for the Blender bake route. A recipe can pin either backend (see below). Probe parts uses an in-process path for supported `.glb`/`.gltf`
 sources; morph targets, bone-parented meshes, animated or placed skinned meshes, animated second models and reader-refused
 features keep the Blender path. HAF auto-detects it; use the override in the HAF
 settings only when detection fails.
