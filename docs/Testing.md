@@ -2477,6 +2477,17 @@ fails four assertions on the initial three fixtures; the fixes pass the full nat
 world-vertex difference below 0.000003 units) and all 2,221 unit tests. The C# slim
 cache revision also changes for the post-strip pose reset, so a reused extract receives the new output policy.
 
+**The row's third run (2026-10-28, after PR #216): 22 of 23 equal, one not - the UniversalTanks' hull `Box_001.002` at
+12.083 s, 1.018 degrees between the routes against the 1-degree clip tolerance.** Measured the same way as (8): the source's
+own keys put the hull 51.556 degrees from its first key at that frame, the GLB route 51.556, the FBX route 50.555 (105 of 378
+rotation keys kept by Unity's import). The row stops at its first failing frame, so each run had shown one deviation; the pair
+harness then took the whole-timeline census with the row's metric (every frame, every bone, parent-space: 47,628 samples):
+1,447 over 0.5 degrees, 41 over 1 degree, none over 1.5, the maximum 1.365 - `Box_001.087` at 13.375 s, a bone that jitters
+by tenths, where the source and the GLB route are both 0.288 degrees from the first key and the FBX route 1.225 (97 keys
+kept). Every deviation is the FBX route's keyframe reduction (0.5 degrees per Euler axis, then interpolation between the kept
+keys); the other 22 entries passed at 1 degree with every frame sampled. The clip rotation tolerance is 2 degrees, the census
+in the comment; the real defects of the first two runs measured 5 to 90 degrees, well clear of it.
+
 Review of PR #214: six native Unity counterexamples fail the original code and pass the fixes. Welding preserves close
 but distinct positions, normals and UVs, and removes collapsed index triangles even without duplicate vertices. Wrapper
 folding adjusts a shared skin's bind poses once and tests scale uniformity relative to its magnitude; shared meshes and

@@ -188,11 +188,16 @@ public static class RigRouteAcceptanceTest
     // through a hierarchy, so applying the same cap to world rotation/scale rejects valid deep rigs. The positional
     // and scale margins remain the row's acceptance policy, not a claim that Unity's percentage metrics use mesh extent.
     const float RestFraction = 1e-3f, RestAngle = 0.06f, RestScale = 1e-3f;
-    // ClipAngle 1 degree (0.6 until 2026-10-28): Unity's FBX import reduces keys (its default keyframe reduction, rotation
-    // error 0.5 degrees) and the FBX route's clip deviates from the source between the keys it kept - the UniversalTanks'
-    // 'Box_001.030' (a drive wheel spinning 9 degrees a frame, then jittering) measured 0.617 degrees from the source at
-    // 1.875 s on the FBX route (117 of 378 keys kept) while the GLB route, which keeps every key, matched the source exactly.
-    internal const float ClipFraction = 0.015f, ClipAngle = 1f, ClipScale = 0.01f;
+    // ClipAngle 2 degrees (0.6 until 2026-10-28, then 1): Unity's FBX import reduces keys (its default keyframe reduction,
+    // rotation error 0.5 degrees per Euler axis) and the FBX route's clip deviates from the source between the keys it kept,
+    // while the GLB route keeps every key and matches the source exactly. The whole-timeline census of the worst entry (the
+    // UniversalTanks, 378 frames x 126 bones = 47,628 parent-space samples, this row's metric): 1,447 over 0.5 degrees, 41
+    // over 1 degree, none over 1.5, the maximum 1.365 ('Box_001.087' at 13.375 s, a bone that jitters by tenths: the source
+    // and the GLB route both 0.288 degrees from its first key, the FBX route 1.225 with 97 of 378 keys kept); the hull
+    // 'Box_001.002' at 12.083 s: source and GLB route 51.556 degrees from the first key, the FBX route 50.555. The row stops
+    // at its first failing frame, so a run shows one deviation at a time - the census is the bound, the real defects of the
+    // first two runs measured 5 to 90 degrees.
+    internal const float ClipFraction = 0.015f, ClipAngle = 2f, ClipScale = 0.01f;
 
     static Transform BoneParent(Transform bone, Dictionary<string, Transform> bones)
     {
