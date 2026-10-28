@@ -3760,3 +3760,16 @@ plugin beside its exe), the native kernels drill rebuilds the DLL and compares i
 September recipe is stale against its re-fused source (one part named differently, 1.2 million vertices exported
 unreduced): the numbers above are that job's, not the user's current Generate; the user's Lab holds the right part names
 until the recipe is saved again.
+
+Review of PR #215 (2026-10-28): the DLL's dissolve initialization published its "tried" flag before resolving both
+trig functions. Parallel first calls could return status 3 while the first worker was still loading them (six of 64 fresh
+32-worker processes reproduced this with the original DLL). C++ local-static initialization now waits for completion;
+all 64 fixed runs passed. `tools/native-kernels-drill/FirstUseDrill.cs` runs that fresh-process test in the native gate.
+The build's edge lookup also scanned an entire vertex bucket for every face, making triangle fans quadratic. Sorted
+buckets and binary search preserve original edge order and last-repeated-pair selection. Exact pool/free-list parity
+holds on 8,192- and 65,536-spoke fans; the larger native build measured 905 ms before and 13 ms after in a local run.
+This measurement covers fan construction. The managed test oracle now uses the production edge-key comparer as well.
+All 2,221 unit cases pass with the rebuilt DLL.
+Two native and two managed Unity Generate runs per model retained identical GLBs for Espana and the saved September
+Saleg's recipe, with the actual kernel mode checked in each Unity log. Native Generate took 5.9–6.4 s and 13.5–14.4 s,
+respectively, versus 9.5–9.6 s and 19.0 s managed in this control run. The saved-recipe limitation above still applies.

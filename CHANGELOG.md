@@ -18,7 +18,8 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   which the managed mesh adopts - each exact, the written GLB byte-equal. The Espana's Generate 8.9 s -> 6.3 s, the Saleg's
   20.0 s -> 15.3 s in Unity. `NativeBMeshTests` holds each kernel to its twin (two plants caught, one of them only by a
   tie-prone fixture); the vehicle_rig drill holds the DLL to Blender on every saved recipe. **Restart Unity after the update:**
-  the DLL's version changed. `docs/Testing.md`, Native kernels.
+  the DLL's version changed. Review fixes serialize first-use trig initialization and keep high-valence edge lookup
+  logarithmic, with exact fan-mesh parity and fresh-process concurrency checks. `docs/Testing.md`, Native kernels.
 - **THE GLB RIG ROUTE'S FIRST ACCEPTANCE RUN, FIFTEEN FINDINGS, FIVE CAUSES (2026-10-27).** The Bake Tests row that bakes
   every animated glTF entry on the Blender FBX route and on the C# GLB route failed 15 of 23 the first time the user ran
   it. Drilled on both routes' files imported the Factory's way in a batch Unity project: the row compared the UNPOSED

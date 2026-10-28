@@ -53,7 +53,7 @@ public class NativeBMeshTests
     {
         var bm = new BMesh();
         for (int v = 0; v < d.Vertices; v++) bm.VertCreate(d.Positions[3 * v], d.Positions[3 * v + 1], d.Positions[3 * v + 2]);
-        int ne = d.Edges.Length / 2; var edgeOf = new Dictionary<long, int>();
+        int ne = d.Edges.Length / 2; var edgeOf = new Dictionary<long, int>(BlenderMesh.EdgeKeyComparer.Instance);
         long Key(int a, int b) => ((long)Math.Min(a, b) << 32) | (uint)Math.Max(a, b);
         for (int e = 0; e < ne; e++)
         {
@@ -125,6 +125,33 @@ public class NativeBMeshTests
         try { HafNativeKernels.BuildFromMesh(d.Positions, d.Vertices, d.Edges, d.EdgeSharp, d.Faces, d.FaceSharp, d.FaceMaterial, true); } catch (InvalidOperationException e) { native = e.Message; }
         Assert.NotNull(managed);
         Assert.Equal(managed, native);
+    }
+
+    [Theory]
+    [InlineData(8192)]
+    [InlineData(65536)]
+    public void BuildHighValenceFanEqualsManagedAndKeepsTheLastRepeatedEdge(int spokes)
+    {
+        Assert.True(HafNativeKernels.Available, HafNativeKernels.Status);
+        var d = new Stage { Vertices = spokes + 1, Positions = new float[3 * (spokes + 1)], FaceMaterial = new int[spokes] };
+        var edges = new List<int>(); var faces = new List<int>();
+        for (int i = 1; i <= spokes; i++)
+        {
+            double angle = (i - 1) * 2.0 * Math.PI / spokes;
+            d.Positions[3 * i] = (float)Math.Cos(angle); d.Positions[3 * i + 1] = (float)Math.Sin(angle);
+            int next = i == spokes ? 1 : i + 1;
+            edges.Add(0); edges.Add(i); edges.Add(i); edges.Add(next);
+            faces.Add(0); faces.Add(i); faces.Add(next);
+        }
+        edges.Add(spokes / 2); edges.Add(0);
+        d.Edges = edges.ToArray(); d.Faces = faces.ToArray();
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        var expected = ManagedBuild(d, true); long managedMs = timer.ElapsedMilliseconds;
+        timer.Restart();
+        var actual = HafNativeKernels.BuildFromMesh(d.Positions, d.Vertices, d.Edges, null, d.Faces, null, d.FaceMaterial, true);
+        long nativeMs = timer.ElapsedMilliseconds;
+        SameBMesh(expected, actual);
+        Console.WriteLine("FAN spokes=" + spokes + " managed_ms=" + managedMs + " native_ms=" + nativeMs);
     }
 
     [Fact]

@@ -19,6 +19,7 @@
 #include <cstring>
 #include <vector>
 #include <algorithm>
+#include <utility>
 #include <windows.h>
 #define EXPORT extern "C" __declspec(dllexport)
 
@@ -33,14 +34,17 @@ const float UnitToAngle = Deg90, AngleToUnit = (float)(1.0f / Deg90);
 const float FltEpsilon = 1.1920929e-7f;
 
 typedef float (__cdecl *F1)(float);
-F1 ucrt_asinf = nullptr, ucrt_cosf = nullptr; bool trigTried = false;
+F1 ucrt_asinf = nullptr, ucrt_cosf = nullptr;
 void LoadTrig()
 {
-    if (trigTried) return;
-    trigTried = true;
-    HMODULE h = LoadLibraryA("ucrtbase.dll");
-    if (!h) return;
-    ucrt_asinf = (F1)GetProcAddress(h, "asinf"); ucrt_cosf = (F1)GetProcAddress(h, "cosf");
+    // C++11 local-static initialization waits for the entire lookup on every worker. Publishing a "tried" flag first
+    // let concurrent kernel callers observe null function pointers while the first worker was still resolving them.
+    static const bool initialized = [] {
+        HMODULE h = LoadLibraryA("ucrtbase.dll");
+        if (h) { ucrt_asinf = (F1)GetProcAddress(h, "asinf"); ucrt_cosf = (F1)GetProcAddress(h, "cosf"); }
+        return true;
+    }();
+    (void)initialized;
 }
 
 inline float Sqrtf(float d) { return (float)std::sqrt((double)d); }
@@ -1029,11 +1033,15 @@ EXPORT void* haf_bmesh_build(const float* positions, int nv, const int* edges, i
     bm.FLFirst.resize(nf); bm.FLen.resize(nf); bm.FMat.resize(nf); bm.FNo.resize(3 * (size_t)nf); bm.FAlive.resize(nf); bm.FFlag.resize(nf);
     for (int v = 0; v < nv; v++) bm.VertCreate(positions[3 * v], positions[3 * v + 1], positions[3 * v + 2]);
     // the edge lookup: per lower vertex, the (higher vertex, edge) pairs in edge order; a pair listed twice resolves to the LAST
-    std::vector<int> bucketStart(nv + 1, 0), bucketHi(ne), bucketEdge(ne);
+    std::vector<int> bucketStart(nv + 1, 0);
+    std::vector<std::pair<int, int>> bucket(ne); // (higher vertex, original edge ordinal)
     for (int e = 0; e < ne; e++) { int a = edges[2 * e], b = edges[2 * e + 1]; bucketStart[std::min(a, b) + 1]++; }
     for (int v = 0; v < nv; v++) bucketStart[v + 1] += bucketStart[v];
     { std::vector<int> fill(bucketStart.begin(), bucketStart.end() - 1);
-      for (int e = 0; e < ne; e++) { int a = edges[2 * e], b = edges[2 * e + 1]; int lo = std::min(a, b); int at = fill[lo]++; bucketHi[at] = std::max(a, b); bucketEdge[at] = e; } }
+      for (int e = 0; e < ne; e++) { int a = edges[2 * e], b = edges[2 * e + 1]; int lo = std::min(a, b); int at = fill[lo]++; bucket[at] = { std::max(a, b), e }; } }
+    // A triangle fan can put every spoke in one bucket. Sorting permits logarithmic lookup instead of scanning that
+    // whole bucket for every face; sorting equal pairs by edge ordinal retains the dictionary's last assignment.
+    for (int v = 0; v < nv; v++) std::sort(bucket.begin() + bucketStart[v], bucket.begin() + bucketStart[v + 1]);
     for (int e = 0; e < ne; e++)
     {
         int a = edges[2 * e], b = edges[2 * e + 1];
@@ -1043,7 +1051,13 @@ EXPORT void* haf_bmesh_build(const float* positions, int nv, const int* edges, i
     auto Lookup = [&](int a, int b) -> int
     {
         int lo = std::min(a, b), hi = std::max(a, b);
-        for (int at = bucketStart[lo + 1] - 1; at >= bucketStart[lo]; at--) if (bucketHi[at] == hi) return bucketEdge[at];
+        int first = bucketStart[lo], last = bucketStart[lo + 1];
+        while (first < last)
+        {
+            int mid = first + (last - first) / 2;
+            if (bucket[mid].first <= hi) first = mid + 1; else last = mid;
+        }
+        if (first > bucketStart[lo] && bucket[first - 1].first == hi) return bucket[first - 1].second;
         return None;
     };
     int verts[3], fe[3];
