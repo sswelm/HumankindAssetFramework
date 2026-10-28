@@ -49,6 +49,12 @@ together. The editor package consumes the same tracked DLL from `editor/Plugins/
 
 ## Blender (optional dependency)
 
+**The push gate needs no Blender since 2026-10-28.** Its nine Blender-parity drills replay a record of Blender's output
+(`tools/blender_oracle.sh`, keyed by the inputs' bytes); `bash tools/refresh_blender_oracle.sh` runs Blender once to make
+or renew the record, and a push whose record is missing or stale says so and fails. See
+[Testing](Testing.md#the-fast-gates--two-lanes-checksh-and-ci). Blender is still needed for the editor's own uses below
+and for the Bake Tests rows that run it.
+
 **Blender** is needed for `.blend` import, **animated-model import**, and for **Strip parts** / Reduce-to-tris on what the
 Factory cannot prepare itself — auto-detected under `Program Files`, or point the Factory Settings override /
 `EditorPrefs 'ENC.blenderPath'` at `blender.exe`. Since 2026-10-08 a static **.glb/.gltf** with a reduce target is

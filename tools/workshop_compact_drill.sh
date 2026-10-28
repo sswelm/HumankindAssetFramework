@@ -116,19 +116,14 @@ SUMMARY="$n_all runs ($WORKSHOP_NOTE, ${#FIXTURES[@]} fixtures, $SAMPLES_NOTE) -
 [ "$n_compacted" -gt 0 ] || { echo "FAIL — compaction drill: nothing was compacted ($SUMMARY)"; exit 1; }
 
 # ---- Blender: original beside compacted copy
-BLENDER="${BLENDER:-}"
-if [ -z "$BLENDER" ]; then
-  for base in "/c/Program Files/Blender Foundation" "/c/Program Files (x86)/Blender Foundation"; do
-    cand=$(ls -d "$base"/Blender* 2>/dev/null | sort -V | tail -1); [ -n "$cand" ] && [ -x "$cand/blender.exe" ] && { BLENDER="$cand/blender.exe"; break; }
-  done
-fi
-if [ -z "$BLENDER" ]; then echo "SKIP — compaction drill: $SUMMARY; Blender not found, so NO import comparison (BLENDER=<exe> to force)"; exit 3; fi
+. "$ROOT/tools/blender_oracle.sh"; oracle_init workshop_compact "compaction drill"   # replay (the gate: no Blender), record (the refresh) or live
 awk -F'\t' '$3 == "compacted" && $4 != "-" { print $2 "\t" $4 }' "$TMPD/result.txt" > "$TMPD/pairs.txt"
 n_pairs=$(grep -c . "$TMPD/pairs.txt")
 [ "$n_pairs" -gt 0 ] || { echo "FAIL — compaction drill: no compacted pair was kept for Blender"; exit 1; }
 mapfile -t BFILES < <(tr '\t' '\n' < "$TMPD/pairs.txt")
 t0=$(date +%s)
-"$BLENDER" --background --python-exit-code 1 --python "$(cygpath -m "$ROOT/tools/glb-reader-drill/blender_counts.py")" -- "${BFILES[@]}" > "$TMPD/blender_raw.txt" 2>&1; brc=$?
+oracle_blender counts "$TMPD/blender_raw.txt" --key "$ROOT/tools/glb-reader-drill/blender_counts.py" "${BFILES[@]}" -- --background --python-exit-code 1 --python "$(cygpath -m "$ROOT/tools/glb-reader-drill/blender_counts.py")" -- "${BFILES[@]}"; brc=$?
+oracle_check
 t1=$(date +%s)
 LC_ALL=C sed 's/\xEF\xBB\xBF//g' "$TMPD/blender_raw.txt" | tr -d '\r' | grep '^BLENDER' > "$TMPD/blender.txt"
 if [ "$brc" -ne 0 ]; then tail -5 "$TMPD/blender_raw.txt"; echo "FAIL — compaction drill: Blender could not import the pairs (exit $brc)"; exit 1; fi

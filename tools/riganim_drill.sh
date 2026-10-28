@@ -46,13 +46,7 @@ for f in "$CSC" "$API/mscorlib.dll"; do
   [ -f "$f" ] || { echo "FAIL — Unity prerequisite not found: $f   (set UNITY=<Unity 2021.3 .../Editor/Data>; rig_anim was NOT drilled)"; exit 2; }
 done
 command -v dotnet >/dev/null 2>&1 || { echo "FAIL — dotnet not on PATH (rig_anim was NOT drilled)"; exit 2; }
-BLENDER="${BLENDER:-}"
-if [ -z "$BLENDER" ]; then
-  for base in "/c/Program Files/Blender Foundation" "/c/Program Files (x86)/Blender Foundation"; do
-    cand=$(ls -d "$base"/Blender* 2>/dev/null | sort -V | tail -1); [ -n "$cand" ] && [ -x "$cand/blender.exe" ] && { BLENDER="$cand/blender.exe"; break; }
-  done
-fi
-[ -n "$BLENDER" ] || { echo "SKIP — rig_anim drill: Blender not found (BLENDER=<exe> to force); rig_anim was NOT drilled"; exit 3; }
+. "$ROOT/tools/blender_oracle.sh"; oracle_init riganim "rig_anim drill"   # replay (the gate: no Blender), record (the refresh) or live
 SCRIPT="$ROOT/editor/Tools~/rig_anim.py"
 [ -f "$SCRIPT" ] || { echo "FAIL — rig_anim.py not found at $SCRIPT"; exit 1; }
 python "$ROOT/tools/riganim-drill/test_riganim_jobs.py" || { echo "FAIL — rig_anim job mapping regression checks"; exit 1; }
@@ -120,10 +114,11 @@ t0=$(date +%s)
 BPIDS=()
 for ((k = 0; k < JOBS; k++)); do
   mkdir -p "$TMPD/work_$k"
-  "$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/riganim-drill/blender_riganim_dump.py")" -- "$(cygpath -m "$SCRIPT")" "$WTMP/shard_$k.txt" "$WTMP/work_$k" > "$TMPD/blender_raw_$k.txt" 2>&1 &
+  oracle_blender "dump_$k" "$TMPD/blender_raw_$k.txt" --dir "work_$k" --key "$ROOT/tools/riganim-drill/blender_riganim_dump.py" "$SCRIPT" "$WTMP/shard_$k.txt" "$WTMP/work_$k" -- --background --python "$(cygpath -m "$ROOT/tools/riganim-drill/blender_riganim_dump.py")" -- "$(cygpath -m "$SCRIPT")" "$WTMP/shard_$k.txt" "$WTMP/work_$k" &
   BPIDS+=($!)
 done
 brc=0; for pid in "${BPIDS[@]}"; do wait "$pid" || brc=$?; done
+oracle_check
 t1=$(date +%s)
 n_b=0
 for ((k = 0; k < JOBS; k++)); do

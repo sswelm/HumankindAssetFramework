@@ -46,6 +46,31 @@ verification pass counted them — so the gate reported 26/26 while eight claims
 drives the real gate functions through a skipped worker, a skipped serial step, a skip beside a failure, a skip with lost
 completion metadata (still a FAIL) and `HAF_ALLOW_SKIP`.
 
+**Blender does not run in the gate (2026-10-28; user: "I don't want to use it anymore in the push, only in the bake
+test").** Nine steps hold a C# port to Blender's own output (the GLB reader and writer drills, the vehicle probe, mesh
+layout, prep and deploy drills, the Workshop compaction drill, the rig_anim and vehicle_rig drills), and every one of them
+ran Blender on every push - the deploy drill alone for 800 s. Each Blender invocation now goes through
+`tools/blender_oracle.sh` (`oracle_blender`), which has three modes (`HAF_ORACLE`): **replay**, the gate's default, takes
+the invocation's raw output, exit code and output folders from a RECORD and runs no Blender; **record**
+(`tools/refresh_blender_oracle.sh`, which is the whole gate run with `HAF_ORACLE=record`) runs Blender exactly as the gate
+shapes it - the same samples, shards and fixtures - and writes the record; **live** runs Blender and stores nothing (the
+behaviour before, for `FULL=1` investigations). The record lives under `HAF_BLENDER_ORACLE` (default
+`<modding project>/Tools/blender_oracle`, self-ignored by git), one folder per drill and invocation, and is KEYED by
+what the invocation depends on (`tools/blender-oracle/oracle.py`): the dump script, the Blender script under test, every
+input file's bytes, the job and shard lists (their text, with every file they name hashed by content too) and the literal
+arguments - never a path, so a record made in one temp folder replays in another, the temp paths inside it stored as
+placeholders. A replay whose key differs names the item that changed (`the record for deploy/export_0 is STALE:
+@WTMP@/deploy_fixtures/x.glb changed`) and the drill SKIPs, which the gate counts as a failure: a changed source, recipe,
+fixture or Blender script cannot pass on a stale record, and the push says to refresh. What a drill compares is
+unchanged - its C# side still runs on every push against Blender's rows, bytes and folders; only Blender's part of the
+work is done once, at the refresh. The blender exit drill tests Blender's own exit behaviour and has no record: it runs
+with the refresh only. `Tests/test_blender_oracle.py` (in the gate and in CI) holds the store - a record replays in another
+temp folder with its paths and folders put back, a changed model named in a jobs list refuses and names the file, a
+changed argument or script refuses, a record never made refuses, the key ignores the temp folder and slashes, and the
+wrapper turns a refusal into the SKIP while `live` runs the given executable untouched. Not covered: a record that
+Blender itself made wrong stays wrong until the next refresh - the record is Blender's answer, the refresh is when it is
+asked.
+
 **One gate at a time, and no step runs forever (2026-10-12).** Two gates on one machine — two sessions pushing, or a
 push beside a drill run — failed each other for weeks: the reader-gate drill's plant vanished under the other gate, and
 this file's own timing test missed its three-second deadline under the other gate's thirteen drills (two rejected pushes

@@ -90,21 +90,15 @@ for l in "${SAMPLES_EXPECT[@]}"; do
 done
 
 # ---- Blender parity on a sample (FULL=1 for every file) ----
-BLENDER="${BLENDER:-}"
-if [ -z "$BLENDER" ]; then
-  for base in "/c/Program Files/Blender Foundation" "/c/Program Files (x86)/Blender Foundation"; do
-    [ -d "$base" ] || continue
-    cand=$(ls -d "$base"/Blender* 2>/dev/null | sort -V | tail -1); [ -n "$cand" ] && [ -x "$cand/blender.exe" ] && { BLENDER="$cand/blender.exe"; break; }
-  done
-fi
-if [ -z "$BLENDER" ]; then echo "SKIP — GLB reader drill: $n_ok files read ($REGISTRY_NOTE, ${#FIXTURES[@]} fixtures, $SAMPLES_NOTE); Blender not found, so no parity comparison (BLENDER=<exe> to force)"; exit 3; fi
+. "$ROOT/tools/blender_oracle.sh"; oracle_init glb_reader "GLB reader drill"   # replay (the gate: no Blender), record (the refresh) or live
 if [ "${FULL:-0}" = "1" ]; then SAMPLE=("${FILES[@]}")
 else
   # every fixture and every Khronos sample (small, and the diversity is the point), the registry's largest and smallest two, four animated ones
   mapfile -t SAMPLE < <( { printf '%s\n' "${FIXTURES[@]}"; [ "${#SAMPLES_OK[@]}" -eq 0 ] || printf '%s\n' "${SAMPLES_OK[@]}"; [ "${#REGISTRY_ONLY[@]}" -eq 0 ] || { ls -S "${REGISTRY_ONLY[@]}" | head -2; ls -S "${REGISTRY_ONLY[@]}" | tail -2; }; echo "$RESULT" | awk -F'\t' '/^FILE/ { for (i=2;i<=NF;i++) if ($i ~ /^animations=/ && $i != "animations=0") print $2 }' | head -4 | while read -r n; do for f in "${FILES[@]}"; do case "$f" in */"$n"/*) echo "$f";; esac; done; done; } | sort -u )
 fi
-BOUT=$("$BLENDER" --background --python-exit-code 1 --python "$(cygpath -m "$ROOT/tools/glb-reader-drill/blender_counts.py")" -- "${SAMPLE[@]}" 2>&1); brc=$?
-BOUT=$(printf '%s' "$BOUT" | LC_ALL=C sed 's/\xEF\xBB\xBF//g')
+oracle_blender counts "$TMPD/blender_raw.txt" --key "$ROOT/tools/glb-reader-drill/blender_counts.py" "${SAMPLE[@]}" -- --background --python-exit-code 1 --python "$(cygpath -m "$ROOT/tools/glb-reader-drill/blender_counts.py")" -- "${SAMPLE[@]}"; brc=$?
+oracle_check
+BOUT=$(LC_ALL=C sed 's/\xEF\xBB\xBF//g' "$TMPD/blender_raw.txt")
 if [ "$brc" -ne 0 ]; then echo "$BOUT" | tail -5; echo "FAIL — Blender could not import the sample (exit $brc)"; exit 1; fi
 printf '%s
 ' "$RESULT" > "$TMPD/csharp.txt"; printf '%s

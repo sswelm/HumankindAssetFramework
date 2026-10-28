@@ -10,6 +10,12 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE PUSH GATE RUNS NO BLENDER (2026-10-28).** Nine parity drills ran Blender on every push (the deploy drill alone
+  800 s). Each Blender invocation now goes through a recorded oracle: `tools/refresh_blender_oracle.sh` runs the gate
+  once with Blender and stores every invocation's output, exit code and written folders under the modding project's
+  Tools/blender_oracle, keyed by the dump script, the Blender script under test and the input files' bytes; the push
+  replays the record. A missing or stale record is a SKIP that names what changed and fails the push. The C# side of
+  every drill still runs on every push against Blender's recorded rows, bytes and folders.
 - **THE BAKE TESTS SAY WHICH KERNELS THEY RAN (2026-10-28).** The whole window went green (252 passed) with the C++
   kernels loaded, but nothing in the report said so - a stale or missing hafkernels.dll would have made every row a
   managed run that still passed. A Kernels dropdown now picks what the rows that can reach a kernel exercise: the C++

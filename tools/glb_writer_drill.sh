@@ -119,21 +119,15 @@ python "$ROOT/tools/glb-reader-drill/compare.py" "$TMPD/orig.txt" "$TMPD/back.tx
 python "$ROOT/tools/glb-reader-drill/compare.py" "$TMPD/orig.txt" "$TMPD/back.txt" --right-tag FILE --basename > /dev/null || { echo "FAIL — GLB writer drill: a written file reads back different from its original"; exit 1; }
 
 # ---- 2. Blender reads the written sample as it read the originals
-BLENDER="${BLENDER:-}"
-if [ -z "$BLENDER" ]; then
-  for base in "/c/Program Files/Blender Foundation" "/c/Program Files (x86)/Blender Foundation"; do
-    [ -d "$base" ] || continue
-    cand=$(ls -d "$base"/Blender* 2>/dev/null | sort -V | tail -1); [ -n "$cand" ] && [ -x "$cand/blender.exe" ] && { BLENDER="$cand/blender.exe"; break; }
-  done
-fi
-if [ -z "$BLENDER" ]; then echo "SKIP — GLB writer drill: $n_wrote files written and read back equal ($REGISTRY_NOTE, ${#FIXTURES[@]} fixtures, $SAMPLES_NOTE); Blender not found, so no import of the written files (BLENDER=<exe> to force)"; exit 3; fi
+. "$ROOT/tools/blender_oracle.sh"; oracle_init glb_writer "GLB writer drill"   # replay (the gate: no Blender), record (the refresh) or live
 if [ "${FULL:-0}" = "1" ]; then SAMPLE=("${WFILES[@]}")
 else
   # the written fixtures and Khronos samples (every one), the largest and smallest two written registry files
   mapfile -t SAMPLE < <( { for f in "${FIXTURES[@]}" "${SAMPLES_OK[@]}"; do [ -n "$f" ] && echo "$WRITTEN/$(basename "${f%.*}").glb"; done; [ "${#REGISTRY_ONLY[@]}" -eq 0 ] || { ls -S "${REGISTRY_ONLY[@]}" | head -2; ls -S "${REGISTRY_ONLY[@]}" | tail -2; } | while IFS= read -r f; do echo "$WRITTEN/$(basename "${f%.*}").glb"; done; } | sort -u )
 fi
-BOUT=$("$BLENDER" --background --python-exit-code 1 --python "$(cygpath -m "$ROOT/tools/glb-reader-drill/blender_counts.py")" -- "${SAMPLE[@]}" 2>&1); brc=$?
-BOUT=$(printf '%s' "$BOUT" | LC_ALL=C sed 's/\xEF\xBB\xBF//g')
+oracle_blender counts "$TMPD/blender_raw.txt" --key "$ROOT/tools/glb-reader-drill/blender_counts.py" "${SAMPLE[@]}" -- --background --python-exit-code 1 --python "$(cygpath -m "$ROOT/tools/glb-reader-drill/blender_counts.py")" -- "${SAMPLE[@]}"; brc=$?
+oracle_check
+BOUT=$(LC_ALL=C sed 's/\xEF\xBB\xBF//g' "$TMPD/blender_raw.txt")
 [ "$brc" -eq 0 ] || { echo "$BOUT" | tail -5; echo "FAIL — Blender could not import a written file (exit $brc)"; exit 1; }
 printf '%s\n' "$BOUT" > "$TMPD/blender.txt"
 python "$ROOT/tools/glb-reader-drill/compare.py" "$TMPD/orig.txt" "$TMPD/blender.txt" --basename | grep -E "^FAIL|^PASS |^COMPARED"
