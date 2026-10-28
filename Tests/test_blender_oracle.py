@@ -61,6 +61,21 @@ class OracleStoreTests(unittest.TestCase):
         self.assertEqual(b.raw.read_text(), "FILE\t%s/out/0/x.glb\nDONE\n" % b.wtmp)   # runB's folder, not runA's
         self.assertEqual((b.dir / "out" / "0" / "x.glb").read_bytes(), b"written by blender")
 
+    def test_paths_blender_spelled_in_lower_case_or_with_backslashes_are_put_back_too(self):
+        # the dumps print what Blender gives them: `c:/users/sebast~1/...`; the gate's C# rows carry the drill's own spelling
+        a = Run(self.tmp, "runA")
+        root = ROOT.as_posix()
+        write(a.raw, "FILE\t%s/fixtures/m.glb\tok\nFILE\t%s\\fixtures\\m.glb\tok\nROOT\t%s/tools/x.py\nPOSIX\t%s/x\n" % (a.wtmp.lower(), a.wtmp, root.lower(), a.wtmp))
+        s = run("store", *self.store_args(a), "--wroot", root, "--tmpd", a.wtmp, "--rc", "0", "--", *a.items())
+        self.assertEqual(s.returncode, 0, s.stdout + s.stderr)
+        stored = (self.store / "t" / "posed_0" / "raw.txt").read_text()
+        # a lower-case spelling keeps a lower-case tag; the drill's own spelling the plain tag; TMPD equal to WTMP is WTMP
+        self.assertEqual(stored, "FILE\t@wtmp@/fixtures/m.glb\tok\nFILE\t@WTMP@\\fixtures\\m.glb\tok\nROOT\t@root@/tools/x.py\nPOSIX\t@WTMP@/x\n")
+        b = Run(self.tmp, "runB"); b.raw.unlink()
+        l = run("load", *self.store_args(b), "--wroot", root, "--tmpd", b.wtmp, "--", *b.items())
+        self.assertEqual(l.returncode, 0, l.stdout + l.stderr)
+        self.assertEqual(b.raw.read_text(), "FILE\t%s/fixtures/m.glb\tok\nFILE\t%s\\fixtures\\m.glb\tok\nROOT\t%s/tools/x.py\nPOSIX\t%s/x\n" % (b.wtmp.lower(), b.wtmp, root.lower(), b.wtmp))
+
     def test_the_recorded_exit_code_comes_back(self):
         a = Run(self.tmp, "runA")
         run("store", *self.store_args(a), "--rc", "7", "--", *a.items())

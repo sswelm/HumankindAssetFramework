@@ -19,7 +19,7 @@ load prints "RC <n>" on success (exit 0); exit 99 when there is no usable record
 An item that is an existing file is hashed by content; a .txt/.json/.args item is a LIST: its normalised text is hashed
 and every token in it that names an existing file is hashed by content as well; any other item is a literal string.
 """
-import hashlib, json, os, shutil, sys, time
+import hashlib, json, os, re, shutil, sys, time
 
 PLACEHOLDERS = ("@WTMP@", "@TMPD@", "@ROOT@")
 
@@ -37,7 +37,8 @@ def digest_text(text):
 
 
 class Paths:
-    """The run-specific prefixes, longest first, each in forward and backslash form."""
+    """The run-specific prefixes, longest first, each in forward and backslash form, matched without regard to case:
+    the dumps print paths as Blender spells them (lower case, `c:/users/sebast~1/...`), the drills as they passed them."""
     def __init__(self, wtmp, tmpd, wroot):
         pairs = []
         for value, tag in ((wtmp, "@WTMP@"), (tmpd, "@TMPD@"), (wroot, "@ROOT@")):
@@ -45,31 +46,45 @@ class Paths:
                 continue
             value = value.rstrip("/\\")
             for form in (value.replace("\\", "/"), value.replace("/", "\\")):
-                if (form, tag) not in pairs:
-                    pairs.append((form, tag))
+                if (form.lower(), tag) not in pairs:
+                    pairs.append((form.lower(), tag))
         pairs.sort(key=lambda p: -len(p[0]))
         self.pairs = pairs
+        self.tags = {}
+        for form, tag in pairs:          # the same spelling for the temp folder in both forms: it is @WTMP@
+            self.tags.setdefault(form, tag)
+        self.pattern = re.compile("|".join(re.escape(form) for form in self.tags), re.IGNORECASE) if pairs else None
         self.wtmp = (wtmp or "").rstrip("/\\").replace("\\", "/")
         self.tmpd = (tmpd or "").rstrip("/\\").replace("\\", "/")
         self.wroot = (wroot or "").rstrip("/\\").replace("\\", "/")
+        self.values = {"@WTMP@": self.wtmp, "@TMPD@": self.tmpd or self.wtmp, "@ROOT@": self.wroot}
+
+    # A match spelled all in lower case (as Blender prints paths) becomes the lower-case tag (@wtmp@) and comes back
+    # in lower case: the comparators that do not fold case see the rows as the run that made them did.
+    def _tag(self, matched):
+        tag = self.tags[matched.lower()]
+        return tag.lower() if matched == matched.lower() and matched != matched.upper() else tag
 
     def normalise(self, text):
-        for form, tag in self.pairs:
-            text = text.replace(form, tag)
-        return text
+        if self.pattern is None:
+            return text
+        return self.pattern.sub(lambda m: self._tag(m.group(0)), text)
 
     def restore(self, text):
-        return text.replace("@WTMP@", self.wtmp).replace("@TMPD@", self.tmpd or self.wtmp).replace("@ROOT@", self.wroot)
+        for tag, value in self.values.items():
+            text = text.replace(tag, value).replace(tag.lower(), value.lower())
+        return text
 
     def normalise_bytes(self, data):
-        for form, tag in self.pairs:
-            data = data.replace(form.encode("utf-8"), tag.encode("utf-8"))
-        return data
+        if self.pattern is None:
+            return data
+        bpattern = re.compile(b"|".join(re.escape(form.encode("utf-8")) for form in self.tags), re.IGNORECASE)
+        return bpattern.sub(lambda m: self._tag(m.group(0).decode("utf-8")).encode("utf-8"), data)
 
     def restore_bytes(self, data):
-        return (data.replace(b"@WTMP@", self.wtmp.encode("utf-8"))
-                    .replace(b"@TMPD@", (self.tmpd or self.wtmp).encode("utf-8"))
-                    .replace(b"@ROOT@", self.wroot.encode("utf-8")))
+        for tag, value in self.values.items():
+            data = data.replace(tag.encode("utf-8"), value.encode("utf-8")).replace(tag.lower().encode("utf-8"), value.lower().encode("utf-8"))
+        return data
 
 
 LIST_EXT = (".txt", ".json", ".args")
