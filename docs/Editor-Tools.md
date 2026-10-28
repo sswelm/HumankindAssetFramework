@@ -562,6 +562,19 @@ Quick/Everything presets; one Run button executes the selection and each run wri
 `Logs/haf_bake_tests_report.txt`, with per-row PASS/FAIL in the window (failures unfold their detail). All tests are
 non-destructive (throwaway resource names — your assets and registry are untouched).
 
+**Kernels dropdown** (2026-10-28): which code the rows exercise - *C++ kernels (native)*, *C# only (managed)*, or
+*Both - kernel rows twice*. Every native kernel keeps a C# twin and the callers take one path whole on a process-wide
+switch (`HafNativeKernels.Available`); the window used to run whatever the switch held and the report never said which,
+so a stale or missing DLL made every row a managed run that still passed. Now the first row, *Do the C++ kernels load?*,
+fails when the DLL did not load (SKIP only for a deliberate `HAF_NATIVE_KERNELS=0`), the rows whose pipeline can reach a
+kernel are marked "C++ kernels" in their cost line, under *Both* each of them runs twice under distinct titles
+(`[C++ kernels]`, then `[C# only]`) against the same goldens and Blender comparisons, and the report header names the
+mode and the loaded status. The choice persists (EditorPrefs `HAF.BakeTests.Kernels`). The two Vehicle Lab golden
+rows always use Blender and run once; select **Vehicle Generate backend acceptance** to exercise the C# Generate path.
+The kernel mode retains each row's Blender/C# backend choice; the dedicated in-process and Generate acceptance rows
+provide explicit C# coverage. Each pass retains its checks (including cached-asset checks or named fallbacks in its body);
+summary and tolerance matches establish those checks rather than output-byte equality.
+
 **Fire and forget** (since 2026-08-22): a run finishes on its own — alt-tab away, minimise Unity, walk off. It used to
 be driven by editor ticks, which Unity stops delivering when its window loses OS focus, so a 28-minute suite silently
 stalled the moment you looked at something else. The run is now one synchronous pass behind a cancellable progress

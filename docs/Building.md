@@ -155,7 +155,11 @@ Nothing is installed for it: the DLL is part of the package.
   `export_skin_bonechild.glb`) and saved GLB/glTF recipe sources on x64 .NET Framework; its Unity Mono leg checks the
   same fixtures and the three smallest recipe sources against those managed hashes. Fuse kernels have separate unit
   and Workshop golden checks; [Testing](Testing.md#native-kernels)
-  records their Unity comparisons. This is not an automated Unity fuse check on every recipe source. The hosts marshal
+  records their Unity comparisons. The Bake Tests window's **Kernels** dropdown (2026-10-28) runs selected kernel-reaching
+  rows twice under *Both*, with the kernels and with the C# twins, against each row's existing oracle. Select the relevant
+  catalog/recipe rows for broad coverage; missing inputs, cached validations and named fallbacks remain visible in their
+  results. The Blender-only Vehicle Lab golden rows run once; Generate backend acceptance exercises C# Generate.
+  The loader row fails when the DLL did not load (or skips for deliberate `HAF_NATIVE_KERNELS=0`). The hosts marshal
   differently: a `bool[]` crosses as four bytes a flag in Mono, so native array parameters use blittable elements,
   with flags as `byte[]`. `HafNativeKernels.Status` says which path runs; the `HafNativeKernels` wrappers validate buffers
   before entering C++.

@@ -73,6 +73,7 @@
     <Compile Include="..\editor\HafNativeKernels.Twin.cs" Link="HafNativeKernels.Twin.cs" />
     <Compile Include="..\editor\HafNativeKernels.Weld.cs" Link="HafNativeKernels.Weld.cs" />
     <Compile Include="..\editor\HafNativeKernels.BMesh.cs" Link="HafNativeKernels.BMesh.cs" />
+    <Compile Include="..\editor\BakeTestKernelPlan.cs" Link="BakeTestKernelPlan.cs" />
     <Compile Include="..\editor\VehicleProbe.Merge.cs" Link="VehicleProbe.Merge.cs" />
     <Compile Include="..\editor\VehicleProbe.BlenderArmature.cs" Link="VehicleProbe.BlenderArmature.cs" />
     <Compile Include="..\editor\HafUnityFrame.cs" Link="HafUnityFrame.cs" />
