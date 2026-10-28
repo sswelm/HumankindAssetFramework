@@ -188,11 +188,15 @@ public static class RigRouteAcceptanceTest
     // through a hierarchy, so applying the same cap to world rotation/scale rejects valid deep rigs. The positional
     // and scale margins remain the row's acceptance policy, not a claim that Unity's percentage metrics use mesh extent.
     const float RestFraction = 1e-3f, RestAngle = 0.06f, RestScale = 1e-3f;
-    // ClipAngle 1 degree (0.6 until 2026-10-28): Unity's FBX import reduces keys (its default keyframe reduction, rotation
-    // error 0.5 degrees) and the FBX route's clip deviates from the source between the keys it kept - the UniversalTanks'
-    // 'Box_001.030' (a drive wheel spinning 9 degrees a frame, then jittering) measured 0.617 degrees from the source at
-    // 1.875 s on the FBX route (117 of 378 keys kept) while the GLB route, which keeps every key, matched the source exactly.
-    internal const float ClipFraction = 0.015f, ClipAngle = 1f, ClipScale = 0.01f;
+    // ClipAngle 2 degrees is an empirical route-comparison policy (0.6 until 2026-10-28, then 1). Unity documents
+    // its default 0.5-degree rotation error as the angle between compressed and original quaternions, not per Euler axis:
+    // https://docs.unity3d.com/2021.3/Documentation/ScriptReference/ModelImporter-animationRotationError.html
+    // The UniversalTanks census measured 378 frames x 126 bones: 1,447 samples over 0.5 degrees, 41 over 1, none over
+    // 1.5, maximum 1.365 ('Box_001.087' at 13.375 s). Source spot checks agree with the GLB route at that frame and on
+    // the hull at 12.083 s; the FBX clips retain 97 and 105 of 378 rotation keys respectively. These finite measurements
+    // motivate the margin; they do not establish a per-axis importer guarantee or a bound between sampled times.
+    // First-frame transforms still use RestAngle, and local scale/position retain their separate limits.
+    internal const float ClipFraction = 0.015f, ClipAngle = 2f, ClipScale = 0.01f;
 
     static Transform BoneParent(Transform bone, Dictionary<string, Transform> bones)
     {

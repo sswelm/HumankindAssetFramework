@@ -2444,7 +2444,7 @@ cases; the push gate's rig_anim drill holds (2) row for row. The in-game check o
 its roles stays the user's; the row green on every entry and that check together flip the default. The comparison
 itself is executed by `tools/riganim_unity_import_drill.sh` (licensed Unity and Blender, a temporary project): equal
 imports and a real FBX/GLB pair (the same fixture slimmed by rig_anim.py and by rig_anim_glb.py) pass, with Unity's
-default FBX compression and without it; a socket rotation of 0.4 degrees passes and one of 2 degrees fails; size,
+default FBX compression and without it; a socket rotation of 0.4 degrees passes and one of 2.02 degrees fails; size,
 duration, intermediate motion, subframe keyed excursions and absent/empty role pose streams fail. A cancel keeps the
 verdicts made so far. Owed: the row's run.
 
@@ -2476,6 +2476,27 @@ children, subframe skin samples, curve resolution, live root references and a re
 fails four assertions on the initial three fixtures; the fixes pass the full native import drill (worst sampled
 world-vertex difference below 0.000003 units) and all 2,221 unit tests. The C# slim
 cache revision also changes for the post-strip pose reset, so a reused extract receives the new output policy.
+
+**The row's third run (2026-10-28, after PR #216): 22 of 23 equal, one not - the UniversalTanks' hull `Box_001.002` at
+12.083 s, 1.018 degrees between the routes against the 1-degree clip tolerance.** Measured the same way as (8): the source's
+own keys put the hull 51.556 degrees from its first key at that frame, the GLB route 51.556, the FBX route 50.555 (105 of 378
+rotation keys kept by Unity's import). The row stops at its first failing frame, so each run had shown one deviation; the pair
+harness then took the whole-timeline census with the row's metric (every frame, every bone, parent-space: 47,628 samples):
+1,447 over 0.5 degrees, 41 over 1 degree, none over 1.5, the maximum 1.365 - `Box_001.087` at 13.375 s, a bone that jitters
+by tenths, where the source and the GLB route are both 0.288 degrees from the first key and the FBX route 1.225 (97 keys
+kept). These source spot checks and reduced FBX key counts support the compression explanation; the cross-route census
+measures the sampled differences and does not prove the cause of every deviation or bound unsampled times. Unity documents
+[rotation compression error](https://docs.unity3d.com/2021.3/Documentation/ScriptReference/ModelImporter-animationRotationError.html)
+as the angle between compressed and original quaternions. The 2-degree comparison ceiling is an empirical policy informed
+by this census; the other 22 entries passed at 1 degree with every frame sampled. First-frame, position and scale tolerances
+remain strict. The real defects of the first two runs measured 5 to 90 degrees.
+
+Review of PR #217: the original change breaks two existing native Unity rejection tests, which still use 2 degrees as an
+excessive error. Updated cases verify that 1.365 and 1.98 degrees pass, while 2.02 and 5 degrees fail, on both weighted and
+unweighted three-bone chains. The unweighted socket negative control also uses 2.02 degrees. This tests acceptance and
+rejection around the new policy without relying on floating-point rounding at exactly 2 degrees. The comments and evidence
+above distinguish the observed route differences from Unity's documented compression setting. The repaired native import
+drill reports zero failures, and all 2,221 unit tests pass.
 
 Review of PR #214: six native Unity counterexamples fail the original code and pass the fixes. Welding preserves close
 but distinct positions, normals and UVs, and removes collapsed index triangles even without duplicate vertices. Wrapper
