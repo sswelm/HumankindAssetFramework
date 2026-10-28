@@ -15,7 +15,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   route agree to the thousandth there, the FBX route is 1.0 degrees off (Unity's keyframe reduction kept 105 of 378 keys).
   The row stops at its first failing frame, so the pair harness took the whole-timeline census (47,628 parent-space samples
   on that entry): 41 over 1 degree, none over 1.5, the maximum 1.365 on a bone that jitters by tenths, the GLB route exact
-  there too. The clip rotation tolerance is 2 degrees, the census in the comment.
+  there too. The clip rotation tolerance is 2 degrees, an empirical comparison policy. Review restores native Unity
+  rejection controls above that ceiling, adds acceptance/rejection boundary cases on weighted and unweighted chains,
+  and distinguishes the measurements from Unity's documented quaternion compression error.
 - **THE GLB RIG ROUTE'S SECOND ACCEPTANCE RUN, TWO FINDINGS (2026-10-28).** 21 of 23 equal after PR #214; the two drilled the
   same way. The folded wrapper's node was still in the chain and the SDK's skeleton counted it as a bone (the ReconDrone's
   89 against 88): the fold removes the node now, its children up to its place, the curve paths re-rooted. The UniversalTanks'

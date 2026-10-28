@@ -121,7 +121,7 @@ public static class UnityRigImportTests
             }
             string socketPath = AnimationUtility.CalculateTransformPath(a.GetComponentsInChildren<Transform>().First(t => t.name == "Muzzle"), a.transform);
             AnimationUtility.SetEditorCurve(clipA, EditorCurveBinding.FloatCurve(socketPath, typeof(Transform), "localEulerAnglesRaw.z"), AnimationCurve.Linear(0, 0, 1, 0));
-            AnimationUtility.SetEditorCurve(clipB, EditorCurveBinding.FloatCurve(socketPath, typeof(Transform), "localEulerAnglesRaw.z"), AnimationCurve.Linear(0, 0, 1, 2));   // 2 degrees at the end: past the clip-time allowance
+            AnimationUtility.SetEditorCurve(clipB, EditorCurveBinding.FloatCurve(socketPath, typeof(Transform), "localEulerAnglesRaw.z"), AnimationCurve.Linear(0, 0, 1, 2.02f));   // just beyond the 2-degree clip-time allowance
             var clipC = new AnimationClip { legacy = true };
             AnimationUtility.SetEditorCurve(clipC, EditorCurveBinding.FloatCurve(socketPath, typeof(Transform), "localEulerAnglesRaw.z"), AnimationCurve.Linear(0, 0, 1, 0.4f));   // inside Unity's 0.5-degree compression allowance
             var identicalSocket = RigRouteAcceptanceTest.CompareRigs(a, b, clipA, clipA);
@@ -258,9 +258,18 @@ public static class UnityRigImportTests
                 ca.SampleAnimation(a, 0); cb.SampleAnimation(b, 0);
                 string tip = AnimationUtility.CalculateTransformPath(a.GetComponentsInChildren<Transform>().First(t => t.name == "Socket2"), a.transform);
                 var excessiveBinding = EditorCurveBinding.FloatCurve(tip, typeof(Transform), scale ? "m_LocalScale.x" : "localEulerAnglesRaw.z");
-                AnimationUtility.SetEditorCurve(cb, excessiveBinding, AnimationCurve.Linear(0, scale ? 1 : 0, 1, scale ? 1.03f : 2));
-                var tooFar = RigRouteAcceptanceTest.CompareRigs(a, b, ca, cb);
-                Check("acceptance: excessive local " + (scale ? "scale" : "rotation") + " on " + (scenario.weighted ? "weighted" : "unweighted") + " chain fails", tooFar.Count > 0, string.Join("; ", tooFar));
+                // Exercise both sides of the policy. The measured 1.365-degree deviation must pass, while
+                // 2.02 degrees must fail even when skin-motion envelopes allow the resulting vertex displacement.
+                foreach (float end in scale ? new[] { 1.03f } : new[] { 1.365f, 1.98f, 2.02f, 5f })
+                {
+                    ca.SampleAnimation(a, 0); cb.SampleAnimation(b, 0);
+                    AnimationUtility.SetEditorCurve(cb, excessiveBinding, AnimationCurve.Linear(0, scale ? 1 : 0, 1, end));
+                    var differencesAtLimit = RigRouteAcceptanceTest.CompareRigs(a, b, ca, cb);
+                    bool shouldFail = scale || end > 2f;
+                    Check("acceptance: local " + (scale ? "scale " : "rotation ") + end.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + " on " +
+                        (scenario.weighted ? "weighted" : "unweighted") + " chain " + (shouldFail ? "fails" : "passes"),
+                        shouldFail ? differencesAtLimit.Any(p => p.Contains("transform differs")) : differencesAtLimit.Count == 0, string.Join("; ", differencesAtLimit));
+                }
             }
             finally { UnityEngine.Object.DestroyImmediate(a); UnityEngine.Object.DestroyImmediate(b); UnityEngine.Object.DestroyImmediate(ca); UnityEngine.Object.DestroyImmediate(cb); foreach (var mesh in meshCopies) UnityEngine.Object.DestroyImmediate(mesh); }
         }

@@ -188,15 +188,14 @@ public static class RigRouteAcceptanceTest
     // through a hierarchy, so applying the same cap to world rotation/scale rejects valid deep rigs. The positional
     // and scale margins remain the row's acceptance policy, not a claim that Unity's percentage metrics use mesh extent.
     const float RestFraction = 1e-3f, RestAngle = 0.06f, RestScale = 1e-3f;
-    // ClipAngle 2 degrees (0.6 until 2026-10-28, then 1): Unity's FBX import reduces keys (its default keyframe reduction,
-    // rotation error 0.5 degrees per Euler axis) and the FBX route's clip deviates from the source between the keys it kept,
-    // while the GLB route keeps every key and matches the source exactly. The whole-timeline census of the worst entry (the
-    // UniversalTanks, 378 frames x 126 bones = 47,628 parent-space samples, this row's metric): 1,447 over 0.5 degrees, 41
-    // over 1 degree, none over 1.5, the maximum 1.365 ('Box_001.087' at 13.375 s, a bone that jitters by tenths: the source
-    // and the GLB route both 0.288 degrees from its first key, the FBX route 1.225 with 97 of 378 keys kept); the hull
-    // 'Box_001.002' at 12.083 s: source and GLB route 51.556 degrees from the first key, the FBX route 50.555. The row stops
-    // at its first failing frame, so a run shows one deviation at a time - the census is the bound, the real defects of the
-    // first two runs measured 5 to 90 degrees.
+    // ClipAngle 2 degrees is an empirical route-comparison policy (0.6 until 2026-10-28, then 1). Unity documents
+    // its default 0.5-degree rotation error as the angle between compressed and original quaternions, not per Euler axis:
+    // https://docs.unity3d.com/2021.3/Documentation/ScriptReference/ModelImporter-animationRotationError.html
+    // The UniversalTanks census measured 378 frames x 126 bones: 1,447 samples over 0.5 degrees, 41 over 1, none over
+    // 1.5, maximum 1.365 ('Box_001.087' at 13.375 s). Source spot checks agree with the GLB route at that frame and on
+    // the hull at 12.083 s; the FBX clips retain 97 and 105 of 378 rotation keys respectively. These finite measurements
+    // motivate the margin; they do not establish a per-axis importer guarantee or a bound between sampled times.
+    // First-frame transforms still use RestAngle, and local scale/position retain their separate limits.
     internal const float ClipFraction = 0.015f, ClipAngle = 2f, ClipScale = 0.01f;
 
     static Transform BoneParent(Transform bone, Dictionary<string, Transform> bones)
