@@ -65,15 +65,23 @@ public static partial class BlenderVehicleRig
                 double dimD = dim == 0f ? 1.0 : dim;
                 float dist = (float)(dimD * 1e-5);
                 var groups = new List<(int mat, List<int> verts)>();
+                // native/hafbmesh.cpp walks every vertex's corners for the material they share (HafNativeKernels.BMesh.cs)
+                int[] vertMaterial = null; bool[] vertUniform = null;
+                if (HafNativeKernels.Available) HafNativeKernels.VertMaterial(bm, out vertMaterial, out vertUniform);
                 var loops = new List<int>();
                 for (int v = 0; v < bm.VertCount; v++)
                 {
-                    if (!bm.VAlive[v]) continue;
-                    loops.Clear(); bm.LoopsOfVert(v, loops);
-                    if (loops.Count == 0) continue;
-                    int m0 = bm.FMat[bm.LF[loops[0]]]; bool same = true;
-                    for (int i = 1; i < loops.Count && same; i++) same = bm.FMat[bm.LF[loops[i]]] == m0;
-                    if (!same) continue;
+                    int m0;
+                    if (vertUniform != null) { if (!vertUniform[v]) continue; m0 = vertMaterial[v]; }
+                    else
+                    {
+                        if (!bm.VAlive[v]) continue;
+                        loops.Clear(); bm.LoopsOfVert(v, loops);
+                        if (loops.Count == 0) continue;
+                        m0 = bm.FMat[bm.LF[loops[0]]]; bool same = true;
+                        for (int i = 1; i < loops.Count && same; i++) same = bm.FMat[bm.LF[loops[i]]] == m0;
+                        if (!same) continue;
+                    }
                     int g = groups.FindIndex(x => x.mat == m0);
                     if (g < 0) { groups.Add((m0, new List<int>())); g = groups.Count - 1; }
                     groups[g].verts.Add(v);
@@ -169,6 +177,8 @@ public static partial class BlenderVehicleRig
             var verts = new List<int>(); var edges = new List<int>();
             for (int v = 0; v < bm.VertCount; v++) if (bm.VAlive[v]) verts.Add(v);
             for (int e = 0; e < bm.EdgeCount; e++) if (bm.EAlive[e]) edges.Add(e);
+            // native/hafbmesh.cpp: the same dissolve and NORMALS_CALC finish on a copy the mesh then adopts (HafNativeKernels.BMesh.cs)
+            if (HafNativeKernels.Available) return HafNativeKernels.DissolveLimit(bm, layers.Uv, layers.CornerColor, ref layers.CustomNormal, angle, new[] { (edges, verts) }, skipEmpty: false);
             BlenderDissolve.DissolveLimit(bm, layers, angle, verts, edges);
             BlenderDissolve.FaceNormalsUpdateAll(bm);
             return null;
@@ -235,6 +245,7 @@ public static partial class BlenderVehicleRig
             var vsl = new List<int>(vs); vsl.Sort((a, b) => vIndex[a].CompareTo(vIndex[b]));
             jobs.Add((esl, vsl));
         }
+        if (HafNativeKernels.Available) return HafNativeKernels.DissolveLimit(bm, layers.Uv, layers.CornerColor, ref layers.CustomNormal, angle, jobs, skipEmpty: true);
         foreach (var (es, vs) in jobs)
         {
             if (es.Count == 0 && vs.Count == 0) continue;
@@ -273,36 +284,46 @@ public static partial class BlenderVehicleRig
     {
         int nv = d.Vertices, nf = d.Faces.Length / 3;
         if (d.Edges == null) throw new InvalidOperationException("a stage mesh without its edge list");
-        var bm = new BMesh();
+        BMesh bm;
         var swf = System.Diagnostics.Stopwatch.StartNew(); bool timing = Environment.GetEnvironmentVariable("VEHICLERIG_DEBUG_TIME") == "1";
-        for (int v = 0; v < nv; v++) bm.VertCreate(d.Positions[3 * v], d.Positions[3 * v + 1], d.Positions[3 * v + 2]);
-        if (timing) Console.Error.WriteLine($"TIME     verts {swf.ElapsedMilliseconds} ms");
-        int ne = d.Edges.Length / 2;
-        var edgeOf = new Dictionary<long, int>(ne, BlenderMesh.EdgeKeyComparer.Instance);   // a packed pair hashes badly as a plain long (its halves XOR): the mesh's own comparer
-        for (int e = 0; e < ne; e++)
+        if (HafNativeKernels.Available)
         {
-            int a = d.Edges[2 * e], b = d.Edges[2 * e + 1];
-            int i = bm.EdgeCreate(a, b);
-            bm.EFlag[i] = d.EdgeSharp != null && d.EdgeSharp[e] ? (byte)0 : BMesh.FlagSmooth;
-            edgeOf[EdgeKey(a, b)] = i;
+            // native/hafbmesh.cpp: the same vertices, edges (a pair listed twice: the last one), faces and normal_tri_v3 (HafNativeKernels.BMesh.cs)
+            bm = HafNativeKernels.BuildFromMesh(d.Positions, nv, d.Edges, d.EdgeSharp, d.Faces, d.FaceSharp, d.FaceMaterial, faceNormals);
+            if (timing) Console.Error.WriteLine($"TIME     faces {swf.ElapsedMilliseconds} ms ({nf}, the native build)");
         }
-        if (timing) Console.Error.WriteLine($"TIME     edges {swf.ElapsedMilliseconds} ms ({ne})");
-        var verts = new int[3]; var edges = new int[3];
-        for (int f = 0; f < nf; f++)
+        else
         {
-            for (int k = 0; k < 3; k++) verts[k] = d.Faces[3 * f + k];
-            for (int k = 0; k < 3; k++)
-                if (!edgeOf.TryGetValue(EdgeKey(verts[k], verts[(k + 1) % 3]), out edges[k])) throw new InvalidOperationException($"face {f}: no edge joins corners {verts[k]} and {verts[(k + 1) % 3]}");
-            int i = bm.FaceCreate(verts, edges, 3);
-            bm.FFlag[i] = d.FaceSharp != null && d.FaceSharp[f] ? (byte)0 : BMesh.FlagSmooth;
-            bm.FMat[i] = d.FaceMaterial[f];
+            bm = new BMesh();
+            for (int v = 0; v < nv; v++) bm.VertCreate(d.Positions[3 * v], d.Positions[3 * v + 1], d.Positions[3 * v + 2]);
+            if (timing) Console.Error.WriteLine($"TIME     verts {swf.ElapsedMilliseconds} ms");
+            int ne = d.Edges.Length / 2;
+            var edgeOf = new Dictionary<long, int>(ne, BlenderMesh.EdgeKeyComparer.Instance);   // a packed pair hashes badly as a plain long (its halves XOR): the mesh's own comparer
+            for (int e = 0; e < ne; e++)
+            {
+                int a = d.Edges[2 * e], b = d.Edges[2 * e + 1];
+                int i = bm.EdgeCreate(a, b);
+                bm.EFlag[i] = d.EdgeSharp != null && d.EdgeSharp[e] ? (byte)0 : BMesh.FlagSmooth;
+                edgeOf[EdgeKey(a, b)] = i;
+            }
+            if (timing) Console.Error.WriteLine($"TIME     edges {swf.ElapsedMilliseconds} ms ({ne})");
+            var verts = new int[3]; var edges = new int[3];
+            for (int f = 0; f < nf; f++)
+            {
+                for (int k = 0; k < 3; k++) verts[k] = d.Faces[3 * f + k];
+                for (int k = 0; k < 3; k++)
+                    if (!edgeOf.TryGetValue(EdgeKey(verts[k], verts[(k + 1) % 3]), out edges[k])) throw new InvalidOperationException($"face {f}: no edge joins corners {verts[k]} and {verts[(k + 1) % 3]}");
+                int i = bm.FaceCreate(verts, edges, 3);
+                bm.FFlag[i] = d.FaceSharp != null && d.FaceSharp[f] ? (byte)0 : BMesh.FlagSmooth;
+                bm.FMat[i] = d.FaceMaterial[f];
+            }
+            if (timing) Console.Error.WriteLine($"TIME     faces {swf.ElapsedMilliseconds} ms ({nf})");
+            if (faceNormals) BlenderDecimate.FaceNormalsUpdate(bm);
         }
-        if (timing) Console.Error.WriteLine($"TIME     faces {swf.ElapsedMilliseconds} ms ({nf})");
         foreach (var u in d.UvAll) layers.Uv.Add((float[])u.Clone());
         if (d.UvAll.Count == 0 && d.Uv != null) layers.Uv.Add((float[])d.Uv.Clone());
         foreach (var c in d.Colors) { if (c.point) layers.PointColor.Add((byte[])c.bytes.Clone()); else layers.CornerColor.Add((byte[])c.bytes.Clone()); }
         layers.CustomNormal = d.CustomNormal == null ? null : (short[])d.CustomNormal.Clone();
-        if (faceNormals) BlenderDecimate.FaceNormalsUpdate(bm);
         if (timing) Console.Error.WriteLine($"TIME     normals {swf.ElapsedMilliseconds} ms");
         if (vertexNormals)
         {
