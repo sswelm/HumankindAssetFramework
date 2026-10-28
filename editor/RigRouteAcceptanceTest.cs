@@ -188,7 +188,11 @@ public static class RigRouteAcceptanceTest
     // through a hierarchy, so applying the same cap to world rotation/scale rejects valid deep rigs. The positional
     // and scale margins remain the row's acceptance policy, not a claim that Unity's percentage metrics use mesh extent.
     const float RestFraction = 1e-3f, RestAngle = 0.06f, RestScale = 1e-3f;
-    internal const float ClipFraction = 0.015f, ClipAngle = 0.6f, ClipScale = 0.01f;
+    // ClipAngle 1 degree (0.6 until 2026-10-28): Unity's FBX import reduces keys (its default keyframe reduction, rotation
+    // error 0.5 degrees) and the FBX route's clip deviates from the source between the keys it kept - the UniversalTanks'
+    // 'Box_001.030' (a drive wheel spinning 9 degrees a frame, then jittering) measured 0.617 degrees from the source at
+    // 1.875 s on the FBX route (117 of 378 keys kept) while the GLB route, which keeps every key, matched the source exactly.
+    internal const float ClipFraction = 0.015f, ClipAngle = 1f, ClipScale = 0.01f;
 
     static Transform BoneParent(Transform bone, Dictionary<string, Transform> bones)
     {

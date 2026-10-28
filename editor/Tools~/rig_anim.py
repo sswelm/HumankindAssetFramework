@@ -841,6 +841,16 @@ for _sa in all_acts:
 if _locs or _kept:
     print("RIGANIM stripped %d bone-LOCATION fcurves across %d clip(s)%s" % (_locs, len(all_acts),
           (", KEPT %d translation curve(s) (keepTranslations)" % _kept) if _kept else " (rotation-only; translations bake unscaled)"))
+# RESET THE POSE CHANNELS AGAIN, AFTER THE STRIP (2026-10-28, the UniversalTanks finding): the reset after the rebake came
+# too early - the slicing evaluated frames again and refilled every pose bone from the curves that still existed, and the
+# strip then removed a bone's location curve with that frame's value left on the pose bone. The export's frame_set evaluates
+# the curves that remain; a stripped channel keeps whatever the pose bone holds, and the FBX's node default is the POSED
+# matrix: the T-62's right drive gear sat 0.0092 units from its rest (the GLB route's value, the exporter resetting pose bones
+# between actions). At rest here, every stripped channel evaluates as the glTF exporter evaluates it.
+for _pb in arm.pose.bones:
+    _pb.location = Vector((0.0, 0.0, 0.0))
+    _pb.rotation_quaternion = Quaternion((1.0, 0.0, 0.0, 0.0))
+    _pb.scale = Vector((1.0, 1.0, 1.0))
 
 # LEGACY SANDWICH COMPENSATION (2026-07-25, the invisible-kickback finding): the legacy FBX ships the m->cm
 # x100 root sandwich; Unity folds 0.01 into every bindpose, and Amplitude's clip import carries that 0.01 into
