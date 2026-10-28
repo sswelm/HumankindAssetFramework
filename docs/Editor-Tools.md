@@ -569,7 +569,11 @@ so a stale or missing DLL made every row a managed run that still passed. Now th
 fails when the DLL did not load (SKIP only for a deliberate `HAF_NATIVE_KERNELS=0`), the rows whose pipeline can reach a
 kernel are marked "C++ kernels" in their cost line, under *Both* each of them runs twice under distinct titles
 (`[C++ kernels]`, then `[C# only]`) against the same goldens and Blender comparisons, and the report header names the
-mode and the loaded status. The choice persists (EditorPrefs `HAF.BakeTests.Kernels`).
+mode and the loaded status. The choice persists (EditorPrefs `HAF.BakeTests.Kernels`). The two Vehicle Lab golden
+rows always use Blender and run once; select **Vehicle Generate backend acceptance** to exercise the C# Generate path.
+The kernel mode retains each row's Blender/C# backend choice; the dedicated in-process and Generate acceptance rows
+provide explicit C# coverage. Each pass retains its checks (including cached-asset checks or named fallbacks in its body);
+summary and tolerance matches establish those checks rather than output-byte equality.
 
 **Fire and forget** (since 2026-08-22): a run finishes on its own — alt-tab away, minimise Unity, walk off. It used to
 be driven by editor ticks, which Unity stops delivering when its window loses OS focus, so a 28-minute suite silently

@@ -9,7 +9,7 @@ using System;
 //   - Native: the rows run with the kernels; when the DLL did not load they run managed and SAY SO in their titles.
 //   - Managed: the rows that can reach a kernel run with the switch off ("[C# only]"), the oracle is the same.
 //   - Both: a kernel row runs twice, kernels first, then managed - the goldens and Blender comparisons are the oracle for
-//     each pass, so two green passes mean both paths agree with the reference (byte-exact where the golden is).
+//     each pass. Each row retains its structural, summary, tolerance or byte-comparison checks.
 // A row that cannot reach a kernel runs once in every mode, untouched. The loader row at the top of the window answers
 // "did the DLL load?" from HafNativeKernels.LoadStatus (what the loader found, not the live switch) and fails when it did
 // not, except for the deliberate HAF_NATIVE_KERNELS=0.
@@ -22,7 +22,7 @@ public static class BakeTestKernelPlan
 
     public struct Pass
     {
-        public bool native;      // HafNativeKernels.Available for this pass
+        public bool native;      // requested HafNativeKernels.Available for a kernel row (ignored for other rows)
         public string suffix;    // appended to the row's title in the window and the report ("" = the plain row)
     }
 

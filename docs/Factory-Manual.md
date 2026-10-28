@@ -552,7 +552,9 @@ items). Each test is a row with a plain-language explanation, a checkbox, and Qu
 shows live per-row PASS/FAIL (failures unfold their detail lines) and writes a durable report to
 `Logs/haf_bake_tests_report.txt`. The **Kernels** dropdown picks what the rows marked "C++ kernels" exercise: the native
 kernels, their C# twins, or both in turn (each pass its own titled row and report section); the first row fails when the
-native DLL did not load, and the report header names the mode and the loaded status.
+native DLL did not load, and the report header names the mode and the loaded status. The Vehicle Lab golden rows
+always run Blender once; use **Vehicle Generate backend acceptance** for C# Generate. Each pass retains its row's
+existing checks; summary and tolerance matches do not imply equal output bytes.
 
 ### Following a run — where the progress shows
 

@@ -2,8 +2,8 @@ using System.Linq;
 using Xunit;
 
 // The Bake Tests window's "Kernels" dropdown, the pure half (editor/BakeTestKernelPlan.cs): which passes a row runs under
-// each mode, what its title says, and the loader row's verdict from HafNativeKernels.Status. The window itself needs
-// Unity; this table is what it executes, so a changed row here is a changed run there.
+// each mode, what its title says, and the loader row's verdict from HafNativeKernels.LoadStatus. The actual window's
+// mode application and restoration are covered by tools/bake_tests_kernel_unity_drill.sh in an isolated Unity project.
 public class BakeTestKernelPlanTests
 {
     [Theory]
@@ -16,7 +16,7 @@ public class BakeTestKernelPlanTests
     {
         var p = BakeTestKernelPlan.Passes(mode, kernelRow: false, loaded: loaded);
         Assert.Single(p);
-        Assert.Equal(loaded, p[0].native);   // the switch is left as the loader set it
+        // The window ignores the native request for this row and preserves the incoming caller switch.
         Assert.Equal("", p[0].suffix);
     }
 

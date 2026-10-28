@@ -3458,14 +3458,32 @@ missing plugin would have made the same rows a managed run that still passed. `e
 and, when the DLL did not load, runs them managed with `[C# only: the C++ kernels did not load]` in their titles; *C# only
 (managed)* switches the kernels off for the rows that can reach one (`[C# only]`); *Both - kernel rows twice* runs each of
 those rows with the kernels (`[C++ kernels]`) and then with the twins (`[C# only]`), two sections in the report, each against
-the same oracle - the goldens are byte-exact, so two green passes mean the two paths produced the same bytes. The rows that
+the same oracle, retaining that row's structural, summary, tolerance or byte comparisons. The rows that
 can reach a kernel: both smoke rows and the Blender + animation options (UniversalBaker's in-process prep), the Model
-Workshop (fuse), the in-process prep and rig slim (decimate), the GLB rig route, the probe preview, the Vehicle Generate
-acceptance and both Vehicle Lab rows. The switch is set between rows on the main thread (no row's workers are alive then)
+Workshop (fuse), the raw-rig control and registry conversion rows, the in-process prep, deploy conversion and rig slim
+(normal encoding and decimation), the GLB rig route, the probe preview, the Vehicle Generate
+acceptance. The two Vehicle Lab golden rows pin Blender and run once with plain titles. Use the Vehicle Generate
+backend acceptance row to exercise C# Generate. The switch is set between rows on the main thread (no row's workers are alive then)
 and restored after the run. The first row, *Do the C++ kernels load?*, reads `HafNativeKernels.LoadStatus`: PASS for native,
 FAIL with the reason and the remedy otherwise, SKIP only for `HAF_NATIVE_KERNELS=0`; the report header carries
 `Kernels: <mode>; loaded in this editor process: <status>`. Not covered: a direct native-versus-managed byte comparison
-inside the window - the oracle stands in for it, exact where the golden is, within the row's tolerance where Blender is.
+inside the window. Each pass retains its row's existing oracle: smoke tests validate assets, Workshop goldens hold
+summary lines, preview comparisons use tolerances, and Generate backend acceptance compares GLB bytes (or its documented
+pixel comparison). Two green passes establish those checks; summary or tolerance matches do not establish byte equality.
+The kernel mode retains each row's Blender/C# backend choice; dedicated in-process and Generate acceptance rows provide
+explicit C# coverage. Some rows validate cached assets or report named fallbacks, as their bodies describe.
+
+Review of PR #218: `tools/bake_tests_kernel_unity_drill.sh` executes the actual runner in a separate temporary Unity
+project, with synthetic rows isolating mode control from the heavy bakes. It loads the packaged native DLL in one editor
+process and uses `HAF_NATIVE_KERNELS=0` in another. The initial harness failed five assertions with the DLL loaded and one
+with it disabled: Blender-only Lab rows were mislabeled/repeated, and a caller-disabled switch was mistaken for a failed
+load. Planning now uses the immutable loader status and restores the incoming switch; non-kernel rows retain that incoming
+state. The drill checks mode ordering, live backend status, distinct persisted reports, a non-kernel row after managed
+passes, row exceptions and cancellation. A second registration counterexample found three omitted native-capable rows:
+the raw-rig control/registry bakes can encode normals through `BlenderReduce`, and the in-process deploy row through
+`BlenderDeploy.ImportedMesh`. They now participate in kernel mode selection, with all three registrations checked by the
+Unity drill. Both process configurations now report zero failures, and all 2,240 unit tests
+pass. The deliberate-disable warning also agrees with the loader row's SKIP verdict.
 
 Why: the same C# runs 2.5-3.4x slower on Unity's Mono than on the .NET Framework's JIT, and the fan walk was 90% of the
 part-mesh CPU. Measured 2026-10-21 with `tools/vehicle_probe_performance.sh` in Unity 2021.3.1f1 (`HAF_PROBE_PERF_UNITY=1`),
