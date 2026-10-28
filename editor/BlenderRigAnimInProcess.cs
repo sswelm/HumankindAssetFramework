@@ -24,7 +24,7 @@ public static class BlenderRigAnimInProcess
 {
     /// <summary>Bump when the in-process run's written file changes: the Factory's slim cache key carries it, so a cached
     /// GLB made by an older port is made again.</summary>
-    public const string CacheRevision = "2026-10-27.pose-reset.1"; // re-slim cached rigs with the post-rebake pose-channel reset
+    public const string CacheRevision = "2026-10-28.post-strip-reset.1"; // re-slim cached rigs with the post-strip pose-channel reset
 
     public sealed class Outcome
     {

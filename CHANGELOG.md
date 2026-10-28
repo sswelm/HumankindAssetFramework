@@ -17,6 +17,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   refilled the pose bones and the strip of constant location curves left a stale location (probed in Blender) - so the
   script resets again after the strip, the port mirrors it. The clip rotation tolerance is 1 degree: Unity's FBX import
   keeps 117 of a spinning wheel's 378 keys and deviates 0.617 degrees from the source where the GLB route is exact.
+  Review preserves ancestor paths and animated child motion when removing nested or translated/rotated wrappers,
+  replaces a removed skin root with a live common ancestor, and invalidates pre-reset C# slim caches. Native Unity
+  counterexamples reproduce the failures and cover the repaired hierarchy at key and subframe times.
 - **THE VEHICLE LAB'S REDUCE STAGE RUNS ITS HOT STEPS AS C++ (2026-10-28).** Measured first in Unity's Mono with the stage's
   own marks, with the Generate drill now shipping the native plugin into its project (it had run the C# route managed all
   along): the Espana's reduce was the limited dissolve of its shroud, the collapse with its mesh build, the weld and the

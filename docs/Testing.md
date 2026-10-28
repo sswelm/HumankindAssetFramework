@@ -2467,6 +2467,16 @@ route was exact to the thousandth and the FBX route 0.617 degrees off - Unity's 
 importer's default keyframe reduction, rotation error 0.5 degrees) and interpolates between them. The clip tolerance is 1
 degree now, with that measurement in the comment.
 
+Review of PR #216: native Unity counterexamples reproduced broken animation paths under a retained parent,
+changed skinned motion when the removed wrapper has translation/rotation and its direct child is animated,
+and a destroyed skin root when glTF's optional `skin.skeleton` names the wrapper. The fixes retain the ancestor
+path, compose the wrapper's static TR into direct-child position/quaternion curves, and select a live common
+ancestor for that renderer's bones. Seven fixture variants cover nested animated wrappers, a nonuniform ancestor, position-only and rotation-only
+children, subframe skin samples, curve resolution, live root references and a repeated fold. The original code
+fails four assertions on the initial three fixtures; the fixes pass the full native import drill (worst sampled
+world-vertex difference below 0.000003 units) and all 2,221 unit tests. The C# slim
+cache revision also changes for the post-strip pose reset, so a reused extract receives the new output policy.
+
 Review of PR #214: six native Unity counterexamples fail the original code and pass the fixes. Welding preserves close
 but distinct positions, normals and UVs, and removes collapsed index triangles even without duplicate vertices. Wrapper
 folding adjusts a shared skin's bind poses once and tests scale uniformity relative to its magnitude; shared meshes and

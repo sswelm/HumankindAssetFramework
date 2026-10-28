@@ -1400,7 +1400,7 @@ public static class UniversalBaker
             .Concat(rig.Root.GetComponentsInChildren<MeshFilter>(true).Select(f => f.transform)).Distinct().ToList();
         if (targets.Count == 0) return lines;
         int Depth(Transform t) { int d = 0; for (var p = t.parent; p != null; p = p.parent) d++; return d; }
-        foreach (int i in Enumerable.Range(0, Math.Min(m.Nodes.Count, rig.Nodes.Length)).OrderBy(i => Depth(rig.Nodes[i])))
+        foreach (int i in Enumerable.Range(0, Math.Min(m.Nodes.Count, rig.Nodes.Length)).Where(i => rig.Nodes[i] != null).OrderBy(i => Depth(rig.Nodes[i])))
         {
             var t = rig.Nodes[i]; if (t == null) continue;   // a wrapper removed below
             var s = t.localScale;
@@ -1451,7 +1451,32 @@ public static class UniversalBaker
             string wrapperPath = AnimationUtility.CalculateTransformPath(t, rig.Root.transform);
             var parent = t.parent; int place = t.GetSiblingIndex();
             var children = new List<Transform>(); for (int c = 0; c < t.childCount; c++) children.Add(t.GetChild(c));
-            foreach (var child in children) { child.SetParent(parent, true); child.SetSiblingIndex(place++); }
+            // Reparenting keeps the current pose; animation must also carry the wrapper's static TR into each
+            // direct child's local curves. Descendants retain their local frame. The scale was folded above.
+            foreach (var child in children)
+            {
+                string childPath = AnimationUtility.CalculateTransformPath(child, rig.Root.transform);
+                foreach (var clip in rig.Clips)
+                {
+                    ComposeWrapperCurves(clip, childPath, "m_LocalPosition", 3, child.localPosition,
+                        v => t.localPosition + t.localRotation * (Vector3)v);
+                    ComposeWrapperCurves(clip, childPath, "m_LocalRotation", 4,
+                        new Vector4(child.localRotation.x, child.localRotation.y, child.localRotation.z, child.localRotation.w),
+                        v => { var q = t.localRotation * new Quaternion(v.x, v.y, v.z, v.w); return new Vector4(q.x, q.y, q.z, q.w); });
+                }
+                child.SetParent(parent, true); child.SetSiblingIndex(place++);
+            }
+            // A glTF skin's optional skeleton root need not be a joint, so it can name the removed wrapper.
+            // Keep a live common ancestor of the skin's bones in the new hierarchy.
+            foreach (var renderer in skinned.Where(r => r.rootBone == t))
+            {
+                var bones = renderer.bones.Where(b => b != null).ToArray();
+                var common = bones.FirstOrDefault() ?? parent;
+                while (common != null && !bones.All(b => b == common || b.IsChildOf(common))) common = common.parent;
+                renderer.rootBone = common ?? parent;
+            }
+            string parentPath = AnimationUtility.CalculateTransformPath(parent, rig.Root.transform);
+            string prefix = parentPath.Length == 0 ? "" : parentPath + "/";
             int repathed = 0;
             foreach (var clip in rig.Clips)
                 foreach (var b in AnimationUtility.GetCurveBindings(clip))
@@ -1459,13 +1484,44 @@ public static class UniversalBaker
                     if (!b.path.StartsWith(wrapperPath + "/", StringComparison.Ordinal)) continue;
                     var c = AnimationUtility.GetEditorCurve(clip, b);
                     AnimationUtility.SetEditorCurve(clip, b, null);
-                    var moved2 = b; moved2.path = b.path.Substring(wrapperPath.Length + 1);
+                    var moved2 = b; moved2.path = prefix + b.path.Substring(wrapperPath.Length + 1);
                     AnimationUtility.SetEditorCurve(clip, moved2, c); repathed++;
                 }
             string wrapperName = t.name; UnityEngine.Object.DestroyImmediate(t.gameObject); rig.Nodes[i] = null;
             lines.Add(FormattableString.Invariant($"the wrapper '{wrapperName}' at uniform scale {f:0.####} folded into the rig and removed: {moved} node translation(s), {poses} bind pose(s), {rigid.Count} rigid mesh(es), {curves} position curve(s), {children.Count} child(ren) up to its place, {repathed} curve path(s)"));
         }
         return lines;
+    }
+
+    // HafModelRig emits complete position/quaternion component groups with linear keys. A static TR is an
+    // affine map of those components, so transforming their union of key times preserves subframe interpolation.
+    static void ComposeWrapperCurves(AnimationClip clip, string path, string property, int components,
+        Vector4 fallback, Func<Vector4, Vector4> transform)
+    {
+        string[] axes = { ".x", ".y", ".z", ".w" };
+        var bindings = Enumerable.Range(0, components).Select(k => EditorCurveBinding.FloatCurve(path, typeof(Transform), property + axes[k])).ToArray();
+        var curves = bindings.Select(b => AnimationUtility.GetEditorCurve(clip, b)).ToArray();
+        var times = curves.Where(c => c != null).SelectMany(c => c.keys.Select(k => k.time)).Distinct().OrderBy(t => t).ToArray();
+        if (times.Length == 0) return;
+        var keys = Enumerable.Range(0, components).Select(_ => new Keyframe[times.Length]).ToArray();
+        for (int i = 0; i < times.Length; i++)
+        {
+            var v = fallback;
+            for (int k = 0; k < components; k++) if (curves[k] != null) v[k] = curves[k].Evaluate(times[i]);
+            v = transform(v);
+            for (int k = 0; k < components; k++) keys[k][i] = new Keyframe(times[i], v[k]);
+        }
+        for (int k = 0; k < components; k++)
+        {
+            for (int i = 0; i < times.Length; i++)
+            {
+                var key = keys[k][i];
+                key.inTangent = i > 0 ? (key.value - keys[k][i - 1].value) / Mathf.Max(1e-6f, times[i] - times[i - 1]) : 0f;
+                key.outTangent = i + 1 < times.Length ? (keys[k][i + 1].value - key.value) / Mathf.Max(1e-6f, times[i + 1] - times[i]) : 0f;
+                keys[k][i] = key;
+            }
+            AnimationUtility.SetEditorCurve(clip, bindings[k], new AnimationCurve(keys[k]));
+        }
     }
 
     // Longest axis of the FBX's combined mesh bounds (native scale), so we can compute the Scale Factor that hits `size`.

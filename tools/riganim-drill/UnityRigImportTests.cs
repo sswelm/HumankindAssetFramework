@@ -407,6 +407,66 @@ public static class UnityRigImportTests
         }
     }
 
+    static void RemovedWrapperCounterexamples()
+    {
+        Vector3[] Snapshot(HafModelRig.Result rig, float time)
+        {
+            rig.Clips[0].SampleAnimation(rig.Root, time);
+            var points = new List<Vector3>(); var baked = new Mesh();
+            try
+            {
+                foreach (var renderer in rig.Root.GetComponentsInChildren<SkinnedMeshRenderer>())
+                { renderer.BakeMesh(baked); points.AddRange(baked.vertices.Select(renderer.transform.TransformPoint)); }
+            }
+            finally { UnityEngine.Object.DestroyImmediate(baked); }
+            return points.ToArray();
+        }
+        foreach (string scenario in new[] { "nested path", "animated direct child", "nested animated wrappers", "nonuniform ancestor", "position-only child", "rotation-only child", "skeleton root" })
+        {
+            var model = GlbReader.Read(Path.Combine(fixtures, "wrapped.glb"));
+            if (scenario == "nested path" || scenario == "nested animated wrappers" || scenario == "nonuniform ancestor")
+            {
+                int index = model.Nodes.Count;
+                model.Nodes.Add(new HafNode { Name = "Carrier", Translation = new[] { 3.0, 2.0, -1.0 },
+                    Scale = scenario == "nested animated wrappers" ? new[] { 0.5, 0.5, 0.5 } : scenario == "nonuniform ancestor" ? new[] { 2.0, 3.0, 4.0 } : new[] { 1.0, 1.0, 1.0 } });
+                model.Nodes[0].Parent = index; model.Nodes[index].Children.Add(0);
+            }
+            if (scenario == "animated direct child" || scenario == "nested animated wrappers" || scenario == "nonuniform ancestor" || scenario.EndsWith("-only child", StringComparison.Ordinal))
+            {
+                model.Nodes[0].Translation = new[] { 3.0, 2.0, -1.0 };
+                model.Nodes[0].Rotation = new[] { 0.0, Math.Sin(0.3), 0.0, Math.Cos(0.3) };
+                var animation = model.Animations[0];
+                int sampler = animation.Samplers.Count;
+                animation.Samplers.Add(new HafSampler { Times = new[] { 0f, 1f }, Components = 3, Values = new[] { 0f, 0f, 0f, 100f, 50f, -50f } });
+                if (scenario != "rotation-only child") animation.Channels.Add(new HafChannel { Node = 1, Path = "translation", Sampler = sampler });
+                sampler = animation.Samplers.Count;
+                animation.Samplers.Add(new HafSampler { Times = new[] { 0f, 1f }, Components = 4, Values = new[] { 0f, 0f, 0f, 1f, 0f, 0f, (float)Math.Sin(0.4), (float)Math.Cos(0.4) } });
+                if (scenario != "position-only child") animation.Channels.Add(new HafChannel { Node = 1, Path = "rotation", Sampler = sampler });
+            }
+            if (scenario == "skeleton root") model.Skins[0].Skeleton = 0;
+            var assets = new List<UnityEngine.Object>(); var rig = HafModelRig.Build(model, assets, forFactory: true);
+            try
+            {
+                var times = new[] { 0f, 0.137f, 0.5f, 0.913f, 1f };
+                var before = times.Select(t => Snapshot(rig, t)).ToArray();
+                var folded = UniversalBaker.FoldScaledWrappers(model, rig);
+                double worst = 0;
+                for (int ti = 0; ti < times.Length; ti++)
+                {
+                    var after = Snapshot(rig, times[ti]);
+                    for (int vi = 0; vi < after.Length; vi++) worst = Math.Max(worst, (before[ti][vi] - after[vi]).magnitude);
+                }
+                Check("removed wrapper: " + scenario + " preserves sampled skin", folded.Count == (scenario == "nested animated wrappers" ? 2 : 1) && worst < 0.0001, $"{folded.Count} folded, worst vertex difference {worst:R}");
+                bool bound = rig.Clips.All(clip => AnimationUtility.GetCurveBindings(clip).All(b => AnimationUtility.GetAnimatedObject(rig.Root, b) != null));
+                Check("removed wrapper: " + scenario + " retains curve targets", bound, "all bindings resolve in the new hierarchy");
+                bool roots = rig.Root.GetComponentsInChildren<SkinnedMeshRenderer>().All(r => r.rootBone != null && r.bones.All(b => b == r.rootBone || b.IsChildOf(r.rootBone)));
+                Check("removed wrapper: " + scenario + " retains a live skin root", roots, "every skin root is a common ancestor of its bones");
+                Check("removed wrapper: " + scenario + " can be folded again", UniversalBaker.FoldScaledWrappers(model, rig).Count == 0, "removed node slots are skipped");
+            }
+            finally { UnityEngine.Object.DestroyImmediate(rig.Root); foreach (var asset in assets) if (asset != null) UnityEngine.Object.DestroyImmediate(asset); }
+        }
+    }
+
     // 2026-10-27, the acceptance row's first run: the Factory's GLB import follows the FBX route's conventions - the prefab posed at
     // the primary clip's first frame (the SDK's reference pose), a uniformly scaled wrapper folded into the rig, vertices equal in
     // every attribute welded and the triangles that collapse dropped (Unity's FBX import does both)
@@ -485,7 +545,7 @@ public static class UnityRigImportTests
             foreach (var item in new[] { (fixture: "long", action: "Spin_" + new string('a', 120)), (fixture: "underscore", action: "_Spin") })
                 if (Import(item.fixture, item.action, out _) != null) Preview(item.fixture, item.action);
             Acceptance(); AcceptanceCounterexamples(); PoseStreams(); CrossRoute(); RootPlacement(); ToleranceCounterexamples(); WrongSkinWeights(); NonUniformParent(2); NonUniformParent(100);
-            FbxRouteConventions(); WeldCounterexamples(); WrapperCounterexamples();
+            FbxRouteConventions(); WeldCounterexamples(); WrapperCounterexamples(); RemovedWrapperCounterexamples();
             RecipeArgsParity(); SparseRecipeParity(); AlbedoPixelsAndOutputDirectory();
         }
         catch (Exception e) { Rows.Add("FAIL exception: " + e); failed++; }
