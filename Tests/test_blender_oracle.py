@@ -126,6 +126,23 @@ class OracleStoreTests(unittest.TestCase):
         kc = run("key", "--wtmp", a.wtmp.replace("/", "\\"), "--", *[i.replace("/", "\\") for i in a.items()]).stdout.strip()
         self.assertEqual(ka, kb); self.assertEqual(ka, kc); self.assertEqual(len(ka), 32)
 
+    def test_a_script_checked_out_with_crlf_replays_a_record_made_with_lf(self):
+        # core.autocrlf gives the same commit LF files in one checkout and CRLF in another; the record must answer in both,
+        # while a changed line still refuses (.py and .sh alike)
+        a = Run(self.tmp, "runA")
+        script = self.tmp / "dump.py"; write(script, "print(1)\nprint(2)\n")
+        wrapper = self.tmp / "wrap.sh"; write(wrapper, "echo 1\necho 2\n")
+        run("store", *self.store_args(a), "--rc", "0", "--", str(script), str(wrapper), *a.items())
+        script.write_bytes(b"print(1)\r\nprint(2)\r\n"); wrapper.write_bytes(b"echo 1\r\necho 2\r\n")
+        l = run("load", *self.store_args(a), "--", str(script), str(wrapper), *a.items())
+        self.assertEqual(l.returncode, 0, l.stdout); self.assertIn("RC 0", l.stdout)
+        script.write_bytes(b"print(1)\r\nprint(3)\r\n")
+        l = run("load", *self.store_args(a), "--", str(script), str(wrapper), *a.items())
+        self.assertEqual(l.returncode, 99); self.assertIn("dump.py changed", l.stdout)
+        script.write_bytes(b"print(1)\r\nprint(2)\r\n"); wrapper.write_bytes(b"echo 1\r\necho 3\r\n")
+        l = run("load", *self.store_args(a), "--", str(script), str(wrapper), *a.items())
+        self.assertEqual(l.returncode, 99); self.assertIn("wrap.sh changed", l.stdout)
+
     def test_a_record_is_replaced_whole_on_a_new_store(self):
         a = Run(self.tmp, "runA")
         run("store", *self.store_args(a), "--rc", "0", "--dirs", "out/0", "--", *a.items())

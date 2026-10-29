@@ -41,6 +41,14 @@ def digest_text(text):
     return hashlib.blake2b(text.encode("utf-8", "surrogateescape"), digest_size=16).hexdigest()
 
 
+def digest_script(path):
+    """A tracked script hashed with CRLF read as LF: the same commit checks out with either ending (core.autocrlf), and a
+    record made in one checkout must answer in another (2026-10-29: four editor/Tools~ scripts were LF in the main checkout
+    and CRLF in a worktree, and a push that changed none of them was STALE on all four)."""
+    with open(path, "rb") as f: data = f.read()
+    return hashlib.blake2b(data.replace(b"\r\n", b"\n"), digest_size=16).hexdigest()
+
+
 class Paths:
     """Portable path references in raw output; literal marker text and arbitrary stdout bytes round-trip exactly."""
     def __init__(self, wtmp, tmpd, wroot):
@@ -97,6 +105,7 @@ class Paths:
 
 
 LIST_EXT = (".txt", ".json", ".args")
+SCRIPT_EXT = (".py", ".sh")   # hashed with CRLF read as LF (digest_script)
 
 
 def as_path(item):
@@ -182,7 +191,7 @@ def describe_items(items, paths, arguments=()):
             if is_list:
                 with open(current, "r", encoding="utf-8", errors="surrogateescape") as source: text = source.read().replace("\r\n", "\n")
                 digest = digest_text(normalised_list(text, current.lower().endswith(".json"), paths))
-            else: digest = digest_file(current)
+            else: digest = digest_script(current) if current.lower().endswith(SCRIPT_EXT) else digest_file(current)
             if not top: refs[paths.key_text(os.path.abspath(current).replace("\\", "/")) + (" (external asset)" if asset else "")] = digest
             if is_list:
                 for line in text_tokens(text, current.lower().endswith(".json")):
@@ -258,7 +267,7 @@ def parse(argv):
     return op, opts
 
 
-FORMAT = 2
+FORMAT = 3   # 3 (2026-10-29): scripts keyed with CRLF read as LF
 
 
 def linked(path):
