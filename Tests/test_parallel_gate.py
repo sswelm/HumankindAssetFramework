@@ -77,6 +77,37 @@ exit "$fail"
         self.assertIn("slow-output", out)
         self.assertIn("fast-output", out)
 
+    def test_lane_steps_run_in_order_each_judged_on_its_own_beside_the_parallel_steps(self):
+        result = self.run_shell(self.helpers()+'''
+run_lane first bash -c 'echo first-output; echo first > "$1/order"' _ "$ROOT"
+run_lane broken bash -c 'echo broken-output; echo broken >> "$1/order"; exit 7' _ "$ROOT"
+run_lane third bash -c 'echo third-output; echo third >> "$1/order"' _ "$ROOT"
+run_bg beside bash -c 'echo beside-output'
+run_lane_go
+run_bg_wait
+exit "$fail"
+''')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual((self.path / "order").read_text().split(), ["first", "broken", "third"])
+        for expected in ("[PASS] first", "[FAIL] broken", "[PASS] third", "[PASS] beside", "first-output", "broken-output", "third-output", "beside-output"):
+            self.assertIn(expected, result.stdout)
+        self.assertLess(result.stdout.index("=== first ==="), result.stdout.index("=== broken ==="))
+        self.assertLess(result.stdout.index("=== third ==="), result.stdout.index("=== beside ==="))
+        progress = (self.path / "progress.md").read_text()
+        for expected in ("PASS first", "FAIL broken", "PASS third", "PASS beside"):
+            self.assertIn(expected, progress)
+        self.assertNotIn("not a child", result.stderr)
+
+    def test_a_lane_nobody_started_still_runs_under_the_wait(self):
+        result = self.run_shell(self.helpers()+'''
+run_lane only bash -c 'echo only-output'
+run_bg_wait
+exit "$fail"
+''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("[PASS] only", result.stdout)
+        self.assertIn("only-output", result.stdout)
+
     def test_a_background_failure_cannot_be_hidden_by_a_later_success(self):
         result = self.run_shell(self.helpers()+'''
 run_bg broken bash -c 'echo broken-output; exit 7'

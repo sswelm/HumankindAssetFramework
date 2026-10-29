@@ -66,32 +66,13 @@ if [ -n "$UNKNOWN" ]; then
   exit 1
 fi
 
-hits=0
-for f in $FILES; do
-  # Strip comments first — the policy notes quote the banned shape verbatim, and a gate that trips on its own
-  # documentation is a gate nobody keeps. Then collapse whitespace so the two-line form reads like the one-liner.
-  stripped=$(perl -0777 -pe 's{/\*.*?\*/}{}gs; s{//[^\n]*}{}g; s{\s+}{ }g' "$f" 2>/dev/null | tr -d '\0') || continue
-
-  # (a) DEAD INITIALIZER: <type> <var> = <init>; try { <var> = Convert.To*(GetMember(...
-  # \1 back-reference is the whole test — it is only a bug when the try targets the SAME local just initialized.
-  a=$(printf '%s' "$stripped" | grep -oP \
-    '\b(?:bool|float|double|int|long|uint|ulong|short|byte|decimal)\s+(\w+)\s*=\s*[^;{}]+;\s*try\s*\{\s*\1\s*=\s*(?:\w+\s*\(\s*)?Convert\.To\w+\s*\(\s*'"$READER_RE"'(?![^{}]*\?\?)[^{}]*?\}\s*catch' \
-    || true)
-
-  # (b) PHANTOM SKIP: try { ... Convert.To*(GetMember(...)) ... } catch { continue; }  — the continue never fires.
-  b=$(printf '%s' "$stripped" | grep -oP \
-    'try\s*\{[^{}]*Convert\.To\w+\s*\(\s*'"$READER_RE"'[^{}]*\}\s*catch\s*(?:\([^)]*\))?\s*\{\s*continue\s*;\s*\}' \
-    || true)
-
-  for found in "$a" "$b"; do
-    [ -z "$found" ] && continue
-    while IFS= read -r m; do
-      [ -z "$m" ] && continue
-      hits=$((hits + 1))
-      printf 'FAIL: %s\n      %s\n' "${f#./}" "$(printf '%s' "$m" | cut -c1-140)"
-    done <<< "$found"
-  done
-done
+# ONE PERL OVER EVERY FILE (2026-10-29): the loop this replaced ran perl, tr and two grep -oP per file in subshells -
+# eight forks a file, 340 files, 99 s on Windows for regexes that take a second. tools/shape-scan.pl holds the two
+# regexes unchanged and prints the same FAIL lines, then `HITS <n>`.
+scan=$(perl tools/shape-scan.pl member "$READER_RE" $FILES) || { echo "[FAIL] member shape: the scanner failed (perl tools/shape-scan.pl)"; exit 2; }
+hits=$(printf '%s\n' "$scan" | awk '/^HITS /{print $2}' | tail -1)
+case "$hits" in ''|*[!0-9]*) echo "[FAIL] member shape: the scanner gave no count"; exit 2;; esac
+[ "$hits" -eq 0 ] || printf '%s\n' "$scan" | grep -v '^HITS '
 
 if [ "$hits" -gt 0 ]; then
   cat >&2 <<'MSG'

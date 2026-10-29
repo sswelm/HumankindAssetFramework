@@ -5,8 +5,8 @@
 #
 # Deliberately NOT here (too slow / need Unity or the game): deploy_regression.sh (Blender golden-master), the
 # in-editor Feature Test, and the in-game binding report (haf_bindings_report.txt). The source-only steps take
-# seconds; with the parity drills (in parallel since 2026-10-11, everything after the build at once since 2026-10-29,
-# Blender replaced by its record since 2026-10-28) the whole gate takes about as long as its longest drill.
+# seconds; with the parity drills (in parallel since 2026-10-11, the source guards on a lane beside them since
+# 2026-10-29, Blender replaced by its record since 2026-10-28) the whole gate takes about as long as its longest drill.
 #
 # A step's exit status means: 0 PASS (its claim held), 3 SKIP (a prerequisite was absent, so its claim was NOT
 # tested; the step's own SKIP line says what did run), anything else FAIL. SKIP is not PASS (2026-10-11): until then a
@@ -99,7 +99,7 @@ verdict() {  # the one summary line, and the status the hook returns
 # The drills are independent of one another (each works in its own mktemp directory and builds its own exe), and the
 # Blender-backed ones took the gate from a minute to 25 in sequence: they run AT ONCE, each into its own log, and the
 # logs are printed in declaration order; each worker reports progress and records its duration when it finishes.
-BG_LOGS=$(mktemp -d); bg_n=0; declare -a BG_LABEL BG_PID BG_T0
+BG_LOGS=$(mktemp -d); bg_n=0; declare -a BG_LABEL BG_PID BG_T0; LANE_STEPS=()   # assigned, not only declared: set -u counts an unassigned array as unbound
 export TMPDIR="$BG_LOGS"   # every step's mktemp lands under the gate's own directory: what an abort has to find (gate_abort)
 run_bg() {  # run_bg <label> <command...>: started now, judged by run_bg_wait
   local label="$1"; shift; local log="$BG_LOGS/$bg_n"
@@ -112,10 +112,38 @@ run_bg() {  # run_bg <label> <command...>: started now, judged by run_bg_wait
   ) &
   BG_PID[$bg_n]=$!; bg_n=$((bg_n + 1))
 }
+# THE LANE (2026-10-29): the source guards are shell scripts that fork for a living (a find, a perl, a grep per file),
+# and twenty-five such steps at once did not overlap, they queued on process creation - the member-shape gate took
+# 544 s beside the others where it takes 99 s alone, and the whole block outlasted the sequence it replaced. The guards
+# run IN SEQUENCE on one background lane beside the drills (which are Mono and Python compute, not forks): each lane
+# step is judged exactly as a run_bg step is - its own log, exit code, duration and PROGRESS note - and the lane's wall
+# hides under the longest drill's.
+run_lane() {  # run_lane <label> <command...>: queued on the lane; run_lane_go starts it
+  local label="$1"; shift
+  BG_LABEL[$bg_n]="$label"; BG_T0[$bg_n]=$(date +%s); BG_PID[$bg_n]=""
+  printf '%s\0' "$@" > "$BG_LOGS/$bg_n.cmd"; LANE_STEPS+=("$bg_n"); bg_n=$((bg_n + 1))
+}
+run_lane_go() {  # the queued lane steps, one after another, in one background job
+  [ "${#LANE_STEPS[@]}" -gt 0 ] || return 0
+  local steps=("${LANE_STEPS[@]}") i; LANE_STEPS=()
+  ( local cmd t0 t1 rc
+    for i in "${steps[@]}"; do
+      mapfile -d '' -t cmd < "$BG_LOGS/$i.cmd"
+      t0=$(date +%s); echo "$t0" > "$BG_LOGS/$i.t0"
+      timeout -k 30 "$STEP_TIMEOUT" "${cmd[@]}" > "$BG_LOGS/$i.out" 2>&1; rc=$?; t1=$(date +%s)
+      echo "$t1" > "$BG_LOGS/$i.end"
+      note "$(word "$rc") ${BG_LABEL[$i]} ($((t1 - t0)) s)"
+      echo "$rc" > "$BG_LOGS/$i.rc"
+    done ) &
+  local pid=$!
+  for i in "${steps[@]}"; do BG_PID[$i]=$pid; done
+}
 run_bg_wait() {
-  local i t1 completed rc
+  local i t1 completed rc t0
+  run_lane_go   # a lane nobody started runs now, so no queued step is ever forgotten
   for ((i = 0; i < bg_n; i++)); do
-    wait "${BG_PID[$i]}"
+    [ -z "${BG_PID[$i]}" ] || wait "${BG_PID[$i]}" 2>/dev/null   # a lane's pid is shared by its steps: waited once, then already gone
+    t0=$(cat "$BG_LOGS/$i.t0" 2>/dev/null); [[ "$t0" =~ ^[0-9]+$ ]] && BG_T0[$i]=$t0   # a lane step's clock starts when its turn comes
     t1=$(cat "$BG_LOGS/$i.end" 2>/dev/null)
     # Missing completion metadata is also a failed worker, never a fabricated success.
     completed=1
@@ -167,50 +195,51 @@ run_bg "parallel gate regression tests (completion, paths and verdicts)" python 
 run_bg "blender oracle tests (the recorded Blender oracle: keyed by its inputs, stale-aware, replayable)" python "$ROOT/Tests/test_blender_oracle.py"
 run_bg_wait
 
-# ---- EVERYTHING ELSE RUNS AT ONCE (2026-10-29) ----
-# The source guards, the remaining Python test files and the drills are independent of one another: each reads the tree or works
-# in its own mktemp directory, and none writes into the checkout (the reader-gate drill plants in a COPY of the tree
-# since this date). In sequence the guards alone took nine minutes before the first drill started, and the gate's wall
-# was those nine plus its longest drill; now the wall is the longest step. The logs are printed in declaration order
-# when the last one ends (run_bg_wait), so a failure's output is still found under its heading.
+# ---- THE GUARD LANE BESIDE THE DRILLS (2026-10-29) ----
+# The source guards and the small Python test files are queued on the lane (run_lane: in sequence, one background job);
+# the drills and the Unity-backed checks start at once (run_bg). Each works in its own mktemp directory or reads the
+# tree only (the reader-gate drill plants in a COPY of the tree since this date). Before this date the guards ran in
+# sequence BEFORE the first drill started, nine minutes the drills then followed; now the lane runs under them.
+# The logs are printed in declaration order when the last one ends (run_bg_wait), so a failure's output is still
+# found under its heading.
 # 3) docs guard — relative links resolve, docs/notes/ banners present, no flat-wiki basename collisions. The docs
 #    publish to the repo, the Pages site AND the wiki, all resolving relative links, so one bad move breaks three.
-run_bg "docs guard (links + notes convention)" bash "$ROOT/tools/check-docs.sh"
+run_lane "docs guard (links + notes convention)" bash "$ROOT/tools/check-docs.sh"
 
 # 3b) binding-catalog SURFACE — bindcheck proves the catalog RESOLVES against the game; this proves it COVERS the code.
 #     Pure source analysis (no game DLLs), so it belongs in the fast gate; bindcheck stays on the game-update trigger.
-run_bg "binding catalog surface (every by-name site catalogued)" bash "$ROOT/tools/check-catalog.sh"
+run_lane "binding catalog surface (every by-name site catalogued)" bash "$ROOT/tools/check-catalog.sh"
 
 # 3c) hot path — nothing Plugin.Update() runs every frame may still call itself a SPIKE (a label that outlives its
 #     experiment is how 1,350 µs/frame hid for weeks). EXPERIMENTAL is allowed only when it names its config gate.
-run_bg "hot path (no shipped spikes in Update)" bash "$ROOT/tools/check-hot-path.sh"
+run_lane "hot path (no shipped spikes in Update)" bash "$ROOT/tools/check-hot-path.sh"
 
 # 3d) parse shape — `float x = D; TryParse(…, out x)` silently overwrites D with 0. Four sites carried it before
 #     2026-08-23; two were live and NOTHING else could see them (no throw, no log, a plausible number). Source-only.
-run_bg "parse shape (no dead-default TryParse)" bash "$ROOT/tools/check-parse-shape.sh"
+run_lane "parse shape (no dead-default TryParse)" bash "$ROOT/tools/check-parse-shape.sh"
 
 # 3e) member shape — the same bug class one layer down: `bool x = true; try { x = Convert.ToBoolean(GetMember(…)) }
 #     catch {}`. GetMember returns null for a renamed member and Convert.To*(null) does NOT throw, so the catch
 #     never runs and the default is dead. Two live sites then did `if (!x) continue;` — work skipped forever.
-run_bg "member shape (no dead-sentinel Convert(GetMember))" bash "$ROOT/tools/check-member-shape.sh"
+run_lane "member shape (no dead-sentinel Convert(GetMember))" bash "$ROOT/tools/check-member-shape.sh"
 
 # 3f) the gate that tests 3b and 3e — plants a null-guarded reader wrapper under an unknown name plus the shapes
 #     those gates exist to catch, and FAILS if either gate passes. Their helper lists are hand-maintained; a review of
 #     PR #48 (2026-09-14) showed a 3-line body window let exactly this wrapper through. Source-only; it plants in
 #     its own copy of the tree, so it runs beside the gates it tests.
-run_bg "reader-gate drill (the gates refuse an unknown wrapper)" bash "$ROOT/tools/drill-reader-gates.sh"
+run_lane "reader-gate drill (the gates refuse an unknown wrapper)" bash "$ROOT/tools/drill-reader-gates.sh"
 
 # 4) registry schema parity — IN-REPO since 2026-08-24. The authoring tools moved from the ENCReload Unity project
 #    into editor/, so both halves of the contract now live here: the guard compares the plugin's Newtonsoft + regex
 #    parse against the baker's ModelDef with no sibling checkout, no best-effort [SKIP] branch, and no direction it
 #    can only be checked from. That [SKIP] used to fire on every runner, which is exactly how a plugin-side change
 #    went unguarded until somebody happened to push the other repo.
-run_bg "registry schema parity" bash "$ROOT/tools/check_schema_parity.sh"
+run_lane "registry schema parity" bash "$ROOT/tools/check_schema_parity.sh"
 
 # 5) editor source guards — also in-repo since the move. Both guard editor/, so they belong with it.
 # CI had this one and the hook did not (2026-10-12): a vehicle_rig.py helper change passed the hook and failed after the push.
-run_bg "vehicle lab math tests (oar calibration guard)" python "$ROOT/Tests/test_vehicle_rig_math.py"
-run_bg "recipe migration tests (a Vehicle Lab recipe across a Model Workshop fuse)" python "$ROOT/Tests/test_recipe_migrate.py"
+run_lane "vehicle lab math tests (oar calibration guard)" python "$ROOT/Tests/test_vehicle_rig_math.py"
+run_lane "recipe migration tests (a Vehicle Lab recipe across a Model Workshop fuse)" python "$ROOT/Tests/test_recipe_migrate.py"
 #    5a) The editor compiles. Roslyn against Unity's own reference assemblies — the ONE check that needs a licensed
 #        Unity install (UnityEditor.dll + the MonoBleedingEdge profile), so it stays hook-only and never runs in CI.
 # No guard: the script itself fails LOUD when Unity/dotnet/Newtonsoft are absent. The old guard here was
@@ -230,9 +259,9 @@ run_bg "backup dedup drill (BackupDedup on real files: unchanged means the bytes
 run_bg "GLB reader drill (every registry GLB read; a sample compared with the Blender record; SKIP without the project or the record)" bash "$ROOT/tools/glb_reader_drill.sh"
 run_bg "GLB writer drill (every registry GLB written, read back equal; a sample as the Blender record imports it; SKIP without the project or the record)" bash "$ROOT/tools/glb_writer_drill.sh"
 run_bg "vehicle probe drill (the Lab's probe in C#: every source probed, a sample's rows equal to Blender's own probe, from the record)" bash "$ROOT/tools/vehicle_probe_drill.sh"
-run_bg "vehicle probe comparator tests (diagnostic rows must be complete)" python "$ROOT/Tests/test_compare_vehicle_probe.py"
+run_lane "vehicle probe comparator tests (diagnostic rows must be complete)" python "$ROOT/Tests/test_compare_vehicle_probe.py"
 run_bg "native kernels drill (the probe's C++ kernels: hafkernels.dll equal to a fresh build of native/, and every output hash on every recipe source equal to the managed twins'; SKIP without g++)" bash "$ROOT/tools/native_kernels_drill.sh"
-run_bg "vehicle probe jobs tests (the recipes' arguments as the Lab formats them)" python "$ROOT/Tests/test_probe_jobs.py"
+run_lane "vehicle probe jobs tests (the recipes' arguments as the Lab formats them)" python "$ROOT/Tests/test_probe_jobs.py"
 run_bg "mesh layout drill (Blender's vertex and edge order in C#: a sample's edge lists equal to Blender's own, from the record)" bash "$ROOT/tools/decimate_drill.sh"
 run_bg "prep drill (the reduce plus the glTF exporter's mesh layout in C#: a sample equal to what Blender's prep_model.py wrote, from the record)" bash "$ROOT/tools/prep_drill.sh"
 run_bg "deploy drill (from the Blender record: Blender's posed state of an imported animation in C#: every object matrix and evaluated property at up to thirteen frames equal to Blender's own, the sign of a zero included; and deploy_convert.py's decisions and the armature it builds - its log, its parts, its bones at rest, its anchors and the scene it leaves - against the script itself, run up to the bake, and then the bake: every key of the action to the bit)" bash "$ROOT/tools/deploy_drill.sh"
@@ -241,15 +270,16 @@ run_bg "rig_anim drill (step (a) the stage dump, from the Blender record: Blende
 run_bg "vehicle_rig drill (all five ported stages and the Generate wrapper: saved recipes and fixtures against the Blender record, GLB bytes and ordered logs, damaged-evidence rejection; SKIP without the record or the recipes)" bash "$ROOT/tools/vehiclerig_drill.sh"
 #    5b) The ownership-rebase hand-lists. A field the UI edits but the window's rebase doesn't re-apply is thrown
 #        away on every Save — silent, and the reason this gate exists. Pure source analysis, so CI can run it too.
-run_bg "hand-list gate (ownership rebases)" bash "$ROOT/tools/check_handlists.sh"
+run_lane "hand-list gate (ownership rebases)" bash "$ROOT/tools/check_handlists.sh"
 
 #    5c) Every path in editor/ has a COMMITTED .meta. Unity generates missing ones under Assets/ and cannot in a
 #        package folder, so the working copy is always right and only the commit is short — invisible from the
 #        authoring side by construction. Broke the install three times on 2026-08-24 (package.json + asmdef, then
 #        HafPackageContext.cs, then the Plugins FOLDER); an ignored asmdef means the package compiles to nothing.
-run_bg "package meta (every editor/ path has one)" bash "$ROOT/tools/check-package-meta.sh"
-run_bg "bake-test golden checksums (SKIP without the project)" bash "$ROOT/tools/check-goldens.sh"
-run_bg "exit status (no gate script reads a status from the end of a pipeline)" bash "$ROOT/tools/check-exit-status.sh"
+run_lane "package meta (every editor/ path has one)" bash "$ROOT/tools/check-package-meta.sh"
+run_lane "bake-test golden checksums (SKIP without the project)" bash "$ROOT/tools/check-goldens.sh"
+run_lane "exit status (no gate script reads a status from the end of a pipeline)" bash "$ROOT/tools/check-exit-status.sh"
+run_lane_go
 run_bg_wait
 
 verdict; exit $?

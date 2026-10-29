@@ -227,8 +227,12 @@ def dependencies(root, items):
     any drill's fixture generator staled every drill's record and cost a 20-minute refresh): the closure is what Blender
     can execute for this invocation, and nothing else can change its output."""
     import subprocess
+    # not the hook's repository: git exports GIT_DIR (and sometimes GIT_WORK_TREE, GIT_INDEX_FILE) to a pre-push hook,
+    # and `git -C <root>` would then list THAT repository's files for any root (the oracle tests' temp repositories
+    # listed nothing under the hook, 2026-10-29); the root names the repository
+    env = {k: v for k, v in os.environ.items() if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")}
     listing = subprocess.run(["git", "-c", "safe.directory=" + root, "-C", root, "ls-files", "-z", "--", "*.py"],
-                             capture_output=True, check=True).stdout
+                             capture_output=True, check=True, env=env).stdout
     tracked = {}
     for rel in listing.decode("utf-8", "surrogateescape").split("\0"):
         if rel: tracked[os.path.normcase(os.path.abspath(os.path.join(root, rel)))] = os.path.join(root, rel).replace("\\", "/")

@@ -121,19 +121,27 @@ starting two gates at once and interrupting the first.
 
 | Surface | `tools/check.sh` (pre-push hook) | also in CI | ~time |
 |---|---|---|---|
-| **Runtime + shared contract** | `dotnet build` · `dotnet test` · docs guard · binding-catalog surface · hot path · parse shape · member shape · reader-gate drill · schema parity | all source-only checks | the build and tests first (seconds); the guards beside the drills |
-| **Editor package** | Roslyn editor compile-check · registry engine drill · backup dedup drill · blender exit drill (refresh only) · GLB reader drill · GLB writer drill · vehicle probe drill · mesh layout, prep and deploy drills · Workshop compaction drill · rig_anim and vehicle_rig drills · schema parity · hand-list gate | parity + hand-list; compile check and drills stay local | EVERYTHING AT ONCE: the longest step's time |
+| **Runtime + shared contract** | `dotnet build` · `dotnet test` · docs guard · binding-catalog surface · hot path · parse shape · member shape · reader-gate drill · schema parity | all source-only checks | the build and tests first (seconds); the guards on a lane beside the drills |
+| **Editor package** | Roslyn editor compile-check · registry engine drill · backup dedup drill · blender exit drill (refresh only) · GLB reader drill · GLB writer drill · vehicle probe drill · mesh layout, prep and deploy drills · Workshop compaction drill · rig_anim and vehicle_rig drills · schema parity · hand-list gate | parity + hand-list; compile check and drills stay local | the drills AT ONCE, the lane beside them: the longest one's time |
 
-**Since 2026-10-11 the drills run concurrently, and since 2026-10-29 everything after the build does.** The drills
-are independent (each works in its own temp directory and builds its own exe), so `check.sh` starts them together
-(`run_bg`), each into its own log, and prints the logs in declaration order. Each worker records its elapsed time and
-reports progress as soon as it finishes; the wall time is the longest step's. Measured on the deploy port's branch:
-870 s where the sequence took about 1,500. Until 2026-10-29 the source guards still ran in sequence BEFORE the drills
-started - nine minutes of `check-member-shape.sh`, `drill-reader-gates.sh` and their kin on a tree of 340 C# files -
-and the gate's wall was those nine plus the deploy drill's ten. Now the build and the unit tests run first (they are
-what everything else assumes) and every other step starts at once; the reader-gate drill, which plants a wrapper in
-`Patches/` and runs the catalog and member-shape gates against it, plants in a COPY of the tree (`git ls-files` of the
-C# sources and `tools/` into its temp folder) so it runs beside the very gates it tests and no gate ever sees its plant. Inside the deploy drill the ~160 single-job
+**Since 2026-10-11 the drills run concurrently, and since 2026-10-29 the source guards run on a lane beside them.**
+The drills are independent (each works in its own temp directory and builds its own exe), so `check.sh` starts them
+together (`run_bg`), each into its own log, and prints the logs in declaration order. Each worker records its elapsed
+time and reports progress as soon as it finishes; the wall time is the longest step's. Measured on the deploy port's
+branch: 870 s where the sequence took about 1,500. Until 2026-10-29 the source guards still ran in sequence BEFORE the
+drills started - nine minutes of `check-member-shape.sh`, `drill-reader-gates.sh` and their kin on a tree of 340 C#
+files - and the gate's wall was those nine plus the deploy drill's ten. Now the build and the unit tests run first
+(they are what everything else assumes), the two test files that time subprocesses next (beside each other only: under
+the drills they time out), and then the guards and the small Python tests run in sequence on ONE background lane
+(`run_lane` / `run_lane_go`, each step judged like a `run_bg` step) while the drills run at once. A lane, not a block:
+the guards are shell scripts that fork for a living, and twenty-five such steps at once queued on Windows process
+creation instead of overlapping (the member-shape gate took 544 s beside the others where it takes 99 s alone, and
+the block outlasted the sequence it replaced). The two shape gates also stopped forking per file: `tools/shape-scan.pl`
+runs their unchanged regexes over every file in one perl (member shape 99 s to under 5, parse shape 67 s to under 5,
+and the reader-gate drill, which runs the member gate three times, 226 s to well under a minute). The reader-gate drill,
+which plants a wrapper in `Patches/` and runs the catalog and member-shape gates against it, plants in a COPY of the
+tree (`git ls-files` of the C# sources and `tools/` into its temp folder) so it runs beside the very gates it tests and
+no gate ever sees its plant. Inside the deploy drill the ~160 single-job
 tamper replays (one drill run per mutated dump) run eight at a time up front (`prerun_tampers`, `DEPLOY_PAR`), and
 every loop requires an exact exit code from `$PAR/<dump name>.rc` plus its expected diagnostic. Jobs and dump paths
 are passed as NUL-delimited arguments, preserving spaces and quotes. `Tests/test_parallel_gate.py` exercises these
