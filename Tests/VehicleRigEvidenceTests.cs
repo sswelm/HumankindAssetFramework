@@ -73,6 +73,17 @@ public class VehicleRigEvidenceTests
         var plainSeal = Seal(rows);   // a seal that hashed the folder in: the dump does not write one, and it cannot verify after a move
         Assert.Throws<InvalidDataException>(() => Parse(plainSeal.Select(r => r.Replace("C:/one/tmp.a", "C:/three/tmp.c")).ToList()));
     }
+    [Theory]
+    [InlineData("duplicate")][InlineData("misplaced")][InlineData("empty")]
+    public void Work_header_must_be_unique_nonempty_and_second_even_with_a_valid_seal(string shape)
+    {
+        const string work = "C:/one/tmp.a/work_0";
+        var rows = Fixture();
+        if (shape == "misplaced") rows.Insert(3, "WORK\t" + work);
+        else rows.Insert(1, "WORK\t" + (shape == "empty" ? "" : work));
+        if (shape == "duplicate") rows.Insert(2, "WORK\tC:/other/tmp/work_1");
+        Assert.Throws<InvalidDataException>(() => Parse(SealWithoutWork(rows, shape == "empty" ? "" : work)));
+    }
     [Fact] public void Intact_evidence_passes() => Assert.True(Parse(Fixture()).Completed);
     [Theory]
     [InlineData("NODE")][InlineData("SKIN")][InlineData("IBM")][InlineData("MESH")][InlineData("PRIM")]

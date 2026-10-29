@@ -106,6 +106,10 @@ public sealed class VehicleRigDump
             if (!Width.TryGetValue(t[0], out int w)) throw new InvalidDataException($"the dump has an unknown row kind '{t[0]}'");
             if (t.Length != w) throw new InvalidDataException($"{t[0]} row has {t.Length} fields, {w} expected");
         }
+        var workHeaders = rows.Where(t => t[0] == "WORK").ToList();
+        if (workHeaders.Count > 1 || (workHeaders.Count == 1 &&
+            (rows[1] != workHeaders[0] || string.IsNullOrWhiteSpace(workHeaders[0][1]))))
+            throw new InvalidDataException("WORK must be one nonempty header immediately after JOB");
         var done = rows.Where(t => t[0] == "DONE").ToList();
         if (done.Count == 0) throw new InvalidDataException("the dump has no DONE row");
         if (done.Count != 1 || done[0][1] != d.Key || rows[rows.Count - 1] != done[0]) throw new InvalidDataException("the dump must end with exactly one matching DONE row");

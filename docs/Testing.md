@@ -4,7 +4,7 @@ HAF is verified in **three tiers**, each a machine, each at the level where its 
 
 | Tier | Runs | Guards |
 |---|---|---|
-| **Unit tests** — **1,621 as of 2026-10-13** (`dotnet test` prints the live number; this one drifts) | `dotnet test`, the pre-push gate, CI | the pure logic: registry/parse/era, pack resolution + merge + tuning tables, pose math, dial config, the session-state rule, the smoke **verdict and classifiers**, and since 09-14 the kernels behind the game-touching code: the descriptor repoint, the multi-mesh quad estimator + partition, the district density boost, the Vehicle Lab's probe-row parser |
+| **Unit tests** — **2,244 as of 2026-10-29** (`dotnet test` prints the live number; this one drifts) | `dotnet test`, the pre-push gate, CI | the pure logic: registry/parse/era, pack resolution + merge + tuning tables, pose math, dial config, the session-state rule, the smoke **verdict and classifiers**, and since 09-14 the kernels behind the game-touching code: the descriptor repoint, the multi-mesh quad estimator + partition, the district density boost, the Vehicle Lab's probe-row parser |
 | **Headless game checks** | `tools/check-catalog.sh` in the push gate; `tools/check-bindings.sh` on demand / after a game update | **two halves of one claim**: `check-catalog.sh` proves the catalog **covers the code** (every by-name literal at a reflection site is catalogued or allowlisted with a reason), `bindcheck` proves it **resolves** against the real DLLs; `typeprobe --find` / `--exact` locate a seam or a member's owner before a binding is written |
 | **In-game smoke test** — `[load]` automatic, `[full]` on the F8 button | every load (a few ms, once), and on request | the injecting half, read from the **engine**: bindings, registry, roles, assets, sounds, files, GPU budget, district tiles and textures, patched seams — and, on the button, every live pawn on *our* skeleton, pose-hook liveness, the sub-pawn walk vs a scene scan, the write-back self-test |
 
@@ -56,10 +56,12 @@ the invocation's raw output, exit code and output folders from a RECORD and runs
 shapes it - the same samples, shards and fixtures - and writes the record; **live** runs Blender and stores nothing (the
 behaviour before, for `FULL=1` investigations). The record lives under `HAF_BLENDER_ORACLE` (default
 `<modding project>/Tools/blender_oracle`, self-ignored by git), one folder per drill and invocation, and is KEYED by
-what the invocation depends on (`tools/blender-oracle/oracle.py`): the dump script, the Blender script under test, every
-input file's bytes, the job and shard lists (their text, with every file they name hashed by content too) and the literal
-arguments - never a path, so a record made in one temp folder replays in another, the temp paths inside it stored as
-placeholders. A replay whose key differs names the item that changed (`the record for deploy/export_0 is STALE:
+what the invocation depends on (`tools/blender-oracle/oracle.py`): declared input bytes, nested job/shard lists
+(including paths in JSON keys), external glTF/GLB buffers and images, the actual Blender argument vector, the wrapper,
+and a conservative set of tracked Python support files under `tools/` and `editor/Tools~/`. Paths under the run's temp
+folder and checkout are normalized, so these prefixes may move while input content and literal arguments remain
+significant. Output arguments stay literals even when Blender creates the named file. The wrapper checks the inputs
+before and after recording and refuses to publish a record if they changed during Blender's run. A replay whose key differs names the item that changed (`the record for deploy/export_0 is STALE:
 @WTMP@/deploy_fixtures/x.glb changed`) and the drill SKIPs, which the gate counts as a failure: a changed source, recipe,
 fixture or Blender script cannot pass on a stale record, and the push says to refresh. What a drill compares is
 unchanged - its C# side still runs on every push against Blender's rows, bytes and folders; only Blender's part of the
@@ -68,12 +70,23 @@ with the refresh only. One dump had to learn this: the vehicle_rig dump seals ev
 rows name the folder the run wrote under (and a stop names the fixtures beside it), so a replayed record failed every
 seal - the dump now writes a `WORK` row and seals the rows with every spelling of the folder above it, the run's temp
 root, as `@TMP@` (`VehicleRigDump.WithoutWork`; the tamper helper `missing_vehiclerig.py` re-seals the same way;
-`Tests/VehicleRigEvidenceTests.cs` moves a sealed dump to another temp root). `Tests/test_blender_oracle.py` (in the gate and in CI) holds the store - a record replays in another
-temp folder with its paths and folders put back, a changed model named in a jobs list refuses and names the file, a
-changed argument or script refuses, a record never made refuses, the key ignores the temp folder and slashes, and the
-wrapper turns a refusal into the SKIP while `live` runs the given executable untouched. Not covered: a record that
-Blender itself made wrong stays wrong until the next refresh - the record is Blender's answer, the refresh is when it is
-asked.
+`Tests/VehicleRigEvidenceTests.cs` moves a sealed dump to another temp root). A `WORK` header, when present, must
+be unique, nonempty and second after `JOB`, even if the evidence seal was recomputed.
+
+**Record format 2 requires one refresh of older records.** Run `bash tools/refresh_blender_oracle.sh` after this update.
+The store checksums metadata, raw output and every output artifact before restoring anything. It refuses unexpected,
+missing or corrupt payloads, changed output-folder requests, and paths or links outside the run's output scope. A folder
+recorded as absent removes a leftover folder during replay. A refresh stages its complete replacement before retiring
+the previous record, preserving the old record when writing fails. These checks detect corruption; the local store is
+not an authenticated source. Stdout relocation preserves literal placeholder text, Unicode paths and non-UTF-8 bytes.
+
+`Tests/test_blender_oracle.py` runs 34 cases in the gate and CI, covering dependency changes, typed arguments, recursive
+lists, external assets, relocation, integrity, containment, recorded absence, failed refreshes, changing inputs, and the
+shell wrapper's modes, parallel shards, caller variables and isolated child Git repositories under hooks. Blender stderr is captured separately and appended after
+stdout, so diagnostics cannot interrupt machine-readable rows. The record remains Blender's answer: a wrong answer from Blender stays
+wrong until the next refresh. Dependency discovery covers the declared inputs and known resources described above;
+new kinds of dynamically loaded resource need to be declared by their drill.
+
 
 **One gate at a time, and no step runs forever (2026-10-12).** Two gates on one machine — two sessions pushing, or a
 push beside a drill run — failed each other for weeks: the reader-gate drill's plant vanished under the other gate, and

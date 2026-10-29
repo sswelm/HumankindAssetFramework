@@ -16,6 +16,12 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   Tools/blender_oracle, keyed by the dump script, the Blender script under test and the input files' bytes; the push
   replays the record. A missing or stale record is a SKIP that names what changed and fails the push. The C# side of
   every drill still runs on every push against Blender's recorded rows, bytes and folders.
+  Review closes stale-key gaps for actual arguments, shared Python helpers, recursive lists and external glTF assets.
+  Format 2 checksums metadata and payloads, confines restoration to requested output folders, reproduces absent folders,
+  preserves literal markers and arbitrary stdout bytes, and stages refreshes without discarding the previous record on
+  failure. Changed inputs during recording refuse publication. Earlier records require one refresh. Vehicle dump WORK
+  headers are checked for position, uniqueness and content even with a valid seal. Diagnostics are collected separately
+  before appending to stdout, so warnings cannot split data rows.
 - **THE BAKE TESTS SAY WHICH KERNELS THEY RAN (2026-10-28).** The whole window went green (252 passed) with the C++
   kernels loaded, but nothing in the report said so - a stale or missing hafkernels.dll would have made every row a
   managed run that still passed. A Kernels dropdown now picks what the rows that can reach a kernel exercise: the C++
