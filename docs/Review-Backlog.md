@@ -612,6 +612,12 @@ worker's fault stops the others and is rethrown as itself, the preview copies me
 goes blank after a failed Generate although the old GLB is kept; `BlenderAvailable()` is now `File.Exists` for all 17 callers
 (a .cmd shim reads as "no Blender"); detection is polled on repaint; the "80 export probes" / "11 plants" of #187 rest on
 tooling that is not committed; fixtures missing an X-axis sail yard or flag axis and trails + gun + recoil at elevation 0.
+The byte-comparison skip bit on 2026-10-20: the rig_anim drill's S5_XGLB_sha tamper was seeded on the first dumped job, and
+the fused galley (23 images, one re-encoded by Blender) is a job whose GLB bytes the model does not compare - the flipped hash
+passed as intact and the gate said so. Fixed on master (64e31cc, 2026-10-29): the tamper is seeded on an image-free export
+block with its own control (jobs_sha.txt / intact_sha.txt), and the drill asserts that control's GLB bytes were compared. Still OPEN: a
+re-encoded image skips the whole file's bytes rather than the image's; the fix is to compare everything but the image payloads,
+as the Generate acceptance already does (ImageEncodingDifference).
 The probe on all cores DONE 2026-10-19 (the user, after a reviewer's remark that the probe was not optimised): measured
 first - the BVH build, the inside-out verdict and the part meshes ran on one core, and the island walk's `HashSet<long>` used
 long's own hash (2.1 s on a 72k grid); every phase now parallel or bucketed, every row byte-identical on the 84 drill inputs,

@@ -126,6 +126,23 @@ class OracleStoreTests(unittest.TestCase):
         kc = run("key", "--wtmp", a.wtmp.replace("/", "\\"), "--", *[i.replace("/", "\\") for i in a.items()]).stdout.strip()
         self.assertEqual(ka, kb); self.assertEqual(ka, kc); self.assertEqual(len(ka), 32)
 
+    def test_a_script_checked_out_with_crlf_replays_a_record_made_with_lf(self):
+        # core.autocrlf gives the same commit LF files in one checkout and CRLF in another; the record must answer in both,
+        # while a changed line still refuses (.py and .sh alike)
+        a = Run(self.tmp, "runA")
+        script = self.tmp / "dump.py"; write(script, "print(1)\nprint(2)\n")
+        wrapper = self.tmp / "wrap.sh"; write(wrapper, "echo 1\necho 2\n")
+        run("store", *self.store_args(a), "--rc", "0", "--", str(script), str(wrapper), *a.items())
+        script.write_bytes(b"print(1)\r\nprint(2)\r\n"); wrapper.write_bytes(b"echo 1\r\necho 2\r\n")
+        l = run("load", *self.store_args(a), "--", str(script), str(wrapper), *a.items())
+        self.assertEqual(l.returncode, 0, l.stdout); self.assertIn("RC 0", l.stdout)
+        script.write_bytes(b"print(1)\r\nprint(3)\r\n")
+        l = run("load", *self.store_args(a), "--", str(script), str(wrapper), *a.items())
+        self.assertEqual(l.returncode, 99); self.assertIn("dump.py changed", l.stdout)
+        script.write_bytes(b"print(1)\r\nprint(2)\r\n"); wrapper.write_bytes(b"echo 1\r\necho 3\r\n")
+        l = run("load", *self.store_args(a), "--", str(script), str(wrapper), *a.items())
+        self.assertEqual(l.returncode, 99); self.assertIn("wrap.sh changed", l.stdout)
+
     def test_a_record_is_replaced_whole_on_a_new_store(self):
         a = Run(self.tmp, "runA")
         run("store", *self.store_args(a), "--rc", "0", "--dirs", "out/0", "--", *a.items())
@@ -253,6 +270,44 @@ class OracleStoreTests(unittest.TestCase):
         self.assertEqual(result.returncode, 99, result.stdout + result.stderr)
         self.assertIn("buffer.txt", result.stdout)
 
+    def test_external_assets_with_script_suffixes_keep_exact_byte_fingerprints(self):
+        for container in ("gltf", "glb"):
+            for section in ("buffers", "images"):
+                for suffix in ("py", "sh"):
+                    with self.subTest(container=container, section=section, suffix=suffix):
+                        a = Run(self.tmp, "runA"); b = Run(self.tmp, "runB")
+                        for r, payload in ((a, b"\r\nX"), (b, b"\nX")):
+                            doc = {"asset": {"version": "2.0"}, section: [{"uri": "external." + suffix}]}
+                            data = json.dumps(doc).encode("utf-8")
+                            if container == "glb":
+                                data += b" " * (-len(data) % 4)
+                                data = struct.pack("<4sIIII", b"glTF", 2, 20 + len(data), len(data), 0x4e4f534a) + data
+                            (r.dir / ("scene." + container)).write_bytes(data)
+                            (r.dir / ("external." + suffix)).write_bytes(payload)
+                        result = run("store", *self.store_args(a), "--rc", "0", "--", *a.items(), a.dir / ("scene." + container))
+                        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                        result = run("load", *self.store_args(b), "--", *b.items(), b.dir / ("scene." + container))
+                        self.assertEqual(result.returncode, 99, result.stdout + result.stderr)
+                        self.assertIn("external." + suffix, result.stdout)
+
+    def test_nested_script_dependencies_normalise_endings_but_reject_changed_lines(self):
+        a = Run(self.tmp, "runA")
+        scripts = [self.tmp / "helper.py", self.tmp / "helper.sh"]
+        dependencies = self.tmp / "code.json"
+        write(dependencies, json.dumps([p.as_posix() for p in scripts]))
+        for p in scripts: p.write_bytes(b"first\nsecond\n")
+        result = run("store", *self.store_args(a), "--rc", "0", "--", *a.items(), dependencies)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for p in scripts: p.write_bytes(b"first\r\nsecond\r\n")
+        result = run("load", *self.store_args(a), "--", *a.items(), dependencies)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for p in scripts:
+            p.write_bytes(b"first\r\nchanged\r\n")
+            result = run("load", *self.store_args(a), "--", *a.items(), dependencies)
+            self.assertEqual(result.returncode, 99, result.stdout + result.stderr)
+            self.assertIn(p.name, result.stdout)
+            p.write_bytes(b"first\r\nsecond\r\n")
+
     def test_invalid_utf8_in_a_list_does_not_collapse_distinct_input_bytes(self):
         args = self.tmp / "options.txt"
         args.write_bytes(b"flag\xff"); first = run("key", "--", args)
@@ -328,6 +383,18 @@ class OracleShellTests(unittest.TestCase):
         for mode in ("record", "replay"):
             result = self.shell(mode, 'unset TMPD WTMP\noracle_init t\nTMPD="%s"; WTMP="$TMPD"\noracle_blender a "$TMPD/raw.txt" --key stable -- --background one\noracle_check\n' % self.tmp.as_posix())
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_containment_is_lexical_and_never_resolves_the_target(self):
+        # a sibling shard's os.replace next to the target made Path.resolve() spell it \\?\C:\... and the root was "not a
+        # parent": 4 of 400 parallel stores failed (2026-10-29). The check reads nothing but the parts and the link bits.
+        sys.path.insert(0, str(ORACLE.parent)); import oracle
+        root = self.tmp / "store"   # does not exist yet, like a first record's store
+        self.assertEqual(oracle.contained(root, "t/part_2"), root / "t" / "part_2")
+        self.assertEqual(oracle.contained(root, "out/0"), root / "out" / "0")
+        for bad in ("../victim", "t/../../victim", "t//x", "./t", "", "C:/x", "t/x.", "t/x "):
+            with self.assertRaises(ValueError, msg=bad): oracle.contained(root, bad)
+        with patch.object(pathlib.Path, "resolve", side_effect=AssertionError("resolved")):
+            self.assertEqual(oracle.contained(root, "t/part_2"), root / "t" / "part_2")
 
     def test_parallel_invocations_have_private_dependency_lists(self):
         for mode in ("record", "replay"):

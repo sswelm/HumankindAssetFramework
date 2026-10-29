@@ -1689,6 +1689,9 @@ public class ModelFactoryWindow : EditorWindow
             }
             if (best <= 1e-6f) return false;   // no positional data (or matrix-only nodes) → don't guess
             trueSize = best;
+            // A Vehicle Lab output (<stem>_Spin.glb) is in Blender units already and bakes right with the fix OFF (the galley
+            // at 9 units, 2026-10-20); the guess armed ON on a re-Browse and the next bake came out a hundredth of its size.
+            if (System.IO.Path.GetFileName(file ?? "").EndsWith("_Spin.glb", StringComparison.OrdinalIgnoreCase)) return false;
             return best >= 0.1f;   // metre-scale → fix ON; tiny-authored → OFF
         }
         catch { trueSize = 0f; return false; }

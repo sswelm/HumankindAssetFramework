@@ -9,7 +9,7 @@ the declared input files, nested job/shard lists, external glTF/GLB buffers and 
 and a conservative set of tracked Python support files in tools/ and editor/Tools~/. A replay whose key differs from the record's names the item that changed and
 exits 99 - the drill then SKIPs, which the gate counts as a failure, so a changed input or script cannot pass on a stale
 record. Paths under the drill's temp folder are stored as @WTMP@ and put back on replay, so a record made in one temp
-folder replays in another. Format 2 checks the record manifest and every payload file before restoring contained
+folder replays in another. Format 3 normalises script dependency line endings and checks the record manifest and every payload file before restoring contained
 outputs, including recorded absence. Literal marker text and non-UTF-8 stdout bytes round-trip without alteration.
 Old records require a one-time refresh; failed writes or changing inputs do not replace the previous record.
 
@@ -39,6 +39,14 @@ def digest_file(path):
 
 def digest_text(text):
     return hashlib.blake2b(text.encode("utf-8", "surrogateescape"), digest_size=16).hexdigest()
+
+
+def digest_script(path):
+    """A tracked script hashed with CRLF read as LF: the same commit checks out with either ending (core.autocrlf), and a
+    record made in one checkout must answer in another (2026-10-29: four editor/Tools~ scripts were LF in the main checkout
+    and CRLF in a worktree, and a push that changed none of them was STALE on all four)."""
+    with open(path, "rb") as f: data = f.read()
+    return hashlib.blake2b(data.replace(b"\r\n", b"\n"), digest_size=16).hexdigest()
 
 
 class Paths:
@@ -97,6 +105,7 @@ class Paths:
 
 
 LIST_EXT = (".txt", ".json", ".args")
+SCRIPT_EXT = (".py", ".sh")   # hashed with CRLF read as LF (digest_script)
 
 
 def as_path(item):
@@ -182,7 +191,7 @@ def describe_items(items, paths, arguments=()):
             if is_list:
                 with open(current, "r", encoding="utf-8", errors="surrogateescape") as source: text = source.read().replace("\r\n", "\n")
                 digest = digest_text(normalised_list(text, current.lower().endswith(".json"), paths))
-            else: digest = digest_file(current)
+            else: digest = digest_script(current) if not asset and current.lower().endswith(SCRIPT_EXT) else digest_file(current)
             if not top: refs[paths.key_text(os.path.abspath(current).replace("\\", "/")) + (" (external asset)" if asset else "")] = digest
             if is_list:
                 for line in text_tokens(text, current.lower().endswith(".json")):
@@ -258,7 +267,7 @@ def parse(argv):
     return op, opts
 
 
-FORMAT = 2
+FORMAT = 3   # 3 (2026-10-29): scripts keyed with CRLF read as LF
 
 
 def linked(path):
@@ -275,14 +284,18 @@ def relative_folder(value):
 
 
 def contained(root, relative):
-    root = Path(root).resolve(); target = root.joinpath(*relative.split("/"))
-    resolved = target.resolve()
-    if resolved == root or root not in resolved.parents: raise ValueError("path escapes its root: " + relative)
-    check = root
-    for part in relative.split("/"):
+    r"""root/relative, with relative checked lexically (no empty, '.', '..', drive or rooted part) and every component
+    checked for a link. Nothing is resolved: resolving the target through the filesystem raced with a sibling shard's
+    os.replace of a record next to it - Windows then spelled the target in the \\?\ form, the resolved root was "not a
+    parent", and one `store` in a few hundred parallel ones failed with "path escapes its root" (2026-10-29, 4 of 400)."""
+    parts = relative.replace("\\", "/").split("/")
+    if not parts or any(part in ("", ".", "..") or ntpath.splitdrive(part)[0] or part.endswith((".", " ")) for part in parts):
+        raise ValueError("path escapes its root: " + relative)
+    root = Path(root); check = root
+    for part in parts:
         check = check / part
         if linked(check): raise ValueError("linked path is not an oracle artifact: " + str(check))
-    return target
+    return check
 
 
 def entry_dir(opts):
