@@ -138,6 +138,45 @@ exit "$fail"
         self.assertIn("[PASS] only", result.stdout)
         self.assertIn("only-output", result.stdout)
 
+    def test_completed_metadata_cannot_leak_between_phases(self):
+        # Model failed cleanup and refusal to overwrite old files. This is independent of OS/root permissions.
+        result = self.run_shell(self.helpers()+'''
+find() { return 0; }
+run_bg first true
+run_bg_wait
+set -o noclobber
+run_bg must_fail bash -c 'exit 7'
+run_bg_wait
+exit "$fail"
+''')
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertNotIn("[PASS] must_fail", result.stdout)
+
+    def test_a_step_cannot_run_when_stale_log_cleanup_fails(self):
+        for runner in ("run_bg", "run_lane"):
+            with self.subTest(runner=runner):
+                result = self.run_shell(self.helpers()+'''
+rm() { return 1; }
+'''+runner+''' must_not_run bash -c 'echo ran > "$1/ran"' _ "$ROOT"
+run_bg_wait
+exit "$fail"
+''')
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertFalse((self.path / "ran").exists())
+                self.assertIn("cannot clear old step metadata", result.stdout)
+
+    def test_a_missing_lane_command_cannot_reexecute_the_previous_step(self):
+        result = self.run_shell(self.helpers()+'''
+run_lane first bash -c 'echo first >> "$1/order"' _ "$ROOT"
+run_lane missing bash -c 'echo missing >> "$1/order"' _ "$ROOT"
+rm "$BG_LOGS/1.cmd"
+run_bg_wait
+exit "$fail"
+''')
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("[FAIL] missing", result.stdout)
+        self.assertEqual((self.path / "order").read_text().split(), ["first"])
+
     def test_a_background_failure_cannot_be_hidden_by_a_later_success(self):
         result = self.run_shell(self.helpers()+'''
 run_bg broken bash -c 'echo broken-output; exit 7'

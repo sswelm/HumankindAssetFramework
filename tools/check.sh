@@ -101,8 +101,16 @@ verdict() {  # the one summary line, and the status the hook returns
 # logs are printed in declaration order; each worker reports progress and records its duration when it finishes.
 BG_LOGS=$(mktemp -d); bg_n=0; declare -a BG_LABEL BG_PID BG_T0; LANE_STEPS=()   # assigned, not only declared: set -u counts an unassigned array as unbound
 export TMPDIR="$BG_LOGS"   # every step's mktemp lands under the gate's own directory: what an abort has to find (gate_abort)
+prepare_step_log() {  # <log prefix> <label>: stale files from a prior phase must never stand in for this step.
+  local log="$1" label="$2"
+  if ! rm -f -- "$log.out" "$log.end" "$log.rc" "$log.t0" "$log.cmd"; then
+    printf '[FAIL] %s — cannot clear old step metadata\n' "$label"
+    note "FAIL $label (cannot clear old step metadata)"; fail=1; return 1
+  fi
+}
 run_bg() {  # run_bg <label> <command...>: started now, judged by run_bg_wait
   local label="$1"; shift; local log="$BG_LOGS/$bg_n"
+  prepare_step_log "$log" "$label" || return 1
   BG_LABEL[$bg_n]="$label"; BG_T0[$bg_n]=$(date +%s)
   local t0="${BG_T0[$bg_n]}"
   ( timeout -k 30 "$STEP_TIMEOUT" "$@" > "$log.out" 2>&1; rc=$?; t1=$(date +%s)
@@ -120,17 +128,27 @@ run_bg() {  # run_bg <label> <command...>: started now, judged by run_bg_wait
 # hides under the longest drill's.
 run_lane() {  # run_lane <label> <command...>: queued on the lane; run_lane_go starts it
   local label="$1"; shift
+  prepare_step_log "$BG_LOGS/$bg_n" "$label" || return 1
   BG_LABEL[$bg_n]="$label"; BG_T0[$bg_n]=$(date +%s); BG_PID[$bg_n]=""
-  printf '%s\0' "$@" > "$BG_LOGS/$bg_n.cmd"; LANE_STEPS+=("$bg_n"); bg_n=$((bg_n + 1))
+  if ! printf '%s\0' "$@" > "$BG_LOGS/$bg_n.cmd"; then
+    printf '[FAIL] %s — cannot write queued command\n' "$label"
+    note "FAIL $label (cannot write queued command)"; fail=1; return 1
+  fi
+  LANE_STEPS+=("$bg_n"); bg_n=$((bg_n + 1))
 }
 run_lane_go() {  # the queued lane steps, one after another, in one background job
   [ "${#LANE_STEPS[@]}" -gt 0 ] || return 0
   local steps=("${LANE_STEPS[@]}") i; LANE_STEPS=()
   ( local cmd t0 t1 rc
     for i in "${steps[@]}"; do
-      mapfile -d '' -t cmd < "$BG_LOGS/$i.cmd"
       t0=$(date +%s); echo "$t0" > "$BG_LOGS/$i.t0"
-      timeout -k 30 "$STEP_TIMEOUT" "${cmd[@]}" > "$BG_LOGS/$i.out" 2>&1; rc=$?; t1=$(date +%s)
+      cmd=()
+      if ! mapfile -d '' -t cmd < "$BG_LOGS/$i.cmd" || [ "${#cmd[@]}" -eq 0 ]; then
+        printf 'FAIL — cannot read queued command\n' > "$BG_LOGS/$i.out"; rc=2
+      else
+        timeout -k 30 "$STEP_TIMEOUT" "${cmd[@]}" > "$BG_LOGS/$i.out" 2>&1; rc=$?
+      fi
+      t1=$(date +%s)
       echo "$t1" > "$BG_LOGS/$i.end"
       note "$(word "$rc") ${BG_LABEL[$i]} ($((t1 - t0)) s)"
       echo "$rc" > "$BG_LOGS/$i.rc"

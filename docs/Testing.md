@@ -135,7 +135,9 @@ drills started - nine minutes of `check-member-shape.sh`, `drill-reader-gates.sh
 files - and the gate's wall was those nine plus the deploy drill's ten. Now the build and the unit tests run first
 (they are what everything else assumes), the two test files that time subprocesses next (beside each other only: under
 the drills they time out), and then the guards and the small Python tests run in sequence on ONE background lane
-(`run_lane` / `run_lane_go`, each step judged like a `run_bg` step) while the drills run at once. A lane, not a block:
+(`run_lane` / `run_lane_go`, each step judged like a `run_bg` step) while the drills run at once. Each launch clears
+its previous log/metadata first and fails if that cannot be done, so a later phase cannot reuse an earlier success.
+Missing or unreadable queued commands fail their own step instead of replaying a preceding command. A lane, not a block:
 the guards are shell scripts that fork for a living, and twenty-five such steps at once queued on Windows process
 creation instead of overlapping (the member-shape gate took 544 s beside the others where it takes 99 s alone, and
 the block outlasted the sequence it replaced). The two shape gates also stopped forking per file: `tools/shape-scan.pl`
@@ -148,7 +150,7 @@ no gate ever sees its plant. Inside the deploy drill the ~160 single-job
 tamper replays (one drill run per mutated dump) run eight at a time up front (`prerun_tampers`, `DEPLOY_PAR`), and
 every loop requires an exact exit code from `$PAR/<dump name>.rc` plus its expected diagnostic. The fork-free status
 reader removes only trailing LF; spaces, tabs, embedded lines and NUL cannot turn a malformed status into a valid code. Jobs and dump paths
-are passed as NUL-delimited arguments, preserving spaces and quotes. `Tests/test_parallel_gate.py` runs 26 cases covering these
+are passed as NUL-delimited arguments, preserving spaces and quotes. `Tests/test_parallel_gate.py` runs 29 cases covering these
 contracts, ordered output, failure propagation and delete-only pushes in both the hook and CI, without Unity or
 Blender. Every gate step appends `HH:MM gate PASS/FAIL <step> (N s)` to
 `PROGRESS.md` beside the worktrees (`HAF_PROGRESS` points it elsewhere; nothing fails on its absence), so a run can

@@ -27,7 +27,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   followed among the tracked files). Review parses Python syntax, handles packages and aliases, excludes prose,
   includes ambiguous candidates conservatively and falls back for computed imports. The engine stays in every key.
   UTF-16 source and read failures are guarded, and malformed whitespace/NUL status files cannot pass as valid codes.
-  The reviewed byte-exact external-asset fix from PR #220 is included.
+  Later phases clear their logs before launch and fail on cleanup errors, preventing stale completion records from
+  hiding a failed worker. Queue I/O failures cannot replay a previous command as the next step. The reviewed byte-exact
+  external-asset fix from PR #220 is included.
 - **THE PUSH GATE RUNS NO BLENDER (2026-10-28).** Nine parity drills ran Blender on every push (the deploy drill alone
   800 s). Each Blender invocation now goes through a recorded oracle: `tools/refresh_blender_oracle.sh` runs the gate
   once with Blender and stores every invocation's output, exit code and written folders under the modding project's
