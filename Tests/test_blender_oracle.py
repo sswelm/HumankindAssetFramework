@@ -270,6 +270,44 @@ class OracleStoreTests(unittest.TestCase):
         self.assertEqual(result.returncode, 99, result.stdout + result.stderr)
         self.assertIn("buffer.txt", result.stdout)
 
+    def test_external_assets_with_script_suffixes_keep_exact_byte_fingerprints(self):
+        for container in ("gltf", "glb"):
+            for section in ("buffers", "images"):
+                for suffix in ("py", "sh"):
+                    with self.subTest(container=container, section=section, suffix=suffix):
+                        a = Run(self.tmp, "runA"); b = Run(self.tmp, "runB")
+                        for r, payload in ((a, b"\r\nX"), (b, b"\nX")):
+                            doc = {"asset": {"version": "2.0"}, section: [{"uri": "external." + suffix}]}
+                            data = json.dumps(doc).encode("utf-8")
+                            if container == "glb":
+                                data += b" " * (-len(data) % 4)
+                                data = struct.pack("<4sIIII", b"glTF", 2, 20 + len(data), len(data), 0x4e4f534a) + data
+                            (r.dir / ("scene." + container)).write_bytes(data)
+                            (r.dir / ("external." + suffix)).write_bytes(payload)
+                        result = run("store", *self.store_args(a), "--rc", "0", "--", *a.items(), a.dir / ("scene." + container))
+                        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                        result = run("load", *self.store_args(b), "--", *b.items(), b.dir / ("scene." + container))
+                        self.assertEqual(result.returncode, 99, result.stdout + result.stderr)
+                        self.assertIn("external." + suffix, result.stdout)
+
+    def test_nested_script_dependencies_normalise_endings_but_reject_changed_lines(self):
+        a = Run(self.tmp, "runA")
+        scripts = [self.tmp / "helper.py", self.tmp / "helper.sh"]
+        dependencies = self.tmp / "code.json"
+        write(dependencies, json.dumps([p.as_posix() for p in scripts]))
+        for p in scripts: p.write_bytes(b"first\nsecond\n")
+        result = run("store", *self.store_args(a), "--rc", "0", "--", *a.items(), dependencies)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for p in scripts: p.write_bytes(b"first\r\nsecond\r\n")
+        result = run("load", *self.store_args(a), "--", *a.items(), dependencies)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for p in scripts:
+            p.write_bytes(b"first\r\nchanged\r\n")
+            result = run("load", *self.store_args(a), "--", *a.items(), dependencies)
+            self.assertEqual(result.returncode, 99, result.stdout + result.stderr)
+            self.assertIn(p.name, result.stdout)
+            p.write_bytes(b"first\r\nsecond\r\n")
+
     def test_invalid_utf8_in_a_list_does_not_collapse_distinct_input_bytes(self):
         args = self.tmp / "options.txt"
         args.write_bytes(b"flag\xff"); first = run("key", "--", args)
