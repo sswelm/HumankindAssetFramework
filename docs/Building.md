@@ -53,7 +53,7 @@ together. The editor package consumes the same tracked DLL from `editor/Plugins/
 (`tools/blender_oracle.sh`, keyed by the inputs' bytes); `bash tools/refresh_blender_oracle.sh` runs Blender once to make
 or renew the record, and a push whose record is missing, stale or corrupt says so and fails. Format 3 requires a
 one-time refresh of earlier records. The key includes actual Blender arguments, the Python files the scripts import or
-name (their closure, not every tracked file), recursive job lists and external glTF/GLB resources as well as declared
+name (a conservative parsed closure; computed imports use the tracked corpus), recursive job lists and external glTF/GLB resources as well as declared
 input bytes. See
 [Testing](Testing.md#the-fast-gates--two-lanes-checksh-and-ci). Blender is still needed for the editor's own uses below
 and for the Bake Tests rows that run it.

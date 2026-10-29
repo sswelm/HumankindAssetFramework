@@ -77,6 +77,36 @@ exit "$fail"
         self.assertIn("slow-output", out)
         self.assertIn("fast-output", out)
 
+    def scan_shapes(self, mode, path):
+        env = dict(self.env, SHAPE_READER_RE=r"(?:\w+\.)?(?:GetMember)\b\s*\(")
+        command = 'perl "$1" member "$SHAPE_READER_RE" "$2"' if mode == "member" else 'perl "$1" parse "$2"'
+        return subprocess.run([BASH, "-c", command, "_", (ROOT / "tools/shape-scan.pl").as_posix(), path.as_posix()],
+                              env=env, capture_output=True, text=True, timeout=15)
+
+    def test_shape_scanner_catches_utf16_source_as_well_as_utf8(self):
+        for mode, text in (("parse", 'float value = 1; float.TryParse("bad", out value);'),
+                           ("member", 'bool value = true; try { value = Convert.ToBoolean(GetMember(o,"A")); } catch {}')):
+            for encoding in ("utf-8", "utf-16", "utf-16-be"):
+                with self.subTest(mode=mode, encoding=encoding):
+                    path = self.path / "source.cs"; data = text.encode(encoding)
+                    if encoding == "utf-16-be": data = b"\xfe\xff" + data
+                    path.write_bytes(data)
+                    result = self.scan_shapes(mode, path)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn("HITS 1", result.stdout)
+
+    def test_shape_scanner_still_ignores_comments_after_decoding_utf16(self):
+        path = self.path / "source.cs"
+        path.write_bytes('// float value = 1; float.TryParse("bad", out value);'.encode("utf-16"))
+        result = self.scan_shapes("parse", path)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("HITS 0", result.stdout)
+
+    def test_shape_scanner_refuses_unreadable_source(self):
+        result = self.scan_shapes("parse", self.path / "missing.cs")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("HITS 0", result.stdout)
+
     def test_lane_steps_run_in_order_each_judged_on_its_own_beside_the_parallel_steps(self):
         result = self.run_shell(self.helpers()+'''
 run_lane first bash -c 'echo first-output; echo first > "$1/order"' _ "$ROOT"
@@ -403,6 +433,7 @@ DEPLOY_PAR=2 prerun_tampers "$ROOT/tamper inputs O'Brien"
 
     def test_cached_status_requires_the_exact_expected_code_for_controls_and_mutations(self):
         source = (ROOT / "tools/deploy_drill.sh").read_text(encoding="utf-8")
+        verdict_helper = source[source.index("read_tamper_status() {"):source.index("prerun_tampers() {")]
         controls = source[source.index("for control in missing exit; do"):source.index("for mode in log matrix")]
         negative = source[source.index("for mode in log matrix"):source.index("for mode in exit_zero")]
         negative = negative[negative.index('  _t="$WTMP/missing_dec/$mode.txt"'):negative.rindex("done")]
@@ -410,7 +441,7 @@ DEPLOY_PAR=2 prerun_tampers "$ROOT/tamper inputs O'Brien"
         for name in ("missing_intact", "exit_intact"):
             write(par / (name+".txt"), "PASS control\n")
         write(par / "log.txt", "FAIL log line differs\n")
-        for status in (None, "", "garbage", "0\n1", "2", "-1", "valid"):
+        for status in (None, "", "garbage", "0\n1", "2", "-1", "valid", "leading_space", "trailing_space", "leading_tab", "trailing_tab", "embedded_nul", "trailing_nul"):
             for control in (True, False):
                 with self.subTest(status=status, control=control):
                     for name in ("missing_intact", "exit_intact", "log"):
@@ -418,10 +449,12 @@ DEPLOY_PAR=2 prerun_tampers "$ROOT/tamper inputs O'Brien"
                         if status is None:
                             path.unlink(missing_ok=True)
                         else:
-                            value = ("1" if name == "log" else "0") if status == "valid" else status
+                            code = "1" if name == "log" else "0"
+                            value = {"valid": code, "leading_space": " " + code, "trailing_space": code + " ",
+                                     "leading_tab": "\t" + code, "trailing_tab": code + "\t", "embedded_nul": code + "\0extra", "trailing_nul": code + "\0"}.get(status, status)
                             write(path, value+"\n" if value else "")
                     text = 'TMPD="$ROOT"; WTMP="$ROOT"; PAR="$ROOT/par"; mode=log; reason="log line"\n'
-                    result = self.run_shell(text+(controls if control else negative))
+                    result = self.run_shell(text+verdict_helper+(controls if control else negative))
                     self.assertEqual(result.returncode, 0 if status == "valid" else 1, result.stderr)
 
     def test_delete_only_hook_skips_but_updates_and_mixed_pushes_run_the_gate(self):

@@ -58,11 +58,12 @@ behaviour before, for `FULL=1` investigations). The record lives under `HAF_BLEN
 `<modding project>/Tools/blender_oracle`, self-ignored by git), one folder per drill and invocation, and is KEYED by
 what the invocation depends on (`tools/blender-oracle/oracle.py`): declared input bytes, nested job/shard lists
 (including paths in JSON keys), external glTF/GLB buffers and images, the actual Blender argument vector, the wrapper,
-and the Python files the key scripts reach - their **import closure** (`oracle.py deps`: what each imports and what each
-names as a `.py` in a whole string literal, followed, among the files git tracks). Not every tracked `.py`: the first
-format 2 keyed on all 63 of them (2026-10-29), so an edit to one drill's fixture generator staled every drill's record
-and cost a 20-minute refresh; `Tests/test_blender_oracle.py` holds the closure to a sibling import, a named chunk in
-another folder and its import, and leaves an unrelated tracked file and an untracked one alone. Paths under the run's
+and a conservative dependency closure of the Python key scripts (`oracle.py deps`), including scripts referenced by
+nested key lists. Python syntax is parsed, so aliases, inline imports, packages and relative imports are followed;
+comments and docstrings do not become dependencies. Ambiguous module names include all matching tracked candidates.
+Computed imports fall back to the tracked Python corpus; computed `exec` inputs must still be declared with `--key`.
+The wrapper and oracle engine themselves always enter the key. Unrelated tracked scripts stay outside a statically
+resolved closure, avoiding the former all-drill invalidation when one fixture generator changed. Paths under the run's
 temp folder and checkout are normalized, so these prefixes may move while input content and literal arguments remain
 significant. Output arguments stay literals even when Blender creates the named file. The wrapper checks the inputs
 before and after recording and refuses to publish a record if they changed during Blender's run. A replay whose key differs names the item that changed (`the record for deploy/export_0 is STALE:
@@ -89,7 +90,7 @@ recorded as absent removes a leftover folder during replay. A refresh stages its
 the previous record, preserving the old record when writing fails. These checks detect corruption; the local store is
 not an authenticated source. Stdout relocation preserves literal placeholder text, Unicode paths and non-UTF-8 bytes.
 
-`Tests/test_blender_oracle.py` runs 37 cases in the gate and CI, covering dependency changes and the closure's bounds, typed arguments, recursive
+`Tests/test_blender_oracle.py` runs 45 cases in the gate and CI, covering dependency changes and the closure's bounds, typed arguments, recursive
 lists, external assets, relocation, integrity, containment, recorded absence, failed refreshes, changing inputs, and the
 shell wrapper's modes, parallel shards, caller variables and isolated child Git repositories under hooks. Blender stderr is captured separately and appended after
 stdout, so diagnostics cannot interrupt machine-readable rows. The record remains Blender's answer: a wrong answer from Blender stays
@@ -138,14 +139,16 @@ the drills they time out), and then the guards and the small Python tests run in
 the guards are shell scripts that fork for a living, and twenty-five such steps at once queued on Windows process
 creation instead of overlapping (the member-shape gate took 544 s beside the others where it takes 99 s alone, and
 the block outlasted the sequence it replaced). The two shape gates also stopped forking per file: `tools/shape-scan.pl`
-runs their unchanged regexes over every file in one perl (member shape 99 s to under 5, parse shape 67 s to under 5,
-and the reader-gate drill, which runs the member gate three times, 226 s to well under a minute). The reader-gate drill,
+runs their regexes over every file in one perl (member shape 99 s to under 5, parse shape 67 s to under 5,
+and the reader-gate drill, which runs the member gate three times, 226 s to well under a minute). BOM-marked UTF-16
+source is decoded before matching; unreadable or malformed source fails the scanner rather than disappearing from it. The reader-gate drill,
 which plants a wrapper in `Patches/` and runs the catalog and member-shape gates against it, plants in a COPY of the
 tree (`git ls-files` of the C# sources and `tools/` into its temp folder) so it runs beside the very gates it tests and
 no gate ever sees its plant. Inside the deploy drill the ~160 single-job
 tamper replays (one drill run per mutated dump) run eight at a time up front (`prerun_tampers`, `DEPLOY_PAR`), and
-every loop requires an exact exit code from `$PAR/<dump name>.rc` plus its expected diagnostic. Jobs and dump paths
-are passed as NUL-delimited arguments, preserving spaces and quotes. `Tests/test_parallel_gate.py` exercises these
+every loop requires an exact exit code from `$PAR/<dump name>.rc` plus its expected diagnostic. The fork-free status
+reader removes only trailing LF; spaces, tabs, embedded lines and NUL cannot turn a malformed status into a valid code. Jobs and dump paths
+are passed as NUL-delimited arguments, preserving spaces and quotes. `Tests/test_parallel_gate.py` runs 26 cases covering these
 contracts, ordered output, failure propagation and delete-only pushes in both the hook and CI, without Unity or
 Blender. Every gate step appends `HH:MM gate PASS/FAIL <step> (N s)` to
 `PROGRESS.md` beside the worktrees (`HAF_PROGRESS` points it elsewhere; nothing fails on its absence), so a run can

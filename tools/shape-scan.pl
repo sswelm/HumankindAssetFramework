@@ -11,6 +11,8 @@
 #   perl tools/shape-scan.pl parse  <file>...
 #   perl tools/shape-scan.pl member <reader regex> <file>...
 use strict; use warnings;
+use Encode qw(decode FB_CROAK);
+binmode STDOUT, ":encoding(UTF-8)";
 
 my $mode = shift @ARGV // '';
 die "shape-scan.pl: mode parse|member\n" unless $mode eq 'parse' || $mode eq 'member';
@@ -19,8 +21,14 @@ die "shape-scan.pl: member needs the reader regex\n" if $mode eq 'member' && !de
 my $types = qr/(?:float|double|int|long|uint|ulong|short|byte|decimal|bool)/;
 my $hits = 0;
 for my $f (@ARGV) {
-    open(my $fh, '<', $f) or next;
+    open(my $fh, '<:raw', $f) or die "shape-scan.pl: cannot read $f: $!\n";
     my $s = do { local $/; <$fh> }; close $fh;
+    $s = '' unless defined $s;
+    # Roslyn accepts BOM-marked UTF-16; the former tr -d NUL pass reached its ASCII shapes too.
+    if ($s =~ s/^\xFF\xFE//) { $s = decode('UTF-16LE', $s, FB_CROAK); }
+    elsif ($s =~ s/^\xFE\xFF//) { $s = decode('UTF-16BE', $s, FB_CROAK); }
+    else { $s = decode('UTF-8', $s, FB_CROAK); $s =~ s/^\x{FEFF}//; }
+    $s =~ s/\0//g;
     # Strip comments first — the policy notes quote the banned shapes verbatim, and a gate that trips on its own
     # documentation is a gate nobody keeps. Then collapse whitespace so the two-line form reads like the one-liner.
     $s =~ s{/\*.*?\*/}{}gs; $s =~ s{//[^\n]*}{}g; $s =~ s{\s+}{ }g;

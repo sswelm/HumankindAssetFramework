@@ -58,7 +58,8 @@ oracle_prepare_dependencies() {  # <invocation name> <key item>...: the tracked 
   # The IMPORT CLOSURE of the key scripts (oracle.py deps: what they import or name as a .py, followed, among the files
   # git tracks - ignored proof projects, caches and untracked files are not Blender source dependencies). Not every
   # tracked .py (the first format 2 did that, 2026-10-29: an edit to one drill's fixture generator staled every drill's
-  # record and cost a 20-minute refresh); the closure is what Blender can execute for this invocation.
+  # record and cost a 20-minute refresh). Ambiguous names are conservative; computed imports use the tracked corpus.
+  # Computed exec inputs must be declared with --key. The engine is keyed separately so key-policy edits invalidate records.
   ORACLE_CODE="$TMPD/$stem.json"
   python "$ROOT/tools/blender-oracle/oracle.py" deps --root "$ORACLE_WROOT" -- "$@" > "$ORACLE_CODE"
   local rc=$?
@@ -100,7 +101,7 @@ oracle_blender() {
   for argument in "$@"; do argvargs+=(--arg "$argument"); done
   if [ "$ORACLE_MODE" != "live" ]; then
     oracle_prepare_dependencies "$name" "${keys[@]}"
-    keys+=("$ORACLE_CODE" "$ROOT/tools/blender_oracle.sh")
+    keys+=("$ORACLE_CODE" "$ROOT/tools/blender_oracle.sh" "$ROOT/tools/blender-oracle/oracle.py")
   fi
   case "$ORACLE_MODE" in
     live)

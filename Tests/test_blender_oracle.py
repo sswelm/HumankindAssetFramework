@@ -461,6 +461,78 @@ class OracleShellTests(unittest.TestCase):
         self.assertEqual(replay.returncode, 0, replay.stdout + replay.stderr)
         self.assertIn("rc 0", replay.stdout); self.assertIn("checked", replay.stdout)
 
+    def track_example(self, repo):
+        result = subprocess.run(["git", "-c", "safe.directory=" + repo.as_posix(), "-C", str(repo), "add", "."],
+                                env=isolated_git_env(), capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_import_syntax_cannot_hide_a_changed_python_dependency(self):
+        repo = self.example_repo(); driver = repo / "tools/example/driver.py"
+        for name, text in (("sibling.py", "VALUE=1\n"), ("pkg/__init__.py", "from . import leaf\n"), ("pkg/child.py", "from . import leaf\n"), ("pkg/leaf.py", "VALUE=1\n")):
+            write(repo / "tools/example" / name, text)
+        self.track_example(repo)
+        for code, changed in (("import helper as h, sibling\n", "sibling.py"), ("if True: import sibling\n", "sibling.py"),
+                              ("from pkg import child\n", "pkg/child.py"), ("import pkg.child\n", "pkg/leaf.py"),
+                              ("import importlib\nimportlib.import_module('sibling')\n", "sibling.py"),
+                              ("import importlib\nname='sibling'\nimportlib.import_module(name)\n", "sibling.py")):
+            with self.subTest(code=code):
+                (self.tmp / "oracle_missing").unlink(missing_ok=True)
+                write(driver, code)
+                recorded = self.shell("record", 'oracle_init t\noracle_blender a "$TMPD/raw.txt" --key "$ROOT/tools/example/driver.py" -- one\noracle_check\n', root=repo)
+                self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
+                dependency = repo / "tools/example" / changed; before = dependency.read_text(encoding="utf-8")
+                write(dependency, before + "# changed\n")
+                replay = self.shell("replay", 'oracle_init t\noracle_blender a "$TMPD/raw2.txt" --key "$ROOT/tools/example/driver.py" -- one\noracle_check\n', root=repo)
+                self.assertEqual(replay.returncode, 3, replay.stdout + replay.stderr)
+                self.assertIn(dependency.name, replay.stdout)
+                write(dependency, before)
+
+    def test_comments_and_docstrings_do_not_create_python_dependencies(self):
+        repo = self.example_repo()
+        write(repo / "tools/example/driver.py", '\"\"\"Documentation names \'unrelated.py\'.\"\"\"\n# \'unrelated.py\' is not executed\nimport helper\n')
+        recorded = self.shell("record", 'oracle_init t\noracle_blender a "$TMPD/raw.txt" --key "$ROOT/tools/example/driver.py" -- one\noracle_check\n', root=repo)
+        self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
+        write(repo / "tools/other/unrelated.py", "X=2\n")
+        replay = self.shell("replay", 'oracle_init t\noracle_blender a "$TMPD/raw2.txt" --key "$ROOT/tools/example/driver.py" -- one\noracle_check\n', root=repo)
+        self.assertEqual(replay.returncode, 0, replay.stdout + replay.stderr)
+
+    def test_ambiguous_module_names_cannot_hide_a_python_dependency(self):
+        repo = self.example_repo()
+        write(repo / "tools/other/helper.py", "VALUE=2\n"); self.track_example(repo)
+        write(repo / "tools/example/driver.py", "import os, sys\nsys.path.insert(0, os.path.join(os.path.dirname(__file__), '../other'))\nimport helper\n")
+        recorded = self.shell("record", 'oracle_init t\noracle_blender a "$TMPD/raw.txt" --key "$ROOT/tools/example/driver.py" -- one\noracle_check\n', root=repo)
+        self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
+        write(repo / "tools/other/helper.py", "VALUE=3\n")
+        replay = self.shell("replay", 'oracle_init t\noracle_blender a "$TMPD/raw2.txt" --key "$ROOT/tools/example/driver.py" -- one\noracle_check\n', root=repo)
+        self.assertEqual(replay.returncode, 3, replay.stdout + replay.stderr)
+
+    def test_the_oracle_engine_itself_is_part_of_the_record_key(self):
+        repo = self.example_repo()
+        recorded = self.shell("record", 'oracle_init t\noracle_blender a "$TMPD/raw.txt" --key "$ROOT/tools/example/driver.py" -- one\noracle_check\n', root=repo)
+        self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
+        engine = repo / "tools/blender-oracle/oracle.py"
+        write(engine, engine.read_text(encoding="utf-8") + "\n# engine changed\n")
+        replay = self.shell("replay", 'oracle_init t\noracle_blender a "$TMPD/raw2.txt" --key "$ROOT/tools/example/driver.py" -- one\noracle_check\n', root=repo)
+        self.assertEqual(replay.returncode, 3, replay.stdout + replay.stderr)
+
+    def test_python_scripts_referenced_by_key_lists_have_their_imports_followed(self):
+        repo = self.example_repo()
+        write(self.tmp / "keys.json", json.dumps([(repo / "tools/example/driver.py").as_posix()]))
+        recorded = self.shell("record", 'oracle_init t\noracle_blender a "$TMPD/raw.txt" --key "$TMPD/keys.json" -- one\noracle_check\n', root=repo)
+        self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
+        write(repo / "tools/example/helper.py", "VALUE=3\n")
+        replay = self.shell("replay", 'oracle_init t\noracle_blender a "$TMPD/raw2.txt" --key "$TMPD/keys.json" -- one\noracle_check\n', root=repo)
+        self.assertEqual(replay.returncode, 3, replay.stdout + replay.stderr)
+
+    def test_dependency_root_overrides_foreign_git_common_directory(self):
+        repo = self.example_repo(); parent = self.tmp / "foreign"; parent.mkdir()
+        result = subprocess.run(["git", "-C", str(parent), "init", "-q"], env=isolated_git_env(), capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with patch.dict(os.environ, {"GIT_COMMON_DIR": str(parent / ".git")}):
+            result = run("deps", "--root", repo, "--", repo / "tools/example/driver.py")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn((repo / "tools/example/helper.py").as_posix(), json.loads(result.stdout))
+
     def test_foreign_hook_git_context_does_not_change_its_index(self):
         parent = self.tmp / "parent"; parent.mkdir()
         write(parent / "sentinel.txt", "keep parent index unchanged")
