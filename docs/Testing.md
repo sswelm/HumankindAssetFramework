@@ -64,7 +64,11 @@ placeholders. A replay whose key differs names the item that changed (`the recor
 fixture or Blender script cannot pass on a stale record, and the push says to refresh. What a drill compares is
 unchanged - its C# side still runs on every push against Blender's rows, bytes and folders; only Blender's part of the
 work is done once, at the refresh. The blender exit drill tests Blender's own exit behaviour and has no record: it runs
-with the refresh only. `Tests/test_blender_oracle.py` (in the gate and in CI) holds the store - a record replays in another
+with the refresh only. One dump had to learn this: the vehicle_rig dump seals every job's rows with a checksum, and the
+rows name the folder the run wrote under (and a stop names the fixtures beside it), so a replayed record failed every
+seal - the dump now writes a `WORK` row and seals the rows with every spelling of the folder above it, the run's temp
+root, as `@TMP@` (`VehicleRigDump.WithoutWork`; the tamper helper `missing_vehiclerig.py` re-seals the same way;
+`Tests/VehicleRigEvidenceTests.cs` moves a sealed dump to another temp root). `Tests/test_blender_oracle.py` (in the gate and in CI) holds the store - a record replays in another
 temp folder with its paths and folders put back, a changed model named in a jobs list refuses and names the file, a
 changed argument or script refuses, a record never made refuses, the key ignores the temp folder and slashes, and the
 wrapper turns a refusal into the SKIP while `live` runs the given executable untouched. Not covered: a record that

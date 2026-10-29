@@ -22,13 +22,28 @@ Rows: the scene rows of tools/riganim-drill/scene_rows.py (SCENE, OBJ, MESH, VG,
 and K rows carry the fcurve's SLOT after the action - a slotted action repeats a data path per slot),
 and  JOB <key> / STAGE <n> / LOG <n> <a VEHICLE line the stage printed, in order; the timing lines left out> /
 EXIT <n> <code> / DIES <n> <exception> / X <a GLB row> / XDIES <why no GLB> /
-EVIDENCE <key> <preceding row count> <sha256 of UTF-8 LF rows, including final newline> / DONE <key>.
+WORK <the work folder this run wrote under> (the second row of a job) /
+EVIDENCE <key> <preceding row count> <sha256 of UTF-8 LF rows, including final newline, with every spelling of the folder
+ABOVE the WORK folder (the run's temp root, where its fixtures and names folders sit too) replaced by @TMP@ - the seal is
+the job's evidence, not the temp folder it ran in: the push gate replays this dump from a record made in another folder
+(tools/blender_oracle.sh)> / DONE <key>.
 """
-import bpy, sys, io, os, contextlib, traceback, hashlib
+import bpy, sys, io, os, contextlib, traceback, hashlib, re
 
 sys.stdout.reconfigure(encoding="utf-8")
 args = sys.argv[sys.argv.index("--") + 1:]
 script, jobs, work = args[0], args[1], args[2]
+
+
+def seal_text(rows, work):
+    """The rows as the seal hashes them: LF-joined with a final newline, the folder above the work folder (the run's
+    temp root) in either slash form and any case as @TMP@ (VehicleRigDump.WithoutWork and missing_vehiclerig.py do the same)."""
+    text = "\n".join(rows) + "\n"
+    root = os.path.dirname(work.rstrip("/\\").replace("\\", "/"))
+    forms = {root, root.replace("/", "\\")}
+    for form in sorted(forms, key=len, reverse=True):
+        text = re.sub(re.escape(form), "@TMP@", text, flags=re.IGNORECASE)
+    return text
 source = open(script, encoding="utf-8").read()
 os.makedirs(work, exist_ok=True)
 here = os.path.dirname(os.path.abspath(__file__))
@@ -86,6 +101,7 @@ for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
         evidence.append(row)
         print(row)
     emit("JOB\t%s" % key)
+    emit("WORK\t%s" % work)
     saved = sys.argv
     try:
         safe = key.replace(":", "_")
@@ -125,7 +141,7 @@ for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
         if exported:
             for r in export_rows(out_glb):
                 emit(r)
-        digest = hashlib.sha256(("\n".join(evidence) + "\n").encode("utf-8")).hexdigest()
+        digest = hashlib.sha256(seal_text(evidence, work).encode("utf-8")).hexdigest()
         print("EVIDENCE\t%s\t%d\t%s" % (key, len(evidence), digest))
         print("DONE\t%s" % key, flush=True)
     except Exception as e:

@@ -44,6 +44,35 @@ public class VehicleRigEvidenceTests
         return rows;
     }
     static VehicleRigDump Parse(List<string> rows) => VehicleRigDump.Parse(rows, Jobs(), false);
+    // the dump's own seal since 2026-10-29: the WORK row names the folder, the hash takes every spelling of the folder above it as @TMP@
+    static List<string> SealWithoutWork(List<string> rows, string work)
+    {
+        rows = rows.Where(r => !r.StartsWith("EVIDENCE\t")).ToList();
+        var recorded = rows.Take(rows.Count - 1).ToList();
+        using (var sha = SHA256.Create())
+        {
+            string text = VehicleRigDump.WithoutWork(string.Join("\n", recorded) + "\n", work);
+            string hash = BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(text))).Replace("-", "").ToLowerInvariant();
+            rows.Insert(rows.Count - 1, "EVIDENCE\ttest\t" + recorded.Count + "\t" + hash);
+        }
+        return rows;
+    }
+    [Fact] public void The_seal_leaves_the_temp_folder_out_so_a_dump_replayed_from_another_folder_verifies()
+    {
+        var rows = Fixture();
+        rows.Insert(1, "WORK\tC:/one/tmp.a/work_0");
+        rows[2] = "LOG\t1\tVEHICLE wrote C:/one/tmp.a/work_0/test/test_Spin.glb and read C:/one/tmp.a/fxwork/names.txt";
+        var sealedRows = SealWithoutWork(rows, "C:/one/tmp.a/work_0");
+        Assert.True(Parse(sealedRows).Completed);
+        // the same evidence under another temp root, in another spelling: the same seal
+        var moved = sealedRows.Select(r => r.Replace("C:/one/tmp.a", "c:\\two\\tmp.b")).ToList();
+        Assert.True(Parse(moved).Completed);
+        // but a changed row under it still fails, and the folder is not a free pass for the rows
+        var tampered = moved.Select(r => r.StartsWith("LOG\t1\t") ? r + "!" : r).ToList();
+        Assert.Throws<InvalidDataException>(() => Parse(tampered));
+        var plainSeal = Seal(rows);   // a seal that hashed the folder in: the dump does not write one, and it cannot verify after a move
+        Assert.Throws<InvalidDataException>(() => Parse(plainSeal.Select(r => r.Replace("C:/one/tmp.a", "C:/three/tmp.c")).ToList()));
+    }
     [Fact] public void Intact_evidence_passes() => Assert.True(Parse(Fixture()).Completed);
     [Theory]
     [InlineData("NODE")][InlineData("SKIN")][InlineData("IBM")][InlineData("MESH")][InlineData("PRIM")]

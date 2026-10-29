@@ -100,7 +100,7 @@ oracle_check
 t1=$(date +%s)
 n_b=0
 for ((k = 0; k < JOBS; k++)); do
-  tr -d '\r' < "$TMPD/blender_raw_$k.txt" | grep -E "^(JOB|STAGE|LOG|SCENE|OBJ|MESH|VG|BONE|PB|ACT|FC|K|EXIT|DIES|DONE|FAIL|X|XDIES|EVIDENCE)	" > "$TMPD/dump_$k.txt"
+  tr -d '\r' < "$TMPD/blender_raw_$k.txt" | grep -E "^(JOB|WORK|STAGE|LOG|SCENE|OBJ|MESH|VG|BONE|PB|ACT|FC|K|EXIT|DIES|DONE|FAIL|X|XDIES|EVIDENCE)	" > "$TMPD/dump_$k.txt"
   n_b=$((n_b + $(grep -c "^DONE" "$TMPD/dump_$k.txt")))
 done
 if [ "$brc" -ne 0 ] || [ "$n_b" -ne "$n_jobs" ]; then
