@@ -81,7 +81,8 @@ be unique, nonempty and second after `JOB`, even if the evidence seal was recomp
 Format 3 (2026-10-29) keys the tracked `.py` and `.sh` scripts with CRLF read as LF: `core.autocrlf` gives the same commit
 LF files in one checkout and CRLF in another (four `editor/Tools~` scripts were LF in the main checkout and CRLF in a
 worktree), and under format 2, which hashed their raw bytes, a worktree push that changed none of them was STALE on all
-four. Inputs other than scripts - models, lists' nested files, images - are still keyed by their bytes.
+four. Script dependencies reached through nested lists use the same normalization. Models and other binary inputs retain
+their byte hashes; external glTF/GLB buffers and images are always byte-keyed, including those named `.py` or `.sh`.
 The store checksums metadata, raw output and every output artifact before restoring anything. It refuses unexpected,
 missing or corrupt payloads, changed output-folder requests, and paths or links outside the run's output scope. A folder
 recorded as absent removes a leftover folder during replay. A refresh stages its complete replacement before retiring

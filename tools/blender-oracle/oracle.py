@@ -9,7 +9,7 @@ the declared input files, nested job/shard lists, external glTF/GLB buffers and 
 and a conservative set of tracked Python support files in tools/ and editor/Tools~/. A replay whose key differs from the record's names the item that changed and
 exits 99 - the drill then SKIPs, which the gate counts as a failure, so a changed input or script cannot pass on a stale
 record. Paths under the drill's temp folder are stored as @WTMP@ and put back on replay, so a record made in one temp
-folder replays in another. Format 2 checks the record manifest and every payload file before restoring contained
+folder replays in another. Format 3 normalises script dependency line endings and checks the record manifest and every payload file before restoring contained
 outputs, including recorded absence. Literal marker text and non-UTF-8 stdout bytes round-trip without alteration.
 Old records require a one-time refresh; failed writes or changing inputs do not replace the previous record.
 
@@ -192,7 +192,7 @@ def describe_items(items, paths, arguments=()):
             if is_list:
                 with open(current, "r", encoding="utf-8", errors="surrogateescape") as source: text = source.read().replace("\r\n", "\n")
                 digest = digest_text(normalised_list(text, current.lower().endswith(".json"), paths))
-            else: digest = digest_script(current) if current.lower().endswith(SCRIPT_EXT) else digest_file(current)
+            else: digest = digest_script(current) if not asset and current.lower().endswith(SCRIPT_EXT) else digest_file(current)
             if not top: refs[paths.key_text(os.path.abspath(current).replace("\\", "/")) + (" (external asset)" if asset else "")] = digest
             if is_list:
                 for line in text_tokens(text, current.lower().endswith(".json")):
