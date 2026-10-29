@@ -91,7 +91,7 @@ verdict() {  # the one summary line, and the status the hook returns
     note "DONE PASS ($n skipped, allowed by HAF_ALLOW_SKIP=1)"; return 0
   fi
   printf 'CHECK: FAIL — %d step(s) SKIPPED: their claim was NOT tested on this machine, and a gate that cannot see is not green:%s\n' "$n" "$list"
-  printf 'Install the missing prerequisite (Blender under Program Files; the modding project, HAF_UNITY_PROJECT), or, meaning it: HAF_ALLOW_SKIP=1 git push\n'
+  printf 'Install the missing prerequisite (the modding project, HAF_UNITY_PROJECT), refresh the Blender record (tools/refresh_blender_oracle.sh, Blender needed), or, meaning it: HAF_ALLOW_SKIP=1 git push\n'
   note "DONE FAIL ($n skipped)"; return 1
 }
 # The drills are independent of one another (each works in its own mktemp directory and builds its own exe), and the
@@ -193,6 +193,7 @@ run "registry schema parity" bash "$ROOT/tools/check_schema_parity.sh"
 
 # 5) editor source guards — also in-repo since the move. Both guard editor/, so they belong with it.
 run "parallel gate regression tests (completion, paths and verdicts)" python "$ROOT/Tests/test_parallel_gate.py"
+run "blender oracle tests (the recorded Blender oracle: keyed by its inputs, stale-aware, replayable)" python "$ROOT/Tests/test_blender_oracle.py"
 # CI had this one and the hook did not (2026-10-12): a vehicle_rig.py helper change passed the hook and failed after the push.
 run "vehicle lab math tests (oar calibration guard)" python "$ROOT/Tests/test_vehicle_rig_math.py"
 run "recipe migration tests (a Vehicle Lab recipe across a Model Workshop fuse)" python "$ROOT/Tests/test_recipe_migrate.py"
@@ -206,19 +207,24 @@ run_bg "editor scripts compile (Roslyn)" bash "$ROOT/tools/editor_compile_check.
 #         Roslyn and Mono, tiny stand-ins for JsonUtility/EditorPrefs. Same Unity prerequisite as 5a, same loud FAIL.
 run_bg "registry engine drill (SingleSourceRegistry on real files)" bash "$ROOT/tools/registry_engine_drill.sh"
 run_bg "backup dedup drill (BackupDedup on real files: unchanged means the bytes)" bash "$ROOT/tools/backup_dedup_drill.sh"
-run_bg "blender exit drill (a crashed script fails the process; SKIP without Blender)" bash "$ROOT/tools/blender_exit_drill.sh"
-run_bg "GLB reader drill (every registry GLB read; a sample compared with Blender; SKIP without the project)" bash "$ROOT/tools/glb_reader_drill.sh"
-run_bg "GLB writer drill (every registry GLB written, read back equal; a sample re-imported by Blender; SKIP without the project)" bash "$ROOT/tools/glb_writer_drill.sh"
-run_bg "vehicle probe drill (the Lab's probe in C#: every source probed, a sample's rows equal to Blender's own probe)" bash "$ROOT/tools/vehicle_probe_drill.sh"
+# BLENDER DOES NOT RUN IN THE GATE (2026-10-28, user: "I don't want to use it anymore in the push, only in the bake test").
+# Every parity drill below replays a RECORD of its Blender invocations (tools/blender_oracle.sh: HAF_ORACLE=replay, the
+# default), keyed by the inputs' bytes and the scripts; tools/refresh_blender_oracle.sh runs this gate with HAF_ORACLE=record
+# and Blender to make the record. A record that is missing or stale is that drill's SKIP, which fails the push and names what
+# changed. The blender exit drill tests Blender's own exit behaviour and has no record: it runs with the refresh only.
+[ "${HAF_ORACLE:-replay}" != "record" ] || run_bg "blender exit drill (a crashed script fails the process)" bash "$ROOT/tools/blender_exit_drill.sh"
+run_bg "GLB reader drill (every registry GLB read; a sample compared with the Blender record; SKIP without the project or the record)" bash "$ROOT/tools/glb_reader_drill.sh"
+run_bg "GLB writer drill (every registry GLB written, read back equal; a sample as the Blender record imports it; SKIP without the project or the record)" bash "$ROOT/tools/glb_writer_drill.sh"
+run_bg "vehicle probe drill (the Lab's probe in C#: every source probed, a sample's rows equal to Blender's own probe, from the record)" bash "$ROOT/tools/vehicle_probe_drill.sh"
 run_bg "vehicle probe comparator tests (diagnostic rows must be complete)" python "$ROOT/Tests/test_compare_vehicle_probe.py"
 run_bg "native kernels drill (the probe's C++ kernels: hafkernels.dll equal to a fresh build of native/, and every output hash on every recipe source equal to the managed twins'; SKIP without g++)" bash "$ROOT/tools/native_kernels_drill.sh"
 run_bg "vehicle probe jobs tests (the recipes' arguments as the Lab formats them)" python "$ROOT/Tests/test_probe_jobs.py"
-run_bg "mesh layout drill (Blender's vertex and edge order in C#: a sample's edge lists equal to Blender's own)" bash "$ROOT/tools/decimate_drill.sh"
-run_bg "prep drill (the reduce plus the glTF exporter's mesh layout in C#: a sample equal to what Blender's prep_model.py wrote)" bash "$ROOT/tools/prep_drill.sh"
-run_bg "deploy drill (Blender's posed state of an imported animation in C#: every object matrix and evaluated property at up to thirteen frames equal to Blender's own, the sign of a zero included; and deploy_convert.py's decisions and the armature it builds - its log, its parts, its bones at rest, its anchors and the scene it leaves - against the script itself, run up to the bake, and then the bake: every key of the action to the bit)" bash "$ROOT/tools/deploy_drill.sh"
-run_bg "Workshop compaction drill (what no node uses is left out; every part reads as before - GLB reader and Blender; SKIP without the project)" bash "$ROOT/tools/workshop_compact_drill.sh"
-run_bg "rig_anim drill (step (a) the stage dump: Blender runs rig_anim.py on every animated recipe as the Factory does, cut at its four stages, the scene after each on record, complete and consistent, the census of the branches the recipes take; steps (b) to (e), all four stages in C#: BlenderRigAnim's scene equal to Blender's row for row on every dumped job after each stage, the albedo by its dimensions; step (f): the GLB rig route - BlenderRigExport's file equal to the one Blender's glTF exporter writes of the same scene, nodes, skins, primitives, materials, channels and bytes; step (g): the Factory's wrapper (BlenderRigAnimInProcess) writes each exported job's file and names its clips; SKIP without the project)" bash "$ROOT/tools/riganim_drill.sh"
-run_bg "vehicle_rig drill (all five ported stages and the Generate wrapper: saved recipes and fixtures against Blender, GLB bytes and ordered logs, damaged-evidence rejection; SKIP without Blender or the recipes)" bash "$ROOT/tools/vehiclerig_drill.sh"
+run_bg "mesh layout drill (Blender's vertex and edge order in C#: a sample's edge lists equal to Blender's own, from the record)" bash "$ROOT/tools/decimate_drill.sh"
+run_bg "prep drill (the reduce plus the glTF exporter's mesh layout in C#: a sample equal to what Blender's prep_model.py wrote, from the record)" bash "$ROOT/tools/prep_drill.sh"
+run_bg "deploy drill (from the Blender record: Blender's posed state of an imported animation in C#: every object matrix and evaluated property at up to thirteen frames equal to Blender's own, the sign of a zero included; and deploy_convert.py's decisions and the armature it builds - its log, its parts, its bones at rest, its anchors and the scene it leaves - against the script itself, run up to the bake, and then the bake: every key of the action to the bit)" bash "$ROOT/tools/deploy_drill.sh"
+run_bg "Workshop compaction drill (what no node uses is left out; every part reads as before - GLB reader and the Blender record; SKIP without the project or the record)" bash "$ROOT/tools/workshop_compact_drill.sh"
+run_bg "rig_anim drill (step (a) the stage dump, from the Blender record: Blender ran rig_anim.py on every animated recipe as the Factory does, cut at its four stages, the scene after each on record, complete and consistent, the census of the branches the recipes take; steps (b) to (e), all four stages in C#: BlenderRigAnim's scene equal to Blender's row for row on every dumped job after each stage, the albedo by its dimensions; step (f): the GLB rig route - BlenderRigExport's file equal to the one Blender's glTF exporter writes of the same scene, nodes, skins, primitives, materials, channels and bytes; step (g): the Factory's wrapper (BlenderRigAnimInProcess) writes each exported job's file and names its clips; SKIP without the project)" bash "$ROOT/tools/riganim_drill.sh"
+run_bg "vehicle_rig drill (all five ported stages and the Generate wrapper: saved recipes and fixtures against the Blender record, GLB bytes and ordered logs, damaged-evidence rejection; SKIP without the record or the recipes)" bash "$ROOT/tools/vehiclerig_drill.sh"
 run_bg_wait
 #    5b) The ownership-rebase hand-lists. A field the UI edits but the window's rebase doesn't re-apply is thrown
 #        away on every Save — silent, and the reason this gate exists. Pure source analysis, so CI can run it too.

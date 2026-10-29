@@ -45,7 +45,7 @@ public sealed class VehicleRigDump
 
     static readonly Dictionary<string, int> Width = new Dictionary<string, int>(StringComparer.Ordinal)
     {
-        { "JOB", 2 }, { "STAGE", 2 }, { "LOG", 3 }, { "SCENE", 6 }, { "OBJ", 42 }, { "MESH", 19 }, { "VG", 6 }, { "BONE", 23 },
+        { "JOB", 2 }, { "WORK", 2 }, { "STAGE", 2 }, { "LOG", 3 }, { "SCENE", 6 }, { "OBJ", 42 }, { "MESH", 19 }, { "VG", 6 }, { "BONE", 23 },
         { "PB", 33 }, { "ACT", 7 }, { "FC", 9 }, { "K", 16 }, { "EXIT", 3 }, { "DIES", 3 }, { "DONE", 2 }, { "FAIL", 3 }, { "EVIDENCE", 4 },
     };
     static readonly HashSet<string> ExportKinds = new HashSet<string>(new[] { "GLB", "SCENE", "NODE", "SKIN", "IBM", "MESH", "PRIM", "MAT", "IMG", "TEX", "SAMP", "ANIM", "CHAN" }, StringComparer.Ordinal);
@@ -59,6 +59,18 @@ public sealed class VehicleRigDump
     static string FcKey(string[] row) => row[2] + "\u0001" + row[3] + "\u0001" + row[4] + "\u0001" + row[5];   // action, slot, data_path, index
     static byte[] LittleEndianBits(string hex) { var b = new byte[4]; for (int i = 0; i < 4; i++) b[i] = Convert.ToByte(hex.Substring((3 - i) * 2, 2), 16); return b; }
     static string Hash(byte[] bytes) { using (var sha = SHA256.Create()) return BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", "").ToLowerInvariant(); }
+    /// <summary>The text with every spelling of the folder above the work folder (either slash form, any case) as @TMP@: what the dump's seal hashes.</summary>
+    internal static string WithoutWork(string text, string work)
+    {
+        if (string.IsNullOrEmpty(work)) return text;
+        string forward = work.TrimEnd('/', '\\').Replace('\\', '/');
+        int cut = forward.LastIndexOf('/');
+        if (cut <= 0) return text;
+        string root = forward.Substring(0, cut);
+        foreach (var form in new[] { root, root.Replace('/', '\\') }.Distinct().OrderByDescending(f => f.Length))
+            text = System.Text.RegularExpressions.Regex.Replace(text, System.Text.RegularExpressions.Regex.Escape(form), "@TMP@", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return text;
+    }
 
     public static VehicleRigDump Parse(List<string> block, Dictionary<string, (bool fast, string[] argv)> jobs, bool requireKeys)
     {
@@ -94,6 +106,10 @@ public sealed class VehicleRigDump
             if (!Width.TryGetValue(t[0], out int w)) throw new InvalidDataException($"the dump has an unknown row kind '{t[0]}'");
             if (t.Length != w) throw new InvalidDataException($"{t[0]} row has {t.Length} fields, {w} expected");
         }
+        var workHeaders = rows.Where(t => t[0] == "WORK").ToList();
+        if (workHeaders.Count > 1 || (workHeaders.Count == 1 &&
+            (rows[1] != workHeaders[0] || string.IsNullOrWhiteSpace(workHeaders[0][1]))))
+            throw new InvalidDataException("WORK must be one nonempty header immediately after JOB");
         var done = rows.Where(t => t[0] == "DONE").ToList();
         if (done.Count == 0) throw new InvalidDataException("the dump has no DONE row");
         if (done.Count != 1 || done[0][1] != d.Key || rows[rows.Count - 1] != done[0]) throw new InvalidDataException("the dump must end with exactly one matching DONE row");
@@ -123,7 +139,7 @@ public sealed class VehicleRigDump
         int current = 0;
         foreach (var t in rows)
         {
-            if (t[0] == "JOB" || t[0] == "DONE" || t[0] == "FAIL" || t[0] == "EVIDENCE") continue;
+            if (t[0] == "JOB" || t[0] == "WORK" || t[0] == "DONE" || t[0] == "FAIL" || t[0] == "EVIDENCE") continue;
             if (t[0] == "STAGE") { current = int.Parse(t[1], CultureInfo.InvariantCulture); continue; }
             int n = int.Parse(t[1], CultureInfo.InvariantCulture);
             if (t[0] == "LOG" || t[0] == "EXIT" || t[0] == "DIES")
@@ -256,6 +272,13 @@ public sealed class VehicleRigDump
             throw new InvalidDataException("the dump must end with one matching EVIDENCE row before DONE");
         var seal = seals[0];
         string recorded = string.Join("\n", all.Take(all.Count - 2).Select(t => string.Join("\t", t))) + "\n";
+        // THE SEAL LEAVES THE TEMP FOLDER OUT (2026-10-29): the dump's WORK row names the folder it wrote under; the hash
+        // is taken with every spelling of the folder ABOVE it (the run's temp root, where the fixtures and names folders
+        // a stop names sit too) as @TMP@ - the seal is the job's evidence, not the temp folder it ran in, so a record
+        // replayed from another folder (tools/blender_oracle.sh) still verifies. A dump without a WORK row (older, or
+        // the test fixtures) seals its rows as they are.
+        var workRow = all.FirstOrDefault(t => t[0] == "WORK");
+        if (workRow != null) recorded = WithoutWork(recorded, workRow[1]);
         if (!IsInt(seal[2]) || long.Parse(seal[2], CultureInfo.InvariantCulture) != all.Count - 2 || !IsHex(seal[3], 64) || Hash(Encoding.UTF8.GetBytes(recorded)) != seal[3])
             throw new InvalidDataException("the evidence row count or checksum differs from the recorded job");
         return d;

@@ -20,11 +20,7 @@ UNITY="${UNITY:-/c/Program Files/Unity 2021.3.1f1/Editor/Data}"
 CSC="$UNITY/DotNetSdkRoslyn/csc.dll"
 API="$UNITY/MonoBleedingEdge/lib/mono/4.7.1-api"
 PROJECT="${HAF_UNITY_PROJECT:-C:/Repo/ENCReload}"
-BLENDER="${BLENDER:-}"
-if [ -z "$BLENDER" ]; then
-  for c in "/c/Program Files/Blender Foundation/Blender 5.1/blender.exe" "/c/Program Files/Blender Foundation/Blender 4.2/blender.exe"; do [ -f "$c" ] && { BLENDER="$c"; break; }; done
-fi
-[ -n "$BLENDER" ] && [ -f "$BLENDER" ] || { echo "SKIP — vehicle_rig drill: Blender not found (set BLENDER); vehicle_rig was NOT drilled"; exit 3; }
+. "$ROOT/tools/blender_oracle.sh"; oracle_init vehiclerig "vehicle_rig drill"   # replay (the gate: no Blender), record (the refresh) or live
 [ -f "$CSC" ] || { echo "FAIL — Unity compiler not found: $CSC (set UNITY)"; exit 2; }
 command -v dotnet >/dev/null 2>&1 || { echo "FAIL — dotnet not on PATH"; exit 2; }
 SCRIPT="$ROOT/editor/Tools~/vehicle_rig.py"
@@ -96,14 +92,15 @@ t0=$(date +%s)
 BPIDS=()
 for ((k = 0; k < JOBS; k++)); do
   mkdir -p "$TMPD/work_$k"
-  "$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/vehiclerig-drill/blender_vehiclerig_dump.py")" -- "$(cygpath -m "$SCRIPT")" "$WTMP/shard_$k.txt" "$WTMP/work_$k" > "$TMPD/blender_raw_$k.txt" 2>&1 &
+  oracle_blender "dump_$k" "$TMPD/blender_raw_$k.txt" --dir "work_$k" --key "$ROOT/tools/vehiclerig-drill/blender_vehiclerig_dump.py" "$SCRIPT" "$WTMP/shard_$k.txt" "$WTMP/work_$k" -- --background --python "$(cygpath -m "$ROOT/tools/vehiclerig-drill/blender_vehiclerig_dump.py")" -- "$(cygpath -m "$SCRIPT")" "$WTMP/shard_$k.txt" "$WTMP/work_$k" &
   BPIDS+=($!)
 done
 brc=0; for pid in "${BPIDS[@]}"; do wait "$pid" || brc=$?; done
+oracle_check
 t1=$(date +%s)
 n_b=0
 for ((k = 0; k < JOBS; k++)); do
-  tr -d '\r' < "$TMPD/blender_raw_$k.txt" | grep -E "^(JOB|STAGE|LOG|SCENE|OBJ|MESH|VG|BONE|PB|ACT|FC|K|EXIT|DIES|DONE|FAIL|X|XDIES|EVIDENCE)	" > "$TMPD/dump_$k.txt"
+  tr -d '\r' < "$TMPD/blender_raw_$k.txt" | grep -E "^(JOB|WORK|STAGE|LOG|SCENE|OBJ|MESH|VG|BONE|PB|ACT|FC|K|EXIT|DIES|DONE|FAIL|X|XDIES|EVIDENCE)	" > "$TMPD/dump_$k.txt"
   n_b=$((n_b + $(grep -c "^DONE" "$TMPD/dump_$k.txt")))
 done
 if [ "$brc" -ne 0 ] || [ "$n_b" -ne "$n_jobs" ]; then

@@ -423,6 +423,7 @@ date() { cat "$ROOT/clock"; }
 cygpath() { printf '%s\\n' "$2"; }
 TMPD="$ROOT"; WTMP="$ROOT"; WROOT="$ROOT"; EXPORT_JOBS=1; BLENDER="$ROOT/blender"
 chmod +x "$BLENDER"
+HAF_ORACLE=live; . "''' + ROOT.as_posix() + '''/tools/blender_oracle.sh"; oracle_init deploy
 '''+launch+'''
 wait "${EPIDS[0]}"
 echo 110 > "$ROOT/clock"

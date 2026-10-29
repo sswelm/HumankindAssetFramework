@@ -6,7 +6,7 @@ intact_s3.txt/jobs_s3.txt hold its supported rig and S3_* copies alter one stage
 
 usage: missing_vehiclerig.py <output directory> <jobs file> <dump>...
 """
-import os, sys, hashlib
+import os, sys, hashlib, re
 
 out = sys.argv[1]
 os.makedirs(out, exist_ok=True)
@@ -53,7 +53,14 @@ def write(name, rows, repair=True):
         # left broken; every otherwise framed mutant receives a matching seal and must fail its semantic check.
         if sum(r.startswith("DONE\t") for r in rows) == 1 and rows[-1].startswith("DONE\t"):
             body = rows[:-1]
-            digest = hashlib.sha256(("\n".join(body) + "\n").encode("utf-8")).hexdigest()
+            # the seal leaves the folder above WORK out (blender_vehiclerig_dump.py seal_text): a mutant re-sealed here must too
+            text = "\n".join(body) + "\n"
+            work = next((r.split("\t", 1)[1] for r in body if r.startswith("WORK\t")), "")
+            if work:
+                root = os.path.dirname(work.rstrip("/\\").replace("\\", "/"))
+                for form in sorted({root, root.replace("/", "\\")}, key=len, reverse=True):
+                    text = re.sub(re.escape(form), "@TMP@", text, flags=re.IGNORECASE)
+            digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
             rows = body + ["EVIDENCE\t%s\t%d\t%s" % (rows[0].split("\t")[1], len(body), digest), rows[-1]]
     open(os.path.join(out, name + ".txt"), "w", encoding="utf-8", newline="\n").write("\n".join(rows) + "\n")
 

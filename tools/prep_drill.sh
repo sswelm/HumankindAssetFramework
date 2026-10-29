@@ -27,13 +27,7 @@ for cand in "$WROOT/References/Newtonsoft.Json.dll" "$PROJECT/Assets/Plugins/Jso
   [ -f "$cand" ] && { NEWTONSOFT="$cand"; break; }
 done
 [ -n "$NEWTONSOFT" ] || { echo "FAIL — Newtonsoft.Json.dll not found (References/ via fetch-refs; the prep was NOT drilled)"; exit 2; }
-BLENDER="${BLENDER:-}"
-if [ -z "$BLENDER" ]; then
-  for base in "/c/Program Files/Blender Foundation" "/c/Program Files (x86)/Blender Foundation"; do
-    cand=$(ls -d "$base"/Blender* 2>/dev/null | sort -V | tail -1); [ -n "$cand" ] && [ -x "$cand/blender.exe" ] && { BLENDER="$cand/blender.exe"; break; }
-  done
-fi
-[ -n "$BLENDER" ] || { echo "SKIP — prep drill: Blender not found (BLENDER=<exe> to force); the prep was NOT drilled"; exit 3; }
+. "$ROOT/tools/blender_oracle.sh"; oracle_init prep "prep drill"   # replay (the gate: no Blender), record (the refresh) or live
 
 TMPD="$(mktemp -d)"; trap 'rm -rf "$TMPD"' EXIT
 cp "$NEWTONSOFT" "$TMPD/Newtonsoft.Json.dll"
@@ -77,10 +71,11 @@ t0=$(date +%s)
 BPIDS=()
 for ((k = 0; k < JOBS; k++)); do
   mapfile -t SHARD < "$TMPD/shard_$k.txt"
-  "$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/prep-drill/blender_prep_many.py")" -- "$(cygpath -m "$ROOT/editor/Tools~/prep_model.py")" "$WTMP/out/$k" "${SHARD[@]}" > "$TMPD/blender_raw_$k.txt" 2>&1 &
+  oracle_blender "prep_$k" "$TMPD/blender_raw_$k.txt" --dir "out/$k" --key "$ROOT/tools/prep-drill/blender_prep_many.py" "$ROOT/editor/Tools~/prep_model.py" "$WTMP/out/$k" "${SHARD[@]}" -- --background --python "$(cygpath -m "$ROOT/tools/prep-drill/blender_prep_many.py")" -- "$(cygpath -m "$ROOT/editor/Tools~/prep_model.py")" "$WTMP/out/$k" "${SHARD[@]}" &
   BPIDS+=($!)
 done
 brc=0; for pid in "${BPIDS[@]}"; do wait "$pid" || brc=$?; done
+oracle_check
 t1=$(date +%s)
 : > "$TMPD/rows.txt"
 for ((k = 0; k < JOBS; k++)); do

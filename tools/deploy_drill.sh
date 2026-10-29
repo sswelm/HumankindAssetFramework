@@ -31,13 +31,7 @@ for cand in "$WROOT/References/Newtonsoft.Json.dll" "$PROJECT/Assets/Plugins/Jso
   [ -f "$cand" ] && { NEWTONSOFT="$cand"; break; }
 done
 [ -n "$NEWTONSOFT" ] || { echo "FAIL — Newtonsoft.Json.dll not found (References/ via fetch-refs; the deploy conversion was NOT drilled)"; exit 2; }
-BLENDER="${BLENDER:-}"
-if [ -z "$BLENDER" ]; then
-  for base in "/c/Program Files/Blender Foundation" "/c/Program Files (x86)/Blender Foundation"; do
-    cand=$(ls -d "$base"/Blender* 2>/dev/null | sort -V | tail -1); [ -n "$cand" ] && [ -x "$cand/blender.exe" ] && { BLENDER="$cand/blender.exe"; break; }
-  done
-fi
-[ -n "$BLENDER" ] || { echo "SKIP — deploy drill: Blender not found (BLENDER=<exe> to force); the deploy conversion was NOT drilled"; exit 3; }
+. "$ROOT/tools/blender_oracle.sh"; oracle_init deploy "deploy drill"   # replay (the gate: no Blender), record (the refresh) or live
 
 TMPD="$(mktemp -d)"; trap 'rm -rf "$TMPD"' EXIT
 cp "$NEWTONSOFT" "$TMPD/Newtonsoft.Json.dll"
@@ -85,10 +79,11 @@ t0=$(date +%s)
 BPIDS=()
 for ((k = 0; k < JOBS; k++)); do
   mapfile -t SHARD < "$TMPD/shard_$k.txt"
-  "$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_posed_dump.py")" -- "${SHARD[@]}" > "$TMPD/blender_raw_$k.txt" 2>&1 &
+  oracle_blender "posed_$k" "$TMPD/blender_raw_$k.txt" --key "$ROOT/tools/deploy-drill/blender_posed_dump.py" "${SHARD[@]}" -- --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_posed_dump.py")" -- "${SHARD[@]}" &
   BPIDS+=($!)
 done
 brc=0; for pid in "${BPIDS[@]}"; do wait "$pid" || brc=$?; done
+oracle_check
 t1=$(date +%s)
 n_b=0
 for ((k = 0; k < JOBS; k++)); do
@@ -213,7 +208,8 @@ MPIDS=(); t_m0=$(date +%s)
 for ((k = 0; k < JOBS; k++)); do
   (
     mapfile -t MSHARD < "$TMPD/mshard_$k.txt"
-    "$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_material_dump.py")" -- "${MSHARD[@]}" > "$TMPD/mat/raw_$k.txt" 2> "$TMPD/mat/err_$k.txt"
+    : > "$TMPD/mat/err_$k.txt"   # stdout and stderr are one record now (the rows are filtered by prefix below)
+    oracle_blender "material_$k" "$TMPD/mat/raw_$k.txt" --key "$ROOT/tools/deploy-drill/blender_material_dump.py" "${MSHARD[@]}" -- --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_material_dump.py")" -- "${MSHARD[@]}"
     shard_rc=$?
     date +%s > "$TMPD/mat/end_$k.txt"
     exit "$shard_rc"
@@ -223,7 +219,8 @@ done
 EPIDS=(); t_e0=$(date +%s)
 for ((k = 0; k < EXPORT_JOBS; k++)); do
   (
-    "$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_export_dump.py")" -- "$WROOT/editor/Tools~/deploy_convert.py" "$WTMP/export/jobs_$k.txt" "$WTMP/export/glb" > "$TMPD/export/raw_$k.txt" 2> "$TMPD/export/err_$k.txt"
+    : > "$TMPD/export/err_$k.txt"
+    oracle_blender "export_$k" "$TMPD/export/raw_$k.txt" --dir "export/glb_$k" --key "$ROOT/tools/deploy-drill/blender_export_dump.py" "$ROOT/editor/Tools~/deploy_convert.py" "$WTMP/export/jobs_$k.txt" "$WTMP/export/glb_$k" -- --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_export_dump.py")" -- "$WROOT/editor/Tools~/deploy_convert.py" "$WTMP/export/jobs_$k.txt" "$WTMP/export/glb_$k"
     shard_rc=$?
     date +%s > "$TMPD/export/end_$k.txt"
     exit "$shard_rc"
@@ -231,7 +228,9 @@ for ((k = 0; k < EXPORT_JOBS; k++)); do
   EPIDS+=($!)
 done
 t3=$(date +%s)
-"$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_decisions_dump.py")" -- "$WROOT/editor/Tools~/deploy_convert.py" "$WTMP/jobs.txt" > "$TMPD/decisions_raw.txt" 2> "$TMPD/decisions_err.txt"; drc=$?   # stderr apart: a depsgraph warning lands in the middle of a row otherwise
+: > "$TMPD/decisions_err.txt"
+oracle_blender decisions "$TMPD/decisions_raw.txt" --key "$ROOT/tools/deploy-drill/blender_decisions_dump.py" "$ROOT/editor/Tools~/deploy_convert.py" "$WTMP/jobs.txt" -- --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_decisions_dump.py")" -- "$WROOT/editor/Tools~/deploy_convert.py" "$WTMP/jobs.txt"; drc=$?
+oracle_check
 t4=$(date +%s)
 tr -d '\r' < "$TMPD/decisions_raw.txt" | grep -E "^(JOB|LOG|LOG2|EXIT|RANGE|NORM|FLAG|PART|BAD|ALIAS|ARM|BONEOF|RBONE|ANCHOR|HULL|PINV|OBJ|M|T|BOX|ACT|FC|FCA|PB2|PB3|M2|O2|O3|LOG3|SNAP|APB|O4|LOG4|FC4|APB4|O5|LOG5|EXIT5|DIES5|R5|RBONE5|FC5|APB5|PM5|O6|LOG6|DIES6|BIND|VG6|MOD6|V6|VX6|N6|DATA6|O7|LOG7|DIES7|OBJ7|ACT7|E7|O8|SKIP7C|LOG7C|DIES7C|ACT7C|FC7C|ACTIVE7|APB7|SW|DONE|FAIL)	" > "$TMPD/decisions.txt"
 n_done=$(grep -c "^DONE" "$TMPD/decisions.txt")
@@ -536,6 +535,9 @@ for ((k = 0; k < EXPORT_JOBS; k++)); do
   fi
   [ "$shard_end" -le "$t_e1" ] || t_e1=$shard_end
 done
+oracle_check
+mkdir -p "$TMPD/export/glb"
+for ((k = 0; k < EXPORT_JOBS; k++)); do if [ -d "$TMPD/export/glb_$k" ]; then cp -r "$TMPD/export/glb_$k"/. "$TMPD/export/glb"/; fi; done
 : > "$TMPD/export.txt"
 for ((k = 0; k < EXPORT_JOBS; k++)); do tr -d '\r' < "$TMPD/export/raw_$k.txt" | grep -E "^(JOB|LOG8|DIES8|EXIT8|GLB|SCENE|NODE|SKIN|IBM|MESH|PRIM|MAT|IMG|TEX|SAMP|ANIM|CHAN|DONE|FAIL)	" >> "$TMPD/export.txt"; done
 n_edone=$(grep -c "^DONE" "$TMPD/export.txt")
@@ -665,6 +667,7 @@ for ((k = 0; k < JOBS; k++)); do
   if ! [[ "$shard_end" =~ ^[0-9]+$ ]] || [ "$shard_end" -lt "$t_m0" ]; then echo "FAIL — deploy drill: no valid completion time for material shard $k"; exit 1; fi
   [ "$shard_end" -le "$t_m1" ] || t_m1=$shard_end
 done
+oracle_check
 : > "$TMPD/materials.txt"
 for ((k = 0; k < JOBS; k++)); do tr -d '\r' < "$TMPD/mat/raw_$k.txt" | grep -E "^(FILE|DIES|MAT|IMG|TEX|SAMP|MATS|DONE|FAIL)	" >> "$TMPD/materials.txt"; done
 n_mdone=$(grep -c "^DONE" "$TMPD/materials.txt")
@@ -744,10 +747,13 @@ echo "PASS — deploy drill, the export (8a): $n8_jobs jobs' exported files - ev
 #      every key to the bit. Every branch the generator can reach must be reached; a dump cut short, with a curve
 #      replaced by its neighbour, one bit off, or of another smoothing fails.
 HND_CURVES="${HND_CURVES:-6000}"
-"$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_handles_dump.py")" -- 1 "$HND_CURVES" 2> "$TMPD/handles_err.txt" | tr -d '\r' | grep -E "^(H|END)	" > "$TMPD/handles.txt"
+oracle_blender handles "$TMPD/handles_raw.txt" --key "$ROOT/tools/deploy-drill/blender_handles_dump.py" 1 "$HND_CURVES" -- --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_handles_dump.py")" -- 1 "$HND_CURVES"
+oracle_check
+: > "$TMPD/handles_err.txt"
+tr -d '\r' < "$TMPD/handles_raw.txt" | grep -E "^(H|END)	" > "$TMPD/handles.txt"
 "$TMPD/deploy.exe" --handles "$WTMP/handles.txt" > "$TMPD/handles_out.txt" 2>&1; hrc=$?
 if [ "$hrc" -ne 0 ] || ! grep -q "^PASS " "$TMPD/handles_out.txt"; then
-  tail -3 "$TMPD/handles_err.txt"; grep -E "^(DIFF|FAIL|TOTAL)" "$TMPD/handles_out.txt" | head -8
+  tail -3 "$TMPD/handles_raw.txt"; grep -E "^(DIFF|FAIL|TOTAL)" "$TMPD/handles_out.txt" | head -8
   echo "FAIL — the handles of automatic keys differ from Blender's (rc=$hrc)"; exit 1
 fi
 # every curve is judged on its own, so a dump that holds fewer is still consistent: the count asked for is the floor
@@ -793,11 +799,14 @@ echo "$(grep "^PASS " "$TMPD/handles_out.txt") - every key AUTO_CLAMPED, the def
 #      calculation from the keys alone. The dump writes no end row when a key is not BEZIER / AUTO_CLAMPED or a
 #      replaced value is not old + (new - old).
 KEY_TRIALS="${KEY_TRIALS:-40}"
-"$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_keyframe_insert_dump.py")" -- 1 "$KEY_TRIALS" 2> "$TMPD/keyins_err.txt" | tr -d '\r' | grep -E "^(H|END)	" > "$TMPD/keyins.txt"
+oracle_blender keyins "$TMPD/keyins_raw.txt" --key "$ROOT/tools/deploy-drill/blender_keyframe_insert_dump.py" 1 "$KEY_TRIALS" -- --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_keyframe_insert_dump.py")" -- 1 "$KEY_TRIALS"
+oracle_check
+: > "$TMPD/keyins_err.txt"
+tr -d '\r' < "$TMPD/keyins_raw.txt" | grep -E "^(H|END)	" > "$TMPD/keyins.txt"
 "$TMPD/deploy.exe" --handles "$WTMP/keyins.txt" > "$TMPD/keyins_out.txt" 2>&1; krc=$?
 key_n=$(grep "^TOTAL" "$TMPD/keyins_out.txt" | awk '{print $3}')
 if [ "$krc" -ne 0 ] || ! grep -q "^PASS " "$TMPD/keyins_out.txt" || [ "${key_n:-0}" -lt $((KEY_TRIALS * 100)) ]; then
-  tail -3 "$TMPD/keyins_err.txt"; grep -E "^(DIFF|FAIL|TOTAL)" "$TMPD/keyins_out.txt" | head -8
+  tail -3 "$TMPD/keyins_raw.txt"; grep -E "^(DIFF|FAIL|TOTAL)" "$TMPD/keyins_out.txt" | head -8
   echo "FAIL — the handles keyframe_insert leaves on a pose bone differ from the port's (rc=$krc, ${key_n:-0} curves)"; exit 1
 fi
 echo "$(grep "^PASS " "$TMPD/keyins_out.txt") - pose_bone.keyframe_insert on an armature, $KEY_TRIALS recoil key sequences, every curve after every insert"
@@ -806,10 +815,13 @@ echo "$(grep "^PASS " "$TMPD/keyins_out.txt") - pose_bone.keyframe_insert on an 
 #      handles, flat ones, exactly quadratic and linear time curves, many keys) against BlenderFCurve.Evaluate, to the
 #      bit. Every branch of the solver the generator can reach must be reached, and a dump cut short or one bit off fails.
 BEZ_CURVES="${BEZ_CURVES:-6000}"
-"$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_bezier_dump.py")" -- 1 "$BEZ_CURVES" 2> "$TMPD/bezier_err.txt" | tr -d '\r' | grep -E "^(CURVE|TIMES|E|END)	" > "$TMPD/bezier.txt"
+oracle_blender bezier "$TMPD/bezier_raw.txt" --key "$ROOT/tools/deploy-drill/blender_bezier_dump.py" 1 "$BEZ_CURVES" -- --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_bezier_dump.py")" -- 1 "$BEZ_CURVES"
+oracle_check
+: > "$TMPD/bezier_err.txt"
+tr -d '\r' < "$TMPD/bezier_raw.txt" | grep -E "^(CURVE|TIMES|E|END)	" > "$TMPD/bezier.txt"
 "$TMPD/deploy.exe" --bezier "$WTMP/bezier.txt" > "$TMPD/bezier_out.txt" 2>&1; brc=$?
 if [ "$brc" -ne 0 ] || ! grep -q "^PASS " "$TMPD/bezier_out.txt"; then
-  tail -3 "$TMPD/bezier_err.txt"; grep -E "^(DIFF|FAIL|TOTAL)" "$TMPD/bezier_out.txt" | head -8
+  tail -3 "$TMPD/bezier_raw.txt"; grep -E "^(DIFF|FAIL|TOTAL)" "$TMPD/bezier_out.txt" | head -8
   echo "FAIL — the Bezier evaluation differs from Blender's FCurve.evaluate() (rc=$brc)"; exit 1
 fi
 for branch in "at or before the first key" "at or past the last key" "on a middle key (within 0.0001 frame)" "all at one height" "no root in range (0)" \

@@ -66,15 +66,10 @@ n_ok=$(grep -c "^FILE" "$TMPD/csharp.txt"); n_rows=$(grep -c "^MESH" "$TMPD/csha
 RUNTIME=$(grep -E "^RUNTIME" "$TMPD/csharp.txt" | head -1 | cut -f2-)
 echo "$RUNTIME" | grep -q "64-bit.*trig exact" || { echo "FAIL — decimate drill: the C# side did not run as a 64-bit process with the C runtime's cosf ($RUNTIME); the collapse was NOT drilled"; exit 2; }
 
-BLENDER="${BLENDER:-}"
-if [ -z "$BLENDER" ]; then
-  for base in "/c/Program Files/Blender Foundation" "/c/Program Files (x86)/Blender Foundation"; do
-    cand=$(ls -d "$base"/Blender* 2>/dev/null | sort -V | tail -1); [ -n "$cand" ] && [ -x "$cand/blender.exe" ] && { BLENDER="$cand/blender.exe"; break; }
-  done
-fi
-if [ -z "$BLENDER" ]; then echo "SKIP — mesh layout drill: $n_ok files laid out in C# ($n_rows mesh objects); Blender not found, so NO parity comparison (BLENDER=<exe> to force)"; exit 3; fi
+. "$ROOT/tools/blender_oracle.sh"; oracle_init decimate "mesh layout drill"   # replay (the gate: no Blender), record (the refresh) or live
 t0=$(date +%s)
-"$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/decimate-drill/blender_edges_many.py")" -- "${SAMPLE[@]}" > "$TMPD/blender_raw.txt" 2>&1; brc=$?
+oracle_blender edges "$TMPD/blender_raw.txt" --key "$ROOT/tools/decimate-drill/blender_edges_many.py" "${SAMPLE[@]}" -- --background --python "$(cygpath -m "$ROOT/tools/decimate-drill/blender_edges_many.py")" -- "${SAMPLE[@]}"; brc=$?
+oracle_check
 t1=$(date +%s)
 tr -d '\r' < "$TMPD/blender_raw.txt" | grep -E "^MESH|^BM|^OP|^FILE|^FAIL" > "$TMPD/blender.txt"
 n_b=$(grep -c "^FILE" "$TMPD/blender.txt")
@@ -90,7 +85,8 @@ echo "$CMP" | grep -E "^COMPARED"
 # milestone c: Blender's Decimate COLLAPSE on every mesh object of the sample at three ratios (1, a half, prep_model's
 # ratio for a third of the file's triangles), applied as prep_model applies it, against BlenderReduce's DEC rows
 t2=$(date +%s)
-"$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/decimate-drill/blender_decimate_many.py")" -- "${SAMPLE[@]}" > "$TMPD/blender_dec_raw.txt" 2>&1; drc=$?
+oracle_blender decimate "$TMPD/blender_dec_raw.txt" --key "$ROOT/tools/decimate-drill/blender_decimate_many.py" "${SAMPLE[@]}" -- --background --python "$(cygpath -m "$ROOT/tools/decimate-drill/blender_decimate_many.py")" -- "${SAMPLE[@]}"; drc=$?
+oracle_check
 t3=$(date +%s)
 tr -d '\r' < "$TMPD/blender_dec_raw.txt" | grep -E "^DEC|^FILE|^FAIL" > "$TMPD/blender_dec.txt"
 n_d=$(grep -c "^FILE" "$TMPD/blender_dec.txt")

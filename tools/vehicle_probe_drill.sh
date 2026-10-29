@@ -122,13 +122,7 @@ if [ "${#RECIPE_SOURCES[@]}" -gt 0 ]; then
 fi
 
 # ---- Blender's probe on a sample (FULL=1: every file)
-BLENDER="${BLENDER:-}"
-if [ -z "$BLENDER" ]; then
-  for base in "/c/Program Files/Blender Foundation" "/c/Program Files (x86)/Blender Foundation"; do
-    cand=$(ls -d "$base"/Blender* 2>/dev/null | sort -V | tail -1); [ -n "$cand" ] && [ -x "$cand/blender.exe" ] && { BLENDER="$cand/blender.exe"; break; }
-  done
-fi
-if [ -z "$BLENDER" ]; then echo "SKIP — vehicle probe drill: $n_ok files probed in C#; Blender not found, so NO parity comparison (BLENDER=<exe> to force)"; exit 3; fi
+. "$ROOT/tools/blender_oracle.sh"; oracle_init vehicle_probe "vehicle probe drill"   # replay (the gate: no Blender), record (the refresh) or live
 if [ "${FULL:-0}" = "1" ]; then SAMPLE=("${FILES[@]}"); cp "$WTMP/jobs.json" "$WTMP/jobs_sample.json"
 else
   python - "$WTMP/jobs.json" "$WTMP/jobs_sample.json" <<'PY'
@@ -145,7 +139,8 @@ PY
 fi
 t0=$(date +%s)
 N_JOBS_SAMPLE=$(python -c "import json,sys; print(len(json.load(open(sys.argv[1], encoding='utf-8'))))" "$WTMP/jobs_sample.json")
-"$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/vehicle-probe-drill/blender_probe_many.py")" -- "$(cygpath -m "$ROOT/editor/Tools~/vehicle_rig.py")" "${SAMPLE[@]}" "@$WTMP/jobs_sample.json" > "$TMPD/blender_raw.txt" 2>&1; brc=$?
+oracle_blender probe "$TMPD/blender_raw.txt" --key "$ROOT/tools/vehicle-probe-drill/blender_probe_many.py" "$ROOT/editor/Tools~/vehicle_rig.py" "${SAMPLE[@]}" "@$WTMP/jobs_sample.json" -- --background --python "$(cygpath -m "$ROOT/tools/vehicle-probe-drill/blender_probe_many.py")" -- "$(cygpath -m "$ROOT/editor/Tools~/vehicle_rig.py")" "${SAMPLE[@]}" "@$WTMP/jobs_sample.json"; brc=$?
+oracle_check
 t1=$(date +%s)
 tr -d '\r' < "$TMPD/blender_raw.txt" | grep -E "^ROW|^FILE" > "$TMPD/blender.txt"
 n_b=$(grep -c "^FILE" "$TMPD/blender.txt")
