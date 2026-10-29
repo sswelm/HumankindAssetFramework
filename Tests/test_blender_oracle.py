@@ -384,6 +384,18 @@ class OracleShellTests(unittest.TestCase):
             result = self.shell(mode, 'unset TMPD WTMP\noracle_init t\nTMPD="%s"; WTMP="$TMPD"\noracle_blender a "$TMPD/raw.txt" --key stable -- --background one\noracle_check\n' % self.tmp.as_posix())
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_containment_is_lexical_and_never_resolves_the_target(self):
+        # a sibling shard's os.replace next to the target made Path.resolve() spell it \\?\C:\... and the root was "not a
+        # parent": 4 of 400 parallel stores failed (2026-10-29). The check reads nothing but the parts and the link bits.
+        sys.path.insert(0, str(ORACLE.parent)); import oracle
+        root = self.tmp / "store"   # does not exist yet, like a first record's store
+        self.assertEqual(oracle.contained(root, "t/part_2"), root / "t" / "part_2")
+        self.assertEqual(oracle.contained(root, "out/0"), root / "out" / "0")
+        for bad in ("../victim", "t/../../victim", "t//x", "./t", "", "C:/x", "t/x.", "t/x "):
+            with self.assertRaises(ValueError, msg=bad): oracle.contained(root, bad)
+        with patch.object(pathlib.Path, "resolve", side_effect=AssertionError("resolved")):
+            self.assertEqual(oracle.contained(root, "t/part_2"), root / "t" / "part_2")
+
     def test_parallel_invocations_have_private_dependency_lists(self):
         for mode in ("record", "replay"):
             result = self.shell(mode, 'oracle_init t\nfor n in 0 1 2 3; do oracle_blender "part_$n" "$TMPD/raw_$n.txt" --key stable -- --background "$n" & done\nwait\noracle_check\n')

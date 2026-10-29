@@ -79,13 +79,17 @@ LF files in one checkout and CRLF in another (four `editor/Tools~` scripts were 
 worktree), and under format 2, which hashed their raw bytes, a worktree push that changed none of them was STALE on all
 four. Script dependencies reached through nested lists use the same normalization. Models and other binary inputs retain
 their byte hashes; external glTF/GLB buffers and images are always byte-keyed, including those named `.py` or `.sh`.
+The store's path containment is lexical (no empty, `.`, `..`, drive or rooted part; every component checked for a link) and
+resolves nothing: resolving the target through the filesystem raced with a sibling shard's rename of the record next to it -
+Windows then spelled the target in the `\\?\` form, the root was "not a parent", and 4 of 400 parallel `store` calls failed
+with "path escapes its root" (2026-10-29; the parallel-invocations shell test flaked the same way under load).
 The store checksums metadata, raw output and every output artifact before restoring anything. It refuses unexpected,
 missing or corrupt payloads, changed output-folder requests, and paths or links outside the run's output scope. A folder
 recorded as absent removes a leftover folder during replay. A refresh stages its complete replacement before retiring
 the previous record, preserving the old record when writing fails. These checks detect corruption; the local store is
 not an authenticated source. Stdout relocation preserves literal placeholder text, Unicode paths and non-UTF-8 bytes.
 
-`Tests/test_blender_oracle.py` runs 37 cases in the gate and CI, covering dependency changes, typed arguments, recursive
+`Tests/test_blender_oracle.py` runs 38 cases in the gate and CI, covering dependency changes, typed arguments, recursive
 lists, external assets, relocation, integrity, containment, recorded absence, failed refreshes, changing inputs, and the
 shell wrapper's modes, parallel shards, caller variables and isolated child Git repositories under hooks. Blender stderr is captured separately and appended after
 stdout, so diagnostics cannot interrupt machine-readable rows. The record remains Blender's answer: a wrong answer from Blender stays
