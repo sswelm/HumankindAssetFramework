@@ -10,6 +10,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE PUSH GATE'S WALL IS ITS LONGEST STEP (2026-10-29).** Replacing Blender by its record (below) left the gate at
+  21 minutes: nine of them were the source guards running IN SEQUENCE before the first drill started (`check-member-shape.sh`
+  99 s, `drill-reader-gates.sh` 226 s, `check-parse-shape.sh` 67 s ... on 340 C# files), then the deploy drill's ten.
+  Now the build and the unit tests run first and every other step starts at once; the reader-gate drill plants its
+  wrapper in a copy of the tree (`git ls-files` into its temp folder), so it runs beside the gates it tests and no gate
+  ever reads its plant. And the record's key no longer covers every tracked `.py` under `tools/` and `editor/Tools~/`
+  (an edit to one drill's fixture generator staled every drill's record and cost a 20-minute refresh): it covers the
+  key scripts' import closure (`oracle.py deps`: what they import and what they name as a `.py` in a string literal,
+  followed among the tracked files), held by two new oracle tests.
 - **THE PUSH GATE RUNS NO BLENDER (2026-10-28).** Nine parity drills ran Blender on every push (the deploy drill alone
   800 s). Each Blender invocation now goes through a recorded oracle: `tools/refresh_blender_oracle.sh` runs the gate
   once with Blender and stores every invocation's output, exit code and written folders under the modding project's

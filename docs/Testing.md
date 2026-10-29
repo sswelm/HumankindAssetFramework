@@ -58,8 +58,12 @@ behaviour before, for `FULL=1` investigations). The record lives under `HAF_BLEN
 `<modding project>/Tools/blender_oracle`, self-ignored by git), one folder per drill and invocation, and is KEYED by
 what the invocation depends on (`tools/blender-oracle/oracle.py`): declared input bytes, nested job/shard lists
 (including paths in JSON keys), external glTF/GLB buffers and images, the actual Blender argument vector, the wrapper,
-and a conservative set of tracked Python support files under `tools/` and `editor/Tools~/`. Paths under the run's temp
-folder and checkout are normalized, so these prefixes may move while input content and literal arguments remain
+and the Python files the key scripts reach - their **import closure** (`oracle.py deps`: what each imports and what each
+names as a `.py` in a whole string literal, followed, among the files git tracks). Not every tracked `.py`: the first
+format 2 keyed on all 63 of them (2026-10-29), so an edit to one drill's fixture generator staled every drill's record
+and cost a 20-minute refresh; `Tests/test_blender_oracle.py` holds the closure to a sibling import, a named chunk in
+another folder and its import, and leaves an unrelated tracked file and an untracked one alone. Paths under the run's
+temp folder and checkout are normalized, so these prefixes may move while input content and literal arguments remain
 significant. Output arguments stay literals even when Blender creates the named file. The wrapper checks the inputs
 before and after recording and refuses to publish a record if they changed during Blender's run. A replay whose key differs names the item that changed (`the record for deploy/export_0 is STALE:
 @WTMP@/deploy_fixtures/x.glb changed`) and the drill SKIPs, which the gate counts as a failure: a changed source, recipe,
@@ -84,7 +88,7 @@ recorded as absent removes a leftover folder during replay. A refresh stages its
 the previous record, preserving the old record when writing fails. These checks detect corruption; the local store is
 not an authenticated source. Stdout relocation preserves literal placeholder text, Unicode paths and non-UTF-8 bytes.
 
-`Tests/test_blender_oracle.py` runs 35 cases in the gate and CI, covering dependency changes, typed arguments, recursive
+`Tests/test_blender_oracle.py` runs 37 cases in the gate and CI, covering dependency changes and the closure's bounds, typed arguments, recursive
 lists, external assets, relocation, integrity, containment, recorded absence, failed refreshes, changing inputs, and the
 shell wrapper's modes, parallel shards, caller variables and isolated child Git repositories under hooks. Blender stderr is captured separately and appended after
 stdout, so diagnostics cannot interrupt machine-readable rows. The record remains Blender's answer: a wrong answer from Blender stays
@@ -117,14 +121,19 @@ starting two gates at once and interrupting the first.
 
 | Surface | `tools/check.sh` (pre-push hook) | also in CI | ~time |
 |---|---|---|---|
-| **Runtime + shared contract** | `dotnet build` · `dotnet test` · docs guard · binding-catalog surface · hot path · parse shape · member shape · schema parity | all source-only checks | seconds |
-| **Editor package** | Roslyn editor compile-check · registry engine drill · backup dedup drill · blender exit drill · GLB reader drill · GLB writer drill · vehicle probe drill · mesh layout, prep and deploy drills · Workshop compaction drill · schema parity · hand-list gate | parity + hand-list; compile check and drills stay local | the drills AT ONCE: the longest one's time |
+| **Runtime + shared contract** | `dotnet build` · `dotnet test` · docs guard · binding-catalog surface · hot path · parse shape · member shape · reader-gate drill · schema parity | all source-only checks | the build and tests first (seconds); the guards beside the drills |
+| **Editor package** | Roslyn editor compile-check · registry engine drill · backup dedup drill · blender exit drill (refresh only) · GLB reader drill · GLB writer drill · vehicle probe drill · mesh layout, prep and deploy drills · Workshop compaction drill · rig_anim and vehicle_rig drills · schema parity · hand-list gate | parity + hand-list; compile check and drills stay local | EVERYTHING AT ONCE: the longest step's time |
 
-**Since 2026-10-11 the drills run concurrently.** The thirteen drills are independent (each works in its own temp
-directory and builds its own exe), so `check.sh` starts them together (`run_bg`), each into its own log, and prints
-the logs in declaration order. Each worker records its elapsed time and reports progress as soon as it finishes;
-the wall time is the longest drill's. Measured on
-the deploy port's branch: 870 s where the sequence took about 1,500. Inside the deploy drill the ~160 single-job
+**Since 2026-10-11 the drills run concurrently, and since 2026-10-29 everything after the build does.** The drills
+are independent (each works in its own temp directory and builds its own exe), so `check.sh` starts them together
+(`run_bg`), each into its own log, and prints the logs in declaration order. Each worker records its elapsed time and
+reports progress as soon as it finishes; the wall time is the longest step's. Measured on the deploy port's branch:
+870 s where the sequence took about 1,500. Until 2026-10-29 the source guards still ran in sequence BEFORE the drills
+started - nine minutes of `check-member-shape.sh`, `drill-reader-gates.sh` and their kin on a tree of 340 C# files -
+and the gate's wall was those nine plus the deploy drill's ten. Now the build and the unit tests run first (they are
+what everything else assumes) and every other step starts at once; the reader-gate drill, which plants a wrapper in
+`Patches/` and runs the catalog and member-shape gates against it, plants in a COPY of the tree (`git ls-files` of the
+C# sources and `tools/` into its temp folder) so it runs beside the very gates it tests and no gate ever sees its plant. Inside the deploy drill the ~160 single-job
 tamper replays (one drill run per mutated dump) run eight at a time up front (`prerun_tampers`, `DEPLOY_PAR`), and
 every loop requires an exact exit code from `$PAR/<dump name>.rc` plus its expected diagnostic. Jobs and dump paths
 are passed as NUL-delimited arguments, preserving spaces and quotes. `Tests/test_parallel_gate.py` exercises these

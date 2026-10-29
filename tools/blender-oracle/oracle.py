@@ -16,6 +16,7 @@ Old records require a one-time refresh; failed writes or changing inputs do not 
     oracle.py store --store S --drill D --name N --wtmp W [--tmpd T] [--wroot R] --rc RC --raw FILE [--dirs rel...] [--blender EXE] [--arg VALUE]... [--expected-key KEY] -- item...
     oracle.py load  --store S --drill D --name N --wtmp W [--tmpd T] [--wroot R] --raw FILE [--dirs rel...] [--arg VALUE]... -- item...
     oracle.py key   --wtmp W [--tmpd T] [--wroot R] -- item...            (prints the key; for tests and curiosity)
+    oracle.py deps  --root R -- item...   (the tracked Python files the .py items reach by import or by name, as JSON)
 
 load prints "RC <n>" on success (exit 0); exit 99 when there is no usable record (the reason printed); exit 1 on an error.
 An existing input file is content-keyed. A .txt/.json/.args input is a recursive list, including paths used as JSON keys.
@@ -218,6 +219,44 @@ def describe_items(items, paths, arguments=()):
     return out
 
 
+def dependencies(root, items):
+    """The tracked Python files under the checkout that the .py items reach: what each imports (`import x`, `from x import`)
+    and what each names as a `.py` file in a whole string literal (a script read and exec'd, a chunk cut from a sibling),
+    followed through the files found. Resolved among the files git tracks, in the naming file's own folder first, then by basename anywhere under the
+    checkout. NOT every tracked Python file (the first record format 2 keyed on all 63 of them, 2026-10-29, so an edit to
+    any drill's fixture generator staled every drill's record and cost a 20-minute refresh): the closure is what Blender
+    can execute for this invocation, and nothing else can change its output."""
+    import subprocess
+    listing = subprocess.run(["git", "-c", "safe.directory=" + root, "-C", root, "ls-files", "-z", "--", "*.py"],
+                             capture_output=True, check=True).stdout
+    tracked = {}
+    for rel in listing.decode("utf-8", "surrogateescape").split("\0"):
+        if rel: tracked[os.path.normcase(os.path.abspath(os.path.join(root, rel)))] = os.path.join(root, rel).replace("\\", "/")
+    by_base = {}
+    for absolute in tracked.values(): by_base.setdefault(os.path.basename(absolute).lower(), []).append(absolute)
+    queue = [p for p in (as_path(i) for i in items) if p and p.lower().endswith(".py")]
+    seen = set(); out = []
+    while queue:
+        current = queue.pop()
+        identity = os.path.normcase(os.path.abspath(current))
+        if identity in seen: continue
+        seen.add(identity)
+        with open(current, "r", encoding="utf-8", errors="surrogateescape") as source: text = source.read()
+        names = set()
+        for match in re.finditer(r"^\s*(?:import|from)\s+([\w.]+(?:\s*,\s*[\w.]+)*)", text, re.M):
+            for name in match.group(1).split(","): names.add(name.strip().split(".")[0] + ".py")
+        # a .py NAME counts only as a whole string literal (`"vehicle_rig.py"`, `'../shared/rows.py'`): prose in comments
+        # and docstrings names scripts constantly ("rig_anim.py's own helper") and would pull half the tree in
+        for match in re.finditer(r"""(["'])([\w./\\~-]+\.py)\1""", text): names.add(match.group(2).replace("\\", "/"))
+        for name in names:
+            candidates = [os.path.join(os.path.dirname(current), name)] + by_base.get(os.path.basename(name).lower(), [])
+            for candidate in candidates:
+                key = os.path.normcase(os.path.abspath(candidate))
+                if key in tracked and key not in seen:
+                    queue.append(tracked[key]); out.append(tracked[key]); break
+    return sorted(set(out))
+
+
 def key_of(described):
     return hashlib.blake2b(json.dumps(described, sort_keys=True).encode("utf-8"), digest_size=16).hexdigest()
 
@@ -246,7 +285,7 @@ def differences(recorded, current):
 
 
 def parse(argv):
-    if not argv or argv[0] not in ("store", "load", "key"):
+    if not argv or argv[0] not in ("store", "load", "key", "deps"):
         print(__doc__); sys.exit(2)
     op = argv[0]; opts = {"dirs": [], "args": []}; i = 1
     while i < len(argv):
@@ -408,6 +447,9 @@ def load(o, paths, described, key, target):
 def main(argv):
     op, o = parse(argv)
     try:
+        if op == "deps":
+            if not o.get("root"): print("FAIL - --root is required"); return 2
+            print(json.dumps(dependencies(o["root"].replace("\\", "/"), o["items"]))); return 0
         paths = Paths(o.get("wtmp"), o.get("tmpd"), o.get("wroot"))
         described = describe_items(o["items"], paths, o["args"]); key = key_of(described)
         if op == "key": print(key); return 0

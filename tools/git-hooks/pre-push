@@ -2,7 +2,7 @@
 # pre-push hook — blocks a push if the fast check gate fails, so a broken build / failing test / drifted schema
 # can't land. Version-controlled: enabled once per clone with
 #     git config core.hooksPath tools/git-hooks
-# Runs tools/check.sh (about 16 minutes with the Blender-parity drills; the source-only steps take seconds). A step
+# Runs tools/check.sh (everything after the build at once: the wall is its longest drill, the deploy drill). A step
 # whose prerequisite is absent reports [SKIP] and FAILS the push — HAF_ALLOW_SKIP=1 git push accepts a partial gate on
 # purpose. Bypass the gate entirely ONLY in a genuine emergency:  git push --no-verify
 # A push that only DELETES refs (git push origin --delete <branch>) changes nothing the gate guards, yet it ran the full

@@ -374,7 +374,7 @@ DEPLOY_PAR=2 prerun_tampers "$ROOT/tamper inputs O'Brien"
         source = (ROOT / "tools/deploy_drill.sh").read_text(encoding="utf-8")
         controls = source[source.index("for control in missing exit; do"):source.index("for mode in log matrix")]
         negative = source[source.index("for mode in log matrix"):source.index("for mode in exit_zero")]
-        negative = negative[negative.index('  cp "$PAR/'):negative.rindex("done")]
+        negative = negative[negative.index('  _t="$WTMP/missing_dec/$mode.txt"'):negative.rindex("done")]
         par = self.path / "par"; par.mkdir()
         for name in ("missing_intact", "exit_intact"):
             write(par / (name+".txt"), "PASS control\n")

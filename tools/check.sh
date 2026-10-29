@@ -5,7 +5,8 @@
 #
 # Deliberately NOT here (too slow / need Unity or the game): deploy_regression.sh (Blender golden-master), the
 # in-editor Feature Test, and the in-game binding report (haf_bindings_report.txt). The source-only steps take
-# seconds; with the Blender-parity drills (in parallel since 2026-10-11) the whole gate takes about 16 minutes.
+# seconds; with the parity drills (in parallel since 2026-10-11, everything after the build at once since 2026-10-29,
+# Blender replaced by its record since 2026-10-28) the whole gate takes about as long as its longest drill.
 #
 # A step's exit status means: 0 PASS (its claim held), 3 SKIP (a prerequisite was absent, so its claim was NOT
 # tested; the step's own SKIP line says what did run), anything else FAIL. SKIP is not PASS (2026-10-11): until then a
@@ -42,8 +43,9 @@ run() {  # run <label> <command...>: in sequence, the output as it comes
 }
 # ---- ONE GATE AT A TIME on this machine (2026-10-12) ----
 # Two gates at once — two sessions pushing, or a push beside a drill run — have failed each other for weeks: the
-# reader-gate drill's plant vanishing under the other gate, and the timing test in Tests/test_parallel_gate.py missing
-# its deadline under the other gate's thirteen drills (two rejected pushes on 2026-10-11 alone). The lock is a DIRECTORY
+# reader-gate drill's plant vanishing under the other gate (it plants in a copy of the tree since 2026-10-29), and the
+# timing test in Tests/test_parallel_gate.py missing its deadline under the other gate's thirteen drills (two rejected
+# pushes on 2026-10-11 alone). The lock is a DIRECTORY
 # (mkdir is atomic) under the user's temp dir, so every checkout and worktree shares it. A waiter says so once, here and
 # in PROGRESS.md, then polls. The holder heartbeats; a holder that stopped beating (a killed shell) is taken over.
 LOCK="${HAF_GATE_LOCK:-${TEMP:-${TMP:-/tmp}}/haf-gate.lock}"
@@ -158,45 +160,57 @@ run "plugin build (dotnet build -c Release)" dotnet build "$ROOT/HumankindAssetF
 # 2) unit tests — the pure logic that runs outside Unity (parse/schema/reflection-resolution/smoke rule).
 run "plugin unit tests (dotnet test)" dotnet test "$ROOT/Tests/HumankindAssetFramework.Tests.csproj" -c Release --nologo -v q
 
+# The two test files that time SUBPROCESSES (a gate's workers, a shell sourcing the oracle wrapper) run first, beside
+# each other only: under the thirteen drills they timed out (the refresh of 2026-10-29: five tests at the 60 s limit),
+# as they did under a second gate before the lock. They take about a minute together.
+run_bg "parallel gate regression tests (completion, paths and verdicts)" python "$ROOT/Tests/test_parallel_gate.py"
+run_bg "blender oracle tests (the recorded Blender oracle: keyed by its inputs, stale-aware, replayable)" python "$ROOT/Tests/test_blender_oracle.py"
+run_bg_wait
+
+# ---- EVERYTHING ELSE RUNS AT ONCE (2026-10-29) ----
+# The source guards, the remaining Python test files and the drills are independent of one another: each reads the tree or works
+# in its own mktemp directory, and none writes into the checkout (the reader-gate drill plants in a COPY of the tree
+# since this date). In sequence the guards alone took nine minutes before the first drill started, and the gate's wall
+# was those nine plus its longest drill; now the wall is the longest step. The logs are printed in declaration order
+# when the last one ends (run_bg_wait), so a failure's output is still found under its heading.
 # 3) docs guard — relative links resolve, docs/notes/ banners present, no flat-wiki basename collisions. The docs
 #    publish to the repo, the Pages site AND the wiki, all resolving relative links, so one bad move breaks three.
-run "docs guard (links + notes convention)" bash "$ROOT/tools/check-docs.sh"
+run_bg "docs guard (links + notes convention)" bash "$ROOT/tools/check-docs.sh"
 
 # 3b) binding-catalog SURFACE — bindcheck proves the catalog RESOLVES against the game; this proves it COVERS the code.
 #     Pure source analysis (no game DLLs), so it belongs in the fast gate; bindcheck stays on the game-update trigger.
-run "binding catalog surface (every by-name site catalogued)" bash "$ROOT/tools/check-catalog.sh"
+run_bg "binding catalog surface (every by-name site catalogued)" bash "$ROOT/tools/check-catalog.sh"
 
 # 3c) hot path — nothing Plugin.Update() runs every frame may still call itself a SPIKE (a label that outlives its
 #     experiment is how 1,350 µs/frame hid for weeks). EXPERIMENTAL is allowed only when it names its config gate.
-run "hot path (no shipped spikes in Update)" bash "$ROOT/tools/check-hot-path.sh"
+run_bg "hot path (no shipped spikes in Update)" bash "$ROOT/tools/check-hot-path.sh"
 
 # 3d) parse shape — `float x = D; TryParse(…, out x)` silently overwrites D with 0. Four sites carried it before
 #     2026-08-23; two were live and NOTHING else could see them (no throw, no log, a plausible number). Source-only.
-run "parse shape (no dead-default TryParse)" bash "$ROOT/tools/check-parse-shape.sh"
+run_bg "parse shape (no dead-default TryParse)" bash "$ROOT/tools/check-parse-shape.sh"
 
 # 3e) member shape — the same bug class one layer down: `bool x = true; try { x = Convert.ToBoolean(GetMember(…)) }
 #     catch {}`. GetMember returns null for a renamed member and Convert.To*(null) does NOT throw, so the catch
 #     never runs and the default is dead. Two live sites then did `if (!x) continue;` — work skipped forever.
-run "member shape (no dead-sentinel Convert(GetMember))" bash "$ROOT/tools/check-member-shape.sh"
+run_bg "member shape (no dead-sentinel Convert(GetMember))" bash "$ROOT/tools/check-member-shape.sh"
 
 # 3f) the gate that tests 3b and 3e — plants a null-guarded reader wrapper under an unknown name plus the shapes
 #     those gates exist to catch, and FAILS if either gate passes. Their helper lists are hand-maintained; a review of
-#     PR #48 (2026-09-14) showed a 3-line body window let exactly this wrapper through. Seconds; source-only.
-run "reader-gate drill (the gates refuse an unknown wrapper)" bash "$ROOT/tools/drill-reader-gates.sh"
+#     PR #48 (2026-09-14) showed a 3-line body window let exactly this wrapper through. Source-only; it plants in
+#     its own copy of the tree, so it runs beside the gates it tests.
+run_bg "reader-gate drill (the gates refuse an unknown wrapper)" bash "$ROOT/tools/drill-reader-gates.sh"
 
 # 4) registry schema parity — IN-REPO since 2026-08-24. The authoring tools moved from the ENCReload Unity project
 #    into editor/, so both halves of the contract now live here: the guard compares the plugin's Newtonsoft + regex
 #    parse against the baker's ModelDef with no sibling checkout, no best-effort [SKIP] branch, and no direction it
 #    can only be checked from. That [SKIP] used to fire on every runner, which is exactly how a plugin-side change
 #    went unguarded until somebody happened to push the other repo.
-run "registry schema parity" bash "$ROOT/tools/check_schema_parity.sh"
+run_bg "registry schema parity" bash "$ROOT/tools/check_schema_parity.sh"
 
 # 5) editor source guards — also in-repo since the move. Both guard editor/, so they belong with it.
-run "parallel gate regression tests (completion, paths and verdicts)" python "$ROOT/Tests/test_parallel_gate.py"
-run "blender oracle tests (the recorded Blender oracle: keyed by its inputs, stale-aware, replayable)" python "$ROOT/Tests/test_blender_oracle.py"
 # CI had this one and the hook did not (2026-10-12): a vehicle_rig.py helper change passed the hook and failed after the push.
-run "vehicle lab math tests (oar calibration guard)" python "$ROOT/Tests/test_vehicle_rig_math.py"
-run "recipe migration tests (a Vehicle Lab recipe across a Model Workshop fuse)" python "$ROOT/Tests/test_recipe_migrate.py"
+run_bg "vehicle lab math tests (oar calibration guard)" python "$ROOT/Tests/test_vehicle_rig_math.py"
+run_bg "recipe migration tests (a Vehicle Lab recipe across a Model Workshop fuse)" python "$ROOT/Tests/test_recipe_migrate.py"
 #    5a) The editor compiles. Roslyn against Unity's own reference assemblies — the ONE check that needs a licensed
 #        Unity install (UnityEditor.dll + the MonoBleedingEdge profile), so it stays hook-only and never runs in CI.
 # No guard: the script itself fails LOUD when Unity/dotnet/Newtonsoft are absent. The old guard here was
@@ -225,17 +239,17 @@ run_bg "deploy drill (from the Blender record: Blender's posed state of an impor
 run_bg "Workshop compaction drill (what no node uses is left out; every part reads as before - GLB reader and the Blender record; SKIP without the project or the record)" bash "$ROOT/tools/workshop_compact_drill.sh"
 run_bg "rig_anim drill (step (a) the stage dump, from the Blender record: Blender ran rig_anim.py on every animated recipe as the Factory does, cut at its four stages, the scene after each on record, complete and consistent, the census of the branches the recipes take; steps (b) to (e), all four stages in C#: BlenderRigAnim's scene equal to Blender's row for row on every dumped job after each stage, the albedo by its dimensions; step (f): the GLB rig route - BlenderRigExport's file equal to the one Blender's glTF exporter writes of the same scene, nodes, skins, primitives, materials, channels and bytes; step (g): the Factory's wrapper (BlenderRigAnimInProcess) writes each exported job's file and names its clips; SKIP without the project)" bash "$ROOT/tools/riganim_drill.sh"
 run_bg "vehicle_rig drill (all five ported stages and the Generate wrapper: saved recipes and fixtures against the Blender record, GLB bytes and ordered logs, damaged-evidence rejection; SKIP without the record or the recipes)" bash "$ROOT/tools/vehiclerig_drill.sh"
-run_bg_wait
 #    5b) The ownership-rebase hand-lists. A field the UI edits but the window's rebase doesn't re-apply is thrown
 #        away on every Save — silent, and the reason this gate exists. Pure source analysis, so CI can run it too.
-run "hand-list gate (ownership rebases)" bash "$ROOT/tools/check_handlists.sh"
+run_bg "hand-list gate (ownership rebases)" bash "$ROOT/tools/check_handlists.sh"
 
 #    5c) Every path in editor/ has a COMMITTED .meta. Unity generates missing ones under Assets/ and cannot in a
 #        package folder, so the working copy is always right and only the commit is short — invisible from the
 #        authoring side by construction. Broke the install three times on 2026-08-24 (package.json + asmdef, then
 #        HafPackageContext.cs, then the Plugins FOLDER); an ignored asmdef means the package compiles to nothing.
-run "package meta (every editor/ path has one)" bash "$ROOT/tools/check-package-meta.sh"
-run "bake-test golden checksums (SKIP without the project)" bash "$ROOT/tools/check-goldens.sh"
-run "exit status (no gate script reads a status from the end of a pipeline)" bash "$ROOT/tools/check-exit-status.sh"
+run_bg "package meta (every editor/ path has one)" bash "$ROOT/tools/check-package-meta.sh"
+run_bg "bake-test golden checksums (SKIP without the project)" bash "$ROOT/tools/check-goldens.sh"
+run_bg "exit status (no gate script reads a status from the end of a pipeline)" bash "$ROOT/tools/check-exit-status.sh"
+run_bg_wait
 
 verdict; exit $?
