@@ -401,14 +401,18 @@ def relative_folder(value):
 
 
 def contained(root, relative):
-    root = Path(root).resolve(); target = root.joinpath(*relative.split("/"))
-    resolved = target.resolve()
-    if resolved == root or root not in resolved.parents: raise ValueError("path escapes its root: " + relative)
-    check = root
-    for part in relative.split("/"):
+    r"""root/relative, with relative checked lexically (no empty, '.', '..', drive or rooted part) and every component
+    checked for a link. Nothing is resolved: resolving the target through the filesystem raced with a sibling shard's
+    os.replace of a record next to it - Windows then spelled the target in the \\?\ form, the resolved root was "not a
+    parent", and one `store` in a few hundred parallel ones failed with "path escapes its root" (2026-10-29, 4 of 400)."""
+    parts = relative.replace("\\", "/").split("/")
+    if not parts or any(part in ("", ".", "..") or ntpath.splitdrive(part)[0] or part.endswith((".", " ")) for part in parts):
+        raise ValueError("path escapes its root: " + relative)
+    root = Path(root); check = root
+    for part in parts:
         check = check / part
         if linked(check): raise ValueError("linked path is not an oracle artifact: " + str(check))
-    return target
+    return check
 
 
 def entry_dir(opts):
