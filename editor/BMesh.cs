@@ -108,6 +108,34 @@ public sealed class BMesh
     // reused); with the free list empty the next slot in address order is taken. The iteration (BM_ITER_MESH) walks the slots
     // in address order, the free ones skipped - so a slot's number is its place in every walk, whoever lives there now.
     readonly Stack<int> freeV = new Stack<int>(), freeE = new Stack<int>(), freeL = new Stack<int>(), freeF = new Stack<int>();
+    // The native collapse edits the alive arrays directly. Replay each pool's deaths in their original order,
+    // retaining any earlier frees, so a later edit takes the same slots as after the managed collapse.
+    internal void RecordNativeKills(int kind, int[] killed)
+    {
+        var pool = kind == 0 ? freeV : kind == 1 ? freeE : kind == 2 ? freeL : freeF;
+        foreach (int index in killed) pool.Push(index);
+    }
+    /// <summary>A pool's free list as the native dissolve takes and returns it: bottom to top (the top is the slot reused next).</summary>
+    internal int[] FreeList(int kind)
+    {
+        var pool = kind == 0 ? freeV : kind == 1 ? freeE : kind == 2 ? freeL : freeF;
+        var a = pool.ToArray(); Array.Reverse(a); return a;   // a Stack enumerates its top first
+    }
+    /// <summary>A result of native/hafbmesh.cpp becomes this mesh (HafNativeKernels.BMesh.cs): the arrays, the counts and the free
+    /// lists (bottom to top), so a later creation takes the slot the managed twin would have taken.</summary>
+    internal void Adopt(int[] ve, bool[] vAlive, float[] vco, float[] vno, byte[] vflag, int[] ev1, int[] ev2, int[] el, int[] ediskNext, int[] ediskPrev, bool[] eAlive, byte[] eflag,
+        int[] lv, int[] le, int[] lf, int[] lnext, int[] lprev, int[] lrn, int[] lrp, bool[] lAlive, int[] flfirst, int[] flen, int[] fmat, float[] fno, bool[] fAlive, byte[] fflag,
+        int[] counts, int[] freeVerts, int[] freeEdges, int[] freeLoops, int[] freeFaces)
+    {
+        VE = ve; VAlive = vAlive; VCo = vco; VNo = vno; VFlag = vflag; VertCount = counts[0]; TotVert = counts[1];
+        EV1 = ev1; EV2 = ev2; EL = el; EDiskNext = ediskNext; EDiskPrev = ediskPrev; EAlive = eAlive; EFlag = eflag; EdgeCount = counts[2]; TotEdge = counts[3];
+        LV = lv; LE = le; LF = lf; LNext = lnext; LPrev = lprev; LRadialNext = lrn; LRadialPrev = lrp; LAlive = lAlive; LoopCount = counts[4]; TotLoop = counts[5];
+        FLFirst = flfirst; FLen = flen; FMat = fmat; FNo = fno; FAlive = fAlive; FFlag = fflag; FaceCount = counts[6]; TotFace = counts[7];
+        freeV.Clear(); foreach (int i in freeVerts) freeV.Push(i);
+        freeE.Clear(); foreach (int i in freeEdges) freeE.Push(i);
+        freeL.Clear(); foreach (int i in freeLoops) freeL.Push(i);
+        freeF.Clear(); foreach (int i in freeFaces) freeF.Push(i);
+    }
     /// <summary>The loop slot a creation would take next (the callers of FaceCreate size their per-loop layers by it).</summary>
     public int LoopSlotCapacity => LoopCount + 3;
 

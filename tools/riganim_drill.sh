@@ -46,13 +46,7 @@ for f in "$CSC" "$API/mscorlib.dll"; do
   [ -f "$f" ] || { echo "FAIL — Unity prerequisite not found: $f   (set UNITY=<Unity 2021.3 .../Editor/Data>; rig_anim was NOT drilled)"; exit 2; }
 done
 command -v dotnet >/dev/null 2>&1 || { echo "FAIL — dotnet not on PATH (rig_anim was NOT drilled)"; exit 2; }
-BLENDER="${BLENDER:-}"
-if [ -z "$BLENDER" ]; then
-  for base in "/c/Program Files/Blender Foundation" "/c/Program Files (x86)/Blender Foundation"; do
-    cand=$(ls -d "$base"/Blender* 2>/dev/null | sort -V | tail -1); [ -n "$cand" ] && [ -x "$cand/blender.exe" ] && { BLENDER="$cand/blender.exe"; break; }
-  done
-fi
-[ -n "$BLENDER" ] || { echo "SKIP — rig_anim drill: Blender not found (BLENDER=<exe> to force); rig_anim was NOT drilled"; exit 3; }
+. "$ROOT/tools/blender_oracle.sh"; oracle_init riganim "rig_anim drill"   # replay (the gate: no Blender), record (the refresh) or live
 SCRIPT="$ROOT/editor/Tools~/rig_anim.py"
 [ -f "$SCRIPT" ] || { echo "FAIL — rig_anim.py not found at $SCRIPT"; exit 1; }
 python "$ROOT/tools/riganim-drill/test_riganim_jobs.py" || { echo "FAIL — rig_anim job mapping regression checks"; exit 1; }
@@ -65,6 +59,7 @@ done
 
 TMPD="$(mktemp -d)"; trap 'rm -rf "$TMPD"' EXIT
 cp "$NEWTONSOFT" "$TMPD/Newtonsoft.Json.dll"
+cp "$ROOT/editor/Plugins/x86_64/hafkernels.dll" "$TMPD/hafkernels.dll"   # the native kernels beside the exe (HafNativeKernels.cs); absent, the managed twins run
 WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"; WTMP="$(cygpath -m "$TMPD" 2>/dev/null || echo "$TMPD")"
 E="$WROOT/editor"
 # the drill and the stage 1 model (BlenderRigAnim.cs) with the editor files it is built from - the deploy drill's list
@@ -74,7 +69,7 @@ OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -optimize+ -out:"$WTMP/riganim.e
   "$E/BlenderExport.cs" "$E/BlenderReduce.cs" "$E/BlenderDecimate.cs" \
   "$E/HafModel.cs" "$E/GlbReader.cs" "$E/HafTransforms.cs" "$E/BlenderNames.cs" "$E/BlenderPosedState.cs" "$E/BlenderTrig.cs" "$E/BlenderEigen.cs" "$E/BlenderMesh.cs" "$E/BMesh.cs" "$E/BlenderColor.cs" \
   "$E/VehicleProbe.cs" "$E/VehicleProbe.Visibility.cs" "$E/VehicleProbe.Islands.cs" "$E/VehicleProbe.InsideOut.cs" \
-  "$E/VehicleProbe.BlenderWorld.cs" "$E/VehicleProbe.BlenderSkin.cs" "$E/VehicleProbe.CustomNormals.cs" "$E/VehicleProbe.Merge.cs" "$E/VehicleProbe.BlenderArmature.cs" "$E/VehicleProbe.BlenderPose.cs" 2>&1); rc=$?
+  "$E/VehicleProbe.BlenderWorld.cs" "$E/VehicleProbe.BlenderSkin.cs" "$E/VehicleProbe.CustomNormals.cs" "$E/HafNativeKernels.cs" "$E/HafNativeKernels.Collapse.cs" "$E/HafNativeKernels.BMesh.cs" "$E/VehicleProbe.Merge.cs" "$E/VehicleProbe.BlenderArmature.cs" "$E/VehicleProbe.BlenderPose.cs" 2>&1); rc=$?
 if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/riganim.exe" ]; then echo "$OUT" | grep -E "error" | head -20; echo "FAIL — the rig_anim drill did not compile (csc rc=$rc)"; exit 1; fi
 
 PACK=$(ls "$PROJECT"/Assets/Pack/*/pack.json 2>/dev/null | head -1)
@@ -119,10 +114,11 @@ t0=$(date +%s)
 BPIDS=()
 for ((k = 0; k < JOBS; k++)); do
   mkdir -p "$TMPD/work_$k"
-  "$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/riganim-drill/blender_riganim_dump.py")" -- "$(cygpath -m "$SCRIPT")" "$WTMP/shard_$k.txt" "$WTMP/work_$k" > "$TMPD/blender_raw_$k.txt" 2>&1 &
+  oracle_blender "dump_$k" "$TMPD/blender_raw_$k.txt" --dir "work_$k" --key "$ROOT/tools/riganim-drill/blender_riganim_dump.py" "$SCRIPT" "$WTMP/shard_$k.txt" "$WTMP/work_$k" -- --background --python "$(cygpath -m "$ROOT/tools/riganim-drill/blender_riganim_dump.py")" -- "$(cygpath -m "$SCRIPT")" "$WTMP/shard_$k.txt" "$WTMP/work_$k" &
   BPIDS+=($!)
 done
 brc=0; for pid in "${BPIDS[@]}"; do wait "$pid" || brc=$?; done
+oracle_check
 t1=$(date +%s)
 n_b=0
 for ((k = 0; k < JOBS; k++)); do
@@ -170,6 +166,9 @@ tr -d '\r' < "$TMPD/tampers_raw.txt" > "$TMPD/tampers.txt"
 if [ "$controlrc" -ne 0 ] || ! grep -qE "^PASS " "$TMPD/intact_out.txt"; then head -5 "$TMPD/intact_out.txt"; echo "FAIL — rig_anim drill rejected the intact control (rc=$controlrc)"; exit 1; fi
 "$TMPD/riganim.exe" --export "$WTMP/missing/jobs.txt" "$WTMP/missing/intact.txt" > "$TMPD/intact_s1.txt" 2>&1; controlrc=$?
 if [ "$controlrc" -ne 0 ] || ! grep -qE "^PASS " "$TMPD/intact_s1.txt"; then head -5 "$TMPD/intact_s1.txt"; echo "FAIL — rig_anim drill: the stage 1-2 model rejected the intact control (rc=$controlrc)"; exit 1; fi
+# The SHA corruption control uses an image-free export whose complete bytes can be compared.
+"$TMPD/riganim.exe" --export "$WTMP/missing/jobs_sha.txt" "$WTMP/missing/intact_sha.txt" > "$TMPD/intact_sha.txt" 2>&1; controlrc=$?
+if [ "$controlrc" -ne 0 ] || ! grep -qE "^PASS " "$TMPD/intact_sha.txt" || ! grep -qE "^EXPORT .*the GLB.s [0-9]+ bytes$" "$TMPD/intact_sha.txt"; then head -5 "$TMPD/intact_sha.txt"; echo "FAIL — rig_anim drill rejected the byte-comparable SHA control (rc=$controlrc)"; exit 1; fi
 n_t=0; n_s1t=0; n_s2t=0; n_s3t=0; n_s4t=0; n_s5t=0
 while IFS= read -r mode; do
   [ -n "$mode" ] || continue
@@ -218,7 +217,7 @@ while IFS= read -r mode; do
     *) echo "FAIL — rig_anim drill: the tamper '$mode' has no expected reason here (add it)"; exit 1;;
   esac
   jf="$WTMP/missing/jobs.txt"
-  case "$mode" in EXIT_ran_full|EXIT_marked_wrong_stage) jf="$WTMP/missing/jobs_exit.txt";; S3_*) jf="$WTMP/missing/jobs_s3.txt";; esac
+  case "$mode" in S5_XGLB_sha) jf="$WTMP/missing/jobs_sha.txt";; EXIT_ran_full|EXIT_marked_wrong_stage) jf="$WTMP/missing/jobs_exit.txt";; S3_*) jf="$WTMP/missing/jobs_s3.txt";; esac
   S1_MODE=(); case "$mode" in S1_*) S1_MODE=(--export); n_s1t=$((n_s1t + 1));; S2_*) S1_MODE=(--export); n_s2t=$((n_s2t + 1));; S3_*|S3F_*) S1_MODE=(--export); n_s3t=$((n_s3t + 1));; S4_*) S1_MODE=(--export); n_s4t=$((n_s4t + 1));; S5_*) S1_MODE=(--export); n_s5t=$((n_s5t + 1));; esac
   "$TMPD/riganim.exe" "${S1_MODE[@]}" "${KEY_MODE[@]}" "$jf" "$WTMP/missing/$mode.txt" > "$TMPD/t_$mode.txt" 2>&1; badrc=$?
   if [ "$badrc" -ne 1 ] || ! grep -E "^FAIL " "$TMPD/t_$mode.txt" | grep -qE "$reason"; then

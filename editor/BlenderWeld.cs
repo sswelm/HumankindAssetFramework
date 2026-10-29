@@ -141,6 +141,14 @@ public static class BlenderWeld
     public static Dictionary<int, int> FindDoubles(BMesh bm, IReadOnlyList<int> verts, float dist)
     {
         int n = verts.Count;
+        if (HafNativeKernels.Available)
+        {
+            // native/hafbmesh.cpp: the same kd-tree balance, range walk and target choice (HafNativeKernels.BMesh.cs)
+            var dup = HafNativeKernels.FindDoubles(bm.VCo, bm.VertCount, verts, dist);
+            var nativeMap = new Dictionary<int, int>();
+            for (int i = 0; i < n; i++) if (dup[i] != -1 && dup[i] != i) nativeMap[verts[i]] = verts[dup[i]];
+            return nativeMap;
+        }
         var tree = new KdTree(n);
         for (int i = 0; i < n; i++) { int v = verts[i]; tree.Insert(i, bm.VCo[3 * v], bm.VCo[3 * v + 1], bm.VCo[3 * v + 2]); }
         tree.BalanceAll();

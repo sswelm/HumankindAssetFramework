@@ -38,7 +38,7 @@ This page is a map, not a reading list. If this is your first visit, open
 - [**Troubleshooting.md**](Troubleshooting.md) — **something failed? start with the symptom.** Evidence order and direct routes to each maintained failure catalog.
 - [**Authoring-State-and-Deployment.md**](Authoring-State-and-Deployment.md) — what each stage writes, which changes need Save/Bake/Build/Relaunch, and which copy is authoritative.
 - [**Mod-Editor-Version-XML-Recovery.md**](Mod-Editor-Version-XML-Recovery.md) — repair the Mod Editor's `XML document (2, 10)` Application Version failure without changing Unity versions.
-- [**Building.md**](Building.md) — build the plugin; the Blender dependency.
+- [**Building.md**](Building.md) — build the plugin; the Blender dependency; the editor's native kernels DLL (how it is built, held to its sources, and why a Unity restart follows an update).
 - [**Backup.md**](Backup.md) — five complementary protections for uncommitted, irreplaceable, generated, and deployed working data.
 
 ### Author content
@@ -98,7 +98,7 @@ Follow the linked page rather than assuming every axis is a `models[]` field.
 ### Project & process — maintainer-facing
 
 - [**Decisions.md**](Decisions.md) — the **ADR log**: settled decisions and the *why*. Check here before proposing a change to any of them.
-- [**Testing.md**](Testing.md) — the testing strategy: what's unit-tested, what's covered by in-editor instruments, and what deliberately isn't.
+- [**Testing.md**](Testing.md) — the testing strategy: what's unit-tested, what's covered by in-editor instruments, and what deliberately isn't; the editor tools' speed, measured (the native kernels section: probe, reduce and fuse before and after, in Unity).
 - [**Framework-Review.md**](Framework-Review.md) — the living hardening roadmap: verified review findings, prioritized, with what was done when.
 - [**Review-Backlog.md**](Review-Backlog.md) — findings verified real and deliberately deferred, ranked by when they'll bite.
 

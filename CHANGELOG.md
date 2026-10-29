@@ -10,6 +10,161 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE PUSH GATE RUNS NO BLENDER (2026-10-28).** Nine parity drills ran Blender on every push (the deploy drill alone
+  800 s). Each Blender invocation now goes through a recorded oracle: `tools/refresh_blender_oracle.sh` runs the gate
+  once with Blender and stores every invocation's output, exit code and written folders under the modding project's
+  Tools/blender_oracle, keyed by the dump script, the Blender script under test and the input files' bytes; the push
+  replays the record. A missing or stale record is a SKIP that names what changed and fails the push. The C# side of
+  every drill still runs on every push against Blender's recorded rows, bytes and folders.
+  Review closes stale-key gaps for actual arguments, shared Python helpers, recursive lists and external glTF assets.
+  Format 2 checksums metadata and payloads, confines restoration to requested output folders, reproduces absent folders,
+  preserves literal markers and arbitrary stdout bytes, and stages refreshes without discarding the previous record on
+  failure. Changed inputs during recording refuse publication. Earlier records require one refresh. Vehicle dump WORK
+  headers are checked for position, uniqueness and content even with a valid seal. Diagnostics are collected separately
+  before appending to stdout, so warnings cannot split data rows.
+- **THE BAKE TESTS SAY WHICH KERNELS THEY RAN (2026-10-28).** The whole window went green (252 passed) with the C++
+  kernels loaded, but nothing in the report said so - a stale or missing hafkernels.dll would have made every row a
+  managed run that still passed. A Kernels dropdown now picks what the rows that can reach a kernel exercise: the C++
+  kernels, the C# twins, or both in turn under distinct titles against the same goldens; a first row fails when the DLL
+  did not load; the report header names the mode and the loaded status. The dropdown's table is pure code under unit test.
+  Review uses the immutable loader finding for capability, preserves the caller's switch, and keeps Blender-only Lab rows
+  out of native/managed repetition. Raw-rig and deploy conversion rows include their normal kernels. A temporary-project
+  Unity drill covers actual execution, reports, errors and cancellation;
+  the documentation distinguishes summary/tolerance checks from output-byte comparisons.
+- **THE GLB RIG ROUTE'S THIRD ACCEPTANCE RUN, ONE FINDING (2026-10-28).** 22 of 23 equal after PR #216; the UniversalTanks'
+  hull measured 1.018 degrees between the routes at 12.083 s against the 1-degree clip tolerance - the source and the GLB
+  route agree to the thousandth there, the FBX route is 1.0 degrees off (Unity's keyframe reduction kept 105 of 378 keys).
+  The row stops at its first failing frame, so the pair harness took the whole-timeline census (47,628 parent-space samples
+  on that entry): 41 over 1 degree, none over 1.5, the maximum 1.365 on a bone that jitters by tenths, the GLB route exact
+  there too. The clip rotation tolerance is 2 degrees, an empirical comparison policy. Review restores native Unity
+  rejection controls above that ceiling, adds acceptance/rejection boundary cases on weighted and unweighted chains,
+  and distinguishes the measurements from Unity's documented quaternion compression error.
+- **THE GLB RIG ROUTE'S SECOND ACCEPTANCE RUN, TWO FINDINGS (2026-10-28).** 21 of 23 equal after PR #214; the two drilled the
+  same way. The folded wrapper's node was still in the chain and the SDK's skeleton counted it as a bone (the ReconDrone's
+  89 against 88): the fold removes the node now, its children up to its place, the curve paths re-rooted. The UniversalTanks'
+  right drive gear sat 0.0061 units off at the first frame: the pose-bone reset after the rebake came too early - the slicing
+  refilled the pose bones and the strip of constant location curves left a stale location (probed in Blender) - so the
+  script resets again after the strip, the port mirrors it. The clip rotation tolerance is 1 degree: Unity's FBX import
+  keeps 117 of a spinning wheel's 378 keys and deviates 0.617 degrees from the source where the GLB route is exact.
+  Review preserves ancestor paths and animated child motion when removing nested or translated/rotated wrappers,
+  replaces a removed skin root with a live common ancestor, and invalidates pre-reset C# slim caches. Native Unity
+  counterexamples reproduce the failures and cover the repaired hierarchy at key and subframe times.
+- **THE VEHICLE LAB'S REDUCE STAGE RUNS ITS HOT STEPS AS C++ (2026-10-28).** Measured first in Unity's Mono with the stage's
+  own marks, with the Generate drill now shipping the native plugin into its project (it had run the C# route managed all
+  along): the Espana's reduce was the limited dissolve of its shroud, the collapse with its mesh build, the weld and the
+  BMesh builds. `native/hafbmesh.cpp` (DLL version 7) runs the BMesh build of a stage mesh, the weld grouping's corner walk,
+  bmesh_find_doubles' kd-tree search and the whole limited dissolve over its chunk jobs - on a copy with the same free lists,
+  which the managed mesh adopts - each exact, the written GLB byte-equal. The Espana's Generate 8.9 s -> 6.3 s, the Saleg's
+  20.0 s -> 15.3 s in Unity. `NativeBMeshTests` holds each kernel to its twin (two plants caught, one of them only by a
+  tie-prone fixture); the vehicle_rig drill holds the DLL to Blender on every saved recipe. **Restart Unity after the update:**
+  the DLL's version changed. Review fixes serialize first-use trig initialization and keep high-valence edge lookup
+  logarithmic, with exact fan-mesh parity and fresh-process concurrency checks. `docs/Testing.md`, Native kernels.
+- **THE GLB RIG ROUTE'S FIRST ACCEPTANCE RUN, FIFTEEN FINDINGS, FIVE CAUSES (2026-10-27).** The Bake Tests row that bakes
+  every animated glTF entry on the Blender FBX route and on the C# GLB route failed 15 of 23 the first time the user ran
+  it. Drilled on both routes' files imported the Factory's way in a batch Unity project: the row compared the UNPOSED
+  prefabs, which the two exporters define differently (eleven entries - the Factory's GLB import now poses its prefab at
+  the primary clip's first frame, the SDK's reference, and the row samples the first frame first); the FBX route shipped a
+  STALE bone location into a one-frame idle slice (the AntiTankIFV's tread links; the script resets its pose bones after
+  the rebake, the port mirrors it); an FBX-born glTF's 0.01 root wrapper is folded into the rig (the ReconDrone); the
+  Factory's GLB mesh welds equal vertices and drops collapsed triangles as Unity's FBX import does (the Lembos' four
+  triangles, the GreatGalley back under the eight-fragment cap); and pose streams one frame apart - the SDK's ceil of
+  length x frame rate on a float ulp - are accepted as such. Review guards preserve distinct vertex attributes, fold shared
+  bind poses once, retain nonuniform wrappers, and validate the SDK's packed word lengths symmetrically. `docs/Testing.md`, step (h).
+- **TWO BAKE TESTS ROWS READ RIGHT AGAIN (2026-10-27).** The "in-process rig slim" row failed twelve rigs on the albedo
+  PNG's bytes: Blender's `image.save` re-encodes the source through its own PNG writer, the port keeps the source's
+  bytes, and the pixels were identical (LightCruisers, proven pixel for pixel). The row holds the PNG pixel for pixel now.
+  In the "GLB rig route" row the port crashed on UniversalTanks because the output's folder did not exist yet under the
+  row's throwaway name; the port creates it. The row's other fifteen differences (rest bounds, pose streams, triangle
+  counts between the FBX and GLB routes) are the acceptance findings the backlog says that row exists to surface, not
+  regressions: the GLB route is not the default, and they are worked through before it becomes one.
+- **THE VEHICLE LAB GENERATES IN C# BY DEFAULT (2026-10-27).** The factory default of the Generate backend (neither the
+  recipe nor **Tools ▸ HAF ▸ Vehicle Generate default** naming one) is the C# port, with native kernels when available;
+  it was Blender until now, and a valid preference or recipe set earlier still wins. The backend labels say
+  "C# + C++ kernels" or "C# (managed kernels)", and the Lab's result line reports kernel availability (user: "by this point the factory default
+  should also be C#").
+- **THE WORKSHOP'S PROBE IN A THIRD OF THE TIME (2026-10-27).** The Saleg's Revenge's Probe spent 12.1 s analysing its
+  1,868 meshes on one thread, and analysing them on every core gained only 15 % - collector-bound, an object per vertex and
+  triangle. Structs, dense/sparse vertex-ID maps and the fuse's flat cell grid brought one thread to 8.7 s and every core to
+  4.5 s; every part's island count unchanged on 22 sources (docs/Testing.md, Native kernels).
+  Review guards bound ID-map allocation, preserve checked coordinate failures, and defer malformed node extensions to node order.
+- **THE NATIVE KERNELS AND THE WORKSHOP'S SPEED DOCUMENTED WHERE A USER LOOKS (2026-10-27).** Native kernel details
+  previously sat mainly in Testing.md. Editor-Tools (the Workshop: what runs native, the measured times, the restart-after-update
+  rule, the timing line, the groups-at-once knob), Building (a Native kernels section: compiler, determinism, the
+  twins, the version contract), Code-Map (`native/`), Troubleshooting (a slow tool or a `managed` kernels line; "Probe
+  failed"), the docs index and Performance (the editor-side axis) now carry it.
+- **FUSE GROUPS AT ONCE: HALF THE PROCESSORS, AND A SETTING (2026-10-27).** Re-measured after the kernels: four at once
+  was right when the groups starved each other of the collector; now 8 at once is a second faster on the Saleg's 22 groups
+  and 16 or all 22 are no faster (the largest group's weld slows as the others compete for memory bandwidth). The default
+  is half the logical processors; the Model Fuser's **groups at once** slider overrides it (0 = auto). Bytes never depend
+  on it (docs/Testing.md, Native kernels). The saved setting loads in `OnEnable`: Unity forbids preference reads in
+  a window's field initializer; a real-Unity drill checks creation and serialized restoration of both Workshop windows.
+- **THE PROBE BROKE IN THE EDITOR AND NOT IN ANY TEST (2026-10-27).** The parse counter PR #207 added used a
+  `ConditionalWeakTable`; Unity's Mono throws from inside it once the collector has run over the table, so every Probe
+  and Fuse in the editor failed with "Specified cast is not valid" while the .NET tests and a Unity batch run passed. A
+  weak list replaces it; the Workshop window now logs a failed probe's stack trace to the console (docs/Review-Backlog.md).
+- **THE FUSE READS ITS FILE ONCE: THE PARSE AND THE MODEL'S FRAME (2026-10-27).** Split and measured: every group of the
+  Saleg's fuse sampled the whole file for the model's frame (40 s summed over 22 groups) and parsed the JSON and copied the BIN
+  for itself (356 MB of garbage a group). The cache the groups already share parses the file once and reads the frame once; the
+  twin census takes its faces in chunks from one counter instead of a fixed slice per thread. Saleg's 47.5 s -> 37.0 s in Unity,
+  bytes unchanged (docs/Testing.md, Native kernels).
+- **THE FUSE'S WELD WALK AND SIDE VIEW RUN AS C++ (2026-10-27).** Split further and measured first: of the Saleg's 22-group
+  fuse the two weld passes took 97 s summed in Unity and the managed side view 61 s. `native/hafweld.cpp` walks the same
+  27 cells in the same order and makes the same unions; the column ladder in `native/hafcolumn.cpp` took its grid axes as
+  parameters and now also serves the side view (DLL version 6, restart Unity). Saleg's 65.2 s -> 47.5 s, the galley
+  19.6 s -> 9.6 s, bytes unchanged (docs/Testing.md, Native kernels). The weld buffer check is overflow-safe; side queries
+  use scalar references without per-call array, timer or diagnostic-string allocations.
+- **THE FUSE'S GATHER AND WELD STOPPED MAKING GARBAGE (2026-10-27).** An allocation census of the Saleg's Revenge fuse: 48 GB
+  allocated over its 22 groups, 13 GB of it a `double[]` per normal, UV and extra attribute of every gathered vertex and the
+  lists doubling themselves, 4.3 GB the weld's Dictionary of Lists per cell and per face triple. The gather now sizes its lists
+  once and keeps every attribute flat; the weld buckets its vertices as one packed long each over a counting sort and the twin
+  pass walks a chained index - every bucket ascending, as the Lists were, so both jobs hash as before. In Unity the Saleg's fuse
+  went from 92.5 s to 65.2 s, the galley's from 23.8 s to 19.6 s. Lesson kept in the source: a first grid of linked chains was
+  faster on .NET and 30 % slower in Unity's Mono (docs/Testing.md, Native kernels). The sizing pass checks accessor ranges
+  before reserving arrays, and a negative index-accessor reference remains an input error rather than an unindexed mesh.
+- **THE FUSE PLANS A FEW GROUPS AT A TIME, LARGEST FIRST (2026-10-26).** All 22 groups of the Saleg's Revenge used to
+  start at once, and starved each other of the editor's garbage collector: the largest group took 52 s alone and 112 s
+  among the others. Four workers taking the groups largest first brought the whole fuse from 123.9 s to 88.1 s in Unity,
+  the written file identical; the galley's fuse is unchanged. A parallel gather was measured on the way and dropped: it
+  moved the wait into the weld (docs/Testing.md, Native kernels).
+- **THE FUSE READS ITS OCCLUDERS ONCE (2026-10-26).** On the Saleg's Revenge fused whole, each of the 22 groups read every
+  other node of the file for its exposure test, all at once: 84 million triangles in 22 copies of 700 MB, and a six-part
+  group spent a minute on the rest of the ship. The nodes are read once per fuse now and shared as segments in node order,
+  so every candidate order and verdict is unchanged (`GlbDisconnectedParts.Occluders.cs`; the native ladder takes the
+  segments). Single-group fuses omit their own source corners from the cache. The segmented native entry uses DLL
+  version 5, so a loaded version 4 safely selects the managed path until Unity restarts. Unity wall for that job
+  148.7 s to 117.9 s, hash unchanged (docs/Testing.md, Native kernels).
+- **THE WORKSHOP FUSE'S COLUMN AND TWIN CENSUS RUN AS C++ (2026-10-25).** Measured first: a 600,000-triangle fuse
+  of the Saleg's Revenge spent 6.2 s in the exposure stage and 4.8 s in the twin census in Unity. The column grid with its
+  vertical ray query and the twin census now run from `native/hafcolumn.cpp` and `native/haftwin.cpp` (DLL version 4),
+  the same registration order, candidate order, rejections and double arithmetic as the C#. The written GLB is
+  byte-equal; that fuse drops from 14.3 s to 9.3 s in Unity, the twin census from 4.8 s to 1.4 s. The occluder read and
+  the side view stay managed. The Workshop golden drill now runs the native path and prints which one ran
+  (docs/Testing.md, Native kernels).
+- **THE PREP'S COLLAPSE RUNS AS C++, AND THE REASON IT GAINS LESS (2026-10-21).** The decimator's edge collapse
+  (`BlenderDecimate.Collapse` over the BMesh: quadrics, BLI_heap, the degenerate checks, the disk/radial edits, the
+  custom-data walk) is ported step for step to `native/hafdecimate.cpp`, the BMesh arrays pinned and edited in place.
+  Byte-equal output on the Saleg's Revenge and in five reduce cases both ways; the Unity prep of the Saleg's to 24,000
+  triangles drops from 21.2 s to 13.8 s, the collapse itself from 14.2 s to 9.2 s. That is 1.6x where the probe's
+  kernels gave 9x, because this loop is bound by memory latency (a five-million-node heap, random walks over the link
+  arrays), not by Mono's code generation: the native loop runs at the .NET JIT's speed. The native kernels drill now
+  hashes the prep's output as well as the probe's, on .NET and in Unity's Mono (docs/Testing.md, Native kernels).
+  PR #201 review fixes restore checkpoint polling during quadric construction, reject missing required links before
+  C++, and replay native deletions into BMesh's free lists for identical later edits (DLL version 3). The collapse tests
+  run on unmeasured CPUs too; byte-colour interpolation is tested directly without the CPU-specific importer.
+- **THE PROBE'S HEAVIEST KERNELS RUN AS C++ (2026-10-21).** ChatGPT's suggestion, tested by measurement before any
+  port: the same C# ran 2.5-3.4x slower on Unity's Mono than on the .NET Framework's JIT, and the hot kernel was not the
+  vertex transform the suggestion named (5% of the probe) but the custom-normal encode and decode (90% of the part-mesh
+  CPU). Those two, the visibility BVH's constructor and the world transform now run from `native/` (g++, `-ffp-contract=off`,
+  ucrtbase's cosf/sinf) through `editor/HafNativeKernels.cs` over the package's `editor/Plugins/x86_64/hafkernels.dll`,
+  with the managed twins kept as specification, oracle and fallback. Unity 2021.3, median of five: the Saleg's Revenge
+  probe 2.86 s to 0.87 s, the Khelandion 0.75 s to 0.24 s, every output hash equal. Guards: twelve unit cases holding both
+  twins bit for bit (planted: the DLL off, a constant off), and a gate drill that hashes every fixture and recipe source
+  both ways on .NET AND natively in Unity's own Mono, and rebuilds the deterministic DLL to compare with the committed one
+  (docs/Testing.md, Native kernels). The Unity leg earned its place on the first push: Mono marshals a `bool[]` as four
+  bytes per flag whatever `MarshalAs` says, the C++ read every fourth sharp-face flag, and every .NET-side guard was green
+  while the editor's Khelandion and Triconter hashes were wrong; the flags cross as bytes now. Review of PR #199 added
+  partial-NaN normal cases: the native clamp preserves NaN so it selects the managed geometry-normal fallback.
+
 - **A TURRET REDUCE TIER IN THE VEHICLE LAB (2026-10-16).** User: "could you add a turret reduce slider". The Gun tier's twin:
   a **Turret reduce (%)** dial, a `turretreduce=<percent>` tag parsed right after `gunreduce=` in `vehicle_rig.py`, and a
   TURRET weld tier running right before GUN in the tier loop, on the turret names the Lab already sends positionally -

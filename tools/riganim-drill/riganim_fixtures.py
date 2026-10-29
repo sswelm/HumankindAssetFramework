@@ -106,22 +106,32 @@ class Rig:
             self.nodes[parent].setdefault("children", []).append(i)
         return i
 
-    def mesh(self, name, at=(0.0, 0.0, 0.0), size=1.0, material=None, joints=None, colors=False, uv=True, second=None, uv2=False):
+    def mesh(self, name, at=(0.0, 0.0, 0.0), size=1.0, material=None, joints=None, colors=False, uv=True, second=None, uv2=False, dupes=False):
         """A small box of 8 vertices and 12 triangles. `joints` = a list of (joint ordinal, weight) sets, one per vertex or a
         single one for all vertices; `second` a material for a second primitive (a triangle beside the box); `uv2` a second
-        UV set (TEXCOORD_1)."""
+        UV set (TEXCOORD_1); `dupes` repeats the 8 vertices (equal in every attribute) with two triangles on the copies and
+        one collapsed triangle (two corners on one vertex) - what Unity's FBX import welds and drops."""
         x, y, z = at; s = size
         pos = [(x + dx * s, y + dy * s, z + dz * s) for dx in (0.0, 1.0) for dy in (0.0, 1.0) for dz in (0.0, 1.0)]
         idx = [0, 1, 3, 0, 3, 2, 4, 6, 7, 4, 7, 5, 0, 4, 5, 0, 5, 1, 2, 3, 7, 2, 7, 6, 0, 2, 6, 0, 6, 4, 1, 5, 7, 1, 7, 3]
-        attrs = {"POSITION": self.b.accessor(pos, "f", "VEC3"), "NORMAL": self.b.accessor([(0.0, 0.0, 1.0)] * 8, "f", "VEC3", minmax=False)}
+        normals = [(0.0, 0.0, 1.0)] * 8
+        uvs = [(dx, dy) for dx in (0.0, 1.0) for dy in (0.0, 1.0) for _ in (0, 1)]
+        uvs2 = [(0.25 + 0.5 * dz, 0.75 - 0.5 * dx) for dx in (0.0, 1.0) for _ in (0, 1) for dz in (0.0, 1.0)]
+        cols = [(1.0, 0.5, 0.25, 1.0)] * 8
+        if dupes:
+            pos = pos + pos; normals = normals + normals; uvs = uvs + uvs; uvs2 = uvs2 + uvs2; cols = cols + cols
+            idx = idx + [8, 9, 11, 8, 11, 10, 0, 0, 1]
+        attrs = {"POSITION": self.b.accessor(pos, "f", "VEC3"), "NORMAL": self.b.accessor(normals, "f", "VEC3", minmax=False)}
         if uv:
-            attrs["TEXCOORD_0"] = self.b.accessor([(dx, dy) for dx in (0.0, 1.0) for dy in (0.0, 1.0) for _ in (0, 1)], "f", "VEC2", minmax=False)
+            attrs["TEXCOORD_0"] = self.b.accessor(uvs, "f", "VEC2", minmax=False)
         if uv2:
-            attrs["TEXCOORD_1"] = self.b.accessor([(0.25 + 0.5 * dz, 0.75 - 0.5 * dx) for dx in (0.0, 1.0) for _ in (0, 1) for dz in (0.0, 1.0)], "f", "VEC2", minmax=False)
+            attrs["TEXCOORD_1"] = self.b.accessor(uvs2, "f", "VEC2", minmax=False)
         if colors:
-            attrs["COLOR_0"] = self.b.accessor([(1.0, 0.5, 0.25, 1.0)] * 8, "f", "VEC4", minmax=False)
+            attrs["COLOR_0"] = self.b.accessor(cols, "f", "VEC4", minmax=False)
         if joints is not None:
             per = joints * 8 if len(joints) == 1 else joints   # one set for every vertex, or one per vertex
+            if dupes:
+                per = list(per) + list(per)
             j4 = []; w4 = []
             for jw in per:
                 jw = (list(jw) + [(0, 0.0)] * 4)[:4]
@@ -199,6 +209,27 @@ def rigged(r, arm_name="Armature", euler_bone=False, material=None, second=None,
         # the importer keeps the bone in quaternion mode; an Euler mode is a Blender-side state no glTF can ask for
         pass
     return arm, j0, j1, sk, m
+
+
+def scaled_wrapper(r, factor=0.01):
+    """rigged()'s rig under a 'RootNode' wrapper scaled by `factor` (an FBX-born glTF keeps its centimetre root at 0.01): the
+    joints' and the clip's translations x 1/factor, the inverse bind matrices of the scaled joints, the skinned box's
+    vertices in world units as before - the same model as "plain", the Factory folding the wrapper. Returns (wrapper, root
+    joint, child joint, skin, material)."""
+    w = r.node("RootNode", scale=[factor, factor, factor])
+    arm = r.node("Armature", w)
+    j0 = r.node("Root", arm)
+    inv = 1.0 / factor
+    j1 = r.node("Arm", j0, translation=[0.0, inv, 0.0])
+    def sibm(ty):
+        return (inv, 0.0, 0.0, 0.0, 0.0, inv, 0.0, 0.0, 0.0, 0.0, inv, 0.0, 0.0, -ty * inv, 0.0, 1.0)
+    sk = r.skin("Skin", [j0, j1], [sibm(0.0), sibm(1.0)])
+    m = r.material("Paint", (0.2, 0.4, 0.9))
+    r.node("Body", arm, mesh=r.mesh("body", material=m, joints=[[(0, 1.0)]] * 4 + [[(0, 0.5), (1, 0.5)]] * 4), skin=sk)
+    a = r.anim("Spin")
+    r.key(a, j1, "rotation", [0.0, 0.5, 1.0], spin(3, "x", 0.5))
+    r.key(a, j1, "translation", [0.0, 1.0], [(0.0, inv, 0.0), (2.0 * inv, inv, 0.0)])
+    return w, j0, j1, sk, m
 
 
 def junk(out):
@@ -874,7 +905,7 @@ def f_review_jpeg(out, declared="image/jpeg", suffix=""):
 def unity_import_fixtures(out):
     """Small raw GLBs for UnityRigImportTests: names, atlas slot order, translation scaling, and clip rebasing."""
     os.makedirs(out, exist_ok=True)
-    for case in ("plain", "long", "late", "underscore", "twist"):
+    for case in ("plain", "long", "late", "underscore", "twist", "offset"):
         r = Rig(); arm, j0, j1, sk, m = rigged(r)
         if case == "long": r.anims[0]["name"] = "Spin_" + "a" * 120
         if case == "underscore": r.anims[0]["name"] = "_Spin"
@@ -882,8 +913,14 @@ def unity_import_fixtures(out):
         if case == "late":
             r.anims = []; a = r.anim("Spin"); r.key(a, j1, "rotation", times, spin(2, "x", 0.25))
         # "twist": the same rest and length as "plain", another motion - the acceptance row's per-frame comparison must catch it
-        r.key(0, j1, "translation", times, [(0.0, 1.0, 0.0), (0.0, 1.0, 2.0) if case == "twist" else (2.0, 1.0, 0.0)])
+        # "offset": the clip's first frame holds the Arm a unit off its rest - the Factory's prefab must sit at that first frame
+        first = (1.0, 1.0, 0.0) if case == "offset" else (0.0, 1.0, 0.0)
+        r.key(0, j1, "translation", times, [first, (0.0, 1.0, 2.0) if case == "twist" else (2.0, 1.0, 0.0)])
         r.write(out, case)
+    r = Rig(); scaled_wrapper(r); r.write(out, "wrapped")   # "plain" under a 0.01 wrapper: the Factory folds it, the two imports are equal
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)   # "dupes": the rig's box replaced by one carrying every vertex twice and a collapsed triangle
+    r.nodes[[i for i, n in enumerate(r.nodes) if n["name"] == "Body"][0]]["mesh"] = r.mesh("body_dupes", material=m, joints=[[(0, 1.0)]] * 4 + [[(0, 0.5), (1, 0.5)]] * 4, dupes=True)
+    r.write(out, "dupes")
     r = Rig(); red = r.material("Red", (1.0, 0.0, 0.0)); blue = r.material("Blue", (0.0, 0.0, 1.0))
     rigged(r, material=blue, second=red)  # submesh order opposite the extraction's material order
     r.write(out, "materials")

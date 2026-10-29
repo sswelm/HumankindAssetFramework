@@ -196,15 +196,20 @@ public static partial class VehicleProbe
         if (N == null)
         {
             var FN0 = FaceNormals(P, tris);
-            var vf = new List<int>[nv];
-            for (int f = 0; f < nf; f++) for (int k = 0; k < 3; k++) { int v = tris[f * 3 + k]; (vf[v] ?? (vf[v] = new List<int>())).Add(f); }
+            // Flat face adjacency, filled in the same face/corner order as the former per-vertex lists.
+            var offsets = new int[nv + 1];
+            for (int c = 0; c < tris.Length; c++) offsets[tris[c] + 1]++;
+            for (int v = 0; v < nv; v++) offsets[v + 1] += offsets[v];
+            var fill = (int[])offsets.Clone(); var vf = new int[tris.Length];
+            for (int c = 0; c < tris.Length; c++) vf[fill[tris[c]]++] = c / 3;
             var res = new float[nv * 3];
             for (int v = 0; v < nv; v++)
             {
                 float sx = 0f, sy = 0f, sz = 0f;
-                if (vf[v] == null) { sx = P[v * 3]; sy = P[v * 3 + 1]; sz = P[v * 3 + 2]; }
-                else foreach (int f in vf[v])
+                if (offsets[v] == offsets[v + 1]) { sx = P[v * 3]; sy = P[v * 3 + 1]; sz = P[v * 3 + 2]; }
+                else for (int at = offsets[v]; at < offsets[v + 1]; at++)
                 {
+                    int f = vf[at];
                     int k = tris[f * 3] == v ? 0 : tris[f * 3 + 1] == v ? 1 : 2;
                     int vp = tris[f * 3 + (k + 2) % 3], vn = tris[f * 3 + (k + 1) % 3];
                     float pdx = (float)(P[vp * 3] - P[v * 3]), pdy = (float)(P[vp * 3 + 1] - P[v * 3 + 1]), pdz = (float)(P[vp * 3 + 2] - P[v * 3 + 2]);
@@ -262,6 +267,8 @@ public static partial class VehicleProbe
     {
         var d0 = new short[tris.Length]; var d1 = new short[tris.Length];
         int nv = P.Length / 3;
+        // native/hafnormals.cpp: the clamp, the true-normal fallback, the fan walk and the encode, the same float32 steps (HafNativeKernels.cs)
+        if (HafNativeKernels.Available) { HafNativeKernels.EncodeCustom(P, tris, N, sharpFace, d0, d1, threads); return (d0, d1); }
         var C = new float[nv * 3]; float[] trueNormals = null;
         for (int v = 0; v < nv; v++)
         {
@@ -323,8 +330,11 @@ public static partial class VehicleProbe
     internal static float[] DecodeCustomShorts(float[] P, int[] tris, bool[] sharpFace, short[] d0, short[] d1, HashSet<long> sharpEdges = null, int threads = 0)
     {
         int nv = P.Length / 3, nf = tris.Length / 3;
-        var cornerNormal = new float[nf * 3 * 3];
         var result = new float[nv * 3];
+        // native/hafnormals.cpp: the fan walk, the decode and mix_normals_corner_to_vert, the same float32 steps; the sharp-edge
+        // set (the weld tiers' marks, BlenderVehicleRig.Stage2) is not ported and keeps the managed walk (HafNativeKernels.cs)
+        if (HafNativeKernels.Available && sharpEdges == null) { HafNativeKernels.DecodeCustom(P, tris, sharpFace, d0, d1, result, threads); return result; }
+        var cornerNormal = new float[nf * 3 * 3];
         WalkFans(P, tris, sharpFace, (v, infos, fan, space) =>
         {
             int s0 = 0, s1 = 0;

@@ -44,6 +44,7 @@ public static class WorkshopGoldenDrill
         if (verify.Count > 0) return VerifyGoldens(verify);
         if (sources.Count == 0) { Console.Error.WriteLine("usage: WorkshopGoldenDrill [--goldens <dir>] [--out <dir>] [--progress <file>] [--only a,b] <source.glb>...  |  --verify-goldens <dir>..."); return 2; }
         Console.WriteLine($"runtime: {(Environment.Is64BitProcess ? "64" : "32")}-bit {(Type.GetType("Mono.Runtime") != null ? "Mono" : ".NET Framework")} {Environment.Version} — not Unity's Mono; a golden is blessed only by the Unity row");
+        Console.WriteLine("kernels: " + HafNativeKernels.Status);   // the fuse's column and twin census run natively when this says so
         Console.WriteLine($"goldens: {(goldens != null && Directory.Exists(goldens) ? goldens : "(none — every source reads NOGOLDEN)")}");
         int pass = 0, fail = 0, nogolden = 0, skip = 0;
         foreach (string src0 in sources)

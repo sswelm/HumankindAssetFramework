@@ -106,6 +106,9 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // coincident positions only: measured on the Teutonic, its plates already touch exactly (the majority rule found
     // the 1,613-face hole at 0), while 0.5‰ collapsed 1,564 rivet-sized triangles and broke the hull island apart.
     [SerializeField] float weldPermille = 0f;
+    // how many fuse groups are planned at once (0 = GlbDisconnectedParts.DefaultFuseGroupWorkers); loaded when the window is enabled
+    const string GroupsAtOncePref = "HAF.ModelFuser.GroupsAtOnce";
+    int groupsAtOnce;
     // CHECK MIRRORED PARTS (2026-09-19, the Confederate frigate; user: "make it an option"). Off by default: every file
     // fuses exactly as before. On, the fuse compares each mirrored part with the plain parts it is welded to and, when
     // they clearly agree the file stores mirrored parts already facing outward, undoes the glTF reversal that would turn
@@ -156,7 +159,11 @@ public abstract class ModelWorkshopWindow : EditorWindow
     bool cutNormalsDone;
     bool CutModeActive => cutGO != null;
 
-    void OnEnable() { if (rows.Count > 0 && triangleFreeCleanupVersion < 1) analyzePending = true; }
+    void OnEnable()
+    {
+        groupsAtOnce = EditorPrefs.GetInt(GroupsAtOncePref, 0);   // Unity forbids EditorPrefs reads in ScriptableObject field initializers
+        if (rows.Count > 0 && triangleFreeCleanupVersion < 1) analyzePending = true;
+    }
     void OnDisable() => DestroyPreview();
 
     // P1 OF THE REVIEW OF PR #97: the stamp check in Analyze() decides what a re-Probe shows, and an operation
@@ -670,6 +677,15 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 "that alone found and fixed its hole. Raise it only for sources whose plates leave gaps, knowing that every triangle smaller " +
                 "than the distance collapses (kept, zero-area, no longer connecting anything): at 0.5‰ the Teutonic lost 1,564 rivet-sized " +
                 "faces AND its hull island broke apart. The result line reports the collapsed count."), weldPermille, 0f, 5f);
+            // GROUPS AT ONCE (2026-10-27, user: "8 sounds right for an 8-core CPU, make this configurable"). 0 = the default,
+            // half the logical processors; kept in EditorPrefs, so it survives the window and the session.
+            int autoGroups = GlbDisconnectedParts.DefaultFuseGroupWorkers;
+            int newGroupsAtOnce = EditorGUILayout.IntSlider(new GUIContent($"Fuse — groups at once (0 = auto: {autoGroups})",
+                "How many ⊕ groups are planned at the same time, largest first. Measured on a 22-group ship with 16 logical processors: " +
+                "4 at once 36-37 s, 8 at once 34-35 s, 16 or all 22 no faster — the largest group's weld slows as more groups compete " +
+                "for memory bandwidth, and the fuse takes as long as that group. Lower it when the editor must stay responsive during a " +
+                "fuse, or when memory is short (each group holds its own copy of the parts it fuses)."), groupsAtOnce, 0, Math.Max(2, Environment.ProcessorCount));
+            if (newGroupsAtOnce != groupsAtOnce) { groupsAtOnce = newGroupsAtOnce; EditorPrefs.SetInt(GroupsAtOncePref, groupsAtOnce); }
             checkMirrored = EditorGUILayout.ToggleLeft(new GUIContent("Check mirrored parts",
                 "glTF says a mirrored part (a negative-scale node, typically one side of a symmetric hull) must have its winding reversed, and the " +
                 "fuse does that. Some files store their mirrored parts ALREADY facing outward, and the reversal then turns that whole side " +
@@ -828,7 +844,9 @@ public abstract class ModelWorkshopWindow : EditorWindow
             Repaint();
             return true;
         }
-        catch (Exception e) { rows.Clear(); status = "Probe failed: " + e.Message; return false; }
+        // the exception goes to the console with its stack trace: "Probe failed: Specified cast is not valid" said nothing of where
+        // (2026-10-27, a Mono ConditionalWeakTable inside Parse), and the window was the only place that saw it
+        catch (Exception e) { UnityEngine.Debug.LogException(e); rows.Clear(); status = "Probe failed: " + e.Message; return false; }
     }
 
     // "Object_12" -> ("Object_", 12): sort names by prefix, then by the trailing number as a NUMBER.
@@ -1572,6 +1590,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 var jobs = groups.Select(g => new GlbDisconnectedParts.FuseJob { NodeIndices = g.Select(r => r.nodeIndex).ToList(), Name = WorkshopRules.ShellName(g.Key, GroupName(g.Key), g.First().node), CheckMirrored = checkMirrored }).ToList();   // the group's name when it has one, else the first row's
                 int total = jobs.Count; string letters = string.Join(" ", groups.Select(g => "⊕" + g.Key));
                 EditorUtility.DisplayProgressBar("Model Workshop", $"Fusing {total} group(s) in parallel: {letters}…", 0.2f);
+                GlbDisconnectedParts.FuseGroupWorkers = groupsAtOnce;   // the window's setting (0 = the default); the bytes do not depend on it
                 byte[] fused = GlbDisconnectedParts.FuseGroups(bytes, jobs, weldPermille / 1000.0, out results,
                     planned => EditorUtility.DisplayProgressBar("Model Workshop", $"Fusing {total} group(s) in parallel — {planned} of {total} planned…", 0.2f + 0.6f * planned / Math.Max(1, total)));
                 for (int gi = 0; gi < groups.Count; gi++)

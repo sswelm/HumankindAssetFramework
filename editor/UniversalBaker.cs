@@ -1265,6 +1265,12 @@ public static class UniversalBaker
             var rig = HafModelRig.Build(m, temp, forFactory: true);
             root = rig.Root;
             if (rig.SkinnedMeshes == 0) { error = "the GLB rig has no skinned mesh"; return null; }
+            // A UNIFORMLY SCALED WRAPPER above the whole rig (2026-10-27, the ReconDrone: an FBX-born glTF keeps its 'RootNode' at
+            // 0.01) is folded into what it wraps: the FBX route has no such node (the script exports armatures and meshes only,
+            // and the dropped empty's scale lands in the armature's matrix), and the SDK's skeleton composes uniform-scale TRS
+            // per bone - a 0.01 root over x100 bind poses is the sandwich UniversalBaker's unit-fix notes warn about. The world
+            // geometry is unchanged: every descendant's translation and every bind pose's rows scale by the wrapper's factor.
+            foreach (string folded in FoldScaledWrappers(m, rig)) Debug.Log($"[Factory] {name} GLB rig: {folded}");
             float longest = MeasureLongestAxis(root);
             float k = longest > 1e-4f ? size / longest : 1f;
             foreach (var tr in root.GetComponentsInChildren<Transform>(true)) if (tr != root.transform) tr.localPosition *= k;
@@ -1312,7 +1318,14 @@ public static class UniversalBaker
                 rebased.Add(FormattableString.Invariant($"{clip.name} from {t0:0.###} s"));
             }
             if (rebased.Count > 0) Debug.Log($"[Factory] {name} GLB rig: {rebased.Count} clip(s) rebased on their first key (Blender's exporter writes absolute times): {string.Join(", ", rebased)}");
-            Debug.Log($"[Factory] {name} GLB rig: scale {k:0.###} folded into the data (native longest {longest:0.###} -> {size} units), {rig.SkinnedMeshes} skinned mesh(es), {rig.Clips.Length} clip(s): {string.Join(", ", rig.ClipNames)}");
+            // THE PREFAB'S POSE IS THE PRIMARY CLIP'S FIRST FRAME (2026-10-27): rig_anim.py pins every FBX it exports at its clip's
+            // first frame ("the REFERENCE the engine encodes clips against"), and Blender's FBX exporter writes that posed matrix
+            // as each bone's default; the glTF exporter writes the armature's rest instead. The SDK's skeleton takes its per-bone
+            // Local from this prefab and encodes every role's clip relative to it (ClipCollection.Reimport), so the GLB route's
+            // prefab is posed the same way before it is saved - the primary clip sampled at 0, as the Factory's skeleton bake reads it.
+            int primaryIndex = Array.IndexOf(rig.ClipNames, primaryAction);
+            if (primaryIndex >= 0) rig.Clips[primaryIndex].SampleAnimation(root, 0f);
+            Debug.Log($"[Factory] {name} GLB rig: scale {k:0.###} folded into the data (native longest {longest:0.###} -> {size} units), {rig.SkinnedMeshes} skinned mesh(es), {rig.Clips.Length} clip(s): {string.Join(", ", rig.ClipNames)}{(primaryIndex >= 0 ? "; the prefab posed at the primary clip's first frame" : "")}{(rig.Note.Length > 0 ? "; " + rig.Note : "")}");
             DeleteGlbRigAssets(animDir);   // a previous bake's rig assets under anim/ go first (the FBX route's .fbx goes after the import, by the caller)
             int n = 0;
             foreach (var mesh in seen) { mesh.hideFlags = HideFlags.None; AssetDatabase.CreateAsset(mesh, animDir + "/" + name + "_rigmesh" + (n++) + ".asset"); meshes.Add(mesh); }
@@ -1367,6 +1380,147 @@ public static class UniversalBaker
         {
             if (root != null) UnityEngine.Object.DestroyImmediate(root);
             foreach (var a in temp) if (a != null && !AssetDatabase.Contains(a)) UnityEngine.Object.DestroyImmediate(a);
+        }
+    }
+
+    /// <summary>A node with a uniform, non-unit scale, no mesh, no joint role and no animation channel that wraps every joint
+    /// and renderer of the rig (an FBX-born glTF's 'RootNode' at 0.01, the ReconDrone) has its scale folded into what it wraps:
+    /// the node's scale becomes 1, every descendant's local translation, every clip's position curve under it and the three
+    /// rows of every bind pose of a bone under it are multiplied by the factor. World positions, rotations and skinning are
+    /// unchanged; no bone carries the scale any more, as on the FBX route. Outermost first, so nested wrappers compose.
+    /// Returns one line per folded wrapper.</summary>
+    internal static List<string> FoldScaledWrappers(HafModel m, HafModelRig.Result rig)
+    {
+        var lines = new List<string>();
+        var joints = new HashSet<Transform>(m.Skins.SelectMany(s => s.Joints).Where(j => j >= 0 && j < rig.Nodes.Length).Select(j => rig.Nodes[j]));
+        var animated = new HashSet<int>(m.Animations.SelectMany(a => a.Channels).Select(ch => ch.Node));
+        var skinned = rig.Root.GetComponentsInChildren<SkinnedMeshRenderer>(true).Where(r => r.sharedMesh != null).ToList();
+        // what a wrapper must hold: every joint, every bone a skinned mesh rides, every rigid mesh (the skinned hosts sit under the root at identity)
+        var targets = joints.Concat(skinned.SelectMany(r => r.bones).Where(b => b != null))
+            .Concat(rig.Root.GetComponentsInChildren<MeshFilter>(true).Select(f => f.transform)).Distinct().ToList();
+        if (targets.Count == 0) return lines;
+        int Depth(Transform t) { int d = 0; for (var p = t.parent; p != null; p = p.parent) d++; return d; }
+        foreach (int i in Enumerable.Range(0, Math.Min(m.Nodes.Count, rig.Nodes.Length)).Where(i => rig.Nodes[i] != null).OrderBy(i => Depth(rig.Nodes[i])))
+        {
+            var t = rig.Nodes[i]; if (t == null) continue;   // a wrapper removed below
+            var s = t.localScale;
+            float scaleTolerance = Mathf.Max(Mathf.Abs(s.x), Mathf.Max(Mathf.Abs(s.y), Mathf.Abs(s.z))) * 1e-6f;
+            bool uniform = Mathf.Abs(s.x - s.y) <= scaleTolerance && Mathf.Abs(s.y - s.z) <= scaleTolerance, unit = Mathf.Abs(s.x - 1f) <= 1e-6f;
+            if (!uniform || unit || s.x <= 0f || joints.Contains(t) || m.Nodes[i].Mesh >= 0 || animated.Contains(i)) continue;
+            if (!targets.All(x => x != t && x.IsChildOf(t))) continue;
+            float f = s.x;
+            t.localScale = Vector3.one;
+            int moved = 0;
+            foreach (var d in t.GetComponentsInChildren<Transform>(true)) if (d != t) { d.localPosition *= f; moved++; }
+            int poses = 0;
+            var posedMeshes = new HashSet<Mesh>();
+            foreach (var r in skinned)
+            {
+                if (!posedMeshes.Add(r.sharedMesh)) continue;
+                var bp = r.sharedMesh.bindposes; bool any = false;
+                for (int bi = 0; bi < bp.Length && bi < r.bones.Length; bi++)
+                {
+                    if (r.bones[bi] == null || !r.bones[bi].IsChildOf(t)) continue;
+                    var b = bp[bi];
+                    b.m00 *= f; b.m01 *= f; b.m02 *= f; b.m03 *= f; b.m10 *= f; b.m11 *= f; b.m12 *= f; b.m13 *= f; b.m20 *= f; b.m21 *= f; b.m22 *= f; b.m23 *= f;
+                    bp[bi] = b; any = true; poses++;
+                }
+                if (any) r.sharedMesh.bindposes = bp;
+            }
+            var rigid = new HashSet<Mesh>();
+            foreach (var mf in t.GetComponentsInChildren<MeshFilter>(true))
+            {
+                if (mf.sharedMesh == null || !rigid.Add(mf.sharedMesh)) continue;
+                var v = mf.sharedMesh.vertices; for (int k = 0; k < v.Length; k++) v[k] *= f; mf.sharedMesh.vertices = v; mf.sharedMesh.RecalculateBounds();
+            }
+            int curves = 0;
+            foreach (var clip in rig.Clips)
+                foreach (var b in AnimationUtility.GetCurveBindings(clip))
+                {
+                    if (!b.propertyName.StartsWith("m_LocalPosition", StringComparison.Ordinal)) continue;
+                    if (!(AnimationUtility.GetAnimatedObject(rig.Root, b) is Transform bound) || !bound.IsChildOf(t) || bound == t) continue;
+                    var c = AnimationUtility.GetEditorCurve(clip, b); var keys = c.keys;
+                    for (int k = 0; k < keys.Length; k++) { keys[k].value *= f; keys[k].inTangent *= f; keys[k].outTangent *= f; }
+                    c.keys = keys; AnimationUtility.SetEditorCurve(clip, b, c); curves++;
+                }
+            // THE NODE ITSELF GOES (2026-10-28, the acceptance row's second run): the FBX route has no such transform, and the SDK's
+            // skeleton counts every transform under the root as a bone - the ReconDrone's pose stream held 89 bones on this route
+            // against 88 on the FBX route with the folded 'RootNode' still in the chain. Its children move up to its parent at its
+            // place, world transforms kept (the wrapper's own translation and rotation compose into theirs, as the dropped empty's
+            // did into the armature on the FBX route), the clips' curve paths lose its segment, and the node is destroyed.
+            string wrapperPath = AnimationUtility.CalculateTransformPath(t, rig.Root.transform);
+            var parent = t.parent; int place = t.GetSiblingIndex();
+            var children = new List<Transform>(); for (int c = 0; c < t.childCount; c++) children.Add(t.GetChild(c));
+            // Reparenting keeps the current pose; animation must also carry the wrapper's static TR into each
+            // direct child's local curves. Descendants retain their local frame. The scale was folded above.
+            foreach (var child in children)
+            {
+                string childPath = AnimationUtility.CalculateTransformPath(child, rig.Root.transform);
+                foreach (var clip in rig.Clips)
+                {
+                    ComposeWrapperCurves(clip, childPath, "m_LocalPosition", 3, child.localPosition,
+                        v => t.localPosition + t.localRotation * (Vector3)v);
+                    ComposeWrapperCurves(clip, childPath, "m_LocalRotation", 4,
+                        new Vector4(child.localRotation.x, child.localRotation.y, child.localRotation.z, child.localRotation.w),
+                        v => { var q = t.localRotation * new Quaternion(v.x, v.y, v.z, v.w); return new Vector4(q.x, q.y, q.z, q.w); });
+                }
+                child.SetParent(parent, true); child.SetSiblingIndex(place++);
+            }
+            // A glTF skin's optional skeleton root need not be a joint, so it can name the removed wrapper.
+            // Keep a live common ancestor of the skin's bones in the new hierarchy.
+            foreach (var renderer in skinned.Where(r => r.rootBone == t))
+            {
+                var bones = renderer.bones.Where(b => b != null).ToArray();
+                var common = bones.FirstOrDefault() ?? parent;
+                while (common != null && !bones.All(b => b == common || b.IsChildOf(common))) common = common.parent;
+                renderer.rootBone = common ?? parent;
+            }
+            string parentPath = AnimationUtility.CalculateTransformPath(parent, rig.Root.transform);
+            string prefix = parentPath.Length == 0 ? "" : parentPath + "/";
+            int repathed = 0;
+            foreach (var clip in rig.Clips)
+                foreach (var b in AnimationUtility.GetCurveBindings(clip))
+                {
+                    if (!b.path.StartsWith(wrapperPath + "/", StringComparison.Ordinal)) continue;
+                    var c = AnimationUtility.GetEditorCurve(clip, b);
+                    AnimationUtility.SetEditorCurve(clip, b, null);
+                    var moved2 = b; moved2.path = prefix + b.path.Substring(wrapperPath.Length + 1);
+                    AnimationUtility.SetEditorCurve(clip, moved2, c); repathed++;
+                }
+            string wrapperName = t.name; UnityEngine.Object.DestroyImmediate(t.gameObject); rig.Nodes[i] = null;
+            lines.Add(FormattableString.Invariant($"the wrapper '{wrapperName}' at uniform scale {f:0.####} folded into the rig and removed: {moved} node translation(s), {poses} bind pose(s), {rigid.Count} rigid mesh(es), {curves} position curve(s), {children.Count} child(ren) up to its place, {repathed} curve path(s)"));
+        }
+        return lines;
+    }
+
+    // HafModelRig emits complete position/quaternion component groups with linear keys. A static TR is an
+    // affine map of those components, so transforming their union of key times preserves subframe interpolation.
+    static void ComposeWrapperCurves(AnimationClip clip, string path, string property, int components,
+        Vector4 fallback, Func<Vector4, Vector4> transform)
+    {
+        string[] axes = { ".x", ".y", ".z", ".w" };
+        var bindings = Enumerable.Range(0, components).Select(k => EditorCurveBinding.FloatCurve(path, typeof(Transform), property + axes[k])).ToArray();
+        var curves = bindings.Select(b => AnimationUtility.GetEditorCurve(clip, b)).ToArray();
+        var times = curves.Where(c => c != null).SelectMany(c => c.keys.Select(k => k.time)).Distinct().OrderBy(t => t).ToArray();
+        if (times.Length == 0) return;
+        var keys = Enumerable.Range(0, components).Select(_ => new Keyframe[times.Length]).ToArray();
+        for (int i = 0; i < times.Length; i++)
+        {
+            var v = fallback;
+            for (int k = 0; k < components; k++) if (curves[k] != null) v[k] = curves[k].Evaluate(times[i]);
+            v = transform(v);
+            for (int k = 0; k < components; k++) keys[k][i] = new Keyframe(times[i], v[k]);
+        }
+        for (int k = 0; k < components; k++)
+        {
+            for (int i = 0; i < times.Length; i++)
+            {
+                var key = keys[k][i];
+                key.inTangent = i > 0 ? (key.value - keys[k][i - 1].value) / Mathf.Max(1e-6f, times[i] - times[i - 1]) : 0f;
+                key.outTangent = i + 1 < times.Length ? (keys[k][i + 1].value - key.value) / Mathf.Max(1e-6f, times[i + 1] - times[i]) : 0f;
+                keys[k][i] = key;
+            }
+            AnimationUtility.SetEditorCurve(clip, bindings[k], new AnimationCurve(keys[k]));
         }
     }
 

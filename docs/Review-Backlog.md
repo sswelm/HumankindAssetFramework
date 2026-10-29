@@ -351,7 +351,17 @@ route bake what the FBX route bakes?" - every animated glTF entry baked both way
 outputs, the imported rig (bones, mesh, placement), every role's clip (length; bone world transforms and skinned vertices at
 every clip frame and curve key) and non-empty role collections and pose stream lengths compared in Unity (`docs/Testing.md`); `BakeResult.rigRoute` names the
 route a bake took. OWED, the user's: the row's run in Unity on every entry and the in-game check of each model playing
-its roles; only then the default flips.
+its roles; only then the default flips. RUN 2026-10-27 by the user: 8 of 23 entries equal, 15 not, 1 not glTF. The
+fifteen, drilled on both routes' files in a batch Unity project (`docs/Testing.md`, step (h), the first run): eleven were
+the row comparing the UNPOSED prefabs - the FBX exporter writes the posed first frame, the glTF exporter the edit rest -
+fixed on both sides (the GLB import poses its prefab at the primary's first frame, the SDK's reference; the row samples
+the first frame before its rest clauses); the AntiTankIFV was a REAL FBX-route defect (a stale pose-bone location
+exported into the idle slice; the script resets its pose bones after the rebake, the port mirrors it); the ReconDrone's
+0.01 `RootNode` wrapper is folded into the rig; the Lembos' four collapsed triangles and the GreatGalley's fragment cap
+were Unity's FBX-import weld, which the Factory's GLB mesh now applies; three pose streams were one frame apart, the
+SDK's ceil of length x frame rate on a float ulp (the rule now allows exactly that, `PoseStreamParity`). STILL OWED: the
+row's re-run on every entry after this, and the in-game check. UniversalTanks' missing output directory is created by
+the port (PR #213); that PR also compares the albedo PNG's decoded pixels instead of its encoder-dependent bytes.
 
 **(5) `vehicle_rig` - the plan, decided 2026-10-14 (the Lab's Generate without Blender, by (4)'s method).** Measured
 first: `vehicle_rig.py` is 3,846 lines; `mode = argv[0]` is probe (ported, 3a-3d), rigfast (the SKM fast path) or
@@ -380,7 +390,7 @@ the scene on record after each with the rig_anim dump's rows (objects, meshes, v
 fcurves), tamper refusal, and the census of branches no recipe takes = fixtures first (Muzzle, Trail, Cradle, Rigging,
 Flag, Shroud, the second model, useSourceRig, Turret, Rotor, Oar, Caterpillar); (b)-(f) the five stages in C#
 (`editor/BlenderVehicleRig.cs`), each held row for row with EXIT:/LEFT: keys and fixtures per branch as (4)'s; (g) the
-Lab's Generate on the C# route - per recipe with an editor default that stays Blender, the lab goldens
+Lab's Generate on the C# route - per recipe with an editor default initially set to Blender (C# since 2026-10-27), the lab goldens
 (`Tools/lab_golden`, the Lab gate rows) and the output GLB read back as the acceptance, every recipe generated both
 ways; (h) the default flip, after the user's check. Estimate: rig_anim's 1,234 lines took three days of sessions at
 this rigor (10-12 to 10-14); three times the lines and heavier geometry: 2 to 4 weeks, inside the 4-8 above.
@@ -571,7 +581,7 @@ are caught. FULL: 25 saved recipes plus 138 fixtures; 155 of 163 jobs compare th
 with all 112 supported GLBs byte-identical. The complete drill rejects 158 damaged-evidence kinds (151 without key rows).
 (g) Generate wiring implemented 2026-10-18: BlenderVehicleRigInProcess runs the five stages and atomically replaces the GLB;
 script exits/deaths remain failures, cancellation propagates, and named limits/read failures use Blender. Each recipe stores
-Generate backend (editor default/Blender/C#); HAF.VehicleGenerateRouteDefault remains Blender unless explicitly changed.
+Generate backend (editor default/Blender/C#); HAF.VehicleGenerateRouteDefault, when unset, blank or unrecognized, means the C# route since 2026-10-27 (it was Blender until then; a valid saved choice still wins; the user: "by this point the factory default should also be C#").
 The C# preview reads the generated GLB through HafModelRig, with Spin first and owned assets cleaned up. Diagnostics and the
 gun-span sidecar keep the existing contract. The every-recipe backend acceptance row forces both routes through the actual
 Vehicleize entry point, compares GLB bytes/read-back, ordered summaries and sidecars, and judges the Blender reference against
@@ -587,7 +597,7 @@ Hawk's missing golden matched independent generations and were installed in the 
 complete with no failures (22 C#, three named Blender fallbacks), and all 52 input fingerprints remain unchanged. The native
 stale-baseline regression now changes its own fixture instead of requiring the user's Espana golden to stay stale; it also
 verifies a refreshed baseline. Details and the remaining checklist: [Vehicle Generate acceptance](Vehicle-Generate-Acceptance.md).
-Next: the user's visual/runtime acceptance before (h), the default flip. d6 remains deferred; the shipped Generate default stays Blender.
+(h) default flip DONE 2026-10-27: C# is the factory default, with valid saved recipe/editor choices preserved. The linked checklist retains the per-model visual/runtime acceptance record. d6 remains deferred.
 Native JPEG-alpha export (2026-10-19): production Generate retains the original JPEG, whose glTF alpha is 1, rather
 than requiring Blender's PNG re-encoding. Espana now generates through C#. Acceptance checks identical decoded RGBA
 pixels and strict non-image GLB bytes/JSON; the stage oracle keeps its original byte-exact rules. Image brightness
@@ -604,14 +614,45 @@ goes blank after a failed Generate although the old GLB is kept; `BlenderAvailab
 tooling that is not committed; fixtures missing an X-axis sail yard or flag axis and trails + gun + recoil at elevation 0.
 The byte-comparison skip bit on 2026-10-20: the rig_anim drill's S5_XGLB_sha tamper was seeded on the first dumped job, and
 the fused galley (23 images, one re-encoded by Blender) is a job whose GLB bytes the model does not compare - the flipped hash
-passed as intact and the gate said so. The tamper now flips every job's GLB row (any compared job catches it). Still OPEN: a
+passed as intact and the gate said so. Fixed on master (64e31cc, 2026-10-29): the tamper is seeded on an image-free export
+block with its own control (jobs_sha.txt / intact_sha.txt), and the drill asserts that control's GLB bytes were compared. Still OPEN: a
 re-encoded image skips the whole file's bytes rather than the image's; the fix is to compare everything but the image payloads,
 as the Generate acceptance already does (ImageEncodingDifference).
 The probe on all cores DONE 2026-10-19 (the user, after a reviewer's remark that the probe was not optimised): measured
 first - the BVH build, the inside-out verdict and the part meshes ran on one core, and the island walk's `HashSet<long>` used
 long's own hash (2.1 s on a 72k grid); every phase now parallel or bucketed, every row byte-identical on the 84 drill inputs,
 16.25 s -> 4.66 s (details in docs/Testing.md). Left: the biggest part's gather and normals are the critical path of the part
-meshes (0.6 s of the Salegs' 1.55 s) - the per-vertex delegates allocate a double[3] each; GlbReader's parse (0.3 s there).
+meshes (0.6 s of the Salegs' 1.55 s). The per-vertex delegate arrays, skinning/bounds scratch allocations and no-file-normal
+vertex lists were removed on 2026-10-20: the Unity benchmark reduces read + probe time by 6–9% across four source models,
+with identical output hashes (docs/Testing.md, Vehicle Probe allocation performance). GlbReader parsing remains a separate cost.
+The heaviest kernels went native on 2026-10-21 (ChatGPT's C++ hypothesis, measured first: Unity's Mono ran the same C# 2.5-3.4x
+slower than the .NET JIT, and the fan walk of the custom-normal encode/decode was 90% of the part-mesh CPU, not the vertex
+transform the suggestion named): encode/decode, the BVH build and the world transform run from native/ through
+HafNativeKernels.cs, the Saleg's probe 2.86 s -> 0.87 s in Unity, every hash equal (docs/Testing.md, Native kernels). The prep's
+edge collapse followed the same day (native/hafdecimate.cpp, byte-equal): the Unity prep of the Saleg's to 24,000 triangles
+21.2 s -> 13.8 s, the collapse itself 14.2 s -> 9.2 s - only 1.5x, because the loop is bound by memory latency (a 5-million-node
+heap, random walks over the link arrays), not by Mono's codegen. Left on the prep: its managed half (the layout, the exporter's
+mesh layout, the GLB assembly: about 4.6 s of the 13.8 s in Unity), and GlbReader's read, 0.47 s of the Saleg's 1.34 s probe.
+The Workshop fuse followed (2026-10-25 to 27: column and twin census native, the occluders read once, four groups at a time,
+the gather and weld without per-vertex garbage, then the weld walk and the side view as kernels, then the file parsed and
+its frame read once per fuse; the Saleg's 22-group fuse 148.7 s -> 37.0 s in Unity, bytes unchanged).
+- **THE WORKSHOP HAS NO UNITY-MONO LEG IN THE GATE (2026-10-27).** PR #207's per-source parse counter used a
+  `ConditionalWeakTable`; Unity's Mono throws `InvalidCastException` from inside its `TryGetValue` once the collector has
+  run over the table, so every Probe and Fuse in the editor failed with "Specified cast is not valid" - while 2,184 .NET
+  tests passed and a Unity BATCH run of the same probe and fuse passed too (one parse, then quit, before any collection).
+  Fixed by a weak list (`GlbDisconnectedParts.CountsOf`). The lesson is wider than the table: Mono-only failures that need a
+  collection or a second call will not show in a batch harness that does one thing and quits. Wanted: a Unity-Mono leg
+  for the Workshop in a gate drill (as the native kernels drill has for the probe), running a probe, a fuse and a second
+  probe in one editor session with a forced `GC.Collect()` between them. Left on the fuse, by
+the splits of 2026-10-27 (docs/Testing.md, Native kernels), summed over the 22 groups: the weld kernel 43 s (the walk at memory
+speed; 7.2 s on the largest group), the exposure stage 39 s (the native column and side queries, the sheet walk), the twin
+census 17 s (6.1 s on the largest group), the gather 14 s. The wall is the largest group's own chain (37 s of stage time);
+below that only intra-group parallelism of the weld or the gather would pay.
+- **`VehicleProbeAllocationTests.Skinning_reuses_private_scratch_..._on_multiple_workers` flaked once in a push gate (2026-10-21)**
+  - the per-thread allocation budget (0..1024 bytes over 3,000 skinner calls on 8 workers) failed in the gate's `dotnet test`
+  step and passed in 10 full-suite runs afterwards on the same branch and on master. The test calls only `BlenderSkinner.Vertex`
+  (PR #198); nothing in the native-kernels change runs in it. Not reproduced; if it fails again, widen the budget or pin the
+  measurement to one warmed worker before blaming the skinner.
 - **Native SDK skeleton smoke test** — FIXED (2026-10-19). Native multi-material atlas remapping assigned transient
   meshes to the saved GLB rig prefab; SaveAssets could serialize missing mesh references before skeleton import,
   producing a NullReferenceException in `Skeleton.FillBoneEntry` at IL 0x1b (also reproduced with a PNG control).

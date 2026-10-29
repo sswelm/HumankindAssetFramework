@@ -444,7 +444,8 @@ public class VehicleLabWindow : EditorWindow
     }
     internal static string[] GenerateBackendLabels(bool blenderAvailable, string editorDefault)
     {
-        string csharp = blenderAvailable ? "C# (fallback to Blender)" : "C# (Blender fallback unavailable)";
+        string csharp = BlenderVehicleRigInProcess.CSharpBackendName(HafNativeKernels.Available)
+            + (blenderAvailable ? " (fallback to Blender)" : " (Blender fallback unavailable)");
         string blender = blenderAvailable ? "Blender" : "Blender (unavailable)";
         bool csharpDefault = BlenderVehicleRigInProcess.UseCSharp("", editorDefault);
         return new[] { "Editor default (" + (csharpDefault ? csharp : blender) + ")", blender, csharp };
@@ -718,7 +719,7 @@ public class VehicleLabWindow : EditorWindow
                     }
                 if (useSourceRig && boneParts.Count > 0)   // 2026-08-20: a user hunted for the turret's shards here — in this mode they are ONE row
                     EditorGUILayout.LabelField("Each row is one BONE of the shipped skeleton; all the shards skinned to it count as that row (the turret's parts = the Turret bone). Untick the fast path to list and mark individual parts.", EditorStyles.wordWrappedMiniLabel);
-                EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   W/T/B = Wheel/Turret/Body   ·   R = Rigging   ·   L = taiL rotor (spins about the lateral axis)   ·   G = Gun (rides the Turret; muzzle/socket anchor)   ·   C = Caterpillar (tread loop)   ·   O = Oar   ·   S = Structure   ·   F = Flip (reverse winding)   ·   P = Preserve (ship byte-identical)   ·   I = Ignore (DELETED)   ·   D = Default   ·   E = Edgecase", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   W/T/B = Wheel/Turret/Body   ·   R = Rigging   ·   L = taiL rotor (spins about the lateral axis)   ·   G = Gun (rides the Turret; muzzle/socket anchor)   ·   C = Caterpillar (tread loop)   ·   O = Oar   ·   S = Structure   ·   F = Flip (reverse winding)   ·   P = Preserve (ship byte-identical)   ·   H = sHroud (standing rigging, soup-reduced)   ·   I = Ignore (DELETED)   ·   D = Default   ·   E = Edgecase", EditorStyles.miniLabel);
                 // Keyboard review loop: ↑/↓ step the selection (zoom+highlight follows), W/T/B/I mark the selected
                 // part's role — the whole list can be reviewed without mousing between rows and dropdowns.
                 var ev = Event.current;
@@ -733,12 +734,13 @@ public class VehicleLabWindow : EditorWindow
                         GUIUtility.keyboardControl = 0;                    // a focused slider/popup must not swallow the arrows
                         ev.Use(); Repaint();
                     }
-                    else if (idx >= 0 && (ev.keyCode == KeyCode.W || ev.keyCode == KeyCode.T || ev.keyCode == KeyCode.B || ev.keyCode == KeyCode.I || ev.keyCode == KeyCode.D || ev.keyCode == KeyCode.E || ev.keyCode == KeyCode.C || ev.keyCode == KeyCode.G || ev.keyCode == KeyCode.R || ev.keyCode == KeyCode.L || ev.keyCode == KeyCode.O || ev.keyCode == KeyCode.S || ev.keyCode == KeyCode.F || ev.keyCode == KeyCode.P))
+                    else if (idx >= 0 && (ev.keyCode == KeyCode.W || ev.keyCode == KeyCode.T || ev.keyCode == KeyCode.B || ev.keyCode == KeyCode.I || ev.keyCode == KeyCode.D || ev.keyCode == KeyCode.E || ev.keyCode == KeyCode.C || ev.keyCode == KeyCode.G || ev.keyCode == KeyCode.R || ev.keyCode == KeyCode.L || ev.keyCode == KeyCode.O || ev.keyCode == KeyCode.S || ev.keyCode == KeyCode.H || ev.keyCode == KeyCode.F || ev.keyCode == KeyCode.P))
                     {
                         shown[idx].role = ev.keyCode == KeyCode.W ? Role.Wheel
                                         : ev.keyCode == KeyCode.T ? Role.Turret
                                         : ev.keyCode == KeyCode.I ? Role.Ignore
                                         : ev.keyCode == KeyCode.D ? Role.Default
+                                        : ev.keyCode == KeyCode.H ? Role.Shroud      // H = sHroud (2026-10-20 user request, reclassifying the galley: masts and stays are marked by the dozen)
                                         : ev.keyCode == KeyCode.E ? Role.Edgecase
                                         : ev.keyCode == KeyCode.C ? Role.Caterpillar
                                         : ev.keyCode == KeyCode.G ? Role.Gun
@@ -1416,7 +1418,7 @@ public class VehicleLabWindow : EditorWindow
             bool blenderAvailable = File.Exists(BlenderExecutablePath());
             string normalized = BlenderVehicleRigInProcess.NormalizeRoute(generateRoute);
             generateRoute = new[] { "", "blender", "csharp" }[EditorGUILayout.Popup("Generate backend", normalized == "blender" ? 1 : normalized == "csharp" ? 2 : 0,
-                GenerateBackendLabels(blenderAvailable, EditorPrefs.GetString(GenerateRouteDefaultPref, "blender")))];
+                GenerateBackendLabels(blenderAvailable, EditorPrefs.GetString(GenerateRouteDefaultPref, BlenderVehicleRigInProcess.FactoryDefaultRoute)))];
             if (!blenderAvailable)
                 EditorGUILayout.HelpBox("Blender was not found. Supported models can generate in C#. Models that require Blender cannot generate until Blender is installed or its executable is set in the Model Factory Settings.", MessageType.Warning);
             using (new EditorGUI.DisabledScope(!canRig || string.IsNullOrEmpty(outGlb)))
@@ -2232,11 +2234,11 @@ public class VehicleLabWindow : EditorWindow
     [MenuItem("Tools/HAF/Vehicle Generate default/Blender")]
     static void DefaultGenerateBlender() => EditorPrefs.SetString(GenerateRouteDefaultPref, "blender");
     [MenuItem("Tools/HAF/Vehicle Generate default/Blender", true)]
-    static bool CheckDefaultBlender() { Menu.SetChecked("Tools/HAF/Vehicle Generate default/Blender", !BlenderVehicleRigInProcess.UseCSharp("", EditorPrefs.GetString(GenerateRouteDefaultPref, "blender"))); return true; }
+    static bool CheckDefaultBlender() { Menu.SetChecked("Tools/HAF/Vehicle Generate default/Blender", !BlenderVehicleRigInProcess.UseCSharp("", EditorPrefs.GetString(GenerateRouteDefaultPref, BlenderVehicleRigInProcess.FactoryDefaultRoute))); return true; }
     [MenuItem("Tools/HAF/Vehicle Generate default/C#")]
     static void DefaultGenerateCSharp() => EditorPrefs.SetString(GenerateRouteDefaultPref, "csharp");
     [MenuItem("Tools/HAF/Vehicle Generate default/C#", true)]
-    static bool CheckDefaultCSharp() { Menu.SetChecked("Tools/HAF/Vehicle Generate default/C#", BlenderVehicleRigInProcess.UseCSharp("", EditorPrefs.GetString(GenerateRouteDefaultPref, "blender"))); return true; }
+    static bool CheckDefaultCSharp() { Menu.SetChecked("Tools/HAF/Vehicle Generate default/C#", BlenderVehicleRigInProcess.UseCSharp("", EditorPrefs.GetString(GenerateRouteDefaultPref, BlenderVehicleRigInProcess.FactoryDefaultRoute))); return true; }
 
     void Vehicleize()
     {
@@ -2384,7 +2386,7 @@ public class VehicleLabWindow : EditorWindow
         lastRigArgLine = VehicleRigArgLine.RigArgLine(rigArgs);
         string stdout;
         bool generatedInProcess = false;
-        if (BlenderVehicleRigInProcess.UseCSharp(generateRoute, EditorPrefs.GetString(GenerateRouteDefaultPref, "blender")))
+        if (BlenderVehicleRigInProcess.UseCSharp(generateRoute, EditorPrefs.GetString(GenerateRouteDefaultPref, BlenderVehicleRigInProcess.FactoryDefaultRoute)))
         {
             var tokens = VehicleRigArgLine.RigArgv(rigArgs).Select(t => t.value).ToList();
             tokens[3] = ""; // HafModelRig previews the generated GLB; no auxiliary FBX is needed.
@@ -2403,7 +2405,9 @@ public class VehicleLabWindow : EditorWindow
             {
                 generatedInProcess = true; lastGenerateRoute = "csharp";
                 stdout = string.Join("\n", result.Log) + "\n"; lastStdout = stdout;
-                Debug.Log("[VehicleLab] Generate (C#, in-process)\n" + stdout);
+                // the time and the kernels on the headline, as the probe's line has them: the Blender route's script prints its own
+                // "VEHICLE timing:" lines, the C# route printed nothing a reader could compare (2026-10-27)
+                Debug.Log($"[VehicleLab] Generate (C#, in-process)   ({watch.Elapsed.TotalSeconds:0.0}s; kernels {HafNativeKernels.Status})\n" + stdout);
             }
             else if (result.ScriptExit)
             {
@@ -2481,7 +2485,8 @@ public class VehicleLabWindow : EditorWindow
             .Where(l => l.Contains("VEHICLE MUZZLE") || l.Contains("VEHICLE CRADLE")
                      || l.Contains("*** WARNING") || l.Contains("DEPLOY gun: SKIPPED"))
             .Select(l => l.Trim()));
-        string backend = lastGenerateRoute == "csharp" ? "C#" : lastGenerateRoute == "csharp-fallback" ? "Blender (C# fallback: " + lastGenerateFallback + ")" : "Blender";
+        // Native availability is reported separately from the selected route; managed runs must not claim C++ kernels.
+        string backend = lastGenerateRoute == "csharp" ? BlenderVehicleRigInProcess.CSharpBackendName(HafNativeKernels.Available) + " (" + HafNativeKernels.Status + ")" : lastGenerateRoute == "csharp-fallback" ? "Blender (C# fallback: " + lastGenerateFallback + ")" : "Blender";
         status = $"DONE → {lastOutGlb}\nBackend: {backend}\n{bones}\n{hybrid}\n{done}\n{muzzle}\n\nNext: Factory ▸ Browse this GLB, Size as usual; " + bakeRecipe;
         if (previewProblem != null) status += "\nPreview unavailable: " + previewProblem;
         if (!headless) EditorGUIUtility.systemCopyBuffer = lastOutGlb;   // ready to paste into the Factory's Browse field
@@ -2688,7 +2693,8 @@ public class VehicleLabWindow : EditorWindow
             preview = VehicleProbePreview.Build(r, PreviewModels(input), PreviewBrightness(input), previewObjects);
             sw.Stop();
             // console headline = the OUTCOME, as the Blender path logs it (the rows themselves would bury it)
-            Debug.Log($"[VehicleLab] probe (C#, in-process): {r.Parts.Count} part(s) found   ({sw.Elapsed.TotalSeconds:0.00}s)\n" + string.Join("\n", r.Notes.Select(n => "VEHICLE " + n)));
+            // the kernels line says whether hafkernels.dll ran (a managed probe is correct, and three times slower: PR #199)
+            Debug.Log($"[VehicleLab] probe (C#, in-process): {r.Parts.Count} part(s) found   ({sw.Elapsed.TotalSeconds:0.00}s, read + probe + preview; kernels {HafNativeKernels.Status})\n" + string.Join("\n", r.Notes.Select(n => "VEHICLE " + n)));
             return true;
         }
         catch (Exception e)

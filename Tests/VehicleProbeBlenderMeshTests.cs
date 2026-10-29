@@ -143,12 +143,15 @@ public class VehicleProbeBlenderMeshTests
         m.Skins.Add(new HafSkin { Name = "Skin", Joints = new[] { 1 } });
         var names = BlenderNames.Compute(Link(m));
         var sk = VehicleProbe.BlenderSkinner.Build(m, 0, names);
-        Assert.Equal(new[] { F(0.08944272994995117), F(0.17888543009757996), 0f }.Select(Bits), sk.Position(me.Primitives[0], 1).Select(Bits));
-        Assert.Equal(new[] { 0f, 0f, F(0.20000000298023224) }.Select(Bits), sk.Position(me.Primitives[0], 2).Select(Bits));
+        var scratch = new float[16];
+        sk.Position(me.Primitives[0], 1, scratch, out float x1, out float y1, out float z1);
+        sk.Position(me.Primitives[0], 2, scratch, out float x2, out float y2, out float z2);
+        Assert.Equal(new[] { F(0.08944272994995117), F(0.17888543009757996), 0f }.Select(Bits), new[] { x1, y1, z1 }.Select(Bits));
+        Assert.Equal(new[] { 0f, 0f, F(0.20000000298023224) }.Select(Bits), new[] { x2, y2, z2 }.Select(Bits));
         // the vertex normals Blender then reads are the skinned normals through the custom-normal encoding: v0 (0.44721362, 0.89442724, 0),
         // v1 and v2 with 1.9e-5 and 3.8e-5 of z from the quantization - the fan normal for v0 (its custom normal lies within 1e-4 of it)
         var P = new float[9]; var N = new float[9];
-        for (int v = 0; v < 3; v++) { var q = sk.Position(me.Primitives[0], v); var n = sk.Normal(me.Primitives[0], v); for (int k = 0; k < 3; k++) { P[v * 3 + k] = q[k]; N[v * 3 + k] = n[k]; } }
+        for (int v = 0; v < 3; v++) sk.Vertex(me.Primitives[0], v, scratch, P, N, v * 3);
         var vn = VehicleProbe.BlenderVertexNormals(P, new[] { 0, 1, 2 }, N);
         var expected = new[] { F(0.44721361994743347), F(0.8944272398948669), 0f, F(0.4472135901451111), F(0.8944271802902222), F(1.9043684005737305e-05), F(0.4472135901451111), F(0.8944271206855774), F(3.8135043723741546e-05) };
         Assert.Equal(expected.Select(Bits), vn.Select(Bits));

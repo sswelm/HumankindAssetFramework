@@ -276,10 +276,10 @@ public static partial class VehicleProbe
         }
 
         /// <summary>The vertex's skinning matrix: the float32 blend of its joints' matrices by weight, divided by the weight sum.</summary>
-        float[] SkinningMatrix(HafPrimitive p, int v)
+        float[] SkinningMatrix(HafPrimitive p, int v, float[] acc)
         {
-            if (!p.Skinned) return (float[])JointMats[0].Clone();   // an unskinned primitive of a skinned mesh: all-zero joint data, so joint 0 at weight 1 (the zero-weight rule)
-            var acc = new float[16]; float wsum = 0f;
+            if (!p.Skinned) return JointMats[0];   // an unskinned primitive of a skinned mesh: all-zero joint data, so joint 0 at weight 1 (the zero-weight rule)
+            Array.Clear(acc, 0, 16); float wsum = 0f;
             // the importer loops over the influence sets in order (JOINTS_0/WEIGHTS_0, then JOINTS_1/WEIGHTS_1), four influences each
             for (int set = 0; set < 2; set++)
             {
@@ -300,35 +300,42 @@ public static partial class VehicleProbe
             return acc;
         }
 
-        /// <summary>The skinned position, Blender's frame (the file's glTF position converted first, as the importer converts the batch).</summary>
-        public float[] Position(HafPrimitive p, int v)
+        /// <summary>One vertex into caller-owned Blender-frame buffers. Blend once for both position and normal;
+        /// scratch belongs to the caller, so the same skinner can serve concurrent part workers.</summary>
+        public void Vertex(HafPrimitive p, int v, float[] scratch, float[] positions, float[] normals, int offset)
         {
-            var M = SkinningMatrix(p, v);
-            float x = p.Positions[v * 3], y = -p.Positions[v * 3 + 2], z = p.Positions[v * 3 + 1];
-            var r = new float[3];
-            for (int row = 0; row < 3; row++)
-            {
-                float s = (float)(0f + (float)(M[row * 4 + 0] * x)); s = (float)(s + (float)(M[row * 4 + 1] * y)); s = (float)(s + (float)(M[row * 4 + 2] * z));
-                r[row] = (float)(s + M[row * 4 + 3]);
-            }
-            return r;
+            var matrix = SkinningMatrix(p, v, scratch);
+            TransformPosition(p, v, matrix, out positions[offset], out positions[offset + 1], out positions[offset + 2]);
+            if (p.Normals == null) normals[offset] = normals[offset + 1] = normals[offset + 2] = float.NaN;
+            else TransformNormal(p, v, matrix, out normals[offset], out normals[offset + 1], out normals[offset + 2]);
         }
 
-        /// <summary>The skinned normal, Blender's frame: the 3x3 times the file normal, normalized as numpy does (x*x summed, sqrt, divide).</summary>
-        public float[] Normal(HafPrimitive p, int v)
+        /// <summary>The bind position for the second-model bake, without computing a normal.</summary>
+        public void Position(HafPrimitive p, int v, float[] scratch, out float x, out float y, out float z)
+            => TransformPosition(p, v, SkinningMatrix(p, v, scratch), out x, out y, out z);
+
+        // Keep numpy's float32 products, sums and normalization in their original order.
+        static float Product(float[] M, int row, float x, float y, float z)
         {
-            var M = SkinningMatrix(p, v);
+            float s = (float)(0f + (float)(M[row * 4 + 0] * x)); s = (float)(s + (float)(M[row * 4 + 1] * y)); s = (float)(s + (float)(M[row * 4 + 2] * z));
+            return s;
+        }
+
+        static void TransformPosition(HafPrimitive p, int v, float[] M, out float rx, out float ry, out float rz)
+        {
+            float x = p.Positions[v * 3], y = -p.Positions[v * 3 + 2], z = p.Positions[v * 3 + 1];
+            rx = (float)(Product(M, 0, x, y, z) + M[3]);
+            ry = (float)(Product(M, 1, x, y, z) + M[7]);
+            rz = (float)(Product(M, 2, x, y, z) + M[11]);
+        }
+
+        static void TransformNormal(HafPrimitive p, int v, float[] M, out float rx, out float ry, out float rz)
+        {
             float x = p.Normals[v * 3], y = -p.Normals[v * 3 + 2], z = p.Normals[v * 3 + 1];
-            var r = new float[3];
-            for (int row = 0; row < 3; row++)
-            {
-                float s = (float)(0f + (float)(M[row * 4 + 0] * x)); s = (float)(s + (float)(M[row * 4 + 1] * y)); s = (float)(s + (float)(M[row * 4 + 2] * z));
-                r[row] = s;
-            }
-            float n2 = (float)((float)((float)(r[0] * r[0]) + (float)(r[1] * r[1])) + (float)(r[2] * r[2]));
+            rx = Product(M, 0, x, y, z); ry = Product(M, 1, x, y, z); rz = Product(M, 2, x, y, z);
+            float n2 = (float)((float)((float)(rx * rx) + (float)(ry * ry)) + (float)(rz * rz));
             float nrm = Sqrtf(n2);
-            if (nrm != 0f) { r[0] = (float)(r[0] / nrm); r[1] = (float)(r[1] / nrm); r[2] = (float)(r[2] / nrm); }
-            return r;
+            if (nrm != 0f) { rx = (float)(rx / nrm); ry = (float)(ry / nrm); rz = (float)(rz / nrm); }
         }
     }
 }

@@ -38,10 +38,11 @@ done
 
 TMPD="$(mktemp -d)"; trap 'rm -rf "$TMPD"' EXIT
 cp "$NEWTONSOFT" "$TMPD/Newtonsoft.Json.dll"
+cp "$ROOT/editor/Plugins/x86_64/hafkernels.dll" "$TMPD/hafkernels.dll"   # the native kernels beside the exe (HafNativeKernels.cs); absent, the managed twins run
 WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"; WTMP="$(cygpath -m "$TMPD" 2>/dev/null || echo "$TMPD")"
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -out:"$WTMP/probe.exe" \
   -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WAPI/System.Numerics.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
-  "$WROOT/tools/vehicle-probe-drill/ProbeDrill.cs" "$WROOT/editor/HafModel.cs" "$WROOT/editor/GlbReader.cs" "$WROOT/editor/HafTransforms.cs" "$WROOT/editor/BlenderNames.cs" "$WROOT/editor/VehicleProbe.cs" "$WROOT/editor/VehicleProbe.Visibility.cs" "$WROOT/editor/VehicleProbe.Islands.cs" "$WROOT/editor/VehicleProbe.InsideOut.cs" "$WROOT/editor/VehicleProbe.BlenderWorld.cs" "$WROOT/editor/VehicleProbe.BlenderSkin.cs" "$WROOT/editor/VehicleProbe.CustomNormals.cs" "$WROOT/editor/VehicleProbe.Merge.cs" "$WROOT/editor/VehicleProbe.BlenderArmature.cs" "$WROOT/editor/BlenderEigen.cs" "$WROOT/editor/BlenderTrig.cs" 2>&1); rc=$?
+  "$WROOT/tools/vehicle-probe-drill/ProbeDrill.cs" "$WROOT/editor/HafModel.cs" "$WROOT/editor/GlbReader.cs" "$WROOT/editor/HafTransforms.cs" "$WROOT/editor/BlenderNames.cs" "$WROOT/editor/VehicleProbe.cs" "$WROOT/editor/VehicleProbe.Visibility.cs" "$WROOT/editor/VehicleProbe.Islands.cs" "$WROOT/editor/VehicleProbe.InsideOut.cs" "$WROOT/editor/VehicleProbe.BlenderWorld.cs" "$WROOT/editor/VehicleProbe.BlenderSkin.cs" "$WROOT/editor/VehicleProbe.CustomNormals.cs" "$WROOT/editor/HafNativeKernels.cs" "$WROOT/editor/VehicleProbe.Merge.cs" "$WROOT/editor/VehicleProbe.BlenderArmature.cs" "$WROOT/editor/BlenderEigen.cs" "$WROOT/editor/BlenderTrig.cs" 2>&1); rc=$?
 if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/probe.exe" ]; then echo "$OUT" | grep -E "error" | head -20; echo "FAIL — the vehicle probe drill did not compile (csc rc=$rc)"; exit 1; fi
 
 # ---- the sources: fixtures, naming fixtures, the registry, the Khronos samples
@@ -121,13 +122,7 @@ if [ "${#RECIPE_SOURCES[@]}" -gt 0 ]; then
 fi
 
 # ---- Blender's probe on a sample (FULL=1: every file)
-BLENDER="${BLENDER:-}"
-if [ -z "$BLENDER" ]; then
-  for base in "/c/Program Files/Blender Foundation" "/c/Program Files (x86)/Blender Foundation"; do
-    cand=$(ls -d "$base"/Blender* 2>/dev/null | sort -V | tail -1); [ -n "$cand" ] && [ -x "$cand/blender.exe" ] && { BLENDER="$cand/blender.exe"; break; }
-  done
-fi
-if [ -z "$BLENDER" ]; then echo "SKIP — vehicle probe drill: $n_ok files probed in C#; Blender not found, so NO parity comparison (BLENDER=<exe> to force)"; exit 3; fi
+. "$ROOT/tools/blender_oracle.sh"; oracle_init vehicle_probe "vehicle probe drill"   # replay (the gate: no Blender), record (the refresh) or live
 if [ "${FULL:-0}" = "1" ]; then SAMPLE=("${FILES[@]}"); cp "$WTMP/jobs.json" "$WTMP/jobs_sample.json"
 else
   python - "$WTMP/jobs.json" "$WTMP/jobs_sample.json" <<'PY'
@@ -144,7 +139,8 @@ PY
 fi
 t0=$(date +%s)
 N_JOBS_SAMPLE=$(python -c "import json,sys; print(len(json.load(open(sys.argv[1], encoding='utf-8'))))" "$WTMP/jobs_sample.json")
-"$BLENDER" --background --python "$(cygpath -m "$ROOT/tools/vehicle-probe-drill/blender_probe_many.py")" -- "$(cygpath -m "$ROOT/editor/Tools~/vehicle_rig.py")" "${SAMPLE[@]}" "@$WTMP/jobs_sample.json" > "$TMPD/blender_raw.txt" 2>&1; brc=$?
+oracle_blender probe "$TMPD/blender_raw.txt" --key "$ROOT/tools/vehicle-probe-drill/blender_probe_many.py" "$ROOT/editor/Tools~/vehicle_rig.py" "${SAMPLE[@]}" "@$WTMP/jobs_sample.json" -- --background --python "$(cygpath -m "$ROOT/tools/vehicle-probe-drill/blender_probe_many.py")" -- "$(cygpath -m "$ROOT/editor/Tools~/vehicle_rig.py")" "${SAMPLE[@]}" "@$WTMP/jobs_sample.json"; brc=$?
+oracle_check
 t1=$(date +%s)
 tr -d '\r' < "$TMPD/blender_raw.txt" | grep -E "^ROW|^FILE" > "$TMPD/blender.txt"
 n_b=$(grep -c "^FILE" "$TMPD/blender.txt")

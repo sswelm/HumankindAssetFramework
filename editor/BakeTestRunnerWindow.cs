@@ -46,6 +46,8 @@ public class BakeTestRunnerWindow : EditorWindow
         public Func<BakeTestSection> run;
         public BakeTestSection last;   // result of the most recent run (this session)
         public bool open;              // detail foldout
+        public bool kernels;           // its pipeline can reach a C++ kernel (HafNativeKernels): the Kernels dropdown applies to it
+        public List<BakeTestSection> results = new List<BakeTestSection>();   // this run's passes - two under "Both", else one
     }
 
     // Set for the duration of a run: true when the converted-rigs row is part of THIS run, which is the only
@@ -65,22 +67,41 @@ public class BakeTestRunnerWindow : EditorWindow
     List<BakeTestSection> collected;
     System.Diagnostics.Stopwatch runWatch;
     bool blenderAtRunStart;
+    // WHICH CODE THE ROWS EXERCISE (2026-10-28, user: "it should now also test with c++" / "make it configurable with a
+    // combobox"): the C++ kernels or their C# twins, a process-wide switch (HafNativeKernels.Available). The window used
+    // to run whatever the switch held and the report never said which - a stale DLL made every row a managed run that
+    // still passed. The dropdown (EditorPrefs) picks the mode, BakeTestKernelPlan turns it into passes per row, the loader
+    // row at the top fails when the DLL did not load, and the report header names mode and loaded status.
+    BakeTestKernelMode kernelMode;
+    static string kernelHeader;   // the report's "Kernels:" line for the run on the stack (static: WriteReport is)
+    struct Planned { public TestRow row; public BakeTestKernelPlan.Pass pass; }
 
     [MenuItem("Tools/HAF/Bake Tests…", false, 30)]
     static void Open() => GetWindow<BakeTestRunnerWindow>("Bake Tests");
 
     void OnEnable()
     {
+        kernelMode = BakeTestKernelPlan.ParseMode(EditorPrefs.GetInt(BakeTestKernelPlan.PrefsKey, 0));
         rows = new List<TestRow>
         {
-            new TestRow { name = "Does the baker still work? (one model per path)", quick = true, on = true, needsBlender = true, group = "smoke",
+            new TestRow { name = "Do the C++ kernels load? (hafkernels.dll in this editor process)", quick = true, on = true,
+                cost = "instant",
+                what = "Reads HafNativeKernels.LoadStatus: PASS when the native DLL loaded with the version this editor expects, FAIL when " +
+                       "the editor fell back to the C# twins (a stale DLL after an update - restart Unity - or a missing plugin), SKIP " +
+                       "only for the deliberate HAF_NATIVE_KERNELS=0. The Kernels dropdown above decides what the rows marked " +
+                       "'C++ kernels' run: the kernels, the C# twins, or both in turn under distinct titles - each pass against the " +
+                       "same goldens and Blender comparisons, with each pass judged by that row's existing checks. The kernel mode keeps the row's Blender/C# backend choice; select the in-process or Generate acceptance rows for explicit C# coverage.",
+                run = () => { BakeTestKernelPlan.Loader(HafNativeKernels.LoadStatus, kernelMode, out int p, out int f, out int sk, out string body);
+                              return new BakeTestSection { pass = p, fail = f, skip = sk, body = body }; } },
+
+            new TestRow { name = "Does the baker still work? (one model per path)", kernels = true, quick = true, on = true, needsBlender = true, group = "smoke",
                 cost = "a handful of real bakes (~minutes)",
                 what = "Re-bakes ONE representative model per bake path (static / animated / rig-converted, per material " +
                        "mode) under a throwaway name and checks the baked assets exist and are not empty stubs. The " +
                        "quick \"did I break the baker?\" check after baker changes. (The 'smoke test'.)",
                 run = BakeSmokeTest.RunRepresentativesSection },
 
-            new TestRow { name = "Does every model still bake? (whole catalog)", needsBlender = true, group = "smoke", thorough = true,
+            new TestRow { name = "Does every model still bake? (whole catalog)", kernels = true, needsBlender = true, group = "smoke", thorough = true,
                 cost = "one full bake per registry model — slow",
                 what = "The same check as the row above, but for EVERY registry entry, not just representatives. " +
                        "Mutually exclusive with that row (this one already covers everything it bakes). Run before a release. " +
@@ -96,14 +117,14 @@ public class BakeTestRunnerWindow : EditorWindow
                        "safety net restores your assets after a FAILED re-bake. (The 'feature test', Tier 1.)",
                 run = BakeFeatureTest.RunTier1Section },
 
-            new TestRow { name = "Do the Blender + animation options work? (real rigs)", needsBlender = true,
+            new TestRow { name = "Do the Blender + animation options work? (real rigs)", kernels = true, needsBlender = true,
                 cost = "real Blender bakes — slow",
                 what = "The options a cube can't exercise: triangle-budget decimation (targetTris), removing a named " +
                        "part (stripParts), and the full ANIMATED pipeline end-to-end on two real rigged models borrowed " +
                        "from the registry (skeleton + clip must come out). (The 'feature test', Tier 2.)",
                 run = BakeFeatureTest.RunTier2Section },
 
-            new TestRow { name = "Is rig conversion still correct? (control rig)", quick = true, on = true, needsBlender = true,
+            new TestRow { name = "Is rig conversion still correct? (control rig)", kernels = true, quick = true, on = true, needsBlender = true,
                 cost = "one synthetic rig bake (fast after the first run)",
                 what = "Synthesizes a known 12-bone test rig (the 'litmus'), bakes it through the raw-rig conversion, " +
                        "and checks the four invariants the game silently requires: every bone scale exactly 1, parents " +
@@ -112,7 +133,7 @@ public class BakeTestRunnerWindow : EditorWindow
                        "a synthetic rig separates 'the pipeline broke' from 'this model broke'.",
                 run = ConversionGateTest.RunLitmusSection },
 
-            new TestRow { name = "Do the real rigs still convert correctly? (every converted model)", needsBlender = true,
+            new TestRow { name = "Do the real rigs still convert correctly? (every converted model)", kernels = true, needsBlender = true,
                 cost = "a full conversion bake per converted model — slow",
                 what = "The same four invariants, but on every REAL converted rig in the registry (animated + 'Convert " +
                        "raw rig', e.g. the Combine soldier's 62-bone auto-rig). The strongest net; needs each source " +
@@ -130,7 +151,7 @@ public class BakeTestRunnerWindow : EditorWindow
 
             // THE WORKSHOP AND THE VEHICLE LAB (2026-09-25, user: "could you add fuse and split and extra generate test
             // to the bake test"): the two tools no row exercised - split/tear/fuse on real ships, and the Lab's Generate.
-            new TestRow { name = "Does the Model Workshop still split, tear and fuse? (every recipe's source)", quick = true, on = true,
+            new TestRow { name = "Does the Model Workshop still split, tear and fuse? (every recipe's source)", kernels = true, quick = true, on = true,
                 cost = "in-memory Workshop passes over every Vehicle Lab recipe's source GLB — no Blender, minutes",
                 what = "Runs the Workshop's split (every multi-island part; no merge, and the 1% default), a tear (the " +
                        "smallest multi-island part — a tear costs minutes on a large one) and a fuse of the largest parts " +
@@ -157,7 +178,7 @@ public class BakeTestRunnerWindow : EditorWindow
 
             // THE MODEL PREP IN C# (2026-10-08, step 5): the push gate holds the in-process prep to Blender's outside Unity; that
             // it gives the same file under Unity's own Mono is this row's to show - and it needs Blender for the other side.
-            new TestRow { name = "Does the in-process model prep match Blender's? (every registry model that reduces, in Unity)", quick = false, on = false,
+            new TestRow { name = "Does the in-process model prep match Blender's? (every registry model that reduces, in Unity)", kernels = true, quick = false, on = false,
                 cost = "Blender's prep and the converter twice per registry .glb with a reduce target - minutes",
                 what = "For every registry entry that preps a .glb/.gltf (a reduce target, with its strip list), prepares the file " +
                        "in process (BlenderPrep) AND with Blender's prep_model.py, runs the Factory's converter on both at the " +
@@ -168,7 +189,7 @@ public class BakeTestRunnerWindow : EditorWindow
 
             // THE DEPLOY CONVERSION IN C# (2026-10-13, after parts 1-8c of replacing Blender): wired into the Factory on 2026-10-11
             // and never run in Unity until this row; the push gate holds it to the script outside Unity and never on the T-62.
-            new TestRow { name = "Does the in-process deploy conversion match Blender's? (every registry model that deploys, in Unity)", quick = false, on = true, needsBlender = true,
+            new TestRow { name = "Does the in-process deploy conversion match Blender's? (every registry model that deploys, in Unity)", kernels = true, quick = false, on = true, needsBlender = true,
                 cost = "the port and deploy_convert.py once per deploying registry entry - the T-62 alone is minutes",
                 what = "For every registry entry with deployConvert on, builds the argv the Factory hands both paths (UniversalBaker.DeployArgv), " +
                        "converts the raw source in process (BlenderDeployInProcess) AND with Blender's deploy_convert.py, and compares the two " +
@@ -178,7 +199,7 @@ public class BakeTestRunnerWindow : EditorWindow
 
             // THE RIG SLIM IN C# (2026-10-14, step (g) of the rig_anim port): the Factory's GLB rig route, opt-in per recipe until this
             // row has passed on every animated registry rig; the push gate holds the port to rig_anim.py outside Unity.
-            new TestRow { name = "Does the in-process rig slim match Blender's GLB export? (every animated registry rig with a glTF source, in Unity)", quick = false, on = true, needsBlender = true,
+            new TestRow { name = "Does the in-process rig slim match Blender's GLB export? (every animated registry rig with a glTF source, in Unity)", kernels = true, quick = false, on = true, needsBlender = true,
                 cost = "the port and Blender's rig_anim_glb.py once per animated registry entry - a minute or two each in Blender",
                 what = "For every animated registry entry with a .glb/.gltf source (a deploying entry's converted rig, from its cache), builds the argv the " +
                        "Factory hands both routes (UniversalBaker.RigAnimArgv), slims the rig in process (BlenderRigAnimInProcess, the GLB route) AND with " +
@@ -190,12 +211,13 @@ public class BakeTestRunnerWindow : EditorWindow
 
             // THE RIG ROUTE ACCEPTANCE (2026-10-14, step (h) of the rig_anim port): the backlog's gate before the GLB route becomes the
             // editor default - every animated glTF entry baked BOTH ways under throwaway names, the Factory's outputs compared in Unity.
-            new TestRow { name = "Does the GLB rig route bake what the FBX route bakes? (every animated glTF entry, both routes, in Unity)", quick = false, on = false, needsBlender = true,
+            new TestRow { name = "Does the GLB rig route bake what the FBX route bakes? (every animated glTF entry, both routes, in Unity)", kernels = true, quick = false, on = false, needsBlender = true,
                 cost = "two full animated bakes per animated glTF registry entry (Blender's slim, the atlas, the Amplitude skeleton and clips) - an hour or more for the whole registry",
                 what = "For every animated registry entry with a .glb/.gltf source, bakes it twice under throwaway names - once on the Blender FBX route, once on " +
-                       "the C# in-process GLB route - and compares what the Factory made: the Amplitude outputs present on both, the rig Unity imported (the bones " +
+                       "the C# in-process GLB route - and compares what the Factory made: the Amplitude outputs present on both, the rig Unity imported at its clip's first frame (the bones " +
                        "by name, the skinned mesh's triangles, bounds and vertex positions, the placement), every role's clip (its length, and the skinned " +
-                       "vertices and bone world transforms at every clip frame and curve key), and each role's non-empty baked collection and pose stream length. An entry the port leaves " +
+                       "vertices and bone world transforms at every clip frame and curve key), and each role's non-empty baked collection and pose stream (the same bones and bytes per frame; " +
+                       "frame counts equal or one apart, the SDK's rounding of length x frame rate). An entry the port leaves " +
                        "to Blender by name is a SKIP that says why (the bake then took the FBX route twice); a crash is a FAIL. This row green on every entry, " +
                        "plus the in-game check of each model playing its roles, is what flips the editor default to the GLB route.",
                 run = RigRouteAcceptanceTest.RunSection },
@@ -203,7 +225,7 @@ public class BakeTestRunnerWindow : EditorWindow
             // THE IN-PROCESS PROBE PREVIEW (2026-10-03, step 3d): the C# probe's rows are held to Blender's by the push gate; the PREVIEW
             // it builds in Unity - the frame, the facing, the lifecycle of its objects - can only be judged in Unity, against the
             // preview FBX files Blender left under Assets/FactorySource/VehicleLab and Unity imported.
-            new TestRow { name = "Does the in-process probe preview match the Blender preview? (every recipe with a preview FBX)", quick = true, on = true,
+            new TestRow { name = "Does the in-process probe preview match the Blender preview? (every recipe with a preview FBX)", kernels = true, quick = true, on = true,
                 cost = "the C# probe on every recipe's source, in memory - seconds to a minute, no Blender",
                 what = "For every saved recipe whose source is a .glb/.gltf and whose Blender preview FBX exists " +
                        "(Assets/FactorySource/VehicleLab/<source>_probe.fbx, left by the last Blender probe of that source), builds " +
@@ -214,7 +236,7 @@ public class BakeTestRunnerWindow : EditorWindow
                        "Parts on one side only are counted, not held. A leaked Unity mesh fails.",
                 run = VehicleProbePreviewGateTest.RunSection },
 
-            new TestRow { name = "Vehicle Generate backend acceptance (every recipe)", needsBlender = true, thorough = true,
+            new TestRow { name = "Vehicle Generate backend acceptance (every recipe)", kernels = true, needsBlender = true, thorough = true,
                 cost = "Generate twice per saved recipe — slow",
                 what = "Forces Blender and C# through the same Generate entry point. Compares the written GLB bytes, read-back rig, diagnostics, gun span sidecars and existing Lab goldens. Named fallbacks are reported separately and never count as C# acceptance. Blender remains the default.",
                 run = VehicleGenerateAcceptanceTest.RunSection },
@@ -293,6 +315,22 @@ public class BakeTestRunnerWindow : EditorWindow
             if (GUILayout.Button("Everything", GUILayout.Width(90))) foreach (var r in rows) r.on = r.group == null || r.thorough;
             if (GUILayout.Button("None", GUILayout.Width(60))) foreach (var r in rows) r.on = false;
         }
+        using (new EditorGUI.DisabledScope(Running))
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            GUILayout.Label("Kernels:", GUILayout.Width(52));
+            var mode = BakeTestKernelPlan.ParseMode(EditorGUILayout.Popup((int)kernelMode, BakeTestKernelPlan.Labels, GUILayout.Width(220)));
+            if (mode != kernelMode) { kernelMode = mode; EditorPrefs.SetInt(BakeTestKernelPlan.PrefsKey, (int)mode); }
+        }
+        EditorGUILayout.LabelField("Loaded in this editor process: " + HafNativeKernels.LoadStatus, wrap);   // own line: a long path must wrap, not widen the window
+        if (kernelMode != BakeTestKernelMode.Managed && !BakeTestKernelPlan.IsNative(HafNativeKernels.LoadStatus))
+        {
+            bool disabled = BakeTestKernelPlan.SwitchedOff(HafNativeKernels.LoadStatus);
+            EditorGUILayout.HelpBox(disabled
+                ? "The C++ kernels are disabled for this editor process (HAF_NATIVE_KERNELS=0). Kernel rows run the C# twins; the loader row is skipped."
+                : "The C++ kernels did not load - the rows marked 'C++ kernels' will run the C# twins and say so in their " +
+                  "titles, and the loader row fails. A stale DLL after an update needs a Unity restart.", disabled ? MessageType.Info : MessageType.Warning);
+        }
         EditorGUILayout.Space(2);
 
         scroll = EditorGUILayout.BeginScrollView(scroll);
@@ -319,23 +357,30 @@ public class BakeTestRunnerWindow : EditorWindow
                 string status = null; var col = GUI.color; var keep = GUI.color;
                 if (Running && r == current) { status = "RUNNING…"; col = new Color(0.5f, 0.8f, 1f); }
                 else if (Running && pending.Contains(r)) { status = "queued"; col = new Color(0.7f, 0.7f, 0.7f); }
-                else if (r.last != null)
-                {
-                    status = ResultLabel(r.last);
-                    col = r.last.fail > 0 ? new Color(1f, 0.45f, 0.45f)
-                        : r.last.pass > 0 ? new Color(0.45f, 1f, 0.45f) : new Color(1f, 0.85f, 0.4f);
-                }
                 if (status != null)
                 { GUI.color = col; EditorGUILayout.LabelField(status, wrapBold); GUI.color = keep; }
+                // one status line per PASS (two under "Both": the kernels, then the C# twins), each named by its title suffix
+                foreach (var s in r.results)
+                {
+                    string suffix = s.title != null && s.title.StartsWith(r.name, StringComparison.Ordinal) ? s.title.Substring(r.name.Length).Trim() : "";
+                    GUI.color = s.fail > 0 ? new Color(1f, 0.45f, 0.45f) : s.pass > 0 ? new Color(0.45f, 1f, 0.45f) : new Color(1f, 0.85f, 0.4f);
+                    EditorGUILayout.LabelField((suffix.Length > 0 ? suffix + "  " : "") + ResultLabel(s), wrapBold);
+                    GUI.color = keep;
+                }
                 EditorGUILayout.LabelField(r.what, wrap);
-                EditorGUILayout.LabelField("Costs: " + r.cost + (r.needsBlender ? "  •  needs Blender" : ""), EditorStyles.miniLabel);
-                if (r.last != null && !string.IsNullOrEmpty(r.last.body))
+                EditorGUILayout.LabelField("Costs: " + r.cost + (r.needsBlender ? "  •  needs Blender" : "") + (r.kernels ? "  •  C++ kernels" : ""), EditorStyles.miniLabel);
+                if (r.results.Any(s => !string.IsNullOrEmpty(s.body)))
                 {
                     r.open = EditorGUILayout.Foldout(r.open, "details", true);
                     if (r.open)
                         using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
-                            foreach (var line in r.last.body.Split('\n'))
-                                EditorGUILayout.LabelField(line, mono);
+                            foreach (var s in r.results)
+                            {
+                                if (string.IsNullOrEmpty(s.body)) continue;
+                                if (r.results.Count > 1) EditorGUILayout.LabelField(s.title, wrapBold);
+                                foreach (var line in s.body.Split('\n'))
+                                    EditorGUILayout.LabelField(line, mono);
+                            }
                 }
             }
         }
@@ -375,17 +420,26 @@ public class BakeTestRunnerWindow : EditorWindow
     // editor while it baked, so almost no interactivity is lost — only the gaps between tests.)
     void StartRun(bool blender)
     {
-        var queue = rows.Where(x => x.on).ToList();
-        pending = new Queue<TestRow>(queue);   // keeps `Running` true for OnGUI while the loop is on the stack
+        var selected = rows.Where(x => x.on).ToList();
+        // one entry per PASS: a kernel row under "Both" is queued twice (kernels, then the C# twins); the switch is set per
+        // entry, between rows, on the main thread - no row's worker threads are alive at that moment - and restored after.
+        // Capability is the immutable loader finding; the incoming switch may be deliberately off in a caller.
+        // Apply the selected mode to kernel rows, preserve that incoming state on other rows, and restore it at exit.
+        bool previousAvailable = HafNativeKernels.Available;
+        bool loaded = BakeTestKernelPlan.IsNative(HafNativeKernels.LoadStatus);
+        var queue = new List<Planned>();
+        foreach (var r in selected) foreach (var p in BakeTestKernelPlan.Passes(kernelMode, r.kernels, loaded)) queue.Add(new Planned { row = r, pass = p });
+        kernelHeader = BakeTestKernelPlan.HeaderLine(kernelMode, HafNativeKernels.LoadStatus);
+        pending = new Queue<TestRow>(queue.Select(q => q.row));   // keeps `Running` true for OnGUI while the loop is on the stack
         collected = new List<BakeTestSection>();
         current = null;
         blenderAtRunStart = blender;
         runWatch = System.Diagnostics.Stopwatch.StartNew();
         Progress.Attach(this);   // the in-window bars need the instance to force synchronous repaints
         lastVerdict = null;
-        foreach (var r in queue) r.last = null;
-        ConversionRowSelected = queue.Any(x => x.run.Method.Name.Contains("RunRegistryConvertedSection")
-                                            || x.name.StartsWith("Do the real rigs"));
+        foreach (var r in selected) { r.last = null; r.results.Clear(); }
+        ConversionRowSelected = selected.Any(x => x.run.Method.Name.Contains("RunRegistryConvertedSection")
+                                               || x.name.StartsWith("Do the real rigs"));
         bool cancelled = false;
         try
         {
@@ -395,15 +449,17 @@ public class BakeTestRunnerWindow : EditorWindow
             UniversalBaker.QuietDialogs = true;
             for (int i = 0; i < queue.Count; i++)
             {
-                var r = queue[i];
+                var r = queue[i].row;
+                string title = r.name + queue[i].pass.suffix;
                 current = r;
                 if (EditorUtility.DisplayCancelableProgressBar(
                         "Bake Tests — safe to leave running",
-                        FormattableString.Invariant($"{r.name}  ({i + 1} of {queue.Count}, {runWatch.Elapsed.TotalMinutes:0.0} min elapsed)"),
+                        FormattableString.Invariant($"{title}  ({i + 1} of {queue.Count}, {runWatch.Elapsed.TotalMinutes:0.0} min elapsed)"),
                         (float)i / Math.Max(1, queue.Count)))
                 { cancelled = true; break; }
-                Progress.BeginRow(r.name, i, queue.Count, runWatch);   // sections compose their step into this row's context
-                RunOne(r);
+                Progress.BeginRow(title, i, queue.Count, runWatch);   // sections compose their step into this row's context
+                HafNativeKernels.Available = r.kernels ? queue[i].pass.native : previousAvailable;
+                RunOne(r, title);
                 collected.Add(r.last);
                 if (r.last.fail > 0) r.open = true;   // failures unfold themselves — the detail is the point
                 pending.Dequeue();
@@ -412,7 +468,7 @@ public class BakeTestRunnerWindow : EditorWindow
                 if (Progress.CancelRequested) { cancelled = true; r.open = true; break; }   // Cancel pressed inside the row: the section stopped early and says so in its body
             }
         }
-        finally { UniversalBaker.QuietDialogs = false; EditorUtility.ClearProgressBar(); Progress.EndRun(); }
+        finally { HafNativeKernels.Available = previousAvailable; UniversalBaker.QuietDialogs = false; EditorUtility.ClearProgressBar(); Progress.EndRun(); }
         FinishRun(cancelled, queue.Count);
     }
 
@@ -550,23 +606,24 @@ public class BakeTestRunnerWindow : EditorWindow
         }
     }
 
-    void RunOne(TestRow r)
+    void RunOne(TestRow r, string title)
     {
         if (r.needsBlender && !blenderAtRunStart)
-        { r.last = new BakeTestSection { title = r.name, skip = 1, body = "SKIP — Blender not found." }; return; }
-        Debug.Log("[BakeTests] running: " + r.name + "…");
+        { r.last = new BakeTestSection { title = title, skip = 1, body = "SKIP — Blender not found." }; r.results.Add(r.last); return; }
+        Debug.Log("[BakeTests] running: " + title + "…");
         // PER-ROW DURATION (2026-08-22): the suite is minutes long and only ever reported one total, so "which row
         // costs the time?" could not be answered from the report — the same blind spot the per-phase probe timers
         // closed. Now every row carries its own, in the window and in the durable report.
         var w = System.Diagnostics.Stopwatch.StartNew();
-        try { r.last = r.run(); r.last.title = r.name; }
+        try { r.last = r.run(); r.last.title = title; }
         catch (OperationCanceledException)
-        { r.last = new BakeTestSection { title = r.name, skip = 1, body = "CANCELLED by the user before this row finished — nothing counted; the rows above are complete." }; }
+        { r.last = new BakeTestSection { title = title, skip = 1, body = "CANCELLED by the user before this row finished — nothing counted; the rows above are complete." }; }
         catch (Exception ex)
-        { r.last = new BakeTestSection { title = r.name, fail = 1, body = "harness exception: " + ex.GetType().Name + ": " + ex.Message }; }
+        { r.last = new BakeTestSection { title = title, fail = 1, body = "harness exception: " + ex.GetType().Name + ": " + ex.Message }; }
         w.Stop();
         r.last.seconds = w.Elapsed.TotalSeconds;
-        Debug.Log("[BakeTests] " + r.name + ": " + ResultLabel(r.last) + "\n" + r.last.body);
+        r.results.Add(r.last);
+        Debug.Log("[BakeTests] " + title + ": " + ResultLabel(r.last) + "\n" + r.last.body);
     }
 
     // ONE interpolated string per Invariant() call: concatenating two of them yields a plain `string`, which the
@@ -615,6 +672,7 @@ public class BakeTestRunnerWindow : EditorWindow
             var sb = new StringBuilder();
             sb.AppendLine(FormattableString.Invariant($"HAF bake-test report — {DateTime.Now:yyyy-MM-dd HH:mm:ss}"));
             sb.AppendLine(verdict);
+            if (kernelHeader != null) sb.AppendLine(kernelHeader);
             sb.AppendLine();
             foreach (var s in sections)
             {

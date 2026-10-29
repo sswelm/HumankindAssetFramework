@@ -1258,6 +1258,10 @@ public static class BlenderRigAnim
                     }
                 rebaked[oa] = na;
             }
+            // the script resets every pose bone's channels after the rebake (2026-10-27): keyframe_insert keys the CURRENT value, so a
+            // bone translating in one clip left its last-frame location on the pose bone, and a clip without a location curve for it
+            // evaluated that stale value (the AntiTankIFV's idle slice shipped the tread links at Spin's last frame on the FBX route)
+            foreach (int b in ad.BoneNodes) ad.PoseProps[b] = new[] { new float[3], new[] { 1f, 0f, 0f, 0f }, new[] { 1f, 1f, 1f } };
             primary = rebaked[primary];
             roleActs = roleActs.Select(r => (r.role, rebaked[r.act])).ToList();
             allActs = new List<ActionData> { primary };
@@ -1333,6 +1337,11 @@ public static class BlenderRigAnim
             s.Logs3.Add("RIGANIM stripped " + locs + " bone-LOCATION fcurves across " + allActs.Count + " clip(s)" + (keptLocs > 0 ? ", KEPT " + keptLocs + " translation curve(s) (keepTranslations)" : " (rotation-only; translations bake unscaled)"));
             Note(s, keptLocs > 0 ? "bone-location fcurves stripped, some kept" : "bone-location fcurves stripped");
         }
+        // the script resets every pose bone's channels AGAIN after the strip (2026-10-28, the UniversalTanks finding): the slicing
+        // had refilled the pose bones from curves that still existed, and the strip left a bone's location on the pose bone -
+        // the T-62's right drive gear 0.0092 units from rest on the FBX route; at rest, a stripped channel evaluates as the
+        // glTF exporter's reset does
+        foreach (int b in ad.BoneNodes) ad.PoseProps[b] = new[] { new float[3], new[] { 1f, 0f, 0f, 0f }, new[] { 1f, 1f, 1f } };
 
         // ---- the legacy sandwich compensation
         if (a.KeepTranslations && !a.ConvertRig && !cleanUnits && keepLocPaths.Count > 0)

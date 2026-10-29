@@ -9,6 +9,8 @@ using Xunit;
 // FUSE (2026-09-15): several parts -> one welded shell with consistent winding, at the SOURCE (the Model Workshop).
 // Fixtures are hand-built GLBs: a handful of quads whose positions, winding, UVs and materials are chosen so each
 // rule has exactly one thing to prove. Outputs are read back from the written bytes, never from the inputs.
+// one collection with the native kernel tests: the native/managed comparison below flips HafNativeKernels.Available
+[Collection("native kernels switch")]
 public class GlbFuseTests
 {
     // ---- fixtures ----
@@ -1903,5 +1905,481 @@ public class GlbFuseTests
             if (fn[t][1] > 0) roofUp++; else roofDown++;
         }
         Assert.Equal(2, roofUp); Assert.Equal(0, roofDown);
+    }
+
+    // ---- the native column and twin kernels (native/hafcolumn.cpp, native/haftwin.cpp, 2026-10-25) ----
+
+    // Every fixture here fused twice - with the native kernels, then with the managed twins - and the written bytes
+    // compared. The set reaches both kernels: the deck that asks the column from above (with a frame of other nodes as
+    // occluders), the doubled and open boxes the twin census pairs, inward and outward boxes, and a broadside.
+    [Fact]
+    public void The_native_column_and_twin_kernels_write_the_managed_fuse_byte_for_byte()
+    {
+        Assert.True(HafNativeKernels.Available, HafNativeKernels.Status);
+        var cases = new List<(byte[] src, int[] nodes, double weld)>
+        {
+            (BuildGlb(Box("Hull", 400, -200, -450, -200, inward: false),
+                      Wall("Tub", new (float x, float z)[] { (0f, 0f), (0f, 10f), (10f, 10f), (10f, 0f), (0f, 0f) }, 0, 10, 1, new[] { 1, 1, 1, 1 }, flip: false),
+                      Level("Tub", 0, 10, 0, 10, 0, down: false)), new[] { 1, 2 }, 0.0),
+            (BuildGlb(OpenBox("Outer", 2, 0, 0, 0, inward: false), OpenBox("Inner", 1.9f, 0.05f, 0.05f, 0.05f, inward: true)), new[] { 0, 1 }, 0.001),
+            (BuildGlb(Box("A", 2, 0, 0, 0, inward: true), Box("B", 2, 3, 0, 0, inward: false)), new[] { 0, 1 }, 0.001),
+            (BuildGlb(Box("Roof", 50, -20, 20, -20, inward: false), OpenBox("Tray", 4, 0, 0, 0, inward: true)), new[] { 1 }, 0.001),
+        };
+        long columnBefore = HafNativeKernels.ColumnIndex.QueryCalls, twinBefore = HafNativeKernels.TwinTicks;
+        int builtBefore = HafNativeKernels.ColumnIndex.Built, disposedBefore = HafNativeKernels.ColumnIndex.Disposed;
+        long sideBefore = HafNativeKernels.SideIndex.QueryCalls, weldBefore = HafNativeKernels.WeldCalls;
+        int sideBuiltBefore = HafNativeKernels.SideIndex.Built, sideDisposedBefore = HafNativeKernels.SideIndex.Disposed;
+        foreach (var (src, nodes, weld) in cases)
+        {
+            byte[] native = GlbDisconnectedParts.FuseNodes(src, nodes, weld).Bytes, managed = null;
+            bool was = HafNativeKernels.Available;
+            HafNativeKernels.Available = false;
+            try { managed = GlbDisconnectedParts.FuseNodes(src, nodes, weld).Bytes; }
+            finally { HafNativeKernels.Available = was; }
+            Assert.NotNull(native);
+            Assert.Equal(managed, native);
+        }
+        Assert.True(HafNativeKernels.ColumnIndex.QueryCalls > columnBefore, "no fixture asked the native column");
+        // every plan released its index on the way out - counted only on the owner's Dispose, so a finalizer that happens to run
+        // first cannot stand in for it (a plant that never registered the index passed a live-instance count)
+        Assert.True(HafNativeKernels.ColumnIndex.Built > builtBefore, "no column index was built");
+        Assert.Equal(HafNativeKernels.ColumnIndex.Built - builtBefore, HafNativeKernels.ColumnIndex.Disposed - disposedBefore);
+        Assert.True(HafNativeKernels.TwinTicks > twinBefore, "the native twin census never ran");
+        // the weld (native/hafweld.cpp) and the side ladder (hafcolumn.cpp, 2026-10-27) are on the same native path and released the same way
+        Assert.True(HafNativeKernels.WeldCalls > weldBefore, "the native weld never ran");
+        Assert.True(HafNativeKernels.SideIndex.QueryCalls > sideBefore, "no fixture asked the native side view");
+        Assert.True(HafNativeKernels.SideIndex.Built > sideBuiltBefore, "no side index was built");
+        Assert.Equal(HafNativeKernels.SideIndex.Built - sideBuiltBefore, HafNativeKernels.SideIndex.Disposed - sideDisposedBefore);
+    }
+
+    // ---- the occluders read once per fuse (GlbDisconnectedParts.Occluders.cs, 2026-10-26) ----
+
+    [Fact]
+    public void A_cached_empty_frame_uses_each_groups_vertices_without_reading_the_file_again()
+    {
+        var source = BuildGlb(Enumerable.Range(0, 500).Select(i => new Part {
+            Name = "Point" + i, Positions = new float[9], Indices = new[] { 0, 1, 2 }
+        }).ToArray());   // triangles exist, but none has area: the frame must use each group's fallback
+        var cache = new GlbDisconnectedParts.OccluderCache(source);
+        var root = cache.Document.Root; var nodes = (JArray)root["nodes"]; var meshes = (JArray)root["meshes"];
+        var first = new List<GlbDisconnectedParts.Vec3> {
+            new GlbDisconnectedParts.Vec3(), new GlbDisconnectedParts.Vec3 { X = 4, Y = 2, Z = 1 }, new GlbDisconnectedParts.Vec3()
+        };
+        cache.Belly(nodes, meshes, new GlbDisconnectedParts.Accessors(root, cache.Bin), first, out int length, out int width, out double centre, out double belly, out double floor);
+        Assert.Equal(0, length); Assert.Equal(2, width); Assert.Equal(0.5, centre, 9); Assert.Equal(0.5, belly, 9); Assert.Equal(0.1, floor, 9);
+        var second = new List<GlbDisconnectedParts.Vec3> {
+            new GlbDisconnectedParts.Vec3 { Y = 10, Z = 10 }, new GlbDisconnectedParts.Vec3 { X = 1, Y = 18, Z = 30 }, new GlbDisconnectedParts.Vec3 { Y = 10, Z = 10 }
+        };
+        var reader = new GlbDisconnectedParts.Accessors(root, cache.Bin);
+        var allocated = (Func<long>)Delegate.CreateDelegate(typeof(Func<long>), typeof(GC).GetMethod("GetAllocatedBytesForCurrentThread"));
+        long before = allocated();
+        cache.Belly(nodes, meshes, reader, second, out length, out width, out centre, out belly, out floor);
+        long bytes = allocated() - before;
+        Assert.Equal(2, length); Assert.Equal(0, width); Assert.Equal(0.5, centre, 9); Assert.Equal(12, belly, 9); Assert.Equal(10.4, floor, 9);
+        Assert.Equal(1, GlbDisconnectedParts.CountsOf(source).BellyReads);
+        Assert.InRange(bytes, 0, 32768);   // tiny fallback scratch; resampling 500 nodes allocates hundreds of KB
+    }
+
+    // A group sees every other node of the file as segments in node order, numbered as the per-group read numbered them, and
+    // its bounds are those nodes' corners only (the group's own pre-weld corners stay out: they would move the skin and the cell).
+    [Fact]
+    public void A_groups_occluder_view_is_the_other_nodes_in_order_with_their_bounds_alone()
+    {
+        var src = BuildGlb(Box("A", 1, 0, 0, 0, inward: false), Box("B", 1, 10, 0, 0, inward: false), Box("C", 1, 0, 40, 0, inward: false));
+        var cache = new GlbDisconnectedParts.OccluderCache(src);
+        var lo = new[] { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity }; var hi = new[] { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
+        var view = cache.View(new HashSet<int> { 1 }, lo, hi);
+        Assert.Equal(new[] { 0, 2 }, view.NodeOf);
+        Assert.Equal(2 * 12 * 3, view.Count);                      // two boxes of twelve triangles, three corners each
+        Assert.Equal(0.0, view[0].X, 9); Assert.Equal(40.0, view[36].Y, 9);   // corner 36 is node C's first: the segments follow node order
+        Assert.Equal(0.0, lo[0], 9); Assert.Equal(1.0, hi[0], 9);  // node B at x 10..11 is the group's own and out of the bounds
+        Assert.Equal(0.0, lo[1], 9); Assert.Equal(41.0, hi[1], 9);
+        var again = cache.View(new HashSet<int> { 0, 2 }, new[] { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity }, new[] { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity });
+        Assert.Equal(new[] { 1 }, again.NodeOf); Assert.Same(view.Segments[0], cache.View(new HashSet<int> { 1 }, lo, hi).Segments[0]);   // read once, shared
+    }
+
+    // A private cache must not expand selected geometry that no query will read.
+    [Fact]
+    public void A_single_groups_cache_does_not_read_or_allocate_its_own_triangles()
+    {
+        var own = Box("Own", 1, 0, 0, 0, inward: false);
+        own.Indices = Enumerable.Range(0, 10000).SelectMany(_ => own.Indices).ToArray();
+        var src = BuildGlb(own, Box("Other", 1, 10, 0, 0, inward: false));
+        var excluded = new HashSet<int> { 0 };
+        GlbDisconnectedParts.OccluderView View() => new GlbDisconnectedParts.OccluderCache(src, excluded).View(
+            excluded, new[] { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity },
+            new[] { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity });
+        View();
+        var counter = (Func<long>)Delegate.CreateDelegate(typeof(Func<long>), typeof(GC).GetMethod("GetAllocatedBytesForCurrentThread"));
+        long before = counter();
+        var view = View();
+        long bytes = counter() - before;
+        Assert.Equal(new[] { 1 }, view.NodeOf);
+        Assert.Equal(36, view.Count);
+        // Allow parsing/copying the file and fixed scratch; expanding Own's 120k triangles into double corners costs 25+ MB.
+        Assert.True(bytes < 4L * src.Length + 262144, "Excluded triangles allocated " + bytes + " bytes for a " + src.Length + " byte file");
+    }
+
+    // Several groups planned at once through one cache fuse to the same bytes as each group planned alone (its own read).
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Groups_sharing_one_occluder_read_fuse_as_groups_reading_for_themselves(bool nativeKernels)
+    {
+        bool was = HafNativeKernels.Available;
+        Assert.True(was, HafNativeKernels.Status);
+        HafNativeKernels.Available = nativeKernels;
+        try
+        {
+            var hull = Box("Hull", 400, -200, -450, -200, inward: false);
+            var walls = Wall("Tub", new (float x, float z)[] { (0f, 0f), (0f, 10f), (10f, 10f), (10f, 0f), (0f, 0f) }, 0, 10, 1, new[] { 1, 1, 1, 1 }, flip: false);
+            var floor = Level("Tub", 0, 10, 0, 10, 0, down: false);
+            var lid = OpenBox("Lid", 4, 20, 0, 20, inward: true);
+            var src = BuildGlb(hull, walls, floor, lid);
+            var jobs = new List<GlbDisconnectedParts.FuseJob> {
+                new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 1, 2 }, Name = "Tub_Fused" },
+                new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 3 }, Name = "Lid_Fused" } };
+            var counts = GlbDisconnectedParts.CountsOf(src); int parsesBefore = counts.Parses, bellyBefore = counts.BellyReads;
+            byte[] together = GlbDisconnectedParts.FuseGroups(src, jobs, 0.0, out var results);
+            // the source is parsed twice whatever the group count - the groups' shared read and the apply's own (the written
+            // file's validation parses the output, another array) - and the model's frame is read once (2026-10-27: every
+            // group used to parse the file and sample the frame for itself)
+            Assert.Equal(2, counts.Parses - parsesBefore);
+            Assert.Equal(1, counts.BellyReads - bellyBefore);
+            var aloneTub = GlbDisconnectedParts.FuseNodes(src, new[] { 1, 2 }, 0.0, "Tub_Fused");
+            var aloneLid = GlbDisconnectedParts.FuseNodes(src, new[] { 3 }, 0.0, "Lid_Fused");
+            Assert.Equal(aloneTub.FacesRewound, results[0].FacesRewound); Assert.Equal(aloneLid.FacesRewound, results[1].FacesRewound);
+            Assert.Equal(FusedFaces(aloneTub, "Tub_Fused").Select(f => string.Join(",", f.n.Select(v => v.ToString("R")))).ToList(),
+                         FusedFaces(new GlbDisconnectedParts.Result { Bytes = together }, "Tub_Fused").Select(f => string.Join(",", f.n.Select(v => v.ToString("R")))).ToList());
+            Assert.Equal(FusedFaces(aloneLid, "Lid_Fused").Select(f => string.Join(",", f.n.Select(v => v.ToString("R")))).ToList(),
+                         FusedFaces(new GlbDisconnectedParts.Result { Bytes = together }, "Lid_Fused").Select(f => string.Join(",", f.n.Select(v => v.ToString("R")))).ToList());
+            Assert.Equal(aloneTub.Bytes, GlbDisconnectedParts.FuseGroups(src, new[] { jobs[0] }, 0.0, out _));
+            Assert.Equal(aloneLid.Bytes, GlbDisconnectedParts.FuseGroups(src, new[] { jobs[1] }, 0.0, out _));
+        }
+        finally { HafNativeKernels.Available = was; }
+    }
+
+    // ---- the groups' schedule (FuseGroups, 2026-10-26): a few workers, largest group first ----
+
+    // The order the groups are planned in cannot change a result: the same eight-group fuse written with one, four and
+    // eight workers is the same bytes.
+    [Fact]
+    public void The_fuse_writes_the_same_bytes_whatever_the_number_of_group_workers()
+    {
+        var parts = new List<Part>(); var jobs = new List<GlbDisconnectedParts.FuseJob>();
+        for (int g = 0; g < 8; g++)
+        {
+            var nodes = new List<int>();
+            for (int k = 0; k <= g % 3; k++) { nodes.Add(parts.Count); parts.Add(k % 2 == 0 ? Box("B" + g + "_" + k, 1 + k, g * 6, 0, 0, inward: g % 2 == 0) : OpenBox("O" + g + "_" + k, 1.5f, g * 6, 0.2f, 0.2f, inward: true)); }
+            jobs.Add(new GlbDisconnectedParts.FuseJob { NodeIndices = nodes, Name = "G" + g + "_Fused" });
+        }
+        byte[] src = BuildGlb(parts.ToArray());
+        int was = GlbDisconnectedParts.FuseGroupWorkers;
+        try
+        {
+            var written = new List<byte[]>();
+            foreach (int workers in new[] { 1, 4, 8 })
+            {
+                GlbDisconnectedParts.FuseGroupWorkers = workers;
+                written.Add(GlbDisconnectedParts.FuseGroups(src, jobs, 0.001, out var _));
+            }
+            Assert.Equal(written[0], written[1]); Assert.Equal(written[0], written[2]);
+        }
+        finally { GlbDisconnectedParts.FuseGroupWorkers = was; }
+    }
+
+    // A failure is still reported for the first group in GROUP order, although the largest group is now planned first:
+    // group 0 (one bad node index) and group 2 (three parts, one skinned) both fail; group 2 fails first in time.
+    [Fact]
+    public void The_first_failing_group_in_group_order_is_reported_whatever_ran_first()
+    {
+        var a = Box("A", 1, 0, 0, 0, inward: false); var b = Box("B", 1, 3, 0, 0, inward: false); var c = Box("C", 1, 6, 0, 0, inward: false);
+        var d = Box("D", 1, 9, 0, 0, inward: false); d.Skinned = true;
+        byte[] src = BuildGlb(a, b, c, d);
+        var jobs = new List<GlbDisconnectedParts.FuseJob> {
+            new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 999 }, Name = "First_Fused" },
+            new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 0 }, Name = "Fine_Fused" },
+            new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 1, 2, 3 }, Name = "Large_Fused" } };
+        int was = GlbDisconnectedParts.FuseGroupWorkers;
+        try
+        {
+            foreach (int workers in new[] { 1, 3 })
+            {
+                GlbDisconnectedParts.FuseGroupWorkers = workers;
+                var thrown = Assert.ThrowsAny<Exception>(() => GlbDisconnectedParts.FuseGroups(src, jobs, 0.001, out var _));
+                Assert.Equal("Node index is out of range.", thrown.Message);
+            }
+        }
+        finally { GlbDisconnectedParts.FuseGroupWorkers = was; }
+    }
+
+    // ---- the gather's and the weld's flat tables (GlbDisconnectedParts.Weld.cs, 2026-10-27) ----
+
+    [Theory]
+    [InlineData("POSITION", 1, int.MaxValue)]
+    [InlineData("indices", 1, int.MaxValue - 1)]
+    [InlineData("POSITION", 2, int.MaxValue)]
+    [InlineData("POSITION", 1, -1)]
+    [InlineData("indices", 1, -1)]
+    public void Impossible_accessor_counts_are_refused_without_reserving_the_declared_arrays(string attribute, int parts, int declaredCount)
+    {
+        var src = Read(BuildGlb(Enumerable.Range(0, parts).Select(i => Quad("P" + i, 0, 1, 0, 1, i)).ToArray()));
+        foreach (JObject mesh in (JArray)src.Root["meshes"])
+        {
+            var primitive = (JObject)mesh["primitives"][0];
+            int accessor = attribute == "indices" ? primitive.Value<int>("indices") : primitive["attributes"].Value<int>(attribute);
+            // Above the CLR's array-length limit, so the broken sizing pass throws immediately rather than consuming RAM.
+            src.Root["accessors"][accessor]["count"] = declaredCount;
+        }
+        byte[] malformed = WriteGlb(src.Root, src.Bin);
+        var error = Assert.Throws<System.IO.InvalidDataException>(() => GlbDisconnectedParts.FuseNodes(malformed, Enumerable.Range(0, parts).ToArray(), 0));
+        if (declaredCount > 0) Assert.Contains("BIN chunk", error.Message);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(-7)]
+    public void A_negative_index_accessor_is_not_treated_as_an_unindexed_primitive(int accessor)
+    {
+        var src = Read(BuildGlb(new Part { Name = "Triangle", Positions = new float[] { 0, 0, 0, 1, 0, 0, 0, 1, 0 }, Indices = new[] { 0, 1, 2 } }));
+        src.Root["meshes"][0]["primitives"][0]["indices"] = accessor;
+        var error = Assert.Throws<System.IO.InvalidDataException>(() => GlbDisconnectedParts.FuseNodes(WriteGlb(src.Root, src.Bin), new[] { 0 }, 0));
+        Assert.Equal("Accessor index is out of range.", error.Message);
+    }
+
+    [Fact]
+    public void An_accessor_must_fit_at_both_ends_before_its_count_is_used_as_capacity()
+    {
+        var src = Read(BuildGlb(Quad("P", 0, 1, 0, 1, 0)));
+        int index = src.Root["meshes"][0]["primitives"][0].Value<int>("indices");
+        var accessor = (JObject)src.Root["accessors"][index];
+        accessor["count"] = int.MaxValue - 1;
+        // The last ushort lands at BIN offset zero, while the first is far before the BIN. Checking only the last
+        // element would approve a huge allocation even though the original reader refuses its very first read.
+        accessor["byteOffset"] = int.MinValue;
+        src.Root["bufferViews"][accessor.Value<int>("bufferView")]["byteOffset"] = int.MinValue + 6;
+        var error = Assert.Throws<System.IO.InvalidDataException>(() => GlbDisconnectedParts.FuseNodes(WriteGlb(src.Root, src.Bin), new[] { 0 }, 0));
+        Assert.Contains("BIN chunk", error.Message);
+    }
+
+    // Every cell of the grid lists its vertices in ascending order, the order the Dictionary's Lists held and the order
+    // the weld's unions depend on; a cell nobody fell in is empty. Jittered positions with duplicates over a coarse cell
+    // (packed keys, as every fuse has them) and over a cell a billionth of the span (the wide keys: 34 bits per axis).
+    [Theory]
+    [InlineData(0.5, false)]
+    [InlineData(1e-9, true)]
+    public void The_cell_grid_lists_each_cells_vertices_ascending_as_the_dictionary_did(double cell, bool wide)
+    {
+        var rng = new Random(7); var pos = new List<GlbDisconnectedParts.Vec3>();
+        for (int i = 0; i < 5000; i++)
+        {
+            var p = new GlbDisconnectedParts.Vec3 { X = rng.NextDouble() * 10 - 5, Y = rng.NextDouble() * 10 - 5, Z = rng.NextDouble() * 10 - 5 };
+            pos.Add(p); if (i % 7 == 0) pos.Add(p);   // a duplicate: the same cell, a higher index
+        }
+        long Floor(double v) => (long)Math.Floor(v / cell);
+        var expected = new Dictionary<(long, long, long), List<int>>();
+        for (int i = 0; i < pos.Count; i++)
+        {
+            var k = (Floor(pos[i].X), Floor(pos[i].Y), Floor(pos[i].Z));
+            if (!expected.TryGetValue(k, out var l)) expected.Add(k, l = new List<int>());
+            l.Add(i);
+        }
+        var grid = new GlbDisconnectedParts.CellGrid(pos, cell);
+        Assert.Equal(wide, grid.Wide);
+        int walked = 0;
+        for (int i = 0; i < pos.Count; i++)
+        {
+            grid.Cell(i, out long x, out long y, out long z);
+            Assert.Equal((Floor(pos[i].X), Floor(pos[i].Y), Floor(pos[i].Z)), (x, y, z));
+            for (long dx = -1; dx <= 1; dx++) for (long dy = -1; dy <= 1; dy++) for (long dz = -1; dz <= 1; dz++)
+            {
+                var got = new List<int>();
+                long key = grid.Range(x + dx, y + dy, z + dz, out int from, out int to);
+                for (int s = from; s < to; s++)
+                {
+                    int j = grid.Members[s];
+                    if (grid.Keys[j] == key && (!grid.Wide || grid.SameCell(j, x + dx, y + dy, z + dz))) got.Add(j);
+                }
+                Assert.Equal(expected.TryGetValue((x + dx, y + dy, z + dz), out var want) ? want : new List<int>(), got);
+                walked += got.Count;
+            }
+        }
+        Assert.True(walked > (wide ? pos.Count : pos.Count * 4), "the fixture's cells are too sparse to exercise the buckets");
+    }
+
+    // Faces on one sorted class triple come out ascending from their lowest face, however the three classes were ordered
+    // on each face; a collapsed or needle face is on no triple.
+    [Fact]
+    public void The_triple_index_groups_faces_by_sorted_class_triple_ascending()
+    {
+        var rng = new Random(11); int faces = 3000; var tris = new List<int>(); var classes = new int[faces * 3];
+        for (int f = 0; f < faces; f++)
+        {
+            int a = rng.Next(40), b = rng.Next(40), c = rng.Next(40);   // 40 classes: many faces share a triple, some are needles
+            int[] cycle = rng.Next(2) == 0 ? new[] { a, b, c } : new[] { b, c, a };
+            for (int k = 0; k < 3; k++) { tris.Add(f * 3 + k); classes[f * 3 + k] = cycle[k]; }
+        }
+        (int, int, int)? Triple(int f)
+        {
+            int[] s = { classes[f * 3], classes[f * 3 + 1], classes[f * 3 + 2] }; Array.Sort(s);
+            return s[0] == s[1] || s[1] == s[2] ? ((int, int, int)?)null : (s[0], s[1], s[2]);
+        }
+        var expected = new Dictionary<(int, int, int), List<int>>();
+        for (int f = 0; f < faces; f++)
+        {
+            var t = Triple(f); if (t == null) continue;
+            if (!expected.TryGetValue(t.Value, out var l)) expected.Add(t.Value, l = new List<int>());
+            l.Add(f);
+        }
+        var index = new GlbDisconnectedParts.TripleIndex(classes, tris, faces);
+        var leaders = new List<int>();
+        for (int f = 0; f < faces; f++)
+        {
+            var t = Triple(f);
+            if (t == null) { Assert.False(index.Registered(f)); continue; }
+            Assert.True(index.Registered(f));
+            var want = expected[t.Value];
+            Assert.Equal(want[0], index.First(f));
+            if (want[0] != f) continue;
+            leaders.Add(f);
+            var got = new List<int>(); for (int m = f; m >= 0; m = index.Next(m)) got.Add(m);
+            Assert.Equal(want, got);
+        }
+        Assert.Equal(expected.Values.Select(l => l[0]).OrderBy(x => x).ToList(), leaders);
+        Assert.Contains(expected.Values, l => l.Count >= 3);
+    }
+
+    // The colour attribute first appears on the SECOND part: the first part's vertices were gathered before the attribute
+    // was known and ship white, and the seam keeps the two colours apart (the mixed case above has the coloured part first).
+    [Fact]
+    public void An_attribute_first_seen_on_a_later_part_pads_the_earlier_parts_vertices()
+    {
+        var plain = Quad("C", 0, 1, 0, 1, 0);
+        var red = Quad("A", 1, 2, 0, 1, 0); red.Colors = Enumerable.Repeat(new[] { 1f, 0f, 0f, 1f }, 4).SelectMany(c => c).ToArray();
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(plain, red), new[] { 0, 1 }, 0.0);
+        Assert.Equal(1, r.IslandsAfter);
+        Assert.Equal(8, r.VerticesAfter);   // the seam vertices differ in colour on each side
+        var g = Read(r.Bytes);
+        var attrs = (JObject)((JObject)g.Primitives(g.Node("C_Fused"))[0])["attributes"];
+        float[] col = g.Floats(attrs.Value<int>("COLOR_0"), 4);
+        Assert.Equal(4, Enumerable.Range(0, 8).Count(i => col[i * 4] > 0.99f && col[i * 4 + 1] > 0.99f && col[i * 4 + 2] > 0.99f));   // four white
+        Assert.Equal(4, Enumerable.Range(0, 8).Count(i => col[i * 4] > 0.99f && col[i * 4 + 1] < 0.01f));   // four red, nothing blended
+    }
+
+    // ---- the probe's meshes analysed at once (Analyze, 2026-10-27) ----
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_sparse_POSITION_accessor_does_not_allocate_its_whole_vertex_map_for_each_mesh(bool invalidIndexRange)
+    {
+        var g = Read(BuildGlb(new Part { Name = "Sparse", Positions = new float[] { 0,0,0, 1,0,0, 0,1,0 }, Indices = new[] { 0,1,2 } }));
+        const int count = 1000000, positionBytes = count * 12;
+        var bin = new byte[positionBytes + 8];
+        Buffer.BlockCopy(g.Bin, 0, bin, 0, 36); Buffer.BlockCopy(g.Bin, 36, bin, positionBytes, 6);
+        g.Root["accessors"][0]["count"] = count;
+        g.Root["bufferViews"][0]["byteLength"] = positionBytes;
+        g.Root["bufferViews"][1]["byteOffset"] = positionBytes;
+        g.Root["buffers"][0]["byteLength"] = bin.Length;
+        if (invalidIndexRange) g.Root["accessors"][1]["count"] = int.MaxValue - 1;
+        ((JArray)g.Root["meshes"]).Add(g.Root["meshes"][0].DeepClone()); // distinct meshes share the large POSITION accessor
+        ((JArray)g.Root["nodes"]).Add(new JObject { ["name"] = "Other", ["mesh"] = 1 });
+        ((JArray)g.Root["scenes"][0]["nodes"]).Add(1);
+        byte[] source = WriteGlb(g.Root, bin);
+        var allocated = (Func<long>)Delegate.CreateDelegate(typeof(Func<long>), typeof(GC).GetMethod("GetAllocatedBytesForCurrentThread"));
+        int was = GlbDisconnectedParts.AnalyzeWorkers;
+        try
+        {
+            GlbDisconnectedParts.AnalyzeWorkers = 1; GlbDisconnectedParts.Analyze(source); // warm
+            long before = allocated();
+            var rows = GlbDisconnectedParts.Analyze(source);
+            long bytes = allocated() - before;
+            Assert.Equal(2, rows.Count);
+            foreach (var row in rows)
+                if (invalidIndexRange) Assert.Equal("Accessor reads beyond the BIN chunk.", row.Blocked);
+                else { Assert.Null(row.Blocked); Assert.Equal(1, row.Islands); Assert.Equal(1, row.Triangles); }
+            Assert.InRange(bytes, 0, 2L * bin.Length + 1024 * 1024); // parse and BIN prefix; only three vertex IDs are needed
+        }
+        finally { GlbDisconnectedParts.AnalyzeWorkers = was; }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void An_invalid_POSITION_range_is_reported_before_allocating_a_declared_giant_vertex_map(bool giantIndexCount)
+    {
+        var g = Read(BuildGlb(Quad("Bad", 0, 1, 0, 1, 0)));
+        g.Root["accessors"][0]["count"] = int.MaxValue;
+        g.Root["accessors"][0]["byteOffset"] = g.Bin.Length;
+        if (giantIndexCount) g.Root["accessors"][1]["count"] = int.MaxValue - 1;
+        var row = GlbDisconnectedParts.Analyze(WriteGlb(g.Root, g.Bin)).Single();
+        Assert.Equal("Accessor reads beyond the BIN chunk.", row.Blocked);
+    }
+
+    [Theory]
+    [InlineData(float.NaN)]
+    [InlineData(float.PositiveInfinity)]
+    [InlineData(float.NegativeInfinity)]
+    public void Non_finite_positions_keep_the_checked_weld_failure(float coordinate)
+    {
+        var g = Read(BuildGlb(Quad("Bad", 0, 1, 0, 1, 0)));
+        Buffer.BlockCopy(BitConverter.GetBytes(coordinate), 0, g.Bin, 0, 4);
+        byte[] source = WriteGlb(g.Root, g.Bin);
+        Assert.NotNull(GlbDisconnectedParts.Analyze(source).Single().Blocked);
+        var split = GlbDisconnectedParts.Split(source);
+        Assert.False(split.Changed);
+        Assert.Contains(split.Warnings, warning => warning.StartsWith("Skipped 'BadMesh':", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_mesh_prepass_defers_malformed_node_extensions_to_node_order()
+    {
+        var g = Read(BuildGlb(Quad("First", 0, 1, 0, 1, 0), Quad("Later", 2, 3, 0, 1, 0)));
+        g.Root["nodes"][0]["mesh"] = -1;
+        g.Root["nodes"][1]["extensions"] = 7;
+        var error = Assert.Throws<ArgumentOutOfRangeException>(() => GlbDisconnectedParts.Analyze(WriteGlb(g.Root, g.Bin)));
+        Assert.Equal("index", error.ParamName);
+    }
+
+    // The probe's rows do not depend on how many meshes are analysed at a time: the same file - two quads, a box, a mesh
+    // named by two nodes, a far quad, and one mesh whose primitive is lines (blocked, "Only TRIANGLES primitives...") - gives
+    // the same rows, in the same order, with the same blocked message, on one worker and on eight.
+    [Fact]
+    public void The_probe_gives_the_same_rows_whatever_the_number_of_mesh_workers()
+    {
+        var src = BuildGlb(Quad("A", 0, 1, 0, 1, 0), Quad("B", 1, 2, 0, 1, 0), Box("Box", 2, 5, 0, 0, inward: false), Quad("Far", 50, 51, 0, 1, 0), Quad("Lines", 0, 1, 5, 6, 0));
+        var g = Read(src);
+        var nodes = (JArray)g.Root["nodes"]; var meshes = (JArray)g.Root["meshes"];
+        ((JObject)((JArray)((JObject)meshes[4])["primitives"])[0])["mode"] = 1;                       // the last mesh is lines: blocked
+        nodes.Add(new JObject { ["name"] = "A_again", ["mesh"] = 0 });                                   // a second node on the first mesh
+        ((JArray)g.Root["scenes"][0]["nodes"]).Add(nodes.Count - 1);
+        src = WriteGlb(g.Root, g.Bin);
+        int was = GlbDisconnectedParts.AnalyzeWorkers;
+        var rows = new Dictionary<int, List<string>>();
+        try
+        {
+            foreach (int workers in new[] { 1, 8 })
+            {
+                GlbDisconnectedParts.AnalyzeWorkers = workers;
+                rows[workers] = GlbDisconnectedParts.Analyze(src, 0.01)
+                    .Select(p => p.NodeIndex + "|" + p.NodeName + "|" + p.Triangles + "|" + p.Islands + "|" + p.Blocked + "|" + p.TriangleFree).ToList();
+            }
+        }
+        finally { GlbDisconnectedParts.AnalyzeWorkers = was; }
+        Assert.Equal(rows[1], rows[8]);
+        Assert.Equal(6, rows[8].Count);
+        Assert.Contains(rows[8], r => r.Contains("Only TRIANGLES"));
+        Assert.Equal(4, rows[8].Count(r => r.Contains("|2|1|")));   // A, A_again, B and Far: two triangles, one island each
+    }
+
+    // The groups planned at once by default: half the logical processors and at least two (2026-10-27, measured on the Saleg's
+    // 22 groups: 8 at once beat 4 by a second, 16 and 22 were no faster). The Model Fuser's setting overrides it through
+    // FuseGroupWorkers; 0 there means this default.
+    [Fact]
+    public void The_default_number_of_groups_at_once_is_half_the_processors_and_at_least_two()
+    {
+        int expected = Math.Max(2, Environment.ProcessorCount / 2);
+        Assert.Equal(expected, GlbDisconnectedParts.DefaultFuseGroupWorkers);
+        Assert.True(GlbDisconnectedParts.DefaultFuseGroupWorkers >= 2);
     }
 }

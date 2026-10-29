@@ -429,6 +429,10 @@ windows. **Deep dive:**
   tick **Check mirrored parts** if one side of a symmetric hull comes out see-through (0.5.7: some files store their
   mirrored parts already facing outward, and the glTF reversal then turns them inward; the fuse checks them against
   the plain parts they touch and acts only on a clear verdict, and warns you when a group would need it),
+  leave **Fuse — groups at once** at **0** (auto: half the logical processors; measured on a 22-group ship, 8 at once is
+  the sweet spot on 16 threads and more is no faster, since the largest group's weld slows as the others compete for
+  memory bandwidth — lower it when the editor must stay responsive during a fuse or memory is short; the output never
+  depends on it),
   press **Fuse … into one shell each**: every group becomes ONE mesh in the output GLB, their seam vertices
   welded (a UV seam or a hard edge keeps its own vertex; connectivity is by position regardless), the winding
   made **consistent by majority**
@@ -468,6 +472,25 @@ windows. **Deep dive:**
   letters travel with a cut or split output, and a fused output's sidecar names each shell under its group's letter, so
   either order works (the Cutter re-reads the sidecar on every Probe, so after changing groups in the Fuser,
   re-Probe in the Cutter before cutting; the Fuser keeps your edits across a re-Probe and reloads through Load groups).
+  **How long a fuse takes, and the native plugin** (2026-10): Fuse's weld, exposure views from above and from the side,
+  and twin census run as C++ from the package's `Plugins/x86_64/hafkernels.dll`, alongside kernels used by the Vehicle
+  Lab's C# probe and the Factory's reduce. The Workshop's **Probe** (island analysis and preview) stays managed C#.
+  The DLL supports the Windows x86_64 editor and ships with the package. Its C# twins provide the same output when
+  native kernels are unavailable or disabled; the speed difference depends on the operation. Across successive fuse
+  optimizations — shared reads, scheduling, allocation reductions and native kernels — the Saleg's Revenge (22 groups,
+  about 705 parts, 3.9 million triangles) fell from 148.7 s to 37 s with four group workers; the galley's 15 groups fell
+  from 24.6 s to 9.6 s. On the Saleg's, eight workers later measured 34.2–35.5 s (the settings and method are in
+  [Testing → Native kernels](Testing.md#native-kernels)). **After an update that changes the DLL, restart Unity**:
+  the editor keeps the loaded plugin. An ABI-version mismatch uses managed fallback; an unchanged ABI version can
+  keep the old native implementation running. To check the backend, run a **C# Vehicle Lab probe in the same editor
+  session** and inspect its Console line containing `kernels native (…)` or `kernels managed (…)`. The Workshop prints
+  no backend line; elapsed time alone does not identify which path ran.
+  Fuse plans groups a few at a time, largest first (**Fuse — groups at once**, above). Each group in
+  `<output GLB>.fuse-report.txt` has a separate stage timing line (`timing: parse … gather … weld … sheets …`). Groups
+  overlap, so their elapsed times must not be summed to get wall time. The largest group's chain dominated the ship
+  measurement above; other models and worker settings can have a different balance. **Probe parts** analyses the file's
+  meshes on every core (the Saleg's 1,868 meshes: 12 s on one thread before 2026-10-27, 4.5 s now). A Probe that fails
+  logs its exception with the stack trace to the Console, not only its message.
   **Delete** (0.5.7): the Delete key, or the row popup, marks a part for deletion in either window — it loses its mesh
   in the output, whatever writes it (Split, Plane cut or Fuse); Insert marks the highlighted row for split, – / 0 /
   Backspace clear every mark. The Split checks and the deletion marks persist in `<source>.marks.txt` (S = split,
@@ -538,6 +561,19 @@ integration test is a row with a plain-language explanation of what it tests and
 Quick/Everything presets; one Run button executes the selection and each run writes a durable report to
 `Logs/haf_bake_tests_report.txt`, with per-row PASS/FAIL in the window (failures unfold their detail). All tests are
 non-destructive (throwaway resource names — your assets and registry are untouched).
+
+**Kernels dropdown** (2026-10-28): which code the rows exercise - *C++ kernels (native)*, *C# only (managed)*, or
+*Both - kernel rows twice*. Every native kernel keeps a C# twin and the callers take one path whole on a process-wide
+switch (`HafNativeKernels.Available`); the window used to run whatever the switch held and the report never said which,
+so a stale or missing DLL made every row a managed run that still passed. Now the first row, *Do the C++ kernels load?*,
+fails when the DLL did not load (SKIP only for a deliberate `HAF_NATIVE_KERNELS=0`), the rows whose pipeline can reach a
+kernel are marked "C++ kernels" in their cost line, under *Both* each of them runs twice under distinct titles
+(`[C++ kernels]`, then `[C# only]`) against the same goldens and Blender comparisons, and the report header names the
+mode and the loaded status. The choice persists (EditorPrefs `HAF.BakeTests.Kernels`). The two Vehicle Lab golden
+rows always use Blender and run once; select **Vehicle Generate backend acceptance** to exercise the C# Generate path.
+The kernel mode retains each row's Blender/C# backend choice; the dedicated in-process and Generate acceptance rows
+provide explicit C# coverage. Each pass retains its checks (including cached-asset checks or named fallbacks in its body);
+summary and tolerance matches establish those checks rather than output-byte equality.
 
 **Fire and forget** (since 2026-08-22): a run finishes on its own — alt-tab away, minimise Unity, walk off. It used to
 be driven by editor ticks, which Unity stops delivering when its window loses OS focus, so a 28-minute suite silently
