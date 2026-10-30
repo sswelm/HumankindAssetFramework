@@ -107,6 +107,89 @@ exit "$fail"
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("HITS 0", result.stdout)
 
+    def test_the_push_mode_runs_no_parity_step_and_the_parity_mode_no_push_step(self):
+        script = self.helpers()+'''
+push_step run_lane pushed bash -c 'echo pushed-output'
+parity_step run_bg parity bash -c 'echo parity-output'
+run_bg_wait
+exit "$fail"
+'''
+        for mode, expected, absent in (("push", "pushed", "parity"), ("parity", "parity", "pushed"), ("all", "pushed", None)):
+            with self.subTest(mode=mode):
+                self.env["HAF_GATE"] = mode
+                result = self.run_shell(script)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("[PASS] " + expected, result.stdout)
+                if absent: self.assertNotIn(absent, result.stdout)
+                else: self.assertIn("[PASS] parity", result.stdout)
+        self.env["HAF_GATE"] = "nonsense"
+        result = self.run_shell(script)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("HAF_GATE must be push, parity or all", result.stdout + result.stderr)
+        del self.env["HAF_GATE"]
+
+    def test_pre_push_cannot_inherit_a_parity_only_gate(self):
+        # Execute the actual hook against a tiny fake checkout, without running the expensive gate.
+        root = self.path / "repo with spaces"
+        (root / "tools").mkdir(parents=True)
+        write(root / "tools/check.sh", 'printf "MODE=%s\\n" "$HAF_GATE"\n')
+        hook = (ROOT / "tools/git-hooks/pre-push").as_posix()
+        self.env["HAF_GATE"] = "parity"
+        self.env["FAKE_ROOT"] = root.as_posix()
+        result = self.run_shell('''git() { printf '%s\\n' "$FAKE_ROOT"; }; export -f git
+printf 'refs/heads/test abc refs/heads/test def\\n' | bash "''' + hook + '''"
+''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("MODE=push", result.stdout)
+
+    def test_real_step_declarations_are_routed_to_their_gate(self):
+        source = (ROOT / "tools/check.sh").read_text(encoding="utf-8")
+        steps = source[source.index("# ==== the gate itself"):]
+        # Run every actual registration with inert commands, including the synchronous build/test registrations.
+        stubs = '''
+gate_lock() { :; }; gate_cancel_watch() { :; }; gate_unlock() { :; }
+note() { :; }; run_lane_go() { :; }; run_bg_wait() { :; }; verdict() { :; }
+run() { echo "STEP $*"; }; run_bg() { run "$@"; }; run_lane() { run "$@"; }
+'''
+        for mode in ("push", "parity", "all"):
+            self.env["HAF_GATE"] = mode
+            self.env["HAF_ORACLE"] = "live"
+            result = self.run_shell(self.helpers() + stubs + steps)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for label in ("plugin build", "plugin unit tests", "native kernels drill", "exit status"):
+                self.assertEqual("STEP " + label in result.stdout, mode != "parity", result.stdout)
+            for label in ("blender exit drill", "GLB reader drill", "GLB writer drill", "vehicle probe drill",
+                          "mesh layout drill", "prep drill", "deploy drill", "Workshop compaction drill",
+                          "rig_anim drill", "vehicle_rig drill", "blender oracle tests"):
+                self.assertEqual("STEP " + label in result.stdout, mode != "push", result.stdout)
+
+    def test_gate_stop_request_signals_the_shell_before_it_takes_a_lock(self):
+        self.env["HAF_GATE_CANCEL_FILE"] = (self.path / "cancel").as_posix()
+        write(self.path / "cancel", "stop")
+        result = self.run_shell(self.helpers() + '''
+trap 'echo STOPPED; gate_unlock; exit 130' TERM
+trap gate_unlock EXIT
+gate_cancel_watch
+for i in {1..30}; do sleep .1; done
+exit 2
+''')
+        self.assertEqual(result.returncode, 130, result.stdout + result.stderr)
+        self.assertIn("STOPPED", result.stdout)
+
+    def test_unlock_reaps_a_long_heartbeat_without_holding_output_open(self):
+        self.env["HAF_GATE_LOCK"] = (self.path / "own.lock").as_posix()
+        self.env["HAF_GATE_LOCK_BEAT"] = "60"
+        result = self.run_shell(self.helpers() + '''
+trap gate_unlock EXIT
+gate_lock
+sleep .1
+gate_unlock
+echo RELEASED
+''')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("RELEASED", result.stdout)
+        self.assertFalse((self.path / "own.lock").exists())
+
     def test_lane_steps_run_in_order_each_judged_on_its_own_beside_the_parallel_steps(self):
         result = self.run_shell(self.helpers()+'''
 run_lane first bash -c 'echo first-output; echo first > "$1/order"' _ "$ROOT"

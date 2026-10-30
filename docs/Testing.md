@@ -28,8 +28,8 @@ The fast guards used to be separate scripts you had to remember to run. They're 
 (`tools/check.sh`), wired as a **pre-push hook** — and, since 2026-08-23, the guards that need nothing but source also run
 in **GitHub Actions**. Both lanes matter, and for different reasons:
 
-- **The hook** runs *everything*, including the guards that need a licensed Unity install or the game. It is the
-  complete gate, and it is the only place some checks can run at all.
+- **The hook** runs the push mode, including the guards that need a Unity install or the game. Blender parity runs
+  separately through Bake Tests or the parity command below.
 - **CI** runs the source-only subset. A hook is **per-clone config** (`git config core.hooksPath …`) that a
   contributor may never have set, and `git push --no-verify` — or a GitHub web edit, which runs no hook whatsoever —
   walks straight past it. CI is the lane that survives all three.
@@ -38,69 +38,38 @@ in **GitHub Actions**. Both lanes matter, and for different reasons:
 prerequisite was absent and its claim was therefore *not tested* (its own `SKIP —` line says what did run: the C# side
 of a parity drill, the fixtures without the registry population), anything else when it failed. The gate prints a
 skipped step as `[SKIP]`, records `SKIP` in `PROGRESS.md`, lists every skipped step under the summary, and **fails the
-push**: on this machine every prerequisite exists, so a SKIP means Blender or the modding project went missing, and a
-port change pushed on that gate would have lost its oracle silently. `HAF_ALLOW_SKIP=1 git push` accepts a partial gate
+push**: on this machine every push prerequisite exists, so a SKIP means a required check lost its inputs. Blender is
+required only in parity mode. `HAF_ALLOW_SKIP=1 git push` accepts a partial gate
 on purpose and says so in the summary (`CHECK: PASS WITH n SKIP`); a `[FAIL]` beside a skip still fails. Until 2026-10-11
 eight of the 26 steps printed `PASS … Blender not found, so NO parity comparison` and exited 0 — the general review's
 verification pass counted them — so the gate reported 26/26 while eight claims were untested. `Tests/test_parallel_gate.py`
 drives the real gate functions through a skipped worker, a skipped serial step, a skip beside a failure, a skip with lost
 completion metadata (still a FAIL) and `HAF_ALLOW_SKIP`.
 
-**Blender does not run in the gate (2026-10-28; user: "I don't want to use it anymore in the push, only in the bake
-test").** Nine steps hold a C# port to Blender's own output (the GLB reader and writer drills, the vehicle probe, mesh
-layout, prep and deploy drills, the Workshop compaction drill, the rig_anim and vehicle_rig drills), and every one of them
-ran Blender on every push - the deploy drill alone for 800 s. Each Blender invocation now goes through
-`tools/blender_oracle.sh` (`oracle_blender`), which has three modes (`HAF_ORACLE`): **replay**, the gate's default, takes
-the invocation's raw output, exit code and output folders from a RECORD and runs no Blender; **record**
-(`tools/refresh_blender_oracle.sh`, which is the whole gate run with `HAF_ORACLE=record`) runs Blender exactly as the gate
-shapes it - the same samples, shards and fixtures - and writes the record; **live** runs Blender and stores nothing (the
-behaviour before, for `FULL=1` investigations). The record lives under `HAF_BLENDER_ORACLE` (default
-`<modding project>/Tools/blender_oracle`, self-ignored by git), one folder per drill and invocation, and is KEYED by
-what the invocation depends on (`tools/blender-oracle/oracle.py`): declared input bytes, nested job/shard lists
-(including paths in JSON keys), external glTF/GLB buffers and images, the actual Blender argument vector, the wrapper,
-and a conservative dependency closure of the Python key scripts (`oracle.py deps`), including scripts referenced by
-nested key lists. Python syntax is parsed, so aliases, inline imports, packages and relative imports are followed;
-comments and docstrings do not become dependencies. Ambiguous module names include all matching tracked candidates.
-Computed imports fall back to the tracked Python corpus; computed `exec` inputs must still be declared with `--key`.
-The wrapper and oracle engine themselves always enter the key. Unrelated tracked scripts stay outside a statically
-resolved closure, avoiding the former all-drill invalidation when one fixture generator changed. Paths under the run's
-temp folder and checkout are normalized, so these prefixes may move while input content and literal arguments remain
-significant. Output arguments stay literals even when Blender creates the named file. The wrapper checks the inputs
-before and after recording and refuses to publish a record if they changed during Blender's run. A replay whose key differs names the item that changed (`the record for deploy/export_0 is STALE:
-@WTMP@/deploy_fixtures/x.glb changed`) and the drill SKIPs, which the gate counts as a failure: a changed source, recipe,
-fixture or Blender script cannot pass on a stale record, and the push says to refresh. What a drill compares is
-unchanged - its C# side still runs on every push against Blender's rows, bytes and folders; only Blender's part of the
-work is done once, at the refresh. The blender exit drill tests Blender's own exit behaviour and has no record: it runs
-with the refresh only. One dump had to learn this: the vehicle_rig dump seals every job's rows with a checksum, and the
-rows name the folder the run wrote under (and a stop names the fixtures beside it), so a replayed record failed every
-seal - the dump now writes a `WORK` row and seals the rows with every spelling of the folder above it, the run's temp
-root, as `@TMP@` (`VehicleRigDump.WithoutWork`; the tamper helper `missing_vehiclerig.py` re-seals the same way;
-`Tests/VehicleRigEvidenceTests.cs` moves a sealed dump to another temp root). A `WORK` header, when present, must
-be unique, nonempty and second after `JOB`, even if the evidence seal was recomputed.
+**The parity drills are not in the push (2026-10-30; user: "for pushes to github it should no longer use any
+blender!!! ... it should only be part of the bake test to verify if it still behaves correctly").** Nine gate steps hold
+a C# port to Blender's own output - the GLB reader and writer, the Workshop's compaction, the vehicle probe, the mesh
+layout, the prep, the deploy conversion, rig_anim and vehicle_rig - and every one of them ran Blender on every push
+until 2026-10-28, then replayed a RECORD of Blender that went stale with every script change and asked for Blender
+again to refresh it. The push now runs none of them. `tools/check.sh` has three modes (`HAF_GATE`): **push** (the
+default, the pre-push hook: the build, the unit tests, the source guards, the Unity-backed drills - no Blender, no record
+of Blender, a few minutes), **parity** (ONLY the nine drills, with Blender: `bash tools/blender_parity.sh`, and the Bake
+Tests row *Do the C# ports still match Blender?* runs exactly that from Unity through Git's bash, reading the gate's
+own `[PASS]`/`[FAIL]`/`[SKIP]` lines back as the row's lines), and **all** (both, the gate as it was). The parity mode
+takes the gate's lock like any gate, so a push started meanwhile waits for it, and takes about twenty minutes.
+The hook explicitly selects `push`, even when its parent shell has `HAF_GATE=parity` or `all` set. The Bake Tests row
+requires a complete successful CHECK verdict and no skipped steps; Cancel asks the gate to stop its workers and release
+its lock, including while waiting for another gate. `bash tools/parity_row_unity_drill.sh --self-test` exercises its
+verdict and cancellation regressions in a temporary Unity project without running Blender.
 
-**Record format 3 requires one refresh of older records.** Run `bash tools/refresh_blender_oracle.sh` after this update.
-Format 3 (2026-10-29) keys the tracked `.py` and `.sh` scripts with CRLF read as LF: `core.autocrlf` gives the same commit
-LF files in one checkout and CRLF in another (four `editor/Tools~` scripts were LF in the main checkout and CRLF in a
-worktree), and under format 2, which hashed their raw bytes, a worktree push that changed none of them was STALE on all
-four. Script dependencies reached through nested lists use the same normalization. Models and other binary inputs retain
-their byte hashes; external glTF/GLB buffers and images are always byte-keyed, including those named `.py` or `.sh`.
-The store's path containment is lexical (no empty, `.`, `..`, drive or rooted part; every component checked for a link) and
-resolves nothing: resolving the target through the filesystem raced with a sibling shard's rename of the record next to it -
-Windows then spelled the target in the `\\?\` form, the root was "not a parent", and 4 of 400 parallel `store` calls failed
-with "path escapes its root" (2026-10-29; the parallel-invocations shell test flaked the same way under load).
-The store checksums metadata, raw output and every output artifact before restoring anything. It refuses unexpected,
-missing or corrupt payloads, changed output-folder requests, and paths or links outside the run's output scope. A folder
-recorded as absent removes a leftover folder during replay. A refresh stages its complete replacement before retiring
-the previous record, preserving the old record when writing fails. These checks detect corruption; the local store is
-not an authenticated source. Stdout relocation preserves literal placeholder text, Unicode paths and non-UTF-8 bytes.
-
-`Tests/test_blender_oracle.py` runs 46 cases in the gate and CI, covering dependency changes and the closure's bounds, typed arguments, recursive
-lists, external assets, relocation, integrity, containment, recorded absence, failed refreshes, changing inputs, and the
-shell wrapper's modes, parallel shards, caller variables and isolated child Git repositories under hooks. Blender stderr is captured separately and appended after
-stdout, so diagnostics cannot interrupt machine-readable rows. The record remains Blender's answer: a wrong answer from Blender stays
-wrong until the next refresh. Dependency discovery covers the declared inputs and known resources described above;
-new kinds of dynamically loaded resource need to be declared by their drill.
-
+The recorded oracle remains an OPTION of the parity mode, nothing more: `tools/blender_oracle.sh` wraps every Blender
+invocation of the drills in `HAF_ORACLE=live` (the default in the parity mode: Blender runs, nothing stored), `record`
+(`tools/refresh_blender_oracle.sh`: Blender runs and each invocation's raw output, exit code and written folders are
+stored under `HAF_BLENDER_ORACLE`, default `<modding project>/Tools/blender_oracle`, keyed by the inputs' bytes, the
+scripts and their import closure, `tools/blender-oracle/oracle.py`) and `replay` (no Blender; a missing or stale record
+is that drill's SKIP, which fails the run and names what changed). A record made on one machine replays on another
+without Blender - an offline rerun - but no push reads one, and nothing asks for a refresh. `Tests/test_blender_oracle.py`
+(46 cases, the parity mode and CI) holds the record's key, relocation, integrity and the wrapper's modes.
 
 **One gate at a time, and no step runs forever (2026-10-12).** Two gates on one machine — two sessions pushing, or a
 push beside a drill run — failed each other for weeks: the reader-gate drill's plant vanished under the other gate, and
@@ -127,8 +96,9 @@ starting two gates at once and interrupting the first.
 
 | Surface | `tools/check.sh` (pre-push hook) | also in CI | ~time |
 |---|---|---|---|
-| **Runtime + shared contract** | `dotnet build` · `dotnet test` · docs guard · binding-catalog surface · hot path · parse shape · member shape · reader-gate drill · schema parity | all source-only checks | the build and tests first (seconds); the guards on a lane beside the drills |
-| **Editor package** | Roslyn editor compile-check · registry engine drill · backup dedup drill · blender exit drill (refresh only) · GLB reader drill · GLB writer drill · vehicle probe drill · mesh layout, prep and deploy drills · Workshop compaction drill · rig_anim and vehicle_rig drills · schema parity · hand-list gate | parity + hand-list; compile check and drills stay local | the drills AT ONCE, the lane beside them: the longest one's time |
+| **Runtime + shared contract** | `dotnet build` · `dotnet test` · the gate's own tests · docs guard · binding-catalog surface · hot path · parse shape · member shape · reader-gate drill · schema parity | all source-only checks | the build and tests first (seconds); the guards on a lane beside the drills |
+| **Editor package** | Roslyn editor compile-check · registry engine drill · backup dedup drill · native kernels drill · hand-list gate · package meta · golden checksums | hand-list; compile check and drills stay local | the drills AT ONCE, the lane beside them: a few minutes |
+| **Blender parity** (`HAF_GATE=parity`: `tools/blender_parity.sh`, the Bake Tests row *Do the C# ports still match Blender?*) | GLB reader drill · GLB writer drill · Workshop compaction drill · vehicle probe drill · mesh layout, prep and deploy drills · rig_anim and vehicle_rig drills · blender exit drill · the oracle tests | never (Blender) | about twenty minutes, NOT in the push |
 
 **Since 2026-10-11 the drills run concurrently, and since 2026-10-29 the source guards run on a lane beside them.**
 The drills are independent (each works in its own temp directory and builds its own exe), so `check.sh` starts them
@@ -137,8 +107,7 @@ time and reports progress as soon as it finishes; the wall time is the longest s
 branch: 870 s where the sequence took about 1,500. Until 2026-10-29 the source guards still ran in sequence BEFORE the
 drills started - nine minutes of `check-member-shape.sh`, `drill-reader-gates.sh` and their kin on a tree of 340 C#
 files - and the gate's wall was those nine plus the deploy drill's ten. Now the build and the unit tests run first
-(they are what everything else assumes), the two test files that time subprocesses next (beside each other only: under
-the drills they time out), and then the guards and the small Python tests run in sequence on ONE background lane
+(they are what everything else assumes), and then the gate regressions, guards and small Python tests run in sequence on ONE background lane
 (`run_lane` / `run_lane_go`, each step judged like a `run_bg` step) while the drills run at once. Each launch clears
 its previous log/metadata first and fails if that cannot be done, so a later phase cannot reuse an earlier success.
 Missing or unreadable queued commands fail their own step instead of replaying a preceding command. A lane, not a block:

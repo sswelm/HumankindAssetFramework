@@ -10,6 +10,19 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE PARITY DRILLS LEFT THE PUSH (2026-10-30; user: "for pushes to github it should no longer use any blender!!! ...
+  it should only be part of the bake test").** Replacing Blender by its record (10-28) still tied every push to Blender:
+  the record went stale with every change to a script or the oracle itself, and asked for a 20-minute refresh with
+  Blender. The nine drills that hold the C# ports to Blender's own output are no longer part of the push at all.
+  `tools/check.sh` has modes: `HAF_GATE=push` (the hook: the build, the tests, the source guards, the Unity-backed
+  drills; no Blender, no record), `parity` (only the nine drills, with Blender: `tools/blender_parity.sh`) and `all`.
+  The Bake Tests row *Do the C# ports still match Blender?* runs the parity mode from Unity through Git's bash and reads
+  the gate's own verdict lines back as its lines. The record (`HAF_ORACLE=record`/`replay`) stays an option of the
+  parity mode for an offline rerun; nothing requires a refresh any more.
+  Review fixes: the hook forces push mode despite inherited `HAF_GATE`; the row rejects skipped steps and missing,
+  failed or incomplete verdicts. Cancellation requests the gate's own cleanup instead of killing its shell and leaving
+  workers or a lock heartbeat running. The row's verdict and cancellation cases run in Unity with
+  `tools/parity_row_unity_drill.sh --self-test` without Blender.
 - **THE PUSH GATE'S WALL IS ITS LONGEST STEP (2026-10-29).** Replacing Blender by its record (below) left the gate at
   21 minutes: nine of them were the source guards running IN SEQUENCE before the first drill started (`check-member-shape.sh`
   99 s, `drill-reader-gates.sh` 226 s, `check-parse-shape.sh` 67 s ... on 340 C# files), then the deploy drill's ten.
