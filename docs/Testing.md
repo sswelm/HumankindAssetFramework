@@ -28,8 +28,8 @@ The fast guards used to be separate scripts you had to remember to run. They're 
 (`tools/check.sh`), wired as a **pre-push hook** — and, since 2026-08-23, the guards that need nothing but source also run
 in **GitHub Actions**. Both lanes matter, and for different reasons:
 
-- **The hook** runs *everything*, including the guards that need a licensed Unity install or the game. It is the
-  complete gate, and it is the only place some checks can run at all.
+- **The hook** runs the push mode, including the guards that need a Unity install or the game. Blender parity runs
+  separately through Bake Tests or the parity command below.
 - **CI** runs the source-only subset. A hook is **per-clone config** (`git config core.hooksPath …`) that a
   contributor may never have set, and `git push --no-verify` — or a GitHub web edit, which runs no hook whatsoever —
   walks straight past it. CI is the lane that survives all three.
@@ -38,8 +38,8 @@ in **GitHub Actions**. Both lanes matter, and for different reasons:
 prerequisite was absent and its claim was therefore *not tested* (its own `SKIP —` line says what did run: the C# side
 of a parity drill, the fixtures without the registry population), anything else when it failed. The gate prints a
 skipped step as `[SKIP]`, records `SKIP` in `PROGRESS.md`, lists every skipped step under the summary, and **fails the
-push**: on this machine every prerequisite exists, so a SKIP means Blender or the modding project went missing, and a
-port change pushed on that gate would have lost its oracle silently. `HAF_ALLOW_SKIP=1 git push` accepts a partial gate
+push**: on this machine every push prerequisite exists, so a SKIP means a required check lost its inputs. Blender is
+required only in parity mode. `HAF_ALLOW_SKIP=1 git push` accepts a partial gate
 on purpose and says so in the summary (`CHECK: PASS WITH n SKIP`); a `[FAIL]` beside a skip still fails. Until 2026-10-11
 eight of the 26 steps printed `PASS … Blender not found, so NO parity comparison` and exited 0 — the general review's
 verification pass counted them — so the gate reported 26/26 while eight claims were untested. `Tests/test_parallel_gate.py`
@@ -57,6 +57,10 @@ of Blender, a few minutes), **parity** (ONLY the nine drills, with Blender: `bas
 Tests row *Do the C# ports still match Blender?* runs exactly that from Unity through Git's bash, reading the gate's
 own `[PASS]`/`[FAIL]`/`[SKIP]` lines back as the row's lines), and **all** (both, the gate as it was). The parity mode
 takes the gate's lock like any gate, so a push started meanwhile waits for it, and takes about twenty minutes.
+The hook explicitly selects `push`, even when its parent shell has `HAF_GATE=parity` or `all` set. The Bake Tests row
+requires a complete successful CHECK verdict and no skipped steps; Cancel asks the gate to stop its workers and release
+its lock, including while waiting for another gate. `bash tools/parity_row_unity_drill.sh --self-test` exercises its
+verdict and cancellation regressions in a temporary Unity project without running Blender.
 
 The recorded oracle remains an OPTION of the parity mode, nothing more: `tools/blender_oracle.sh` wraps every Blender
 invocation of the drills in `HAF_ORACLE=live` (the default in the parity mode: Blender runs, nothing stored), `record`
@@ -65,7 +69,7 @@ stored under `HAF_BLENDER_ORACLE`, default `<modding project>/Tools/blender_orac
 scripts and their import closure, `tools/blender-oracle/oracle.py`) and `replay` (no Blender; a missing or stale record
 is that drill's SKIP, which fails the run and names what changed). A record made on one machine replays on another
 without Blender - an offline rerun - but no push reads one, and nothing asks for a refresh. `Tests/test_blender_oracle.py`
-(37 cases, the parity mode and CI) holds the record's key, relocation, integrity and the wrapper's modes.
+(46 cases, the parity mode and CI) holds the record's key, relocation, integrity and the wrapper's modes.
 
 **One gate at a time, and no step runs forever (2026-10-12).** Two gates on one machine — two sessions pushing, or a
 push beside a drill run — failed each other for weeks: the reader-gate drill's plant vanished under the other gate, and
@@ -103,8 +107,7 @@ time and reports progress as soon as it finishes; the wall time is the longest s
 branch: 870 s where the sequence took about 1,500. Until 2026-10-29 the source guards still ran in sequence BEFORE the
 drills started - nine minutes of `check-member-shape.sh`, `drill-reader-gates.sh` and their kin on a tree of 340 C#
 files - and the gate's wall was those nine plus the deploy drill's ten. Now the build and the unit tests run first
-(they are what everything else assumes), the two test files that time subprocesses next (beside each other only: under
-the drills they time out), and then the guards and the small Python tests run in sequence on ONE background lane
+(they are what everything else assumes), and then the gate regressions, guards and small Python tests run in sequence on ONE background lane
 (`run_lane` / `run_lane_go`, each step judged like a `run_bg` step) while the drills run at once. Each launch clears
 its previous log/metadata first and fails if that cannot be done, so a later phase cannot reuse an earlier success.
 Missing or unreadable queued commands fail their own step instead of replaying a preceding command. A lane, not a block:

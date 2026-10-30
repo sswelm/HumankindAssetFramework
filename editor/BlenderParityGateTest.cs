@@ -16,6 +16,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 
@@ -54,28 +55,77 @@ public static class BlenderParityGateTest
         { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, WorkingDirectory = root };
         psi.EnvironmentVariables["HAF_GATE"] = "parity";
         psi.EnvironmentVariables["HAF_ORACLE"] = "live";
+        psi.EnvironmentVariables["HAF_ALLOW_SKIP"] = "0";
         psi.EnvironmentVariables["BLENDER"] = blender.Replace('\\', '/');
         psi.EnvironmentVariables["HAF_UNITY_PROJECT"] = project.Replace('\\', '/');
         // a hook's variables would make the gate's git calls answer for another repository; none are set in an editor, but a
         // shell that started Unity from inside a hook would pass them on
-        foreach (var name in new[] { "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE" }) psi.EnvironmentVariables.Remove(name);
+        foreach (var name in new[] { "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_GRAFT_FILE", "GIT_PREFIX", "GIT_SHALLOW_FILE", "GIT_IMPLICIT_WORK_TREE",
+            "GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "GIT_INTERNAL_SUPER_PREFIX", "GIT_NO_REPLACE_OBJECTS",
+            "GIT_REPLACE_REF_BASE" }) psi.EnvironmentVariables.Remove(name);
+        string cancelFile = Path.Combine(Path.GetTempPath(), "haf-gate-cancel-" + Guid.NewGuid().ToString("N"));
+        psi.EnvironmentVariables["HAF_GATE_CANCEL_FILE"] = cancelFile.Replace('\\', '/');
         body.AppendLine("gate: " + gate + "  (bash " + bash + ")");
         body.AppendLine("Blender: " + blender + "   modding project: " + project);
-        string o = "", e = ""; bool finished; int rc;
+        string o = "", e = ""; bool finished, drained; int rc;
         var watch = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             using (var p = System.Diagnostics.Process.Start(psi))
             {
-                finished = UniversalBaker.RunBounded(p, TimeoutMs, out o, out e);
+                finished = RunGate(p, cancelFile, TimeoutMs, () => BakeTestRunnerWindow.Progress.CancelRequested,
+                    () => BakeTestRunnerWindow.Progress.Heartbeat(), out o, out e, out drained);
                 rc = finished ? p.ExitCode : -1;
             }
         }
+        catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
             s.fail = 1; body.AppendLine("FAIL — could not start the gate: " + ex.Message);
             s.body = body.ToString(); return s;
         }
+        finally { try { File.Delete(cancelFile); } catch { } }
+        ReadResult(s, o, e, finished, drained, rc, watch.Elapsed.TotalSeconds);
+        s.body = body + s.body;
+        return s;
+    }
+
+    // Killing bash outright bypasses check.sh's TERM trap and leaves its drills and lock heartbeat alive. Ask the
+    // gate's watcher to signal its own shell, including while waiting for another gate's lock, then let it clean up.
+    internal static bool RunGate(System.Diagnostics.Process p, string cancelFile, int timeoutMs, Func<bool> cancelled,
+        Action heartbeat, out string stdout, out string stderr, out bool drained)
+    {
+        var output = Task.Run(() => p.StandardOutput.ReadToEnd());
+        var error = Task.Run(() => p.StandardError.ReadToEnd());
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        bool cancel = false, timedOut = false;
+        while (!p.WaitForExit(250))
+        {
+            try { heartbeat(); } catch { }   // progress rendering must not orphan the gate
+            cancel = cancelled(); timedOut = watch.ElapsedMilliseconds >= timeoutMs;
+            if (!cancel && !timedOut) continue;
+            File.WriteAllText(cancelFile, "stop\n");
+            // The gate's abort trap stops workers, releases the lock and exits 130. Do not dispose its pipes early.
+            if (!p.WaitForExit(60000))
+            {
+                try { p.Kill(); } catch { }
+                throw new TimeoutException("The parity gate did not acknowledge the stop request within 60 seconds");
+            }
+            break;
+        }
+        drained = false;
+        try { drained = Task.WaitAll(new Task[] { output, error }, 5000); } catch { }
+        stdout = output.Status == TaskStatus.RanToCompletion ? output.Result : "";
+        stderr = error.Status == TaskStatus.RanToCompletion ? error.Result : "";
+        drained = drained && output.Status == TaskStatus.RanToCompletion && error.Status == TaskStatus.RanToCompletion;
+        if (cancel) throw new OperationCanceledException("Bake Tests: cancelled by the user");
+        return !timedOut;
+    }
+
+    internal static void ReadResult(BakeTestSection s, string o, string e, bool finished, bool drained, int rc, double seconds)
+    {
+        var body = new System.Text.StringBuilder();
         var lines = (o ?? "").Replace("\r", "").Split('\n');
         foreach (var line in lines)
         {
@@ -85,11 +135,17 @@ public static class BlenderParityGateTest
         }
         string verdict = lines.LastOrDefault(l => l.StartsWith("CHECK: ")) ?? "";
         body.AppendLine(verdict.Length > 0 ? verdict : "(the gate printed no CHECK verdict)");
-        body.AppendLine(string.Format("exit {0} after {1:0} s", rc, watch.Elapsed.TotalSeconds));
+        body.AppendLine(string.Format("exit {0} after {1:0} s", rc, seconds));
         if (!finished) { s.fail++; body.AppendLine("FAIL — the gate did not finish within " + (TimeoutMs / 60000) + " minutes and was killed"); }
-        else if (rc != 0 && s.fail == 0 && s.skip == 0) { s.fail++; body.AppendLine("FAIL — the gate exited " + rc + " without a failed step: its own output follows"); }
+        else if (rc != 0 && s.fail == 0) { s.fail++; body.AppendLine("FAIL — the gate exited " + rc); }
         else if (rc == 0 && s.pass == 0) { s.fail++; body.AppendLine("FAIL — the gate exited 0 but no step passed: nothing was tested"); }
-        // a SKIP is the gate's failure (a prerequisite absent: the modding project, a recipe set, Blender for a shard), and the row's
+        if (s.skip > 0 && s.fail == 0) { s.fail++; body.AppendLine("FAIL — parity steps were skipped; the row requires every claim to be tested"); }
+        if (!drained || lines.Count(l => l.StartsWith("CHECK: ")) != 1 || verdict != "CHECK: PASS — safe to push."
+            || lines.LastOrDefault(l => l.Length > 0) != verdict)
+        {
+            if (s.fail == 0) s.fail++;
+            body.AppendLine("FAIL — missing, unsuccessful or incomplete gate verdict/output");
+        }
         if (rc != 0 || !finished || s.fail > 0)
         {
             var tail = lines.Where(l => l.Length > 0).ToList();
@@ -98,7 +154,6 @@ public static class BlenderParityGateTest
             if (!string.IsNullOrWhiteSpace(e)) { body.AppendLine("--- stderr ---"); body.AppendLine(e.Trim()); }
         }
         s.body = body.ToString();
-        return s;
     }
 
     /// <summary>The repository checkout the package lives in: the package folder (editor/) is inside it, and tools/ beside it.

@@ -13,4 +13,6 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   case "$local_sha" in 0000000000000000000000000000000000000000) ;; *) only_deletes=0;; esac
 done
 if [ "$only_deletes" -eq 1 ]; then echo "pre-push: only deletions - no gate"; exit 0; fi
+# A parity investigation in the parent shell must never replace the push's build and guards.
+export HAF_GATE=push
 exec bash "$(git rev-parse --show-toplevel)/tools/check.sh"

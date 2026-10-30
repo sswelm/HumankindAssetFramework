@@ -64,6 +64,15 @@ run() {  # run <label> <command...>: in sequence, the output as it comes
 # in PROGRESS.md, then polls. The holder heartbeats; a holder that stopped beating (a killed shell) is taken over.
 LOCK="${HAF_GATE_LOCK:-${TEMP:-${TMP:-/tmp}}/haf-gate.lock}"
 LOCK_BEAT_PID=""
+CANCEL_PID=""
+gate_cancel_watch() {
+  [ -n "${HAF_GATE_CANCEL_FILE:-}" ] || return 0
+  ( sleeper=""
+    trap '[ -z "$sleeper" ] || { kill "$sleeper" 2>/dev/null; wait "$sleeper" 2>/dev/null; }; exit 0' TERM INT
+    while [ ! -f "$HAF_GATE_CANCEL_FILE" ]; do sleep 1 & sleeper=$!; wait "$sleeper"; done
+    kill -TERM "$$"
+  ) </dev/null >/dev/null 2>&1 & CANCEL_PID=$!
+}
 gate_lock() {
   local t0=$(date +%s) said=0 holder beat now poll="${HAF_GATE_LOCK_POLL:-10}" stale="${HAF_GATE_LOCK_STALE:-180}" max="${HAF_GATE_LOCK_WAIT:-2700}"
   while ! mkdir "$LOCK" 2>/dev/null; do
@@ -86,10 +95,24 @@ gate_lock() {
   # the beat is written beside and renamed over (a reader never sees a half-written or truncated file), and a failed
   # write is retried on the next beat, never a reason to stop beating (2026-10-12: the old `|| exit 0` let one failed
   # write end the heartbeat, and 180 s later the gate read as dead)
-  ( while sleep "${HAF_GATE_LOCK_BEAT:-20}"; do [ -d "$LOCK" ] || exit 0; date +%s > "$LOCK/beat.$$" 2>/dev/null && mv -f "$LOCK/beat.$$" "$LOCK/beat" 2>/dev/null; done ) & LOCK_BEAT_PID=$!
+  ( sleeper=""
+    trap '[ -z "$sleeper" ] || { kill "$sleeper" 2>/dev/null; wait "$sleeper" 2>/dev/null; }; exit 0' TERM INT
+    while :; do
+      sleep "${HAF_GATE_LOCK_BEAT:-20}" & sleeper=$!; wait "$sleeper"
+      [ -d "$LOCK" ] || exit 0
+      date +%s > "$LOCK/beat.$$" 2>/dev/null && mv -f "$LOCK/beat.$$" "$LOCK/beat" 2>/dev/null
+    done
+  ) </dev/null >/dev/null 2>&1 & LOCK_BEAT_PID=$!
+}
+gate_stop_aux() {  # reap sleepers too: inherited pipe/log handles otherwise survive their parent shell.
+  local pid
+  for pid in "$CANCEL_PID" "$LOCK_BEAT_PID"; do
+    [ -z "$pid" ] || { kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; }
+  done
+  CANCEL_PID=""; LOCK_BEAT_PID=""
 }
 gate_unlock() {  # only the holder removes the lock: a waiter that gave up must not free another gate's
-  [ -z "$LOCK_BEAT_PID" ] || kill "$LOCK_BEAT_PID" 2>/dev/null; LOCK_BEAT_PID=""
+  gate_stop_aux
   if grep -q "pid $$\$" "$LOCK/holder" 2>/dev/null; then rm -rf "$LOCK"; fi
   return 0
 }
@@ -190,6 +213,7 @@ run_bg_wait() {
   find "$BG_LOGS" -mindepth 1 -delete 2>/dev/null; bg_n=0
 }
 gate_abort() {  # INT/TERM: stop everything this gate spawned, drop the logs, free the lock, say so
+  gate_stop_aux   # stop auxiliaries gracefully before the Windows worker sweep can kill their shells
   # Windows keeps no usable parent chain for what Cygwin exec'd — every drill script, Blender shard and Mono run has
   # a parent that is already gone — so `taskkill /T` stops at the worker's shell and the drills ran on underneath
   # (drilled 2026-10-12: a gate killed at 60 s into its drills left eleven processes that were still starting
@@ -209,9 +233,10 @@ gate_abort() {  # INT/TERM: stop everything this gate spawned, drop the logs, fr
 }
 
 # ==== the gate itself: the lock, the traps, the steps (everything above is a definition; Tests/test_parallel_gate.py drives those) ====
-gate_lock
 trap gate_abort INT TERM
 trap gate_unlock EXIT
+gate_cancel_watch
+gate_lock
 note "started ($(git rev-parse --short HEAD 2>/dev/null) $(git branch --show-current 2>/dev/null); $GATE)"
 
 # 1) plugin compiles — dotnet build exits non-zero on ERRORS only (the one benign CS0169 warning is fine).

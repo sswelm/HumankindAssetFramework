@@ -19,6 +19,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   The Bake Tests row *Do the C# ports still match Blender?* runs the parity mode from Unity through Git's bash and reads
   the gate's own verdict lines back as its lines. The record (`HAF_ORACLE=record`/`replay`) stays an option of the
   parity mode for an offline rerun; nothing requires a refresh any more.
+  Review fixes: the hook forces push mode despite inherited `HAF_GATE`; the row rejects skipped steps and missing,
+  failed or incomplete verdicts. Cancellation requests the gate's own cleanup instead of killing its shell and leaving
+  workers or a lock heartbeat running. The row's verdict and cancellation cases run in Unity with
+  `tools/parity_row_unity_drill.sh --self-test` without Blender.
 - **THE PUSH GATE'S WALL IS ITS LONGEST STEP (2026-10-29).** Replacing Blender by its record (below) left the gate at
   21 minutes: nine of them were the source guards running IN SEQUENCE before the first drill started (`check-member-shape.sh`
   99 s, `drill-reader-gates.sh` 226 s, `check-parse-shape.sh` 67 s ... on 340 C# files), then the deploy drill's ten.
