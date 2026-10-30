@@ -28,7 +28,7 @@ public static class BlenderParityGateTest
         var s = new BakeTestSection { title = "the C# ports against Blender: the nine parity drills (tools/check.sh, HAF_GATE=parity), with Blender, outside Unity" };
         var body = new System.Text.StringBuilder();
         string root = RepoRoot();
-        string gate = root == null ? null : Path.Combine(root, "tools", "check.sh");
+        string gate = root == null ? null : Path.Combine(root, "tools", "check.sh").Replace('\\', '/');
         if (gate == null || !File.Exists(gate))
         {
             s.skip = 1; body.AppendLine("SKIP — tools/check.sh not found beside the package (the package must be the repository's editor/ folder, not a copy): " + (gate ?? "no package path"));
@@ -46,7 +46,10 @@ public static class BlenderParityGateTest
             s.skip = 1; body.AppendLine("SKIP — no Blender found (UniversalBaker.FindBlender): the parity drills need the other side");
             s.body = body.ToString(); return s;
         }
-        string project = Directory.GetParent(Application.dataPath).FullName;
+        // the modding project the drills read (the registry, the recipes, the Workshop files): this project - unless the caller named
+        // one (HAF_UNITY_PROJECT, as the batch drill does from its throwaway project, and as the gate itself reads it)
+        string project = Environment.GetEnvironmentVariable("HAF_UNITY_PROJECT");
+        if (string.IsNullOrEmpty(project) || !Directory.Exists(project)) project = Directory.GetParent(Application.dataPath).FullName;
         var psi = new System.Diagnostics.ProcessStartInfo(bash, "\"" + gate.Replace('\\', '/') + "\"")
         { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, WorkingDirectory = root };
         psi.EnvironmentVariables["HAF_GATE"] = "parity";
