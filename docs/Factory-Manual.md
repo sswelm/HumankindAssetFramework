@@ -615,6 +615,7 @@ set up. Blender is auto-detected under Program Files; a winget/Steam/portable in
 | *Does the in-process rig slim match Blender's GLB export?* | **Yes** | SKIP — and also skip while no registry entry is animated; a non-glTF source, a deploying entry without its cached conversion and a shape the port leaves to Blender by name are a SKIP per entry, a port that crashes is a FAIL |
 | *Does the GLB rig route bake what the FBX route bakes?* | **Yes** | SKIP — and also skip while no registry entry is animated; off by default (two full bakes per animated glTF entry); an entry the port leaves to Blender by name is a SKIP, a crash a FAIL |
 | *Does the Vehicle Lab still generate?* (representatives / every recipe) | **Yes** | SKIP — and also skip while you have no saved recipes |
+| *Do the C# ports still match Blender?* (the nine parity drills) | **Yes** | SKIP — the push gate no longer runs these (2026-10-30); off by default, about twenty minutes, holds the gate lock; it needs Git's bash and the package as the repository's editor/ folder |
 
 The same boundary applies to **baking itself**: a static model at `targetTris 0` with no strip-parts — including the
 whole projectile path — needs **no Blender at all**, from `.glb`, `.gltf`, or `.obj`. Tri-reduction, part-stripping,

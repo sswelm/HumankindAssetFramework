@@ -107,6 +107,27 @@ exit "$fail"
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("HITS 0", result.stdout)
 
+    def test_the_push_mode_runs_no_parity_step_and_the_parity_mode_no_push_step(self):
+        script = self.helpers()+'''
+push_step run_lane pushed bash -c 'echo pushed-output'
+parity_step run_bg parity bash -c 'echo parity-output'
+run_bg_wait
+exit "$fail"
+'''
+        for mode, expected, absent in (("push", "pushed", "parity"), ("parity", "parity", "pushed"), ("all", "pushed", None)):
+            with self.subTest(mode=mode):
+                self.env["HAF_GATE"] = mode
+                result = self.run_shell(script)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("[PASS] " + expected, result.stdout)
+                if absent: self.assertNotIn(absent, result.stdout)
+                else: self.assertIn("[PASS] parity", result.stdout)
+        self.env["HAF_GATE"] = "nonsense"
+        result = self.run_shell(script)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("HAF_GATE must be push, parity or all", result.stdout + result.stderr)
+        del self.env["HAF_GATE"]
+
     def test_lane_steps_run_in_order_each_judged_on_its_own_beside_the_parallel_steps(self):
         result = self.run_shell(self.helpers()+'''
 run_lane first bash -c 'echo first-output; echo first > "$1/order"' _ "$ROOT"

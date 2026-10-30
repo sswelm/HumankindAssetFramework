@@ -49,13 +49,12 @@ together. The editor package consumes the same tracked DLL from `editor/Plugins/
 
 ## Blender (optional dependency)
 
-**The push gate needs no Blender since 2026-10-28.** Its nine Blender-parity drills replay a record of Blender's output
-(`tools/blender_oracle.sh`, keyed by the inputs' bytes); `bash tools/refresh_blender_oracle.sh` runs Blender once to make
-or renew the record, and a push whose record is missing, stale or corrupt says so and fails. Format 3 requires a
-one-time refresh of earlier records. The key includes actual Blender arguments, the Python files the scripts import or
-name (a conservative parsed closure; computed imports use the tracked corpus), recursive job lists and external glTF/GLB resources as well as declared
-input bytes. See
-[Testing](Testing.md#the-fast-gates--two-lanes-checksh-and-ci). Blender is still needed for the editor's own uses below
+**The push gate runs no Blender and no Blender-parity drill (2026-10-30).** The nine drills that hold the C# ports to
+Blender's own output are the gate's parity mode (`HAF_GATE=parity`: `bash tools/blender_parity.sh`, or the Bake Tests
+row *Do the C# ports still match Blender?*, which runs exactly that from Unity) and need Blender there; a push runs the
+build, the tests, the source guards and the Unity-backed drills only. A record of Blender's output (`HAF_ORACLE=record`
+with `tools/refresh_blender_oracle.sh`, then `replay`) remains an option of the parity mode for an offline rerun; nothing
+requires it. See [Testing](Testing.md#the-fast-gates--two-lanes-checksh-and-ci). Blender is still needed for the editor's own uses below
 and for the Bake Tests rows that run it.
 
 **Blender** is needed for `.blend` import, **animated-model import**, and for **Strip parts** / Reduce-to-tris on what the

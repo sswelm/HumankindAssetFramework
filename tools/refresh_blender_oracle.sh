@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# refresh_blender_oracle.sh - record the Blender oracle the push gate replays (2026-10-28, user: "I don't want to use
-# [Blender] anymore in the push, only in the bake test").
+# refresh_blender_oracle.sh - record the Blender oracle the parity drills can replay (2026-10-28). SINCE 2026-10-30 THE
+# PUSH READS NO RECORD: the parity drills are not in the push at all (tools/check.sh HAF_GATE=parity; tools/blender_parity.sh
+# and the Bake Tests row run them with Blender). This script remains for an offline rerun of the drills (HAF_ORACLE=replay
+# after a record made here); nothing requires it any more.
 #
 # The parity drills hold the C# ports to Blender's own output. They used to run Blender on every push; now the push
 # REPLAYS a record and this script MAKES it: it runs the whole gate (tools/check.sh) with HAF_ORACLE=record, so every
@@ -18,6 +20,6 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/tools/blender_oracle.sh"
 oracle_find_blender
 if [ -z "$BLENDER" ] || [ ! -x "$BLENDER" ]; then echo "FAIL — no Blender found (BLENDER=<exe>); nothing was recorded"; exit 2; fi
-export BLENDER HAF_ORACLE=record
+export BLENDER HAF_ORACLE=record HAF_GATE=parity
 printf 'recording the Blender oracle under %s with %s\n' "$ORACLE_STORE" "$BLENDER"
 exec bash "$ROOT/tools/check.sh"

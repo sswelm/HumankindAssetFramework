@@ -236,6 +236,18 @@ public class BakeTestRunnerWindow : EditorWindow
                        "Parts on one side only are counted, not held. A leaked Unity mesh fails.",
                 run = VehicleProbePreviewGateTest.RunSection },
 
+            // THE PARITY DRILLS (2026-10-30; user: "for pushes to github it should no longer use any blender!!! ... it should only be
+            // part of the bake test"): the nine drills that hold the C# ports to Blender's own output left the push gate for good;
+            // this row is where they run, with Blender, through the gate's own parity mode (tools/check.sh HAF_GATE=parity).
+            new TestRow { name = "Do the C# ports still match Blender? (the nine parity drills, with Blender, outside Unity)", needsBlender = true, on = false,
+                cost = "the gate's parity mode in Git's bash: Blender's dumps and the C# ports on every drill's sample - about twenty minutes; it holds the gate lock, so a push waits for it",
+                what = "Runs tools/check.sh with HAF_GATE=parity from the package's repository checkout: the GLB reader and writer drills, the Workshop compaction " +
+                       "drill, the vehicle probe drill, the mesh layout and prep drills, the deploy drill, the rig_anim drill and the vehicle_rig drill - each " +
+                       "runs Blender on its sample of registry sources, recipes and fixtures and holds the C# port to Blender's rows, bytes and folders, with " +
+                       "the drill's own tamper and rejection checks. Every gate step is a line here with its PASS, FAIL or SKIP; a SKIP (the modding " +
+                       "project, a recipe set or Blender missing for a shard) fails the row as it fails the gate. The push gate no longer runs these.",
+                run = BlenderParityGateTest.RunSection },
+
             new TestRow { name = "Vehicle Generate backend acceptance (every recipe)", kernels = true, needsBlender = true, thorough = true,
                 cost = "Generate twice per saved recipe — slow",
                 what = "Forces Blender and C# through the same Generate entry point. Compares the written GLB bytes, read-back rig, diagnostics, gun span sidecars and existing Lab goldens. Named fallbacks are reported separately and never count as C# acceptance. Blender remains the default.",

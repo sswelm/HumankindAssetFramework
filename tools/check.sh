@@ -5,8 +5,16 @@
 #
 # Deliberately NOT here (too slow / need Unity or the game): deploy_regression.sh (Blender golden-master), the
 # in-editor Feature Test, and the in-game binding report (haf_bindings_report.txt). The source-only steps take
-# seconds; with the parity drills (in parallel since 2026-10-11, the source guards on a lane beside them since
-# 2026-10-29, Blender replaced by its record since 2026-10-28) the whole gate takes about as long as its longest drill.
+# seconds; with the Unity-backed drills (in parallel since 2026-10-11, the source guards on a lane beside them since
+# 2026-10-29) the push takes a few minutes.
+#
+# THE GATE HAS MODES (2026-10-30; user: "for pushes to github it should no longer use any blender!!! ... it should only be
+# part of the bake test"). The push runs NO Blender-parity drill - not Blender, not a record of Blender, not a refresh.
+#   HAF_GATE=push    (the default; the pre-push hook) the build, the unit tests, the source guards, the Unity-backed drills
+#   HAF_GATE=parity  ONLY the nine parity drills that hold the C# ports to Blender's own output, with Blender
+#                    (HAF_ORACLE=live unless set): tools/blender_parity.sh, and the Bake Tests row
+#                    "Do the C# ports still match Blender?" runs exactly that from Unity
+#   HAF_GATE=all     both (the gate as it was until 2026-10-30)
 #
 # A step's exit status means: 0 PASS (its claim held), 3 SKIP (a prerequisite was absent, so its claim was NOT
 # tested; the step's own SKIP line says what did run), anything else FAIL. SKIP is not PASS (2026-10-11): until then a
@@ -24,6 +32,12 @@ PROGRESS="${HAF_PROGRESS:-$ROOT/../PROGRESS.md}"
 [ -f "$PROGRESS" ] || [ ! -f "$ROOT/../haf-wt/PROGRESS.md" ] || PROGRESS="$ROOT/../haf-wt/PROGRESS.md"
 # A step may take this long; a hung Blender or Mono used to block the push forever, with no message (2026-10-12).
 STEP_TIMEOUT="${HAF_STEP_TIMEOUT:-1800}"
+# The mode (see the header): push_step and parity_step prefix every step with the mode it belongs to.
+GATE="${HAF_GATE:-push}"
+case "$GATE" in push|parity|all) ;; *) echo "FAIL — HAF_GATE must be push, parity or all (got '$GATE')"; exit 2;; esac
+[ "$GATE" = push ] || export HAF_ORACLE="${HAF_ORACLE:-live}"   # the parity drills run Blender unless a record is asked for
+push_step() { [ "$GATE" = parity ] || "$@"; }     # push_step run_lane "<label>" <command...>
+parity_step() { [ "$GATE" = push ] || "$@"; }     # parity_step run_bg "<label>" <command...>
 note() { [ -f "$PROGRESS" ] && printf '%s  gate  %s\n' "$(date +%H:%M)" "$*" >> "$PROGRESS"; return 0; }
 word() { case "$1" in 0) echo PASS;; 3) echo SKIP;; *) echo FAIL;; esac; }
 record() {  # record <label> <rc> <seconds>: the verdict line, counted (the PROGRESS note is the caller's)
@@ -93,7 +107,7 @@ verdict() {  # the one summary line, and the status the hook returns
     note "DONE PASS ($n skipped, allowed by HAF_ALLOW_SKIP=1)"; return 0
   fi
   printf 'CHECK: FAIL — %d step(s) SKIPPED: their claim was NOT tested on this machine, and a gate that cannot see is not green:%s\n' "$n" "$list"
-  printf 'Install the missing prerequisite (the modding project, HAF_UNITY_PROJECT), refresh the Blender record (tools/refresh_blender_oracle.sh, Blender needed), or, meaning it: HAF_ALLOW_SKIP=1 git push\n'
+  printf 'Install the missing prerequisite (the modding project, HAF_UNITY_PROJECT; Blender for the parity mode), or, meaning it: HAF_ALLOW_SKIP=1 git push\n'
   note "DONE FAIL ($n skipped)"; return 1
 }
 # The drills are independent of one another (each works in its own mktemp directory and builds its own exe), and the
@@ -198,20 +212,19 @@ gate_abort() {  # INT/TERM: stop everything this gate spawned, drop the logs, fr
 gate_lock
 trap gate_abort INT TERM
 trap gate_unlock EXIT
-note "started ($(git rev-parse --short HEAD 2>/dev/null) $(git branch --show-current 2>/dev/null))"
+note "started ($(git rev-parse --short HEAD 2>/dev/null) $(git branch --show-current 2>/dev/null); $GATE)"
 
 # 1) plugin compiles — dotnet build exits non-zero on ERRORS only (the one benign CS0169 warning is fine).
-run "plugin build (dotnet build -c Release)" dotnet build "$ROOT/HumankindAssetFramework.csproj" -c Release --nologo -v q
+push_step run "plugin build (dotnet build -c Release)" dotnet build "$ROOT/HumankindAssetFramework.csproj" -c Release --nologo -v q
 
 # 2) unit tests — the pure logic that runs outside Unity (parse/schema/reflection-resolution/smoke rule).
-run "plugin unit tests (dotnet test)" dotnet test "$ROOT/Tests/HumankindAssetFramework.Tests.csproj" -c Release --nologo -v q
+push_step run "plugin unit tests (dotnet test)" dotnet test "$ROOT/Tests/HumankindAssetFramework.Tests.csproj" -c Release --nologo -v q
 
-# The two test files that time SUBPROCESSES (a gate's workers, a shell sourcing the oracle wrapper) run first, beside
-# each other only: under the thirteen drills they timed out (the refresh of 2026-10-29: five tests at the 60 s limit),
-# as they did under a second gate before the lock. They take about a minute together.
-run_bg "parallel gate regression tests (completion, paths and verdicts)" python "$ROOT/Tests/test_parallel_gate.py"
-run_bg "blender oracle tests (the recorded Blender oracle: keyed by its inputs, stale-aware, replayable)" python "$ROOT/Tests/test_blender_oracle.py"
-run_bg_wait
+# The gate's own regression tests head the lane: they time subprocesses (a gate's workers, a shell sourcing the oracle
+# wrapper) and timed out under the thirteen parity drills - which the push no longer runs (2026-10-30). The oracle tests
+# belong to the parity mode, where the record machinery is used.
+push_step run_lane "parallel gate regression tests (completion, paths and verdicts)" python "$ROOT/Tests/test_parallel_gate.py"
+parity_step run_lane "blender oracle tests (the recorded Blender oracle: keyed by its inputs, stale-aware, replayable)" python "$ROOT/Tests/test_blender_oracle.py"
 
 # ---- THE GUARD LANE BESIDE THE DRILLS (2026-10-29) ----
 # The source guards and the small Python test files are queued on the lane (run_lane: in sequence, one background job);
@@ -222,81 +235,83 @@ run_bg_wait
 # found under its heading.
 # 3) docs guard — relative links resolve, docs/notes/ banners present, no flat-wiki basename collisions. The docs
 #    publish to the repo, the Pages site AND the wiki, all resolving relative links, so one bad move breaks three.
-run_lane "docs guard (links + notes convention)" bash "$ROOT/tools/check-docs.sh"
+push_step run_lane "docs guard (links + notes convention)" bash "$ROOT/tools/check-docs.sh"
 
 # 3b) binding-catalog SURFACE — bindcheck proves the catalog RESOLVES against the game; this proves it COVERS the code.
 #     Pure source analysis (no game DLLs), so it belongs in the fast gate; bindcheck stays on the game-update trigger.
-run_lane "binding catalog surface (every by-name site catalogued)" bash "$ROOT/tools/check-catalog.sh"
+push_step run_lane "binding catalog surface (every by-name site catalogued)" bash "$ROOT/tools/check-catalog.sh"
 
 # 3c) hot path — nothing Plugin.Update() runs every frame may still call itself a SPIKE (a label that outlives its
 #     experiment is how 1,350 µs/frame hid for weeks). EXPERIMENTAL is allowed only when it names its config gate.
-run_lane "hot path (no shipped spikes in Update)" bash "$ROOT/tools/check-hot-path.sh"
+push_step run_lane "hot path (no shipped spikes in Update)" bash "$ROOT/tools/check-hot-path.sh"
 
 # 3d) parse shape — `float x = D; TryParse(…, out x)` silently overwrites D with 0. Four sites carried it before
 #     2026-08-23; two were live and NOTHING else could see them (no throw, no log, a plausible number). Source-only.
-run_lane "parse shape (no dead-default TryParse)" bash "$ROOT/tools/check-parse-shape.sh"
+push_step run_lane "parse shape (no dead-default TryParse)" bash "$ROOT/tools/check-parse-shape.sh"
 
 # 3e) member shape — the same bug class one layer down: `bool x = true; try { x = Convert.ToBoolean(GetMember(…)) }
 #     catch {}`. GetMember returns null for a renamed member and Convert.To*(null) does NOT throw, so the catch
 #     never runs and the default is dead. Two live sites then did `if (!x) continue;` — work skipped forever.
-run_lane "member shape (no dead-sentinel Convert(GetMember))" bash "$ROOT/tools/check-member-shape.sh"
+push_step run_lane "member shape (no dead-sentinel Convert(GetMember))" bash "$ROOT/tools/check-member-shape.sh"
 
 # 3f) the gate that tests 3b and 3e — plants a null-guarded reader wrapper under an unknown name plus the shapes
 #     those gates exist to catch, and FAILS if either gate passes. Their helper lists are hand-maintained; a review of
 #     PR #48 (2026-09-14) showed a 3-line body window let exactly this wrapper through. Source-only; it plants in
 #     its own copy of the tree, so it runs beside the gates it tests.
-run_lane "reader-gate drill (the gates refuse an unknown wrapper)" bash "$ROOT/tools/drill-reader-gates.sh"
+push_step run_lane "reader-gate drill (the gates refuse an unknown wrapper)" bash "$ROOT/tools/drill-reader-gates.sh"
 
 # 4) registry schema parity — IN-REPO since 2026-08-24. The authoring tools moved from the ENCReload Unity project
 #    into editor/, so both halves of the contract now live here: the guard compares the plugin's Newtonsoft + regex
 #    parse against the baker's ModelDef with no sibling checkout, no best-effort [SKIP] branch, and no direction it
 #    can only be checked from. That [SKIP] used to fire on every runner, which is exactly how a plugin-side change
 #    went unguarded until somebody happened to push the other repo.
-run_lane "registry schema parity" bash "$ROOT/tools/check_schema_parity.sh"
+push_step run_lane "registry schema parity" bash "$ROOT/tools/check_schema_parity.sh"
 
 # 5) editor source guards — also in-repo since the move. Both guard editor/, so they belong with it.
 # CI had this one and the hook did not (2026-10-12): a vehicle_rig.py helper change passed the hook and failed after the push.
-run_lane "vehicle lab math tests (oar calibration guard)" python "$ROOT/Tests/test_vehicle_rig_math.py"
-run_lane "recipe migration tests (a Vehicle Lab recipe across a Model Workshop fuse)" python "$ROOT/Tests/test_recipe_migrate.py"
+push_step run_lane "vehicle lab math tests (oar calibration guard)" python "$ROOT/Tests/test_vehicle_rig_math.py"
+push_step run_lane "recipe migration tests (a Vehicle Lab recipe across a Model Workshop fuse)" python "$ROOT/Tests/test_recipe_migrate.py"
 #    5a) The editor compiles. Roslyn against Unity's own reference assemblies — the ONE check that needs a licensed
 #        Unity install (UnityEditor.dll + the MonoBleedingEdge profile), so it stays hook-only and never runs in CI.
 # No guard: the script itself fails LOUD when Unity/dotnet/Newtonsoft are absent. The old guard here was
 # always-true (it accepted the committed .rsp as proof of Unity), and the script then PASSed while compiling
 # nothing on any machine without Unity at the author's path — a fabricated green found 2026-09-02.
-run_bg "editor scripts compile (Roslyn)" bash "$ROOT/tools/editor_compile_check.sh"
+push_step run_bg "editor scripts compile (Roslyn)" bash "$ROOT/tools/editor_compile_check.sh"
 #    5a') The shared registry engine (districts, formations, sounds) RUN against real files: its own source, Unity's
 #         Roslyn and Mono, tiny stand-ins for JsonUtility/EditorPrefs. Same Unity prerequisite as 5a, same loud FAIL.
-run_bg "registry engine drill (SingleSourceRegistry on real files)" bash "$ROOT/tools/registry_engine_drill.sh"
-run_bg "backup dedup drill (BackupDedup on real files: unchanged means the bytes)" bash "$ROOT/tools/backup_dedup_drill.sh"
-# BLENDER DOES NOT RUN IN THE GATE (2026-10-28, user: "I don't want to use it anymore in the push, only in the bake test").
-# Every parity drill below replays a RECORD of its Blender invocations (tools/blender_oracle.sh: HAF_ORACLE=replay, the
-# default), keyed by the inputs' bytes and the scripts; tools/refresh_blender_oracle.sh runs this gate with HAF_ORACLE=record
-# and Blender to make the record. A record that is missing or stale is that drill's SKIP, which fails the push and names what
-# changed. The blender exit drill tests Blender's own exit behaviour and has no record: it runs with the refresh only.
-[ "${HAF_ORACLE:-replay}" != "record" ] || run_bg "blender exit drill (a crashed script fails the process)" bash "$ROOT/tools/blender_exit_drill.sh"
-run_bg "GLB reader drill (every registry GLB read; a sample compared with the Blender record; SKIP without the project or the record)" bash "$ROOT/tools/glb_reader_drill.sh"
-run_bg "GLB writer drill (every registry GLB written, read back equal; a sample as the Blender record imports it; SKIP without the project or the record)" bash "$ROOT/tools/glb_writer_drill.sh"
-run_bg "vehicle probe drill (the Lab's probe in C#: every source probed, a sample's rows equal to Blender's own probe, from the record)" bash "$ROOT/tools/vehicle_probe_drill.sh"
-run_lane "vehicle probe comparator tests (diagnostic rows must be complete)" python "$ROOT/Tests/test_compare_vehicle_probe.py"
-run_bg "native kernels drill (the probe's C++ kernels: hafkernels.dll equal to a fresh build of native/, and every output hash on every recipe source equal to the managed twins'; SKIP without g++)" bash "$ROOT/tools/native_kernels_drill.sh"
-run_lane "vehicle probe jobs tests (the recipes' arguments as the Lab formats them)" python "$ROOT/Tests/test_probe_jobs.py"
-run_bg "mesh layout drill (Blender's vertex and edge order in C#: a sample's edge lists equal to Blender's own, from the record)" bash "$ROOT/tools/decimate_drill.sh"
-run_bg "prep drill (the reduce plus the glTF exporter's mesh layout in C#: a sample equal to what Blender's prep_model.py wrote, from the record)" bash "$ROOT/tools/prep_drill.sh"
-run_bg "deploy drill (from the Blender record: Blender's posed state of an imported animation in C#: every object matrix and evaluated property at up to thirteen frames equal to Blender's own, the sign of a zero included; and deploy_convert.py's decisions and the armature it builds - its log, its parts, its bones at rest, its anchors and the scene it leaves - against the script itself, run up to the bake, and then the bake: every key of the action to the bit)" bash "$ROOT/tools/deploy_drill.sh"
-run_bg "Workshop compaction drill (what no node uses is left out; every part reads as before - GLB reader and the Blender record; SKIP without the project or the record)" bash "$ROOT/tools/workshop_compact_drill.sh"
-run_bg "rig_anim drill (step (a) the stage dump, from the Blender record: Blender ran rig_anim.py on every animated recipe as the Factory does, cut at its four stages, the scene after each on record, complete and consistent, the census of the branches the recipes take; steps (b) to (e), all four stages in C#: BlenderRigAnim's scene equal to Blender's row for row on every dumped job after each stage, the albedo by its dimensions; step (f): the GLB rig route - BlenderRigExport's file equal to the one Blender's glTF exporter writes of the same scene, nodes, skins, primitives, materials, channels and bytes; step (g): the Factory's wrapper (BlenderRigAnimInProcess) writes each exported job's file and names its clips; SKIP without the project)" bash "$ROOT/tools/riganim_drill.sh"
-run_bg "vehicle_rig drill (all five ported stages and the Generate wrapper: saved recipes and fixtures against the Blender record, GLB bytes and ordered logs, damaged-evidence rejection; SKIP without the record or the recipes)" bash "$ROOT/tools/vehiclerig_drill.sh"
+push_step run_bg "registry engine drill (SingleSourceRegistry on real files)" bash "$ROOT/tools/registry_engine_drill.sh"
+push_step run_bg "backup dedup drill (BackupDedup on real files: unchanged means the bytes)" bash "$ROOT/tools/backup_dedup_drill.sh"
+# THE PARITY DRILLS ARE NOT IN THE PUSH (2026-10-30; user: "for pushes to github it should no longer use any blender!!!").
+# They hold the C# ports to Blender's own output and run in the parity mode only (HAF_GATE=parity: tools/blender_parity.sh,
+# the Bake Tests row "Do the C# ports still match Blender?"), with Blender (HAF_ORACLE=live) - or, asked for explicitly,
+# against a record of it (tools/blender_oracle.sh: HAF_ORACLE=record stores one, replay reads one; a missing or stale
+# record is that drill's SKIP, which fails the run and names what changed). Until 2026-10-28 they ran Blender on every push;
+# until this date they replayed a record that went stale with every script change and asked for Blender again to refresh.
+# The blender exit drill tests Blender's own exit behaviour and has no record: it runs when Blender does.
+[ "$GATE" = push ] || [ "$HAF_ORACLE" = replay ] || run_bg "blender exit drill (a crashed script fails the process)" bash "$ROOT/tools/blender_exit_drill.sh"
+parity_step run_bg "GLB reader drill (every registry GLB read; a sample compared with Blender; SKIP without the project)" bash "$ROOT/tools/glb_reader_drill.sh"
+parity_step run_bg "GLB writer drill (every registry GLB written, read back equal; a sample as Blender imports it; SKIP without the project)" bash "$ROOT/tools/glb_writer_drill.sh"
+parity_step run_bg "vehicle probe drill (the Lab's probe in C#: every source probed, a sample's rows equal to Blender's own probe)" bash "$ROOT/tools/vehicle_probe_drill.sh"
+push_step run_lane "vehicle probe comparator tests (diagnostic rows must be complete)" python "$ROOT/Tests/test_compare_vehicle_probe.py"
+push_step run_bg "native kernels drill (the probe's C++ kernels: hafkernels.dll equal to a fresh build of native/, and every output hash on every recipe source equal to the managed twins'; SKIP without g++)" bash "$ROOT/tools/native_kernels_drill.sh"
+push_step run_lane "vehicle probe jobs tests (the recipes' arguments as the Lab formats them)" python "$ROOT/Tests/test_probe_jobs.py"
+parity_step run_bg "mesh layout drill (Blender's vertex and edge order in C#: a sample's edge lists equal to Blender's own)" bash "$ROOT/tools/decimate_drill.sh"
+parity_step run_bg "prep drill (the reduce plus the glTF exporter's mesh layout in C#: a sample equal to what Blender's prep_model.py wrote)" bash "$ROOT/tools/prep_drill.sh"
+parity_step run_bg "deploy drill (Blender's posed state of an imported animation in C#: every object matrix and evaluated property at up to thirteen frames equal to Blender's own, the sign of a zero included; and deploy_convert.py's decisions and the armature it builds - its log, its parts, its bones at rest, its anchors and the scene it leaves - against the script itself, run up to the bake, and then the bake: every key of the action to the bit)" bash "$ROOT/tools/deploy_drill.sh"
+parity_step run_bg "Workshop compaction drill (what no node uses is left out; every part reads as before - GLB reader and Blender; SKIP without the project)" bash "$ROOT/tools/workshop_compact_drill.sh"
+parity_step run_bg "rig_anim drill (step (a) the stage dump, Blender ran rig_anim.py on every animated recipe as the Factory does, cut at its four stages, the scene after each on record, complete and consistent, the census of the branches the recipes take; steps (b) to (e), all four stages in C#: BlenderRigAnim's scene equal to Blender's row for row on every dumped job after each stage, the albedo by its dimensions; step (f): the GLB rig route - BlenderRigExport's file equal to the one Blender's glTF exporter writes of the same scene, nodes, skins, primitives, materials, channels and bytes; step (g): the Factory's wrapper (BlenderRigAnimInProcess) writes each exported job's file and names its clips; SKIP without the project)" bash "$ROOT/tools/riganim_drill.sh"
+parity_step run_bg "vehicle_rig drill (all five ported stages and the Generate wrapper: saved recipes and fixtures against Blender, GLB bytes and ordered logs, damaged-evidence rejection; SKIP without the recipes)" bash "$ROOT/tools/vehiclerig_drill.sh"
 #    5b) The ownership-rebase hand-lists. A field the UI edits but the window's rebase doesn't re-apply is thrown
 #        away on every Save — silent, and the reason this gate exists. Pure source analysis, so CI can run it too.
-run_lane "hand-list gate (ownership rebases)" bash "$ROOT/tools/check_handlists.sh"
+push_step run_lane "hand-list gate (ownership rebases)" bash "$ROOT/tools/check_handlists.sh"
 
 #    5c) Every path in editor/ has a COMMITTED .meta. Unity generates missing ones under Assets/ and cannot in a
 #        package folder, so the working copy is always right and only the commit is short — invisible from the
 #        authoring side by construction. Broke the install three times on 2026-08-24 (package.json + asmdef, then
 #        HafPackageContext.cs, then the Plugins FOLDER); an ignored asmdef means the package compiles to nothing.
-run_lane "package meta (every editor/ path has one)" bash "$ROOT/tools/check-package-meta.sh"
-run_lane "bake-test golden checksums (SKIP without the project)" bash "$ROOT/tools/check-goldens.sh"
-run_lane "exit status (no gate script reads a status from the end of a pipeline)" bash "$ROOT/tools/check-exit-status.sh"
+push_step run_lane "package meta (every editor/ path has one)" bash "$ROOT/tools/check-package-meta.sh"
+push_step run_lane "bake-test golden checksums (SKIP without the project)" bash "$ROOT/tools/check-goldens.sh"
+push_step run_lane "exit status (no gate script reads a status from the end of a pipeline)" bash "$ROOT/tools/check-exit-status.sh"
 run_lane_go
 run_bg_wait
 
