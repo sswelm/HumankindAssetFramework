@@ -21,16 +21,26 @@
 #      a bounded numeric suffix must enumerate every generated name.
 #
 # Then removes the plant and re-runs both gates, which must PASS — so a drill that leaves the tree dirty, or a gate
-# that fails for an unrelated reason, is reported as the drill's own failure. The plant is removed on every exit.
+# that fails for an unrelated reason, is reported as the drill's own failure. The plant lives in a COPY of the tree
+# (2026-10-29), removed on every exit: the checkout is never touched, so the drill runs beside the gates it tests.
 #
 #   bash tools/drill-reader-gates.sh
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 2
 
+# THE DRILL PLANTS IN A COPY OF THE TREE (2026-10-29). The gate runs it beside the two gates it tests (and beside every
+# other step), and a plant in the checkout would be read by them; two gates at once lost pushes to a vanishing plant for
+# weeks before that. The copy holds what the two gates read: every C# source the gates scan (not the build, test, baker
+# or tools folders) and tools/ itself, as the working tree has them (tracked and untracked, not ignored).
+SANDBOX=$(mktemp -d) || exit 2
+trap 'rm -rf "$SANDBOX"' EXIT
+git ls-files -z --cached --others --exclude-standard -- '*.cs' tools | grep -zvE '^(obj|bin|Temp|Tests|baker)/' | xargs -0 cp --parents -t "$SANDBOX" \
+  || { echo "[FAIL] could not copy the tree for the reader-gate drill"; exit 2; }
+cd "$SANDBOX" || exit 2
+
 PLANT=Patches/_ReaderGateDrill.cs
 SHADOW=Patches/_ReaderGateDrillShadow.cs
 [ -e "$PLANT" ] || [ -e "$SHADOW" ] && { echo "[FAIL] a reader-gate drill plant already exists — inspect and delete it"; exit 2; }
-trap 'rm -f "$PLANT" "$SHADOW"' EXIT
 
 cat > "$PLANT" <<'EOF'
 using System;

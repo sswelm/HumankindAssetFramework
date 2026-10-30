@@ -31,32 +31,14 @@ FILES=$(find . -name '*.cs' \
           -not -path './obj/*' -not -path './bin/*' -not -path './Temp/*' \
           -not -path './Tests/*' -not -path './baker/*' -not -path './tools/*' | sort)
 
-hits=0
-for f in $FILES; do
-  # Strip // line comments and /* */ blocks FIRST — the policy note at Plugin.ParseFloat quotes the banned shape
-  # verbatim, and a gate that trips on its own documentation is a gate nobody keeps.
-  # (Stripping is deliberately naive about "//" inside string literals: that can only hide a violation, never
-  # invent one, so the gate stays fail-safe rather than fail-noisy.)
-  # Then collapse newlines so the two-line form is caught as readily as the one-liner.
-  # `tr -d '\0'` because -0777 leaves a trailing NUL that bash then warns about on every file, every run — and a
-  # gate that prints a warning on a clean tree is a gate people learn to skim past.
-  stripped=$(perl -0777 -pe 's{/\*.*?\*/}{}gs; s{//[^\n]*}{}g; s{\s+}{ }g' "$f" 2>/dev/null | tr -d '\0') || continue
-
-  # <type> <name> = <literal…> ;   <type>.TryParse( … out <same name> )
-  # \1 = declared type, \2 = the variable, back-referenced in the out — that back-reference is the whole test:
-  # it is only a bug when the parse targets the SAME local the initializer just set.
-  found=$(printf '%s' "$stripped" | grep -oP \
-    '\b(?:float|double|int|long|uint|ulong|short|byte|decimal|bool)\s+(\w+)\s*=\s*[^;{}]+;\s*(?:float|double|int|long|uint|ulong|short|byte|decimal|bool)\.TryParse\([^;]*?\bout\s+\1\b' \
-    || true)
-
-  if [ -n "$found" ]; then
-    while IFS= read -r m; do
-      [ -z "$m" ] && continue
-      hits=$((hits + 1))
-      printf 'FAIL: %s\n      %s\n' "${f#./}" "$(printf '%s' "$m" | cut -c1-140)"
-    done <<< "$found"
-  fi
-done
+# ONE PERL OVER EVERY FILE (2026-10-29): the loop this replaced ran perl, tr and grep -oP per file in subshells -
+# six forks a file, 340 files, 67 s on Windows for a regex that takes a second. tools/shape-scan.pl holds the regex
+# unchanged (and the comment stripping, with its deliberate naivety about "//" in strings) and prints the same FAIL
+# lines, then `HITS <n>`.
+scan=$(perl tools/shape-scan.pl parse $FILES) || { echo "[FAIL] parse shape: the scanner failed (perl tools/shape-scan.pl)"; exit 2; }
+hits=$(printf '%s\n' "$scan" | awk '/^HITS /{print $2}' | tail -1)
+case "$hits" in ''|*[!0-9]*) echo "[FAIL] parse shape: the scanner gave no count"; exit 2;; esac
+[ "$hits" -eq 0 ] || printf '%s\n' "$scan" | grep -v '^HITS '
 
 if [ "$hits" -gt 0 ]; then
   cat >&2 <<'MSG'

@@ -6,7 +6,7 @@ now Blender runs only when the record is REFRESHED (tools/refresh_blender_oracle
 REPLAYS the record (HAF_ORACLE=replay, the default). A record is one Blender invocation's raw output, its exit code and
 the output folders it wrote, keyed by what the invocation depends on: the dump script, the Blender script under test,
 the declared input files, nested job/shard lists, external glTF/GLB buffers and images, the actual Blender arguments,
-and a conservative set of tracked Python support files in tools/ and editor/Tools~/. A replay whose key differs from the record's names the item that changed and
+the oracle engine, and a conservative parsed closure of tracked Python imports and named scripts. A replay whose key differs from the record's names the item that changed and
 exits 99 - the drill then SKIPs, which the gate counts as a failure, so a changed input or script cannot pass on a stale
 record. Paths under the drill's temp folder are stored as @WTMP@ and put back on replay, so a record made in one temp
 folder replays in another. Format 3 normalises script dependency line endings and checks the record manifest and every payload file before restoring contained
@@ -16,6 +16,7 @@ Old records require a one-time refresh; failed writes or changing inputs do not 
     oracle.py store --store S --drill D --name N --wtmp W [--tmpd T] [--wroot R] --rc RC --raw FILE [--dirs rel...] [--blender EXE] [--arg VALUE]... [--expected-key KEY] -- item...
     oracle.py load  --store S --drill D --name N --wtmp W [--tmpd T] [--wroot R] --raw FILE [--dirs rel...] [--arg VALUE]... -- item...
     oracle.py key   --wtmp W [--tmpd T] [--wroot R] -- item...            (prints the key; for tests and curiosity)
+    oracle.py deps  --root R -- item...   (the tracked Python files the .py items reach by import or by name, as JSON)
 
 load prints "RC <n>" on success (exit 0); exit 99 when there is no usable record (the reason printed); exit 1 on an error.
 An existing input file is content-keyed. A .txt/.json/.args input is a recursive list, including paths used as JSON keys.
@@ -218,6 +219,122 @@ def describe_items(items, paths, arguments=()):
     return out
 
 
+def dependencies(root, items):
+    """Conservative tracked imports/named scripts, not an execution tracer. Computed exec inputs must be declared.
+
+    Parse Python syntax (including packages and relative imports); prose is not code. Ambiguous module names include
+    all matching tracked files. Computed imports or script-name fragments fall back to all tracked Python files.
+    """
+    import ast, subprocess, tokenize
+    root = os.path.abspath(root)
+    local_vars = subprocess.check_output(["git", "rev-parse", "--local-env-vars"], text=True).splitlines()
+    env = {k: v for k, v in os.environ.items() if k not in local_vars}
+    listing = subprocess.run(["git", "-c", "safe.directory=" + root, "-C", root, "ls-files", "-z", "--", "*.py"],
+                             capture_output=True, check=True, env=env).stdout
+    def identity(path): return os.path.normcase(os.path.abspath(path))
+    tracked = {identity(os.path.join(root, rel)): os.path.abspath(os.path.join(root, rel)).replace("\\", "/")
+               for rel in listing.decode("utf-8", "surrogateescape").split("\0") if rel}
+    queue = []; seeds = set(); lists = set()
+    def seed(item, parent=None):
+        path = as_path(item) or (as_path(os.path.join(parent, item)) if parent else None)
+        if not path: return
+        key = identity(path)
+        if path.lower().endswith(".py"):
+            if key not in seeds: seeds.add(key); queue.append(path)
+        elif path.lower().endswith(LIST_EXT) and key not in lists:
+            lists.add(key)
+            with open(path, encoding="utf-8", errors="surrogateescape") as source: text = source.read()
+            for line in text_tokens(text, path.lower().endswith(".json")):
+                for token in line.replace("\t", "\n").replace("|", "\n").splitlines():
+                    if token.strip(): seed(token.strip(), os.path.dirname(path))
+    for item in items: seed(item)
+    seen = set(); out = set()
+    def add(path):
+        key = identity(path)
+        if key not in tracked: return
+        if key not in seeds: out.add(tracked[key])
+        if key not in seen: queue.append(tracked[key])
+    def add_with_packages(path):
+        add(path)
+        parent = os.path.dirname(path)
+        while identity(parent) != identity(root) and os.path.commonpath([root, parent]) == root:
+            add(os.path.join(parent, "__init__.py"))
+            parent = os.path.dirname(parent)
+    def module(name, current, level=0):
+        rel = name.replace(".", "/")
+        if level:
+            base = os.path.dirname(current)
+            for _ in range(level - 1): base = os.path.dirname(base)
+            candidates = [os.path.join(base, rel + ".py"), os.path.join(base, rel, "__init__.py")]
+        else:
+            suffixes = ("/" + rel + ".py", "/" + rel + "/__init__.py")
+            candidates = [p for p in tracked.values() if p.lower().endswith(tuple(x.lower() for x in suffixes))]
+        found = [tracked[identity(p)] for p in candidates if identity(p) in tracked]
+        for path in found: add_with_packages(path)
+        return found
+    def named_script(name, current):
+        name = name.replace("\\", "/")
+        if name == ".py":
+            for path in tracked.values(): add(path)
+            return
+        direct = os.path.join(os.path.dirname(current), name)
+        if "/" in name and identity(direct) in tracked: add_with_packages(direct)
+        else:
+            for path in tracked.values():
+                if os.path.basename(path).lower() == os.path.basename(name).lower(): add_with_packages(path)
+    while queue:
+        current = queue.pop(); key = identity(current)
+        if key in seen: continue
+        seen.add(key)
+        with tokenize.open(current) as source: text = source.read()
+        try: tree = ast.parse(text, filename=current)
+        except SyntaxError as error: raise ValueError("cannot inspect Python dependencies of " + current + ": " + str(error))
+        docs = set()
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body:
+                first = node.body[0]
+                if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) and isinstance(first.value.value, str): docs.add(id(first.value))
+        import_functions = {name: name for name in ("__import__", "import_module", "spec_from_file_location")}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module in ("importlib", "importlib.util", "builtins"):
+                import_functions.update({alias.asname or alias.name: alias.name for alias in node.names if alias.name in ("__import__", "import_module", "spec_from_file_location")})
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names: module(alias.name, current)
+            elif isinstance(node, ast.ImportFrom):
+                packages = module(node.module or "", current, node.level)
+                for alias in node.names:
+                    if alias.name == "*":
+                        for package in packages:
+                            if os.path.basename(package) == "__init__.py":
+                                prefix = os.path.dirname(package) + "/"
+                                for path in tracked.values():
+                                    if path.startswith(prefix): add_with_packages(path)
+                    else: module(((node.module + ".") if node.module else "") + alias.name, current, node.level)
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docs:
+                if node.value.lower().endswith(".py") and not any(c in node.value for c in ("\n", "\r", "\0")): named_script(node.value, current)
+            elif isinstance(node, ast.Call):
+                name = node.func.id if isinstance(node.func, ast.Name) else node.func.attr if isinstance(node.func, ast.Attribute) else ""
+                if name in import_functions:
+                    index = 1 if import_functions[name] == "spec_from_file_location" else 0
+                    arg = node.args[index] if len(node.args) > index else None
+                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                        if index: named_script(arg.value, current)
+                        elif arg.value.startswith("."):
+                            package = node.args[1] if len(node.args) > 1 else next((k.value for k in node.keywords if k.arg == "package"), None)
+                            if isinstance(package, ast.Constant) and isinstance(package.value, str):
+                                level = len(arg.value) - len(arg.value.lstrip("."))
+                                prefix = package.value.split(".")
+                                prefix = prefix[:len(prefix) - level + 1] if level > 1 else prefix
+                                module(".".join(prefix + [arg.value.lstrip(".")]), current)
+                            else:
+                                for path in tracked.values(): add(path)
+                        else: module(arg.value, current)
+                    else:
+                        for path in tracked.values(): add(path)
+    return sorted(out)
+
+
 def key_of(described):
     return hashlib.blake2b(json.dumps(described, sort_keys=True).encode("utf-8"), digest_size=16).hexdigest()
 
@@ -246,7 +363,7 @@ def differences(recorded, current):
 
 
 def parse(argv):
-    if not argv or argv[0] not in ("store", "load", "key"):
+    if not argv or argv[0] not in ("store", "load", "key", "deps"):
         print(__doc__); sys.exit(2)
     op = argv[0]; opts = {"dirs": [], "args": []}; i = 1
     while i < len(argv):
@@ -412,6 +529,9 @@ def load(o, paths, described, key, target):
 def main(argv):
     op, o = parse(argv)
     try:
+        if op == "deps":
+            if not o.get("root"): print("FAIL - --root is required"); return 2
+            print(json.dumps(dependencies(o["root"].replace("\\", "/"), o["items"]))); return 0
         paths = Paths(o.get("wtmp"), o.get("tmpd"), o.get("wroot"))
         described = describe_items(o["items"], paths, o["args"]); key = key_of(described)
         if op == "key": print(key); return 0

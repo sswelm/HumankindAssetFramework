@@ -8,7 +8,8 @@
 #           from the RECORD under $HAF_BLENDER_ORACLE (default <modding project>/Tools/blender_oracle), keyed by what
 #           the invocation depends on - the dump script, the Blender script under test, the input files' bytes, the
 #           job and shard lists with every file they name - so a record cannot answer for inputs it was not made from.
-#           Actual arguments and tracked Python helpers are included automatically; inputs are checked before/after recording.
+#           The actual arguments and the Python files the key scripts import or name are included automatically (the
+#           import closure, NOT every tracked .py: 2026-10-29); inputs are checked before/after recording.
 #           Payload/manifest corruption and unsafe output paths are refused. No record, or a stale one, is a SKIP (exit 3) that names what changed; the gate counts a SKIP as a failure.
 #   record  (tools/refresh_blender_oracle.sh): Blender runs and the record is written. Needs Blender.
 #   live    (the behaviour before this file, for FULL=1 investigations): Blender runs, nothing is stored.
@@ -51,23 +52,18 @@ oracle_init() {  # <drill> [label]: record/live need Blender; replay needs only 
 }
 
 # Callers may initialize before allocating TMPD/WTMP. Each invocation gets its own list so parallel shards never write the same file.
-oracle_prepare_dependencies() {  # <invocation name>
-  local stem="oracle_code_$1"
-  case "$1" in ''|*[!a-zA-Z0-9_.-]*) echo "FAIL — invalid oracle invocation name"; exit 2;; esac
-  # A conservative dependency set covers imports/execs shared across drill directories (scene_rows, glb_rows, etc.).
-  # Use tracked files: ignored proof projects, caches and unrelated untracked files are not Blender source dependencies.
-  git -c safe.directory="$ORACLE_WROOT" -C "$ROOT" ls-files -z -- 'tools/*.py' 'editor/Tools~/*.py' > "$TMPD/$stem.list0"
+oracle_prepare_dependencies() {  # <invocation name> <key item>...: the tracked Python files the key scripts reach
+  local stem="oracle_code_$1"; shift
+  case "$stem" in oracle_code_|*[!a-zA-Z0-9_.-]*) echo "FAIL — invalid oracle invocation name"; exit 2;; esac
+  # The IMPORT CLOSURE of the key scripts (oracle.py deps: what they import or name as a .py, followed, among the files
+  # git tracks - ignored proof projects, caches and untracked files are not Blender source dependencies). Not every
+  # tracked .py (the first format 2 did that, 2026-10-29: an edit to one drill's fixture generator staled every drill's
+  # record and cost a 20-minute refresh). Ambiguous names are conservative; computed imports use the tracked corpus.
+  # Computed exec inputs must be declared with --key. The engine is keyed separately so key-policy edits invalidate records.
+  ORACLE_CODE="$TMPD/$stem.json"
+  python "$ROOT/tools/blender-oracle/oracle.py" deps --root "$ORACLE_WROOT" -- "$@" > "$ORACLE_CODE"
   local rc=$?
-  if [ "$rc" -ne 0 ]; then echo "FAIL — $ORACLE_LABEL: cannot enumerate tracked Blender Python dependencies"; exit 2; fi
-  ORACLE_CODE="$WTMP/$stem.json"
-  python - "$TMPD/$stem.list0" "$TMPD/$stem.json" "$ORACLE_WROOT" <<'PYCODE'
-import json, sys
-with open(sys.argv[1], "rb") as source: names = source.read().split(b"\0")
-with open(sys.argv[2], "w", encoding="utf-8", newline="\n") as output:
-    json.dump([sys.argv[3].rstrip("/\\") + "/" + name.decode("utf-8") for name in names if name], output)
-PYCODE
-  rc=$?
-  if [ "$rc" -ne 0 ]; then echo "FAIL — $ORACLE_LABEL: cannot describe tracked Blender Python dependencies"; exit 2; fi
+  if [ "$rc" -ne 0 ]; then echo "FAIL — $ORACLE_LABEL: cannot describe the Blender Python dependencies ($(cat "$ORACLE_CODE" 2>/dev/null))"; exit 2; fi
   return 0
 }
 
@@ -104,8 +100,8 @@ oracle_blender() {
   local argvargs=() argument
   for argument in "$@"; do argvargs+=(--arg "$argument"); done
   if [ "$ORACLE_MODE" != "live" ]; then
-    oracle_prepare_dependencies "$name"
-    keys+=("$ORACLE_CODE" "$ROOT/tools/blender_oracle.sh")
+    oracle_prepare_dependencies "$name" "${keys[@]}"
+    keys+=("$ORACLE_CODE" "$ROOT/tools/blender_oracle.sh" "$ROOT/tools/blender-oracle/oracle.py")
   fi
   case "$ORACLE_MODE" in
     live)

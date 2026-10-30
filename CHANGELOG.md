@@ -10,6 +10,26 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE PUSH GATE'S WALL IS ITS LONGEST STEP (2026-10-29).** Replacing Blender by its record (below) left the gate at
+  21 minutes: nine of them were the source guards running IN SEQUENCE before the first drill started (`check-member-shape.sh`
+  99 s, `drill-reader-gates.sh` 226 s, `check-parse-shape.sh` 67 s ... on 340 C# files), then the deploy drill's ten.
+  Now the build and the unit tests run first, the two subprocess-timing test files next, and then the source guards
+  run in sequence on one background LANE beside the drills (a block of twenty-five at once queued on Windows process
+  creation: the member-shape gate took 544 s beside the others where it takes 99 s alone). The two shape gates run
+  their regexes in one perl over every file (`tools/shape-scan.pl`) instead of forking eight times per file: 99 s and
+  67 s to seconds, and the reader-gate drill, which runs the member gate three times, 226 s to well under a minute;
+  it plants its wrapper in a copy of the tree (`git ls-files` into its temp folder), so it runs beside the gates it
+  tests and no gate ever reads its plant. The deploy drill's verdict loops read ~250 tamper verdicts with `${f##*/}`
+  and a strict shell-builtin status reader instead of `$(basename)` and `$(cat)`: a third of the replayed drill's time was those forks.
+  And the record's key no longer covers every tracked `.py` under `tools/` and `editor/Tools~/`
+  (an edit to one drill's fixture generator staled every drill's record and cost a 20-minute refresh): it covers the
+  key scripts' import closure (`oracle.py deps`: what they import and what they name as a `.py` in a string literal,
+  followed among the tracked files). Review parses Python syntax, handles packages and aliases, excludes prose,
+  includes ambiguous candidates conservatively and falls back for computed imports. The engine stays in every key.
+  UTF-16 source and read failures are guarded, and malformed whitespace/NUL status files cannot pass as valid codes.
+  Later phases clear their logs before launch and fail on cleanup errors, preventing stale completion records from
+  hiding a failed worker. Queue I/O failures cannot replay a previous command as the next step. The reviewed byte-exact
+  external-asset fix from PR #220 is included.
 - **THE PUSH GATE RUNS NO BLENDER (2026-10-28).** Nine parity drills ran Blender on every push (the deploy drill alone
   800 s). Each Blender invocation now goes through a recorded oracle: `tools/refresh_blender_oracle.sh` runs the gate
   once with Blender and stores every invocation's output, exit code and written folders under the modding project's

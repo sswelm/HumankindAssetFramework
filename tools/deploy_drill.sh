@@ -250,13 +250,28 @@ UNCOVERED=$(grep -E "^COVER 0 " "$TMPD/dec.txt" | cut -d' ' -f3- | paste -sd';' 
 python "$ROOT/tools/deploy-drill/missing_decisions.py" "$WTMP/missing_dec" "$WTMP/decisions.txt" "$WTMP/jobs.txt" || { echo "FAIL — could not construct the missing-decision regressions"; exit 1; }
 # The tamper replays (one drill run per mutated single-job dump, ~160 of them, 2-6 s each) are independent: they run
 # eight at a time here, each into $PAR/<dump name> with its exit code in .rc, and the loops below read those verdicts.
+# THE LOOPS SPAWN AS LITTLE AS THEY CAN (2026-10-29): a trace of the replayed drill put a third of its 795 s in the
+# verdict loops themselves - `$(basename ...)` twice and `$(cat ...)` per dump, each a fork that costs 0.2-0.3 s on
+# Windows under the gate's load, times ~250 dumps. The name is `${f##*/}` and the exit code read_tamper_status (a shell builtin read)
+# (no fork; the whole file with only trailing LF removed). Spaces, tabs, embedded lines and NUL cannot turn an invalid
+# status into the expected code. A missing file yields 99; the copy and greps stay.
 # A dump's jobs file is its group's (fire_, gun_, recoil_, bind_, role_, exit_), else the missing group's; a directory
 # without group files (imported_pose) has one jobs.txt. In sequence this was the bulk of the gate's longest step.
 PAR="$TMPD/par"; mkdir -p "$PAR"
+read_tamper_status() {  # <rc file> <output variable>: exact digits; only trailing LF is ignored, as with $(cat).
+  local _verdict_file="$1" _verdict_target="$2" _verdict_value="" _verdict_read=1
+  if [ -f "$_verdict_file" ]; then
+    IFS= read -r -d '' _verdict_value 2>/dev/null < "$_verdict_file"; _verdict_read=$?
+    if [ "$_verdict_read" -ne 1 ]; then _verdict_value=99   # NUL delimiter or read error: malformed status
+    else while [[ "$_verdict_value" == *$'\n' ]]; do _verdict_value=${_verdict_value%$'\n'}; done; fi
+  else _verdict_value=99; fi
+  printf -v "$_verdict_target" '%s' "$_verdict_value"
+}
+
 prerun_tampers() {  # <dir>
   local dir="$1" f n grp jobs
   for f in "$dir"/*.txt; do
-    n=$(basename "$f"); case "$n" in *_jobs.txt|jobs.txt) continue;; esac
+    n=${f##*/}; case "$n" in *_jobs.txt|jobs.txt) continue;; esac
     case "$n" in fire_*) grp=fire;; gun_*) grp=gun;; recoil_*) grp=recoil;; bind_*) grp=bind;; role_*) grp=role;; exit_*) grp=exit;; *) grp=missing;; esac
     jobs="$dir/${grp}_jobs.txt"; [ -f "$jobs" ] || jobs="$dir/jobs.txt"
     printf '%s\0%s\0' "$jobs" "$f"
@@ -265,7 +280,7 @@ prerun_tampers() {  # <dir>
 prerun_tampers "$WTMP/missing_dec"
 # The same one-job lists must accept the intact controls before their mutations are judged.
 for control in missing exit; do
-  cp "$PAR/$(basename "$WTMP/missing_dec/${control}_intact.txt")" "$TMPD/dec_control_$control.txt" 2>/dev/null; controlrc=$(cat "$PAR/$(basename "$WTMP/missing_dec/${control}_intact.txt").rc" 2>/dev/null || echo 99)
+  _t="$WTMP/missing_dec/${control}_intact.txt"; _t=${_t##*/}; cp "$PAR/$_t" "$TMPD/dec_control_$control.txt" 2>/dev/null; read_tamper_status "$PAR/$_t.rc" controlrc
   if [ "$controlrc" != "0" ] || ! grep -qE "^PASS " "$TMPD/dec_control_$control.txt"; then
     cat "$TMPD/dec_control_$control.txt" | head -5
     echo "FAIL — deploy drill rejected the intact $control control (rc=$controlrc)"; exit 1
@@ -291,14 +306,14 @@ for mode in log matrix transform box object part range done bone boneof anchor h
     act) reason="no single ACT and M2 row";;
     index) reason="a component its channel does not have";;
   esac
-  cp "$PAR/$(basename "$WTMP/missing_dec/$mode.txt")" "$TMPD/missing_dec_$mode.txt" 2>/dev/null; badrc=$(cat "$PAR/$(basename "$WTMP/missing_dec/$mode.txt").rc" 2>/dev/null || echo 99)
+  _t="$WTMP/missing_dec/$mode.txt"; _t=${_t##*/}; cp "$PAR/$_t" "$TMPD/missing_dec_$mode.txt" 2>/dev/null; read_tamper_status "$PAR/$_t.rc" badrc
   if [ "$badrc" != "1" ] || ! grep -E "^FAIL " "$TMPD/missing_dec_$mode.txt" | grep -qF "$reason"; then
     cat "$TMPD/missing_dec_$mode.txt" | head -5
     echo "FAIL — deploy drill accepted a dump with a missing $mode row (rc=$badrc)"; exit 1
   fi
 done
 for mode in exit_zero exit_short exit_duplicate; do
-  cp "$PAR/$(basename "$WTMP/missing_dec/$mode.txt")" "$TMPD/missing_dec_$mode.txt" 2>/dev/null; badrc=$(cat "$PAR/$(basename "$WTMP/missing_dec/$mode.txt").rc" 2>/dev/null || echo 99)
+  _t="$WTMP/missing_dec/$mode.txt"; _t=${_t##*/}; cp "$PAR/$_t" "$TMPD/missing_dec_$mode.txt" 2>/dev/null; read_tamper_status "$PAR/$_t.rc" badrc
   if [ "$badrc" != "1" ] || ! grep -qE "^FAIL .*InvalidDataException: the dump has an invalid EXIT row" "$TMPD/missing_dec_$mode.txt"; then
     cat "$TMPD/missing_dec_$mode.txt" | head -5
     echo "FAIL — deploy drill accepted an invalid abort record ($mode, rc=$badrc)"; exit 1
@@ -306,7 +321,7 @@ for mode in exit_zero exit_short exit_duplicate; do
 done
 python "$ROOT/tools/deploy-drill/missing_imported_pose.py" "$WTMP/imported_pose" "$WTMP/decisions.txt" "$WTMP/jobs.txt" || { echo "FAIL — could not construct the imported-pose regressions"; exit 1; }
 prerun_tampers "$WTMP/imported_pose"
-cp "$PAR/$(basename "$WTMP/imported_pose/intact.txt")" "$TMPD/imported_pose_control.txt" 2>/dev/null; controlrc=$(cat "$PAR/$(basename "$WTMP/imported_pose/intact.txt").rc" 2>/dev/null || echo 99)
+_t="$WTMP/imported_pose/intact.txt"; _t=${_t##*/}; cp "$PAR/$_t" "$TMPD/imported_pose_control.txt" 2>/dev/null; read_tamper_status "$PAR/$_t.rc" controlrc
 if [ "$controlrc" != "0" ] || ! grep -qE "^PASS " "$TMPD/imported_pose_control.txt"; then
   head -5 "$TMPD/imported_pose_control.txt"
   echo "FAIL — deploy drill rejected the intact imported-pose control (rc=$controlrc)"; exit 1
@@ -319,7 +334,7 @@ for kind in PB2 PB3; do
       unknown_armature|unknown_bone|all_unknown) reason="unknown $kind bone";;
       short|long) reason="$kind row has";;
     esac
-    cp "$PAR/$(basename "$WTMP/imported_pose/${kind}_$mode.txt")" "$TMPD/imported_pose_${kind}_$mode.txt" 2>/dev/null; badrc=$(cat "$PAR/$(basename "$WTMP/imported_pose/${kind}_$mode.txt").rc" 2>/dev/null || echo 99)
+    _t="$WTMP/imported_pose/${kind}_$mode.txt"; _t=${_t##*/}; cp "$PAR/$_t" "$TMPD/imported_pose_${kind}_$mode.txt" 2>/dev/null; read_tamper_status "$PAR/$_t.rc" badrc
     if [ "$badrc" != "1" ] || ! grep -E "^FAIL " "$TMPD/imported_pose_${kind}_$mode.txt" | grep -qF "$reason"; then
       head -5 "$TMPD/imported_pose_${kind}_$mode.txt"
       echo "FAIL — deploy drill accepted invalid $kind evidence ($mode, rc=$badrc)"; exit 1
@@ -331,7 +346,7 @@ echo "PASS — deploy drill rejects a decisions dump without a log line, a matri
 echo "PASS — deploy drill accepts intact single-job controls and rejects a successful, truncated or duplicated abort record"
 # ... and the fire-window snapshot (5a): against an intact control, a snapshot row, a pose row of the new armature and an
 # object row after it - each missing, doubled in place of its neighbour, under an unknown name, cut short, or one bit off
-cp "$PAR/$(basename "$WTMP/missing_dec/fire_intact.txt")" "$TMPD/fire_control.txt" 2>/dev/null; controlrc=$(cat "$PAR/$(basename "$WTMP/missing_dec/fire_intact.txt").rc" 2>/dev/null || echo 99)
+_t="$WTMP/missing_dec/fire_intact.txt"; _t=${_t##*/}; cp "$PAR/$_t" "$TMPD/fire_control.txt" 2>/dev/null; read_tamper_status "$PAR/$_t.rc" controlrc
 if [ "$controlrc" != "0" ] || ! grep -qE "^PASS " "$TMPD/fire_control.txt"; then
   head -5 "$TMPD/fire_control.txt"
   echo "FAIL — deploy drill rejected the intact fire-window control (rc=$controlrc)"; exit 1
@@ -346,19 +361,19 @@ for kind in SNAP APB O4; do
       short) reason="fields, expected";;
       value) case "$kind" in SNAP) reason="snapshot rows differ";; APB) reason="hold other values after the fire window";; O4) reason="matrices after the fire window differ";; esac;;
     esac
-    cp "$PAR/$(basename "$WTMP/missing_dec/fire_${kind}_$mode.txt")" "$TMPD/fire_${kind}_$mode.txt" 2>/dev/null; badrc=$(cat "$PAR/$(basename "$WTMP/missing_dec/fire_${kind}_$mode.txt").rc" 2>/dev/null || echo 99)
+    _t="$WTMP/missing_dec/fire_${kind}_$mode.txt"; _t=${_t##*/}; cp "$PAR/$_t" "$TMPD/fire_${kind}_$mode.txt" 2>/dev/null; read_tamper_status "$PAR/$_t.rc" badrc
     if [ "$badrc" != "1" ] || ! grep -E "^FAIL " "$TMPD/fire_${kind}_$mode.txt" | grep -qF "$reason"; then
       head -5 "$TMPD/fire_${kind}_$mode.txt"
       echo "FAIL — deploy drill accepted invalid fire-window evidence ($kind $mode, rc=$badrc)"; exit 1
     fi
   done
 done
-cp "$PAR/$(basename "$WTMP/missing_dec/fire_LOG3_missing.txt")" "$TMPD/fire_log3.txt" 2>/dev/null; badrc=$(cat "$PAR/$(basename "$WTMP/missing_dec/fire_LOG3_missing.txt").rc" 2>/dev/null || echo 99)
+_t="$WTMP/missing_dec/fire_LOG3_missing.txt"; _t=${_t##*/}; cp "$PAR/$_t" "$TMPD/fire_log3.txt" 2>/dev/null; read_tamper_status "$PAR/$_t.rc" badrc
 if [ "$badrc" != "1" ] || ! grep -E "^FAIL " "$TMPD/fire_log3.txt" | grep -qF "the fire window's log"; then head -5 "$TMPD/fire_log3.txt"; echo "FAIL — deploy drill accepted a dump without the fire window's log line (rc=$badrc)"; exit 1; fi
 echo "PASS — deploy drill accepts an intact fire-window snapshot and rejects missing, doubled, unknown, truncated or changed snapshot, pose and object rows, and a missing log line"
 # ... and the barrel retarget and the leg scale (5b, 5c): against an intact control, one of the new Bezier curves, a pose
 # row and an object row after them - each missing, doubled in place of its neighbour, renamed, or one bit off
-cp "$PAR/$(basename "$WTMP/missing_dec/gun_intact.txt")" "$TMPD/gun_control.txt" 2>/dev/null; controlrc=$(cat "$PAR/$(basename "$WTMP/missing_dec/gun_intact.txt").rc" 2>/dev/null || echo 99)
+_t="$WTMP/missing_dec/gun_intact.txt"; _t=${_t##*/}; cp "$PAR/$_t" "$TMPD/gun_control.txt" 2>/dev/null; read_tamper_status "$PAR/$_t.rc" controlrc
 if [ "$controlrc" != "0" ] || ! grep -qE "^PASS " "$TMPD/gun_control.txt"; then
   head -5 "$TMPD/gun_control.txt"
   echo "FAIL — deploy drill rejected the intact retarget control (rc=$controlrc)"; exit 1
@@ -377,14 +392,14 @@ for kind in FC4 APB4 O5; do
       O5:value) reason="matrices after the retarget differ";;
       *:duplicate) reason="twice";;
     esac
-    cp "$PAR/$(basename "$WTMP/missing_dec/gun_${kind}_$mode.txt")" "$TMPD/gun_${kind}_$mode.txt" 2>/dev/null; badrc=$(cat "$PAR/$(basename "$WTMP/missing_dec/gun_${kind}_$mode.txt").rc" 2>/dev/null || echo 99)
+    _t="$WTMP/missing_dec/gun_${kind}_$mode.txt"; _t=${_t##*/}; cp "$PAR/$_t" "$TMPD/gun_${kind}_$mode.txt" 2>/dev/null; read_tamper_status "$PAR/$_t.rc" badrc
     if [ "$badrc" != "1" ] || ! grep -E "^FAIL " "$TMPD/gun_${kind}_$mode.txt" | grep -qF "$reason"; then
       head -5 "$TMPD/gun_${kind}_$mode.txt"
       echo "FAIL — deploy drill accepted invalid retarget evidence ($kind $mode, rc=$badrc)"; exit 1
     fi
   done
 done
-cp "$PAR/$(basename "$WTMP/missing_dec/gun_LOG4_missing.txt")" "$TMPD/gun_log4.txt" 2>/dev/null; badrc=$(cat "$PAR/$(basename "$WTMP/missing_dec/gun_LOG4_missing.txt").rc" 2>/dev/null || echo 99)
+_t="$WTMP/missing_dec/gun_LOG4_missing.txt"; _t=${_t##*/}; cp "$PAR/$_t" "$TMPD/gun_log4.txt" 2>/dev/null; read_tamper_status "$PAR/$_t.rc" badrc
 if [ "$badrc" != "1" ] || ! grep -E "^FAIL " "$TMPD/gun_log4.txt" | grep -qF "the retarget's log"; then head -5 "$TMPD/gun_log4.txt"; echo "FAIL — deploy drill accepted a dump without the retarget's log line (rc=$badrc)"; exit 1; fi
 echo "PASS — deploy drill accepts an intact barrel retarget and rejects missing, doubled, unknown or changed curve, pose and object rows, and a missing log line"
 # ... and the frame sweep after it: a row missing, doubled, renamed, cut short, one bit off, and no sweep at all
@@ -398,7 +413,7 @@ for mode in missing duplicate unknown short value none frame tail; do
     none) reason="has no frame sweep";;
     frame|tail) reason="is not the sweep the dump script makes";;
   esac
-  cp "$PAR/$(basename "$WTMP/missing_dec/gun_SW_$mode.txt")" "$TMPD/gun_SW_$mode.txt" 2>/dev/null; badrc=$(cat "$PAR/$(basename "$WTMP/missing_dec/gun_SW_$mode.txt").rc" 2>/dev/null || echo 99)
+  _t="$WTMP/missing_dec/gun_SW_$mode.txt"; _t=${_t##*/}; cp "$PAR/$_t" "$TMPD/gun_SW_$mode.txt" 2>/dev/null; read_tamper_status "$PAR/$_t.rc" badrc
   if [ "$badrc" != "1" ] || ! grep -E "^FAIL " "$TMPD/gun_SW_$mode.txt" | grep -qF "$reason"; then
     head -5 "$TMPD/gun_SW_$mode.txt"
     echo "FAIL — deploy drill accepted an invalid frame sweep ($mode, rc=$badrc)"; exit 1
@@ -408,7 +423,7 @@ echo "PASS — deploy drill rejects a frame sweep with a missing, doubled, unkno
 # ... and the recoil tail (5d): against an intact control, a measurement row, a rebuilt bone, one of the arm's curves, a
 # pose row, a pose matrix and an object row after it - each missing, doubled, renamed, cut short or one bit off; the
 # log line missing; the script's exit or death claimed where the port went on
-cp "$PAR/$(basename "$WTMP/missing_dec/recoil_intact.txt")" "$TMPD/recoil_control.txt" 2>/dev/null; controlrc=$(cat "$PAR/$(basename "$WTMP/missing_dec/recoil_intact.txt").rc" 2>/dev/null || echo 99)
+_t="$WTMP/missing_dec/recoil_intact.txt"; _t=${_t##*/}; cp "$PAR/$_t" "$TMPD/recoil_control.txt" 2>/dev/null; read_tamper_status "$PAR/$_t.rc" controlrc
 if [ "$controlrc" != "0" ] || ! grep -qE "^PASS " "$TMPD/recoil_control.txt"; then
   head -5 "$TMPD/recoil_control.txt"
   echo "FAIL — deploy drill rejected the intact recoil control (rc=$controlrc)"; exit 1
@@ -422,7 +437,7 @@ for kind in R5 RBONE5 FC5 APB5 PM5 O6; do
       APB5) reason="pose row|pose bones of the new armature hold other values";;
       PM5|O6) reason="object row|matrices .*after the recoil";;
     esac
-    cp "$PAR/$(basename "$WTMP/missing_dec/recoil_${kind}_$mode.txt")" "$TMPD/recoil_${kind}_$mode.txt" 2>/dev/null; badrc=$(cat "$PAR/$(basename "$WTMP/missing_dec/recoil_${kind}_$mode.txt").rc" 2>/dev/null || echo 99)
+    _t="$WTMP/missing_dec/recoil_${kind}_$mode.txt"; _t=${_t##*/}; cp "$PAR/$_t" "$TMPD/recoil_${kind}_$mode.txt" 2>/dev/null; read_tamper_status "$PAR/$_t.rc" badrc
     if [ "$badrc" != "1" ] || ! grep -E "^FAIL " "$TMPD/recoil_${kind}_$mode.txt" | grep -qE "$reason"; then
       head -5 "$TMPD/recoil_${kind}_$mode.txt"
       echo "FAIL — deploy drill accepted invalid recoil evidence ($kind $mode, rc=$badrc)"; exit 1
@@ -435,7 +450,7 @@ for mode in LOG5_missing EXIT5_claimed DIES5_claimed; do
     EXIT5_claimed) reason="exits in the recoil step";;
     DIES5_claimed) reason="died in the recoil step";;
   esac
-  cp "$PAR/$(basename "$WTMP/missing_dec/recoil_$mode.txt")" "$TMPD/recoil_$mode.txt" 2>/dev/null; badrc=$(cat "$PAR/$(basename "$WTMP/missing_dec/recoil_$mode.txt").rc" 2>/dev/null || echo 99)
+  _t="$WTMP/missing_dec/recoil_$mode.txt"; _t=${_t##*/}; cp "$PAR/$_t" "$TMPD/recoil_$mode.txt" 2>/dev/null; read_tamper_status "$PAR/$_t.rc" badrc
   if [ "$badrc" != "1" ] || ! grep -E "^FAIL " "$TMPD/recoil_$mode.txt" | grep -qE "$reason"; then
     head -5 "$TMPD/recoil_$mode.txt"; echo "FAIL — deploy drill accepted a recoil dump with $mode (rc=$badrc)"; exit 1
   fi
@@ -444,7 +459,7 @@ echo "PASS — deploy drill accepts an intact recoil tail and rejects missing, d
 # ... and the bind (6): against an intact control, a bind row, a vertex-group row, a modifier row, a vertex hash, a sampled
 # vertex, a custom-normal row, a datablock row and an object row after it - each missing, doubled, renamed, cut short or one
 # bit off; the log line missing; the script's death claimed where the port went on
-cp "$PAR/$(basename "$WTMP/missing_dec/bind_intact.txt")" "$TMPD/bind_control.txt" 2>/dev/null; controlrc=$(cat "$PAR/$(basename "$WTMP/missing_dec/bind_intact.txt").rc" 2>/dev/null || echo 99)
+_t="$WTMP/missing_dec/bind_intact.txt"; _t=${_t##*/}; cp "$PAR/$_t" "$TMPD/bind_control.txt" 2>/dev/null; read_tamper_status "$PAR/$_t.rc" controlrc
 if [ "$controlrc" != "0" ] || ! grep -qE "^PASS " "$TMPD/bind_control.txt"; then
   head -5 "$TMPD/bind_control.txt"
   echo "FAIL — deploy drill rejected the intact bind control (rc=$controlrc)"; exit 1
@@ -461,7 +476,7 @@ for kind in BIND VG6 MOD6 V6 VX6 N6 DATA6 O7; do
       DATA6) reason="mesh datablocks after the bind";;
       O7) reason="object row|matrices .*after the bind";;
     esac
-    cp "$PAR/$(basename "$WTMP/missing_dec/bind_${kind}_$mode.txt")" "$TMPD/bind_${kind}_$mode.txt" 2>/dev/null; badrc=$(cat "$PAR/$(basename "$WTMP/missing_dec/bind_${kind}_$mode.txt").rc" 2>/dev/null || echo 99)
+    _t="$WTMP/missing_dec/bind_${kind}_$mode.txt"; _t=${_t##*/}; cp "$PAR/$_t" "$TMPD/bind_${kind}_$mode.txt" 2>/dev/null; read_tamper_status "$PAR/$_t.rc" badrc
     if [ "$badrc" != "1" ] || ! grep -E "^FAIL " "$TMPD/bind_${kind}_$mode.txt" | grep -qE "$reason"; then
       head -5 "$TMPD/bind_${kind}_$mode.txt"
       echo "FAIL — deploy drill accepted invalid bind evidence ($kind $mode, rc=$badrc)"; exit 1
@@ -473,7 +488,7 @@ for mode in LOG6_missing DIES6_claimed; do
     LOG6_missing) reason="the bind's log";;
     DIES6_claimed) reason="died in the bind";;
   esac
-  cp "$PAR/$(basename "$WTMP/missing_dec/bind_$mode.txt")" "$TMPD/bind_$mode.txt" 2>/dev/null; badrc=$(cat "$PAR/$(basename "$WTMP/missing_dec/bind_$mode.txt").rc" 2>/dev/null || echo 99)
+  _t="$WTMP/missing_dec/bind_$mode.txt"; _t=${_t##*/}; cp "$PAR/$_t" "$TMPD/bind_$mode.txt" 2>/dev/null; read_tamper_status "$PAR/$_t.rc" badrc
   if [ "$badrc" != "1" ] || ! grep -E "^FAIL " "$TMPD/bind_$mode.txt" | grep -qE "$reason"; then
     head -5 "$TMPD/bind_$mode.txt"; echo "FAIL — deploy drill accepted a bind dump with $mode (rc=$badrc)"; exit 1
   fi
@@ -482,7 +497,7 @@ echo "PASS — deploy drill accepts an intact bind and rejects missing, doubled,
 # ... and the purge and the role clips (7, 7b, 7c): against an intact control, an object row, an action, a transform row and
 # an object matrix after the purge, a role action, a role curve and a pose row after the role clips - each missing, doubled,
 # renamed, cut short or one bit off; the log lines missing; the active action wrong; a death or a skip claimed
-cp "$PAR/$(basename "$WTMP/missing_dec/role_intact.txt")" "$TMPD/role_control.txt" 2>/dev/null; controlrc=$(cat "$PAR/$(basename "$WTMP/missing_dec/role_intact.txt").rc" 2>/dev/null || echo 99)
+_t="$WTMP/missing_dec/role_intact.txt"; _t=${_t##*/}; cp "$PAR/$_t" "$TMPD/role_control.txt" 2>/dev/null; read_tamper_status "$PAR/$_t.rc" controlrc
 if [ "$controlrc" != "0" ] || ! grep -qE "^PASS " "$TMPD/role_control.txt"; then
   head -5 "$TMPD/role_control.txt"
   echo "FAIL — deploy drill rejected the intact role-clip control (rc=$controlrc)"; exit 1
@@ -498,7 +513,7 @@ for kind in OBJ7 ACT7 E7 O8 ACT7C FC7C APB7; do
       FC7C) reason="role curve|deploy action.s curves after the role clips";;
       APB7) reason="pose row after the role clips|pose bones hold other values after the role clips";;
     esac
-    cp "$PAR/$(basename "$WTMP/missing_dec/role_${kind}_$mode.txt")" "$TMPD/role_${kind}_$mode.txt" 2>/dev/null; badrc=$(cat "$PAR/$(basename "$WTMP/missing_dec/role_${kind}_$mode.txt").rc" 2>/dev/null || echo 99)
+    _t="$WTMP/missing_dec/role_${kind}_$mode.txt"; _t=${_t##*/}; cp "$PAR/$_t" "$TMPD/role_${kind}_$mode.txt" 2>/dev/null; read_tamper_status "$PAR/$_t.rc" badrc
     if [ "$badrc" != "1" ] || ! grep -E "^FAIL " "$TMPD/role_${kind}_$mode.txt" | grep -qE "$reason"; then
       head -5 "$TMPD/role_${kind}_$mode.txt"
       echo "FAIL — deploy drill accepted invalid role-clip evidence ($kind $mode, rc=$badrc)"; exit 1
@@ -514,7 +529,7 @@ for mode in LOG7_missing LOG7C_missing ACTIVE7_wrong DIES7_claimed DIES7C_claime
     DIES7C_claimed) reason="died in the role clips";;
     SKIP7C_claimed) reason="skipped the role clips";;
   esac
-  cp "$PAR/$(basename "$WTMP/missing_dec/role_$mode.txt")" "$TMPD/role_$mode.txt" 2>/dev/null; badrc=$(cat "$PAR/$(basename "$WTMP/missing_dec/role_$mode.txt").rc" 2>/dev/null || echo 99)
+  _t="$WTMP/missing_dec/role_$mode.txt"; _t=${_t##*/}; cp "$PAR/$_t" "$TMPD/role_$mode.txt" 2>/dev/null; read_tamper_status "$PAR/$_t.rc" badrc
   if [ "$badrc" != "1" ] || ! grep -E "^FAIL " "$TMPD/role_$mode.txt" | grep -qE "$reason"; then
     head -5 "$TMPD/role_$mode.txt"; echo "FAIL — deploy drill accepted a role-clip dump with $mode (rc=$badrc)"; exit 1
   fi
@@ -585,7 +600,7 @@ UNCOVERED=$(grep -E "^COVER 0 " "$TMPD/exp.txt" | cut -d' ' -f3- | paste -sd';' 
 # or cut short; the log lines missing; the written line and the end row missing; a death or an exit of the script claimed
 python "$ROOT/tools/deploy-drill/missing_export.py" "$WTMP/missing_exp" "$WTMP/export.txt" "$WTMP/jobs_export.txt" || { echo "FAIL — could not construct the missing-export regressions"; exit 1; }
 MODE=--export prerun_tampers "$WTMP/missing_exp"
-cp "$PAR/exp_intact.txt" "$TMPD/exp_control.txt" 2>/dev/null; controlrc=$(cat "$PAR/exp_intact.txt.rc" 2>/dev/null || echo 99)
+cp "$PAR/exp_intact.txt" "$TMPD/exp_control.txt" 2>/dev/null; read_tamper_status "$PAR/exp_intact.txt.rc" controlrc
 if [ "$controlrc" != "0" ] || ! grep -qE "^PASS " "$TMPD/exp_control.txt"; then
   head -5 "$TMPD/exp_control.txt"
   echo "FAIL — deploy drill rejected the intact export control (rc=$controlrc)"; exit 1
@@ -623,7 +638,7 @@ for kind in GLB SCENE NODE SKIN IBM MESH PRIM ANIM CHAN MAT TEX SAMP IMG; do
       ANIM:short) reason="animation row has";;
       ANIM:*) reason="the animations \(name";;
     esac
-    cp "$PAR/exp_${kind}_$mode.txt" "$TMPD/exp_${kind}_$mode.txt" 2>/dev/null; badrc=$(cat "$PAR/exp_${kind}_$mode.txt.rc" 2>/dev/null || echo 99)
+    cp "$PAR/exp_${kind}_$mode.txt" "$TMPD/exp_${kind}_$mode.txt" 2>/dev/null; read_tamper_status "$PAR/exp_${kind}_$mode.txt.rc" badrc
     if [ "$badrc" != "1" ] || ! grep -E "^FAIL " "$TMPD/exp_${kind}_$mode.txt" | grep -qE "$reason"; then
       head -5 "$TMPD/exp_${kind}_$mode.txt"
       echo "FAIL — deploy drill accepted invalid export evidence ($kind $mode, rc=$badrc)"; exit 1
@@ -638,7 +653,7 @@ for mode in LOG8_missing WROTE_missing DONE_missing DIES8_claimed EXIT8_claimed;
     DIES8_claimed) reason="died in the export step|exported file rows after an exit or death";;
     EXIT8_claimed) reason="the script stops before the export, the port goes on";;
   esac
-  cp "$PAR/exp_$mode.txt" "$TMPD/exp_$mode.txt" 2>/dev/null; badrc=$(cat "$PAR/exp_$mode.txt.rc" 2>/dev/null || echo 99)
+  cp "$PAR/exp_$mode.txt" "$TMPD/exp_$mode.txt" 2>/dev/null; read_tamper_status "$PAR/exp_$mode.txt.rc" badrc
   if [ "$badrc" != "1" ] || ! grep -E "^FAIL " "$TMPD/exp_$mode.txt" | grep -qE "$reason"; then
     head -5 "$TMPD/exp_$mode.txt"; echo "FAIL — deploy drill accepted an export dump with $mode (rc=$badrc)"; exit 1
   fi
@@ -653,7 +668,7 @@ for mode in DONE_wrong DONE_short DONE_extra DONE_duplicate DONE_trailing FAIL_c
     GLB_*) reason="single valid GLB written-file row";;
     ANIM_index) reason="the animations \(name";;
   esac
-  cp "$PAR/exp_$mode.txt" "$TMPD/exp_$mode.txt" 2>/dev/null; badrc=$(cat "$PAR/exp_$mode.txt.rc" 2>/dev/null || echo 99)
+  cp "$PAR/exp_$mode.txt" "$TMPD/exp_$mode.txt" 2>/dev/null; read_tamper_status "$PAR/exp_$mode.txt.rc" badrc
   if [ "$badrc" != "1" ] || ! grep -E "^FAIL " "$TMPD/exp_$mode.txt" | grep -qE "$reason"; then
     head -5 "$TMPD/exp_$mode.txt"; echo "FAIL — deploy drill accepted invalid export envelope ($mode, rc=$badrc)"; exit 1
   fi
@@ -695,7 +710,7 @@ UNCOVERED=$(grep -E "^COVER 0 " "$TMPD/mat.txt" | cut -d' ' -f3- | paste -sd';' 
 python "$ROOT/tools/deploy-drill/missing_materials.py" "$WTMP/missing_mat" "$WTMP/materials.txt" || { echo "FAIL — could not construct the missing-material regressions"; exit 1; }
 : > "$TMPD/missing_mat/jobs.txt"   # the replay passes a jobs file first; the material drill reads only dumps
 MODE=--materials prerun_tampers "$WTMP/missing_mat"
-cp "$PAR/mat_intact.txt" "$TMPD/mat_control.txt" 2>/dev/null; controlrc=$(cat "$PAR/mat_intact.txt.rc" 2>/dev/null || echo 99)
+cp "$PAR/mat_intact.txt" "$TMPD/mat_control.txt" 2>/dev/null; read_tamper_status "$PAR/mat_intact.txt.rc" controlrc
 if [ "$controlrc" != "0" ] || ! grep -qE "^PASS " "$TMPD/mat_control.txt"; then
   head -5 "$TMPD/mat_control.txt"
   echo "FAIL — deploy drill rejected the intact material control (rc=$controlrc)"; exit 1
@@ -712,7 +727,7 @@ for kind in MAT TEX SAMP IMG; do
       IMG:short) reason="image row|the images \(index";;
       IMG:*) reason="the images \(index";;
     esac
-    cp "$PAR/mat_${kind}_$mode.txt" "$TMPD/mat_${kind}_$mode.txt" 2>/dev/null; badrc=$(cat "$PAR/mat_${kind}_$mode.txt.rc" 2>/dev/null || echo 99)
+    cp "$PAR/mat_${kind}_$mode.txt" "$TMPD/mat_${kind}_$mode.txt" 2>/dev/null; read_tamper_status "$PAR/mat_${kind}_$mode.txt.rc" badrc
     if [ "$badrc" != "1" ] || ! grep -E "^FAIL " "$TMPD/mat_${kind}_$mode.txt" | grep -qE "$reason"; then
       head -5 "$TMPD/mat_${kind}_$mode.txt"
       echo "FAIL — deploy drill accepted invalid material evidence ($kind $mode, rc=$badrc)"; exit 1
@@ -732,7 +747,7 @@ for mode in DONE_missing DIES_claimed DONE_wrong DONE_short DONE_extra DONE_dupl
     DIES_rows) reason="exported material rows after a death";;
     DIES_duplicate) reason="invalid DIES row";;
   esac
-  cp "$PAR/mat_$mode.txt" "$TMPD/mat_$mode.txt" 2>/dev/null; badrc=$(cat "$PAR/mat_$mode.txt.rc" 2>/dev/null || echo 99)
+  cp "$PAR/mat_$mode.txt" "$TMPD/mat_$mode.txt" 2>/dev/null; read_tamper_status "$PAR/mat_$mode.txt.rc" badrc
   if [ "$badrc" != "1" ] || ! grep -E "^FAIL " "$TMPD/mat_$mode.txt" | grep -qE "$reason"; then
     head -5 "$TMPD/mat_$mode.txt"; echo "FAIL — deploy drill accepted invalid material envelope ($mode, rc=$badrc)"; exit 1
   fi
