@@ -25,6 +25,7 @@ class ParallelGateTests(unittest.TestCase):
         self.path = Path(self.tmp.name)
         self.env = dict(os.environ, HAF_PROGRESS=(self.path / "progress.md").as_posix())
         self.env.pop("HAF_ALLOW_SKIP", None)   # the machine's own setting must not decide a test
+        self.env.pop("HAF_GATE", None)         # nor the mode of a shell this runs in: each test says its own, or gets the gate's default
         write(self.path / "progress.md", "")
 
     def script(self, text):
@@ -343,6 +344,65 @@ verdict; exit $?
         self.assertIn("CHECK: FAIL", result.stdout)
         self.assertIn("fix the [FAIL] step(s)", result.stdout)
         self.assertNotIn("SKIPPED", result.stdout)                 # the failure verdict, not the skip verdict
+
+    # THE PARITY STAMP (2026-10-31): a parity or combined gate's full PASS writes tools/parity-stamp.txt through
+    # tools/check-parity-stamp.sh --write <digest taken before the drills>, before its one CHECK line; a writer that
+    # refuses turns the verdict into a FAIL; the push mode never calls it. The writer here is a stub that records its
+    # arguments (the review of PR #229: with HAF_GATE=all inherited, the verdict looked for a writer the temporary
+    # root did not have, and the combined mode failed its own tests).
+    def stamp_writer(self, body):
+        (self.path / "tools").mkdir(exist_ok=True)
+        write(self.path / "tools/check-parity-stamp.sh", 'printf "%s\\n" "$*" >> "$(dirname "$0")/calls"\n' + body)
+
+    def test_a_full_parity_pass_writes_the_stamp_before_its_check_line(self):
+        self.stamp_writer('echo "parity stamp written: stub"; exit 0\n')
+        for mode in ("parity", "all"):
+            with self.subTest(mode=mode):
+                self.env["HAF_GATE"] = mode
+                (self.path / "tools/calls").unlink(missing_ok=True)
+                result = self.run_shell(self.helpers() + '''
+PARITY_START_DIGEST="abc123 150"
+run_bg good bash -c 'echo good-output'
+run_bg_wait
+verdict; exit $?
+''')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual((self.path / "tools/calls").read_text().strip(), "--write abc123 150")
+                self.assertLess(result.stdout.index("parity stamp written"), result.stdout.index("CHECK: PASS"))
+                self.assertEqual(result.stdout.count("CHECK: "), 1)
+
+    def test_a_refused_stamp_write_fails_the_verdict(self):
+        self.stamp_writer('echo "FAIL — a covered file changed DURING the parity run"; exit 1\n')
+        self.env["HAF_GATE"] = "parity"
+        result = self.run_shell(self.helpers() + '''
+PARITY_START_DIGEST="abc123 150"
+run_bg good bash -c 'echo good-output'
+run_bg_wait
+verdict; exit $?
+''')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("changed DURING the parity run", result.stdout)
+        self.assertIn("CHECK: FAIL", result.stdout)
+        self.assertIn("parity stamp could not be written", result.stdout)
+        self.assertIn("DONE FAIL (stamp)", (self.path / "progress.md").read_text())
+
+    def test_the_push_mode_never_writes_the_stamp_and_a_skip_does_not_either(self):
+        self.stamp_writer('echo "must not be called"; exit 1\n')
+        self.env["HAF_GATE"] = "push"
+        result = self.run_shell(self.helpers() + '''
+run_bg good bash -c 'echo good-output'
+run_bg_wait
+verdict; exit $?
+''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("CHECK: PASS", result.stdout)
+        self.assertFalse((self.path / "tools/calls").exists())
+        self.env["HAF_GATE"] = "all"
+        self.env["HAF_ALLOW_SKIP"] = "1"
+        result = self.run_shell(self.helpers() + self.SKIP_SCRIPT)
+        self.assertEqual(result.returncode, 0, result.stderr)   # allowed skips pass, but a partial gate earns no stamp
+        self.assertIn("CHECK: PASS WITH 2 SKIP", result.stdout)
+        self.assertFalse((self.path / "tools/calls").exists())
 
     def test_a_skip_with_missing_completion_metadata_fails_closed(self):
         self.env["HAF_ALLOW_SKIP"] = "1"
