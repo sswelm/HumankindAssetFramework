@@ -103,12 +103,28 @@ def scan_interpolated(text, k, verbatim):
             if not verbatim and c == "\\":
                 out.append("  "); j += 2; continue
             out.append("\n" if c == "\n" else " "); j += 1
-        else:
-            if c == '"':
-                e = j + 1
-                while e < n and text[e] != '"' and text[e] != "\n":
-                    e += 2 if text[e] == "\\" else 1
-                out.append('"' + " " * max(0, e - j - 1) + '"'); j = e + 1; continue
+        else:   # inside a hole: code, whose own comments and strings are blanked like anywhere else (recursively)
+            if text.startswith("//", j):
+                e = text.find("\n", j); e = n if e < 0 else e
+                out.append(" " * (e - j)); j = e; continue
+            if text.startswith("/*", j):
+                e = text.find("*/", j + 2); e = n if e < 0 else e + 2
+                out.append(re.sub(r"[^\n]", " ", text[j:e])); j = e; continue
+            if c == '"' or (c in "@$" and text[j + 1:j + 2] == '"') or (text[j:j + 2] in ("@$", "$@") and text[j + 2:j + 3] == '"'):
+                kk = j; vb = ip = False
+                while text[kk] in "@$":
+                    vb = vb or text[kk] == "@"; ip = ip or text[kk] == "$"; kk += 1
+                if ip:
+                    e, content = scan_interpolated(text, kk, vb)
+                    out.append(text[j:kk] + '"' + content + '"'); j = e; continue
+                e = kk + 1
+                while e < n:
+                    if vb and text[e] == '"' and text[e + 1:e + 2] == '"':
+                        e += 2; continue
+                    if text[e] == '"' or (not vb and text[e] == "\n"):
+                        break
+                    e += 2 if (not vb and text[e] == "\\") else 1
+                out.append(text[j:kk] + '"' + " " * max(0, e - kk - 1) + '"'); j = e + 1; continue
             if c == "{":
                 depth += 1
             elif c == "}":
@@ -166,11 +182,13 @@ def worker_bodies(text):
             b = body.find("{")
             body = body[b:matching(body, b, "{", "}")]
         else:   # an expression body ends at the first top-level comma (a cancellation token, scheduling options: the caller's thread)
+            # `<` right after a name opens generic arguments (`F<int, int>(...)`): its comma is not the lambda's end. A
+            # comparison spelt `a<b` opens one that never closes, which only makes the body longer: the safe direction.
             depth, cut = 0, len(body)
             for idx, ch in enumerate(body):
-                if ch in "([{":
+                if ch in "([{" or (ch == "<" and idx > 0 and (body[idx - 1].isalnum() or body[idx - 1] == "_")):
                     depth += 1
-                elif ch in ")]}":
+                elif ch in ")]}" or (ch == ">" and depth > 0 and idx > 0 and body[idx - 1] not in "=-"):
                     depth -= 1
                 elif ch == "," and depth == 0:
                     cut = idx; break
@@ -223,6 +241,9 @@ static class Planted
         System.Threading.Tasks.Task.Run(() => Note());   // a hop to a string-only member: must not
         System.Threading.Tasks.Task.Run(() => Debug.Log($"days: {EditorPrefs.GetInt("x", 14)} {{not a hole}}"));   // a hole: must be found
         System.Threading.Tasks.Task.Run(() => { int d2 = Days2(); }, Token());   // the method hop: found; Token() runs on the caller: not
+        System.Threading.Tasks.Task.Run(() => F<int, int>(EditorPrefs.GetInt("g", 1)));   // the generic comma is not the end: found
+        System.Threading.Tasks.Task.Run(() => Debug.Log($"outer {$"inner {EditorPrefs.GetInt("n", 1)}"} end"));   // a nested $-string's hole: found
+        System.Threading.Tasks.Task.Run(() => Debug.Log($"c {/* EditorPrefs.GetInt */ 1} {"EditorPrefs."}"));   // a comment and a string in holes: not
         System.Threading.Tasks.Task.Run(check);           // by name: listed, not judged
     }
 }
@@ -235,7 +256,7 @@ def self_test():
     by_name_line = next(i + 1 for i, l in enumerate(PLANT.split("\n")) if "Task.Run(check)" in l)
     ok = ("'Days' uses EditorPrefs." in msgs and "'Days2' uses EditorPrefs." in msgs
           and "'AssetDatabase.' is a main-thread" in msgs and "'EditorPrefs.' is a main-thread" in msgs
-          and "Note" not in msgs and "Token" not in msgs and msgs.count("EditorPrefs") == 3
+          and "Note" not in msgs and "Token" not in msgs and msgs.count("EditorPrefs") == 5
           and unseen == [(by_name_line, "check")])
     if not ok:
         print("FAIL - worker-thread self-test: the planted shapes were not reported as expected:\n" + msgs + f"\n  unseen: {unseen}")
