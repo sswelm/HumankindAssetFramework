@@ -195,50 +195,68 @@ static class HafAutoBackup
             string off = EditorPrefs.GetString("HAF.Backup.OffsiteDest", "");
             bool offAuto = EditorPrefs.GetBool("HAF.Backup.OffsiteAuto", HafPackageContext.AutoDefault);
             EditorPrefs.SetString(PrefLast, DateTime.Now.Ticks.ToString());   // main thread, before the worker starts
+            // EVERY PREF THE WORKER NEEDS IS READ HERE, ON THE MAIN THREAD (2026-10-31). The delete-guard prune below
+            // read KeepGuardDays - EditorPrefs behind a property - from the worker: EditorPrefs throws off the main
+            // thread, a faulted Task says nothing, and the prune NEVER ran (720 guards, 321 past the 14 days, not one
+            // "pruned" line in any Editor.log; the 2026-10-31 review). tools/check-worker-thread.py now refuses a
+            // main-thread Unity API inside a worker body, directly or one hop away.
+            int keepDays = KeepGuardDays;
             Debug.Log("[HAF Backup] daily auto-version started in the background → " + Path.GetFileName(dir));
 
             // The whole snapshot runs on a WORKER thread (critical-review fix: 1+ GB copied synchronously froze the
             // editor for ~30-60 s on load, looking like a hang). SnapshotInto + rotation + zip are pure file IO —
-            // no Unity APIs — and Debug.Log is thread-safe. Group paths were resolved on the main thread above.
+            // no Unity APIs — and Debug.Log is thread-safe. Group paths and prefs were resolved on the main thread above.
+            // A worker that throws SAYS so: a faulted Task is otherwise silent, which is how the prune hid for two months.
             System.Threading.Tasks.Task.Run(() =>
             {
-                var r = BackupWindow.SnapshotInto(dir, groups, "daily auto-version");
-                Debug.Log("[HAF Backup] daily auto-version: " + r.report);
-                if (!r.ok) return;
-
-                if (offAuto && !string.IsNullOrEmpty(off))
-                    Debug.Log("[HAF Backup] auto offsite: " + BackupWindow.OffsiteZipCore(dir, off));
-
-                // RETENTION: rotate _auto_ versions only — keep the newest N. Manual backups, _prerestore and _deleted
-                // snapshots are never touched (the never-auto-delete rule holds for everything a human made or lost).
-                var autos = Directory.GetDirectories(dest).Where(d => Path.GetFileName(d).StartsWith("_auto_")).OrderByDescending(d => d).ToList();
-                foreach (var old in autos.Skip(Keep))
-                {
-                    try { Directory.Delete(old, true); Debug.Log("[HAF Backup] rotated out old auto-version '" + Path.GetFileName(old) + "' (keeping the newest " + Keep + ")"); }
-                    catch (Exception e) { Debug.LogWarning("[HAF Backup] could not rotate '" + Path.GetFileName(old) + "': " + e.Message); }
-                }
-
-                // DELETE-GUARD RETENTION (2026-08-23) — the one layer that had none. Its value is measured in
-                // minutes ("I just deleted the wrong asset"), but nothing ever pruned it, so 362 folders / 6.4 GB
-                // accumulated over four days and the window's restorable list became unreadable. The fixture
-                // exclusion above stops the flood at source; this clears what a real day still leaves behind.
-                // AGE, not count: a guard's worth is how recently it was made, and a burst of thirty deletions in
-                // one afternoon must not evict the single one from yesterday that someone actually needs.
-                int cut = 0, keepDays = KeepGuardDays;   // read once: the pref must not change mid-sweep
-                foreach (var g in keepDays <= 0 ? new string[0]   // 0 = keep forever, the pre-2026-08-23 behaviour
-                                                : Directory.GetDirectories(dest).Where(d => Path.GetFileName(d).StartsWith("_deleted_")).ToArray())
-                {
-                    try
-                    {
-                        if (Directory.GetCreationTime(g) > DateTime.Now.AddDays(-keepDays)) continue;
-                        Directory.Delete(g, true); cut++;
-                    }
-                    catch (Exception e) { Debug.LogWarning("[HAF Backup] could not prune guard '" + Path.GetFileName(g) + "': " + e.Message); }
-                }
-                if (cut > 0) Debug.Log($"[HAF Backup] pruned {cut} delete-guard snapshot(s) older than {keepDays} days. " +
-                                       $"Manual backups, _prerestore and _removed_ snapshots are never auto-deleted.");
+                try { DailyWorker(dir, dest, groups, off, offAuto, keepDays); }
+                catch (Exception e) { Debug.LogWarning("[HAF Backup] daily auto-version worker failed: " + e); }
             });
         }
         catch (Exception e) { Debug.LogWarning("[HAF Backup] daily auto-version failed: " + e.Message); }
+    }
+
+    // The worker's whole job, off the main thread: NO Unity API in here but Debug.Log (tools/check-worker-thread.py).
+    static void DailyWorker(string dir, string dest, List<BackupWindow.Group> groups, string off, bool offAuto, int keepDays)
+    {
+        var r = BackupWindow.SnapshotInto(dir, groups, "daily auto-version");
+        Debug.Log("[HAF Backup] daily auto-version: " + r.report);
+        if (!r.ok) return;
+
+        if (offAuto && !string.IsNullOrEmpty(off))
+            Debug.Log("[HAF Backup] auto offsite: " + BackupWindow.OffsiteZipCore(dir, off));
+
+        // RETENTION: rotate _auto_ versions only — keep the newest N. Manual backups, _prerestore and _deleted
+        // snapshots are never touched (the never-auto-delete rule holds for everything a human made or lost).
+        var autos = Directory.GetDirectories(dest).Where(d => Path.GetFileName(d).StartsWith("_auto_")).OrderByDescending(d => d).ToList();
+        foreach (var old in autos.Skip(Keep))
+        {
+            try { Directory.Delete(old, true); Debug.Log("[HAF Backup] rotated out old auto-version '" + Path.GetFileName(old) + "' (keeping the newest " + Keep + ")"); }
+            catch (Exception e) { Debug.LogWarning("[HAF Backup] could not rotate '" + Path.GetFileName(old) + "': " + e.Message); }
+        }
+
+        // DELETE-GUARD RETENTION (2026-08-23) — the one layer that had none. Its value is measured in
+        // minutes ("I just deleted the wrong asset"), but nothing ever pruned it, so 362 folders / 6.4 GB
+        // accumulated over four days and the window's restorable list became unreadable. The fixture
+        // exclusion above stops the flood at source; this clears what a real day still leaves behind.
+        // AGE, not count: a guard's worth is how recently it was made, and a burst of thirty deletions in
+        // one afternoon must not evict the single one from yesterday that someone actually needs.
+        // keepDays was read on the main thread (EditorPrefs is main-thread-only); the rule is BackupRules.GuardIsExpired.
+        int cut = 0, seen = 0;
+        var now = DateTime.Now;
+        foreach (var g in keepDays <= 0 ? new string[0]   // 0 = keep forever, the pre-2026-08-23 behaviour
+                                        : Directory.GetDirectories(dest).Where(d => Path.GetFileName(d).StartsWith(BackupRules.DeletedPrefix)).ToArray())
+        {
+            seen++;
+            try
+            {
+                if (!BackupRules.GuardIsExpired(Path.GetFileName(g), Directory.GetCreationTime(g), keepDays, now)) continue;
+                Directory.Delete(g, true); cut++;
+            }
+            catch (Exception e) { Debug.LogWarning("[HAF Backup] could not prune guard '" + Path.GetFileName(g) + "': " + e.Message); }
+        }
+        Debug.Log(keepDays <= 0 ? "[HAF Backup] delete-guard retention is off (0 days): nothing pruned."
+                : $"[HAF Backup] pruned {cut} of {seen} delete-guard snapshot(s) older than {keepDays} days. " +
+                  "Manual backups, _prerestore and _removed_ snapshots are never auto-deleted.");
     }
 }
