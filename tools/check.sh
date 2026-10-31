@@ -124,7 +124,14 @@ verdict() {  # the one summary line, and the status the hook returns
     printf 'CHECK: FAIL — fix the [FAIL] step(s) above before pushing (or, only in a real emergency, git push --no-verify).%s\n' "$list"
     note "DONE FAIL"; return 1
   fi
-  if [ "$n" -eq 0 ]; then printf 'CHECK: PASS — safe to push.\n'; note "DONE PASS"; return 0; fi
+  if [ "$n" -eq 0 ]; then
+    # THE PARITY STAMP (2026-10-31): a parity-mode PASS with every drill run is what the push's stamp step remembers.
+    # Written here, before the one CHECK line (the Bake Tests row reads that line last), and only on a full PASS.
+    if [ "$GATE" != push ] && ! bash "$ROOT/tools/check-parity-stamp.sh" --write; then
+      printf 'CHECK: FAIL — the parity drills passed but the parity stamp could not be written (see above).\n'; note "DONE FAIL (stamp)"; return 1
+    fi
+    printf 'CHECK: PASS — safe to push.\n'; note "DONE PASS"; return 0
+  fi
   if [ "${HAF_ALLOW_SKIP:-0}" = "1" ]; then
     printf 'CHECK: PASS WITH %d SKIP — accepted by HAF_ALLOW_SKIP=1; these claims were NOT tested on this machine:%s\n' "$n" "$list"
     note "DONE PASS ($n skipped, allowed by HAF_ALLOW_SKIP=1)"; return 0
@@ -291,6 +298,17 @@ push_step run_lane "reader-gate drill (the gates refuse an unknown wrapper)" bas
 #    can only be checked from. That [SKIP] used to fire on every runner, which is exactly how a plugin-side change
 #    went unguarded until somebody happened to push the other repo.
 push_step run_lane "registry schema parity" bash "$ROOT/tools/check_schema_parity.sh"
+
+# 4b) THE PARITY STAMP (2026-10-31). The push runs no Blender-parity drill (PR #222), and until today nothing told it
+#     whether the ports had EVER been held to Blender as they are: a ported script or its C# port could change and
+#     push green with the parity claim untested (the 2026-10-31 review, P1). The parity mode's PASS writes
+#     tools/parity-stamp.txt, a digest of every file the parity drills compile, run or read (derived from the drill
+#     scripts, not hand-listed); this step compares it with those files as they are now and SKIPs - which the verdict
+#     counts as a FAIL unless HAF_ALLOW_SKIP=1 says, meaning it - when a covered file changed since, naming the files.
+#     No Blender, no record: a few seconds of git. Its drill, in a shared clone, proves the guard refuses a changed
+#     Blender script, C# port and fixture, ignores an uncovered file, and refuses a missing stamp.
+push_step run_lane "parity stamp (every file the parity drills cover is as the last Blender-parity PASS held it; SKIP when one changed since)" bash "$ROOT/tools/check-parity-stamp.sh"
+push_step run_lane "parity stamp drill (the guard refuses a changed covered file, in a shared clone)" bash "$ROOT/tools/check-parity-stamp.sh" --self-test
 
 # 5) editor source guards — also in-repo since the move. Both guard editor/, so they belong with it.
 # CI had this one and the hook did not (2026-10-12): a vehicle_rig.py helper change passed the hook and failed after the push.

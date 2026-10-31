@@ -29,6 +29,13 @@ jobs:
       - name: GPU buffer hook drill (real Harmony adapters and configuration)
         shell: bash
         run: bash tools/buffer_hook_drill.sh
+      # THE PARITY STAMP'S DRILL (2026-10-31): the push's `parity stamp` step compares tools/parity-stamp.txt with every
+      # file the parity drills cover; this proves, in a shared clone, that the guard refuses a changed Blender script,
+      # C# port and fixture, ignores an uncovered file and refuses a missing stamp. Git and bash only, no Blender. The
+      # stamp check itself stays the push's: a stale stamp is a SKIP the author answers with a parity run, not a red CI.
+      - name: Parity stamp drill (the guard refuses a changed covered file)
+        shell: bash
+        run: bash tools/check-parity-stamp.sh --self-test
       # VEHICLE LAB PURE MATH — ast-extracts the two pure helpers from vehicle_rig.py and checks the oar-recovery
       # calibration (the exact eps regression that once split 64 oars into 104) plus the shared-clip cycle fitting.
       # Blender-free by construction, so the runner's stock Python is enough. Wired 2026-09-05: the file existed

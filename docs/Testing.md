@@ -62,6 +62,21 @@ requires a complete successful CHECK verdict and no skipped steps; Cancel asks t
 its lock, including while waiting for another gate. `bash tools/parity_row_unity_drill.sh --self-test` exercises its
 verdict and cancellation regressions in a temporary Unity project without running Blender.
 
+**The parity stamp connects the two (2026-10-31).** For a day nothing did: a ported script or its C# port could change
+and push green with the parity claim untested (the 2026-10-31 review, P1 "nothing enforces parity"). A parity-mode PASS
+with every drill run now writes `tools/parity-stamp.txt`: a digest of every file the parity drills compile, run or read
+(148 at the time of writing: the Blender scripts under `editor/Tools~`, the ported `editor/*.cs` the drills compile,
+the drills' own folders with their fixtures and dumps, the native kernels DLL), each hashed as git stores it so CRLF
+and LF checkouts agree. The set is derived from the drill scripts in `tools/check.sh`, not hand-listed, and the guard
+FAILS rather than guards nothing when it loses a known anchor or when a drill references a file git does not track.
+The push's step `parity stamp` compares the digest with those files as they are now: equal is `[PASS]`; a changed
+covered file, or no stamp, is `[SKIP]` with the changed files named, which the verdict counts as a FAIL unless
+`HAF_ALLOW_SKIP=1` says, meaning it, that the push goes without the parity claim. The remedy is a parity run (`bash
+tools/blender_parity.sh` or the Bake Tests row) and committing the stamp it writes beside the change. What the digest
+cannot see, said: the recipes, registry sources and sample files in the Unity project. Its drill, `bash
+tools/check-parity-stamp.sh --self-test` (the push and CI), proves in a shared clone that the guard refuses a changed
+Blender script, C# port and fixture, ignores an uncovered file and refuses a missing stamp.
+
 The recorded oracle remains an OPTION of the parity mode, nothing more: `tools/blender_oracle.sh` wraps every Blender
 invocation of the drills in `HAF_ORACLE=live` (the default in the parity mode: Blender runs, nothing stored), `record`
 (`tools/refresh_blender_oracle.sh`: Blender runs and each invocation's raw output, exit code and written folders are
@@ -96,7 +111,7 @@ starting two gates at once and interrupting the first.
 
 | Surface | `tools/check.sh` (pre-push hook) | also in CI | ~time |
 |---|---|---|---|
-| **Runtime + shared contract** | `dotnet build` · `dotnet test` · the gate's own tests · GPU buffer hook drill · docs guard · binding-catalog surface · hot path · parse shape · member shape · reader-gate drill · schema parity | all source-only checks | the build and tests first (seconds); the guards on a lane beside the drills |
+| **Runtime + shared contract** | `dotnet build` · `dotnet test` · the gate's own tests · GPU buffer hook drill · docs guard · binding-catalog surface · hot path · parse shape · member shape · reader-gate drill · schema parity · parity stamp and its drill | all source-only checks (the stamp's drill; the stamp itself is the push's) | the build and tests first (seconds); the guards on a lane beside the drills |
 | **Editor package** | Roslyn editor compile-check · registry engine drill · backup dedup drill · native kernels drill · hand-list gate · package meta · golden checksums | hand-list; compile check and drills stay local | the drills AT ONCE, the lane beside them: a few minutes |
 | **Blender parity** (`HAF_GATE=parity`: `tools/blender_parity.sh`, the Bake Tests row *Do the C# ports still match Blender?*) | GLB reader drill · GLB writer drill · Workshop compaction drill · vehicle probe drill · mesh layout, prep and deploy drills · rig_anim and vehicle_rig drills · blender exit drill · the oracle tests | never (Blender) | about twenty minutes, NOT in the push |
 
