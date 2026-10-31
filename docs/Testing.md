@@ -120,6 +120,11 @@ starting two gates at once and interrupting the first.
 | **Editor package** | Roslyn editor compile-check · registry engine drill · backup dedup drill · FBX reader drill (the binary record tree against an independent reader) · native kernels drill · hand-list gate · package meta · golden checksums | hand-list; compile check and drills stay local | the drills AT ONCE, the lane beside them: a few minutes |
 | **Blender parity** (`HAF_GATE=parity`: `tools/blender_parity.sh`, the Bake Tests row *Do the C# ports still match Blender?*) | GLB reader drill · GLB writer drill · Workshop compaction drill · vehicle probe drill · mesh layout, prep and deploy drills · rig_anim and vehicle_rig drills · blender exit drill · the oracle tests | never (Blender) | about twenty minutes, NOT in the push |
 
+The FBX reader drill compares every selected good file and requires both readers to refuse 21 malformed fixtures on
+Unity's Mono. It checks the generator, reader and timing exit statuses. Source discovery includes `srcFile` and
+`srcFile2`, BOM recipes and project-relative paths; unreadable recipes/scans fail, and unavailable optional sources
+are named as not drilled. Its five source-discovery regression tests also run in CI.
+
 **Since 2026-10-11 the drills run concurrently, and since 2026-10-29 the source guards run on a lane beside them.**
 The drills are independent (each works in its own temp directory and builds its own exe), so `check.sh` starts them
 together (`run_bg`), each into its own log, and prints the logs in declaration order. Each worker records its elapsed

@@ -14,6 +14,17 @@ static class FbxDrill
 {
     static int Main(string[] args)
     {
+        if (args.Length > 0 && args[0] == "--reject")
+        {
+            int failed = 0;
+            for (int i = 1; i < args.Length; i++)
+            {
+                try { FbxDocument.Read(args[i]); Console.WriteLine("FAIL accepted malformed FBX: " + args[i]); failed++; }
+                catch (InvalidDataException) { Console.WriteLine("REFUSED " + args[i]); }
+                catch (Exception e) { Console.WriteLine("FAIL unnamed refusal: " + e); failed++; }
+            }
+            return failed == 0 && args.Length > 1 ? 0 : 1;
+        }
         bool time = args.Length > 0 && args[0] == "--time";
         int rc = 0;
         var sha = SHA1.Create();
@@ -63,9 +74,9 @@ static class FbxDrill
     {
         switch (p)
         {
-            case short _: return 'Y'; case bool _: return 'C'; case int _: return 'I'; case float _: return 'F'; case double _: return 'D'; case long _: return 'L';
+            case sbyte _: return 'Z'; case short _: return 'Y'; case byte _: return 'C'; case bool _: return 'B'; case int _: return 'I'; case float _: return 'F'; case double _: return 'D'; case long _: return 'L';
             case string _: return 'S'; case FbxRaw _: return 'R';
-            case float[] _: return 'f'; case double[] _: return 'd'; case long[] _: return 'l'; case int[] _: return 'i'; case bool[] _: return 'b';
+            case float[] _: return 'f'; case double[] _: return 'd'; case long[] _: return 'l'; case int[] _: return 'i'; case bool[] _: return 'b'; case byte[] _: return 'c';
             default: return '?';
         }
     }
@@ -76,6 +87,8 @@ static class FbxDrill
     {
         switch (p)
         {
+            case sbyte z: return z.ToString();
+            case byte character: return character.ToString();
             case short y: return y.ToString();
             case bool c: return c ? "1" : "0";
             case int i: return i.ToString();
@@ -88,6 +101,7 @@ static class FbxDrill
             case double[] a: { var raw = new byte[a.Length * 8]; Buffer.BlockCopy(a, 0, raw, 0, raw.Length); return "d[" + a.Length + "]:" + Hex(sha.ComputeHash(raw)); }
             case long[] a: { var raw = new byte[a.Length * 8]; Buffer.BlockCopy(a, 0, raw, 0, raw.Length); return "l[" + a.Length + "]:" + Hex(sha.ComputeHash(raw)); }
             case int[] a: { var raw = new byte[a.Length * 4]; Buffer.BlockCopy(a, 0, raw, 0, raw.Length); return "i[" + a.Length + "]:" + Hex(sha.ComputeHash(raw)); }
+            case byte[] a: return "c[" + a.Length + "]:" + Hex(sha.ComputeHash(a));
             case bool[] a: { var raw = new byte[a.Length]; for (int i = 0; i < a.Length; i++) raw[i] = a[i] ? (byte)1 : (byte)0; return "b[" + a.Length + "]:" + Hex(sha.ComputeHash(raw)); }
             default: return "?";
         }

@@ -24,6 +24,7 @@ for f in "$CSC" "$MONO" "$API/mscorlib.dll"; do
 done
 command -v dotnet >/dev/null 2>&1 || { echo "FAIL — dotnet not on PATH (FBX reader NOT drilled)"; exit 2; }
 command -v python >/dev/null 2>&1 || { echo "FAIL — python not on PATH (FBX reader NOT drilled)"; exit 2; }
+python "$ROOT/tools/fbx-drill/test_fbx_inputs.py" || { echo "FAIL — FBX input coverage regression tests"; exit 1; }
 
 TMPD="$(mktemp -d)"; trap 'rm -rf "$TMPD"' EXIT
 WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"; WTMP="$(cygpath -m "$TMPD" 2>/dev/null || echo "$TMPD")"
@@ -35,36 +36,34 @@ if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/drill.exe" ]; then echo "$OUT" | grep -E "er
 # ---- the population ------------------------------------------------------------------------------------------------
 FILES=()
 PROJECT_NOTE="NO modding project at $PROJECT (set HAF_UNITY_PROJECT)"
-N_PROJECT=0
-if [ -d "$PROJECT/Assets" ]; then
-  mapfile -t PROJECT_FILES < <(find "$PROJECT/Assets" -iname "*.fbx" -not -path "*/Library/*" 2>/dev/null | cygpath -m -f - | sort)
-  N_PROJECT=${#PROJECT_FILES[@]}
-  FILES+=("${PROJECT_FILES[@]}")
-  PROJECT_NOTE="$N_PROJECT project FBX files"
-fi
-# the Lab recipes' FBX SOURCES (the originals the Lab reads; the FBX SDK's own 7500/7700 files) when they are on disk
-RECIPE_FBX=()
-if [ -d "$PROJECT/Assets" ]; then
-  # (recipe_check.py --list names the .glb sources only; the recipes' srcFile is read here for the .fbx ones)
-  mapfile -t RECIPE_FBX < <(python -c '
-import glob, json, os, sys
-for p in sorted(glob.glob(os.path.join(sys.argv[1], "Assets/FactorySource/VehicleLab/Recipes/*.json"))):
-    try: src = json.load(open(p, encoding="utf-8")).get("srcFile", "")
-    except Exception: continue
-    if src.lower().endswith(".fbx") and os.path.isfile(src): print(src.replace("\\", "/"))
-' "$PROJECT" 2>/dev/null | tr -d '\r')
-  [ "${#RECIPE_FBX[@]}" -eq 0 ] || { FILES+=("${RECIPE_FBX[@]}"); PROJECT_NOTE="$PROJECT_NOTE and ${#RECIPE_FBX[@]} recipe FBX sources"; }
-fi
+python "$ROOT/tools/fbx-drill/fbx_inputs.py" "$PROJECT" > "$TMPD/inputs.txt" || { echo "FAIL — could not enumerate FBX populations"; exit 1; }
+mapfile -t PROJECT_FILES < <(sed -n 's/^PROJECT\t//p' "$TMPD/inputs.txt" | tr -d '\r')
+mapfile -t RECIPE_FBX < <(sed -n 's/^RECIPE\t//p' "$TMPD/inputs.txt" | tr -d '\r')
+sed -n 's/^NOTE\t/NOTE — /p' "$TMPD/inputs.txt"
+N_PROJECT=${#PROJECT_FILES[@]}
+FILES+=("${PROJECT_FILES[@]}" "${RECIPE_FBX[@]}")
+[ "$N_PROJECT" -eq 0 ] || PROJECT_NOTE="$N_PROJECT project FBX files and ${#RECIPE_FBX[@]} recipe FBX sources"
 FIXDIR="$TMPD/fixtures"
-mapfile -t FIXTURES < <(python "$ROOT/tools/fbx-drill/fbx_fixtures.py" "$(cygpath -m "$FIXDIR")" | tr -d '\r')
+python "$ROOT/tools/fbx-drill/fbx_fixtures.py" "$(cygpath -m "$FIXDIR")" > "$TMPD/fixtures.txt" || { echo "FAIL — fixture generation failed"; exit 1; }
+mapfile -t FIXTURES < <(tr -d '\r' < "$TMPD/fixtures.txt")
 [ "${#FIXTURES[@]}" -gt 0 ] || { echo "FAIL — could not write the fixtures (tools/fbx-drill/fbx_fixtures.py)"; exit 1; }
 FILES+=("${FIXTURES[@]}")
 [ "${#FILES[@]}" -gt 0 ] || { echo "FAIL — nothing to drill"; exit 1; }
+
+# Agreement on good files alone cannot prove refusal. Both readers reject this malformed corpus; the C# one runs
+# on Unity's Mono here, while the unit tests also exercise .NET Framework (their inflater EOF behaviour differs).
+python "$ROOT/tools/fbx-drill/fbx_fixtures.py" --bad "$WTMP/bad" > "$TMPD/bad.txt" || { echo "FAIL — malformed fixture generation failed"; exit 1; }
+mapfile -t BAD < <(tr -d '\r' < "$TMPD/bad.txt")
+[ "${#BAD[@]}" -gt 0 ] || { echo "FAIL — no malformed fixtures"; exit 1; }
+"$MONO" "$TMPD/drill.exe" --reject "${BAD[@]}" > "$TMPD/reject-cs.txt" 2>&1 || { echo "FAIL — C# malformed-input refusals:"; cat "$TMPD/reject-cs.txt"; exit 1; }
+python -I "$ROOT/tools/fbx-drill/fbx_nodes.py" --reject "${BAD[@]}" > "$TMPD/reject-py.txt" 2>&1 || { echo "FAIL — oracle malformed-input refusals:"; cat "$TMPD/reject-py.txt"; exit 1; }
+echo "PASS — both readers refused ${#BAD[@]} malformed FBX fixtures"
 
 # ---- both readers, every file, compared ----------------------------------------------------------------------------
 t0=$(date +%s)
 "$MONO" "$TMPD/drill.exe" "${FILES[@]}" > "$TMPD/cs.txt" 2> "$TMPD/cs.err"; crc=$?
 t1=$(date +%s)
+if [ "$crc" -ne 0 ]; then echo "FAIL — the C# reader exited $crc:"; tail -8 "$TMPD/cs.txt"; tail -5 "$TMPD/cs.err"; exit 1; fi
 python -I "$ROOT/tools/fbx-drill/fbx_nodes.py" "${FILES[@]}" > "$TMPD/py.txt" 2> "$TMPD/py.err"; prc=$?
 t2=$(date +%s)
 if [ "$prc" -ne 0 ]; then echo "FAIL — the Python reader (the oracle) failed:"; tail -5 "$TMPD/py.err"; exit 1; fi
@@ -80,10 +79,15 @@ if ! cmp -s "$TMPD/cs.lf" "$TMPD/py.lf"; then
   exit 1
 fi
 n_files=$(grep -c '^=== ' "$TMPD/cs.lf"); n_records=$(awk '/^records /{ s += $2 } END { print s + 0 }' "$TMPD/cs.lf")
+[ "$n_files" -eq "${#FILES[@]}" ] || { echo "FAIL — the readers dumped $n_files of ${#FILES[@]} selected files"; exit 1; }
 versions=$(grep '^version ' "$TMPD/cs.lf" | sort | uniq -c | awk '{ printf "%s x%d ", $3, $1 }')
 # the cost of the format layer alone, per file, for the plan
 "$MONO" "$TMPD/drill.exe" --time "${FILES[@]}" > "$TMPD/time.txt" 2>/dev/null
-slowest=$(sort -k2,2nr "$TMPD/time.txt" | head -1 | awk '{ printf "%s ms for %s records (%s)", $2, $3, $4 }')
+trc=$?
+[ "$trc" -eq 0 ] || { echo "FAIL — the C# timing run exited $trc:"; tail -5 "$TMPD/time.txt"; exit 1; }
+tr -d '\r' < "$TMPD/time.txt" | sed '1s/^\xEF\xBB\xBF//' > "$TMPD/time.lf"
+[ "$(grep -c '^TIME ' "$TMPD/time.lf")" -eq "$n_files" ] || { echo "FAIL — the timing run did not report every file"; exit 1; }
+slowest=$(sort -k2,2nr "$TMPD/time.lf" | head -1 | awk '{ printf "%s ms for %s records (%s)", $2, $3, $4 }')
 RESULT="PASS — FBX reader drill: $n_files binary FBX files, $n_records records, read by editor/FbxDocument.cs and by the independent Python reader with identical dumps (every record, property and array as bits and hashes) - $PROJECT_NOTE, ${#FIXTURES[@]} fixtures; versions $versions(C# $((t1 - t0)) s, Python $((t2 - t1)) s; slowest $slowest)"
 echo "$RESULT"
 [ "$N_PROJECT" -gt 0 ] || { echo "SKIP — ${RESULT#PASS — } | the project population was NOT drilled: no modding project at $PROJECT (set HAF_UNITY_PROJECT)"; exit 3; }

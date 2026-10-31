@@ -19,9 +19,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   steps. The inventory that sized it: every FBX this machine has is binary 7400 (Blender's exporter), 7500 or 7700
   (the FBX SDK), with zlib arrays, ngons up to 19 sides, ByPolygonVertex/ByVertice/ByPolygon/AllSame layer elements
   in Direct and IndexToDirect form, skins of up to 254 clusters, and up to 103 animation stacks in one file. The
-  drill (`tools/fbx_drill.sh`, the push) holds the reader to an independent Python reader record for record: 197
+  drill (`tools/fbx_drill.sh`, the push) holds the reader to an independent Python reader record for record: 198
   files, 1.3 million records, identical dumps (the project's 187, the recipes' FBX sources, nine generated fixtures
-  for the shapes those files lack).
+  for the shapes those files lack). The review also preserves `C` as a full character byte (`B` is Boolean), reads
+  `Z` signed bytes and `c` byte arrays, checks the complete signature and scope terminators, and refuses invalid
+  UTF-8, truncated/trailing DEFLATE data and unsupported zlib headers without allocating a corrupt array's claimed
+  size. Both readers reject 21 malformed fixtures on Unity's Mono. The drill checks reader, generator and timing
+  exit statuses and discovers both recipe source slots, including BOM recipes and project-relative sources.
 - **THE DELETE-GUARD PRUNE RUNS AT LAST, AND A WORKER THREAD IS GUARDED (2026-10-31).** The retention added on
   2026-08-23 never pruned a single guard: 720 `_deleted_` folders, 321 past the 14 days, not one "pruned" line in any
   Editor.log (the 2026-10-31 review). The daily worker read `KeepGuardDays` — EditorPrefs behind a property — from

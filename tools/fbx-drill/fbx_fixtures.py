@@ -14,14 +14,16 @@ import os, struct, sys, zlib
 
 def prop(t, v, compress=False):
     if t == 'Y': return b'Y' + struct.pack('<h', v)
-    if t == 'C': return b'C' + (b'\x01' if v else b'\x00')
+    if t == 'C': return b'C' + bytes([int(v)])
+    if t == 'B': return b'B' + (b'\x01' if v else b'\x00')
+    if t == 'Z': return b'Z' + struct.pack('<b', v)
     if t == 'I': return b'I' + struct.pack('<i', v)
     if t == 'F': return b'F' + struct.pack('<f', v)
     if t == 'D': return b'D' + struct.pack('<d', v)
     if t == 'L': return b'L' + struct.pack('<q', v)
     if t == 'S': raw = v.encode('utf-8'); return b'S' + struct.pack('<I', len(raw)) + raw
     if t == 'R': return b'R' + struct.pack('<I', len(v)) + v
-    fmt = {'f': 'f', 'd': 'd', 'l': 'q', 'i': 'i', 'b': 'b'}[t]
+    fmt = {'f': 'f', 'd': 'd', 'l': 'q', 'i': 'i', 'b': 'b', 'c': 'B'}[t]
     raw = struct.pack('<%d%s' % (len(v), fmt), *v)
     if compress:
         z = zlib.compress(raw, 9)
@@ -54,21 +56,63 @@ def null_record(wide):
     return b'\0' * ((24 if wide else 12) + 1)
 
 
-def write_fbx(path, version, nodes):
+def file_bytes(version, nodes):
     wide = version >= 7500
     out = bytearray(b'Kaydara FBX Binary  \0\x1a\0' + struct.pack('<I', version))
     for n in nodes:
         out += encode(n, len(out), wide)
     out += null_record(wide)
     out += bytes(16) + bytes(4) + struct.pack('<I', version) + bytes(120) + bytes.fromhex('f85a8c6a de f5 d9 7e ec e9 0c e3 75 8f 29 0b'.replace(' ', ''))   # a footer the readers never read
-    with open(path, 'wb') as f: f.write(out)
+    return bytes(out)
+
+
+def write_fbx(path, version, nodes):
+    with open(path, 'wb') as f: f.write(file_bytes(version, nodes))
+
+
+def bad_fixtures():
+    """Framing and compressed-input regressions: both readers must refuse, including under Unity's Mono."""
+    for version in (7400, 7500):
+        header = file_bytes(version, [])[:27]
+        yield 'missing_root_%d' % version, header
+        yield 'cut_after_node_%d' % version, header + encode(Node('Last', [prop('I', 1)]), 27, version >= 7500)
+        bad = bytearray(file_bytes(version, [Node('Parent', [], [Node('Child')])]))
+        fmt, size = ('<Q', 25) if version >= 7500 else ('<I', 13)
+        end, = struct.unpack_from(fmt, bad, 27)
+        struct.pack_into(fmt, bad, 27, end - size)
+        yield 'missing_scope_%d' % version, bad
+    bad = bytearray(file_bytes(7400, [])); bad[21] = 0
+    yield 'wrong_magic', bad
+    bad = bytearray(file_bytes(7400, [])); bad[22] = 1
+    yield 'unsupported_endian', bad
+
+    def array(z, count=4, encoding=1):
+        return file_bytes(7400, [Node('Array', [b'i' + struct.pack('<III', count, encoding, len(z)) + z])])
+
+    raw = struct.pack('<4i', 5, 6, 7, 8)
+    z = zlib.compress(raw)
+    yield 'no_deflate_block', array(b'\x78\x9c\0\0\0\1', 0)
+    yield 'oversize_count', array(z, 0xffffffff)
+    yield 'short_decoded_data', array(z, 0x10000000)
+    yield 'unknown_encoding', array(raw, encoding=7)
+    yield 'preset_dictionary', array(z[:1] + b'\xbb' + z[2:])
+    bad = bytearray(z); bad[0] = 0x88
+    bad[1] = next(flag for flag in range(32) if ((bad[0] << 8) | flag) % 31 == 0)
+    yield 'invalid_window', array(bad)
+    bad = bytearray(z); bad[-1] ^= 1
+    yield 'wrong_adler', array(bad)
+    for cut in (1, 2, 4):
+        yield 'cut_deflate_%d' % cut, array(z[:-4-cut] + z[-4:])
+    for count in (1, 2, 1024):
+        yield 'trailing_deflate_%d' % count, array(z[:-4] + b'\x2a' * count + z[-4:])
 
 
 def fixtures():
     every_type = Node('Types', [prop('Y', -7), prop('C', True), prop('C', False), prop('I', -123456), prop('F', 1.5), prop('F', -0.0),
                                 prop('D', 2.0 ** -1074), prop('D', float('inf')), prop('L', -(2 ** 40)), prop('S', 'héllo\x00\x01world'),
                                 prop('R', bytes(range(256))), prop('i', [1, -2, 3]), prop('l', [2 ** 40, -1]), prop('f', [0.5, -0.25]),
-                                prop('d', [1e300, -1e-300]), prop('b', [True, False, True])])
+                                prop('d', [1e300, -1e-300]), prop('b', [True, False, True]),
+                                prop('C', 255), prop('B', True), prop('B', False), prop('Z', -127), prop('c', [0, 127, 255], True)])
     compressed = Node('Compressed', [prop('i', list(range(1000)), True), prop('d', [x * 0.001 for x in range(500)], True),
                                      prop('f', [x * 0.5 for x in range(300)], True), prop('l', [x * 7 for x in range(100)], True),
                                      prop('b', [x % 2 == 0 for x in range(64)], True)])
@@ -101,9 +145,16 @@ def fixtures():
 
 
 if __name__ == '__main__':
-    out = sys.argv[1]
+    reject = sys.argv[1] == '--bad'
+    out = sys.argv[2] if reject else sys.argv[1]
     os.makedirs(out, exist_ok=True)
-    for name, version, nodes in fixtures():
-        path = os.path.join(out, name + '.fbx')
-        write_fbx(path, version, nodes)
-        print(path.replace('\\', '/'))
+    if reject:
+        for name, data in bad_fixtures():
+            path = os.path.join(out, name + '.fbx')
+            with open(path, 'wb') as stream: stream.write(data)
+            print(path.replace('\\', '/'))
+    else:
+        for name, version, nodes in fixtures():
+            path = os.path.join(out, name + '.fbx')
+            write_fbx(path, version, nodes)
+            print(path.replace('\\', '/'))
