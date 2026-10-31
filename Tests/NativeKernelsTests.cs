@@ -257,7 +257,12 @@ public class NativeKernelsTests
             for (int i = 0; i < 10000; i++) if (index.Query(0, i % 2 == 0)) exposed++;
             long bytes = allocated() - before;
             Assert.Equal(5000, exposed);   // the blocker is ahead; the opposite ray is open
-            Assert.InRange(bytes, 0, 1024);
+            // THE CLAIM IS "NO PER-FACE GARBAGE", NOT "NO BYTES": one small object per query would be at least 24 bytes
+            // x 10,000 = 240 KB, and the old code's per-face arrays were far more. The thread's own noise is not zero -
+            // the CI runner measured 3,840 bytes over the loop on 2026-10-31 (tiering stubs, the test host) against a
+            // 1,024 ceiling, a red CI for an unrelated PR - so the ceiling is under one byte per query: ten thousand
+            // times tighter than the failure it exists to catch, and above anything the runtime does on its own.
+            Assert.InRange(bytes, 0, 10000);
         }
     }
 
