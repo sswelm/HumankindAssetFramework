@@ -293,9 +293,9 @@ namespace HumankindAssetFramework
         // makes re-scaling idempotent and reversible instead of compounding. Both maps are keyed by data that
         // outlives a session reset in the same way the buffers do — the Fx content buffers persist across
         // save/load while descriptor ids re-resolve, so clearing the mesh map would double-scale.
-        // The mesh record is SELF-VERIFYING rather than assumed: it stores the factor AND the first vertex as we
-        // left it. If the engine reloads its Fx content (menu round trip, streaming), that vertex comes back
-        // vanilla and the position fingerprint no longer matches — we then know the buffer is fresh and re-scale from 1 instead
+        // The mesh record is SELF-VERIFYING rather than assumed: it stores the factor, mesh range and a fingerprint
+        // of every position as we left it. If the engine reloads its Fx content (menu round trip, streaming), those
+        // positions come back vanilla and the fingerprint no longer matches — re-scale the fresh mesh from 1 instead
         // of trusting a stale bookkeeping entry. That closes both failure modes at once: double-scaling a buffer
         // that persisted, and silently under-scaling one that was rebuilt.
         struct MeshScale { public float factor; public uint start; public int count; public ulong positions; }
