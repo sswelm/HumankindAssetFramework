@@ -14,14 +14,18 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   for a day nothing connected the push to the parity mode: a Blender script or its C# port could change and push green
   with the claim "the C# ports still match Blender" untested, in silence (the 2026-10-31 review, P1). Now a parity-mode
   PASS with every drill run writes `tools/parity-stamp.txt`, a digest of every file the parity drills compile, run or
-  read — derived from the drill scripts themselves (148 files: the `editor/Tools~` scripts, the ported `editor/*.cs`,
-  the drills' fixtures and dumps, the kernels DLL), each hashed as git stores it so CRLF and LF checkouts agree — and
-  the push's `parity stamp` step compares it with those files as they are: a changed covered file, or no stamp, is a
-  `[SKIP]` naming the files, which the verdict counts as a FAIL unless `HAF_ALLOW_SKIP=1` says, meaning it, that the
-  push goes without the claim. No Blender in the push, a few seconds of git. The guard fails rather than guards nothing
-  when its parser loses a known anchor or a drill names an untracked file; its drill (`--self-test`, the push and CI)
-  proves in a shared clone that it refuses a changed script, port and fixture, ignores an uncovered file and refuses a
-  missing stamp. Said: the recipes, registry sources and sample files in the Unity project are outside the digest.
+  read — derived from the drill scripts themselves and followed transitively (150 files: the `editor/Tools~` scripts,
+  the ported `editor/*.cs`, the drills' fixtures and dumps, the oracle wrapper and its `oracle.py`, the kernels DLL),
+  each hashed as git stores it so CRLF and LF checkouts agree — and the push's `parity stamp` step compares it with
+  those files as they are: a changed covered file, or no stamp, is a `[SKIP]` naming the files, which the verdict
+  counts as a FAIL unless `HAF_ALLOW_SKIP=1` says, meaning it, that the push goes without the claim. No Blender in the
+  push, ten seconds of git. The digest is taken before the drills start, and the write refuses a different one: a
+  covered file edited during the run gets no stamp. The guard fails rather than guards nothing when its parser loses a
+  known anchor or a drill names an untracked file; its drill (`--self-test`, the push and CI) proves in a shared clone,
+  under the hook's own `GIT_DIR` (inherited, it had pointed the clone's git at the author's branch: a stray commit, the
+  identity overwritten — the review's first finding), that it refuses a changed script, port, fixture and `oracle.py`,
+  ignores an uncovered file, refuses a change during the run and a missing stamp, and leaves the author's repository
+  alone. Said: the recipes, registry sources and sample files in the Unity project are outside the digest.
 - **THE GPU BUFFER WALL IS NAMED, NOT SILENT (2026-10-31).** On 2026-10-20 every custom model vanished at once: the pawn
   layer's vertex buffer was full, the engine refused each further mesh, and the plugin's every-injection capacity check
   kept reading "nearly full", because a refused mesh need not move the layer's fill cursor — the only thing the check

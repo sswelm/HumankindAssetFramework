@@ -127,7 +127,7 @@ verdict() {  # the one summary line, and the status the hook returns
   if [ "$n" -eq 0 ]; then
     # THE PARITY STAMP (2026-10-31): a parity-mode PASS with every drill run is what the push's stamp step remembers.
     # Written here, before the one CHECK line (the Bake Tests row reads that line last), and only on a full PASS.
-    if [ "$GATE" != push ] && ! bash "$ROOT/tools/check-parity-stamp.sh" --write; then
+    if [ "$GATE" != push ] && ! bash "$ROOT/tools/check-parity-stamp.sh" --write "${PARITY_START_DIGEST:-}"; then
       printf 'CHECK: FAIL — the parity drills passed but the parity stamp could not be written (see above).\n'; note "DONE FAIL (stamp)"; return 1
     fi
     printf 'CHECK: PASS — safe to push.\n'; note "DONE PASS"; return 0
@@ -256,6 +256,12 @@ push_step run "plugin unit tests (dotnet test)" dotnet test "$ROOT/Tests/Humanki
 # wrapper) and timed out under the thirteen parity drills - which the push no longer runs (2026-10-30). The oracle tests
 # belong to the parity mode, where the record machinery is used.
 push_step run_lane "parallel gate regression tests (completion, paths and verdicts)" python "$ROOT/Tests/test_parallel_gate.py"
+# THE PARITY STAMP'S DIGEST IS TAKEN HERE, before any parity drill starts: the verdict's write refuses a different one,
+# so a covered file edited during the run - which the drills did not test - gets no stamp (the review of PR #228).
+PARITY_START_DIGEST=""
+if [ "$GATE" != push ]; then
+  PARITY_START_DIGEST="$(bash "$ROOT/tools/check-parity-stamp.sh" --digest)" || { printf 'FAIL — the parity stamp cannot be prepared:\n%s\n' "$PARITY_START_DIGEST"; fail=1; }
+fi
 parity_step run_lane "blender oracle tests (the recorded Blender oracle: keyed by its inputs, stale-aware, replayable)" python "$ROOT/Tests/test_blender_oracle.py"
 
 # ---- THE GUARD LANE BESIDE THE DRILLS (2026-10-29) ----
@@ -307,8 +313,10 @@ push_step run_lane "registry schema parity" bash "$ROOT/tools/check_schema_parit
 #     counts as a FAIL unless HAF_ALLOW_SKIP=1 says, meaning it - when a covered file changed since, naming the files.
 #     No Blender, no record: a few seconds of git. Its drill, in a shared clone, proves the guard refuses a changed
 #     Blender script, C# port and fixture, ignores an uncovered file, and refuses a missing stamp.
-push_step run_lane "parity stamp (every file the parity drills cover is as the last Blender-parity PASS held it; SKIP when one changed since)" bash "$ROOT/tools/check-parity-stamp.sh"
-push_step run_lane "parity stamp drill (the guard refuses a changed covered file, in a shared clone)" bash "$ROOT/tools/check-parity-stamp.sh" --self-test
+#     The stamp step is the PUSH mode's alone: in the combined mode the parity drills themselves are the claim and write
+#     a fresh stamp at the verdict, which a stale-stamp SKIP beside them would have forbidden (the review of PR #228).
+[ "$GATE" != push ] || run_lane "parity stamp (every file the parity drills cover is as the last Blender-parity PASS held it; SKIP when one changed since)" bash "$ROOT/tools/check-parity-stamp.sh"
+push_step run_lane "parity stamp drill (the guard refuses a changed covered file, in a shared clone, and leaves the author's repository alone)" bash "$ROOT/tools/check-parity-stamp.sh" --self-test
 
 # 5) editor source guards — also in-repo since the move. Both guard editor/, so they belong with it.
 # CI had this one and the hook did not (2026-10-12): a vehicle_rig.py helper change passed the hook and failed after the push.

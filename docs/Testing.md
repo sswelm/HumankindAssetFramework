@@ -65,17 +65,22 @@ verdict and cancellation regressions in a temporary Unity project without runnin
 **The parity stamp connects the two (2026-10-31).** For a day nothing did: a ported script or its C# port could change
 and push green with the parity claim untested (the 2026-10-31 review, P1 "nothing enforces parity"). A parity-mode PASS
 with every drill run now writes `tools/parity-stamp.txt`: a digest of every file the parity drills compile, run or read
-(148 at the time of writing: the Blender scripts under `editor/Tools~`, the ported `editor/*.cs` the drills compile,
-the drills' own folders with their fixtures and dumps, the native kernels DLL), each hashed as git stores it so CRLF
-and LF checkouts agree. The set is derived from the drill scripts in `tools/check.sh`, not hand-listed, and the guard
-FAILS rather than guards nothing when it loses a known anchor or when a drill references a file git does not track.
-The push's step `parity stamp` compares the digest with those files as they are now: equal is `[PASS]`; a changed
-covered file, or no stamp, is `[SKIP]` with the changed files named, which the verdict counts as a FAIL unless
+(150 at the time of writing: the Blender scripts under `editor/Tools~`, the ported `editor/*.cs` the drills compile,
+the drills' own folders with their fixtures and dumps, the oracle wrapper and its `oracle.py`, the native kernels DLL),
+each hashed as git stores it so CRLF and LF checkouts agree. The set is derived from the drill scripts in
+`tools/check.sh` and followed transitively through every script it reaches, not hand-listed, and the guard FAILS
+rather than guards nothing when it loses a known anchor or when a drill references a file git does not track. The
+digest is taken BEFORE the drills start and the write refuses a different one, so a covered file edited during the
+twenty minutes gets no stamp. The push's step `parity stamp` (the push mode's alone: in the combined mode the drills
+themselves are the claim) compares the digest with those files as they are now: equal is `[PASS]`; a changed covered
+file, or no stamp, is `[SKIP]` with the changed files named, which the verdict counts as a FAIL unless
 `HAF_ALLOW_SKIP=1` says, meaning it, that the push goes without the parity claim. The remedy is a parity run (`bash
 tools/blender_parity.sh` or the Bake Tests row) and committing the stamp it writes beside the change. What the digest
 cannot see, said: the recipes, registry sources and sample files in the Unity project. Its drill, `bash
-tools/check-parity-stamp.sh --self-test` (the push and CI), proves in a shared clone that the guard refuses a changed
-Blender script, C# port and fixture, ignores an uncovered file and refuses a missing stamp.
+tools/check-parity-stamp.sh --self-test` (the push and CI), proves in a shared clone, under the hook's own `GIT_DIR`
+(which the guard drops: inherited, it had pointed the clone's every git command at the author's branch), that the
+guard refuses a changed Blender script, C# port, fixture and `oracle.py`, ignores an uncovered file, refuses a change
+made during the run and a missing stamp, and leaves the author's repository as it found it.
 
 The recorded oracle remains an OPTION of the parity mode, nothing more: `tools/blender_oracle.sh` wraps every Blender
 invocation of the drills in `HAF_ORACLE=live` (the default in the parity mode: Blender runs, nothing stored), `record`
