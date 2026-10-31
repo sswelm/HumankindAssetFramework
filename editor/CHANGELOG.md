@@ -22,6 +22,12 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   - The 09-28 version also retried a transiently locked swap in the district, formation and sound registries; every
     registry's write is a checked, retried operation since (`CheckedReplace.Apply`), so that part is not landed.
 
+  Review fixes: an exception after a registry write is an unsettled commit, never proof that nothing was saved.
+  New assets and the old recovery snapshot are kept until the source is inspected. A failed snapshot stops the
+  bake before destructive work; failed restores report recovery failure and keep the backup. A failed first bake
+  restores the empty output set. `bash tools/bake_commit_unity_drill.sh` exercises the transaction itself against
+  real files, locks and cancellation in a temporary Unity project.
+
 - **Vehicle Lab: Turret is a reduce tier** (user: "could you add a turret reduce slider"). A **Turret reduce (%)** slider
   in *Vertices control*, enabled when a part is marked Turret: a weld tier like Gun (seams welded within each material, then
   collapse), run before the Turret bone is measured, so its pivot comes from the reduced mesh. Saved in the recipe;

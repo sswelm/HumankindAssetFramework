@@ -1702,7 +1702,7 @@ public class AnimationLabWindow : EditorWindow
         {
             cur = JsonUtility.FromJson<ModelDef>(formSnapshot);   // the form drops the rolled-back bake's GUIDs, keeps the settings
             status = r.commitFailed
-                ? $"'{cur.resourceName}': {r.error}." + (r.commitUnsettled ? "" : " Close whatever's locking pack.json and re-bake.")
+                ? $"'{cur.resourceName}': {r.error}." + (r.commitUnsettled || r.rollbackFailed ? "" : " Close whatever's locking pack.json and re-bake.")
                 : "Bake FAILED (settings kept): " + r.error;
             Debug.LogError("[AnimLab] " + status);
             if (r.commitFailed) { ModelFactoryWindow.ReloadPreviews(); BuildFitPreview(); }   // show the model now on disk (restored, or kept when unsettled)

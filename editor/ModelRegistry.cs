@@ -923,6 +923,7 @@ public static class ModelRegistry
         var json = JsonUtility.ToJson(file, true);
         // 1) Atomic write to THE SOURCE (the collapse: the git-tracked project file is the one registry): fill a
         //    temp file, then swap it in, so an interrupted or locked write can never leave a truncated registry.
+        bool sourceWritten = false;
         try
         {
             Directory.CreateDirectory(PackRepoDir);
@@ -930,6 +931,7 @@ public static class ModelRegistry
             // editor replacing the file between that read and this write used to be overwritten unseen. The replace
             // reports what it displaced; anything but `sourceText` puts the other version back and refuses.
             var outcome = CheckedReplace.Write(SourcePath, sourceText, json, out string replaceNote);
+            sourceWritten = outcome == CheckedReplace.Outcome.Written;
             if (replaceNote != null) Debug.LogWarning($"[Factory] registry source: {replaceNote}.");
             if (outcome == CheckedReplace.Outcome.Conflict)
             {
@@ -957,6 +959,11 @@ public static class ModelRegistry
         }
         catch (Exception e)
         {
+            if (sourceWritten)
+            {
+                Debug.LogError($"[Factory] registry source was written, but post-save bookkeeping failed ({e.Message}). Reload and inspect '{SourcePath}'; baked assets must be kept.");
+                return RegistryRules.SaveOutcome.Unknown;
+            }
             Debug.LogError($"[Factory] registry write FAILED — the model baked but its entry was NOT saved to " +
                            $"'{SourcePath}' ({e.Message}). Close whatever's locking it (AV, search indexer) and re-bake; " +
                            "the previous source is intact (git history has every committed version).");

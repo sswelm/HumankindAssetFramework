@@ -2458,7 +2458,7 @@ public class ModelFactoryWindow : EditorWindow
             cur = JsonUtility.FromJson<ModelDef>(formSnapshot);   // the form drops the rolled-back bake's GUIDs, keeps the settings
             if (r.commitFailed)
             {
-                status = $"'{cur.resourceName}': {r.error}." + (r.commitUnsettled ? "" :
+                status = $"'{cur.resourceName}': {r.error}." + (r.commitUnsettled || r.rollbackFailed ? "" :
                          " Close whatever's locking pack.json (AV / indexer / the running game) and re-bake.");
                 Debug.LogError("[Factory] " + status);
                 LoadPreview(cur.resourceName, forceReimport: true);   // the model now on disk: the restored one, or the kept one when unsettled
