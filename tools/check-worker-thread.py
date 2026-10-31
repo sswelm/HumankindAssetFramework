@@ -7,10 +7,12 @@ the snapshot and the rotation and then silence, exactly where the pref was read.
 lambda would have found nothing: the read was one hop away, behind a property on the same class.
 
 THE SHAPES CAUGHT, in editor/*.cs: inside the body of a lambda handed to Task.Run / Task.Factory.StartNew /
-ThreadPool.QueueUserWorkItem / new Thread, (1) a main-thread Unity API used directly (EditorPrefs., AssetDatabase.,
-EditorUtility., EditorApplication., Selection., Application.dataPath, ...), and (2) the name of a member declared in
-editor/ whose own body uses one directly (one hop: `KeepGuardDays => EditorPrefs.GetInt(...)`). Comments and string
-contents are blanked first, so a log line that mentions EditorPrefs is not a use.
+ThreadPool.QueueUserWorkItem / new Thread - a block, or an expression up to the next top-level comma: a cancellation
+token or scheduling option after the lambda is the CALLER's - (1) a main-thread Unity API used directly (EditorPrefs.,
+AssetDatabase., EditorUtility., EditorApplication., Selection., Application.dataPath, ...), and (2) the name of a
+member declared in the same file whose own body uses one directly (one hop: `KeepGuardDays => EditorPrefs.GetInt(...)`,
+a property or a method, expression- or block-bodied). Comments and string TEXT are blanked first, so a log line that
+mentions EditorPrefs is not a use; the {holes} of an interpolated string are code and stay (the review of PR #230).
 
 WHAT IT CANNOT SEE, said: a delegate passed by name (`Task.Run(check)`) - those are listed, not judged; two hops;
 a Unity API reached through another class's member (the hop is per file). Debug.Log is thread-safe and not listed.
@@ -50,9 +52,13 @@ def blank(text):
             out.append(re.sub(r"[^\n]", " ", text[i:j])); i = j
         elif c == '"' or (c in "@$" and text[i + 1:i + 2] == '"') or (text[i:i + 2] in ("@$", "$@") and text[i + 2:i + 3] == '"'):
             k = i
-            verbatim = False
+            verbatim = interpolated = False
             while text[k] in "@$":
-                verbatim = verbatim or text[k] == "@"; k += 1
+                verbatim = verbatim or text[k] == "@"; interpolated = interpolated or text[k] == "$"; k += 1
+            if interpolated:   # the holes are CODE (the review of PR #230: `$"days: {EditorPrefs.GetInt(...)}"` had vanished with the text)
+                j, content = scan_interpolated(text, k, verbatim)
+                out.append(text[i:k] + '"' + content + '"'); i = j
+                continue
             j = k + 1
             while j < n:
                 if verbatim and text[j] == '"' and text[j + 1:j + 2] == '"':
@@ -77,6 +83,39 @@ def blank(text):
     return "".join(out)
 
 
+def scan_interpolated(text, k, verbatim):
+    """From the opening quote at k of a $-string: (index past the closing quote, the content with its text blanked and
+    its {holes} kept). A plain string nested inside a hole is blanked whole; `{{` and `}}` are text."""
+    n = len(text)
+    j, depth, out = k + 1, 0, []
+    while j < n:
+        c = text[j]
+        if depth == 0:
+            if c in "{}" and text[j + 1:j + 2] == c:
+                out.append("  "); j += 2; continue
+            if c == "{":
+                depth = 1; out.append("{"); j += 1; continue
+            if verbatim and c == '"' and text[j + 1:j + 2] == '"':
+                out.append("  "); j += 2; continue
+            if c == '"':
+                return j + 1, "".join(out)
+            if not verbatim and c == "\\":
+                out.append("  "); j += 2; continue
+            out.append("\n" if c == "\n" else " "); j += 1
+        else:
+            if c == '"':
+                e = j + 1
+                while e < n and text[e] != '"' and text[e] != "\n":
+                    e += 2 if text[e] == "\\" else 1
+                out.append('"' + " " * max(0, e - j - 1) + '"'); j = e + 1; continue
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+            out.append(c); j += 1
+    return n, "".join(out)
+
+
 def matching(text, start, open_ch, close_ch):
     """Index just past the bracket that closes the one at `start`, or len(text)."""
     depth = 0
@@ -94,13 +133,19 @@ def member_bodies(text):
     """(name, body) of every declared member with an expression or block body; the first-hop table is built from them."""
     for m in DECL.finditer(text):
         name, tail = m.group(1), m.group(2)
+        at = m.end()
+        if tail == "(":   # a method: past its parameter list, an arrow or a block (the review of PR #230: `Days() => ...` was skipped)
+            at = matching(text, m.end() - 1, "(", ")")
+            rest = text[at:at + 40].lstrip()
+            tail = "=>" if rest.startswith("=>") else "{" if rest.startswith("{") else ""
+            if tail == "=>":
+                at = text.find("=>", at) + 2
         if tail == "=>":
-            end = text.find(";", m.end())
-            yield name, text[m.end():end if end >= 0 else len(text)]
-        else:
-            brace = text.find("{", m.end() - 1)
-            semi = text.find(";", m.end() - 1)
-            if brace < 0 or (0 <= semi < brace and tail == "("):
+            end = text.find(";", at)
+            yield name, text[at:end if end >= 0 else len(text)]
+        elif tail == "{":
+            brace = text.find("{", at - 1)
+            if brace < 0:
                 continue
             yield name, text[brace:matching(text, brace, "{", "}")]
 
@@ -116,6 +161,19 @@ def worker_bodies(text):
             yield m.start(), None, arg.strip()
             continue
         body = arg[lam.end():]
+        if body.lstrip().startswith("{"):
+            b = body.find("{")
+            body = body[b:matching(body, b, "{", "}")]
+        else:   # an expression body ends at the first top-level comma (a cancellation token, scheduling options: the caller's thread)
+            depth, cut = 0, len(body)
+            for idx, ch in enumerate(body):
+                if ch in "([{":
+                    depth += 1
+                elif ch in ")]}":
+                    depth -= 1
+                elif ch == "," and depth == 0:
+                    cut = idx; break
+            body = body[:cut]
         yield m.start(), body, None
 
 
@@ -150,7 +208,9 @@ PLANT = '''
 static class Planted
 {
     static int Days => EditorPrefs.GetInt("HAF.Days", 14);   // the wrapper that hid the real one
+    static int Days2() => EditorPrefs.GetInt("HAF.Days2", 14);   // an expression-bodied METHOD wrapper
     static string Note() { return "EditorPrefs. in a string is not a use"; }
+    static System.Threading.CancellationToken Token() { EditorPrefs.GetInt("t", 0); return default; }
     static void Run()
     {
         System.Threading.Tasks.Task.Run(() =>
@@ -160,6 +220,8 @@ static class Planted
             Debug.Log("EditorPrefs.");       // a string: must not
         });
         System.Threading.Tasks.Task.Run(() => Note());   // a hop to a string-only member: must not
+        System.Threading.Tasks.Task.Run(() => Debug.Log($"days: {EditorPrefs.GetInt("x", 14)} {{not a hole}}"));   // a hole: must be found
+        System.Threading.Tasks.Task.Run(() => { int d2 = Days2(); }, Token());   // the method hop: found; Token() runs on the caller: not
         System.Threading.Tasks.Task.Run(check);           // by name: listed, not judged
     }
 }
@@ -169,8 +231,11 @@ static class Planted
 def self_test():
     findings, unseen = check_text(PLANT, "plant.cs")
     msgs = "\n".join(m for _, m in findings)
-    ok = ("'Days' uses EditorPrefs." in msgs and "'AssetDatabase.' is a main-thread" in msgs
-          and "Note" not in msgs and msgs.count("EditorPrefs") == 1 and unseen == [(15, "check")])
+    by_name_line = next(i + 1 for i, l in enumerate(PLANT.split("\n")) if "Task.Run(check)" in l)
+    ok = ("'Days' uses EditorPrefs." in msgs and "'Days2' uses EditorPrefs." in msgs
+          and "'AssetDatabase.' is a main-thread" in msgs and "'EditorPrefs.' is a main-thread" in msgs
+          and "Note" not in msgs and "Token" not in msgs and msgs.count("EditorPrefs") == 3
+          and unseen == [(by_name_line, "check")])
     if not ok:
         print("FAIL - worker-thread self-test: the planted shapes were not reported as expected:\n" + msgs + f"\n  unseen: {unseen}")
         return False
