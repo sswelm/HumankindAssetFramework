@@ -602,6 +602,19 @@ def s4_fold_big(out):
     return r.write(out, "riganim_s4_fold_big")
 
 
+def s4_cap_boundary(out, bones=127):
+    """One weighted root and many zero-weight leaves: one bone over budget must lose only one leaf."""
+    r = Rig(); arm = r.node("Armature"); root = r.node("Root", arm)
+    joints = [root]; matrices = [ibm(0, 0, 0)]
+    for i in range(bones - 1):
+        x = 1.0 + 0.01 * i
+        joints.append(r.node("Leaf%03d" % i, root, translation=[x, 0.0, 0.0])); matrices.append(ibm(x, 0, 0))
+    skin = r.skin("Skin", joints, matrices); mat = r.material("Paint")
+    r.node("Body", arm, mesh=r.mesh("body", material=mat, joints=[[(0, 1.0)]]), skin=skin)
+    action = r.anim("Spin"); r.key(action, root, "rotation", [0.0, 0.5], spin(2, "x", 0.125))
+    return r.write(out, "riganim_cap_boundary_%d" % bones)
+
+
 def s4_bonecap(out, weight=1.0, suffix=""):
     """492 bones: a root, 245 chains of a middle bone and a leaf, and a weighted leaf. Pass one removes the 245 leaves
     (the weighted one stays), the count is still over the cap, pass two removes the 238 unweighted middles."""
@@ -988,6 +1001,7 @@ def main(out):
     job("fx_s4_multi_keept", multi(out), clip="Longer", keept="1", roles="attack=Held;move=Spin[0..6]")
     job("fx_s4_fold_big", s4_fold_big(out), clip="Longer")
     job("fx_s4_bonecap", s4_bonecap(out))
+    job("fx_s4_cap_boundary", s4_cap_boundary(out))
     # PR #167 review: Python's double threshold protects nominal 0.001f; the lower neighbor is removed, the upper kept.
     for weight, suffix in ((0.000999, "below"), (0.001, "exact"), (0.001001, "above")):
         job("fx_s4_bonecap_" + suffix, s4_bonecap(out, weight, "_" + suffix))

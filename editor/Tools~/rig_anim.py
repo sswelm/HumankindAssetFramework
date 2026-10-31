@@ -406,6 +406,10 @@ def assign_action(a):
 # for rigs already under it (soldier 62, howitzer ~27), so proven models are byte-identical. What this cannot fix
 # (more than 126 WEIGHTED bones) is said out loud just before export.
 _BONE_LIMIT = 126
+def _zero_weight_leaves_for_cap(bones, weighted, limit):
+    # Remove only the excess, rather than every leaf in a wide rig. The next pass can expose more parents.
+    return [b.name for b in bones if len(b.children) == 0 and b.name not in weighted][:max(0, len(bones) - limit)]
+
 if len(arm.data.bones) > _BONE_LIMIT:
     _skmesh = [m for m in bpy.data.objects if m.type == 'MESH' and m.find_armature() == arm]
     # which bones actually deform the mesh? Only those need to survive with a low index. The rest — IK targets,
@@ -424,7 +428,7 @@ if len(arm.data.bones) > _BONE_LIMIT:
     _removed = 0
     bpy.context.view_layer.objects.active = arm
     while len(arm.data.bones) > _BONE_LIMIT:
-        _leaves = [b.name for b in arm.data.bones if len(b.children) == 0 and b.name not in _weighted]
+        _leaves = _zero_weight_leaves_for_cap(arm.data.bones, _weighted, _BONE_LIMIT)
         if not _leaves:
             break                                     # only weighted bones + their load-bearing ancestors remain
         bpy.ops.object.mode_set(mode='EDIT')

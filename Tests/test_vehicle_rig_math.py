@@ -145,6 +145,23 @@ class TurretTierGuard(unittest.TestCase):
 
 
 class BoneBudgetGuard(unittest.TestCase):
+    def test_the_cap_removes_only_the_excess_and_keeps_weighted_leaves(self):
+        from types import SimpleNamespace
+        rig_source = (SCRIPT.parent / "rig_anim.py").read_text(encoding="utf-8")
+        fn = next(n for n in ast.parse(rig_source).body if isinstance(n, ast.FunctionDef) and n.name == "_zero_weight_leaves_for_cap")
+        scope = {}
+        exec(compile(ast.Module(body=[fn], type_ignores=[]), "rig_anim.py", "exec"), scope)
+        choose = scope[fn.name]
+        bones = [SimpleNamespace(name="Root", children=[1])] + [SimpleNamespace(name="Leaf%03d" % i, children=[]) for i in range(126)]
+        self.assertEqual(["Leaf000"], choose(bones, {"Root"}, 126))
+        self.assertEqual([], choose(bones[:126], {"Root"}, 126))
+        self.assertEqual(["Leaf001"], choose(bones, {"Root", "Leaf000"}, 126))
+
+    def test_the_fast_path_checks_its_finished_skeleton_before_export(self):
+        fast = SOURCE[SOURCE.index('    def _fast():'):SOURCE.index('    _guard(_fast)')]
+        self.assertIn('_bone_wall_check(arm)', fast)
+        self.assertLess(fast.index('_bone_wall_check(arm)'), fast.index('bpy.ops.export_scene.gltf('))
+
     # 2026-09-28 (the wall corrected): the engine breaks past bone INDEX 127, so one budget of 126 in vehicle_rig.py and
     # rig_anim.py, and in their C# ports, whose log lines the drills hold to the scripts' own. A budget that drifts in
     # one place (240 again) sends a rig past the wall without a word.

@@ -5,28 +5,6 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
-- **The bone budget is the real wall everywhere, and a rig over it says so** (2026-10-31; written 2026-09-28, found
-  stranded by the 2026-10-31 review). The engine breaks past bone *index* 127, not 256. That has been documented since
-  the T-62 (2026-07-26), but only `deploy_convert` enforced it (≤126). `rig_anim` still slimmed zero-weight leaf bones
-  down to 240. The Vehicle Lab's tread clamp still budgeted cells against 240, and its armature line still said
-  "Amplitude cap 256". A 127–240-bone rig therefore baked without a word and spiked or lost geometry in-game.
-  - **One budget of 126 in all three scripts, and in the C# ports.** It is the same margin `deploy_convert` uses, since
-    the armature object is one more entry on top. `rig_anim`'s leaf slim now works toward it, `BlenderRigAnim` with it
-    (the drills hold the port's log lines to the script's). Removing a zero-weight leaf never moves a vertex, so rigs
-    already under 126 bake byte-identically. `Tests/test_vehicle_rig_math.py` pins the one budget in all four places.
-  - **Rigs still over it are named.** Both scripts and both ports check the *finished* rig. `rig_anim` checks after its
-    donor sockets, which are added after the slim. What is still over the budget prints a `WARNING` naming the count.
-    The drills' census has a row for it; `fx_r_wall` (130 clusters) reaches the Lab's.
-  - **The warnings reach you.** The Factory now raises every `RIGANIM WARN…` line to a Console warning, on the Blender
-    route and the in-process one. Before, they sat in the info-level dump, the existing grounding warning included. The
-    Lab shows `*** WARNING` lines in its status box.
-  - **The tread clamp is labelled for what it is.** It caps cells, not bones: the v2 hybrid bones only the wrap arcs,
-    about a third of the cells. It is now labelled `CELL CLAMP`, and it no longer coarsens treads that already fit.
-  - **Your step.** The Bredley Lab golden records the old armature text (`… (Amplitude cap 256)`). Re-bless it once
-    by deleting `Tools/lab_golden/Bredley_Low.txt`, and copy both scripts into the project's `Tools/` if that folder
-    shadows the package. The Blender record of the parity row is stale too (the scripts changed): the next parity run
-    re-records with Blender.
-
 - **Vehicle Lab: Turret is a reduce tier** (user: "could you add a turret reduce slider"). A **Turret reduce (%)** slider
   in *Vertices control*, enabled when a part is marked Turret: a weld tier like Gun (seams welded within each material, then
   collapse), run before the Turret bone is measured, so its pivot comes from the reduced mesh. Saved in the recipe;
@@ -65,6 +43,32 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   in its lookup while probing the fused Protected Cruiser. Each probe now owns its cache and releases it on success
   or failure; nested and concurrent probes stay isolated. Re-probing also reads changed indices. Unit and Unity
   regressions cover edited models, aborted/nested probes, and collection between probe stages.
+
+- **The bone budget is the real wall everywhere, and a rig over it says so** (2026-10-31; written 2026-09-28, found
+  stranded by the 2026-10-31 review). The engine breaks past bone *index* 127, not 256. That has been documented since
+  the T-62 (2026-07-26), but only `deploy_convert` enforced it (≤126). `rig_anim` still slimmed zero-weight leaf bones
+  down to 240. The Vehicle Lab's tread clamp still budgeted cells against 240, and its armature line still said
+  "Amplitude cap 256". A 127–240-bone rig therefore baked without a word and spiked or lost geometry in-game.
+  - **One budget of 126 in all three scripts, and in the C# ports.** It is the same margin `deploy_convert` uses, since
+    the armature object is one more entry on top. `rig_anim`'s leaf slim now works toward it, `BlenderRigAnim` with it
+    (the drills hold the port's log lines to the script's). Removing a zero-weight leaf never moves a vertex, so rigs
+    already under 126 bake byte-identically. `Tests/test_vehicle_rig_math.py` pins the one budget in all four places.
+  - **Rigs still over it are named.** Both scripts and both ports check the *finished* rig. `rig_anim` checks after its
+    donor sockets, which are added after the slim. What is still over the budget prints a `WARNING` naming the count.
+    The drills' census has a row for it; `fx_r_wall` (130 clusters) reaches the Lab's.
+  - **The warnings reach you.** The Factory now raises every `RIGANIM WARN…` line to a Console warning, on the Blender
+    route and the in-process one. Before, they sat in the info-level dump, the existing grounding warning included. The
+    Lab shows `*** WARNING` lines in its status box.
+  - **The tread clamp is labelled for what it is.** It caps cells, not bones: the v2 hybrid bones only the wrap arcs,
+    about a third of the cells. It is now labelled `CELL CLAMP`, and it no longer coarsens treads that already fit.
+  - **Your step.** The Bredley Lab golden records the old armature text (`… (Amplitude cap 256)`). Re-bless it once
+    by deleting `Tools/lab_golden/Bredley_Low.txt`, and copy both scripts into the project's `Tools/` if that folder
+    shadows the package. The Blender record of the parity row is stale too (the scripts changed): the next parity run
+    re-records with Blender.
+
+  Review fixes: the source-skeleton fast path checks its finished rig too. The bone cap removes only the
+  excess leaves, so a 127-bone rig loses one bone rather than its whole leaf layer. Boundary fixtures exercise
+  both scripts and the C# port against live Blender.
 
 - **Clip player review fixes:** switching clips restores animated properties that the selected clip does not drive,
   including properties on other nodes. Slashes in node names no longer break Unity animation paths, and long Unicode

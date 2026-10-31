@@ -953,7 +953,7 @@ public static class BlenderRigAnim
             int removed = 0;
             while (ad.BoneNodes.Count > 126)
             {
-                var leaves = ad.BoneNodes.Where(b => !ad.BoneNodes.Any(c => ad.Rest.Parent[c] == b) && !weighted.Contains(names.BoneOfJoint[b])).ToList();
+                var leaves = ad.BoneNodes.Where(b => !ad.BoneNodes.Any(c => ad.Rest.Parent[c] == b) && !weighted.Contains(names.BoneOfJoint[b])).Take(ad.BoneNodes.Count - 126).ToList();
                 if (leaves.Count == 0) { Note(s, "the bone cap stopped at weighted bones and their ancestors"); break; }
                 foreach (int b in leaves)
                 {

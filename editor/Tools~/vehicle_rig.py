@@ -1230,6 +1230,7 @@ if mode == "rigfast":
         for o in list(bpy.data.objects):
             if o not in keep:
                 bpy.data.objects.remove(o, do_unlink=True)
+        _bone_wall_check(arm)   # rigfast keeps the artist skeleton and exits before the mesh path's final check
         bpy.ops.export_scene.gltf(filepath=out_glb, export_animations=True)
         if preview_fbx:
             bpy.ops.export_scene.fbx(filepath=preview_fbx, add_leaf_bones=False, bake_anim=True, **_embed_previews)

@@ -143,7 +143,7 @@ Exits and deaths (recipes_exit, keys renamed by --exits): fx_x_allignored (every
 import json, math, os, sys
 sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "riganim-drill"))
-from riganim_fixtures import Rig, rigged   # noqa: E402
+from riganim_fixtures import Rig, rigged, s4_cap_boundary   # noqa: E402
 
 
 def recipe(out, key, src, parts, sub="recipes", **fields):
@@ -335,6 +335,10 @@ def boxes_in_one(r, name, material, count):
 
 def main(out):
     models = os.path.join(out, "models"); os.makedirs(models, exist_ok=True)
+    for count in (126, 127):
+        source = s4_cap_boundary(os.path.join(out, "models"), count)
+        recipe(out, "fx_fast_wall_%d" % count, source, [("Body", 0, {})], useSourceRig=True,
+               boneParts=[{"name": "Leaf000", "role": 1, "verts": 1}])
     # two boxes under a turned root
     r = Rig(); m = r.material("Paint", (0.3, 0.5, 0.7)); root = r.node("Root", rotation=[0.0, 0.7071068, 0.0, 0.7071068])
     r.node("A", root, mesh=r.mesh("A", material=m)); r.node("B", root, mesh=r.mesh("B", at=(3.0, 0.0, 0.0), material=m), translation=[0.0, 2.0, 0.0])
