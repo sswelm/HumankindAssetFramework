@@ -31,8 +31,9 @@ MAIN_THREAD = ["EditorPrefs", "PlayerPrefs", "AssetDatabase", "EditorUtility", "
                "EditorSceneManager", "AssetImporter", "EditorWindow", "SceneView", "Handles", "Gizmos"]
 MT_RE = re.compile(r"\b(" + "|".join(MAIN_THREAD) + r")\s*\.|\bApplication\s*\.\s*(dataPath|persistentDataPath|streamingAssetsPath|temporaryCachePath)\b")
 STARTERS = re.compile(r"\b(Task\s*\.\s*Run|Task\s*\.\s*Factory\s*\.\s*StartNew|ThreadPool\s*\.\s*QueueUserWorkItem|new\s+Thread)\s*\(")
-DECL = re.compile(r"^[ \t]*(?:(?:public|internal|private|protected|static|readonly|override|virtual|abstract|async|unsafe|new)\s+)+"
-                  r"[\w<>\[\],.?]+\s+(\w+)\s*(=>|\(|\{)", re.M)
+# a declaration wherever it starts (after a line start, a brace or a semicolon: `{ static int Days() => ...; }` on one line too)
+DECL = re.compile(r"(?<![\w.])(?:(?:public|internal|private|protected|static|readonly|override|virtual|abstract|async|unsafe|new)\s+)+"
+                  r"[\w<>\[\],.?]+\s+(\w+)\s*(=>|\(|\{)")
 
 
 def blank(text):
