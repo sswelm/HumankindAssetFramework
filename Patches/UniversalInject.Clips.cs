@@ -295,14 +295,15 @@ namespace HumankindAssetFramework
         // save/load while descriptor ids re-resolve, so clearing the mesh map would double-scale.
         // The mesh record is SELF-VERIFYING rather than assumed: it stores the factor AND the first vertex as we
         // left it. If the engine reloads its Fx content (menu round trip, streaming), that vertex comes back
-        // vanilla and the probe no longer matches — we then know the buffer is fresh and re-scale from 1 instead
+        // vanilla and the position fingerprint no longer matches — we then know the buffer is fresh and re-scale from 1 instead
         // of trusting a stale bookkeeping entry. That closes both failure modes at once: double-scaling a buffer
         // that persisted, and silently under-scaling one that was rebuilt.
-        struct MeshScale { public float factor; public UnityEngine.Vector3 probe; }
+        struct MeshScale { public float factor; public uint start; public int count; public ulong positions; }
         // PROCESS-LIVED, NOT SESSION-SCOPED (review 2026-09-27): the 2026-08-21 registry sweep tagged this [SessionScoped],
         // so every re-arm cleared it — the exact double-scale the paragraph above warns about (x0.8 -> x0.64 -> x0.512 on
-        // each save-load in one process). The first-vertex probe is what makes keeping it safe across a rebuilt buffer.
-        [ProcessLived("records the factor baked into the Fx vertex buffers, which outlive a session; self-verifying via the first-vertex probe")]
+        // each save-load in one process). The position fingerprint also recognizes a rebuilt buffer when its first
+        // vertex is the origin (zero is unchanged by scaling), or when a different mesh reuses the same table slot.
+        [ProcessLived("records the factor baked into the Fx vertex buffers, which outlive a session; verifies mesh layout and positions before reuse")]
         static readonly Dictionary<long, MeshScale> meshApplied = new Dictionary<long, MeshScale>();   // (layer<<32)|meshIndex
         [SessionScoped] static readonly Dictionary<int, float> descApplied = new Dictionary<int, float>();             // descriptor -> current target (session-scoped)
 

@@ -16,8 +16,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   The 2026-08-21 session-state registry then tagged it `[SessionScoped]`, so every re-arm forgot the factor while
   the vertices kept it, and the next session applied the rule on top: ×0.8, then ×0.64, then ×0.512 per save-load
   in one process. It is `[ProcessLived]` again. Keeping it is safe because the record checks itself: a rebuilt
-  buffer brings back a vanilla first vertex, the stored probe no longer matches, and the scale restarts from 1. A
-  test pins the declaration, and keeps the descriptor side per session. *Found by the 2026-09-27 critical review;
+  buffer brings back vanilla positions, the stored fingerprint no longer matches, and the scale restarts from 1.
+  The fingerprint checks the whole mesh and its range: a first vertex at the origin never changes under scaling and
+  cannot detect a reload. Numeric regressions cover persisted/copied buffers, rebuilt buffers and reused mesh slots;
+  the declaration test keeps the descriptor side per session. *Found by the 2026-09-27 critical review;
   the code path and the git history are confirmed, the compounding has not been watched in a game.*
 
 - **THE PARITY DRILLS LEFT THE PUSH (2026-10-30; user: "for pushes to github it should no longer use any blender!!! ...
