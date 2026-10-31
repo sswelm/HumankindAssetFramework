@@ -319,32 +319,61 @@ namespace HumankindAssetFramework
                 if (extra > 0 && nm.IndexOf("Visual", StringComparison.OrdinalIgnoreCase) >= 0)
                     BumpIntField(__instance, "baseVertexBufferSize", extra, nm, "[District]");
 
-                // generic per-layer overrides: "<nameSubstr>:verts=+N,idx=+N,meshes=+N,maxtris=N;..."
-                // verts/idx/meshes ADD to buffer sizes; maxtris SETS the per-mesh triangle cap (0 = unlimited —
-                // otherwise quads beyond it are SILENTLY dropped at encode, leaving holes in detailed models).
-                var spec = Plugin.BufferOverrides?.Value?.Trim() ?? "";
-                if (spec.Length == 0) return;
-                foreach (var part in spec.Split(';'))
+                // generic per-layer overrides: "<layerName>:verts=+N,idx=+N,meshes=+N,maxtris=N;..." (BufferRules: the key
+                // names ONE layer exactly, or a prefix with a trailing '*'; it was a substring until 2026-10-31, and
+                // "MeshWithSkeleton" enlarged the unrelated layer of that name beside the pawn layer). verts/idx/meshes
+                // ADD to buffer sizes; maxtris SETS the per-mesh triangle cap (0 = unlimited — otherwise quads beyond it
+                // are SILENTLY dropped at encode, leaving holes in detailed models). The spec is parsed once, its
+                // problems said once; a key no layer carries is said once the layers exist (WarnUnmatchedOnce).
+                foreach (var o in Parsed())
                 {
-                    int colon = part.IndexOf(':');
-                    if (colon <= 0) continue;
-                    string match = part.Substring(0, colon).Trim();
-                    if (match.Length == 0 || nm.IndexOf(match, StringComparison.OrdinalIgnoreCase) < 0) continue;
-                    foreach (var kv in part.Substring(colon + 1).Split(','))
-                    {
-                        var p = kv.Split('=');
-                        if (p.Length != 2 || !int.TryParse(p[1].Trim().TrimStart('+'), out int val)) continue;
-                        switch (p[0].Trim().ToLowerInvariant())
-                        {
-                            case "verts":   BumpIntField(__instance, "baseVertexBufferSize", val, nm, "[Buffers]"); break;
-                            case "idx":     BumpIntField(__instance, "baseIndexBufferSize", val, nm, "[Buffers]"); break;
-                            case "meshes":  BumpIntField(__instance, "maxMeshCount", val, nm, "[Buffers]"); break;
-                            case "maxtris": SetIntField(__instance, "maxMeshTriangleCount", val, nm, "[Buffers]"); break;
-                        }
-                    }
+                    if (!BufferRules.Matches(o, nm)) continue;
+                    if (o.Verts != 0) BumpIntField(__instance, "baseVertexBufferSize", o.Verts, nm, "[Buffers]");
+                    if (o.Idx != 0) BumpIndexField(__instance, o.Idx, nm);
+                    if (o.Meshes != 0) BumpIntField(__instance, "maxMeshCount", o.Meshes, nm, "[Buffers]");
+                    if (o.MaxTris >= 0) SetIntField(__instance, "maxMeshTriangleCount", o.MaxTris, nm, "[Buffers]");
                 }
+                // Also enforce the packed-handle ceiling for a pre-enlarged base or an idx=0 override.
+                var indexField = t.GetField("baseIndexBufferSize", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                if (indexField?.GetValue(__instance) is int size && size > BufferRules.IndexCeiling)
+                    BumpIndexField(__instance, 0, nm);
             }
             catch (System.Exception ex) { Plugin.Log.LogError("[Buffers] layer override: " + ex); }
+        }
+
+        [ProcessLived("the config spec parsed once; the config is read at layer creation and layers outlive a session")] static List<BufferRules.Override> parsed;
+        [ProcessLived("one unmatched-keys warning per process")] static bool unmatchedWarned;
+        static List<BufferRules.Override> Parsed()
+        {
+            if (parsed != null) return parsed;
+            var problems = new List<string>();
+            parsed = BufferRules.Parse(Plugin.BufferOverrides?.Value ?? "", problems);
+            foreach (var p in problems) Plugin.Log.LogWarning("[Buffers] BufferOverrides, NOT applied: " + p);
+            return parsed;
+        }
+
+        // Called with every layer's name once they exist (the first live budget read): a key that enlarged no layer is a
+        // typo or a layer this game does not create - the one case the substring match hid completely.
+        internal static void WarnUnmatchedOnce(IEnumerable<string> layerNames)
+        {
+            if (unmatchedWarned || parsed == null) return;
+            unmatchedWarned = true;
+            var missing = BufferRules.Unmatched(parsed, layerNames);
+            if (missing.Count == 0) return;
+            Plugin.Log.LogWarning($"[Buffers] BufferOverrides key(s) that name NO layer, so nothing was enlarged: {string.Join(", ", missing)}. " +
+                                  $"The layers are: {string.Join(", ", layerNames.Where(n => n != null))} (Shift+F8 prints them with their fill).");
+        }
+
+        // the index buffer, held under the 24-bit start-index ceiling (BufferRules.IndexCeiling; the encode does not mask it)
+        static void BumpIndexField(object o, int extra, string layer)
+        {
+            var f = o.GetType().GetField("baseIndexBufferSize", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+            if (f == null || f.FieldType != typeof(int)) { Plugin.Log.LogWarning("[Buffers] field 'baseIndexBufferSize' not found on ContentLayer."); return; }
+            int cur = (int)f.GetValue(o);
+            int next = BufferRules.ClampedIndexSize(cur, extra, out string note);
+            f.SetValue(o, next);
+            Plugin.Diag($"[Buffers] '{layer}' baseIndexBufferSize: {cur} -> {next} (+{next - cur}).");
+            if (note != null) Plugin.Log.LogWarning($"[Buffers] '{layer}' idx=+{extra}: {note}.");
         }
 
         static void BumpIntField(object o, string field, int extra, string layer, string tag)
@@ -352,8 +381,10 @@ namespace HumankindAssetFramework
             var f = o.GetType().GetField(field, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
             if (f == null || f.FieldType != typeof(int)) { Plugin.Log.LogWarning($"{tag} field '{field}' not found on ContentLayer."); return; }
             int cur = (int)f.GetValue(o);
-            f.SetValue(o, cur + extra);
-            Plugin.Diag($"{tag} '{layer}' {field}: {cur} -> {cur + extra} (+{extra}).");
+            int next = BufferRules.AddedSize(cur, extra, out string note);
+            if (note != null) { Plugin.Log.LogWarning($"{tag} '{layer}' {field}: {note}."); return; }
+            f.SetValue(o, next);
+            Plugin.Diag($"{tag} '{layer}' {field}: {cur} -> {next} (+{extra}).");
         }
 
         static void SetIntField(object o, string field, int val, string layer, string tag)
@@ -364,6 +395,40 @@ namespace HumankindAssetFramework
             f.SetValue(o, val);
             Plugin.Diag($"{tag} '{layer}' {field}: {cur} -> {val}{(field == "maxMeshTriangleCount" && val == 0 ? " (unlimited)" : "")}.");
         }
+    }
+
+    // THE DROP, SEEN WHERE IT HAPPENS (2026-10-31). ContentLayer.Register hands every mesh to the encoder; a mesh the
+    // vertex or index buffer cannot hold (or one the encoder rejects) comes back as FxOneMeshStruct.DefaultValue() -
+    // VertexCount 0 - and the layer stores THAT: the mesh never draws, the engine's own error goes to its Diagnostics,
+    // not to this log, and a capacity refusal need not move the binding cursor, so CheckPawnBufferCapacity
+    // kept reading "nearly full" while units vanished (the 2026-10-20 session). The adapter also observes exceptions:
+    // a mesh-table overflow throws at the array write before a postfix runs. State/diagnosis live in MeshDropWatch.
+    [HarmonyPatch]
+    internal static class Hk_MeshDropWatch
+    {
+        static MethodBase TargetMethod()
+        {
+            var layer = GameBinding.ContentLayer;
+            return layer?.GetMethod("Register", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+        }
+        static void Prefix(object __instance, object[] __args, out MeshDropWatch.Snapshot __state)
+        {
+            __state = null;
+            try
+            {
+                int chunk = GameBinding.FxComponentMeshContentManager?.GetField("IntBufferChunkSize", BindingFlags.Public | BindingFlags.Static)?.GetValue(null) is int n ? n : 0;
+                __state = MeshDropWatch.Before(__instance, __args[1], chunk);
+            }
+            catch (Exception ex) { Plugin.Log?.LogWarning("[Buffers] drop watch snapshot: " + ex.Message); }
+        }
+        static void Postfix(int __result, object __instance, string meshName, MeshDropWatch.Snapshot __state)
+            => MeshDropWatch.After(__result, __instance, meshName, __state);
+        static Exception Finalizer(Exception __exception, object __instance, string meshName, MeshDropWatch.Snapshot __state)
+        {
+            if (__exception != null) MeshDropWatch.After(-1, __instance, meshName, __state, __exception);
+            return __exception;   // observe the engine failure; never swallow or replace it
+        }
+
     }
 
     // EXPERIMENTAL (opt-in, [Terrain]) — the TILE render ceiling lead (2026-09-13, shakee's Discord report:

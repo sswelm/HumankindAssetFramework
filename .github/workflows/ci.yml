@@ -26,6 +26,9 @@ jobs:
         run: dotnet build HumankindAssetFramework.csproj -c Release --nologo
       - name: Run tests
         run: dotnet test Tests/HumankindAssetFramework.Tests.csproj -c Release --nologo
+      - name: GPU buffer hook drill (real Harmony adapters and configuration)
+        shell: bash
+        run: bash tools/buffer_hook_drill.sh
       # VEHICLE LAB PURE MATH — ast-extracts the two pure helpers from vehicle_rig.py and checks the oar-recovery
       # calibration (the exact eps regression that once split 64 oars into 104) plus the shared-clip cycle fitting.
       # Blender-free by construction, so the runner's stock Python is enough. Wired 2026-09-05: the file existed

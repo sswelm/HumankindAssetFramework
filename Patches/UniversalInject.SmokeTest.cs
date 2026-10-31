@@ -101,7 +101,7 @@ namespace HumankindAssetFramework
             if (f.DeadRoles.Count > 0) fails.Add($"{f.DeadRoles.Count} dead clip role(s): {string.Join(", ", f.DeadRoles)}");
             if (f.MissingAssets.Count > 0) fails.Add($"{f.MissingAssets.Count} missing asset(s): {string.Join(", ", f.MissingAssets)}");
             if (f.FailedSounds.Count > 0) fails.Add($"{f.FailedSounds.Count} sound file(s) failed to load: {string.Join(", ", f.FailedSounds)}");
-            if (f.BudgetAlarms.Count > 0) fails.Add($"GPU mesh budget near the wall: {string.Join(", ", f.BudgetAlarms)}");
+            if (f.BudgetAlarms.Count > 0) fails.Add($"GPU mesh budget near the wall or mesh registration rejected: {string.Join(", ", f.BudgetAlarms)}");
             if (f.DistrictIssues.Count > 0) fails.Add($"{f.DistrictIssues.Count} district issue(s): {string.Join(", ", f.DistrictIssues)}");
             if (f.MissingFiles.Count > 0) fails.Add($"{f.MissingFiles.Count} referenced file(s) missing on disk: {string.Join(", ", f.MissingFiles)}");
             if (f.MatchIssues.Count > 0) fails.Add($"{f.MatchIssues.Count} entry(ies) whose pawnDescription cannot match the loaded unit: {string.Join("; ", f.MatchIssues)}");
@@ -687,8 +687,8 @@ namespace HumankindAssetFramework
                     var b = layers[i];
                     if (b.Name == null || b.VertsMax <= 0) continue;
                     f.LayersChecked++;
-                    int vp = Pct(b.Verts, b.VertsMax), xp = Pct(b.Idx, b.IdxMax);
-                    if (vp >= 95 || xp >= 95) f.BudgetAlarms.Add($"L{i} '{b.Name}' verts {vp}% / idx {xp}%");
+                    string alarm = BudgetAlarm(b);
+                    if (alarm != null) f.BudgetAlarms.Add($"L{i} " + alarm);
                 }
 
                 if (tier == SmokeTier.Full)

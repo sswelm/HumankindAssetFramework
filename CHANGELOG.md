@@ -10,6 +10,27 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE GPU BUFFER WALL IS NAMED, NOT SILENT (2026-10-31).** On 2026-10-20 every custom model vanished at once: the pawn
+  layer's vertex buffer was full, the engine refused each further mesh, and the plugin's every-injection capacity check
+  kept reading "nearly full", because a refused mesh need not move the layer's fill cursor — the only thing the check
+  read. Three changes, found by the 2026-10-31 review. (1) `Hk_MeshDropWatch` sits on the layer's `Register`: a mesh
+  that comes back with no vertices was refused, and is named at once with its layer, the fill and the remedy
+  (`[Buffers][DROPPED] …`); the F8 budget readout shows `DROPPED N mesh(es)` per layer and the capacity check reports
+  FULL on a capacity drop. The finalizer also catches the mesh-table overflow that throws before a postfix can run;
+  encoder/data refusals are named without claiming a full buffer. Records follow the actual layer and mesh-buffer
+  generation, so same-named layers stay independent, rebuilt buffers clear old failures, and repaired entries resolve.
+  The smoke test alarms on refused geometry even below the fill threshold. (2) `[Buffers] BufferOverrides` keys name **one layer exactly** (a trailing `*` is a prefix): the
+  substring match had made `MeshWithSkeleton` enlarge the unrelated layer of that name beside the pawn layer
+  `MeshWithSkeletonParticleIndexBuffer` — 700k → 3.7M vertices of VRAM for nothing — and a misspelled key enlarged
+  nothing without a word. A field that does not parse is logged, and a key no layer carries is logged once the layers
+  exist. **Your step:** a key that was a substring must now be the full layer name. (3) `idx` is held under
+  16,777,216: the encoded mesh handle packs the start index into 24 bits, unmasked. `BufferRules` (pure, tested) holds
+  the parse, the match, the unmatched list and the ceiling. Invalid signs, negative triangle caps, overflowing additions
+  and nonpositive requested sizes are refused; a pre-enlarged base and `idx=0` cannot bypass the ceiling. The reader
+  gate still checks methods named `Postfix`. `tools/buffer_hook_drill.sh` runs the real Harmony adapters in an isolated
+  .NET process on engine-shaped records and runs in both the push gate and CI. *Code path read against the decompiled engine; the drop
+  line has not been provoked in a game.*
+
 - **A RESIZE NO LONGER SHRINKS AGAIN ON EVERY SAVE-LOAD (2026-10-31; written 2026-09-28).** The Resize/era record of what factor is
   already baked into a vanilla unit's vertices (`meshApplied`) is keyed by buffers that outlive a session: the Fx
   content layer is process-lived. The hand-written reset had kept it on purpose ("meshApplied deliberately KEPT").

@@ -204,7 +204,8 @@ namespace HumankindAssetFramework
         // only the active unit types. Bound to a hotkey — press in-game with custom units on the map.
         // Structured live budget read — ONE source shared by the F8 window, the Shift+F8 log dump, and the smoke
         // test's near-the-wall alarm (2026-08-17). Name == null marks a null layer slot.
-        internal struct LayerBudget { public string Name; public int Verts, VertsMax, Idx, IdxMax, Meshes, MeshesMax, MaxTris; }
+        internal struct LayerBudget { public string Name; public int Verts, VertsMax, Idx, IdxMax, Meshes, MeshesMax, MaxTris, Dropped, CapacityDrops; public string[] DroppedNames, CapacityNames; }
+
         internal static System.Collections.Generic.List<LayerBudget> ReadMeshBudget(out string error, out int pawnLayer)
         {
             var list = new System.Collections.Generic.List<LayerBudget>(); error = null; pawnLayer = -1;
@@ -221,6 +222,7 @@ namespace HumankindAssetFramework
                 {
                     var L = layers.GetValue(i);
                     if (L == null) { list.Add(new LayerBudget()); continue; }   // Name stays null = null slot
+                    var drops = MeshDropWatch.Pending(L);
                     list.Add(new LayerBudget
                     {
                         Name = GetMember(L, "name") as string ?? "?",
@@ -228,9 +230,12 @@ namespace HumankindAssetFramework
                         Idx = ToInt(GetMember(L, "currentIndexIndex")),       IdxMax = ToInt(GetMember(L, "baseIndexBufferSize")),
                         Meshes = ToInt(GetMember(L, "currentMeshAddedCount")), MeshesMax = ToInt(GetMember(L, "maxMeshCount")),
                         // the PER-MESH ceiling: quads beyond this are SILENTLY dropped at encode (holes in the model). 0 = unlimited.
-                        MaxTris = ToInt(GetMember(L, "maxMeshTriangleCount"))
+                        MaxTris = ToInt(GetMember(L, "maxMeshTriangleCount")),
+                        Dropped = drops.Length, CapacityDrops = drops.Count(d => d.Capacity), DroppedNames = drops.Select(d => d.Name).ToArray(),
+                        CapacityNames = drops.Where(d => d.Capacity).Select(d => d.Name).ToArray()
                     });
                 }
+                Hk_DistrictBufferHeadroom.WarnUnmatchedOnce(list.Select(b => b.Name));   // the layers exist now: a BufferOverrides key none of them carries is said once
             }
             catch (Exception ex) { error = "budget read failed: " + ex.Message; }
             return list;
@@ -248,7 +253,8 @@ namespace HumankindAssetFramework
                 var b = layers[i];
                 if (b.Name == null) { lines.Add($"  layer {i}: <null>"); continue; }
                 string tag = i == pawnLayer ? "  <-- your models" : "";
-                lines.Add($"  L{i} '{b.Name}': verts {b.Verts:n0}/{b.VertsMax:n0} ({Pct(b.Verts, b.VertsMax)}%) | idx {Pct(b.Idx, b.IdxMax)}% | meshes {b.Meshes}/{b.MeshesMax} | maxTris/mesh {(b.MaxTris == 0 ? "unlimited" : b.MaxTris.ToString("n0"))}{tag}");
+                string dropped = b.Dropped > 0 ? $" | DROPPED {b.Dropped} mesh(es): {string.Join(", ", b.DroppedNames.Take(5))}{(b.Dropped > 5 ? ", ..." : "")}" : "";
+                lines.Add($"  L{i} '{b.Name}': verts {b.Verts:n0}/{b.VertsMax:n0} ({Pct(b.Verts, b.VertsMax)}%) | idx {Pct(b.Idx, b.IdxMax)}% | meshes {b.Meshes}/{b.MeshesMax} | maxTris/mesh {(b.MaxTris == 0 ? "unlimited" : b.MaxTris.ToString("n0"))}{dropped}{tag}");
             }
             if (err != null) lines.Add(err);
             return lines;

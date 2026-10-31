@@ -306,6 +306,7 @@ push_step run_bg "editor scripts compile (Roslyn)" bash "$ROOT/tools/editor_comp
 #         Roslyn and Mono, tiny stand-ins for JsonUtility/EditorPrefs. Same Unity prerequisite as 5a, same loud FAIL.
 push_step run_bg "registry engine drill (SingleSourceRegistry on real files)" bash "$ROOT/tools/registry_engine_drill.sh"
 push_step run_bg "backup dedup drill (BackupDedup on real files: unchanged means the bytes)" bash "$ROOT/tools/backup_dedup_drill.sh"
+push_step run_bg "GPU buffer hook drill (real Harmony adapters and configuration)" bash "$ROOT/tools/buffer_hook_drill.sh"
 # THE PARITY DRILLS ARE NOT IN THE PUSH (2026-10-30; user: "for pushes to github it should no longer use any blender!!!").
 # They hold the C# ports to Blender's own output and run in the parity mode only (HAF_GATE=parity: tools/blender_parity.sh,
 # the Bake Tests row "Do the C# ports still match Blender?"), with Blender (HAF_ORACLE=live) - or, asked for explicitly,
