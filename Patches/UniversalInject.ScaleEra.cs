@@ -424,30 +424,14 @@ namespace HumankindAssetFramework
                         long key = ((long)layerIdx << 32) | (uint)mi;
                         uint sv = Convert.ToUInt32(svF.GetValue(mEntry));
                         if (sv >= verts.Length) break;
-                        var probeNow = (UnityEngine.Vector3)posF.GetValue(verts.GetValue((int)sv));
-
-                        // trust the record only if the buffer still holds the data we wrote (see MeshScale)
-                        float applied = 1f;
-                        if (meshApplied.TryGetValue(key, out var st) && (st.probe - probeNow).sqrMagnitude < 1e-8f)
-                            applied = st.factor;
-                        else if (meshApplied.ContainsKey(key))
-                            Plugin.Diag($"[Resize] mesh {mi} came back unscaled (Fx content reloaded) — re-scaling from 1");
-
-                        ratio = target / applied;                       // only the DIFFERENCE — re-scaling never compounds
+                        ratio = ScaleMeshVertices(key, verts, sv, vc, posF, target);
                         if (Math.Abs(ratio - 1f) > 1e-4f)
                         {
-                            for (uint v = sv; v < sv + vc && v < verts.Length; v++)
-                            {
-                                var vert = verts.GetValue((int)v);
-                                posF.SetValue(vert, (UnityEngine.Vector3)posF.GetValue(vert) * ratio);
-                                verts.SetValue(vert, (int)v);
-                            }
                             mbMinF.SetValue(mEntry, (UnityEngine.Vector3)mbMinF.GetValue(mEntry) * ratio);
                             mbMaxF.SetValue(mEntry, (UnityEngine.Vector3)mbMaxF.GetValue(mEntry) * ratio);
                             meshTable.SetValue(mEntry, mi);
                             meshesScaled++; vertsScaled += vc;
                         }
-                        meshApplied[key] = new MeshScale { factor = target, probe = probeNow * ratio };
                         break;
                     }
                 }
@@ -474,6 +458,43 @@ namespace HumankindAssetFramework
                 Plugin.Diag($"[Resize] desc {descId} -> x{target:0.###} (anchor era {anchorUsed} {EraName(anchorUsed)}): {meshesScaled} mesh(es), {vertsScaled} vert(s) re-scaled by {descRatio:0.###}x + per-pawn placement x{target:0.###}");
             }
             catch (Exception ex) { Plugin.Log.LogError("[Resize] mesh scale: " + ex); }
+        }
+
+        // Called only when a descriptor's target changes or it is first seen in a session, never on the per-frame
+        // placement path. Verify all positions: a first-vertex probe cannot detect a reload when that vertex is zero.
+        internal static float ScaleMeshVertices(long key, Array verts, uint start, int count, FieldInfo pos, float target)
+        {
+            ulong Stamp()
+            {
+                ulong hash = 14695981039346656037UL;
+                for (long i = start; i < (long)start + count && i < verts.Length; i++)
+                {
+                    var p = (UnityEngine.Vector3)pos.GetValue(verts.GetValue((int)i));
+                    unchecked
+                    {
+                        hash = (hash ^ (uint)p.x.GetHashCode()) * 1099511628211UL;
+                        hash = (hash ^ (uint)p.y.GetHashCode()) * 1099511628211UL;
+                        hash = (hash ^ (uint)p.z.GetHashCode()) * 1099511628211UL;
+                    }
+                }
+                return hash;
+            }
+            ulong current = Stamp();
+            float applied = meshApplied.TryGetValue(key, out var old) && old.start == start && old.count == count
+                && old.positions == current ? old.factor : 1f;
+            float ratio = target / applied;
+            if (Math.Abs(ratio - 1f) > 1e-4f)
+            {
+                for (long i = start; i < (long)start + count && i < verts.Length; i++)
+                {
+                    var vertex = verts.GetValue((int)i);
+                    pos.SetValue(vertex, (UnityEngine.Vector3)pos.GetValue(vertex) * ratio);
+                    verts.SetValue(vertex, (int)i);
+                }
+                current = Stamp();
+            }
+            meshApplied[key] = new MeshScale { factor = target, start = start, count = count, positions = current };
+            return ratio;
         }
 
     }
