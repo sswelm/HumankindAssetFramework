@@ -5,6 +5,29 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **A bake whose registry save fails is rolled back, not left half-done** (2026-10-31; written 2026-09-28, found
+  stranded by the 2026-10-31 review). The unit bake kept a rollback copy of the
+  previous assets, but threw it away as soon as the bake itself succeeded, before the registry entry was written.
+  When that write then failed (a transient lock on pack.json; one failed exactly like that on 2026-09-27), the NEW
+  assets stayed, while the registry kept the OLD entry naming the assets they had replaced. After the next mod
+  build, the unit was dead in-game. The district path had been fixed for this in PR #77, the unit path had not.
+  - **The save is now part of the bake.** In the Factory, the Animation Lab and the CLI, the registry write is a
+    step inside the bake's rollback. A refused save puts the previous model back, the form keeps your settings, and
+    the status says the bake was rolled back. A save the registry could not *settle* (its source may or may not hold
+    the entry) keeps the new assets instead, since rolling them back could strand an entry that names them, and the
+    status sends you to the source. `BakerRules.AfterCommit` holds the three verdicts, with unit tests.
+  - **One copy of the GUID write-back.** The three copies of the code that writes the baked GUIDs into the entry
+    are now one shared helper. One of them had already drifted once: the Factory had shipped a dead idle-override
+    GUID.
+  - The 09-28 version also retried a transiently locked swap in the district, formation and sound registries; every
+    registry's write is a checked, retried operation since (`CheckedReplace.Apply`), so that part is not landed.
+
+  Review fixes: an exception after a registry write is an unsettled commit, never proof that nothing was saved.
+  New assets and the old recovery snapshot are kept until the source is inspected. A failed snapshot stops the
+  bake before destructive work; failed restores report recovery failure and keep the backup. A failed first bake
+  restores the empty output set. `bash tools/bake_commit_unity_drill.sh` exercises the transaction itself against
+  real files, locks and cancellation in a temporary Unity project.
+
 - **Vehicle Lab: Turret is a reduce tier** (user: "could you add a turret reduce slider"). A **Turret reduce (%)** slider
   in *Vertices control*, enabled when a part is marked Turret: a weld tier like Gun (seams welded within each material, then
   collapse), run before the Turret bone is measured, so its pivot comes from the reduced mesh. Saved in the recipe;

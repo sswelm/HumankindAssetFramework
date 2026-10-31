@@ -464,6 +464,20 @@ public static class BackupRules
 /// <summary>Bake-pipeline decisions (UniversalBaker calls these; BakerRulesTests locks them).</summary>
 public static class BakerRules
 {
+    // THE REGISTRY WRITE INSIDE THE BAKE (review 2026-09-27, landed 2026-10-31): what UniversalBaker.Transact does with
+    // the outcome of the caller's registry save. Refused = nothing was written: the previous outputs go back. Unknown =
+    // the save could not be settled and the source MAY hold it (ModelRegistry.Save's Unresolved replace): rolling the
+    // outputs back could strand an entry that names them, so they stay, and the bake reports itself unsettled.
+    public enum CommitVerdict { Committed, RolledBack, Unsettled }
+    public static CommitVerdict AfterCommit(RegistryRules.SaveOutcome outcome) =>
+        outcome == RegistryRules.SaveOutcome.Saved ? CommitVerdict.Committed
+        : outcome == RegistryRules.SaveOutcome.Unknown ? CommitVerdict.Unsettled
+        : CommitVerdict.RolledBack;
+    public static string CommitError(CommitVerdict verdict) =>
+        verdict == CommitVerdict.RolledBack ? "the REGISTRY SAVE FAILED (see Console), so the bake was rolled back and the previous model is untouched"
+        : verdict == CommitVerdict.Unsettled ? "the REGISTRY SAVE COULD NOT BE SETTLED (see Console): the new assets are kept because the entry may already name them - inspect the registry source, reload, then re-bake"
+        : null;
+
     /// <summary>A named rig fallback can be reused only with reuse requested and the same settings, source and tool.
     /// A forced rebuild or a changed source must ask the C# port again: its earlier unsupported shape may be gone.</summary>
     public static bool CanReuseRigFallback(bool reuse, bool fbxExists, bool keyMatches, bool toolChanged, bool sourceChanged)

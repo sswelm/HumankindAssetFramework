@@ -61,24 +61,11 @@ namespace HAF
                     if (string.IsNullOrWhiteSpace(cur.modelFile)) continue;
                     var cfg = ModelFactoryWindow.ConfigFor(cur);   // the one shared config path — can't drift from the GUI
                     if (fresh) cfg.reuseExtracted = false;         // force a full re-slim (default honours the entry's keep-texture setting)
-                    var r = cfg.animated ? UniversalBaker.BuildAnimated(cfg) : UniversalBaker.Build(cfg);
-                    if (!r.ok) { failed++; Debug.LogError("[HAF-CLI] bake FAILED " + cur.resourceName + ": " + r.error); continue; }
-
-                    // Copy the baked GUIDs back exactly as ModelFactoryWindow.DoBake does.
-                    cur.skel = ModelRegistry.ParseGuid(r.skeletonGuid);
-                    cur.atlas = ModelRegistry.ParseGuid(r.atlasGuid);
-                    cur.clip = cfg.animated ? ModelRegistry.ParseGuid(r.clipGuid) : new int[4];
-                    bool sd = cfg.animated && cfg.animStateDriven;
-                    cur.clipMove = sd ? ModelRegistry.ParseGuid(r.clipMoveGuid) : new int[4];
-                    cur.clipAfter = sd && !string.IsNullOrEmpty(r.clipAfterGuid) ? ModelRegistry.ParseGuid(r.clipAfterGuid) : new int[4];
-                    cur.clipAttack = sd && !string.IsNullOrEmpty(r.clipAttackGuid) ? ModelRegistry.ParseGuid(r.clipAttackGuid) : new int[4];
-                    cur.clipCombat = sd && !string.IsNullOrEmpty(r.clipCombatGuid) ? ModelRegistry.ParseGuid(r.clipCombatGuid) : new int[4];
-                    cur.clipPreMove = sd && !string.IsNullOrEmpty(r.clipPreMoveGuid) ? ModelRegistry.ParseGuid(r.clipPreMoveGuid) : new int[4];
-                    cur.clipIdle = sd && !string.IsNullOrEmpty(r.clipIdleGuid) ? ModelRegistry.ParseGuid(r.clipIdleGuid) : new int[4];
-                    cur.clipIdleAlt = sd && !string.IsNullOrEmpty(r.clipIdleAltGuid) ? ModelRegistry.ParseGuid(r.clipIdleAltGuid) : new int[4];
-                    cur.clipIdleAlt2 = sd && !string.IsNullOrEmpty(r.clipIdleAlt2Guid) ? ModelRegistry.ParseGuid(r.clipIdleAlt2Guid) : new int[4];
-
-                    if (!ModelRegistry.Upsert(cur)) { failed++; Debug.LogError("[HAF-CLI] registry save FAILED " + cur.resourceName); continue; }
+                    // The baked GUIDs go back into the entry exactly as the Factory's Bake does (one shared helper), and
+                    // the registry write rides inside the bake's rollback: a failed save restores the previous assets.
+                    Func<BakeResult, RegistryRules.SaveOutcome> commit = res => { ModelFactoryWindow.ApplyBakeGuids(cur, cfg, res); return ModelRegistry.UpsertOutcome(cur); };
+                    var r = cfg.animated ? UniversalBaker.BuildAnimated(cfg, commit) : UniversalBaker.Build(cfg, commit);
+                    if (!r.ok) { failed++; Debug.LogError("[HAF-CLI] " + (r.commitFailed ? "registry save FAILED " : "bake FAILED ") + cur.resourceName + ": " + r.error); continue; }
                     ok++;
                     Debug.Log("[HAF-CLI] rebuilt " + cur.resourceName + (cfg.animated ? " (animated)" : " (static)"));
                 }

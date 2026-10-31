@@ -69,22 +69,75 @@ public struct BakeResult
 {
     public bool ok; public string error; public string skeletonGuid, atlasGuid, clipGuid; public Vector3 bbox;
     public string rigRoute, rigRouteNote;   // ANIMATED only (step (h)): "blender", "csharp", or "csharp-fallback" with the port's reason in the note
+    public bool commitFailed;   // the bake itself succeeded, but the caller's commit (the registry write) did not — the outputs were rolled back...
+    public bool commitUnsettled;   // ...unless the save could not be settled (the source MAY hold it): then the new outputs are kept and this says so
+    public bool rollbackFailed;
+    public string rollbackBackup;  // recovery copy after an unsettled commit or failed restore
     public string clipMoveGuid, clipAfterGuid, clipAttackGuid, clipCombatGuid, clipPreMoveGuid, clipIdleGuid, clipIdleAltGuid, clipIdleAlt2Guid;   // STATE-DRIVEN only: the per-role ClipCollection GUIDs ("" when not baked)
 }
 
 public static class UniversalBaker
 {
-    public static BakeResult Build(BakeConfig cfg)
+    public static BakeResult Build(BakeConfig cfg) => Build(cfg, null);
+
+    // THE REGISTRY WRITE IS PART OF THE BAKE (review 2026-09-27; the district path got the same fix in PR #77). The
+    // backup used to be discarded the moment the bake succeeded — BEFORE the caller's Upsert. A save that then failed
+    // (a transient lock on pack.json: File.Replace's "unable to remove the replaced file", seen 2026-09-27) kept the
+    // NEW assets while the registry kept the OLD entry, whose GUIDs name the assets the bake had just replaced: the
+    // unit was dead in-game after the next build. `commit` runs INSIDE the rollback — a Refused save restores
+    // the previous outputs and reports commitFailed; a throw or Unknown outcome (a replace that could not be
+    // settled, so the source MAY hold this save) keeps the new outputs, because rolling them back could strand an entry
+    // that names them, retains the old recovery copy and reports commitUnsettled. Null = no commit (props, projectiles,
+    // districts, the bake tests).
+    public static BakeResult Build(BakeConfig cfg, Func<BakeResult, RegistryRules.SaveOutcome> commit)
     {
         LastPrepSourceTris = -1;   // per-BUILD, not per-prep: a no-reduce bake must not inherit the previous bake's source count
-        // E5: snapshot the existing baked outputs BEFORE the (delete-first) bake, and restore them if it fails, so a
-        // partway-failed re-bake can't leave the registry pointing at now-deleted assets. Success path is unchanged.
+        return Transact(cfg, commit, BuildInner);
+    }
+
+    // E5: snapshot the existing baked outputs BEFORE the (delete-first) bake, and restore them if it — or the commit
+    // after it — fails, so a partway-failed re-bake can't leave the registry pointing at now-deleted assets.
+    static BakeResult Transact(BakeConfig cfg, Func<BakeResult, RegistryRules.SaveOutcome> commit, Func<BakeConfig, BakeResult> inner)
+    {
+        if (!BackupRules.IsPlainName(cfg.resourceName))
+            return new BakeResult { error = "resourceName must be a plain name; refusing to snapshot or restore paths by it" };
         var backup = BackupOutputs(cfg.resourceName);
+        if (backup.error != null)
+            return new BakeResult { error = "the bake was not started: its rollback snapshot failed; the previous outputs are untouched. " + backup.error };
         BakeResult r;
-        try { r = BuildInner(cfg); }
+        try { r = inner(cfg); }
         catch (OperationCanceledException) { RestoreOutputs(backup); throw; }   // a bake-test cancel: roll back exactly like a failure, but the RUNNER must see the cancel, not a failed bake (review of 8cff051)
         catch (Exception e) { Debug.LogError("[Factory] " + e); r = new BakeResult { ok = false, error = e.Message }; }
-        if (r.ok) DiscardBackup(backup); else RestoreOutputs(backup);
+        if (r.ok && commit != null)
+        {
+            RegistryRules.SaveOutcome outcome;
+            try { outcome = commit(r); }
+            catch (OperationCanceledException)
+            {
+                Debug.LogWarning("[Factory] commit cancelled with an unknown write outcome: keeping the new outputs and recovery backup at '" + backup.dir + "'. Inspect the registry before restoring.");
+                throw;
+            }
+            catch (Exception e) { Debug.LogError("[Factory] " + cfg.resourceName + ": the registry write threw (it may already have written): " + e); outcome = RegistryRules.SaveOutcome.Unknown; }
+            var verdict = BakerRules.AfterCommit(outcome);
+            if (verdict != BakerRules.CommitVerdict.Committed)
+            {
+                r.ok = false; r.commitFailed = true; r.commitUnsettled = verdict == BakerRules.CommitVerdict.Unsettled;
+                r.error = BakerRules.CommitError(verdict);
+            }
+            if (r.commitUnsettled)
+            {
+                r.rollbackBackup = backup.files.Count > 0 ? backup.dir : null;
+                if (r.rollbackBackup != null) r.error += ". The previous assets are preserved at '" + backup.dir + "' for recovery after inspecting the registry";
+                return r;
+            }
+        }
+        if (r.ok) DiscardBackup(backup);
+        else if (!RestoreOutputs(backup))
+        {
+            r.rollbackFailed = true; r.rollbackBackup = backup.dir;
+            r.error = "the bake/save failed, and restoring the previous outputs also FAILED. The output folder may contain a partial bake. " +
+                "Recover the assets and .meta files from '" + backup.dir + "' before baking again (see Console)";
+        }
         return r;
     }
 
@@ -93,16 +146,8 @@ public static class UniversalBaker
     // bone strip, export albedo), Unity imports the FBX, then we bake an Amplitude Skeleton (from the FBX) and a
     // ClipCollection (from the folder) via the same reflected editor methods the SDK inspector uses. Returns skel + clip
     // + atlas guids for the registry ("clip" makes the runtime drive the pawn's pose onto our animation).
-    public static BakeResult BuildAnimated(BakeConfig cfg)
-    {
-        var backup = BackupOutputs(cfg.resourceName);   // E5: same rollback protection on the animated path
-        BakeResult r;
-        try { r = BuildAnimatedInner(cfg); }
-        catch (OperationCanceledException) { RestoreOutputs(backup); throw; }   // as in Build: a cancel rolls back and propagates
-        catch (Exception e) { Debug.LogError("[Factory] " + e); r = new BakeResult { ok = false, error = e.Message }; }
-        if (r.ok) DiscardBackup(backup); else RestoreOutputs(backup);
-        return r;
-    }
+    public static BakeResult BuildAnimated(BakeConfig cfg) => BuildAnimated(cfg, null);
+    public static BakeResult BuildAnimated(BakeConfig cfg, Func<BakeResult, RegistryRules.SaveOutcome> commit) => Transact(cfg, commit, BuildAnimatedInner);   // E5 + the commit, as in Build
 
     // ---- E5: re-bake rollback protection --------------------------------------------------------------------------
     // Both bake paths DELETE the model's baked outputs before the fallible steps (Blender, glbconv, the Amplitude
@@ -202,6 +247,7 @@ public static class UniversalBaker
     internal class OutputBackup
     {
         public string name = ""; public string dir = "";
+        public string error;
         public readonly List<string> all = new List<string>();
         public readonly List<string> files = new List<string>();
     }
@@ -229,6 +275,7 @@ public static class UniversalBaker
     static OutputBackup BackupBasenames(string name, List<string> basenames)
     {
         var b = new OutputBackup { name = name ?? "" };
+        if (!BackupRules.IsPlainName(name)) { b.error = "not a plain resource name"; return b; }
         if (string.IsNullOrEmpty(name) || basenames == null || basenames.Count == 0) return b;
         b.all.AddRange(basenames);
         b.dir = Path.Combine(Path.GetTempPath(), "haf_rebake_backup",
@@ -247,7 +294,7 @@ public static class UniversalBaker
                 }
         }
         catch (OperationCanceledException) { throw; }   // a bake-test cancel passes through every wrapper (review of 610711c)
-        catch (Exception e) { Debug.LogWarning("[Factory] re-bake backup failed (proceeding WITHOUT rollback protection): " + e.Message); b.files.Clear(); }
+        catch (Exception e) { b.error = e.Message; Debug.LogWarning("[Factory] re-bake backup failed: " + e.Message); }
         return b;
     }
 
@@ -257,12 +304,13 @@ public static class UniversalBaker
     }
 
     // Restore the backed-up outputs (called only on a FAILED bake): wipe any partial new outputs, copy the backups back
-    // verbatim (asset + meta -> original GUIDs), and reimport. A no-op when nothing was backed up (a first bake).
+    // verbatim (asset + meta -> original GUIDs), and reimport. A first bake restores the originally empty output set.
     // The backup is discarded ONLY after a successful restore — a failed restore is the one moment the backup is
     // the sole surviving copy (the old outputs are already deleted here), so it is KEPT and its path logged.
-    internal static void RestoreOutputs(OutputBackup b)
+    internal static bool RestoreOutputs(OutputBackup b)
     {
-        if (b == null || b.files.Count == 0) { DiscardBackup(b); return; }
+        if (b == null) return true;
+        if (b.error != null) return false;   // never wipe outputs when the snapshot is incomplete
         try
         {
             string res = ResourcesFull();
@@ -270,7 +318,7 @@ public static class UniversalBaker
             // path clears its own four partial assets and does not reach into the unit path's (or vice versa).
             foreach (var bn in b.all)
                 foreach (var ext in new[] { "", ".meta" })
-                { string p = Path.Combine(res, bn + ext); try { if (File.Exists(p)) File.Delete(p); } catch { } }
+                { string p = Path.Combine(res, bn + ext); if (File.Exists(p)) File.Delete(p); }
             foreach (var f in b.files) File.Copy(Path.Combine(b.dir, f), Path.Combine(res, f), true);
             AssetDatabase.Refresh();
             int n = b.files.Count(f => !f.EndsWith(".meta"));
@@ -280,9 +328,10 @@ public static class UniversalBaker
         catch (Exception e)
         {
             Debug.LogError($"[Factory] re-bake RESTORE failed mid-copy — the backup is KEPT at '{b.dir}'. Close whatever locks the files, then copy its contents into 'Assets/Resources' (assets + .meta, overwriting) and let Unity refresh; or recover from git: " + e);
-            return;   // keep the backup: it is now the only copy of the previous bake
+            return false;   // keep the backup: it is now the only copy of the previous bake
         }
         DiscardBackup(b);
+        return true;
     }
 
     // DEPLOY CONVERSION AS PART OF THE RECIPE (2026-07-19, user-designed): run Tools/deploy_convert.py on the RAW
