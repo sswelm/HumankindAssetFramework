@@ -31,6 +31,24 @@ public class BackupRulesTests
         Assert.Equal("_", BackupRules.SafeSegment("\\"));
     }
 
+    // THE DELETE-GUARD PRUNE (2026-10-31): it never ran once - the worker read the retention pref off the main thread and
+    // the Task faulted in silence. The rule is pure now and the worker gets the days from the main thread.
+    [Fact]
+    public void A_guard_expires_by_age_and_nothing_else_ever_does()
+    {
+        var now = new DateTime(2026, 10, 31, 12, 0, 0);
+        Assert.True(BackupRules.GuardIsExpired("_deleted_2026-10-01_120000_Tank", now.AddDays(-30), 14, now));
+        Assert.True(BackupRules.GuardIsExpired("_deleted_2026-10-17_120000_Tank_outputs", now.AddDays(-14), 14, now));   // exactly N days: expired
+        Assert.False(BackupRules.GuardIsExpired("_deleted_2026-10-20_120000_Tank", now.AddDays(-13.9), 14, now));
+        Assert.False(BackupRules.GuardIsExpired("_deleted_2026-10-31_110000_Tank", now.AddHours(-1), 14, now));
+        // 0 = keep forever, the pre-2026-08-23 promise
+        Assert.False(BackupRules.GuardIsExpired("_deleted_2025-01-01_000000_Tank", now.AddDays(-600), 0, now));
+        Assert.False(BackupRules.GuardIsExpired("_deleted_2025-01-01_000000_Tank", now.AddDays(-600), -3, now));
+        // never a manual backup, an auto version, a pre-restore or a Factory-remove snapshot, whatever their age
+        foreach (var other in new[] { "2026-07-22_101010", "_auto_2026-07-22_101010", "_prerestore_2026-07-22_101010", "_removed_2026-07-22_101010_Tank", "", null })
+            Assert.False(BackupRules.GuardIsExpired(other, now.AddDays(-600), 14, now), other ?? "<null>");
+    }
+
     [Fact]
     public void The_snapshot_folder_name_carries_the_prefix_and_stamp_and_no_separators()
     {

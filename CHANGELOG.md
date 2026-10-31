@@ -10,6 +10,17 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE DELETE-GUARD PRUNE RUNS AT LAST, AND A WORKER THREAD IS GUARDED (2026-10-31).** The retention added on
+  2026-08-23 never pruned a single guard: 720 `_deleted_` folders, 321 past the 14 days, not one "pruned" line in any
+  Editor.log (the 2026-10-31 review). The daily worker read `KeepGuardDays` — EditorPrefs behind a property — from
+  inside `Task.Run`; EditorPrefs throws off the main thread, a faulted Task says nothing, and the 10-30 log shows the
+  snapshot, the rotation, then silence exactly there. Now every pref the worker needs is read on the main thread
+  before it starts, the worker's whole job is one method that logs any throw, the rule is pure
+  (`BackupRules.GuardIsExpired`: a `_deleted_` folder N or more days old, 0 keeps forever, nothing else ever) and
+  tested, and the prune logs its count every run. `tools/check-worker-thread.py` (the push and CI) refuses a
+  main-thread Unity API inside a worker body, directly or one hop away through a member of the same file; run on
+  the tree before the fix it named exactly this line and nothing else. Not executed: the prune itself — the next
+  daily auto-version after the package update is the acceptance (its "pruned N of M" line, and the folder count).
 - **THE PUSH REMEMBERS THE LAST PARITY PASS (2026-10-31).** Since PR #222 the push runs no Blender-parity drill, and
   for a day nothing connected the push to the parity mode: a Blender script or its C# port could change and push green
   with the claim "the C# ports still match Blender" untested, in silence (the 2026-10-31 review, P1). Now a parity-mode

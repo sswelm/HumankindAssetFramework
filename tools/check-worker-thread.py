@@ -1,0 +1,205 @@
+"""check-worker-thread.py - no main-thread Unity API inside a worker body, directly or one call away (2026-10-31).
+
+WHY THIS EXISTS. The daily backup's delete-guard prune never ran once (720 guards, 321 past the 14-day retention,
+not one "pruned" line in any Editor.log): its worker read `KeepGuardDays` - a property wrapping EditorPrefs.GetInt -
+from inside Task.Run. Unity's EditorPrefs throws off the main thread, a faulted Task says nothing, and the log showed
+the snapshot and the rotation and then silence, exactly where the pref was read. A grep for EditorPrefs inside the
+lambda would have found nothing: the read was one hop away, behind a property on the same class.
+
+THE SHAPES CAUGHT, in editor/*.cs: inside the body of a lambda handed to Task.Run / Task.Factory.StartNew /
+ThreadPool.QueueUserWorkItem / new Thread, (1) a main-thread Unity API used directly (EditorPrefs., AssetDatabase.,
+EditorUtility., EditorApplication., Selection., Application.dataPath, ...), and (2) the name of a member declared in
+editor/ whose own body uses one directly (one hop: `KeepGuardDays => EditorPrefs.GetInt(...)`). Comments and string
+contents are blanked first, so a log line that mentions EditorPrefs is not a use.
+
+WHAT IT CANNOT SEE, said: a delegate passed by name (`Task.Run(check)`) - those are listed, not judged; two hops;
+a Unity API reached through another class's member (the hop is per file). Debug.Log is thread-safe and not listed.
+
+    python tools/check-worker-thread.py            the gate's step: 0 clean, 1 a use found, 2 the self-test failed
+"""
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+MAIN_THREAD = ["EditorPrefs", "PlayerPrefs", "AssetDatabase", "EditorUtility", "EditorApplication", "EditorGUIUtility",
+               "EditorGUI", "EditorGUILayout", "GUI", "GUILayout", "Selection", "Undo", "PrefabUtility",
+               "EditorSceneManager", "AssetImporter", "EditorWindow", "SceneView", "Handles", "Gizmos"]
+MT_RE = re.compile(r"\b(" + "|".join(MAIN_THREAD) + r")\s*\.|\bApplication\s*\.\s*(dataPath|persistentDataPath|streamingAssetsPath|temporaryCachePath)\b")
+STARTERS = re.compile(r"\b(Task\s*\.\s*Run|Task\s*\.\s*Factory\s*\.\s*StartNew|ThreadPool\s*\.\s*QueueUserWorkItem|new\s+Thread)\s*\(")
+DECL = re.compile(r"^[ \t]*(?:(?:public|internal|private|protected|static|readonly|override|virtual|abstract|async|unsafe|new)\s+)+"
+                  r"[\w<>\[\],.?]+\s+(\w+)\s*(=>|\(|\{)", re.M)
+
+
+def blank(text):
+    """Comments and string contents replaced by spaces (newlines kept): structure stays, words inside them vanish."""
+    out = []
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        two = text[i:i + 2]
+        if two == "//":
+            j = text.find("\n", i)
+            j = n if j < 0 else j
+            out.append(" " * (j - i)); i = j
+        elif two == "/*":
+            j = text.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            out.append(re.sub(r"[^\n]", " ", text[i:j])); i = j
+        elif c == '"' or (c in "@$" and text[i + 1:i + 2] == '"') or (text[i:i + 2] in ("@$", "$@") and text[i + 2:i + 3] == '"'):
+            k = i
+            verbatim = False
+            while text[k] in "@$":
+                verbatim = verbatim or text[k] == "@"; k += 1
+            j = k + 1
+            while j < n:
+                if verbatim and text[j] == '"' and text[j + 1:j + 2] == '"':
+                    j += 2; continue
+                if text[j] == '"':
+                    break
+                if not verbatim and text[j] == "\\":
+                    j += 2; continue
+                if not verbatim and text[j] == "\n":
+                    break
+                j += 1
+            j = min(n, j + 1)
+            out.append(text[i:k] + '"' + re.sub(r"[^\n]", " ", text[k + 1:j - 1]) + '"'); i = j
+        elif c == "'":
+            j = i + 1
+            while j < n and text[j] != "'" and text[j] != "\n":
+                j += 2 if text[j] == "\\" else 1
+            j = min(n, j + 1)
+            out.append("'" + " " * (j - i - 2) + "'" if j - i >= 2 else text[i:j]); i = j
+        else:
+            out.append(c); i += 1
+    return "".join(out)
+
+
+def matching(text, start, open_ch, close_ch):
+    """Index just past the bracket that closes the one at `start`, or len(text)."""
+    depth = 0
+    for j in range(start, len(text)):
+        if text[j] == open_ch:
+            depth += 1
+        elif text[j] == close_ch:
+            depth -= 1
+            if depth == 0:
+                return j + 1
+    return len(text)
+
+
+def member_bodies(text):
+    """(name, body) of every declared member with an expression or block body; the first-hop table is built from them."""
+    for m in DECL.finditer(text):
+        name, tail = m.group(1), m.group(2)
+        if tail == "=>":
+            end = text.find(";", m.end())
+            yield name, text[m.end():end if end >= 0 else len(text)]
+        else:
+            brace = text.find("{", m.end() - 1)
+            semi = text.find(";", m.end() - 1)
+            if brace < 0 or (0 <= semi < brace and tail == "("):
+                continue
+            yield name, text[brace:matching(text, brace, "{", "}")]
+
+
+def worker_bodies(text):
+    """(start offset, body text or None for a delegate by name, that name) for every worker starter."""
+    for m in STARTERS.finditer(text):
+        arg_start = m.end()
+        arg_end = matching(text, m.end() - 1, "(", ")") - 1
+        arg = text[arg_start:arg_end]
+        lam = re.match(r"\s*(?:async\s+)?(?:\(\s*[\w\s,]*\)|\w+)\s*=>\s*", arg)
+        if not lam:
+            yield m.start(), None, arg.strip()
+            continue
+        body = arg[lam.end():]
+        yield m.start(), body, None
+
+
+def line_of(text, off):
+    return text.count("\n", 0, off) + 1
+
+
+def check_text(text, path="<text>"):
+    """The findings for one file's text: (line, message) rows, plus the delegates passed by name."""
+    t = blank(text)
+    wrappers = {}
+    for name, body in member_bodies(t):
+        hit = MT_RE.search(body)
+        if hit and name not in wrappers:
+            wrappers[name] = (hit.group(0).strip(), line_of(t, t.find(body)))
+    findings, unseen = [], []
+    for off, body, by_name in worker_bodies(t):
+        line = line_of(t, off)
+        if body is None:
+            unseen.append((line, by_name)); continue
+        for hit in MT_RE.finditer(body):
+            findings.append((line_of(t, off + len(t[off:].split(body, 1)[0]) + hit.start()) if body in t[off:] else line,
+                             f"{path}:{line}: '{hit.group(0).strip()}' is a main-thread Unity API, used inside a worker body"))
+        for name, (api, decl_line) in wrappers.items():
+            for use in re.finditer(r"\b" + re.escape(name) + r"\b", body):
+                findings.append((line, f"{path}:{line}: '{name}' uses {api} ({path}:{decl_line}), and is read inside a worker body"))
+                break
+    return findings, unseen
+
+
+PLANT = '''
+static class Planted
+{
+    static int Days => EditorPrefs.GetInt("HAF.Days", 14);   // the wrapper that hid the real one
+    static string Note() { return "EditorPrefs. in a string is not a use"; }
+    static void Run()
+    {
+        System.Threading.Tasks.Task.Run(() =>
+        {
+            int keep = Days;                 // one hop: must be found
+            AssetDatabase.Refresh();         // direct: must be found
+            Debug.Log("EditorPrefs.");       // a string: must not
+        });
+        System.Threading.Tasks.Task.Run(() => Note());   // a hop to a string-only member: must not
+        System.Threading.Tasks.Task.Run(check);           // by name: listed, not judged
+    }
+}
+'''
+
+
+def self_test():
+    findings, unseen = check_text(PLANT, "plant.cs")
+    msgs = "\n".join(m for _, m in findings)
+    ok = ("'Days' uses EditorPrefs." in msgs and "'AssetDatabase.' is a main-thread" in msgs
+          and "Note" not in msgs and msgs.count("EditorPrefs") == 1 and unseen == [(15, "check")])
+    if not ok:
+        print("FAIL - worker-thread self-test: the planted shapes were not reported as expected:\n" + msgs + f"\n  unseen: {unseen}")
+        return False
+    return True
+
+
+def main():
+    if not self_test():
+        return 2
+    files = subprocess.run(["git", "ls-files", "--", "editor/*.cs"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.split()
+    all_findings, all_unseen, bodies = [], [], 0
+    for rel in files:
+        text = (ROOT / rel).read_text(encoding="utf-8", errors="replace")
+        if not STARTERS.search(text):
+            continue
+        f, u = check_text(text, rel)
+        bodies += sum(1 for _, b, _ in worker_bodies(blank(text)) if b is not None)
+        all_findings += f
+        all_unseen += [(rel, l, n) for l, n in u]
+    for _, m in sorted(set(all_findings)):
+        print("FAIL - " + m)
+    for rel, l, n in all_unseen:
+        print(f"  cannot see: {rel}:{l} hands the worker a delegate by name ('{n}')")
+    if all_findings:
+        print(f"worker thread: FAIL - {len(set(all_findings))} main-thread use(s) inside worker bodies ({bodies} bodies in {len(files)} files)")
+        return 1
+    print(f"worker thread: OK - no main-thread Unity API inside {bodies} worker bodies, directly or one hop away ({len(files)} editor files; {len(all_unseen)} delegate(s) by name listed above, not seen)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

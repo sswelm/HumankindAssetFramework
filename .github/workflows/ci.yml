@@ -82,6 +82,12 @@ jobs:
         shell: bash
         run: bash tools/check-member-shape.sh
 
+      # One thread over: a main-thread Unity API (EditorPrefs, AssetDatabase, ...) inside a Task.Run body throws off
+      # the main thread and the faulted Task says nothing - the backup's delete-guard prune never ran once because of
+      # a property wrapping EditorPrefs read from its worker (2026-10-31). Direct uses and one hop; source-only, Python.
+      - name: Worker thread (no main-thread Unity API inside a worker body)
+        run: python tools/check-worker-thread.py
+
       # The gate that tests the two above: plants a null-guarded reader wrapper under an unknown name plus the shapes
       # they exist to catch, and FAILS if either gate passes. Their helper lists are hand-maintained; a 3-line body
       # window let exactly that wrapper through on 2026-09-14. Seconds, source-only.
