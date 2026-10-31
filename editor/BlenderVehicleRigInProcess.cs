@@ -164,7 +164,7 @@ public static class VehicleLabSourceGuard
         }
         catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
         {
-            return "Refused — cannot verify that the " + label + " is separate from the source models: " + e.Message;
+            return "Refused — the output could not be written safely (" + label + "): cannot verify that it is separate from the source models: " + e.Message;
         }
         return null;
     }
