@@ -951,6 +951,9 @@ namespace HumankindAssetFramework
                 var b = lb[pawnLayer];
                 if (b.Name == null || b.VertsMax <= 0) return;
                 int band = BudgetBand(b.Verts, b.VertsMax, b.Idx, b.IdxMax, b.Meshes, b.MeshesMax);
+                // a mesh the layer REFUSED (Hk_MeshDropWatch) does not move the cursors, so the band alone could read
+                // "nearly full" while units vanished: a drop is the wall, whatever the cursors say
+                if (b.Dropped > 0) band = 3;
                 if (band <= pawnBudgetBand) { pawnBudgetBand = band; return; }
                 pawnBudgetBand = band;
                 if (band == 0) return;
@@ -959,7 +962,8 @@ namespace HumankindAssetFramework
                 string state = $"verts {vp}% ({b.Verts:n0}/{b.VertsMax:n0}) | idx {xp}% | meshes {b.Meshes}/{b.MeshesMax}";
                 string remedy = $" Raise Buffers.BufferOverrides (e.g. \"{b.Name}:verts=+500000,idx=+1000000,meshes=+500\").";
                 if (band == 3)
-                    Plugin.Log.LogError($"[Uni][BUDGET] pawn layer '{b.Name}' is FULL ({state}; checked at load of '{modelName}') — anything that did not fit has been dropped SILENTLY, and nothing further will fit." + remedy);
+                    Plugin.Log.LogError($"[Uni][BUDGET] pawn layer '{b.Name}' is FULL ({state}; checked at load of '{modelName}') — " +
+                                        (b.Dropped > 0 ? $"{b.Dropped} mesh(es) were REFUSED and do not draw: {string.Join(", ", DroppedIn(b.Name))}." : "anything that did not fit has been dropped SILENTLY, and nothing further will fit.") + remedy);
                 else if (band == 2)
                     Plugin.Log.LogError($"[Uni][BUDGET] pawn layer '{b.Name}' nearly full: {state} (checked at load of '{modelName}') — a full buffer drops geometry silently." + remedy);
                 else

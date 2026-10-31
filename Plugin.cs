@@ -139,7 +139,7 @@ namespace HumankindAssetFramework
         internal static ConfigEntry<bool> DistrictFootprintMeshHideDecal;  // default true = when the mesh footprint is on, DROP the template's baked footprint DECAL item(s) (the inherited donor outline that shows beneath the mesh). Needs DistrictFootprintMesh=true
         internal static ConfigEntry<string> DistrictFootprintMeshFlatHeight; // flatten HEIGHT (size.y multiplier) on the strategic map: ~0.02 = paper-flat (edges can drown in rising terrain), up toward 1 = full 3D. Tune in the F8 window until it reads flat yet clears the ground
         // --- EXPERIMENTAL: generic GPU mesh-buffer overrides (units, districts, any content layer) ---
-        internal static ConfigEntry<string> BufferOverrides;     // per-layer overrides "<nameSubstr>:verts=+N,idx=+N,meshes=+N,maxtris=N;..." applied at layer creation
+        internal static ConfigEntry<string> BufferOverrides;     // per-layer overrides "<layerName>:verts=+N,idx=+N,meshes=+N,maxtris=N;..." applied at layer creation (BufferRules)
         internal static ConfigEntry<int>    SkeletonBoneBudget;  // shared per-frame animated-bone pool size (vanilla 65,535; high-bone customs overflow it -> spike plague)
         internal static ConfigEntry<string> SilenceAudioEvents;  // comma-separated Wwise event-name SUBSTRINGS to drop at AudioManager.PostEvent (test/POC for era-audio) — "" = silence nothing
         // --- EXPERIMENTAL: pawn prop/attachment axis (custom weapons & gear; see the sling experiment) ---
@@ -180,6 +180,7 @@ namespace HumankindAssetFramework
                 typeof(Hk_SilenceEvents),     // silence-by-event-name: drop any Wwise post whose name matches Audio/SilenceAudioEvents (POC for era-audio; no-op when empty)
                 typeof(Hk_DistrictRepoint),   // EXPERIMENTAL: replace one district's on-map visual (docs/District-Visuals.md)
                 typeof(Hk_DistrictBufferHeadroom), // EXPERIMENTAL: enlarge the shared 'Visual' mesh buffer so custom district meshes fit (opt-in)
+                typeof(Hk_MeshDropWatch),          // a mesh a GPU layer REFUSES to store is named, with the fill and the remedy; the budget readout and the capacity check carry the count (2026-10-31)
                 typeof(Hk_TerrainHexagonHeadroom), // EXPERIMENTAL: probe + multiply the terrain visible-hexagon/draw-command buffer sizes (the ~21k-tile ceiling lead)
                 typeof(Hk_DistrictGroundMaterial), // EXPERIMENTAL: force a ground material (grass field) under a custom district
                 typeof(Hk_GroundApplyProbe),       // DIAGNOSTIC: log the ground index each district resolves (find the Industry "deadzone")
@@ -412,11 +413,12 @@ namespace HumankindAssetFramework
             //     TRUNCATES any mesh above it (holes in the model, no log). This lifts any of them, per layer. ---
             BufferOverrides     = Config.Bind("Buffers", "BufferOverrides", "",
                                   "Per-layer GPU mesh-buffer overrides, applied once at layer creation. Format: " +
-                                  "\"<layerNameSubstring>:verts=+N,idx=+N,meshes=+N,maxtris=N\" — semicolon-separated for several layers. " +
+                                  "\"<layerName>:verts=+N,idx=+N,meshes=+N,maxtris=N\" — the key names ONE layer exactly (a trailing * makes it a prefix); " +
+                                  "semicolon-separated for several layers. A key no layer carries, or a field that does not parse, is reported in the log. " +
                                   "verts/idx/meshes ADD to the layer's buffer sizes (vertex buffer / index buffer / mesh table); " +
                                   "maxtris SETS the per-mesh triangle cap absolutely (0 = unlimited — quads beyond the cap are otherwise " +
                                   "silently dropped, leaving holes in a detailed model). Layer names: Shift+F8 mesh-budget dump. " +
-                                  "e.g. \"MeshWithSkeleton:verts=+200000,idx=+500000,maxtris=0\". Blank = off.");
+                                  "e.g. \"MeshWithSkeletonParticleIndexBuffer:verts=+200000,idx=+500000,maxtris=0\" (the pawn layer). Blank = off.");
 
             // --- EXPERIMENTAL pawn PROP/attachment axis (custom weapons & gear on pawn attachment slots). A
             //     PresentationPawnFragmentMesh (the EQ_* asset a pawn's Attachements slot references) hard-gates on its

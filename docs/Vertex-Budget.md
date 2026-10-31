@@ -54,14 +54,22 @@ All four limits are plain fields set at layer creation, and the plugin can overr
 
 ```ini
 [Buffers]
-BufferOverrides = MeshWithSkeleton:verts=+1000000,idx=+2000000,meshes=+1000
+BufferOverrides = MeshWithSkeletonParticleIndexBuffer:verts=+1000000,idx=+2000000,meshes=+1000
 ```
 
-- Format: `<layerNameSubstring>:verts=+N,idx=+N,meshes=+N,maxtris=N`, semicolon-separated for several
-  layers. `verts`/`idx`/`meshes` **add** to the buffer sizes; `maxtris` **sets** the per-mesh cap
-  absolutely (0 = unlimited). Layer names come from the Mesh Budget dump.
+- Format: `<layerName>:verts=+N,idx=+N,meshes=+N,maxtris=N`, semicolon-separated for several layers.
+  The key names **one layer exactly** (case does not matter); a trailing `*` makes it a prefix. Until
+  2026-10-31 the key was a substring, and `MeshWithSkeleton` enlarged the unrelated layer of that name
+  (700k → 3.7M vertices of VRAM for nothing) beside the pawn layer. `verts`/`idx`/`meshes` **add** to the
+  buffer sizes; `maxtris` **sets** the per-mesh cap absolutely (0 = unlimited). Layer names come from the
+  Mesh Budget dump (Shift+F8); the pawn layer is `MeshWithSkeletonParticleIndexBuffer`.
 - Applied once at layer creation (next launch); the confirmation is logged as
-  `[Buffers] '<layer>' baseVertexBufferSize: 1000000 -> 2000000`.
+  `[Buffers] '<layer>' baseVertexBufferSize: 1000000 -> 2000000`. A field that does not parse is logged
+  as `[Buffers] BufferOverrides, NOT applied: …`, and a key that names no layer is logged once the layers
+  exist, with the list of layers — a typo no longer enlarges nothing in silence.
+- `idx` stops at **16,777,216**: the encoded mesh handle packs the start index into 24 bits, unmasked,
+  so a larger index buffer would corrupt the particle-count byte rather than clamp. The plugin clamps
+  there and says so.
 - Cost is VRAM only: pawn vertices are ~28 B packed, so `verts=+1000000` ≈ +28 MB, `idx=+2000000`
   ≈ +8 MB. The shader reads buffer sizes dynamically, so the change is transparent.
 
@@ -139,7 +147,7 @@ measured, not assumed:
 > it fills the game stops uploading meshes entirely — **units and districts both stop drawing, with no error**. That
 > day's buffer was already doubled to 2,000,000 by `BufferOverrides` and sat at 1,999,968; one static re-bake of one
 > ship was the straw. Read the fill with **F8** (`L2 … verts %`), and raise the pool with
-> `BufferOverrides = MeshWithSkeleton:verts=+2000000` (roughly +48 MB VRAM per million) before splitting a second
+> `BufferOverrides = MeshWithSkeletonParticleIndexBuffer:verts=+2000000` (roughly +48 MB VRAM per million) before splitting a second
 > large model. Reducing triangles pays both ceilings at once; splitting pays one by spending the other.
 | **Districts / buildings** | baked static meshes in the shared `Visual` layer | **3,000,000 verts**, ~99% full late-game — the tightest real vertex wall | 255 sub-particles × PPC (PPC dynamic, auto-boosted since 0.5.7) | `DistrictBufferHeadroom` for the pool; `DistrictMeshDensityBoost` floor for the ceiling — [District-Visuals](District-Visuals.md) |
 | **Terrain tiles** | **NO stored vertices at all** — `ProceduralTerrainRenderer` GENERATES the hex geometry on the GPU every frame (visibility kernel → repack → draw-procedural + tessellation) and throws it away | n/a — vertices are manufactured per frame | **10,000 visible hexagons** per frame (post-culling) and 800,000 draw commands, both plain ints on the technical-settings asset | `[Terrain] TerrainHexagonBufferMultiplier` (0.5.7, experimental — section below) |

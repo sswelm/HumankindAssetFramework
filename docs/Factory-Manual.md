@@ -237,7 +237,8 @@ their settings and work together**:
   don't carry one path's figure to the other; read the `BAKED MESH` lines. Fill that buffer and the game stops
   uploading *any* further mesh: units **and** districts stop drawing at once, with no error (2026-09-20 — a single
   static re-bake of that frigate was the straw, on a buffer already doubled to 2,000,000 by `BufferOverrides`). F8
-  shows the fill; raise it with `BufferOverrides = MeshWithSkeleton:verts=+N`. See [Vertex-Budget](Vertex-Budget.md).
+  shows the fill; raise it with `BufferOverrides = MeshWithSkeletonParticleIndexBuffer:verts=+N`. Since 2026-10-31 a
+  mesh the layer refuses is named in the log (`[Buffers][DROPPED] …`) and counted in F8. See [Vertex-Budget](Vertex-Budget.md).
 - **Double-sided** — for **animated (rigged) vehicles** this moved to the **Vehicle Lab** in 0.5.4 (its
   *Double-sided (fix see-through parts)* checkbox, applied to the source Spin GLB when you generate the rig). The
   Factory no longer has the checkbox for animated models. For **static** single-sided/CAD shells, use **Winding
