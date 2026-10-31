@@ -520,7 +520,8 @@ namespace HumankindAssetFramework
             new Dep(FxMesh, nameof(FxMesh), "Mesh", "importAngles"),   // importAngles: the hand-prop import-angle stamp (bindcheck re-homed it here from FxEvolverMaterial)
             new Dep(ContentLayer, nameof(ContentLayer),
                 "LoadEncodingVertexAndBuffer", "baseVertexBufferSize", "baseIndexBufferSize", "maxMeshCount", "maxMeshTriangleCount",
-                "vertexBuffer", "HxFxOneMeshComputeBufferData", "hxFxOneMeshComputeBuffer", "FindGuidAssociatedToIndex"),
+                "vertexBuffer", "HxFxOneMeshComputeBufferData", "hxFxOneMeshComputeBuffer", "FindGuidAssociatedToIndex",
+                "Register"),   // Hk_MeshDropWatch: the seam where a refused mesh comes back with no vertices (2026-10-31)
             new Dep(PresentationPawnDefinition, nameof(PresentationPawnDefinition), "Projectile", "AnimationCapabilityProfile", "SubPawnDefinitions"),
             new Dep(ProjectileAsset, nameof(ProjectileAsset)),
             // district scoped-visual — the mesh strategic footprint (render-feature gate, B&W, flatten) + composed foliage

@@ -158,10 +158,11 @@ HELPERS="GetMember SetMember GetMemberOrNull CallMethod CachedField CachedProp G
 #                          InjectReactorFootprint KeepDistrictMeshAtStrategicZoom MaybeDumpPawnRig UnmaskPavingDecals
 #   substring filter ..... FillMatrixCells ("District/Main" against database names)
 #   bone / mesh / event .. SkelHasBone (bone name) RenameBodyMesh (mesh name) PostEventByName (audio event name)
+#   mesh name ............ Postfix (Hk_MeshDropWatch: Harmony hands it the engine's own name of the mesh being registered)
 NOT_MEMBER_READERS="DumpBoneRests DumpFields DumpNameTables DumpSkinned DumpSelectorElements DumpPlbcTree RebaseRootIdentity
                     WalkCollection OnPawnAttack CenterScopedBuilding DumpClipCollections DumpDecalBinding DumpSchematicAtlas
                     GraftFootprint InjectReactorFootprint KeepDistrictMeshAtStrategicZoom MaybeDumpPawnRig UnmaskPavingDecals
-                    FillMatrixCells SkelHasBone RenameBodyMesh PostEventByName"
+                    FillMatrixCells SkelHasBone RenameBodyMesh PostEventByName Postfix"
 HELPER_RE="\\b($(echo $HELPERS | tr ' ' '|'))"
 ACCESSORS="${HELPER_RE}|FastMember\.(Getter|Setter)<[^>]*>|AccessTools\.(Field|Property|Method|PropertyGetter|PropertySetter|DeclaredField|DeclaredProperty|DeclaredMethod)|\.Get(Field|Property|Method|Event|Member)|Traverse\.(Field|Property|Method)"
 
