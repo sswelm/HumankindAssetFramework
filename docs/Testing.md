@@ -117,7 +117,7 @@ starting two gates at once and interrupting the first.
 | Surface | `tools/check.sh` (pre-push hook) | also in CI | ~time |
 |---|---|---|---|
 | **Runtime + shared contract** | `dotnet build` · `dotnet test` · the gate's own tests · GPU buffer hook drill · docs guard · binding-catalog surface · hot path · parse shape · member shape · worker thread · reader-gate drill · schema parity · parity stamp and its drill | all source-only checks (the stamp's drill; the stamp itself is the push's) | the build and tests first (seconds); the guards on a lane beside the drills |
-| **Editor package** | Roslyn editor compile-check · registry engine drill · backup dedup drill · native kernels drill · hand-list gate · package meta · golden checksums | hand-list; compile check and drills stay local | the drills AT ONCE, the lane beside them: a few minutes |
+| **Editor package** | Roslyn editor compile-check · registry engine drill · backup dedup drill · FBX reader drill (the binary record tree against an independent reader) · native kernels drill · hand-list gate · package meta · golden checksums | hand-list; compile check and drills stay local | the drills AT ONCE, the lane beside them: a few minutes |
 | **Blender parity** (`HAF_GATE=parity`: `tools/blender_parity.sh`, the Bake Tests row *Do the C# ports still match Blender?*) | GLB reader drill · GLB writer drill · Workshop compaction drill · vehicle probe drill · mesh layout, prep and deploy drills · rig_anim and vehicle_rig drills · blender exit drill · the oracle tests | never (Blender) | about twenty minutes, NOT in the push |
 
 **Since 2026-10-11 the drills run concurrently, and since 2026-10-29 the source guards run on a lane beside them.**

@@ -10,6 +10,18 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE NATIVE FBX READER, STEP 1: THE RECORD TREE (2026-10-31).** The programme named on 2026-10-10 ("we suddenly get
+  access to a lot of free 3d models"; ufbx as the guide) begins at the format layer. `editor/FbxDocument.cs` reads
+  the binary FBX record tree - 32- and 64-bit records (version 7500 and up), every property type, stored and zlib
+  arrays with their Adler-32 verified - and refuses by name what it does not understand (an ASCII FBX, an unknown
+  property type, an array that does not decode to its count, a record past the file). No meaning is attached yet:
+  the object graph (Geometry, Model, Deformer, Animation, Connections) and its mapping onto HafModel are the next
+  steps. The inventory that sized it: every FBX this machine has is binary 7400 (Blender's exporter), 7500 or 7700
+  (the FBX SDK), with zlib arrays, ngons up to 19 sides, ByPolygonVertex/ByVertice/ByPolygon/AllSame layer elements
+  in Direct and IndexToDirect form, skins of up to 254 clusters, and up to 103 animation stacks in one file. The
+  drill (`tools/fbx_drill.sh`, the push) holds the reader to an independent Python reader record for record: 197
+  files, 1.3 million records, identical dumps (the project's 187, the recipes' FBX sources, nine generated fixtures
+  for the shapes those files lack).
 - **THE DELETE-GUARD PRUNE RUNS AT LAST, AND A WORKER THREAD IS GUARDED (2026-10-31).** The retention added on
   2026-08-23 never pruned a single guard: 720 `_deleted_` folders, 321 past the 14 days, not one "pruned" line in any
   Editor.log (the 2026-10-31 review). The daily worker read `KeepGuardDays` — EditorPrefs behind a property — from

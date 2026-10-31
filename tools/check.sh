@@ -333,6 +333,10 @@ push_step run_bg "editor scripts compile (Roslyn)" bash "$ROOT/tools/editor_comp
 push_step run_bg "registry engine drill (SingleSourceRegistry on real files)" bash "$ROOT/tools/registry_engine_drill.sh"
 push_step run_bg "backup dedup drill (BackupDedup on real files: unchanged means the bytes)" bash "$ROOT/tools/backup_dedup_drill.sh"
 push_step run_bg "GPU buffer hook drill (real Harmony adapters and configuration)" bash "$ROOT/tools/buffer_hook_drill.sh"
+# THE NATIVE FBX READER, step 1 (2026-10-31): the binary record tree (editor/FbxDocument.cs) against an independent
+# Python reader, record for record, over every FBX the project holds, the recipes' FBX sources and generated fixtures.
+# No Blender in it: the claim is two readers written apart agreeing on every record, property and array.
+push_step run_bg "FBX reader drill (the binary record tree in C# equal to an independent reader's on every project FBX, recipe source and fixture; SKIP without the project)" bash "$ROOT/tools/fbx_drill.sh"
 # THE PARITY DRILLS ARE NOT IN THE PUSH (2026-10-30; user: "for pushes to github it should no longer use any blender!!!").
 # They hold the C# ports to Blender's own output and run in the parity mode only (HAF_GATE=parity: tools/blender_parity.sh,
 # the Bake Tests row "Do the C# ports still match Blender?"), with Blender (HAF_ORACLE=live) - or, asked for explicitly,
