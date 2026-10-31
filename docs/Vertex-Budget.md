@@ -84,7 +84,8 @@ history, while copying its CPU array keeps failures and repairing a refused entr
 
 `bash tools/buffer_hook_drill.sh` exercises the real Harmony adapters and configuration hook in an isolated .NET
 process with engine-shaped records, without a game launch or GPU allocation. The live in-game drop acceptance is
-still a separate check.
+still a separate check. The drill also runs automatically in the push gate and CI, using the .NET SDK and public
+reference assemblies; no Unity installation is needed for this drill.
 
 With the override above, a **100k-vert hero unit is entirely practical** — the shipped default pool
 already fits one today (~300k free late-game); the override just restores comfortable headroom for

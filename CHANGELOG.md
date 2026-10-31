@@ -28,7 +28,7 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   the parse, the match, the unmatched list and the ceiling. Invalid signs, negative triangle caps, overflowing additions
   and nonpositive requested sizes are refused; a pre-enlarged base and `idx=0` cannot bypass the ceiling. The reader
   gate still checks methods named `Postfix`. `tools/buffer_hook_drill.sh` runs the real Harmony adapters in an isolated
-  .NET process on engine-shaped records. *Code path read against the decompiled engine; the drop
+  .NET process on engine-shaped records and runs in both the push gate and CI. *Code path read against the decompiled engine; the drop
   line has not been provoked in a game.*
 
 - **A RESIZE NO LONGER SHRINKS AGAIN ON EVERY SAVE-LOAD (2026-10-31; written 2026-09-28).** The Resize/era record of what factor is
