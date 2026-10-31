@@ -70,6 +70,14 @@ public static class BlenderVehicleRigInProcess
             void Tick() { checkpoint?.Invoke(); }
             Tick();
             var a = BlenderVehicleRig.ParseArgs(argv.ToList());
+            if (a.Problem == null && (a.Mode == "rig" || a.Mode == "rigfast"))
+            {
+                string second = a.Merge2 == null ? null : a.Merge2.Split('|')[0].Trim();
+                string refusal = VehicleLabSourceGuard.Refusal(a.Input, second, a.OutGlb);
+                if (refusal == null && !string.IsNullOrWhiteSpace(a.PreviewFbx))
+                    refusal = VehicleLabSourceGuard.Refusal(a.Input, second, a.PreviewFbx, "preview FBX");
+                if (refusal != null) { o.Error = refusal; return o; }
+            }
             string sourceLimit = BlenderVehicleRig.SourceFallback(a);
             if (a.Problem == null && sourceLimit != null) { o.UseBlender = sourceLimit; return o; }
             if (a.Problem == null && a.Mode == "rig" && a.PreDie == null && !File.Exists(a.Input)) { o.UseBlender = "the model file is not there"; return o; }
@@ -113,5 +121,51 @@ public static class BlenderVehicleRigInProcess
         catch (ReaderLimit e) { o.UseBlender = "the C# reader cannot handle this input: " + e.Message; return o; }
         catch (Exception e) { o.UseBlender = "the C# rig run failed (" + e.GetType().Name + ": " + e.Message + ")"; return o; }
         finally { if (temporary != null) try { if (File.Exists(temporary)) File.Delete(temporary); } catch { } }
+    }
+}
+
+// File identity belongs beside the I/O wrapper, rather than in the pure EditorRules kernels. Lexically different
+// Windows paths can still name one source via a junction, symlink or hard link; neither Generate route may replace it.
+public static class VehicleLabSourceGuard
+{
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    struct FileIdentity
+    {
+        public uint attributes, creationLow, creationHigh, accessLow, accessHigh, writeLow, writeHigh;
+        public uint volume, sizeHigh, sizeLow, links, indexHigh, indexLow;
+    }
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool GetFileInformationByHandle(Microsoft.Win32.SafeHandles.SafeFileHandle handle, out FileIdentity identity);
+
+    static FileIdentity Identity(string path)
+    {
+        using (var f = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+        {
+            if (!GetFileInformationByHandle(f.SafeFileHandle, out var id))
+                throw new IOException("could not inspect the file identity");
+            return id;
+        }
+    }
+    public static string Refusal(string raw, string second, string output, string label = "Output GLB")
+    {
+        string refusal = VehicleLabRules.SourceGuardRefusal(raw, second, output, label);
+        if (refusal != null || Environment.OSVersion.Platform != PlatformID.Win32NT || !File.Exists(output)) return refusal;
+        try
+        {
+            var target = Identity(output);
+            foreach (string source in new[] { raw, second })
+            {
+                if (string.IsNullOrWhiteSpace(source) || !File.Exists(source)) continue;
+                var input = Identity(source);
+                if (input.volume == target.volume && input.indexHigh == target.indexHigh && input.indexLow == target.indexLow)
+                    return "Refused — the " + label + " names the " + (source == raw ? "raw" : "second") +
+                        " model through a filesystem alias ('" + source + "'). Pick a different output path; a source model is never overwritten.";
+            }
+        }
+        catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+        {
+            return "Refused — the output could not be written safely (" + label + "): cannot verify that it is separate from the source models: " + e.Message;
+        }
+        return null;
     }
 }
