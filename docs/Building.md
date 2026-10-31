@@ -49,6 +49,11 @@ together. The editor package consumes the same tracked DLL from `editor/Plugins/
 
 ## Blender (optional dependency)
 
+**The push remembers the last parity PASS (2026-10-31).** A parity run that passes writes `tools/parity-stamp.txt`, a
+digest of every file the parity drills compile, run or read; the push's `parity stamp` step compares it and SKIPs,
+naming the files, when a Blender script, a ported `editor/*.cs` or a drill fixture changed since. Commit the stamp
+the parity run writes beside such a change. See [Testing](Testing.md#the-fast-gates--two-lanes-checksh-and-ci).
+
 **The push gate runs no Blender and no Blender-parity drill (2026-10-30).** The nine drills that hold the C# ports to
 Blender's own output are the gate's parity mode (`HAF_GATE=parity`: `bash tools/blender_parity.sh`, or the Bake Tests
 row *Do the C# ports still match Blender?*, which runs exactly that from Unity) and need Blender there; a push runs the
