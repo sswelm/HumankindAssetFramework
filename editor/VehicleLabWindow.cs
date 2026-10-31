@@ -2477,9 +2477,9 @@ public class VehicleLabWindow : EditorWindow
             }
         }
         // surface the BONE TOTAL prominently (user request): the budget lines are the difference between a
-        // clean unit and the 256-wall / twitch-ceiling diseases — they were buried in the Console until now
+        // clean unit and the bone-index-wall / twitch-ceiling diseases — they were buried in the Console until now
         string bones = stdout.Split('\n').FirstOrDefault(l => l.Contains("VEHICLE armature:"))?.Trim() ?? "";
-        string hybrid = string.Join("\n", stdout.Split('\n').Where(l => l.Contains("HYBRID v2") || l.Contains("BONE BUDGET CLAMP")).Select(l => l.Trim()));
+        string hybrid = string.Join("\n", stdout.Split('\n').Where(l => l.Contains("HYBRID v2") || l.Contains("CELL CLAMP")).Select(l => l.Trim()));
         string bakeRecipe = hasRotor
             ? "Animation Lab ▸ State-driven OFF (a rotor spins CONTINUOUSLY), Idle/reference = Spin (full), Convert raw rig ON, " +
               "Fix 100× OFF, Keep bone translations ✓. Bake.  (It is a flyer: the bake grounds it like any model — dial its flying height with Position z.)"

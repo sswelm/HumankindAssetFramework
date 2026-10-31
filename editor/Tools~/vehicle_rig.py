@@ -782,6 +782,19 @@ def _guard(fn):
         _tb.print_exc()
         sys.exit(1)
 
+# THE BONE-INDEX WALL (review 2026-09-27): Amplitude's crowd-skinning vertex format breaks past bone INDEX 127 — NOT
+# 256 (the T-62's turret+wheels at bones 128-140 vanished; the mech's wings at 222 flung). The armature object is one
+# more entry on top, so 126 Blender bones is the budget with deploy_convert's margin. The Lab surfaces "*** WARNING"
+# lines in its status box, so an over-budget rig is said out loud instead of spiking in-game.
+_BONE_BUDGET = 126
+def _bone_wall_check(_arm):
+    _n = len(_arm.data.bones)
+    if _n > _BONE_BUDGET:
+        print("VEHICLE *** WARNING: %d bones — past the %d-bone budget (bone indices break past 127 in-game: the "
+              "geometry on the last bones collapses or spikes). Lower Tread detail (the bones dial) or mark fewer "
+              "separate parts." % (_n, _BONE_BUDGET))
+    return _n
+
 out_glb, preview_fbx = argv[2], argv[3]
 def namelist(arg):
     # "@<path>" = read names from a file (one per line): a thorough marking session is hundreds of shards,
@@ -1217,6 +1230,7 @@ if mode == "rigfast":
         for o in list(bpy.data.objects):
             if o not in keep:
                 bpy.data.objects.remove(o, do_unlink=True)
+        _bone_wall_check(arm)   # rigfast keeps the artist skeleton and exits before the mesh path's final check
         bpy.ops.export_scene.gltf(filepath=out_glb, export_animations=True)
         if preview_fbx:
             bpy.ops.export_scene.fbx(filepath=preview_fbx, add_leaf_bones=False, bake_anim=True, **_embed_previews)
@@ -2620,8 +2634,9 @@ for o in objs:
             # cells made the sprocket wrap read chunky, half-link was better, quarter-link (user request) makes
             # the wrap facets ~15 deg. Straight runs are unaffected (rigid transport shows no cell boundaries
             # on a straight). The conveyor advances CELLS_PER_LINK cells per loop = one full link, keeping
-            # speed and exact restart. NOTE the Amplitude 256-bone budget: quarter-link = 216 link bones on the
-            # Jagdpanzer — only affordable because link mode DELETES the unused legacy tread bones (18).
+            # speed and exact restart. NOTE the bone budget (_BONE_BUDGET, the index-127 wall): quarter-link cells
+            # were 216 link bones on the pre-hybrid Jagdpanzer; the v2 hybrid below bones only the wrap arcs, and
+            # link mode DELETES the unused legacy tread bones (18).
             _CPL = tread_cells_per_link   # cells per link — the Lab's "Tread detail" bones dial
 
             def _project(_ptsP, _SP2):
@@ -2678,14 +2693,15 @@ for o in objs:
             _L = _S[_M]
             _s_of = _project(_pts, _S)
             _NC = max(8, int(round(_L / (_fund_p / _CPL))))
-            # HARD BONE-BUDGET CLAMP (the Bradley incident: its finely-molded links at detail 2 exploded to
-            # 278 bones — past the 256 GPU vertex-format wall, guaranteed spikes — and the rig let it happen
-            # silently). Links get whatever remains of 240 after wheels/Root/Turret/Gun, split evenly across
-            # tracks; cells grow to fit. 240 keeps headroom under the 256 wall.
+            # CELL-EXPLOSION CLAMP (the Bradley incident: its finely-molded links at detail 2 exploded to 278
+            # bones, and the rig let it happen silently). This caps CELLS, not bones: the v2 hybrid below gives
+            # bones only to the wrap-arc cells plus one shuttle per straight run, about a third of the cells. The
+            # real limit is the bone-INDEX wall at 127 (see _BONE_BUDGET), checked on the finished armature —
+            # which says when a rig is over it, rather than coarsening every tread that already fits.
             _non_link = len(cluster_bones) + 1 + (1 if turret_names else 0) + (1 if gun_names else 0)
             _link_budget = max(8, (240 - _non_link) // max(1, len(track_names)))
             if _NC > _link_budget:
-                print("VEHICLE tread '%s' BONE BUDGET CLAMP: %d cells -> %d (%d wheels+aux leave %d links/track under the 256-bone wall) — cells grow accordingly; lower Tread detail to regain smoothness headroom"
+                print("VEHICLE tread '%s' CELL CLAMP: %d cells -> %d (%d wheels+aux leave %d cells/track) — cells grow accordingly; lower Tread detail to regain smoothness headroom"
                       % (o.name, _NC, _link_budget, len(cluster_bones), _link_budget))
                 _NC = _link_budget
             _cellL = _L / _NC
@@ -2822,7 +2838,7 @@ if _link_jobs:
     bpy.ops.object.mode_set(mode='EDIT')
     for _tn, _job in _link_jobs.items():
         # the legacy carrier bones carry no weights in link mode — delete them (quarter-link cells need the
-        # bone budget: Amplitude caps skeletons at 256 bones)
+        # bone budget: indices break past 127, see _BONE_BUDGET)
         for _an in _job["aux"]:
             _ab = arm_data.edit_bones.get(_an)
             if _ab is not None:
@@ -2841,7 +2857,7 @@ if _link_jobs:
             eb.tail = _P0 + Vector((0, 0, 0.1))
             eb.parent = arm_data.edit_bones[body_bone]
     bpy.ops.object.mode_set(mode='OBJECT')
-    print("VEHICLE armature: %d bones total (Amplitude cap 256)" % len(arm_data.bones))
+    print("VEHICLE armature: %d bones total (budget %d: bone indices break past 127)" % (len(arm_data.bones), _BONE_BUDGET))
     for _tn, _job in _link_jobs.items():
         _o = bpy.data.objects[_job["obj"]]
         for _g in list(_o.vertex_groups):   # carrier groups stayed empty in link mode — drop them
@@ -3841,6 +3857,7 @@ for _xo in bpy.context.scene.objects:
     _xo.data.calc_loop_triangles()
     _xt_v += len(_xo.data.vertices); _xt_t += len(_xo.data.loop_triangles); _xt_m += 1
 print("VEHICLE export totals: %d verts, %d tris across %d mesh(es)" % (_xt_v, _xt_t, _xt_m))
+_bone_wall_check(arm)   # every rig, not only the tread path that prints the armature line
 _lap("join + clips")
 bpy.ops.export_scene.gltf(filepath=out_glb, export_animations=True)
 if preview_fbx:

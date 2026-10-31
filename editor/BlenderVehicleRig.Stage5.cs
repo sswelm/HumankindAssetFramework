@@ -277,6 +277,9 @@ public static partial class BlenderVehicleRig
         }
         var all = s.Objects.Where(o => o.Type == "MESH" && o.Mesh.Vertices > 0).ToList(); int verts = all.Sum(o => o.Mesh.Vertices), tris = all.Sum(o => o.Mesh.Faces.Length / 3);
         s.Logs5.Add("VEHICLE export totals: " + verts + " verts, " + tris + " tris across " + all.Count + " mesh(es)");
+        // the script's _bone_wall_check(arm): every rig, past the 126-bone budget, says so (the Lab shows *** WARNING lines)
+        if (s.Armature.BoneNodes.Count > 126)
+            s.Logs5.Add("VEHICLE *** WARNING: " + s.Armature.BoneNodes.Count + " bones — past the 126-bone budget (bone indices break past 127 in-game: the geometry on the last bones collapses or spikes). Lower Tread detail (the bones dial) or mark fewer separate parts.");
         int current = s.FrameCurrent;
         var x = BlenderRigExport.BuildVehicle(s, f => EvaluateExportFrame(s, f), preserveJpegAlpha);
         if (x.Fallback != null) { s.Fallback = "stage 5: the GLB export (" + x.Fallback + ") is not modelled yet"; return x; }

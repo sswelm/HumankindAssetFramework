@@ -144,5 +144,44 @@ class TurretTierGuard(unittest.TestCase):
         self.assertEqual(35.5, NAMESPACE["_tagged_reduce_pct"](["rig", "turretreduce=35.5", "gunreduce=10"], "turretreduce"))
 
 
+class BoneBudgetGuard(unittest.TestCase):
+    def test_the_cap_removes_only_the_excess_and_keeps_weighted_leaves(self):
+        from types import SimpleNamespace
+        rig_source = (SCRIPT.parent / "rig_anim.py").read_text(encoding="utf-8")
+        fn = next(n for n in ast.parse(rig_source).body if isinstance(n, ast.FunctionDef) and n.name == "_zero_weight_leaves_for_cap")
+        scope = {}
+        exec(compile(ast.Module(body=[fn], type_ignores=[]), "rig_anim.py", "exec"), scope)
+        choose = scope[fn.name]
+        bones = [SimpleNamespace(name="Root", children=[1])] + [SimpleNamespace(name="Leaf%03d" % i, children=[]) for i in range(126)]
+        self.assertEqual(["Leaf000"], choose(bones, {"Root"}, 126))
+        self.assertEqual([], choose(bones[:126], {"Root"}, 126))
+        self.assertEqual(["Leaf001"], choose(bones, {"Root", "Leaf000"}, 126))
+
+    def test_the_fast_path_checks_its_finished_skeleton_before_export(self):
+        fast = SOURCE[SOURCE.index('    def _fast():'):SOURCE.index('    _guard(_fast)')]
+        self.assertIn('_bone_wall_check(arm)', fast)
+        self.assertLess(fast.index('_bone_wall_check(arm)'), fast.index('bpy.ops.export_scene.gltf('))
+
+    # 2026-09-28 (the wall corrected): the engine breaks past bone INDEX 127, so one budget of 126 in vehicle_rig.py and
+    # rig_anim.py, and in their C# ports, whose log lines the drills hold to the scripts' own. A budget that drifts in
+    # one place (240 again) sends a rig past the wall without a word.
+    def test_one_bone_budget_of_126_in_both_scripts_and_both_ports(self):
+        editor = SCRIPT.parent.parent
+        rig_anim = (editor / "Tools~" / "rig_anim.py").read_text(encoding="utf-8")
+        self.assertIn("_BONE_BUDGET = 126", SOURCE)
+        self.assertIn("_bone_wall_check(arm)", SOURCE)
+        self.assertIn("_BONE_LIMIT = 126", rig_anim)
+        self.assertIn("bones after every cull and socket — past the %d-bone budget", rig_anim)
+        port = (editor / "BlenderRigAnim.cs").read_text(encoding="utf-8")
+        self.assertEqual(2, port.count("ad.BoneNodes.Count > 126"))
+        self.assertIn("(budget 126: bone indices break past 127; weighted bones untouched)", port)
+        self.assertIn("bones after every cull and socket — past the 126-bone budget", port)
+        stage5 = (editor / "BlenderVehicleRig.Stage5.cs").read_text(encoding="utf-8")
+        self.assertIn("s.Armature.BoneNodes.Count > 126", stage5)
+        self.assertIn("past the 126-bone budget (bone indices break past 127 in-game", stage5)
+        for text in (SOURCE, rig_anim, port, stage5):
+            self.assertNotIn("> 240", text); self.assertNotIn("= 240", text)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -235,8 +235,10 @@ trace to the shape.
 The GPU skinning wall is a per-vertex **bone-index** limit of **128** (indices break past 127) — *not* 256. A rig with
 verts weighted to bones past index 127 breaks. `deploy_convert` pair-merges instanced link chains to ≤126; `rig_anim`'s
 zero-weight-leaf slim does **not** rescue a rig with >127 *weighted* bones (the mech's collapsed "wings"). **Why:**
-slimming to a total count (e.g. 240) never moves a vertex off a >127 index — only merging does. See
-[Animation-Pitfalls.md](Animation-Pitfalls.md).
+removing unweighted leaves only helps when they sit in front of weighted bones — only merging reduces the weighted
+count. Since 2026-10-31 all three scripts and the C# ports share the 126 budget (`rig_anim` slimmed to 240 until then,
+a leftover of the stale 256 figure), and `rig_anim` and the Vehicle Lab print a `WARNING` when a finished rig is still
+over it, which the Factory and the Lab surface. See [Animation-Pitfalls.md](Animation-Pitfalls.md).
 
 ## Rotation-only custom animation (engine contract)
 Custom clips animate by **rotation** (with constrained translation), bind == frame 0, on a scale-1, name-ordered

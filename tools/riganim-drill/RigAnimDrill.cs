@@ -297,6 +297,7 @@ static class RigAnimDrill
         ("wrapper empties flattened", d => d.AllLogs.Any(l => l.StartsWith("RIGANIM flattened"))),
         ("localNodeAnim v2: mesh bones keyed", d => d.AllLogs.Any(l => l.StartsWith("RIGANIM localNodeAnim v2:"))),
         ("the bone cap: zero-weight leaves removed", d => d.AllLogs.Any(l => l.StartsWith("RIGANIM bone-cap:"))),
+        ("the bone-index wall: a finished rig past the budget (a warning)", d => d.AllLogs.Any(l => l.StartsWith("RIGANIM WARNING:") && l.Contains("past the 126-bone budget"))),
         ("a clip sliced", d => d.AllLogs.Any(l => l.StartsWith("RIGANIM sliced"))),
         ("a reversed slice", d => d.AllLogs.Any(l => l.StartsWith("RIGANIM sliced") && l.EndsWith(", reversed)"))),
         ("a held stance padded (the epsilon nudge)", d => d.AllLogs.Any(l => l.StartsWith("RIGANIM held-stance pad:"))),
