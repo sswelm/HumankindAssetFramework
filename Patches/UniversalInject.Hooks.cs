@@ -328,18 +328,20 @@ namespace HumankindAssetFramework
                 foreach (var o in Parsed())
                 {
                     if (!BufferRules.Matches(o, nm)) continue;
-                    matchedKeys.Add(o.Key);
                     if (o.Verts != 0) BumpIntField(__instance, "baseVertexBufferSize", o.Verts, nm, "[Buffers]");
                     if (o.Idx != 0) BumpIndexField(__instance, o.Idx, nm);
                     if (o.Meshes != 0) BumpIntField(__instance, "maxMeshCount", o.Meshes, nm, "[Buffers]");
                     if (o.MaxTris >= 0) SetIntField(__instance, "maxMeshTriangleCount", o.MaxTris, nm, "[Buffers]");
                 }
+                // Also enforce the packed-handle ceiling for a pre-enlarged base or an idx=0 override.
+                var indexField = t.GetField("baseIndexBufferSize", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                if (indexField?.GetValue(__instance) is int size && size > BufferRules.IndexCeiling)
+                    BumpIndexField(__instance, 0, nm);
             }
             catch (System.Exception ex) { Plugin.Log.LogError("[Buffers] layer override: " + ex); }
         }
 
         [ProcessLived("the config spec parsed once; the config is read at layer creation and layers outlive a session")] static List<BufferRules.Override> parsed;
-        [ProcessLived("the override keys some layer took - the rest are typos, said once")] static readonly HashSet<string> matchedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         [ProcessLived("one unmatched-keys warning per process")] static bool unmatchedWarned;
         static List<BufferRules.Override> Parsed()
         {
@@ -379,8 +381,10 @@ namespace HumankindAssetFramework
             var f = o.GetType().GetField(field, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
             if (f == null || f.FieldType != typeof(int)) { Plugin.Log.LogWarning($"{tag} field '{field}' not found on ContentLayer."); return; }
             int cur = (int)f.GetValue(o);
-            f.SetValue(o, cur + extra);
-            Plugin.Diag($"{tag} '{layer}' {field}: {cur} -> {cur + extra} (+{extra}).");
+            int next = BufferRules.AddedSize(cur, extra, out string note);
+            if (note != null) { Plugin.Log.LogWarning($"{tag} '{layer}' {field}: {note}."); return; }
+            f.SetValue(o, next);
+            Plugin.Diag($"{tag} '{layer}' {field}: {cur} -> {next} (+{extra}).");
         }
 
         static void SetIntField(object o, string field, int val, string layer, string tag)
@@ -396,9 +400,9 @@ namespace HumankindAssetFramework
     // THE DROP, SEEN WHERE IT HAPPENS (2026-10-31). ContentLayer.Register hands every mesh to the encoder; a mesh the
     // vertex or index buffer cannot hold (or one the encoder rejects) comes back as FxOneMeshStruct.DefaultValue() -
     // VertexCount 0 - and the layer stores THAT: the mesh never draws, the engine's own error goes to its Diagnostics,
-    // not to this log, and the fill cursor does not move, so the every-injection capacity check (CheckPawnBufferCapacity)
-    // kept reading "nearly full" while units vanished (the 2026-10-20 session). This postfix names each refused mesh
-    // and its layer, with the fill and the remedy, and the budget readout and the capacity check carry the count.
+    // not to this log, and a capacity refusal need not move the binding cursor, so CheckPawnBufferCapacity
+    // kept reading "nearly full" while units vanished (the 2026-10-20 session). The adapter also observes exceptions:
+    // a mesh-table overflow throws at the array write before a postfix runs. State/diagnosis live in MeshDropWatch.
     [HarmonyPatch]
     internal static class Hk_MeshDropWatch
     {
@@ -407,29 +411,24 @@ namespace HumankindAssetFramework
             var layer = GameBinding.ContentLayer;
             return layer?.GetMethod("Register", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
         }
-        static void Postfix(object __instance, string meshName, int __result)
+        static void Prefix(object __instance, object[] __args, out MeshDropWatch.Snapshot __state)
         {
+            __state = null;
             try
             {
-                string layer = UniversalInject.GetMember(__instance, "name") as string ?? "?";
-                var buf = UniversalInject.GetMember(__instance, "hxFxOneMeshComputeBuffer");
-                var content = buf == null ? null : UniversalInject.GetMember(buf, "WriteContent") as Array;
-                string why;
-                if (content == null) return;
-                else if (__result < 0 || __result >= content.Length) why = "the mesh table is full (maxMeshCount)";
-                else if (Convert.ToInt32(UniversalInject.GetMember(content.GetValue(__result), "VertexCount")) > 0) return;
-                else why = "the vertex or index buffer could not hold it, or the encoder rejected it";
-                UniversalInject.NoteDroppedMesh(layer, meshName ?? "?");
-                int verts = ToInt(UniversalInject.GetMember(__instance, "currentVertexIndex")), vmax = ToInt(UniversalInject.GetMember(__instance, "baseVertexBufferSize"));
-                int idx = ToInt(UniversalInject.GetMember(__instance, "currentIndexIndex")), imax = ToInt(UniversalInject.GetMember(__instance, "baseIndexBufferSize"));
-                int meshes = ToInt(UniversalInject.GetMember(__instance, "currentMeshAddedCount")), mmax = ToInt(UniversalInject.GetMember(__instance, "maxMeshCount"));
-                Plugin.Log.LogError($"[Buffers][DROPPED] mesh '{meshName}' was NOT stored in layer '{layer}' ({why}) and will not draw. " +
-                                    $"Fill: verts {verts:n0}/{vmax:n0}, idx {idx:n0}/{imax:n0}, meshes {meshes}/{mmax}. " +
-                                    $"Raise [Buffers] BufferOverrides (e.g. \"{layer}:verts=+1000000,idx=+1000000,meshes=+500\") or make the roster leaner.");
+                int chunk = GameBinding.FxComponentMeshContentManager?.GetField("IntBufferChunkSize", BindingFlags.Public | BindingFlags.Static)?.GetValue(null) is int n ? n : 0;
+                __state = MeshDropWatch.Before(__instance, __args[1], chunk);
             }
-            catch (System.Exception ex) { Plugin.Log.LogWarning("[Buffers] drop watch: " + ex.Message); }
+            catch (Exception ex) { Plugin.Log?.LogWarning("[Buffers] drop watch snapshot: " + ex.Message); }
         }
-        static int ToInt(object o) { try { return o == null ? -1 : Convert.ToInt32(o); } catch { return -1; } }
+        static void Postfix(int __result, object __instance, string meshName, MeshDropWatch.Snapshot __state)
+            => MeshDropWatch.After(__result, __instance, meshName, __state);
+        static Exception Finalizer(Exception __exception, object __instance, string meshName, MeshDropWatch.Snapshot __state)
+        {
+            if (__exception != null) MeshDropWatch.After(-1, __instance, meshName, __state, __exception);
+            return __exception;   // observe the engine failure; never swallow or replace it
+        }
+
     }
 
     // EXPERIMENTAL (opt-in, [Terrain]) — the TILE render ceiling lead (2026-09-13, shakee's Discord report:

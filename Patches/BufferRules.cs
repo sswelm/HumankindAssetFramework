@@ -45,14 +45,16 @@ namespace HumankindAssetFramework
                     string field = kv.Trim();
                     if (field.Length == 0) continue;
                     var p = field.Split('=');
-                    if (p.Length != 2 || !int.TryParse(p[1].Trim().TrimStart('+'), NumberStyles.Integer, CultureInfo.InvariantCulture, out int val))
+                    if (p.Length != 2 || !int.TryParse(p[1].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int val))
                     { problems.Add($"'{key}': '{field}' is not <field>=<number>"); continue; }
                     switch (p[0].Trim().ToLowerInvariant())
                     {
                         case "verts":   o.Verts = val; break;
                         case "idx":     o.Idx = val; break;
                         case "meshes":  o.Meshes = val; break;
-                        case "maxtris": o.MaxTris = val < 0 ? 0 : val; break;
+                        case "maxtris":
+                            if (val < 0) { problems.Add($"'{key}': maxtris must be zero (unlimited) or positive"); continue; }
+                            o.MaxTris = val; break;
                         default: problems.Add($"'{key}': unknown field '{p[0].Trim()}' (verts, idx, meshes, maxtris)"); continue;
                     }
                     any = true;
@@ -80,9 +82,18 @@ namespace HumankindAssetFramework
         public static int ClampedIndexSize(int current, int extra, out string note)
         {
             long want = (long)current + extra;
+            if (want < 1 && extra != 0) { note = "an index buffer must have a positive size: override not applied"; return current; }
             if (want <= IndexCeiling) { note = null; return (int)Math.Max(0, want); }
             note = $"an index buffer of {want:n0} would pass the 24-bit start-index ceiling ({IndexCeiling:n0}), which the encode does not mask: clamped to the ceiling";
             return IndexCeiling;
+        }
+
+        public static int AddedSize(int current, int extra, out string note)
+        {
+            long want = (long)current + extra;
+            if (want < 1 || want > int.MaxValue)
+            { note = $"size {want} is outside the positive Int32 range: override not applied"; return current; }
+            note = null; return (int)want;
         }
     }
 }

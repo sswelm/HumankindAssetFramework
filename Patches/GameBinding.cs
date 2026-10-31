@@ -520,7 +520,7 @@ namespace HumankindAssetFramework
             new Dep(FxMesh, nameof(FxMesh), "Mesh", "importAngles"),   // importAngles: the hand-prop import-angle stamp (bindcheck re-homed it here from FxEvolverMaterial)
             new Dep(ContentLayer, nameof(ContentLayer),
                 "LoadEncodingVertexAndBuffer", "baseVertexBufferSize", "baseIndexBufferSize", "maxMeshCount", "maxMeshTriangleCount",
-                "vertexBuffer", "HxFxOneMeshComputeBufferData", "hxFxOneMeshComputeBuffer", "FindGuidAssociatedToIndex",
+                "vertexBuffer", "indexBuffer", "HxFxOneMeshComputeBufferData", "hxFxOneMeshComputeBuffer", "FindGuidAssociatedToIndex",
                 "Register"),   // Hk_MeshDropWatch: the seam where a refused mesh comes back with no vertices (2026-10-31)
             new Dep(PresentationPawnDefinition, nameof(PresentationPawnDefinition), "Projectile", "AnimationCapabilityProfile", "SubPawnDefinitions"),
             new Dep(ProjectileAsset, nameof(ProjectileAsset)),
@@ -586,8 +586,8 @@ namespace HumankindAssetFramework
             // is attributed to the receiver the code actually reads it off (derived receivers follow the walked path).
             new Dep(FragmentEntry, nameof(FragmentEntry), "meshCollection", "meshName", "boneName", "SlotIndex", "BoneIndex", "EncodedMeshAndVisualParticleCount", "FxOutputLayer", "fxOutputLayer", "Load"),
             new Dep(SkinnedMeshInfo, nameof(SkinnedMeshInfo), "MeshName", "FxMeshContent", "MeshIndex"),
-            new Dep(FxMeshContent, nameof(FxMeshContent), "verticesBytes", "vertexCount", "verticesBytesCrc", "bboxMin", "bboxMax", "Guid", "ImportAngles"),
-            new Dep(FxComponentMeshContentManager, nameof(FxComponentMeshContentManager), "layers", "Layers"),
+            new Dep(FxMeshContent, nameof(FxMeshContent), "verticesBytes", "vertexCount", "verticesBytesCrc", "bboxMin", "bboxMax", "Guid", "ImportAngles", "VertexCount", "QuadCount"),
+            new Dep(FxComponentMeshContentManager, nameof(FxComponentMeshContentManager), "layers", "Layers", "IntBufferChunkSize"),
             new Dep(MeshVertexBuffer, nameof(MeshVertexBuffer), "Apply", "Size"),   // WriteContent lives on the RUNTIME buffer subclass, not the declared field type — unreachable statically, read null-tolerant via GetMember
             new Dep(ClipEntry, nameof(ClipEntry), "UnityAnimationClip", "FrameCount", "BonesCount", "CurveIndex", "Looping"),
             new Dep(PawnDefinitionEntry, nameof(PawnDefinitionEntry), "PresentationUnitDefinition"),

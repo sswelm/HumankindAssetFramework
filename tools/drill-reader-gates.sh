@@ -49,6 +49,10 @@ namespace HumankindAssetFramework
     // PLANTED BY tools/drill-reader-gates.sh — if you can read this in the tree, the drill was interrupted; delete it.
     internal static class ReaderGateDrill
     {
+        static object Postfix(object o, string name)
+        {
+            return UniversalInject.GetMember(o, name);
+        }
         static object Peek(object o, string name)
         {
             if (o == null)
@@ -112,7 +116,7 @@ fail=0
 # Every planted wrapper must be named by both self-checks — one missing means a body-boundary blind spot.
 expect_all() {   # $1 gate label, $2 output
   local missing=""
-  for w in Peek PeekComment PeekString PeekInterp; do printf '%s' "$2" | grep -qE "^\s*$w\s" || missing="$missing $w"; done
+  for w in Peek PeekComment PeekString PeekInterp Postfix; do printf '%s' "$2" | grep -qE "^\s*$w\s" || missing="$missing $w"; done
   if [ -n "$missing" ]; then echo "[FAIL] $1 failed, but did not name planted wrapper(s):$missing"; printf '%s\n' "$2" | head -8; return 1; fi
   return 0
 }
@@ -128,6 +132,7 @@ else echo "ok   — check-member-shape.sh refuses the null-guarded / comment-bra
 
 # Second plant: the wrappers under a name the gates DO know (`Mem`) — now the self-checks are silent and the literal
 # extraction and the dead-sentinel regex themselves must catch shapes 2 and 3.
+sed -i '/static object Postfix(/,/^        }/d' "$PLANT"
 sed -i 's/\bPeekComment\b/MemC/g; s/\bPeekString\b/MemS/g; s/\bPeekInterp\b/MemI/g; s/\bPeek\b/Mem/g' "$PLANT"
 sed -i '/static object MemC(/,/^        }/d; /static object MemS(/,/^        }/d; /static object MemI(/,/^        }/d' "$PLANT"
 out=$(bash tools/check-catalog.sh 2>&1); rc=$?

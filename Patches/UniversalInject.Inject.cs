@@ -941,6 +941,14 @@ namespace HumankindAssetFramework
             Rate(verts, vertsMax); Rate(idx, idxMax); Rate(meshes, meshesMax);
             return worst;
         }
+        internal static int BudgetBand(LayerBudget b) => b.CapacityDrops > 0 ? 3 : BudgetBand(b.Verts, b.VertsMax, b.Idx, b.IdxMax, b.Meshes, b.MeshesMax);
+        internal static string BudgetAlarm(LayerBudget b)
+        {
+            if (b.Name == null || b.VertsMax <= 0) return null;
+            int vp = Pct(b.Verts, b.VertsMax), xp = Pct(b.Idx, b.IdxMax);
+            return vp >= 95 || xp >= 95 || b.Dropped > 0
+                ? $"'{b.Name}' verts {vp}% / idx {xp}%" + (b.Dropped > 0 ? $"; {b.Dropped} mesh(es) refused ({b.CapacityDrops} for capacity)" : "") : null;
+        }
         [ProcessLived("last reported band per pawn layer — re-logs only on a band increase")] static int pawnBudgetBand = -1;
         static void CheckPawnBufferCapacity(string modelName)
         {
@@ -950,10 +958,9 @@ namespace HumankindAssetFramework
                 if (pawnLayer < 0 || pawnLayer >= lb.Count) return;
                 var b = lb[pawnLayer];
                 if (b.Name == null || b.VertsMax <= 0) return;
-                int band = BudgetBand(b.Verts, b.VertsMax, b.Idx, b.IdxMax, b.Meshes, b.MeshesMax);
+                int band = BudgetBand(b);
                 // a mesh the layer REFUSED (Hk_MeshDropWatch) does not move the cursors, so the band alone could read
                 // "nearly full" while units vanished: a drop is the wall, whatever the cursors say
-                if (b.Dropped > 0) band = 3;
                 if (band <= pawnBudgetBand) { pawnBudgetBand = band; return; }
                 pawnBudgetBand = band;
                 if (band == 0) return;
@@ -963,7 +970,7 @@ namespace HumankindAssetFramework
                 string remedy = $" Raise Buffers.BufferOverrides (e.g. \"{b.Name}:verts=+500000,idx=+1000000,meshes=+500\").";
                 if (band == 3)
                     Plugin.Log.LogError($"[Uni][BUDGET] pawn layer '{b.Name}' is FULL ({state}; checked at load of '{modelName}') — " +
-                                        (b.Dropped > 0 ? $"{b.Dropped} mesh(es) were REFUSED and do not draw: {string.Join(", ", DroppedIn(b.Name))}." : "anything that did not fit has been dropped SILENTLY, and nothing further will fit.") + remedy);
+                                        (b.CapacityDrops > 0 ? $"{b.CapacityDrops} mesh(es) were REFUSED for lack of capacity and do not draw: {string.Join(", ", b.CapacityNames)}." : "anything that did not fit has been dropped SILENTLY, and nothing further will fit.") + remedy);
                 else if (band == 2)
                     Plugin.Log.LogError($"[Uni][BUDGET] pawn layer '{b.Name}' nearly full: {state} (checked at load of '{modelName}') — a full buffer drops geometry silently." + remedy);
                 else

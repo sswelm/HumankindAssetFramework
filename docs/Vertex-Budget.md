@@ -69,9 +69,22 @@ BufferOverrides = MeshWithSkeletonParticleIndexBuffer:verts=+1000000,idx=+200000
   exist, with the list of layers — a typo no longer enlarges nothing in silence.
 - `idx` stops at **16,777,216**: the encoded mesh handle packs the start index into 24 bits, unmasked,
   so a larger index buffer would corrupt the particle-count byte rather than clamp. The plugin clamps
-  there and says so.
+  there and says so, including a base size enlarged before this hook or an explicit `idx=0` entry. Additions cannot
+  wrap into negative sizes, and a subtraction that would create a nonpositive buffer is refused. Malformed signs
+  and negative `maxtris` values are reported instead of silently changing the configuration.
 - Cost is VRAM only: pawn vertices are ~28 B packed, so `verts=+1000000` ≈ +28 MB, `idx=+2000000`
   ≈ +8 MB. The shader reads buffer sizes dynamically, so the change is transparent.
+
+**Refusals are reported when registration happens.** `[Buffers][DROPPED]` names the mesh, layer, pre-registration
+fill and reason. A full mesh table throws before the engine returns, so the watcher observes that exception too
+and preserves it. A capacity refusal forces the pawn budget alarm to FULL even when the fill cursor did not move.
+An encoder/data refusal asks for mesh inspection instead of a larger buffer. F8 and Shift+F8 count the refusals,
+and the smoke test reports them. Counts belong to each actual layer's current buffer: rebuilding it clears stale
+history, while copying its CPU array keeps failures and repairing a refused entry resolves it.
+
+`bash tools/buffer_hook_drill.sh` exercises the real Harmony adapters and configuration hook in an isolated .NET
+process with engine-shaped records, without a game launch or GPU allocation. The live in-game drop acceptance is
+still a separate check.
 
 With the override above, a **100k-vert hero unit is entirely practical** — the shipped default pool
 already fits one today (~300k free late-game); the override just restores comfortable headroom for

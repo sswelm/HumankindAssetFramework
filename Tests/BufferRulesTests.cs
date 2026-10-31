@@ -72,4 +72,30 @@ public class BufferRulesTests
         Assert.Contains("24-bit", note);
         Assert.Equal(16_777_216, BufferRules.IndexCeiling);
     }
+
+    [Theory]
+    [InlineData("++5")]
+    [InlineData("+-5")]
+    [InlineData("+ 5")]
+    public void Malformed_signs_are_not_silently_applied(string number)
+    {
+        var problems = new List<string>();
+        Assert.Empty(BufferRules.Parse("Visual:verts=" + number, problems));
+        Assert.NotEmpty(problems);
+    }
+    [Fact]
+    public void A_negative_triangle_cap_does_not_turn_into_unlimited()
+    {
+        var problems = new List<string>();
+        Assert.Empty(BufferRules.Parse("Visual:maxtris=-1", problems));
+        Assert.Contains(problems, p => p.Contains("maxtris must"));
+    }
+    [Fact]
+    public void Size_arithmetic_cannot_wrap_or_destroy_a_buffer()
+    {
+        Assert.Equal(100, BufferRules.AddedSize(100, int.MaxValue, out string note)); Assert.NotNull(note);
+        Assert.Equal(100, BufferRules.AddedSize(100, -100, out note)); Assert.NotNull(note);
+        Assert.Equal(50, BufferRules.AddedSize(100, -50, out note)); Assert.Null(note);
+        Assert.Equal(100, BufferRules.ClampedIndexSize(100, -100, out note)); Assert.NotNull(note);
+    }
 }
