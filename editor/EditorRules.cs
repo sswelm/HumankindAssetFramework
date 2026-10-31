@@ -704,7 +704,7 @@ public static class VehicleLabRules
     // second (merged) one. The comparison is GlbDisconnectedParts.GuardPaths' (full paths, case-insensitive), repeated
     // here because the drills compile these rules without the GLB core. Returns the Lab's refusal, or null. A malformed
     // path is not this guard's verdict: the run reports it.
-    public static string SourceGuardRefusal(string raw, string second, string outGlb)
+    public static string SourceGuardRefusal(string raw, string second, string outGlb, string outputLabel = "Output GLB")
     {
         if (string.IsNullOrWhiteSpace(outGlb)) return null;
         foreach (string source in new[] { raw, second })
@@ -714,7 +714,7 @@ public static class VehicleLabRules
             try { same = string.Equals(System.IO.Path.GetFullPath(source), System.IO.Path.GetFullPath(outGlb), StringComparison.OrdinalIgnoreCase); }
             catch (Exception) { continue; }
             if (same)
-                return $"Refused — the Output GLB is the {(source == raw ? "raw" : "second")} model itself ('{source}'). " +
+                return $"Refused — the {outputLabel} is the {(source == raw ? "raw" : "second")} model itself ('{source}'). " +
                        "Pick a new output path; a source model is never overwritten.";
         }
         return null;

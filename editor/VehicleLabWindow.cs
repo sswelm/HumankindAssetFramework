@@ -2271,7 +2271,14 @@ public class VehicleLabWindow : EditorWindow
         // and neither route (vehicle_rig.py, BlenderVehicleRig) has a same-file check of its own. The Workshop already
         // refuses output == source outright (GuardPaths: "the source GLB is never overwritten"); the Lab now asks the
         // same comparison, for both models, before either route runs.
-        string sourceRefusal = VehicleLabRules.SourceGuardRefusal(srcFile, srcFile2, outGlb);
+        string sourceRefusal = VehicleLabSourceGuard.Refusal(srcFile, srcFile2, outGlb);
+        if (sourceRefusal != null) { status = sourceRefusal; return; }
+        string baseName = Path.GetFileNameWithoutExtension(outGlb);
+        string projRoot = Directory.GetParent(Application.dataPath).FullName;
+        string prevDir = PrevDir;
+        string prevRel = prevDir + "/" + baseName + "_preview.fbx";
+        string prevFull = Path.Combine(projRoot, prevRel).Replace('\\', '/');
+        sourceRefusal = VehicleLabSourceGuard.Refusal(srcFile, srcFile2, prevFull, "preview FBX");
         if (sourceRefusal != null) { status = sourceRefusal; return; }
         // OVERWRITE GUARD: the output path is explicit and user-owned — an existing file (e.g. a HAND-MADE rig like
         // the original Ehrhardt_Spin.glb) is never clobbered without an explicit yes.
@@ -2280,13 +2287,8 @@ public class VehicleLabWindow : EditorWindow
                 "Overwrite", "Cancel"))
         { status = "Cancelled — pick a different Output GLB path."; return; }
         DestroyPreview();
-        string baseName = Path.GetFileNameWithoutExtension(outGlb);
         lastOutGlb = outGlb.Replace('\\', '/');
-        string projRoot = Directory.GetParent(Application.dataPath).FullName;
-        string prevDir = PrevDir;   // Assets/FactorySource/VehicleLab, or the Bake Tests' work dir while headless
         Directory.CreateDirectory(Path.Combine(projRoot, prevDir));
-        string prevRel = prevDir + "/" + baseName + "_preview.fbx";
-        string prevFull = Path.Combine(projRoot, prevRel).Replace('\\', '/');
         // Part lists travel via FILE (@path): a thorough marking session is hundreds of shard names — far past
         // the ~32k Windows command-line limit that an inline ;-joined string would hit.
         string wheelsFile = Path.Combine(projRoot, prevDir, baseName + "_wheels.txt").Replace('\\', '/');
@@ -2634,6 +2636,8 @@ public class VehicleLabWindow : EditorWindow
             string projRoot = Directory.GetParent(Application.dataPath).FullName;
             Directory.CreateDirectory(Path.Combine(projRoot, w.headlessDir));
             outGlbPath = Path.Combine(projRoot, w.headlessDir, Path.GetFileNameWithoutExtension(recipePath) + "_Spin.glb").Replace('\\', '/');
+            string refusal = VehicleLabSourceGuard.Refusal(w.srcFile, w.srcFile2, outGlbPath);
+            if (refusal != null) { statusText = refusal; return false; }   // before deleting any existing output
             try { if (File.Exists(outGlbPath)) File.Delete(outGlbPath); } catch { }
             w.outGlb = outGlbPath;
             if (routeOverride != null) w.generateRoute = BlenderVehicleRigInProcess.NormalizeRoute(routeOverride);

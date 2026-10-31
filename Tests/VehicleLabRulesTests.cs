@@ -9,6 +9,36 @@ namespace HumankindAssetFramework.Tests
     // hard-capped at 8 fields, so the NEXT field added to the script would have emptied the Lab with no log.
     public class VehicleLabRulesTests
     {
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+        static extern bool CreateHardLink(string link, string existing, System.IntPtr reserved);
+
+        [Fact]
+        public void Generate_refuses_filesystem_aliases_and_allows_distinct_files()
+        {
+            if (System.Environment.OSVersion.Platform != System.PlatformID.Win32NT) return;
+            string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "haf-source-guard-" + System.Guid.NewGuid().ToString("N"));
+            System.IO.Directory.CreateDirectory(dir);
+            string source = System.IO.Path.Combine(dir, "source.glb"), alias = System.IO.Path.Combine(dir, "alias.glb"), other = System.IO.Path.Combine(dir, "other.glb");
+            try
+            {
+                System.IO.File.WriteAllText(source, "SOURCE"); System.IO.File.WriteAllText(other, "OTHER");
+                Assert.True(CreateHardLink(alias, source, System.IntPtr.Zero));
+                Assert.Contains("raw model through a filesystem alias", VehicleLabSourceGuard.Refusal(source, "", alias));
+                Assert.Contains("second model through a filesystem alias", VehicleLabSourceGuard.Refusal(other, source, alias));
+                Assert.Null(VehicleLabSourceGuard.Refusal(source, "", other));
+                var args = VehicleRigArgLine.RigArgv(new VehicleRigArgs { srcFile = source, outGlb = alias, frames = 24,
+                    namesFiles = VehicleRigArgLine.NamesRoles.ToDictionary(role => role, role => "") }).Select(x => x.value).ToArray();
+                var result = BlenderVehicleRigInProcess.Run(args);
+                Assert.False(result.Written); Assert.Null(result.UseBlender);
+                Assert.Contains("filesystem alias", result.Error);
+                Assert.Equal("SOURCE", System.IO.File.ReadAllText(source));
+            }
+            finally
+            {
+                foreach (string file in new[] { alias, source, other }) if (System.IO.File.Exists(file)) System.IO.File.Delete(file);
+                System.IO.Directory.Delete(dir);
+            }
+        }
         // ---- per-part placement lines (2026-09-20): name|ox,oy,oz|sx,sy,sz, split from the RIGHT on both sides ----
         [Fact]
     public void A_cut_part_finds_its_parents_nearest_first()
@@ -207,6 +237,7 @@ namespace HumankindAssetFramework.Tests
             Assert.Contains("raw model itself", VehicleLabRules.SourceGuardRefusal(raw, second, "C:/Models/tank.glb"));
             Assert.Contains("raw model itself", VehicleLabRules.SourceGuardRefusal(raw, "", @"c:\models\TANK.glb"));   // the same file, spelled differently
             Assert.Contains("second model itself", VehicleLabRules.SourceGuardRefusal(raw, second, "C:/Models/sub/../turret.glb"));
+            Assert.Contains("preview FBX", VehicleLabRules.SourceGuardRefusal("C:/Models/Tank_preview.fbx", "", "C:/Models/Tank_preview.fbx", "preview FBX"));
         }
 
         [Fact]

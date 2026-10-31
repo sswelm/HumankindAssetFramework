@@ -5,17 +5,22 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Vehicle Lab: Turret is a reduce tier** (user: "could you add a turret reduce slider"). A **Turret reduce (%)** slider
+  in *Vertices control*, enabled when a part is marked Turret: a weld tier like Gun (seams welded within each material, then
+  collapse), run before the Turret bone is measured, so its pivot comes from the reduced mesh. Saved in the recipe;
+  reaches the rig script as a tagged `turretreduce=<percent>`, absent while the dial is 0, so every existing recipe and
+  golden generates exactly as before. The C# port of the rig carries the same tier.
+
 - **Vehicle Lab: Generate can no longer overwrite the raw model.** Only an ordinary "Overwrite existing file?"
   dialog stood between the Output GLB and the source. An output browsed to the source, or a recipe whose output
   equals it, took one "Overwrite" click to have Generate write the rig over the model, and neither route (`vehicle_rig.py`,
   the C# port) has a same-file check of its own. Generate now asks the Workshop's guard: output equals source is refused outright, for
   the raw model and the second (merged) model both, with the status naming which one.
 
-- **Vehicle Lab: Turret is a reduce tier** (user: "could you add a turret reduce slider"). A **Turret reduce (%)** slider
-  in *Vertices control*, enabled when a part is marked Turret: a weld tier like Gun (seams welded within each material, then
-  collapse), run before the Turret bone is measured, so its pivot comes from the reduced mesh. Saved in the recipe;
-  reaches the rig script as a tagged `turretreduce=<percent>`, absent while the dial is 0, so every existing recipe and
-  golden generates exactly as before. The C# port of the rig carries the same tier.
+  Review fixes: the headless entry point refuses before deleting an existing output; preview FBX collisions are
+  refused too. Filesystem aliases (junctions, symlinks and hard links) are compared by Windows file identity, and
+  the standalone C# writer shares the guard. `bash tools/vehicle_source_guard_unity_drill.sh` checks source bytes
+  before either backend can run, in a temporary Unity project.
 
 - **Model Fuser view modes:** "Not in a fuse group" is replaced by "Deleted Parts" and "Not marked".
   "Not marked" shows ungrouped parts without a deletion mark, keeping the remaining parts to review separate
