@@ -131,7 +131,10 @@ constant** rather than a copy of the string, so a suite renaming its fixtures ca
 **0 = keep forever**, the original behaviour, still reachable for anyone who relied on it). By **age, not count**: a
 guard's worth is how recently it was made, and a burst of thirty deletions in one afternoon must not evict the single
 one from yesterday that someone actually needs. Manual backups, `_prerestore` and the Factory's `_removed_` undo
-snapshots are still **never** auto-deleted.
+snapshots are still **never** auto-deleted. *Until 2026-10-31 this never ran once*: the daily worker read the
+retention pref from its background thread, where Unity's EditorPrefs throws, and the faulted task said nothing (720
+guards, 321 past the 14 days). The pref is read on the main thread now, the worker logs any throw, and every daily run
+logs `pruned N of M delete-guard snapshot(s)`; `tools/check-worker-thread.py` guards the shape in the push and CI.
 
 ## How a backup is stored
 

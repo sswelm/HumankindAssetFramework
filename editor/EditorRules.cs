@@ -401,6 +401,20 @@ public static class BackupRules
     public static bool IsPlainName(string name) => !string.IsNullOrEmpty(name) && SafeSegment(name) == name;
 
     /// <summary>
+    /// THE DELETE-GUARD PRUNE (2026-08-23, pure since 2026-10-31): a <c>_deleted_</c> folder (the guard's, and the outputs
+    /// snapshot that shares its shape) is expired when it was created <paramref name="keepDays"/> or more days before
+    /// <paramref name="now"/>; 0 keeps forever; nothing else is ever expired, whatever its age. AGE, not count: a burst of
+    /// thirty deletions in one afternoon must not evict the single guard from yesterday somebody needs. The daily worker
+    /// applies this with a keepDays read on the MAIN thread - the read on the worker is why the prune never ran once in
+    /// two months (the 2026-10-31 review).
+    /// </summary>
+    public static bool GuardIsExpired(string folderName, DateTime created, int keepDays, DateTime now)
+    {
+        if (keepDays <= 0 || string.IsNullOrEmpty(folderName) || !folderName.StartsWith(DeletedPrefix, StringComparison.Ordinal)) return false;
+        return created <= now.AddDays(-keepDays);
+    }
+
+    /// <summary>
     /// A folder under <paramref name="root"/> RESERVED for this caller alone (fifth and sixth rounds): the stamp is to
     /// the second and safe names collide ("a/b", "a_b"), so two removes could share one folder — and the cleanup after
     /// the second, refused, one deleted the first one's undo. "Exists, then create" was not enough either: two editors

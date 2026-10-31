@@ -357,6 +357,13 @@ parity_step run_bg "vehicle_rig drill (all five ported stages and the Generate w
 #        away on every Save — silent, and the reason this gate exists. Pure source analysis, so CI can run it too.
 push_step run_lane "hand-list gate (ownership rebases)" bash "$ROOT/tools/check_handlists.sh"
 
+#    5a') THE WORKER THREAD (2026-10-31). The daily backup's delete-guard prune never ran once: its Task.Run body read
+#         KeepGuardDays - EditorPrefs behind a property - and EditorPrefs throws off the main thread, a faulted Task
+#         says nothing, and the log went silent exactly there (720 guards, 321 past the 14 days). This refuses a
+#         main-thread Unity API inside a worker body, directly or ONE HOP away through a member of the same file;
+#         delegates passed by name are listed as unseen. Python, source-only, self-tested on a plant first.
+push_step run_lane "worker thread (no main-thread Unity API inside a Task.Run body, directly or one hop away)" python "$ROOT/tools/check-worker-thread.py"
+
 #    5c) Every path in editor/ has a COMMITTED .meta. Unity generates missing ones under Assets/ and cannot in a
 #        package folder, so the working copy is always right and only the commit is short — invisible from the
 #        authoring side by construction. Broke the install three times on 2026-08-24 (package.json + asmdef, then
