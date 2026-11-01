@@ -42,8 +42,9 @@ if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/fbxmodel.exe" ]; then echo "$OUT" | grep -E 
 # output), and the generated fixtures
 PROJECT="${HAF_UNITY_PROJECT:-C:/Repo/ENCReload}"
 SOURCES=()
-while IFS=$'\t' read -r kind path; do [ "$kind" = RECIPE ] && [ -f "$path" ] && SOURCES+=("$path"); done < <(python "$ROOT/tools/fbx-drill/fbx_inputs.py" "$PROJECT" 2>/dev/null | tr -d '\r')
-if [ -d /d/3DModels ]; then while IFS= read -r f; do case "$f" in *_Spin*|*_preview*|*_probe*) continue;; esac; skip=0; for s in "${SOURCES[@]}"; do [ "$s" = "$f" ] && skip=1; done; [ $skip = 0 ] && SOURCES+=("$f"); done < <(find /d/3DModels -iname '*.fbx' 2>/dev/null); fi
+# every path in one form (cygpath -m, case folded for the match), so a source the recipes name and the drive scan finds is drilled once
+while IFS=$'\t' read -r kind path; do [ "$kind" = RECIPE ] && [ -f "$path" ] && SOURCES+=("$(cygpath -m "$path")"); done < <(python "$ROOT/tools/fbx-drill/fbx_inputs.py" "$PROJECT" 2>/dev/null | tr -d '\r')
+if [ -d /d/3DModels ]; then while IFS= read -r f; do case "$f" in *_Spin*|*_preview*|*_probe*) continue;; esac; f="$(cygpath -m "$f")"; skip=0; for s in "${SOURCES[@]}"; do [ "${s,,}" = "${f,,}" ] && skip=1; done; [ $skip = 0 ] && SOURCES+=("$f"); done < <(find /d/3DModels -iname '*.fbx' 2>/dev/null); fi
 mkdir -p "$TMPD/fixtures"
 mapfile -t FIXTURES < <(python "$ROOT/tools/fbx-drill/fbx_model_fixtures.py" "$WTMP/fixtures" | tr -d '\r')
 FILES=("${SOURCES[@]}" "${FIXTURES[@]}")
