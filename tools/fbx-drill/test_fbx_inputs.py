@@ -42,6 +42,13 @@ class FbxInputTests(unittest.TestCase):
         self.assertEqual(len(missing), 1)
         self.assertIn('srcFile is unavailable, NOT drilled: missing.fbx', missing[0])
 
+    def test_recipes_only_keeps_sources_inside_assets_without_including_generated_outputs(self):
+        source = self.root / 'Assets/source.fbx'
+        source.write_bytes(b'input')
+        (self.root / 'Assets/generated.fbx').write_bytes(b'output')
+        self.recipe({'srcFile': 'Assets/source.fbx', 'srcFile2': str(source)})
+        self.assertEqual(([], [source.as_posix()], []), collect(self.root, include_project=False))
+
     def test_malformed_recipes_do_not_silently_remove_a_population(self):
         path = self.recipes / 'model.json'
         for value in ('{broken', '[]', '{"srcFile":42}', '{"srcFile":0}'):

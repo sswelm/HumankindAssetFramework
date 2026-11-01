@@ -51,6 +51,8 @@ jobs:
         run: python tools/fbx-drill/test_fbx_inputs.py
       - name: FBX scene comparison tests
         run: python Tests/test_compare_fbx_scene.py
+      - name: FBX model coverage tests
+        run: python Tests/test_fbx_model_verdict.py
       - name: Parallel gate regression tests
         run: python Tests/test_parallel_gate.py
       - name: blender oracle tests

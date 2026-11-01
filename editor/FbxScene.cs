@@ -519,6 +519,26 @@ public sealed class FbxScene
 
     public static FbxScene Read(string path) { var s = Read(FbxDocument.Read(path)); return s; }
 
+    // Blender consumes the record graph before doing its own hierarchy selection and mesh repair. Do not run
+    // ufbx's validation, property synthesis or evaluation on that path: those deliberately have different rules.
+    internal static FbxScene ReadBlenderGraph(FbxDocument doc)
+    {
+        var s = new FbxScene { Document = doc, Version = doc.Version, GlobalSettings = FbxProps.Read(doc.First("GlobalSettings")) };
+        s.ReadTemplates();
+        s.ReadObjects();
+        foreach (var o in s.Objects) s.ById[o.Id] = o; // Blender's table keeps the last record of a repeated ID.
+        var conns = doc.First("Connections");
+        if (conns != null) foreach (var c in conns.All("C"))
+        {
+            // io_scene_fbx/load(): only links whose first two identifiers have the binary LL types enter its maps.
+            if (c.Properties.Count < 3 || !(c.Properties[1] is long src) || !(c.Properties[2] is long dst)) continue;
+            var link = new FbxConnection { Kind = c.Properties[0] as string ?? "", SrcId = src, DstId = dst };
+            s.ById.TryGetValue(src, out link.Src); s.ById.TryGetValue(dst, out link.Dst);
+            s.Connections.Add(link);
+        }
+        return s;
+    }
+
     public static FbxScene Read(FbxDocument doc)
     {
         var s = new FbxScene { Document = doc, Version = doc.Version };

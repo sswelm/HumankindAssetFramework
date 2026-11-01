@@ -13,7 +13,8 @@ static class FbxModelDrill
 {
     static int Main(string[] args)
     {
-        if (args.Length < 1) { Console.Error.WriteLine("usage: FbxModelDrill <file.fbx> <blender.glb> [...]  |  --dump <file.fbx>"); return 2; }
+        if (args.Length < 2 || args.Length % 2 != 0 || ((args[0] == "--dump" || args[0] == "--probe") && args.Length != 2))
+        { Console.Error.WriteLine("usage: FbxModelDrill <file.fbx> <blender.glb> [...]  |  --dump <file.fbx>  |  --probe <file.fbx>"); return 2; }
         if (args[0] == "--dump")
         {
             var scene = FbxImport.Read(args[1]);
@@ -55,7 +56,7 @@ static class FbxModelDrill
             catch (Exception e) { Console.WriteLine("ERROR " + fbx + " : " + e.GetType().Name + ": " + e.Message); failed++; }
         }
         Console.WriteLine("RESULT compared=" + compared + " skipped=" + skipped + " failed=" + failed);
-        return failed == 0 ? 0 : 1;
+        return failed != 0 ? 1 : compared == 0 ? 3 : 0;
     }
 
     static string Bits(double d) => BitConverter.ToUInt64(BitConverter.GetBytes(d), 0).ToString("x16");

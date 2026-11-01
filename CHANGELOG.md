@@ -21,11 +21,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   tessellation of Mesh.loop_triangles, the mesh layout with the polygon mesh's corner normals). `VehicleProbe.PolygonNormals.cs`
   generalises the corner normal kernel to polygons and ports mesh_normals_corner_custom_set's sharp-edge tagging.
   `tools/fbx_model_drill.sh` holds the HafModel to Blender's own import + export on every node, transform, mesh and name,
-  bit for bit: the Bradley, the balloon, the light mech and eight generated scenes identical; files with bones, deformers,
+  bit for bit: the Bradley, the balloon, the light mech and fourteen generated scenes identical; files with bones, deformers,
   animation, cameras or colour layers are left to Blender by name (sub-steps 6b-6d). Fourteen planted deviations each failed
   the drill. Found on the way: eulO_to_mat3 computes in double and rounds once; quat_to_eulO does not normalize; an empty
   datablock name is "Mesh"; BLI_strcasecmp compares UNSIGNED bytes (the exporter tree's port said signed: corrected, no glTF
-  population had a non-ASCII sibling). 8 test cases hold Blender's answers.
+  population had a non-ASCII sibling). 17 test cases hold Blender's answers. Review fixes: the Blender path consumes the raw
+  record graph before ufbx's different validation and property synthesis, so last-parent root overrides and repairable
+  polygons import correctly; only LL connections bind, duplicate material IDs use the last record, invalid material indices
+  reset to zero, and later shared-mesh slots extend earlier object overrides. The drill checks generator/Blender exits,
+  complete comparison coverage and mandatory fixture passes; zero comparisons cannot pass. Recipe sources inside Assets
+  remain included without adding generated project outputs.
 - **THE NATIVE FBX READER, STEP 5: ANIMATION, HELD TO UFBX (2026-11-01).** `editor/FbxAnimation.cs` reads and
   evaluates what ufbx does, formula for formula: the AnimationStack, AnimationLayer, AnimationCurveNode and
   AnimationCurve objects (`ufbxi_read_animation_curve` with its float tangents - auto, user, TCB and weighted, the

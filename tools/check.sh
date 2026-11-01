@@ -256,6 +256,7 @@ push_step run "plugin unit tests (dotnet test)" dotnet test "$ROOT/Tests/Humanki
 # wrapper) and timed out under the thirteen parity drills - which the push no longer runs (2026-10-30). The oracle tests
 # belong to the parity mode, where the record machinery is used.
 push_step run_lane "parallel gate regression tests (completion, paths and verdicts)" python "$ROOT/Tests/test_parallel_gate.py"
+push_step run_lane "FBX model coverage tests (lost inputs and skipped fixtures cannot pass)" python "$ROOT/Tests/test_fbx_model_verdict.py"
 # THE PARITY STAMP'S DIGEST IS TAKEN HERE, before any parity drill starts: the verdict's write refuses a different one,
 # so a covered file edited during the run - which the drills did not test - gets no stamp (the review of PR #228).
 PARITY_START_DIGEST=""

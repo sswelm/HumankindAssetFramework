@@ -156,7 +156,7 @@ def fixtures():
     long_name = 'L' * 70
     objects = [geometry(30, '', CUBE_V, CUBE_F), geometry(31, long_name, [0, 0, 0, 1, 0, 0, 0, 1, 0], [[0, 1, 2]]),
                model(1, 'Cube.001'), model(2, 'Cube'), model(3, 'Cube'), model(4, long_name), model(5, 'Shared'), model(6, 'Twice'), model(7, 'ParentA'), model(8, 'ParentB'),
-               # siblings the exporter orders by BLI_strcasecmp: a_part before B_part (case folded), é_part FIRST (a non-ASCII byte is negative)
+               # siblings the exporter orders by BLI_strcasecmp: a_part before B_part (case folded), é_part last (unsigned UTF-8 bytes)
                model(9, 'B_part'), model(10, 'a_part'), model(11, 'é_part'),
                # digits: natural order would put part9 before part10 and Part2 between; plain byte order does not
                model(12, 'part10'), model(13, 'part9'), model(14, 'Part2'), model(15, 'part'),
@@ -186,6 +186,25 @@ def fixtures():
     smooth = geometry(32, 'Mixed', CUBE_V, CUBE_F, [layer('Normal', 'Normals', 'ByPolygonVertex', 'Direct', mixed), layer('Smoothing', 'Smoothing', 'ByPolygon', 'Direct', [1] * 6, typ='i')])
     objects = [model(1, 'Flat'), flat, model(2, 'VertIndexed', vec('Lcl Translation', 3, 0, 0)), vidx, model(3, 'Mixed', vec('Lcl Translation', 6, 0, 0)), smooth, material(40, 'Mat')]
     yield 'normals', scene(objects, [connect(1, 0), connect(2, 0), connect(3, 0), connect(30, 1), connect(31, 2), connect(32, 3), connect(40, 1), connect(40, 2), connect(40, 3)])
+
+    # Blender chooses the last parent (including root) before evaluating: the final root link breaks an earlier cycle.
+    yield 'late_root', scene([model(1, 'A'), model(2, 'B')], [connect(1, 2), connect(2, 1), connect(1, 0)])
+    # mesh.validate removes the bad face, preserving the valid triangle. ufbx's pre-validation would reject the file.
+    vertices = [0, 0, 0, 1, 0, 0, 0, 1, 0]
+    yield 'invalid_face', scene([model(1, 'Node'), geometry(30, 'Geo', vertices, [[0, 1, 2], [0, 1, 99]])], [connect(1, 0), connect(30, 1)])
+    yield 'negative_material', scene([model(1, 'Node'), geometry(30, 'Geo', vertices, [[0, 1, 2]],
+        [layer('Material', 'Materials', 'AllSame', 'IndexToDirect', [-1], typ='i')]), material(40, 'Mat')], [connect(1, 0), connect(30, 1), connect(40, 1)])
+    # Blender only maps links with two long identifiers, not int32 or double identifiers with the same numeric values.
+    yield 'connection_types', scene([model(1, 'Node'), geometry(30, 'Geo', vertices, [[0, 1, 2]])],
+        [connect(1, 0)] + [Node('C', [prop('S', 'OO'), prop(t, 30), prop(t, 1)]) for t in ('I', 'D')])
+    # Appending a mesh slot also extends every object's earlier overrides of that mesh's slots.
+    objects = [model(i, name) for i, name in ((1, 'A'), (2, 'B'), (3, 'C'))]
+    objects += [geometry(30, 'Geo', vertices, [[0, 1, 2]], [layer('Material', 'Materials', 'AllSame', 'IndexToDirect', [2], typ='i')])]
+    objects += [material(i, 'Mat' + str(i)) for i in range(40, 44)]
+    yield 'late_material_slot', scene(objects, [connect(i, 0) for i in (1, 2, 3)] + [connect(30, i) for i in (1, 2, 3)] +
+        [connect(40, 1), connect(41, 1), connect(42, 2), connect(41, 2), connect(40, 3), connect(41, 3), connect(43, 3)])
+    yield 'duplicate_material_id', scene([model(1, 'Node'), geometry(30, 'Geo', vertices, [[0, 1, 2]]), material(40, 'Old'), material(40, 'Last')],
+        [connect(1, 0), connect(30, 1), connect(40, 1)])
 
 
 if __name__ == '__main__':

@@ -71,7 +71,7 @@ public static class FbxImport
 
     public sealed class Scene
     {
-        public FbxScene Source;
+        public FbxScene Source;                  // raw object graph; evaluated ufbx nodes/meshes are not built on this path
         public string Fallback;                  // non-null: what this file has that 6a does not model; Blender's to import
         public readonly List<string> Reasons = new List<string>();
         public readonly List<Mesh> Meshes = new List<Mesh>();       // Geometry file order
@@ -85,10 +85,13 @@ public static class FbxImport
 
     const double DegToRad = Math.PI / 180.0;
 
-    public static Scene Read(string path) => Build(FbxScene.Read(path));
+    public static Scene Read(string path) => Build(FbxDocument.Read(path));
 
-    public static Scene Build(FbxScene s)
+    public static Scene Build(FbxScene s) => Build(s.Document);
+
+    public static Scene Build(FbxDocument doc)
     {
+        var s = FbxScene.ReadBlenderGraph(doc);
         var r = new Scene { Source = s };
         void Decline(string why) { r.Reasons.Add(why); if (r.Fallback == null) r.Fallback = why; }
         if (s.Version < 7100) Decline($"version {s.Version}: Blender's importer refuses files before 7100");
@@ -208,13 +211,18 @@ public static class FbxImport
             for (int i = 0; i < toCompare.Count && i < own.Count; i++) if (toCompare[i] != own[i]) own[i] = toCompare[i];
             o.Materials = own.SequenceEqual(mesh.Materials) ? mesh.Materials : own;
         }
-        foreach (var o in r.Objects) if (o.Mesh != null && o.Materials == null) o.Materials = o.Mesh.Materials;
-        // validate_material_indices: an index at or past the slot count resets to 0 (against max(slots, 1))
+        // Appending a datablock slot grows every user's slots, including objects with earlier per-slot overrides.
+        foreach (var o in r.Objects) if (o.Mesh != null)
+        {
+            if (o.Materials == null) o.Materials = o.Mesh.Materials;
+            else if (o.Materials.Count < o.Mesh.Materials.Count) o.Materials.AddRange(o.Mesh.Materials.Skip(o.Materials.Count));
+        }
+        // validate_material_indices: negative indices and indices at or past max(slots, 1) reset to 0.
         foreach (var m in r.Meshes)
         {
             if (m.FaceMaterial == null) continue;
             int max = Math.Max(m.Materials.Count, 1);
-            for (int f = 0; f < m.FaceMaterial.Length; f++) if (m.FaceMaterial[f] >= max) m.FaceMaterial[f] = 0;
+            for (int f = 0; f < m.FaceMaterial.Length; f++) if (m.FaceMaterial[f] < 0 || m.FaceMaterial[f] >= max) m.FaceMaterial[f] = 0;
         }
         return r;
     }

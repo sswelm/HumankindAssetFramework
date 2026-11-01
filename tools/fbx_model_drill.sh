@@ -7,7 +7,7 @@
 # vertex counts, positions, normals, UV sets and indices as bits) and the material names. A file the import names as a
 # fallback (bones, deformers, animation, cameras, colour layers: sub-steps 6b-6d) is a SKIP row, not a failure.
 # The C# side runs as a 64-bit process (BlenderTrig: the C runtime's float trig). Prerequisites as prep_drill.sh.
-set -u
+set -uo pipefail
 UNITY="${UNITY:-C:/Program Files/Unity 2021.3.1f1/Editor/Data}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WROOT="$(cygpath -m "$ROOT" 2>/dev/null || echo "$ROOT")"
@@ -43,10 +43,22 @@ if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/fbxmodel.exe" ]; then echo "$OUT" | grep -E 
 PROJECT="${HAF_UNITY_PROJECT:-C:/Repo/ENCReload}"
 SOURCES=()
 # every path in one form (cygpath -m, case folded for the match), so a source the recipes name and the drive scan finds is drilled once
-while IFS=$'\t' read -r kind path; do [ "$kind" = RECIPE ] && [ -f "$path" ] && SOURCES+=("$(cygpath -m "$path")"); done < <(python "$ROOT/tools/fbx-drill/fbx_inputs.py" "$PROJECT" 2>/dev/null | tr -d '\r')
-if [ -d /d/3DModels ]; then while IFS= read -r f; do case "$f" in *_Spin*|*_preview*|*_probe*) continue;; esac; f="$(cygpath -m "$f")"; skip=0; for s in "${SOURCES[@]}"; do [ "${s,,}" = "${f,,}" ] && skip=1; done; [ $skip = 0 ] && SOURCES+=("$f"); done < <(find /d/3DModels -iname '*.fbx' 2>/dev/null); fi
+python "$ROOT/tools/fbx-drill/fbx_inputs.py" "$PROJECT" --recipes-only > "$TMPD/inputs.txt" || { echo "FAIL — FBX recipe enumeration failed"; exit 1; }
+while IFS=$'\t' read -r kind path; do
+  path="${path%$'\r'}"
+  if [ "$kind" = RECIPE ]; then
+    [ -f "$path" ] || { echo "FAIL — FBX recipe input disappeared: $path"; exit 1; }
+    SOURCES+=("$(cygpath -m "$path")")
+  elif [ "$kind" = NOTE ]; then echo "NOTE — $path"; fi
+done < "$TMPD/inputs.txt"
+if [ -d /d/3DModels ]; then
+  find /d/3DModels -type f -iname '*.fbx' > "$TMPD/drive.txt" || { echo "FAIL — FBX model-drive enumeration failed"; exit 1; }
+  while IFS= read -r f; do case "$f" in *_Spin*|*_preview*|*_probe*) continue;; esac; f="$(cygpath -m "$f")"; skip=0; for s in "${SOURCES[@]}"; do [ "${s,,}" = "${f,,}" ] && skip=1; done; [ $skip = 0 ] && SOURCES+=("$f"); done < "$TMPD/drive.txt"
+fi
 mkdir -p "$TMPD/fixtures"
-mapfile -t FIXTURES < <(python "$ROOT/tools/fbx-drill/fbx_model_fixtures.py" "$WTMP/fixtures" | tr -d '\r')
+python "$ROOT/tools/fbx-drill/fbx_model_fixtures.py" "$WTMP/fixtures" > "$TMPD/fixtures.txt" || { echo "FAIL — FBX model fixture generation failed"; exit 1; }
+mapfile -t FIXTURES < <(tr -d '\r' < "$TMPD/fixtures.txt")
+[ "${#FIXTURES[@]}" -gt 0 ] || { echo "FAIL — no FBX model fixtures generated"; exit 1; }
 FILES=("${SOURCES[@]}" "${FIXTURES[@]}")
 [ "${#FILES[@]}" -gt 0 ] || { echo "FAIL — no FBX file to drill"; exit 1; }
 
@@ -55,15 +67,15 @@ PAIRS=(); t0=$(date +%s); n_blender=0
 mkdir -p "$TMPD/oracle"
 for f in "${FILES[@]}"; do
   out="$TMPD/oracle/$(basename "${f%.*}")_$n_blender.glb"
-  "$BLENDER" -b --python "$ROOT/tools/fbx-drill/fbx_to_glb.py" -- "$f" "$out" > "$TMPD/blender_$n_blender.log" 2>&1
-  if [ ! -s "$out" ]; then echo "FAIL — Blender wrote nothing for $f:"; grep -iE 'error|Traceback' "$TMPD/blender_$n_blender.log" | head -5; exit 1; fi
+  "$BLENDER" -b --python-exit-code 1 --python "$ROOT/tools/fbx-drill/fbx_to_glb.py" -- "$f" "$out" > "$TMPD/blender_$n_blender.log" 2>&1; rc=$?
+  if [ "$rc" -ne 0 ] || [ ! -s "$out" ]; then echo "FAIL — Blender import/export failed for $f (exit $rc):"; tail -8 "$TMPD/blender_$n_blender.log"; exit 1; fi
   PAIRS+=("$f" "$out"); n_blender=$((n_blender + 1))
 done
 t1=$(date +%s)
 "$TMPD/fbxmodel.exe" "${PAIRS[@]}" > "$TMPD/result.txt" 2>&1; rc=$?
 t2=$(date +%s)
 grep -E '^(DIFF|ERROR|SKIP) ' "$TMPD/result.txt" | cut -c1-400
-RES=$(grep '^RESULT ' "$TMPD/result.txt")
-[ "$rc" -eq 0 ] && [ -n "$RES" ] || { echo "FAIL — FBX model drill: $RES (C# exit $rc)"; tail -5 "$TMPD/result.txt"; exit 1; }
+python "$ROOT/tools/fbx-drill/model_verdict.py" "$TMPD/result.txt" "$rc" "${#SOURCES[@]}" "${FILES[@]}"; verdict=$?
+[ "$verdict" -eq 0 ] || { tail -5 "$TMPD/result.txt"; exit "$verdict"; }
 n_pass=$(grep -c '^PASS ' "$TMPD/result.txt"); n_skip=$(grep -c '^SKIP ' "$TMPD/result.txt")
 echo "PASS — FBX model drill: $n_pass FBX files read by editor/FbxImport.cs + FbxModel.cs equal to Blender 5.1's import + glTF export on every node (name, parent, order, transform bits), mesh (every primitive's positions, normals, UVs, indices, material name) and material name; $n_skip left to Blender by name (bones, deformers, animation, cameras, colours: sub-steps 6b-6d) (Blender $((t1 - t0)) s for ${#FILES[@]} files, C# $((t2 - t1)) s)"

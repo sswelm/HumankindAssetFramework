@@ -48,7 +48,7 @@ public class FbxModelTests
         var d = new FbxDocument { Version = 7400 };
         d.Nodes.AddRange(header ?? Header());
         d.Nodes.Add(With(N("Objects"), objects)); d.Nodes.Add(With(N("Connections"), connections));
-        return FbxImport.Build(FbxScene.Read(d));
+        return FbxImport.Build(d);
     }
     static string Bits(double d) => BitConverter.ToUInt64(BitConverter.GetBytes(d), 0).ToString("x16");
     static string Bits(double[] v) => string.Join(",", v.Select(Bits));
@@ -212,4 +212,72 @@ public class FbxModelTests
         Assert.EndsWith("_" + Sha1Prefix(new string('é', 40)), accented);
     }
     static string Sha1Prefix(string s) { using (var sha = System.Security.Cryptography.SHA1.Create()) return BitConverter.ToString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(s))).Replace("-", "").ToLowerInvariant().Substring(0, 7); }
+
+    [Fact]
+    public void Last_root_link_can_break_an_earlier_parent_cycle_before_hierarchy_validation()
+    {
+        var s = Scene(new[] { Model(1, "A"), Model(2, "B") }, new[] { C(1, 2), C(2, 1), C(1, 0) });
+        Assert.Null(s.Fallback);
+        Assert.Equal(new[] { "A", "B" }, s.Objects.Select(o => o.Name));
+        Assert.Null(s.Objects[0].Parent);
+        Assert.Same(s.Objects[0], s.Objects[1].Parent);
+    }
+
+    [Fact]
+    public void Invalid_vertex_faces_are_repaired_before_ufbx_mesh_validation_can_reject_them()
+    {
+        var s = Scene(new[] { Model(1, "A"), Geometry(30, "Geo", new double[] { 0, 0, 0, 1, 0, 0, 0, 1, 0 },
+            new[] { new[] { 0, 1, 2 }, new[] { 0, 1, 99 } }) }, new[] { C(1, 0), C(30, 1) });
+        Assert.Equal(1, s.Meshes[0].FaceCount);
+        Assert.Equal(3, FbxModel.Build(s).Meshes[0].Primitives[0].Indices.Length);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(32768)]
+    [InlineData(65535)]
+    public void Invalid_material_indices_reset_to_the_first_slot(int index)
+    {
+        var s = Scene(new[] { Model(1, "A"), Geometry(30, "Geo", CubeV, CubeF, null,
+            Layer("Material", "Materials", "AllSame", "IndexToDirect", new[] { index })), Material(40, "Mat") }, new[] { C(1, 0), C(30, 1), C(40, 1) });
+        Assert.All(s.Meshes[0].FaceMaterial, i => Assert.Equal(0, i));
+        Assert.Equal("Mat", FbxModel.Build(s).Materials[0].Name);
+    }
+
+    [Fact]
+    public void Non_long_connection_ids_do_not_bind_geometry_in_the_blender_graph()
+    {
+        var s = Scene(new[] { Model(1, "A"), Geometry(30, "Geo", CubeV, CubeF) },
+            new[] { C(1, 0), N("C", "OO", 30, 1), N("C", "OO", 30.0, 1.0) });
+        Assert.Null(s.Objects[0].Mesh);
+        Assert.Empty(FbxModel.Build(s).Meshes);
+    }
+
+    [Fact]
+    public void Later_shared_mesh_slots_extend_earlier_object_overrides()
+    {
+        var objects = new[] { Model(1, "A"), Model(2, "B"), Model(3, "C"), Geometry(30, "Geo", CubeV, CubeF, null,
+            Layer("Material", "Materials", "AllSame", "IndexToDirect", new[] { 2 })),
+            Material(40, "Mat40"), Material(41, "Mat41"), Material(42, "Mat42"), Material(43, "Mat43") };
+        var s = Scene(objects, new[] { C(1, 0), C(2, 0), C(3, 0), C(30, 1), C(30, 2), C(30, 3),
+            C(40, 1), C(41, 1), C(42, 2), C(41, 2), C(40, 3), C(41, 3), C(43, 3) });
+        Assert.Equal(new[] { "Mat42", "Mat41", "Mat43" }, s.Objects[1].Materials.Select(m => m.Name));
+        Assert.Equal("Mat43", FbxModel.Build(s).Materials[0].Name);
+    }
+
+    [Fact]
+    public void Duplicate_material_ids_resolve_to_the_last_record()
+    {
+        var s = Scene(new[] { Model(1, "A"), Geometry(30, "Geo", CubeV, CubeF), Material(40, "Old"), Material(40, "Last") },
+            new[] { C(1, 0), C(30, 1), C(40, 1) });
+        Assert.Equal("Last", s.Objects[0].Materials[0].Name);
+        Assert.Equal("Last", FbxModel.Build(s).Materials[0].Name);
+    }
+
+    [Fact]
+    public void Unsupported_files_decline_before_evaluating_their_unmodelled_data()
+    {
+        var s = Scene(new[] { Object("Deformer", 40, "BrokenSkin", "Skin"), Model(1, "A"), Model(2, "B") }, new[] { C(1, 2), C(2, 1) });
+        Assert.Contains("deformers", s.Fallback);
+    }
 }
