@@ -36,8 +36,10 @@ double ufbx_atan2(double y, double x) { ucrt_init(); return p_atan2(y, x); }
 double ufbx_pow(double x, double y) { ucrt_init(); return p_pow(x, y); }
 double ufbx_rint(double x) { ucrt_init(); return p_rint(x); }
 double ufbx_nextafter(double x, double y) { ucrt_init(); return p_nextafter(x, y); }
-double ufbx_fmin(double a, double b) { return a < b ? a : b; }
-double ufbx_fmax(double a, double b) { return a > b ? a : b; }
+// C99 fmin/fmax discard a single NaN operand. A ternary comparison propagates a right-hand NaN instead,
+// changing ufbx's ear weights when finite tiny/large coordinates underflow/overflow intermediate products.
+double ufbx_fmin(double a, double b) { return fmin(a, b); }
+double ufbx_fmax(double a, double b) { return fmax(a, b); }
 double ufbx_fabs(double x) { return fabs(x); }
 double ufbx_copysign(double x, double y) { return copysign(x, y); }
 double ufbx_floor(double x) { return floor(x); }

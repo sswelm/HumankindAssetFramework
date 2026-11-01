@@ -126,4 +126,14 @@ public class FbxTriangulateTests
             Assert.True((bx - ax) * (cy - ay) - (by - ay) * (cx - ax) > 0, $"triangle {i / 3} is folded");
         }
     }
+
+    [Fact]
+    public void Underflowed_ear_weights_keep_C99_fmax_semantics()
+    {
+        // Stock ufbx's answer for finite positions whose ear-weight divisions produce NaNs. The oracle's
+        // former comparison-only fmax wrapper returned a fan instead: 0,1,2 / 0,2,3 / 0,3,4 / 0,4,5.
+        const double s = 5e-151;
+        var m = Mesh(new double[] { 0, 0, 0, 0, s, 0, 0, 0, s, 0, 0, -s, 0, 0, 0, 0, -s, 0 }, Range(0, 6));
+        AssertTriangles(m, 5, 0, 2, 0, 1, 2, 4, 2, 3, 4, 5, 2);
+    }
 }

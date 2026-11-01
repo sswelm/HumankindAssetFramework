@@ -135,10 +135,12 @@ populations or refusal rows; these seven comparator tests run in the drill and C
 filename outside the Windows ANSI code page, guarding the oracle's wide-argument to UTF-8 conversion. Its third step
 (2026-11-01) adds every face's triangles to the same comparison: `editor/FbxTriangulate.cs` against
 `ufbx_triangulate_face` (the quad's shorter-diagonal rule with its crossing test, the n-gon's ear clipping in the
-plane of its Newell normal with the reflex corners in a KD tree), hashed per mesh as corner indices in order. Six
+plane of its Newell normal with the reflex corners in a KD tree), hashed per mesh as corner indices in order. Seven
 generated polygon scenes reach what the real files do not: a dart whose shorter diagonal is crossed, twisted quads,
 L and U shapes, stars (one of 320 corners, past the KD tree's cached levels), reversed windings, a tilted star, a
-near-degenerate strip, repeated corners. Planted deviations (no reflex check, no crossing rule, no ear weighting)
+near-degenerate strip, repeated corners, and finite tiny coordinates whose ear-weight products underflow. The last
+scene guards the oracle's C99 `fmax` NaN handling: comparison-only wrappers produced different triangles from stock
+ufbx. Planted deviations (no reflex check, no crossing rule, no ear weighting)
 each changed the fixture dump; a plain scan of the reflex corners did not, and the tree is kept for the cases where
 its pruning decides.
 

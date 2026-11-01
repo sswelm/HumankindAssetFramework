@@ -16,9 +16,12 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   the two ears at hand first, with the polygon's reflex corners in the same median KD tree ufbx builds (the tree decides
   which corners are tested, so a plain scan is not the same algorithm in the near-degenerate cases); the fallback cuts
   non-ears. `FbxMeshData.Triangles` holds the result as corner indices. The drill's dump gains a `triangles` hash per
-  mesh on both sides: every face of every file identical to ufbx's on the first run (the real files, the ten downloaded
+  mesh on both sides: the initial comparison matched every face of every file (the real files, the ten downloaded
   sources with 325,792 triangles, and six generated polygon scenes: a dart, twisted quads, L and U shapes, stars of 16
-  and 320 corners, reversed windings, a tilted star, repeated corners). Six unit tests hold ufbx's own triangle lists.
+  and 320 corners, reversed windings, a tilted star, repeated corners). Review added a seventh polygon scene with
+  finite tiny coordinates whose ear weights underflow: the oracle's comparison-only `fmin`/`fmax` wrappers propagated
+  a right-hand NaN and triangulated it differently from stock ufbx. They now use the C99 math functions. Seven unit
+  tests hold ufbx's own triangle lists; an additional 7,000-polygon differential probe matched stock ufbx.
 - **THE NATIVE FBX READER, STEP 2: THE OBJECT GRAPH, HELD TO UFBX (2026-11-01).** `editor/FbxScene.cs` gives the record
   tree its meaning the way ufbx (the reference reader, 0.23.1) does, formula for formula: objects and their Properties70
   with the Definitions' templates behind them, connections, the node tree in ufbx's order, every node's local transform

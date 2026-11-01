@@ -135,6 +135,12 @@ def triangulation_fixtures():
     verts = dup + touch
     nD = len(dup) // 3
     yield 'ngons_degenerate', scene([obj('Model', 1, 'Node', 'Mesh'), polygon(30, 'Degenerate', verts, [list(range(nD)), list(range(nD, len(verts) // 3))])], [connect(1, 0), connect(30, 1)])
+    # Finite coordinates, but ear-weight products underflow: some cosines are 0/0. The C99 fmax must
+    # discard a NaN on either side. A comparison-only oracle wrapper incorrectly falls back to a fan.
+    s = 5e-151
+    tiny = [0, 0, 0, 0, s, 0, 0, 0, s, 0, 0, -s, 0, 0, 0, 0, -s, 0]
+    yield 'ngon_underflow', scene([obj('Model', 1, 'Node', 'Mesh'),
+        polygon(30, 'Underflow', tiny, [list(range(6))])], [connect(1, 0), connect(30, 1)])
 
 
 def bad_fixtures():
