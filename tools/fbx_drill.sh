@@ -134,7 +134,8 @@ if [ "${#SCENE_FILES[@]}" -gt 0 ]; then
   n_nodes=$(grep -c '^node ' "$TMPD/scene-cs.lf"); n_meshes=$(grep -c '^mesh ' "$TMPD/scene-cs.lf"); n_mats=$(grep -c '^material ' "$TMPD/scene-cs.lf")
   n_streams=$(grep -cE '^  (position|normal|uv[0-9]+|color[0-9]+|tangent|bitangent) values=' "$TMPD/scene-cs.lf")
   n_tris=$(grep '^  triangles count=' "$TMPD/scene-cs.lf" | sed 's/.*count=\([0-9]*\).*/\1/' | awk '{s+=$1} END {print s+0}')
-  RESULT2="PASS — FBX object layer: ${#SCENE_FILES[@]} files, $n_nodes nodes (every local transform, node-to-parent and node-to-world matrix as bits), $n_meshes meshes ($n_streams vertex streams, every face and its $n_tris triangles as hashes), $n_mats materials - equal to ufbx 0.23.1's own reading (C# $((t4 - t3)) s, ufbx $((t5 - t4)) s)"
+  n_skins=$(grep -c '^skin ' "$TMPD/scene-cs.lf"); n_clusters=$(grep -c '^cluster ' "$TMPD/scene-cs.lf"); n_poses=$(grep -c '^pose ' "$TMPD/scene-cs.lf"); n_bones=$(grep -c '^bone ' "$TMPD/scene-cs.lf")
+  RESULT2="PASS — FBX object layer: ${#SCENE_FILES[@]} files, $n_nodes nodes (every local transform, node-to-parent and node-to-world matrix as bits), $n_meshes meshes ($n_streams vertex streams, every face and its $n_tris triangles as hashes), $n_mats materials, $n_skins skins with $n_clusters clusters (every vertex's sorted weights as hashes, every binding matrix as bits), $n_poses poses, $n_bones bones - equal to ufbx 0.23.1's own reading (C# $((t4 - t3)) s, ufbx $((t5 - t4)) s)"
   echo "$RESULT2"
   RESULT="$RESULT | $RESULT2"
   python "$ROOT/tools/fbx-drill/fbx_scene_fixtures.py" --bad "$WTMP/bad-scenes" > "$TMPD/bad-scenes.txt" || { echo "FAIL — bad scene fixture generation failed"; exit 1; }
@@ -142,7 +143,7 @@ if [ "${#SCENE_FILES[@]}" -gt 0 ]; then
   [ "${#BAD_SCENES[@]}" -gt 0 ] || { echo "FAIL — no malformed scenes"; exit 1; }
   "$WTMP/mono-host.exe" "$UNITY/MonoBleedingEdge" "$WTMP/drill.exe" --reject-scene "${BAD_SCENES[@]}" > "$TMPD/reject-scene-cs.txt" 2>&1 || { echo "FAIL — C# scene refusals:"; cat "$TMPD/reject-scene-cs.txt"; exit 1; }
   "$TMPD/ufbxdump.exe" --reject "${BAD_SCENES[@]}" > "$TMPD/reject-scene-u.txt" 2>&1 || { echo "FAIL — ufbx scene refusals:"; cat "$TMPD/reject-scene-u.txt"; exit 1; }
-  echo "PASS — both scene readers refused ${#BAD_SCENES[@]} cyclic hierarchies"
+  echo "PASS — both scene readers refused ${#BAD_SCENES[@]} malformed scenes (cyclic hierarchies, mismatched cluster arrays, short matrices)"
 fi
 [ "$N_PROJECT" -gt 0 ] || { echo "SKIP — ${RESULT#PASS — } | the project population was NOT drilled: no modding project at $PROJECT (set HAF_UNITY_PROJECT)"; exit 3; }
 exit 0

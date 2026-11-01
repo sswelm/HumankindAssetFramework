@@ -142,7 +142,23 @@ near-degenerate strip, repeated corners, and finite tiny coordinates whose ear-w
 scene guards the oracle's C99 `fmax` NaN handling: comparison-only wrappers produced different triangles from stock
 ufbx. Planted deviations (no reflex check, no crossing rule, no ear weighting)
 each changed the fixture dump; a plain scan of the reflex corners did not, and the tree is kept for the cases where
-its pruning decides.
+its pruning decides. Its fourth step (2026-11-01) adds the skins to the same comparison: every skin deformer's
+clusters, its per-vertex weights sorted as ufbx sorts them (hashed), every cluster's four binding matrices and its
+world transform as bits, every bind pose's bone matrices as bits, every bone's radius in the exporter's unit, the
+exporter itself (from the header's Creator string) and each mesh's instance order. The real population carries 521
+skins with 11,383 clusters and 7.3 million weights, 521 bind poses and 4,408 bones; 22 generated skin scenes add the
+shapes it lacks: clusters without matrices (filled from the bind pose, the binding computed from its inverse), the
+root in a pose, duplicate and bone-less clusters, NaN and tied weights (the stable sort's own order), the four
+skinning methods with dual-quaternion weights, the quaternion branches of `ufbx_matrix_to_transform` with a negative
+determinant, a zero column and a singular bind matrix, the exporter strings, a node with two bone attributes and a
+mesh with two instances, property-free OP/PO/PP connections (including texture property routing), a cluster bound to
+the synthetic root, named-property links excluded from bindings, and non-string property fields skipped. A
+45-influence list with NaNs and ties reaches the merge sort; an allocation regression guards sorting ordinary
+four-influence lists in place. Three malformed scenes (mismatched cluster arrays, short matrices) must be refused by both
+readers. Ten planted deviations (an unstable sort, no pose fill, no geometric transform, the wrong axis flipped, the
+exporter undetected, the first mesh or bone instead of the last, the root entry skipped, poses unsorted, and the
+identity multiply skipped) each changed a dump; the last changed nothing on the fixtures but 26 lines on the real
+files, where Blender's negative zeros become positive under ufbx's multiplication, so the multiply stays.
 
 **Since 2026-10-11 the drills run concurrently, and since 2026-10-29 the source guards run on a lane beside them.**
 The drills are independent (each works in its own temp directory and builds its own exe), so `check.sh` starts them

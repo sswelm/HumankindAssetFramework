@@ -114,14 +114,15 @@ static int dump_main(int argc, char **argv) {
 			continue;
 		}
 		if (!scene) { printf("ERROR %s\n", error.description.data); failed = 1; continue; }
-		printf("settings up=%d front=%d right=%d unit=%016llx fps=%016llx version=%u\n", (int)scene->settings.axes.up, (int)scene->settings.axes.front, (int)scene->settings.axes.right,
-			(unsigned long long)bits(scene->settings.unit_meters), (unsigned long long)bits(scene->settings.frames_per_second), scene->metadata.version);
-		printf("counts nodes=%zu meshes=%zu materials=%zu textures=%zu skins=%zu clusters=%zu bones=%zu anim_stacks=%zu\n",
-			scene->nodes.count, scene->meshes.count, scene->materials.count, scene->textures.count, scene->skin_deformers.count, scene->skin_clusters.count, scene->bones.count, scene->anim_stacks.count);
+		printf("settings up=%d front=%d right=%d unit=%016llx fps=%016llx version=%u exporter=%d exporter_version=%u\n", (int)scene->settings.axes.up, (int)scene->settings.axes.front, (int)scene->settings.axes.right,
+			(unsigned long long)bits(scene->settings.unit_meters), (unsigned long long)bits(scene->settings.frames_per_second), scene->metadata.version, (int)scene->metadata.exporter, scene->metadata.exporter_version);
+		printf("counts nodes=%zu meshes=%zu materials=%zu textures=%zu skins=%zu clusters=%zu bones=%zu poses=%zu anim_stacks=%zu\n",
+			scene->nodes.count, scene->meshes.count, scene->materials.count, scene->textures.count, scene->skin_deformers.count, scene->skin_clusters.count, scene->bones.count, scene->poses.count, scene->anim_stacks.count);
 		for (size_t i = 0; i < scene->nodes.count; i++) {
 			ufbx_node *n = scene->nodes.data[i];
-			printf("node %zu \"%s\" parent=%d attrib=%s mesh=%d inherit=%d order=%d rotspace=%d geomxf=%d visible=%d\n", i, n->name.data, n->parent ? (int)n->parent->typed_id : -1,
-				attrib_name(n->attrib_type), n->mesh ? (int)n->mesh->typed_id : -1, (int)n->inherit_mode, (int)n->rotation_order, n->use_rotation_space ? 1 : 0, n->has_geometry_transform ? 1 : 0, n->visible ? 1 : 0);
+			printf("node %zu \"%s\" parent=%d attrib=%s mesh=%d inherit=%d order=%d rotspace=%d geomxf=%d visible=%d bind_pose=%d bone=%d\n", i, n->name.data, n->parent ? (int)n->parent->typed_id : -1,
+				attrib_name(n->attrib_type), n->mesh ? (int)n->mesh->typed_id : -1, (int)n->inherit_mode, (int)n->rotation_order, n->use_rotation_space ? 1 : 0, n->has_geometry_transform ? 1 : 0, n->visible ? 1 : 0,
+				n->bind_pose ? (int)n->bind_pose->typed_id : -1, n->bone ? (int)n->bone->typed_id : -1);
 			printf("  local"); print_vec3("t", n->local_transform.translation); print_quat("r", n->local_transform.rotation); print_vec3("s", n->local_transform.scale); printf("\n");
 			print_matrix("n2p", &n->node_to_parent);
 			print_matrix("n2w", &n->node_to_world);
@@ -129,7 +130,7 @@ static int dump_main(int argc, char **argv) {
 		}
 		for (size_t i = 0; i < scene->meshes.count; i++) {
 			ufbx_mesh *m = scene->meshes.data[i];
-			printf("mesh %zu \"%s\" vertices=%zu faces=%zu indices=%zu triangles=%zu max_face=%u materials=%zu instances=%zu\n", i, m->name.data, m->num_vertices, m->num_faces, m->num_indices, m->num_triangles, m->max_face_triangles, m->materials.count, m->instances.count);
+			printf("mesh %zu \"%s\" vertices=%zu faces=%zu indices=%zu triangles=%zu max_face=%zu materials=%zu instances=%zu\n", i, m->name.data, m->num_vertices, m->num_faces, m->num_indices, m->num_triangles, m->max_face_triangles, m->materials.count, m->instances.count);
 			hash_reset();
 			for (size_t f = 0; f < m->num_faces; f++) {
 				ufbx_face face = m->faces.data[f];
@@ -163,6 +164,8 @@ static int dump_main(int argc, char **argv) {
 			dump_stream_vec3("tangent", &m->vertex_tangent, m->num_indices);
 			dump_stream_vec3("bitangent", &m->vertex_bitangent, m->num_indices);
 			for (size_t k = 0; k < m->materials.count; k++) printf("  slot %zu material=%d\n", k, m->materials.data[k] ? (int)m->materials.data[k]->typed_id : -1);
+			for (size_t k = 0; k < m->skin_deformers.count; k++) printf("  skin %u\n", m->skin_deformers.data[k]->typed_id);
+			for (size_t k = 0; k < m->instances.count; k++) printf("  instance %u\n", m->instances.data[k]->typed_id);
 		}
 		for (size_t i = 0; i < scene->materials.count; i++) {
 			ufbx_material *mat = scene->materials.data[i];
@@ -170,6 +173,40 @@ static int dump_main(int argc, char **argv) {
 			print_vec3("diffuse", mat->fbx.diffuse_color.value_vec3);
 			printf(" textures=%zu\n", mat->textures.count);
 			for (size_t t = 0; t < mat->textures.count; t++) printf("  texture \"%s\" -> \"%s\"\n", mat->textures.data[t].material_prop.data, mat->textures.data[t].texture->relative_filename.data);
+		}
+		// step 4: bones, skins (every vertex's sorted weights as a hash), clusters (raw weights as a hash, the four
+		// matrices and the world transform as bits), poses (every bone's matrices as bits)
+		for (size_t i = 0; i < scene->bones.count; i++) {
+			ufbx_bone *b = scene->bones.data[i];
+			printf("bone %zu \"%s\" root=%d radius=%016llx rel=%016llx instances=%zu\n", i, b->name.data, b->is_root ? 1 : 0, (unsigned long long)bits(b->radius), (unsigned long long)bits(b->relative_length), b->instances.count);
+		}
+		for (size_t i = 0; i < scene->skin_deformers.count; i++) {
+			ufbx_skin_deformer *s = scene->skin_deformers.data[i];
+			printf("skin %zu \"%s\" method=%d clusters=%zu vertices=%zu weights=%zu max_weights=%zu dq=%zu\n", i, s->name.data, (int)s->skinning_method, s->clusters.count, s->vertices.count, s->weights.count, s->max_weights_per_vertex, s->num_dq_weights);
+			printf("  clusters"); for (size_t c = 0; c < s->clusters.count; c++) printf(" %u", s->clusters.data[c]->typed_id); printf("\n");
+			hash_reset();
+			for (size_t v = 0; v < s->vertices.count; v++) { ufbx_skin_vertex sv = s->vertices.data[v]; hash_u32(sv.weight_begin); hash_u32(sv.num_weights); hash_double(sv.dq_weight); if (full) printf("  sv %zu begin=%u n=%u dq=%016llx\n", v, sv.weight_begin, sv.num_weights, (unsigned long long)bits(sv.dq_weight)); }
+			printf("  skin_vertices hash=%016llx\n", (unsigned long long)fnv);
+			hash_reset();
+			for (size_t w = 0; w < s->weights.count; w++) { ufbx_skin_weight sw = s->weights.data[w]; hash_u32(sw.cluster_index); hash_double(sw.weight); if (full) printf("  sw %zu cluster=%u w=%016llx\n", w, sw.cluster_index, (unsigned long long)bits(sw.weight)); }
+			printf("  skin_weights hash=%016llx\n", (unsigned long long)fnv);
+			hash_reset();
+			for (size_t d = 0; d < s->num_dq_weights; d++) { hash_u32(s->dq_vertices.data[d]); hash_double(s->dq_weights.data[d]); }
+			printf("  dq hash=%016llx\n", (unsigned long long)fnv);
+		}
+		for (size_t i = 0; i < scene->skin_clusters.count; i++) {
+			ufbx_skin_cluster *c = scene->skin_clusters.data[i];
+			printf("cluster %zu \"%s\" bone=%d num_weights=%zu\n", i, c->name.data, c->bone_node ? (int)c->bone_node->typed_id : -1, c->num_weights);
+			hash_reset();
+			for (size_t k = 0; k < c->num_weights; k++) { hash_u32(c->vertices.data[k]); hash_double(c->weights.data[k]); if (full) printf("  cw %zu %u %016llx\n", k, c->vertices.data[k], (unsigned long long)bits(c->weights.data[k])); }
+			printf("  raw hash=%016llx\n", (unsigned long long)fnv);
+			print_matrix("m2b", &c->mesh_node_to_bone); print_matrix("b2w", &c->bind_to_world); print_matrix("g2b", &c->geometry_to_bone); print_matrix("g2w", &c->geometry_to_world);
+			printf("  g2wt"); print_vec3("t", c->geometry_to_world_transform.translation); print_quat("r", c->geometry_to_world_transform.rotation); print_vec3("s", c->geometry_to_world_transform.scale); printf("\n");
+		}
+		for (size_t i = 0; i < scene->poses.count; i++) {
+			ufbx_pose *p = scene->poses.data[i];
+			printf("pose %zu \"%s\" bind=%d bones=%zu\n", i, p->name.data, p->is_bind_pose ? 1 : 0, p->bone_poses.count);
+			for (size_t b = 0; b < p->bone_poses.count; b++) { ufbx_bone_pose *bp = &p->bone_poses.data[b]; printf("  bone %u\n", bp->bone_node->typed_id); print_matrix("b2w", &bp->bone_to_world); print_matrix("b2p", &bp->bone_to_parent); }
 		}
 		ufbx_free_scene(scene);
 	}

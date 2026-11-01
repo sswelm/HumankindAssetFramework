@@ -26,7 +26,7 @@ public static class FbxTriangulate
     static double DistSq(V2 a, V2 b) { double dx = a.X - b.X, dy = a.Y - b.Y; return dx * dx + dy * dy; }
     static double Orient2d(V2 a, V2 b, V2 c) => (b.X - a.X) * (c.Y - a.Y) - (b.Y - a.Y) * (c.X - a.X);
     /// <summary>C's fmax: a NaN operand loses to the other, unlike Math.Max.</summary>
-    static double FMax(double a, double b) => double.IsNaN(a) ? b : double.IsNaN(b) ? a : (a < b ? b : a);
+    static double FMax(double a, double b) => FbxMath.FMax(a, b);
 
     /// <summary>Every face of the mesh as corner indices (into the mesh's index space, as ufbx), three per triangle,
     /// faces in order; NumTriangles * 3 entries. A face under three corners yields nothing.</summary>

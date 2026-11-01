@@ -17,26 +17,26 @@ static class FbxSceneDump
 
     public static void Dump(FbxScene s, StringBuilder o, bool full)
     {
-        int textures = 0, skins = 0, clusters = 0, bones = 0, stacks = 0;
+        int textures = 0, stacks = 0;
         foreach (var ob in s.Objects)
         {
             if (ob.IsTexture) textures++;
-            else if (ob.Class == "Deformer" && ob.SubType == "Skin") skins++;
-            else if (ob.Class == "Deformer" && ob.SubType == "Cluster") clusters++;
-            else if (ob.Class == "NodeAttribute" && (ob.SubType == "LimbNode" || ob.SubType == "Limb" || ob.SubType == "Root")) bones++;
             else if (ob.Class == "AnimationStack") stacks++;
         }
         o.Append("settings up=").Append(s.UpAxis).Append(" front=").Append(s.FrontAxis).Append(" right=").Append(s.RightAxis)
-         .Append(" unit=").Append(Bits(s.UnitMeters)).Append(" fps=").Append(Bits(s.FramesPerSecond)).Append(" version=").Append(s.Version).Append('\n');
+         .Append(" unit=").Append(Bits(s.UnitMeters)).Append(" fps=").Append(Bits(s.FramesPerSecond)).Append(" version=").Append(s.Version)
+         .Append(" exporter=").Append(s.Exporter).Append(" exporter_version=").Append(s.ExporterVersion).Append('\n');
         o.Append("counts nodes=").Append(s.Nodes.Count).Append(" meshes=").Append(s.Meshes.Count).Append(" materials=").Append(s.Materials.Count)
-         .Append(" textures=").Append(textures).Append(" skins=").Append(skins).Append(" clusters=").Append(clusters).Append(" bones=").Append(bones).Append(" anim_stacks=").Append(stacks).Append('\n');
+         .Append(" textures=").Append(textures).Append(" skins=").Append(s.Skins.Count).Append(" clusters=").Append(s.Clusters.Count).Append(" bones=").Append(s.Bones.Count)
+         .Append(" poses=").Append(s.Poses.Count).Append(" anim_stacks=").Append(stacks).Append('\n');
         for (int i = 0; i < s.Nodes.Count; i++)
         {
             var n = s.Nodes[i];
             o.Append("node ").Append(i).Append(" \"").Append(n.Name).Append("\" parent=").Append(n.Parent != null ? n.Parent.Index : -1)
              .Append(" attrib=").Append(n.AttribType).Append(" mesh=").Append(n.Mesh != null ? n.Mesh.Index : -1)
              .Append(" inherit=").Append(n.InheritMode).Append(" order=").Append(n.RotationOrder).Append(" rotspace=").Append(n.UseRotationSpace ? 1 : 0)
-             .Append(" geomxf=").Append(n.HasGeometryTransform ? 1 : 0).Append(" visible=").Append(n.Visible ? 1 : 0).Append('\n');
+             .Append(" geomxf=").Append(n.HasGeometryTransform ? 1 : 0).Append(" visible=").Append(n.Visible ? 1 : 0)
+             .Append(" bind_pose=").Append(n.BindPose != null ? n.BindPose.Index : -1).Append(" bone=").Append(n.Bone != null ? n.Bone.Index : -1).Append('\n');
             var t = n.LocalTransform;
             o.Append("  local t=").Append(Bits(t.tx)).Append(',').Append(Bits(t.ty)).Append(',').Append(Bits(t.tz))
              .Append(" r=").Append(Bits(t.qx)).Append(',').Append(Bits(t.qy)).Append(',').Append(Bits(t.qz)).Append(',').Append(Bits(t.qw))
@@ -85,6 +85,8 @@ static class FbxSceneDump
             Stream("tangent", m.Tangent, m.NumIndices, o, full);
             Stream("bitangent", m.Bitangent, m.NumIndices, o, full);
             for (int k = 0; k < m.Materials.Count; k++) o.Append("  slot ").Append(k).Append(" material=").Append(MaterialIndex(s, m.Materials[k])).Append('\n');
+            foreach (var sk in m.SkinDeformers) o.Append("  skin ").Append(sk.Index).Append('\n');
+            foreach (var n in m.Instances) o.Append("  instance ").Append(n.Index).Append('\n');
         }
         for (int i = 0; i < s.Materials.Count; i++)
         {
@@ -93,6 +95,54 @@ static class FbxSceneDump
              .Append(" diffuse=").Append(Bits(mat.Diffuse[0])).Append(',').Append(Bits(mat.Diffuse[1])).Append(',').Append(Bits(mat.Diffuse[2]))
              .Append(" textures=").Append(mat.Textures.Count).Append('\n');
             foreach (var (prop, _, file) in mat.Textures) o.Append("  texture \"").Append(prop).Append("\" -> \"").Append(file).Append("\"\n");
+        }
+        // step 4: bones, skins, clusters, poses in ufbxdump.c's lines
+        foreach (var b in s.Bones)
+            o.Append("bone ").Append(b.Index).Append(" \"").Append(b.Name).Append("\" root=").Append(b.IsRoot ? 1 : 0).Append(" radius=").Append(Bits(b.Radius))
+             .Append(" rel=").Append(Bits(b.RelativeLength)).Append(" instances=").Append(b.Instances.Count).Append('\n');
+        foreach (var sk in s.Skins)
+        {
+            o.Append("skin ").Append(sk.Index).Append(" \"").Append(sk.Name).Append("\" method=").Append(sk.SkinningMethod).Append(" clusters=").Append(sk.Clusters.Count)
+             .Append(" vertices=").Append(sk.Vertices.Length).Append(" weights=").Append(sk.Weights.Length).Append(" max_weights=").Append(sk.MaxWeightsPerVertex).Append(" dq=").Append(sk.NumDqWeights).Append('\n');
+            o.Append("  clusters"); foreach (var cl in sk.Clusters) o.Append(' ').Append(cl.Index); o.Append('\n');
+            HashReset();
+            for (int v = 0; v < sk.Vertices.Length; v++)
+            {
+                var sv = sk.Vertices[v]; HashU32((uint)sv.WeightBegin); HashU32((uint)sv.NumWeights); HashDouble(sv.DqWeight);
+                if (full) o.Append("  sv ").Append(v).Append(" begin=").Append(sv.WeightBegin).Append(" n=").Append(sv.NumWeights).Append(" dq=").Append(Bits(sv.DqWeight)).Append('\n');
+            }
+            o.Append("  skin_vertices hash=").Append(fnv.ToString("x16")).Append('\n');
+            HashReset();
+            for (int w = 0; w < sk.Weights.Length; w++)
+            {
+                var sw = sk.Weights[w]; HashU32((uint)sw.ClusterIndex); HashDouble(sw.Weight);
+                if (full) o.Append("  sw ").Append(w).Append(" cluster=").Append(sw.ClusterIndex).Append(" w=").Append(Bits(sw.Weight)).Append('\n');
+            }
+            o.Append("  skin_weights hash=").Append(fnv.ToString("x16")).Append('\n');
+            HashReset();
+            for (int d = 0; d < sk.NumDqWeights; d++) { HashU32(unchecked((uint)sk.DqVertices[d])); HashDouble(sk.DqWeights[d]); }
+            o.Append("  dq hash=").Append(fnv.ToString("x16")).Append('\n');
+        }
+        foreach (var cl in s.Clusters)
+        {
+            o.Append("cluster ").Append(cl.Index).Append(" \"").Append(cl.Name).Append("\" bone=").Append(cl.BoneNode != null ? cl.BoneNode.Index : -1).Append(" num_weights=").Append(cl.NumWeights).Append('\n');
+            HashReset();
+            for (int k = 0; k < cl.NumWeights; k++)
+            {
+                HashU32(unchecked((uint)cl.Vertices[k])); HashDouble(cl.Weights[k]);
+                if (full) o.Append("  cw ").Append(k).Append(' ').Append(unchecked((uint)cl.Vertices[k])).Append(' ').Append(Bits(cl.Weights[k])).Append('\n');
+            }
+            o.Append("  raw hash=").Append(fnv.ToString("x16")).Append('\n');
+            Matrix("m2b", cl.MeshNodeToBone, o); Matrix("b2w", cl.BindToWorld, o); Matrix("g2b", cl.GeometryToBone, o); Matrix("g2w", cl.GeometryToWorld, o);
+            var t = cl.GeometryToWorldTransform;
+            o.Append("  g2wt t=").Append(Bits(t.tx)).Append(',').Append(Bits(t.ty)).Append(',').Append(Bits(t.tz))
+             .Append(" r=").Append(Bits(t.qx)).Append(',').Append(Bits(t.qy)).Append(',').Append(Bits(t.qz)).Append(',').Append(Bits(t.qw))
+             .Append(" s=").Append(Bits(t.sx)).Append(',').Append(Bits(t.sy)).Append(',').Append(Bits(t.sz)).Append('\n');
+        }
+        foreach (var p in s.Poses)
+        {
+            o.Append("pose ").Append(p.Index).Append(" \"").Append(p.Name).Append("\" bind=").Append(p.IsBindPose ? 1 : 0).Append(" bones=").Append(p.BonePoses.Count).Append('\n');
+            foreach (var bp in p.BonePoses) { o.Append("  bone ").Append(bp.BoneNode.Index).Append('\n'); Matrix("b2w", bp.BoneToWorld, o); Matrix("b2p", bp.BoneToParent, o); }
         }
     }
 
