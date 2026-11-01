@@ -250,13 +250,30 @@ public static class BlenderExport
     }
 
     /// <summary>The triangle primitives of a reduced, unskinned mesh, one per material slot in use, ascending.</summary>
-    public static List<Primitive> MeshPrimitives(BlenderReduce.Result r, Skin skin = null)
+    public static List<Primitive> MeshPrimitives(BlenderReduce.Result r, Skin skin = null) => MeshPrimitives(r, skin, null);
+
+    /// <summary>... with the mesh's corner normals GIVEN (3 per corner of r.Faces, Blender's frame, as Mesh.corner_normals holds
+    /// them): a polygon mesh's normals are decided by its polygons' fans before the exporter tessellates it (FbxModel), so the
+    /// triangle walk above is not the one to run; the exporter's rounding, normalizing and Y-up turn still apply. The mesh is
+    /// taken as already validated.</summary>
+    internal static List<Primitive> MeshPrimitives(BlenderReduce.Result r, Skin skin, float[] cornerNormalsBlenderFrame)
     {
-        r = Validated(r);
+        if (cornerNormalsBlenderFrame == null) r = Validated(r);
         int nc = r.Faces.Length, nf = nc / 3;
         var plan = ColorPlan(r);
         float[] nt = skin != null ? VehicleProbe.ExporterNormalTransform(skin.ArmatureWorld, skin.ObjectWorld) : null;
-        var normals = CornerNormals(r.Positions, r.Faces, r.FaceSharp, r.CustomNormal, nt, r.EdgeSharp == null ? null : VehicleProbe.SharpEdgeSet(r.Edges, r.EdgeSharp));
+        float[] normals;
+        if (cornerNormalsBlenderFrame != null)
+        {
+            normals = new float[nc * 3];
+            for (int c = 0; c < nc; c++)
+            {
+                float x = cornerNormalsBlenderFrame[3 * c], y = cornerNormalsBlenderFrame[3 * c + 1], z = cornerNormalsBlenderFrame[3 * c + 2];
+                ExportedNormal(ref x, ref y, ref z, nt);
+                normals[3 * c] = x; normals[3 * c + 1] = z; normals[3 * c + 2] = -y;   // zup2yup
+            }
+        }
+        else normals = CornerNormals(r.Positions, r.Faces, r.FaceSharp, r.CustomNormal, nt, r.EdgeSharp == null ? null : VehicleProbe.SharpEdgeSet(r.Edges, r.EdgeSharp));
         float[] locs = r.Positions; ushort[] vertJoints = null; float[] vertWeights = null; bool neutral = false;
         if (skin != null) { locs = SkinnedPositions(r.Positions, skin.ObjectWorld); VertexBones(r, skin, out vertJoints, out vertWeights, out neutral); }
         int colorAt = 1 + 3 + 2 * r.Uv.Count;
