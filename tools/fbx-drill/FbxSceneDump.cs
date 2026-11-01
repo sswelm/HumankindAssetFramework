@@ -72,6 +72,12 @@ static class FbxSceneDump
                 if (full) o.Append("  vertex ").Append(v).Append(' ').Append(Bits(m.Vertices[v * 3])).Append(' ').Append(Bits(m.Vertices[v * 3 + 1])).Append(' ').Append(Bits(m.Vertices[v * 3 + 2])).Append('\n');
             }
             o.Append("  vertices hash=").Append(fnv.ToString("x16")).Append('\n');
+            // step 3: every face through FbxTriangulate (the quad rule, the n-gon ear clipping); corner indices in order
+            HashReset();
+            var tris = m.Triangles;
+            foreach (var t in tris) HashU32((uint)t);
+            if (full) { int at = 0; for (int f = 0; f < m.NumFaces; f++) for (int t = 0; t < Math.Max(0, m.FaceSize[f] - 2); t++, at += 3) o.Append("  tri ").Append(f).Append(' ').Append(tris[at]).Append(',').Append(tris[at + 1]).Append(',').Append(tris[at + 2]).Append('\n'); }
+            o.Append("  triangles count=").Append(tris.Length / 3).Append(" hash=").Append(fnv.ToString("x16")).Append('\n');
             Stream("position", m.Position, m.NumIndices, o, full);
             Stream("normal", m.Normal, m.NumIndices, o, full);
             for (int u = 0; u < m.UvSets.Count; u++) { o.Append("  uvset ").Append(u).Append(" \"").Append(m.UvSets[u].Name).Append("\"\n"); Stream("uv" + u, m.UvSets[u], m.NumIndices, o, full); }

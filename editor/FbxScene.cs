@@ -267,6 +267,9 @@ public sealed class FbxMeshData
     public int[] FaceMaterial = new int[0];
     public readonly List<FbxObject> Materials = new List<FbxObject>();
     public readonly List<FbxSceneNode> Instances = new List<FbxSceneNode>();
+    /// <summary>Every face as triangles (FbxTriangulate.Mesh, ufbx's rules), corner indices three per triangle; computed once.</summary>
+    public int[] Triangles => triangles ?? (triangles = FbxTriangulate.Mesh(this));
+    int[] triangles;
 }
 
 public sealed class FbxMaterialData
