@@ -430,4 +430,63 @@ public class FbxAnimTests
         var gimbal = FbxAnimation.QuatToEuler(FbxMath.EulerToQuat(new[] { 0.0, 90.0, 0.0 }, 0), 0);
         Assert.Equal(90.0, gimbal[1], 9); Assert.Equal(0.0, gimbal[0]);
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_template_missing_a_synthetic_property_keeps_zero_defaults_without_NoValue(bool connected)
+    {
+        var definitions = With(N("Definitions"), With(N("ObjectType", "Model"), With(N("PropertyTemplate", "FbxNode"), Props70(P("Other", 9.0)))));
+        var objects = new[] { Model(1, "Driven"), Model(2, "Driver", P("Lcl Scaling", 2.0, 3.0, 4.0)),
+            Stack(60, "Take", 0.0, 1.0), Layer(61, "Base"), CurveNode(70, "S", 2, 3, 4) };
+        var edge = connected ? PP(2, "Lcl Scaling", 1, "Lcl Scaling") : OP(70, 1, "Lcl Scaling");
+        var s = Scene(objects, new[] { C(1, 0), C(2, 0), C(61, 60), C(70, 61), edge }, null, definitions);
+        var node = Node(s, "Driven"); var prop = node.Object.Props.Own("Lcl Scaling");
+        Assert.True(prop.Synthetic);
+        Assert.False(prop.NoValue);
+        Assert.Equal(new[] { 0.0, 0.0, 0.0 }, prop.Reals.Take(3));
+        Assert.Equal((0.0, 0.0, 0.0), (node.LocalTransform.sx, node.LocalTransform.sy, node.LocalTransform.sz));
+        var t = FbxAnimation.EvaluateTransform(s.Anim, node, 0.5);
+        Assert.Equal((2.0, 3.0, 4.0), (t.sx, t.sy, t.sz));
+    }
+
+    [Fact]
+    public void A_property_connection_from_the_synthetic_root_is_resolved()
+    {
+        var s = Scene(new[] { Model(1, "Driven", P("Lcl Translation", 1.0, 2.0, 3.0)), Stack(60, "Take", 0.0, 1.0), Layer(61, "Base") },
+            new[] { C(1, 0), C(61, 60), PP(0, "Nothing", 1, "Lcl Translation") });
+        var node = Node(s, "Driven");
+        Assert.True(node.Object.Props.Own("Lcl Translation").Connected);
+        var t = FbxAnimation.EvaluateTransform(s.Anim, node, 0.5);
+        Assert.Equal((0.0, 0.0, 0.0), (t.tx, t.ty, t.tz)); // ufbx evaluates the root's missing property to zero
+    }
+
+    [Fact]
+    public void An_indirect_rotation_order_evaluation_cycle_is_a_named_refusal()
+    {
+        // This is not a direct connection cycle: RotationOrder is driven by Lcl Rotation, whose additive
+        // composition evaluates RotationOrder again. The unguarded evaluator exhausted the runtime stack.
+        var s = Scene(new[] { Model(1, "Node", P("Lcl Rotation", 0.0, 0.0, 0.0), P("RotationOrder", 0)),
+            Stack(60, "Take", 0.0, 1.0), Layer(61, "Base", P("BlendMode", 1)), Layer(62, "Add", P("BlendMode", 0), P("Weight", 50.0)),
+            CurveNode(70, "R", 30, 0, 0), CurveNode(71, "R", 20, 0, 0) },
+            new[] { C(1, 0), C(61, 60), C(62, 60), C(70, 61), C(71, 62), OP(70, 1, "Lcl Rotation"), OP(71, 1, "Lcl Rotation"), PP(1, "Lcl Rotation", 1, "RotationOrder") });
+        Assert.Contains("Cyclic animation property", Assert.Throws<InvalidDataException>(() => FbxAnimation.EvaluateTransform(s.Anim, Node(s, "Node"), 0.5)).Message);
+        Assert.Contains("Cyclic animation property", Assert.Throws<InvalidDataException>(() => FbxAnimation.EvaluateProp(s.Anim, Node(s, "Node").Object, "Lcl Rotation", 0.5)).Message);
+    }
+
+    [Fact]
+    public void Deep_acyclic_rotation_dependencies_are_bounded_before_stack_exhaustion()
+    {
+        var objects = new List<FbxNode> { Stack(1000, "Take", 0.0, 1.0), Layer(1001, "Base", P("BlendMode", 1)),
+            Layer(1002, "Add", P("BlendMode", 0)), CurveNode(1003, "BaseR", 10, 0, 0), CurveNode(1004, "AddR", 20, 0, 0) };
+        var edges = new List<FbxNode> { C(1001, 1000), C(1002, 1000), C(1003, 1001), C(1004, 1002) };
+        for (int i = 1; i <= 70; i++)
+        {
+            objects.Add(Model(i, "Node" + i, P("Lcl Rotation", 0.0, 0.0, 0.0), P("RotationOrder", 0)));
+            edges.Add(C(i, 0)); edges.Add(OP(1003, i, "Lcl Rotation")); edges.Add(OP(1004, i, "Lcl Rotation"));
+            if (i < 70) edges.Add(PP(i + 1, "Lcl Rotation", i, "RotationOrder"));
+        }
+        var s = Scene(objects.ToArray(), edges.ToArray());
+        Assert.Contains("128 dependent properties", Assert.Throws<InvalidDataException>(() => FbxAnimation.EvaluateTransform(s.Anim, Node(s, "Node1"), 0.5)).Message);
+    }
 }

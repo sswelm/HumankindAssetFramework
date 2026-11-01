@@ -517,6 +517,28 @@ def anim_fixtures():
         yield name, scene(objects, [connect(1, 0), connect(61, 60), connect(70, 61), op(70, 1, 'Lcl Translation'), op(80, 70, 'd|X')], head)
 
 
+def anim_review_fixtures():
+    # A template exists, but does not declare Scaling. ufbx keeps the synthetic zeros without NO_VALUE,
+    # for both animated and connected properties (built-in ones are used only without a template).
+    template = Node('Definitions', [], [Node('ObjectType', [prop('S', 'Model')], [
+        Node('PropertyTemplate', [prop('S', 'FbxNode')], [properties(p('Other', 9.0))])])])
+    for connected in (False, True):
+        objects = [model(1, 'Node', 'Null'), model(2, 'Driver', 'Null', p('Lcl Scaling', 2.0, 3.0, 4.0)),
+            anim_stack(60, 'Take', 0.0, 1.0), anim_layer(61, 'Base'), curve_node(70, 'S', 2.0, 3.0, 4.0)]
+        binding = pp(2, 'Lcl Scaling', 1, 'Lcl Scaling') if connected else op(70, 1, 'Lcl Scaling')
+        yield 'anim_template_missing_' + ('connected' if connected else 'animated'), scene(objects,
+            [connect(1, 0), connect(2, 0), connect(61, 60), connect(70, 61), binding], [template])
+    # ID zero is a valid property source. A missing root property evaluates to zero, overriding the stored value.
+    yield 'anim_root_driver', scene([model(1, 'Node', 'Null', p('Lcl Translation', 1.0, 2.0, 3.0)),
+        anim_stack(60, 'Take', 0.0, 1.0), anim_layer(61, 'Base')],
+        [connect(1, 0), connect(61, 60), pp(0, 'Nothing', 1, 'Lcl Translation')])
+    # The same four-byte name key, then BMP private-use and a supplementary character: UTF-8 and UTF-16
+    # ordinal ordering differ. The reader and both dumps must use UTF-8 order.
+    yield 'anim_unicode_properties', scene([model(1, 'Node', 'Null'), anim_stack(60, 'Take', 0.0, 1.0),
+        anim_layer(61, 'Base'), curve_node(70, 'V', 1.0), curve_node(71, 'W', 2.0)],
+        [connect(1, 0), connect(61, 60), connect(70, 61), connect(71, 61), op(70, 1, 'aaaa\ue000'), op(71, 1, 'aaaa\U0001f600')])
+
+
 def bad_fixtures():
     yield 'cycle_self', scene([obj('Model', 1, 'Self', 'Null')], [connect(1, 1)])
     yield 'cycle_pair', scene([obj('Model', 1, 'One', 'Null'), obj('Model', 2, 'Two', 'Null')], [connect(1, 2), connect(2, 1)])
@@ -546,6 +568,7 @@ if __name__ == '__main__':
         yield from triangulation_fixtures()
         yield from skin_fixtures()
         yield from anim_fixtures()
+        yield from anim_review_fixtures()
     for name, nodes in (bad_fixtures() if reject else good()):
         path = out / (name + '.fbx')
         write_fbx(path, 7400, nodes)

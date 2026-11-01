@@ -107,8 +107,9 @@ public static class FbxAnimation
 
     /// <summary>For each element, the properties named by a connection INTO it: CONNECTED when a source property is named
     /// (PO/PP), ANIMATED when the source is an AnimationCurveNode without one (OP). A named property the element does not
-    /// store is synthesised: the template's copy if there is one, else zeros (ones for Lcl Scaling) for an animated one,
-    /// else a NO_VALUE placeholder the internal lookups skip. Connections with an unresolved end do not exist to ufbx.</summary>
+    /// store is synthesised: a template's copy when present, or zeros when the template omits it. With no template,
+    /// animation supplies zeros (ones for Lcl Scaling), and connection-only properties get NO_VALUE placeholders.
+    /// Connections with an unresolved end do not exist to ufbx.</summary>
     public static void FlagProperties(FbxScene s)
     {
         foreach (var o in s.Objects)
@@ -138,8 +139,13 @@ public static class FbxAnimation
                 if (o.Props.Defaults != null) def = o.Props.Defaults.Find(name);
                 var synthetic = new FbxProp { Name = name, Synthetic = true, Animated = animated, Connected = connected };
                 if (def != null) { synthetic.Type = def.Type; synthetic.SubType = def.SubType; synthetic.Flags = def.Flags; synthetic.ValueInt = def.ValueInt; synthetic.HasInt = def.HasInt; Array.Copy(def.Reals, synthetic.Reals, 4); synthetic.RealCount = def.RealCount; synthetic.Animated |= def.Animated; synthetic.Connected |= def.Connected; }
-                else if (animated) { if (name == "Lcl Scaling") { synthetic.Reals[0] = synthetic.Reals[1] = synthetic.Reals[2] = 1.0; synthetic.RealCount = 3; } }
-                else synthetic.NoValue = true;
+                // ufbx only supplies built-in defaults/NO_VALUE when there is no template at all. If a
+                // template exists but omits this property, the synthetic property keeps zero values and flags.
+                else if (o.Props.Defaults == null)
+                {
+                    if (animated) { if (name == "Lcl Scaling") { synthetic.Reals[0] = synthetic.Reals[1] = synthetic.Reals[2] = 1.0; synthetic.RealCount = 3; } }
+                    else synthetic.NoValue = true;
+                }
                 synthetic.ValueStr = ""; synthetic.HasStr = false;
                 o.Props.Add(synthetic);
             }
@@ -664,7 +670,7 @@ public static class FbxAnimation
     {
         if (anim == null) return node.LocalTransform;
         if (node.IsRoot) return node.LocalTransform;
-        var props = SelectedProps(anim, node.Object, time, TransformProps);
+        var props = SelectedProps(anim, node.Object, time, TransformProps, new EvaluationState());
         var evaluated = new FbxProps(props, node.Object.Props);
         int order = (int)evaluated.Enum("RotationOrder", 0, 6);
         return FbxScene.GetTransform(evaluated, order, node);
@@ -672,31 +678,48 @@ public static class FbxAnimation
 
     /// <summary>ufbxi_evaluate_selected_props: the element's OWN properties among the names that are animated or connected,
     /// copied, the connected ones resolved through their connections, then evaluated.</summary>
-    static List<FbxProp> SelectedProps(FbxAnim anim, FbxObject element, double time, string[] names)
+    static List<FbxProp> SelectedProps(FbxAnim anim, FbxObject element, double time, string[] names, EvaluationState state)
     {
         var props = new List<FbxProp>();
         foreach (string name in names)
         {
             var prop = element.Props.Own(name);
             if (prop == null) continue;
-            if (prop.Connected) { var copy = Copy(prop); EvaluateConnectedProp(copy, anim, element, name, time); props.Add(copy); }
+            if (prop.Connected) { var copy = Copy(prop); EvaluateConnectedProp(copy, anim, element, name, time, state); props.Add(copy); }
             else if (prop.Animated) props.Add(Copy(prop));
         }
-        EvaluateProps(anim, element, time, props);
+        EvaluateProps(anim, element, time, props, state);
         return props;
     }
 
     /// <summary>ufbx_evaluate_prop_flags_len: one property of an element at a time (the public lookup includes templates).</summary>
-    public static FbxProp EvaluateProp(FbxAnim anim, FbxObject element, string name, double time)
+    public static FbxProp EvaluateProp(FbxAnim anim, FbxObject element, string name, double time) => EvaluateProp(anim, element, name, time, new EvaluationState());
+
+    // Direct connection cycles are handled by the reference's 1000-hop walk. Indirect cycles can also pass
+    // through composed rotation -> RotationOrder -> a connected rotation. Keep this state local to one evaluation
+    // so concurrent evaluations do not share it, and bound acyclic dependency depth before the runtime stack fails.
+    sealed class EvaluationState
     {
-        var prop = element.Props.FindAny(name);
-        FbxProp result;
-        if (prop != null) result = Copy(prop);
-        else result = new FbxProp { Name = name, NotFound = true, ValueStr = "" };
-        if (!(result.Animated || result.Connected)) return result;
-        if (prop.Connected) EvaluateConnectedProp(result, anim, element, prop.Name, time);
-        EvaluateProps(anim, element, time, new List<FbxProp> { result });
-        return result;
+        public HashSet<(FbxObject, string)> Active;
+    }
+
+    static FbxProp EvaluateProp(FbxAnim anim, FbxObject element, string name, double time, EvaluationState state)
+    {
+        var active = state.Active ?? (state.Active = new HashSet<(FbxObject, string)>());
+        if (!active.Add((element, name))) throw new InvalidDataException($"FBX: Cyclic animation property evaluation at '{element.Name}.{name}'");
+        try
+        {
+            if (active.Count > 128) throw new InvalidDataException($"FBX: animation property evaluation exceeds 128 dependent properties at '{element.Name}.{name}'");
+            var prop = element.Props.FindAny(name);
+            FbxProp result;
+            if (prop != null) result = Copy(prop);
+            else result = new FbxProp { Name = name, NotFound = true, ValueStr = "" };
+            if (!(result.Animated || result.Connected)) return result;
+            if (prop.Connected) EvaluateConnectedProp(result, anim, element, prop.Name, time, state);
+            EvaluateProps(anim, element, time, new List<FbxProp> { result }, state);
+            return result;
+        }
+        finally { active.Remove((element, name)); }
     }
 
     static FbxProp Copy(FbxProp p)
@@ -722,7 +745,7 @@ public static class FbxAnimation
 
     /// <summary>ufbxi_evaluate_connected_prop: follow the property connections to their source (at most a thousand hops) and
     /// take that property's evaluated value; a cycle leaves the property to its own animation.</summary>
-    static void EvaluateConnectedProp(FbxProp prop, FbxAnim anim, FbxObject element, string name, double time)
+    static void EvaluateConnectedProp(FbxProp prop, FbxAnim anim, FbxObject element, string name, double time, EvaluationState state)
     {
         var conn = FindPropConnection(element, name);
         for (int i = 0; i < 1000 && conn != null; i++)
@@ -733,7 +756,7 @@ public static class FbxAnimation
         }
         if (conn != null && FindPropConnection(conn.Src, conn.SrcProp) == null)
         {
-            var ep = EvaluateProp(anim, conn.Src, conn.SrcProp, time);
+            var ep = EvaluateProp(anim, conn.Src, conn.SrcProp, time, state);
             System.Array.Copy(ep.Reals, prop.Reals, 4); prop.RealCount = ep.RealCount;
             prop.ValueInt = ep.ValueInt; prop.HasInt = ep.HasInt;
             prop.ValueStr = ep.ValueStr; prop.HasStr = ep.HasStr;
@@ -741,12 +764,12 @@ public static class FbxAnimation
         else prop.Connected = false;
     }
 
-    sealed class CombineContext { public FbxAnim Anim; public FbxObject Element; public double Time; public bool HasRotationOrder; public int RotationOrder; }
+    sealed class CombineContext { public FbxAnim Anim; public FbxObject Element; public double Time; public bool HasRotationOrder; public int RotationOrder; public EvaluationState State; }
 
     /// <summary>ufbxi_evaluate_props: layer by layer, the first layer assigns and the others combine by weight.</summary>
-    static void EvaluateProps(FbxAnim anim, FbxObject element, double time, List<FbxProp> props)
+    static void EvaluateProps(FbxAnim anim, FbxObject element, double time, List<FbxProp> props, EvaluationState state)
     {
-        var ctx = new CombineContext { Anim = anim, Element = element, Time = time };
+        var ctx = new CombineContext { Anim = anim, Element = element, Time = time, State = state };
         for (int layerIx = 0; layerIx < anim.Layers.Count; layerIx++)
         {
             var layer = anim.Layers[layerIx];
@@ -779,7 +802,7 @@ public static class FbxAnimation
     {
         if (layer.ComposeRotation && layer.Blended && propName == "Lcl Rotation" && !ctx.HasRotationOrder)
         {
-            var rp = EvaluateProp(ctx.Anim, ctx.Element, "RotationOrder", ctx.Time);
+            var rp = EvaluateProp(ctx.Anim, ctx.Element, "RotationOrder", ctx.Time, ctx.State);
             ctx.RotationOrder = rp.ValueInt >= 0 && rp.ValueInt <= 6 ? (int)rp.ValueInt : 0;
             ctx.HasRotationOrder = true;
         }

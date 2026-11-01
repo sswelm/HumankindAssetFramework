@@ -24,9 +24,14 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   layer assigns, the others combine by weight: additive and blended layers, rotations composed through quaternion slerp
   under the evaluated rotation order, scales through powers) with connected properties resolved through their chains,
   and `ufbx_evaluate_transform`. The drill's dump on both sides gains the stacks, layers, values, curves (keys and
-  thirteen samples as hashes) and every node's transform at thirteen times of every stack; the real population (160
-  stacks, 164 layers, 44,097 curves, 1.25 million keyframes) and nine generated animation scenes are identical to ufbx's
-  reading and evaluation; five malformed curves are refused by both. 13 test cases hold ufbx's answers. The first
+  thirteen samples as hashes) and every node's transform at thirteen times of every stack; the review population
+  (238 files, 164 stacks, 168 layers, 44,098 curves, 1,247,971 keyframes, including 13 animation scenes) is identical to ufbx's
+  reading and evaluation; five malformed curves are refused by both. 18 animation test cases cover the reader and
+  evaluator. Review fixes the synthetic defaults/NO_VALUE flags when a template omits the property, root-sourced
+  property connections, and UTF-8 ordering in the animated-property dump. Indirect rotation-order dependency cycles
+  now raise a named error before stack exhaustion; evaluation also refuses more than 128 nested property dependencies.
+  The cycle also exhausted stock ufbx's stack in an isolated probe, so its refusal is a managed regression test rather
+  than a good-file oracle comparison. Four hundred randomized curves matched ufbx's keys and samples. The first
   population run differed on 24 lines: ufbx's max of two reals keeps the FIRST of a tie (`a < b ? b : a`) and its min
   the last, which Blender's curves of signed zeros (equal, differently signed) tell apart from a `>` comparison.
 - **THE NATIVE FBX READER, STEP 4: SKINS, HELD TO UFBX (2026-11-01).** `editor/FbxScene.cs` reads what ufbx reads of

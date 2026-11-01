@@ -178,7 +178,7 @@ static class FbxSceneDump
              .Append(" blended=").Append(l.Blended ? 1 : 0).Append(" additive=").Append(l.Additive ? 1 : 0).Append(" compose_rot=").Append(l.ComposeRotation ? 1 : 0)
              .Append(" compose_scale=").Append(l.ComposeScale ? 1 : 0).Append(" values=").Append(l.Values.Count).Append(" props=").Append(l.AnimProps.Length).Append('\n');
             o.Append("  values"); foreach (var v in l.Values) o.Append(' ').Append(v.Index); o.Append('\n');
-            var sorted = l.AnimProps.OrderBy(a => a.Element.ElementId).ThenBy(a => a.Key).ThenBy(a => a.PropName, StringComparer.Ordinal).ThenBy(a => a.Value.Index).ToList();
+            var sorted = l.AnimProps.OrderBy(a => a.Element.ElementId).ThenBy(a => a.Key).ThenBy(a => a.PropName, FbxScene.Utf8Order).ThenBy(a => a.Value.Index).ToList();
             HashReset();
             foreach (var ap in sorted)
             {

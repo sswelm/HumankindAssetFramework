@@ -489,6 +489,9 @@ public sealed class FbxScene
     public FbxDocument Document;
     public int Version;
     public readonly List<FbxObject> Objects = new List<FbxObject>();
+    // ID zero is the synthetic root, a valid property-connection source even though it is not a stored object.
+    // Connections INTO zero stay special (parenting); they are not ordinary attribute/animation destinations.
+    readonly FbxObject rootObject = new FbxObject { Id = 0, ElementId = 0, Class = "Model", Name = "", SubType = "Root", Props = new FbxProps(), Record = new FbxNode { Name = "Model" } };
     public readonly Dictionary<long, FbxObject> ById = new Dictionary<long, FbxObject>();
     public readonly List<FbxConnection> Connections = new List<FbxConnection>();
     public readonly Dictionary<string, List<(string subType, FbxProps props)>> Templates = new Dictionary<string, List<(string, FbxProps)>>(StringComparer.Ordinal);
@@ -679,6 +682,7 @@ public sealed class FbxScene
             if (kind == "PO" || kind == "PP") conn.SrcProp = c.Properties[2] as string ?? "";
             if (kind == "PP") conn.DstProp = c.Properties[4] as string ?? "";
             ById.TryGetValue(conn.SrcId, out conn.Src); ById.TryGetValue(conn.DstId, out conn.Dst);
+            if (conn.SrcId == 0) conn.Src = rootObject;
             Connections.Add(conn);
             conn.Src?.Targets.Add(conn);
             conn.Dst?.Sources.Add(conn);
