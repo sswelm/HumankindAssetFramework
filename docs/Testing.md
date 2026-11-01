@@ -132,7 +132,15 @@ sin and cos from ucrtbase, the library `FbxMath` P/Invokes. Ten generated scenes
 identifiers/arrays, layer order, primary tangents, parenting and textures; both readers must refuse two cyclic
 hierarchies. `Tests/test_compare_fbx_scene.py` tests that matching output cannot hide failed processes, incomplete
 populations or refusal rows; these seven comparator tests run in the drill and CI. The control fixture has a Unicode
-filename outside the Windows ANSI code page, guarding the oracle's wide-argument to UTF-8 conversion.
+filename outside the Windows ANSI code page, guarding the oracle's wide-argument to UTF-8 conversion. Its third step
+(2026-11-01) adds every face's triangles to the same comparison: `editor/FbxTriangulate.cs` against
+`ufbx_triangulate_face` (the quad's shorter-diagonal rule with its crossing test, the n-gon's ear clipping in the
+plane of its Newell normal with the reflex corners in a KD tree), hashed per mesh as corner indices in order. Six
+generated polygon scenes reach what the real files do not: a dart whose shorter diagonal is crossed, twisted quads,
+L and U shapes, stars (one of 320 corners, past the KD tree's cached levels), reversed windings, a tilted star, a
+near-degenerate strip, repeated corners. Planted deviations (no reflex check, no crossing rule, no ear weighting)
+each changed the fixture dump; a plain scan of the reflex corners did not, and the tree is kept for the cases where
+its pruning decides.
 
 **Since 2026-10-11 the drills run concurrently, and since 2026-10-29 the source guards run on a lane beside them.**
 The drills are independent (each works in its own temp directory and builds its own exe), so `check.sh` starts them

@@ -140,6 +140,20 @@ static int dump_main(int argc, char **argv) {
 			printf("  face_material count=%zu hash=%016llx\n", m->face_material.count, (unsigned long long)fnv);
 			hash_reset(); for (size_t v = 0; v < m->num_vertices; v++) { ufbx_vec3 p = m->vertices.data[v]; hash_double(p.x); hash_double(p.y); hash_double(p.z); if (full) printf("  vertex %zu %016llx %016llx %016llx\n", v, (unsigned long long)bits(p.x), (unsigned long long)bits(p.y), (unsigned long long)bits(p.z)); }
 			printf("  vertices hash=%016llx\n", (unsigned long long)fnv);
+			// step 3: every face through ufbx_triangulate_face (the quad rule, the n-gon ear clipping); corner indices in order
+			{
+				size_t cap = (size_t)m->max_face_triangles * 3, total = 0;
+				uint32_t *tri = cap ? (uint32_t*)malloc(cap * sizeof(uint32_t)) : NULL;
+				hash_reset();
+				for (size_t f = 0; f < m->num_faces; f++) {
+					uint32_t num = ufbx_triangulate_face(tri, cap, m, m->faces.data[f]);
+					for (uint32_t k = 0; k < num * 3; k++) hash_u32(tri[k]);
+					if (full) for (uint32_t t = 0; t < num; t++) printf("  tri %zu %u,%u,%u\n", f, tri[t*3], tri[t*3+1], tri[t*3+2]);
+					total += num;
+				}
+				printf("  triangles count=%zu hash=%016llx\n", total, (unsigned long long)fnv);
+				free(tri);
+			}
 			dump_stream_vec3("position", &m->vertex_position, m->num_indices);
 			dump_stream_vec3("normal", &m->vertex_normal, m->num_indices);
 			for (size_t u = 0; u < m->uv_sets.count; u++) { char tag[64]; snprintf(tag, sizeof tag, "uv%zu", u); printf("  uvset %zu \"%s\"\n", u, m->uv_sets.data[u].name.data); dump_stream_vec2(tag, &m->uv_sets.data[u].vertex_uv, m->num_indices); }

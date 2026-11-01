@@ -58,6 +58,7 @@
     <Compile Include="..\editor\GlbReader.cs" Link="GlbReader.cs" />
     <Compile Include="..\editor\FbxDocument.cs" Link="FbxDocument.cs" />
     <Compile Include="..\editor\FbxScene.cs" Link="FbxScene.cs" />
+    <Compile Include="..\editor\FbxTriangulate.cs" Link="FbxTriangulate.cs" />
     <Compile Include="..\editor\HafTransforms.cs" Link="HafTransforms.cs" />
     <Compile Include="..\editor\GlbWriter.cs" Link="GlbWriter.cs" />
     <Compile Include="..\editor\HafModelDiff.cs" Link="HafModelDiff.cs" />
