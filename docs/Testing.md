@@ -158,7 +158,23 @@ four-influence lists in place. Three malformed scenes (mismatched cluster arrays
 readers. Ten planted deviations (an unstable sort, no pose fill, no geometric transform, the wrong axis flipped, the
 exporter undetected, the first mesh or bone instead of the last, the root entry skipped, poses unsorted, and the
 identity multiply skipped) each changed a dump; the last changed nothing on the fixtures but 26 lines on the real
-files, where Blender's negative zeros become positive under ufbx's multiplication, so the multiply stays.
+files, where Blender's negative zeros become positive under ufbx's multiplication, so the multiply stays. Its fifth step (2026-11-01) adds the animation: every stack's time range and layers, every layer's
+blend settings and animated properties (hashed by element, key and name), every value's defaults and curves, every
+curve's keyframes with ufbx's float tangents (hashed) and thirteen samples of its evaluation across and beyond its key
+range (hashed), and every node's transform evaluated at thirteen times of every stack (hashed). The review run compared
+238 files with 164 stacks, 168 layers and 44,098 curves containing 1,247,971 keyframes. This includes 13 generated
+animation scenes for shapes beyond the real-file corpus: constant, linear, cubic auto, user, TCB and weighted tangents with
+the clamp and bias flags, every extrapolation mode with its repeat count, additive, blended and override layers with
+composed rotations and scales and an animated weight, connected properties (a driver, a two-hop chain, a cycle),
+properties synthesised for animation with and without a template, an animated rotation order, 32-bit key times and the
+FBX 8000 time code. Review scenes also cover a template that omits an animated or connected property, a property
+driven by the synthetic root, and Unicode property names with equal four-byte keys but different UTF-8/UTF-16 order.
+Five malformed curves (mismatched, short or exhausted arrays) must be refused by both readers. Managed regression
+tests reject indirect property-evaluation cycles through composed rotation/RotationOrder and chains over 128 nested
+property dependencies before stack exhaustion. The cycle crashes stock ufbx 0.23.1, so it is excluded from good-file
+oracle comparisons; ordinary direct connection cycles retain ufbx's own fallback behavior.
+Sixteen planted deviations each changed a dump (the first layer blending instead of assigning: 10,022 real lines; the last value winning a shared property; constant-previous and -next swapped; a weight of exactly one third instead of ufbx's 0.333333f: 1,686 real lines; the Bezier solve stopped after three Newton steps; the mirror parity skipped; the packed weights swapped; the reference range ignored; a synthesised scale of zeros; a connection cycle left connected; the time code ignored; the auto tangent always time-independent; the additive rotation added instead of composed; a tangent's negative zero lost; the max of a tie taken from the last; the property flags never set). Two of them (the negative zero and the tie) changed nothing on the fixtures and 286 and 284 lines on the real
+files until a curve of signed zeros joined the scenes.
 
 **Since 2026-10-11 the drills run concurrently, and since 2026-10-29 the source guards run on a lane beside them.**
 The drills are independent (each works in its own temp directory and builds its own exe), so `check.sh` starts them

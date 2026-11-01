@@ -10,6 +10,30 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE NATIVE FBX READER, STEP 5: ANIMATION, HELD TO UFBX (2026-11-01).** `editor/FbxAnimation.cs` reads and
+  evaluates what ufbx does, formula for formula: the AnimationStack, AnimationLayer, AnimationCurveNode and
+  AnimationCurve objects (`ufbxi_read_animation_curve` with its float tangents - auto, user, TCB and weighted, the
+  clamp, progressive-clamp, time-independent and bias flags, the packed decimal weights, both extrapolations), the
+  finalize block (a stack's layers and a layer's values once each, the animated properties sorted by element, key and
+  name, a layer's blend mode, weight and accumulation modes, a value's defaults and its curves by axis name) and
+  `ufbxi_update_anim_stack` (the range from LocalStart/LocalStop or ReferenceStart/ReferenceStop in KTime ticks, the
+  base chosen by the header's TCDefinition). Before the nodes are built, every element's properties learn which are
+  ANIMATED or CONNECTED, the missing ones synthesised from the template or ufbx's defaults, as ufbx does. The
+  evaluation is `ufbx_evaluate_curve` (constant, linear and cubic Bezier spans through the Newton solve; repeat, mirror,
+  slope and relative-repeat extrapolation in ticks), `ufbx_evaluate_anim_value`, `ufbxi_evaluate_props` (the first
+  layer assigns, the others combine by weight: additive and blended layers, rotations composed through quaternion slerp
+  under the evaluated rotation order, scales through powers) with connected properties resolved through their chains,
+  and `ufbx_evaluate_transform`. The drill's dump on both sides gains the stacks, layers, values, curves (keys and
+  thirteen samples as hashes) and every node's transform at thirteen times of every stack; the review population
+  (238 files, 164 stacks, 168 layers, 44,098 curves, 1,247,971 keyframes, including 13 animation scenes) is identical to ufbx's
+  reading and evaluation; five malformed curves are refused by both. 18 animation test cases cover the reader and
+  evaluator. Review fixes the synthetic defaults/NO_VALUE flags when a template omits the property, root-sourced
+  property connections, and UTF-8 ordering in the animated-property dump. Indirect rotation-order dependency cycles
+  now raise a named error before stack exhaustion; evaluation also refuses more than 128 nested property dependencies.
+  The cycle also exhausted stock ufbx's stack in an isolated probe, so its refusal is a managed regression test rather
+  than a good-file oracle comparison. Four hundred randomized curves matched ufbx's keys and samples. The first
+  population run differed on 24 lines: ufbx's max of two reals keeps the FIRST of a tie (`a < b ? b : a`) and its min
+  the last, which Blender's curves of signed zeros (equal, differently signed) tell apart from a `>` comparison.
 - **THE NATIVE FBX READER, STEP 4: SKINS, HELD TO UFBX (2026-11-01).** `editor/FbxScene.cs` reads what ufbx reads of
   a skinned file, formula for formula: the Skin and Cluster deformers (`ufbxi_read_skin`, `ufbxi_read_skin_cluster`),
   the Pose objects with their bones linked by raw id (`ufbxi_read_pose`, the root included), the bone attributes;

@@ -22,6 +22,10 @@ public sealed class FbxProp
     public string ValueStr; public bool HasStr;
     public double Real => Reals[0];
     public bool HasValue => HasInt || RealCount > 0 || HasStr;
+    // ufbx_prop_flags set by the animation pass (FbxAnimation.FlagProperties): ANIMATED (an AnimationCurveNode names it),
+    // CONNECTED (another element's property names it), SYNTHETIC (the element stores no such property), NO_VALUE (synthetic
+    // and connected only: the internal lookups skip it), NOT_FOUND (an evaluation of a property nobody has)
+    public bool Animated, Connected, Synthetic, NoValue, NotFound;
 }
 
 public sealed class FbxProps
@@ -31,14 +35,28 @@ public sealed class FbxProps
     public int Count => byName.Count;
     public IEnumerable<FbxProp> All => byName.Values;
 
-    /// <summary>The property by name, or the template's when undeclared. An explicitly empty P has zero values and
-    /// still overrides the template; ufbx's NO_VALUE flag is for synthetic animation properties, not an empty stored P.</summary>
+    public FbxProps() { }
+    /// <summary>An evaluated overlay: these properties first, then the element's own and its templates (ufbx_props.defaults).</summary>
+    public FbxProps(IEnumerable<FbxProp> props, FbxProps defaults) { foreach (var p in props) byName[p.Name] = p; Defaults = defaults; }
+
+    /// <summary>The property by name, or the template's when undeclared (ufbxi_find_prop_with_key, which skips a NO_VALUE
+    /// placeholder). An explicitly empty P has zero values and still overrides the template.</summary>
     public FbxProp Find(string name)
+    {
+        for (var p = this; p != null; p = p.Defaults)
+            if (p.byName.TryGetValue(name, out var prop) && !prop.NoValue) return prop;
+        return null;
+    }
+    /// <summary>ufbx_find_prop_len, the public lookup: the templates too, placeholders included.</summary>
+    public FbxProp FindAny(string name)
     {
         for (var p = this; p != null; p = p.Defaults)
             if (p.byName.TryGetValue(name, out var prop)) return prop;
         return null;
     }
+    /// <summary>The element's OWN property of that name (element->props.props), synthetic ones included; never a template's.</summary>
+    public FbxProp Own(string name) => byName.TryGetValue(name, out var prop) ? prop : null;
+    internal void Add(FbxProp prop) => byName[prop.Name] = prop;
     public double[] Vec3(string name, double dx, double dy, double dz) { var p = Find(name); return p != null ? new[] { p.Reals[0], p.Reals[1], p.Reals[2] } : new[] { dx, dy, dz }; }
     public double Real(string name, double def) { var p = Find(name); return p != null ? p.Reals[0] : def; }
     public long Int(string name, long def) { var p = Find(name); return p != null ? p.ValueInt : def; }
@@ -84,7 +102,7 @@ public sealed class FbxProps
             case float f: return F64ToI64(f); case double d: return F64ToI64(d); default: return 0;
         }
     }
-    static long F64ToI64(double value) => Math.Abs(value) <= (double)long.MaxValue ? (long)value : (value >= 0 ? long.MaxValue : long.MinValue);
+    internal static long F64ToI64(double value) => Math.Abs(value) <= (double)long.MaxValue ? (long)value : (value >= 0 ? long.MaxValue : long.MinValue);
 }
 
 public sealed class FbxObject
@@ -159,6 +177,8 @@ public static class FbxMath
     }
     public static double Cos(double x) => Exact ? ucrt_cos(x) : Math.Cos(x);
     public static double Sin(double x) => Exact ? ucrt_sin(x) : Math.Sin(x);
+    /// <summary>C99 fmin: a single NaN operand is discarded, as ufbx_fmin does (Math.Min would keep it).</summary>
+    public static double FMin(double a, double b) => double.IsNaN(a) ? b : double.IsNaN(b) ? a : (a < b ? a : b);
 
     public static double[] EulerToQuat(double[] v, int order)
     {
@@ -469,6 +489,9 @@ public sealed class FbxScene
     public FbxDocument Document;
     public int Version;
     public readonly List<FbxObject> Objects = new List<FbxObject>();
+    // ID zero is the synthetic root, a valid property-connection source even though it is not a stored object.
+    // Connections INTO zero stay special (parenting); they are not ordinary attribute/animation destinations.
+    readonly FbxObject rootObject = new FbxObject { Id = 0, ElementId = 0, Class = "Model", Name = "", SubType = "Root", Props = new FbxProps(), Record = new FbxNode { Name = "Model" } };
     public readonly Dictionary<long, FbxObject> ById = new Dictionary<long, FbxObject>();
     public readonly List<FbxConnection> Connections = new List<FbxConnection>();
     public readonly Dictionary<string, List<(string subType, FbxProps props)>> Templates = new Dictionary<string, List<(string, FbxProps)>>(StringComparer.Ordinal);
@@ -486,6 +509,13 @@ public sealed class FbxScene
     public int UpAxis = 6, FrontAxis = 6, RightAxis = 6;   // ufbx_coordinate_axis: +X 0, -X 1, +Y 2, -Y 3, +Z 4, -Z 5, unknown 6
     public double UnitMeters = 1, FramesPerSecond = 24;
     public readonly List<string> Warnings = new List<string>();
+    // step 5: animation (FbxAnimation.Build), in element order (ufbx's typed ids); Anim is the first stack's, else empty
+    public long KTimeSecond = 46186158000;   // ufbx_metadata.ktime_second: the ticks of one second (141,120,000 under the FBX 8000 time code)
+    public readonly List<FbxAnimStack> AnimStacks = new List<FbxAnimStack>();
+    public readonly List<FbxAnimLayer> AnimLayers = new List<FbxAnimLayer>();
+    public readonly List<FbxAnimValue> AnimValues = new List<FbxAnimValue>();
+    public readonly List<FbxAnimCurve> AnimCurves = new List<FbxAnimCurve>();
+    public FbxAnim Anim = new FbxAnim();
 
     public static FbxScene Read(string path) { var s = Read(FbxDocument.Read(path)); return s; }
 
@@ -495,20 +525,32 @@ public sealed class FbxScene
         s.ReadTemplates();
         s.ReadObjects();
         s.ReadConnections();
+        FbxAnimation.FlagProperties(s);   // before the nodes: a synthesised animated property is what ufbxi_find_vec3 finds
         s.ReadSettings();
         s.ReadExporter();
         s.BuildNodes();
         s.BuildMeshes();
         s.BuildMaterials();
         s.BuildSkins();
+        FbxAnimation.Build(s);
         return s;
     }
 
-    // ---- The exporter: ufbxi_match_exporter on the header's Creator string --------------------------------------------
+    // ---- The exporter: ufbxi_match_exporter on the header's Creator string; the KTime base (ufbxi_read_header_extension) ----
     void ReadExporter()
     {
         var header = Document.First("FBXHeaderExtension");
-        if (header != null) foreach (var c in header.All("Creator")) if (c.Properties.Count > 0 && c.Properties[0] is string s) Creator = s;
+        int headerVersion = 0; bool hasTc = false; long tc = 0;
+        if (header != null)
+        {
+            foreach (var c in header.All("Creator")) if (c.Properties.Count > 0 && c.Properties[0] is string s) Creator = s;
+            foreach (var c in header.All("FBXHeaderVersion")) if (c.Properties.Count > 0 && FbxProps.IsNumber(c.Properties[0])) headerVersion = unchecked((int)FbxProps.AsInt(c.Properties[0]));
+            foreach (var c in header.All("OtherFlags")) { var d = c.First("TCDefinition"); if (d != null && d.Properties.Count > 0 && FbxProps.IsNumber(d.Properties[0])) { tc = FbxProps.AsInt(d.Properties[0]); hasTc = true; } }
+        }
+        // FBX 8000 changes the KTime units; TCDefinition opts in from header version 1004 on, 127 keeping the old ones
+        bool v7KTime = Version < 8000;
+        if (headerVersion >= 1004 && hasTc) v7KTime = tc == 127;
+        KTimeSecond = v7KTime ? 46186158000L : 141120000L;
         var v = new uint[3];
         if (MatchVersion("blender-- ?.?.?", Creator, v)) { Exporter = 2; ExporterVersion = Pack(v[0], v[1], v[2]); }
         else if (MatchVersion("blender- ?.?", Creator, v)) { Exporter = 2; ExporterVersion = Pack(v[0], v[1], 0); }
@@ -640,6 +682,7 @@ public sealed class FbxScene
             if (kind == "PO" || kind == "PP") conn.SrcProp = c.Properties[2] as string ?? "";
             if (kind == "PP") conn.DstProp = c.Properties[4] as string ?? "";
             ById.TryGetValue(conn.SrcId, out conn.Src); ById.TryGetValue(conn.DstId, out conn.Dst);
+            if (conn.SrcId == 0) conn.Src = rootObject;
             Connections.Add(conn);
             conn.Src?.Targets.Add(conn);
             conn.Dst?.Sources.Add(conn);
@@ -804,7 +847,7 @@ public sealed class FbxScene
     }
 
     /// <summary>ufbxi_get_transform: WorldTransform = T * Roff * Rp * Rpre * R * Rpost^-1 * Rp^-1 * Soff * Sp * S * Sp^-1, composed from the inside out.</summary>
-    static FbxTransform GetTransform(FbxProps props, int order, FbxSceneNode node)
+    internal static FbxTransform GetTransform(FbxProps props, int order, FbxSceneNode node)
     {
         var scalePivot = props.Vec3("ScalingPivot", 0, 0, 0);
         var rotPivot = props.Vec3("RotationPivot", 0, 0, 0);
@@ -977,7 +1020,7 @@ public sealed class FbxScene
         return m;
     }
 
-    static double[] Reals(FbxNode n, string what)
+    internal static double[] Reals(FbxNode n, string what)
     {
         if (n.Properties.Count == 0) throw new InvalidDataException($"FBX: {what} has no array");
         switch (n.Properties[0])
@@ -992,7 +1035,7 @@ public sealed class FbxScene
         }
     }
 
-    static int[] Integers(FbxNode n, string what)
+    internal static int[] Integers(FbxNode n, string what)
     {
         if (n.Properties.Count > 0 && n.Properties[0] is int[] exact) return exact;
         if (n.Properties.Count == 0) throw new InvalidDataException($"FBX: {what} has no array");
@@ -1338,7 +1381,7 @@ public sealed class FbxScene
     }
 
     // UTF-8 byte order is Unicode scalar order; UTF-16 Ordinal puts surrogate pairs before BMP private-use chars.
-    static readonly IComparer<string> Utf8Order = Comparer<string>.Create(CompareUtf8);
+    internal static readonly IComparer<string> Utf8Order = Comparer<string>.Create(CompareUtf8);
     static int CompareUtf8(string a, string b)
     {
         int i = 0, j = 0;
