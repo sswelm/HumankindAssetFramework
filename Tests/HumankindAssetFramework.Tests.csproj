@@ -59,6 +59,9 @@
     <Compile Include="..\editor\FbxDocument.cs" Link="FbxDocument.cs" />
     <Compile Include="..\editor\FbxScene.cs" Link="FbxScene.cs" />
     <Compile Include="..\editor\FbxAnimation.cs" Link="FbxAnimation.cs" />
+    <Compile Include="..\editor\FbxImport.cs" Link="FbxImport.cs" />
+    <Compile Include="..\editor\FbxModel.cs" Link="FbxModel.cs" />
+    <Compile Include="..\editor\VehicleProbe.PolygonNormals.cs" Link="VehicleProbe.PolygonNormals.cs" />
     <Compile Include="..\editor\FbxTriangulate.cs" Link="FbxTriangulate.cs" />
     <Compile Include="..\editor\HafTransforms.cs" Link="HafTransforms.cs" />
     <Compile Include="..\editor\GlbWriter.cs" Link="GlbWriter.cs" />

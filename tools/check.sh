@@ -256,6 +256,7 @@ push_step run "plugin unit tests (dotnet test)" dotnet test "$ROOT/Tests/Humanki
 # wrapper) and timed out under the thirteen parity drills - which the push no longer runs (2026-10-30). The oracle tests
 # belong to the parity mode, where the record machinery is used.
 push_step run_lane "parallel gate regression tests (completion, paths and verdicts)" python "$ROOT/Tests/test_parallel_gate.py"
+push_step run_lane "FBX model coverage tests (lost inputs and skipped fixtures cannot pass)" python "$ROOT/Tests/test_fbx_model_verdict.py"
 # THE PARITY STAMP'S DIGEST IS TAKEN HERE, before any parity drill starts: the verdict's write refuses a different one,
 # so a covered file edited during the run - which the drills did not test - gets no stamp (the review of PR #228).
 PARITY_START_DIGEST=""
@@ -353,6 +354,7 @@ push_step run_bg "native kernels drill (the probe's C++ kernels: hafkernels.dll 
 push_step run_lane "vehicle probe jobs tests (the recipes' arguments as the Lab formats them)" python "$ROOT/Tests/test_probe_jobs.py"
 parity_step run_bg "mesh layout drill (Blender's vertex and edge order in C#: a sample's edge lists equal to Blender's own)" bash "$ROOT/tools/decimate_drill.sh"
 parity_step run_bg "prep drill (the reduce plus the glTF exporter's mesh layout in C#: a sample equal to what Blender's prep_model.py wrote)" bash "$ROOT/tools/prep_drill.sh"
+parity_step run_bg "FBX model drill (the FBX path into the Factory in C#: every static FBX source and fixture read as Blender's FBX importer reads it and laid out as its glTF exporter writes it - nodes, transforms, meshes, names, bit for bit; the rest left to Blender by name; SKIP without Blender)" bash "$ROOT/tools/fbx_model_drill.sh"
 parity_step run_bg "deploy drill (Blender's posed state of an imported animation in C#: every object matrix and evaluated property at up to thirteen frames equal to Blender's own, the sign of a zero included; and deploy_convert.py's decisions and the armature it builds - its log, its parts, its bones at rest, its anchors and the scene it leaves - against the script itself, run up to the bake, and then the bake: every key of the action to the bit)" bash "$ROOT/tools/deploy_drill.sh"
 parity_step run_bg "Workshop compaction drill (what no node uses is left out; every part reads as before - GLB reader and Blender; SKIP without the project)" bash "$ROOT/tools/workshop_compact_drill.sh"
 parity_step run_bg "rig_anim drill (step (a) the stage dump, Blender ran rig_anim.py on every animated recipe as the Factory does, cut at its four stages, the scene after each on record, complete and consistent, the census of the branches the recipes take; steps (b) to (e), all four stages in C#: BlenderRigAnim's scene equal to Blender's row for row on every dumped job after each stage, the albedo by its dimensions; step (f): the GLB rig route - BlenderRigExport's file equal to the one Blender's glTF exporter writes of the same scene, nodes, skins, primitives, materials, channels and bytes; step (g): the Factory's wrapper (BlenderRigAnimInProcess) writes each exported job's file and names its clips; SKIP without the project)" bash "$ROOT/tools/riganim_drill.sh"

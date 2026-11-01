@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 
 
-def collect(project):
+def collect(project, include_project=True):
     project = Path(project).resolve()
     assets = project / 'Assets'
     files, sources, missing = [], [], []
@@ -15,7 +15,7 @@ def collect(project):
     def scan_error(error):
         raise error
 
-    for directory, dirs, names in os.walk(assets, onerror=scan_error):
+    for directory, dirs, names in os.walk(assets, onerror=scan_error) if include_project else ():
         dirs[:] = sorted(d for d in dirs if d.lower() != 'library')
         files.extend((Path(directory) / n).as_posix() for n in sorted(names) if n.lower().endswith('.fbx'))
     files.sort()
@@ -53,7 +53,7 @@ def collect(project):
 def main():
     sys.stdout.reconfigure(encoding='utf-8')
     try:
-        files, sources, missing = collect(sys.argv[1])
+        files, sources, missing = collect(sys.argv[1], include_project='--recipes-only' not in sys.argv[2:])
         for kind, paths in (('PROJECT', files), ('RECIPE', sources), ('NOTE', missing)):
             for path in paths:
                 if '\n' in path or '\r' in path:
