@@ -10,6 +10,20 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE NATIVE FBX READER, STEP 4: SKINS, HELD TO UFBX (2026-11-01).** `editor/FbxScene.cs` reads what ufbx reads of
+  a skinned file, formula for formula: the Skin and Cluster deformers (`ufbxi_read_skin`, `ufbxi_read_skin_cluster`),
+  the Pose objects with their bones linked by raw id (`ufbxi_read_pose`, the root included), the bone attributes;
+  then `ufbxi_finalize_scene` (the clusters of a skin once each and only those with a bone, every vertex's weights
+  from every cluster in order and sorted descending by ufbx's own stable sort, a missing `bind_to_world` taken from
+  the bind pose) and `ufbxi_update_scene` (`mesh_node_to_bone` computed from the bind pose's inverse when the cluster
+  has none, `geometry_to_bone` through the node's geometric transform, `bone_to_parent` against the pose's entry for
+  the parent, `geometry_to_world` and its transform by `ufbx_matrix_to_transform`, the bone radius in the exporter's
+  unit from the header's Creator string). `FbxMath` gains ufbx's determinant, inverse, matrix-to-transform and stable
+  sort. The drill's dump on both sides gains the skins, clusters, poses, bones and each mesh's instance order; the
+  real population (521 skins, 11,383 clusters, 7.3 million weights, 521 poses, 4,408 bones) and fifteen generated
+  scenes are identical to ufbx's reading; three malformed scenes are refused by both. Twelve unit tests hold ufbx's
+  answers. Two step-2 gaps found on the way: a node's mesh is its LAST mesh attribute and a mesh's instances follow
+  its own connection order (no real file has either shape; a scene now does).
 - **THE NATIVE FBX READER, STEP 3: TRIANGULATION (2026-11-01).** `editor/FbxTriangulate.cs` ports
   `ufbx_triangulate_face` formula for formula: a quad splits along its shorter diagonal unless a corner crosses that
   diagonal's plane (then the less crossed one), an n-gon is ear-clipped in the plane of its Newell normal, the better of

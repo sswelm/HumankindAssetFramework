@@ -221,6 +221,181 @@ public static class FbxMath
         d[8] = a[2]*b[6] + a[5]*b[7] + a[8]*b[8];
         return d;
     }
+
+    public const double Epsilon = 1.4916681462400413e-154;   // UFBX_EPSILON, the double form
+    /// <summary>C's fmax: a NaN operand loses to the other, unlike Math.Max (the oracle wrapper lesson of PR #233).</summary>
+    public static double FMax(double a, double b) => double.IsNaN(a) ? b : double.IsNaN(b) ? a : (a < b ? b : a);
+    public static bool AllZero(double[] m) { for (int i = 0; i < 12; i++) if (m[i] != 0.0) return false; return true; }
+    public static double[] Zero12 => new double[12];
+
+    // ufbx_matrix_determinant, ufbx_matrix_invert: ufbx's own expressions in its own order (m00=v[0] m10=v[1] m20=v[2]
+    // m01=v[3] m11=v[4] m21=v[5] m02=v[6] m12=v[7] m22=v[8] m03=v[9] m13=v[10] m23=v[11]); a singular matrix inverts to zeros.
+    public static double Determinant(double[] m)
+    {
+        double m00 = m[0], m10 = m[1], m20 = m[2], m01 = m[3], m11 = m[4], m21 = m[5], m02 = m[6], m12 = m[7], m22 = m[8];
+        return
+            - m02*m11*m20 + m01*m12*m20 + m02*m10*m21
+            - m00*m12*m21 - m01*m10*m22 + m00*m11*m22;
+    }
+    public static double[] Invert(double[] m)
+    {
+        double det = Determinant(m);
+        var r = new double[12];
+        if (Math.Abs(det) <= Epsilon) return r;
+        double rcp_det = 1.0 / det;
+        double m00 = m[0], m10 = m[1], m20 = m[2], m01 = m[3], m11 = m[4], m21 = m[5], m02 = m[6], m12 = m[7], m22 = m[8], m03 = m[9], m13 = m[10], m23 = m[11];
+        r[0] = ( - m12*m21 + m11*m22) * rcp_det;   // m00
+        r[1] = ( + m12*m20 - m10*m22) * rcp_det;   // m10
+        r[2] = ( - m11*m20 + m10*m21) * rcp_det;   // m20
+        r[3] = ( + m02*m21 - m01*m22) * rcp_det;   // m01
+        r[4] = ( - m02*m20 + m00*m22) * rcp_det;   // m11
+        r[5] = ( + m01*m20 - m00*m21) * rcp_det;   // m21
+        r[6] = ( - m02*m11 + m01*m12) * rcp_det;   // m02
+        r[7] = ( + m02*m10 - m00*m12) * rcp_det;   // m12
+        r[8] = ( - m01*m10 + m00*m11) * rcp_det;   // m22
+        r[9]  = (m03*m12*m21 - m02*m13*m21 - m03*m11*m22 + m01*m13*m22 + m02*m11*m23 - m01*m12*m23) * rcp_det;   // m03
+        r[10] = (m02*m13*m20 - m03*m12*m20 + m03*m10*m22 - m00*m13*m22 - m02*m10*m23 + m00*m12*m23) * rcp_det;   // m13
+        r[11] = (m03*m11*m20 - m01*m13*m20 - m03*m10*m21 + m00*m13*m21 + m01*m10*m23 - m00*m11*m23) * rcp_det;   // m23
+        return r;
+    }
+
+    /// <summary>ufbx_matrix_to_transform: the translation column, the columns' lengths as the scale (one axis negated
+    /// under a negative determinant), the quaternion from the normalised columns by the trace's branch, renormalised
+    /// by its squared length when that is off one (ufbx divides by the square, not the root).</summary>
+    public static FbxTransform MatrixToTransform(double[] m)
+    {
+        double det = Determinant(m);
+        var t = FbxTransform.Identity;
+        t.tx = m[9]; t.ty = m[10]; t.tz = m[11];
+        t.sx = Math.Sqrt(m[0]*m[0] + m[1]*m[1] + m[2]*m[2]);
+        t.sy = Math.Sqrt(m[3]*m[3] + m[4]*m[4] + m[5]*m[5]);
+        t.sz = Math.Sqrt(m[6]*m[6] + m[7]*m[7] + m[8]*m[8]);
+        double sign_x = 1.0, sign_y = 1.0, sign_z = 1.0;
+        if (det < 0.0)
+        {
+            if (t.sx > 0.0) sign_x = -1.0;
+            else if (t.sy > 0.0) sign_y = -1.0;
+            else if (t.sz > 0.0) sign_z = -1.0;
+        }
+        double kx = t.sx > 0.0 ? sign_x / t.sx : 0.0, ky = t.sy > 0.0 ? sign_y / t.sy : 0.0, kz = t.sz > 0.0 ? sign_z / t.sz : 0.0;
+        double xx = m[0] * kx, xy = m[1] * kx, xz = m[2] * kx;   // x = col0 * kx: x.x x.y x.z
+        double yx = m[3] * ky, yy = m[4] * ky, yz = m[5] * ky;
+        double zx = m[6] * kz, zy = m[7] * kz, zz = m[8] * kz;
+        double trace = xx + yy + zz;
+        if (trace > 0.0)
+        {
+            double a = Math.Sqrt(FMax(0.0, trace + 1.0)), b = a != 0.0 ? 0.5 / a : 0.0;
+            t.qx = (yz - zy) * b; t.qy = (zx - xz) * b; t.qz = (xy - yx) * b; t.qw = 0.5 * a;
+        }
+        else if (xx > yy && xx > zz)
+        {
+            double a = Math.Sqrt(FMax(0.0, 1.0 + xx - yy - zz)), b = a != 0.0 ? 0.5 / a : 0.0;
+            t.qx = 0.5 * a; t.qy = (yx + xy) * b; t.qz = (zx + xz) * b; t.qw = (yz - zy) * b;
+        }
+        else if (yy > zz)
+        {
+            double a = Math.Sqrt(FMax(0.0, 1.0 - xx + yy - zz)), b = a != 0.0 ? 0.5 / a : 0.0;
+            t.qx = (yx + xy) * b; t.qy = 0.5 * a; t.qz = (zy + yz) * b; t.qw = (zx - xz) * b;
+        }
+        else
+        {
+            double a = Math.Sqrt(FMax(0.0, 1.0 - xx - yy + zz)), b = a != 0.0 ? 0.5 / a : 0.0;
+            t.qx = (zx + xz) * b; t.qy = (zy + yz) * b; t.qz = 0.5 * a; t.qw = (xy - yx) * b;
+        }
+        double len = t.qx*t.qx + t.qy*t.qy + t.qz*t.qz + t.qw*t.qw;
+        if (Math.Abs(len - 1.0) > Epsilon)
+        {
+            if (Math.Abs(len) <= Epsilon) { t.qx = 0.0; t.qy = 0.0; t.qz = 0.0; t.qw = 1.0; }
+            else { t.qx /= len; t.qy /= len; t.qz /= len; t.qw /= len; }
+        }
+        t.sx *= sign_x; t.sy *= sign_y; t.sz *= sign_z;
+        return t;
+    }
+
+    /// <summary>ufbxi_macro_stable_sort: insertion sort in blocks of the linear size, then a bottom-up merge that takes
+    /// the right run's element only when it is strictly less. The same algorithm gives the same order for comparators
+    /// that are not strict weak orders (NaN weights), which is why it is ported rather than replaced.</summary>
+    public static void StableSort<T>(T[] data, int begin, int count, int linearSize, Func<T, T, bool> less)
+    {
+        if (count <= 1) return;
+        var tmp = new T[count];
+        var dst = new T[count]; Array.Copy(data, begin, dst, 0, count);
+        var src = tmp;
+        int block = linearSize;
+        for (int b0 = 0; b0 < count; b0 += block)
+        {
+            int iEnd = Math.Min(b0 + block, count);
+            for (int i = b0 + 1; i < iEnd; i++)
+            {
+                int j = i; var v = dst[i];
+                for (; j != b0; --j) { if (!less(v, dst[j - 1])) break; dst[j] = dst[j - 1]; }
+                dst[j] = v;
+            }
+        }
+        for (; block < count; block *= 2)
+        {
+            var swap = dst; dst = src; src = swap;
+            for (int b0 = 0; b0 < count; b0 += block * 2)
+            {
+                int i = b0, iEnd = Math.Min(b0 + block, count), j = b0 + block, jEnd = Math.Min(j + block, count), k = b0;
+                while (i < iEnd && j < jEnd)
+                {
+                    if (less(src[j], src[i])) dst[k] = src[j++]; else dst[k] = src[i++];
+                    k++;
+                }
+                while (i < iEnd) dst[k++] = src[i++];
+                while (j < jEnd) dst[k++] = src[j++];
+            }
+        }
+        Array.Copy(dst, 0, data, begin, count);
+    }
+}
+
+/// <summary>ufbx_skin_cluster: one bone's binding. Vertices/Weights are the raw per-vertex lists of the Deformer record
+/// (indices into the mesh's vertices, possibly out of range); the matrices are ufbx's names.</summary>
+public sealed class FbxSkinCluster
+{
+    public FbxObject Object; public int Index; public string Name = "";
+    public FbxSceneNode BoneNode;
+    public int NumWeights; public int[] Vertices = new int[0]; public double[] Weights = new double[0];
+    public double[] MeshNodeToBone = FbxMath.Zero12, BindToWorld = FbxMath.Zero12, GeometryToBone = FbxMath.Zero12, GeometryToWorld = FbxMath.Zero12;
+    public FbxTransform GeometryToWorldTransform = FbxTransform.Identity;
+}
+
+public struct FbxSkinVertex { public int WeightBegin, NumWeights; public double DqWeight; }
+public struct FbxSkinWeight { public int ClusterIndex; public double Weight; }
+
+/// <summary>ufbx_skin_deformer: the clusters that have a bone, and every vertex's weights sorted descending
+/// (ufbxi_finalize_scene; ufbxi_sort_skin_weights). The weights are not normalised, as ufbx leaves them.</summary>
+public sealed class FbxSkinDeformer
+{
+    public FbxObject Object; public int Index; public string Name = "";
+    public int SkinningMethod;   // ufbx_skinning_method: 0 linear, 1 rigid, 2 dual quaternion, 3 blended dq/linear
+    public readonly List<FbxSkinCluster> Clusters = new List<FbxSkinCluster>();
+    public FbxSkinVertex[] Vertices = new FbxSkinVertex[0];
+    public FbxSkinWeight[] Weights = new FbxSkinWeight[0];
+    public int MaxWeightsPerVertex;
+    public int NumDqWeights; public int[] DqVertices = new int[0]; public double[] DqWeights = new double[0];
+}
+
+public sealed class FbxBonePose { public FbxSceneNode BoneNode; public double[] BoneToWorld = FbxMath.Zero12, BoneToParent = FbxMath.Zero12; }
+
+/// <summary>ufbx_pose: the Pose object's PoseNode entries that name a Model, sorted by node index (stably).</summary>
+public sealed class FbxPose
+{
+    public FbxObject Object; public int Index; public string Name = "";
+    public bool IsBindPose;
+    public readonly List<FbxBonePose> BonePoses = new List<FbxBonePose>();
+    /// <summary>ufbx_get_bone_pose: the first entry of the node, or null.</summary>
+    public FbxBonePose Find(FbxSceneNode node) { foreach (var b in BonePoses) if (b.BoneNode == node) return b; return null; }
+}
+
+/// <summary>ufbx_bone: a LimbNode/Limb/Root attribute; its radius in the exporter's unit (ufbxi_update_bone).</summary>
+public sealed class FbxBoneData
+{
+    public FbxObject Object; public int Index; public string Name = "";
+    public double Radius, RelativeLength = 1.0; public bool IsRoot;
+    public readonly List<FbxSceneNode> Instances = new List<FbxSceneNode>();
 }
 
 public sealed class FbxSceneNode
@@ -240,6 +415,8 @@ public sealed class FbxSceneNode
     public double[] InheritScale = { 1, 1, 1 };
     public double[] NodeToParent, NodeToWorld, UnscaledNodeToWorld, GeometryToNode;
     public bool HasGeometryTransform;
+    public FbxPose BindPose;       // the first bind pose naming this node (ufbx_node.bind_pose)
+    public FbxBoneData Bone;       // the LAST bone attribute connected to the node (ufbx_node.bone)
 }
 
 /// <summary>A per-corner vertex stream as ufbx holds it: Values (Components per element) and one index per mesh index.</summary>
@@ -267,6 +444,7 @@ public sealed class FbxMeshData
     public int[] FaceMaterial = new int[0];
     public readonly List<FbxObject> Materials = new List<FbxObject>();
     public readonly List<FbxSceneNode> Instances = new List<FbxSceneNode>();
+    public readonly List<FbxSkinDeformer> SkinDeformers = new List<FbxSkinDeformer>();   // the Skin deformers connected to the Geometry, no duplicates
     /// <summary>Every face as triangles (FbxTriangulate.Mesh, ufbx's rules), corner indices three per triangle; computed once.</summary>
     public int[] Triangles => triangles ?? (triangles = FbxTriangulate.Mesh(this));
     int[] triangles;
@@ -292,6 +470,13 @@ public sealed class FbxScene
     public readonly List<FbxSceneNode> Nodes = new List<FbxSceneNode>();   // ufbx's order: by depth, then parent's element id, then element id; the root first
     public readonly List<FbxMeshData> Meshes = new List<FbxMeshData>();
     public readonly List<FbxMaterialData> Materials = new List<FbxMaterialData>();
+    public readonly List<FbxSkinDeformer> Skins = new List<FbxSkinDeformer>();      // element order (ufbx's typed ids)
+    public readonly List<FbxSkinCluster> Clusters = new List<FbxSkinCluster>();
+    public readonly List<FbxPose> Poses = new List<FbxPose>();
+    public readonly List<FbxBoneData> Bones = new List<FbxBoneData>();
+    public string Creator = "";
+    public int Exporter;            // ufbx_exporter: 0 unknown, 1 FBX SDK, 2 Blender binary, 3 Blender ASCII, 4 MotionBuilder, 5 ufbx_write
+    public uint ExporterVersion;    // ufbx_pack_version(major, minor, patch) = major*1000000 + minor*1000 + patch
     public FbxProps GlobalSettings = new FbxProps();
     public int UpAxis = 6, FrontAxis = 6, RightAxis = 6;   // ufbx_coordinate_axis: +X 0, -X 1, +Y 2, -Y 3, +Z 4, -Z 5, unknown 6
     public double UnitMeters = 1, FramesPerSecond = 24;
@@ -306,10 +491,67 @@ public sealed class FbxScene
         s.ReadObjects();
         s.ReadConnections();
         s.ReadSettings();
+        s.ReadExporter();
         s.BuildNodes();
         s.BuildMeshes();
         s.BuildMaterials();
+        s.BuildSkins();
         return s;
+    }
+
+    // ---- The exporter: ufbxi_match_exporter on the header's Creator string --------------------------------------------
+    void ReadExporter()
+    {
+        var header = Document.First("FBXHeaderExtension");
+        if (header != null) foreach (var c in header.All("Creator")) if (c.Properties.Count > 0 && c.Properties[0] is string s) Creator = s;
+        var v = new uint[3];
+        if (MatchVersion("blender-- ?.?.?", Creator, v)) { Exporter = 2; ExporterVersion = Pack(v[0], v[1], v[2]); }
+        else if (MatchVersion("blender- ?.?", Creator, v)) { Exporter = 2; ExporterVersion = Pack(v[0], v[1], 0); }
+        else if (MatchVersion("blender version ?.?", Creator, v)) { Exporter = 3; ExporterVersion = Pack(v[0], v[1], 0); }
+        else if (MatchVersion("fbx sdk/fbx plugins version ?.?", Creator, v)) { Exporter = 1; ExporterVersion = Pack(v[0], v[1], 0); }
+        else if (MatchVersion("fbx sdk/fbx plugins build ?", Creator, v)) { Exporter = 1; ExporterVersion = Pack(v[0] / 10000u, v[0] / 100u % 100u, v[0] % 100u); }
+        else if (MatchVersion("motionbuilder version ?.?", Creator, v)) { Exporter = 4; ExporterVersion = Pack(v[0], v[1], 0); }
+        else if (MatchVersion("motionbuilder/mocap/online version ?.?", Creator, v)) { Exporter = 4; ExporterVersion = Pack(v[0], v[1], 0); }
+        else if (MatchVersion("ufbx_write", Creator, v)) { Exporter = 5; ExporterVersion = Pack(0, 0, 1); }
+    }
+    static uint Pack(uint major, uint minor, uint patch) => unchecked(major * 1000000u + minor * 1000u + patch);
+
+    /// <summary>ufbxi_match_version_string: a letter matches itself or its upper case; a space skips blanks; a dash skips to
+    /// the next dash and consumes it; punctuation matches itself; ? reads one or more digits into the next version slot.</summary>
+    internal static bool MatchVersion(string fmt, string str, uint[] version)
+    {
+        int num = 0, pos = 0;
+        foreach (char c in fmt)
+        {
+            if (c >= 'a' && c <= 'z')
+            {
+                if (pos >= str.Length) return false;
+                int s = str[pos];
+                if (s != c && s + ('a' - 'A') != c) return false;
+                pos++;
+            }
+            else if (c == ' ') { while (pos < str.Length && (str[pos] == ' ' || str[pos] == '\t')) pos++; }
+            else if (c == '-')
+            {
+                while (pos < str.Length && str[pos] != '-') pos++;
+                if (pos >= str.Length) return false;
+                pos++;
+            }
+            else if (c == '/' || c == '.' || c == '(' || c == ')' || c == '_')
+            {
+                if (pos >= str.Length || str[pos] != c) return false;
+                pos++;
+            }
+            else if (c == '?')
+            {
+                uint n = 0; int len = 0;
+                while (pos < str.Length && str[pos] >= '0' && str[pos] <= '9') { n = unchecked(n * 10 + (uint)(str[pos] - '0')); pos++; len++; }
+                if (len == 0) return false;
+                version[num++] = n;
+            }
+            else throw new InvalidOperationException("Unhandled match character");
+        }
+        return true;
     }
 
     // ---- Definitions: the property templates behind every object's own properties -----------------------------------
@@ -411,10 +653,11 @@ public sealed class FbxScene
     }
 
     // ---- Nodes: the Model objects under the synthetic root, sorted and composed as ufbx does ---------------------------
+    readonly Dictionary<FbxObject, FbxSceneNode> nodeOf = new Dictionary<FbxObject, FbxSceneNode>();
     void BuildNodes()
     {
         var root = new FbxSceneNode { IsRoot = true, Name = "", Depth = 0, ElementId = 0 };
-        var byObject = new Dictionary<FbxObject, FbxSceneNode>();
+        var byObject = nodeOf;
         var all = new List<FbxSceneNode> { root };
         foreach (var o in Objects)
         {
@@ -589,12 +832,16 @@ public sealed class FbxScene
             var m = ReadMesh(o);
             m.Index = Meshes.Count; Meshes.Add(m); byObject[o] = m;
         }
+        // ufbxi_finalize_scene: every attribute connection of a node is walked and the LAST mesh is node->mesh; a mesh's
+        // instances are the nodes its own connections name, in that order, once each (ufbxi_fetch_src_elements)
         foreach (var n in Nodes)
         {
             if (n.IsRoot) continue;
-            foreach (var c in n.Object.Sources)
-                if (c.Kind == "OO" && c.Src != null && byObject.TryGetValue(c.Src, out var m)) { n.Mesh = m; m.Instances.Add(n); break; }
+            foreach (var c in n.Object.Sources) if (c.Kind == "OO" && c.Src != null && byObject.TryGetValue(c.Src, out var m)) n.Mesh = m;
         }
+        foreach (var m in Meshes)
+            foreach (var c in m.Object.Targets)
+                if (c.Kind == "OO" && c.Dst != null && nodeOf.TryGetValue(c.Dst, out var n) && !m.Instances.Contains(n)) m.Instances.Add(n);
         foreach (var m in Meshes)
         {
             // ufbxi_fetch_mesh_materials(search_node): the Geometry's own Material connections, else the first instance node's
@@ -840,6 +1087,228 @@ public sealed class FbxScene
             foreach (var (prop, tex) in texs.OrderBy(t => t.prop, Utf8Order))
                 mat.Textures.Add((prop, tex, tex.Record.First("RelativeFilename")?.Prop<string>(0) ?? tex.Record.First("RelativeFileName")?.Prop<string>(0) ?? ""));
             Materials.Add(mat);
+        }
+    }
+
+    // ---- Skins, clusters, poses and bones: ufbxi_read_skin/_skin_cluster/_pose/_bone, ufbxi_finalize_scene, -----------
+    // ---- ufbxi_update_initial_clusters, ufbxi_update_pose, ufbxi_update_skin_cluster, ufbxi_update_bone ----------------
+    static FbxNode ArrayNode(FbxNode rec, string name)
+    {
+        var n = rec.First(name);
+        return n != null && n.Properties.Count > 0 && n.Properties[0] is Array ? n : null;   // ufbxi_find_array: a child without an array value is "not found"
+    }
+    /// <summary>ufbxi_read_transform_matrix: a stored 4x4's first three columns of each row.</summary>
+    static double[] ReadTransformMatrix(double[] d) => new[] { d[0], d[1], d[2], d[4], d[5], d[6], d[8], d[9], d[10], d[12], d[13], d[14] };
+
+    void BuildSkins()
+    {
+        var clusterOf = new Dictionary<FbxObject, FbxSkinCluster>();
+        var skinOf = new Dictionary<FbxObject, FbxSkinDeformer>();
+        var boneOf = new Dictionary<FbxObject, FbxBoneData>();
+        var meshOf = new Dictionary<FbxObject, FbxMeshData>();
+        foreach (var m in Meshes) meshOf[m.Object] = m;
+        var poseEntries = new Dictionary<FbxPose, List<(long id, double[] matrix)>>();
+        foreach (var o in Objects)
+        {
+            if (o.Class == "Deformer" && o.SubType == "Cluster")
+            {
+                var c = new FbxSkinCluster { Object = o, Index = Clusters.Count, Name = o.Name };
+                var idx = ArrayNode(o.Record, "Indexes"); var w = ArrayNode(o.Record, "Weights");
+                if (idx != null && w != null)
+                {
+                    var vi = Integers(idx, "Indexes"); var wd = Reals(w, "Weights");
+                    if (vi.Length != wd.Length) throw new InvalidDataException($"FBX cluster '{o.Name}': {vi.Length} indices against {wd.Length} weights");
+                    c.NumWeights = vi.Length; c.Vertices = vi; c.Weights = wd;
+                }
+                var tr = ArrayNode(o.Record, "Transform"); var tl = ArrayNode(o.Record, "TransformLink");
+                if (tr != null && tl != null)
+                {
+                    var a = Reals(tr, "Transform"); var b = Reals(tl, "TransformLink");
+                    if (a.Length < 16 || b.Length < 16) throw new InvalidDataException($"FBX cluster '{o.Name}': a transform matrix under 16 values");
+                    c.MeshNodeToBone = ReadTransformMatrix(a); c.BindToWorld = ReadTransformMatrix(b);
+                }
+                Clusters.Add(c); clusterOf[o] = c;
+            }
+            else if (o.Class == "Deformer" && o.SubType == "Skin")
+            {
+                var s = new FbxSkinDeformer { Object = o, Index = Skins.Count, Name = o.Name };
+                var st = o.Record.First("SkinningType");
+                if (st != null && st.Properties.Count > 0 && st.Properties[0] is string method)
+                    s.SkinningMethod = method == "Rigid" ? 1 : method == "Linear" ? 0 : method == "DualQuaternion" ? 2 : method == "Blend" ? 3 : 0;
+                var idx = ArrayNode(o.Record, "Indexes"); var w = ArrayNode(o.Record, "BlendWeights");
+                if (idx != null && w != null)
+                {
+                    var vi = Integers(idx, "Indexes"); var wd = Reals(w, "BlendWeights");
+                    s.NumDqWeights = Math.Min(vi.Length, wd.Length); s.DqVertices = vi; s.DqWeights = wd;
+                }
+                Skins.Add(s); skinOf[o] = s;
+            }
+            else if (o.Class == "Pose")
+            {
+                var p = new FbxPose { Object = o, Index = Poses.Count, Name = o.Name, IsBindPose = o.SubType == "BindPose" };
+                var entries = new List<(long, double[])>();
+                foreach (var pn in o.Record.All("PoseNode"))
+                {
+                    var idNode = pn.First("Node");
+                    if (idNode == null || idNode.Properties.Count == 0 || !FbxProps.IsNumber(idNode.Properties[0])) continue;
+                    var mx = ArrayNode(pn, "Matrix");
+                    if (mx == null) continue;
+                    var d = Reals(mx, "Matrix");
+                    if (d.Length < 16) throw new InvalidDataException($"FBX pose '{o.Name}': a PoseNode matrix under 16 values");
+                    entries.Add((FbxProps.AsInt(idNode.Properties[0]), ReadTransformMatrix(d)));
+                }
+                Poses.Add(p); poseEntries[p] = entries;
+            }
+            else if (o.Class == "NodeAttribute" && (o.SubType == "LimbNode" || o.SubType == "Limb" || o.SubType == "Root"))
+            {
+                var b = new FbxBoneData { Object = o, Index = Bones.Count, Name = o.Name, IsRoot = o.SubType == "Root" };
+                Bones.Add(b); boneOf[o] = b;
+            }
+        }
+
+        // ---- ufbxi_finalize_scene, in its order ----
+        // the node's attribute shorthand: the LAST bone attribute among its attribute connections
+        foreach (var n in Nodes)
+        {
+            if (n.IsRoot) continue;
+            foreach (var c in n.Object.Sources) if (c.Kind == "OO" && c.Src != null && boneOf.TryGetValue(c.Src, out var b)) n.Bone = b;
+        }
+        // bind pose bones, linked by raw id rather than connections; a bind pose fills a cluster's missing bind_to_world
+        foreach (var p in Poses)
+        {
+            foreach (var (id, matrix) in poseEntries[p])
+            {
+                // ufbxi_find_element_by_fbx_id: id 0 is the synthetic root node (the FBX SDK writes it into bind poses)
+                FbxSceneNode node; FbxObject obj = null;
+                if (id == 0) node = Nodes[0];
+                else if (!ById.TryGetValue(id, out obj) || !nodeOf.TryGetValue(obj, out node)) continue;
+                p.BonePoses.Add(new FbxBonePose { BoneNode = node, BoneToWorld = matrix });
+                if (!p.IsBindPose) continue;
+                if (node.BindPose == null) node.BindPose = p;
+                if (obj == null) continue;
+                foreach (var c in obj.Targets)
+                    if (c.Kind == "OO" && c.Dst != null && clusterOf.TryGetValue(c.Dst, out var cl) && FbxMath.AllZero(cl.BindToWorld)) cl.BindToWorld = (double[])matrix.Clone();
+            }
+            var arr = p.BonePoses.ToArray();
+            FbxMath.StableSort(arr, 0, arr.Length, 16, (a, b) => a.BoneNode.Index < b.BoneNode.Index);
+            p.BonePoses.Clear(); p.BonePoses.AddRange(arr);
+        }
+        // the attributes' instances (bones here)
+        foreach (var b in Bones)
+            foreach (var c in b.Object.Targets)
+                if (c.Kind == "OO" && c.Dst != null && nodeOf.TryGetValue(c.Dst, out var n) && !b.Instances.Contains(n)) b.Instances.Add(n);
+        // each cluster's bone: the first node connected into it
+        foreach (var cl in Clusters)
+            foreach (var c in cl.Object.Sources)
+                if (c.Kind == "OO" && c.Src != null && nodeOf.TryGetValue(c.Src, out var n)) { cl.BoneNode = n; break; }
+        foreach (var s in Skins)
+        {
+            // the clusters connected into the skin, once each; those without a bone are dropped
+            var seen = new HashSet<FbxSkinCluster>();
+            foreach (var c in s.Object.Sources)
+            {
+                if (c.Kind != "OO" || c.Src == null || !clusterOf.TryGetValue(c.Src, out var cl)) continue;
+                if (!seen.Add(cl)) { Warnings.Add($"Duplicate connection to {s.Object.ElementId}"); continue; }
+                s.Clusters.Add(cl);
+            }
+            s.Clusters.RemoveAll(cl => cl.BoneNode == null);
+            int totalWeights = 0;
+            foreach (var cl in s.Clusters) totalWeights += cl.NumWeights;
+            // padded to the largest mesh the skin deforms, found through the Geometry or the node
+            int numVertices = 0;
+            foreach (var c in s.Object.Targets)
+            {
+                if (c.Kind != "OO" || c.Dst == null) continue;
+                FbxMeshData mesh = null;
+                if (meshOf.TryGetValue(c.Dst, out var mm)) mesh = mm;
+                else if (nodeOf.TryGetValue(c.Dst, out var n)) mesh = n.Mesh;
+                if (mesh != null) numVertices = Math.Max(numVertices, mesh.NumVertices);
+            }
+            s.Vertices = new FbxSkinVertex[numVertices];
+            s.Weights = new FbxSkinWeight[totalWeights];
+            foreach (var cl in s.Clusters)
+                for (int i = 0; i < cl.NumWeights; i++) { int v = cl.Vertices[i]; if (v >= 0 && v < numVertices) s.Vertices[v].NumWeights++; }   // retain_all: zero weights kept
+            double defaultDq = s.SkinningMethod == 2 ? 1.0 : 0.0;
+            int offset = 0, maxWeights = 0;
+            for (int i = 0; i < numVertices; i++)
+            {
+                s.Vertices[i].WeightBegin = offset; s.Vertices[i].DqWeight = defaultDq;
+                int nw = s.Vertices[i].NumWeights; offset += nw; s.Vertices[i].NumWeights = 0;
+                if (nw > maxWeights) maxWeights = nw;
+            }
+            s.MaxWeightsPerVertex = maxWeights;
+            for (int i = 0; i < s.NumDqWeights; i++) { int v = s.DqVertices[i]; if (v >= 0 && v < numVertices) s.Vertices[v].DqWeight = s.DqWeights[i]; }
+            for (int ci = 0; ci < s.Clusters.Count; ci++)
+            {
+                var cl = s.Clusters[ci];
+                for (int i = 0; i < cl.NumWeights; i++)
+                {
+                    int v = cl.Vertices[i];
+                    if (v < 0 || v >= numVertices) continue;
+                    int local = s.Vertices[v].NumWeights++;
+                    s.Weights[s.Vertices[v].WeightBegin + local] = new FbxSkinWeight { ClusterIndex = ci, Weight = cl.Weights[i] };
+                }
+            }
+            for (int i = 0; i < numVertices; i++)   // ufbxi_sort_skin_weights: descending, stable
+                FbxMath.StableSort(s.Weights, s.Vertices[i].WeightBegin, s.Vertices[i].NumWeights, 32, (a, b) => a.Weight > b.Weight);
+        }
+        foreach (var m in Meshes)
+        {
+            var seen = new HashSet<FbxSkinDeformer>();
+            foreach (var c in m.Object.Sources)
+            {
+                if (c.Kind != "OO" || c.Src == null || !skinOf.TryGetValue(c.Src, out var s)) continue;
+                if (!seen.Add(s)) { Warnings.Add($"Duplicate connection to {m.Object.ElementId}"); continue; }
+                m.SkinDeformers.Add(s);
+            }
+        }
+
+        // ---- ufbxi_update_scene (initial), in its order ----
+        // ufbxi_update_bone: Size over the exporter's unit (Blender binary 33, ASCII 1, else 100/3); LimbLength only for Blender ASCII
+        double unit = Exporter == 2 ? 33.0 : Exporter == 3 ? 1.0 : 100.0 / 3.0;
+        foreach (var b in Bones)
+        {
+            b.Radius = b.Object.Props.Real("Size", unit) / unit;
+            b.RelativeLength = Exporter == 3 ? 1.0 : b.Object.Props.Real("LimbLength", 1.0);
+        }
+        // ufbxi_update_initial_clusters with the default options: world_to_units is the root's identity (the multiplication
+        // is kept: it is what ufbx does to the bits), no mirror, a translation scale and geometry scale of one
+        var worldToUnits = Nodes[0].NodeToParent;
+        foreach (var cl in Clusters) { cl.GeometryToBone = cl.MeshNodeToBone; cl.BindToWorld = FbxMath.Mul(worldToUnits, cl.BindToWorld); }
+        foreach (var p in Poses) foreach (var bp in p.BonePoses) bp.BoneToWorld = FbxMath.Mul(worldToUnits, bp.BoneToWorld);
+        foreach (var cl in Clusters)
+        {
+            FbxSkinDeformer skin = null;
+            foreach (var c in cl.Object.Targets) if (c.Kind == "OO" && c.Dst != null && skinOf.TryGetValue(c.Dst, out skin)) break;
+            if (skin == null) continue;
+            FbxSceneNode node = null;
+            foreach (var c in skin.Object.Targets) if (c.Kind == "OO" && c.Dst != null && nodeOf.TryGetValue(c.Dst, out node)) break;
+            if (node == null)
+            {
+                FbxMeshData mesh = null;
+                foreach (var c in skin.Object.Targets) if (c.Kind == "OO" && c.Dst != null && meshOf.TryGetValue(c.Dst, out mesh)) break;
+                if (mesh != null && mesh.Instances.Count > 0) node = mesh.Instances[0];
+            }
+            if (node == null) continue;
+            if (FbxMath.AllZero(cl.MeshNodeToBone))
+                cl.MeshNodeToBone = FbxMath.Mul(FbxMath.Invert(cl.BindToWorld), node.NodeToWorld);   // an unspecified binding is computed from the bind pose
+            cl.GeometryToBone = node.HasGeometryTransform ? FbxMath.Mul(cl.MeshNodeToBone, node.GeometryToNode) : cl.MeshNodeToBone;
+        }
+        // ufbxi_update_pose: bone_to_parent against the pose's own entry for the parent, else the parent's node_to_world
+        foreach (var p in Poses)
+            foreach (var bp in p.BonePoses)
+            {
+                var parentToWorld = FbxMath.IdentityMatrix;
+                var parentPose = p.Find(bp.BoneNode.Parent);
+                if (parentPose != null) parentToWorld = parentPose.BoneToWorld;
+                else if (bp.BoneNode.Parent != null) parentToWorld = bp.BoneNode.Parent.NodeToWorld;
+                bp.BoneToParent = FbxMath.Mul(FbxMath.Invert(parentToWorld), bp.BoneToWorld);
+            }
+        // ufbxi_update_skin_cluster
+        foreach (var cl in Clusters)
+        {
+            cl.GeometryToWorld = FbxMath.Mul(cl.BoneNode != null ? cl.BoneNode.NodeToWorld : cl.BindToWorld, cl.GeometryToBone);
+            cl.GeometryToWorldTransform = FbxMath.MatrixToTransform(cl.GeometryToWorld);
         }
     }
 
