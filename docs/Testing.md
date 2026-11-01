@@ -176,6 +176,29 @@ oracle comparisons; ordinary direct connection cycles retain ufbx's own fallback
 Sixteen planted deviations each changed a dump (the first layer blending instead of assigning: 10,022 real lines; the last value winning a shared property; constant-previous and -next swapped; a weight of exactly one third instead of ufbx's 0.333333f: 1,686 real lines; the Bezier solve stopped after three Newton steps; the mirror parity skipped; the packed weights swapped; the reference range ignored; a synthesised scale of zeros; a connection cycle left connected; the time code ignored; the auto tangent always time-independent; the additive rotation added instead of composed; a tangent's negative zero lost; the max of a tie taken from the last; the property flags never set). Two of them (the negative zero and the tie) changed nothing on the fixtures and 286 and 284 lines on the real
 files until a curve of signed zeros joined the scenes.
 
+**`tools/fbx_model_drill.sh`** (step 6a of the native FBX reader, 2026-11-01: the FBX path into the Factory): Blender imports
+every static FBX source and fixture with its FBX importer's defaults and exports a GLB (`tools/fbx-drill/fbx_to_glb.py`);
+`editor/FbxImport.cs` reads the same file as that importer builds it (the global matrix from the file's axes and unit, every
+Model's transform chain in float32 mathutils, the hierarchy from the OO links in file order, objects created depth first and
+named through Blender's pools, `obj.matrix_basis` applied through the object kernel's Euler round trip, the meshes with their
+polygons, edges, layers, validation and per-corner custom normals - `VehicleProbe.PolygonNormals.cs` generalises the corner
+normal kernel from triangles to polygons, with the sharp edges a fan's differing custom normals add) and `editor/FbxModel.cs`
+writes the HafModel its glTF exporter would (the node order, `ExporterTrs`, `Mesh.loop_triangles`' quad rule and ear clipping,
+`BlenderExport.MeshPrimitives` with the polygon mesh's corner normals). The drill holds the two on every node (name, parent,
+children order, mesh, every written translation, rotation and scale as bits), every mesh (name, each primitive's material
+name, vertex count, positions, normals, UV sets and indices as bits) and the material names; a file with bones, deformers,
+animation curves, cameras or colour layers is left to Blender by name (sub-steps 6b-6d) and counted as a SKIP. Three sources
+(the Bradley, the balloon, the light mech) and eight generated scenes (every polygon size with the arrowhead quad that flips the
+split, by-edge smoothing through an Edges array, pivots, offsets, pre/post rotations and every rotation order, Z-up metres and
+Y-up inches, Blender's name pools with an empty name, a 70-byte name, numbered twins, a shared datablock, siblings whose case
+and bytes decide their order, degenerate polygons, normals by polygon, by vertex through an index and mixed per corner) are
+identical. Fourteen planted deviations (the quad never flipping, a fan instead of the ear clipping, no sharp tagging, the world
+taken from the basis without the Euler round trip, ordinal sibling order, the Edges array ignored, float trig in
+eulO_to_mat3, the quaternion normalized before quat_to_eulO, the first parent winning, PreRotation without RotationActive,
+duplicate faces kept, no default mesh name, UV indices clipped instead of skipped, a fan's first normal instead of its average)
+each failed the comparison. The measurement corrected the exporter tree's `BLI_strcasecmp`: unsigned bytes, a non-ASCII
+name last. Blender live only (no record for the push gate yet): a parity-lane step.
+
 **Since 2026-10-11 the drills run concurrently, and since 2026-10-29 the source guards run on a lane beside them.**
 The drills are independent (each works in its own temp directory and builds its own exe), so `check.sh` starts them
 together (`run_bg`), each into its own log, and prints the logs in declaration order. Each worker records its elapsed

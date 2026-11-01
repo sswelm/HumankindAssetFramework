@@ -3,7 +3,7 @@
 // Factory's converter walks (baker/glbconv: nodes in file order, node.WorldMatrix). Read at Blender 5.1.2:
 //   * the exporter's tree (io_scene_gltf2/blender/exp/tree.py): the scene's objects without a parent in the order the
 //     scene holds them - creation order for an import -, each object's children in the order `bpy.data.objects` lists
-//     them - by name, BLI_strcasecmp: byte by byte after an ASCII tolower, signed, so a non-ASCII byte sorts first -, an
+//     them - by name, BLI_strcasecmp: byte by byte after an ASCII tolower, UNSIGNED, so a non-ASCII byte sorts last -, an
 //     armature's object children before its root bones (`pose.bones` without a parent, creation order), a bone's bone
 //     children in creation order. An object parented to a BONE (nodes.py get_objects_parented_to_bones) hangs from that
 //     bone's joint after the joint's bone children, in name order with its siblings; its transform, and its subtree's, are
@@ -65,20 +65,23 @@ public static class BlenderExportTree
         public List<string> Problems = new List<string>();   // shapes Blender writes in a way this tree does not model, named: such a file is Blender's to prep
     }
 
-    /// <summary>BLI_strcasecmp over the UTF-8 bytes: each byte as a signed char after tolower (ASCII only).</summary>
+    /// <summary>BLI_strcasecmp over the UTF-8 bytes: each byte unsigned after tolower (ASCII only).</summary>
     public static int StrCaseCmp(string a, string b)
     {
         var x = System.Text.Encoding.UTF8.GetBytes(a); var y = System.Text.Encoding.UTF8.GetBytes(b);
         for (int i = 0; ; i++)
         {
-            int c1 = i < x.Length ? Lower((sbyte)x[i]) : 0, c2 = i < y.Length ? Lower((sbyte)y[i]) : 0;
+            int c1 = i < x.Length ? Lower(x[i]) : 0, c2 = i < y.Length ? Lower(y[i]) : 0;
             if (c1 < c2) return -1;
             if (c1 > c2) return 1;
             if (c1 == 0) return 0;
         }
     }
 
-    static int Lower(sbyte c) => c >= 'A' && c <= 'Z' ? c + 32 : c;
+    // UNSIGNED bytes: a non-ASCII name sorts after every ASCII one (measured 2026-11-01 on an FBX import: a_part, B_part, then
+    // é_part - Blender's char is unsigned in that comparison; the first reading of BLI_strcasecmp here said signed, and
+    // no glTF population had a non-ASCII sibling to tell). Digits are bytes too: part10 before Part2 before part9.
+    static int Lower(byte c) => c >= 'A' && c <= 'Z' ? c + 32 : c;
 
     /// <summary>The tree and the written node order for a model, given every glTF node's matrix_world as Blender holds it
     /// (VehicleProbe.BlenderWorldMatrices, column-major float32), the mesh nodes whose mesh has a triangle (the others are

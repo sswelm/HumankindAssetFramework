@@ -24,10 +24,9 @@ public class BlenderExportTreeTests
     [InlineData("a10", "a9", -1)]     // byte by byte, not natural
     [InlineData("A.001", "a10", -1)]  // '.' before '1'
     [InlineData("b", "B", 0)]
-    [InlineData("Ärmel", "zz", 1)]    // a non-ASCII byte is a negative char: it sorts BEFORE every letter... as the FIRST operand here it is greater? no: 0xC3 as sbyte is -61 < 'z'
-    public void Blenders_id_sort_compares_signed_bytes_after_an_ascii_tolower(string a, string b, int expected)
+    [InlineData("Ärmel", "zz", 1)]    // a non-ASCII byte is UNSIGNED: 0xC3 is 195, after every letter (measured 2026-11-01: Blender 5.1 orders a_part, B_part, then é_part; the earlier reading said signed)
+    public void Blenders_id_sort_compares_unsigned_bytes_after_an_ascii_tolower(string a, string b, int expected)
     {
-        if (a == "Ärmel") { Assert.Equal(-1, BlenderExportTree.StrCaseCmp(a, b)); Assert.Equal(1, BlenderExportTree.StrCaseCmp(b, a)); return; }
         Assert.Equal(expected, BlenderExportTree.StrCaseCmp(a, b));
         Assert.Equal(-expected, BlenderExportTree.StrCaseCmp(b, a));
     }

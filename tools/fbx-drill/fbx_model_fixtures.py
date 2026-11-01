@@ -102,12 +102,12 @@ CUBE_F = [[0, 1, 2, 3], [4, 7, 6, 5], [0, 4, 5, 1], [1, 5, 6, 2], [2, 6, 7, 3], 
 
 
 def fixtures():
-    # polygons of every kind in one mesh: a triangle, a convex quad, a folded quad (the 0-2 split flips), a pentagon, an
+    # polygons of every kind in one mesh: a triangle, a convex quad, an arrowhead quad (the 0-2 split flips), a pentagon, an
     # L-shaped hexagon; two material slots by polygon; UVs by corner through an index; normals per corner from the faces
     # (every edge hard); smoothing by polygon with one smooth face
     V = [0, 0, 0, 2, 0, 0, 1, 2, 0,                     # triangle
          3, 0, 0, 5, 0, 0, 5, 2, 0, 3, 2, 0,            # quad
-         6, 0, 0, 8, 0, 0, 8, 2, 3, 6, 2, 0,            # folded quad (corner 2 lifted far)
+         6, 0, 0, 8, 1, 0, 10, 0, 0, 8, 3, 0,           # an arrowhead quad: corner 1 inside, so the 0-2 split flips to 1-3
          9, 0, 0, 11, 0, 0, 12, 1.5, 0, 10, 3, 0, 8.5, 1.5, 0,   # pentagon
          13, 0, 0, 16, 0, 0, 16, 1, 0, 14, 1, 0, 14, 3, 0, 13, 3, 0]  # L
     F = [[0, 1, 2], [3, 4, 5, 6], [7, 8, 9, 10], [11, 12, 13, 14, 15], [16, 17, 18, 19, 20, 21]]
@@ -156,8 +156,12 @@ def fixtures():
     long_name = 'L' * 70
     objects = [geometry(30, '', CUBE_V, CUBE_F), geometry(31, long_name, [0, 0, 0, 1, 0, 0, 0, 1, 0], [[0, 1, 2]]),
                model(1, 'Cube.001'), model(2, 'Cube'), model(3, 'Cube'), model(4, long_name), model(5, 'Shared'), model(6, 'Twice'), model(7, 'ParentA'), model(8, 'ParentB'),
+               # siblings the exporter orders by BLI_strcasecmp: a_part before B_part (case folded), é_part FIRST (a non-ASCII byte is negative)
+               model(9, 'B_part'), model(10, 'a_part'), model(11, 'é_part'),
+               # digits: natural order would put part9 before part10 and Part2 between; plain byte order does not
+               model(12, 'part10'), model(13, 'part9'), model(14, 'Part2'), model(15, 'part'),
                material(40, 'MatA'), material(41, 'MatB')]
-    conns = [connect(1, 0), connect(2, 0), connect(3, 0), connect(4, 0), connect(5, 0), connect(7, 0), connect(8, 0), connect(6, 7), connect(6, 8),
+    conns = [connect(1, 0), connect(2, 0), connect(3, 0), connect(4, 0), connect(5, 0), connect(7, 0), connect(8, 0), connect(6, 7), connect(6, 8), connect(9, 7), connect(10, 7), connect(11, 7), connect(12, 8), connect(13, 8), connect(14, 8), connect(15, 8),
              connect(30, 1), connect(30, 2), connect(30, 3), connect(31, 4), connect(30, 5), connect(31, 6), connect(40, 2), connect(41, 5), connect(40, 5)]
     yield 'names', scene(objects, conns)
     # degenerate polygons: a repeated vertex, a reversed duplicate, two corners; a mesh without faces (a node without a mesh);

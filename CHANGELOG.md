@@ -10,6 +10,22 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE NATIVE FBX READER, STEP 6a: THE STATIC FBX PATH, HELD TO BLENDER (2026-11-01).** `editor/FbxImport.cs` reads an
+  FBX file as Blender 5.1's FBX importer builds it (io_scene_fbx/import_fbx.py with its defaults: the global matrix from the
+  file's axes and unit scale, every Model's transform chain in mathutils float32 - translation, offsets, pivots, pre/post
+  rotation under RotationActive, the rotation order, the geometric transform -, the hierarchy from the OO links in file order,
+  `obj.matrix_basis` through BKE_object_apply_mat4 and the XYZ Euler round trip of BKE_object_to_mat4, objects created depth
+  first and named through Blender's pools, meshes with polygons of any size, the Edges array, the material / UV / smoothing /
+  normal layers under every mapping and reference the importer takes, mesh.validate(), per-corner custom normals), and
+  `editor/FbxModel.cs` writes the HafModel Blender's glTF exporter would of that scene (the node order and transforms, the
+  tessellation of Mesh.loop_triangles, the mesh layout with the polygon mesh's corner normals). `VehicleProbe.PolygonNormals.cs`
+  generalises the corner normal kernel to polygons and ports mesh_normals_corner_custom_set's sharp-edge tagging.
+  `tools/fbx_model_drill.sh` holds the HafModel to Blender's own import + export on every node, transform, mesh and name,
+  bit for bit: the Bradley, the balloon, the light mech and eight generated scenes identical; files with bones, deformers,
+  animation, cameras or colour layers are left to Blender by name (sub-steps 6b-6d). Fourteen planted deviations each failed
+  the drill. Found on the way: eulO_to_mat3 computes in double and rounds once; quat_to_eulO does not normalize; an empty
+  datablock name is "Mesh"; BLI_strcasecmp compares UNSIGNED bytes (the exporter tree's port said signed: corrected, no glTF
+  population had a non-ASCII sibling). 8 test cases hold Blender's answers.
 - **THE NATIVE FBX READER, STEP 5: ANIMATION, HELD TO UFBX (2026-11-01).** `editor/FbxAnimation.cs` reads and
   evaluates what ufbx does, formula for formula: the AnimationStack, AnimationLayer, AnimationCurveNode and
   AnimationCurve objects (`ufbxi_read_animation_curve` with its float tangents - auto, user, TCB and weighted, the
