@@ -20,7 +20,7 @@ static class FbxSceneDump
         int textures = 0, skins = 0, clusters = 0, bones = 0, stacks = 0;
         foreach (var ob in s.Objects)
         {
-            if (ob.Class == "Texture") textures++;
+            if (ob.IsTexture) textures++;
             else if (ob.Class == "Deformer" && ob.SubType == "Skin") skins++;
             else if (ob.Class == "Deformer" && ob.SubType == "Cluster") clusters++;
             else if (ob.Class == "NodeAttribute" && (ob.SubType == "LimbNode" || ob.SubType == "Limb" || ob.SubType == "Root")) bones++;

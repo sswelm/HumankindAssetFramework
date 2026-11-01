@@ -14,12 +14,13 @@ static class FbxDrill
 {
     static int Main(string[] args)
     {
-        if (args.Length > 0 && args[0] == "--reject")
+        if (args.Length > 0 && (args[0] == "--reject" || args[0] == "--reject-scene"))
         {
+            bool scene = args[0] == "--reject-scene";
             int failed = 0;
             for (int i = 1; i < args.Length; i++)
             {
-                try { FbxDocument.Read(args[i]); Console.WriteLine("FAIL accepted malformed FBX: " + args[i]); failed++; }
+                try { if (scene) FbxScene.Read(args[i]); else FbxDocument.Read(args[i]); Console.WriteLine("FAIL accepted malformed FBX: " + args[i]); failed++; }
                 catch (InvalidDataException) { Console.WriteLine("REFUSED " + args[i]); }
                 catch (Exception e) { Console.WriteLine("FAIL unnamed refusal: " + e); failed++; }
             }
@@ -27,6 +28,7 @@ static class FbxDrill
         }
         if (args.Length > 0 && (args[0] == "--scene" || args[0] == "--scene-full"))
         {
+            if (args.Length < 2) { Console.Error.WriteLine("FAIL — no FBX scene files selected"); return 2; }
             // the object layer (editor/FbxScene.cs) in tools/fbx-drill/ufbx/ufbxdump.c's format: step 2's comparison
             bool fullScene = args[0] == "--scene-full";
             int src = 0;

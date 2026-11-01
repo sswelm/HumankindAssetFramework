@@ -96,15 +96,22 @@ static void dump_stream_vec4(const char *tag, const ufbx_vertex_vec4 *s, size_t 
 	printf("  %s values=%zu indices=%zu unique=%s hash=%016llx\n", tag, s->values.count, s->indices.count, s->unique_per_vertex ? "1" : "0", (unsigned long long)fnv);
 }
 
-int main(int argc, char **argv) {
-	int first = 1;
+static int dump_main(int argc, char **argv) {
+	int first = 1, reject = 0, failed = 0;
 	if (argc > 1 && strcmp(argv[1], "--full") == 0) { full = 1; first = 2; }
+	if (argc > 1 && strcmp(argv[1], "--reject") == 0) { reject = 1; first = 2; }
+	if (argc <= first) { fprintf(stderr, "no FBX scene files selected\n"); return 2; }
 	for (int a = first; a < argc; a++) {
 		printf("=== %s\n", argv[a]);
 		ufbx_load_opts opts = { 0 };
 		ufbx_error error;
 		ufbx_scene *scene = ufbx_load_file(argv[a], &opts, &error);
-		if (!scene) { printf("ERROR %s\n", error.description.data); continue; }
+		if (reject) {
+			if (scene) { printf("ERROR accepted malformed scene\n"); ufbx_free_scene(scene); failed = 1; }
+			else { printf("REFUSED %s\n", error.description.data); }
+			continue;
+		}
+		if (!scene) { printf("ERROR %s\n", error.description.data); failed = 1; continue; }
 		printf("settings up=%d front=%d right=%d unit=%016llx fps=%016llx version=%u\n", (int)scene->settings.axes.up, (int)scene->settings.axes.front, (int)scene->settings.axes.right,
 			(unsigned long long)bits(scene->settings.unit_meters), (unsigned long long)bits(scene->settings.frames_per_second), scene->metadata.version);
 		printf("counts nodes=%zu meshes=%zu materials=%zu textures=%zu skins=%zu clusters=%zu bones=%zu anim_stacks=%zu\n",
@@ -150,5 +157,23 @@ int main(int argc, char **argv) {
 		}
 		ufbx_free_scene(scene);
 	}
-	return 0;
+	return failed;
+}
+
+// Windows narrow argv uses the system code page, while ufbx filenames and our dumps use UTF-8.
+// Keep the original Unicode command line intact even outside the active ANSI code page.
+int wmain(int argc, wchar_t **wide_argv) {
+	char **argv = (char**)calloc((size_t)argc, sizeof(char*));
+	if (!argv) return 3;
+	int result = 3;
+	for (int a = 0; a < argc; a++) {
+		int size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide_argv[a], -1, NULL, 0, NULL, NULL);
+		if (!size || !(argv[a] = (char*)malloc((size_t)size))) goto cleanup;
+		if (!WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide_argv[a], -1, argv[a], size, NULL, NULL)) goto cleanup;
+	}
+	result = dump_main(argc, argv);
+cleanup:
+	for (int a = 0; a < argc; a++) free(argv[a]);
+	free(argv);
+	return result;
 }

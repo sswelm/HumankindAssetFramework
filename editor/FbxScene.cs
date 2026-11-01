@@ -31,11 +31,12 @@ public sealed class FbxProps
     public int Count => byName.Count;
     public IEnumerable<FbxProp> All => byName.Values;
 
-    /// <summary>The property by name, the template's when the object has none; null when neither has it (a property with no value counts as absent, as ufbx's find).</summary>
+    /// <summary>The property by name, or the template's when undeclared. An explicitly empty P has zero values and
+    /// still overrides the template; ufbx's NO_VALUE flag is for synthetic animation properties, not an empty stored P.</summary>
     public FbxProp Find(string name)
     {
         for (var p = this; p != null; p = p.Defaults)
-            if (p.byName.TryGetValue(name, out var prop) && prop.HasValue) return prop;
+            if (p.byName.TryGetValue(name, out var prop)) return prop;
         return null;
     }
     public double[] Vec3(string name, double dx, double dy, double dz) { var p = Find(name); return p != null ? new[] { p.Reals[0], p.Reals[1], p.Reals[2] } : new[] { dx, dy, dz }; }
@@ -94,6 +95,7 @@ public sealed class FbxObject
     public FbxProps Props;
     public readonly List<FbxConnection> Sources = new List<FbxConnection>();   // connections INTO this object (this is the dst), file order
     public readonly List<FbxConnection> Targets = new List<FbxConnection>();   // connections OUT of this object (this is the src), file order
+    public bool IsTexture => Class == "Texture" || Class == "LayeredTexture";
     public override string ToString() => $"{Class}/{SubType} '{Name}' #{Id}";
 }
 
@@ -247,7 +249,7 @@ public sealed class FbxVertexStream
     public double[] Values = new double[0];
     public int[] Indices = new int[0];   // one per mesh index; -1 = UFBX_NO_INDEX (reads as zeros)
     public bool UniquePerVertex;
-    public string Name = ""; public int LayerIndex;
+    public string Name = ""; public uint LayerIndex;
     public int ValueCount => Components == 0 ? 0 : Values.Length / Components;
     public double Get(int index, int component) { int ix = Indices[index]; return ix < 0 ? 0.0 : Values[ix * Components + component]; }
 }
@@ -344,7 +346,8 @@ public sealed class FbxScene
         int elementId = 1;   // 0 is the synthetic root node (ufbx creates it before reading the Objects)
         foreach (var rec in objs.Children)
         {
-            if (rec.Properties.Count < 3 || !(rec.Properties[0] is long id)) continue;
+            if (rec.Properties.Count < 3 || !FbxProps.IsNumber(rec.Properties[0])) continue;
+            long id = FbxProps.AsInt(rec.Properties[0]);
             string typeAndName = rec.Properties[1] as string ?? "";
             string name = typeAndName, cls = "";
             int sep = typeAndName.IndexOf("\0\u0001", StringComparison.Ordinal);
@@ -364,7 +367,9 @@ public sealed class FbxScene
         foreach (var c in conns.All("C"))
         {
             if (c.Properties.Count < 3) continue;
-            var conn = new FbxConnection { Kind = c.Properties[0] as string ?? "", SrcId = c.Properties[1] is long a ? a : -1, DstId = c.Properties[2] is long b ? b : -1 };
+            if (!FbxProps.IsNumber(c.Properties[1]) || !FbxProps.IsNumber(c.Properties[2]))
+                throw new InvalidDataException("FBX connection requires numeric source and destination identifiers");
+            var conn = new FbxConnection { Kind = c.Properties[0] as string ?? "", SrcId = FbxProps.AsInt(c.Properties[1]), DstId = FbxProps.AsInt(c.Properties[2]) };
             if (conn.Kind == "OP" && c.Properties.Count > 3) conn.DstProp = c.Properties[3] as string ?? "";
             if (conn.Kind == "PO" && c.Properties.Count > 3) conn.SrcProp = c.Properties[3] as string ?? "";
             if (conn.Kind == "PP" && c.Properties.Count > 4) { conn.SrcProp = c.Properties[3] as string ?? ""; conn.DstProp = c.Properties[4] as string ?? ""; }
@@ -414,20 +419,36 @@ public sealed class FbxScene
             var n = new FbxSceneNode { Object = o, Name = o.Name, ElementId = o.ElementId };
             byObject[o] = n; all.Add(n);
         }
-        // parent: the first OO connection to a Model, or to the root (id 0)
+        // ufbx hooks children while iterating parent nodes in element order. The last parent in that order wins,
+        // regardless of connection order; a root connection (element 0) cannot override an explicit Model parent.
         foreach (var n in all)
         {
             if (n.IsRoot) continue;
+            n.Parent = root;
             foreach (var c in n.Object.Targets)
             {
                 if (c.Kind != "OO") continue;
-                if (c.DstId == 0) { n.Parent = root; break; }
-                if (c.Dst != null && c.Dst.Class == "Model" && byObject.TryGetValue(c.Dst, out var p)) { n.Parent = p; break; }
+                if (c.DstId == 0) continue;
+                if (c.Dst != null && c.Dst.Class == "Model" && byObject.TryGetValue(c.Dst, out var p) && p.ElementId > n.Parent.ElementId) n.Parent = p;
             }
-            if (n.Parent == null) n.Parent = root;   // ufbx parents an orphan Model to the root
         }
         foreach (var n in all) if (n.Parent != null) n.Parent.Children.Add(n);
-        foreach (var n in all) { int d = 0; for (var p = n.Parent; p != null; p = p.Parent) d++; n.Depth = d; }
+        // Cache completed parent chains: linear work even for reverse-ordered deep hierarchies, and a cycle is a
+        // named refusal instead of an infinite loop. 1 is the current path, 2 is a completed chain ending at root.
+        var state = new Dictionary<FbxSceneNode, byte> { [root] = 2 };
+        var path = new List<FbxSceneNode>();
+        foreach (var n in all)
+        {
+            path.Clear(); var p = n;
+            while (p != null && (!state.TryGetValue(p, out var mark) || mark != 2))
+            {
+                if (state.TryGetValue(p, out mark) && mark == 1)
+                    throw new InvalidDataException($"FBX: Cyclic node hierarchy at '{p.Name}' (id {p.Object?.Id})");
+                state[p] = 1; path.Add(p); p = p.Parent;
+            }
+            int depth = p != null ? p.Depth : -1;
+            for (int i = path.Count - 1; i >= 0; i--) { path[i].Depth = ++depth; state[path[i]] = 2; }
+        }
         // ufbxi_cmp_node_less: depth, then the parent's element id, then the element id (helpers are off here)
         var sorted = all.OrderBy(n => n.Depth).ThenBy(n => n.Parent != null ? n.Parent.ElementId : -1).ThenBy(n => n.ElementId).ToList();
         for (int i = 0; i < sorted.Count; i++) { sorted[i].Index = i; Nodes.Add(sorted[i]); }
@@ -594,7 +615,7 @@ public sealed class FbxScene
         if (m.Vertices.Length % 3 != 0) throw new InvalidDataException($"FBX mesh '{o.Name}': {m.Vertices.Length} vertex values are not triples");
         m.NumVertices = m.Vertices.Length / 3;
         var idxNode = rec.First("PolygonVertexIndex");
-        var idx = idxNode != null ? (int[])(idxNode.Prop<int[]>(0)).Clone() : new int[0];
+        var idx = idxNode != null ? (int[])Integers(idxNode, "PolygonVertexIndex").Clone() : new int[0];
         m.NumIndices = idx.Length;
         if (idx.Length > 0 && idx[idx.Length - 1] >= 0) idx[idx.Length - 1] = ~idx[idx.Length - 1];   // a last index not negated closes the polygon
         // ufbxi_process_indices: a negative index (~x) ends a polygon
@@ -616,21 +637,30 @@ public sealed class FbxScene
         m.NumFaces = begins.Count; m.NumTriangles = triangles; m.MaxFaceTriangles = maxFaceTriangles;
         m.Position = new FbxVertexStream { Exists = true, Components = 3, Values = m.Vertices, Indices = idx, UniquePerVertex = true };
 
+        var tangents = new Dictionary<uint, FbxVertexStream>();
+        var bitangents = new Dictionary<uint, FbxVertexStream>();
         foreach (var n in rec.Children)
         {
             if (!n.Name.StartsWith("LayerElement", StringComparison.Ordinal)) continue;
             switch (n.Name)
             {
                 case "LayerElementNormal": if (!m.Normal.Exists) m.Normal = ReadVertexElement(m, n, "Normals", "NormalsIndex", 3); break;
-                case "LayerElementTangent": if (!m.Tangent.Exists) m.Tangent = ReadVertexElement(m, n, "Tangents", "TangentsIndex", 3); break;
-                case "LayerElementBinormal": if (!m.Bitangent.Exists) m.Bitangent = ReadVertexElement(m, n, "Binormals", "BinormalsIndex", 3); break;
+                case "LayerElementTangent":
+                case "LayerElementBinormal":
+                {
+                    bool tangent = n.Name == "LayerElementTangent";
+                    var stream = ReadVertexElement(m, n, tangent ? "Tangents" : "Binormals", tangent ? "TangentsIndex" : "BinormalsIndex", 3);
+                    var table = tangent ? tangents : bitangents;
+                    if (stream.Exists && !table.ContainsKey(stream.LayerIndex)) table.Add(stream.LayerIndex, stream);
+                    break;
+                }
                 case "LayerElementUV": { var s = ReadVertexElement(m, n, "UV", "UVIndex", 2); if (s.Exists) m.UvSets.Add(s); break; }
                 case "LayerElementColor": { var s = ReadVertexElement(m, n, "Colors", "ColorIndex", 4); if (s.Exists) m.ColorSets.Add(s); break; }
                 case "LayerElementMaterial":
                 {
                     if (m.FaceMaterial.Length > 0) break;
                     string mapping = n.First("MappingInformationType")?.Prop<string>(0) ?? "";
-                    var arr = n.First("Materials")?.Properties.Count > 0 ? n.First("Materials").Prop<int[]>(0) : null;
+                    var arr = n.First("Materials")?.Properties.Count > 0 ? Integers(n.First("Materials"), "Materials") : null;
                     if (mapping == "ByPolygon")
                     {
                         if (arr == null) { Warnings.Add($"mesh '{o.Name}': missing geometry data: Materials"); break; }
@@ -648,6 +678,30 @@ public sealed class FbxScene
                 }
             }
         }
+        // ufbx stably sorts sets by their unsigned typed index, then exposes the lowest UV set's tangent pair.
+        var sortedUv = m.UvSets.OrderBy(s => s.LayerIndex).ToArray(); m.UvSets.Clear(); m.UvSets.AddRange(sortedUv);
+        var sortedColor = m.ColorSets.OrderBy(s => s.LayerIndex).ToArray(); m.ColorSets.Clear(); m.ColorSets.AddRange(sortedColor);
+        if (m.UvSets.Count > 0)
+        {
+            uint primary = m.UvSets[0].LayerIndex;
+            foreach (var layer in rec.All("Layer"))
+            {
+                uint? uv = null, tangent = null, bitangent = null;
+                foreach (var element in layer.All("LayerElement"))
+                {
+                    var typed = element.First("TypedIndex"); var type = element.First("Type");
+                    if (typed == null || typed.Properties.Count == 0 || !FbxProps.IsNumber(typed.Properties[0]) || type == null || type.Properties.Count == 0) continue;
+                    uint index = unchecked((uint)FbxProps.AsInt(typed.Properties[0]));
+                    string name = type.Properties[0] as string ?? "";
+                    if (name == "LayerElementUV") uv = index;
+                    else if (name == "LayerElementTangent") tangent = index;
+                    else if (name == "LayerElementBinormal") bitangent = index;
+                }
+                if (uv != primary) continue;
+                if (tangent.HasValue && tangents.TryGetValue(tangent.Value, out var ts)) m.Tangent = ts;
+                if (bitangent.HasValue && bitangents.TryGetValue(bitangent.Value, out var bs)) m.Bitangent = bs;
+            }
+        }
         if (m.FaceMaterial.Length == 0) m.FaceMaterial = new int[m.NumFaces];
         return m;
     }
@@ -661,14 +715,32 @@ public sealed class FbxScene
             case float[] f: { var d = new double[f.Length]; for (int i = 0; i < f.Length; i++) d[i] = f[i]; return d; }
             case int[] ii: { var d = new double[ii.Length]; for (int i = 0; i < ii.Length; i++) d[i] = ii[i]; return d; }
             case long[] l: { var d = new double[l.Length]; for (int i = 0; i < l.Length; i++) d[i] = l[i]; return d; }
+            case byte[] b: { var d = new double[b.Length]; for (int i = 0; i < b.Length; i++) d[i] = b[i]; return d; }
+            case bool[] b: { var d = new double[b.Length]; for (int i = 0; i < b.Length; i++) d[i] = b[i] ? 1 : 0; return d; }
             default: throw new InvalidDataException($"FBX: {what} is not a number array ({n.Properties[0].GetType().Name})");
         }
     }
 
+    static int[] Integers(FbxNode n, string what)
+    {
+        if (n.Properties.Count > 0 && n.Properties[0] is int[] exact) return exact;
+        if (n.Properties.Count == 0) throw new InvalidDataException($"FBX: {what} has no array");
+        switch (n.Properties[0])
+        {
+            case long[] a: { var d = new int[a.Length]; for (int i = 0; i < a.Length; i++) d[i] = unchecked((int)a[i]); return d; }
+            case byte[] a: { var d = new int[a.Length]; for (int i = 0; i < a.Length; i++) d[i] = a[i]; return d; }
+            case bool[] a: { var d = new int[a.Length]; for (int i = 0; i < a.Length; i++) d[i] = a[i] ? 1 : 0; return d; }
+            case float[] a: { var d = new int[a.Length]; for (int i = 0; i < a.Length; i++) d[i] = ToInt32(a[i]); return d; }
+            case double[] a: { var d = new int[a.Length]; for (int i = 0; i < a.Length; i++) d[i] = ToInt32(a[i]); return d; }
+            default: throw new InvalidDataException($"FBX: {what} is not a number array");
+        }
+    }
+    static int ToInt32(double value) => Math.Abs(value) <= int.MaxValue ? (int)value : value >= 0 ? int.MaxValue : int.MinValue;
+
     /// <summary>ufbxi_read_vertex_element: the mapping and reference modes resolved to one index per mesh index.</summary>
     FbxVertexStream ReadVertexElement(FbxMeshData m, FbxNode n, string dataName, string indexName, int components)
     {
-        var s = new FbxVertexStream { Components = components, LayerIndex = n.Properties.Count > 0 && n.Properties[0] is int li ? li : 0, Name = n.First("Name")?.Prop<string>(0) ?? "" };
+        var s = new FbxVertexStream { Components = components, LayerIndex = n.Properties.Count > 0 && FbxProps.IsNumber(n.Properties[0]) ? unchecked((uint)FbxProps.AsInt(n.Properties[0])) : 0u, Name = n.First("Name")?.Prop<string>(0) ?? "" };
         var dataNode = n.First(dataName);
         if (dataNode == null || dataNode.Properties.Count == 0) return s;
         var data = Reals(dataNode, dataName);
@@ -677,7 +749,7 @@ public sealed class FbxScene
         if (numElems == 0) return s;
         s.Exists = true; s.Values = data;
         var idxNode = n.First(indexName);
-        int[] indexData = idxNode != null && idxNode.Properties.Count > 0 && idxNode.Properties[0] is int[] ia ? ia : null;
+        int[] indexData = idxNode != null && idxNode.Properties.Count > 0 ? Integers(idxNode, indexName) : null;
         string mapping = n.First("MappingInformationType")?.Prop<string>(0) ?? "";
         if (mapping == "ByPolygon") { int ni = indexData != null ? indexData.Length : numElems; if (ni == m.NumIndices) mapping = "ByPolygonVertex"; }   // old exporters' ByPolygon
         var result = new int[m.NumIndices];
@@ -761,10 +833,25 @@ public sealed class FbxScene
             // unnamed OO ones first), ties in file order. Textures a MESH names through LayerElement*Textures (texture_id >= 0,
             // sorted after these) are not modelled: none of the files here carry them.
             var texs = new List<(string prop, FbxObject tex)>();
-            foreach (var c in o.Sources) if ((c.Kind == "OP" || c.Kind == "OO") && c.Src != null && c.Src.Class == "Texture") texs.Add((c.Kind == "OP" ? c.DstProp : "", c.Src));
-            foreach (var (prop, tex) in texs.OrderBy(t => t.prop, StringComparer.Ordinal))
-                mat.Textures.Add((prop, tex, tex.Record.First("RelativeFilename")?.Prop<string>(0) ?? ""));
+            foreach (var c in o.Sources) if ((c.Kind == "OP" || c.Kind == "OO") && c.Src != null && c.Src.IsTexture) texs.Add((c.Kind == "OP" ? c.DstProp : "", c.Src));
+            foreach (var (prop, tex) in texs.OrderBy(t => t.prop, Utf8Order))
+                mat.Textures.Add((prop, tex, tex.Record.First("RelativeFilename")?.Prop<string>(0) ?? tex.Record.First("RelativeFileName")?.Prop<string>(0) ?? ""));
             Materials.Add(mat);
         }
+    }
+
+    // UTF-8 byte order is Unicode scalar order; UTF-16 Ordinal puts surrogate pairs before BMP private-use chars.
+    static readonly IComparer<string> Utf8Order = Comparer<string>.Create(CompareUtf8);
+    static int CompareUtf8(string a, string b)
+    {
+        int i = 0, j = 0;
+        while (i < a.Length && j < b.Length)
+        {
+            int x = a[i++], y = b[j++];
+            if (char.IsHighSurrogate((char)x) && i < a.Length && char.IsLowSurrogate(a[i])) x = char.ConvertToUtf32((char)x, a[i++]);
+            if (char.IsHighSurrogate((char)y) && j < b.Length && char.IsLowSurrogate(b[j])) y = char.ConvertToUtf32((char)y, b[j++]);
+            if (x != y) return x < y ? -1 : 1;
+        }
+        return i < a.Length ? 1 : j < b.Length ? -1 : 0;
     }
 }

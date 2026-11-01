@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using Xunit;
 
@@ -148,5 +149,114 @@ public class FbxSceneTests
         Assert.Equal(2, s.Nodes.Count); Assert.Same(s.Nodes[0], s.Nodes[1].Parent);   // an orphan Model hangs from the root, as in ufbx
         var m = Assert.Single(s.Meshes); Assert.Empty(m.Instances); Assert.Equal(1, m.NumFaces);
         Assert.Empty(m.FaceMaterial);   // no material slot at all: no face material list (ufbx); one slot would give every face 0
+    }
+
+    [Fact]
+    public void Numeric_identifiers_are_not_limited_to_int64_properties()
+    {
+        var model = N("Model", 1, "IntegerId\0\u0001Model", "Null");
+        var s = FbxScene.Read(Doc(With(N("Objects"), model), With(N("Connections"), N("C", "OO", 1, 0))));
+        Assert.Equal("IntegerId", Assert.Single(s.Nodes.Where(n => !n.IsRoot)).Name);
+        Assert.Same(s.Nodes[0], s.Nodes[1].Parent);
+        Assert.Same(s.Objects[0], Assert.Single(s.Connections).Src);
+    }
+
+    [Fact]
+    public void An_empty_declared_property_overrides_a_template_with_zero_values()
+    {
+        var props = FbxProps.Read(With(N("Model"), Props70(P("Lcl Scaling", "Lcl Scaling"), P("Dup", "double", 2.0), P("Dup", "double"))));
+        props.Defaults = FbxProps.Read(With(N("Template"), Props70(P("Lcl Scaling", "Lcl Scaling", 3.0, 3.0, 3.0))));
+        Assert.NotNull(props.Find("Lcl Scaling"));
+        Assert.Equal(new[] { 0.0, 0.0, 0.0 }, props.Vec3("Lcl Scaling", 1, 1, 1));
+        Assert.Equal(0.0, props.Real("Dup", 99));
+    }
+
+    static FbxNode Layer(string kind, int index, string field, double[] values, string name = "") =>
+        With(N("LayerElement" + kind, index), N("Name", name), N("MappingInformationType", "ByPolygonVertex"),
+            N("ReferenceInformationType", "Direct"), N(field, values));
+    static FbxScene MeshScene(params FbxNode[] layers) => FbxScene.Read(Doc(With(N("Objects"), Cube(1, "Triangle", new[] { 0, 1, -3 },
+        new double[] { 0, 0, 0, 1, 0, 0, 0, 1, 0 }, layers))));
+
+    [Fact]
+    public void Uv_and_color_sets_sort_by_typed_index_stably()
+    {
+        var m = Assert.Single(MeshScene(Layer("UV", 2, "UV", new double[6], "uv2"), Layer("UV", 0, "UV", new double[6], "uv0"),
+            Layer("Color", 2, "Colors", new double[12], "color2"), Layer("Color", 0, "Colors", new double[12], "color0")).Meshes);
+        Assert.Equal(new[] { "uv0", "uv2" }, m.UvSets.Select(s => s.Name));
+        Assert.Equal(new[] { "color0", "color2" }, m.ColorSets.Select(s => s.Name));
+    }
+
+    [Fact]
+    public void Primary_tangents_follow_the_uv_layer_references()
+    {
+        var link = With(N("Layer", 0), With(N("LayerElement"), N("Type", "LayerElementUV"), N("TypedIndex", 0)),
+            With(N("LayerElement"), N("Type", "LayerElementTangent"), N("TypedIndex", 0)));
+        var layers = new[] { Layer("UV", 0, "UV", new double[6]),
+            Layer("Tangent", 1, "Tangents", new double[] { 0, 1, 0, 0, 1, 0, 0, 1, 0 }),
+            Layer("Tangent", 0, "Tangents", new double[] { 1, 0, 0, 1, 0, 0, 1, 0, 0 }) };
+        var m = Assert.Single(MeshScene(layers.Concat(new[] { link }).ToArray()).Meshes);
+        Assert.Equal(1.0, m.Tangent.Get(0, 0));
+        Assert.Equal(0.0, m.Tangent.Get(0, 1));
+        Assert.False(Assert.Single(MeshScene(layers).Meshes).Tangent.Exists); // without a Layer association it is not the primary UV's tangent
+    }
+
+    [Fact]
+    public void Numeric_mesh_arrays_are_converted_like_ufbx()
+    {
+        var mesh = Object("Geometry", 1, "Bytes", "Mesh", N("Vertices", new byte[] { 0, 0, 0, 1, 0, 0, 0, 1, 0 }),
+            N("PolygonVertexIndex", new long[] { 0, 1, -3 }),
+            With(N("LayerElementColor", 0), N("MappingInformationType", "ByPolygonVertex"),
+                N("Colors", new[] { true, false, false, true, true, false, false, true, true, false, false, true })));
+        var m = Assert.Single(FbxScene.Read(Doc(With(N("Objects"), mesh))).Meshes);
+        Assert.Equal(new double[] { 0, 0, 0, 1, 0, 0, 0, 1, 0 }, m.Vertices);
+        Assert.Equal(new[] { 0, 1, 2 }, m.VertexIndices);
+        Assert.Equal(1.0, Assert.Single(m.ColorSets).Get(0, 0));
+    }
+
+    [Fact]
+    public void Multiple_parents_use_ufbx_element_order_instead_of_the_first_connection()
+    {
+        var objects = With(N("Objects"), Object("Model", 1, "Child", "Null"), Object("Model", 2, "ParentA", "Null"), Object("Model", 3, "ParentB", "Null"));
+        foreach (bool reverse in new[] { false, true })
+        {
+            var edges = reverse ? new[] { C("OO", 1, 3), C("OO", 1, 2) } : new[] { C("OO", 1, 2), C("OO", 1, 3) };
+            var s = FbxScene.Read(Doc(objects, With(N("Connections"), edges)));
+            Assert.Equal("ParentB", s.Nodes.Single(n => n.Name == "Child").Parent.Name);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Cyclic_hierarchies_are_refused_by_name(bool self)
+    {
+        var objects = With(N("Objects"), Object("Model", 1, "One", "Null"), Object("Model", 2, "Two", "Null"));
+        var connections = self ? With(N("Connections"), C("OO", 1, 1)) : With(N("Connections"), C("OO", 1, 2), C("OO", 2, 1));
+        Assert.Contains("Cyclic", Assert.Throws<InvalidDataException>(() => FbxScene.Read(Doc(objects, connections))).Message);
+    }
+
+    [Fact]
+    public void Texture_aliases_and_utf8_property_order_are_preserved()
+    {
+        string pua = "\ue000", emoji = "\ud83d\ude00";
+        var s = FbxScene.Read(Doc(With(N("Objects"), Object("Material", 1, "Material", ""),
+            Object("Texture", 2, "PUA", "", N("RelativeFileName", "textures/pua.png")),
+            Object("Texture", 3, "Emoji", "", N("RelativeFilename", "textures/emoji.png"))),
+            With(N("Connections"), C("OP", 2, 1, pua), C("OP", 3, 1, emoji))));
+        var textures = Assert.Single(s.Materials).Textures;
+        Assert.Equal(new[] { pua, emoji }, textures.Select(t => t.prop));
+        Assert.Equal(new[] { "textures/pua.png", "textures/emoji.png" }, textures.Select(t => t.relativeFilename));
+    }
+
+    [Fact]
+    public void Layered_texture_references_keep_their_children()
+    {
+        var s = FbxScene.Read(Doc(With(N("Objects"), Object("Material", 1, "Material", ""),
+            Object("LayeredTexture", 2, "Layers", ""), Object("Texture", 3, "Leaf", "", N("RelativeFilename", "leaf.png"))),
+            With(N("Connections"), C("OP", 2, 1, "DiffuseColor"), C("OO", 3, 2))));
+        var texture = Assert.Single(Assert.Single(s.Materials).Textures).texture;
+        Assert.Equal("LayeredTexture", texture.Class);
+        Assert.True(texture.IsTexture);
+        Assert.Equal("Leaf", Assert.Single(texture.Sources).Src.Name);
     }
 }
