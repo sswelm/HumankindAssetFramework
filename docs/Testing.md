@@ -187,7 +187,7 @@ writes the HafModel its glTF exporter would (the node order, `ExporterTrs`, `Mes
 `BlenderExport.MeshPrimitives` with the polygon mesh's corner normals). The drill holds the two on every node (name, parent,
 children order, mesh, every written translation, rotation and scale as bits), every mesh (name, each primitive's material
 name, vertex count, positions, normals, UV sets and indices as bits) and the material names; a file with bones, deformers,
-animation curves, cameras or colour layers is left to Blender by name (sub-steps 6b-6d) and counted as a SKIP. Three sources
+animation curves, cameras or colour layers is left to Blender by name (sub-steps 6c-6d) and counted as a SKIP. Three sources
 (the Bradley, the balloon, the light mech) and fourteen generated scenes (every polygon size with the arrowhead quad that flips the
 split, by-edge smoothing through an Edges array, pivots, offsets, pre/post rotations and every rotation order, Z-up metres and
 Y-up inches, Blender's name pools with an empty name, a 70-byte name, numbered twins, a shared datablock, siblings whose case
@@ -204,6 +204,37 @@ The drill refuses failed input/fixture generators, nonzero Blender exits even wi
 transcripts and skipped fixtures. The comparator returns SKIP when it compares no file, never PASS. Recipe-only discovery includes
 sources inside Assets without adding generated project outputs. Blender live only: a parity-lane step; the push runs
 no Blender or recorded Blender comparisons.
+
+Sub-step 6b (2026-11-02) adds the materials, textures and images: `editor/FbxMaterials.cs` reads every Material through
+the importer's PrincipledBSDFWrapper (DiffuseColor, SpecularFactor x 2, 1 - sqrt(Shininess) / 10, the alpha from
+TransparencyFactor then the material's own Opacity then TransparentColor, ReflectionFactor, BumpFactor, EmissiveColor and
+EmissiveFactor, each clamped into its float32 socket; a property read from the Material then the KFbxSurfacePhong template
+with a 'U' flag skipping it, and Blender's type assertions declining the file), every Video and Texture through
+blen_read_texture_image (RelativeFilename under the file's directory, FileName, Filename, the element's name; load_image's
+variants and its recursive case-folded search; a placeholder without pixels; a Content block packed over the loaded buffers;
+the image named after the element's base name through Blender's image pool), and the texture links in connection order into
+the wrapper's slots (the eight link families, the alpha slot's Alpha-or-Color output by the image's channels and depth, the
+Mapping node and EXTEND from the Texture's transform and wrap properties, the diffuse image of depth 32 copied into the
+alpha slot, and the wrapper's colourspace rule that COPIES a datablock another node already holds when a Non-Color slot
+takes it - the rule behind Blender's re-encoding of every textured hull with an alpha channel; a later element's Content
+packed over a shared image; bytes no reader takes packed as no pixels). The exporter side writes the
+material fields, KHR_materials_specular and KHR_materials_emissive_strength, the textures per slot (the base colour from
+the base and alpha slots, the metallic-roughness composition, emissive, specular, normal with its scale), a sampler per
+value, and the images: a file passed through when its bytes are the MIME type's (JPEG by extension, PNG forced under an
+Alpha reader), else COMPOSED from the pixels Blender holds (`editor/PngCodec.cs` decodes every 8-bit PNG colour type as
+OpenImageIO expands it, and encodes the new PNG), named by the file's stem or the Blender names' stems; extensionsUsed in the
+exporter's fixed registration order. The drill compares every material field as bits, the extensions structurally, the
+textures, the samplers, the images' names, MIME types and bytes - or the decoded PIXELS of a composition, since Blender's
+PNG encoder is not reproduced. Three sources (the Bradley with its metallic-roughness compositions over grey PNGs, the
+balloon with its alpha compositions, the light mech) and nine material scenes (every property and its clamp, the template
+and the U flag, every link family, twins and names, missing files, embedded Content, a JPEG, every PNG colour type, wrap modes)
+are identical; ten scenes are named fallbacks the drill requires as SKIP rows (a property type Blender asserts on, a short
+property in an object's own block, a texture transform, a JPEG or a 16-bit PNG inside a composition, a JPEG under a .png name,
+images of different sizes composed, a TGA, a TIFF).
+Twelve planted deviations (the roughness without its square root, the specular not doubled, the alpha copy ignoring the
+depth test, no datablock copy for a used image, metallic into G, an averaged luminance, the file stem for every name, JPEG by
+magic, extensionsUsed in traversal order, no white fill beside a lone metallic, the emission strength never applied, the template's
+Opacity read) each failed the comparison. 14 test cases hold Blender's answers.
 
 **Since 2026-10-11 the drills run concurrently, and since 2026-10-29 the source guards run on a lane beside them.**
 The drills are independent (each works in its own temp directory and builds its own exe), so `check.sh` starts them

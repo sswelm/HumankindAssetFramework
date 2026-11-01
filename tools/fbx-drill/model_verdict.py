@@ -18,8 +18,11 @@ def verdict(transcript, returncode, files, source_count):
         if path != expected:
             return 1, 'comparison path/order differs from expected input: ' + expected
         counts[0 if kind == 'PASS' else 1 if kind == 'SKIP' else 2] += 1
-        if i >= source_count and kind != 'PASS':
-            return 1, 'required fixture did not compare: ' + expected
+        if i >= source_count:
+            # a fixture named *_fallback holds a shape the reader must leave to Blender by name: its row is a SKIP
+            wanted = 'SKIP' if expected.endswith('_fallback.fbx') else 'PASS'
+            if kind != wanted:
+                return 1, ('required fixture did not compare: ' if wanted == 'PASS' else 'fallback fixture was not a named fallback: ') + expected
     if counts != [int(n) for n in summary.groups()]:
         return 1, 'RESULT counts disagree with comparison rows'
     expected_rc = 1 if counts[2] else 3 if not counts[0] else 0
@@ -29,7 +32,7 @@ def verdict(transcript, returncode, files, source_count):
         return 1, 'one or more comparisons failed'
     if not counts[0]:
         return 3, 'no FBX model was compared'
-    return 0, f'{counts[0]} compared, {counts[1]} named source fallbacks, all {len(files) - source_count} fixtures compared'
+    return 0, f'{counts[0]} compared, {counts[1]} named fallbacks, all {len(files) - source_count} fixtures as expected'
 
 
 def main():

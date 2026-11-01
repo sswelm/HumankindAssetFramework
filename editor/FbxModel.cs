@@ -13,21 +13,27 @@ using System.Linq;
 // folded; an n-gon projected by axis_dominant_v3_to_m3_negate of its Newell normal and ear-clipped by BLI_polyfill_calc
 // without beautify), with the corner normals of the POLYGON mesh (VehicleProbe.PolygonCornerNormals) carried to the triangles'
 // corners; a mesh datablock shared by objects with the same material slots is written once; materials by name in first-use
-// order (their fields are sub-step 6b's: carried as names here, so the Factory's converter reads a material per slot).
-// A mesh object whose mesh has no triangle is written as a node without a mesh. Images, textures, samplers: none (6b).
+// order, each with its fields, textures, images and samplers as FbxMaterials.Export writes them (sub-step 6b, numbered at the
+// material's first use as the exporter's traversal numbers them). A mesh object whose mesh has no triangle is written as a
+// node without a mesh.
 // Proof: tools/fbx_model_drill.sh.
 public static class FbxModel
 {
     public static HafModel Read(string path) => Build(FbxImport.Read(path));
 
     /// <summary>The model, or null when the import named a fallback (then `why` says what).</summary>
-    public static HafModel Build(FbxImport.Scene s) => Build(s, out _);
+    public static HafModel Build(FbxImport.Scene s) => Build(s, out _, out _);
 
-    public static HafModel Build(FbxImport.Scene s, out string why)
+    public static HafModel Build(FbxImport.Scene s, out string why) => Build(s, out why, out _);
+
+    /// <summary>`composed` lists the images whose bytes Blender's exporter encodes anew (a composition): the drill compares their pixels.</summary>
+    public static HafModel Build(FbxImport.Scene s, out string why, out HashSet<int> composed)
     {
-        why = s.Fallback;
+        why = s.Fallback; composed = null;
         if (why != null) return null;
         var o = new HafModel { Generator = "HAF FbxModel" };
+        var writer = new FbxMaterials.Writer(o);
+        string materialWhy = null;
         // ---- the tree
         var children = new Dictionary<FbxImport.Obj, List<FbxImport.Obj>>();
         foreach (var ob in s.Objects) children[ob] = new List<FbxImport.Obj>();
@@ -41,7 +47,14 @@ public static class FbxModel
         {
             if (mat == null) return -1;
             string name = s.MaterialName[mat];
-            if (!materialIndex.TryGetValue(name, out int i)) { i = o.Materials.Count; materialIndex[name] = i; o.Materials.Add(new HafMaterial { Name = name, NameAbsent = false }); }
+            if (!materialIndex.TryGetValue(name, out int i))
+            {
+                // gather_material at the material's first use: its textures, images and samplers are numbered here (6b)
+                i = o.Materials.Count; materialIndex[name] = i;
+                var hm = FbxMaterials.Export(writer, s.MaterialData.Materials[mat], name, out string mw);
+                if (hm == null) { if (materialWhy == null) materialWhy = "material '" + name + "': " + mw; hm = new HafMaterial { Name = name, NameAbsent = false }; }
+                o.Materials.Add(hm);
+            }
             return i;
         }
         int indexOfNode = 0;
@@ -77,6 +90,8 @@ public static class FbxModel
         var scene = new HafScene { Name = "Scene" };
         foreach (var root in roots) scene.Nodes.Add(Visit(root));
         o.Scenes.Add(scene); o.Scene = 0;
+        if (materialWhy != null) { why = materialWhy; return null; }
+        composed = writer.ComposedImages;
         return o;
     }
 

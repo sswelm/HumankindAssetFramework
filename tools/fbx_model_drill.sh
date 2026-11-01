@@ -4,8 +4,11 @@
 # (tools/fbx-drill/fbx_to_glb.py); the C# side (editor/FbxImport.cs + editor/FbxModel.cs) builds the HafModel Blender's
 # exporter would write and holds it to that GLB on what sub-step 6a models: the node tree (names, parents, children order,
 # mesh references, every written translation / rotation / scale as bits), the meshes (names, the primitives' material names,
-# vertex counts, positions, normals, UV sets and indices as bits) and the material names. A file the import names as a
-# fallback (bones, deformers, animation, cameras, colour layers: sub-steps 6b-6d) is a SKIP row, not a failure.
+# vertex counts, positions, normals, UV sets and indices as bits), the materials, textures, samplers and images. A file the import names as a
+# fallback (bones, deformers, animation, cameras, colour layers: sub-steps 6c-6d) is a SKIP row, not a failure. Sub-step 6b
+# (2026-11-02) adds the materials with every field, the textures, samplers and images (bytes, or the pixels of an image the
+# exporter composes anew: the metallic-roughness composition, an alpha read from a colour output) through
+# editor/FbxMaterials.cs + editor/PngCodec.cs; a fixture named *_fallback must be a SKIP row (a named fallback).
 # The C# side runs as a 64-bit process (BlenderTrig: the C runtime's float trig). Prerequisites as prep_drill.sh.
 set -uo pipefail
 UNITY="${UNITY:-C:/Program Files/Unity 2021.3.1f1/Editor/Data}"
@@ -31,7 +34,7 @@ cp "$ROOT/editor/Plugins/x86_64/hafkernels.dll" "$TMPD/hafkernels.dll" 2>/dev/nu
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -optimize+ -platform:x64 -out:"$WTMP/fbxmodel.exe" \
   -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WAPI/System.Numerics.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
   "$WROOT/tools/fbx-drill/FbxModelDrill.cs" \
-  "$WROOT/editor/FbxDocument.cs" "$WROOT/editor/FbxScene.cs" "$WROOT/editor/FbxAnimation.cs" "$WROOT/editor/FbxTriangulate.cs" "$WROOT/editor/FbxImport.cs" "$WROOT/editor/FbxModel.cs" \
+  "$WROOT/editor/FbxDocument.cs" "$WROOT/editor/FbxScene.cs" "$WROOT/editor/FbxAnimation.cs" "$WROOT/editor/FbxTriangulate.cs" "$WROOT/editor/FbxImport.cs" "$WROOT/editor/FbxModel.cs" "$WROOT/editor/FbxMaterials.cs" "$WROOT/editor/PngCodec.cs" \
   "$WROOT/editor/HafModel.cs" "$WROOT/editor/GlbReader.cs" "$WROOT/editor/HafTransforms.cs" "$WROOT/editor/BlenderNames.cs" "$WROOT/editor/BlenderMesh.cs" "$WROOT/editor/BMesh.cs" \
   "$WROOT/editor/BlenderColor.cs" "$WROOT/editor/BlenderTrig.cs" "$WROOT/editor/BlenderDecimate.cs" "$WROOT/editor/BlenderReduce.cs" "$WROOT/editor/BlenderExport.cs" "$WROOT/editor/BlenderExportTree.cs" "$WROOT/editor/BlenderPolyfill.cs" "$WROOT/editor/BlenderWeld.cs" \
   "$WROOT/editor/VehicleProbe.cs" "$WROOT/editor/VehicleProbe.Visibility.cs" "$WROOT/editor/VehicleProbe.Islands.cs" "$WROOT/editor/VehicleProbe.InsideOut.cs" \
@@ -68,7 +71,10 @@ mkdir -p "$TMPD/oracle"
 for f in "${FILES[@]}"; do
   out="$TMPD/oracle/$(basename "${f%.*}")_$n_blender.glb"
   "$BLENDER" -b --python-exit-code 1 --python "$ROOT/tools/fbx-drill/fbx_to_glb.py" -- "$f" "$out" > "$TMPD/blender_$n_blender.log" 2>&1; rc=$?
-  if [ "$rc" -ne 0 ] || [ ! -s "$out" ]; then echo "FAIL — Blender import/export failed for $f (exit $rc):"; tail -8 "$TMPD/blender_$n_blender.log"; exit 1; fi
+  if [ "$rc" -ne 0 ] || [ ! -s "$out" ]; then
+    # Blender's importer asserts on some property shapes: the reader must decline such a file (a SKIP row), else it is a DIFF
+    echo "NOTE — Blender import/export failed for $f (exit $rc): $(grep -E 'Error|error' "$TMPD/blender_$n_blender.log" | tail -1 | cut -c1-200)"; out="-"
+  fi
   PAIRS+=("$f" "$out"); n_blender=$((n_blender + 1))
 done
 t1=$(date +%s)
@@ -78,4 +84,4 @@ grep -E '^(DIFF|ERROR|SKIP) ' "$TMPD/result.txt" | cut -c1-400
 python "$ROOT/tools/fbx-drill/model_verdict.py" "$TMPD/result.txt" "$rc" "${#SOURCES[@]}" "${FILES[@]}"; verdict=$?
 [ "$verdict" -eq 0 ] || { tail -5 "$TMPD/result.txt"; exit "$verdict"; }
 n_pass=$(grep -c '^PASS ' "$TMPD/result.txt"); n_skip=$(grep -c '^SKIP ' "$TMPD/result.txt")
-echo "PASS — FBX model drill: $n_pass FBX files read by editor/FbxImport.cs + FbxModel.cs equal to Blender 5.1's import + glTF export on every node (name, parent, order, transform bits), mesh (every primitive's positions, normals, UVs, indices, material name) and material name; $n_skip left to Blender by name (bones, deformers, animation, cameras, colours: sub-steps 6b-6d) (Blender $((t1 - t0)) s for ${#FILES[@]} files, C# $((t2 - t1)) s)"
+echo "PASS — FBX model drill: $n_pass FBX files read by editor/FbxImport.cs + FbxModel.cs equal to Blender 5.1's import + glTF export on every node (name, parent, order, transform bits), mesh (every primitive's positions, normals, UVs, indices, material name), material (every field, the extensions), texture, sampler and image (bytes, or the pixels of a composition); $n_skip left to Blender by name (bones, deformers, animation, cameras, colours: sub-steps 6c-6d; a texture transform, an image the exporter encodes again, a composition over pixels this code cannot decode) (Blender $((t1 - t0)) s for ${#FILES[@]} files, C# $((t2 - t1)) s)"

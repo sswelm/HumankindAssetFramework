@@ -124,6 +124,7 @@ public sealed class FbxConnection
     public bool IsObjectConnection => SrcProp.Length == 0 && DstProp.Length == 0;
     public FbxObject Src, Dst; public long SrcId, DstId;
     public string SrcProp = "", DstProp = "";
+    public int PropertyCount;   // the record's field count (Blender's importer indexes an OP link's fourth field without checking)
 }
 
 /// <summary>ufbx_transform: translation, rotation (x y z w), scale; and the composition helpers of ufbx, in its order of operations.</summary>
@@ -532,7 +533,8 @@ public sealed class FbxScene
         {
             // io_scene_fbx/load(): only links whose first two identifiers have the binary LL types enter its maps.
             if (c.Properties.Count < 3 || !(c.Properties[1] is long src) || !(c.Properties[2] is long dst)) continue;
-            var link = new FbxConnection { Kind = c.Properties[0] as string ?? "", SrcId = src, DstId = dst };
+            var link = new FbxConnection { Kind = c.Properties[0] as string ?? "", SrcId = src, DstId = dst, PropertyCount = c.Properties.Count };
+            if (link.Kind == "OP" && c.Properties.Count > 3 && c.Properties[3] is string dp) link.DstProp = dp;   // the material's property a texture feeds (the "Assign textures" pass)
             s.ById.TryGetValue(src, out link.Src); s.ById.TryGetValue(dst, out link.Dst);
             s.Connections.Add(link);
         }
