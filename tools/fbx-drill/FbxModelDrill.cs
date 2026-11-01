@@ -7,8 +7,11 @@ using System.Text;
 // The C# side of tools/fbx_model_drill.sh (step 6a of the native FBX reader): for every FBX file, FbxModel's HafModel against
 // the GLB Blender wrote of the same file (fbx_to_glb.py: import, export), compared on what 6a models - the node tree (names,
 // parents, children order, mesh references, the written translation / rotation / scale as bits), the meshes (names, the
-// primitives' material NAMES, vertex counts, positions, normals, UV sets and indices as bits) and the material names in
-// order. Images, textures, samplers and material fields are 6b's. Exit 1 on any difference; a named fallback is a SKIP row.
+// primitives' material NAMES, vertex counts, positions, normals, UV sets and indices as bits), the materials in order with
+// every field (6b: the factors as bits, the texture references, the alpha mode, the extensions object structurally), the
+// textures (image, sampler), the samplers (structurally), the images (name, MIME type, the bytes - or the decoded PIXELS of
+// an image the exporter composes anew) and extensionsUsed. Exit 1 on any difference; a named fallback is a SKIP row. An
+// oracle given as "-" means Blender's import failed: a SKIP when the reader declined the file too, else a DIFF.
 static class FbxModelDrill
 {
     static int Main(string[] args)
@@ -18,8 +21,8 @@ static class FbxModelDrill
         if (args[0] == "--dump")
         {
             var scene = FbxImport.Read(args[1]);
-            if (scene.Fallback != null) { Console.WriteLine("FALLBACK " + scene.Fallback); return 0; }
-            var m = FbxModel.Build(scene);
+            var m = FbxModel.Build(scene, out string why);
+            if (m == null) { Console.WriteLine("FALLBACK " + why); return 0; }
             Console.WriteLine(Describe(m));
             return 0;
         }
@@ -46,11 +49,12 @@ static class FbxModelDrill
             try
             {
                 var scene = FbxImport.Read(fbx);
-                if (scene.Fallback != null) { Console.WriteLine("SKIP " + fbx + " : " + scene.Fallback); skipped++; continue; }
-                var mine = FbxModel.Build(scene);
+                var mine = FbxModel.Build(scene, out string why, out var composed);
+                if (mine == null) { Console.WriteLine("SKIP " + fbx + " : " + why); skipped++; continue; }
+                if (glb == "-") { Console.WriteLine("DIFF " + fbx + " : Blender's import failed where the reader built a model"); failed++; continue; }
                 var theirs = GlbReader.Read(glb);
-                string d = Compare(mine, theirs);
-                if (d == null) { Console.WriteLine("PASS " + fbx + " : " + mine.Nodes.Count + " nodes, " + mine.Meshes.Count + " meshes, " + mine.Materials.Count + " materials" + (scene.Notes.Count > 0 ? " (notes: " + string.Join("; ", scene.Notes.Distinct().Take(3)) + ")" : "")); compared++; }
+                string d = Compare(mine, theirs, composed, ReadImageEvidence(glb, theirs));
+                if (d == null) { Console.WriteLine("PASS " + fbx + " : " + mine.Nodes.Count + " nodes, " + mine.Meshes.Count + " meshes, " + mine.Materials.Count + " materials, " + mine.Textures.Count + " textures, " + mine.Images.Count + " images" + (composed.Count > 0 ? " (" + composed.Count + " composed: pixels compared)" : "") + (scene.Notes.Count > 0 ? " (notes: " + string.Join("; ", scene.Notes.Distinct().Take(6)) + ")" : "")); compared++; }
                 else { Console.WriteLine("DIFF " + fbx + " : " + d); failed++; }
             }
             catch (Exception e) { Console.WriteLine("ERROR " + fbx + " : " + e.GetType().Name + ": " + e.Message); failed++; }
@@ -62,8 +66,8 @@ static class FbxModelDrill
     static string Bits(double d) => BitConverter.ToUInt64(BitConverter.GetBytes(d), 0).ToString("x16");
     static string FBits(float f) => BitConverter.ToUInt32(BitConverter.GetBytes(f), 0).ToString("x8");
 
-    /// <summary>The first difference on the 6a fields, or null.</summary>
-    static string Compare(HafModel a, HafModel b)
+    /// <summary>The first difference on the 6a and 6b fields, or null.</summary>
+    static string Compare(HafModel a, HafModel b, HashSet<int> composed, int[] imageModes)
     {
         if (a.Nodes.Count != b.Nodes.Count) return $"nodes: {a.Nodes.Count} vs Blender's {b.Nodes.Count} ({Names(a.Nodes.Select(n => n.Name))} vs {Names(b.Nodes.Select(n => n.Name))})";
         if (a.Meshes.Count != b.Meshes.Count) return $"meshes: {a.Meshes.Count} vs Blender's {b.Meshes.Count}";
@@ -110,7 +114,123 @@ static class FbxModelDrill
                 }
             }
         }
+        return CompareMaterials(a, b, composed, imageModes);
+    }
+
+    /// <summary>6b: every material field, the textures, the samplers, the images, extensionsUsed.</summary>
+    static string CompareMaterials(HafModel a, HafModel b, HashSet<int> composed, int[] imageModes)
+    {
+        for (int i = 0; i < a.Materials.Count; i++)
+        {
+            var x = a.Materials[i]; var y = b.Materials[i];
+            string where = $"material {i} '{x.Name}'";
+            string t = Trs(x.BaseColorFactor, y.BaseColorFactor, "baseColorFactor", 4); if (t != null) return where + ": " + t;
+            if (FBits(x.MetallicFactor) != FBits(y.MetallicFactor)) return $"{where}: metallicFactor {x.MetallicFactor} vs {y.MetallicFactor}";
+            if (FBits(x.RoughnessFactor) != FBits(y.RoughnessFactor)) return $"{where}: roughnessFactor {x.RoughnessFactor} vs {y.RoughnessFactor}";
+            if (x.BaseColorTexture != y.BaseColorTexture || x.BaseColorTexCoord != y.BaseColorTexCoord) return $"{where}: baseColorTexture {x.BaseColorTexture} vs {y.BaseColorTexture}";
+            if (x.MetallicRoughnessTexture != y.MetallicRoughnessTexture || x.MetallicRoughnessTexCoord != y.MetallicRoughnessTexCoord) return $"{where}: metallicRoughnessTexture {x.MetallicRoughnessTexture} vs {y.MetallicRoughnessTexture}";
+            if (x.NormalTexture != y.NormalTexture || x.NormalTexCoord != y.NormalTexCoord) return $"{where}: normalTexture {x.NormalTexture} vs {y.NormalTexture}";
+            if (FBits(x.NormalScale) != FBits(y.NormalScale)) return $"{where}: normalTexture.scale {x.NormalScale} vs {y.NormalScale}";
+            if (x.OcclusionTexture != y.OcclusionTexture) return $"{where}: occlusionTexture {x.OcclusionTexture} vs {y.OcclusionTexture}";
+            if (x.EmissiveTexture != y.EmissiveTexture || x.EmissiveTexCoord != y.EmissiveTexCoord) return $"{where}: emissiveTexture {x.EmissiveTexture} vs {y.EmissiveTexture}";
+            t = Trs(x.EmissiveFactorJson, y.EmissiveFactorJson, "emissiveFactor", 3); if (t != null) return where + ": " + t;
+            if (x.AlphaMode != y.AlphaMode) return $"{where}: alphaMode {x.AlphaMode} vs {y.AlphaMode}";
+            if (Bits(x.AlphaCutoff) != Bits(y.AlphaCutoff)) return $"{where}: alphaCutoff {x.AlphaCutoff} vs {y.AlphaCutoff}";
+            if (x.DoubleSided != y.DoubleSided) return $"{where}: doubleSided {x.DoubleSided} vs {y.DoubleSided}";
+            string e = Json(x.ExtensionsJson, y.ExtensionsJson); if (e != null) return $"{where}: extensions {e}";
+            if ((x.ExtrasJson ?? "") != (y.ExtrasJson ?? "")) return $"{where}: extras";
+        }
+        if (a.Textures.Count != b.Textures.Count) return $"textures: {a.Textures.Count} vs Blender's {b.Textures.Count}";
+        for (int i = 0; i < a.Textures.Count; i++)
+        {
+            var x = a.Textures[i]; var y = b.Textures[i];
+            if (x.Source != y.Source || x.Sampler != y.Sampler || x.Name != y.Name) return $"texture {i}: source {x.Source} sampler {x.Sampler} '{x.Name}' vs source {y.Source} sampler {y.Sampler} '{y.Name}'";
+        }
+        if (a.Samplers.Count != b.Samplers.Count) return $"samplers: {a.Samplers.Count} vs Blender's {b.Samplers.Count}";
+        for (int i = 0; i < a.Samplers.Count; i++) { string e = Json(a.Samplers[i], b.Samplers[i]); if (e != null) return $"sampler {i}: {e}"; }
+        if (a.Images.Count != b.Images.Count) return $"images: {a.Images.Count} vs Blender's {b.Images.Count} ({Names(a.Images.Select(m => m.Name))} vs {Names(b.Images.Select(m => m.Name))})";
+        for (int i = 0; i < a.Images.Count; i++)
+        {
+            var x = a.Images[i]; var y = b.Images[i];
+            if (x.Name != y.Name) return $"image {i}: name '{x.Name}' vs '{y.Name}'";
+            if (x.MimeType != y.MimeType) return $"image {i} '{x.Name}': mimeType {x.MimeType} vs {y.MimeType}";
+            if (x.Bytes == null || y.Bytes == null) return $"image {i} '{x.Name}': bytes missing";
+            if ((imageModes[i] & (composed.Contains(i) ? 2 : 1)) == 0) return $"image {i} '{x.Name}': composition decision differs from Blender's exporter";
+            if (composed.Contains(i))
+            {
+                var px = PngCodec.Decode(x.Bytes, out var ix, out string wx); var py = PngCodec.Decode(y.Bytes, out var iy, out string wy);
+                if (px == null) return $"image {i} '{x.Name}': the reader's PNG does not decode ({wx})";
+                if (py == null) return $"image {i} '{x.Name}': Blender's PNG does not decode ({wy})";
+                if (ix.Width != iy.Width || ix.Height != iy.Height) return $"image {i} '{x.Name}': {ix.Width}x{ix.Height} vs Blender's {iy.Width}x{iy.Height}";
+                if (ix.HasAlpha != iy.HasAlpha || ix.ColorType != iy.ColorType) return $"image {i} '{x.Name}': colour type {ix.ColorType} vs Blender's {iy.ColorType}";
+                for (int k = 0; k < px.Length; k++) if (px[k] != py[k]) return $"image {i} '{x.Name}': pixel {k / 4} channel {k % 4}: {px[k]} vs Blender's {py[k]} (composed, pixels compared)";
+            }
+            else
+            {
+                if (x.Bytes.Length != y.Bytes.Length) return $"image {i} '{x.Name}': {x.Bytes.Length} bytes vs Blender's {y.Bytes.Length}";
+                for (int k = 0; k < x.Bytes.Length; k++) if (x.Bytes[k] != y.Bytes[k]) return $"image {i} '{x.Name}': byte {k} differs";
+            }
+        }
+        if (!a.ExtensionsUsed.SequenceEqual(b.ExtensionsUsed)) return $"extensionsUsed [{string.Join(",", a.ExtensionsUsed)}] vs [{string.Join(",", b.ExtensionsUsed)}]";
         return null;
+    }
+
+    // The observer records the actual exporter path, bound to each written image. Missing/stale evidence cannot pass.
+    static int[] ReadImageEvidence(string glb, HafModel model)
+    {
+        var doc = Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(glb + ".images.json"));
+        var rows = doc["images"] as Newtonsoft.Json.Linq.JArray;
+        if ((int?)doc["version"] != 1 || rows == null || rows.Count != model.Images.Count) throw new InvalidDataException("image oracle evidence: version/count mismatch");
+        var modes = new int[rows.Count];
+        for (int i = 0; i < rows.Count; i++)
+        {
+            var image = model.Images[i]; string hash;
+            using (var sha = System.Security.Cryptography.SHA256.Create()) hash = BitConverter.ToString(sha.ComputeHash(image.Bytes)).Replace("-", "").ToLowerInvariant();
+            if ((string)rows[i]["name"] != image.Name || (string)rows[i]["mimeType"] != image.MimeType || (string)rows[i]["sha256"] != hash)
+                throw new InvalidDataException("image oracle evidence: image identity mismatch at " + i);
+            var values = rows[i]["composed"] as Newtonsoft.Json.Linq.JArray;
+            if (values == null || values.Count == 0 || values.Count > 2) throw new InvalidDataException("image oracle evidence: missing composition decision");
+            foreach (var value in values)
+            {
+                if (value.Type != Newtonsoft.Json.Linq.JTokenType.Boolean) throw new InvalidDataException("image oracle evidence: invalid composition decision");
+                int mode = (bool)value ? 2 : 1;
+                if ((modes[i] & mode) != 0) throw new InvalidDataException("image oracle evidence: duplicate composition decision");
+                modes[i] |= mode;
+            }
+        }
+        return modes;
+    }
+
+    /// <summary>Two JSON texts compared structurally: members by name, numbers as double bits, null and absent alike.</summary>
+    static string Json(string x, string y)
+    {
+        var jx = string.IsNullOrEmpty(x) ? null : Newtonsoft.Json.Linq.JToken.Parse(x); var jy = string.IsNullOrEmpty(y) ? null : Newtonsoft.Json.Linq.JToken.Parse(y);
+        return JsonDiff(jx, jy, "");
+    }
+
+    static string JsonDiff(Newtonsoft.Json.Linq.JToken x, Newtonsoft.Json.Linq.JToken y, string path)
+    {
+        if (x == null && y == null) return null;
+        if (x == null || y == null) return $"{path}: {(x == null ? "absent" : x.ToString(Newtonsoft.Json.Formatting.None))} vs Blender's {(y == null ? "absent" : y.ToString(Newtonsoft.Json.Formatting.None))}";
+        if (x is Newtonsoft.Json.Linq.JObject ox && y is Newtonsoft.Json.Linq.JObject oy)
+        {
+            foreach (var k in ox.Properties().Select(p => p.Name).Union(oy.Properties().Select(p => p.Name)))
+            { string d = JsonDiff(ox[k], oy[k], path + "/" + k); if (d != null) return d; }
+            return null;
+        }
+        if (x is Newtonsoft.Json.Linq.JArray ax && y is Newtonsoft.Json.Linq.JArray ay)
+        {
+            if (ax.Count != ay.Count) return $"{path}: {ax.Count} items vs {ay.Count}";
+            for (int i = 0; i < ax.Count; i++) { string d = JsonDiff(ax[i], ay[i], path + "[" + i + "]"); if (d != null) return d; }
+            return null;
+        }
+        if (x is Newtonsoft.Json.Linq.JValue vx && y is Newtonsoft.Json.Linq.JValue vy)
+        {
+            if ((vx.Type == Newtonsoft.Json.Linq.JTokenType.Integer || vx.Type == Newtonsoft.Json.Linq.JTokenType.Float) && (vy.Type == Newtonsoft.Json.Linq.JTokenType.Integer || vy.Type == Newtonsoft.Json.Linq.JTokenType.Float))
+                return Bits(Convert.ToDouble(vx.Value)) == Bits(Convert.ToDouble(vy.Value)) ? null : $"{path}: {vx} vs Blender's {vy}";
+            return Equals(vx.Value, vy.Value) ? null : $"{path}: {vx} vs Blender's {vy}";
+        }
+        return $"{path}: {x.Type} vs Blender's {y.Type}";
     }
 
     static string Names(IEnumerable<string> n) => "[" + string.Join(",", n.Take(12)) + "]";
@@ -147,7 +267,17 @@ static class FbxModelDrill
             foreach (var p in me.Primitives) sb.Append(" [mat=").Append(p.Material).Append(" v=").Append(p.VertexCount).Append(" i=").Append(p.Indices?.Length ?? 0).Append(" uv=").Append((p.Uv0 != null ? 1 : 0) + (p.Uv1 != null ? 1 : 0) + (p.UvMore?.Count ?? 0)).Append(']');
             sb.Append('\n');
         }
-        for (int i = 0; i < m.Materials.Count; i++) sb.Append("material ").Append(i).Append(" \"").Append(m.Materials[i].Name).Append("\"\n");
+        for (int i = 0; i < m.Materials.Count; i++)
+        {
+            var mt = m.Materials[i];
+            sb.Append("material ").Append(i).Append(" \"").Append(mt.Name).Append("\" base=[").Append(string.Join(",", mt.BaseColorFactor)).Append("] metallic=").Append(mt.MetallicFactor).Append(" roughness=").Append(mt.RoughnessFactor)
+              .Append(" alpha=").Append(mt.AlphaMode).Append(" tex base=").Append(mt.BaseColorTexture).Append(" mr=").Append(mt.MetallicRoughnessTexture).Append(" normal=").Append(mt.NormalTexture).Append('/').Append(mt.NormalScale)
+              .Append(" emissive=").Append(mt.EmissiveTexture).Append(" [").Append(string.Join(",", mt.EmissiveFactorJson)).Append("] ext=").Append(mt.ExtensionsJson ?? "-").Append('\n');
+        }
+        for (int i = 0; i < m.Textures.Count; i++) sb.Append("texture ").Append(i).Append(" source=").Append(m.Textures[i].Source).Append(" sampler=").Append(m.Textures[i].Sampler).Append('\n');
+        for (int i = 0; i < m.Samplers.Count; i++) sb.Append("sampler ").Append(i).Append(' ').Append(m.Samplers[i]).Append('\n');
+        for (int i = 0; i < m.Images.Count; i++) sb.Append("image ").Append(i).Append(" \"").Append(m.Images[i].Name).Append("\" ").Append(m.Images[i].MimeType).Append(' ').Append(m.Images[i].Bytes?.Length ?? 0).Append(" bytes\n");
+        sb.Append("extensionsUsed [").Append(string.Join(",", m.ExtensionsUsed)).Append("]\n");
         return sb.ToString();
     }
 }

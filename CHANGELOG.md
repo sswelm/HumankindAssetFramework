@@ -10,6 +10,32 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE NATIVE FBX READER, STEP 6b: MATERIALS, TEXTURES AND IMAGES, HELD TO BLENDER (2026-11-02).** `editor/FbxMaterials.cs`
+  reads every Material as Blender 5.1's FBX importer builds its node tree (blen_read_material through
+  PrincipledBSDFWrapper: the colour, specular, roughness, alpha, metallic, bump and emission formulas with their clamps into
+  float32 sockets; the Material's Properties70 then the KFbxSurfacePhong template, a 'U' flag skipping a property; Blender's
+  type assertions decline the file), every Video and Texture as blen_read_texture_image loads it (the path rules, load_image's
+  search with its recursive case-folded walk, placeholders, embedded Content packed over the loaded buffers, Blender's image
+  name pool) and the texture links as the "Assign textures" pass wires them (the eight link families, the alpha slot's output
+  by the image's channels and depth, the Mapping node and EXTEND, the diffuse image of depth 32 copied into the alpha slot,
+  the wrapper's colourspace rule copying a datablock another node holds), and writes them as the glTF exporter does
+  (the material fields, KHR_materials_specular and KHR_materials_emissive_strength, a texture per slot, the base colour from
+  the base and alpha slots, the metallic-roughness composition, samplers by value, images passed through or COMPOSED from
+  the pixels Blender holds through the new `editor/PngCodec.cs`, their names, extensionsUsed in the exporter's fixed order).
+  `tools/fbx_model_drill.sh` now holds every material field, texture, sampler and image to Blender (bytes, or the pixels of a
+  composition): the Bradley, the balloon, the light mech and thirteen material scenes identical; ten named fallbacks required as
+  SKIP rows (a texture transform, an image the exporter encodes again, a JPEG or a 16-bit PNG inside a composition, images of
+  different sizes composed, a TGA, a TIFF, a property Blender asserts on, a short property in an object's own block). Twelve planted deviations each failed the drill. Found on
+  the way: the wrapper's `image.copy()` for a used datablock is why Blender re-encodes every alpha-bearing hull texture;
+  `image.pack()` reloads the pixels from the packed data; extensionsUsed is registered for every extension kind at the first
+  material and filtered afterwards, so its order is fixed. 25 material/codec tests cover Blender's answers and malformed-input
+  bounds. Review fixes: image headers alone no longer establish loaded pixels. Invalid PNG chunks/checksums, short scanlines,
+  invalid filters and JPEG frames without scan data become placeholders; PNG decompression stops at the declared image,
+  grows only with actual scanlines and rejects unrepresentable dimensions before allocating. Cached images skip the custom
+  property pass, as Blender does. Four additional live fixtures cover damaged file/packed images, Blender's tolerated PNG
+  trailers, cached-image properties and an unrelated image with bytes identical to a composition. The comparator records
+  Blender's actual composition decisions, bound to the written image identities, instead of inferring them from source-byte
+  equality. Its negative controls reject eleven damaged or missing evidence records.
 - **THE NATIVE FBX READER, STEP 6a: THE STATIC FBX PATH, HELD TO BLENDER (2026-11-01).** `editor/FbxImport.cs` reads an
   FBX file as Blender 5.1's FBX importer builds it (io_scene_fbx/import_fbx.py with its defaults: the global matrix from the
   file's axes and unit scale, every Model's transform chain in mathutils float32 - translation, offsets, pivots, pre/post

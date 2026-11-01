@@ -34,7 +34,7 @@ using System.Text;
 //     Blender's mesh name pool names the datablock after the Geometry;
 //   * materials in slot order: the Material objects connected INTO the Model (connection order, any kind); a mesh shared
 //     by a second object with other materials gets object-level slots; a material index past the slots resets to 0;
-//   * colour layers and shape keys are NAMED (Fallback) for 6b.
+//   * materials, textures and images: FbxMaterials.cs (sub-step 6b); colour layers and shape keys are NAMED (Fallback).
 // Proof: tools/fbx_model_drill.sh (Blender imports every file and exports a GLB; FbxModel writes the same from this).
 public static class FbxImport
 {
@@ -81,18 +81,22 @@ public static class FbxImport
         public float[] GlobalMatrix;             // row-major mathutils items
         public double GlobalScale;
         public readonly List<string> Notes = new List<string>();
+        public readonly List<FbxObject> Table = new List<FbxObject>();   // fbx_table_nodes: every object in file order, a repeated id in its first place with its last record
+        public string BaseDir = "";              // the file's directory: where the importer looks for texture files
+        public FbxMaterials.Scene MaterialData;  // the materials' wrapper state and the images (sub-step 6b)
     }
 
     const double DegToRad = Math.PI / 180.0;
 
-    public static Scene Read(string path) => Build(FbxDocument.Read(path));
+    public static Scene Read(string path) => Build(FbxDocument.Read(path), Path.GetDirectoryName(Path.GetFullPath(path)) ?? "");
 
     public static Scene Build(FbxScene s) => Build(s.Document);
 
-    public static Scene Build(FbxDocument doc)
+    /// <summary>`baseDir` is where Blender's importer looks for texture files (the FBX file's directory); none: no file is found.</summary>
+    public static Scene Build(FbxDocument doc, string baseDir = "")
     {
         var s = FbxScene.ReadBlenderGraph(doc);
-        var r = new Scene { Source = s };
+        var r = new Scene { Source = s, BaseDir = baseDir ?? "" };
         void Decline(string why) { r.Reasons.Add(why); if (r.Fallback == null) r.Fallback = why; }
         if (s.Version < 7100) Decline($"version {s.Version}: Blender's importer refuses files before 7100");
         // ---- GlobalSettings: unit scale and axes (load(): unit_scale / 100 for a factory scene; axes through RIGHT_HAND_AXES)
@@ -110,8 +114,8 @@ public static class FbxImport
         {
             if (o.Class == "Model" && (o.SubType == "LimbNode" || o.SubType == "Limb")) { Decline("bones: a Model of type " + o.SubType + " (an armature; sub-step 6c)"); break; }
         }
-        if (s.Objects.Exists(o => o.Class == "Deformer")) Decline("deformers: a Skin, Cluster or BlendShape (sub-steps 6b/6c)");
-        if (s.Objects.Exists(o => o.Class == "Geometry" && o.SubType == "Shape")) Decline("shape keys (sub-step 6b)");
+        if (s.Objects.Exists(o => o.Class == "Deformer")) Decline("deformers: a Skin, Cluster or BlendShape (sub-step 6c)");
+        if (s.Objects.Exists(o => o.Class == "Geometry" && o.SubType == "Shape")) Decline("shape keys (sub-step 6c)");
         // a stack or layer without any curve node makes no action in Blender (blen_read_animations skips empty layers): static
         if (s.Objects.Exists(o => o.Class == "AnimationCurveNode")) Decline("animation (sub-step 6d)");
         if (s.Objects.Exists(o => o.Class == "NodeAttribute" && (o.SubType == "Camera" || o.SubType == "Light"))) Decline("a camera or light: its correction matrix and the exporter's filter are not modelled");
@@ -123,6 +127,7 @@ public static class FbxImport
             if (slot.TryGetValue(o.Id, out int at)) table[at] = o;
             else { slot[o.Id] = table.Count; table.Add(o); }
         }
+        r.Table.AddRange(table);
         var byId = new Dictionary<long, FbxObject>(); foreach (var o in table) byId[o.Id] = o;
         // connections as the importer maps them: forward (src -> dsts) and reverse (dst -> srcs), file order, only LL records
         var reverse = new Dictionary<long, List<FbxConnection>>();
@@ -224,6 +229,8 @@ public static class FbxImport
             int max = Math.Max(m.Materials.Count, 1);
             for (int f = 0; f < m.FaceMaterial.Length; f++) if (m.FaceMaterial[f] < 0 || m.FaceMaterial[f] >= max) m.FaceMaterial[f] = 0;
         }
+        // ---- the materials' node trees and the images (blen_read_material, blen_read_texture_image, the texture links)
+        r.MaterialData = FbxMaterials.Read(r, s, table, r.BaseDir, Decline, r.Notes);
         return r;
     }
 
@@ -575,7 +582,7 @@ public static class FbxImport
         // layers
         m.FaceMaterial = ReadMaterialLayer(rec, nf, r, g);
         ReadUvLayers(rec, m, r, g);
-        if (rec.All("LayerElementColor").Any()) { m.ColorLayers = rec.All("LayerElementColor").Count(); r.Reasons.Add("colour layers in '" + g.Name + "' (sub-step 6b)"); if (r.Fallback == null) r.Fallback = r.Reasons[r.Reasons.Count - 1]; }
+        if (rec.All("LayerElementColor").Any()) { m.ColorLayers = rec.All("LayerElementColor").Count(); r.Reasons.Add("colour layers in '" + g.Name + "' (not modelled yet)"); if (r.Fallback == null) r.Fallback = r.Reasons[r.Reasons.Count - 1]; }
         m.SharpFace = new bool[nf];
         bool[] edgeSharp = null;
         ReadSmoothing(rec, m, edges, ref edgeSharp, r, g);

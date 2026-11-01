@@ -18,6 +18,12 @@ class ModelVerdictTests(unittest.TestCase):
         self.assertEqual(1, verdict(text, 0, ['source'], 1)[0])
         self.assertEqual(1, verdict(text, 3, ['source'], 0)[0])
 
+    def test_a_fallback_fixture_must_be_a_named_skip_and_an_ordinary_fixture_a_pass(self):
+        text = 'SKIP shape_fallback.fbx : named' + chr(10) + 'PASS fixture.fbx : exact' + chr(10) + 'RESULT compared=1 skipped=1 failed=0' + chr(10)
+        self.assertEqual(0, verdict(text, 0, ['shape_fallback.fbx', 'fixture.fbx'], 0)[0])
+        swapped = 'PASS shape_fallback.fbx : exact' + chr(10) + 'SKIP fixture.fbx : named' + chr(10) + 'RESULT compared=1 skipped=1 failed=0' + chr(10)
+        self.assertEqual(1, verdict(swapped, 0, ['shape_fallback.fbx', 'fixture.fbx'], 0)[0])
+
     def test_incomplete_extra_reordered_or_fabricated_coverage(self):
         text = 'PASS source : exact\nRESULT compared=1 skipped=0 failed=0\n'
         for expected in ([], ['source', 'lost'], ['other']):
