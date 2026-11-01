@@ -27,7 +27,7 @@ using Newtonsoft.Json.Linq;
 //     else the element's name; separators made native; a path seen before shares the image (image_cache); load_image looks
 //     for the file as given, under the FBX's directory, by its base name there, then RECURSIVELY under that directory by
 //     case-folded base name, and makes a PLACEHOLDER (no pixels) when nothing is found; a Content block packs its bytes into
-//     the image (the pixels Blender holds come from the disk file when one loaded, the exported bytes from the packed data);
+//     the image (the packed data replace its pixels as well as its exported bytes);
 //     the image is named after the element's name's base name through Blender's image pool;
 //   * texture links (the "Assign textures" pass): for every Material, the Texture objects connected INTO it in connection
 //     order, OP links only, by the destination property: DiffuseColor and 3dsMax|maps|texmap_diffuse -> base colour;
@@ -81,6 +81,7 @@ public static class FbxMaterials
         public Image Original;              // the datablock this one was copied from (image.copy() in the wrapper's colourspace rule), or null
         public byte[] ExportBytes => Packed ?? FileBytes;   // __encode_from_image: the packed data, else the file's
         byte[] pixels;
+        internal void ResetPixels() { pixels = null; }
         /// <summary>Four bytes per pixel, rows top-down, as Blender holds them (null with `why` when not decodable).</summary>
         public byte[] Pixels(out string why)
         {
@@ -299,7 +300,6 @@ public static class FbxMaterials
     static Image ReadTextureImage(FbxObject t, FbxNode tmpl, string baseDir, Dictionary<string, Image> cache, BlenderNames.NamePool pool, Scene o, List<string> notes)
     {
         string elemName = FbxImport.ValidateBlendName(t.Name);
-        CheckOwnBlock(Props70(t.Record), t.Class + " '" + t.Name + "'");
         string filepath = FirstString(t.Record, "RelativeFilename");
         if (!string.IsNullOrEmpty(filepath))
         {
@@ -322,6 +322,8 @@ public static class FbxMaterials
         if (content != null && content.Length > 0) Pack(image, content);
         cache[filepath] = image;
         image.Name = pool.Unique(DefaultName(Basename(elemName), "Image"));
+        // Blender returns a cached image before blen_read_custom_properties; ignored cached blocks must not decline.
+        CheckOwnBlock(Props70(t.Record), t.Class + " '" + t.Name + "'");
         o.Images.Add(image);
         return image;
     }
@@ -446,14 +448,21 @@ public static class FbxMaterials
             im.Depth = png.BitDepth == 16 ? planes * 4 : planes;   // a 16-bit PNG is a float buffer: depth = planes * 4
             if (png.BitDepth == 16) im.Undecodable = "a 16-bit PNG (Blender keeps it as a float buffer)";
             else if (png.Interlaced) im.Undecodable = "an interlaced PNG";
+            else if (im.Pixels(out string why) == null && why != "PNG dimensions exceed managed buffer limits")
+            {
+                // A header is not an ImBuf: Blender drops images whose scanlines cannot be decoded.
+                im.Width = im.Height = im.Depth = im.Channels = 0; im.Undecodable = null;
+            }
             return;
         }
+        if (PngCodec.IsPng(bytes)) return; // malformed PNG: a placeholder, not an unknown-but-readable format
         if (JpegInfo(bytes, out int w, out int h, out int comps))
         {
             im.Width = w; im.Height = h; im.Channels = 4; im.Depth = comps == 4 ? 24 : 8 * comps;   // a CMYK JPEG reaches Blender as RGB through OpenImageIO (not measured: no sample)
             im.Undecodable = "a JPEG (its pixels are not decoded here)";
             return;
         }
+        if (bytes.Length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) return;
         if (bytes.Length > 12 && bytes[8] == 'W' && bytes[9] == 'E' && bytes[10] == 'B' && bytes[11] == 'P') { im.Width = im.Height = 1; im.Channels = 4; im.Depth = 32; im.Undecodable = "a WebP image"; return; }
         // another format: Blender may read it (TGA, BMP, TIFF, DDS, PSD, EXR...) or not; either way its texture is not modelled here
         im.Width = im.Height = 1; im.Channels = 4; im.Depth = 24; im.Undecodable = "an image format other than PNG or JPEG";
@@ -463,30 +472,38 @@ public static class FbxMaterials
     /// come from the packed data from then on (measured: an RGBA Content over an RGB file on disk reads as depth 32).</summary>
     static void Pack(Image im, byte[] content)
     {
+        im.ResetPixels();
         im.Packed = content;
         im.Width = im.Height = im.Depth = im.Channels = 0; im.Undecodable = null;
         if (!BlenderKnowsFormat(content)) return;   // bytes no reader takes: no pixels (measured: depth 0, size 0x0), the data still the exporter's
         Describe(im, content);
     }
 
-    /// <summary>The JPEG's frame header: width, height and component count (1 grey, 3 colour, 4 CMYK).</summary>
+    /// <summary>A complete JPEG header through the first scan: frame width, height and component count
+    /// (1 grey, 3 colour, 4 CMYK). An isolated frame header does not establish that an image loads.</summary>
     internal static bool JpegInfo(byte[] d, out int w, out int h, out int comps)
     {
         w = h = comps = 0;
         if (d == null || d.Length < 4 || d[0] != 0xFF || d[1] != 0xD8) return false;
         int i = 2;
-        while (i + 9 < d.Length)
+        bool frame = false;
+        while (i <= d.Length - 4)
         {
             if (d[i] != 0xFF) { i++; continue; }
             byte marker = d[i + 1];
             if (marker == 0xD8 || marker == 0x01 || (marker >= 0xD0 && marker <= 0xD7) || marker == 0xFF) { i += marker == 0xFF ? 1 : 2; continue; }
             int len = (d[i + 2] << 8) | d[i + 3];
+            if (len < 2 || len > d.Length - i - 2) return false;
             if (marker >= 0xC0 && marker <= 0xCF && marker != 0xC4 && marker != 0xC8 && marker != 0xCC)
             {
+                if (len < 8) return false;
                 h = (d[i + 5] << 8) | d[i + 6]; w = (d[i + 7] << 8) | d[i + 8]; comps = d[i + 9];
-                return w > 0 && h > 0 && comps > 0;
+                frame = w > 0 && h > 0 && comps > 0 && len >= 8 + 3 * comps;
+                if (!frame) return false;
             }
-            if (marker == 0xDA || marker == 0xD9) return false;
+            // A frame header alone does not load: require a complete scan header and some scan data as well.
+            if (marker == 0xDA) return frame && len >= 6 && i + 2 + len < d.Length;
+            if (marker == 0xD9) return false;
             i += 2 + len;
         }
         return false;
@@ -699,6 +716,7 @@ public static class FbxMaterials
             int width = 1, height = 1;
             foreach (var img in imgs) { width = Math.Max(width, img.Width); height = Math.Max(height, img.Height); }
             foreach (var img in imgs) if (img.Width != width || img.Height != height) { why = "a texture composed from images of different sizes (Blender scales '" + img.Name + "')"; return -1; }
+            if ((long)width * height > int.MaxValue / 16) { why = "composed image dimensions exceed managed buffer limits"; return -1; }
             var outp = new byte[width * height * 4];
             var outF = new float[width * height * 4];
             for (int i = 0; i < outF.Length; i++) outF[i] = 1f;

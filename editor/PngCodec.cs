@@ -32,26 +32,33 @@ public static class PngCodec
         return true;
     }
 
-    /// <summary>The header alone (IHDR, and whether a tRNS chunk follows), or null when the bytes are not a PNG.</summary>
+    /// <summary>The header and critical-chunk integrity (including IDAT presence), or null for malformed PNG chunks.
+    /// Scanline decoding is checked separately by Decode.</summary>
     public static Info ReadInfo(byte[] d)
     {
         if (!IsPng(d) || d.Length < 33) return null;
-        int p = 8;
+        int p = 8; bool hasData = false;
         Info info = null;
-        while (p + 8 <= d.Length)
+        while (p <= d.Length - 12)
         {
             int len = BE(d, p); string type = System.Text.Encoding.ASCII.GetString(d, p + 4, 4);
-            if (len < 0 || p + 12 + len > d.Length) break;
+            if (len < 0 || len > d.Length - p - 12) return null;
+            bool crc = ValidCrc(d, p, len);
+            if (!crc && (type == "IHDR" || type == "PLTE" || type == "IDAT")) return null;
             if (type == "IHDR")
             {
-                if (len < 13) return null;
+                if (p != 8 || len != 13 || info != null || d[p + 18] != 0 || d[p + 19] != 0 || d[p + 20] > 1) return null;
                 info = new Info { Width = BE(d, p + 8), Height = BE(d, p + 12), BitDepth = d[p + 16], ColorType = d[p + 17], Interlaced = d[p + 20] != 0 };
             }
-            else if (type == "tRNS" && info != null) info.HasTrns = true;
-            else if (type == "IDAT" || type == "IEND") break;
+            else if (type == "tRNS" && info != null && crc) info.HasTrns = true;
+            else if (type == "IDAT") hasData = true;
+            else if (type == "IEND") break;
             p += 12 + len;
         }
-        if (info == null) return null;
+        if (info == null || !hasData || info.Width <= 0 || info.Height <= 0) return null;
+        bool greyOrPalette = info.ColorType == 0 || info.ColorType == 3;
+        if (!(info.BitDepth == 8 || (info.BitDepth == 16 && info.ColorType != 3) ||
+            (greyOrPalette && (info.BitDepth == 1 || info.BitDepth == 2 || info.BitDepth == 4)))) return null;
         switch (info.ColorType)
         {
             case 0: info.Channels = info.HasTrns ? 2 : 1; break;
@@ -63,6 +70,9 @@ public static class PngCodec
         }
         return info;
     }
+
+    static bool ValidCrc(byte[] d, int p, int len) =>
+        (Crc32(d, p + 4, len + 4, 0xFFFFFFFFu) ^ 0xFFFFFFFFu) == unchecked((uint)BE(d, p + 8 + len));
 
     /// <summary>The pixels as Blender holds them: four bytes per pixel, rows top-down. `why` names what could not be decoded
     /// (the result is null then).</summary>
@@ -80,30 +90,33 @@ public static class PngCodec
         byte[] palette = null, trns = null;
         var idat = new MemoryStream();
         int p = 8;
-        while (p + 8 <= d.Length)
+        while (p <= d.Length - 12)
         {
             int len = BE(d, p); string type = System.Text.Encoding.ASCII.GetString(d, p + 4, 4);
-            if (len < 0 || p + 12 + len > d.Length) { why = "a truncated chunk"; return null; }
+            if (len < 0 || len > d.Length - p - 12) { why = "a truncated chunk"; return null; }
             if (type == "PLTE") { palette = new byte[len]; Array.Copy(d, p + 8, palette, 0, len); }
-            else if (type == "tRNS") { trns = new byte[len]; Array.Copy(d, p + 8, trns, 0, len); }
+            else if (type == "tRNS" && ValidCrc(d, p, len)) { trns = new byte[len]; Array.Copy(d, p + 8, trns, 0, len); }
             else if (type == "IDAT") idat.Write(d, p + 8, len);
             else if (type == "IEND") break;
             p += 12 + len;
         }
         if (ct == 3 && palette == null) { why = "a palette PNG without a PLTE chunk"; return null; }
-        byte[] raw;
-        try { raw = Inflate(idat.ToArray()); }
-        catch (Exception e) { why = "zlib: " + e.Message; return null; }
         int samples = ct == 0 ? 1 : ct == 2 ? 3 : ct == 3 ? 1 : ct == 4 ? 2 : 4;
         int bpp = Math.Max(1, samples * bits / 8);                    // bytes per complete pixel (for the filters)
         long stride = ((long)info.Width * samples * bits + 7) / 8;
-        if (raw.Length < (stride + 1) * info.Height) { why = "too little image data"; return null; }
+        long pixels = (long)info.Width * info.Height;
+        if (pixels > int.MaxValue / 4 || (stride + 1) * info.Height > int.MaxValue)
+        { why = "PNG dimensions exceed managed buffer limits"; return null; }
+        byte[] raw;
+        try { raw = Inflate(idat.ToArray(), (int)((stride + 1) * info.Height)); }
+        catch (Exception e) when (e is InvalidDataException || e is IOException) { why = "zlib: " + e.Message; return null; }
         var prev = new byte[stride]; var line = new byte[stride];
         var outp = new byte[info.Width * info.Height * 4];
         int pos = 0;
         for (int y = 0; y < info.Height; y++)
         {
             int filter = raw[pos++];
+            if (filter > 4) { why = "PNG filter " + filter; return null; }
             Array.Copy(raw, pos, line, 0, stride); pos += (int)stride;
             Unfilter(filter, line, prev, bpp);
             int o = y * info.Width * 4;
@@ -157,16 +170,29 @@ public static class PngCodec
         }
     }
 
-    static byte[] Inflate(byte[] z)
+    static byte[] Inflate(byte[] z, int expected)
     {
         if (z.Length < 6) throw new InvalidDataException("no zlib stream");
-        if ((z[0] & 0x0F) != 8 || ((z[0] << 8) | z[1]) % 31 != 0) throw new InvalidDataException("not a zlib stream");
+        if ((z[0] & 0x0F) != 8 || (z[0] >> 4) > 7 || (z[1] & 0x20) != 0 || ((z[0] << 8) | z[1]) % 31 != 0) throw new InvalidDataException("not a zlib stream");
         using (var ms = new MemoryStream(z, 2, z.Length - 6))
         using (var ds = new DeflateStream(ms, CompressionMode.Decompress))
-        using (var outp = new MemoryStream())
+        using (var outp = new MemoryStream(Math.Min(expected, 65536)))
         {
-            ds.CopyTo(outp);
-            return outp.ToArray();
+            // Read only the declared scanlines: an IDAT must not expand into an unbounded temporary buffer.
+            // Grow with actual data, not a claimed huge header whose compressed stream may contain only one pixel.
+            var buffer = new byte[Math.Min(expected, 4096)]; int pos = 0;
+            while (pos < expected)
+            {
+                int n = ds.Read(buffer, 0, Math.Min(buffer.Length, expected - pos));
+                if (n == 0) throw new InvalidDataException("too little image data");
+                outp.Write(buffer, 0, n);
+                pos += n;
+            }
+            var raw = outp.ToArray();
+            // Blender accepts extra decompressed bytes after the image, and a missing IEND. With an exact payload,
+            // validate zlib's checksum as libpng does. An extra-byte probe also finishes the deflate stream safely.
+            if (ds.ReadByte() < 0 && Adler32(raw) != unchecked((uint)BE(z, z.Length - 4))) throw new InvalidDataException("Adler checksum mismatch");
+            return raw;
         }
     }
 

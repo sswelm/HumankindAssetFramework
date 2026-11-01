@@ -23,12 +23,17 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   the base and alpha slots, the metallic-roughness composition, samplers by value, images passed through or COMPOSED from
   the pixels Blender holds through the new `editor/PngCodec.cs`, their names, extensionsUsed in the exporter's fixed order).
   `tools/fbx_model_drill.sh` now holds every material field, texture, sampler and image to Blender (bytes, or the pixels of a
-  composition): the Bradley, the balloon, the light mech and nine material scenes identical; ten named fallbacks required as
+  composition): the Bradley, the balloon, the light mech and twelve material scenes identical; ten named fallbacks required as
   SKIP rows (a texture transform, an image the exporter encodes again, a JPEG or a 16-bit PNG inside a composition, images of
   different sizes composed, a TGA, a TIFF, a property Blender asserts on, a short property in an object's own block). Twelve planted deviations each failed the drill. Found on
   the way: the wrapper's `image.copy()` for a used datablock is why Blender re-encodes every alpha-bearing hull texture;
   `image.pack()` reloads the pixels from the packed data; extensionsUsed is registered for every extension kind at the first
-  material and filtered afterwards, so its order is fixed. 14 test cases hold Blender's answers.
+  material and filtered afterwards, so its order is fixed. 25 material/codec tests cover Blender's answers and malformed-input
+  bounds. Review fixes: image headers alone no longer establish loaded pixels. Invalid PNG chunks/checksums, short scanlines,
+  invalid filters and JPEG frames without scan data become placeholders; PNG decompression stops at the declared image,
+  grows only with actual scanlines and rejects unrepresentable dimensions before allocating. Cached images skip the custom
+  property pass, as Blender does. Three additional live fixtures cover damaged file/packed images, Blender's tolerated PNG
+  trailers and cached-image properties.
 - **THE NATIVE FBX READER, STEP 6a: THE STATIC FBX PATH, HELD TO BLENDER (2026-11-01).** `editor/FbxImport.cs` reads an
   FBX file as Blender 5.1's FBX importer builds it (io_scene_fbx/import_fbx.py with its defaults: the global matrix from the
   file's axes and unit scale, every Model's transform chain in mathutils float32 - translation, offsets, pivots, pre/post

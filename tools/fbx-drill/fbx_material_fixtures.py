@@ -12,7 +12,7 @@ from fbx_model_fixtures import P, vec, properties, obj, connect, header, scene, 
 
 # ---- image files --------------------------------------------------------------------------------------------------------
 
-def png(w, h, rows, color_type, bit_depth=8, plte=None, trns=None):
+def png(w, h, rows, color_type, bit_depth=8, plte=None, trns=None, scanlines=None):
     def chunk(t, d):
         return struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
     out = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, bit_depth, color_type, 0, 0, 0))
@@ -20,7 +20,7 @@ def png(w, h, rows, color_type, bit_depth=8, plte=None, trns=None):
         out += chunk(b'PLTE', plte)
     if trns is not None:
         out += chunk(b'tRNS', trns)
-    out += chunk(b'IDAT', zlib.compress(b''.join(b'\x00' + bytes(r) for r in rows), 9)) + chunk(b'IEND', b'')
+    out += chunk(b'IDAT', zlib.compress(b''.join(b'\x00' + bytes(r) for r in rows) if scanlines is None else scanlines, 9)) + chunk(b'IEND', b'')
     return out
 
 
@@ -121,6 +121,16 @@ def images():
     out['tex/other/same.png'] = png(W, H, gray_rows(77), 0)
     out['sub/deep/found.png'] = png(W, H, rgb_rows(60), 2)
     out['sub/deep/Case.png'] = png(W, H, gray_rows(3), 0)
+    # These have image signatures/headers but Blender cannot load their pixels: they become placeholders.
+    out['tex/header_only.png'] = out['tex/rgb.png'][:33]
+    damaged = bytearray(out['tex/rgb.png']); damaged[29] ^= 1
+    out['tex/bad_crc.png'] = bytes(damaged)
+    out['tex/bad_filter.png'] = png(1, 1, [], 2, scanlines=b'\x05\x14\x28\x3c')
+    out['tex/short_pixels.png'] = png(1, 1, [], 2, scanlines=b'\x00\x14\x28')
+    out['tex/header_only.jpg'] = TINY_JPG[:TINY_JPG.index(b'\xff\xc4')]
+    # Blender tolerates both boundaries: do not mistake them for the damaged images above.
+    out['tex/no_iend.png'] = out['tex/rgb.png'][:-12]
+    out['tex/extra_pixels.png'] = png(1, 1, [], 2, scanlines=b'\x00\x14\x28\x3c\xff\x00\x01')
     return out
 
 
@@ -387,3 +397,17 @@ def fixtures():
     yield 'textures_tga_fallback', material_scene([material(100, 'Tga')], objects, [link(60, 100, 'DiffuseColor')])
     objects = [texture(60, 'tif', T + 'real.tif')]
     yield 'textures_tiff_fallback', material_scene([material(100, 'Tiff')], objects, [link(60, 100, 'DiffuseColor')])
+
+    damaged = images()
+    names = ['header_only.png', 'bad_crc.png', 'bad_filter.png', 'short_pixels.png', 'header_only.jpg']
+    mats = [material(100 + i, 'Broken%d' % i) for i in range(6)]
+    objects = [texture(60 + i, 'Broken%d' % i, relative='tex/' + name) for i, name in enumerate(names)]
+    objects.append(texture(65, 'BrokenContent', relative='tex/rgb2.png', content=damaged['tex/bad_crc.png']))
+    links = [link(60 + i, 100 + i, 'ReflectionFactor' if i == 2 else 'DiffuseColor') for i in range(6)]
+    yield 'images_invalid', material_scene(mats, objects, links)
+    yield 'png_tolerated_trailers', material_scene([material(100, 'NoEnd'), material(101, 'ExtraPixels')],
+        [texture(60, 'NoEnd', relative='tex/no_iend.png'), texture(61, 'ExtraPixels', relative='tex/extra_pixels.png')],
+        [link(60, 100, 'DiffuseColor'), link(61, 101, 'DiffuseColor')])
+    yield 'cached_image_properties', material_scene([material(100, 'Cached')],
+        [video(70, 'Video', relative='tex/rgb.png'), texture(60, 'Cached', relative='tex/rgb.png',
+            props=[Node('P', [prop('S', 'IgnoredShortProperty')])])], [link(60, 100, 'DiffuseColor')])

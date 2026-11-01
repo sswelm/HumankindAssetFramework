@@ -226,7 +226,7 @@ OpenImageIO expands it, and encodes the new PNG), named by the file's stem or th
 exporter's fixed registration order. The drill compares every material field as bits, the extensions structurally, the
 textures, the samplers, the images' names, MIME types and bytes - or the decoded PIXELS of a composition, since Blender's
 PNG encoder is not reproduced. Three sources (the Bradley with its metallic-roughness compositions over grey PNGs, the
-balloon with its alpha compositions, the light mech) and nine material scenes (every property and its clamp, the template
+balloon with its alpha compositions, the light mech) and twelve material scenes (every property and its clamp, the template
 and the U flag, every link family, twins and names, missing files, embedded Content, a JPEG, every PNG colour type, wrap modes)
 are identical; ten scenes are named fallbacks the drill requires as SKIP rows (a property type Blender asserts on, a short
 property in an object's own block, a texture transform, a JPEG or a 16-bit PNG inside a composition, a JPEG under a .png name,
@@ -234,7 +234,12 @@ images of different sizes composed, a TGA, a TIFF).
 Twelve planted deviations (the roughness without its square root, the specular not doubled, the alpha copy ignoring the
 depth test, no datablock copy for a used image, metallic into G, an averaged luminance, the file stem for every name, JPEG by
 magic, extensionsUsed in traversal order, no white fill beside a lone metallic, the emission strength never applied, the template's
-Opacity read) each failed the comparison. 14 test cases hold Blender's answers.
+Opacity read) each failed the comparison. 25 material/codec tests cover Blender's answers and malformed-input bounds.
+Review fixtures also hold corrupted PNGs and a JPEG frame without scan data to Blender's placeholders, including packed
+Content over a loaded file and a missing metallic image's white fill. A missing IEND and excess decompressed PNG data
+remain accepted as Blender accepts them. Decoder tests reject overflowing chunk/dimension claims, invalid filters and
+checksums, and verify bounded allocation for both excessive compressed output and a huge header with too few scanlines.
+A cached-image fixture verifies that the custom-property pass is skipped only on a cache hit.
 
 **Since 2026-10-11 the drills run concurrently, and since 2026-10-29 the source guards run on a lane beside them.**
 The drills are independent (each works in its own temp directory and builds its own exe), so `check.sh` starts them

@@ -77,6 +77,25 @@ public class FbxMaterialsTests : IDisposable
     static string Bits(double d) => BitConverter.ToUInt64(BitConverter.GetBytes(d), 0).ToString("x16");
     static byte[] Pixels(HafModel m, int image, out PngCodec.Info info) { var px = PngCodec.Decode(m.Images[image].Bytes, out info, out string why); Assert.Null(why); return px; }
 
+    static byte[] PngChunk(string type, byte[] data)
+    {
+        var t = System.Text.Encoding.ASCII.GetBytes(type); uint crc = 0xffffffff;
+        foreach (byte v in t.Concat(data)) { crc ^= v; for (int b = 0; b < 8; b++) crc = (crc & 1) != 0 ? 0xedb88320 ^ (crc >> 1) : crc >> 1; }
+        crc ^= 0xffffffff;
+        return new[] { (byte)(data.Length >> 24), (byte)(data.Length >> 16), (byte)(data.Length >> 8), (byte)data.Length }
+            .Concat(t).Concat(data).Concat(new[] { (byte)(crc >> 24), (byte)(crc >> 16), (byte)(crc >> 8), (byte)crc }).ToArray();
+    }
+    static byte[] RawRgbPng(int width, int height, byte[] scanlines)
+    {
+        var header = new[] { (byte)(width >> 24), (byte)(width >> 16), (byte)(width >> 8), (byte)width,
+            (byte)(height >> 24), (byte)(height >> 16), (byte)(height >> 8), (byte)height, (byte)8, (byte)2, (byte)0, (byte)0, (byte)0 };
+        var z = new MemoryStream(); z.WriteByte(0x78); z.WriteByte(0x9c);
+        using (var ds = new System.IO.Compression.DeflateStream(z, System.IO.Compression.CompressionMode.Compress, true)) ds.Write(scanlines, 0, scanlines.Length);
+        uint a = 1, b = 0; foreach (byte v in scanlines) { a = (a + v) % 65521; b = (b + a) % 65521; } uint ad = (b << 16) | a;
+        z.Write(new[] { (byte)(ad >> 24), (byte)(ad >> 16), (byte)(ad >> 8), (byte)ad }, 0, 4);
+        return new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }.Concat(PngChunk("IHDR", header)).Concat(PngChunk("IDAT", z.ToArray())).Concat(PngChunk("IEND", new byte[0])).ToArray();
+    }
+
     // ---- PngCodec -------------------------------------------------------------------------------------------------
     [Fact]
     public void Png_round_trips_rgba_and_rgb_through_every_filter_of_a_foreign_encoder()
@@ -90,7 +109,7 @@ public class FbxMaterialsTests : IDisposable
         // a palette with tRNS, grey + alpha, a 2-bit grey: the expansions libpng makes for OpenImageIO
         byte[] Png(byte ct, byte bd, byte[] rows, byte[] plte = null, byte[] trns = null)
         {
-            var ms = new MemoryStream(); void Chunk(string t, byte[] d) { var len = BitConverter.GetBytes(d.Length); Array.Reverse(len); ms.Write(len, 0, 4); var tt = System.Text.Encoding.ASCII.GetBytes(t); ms.Write(tt, 0, 4); ms.Write(d, 0, d.Length); ms.Write(new byte[4], 0, 4); }
+            var ms = new MemoryStream(); void Chunk(string t, byte[] d) { var chunk = PngChunk(t, d); ms.Write(chunk, 0, chunk.Length); }
             ms.Write(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A }, 0, 8);
             Chunk("IHDR", new byte[] { 0, 0, 0, 2, 0, 0, 0, 1, bd, ct, 0, 0, 0 });
             if (plte != null) Chunk("PLTE", plte); if (trns != null) Chunk("tRNS", trns);
@@ -352,5 +371,95 @@ public class FbxMaterialsTests : IDisposable
         Assert.Empty(m.ExtensionsUsed);
         Assert.Null(Model(new[] { Material(100, "Moved") }, new[] { Texture(60, "t", "tex\\rgb.png", P("Translation", "Vector3D", "Vector", 0.5, 0.0, 0.0)) }, new[] { Link(60, 100, "DiffuseColor") }, out why, out _));
         Assert.Contains("KHR_texture_transform", why);
+    }
+
+    [Theory]
+    [InlineData(2147483647)]
+    [InlineData(2147483636)]
+    [InlineData(-1)]
+    public void Png_chunk_lengths_cannot_wrap_the_bounds_check(int length)
+    {
+        var png = RawRgbPng(1, 1, new byte[] { 0, 20, 40, 60 });
+        for (int b = 0; b < 4; b++) png[8 + b] = (byte)(length >> (24 - 8 * b));
+        Assert.Null(PngCodec.ReadInfo(png));
+        Assert.Null(PngCodec.Decode(png, out _, out string why)); Assert.NotNull(why);
+    }
+
+    [Theory]
+    [InlineData(2147483647, 2147483647)]
+    [InlineData(65536, 65536)]
+    public void Png_dimensions_decline_before_allocating_unrepresentable_buffers(int width, int height)
+    {
+        Assert.Null(PngCodec.Decode(RawRgbPng(width, height, new byte[] { 0, 1, 2, 3 }), out _, out string why));
+        Assert.Contains("buffer limits", why);
+    }
+
+    [Fact]
+    public void Bad_scanlines_and_critical_checksums_return_a_reason_instead_of_throwing()
+    {
+        foreach (var raw in new[] { new byte[] { 5, 20, 40, 60 }, new byte[] { 0, 20, 40 } })
+        { Assert.Null(PngCodec.Decode(RawRgbPng(1, 1, raw), out _, out string why)); Assert.NotNull(why); }
+        var png = RawRgbPng(1, 1, new byte[] { 0, 20, 40, 60 }); png[29] ^= 1;
+        Assert.Null(PngCodec.Decode(png, out _, out string crcWhy)); Assert.NotNull(crcWhy);
+    }
+
+    [Fact]
+    public void Png_inflation_is_bounded_by_the_image_even_with_a_large_unused_tail()
+    {
+        var raw = new byte[8 * 1024 * 1024]; raw[1] = 20; raw[2] = 40; raw[3] = 60;
+        var png = RawRgbPng(1, 1, raw);
+        var allocated = (Func<long>)Delegate.CreateDelegate(typeof(Func<long>), typeof(GC).GetMethod("GetAllocatedBytesForCurrentThread"));
+        PngCodec.Decode(png, out _, out _); // warm runtime/deflate allocation
+        long before = allocated(); var px = PngCodec.Decode(png, out _, out string why); long bytes = allocated() - before;
+        Assert.Null(why); Assert.Equal(new byte[] { 20, 40, 60, 255 }, px);
+        Assert.True(bytes < 128 * 1024, "A 1-pixel PNG allocated " + bytes + " bytes");
+    }
+
+    [Fact]
+    public void A_large_claimed_header_does_not_allocate_its_buffer_before_scanlines_exist()
+    {
+        var png = RawRgbPng(10000000, 1, new byte[] { 0, 20, 40, 60 });
+        var allocated = (Func<long>)Delegate.CreateDelegate(typeof(Func<long>), typeof(GC).GetMethod("GetAllocatedBytesForCurrentThread"));
+        PngCodec.Decode(png, out _, out _);
+        long before = allocated(); var px = PngCodec.Decode(png, out _, out string why); long bytes = allocated() - before;
+        Assert.Null(px); Assert.Contains("too little image data", why);
+        Assert.True(bytes < 128 * 1024, "An incomplete PNG allocated " + bytes + " bytes");
+    }
+
+    [Fact]
+    public void Broken_pngs_become_placeholders_and_do_not_export_invalid_image_bytes()
+    {
+        var png = RawRgbPng(1, 1, new byte[] { 0, 20, 40, 60 });
+        var crc = (byte[])png.Clone(); crc[29] ^= 1;
+        var inputs = new[] { png.Take(33).ToArray(), crc, RawRgbPng(1, 1, new byte[] { 5, 20, 40, 60 }), RawRgbPng(1, 1, new byte[] { 0, 20, 40 }) };
+        foreach (var input in inputs)
+        {
+            Write("broken.png", input);
+            var m = Model(new[] { Material(100, "Mat") }, new[] { Texture(60, "Broken", "tex\\broken.png") }, new[] { Link(60, 100, "DiffuseColor") });
+            Assert.Empty(m.Images); Assert.Empty(m.Textures);
+        }
+        Write("no_end.png", png.Take(png.Length - 12).ToArray());
+        Assert.Single(Model(new[] { Material(100, "Mat") }, new[] { Texture(60, "Valid", "tex\\no_end.png") }, new[] { Link(60, 100, "DiffuseColor") }).Images);
+    }
+
+    [Fact]
+    public void Jpeg_frame_without_scan_data_is_a_placeholder()
+    {
+        byte[] header = { 255, 216, 255, 192, 0, 17, 8, 0, 1, 0, 1, 3, 1, 17, 0, 2, 17, 0, 3, 17, 0 };
+        Write("header.jpg", header);
+        var m = Model(new[] { Material(100, "Mat") }, new[] { Texture(60, "Broken", "tex\\header.jpg") }, new[] { Link(60, 100, "DiffuseColor") });
+        Assert.Empty(m.Images); Assert.Empty(m.Textures);
+    }
+
+    [Fact]
+    public void Cached_images_skip_the_custom_property_pass_as_blender_does()
+    {
+        Write("rgb.png", PngCodec.Encode(W, H, Rgba(0, false), false));
+        var tex = Texture(60, "Cached", "tex\\rgb.png"); tex.Children.Add(Props70(N("P", "IgnoredShortProperty")));
+        var m = Model(new[] { Material(100, "Mat") }, new[] { Video(70, "Video", "tex\\rgb.png"), tex }, new[] { Link(60, 100, "DiffuseColor") });
+        Assert.Single(m.Images); Assert.Single(m.Textures);
+        // The same block on a newly created image does reach Blender's custom-property pass and must still decline.
+        Assert.Null(Model(new[] { Material(100, "Mat") }, new[] { tex }, new[] { Link(60, 100, "DiffuseColor") }, out string why, out _));
+        Assert.Contains("fewer than four", why);
     }
 }
