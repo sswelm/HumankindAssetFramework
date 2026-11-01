@@ -25,6 +25,23 @@ static class FbxDrill
             }
             return failed == 0 && args.Length > 1 ? 0 : 1;
         }
+        if (args.Length > 0 && (args[0] == "--scene" || args[0] == "--scene-full"))
+        {
+            // the object layer (editor/FbxScene.cs) in tools/fbx-drill/ufbx/ufbxdump.c's format: step 2's comparison
+            bool fullScene = args[0] == "--scene-full";
+            int src = 0;
+            var so = new StringBuilder();
+            for (int i = 1; i < args.Length; i++)
+            {
+                so.Append("=== ").Append(args[i]).Append('\n');
+                try { FbxSceneDump.Dump(FbxScene.Read(args[i]), so, fullScene); }
+                catch (Exception e) { so.Append("ERROR ").Append(e.Message).Append('\n'); src = 1; }
+            }
+            var sout = Console.OpenStandardOutput();
+            var sbytes = new UTF8Encoding(false).GetBytes(so.ToString());
+            sout.Write(sbytes, 0, sbytes.Length);
+            return src;
+        }
         bool time = args.Length > 0 && args[0] == "--time";
         int rc = 0;
         var sha = SHA1.Create();
