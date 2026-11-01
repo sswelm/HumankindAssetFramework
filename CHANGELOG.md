@@ -10,6 +10,25 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE NATIVE FBX READER, STEP 2: THE OBJECT GRAPH, HELD TO UFBX (2026-11-01).** `editor/FbxScene.cs` gives the record
+  tree its meaning the way ufbx (the reference reader, 0.23.1) does, formula for formula: objects and their Properties70
+  with the Definitions' templates behind them, connections, the node tree in ufbx's order, every node's local transform
+  from `ufbxi_get_transform` (pivots, offsets, pre- and post-rotation, rotation order, the inherit modes of
+  `ufbxi_update_node`) and its node-to-parent and node-to-world matrices, meshes with their polygons and every layer
+  element resolved per corner (`ufbxi_read_vertex_element`'s mapping and reference modes, the index clamping), face
+  materials and slots, materials with their shader type and textures. The oracle is ufbx itself: `tools/fbx-drill/ufbx/`
+  vendors it (MIT) with `ufbxdump.c`, which the drill builds with GCC and `-DUFBX_EXTERNAL_MATH` so its sin and cos are
+  ucrtbase's, the ones `FbxMath` P/Invokes (MinGW's own differ by an ulp on some angles). The C# side runs on Unity's
+  64-bit Mono through the deploy drill's host: the stand-alone mono.exe is a 32-bit process whose x87 doubles put the
+  matrices an ulp off. Result: every node matrix as bits, every vertex stream and face as a hash, every material -
+  identical to ufbx's on the 189 real files (187 project files plus both recipe sources), with ten generated semantic
+  scenes covering the review's gaps: numeric IDs/arrays, explicitly empty properties, UV/color ordering and primary
+  tangent associations, parent selection, texture filename aliases and UTF-8 ordering, and layered-texture links.
+  The oracle takes Windows Unicode arguments as UTF-8; the control scene's filename includes an emoji.
+  Cyclic hierarchies are refused by name with cached linear-time depth traversal. The scene comparison requires
+  successful process exits and a complete dump for every input; seven regression tests also run in CI. The initial
+  implementation also matched ten downloaded sources (Max, Maya and Blender exports, 7400 to 7700).
+  Not yet: triangulation, skins, animation, the HafModel mapping (steps 3 to 5).
 - **THE NATIVE FBX READER, STEP 1: THE RECORD TREE (2026-10-31).** The programme named on 2026-10-10 ("we suddenly get
   access to a lot of free 3d models"; ufbx as the guide) begins at the format layer. `editor/FbxDocument.cs` reads
   the binary FBX record tree - 32- and 64-bit records (version 7500 and up), every property type, stored and zlib

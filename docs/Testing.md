@@ -123,7 +123,16 @@ starting two gates at once and interrupting the first.
 The FBX reader drill compares every selected good file and requires both readers to refuse 21 malformed fixtures on
 Unity's Mono. It checks the generator, reader and timing exit statuses. Source discovery includes `srcFile` and
 `srcFile2`, BOM recipes and project-relative paths; unreadable recipes/scans fail, and unavailable optional sources
-are named as not drilled. Its five source-discovery regression tests also run in CI.
+are named as not drilled. Its five source-discovery regression tests also run in CI. Its second step (2026-11-01) holds
+the object layer, `editor/FbxScene.cs`, to **ufbx** (the reference reader, vendored under `tools/fbx-drill/ufbx/`, built
+with GCC): every node's local transform and matrices as bits, every mesh's faces and vertex streams as hashes, every
+material, equal text on every project file and recipe source. The C# side runs on Unity's 64-bit Mono through the
+deploy drill's host (the stand-alone mono.exe is 32-bit and its x87 doubles land an ulp off), and the oracle takes its
+sin and cos from ucrtbase, the library `FbxMath` P/Invokes. Ten generated scenes cover property defaults, numeric
+identifiers/arrays, layer order, primary tangents, parenting and textures; both readers must refuse two cyclic
+hierarchies. `Tests/test_compare_fbx_scene.py` tests that matching output cannot hide failed processes, incomplete
+populations or refusal rows; these seven comparator tests run in the drill and CI. The control fixture has a Unicode
+filename outside the Windows ANSI code page, guarding the oracle's wide-argument to UTF-8 conversion.
 
 **Since 2026-10-11 the drills run concurrently, and since 2026-10-29 the source guards run on a lane beside them.**
 The drills are independent (each works in its own temp directory and builds its own exe), so `check.sh` starts them

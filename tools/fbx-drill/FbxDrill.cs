@@ -14,16 +14,35 @@ static class FbxDrill
 {
     static int Main(string[] args)
     {
-        if (args.Length > 0 && args[0] == "--reject")
+        if (args.Length > 0 && (args[0] == "--reject" || args[0] == "--reject-scene"))
         {
+            bool scene = args[0] == "--reject-scene";
             int failed = 0;
             for (int i = 1; i < args.Length; i++)
             {
-                try { FbxDocument.Read(args[i]); Console.WriteLine("FAIL accepted malformed FBX: " + args[i]); failed++; }
+                try { if (scene) FbxScene.Read(args[i]); else FbxDocument.Read(args[i]); Console.WriteLine("FAIL accepted malformed FBX: " + args[i]); failed++; }
                 catch (InvalidDataException) { Console.WriteLine("REFUSED " + args[i]); }
                 catch (Exception e) { Console.WriteLine("FAIL unnamed refusal: " + e); failed++; }
             }
             return failed == 0 && args.Length > 1 ? 0 : 1;
+        }
+        if (args.Length > 0 && (args[0] == "--scene" || args[0] == "--scene-full"))
+        {
+            if (args.Length < 2) { Console.Error.WriteLine("FAIL — no FBX scene files selected"); return 2; }
+            // the object layer (editor/FbxScene.cs) in tools/fbx-drill/ufbx/ufbxdump.c's format: step 2's comparison
+            bool fullScene = args[0] == "--scene-full";
+            int src = 0;
+            var so = new StringBuilder();
+            for (int i = 1; i < args.Length; i++)
+            {
+                so.Append("=== ").Append(args[i]).Append('\n');
+                try { FbxSceneDump.Dump(FbxScene.Read(args[i]), so, fullScene); }
+                catch (Exception e) { so.Append("ERROR ").Append(e.Message).Append('\n'); src = 1; }
+            }
+            var sout = Console.OpenStandardOutput();
+            var sbytes = new UTF8Encoding(false).GetBytes(so.ToString());
+            sout.Write(sbytes, 0, sbytes.Length);
+            return src;
         }
         bool time = args.Length > 0 && args[0] == "--time";
         int rc = 0;
