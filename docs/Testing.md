@@ -188,16 +188,22 @@ writes the HafModel its glTF exporter would (the node order, `ExporterTrs`, `Mes
 children order, mesh, every written translation, rotation and scale as bits), every mesh (name, each primitive's material
 name, vertex count, positions, normals, UV sets and indices as bits) and the material names; a file with bones, deformers,
 animation curves, cameras or colour layers is left to Blender by name (sub-steps 6b-6d) and counted as a SKIP. Three sources
-(the Bradley, the balloon, the light mech) and eight generated scenes (every polygon size with the arrowhead quad that flips the
+(the Bradley, the balloon, the light mech) and fourteen generated scenes (every polygon size with the arrowhead quad that flips the
 split, by-edge smoothing through an Edges array, pivots, offsets, pre/post rotations and every rotation order, Z-up metres and
 Y-up inches, Blender's name pools with an empty name, a 70-byte name, numbered twins, a shared datablock, siblings whose case
-and bytes decide their order, degenerate polygons, normals by polygon, by vertex through an index and mixed per corner) are
+and bytes decide their order, degenerate polygons, normals by polygon, by vertex through an index and mixed per corner,
+last-root parent overrides, invalid vertex faces repaired by Blender, negative material indices, non-LL links,
+late shared-mesh material slots and duplicate material IDs) are
 identical. Fourteen planted deviations (the quad never flipping, a fan instead of the ear clipping, no sharp tagging, the world
 taken from the basis without the Euler round trip, ordinal sibling order, the Edges array ignored, float trig in
 eulO_to_mat3, the quaternion normalized before quat_to_eulO, the first parent winning, PreRotation without RotationActive,
 duplicate faces kept, no default mesh name, UV indices clipped instead of skipped, a fan's first normal instead of its average)
 each failed the comparison. The measurement corrected the exporter tree's `BLI_strcasecmp`: unsigned bytes, a non-ASCII
-name last. Blender live only (no record for the push gate yet): a parity-lane step.
+name last. The Blender path starts from the raw record graph, before ufbx's distinct validation and property synthesis.
+The drill refuses failed input/fixture generators, nonzero Blender exits even with output, incomplete comparison
+transcripts and skipped fixtures. The comparator returns SKIP when it compares no file, never PASS. Recipe-only discovery includes
+sources inside Assets without adding generated project outputs. Blender live only: a parity-lane step; the push runs
+no Blender or recorded Blender comparisons.
 
 **Since 2026-10-11 the drills run concurrently, and since 2026-10-29 the source guards run on a lane beside them.**
 The drills are independent (each works in its own temp directory and builds its own exe), so `check.sh` starts them
