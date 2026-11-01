@@ -327,6 +327,196 @@ def skin_fixtures():
         links + [connect(40, 30)] + [connect(i, 40) for i in (100, 101, 102)] + malformed)
 
 
+KTIME = 46186158000
+
+
+def ticks(seconds, ktime=KTIME):
+    return int(round(seconds * ktime))
+
+
+def pl(name, value, kind='KTime', sub='Time'):
+    """A P with a 64-bit value (the stack's LocalStart/LocalStop are KTime ticks past 2^31)."""
+    return Node('P', [prop('S', name), prop('S', kind), prop('S', sub), prop('S', ''), prop('L', value)])
+
+
+def op(src, dst, name):
+    return Node('C', [prop('S', 'OP'), prop('L', src), prop('L', dst), prop('S', name)])
+
+
+def pp(src, src_prop, dst, dst_prop):
+    return Node('C', [prop('S', 'PP'), prop('L', src), prop('S', src_prop), prop('L', dst), prop('S', dst_prop)])
+
+
+def curve(ident, name, times, values, flags, attrs, refs, pre=None, post=None, time_type='l', value_type='d', attr_type='f', ktime=KTIME):
+    """An AnimationCurve: KeyTime in seconds (written as ticks), KeyValueFloat, the run-length attribute arrays (one
+    flag and four attribute floats per KeyAttrRefCount entry); pre/post = (extrapolation type letter[, repetition])."""
+    children = []
+    for tag, ext in (('Pre-Extrapolation', pre), ('Post-Extrapolation', post)):
+        if ext is not None:
+            kids = [Node('Type', [prop('I', ord(ext[0]))])]
+            if len(ext) > 1:
+                kids.append(Node('Repetition', [prop('I', ext[1])]))
+            children.append(Node(tag, [], kids))
+    children += [Node('Default', [prop('D', 0.0)]), Node('KeyVer', [prop('I', 4009)]),
+                 Node('KeyTime', [prop(time_type, [ticks(t, ktime) for t in times])]), Node('KeyValueFloat', [prop(value_type, values)]),
+                 Node('KeyAttrFlags', [prop('i', flags)]), Node('KeyAttrDataFloat', [prop(attr_type, attrs)]), Node('KeyAttrRefCount', [prop('i', refs)])]
+    return obj('AnimationCurve', ident, name, '', children)
+
+
+def packed_weights(right, next_left):
+    """Two 0.4 decimal fixed-point weights in the bits of one float (KeyAttrDataFloat[2])."""
+    import struct
+    return struct.unpack('<f', struct.pack('<I', (int(round(right * 10000)) & 0xffff) | (int(round(next_left * 10000)) << 16)))[0]
+
+
+def curve_node(ident, name, *defaults):
+    ps = [p('d|' + axis, float(v)) for axis, v in zip('XYZ', defaults)]
+    return obj('AnimationCurveNode', ident, name, '', [properties(*ps)] if ps else [])
+
+
+def anim_layer(ident, name, *props):
+    return obj('AnimationLayer', ident, name, '', [properties(*props)] if props else [])
+
+
+def anim_stack(ident, name, start=None, stop=None, reference=False, *props):
+    ps = list(props)
+    if start is not None:
+        ps += [pl('ReferenceStart' if reference else 'LocalStart', ticks(start)), pl('ReferenceStop' if reference else 'LocalStop', ticks(stop))]
+    return obj('AnimationStack', ident, name, '', [properties(*ps)] if ps else [])
+
+
+AUTO, LINEAR, CONST, CONST_NEXT, USER, TCB = 0x108, 0x4, 0x2, 0x102, 0x408, 0x208
+CLAMP, TIME_INDEPENDENT, CLAMP_PROGRESSIVE, BROKEN, WEIGHTED_RIGHT, WEIGHTED_NEXT_LEFT = 0x1000, 0x2000, 0x4000, 0x800, 0x1000000, 0x2000000
+
+
+def anim_fixtures():
+    # step 5 (animation): one stack, one layer, a node whose translation, rotation and scale curves cover the three
+    # interpolations (constant previous and next, linear, cubic with auto and user tangents), a one-key curve, a value
+    # with no curves, a node without animation
+    node = model(1, 'Anim', 'Null', p('Lcl Translation', 1.0, 2.0, 3.0), p('Lcl Rotation', 10.0, 20.0, 30.0), p('Lcl Scaling', 1.0, 1.0, 1.0))
+    still = model(2, 'Still', 'Null', p('Lcl Translation', 4.0, 5.0, 6.0))
+    base = [node, still, anim_stack(60, 'Take', 0.0, 2.0), anim_layer(61, 'Base')]
+    links = [connect(1, 0), connect(2, 0), connect(61, 60)]
+    zeros = [0.0, 0.0, 0.0, 0.0]
+    curves = [curve_node(70, 'T', 1.0, 2.0, 3.0), curve_node(71, 'R', 0.0, 0.0, 0.0), curve_node(72, 'S', 1.0, 1.0, 1.0), curve_node(73, 'Empty', 7.0, 8.0, 9.0),
+              curve(80, 'TX', [0.0, 1.0, 2.0], [0.0, 1.0, 3.0], [LINEAR], zeros, [3]),
+              curve(81, 'TY', [0.0, 0.5, 1.5, 2.0], [0.0, 1.0, -1.0, 0.5], [AUTO], zeros, [4]),
+              curve(82, 'TZ', [0.0, 0.4, 0.8, 1.2, 1.6, 2.0], [0.0, 1.0, 0.5, 2.0, -1.0, 0.0], [CONST, CONST_NEXT, LINEAR, AUTO | CLAMP, USER, AUTO],
+                    zeros + zeros + zeros + zeros + [2.0, -1.0, 0.0, 0.0] + zeros, [1, 1, 1, 1, 1, 1]),
+              curve(83, 'RZ', [0.0, 1.0, 2.0, 3.0], [0.0, 90.0, 180.0, 45.0], [AUTO], zeros, [4]),
+              curve(84, 'SX', [1.0], [2.0], [AUTO], zeros, [1])]
+    anim_links = [connect(70, 61), connect(71, 61), connect(72, 61), connect(73, 61), op(70, 1, 'Lcl Translation'), op(71, 1, 'Lcl Rotation'), op(72, 1, 'Lcl Scaling'), op(73, 1, 'RotationPivot'),
+                  op(80, 70, 'd|X'), op(81, 70, 'd|Y'), op(82, 70, 'd|Z'), op(83, 71, 'd|Z'), op(84, 72, 'd|X')]
+    yield 'anim_basic', scene(base + curves, links + anim_links)
+    # tangent solvers the Blender files never write: TCB, auto with time-independent / clamp-progressive / a bias past
+    # 500, user tangents weighted on either side and broken, equal consecutive key times, keys out of order
+    tcb = [0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.5, -0.5, 0.0, 0.0, -0.3, 0.8, 0.0, 0.0, 0.0, 0.0, 0.0]
+    curves = [curve_node(70, 'T', 0.0, 0.0, 0.0), curve_node(71, 'R', 0.0, 0.0, 0.0),
+              curve(80, 'TX', [0.0, 0.5, 1.0, 1.5, 2.0], [0.0, 2.0, 1.0, 3.0, 0.0], [TCB] * 5, tcb, [1] * 5),
+              curve(81, 'TY', [0.0, 0.5, 1.0, 1.5, 2.0], [0.0, 2.0, 1.0, 3.0, 0.0], [AUTO | TIME_INDEPENDENT, AUTO | CLAMP_PROGRESSIVE, AUTO, AUTO, AUTO | CLAMP],
+                    zeros + zeros + [650.0, 0.0, 0.0, 0.0] + [-200.0, 0.0, 0.0, 0.0] + zeros, [1] * 5),
+              curve(82, 'TZ', [0.0, 0.5, 1.0, 1.5, 2.0], [0.0, 2.0, 1.0, 3.0, 0.0], [USER | WEIGHTED_RIGHT, USER | WEIGHTED_NEXT_LEFT, USER | BROKEN, USER | WEIGHTED_RIGHT | WEIGHTED_NEXT_LEFT, USER],
+                    [1.0, 0.5, packed_weights(0.25, 0.75), 0.0] + [-1.0, 2.0, packed_weights(0.1, 0.6), 0.0] + [3.0, -3.0, 0.0, 0.0] + [0.5, 0.5, packed_weights(0.9, 0.05), 0.0] + [1.0, 1.0, 0.0, 0.0], [1] * 5),
+              curve(83, 'RX', [0.0, 1.0, 1.0, 2.0], [0.0, 10.0, 20.0, 30.0], [AUTO], zeros, [4]),
+              curve(84, 'RY', [0.0, 2.0, 1.0, 3.0], [0.0, 10.0, 20.0, 30.0], [LINEAR], zeros, [4]),
+              curve(85, 'RZ', [0.0, 0.5, 1.0, 1.5, 2.0], [0.0, 2.0, 1.0, 3.0, 0.0], [AUTO | CLAMP], zeros, [5])]
+    anim_links = [connect(70, 61), connect(71, 61), op(70, 1, 'Lcl Translation'), op(71, 1, 'Lcl Rotation'),
+                  op(80, 70, 'd|X'), op(81, 70, 'd|Y'), op(82, 70, 'd|Z'), op(83, 71, 'd|X'), op(84, 71, 'd|Y'), op(85, 71, 'd|Z')]
+    yield 'anim_tangents', scene(base + curves, links + anim_links)
+    # every extrapolation mode on both sides, sampled 0.5 and 2.3 spans beyond the keys: repeat, mirror (twice), slope,
+    # relative repeat, constant, a repeat count of zero, a zero-length curve
+    keys = ([0.0, 0.5, 1.0, 2.0], [0.0, 1.0, 3.0, 2.0], [AUTO], zeros, [4])
+    curves = [curve_node(70, 'T', 0.0, 0.0, 0.0), curve_node(71, 'R', 0.0, 0.0, 0.0), curve_node(72, 'S', 1.0, 1.0, 1.0),
+              curve(80, 'Repeat', *keys, pre=('R', -1), post=('R', 1)), curve(81, 'Mirror', *keys, pre=('M', 2), post=('M', -1)),
+              curve(82, 'Slope', *keys, pre=('K',), post=('K', 3)), curve(83, 'Relative', *keys, pre=('A', -1), post=('A', 2)),
+              curve(84, 'Constant', *keys, pre=('C', 5), post=('R', 0)), curve(85, 'Unknown', *keys, pre=('Z', 1), post=('M', 0)),
+              curve(86, 'Point', [1.0, 1.0], [2.0, 3.0], [LINEAR], zeros, [2], pre=('R', -1), post=('M', -1)),
+              curve(87, 'None', [], [], [], [], [], pre=('R', -1), post=('R', -1))]
+    anim_links = [connect(70, 61), connect(71, 61), connect(72, 61), op(70, 1, 'Lcl Translation'), op(71, 1, 'Lcl Rotation'), op(72, 1, 'Lcl Scaling'),
+                  op(80, 70, 'd|X'), op(81, 70, 'd|Y'), op(82, 70, 'd|Z'), op(83, 71, 'd|X'), op(84, 71, 'd|Y'), op(85, 71, 'd|Z'), op(86, 72, 'd|X'), op(87, 72, 'd|Y')]
+    yield 'anim_extrapolation', scene(base + curves, links + anim_links)
+    # layers: an override base, an additive layer at half weight composing rotations and scales, an override-passthrough
+    # layer at 30% without composition, a layer whose weight is itself animated, an unknown blend mode; a second stack
+    # with the same layers in another order (the first layer assigns, the others blend); rotation order YZX
+    rot = model(1, 'Anim', 'Null', p('Lcl Translation', 1.0, 2.0, 3.0), p('Lcl Rotation', 10.0, 20.0, 30.0), p('Lcl Scaling', 2.0, 2.0, 2.0), p('RotationOrder', 2))
+    layers = [anim_layer(61, 'Base', p('BlendMode', 1)), anim_layer(62, 'Add', p('BlendMode', 0), p('Weight', 50.0), p('RotationAccumulationMode', 0), p('ScaleAccumulationMode', 0)),
+              anim_layer(63, 'Pass', p('BlendMode', 2), p('Weight', 30.0), p('RotationAccumulationMode', 1), p('ScaleAccumulationMode', 1)),
+              anim_layer(64, 'Weighted', p('BlendMode', 2), p('Weight', 100.0)), anim_layer(65, 'Odd', p('BlendMode', 7), p('Weight', 120.0))]
+    objects = [rot, still, anim_stack(60, 'Take', 0.0, 2.0), anim_stack(66, 'Reversed', 0.0, 2.0)] + layers
+    conns = [connect(1, 0), connect(2, 0), connect(61, 60), connect(62, 60), connect(63, 60), connect(64, 60), connect(65, 60),
+             connect(63, 66), connect(62, 66), connect(61, 66)]
+    curves = []
+    ident = 70
+    for layer, scale in ((61, 1.0), (62, 2.0), (63, 3.0), (64, 4.0), (65, 5.0)):
+        t, r, s = ident, ident + 1, ident + 2
+        curves += [curve_node(t, 'T', 0.0, 0.0, 0.0), curve_node(r, 'R', 0.0, 0.0, 0.0), curve_node(s, 'S', 1.0, 1.0, 1.0),
+                   curve(t + 10, 'TX', [0.0, 2.0], [0.0, scale], [LINEAR], zeros, [2]), curve(r + 10, 'RY', [0.0, 2.0], [0.0, 45.0 * scale], [LINEAR], zeros, [2]),
+                   curve(s + 10, 'SZ', [0.0, 2.0], [1.0, scale], [LINEAR], zeros, [2])]
+        conns += [connect(t, layer), connect(r, layer), connect(s, layer), op(t, 1, 'Lcl Translation'), op(r, 1, 'Lcl Rotation'), op(s, 1, 'Lcl Scaling'),
+                  op(t + 10, t, 'd|X'), op(r + 10, r, 'd|Y'), op(s + 10, s, 'd|Z')]
+        ident += 20
+    curves += [curve_node(99, 'W', 100.0), curve(98, 'Weight', [0.0, 2.0], [0.0, 100.0], [LINEAR], zeros, [2])]
+    conns += [connect(99, 64), op(99, 64, 'Weight'), op(98, 99, 'd|X')]
+    yield 'anim_layers', scene(objects + curves, conns)
+    # connected properties: a node driven by another's animated rotation (PP), a two-hop chain, a cycle that leaves the
+    # node to its own animation, an animated property the node does not store (synthesised: scale ones, visibility
+    # zero), an animated rotation order read through the evaluation, a value connected to a material property
+    nodes = [model(1, 'Driven', 'Null', p('Lcl Rotation', 1.0, 1.0, 1.0)), model(2, 'Driver', 'Null', p('Lcl Rotation', 5.0, 6.0, 7.0)),
+             model(3, 'Cycle', 'Null', p('Lcl Translation', 1.0, 1.0, 1.0)), model(4, 'Loop', 'Null', p('Lcl Translation', 2.0, 2.0, 2.0)),
+             model(5, 'Chain', 'Null', p('Lcl Scaling', 1.0, 1.0, 1.0)), model(6, 'Link', 'Null', p('Lcl Scaling', 2.0, 2.0, 2.0)), model(7, 'Source', 'Null', p('Lcl Scaling', 3.0, 3.0, 3.0)),
+             model(8, 'Missing', 'Null'), model(9, 'Ordered', 'Null', p('Lcl Rotation', 10.0, 20.0, 30.0)),
+             obj('Material', 40, 'Mat', children=[Node('ShadingModel', [prop('S', 'phong')])])]
+    objects = nodes + [anim_stack(60, 'Take', 0.0, 2.0), anim_layer(61, 'Base', p('BlendMode', 1)), anim_layer(62, 'Add', p('BlendMode', 0), p('Weight', 50.0))]
+    conns = [connect(n, 0) for n in range(1, 10)] + [connect(61, 60), connect(62, 60),
+             pp(2, 'Lcl Rotation', 1, 'Lcl Rotation'), pp(4, 'Lcl Translation', 3, 'Lcl Translation'), pp(3, 'Lcl Translation', 4, 'Lcl Translation'),
+             pp(6, 'Lcl Scaling', 5, 'Lcl Scaling'), pp(7, 'Lcl Scaling', 6, 'Lcl Scaling')]
+    curves = [curve_node(70, 'R', 0.0, 0.0, 0.0), curve(80, 'RX', [0.0, 2.0], [0.0, 90.0], [LINEAR], zeros, [2]),
+              curve_node(71, 'T', 0.0, 0.0, 0.0), curve(81, 'TX', [0.0, 2.0], [0.0, 4.0], [LINEAR], zeros, [2]),
+              curve_node(72, 'S', 1.0, 1.0, 1.0), curve(82, 'SX', [0.0, 2.0], [1.0, 5.0], [LINEAR], zeros, [2]),
+              curve_node(73, 'S', 1.0, 1.0, 1.0), curve(83, 'SY', [0.0, 2.0], [1.0, 6.0], [LINEAR], zeros, [2]),
+              curve_node(74, 'V', 1.0), curve(84, 'VX', [0.0, 2.0], [1.0, 0.0], [LINEAR], zeros, [2]),
+              curve_node(75, 'O', 4.0), curve(85, 'OX', [0.0, 2.0], [4.0, 1.0], [CONST], zeros, [2]),
+              curve_node(76, 'R', 0.0, 0.0, 0.0), curve(86, 'RZ', [0.0, 2.0], [0.0, 60.0], [LINEAR], zeros, [2]),
+              curve_node(77, 'R', 0.0, 0.0, 0.0), curve(87, 'RX', [0.0, 2.0], [0.0, 30.0], [LINEAR], zeros, [2]),
+              curve_node(78, 'D', 0.5, 0.5, 0.5), curve(88, 'DX', [0.0, 2.0], [0.0, 1.0], [LINEAR], zeros, [2]),
+              curve_node(79, 'R', 0.0, 0.0, 0.0), curve(89, 'RY', [0.0, 2.0], [0.0, 90.0], [LINEAR], zeros, [2])]
+    conns += [connect(70, 61), op(70, 2, 'Lcl Rotation'), op(80, 70, 'd|X'), connect(71, 61), op(71, 3, 'Lcl Translation'), op(81, 71, 'd|X'),
+              connect(72, 61), op(72, 7, 'Lcl Scaling'), op(82, 72, 'd|X'), connect(73, 61), op(73, 8, 'Lcl Scaling'), op(83, 73, 'd|Y'),
+              connect(74, 61), op(74, 8, 'Visibility'), op(84, 74, 'd|X'), connect(75, 61), op(75, 9, 'RotationOrder'), op(85, 75, 'd|X'),
+              connect(76, 61), op(76, 9, 'Lcl Rotation'), op(86, 76, 'd|Z'), connect(77, 62), op(77, 9, 'Lcl Rotation'), op(87, 77, 'd|X'),
+              connect(78, 61), op(78, 40, 'DiffuseColor'), op(88, 78, 'd|X'), connect(79, 61), op(79, 1, 'Lcl Rotation'), op(89, 79, 'd|Y')]
+    yield 'anim_connected', scene(objects + curves, conns)
+    # the same with a Model template: the synthesised properties take the template's values
+    template = Node('Definitions', [], [Node('ObjectType', [prop('S', 'Model')], [
+        Node('PropertyTemplate', [prop('S', 'FbxNode')], [properties(p('Lcl Scaling', 3.0, 3.0, 3.0), p('Visibility', 1.0), p('Lcl Translation', 0.0, 0.0, 0.0))])])])
+    yield 'anim_connected_template', scene(objects + curves, conns, [template])
+    # stacks and values in odd shapes: a reference range, no range (zero span, the samples a second apart), no layers,
+    # a layer connected twice, a value connected twice, two values on one property (the first connected wins), a curve
+    # on "Y" and another on "d|Y" (the later-sorted wins), a
+    # curve on an unknown axis name (index 0), a value without default properties, 32-bit key times (under 46 ms), float values,
+    # double attributes (narrowed to float), a layer with no values, a curve of signed zeros
+    nodes = [model(1, 'Anim', 'Null', p('Lcl Translation', 1.0, 2.0, 3.0))]
+    objects = nodes + [anim_stack(60, 'Reference', 0.5, 1.5, True), anim_stack(66, 'Empty'), anim_stack(67, 'NoLayers', 0.0, 1.0),
+                       anim_layer(61, 'Twice'), anim_layer(62, 'Bare'),
+                       curve_node(70, 'T', 1.0, 2.0, 3.0), curve_node(71, 'R'), curve_node(72, 'T2', 9.0, 9.0, 9.0),
+                       curve(80, 'Y', [0.0, 1.0], [0.0, 1.0], [LINEAR], zeros, [2]), curve(81, 'dY', [0.0, 1.0], [0.0, 2.0], [LINEAR], zeros, [2]),
+                       curve(82, 'W', [0.0, 0.04], [0.0, 3.0], [LINEAR], zeros, [2], time_type='i', value_type='f', attr_type='d'),
+                       curve(83, 'RX', [0.0, 0.04], [0.0, 4.0], [AUTO, AUTO], [0.25, 0.5, 0.75, 1.0] * 2, [1, 1], time_type='i', value_type='f', attr_type='d'),
+                       # signed zeros compare equal: ufbx's max keeps the FIRST of a tie (+0), its min the LAST (-0); a linear
+                       # tangent dy of -0 stays -0
+                       curve(84, 'Zeros', [0.0, 1.0], [0.0, -0.0], [LINEAR], zeros, [2])]
+    conns = [connect(1, 0), connect(61, 60), connect(61, 60), connect(62, 66), connect(61, 66), connect(70, 61), connect(70, 61), connect(71, 61), connect(72, 61),
+             op(70, 1, 'Lcl Translation'), op(71, 1, 'Lcl Rotation'), op(72, 1, 'Lcl Translation'), op(80, 70, 'Y'), op(81, 70, 'd|Y'), op(82, 70, 'd|W'), op(83, 71, 'd|X'), op(84, 71, 'd|Z')]
+    yield 'anim_shapes', scene(objects, conns)
+    # the FBX 8000 time code: FBXHeaderVersion 1004 with TCDefinition 128 switches the KTime base, 127 keeps it
+    for name, tc in (('anim_ktime_new', 128), ('anim_ktime_old', 127)):
+        head = [Node('FBXHeaderExtension', [], [Node('FBXHeaderVersion', [prop('I', 1004)]), Node('FBXVersion', [prop('I', 7400)]),
+                                               Node('OtherFlags', [], [Node('TCDefinition', [prop('I', tc)])])])]
+        objects = nodes + [anim_stack(60, 'Take', 0.0, 2.0), anim_layer(61, 'Base'), curve_node(70, 'T', 1.0, 2.0, 3.0),
+                           curve(80, 'TX', [0.0, 1.0, 2.0], [0.0, 1.0, 3.0], [AUTO], zeros, [3], pre=('R', -1), post=('R', -1))]
+        yield name, scene(objects, [connect(1, 0), connect(61, 60), connect(70, 61), op(70, 1, 'Lcl Translation'), op(80, 70, 'd|X')], head)
+
+
 def bad_fixtures():
     yield 'cycle_self', scene([obj('Model', 1, 'Self', 'Null')], [connect(1, 1)])
     yield 'cycle_pair', scene([obj('Model', 1, 'One', 'Null'), obj('Model', 2, 'Two', 'Null')], [connect(1, 2), connect(2, 1)])
@@ -336,6 +526,15 @@ def bad_fixtures():
     yield 'pose_short_matrix', scene([model(10, 'Root', 'LimbNode'), pose(50, 'BindPose', [(10, [1.0] * 12)])], [connect(10, 0)])
     yield 'cluster_short_transform', scene([model(1, 'Mesh', 'Mesh'), quad(), skin(40, 'Skin'), cluster(41, 'C', [0], [1.0], [1.0] * 9, translation(0, 0, 0))],
         [connect(1, 0), connect(30, 1), connect(40, 30), connect(41, 40)])
+    # step 5: a curve whose times and values differ in length, attributes short of four per entry, reference counts
+    # that run out before the keys, a zero reference count, a curve without KeyAttrRefCount
+    zeros = [0.0, 0.0, 0.0, 0.0]
+    yield 'anim_curve_mismatch', scene([curve(80, 'C', [0.0, 1.0, 2.0], [0.0, 1.0], [LINEAR], zeros, [3])], [])
+    yield 'anim_curve_short_attrs', scene([curve(80, 'C', [0.0, 1.0], [0.0, 1.0], [LINEAR], [0.0, 0.0, 0.0], [2])], [])
+    yield 'anim_curve_refs_exhausted', scene([curve(80, 'C', [0.0, 1.0, 2.0], [0.0, 1.0, 2.0], [LINEAR], zeros, [2])], [])
+    yield 'anim_curve_refs_zero', scene([curve(80, 'C', [0.0, 1.0], [0.0, 1.0], [LINEAR, LINEAR], zeros + zeros, [0, 2])], [])
+    yield 'anim_curve_no_refs', scene([obj('AnimationCurve', 80, 'C', '', [Node('KeyTime', [prop('l', [0])]), Node('KeyValueFloat', [prop('d', [1.0])]),
+        Node('KeyAttrFlags', [prop('i', [LINEAR])]), Node('KeyAttrDataFloat', [prop('f', zeros)])])], [])
 
 
 if __name__ == '__main__':
@@ -346,6 +545,7 @@ if __name__ == '__main__':
         yield from fixtures()
         yield from triangulation_fixtures()
         yield from skin_fixtures()
+        yield from anim_fixtures()
     for name, nodes in (bad_fixtures() if reject else good()):
         path = out / (name + '.fbx')
         write_fbx(path, 7400, nodes)

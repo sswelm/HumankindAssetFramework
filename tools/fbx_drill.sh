@@ -31,7 +31,7 @@ TMPD="$(mktemp -d)"; trap 'rm -rf "$TMPD"' EXIT
 WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"; WTMP="$(cygpath -m "$TMPD" 2>/dev/null || echo "$TMPD")"
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -out:"$WTMP/drill.exe" \
   -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" \
-  "$WROOT/tools/fbx-drill/FbxDrill.cs" "$WROOT/tools/fbx-drill/FbxSceneDump.cs" "$WROOT/editor/FbxDocument.cs" "$WROOT/editor/FbxScene.cs" "$WROOT/editor/FbxTriangulate.cs" 2>&1); rc=$?
+  "$WROOT/tools/fbx-drill/FbxDrill.cs" "$WROOT/tools/fbx-drill/FbxSceneDump.cs" "$WROOT/editor/FbxDocument.cs" "$WROOT/editor/FbxScene.cs" "$WROOT/editor/FbxAnimation.cs" "$WROOT/editor/FbxTriangulate.cs" 2>&1); rc=$?
 if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/drill.exe" ]; then echo "$OUT" | grep -E "error" | head -20; echo "FAIL — the FBX drill did not compile (csc rc=$rc)"; exit 1; fi
 # THE OBJECT LAYER RUNS ON UNITY'S 64-BIT MONO (2026-11-01): the stand-alone mono.exe is a 32-bit process whose double
 # arithmetic goes through the x87 unit with its extended intermediates - the matrices came out an ulp from ufbx's on the
@@ -135,7 +135,9 @@ if [ "${#SCENE_FILES[@]}" -gt 0 ]; then
   n_streams=$(grep -cE '^  (position|normal|uv[0-9]+|color[0-9]+|tangent|bitangent) values=' "$TMPD/scene-cs.lf")
   n_tris=$(grep '^  triangles count=' "$TMPD/scene-cs.lf" | sed 's/.*count=\([0-9]*\).*/\1/' | awk '{s+=$1} END {print s+0}')
   n_skins=$(grep -c '^skin ' "$TMPD/scene-cs.lf"); n_clusters=$(grep -c '^cluster ' "$TMPD/scene-cs.lf"); n_poses=$(grep -c '^pose ' "$TMPD/scene-cs.lf"); n_bones=$(grep -c '^bone ' "$TMPD/scene-cs.lf")
-  RESULT2="PASS — FBX object layer: ${#SCENE_FILES[@]} files, $n_nodes nodes (every local transform, node-to-parent and node-to-world matrix as bits), $n_meshes meshes ($n_streams vertex streams, every face and its $n_tris triangles as hashes), $n_mats materials, $n_skins skins with $n_clusters clusters (every vertex's sorted weights as hashes, every binding matrix as bits), $n_poses poses, $n_bones bones - equal to ufbx 0.23.1's own reading (C# $((t4 - t3)) s, ufbx $((t5 - t4)) s)"
+  n_stacks=$(grep -c '^anim_stack ' "$TMPD/scene-cs.lf"); n_layers=$(grep -c '^anim_layer ' "$TMPD/scene-cs.lf"); n_curves=$(grep -c '^anim_curve ' "$TMPD/scene-cs.lf"); n_evals=$(grep -c '^anim_eval ' "$TMPD/scene-cs.lf")
+  n_keys=$(grep '^anim_curve ' "$TMPD/scene-cs.lf" | sed 's/.*keys=\([0-9]*\).*/\1/' | awk '{s+=$1} END {print s+0}')
+  RESULT2="PASS — FBX object layer: ${#SCENE_FILES[@]} files, $n_nodes nodes (every local transform, node-to-parent and node-to-world matrix as bits), $n_meshes meshes ($n_streams vertex streams, every face and its $n_tris triangles as hashes), $n_mats materials, $n_skins skins with $n_clusters clusters (every vertex's sorted weights as hashes, every binding matrix as bits), $n_poses poses, $n_bones bones, $n_stacks animation stacks with $n_layers layers and $n_curves curves ($n_keys keyframes with their tangents as hashes, every curve sampled at thirteen times, every node's transform evaluated at thirteen times of every stack: $n_evals node-stack pairs as hashes) - equal to ufbx 0.23.1's own reading (C# $((t4 - t3)) s, ufbx $((t5 - t4)) s)"
   echo "$RESULT2"
   RESULT="$RESULT | $RESULT2"
   python "$ROOT/tools/fbx-drill/fbx_scene_fixtures.py" --bad "$WTMP/bad-scenes" > "$TMPD/bad-scenes.txt" || { echo "FAIL — bad scene fixture generation failed"; exit 1; }
@@ -143,7 +145,7 @@ if [ "${#SCENE_FILES[@]}" -gt 0 ]; then
   [ "${#BAD_SCENES[@]}" -gt 0 ] || { echo "FAIL — no malformed scenes"; exit 1; }
   "$WTMP/mono-host.exe" "$UNITY/MonoBleedingEdge" "$WTMP/drill.exe" --reject-scene "${BAD_SCENES[@]}" > "$TMPD/reject-scene-cs.txt" 2>&1 || { echo "FAIL — C# scene refusals:"; cat "$TMPD/reject-scene-cs.txt"; exit 1; }
   "$TMPD/ufbxdump.exe" --reject "${BAD_SCENES[@]}" > "$TMPD/reject-scene-u.txt" 2>&1 || { echo "FAIL — ufbx scene refusals:"; cat "$TMPD/reject-scene-u.txt"; exit 1; }
-  echo "PASS — both scene readers refused ${#BAD_SCENES[@]} malformed scenes (cyclic hierarchies, mismatched cluster arrays, short matrices)"
+  echo "PASS — both scene readers refused ${#BAD_SCENES[@]} malformed scenes (cyclic hierarchies, mismatched cluster arrays, short matrices, mismatched or exhausted keyframe arrays)"
 fi
 [ "$N_PROJECT" -gt 0 ] || { echo "SKIP — ${RESULT#PASS — } | the project population was NOT drilled: no modding project at $PROJECT (set HAF_UNITY_PROJECT)"; exit 3; }
 exit 0

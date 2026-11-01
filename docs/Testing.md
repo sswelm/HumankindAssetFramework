@@ -158,7 +158,18 @@ four-influence lists in place. Three malformed scenes (mismatched cluster arrays
 readers. Ten planted deviations (an unstable sort, no pose fill, no geometric transform, the wrong axis flipped, the
 exporter undetected, the first mesh or bone instead of the last, the root entry skipped, poses unsorted, and the
 identity multiply skipped) each changed a dump; the last changed nothing on the fixtures but 26 lines on the real
-files, where Blender's negative zeros become positive under ufbx's multiplication, so the multiply stays.
+files, where Blender's negative zeros become positive under ufbx's multiplication, so the multiply stays. Its fifth step (2026-11-01) adds the animation: every stack's time range and layers, every layer's
+blend settings and animated properties (hashed by element, key and name), every value's defaults and curves, every
+curve's keyframes with ufbx's float tangents (hashed) and thirteen samples of its evaluation across and beyond its key
+range (hashed), and every node's transform evaluated at thirteen times of every stack (hashed). The real population
+carries 160 stacks, 164 layers and 44,097 curves with 1.25 million keyframes, every stack a single Blender layer; nine
+generated animation scenes add the shapes it lacks: constant, linear, cubic auto, user, TCB and weighted tangents with
+the clamp and bias flags, every extrapolation mode with its repeat count, additive, blended and override layers with
+composed rotations and scales and an animated weight, connected properties (a driver, a two-hop chain, a cycle),
+properties synthesised for animation with and without a template, an animated rotation order, 32-bit key times and the
+FBX 8000 time code. Five malformed curves (mismatched, short or exhausted arrays) must be refused by both readers.
+Sixteen planted deviations each changed a dump (the first layer blending instead of assigning: 10,022 real lines; the last value winning a shared property; constant-previous and -next swapped; a weight of exactly one third instead of ufbx's 0.333333f: 1,686 real lines; the Bezier solve stopped after three Newton steps; the mirror parity skipped; the packed weights swapped; the reference range ignored; a synthesised scale of zeros; a connection cycle left connected; the time code ignored; the auto tangent always time-independent; the additive rotation added instead of composed; a tangent's negative zero lost; the max of a tie taken from the last; the property flags never set). Two of them (the negative zero and the tie) changed nothing on the fixtures and 286 and 284 lines on the real
+files until a curve of signed zeros joined the scenes.
 
 **Since 2026-10-11 the drills run concurrently, and since 2026-10-29 the source guards run on a lane beside them.**
 The drills are independent (each works in its own temp directory and builds its own exe), so `check.sh` starts them

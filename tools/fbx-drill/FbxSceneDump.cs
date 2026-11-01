@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 
 // The C# side of the OBJECT-LAYER comparison of tools/fbx_drill.sh: editor/FbxScene.cs's dump of a file in exactly
@@ -17,18 +18,15 @@ static class FbxSceneDump
 
     public static void Dump(FbxScene s, StringBuilder o, bool full)
     {
-        int textures = 0, stacks = 0;
-        foreach (var ob in s.Objects)
-        {
-            if (ob.IsTexture) textures++;
-            else if (ob.Class == "AnimationStack") stacks++;
-        }
+        int textures = 0;
+        foreach (var ob in s.Objects) if (ob.IsTexture) textures++;
         o.Append("settings up=").Append(s.UpAxis).Append(" front=").Append(s.FrontAxis).Append(" right=").Append(s.RightAxis)
          .Append(" unit=").Append(Bits(s.UnitMeters)).Append(" fps=").Append(Bits(s.FramesPerSecond)).Append(" version=").Append(s.Version)
-         .Append(" exporter=").Append(s.Exporter).Append(" exporter_version=").Append(s.ExporterVersion).Append('\n');
+         .Append(" exporter=").Append(s.Exporter).Append(" exporter_version=").Append(s.ExporterVersion).Append(" ktime=").Append(s.KTimeSecond).Append('\n');
         o.Append("counts nodes=").Append(s.Nodes.Count).Append(" meshes=").Append(s.Meshes.Count).Append(" materials=").Append(s.Materials.Count)
          .Append(" textures=").Append(textures).Append(" skins=").Append(s.Skins.Count).Append(" clusters=").Append(s.Clusters.Count).Append(" bones=").Append(s.Bones.Count)
-         .Append(" poses=").Append(s.Poses.Count).Append(" anim_stacks=").Append(stacks).Append('\n');
+         .Append(" poses=").Append(s.Poses.Count).Append(" anim_stacks=").Append(s.AnimStacks.Count).Append(" anim_layers=").Append(s.AnimLayers.Count)
+         .Append(" anim_values=").Append(s.AnimValues.Count).Append(" anim_curves=").Append(s.AnimCurves.Count).Append('\n');
         for (int i = 0; i < s.Nodes.Count; i++)
         {
             var n = s.Nodes[i];
@@ -144,9 +142,100 @@ static class FbxSceneDump
             o.Append("pose ").Append(p.Index).Append(" \"").Append(p.Name).Append("\" bind=").Append(p.IsBindPose ? 1 : 0).Append(" bones=").Append(p.BonePoses.Count).Append('\n');
             foreach (var bp in p.BonePoses) { o.Append("  bone ").Append(bp.BoneNode.Index).Append('\n'); Matrix("b2w", bp.BoneToWorld, o); Matrix("b2p", bp.BoneToParent, o); }
         }
+        Animation(s, o, full);
     }
 
     static int MaterialIndex(FbxScene s, FbxObject o) { for (int i = 0; i < s.Materials.Count; i++) if (s.Materials[i].Object == o) return i; return -1; }
+
+    static string FBits(float f) => BitConverter.ToUInt32(BitConverter.GetBytes(f), 0).ToString("x8");
+    static void HashFloat(float f) => HashBytes(BitConverter.GetBytes(f));
+    static double[] SampleTimes(double begin, double end)
+    {
+        double span = end - begin;
+        if (!(span > 0.0)) span = 1.0;
+        var t = new double[13];
+        t[0] = begin - span * 2.3;
+        t[1] = begin - span * 0.5;
+        for (int k = 0; k <= 8; k++) t[2 + k] = begin + span * (double)k / 8.0;
+        t[11] = end + span * 0.5;
+        t[12] = end + span * 2.3;
+        return t;
+    }
+
+    /// <summary>Step 5, in ufbxdump.c's lines: stacks, layers (animated properties as a hash), values, curves (keys and thirteen
+    /// samples as hashes), every node's transform at thirteen samples of each stack.</summary>
+    static void Animation(FbxScene s, StringBuilder o, bool full)
+    {
+        foreach (var st in s.AnimStacks)
+        {
+            o.Append("anim_stack ").Append(st.Index).Append(" \"").Append(st.Name).Append("\" begin=").Append(Bits(st.TimeBegin)).Append(" end=").Append(Bits(st.TimeEnd)).Append(" layers=");
+            for (int k = 0; k < st.Layers.Count; k++) o.Append(k > 0 ? "," : "").Append(st.Layers[k].Index);
+            o.Append('\n');
+        }
+        foreach (var l in s.AnimLayers)
+        {
+            o.Append("anim_layer ").Append(l.Index).Append(" \"").Append(l.Name).Append("\" weight=").Append(Bits(l.Weight)).Append(" weight_anim=").Append(l.WeightIsAnimated ? 1 : 0)
+             .Append(" blended=").Append(l.Blended ? 1 : 0).Append(" additive=").Append(l.Additive ? 1 : 0).Append(" compose_rot=").Append(l.ComposeRotation ? 1 : 0)
+             .Append(" compose_scale=").Append(l.ComposeScale ? 1 : 0).Append(" values=").Append(l.Values.Count).Append(" props=").Append(l.AnimProps.Length).Append('\n');
+            o.Append("  values"); foreach (var v in l.Values) o.Append(' ').Append(v.Index); o.Append('\n');
+            var sorted = l.AnimProps.OrderBy(a => a.Element.ElementId).ThenBy(a => a.Key).ThenBy(a => a.PropName, StringComparer.Ordinal).ThenBy(a => a.Value.Index).ToList();
+            HashReset();
+            foreach (var ap in sorted)
+            {
+                HashU32((uint)ap.Element.ElementId); HashBytes(Encoding.UTF8.GetBytes(ap.PropName)); HashU32((uint)ap.Value.Index);
+                if (full) o.Append("  aprop ").Append(ap.Element.ElementId).Append(" \"").Append(ap.PropName).Append("\" value=").Append(ap.Value.Index).Append('\n');
+            }
+            o.Append("  aprops hash=").Append(fnv.ToString("x16")).Append('\n');
+        }
+        foreach (var v in s.AnimValues)
+            o.Append("anim_value ").Append(v.Index).Append(" \"").Append(v.Name).Append("\" default=").Append(Bits(v.DefaultValue[0])).Append(',').Append(Bits(v.DefaultValue[1])).Append(',').Append(Bits(v.DefaultValue[2]))
+             .Append(" curves=").Append(v.Curves[0] != null ? v.Curves[0].Index : -1).Append(',').Append(v.Curves[1] != null ? v.Curves[1].Index : -1).Append(',').Append(v.Curves[2] != null ? v.Curves[2].Index : -1).Append('\n');
+        foreach (var c in s.AnimCurves)
+        {
+            o.Append("anim_curve ").Append(c.Index).Append(" \"").Append(c.Name).Append("\" keys=").Append(c.Keyframes.Length).Append(" pre=").Append(c.PreMode).Append(',').Append(c.PreRepeat)
+             .Append(" post=").Append(c.PostMode).Append(',').Append(c.PostRepeat).Append(" min=").Append(Bits(c.MinValue)).Append(" max=").Append(Bits(c.MaxValue))
+             .Append(" tmin=").Append(Bits(c.MinTime)).Append(" tmax=").Append(Bits(c.MaxTime)).Append('\n');
+            HashReset();
+            for (int k = 0; k < c.Keyframes.Length; k++)
+            {
+                var key = c.Keyframes[k];
+                HashDouble(key.Time); HashDouble(key.Value); HashU32((uint)key.Interpolation);
+                HashFloat(key.LeftDx); HashFloat(key.LeftDy); HashFloat(key.RightDx); HashFloat(key.RightDy);
+                if (full) o.Append("  key ").Append(k).Append(" t=").Append(Bits(key.Time)).Append(" v=").Append(Bits(key.Value)).Append(" i=").Append(key.Interpolation)
+                           .Append(" l=").Append(FBits(key.LeftDx)).Append(',').Append(FBits(key.LeftDy)).Append(" r=").Append(FBits(key.RightDx)).Append(',').Append(FBits(key.RightDy)).Append('\n');
+            }
+            o.Append("  keys hash=").Append(fnv.ToString("x16")).Append('\n');
+            var times = SampleTimes(c.MinTime, c.MaxTime);
+            HashReset();
+            for (int k = 0; k < 13; k++)
+            {
+                double value = FbxAnimation.EvaluateCurve(c, times[k], 0.0);
+                HashDouble(value);
+                if (full) o.Append("  sample ").Append(k).Append(" t=").Append(Bits(times[k])).Append(" v=").Append(Bits(value)).Append('\n');
+            }
+            o.Append("  samples hash=").Append(fnv.ToString("x16")).Append('\n');
+        }
+        foreach (var st in s.AnimStacks)
+        {
+            var times = SampleTimes(st.TimeBegin, st.TimeEnd);
+            for (int j = 0; j < s.Nodes.Count; j++)
+            {
+                var n = s.Nodes[j];
+                HashReset();
+                for (int k = 0; k < 13; k++)
+                {
+                    var t = FbxAnimation.EvaluateTransform(st.Anim, n, times[k]);
+                    HashDouble(t.tx); HashDouble(t.ty); HashDouble(t.tz);
+                    HashDouble(t.qx); HashDouble(t.qy); HashDouble(t.qz); HashDouble(t.qw);
+                    HashDouble(t.sx); HashDouble(t.sy); HashDouble(t.sz);
+                    if (full) o.Append("  at ").Append(k).Append(" t=").Append(Bits(t.tx)).Append(',').Append(Bits(t.ty)).Append(',').Append(Bits(t.tz))
+                               .Append(" r=").Append(Bits(t.qx)).Append(',').Append(Bits(t.qy)).Append(',').Append(Bits(t.qz)).Append(',').Append(Bits(t.qw))
+                               .Append(" s=").Append(Bits(t.sx)).Append(',').Append(Bits(t.sy)).Append(',').Append(Bits(t.sz)).Append('\n');
+                }
+                o.Append("anim_eval stack=").Append(st.Index).Append(" node=").Append(j).Append(" hash=").Append(fnv.ToString("x16")).Append('\n');
+            }
+        }
+    }
 
     static void Matrix(string tag, double[] m, StringBuilder o)
     {

@@ -54,6 +54,26 @@ static void hash_u32(uint32_t v) { hash_bytes(&v, 4); }
 static uint64_t bits(double d) { uint64_t u; memcpy(&u, &d, 8); return u; }
 
 static int full = 0;
+static uint32_t fbits(float f) { uint32_t u; memcpy(&u, &f, 4); return u; }
+// thirteen sample times: 2.3 and 0.5 spans before, nine across (the ends included), 0.5 and 2.3 spans after; a zero span is a second
+static void sample_times(double begin, double end, double *out) {
+	double span = end - begin;
+	if (!(span > 0.0)) span = 1.0;
+	out[0] = begin - span * 2.3;
+	out[1] = begin - span * 0.5;
+	for (int k = 0; k <= 8; k++) out[2 + k] = begin + span * (double)k / 8.0;
+	out[11] = end + span * 0.5;
+	out[12] = end + span * 2.3;
+}
+static int anim_prop_cmp(const void *va, const void *vb) {
+	const ufbx_anim_prop *a = (const ufbx_anim_prop*)va, *b = (const ufbx_anim_prop*)vb;
+	if (a->element->element_id != b->element->element_id) return a->element->element_id < b->element->element_id ? -1 : 1;
+	if (a->_internal_key != b->_internal_key) return a->_internal_key < b->_internal_key ? -1 : 1;
+	int c = strcmp(a->prop_name.data, b->prop_name.data);
+	if (c != 0) return c;
+	if (a->anim_value->typed_id != b->anim_value->typed_id) return a->anim_value->typed_id < b->anim_value->typed_id ? -1 : 1;
+	return 0;
+}
 
 static void print_vec3(const char *tag, ufbx_vec3 v) { printf(" %s=%016llx,%016llx,%016llx", tag, (unsigned long long)bits(v.x), (unsigned long long)bits(v.y), (unsigned long long)bits(v.z)); }
 static void print_quat(const char *tag, ufbx_quat q) { printf(" %s=%016llx,%016llx,%016llx,%016llx", tag, (unsigned long long)bits(q.x), (unsigned long long)bits(q.y), (unsigned long long)bits(q.z), (unsigned long long)bits(q.w)); }
@@ -114,10 +134,11 @@ static int dump_main(int argc, char **argv) {
 			continue;
 		}
 		if (!scene) { printf("ERROR %s\n", error.description.data); failed = 1; continue; }
-		printf("settings up=%d front=%d right=%d unit=%016llx fps=%016llx version=%u exporter=%d exporter_version=%u\n", (int)scene->settings.axes.up, (int)scene->settings.axes.front, (int)scene->settings.axes.right,
-			(unsigned long long)bits(scene->settings.unit_meters), (unsigned long long)bits(scene->settings.frames_per_second), scene->metadata.version, (int)scene->metadata.exporter, scene->metadata.exporter_version);
-		printf("counts nodes=%zu meshes=%zu materials=%zu textures=%zu skins=%zu clusters=%zu bones=%zu poses=%zu anim_stacks=%zu\n",
-			scene->nodes.count, scene->meshes.count, scene->materials.count, scene->textures.count, scene->skin_deformers.count, scene->skin_clusters.count, scene->bones.count, scene->poses.count, scene->anim_stacks.count);
+		printf("settings up=%d front=%d right=%d unit=%016llx fps=%016llx version=%u exporter=%d exporter_version=%u ktime=%lld\n", (int)scene->settings.axes.up, (int)scene->settings.axes.front, (int)scene->settings.axes.right,
+			(unsigned long long)bits(scene->settings.unit_meters), (unsigned long long)bits(scene->settings.frames_per_second), scene->metadata.version, (int)scene->metadata.exporter, scene->metadata.exporter_version, (long long)scene->metadata.ktime_second);
+		printf("counts nodes=%zu meshes=%zu materials=%zu textures=%zu skins=%zu clusters=%zu bones=%zu poses=%zu anim_stacks=%zu anim_layers=%zu anim_values=%zu anim_curves=%zu\n",
+			scene->nodes.count, scene->meshes.count, scene->materials.count, scene->textures.count, scene->skin_deformers.count, scene->skin_clusters.count, scene->bones.count, scene->poses.count, scene->anim_stacks.count,
+			scene->anim_layers.count, scene->anim_values.count, scene->anim_curves.count);
 		for (size_t i = 0; i < scene->nodes.count; i++) {
 			ufbx_node *n = scene->nodes.data[i];
 			printf("node %zu \"%s\" parent=%d attrib=%s mesh=%d inherit=%d order=%d rotspace=%d geomxf=%d visible=%d bind_pose=%d bone=%d\n", i, n->name.data, n->parent ? (int)n->parent->typed_id : -1,
@@ -207,6 +228,80 @@ static int dump_main(int argc, char **argv) {
 			ufbx_pose *p = scene->poses.data[i];
 			printf("pose %zu \"%s\" bind=%d bones=%zu\n", i, p->name.data, p->is_bind_pose ? 1 : 0, p->bone_poses.count);
 			for (size_t b = 0; b < p->bone_poses.count; b++) { ufbx_bone_pose *bp = &p->bone_poses.data[b]; printf("  bone %u\n", bp->bone_node->typed_id); print_matrix("b2w", &bp->bone_to_world); print_matrix("b2p", &bp->bone_to_parent); }
+		}
+		// step 5: animation stacks, layers (their animated properties sorted by element id, key and name, as a hash), values,
+		// curves (every keyframe with its float tangents as a hash; thirteen samples of ufbx_evaluate_curve across and beyond the
+		// key range as a hash) and every node's transform through ufbx_evaluate_transform at thirteen samples of each stack
+		for (size_t i = 0; i < scene->anim_stacks.count; i++) {
+			ufbx_anim_stack *st = scene->anim_stacks.data[i];
+			printf("anim_stack %zu \"%s\" begin=%016llx end=%016llx layers=", i, st->name.data, (unsigned long long)bits(st->time_begin), (unsigned long long)bits(st->time_end));
+			for (size_t k = 0; k < st->layers.count; k++) printf("%s%u", k ? "," : "", st->layers.data[k]->typed_id);
+			printf("\n");
+		}
+		for (size_t i = 0; i < scene->anim_layers.count; i++) {
+			ufbx_anim_layer *l = scene->anim_layers.data[i];
+			printf("anim_layer %zu \"%s\" weight=%016llx weight_anim=%d blended=%d additive=%d compose_rot=%d compose_scale=%d values=%zu props=%zu\n", i, l->name.data,
+				(unsigned long long)bits(l->weight), l->weight_is_animated ? 1 : 0, l->blended ? 1 : 0, l->additive ? 1 : 0, l->compose_rotation ? 1 : 0, l->compose_scale ? 1 : 0, l->anim_values.count, l->anim_props.count);
+			printf("  values"); for (size_t k = 0; k < l->anim_values.count; k++) printf(" %u", l->anim_values.data[k]->typed_id); printf("\n");
+			// ufbx orders anim_props by element ADDRESS; the dump orders them by element id (the same order unless the
+			// allocator's chunks are out of address order), key, name, then the value's id
+			size_t n = l->anim_props.count;
+			ufbx_anim_prop *sorted = n ? (ufbx_anim_prop*)malloc(n * sizeof(ufbx_anim_prop)) : NULL;
+			for (size_t k = 0; k < n; k++) sorted[k] = l->anim_props.data[k];
+			qsort(sorted, n, sizeof(ufbx_anim_prop), anim_prop_cmp);
+			hash_reset();
+			for (size_t k = 0; k < n; k++) {
+				ufbx_anim_prop *ap = &sorted[k];
+				hash_u32(ap->element->element_id); hash_bytes(ap->prop_name.data, ap->prop_name.length); hash_u32(ap->anim_value->typed_id);
+				if (full) printf("  aprop %u \"%s\" value=%u\n", ap->element->element_id, ap->prop_name.data, ap->anim_value->typed_id);
+			}
+			printf("  aprops hash=%016llx\n", (unsigned long long)fnv);
+			free(sorted);
+		}
+		for (size_t i = 0; i < scene->anim_values.count; i++) {
+			ufbx_anim_value *v = scene->anim_values.data[i];
+			printf("anim_value %zu \"%s\" default=%016llx,%016llx,%016llx curves=%d,%d,%d\n", i, v->name.data,
+				(unsigned long long)bits(v->default_value.x), (unsigned long long)bits(v->default_value.y), (unsigned long long)bits(v->default_value.z),
+				v->curves[0] ? (int)v->curves[0]->typed_id : -1, v->curves[1] ? (int)v->curves[1]->typed_id : -1, v->curves[2] ? (int)v->curves[2]->typed_id : -1);
+		}
+		for (size_t i = 0; i < scene->anim_curves.count; i++) {
+			ufbx_anim_curve *c = scene->anim_curves.data[i];
+			printf("anim_curve %zu \"%s\" keys=%zu pre=%d,%d post=%d,%d min=%016llx max=%016llx tmin=%016llx tmax=%016llx\n", i, c->name.data, c->keyframes.count,
+				(int)c->pre_extrapolation.mode, c->pre_extrapolation.repeat_count, (int)c->post_extrapolation.mode, c->post_extrapolation.repeat_count,
+				(unsigned long long)bits(c->min_value), (unsigned long long)bits(c->max_value), (unsigned long long)bits(c->min_time), (unsigned long long)bits(c->max_time));
+			hash_reset();
+			for (size_t k = 0; k < c->keyframes.count; k++) {
+				ufbx_keyframe *key = &c->keyframes.data[k];
+				hash_double(key->time); hash_double(key->value); hash_u32((uint32_t)key->interpolation);
+				hash_u32(fbits(key->left.dx)); hash_u32(fbits(key->left.dy)); hash_u32(fbits(key->right.dx)); hash_u32(fbits(key->right.dy));
+				if (full) printf("  key %zu t=%016llx v=%016llx i=%d l=%08x,%08x r=%08x,%08x\n", k, (unsigned long long)bits(key->time), (unsigned long long)bits(key->value), (int)key->interpolation,
+					fbits(key->left.dx), fbits(key->left.dy), fbits(key->right.dx), fbits(key->right.dy));
+			}
+			printf("  keys hash=%016llx\n", (unsigned long long)fnv);
+			double times[13]; sample_times(c->min_time, c->max_time, times);
+			hash_reset();
+			for (int k = 0; k < 13; k++) {
+				double value = ufbx_evaluate_curve(c, times[k], 0.0);
+				hash_double(value);
+				if (full) printf("  sample %d t=%016llx v=%016llx\n", k, (unsigned long long)bits(times[k]), (unsigned long long)bits(value));
+			}
+			printf("  samples hash=%016llx\n", (unsigned long long)fnv);
+		}
+		for (size_t i = 0; i < scene->anim_stacks.count; i++) {
+			ufbx_anim_stack *st = scene->anim_stacks.data[i];
+			double times[13]; sample_times(st->time_begin, st->time_end, times);
+			for (size_t j = 0; j < scene->nodes.count; j++) {
+				ufbx_node *n = scene->nodes.data[j];
+				hash_reset();
+				for (int k = 0; k < 13; k++) {
+					ufbx_transform t = ufbx_evaluate_transform(st->anim, n, times[k]);
+					hash_double(t.translation.x); hash_double(t.translation.y); hash_double(t.translation.z);
+					hash_double(t.rotation.x); hash_double(t.rotation.y); hash_double(t.rotation.z); hash_double(t.rotation.w);
+					hash_double(t.scale.x); hash_double(t.scale.y); hash_double(t.scale.z);
+					if (full) { printf("  at %d", k); print_vec3("t", t.translation); print_quat("r", t.rotation); print_vec3("s", t.scale); printf("\n"); }
+				}
+				printf("anim_eval stack=%zu node=%zu hash=%016llx\n", i, j, (unsigned long long)fnv);
+			}
 		}
 		ufbx_free_scene(scene);
 	}
