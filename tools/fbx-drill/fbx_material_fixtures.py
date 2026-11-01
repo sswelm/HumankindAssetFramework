@@ -131,6 +131,14 @@ def images():
     # Blender tolerates both boundaries: do not mistake them for the damaged images above.
     out['tex/no_iend.png'] = out['tex/rgb.png'][:-12]
     out['tex/extra_pixels.png'] = png(1, 1, [], 2, scanlines=b'\x00\x14\x28\x3c\xff\x00\x01')
+    out['tex/transparent.png'] = png(2, 1, [[150, 30, 240, 0, 110, 20, 30, 128]], 6)
+    # Blender 5.1.2's composed PNG of transparent.png. This unrelated unused image used to fool the comparator's
+    # byte-equality heuristic into claiming that Blender passed the actual composition through.
+    out['tex/unused_equal.png'] = bytes.fromhex(
+        '89504e470d0a1a0a0000000d4948445200000002000000010806000000f4227f8a00000001735247420337c74d530000000467414d410000b18f0bfc6105'
+        '000000206348524d00007a26000080840000fa00000080e8000075300000ea6000003a98000017709cba513c00000036655849664d4d002a00000018'
+        '000000480000000100000048000000010002011a00050000000100000008011b00050000000100000010000000009078efbc000000096f46467300000000'
+        '0000000000da2ab6ce000000097048597300000b1200000b1201d2dd7efc0000001149444154081d639c26f781e1c637bd0600125204225e7593e10000000049454e44ae426082')
     return out
 
 
@@ -411,3 +419,6 @@ def fixtures():
     yield 'cached_image_properties', material_scene([material(100, 'Cached')],
         [video(70, 'Video', relative='tex/rgb.png'), texture(60, 'Cached', relative='tex/rgb.png',
             props=[Node('P', [prop('S', 'IgnoredShortProperty')])])], [link(60, 100, 'DiffuseColor')])
+    yield 'unused_equal_image', material_scene([material(100, 'Composed')],
+        [texture(60, 'Transparent', relative='tex/transparent.png'), texture(61, 'Unused', relative='tex/unused_equal.png')],
+        [link(60, 100, 'DiffuseColor')])

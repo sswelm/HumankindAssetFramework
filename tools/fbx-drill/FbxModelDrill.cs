@@ -53,7 +53,7 @@ static class FbxModelDrill
                 if (mine == null) { Console.WriteLine("SKIP " + fbx + " : " + why); skipped++; continue; }
                 if (glb == "-") { Console.WriteLine("DIFF " + fbx + " : Blender's import failed where the reader built a model"); failed++; continue; }
                 var theirs = GlbReader.Read(glb);
-                string d = Compare(mine, theirs, composed, scene);
+                string d = Compare(mine, theirs, composed, ReadImageEvidence(glb, theirs));
                 if (d == null) { Console.WriteLine("PASS " + fbx + " : " + mine.Nodes.Count + " nodes, " + mine.Meshes.Count + " meshes, " + mine.Materials.Count + " materials, " + mine.Textures.Count + " textures, " + mine.Images.Count + " images" + (composed.Count > 0 ? " (" + composed.Count + " composed: pixels compared)" : "") + (scene.Notes.Count > 0 ? " (notes: " + string.Join("; ", scene.Notes.Distinct().Take(6)) + ")" : "")); compared++; }
                 else { Console.WriteLine("DIFF " + fbx + " : " + d); failed++; }
             }
@@ -67,7 +67,7 @@ static class FbxModelDrill
     static string FBits(float f) => BitConverter.ToUInt32(BitConverter.GetBytes(f), 0).ToString("x8");
 
     /// <summary>The first difference on the 6a and 6b fields, or null.</summary>
-    static string Compare(HafModel a, HafModel b, HashSet<int> composed, FbxImport.Scene scene)
+    static string Compare(HafModel a, HafModel b, HashSet<int> composed, int[] imageModes)
     {
         if (a.Nodes.Count != b.Nodes.Count) return $"nodes: {a.Nodes.Count} vs Blender's {b.Nodes.Count} ({Names(a.Nodes.Select(n => n.Name))} vs {Names(b.Nodes.Select(n => n.Name))})";
         if (a.Meshes.Count != b.Meshes.Count) return $"meshes: {a.Meshes.Count} vs Blender's {b.Meshes.Count}";
@@ -114,11 +114,11 @@ static class FbxModelDrill
                 }
             }
         }
-        return CompareMaterials(a, b, composed, scene);
+        return CompareMaterials(a, b, composed, imageModes);
     }
 
     /// <summary>6b: every material field, the textures, the samplers, the images, extensionsUsed.</summary>
-    static string CompareMaterials(HafModel a, HafModel b, HashSet<int> composed, FbxImport.Scene scene)
+    static string CompareMaterials(HafModel a, HafModel b, HashSet<int> composed, int[] imageModes)
     {
         for (int i = 0; i < a.Materials.Count; i++)
         {
@@ -155,11 +155,9 @@ static class FbxModelDrill
             if (x.Name != y.Name) return $"image {i}: name '{x.Name}' vs '{y.Name}'";
             if (x.MimeType != y.MimeType) return $"image {i} '{x.Name}': mimeType {x.MimeType} vs {y.MimeType}";
             if (x.Bytes == null || y.Bytes == null) return $"image {i} '{x.Name}': bytes missing";
+            if ((imageModes[i] & (composed.Contains(i) ? 2 : 1)) == 0) return $"image {i} '{x.Name}': composition decision differs from Blender's exporter";
             if (composed.Contains(i))
             {
-                // a composition the reader made where Blender passed a file through would still match by pixels: Blender's
-                // bytes must not be any source image's (the review of this step)
-                foreach (var im in scene.MaterialData.Images) if (im.ExportBytes != null && im.ExportBytes.Length == y.Bytes.Length && im.ExportBytes.SequenceEqual(y.Bytes)) return $"image {i} '{x.Name}': the reader composed it, Blender passed '{im.Name}' through";
                 var px = PngCodec.Decode(x.Bytes, out var ix, out string wx); var py = PngCodec.Decode(y.Bytes, out var iy, out string wy);
                 if (px == null) return $"image {i} '{x.Name}': the reader's PNG does not decode ({wx})";
                 if (py == null) return $"image {i} '{x.Name}': Blender's PNG does not decode ({wy})";
@@ -175,6 +173,32 @@ static class FbxModelDrill
         }
         if (!a.ExtensionsUsed.SequenceEqual(b.ExtensionsUsed)) return $"extensionsUsed [{string.Join(",", a.ExtensionsUsed)}] vs [{string.Join(",", b.ExtensionsUsed)}]";
         return null;
+    }
+
+    // The observer records the actual exporter path, bound to each written image. Missing/stale evidence cannot pass.
+    static int[] ReadImageEvidence(string glb, HafModel model)
+    {
+        var doc = Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(glb + ".images.json"));
+        var rows = doc["images"] as Newtonsoft.Json.Linq.JArray;
+        if ((int?)doc["version"] != 1 || rows == null || rows.Count != model.Images.Count) throw new InvalidDataException("image oracle evidence: version/count mismatch");
+        var modes = new int[rows.Count];
+        for (int i = 0; i < rows.Count; i++)
+        {
+            var image = model.Images[i]; string hash;
+            using (var sha = System.Security.Cryptography.SHA256.Create()) hash = BitConverter.ToString(sha.ComputeHash(image.Bytes)).Replace("-", "").ToLowerInvariant();
+            if ((string)rows[i]["name"] != image.Name || (string)rows[i]["mimeType"] != image.MimeType || (string)rows[i]["sha256"] != hash)
+                throw new InvalidDataException("image oracle evidence: image identity mismatch at " + i);
+            var values = rows[i]["composed"] as Newtonsoft.Json.Linq.JArray;
+            if (values == null || values.Count == 0 || values.Count > 2) throw new InvalidDataException("image oracle evidence: missing composition decision");
+            foreach (var value in values)
+            {
+                if (value.Type != Newtonsoft.Json.Linq.JTokenType.Boolean) throw new InvalidDataException("image oracle evidence: invalid composition decision");
+                int mode = (bool)value ? 2 : 1;
+                if ((modes[i] & mode) != 0) throw new InvalidDataException("image oracle evidence: duplicate composition decision");
+                modes[i] |= mode;
+            }
+        }
+        return modes;
     }
 
     /// <summary>Two JSON texts compared structurally: members by name, numbers as double bits, null and absent alike.</summary>

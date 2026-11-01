@@ -66,7 +66,7 @@ FILES=("${SOURCES[@]}" "${FIXTURES[@]}")
 [ "${#FILES[@]}" -gt 0 ] || { echo "FAIL — no FBX file to drill"; exit 1; }
 
 # Blender: import + export, one process per file (3-7 s each)
-PAIRS=(); t0=$(date +%s); n_blender=0
+PAIRS=(); t0=$(date +%s); n_blender=0; evidence_oracle=""
 mkdir -p "$TMPD/oracle"
 for f in "${FILES[@]}"; do
   out="$TMPD/oracle/$(basename "${f%.*}")_$n_blender.glb"
@@ -76,6 +76,7 @@ for f in "${FILES[@]}"; do
     echo "NOTE — Blender import/export failed for $f (exit $rc): $(grep -E 'Error|error' "$TMPD/blender_$n_blender.log" | tail -1 | cut -c1-200)"; out="-"
   fi
   PAIRS+=("$f" "$out"); n_blender=$((n_blender + 1))
+  [ "$(basename "$f")" != unused_equal_image.fbx ] || evidence_oracle="$out"
 done
 t1=$(date +%s)
 "$TMPD/fbxmodel.exe" "${PAIRS[@]}" > "$TMPD/result.txt" 2>&1; rc=$?
@@ -83,5 +84,7 @@ t2=$(date +%s)
 grep -E '^(DIFF|ERROR|SKIP) ' "$TMPD/result.txt" | cut -c1-400
 python "$ROOT/tools/fbx-drill/model_verdict.py" "$TMPD/result.txt" "$rc" "${#SOURCES[@]}" "${FILES[@]}"; verdict=$?
 [ "$verdict" -eq 0 ] || { tail -5 "$TMPD/result.txt"; exit "$verdict"; }
+[ -n "$evidence_oracle" ] && [ "$evidence_oracle" != - ] || { echo "FAIL — image evidence regression fixture missing"; exit 1; }
+python "$ROOT/tools/fbx-drill/test_model_evidence.py" "$WTMP/fbxmodel.exe" "$WTMP/fixtures/unused_equal_image.fbx" "$(cygpath -m "$evidence_oracle")" || exit 1
 n_pass=$(grep -c '^PASS ' "$TMPD/result.txt"); n_skip=$(grep -c '^SKIP ' "$TMPD/result.txt")
 echo "PASS — FBX model drill: $n_pass FBX files read by editor/FbxImport.cs + FbxModel.cs equal to Blender 5.1's import + glTF export on every node (name, parent, order, transform bits), mesh (every primitive's positions, normals, UVs, indices, material name), material (every field, the extensions), texture, sampler and image (bytes, or the pixels of a composition); $n_skip left to Blender by name (bones, deformers, animation, cameras, colours: sub-steps 6c-6d; a texture transform, an image the exporter encodes again, a composition over pixels this code cannot decode) (Blender $((t1 - t0)) s for ${#FILES[@]} files, C# $((t2 - t1)) s)"

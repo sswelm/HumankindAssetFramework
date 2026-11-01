@@ -226,7 +226,7 @@ OpenImageIO expands it, and encodes the new PNG), named by the file's stem or th
 exporter's fixed registration order. The drill compares every material field as bits, the extensions structurally, the
 textures, the samplers, the images' names, MIME types and bytes - or the decoded PIXELS of a composition, since Blender's
 PNG encoder is not reproduced. Three sources (the Bradley with its metallic-roughness compositions over grey PNGs, the
-balloon with its alpha compositions, the light mech) and twelve material scenes (every property and its clamp, the template
+balloon with its alpha compositions, the light mech) and thirteen material scenes (every property and its clamp, the template
 and the U flag, every link family, twins and names, missing files, embedded Content, a JPEG, every PNG colour type, wrap modes)
 are identical; ten scenes are named fallbacks the drill requires as SKIP rows (a property type Blender asserts on, a short
 property in an object's own block, a texture transform, a JPEG or a 16-bit PNG inside a composition, a JPEG under a .png name,
@@ -240,6 +240,10 @@ Content over a loaded file and a missing metallic image's white fill. A missing 
 remain accepted as Blender accepts them. Decoder tests reject overflowing chunk/dimension claims, invalid filters and
 checksums, and verify bounded allocation for both excessive compressed output and a huge header with too few scanlines.
 A cached-image fixture verifies that the custom-property pass is skipped only on a cache hit.
+The Blender exporter observer also writes `.images.json` beside each GLB: actual composition decisions bound to each
+image's name, MIME type and SHA-256. The comparator requires this evidence; it cannot infer pass-through from matching
+bytes in an unrelated unused image. A dedicated fixture holds that case, and the drill rejects eleven damaged/missing
+evidence records through the actual compiled comparator before accepting the intact record again.
 
 **Since 2026-10-11 the drills run concurrently, and since 2026-10-29 the source guards run on a lane beside them.**
 The drills are independent (each works in its own temp directory and builds its own exe), so `check.sh` starts them
