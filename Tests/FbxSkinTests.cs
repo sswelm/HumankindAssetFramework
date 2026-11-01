@@ -257,6 +257,95 @@ public class FbxSkinTests
     }
 
     // ---- the math ---------------------------------------------------------------------------------------------------
+    [Theory]
+    [InlineData("OP")]
+    [InlineData("PO")]
+    [InlineData("PP")]
+    public void Property_free_connections_keep_the_object_graph(string kind)
+    {
+        FbxNode Edge(long src, long dst) => kind == "OP" ? N("C", kind, src, dst, "") :
+            kind == "PO" ? N("C", kind, src, "", dst) : N("C", kind, src, "", dst, "");
+        var objects = Rig.Concat(new[] { Skin(40, "Skin"), Cluster(41, "C", new[] { 0 }, new[] { 1.0 }),
+            Pose(50, "Pose", "BindPose", PoseNode(10, T(0, 1, 0))) }).ToArray();
+        var links = RigLinks.Select(c => Edge((long)c.Properties[1], (long)c.Properties[2]))
+            .Concat(new[] { Edge(41, 40), Edge(40, 30), Edge(10, 41) }).ToArray();
+        var s = Scene(objects, links);
+        Assert.Same(Node(s, "Root"), Node(s, "Child").Parent);
+        Assert.Same(s.Meshes[0], Node(s, "Mesh").Mesh);
+        Assert.Same(Node(s, "Root"), s.Clusters[0].BoneNode);
+        Assert.Same(s.Bones[0], Node(s, "Root").Bone);
+        Assert.Equal(1, Assert.Single(s.Skins).Vertices[0].NumWeights);
+        Assert.Single(s.Meshes[0].SkinDeformers);
+        Assert.Equal(new[] { 0.0, 1.0, 0.0 }, Translation(s.Clusters[0].BindToWorld));
+    }
+
+    [Fact]
+    public void A_root_bound_cluster_keeps_its_weights_and_root_pose()
+    {
+        var s = Scene(new[] { Model(1, "Mesh", "Mesh", P("Lcl Translation", 1.0, 2.0, 3.0)), Quad(),
+            Skin(40, "Skin"), Cluster(41, "C", new[] { 0 }, new[] { 1.0 }),
+            Pose(50, "Pose", "BindPose", PoseNode(0, T(0, 2, 0))) },
+            new[] { C(1, 0), C(30, 1), C(41, 40), C(40, 30), C(0, 41) });
+        Assert.Same(s.Nodes[0], s.Clusters[0].BoneNode);
+        Assert.Single(s.Skins[0].Clusters);
+        Assert.Equal(1, s.Skins[0].Vertices[0].NumWeights);
+        Assert.Equal(new[] { 0.0, 2.0, 0.0 }, Translation(s.Clusters[0].BindToWorld));
+        Assert.Equal(new[] { 1.0, 0.0, 3.0 }, Translation(s.Clusters[0].MeshNodeToBone));
+    }
+
+    [Theory]
+    [InlineData("PO")]
+    [InlineData("PP")]
+    public void Texture_connections_use_the_decoded_source_and_destination_properties(string kind)
+    {
+        var edge = kind == "PO" ? N("C", kind, 2L, "", 1L) : N("C", kind, 2L, "", 1L, "DiffuseColor");
+        var s = Scene(new[] { Object("Material", 1, "Mat", "", N("ShadingModel", "phong")),
+            Object("Texture", 2, "Tex", "", N("RelativeFilename", "tex.png")) }, new[] { edge });
+        var t = Assert.Single(Assert.Single(s.Materials).Textures);
+        Assert.Equal(kind == "PO" ? "" : "DiffuseColor", t.prop);
+        Assert.Equal("tex.png", t.relativeFilename);
+    }
+
+    [Fact]
+    public void Named_property_connections_do_not_become_skin_bindings()
+    {
+        var s = Scene(Rig.Concat(new[] { Skin(40, "Skin"), Cluster(41, "C", new[] { 0 }, new[] { 1.0 }) }).ToArray(),
+            RigLinks.Concat(new[] { C(41, 40), N("C", "OP", 40L, 30L, "OtherProperty"), C(10, 41) }).ToArray());
+        Assert.Empty(s.Skins[0].Vertices);
+        Assert.Empty(s.Meshes[0].SkinDeformers);
+    }
+
+    [Theory]
+    [InlineData("OP")]
+    [InlineData("PO")]
+    [InlineData("PP")]
+    public void Nonstring_property_fields_do_not_create_object_bindings(string kind)
+    {
+        var edge = kind == "OP" ? N("C", kind, 10L, 41L, 17) :
+            kind == "PO" ? N("C", kind, 10L, 17, 41L) : N("C", kind, 10L, 17, 41L, 17);
+        var s = Scene(Rig.Concat(new[] { Skin(40, "Skin"), Cluster(41, "C", new[] { 0 }, new[] { 1.0 }) }).ToArray(),
+            RigLinks.Concat(new[] { C(41, 40), C(40, 30), edge }).ToArray());
+        Assert.Null(s.Clusters[0].BoneNode);
+        Assert.Empty(s.Skins[0].Clusters);
+    }
+
+    [Fact]
+    public void Sorting_ordinary_vertex_weights_has_no_per_vertex_scratch_arrays()
+    {
+        var allocated = (Func<long>)Delegate.CreateDelegate(typeof(Func<long>), typeof(GC).GetMethod("GetAllocatedBytesForCurrentThread"));
+        var weights = new FbxSkinWeight[4];
+        Func<FbxSkinWeight, FbxSkinWeight, bool> less = (a, b) => a.Weight > b.Weight;
+        FbxMath.StableSort(weights, 0, 4, 32, less); // warm up outside the measured region
+        long before = allocated();
+        for (int i = 0; i < 100000; i++)
+        {
+            for (int j = 0; j < 4; j++) weights[j].Weight = j;
+            FbxMath.StableSort(weights, 0, 4, 32, less);
+        }
+        Assert.True(allocated() - before < 1000000, "Sorting four influences must not allocate scratch arrays per vertex");
+        Assert.Equal(new[] { 3.0, 2.0, 1.0, 0.0 }, weights.Select(w => w.Weight));
+    }
+
     [Fact]
     public void Invert_is_ufbx_matrix_invert()
     {

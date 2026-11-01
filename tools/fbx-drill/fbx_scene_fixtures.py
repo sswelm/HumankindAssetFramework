@@ -291,6 +291,40 @@ def skin_fixtures():
     # connected to two Geometries (the last is its mesh, both list it)
     yield 'instances_order', scene([model(1, 'A', 'Mesh'), model(2, 'B', 'Mesh'), quad(), polygon(31, 'Tri', [0, 0, 0, 1, 0, 0, 0, 1, 0], [[0, 1, 2]])],
         [connect(1, 0), connect(2, 0), connect(30, 2), connect(30, 1), connect(31, 1)])
+    # Property-free OP/PO/PP connections are object links, too. PO/PP store the source property BEFORE the
+    # destination ID. Exercise the entire graph and each encoding's texture property routing.
+    for kind in ('OP', 'PO', 'PP'):
+        def edge(src, dst, dst_prop=''):
+            fields = [prop('S', kind), prop('L', src)]
+            if kind in ('PO', 'PP'):
+                fields.append(prop('S', ''))
+            fields.append(prop('L', dst))
+            if kind in ('OP', 'PP'):
+                fields.append(prop('S', dst_prop))
+            return Node('C', fields)
+        objects = rig + [skin(40, 'Skin'), cluster(41, 'C', [0], [1.0]), pose(50, 'Pose', [(10, translation(0, 1, 0))]),
+            obj('Material', 60, 'Mat', children=[Node('ShadingModel', [prop('S', 'phong')])]),
+            obj('Texture', 70, 'Tex', children=[Node('RelativeFilename', [prop('S', 'tex.png')])])]
+        yield 'skin_connections_' + kind.lower(), scene(objects, [edge(a, b) for a, b in
+            [(1, 0), (10, 0), (11, 10), (30, 1), (20, 10), (21, 11), (41, 40), (40, 30), (10, 41), (60, 30)]] + [edge(70, 60, 'DiffuseColor')])
+    # The synthetic root is a valid cluster bone, including bind-pose filling through its outgoing links.
+    yield 'skin_root_bone', scene([model(1, 'Mesh', 'Mesh', p('Lcl Translation', 1.0, 2.0, 3.0)), quad(),
+        skin(40, 'Skin'), cluster(41, 'C', [0], [1.0]), pose(50, 'Pose', [(0, translation(0, 2, 0))])],
+        [connect(1, 0), connect(30, 1), connect(41, 40), connect(40, 30), connect(0, 41)])
+    # Named property links are not deformers attached to a mesh.
+    yield 'skin_named_property', scene(rig + [skin(40, 'Skin'), cluster(41, 'C', [0], [1.0])],
+        links + [connect(41, 40), Node('C', [prop('S', 'OP'), prop('L', 40), prop('L', 30), prop('S', 'OtherProperty')]), connect(10, 41)])
+    # More than one insertion-sort block, NaNs and equal weights: pin the reference merge order after
+    # removing per-vertex scratch allocations from the common short-list path.
+    many = [cluster(100 + i, 'C' + str(i), [0], [nan if i % 5 == 1 else (i * 7 % 11) / 10.0]) for i in range(45)]
+    yield 'skin_many_weights', scene(rig + [skin(40, 'Skin')] + many,
+        links + [connect(40, 30)] + [c for i in range(45) for c in (connect(100 + i, 40), connect(10, 100 + i))])
+    # Invalid numeric property names are skipped, not converted to empty strings and then treated as bindings.
+    malformed = [Node('C', [prop('S', 'OP'), prop('L', 10), prop('L', 100), prop('I', 17)]),
+        Node('C', [prop('S', 'PO'), prop('L', 10), prop('I', 17), prop('L', 101)]),
+        Node('C', [prop('S', 'PP'), prop('L', 10), prop('I', 17), prop('L', 102), prop('I', 17)])]
+    yield 'skin_bad_property_fields', scene(rig + [skin(40, 'Skin')] + [cluster(i, 'C' + str(i), [0], [1.0]) for i in (100, 101, 102)],
+        links + [connect(40, 30)] + [connect(i, 40) for i in (100, 101, 102)] + malformed)
 
 
 def bad_fixtures():

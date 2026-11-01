@@ -102,6 +102,8 @@ public sealed class FbxObject
 public sealed class FbxConnection
 {
     public string Kind = "";   // OO, OP, PO, PP
+    // ufbx treats a property-free OP/PO/PP as an object connection as well.
+    public bool IsObjectConnection => SrcProp.Length == 0 && DstProp.Length == 0;
     public FbxObject Src, Dst; public long SrcId, DstId;
     public string SrcProp = "", DstProp = "";
 }
@@ -318,36 +320,39 @@ public static class FbxMath
     public static void StableSort<T>(T[] data, int begin, int count, int linearSize, Func<T, T, bool> less)
     {
         if (count <= 1) return;
-        var tmp = new T[count];
-        var dst = new T[count]; Array.Copy(data, begin, dst, 0, count);
-        var src = tmp;
         int block = linearSize;
+        // Start in the caller's range, as ufbx does. Ordinary vertex influence lists fit in one insertion block
+        // and need no heap scratch at all. Longer lists need one merge buffer, rather than two copies per vertex.
         for (int b0 = 0; b0 < count; b0 += block)
         {
             int iEnd = Math.Min(b0 + block, count);
             for (int i = b0 + 1; i < iEnd; i++)
             {
-                int j = i; var v = dst[i];
-                for (; j != b0; --j) { if (!less(v, dst[j - 1])) break; dst[j] = dst[j - 1]; }
-                dst[j] = v;
+                int j = i; var v = data[begin + i];
+                for (; j != b0; --j) { if (!less(v, data[begin + j - 1])) break; data[begin + j] = data[begin + j - 1]; }
+                data[begin + j] = v;
             }
         }
+        if (block >= count) return;
+        var dst = data; int dstBegin = begin;
+        var src = new T[count]; int srcBegin = 0;
         for (; block < count; block *= 2)
         {
             var swap = dst; dst = src; src = swap;
+            int swapBegin = dstBegin; dstBegin = srcBegin; srcBegin = swapBegin;
             for (int b0 = 0; b0 < count; b0 += block * 2)
             {
                 int i = b0, iEnd = Math.Min(b0 + block, count), j = b0 + block, jEnd = Math.Min(j + block, count), k = b0;
                 while (i < iEnd && j < jEnd)
                 {
-                    if (less(src[j], src[i])) dst[k] = src[j++]; else dst[k] = src[i++];
+                    if (less(src[srcBegin + j], src[srcBegin + i])) dst[dstBegin + k] = src[srcBegin + j++]; else dst[dstBegin + k] = src[srcBegin + i++];
                     k++;
                 }
-                while (i < iEnd) dst[k++] = src[i++];
-                while (j < jEnd) dst[k++] = src[j++];
+                while (i < iEnd) dst[dstBegin + k++] = src[srcBegin + i++];
+                while (j < jEnd) dst[dstBegin + k++] = src[srcBegin + j++];
             }
         }
-        Array.Copy(dst, 0, data, begin, count);
+        if (dst != data) Array.Copy(dst, dstBegin, data, begin, count);
     }
 }
 
@@ -612,12 +617,28 @@ public sealed class FbxScene
         foreach (var c in conns.All("C"))
         {
             if (c.Properties.Count < 3) continue;
-            if (!FbxProps.IsNumber(c.Properties[1]) || !FbxProps.IsNumber(c.Properties[2]))
+            string kind = c.Properties[0] as string ?? "";
+            int dstIndex, required;
+            switch (kind)
+            {
+                case "OO": dstIndex = 2; required = 3; break;
+                case "OP": dstIndex = 2; required = 4; break;
+                case "PO": dstIndex = 3; required = 4; break;
+                case "PP": dstIndex = 3; required = 5; break;
+                default: continue; // ufbx ignores unknown connection kinds
+            }
+            if (c.Properties.Count < required) continue;
+            // A malformed property field must not turn into an empty property and create an object binding.
+            // ufbx skips these records when its string-valued connection parser cannot read them.
+            if ((kind == "PO" || kind == "PP") && !(c.Properties[2] is string)) continue;
+            if (kind == "OP" && !(c.Properties[3] is string)) continue;
+            if (kind == "PP" && !(c.Properties[4] is string)) continue;
+            if (!FbxProps.IsNumber(c.Properties[1]) || !FbxProps.IsNumber(c.Properties[dstIndex]))
                 throw new InvalidDataException("FBX connection requires numeric source and destination identifiers");
-            var conn = new FbxConnection { Kind = c.Properties[0] as string ?? "", SrcId = FbxProps.AsInt(c.Properties[1]), DstId = FbxProps.AsInt(c.Properties[2]) };
-            if (conn.Kind == "OP" && c.Properties.Count > 3) conn.DstProp = c.Properties[3] as string ?? "";
-            if (conn.Kind == "PO" && c.Properties.Count > 3) conn.SrcProp = c.Properties[3] as string ?? "";
-            if (conn.Kind == "PP" && c.Properties.Count > 4) { conn.SrcProp = c.Properties[3] as string ?? ""; conn.DstProp = c.Properties[4] as string ?? ""; }
+            var conn = new FbxConnection { Kind = kind, SrcId = FbxProps.AsInt(c.Properties[1]), DstId = FbxProps.AsInt(c.Properties[dstIndex]) };
+            if (kind == "OP") conn.DstProp = c.Properties[3] as string ?? "";
+            if (kind == "PO" || kind == "PP") conn.SrcProp = c.Properties[2] as string ?? "";
+            if (kind == "PP") conn.DstProp = c.Properties[4] as string ?? "";
             ById.TryGetValue(conn.SrcId, out conn.Src); ById.TryGetValue(conn.DstId, out conn.Dst);
             Connections.Add(conn);
             conn.Src?.Targets.Add(conn);
@@ -673,7 +694,7 @@ public sealed class FbxScene
             n.Parent = root;
             foreach (var c in n.Object.Targets)
             {
-                if (c.Kind != "OO") continue;
+                if (!c.IsObjectConnection) continue;
                 if (c.DstId == 0) continue;
                 if (c.Dst != null && c.Dst.Class == "Model" && byObject.TryGetValue(c.Dst, out var p) && p.ElementId > n.Parent.ElementId) n.Parent = p;
             }
@@ -714,7 +735,7 @@ public sealed class FbxScene
             // the attribute: a Geometry (mesh) or a NodeAttribute connected to the Model
             foreach (var c in n.Object.Sources)
             {
-                if (c.Kind != "OO" || c.Src == null) continue;
+                if (!c.IsObjectConnection || c.Src == null) continue;
                 if (c.Src.Class == "Geometry" && c.Src.SubType == "Mesh") { n.AttribType = "mesh"; break; }
                 if (c.Src.Class == "NodeAttribute")
                 {
@@ -724,7 +745,7 @@ public sealed class FbxScene
                 }
                 if (c.Src.Class == "Material") continue;
             }
-            foreach (var c in n.Object.Sources) if (c.Kind == "OO" && c.Src != null && c.Src.Class == "Material") n.Materials.Add(c.Src);
+            foreach (var c in n.Object.Sources) if (c.IsObjectConnection && c.Src != null && c.Src.Class == "Material") n.Materials.Add(c.Src);
         }
         foreach (var n in Nodes) UpdateNode(n);
     }
@@ -837,15 +858,15 @@ public sealed class FbxScene
         foreach (var n in Nodes)
         {
             if (n.IsRoot) continue;
-            foreach (var c in n.Object.Sources) if (c.Kind == "OO" && c.Src != null && byObject.TryGetValue(c.Src, out var m)) n.Mesh = m;
+            foreach (var c in n.Object.Sources) if (c.IsObjectConnection && c.Src != null && byObject.TryGetValue(c.Src, out var m)) n.Mesh = m;
         }
         foreach (var m in Meshes)
             foreach (var c in m.Object.Targets)
-                if (c.Kind == "OO" && c.Dst != null && nodeOf.TryGetValue(c.Dst, out var n) && !m.Instances.Contains(n)) m.Instances.Add(n);
+                if (c.IsObjectConnection && c.Dst != null && nodeOf.TryGetValue(c.Dst, out var n) && !m.Instances.Contains(n)) m.Instances.Add(n);
         foreach (var m in Meshes)
         {
             // ufbxi_fetch_mesh_materials(search_node): the Geometry's own Material connections, else the first instance node's
-            foreach (var c in m.Object.Sources) if (c.Kind == "OO" && c.Src != null && c.Src.Class == "Material") m.Materials.Add(c.Src);
+            foreach (var c in m.Object.Sources) if (c.IsObjectConnection && c.Src != null && c.Src.Class == "Material") m.Materials.Add(c.Src);
             if (m.Materials.Count == 0 && m.Instances.Count > 0) m.Materials.AddRange(m.Instances[0].Materials);
             // ufbxi_finalize_scene: one slot -> every face 0; no slot -> no face material list at all; more -> a face
             // material past the slots is 0 (ufbxi_finalize_mesh_material)
@@ -1063,7 +1084,7 @@ public sealed class FbxScene
             // ufbxi_fetch_src_element(&material->element, UFBX_ELEMENT_SHADER): the MATERIAL is the source of the connection,
             // the Implementation its destination (the 3ds Max temple: `OO Material -> Implementation`, RenderAPI "OSL")
             FbxObject shader = null;
-            foreach (var c in o.Targets) if (c.Kind == "OO" && c.Dst != null && c.Dst.Class == "Implementation") { shader = c.Dst; break; }
+            foreach (var c in o.Targets) if (c.IsObjectConnection && c.Dst != null && c.Dst.Class == "Implementation") { shader = c.Dst; break; }
             if (shader != null)
             {
                 string api = shader.Props.Str("RenderAPI", "");
@@ -1083,7 +1104,7 @@ public sealed class FbxScene
             // unnamed OO ones first), ties in file order. Textures a MESH names through LayerElement*Textures (texture_id >= 0,
             // sorted after these) are not modelled: none of the files here carry them.
             var texs = new List<(string prop, FbxObject tex)>();
-            foreach (var c in o.Sources) if ((c.Kind == "OP" || c.Kind == "OO") && c.Src != null && c.Src.IsTexture) texs.Add((c.Kind == "OP" ? c.DstProp : "", c.Src));
+            foreach (var c in o.Sources) if (c.SrcProp.Length == 0 && c.Src != null && c.Src.IsTexture) texs.Add((c.DstProp, c.Src));
             foreach (var (prop, tex) in texs.OrderBy(t => t.prop, Utf8Order))
                 mat.Textures.Add((prop, tex, tex.Record.First("RelativeFilename")?.Prop<string>(0) ?? tex.Record.First("RelativeFileName")?.Prop<string>(0) ?? ""));
             Materials.Add(mat);
@@ -1171,7 +1192,7 @@ public sealed class FbxScene
         foreach (var n in Nodes)
         {
             if (n.IsRoot) continue;
-            foreach (var c in n.Object.Sources) if (c.Kind == "OO" && c.Src != null && boneOf.TryGetValue(c.Src, out var b)) n.Bone = b;
+            foreach (var c in n.Object.Sources) if (c.IsObjectConnection && c.Src != null && boneOf.TryGetValue(c.Src, out var b)) n.Bone = b;
         }
         // bind pose bones, linked by raw id rather than connections; a bind pose fills a cluster's missing bind_to_world
         foreach (var p in Poses)
@@ -1185,9 +1206,9 @@ public sealed class FbxScene
                 p.BonePoses.Add(new FbxBonePose { BoneNode = node, BoneToWorld = matrix });
                 if (!p.IsBindPose) continue;
                 if (node.BindPose == null) node.BindPose = p;
-                if (obj == null) continue;
-                foreach (var c in obj.Targets)
-                    if (c.Kind == "OO" && c.Dst != null && clusterOf.TryGetValue(c.Dst, out var cl) && FbxMath.AllZero(cl.BindToWorld)) cl.BindToWorld = (double[])matrix.Clone();
+                IEnumerable<FbxConnection> targets = obj != null ? obj.Targets : Connections.Where(c => c.SrcId == 0);
+                foreach (var c in targets)
+                    if (c.IsObjectConnection && c.Dst != null && clusterOf.TryGetValue(c.Dst, out var cl) && FbxMath.AllZero(cl.BindToWorld)) cl.BindToWorld = (double[])matrix.Clone();
             }
             var arr = p.BonePoses.ToArray();
             FbxMath.StableSort(arr, 0, arr.Length, 16, (a, b) => a.BoneNode.Index < b.BoneNode.Index);
@@ -1196,18 +1217,22 @@ public sealed class FbxScene
         // the attributes' instances (bones here)
         foreach (var b in Bones)
             foreach (var c in b.Object.Targets)
-                if (c.Kind == "OO" && c.Dst != null && nodeOf.TryGetValue(c.Dst, out var n) && !b.Instances.Contains(n)) b.Instances.Add(n);
+                if (c.IsObjectConnection && c.Dst != null && nodeOf.TryGetValue(c.Dst, out var n) && !b.Instances.Contains(n)) b.Instances.Add(n);
         // each cluster's bone: the first node connected into it
         foreach (var cl in Clusters)
             foreach (var c in cl.Object.Sources)
-                if (c.Kind == "OO" && c.Src != null && nodeOf.TryGetValue(c.Src, out var n)) { cl.BoneNode = n; break; }
+            {
+                if (!c.IsObjectConnection) continue;
+                if (c.SrcId == 0) { cl.BoneNode = Nodes[0]; break; }
+                if (c.Src != null && nodeOf.TryGetValue(c.Src, out var n)) { cl.BoneNode = n; break; }
+            }
         foreach (var s in Skins)
         {
             // the clusters connected into the skin, once each; those without a bone are dropped
             var seen = new HashSet<FbxSkinCluster>();
             foreach (var c in s.Object.Sources)
             {
-                if (c.Kind != "OO" || c.Src == null || !clusterOf.TryGetValue(c.Src, out var cl)) continue;
+                if (!c.IsObjectConnection || c.Src == null || !clusterOf.TryGetValue(c.Src, out var cl)) continue;
                 if (!seen.Add(cl)) { Warnings.Add($"Duplicate connection to {s.Object.ElementId}"); continue; }
                 s.Clusters.Add(cl);
             }
@@ -1218,7 +1243,7 @@ public sealed class FbxScene
             int numVertices = 0;
             foreach (var c in s.Object.Targets)
             {
-                if (c.Kind != "OO" || c.Dst == null) continue;
+                if (!c.IsObjectConnection || c.Dst == null) continue;
                 FbxMeshData mesh = null;
                 if (meshOf.TryGetValue(c.Dst, out var mm)) mesh = mm;
                 else if (nodeOf.TryGetValue(c.Dst, out var n)) mesh = n.Mesh;
@@ -1257,7 +1282,7 @@ public sealed class FbxScene
             var seen = new HashSet<FbxSkinDeformer>();
             foreach (var c in m.Object.Sources)
             {
-                if (c.Kind != "OO" || c.Src == null || !skinOf.TryGetValue(c.Src, out var s)) continue;
+                if (!c.IsObjectConnection || c.Src == null || !skinOf.TryGetValue(c.Src, out var s)) continue;
                 if (!seen.Add(s)) { Warnings.Add($"Duplicate connection to {m.Object.ElementId}"); continue; }
                 m.SkinDeformers.Add(s);
             }
@@ -1279,14 +1304,14 @@ public sealed class FbxScene
         foreach (var cl in Clusters)
         {
             FbxSkinDeformer skin = null;
-            foreach (var c in cl.Object.Targets) if (c.Kind == "OO" && c.Dst != null && skinOf.TryGetValue(c.Dst, out skin)) break;
+            foreach (var c in cl.Object.Targets) if (c.IsObjectConnection && c.Dst != null && skinOf.TryGetValue(c.Dst, out skin)) break;
             if (skin == null) continue;
             FbxSceneNode node = null;
-            foreach (var c in skin.Object.Targets) if (c.Kind == "OO" && c.Dst != null && nodeOf.TryGetValue(c.Dst, out node)) break;
+            foreach (var c in skin.Object.Targets) if (c.IsObjectConnection && c.Dst != null && nodeOf.TryGetValue(c.Dst, out node)) break;
             if (node == null)
             {
                 FbxMeshData mesh = null;
-                foreach (var c in skin.Object.Targets) if (c.Kind == "OO" && c.Dst != null && meshOf.TryGetValue(c.Dst, out mesh)) break;
+                foreach (var c in skin.Object.Targets) if (c.IsObjectConnection && c.Dst != null && meshOf.TryGetValue(c.Dst, out mesh)) break;
                 if (mesh != null && mesh.Instances.Count > 0) node = mesh.Instances[0];
             }
             if (node == null) continue;
