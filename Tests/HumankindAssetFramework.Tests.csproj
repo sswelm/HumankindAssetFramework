@@ -16,6 +16,7 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
     <PackageReference Include="xunit" Version="2.6.6" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.6" />
+    <None Update="Fixtures\fbx_loader\*.fbx" CopyToOutputDirectory="PreserveNewest" />
     <None Include="eigen_inverses.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Include="blender_handle_releases.txt" CopyToOutputDirectory="PreserveNewest" />
     <!-- the native kernels beside the test host: NativeKernelsTests holds hafkernels.dll to the managed twins (and FAILS when it cannot load) -->
@@ -64,6 +65,7 @@
     <Compile Include="..\editor\FbxMaterials.cs" Link="FbxMaterials.cs" />
     <Compile Include="..\editor\FbxArmature.cs" Link="FbxArmature.cs" />
     <Compile Include="..\editor\FbxActions.cs" Link="FbxActions.cs" />
+    <Compile Include="..\editor\HafModelLoader.cs" Link="HafModelLoader.cs" />
     <Compile Include="..\editor\PngCodec.cs" Link="PngCodec.cs" />
     <Compile Include="..\editor\VehicleProbe.PolygonNormals.cs" Link="VehicleProbe.PolygonNormals.cs" />
     <Compile Include="..\editor\FbxTriangulate.cs" Link="FbxTriangulate.cs" />

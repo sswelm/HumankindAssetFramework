@@ -50,7 +50,7 @@ public class ModelReaderWindow : EditorWindow
             path = EditorGUILayout.TextField("Model file", path);
             if (GUILayout.Button("Browse…", GUILayout.Width(70)))
             {
-                string p = EditorUtility.OpenFilePanelWithFilters("Pick a model", string.IsNullOrEmpty(path) ? Application.dataPath : Path.GetDirectoryName(path), new[] { "glTF", "glb,gltf", "All files", "*" });
+                string p = EditorUtility.OpenFilePanelWithFilters("Pick a model", string.IsNullOrEmpty(path) ? Application.dataPath : Path.GetDirectoryName(path), new[] { "glTF / FBX", "glb,gltf,fbx", "All files", "*" });
                 if (!string.IsNullOrEmpty(p)) { path = p; ReadOne(); }
             }
         }
@@ -156,7 +156,8 @@ public class ModelReaderWindow : EditorWindow
         {
             fileBytes = new FileInfo(path).Length;
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            model = GlbReader.Read(path);
+            model = HafModelLoader.Read(path, out string leave);
+            if (model == null) { status = "⚠ left to Blender by name — " + leave; return; }
             sw.Stop(); readMs = sw.Elapsed.TotalMilliseconds;
             status = $"Read {Path.GetFileName(path)} in {readMs:0} ms.";
             BuildPreview();
@@ -174,12 +175,13 @@ public class ModelReaderWindow : EditorWindow
         foreach (var e in entries)
         {
             string f = e.modelFile ?? "";
-            if (!f.EndsWith(".glb", StringComparison.OrdinalIgnoreCase) && !f.EndsWith(".gltf", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!HafModelLoader.CanRead(f)) continue;
             if (!File.Exists(f)) { missing++; lines.Add($"MISSING  {e.resourceName}: {f}"); continue; }
             try
             {
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                var m = GlbReader.Read(f);
+                var m = HafModelLoader.Read(f, out string leave);
+                if (m == null) { refused++; lines.Add($"LEFT     {e.resourceName}: {leave}"); continue; }
                 sw.Stop(); ms += sw.Elapsed.TotalMilliseconds; bytes += new FileInfo(f).Length; ok++;
                 lines.Add($"OK       {e.resourceName}: {m.TriangleCount:N0} tris, {m.Meshes.Count} meshes, {m.Skins.Sum(s => s.Joints.Length)} joints, {m.Animations.Count} anim, {sw.Elapsed.TotalMilliseconds:0} ms");
             }

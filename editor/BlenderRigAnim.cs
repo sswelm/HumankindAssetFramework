@@ -437,7 +437,7 @@ public static class BlenderRigAnim
         var s = new Stage1 { Model = m };
         if (a.Problem != null) { s.Fallback = a.Problem; return s; }
         string ext = System.IO.Path.GetExtension(a.Input).ToLowerInvariant();
-        if (ext == ".fbx" || ext == ".blend") { s.Fallback = "a " + ext + " source: Blender's own importer, until the native reader"; return s; }
+        if (ext == ".blend") { s.Fallback = "a .blend source: Blender's own importer"; return s; }   // an .fbx reads through HafModelLoader since 6e
         if (a.LocalNodeAnim) { s.Fallback = "localNodeAnim: the REST hold and the inspection round trip are Blender's"; return s; }
         return ImportScene(m, s, a.Logs, dropMaterialLess: true, requireArmature: true, convertRig: a.ConvertRig);
     }

@@ -48,6 +48,8 @@ static class VehicleRigJobs
                 if (string.IsNullOrWhiteSpace(a.srcFile)) { Console.WriteLine($"INVALID\t{key}\tno source model"); invalid++; continue; }
                 if (!File.Exists(a.srcFile)) { Console.WriteLine($"UNAVAILABLE\t{key}\tsource missing: {a.srcFile}"); unavailable++; continue; }
                 if (a.srcFile2.Length > 0 && !File.Exists(a.srcFile2)) { Console.WriteLine($"UNAVAILABLE\t{key}\tsecond model missing: {a.srcFile2}"); unavailable++; continue; }
+                string srcExt = Path.GetExtension(a.srcFile).ToLowerInvariant();
+                if (srcExt != ".glb" && srcExt != ".gltf") { Console.WriteLine($"LEFT\t{key}\tthe source is {srcExt} - left by name until the drill's oracle runs on Blender's own GLB export of it (step 6f)"); continue; }
                 double mb = new FileInfo(a.srcFile).Length / 1048576.0 + (a.srcFile2.Length > 0 ? new FileInfo(a.srcFile2).Length / 1048576.0 : 0);
                 if (!all && mb > maxMb) { Console.WriteLine($"LEFT\t{key}\tover {maxMb:0} MB ({mb:0.0} MB; FULL=1 takes it)"); continue; }
                 // the names files, as the window writes them (one name per line, the recipe's order), under <work>/<key>/

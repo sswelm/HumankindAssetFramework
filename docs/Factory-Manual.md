@@ -35,9 +35,11 @@ part that matches your task.
   [HAF Authoring Tools package](Installation.md#3-the-authoring-tools) installed.
 - **A model file:** `.glb`, `.gltf`, `.obj`, `.fbx`, or `.blend`. It must be UV-mapped and textured if you want
   the original skin.
-- **Blender** for animated models, `.blend` import, part-stripping, and **Reduce-to-tris** decimation. Static GLB,
-  glTF, OBJ, and FBX bakes need no Blender. HAF auto-detects it under `C:\Program Files\Blender Foundation`; use the
-  Factory's **Settings** panel if it is installed elsewhere.
+- **Blender** for `.blend` import and named C# limits. Supported static glTF, OBJ, and FBX bakes need no Blender.
+  Skinned or animated FBX in the Vehicle Lab's probe/Generate keeps a named Blender fallback until its direct-FBX
+  pose convention is ported; static FBX can run natively. Animated FBX material extraction uses the native reader
+  when supported and Blender's export for named reader limits. HAF auto-detects Blender under
+  `C:\Program Files\Blender Foundation`; use the Factory's **Settings** panel if it is installed elsewhere.
 - **The game installed** (Steam auto-detected). The registry the plugin reads is written into `<Humankind>\BepInEx\config`.
 
 ---
@@ -619,9 +621,11 @@ set up. Blender is auto-detected under Program Files; a winget/Steam/portable in
 | *Do the C# ports still match Blender?* (the nine parity drills) | **Yes** | SKIP — the push gate no longer runs these (2026-10-30); off by default, about twenty minutes, holds the gate lock; it needs Git's bash and the package as the repository's editor/ folder |
 
 The same boundary applies to **baking itself**: a static model at `targetTris 0` with no strip-parts — including the
-whole projectile path — needs **no Blender at all**, from `.glb`, `.gltf`, or `.obj`. Tri-reduction, part-stripping,
-`.fbx`/`.blend` import, and every animated path shell out to Blender and will tell you *before* the bake if it is
-missing.
+whole projectile path — needs **no Blender at all**, from `.glb`, `.gltf`, `.obj` or `.fbx` (since 2026-11-02 an `.fbx` is
+read by the native FBX reader - the model Blender's own FBX import and glTF export would write - and takes the GLB path;
+one the reader leaves by name, said in the Console, takes Unity's FBX importer as before). Tri-reduction and
+part-stripping of an `.obj`, `.blend` import, an `.fbx` the native reader leaves by name, and every animated path the
+in-process ports leave by name shell out to Blender and will tell you *before* the bake if it is missing.
 
 The guards, in pyramid order:
 

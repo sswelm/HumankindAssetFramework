@@ -67,7 +67,7 @@ def jobs(pack, project, max_mb=40.0, everything=False):
                 out.append("UNAVAILABLE\t%s\tthe deploy conversion it bakes from is not on disk (%s)" % (key, src)); continue
         ext = os.path.splitext(src)[1].lower()
         if ext in (".fbx", ".blend"):
-            out.append("LEFT\t%s\tthe source is %s - Blender-only named fallback (%s)" % (key, ext, src)); continue
+            out.append("LEFT\t%s\tthe source is %s - left by name until the drill's oracle runs on Blender's own GLB export of it (step 6f) (%s)" % (key, ext, src)); continue
         if ext not in (".glb", ".gltf"):
             out.append("INVALID\t%s\tunsupported model extension %s (%s)" % (key, ext, src)); continue
         roles = ""

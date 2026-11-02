@@ -3,7 +3,7 @@
 // outside Unity (tools/riganim_drill.sh: the four stages row for row and the exported GLB byte for byte, on the registry's
 // rigs and the fixtures) - in a .NET Framework process. What only Unity can show is that the same code writes the same
 // file under Unity's Mono (which evaluates an uncast float product in double), on the registry's own animated rigs with
-// the Factory's own arguments. For every animated registry entry whose source is a .glb/.gltf (a deployConvert entry's
+// the Factory's own arguments. For every animated registry entry whose source is a .glb/.gltf/.fbx (a deployConvert entry's
 // CONVERTED file, when its cache holds one), the argv the Factory would hand both routes (UniversalBaker.RigAnimArgv)
 // runs the port into one GLB and Blender's Tools/rig_anim_glb.py (rig_anim.py's own source cut before its FBX export,
 // then the one glTF export the drill's dump runs too) into another, and the two must be equal byte for byte. A fallback
@@ -53,7 +53,7 @@ public static class BlenderRigAnimHeadlessTest
                     src = conv;
                 }
                 string ext = Path.GetExtension(src).ToLowerInvariant();
-                if (ext != ".glb" && ext != ".gltf") { s.skip++; notGlb++; body.AppendLine($"SKIP: {e.resourceName}: {Path.GetFileName(src)} is not a glTF file - the port reads .glb/.gltf only, the FBX route stays Blender's"); continue; }
+                if (!HafModelLoader.CanRead(src)) { s.skip++; notGlb++; body.AppendLine($"SKIP: {e.resourceName}: {Path.GetFileName(src)} is not a glTF or FBX file - the port reads .glb/.gltf/.fbx, the rest stays Blender's"); continue; }
                 string dirA = Path.Combine(root, "cs"), dirB = Path.Combine(root, "blender");
                 foreach (var d in new[] { dirA, dirB }) { if (Directory.Exists(d)) Directory.Delete(d, true); Directory.CreateDirectory(d); }
                 string glbA = Path.Combine(dirA, e.resourceName + "_anim.glb"), glbB = Path.Combine(dirB, e.resourceName + "_anim.glb");
@@ -80,7 +80,15 @@ public static class BlenderRigAnimHeadlessTest
                 { s.fail++; body.AppendLine($"FAIL: {e.resourceName}: the port's albedo could not be written - {albErr}"); continue; }
                 BakeTestRunnerWindow.Progress.Step($"{e.resourceName} ({i + 1}/{jobs.Count}) - Blender's rig_anim_glb.py", (float)(i + 0.5) / Math.Max(1, jobs.Count));
                 sw.Restart();
-                var blender = UniversalBaker.RunRigAnimGlbViaBlender(src, glbB, argvB);
+                // an .fbx source (6e): Blender's script runs on Blender's OWN GLB export of it (Tools/fbx_export.py) - the convention the
+                // port's model is held to; rig_anim.py's direct FBX import builds a rig of another convention, which no port is meant to match
+                string oracleSrc = src;
+                if (HafModelLoader.IsFbx(src))
+                {
+                    oracleSrc = Path.Combine(dirB, e.resourceName + "_source.glb");
+                    if (!UniversalBaker.ConvertFbxToGlbViaBlender(src, oracleSrc)) { s.fail++; body.AppendLine($"FAIL: {e.resourceName}: Blender could not export the FBX source as a GLB (Tools/fbx_export.py)"); continue; }
+                }
+                var blender = UniversalBaker.RunRigAnimGlbViaBlender(oracleSrc, glbB, argvB);
                 double secondsB = sw.Elapsed.TotalSeconds;
                 if (inProc.ScriptExit)
                 {

@@ -24,7 +24,7 @@ public static class BlenderRigAnimInProcess
 {
     /// <summary>Bump when the in-process run's written file changes: the Factory's slim cache key carries it, so a cached
     /// GLB made by an older port is made again.</summary>
-    public const string CacheRevision = "2026-10-28.post-strip-reset.1"; // re-slim cached rigs with the post-strip pose-channel reset
+    public const string CacheRevision = "2026-10-28.post-strip-reset.1." + HafModelLoader.CacheRevision; // re-slim cached rigs with the post-strip pose-channel reset
 
     public sealed class Outcome
     {
@@ -56,11 +56,11 @@ public static class BlenderRigAnimInProcess
         void Tick() { checkpoint?.Invoke(); }
         if (string.IsNullOrEmpty(src) || !File.Exists(src)) { o.UseBlender = "the model file is not there"; return o; }
         string ext = Path.GetExtension(src).ToLowerInvariant();
-        if (ext != ".glb" && ext != ".gltf") { o.UseBlender = "the source is not a .glb/.gltf file"; return o; }
+        if (!HafModelLoader.CanRead(src)) { o.UseBlender = HafModelLoader.NotReadable; return o; }
         try
         {
             HafModel m;
-            try { m = GlbReader.Read(src); }
+            try { m = HafModelLoader.Read(src, out string leave); if (m == null) { o.UseBlender = leave; return o; } }   // 6e: a .glb/.gltf, or an .fbx through the native reader
             catch (Exception e) when (e is InvalidDataException || e is NotSupportedException) { o.UseBlender = "the C# reader cannot handle this input: " + e.Message; return o; }
             Tick();
             var a = BlenderRigAnim.ParseArgs(new[] { src, outGlb }.Concat(argv).ToList());

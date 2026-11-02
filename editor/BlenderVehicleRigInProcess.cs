@@ -26,13 +26,14 @@ public static class BlenderVehicleRigInProcess
     internal static string CSharpBackendName(bool nativeKernelsAvailable)
         => nativeKernelsAvailable ? "C# + C++ kernels" : "C# (managed kernels)";
 
-    // The one Blender fallback acceptance EXPECTS: a source the C# does not read (SourceFallback: .fbx/.obj/.blend). Every other
+    // The Blender fallbacks acceptance EXPECTS: a source the C# does not read (SourceFallback: .obj/.blend) and an .fbx the FBX
+    // reader leaves by name (HafModelLoader.FbxLeavePrefix: a camera, shape keys, a shared skinned datablock, ...). Every other
     // reason - a reader refusal, the material preflight, a stage's named limit, a crash - is C# coverage lost, and the acceptance
     // row fails on it until it is fixed or this rule is widened on purpose (review of #188/#191).
     public static bool ExpectedFallback(string source, string reason)
     {
         if (string.IsNullOrWhiteSpace(source) || string.IsNullOrEmpty(reason)) return false;
-        return reason == BlenderVehicleRig.SourceFallback(new BlenderVehicleRig.Args { Input = source });
+        return reason == BlenderVehicleRig.SourceFallback(new BlenderVehicleRig.Args { Input = source }) || HafModelLoader.IsNamedFbxLeave(reason);
     }
 
     public sealed class Outcome
@@ -45,9 +46,10 @@ public static class BlenderVehicleRigInProcess
     }
 
     sealed class ReaderLimit : Exception { public ReaderLimit(string message) : base(message) { } }
+    sealed class NamedLeave : Exception { public NamedLeave(string message) : base(message) { } }   // an .fbx the FBX reader leaves by name
     static HafModel Read(string path)
     {
-        try { return GlbReader.Read(path); }
+        try { var m = HafModelLoader.ReadForVehicle(path, out string leave); if (m == null) throw new NamedLeave(leave); return m; }
         catch (Exception e) when (e is InvalidDataException || e is NotSupportedException) { throw new ReaderLimit(e.Message); }
     }
 
@@ -118,6 +120,7 @@ public static class BlenderVehicleRigInProcess
         }
         catch (OperationCanceledException) { throw; }
         catch (TimeoutException e) { o.Error = e.Message; return o; }
+        catch (NamedLeave e) { o.UseBlender = e.Message; return o; }
         catch (ReaderLimit e) { o.UseBlender = "the C# reader cannot handle this input: " + e.Message; return o; }
         catch (Exception e) { o.UseBlender = "the C# rig run failed (" + e.GetType().Name + ": " + e.Message + ")"; return o; }
         finally { if (temporary != null) try { if (File.Exists(temporary)) File.Delete(temporary); } catch { } }

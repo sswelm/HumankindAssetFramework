@@ -40,7 +40,7 @@ public static class RigRouteAcceptanceTest
             if (BakeTestRunnerWindow.Progress.CancelRequested) { cancelled = true; body.AppendLine("CANCELLED by the user - remaining entries were not run"); break; }
             if (string.IsNullOrWhiteSpace(e.modelFile) || !File.Exists(e.modelFile)) { s.skip++; body.AppendLine($"SKIP: {e.resourceName}: {e.modelFile} is not on this machine"); continue; }
             string ext = Path.GetExtension(e.modelFile).ToLowerInvariant();
-            if (ext != ".glb" && ext != ".gltf") { s.skip++; notGlb++; body.AppendLine($"SKIP: {e.resourceName}: {Path.GetFileName(e.modelFile)} is not a glTF file - the port reads .glb/.gltf only, the FBX route stays Blender's"); continue; }
+            if (ext != ".glb" && ext != ".gltf") { s.skip++; notGlb++; body.AppendLine($"SKIP: {e.resourceName}: {Path.GetFileName(e.modelFile)} is not a glTF file - the FBX route bakes Blender's FBX import and the GLB route the native reader's model, two rig conventions this row cannot hold equal; .glb/.gltf entries only"); continue; }
             // the run position rides in the throwaway name (Unity's own Importing modal shows the asset path and nothing else of ours);
             // the prefix first: the delete guard, the registry filter and Ship Status match it
             string nameA = BakeSmokeTest.PREFIX + $"{i + 1:00}of{jobs.Count:00}_fbx_" + e.resourceName;

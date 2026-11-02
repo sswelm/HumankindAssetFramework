@@ -10,6 +10,18 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE NATIVE FBX READER, STEP 6e: THE LOADER, WIRED INTO THE FACTORY AND THE LAB (2026-11-02).** `editor/HafModelLoader.cs`
+  reads a `.glb`/`.gltf` through GlbReader and an `.fbx` through the native reader (FbxImport + FbxModel: the model Blender's
+  FBX import and glTF export would write), and hands an `.fbx` the reader leaves by name to Blender as any other named limit.
+  Every in-process port reads through it: the deploy conversion, the rig slim (rig_anim's `.fbx` extension fallback is gone;
+  `.blend` stays), the Vehicle Lab's probe, preview and Generate (a second model too), the clip range picker, the Model
+  Reader (and its registry sweep), the Factory's in-process prep, and its static bake - an `.fbx` becomes a GLB and takes
+  the `.glb` conversion, Unity's FBX importer only for a file the reader leaves. The vehicle acceptance expects the FBX
+  reader's named leaves as Blender fallbacks. The rig-slim Bake Tests row takes `.fbx` entries, Blender's side on Blender's
+  own GLB export of the file (`Tools/fbx_export.py`); the probe preview row takes `.fbx` recipes. The parity drills leave
+  `.fbx` sources by name until step 6f runs their oracle on that export. Review fixes keep skinned/animated vehicle FBX
+  sources on a named fallback until the direct-FBX pose convention is ported, extract animated FBX multi-material
+  albedos, invalidate old loader-dependent caches, clean up unique temporary GLBs, and preserve cancellation. 9 loader cases.
 - **THE NATIVE FBX READER, STEP 6d: ANIMATION, HELD TO BLENDER (2026-11-02).** `editor/FbxActions.cs` ports the FBX
   importer's animation block (frame rate and ktime, stacks, layers, curve nodes and curves, one action per animated object
   or bone with the first assigned, the curves combined by np.interp and turned frame by frame into Blender's location,

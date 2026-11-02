@@ -103,11 +103,13 @@ public class VehicleRigInProcessTests : IDisposable
     }
     // review of #188/#191: acceptance expects a Blender fallback only for a source the C# does not read
     [Theory]
-    [InlineData("m.fbx","a .fbx source: Blender's own importer, until the native reader",true)]
-    [InlineData("m.FBX","a .fbx source: Blender's own importer, until the native reader",true)]
-    [InlineData("m.obj","a .obj source: Blender's own importer, until the native reader",true)]
+    [InlineData("m.fbx","a .fbx source: Blender's own importer, until the native reader",false)]
+    [InlineData("m.FBX","a .fbx source: Blender's own importer, until the native reader",false)]   // since 6e an .fbx is read: its old extension fallback is no longer expected
+    [InlineData("m.FBX","the FBX reader leaves this file to Blender by name: shape keys (not modelled)",true)]
+    [InlineData("m.obj","a .obj source: Blender's own importer",true)]
+    [InlineData("m.blend","a .blend source: Blender's own importer",true)]
     [InlineData("m.fbx","the C# rig run failed (Exception: x)",false)]
-    [InlineData("m.fbx","a .obj source: Blender's own importer, until the native reader",false)]
+    [InlineData("m.fbx","a .obj source: Blender's own importer",false)]
     [InlineData("m.obj","x",false)]
     [InlineData("m.glb","the C# reader cannot handle this input: x",false)] [InlineData("m.gltf","the C# rig run failed (Exception: x)",false)]
     [InlineData("m.glb","stage 5: the GLB export (image 3: a JPEG whose alpha is read (the exporter writes it again as PNG)) is not modelled yet",false)]
