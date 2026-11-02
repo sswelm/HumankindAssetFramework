@@ -1768,7 +1768,9 @@ a plain root sharer, a static sharer and three sharers through the fold's copies
 compares at every stage (154 jobs, 143 equal, 11 left by name, 0 differ). The mech's EXPORT is the next named limit,
 keyed `KNOWN_EXPORTLEFT` in the drill: an object-level location curve on the armature (the exporter port does not write the
 armature node's own channels), so its bake still takes Blender's rig_anim.py until that is ported. The drill prints
-each export leave and its actual reason; its aggregate count does not imply that every leave is an unused skin. Review of PR #164 added
+each export leave and its actual reason; its aggregate count does not imply that every leave is an unused skin.
+The shared-mesh coverage notes classify sharers from the original bind plan, before binding clears their bone parents;
+two bound users alone do not claim coverage of a plain/static user left unbound. Review of PR #164 added
 `fx_s2_unicode_static`: Python `str.lower()` expands U+0130 and applies final-sigma casing, which .NET invariant
 lowercase did not; before the fix the C# model bound two meshes Blender kept weightless. The C# matcher now follows
 those rules. Supplementary-script casing remains a named Blender fallback (`LEFT:fx_s2_supplementary_static`). Stages 3

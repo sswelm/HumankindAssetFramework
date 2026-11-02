@@ -24,6 +24,8 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   own channels), so the mech's bake still takes Blender's rig_anim.py until that is ported. Also corrected here: the 6f review's claim that its skinned-FBX fixture is "compared as an argument failure before the import"
   (it is the reader's named leave with Blender's death after its import recorded - the drill's own verdict row).
   The drill prints each actual export fallback reason instead of labeling every leave an unused skin.
+  Shared-mesh coverage uses the original bind plan: clearing a bound object's bone parent no longer counts it as a
+  plain/static sharer that the bind leaves alone.
 - **THE PNG CODEC'S KERNELS - C++ FOR THE FBX READER'S TEXTURES (2026-11-02).** Measured first: the native FBX reader's
   cost was its textures - the Bradley (eight 4096x4096 PNGs) 10.3 s in Unity's Mono against 0.04 s for the same content as
   a GLB - and the cost sat in the PNG codec's algorithm and zlib, the same on .NET and Mono (Mono's DeflateStream ignores

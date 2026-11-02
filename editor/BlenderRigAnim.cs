@@ -781,6 +781,7 @@ public static class BlenderRigAnim
         }
         if (bp.Count > 0)
         {
+            var bindSet = new HashSet<SceneObject>(bp); // preserve the plan: binding clears an object's bone parent
             // one vertex-group list and one weight layer serve every object of a mesh datablock (vertex groups live on the
             // MESH since Blender 3.0; the Armature modifier is the OBJECT's): a bind on one object shows on every other object
             // of the datablock - a second bind adds its group and weights to the same list and layer (or finds its group
@@ -837,7 +838,7 @@ public static class BlenderRigAnim
                     x.Mesh.Groups = new List<string>(d.Groups);
                     x.Mesh.DefNr = d.DefNr.Select(l => new List<int>(l)).ToArray();
                     x.Mesh.DefWeight = d.DefWeight.Select(l => new List<float>(l)).ToArray();
-                    Note(s, Governing(x) != null && !IsStatic(x) ? "a bound mesh's datablock shared with another bone-hung mesh (two binds on one list and layer)"
+                    Note(s, bindSet.Contains(x) ? "a bound mesh's datablock shared with another bone-hung mesh (two binds on one list and layer)"
                                                                  : "a bound mesh's datablock shared with a mesh the bind leaves alone (its rows show the bind)");
                 }
             }
