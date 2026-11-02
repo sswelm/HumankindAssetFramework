@@ -35,6 +35,22 @@ public static class DistrictBaker
         return $"{t.GetField("a", BF)?.GetValue(g)},{t.GetField("b", BF)?.GetValue(g)},{t.GetField("c", BF)?.GetValue(g)},{t.GetField("d", BF)?.GetValue(g)}";
     }
 
+    // THE BAKER'S FRAME IS Z-UP (2026-09-12, one frame for the static and animated paths: glbconv emits it, the static
+    // combine has no auto-align, and the unit prefab stands its mesh up with Euler(270, 0, 0) - UniversalBaker). The game
+    // draws an FxMesh by its importAngles, and its own district meshes are authored Z-up and drawn with (-90, 0, 0), the
+    // FxMesh default (BakeFxMesh below). The same frame rotation stands a baked district up. The district path had none -
+    // its wrapper predates the unified frame and took the Factory's mesh as Y-up - so every district baked after
+    // 2026-09-12 drew on its side (the reactor, 2026-11-02: its previous bake was from August). DistrictFrameHeadlessTest
+    // (Bake Tests) holds a baker-frame box to this through BakeFxMesh and the asset it writes.
+    public static readonly Quaternion BakerFrameUp = Quaternion.Euler(-90f, 0f, 0f);
+
+    /// <summary>The full draw-time rotation the District Factory writes into the FxMesh and draws in its preview, innermost
+    /// first: the registry's legacy import angles (entries authored before Facing; (0, 0, 0) since), the frame rotation that
+    /// stands the baker's Z-up frame up, then Facing (a yaw about the drawn-space vertical) - so Facing turns the standing
+    /// model, never tips it. Euler angles, as the FxMesh stores them and the game rebuilds them.</summary>
+    public static Vector3 DrawAngles(float facing, Vector3 importAngles) =>
+        (Quaternion.Euler(0f, facing, 0f) * BakerFrameUp * Quaternion.Euler(importAngles)).eulerAngles;
+
     // CORE — wrap a baked mesh as a district FxMesh. Callable from the District Factory window (the normal path), the
     // Prop Lab (pawn attachments), and the menu command below. Returns the FxMesh's Amplitude GUID "a,b,c,d", or null.
     // mergeSubMeshes: flatten a multi-material bake's submeshes into ONE — the pawn-fragment GPU encoder only draws
