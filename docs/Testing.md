@@ -341,6 +341,24 @@ using a temporary native GLB or Blender's export for a named reader limit. FBX r
 static extraction and material stamps, and rig/deploy cache keys; previous extension-based rig fallbacks retry. Temporary
 FBX GLBs have unique names and are cleaned up after conversion. Cancellation from the FBX oracle export propagates.
 
+Sub-step 6f (2026-11-02) puts the parity drills on `.fbx` sources. The C# side of the vehicle probe drill, the vehicle_rig
+drill and the rig_anim drill reads an `.fbx` recipe or registry source exactly as the Lab and the Factory read it
+(`HafModelLoader.ReadForVehicle` for the probe and vehicle_rig - a skinned or animated `.fbx`, or one the reader leaves by
+name, is LEFT by name, as the Lab leaves it to its Blender route; `HafModelLoader.Read` for rig_anim); Blender's side runs
+its script on Blender's OWN GLB export of the file (`tools/blender_oracle.sh: oracle_fbx_glb`, through `Tools/fbx_export.py`
+under the recorded oracle like every other Blender run), the convention the native model is held to by the FBX model drill,
+so the comparison judges the port and not Blender's two importers. The shards and the probe's sample carry the converted
+path, the jobs file and the C# side the `.fbx`; `recipe_check.py` judges `.fbx` recipes and notes a left one. Today's
+populations: the Bradley recipe (static, probed and rigged in C#), the Ehrhardt recipe (a skinned FBX: LEFT by name on both
+vehicle drills), the light assault mech's registry entry (skinned and animated: stage 1 compares from FBX, then stage 2
+hits the named shared bone-hung mesh limit; later stages/export are not claimed). An `.obj`/`.blend` source stays LEFT by name.
+
+Review regressions require a fresh nonempty FBX oracle GLB, retain nonzero Blender exit codes, and cover record/replay
+with external FBX image dependencies (including a previously missing recursive basename match). Named-left probe files
+and recipe jobs are removed before conversion; absent conversion mappings fail explicitly. A recipe-specific LEFT is
+not compared against primary-only rows. The vehicle stage drill follows production's pre-import argument failures,
+with a skinned FBX early-failure fixture that must be compared as a failure of arguments rather than left by the reader.
+
 **Since 2026-10-11 the drills run concurrently, and since 2026-10-29 the source guards run on a lane beside them.**
 The drills are independent (each works in its own temp directory and builds its own exe), so `check.sh` starts them
 together (`run_bg`), each into its own log, and prints the logs in declaration order. Each worker records its elapsed

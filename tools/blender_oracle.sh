@@ -124,6 +124,29 @@ oracle_blender() {
   esac
 }
 
+# oracle_fbx_glb <index> <in.fbx>: Blender's own GLB export of an .fbx source - editor/Tools~/fbx_export.py, its FBX import and
+# its glTF export with every option at its default - written under $TMPD/fbxglb_<index>/<stem>.glb and printed (Windows form).
+# The Blender side of a drill runs on THIS file when a recipe's or an entry's source is an .fbx (step 6f of the native FBX
+# reader, 2026-11-02): the native reader's model is held to that very export (tools/fbx_model_drill.sh), so both sides start
+# from one scene convention and the comparison judges the port, not Blender's two importers. Returns Blender's exit code (99:
+# no usable record, for oracle_check); nothing is printed then.
+oracle_fbx_glb() {
+  local index="$1" fbx="$2" stem out rc script input
+  stem="$(basename "$fbx")"; stem="${stem%.*}"
+  mkdir -p "$TMPD/fbxglb_$index" || return 1
+  out="$WTMP/fbxglb_$index/$stem.glb"
+  rm -f -- "$TMPD/fbxglb_$index/$stem.glb" || return 1   # a retry must not accept an earlier artifact
+  script=$(cygpath -m "$ROOT/editor/Tools~/fbx_export.py" 2>/dev/null || printf '%s' "$ROOT/editor/Tools~/fbx_export.py")
+  input=$(cygpath -m "$fbx" 2>/dev/null || printf '%s' "$fbx")
+  oracle_blender "fbxglb_$index" "$TMPD/fbxglb_${index}_raw.txt" --dir "fbxglb_$index" --key "$ROOT/editor/Tools~/fbx_export.py" "$fbx" \
+    -- --background --python "$script" -- "$input" "$out"; rc=$?
+  [ "$rc" -eq 0 ] || return "$rc"
+  if [ ! -s "$TMPD/fbxglb_$index/$stem.glb" ]; then
+    echo "FAIL — FBX oracle export produced no nonempty GLB: $fbx" >&2; return 1
+  fi
+  printf '%s\n' "$out"
+}
+
 oracle_check() {  # the SKIP for a replay without a usable record, after the invocation(s) it covers
   [ -f "$TMPD/oracle_missing" ] || return 0
   local what; what=$(tr '\n' ' ' < "$TMPD/oracle_missing" | cut -c1-900)

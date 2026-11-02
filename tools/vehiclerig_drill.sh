@@ -77,16 +77,46 @@ n_fx=$(( $(grep -cE "^(JOB|FAST)	" "$TMPD/fxjobs_raw.txt") + $(grep -cE "^JOB	" 
 [ "$n_fx" -gt 0 ] || { echo "FAIL — the vehicle_rig fixtures gave no job"; exit 1; }
 [ "$(grep -cE "^JOB	(EXIT|DIES):" "$TMPD/fxexit_jobs.txt")" -ge 8 ] || { echo "FAIL — the vehicle_rig exit fixtures gave fewer than 8 EXIT:/DIES: jobs"; exit 1; }
 
+# STEP 6f OF THE NATIVE FBX READER (2026-11-02): a recipe whose source or second model is an .fbx. The C# reads the .fbx as
+# the Lab reads it (HafModelLoader.ReadForVehicle: a skinned or animated one, or one the reader leaves by name, is LEFT by
+# name - the Lab's Blender route takes those); Blender's side runs vehicle_rig.py on Blender's OWN GLB export of the file
+# (oracle_fbx_glb: editor/Tools~/fbx_export.py), the convention the native model is held to - the shards carry that path,
+# the jobs file (the C# side's) the .fbx. The merge2= second model likewise.
+python - "$TMPD/jobs.txt" "$TMPD/fbx_needed.txt" <<'PYEOF'
+import sys
+seen = []
+for l in open(sys.argv[1], encoding="utf-8").read().split("\n"):
+    t = l.split("\t")
+    if t[0] not in ("JOB", "FAST"): continue
+    for p in [t[3]] + [f[7:].split("|")[0] for f in t[4:] if f.startswith("merge2=")]:
+        if p.lower().endswith(".fbx") and p not in seen: seen.append(p)
+open(sys.argv[2], "w", encoding="utf-8", newline="\n").write("".join(p + "\n" for p in seen))
+PYEOF
+N_FBX=0; : > "$TMPD/fbxglb.txt"
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  glb=$(oracle_fbx_glb "$N_FBX" "$f"); rc=$?
+  [ "$rc" -eq 0 ] || { oracle_check; echo "FAIL — vehicle_rig drill: Blender could not export $f as a GLB (exit $rc)"; exit 1; }
+  printf '%s\t%s\n' "$f" "$glb" >> "$TMPD/fbxglb.txt"; N_FBX=$((N_FBX + 1))
+done < "$TMPD/fbx_needed.txt"
+[ "$N_FBX" -eq 0 ] || echo "NOTE — vehicle_rig drill: $N_FBX .fbx source(s) read by the FBX reader here, Blender's side on Blender's own GLB export of each (step 6f)"
 # Blender: the shards, the largest sources first, round robin
 JOBS="${VEHICLERIG_JOBS:-4}"; [ "$JOBS" -ge 1 ] 2>/dev/null || JOBS=1
 [ "$JOBS" -le "$n_jobs" ] || JOBS="$n_jobs"
-python - "$TMPD/jobs.txt" "$TMPD" "$JOBS" <<'PYEOF'
+python - "$TMPD/jobs.txt" "$TMPD" "$JOBS" "$TMPD/fbxglb.txt" <<'PYEOF'
 import os, sys
 jobs = [l for l in open(sys.argv[1], encoding="utf-8").read().split("\n") if l.startswith("JOB\t") or l.startswith("FAST\t")]
 jobs.sort(key=lambda l: -os.path.getsize(l.split("\t")[3]))
+glb = dict(l.split("\t") for l in open(sys.argv[4], encoding="utf-8").read().split("\n") if "\t" in l)   # .fbx -> Blender's own GLB export (6f)
+def blender_side(l):
+    t = l.split("\t"); t[3] = glb.get(t[3], t[3])
+    for i in range(4, len(t)):
+        if t[i].startswith("merge2="):
+            f = t[i][7:].split("|"); f[0] = glb.get(f[0], f[0]); t[i] = "merge2=" + "|".join(f)
+    return "\t".join(t)
 n = int(sys.argv[3])
 for k in range(n):
-    open(os.path.join(sys.argv[2], "shard_%d.txt" % k), "w", encoding="utf-8", newline="\n").write("\n".join(jobs[k::n]) + "\n")
+    open(os.path.join(sys.argv[2], "shard_%d.txt" % k), "w", encoding="utf-8", newline="\n").write("\n".join(blender_side(j) for j in jobs[k::n]) + "\n")
 PYEOF
 t0=$(date +%s)
 BPIDS=()
@@ -122,7 +152,8 @@ n_exit=$(grep -cE "^JOB	(EXIT|DIES):" "$TMPD/jobs.txt")
 [ "$n_full" -eq $((n_jobs - n_fast - n_exit)) ] && [ "$n_fastrun" -eq "$n_fast" ] && [ "$n_stop" -eq "$n_exit" ] || { echo "FAIL — vehicle_rig drill: not every recipe completed (full $n_full of $((n_jobs - n_fast - n_exit)), fast $n_fastrun of $n_fast, stopped $n_stop of $n_exit)"; exit 1; }
 # STEPS (b) and (c), STAGES 1 and 2: the C# model of the first two stages (editor/BlenderVehicleRig.cs, .Stage2.cs) against every
 # job's rows of those stages, as strings - the dump's own float32 bits and hashes. Every dumped job must be equal row for row,
-# or left by name (a source the C# does not read: .fbx/.obj/.blend, the source-skeleton fast path); any other decline is a FAIL.
+# or left by name (a source the C# does not read: .obj/.blend; an .fbx the vehicle import leaves: skinned, animated, the reader's
+# own limit; the source-skeleton fast path); any other decline is a FAIL.
 "$TMPD/vehiclerig.exe" --inprocess "${KEY_MODE[@]}" "$WTMP/jobs.txt" "${DUMPS[@]}" > "$TMPD/s1_raw.txt" 2>&1; s1rc=$?
 t3=$(date +%s)
 tr -d '\r' < "$TMPD/s1_raw.txt" > "$TMPD/s1.txt"

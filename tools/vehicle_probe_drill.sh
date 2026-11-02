@@ -6,7 +6,10 @@
 #     missing names, creation order, an armature at the root, islands laid out against their index order),
 #   * every .glb the modding project's registry names, the Khronos samples when fetched,
 #   * and the SOURCES OF THE LAB'S SAVED RECIPES - the probe's real inputs: the unreduced originals (925 MB, one of
-#     398 MB), each recipe holding the parts Blender's probe listed when it was saved,
+#     398 MB), each recipe holding the parts Blender's probe listed when it was saved; an .fbx source since step 6f of the
+#     native FBX reader (2026-11-02): read here as the Lab reads it (HafModelLoader.ReadForVehicle - a skinned or animated
+#     one, or one the reader leaves by name, is LEFT: the Lab's Blender route takes it, so there are no rows to hold), and put
+#     to Blender's probe as Blender's OWN GLB export of the file (oracle_fbx_glb), the convention the native model is held to,
 # then Blender runs the REAL probe (editor/Tools~/vehicle_rig.py probe, posed at the first clip's start) on a
 # sample of them in one process, and the rows are compared per file: the part NAMES (the key every saved recipe
 # holds) and their order, the vertex counts, the world boxes, the visibility verdicts, the dominant bones, the RIGBONE rows.
@@ -42,7 +45,7 @@ cp "$ROOT/editor/Plugins/x86_64/hafkernels.dll" "$TMPD/hafkernels.dll"   # the n
 WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"; WTMP="$(cygpath -m "$TMPD" 2>/dev/null || echo "$TMPD")"
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -out:"$WTMP/probe.exe" \
   -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WAPI/System.Numerics.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
-  "$WROOT/tools/vehicle-probe-drill/ProbeDrill.cs" "$WROOT/editor/HafModel.cs" "$WROOT/editor/GlbReader.cs" "$WROOT/editor/HafTransforms.cs" "$WROOT/editor/BlenderNames.cs" "$WROOT/editor/VehicleProbe.cs" "$WROOT/editor/VehicleProbe.Visibility.cs" "$WROOT/editor/VehicleProbe.Islands.cs" "$WROOT/editor/VehicleProbe.InsideOut.cs" "$WROOT/editor/VehicleProbe.BlenderWorld.cs" "$WROOT/editor/VehicleProbe.BlenderSkin.cs" "$WROOT/editor/VehicleProbe.CustomNormals.cs" "$WROOT/editor/HafNativeKernels.cs" "$WROOT/editor/VehicleProbe.Merge.cs" "$WROOT/editor/VehicleProbe.BlenderArmature.cs" "$WROOT/editor/BlenderEigen.cs" "$WROOT/editor/BlenderTrig.cs" 2>&1); rc=$?
+  "$WROOT/tools/vehicle-probe-drill/ProbeDrill.cs" "$WROOT/editor/HafModel.cs" "$WROOT/editor/GlbReader.cs" "$WROOT/editor/HafModelLoader.cs" "$WROOT/editor/FbxDocument.cs" "$WROOT/editor/FbxScene.cs" "$WROOT/editor/FbxAnimation.cs" "$WROOT/editor/FbxTriangulate.cs" "$WROOT/editor/FbxImport.cs" "$WROOT/editor/FbxModel.cs" "$WROOT/editor/FbxMaterials.cs" "$WROOT/editor/PngCodec.cs" "$WROOT/editor/FbxArmature.cs" "$WROOT/editor/FbxActions.cs" "$WROOT/editor/BlenderExport.cs" "$WROOT/editor/BlenderExportTree.cs" "$WROOT/editor/BlenderPolyfill.cs" "$WROOT/editor/BlenderWeld.cs" "$WROOT/editor/BlenderColor.cs" "$WROOT/editor/BlenderMesh.cs" "$WROOT/editor/BMesh.cs" "$WROOT/editor/BlenderDecimate.cs" "$WROOT/editor/BlenderReduce.cs" "$WROOT/editor/HafNativeKernels.Collapse.cs" "$WROOT/editor/HafNativeKernels.BMesh.cs" "$WROOT/editor/VehicleProbe.PolygonNormals.cs" "$WROOT/editor/HafTransforms.cs" "$WROOT/editor/BlenderNames.cs" "$WROOT/editor/VehicleProbe.cs" "$WROOT/editor/VehicleProbe.Visibility.cs" "$WROOT/editor/VehicleProbe.Islands.cs" "$WROOT/editor/VehicleProbe.InsideOut.cs" "$WROOT/editor/VehicleProbe.BlenderWorld.cs" "$WROOT/editor/VehicleProbe.BlenderSkin.cs" "$WROOT/editor/VehicleProbe.CustomNormals.cs" "$WROOT/editor/HafNativeKernels.cs" "$WROOT/editor/VehicleProbe.Merge.cs" "$WROOT/editor/VehicleProbe.BlenderArmature.cs" "$WROOT/editor/BlenderEigen.cs" "$WROOT/editor/BlenderTrig.cs" 2>&1); rc=$?
 if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/probe.exe" ]; then echo "$OUT" | grep -E "error" | head -20; echo "FAIL — the vehicle probe drill did not compile (csc rc=$rc)"; exit 1; fi
 
 # ---- the sources: fixtures, naming fixtures, the registry, the Khronos samples
@@ -67,7 +70,7 @@ if [ -d "$ROOT/References/gltf-samples" ]; then
   [ "${#SLINES[@]}" -eq "$n_listed" ] || { echo "FAIL — the Khronos sample cache has ${#SLINES[@]} of the $n_listed samples samples.txt names (fetch again: python tools/glb-reader-drill/fetch_samples.py References/gltf-samples)"; exit 1; }
 fi
 RECIPE_SOURCES=()
-[ -z "$PACK" ] || mapfile -t RECIPE_SOURCES < <(python "$ROOT/tools/vehicle-probe-drill/recipe_check.py" --list "$PROJECT" | tr -d '\r')
+[ -z "$PACK" ] || mapfile -t RECIPE_SOURCES < <(python "$ROOT/tools/vehicle-probe-drill/recipe_check.py" --list-readable "$PROJECT" | tr -d '\r')   # the .fbx sources too (6f)
 FILES=("${FIXTURES[@]}" "${NAMING[@]}"); [ "${#REGISTRY[@]}" -eq 0 ] || FILES+=("${REGISTRY[@]}"); [ "${#SAMPLES_OK[@]}" -eq 0 ] || FILES+=("${SAMPLES_OK[@]}"); [ "${#RECIPE_SOURCES[@]}" -eq 0 ] || FILES+=("${RECIPE_SOURCES[@]}")
 mapfile -t FILES < <(printf '%s\n' "${FILES[@]}" | awk '!seen[tolower($0)]++')   # a recipe's source may also be a registry file
 # ---- the JOBS (step 3d): probes with the Lab's other inputs - a second model, placements, an orientation - on the fixtures that
@@ -106,8 +109,9 @@ PY
   N_NATIVE=$((N_NATIVE + 1))
 done
 grep -E "^FAIL" "$TMPD/csharp.txt"
-n_ok=$(grep -c "^FILE" "$TMPD/csharp.txt"); n_rows=$(grep -c "^ROW" "$TMPD/csharp.txt")
-[ "$n_ok" -eq $(( ${#FILES[@]} + ${#JOBS[@]} )) ] || { echo "FAIL — vehicle probe drill: a file could not be probed ($n_ok of ${#FILES[@]} files + ${#JOBS[@]} jobs)"; exit 1; }
+grep "^LEFT	" "$TMPD/csharp.txt" | sed 's/^LEFT\t/LEFT /; s/\t/: /'
+n_ok=$(grep -c "^FILE" "$TMPD/csharp.txt"); n_rows=$(grep -c "^ROW" "$TMPD/csharp.txt"); n_leftfbx=$(grep -c "^LEFT	" "$TMPD/csharp.txt")
+[ $(( n_ok + n_leftfbx )) -eq $(( ${#FILES[@]} + ${#JOBS[@]} )) ] || { echo "FAIL — vehicle probe drill: a file could not be probed ($n_ok of ${#FILES[@]} files + ${#JOBS[@]} jobs, $n_leftfbx left by name)"; exit 1; }
 echo "C# probe: $n_ok probes, $n_rows rows - ${#FIXTURES[@]} fixtures, ${#NAMING[@]} naming fixtures, $REGISTRY_NOTE (${#REGISTRY[@]}), ${#SAMPLES_OK[@]} Khronos samples, ${#RECIPE_SOURCES[@]} recipe sources, ${#JOBS[@]} jobs with a second model, placements or an orientation ($N_FIXTURE_JOBS on fixtures, $(( ${#JOBS[@]} - N_FIXTURE_JOBS )) recipes' own) ($(grep '^TOTAL' "$TMPD/csharp.txt"))"
 
 # ---- the saved recipes: what Blender listed when each was saved, against the C# probe of its source today
@@ -137,6 +141,23 @@ PY
     [ "${#REGISTRY[@]}" -eq 0 ] || ls -S "${REGISTRY[@]}" | tail -3;
     for d in "${DIFFERING[@]}"; do [ -n "$d" ] && [ "$(stat -c %s "$d" 2>/dev/null || echo 0)" -le 100000000 ] && echo "$d"; done; } | awk '!seen[tolower($0)]++' )
 fi
+# step 6f: an .fbx in the sample goes to Blender's probe as Blender's own GLB export of it, behind the .fbx's key (a job of
+# jobs_sample.json: blender_probe_many.py keys a job's rows by the key given); a merge2 second model likewise; a file or job the
+# C# LEFT by name is not put to Blender (no rows to hold). SAMPLE_ALL keeps the sample as chosen, for the stale-recipe count.
+SAMPLE_ALL=("${SAMPLE[@]}")
+awk -F'\t' '$1 == "LEFT" { print $2 }' "$TMPD/csharp.txt" > "$TMPD/left_keys.txt"
+printf '%s\n' "${SAMPLE[@]}" > "$TMPD/sample_in.txt"
+python "$ROOT/tools/vehicle-probe-drill/oracle_inputs.py" plan "$TMPD/sample_in.txt" "$WTMP/jobs_sample.json" "$TMPD/left_keys.txt" "$TMPD/sample_out.txt" "$TMPD/fbx_needed.txt" || { echo "FAIL — vehicle probe drill: cannot plan FBX oracle inputs"; exit 1; }
+N_FBX=0; : > "$TMPD/fbxglb.txt"
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  glb=$(oracle_fbx_glb "$N_FBX" "$f"); rc=$?
+  [ "$rc" -eq 0 ] || { oracle_check; echo "FAIL — vehicle probe drill: Blender could not export $f as a GLB (exit $rc)"; exit 1; }
+  printf '%s\t%s\n' "$f" "$glb" >> "$TMPD/fbxglb.txt"; N_FBX=$((N_FBX + 1))
+done < "$TMPD/fbx_needed.txt"
+python "$ROOT/tools/vehicle-probe-drill/oracle_inputs.py" apply "$TMPD/sample_out.txt" "$WTMP/jobs_sample.json" "$TMPD/fbxglb.txt" || { echo "FAIL — vehicle probe drill: cannot map FBX oracle inputs"; exit 1; }
+mapfile -t SAMPLE < "$TMPD/sample_out.txt"
+[ "$N_FBX" -eq 0 ] || echo "NOTE — vehicle probe drill: $N_FBX .fbx source(s) read by the FBX reader here, Blender's probe on Blender's own GLB export of each (step 6f)"
 t0=$(date +%s)
 N_JOBS_SAMPLE=$(python -c "import json,sys; print(len(json.load(open(sys.argv[1], encoding='utf-8'))))" "$WTMP/jobs_sample.json")
 oracle_blender probe "$TMPD/blender_raw.txt" --key "$ROOT/tools/vehicle-probe-drill/blender_probe_many.py" "$ROOT/editor/Tools~/vehicle_rig.py" "${SAMPLE[@]}" "@$WTMP/jobs_sample.json" -- --background --python "$(cygpath -m "$ROOT/tools/vehicle-probe-drill/blender_probe_many.py")" -- "$(cygpath -m "$ROOT/editor/Tools~/vehicle_rig.py")" "${SAMPLE[@]}" "@$WTMP/jobs_sample.json"; brc=$?
@@ -157,9 +178,10 @@ echo "$CMP" | grep -E "^COMPARED"
 [ "$crc" -eq 0 ] || { echo "FAIL — vehicle probe drill: the C# probe's rows differ from Blender's"; exit 1; }
 # the recipes that differ: Blender's probe of the source today agreed with the C# rows (or the compare above failed), so the recipe is stale
 n_arb=0; n_left=0
-for d in "${DIFFERING[@]}"; do [ -z "$d" ] && continue; if printf '%s\n' "${SAMPLE[@]}" | grep -qixF -- "$d"; then n_arb=$((n_arb + 1)); else n_left=$((n_left + 1)); echo "NOTE — a differing recipe's source was not put to Blender in this run (over 100 MB; FULL=1): $d"; fi; done
+for d in "${DIFFERING[@]}"; do [ -z "$d" ] && continue; if printf '%s\n' "${SAMPLE_ALL[@]}" | grep -qixF -- "$d"; then n_arb=$((n_arb + 1)); else n_left=$((n_left + 1)); echo "NOTE — a differing recipe's source was not put to Blender in this run (over 100 MB; FULL=1): $d"; fi; done
 [ "${#DIFFERING[@]}" -eq 0 ] || echo "recipes that differ: $n_arb are STALE (Blender's probe of the source today gives the C# rows, not the recipe's), $n_left left for FULL=1"
 NATIVE_NOTE=""; [ "$N_NATIVE" -eq 0 ] || NATIVE_NOTE=" ($N_NATIVE probed on the 64-bit .NET runtime: too large for Unity's 32-bit standalone Mono)"
-RESULT="PASS — vehicle probe drill: $n_ok probes in C# (${#FILES[@]} files, ${#JOBS[@]} jobs with a second model, placements or an orientation)$NATIVE_NOTE; on ${#SAMPLE[@]} files and $N_JOBS_SAMPLE jobs the rows equal Blender's own probe (names, order, vertices, visibility, inside-out, boxes, bones, rig bones, matrices and vertex positions bit for bit; Blender took $((t1 - t0)) s for those)${RECIPE_LINE:+; $RECIPE_LINE}"
+FBX_NOTE=""; [ "$N_FBX" -eq 0 ] && [ "$n_leftfbx" -eq 0 ] || FBX_NOTE=" ($N_FBX .fbx read by the FBX reader, Blender's probe on its own GLB export; $n_leftfbx left to Blender by name)"
+RESULT="PASS — vehicle probe drill: $n_ok probes in C# (${#FILES[@]} files, ${#JOBS[@]} jobs with a second model, placements or an orientation)$NATIVE_NOTE$FBX_NOTE; on ${#SAMPLE[@]} files and $N_JOBS_SAMPLE jobs the rows equal Blender's own probe (names, order, vertices, visibility, inside-out, boxes, bones, rig bones, matrices and vertex positions bit for bit; Blender took $((t1 - t0)) s for those)${RECIPE_LINE:+; $RECIPE_LINE}"
 [ "${#REGISTRY[@]}" -gt 0 ] || { echo "SKIP — ${RESULT#PASS — } | the registry population was NOT drilled: no existing registry model files at $PROJECT (set HAF_UNITY_PROJECT)"; exit 3; }
 echo "$RESULT"

@@ -1037,6 +1037,18 @@ def exits(jobs_path):
         kind, edit = EXITS[key]; edit(argv); n += 1
         stage = STAGE_OF.get(key, 1)
         print("\t".join(["JOB", key if kind is None else "%s:%d:%s" % (kind, stage, key)] + argv))
+        if key == "fx_d_frames":
+            # The same early int() failure with a skinned FBX: production never imports it. The drill must
+            # compare the argument failure, not accept a named FBX vehicle-pose fallback instead.
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "fbx-drill"))
+            from fbx_animation_fixtures import fixtures as fbx_fixtures
+            from fbx_fixtures import write_fbx
+            source = os.path.join(os.path.dirname(argv[1]), "fx_d_fbx_before_import.fbx")
+            for name, nodes, version in fbx_fixtures():
+                if name == "anim_bones":
+                    write_fbx(source, version, nodes); break
+            fbx_argv = list(argv); fbx_argv[1] = source.replace("\\", "/")
+            print("\t".join(["JOB", "DIES:1:fx_d_fbx_before_import"] + fbx_argv))
     if n != len(EXITS):
         raise SystemExit("expected %d exit jobs, got %d" % (len(EXITS), n))
 

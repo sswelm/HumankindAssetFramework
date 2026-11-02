@@ -31,8 +31,10 @@
 # STEP (f), THE GLB EXPORT (2026-10-14): after stage 4 the dump exports the scene as a GLB through Blender's glTF exporter
 # (the X rows, read back by tools/deploy-drill/glb_rows.py) and BlenderRigExport + BlenderGlbWriter write the same file -
 # `riganim.exe --export`; the S5_* tampers must be refused. An EXPORTLEFT: job is left at the export alone.
-# The light assault mech's source is an .fbx, which the C# does not read until the native FBX reader: that recipe is
-# LEFT by name and the coverage is reported as 23 of 24, never as the whole registry.
+# STEP 6f OF THE NATIVE FBX READER (2026-11-02): an entry whose source is an .fbx (the light assault mech) is a job: the C#
+# reads the .fbx through the FBX reader (HafModelLoader.Read; one it leaves by name is a named leave), Blender's side runs
+# rig_anim.py on Blender's OWN GLB export of the file (oracle_fbx_glb: editor/Tools~/fbx_export.py), the convention the
+# native model is held to. A .blend source stays LEFT by name.
 # The sample: the recipes whose source is under 40 MB; FULL=1 takes every size (507 MB in all, 17 s in four shards on
 # 2026-10-12). Both sides run as several processes (RIGANIM_JOBS, default 4).
 # Prerequisites and SKIP rules as deploy_drill.sh. Edit this script only while no FULL run is executing it.
@@ -88,6 +90,11 @@ if [ -n "$PACK" ]; then
     echo "FAIL — rig_anim drill: invalid animated registry recipe at $PACK"; exit 1
   fi
   tr -d '\r' < "$TMPD/jobs_raw.txt" > "$TMPD/jobs.txt"
+  # a registry job the port leaves by NAME at a later stage (the limits BlenderRigAnim.cs's header names) is keyed LEFT: here, as
+  # a fixture would be: the drill holds the model to that leave (a model that took the job would be wrong too) and the summary
+  # counts it (STAGES ... left N); the Factory's rig slim takes Blender's rig_anim.py for it
+  KNOWN_LEFT="LightAssaultMech"   # stage 2: a bone-hung mesh whose datablock another object shares (one vertex-group list, one weight layer) - found by step 6f on its .fbx
+  for k in $KNOWN_LEFT; do awk -F'\t' -v OFS='\t' -v k="$k" '$1 == "JOB" && $2 == k { $2 = "LEFT:" k } 1' "$TMPD/jobs.txt" > "$TMPD/jobs_k.txt" && mv "$TMPD/jobs_k.txt" "$TMPD/jobs.txt"; done
   n_jobs=$(grep -c "^JOB	" "$TMPD/jobs.txt"); n_left=$(grep -c "^LEFT	" "$TMPD/jobs.txt")
 fi
 n_reg=$n_jobs
@@ -99,16 +106,29 @@ tr -d '\r' < "$TMPD/fixtures_raw.txt" >> "$TMPD/jobs.txt"
 n_fx=$(grep -c "^JOB	" "$TMPD/fixtures_raw.txt"); n_jobs=$((n_reg + n_fx))
 [ "$n_fx" -gt 0 ] || { echo "FAIL — the rig_anim fixtures gave no job"; exit 1; }
 
+# step 6f: the .fbx sources, converted once for Blender's side (the shards carry the GLB, the jobs file the .fbx)
+awk -F'\t' '($1 == "JOB") && tolower($3) ~ /\.fbx$/ && !seen[$3]++ { print $3 }' "$TMPD/jobs.txt" > "$TMPD/fbx_needed.txt"
+N_FBX=0; : > "$TMPD/fbxglb.txt"
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  glb=$(oracle_fbx_glb "$N_FBX" "$f"); rc=$?
+  [ "$rc" -eq 0 ] || { oracle_check; echo "FAIL — rig_anim drill: Blender could not export $f as a GLB (exit $rc)"; exit 1; }
+  printf '%s\t%s\n' "$f" "$glb" >> "$TMPD/fbxglb.txt"; N_FBX=$((N_FBX + 1))
+done < "$TMPD/fbx_needed.txt"
+[ "$N_FBX" -eq 0 ] || echo "NOTE — rig_anim drill: $N_FBX .fbx source(s) read by the FBX reader here, Blender's side on Blender's own GLB export of each (step 6f)"
 JOBS="${RIGANIM_JOBS:-4}"; [ "$JOBS" -ge 1 ] 2>/dev/null || JOBS=1
 [ "$JOBS" -le "$n_jobs" ] || JOBS="$n_jobs"
 # shards by size, the largest first, round robin
-python - "$TMPD/jobs.txt" "$TMPD" "$JOBS" <<'PYEOF'
+python - "$TMPD/jobs.txt" "$TMPD" "$JOBS" "$TMPD/fbxglb.txt" <<'PYEOF'
 import os, sys
 jobs = [l for l in open(sys.argv[1], encoding="utf-8").read().split("\n") if l.startswith("JOB\t")]
 jobs.sort(key=lambda l: -os.path.getsize(l.split("\t")[2]))
+glb = dict(l.split("\t") for l in open(sys.argv[4], encoding="utf-8").read().split("\n") if "\t" in l)   # .fbx -> Blender's own GLB export (6f)
+def blender_side(l):
+    t = l.split("\t"); t[2] = glb.get(t[2], t[2]); return "\t".join(t)
 n = int(sys.argv[3])
 for k in range(n):
-    open(os.path.join(sys.argv[2], "shard_%d.txt" % k), "w", encoding="utf-8", newline="\n").write("\n".join(jobs[k::n]) + "\n")
+    open(os.path.join(sys.argv[2], "shard_%d.txt" % k), "w", encoding="utf-8", newline="\n").write("\n".join(blender_side(j) for j in jobs[k::n]) + "\n")
 PYEOF
 t0=$(date +%s)
 BPIDS=()
