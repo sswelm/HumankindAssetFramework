@@ -21,7 +21,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   ignored in the pose) - the robo1A's Blender-made chain is one -, an unused skin's inverse bind matrices are gathered
   after the animations from the scene the sampler left, and the posed-bone case 6c left by name now compares (the pose is
   evaluated). The model drill holds every animation to Blender: the robo1A (31 bones, 3 actions, 195 channels) and
-  seventeen scenes identical, two named fallbacks. Nineteen planted deviations each failed the drill. 6 test cases hold Blender's answers.
+  twenty-one scenes identical, five named fallbacks. Review fixes preserve float32 subtraction in invalid-curve repair
+  and Blender's RNA clamps on fps and fps_base, and decline frame rates Blender cannot assign. Nineteen planted deviations
+  each failed the drill. 15 test cases hold Blender's answers.
 - **THE NATIVE FBX READER, STEP 6c: ARMATURES, BONES, SKINS AND COLOUR LAYERS, HELD TO BLENDER (2026-11-02).**
   `editor/FbxArmature.cs` ports the FBX importer's helper-node passes (find_armatures, find_fake_bones, the bind poses from
   every BindPose and from the clusters, make_bind_pose_local, collect_armature_meshes, build_hierarchy's edit bones from

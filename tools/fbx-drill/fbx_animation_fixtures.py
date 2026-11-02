@@ -182,6 +182,21 @@ def fixtures():
         rig.animate(1, 'Lcl Translation', 'X', frames(24, 0, 24, ktime=ktime), [[0, 3]])
         yield anim_scene(name, [null(1, 'Timed')] + rig.objects, [connect(1, 0)] + rig.conns, head=header(header_version=1004 if tc is not None else 1003, tc_definition=tc, version=7700), version=7700)
 
+    # RenderSettings RNA clamps integer fps before computing/storing fps_base. Low custom rates otherwise
+    # collapse distinct keys; high rates export the wrong sample count and timing.
+    for name, rate, key_fps in (('anim_fps_low', 0.25, 1), ('anim_fps_high', 100000.0, 100000), ('anim_fps_base_clamp', 1e-10, 1)):
+        rig = Rig(200, 201, 300)
+        rig.animate(1, 'Lcl Translation', 'X', frames(key_fps, 0, 2), [[0, 2]])
+        yield anim_scene(name, [null(1, 'Timed')] + rig.objects, [connect(1, 0)] + rig.conns, head=header(time_mode=14, custom_fps=rate))
+    for name, rate in (('anim_fps_nan_fallback', float('nan')), ('anim_fps_inf_fallback', float('inf')), ('anim_fps_overflow_fallback', 2147483648.0)):
+        yield anim_scene(name, [null(1, 'Timed')], [connect(1, 0)], head=header(time_mode=14, custom_fps=rate))
+
+    # Invalid time repair subtracts float32 values before multiplication by a double factor. Cancellation
+    # makes this observable at the repaired last key: 8 rather than 9.25.
+    rig = Rig(200, 201, 300)
+    rig.animate(1, 'Lcl Translation', 'X', f24(0, 48, 24, 24), [[100000000, 9.25, 2.333333, 9.87654]])
+    yield anim_scene('anim_invalid_cancellation', [null(1, 'A')] + rig.objects, [connect(1, 0)] + rig.conns)
+
     # ---- an unsorted curve (blen_read_invalid_animation_curve), a curve with a repeated time, keys on fractional frames
     rig = Rig(200, 201, 300)
     rig.animate(1, 'Lcl Translation', 'X', [f24(0, 48, 24, 24)], [[0, 4, 2, 9]])

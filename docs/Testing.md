@@ -284,7 +284,7 @@ Quiet normal mapping probes suppress ordinary unsupported-mapping notes, while f
 assertions still decline the file, as Blender does; two fixtures and tests hold that distinction.
 
 Sub-step 6d (2026-11-02) adds the animation: `editor/FbxActions.cs` ports the importer's animation block (the frame rate
-from TimeMode, the ktime from the version and a 1004 header's TCDefinition; stacks, layers, curve nodes and curves through
+from TimeMode with RenderSettings RNA clamps on fps and fps_base, the ktime from the version and a 1004 header's TCDefinition; stacks, layers, curve nodes and curves through
 their links, the first curve per channel; per animated object or bone one action named "<object>|<stack>" or with the
 layer, the first assigned; each transformation curve read - strictly increasing times, else the invalid-curve path -, the
 curves' times combined with np.interp in float64 and the static value before a curve's first key, then per time the local
@@ -302,13 +302,13 @@ the parent's tail within similar_values_iter has its head snapped there and its 
 found by the robo1A, whose Blender-exported chain connects) and an unused skin's inverse bind matrices gathered after the
 animations from the scene the sampler left (tree.py get_unused_skins). The drill compares every animation's name and
 order, every channel's node, path and interpolation, every sampler's times and values as bits. The robo1A (an armature of
-31 bones under a keyed empty, 3 actions of 195 channels, its skin unused) and seventeen scenes (objects keyed on every
+31 bones under a keyed empty, 3 actions of 195 channels, its skin unused) and twenty-one scenes (objects keyed on every
 property with curves of different times, a rotation past 180 degrees, a constant channel, a single key, one curve node on
 two models; bones keyed beside a posed one, an empty under a keyed bone, the armature object keyed, meshes under the
 armature keyed - skipped as Blender skips them; two stacks on one armature, two layers in a stack; 30 fps, 29.97 fps, a
 custom rate; a 7700 file under both ktimes; unsorted and fractional keys; a connected chain static and keyed; the armature
-keyed in the stack that sorts last; an unused skin under a keyed empty) are identical; two scenes are named fallbacks (a
-stack without its AnimStack class, a curve without keys). Nineteen planted deviations (the frames not offset by one, the fps not rounded, fps_base ignored, TCDefinition ignored,
+keyed in the stack that sorts last; an unused skin under a keyed empty; low and high custom frame rates and the fps_base clamp; invalid-curve float32 cancellation) are identical; five scenes are named fallbacks (a
+stack without its AnimStack class, a curve without keys, and NaN, infinite or overflowing frame rates). Nineteen planted deviations (the frames not offset by one, the fps not rounded, fps_base ignored, TCDefinition ignored,
 np.interp's left value the first key's, degrees to radians in double for a lone curve, the quaternion's sign never
 flipped, the Euler not made compatible, unsorted times merely sorted, a bone's bind matrix not taken out, the actions
 not sorted by name, a switched armature not reset, every action recomputed without the first fill, a constant channel
@@ -316,7 +316,9 @@ keeping every sample, two equal samples LINEAR, object values not swizzled, a co
 bone connected, an unused skin from frame 0, the rest rule with the rest pose) each failed the comparison - three of them
 only after the scenes grew the shape they bend (a scale key differing from the static value, a bone rotation past 180
 degrees between keys, the bind matrix of a keyed bone), and one first plant (the identity pre-matrix always multiplied)
-was an equivalent mutation and was replaced. 6 test cases hold Blender's answers and its mathutils and NumPy measurements.
+was an equivalent mutation and was replaced. 15 test cases hold Blender's answers and its mathutils and NumPy measurements. Review regressions include the
+float32 subtraction before invalid-curve interpolation (a repaired value of 8 rather than 9.25), RenderSettings RNA
+clamps (fps 1..32767, fps_base 1e-5..1e6), and named declines for frame rates Blender cannot assign.
 
 **Since 2026-10-11 the drills run concurrently, and since 2026-10-29 the source guards run on a lane beside them.**
 The drills are independent (each works in its own temp directory and builds its own exe), so `check.sh` starts them

@@ -118,9 +118,14 @@ public static class FbxActions
         long timeMode = FbxImport.PropEnum(s.GlobalSettings, "TimeMode", -1);
         double realFps = customFps;
         foreach (var (fps, mode) in FrameRates) if (mode == timeMode) { realFps = fps; break; }
-        if (!(realFps > 0.0)) realFps = 25.0;
-        r.Fps = (int)Math.Round(realFps, MidpointRounding.ToEven);   // Python's round()
-        r.FpsBase = (float)(r.Fps / realFps);
+        if (realFps <= 0.0) realFps = 25.0;
+        // Python's round must produce an RNA int before RenderSettings clamps fps to 1..32767.
+        // fps_base is stored as float32, then clamped to its RNA range as well.
+        double roundedFps = Math.Round(realFps, MidpointRounding.ToEven);
+        if (double.IsNaN(roundedFps) || double.IsInfinity(roundedFps) || roundedFps > int.MaxValue)
+            throw new DeclineException("a frame rate outside Blender's integer range (CustomFrameRate: " + realFps + ")");
+        r.Fps = Math.Max(1, Math.Min(32767, (int)roundedFps));
+        r.FpsBase = Math.Max(0.00001f, Math.Min(1000000f, (float)(r.Fps / realFps)));
         // ---- ktime
         long ktime = s.Version >= 8000 ? KtimeV8 : KtimeV7;
         var header = s.Document.First("FBXHeaderExtension");
@@ -385,7 +390,9 @@ public static class FbxActions
             double prevTime = keyTimes[At(prev)], prevValue = keyValues[At(prev)];
             double ifacA = (double)(sorted[s] - (long)prevTime), ifacB = (double)(indexedTimes[s] - (long)prevTime);
             double ifac = ifacA / ifacB;   // a zero divides to inf or nan as NumPy lets it
-            interpolated[s] = (indexedValues[s] - prevValue) * ifac + prevValue;
+            // NumPy subtracts two float32 arrays before promotion by the float64 factor.
+            float delta = (float)((float)indexedValues[s] - (float)prevValue);
+            interpolated[s] = (double)delta * ifac + prevValue;
         }
         var t = new List<double>(); var v = new List<float>();
         for (int s = 0; s < n; s++) if (indexedTimes[s] >= sorted[s]) { t.Add(sorted[s]); v.Add((float)interpolated[s]); }

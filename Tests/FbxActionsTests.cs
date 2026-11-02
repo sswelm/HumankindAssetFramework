@@ -327,4 +327,43 @@ public class FbxActionsTests
         Assert.Equal(49, Sp(m.Animations[0], m.Animations[0].Channels[0]).KeyCount);
         Assert.Equal(new[] { "00000000", "00000000", "80000000", "3a5a740d", "3baa4974", "80000000", "3ada740e", "00000000" }, FBs(Sp(m.Animations[0], m.Animations[0].Channels[0]).Values.Take(8)));
     }
+    [Fact]
+    public void Invalid_curve_repair_rounds_the_value_difference_before_interpolation()
+    {
+        var rig = new Rig(200, 201, 300);
+        rig.Animate(1, "Lcl Translation", "X", Frames(24, 0, 48, 24, 24), new[] { new[] { 100000000f, 9.25f, 2.333333f, 9.87654f } });
+        var s = Scene(new[] { Null(1, "A") }.Concat(rig.Objects), new[] { C(1, 0) }.Concat(rig.Conns));
+        Assert.Null(s.Fallback);
+        // Blender's invalid-curve repair subtracts float32 arrays. The last value is 8, not 9.25.
+        Assert.Equal(0.08f, s.Actions[0].Object.Loc[0].Values.Last());
+        var m = FbxModel.Build(s, out string why); Assert.Null(why);
+        var a = m.Animations[0];
+        Assert.Equal("3da3d70a", FB(Sp(a, Ch(a, "A", "translation", m)).Values[48 * 3]));
+    }
+
+    [Theory]
+    [InlineData(0.25, 1, 4.0)]
+    [InlineData(100000.0, 32767, 0.32767)]
+    [InlineData(0.0000000001, 1, 1000000.0)]
+    [InlineData(2147483647.0, 32767, 0.0000152583234083179)]
+    public void Custom_frame_rates_obey_Blenders_RNA_clamps(double rate, int fps, double fpsBase)
+    {
+        var rig = new Rig(200, 201, 300);
+        rig.Animate(1, "Lcl Translation", "X", Frames(1, 0, 2), new[] { new[] { 0f, 2f } });
+        var s = Scene(new[] { Null(1, "A") }.Concat(rig.Objects), new[] { C(1, 0) }.Concat(rig.Conns), Header(14, rate));
+        Assert.Null(s.Fallback);
+        Assert.Equal(fps, s.Fps); Assert.Equal(FB((float)fpsBase), FB(s.FpsBase));
+    }
+
+    [Theory]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    [InlineData(2147483648.0)]
+    public void Frame_rates_Blender_cannot_assign_decline_the_file(double rate)
+    {
+        var s = Scene(new[] { Null(1, "A") }, new[] { C(1, 0) }, Header(14, rate));
+        Assert.Contains("frame rate outside Blender's integer range", s.Fallback);
+        Assert.Null(FbxModel.Build(s, out string why)); Assert.Equal(s.Fallback, why);
+    }
+
 }
