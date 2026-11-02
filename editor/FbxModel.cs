@@ -51,9 +51,11 @@ public static class FbxModel
         var boneObjects = new Dictionary<FbxArmature.Bone, List<FbxImport.Obj>>();
         foreach (var arm in s.Armatures) foreach (var b in arm.Bones) { var l = new List<FbxImport.Obj>(b.ObjectChildren); BlenderExportTree.StableSort(l, (x, y) => BlenderExportTree.StrCaseCmp(x.Name, y.Name)); boneObjects[b] = l; }
         var roots = s.Objects.Where(ob => ob.Parent == null).ToList();
-        // ---- the exporter's matrix_world per node (column-major): an object's own; a joint's armature @ matrix_local @ basis;
-        // an object under a bone moved to rest @ pose.inverted_safe() @ world (the rest-position rule) with its descendants
+        // ---- the exporter's matrix_world per node (column-major): an object's own (the scene at frame 0); a joint's armature @
+        // matrix_local @ basis; an object under a bone moved to rest @ pose.inverted_safe() @ world (the rest-position rule, the
+        // pose the frame-0 one) with its descendants
         var jointWorld = new Dictionary<FbxArmature.Bone, float[]>();
+        var poseWorld = new Dictionary<FbxArmature.Bone, float[]>();
         var armatureOf = new Dictionary<FbxArmature.Bone, FbxArmature.Armature>();
         foreach (var arm in s.Armatures)
         {
@@ -61,6 +63,8 @@ public static class FbxModel
             foreach (var b in arm.Bones)
             {
                 jointWorld[b] = VehicleProbe.ToColumnMajor(FbxImport.MatMul(FbxImport.MatMul(armRow, VehicleProbe.ToRowMajor(b.MatrixLocal)), AxisBasisChange));
+                var pose = s.ExportState != null && s.ExportState.Pose.TryGetValue(b, out var pm) ? pm : b.MatrixLocal;
+                poseWorld[b] = VehicleProbe.ToColumnMajor(FbxImport.MatMul(FbxImport.MatMul(armRow, VehicleProbe.ToRowMajor(pose)), AxisBasisChange));
                 armatureOf[b] = arm;
             }
         }
@@ -71,9 +75,9 @@ public static class FbxModel
             float[] result;
             if (ob.ParentBone != null)
             {
-                // _pose == _rest here (a posed bone with an object child is declined by the import): rest @ (pose.inverted_safe() @ world)
+                // rest @ (pose.inverted_safe() @ world): the pose the scene's at frame 0 (tree.py, export_rest_position_armature)
                 var rest = VehicleProbe.ToRowMajor(jointWorld[ob.ParentBone]);
-                var delta = FbxImport.MatMul(VehicleProbe.InvertedSafe(rest), VehicleProbe.ToRowMajor(ob.World));
+                var delta = FbxImport.MatMul(VehicleProbe.InvertedSafe(VehicleProbe.ToRowMajor(poseWorld[ob.ParentBone])), VehicleProbe.ToRowMajor(ob.World));
                 result = VehicleProbe.ToColumnMajor(FbxImport.MatMul(rest, delta));
             }
             else if (ob.Parent != null && Moved(ob.Parent))
@@ -137,12 +141,15 @@ public static class FbxModel
             int idx = o.Nodes.Count; o.Nodes.Add(node); neutralIndex[arm] = idx;
             return idx;
         }
-        int EnsureSkin(FbxArmature.Armature arm)
+        int EnsureSkin(FbxArmature.Armature arm) => EnsureSkinWith(arm, arm.Obj.World);
+        /// <summary>`armatureWorld`: the armature's matrix_world the skin is gathered with - at frame 0 for a skin a mesh uses, the
+        /// state the sampler left for an unused one (gathered after the animations).</summary>
+        int EnsureSkinWith(FbxArmature.Armature arm, float[] armatureWorld)
         {
             if (skinIndex.TryGetValue(arm, out int done)) return done;
             var skin = new HafSkin { Name = arm.Obj.Name, Skeleton = -1 };
             var joints = new List<int>(); var ibm = new List<double>();
-            var armRow = VehicleProbe.ToRowMajor(arm.Obj.World);
+            var armRow = VehicleProbe.ToRowMajor(armatureWorld);
             foreach (var b in arm.Bones)
             {
                 joints.Add(VisitJoint(b));
@@ -161,8 +168,10 @@ public static class FbxModel
         }
         // ---- objects (the exporter's traversal: children, mesh, skin, then the node)
         var indexOf = new Dictionary<FbxImport.Obj, int>();
+        var visitOrder = new List<FbxImport.Obj>();   // the vtree's object order (preorder)
         int Visit(FbxImport.Obj ob)
         {
+            visitOrder.Add(ob);
             var node = new HafNode { Name = ob.Name };
             foreach (var c in children[ob]) node.Children.Add(Visit(c));
             if (ob.Kind == FbxImport.ObjectKind.Armature) foreach (var b in ob.Armature.Roots) node.Children.Add(VisitJoint(b));
@@ -207,9 +216,14 @@ public static class FbxModel
         var scene = new HafScene { Name = "Scene" };
         foreach (var root in roots) scene.Nodes.Add(Visit(root));
         o.Scenes.Add(scene); o.Scene = 0;
-        // unused skins: armatures no written mesh is skinned to, in creation order
-        foreach (var arm in s.Armatures) if (!skinUsed.Contains(arm) && arm.Bones.Count > 0) EnsureSkin(arm);
         if (materialWhy != null) { why = materialWhy; return null; }
+        // ---- animations (6d): the actions sampled as the exporter samples them
+        var animations = FbxActions.Export(s, visitOrder, indexOf, jointIndex, out string animationWhy, out var finalState);
+        if (animations == null) { why = animationWhy; return null; }
+        o.Animations.AddRange(animations);
+        // unused skins: armatures no written mesh is skinned to, in creation order, gathered after the animations from the
+        // scene the sampler left (tree.py get_unused_skins)
+        foreach (var arm in s.Armatures) if (!skinUsed.Contains(arm) && arm.Bones.Count > 0) EnsureSkinWith(arm, finalState != null ? finalState.World[arm.Obj] : arm.Obj.World);
         composed = writer.ComposedImages;
         return o;
     }

@@ -10,6 +10,20 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE NATIVE FBX READER, STEP 6d: ANIMATION, HELD TO BLENDER (2026-11-02).** `editor/FbxActions.cs` ports the FBX
+  importer's animation block (frame rate and ktime, stacks, layers, curve nodes and curves, one action per animated object
+  or bone with the first assigned, the curves combined by np.interp and turned frame by frame into Blender's location,
+  rotation - a compatible XYZ Euler for an object, a sign-continuous quaternion for a bone - and scale keys) and the glTF
+  exporter's sampling of them (the scene at frame 0 for every static transform, the actions sorted by name, a lone
+  armature taking every bone action, the sampling cache's first fill and recomputes, reset_bone_matrix at a switch, the
+  constant-channel keep, STEP for two equal samples, the Y-up swizzle, the times over fps * fps_base). On the way: the
+  importer connects a child bone whose head sits on its parent's tail (use_connect: the head snapped, the location
+  ignored in the pose) - the robo1A's Blender-made chain is one -, an unused skin's inverse bind matrices are gathered
+  after the animations from the scene the sampler left, and the posed-bone case 6c left by name now compares (the pose is
+  evaluated). The model drill holds every animation to Blender: the robo1A (31 bones, 3 actions, 195 channels) and
+  twenty-one scenes identical, five named fallbacks. Review fixes preserve float32 subtraction in invalid-curve repair
+  and Blender's RNA clamps on fps and fps_base, and decline frame rates Blender cannot assign. Nineteen planted deviations
+  each failed the drill. 15 test cases hold Blender's answers.
 - **THE NATIVE FBX READER, STEP 6c: ARMATURES, BONES, SKINS AND COLOUR LAYERS, HELD TO BLENDER (2026-11-02).**
   `editor/FbxArmature.cs` ports the FBX importer's helper-node passes (find_armatures, find_fake_bones, the bind poses from
   every BindPose and from the clusters, make_bind_pose_local, collect_armature_meshes, build_hierarchy's edit bones from

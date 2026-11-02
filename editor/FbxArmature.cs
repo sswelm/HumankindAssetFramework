@@ -33,17 +33,20 @@ using System.Linq;
 //     translations - the parent's size when there are none), then `bone.matrix = parent_bone_matrix @ bind.normalized()`
 //     (ED_armature_ebone_from_mat4: head = the translation, tail = head + Y column * the length, roll = mat3_vec_to_roll:
 //     vec_roll_to_mat3 of the Y column at roll 0, inverted, times the matrix, to a quaternion (normalize_m3, mat3_to_quat),
-//     the twist about Y - atan2f(q.y, q.w) after making w non-negative); leaving edit mode (armature_finalize_restpose,
-//     VehicleProbe.RestFromEditBones) gives bone.matrix_local; bone_child_matrix = Translation(-tail);
+//     the twist about Y - atan2f(q.y, q.w) after making w non-negative); a child whose head sits on the parent's tail
+//     (similar_values_iter: mathutils' one-step equality, else within 1e-6 of the larger magnitude per component) is
+//     connected - use_connect snaps its head onto the tail, and the pose ignores its location (6d); leaving edit mode
+//     (armature_finalize_restpose, VehicleProbe.RestFromEditBones) gives bone.matrix_local; bone_child_matrix =
+//     Translation(-tail);
 //   * set_pose_matrix: pose_bone.matrix_basis = bind.inverted_safe() @ matrix - the rest export ignores it, except that an
-//     object parented to a posed bone follows the pose (left to Blender by name until the pose evaluation is ported);
+//     object parented to a posed bone follows the pose (FbxActions.Evaluate: BKE_pose_where_is at the exporter's frame 0);
 //   * link: an object under a bone is parented to the armature with parent_type BONE, parentinv the identity, its
 //     pre_matrix = bone_child_matrix @ pre_matrix and its basis get_matrix() again; a skinned mesh gets
 //     matrix_parent_inverse = (global @ armature bind [@ armature geom]).inverted_safe() @ (global @ mesh bind [@ mesh
 //     geom]) @ basis.inverted_safe() and an armature modifier; the bones' clusters make vertex groups named after the
 //     bones, in bone order (depth first), weights set REPLACE and clamped to 0..1 (an index outside the mesh is ignored);
 //   * matrix_world: (parent @ parentinv) @ local (BKE_object_where_is_calc); the parent of a bone child is the armature's
-//     world @ the bone's pose matrix with its TAIL as translation (ob_parbone; pose = rest here).
+//     world @ the bone's pose matrix with its TAIL as translation (ob_parbone) - FbxActions.Evaluate.
 // THE EXPORTER, as modelled: an armature node's children are its objects by name, then its root bones in creation order,
 // then the neutral bone when a skinned mesh needs one; a joint's children are its bone children in creation order, then the
 // objects parented to it by name; a joint's matrix_world is armature.matrix_world @ bone.matrix_local @ the Z-up to Y-up
@@ -68,10 +71,12 @@ public static class FbxArmature
         public float[] Head, Tail; public float Roll;   // the edit bone, armature space
         public float[] BoneMatrixEdit;           // the `bone_matrix` the children are built against (row-major mathutils items)
         public float[] BoneChildMatrix;          // Translation(-tail): the correction for objects parented to this bone (row-major)
+        public float[] Offs;                     // BKE_bone_offset_matrix_get: the bone's matrix in its parent's frame at the parent's tail (column-major; the pose chain)
         public float[] MatrixLocal;              // bone.matrix_local (arm_mat), Blender's M[col][row] = column-major
         public float Length;                     // bone.length
         public float[] PoseBasis;                // pose_bone.matrix_basis (row-major): bind.inverted_safe() @ matrix
         public bool Posed;                       // the pose basis is not the identity
+        public bool Connected;                   // use_connect (build_skeleton child_connect): the head snapped to the parent's tail; the pose ignores its location
         public readonly List<FbxImport.Obj> ObjectChildren = new List<FbxImport.Obj>();   // objects parented to this bone (creation order)
     }
 
@@ -394,8 +399,29 @@ public static class FbxArmature
             bone.Tail = new[] { (float)(head[0] + (float)(vx * len)), (float)(head[1] + (float)(vy * len)), (float)(head[2] + (float)(vz * len)) };
             bone.BoneMatrixEdit = boneMatrix;
             bone.BoneChildMatrix = Translation(-boneTail[0], -boneTail[1], -boneTail[2]);
-            foreach (var c in h.Children) if (c.IsBone) BuildSkeleton(arm, c, bone, boneMatrix, size);
-            // (use_connect is decided here in Blender: it changes no matrix the export reads)
+            foreach (var c in h.Children)
+            {
+                if (!c.IsBone) continue;
+                BuildSkeleton(arm, c, bone, boneMatrix, size);
+                // child_connect: a child whose head is the parent's tail within similar_values_iter is connected - use_connect = True
+                // snaps its head onto the tail (rna_EditBone_connected_check); force_connect_children is off
+                if (SimilarValues(bone.Tail, c.Bone.Head)) { c.Bone.Connected = true; c.Bone.Head = (float[])bone.Tail.Clone(); }
+            }
+        }
+
+        /// <summary>similar_values_iter(v1, v2, e=1e-6): mathutils' == (every component within one float step), else no
+        /// component differing by more than e of the larger magnitude (in Python's doubles).</summary>
+        bool SimilarValues(float[] v1, float[] v2)
+        {
+            bool eq = true;
+            for (int i = 0; i < 3; i++) if (!FbxActions.FloatsAreEqual(v1[i], v2[i], 1)) eq = false;
+            if (eq) return true;
+            for (int i = 0; i < 3; i++)
+            {
+                double a = v1[i], b = v2[i];
+                if (a != b && Math.Abs(a - b) / Math.Max(Math.Abs(a), Math.Abs(b)) > 1e-6) return false;
+            }
+            return true;
         }
 
         void BuildSkeletonChildren(FbxImport.Helper h, FbxImport.Obj armObj)
@@ -428,7 +454,7 @@ public static class FbxArmature
                     head[i] = (float[])b.Head.Clone(); tail[i] = (float[])b.Tail.Clone(); roll[i] = b.Roll;
                     if (b.Parent == null) roots.Add(i);
                 }
-                VehicleProbe.RestFromEditBones(ids, kids, roots, head, tail, roll, (i, parent, armMat, offs, length) => { arm.Bones[i].MatrixLocal = armMat; arm.Bones[i].Length = length; });
+                VehicleProbe.RestFromEditBones(ids, kids, roots, head, tail, roll, (i, parent, armMat, offs, length) => { arm.Bones[i].MatrixLocal = armMat; arm.Bones[i].Length = length; arm.Bones[i].Offs = offs; });
                 // set_pose_matrix: bind.inverted_safe() @ matrix
                 foreach (var b in arm.Bones)
                 {
@@ -544,35 +570,6 @@ public static class FbxArmature
         }
         LinkHierarchy(root);
 
-        // ---- matrix_world: (parent @ parentinv) @ local; a bone child's parent matrix is the armature's world @ the bone's
-        // pose matrix with its tail as translation (the rest here: a posed bone with an object child is left to Blender)
-        var done = new HashSet<FbxImport.Obj>();
-        float[] WorldOf(FbxImport.Obj o)
-        {
-            if (done.Contains(o)) return o.World;
-            var local = FbxImport.ObjectMatrixEuler(o.Loc, o.Eul, o.Size);
-            float[] parentMat = null;
-            if (o.Parent != null)
-            {
-                parentMat = WorldOf(o.Parent);
-                if (o.ParentBone != null)
-                {
-                    var b = o.ParentBone;
-                    if (b.Posed) throw new DeclineException("an object parented to a posed bone '" + b.Name + "' (its bind pose differs from its transform): the pose evaluation is not ported (6d)");
-                    var tmat = (float[])b.MatrixLocal.Clone();   // column-major: col 1 is the Y axis, col 3 the translation
-                    tmat[12] = (float)(tmat[12] + (float)(tmat[4] * b.Length)); tmat[13] = (float)(tmat[13] + (float)(tmat[5] * b.Length)); tmat[14] = (float)(tmat[14] + (float)(tmat[6] * b.Length));
-                    parentMat = VehicleProbe.MulM4(parentMat, tmat);
-                }
-            }
-            if (parentMat == null) o.World = local;
-            else
-            {
-                var pm = o.ParentInverse != null ? VehicleProbe.MulM4(parentMat, VehicleProbe.ToColumnMajor(o.ParentInverse)) : parentMat;
-                o.World = VehicleProbe.MulM4(pm, local);
-            }
-            done.Add(o);
-            return o.World;
-        }
-        foreach (var o in r.Objects) WorldOf(o);
+        // matrix_world: FbxActions.Evaluate (the scene at the exporter's frame 0, the pose evaluated) - FbxImport.Build runs it
     }
 }

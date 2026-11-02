@@ -199,13 +199,18 @@ public class FbxArmatureTests
     }
 
     [Fact]
-    public void An_object_under_a_bone_whose_bind_pose_differs_from_its_transform_is_left_to_blender_by_name()
+    public void An_object_under_a_bone_whose_bind_pose_differs_from_its_transform_hangs_from_the_rest_bone_through_the_pose()
     {
         var objects = new[] { Null(1, "Rig"), Null(3, "Marker", V("Lcl Translation", 1, 0, 0)), Model(2, "Skinned"), Geometry(30, "Grid", GridV, GridF, GridUv), Skin(50),
             Cluster(40, "PivotCluster", Enumerable.Range(0, 12).ToArray(), Enumerable.Repeat(1.0, 12).ToArray(), Translation(0, 0, 0), Translation(0, 0, 1)),
             Limb(10, "Pivot", V("Lcl Translation", 0, 0, 1), V("Lcl Rotation", 0, 0, 30)) };
-        Assert.Null(Build(objects, new[] { C(1, 0), C(2, 1), C(30, 2), C(10, 1), C(3, 10), C(50, 30), C(40, 50), C(10, 40) }, out string why));
-        Assert.Contains("posed bone", why);
+        // since 6d the pose is evaluated (FbxActions.Evaluate): the Marker's transform against the rest joint is rest @ pose.inverted_safe() @ world
+        var m = Build(objects, new[] { C(1, 0), C(2, 1), C(30, 2), C(10, 1), C(3, 10), C(50, 30), C(40, 50), C(10, 40) });
+        Assert.True(m.Nodes.Count == 4);
+        double D(ulong bits) => BitConverter.Int64BitsToDouble(unchecked((long)bits));
+        var marker = m.Nodes[NodeNamed(m, "Marker")];
+        Assert.Equal(new[] { 1.0, D(0xbe718d1760000000), D(0x3cc8000000000000) }, marker.Translation);
+        Assert.Equal(new[] { D(0x3fe6a09e60000000), D(0xbe56a09e40000000), D(0xbe56a09e40000000), D(0x3fe6a09e60000000) }, marker.Rotation);
     }
 
     [Fact]
