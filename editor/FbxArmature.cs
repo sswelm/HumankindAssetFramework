@@ -19,7 +19,7 @@ using System.Linq;
 //     to the helpers; then per bone its Cluster deformers (OO links out of the bone, in file order): the cluster's
 //     TransformLink replaces the bind matrix, Transform (times TransformLink) is the mesh's bind matrix and
 //     TransformAssociateModel the armature's, remembered per mesh object the cluster reaches through its Skin and Geometry
-//     (OO links, both ways as the importer walks them: a cluster, skin or geometry without an outgoing link, or a geometry
+//     (OO links, both ways as the importer walks them: a cluster or geometry without an outgoing link, or a geometry
 //     linked to a non-Model, stops Blender's import - this reader declines the file); make_bind_pose_local turns the
 //     global bind matrices local (parent.inverted_safe() @ bind, a bone without one taking its own matrix);
 //   * collect_armature_meshes: a mesh any cluster of an armature's bones drives is MOVED under the armature (the last of
@@ -167,8 +167,7 @@ public static class FbxArmature
             foreach (var pn in o.Record.All("PoseNode"))
             {
                 var nodeElem = pn.First("Node");
-                if (nodeElem == null || nodeElem.Properties.Count == 0 || !FbxProps.IsNumber(nodeElem.Properties[0])) throw new DeclineException("a PoseNode without a Node id (Blender's importer fails on it)");
-                long id = FbxProps.AsInt(nodeElem.Properties[0]);
+                if (nodeElem == null || nodeElem.Properties.Count == 0 || !(nodeElem.Properties[0] is long id)) throw new DeclineException("a PoseNode without an int64 Node id (Blender's importer asserts on it)");
                 var matrix = Matrix16(pn, "Matrix");
                 if (helpers.TryGetValue(id, out var bone) && matrix != null) bone.BindMatrix = ArrayToMatrix4(matrix);   // the root (id 0) included, as Blender has it
             }
@@ -208,6 +207,8 @@ public static class FbxArmature
                         if (meshLink.Kind != "OO") continue;
                         var geom = Obj(meshLink.DstId);
                         if (geom == null || geom.Class != "Geometry" || geom.SubType != "Mesh") continue;
+                        if (Out(geom.Id, "a skinned geometry").Where(l => l.Kind == "OO" && helpers.ContainsKey(l.DstId)).Select(l => l.DstId).Distinct().Count() > 1)
+                            throw new DeclineException("a shared skinned mesh datablock (its per-object skin state is not modelled)");
                         foreach (var objLink in Out(geom.Id, "a skinned geometry"))
                         {
                             if (objLink.Kind != "OO") continue;
@@ -268,6 +269,9 @@ public static class FbxArmature
                 CollectArmatureMeshes(c);
                 if (c.Meshes == null || c.Meshes.Count == 0) CollectSkeletonMeshes(c, meshes);
             }
+            // A Python set controls creation/name order here. Until that case is modelled, do not return a model
+            // whose first mesh can freeze a skin before a later mesh needs its neutral joint.
+            if (meshes.Count > 1) throw new DeclineException("several skinned meshes moving under one armature (Python set order is not modelled)");
             foreach (var m in meshes.OrderBy(x => x.Order))   // a Python set: the order of iteration is not the insertion order; here every move lands at the END of the armature's children, so only the relative order among several moved meshes could differ (noted)
             {
                 m.Matrix = FbxImport.MatMul(armInv, World(m));

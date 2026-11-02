@@ -275,8 +275,11 @@ adding its weight instead of replacing, a cluster's TransformLink not the bind, 
 and snapped like objects, the unused skin omitted, the root bones reversed, colour bytes truncated, the colour default not
 255) each failed the comparison - three of them only after the scenes grew the shape they bend (a plant no fixture sees is
 a fixture gap, not a pass), and two first plants were equivalent mutations (the exporter clamps weights as mesh.validate()
-does; a material-less slot takes layer 0 with alpha whether named active or not) and were replaced. 6 test cases hold
-Blender's answers.
+does; a material-less slot takes layer 0 with alpha whether named active or not) and were replaced. 13 test cases cover
+Blender's answers and the named reader limits. Six review fixtures also cover ignored ByPolygon colour mappings,
+colour data compacted with removed faces, shared skinned geometry, several meshes moving under one armature and
+int32/double PoseNode identifiers (Blender requires int64). The shared/multiple-mesh limits are enforced in `FbxArmature`,
+before a partially built skin can omit a later mesh's neutral joint; these fixtures require named fallbacks.
 
 **Since 2026-10-11 the drills run concurrently, and since 2026-10-29 the source guards run on a lane beside them.**
 The drills are independent (each works in its own temp directory and builds its own exe), so `check.sh` starts them

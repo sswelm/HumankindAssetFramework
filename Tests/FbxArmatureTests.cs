@@ -250,4 +250,60 @@ public class FbxArmatureTests
         float[] rotY = { c, 0, -s, 0, 1, 0, s, 0, c };
         Assert.Equal(Math.PI / 6, FbxArmature.Mat3VecToRoll(rotY, 0f, 1f, 0f), 5);
     }
+
+    [Theory]
+    [InlineData("Direct")]
+    [InlineData("IndexToDirect")]
+    public void Polygon_mapped_colours_keep_the_polyloop_attributes_default(string reference)
+    {
+        var m = Build(new[] { Model(1, "Mesh"), Geometry(30, "Geo", new double[] { 0, 0, 0, 1, 0, 0, 0, 1, 0 }, new[] { new[] { 0, 1, 2 } },
+            Layer("Color", "Colors", "ByPolygon", reference, new[] { 1.0, 0, 0, 1 }, "Color", reference == "Direct" ? null : new[] { 0 }, "ColorIndex")) }, new[] { C(1, 0), C(30, 1) });
+        Assert.All(m.Meshes[0].Primitives[0].Colors, c => Assert.Equal(1f, c));
+    }
+
+    [Fact]
+    public void Removing_a_face_compacts_every_colour_layer_with_its_corners()
+    {
+        var first = Enumerable.Repeat(new double[] { 1, 0, 0, 1 }, 3).Concat(Enumerable.Repeat(new double[] { 0, 0, 1, 1 }, 3)).SelectMany(c => c).ToArray();
+        var second = Enumerable.Repeat(new double[] { 1, 1, 0, 1 }, 3).Concat(Enumerable.Repeat(new double[] { 0, 1, 0, 1 }, 3)).SelectMany(c => c).ToArray();
+        var m = Build(new[] { Model(1, "Mesh"), Geometry(30, "Geo", new double[] { 0, 0, 0, 1, 0, 0, 0, 1, 0 }, new[] { new[] { 0, 0, 1 }, new[] { 0, 1, 2 } },
+            Layer("Color", "Colors", "ByPolygonVertex", "Direct", first, "Blue"), Layer("Color", "Colors", "ByPolygonVertex", "Direct", second, "Green")) }, new[] { C(1, 0), C(30, 1) });
+        var p = m.Meshes[0].Primitives[0];
+        Assert.Equal(3, p.VertexCount); Assert.Single(p.ColorMore);
+        for (int v = 0; v < p.VertexCount; v++)
+        {
+            Assert.Equal(new[] { 0f, 0f, 1f, 1f }, p.Colors.Skip(4 * v).Take(4));
+            Assert.Equal(new[] { 0f, 1f, 0f, 1f }, p.ColorMore[0].Skip(4 * v).Take(4));
+        }
+    }
+
+    [Theory]
+    [InlineData(true, "shared skinned mesh")]
+    [InlineData(false, "several skinned meshes")]
+    public void Declared_skin_limits_are_enforced_by_the_reader(bool shared, string reason)
+    {
+        double[] v = { 0, 0, 0, 1, 0, 0, 0, 1, 0 }; int[][] f = { new[] { 0, 1, 2 } };
+        var objects = new List<FbxNode> { Null(1, "Rig"), Limb(10, "Bone"), Model(2, "A"), Model(3, "B"), Geometry(30, "Geo", v, f), Skin(50),
+            Cluster(40, "ACluster", new[] { 0, 1, 2 }, new[] { 1.0, 1, 1 }) };
+        var links = new List<FbxNode> { C(1, 0), C(10, 1), C(2, 0), C(3, 0), C(30, 2), C(50, 30), C(40, 50), C(10, 40) };
+        if (shared) links.Add(C(30, 3));
+        else
+        {
+            objects.AddRange(new[] { Geometry(31, "GeoB", v, f), Skin(51), Cluster(41, "BCluster", new[] { 0 }, new[] { 1.0 }) });
+            links.AddRange(new[] { C(31, 3), C(51, 31), C(41, 51), C(10, 41) });
+        }
+        Assert.Null(Build(objects.ToArray(), links.ToArray(), out string why));
+        Assert.Contains(reason, why);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Bind_pose_node_ids_must_be_int64_as_blender_requires(bool real)
+    {
+        var pose = BindPose(60, (10, Translation(0, 0, 0)));
+        pose.First("PoseNode").First("Node").Properties[0] = real ? (object)10.0 : 10;
+        Assert.Null(Build(new[] { Null(1, "Rig"), Limb(10, "Bone"), pose }, new[] { C(1, 0), C(10, 1) }, out string why));
+        Assert.Contains("int64", why);
+    }
 }

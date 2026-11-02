@@ -732,7 +732,7 @@ public static class FbxImport
             if (dataN != null)
             {
                 var data = FbxScene.Reals(dataN, "Colors");
-                var res = MappedLayer(data, indexN != null ? FbxScene.Integers(indexN, "ColorIndex") : null, mapping, reference, 4, nc, "colours '" + name + "' of '" + g.Name + "'", r, m.CornerVerts, true, true, true, false, new double[] { 1, 1, 1, 1 });
+                var res = MappedLayer(data, indexN != null ? FbxScene.Integers(indexN, "ColorIndex") : null, mapping, reference, 4, nc, "colours '" + name + "' of '" + g.Name + "'", r, m.CornerVerts, false, false, true, false, new double[] { 1, 1, 1, 1 });
                 if (res != null) for (int i = 0; i < 4 * nc; i++) bytes[i] = RoundFlToUcharClamp((float)((float)res[i] * 255.0f));
             }
             else r.Notes.Add("colour layer '" + name + "' missing data");
@@ -837,6 +837,7 @@ public static class FbxImport
         // compact
         var newOffsets = new List<int> { 0 }; var newCorners = new List<int>(); var newMat = m.FaceMaterial != null ? new List<int>() : null; var newSharp = new List<bool>();
         var newUv = m.Uv.Select(u => new List<float>()).ToList(); var newNormals = cornerNormals != null ? new List<float>() : null;
+        var newColors = m.Colors.Select(c => new List<byte>()).ToList();
         for (int f = 0; f < nf; f++)
         {
             if (!keep[f]) continue;
@@ -844,6 +845,7 @@ public static class FbxImport
             {
                 newCorners.Add(m.CornerVerts[c]);
                 for (int u = 0; u < m.Uv.Count; u++) { newUv[u].Add(m.Uv[u].uv[2 * c]); newUv[u].Add(m.Uv[u].uv[2 * c + 1]); }
+                for (int l = 0; l < m.Colors.Count; l++) for (int k = 0; k < 4; k++) newColors[l].Add(m.Colors[l].rgba[4 * c + k]);
                 if (newNormals != null) { newNormals.Add(cornerNormals[3 * c]); newNormals.Add(cornerNormals[3 * c + 1]); newNormals.Add(cornerNormals[3 * c + 2]); }
             }
             newOffsets.Add(newCorners.Count);
@@ -851,6 +853,7 @@ public static class FbxImport
         }
         m.CornerVerts = newCorners.ToArray(); m.FaceOffsets = newOffsets.ToArray(); m.FaceMaterial = newMat?.ToArray(); m.SharpFace = newSharp.ToArray();
         for (int u = 0; u < m.Uv.Count; u++) m.Uv[u] = (m.Uv[u].name, newUv[u].ToArray());
+        for (int l = 0; l < m.Colors.Count; l++) m.Colors[l] = (m.Colors[l].name, newColors[l].ToArray());
         keptNormals = newNormals?.ToArray();
         // edges: equal ends, out of range, repeated (either direction)
         keptEdges = new List<(int, int)>(); var keptSharp = edgeSharp != null ? new List<bool>() : null;

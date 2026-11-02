@@ -173,3 +173,24 @@ def fixtures():
     # an AllSame layer that carries an index array: Blender's importer asserts on it (the polyloop readers: UVs and colours alike)
     objects = [model(1, 'Bad'), geometry(30, 'BadGeo', V, F, [layer('Color', 'Colors', 'AllSame', 'IndexToDirect', [0.2, 0.4, 0.6, 0.8], [0], 'ColorIndex', name='same')])]
     yield rig_scene('colour_allsame_index_fallback', objects, [connect(1, 0), connect(30, 1)])
+
+    # A polygon mapping is not supported by Blender's polyloop reader: the colour attributes stay white.
+    v = [0, 0, 0, 1, 0, 0, 0, 1, 0]; faces = [[0, 1, 2]]
+    layers = [layer('Color', 'Colors', 'ByPolygon', 'Direct', [1., 0., 0., 1.], name='direct'),
+              layer('Color', 'Colors', 'ByPolygon', 'IndexToDirect', [0., 1., 0., 1.], [0], 'ColorIndex', name='indexed')]
+    yield rig_scene('colour_polygon_ignored', [model(1, 'Mesh'), geometry(30, 'Geo', v, faces, layers)], [connect(1, 0), connect(30, 1)])
+    # mesh.validate removes the leading face and its corners from every colour attribute, just as from UVs/normals.
+    layers = [layer('Color', 'Colors', 'ByPolygonVertex', 'Direct', [1., 0., 0., 1.] * 3 + [0., 0., 1., 1.] * 3, name='blue'),
+              layer('Color', 'Colors', 'ByPolygonVertex', 'Direct', [1., 1., 0., 1.] * 3 + [0., 1., 0., 1.] * 3, name='green')]
+    yield rig_scene('colour_face_repair', [model(1, 'Mesh'), geometry(30, 'Geo', v, [[0, 0, 1], [0, 1, 2]], layers)], [connect(1, 0), connect(30, 1)])
+    # These are declared reader limits, enforced before the importer builds a misleading or invalid skin.
+    objects = [null(1, 'Rig'), limb(10, 'Bone'), model(2, 'A'), model(3, 'B'), geometry(30, 'Geo', v, faces), skin(50),
+               cluster(40, 'ACluster', [0, 1, 2], [1., 1., 1.])]
+    links = [connect(1, 0), connect(10, 1), connect(2, 0), connect(3, 0), connect(30, 2), connect(50, 30), connect(40, 50), connect(10, 40)]
+    yield rig_scene('skin_shared_datablock_fallback', objects, links + [connect(30, 3)])
+    yield rig_scene('skin_multiple_meshes_fallback', objects + [geometry(31, 'GeoB', v, faces), skin(51), cluster(41, 'BCluster', [0], [1.])],
+                    links + [connect(31, 3), connect(51, 31), connect(41, 51), connect(10, 41)])
+    for kind in ('I', 'D'):
+        pose = obj('Pose', 60, 'BindPose', 'BindPose', [Node('Type', [prop('S', 'BindPose')]),
+            Node('PoseNode', [], [Node('Node', [prop(kind, 10)]), Node('Matrix', [prop('d', mat16(translation(0, 0, 0)))])])])
+        yield rig_scene('pose_node_' + kind + '_fallback', [null(1, 'Rig'), limb(10, 'Bone'), pose], [connect(1, 0), connect(10, 1)])

@@ -18,8 +18,8 @@ static class FbxModelDrill
 {
     static int Main(string[] args)
     {
-        if (args.Length < 2 || args.Length % 2 != 0 || ((args[0] == "--dump" || args[0] == "--probe") && args.Length != 2))
-        { Console.Error.WriteLine("usage: FbxModelDrill <file.fbx> <blender.glb> [...]  |  --dump <file.fbx>  |  --probe <file.fbx>"); return 2; }
+        if (args.Length < 2 || args.Length % 2 != 0 || ((args[0] == "--dump" || args[0] == "--probe" || args[0] == "--probe-bones") && args.Length != 2))
+        { Console.Error.WriteLine("usage: FbxModelDrill <file.fbx> <blender.glb> [...]  |  --dump <file.fbx>  |  --probe <file.fbx>  |  --probe-bones <file.fbx>"); return 2; }
         if (args[0] == "--dump")
         {
             var scene = FbxImport.Read(args[1]);
