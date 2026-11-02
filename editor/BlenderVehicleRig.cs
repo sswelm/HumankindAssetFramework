@@ -390,7 +390,7 @@ public static partial class BlenderVehicleRig
     public static string SourceFallback(Args a)
     {
         string ext = System.IO.Path.GetExtension(a.Input).ToLowerInvariant();
-        return ext == ".glb" || ext == ".gltf" ? null : "a " + ext + " source: Blender's own importer, until the native reader";
+        return HafModelLoader.CanRead(a.Input) ? null : "a " + ext + " source: Blender's own importer";   // .glb/.gltf, and .fbx through the native reader (6e)
     }
 
     public static BlenderRigAnim.Stage1 RunStage1(HafModel m, Args a) => RunStage1(m, a, null);
@@ -433,7 +433,7 @@ public static partial class BlenderVehicleRig
             string path2 = f4[0];
             if (!System.IO.File.Exists(path2)) { s.Logs.Add("VEHICLE ERROR: second model not found: " + path2); s.Exits = true; return s; }
             string ext2 = System.IO.Path.GetExtension(path2).ToLowerInvariant();
-            if (ext2 != ".glb" && ext2 != ".gltf") { s.Fallback = "a second model that is not glTF (" + ext2 + "): Blender's own importer"; return s; }
+            if (!HafModelLoader.CanRead(path2)) { s.Fallback = "a second model that is not glTF or FBX (" + ext2 + "): Blender's own importer"; return s; }
             if (loadSecond == null) { s.Fallback = "a second model (merge2): no loader given"; return s; }
             var m2 = loadSecond(path2);
             var s2 = new BlenderRigAnim.Stage1 { Model = m2 };

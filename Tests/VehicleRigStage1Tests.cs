@@ -136,11 +136,12 @@ public class VehicleRigStage1Tests
     [Fact]
     public void A_source_the_csharp_does_not_read_is_named_before_any_read()
     {
-        var a = BlenderVehicleRig.ParseArgs(Argv(new Dictionary<int, string> { [1] = "D:/m/a.fbx" }));
-        Assert.StartsWith("a .fbx source", BlenderVehicleRig.SourceFallback(a));
+        var a = BlenderVehicleRig.ParseArgs(Argv(new Dictionary<int, string> { [1] = "D:/m/a.obj" }));   // since 6e an .fbx is read (HafModelLoader); .obj and .blend stay Blender's
+        Assert.StartsWith("a .obj source", BlenderVehicleRig.SourceFallback(a));
         Assert.Null(BlenderVehicleRig.SourceFallback(BlenderVehicleRig.ParseArgs(Argv())));
+        Assert.Null(BlenderVehicleRig.SourceFallback(BlenderVehicleRig.ParseArgs(Argv(new Dictionary<int, string> { [1] = "D:/m/a.fbx" }))));
         var s = BlenderVehicleRig.RunStage1(null, a);
-        Assert.StartsWith("a .fbx source", s.Fallback);
+        Assert.StartsWith("a .obj source", s.Fallback);
         var fast = BlenderVehicleRig.RunStage1(null, BlenderVehicleRig.ParseArgs(Argv(new Dictionary<int, string> { [0] = "rigfast" })));
         Assert.StartsWith("the source-skeleton fast path", fast.Fallback);
     }

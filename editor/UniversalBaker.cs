@@ -2028,6 +2028,11 @@ public static class UniversalBaker
                 srcFile = prepped;
             }
             string ext = Path.GetExtension(srcFile).ToLowerInvariant();
+            // THE FBX IN C# (step 6e of the native FBX reader, 2026-11-02): an .fbx read by the native reader - the model Blender's
+            // FBX import and glTF export would write - becomes a GLB and takes the .glb path below; one the reader leaves by name
+            // takes Unity's own FBX importer as before, said in the Console.
+            string fbxGlb = null, fbxLeave = null;
+            bool fbxNative = ext == ".fbx" && FbxInProcessToGlb(srcFile, name, out fbxGlb, out fbxLeave);
             if (ext == ".blend")
             {
                 // .blend isn't a transfer format — convert it to GLB via headless Blender first, then fall through the
@@ -2045,8 +2050,16 @@ public static class UniversalBaker
                 Directory.CreateDirectory(fsDir);
                 if (!ConvertGlb(srcFile, fsDir, name, cfg.convertGrid)) return Fail("GLB conversion failed (see console)");
             }
+            else if (ext == ".fbx" && fbxNative)
+            {
+                Debug.Log("[Factory] " + name + ": FBX read in process (the native reader) and converted like a GLB.");
+                string fsDir = Path.Combine(Application.dataPath, "FactorySource", name);
+                Directory.CreateDirectory(fsDir);
+                if (!ConvertGlb(fbxGlb, fsDir, name, cfg.convertGrid)) return Fail("GLB conversion failed (see console)");
+            }
             else if (ext == ".obj" || ext == ".fbx")
             {
+                if (ext == ".fbx") Debug.Log("[Factory] " + name + ": FBX through Unity's importer because " + fbxLeave + ".");
                 objPath = resDir + "/" + name + ext;
                 string destFull = Path.GetFullPath(Path.Combine(projRoot, objPath));
                 // Skip the copy when the picked file IS the destination (e.g. resource "Hovercraft" + a source already at
@@ -3324,7 +3337,7 @@ public static class UniversalBaker
     {
         useBlender = null; LastPrepSourceTris = -1;
         string ext = Path.GetExtension(src ?? "").ToLowerInvariant();
-        if (ext != ".glb" && ext != ".gltf") { useBlender = "the source is not a .glb/.gltf file"; return false; }
+        if (!HafModelLoader.CanRead(src)) { useBlender = HafModelLoader.NotReadable; return false; }
         if (targetTris <= 0) { useBlender = "no reduce is asked (a strip alone keeps instanced meshes shared in Blender, which the C# prep does not model)"; return false; }
         if (!File.Exists(src)) { useBlender = "the model file is not there"; return false; }   // PrepViaBlender reports it
         var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -3344,7 +3357,8 @@ public static class UniversalBaker
             }
             if (!QuietDialogs) EditorUtility.DisplayProgressBar("Model Factory", "Preparing " + Path.GetFileName(src) + " in process (strip / reduce)...", 0.2f);
             Checkpoint();
-            var model = GlbReader.Read(src);
+            var model = HafModelLoader.Read(src, out string leave);
+            if (model == null) { useBlender = leave; return false; }
             Checkpoint();
             var r = BlenderPrep.Prepare(model, targetTris, strip: substrings ?? "", checkpoint: Checkpoint);
             if (r.Model == null) { useBlender = r.Fallback ?? "the C# prep gave no file"; return false; }
@@ -3411,6 +3425,47 @@ public static class UniversalBaker
     }
 
     // Convert a .blend to GLB via headless Blender + the bundled export script, so the normal GLB path can take over.
+    /// <summary>The native FBX reader's model of `src` written as a GLB under the temp folder (step 6e): true with its path;
+    /// false with the reason it is left - a shape the reader names, or a file it refuses (Unity's importer then).</summary>
+    static bool FbxInProcessToGlb(string src, string name, out string glb, out string leave)
+    {
+        glb = null; leave = null;
+        try
+        {
+            var m = HafModelLoader.Read(src, out leave);
+            if (m == null) return false;
+            glb = Path.Combine(Path.GetTempPath(), name + "_fromfbx.glb");
+            GlbWriter.Write(m, glb);
+            return true;
+        }
+        catch (Exception e) when (e is InvalidDataException || e is NotSupportedException) { leave = "the C# reader cannot handle this input: " + e.Message; return false; }
+        catch (Exception e) { leave = "the native FBX read failed (" + e.GetType().Name + ": " + e.Message + ")"; return false; }
+    }
+
+    /// <summary>Blender's own FBX import and glTF export of `fbx` into `outGlb` (Tools/fbx_export.py, every option at its default):
+    /// the file the native reader's model is held to, the rig-slim row's oracle source for an .fbx entry.</summary>
+    internal static bool ConvertFbxToGlbViaBlender(string fbx, string outGlb)
+    {
+        string script = HafPackageContext.ToolPath("fbx_export.py");
+        if (!File.Exists(script)) { Debug.LogError("[Factory] bundled fbx exporter missing: " + script); return false; }
+        string blender = FindBlender();
+        var psi = new System.Diagnostics.ProcessStartInfo(blender, $"{BakerRules.BlenderScript(script)} -- \"{fbx}\" \"{outGlb}\"")
+        { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        try
+        {
+            if (File.Exists(outGlb)) File.Delete(outGlb);
+            using (var p = System.Diagnostics.Process.Start(psi))
+            {
+                if (!RunBounded(p, ProcTimeoutMs, out string o, out string e))
+                { Debug.LogError($"[Factory] Blender's FBX export timed out (~{ProcTimeoutMs / 1000}s) and was killed."); return false; }
+                if (!string.IsNullOrWhiteSpace(e)) Debug.LogWarning("[blender] " + e.Trim());
+                if (p.ExitCode != 0) { Debug.LogError("[Factory] Blender's FBX export failed (exit " + p.ExitCode + ")\n" + o); return false; }
+            }
+        }
+        catch (Exception e) { Debug.LogError("[Factory] Blender's FBX export could not run: " + e.Message); return false; }
+        return File.Exists(outGlb);
+    }
+
     static bool ConvertBlend(string blend, string outGlb)
     {
         string proj = Directory.GetParent(Application.dataPath).FullName;

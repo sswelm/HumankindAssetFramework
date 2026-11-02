@@ -199,9 +199,9 @@ public class BakeTestRunnerWindow : EditorWindow
 
             // THE RIG SLIM IN C# (2026-10-14, step (g) of the rig_anim port): the Factory's GLB rig route, opt-in per recipe until this
             // row has passed on every animated registry rig; the push gate holds the port to rig_anim.py outside Unity.
-            new TestRow { name = "Does the in-process rig slim match Blender's GLB export? (every animated registry rig with a glTF source, in Unity)", kernels = true, quick = false, on = true, needsBlender = true,
+            new TestRow { name = "Does the in-process rig slim match Blender's GLB export? (every animated registry rig with a glTF or FBX source, in Unity)", kernels = true, quick = false, on = true, needsBlender = true,
                 cost = "the port and Blender's rig_anim_glb.py once per animated registry entry - a minute or two each in Blender",
-                what = "For every animated registry entry with a .glb/.gltf source (a deploying entry's converted rig, from its cache), builds the argv the " +
+                what = "For every animated registry entry with a .glb/.gltf/.fbx source (a deploying entry's converted rig, from its cache; an .fbx is read by the native reader, Blender's side runs on Blender's own GLB export of it), builds the argv the " +
                        "Factory hands both routes (UniversalBaker.RigAnimArgv), slims the rig in process (BlenderRigAnimInProcess, the GLB route) AND with " +
                        "Blender's Tools/rig_anim_glb.py (rig_anim.py cut before its FBX export, then one glTF export), and compares the two written GLBs byte " +
                        "for byte (a difference is read back and named field by field) and the extracted albedo. A shape the port leaves to Blender by name is a " +
@@ -227,7 +227,7 @@ public class BakeTestRunnerWindow : EditorWindow
             // preview FBX files Blender left under Assets/FactorySource/VehicleLab and Unity imported.
             new TestRow { name = "Does the in-process probe preview match the Blender preview? (every recipe with a preview FBX)", kernels = true, quick = true, on = true,
                 cost = "the C# probe on every recipe's source, in memory - seconds to a minute, no Blender",
-                what = "For every saved recipe whose source is a .glb/.gltf and whose Blender preview FBX exists " +
+                what = "For every saved recipe whose source is a .glb/.gltf/.fbx and whose Blender preview FBX exists " +
                        "(Assets/FactorySource/VehicleLab/<source>_probe.fbx, left by the last Blender probe of that source), builds " +
                        "the in-process probe preview for the recipe's inputs - second model, placements, orientation - and sets it " +
                        "beside Unity's import of the FBX part for part by NAME: world bounds centre and size within 1e-3 of the " +

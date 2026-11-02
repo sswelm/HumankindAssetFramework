@@ -4,7 +4,7 @@
 // (Blender's (X, Y, Z) drawn as Unity's (-X, Z, -Y) with the faces rewound - what the FBX exporter and Unity's importer gave
 // the old preview), the FACING of the faces, and that every Unity object the preview makes is destroyed with it. The oracle is
 // already in the project: every source the Lab ever probed through Blender left <source>_probe.fbx under
-// Assets/FactorySource/VehicleLab, imported by Unity's own FBX importer. For every saved recipe whose source is a .glb/.gltf and
+// Assets/FactorySource/VehicleLab, imported by Unity's own FBX importer. For every saved recipe whose source is a .glb/.gltf/.fbx and
 // whose preview FBX exists, the in-process preview is built for the recipe's inputs and set beside the imported FBX part for part
 // by NAME: the world bounds centre and size (tolerance 1e-3 of the model's extent), and the facing - the sign of the sum over the
 // faces of (area-weighted normal) . (face centre - part centre), which a wrong frame or a wrong winding turns (a flat part gives

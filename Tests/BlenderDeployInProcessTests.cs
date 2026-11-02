@@ -70,7 +70,10 @@ public class BlenderDeployInProcessTests : IDisposable
         Assert.False(gone.Written); Assert.False(gone.ScriptExit); Assert.Equal("the model file is not there", gone.UseBlender);
         string fbx = Path.Combine(dir, "model.fbx"); File.WriteAllBytes(fbx, new byte[] { 1, 2, 3 });
         var other = BlenderDeployInProcess.Run(fbx, Path.Combine(dir, "out.glb"), BlenderDeployInProcess.Argv("0", "24", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""));
-        Assert.Equal("the source is not a .glb/.gltf file", other.UseBlender);
+        Assert.StartsWith("the C# reader cannot handle this input: ", other.UseBlender);   // since 6e an .fbx is read: three bytes are not an FBX
+        string obj = Path.Combine(dir, "model.obj"); File.WriteAllBytes(obj, new byte[] { 1, 2, 3 });
+        var notRead = BlenderDeployInProcess.Run(obj, Path.Combine(dir, "out.glb"), BlenderDeployInProcess.Argv("0", "24", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""));
+        Assert.Equal(HafModelLoader.NotReadable, notRead.UseBlender);
         string junk = Path.Combine(dir, "junk.glb"); File.WriteAllBytes(junk, new byte[] { 1, 2, 3, 4 });
         var bad = BlenderDeployInProcess.Run(junk, Path.Combine(dir, "out.glb"), BlenderDeployInProcess.Argv("0", "24", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""));
         Assert.False(bad.Written); Assert.NotNull(bad.UseBlender);

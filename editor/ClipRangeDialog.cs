@@ -113,7 +113,7 @@ public class ClipRangeDialog : EditorWindow
         Repaint();
     }
 
-    static bool IsGltf(string p) => p.EndsWith(".glb", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".gltf", StringComparison.OrdinalIgnoreCase);
+    static bool IsGltf(string p) => HafModelLoader.CanRead(p);   // .glb/.gltf, and .fbx through the native reader (6e)
 
     // THE IN-PROCESS PLAYER (2026-10-03, step 4 of replacing Blender): the model read by GlbReader and built as a live Unity rig
     // (HafModelRig) - the node hierarchy, the skins as SkinnedMeshRenderers, one legacy clip per animation baked at FPS from the
@@ -126,7 +126,8 @@ public class ClipRangeDialog : EditorWindow
         try
         {
             EditorUtility.DisplayProgressBar("Clip range picker", "Reading the model and building its rig in-process…", 0.4f);
-            var m = GlbReader.Read(modelFile);
+            var m = HafModelLoader.Read(modelFile, out string leave);
+            if (m == null) { Debug.Log("[ClipRange] using Blender's inspection FBXs: " + leave); DestroyRig(); return false; }
             if (m.Meshes.Any(x => x.Primitives.Any(p => p.MorphTargets > 0))) { Debug.Log("[ClipRange] using Blender's inspection FBXs: the model has morph targets, which the in-process rig does not carry"); DestroyRig(); return false; }
             if (m.Animations.Count == 0) { Debug.Log("[ClipRange] using Blender's inspection FBXs: the file declares no animation"); DestroyRig(); return false; }
             rig = HafModelRig.Build(m, rigAssets, FPS);

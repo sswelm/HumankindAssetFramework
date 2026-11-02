@@ -320,6 +320,19 @@ was an equivalent mutation and was replaced. 15 test cases hold Blender's answer
 float32 subtraction before invalid-curve interpolation (a repaired value of 8 rather than 9.25), RenderSettings RNA
 clamps (fps 1..32767, fps_base 1e-5..1e6), and named declines for frame rates Blender cannot assign.
 
+Sub-step 6e (2026-11-02) wires the reader in: `editor/HafModelLoader.cs` is the one loader of a model source for every
+in-process port - a `.glb`/`.gltf` through GlbReader, an `.fbx` through FbxImport + FbxModel -, and an `.fbx` the FBX
+reader leaves by name comes back as the port's "use Blender" reason (an expected fallback for the vehicle acceptance:
+`BlenderVehicleRigInProcess.ExpectedFallback`), so the deploy conversion, the rig slim, the Vehicle Lab's probe and
+Generate, the clip range picker, the Model Reader, the Factory's in-process prep and its static bake (the reader's model as
+a GLB through the same conversion as a `.glb`; Unity's FBX importer for a file the reader leaves) read an `.fbx` as they
+read a `.glb`. The Bake Tests rows that hold the ports to Blender take `.fbx` sources: the probe preview row against the
+Blender preview FBX of that source, the rig-slim row with Blender's script run on Blender's own GLB export of the `.fbx`
+(`Tools/fbx_export.py`) - the convention the native model is held to; `rig_anim.py`'s direct FBX import builds a rig of
+another convention, which is why the rig route acceptance row stays on `.glb`/`.gltf` entries. The parity drills keep an
+`.fbx` recipe or registry source LEFT by name until their oracle runs on Blender's own GLB export of it (step 6f). 2 test
+cases hold the loader's routing and the expected-fallback rule.
+
 **Since 2026-10-11 the drills run concurrently, and since 2026-10-29 the source guards run on a lane beside them.**
 The drills are independent (each works in its own temp directory and builds its own exe), so `check.sh` starts them
 together (`run_bg`), each into its own log, and prints the logs in declaration order. Each worker records its elapsed

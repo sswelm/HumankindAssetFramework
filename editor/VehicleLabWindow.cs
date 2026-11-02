@@ -1532,7 +1532,7 @@ public class VehicleLabWindow : EditorWindow
         string prevRel = prevDir + "/" + Path.GetFileNameWithoutExtension(srcFile) + "_probe.fbx";
         string prevFull = Path.Combine(projRoot, prevRel).Replace('\\', '/');
         // THE PROBE IN C# for a .glb/.gltf source (2026-10-03, step 3d of replacing Blender; ProbeInProcess below): the same rows,
-        // in-process, and a preview built from the probe's own parts. FBX/OBJ/.blend sources keep the Blender probe and its FBX.
+        // in-process, and a preview built from the probe's own parts. OBJ/.blend sources keep the Blender probe and its FBX (an .fbx the native reader leaves by name too).
         IEnumerable<string> rowLines; GameObject builtPreview = null; List<UnityEngine.Object> builtObjects = null;
         bool inProcess = CanProbeInProcess;
         List<string> nativeRows = null;
@@ -2658,9 +2658,9 @@ public class VehicleLabWindow : EditorWindow
     // and proberot text this window would hand vehicle_rig.py, parsed as the script parses them), held row for row and bit for
     // bit against Blender's own probe by tools/vehicle_probe_drill.sh, in a fraction of a second instead of 25 s; and the
     // turntable instance is built from the probe's own vertices (VehicleProbePreview) instead of a preview FBX written by
-    // Blender, imported and instantiated. FBX/OBJ/.blend sources - and a second model of those kinds - keep the Blender probe.
+    // Blender, imported and instantiated. OBJ/.blend sources - and a second model of those kinds, or an .fbx the native reader leaves by name - keep the Blender probe.
     // The preview against Unity's import of the Blender preview FBX is a Bake Tests row (VehicleProbePreviewGateTest).
-    static bool IsGltf(string p) => !string.IsNullOrWhiteSpace(p) && (p.Trim().EndsWith(".glb", StringComparison.OrdinalIgnoreCase) || p.Trim().EndsWith(".gltf", StringComparison.OrdinalIgnoreCase));
+    static bool IsGltf(string p) => HafModelLoader.CanRead(p);   // .glb/.gltf, and .fbx through the native reader (6e)
     bool CanProbeInProcess => IsGltf(srcFile) && (string.IsNullOrWhiteSpace(srcFile2) || IsGltf(srcFile2));
 
     /// <summary>The probe's input from this window's state: the source read, the second model read from the merge2 text, the placed
@@ -2669,9 +2669,9 @@ public class VehicleLabWindow : EditorWindow
     internal bool BuildProbeInput(out VehicleProbe.Input input, out string error)
     {
         error = null;
-        input = new VehicleProbe.Input { Model = GlbReader.Read(srcFile) };
+        input = new VehicleProbe.Input { Model = HafModelLoader.ReadOrThrow(srcFile) };   // an .fbx the reader leaves by name throws: the probe takes Blender
         string merge2 = Merge2Text();
-        if (merge2 != null && !input.SetSecond(merge2, GlbReader.Read, out error)) return false;
+        if (merge2 != null && !input.SetSecond(merge2, HafModelLoader.ReadOrThrow, out error)) return false;
         input.AddPlacementLines(parts.Where(IsPlaced).Select(x => VehicleLabRules.PartPlacementLine(x.name, x.offset.x, x.offset.y, x.offset.z, x.scale.x, x.scale.y, x.scale.z)));
         string rot = ProbeRotText();
         if (rot != null) input.SetProbeRotation(rot);
@@ -2713,7 +2713,7 @@ public class VehicleLabWindow : EditorWindow
             // The C# reader deliberately refuses extensions it cannot interpret (e.g. Draco). Blender can still
             // import those glTFs; choosing the new fast path must not remove the old format support.
             if (e is InvalidDataException || e is NotSupportedException)
-            { useBlender = true; Debug.Log("[VehicleLab] probe: using Blender because the C# reader cannot handle this input: " + e.Message); }
+            { useBlender = true; Debug.Log("[VehicleLab] probe: using Blender because " + (HafModelLoader.IsNamedFbxLeave(e.Message) ? e.Message : "the C# reader cannot handle this input: " + e.Message)); }
             else
             { status = "Probe failed: " + e.Message; Debug.LogError("[VehicleLab] probe (C#, in-process) failed on " + srcFile + "\n" + e); }
             if (preview != null) { DestroyImmediate(preview); preview = null; }
@@ -2736,7 +2736,7 @@ public class VehicleLabWindow : EditorWindow
             w.headless = true;
             w.LoadRecipeFromPath(recipePath);
             if (!w.recipeReadThisSession) { error = w.status; return false; }
-            if (!w.CanProbeInProcess) { error = "an FBX/OBJ/.blend source or second model: Blender's probe, not this one"; return false; }
+            if (!w.CanProbeInProcess) { error = "an OBJ/.blend source or second model: Blender's probe, not this one"; return false; }
             if (!w.BuildProbeInput(out var input, out error)) return false;
             string fallback = input.InProcessFallbackReason();
             if (fallback != null) { error = "the Lab would use Blender for this recipe: " + fallback; return false; }

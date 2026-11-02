@@ -619,9 +619,11 @@ set up. Blender is auto-detected under Program Files; a winget/Steam/portable in
 | *Do the C# ports still match Blender?* (the nine parity drills) | **Yes** | SKIP — the push gate no longer runs these (2026-10-30); off by default, about twenty minutes, holds the gate lock; it needs Git's bash and the package as the repository's editor/ folder |
 
 The same boundary applies to **baking itself**: a static model at `targetTris 0` with no strip-parts — including the
-whole projectile path — needs **no Blender at all**, from `.glb`, `.gltf`, or `.obj`. Tri-reduction, part-stripping,
-`.fbx`/`.blend` import, and every animated path shell out to Blender and will tell you *before* the bake if it is
-missing.
+whole projectile path — needs **no Blender at all**, from `.glb`, `.gltf`, `.obj` or `.fbx` (since 2026-11-02 an `.fbx` is
+read by the native FBX reader - the model Blender's own FBX import and glTF export would write - and takes the GLB path;
+one the reader leaves by name, said in the Console, takes Unity's FBX importer as before). Tri-reduction and
+part-stripping of an `.obj`, `.blend` import, an `.fbx` the native reader leaves by name, and every animated path the
+in-process ports leave by name shell out to Blender and will tell you *before* the bake if it is missing.
 
 The guards, in pyramid order:
 
