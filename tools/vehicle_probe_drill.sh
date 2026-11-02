@@ -147,16 +147,7 @@ fi
 SAMPLE_ALL=("${SAMPLE[@]}")
 awk -F'\t' '$1 == "LEFT" { print $2 }' "$TMPD/csharp.txt" > "$TMPD/left_keys.txt"
 printf '%s\n' "${SAMPLE[@]}" > "$TMPD/sample_in.txt"
-python - "$TMPD/sample_in.txt" "$WTMP/jobs_sample.json" "$TMPD/fbx_needed.txt" <<'PY'
-import json, sys
-seen = []
-for p in [l for l in open(sys.argv[1], encoding="utf-8").read().split("\n") if l]:
-    if p.lower().endswith(".fbx") and p not in seen: seen.append(p)
-for j in json.load(open(sys.argv[2], encoding="utf-8")):
-    for p in [j["file"]] + ([j["merge2"].split("|")[0]] if j.get("merge2") else []):
-        if p.lower().endswith(".fbx") and p not in seen: seen.append(p)
-open(sys.argv[3], "w", encoding="utf-8", newline="\n").write("".join(p + "\n" for p in seen))
-PY
+python "$ROOT/tools/vehicle-probe-drill/oracle_inputs.py" plan "$TMPD/sample_in.txt" "$WTMP/jobs_sample.json" "$TMPD/left_keys.txt" "$TMPD/sample_out.txt" "$TMPD/fbx_needed.txt" || { echo "FAIL — vehicle probe drill: cannot plan FBX oracle inputs"; exit 1; }
 N_FBX=0; : > "$TMPD/fbxglb.txt"
 while IFS= read -r f; do
   [ -n "$f" ] || continue
@@ -164,25 +155,7 @@ while IFS= read -r f; do
   [ "$rc" -eq 0 ] || { oracle_check; echo "FAIL — vehicle probe drill: Blender could not export $f as a GLB (exit $rc)"; exit 1; }
   printf '%s\t%s\n' "$f" "$glb" >> "$TMPD/fbxglb.txt"; N_FBX=$((N_FBX + 1))
 done < "$TMPD/fbx_needed.txt"
-python - "$TMPD/sample_in.txt" "$WTMP/jobs_sample.json" "$TMPD/left_keys.txt" "$TMPD/fbxglb.txt" "$TMPD/sample_out.txt" <<'PY'
-import json, sys
-left = set(l for l in open(sys.argv[3], encoding="utf-8").read().split("\n") if l)
-glb = dict(l.split("\t") for l in open(sys.argv[4], encoding="utf-8").read().split("\n") if "\t" in l)
-key = lambda p: p.replace("\\", "/").lower()
-files = []; jobs = []
-for p in [l for l in open(sys.argv[1], encoding="utf-8").read().split("\n") if l]:
-    if key(p) in left: continue
-    if p.lower().endswith(".fbx"): jobs.append({"key": key(p), "file": glb[p]})
-    else: files.append(p)
-for j in json.load(open(sys.argv[2], encoding="utf-8")):
-    if j["key"] in left: continue
-    j["file"] = glb.get(j["file"], j["file"])
-    if j.get("merge2"):
-        f = j["merge2"].split("|"); f[0] = glb.get(f[0], f[0]); j["merge2"] = "|".join(f)
-    jobs.append(j)
-json.dump(jobs, open(sys.argv[2], "w", encoding="utf-8"))
-open(sys.argv[5], "w", encoding="utf-8", newline="\n").write("".join(p + "\n" for p in files))
-PY
+python "$ROOT/tools/vehicle-probe-drill/oracle_inputs.py" apply "$TMPD/sample_out.txt" "$WTMP/jobs_sample.json" "$TMPD/fbxglb.txt" || { echo "FAIL — vehicle probe drill: cannot map FBX oracle inputs"; exit 1; }
 mapfile -t SAMPLE < "$TMPD/sample_out.txt"
 [ "$N_FBX" -eq 0 ] || echo "NOTE — vehicle probe drill: $N_FBX .fbx source(s) read by the FBX reader here, Blender's probe on Blender's own GLB export of each (step 6f)"
 t0=$(date +%s)

@@ -327,6 +327,24 @@ class OracleStoreTests(unittest.TestCase):
         self.assertEqual(result.returncode, 99, result.stdout + result.stderr)
         self.assertIn("external.png", result.stdout)
 
+    def test_fbx_external_texture_changes_and_new_recursive_matches_invalidate_records(self):
+        sys.path.insert(0, str(ROOT / "tools" / "fbx-drill"))
+        from fbx_fixtures import Node, prop, write_fbx
+        for nested in (False, True):
+            with self.subTest(nested=nested):
+                a = Run(self.tmp, "fbx_" + str(nested))
+                source = a.dir / "source.fbx"
+                texture = a.dir / ("nested/external.png" if nested else "external.png")
+                write_fbx(source, 7400, [Node("RelativeFilename", [prop("S", "external.png")])])
+                if not nested:
+                    texture.write_bytes(b"original texture")
+                result = run("store", *self.store_args(a), "--rc", "0", "--", *a.items(), source)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                texture.parent.mkdir(parents=True, exist_ok=True); texture.write_bytes(b"changed texture")
+                result = run("load", *self.store_args(a), "--", *a.items(), source)
+                self.assertEqual(result.returncode, 99, result.stdout + result.stderr)
+                self.assertIn("external.png", result.stdout)
+
     def test_failed_refresh_preserves_the_previous_record(self):
         a = Run(self.tmp, "runA")
         run("store", *self.store_args(a), "--rc", "0", "--", *a.items())
@@ -354,6 +372,30 @@ class OracleShellTests(unittest.TestCase):
         env = isolated_git_env(HAF_ORACLE=mode, HAF_BLENDER_ORACLE=self.store.as_posix(), BLENDER=self.fake.as_posix(), FAKE_RC=rc_env)
         body = ('set -u\nROOT="%s"\nTMPD="%s"\nWTMP="$TMPD"\n. "$ROOT/tools/blender_oracle.sh"\n' % (root.as_posix(), self.tmp.as_posix())) + script
         return subprocess.run([BASH, "-c", body], env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+
+    def test_fbx_export_records_and_restores_its_artifact_and_preserves_failure_code(self):
+        write(self.tmp / "source.fbx", "synthetic input")
+        write(self.fake, '#!/usr/bin/env bash\nout="${!#}"\nif [ "${FAKE_RC:-0}" = 0 ]; then printf "glTF export" > "$out"; fi\nexit ${FAKE_RC:-0}\n')
+        script = 'oracle_init t\nglb=$(oracle_fbx_glb 0 "$TMPD/source.fbx"); rc=$?\nprintf "rc=%s path=%s\\n" "$rc" "$glb"\n'
+        recorded = self.shell("record", script)
+        self.assertIn("rc=0 path=", recorded.stdout, recorded.stdout + recorded.stderr)
+        replayed = self.shell("replay", script, rc_env="7")
+        self.assertIn("rc=0 path=", replayed.stdout, replayed.stdout + replayed.stderr)
+        self.assertEqual(b"glTF export", (self.tmp / "fbxglb_0/source.glb").read_bytes())
+        failed = self.shell("live", script, rc_env="7")
+        self.assertIn("rc=7 path=", failed.stdout, failed.stdout + failed.stderr)
+
+    def test_fbx_export_requires_fresh_nonempty_output_even_on_zero_exit(self):
+        write(self.tmp / "source.fbx", "synthetic input")
+        script = 'oracle_init t\nglb=$(oracle_fbx_glb 0 "$TMPD/source.fbx"); rc=$?\nprintf "rc=%s path=%s\\n" "$rc" "$glb"\n'
+        for prior in (None, b"old GLB", b""):
+            with self.subTest(prior=prior):
+                folder = self.tmp / "fbxglb_0"; folder.mkdir(exist_ok=True)
+                output = folder / "source.glb"
+                if prior is not None: output.write_bytes(prior)
+                result = self.shell("live", script)
+                self.assertIn("rc=1 path=", result.stdout, result.stdout + result.stderr)
+                self.assertFalse(output.exists())
 
     def test_live_runs_the_executable_and_returns_its_code(self):
         r = self.shell("live", 'oracle_init t "the t drill"\noracle_blender a "$TMPD/raw.txt" --key x -- --background one; echo "rc $?"\ncat "$TMPD/raw.txt"\n', rc_env="5")

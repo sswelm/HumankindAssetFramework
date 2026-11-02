@@ -23,7 +23,7 @@ An existing input file is content-keyed. A .txt/.json/.args input is a recursive
 Declared glTF resources are always byte-keyed regardless of extension. --arg values are typed literals, so created output
 files are never mistaken for input dependencies. Network resource URIs cannot be fingerprinted and fail closed.
 """
-import hashlib, json, ntpath, os, re, shutil, struct, sys, tempfile, time
+import hashlib, importlib.util, json, ntpath, os, re, shutil, struct, sys, tempfile, time, zlib
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -167,6 +167,42 @@ def gltf_resources(path):
     return refs
 
 
+
+FBX_PARSER = Path(__file__).resolve().parents[1] / "fbx-drill" / "fbx_nodes.py"
+_FBX_READER = None
+
+
+def fbx_resources(path):
+    """Conservative closure of FBX image paths, including Blender's recursive basename search.
+
+    Track every candidate, not just the current winner: a new matching file can replace a placeholder.
+    Reuse the independent binary reader; the caller fingerprints its code as well.
+    """
+    if Path(path).suffix.lower() != ".fbx": return []
+    global _FBX_READER
+    if _FBX_READER is None:
+        spec = importlib.util.spec_from_file_location("haf_oracle_fbx_nodes", FBX_PARSER)
+        _FBX_READER = importlib.util.module_from_spec(spec); spec.loader.exec_module(_FBX_READER)
+    try:
+        _, records = _FBX_READER.read_records(Path(path).read_bytes())
+    except (ValueError, struct.error, IndexError, UnicodeError, zlib.error):
+        return []   # still record Blender's failure on malformed FBX
+    base = os.path.dirname(os.path.abspath(path)); refs = set(); names = set()
+    for _, name, props in records:
+        if name not in ("RelativeFilename", "FileName", "Filename"): continue
+        for kind, value, *rest in props:
+            if kind != "S": continue
+            raw = value.decode("utf-8", errors="replace").replace("\\", "/")
+            if not raw: continue
+            basename = ntpath.basename(raw); names.add(basename.casefold())
+            refs.add(os.path.normpath(os.path.join(base, raw)))
+            refs.add(os.path.normpath(os.path.join(base, basename)))
+    if names:
+        for directory, _, files in os.walk(base):
+            for name in files:
+                if name.casefold() in names: refs.add(os.path.join(directory, name))
+    return sorted(refs)
+
 def normalised_list(text, is_json, paths):
     if is_json:
         try:
@@ -205,7 +241,8 @@ def describe_items(items, paths, arguments=()):
                             found = as_path(candidate)
                             if found: visit(found)
             elif not asset:
-                for resource in gltf_resources(current):
+                if current.lower().endswith(".fbx"): visit(str(FBX_PARSER))
+                for resource in gltf_resources(current) + fbx_resources(current):
                     if os.path.isfile(resource): visit(resource, asset=True)
                     else: refs[paths.key_text(resource.replace("\\", "/")) + " (external asset)"] = None
             return digest

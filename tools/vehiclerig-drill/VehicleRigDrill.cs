@@ -616,7 +616,9 @@ static class StageDrill
             // an .obj/.blend source: not read, the model declines it by name; an .fbx is read through the FBX reader as the Lab reads it
             // (HafModelLoader.ReadForVehicle, step 6f) - one the vehicle import leaves (skinned, animated, the reader's own limit) is named
             HafModel m = null; string leave = null;
-            if (BlenderVehicleRig.SourceFallback(args) == null) m = HafModelLoader.ReadForVehicle(args.Input, out leave);
+            // Match BlenderVehicleRigInProcess.Run: argument failures and rigfast never import the source.
+            if (args.Problem == null && args.Mode == "rig" && args.PreDie == null && BlenderVehicleRig.SourceFallback(args) == null)
+                m = HafModelLoader.ReadForVehicle(args.Input, out leave);
             try { model = m == null && leave != null ? new BlenderRigAnim.Stage1 { Fallback = leave } : BlenderVehicleRig.RunStage1(m, args, ReadSecond); }
             catch (SecondLeave e) { model = new BlenderRigAnim.Stage1 { Fallback = e.Message }; }
         }
@@ -624,6 +626,8 @@ static class StageDrill
         foreach (var note in model.Notes) Census[note] = (Census.TryGetValue(note, out int c) ? c : 0) + 1;
         if (model.Fallback != null)
         {
+            if (args.PreDie != null && BlenderVehicleRig.SourceFallback(args) == null)
+            { Console.WriteLine($"FAIL {key}: an argument failure was hidden by a source-reader fallback: {model.Fallback}"); return false; }
             Census["LEFT: " + model.Fallback] = (Census.TryGetValue("LEFT: " + model.Fallback, out int c) ? c : 0) + 1;
             // left by NAME: a source the C# does not read (.obj/.blend), an .fbx the vehicle import leaves (HafModelLoader.ReadForVehicle:
             // skinned or animated, or the reader's own limit), the fast path; every other decline is a model that is wrong

@@ -350,8 +350,14 @@ under the recorded oracle like every other Blender run), the convention the nati
 so the comparison judges the port and not Blender's two importers. The shards and the probe's sample carry the converted
 path, the jobs file and the C# side the `.fbx`; `recipe_check.py` judges `.fbx` recipes and notes a left one. Today's
 populations: the Bradley recipe (static, probed and rigged in C#), the Ehrhardt recipe (a skinned FBX: LEFT by name on both
-vehicle drills), the light assault mech's registry entry (skinned and animated: rig_anim's five stages and the export held
-to Blender from the `.fbx`). An `.obj`/`.blend` source stays LEFT by name.
+vehicle drills), the light assault mech's registry entry (skinned and animated: stage 1 compares from FBX, then stage 2
+hits the named shared bone-hung mesh limit; later stages/export are not claimed). An `.obj`/`.blend` source stays LEFT by name.
+
+Review regressions require a fresh nonempty FBX oracle GLB, retain nonzero Blender exit codes, and cover record/replay
+with external FBX image dependencies (including a previously missing recursive basename match). Named-left probe files
+and recipe jobs are removed before conversion; absent conversion mappings fail explicitly. A recipe-specific LEFT is
+not compared against primary-only rows. The vehicle stage drill follows production's pre-import argument failures,
+with a skinned FBX early-failure fixture that must be compared as a failure of arguments rather than left by the reader.
 
 **Since 2026-10-11 the drills run concurrently, and since 2026-10-29 the source guards run on a lane beside them.**
 The drills are independent (each works in its own temp directory and builds its own exe), so `check.sh` starts them

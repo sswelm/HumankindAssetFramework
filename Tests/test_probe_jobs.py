@@ -2,6 +2,8 @@
 model, placements and orientation as VehicleLabWindow hands them to vehicle_rig.py; the in-process probe parses the same
 text), so a recipe is drilled with the characters the Lab would send - a fifth decimal rounded differently would be a
 different input on one side."""
+import contextlib
+import io
 import json
 import os
 import sys
@@ -10,6 +12,8 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools", "vehicle-probe-drill"))
 import probe_jobs as J
+import recipe_check as R
+import oracle_inputs as O
 
 
 class ProbeJobsTests(unittest.TestCase):
@@ -64,6 +68,51 @@ class ProbeJobsTests(unittest.TestCase):
         self.assertEqual("0,6,-45", jobs["rot"]["proberot"])
         self.assertTrue(jobs["merged"]["merge2"].endswith("|0,0,0|0,0,0|1,1,1"))
         self.assertEqual(["P|1,0,0|1,1,1"], jobs["placed"]["parttx"])
+
+
+class RecipeFallbackTests(unittest.TestCase):
+    def test_a_recipe_left_for_its_second_model_is_not_judged_against_primary_only_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rec = os.path.join(tmp, "Assets", "FactorySource", "VehicleLab", "Recipes"); os.makedirs(rec)
+            src = os.path.join(tmp, "primary.glb"); open(src, "wb").close()
+            own = R.key(src) + "#merged"
+            recipe = {"srcFile": src, "srcFile2": "skinned.fbx", "parts": []}
+            with open(os.path.join(rec, "merged.json"), "w") as f: json.dump(recipe, f)
+            rows = os.path.join(tmp, "rows.txt")
+            with open(rows, "w") as f:
+                f.write("ROW\t" + R.key(src) + "\tPART|Hull|3|0,0,0|1,1,1|1||0\n")
+                f.write("LEFT\t" + own + "\tthe FBX vehicle import needs Blender: skinned second model\n")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output): R.main(["recipe_check.py", tmp, rows])
+            self.assertIn("not judged", output.getvalue())
+            self.assertIn("RECIPES 0 judged", output.getvalue())
+            self.assertNotIn("SAME merged.json", output.getvalue())
+
+
+class OracleInputTests(unittest.TestCase):
+    def test_declined_files_and_second_model_jobs_never_request_conversion(self):
+        jobs = [{'key': 'merged', 'file': 'primary.glb', 'merge2': 'bad.fbx|0,0,0|0,0,0|1'},
+                {'key': 'accepted', 'file': 'good.fbx', 'merge2': 'second.fbx|0,0,0|0,0,0|1'}]
+        files, selected, needed = O.select_inputs(['bad.fbx', 'good.fbx'], jobs, {'bad.fbx', 'merged'})
+        self.assertEqual(['good.fbx'], files)
+        self.assertEqual(['accepted'], [j['key'] for j in selected])
+        self.assertEqual(['good.fbx', 'second.fbx'], needed)
+
+    def test_rewrites_only_oracle_paths_preserving_original_keys_and_merge_transforms(self):
+        jobs = [{'key': 'recipe', 'file': 'A.FBX', 'merge2': 'B.fbx|1,2,3|4,5,6|2,2,2', 'parttx': ['Hull|1,0,0|1,1,1']}]
+        files, output = O.convert_inputs(['A.FBX', 'plain.glb'], jobs, {'a.fbx': 'oracle-a.glb', 'b.fbx': 'oracle-b.glb'})
+        self.assertEqual(['plain.glb'], files)
+        self.assertEqual({'key': 'a.fbx', 'file': 'oracle-a.glb'}, output[0])
+        self.assertEqual('recipe', output[1]['key'])
+        self.assertEqual('oracle-b.glb|1,2,3|4,5,6|2,2,2', output[1]['merge2'])
+        self.assertEqual(jobs[0]['parttx'], output[1]['parttx'])
+        self.assertEqual('A.FBX', jobs[0]['file'])
+
+    def test_missing_or_empty_conversion_mapping_is_an_error(self):
+        for conversions in ({}, {'source.fbx': ''}):
+            with self.subTest(conversions=conversions):
+                with self.assertRaisesRegex(ValueError, 'no FBX oracle GLB'):
+                    O.convert_inputs(['source.fbx'], [], conversions)
 
 
 if __name__ == "__main__":

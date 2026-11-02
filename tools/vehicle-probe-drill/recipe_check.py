@@ -77,6 +77,8 @@ def main(argv):
         if key(src) in left:
             print(f"NOTE {name}: the vehicle import leaves its source to Blender by name - not judged ({left[key(src)]})"); continue
         own_key = key(src) + "#" + os.path.splitext(name)[0]
+        if own_key in left:
+            print(f"NOTE {name}: the vehicle import leaves this recipe's inputs to Blender by name - not judged ({left[own_key]})"); continue
         with_inputs = own_key in rows   # probed with the recipe's second model, placements and orientation
         have = rows.get(own_key) or rows.get(key(src))
         if have is None:

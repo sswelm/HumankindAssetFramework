@@ -131,13 +131,19 @@ oracle_blender() {
 # from one scene convention and the comparison judges the port, not Blender's two importers. Returns Blender's exit code (99:
 # no usable record, for oracle_check); nothing is printed then.
 oracle_fbx_glb() {
-  local index="$1" fbx="$2" stem out rc
+  local index="$1" fbx="$2" stem out rc script input
   stem="$(basename "$fbx")"; stem="${stem%.*}"
-  mkdir -p "$TMPD/fbxglb_$index"
+  mkdir -p "$TMPD/fbxglb_$index" || return 1
   out="$WTMP/fbxglb_$index/$stem.glb"
+  rm -f -- "$TMPD/fbxglb_$index/$stem.glb" || return 1   # a retry must not accept an earlier artifact
+  script=$(cygpath -m "$ROOT/editor/Tools~/fbx_export.py" 2>/dev/null || printf '%s' "$ROOT/editor/Tools~/fbx_export.py")
+  input=$(cygpath -m "$fbx" 2>/dev/null || printf '%s' "$fbx")
   oracle_blender "fbxglb_$index" "$TMPD/fbxglb_${index}_raw.txt" --dir "fbxglb_$index" --key "$ROOT/editor/Tools~/fbx_export.py" "$fbx" \
-    -- --background --python "$(cygpath -m "$ROOT/editor/Tools~/fbx_export.py")" -- "$(cygpath -m "$fbx")" "$out"; rc=$?
-  [ "$rc" -eq 0 ] && [ -s "$TMPD/fbxglb_$index/$stem.glb" ] || return "$rc"
+    -- --background --python "$script" -- "$input" "$out"; rc=$?
+  [ "$rc" -eq 0 ] || return "$rc"
+  if [ ! -s "$TMPD/fbxglb_$index/$stem.glb" ]; then
+    echo "FAIL — FBX oracle export produced no nonempty GLB: $fbx" >&2; return 1
+  fi
   printf '%s\n' "$out"
 }
 
