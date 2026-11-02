@@ -194,3 +194,6 @@ def fixtures():
         pose = obj('Pose', 60, 'BindPose', 'BindPose', [Node('Type', [prop('S', 'BindPose')]),
             Node('PoseNode', [], [Node('Node', [prop(kind, 10)]), Node('Matrix', [prop('d', mat16(translation(0, 0, 0)))])])])
         yield rig_scene('pose_node_' + kind + '_fallback', [null(1, 'Rig'), limb(10, 'Bone'), pose], [connect(1, 0), connect(10, 1)])
+    for mapping, reference in [('ByVertice', 'Direct'), ('AllSame', 'IndexToDirect')]:
+        normal = layer('Normal', 'Normals', mapping, reference, [0., 0., 1.] * 3, [0, 1, 2], 'NormalsIndex')
+        yield rig_scene('normal_' + mapping + '_index_fallback', [model(1, 'Mesh'), geometry(30, 'Geo', v, faces, [normal])], [connect(1, 0), connect(30, 1)])

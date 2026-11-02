@@ -787,15 +787,18 @@ public static class FbxImport
         string what = "normals of '" + g.Name + "'";
         var quiet = new Scene();   // the tries are quiet: only the last failure is reported
         double[] res = MappedLayer(data, index, mapping, reference, 3, nc, what, quiet, m.CornerVerts, false, false, true, false, new double[] { 0, 0, 0 });
+        if (quiet.Fallback != null) { r.DeclineNow(quiet.Fallback); return null; }
         float[] result = new float[3 * nc];
         if (res != null) { for (int i = 0; i < 3 * nc; i++) result[i] = (float)res[i]; return result; }
         res = MappedLayer(data, index, mapping, reference, 3, nf, what, quiet, null, false, true, false, false, new double[] { 0, 0, 0 });
+        if (quiet.Fallback != null) { r.DeclineNow(quiet.Fallback); return null; }
         if (res != null)
         {
             for (int f = 0; f < nf; f++) for (int c = m.FaceOffsets[f]; c < m.FaceOffsets[f + 1]; c++) for (int i = 0; i < 3; i++) result[3 * c + i] = (float)res[3 * f + i];
             return result;
         }
         res = MappedLayer(data, index, mapping, reference, 3, nv, what, quiet, null, true, false, false, false, new double[] { 0, 0, 0 });
+        if (quiet.Fallback != null) { r.DeclineNow(quiet.Fallback); return null; }
         if (res != null)
         {
             for (int c = 0; c < nc; c++) for (int i = 0; i < 3; i++) result[3 * c + i] = (float)res[3 * m.CornerVerts[c] + i];

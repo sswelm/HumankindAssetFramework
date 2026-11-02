@@ -22,11 +22,12 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   object under a posed bone, which waits for the pose evaluation of 6d; a colour layer Blender asserts on). Fourteen planted
   deviations each failed the drill. Found on the way: quat_split_swing_and_twist returns twice the half angle (the roll of
   one Ehrhardt bone differed by a factor two until it did); `vg.add` ignores an index outside the mesh and clamps the weight;
-  Python's `for child in children` over a list a nested armature shortens skips an element. 13 armature/colour test cases
+  Python's `for child in children` over a list a nested armature shortens skips an element. 15 armature/colour test cases
   cover Blender's answers and the reader's named limits. Review fixes: polygon-mapped colours remain at Blender's default,
   removed faces take every colour layer's corner data with them, and PoseNode identifiers require int64. The documented
   shared-skinned-datablock and multiple-mesh armature limits are enforced in the production reader, before it can return
-  an invalid skin missing a later mesh's neutral joint. Six additional live fixtures hold these cases.
+  an invalid skin missing a later mesh's neutral joint. Fatal normal-layer assertions propagate out of the quiet mapping
+  probes instead of being treated as ordinary mapping misses. Eight additional live fixtures hold these cases.
 - **THE NATIVE FBX READER, STEP 6b: MATERIALS, TEXTURES AND IMAGES, HELD TO BLENDER (2026-11-02).** `editor/FbxMaterials.cs`
   reads every Material as Blender 5.1's FBX importer builds its node tree (blen_read_material through
   PrincipledBSDFWrapper: the colour, specular, roughness, alpha, metallic, bump and emission formulas with their clamps into

@@ -306,4 +306,15 @@ public class FbxArmatureTests
         Assert.Null(Build(new[] { Null(1, "Rig"), Limb(10, "Bone"), pose }, new[] { C(1, 0), C(10, 1) }, out string why));
         Assert.Contains("int64", why);
     }
+
+    [Theory]
+    [InlineData("ByVertice", "Direct")]
+    [InlineData("AllSame", "IndexToDirect")]
+    public void Quiet_normal_mapping_probes_still_propagate_fatal_blender_assertions(string mapping, string reference)
+    {
+        var objects = new[] { Model(1, "Mesh"), Geometry(30, "Geo", new double[] { 0, 0, 0, 1, 0, 0, 0, 1, 0 }, new[] { new[] { 0, 1, 2 } },
+            Layer("Normal", "Normals", mapping, reference, new double[] { 0, 0, 1, 0, 0, 1, 0, 0, 1 }, "Normal", new[] { 0, 1, 2 }, "NormalsIndex")) };
+        Assert.Null(Build(objects, new[] { C(1, 0), C(30, 1) }, out string why));
+        Assert.Contains("normals", why); Assert.Contains("asserts", why);
+    }
 }
