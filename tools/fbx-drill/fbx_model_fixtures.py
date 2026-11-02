@@ -211,9 +211,10 @@ if __name__ == '__main__':
     sys.stdout.reconfigure(encoding='utf-8')
     out = Path(sys.argv[1]); out.mkdir(parents=True, exist_ok=True)
     import fbx_material_fixtures   # sub-step 6b: materials, textures, images (and the image files beside the scenes)
+    import fbx_armature_fixtures   # sub-step 6c: armatures, bones, skins, colour layers
     fbx_material_fixtures.write_assets(out)
     import itertools
-    for name, nodes in itertools.chain(fixtures(), fbx_material_fixtures.fixtures()):
+    for name, nodes in itertools.chain(fixtures(), fbx_material_fixtures.fixtures(), fbx_armature_fixtures.fixtures()):
         path = out / (name + '.fbx')
         write_fbx(path, 7400, nodes)
         print(path.as_posix())

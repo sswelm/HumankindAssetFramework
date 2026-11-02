@@ -245,6 +245,44 @@ image's name, MIME type and SHA-256. The comparator requires this evidence; it c
 bytes in an unrelated unused image. A dedicated fixture holds that case, and the drill rejects eleven damaged/missing
 evidence records through the actual compiled comparator before accepting the intact record again.
 
+Sub-step 6c (2026-11-02) adds the armatures, bones, skins and colour layers: `editor/FbxArmature.cs` ports the importer's
+helper-node passes (a Null or Root with bone children becomes the armature, any other parent of bones gets an "Armature"
+inserted, a non-bone with bones below becomes a fake bone with a data helper of its own; bind matrices from every BindPose
+and from the clusters' TransformLink, made local; the meshes an armature's bones drive moved under it; edit bones built
+depth first from `parent_bone_matrix @ bind.normalized()` through ED_armature_ebone_from_mat4 - the head, the tail along the
+matrix's Y column at the mean distance of the bone children with Blender's 0.01 floor, the roll as mat3_vec_to_roll's
+full twist (quat_split_swing_and_twist returns twice the half angle: the one bone of the Ehrhardt that turned on it found
+the first port's omission) - and bone.matrix_local through VehicleProbe.RestFromEditBones; objects under bones parented
+to the armature with the bone's tail correction; a skinned mesh's matrix_parent_inverse from the cluster's and the
+armature's bind matrices under the global matrix; vertex groups per bone in bone order, weights REPLACE and clamped, an
+index outside the mesh ignored - both measured) and the exporter's writing of them (joints after their children, an
+object under a bone against its joint under the rest-position rule, the skin per armature with its inverse bind matrices
+column by column, the neutral bone, unused skins last, skinned positions, normals, joints and weights through
+`BlenderExport.MeshPrimitives` with a Skin). Colour layers read as BYTE_COLOR corner attributes (round_fl_to_uchar_clamp
+of the float times 255; an AllSame layer or a ByVertice Direct layer with an index array stops Blender's import, declined)
+and written through the exporter's colour plan (a forced COLOR_0 beside materials, the active layer with alpha for a
+material-less slot, every layer as normalized shorts). The drill now compares every node's skin, every skin's name, joints
+and inverse bind matrices as bits, every primitive's joints, weights and colour sets. The Ehrhardt (an armature of 14 bones,
+a skin of 51,393 vertices with two bones at most, two colour sets) and five scenes (a Null turned armature with every weight
+shape - five bones on a vertex, a tiny weight, a weight of 1.5, an index past the mesh and a negative one - and a neutral
+bone, an inserted armature with twin and empty bone names and bind poses from a Pose, a cluster and none, objects under
+bones with a fake bone, a bone of 1/128 (under the 0.01 length floor), a second root bone and an unused armature, rotated
+and scaled bones with a PreRotation, colour layers under every mapping beside a material-less slot) are identical; two
+scenes are named fallbacks (an object under a posed bone - the pose evaluation is 6d's -, an AllSame colour layer carrying
+an index). Fourteen planted deviations (the half twist not doubled, the bind matrix not normalized, no minimum bone length,
+the parent's bone size ignored, the mesh not moved under the armature, the parent inverse left identity, a second cluster
+adding its weight instead of replacing, a cluster's TransformLink not the bind, the neutral bone omitted, joints normalized
+and snapped like objects, the unused skin omitted, the root bones reversed, colour bytes truncated, the colour default not
+255) each failed the comparison - three of them only after the scenes grew the shape they bend (a plant no fixture sees is
+a fixture gap, not a pass), and two first plants were equivalent mutations (the exporter clamps weights as mesh.validate()
+does; a material-less slot takes layer 0 with alpha whether named active or not) and were replaced. 15 test cases cover
+Blender's answers and the named reader limits. Eight review fixtures also cover ignored ByPolygon colour mappings,
+colour data compacted with removed faces, shared skinned geometry, several meshes moving under one armature and
+int32/double PoseNode identifiers (Blender requires int64). The shared/multiple-mesh limits are enforced in `FbxArmature`,
+before a partially built skin can omit a later mesh's neutral joint; these fixtures require named fallbacks.
+Quiet normal mapping probes suppress ordinary unsupported-mapping notes, while fatal AllSame/ByVertice index-array
+assertions still decline the file, as Blender does; two fixtures and tests hold that distinction.
+
 **Since 2026-10-11 the drills run concurrently, and since 2026-10-29 the source guards run on a lane beside them.**
 The drills are independent (each works in its own temp directory and builds its own exe), so `check.sh` starts them
 together (`run_bg`), each into its own log, and prints the logs in declaration order. Each worker records its elapsed

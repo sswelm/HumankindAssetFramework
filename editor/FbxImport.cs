@@ -50,7 +50,7 @@ public static class FbxImport
         public HashSet<long> SharpEdges;         // VehicleProbe.SharpEdgeKey pairs, or null
         public List<(string name, float[] uv)> Uv = new List<(string, float[])>();   // per layer, 2 per corner
         public short[] CustomNormal;             // 2 per corner, or null (no normal layer)
-        public int ColorLayers;                  // named, not modelled (6b)
+        public List<(string name, byte[] rgba)> Colors = new List<(string, byte[])>();   // per LayerElementColor: 4 bytes per corner (BYTE_COLOR, the sRGB bytes), the first is the active/render layer
         public List<FbxObject> Materials = new List<FbxObject>();   // the datablock's slots (the first object's)
         public int FaceCount => FaceOffsets.Length - 1;
     }
@@ -67,7 +67,16 @@ public static class FbxImport
         public float[] HelperMatrix, HelperBase, HelperGeom, HelperLclRot;   // the importer's chain, for the drill's probe
         public float[] Loc, Eul, Size;           // the object's stored transform (float32)
         public float[] World;                    // matrix_world, column-major float32 (Blender's m[col][row])
+        public ObjectKind Kind;
+        public FbxArmature.Armature Armature;    // for an armature object: its bones
+        public FbxArmature.Bone ParentBone;      // parented to a bone (parent_type BONE: Parent is that bone's armature object), or null
+        public float[] ParentInverse;            // matrix_parent_inverse (row-major mathutils items), or null for the identity
+        public Obj SkinArmature;                 // a skinned mesh: the armature object whose modifier deforms it, or null
+        public readonly List<string> VertexGroups = new List<string>();   // obj.vertex_groups in creation order (bone names)
+        public List<int>[] DefNr; public List<float>[] DefWeight;          // per vertex: its groups and weights in insertion order, or null
     }
+
+    public enum ObjectKind { Empty, Mesh, Armature }
 
     public sealed class Scene
     {
@@ -76,11 +85,13 @@ public static class FbxImport
         public readonly List<string> Reasons = new List<string>();
         public readonly List<Mesh> Meshes = new List<Mesh>();       // Geometry file order
         public readonly List<Obj> Objects = new List<Obj>();        // creation order (the scene's object order)
+        public readonly List<FbxArmature.Armature> Armatures = new List<FbxArmature.Armature>();   // creation order
         public readonly List<FbxObject> Materials = new List<FbxObject>();   // Material objects, file order
         public readonly Dictionary<FbxObject, string> MaterialName = new Dictionary<FbxObject, string>();
         public float[] GlobalMatrix;             // row-major mathutils items
         public double GlobalScale;
         public readonly List<string> Notes = new List<string>();
+        internal void DeclineNow(string why) { Reasons.Add(why); if (Fallback == null) Fallback = why; }
         public readonly List<FbxObject> Table = new List<FbxObject>();   // fbx_table_nodes: every object in file order, a repeated id in its first place with its last record
         public string BaseDir = "";              // the file's directory: where the importer looks for texture files
         public FbxMaterials.Scene MaterialData;  // the materials' wrapper state and the images (sub-step 6b)
@@ -110,12 +121,8 @@ public static class FbxImport
         var (up, forward) = RightHandAxes(axisUp, axisForward, axisCoord);
         r.GlobalMatrix = MatMul(MatScale((float)r.GlobalScale), AxisConversion(forward, up, "Y", "Z"));
         // ---- what 6a leaves to Blender
-        foreach (var o in s.Objects)
-        {
-            if (o.Class == "Model" && (o.SubType == "LimbNode" || o.SubType == "Limb")) { Decline("bones: a Model of type " + o.SubType + " (an armature; sub-step 6c)"); break; }
-        }
-        if (s.Objects.Exists(o => o.Class == "Deformer")) Decline("deformers: a Skin, Cluster or BlendShape (sub-step 6c)");
-        if (s.Objects.Exists(o => o.Class == "Geometry" && o.SubType == "Shape")) Decline("shape keys (sub-step 6c)");
+        if (s.Objects.Exists(o => o.Class == "Deformer" && o.SubType != "Skin" && o.SubType != "Cluster")) Decline("a BlendShape deformer (shape keys are not modelled)");
+        if (s.Objects.Exists(o => o.Class == "Geometry" && o.SubType == "Shape")) Decline("shape keys (not modelled)");
         // a stack or layer without any curve node makes no action in Blender (blen_read_animations skips empty layers): static
         if (s.Objects.Exists(o => o.Class == "AnimationCurveNode")) Decline("animation (sub-step 6d)");
         if (s.Objects.Exists(o => o.Class == "NodeAttribute" && (o.SubType == "Camera" || o.SubType == "Light"))) Decline("a camera or light: its correction matrix and the exporter's filter are not modelled");
@@ -159,7 +166,7 @@ public static class FbxImport
         foreach (var o in table)
         {
             if (o.Class != "Model") continue;
-            var h = new Helper { Model = o, Name = ValidateBlendName(o.Name) };
+            var h = new Helper { Model = o, Name = ValidateBlendName(o.Name), IsBone = o.SubType == "LimbNode" || o.SubType == "Limb" };
             ReadTransform(o.Props, h);
             helpers[o.Id] = h; helperList.Add(h);
         }
@@ -172,32 +179,9 @@ public static class FbxImport
             if (data.Class != "Geometry" && data.Class != "NodeAttribute") continue;
             parent.Data = data;   // bl_data: the Geometry's mesh (or a NodeAttribute: an empty here)
         }
-        // ---- the correction matrices: the root's children take the global matrix (find_correction_matrix with no bones)
-        foreach (var h in root.Children) h.PreMatrix = r.GlobalMatrix;
-        // ---- build_hierarchy: objects depth first from the root, named through the object pool, matrix_basis applied
-        var objectPool = new BlenderNames.NamePool();
-        void Build(Helper h, Obj parentObj)
-        {
-            if (h.Model != null)
-            {
-                var o = new Obj { Model = h.Model, Parent = parentObj, Name = objectPool.Unique(DefaultName(h.Name, "Object")) };
-                if (h.Data != null && meshOf.TryGetValue(h.Data, out var mesh)) o.Mesh = mesh;
-                o.Basis = h.GetMatrix(); o.HelperMatrix = h.Matrix; o.HelperBase = h.MatrixAsParent; o.HelperGeom = h.MatrixGeom; o.HelperLclRot = h.LclRot;
-                ApplyMat4(o);
-                r.Objects.Add(o);
-                if (parentObj != null) parentObj.Children.Add(o);
-                h.Obj = o;
-                foreach (var c in h.Children) Build(c, o);
-            }
-            else foreach (var c in h.Children) Build(c, parentObj);
-        }
-        foreach (var c in root.Children) Build(c, null);
-        // ---- matrix_world: parent @ local (the object's own transform through BKE_object_to_mat4), roots first
-        foreach (var o in r.Objects)
-        {
-            var local = ObjectMatrixEuler(o.Loc, o.Eul, o.Size);
-            o.World = o.Parent != null ? VehicleProbe.MulM4(o.Parent.World, local) : local;
-        }
+        // ---- armatures, bind poses, clusters, the corrections, build_hierarchy, link_hierarchy, matrix_world (FbxArmature)
+        FbxArmature.Build(r, s, table, byId, helpers, helperList, root, meshOf, Decline);
+        if (r.Fallback != null) return r;
         // ---- materials: per mesh object, the Materials connected into its Model (connection order, any kind); the first
         // object fills the datablock's slots, another object with a different list overrides per slot (link = OBJECT)
         foreach (var o in r.Objects)
@@ -252,7 +236,7 @@ public static class FbxImport
 
     /// <summary>bpy.data.<kind>.new(name=""): an EMPTY name takes the ID type's default (BKE_libblock_alloc: "Mesh", "Object",
     /// "Material"), then the pool's numbering.</summary>
-    static string DefaultName(string name, string def) => name.Length == 0 ? def : name;
+    internal static string DefaultName(string name, string def) => name.Length == 0 ? def : name;
 
     /// <summary>validate_blend_names: a name over 63 UTF-8 bytes is cut to 55 bytes + "_" + 7 hex digits of its SHA-1, cut further
     /// until the UTF-8 fits; invalid UTF-8 was already replaced by the document reader.</summary>
@@ -389,14 +373,33 @@ public static class FbxImport
     }
 
     // ---- the helper node (FbxImportHelperNode) -----------------------------------------------------------------------------
-    sealed class Helper
+    internal sealed class Helper
     {
         public FbxObject Model; public FbxObject Data; public string Name = "Unknown";
         public bool IsRoot;
         public Helper Parent; public readonly List<Helper> Children = new List<Helper>();
         public float[] Matrix, MatrixAsParent, MatrixGeom, PreMatrix, PostMatrix, LclRot;
         public Obj Obj;
+        // sub-step 6c (FbxArmature): the importer's helper-node fields for bones and armatures
+        public bool IsBone, IsArmature, HasBoneChildren;
+        public float[] BindMatrix;               // the bind pose (global from the file, local after make_bind_pose_local), row-major
+        public Helper ArmatureHelper;            // for a bone: its armature helper
+        public readonly List<(FbxObject cluster, HashSet<Helper> meshes)> Clusters = new List<(FbxObject, HashSet<Helper>)>();
+        public HashSet<Helper> Meshes;           // for an armature: the mesh helpers its bones drive
+        public readonly Dictionary<Helper, (float[] mesh, float[] armature)> ArmatureSetup = new Dictionary<Helper, (float[], float[])>();
+        public FbxArmature.Bone Bone;
+        public int Order;                        // creation order (a Python set iterates in no known order: this one is used)
+        static int next;
+        public Helper() { Order = next++; }
         public void SetParent(Helper p) { if (Parent != null) Parent.Children.Remove(this); Parent = p; if (p != null) p.Children.Add(this); }
+        /// <summary>get_bind_matrix: pre @ bind @ post (each absent one the identity).</summary>
+        public float[] GetBindMatrix()
+        {
+            var m = BindMatrix ?? Identity4();
+            if (PreMatrix != null) m = MatMul(PreMatrix, m);
+            if (PostMatrix != null) m = MatMul(m, PostMatrix);
+            return m;
+        }
         /// <summary>get_matrix: pre @ matrix @ post (each absent one the identity).</summary>
         public float[] GetMatrix()
         {
@@ -409,7 +412,7 @@ public static class FbxImport
 
     /// <summary>blen_read_object_transform_preprocess + blen_read_object_transform_do: the helper's matrix (base @ geom), the
     /// matrix as parent (base) and the geometric matrix, from the Model's properties with the template behind them.</summary>
-    static void ReadTransform(FbxProps props, Helper h)
+    internal static void ReadTransform(FbxProps props, Helper h)
     {
         var loc = PropVec3(props, "Lcl Translation", 0, 0, 0);
         var rot = PropVec3(props, "Lcl Rotation", 0, 0, 0);
@@ -445,7 +448,7 @@ public static class FbxImport
     }
 
     // ---- obj.matrix_basis = m (BKE_object_apply_mat4, no parent, no compat) and BKE_object_to_mat4 ----------------------------
-    static void ApplyMat4(Obj o)
+    internal static void ApplyMat4(Obj o)
     {
         var bm = VehicleProbe.ToColumnMajor(o.Basis);
         VehicleProbe.Mat4ToLocRotSize(bm, out var loc, out var rot, out var size);
@@ -582,7 +585,7 @@ public static class FbxImport
         // layers
         m.FaceMaterial = ReadMaterialLayer(rec, nf, r, g);
         ReadUvLayers(rec, m, r, g);
-        if (rec.All("LayerElementColor").Any()) { m.ColorLayers = rec.All("LayerElementColor").Count(); r.Reasons.Add("colour layers in '" + g.Name + "' (not modelled yet)"); if (r.Fallback == null) r.Fallback = r.Reasons[r.Reasons.Count - 1]; }
+        ReadColorLayers(rec, m, r, g);
         m.SharpFace = new bool[nf];
         bool[] edgeSharp = null;
         ReadSmoothing(rec, m, edges, ref edgeSharp, r, g);
@@ -657,12 +660,12 @@ public static class FbxImport
         }
         else if (mapping == "ByVertice" && allowLoop && loopToVert != null)
         {
-            if (reference == "Direct") { Indexed(loopToVert); ok = true; }
+            if (reference == "Direct") { if (index != null) { r.DeclineNow(what + ": a ByVertice Direct layer with an index array (Blender's importer asserts)"); return null; } Indexed(loopToVert); ok = true; }
         }
         else if (mapping == "ByVertice" && allowVertice)
         {
             if (reference == "IndexToDirect") { if (index == null) Direct(); else Indexed(index); ok = true; }
-            else if (reference == "Direct") { Direct(); ok = true; }
+            else if (reference == "Direct") { if (index != null) { r.DeclineNow(what + ": a ByVertice Direct layer with an index array (Blender's importer asserts)"); return null; } Direct(); ok = true; }
         }
         else if (mapping == "ByPolygon" && allowPolygon)
         {
@@ -675,7 +678,7 @@ public static class FbxImport
         }
         else if (mapping == "AllSame")
         {
-            if (reference == "IndexToDirect") { AllSame(); ok = true; }
+            if (reference == "IndexToDirect") { if (index != null) { r.DeclineNow(what + ": an AllSame layer with an index array (Blender's importer asserts)"); return null; } AllSame(); ok = true; }
         }
         if (!ok) { r.Notes.Add(what + ": mapping '" + mapping + "' / reference '" + reference + "' unsupported, layer skipped"); return null; }
         return result;
@@ -712,6 +715,36 @@ public static class FbxImport
             if (res != null) for (int i = 0; i < 2 * nc; i++) uv[i] = (float)res[i];
             m.Uv.Add((name, uv));
         }
+    }
+
+    /// <summary>blen_read_geom_layer_color (colors_type SRGB): every LayerElementColor becomes a BYTE_COLOR corner attribute named
+    /// after the layer, its Colors (4 doubles per item, np.single) through the polyloop mapping into color_srgb - each
+    /// float times 255, rounded (floorf(v + 0.5)) and clamped to a byte; a corner the layer leaves out keeps the attribute's
+    /// default (255, 255, 255, 255); a layer without data stays at that default.</summary>
+    static void ReadColorLayers(FbxNode rec, Mesh m, Scene r, FbxObject g)
+    {
+        int nc = m.CornerVerts.Length;
+        foreach (var layer in rec.All("LayerElementColor"))
+        {
+            var (name, mapping, reference) = LayerInfo(layer);
+            var dataN = ArrayOf(layer, "Colors"); var indexN = ArrayOf(layer, "ColorIndex");
+            var bytes = new byte[4 * nc]; for (int i = 0; i < bytes.Length; i++) bytes[i] = 255;
+            if (dataN != null)
+            {
+                var data = FbxScene.Reals(dataN, "Colors");
+                var res = MappedLayer(data, indexN != null ? FbxScene.Integers(indexN, "ColorIndex") : null, mapping, reference, 4, nc, "colours '" + name + "' of '" + g.Name + "'", r, m.CornerVerts, false, false, true, false, new double[] { 1, 1, 1, 1 });
+                if (res != null) for (int i = 0; i < 4 * nc; i++) bytes[i] = RoundFlToUcharClamp((float)((float)res[i] * 255.0f));
+            }
+            else r.Notes.Add("colour layer '" + name + "' missing data");
+            m.Colors.Add((name, bytes));
+        }
+    }
+
+    /// <summary>round_fl_to_uchar_clamp: floorf(a + 0.5f), clamped to 0..255.</summary>
+    internal static byte RoundFlToUcharClamp(float a)
+    {
+        float v = (float)Math.Floor((float)(a + 0.5f));
+        if (v <= 0f) return 0; if (v >= 255f) return 255; return (byte)v;
     }
 
     static void ReadSmoothing(FbxNode rec, Mesh m, List<(int a, int b)> edges, ref bool[] edgeSharp, Scene r, FbxObject g)
@@ -754,15 +787,18 @@ public static class FbxImport
         string what = "normals of '" + g.Name + "'";
         var quiet = new Scene();   // the tries are quiet: only the last failure is reported
         double[] res = MappedLayer(data, index, mapping, reference, 3, nc, what, quiet, m.CornerVerts, false, false, true, false, new double[] { 0, 0, 0 });
+        if (quiet.Fallback != null) { r.DeclineNow(quiet.Fallback); return null; }
         float[] result = new float[3 * nc];
         if (res != null) { for (int i = 0; i < 3 * nc; i++) result[i] = (float)res[i]; return result; }
         res = MappedLayer(data, index, mapping, reference, 3, nf, what, quiet, null, false, true, false, false, new double[] { 0, 0, 0 });
+        if (quiet.Fallback != null) { r.DeclineNow(quiet.Fallback); return null; }
         if (res != null)
         {
             for (int f = 0; f < nf; f++) for (int c = m.FaceOffsets[f]; c < m.FaceOffsets[f + 1]; c++) for (int i = 0; i < 3; i++) result[3 * c + i] = (float)res[3 * f + i];
             return result;
         }
         res = MappedLayer(data, index, mapping, reference, 3, nv, what, quiet, null, true, false, false, false, new double[] { 0, 0, 0 });
+        if (quiet.Fallback != null) { r.DeclineNow(quiet.Fallback); return null; }
         if (res != null)
         {
             for (int c = 0; c < nc; c++) for (int i = 0; i < 3; i++) result[3 * c + i] = (float)res[3 * m.CornerVerts[c] + i];
@@ -804,6 +840,7 @@ public static class FbxImport
         // compact
         var newOffsets = new List<int> { 0 }; var newCorners = new List<int>(); var newMat = m.FaceMaterial != null ? new List<int>() : null; var newSharp = new List<bool>();
         var newUv = m.Uv.Select(u => new List<float>()).ToList(); var newNormals = cornerNormals != null ? new List<float>() : null;
+        var newColors = m.Colors.Select(c => new List<byte>()).ToList();
         for (int f = 0; f < nf; f++)
         {
             if (!keep[f]) continue;
@@ -811,6 +848,7 @@ public static class FbxImport
             {
                 newCorners.Add(m.CornerVerts[c]);
                 for (int u = 0; u < m.Uv.Count; u++) { newUv[u].Add(m.Uv[u].uv[2 * c]); newUv[u].Add(m.Uv[u].uv[2 * c + 1]); }
+                for (int l = 0; l < m.Colors.Count; l++) for (int k = 0; k < 4; k++) newColors[l].Add(m.Colors[l].rgba[4 * c + k]);
                 if (newNormals != null) { newNormals.Add(cornerNormals[3 * c]); newNormals.Add(cornerNormals[3 * c + 1]); newNormals.Add(cornerNormals[3 * c + 2]); }
             }
             newOffsets.Add(newCorners.Count);
@@ -818,6 +856,7 @@ public static class FbxImport
         }
         m.CornerVerts = newCorners.ToArray(); m.FaceOffsets = newOffsets.ToArray(); m.FaceMaterial = newMat?.ToArray(); m.SharpFace = newSharp.ToArray();
         for (int u = 0; u < m.Uv.Count; u++) m.Uv[u] = (m.Uv[u].name, newUv[u].ToArray());
+        for (int l = 0; l < m.Colors.Count; l++) m.Colors[l] = (m.Colors[l].name, newColors[l].ToArray());
         keptNormals = newNormals?.ToArray();
         // edges: equal ends, out of range, repeated (either direction)
         keptEdges = new List<(int, int)>(); var keptSharp = edgeSharp != null ? new List<bool>() : null;
