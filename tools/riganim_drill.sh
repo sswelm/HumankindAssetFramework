@@ -93,8 +93,12 @@ if [ -n "$PACK" ]; then
   # a registry job the port leaves by NAME at a later stage (the limits BlenderRigAnim.cs's header names) is keyed LEFT: here, as
   # a fixture would be: the drill holds the model to that leave (a model that took the job would be wrong too) and the summary
   # counts it (STAGES ... left N); the Factory's rig slim takes Blender's rig_anim.py for it
-  KNOWN_LEFT="LightAssaultMech"   # stage 2: a bone-hung mesh whose datablock another object shares (one vertex-group list, one weight layer) - found by step 6f on its .fbx
+  KNOWN_LEFT=""   # recipes left by the model by name (a registry recipe the port names; empty since 2026-11-02: the light assault mech's stage 2 shared datablock is modelled)
   for k in $KNOWN_LEFT; do awk -F'\t' -v OFS='\t' -v k="$k" '$1 == "JOB" && $2 == k { $2 = "LEFT:" k } 1' "$TMPD/jobs.txt" > "$TMPD/jobs_k.txt" && mv "$TMPD/jobs_k.txt" "$TMPD/jobs.txt"; done
+  # a registry job equal at all four stages whose EXPORT the exporter port leaves by name (BlenderRigExport's limits) is keyed
+  # EXPORTLEFT: as a fixture would be; the drill holds the model to that leave and counts it (EXPORTS ... left N)
+  KNOWN_EXPORTLEFT="LightAssaultMech"   # the export: an object-level location curve on the armature (the armature node's channels are not modelled) - since 2026-11-02, when its stage 2 shared datablock was ported
+  for k in $KNOWN_EXPORTLEFT; do awk -F'\t' -v OFS='\t' -v k="$k" '$1 == "JOB" && $2 == k { $2 = "EXPORTLEFT:" k } 1' "$TMPD/jobs.txt" > "$TMPD/jobs_k.txt" && mv "$TMPD/jobs_k.txt" "$TMPD/jobs.txt"; done
   n_jobs=$(grep -c "^JOB	" "$TMPD/jobs.txt"); n_left=$(grep -c "^LEFT	" "$TMPD/jobs.txt")
 fi
 n_reg=$n_jobs

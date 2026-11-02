@@ -25,8 +25,10 @@ a vertex group of that name and an Armature modifier already there), an armature
 rotated wrapper with a hung mesh, a rigid mesh with a child, an empty holding a mesh and a lone empty (several empties
 flattened), a dropped parent's child beside a bind (the update re-evaluates it), the armature itself a dropped parent's
 child (re-rooted before the pin), object animation cleared beside a bind, Python Unicode lowercasing for staticParts,
-supplementary-script casing (LEFT: by name), both blocks under the legacy path (nothing happens), and two hung objects
-sharing one mesh (LEFT: by name).
+supplementary-script casing (LEFT: by name), both blocks under the legacy path (nothing happens), and objects sharing one
+mesh datablock (fx_s2_shared_*, ported 2026-11-02 for the light assault mech): two hung from different bones, two from the
+same bone, a hung one beside a plain root object, a hung one beside a static part, and three sharers (two bound, one
+plain) through the fold's copies, the join and the export.
 
 Stage 3 (step (d), fx_s3_*): slices of the rotation-only rig (a plain range, reversed with a speed step, a single frame
 with the held-stance nudge - these three take the rest fold on the conversion path and are deferred there), slices on
@@ -471,13 +473,58 @@ def s2_objanim_hung(out):
 
 
 def s2_shared_hung(out):
-    """Two bone-hung objects sharing one mesh datablock (one vertex group list, one weight layer, two binds): left to
-    Blender by name."""
+    """Two bone-hung objects sharing one mesh datablock, hung from different bones: one vertex group list and one weight
+    layer (vertex groups live on the mesh since Blender 3.0), two binds - after the first, the second object's mesh already
+    holds the first's group at full weight; after both, every vertex carries both groups at 1.0 (the modifier normalizes).
+    Left to Blender by name until 2026-11-02 (the light assault mech's shape)."""
     r = Rig(); arm, j0, j1, sk, m = rigged(r)
     shared = r.mesh("pad", at=(0.0, 0.0, 0.0), size=0.5, material=m)
     r.node("PadA", j0, mesh=shared, translation=[1.0, 0.0, 0.0])
     r.node("PadB", j1, mesh=shared, translation=[-1.0, 0.0, 0.0])
     return r.write(out, "riganim_s2_shared_hung")
+
+
+def s2_shared_same_bone(out):
+    """Two bone-hung objects sharing one mesh, hung from the SAME bone: the second bind finds the first's group on the shared
+    list (the existing-group branch) and rewrites the same weights."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    shared = r.mesh("pad", at=(0.0, 0.0, 0.0), size=0.5, material=m)
+    r.node("PadA", j1, mesh=shared, translation=[1.0, 0.0, 0.0])
+    r.node("PadB", j1, mesh=shared, translation=[-1.0, 0.0, 0.0])
+    return r.write(out, "riganim_s2_shared_same_bone")
+
+
+def s2_shared_plain(out):
+    """A bone-hung object sharing its mesh with a plain root object the bind leaves alone: the root object's rows show the
+    group and the full weights (they are the mesh's) and no Armature modifier (modifiers are the object's); the join then
+    takes its vertices with those weights."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    shared = r.mesh("pad", at=(0.0, 0.0, 0.0), size=0.5, material=m)
+    r.node("PadA", j1, mesh=shared, translation=[1.0, 0.0, 0.0])
+    r.node("PadPlain", None, mesh=shared, translation=[3.0, 0.0, 0.0])
+    return r.write(out, "riganim_s2_shared_plain")
+
+
+def s2_shared_static(out):
+    """A bone-hung object sharing its mesh with a bone-hung STATIC part (kept weightless by staticParts): the static part's
+    rows show the other's group and weights all the same - weightless names its own bind, not its mesh."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    shared = r.mesh("pad", at=(0.0, 0.0, 0.0), size=0.5, material=m)
+    r.node("PadA", j1, mesh=shared, translation=[1.0, 0.0, 0.0])
+    r.node("PadStatic", j0, mesh=shared, translation=[-1.0, 0.0, 0.0])
+    return r.write(out, "riganim_s2_shared_static")
+
+
+def s2_shared_three(out):
+    """Three objects of one mesh: two bone-hung (bound to different bones) and a plain root one - the fold's copies in stage 3
+    (the first bound object's data copied as pad.001, the second's as pad.002, the plain one keeping pad), the join of all
+    three and the export."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    shared = r.mesh("pad", at=(0.0, 0.0, 0.0), size=0.5, material=m)
+    r.node("PadA", j0, mesh=shared, translation=[1.0, 0.0, 0.0])
+    r.node("PadB", j1, mesh=shared, translation=[-1.0, 0.0, 0.0])
+    r.node("PadPlain", None, mesh=shared, translation=[3.0, 0.0, 0.0])
+    return r.write(out, "riganim_s2_shared_three")
 
 
 # ---- stage 3 (step (d)): the clip path
@@ -970,7 +1017,11 @@ def main(out):
     job("fx_s2_objanim_hung", s2_objanim_hung(out))
     job("fx_s2_multi_legacy", multi(out), clip="Longer", convert="0")
     job("fx_s2_wrapped_legacy", wrapped(out), convert="0")
-    job("LEFT:fx_s2_shared_hung", s2_shared_hung(out))
+    job("fx_s2_shared_hung", s2_shared_hung(out))
+    job("fx_s2_shared_same_bone", s2_shared_same_bone(out))
+    job("fx_s2_shared_plain", s2_shared_plain(out))
+    job("fx_s2_shared_static", s2_shared_static(out), static="padstatic")
+    job("fx_s2_shared_three", s2_shared_three(out))
     # stage 3 (step (d), the clip path; the rest fold is deferred): slices on the rotation-only rig, the exits, the filter,
     # legacy keepTranslations, the multi-slot trap
     plain = s3_plain(out)

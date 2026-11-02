@@ -1038,8 +1038,11 @@ def exits(jobs_path):
         stage = STAGE_OF.get(key, 1)
         print("\t".join(["JOB", key if kind is None else "%s:%d:%s" % (kind, stage, key)] + argv))
         if key == "fx_d_frames":
-            # The same early int() failure with a skinned FBX: production never imports it. The drill must
-            # compare the argument failure, not accept a named FBX vehicle-pose fallback instead.
+            # The same frames argument on a skinned, animated FBX (the anim_bones fixture). The reader leaves such a
+            # vehicle .fbx by name (ReadForVehicle), and so does production: Blender imports it and dies at int(argv[7])
+            # AFTER the import (vehicle_rig.py ~line 1081; only int(inf) of a flag-fold count is pre-import, PreDie). So
+            # the job's verdict is the named leave with Blender's death recorded (DIES:1), not an argument failure
+            # compared before the import - the review's first wording, corrected 2026-11-02 from the drill's verdict row.
             sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "fbx-drill"))
             from fbx_animation_fixtures import fixtures as fbx_fixtures
             from fbx_fixtures import write_fbx
