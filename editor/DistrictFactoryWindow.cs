@@ -562,6 +562,19 @@ public class DistrictFactoryWindow : EditorWindow
         cur.modelFile = (cur.modelFile ?? "").Trim();
         cur.stripParts = (cur.stripParts ?? "").Trim();
 
+        // WALL-CLOCK TIMING per district step (2026-11-02): the Factory prints its own, the steps after it printed none, and
+        // "baking is extremely slow" could not be placed from the Console. One line per step, as the Factory's.
+        var swBake = System.Diagnostics.Stopwatch.StartNew(); double tPrev = 0;
+        void Lap(string what, double? elapsed = null)
+        {
+            double t = elapsed ?? swBake.Elapsed.TotalSeconds;
+            Debug.Log($"[District] {cur.resourceName} timing: {what,-44} {t - tPrev,5:0.0}s   (total {t:0.0}s)");
+            tPrev = t;
+        }
+
+        string timingOutcome = "failed";
+        try
+        {
         // E5 ROLLBACK FOR THE WHOLE DISTRICT BAKE (2026-09-21 review; scope corrected by the PR #77 review).
         // Every step below is destructive. UniversalBaker.Build sweeps and re-creates the SHARED unit outputs for
         // this resourceName — _Atlas, _NormalAtlas, _RoughAtlas among them — and discards its own backup the moment
@@ -593,20 +606,11 @@ public class DistrictFactoryWindow : EditorWindow
         // new baked field appears. FromJsonOverwrite restores in place, so anything holding `cur` keeps its instance.
         string curBeforeBake = JsonUtility.ToJson(cur);
         var dbk = UniversalBaker.BackupDistrictBake(cur.resourceName);
+        Lap("snapshot + backup");
         bool districtBakeOk = false;
         bool districtBakeUndecided = false;   // an unsettled registry save that couldn't be read back: keep the backup, restore nothing
         try
         {
-        // WALL-CLOCK TIMING per district step (2026-11-02): the Factory prints its own, the steps after it printed none, and
-        // "baking is extremely slow" could not be placed from the Console. One line per step, as the Factory's.
-        var swBake = System.Diagnostics.Stopwatch.StartNew(); double tPrev = 0;
-        void Lap(string what)
-        {
-            double t = swBake.Elapsed.TotalSeconds;
-            Debug.Log($"[District] {cur.resourceName} timing: {what,-44} {t - tPrev,5:0.0}s   (total {t:0.0}s)");
-            tPrev = t;
-        }
-
         // 1) the same static bake core as the unit Factory — pawnDescription stays empty (registry-only field, unused by Build)
         var cfg = new BakeConfig
         {
@@ -617,8 +621,8 @@ public class DistrictFactoryWindow : EditorWindow
             materialMode = MaterialMode.Auto, atlasMaxDim = cur.atlasMaxDim <= 0 ? 1024 : cur.atlasMaxDim, albedoBrightness = 1f, albedoSaturation = 1f,
         };
         var r = UniversalBaker.Build(cfg);
-        if (!r.ok) { status = "Bake FAILED: " + r.error; return; }
         Lap("Factory bake (its own timing lines above)");
+        if (!r.ok) { status = "Bake FAILED: " + r.error; return; }
         if (UniversalBaker.LastPrepSourceTris > 0) cur.sourceTris = UniversalBaker.LastPrepSourceTris;
 
         // 2) wrap the baked mesh as the bone-free district FxMesh
@@ -729,8 +733,8 @@ public class DistrictFactoryWindow : EditorWindow
         string guid = DistrictBaker.BakeFxMesh(mesh, cur.resourceName, ComposedImportAngles(), out _,
             levelOnGround: !composedLeveled, postLevelOffset: composedLeveled ? Vector3.zero : cur.posOffset, clipHexPct: cur.clipHexPct,
             foundationDepth: cur.foundationDepth, foundationUV: foundationUV);
-        if (string.IsNullOrEmpty(guid)) { status = "District FxMesh bake FAILED (see Console)."; return; }
         Lap("FxMesh bake (level, clip, plinth, two mesh assets)");
+        if (string.IsNullOrEmpty(guid)) { status = "District FxMesh bake FAILED (see Console)."; return; }
         cur.fxMeshGuid = guid;
         cur.posOffsetBaked = cur.posOffset;   // the preview shows future posOffset edits as a live delta against this
 
@@ -817,6 +821,7 @@ public class DistrictFactoryWindow : EditorWindow
         }
         finally
         {
+            double cleanupStart = swBake.Elapsed.TotalSeconds;
             // Every exit from the block above lands here: the early `return`s (a failed base bake, a part with no
             // model file, a compose failure, a missing atlas, a failed registry save) and an exception alike.
             // Anything short of a complete, registered bake restores.
@@ -833,6 +838,20 @@ public class DistrictFactoryWindow : EditorWindow
                 // The preview was pointed at the half-baked assets; show what is actually on disk again.
                 try { LoadPreviewAssets(force: true); } catch (Exception e) { Debug.LogWarning("[District] preview reload after rollback failed: " + e.Message); }
             }
+            // Report after cleanup so diagnostic logging cannot interrupt rollback.
+            Lap(districtBakeOk ? "bake finished" : "failed/unsettled step before cleanup", cleanupStart);
+            Lap("backup cleanup / rollback");
+            timingOutcome = districtBakeOk ? "ok" : districtBakeUndecided ? "unsettled" : "failed";
+        }
+        }
+        catch
+        {
+            timingOutcome = "failed (exception)";
+            throw;
+        }
+        finally
+        {
+            Debug.Log($"[District] {cur.resourceName} timing: TOTAL {swBake.Elapsed.TotalSeconds:0.0}s ({timingOutcome})");
         }
     }
 

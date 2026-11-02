@@ -3228,12 +3228,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 - **THE DISTRICT BAKE: 39 s -> 3.6 s (2026-11-02, "baking is extremely slow").** Measured first, with one wall-clock line
   per district step (the Factory already printed its own) and a split inside the scoped selector: of a 39.0 s reactor bake,
-  35.8 s sat in the scoped selector's four walks over the footprint template, which call the SDK's material loader 565
-  times - and the SDK caches by GUID, so the cost was beside each call: `DistrictBaker.TryLoadFx` found the loader's type by
+  35.8 s sat in the scoped selector's four walks over the footprint template, which attempted 565 `TryLoadFx` loads.
+  The SDK caches by GUID, so the cost was in the wrapper: `DistrictBaker.TryLoadFx` found the loader's type by
   scanning every type of every loaded assembly, then reflected its method list, on every call (about 60 ms each). The type
   and the method are now resolved once per domain (`FindType` caches; a domain reload clears it with the assemblies), and
   the step takes 0.5 s, the bake 3.6 s. The timing lines stay in the Console (`[District] <name> timing: ...` and
   `[ScopedSelector] <name> timing: ...`); what is left is Unity's own asset writes and imports on its main thread.
+  Review separates wrapper attempts from actual SDK calls (null/zero GUIDs never invoke it), emits selector timing on
+  failure, and reports the window's total through backup and cleanup/rollback on every exit. The original measurement
+  above predates those complete timing boundaries. Isolated Unity checks cover late assembly loading, cached type
+  identity, actual SDK-call counts and failed-bake summaries; all six district geometry/asset cases remain green.
 - **THE DISTRICT DRAWS THE BAKER'S FRAME UPRIGHT (2026-11-02).** Since the static frame unified on 2026-09-12 the Factory
   bakes every static model in the baker's Z-up frame (the unit prefab stands its mesh up with a 270° X turn), but the district
   wrapper, written in August against the old auto-aligned output, took that mesh as Y-up and leveled, clipped, plinthed and

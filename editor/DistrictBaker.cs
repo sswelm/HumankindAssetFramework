@@ -936,18 +936,20 @@ public static class DistrictBaker
     public static bool BakeScopedSelector(string resourceName, out string selectorGuidStr, out string err)
     {
         selectorGuidStr = null; err = null;
+        var swSel = System.Diagnostics.Stopwatch.StartNew(); double tSel = 0; var laps = new System.Text.StringBuilder();
+        void Lap(string what) { double t = swSel.Elapsed.TotalSeconds; laps.Append($"{what} {t - tSel:0.0}s | "); tSel = t; }
+        bool selectorOk = false;
+        tryLoadCalls = 0; tryLoadTicks = 0; tryLoadSdkCalls = 0; tryLoadSdkTicks = 0;
         try
         {
             if (string.IsNullOrWhiteSpace(resourceName)) { err = "no resource name on the entry."; return false; }
             var fxMesh = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>($"Assets/Resources/{resourceName}_FxMesh.asset");
             if (fxMesh == null) { err = $"Assets/Resources/{resourceName}_FxMesh.asset not found — bake the district model first."; return false; }
             var meshGuid = MakeGuid(AmplitudeGuid(fxMesh));
+            Lap("input mesh + GUID");
             if (meshGuid == null) { err = "couldn't parse the FxMesh GUID."; return false; }
             // WALL-CLOCK per sub-step (2026-11-02): a 42 s district bake spent 35 s in here, in two silent gaps around its two
             // asset writes; the split (the SDK loader per item, the template walks, SaveAssets + Refresh) is printed at the end.
-            var swSel = System.Diagnostics.Stopwatch.StartNew(); double tSel = 0; var laps = new System.Text.StringBuilder();
-            void Lap(string what) { double t = swSel.Elapsed.TotalSeconds; laps.Append($"{what} {t - tSel:0.0}s | "); tSel = t; }
-            tryLoadCalls = 0; tryLoadTicks = 0;
             var tmpl = TryLoadFx(FootprintTemplateGuid());
             Lap("template load");
             if (tmpl == null) { err = $"footprint template '{FootprintTemplateLabel()}' didn't load (Tools/HAF/District/Footprint template...)."; return false; }
@@ -1013,10 +1015,16 @@ public static class DistrictBaker
             AssetDatabase.SaveAssets(); Lap("SaveAssets"); AssetDatabase.Refresh(); Lap("Refresh");
             selectorGuidStr = AmplitudeGuid(sel);
             Debug.Log($"[ScopedSelector] '{resourceName}': element={AmplitudeGuid(elem)}  selector={selectorGuidStr}  (kept {kept} slot, nulled {nulled} props, left {keptOther} decal/emitter items).");
-            Debug.Log($"[ScopedSelector] '{resourceName}' timing: {laps}total {swSel.Elapsed.TotalSeconds:0.0}s; SDK TryLoad {tryLoadCalls} calls {tryLoadTicks / (double)System.Diagnostics.Stopwatch.Frequency:0.0}s");
+            selectorOk = true;
             return true;
         }
         catch (Exception e) { err = e.Message; Debug.LogError("[ScopedSelector] " + e); return false; }
+        finally
+        {
+            Debug.Log($"[ScopedSelector] '{resourceName}' timing: {laps}total {swSel.Elapsed.TotalSeconds:0.0}s ({(selectorOk ? "ok" : "failed")}); " +
+                      $"TryLoadFx {tryLoadCalls} calls {tryLoadTicks / (double)System.Diagnostics.Stopwatch.Frequency:0.0}s; " +
+                      $"SDK TryLoad {tryLoadSdkCalls} calls {tryLoadSdkTicks / (double)System.Diagnostics.Stopwatch.Frequency:0.0}s");
+        }
     }
 
     [MenuItem("Tools/HAF/District/Probe: NuclearTest visual template")]
@@ -1062,6 +1070,7 @@ public static class DistrictBaker
     // works in-editor. Returns null if the guid is null/unloadable.
     // the SDK loader's cost, counted per bake: BakeScopedSelector prints calls and seconds (2026-11-02, "baking is extremely slow")
     static int tryLoadCalls; static long tryLoadTicks;
+    static int tryLoadSdkCalls; static long tryLoadSdkTicks;
     static MethodInfo tryLoadFx; static Type tryLoadFxGuidType;
     static object TryLoadFx(object guid)
     {
@@ -1084,7 +1093,13 @@ public static class DistrictBaker
                 .FirstOrDefault(m => m.Name == "TryLoad" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == gt && m.GetParameters()[1].ParameterType == typeof(bool));
             tryLoadFxGuidType = gt;
         }
-        try { return tryLoadFx?.Invoke(null, new object[] { guid, true }); } catch { return null; }
+        if (tryLoadFx == null) return null;
+        // Keep the wrapper's lookup/validation cost separate from actual SDK invocations. Null/zero GUIDs
+        // never reach the SDK, and a loader that throws still made a call worth timing.
+        long sdkStart = System.Diagnostics.Stopwatch.GetTimestamp();
+        try { tryLoadSdkCalls++; return tryLoadFx.Invoke(null, new object[] { guid, true }); }
+        catch { return null; }
+        finally { tryLoadSdkTicks += System.Diagnostics.Stopwatch.GetTimestamp() - sdkStart; }
     }
 
     // structure dump: type + any fxMesh/mesh/decalMesh; follow levelBuildItems (LOAD each item's EvolverMaterialGuid so we
