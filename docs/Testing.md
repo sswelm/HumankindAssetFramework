@@ -732,6 +732,20 @@ for the editor itself is the Bake Tests row *Does the in-process model prep matc
 (`BlenderPrepHeadlessTest`): every static registry entry that reduces is prepared in process AND by Blender, the
 converter runs on both at the entry's grid, and its output folders must be equal byte for byte; an entry left to
 Blender is a SKIP that says why. It needs Blender and is not in the push gate. `FULL=1` (293 runs on 99 files, 74 of them strip runs): 163 written and read by the converter as it reads Blender's - 43 of them stripped -, 106 left to Blender by name, 21 known prep failures (18 strips that leave no mesh), the canoe's 3. The drill's two sides now run as six processes each (`PREP_JOBS`; `tools/prep-drill/merge_shards.py` adds their rows up, and a shard that did not finish is a FAIL): the gate sample in 43 s where it took minutes, that FULL run in 27 minutes.
+The district's draw-time frame has its own row since 2026-11-02, *Does the district draw the baker's frame upright?*
+(`DistrictFrameHeadlessTest`, on by default, in the Quick preset): the static Factory has baked every model in the baker's
+Z-up frame since 2026-09-12, the game draws a district FxMesh by the import angles the asset carries, and the District
+Factory writes `DistrictBaker.DrawAngles` into it (the registry's legacy import angles, then the frame stood up, then
+Facing). The row bakes an eight-vertex box authored in the baker's frame through the real `BakeFxMesh` with those
+angles, reads the FxMesh back and measures the box under the asset's own angles, as the game draws it: standing on its
+footprint, floor on the tile, centred; Facing 90 turns it; a legacy roll about the baker's up turns it too. Three additional
+composition cases check an asymmetric part and its golden-angle copy under different base/part facings and legacy angles:
+every drawn vertex, normal and tangent must use the upright frame, with the part grounded and placed at its own offset.
+These failed before the review fix because composition still interpreted part vertices as Y-up. Before the
+row and the fix it guards, the window wrote Facing and the legacy angles alone and took the Factory's mesh as Y-up, so
+every district baked after the frame unified drew on its side (the breeder reactor's first bake since August, on the
+day of the fix). SKIP in a project without the SDK's `FxMesh` type.
+
 The deploy port has the same pair since 2026-10-13. The Bake Tests row *Does the in-process deploy conversion match
 Blender's?* (`BlenderDeployHeadlessTest`, on by default): every registry entry with `deployConvert` on — today the
 T-62, the >127-bone pair-merge path the push gate's sample never reaches — is converted in process AND by

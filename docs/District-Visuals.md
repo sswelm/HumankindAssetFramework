@@ -150,9 +150,15 @@ retry), re-apply every frame (the game reloads the shared selector into the chan
 The District Factory has an **embedded preview pane** (2026-08-06): the baked mesh, textured, standing on a tile-sized
 ground square pinned at the true in-game surface level. The placement controls split by job:
 
-1. **Rotation offset — stand it up** (baked into the mesh; the preview shows the result after each Bake). The bake
-   auto-aligns the *longest* axis, which can tip a near-cubic model onto its side around ANY axis (the plant needed
-   `Z=-90`). Dial it in the preview — no relaunch round-trips.
+1. **Rotation offset — stand it up** (baked into the mesh; the preview shows the result after each Bake). It has the
+   unit Factory's meaning (X pitch, Y heading, Z roll) on the model as authored: a Y-up glTF/FBX stands as it is at
+   `0,0,0`. Dial it in the preview — no relaunch round-trips. (Until 2026-11-02 the bake auto-aligned the *longest*
+   axis, which could tip a near-cubic model — the plant needed `Z=-90` — and after the static frame unified on
+   2026-09-12 the district path drew every bake on its side: it took the Factory's Z-up mesh as Y-up. The district
+   now draws the baker's frame upright itself, through the FxMesh's own import angles, as the game's districts do;
+   an entry dialed before that re-bakes into the new frame and may need its Rotation re-dialed once.)
+   Added parts and their copies use that same upright baker frame before their own Facing and placement are applied;
+   the base's legacy import angles and Facing do not tip or move them. Their normals and tangents follow the geometry.
 2. **Facing on tile — turn it** (0–360°, previewed LIVE). Always rotates the standing building about the vertical, so
    it can never tip the model; written into the FxMesh at Bake. The preview draws a **NESW compass rose** (2026-08-08)
    — lines to all four cardinals with letters reading North-up — because a district has no facing of its own: the

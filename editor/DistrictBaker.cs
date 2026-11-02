@@ -35,6 +35,22 @@ public static class DistrictBaker
         return $"{t.GetField("a", BF)?.GetValue(g)},{t.GetField("b", BF)?.GetValue(g)},{t.GetField("c", BF)?.GetValue(g)},{t.GetField("d", BF)?.GetValue(g)}";
     }
 
+    // THE BAKER'S FRAME IS Z-UP (2026-09-12, one frame for the static and animated paths: glbconv emits it, the static
+    // combine has no auto-align, and the unit prefab stands its mesh up with Euler(270, 0, 0) - UniversalBaker). The game
+    // draws an FxMesh by its importAngles, and its own district meshes are authored Z-up and drawn with (-90, 0, 0), the
+    // FxMesh default (BakeFxMesh below). The same frame rotation stands a baked district up. The district path had none -
+    // its wrapper predates the unified frame and took the Factory's mesh as Y-up - so every district baked after
+    // 2026-09-12 drew on its side (the reactor, 2026-11-02: its previous bake was from August). DistrictFrameHeadlessTest
+    // (Bake Tests) holds a baker-frame box to this through BakeFxMesh and the asset it writes.
+    public static readonly Quaternion BakerFrameUp = Quaternion.Euler(-90f, 0f, 0f);
+
+    /// <summary>The full draw-time rotation the District Factory writes into the FxMesh and draws in its preview, innermost
+    /// first: the registry's legacy import angles (entries authored before Facing; (0, 0, 0) since), the frame rotation that
+    /// stands the baker's Z-up frame up, then Facing (a yaw about the drawn-space vertical) - so Facing turns the standing
+    /// model, never tips it. Euler angles, as the FxMesh stores them and the game rebuilds them.</summary>
+    public static Vector3 DrawAngles(float facing, Vector3 importAngles) =>
+        (Quaternion.Euler(0f, facing, 0f) * BakerFrameUp * Quaternion.Euler(importAngles)).eulerAngles;
+
     // CORE — wrap a baked mesh as a district FxMesh. Callable from the District Factory window (the normal path), the
     // Prop Lab (pawn attachments), and the menu command below. Returns the FxMesh's Amplitude GUID "a,b,c,d", or null.
     // mergeSubMeshes: flatten a multi-material bake's submeshes into ONE — the pawn-fragment GPU encoder only draws
@@ -385,6 +401,10 @@ public static class DistrictBaker
         {
             int start = nv.Count;
             var vs = overrideVerts ?? m.vertices;   // copies share ONE leaf-scaled vertex array (the stem search is the slow part)
+            // Every Factory mesh, including parts, is stored Z-up. Place each part in drawn space before
+            // converting it into the base's storage frame; the entry's legacy angles/Facing belong to the base.
+            // Treating the part's stored vertices as Y-up left it sideways even after the base stood upright.
+            var partUp = BakerFrameUp;
             var ns = m.normals; var us = m.uv; var ts = m.tangents;
             bool hasN = ns != null && ns.Length == vs.Length;
             bool hasU = us != null && us.Length == vs.Length;
@@ -399,23 +419,23 @@ public static class DistrictBaker
                 // hex entirely). Pivot = the part's XZ bounds center; ground = its own lowest point.
                 var pmin = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
                 var pmax = new Vector3(float.MinValue, float.MinValue, float.MinValue);
-                for (int i = 0; i < vs.Length; i++) { pmin = Vector3.Min(pmin, vs[i]); pmax = Vector3.Max(pmax, vs[i]); }
+                for (int i = 0; i < vs.Length; i++) { var drawn = partUp * vs[i]; pmin = Vector3.Min(pmin, drawn); pmax = Vector3.Max(pmax, drawn); }
                 pivot = new Vector3((pmin.x + pmax.x) * 0.5f, 0f, (pmin.z + pmax.z) * 0.5f);
                 float minY = float.MaxValue;
-                for (int i = 0; i < vs.Length; i++) { float y = (Rp * (vs[i] - pivot)).y; if (y < minY) minY = y; }
+                for (int i = 0; i < vs.Length; i++) { float y = (Rp * (partUp * vs[i] - pivot)).y; if (y < minY) minY = y; }
                 // + baseCenterXZ so the offset is measured from the TILE CENTER (leveling subtracts baseCenter again)
                 shift = new Vector3(off.x + baseCenterXZ.x, baseMinY - minY + off.y, off.z + baseCenterXZ.z);
             }
             if (!isBase) Debug.Log($"[District] placement: offset ({off.x:0.0}, {off.y:0.0}, {off.z:0.0}) [X=east, Z=north] · facing {facing:0.0}° · lands at tile ({off.x:0.0}, {off.z:0.0}) from center");
             for (int i = 0; i < vs.Length; i++)
             {
-                nv.Add(isBase ? vs[i] : Rinv * (Rp * (vs[i] - pivot) + shift));
+                nv.Add(isBase ? vs[i] : Rinv * (Rp * (partUp * vs[i] - pivot) + shift));
                 var nrm = hasN ? ns[i] : Vector3.up;
-                nn.Add(isBase ? nrm : Rinv * (Rp * nrm));
+                nn.Add(isBase ? nrm : Rinv * (Rp * (partUp * nrm)));
                 var uv = hasU ? us[i] : Vector2.zero;
                 nu.Add(new Vector2(rect.x + uv.x * rect.width, rect.y + uv.y * rect.height));
                 var t4 = hasT ? ts[i] : new Vector4(1f, 0f, 0f, 1f);
-                if (!isBase) { var xyz = Rinv * (Rp * new Vector3(t4.x, t4.y, t4.z)); t4 = new Vector4(xyz.x, xyz.y, xyz.z, t4.w); }
+                if (!isBase) { var xyz = Rinv * (Rp * (partUp * new Vector3(t4.x, t4.y, t4.z))); t4 = new Vector4(xyz.x, xyz.y, xyz.z, t4.w); }
                 nt4.Add(t4);
             }
             var tris = new List<int>();

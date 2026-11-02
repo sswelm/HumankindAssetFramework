@@ -262,9 +262,10 @@ public class DistrictFactoryWindow : EditorWindow
             "World length of the model's longest axis. A tile hex is ~7 across its flats (~8 corner to corner — the " +
             "preview hex is true size) — ~5-6 fills the tile, ~2.5 tile-furniture."), cur.size);
         cur.rotation = EditorGUILayout.Vector3Field(new GUIContent("Rotation offset (deg)",
-            "The STAND-IT-UP control, baked into the mesh — on top of the automatic longest-axis align, which can TIP a " +
-            "near-cubic model onto its side around ANY axis (the plant needed Z=-90). The preview below shows the result " +
-            "after each Bake — dial it there, no relaunch needed. To merely TURN a standing building, use Facing instead."), cur.rotation);
+            "The STAND-IT-UP control, baked into the mesh, with the unit Factory's meaning: X pitch, Y heading, Z roll, " +
+            "on the model as authored (a Y-up glTF/FBX stands as it is at 0,0,0; since 2026-11-02 the district draws the " +
+            "baker's frame upright by itself). The preview below shows the result after each Bake — dial it there, no " +
+            "relaunch needed. To merely TURN a standing building, use Facing instead."), cur.rotation);
         cur.facing = EditorGUILayout.Slider(new GUIContent("Facing on tile (deg)",
             "Turn the building on its tile — always about the vertical, can't tip it. Previewed LIVE; written into the " +
             "FxMesh at Bake (auto-level re-grounds for the result)."), cur.facing, 0f, 360f);
@@ -908,10 +909,12 @@ public class DistrictFactoryWindow : EditorWindow
         Texture tex = null;
         try
         {
-            // the game's draw-time rotation, LIVE from the form fields — dial the model upright + turned right here.
+            // the game's draw-time rotation, LIVE from the form fields — dial the model upright + turned right here. The
+            // ONE definition the bake writes into the FxMesh (ComposedImportAngles: the baker's frame stood up, then Facing),
+            // rebuilt from the Euler angles exactly as the game rebuilds it from the asset.
             // Position offset previews as a DELTA vs what the current bake already carries (baked into the vertices).
             var mtx = Matrix4x4.Translate(cur.posOffset - cur.posOffsetBaked)
-                    * Matrix4x4.Rotate(Quaternion.Euler(0f, cur.facing, 0f) * Quaternion.Euler(cur.importAngles));
+                    * Matrix4x4.Rotate(Quaternion.Euler(ComposedImportAngles()));
             var b = TransformBounds(mtx, pvMesh.bounds);
             // the FOUNDATION plinth extrudes below the surface (y<0); don't let it drag the framing down — the camera
             // frames on the ABOVE-GROUND building (clamp the bottom to the surface) so adding a plinth doesn't shift
@@ -1037,10 +1040,10 @@ public class DistrictFactoryWindow : EditorWindow
         return new Bounds(c, ne * 2f);
     }
 
-    // The full draw-time rotation written into the FxMesh: Facing (a yaw about the drawn-space vertical) applied AFTER
-    // the import angles — so import angles stand the model up and Facing turns the standing model, never tips it.
-    Vector3 ComposedImportAngles() =>
-        (Quaternion.Euler(0f, cur.facing, 0f) * Quaternion.Euler(cur.importAngles)).eulerAngles;
+    // The full draw-time rotation written into the FxMesh and drawn by the preview: the baker's Z-up frame stood up between
+    // the registry's legacy import angles and Facing (DistrictBaker.DrawAngles - the frame story is there; the district path
+    // had drawn every post-2026-09-12 bake on its side, the reactor on 2026-11-02).
+    Vector3 ComposedImportAngles() => DistrictBaker.DrawAngles(cur.facing, cur.importAngles);
 
     // Extension_Base_BreederReactor -> "BreederReactor". Suggested resource name.
     // The game's GroundMaterialDefinition vocabulary (from the plugin's [Ground] dump — stable game data). Prairie_* =

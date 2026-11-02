@@ -187,6 +187,17 @@ public class BakeTestRunnerWindow : EditorWindow
                        "difference here and none in the push gate means Unity's runtime computes something differently.",
                 run = BlenderPrepHeadlessTest.RunSection },
 
+            // THE DISTRICT FRAME (2026-11-02): the static Factory bakes in the baker's Z-up frame since 2026-09-12, and the district
+            // wrapper had drawn that frame as Y-up ever since - every district baked after the change lay on its side.
+            new TestRow { name = "Does the district draw the baker's frame upright? (a box through BakeFxMesh, as the game draws it)", quick = true, on = true,
+                cost = "three tiny compositions and three FxMesh bakes of an eight-vertex box - a second",
+                what = "Bakes a box authored in the baker's Z-up frame through the real BakeFxMesh with the draw angles the District " +
+                       "Factory writes (DistrictBaker.DrawAngles: legacy import angles, the frame stood up, then Facing), reads the FxMesh " +
+                       "back and measures the box under the asset's own angles - as the game draws it: standing on its footprint, floor on " +
+                       "the tile, centred; Facing 90 turns it; a legacy roll about the baker's up turns it too. Also checks an asymmetric " +
+                       "part and its copy: upright, grounded and placed by their own Facing, with normals/tangents in the same frame. SKIP without the SDK.",
+                run = DistrictFrameHeadlessTest.RunSection },
+
             // THE DEPLOY CONVERSION IN C# (2026-10-13, after parts 1-8c of replacing Blender): wired into the Factory on 2026-10-11
             // and never run in Unity until this row; the push gate holds it to the script outside Unity and never on the T-62.
             new TestRow { name = "Does the in-process deploy conversion match Blender's? (every registry model that deploys, in Unity)", kernels = true, quick = false, on = true, needsBlender = true,
