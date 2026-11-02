@@ -35,8 +35,9 @@
 // localNodeAnim (the REST hold and the round-trip sampling), several scenes, cameras, lights, mesh instancing,
 // KHR_materials_variants, KHR_animation_pointer, a CUBICSPLINE sampler, morph weights, a sampler without keys or with the
 // wrong component count, a skin whose joints are under no armature or that lists a joint twice, a mesh placed on a bone
-// node, every mesh BlenderReduce declines, (stage 2) a bone-hung mesh whose datablock another object shares or
-// staticParts matching against supplementary Unicode names, and (stage 4) the weld of a one-material, one-bone mesh
+// node, every mesh BlenderReduce declines, (stage 2) staticParts matching against supplementary Unicode names (a
+// bone-hung mesh whose datablock another object shares is modelled since 2026-11-02: one vertex-group list and weight
+// layer for every object of it), and (stage 4) the weld of a one-material, one-bone mesh
 // (bmesh remove_doubles), a socket sorting before its parent (the script exits with a message read from a freed edit
 // bone), a no-op root bone with an object hung from it. Held to Blender by tools/riganim_drill.sh (--stages 4), every
 // row of every stage; the albedo PNG by its dimensions (its bytes are Blender's encoder's). BlenderRigExport.cs writes
@@ -780,10 +781,14 @@ public static class BlenderRigAnim
         }
         if (bp.Count > 0)
         {
-            // one vertex-group list and one weight layer serve every object of a mesh datablock: two binds on one mesh,
-            // or a bind the other object's rows then show, are not modelled
-            foreach (var o in bp)
-                if (s.Objects.Any(x => x != o && x.Type == "MESH" && x.DataName == o.DataName)) { s.Fallback = "'" + o.Name + "': a bone-hung mesh whose datablock another object shares (one vertex-group list, one weight layer)"; return; }
+            var bindSet = new HashSet<SceneObject>(bp); // preserve the plan: binding clears an object's bone parent
+            // one vertex-group list and one weight layer serve every object of a mesh datablock (vertex groups live on the
+            // MESH since Blender 3.0; the Armature modifier is the OBJECT's): a bind on one object shows on every other object
+            // of the datablock - a second bind adds its group and weights to the same list and layer (or finds its group
+            // there), a plain or static sharer carries them without a modifier. The model holds one MeshData per OBJECT,
+            // its view of the datablock, so the datablock's state is mirrored to every sharer after each bind (the only
+            // mesh edit before stage 3's fold, which copies a multi-user datablock before its modifier is applied - from
+            // there the views diverge as the datablocks do). Ported 2026-11-02 for the light assault mech (fx_s2_shared_*).
             var armBones = new HashSet<string>(ad.BoneNodes.Select(b => s.Names.BoneOfJoint[b]), StringComparer.Ordinal);
             string rootBone = ad.BoneNodes.Where(b => ad.Rest.Parent[b] < 0).Select(b => s.Names.BoneOfJoint[b]).FirstOrDefault();
             // pose_position = 'REST' + update: the script's armature at rest (pose_mat = arm_mat), every other one as posed;
@@ -826,6 +831,16 @@ public static class BlenderRigAnim
                 if (d.ArmatureModifier == null) d.ArmatureModifier = armObj.Name;
                 else Note(s, "a bound mesh already having an Armature modifier");
                 bound++;
+                // the datablock's vertex groups and weights, as every other object of it now holds them
+                foreach (var x in s.Objects)
+                {
+                    if (x == o || x.Type != "MESH" || x.DataName != o.DataName) continue;
+                    x.Mesh.Groups = new List<string>(d.Groups);
+                    x.Mesh.DefNr = d.DefNr.Select(l => new List<int>(l)).ToArray();
+                    x.Mesh.DefWeight = d.DefWeight.Select(l => new List<float>(l)).ToArray();
+                    Note(s, bindSet.Contains(x) ? "a bound mesh's datablock shared with another bone-hung mesh (two binds on one list and layer)"
+                                                                 : "a bound mesh's datablock shared with a mesh the bind leaves alone (its rows show the bind)");
+                }
             }
             // pose_position back + update: the re-homed objects and their descendants, and everything under the
             // armature's bones again, evaluated in the pose; the rest keep their matrix_world

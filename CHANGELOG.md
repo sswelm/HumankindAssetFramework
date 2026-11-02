@@ -10,6 +10,22 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **RIG_ANIM STAGE 2: A SHARED MESH DATABLOCK UNDER THE BONES (2026-11-02).** The light assault mech's `.fbx`, read by the
+  native reader since step 6f, equalled Blender at stage 1 and hit the port's one named stage 2 limit: a bone-hung mesh
+  whose datablock another object shares. In Blender the vertex groups live on the mesh (since 3.0) and the Armature modifier
+  on the object, so a bind on one object shows on every object of the datablock, a second bind adds its group and weights to
+  the same list and layer, and a plain or static sharer carries them without a modifier. `BlenderRigAnim.RunStage2` now
+  mirrors the datablock's groups and weights to every sharer after each bind (the only mesh edit before stage 3's fold
+  copies a multi-user datablock, from where the per-object views diverge as the datablocks do); five fixtures
+  (`fx_s2_shared_*`) cover two bones, one bone, a plain root sharer, a static sharer and three sharers through the fold's
+  copies, the join and the export, and the mech leaves `KNOWN_LEFT` and compares at every stage (154 jobs, 143 equal, 11
+  left by name, 0 differ). Its EXPORT is the next named limit, keyed `KNOWN_EXPORTLEFT` in the drill: an object-level
+  location curve on the armature (`Armature|Armature|ArmatureAction` - the exporter port does not write the armature node's
+  own channels), so the mech's bake still takes Blender's rig_anim.py until that is ported. Also corrected here: the 6f review's claim that its skinned-FBX fixture is "compared as an argument failure before the import"
+  (it is the reader's named leave with Blender's death after its import recorded - the drill's own verdict row).
+  The drill prints each actual export fallback reason instead of labeling every leave an unused skin.
+  Shared-mesh coverage uses the original bind plan: clearing a bound object's bone parent no longer counts it as a
+  plain/static sharer that the bind leaves alone.
 - **THE PNG CODEC'S KERNELS - C++ FOR THE FBX READER'S TEXTURES (2026-11-02).** Measured first: the native FBX reader's
   cost was its textures - the Bradley (eight 4096x4096 PNGs) 10.3 s in Unity's Mono against 0.04 s for the same content as
   a GLB - and the cost sat in the PNG codec's algorithm and zlib, the same on .NET and Mono (Mono's DeflateStream ignores
@@ -29,7 +45,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   and rigged in C# against Blender; the light assault mech compares at stage 1, then names its stage 2 shared bone-hung
   mesh limit (no later-stage/export claim). The Ehrhardt recipe (skinned) is left by name. `.obj`/`.blend` sources stay Blender's.
   Review fixes reject missing/stale oracle GLBs, track linked FBX textures in recorded inputs, remove named-left probe
-  inputs before conversion, respect recipe-specific declines, and compare early FBX argument failures before importing.
+  inputs before conversion, respect recipe-specific declines, and add a skinned FBX fixture under the frames-argument failure
+  (its verdict is the reader's named leave with Blender's death after its import recorded, as production does - the review's
+  "compared before importing" was wrong; corrected 2026-11-02 after reading the drill's verdict row).
 - **THE NATIVE FBX READER, STEP 6e: THE LOADER, WIRED INTO THE FACTORY AND THE LAB (2026-11-02).** `editor/HafModelLoader.cs`
   reads a `.glb`/`.gltf` through GlbReader and an `.fbx` through the native reader (FbxImport + FbxModel: the model Blender's
   FBX import and glTF export would write), and hands an `.fbx` the reader leaves by name to Blender as any other named limit.

@@ -356,8 +356,12 @@ hits the named shared bone-hung mesh limit; later stages/export are not claimed)
 Review regressions require a fresh nonempty FBX oracle GLB, retain nonzero Blender exit codes, and cover record/replay
 with external FBX image dependencies (including a previously missing recursive basename match). Named-left probe files
 and recipe jobs are removed before conversion; absent conversion mappings fail explicitly. A recipe-specific LEFT is
-not compared against primary-only rows. The vehicle stage drill follows production's pre-import argument failures,
-with a skinned FBX early-failure fixture that must be compared as a failure of arguments rather than left by the reader.
+not compared against primary-only rows. The vehicle stage drill follows production's pre-import argument failures
+(`int(inf)` of a flag-fold count), and carries a skinned FBX fixture under the frames-argument failure
+(`DIES:1:fx_d_fbx_before_import`): the reader leaves a skinned, animated vehicle `.fbx` by name and Blender, importing
+it, dies at `int(argv[7])` AFTER its import - production does the same - so its verdict is the named leave with the death
+recorded, not an argument failure compared before the import (the review's wording, corrected 2026-11-02 after reading the
+drill's own verdict row).
 
 **Since 2026-10-11 the drills run concurrently, and since 2026-10-29 the source guards run on a lane beside them.**
 The drills are independent (each works in its own temp directory and builds its own exe), so `check.sh` starts them
@@ -1768,8 +1772,19 @@ update - the bind's update makes it a root at its own transform (`fx_s2_junk_hun
 evaluates the scene before stage 4, hence "the same at stages 1 to 3"); the importer leaves an animated skinned mesh
 node as an EMPTY, which the flatten removes; the dump tells one action's fcurves apart by data path alone, so two
 armatures with an animated bone of one name make an inconsistent dump (the FC identity carries no slot) - the fixture
-animates the second armature's root instead. Not modelled, named: a bone-hung mesh whose datablock another object shares
-(one vertex-group list and weight layer for two objects; `LEFT:fx_s2_shared_hung`). Review of PR #164 added
+animates the second armature's root instead. A bone-hung mesh whose datablock another object shares (one vertex-group
+list and weight layer for every object of it; `LEFT:fx_s2_shared_hung` until 2026-11-02) is modelled since 2026-11-02,
+when the light assault mech's `.fbx` hit it at stage 2 (step 6f): the model holds one `MeshData` per object, its view of
+the datablock, and mirrors the datablock's groups and weights to every sharer after each bind - the only mesh edit
+before stage 3's fold copies a multi-user datablock - so a second bind adds to the same list, and a plain or static
+sharer shows the bind without a modifier; `fx_s2_shared_{hung,same_bone,plain,static,three}` cover two bones, one bone,
+a plain root sharer, a static sharer and three sharers through the fold's copies, the join and the export, and the mech
+compares at every stage (154 jobs, 143 equal, 11 left by name, 0 differ). The mech's EXPORT is the next named limit,
+keyed `KNOWN_EXPORTLEFT` in the drill: an object-level location curve on the armature (the exporter port does not write the
+armature node's own channels), so its bake still takes Blender's rig_anim.py until that is ported. The drill prints
+each export leave and its actual reason; its aggregate count does not imply that every leave is an unused skin.
+The shared-mesh coverage notes classify sharers from the original bind plan, before binding clears their bone parents;
+two bound users alone do not claim coverage of a plain/static user left unbound. Review of PR #164 added
 `fx_s2_unicode_static`: Python `str.lower()` expands U+0130 and applies final-sigma casing, which .NET invariant
 lowercase did not; before the fix the C# model bound two meshes Blender kept weightless. The C# matcher now follows
 those rules. Supplementary-script casing remains a named Blender fallback (`LEFT:fx_s2_supplementary_static`). Stages 3
