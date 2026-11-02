@@ -191,9 +191,9 @@ public class FbxModelTests
         var bones = Scene(new[] { Model(1, "A"), Object("Model", 2, "Bone", "LimbNode") }, new[] { C(1, 0), C(2, 1) });
         Assert.Null(bones.Fallback); Assert.Single(bones.Armatures);   // since 6c: an armature inserted above the fake bone A
         var anim = Scene(new[] { Model(1, "A"), Object("AnimationStack", 60, "Take", ""), Object("AnimationLayer", 61, "Base", ""), Object("AnimationCurveNode", 70, "T", "") }, new[] { C(1, 0), C(61, 60), C(70, 61) });
-        Assert.StartsWith("animation", anim.Fallback);
-        var emptyStack = Scene(new[] { Model(1, "A"), Object("AnimationStack", 60, "Take", ""), Object("AnimationLayer", 61, "Base", "") }, new[] { C(1, 0), C(61, 60) });
-        Assert.Null(emptyStack.Fallback);   // a stack without curves makes no action
+        Assert.Contains("AnimStack", anim.Fallback);   // since 6d: a stack named without its class is what Blender asserts on; a proper one imports
+        var emptyStack = Scene(new[] { Model(1, "A"), With(N("AnimationStack", 60L, "Take\0\u0001AnimStack", "")), With(N("AnimationLayer", 61L, "Base\0\u0001AnimLayer", "")) }, new[] { C(1, 0), C(61, 60) });
+        Assert.Null(emptyStack.Fallback);   // a stack without curves makes no action (its class and its layer's are still asserted)
         var colours = Scene(new[] { Model(1, "A"), Geometry(30, "G", CubeV, CubeF, null, Layer("Color", "Colors", "ByPolygonVertex", "Direct", new double[96])) }, new[] { C(1, 0), C(30, 1) });
         Assert.Null(colours.Fallback);   // since 6c: a colour layer is read
         var d = new FbxDocument { Version = 7400 };

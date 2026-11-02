@@ -10,7 +10,7 @@ using System.Text;
 // primitives' material NAMES, vertex counts, positions, normals, UV sets and indices as bits), the materials in order with
 // every field (6b: the factors as bits, the texture references, the alpha mode, the extensions object structurally), the
 // textures (image, sampler), the samplers (structurally), the images (name, MIME type, the bytes - or the decoded PIXELS of
-// an image the exporter composes anew), extensionsUsed, and (6c) every node's skin, every skin (name, joints, inverse bind
+// an image the exporter composes anew), extensionsUsed, (6c) every node's skin, every skin (name, joints, inverse bind
 // matrices as bits), every primitive's joints and weights as bits and its colour sets as the reader decodes them. Exit 1
 // on any difference; a named fallback is a SKIP row. An
 // oracle given as "-" means Blender's import failed: a SKIP when the reader declined the file too, else a DIFF.
@@ -18,8 +18,9 @@ static class FbxModelDrill
 {
     static int Main(string[] args)
     {
-        if (args.Length < 2 || args.Length % 2 != 0 || ((args[0] == "--dump" || args[0] == "--probe" || args[0] == "--probe-bones") && args.Length != 2))
+        if (args.Length < 2 || args.Length % 2 != 0 || ((args[0] == "--dump" || args[0] == "--dump-glb" || args[0] == "--probe" || args[0] == "--probe-bones") && args.Length != 2))
         { Console.Error.WriteLine("usage: FbxModelDrill <file.fbx> <blender.glb> [...]  |  --dump <file.fbx>  |  --probe <file.fbx>  |  --probe-bones <file.fbx>"); return 2; }
+        if (args[0] == "--dump-glb") { Console.Write(Describe(GlbReader.Read(args[1]))); return 0; }
         if (args[0] == "--dump")
         {
             var scene = FbxImport.Read(args[1]);
@@ -76,7 +77,7 @@ static class FbxModelDrill
                 if (glb == "-") { Console.WriteLine("DIFF " + fbx + " : Blender's import failed where the reader built a model"); failed++; continue; }
                 var theirs = GlbReader.Read(glb);
                 string d = Compare(mine, theirs, composed, ReadImageEvidence(glb, theirs));
-                if (d == null) { Console.WriteLine("PASS " + fbx + " : " + mine.Nodes.Count + " nodes, " + mine.Meshes.Count + " meshes, " + mine.Materials.Count + " materials, " + mine.Textures.Count + " textures, " + mine.Images.Count + " images" + (mine.Skins.Count > 0 ? ", " + mine.Skins.Count + " skins (" + mine.Skins.Sum(k => k.Joints.Length) + " joints)" : "") + (composed.Count > 0 ? " (" + composed.Count + " composed: pixels compared)" : "") + (scene.Notes.Count > 0 ? " (notes: " + string.Join("; ", scene.Notes.Distinct().Take(6)) + ")" : "")); compared++; }
+                if (d == null) { Console.WriteLine("PASS " + fbx + " : " + mine.Nodes.Count + " nodes, " + mine.Meshes.Count + " meshes, " + mine.Materials.Count + " materials, " + mine.Textures.Count + " textures, " + mine.Images.Count + " images" + (mine.Skins.Count > 0 ? ", " + mine.Skins.Count + " skins (" + mine.Skins.Sum(k => k.Joints.Length) + " joints)" : "") + (mine.Animations.Count > 0 ? ", " + mine.Animations.Count + " animations (" + mine.Animations.Sum(k => k.Channels.Count) + " channels)" : "") + (composed.Count > 0 ? " (" + composed.Count + " composed: pixels compared)" : "") + (scene.Notes.Count > 0 ? " (notes: " + string.Join("; ", scene.Notes.Distinct().Take(6)) + ")" : "")); compared++; }
                 else { Console.WriteLine("DIFF " + fbx + " : " + d); failed++; }
             }
             catch (Exception e) { Console.WriteLine("ERROR " + fbx + " : " + e.GetType().Name + ": " + e.Message); failed++; }
@@ -159,7 +160,39 @@ static class FbxModelDrill
                 for (int k = 0; k < x.InverseBindMatrices.Length; k++) if (Bits(x.InverseBindMatrices[k]) != Bits(y.InverseBindMatrices[k])) return $"skin {i} '{x.Name}': inverse bind matrix {k / 16} [{k % 16}]: {Bits(x.InverseBindMatrices[k])} ({x.InverseBindMatrices[k]}) vs {Bits(y.InverseBindMatrices[k])} ({y.InverseBindMatrices[k]})";
             }
         }
+        string anim = CompareAnimations(a, b);
+        if (anim != null) return anim;
         return CompareMaterials(a, b, composed, imageModes);
+    }
+
+    /// <summary>6d: every animation (name, order), its channels (node, path, one sampler each), its samplers (interpolation,
+    /// the times and the values as bits).</summary>
+    static string CompareAnimations(HafModel a, HafModel b)
+    {
+        if (a.Animations.Count != b.Animations.Count) return $"animations: {a.Animations.Count} vs Blender's {b.Animations.Count} ({Names(a.Animations.Select(x => x.Name))} vs {Names(b.Animations.Select(x => x.Name))})";
+        for (int i = 0; i < a.Animations.Count; i++)
+        {
+            var x = a.Animations[i]; var y = b.Animations[i];
+            string where = $"animation {i} '{x.Name}'";
+            if (x.Name != y.Name) return $"animation {i}: name '{x.Name}' vs '{y.Name}'";
+            if (x.Channels.Count != y.Channels.Count) return $"{where}: {x.Channels.Count} channels vs {y.Channels.Count}";
+            if (x.Samplers.Count != y.Samplers.Count) return $"{where}: {x.Samplers.Count} samplers vs {y.Samplers.Count}";
+            for (int c = 0; c < x.Channels.Count; c++)
+            {
+                var u = x.Channels[c]; var v = y.Channels[c];
+                string ch = $"{where} channel {c} (node {u.Node} '{(u.Node >= 0 && u.Node < a.Nodes.Count ? a.Nodes[u.Node].Name : "?")}' {u.Path})";
+                if (u.Node != v.Node) return $"{ch}: node {u.Node} vs {v.Node} ('{(v.Node >= 0 && v.Node < b.Nodes.Count ? b.Nodes[v.Node].Name : "?")}')";
+                if (u.Path != v.Path) return $"{ch}: path {u.Path} vs {v.Path}";
+                if (u.Sampler != v.Sampler) return $"{ch}: sampler {u.Sampler} vs {v.Sampler}";
+                if (u.Sampler < 0 || u.Sampler >= x.Samplers.Count) return $"{ch}: sampler {u.Sampler} out of range";
+                var sx = x.Samplers[u.Sampler]; var sy = y.Samplers[v.Sampler];
+                if (sx.Interpolation != sy.Interpolation) return $"{ch}: interpolation {sx.Interpolation} vs {sy.Interpolation}";
+                if (sx.Components != sy.Components) return $"{ch}: {sx.Components} components vs {sy.Components}";
+                string d = Floats(sx.Times, sy.Times, ch + ": times", 1); if (d != null) return d;
+                d = Floats(sx.Values, sy.Values, ch + ": values", sx.Components); if (d != null) return d;
+            }
+        }
+        return null;
     }
 
     /// <summary>6b: every material field, the textures, the samplers, the images, extensionsUsed.</summary>
@@ -323,6 +356,17 @@ static class FbxModelDrill
         for (int i = 0; i < m.Textures.Count; i++) sb.Append("texture ").Append(i).Append(" source=").Append(m.Textures[i].Source).Append(" sampler=").Append(m.Textures[i].Sampler).Append('\n');
         for (int i = 0; i < m.Samplers.Count; i++) sb.Append("sampler ").Append(i).Append(' ').Append(m.Samplers[i]).Append('\n');
         for (int i = 0; i < m.Images.Count; i++) sb.Append("image ").Append(i).Append(" \"").Append(m.Images[i].Name).Append("\" ").Append(m.Images[i].MimeType).Append(' ').Append(m.Images[i].Bytes?.Length ?? 0).Append(" bytes\n");
+        for (int i = 0; i < m.Animations.Count; i++)
+        {
+            var an = m.Animations[i];
+            sb.Append("animation ").Append(i).Append(" \"").Append(an.Name).Append("\" channels=").Append(an.Channels.Count).Append('\n');
+            for (int c = 0; c < an.Channels.Count; c++)
+            {
+                var ch = an.Channels[c]; var sp = an.Samplers[ch.Sampler];
+                sb.Append("  ch ").Append(c).Append(" node=").Append(ch.Node).Append(" \"").Append(ch.Node >= 0 && ch.Node < m.Nodes.Count ? m.Nodes[ch.Node].Name : "?").Append("\" ").Append(ch.Path).Append(' ').Append(sp.Interpolation)
+                  .Append(" keys=").Append(sp.KeyCount).Append(" t=").Append(string.Join(",", sp.Times.Take(4).Select(FBits))).Append(" v=").Append(string.Join(",", sp.Values.Take(8).Select(FBits))).Append('\n');
+            }
+        }
         sb.Append("extensionsUsed [").Append(string.Join(",", m.ExtensionsUsed)).Append("]\n");
         return sb.ToString();
     }

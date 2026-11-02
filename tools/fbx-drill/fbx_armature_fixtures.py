@@ -133,12 +133,13 @@ def fixtures():
              connect(50, 30), connect(40, 50), connect(41, 50), connect(10, 40), connect(11, 41)]
     yield rig_scene('armature_bone_children', objects, conns)
 
-    # ---- a bone whose bind pose differs from its transform, with an object parented to it: the pose evaluation is not ported
+    # ---- a bone whose bind pose differs from its transform, with an object parented to it: the pose evaluation (6d,
+    # FbxActions.Evaluate) puts the object against the rest bone through the pose the exporter sees at frame 0
     bones = [limb(10, 'Pivot', vec('Lcl Translation', 0, 0, 1), vec('Lcl Rotation', 0, 0, 30))]
     objects = [null(1, 'Rig'), null(3, 'Marker', vec('Lcl Translation', 1, 0, 0)), model(2, 'Skinned'), geometry(30, 'Grid', GRID_V, GRID_F, [GRID_UV]),
                skin(50), cluster(40, 'PivotCluster', list(range(12)), [1.0] * 12, transform=translation(0, 0, 0), transform_link=translation(0, 0, 1))] + bones
     conns = [connect(1, 0), connect(2, 1), connect(30, 2), connect(10, 1), connect(3, 10), connect(50, 30), connect(40, 50), connect(10, 40)]
-    yield rig_scene('armature_posed_fallback', objects, conns)
+    yield rig_scene('armature_posed', objects, conns)
 
     # ---- rotated and scaled bones: a chain of three with rotations about every axis, a PreRotation under RotationActive,
     # a non-uniform scale on the armature Null, bind poses from a Pose that disagree slightly with the transforms (no
@@ -155,6 +156,19 @@ def fixtures():
     conns = [connect(1, 0), connect(2, 1), connect(30, 2), connect(100, 2), connect(10, 1), connect(11, 10), connect(12, 11),
              connect(50, 30), connect(40, 50), connect(41, 50), connect(42, 50), connect(10, 40), connect(11, 41), connect(12, 42)]
     yield rig_scene('armature_rotated', objects, conns)
+
+    # ---- a connected chain: the Spine's head sits exactly on the Root's tail (the Root's one bone child along its Y at the
+    # distance the tail takes): use_connect, the head snapped; the Head and the Arm under the Spine are not (two children: the
+    # tail at their mean distance); an empty under the connected Spine; the Spine's bind pose a hair from its transform
+    g = {10: translation(0, 0, 0), 11: translation(0, 1, 0), 12: translation(0, 2, 0), 13: translation(0.2, 2, 0)}
+    bones = [limb(10, 'Root'), limb(11, 'Spine', vec('Lcl Translation', 0, 1, 0)), limb(12, 'Head', vec('Lcl Translation', 0, 1, 0)), limb(13, 'Arm', vec('Lcl Translation', 0.2, 1, 0))]
+    objects = [null(1, 'Rig'), null(3, 'Marker', vec('Lcl Translation', 0.1, 0, 0)), model(2, 'Skinned'), geometry(30, 'Grid', GRID_V, GRID_F, [GRID_UV]), material(100, 'Mat'), skin(50),
+               cluster(40, 'RootCluster', [0, 1, 2, 3], [1.0] * 4, transform=translation(0, 0, 0), transform_link=g[10]),
+               cluster(41, 'SpineCluster', [4, 5, 6, 7], [1.0] * 4, transform=translation(0, 0, 0), transform_link=g[11]),
+               cluster(42, 'HeadCluster', [8, 9, 10, 11], [1.0] * 4, transform=translation(0, 0, 0), transform_link=g[12])] + bones
+    conns = [connect(1, 0), connect(2, 1), connect(30, 2), connect(100, 2), connect(10, 1), connect(11, 10), connect(12, 11), connect(13, 11), connect(3, 11),
+             connect(50, 30), connect(40, 50), connect(41, 50), connect(42, 50), connect(10, 40), connect(11, 41), connect(12, 42)]
+    yield rig_scene('armature_connected', objects, conns)
 
     # ---- colour layers: ByPolygonVertex direct, ByVertice through an index, AllSame; a slot without a material beside one
     # with (the active layer becomes COLOR_0 with alpha for the material-less slot's mesh; a forced COLOR_0 beside materials)

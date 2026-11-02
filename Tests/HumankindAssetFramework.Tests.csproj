@@ -63,6 +63,7 @@
     <Compile Include="..\editor\FbxModel.cs" Link="FbxModel.cs" />
     <Compile Include="..\editor\FbxMaterials.cs" Link="FbxMaterials.cs" />
     <Compile Include="..\editor\FbxArmature.cs" Link="FbxArmature.cs" />
+    <Compile Include="..\editor\FbxActions.cs" Link="FbxActions.cs" />
     <Compile Include="..\editor\PngCodec.cs" Link="PngCodec.cs" />
     <Compile Include="..\editor\VehicleProbe.PolygonNormals.cs" Link="VehicleProbe.PolygonNormals.cs" />
     <Compile Include="..\editor\FbxTriangulate.cs" Link="FbxTriangulate.cs" />

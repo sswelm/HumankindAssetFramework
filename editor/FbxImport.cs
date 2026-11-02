@@ -74,6 +74,7 @@ public static class FbxImport
         public Obj SkinArmature;                 // a skinned mesh: the armature object whose modifier deforms it, or null
         public readonly List<string> VertexGroups = new List<string>();   // obj.vertex_groups in creation order (bone names)
         public List<int>[] DefNr; public List<float>[] DefWeight;          // per vertex: its groups and weights in insertion order, or null
+        public FbxActions.Action ActiveAction;   // animation_data.action: the first action the importer made for this object (6d), or null
     }
 
     public enum ObjectKind { Empty, Mesh, Armature }
@@ -94,6 +95,11 @@ public static class FbxImport
         internal void DeclineNow(string why) { Reasons.Add(why); if (Fallback == null) Fallback = why; }
         public readonly List<FbxObject> Table = new List<FbxObject>();   // fbx_table_nodes: every object in file order, a repeated id in its first place with its last record
         public string BaseDir = "";              // the file's directory: where the importer looks for texture files
+        // sub-step 6d (FbxActions): the scene's frame rate and the file's ktime, every action in creation order, and the scene
+        // as the exporter reads it at frame 0 (every object's World is this state's)
+        public int Fps = 24; public float FpsBase = 1f; public long Ktime = 46186158000;
+        public readonly List<FbxActions.Action> Actions = new List<FbxActions.Action>();
+        public FbxActions.State ExportState;
         public FbxMaterials.Scene MaterialData;  // the materials' wrapper state and the images (sub-step 6b)
     }
 
@@ -123,8 +129,6 @@ public static class FbxImport
         // ---- what 6a leaves to Blender
         if (s.Objects.Exists(o => o.Class == "Deformer" && o.SubType != "Skin" && o.SubType != "Cluster")) Decline("a BlendShape deformer (shape keys are not modelled)");
         if (s.Objects.Exists(o => o.Class == "Geometry" && o.SubType == "Shape")) Decline("shape keys (not modelled)");
-        // a stack or layer without any curve node makes no action in Blender (blen_read_animations skips empty layers): static
-        if (s.Objects.Exists(o => o.Class == "AnimationCurveNode")) Decline("animation (sub-step 6d)");
         if (s.Objects.Exists(o => o.Class == "NodeAttribute" && (o.SubType == "Camera" || o.SubType == "Light"))) Decline("a camera or light: its correction matrix and the exporter's filter are not modelled");
         if (r.Fallback != null) return r;
         // ---- the FBX table: id -> object, the Objects' file order; a repeated id keeps its first place and its LAST record
@@ -182,6 +186,12 @@ public static class FbxImport
         // ---- armatures, bind poses, clusters, the corrections, build_hierarchy, link_hierarchy, matrix_world (FbxArmature)
         FbxArmature.Build(r, s, table, byId, helpers, helperList, root, meshOf, Decline);
         if (r.Fallback != null) return r;
+        // ---- animation: the actions (FbxActions), then the scene as the exporter reads it at frame 0 - every object's
+        // matrix_world and every bone's pose (the import's pose, or the active action's curves there)
+        FbxActions.Read(r, s, table, byId, helpers, Decline);
+        if (r.Fallback != null) return r;
+        r.ExportState = FbxActions.Evaluate(r, 0f, ob => ob.ActiveAction, ob => false);
+        foreach (var ob in r.Objects) ob.World = r.ExportState.World[ob];
         // ---- materials: per mesh object, the Materials connected into its Model (connection order, any kind); the first
         // object fills the datablock's slots, another object with a different list overrides per slot (link = OBJECT)
         foreach (var o in r.Objects)
@@ -228,10 +238,10 @@ public static class FbxImport
         }
         return null;
     }
-    static double PropNumber(FbxProps props, string name, double def) { var p = FindProp(props, name); return p != null && p.RealCount > 0 ? p.Reals[0] : def; }
+    internal static double PropNumber(FbxProps props, string name, double def) { var p = FindProp(props, name); return p != null && p.RealCount > 0 ? p.Reals[0] : def; }
     static long PropInteger(FbxProps props, string name, long def) { var p = FindProp(props, name); return p != null && p.HasInt ? p.ValueInt : def; }
     static bool PropBool(FbxProps props, string name, bool def) { var p = FindProp(props, name); return p != null && p.HasInt ? p.ValueInt != 0 : def; }
-    static long PropEnum(FbxProps props, string name, long def) { var p = FindProp(props, name); return p != null && p.HasInt ? p.ValueInt : def; }
+    internal static long PropEnum(FbxProps props, string name, long def) { var p = FindProp(props, name); return p != null && p.HasInt ? p.ValueInt : def; }
     static double[] PropVec3(FbxProps props, string name, double x, double y, double z) { var p = FindProp(props, name); return p != null && p.RealCount >= 3 ? new[] { p.Reals[0], p.Reals[1], p.Reals[2] } : new[] { x, y, z }; }
 
     /// <summary>bpy.data.<kind>.new(name=""): an EMPTY name takes the ID type's default (BKE_libblock_alloc: "Mesh", "Object",
@@ -388,6 +398,7 @@ public static class FbxImport
         public HashSet<Helper> Meshes;           // for an armature: the mesh helpers its bones drive
         public readonly Dictionary<Helper, (float[] mesh, float[] armature)> ArmatureSetup = new Dictionary<Helper, (float[], float[])>();
         public FbxArmature.Bone Bone;
+        public TransformData Transform;          // fbx_transform_data: the Model's transform properties (6d builds the animated matrices from them)
         public int Order;                        // creation order (a Python set iterates in no known order: this one is used)
         static int next;
         public Helper() { Order = next++; }
@@ -408,6 +419,13 @@ public static class FbxImport
             if (PostMatrix != null) m = MatMul(m, PostMatrix);
             return m;
         }
+    }
+
+    /// <summary>blen_read_object_transform_preprocess: the Model's transform properties (degrees, the file's units).</summary>
+    internal sealed class TransformData
+    {
+        public double[] Loc, Rot, Sca, GeomLoc, GeomRot, GeomSca, RotOfs, RotPiv, ScaOfs, ScaPiv, PreRot, PstRot;
+        public int RotOrd;
     }
 
     /// <summary>blen_read_object_transform_preprocess + blen_read_object_transform_do: the helper's matrix (base @ geom), the
@@ -434,6 +452,7 @@ public static class FbxImport
             rotOrd = order >= 0 && order <= 5 ? (int)order : 0;   // 6 (spheric) and unknown values: XYZ
         }
         else { preRot = new double[3]; pstRot = new double[3]; rotOrd = 0; }
+        h.Transform = new TransformData { Loc = loc, Rot = rot, Sca = sca, GeomLoc = geomLoc, GeomRot = geomRot, GeomSca = geomSca, RotOfs = rotOfs, RotPiv = rotPiv, ScaOfs = scaOfs, ScaPiv = scaPiv, PreRot = preRot, PstRot = pstRot, RotOrd = rotOrd };
         var lclTranslation = MatTranslation(loc);
         var geomLocM = MatTranslation(geomLoc);
         var lclRot = MatMul(MatRotation(rot, rotOrd), Identity4());   // @ rot_alt_mat (the identity)

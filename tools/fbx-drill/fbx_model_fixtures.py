@@ -28,17 +28,19 @@ def connect(src, dst):
     return Node('C', [prop('S', 'OO'), prop('L', src), prop('L', dst)])
 
 
-def header(up=(1, 1), front=(2, 1), coord=(0, 1), unit=1.0, creator='fbx_model_fixtures'):
-    """Y up, -Z forward (the FBX SDK's default frame), centimetres."""
+def header(up=(1, 1), front=(2, 1), coord=(0, 1), unit=1.0, creator='fbx_model_fixtures', time_mode=11, custom_fps=24.0, header_version=1003, tc_definition=None, version=7400):
+    """Y up, -Z forward (the FBX SDK's default frame), centimetres; 24 fps unless told otherwise (6d: the TimeMode, the
+    CustomFrameRate a custom mode falls back to, a 1004 header with OtherFlags/TCDefinition picking the ktime)."""
     settings = properties(P('UpAxis', 'int', 'Integer', up[0]), P('UpAxisSign', 'int', 'Integer', up[1]),
                           P('FrontAxis', 'int', 'Integer', front[0]), P('FrontAxisSign', 'int', 'Integer', front[1]),
                           P('CoordAxis', 'int', 'Integer', coord[0]), P('CoordAxisSign', 'int', 'Integer', coord[1]),
                           P('UnitScaleFactor', 'double', 'Number', float(unit)), P('OriginalUnitScaleFactor', 'double', 'Number', float(unit)),
-                          P('TimeMode', 'enum', '', 11), P('CustomFrameRate', 'double', 'Number', 24.0))
+                          P('TimeMode', 'enum', '', time_mode), P('CustomFrameRate', 'double', 'Number', float(custom_fps)))
+    other_flags = [Node('OtherFlags', [], [Node('TCDefinition', [prop('I', tc_definition)])])] if tc_definition is not None else []
     model_template = Node('PropertyTemplate', [prop('S', 'FbxNode')], [properties(
         vec('Lcl Translation', 0, 0, 0, 'Lcl Translation', ''), vec('Lcl Rotation', 0, 0, 0, 'Lcl Rotation', ''), vec('Lcl Scaling', 1, 1, 1, 'Lcl Scaling', ''),
         P('RotationActive', 'bool', '', 0), P('RotationOrder', 'enum', '', 0), P('Visibility', 'Visibility', '', 1.0))])
-    return [Node('FBXHeaderExtension', [], [Node('FBXHeaderVersion', [prop('I', 1003)]), Node('FBXVersion', [prop('I', 7400)]), Node('Creator', [prop('S', creator)])]),
+    return [Node('FBXHeaderExtension', [], [Node('FBXHeaderVersion', [prop('I', header_version)]), Node('FBXVersion', [prop('I', version)]), Node('Creator', [prop('S', creator)])] + other_flags),
             Node('GlobalSettings', [], [Node('Version', [prop('I', 1000)]), settings]),
             Node('Definitions', [], [Node('Version', [prop('I', 100)]), Node('ObjectType', [prop('S', 'Model')], [model_template]),
                                      Node('ObjectType', [prop('S', 'Geometry')], []), Node('ObjectType', [prop('S', 'Material')], [])])]
@@ -212,9 +214,12 @@ if __name__ == '__main__':
     out = Path(sys.argv[1]); out.mkdir(parents=True, exist_ok=True)
     import fbx_material_fixtures   # sub-step 6b: materials, textures, images (and the image files beside the scenes)
     import fbx_armature_fixtures   # sub-step 6c: armatures, bones, skins, colour layers
+    import fbx_animation_fixtures  # sub-step 6d: animation stacks, layers, curves
     fbx_material_fixtures.write_assets(out)
     import itertools
-    for name, nodes in itertools.chain(fixtures(), fbx_material_fixtures.fixtures(), fbx_armature_fixtures.fixtures()):
+    for entry in itertools.chain(fixtures(), fbx_material_fixtures.fixtures(), fbx_armature_fixtures.fixtures(), fbx_animation_fixtures.fixtures()):
+        name, nodes = entry[0], entry[1]
+        version = entry[2] if len(entry) > 2 else 7400   # 6d: a file's own version (the ktime rule)
         path = out / (name + '.fbx')
-        write_fbx(path, 7400, nodes)
+        write_fbx(path, version, nodes)
         print(path.as_posix())
