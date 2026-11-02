@@ -230,8 +230,16 @@ public static class PngCodec
     /// <summary>Encode on one path: `native` names it. The two paths' bytes differ (two compressors), their pixels do not.</summary>
     internal static byte[] Encode(int width, int height, byte[] rgba, bool alpha, bool native)
     {
+        if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
+        if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
+        if (rgba == null) throw new ArgumentNullException(nameof(rgba));
+        long pixels = (long)width * height;
+        if (pixels > int.MaxValue / 4) throw new ArgumentOutOfRangeException(nameof(width), "PNG dimensions exceed managed buffer limits");
+        if (rgba.LongLength < pixels * 4) throw new ArgumentException("RGBA buffer is shorter than the image dimensions", nameof(rgba));
         int samples = alpha ? 4 : 3;
-        var raw = new byte[(width * samples + 1) * height];
+        long rawLength = pixels * samples + height;
+        if (rawLength > int.MaxValue) throw new ArgumentOutOfRangeException(nameof(width), "PNG scanlines exceed managed buffer limits");
+        var raw = new byte[(int)rawLength];
         byte[] zlib;
         if (native)
         {

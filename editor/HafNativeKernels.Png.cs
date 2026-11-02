@@ -59,13 +59,15 @@ public static partial class HafNativeKernels
     internal static int PngRows(byte[] raw, int width, int height, int bits, int ct, int samples, int bpp, long stride, byte[] palette, byte[] trns, byte[] outp)
     {
         Need(width > 0 && height > 0, "png rows: " + width + " x " + height);
+        // Two positive int dimensions fit in long; multiplying that product by four need not.
+        long pixels = (long)width * height;
+        Need(pixels <= outp.LongLength / 4, "png rows: " + outp.Length + " output bytes for " + width + " x " + height);
         Need(bits == 1 || bits == 2 || bits == 4 || bits == 8, "png rows: bit depth " + bits);
         Need(ct == 0 || ct == 2 || ct == 3 || ct == 4 || ct == 6, "png rows: colour type " + ct);
         Need(samples == (ct == 0 ? 1 : ct == 2 ? 3 : ct == 3 ? 1 : ct == 4 ? 2 : 4), "png rows: " + samples + " samples for colour type " + ct);
         Need(bpp == Math.Max(1, samples * bits / 8), "png rows: " + bpp + " bytes per pixel");
         Need(stride == ((long)width * samples * bits + 7) / 8, "png rows: stride " + stride);
         Need((stride + 1) * height <= raw.Length, "png rows: " + raw.Length + " raw bytes for " + height + " rows of " + (stride + 1));
-        Need((long)outp.Length >= (long)width * height * 4, "png rows: " + outp.Length + " output bytes for " + width + " x " + height);
         if (ct == 3) Need(palette != null, "png rows: a palette image without a palette");
         return haf_png_rows(raw, raw.Length, width, height, bits, ct, samples, bpp, stride, palette, palette == null ? 0 : palette.Length, trns, trns == null ? 0 : trns.Length, outp);
     }
@@ -74,7 +76,8 @@ public static partial class HafNativeKernels
     internal static void PngPack(byte[] rgba, int width, int height, bool alpha, byte[] raw)
     {
         Need(width > 0 && height > 0, "png pack: " + width + " x " + height);
-        Need((long)rgba.Length >= (long)width * height * 4, "png pack: " + rgba.Length + " pixel bytes for " + width + " x " + height);
+        long pixels = (long)width * height;
+        Need(pixels <= rgba.LongLength / 4, "png pack: " + rgba.Length + " pixel bytes for " + width + " x " + height);
         Need((long)raw.Length >= ((long)width * (alpha ? 4 : 3) + 1) * height, "png pack: " + raw.Length + " raw bytes");
         haf_png_pack(rgba, width, height, alpha ? 1 : 0, raw);
     }

@@ -18,6 +18,8 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   libdeflate 1.26 (vendored, `native/libdeflate/`, MIT) and SHA-256 through Windows CNG; the managed code is each kernel's
   twin and fallback, a PNG's pixels (never its bytes) are what the FBX model drill holds to Blender. The Bradley reads in
   3.2 s in Mono (4.2 s on .NET), the Ehrhardt in 2.1 s; the untextured mech is unchanged. `Tests/NativePngTests.cs`.
+  Review fixes reject overflowing image dimensions before native calls or allocation and serialize SHA-256 first-use
+  initialization. The rebuilt DLL passes 64 fresh-process concurrency runs; all 2,486 unit cases pass.
   Restart Unity after pulling: a loaded plugin is never replaced.
 - **THE NATIVE FBX READER, STEP 6f: THE PARITY DRILLS ON FBX SOURCES (2026-11-02).** The vehicle probe, vehicle_rig and
   rig_anim drills take an `.fbx` recipe or registry source: the C# side reads it as the Lab and the Factory do (the FBX reader;

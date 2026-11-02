@@ -207,4 +207,26 @@ public class NativePngTests
         Assert.Throws<IndexOutOfRangeException>(() => HafNativeKernels.ZlibCompress(raw, 0));
         Assert.Throws<IndexOutOfRangeException>(() => HafNativeKernels.ZlibCompress(raw, 13));
     }
+    [Fact]
+    public void Kernel_dimensions_cannot_wrap_the_buffer_guards()
+    {
+        NeedNative();
+        // width*height*4 overflows Int64, and (width*4+1)*height wraps to 17 in Int32.
+        // The former guards accepted these tiny buffers and called C++ out of bounds.
+        const int width = 1501975312, height = 1768226769;
+        Assert.Throws<IndexOutOfRangeException>(() => HafNativeKernels.PngPack(new byte[0], width, height, true, new byte[17]));
+        Assert.Throws<IndexOutOfRangeException>(() => HafNativeKernels.PngRows(new byte[17], width, height, 8, 6, 4, 4, (long)width * 4, null, null, new byte[0]));
+    }
+
+    [Theory]
+    [InlineData(true)] [InlineData(false)]
+    public void Encode_validates_dimensions_and_input_before_either_backend(bool native)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => PngCodec.Encode(1501975312, 1768226769, new byte[0], true, native));
+        Assert.Throws<ArgumentOutOfRangeException>(() => PngCodec.Encode(0, 1, new byte[4], true, native));
+        Assert.Throws<ArgumentOutOfRangeException>(() => PngCodec.Encode(1, -1, new byte[4], true, native));
+        Assert.Throws<ArgumentNullException>(() => PngCodec.Encode(1, 1, null, true, native));
+        Assert.Throws<ArgumentException>(() => PngCodec.Encode(2, 2, new byte[15], true, native));
+    }
+
 }

@@ -4188,6 +4188,19 @@ rounding's edges, SHA-256 against the managed digest around the block sizes, and
 
 What remains in Mono on the Bradley: eight inflates (0.13 s each), the compositions' four decodes, two encodes.
 
+Review of PR #242 adds overflow-safe validation before allocating PNG scanlines or entering a native row/packing
+kernel. The positive dimensions 1501975312 x 1768226769 previously wrapped an encoder allocation to 17 bytes and the
+Int64 capacity checks to negative values; an isolated no-op native probe confirmed all three unsafe entry paths.
+The encoder now validates dimensions, RGBA capacity and scanline capacity consistently on both backends. Three added
+unit cases cover these bounds and invalid inputs; all 2,486 unit cases pass.
+
+SHA-256 initialization also published a tried flag before resolving BCryptHash. In the fresh-process regression,
+30 of 32 callers returned unavailable while the provider was present. C++ local-static initialization now waits for
+resolution before publishing the pointer. The native gate checks SHA-256 and dissolve together in 64 fresh processes
+with 32 workers each; all passed after rebuilding the DLL. The DLL ABI remains version 8. All 33 vendored dependency
+files match the pinned libdeflate commit (after line-ending normalization).
+
+
 Review of PR #215 (2026-10-28): the DLL's dissolve initialization published its "tried" flag before resolving both
 trig functions. Parallel first calls could return status 3 while the first worker was still loading them (six of 64 fresh
 32-worker processes reproduced this with the original DLL). C++ local-static initialization now waits for completion;

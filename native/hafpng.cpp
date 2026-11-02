@@ -21,20 +21,26 @@ namespace
     // code at ~140 MB/s. Resolved at first use, as hafnormals.cpp resolves the C runtime's trig; absent, the caller keeps
     // the managed hash.
     typedef LONG (WINAPI* BCryptHashFn)(void* hAlgorithm, unsigned char* pbSecret, ULONG cbSecret, unsigned char* pbInput, ULONG cbInput, unsigned char* pbOutput, ULONG cbOutput);
-    BCryptHashFn bcryptHash = nullptr; bool bcryptTried = false;
+    BCryptHashFn Sha256Function()
+    {
+        // C++11 static initialization publishes the pointer only after resolution completes. A separate
+        // tried flag let concurrent callers observe "tried" with a null pointer and race on both fields.
+        static BCryptHashFn function = []() -> BCryptHashFn
+        {
+            HMODULE module = LoadLibraryW(L"bcrypt.dll");
+            return module != nullptr ? (BCryptHashFn)(void*)GetProcAddress(module, "BCryptHash") : nullptr;
+        }();
+        return function;
+    }
     const void* SHA256_PSEUDO_HANDLE = (const void*)(uintptr_t)0x00000041;   // BCRYPT_SHA256_ALG_HANDLE
 }
 
 // SHA-256 of n bytes into out (32 bytes). Returns 0, -1 when CNG's one-shot hash is not there, else CNG's status.
 EXPORT int haf_sha256(const uint8_t* d, int64_t n, uint8_t* out)
 {
-    if (!bcryptTried)
-    {
-        bcryptTried = true;
-        HMODULE m = LoadLibraryW(L"bcrypt.dll");
-        if (m != nullptr) bcryptHash = (BCryptHashFn)(void*)GetProcAddress(m, "BCryptHash");
-    }
-    if (bcryptHash == nullptr || n < 0 || n > 0xFFFFFFFFLL) return -1;
+    if (n < 0 || n > 0xFFFFFFFFLL) return -1;
+    BCryptHashFn bcryptHash = Sha256Function();
+    if (bcryptHash == nullptr) return -1;
     LONG s = bcryptHash((void*)SHA256_PSEUDO_HANDLE, nullptr, 0, (unsigned char*)d, (ULONG)n, out, 32);
     return s == 0 ? 0 : (int)s;
 }
