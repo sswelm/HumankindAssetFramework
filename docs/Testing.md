@@ -738,7 +738,10 @@ Z-up frame since 2026-09-12, the game draws a district FxMesh by the import angl
 Factory writes `DistrictBaker.DrawAngles` into it (the registry's legacy import angles, then the frame stood up, then
 Facing). The row bakes an eight-vertex box authored in the baker's frame through the real `BakeFxMesh` with those
 angles, reads the FxMesh back and measures the box under the asset's own angles, as the game draws it: standing on its
-footprint, floor on the tile, centred; Facing 90 turns it; a legacy roll about the baker's up turns it too. Before the
+footprint, floor on the tile, centred; Facing 90 turns it; a legacy roll about the baker's up turns it too. Three additional
+composition cases check an asymmetric part and its golden-angle copy under different base/part facings and legacy angles:
+every drawn vertex, normal and tangent must use the upright frame, with the part grounded and placed at its own offset.
+These failed before the review fix because composition still interpreted part vertices as Y-up. Before the
 row and the fix it guards, the window wrote Facing and the legacy angles alone and took the Factory's mesh as Y-up, so
 every district baked after the frame unified drew on its side (the breeder reactor's first bake since August, on the
 day of the fix). SKIP in a project without the SDK's `FxMesh` type.

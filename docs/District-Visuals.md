@@ -157,6 +157,8 @@ ground square pinned at the true in-game surface level. The placement controls s
    2026-09-12 the district path drew every bake on its side: it took the Factory's Z-up mesh as Y-up. The district
    now draws the baker's frame upright itself, through the FxMesh's own import angles, as the game's districts do;
    an entry dialed before that re-bakes into the new frame and may need its Rotation re-dialed once.)
+   Added parts and their copies use that same upright baker frame before their own Facing and placement are applied;
+   the base's legacy import angles and Facing do not tip or move them. Their normals and tangents follow the geometry.
 2. **Facing on tile — turn it** (0–360°, previewed LIVE). Always rotates the standing building about the vertical, so
    it can never tip the model; written into the FxMesh at Bake. The preview draws a **NESW compass rose** (2026-08-08)
    — lines to all four cardinals with letters reading North-up — because a district has no facing of its own: the

@@ -401,6 +401,10 @@ public static class DistrictBaker
         {
             int start = nv.Count;
             var vs = overrideVerts ?? m.vertices;   // copies share ONE leaf-scaled vertex array (the stem search is the slow part)
+            // Every Factory mesh, including parts, is stored Z-up. Place each part in drawn space before
+            // converting it into the base's storage frame; the entry's legacy angles/Facing belong to the base.
+            // Treating the part's stored vertices as Y-up left it sideways even after the base stood upright.
+            var partUp = BakerFrameUp;
             var ns = m.normals; var us = m.uv; var ts = m.tangents;
             bool hasN = ns != null && ns.Length == vs.Length;
             bool hasU = us != null && us.Length == vs.Length;
@@ -415,23 +419,23 @@ public static class DistrictBaker
                 // hex entirely). Pivot = the part's XZ bounds center; ground = its own lowest point.
                 var pmin = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
                 var pmax = new Vector3(float.MinValue, float.MinValue, float.MinValue);
-                for (int i = 0; i < vs.Length; i++) { pmin = Vector3.Min(pmin, vs[i]); pmax = Vector3.Max(pmax, vs[i]); }
+                for (int i = 0; i < vs.Length; i++) { var drawn = partUp * vs[i]; pmin = Vector3.Min(pmin, drawn); pmax = Vector3.Max(pmax, drawn); }
                 pivot = new Vector3((pmin.x + pmax.x) * 0.5f, 0f, (pmin.z + pmax.z) * 0.5f);
                 float minY = float.MaxValue;
-                for (int i = 0; i < vs.Length; i++) { float y = (Rp * (vs[i] - pivot)).y; if (y < minY) minY = y; }
+                for (int i = 0; i < vs.Length; i++) { float y = (Rp * (partUp * vs[i] - pivot)).y; if (y < minY) minY = y; }
                 // + baseCenterXZ so the offset is measured from the TILE CENTER (leveling subtracts baseCenter again)
                 shift = new Vector3(off.x + baseCenterXZ.x, baseMinY - minY + off.y, off.z + baseCenterXZ.z);
             }
             if (!isBase) Debug.Log($"[District] placement: offset ({off.x:0.0}, {off.y:0.0}, {off.z:0.0}) [X=east, Z=north] · facing {facing:0.0}° · lands at tile ({off.x:0.0}, {off.z:0.0}) from center");
             for (int i = 0; i < vs.Length; i++)
             {
-                nv.Add(isBase ? vs[i] : Rinv * (Rp * (vs[i] - pivot) + shift));
+                nv.Add(isBase ? vs[i] : Rinv * (Rp * (partUp * vs[i] - pivot) + shift));
                 var nrm = hasN ? ns[i] : Vector3.up;
-                nn.Add(isBase ? nrm : Rinv * (Rp * nrm));
+                nn.Add(isBase ? nrm : Rinv * (Rp * (partUp * nrm)));
                 var uv = hasU ? us[i] : Vector2.zero;
                 nu.Add(new Vector2(rect.x + uv.x * rect.width, rect.y + uv.y * rect.height));
                 var t4 = hasT ? ts[i] : new Vector4(1f, 0f, 0f, 1f);
-                if (!isBase) { var xyz = Rinv * (Rp * new Vector3(t4.x, t4.y, t4.z)); t4 = new Vector4(xyz.x, xyz.y, xyz.z, t4.w); }
+                if (!isBase) { var xyz = Rinv * (Rp * (partUp * new Vector3(t4.x, t4.y, t4.z))); t4 = new Vector4(xyz.x, xyz.y, xyz.z, t4.w); }
                 nt4.Add(t4);
             }
             var tris = new List<int>();

@@ -3218,6 +3218,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   import angles and Facing, so a Y-up glTF/FBX stands as authored at Rotation `0,0,0` and the Rotation offset means what it
   means in the unit Factory (pitch, heading, roll). Entries dialed before this re-bake into the new frame and may need their
   Rotation re-dialed once (the Oracle temple's `0,-90,-90` was dialed against the old frame).
+  Review also fixes composition: added parts and their copies now stand in that same frame before their own facing,
+  grounding and placement, with normals and tangents rotated alongside the geometry. Three asymmetric composition
+  regressions failed before the fix; all six district-frame cases pass in isolated Unity with the real SDK.
 - **STRATEGIC MESH FOOTPRINT + scoped-path migration (2026-08-15).** A district's zoomed-out strategic footprint is now
   its **own 3D building**, not a flat decal. The strategic fade turned out to be a **per-element GPU render-feature gate**
   (`FxEvolverMaterialLevelBuildElement.RenderFeatureSelector.SelectionFlags0`), not a camera swap — zeroing it (AlwaysEnabled)
