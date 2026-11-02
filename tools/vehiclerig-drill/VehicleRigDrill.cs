@@ -602,6 +602,9 @@ static class StageDrill
     static int Exported5, BytesEqual5, InProcessEqual;
     static long ExportRows5;
 
+    sealed class SecondLeave : Exception { public SecondLeave(string message) : base(message) { } }   // the second model (merge2) left by name
+    static HafModel ReadSecond(string path) { var m = HafModelLoader.ReadForVehicle(path, out string leave); if (m == null) throw new SecondLeave(leave); return m; }
+
     public static bool Compare(VehicleRigDump d, string key, int stages)
     {
         Compared++;
@@ -610,16 +613,22 @@ static class StageDrill
         try
         {
             args = BlenderVehicleRig.ParseArgs(d.Argv);
-            var m = BlenderVehicleRig.SourceFallback(args) == null ? GlbReader.Read(args.Input) : null;   // a .fbx/.obj/.blend source: not read, the model declines it by name
-            model = BlenderVehicleRig.RunStage1(m, args, GlbReader.Read);
+            // an .obj/.blend source: not read, the model declines it by name; an .fbx is read through the FBX reader as the Lab reads it
+            // (HafModelLoader.ReadForVehicle, step 6f) - one the vehicle import leaves (skinned, animated, the reader's own limit) is named
+            HafModel m = null; string leave = null;
+            if (BlenderVehicleRig.SourceFallback(args) == null) m = HafModelLoader.ReadForVehicle(args.Input, out leave);
+            try { model = m == null && leave != null ? new BlenderRigAnim.Stage1 { Fallback = leave } : BlenderVehicleRig.RunStage1(m, args, ReadSecond); }
+            catch (SecondLeave e) { model = new BlenderRigAnim.Stage1 { Fallback = e.Message }; }
         }
         catch (Exception e) { Console.WriteLine($"FAIL {key}: stage 1 model: {e.GetType().Name}: {e.Message}"); return false; }
         foreach (var note in model.Notes) Census[note] = (Census.TryGetValue(note, out int c) ? c : 0) + 1;
         if (model.Fallback != null)
         {
             Census["LEFT: " + model.Fallback] = (Census.TryGetValue("LEFT: " + model.Fallback, out int c) ? c : 0) + 1;
-            // left by NAME: a source the C# does not read (until the native readers); every other decline is a model that is wrong
-            bool named = BlenderVehicleRig.SourceFallback(args) != null || model.Fallback.StartsWith("the source-skeleton fast path", StringComparison.Ordinal)
+            // left by NAME: a source the C# does not read (.obj/.blend), an .fbx the vehicle import leaves (HafModelLoader.ReadForVehicle:
+            // skinned or animated, or the reader's own limit), the fast path; every other decline is a model that is wrong
+            bool named = BlenderVehicleRig.SourceFallback(args) != null || HafModelLoader.IsNamedFbxLeave(model.Fallback)
+                || model.Fallback.StartsWith("the source-skeleton fast path", StringComparison.Ordinal)
                 || (args.Unsupported != null && model.Fallback == args.Unsupported);
             if (!named) { Console.WriteLine($"FAIL {key}: stage 1 model leaves this job to Blender: {model.Fallback}"); return false; }
             Left++; Console.WriteLine($"STAGE1 {key}: left to Blender by name: {model.Fallback}"); return true;

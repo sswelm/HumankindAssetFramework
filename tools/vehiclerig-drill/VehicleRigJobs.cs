@@ -11,7 +11,7 @@
 //   JOB <key> <argv[0]> <argv[1]> ... <argv[k]>      the script's arguments after `--`; argv[2] (the output GLB) and argv[3]
 //                                                     (the preview FBX) are the dump's to replace: the key's own files
 //   FAST <key> <argv...>                              the same for a recipe on the source-skeleton fast path (rigfast)
-//   LEFT <key> <reason>                               a recipe over the size limit (FULL=1 / --all takes them)
+//   LEFT <key> <reason>                               a recipe over the size limit (FULL=1 / --all takes them) or an .obj/.blend source
 //   UNAVAILABLE <key> <reason>                        the source model is not on this machine (exit 3)
 //   INVALID <key> <reason>                            the recipe cannot be read (exit 1)
 // A key is the recipe file's stem; a name may hold TAB-free characters only (a TAB in a part name is INVALID).
@@ -49,7 +49,7 @@ static class VehicleRigJobs
                 if (!File.Exists(a.srcFile)) { Console.WriteLine($"UNAVAILABLE\t{key}\tsource missing: {a.srcFile}"); unavailable++; continue; }
                 if (a.srcFile2.Length > 0 && !File.Exists(a.srcFile2)) { Console.WriteLine($"UNAVAILABLE\t{key}\tsecond model missing: {a.srcFile2}"); unavailable++; continue; }
                 string srcExt = Path.GetExtension(a.srcFile).ToLowerInvariant();
-                if (srcExt != ".glb" && srcExt != ".gltf") { Console.WriteLine($"LEFT\t{key}\tthe source is {srcExt} - left by name until the drill's oracle runs on Blender's own GLB export of it (step 6f)"); continue; }
+                if (srcExt != ".glb" && srcExt != ".gltf" && srcExt != ".fbx") { Console.WriteLine($"LEFT\t{key}\tthe source is {srcExt}: Blender's own importer, not read here"); continue; }   // an .fbx reads through the FBX reader (step 6f)
                 double mb = new FileInfo(a.srcFile).Length / 1048576.0 + (a.srcFile2.Length > 0 ? new FileInfo(a.srcFile2).Length / 1048576.0 : 0);
                 if (!all && mb > maxMb) { Console.WriteLine($"LEFT\t{key}\tover {maxMb:0} MB ({mb:0.0} MB; FULL=1 takes it)"); continue; }
                 // the names files, as the window writes them (one name per line, the recipe's order), under <work>/<key>/

@@ -10,7 +10,7 @@ Two kinds of job:
     its frame - baked into the vertices exactly as Blender bakes it), the same pair with A and B swapped (the single-mesh
     split on each side, and the order the loose parts are linked in), placement_nested.glb with two placements (a part
     with children and a loose part of a split), insideout.glb judged under proberot=0,0,90;
-  * the RECIPE jobs: every saved recipe whose source is a .glb/.gltf on disk and that sets a second model (also .glb/.gltf,
+  * the RECIPE jobs: every saved recipe whose source is a .glb/.gltf/.fbx on disk and that sets a second model (likewise,
     on disk), a placement or an orientation - probed with the recipe's exact arguments, formatted as the Lab formats them
     (merge2: five decimals, the legacy uniform scale times the per-axis one; parttx: four decimals; proberot: two). These
     are the probe's real inputs: recipe_check.py judges the stored B_ and placed parts against these rows.
@@ -99,13 +99,13 @@ def recipe_jobs(project):
         except Exception:
             continue
         src = (r.get("srcFile") or "").strip()
-        if not src.lower().endswith((".glb", ".gltf")) or not os.path.isfile(src):
+        if not src.lower().endswith((".glb", ".gltf", ".fbx")) or not os.path.isfile(src):   # an .fbx reads through the FBX reader (6f)
             continue
         job = {"key": key_of(src, os.path.splitext(os.path.basename(f))[0]), "file": src.replace("\\", "/")}
         src2 = (r.get("srcFile2") or "").strip()
         if src2:
-            if not src2.lower().endswith((".glb", ".gltf")) or not os.path.isfile(src2):
-                continue   # Blender keeps a non-glTF second model; a missing one cannot be probed on either side
+            if not src2.lower().endswith((".glb", ".gltf", ".fbx")) or not os.path.isfile(src2):
+                continue   # Blender keeps an .obj/.blend second model; a missing one cannot be probed on either side
             job["merge2"] = merge2_text(src2, r.get("model2Off") or {"x": 0, "y": 0, "z": 0}, r.get("model2Rot") or {"x": 0, "y": 0, "z": 0},
                                         r.get("model2Scale", 1.0), r.get("model2ScaleXYZ") or {"x": 1, "y": 1, "z": 1})
         placed = [placement_line(p) for p in (r.get("parts") or []) if is_placed(p)]

@@ -10,6 +10,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE NATIVE FBX READER, STEP 6f: THE PARITY DRILLS ON FBX SOURCES (2026-11-02).** The vehicle probe, vehicle_rig and
+  rig_anim drills take an `.fbx` recipe or registry source: the C# side reads it as the Lab and the Factory do (the FBX reader;
+  a skinned or animated vehicle `.fbx`, or one the reader leaves by name, is LEFT by name as the Lab leaves it), Blender's side
+  runs its script on Blender's own GLB export of the file (`oracle_fbx_glb` in `tools/blender_oracle.sh`, through
+  `Tools/fbx_export.py` under the recorded oracle) - the convention the native model is held to. The Bradley recipe is probed
+  and rigged in C# against Blender, the light assault mech's rig_anim run is held to Blender through all five stages and the
+  export from the `.fbx`; the Ehrhardt recipe (skinned) is left by name. `.obj`/`.blend` sources stay Blender's.
 - **THE NATIVE FBX READER, STEP 6e: THE LOADER, WIRED INTO THE FACTORY AND THE LAB (2026-11-02).** `editor/HafModelLoader.cs`
   reads a `.glb`/`.gltf` through GlbReader and an `.fbx` through the native reader (FbxImport + FbxModel: the model Blender's
   FBX import and glTF export would write), and hands an `.fbx` the reader leaves by name to Blender as any other named limit.

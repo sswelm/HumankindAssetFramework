@@ -3,10 +3,11 @@
 A recipe (Assets/FactorySource/VehicleLab/Recipes/*.json) stores the parts Blender's probe listed when it was saved -
 name, vertices, centre, size - and keys every role and placement by the part's NAME. That is the product's own
 oracle: a probe that names a part differently orphans the recipe's markings. For each recipe whose source is a
-.glb/.gltf on disk, every stored part must be in the C# probe's rows for that source, with the same vertex count
+.glb/.gltf/.fbx on disk, every stored part must be in the C# probe's rows for that source, with the same vertex count
 and, where the part carries no placement, the same box.
 
     python recipe_check.py --list <projectDir>                          the recipes' .glb/.gltf sources that exist, one per line
+    python recipe_check.py --list-readable <projectDir>                 the same with the .fbx sources (the probe drill's list, 6f)
     python recipe_check.py <projectDir> <csharp rows> [<differing out>]  SAME / DIFFERS per recipe; the sources of the
                                                                         recipes that differ are written to <differing out>
 
@@ -35,38 +36,46 @@ def is_gltf(p):
     return p.lower().endswith((".glb", ".gltf"))
 
 
+def is_readable(p):   # what the Lab reads in process (HafModelLoader.ReadForVehicle): glTF, and an .fbx through the native reader (6f)
+    return p.lower().endswith((".glb", ".gltf", ".fbx"))
+
+
 def key(p):
     return p.replace("\\", "/").lower()
 
 
 def load_rows(path):
-    files = {}
+    files = {}; left = {}   # left: the files the vehicle import LEFT to Blender by name (an .fbx that is skinned or animated, or the reader's limit)
     for line in open(path, encoding="utf-8", errors="replace"):
         t = line.rstrip("\r\n").split("\t", 2)
+        if len(t) == 3 and t[0] == "LEFT":
+            left[t[1]] = t[2]; continue
         if len(t) < 3 or t[0] != "ROW" or not t[2].startswith("PART|"):
             continue
         f = t[2].split("|")
         name = "|".join(f[1:len(f) - 6]); tail = f[len(f) - 6:]
         files.setdefault(t[1], {})[name] = (int(tail[0]), [float(x) for x in tail[1].split(",")], [float(x) for x in tail[2].split(",")])
-    return files
+    return files, left
 
 
 def main(argv):
-    if argv[1] == "--list":
-        seen = set()
+    if argv[1] in ("--list", "--list-readable"):
+        seen = set(); take = is_readable if argv[1] == "--list-readable" else is_gltf
         for _, r in recipes(argv[2]):
             p = r.get("srcFile") or ""
-            if p and is_gltf(p) and os.path.isfile(p) and key(p) not in seen:
+            if p and take(p) and os.path.isfile(p) and key(p) not in seen:
                 seen.add(key(p)); print(p.replace("\\", "/"))
         return 0
-    project, rows = argv[1], load_rows(argv[2])
+    project, (rows, left) = argv[1], load_rows(argv[2])
     fails = 0; judged = 0; parts_checked = 0; differing = []
     for f, r in recipes(project):
         name = os.path.basename(f); src = r.get("srcFile") or ""
-        if not src or not is_gltf(src):
+        if not src or not is_readable(src):
             print(f"NOTE {name}: source is {os.path.splitext(src)[1] or 'unset'} - Blender keeps those, not judged"); continue
         if not os.path.isfile(src):
             print(f"NOTE {name}: source {src} is not on this machine - not judged"); continue
+        if key(src) in left:
+            print(f"NOTE {name}: the vehicle import leaves its source to Blender by name - not judged ({left[key(src)]})"); continue
         own_key = key(src) + "#" + os.path.splitext(name)[0]
         with_inputs = own_key in rows   # probed with the recipe's second model, placements and orientation
         have = rows.get(own_key) or rows.get(key(src))

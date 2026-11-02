@@ -534,9 +534,9 @@ static class Stage1Drill
         BlenderRigAnim.Stage1 model; BlenderRigAnim.Args args;
         try
         {
-            var m = GlbReader.Read(d.Argv[0]);
+            var m = HafModelLoader.Read(d.Argv[0], out string leave);   // an .fbx through the FBX reader (step 6f); one it leaves by name is a named leave below
             args = BlenderRigAnim.ParseArgs(argv);
-            model = BlenderRigAnim.RunStage1(m, args);
+            model = m == null ? new BlenderRigAnim.Stage1 { Fallback = leave } : BlenderRigAnim.RunStage1(m, args);
         }
         catch (Exception e) { Console.WriteLine($"FAIL {key}: stage 1 model: {e.GetType().Name}: {e.Message}"); return false; }
         // a LEFT: key names a job the C# leaves to Blender by name: the model must say so, and a model that takes it is wrong too
@@ -545,7 +545,7 @@ static class Stage1Drill
         if (model.Fallback != null)
         {
             foreach (var note in model.Notes) Census[note] = (Census.TryGetValue(note, out int c) ? c : 0) + 1;
-            if (!left) { Console.WriteLine($"FAIL {key}: stage 1 model leaves this file to Blender: {model.Fallback}"); return false; }
+            if (!left && !HafModelLoader.IsNamedFbxLeave(model.Fallback)) { Console.WriteLine($"FAIL {key}: stage 1 model leaves this file to Blender: {model.Fallback}"); return false; }
             Left++; Console.WriteLine($"STAGE1 {key}: left to Blender by name, as the model says: {model.Fallback}"); return true;
         }
         var rows = model.Exits ? null : BlenderRigAnim.Render(model, 1);
