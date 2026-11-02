@@ -10,6 +10,19 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE NATIVE FBX READER, STEP 6c: ARMATURES, BONES, SKINS AND COLOUR LAYERS, HELD TO BLENDER (2026-11-02).**
+  `editor/FbxArmature.cs` ports the FBX importer's helper-node passes (find_armatures, find_fake_bones, the bind poses from
+  every BindPose and from the clusters, make_bind_pose_local, collect_armature_meshes, build_hierarchy's edit bones from
+  `parent @ bind.normalized()` - head, tail, the full-twist roll - and link_hierarchy's bone parenting, parent inverse and
+  vertex groups) and the glTF exporter's joints (after their children, against their parent joint or the armature, without
+  normalization or snapping), skins (one per armature, inverse bind matrices column by column, the neutral bone, unused skins
+  last) and skinned primitives (through BlenderExport.MeshPrimitives with a Skin). Colour layers enter as BYTE_COLOR corner
+  attributes and leave through the exporter's colour plan. The model drill now holds skins, joints, weights and colour sets to
+  Blender: the Ehrhardt (14 bones, 51,393 skinned vertices, two colour sets) and five scenes identical, two named fallbacks (an
+  object under a posed bone, which waits for the pose evaluation of 6d; a colour layer Blender asserts on). Fourteen planted
+  deviations each failed the drill. Found on the way: quat_split_swing_and_twist returns twice the half angle (the roll of
+  one Ehrhardt bone differed by a factor two until it did); `vg.add` ignores an index outside the mesh and clamps the weight;
+  Python's `for child in children` over a list a nested armature shortens skips an element. 6 test cases hold Blender's answers.
 - **THE NATIVE FBX READER, STEP 6b: MATERIALS, TEXTURES AND IMAGES, HELD TO BLENDER (2026-11-02).** `editor/FbxMaterials.cs`
   reads every Material as Blender 5.1's FBX importer builds its node tree (blen_read_material through
   PrincipledBSDFWrapper: the colour, specular, roughness, alpha, metallic, bump and emission formulas with their clamps into

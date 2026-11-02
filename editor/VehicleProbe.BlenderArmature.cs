@@ -271,7 +271,7 @@ public static partial class VehicleProbe
 
     // ---- mathutils
     /// <summary>Vector.length: sqrt (double) of dot_vn_vn - float products summed in double from the LAST element down.</summary>
-    static double VecLength(float[] v) { double d = 0; for (int i = 2; i >= 0; i--) d += (double)(float)(v[i] * v[i]); return Math.Sqrt(d); }
+    internal static double VecLength(float[] v) { double d = 0; for (int i = 2; i >= 0; i--) d += (double)(float)(v[i] * v[i]); return Math.Sqrt(d); }
 
     // which branches a run took, for the drill's coverage rows (ArmatureResult.Notes); null outside BlenderArmature
     [ThreadStatic] static List<string> armatureNotes;

@@ -10,7 +10,9 @@ using System.Text;
 // primitives' material NAMES, vertex counts, positions, normals, UV sets and indices as bits), the materials in order with
 // every field (6b: the factors as bits, the texture references, the alpha mode, the extensions object structurally), the
 // textures (image, sampler), the samplers (structurally), the images (name, MIME type, the bytes - or the decoded PIXELS of
-// an image the exporter composes anew) and extensionsUsed. Exit 1 on any difference; a named fallback is a SKIP row. An
+// an image the exporter composes anew), extensionsUsed, and (6c) every node's skin, every skin (name, joints, inverse bind
+// matrices as bits), every primitive's joints and weights as bits and its colour sets as the reader decodes them. Exit 1
+// on any difference; a named fallback is a SKIP row. An
 // oracle given as "-" means Blender's import failed: a SKIP when the reader declined the file too, else a DIFF.
 static class FbxModelDrill
 {
@@ -24,6 +26,26 @@ static class FbxModelDrill
             var m = FbxModel.Build(scene, out string why);
             if (m == null) { Console.WriteLine("FALLBACK " + why); return 0; }
             Console.WriteLine(Describe(m));
+            return 0;
+        }
+        if (args[0] == "--probe-bones")
+        {
+            // per armature and bone: the local bind matrix, the edit matrix, the edit bone and matrix_local, as bits (against a Blender probe)
+            var scene = FbxImport.Read(args[1]);
+            if (scene.Fallback != null) { Console.WriteLine("FALLBACK " + scene.Fallback); return 0; }
+            foreach (var arm in scene.Armatures)
+            {
+                Console.WriteLine("ARMATURE '" + arm.Obj.Name + "' world " + string.Join(" ", arm.Obj.World.Select(FBits)));
+                foreach (var b in arm.Bones)
+                {
+                    Console.WriteLine("BONE '" + b.Name + "' parent " + (b.Parent != null ? "'" + b.Parent.Name + "'" : "None"));
+                    Console.WriteLine("  bonematrix " + string.Join(" ", VehicleProbe.ToColumnMajor(b.BoneMatrixEdit).Select(FBits)));
+                    Console.WriteLine("  head " + string.Join(" ", b.Head.Select(FBits)) + " tail " + string.Join(" ", b.Tail.Select(FBits)) + " roll " + FBits(b.Roll));
+                    Console.WriteLine("  local " + string.Join(" ", b.MatrixLocal.Select(FBits)));
+                    var m3 = new float[9]; var bm = b.BoneMatrixEdit; for (int col = 0; col < 3; col++) for (int row = 0; row < 3; row++) m3[col * 3 + row] = bm[row * 4 + col];
+                    var tr = new StringBuilder(); FbxArmature.Mat3VecToRoll(m3, m3[3], m3[4], m3[5], tr); Console.Write(tr.ToString().Replace("\n", "\n  ").TrimEnd(' '));
+                }
+            }
             return 0;
         }
         if (args[0] == "--probe")
@@ -54,7 +76,7 @@ static class FbxModelDrill
                 if (glb == "-") { Console.WriteLine("DIFF " + fbx + " : Blender's import failed where the reader built a model"); failed++; continue; }
                 var theirs = GlbReader.Read(glb);
                 string d = Compare(mine, theirs, composed, ReadImageEvidence(glb, theirs));
-                if (d == null) { Console.WriteLine("PASS " + fbx + " : " + mine.Nodes.Count + " nodes, " + mine.Meshes.Count + " meshes, " + mine.Materials.Count + " materials, " + mine.Textures.Count + " textures, " + mine.Images.Count + " images" + (composed.Count > 0 ? " (" + composed.Count + " composed: pixels compared)" : "") + (scene.Notes.Count > 0 ? " (notes: " + string.Join("; ", scene.Notes.Distinct().Take(6)) + ")" : "")); compared++; }
+                if (d == null) { Console.WriteLine("PASS " + fbx + " : " + mine.Nodes.Count + " nodes, " + mine.Meshes.Count + " meshes, " + mine.Materials.Count + " materials, " + mine.Textures.Count + " textures, " + mine.Images.Count + " images" + (mine.Skins.Count > 0 ? ", " + mine.Skins.Count + " skins (" + mine.Skins.Sum(k => k.Joints.Length) + " joints)" : "") + (composed.Count > 0 ? " (" + composed.Count + " composed: pixels compared)" : "") + (scene.Notes.Count > 0 ? " (notes: " + string.Join("; ", scene.Notes.Distinct().Take(6)) + ")" : "")); compared++; }
                 else { Console.WriteLine("DIFF " + fbx + " : " + d); failed++; }
             }
             catch (Exception e) { Console.WriteLine("ERROR " + fbx + " : " + e.GetType().Name + ": " + e.Message); failed++; }
@@ -82,6 +104,7 @@ static class FbxModelDrill
             if (x.Parent != y.Parent) return $"node {i} '{x.Name}': parent {x.Parent} vs {y.Parent}";
             if (!x.Children.SequenceEqual(y.Children)) return $"node {i} '{x.Name}': children [{string.Join(",", x.Children)}] vs [{string.Join(",", y.Children)}]";
             if (x.Mesh != y.Mesh) return $"node {i} '{x.Name}': mesh {x.Mesh} vs {y.Mesh}";
+            if (x.Skin != y.Skin) return $"node {i} '{x.Name}': skin {x.Skin} vs {y.Skin}";
             if (x.HasMatrix != y.HasMatrix) return $"node {i} '{x.Name}': matrix";
             string t = Trs(x.Translation, y.Translation, "translation", 3); if (t != null) return $"node {i} '{x.Name}': {t}";
             t = Trs(x.Rotation, y.Rotation, "rotation", 4); if (t != null) return $"node {i} '{x.Name}': {t}";
@@ -106,12 +129,34 @@ static class FbxModelDrill
                 int um = u.UvMore?.Count ?? 0, vm = v.UvMore?.Count ?? 0;
                 if (um != vm) return $"{where}: {um + 2} uv sets vs {vm + 2}";
                 for (int k = 0; k < um; k++) { d = Floats(u.UvMore[k], v.UvMore[k], "uv" + (k + 2), 2); if (d != null) return where + ": " + d; }
+                d = Floats(u.Weights, v.Weights, "weights", 4); if (d != null) return where + ": " + d;
+                if ((u.Joints == null) != (v.Joints == null)) return where + ": joints " + (u.Joints == null ? "missing here" : "missing in Blender's");
+                if (u.Joints != null) { if (u.Joints.Length != v.Joints.Length) return $"{where}: {u.Joints.Length / 4} joint sets vs {v.Joints.Length / 4}"; for (int k = 0; k < u.Joints.Length; k++) if (u.Joints[k] != v.Joints[k]) return $"{where}: joint {k / 4}[{k % 4}]: {u.Joints[k]} vs {v.Joints[k]}"; }
+                if ((u.Joints1 == null) != (v.Joints1 == null)) return where + ": a second joint set " + (u.Joints1 == null ? "missing here" : "missing in Blender's");
+                d = Floats(u.Colors, v.Colors, "COLOR_0", 4); if (d != null) return where + ": " + d;
+                int cm = u.ColorMore?.Count ?? 0, cn = v.ColorMore?.Count ?? 0;
+                if (cm != cn) return $"{where}: {cm + (u.Colors != null ? 1 : 0)} colour sets vs {cn + (v.Colors != null ? 1 : 0)}";
+                for (int k = 0; k < cm; k++) { d = Floats(u.ColorMore[k], v.ColorMore[k], "COLOR_" + (k + 1), 4); if (d != null) return where + ": " + d; }
                 if ((u.Indices == null) != (v.Indices == null)) return where + ": indexed vs not";
                 if (u.Indices != null)
                 {
                     if (u.Indices.Length != v.Indices.Length) return $"{where}: {u.Indices.Length} indices vs {v.Indices.Length}";
                     for (int k = 0; k < u.Indices.Length; k++) if (u.Indices[k] != v.Indices[k]) return $"{where}: index {k}: {u.Indices[k]} vs {v.Indices[k]}";
                 }
+            }
+        }
+        if (a.Skins.Count != b.Skins.Count) return $"skins: {a.Skins.Count} vs Blender's {b.Skins.Count}";
+        for (int i = 0; i < a.Skins.Count; i++)
+        {
+            var x = a.Skins[i]; var y = b.Skins[i];
+            if (x.Name != y.Name) return $"skin {i}: name '{x.Name}' vs '{y.Name}'";
+            if (x.Skeleton != y.Skeleton) return $"skin {i} '{x.Name}': skeleton {x.Skeleton} vs {y.Skeleton}";
+            if (!x.Joints.SequenceEqual(y.Joints)) return $"skin {i} '{x.Name}': joints [{string.Join(",", x.Joints)}] vs [{string.Join(",", y.Joints)}]";
+            if ((x.InverseBindMatrices == null) != (y.InverseBindMatrices == null)) return $"skin {i} '{x.Name}': inverse bind matrices " + (x.InverseBindMatrices == null ? "missing here" : "missing in Blender's");
+            if (x.InverseBindMatrices != null)
+            {
+                if (x.InverseBindMatrices.Length != y.InverseBindMatrices.Length) return $"skin {i} '{x.Name}': {x.InverseBindMatrices.Length / 16} inverse bind matrices vs {y.InverseBindMatrices.Length / 16}";
+                for (int k = 0; k < x.InverseBindMatrices.Length; k++) if (Bits(x.InverseBindMatrices[k]) != Bits(y.InverseBindMatrices[k])) return $"skin {i} '{x.Name}': inverse bind matrix {k / 16} [{k % 16}]: {Bits(x.InverseBindMatrices[k])} ({x.InverseBindMatrices[k]}) vs {Bits(y.InverseBindMatrices[k])} ({y.InverseBindMatrices[k]})";
             }
         }
         return CompareMaterials(a, b, composed, imageModes);
@@ -257,7 +302,7 @@ static class FbxModelDrill
         for (int i = 0; i < m.Nodes.Count; i++)
         {
             var n = m.Nodes[i];
-            sb.Append("node ").Append(i).Append(" \"").Append(n.Name).Append("\" parent=").Append(n.Parent).Append(" mesh=").Append(n.Mesh).Append(" children=[").Append(string.Join(",", n.Children)).Append("] t=").Append(string.Join(",", n.Translation.Select(Bits)))
+            sb.Append("node ").Append(i).Append(" \"").Append(n.Name).Append("\" parent=").Append(n.Parent).Append(" mesh=").Append(n.Mesh).Append(" skin=").Append(n.Skin).Append(" children=[").Append(string.Join(",", n.Children)).Append("] t=").Append(string.Join(",", n.Translation.Select(Bits)))
               .Append(" r=").Append(string.Join(",", n.Rotation.Select(Bits))).Append(" s=").Append(string.Join(",", n.Scale.Select(Bits))).Append('\n');
         }
         for (int i = 0; i < m.Meshes.Count; i++)
@@ -274,6 +319,7 @@ static class FbxModelDrill
               .Append(" alpha=").Append(mt.AlphaMode).Append(" tex base=").Append(mt.BaseColorTexture).Append(" mr=").Append(mt.MetallicRoughnessTexture).Append(" normal=").Append(mt.NormalTexture).Append('/').Append(mt.NormalScale)
               .Append(" emissive=").Append(mt.EmissiveTexture).Append(" [").Append(string.Join(",", mt.EmissiveFactorJson)).Append("] ext=").Append(mt.ExtensionsJson ?? "-").Append('\n');
         }
+        for (int i = 0; i < m.Skins.Count; i++) sb.Append("skin ").Append(i).Append(" \"").Append(m.Skins[i].Name).Append("\" joints=[").Append(string.Join(",", m.Skins[i].Joints)).Append("] ibm0=").Append(m.Skins[i].InverseBindMatrices == null ? "-" : string.Join(",", m.Skins[i].InverseBindMatrices.Take(16).Select(Bits))).Append('\n');
         for (int i = 0; i < m.Textures.Count; i++) sb.Append("texture ").Append(i).Append(" source=").Append(m.Textures[i].Source).Append(" sampler=").Append(m.Textures[i].Sampler).Append('\n');
         for (int i = 0; i < m.Samplers.Count; i++) sb.Append("sampler ").Append(i).Append(' ').Append(m.Samplers[i]).Append('\n');
         for (int i = 0; i < m.Images.Count; i++) sb.Append("image ").Append(i).Append(" \"").Append(m.Images[i].Name).Append("\" ").Append(m.Images[i].MimeType).Append(' ').Append(m.Images[i].Bytes?.Length ?? 0).Append(" bytes\n");

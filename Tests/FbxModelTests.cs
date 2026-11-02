@@ -189,13 +189,13 @@ public class FbxModelTests
     public void Files_outside_the_sub_step_are_named_as_blender_s()
     {
         var bones = Scene(new[] { Model(1, "A"), Object("Model", 2, "Bone", "LimbNode") }, new[] { C(1, 0), C(2, 1) });
-        Assert.StartsWith("bones", bones.Fallback);
+        Assert.Null(bones.Fallback); Assert.Single(bones.Armatures);   // since 6c: an armature inserted above the fake bone A
         var anim = Scene(new[] { Model(1, "A"), Object("AnimationStack", 60, "Take", ""), Object("AnimationLayer", 61, "Base", ""), Object("AnimationCurveNode", 70, "T", "") }, new[] { C(1, 0), C(61, 60), C(70, 61) });
         Assert.StartsWith("animation", anim.Fallback);
         var emptyStack = Scene(new[] { Model(1, "A"), Object("AnimationStack", 60, "Take", ""), Object("AnimationLayer", 61, "Base", "") }, new[] { C(1, 0), C(61, 60) });
         Assert.Null(emptyStack.Fallback);   // a stack without curves makes no action
         var colours = Scene(new[] { Model(1, "A"), Geometry(30, "G", CubeV, CubeF, null, Layer("Color", "Colors", "ByPolygonVertex", "Direct", new double[96])) }, new[] { C(1, 0), C(30, 1) });
-        Assert.Contains("colour", colours.Fallback);
+        Assert.Null(colours.Fallback);   // since 6c: a colour layer is read
         var d = new FbxDocument { Version = 7400 };
         d.Nodes.Add(With(N("Objects"), Model(1, "A"))); d.Nodes.Add(With(N("Connections"), C(1, 0)));
         Assert.Contains("GlobalSettings", FbxImport.Build(FbxScene.Read(d)).Fallback);
@@ -275,9 +275,11 @@ public class FbxModelTests
     }
 
     [Fact]
-    public void Unsupported_files_decline_before_evaluating_their_unmodelled_data()
+    public void A_skin_deformer_without_clusters_is_never_visited_as_blenders_importer_walks_from_the_clusters()
     {
-        var s = Scene(new[] { Object("Deformer", 40, "BrokenSkin", "Skin"), Model(1, "A"), Model(2, "B") }, new[] { C(1, 2), C(2, 1) });
-        Assert.Contains("deformers", s.Fallback);
+        var s = Scene(new[] { Object("Deformer", 40, "BrokenSkin", "Skin"), Model(1, "A"), Model(2, "B") }, new[] { C(1, 0), C(2, 1) });
+        Assert.Null(s.Fallback); Assert.Empty(s.Armatures);
+        var blend = Scene(new[] { Object("Deformer", 40, "Morph", "BlendShape"), Model(1, "A") }, new[] { C(1, 0) });
+        Assert.Contains("BlendShape", blend.Fallback);
     }
 }
