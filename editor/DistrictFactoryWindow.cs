@@ -597,6 +597,15 @@ public class DistrictFactoryWindow : EditorWindow
         bool districtBakeUndecided = false;   // an unsettled registry save that couldn't be read back: keep the backup, restore nothing
         try
         {
+        // WALL-CLOCK TIMING per district step (2026-11-02): the Factory prints its own, the steps after it printed none, and
+        // "baking is extremely slow" could not be placed from the Console. One line per step, as the Factory's.
+        var swBake = System.Diagnostics.Stopwatch.StartNew(); double tPrev = 0;
+        void Lap(string what)
+        {
+            double t = swBake.Elapsed.TotalSeconds;
+            Debug.Log($"[District] {cur.resourceName} timing: {what,-44} {t - tPrev,5:0.0}s   (total {t:0.0}s)");
+            tPrev = t;
+        }
 
         // 1) the same static bake core as the unit Factory — pawnDescription stays empty (registry-only field, unused by Build)
         var cfg = new BakeConfig
@@ -609,6 +618,7 @@ public class DistrictFactoryWindow : EditorWindow
         };
         var r = UniversalBaker.Build(cfg);
         if (!r.ok) { status = "Bake FAILED: " + r.error; return; }
+        Lap("Factory bake (its own timing lines above)");
         if (UniversalBaker.LastPrepSourceTris > 0) cur.sourceTris = UniversalBaker.LastPrepSourceTris;
 
         // 2) wrap the baked mesh as the bone-free district FxMesh
@@ -699,6 +709,7 @@ public class DistrictFactoryWindow : EditorWindow
             int totalCopies = 0; foreach (var p in cur.parts) totalCopies += p.copies != null ? p.copies.Count : 0;
             composeReceipt = $"composed: {cur.parts.Count} part(s) + {totalCopies} cop(ies) · super-atlas {superAtlasW}x{superAtlasH} {(superHasAlpha ? "DXT5 (alpha kept)" : "DXT1 (opaque)")} · base-anchored center";
             Debug.Log($"[District] {composeReceipt}");
+            Lap("compose: parts baked, super atlases");
         }
 
         // FOUNDATION: append a concrete swatch to the atlas (grows it + remaps the mesh UVs), then extrude the
@@ -714,10 +725,12 @@ public class DistrictFactoryWindow : EditorWindow
             var fa = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Resources/" + cur.resourceName + "_Atlas.asset");
             if (fm != null && fa != null) { fm.mainTexture = fa; EditorUtility.SetDirty(fm); AssetDatabase.SaveAssets(); }
         }
+        Lap("concrete strip (atlas rewrite)");
         string guid = DistrictBaker.BakeFxMesh(mesh, cur.resourceName, ComposedImportAngles(), out _,
             levelOnGround: !composedLeveled, postLevelOffset: composedLeveled ? Vector3.zero : cur.posOffset, clipHexPct: cur.clipHexPct,
             foundationDepth: cur.foundationDepth, foundationUV: foundationUV);
         if (string.IsNullOrEmpty(guid)) { status = "District FxMesh bake FAILED (see Console)."; return; }
+        Lap("FxMesh bake (level, clip, plinth, two mesh assets)");
         cur.fxMeshGuid = guid;
         cur.posOffsetBaked = cur.posOffset;   // the preview shows future posOffset edits as a live delta against this
 
@@ -748,10 +761,13 @@ public class DistrictFactoryWindow : EditorWindow
         else
             Debug.LogWarning($"[District] '{cur.resourceName}': scoped selector NOT baked ({selErr}) — the district stays on the legacy path. Pick a single-building Footprint template (Tools/HAF/District/Footprint template...) and re-bake to migrate it.");
 
+        Lap("scoped selector (+ atlas guids)");
         LoadPreviewAssets(force: true);
+        Lap("preview assets reload");
 
         // 3) registry entry
         var saveOutcome = DistrictRegistry.UpsertOutcome(cur);
+        Lap("registry save");
         if (saveOutcome == RegistryRules.SaveOutcome.Unknown)
         {
             // UNSETTLED (critical review 2026-09-30): the entry may name the new assets or the previous ones, and each wrong
@@ -795,6 +811,7 @@ public class DistrictFactoryWindow : EditorWindow
                  "Check the FxMesh Inspector preview for orientation, then rebuild the mod + relaunch." + (DistrictRegistry.DeployPending ? " The game's copy of the registry is not refreshed yet (see the Console) — Refresh retries it." : "");
         Debug.Log("[District] " + status);
         RunHealthChecks();   // fresh bake: the stale-bundle warning should light up until the mod is rebuilt
+        Lap("list refresh + health checks");
         Selection.activeObject = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>("Assets/Resources/" + cur.resourceName + "_FxMesh.asset");
 
         }

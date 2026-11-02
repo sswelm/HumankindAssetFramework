@@ -20,8 +20,19 @@ public static class DistrictBaker
 {
     const BindingFlags BF = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
 
-    static Type FindType(string fullName) =>
-        AppDomain.CurrentDomain.GetAssemblies().SelectMany(SafeTypes).FirstOrDefault(t => t.FullName == fullName);
+    // A type by full name across every loaded assembly, resolved ONCE per domain (2026-11-02): the scan walks tens of
+    // thousands of types, and the scoped-selector bake called it through TryLoadFx 565 times - 34.7 s of a 39 s district
+    // bake (the SDK's own loader caches by GUID; the cost was this lookup beside each call). A domain reload clears the
+    // statics, so the cache can never outlive the assemblies it was built from; a name not found is not cached (an
+    // assembly loaded later may hold it).
+    static readonly Dictionary<string, Type> typeCache = new Dictionary<string, Type>(StringComparer.Ordinal);
+    static Type FindType(string fullName)
+    {
+        if (typeCache.TryGetValue(fullName, out var cached)) return cached;
+        var t = AppDomain.CurrentDomain.GetAssemblies().SelectMany(SafeTypes).FirstOrDefault(x => x.FullName == fullName);
+        if (t != null) typeCache[fullName] = t;
+        return t;
+    }
     static Type[] SafeTypes(Assembly a) { try { return a.GetTypes(); } catch { return Array.Empty<Type>(); } }
 
     // "a,b,c,d" for an authored asset — same convention the unit registry uses (mirrors UniversalBaker.AmplitudeGuid).
@@ -932,7 +943,13 @@ public static class DistrictBaker
             if (fxMesh == null) { err = $"Assets/Resources/{resourceName}_FxMesh.asset not found — bake the district model first."; return false; }
             var meshGuid = MakeGuid(AmplitudeGuid(fxMesh));
             if (meshGuid == null) { err = "couldn't parse the FxMesh GUID."; return false; }
+            // WALL-CLOCK per sub-step (2026-11-02): a 42 s district bake spent 35 s in here, in two silent gaps around its two
+            // asset writes; the split (the SDK loader per item, the template walks, SaveAssets + Refresh) is printed at the end.
+            var swSel = System.Diagnostics.Stopwatch.StartNew(); double tSel = 0; var laps = new System.Text.StringBuilder();
+            void Lap(string what) { double t = swSel.Elapsed.TotalSeconds; laps.Append($"{what} {t - tSel:0.0}s | "); tSel = t; }
+            tryLoadCalls = 0; tryLoadTicks = 0;
             var tmpl = TryLoadFx(FootprintTemplateGuid());
+            Lap("template load");
             if (tmpl == null) { err = $"footprint template '{FootprintTemplateLabel()}' didn't load (Tools/HAF/District/Footprint template...)."; return false; }
 
             // ---- element: clone the template's largest building element, swap in our fxMesh ----
@@ -941,8 +958,10 @@ public static class DistrictBaker
             // — same effect as running Tools/HAF/District/Probe before the reactor's 1b.
             object warm = null; float warmMax = -1f;
             FindLargestElement(tmpl, 0, new HashSet<object>(), ref warm, ref warmMax);
+            Lap("warm walk");
             object best = null; float bestMax = -1f;
             FindLargestElement(tmpl, 0, new HashSet<object>(), ref best, ref bestMax);
+            Lap("element walk");
             if (best == null || !(best is UnityEngine.Object))
             { err = $"no building Element found in template '{FootprintTemplateLabel()}'. Run Tools/HAF/District/Probe: {FootprintTemplateLabel().Split(' ')[0]} visual template once to warm it, then re-bake (or pick a different Footprint template — only single-building families like NuclearTest / MissileSilo reduce cleanly)."; return false; }
             var elem = ScriptableObject.CreateInstance(best.GetType());
@@ -954,8 +973,10 @@ public static class DistrictBaker
             var fmcF = elem.GetType().GetField("fxMeshContent", BF); if (fmcF != null) fmcF.SetValue(elem, Activator.CreateInstance(fmcF.FieldType));
             elem.GetType().GetField("outputLayer", BF)?.SetValue(elem, null);   // runtime hook binds our textured layer
             string elemPath = $"Assets/Resources/{resourceName}_Element.asset";
+            Lap("element clone");
             AssetDatabase.DeleteAsset(elemPath); AssetDatabase.CreateAsset(elem, elemPath); EditorUtility.SetDirty(elem);
-            AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
+            Lap("element delete+create");
+            AssetDatabase.SaveAssets(); Lap("SaveAssets"); AssetDatabase.Refresh(); Lap("Refresh");
             var elemGuid = MakeGuid(AmplitudeGuid(elem));
 
             // ---- selector: clone the template, reduce its building elements to our one, keep the decals ----
@@ -985,11 +1006,14 @@ public static class DistrictBaker
                 if (isElem) { if (i == bestIdx) { gf?.SetValue(it, elemGuid); kept++; } else { gf?.SetValue(it, nullGuid); nulled++; } lf?.SetValue(it, null); items.SetValue(it, i); }
                 else keptOther++;
             }
+            Lap("selector slot loops");
             string selPath = $"Assets/Resources/CityMapSelector_{resourceName}.asset";
             AssetDatabase.DeleteAsset(selPath); AssetDatabase.CreateAsset(sel, selPath); EditorUtility.SetDirty(sel);
-            AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
+            Lap("selector delete+create");
+            AssetDatabase.SaveAssets(); Lap("SaveAssets"); AssetDatabase.Refresh(); Lap("Refresh");
             selectorGuidStr = AmplitudeGuid(sel);
             Debug.Log($"[ScopedSelector] '{resourceName}': element={AmplitudeGuid(elem)}  selector={selectorGuidStr}  (kept {kept} slot, nulled {nulled} props, left {keptOther} decal/emitter items).");
+            Debug.Log($"[ScopedSelector] '{resourceName}' timing: {laps}total {swSel.Elapsed.TotalSeconds:0.0}s; SDK TryLoad {tryLoadCalls} calls {tryLoadTicks / (double)System.Diagnostics.Stopwatch.Frequency:0.0}s");
             return true;
         }
         catch (Exception e) { err = e.Message; Debug.LogError("[ScopedSelector] " + e); return false; }
@@ -1036,17 +1060,31 @@ public static class DistrictBaker
 
     // Load an Amplitude FxEvolverMaterial by its Guid (editor, synchronous) — the runtime loader, which the probe proved
     // works in-editor. Returns null if the guid is null/unloadable.
+    // the SDK loader's cost, counted per bake: BakeScopedSelector prints calls and seconds (2026-11-02, "baking is extremely slow")
+    static int tryLoadCalls; static long tryLoadTicks;
+    static MethodInfo tryLoadFx; static Type tryLoadFxGuidType;
     static object TryLoadFx(object guid)
+    {
+        var swLoad = System.Diagnostics.Stopwatch.StartNew();
+        try { return TryLoadFxCore(guid); }
+        finally { tryLoadCalls++; tryLoadTicks += swLoad.ElapsedTicks; }
+    }
+    static object TryLoadFxCore(object guid)
     {
         if (guid == null) return null;
         var gt = guid.GetType();
         bool isNull = (int)(gt.GetField("a", BF)?.GetValue(guid) ?? 0) == 0 && (int)(gt.GetField("b", BF)?.GetValue(guid) ?? 0) == 0
                    && (int)(gt.GetField("c", BF)?.GetValue(guid) ?? 0) == 0 && (int)(gt.GetField("d", BF)?.GetValue(guid) ?? 0) == 0;
         if (isNull) return null;
-        var fxmType = FindType("Amplitude.Graphics.Fx.FxEvolverMaterial");
-        var tryLoad = fxmType?.GetMethods(BindingFlags.Public | BindingFlags.Static)
-            .FirstOrDefault(m => m.Name == "TryLoad" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == gt && m.GetParameters()[1].ParameterType == typeof(bool));
-        try { return tryLoad?.Invoke(null, new object[] { guid, true }); } catch { return null; }
+        // the SDK's static TryLoad(Guid, bool synchrone), resolved once per domain (the same reason as FindType's cache)
+        if (tryLoadFx == null || tryLoadFxGuidType != gt)
+        {
+            var fxmType = FindType("Amplitude.Graphics.Fx.FxEvolverMaterial");
+            tryLoadFx = fxmType?.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .FirstOrDefault(m => m.Name == "TryLoad" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == gt && m.GetParameters()[1].ParameterType == typeof(bool));
+            tryLoadFxGuidType = gt;
+        }
+        try { return tryLoadFx?.Invoke(null, new object[] { guid, true }); } catch { return null; }
     }
 
     // structure dump: type + any fxMesh/mesh/decalMesh; follow levelBuildItems (LOAD each item's EvolverMaterialGuid so we
