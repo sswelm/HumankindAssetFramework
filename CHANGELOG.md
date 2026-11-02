@@ -18,11 +18,12 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   mirrors the datablock's groups and weights to every sharer after each bind (the only mesh edit before stage 3's fold
   copies a multi-user datablock, from where the per-object views diverge as the datablocks do); five fixtures
   (`fx_s2_shared_*`) cover two bones, one bone, a plain root sharer, a static sharer and three sharers through the fold's
-  copies, the join and the export, and the mech leaves `KNOWN_LEFT` and compares at every stage (154 jobs, 143 equal, 10
+  copies, the join and the export, and the mech leaves `KNOWN_LEFT` and compares at every stage (154 jobs, 143 equal, 11
   left by name, 0 differ). Its EXPORT is the next named limit, keyed `KNOWN_EXPORTLEFT` in the drill: an object-level
   location curve on the armature (`Armature|Armature|ArmatureAction` - the exporter port does not write the armature node's
   own channels), so the mech's bake still takes Blender's rig_anim.py until that is ported. Also corrected here: the 6f review's claim that its skinned-FBX fixture is "compared as an argument failure before the import"
   (it is the reader's named leave with Blender's death after its import recorded - the drill's own verdict row).
+  The drill prints each actual export fallback reason instead of labeling every leave an unused skin.
 - **THE PNG CODEC'S KERNELS - C++ FOR THE FBX READER'S TEXTURES (2026-11-02).** Measured first: the native FBX reader's
   cost was its textures - the Bradley (eight 4096x4096 PNGs) 10.3 s in Unity's Mono against 0.04 s for the same content as
   a GLB - and the cost sat in the PNG codec's algorithm and zlib, the same on .NET and Mono (Mono's DeflateStream ignores
