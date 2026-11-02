@@ -153,10 +153,14 @@ by `bash tools/build_native_kernels.sh`. It holds the kernels that were measured
 (2026-10-21 to 28): the Lab probe's custom-normal encode and decode, visibility BVH build and world transform
 (`hafkernels.cpp`, `hafnormals.cpp`); the reduce's edge collapse (`hafdecimate.cpp`); the Workshop fuse's exposure
 ladders from above and from the side (`hafcolumn.cpp`), twin census (`haftwin.cpp`) and weld classes (`hafweld.cpp`);
-the Vehicle Lab reduce stage's BMesh build, double search and limited dissolve (`hafbmesh.cpp`).
+the Vehicle Lab reduce stage's BMesh build, double search and limited dissolve (`hafbmesh.cpp`); the PNG codec's
+scanline unfilter and pixel expansion, row packing, checksums, composition fills and zlib compression, and SHA-256
+through Windows CNG, for the native FBX reader's textures (`hafpng.cpp`, with libdeflate 1.26 vendored under
+`native/libdeflate/`, MIT; 2026-11-02).
 Nothing is installed for it: the DLL is part of the package.
 
-- **Compiler:** WinLibs GCC (MinGW-W64 x86_64-ucrt, `g++` on PATH), `-O2 -ffp-contract=off -fno-fast-math` and SSE only,
+- **Compiler:** WinLibs GCC (MinGW-W64 x86_64-ucrt, `g++` and `gcc` on PATH - libdeflate's C is compiled by `gcc` into objects
+  the DLL links), `-O2 -ffp-contract=off -fno-fast-math` and SSE only,
   so the C++ rounds exactly as the C# it replaces; `cosf`/`sinf` are resolved from `ucrtbase.dll` at load, never from
   mingw's libm (the decode computes with Blender's C runtime). Without `g++` the script fails loud and builds nothing.
 - **Deterministic:** no timestamp, fixed image base and random seed, stripped, the export directory's stamp and the
@@ -176,7 +180,7 @@ Nothing is installed for it: the DLL is part of the package.
   differently: a `bool[]` crosses as four bytes a flag in Mono, so native array parameters use blittable elements,
   with flags as `byte[]`. `HafNativeKernels.Status` says which path runs; the `HafNativeKernels` wrappers validate buffers
   before entering C++.
-- **Version contract:** `haf_kernels_version()` must equal `HafNativeKernels.Version` (7 since 2026-10-28); bump both
+- **Version contract:** `haf_kernels_version()` must equal `HafNativeKernels.Version` (8 since 2026-11-02); bump both
   on any ABI change. A mismatch is not an error, it is the managed path — and a Unity editor never unloads a native
   plugin, so after rebuilding or updating the DLL **restart Unity**. An ABI-version mismatch selects managed fallback;
   an update that keeps the same ABI version can continue running the old native implementation until that restart.

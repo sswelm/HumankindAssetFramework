@@ -27,7 +27,7 @@ using System.Runtime.InteropServices;
 public static partial class HafNativeKernels
 {
     public const string DllName = "hafkernels";
-    public const int Version = 7;   // 7: the reduce stage's BMesh build, double finder and limited dissolve (hafbmesh.cpp); 6: the weld classes and the side ladder (hafweld.cpp, hafcolumn.cpp); 5: segmented column-build ABI
+    public const int Version = 8;   // 8: the PNG codec's rows, packing, checksums and libdeflate compression (hafpng.cpp); 7: the reduce stage's BMesh build, double finder and limited dissolve (hafbmesh.cpp); 6: the weld classes and the side ladder (hafweld.cpp, hafcolumn.cpp); 5: segmented column-build ABI
 
     /// <summary>True when the kernels run natively: the DLL loaded, 64-bit, version matched, trig resolved, not switched off. Set once
     /// here; mutable so Bake Tests and Tests/NativeKernelsTests.cs can call both twins in one host (the JIT bakes a static
