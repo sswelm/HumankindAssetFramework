@@ -19,7 +19,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   the `.glb` conversion, Unity's FBX importer only for a file the reader leaves. The vehicle acceptance expects the FBX
   reader's named leaves as Blender fallbacks. The rig-slim Bake Tests row takes `.fbx` entries, Blender's side on Blender's
   own GLB export of the file (`Tools/fbx_export.py`); the probe preview row takes `.fbx` recipes. The parity drills leave
-  `.fbx` sources by name until step 6f runs their oracle on that export. 2 test cases.
+  `.fbx` sources by name until step 6f runs their oracle on that export. Review fixes keep skinned/animated vehicle FBX
+  sources on a named fallback until the direct-FBX pose convention is ported, extract animated FBX multi-material
+  albedos, invalidate old loader-dependent caches, clean up unique temporary GLBs, and preserve cancellation. 9 loader cases.
 - **THE NATIVE FBX READER, STEP 6d: ANIMATION, HELD TO BLENDER (2026-11-02).** `editor/FbxActions.cs` ports the FBX
   importer's animation block (frame rate and ktime, stacks, layers, curve nodes and curves, one action per animated object
   or bone with the first assigned, the curves combined by np.interp and turned frame by frame into Blender's location,

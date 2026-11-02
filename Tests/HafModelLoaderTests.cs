@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using Xunit;
 
 // Step 6e of the native FBX reader: editor/HafModelLoader.cs - the one loader of a model source for the in-process ports - and
@@ -40,4 +41,47 @@ public class HafModelLoaderTests
         var fbx = BlenderRigAnim.RunStage1(m, BlenderRigAnim.ParseArgs(new[] { "rig.fbx", "out.glb", "0", "", "", "0", "0", "0,0,0", "0", "", "0", "", "0", "", "0" }));
         Assert.DoesNotContain(".fbx source", fbx.Fallback ?? "");
     }
+    static string Fixture(string name) => Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Fixtures", "fbx_loader", name + ".fbx");
+
+    [Fact]
+    public void Static_fbx_loads_for_the_Factory_and_the_vehicle_probe()
+    {
+        var model = HafModelLoader.ReadForVehicle(Fixture("static"), out string leave);
+        Assert.Null(leave); Assert.NotNull(model); Assert.Single(model.Meshes);
+        Assert.Equal("Mesh", Assert.Single(VehicleProbe.Run(model).Parts).Name);
+    }
+
+    [Fact]
+    public void A_skinned_animated_fbx_still_loads_for_the_Factory_but_the_vehicle_route_names_its_pose_limit()
+    {
+        string path = Fixture("animated_skin");
+        var model = HafModelLoader.Read(path, out string leave);
+        Assert.Null(leave); Assert.NotEmpty(model.Skins); Assert.NotEmpty(model.Animations);
+        Assert.Null(HafModelLoader.ReadForVehicle(path, out leave));
+        Assert.StartsWith(HafModelLoader.FbxVehicleLeavePrefix, leave);
+        Assert.True(BlenderVehicleRigInProcess.ExpectedFallback(path, leave));
+        Assert.Throws<NotSupportedException>(() => HafModelLoader.ReadForVehicleOrThrow(path));
+        string output = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".glb");
+        var argv = Enumerable.Repeat("", 76).ToArray();
+        argv[0] = "rig"; argv[1] = path; argv[2] = output; argv[7] = "15"; argv[8] = "-360"; argv[17] = "0"; argv[21] = "0";
+        var run = BlenderVehicleRigInProcess.Run(argv);
+        Assert.Equal(leave, run.UseBlender); Assert.False(run.Written); Assert.False(File.Exists(output));
+        // The same context guard applies to merge2: the primary can be glTF while the declined second input is FBX.
+        Assert.True(BlenderVehicleRigInProcess.ExpectedFallback("primary.glb", leave));
+    }
+
+    [Theory]
+    [InlineData("source.fbx", true, false, true)]
+    [InlineData("source.FBX", false, true, true)]
+    [InlineData("source.fbx", false, false, false)]
+    [InlineData("source.glb", true, true, false)]
+    [InlineData("source.gltf", true, true, false)]
+    public void The_vehicle_limit_is_specific_to_FBX_skin_or_animation(string source, bool skin, bool animation, bool declines)
+    {
+        var model = new HafModel();
+        if (skin) model.Skins.Add(new HafSkin());
+        if (animation) model.Animations.Add(new HafAnimation());
+        Assert.Equal(declines, HafModelLoader.VehicleImportFallback(source, model) != null);
+    }
+
 }

@@ -13,7 +13,7 @@ public static class BlenderDeployInProcess
 {
     /// <summary>Bump when the in-process conversion's written file changes: the Factory's cache key carries it, so a
     /// cached deploy_converted.glb made by an older port is converted again.</summary>
-    public const string CacheRevision = "2026-10-11.1";
+    public const string CacheRevision = "2026-10-11.1." + HafModelLoader.CacheRevision;
 
     /// <summary>The longest animation converted here (frames from the bake's first to its last): the bake, the fire
     /// window, the role clips and the export each walk every frame for every bone on the editor thread, where only the

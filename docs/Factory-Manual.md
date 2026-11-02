@@ -35,9 +35,11 @@ part that matches your task.
   [HAF Authoring Tools package](Installation.md#3-the-authoring-tools) installed.
 - **A model file:** `.glb`, `.gltf`, `.obj`, `.fbx`, or `.blend`. It must be UV-mapped and textured if you want
   the original skin.
-- **Blender** for animated models, `.blend` import, part-stripping, and **Reduce-to-tris** decimation. Static GLB,
-  glTF, OBJ, and FBX bakes need no Blender. HAF auto-detects it under `C:\Program Files\Blender Foundation`; use the
-  Factory's **Settings** panel if it is installed elsewhere.
+- **Blender** for `.blend` import and named C# limits. Supported static glTF, OBJ, and FBX bakes need no Blender.
+  Skinned or animated FBX in the Vehicle Lab's probe/Generate keeps a named Blender fallback until its direct-FBX
+  pose convention is ported; static FBX can run natively. Animated FBX material extraction uses the native reader
+  when supported and Blender's export for named reader limits. HAF auto-detects Blender under
+  `C:\Program Files\Blender Foundation`; use the Factory's **Settings** panel if it is installed elsewhere.
 - **The game installed** (Steam auto-detected). The registry the plugin reads is written into `<Humankind>\BepInEx\config`.
 
 ---

@@ -2669,9 +2669,9 @@ public class VehicleLabWindow : EditorWindow
     internal bool BuildProbeInput(out VehicleProbe.Input input, out string error)
     {
         error = null;
-        input = new VehicleProbe.Input { Model = HafModelLoader.ReadOrThrow(srcFile) };   // an .fbx the reader leaves by name throws: the probe takes Blender
+        input = new VehicleProbe.Input { Model = HafModelLoader.ReadForVehicleOrThrow(srcFile) };   // an .fbx the reader leaves by name throws: the probe takes Blender
         string merge2 = Merge2Text();
-        if (merge2 != null && !input.SetSecond(merge2, HafModelLoader.ReadOrThrow, out error)) return false;
+        if (merge2 != null && !input.SetSecond(merge2, HafModelLoader.ReadForVehicleOrThrow, out error)) return false;
         input.AddPlacementLines(parts.Where(IsPlaced).Select(x => VehicleLabRules.PartPlacementLine(x.name, x.offset.x, x.offset.y, x.offset.z, x.scale.x, x.scale.y, x.scale.z)));
         string rot = ProbeRotText();
         if (rot != null) input.SetProbeRotation(rot);
@@ -2726,7 +2726,7 @@ public class VehicleLabWindow : EditorWindow
 
     // THE BAKE TESTS' ENTRY (VehicleProbePreviewGateTest): the in-process probe and its preview for a saved recipe, in a window
     // instance never shown - the SAME input the Probe parts button builds. False, with the reason, for a recipe the in-process
-    // path does not take (an FBX/OBJ/.blend source or second model) or whose second model is not on disk.
+    // path does not take (OBJ/.blend or a named FBX source/second-model limit) or whose second model is not on disk.
     internal static bool ProbeRecipeHeadless(string recipePath, List<UnityEngine.Object> assets, out VehicleProbe.Result result, out GameObject preview, out string error)
     {
         result = null; preview = null; error = null;
@@ -2744,6 +2744,8 @@ public class VehicleLabWindow : EditorWindow
             preview = VehicleProbePreview.Build(result, w.PreviewModels(input), w.PreviewBrightness(input), assets);
             return true;
         }
+        catch (NotSupportedException e) when (HafModelLoader.IsNamedFbxLeave(e.Message))
+        { error = e.Message; return false; }   // a named vehicle/import limit is a SKIP in the preview acceptance row
         finally { DestroyImmediate(w); }
     }
 

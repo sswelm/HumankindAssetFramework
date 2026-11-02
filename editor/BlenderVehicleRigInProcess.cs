@@ -49,7 +49,7 @@ public static class BlenderVehicleRigInProcess
     sealed class NamedLeave : Exception { public NamedLeave(string message) : base(message) { } }   // an .fbx the FBX reader leaves by name
     static HafModel Read(string path)
     {
-        try { var m = HafModelLoader.Read(path, out string leave); if (m == null) throw new NamedLeave(leave); return m; }
+        try { var m = HafModelLoader.ReadForVehicle(path, out string leave); if (m == null) throw new NamedLeave(leave); return m; }
         catch (Exception e) when (e is InvalidDataException || e is NotSupportedException) { throw new ReaderLimit(e.Message); }
     }
 

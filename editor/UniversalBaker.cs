@@ -758,7 +758,7 @@ public static class UniversalBaker
         // hand-edited albedos exactly like the single-albedo path.
         if ((cfg.materialMode == MaterialMode.Multi || cfg.materialMode == MaterialMode.Auto)
             && !string.IsNullOrEmpty(cfg.modelFile) && File.Exists(cfg.modelFile)
-            && (cfg.modelFile.EndsWith(".glb", StringComparison.OrdinalIgnoreCase) || cfg.modelFile.EndsWith(".gltf", StringComparison.OrdinalIgnoreCase)))
+            && HafModelLoader.CanRead(cfg.modelFile))
         {
             string mtlPath = Path.Combine(fsResDir, name + ".mtl");
             // SOURCE-IDENTITY CACHE-BUSTER (canoe finding 2026-07-30, same trap class as the slim-FBX busters):
@@ -767,7 +767,8 @@ public static class UniversalBaker
             // the Cloth submesh never got an atlas rect (sail sampled Bark / unmapped grey). Stamp the extraction
             // with its source path+mtime and re-extract on any mismatch.
             string stampPath = mtlPath + ".src";
-            string stamp = cfg.modelFile.Replace('\\', '/') + "|" + File.GetLastWriteTimeUtc(cfg.modelFile).Ticks;
+            string stamp = cfg.modelFile.Replace('\\', '/') + "|" + File.GetLastWriteTimeUtc(cfg.modelFile).Ticks
+                + (HafModelLoader.IsFbx(cfg.modelFile) ? "|" + HafModelLoader.CacheRevision : "");
             // FRESHNESS BY STAMP, PRESENCE BY EITHER SHAPE (review finding 2, 2026-09-07). glbconv writes an MTL
             // only for MULTI-material sources, so the old "MTL exists and is newer" freshness test read PERMANENTLY
             // stale for a 1-material GLB — the hygiene below then deleted <name>_albedo.png and re-ran glbconv on
@@ -802,8 +803,24 @@ public static class UniversalBaker
                 // already deleted every extracted albedo, so continuing from here bakes a flat-grey atlas and
                 // reports SUCCESS — the old warning even promised a "single atlas" fallback whose inputs were
                 // just deleted. Silent wrong output is the one failure class this project does not tolerate.
-                if (!ConvertGlb(cfg.modelFile, fsResDir, name, 0))
-                    return Fail("glbconv albedo extraction failed, and the previous extraction was already removed — continuing would bake a flat-grey atlas. See the [glbconv] Console error (missing dotnet/glbconv, or a broken GLB), then re-bake.");
+                string extractionSource = cfg.modelFile, temporaryFbxGlb = null;
+                try
+                {
+                    if (HafModelLoader.IsFbx(extractionSource))
+                    {
+                        if (!FbxInProcessToGlb(extractionSource, name, out temporaryFbxGlb, out string fbxWhy))
+                        {
+                            if (!BlenderAvailable()) return Fail("FBX material extraction needs Blender: " + fbxWhy);
+                            temporaryFbxGlb = Path.Combine(Path.GetTempPath(), name + "_" + Guid.NewGuid().ToString("N") + "_materials.glb");
+                            if (!ConvertFbxToGlbViaBlender(extractionSource, temporaryFbxGlb))
+                                return Fail("FBX material extraction failed (Blender's FBX to GLB export; see console)");
+                        }
+                        extractionSource = temporaryFbxGlb;
+                    }
+                    if (!ConvertGlb(extractionSource, fsResDir, name, 0))
+                        return Fail("glbconv albedo extraction failed, and the previous extraction was already removed — continuing would bake a flat-grey atlas. See the [glbconv] Console error (missing dotnet/glbconv, or a broken GLB), then re-bake.");
+                }
+                finally { DeleteTemporaryFbxGlb(temporaryFbxGlb); }
                 File.WriteAllText(stampPath, stamp);
             }
         }
@@ -1987,7 +2004,7 @@ public static class UniversalBaker
             cfg.targetTris > 0 ? cfg.targetTris.ToString(sinv) : "0",
             cfg.doubleSided ? "1" : "0",    // double-sided halves the reduce target -> shapes the OBJ
             "v3",   // extractor-convention stamp: v3 = single Z-up frame + skinned bind-pose evaluation (2026-09-12)
-            BlenderPrep.CacheRevision);   // C# prep changes also invalidate reused extracts; the Python script's mtime cannot see them
+            BlenderPrep.CacheRevision + (HafModelLoader.IsFbx(cfg.modelFile) ? ":" + HafModelLoader.CacheRevision : ""));   // C# prep/FBX reader changes also invalidate reused extracts; the Python script's mtime cannot see them
         string extractArgsFull = Path.Combine(projRoot, resDir, name + ".extract.args.txt");
         bool argsChanged = cachedFull != null && (!File.Exists(extractArgsFull) || File.ReadAllText(extractArgsFull) != extractArgsKey);
         if (argsChanged) Debug.Log($"[Factory] {name}: an extract input or C# prep revision changed — re-extracting.");
@@ -2052,10 +2069,14 @@ public static class UniversalBaker
             }
             else if (ext == ".fbx" && fbxNative)
             {
-                Debug.Log("[Factory] " + name + ": FBX read in process (the native reader) and converted like a GLB.");
-                string fsDir = Path.Combine(Application.dataPath, "FactorySource", name);
-                Directory.CreateDirectory(fsDir);
-                if (!ConvertGlb(fbxGlb, fsDir, name, cfg.convertGrid)) return Fail("GLB conversion failed (see console)");
+                try
+                {
+                    Debug.Log("[Factory] " + name + ": FBX read in process (the native reader) and converted like a GLB.");
+                    string fsDir = Path.Combine(Application.dataPath, "FactorySource", name);
+                    Directory.CreateDirectory(fsDir);
+                    if (!ConvertGlb(fbxGlb, fsDir, name, cfg.convertGrid)) return Fail("GLB conversion failed (see console)");
+                }
+                finally { DeleteTemporaryFbxGlb(fbxGlb); }
             }
             else if (ext == ".obj" || ext == ".fbx")
             {
@@ -3434,12 +3455,18 @@ public static class UniversalBaker
         {
             var m = HafModelLoader.Read(src, out leave);
             if (m == null) return false;
-            glb = Path.Combine(Path.GetTempPath(), name + "_fromfbx.glb");
+            glb = Path.Combine(Path.GetTempPath(), name + "_" + Guid.NewGuid().ToString("N") + "_fromfbx.glb");
             GlbWriter.Write(m, glb);
             return true;
         }
-        catch (Exception e) when (e is InvalidDataException || e is NotSupportedException) { leave = "the C# reader cannot handle this input: " + e.Message; return false; }
-        catch (Exception e) { leave = "the native FBX read failed (" + e.GetType().Name + ": " + e.Message + ")"; return false; }
+        catch (OperationCanceledException) { DeleteTemporaryFbxGlb(glb); throw; }
+        catch (Exception e) when (e is InvalidDataException || e is NotSupportedException) { DeleteTemporaryFbxGlb(glb); glb = null; leave = "the C# reader cannot handle this input: " + e.Message; return false; }
+        catch (Exception e) { DeleteTemporaryFbxGlb(glb); glb = null; leave = "the native FBX read failed (" + e.GetType().Name + ": " + e.Message + ")"; return false; }
+    }
+
+    static void DeleteTemporaryFbxGlb(string path)
+    {
+        if (path != null) try { File.Delete(path); } catch { }   // best effort: never mask conversion failure or cancellation
     }
 
     /// <summary>Blender's own FBX import and glTF export of `fbx` into `outGlb` (Tools/fbx_export.py, every option at its default):
@@ -3462,6 +3489,7 @@ public static class UniversalBaker
                 if (p.ExitCode != 0) { Debug.LogError("[Factory] Blender's FBX export failed (exit " + p.ExitCode + ")\n" + o); return false; }
             }
         }
+        catch (OperationCanceledException) { throw; }   // RunBounded killed the process: preserve the user's cancellation
         catch (Exception e) { Debug.LogError("[Factory] Blender's FBX export could not run: " + e.Message); return false; }
         return File.Exists(outGlb);
     }

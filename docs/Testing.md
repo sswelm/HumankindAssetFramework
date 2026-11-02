@@ -330,8 +330,16 @@ read a `.glb`. The Bake Tests rows that hold the ports to Blender take `.fbx` so
 Blender preview FBX of that source, the rig-slim row with Blender's script run on Blender's own GLB export of the `.fbx`
 (`Tools/fbx_export.py`) - the convention the native model is held to; `rig_anim.py`'s direct FBX import builds a rig of
 another convention, which is why the rig route acceptance row stays on `.glb`/`.gltf` entries. The parity drills keep an
-`.fbx` recipe or registry source LEFT by name until their oracle runs on Blender's own GLB export of it (step 6f). 2 test
-cases hold the loader's routing and the expected-fallback rule.
+`.fbx` recipe or registry source LEFT by name until their oracle runs on Blender's own GLB export of it (step 6f). 9 test
+cases hold the loader's routing, actual static and skinned/animated FBX files, and expected-fallback rules.
+
+Review of 6e keeps skinned or animated FBX sources (including a second model) on the Vehicle Lab's named Blender
+fallback: a direct FBX import and its glTF round trip do not give the same vehicle pose. A generated skinned fixture
+measures centre X 0.0309 directly in Blender versus 0.0305 through the glTF model. Static FBX remains native. The preview
+acceptance reports a named FBX decline as a SKIP. The Factory's animated multi-material extraction now includes FBX,
+using a temporary native GLB or Blender's export for a named reader limit. FBX reader revisions invalidate the relevant
+static extraction and material stamps, and rig/deploy cache keys; previous extension-based rig fallbacks retry. Temporary
+FBX GLBs have unique names and are cleaned up after conversion. Cancellation from the FBX oracle export propagates.
 
 **Since 2026-10-11 the drills run concurrently, and since 2026-10-29 the source guards run on a lane beside them.**
 The drills are independent (each works in its own temp directory and builds its own exe), so `check.sh` starts them
