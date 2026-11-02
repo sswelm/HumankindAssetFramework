@@ -1,0 +1,1 @@
+libdeflate 1.26, vendored unchanged from https://github.com/ebiggers/libdeflate commit 0758d0a12d34fac281b0fe27c5155fbe753d9511 (2026-10-31), MIT (COPYING). Only the compressor side is built into hafkernels.dll (tools/build_native_kernels.sh): adler32.c crc32.c deflate_compress.c utils.c zlib_compress.c x86/cpu_features.c. lib/arm and lib/riscv are not copied.

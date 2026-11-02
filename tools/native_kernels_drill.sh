@@ -36,7 +36,7 @@ cp "$NEWTONSOFT" "$TMPD/Newtonsoft.Json.dll"
 cp "$DLL" "$TMPD/hafkernels.dll"
 
 # First-use initialization is independent of the version/trig check and must be safe before any serial dissolve warms it.
-# Each executable starts a fresh DLL instance and releases 32 workers together; reuse of one host would hide the race.
+# Each executable starts a fresh DLL instance and releases 32 SHA-256/dissolve workers together; reuse of one host would hide the races.
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -optimize+ -platform:x64 -out:"$WTMP/first-use.exe" \
   -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" \
   "$WROOT/tools/native-kernels-drill/FirstUseDrill.cs" 2>&1); rc=$?
@@ -44,7 +44,7 @@ if [ "$rc" -ne 0 ]; then echo "$OUT"; echo "FAIL — native first-use harness di
 for trial in $(seq 1 64); do
   if ! "$TMPD/first-use.exe" > "$TMPD/first-use.txt" 2>&1; then cat "$TMPD/first-use.txt"; echo "FAIL — concurrent native first use, fresh process $trial"; exit 1; fi
 done
-echo "PASS — native dissolve first use: 64 fresh processes, 32 concurrent workers each"
+echo "PASS — native SHA-256 and dissolve first use: 64 fresh processes, 32 concurrent workers each"
 
 # ---- the harness: ProbePerformance as an x64 exe (the .NET Framework's 64-bit runtime, the DLL's architecture), one run per file
 sources=(HafModel GlbReader HafTransforms BlenderNames VehicleProbe VehicleProbe.Visibility VehicleProbe.Islands

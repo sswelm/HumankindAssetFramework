@@ -4149,6 +4149,58 @@ September recipe is stale against its re-fused source (one part named differentl
 unreduced): the numbers above are that job's, not the user's current Generate; the user's Lab holds the right part names
 until the recipe is saved again.
 
+**The PNG codec's kernels** (`native/hafpng.cpp` through `HafNativeKernels.Png.cs`, DLL version 8, 2026-11-02; the user:
+"why aren't you adding C++ support?" after the FBX reader's timing). Measured first (a harness over `HafModelLoader`'s two
+stages on the real files, three runs each, in x64 .NET and in Unity's 64-bit Mono through the deploy drill's MonoHost):
+the native FBX reader's cost was its textures, not its geometry and not Mono - the Bradley (32 meshes, 18,837 vertices,
+eight 4096x4096 PNGs, 150 MB) took 8.9 s on .NET and 10.3 s in Mono where the same content as a GLB reads in 0.04 s; the
+robo1A mech (32k vertices, three actions, no textures) 0.11 and 0.14 s. A 4096x4096 PNG decoded in 0.8-1.1 s and
+re-encoded in 1.2-2.3 s, the same on both runtimes, so the codec's algorithm and zlib were the cost and a C++ port of the
+same C# would have gained nothing: inside a decode the zlib inflate (DeflateStream: native zlib in both hosts) was 0.13 s
+of 0.8 s in Mono and the managed unfilter plus RGBA expansion the rest; inside an encode Mono's DeflateStream takes
+1.0-2.0 s whatever level the caller asks (measured: `Fastest` gives `Optimal`'s bytes in the same time; on .NET it is a
+different level); the managed Adler-32 over a 48 MB buffer 0.17 s, twice per texture; the import decodes every PNG once to
+validate it as Blender does (`FbxMaterials.Describe`) and the compositions decode their inputs again; and Mono's managed
+SHA-256 (the exported images' content key, `FbxMaterials.ImageIndex`) runs at ~140 MB/s over ~190 MB per Bradley import.
+Native now: **the rows** (`haf_png_rows`: the five filters and the expansion of every colour type, bit depth, palette and tRNS
+rule, in place over the inflated buffer), **the packing** (`haf_png_pack`), **the checksums** (`haf_adler32`, `haf_crc32`:
+libdeflate's), **the compression** (`haf_zlib_compress`: libdeflate at level 6, `PngCodec.NativeZlibLevel` - measured on
+the Bradley's rows in Mono: DeflateStream 0.96/2.0 s against libdeflate 0.42/0.28 s for the same size class, level 1
+0.23/0.14 s at 5-27% larger, level 12 slower than zlib), **the composition fills and the byte rounding**
+(`haf_png_fill`, `haf_unit_to_uchar`: float32 step for step as the C# casts, `-ffp-contract=off`), and **SHA-256 through
+Windows CNG's one-shot `BCryptHash`** (`haf_sha256`, resolved at first use; absent, the managed hash). The inflate stays
+DeflateStream (its bounded read and trailing-byte rule are the managed code's). The managed code is each kernel's twin
+and fallback; `PngCodec.Decode`/`Encode` and the composition ask `HafNativeKernels.Available` once per call. A PNG's
+BYTES were never held to anything (two compressors; Blender's own differ again), its PIXELS are: the FBX model drill
+compares composed images pixel for pixel against Blender's export with the DLL beside its exe, as the other Blender drills
+do. Guards: `Tests/NativePngTests.cs` holds the rows to the managed twin on every colour type, depth (1/2/4/8), filter, a
+short palette and a short tRNS, through the kernel entry and through the public decoder on both paths, a bad filter byte's
+name, the checksums across block boundaries and offsets with a continued state, the native encoder's stream read back by
+both decoders to the same pixels (and its Adler-32 trailer), the fills and the rounding on every byte value and the
+rounding's edges, SHA-256 against the managed digest around the block sizes, and the entry checks. Result, three runs each:
+
+| HafModelLoader.Read | .NET x64 before | after | Unity Mono before | after |
+| --- | ---: | ---: | ---: | ---: |
+| Bredley_Low.fbx (8 PNG textures, 2 compositions) | 8.9 s | 4.2 s | 10.3 s | 3.2 s |
+| SKM_Ehrhardt_E_V_Games.FBX (one 27 MB PNG) | 5.4 s | 2.6 s | 5.8 s | 2.1 s |
+| robo1A.fbx (no textures) | 0.11 s | 0.10 s | 0.14 s | 0.14 s |
+| a 4096x4096 PNG, decode / encode (Mono) | | | 0.8 / 1.25 s | 0.3 / 0.45 s |
+
+What remains in Mono on the Bradley: eight inflates (0.13 s each), the compositions' four decodes, two encodes.
+
+Review of PR #242 adds overflow-safe validation before allocating PNG scanlines or entering a native row/packing
+kernel. The positive dimensions 1501975312 x 1768226769 previously wrapped an encoder allocation to 17 bytes and the
+Int64 capacity checks to negative values; an isolated no-op native probe confirmed all three unsafe entry paths.
+The encoder now validates dimensions, RGBA capacity and scanline capacity consistently on both backends. Three added
+unit cases cover these bounds and invalid inputs; all 2,486 unit cases pass.
+
+SHA-256 initialization also published a tried flag before resolving BCryptHash. In the fresh-process regression,
+30 of 32 callers returned unavailable while the provider was present. C++ local-static initialization now waits for
+resolution before publishing the pointer. The native gate checks SHA-256 and dissolve together in 64 fresh processes
+with 32 workers each; all passed after rebuilding the DLL. The DLL ABI remains version 8. All 33 vendored dependency
+files match the pinned libdeflate commit (after line-ending normalization).
+
+
 Review of PR #215 (2026-10-28): the DLL's dissolve initialization published its "tried" flag before resolving both
 trig functions. Parallel first calls could return status 3 while the first worker was still loading them (six of 64 fresh
 32-worker processes reproduced this with the original DLL). C++ local-static initialization now waits for completion;

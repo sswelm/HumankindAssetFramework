@@ -631,8 +631,12 @@ public static class FbxMaterials
 
         public int ImageIndex(string name, string mime, byte[] bytes, bool composed)
         {
-            string key;
-            using (var sha = System.Security.Cryptography.SHA256.Create()) key = mime + "\t" + name + "\t" + BitConverter.ToString(sha.ComputeHash(bytes));
+            // the content key: SHA-256 through CNG when the kernels are there (Mono's managed SHA256 runs at ~140 MB/s over
+            // every exported image), the managed one otherwise - the same digest either way
+            var hash = new byte[32];
+            if (!(HafNativeKernels.Available && HafNativeKernels.TrySha256(bytes, hash)))
+                using (var sha = System.Security.Cryptography.SHA256.Create()) hash = sha.ComputeHash(bytes);
+            string key = mime + "\t" + name + "\t" + BitConverter.ToString(hash);
             if (imageOf.TryGetValue(key, out int done)) return done;
             Model.Images.Add(new HafImage { Name = name, MimeType = mime, Bytes = bytes });
             int idx = Model.Images.Count - 1; imageOf[key] = idx;
@@ -720,6 +724,7 @@ public static class FbxMaterials
             var outp = new byte[width * height * 4];
             var outF = new float[width * height * 4];
             for (int i = 0; i < outF.Length; i++) outF[i] = 1f;
+            bool native = HafNativeKernels.Available;   // the fills and the byte rounding as kernels (HafNativeKernels.Png.cs); the loops below are their twins
             foreach (var img in imgs)
             {
                 var px = img.Pixels(out string pwhy);
@@ -729,7 +734,8 @@ public static class FbxMaterials
                 {
                     var f = fills[dst];
                     if (f.White || f.Img != img) continue;
-                    if (!f.Bw) for (int p = 0; p < n; p++) outF[4 * p + dst] = (float)(px[4 * p + f.Src] * (1.0f / 255.0f));
+                    if (native) HafNativeKernels.PngFill(px, n, dst, f.Src, f.Bw, outF);
+                    else if (!f.Bw) for (int p = 0; p < n; p++) outF[4 * p + dst] = (float)(px[4 * p + f.Src] * (1.0f / 255.0f));
                     else
                     {
                         const float c1 = 0.2989f, c2 = 0.5870f, c3 = 0.1140f;
@@ -742,7 +748,8 @@ public static class FbxMaterials
                     }
                 }
             }
-            for (int i = 0; i < outF.Length; i++) outp[i] = UnitFloatToUchar(outF[i]);
+            if (native) HafNativeKernels.UnitToUchar(outF, outp);
+            else for (int i = 0; i < outF.Length; i++) outp[i] = UnitFloatToUchar(outF[i]);
             bytes = PngCodec.Encode(width, height, outp, alpha);
             composed = true;
         }
