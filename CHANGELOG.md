@@ -19,7 +19,12 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   its own copy; 4 unit tests). The same afternoon the restored July rig previewed with its legs flying apart: the Lab
   drapes a multi-material bake's persisted atlas-UV clone over the rig when the vertex and bone COUNTS match, and a
   clone left by an earlier bake of the same entry matched by count with another bake's bind poses. Both previews now
-  require the bind poses equal by value and say when a clone is skipped. Preview-only: nothing baked or shipped changes.
+  require the bind poses equal by value and say when a clone is skipped. The review also requires matching vertices,
+  topology and bone weights, rejects nonfinite bind poses, and searches all candidates before consuming a match (an
+  equally-sized incompatible first clone hid a valid later one). Skin refresh keeps the shared material alive for a
+  playing clip; an unreadable PNG restores the atlas with a visible explanation and retries on refresh. A fresh-project
+  Unity drill holds both loaders, the shared material and runtime pixel math with 24 checks (nine failures reproduced
+  before the fixes). Preview-only: nothing baked or shipped changes.
 - **A SKINNED OR ANIMATED .FBX STAYS ON THE FBX ROUTE - THE ROUND TRIP IS NOT THE FBX ROUTE (2026-11-03).** The first
   GLB-route bake of the light assault mech, the entry the previous entry freed from Blender, came out as scattered pieces
   while the FBX route's bake is the mech, and both read the same `.fbx`. The cause is not in the port's rows: rig_anim.py on

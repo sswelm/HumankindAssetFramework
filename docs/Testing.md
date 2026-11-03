@@ -337,8 +337,16 @@ cases hold the loader's routing, actual static and skinned/animated FBX files, a
 (gamma, then the pull toward each pixel's luminance, then the per-channel tint, clamped), shared by the Retexture window's
 live preview and the Animation Lab's `Skin` preview toggle. Held: unchanged adjustments leave every byte and the alpha
 alone, full desaturate gives the luminance, tints add and clamp, the gamma LUT's ends and a mid value, the brightness
-clamp to 0.2..4, and the three steps in order on the mech entry's values (1.5, 0.85, +50/+50/0). The Lab's preview clone
-rule (bind poses equal by value) is editor UI, held by the Factory manual's description and the Console line, not a test.
+  clamp to 0.2..4, and the three steps in order on the mech entry's values (1.5, 0.85, +50/+50/0).
+
+**Animation Lab previews in Unity:** `bash tools/animationlab_unity_drill.sh` creates a fresh temporary Unity project,
+compiles the real editor sources and exercises both preview loaders. No Blender or user project is used. Its 24 checks
+cover valid atlas clones, different bind poses/weights/vertices/topology, missing weights, nonfinite bind poses, and a
+valid candidate after an equally-sized incompatible one. They also hold the shared material alive across skin refresh,
+restore the atlas on a locked PNG, retry after it becomes readable, and retain the rest preview's missing-skin note.
+The Color32 adapter is compared to the pure transform, and 381 brightness values to Unity's runtime gamma math.
+The initial reproduction failed nine checks before the review fixes; the complete set passes afterward. Missing Unity
+is an explicit SKIP (exit 3), never preview validation.
 
 Review of 6e keeps skinned or animated FBX sources (including a second model) on the Vehicle Lab's named Blender
 fallback: a direct FBX import and its glTF round trip do not give the same vehicle pose. A generated skinned fixture
