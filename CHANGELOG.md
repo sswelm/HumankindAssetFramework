@@ -10,6 +10,23 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **A SKINNED OR ANIMATED .FBX STAYS ON THE FBX ROUTE - THE ROUND TRIP IS NOT THE FBX ROUTE (2026-11-03).** The first
+  GLB-route bake of the light assault mech, the entry the previous entry freed from Blender, came out as scattered pieces
+  while the FBX route's bake is the mech, and both read the same `.fbx`. The cause is not in the port's rows: rig_anim.py on
+  the FBX route imports the `.fbx` directly; the native reader writes Blender's FBX-import-plus-GLB-export round trip of it,
+  and so does the rig drill's oracle for an `.fbx` job (step 6f, `oracle_fbx_glb`) - a drill PASS holds the port equal to
+  the round trip, not to the FBX route. Measured on the mech (`blender_riganim_dump.py` on the `.fbx` against the
+  Factory's in-process call): 9 against 8 material slots, the missing texture's placeholder image dropped, placement
+  lifted 0.04 against 1.63, the exported root bone's rest 0.38 against 1.6, the round trip's mesh 4.3x its bones. The
+  vehicle route has named this since the 6e review (`ReadForVehicle`); the rig route now does the same:
+  `HafModelLoader.ReadForRig` leaves a skinned or animated `.fbx` to the FBX route by name (an expected fallback, said in
+  the Console; the in-process cache revision bumped so an earlier GLB-route slim of such a file is made again), a static
+  `.fbx` is read as before, and the drill keeps holding the reader's round-trip parity on `.fbx` jobs. The deploy
+  conversion (`BlenderDeployInProcess`, deploy_convert.py imports an `.fbx` directly too) takes the same leave and its
+  cache revision moves with it. Two unit tests hold the limit. So the previous entry's "the mech's bake leaves Blender" holds for the EXPORT rows, not for the bake: the
+  mech bakes on the FBX route until a drill row holds the direct import and the round trip equal for its file. Its lost
+  colours are a different matter: the file names its textures by the author's absolute paths, none on this disk, and the
+  archive beside the model holds them unextracted - both routes find no albedo and bake a 32x32 swatch atlas.
 - **THE RIG ROUTE WRITES THE ARMATURE NODE'S OWN CHANNELS - THE MECH'S BAKE LEAVES BLENDER (2026-11-03).** The light
   assault mech's `.fbx` keys its armature's location at the object level, and `BlenderRigExport` left any such curve to
   Blender by name (`'Armature|Armature|ArmatureAction': an object-level curve on the armature`), so the mech was the one

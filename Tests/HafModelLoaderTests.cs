@@ -84,4 +84,41 @@ public class HafModelLoaderTests
         Assert.Equal(declines, HafModelLoader.VehicleImportFallback(source, model) != null);
     }
 
+    // The rig route's direct-import limit (2026-11-03, the light assault mech): rig_anim.py on the FBX route imports the .fbx
+    // directly, the reader is Blender's glTF round trip of it, and the two rigs are not the same - the GLB route baked scattered
+    // pieces. A skinned or animated .fbx leaves to the FBX route by name; a static one is read as before.
+    [Theory]
+    [InlineData("source.fbx", true, false, true)]
+    [InlineData("source.FBX", false, true, true)]
+    [InlineData("source.fbx", false, false, false)]
+    [InlineData("source.glb", true, true, false)]
+    [InlineData("source.gltf", true, true, false)]
+    public void The_rig_limit_is_specific_to_FBX_skin_or_animation(string source, bool skin, bool animation, bool declines)
+    {
+        var model = new HafModel();
+        if (skin) model.Skins.Add(new HafSkin());
+        if (animation) model.Animations.Add(new HafAnimation());
+        string why = HafModelLoader.RigImportFallback(source, model);
+        Assert.Equal(declines, why != null);
+        if (declines) { Assert.StartsWith(HafModelLoader.FbxRigLeavePrefix, why); Assert.True(HafModelLoader.IsNamedFbxLeave(why)); }
+    }
+
+    [Fact]
+    public void A_skinned_animated_fbx_leaves_the_rig_route_to_Blender_by_name_and_a_static_one_does_not()
+    {
+        Assert.NotNull(HafModelLoader.ReadForRig(Fixture("static"), out string leave)); Assert.Null(leave);
+        string path = Fixture("animated_skin");
+        Assert.NotNull(HafModelLoader.Read(path, out leave)); Assert.Null(leave);   // the reader itself takes it
+        Assert.Null(HafModelLoader.ReadForRig(path, out leave));
+        Assert.StartsWith(HafModelLoader.FbxRigLeavePrefix, leave);
+        Assert.True(HafModelLoader.IsNamedFbxLeave(leave));   // an EXPECTED fallback for the Factory's route bookkeeping, not a crash
+        // the in-process run names it before any stage runs: no file, no RIGANIM line, the Factory takes its FBX route
+        string output = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".glb");
+        var argv = BlenderRigAnimInProcess.Argv(0, "", "", "", true, "0,0,0", true, "", false, "", false, "", false);
+        var run = BlenderRigAnimInProcess.Run(path, output, argv);
+        Assert.Equal(leave, run.UseBlender); Assert.False(run.Written); Assert.False(run.ScriptExit); Assert.Empty(run.Log); Assert.False(File.Exists(output));
+        // deploy_convert.py imports an .fbx directly too: the same leave, before any step
+        var deploy = BlenderDeployInProcess.Run(path, output, BlenderDeployInProcess.Argv("0", "24", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""));
+        Assert.Equal(leave, deploy.UseBlender); Assert.False(deploy.Written); Assert.False(File.Exists(output));
+    }
 }

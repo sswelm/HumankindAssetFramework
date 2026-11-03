@@ -24,7 +24,7 @@ public static class BlenderRigAnimInProcess
 {
     /// <summary>Bump when the in-process run's written file changes: the Factory's slim cache key carries it, so a cached
     /// GLB made by an older port is made again.</summary>
-    public const string CacheRevision = "2026-11-03.armature-object-channels.1." + HafModelLoader.CacheRevision; // retry old object-channel fallbacks and rebuild mirrored transform folds
+    public const string CacheRevision = "2026-11-03.fbx-rig-leave.1." + HafModelLoader.CacheRevision; // a skinned or animated .fbx leaves to the FBX route by name: its cached GLB-route slim is made again there
 
     public sealed class Outcome
     {
@@ -60,7 +60,7 @@ public static class BlenderRigAnimInProcess
         try
         {
             HafModel m;
-            try { m = HafModelLoader.Read(src, out string leave); if (m == null) { o.UseBlender = leave; return o; } }   // 6e: a .glb/.gltf, or an .fbx through the native reader
+            try { m = HafModelLoader.ReadForRig(src, out string leave); if (m == null) { o.UseBlender = leave; return o; } }   // 6e: a .glb/.gltf, or a STATIC .fbx through the native reader; a skinned or animated .fbx is the FBX route's by name (HafModelLoader.RigImportFallback)
             catch (Exception e) when (e is InvalidDataException || e is NotSupportedException) { o.UseBlender = "the C# reader cannot handle this input: " + e.Message; return o; }
             Tick();
             var a = BlenderRigAnim.ParseArgs(new[] { src, outGlb }.Concat(argv).ToList());
