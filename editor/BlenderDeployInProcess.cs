@@ -13,7 +13,7 @@ public static class BlenderDeployInProcess
 {
     /// <summary>Bump when the in-process conversion's written file changes: the Factory's cache key carries it, so a
     /// cached deploy_converted.glb made by an older port is converted again.</summary>
-    public const string CacheRevision = "2026-10-11.1." + HafModelLoader.CacheRevision;
+    public const string CacheRevision = "2026-11-03.fbx-rig-leave.1." + HafModelLoader.CacheRevision;   // a skinned or animated .fbx converts in Blender by name: an earlier C# conversion of one is made again there
 
     /// <summary>The longest animation converted here (frames from the bake's first to its last): the bake, the fire
     /// window, the role clips and the export each walk every frame for every bone on the editor thread, where only the
@@ -53,7 +53,7 @@ public static class BlenderDeployInProcess
         try
         {
             HafModel m;
-            try { m = HafModelLoader.Read(src, out string leave); if (m == null) { o.UseBlender = leave; return o; } }   // 6e: a .glb/.gltf, or an .fbx through the native reader
+            try { m = HafModelLoader.ReadForRig(src, out string leave); if (m == null) { o.UseBlender = leave; return o; } }   // 6e: a .glb/.gltf, or a STATIC .fbx through the native reader; deploy_convert.py imports an .fbx directly as rig_anim.py does, so a skinned or animated one is Blender's by the same name (HafModelLoader.RigImportFallback)
             catch (Exception e) when (e is InvalidDataException || e is NotSupportedException) { o.UseBlender = "the C# reader cannot handle this input: " + e.Message; return o; }
             Tick();
             var names = BlenderNames.Compute(m);

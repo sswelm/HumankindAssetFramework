@@ -12,6 +12,7 @@ public static class HafModelLoader
 {
     public const string CacheRevision = "2026-11-02.fbx-loader.1";
     public const string FbxVehicleLeavePrefix = "the FBX vehicle import needs Blender: ";
+    public const string FbxRigLeavePrefix = "the FBX rig import needs Blender: ";
     public const string FbxLeavePrefix = "the FBX reader leaves this file to Blender by name: ";
 
     public static bool IsGltf(string path) => path != null && (path.Trim().EndsWith(".glb", StringComparison.OrdinalIgnoreCase) || path.Trim().EndsWith(".gltf", StringComparison.OrdinalIgnoreCase));
@@ -53,6 +54,25 @@ public static class HafModelLoader
         return model;
     }
 
+    // The rig route (BlenderRigAnimInProcess) has the same limit (2026-11-03, the light assault mech): rig_anim.py on the
+    // Factory's FBX route imports the .fbx DIRECTLY, the reader writes Blender's glTF round trip of it, and the rig drill's
+    // oracle for an .fbx is that round trip too (tools/riganim_drill.sh, step 6f: oracle_fbx_glb) - so a drill PASS says the
+    // port equals the round trip, not the FBX route. On the mech the two scenes differ (9 against 8 material slots, the missing
+    // texture's placeholder image dropped, placement lifted 1.63 against 0.04, the root bone's rest 1.6 against 0.38, the mesh
+    // 4.3x its bones): the GLB route baked scattered pieces where the FBX route bakes the mech. A skinned or animated .fbx
+    // stays on the FBX route by name until a drill row holds the direct import and the round trip equal for it.
+    internal static string RigImportFallback(string path, HafModel model)
+        => IsFbx(path) && (model.Skins.Count > 0 || model.Animations.Count > 0)
+            ? FbxRigLeavePrefix + "a skinned or animated FBX (rig_anim.py imports the .fbx directly; the reader's glTF round trip of it is not the same rig - the light assault mech, 2026-11-03)" : null;
+
+    /// <summary>The model for the rig route, or null with `leave`: the FBX reader's named limit, or the direct-import limit above.</summary>
+    public static HafModel ReadForRig(string path, out string leave)
+    {
+        var model = Read(path, out leave);
+        if (model != null) leave = RigImportFallback(path, model);
+        return leave == null ? model : null;
+    }
+
     /// <summary>Read, with a named FBX limit thrown as NotSupportedException (for the callers that take a reader's refusal as
     /// "Blender then" already).</summary>
     public static HafModel ReadOrThrow(string path)
@@ -64,5 +84,5 @@ public static class HafModelLoader
 
     /// <summary>True for a reason this loader made for an .fbx the FBX reader leaves by name - an EXPECTED Blender fallback, not
     /// C# coverage lost (BlenderVehicleRigInProcess.ExpectedFallback). This also includes the named direct-FBX vehicle convention limit.</summary>
-    public static bool IsNamedFbxLeave(string reason) => reason != null && (reason.StartsWith(FbxLeavePrefix, StringComparison.Ordinal) || reason.StartsWith(FbxVehicleLeavePrefix, StringComparison.Ordinal));
+    public static bool IsNamedFbxLeave(string reason) => reason != null && (reason.StartsWith(FbxLeavePrefix, StringComparison.Ordinal) || reason.StartsWith(FbxVehicleLeavePrefix, StringComparison.Ordinal) || reason.StartsWith(FbxRigLeavePrefix, StringComparison.Ordinal));
 }
