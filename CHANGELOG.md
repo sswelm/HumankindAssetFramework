@@ -10,6 +10,21 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE ANIMATION LAB PREVIEWS THE SKIN, AND A PREVIEW CLONE ONLY WITH THE RIG'S OWN BIND POSES (2026-11-03).** The light
+  assault mech is drawn in game with its retexture (the entry's Texture file, the green repaint, with brightness 1.5,
+  desaturate 0.85 and a +50/+50/0 tint), never with its bake atlas - and the Lab's previews wore the atlas alone, so the
+  camouflaged mech previewed grey and orange and read as "the texture is gone". A `Skin` toggle (on by default) dresses
+  the body renderers of both previews in the skin PNG from the pack's `skins/` with the entry's adjustments through the
+  new `SkinAdjust` (the plugin's AdjustSkin math; the Retexture window's live preview now runs the same code instead of
+  its own copy; 4 unit tests). The same afternoon the restored July rig previewed with its legs flying apart: the Lab
+  drapes a multi-material bake's persisted atlas-UV clone over the rig when the vertex and bone COUNTS match, and a
+  clone left by an earlier bake of the same entry matched by count with another bake's bind poses. Both previews now
+  require the bind poses equal by value and say when a clone is skipped. The review also requires matching vertices,
+  topology and bone weights, rejects nonfinite bind poses, and searches all candidates before consuming a match (an
+  equally-sized incompatible first clone hid a valid later one). Skin refresh keeps the shared material alive for a
+  playing clip; an unreadable PNG restores the atlas with a visible explanation and retries on refresh. A fresh-project
+  Unity drill holds both loaders, the shared material and runtime pixel math with 24 checks (nine failures reproduced
+  before the fixes). Preview-only: nothing baked or shipped changes.
 - **A SKINNED OR ANIMATED .FBX STAYS ON THE FBX ROUTE - THE ROUND TRIP IS NOT THE FBX ROUTE (2026-11-03).** The first
   GLB-route bake of the light assault mech, the entry the previous entry freed from Blender, came out as scattered pieces
   while the FBX route's bake is the mech, and both read the same `.fbx`. The cause is not in the port's rows: rig_anim.py on

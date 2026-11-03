@@ -35,6 +35,7 @@
     <Compile Include="..\editor\GlbDisconnectedParts.Explain.cs" Link="GlbDisconnectedParts.Explain.cs" />
     <Compile Include="..\editor\BlenderExecutable.cs" Link="BlenderExecutable.cs" />
     <Compile Include="..\editor\EditorRules.cs" Link="EditorRules.cs" />
+    <Compile Include="..\editor\SkinAdjust.cs" Link="SkinAdjust.cs" />
     <Compile Include="..\editor\VehicleRigArgs.cs" Link="VehicleRigArgs.cs" />
     <Compile Include="..\editor\BlenderVehicleRig.cs" Link="BlenderVehicleRig.cs" />
     <Compile Include="..\editor\BlenderVehicleRig.Stage2.cs" Link="BlenderVehicleRig.Stage2.cs" />
