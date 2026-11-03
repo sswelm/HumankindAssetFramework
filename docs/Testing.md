@@ -360,6 +360,29 @@ populations: the Bradley recipe (static, probed and rigged in C#), the Ehrhardt 
 vehicle drills), the light assault mech's registry entry (skinned and animated: stage 1 compares from FBX, then stage 2
 hits the named shared bone-hung mesh limit; later stages/export are not claimed). An `.obj`/`.blend` source stays LEFT by name.
 
+**What a rig_anim drill PASS on an `.fbx` job does and does not say (2026-11-03, the light assault mech's first GLB-route
+bake).** The drill's Blender side runs the script on Blender's own GLB export of the `.fbx`; the Factory's FBX route runs
+the script on the `.fbx` directly. A PASS holds the port equal to the round trip, not to the FBX route. Measured on the
+mech (`blender_riganim_dump.py` on the `.fbx` against the Factory's in-process call on the same file): the direct import
+keeps 9 material slots and a placeholder image for the texture the file names by a path that is not there, the round trip
+8 slots and no image; the direct scene's placement lifts the model 0.04, the round trip's 1.63 (its "grounding lifted this
+model by 34.6%" warning); the exported root bone rests at 0.38 against 1.6 and the round trip's mesh is 4.3x its bones -
+the GLB route baked scattered pieces where the FBX route bakes the mech, and the drill, its export rows equal, could not
+see it. So the rig route now has the vehicle route's limit: `HafModelLoader.ReadForRig` leaves a skinned or animated
+`.fbx` to the FBX route by name (`FbxRigLeavePrefix`, an expected fallback for the Factory's route bookkeeping, the
+in-process cache revision bumped so an earlier GLB-route slim of such a file is made again on the FBX route); a static
+`.fbx` is read as before. The deploy conversion (`BlenderDeployInProcess`; deploy_convert.py imports an `.fbx` directly
+too) takes the same leave, its cache revision moved with it. The drill keeps comparing the stages and the export of `.fbx` jobs through `HafModelLoader.Read`
+(the reader's own parity with the round trip, which the FBX model drill holds); the Factory does not take that route for a
+rig until a drill row holds the direct import and the round trip equal for the file. Two unit tests hold the limit
+(`HafModelLoaderTests`: the shape rule per extension/skin/animation, and the fixtures: static reads, skinned-animated
+leaves before any stage runs - no file, no RIGANIM line).
+The wrapper verdict is mandatory for a restricted FBX, not an optional acceptable outcome: a native write fails even
+when its bytes equal the round-trip oracle. `RigInProcessResultCheck` derives the required reason from the source/model
+policy and requires that exact reason, no output file, no script exit and no stage log; applying this guard to an allowed
+source fails too. Eight unit cases cover these verdicts. A live mech mutation that bypasses `ReadForRig` passed the
+original drill but is rejected by this check; the unmodified wrapper still passes with a named decline.
+
 Review regressions require a fresh nonempty FBX oracle GLB, retain nonzero Blender exit codes, and cover record/replay
 with external FBX image dependencies (including a previously missing recursive basename match). Named-left probe files
 and recipe jobs are removed before conversion; absent conversion mappings fail explicitly. A recipe-specific LEFT is
@@ -2003,7 +2026,9 @@ The drill holds the wrapper on every exported job: `riganim.exe --export` also r
 with the job's arguments and requires the file written, its SHA-256 the dump's GLB's when the export compared the
 bytes (a JPEG albedo's file is read back instead: every image with bytes, the export's animation count), the primary
 and the roles named as the model names them, the roles sidecar reading back, the albedo written when the model says
-so (`EXPORTS jobs N rows R inprocess N`; the PASS line says how many). The dump's export step is the shipped
+so (`EXPORTS jobs N rows R inprocess N inprocleft L`; the PASS line says how many - L the skinned or animated `.fbx`
+jobs the wrapper leaves to the FBX route by name since 2026-11-03, each on an `INPROC` line; their stages and export
+still compare, against the round trip). The dump's export step is the shipped
 `editor/Tools~/rig_anim_glb.py` (rig_anim.py's source cut before its FBX export marker, then the one glTF export),
 imported by `blender_riganim_dump.py` from the rig_anim.py argument's folder, so the drill and the Factory's Bake
 Tests row have one oracle; the registry re-dumped through it gave the same 11,133 X rows. Measured: all 23 registry
