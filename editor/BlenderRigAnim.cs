@@ -2009,6 +2009,11 @@ public static class BlenderRigAnim
                 if (mwInv == null || armInv == null) { s.Fallback = "a matrix mathutils cannot invert in the placement"; return; }
                 var dmesh = Mat3VecPy(mwInv, dworld); var darm = Mat3VecPy(armInv, dworld);
                 for (int v = 0; v < me.Vertices; v++) for (int k = 0; k < 3; k++) me.Positions[3 * v + k] = (float)(me.Positions[3 * v + k] + dmesh[k]);
+                // every head and tail moved ONCE: this port's bones hold their own points, so it never had Blender's connected-chain
+                // defect (a connected child's head IS its parent's tail there; "+= d" per bone moved that one point twice, the mech's
+                // hanging legs, fixed in rig_anim.py 2026-11-03 to set every bone from positions read before any move - the same
+                // one-delta result as here; tools/riganim_connected_drill.sh holds Blender's side, the FBX importer's connected chains
+                // being a shape no glTF job in the rig drill has)
                 foreach (int b in ad.BoneNodes) { ad.Rest.EditHead[b] = Add3(ad.Rest.EditHead[b], darm); ad.Rest.EditTail[b] = Add3(ad.Rest.EditTail[b], darm); }
                 RebuildRest(ad, ad.BoneNodes);
                 foreach (var kv in VehicleProbe.PoseMatrices(ad.Rest, b => ad.PoseProps[b])) ad.PoseMats[kv.Key] = kv.Value;

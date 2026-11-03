@@ -401,6 +401,24 @@ policy and requires that exact reason, no output file, no script exit and no sta
 source fails too. Eight unit cases cover these verdicts. A live mech mutation that bypasses `ReadForRig` passed the
 original drill but is rejected by this check; the unmodified wrapper still passes with a named decline.
 
+**The placement on a connected chain (parity mode, `bash tools/riganim_connected_drill.sh`, 2026-11-03):** Blender's
+edit bones share a point between a connected child's head and its parent's tail, and rig_anim.py's placement moved
+every head and tail by the delta - one move per name, so a connected chain stretched by one delta per link while the
+mesh moved by one (the light assault mech's hanging legs; 19 of its 31 bones are connected by the FBX importer, and no
+other animated recipe has a connected bone - all `.glb`, the glTF importer connects none). The rig drill cannot hold
+this shape: its Blender side for an `.fbx` job is the glTF round trip, which strips the connection, and the C# port
+holds its own points per bone. So `tools/riganim-drill/connected_placement_fixture.py` builds the shape - a three-bone
+connected chain, a skinned mesh around it, both off the origin and above the ground so the placement must move them -
+exports it as FBX and confirms the importer retained the connected chain. It runs `editor/Tools~/rig_anim.py` as the
+Factory does, reads the slim FBX back and holds 14 checks: expected objects/bones, all three absolute heads and
+lengths at the fixed clean-unit export scale, every parent and connected joint, finite geometry, and absolute mesh
+bounds centred and grounded at the expected size. Leaf lengths compare to the imported input because FBX infers the
+leaf's tail. Nothing derives the expected scale from an output bone. The original relative-only checks passed with
+placement disabled or export scale doubled; both now fail. Every run also requires three planted regressions to be
+rejected by the output checks: the old incremental bone loop, disabled placement and doubled export scale. A crash
+or missing output does not count as a successful rejection. SKIP without Blender (exit 3) is a gate FAIL in parity
+mode, like every parity drill.
+
 Review regressions require a fresh nonempty FBX oracle GLB, retain nonzero Blender exit codes, and cover record/replay
 with external FBX image dependencies (including a previously missing recursive basename match). Named-left probe files
 and recipe jobs are removed before conversion; absent conversion mappings fail explicitly. A recipe-specific LEFT is

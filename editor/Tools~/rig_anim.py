@@ -1200,8 +1200,16 @@ if arm is not None and me.vertices:
         me.update()
         bpy.context.view_layer.objects.active = arm
         bpy.ops.object.mode_set(mode='EDIT')
+        # A CONNECTED child's head IS its parent's tail (one point, two names). "head += d; tail += d" per bone moved
+        # that shared point once for the parent and once more for the child, so every connected chain stretched by
+        # one delta per link while the mesh moved by one: the light assault mech (19 of 31 bones connected, FBX import)
+        # re-baked with its legs hanging in the air, the first rig with connected bones through the placement since
+        # it became unconditional (2026-09-20; the frigate had two unconnected bones). Set every bone from the
+        # positions read BEFORE any move, so a shared point lands on origin + delta however many names it has.
+        _orig = {_eb.name: (_eb.head.copy(), _eb.tail.copy()) for _eb in arm.data.edit_bones}
         for _eb in arm.data.edit_bones:
-            _eb.head += _darm; _eb.tail += _darm
+            _h, _t = _orig[_eb.name]
+            _eb.head = _h + _darm; _eb.tail = _t + _darm
         bpy.ops.object.mode_set(mode='OBJECT')
         print("RIGANIM placement: world centre (%.4f, %.4f) -> origin, lowest point %.4f -> 0 (moved %.4f, %.4f, %.4f)"
               % (-_dx, -_dy, min(_zs), _dx, _dy, _dz))

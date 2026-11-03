@@ -10,6 +10,27 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE PLACEMENT STRETCHED EVERY CONNECTED BONE CHAIN - THE MECH'S LEGS HUNG IN THE AIR (2026-11-03).** The light
+  assault mech re-baked on the FBX route with its legs apart from its body, in the Lab's playing clip and in the rest
+  pose. Not the preview: the rest skeleton rig_anim.py writes differs from the July bake's - bone heads moved by
+  unequal amounts and bone lengths doubled along the legs - and running every rig_anim.py version since July on the
+  mech's `.fbx` puts the change at the placement of 2026-09-20 (`an animated bake lands where a static bake lands`).
+  The cause: a CONNECTED child's head IS its parent's tail in Blender's edit bones, one point with two names, and
+  the placement moved every bone's head and tail by the delta, so a shared point moved once per name and a connected
+  chain stretched by one delta per link while the mesh moved by one. The mech has 19 of 31 bones connected (Blender's
+  FBX importer connects a child that starts where its parent ends); no other animated recipe has a connected bone
+  (all are `.glb`, and the glTF importer connects none) - measured over all 42 - which is why the frigate the
+  placement was drilled on (two unconnected bones) never showed it, and why the rig drill could not: its Blender
+  side for an `.fbx` is the glTF round trip, which strips the connection. The placement now sets every bone from the
+  positions read BEFORE any move (the July skeleton moved as one piece, bone for bone, 31 of 31). The C# port holds
+  its own points per bone and never had the defect. New in the parity mode: `tools/riganim_connected_drill.sh`
+  builds a three-bone connected chain with a skinned mesh off the origin, runs rig_anim.py on it and reads the slim
+  FBX back. The review found that relative-only checks accepted disabled placement and doubled export scale; the
+  fixture now holds 14 independent checks of absolute heads, input lengths at the fixed export scale, every parent
+  and connection, finite geometry and centred/grounded mesh bounds. The leaf's length compares to the imported
+  input (FBX infers its tail). Every run also rejects the old bone loop, missing placement and wrong-scale controls;
+  crashes and missing output do not count as numerical rejections. The mech
+  still needs `Keep extracted texture` ticked: its albedo is a hand-kept file the source-change hygiene removes.
 - **THE PREVIEW CLONE IS THE RIG'S SUBMESHES MERGED - THE REVIEW'S CHECK SKIPPED EVERY REAL ONE (2026-11-03).** The
   review of the entry below compared a persisted atlas-UV clone with the rig submesh by submesh, and the Factory writes
   that clone with the rig's submeshes MERGED into one (one atlas material, one submesh, `BuildMultiAtlasAndRemap`), so
