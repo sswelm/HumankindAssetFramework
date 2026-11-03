@@ -25,13 +25,27 @@ public static class UnityAnimationLabTests
         m.boneWeights = Enumerable.Repeat(new BoneWeight { boneIndex0 = 0, weight0 = 1 }, 3).ToArray();
         return m;
     }
+    // A multi-material rig as the Factory sees it: two submeshes (two material slots) over shared vertices. The Factory's
+    // persisted clone MERGES them into one submesh in order (BuildMultiAtlasAndRemap), which is the shape every real
+    // multi-material entry's clone has - the single-submesh cases above cannot see a check that rejects it.
+    static Mesh TwoSubmeshMesh(string name)
+    {
+        var m = new Mesh { name = name, vertices = new[] { Vector3.zero, Vector3.right, Vector3.up, Vector3.one },
+            uv = new[] { Vector2.zero, Vector2.right, Vector2.up, Vector2.one }, bindposes = new[] { Matrix4x4.identity, Matrix4x4.Translate(Vector3.up) } };
+        m.boneWeights = Enumerable.Repeat(new BoneWeight { boneIndex0 = 0, weight0 = 1 }, 4).ToArray();
+        m.subMeshCount = 2; m.SetTriangles(new[] { 0, 1, 2 }, 0); m.SetTriangles(new[] { 1, 3, 2 }, 1);
+        return m;
+    }
     static void CloneCase(string defect)
     {
         string res = "Preview_" + defect, dir = "Assets/FactorySource/" + res;
         Directory.CreateDirectory(dir + "/anim"); AssetDatabase.Refresh();
-        var source = Mesh("source"); AssetDatabase.CreateAsset(source, dir + "/source.asset");
+        var source = defect.StartsWith("merged") ? TwoSubmeshMesh("source") : Mesh("source"); AssetDatabase.CreateAsset(source, dir + "/source.asset");
         var sub = UnityEngine.Object.Instantiate(source); sub.name = "UV clone";
-        bool reject = defect != "valid" && defect != "pool_order";
+        bool reject = defect != "valid" && defect != "pool_order" && defect != "merged";
+        // the Factory's merge (in order) is the clone; the same triangles merged in another order are not this rig's clone
+        if (defect == "merged") { sub.subMeshCount = 1; sub.SetTriangles(new[] { 0, 1, 2, 1, 3, 2 }, 0); }
+        if (defect == "merged_reordered") { sub.subMeshCount = 1; sub.SetTriangles(new[] { 1, 3, 2, 0, 1, 2 }, 0); }
         if (defect == "weights") sub.boneWeights = Enumerable.Repeat(new BoneWeight { boneIndex0 = 1, weight0 = 1 }, 3).ToArray();
         if (defect == "geometry") sub.vertices = new[] { Vector3.zero, Vector3.right * 5, Vector3.up };
         if (defect == "topology") sub.triangles = new[] { 0, 2, 1 };
@@ -49,7 +63,8 @@ public static class UnityAnimationLabTests
         for (int i = 0; i < 2; i++) { var bone = new GameObject("bone" + i); bone.transform.SetParent(go.transform, false); }
         var renderer = go.AddComponent<SkinnedMeshRenderer>(); renderer.sharedMesh = source;
         var mat = new Material(Shader.Find("Standard")) { name = res + "_PreviewMat" };
-        AssetDatabase.CreateAsset(mat, dir + "/" + res + "_PreviewMat.mat"); renderer.sharedMaterial = mat;
+        AssetDatabase.CreateAsset(mat, dir + "/" + res + "_PreviewMat.mat");
+        renderer.sharedMaterials = Enumerable.Repeat(mat, source.subMeshCount).ToArray();
         renderer.bones = new[] { go.transform.GetChild(0), go.transform.GetChild(1) };
         string path = dir + "/anim/" + res + "_anim.prefab";
         PrefabUtility.SaveAsPrefabAsset(go, path); UnityEngine.Object.DestroyImmediate(go);
@@ -62,6 +77,8 @@ public static class UnityAnimationLabTests
             Call(w, "BuildAnimPreview", "anim");
             var inst = Get<GameObject>(w, "fitAnimInst");
             Check(defect + ": playing preview chooses compatible mesh", inst != null && inst.GetComponent<SkinnedMeshRenderer>().sharedMesh == expected);
+            var playing = inst != null ? inst.GetComponent<SkinnedMeshRenderer>() : null;
+            Check(defect + ": playing preview has one material per rendered submesh", playing != null && playing.sharedMaterials.Length == playing.sharedMesh.subMeshCount);
             Call(w, "LoadFitPreview", path, pool);
             var draws = Get<List<(Mesh, Material[], Matrix4x4)>>(w, "fitDraws");
             Check(defect + ": rest preview chooses compatible mesh", draws != null && draws.Count == 1 && draws[0].Item1 == expected);
@@ -72,6 +89,65 @@ public static class UnityAnimationLabTests
                 var field = typeof(AnimationLabWindow).GetField("fitSkinNote", Private);
                 Check("rest preview retains the missing-skin explanation for its UI", field != null && ((string)field.GetValue(w) ?? "").Contains("showing the bake atlas"));
             }
+        }
+        finally { UnityEngine.Object.DestroyImmediate(w); }
+    }
+    // Exercise the actual writer, not a hand-built approximation of its persisted mesh shape.
+    static void FactoryCase()
+    {
+        const string res = "Preview_factory"; string dir = "Assets/FactorySource/" + res;
+        Directory.CreateDirectory(dir + "/anim"); AssetDatabase.Refresh();
+        var source = TwoSubmeshMesh("factory source");
+        // The material islands have distinct vertices, as the Factory's per-material remapper requires.
+        source.vertices = new[] { Vector3.zero, Vector3.right, Vector3.up, Vector3.right * 2, Vector3.right * 3, new Vector3(2, 1, 0) };
+        source.uv = new[] { Vector2.zero, Vector2.right, Vector2.up, Vector2.zero, Vector2.right, Vector2.up };
+        source.boneWeights = Enumerable.Repeat(new BoneWeight { boneIndex0 = 0, weight0 = 1 }, 6).ToArray();
+        source.SetTriangles(new[] { 3, 4, 5 }, 1); source.RecalculateNormals();
+        AssetDatabase.CreateAsset(source, dir + "/source.asset");
+        var go = new GameObject(res); var renderer = go.AddComponent<SkinnedMeshRenderer>(); renderer.sharedMesh = source;
+        for (int i = 0; i < 2; i++) { var bone = new GameObject("bone" + i); bone.transform.SetParent(go.transform, false); }
+        renderer.bones = new[] { go.transform.GetChild(0), go.transform.GetChild(1) };
+        var albedos = new List<KeyValuePair<string, Texture2D>>(); var materials = new Material[2];
+        for (int i = 0; i < 2; i++)
+        {
+            string name = i == 0 ? "factory_red" : "factory_blue";
+            materials[i] = new Material(Shader.Find("Standard")) { name = name };
+            AssetDatabase.CreateAsset(materials[i], dir + "/" + name + ".mat");
+            var image = new Texture2D(4, 4, TextureFormat.RGBA32, false);
+            image.SetPixels(Enumerable.Repeat(i == 0 ? Color.red : Color.blue, 16).ToArray()); image.Apply();
+            albedos.Add(new KeyValuePair<string, Texture2D>("mat" + i + "_" + name, image));
+        }
+        renderer.sharedMaterials = materials;
+        string path = dir + "/anim/" + res + "_anim.prefab";
+        PrefabUtility.SaveAsPrefabAsset(go, path);
+        object[] args = { go, albedos, res, new BakeConfig { atlasMaxDim = 64, albedoBrightness = 1, albedoSaturation = 1, keepBlack = true }, null };
+        var atlas = (Texture2D)typeof(UniversalBaker).GetMethod("BuildMultiAtlasAndRemap", BindingFlags.Static | BindingFlags.NonPublic).Invoke(null, args);
+        var clone = ((List<Mesh>)args[4]).Single();
+        Check("Factory writer merges a copy and retains the source topology", source.subMeshCount == 2 && clone.subMeshCount == 1 && renderer.sharedMaterials.Length == 1);
+        var uv = clone.uv;
+        Color32 red = atlas.GetPixelBilinear(uv[0].x, uv[0].y), blue = atlas.GetPixelBilinear(uv[3].x, uv[3].y);
+        Check("Factory writer maps both material islands to their atlas colours", red.r == 255 && red.b == 0 && blue.r == 0 && blue.b == 255);
+        AssetDatabase.CreateAsset(clone, UniversalBaker.PreviewMeshPath(dir, res, 0));
+        AssetDatabase.CreateAsset(atlas, dir + "/atlas.asset");
+        var body = new Material(Shader.Find("Standard")) { name = res + "_PreviewMat", mainTexture = atlas };
+        AssetDatabase.CreateAsset(body, dir + "/" + res + "_PreviewMat.mat");
+        // BuildFitPreview's rest prefab wears the atlas but still carries the rig mesh until LoadFitPreview substitutes it.
+        renderer.sharedMesh = source; renderer.sharedMaterials = Enumerable.Repeat(body, source.subMeshCount).ToArray();
+        string rest = dir + "/" + res + "_PropFit.prefab";
+        PrefabUtility.SaveAsPrefabAsset(go, rest); UnityEngine.Object.DestroyImmediate(go);
+        var container = new Mesh(); AssetDatabase.CreateAsset(container, dir + "/anim/_" + res + "_Clip_primary.asset");
+        AssetDatabase.AddObjectToAsset(new AnimationClip { name = "Idle", legacy = true }, container); AssetDatabase.SaveAssets();
+        var w = ScriptableObject.CreateInstance<AnimationLabTestWindow>();
+        try
+        {
+            Set(w, "cur", new ModelDef { resourceName = res }); Set(w, "fitSkin", false);
+            Call(w, "BuildAnimPreview", "anim");
+            var playing = Get<GameObject>(w, "fitAnimInst").GetComponent<SkinnedMeshRenderer>();
+            Check("Factory writer's persisted clone is worn by the playing preview", playing.sharedMesh == clone);
+            Check("Factory writer's playing preview uses one atlas material", playing.sharedMaterials.Length == 1);
+            Call(w, "LoadFitPreview", rest, new List<Mesh> { clone });
+            var draws = Get<List<(Mesh, Material[], Matrix4x4)>>(w, "fitDraws");
+            Check("Factory writer's persisted clone is worn by the rig rest preview", draws != null && draws.Count == 1 && draws[0].Item1 == clone);
         }
         finally { UnityEngine.Object.DestroyImmediate(w); }
     }
@@ -125,7 +201,7 @@ public static class UnityAnimationLabTests
     public static void Run()
     {
         string[] args = Environment.GetCommandLineArgs(); string output = args[Array.IndexOf(args, "-hafPreviewOutput") + 1];
-        try { foreach (string defect in new[] { "valid", "bindposes", "weights", "geometry", "topology", "unweighted", "pool_order", "nonfinite" }) CloneCase(defect); SkinCache(); Pixels(); }
+        try { foreach (string defect in new[] { "valid", "bindposes", "weights", "geometry", "topology", "unweighted", "pool_order", "nonfinite", "merged", "merged_reordered" }) CloneCase(defect); FactoryCase(); SkinCache(); Pixels(); }
         catch (Exception e) { Rows.Add("FAIL exception: " + e); failed++; }
         Rows.Add("TOTAL failed " + failed); File.WriteAllLines(output, Rows); EditorApplication.Exit(failed == 0 ? 0 : 1);
     }
