@@ -208,17 +208,23 @@ public class AnimationLabWindow : EditorWindow
         int subUsed = 0, subSkipped = 0;
         foreach (var r in fitAnimInst.GetComponentsInChildren<Renderer>(true))
         {
+            var smr = r as SkinnedMeshRenderer;
+            if (pool != null && smr != null && smr.sharedMesh != null)
+            {
+                // Search ALL candidates before consuming one: equally-sized renderers need not be in the persisted order.
+                int hit = pool.FindIndex(s => IsAtlasClone(s, smr.sharedMesh));
+                if (hit >= 0) { smr.sharedMesh = pool[hit]; pool.RemoveAt(hit); subUsed++; }
+                else if (pool.Any(s => s.vertexCount == smr.sharedMesh.vertexCount)) subSkipped++;
+            }
             if (bodyMat != null)
             {
-                var mats = new Material[Mathf.Max(1, r.sharedMaterials.Length)];
+                // The selected atlas clone has one submesh. Keeping the imported rig's material count draws that
+                // same submesh repeatedly (100 times for UniversalTanks); size the slots AFTER choosing the mesh.
+                var mesh = smr != null ? smr.sharedMesh : r.GetComponent<MeshFilter>()?.sharedMesh;
+                var mats = new Material[Mathf.Max(1, mesh != null ? mesh.subMeshCount : r.sharedMaterials.Length)];
                 for (int i = 0; i < mats.Length; i++) mats[i] = bodyMat;
                 r.sharedMaterials = mats;
             }
-            if (pool == null || !(r is SkinnedMeshRenderer smr) || smr.sharedMesh == null) continue;
-            // Search ALL candidates before consuming one: equally-sized renderers need not be in the persisted order.
-            int hit = pool.FindIndex(s => IsAtlasClone(s, smr.sharedMesh));
-            if (hit >= 0) { smr.sharedMesh = pool[hit]; pool.RemoveAt(hit); subUsed++; }
-            else if (pool.Any(s => s.vertexCount == smr.sharedMesh.vertexCount)) subSkipped++;
         }
         fitPRU.AddSingleGO(fitAnimInst);
         fitAnimT = 0f; fitAnimTick = EditorApplication.timeSinceStartup; fitAnimBoundsValid = false;

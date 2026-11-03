@@ -132,7 +132,9 @@ atlas. A hand prop keeps its own material. The atlas-UV clone a multi-material b
 when its vertices, topology, bone weights and finite bind poses match the rig: equal counts or bind poses alone do
 not establish that it is this rig's UV clone. The clone's single submesh is the rig's submeshes merged in order, as the
 Factory writes it, and is compared as such (a submesh-by-submesh comparison would skip every multi-material clone -
-measured on four entries, 2026-11-03). Both previews search all candidates before consuming a match. A stale
+measured on four entries, 2026-11-03). Both previews search all candidates before consuming a match. The playing
+preview uses one atlas material for the merged mesh; it sizes the material slots after selecting the mesh so it
+does not draw that same mesh once per original material. A stale
 clone is skipped instead of changing the rig's geometry or deformation. Refreshing the skin keeps a playing clip's
 material alive. A missing or temporarily unreadable PNG uses the atlas, with the reason shown under the preview
 controls; refresh again after the PNG is available to retry it.

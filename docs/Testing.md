@@ -340,16 +340,22 @@ alone, full desaturate gives the luminance, tints add and clamp, the gamma LUT's
 clamp to 0.2..4, and the three steps in order on the mech entry's values (1.5, 0.85, +50/+50/0).
 
 **Animation Lab previews in Unity:** `bash tools/animationlab_unity_drill.sh` creates a fresh temporary Unity project,
-compiles the real editor sources and exercises both preview loaders. No Blender or user project is used. Its 28 checks
+compiles the real editor sources and exercises both preview loaders. No Blender or user project is used. Its 43 checks
 cover valid atlas clones, different bind poses/weights/vertices/topology, missing weights, nonfinite bind poses, a
 valid candidate after an equally-sized incompatible one, and the shape every real multi-material clone has: a two-submesh
 rig whose clone is the submeshes MERGED into one in order (worn), against the same triangles merged in another order
 (skipped). That pair was added after the review's submesh-by-submesh check rejected 4 of 4 real entries' clones in a fresh
 project (AssaultInfantry, OrganGun, UniversalTanks, Zeppelin - 2026-11-03), a shape the single-submesh cases could not
-see. They also hold the shared material alive across skin refresh,
+see. Each playing renderer must have one material slot per selected submesh, including after accepting a merged clone
+or rejecting an incompatible one. A further fixture calls the actual `BuildMultiAtlasAndRemap` writer, samples both
+material islands' colours in the returned atlas, persists its merged clone and loads it through both preview paths.
+This keeps the positive control tied to the Factory's output: restoring the old submesh-count rule in a private
+compilation fails five checks, including both loaders with the actual writer's clone. The material-slot regression failed before its fix;
+four isolated real-entry probes also reproduced the mismatch (2/3/100/2 material slots for one submesh), and now
+use one material each. They also hold the shared material alive across skin refresh,
 restore the atlas on a locked PNG, retry after it becomes readable, and retain the rest preview's missing-skin note.
 The Color32 adapter is compared to the pure transform, and 381 brightness values to Unity's runtime gamma math.
-The initial reproduction failed nine checks before the review fixes; the complete set passes afterward. Missing Unity
+PR #248's initial reproduction failed nine checks before its review fixes; the complete set passes afterward. Missing Unity
 is an explicit SKIP (exit 3), never preview validation.
 
 Review of 6e keeps skinned or animated FBX sources (including a second model) on the Vehicle Lab's named Blender

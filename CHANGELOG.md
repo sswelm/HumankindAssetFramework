@@ -18,8 +18,12 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   bind poses and the merged index list all equal, `IsAtlasClone` false on 4 of 4. `IsAtlasClone` now compares a
   single-submesh clone against the rig's submeshes concatenated in order (triangles only, as the Factory merges them)
   and a clone with the rig's own submesh count submesh by submesh; the Unity drill gains the merged shape and the same
-  triangles merged in another order (24 -> 28 checks). The rest-pose preview was never affected: its prefab references
-  the clone itself. Preview-only.
+  triangles merged in another order. The review also sizes the playing renderer's material slots AFTER choosing its
+  mesh: the merged clone had retained 2/3/100/2 original material slots on the four real entries, redrawing its one
+  submesh that many times. Each now uses one atlas material. The Unity drill has 43 checks, including the actual
+  Factory writer, atlas colour samples, persisted clones in both preview loaders and the material-slot regression.
+  The static `_Preview.prefab` references the clone directly; the grounded rig/prop rest preview uses the same
+  substitution rule as the playing preview. Preview-only.
 - **THE ANIMATION LAB PREVIEWS THE SKIN, AND A PREVIEW CLONE ONLY WITH THE RIG'S OWN BIND POSES (2026-11-03).** The light
   assault mech is drawn in game with its retexture (the entry's Texture file, the green repaint, with brightness 1.5,
   desaturate 0.85 and a +50/+50/0 tint), never with its bake atlas - and the Lab's previews wore the atlas alone, so the
