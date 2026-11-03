@@ -30,6 +30,11 @@ mesh datablock (fx_s2_shared_*, ported 2026-11-02 for the light assault mech): t
 same bone, a hung one beside a plain root object, a hung one beside a static part, and three sharers (two bound, one
 plain) through the fold's copies, the join and the export.
 
+The export's armature object channels (step (f), fx_armobj_* and fx_groups_legacy, 2026-11-03): the armature's own
+curves kept by the legacy path (a LINEAR location, a STEP scale, a rotation keyed twice to one value), kept by the role
+clips while the fold strips the primary's, a one-key location (its group needs baking: listed after the rotation), and
+an armature under an empty (EXPORTLEFT: its matrix against the parent's per frame).
+
 Stage 3 (step (d), fx_s3_*): slices of the rotation-only rig (a plain range, reversed with a speed step, a single frame
 with the held-stance nudge - these three take the rest fold on the conversion path and are deferred there), slices on
 the legacy path over LINEAR and CONSTANT keys (a plain one, a reversed stepped one that lands on its end frame, a held
@@ -250,6 +255,48 @@ def objanim(out, name):
     r.key(0, prop, "rotation", [0.0, 1.0], spin(2, "z", 0.25))          # object-level animation beside the bone's
     r.key(0, prop, "translation", [0.0, 1.0], [(2.0, 0.0, 0.0), (2.0, 1.0, 0.0)])
     return r.write(out, name)
+
+
+def armobj(out, name, onekey=False, parented=False):
+    """The armature OBJECT's own curves at the export (the exporter writes the armature node's animated properties after
+    its bones', sampled from matrix_world and swizzled to Y-up): on the clip, a LINEAR location, a STEP scale and a
+    rotation keyed twice to one value (reduced to two samples, STEP by equality). `onekey`: the location on one key
+    (needs baking: sampled, listed after the rotation) and a STEP rotation instead. `parented`: the armature under an
+    empty - its matrix against the parent's per frame is the export's named leave."""
+    r = Rig()
+    top = r.node("Top", translation=[0.0, 0.5, 0.0]) if parented else None
+    arm = r.node("Armature", top)
+    j0 = r.node("Root", arm)
+    j1 = r.node("Arm", j0, translation=[0.0, 1.0, 0.0])
+    sk = r.skin("Skin", [j0, j1], [ibm(0.0, 0.0, 0.0), ibm(0.0, 1.0, 0.0)])
+    m = r.material("Paint", (0.2, 0.4, 0.9))
+    r.node("Body", arm, mesh=r.mesh("body", material=m, joints=[[(0, 1.0)]] * 4 + [[(0, 0.5), (1, 0.5)]] * 4), skin=sk)
+    a = r.anim("Spin")
+    r.key(a, j1, "rotation", [0.0, 0.5, 1.0], spin(3, "x", 0.5))
+    if onekey:
+        r.key(a, arm, "rotation", [0.0, 0.5, 1.0], spin(3, "y", 0.25), "STEP")
+        r.key(a, arm, "translation", [0.5], [(0.0, 0.25, 0.0)])
+    else:
+        r.key(a, arm, "translation", [0.0, 1.0], [(0.0, 0.0, 0.0), (0.5, 0.25, -0.75)])
+        r.key(a, arm, "scale", [0.0, 0.5, 1.0], [(1.0, 1.0, 1.0), (2.0, 1.5, 1.0), (1.0, 1.0, 1.0)], "STEP")
+        r.key(a, arm, "rotation", [0.0, 1.0], [(0.0, 0.0, 0.0, 1.0), (0.0, 0.0, 0.0, 1.0)])
+    return r.write(out, name)
+
+
+
+def armobj_mirrored_roles(out):
+    """Object rotation plus negative, nonuniform STEP scale retained by role clips. The stage-4 fold must flip
+    mirrored triangles AND their UV/normal/color corner data, as Blender's transform_apply does."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    attrs = r.meshes[0]["primitives"][0]["attributes"]
+    attrs["TEXCOORD_1"] = r.b.accessor([(i / 7.0, (7 - i) / 7.0) for i in range(8)], "f", "VEC2", minmax=False)
+    attrs["COLOR_0"] = r.b.accessor([(i / 7.0, 0.25, 0.75, 1.0) for i in range(8)], "f", "VEC4", minmax=False)
+    axis = [v / math.sqrt(14.0) for v in (1.0, 2.0, 3.0)]
+    rots = [tuple(v * math.sin(math.pi * t) for v in axis) + (math.cos(math.pi * t),) for t in (0.0, 0.55, 1.1)]
+    r.key(0, arm, "rotation", [0.0, 0.5, 1.0], rots)
+    r.key(0, arm, "translation", [0.0, 1.0], [(-0.3, 0.2, 0.7), (0.4, -0.5, 0.1)])
+    r.key(0, arm, "scale", [0.0, 0.5, 1.0], [(-1.0, 2.0, 3.0), (-2.0, 3.0, 1.0), (-0.5, 1.0, 2.0)], "STEP")
+    return r.write(out, "riganim_armobj_mirrored_roles")
 
 
 def multi(out):
@@ -1002,6 +1049,14 @@ def main(out):
     job("EXIT:1:fx_noarm", noarm(out))
     job("LEFT:fx_localnode", p, local="1")
     job("fx_groups", groups(out))
+    # the armature object's own curves at the export (the legacy path and the role clips keep them; the fold strips the primary's)
+    job("fx_groups_legacy", groups(out), convert="0")
+    ao = armobj(out, "riganim_armobj")
+    job("fx_armobj_legacy", ao, convert="0")
+    job("fx_armobj_roles", ao, roles="attack=Spin[0..6];move=Spin[6..12]")
+    job("fx_armobj_onekey", armobj(out, "riganim_armobj_onekey", onekey=True), convert="0")
+    job("fx_armobj_mirrored_roles", armobj_mirrored_roles(out), roles="attack=Spin[0..6];move=Spin[6..12]")
+    job("EXPORTLEFT:fx_armobj_parented", armobj(out, "riganim_armobj_parented", parented=True), convert="0")
     job("fx_skinned_anim", skinned_anim(out))
     # stage 2
     job("fx_s2_static", s2_static(out), static="turret,glass")

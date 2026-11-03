@@ -48,11 +48,23 @@
 //     cached on (bytes, component type, count, max, min, type) for the whole export, so channels with the same times (or
 //     the same two kept samples) write one accessor and one buffer view, with the accessor's min and max the Python
 //     doubles frame / 24 - part 8c's writer dedupes by that key; this result holds the floats per channel
-//   * not modelled, impossible from the script: the armature OBJECT's own channels (an action with curves outside
-//     pose.bones - nla.bake runs with bake_types={'POSE'} and the roles key pose bones alone), a connected bone
-//     (BKE_pchan_to_mat4 drops the location of a bone with BONE_CONNECTED; edit_bones.new leaves use_connect off), a
-//     bone constraint (clear_constraints=True at the bake); fps 24 holds for a glTF source (the glTF importer reads
-//     render.fps, an FBX import would set it) - the only source the port reads
+//   * the armature OBJECT's own channels (sampled/armature/channels.py after the bones', 2026-11-03; rig_anim's legacy
+//     path and its role clips carry them - the light assault mech's location curve -, the deploy script's bake does
+//     not: nla.bake runs with bake_types={'POSE'}): one channel per PROPERTY of the action's object-level curves on the
+//     armature (__gather_armature_object_channel: location, rotation_quaternion, scale, in get_channel_groups' order -
+//     the first curve of each property -, a property whose group needs_baking listed after the others), always
+//     "animated"; the samples the object sampler's: per frame parent_mat.inverted_safe() @ matrix_world (a root: the
+//     identity's) decomposed as the bone's, the object's matrix BKE_object_to_mat4 of its properties as the depsgraph
+//     holds them - a curve's value where the action has one, else the ORIGINAL's property, which the frame loop of each
+//     earlier action wrote at its last frame (animsys_write_orig_anim_rna, where the value differed; no reset_bone_matrix
+//     for an object) -, then transform(Identity) and swizzle_yup: location (x, z, -y), rotation (w, x, z, -y) written
+//     (x, y, z, w), scale (x, z, y); the keep and the interpolation the object sampler's (the same rules, mathutils ==
+//     on two kept samples); the target the armature's node. An armature with a parent, an Euler or delta property, two
+//     properties needing baking (to_be_sampled is a set) are left by name (BlenderRigExport.ChannelSpec)
+//   * not modelled, impossible from the script: a connected bone (BKE_pchan_to_mat4 drops the location of a bone with
+//     BONE_CONNECTED; edit_bones.new leaves use_connect off), a bone constraint (clear_constraints=True at the bake);
+//     fps 24 holds for a glTF source (the glTF importer reads render.fps, an FBX import would set it) - the only source
+//     the port reads
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -81,6 +93,7 @@ public static class BlenderChannelExport
         public string Fallback;
         public readonly List<Animation> Animations = new List<Animation>();
         public int Reduced, Full, Single, Stepped, Linear, EulerBones, HeldBones;   // what the walk met (the drill's coverage)
+        public int ObjectChannels;                                                  // the armature object's own channels written
     }
 
     const double Fps = 24.0;   // the startup scene's render.fps * fps_base
@@ -100,6 +113,9 @@ public static class BlenderChannelExport
         public Func<string, int, List<BlenderDeploy.ArmKey>> Keys;
         public Func<string, int, int> DenseCount;   // the bake's curve: its key count, 0 when the bone is not from the bake
         public int Lo, Hi; public bool Any;
+        /// <summary>The armature OBJECT's own animated properties (location, rotation_quaternion, scale) in the exporter's
+        /// channel order, or null: their curves answer `Has`, `Eval` and `Keys` under the bone name null.</summary>
+        public List<string> ObjectProps;
     }
 
     public static Result Build(BlenderDeploy.Result r, BlenderDeployExport.Result x, int sfra, int efra)
@@ -122,6 +138,10 @@ public static class BlenderChannelExport
         public Func<string, string> ModeOf; public Func<string, float[]> HeldOf;
         public string Active; public readonly List<string> Visited = new List<string>();
         public Func<string, Source> SourceOf;
+        /// <summary>The armature object itself, for a Source with ObjectProps: its glTF node and its own properties (location,
+        /// quaternion, scale) as the export's first-frame evaluation left the ORIGINAL (the held values a curve-less property
+        /// keeps). The object is a scene root: its matrix_world is BKE_object_to_mat4 of these.</summary>
+        public int ObjectNode = -1; public float[][] ObjectHeld;
     }
 
     public static Result Build(Spec spec, BlenderDeployExport.Result x, int sfra, int efra)
@@ -186,6 +206,8 @@ public static class BlenderChannelExport
         for (int i = 0; i < x.Nodes.Count; i++) if (x.Nodes[i].Joint) nodeOf[x.Nodes[i].Name] = i;
         foreach (var b in walk) if (!nodeOf.ContainsKey(b.Name)) throw new LeftException($"the bone '{b.Name}' has no node");
         bool activeUnreset = active != null && visited.Count > 0 && visited[0] == active;
+        // the armature object's ORIGINAL properties, carried through the actions' frame loops in the exporter's order (no reset for an object)
+        var objHeld = spec.ObjectHeld != null ? spec.ObjectHeld.Select(p => (float[])p.Clone()).ToArray() : null;
         foreach (string name in x.Animations)
         {
             var src = spec.SourceOf(name);
@@ -246,6 +268,46 @@ public static class BlenderChannelExport
                 }
             }
 
+            // one channel: the keep (fcurve_is_constant), the interpolation, the values through `correction` (the bone's
+            // correction_matrix_local, or the identity and swizzle_yup for the armature object)
+            void AddChannel(int node, float[][] samples, string path, int from, int count, bool animated, string curveInterp, float[] correction, bool swizzle)
+            {
+                var frames = new List<int>(); for (int k = 0; k < n; k++) frames.Add(k);
+                // fcurve_is_constant: np.ptp per component (in double) below 0.0001
+                bool cst = true;
+                for (int c = 0; c < count && cst; c++)
+                {
+                    double lo = double.PositiveInfinity, hi = double.NegativeInfinity;
+                    for (int k = 0; k < n; k++) { double val = samples[k][from + c]; if (val < lo) lo = val; if (val > hi) hi = val; }
+                    if (!(hi - lo < 0.0001)) cst = false;
+                }
+                if (cst && n >= 2) { frames = new List<int> { 0, n - 1 }; res.Reduced++; } else if (n == 1) res.Single++; else res.Full++;
+                string interp;
+                if (frames.Count > 2) interp = curveInterp == "STEP" ? "STEP" : "LINEAR";
+                else if (frames.Count == 1) interp = !animated ? "STEP" : curveInterp == "CUBICSPLINE" ? "LINEAR" : curveInterp;
+                else
+                {
+                    if (!animated) interp = "STEP";
+                    else
+                    {
+                        bool same = true;
+                        for (int c = 0; c < count; c++) if (!FloatsAreEqual(samples[frames[0]][from + c], samples[frames[1]][from + c], 1)) same = false;
+                        interp = same ? "STEP" : "LINEAR";
+                    }
+                }
+                if (interp == "STEP") res.Stepped++; else res.Linear++;
+                var times = new float[frames.Count]; var values = new List<float>();
+                for (int i = 0; i < frames.Count; i++)
+                {
+                    times[i] = (float)((start + frames[i]) / Fps);
+                    var t = Transform(path, samples[frames[i]], from, correction);
+                    if (swizzle) t = path == "translation" ? new[] { t[0], t[2], -t[1] } : path == "rotation" ? new[] { t[0], t[2], -t[1], t[3] } : new[] { t[0], t[2], t[1] };
+                    values.AddRange(t);
+                }
+                anim.Channels.Add(new Channel { Node = node, Path = path, Interpolation = interp, Times = times, Values = values.ToArray(), Sampler = anim.Channels.Count,
+                                                MinTime = (start + frames[0]) / Fps, MaxTime = (start + frames[frames.Count - 1]) / Fps });
+            }
+
             // per bone: location, rotation_quaternion, scale
             foreach (var b in walk)
             {
@@ -258,39 +320,41 @@ public static class BlenderChannelExport
                     if (path == "rotation" && mode != "QUATERNION") { curveFrom = EUL; curveCount = 3; }
                     bool animated = Enumerable.Range(curveFrom, curveCount).Any(c => src.Has(b.Name, c));
                     string curveInterp = animated ? GroupInterpolation(src, b.Name, curveFrom, curveCount) : "LINEAR";
-                    var frames = new List<int>(); for (int k = 0; k < n; k++) frames.Add(k);
-                    // fcurve_is_constant: np.ptp per component (in double) below 0.0001
-                    bool cst = true;
-                    for (int c = 0; c < count && cst; c++)
+                    AddChannel(nodeOf[b.Name], sampled[b.Name], path, from, count, animated, curveInterp, corr[b.Name], false);
+                }
+            }
+
+            // the armature object's own channels, after the bones': its matrix_world per frame from its properties - a
+            // curve's value, else the ORIGINAL's (what the earlier actions' frame loops left there) - decomposed as the
+            // bone's; only the properties the action keys, in the exporter's order
+            if (src.ObjectProps != null && src.ObjectProps.Count > 0)
+            {
+                if (spec.ObjectNode < 0 || objHeld == null) throw new LeftException($"the animation '{name}' keys the armature object, which the spec gives no node or held properties for");
+                var osamp = new float[n][];
+                var identity = VehicleProbe.InvertedSafe(VehicleProbe.IdentityF());   // parent_mat.inverted_safe(): a scene root's parent_mat is the identity
+                for (int k = 0; k < n; k++)
+                {
+                    int f = start + k;
+                    var v = new[] { (float[])objHeld[0].Clone(), (float[])objHeld[1].Clone(), (float[])objHeld[2].Clone() };   // the evaluated copy
+                    for (int c = 0; c < 10; c++)
                     {
-                        double lo = double.PositiveInfinity, hi = double.NegativeInfinity;
-                        for (int k = 0; k < n; k++) { double val = sampled[b.Name][k][from + c]; if (val < lo) lo = val; if (val > hi) hi = val; }
-                        if (!(hi - lo < 0.0001)) cst = false;
+                        if (!src.Has(null, c)) continue;
+                        float val = src.Eval(null, c, f);
+                        int ci = c < QUAT ? 0 : c < SCALE ? 1 : 2, idx = c < QUAT ? c : c < SCALE ? c - QUAT : c - SCALE;
+                        v[ci][idx] = val;
+                        if (objHeld[ci][idx] != val) objHeld[ci][idx] = val;   // animsys_write_orig_anim_rna: the original takes the value where it differs
                     }
-                    if (cst && n >= 2) { frames = new List<int> { 0, n - 1 }; res.Reduced++; } else if (n == 1) res.Single++; else res.Full++;
-                    string interp;
-                    if (frames.Count > 2) interp = curveInterp == "STEP" ? "STEP" : "LINEAR";
-                    else if (frames.Count == 1) interp = !animated ? "STEP" : curveInterp == "CUBICSPLINE" ? "LINEAR" : curveInterp;
-                    else
-                    {
-                        if (!animated) interp = "STEP";
-                        else
-                        {
-                            bool same = true;
-                            for (int c = 0; c < count; c++) if (!FloatsAreEqual(sampled[b.Name][frames[0]][from + c], sampled[b.Name][frames[1]][from + c], 1)) same = false;
-                            interp = same ? "STEP" : "LINEAR";
-                        }
-                    }
-                    if (interp == "STEP") res.Stepped++; else res.Linear++;
-                    var times = new float[frames.Count]; var values = new List<float>();
-                    for (int i = 0; i < frames.Count; i++)
-                    {
-                        times[i] = (float)((start + frames[i]) / Fps);
-                        var s = sampled[b.Name][frames[i]];
-                        values.AddRange(Transform(path, s, from, corr[b.Name]));
-                    }
-                    anim.Channels.Add(new Channel { Node = nodeOf[b.Name], Path = path, Interpolation = interp, Times = times, Values = values.ToArray(), Sampler = anim.Channels.Count,
-                                                    MinTime = (start + frames[0]) / Fps, MaxTime = (start + frames[frames.Count - 1]) / Fps });
+                    var world = VehicleProbe.ObjectMatrix(v[0], v[1], v[2]);   // BKE_object_to_mat4: a root's matrix_world
+                    var mat = VehicleProbe.MatMulMathutils(identity, VehicleProbe.ToRowMajor(world));
+                    VehicleProbe.Mat4ToLocRotSize(VehicleProbe.ToColumnMajor(mat), out var loc, out var rot3, out var size);   // mat.decompose()
+                    var quat = VehicleProbe.Mat3NormalizedToQuatFast(rot3);
+                    osamp[k] = new[] { loc[0], loc[1], loc[2], quat[0], quat[1], quat[2], quat[3], size[0], size[1], size[2] };
+                }
+                foreach (string prop in src.ObjectProps)
+                {
+                    var (path, from, count) = prop == "location" ? ("translation", LOC, 3) : prop == "rotation_quaternion" ? ("rotation", QUAT, 4) : prop == "scale" ? ("scale", SCALE, 3) : throw new LeftException($"the animation '{name}' keys {prop} on the armature object (not modelled)");
+                    AddChannel(spec.ObjectNode, osamp, path, from, count, true, GroupInterpolation(src, null, from, count), identity, true);
+                    res.ObjectChannels++;
                 }
             }
         }
@@ -360,6 +424,22 @@ public static class BlenderChannelExport
         if (lists[0].Count <= 1) return "LINEAR";
         for (int i = 0; i < lists[0].Count; i++) foreach (var l in lists) if (l[i].Frame != lists[0][i].Frame) return "LINEAR";
         return first == "BEZIER" ? "CUBICSPLINE" : first == "LINEAR" ? "LINEAR" : "STEP";
+    }
+
+    /// <summary>needs_baking for one property's curve group (the key lists of its curves, in channel order): an
+    /// interpolation the exporter does not know on the first key, a key of another interpolation, unequal key counts, one
+    /// key or fewer, differently placed keys across the curves. The exporter samples such a group and lists it after the
+    /// others (get_channel_groups' to_be_sampled).</summary>
+    internal static bool NeedsBaking(List<List<BlenderDeploy.ArmKey>> lists)
+    {
+        if (lists.Count == 0) return false;
+        string first = lists[0].Count > 0 ? lists[0][0].Interpolation ?? "BEZIER" : "BEZIER";
+        if (first != "BEZIER" && first != "LINEAR" && first != "CONSTANT") return true;
+        foreach (var l in lists) foreach (var k in l) if ((k.Interpolation ?? "BEZIER") != first) return true;
+        if (lists.Any(l => l.Count != lists[0].Count)) return true;
+        if (lists[0].Count <= 1) return true;
+        for (int i = 0; i < lists[0].Count; i++) foreach (var l in lists) if (l[i].Frame != lists[0][i].Frame) return true;
+        return false;
     }
 
     /// <summary>gltf2_blender_math.transform of one sample (loc 3, quat 4 as (w, x, y, z), size 3 at `from`) through the

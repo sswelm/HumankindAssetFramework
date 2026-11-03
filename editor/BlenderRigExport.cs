@@ -27,7 +27,10 @@
 //     the strongest four normalized (BlenderExport.VertexBones); a vertex without one takes the neutral bone;
 //   * action.py (ACTIONS mode): one animation per action with a slot of an exported armature whose curves reach the
 //     scene's range, sorted by name lower-cased; its channels are three per bone of every armature the action has a
-//     slot for (optimize_animation_keep_anim_armature keeps the constant ones) - their samples are part (f3)'s;
+//     slot for (optimize_animation_keep_anim_armature keeps the constant ones), then one per property the action keys
+//     on the armature OBJECT itself (sampled/armature/channels.py __gather_armature_object_channel: the legacy path's
+//     and the role clips' object-level curves - the light assault mech's location, 2026-11-03) - their samples are
+//     part (f3)'s (BlenderChannelExport: the bones', and the object's from its matrix_world swizzled to Y-up);
 //   * the albedo (stage 4's image.save): the image's export name becomes the saved file's stem and its type image/png;
 //     a PNG source's bytes stay its own (measured on the fixtures and the registry), a JPEG source's become the PNG
 //     Blender's encoder wrote - unknown here (null: the IMG row by name and type, the GLB's bytes without it).
@@ -309,8 +312,10 @@ public static class BlenderRigExport
     /// root bones in that order, each followed by its children), every bone in QUATERNION mode (the importer's), the pose the
     /// script left (PoseProps), the actions with a slot of the armature sorted by name lower-cased, the active one, and each
     /// action's curves - a curve per (bone, channel) of its armature slot, evaluated as the depsgraph does (LINEAR and
-    /// CONSTANT segments included). An action with curves on any other object (the armature's own object channels, a
-    /// second armature) is left by name.</summary>
+    /// CONSTANT segments included) -, and the armature OBJECT's own curves under the bone name null with their
+    /// properties in the exporter's channel order (Source.ObjectProps; the armature's node and held properties on the
+    /// Spec). An action with curves on any other object (a second armature, an animated mesh node), an armature with a
+    /// parent, an Euler or delta property, two object properties needing baking are left by name.</summary>
     static BlenderChannelExport.Spec ChannelSpec(BlenderRigAnim.Stage1 s, BlenderDeployExport.Result x, bool vehicle)
     {
         var ad = s.Armature; var armObj = ad.Object; var names = s.Names;
@@ -338,24 +343,58 @@ public static class BlenderRigExport
         Visit(-1);
         foreach (var act in s.Actions) if (act.Slots.Any(sl => vehicle ? sl.FCurves.Any(fc => fc.Bone != null) : sl.Object == armObj)) spec.Visited.Add(act.Name);
         BlenderExportTree.StableSort(spec.Visited, (p, q) => BlenderRigAnim.PyStringOrder.Compare(BlenderRigAnim.PyLower(p), BlenderRigAnim.PyLower(q)));
+        // the armature object itself: its node, and its properties as the export's first-frame evaluation left the original
+        if (!vehicle)
+        {
+            spec.ObjectNode = x.Nodes.FindIndex(nd => !nd.Joint && !nd.Neutral && nd.Name == armObj.Name);
+            spec.ObjectHeld = armObj.Props?.Select(p => (float[])p.Clone()).ToArray();
+        }
         spec.SourceOf = name =>
         {
             var act = s.Actions.FirstOrDefault(a => a.Name == name);
             if (act == null) return null;
             var src = new BlenderChannelExport.Source { Name = name, Lo = int.MaxValue, Hi = int.MinValue };
             var curves = new Dictionary<(string bone, int channel), List<BlenderRigAnim.KeyData>>();
+            var objProps = new List<string>();   // the armature object's keyed properties, first curve first (get_channel_groups' dict)
             foreach (var sl in act.Slots)
             {
                 // a slot of an object the scene no longer holds (joined away, flattened) animates nothing; one of a live object does
                 if (!vehicle && sl.Object != armObj) { if (sl.FCurves.Count > 0 && sl.Object != null && s.Objects.Contains(sl.Object)) throw new InvalidOperationException("'" + name + "': curves on '" + sl.Object.Name + "' beside the armature's (its object channels, or a second armature, are not modelled)"); continue; }
                 foreach (var fc in sl.FCurves)
                 {
-                    if (fc.Bone == null) throw new InvalidOperationException("'" + name + "': an object-level curve on the armature (" + fc.DataPath + ": the armature node's channels are not modelled)");
+                    if (fc.Bone == null)
+                    {
+                        // the armature OBJECT's own curve: its property's channel, under the bone name null (the vehicle rig's sampler
+                        // evaluates its own frames: left there)
+                        if (vehicle) throw new InvalidOperationException("'" + name + "': an object-level curve on the armature (" + fc.DataPath + ": the vehicle rig's armature node channels are not modelled)");
+                        if (fc.Prop != "location" && fc.Prop != "rotation_quaternion" && fc.Prop != "scale") throw new InvalidOperationException("'" + name + "': an object-level curve on the armature (" + fc.DataPath + ": only location, rotation_quaternion and scale are modelled)");
+                        if (armObj.Parent != null) throw new InvalidOperationException("'" + name + "': an object-level curve on an armature with a parent (" + fc.DataPath + ": its matrix against the parent's per frame is not modelled)");
+                        if (fc.Keys.Count == 0) continue;   // get_channel_groups skips a curve without keyframes
+                        int oc = fc.Prop == "location" ? fc.Index : fc.Prop == "rotation_quaternion" ? 3 + fc.Index : 7 + fc.Index;
+                        curves[(null, oc)] = fc.Keys;
+                        if (!objProps.Contains(fc.Prop)) objProps.Add(fc.Prop);
+                        foreach (var k in fc.Keys) { int f = (int)k.Frame; if (f < src.Lo) src.Lo = f; if (f > src.Hi) src.Hi = f; src.Any = true; }
+                        continue;
+                    }
                     int c = fc.Prop == "location" ? fc.Index : fc.Prop == "rotation_quaternion" ? 3 + fc.Index : fc.Prop == "scale" ? 7 + fc.Index : fc.Prop == "rotation_euler" ? 10 + fc.Index : -1;
                     if (c < 0) throw new InvalidOperationException("'" + name + "': a curve of " + fc.Prop + " (not modelled)");
                     curves[(fc.Bone, c)] = fc.Keys;
                     foreach (var k in fc.Keys) { int f = (int)k.Frame; if (f < src.Lo) src.Lo = f; if (f > src.Hi) src.Hi = f; src.Any = true; }
                 }
+            }
+            if (objProps.Count > 0)
+            {
+                // a property whose curve group needs baking is sampled and listed after the others (to_be_sampled, a set: its
+                // order among two or more is not modelled)
+                var baked = objProps.Where(p =>
+                {
+                    int from = p == "location" ? 0 : p == "rotation_quaternion" ? 3 : 7, count = p == "rotation_quaternion" ? 4 : 3;
+                    var lists = new List<List<BlenderDeploy.ArmKey>>();
+                    for (int oc = from; oc < from + count; oc++) if (curves.TryGetValue((null, oc), out var keys)) lists.Add(BlenderRigAnim.ToArm(keys));
+                    return BlenderChannelExport.NeedsBaking(lists);
+                }).ToList();
+                if (baked.Count > 1) throw new InvalidOperationException("'" + name + "': two object-level properties of the armature need baking (" + string.Join(", ", baked) + ": the exporter's set order is not modelled)");
+                src.ObjectProps = objProps.Where(p => !baked.Contains(p)).Concat(baked).ToList();
             }
             var (start, end) = ActionRange(act); src.Lo = start; src.Hi = end; src.Any = true;   // the exporter's range: int() of frame_range, the single frame's +1 undone
             src.Has = (bone, c) => curves.ContainsKey((bone, c));
@@ -399,7 +438,8 @@ public static class BlenderRigExport
     }
 
     /// <summary>The channels an animation carries for the ANIM row: three per bone of every armature the action has a slot
-    /// for (keep_anim_armature keeps the constant ones).</summary>
+    /// for (keep_anim_armature keeps the constant ones), then one per property (location, rotation_quaternion, scale) the
+    /// action keys on the primary armature OBJECT itself (ChannelSpec: the curves under the bone name null).</summary>
     public static int ChannelCount(BlenderRigAnim.Stage1 s, string animation)
     {
         var act = s.Actions.FirstOrDefault(a => a.Name == animation);
@@ -410,6 +450,7 @@ public static class BlenderRigExport
             bool primary = s.Armature != null && o == s.Armature.Object;
             bones += primary ? s.Armature.BoneNodes.Count : s.Rig.Armatures[o.Source.GltfNode].Bones.Count;
         }
-        return 3 * bones;
+        int objectProps = s.Armature == null ? 0 : act.Slots.Where(sl => sl.Object == s.Armature.Object).SelectMany(sl => sl.FCurves).Where(fc => fc.Bone == null && fc.Keys.Count > 0).Select(fc => fc.Prop).Distinct().Count();
+        return 3 * bones + objectProps;
     }
 }

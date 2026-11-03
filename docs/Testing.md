@@ -1591,7 +1591,8 @@ reader against the sources found the reset rule tied to the active action's NAME
 POSITION: the switch runs for every action in the sorted list, so the active one escapes the reset only when it sorts
 first (`deploy` does; a role named below it would reset `deploy` too - latent, held by a unit test that adds such a role);
 an animation the export names but the sampler cannot fill is a contradiction now, not an empty animation; and three
-cases the script cannot produce are named in the file's header (the armature object's own channels, a connected bone,
+cases the script cannot produce were named in the file's header (the armature object's own channels - modelled since
+2026-11-03 for the rig route, whose legacy path and role clips do carry them (step (f) below) -, a connected bone,
 accessor sharing - gather_accessor is cached on its bytes, count, min and max for the whole export, which part 8c's
 writer has to reproduce). Not here: the bytes (8c).
 
@@ -1720,7 +1721,9 @@ BlenderPosedState, the posed world matrices, BlenderReduce at a ratio of 1, the 
 importer's rules read for this stage (mesh.py: slots only when a primitive has a material or COLOR_0, a vertex group per
 joint with every non-zero weight added with REPLACE, the modifier named "Armature"; animation.py and its helpers: one
 action per animation, a slot "OB" + name per touched object in node-index order, the fcurves in that order three or four
-per channel, a lone key's handles left at the zeros `keyframe_points.add` gave them, the first animation's action
+per channel, a lone key's handles left at the zeros `keyframe_points.add` gave them - except the right one's frame, which
+`fcurve.update()`'s sort_time_fcurve pulls to the key's when the key sits past frame 0 (`fx_armobj_onekey`, 2026-11-03;
+every earlier lone key sat at frame 0) -, the first animation's action
 restored as the active one and every other touched object keeping animation_data without one). `riganim.exe --stage1`
 renders the model's scene as the dump's own rows - float32 bits and SHA-256 hashes - and compares every job's stage 1
 with Blender's string for string; a differing field names the row and both values, a differing `FC` hash the first
@@ -1779,9 +1782,9 @@ the datablock, and mirrors the datablock's groups and weights to every sharer af
 before stage 3's fold copies a multi-user datablock - so a second bind adds to the same list, and a plain or static
 sharer shows the bind without a modifier; `fx_s2_shared_{hung,same_bone,plain,static,three}` cover two bones, one bone,
 a plain root sharer, a static sharer and three sharers through the fold's copies, the join and the export, and the mech
-compares at every stage (154 jobs, 143 equal, 11 left by name, 0 differ). The mech's EXPORT is the next named limit,
-keyed `KNOWN_EXPORTLEFT` in the drill: an object-level location curve on the armature (the exporter port does not write the
-armature node's own channels), so its bake still takes Blender's rig_anim.py until that is ported. The drill prints
+compares at every stage (154 jobs, 143 equal, 11 left by name, 0 differ). The mech's EXPORT was the next named limit,
+keyed `KNOWN_EXPORTLEFT` in the drill for a day: an object-level location curve on the armature, which the exporter port
+writes since 2026-11-03 as the armature node's own channel (step (f) below; the key is empty). The drill prints
 each export leave and its actual reason; its aggregate count does not imply that every leave is an unused skin.
 The shared-mesh coverage notes classify sharers from the original bind plan, before binding clears their bone parents;
 two bound users alone do not claim coverage of a plain/static user left unbound. Review of PR #164 added
@@ -1939,7 +1942,33 @@ a mesh with the Armature modifier but no vertex groups gets joint attributes on 
 the join unites colour layers by name and zero-fills a layer a mesh lacks (not white: `fx_groups` said so), and keeps
 the active object's render colour index, which decides whether a material's Color Attribute node finds a layer (none:
 COLOR_0 is the forced 255s and the layer follows as COLOR_1); an action with a slot and no curves is exported with
-every bone's three constant channels; a slot of an object the join removed animates nothing. Left by name (EXPORTLEFT:,
+every bone's three constant channels; a slot of an object the join removed animates nothing. The armature OBJECT's own
+channels (2026-11-03; `sampled/armature/channels.py` after the bones': the light assault mech's `.fbx` keys the
+armature's location, and rig_anim's legacy path keeps such curves on the primary while the fold strips them - the
+role clips keep theirs on either path): one channel per property the action keys on the armature itself (location,
+rotation_quaternion, scale, in `get_channel_groups`' order - the property's first curve -, a group that needs baking
+listed last), sampled by the OBJECT sampler - per frame `parent_mat.inverted_safe() @ matrix_world` (a root's
+parent_mat the identity) decomposed as the bone's, the matrix `BKE_object_to_mat4` of the properties as the depsgraph
+holds them: a curve's value, else the ORIGINAL's, which every earlier action's frame loop wrote at its last frame
+(animsys_write_orig_anim_rna; no reset_bone_matrix for an object) -, then `transform(Identity)` and `swizzle_yup`
+(location (x, z, -y), rotation (w, x, z, -y) written (x, y, z, w), scale (x, z, y)), the keep and the interpolation
+the object sampler's. Fixtures: `fx_groups_legacy` (the Spin action's armature translation through the legacy path),
+`fx_armobj_legacy` (a LINEAR location, a STEP scale and a rotation keyed twice to one value - reduced, STEP by
+equality), `fx_armobj_roles` (the fold strips the primary's curves, the two role clips carry theirs), `fx_armobj_onekey`
+(a STEP rotation and a one-key location - the baked group listed after the rotation), and the mech, whose export
+compares from here on (`KNOWN_EXPORTLEFT` is empty). Review adds `fx_armobj_mirrored_roles`: animated object rotation
+and negative, nonuniform scale carried by role clips, with a second UV layer and vertex colors. The stage-4 transform
+fold flips a mirrored mesh's triangles and their corner data (UVs, custom normals and corner colors), using the same
+helper as vehicle import. The fixture fails on its loop-index hash without that flip, then matches through GLB export.
+`BlenderRigAnimInProcess.CacheRevision` changes with this support: old slim GLBs are rebuilt and old named Blender
+fallback decisions are retried even with reuse enabled and unchanged source/script timestamps; a unit regression
+holds the production fallback policy to the previous revision's key. The review's `FULL=1` live run passes 160 jobs
+(149 equal, 11 named leaves), 139 export comparisons (130 byte-identical files), and all 100 damaged-evidence controls.
+Left by name (EXPORTLEFT:): an armature with a parent
+(`fx_armobj_parented`: its matrix against the parent's per frame), an Euler or delta property (no glTF source makes
+one), two properties needing baking (to_be_sampled is a set). The drill's ANIM row counts the object channels beside
+the bones' (`BlenderRigExport.ChannelCount`: the first run of these fixtures compared with the old count and showed
+93 against Blender's 96 on the mech - the count includes keyed object properties beside the bones' three channels). Left by name (EXPORTLEFT:,
 the four stages equal): a second armature no mesh uses - its skin is gathered after the animation export, from the
 scene the sampler leaves, and neither the first frame's posed nor its rest world gives those matrices (three
 fixtures; no registry rig has a second armature). Not fixtured, named: a mesh of 65,535 vertices or more (the

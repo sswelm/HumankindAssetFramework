@@ -10,6 +10,37 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE RIG ROUTE WRITES THE ARMATURE NODE'S OWN CHANNELS - THE MECH'S BAKE LEAVES BLENDER (2026-11-03).** The light
+  assault mech's `.fbx` keys its armature's location at the object level, and `BlenderRigExport` left any such curve to
+  Blender by name (`'Armature|Armature|ArmatureAction': an object-level curve on the armature`), so the mech was the one
+  registry entry whose rig route still ran rig_anim.py. Read in Blender 5.1's exporter (`sampled/armature/channels.py`,
+  `sampled/object/*`, `sampling_cache.py`, `fcurves/channels.py`): after a bone's three channels the exporter writes one
+  channel per property the action keys on the armature OBJECT itself (location, rotation_quaternion, scale, in
+  `get_channel_groups`' order, a group that `needs_baking` listed last), sampled by the OBJECT sampler - per frame
+  `parent_mat.inverted_safe() @ matrix_world` decomposed as a bone's, the matrix `BKE_object_to_mat4` of the properties as
+  the depsgraph holds them (a curve's value, else the ORIGINAL's, which every earlier action's frame loop wrote at its last
+  frame: no reset for an object) -, then `transform(Identity)` and `swizzle_yup`. `BlenderChannelExport` samples them
+  after the bones' (the Spec names the armature's node and held properties, a Source its keyed properties under the bone
+  name null), `BlenderRigExport.ChannelSpec` feeds the curves and leaves by name an armature with a parent, an Euler or
+  delta property and two properties needing baking. Held to Blender live (tools/riganim_drill.sh): the mech's export
+  compares - `KNOWN_EXPORTLEFT` is empty - with four fixtures (`fx_groups_legacy`, `fx_armobj_legacy`, `fx_armobj_roles`:
+  the fold strips the primary's object curves and the role clips keep theirs, `fx_armobj_onekey`: a baked group listed
+  last) and one named leave (`EXPORTLEFT:fx_armobj_parented`); FULL=1: 159 jobs (all 23 animated recipes, 136 fixtures),
+  148 equal at every stage, 11 left by name, 0 differ; 138 exports equal, 129 of them byte-identical GLBs; a planted
+  defect (the translation swizzle without its sign) was caught on exactly the five jobs that carry object channels - the
+  mech and the four fixtures. Found on the way: the drill's ANIM row counted an animation's channels by a formula
+  (`ChannelCount`, three per bone) instead of the sampler's output - the first run compared 93 against Blender's 96 on
+  the mech with the channels themselves right; and a lone key past frame 0 keeps its right handle at the key's frame
+  (`fcurve.update()`'s sort_time_fcurve pulls a handle on the wrong side of the key to it; every earlier lone key sat at
+  frame 0, where the zeros already satisfy it) - stage 1 now does the same. Not yet in-game: the mech's bake through the
+  Factory on the GLB route is the next acceptance.
+  Review fixes the transform fold for mirrored meshes: triangle winding and corner data (UVs, normals, colors) flip
+  together, using the vehicle import's shared helper. `fx_armobj_mirrored_roles` adds animated rotation/negative scale,
+  role clips, a second UV layer and colors; it fails before the fix and matches Blender afterwards. The in-process
+  revision also changes so old successful outputs and cached Blender fallback decisions are retried automatically.
+  The old revision's fallback key is covered by a failing-before/passing-after unit regression; all 2,487 unit cases pass.
+  The review's full live run: 160 jobs (23 recipes, 137 fixtures), 149 equal at the modeled stages, 11 named leaves,
+  139 equal exports (130 byte-identical GLBs), and all 100 damaged-evidence controls refused.
 - **RIG_ANIM STAGE 2: A SHARED MESH DATABLOCK UNDER THE BONES (2026-11-02).** The light assault mech's `.fbx`, read by the
   native reader since step 6f, equalled Blender at stage 1 and hit the port's one named stage 2 limit: a bone-hung mesh
   whose datablock another object shares. In Blender the vertex groups live on the mesh (since 3.0) and the Armature modifier
@@ -19,9 +50,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   copies a multi-user datablock, from where the per-object views diverge as the datablocks do); five fixtures
   (`fx_s2_shared_*`) cover two bones, one bone, a plain root sharer, a static sharer and three sharers through the fold's
   copies, the join and the export, and the mech leaves `KNOWN_LEFT` and compares at every stage (154 jobs, 143 equal, 11
-  left by name, 0 differ). Its EXPORT is the next named limit, keyed `KNOWN_EXPORTLEFT` in the drill: an object-level
-  location curve on the armature (`Armature|Armature|ArmatureAction` - the exporter port does not write the armature node's
-  own channels), so the mech's bake still takes Blender's rig_anim.py until that is ported. Also corrected here: the 6f review's claim that its skinned-FBX fixture is "compared as an argument failure before the import"
+  left by name, 0 differ). Its EXPORT was the next named limit, keyed `KNOWN_EXPORTLEFT` in the drill: an object-level
+  location curve on the armature (`Armature|Armature|ArmatureAction` - the exporter port did not write the armature node's
+  own channels); ported the next day (the entry above). Also corrected here: the 6f review's claim that its skinned-FBX fixture is "compared as an argument failure before the import"
   (it is the reader's named leave with Blender's death after its import recorded - the drill's own verdict row).
   The drill prints each actual export fallback reason instead of labeling every leave an unused skin.
   Shared-mesh coverage uses the original bind plan: clearing a bound object's bone parent no longer counts it as a

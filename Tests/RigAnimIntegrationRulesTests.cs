@@ -14,6 +14,17 @@ public class RigAnimIntegrationRulesTests
     public void Fallback_reuse_requires_fresh_inputs_and_requested_reuse(bool reuse, bool exists, bool key, bool tool, bool source, bool expected)
         => Assert.Equal(expected, BakerRules.CanReuseRigFallback(reuse, exists, key, tool, source));
 
+    [Fact]
+    public void Armature_object_support_retries_previously_cached_Blender_fallback()
+    {
+        // Same source/settings and unchanged Python script: only the C# revision can invalidate the mech's
+        // old object-channel fallback. The production key includes the loader revision in both versions.
+        string previous = "route=csharp-fallback:2026-10-28.post-strip-reset.1." + HafModelLoader.CacheRevision;
+        string current = "route=csharp-fallback:" + BlenderRigAnimInProcess.CacheRevision;
+        Assert.False(BakerRules.CanReuseRigFallback(true, true,
+            string.Equals(previous, current, StringComparison.Ordinal), false, false));
+    }
+
     [Theory]
     [InlineData("Spin")]
     [InlineData("_Spin")]
