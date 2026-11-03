@@ -10,6 +10,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE ANIMATION LAB PREVIEWS THE SKIN, AND A PREVIEW CLONE ONLY WITH THE RIG'S OWN BIND POSES (2026-11-03).** The light
+  assault mech is drawn in game with its retexture (the entry's Texture file, the green repaint, with brightness 1.5,
+  desaturate 0.85 and a +50/+50/0 tint), never with its bake atlas - and the Lab's previews wore the atlas alone, so the
+  camouflaged mech previewed grey and orange and read as "the texture is gone". A `Skin` toggle (on by default) dresses
+  the body renderers of both previews in the skin PNG from the pack's `skins/` with the entry's adjustments through the
+  new `SkinAdjust` (the plugin's AdjustSkin math; the Retexture window's live preview now runs the same code instead of
+  its own copy; 4 unit tests). The same afternoon the restored July rig previewed with its legs flying apart: the Lab
+  drapes a multi-material bake's persisted atlas-UV clone over the rig when the vertex and bone COUNTS match, and a
+  clone left by an earlier bake of the same entry matched by count with another bake's bind poses. Both previews now
+  require the bind poses equal by value and say when a clone is skipped. Preview-only: nothing baked or shipped changes.
 - **THE RIG ROUTE WRITES THE ARMATURE NODE'S OWN CHANNELS - THE MECH'S BAKE LEAVES BLENDER (2026-11-03).** The light
   assault mech's `.fbx` keys its armature's location at the object level, and `BlenderRigExport` left any such curve to
   Blender by name (`'Armature|Armature|ArmatureAction': an object-level curve on the armature`), so the mech was the one

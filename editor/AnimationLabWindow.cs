@@ -47,6 +47,11 @@ public class AnimationLabWindow : EditorWindow
     [SerializeField] bool fitGrounded;
     [SerializeField] bool fitRefMan;   // "Ref man" size reference (2026-08-19) — shared builder/constant with the Factory
     [SerializeField] Vector2 fitRefManPos = new Vector2(1.5f, 0f);   // his spot (X sideways, Z fore/aft) — user-dialed
+    // SKIN (2026-11-03, the light assault mech): the game draws a retextured unit with the entry's skin PNG and its
+    // adjustments (RetextureWindow / the plugin's AdjustSkin), not the bake atlas - and this preview wore the atlas alone,
+    // so a camouflaged mech previewed grey. On, the body renderers wear the skin as the plugin applies it; off, the atlas.
+    [SerializeField] bool fitSkin = true;
+    Texture2D fitSkinTex; Material fitSkinMat; string fitSkinSig;
     Mesh fitRefManMesh;
     Material fitGroundMat;
     Mesh fitGroundMesh;
@@ -142,7 +147,7 @@ public class AnimationLabWindow : EditorWindow
             if (!string.IsNullOrEmpty(fitAnimRole)) BuildAnimPreview(fitAnimRole);
         }
     }
-    void OnDisable() { DestroyFitPreview(); }
+    void OnDisable() { DestroyFitPreview(); DestroySkinPreview(); }
 
     // The recoil knobs' explicit defaults, in ONE place (user rule: no empty fields). Applied to the form so
     // what's shown is what bakes/saves, AND to a loaded entry before the form-vs-registry diff so a not-yet-
@@ -197,7 +202,7 @@ public class AnimationLabWindow : EditorWindow
         // substitute meshes of a multi-material bake (matched by vertex count, like LoadFitPreview). A substitute
         // is only accepted when it carries the SAME skinning data — a UV clone without bind poses would render
         // the model as an unskinned heap, and a wrong-UV wheel still shows its rotation, which is the point here.
-        var bodyMat = AssetDatabase.LoadAssetAtPath<Material>($"Assets/FactorySource/{res}/{res}_PreviewMat.mat");
+        var bodyMat = PreviewBodyMaterial(AssetDatabase.LoadAssetAtPath<Material>($"Assets/FactorySource/{res}/{res}_PreviewMat.mat"), out string skinNote);
         var pool = UniversalBaker.LoadPreviewSubstitutes(res)?.Where(m => m != null).ToList();
         int subUsed = 0, subSkipped = 0;
         foreach (var r in fitAnimInst.GetComponentsInChildren<Renderer>(true))
@@ -214,7 +219,10 @@ public class AnimationLabWindow : EditorWindow
             int hit = pool.FindIndex(s => s.vertexCount == smr.sharedMesh.vertexCount);
             if (hit < 0) continue;
             var sub = pool[hit]; pool.RemoveAt(hit);
-            if (sub.bindposes.Length == smr.sharedMesh.bindposes.Length && sub.boneWeights.Length == sub.vertexCount)
+            // the SAME bind poses by value, not by count (2026-11-03): a clone persisted by an EARLIER bake of this entry has the
+            // vertex and bone counts of the rig restored from a backup and the bind poses of another - draped over this rig it
+            // showed the mech's legs flying apart
+            if (sub.bindposes.Length == smr.sharedMesh.bindposes.Length && sub.boneWeights.Length == sub.vertexCount && SameBindPoses(sub.bindposes, smr.sharedMesh.bindposes))
             { smr.sharedMesh = sub; subUsed++; }
             else subSkipped++;
         }
@@ -222,7 +230,8 @@ public class AnimationLabWindow : EditorWindow
         fitAnimT = 0f; fitAnimTick = EditorApplication.timeSinceStartup; fitAnimBoundsValid = false;
         status = fitAnimClip != null
             ? $"Playing '{fitAnimClip.name}' ({fitAnimClip.length:0.00}s) from {fitAnimRole}/ — the BAKED clip, as the game plays it."
-              + (subSkipped > 0 ? $"  ({subSkipped} atlas-UV clone(s) skipped — unskinned; texture may be off, motion is exact.)" : "")
+              + (subSkipped > 0 ? $"  ({subSkipped} atlas-UV clone(s) skipped — unskinned or another bake's bind poses; texture may be off, motion is exact.)" : "")
+              + (skinNote != null ? "  (" + skinNote + ")" : "")
             : $"{fitAnimRole}/ has no animation clip — showing its rest pose.";
         Repaint();
     }
@@ -232,6 +241,59 @@ public class AnimationLabWindow : EditorWindow
         if (fitAnimInst != null) { DestroyImmediate(fitAnimInst); fitAnimInst = null; }
         fitAnimClip = null; fitAnimBoundsValid = false;
         fitElevBone = null; fitElevBoneFor = ""; fitPivotKnown = false; fitRestPose = null;
+    }
+
+    // The body material the previews wear: with Skin on and the entry retextured (textureFile), the skin PNG from the pack's
+    // skins/ with the entry's adjustments through SkinAdjust - the plugin's AdjustSkin, so the preview is the game's drawing;
+    // otherwise the Factory's preview material (the bake atlas). Cached per file, file time, adjustments and base material.
+    Material PreviewBodyMaterial(Material bodyMat, out string note)
+    {
+        note = null;
+        if (!fitSkin || cur == null || bodyMat == null) return bodyMat;
+        string file = (cur.textureFile ?? "").Trim();
+        if (file.Length == 0) return bodyMat;
+        string path = Path.Combine(ModelRegistry.PackLiveDir, "skins", file);
+        if (!File.Exists(path)) { note = $"skin '{file}' is not in the pack's skins/ — showing the bake atlas"; return bodyMat; }
+        float brightness = cur.brightness <= 0f ? 1f : cur.brightness;   // saved before the knob existed: unchanged (RetextureWindow's rule)
+        string sig = string.Join("|", path, File.GetLastWriteTimeUtc(path).Ticks, brightness, cur.desaturate, cur.tintR, cur.tintG, cur.tintB, bodyMat.GetInstanceID());
+        if (sig != fitSkinSig || fitSkinTex == null || fitSkinMat == null)
+        {
+            DestroySkinPreview();
+            var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false) { name = file + " (skin preview)", hideFlags = HideFlags.HideAndDontSave };
+            if (!tex.LoadImage(File.ReadAllBytes(path))) { DestroyImmediate(tex); note = $"skin '{file}' could not be read — showing the bake atlas"; return bodyMat; }
+            tex.SetPixels32(SkinAdjust.ApplyTo(tex.GetPixels32(), brightness, cur.desaturate, cur.tintR, cur.tintG, cur.tintB)); tex.Apply();
+            fitSkinTex = tex;
+            fitSkinMat = new Material(bodyMat) { name = bodyMat.name + " (skin)", mainTexture = tex, hideFlags = HideFlags.HideAndDontSave };
+            fitSkinSig = sig;
+        }
+        note = $"wearing the skin '{file}' with its adjustments, as the game draws it";
+        return fitSkinMat;
+    }
+
+    void DestroySkinPreview()
+    {
+        if (fitSkinMat != null) DestroyImmediate(fitSkinMat);
+        if (fitSkinTex != null) DestroyImmediate(fitSkinTex);
+        fitSkinMat = null; fitSkinTex = null; fitSkinSig = null;
+    }
+
+    // Both previews again after the Skin toggle: the clip instance (its renderers wear the material at build) and the rest-pose draw list.
+    void ReloadPreviewsForSkin()
+    {
+        if (fitAnimInst != null) BuildAnimPreview(fitAnimRole);
+        if (!string.IsNullOrEmpty(previewPath))
+            LoadFitPreview(previewPath, fitGrounded ? UniversalBaker.LoadPreviewSubstitutes((cur?.resourceName ?? "").Trim()) : null);
+        Repaint();
+    }
+
+    /// <summary>Two bind-pose sets equal element for element (a rig's own clone), within float noise.</summary>
+    static bool SameBindPoses(Matrix4x4[] a, Matrix4x4[] b)
+    {
+        if (a == null || b == null || a.Length != b.Length) return false;
+        for (int i = 0; i < a.Length; i++)
+            for (int k = 0; k < 16; k++)
+                if (Mathf.Abs(a[i][k] - b[i][k]) > 1e-4f) return false;
+        return true;
     }
 
     // What the pivot row says under the slider: why there is no preview, or the number to dial.
@@ -400,11 +462,19 @@ public class AnimationLabWindow : EditorWindow
             if (m == null) continue;
             if (pool != null && r is SkinnedMeshRenderer)
             {
-                int hit = pool.FindIndex(s => s.vertexCount == m.vertexCount);
+                // the same bind poses by value as the clip preview requires (2026-11-03): a clone of another bake of this entry has this rig's counts and another's skinning
+                int hit = pool.FindIndex(s => s.vertexCount == m.vertexCount && SameBindPoses(s.bindposes, m.bindposes));
                 if (hit >= 0) { m = pool[hit]; pool.RemoveAt(hit); subUsed++; }
             }
             var mtx = r.transform.localToWorldMatrix;
-            fitDraws.Add((m, r.sharedMaterials, mtx));
+            // the body wears the skin when Skin is on (PreviewBodyMaterial): the renderers the Factory textured with the preview material, not a hand prop's
+            var mats = r.sharedMaterials;
+            if (mats.Length > 0 && mats[0] != null && mats[0].name.EndsWith("_PreviewMat", StringComparison.Ordinal))
+            {
+                var body = PreviewBodyMaterial(mats[0], out _);
+                if (body != mats[0]) { mats = (Material[])mats.Clone(); for (int i = 0; i < mats.Length; i++) mats[i] = body; }
+            }
+            fitDraws.Add((m, mats, mtx));
             var wb = TransformBounds(mtx, m.bounds);
             if (first) { fitBounds = wb; first = false; } else fitBounds.Encapsulate(wb);
         }
@@ -1531,6 +1601,10 @@ public class AnimationLabWindow : EditorWindow
                     + (fitGrounded ? " · arrow = forward)" : ")")
                     + (cur != null && cur.position != Vector3.zero ? "  · Position offset shown LIVE (runtime-applied, no bake needed)" : ""),
                     EditorStyles.miniBoldLabel);
+                bool skinOn = GUILayout.Toggle(fitSkin, new GUIContent("Skin",
+                    "Wear the entry's skin PNG with its adjustments (brightness, desaturate, tint) - the retexture the plugin draws in game - instead of the bake atlas. " +
+                    "Needs a Texture file on this entry and the PNG in the pack's skins/ folder; otherwise the atlas shows."), GUILayout.Width(48));
+                if (skinOn != fitSkin) { fitSkin = skinOn; ReloadPreviewsForSkin(); }
                 if (fitGrounded)
                 {
                     fitRefMan = GUILayout.Toggle(fitRefMan, new GUIContent("Ref man",

@@ -123,6 +123,15 @@ Two things the flat preview plane cannot show:
   nothing anywhere until you **Bake**. (The runtime-fields help text says "applies on load"; for static
   entries' position that is wrong — a known label lie, on the audit list.)
 
+**Skin** (Animation Lab preview toggle, on by default, 2026-11-03): the game draws a retextured unit with the entry's
+Texture file (the PNG in the pack's `skins/`) and its adjustments (brightness, desaturate, tint), never with the bake
+atlas; until this toggle the Lab's previews wore the atlas alone, so a camouflaged mech previewed grey. On, the body
+renderers of both previews (the rest pose and the playing clip) wear the skin exactly as the plugin applies it
+(`SkinAdjust`, the Retexture window's live preview runs the same math); off, or without a Texture file or its PNG, the
+atlas. A hand prop keeps its own material. The atlas-UV clone a multi-material bake persists for the preview is worn only
+when its bind poses equal the rig's by value: a clone left by an earlier bake of the same entry (same vertex and bone
+counts, another skinning) is skipped and said so, instead of draping the rig in another bake's bind poses.
+
 **Ref man & Ruler** (preview toggles, Factory and Animation Lab alike): a human figure at game pawn height
 beside the model — **1.85u**, calibrated stepwise (0.9 → 1.1 → 1.85) against a human-scale soldier model and
 verified head-to-head — with X/Y position fields to walk him around, plus a vertical **measuring stick**

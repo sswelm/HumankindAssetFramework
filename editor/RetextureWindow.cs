@@ -287,24 +287,8 @@ public class RetextureWindow : EditorWindow
             if (previewTex != null) DestroyImmediate(previewTex);
             previewTex = new Texture2D(srcW, srcH, TextureFormat.RGBA32, false);
         }
-        var px = (Color32[])srcPixels.Clone();
-        float s = Mathf.Clamp01(desaturate);
-        // gamma FIRST, then desaturate, then tint — the plugin's AdjustSkin order, mirrored exactly
-        byte[] lut = null;
-        if (Mathf.Abs(brightness - 1f) > 0.001f)
-        {
-            float inv = 1f / Mathf.Clamp(brightness, 0.2f, 4f);
-            lut = new byte[256];
-            for (int v = 0; v < 256; v++) lut[v] = (byte)Mathf.Clamp(Mathf.RoundToInt(255f * Mathf.Pow(v / 255f, inv)), 0, 255);
-        }
-        for (int i = 0; i < px.Length; i++)
-        {
-            if (lut != null) { px[i].r = lut[px[i].r]; px[i].g = lut[px[i].g]; px[i].b = lut[px[i].b]; }
-            float lum = px[i].r * 0.299f + px[i].g * 0.587f + px[i].b * 0.114f;
-            px[i].r = (byte)Mathf.Clamp((px[i].r + (lum - px[i].r) * s) + tintR, 0, 255);
-            px[i].g = (byte)Mathf.Clamp((px[i].g + (lum - px[i].g) * s) + tintG, 0, 255);
-            px[i].b = (byte)Mathf.Clamp((px[i].b + (lum - px[i].b) * s) + tintB, 0, 255);
-        }
+        // gamma FIRST, then desaturate, then tint — the plugin's AdjustSkin order (SkinAdjust: one source, the Animation Lab's Skin preview runs it too)
+        var px = SkinAdjust.ApplyTo(srcPixels, brightness, desaturate, tintR, tintG, tintB);
         previewTex.SetPixels32(px); previewTex.Apply();
     }
 
