@@ -513,7 +513,7 @@ static class Stage1Drill
     /// <summary>Stages 1..`stages` of the model against the dump. A LEFT: job must be declined by the model at one of
     /// them (its earlier stages compared all the same); any other decline is a FAIL.</summary>
     public static bool Export;                                   // --export: BlenderRigExport against the dump's X rows after stage 4
-    public static bool InProcess; public static int InProcessEqual;   // --export also runs BlenderRigAnimInProcess on every exported job (step (g))
+    public static bool InProcess; public static int InProcessEqual, InProcessLeft;   // --export also runs BlenderRigAnimInProcess on every exported job (step (g)); Left: the skinned/animated .fbx jobs it leaves to the FBX route by name
     public static int Exported; public static long ExportRows;
     public static readonly SortedDictionary<string, long> ExportCover = new SortedDictionary<string, long>(StringComparer.Ordinal);
 
@@ -705,7 +705,11 @@ static class Stage1Drill
                                             try
                                             {
                                                 var o = BlenderRigAnimInProcess.Run(d.Argv[0], tmpGlb, argv.Skip(2).ToArray());
-                                                if (!o.Written) problems.Add("the in-process wrapper did not write the file: " + (o.ScriptExit ? "the script's exit" : o.UseBlender));
+                                                // a skinned or animated .fbx: the wrapper leaves it to the FBX route by name (HafModelLoader.RigImportFallback, 2026-11-03 -
+                                                // the reader's round trip, which the stages and the export above are held to, is not rig_anim.py's direct import); counted, not a problem
+                                                if (!o.Written && HafModelLoader.IsFbx(d.Argv[0]) && o.UseBlender != null && o.UseBlender.StartsWith(HafModelLoader.FbxRigLeavePrefix, StringComparison.Ordinal))
+                                                { InProcessLeft++; Cover("the in-process wrapper leaves a skinned or animated .fbx to the FBX route by name (step (g))"); Console.WriteLine($"INPROC {key}: left to the FBX route by name, as the wrapper says: {o.UseBlender}"); }
+                                                else if (!o.Written) problems.Add("the in-process wrapper did not write the file: " + (o.ScriptExit ? "the script's exit" : o.UseBlender));
                                                 else
                                                 {
                                                     if (st.GlbEqual)
@@ -772,7 +776,7 @@ static class Stage1Drill
     public static void Summary(int stages)
     {
         foreach (var kv in Census) Console.WriteLine($"MODEL {kv.Value} {kv.Key}");
-        if (Export) { foreach (var kv in ExportCover) Console.WriteLine($"XCOVER {kv.Value} {kv.Key}"); Console.WriteLine($"EXPORTS jobs {Exported} rows {ExportRows} inprocess {InProcessEqual}"); }
+        if (Export) { foreach (var kv in ExportCover) Console.WriteLine($"XCOVER {kv.Value} {kv.Key}"); Console.WriteLine($"EXPORTS jobs {Exported} rows {ExportRows} inprocess {InProcessEqual} inprocleft {InProcessLeft}"); }
         Console.WriteLine($"STAGES {stages} jobs {Compared} equal {Equal} left {Left} rows {RowsEqual} deferred {Deferred}");
     }
 }

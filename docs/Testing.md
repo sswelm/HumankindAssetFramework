@@ -2014,7 +2014,9 @@ The drill holds the wrapper on every exported job: `riganim.exe --export` also r
 with the job's arguments and requires the file written, its SHA-256 the dump's GLB's when the export compared the
 bytes (a JPEG albedo's file is read back instead: every image with bytes, the export's animation count), the primary
 and the roles named as the model names them, the roles sidecar reading back, the albedo written when the model says
-so (`EXPORTS jobs N rows R inprocess N`; the PASS line says how many). The dump's export step is the shipped
+so (`EXPORTS jobs N rows R inprocess N inprocleft L`; the PASS line says how many - L the skinned or animated `.fbx`
+jobs the wrapper leaves to the FBX route by name since 2026-11-03, each on an `INPROC` line; their stages and export
+still compare, against the round trip). The dump's export step is the shipped
 `editor/Tools~/rig_anim_glb.py` (rig_anim.py's source cut before its FBX export marker, then the one glTF export),
 imported by `blender_riganim_dump.py` from the rig_anim.py argument's folder, so the drill and the Factory's Bake
 Tests row have one oracle; the registry re-dumped through it gave the same 11,133 X rows. Measured: all 23 registry
