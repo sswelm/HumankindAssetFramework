@@ -25,13 +25,27 @@ public static class UnityAnimationLabTests
         m.boneWeights = Enumerable.Repeat(new BoneWeight { boneIndex0 = 0, weight0 = 1 }, 3).ToArray();
         return m;
     }
+    // A multi-material rig as the Factory sees it: two submeshes (two material slots) over shared vertices. The Factory's
+    // persisted clone MERGES them into one submesh in order (BuildMultiAtlasAndRemap), which is the shape every real
+    // multi-material entry's clone has - the single-submesh cases above cannot see a check that rejects it.
+    static Mesh TwoSubmeshMesh(string name)
+    {
+        var m = new Mesh { name = name, vertices = new[] { Vector3.zero, Vector3.right, Vector3.up, Vector3.one },
+            uv = new[] { Vector2.zero, Vector2.right, Vector2.up, Vector2.one }, bindposes = new[] { Matrix4x4.identity, Matrix4x4.Translate(Vector3.up) } };
+        m.boneWeights = Enumerable.Repeat(new BoneWeight { boneIndex0 = 0, weight0 = 1 }, 4).ToArray();
+        m.subMeshCount = 2; m.SetTriangles(new[] { 0, 1, 2 }, 0); m.SetTriangles(new[] { 1, 3, 2 }, 1);
+        return m;
+    }
     static void CloneCase(string defect)
     {
         string res = "Preview_" + defect, dir = "Assets/FactorySource/" + res;
         Directory.CreateDirectory(dir + "/anim"); AssetDatabase.Refresh();
-        var source = Mesh("source"); AssetDatabase.CreateAsset(source, dir + "/source.asset");
+        var source = defect.StartsWith("merged") ? TwoSubmeshMesh("source") : Mesh("source"); AssetDatabase.CreateAsset(source, dir + "/source.asset");
         var sub = UnityEngine.Object.Instantiate(source); sub.name = "UV clone";
-        bool reject = defect != "valid" && defect != "pool_order";
+        bool reject = defect != "valid" && defect != "pool_order" && defect != "merged";
+        // the Factory's merge (in order) is the clone; the same triangles merged in another order are not this rig's clone
+        if (defect == "merged") { sub.subMeshCount = 1; sub.SetTriangles(new[] { 0, 1, 2, 1, 3, 2 }, 0); }
+        if (defect == "merged_reordered") { sub.subMeshCount = 1; sub.SetTriangles(new[] { 1, 3, 2, 0, 1, 2 }, 0); }
         if (defect == "weights") sub.boneWeights = Enumerable.Repeat(new BoneWeight { boneIndex0 = 1, weight0 = 1 }, 3).ToArray();
         if (defect == "geometry") sub.vertices = new[] { Vector3.zero, Vector3.right * 5, Vector3.up };
         if (defect == "topology") sub.triangles = new[] { 0, 2, 1 };
@@ -125,7 +139,7 @@ public static class UnityAnimationLabTests
     public static void Run()
     {
         string[] args = Environment.GetCommandLineArgs(); string output = args[Array.IndexOf(args, "-hafPreviewOutput") + 1];
-        try { foreach (string defect in new[] { "valid", "bindposes", "weights", "geometry", "topology", "unweighted", "pool_order", "nonfinite" }) CloneCase(defect); SkinCache(); Pixels(); }
+        try { foreach (string defect in new[] { "valid", "bindposes", "weights", "geometry", "topology", "unweighted", "pool_order", "nonfinite", "merged", "merged_reordered" }) CloneCase(defect); SkinCache(); Pixels(); }
         catch (Exception e) { Rows.Add("FAIL exception: " + e); failed++; }
         Rows.Add("TOTAL failed " + failed); File.WriteAllLines(output, Rows); EditorApplication.Exit(failed == 0 ? 0 : 1);
     }

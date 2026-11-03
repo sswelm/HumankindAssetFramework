@@ -307,9 +307,15 @@ public class AnimationLabWindow : EditorWindow
     }
 
     // Atlas remapping changes UVs alone. Equal bind poses cannot establish the vertex order or bone assignments.
+    // The Factory's clone carries the source's submeshes MERGED into one, in order (BuildMultiAtlasAndRemap: one atlas
+    // material, one submesh), so its single index list is compared against the rig's submeshes concatenated; a clone with
+    // the rig's own submesh count compares submesh by submesh. The submesh-by-submesh form alone (review of #248) rejected
+    // every real multi-material clone - 4 of 4 entries probed in a fresh project, 2026-11-03 - and the playing clip wore
+    // the atlas with the rig's un-remapped UVs.
     static bool IsAtlasClone(Mesh sub, Mesh source)
     {
-        if (sub == null || source == null || sub.vertexCount != source.vertexCount || sub.subMeshCount != source.subMeshCount || !SameBindPoses(sub.bindposes, source.bindposes)) return false;
+        if (sub == null || source == null || sub.vertexCount != source.vertexCount || !SameBindPoses(sub.bindposes, source.bindposes)) return false;
+        if (sub.subMeshCount != source.subMeshCount && sub.subMeshCount != 1) return false;
         var a = sub.vertices; var b = source.vertices;
         for (int i = 0; i < a.Length; i++) if (a[i] != b[i]) return false;
         var wa = sub.boneWeights; var wb = source.boneWeights;
@@ -317,9 +323,21 @@ public class AnimationLabWindow : EditorWindow
         for (int i = 0; i < wa.Length; i++)
             if (wa[i].boneIndex0 != wb[i].boneIndex0 || wa[i].boneIndex1 != wb[i].boneIndex1 || wa[i].boneIndex2 != wb[i].boneIndex2 || wa[i].boneIndex3 != wb[i].boneIndex3 ||
                 wa[i].weight0 != wb[i].weight0 || wa[i].weight1 != wb[i].weight1 || wa[i].weight2 != wb[i].weight2 || wa[i].weight3 != wb[i].weight3) return false;
-        for (int i = 0; i < sub.subMeshCount; i++)
-            if (sub.GetTopology(i) != source.GetTopology(i) || !sub.GetIndices(i).SequenceEqual(source.GetIndices(i))) return false;
-        return true;
+        if (sub.subMeshCount == source.subMeshCount)
+        {
+            for (int i = 0; i < sub.subMeshCount; i++)
+                if (sub.GetTopology(i) != source.GetTopology(i) || !sub.GetIndices(i).SequenceEqual(source.GetIndices(i))) return false;
+            return true;
+        }
+        // the merged clone: triangles only (the Factory merges GetTriangles), the source's submeshes in order
+        if (sub.GetTopology(0) != MeshTopology.Triangles) return false;
+        var merged = new List<int>();
+        for (int i = 0; i < source.subMeshCount; i++)
+        {
+            if (source.GetTopology(i) != MeshTopology.Triangles) return false;
+            merged.AddRange(source.GetIndices(i));
+        }
+        return sub.GetIndices(0).SequenceEqual(merged);
     }
 
     // What the pivot row says under the slider: why there is no preview, or the number to dial.

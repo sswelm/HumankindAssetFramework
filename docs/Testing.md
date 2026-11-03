@@ -337,12 +337,16 @@ cases hold the loader's routing, actual static and skinned/animated FBX files, a
 (gamma, then the pull toward each pixel's luminance, then the per-channel tint, clamped), shared by the Retexture window's
 live preview and the Animation Lab's `Skin` preview toggle. Held: unchanged adjustments leave every byte and the alpha
 alone, full desaturate gives the luminance, tints add and clamp, the gamma LUT's ends and a mid value, the brightness
-  clamp to 0.2..4, and the three steps in order on the mech entry's values (1.5, 0.85, +50/+50/0).
+clamp to 0.2..4, and the three steps in order on the mech entry's values (1.5, 0.85, +50/+50/0).
 
 **Animation Lab previews in Unity:** `bash tools/animationlab_unity_drill.sh` creates a fresh temporary Unity project,
-compiles the real editor sources and exercises both preview loaders. No Blender or user project is used. Its 24 checks
-cover valid atlas clones, different bind poses/weights/vertices/topology, missing weights, nonfinite bind poses, and a
-valid candidate after an equally-sized incompatible one. They also hold the shared material alive across skin refresh,
+compiles the real editor sources and exercises both preview loaders. No Blender or user project is used. Its 28 checks
+cover valid atlas clones, different bind poses/weights/vertices/topology, missing weights, nonfinite bind poses, a
+valid candidate after an equally-sized incompatible one, and the shape every real multi-material clone has: a two-submesh
+rig whose clone is the submeshes MERGED into one in order (worn), against the same triangles merged in another order
+(skipped). That pair was added after the review's submesh-by-submesh check rejected 4 of 4 real entries' clones in a fresh
+project (AssaultInfantry, OrganGun, UniversalTanks, Zeppelin - 2026-11-03), a shape the single-submesh cases could not
+see. They also hold the shared material alive across skin refresh,
 restore the atlas on a locked PNG, retry after it becomes readable, and retain the rest preview's missing-skin note.
 The Color32 adapter is compared to the pure transform, and 381 brightness values to Unity's runtime gamma math.
 The initial reproduction failed nine checks before the review fixes; the complete set passes afterward. Missing Unity

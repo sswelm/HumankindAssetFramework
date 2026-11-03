@@ -10,6 +10,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE PREVIEW CLONE IS THE RIG'S SUBMESHES MERGED - THE REVIEW'S CHECK SKIPPED EVERY REAL ONE (2026-11-03).** The
+  review of the entry below compared a persisted atlas-UV clone with the rig submesh by submesh, and the Factory writes
+  that clone with the rig's submeshes MERGED into one (one atlas material, one submesh, `BuildMultiAtlasAndRemap`), so
+  the playing-clip preview of every multi-material entry skipped its clone and wore the atlas with un-remapped UVs.
+  Measured in a fresh Unity project on AssaultInfantry, OrganGun, UniversalTanks and Zeppelin: vertices, bone weights,
+  bind poses and the merged index list all equal, `IsAtlasClone` false on 4 of 4. `IsAtlasClone` now compares a
+  single-submesh clone against the rig's submeshes concatenated in order (triangles only, as the Factory merges them)
+  and a clone with the rig's own submesh count submesh by submesh; the Unity drill gains the merged shape and the same
+  triangles merged in another order (24 -> 28 checks). The rest-pose preview was never affected: its prefab references
+  the clone itself. Preview-only.
 - **THE ANIMATION LAB PREVIEWS THE SKIN, AND A PREVIEW CLONE ONLY WITH THE RIG'S OWN BIND POSES (2026-11-03).** The light
   assault mech is drawn in game with its retexture (the entry's Texture file, the green repaint, with brightness 1.5,
   desaturate 0.85 and a +50/+50/0 tint), never with its bake atlas - and the Lab's previews wore the atlas alone, so the
