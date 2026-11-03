@@ -609,7 +609,18 @@ public static class BlenderRigAnim
                         for (int k = 0; k < cv.Frames.Length; k++) keys.Add(new BlenderDeploy.ArmKey { Frame = cv.Frames[k], Value = cv.Values[k] });
                         // fcurve.update(): BKE_fcurve_handles_recalc returns before a lone key; its handles stay the zeros of keyframe_points.add
                         if (keys.Count >= 2) BlenderFCurve.RecalcHandles(keys, constant: true);
-                        else Note(s, "a lone key (its handles left at zero)");
+                        else
+                        {
+                            // fcurve.update() still runs sort_time_fcurve, which pulls a handle's x to the key's frame when it lies
+                            // on the wrong side of it: the zeros of keyframe_points.add leave a lone key's right handle at its frame
+                            // (a key past frame 0; fx_armobj_onekey, 2026-11-03), the heights stay zero
+                            foreach (var k in keys)
+                            {
+                                if (k.LeftX > k.Frame && k.RightX < k.Frame) { float tx = k.LeftX, ty = k.LeftY; k.LeftX = k.RightX; k.LeftY = k.RightY; k.RightX = tx; k.RightY = ty; }
+                                else { if (k.LeftX > k.Frame) k.LeftX = k.Frame; if (k.RightX < k.Frame) k.RightX = k.Frame; }
+                            }
+                            Note(s, "a lone key (its handles left at zero, the right one's frame pulled to the key's)");
+                        }
                         if (keys.Count < sampler.Times.Length) Note(s, "keys closer than 0.01 frame merged");
                         foreach (var k in keys) fc.Keys.Add(new KeyData { Frame = k.Frame, Value = k.Value, LeftX = k.LeftX, LeftY = k.LeftY, RightX = k.RightX, RightY = k.RightY, Interpolation = ipo });
                         slot.FCurves.Add(fc);

@@ -97,7 +97,7 @@ if [ -n "$PACK" ]; then
   for k in $KNOWN_LEFT; do awk -F'\t' -v OFS='\t' -v k="$k" '$1 == "JOB" && $2 == k { $2 = "LEFT:" k } 1' "$TMPD/jobs.txt" > "$TMPD/jobs_k.txt" && mv "$TMPD/jobs_k.txt" "$TMPD/jobs.txt"; done
   # a registry job equal at all four stages whose EXPORT the exporter port leaves by name (BlenderRigExport's limits) is keyed
   # EXPORTLEFT: as a fixture would be; the drill holds the model to that leave and counts it (EXPORTS ... left N)
-  KNOWN_EXPORTLEFT="LightAssaultMech"   # the export: an object-level location curve on the armature (the armature node's channels are not modelled) - since 2026-11-02, when its stage 2 shared datablock was ported
+  KNOWN_EXPORTLEFT=""   # none since 2026-11-03: the mech's object-level location curve on the armature is written as the armature node's channel (BlenderChannelExport); 2026-11-02..03 it was LightAssaultMech
   for k in $KNOWN_EXPORTLEFT; do awk -F'\t' -v OFS='\t' -v k="$k" '$1 == "JOB" && $2 == k { $2 = "EXPORTLEFT:" k } 1' "$TMPD/jobs.txt" > "$TMPD/jobs_k.txt" && mv "$TMPD/jobs_k.txt" "$TMPD/jobs.txt"; done
   n_jobs=$(grep -c "^JOB	" "$TMPD/jobs.txt"); n_left=$(grep -c "^LEFT	" "$TMPD/jobs.txt")
 fi
