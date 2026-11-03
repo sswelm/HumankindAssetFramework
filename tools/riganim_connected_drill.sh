@@ -16,14 +16,35 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/tools/blender_oracle.sh"
 oracle_find_blender
 if [ -z "${BLENDER:-}" ] || [ ! -x "$BLENDER" ]; then echo "SKIP — no Blender found (BLENDER=<exe>); the connected-chain placement is NOT tested"; exit 3; fi
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/haf-riganim-connected.XXXXXXXX")" || exit 2
-trap 'rm -rf "$WORK"' EXIT
-LOG="$WORK/blender.log"
-"$BLENDER" -b --python "$ROOT/tools/riganim-drill/connected_placement_fixture.py" -- "$(cygpath -m "$ROOT/editor/Tools~/rig_anim.py")" "$(cygpath -m "$WORK")" > "$LOG" 2>&1
-rc=$?
-grep -E "^FIXTURE|^RIGANIM placement" "$LOG"
-if [ "$rc" -ne 0 ] || ! grep -q "^FIXTURE PASS" "$LOG"; then
-  grep -E "Error|Traceback" "$LOG" | head -5
-  echo "FAIL — the placement on a connected chain: rig_anim.py stretched or tore the chain (rc=$rc)"; exit 1
-fi
-echo "PASS — the placement on a connected chain: every bone its own length, every head and the mesh moved by one delta"
+TASK_TEMP_ROOT="$(cd "${TMPDIR:-/tmp}" && pwd -P)" || exit 2
+WORK="$(mktemp -d "$TASK_TEMP_ROOT/haf-riganim-connected.XXXXXXXX")" || exit 2
+cleanup() {
+  [ -d "$WORK" ] || return 0
+  local resolved="$(cd "$WORK" && pwd -P)"
+  case "$resolved" in
+    "$TASK_TEMP_ROOT"/haf-riganim-connected.*) rm -rf -- "$resolved";;
+    *) echo 'FAIL — refusing cleanup outside the connected-chain runner root' >&2; return 1;;
+  esac
+}
+trap cleanup EXIT
+for mode in valid old-loop no-placement double-scale; do
+  echo "FIXTURE case $mode (valid must pass; regression controls must fail their output checks)"
+  LOG="$WORK/$mode.log"
+  "$BLENDER" -b --python-exit-code 1 --python "$ROOT/tools/riganim-drill/connected_placement_fixture.py" -- "$(cygpath -m "$ROOT/editor/Tools~/rig_anim.py")" "$(cygpath -m "$WORK/$mode")" "$mode" > "$LOG" 2>&1
+  rc=$?
+  grep -E "^FIXTURE|^RIGANIM placement" "$LOG"
+  if [ "$mode" = valid ]; then
+    if [ "$rc" -ne 0 ] || ! grep -q '^FIXTURE PASS: connected-chain placement ' "$LOG" || grep -q '^FIXTURE FAIL' "$LOG"; then
+      tail -15 "$LOG"
+      echo "FAIL — connected-chain placement did not pass (rc=$rc)"; exit 1
+    fi
+  else
+    # A crash or missing output is not evidence the numerical checks rejected the intended regression.
+    if [ "$rc" -eq 0 ] || ! grep -q '^FIXTURE FAIL: connected-chain placement ' "$LOG" || grep -q '^FIXTURE PASS' "$LOG"; then
+      tail -15 "$LOG"
+      echo "FAIL — the fixture did not reject the $mode control through its placement checks (rc=$rc)"; exit 1
+    fi
+    echo "PASS — connected-chain fixture rejects $mode"
+  fi
+done
+echo "PASS — connected-chain placement: absolute heads, lengths, parents and mesh bounds; old-loop, missing placement and wrong scale rejected"

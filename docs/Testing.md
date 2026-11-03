@@ -409,10 +409,14 @@ other animated recipe has a connected bone - all `.glb`, the glTF importer conne
 this shape: its Blender side for an `.fbx` job is the glTF round trip, which strips the connection, and the C# port
 holds its own points per bone. So `tools/riganim-drill/connected_placement_fixture.py` builds the shape - a three-bone
 connected chain, a skinned mesh around it, both off the origin and above the ground so the placement must move them -
-exports it as FBX, runs `editor/Tools~/rig_anim.py` on it as the Factory does, reads the slim FBX back and holds six
-checks: the two non-leaf lengths (an FBX stores no bone length; the importer gives a leaf its parent's, so the leaf's
-is not rig_anim.py's), the two child heads one delta from the root, the chain still a chain, the mesh one delta from
-the root. Five of the six fail against the previous script. SKIP without Blender (exit 3) is a gate FAIL in the parity
+exports it as FBX and confirms the importer retained the connected chain. It runs `editor/Tools~/rig_anim.py` as the
+Factory does, reads the slim FBX back and holds 14 checks: expected objects/bones, all three absolute heads and
+lengths at the fixed clean-unit export scale, every parent and connected joint, finite geometry, and absolute mesh
+bounds centred and grounded at the expected size. Leaf lengths compare to the imported input because FBX infers the
+leaf's tail. Nothing derives the expected scale from an output bone. The original relative-only checks passed with
+placement disabled or export scale doubled; both now fail. Every run also requires three planted regressions to be
+rejected by the output checks: the old incremental bone loop, disabled placement and doubled export scale. A crash
+or missing output does not count as a successful rejection. SKIP without Blender (exit 3) is a gate FAIL in parity
 mode, like every parity drill.
 
 Review regressions require a fresh nonempty FBX oracle GLB, retain nonzero Blender exit codes, and cover record/replay

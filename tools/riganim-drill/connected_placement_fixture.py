@@ -10,17 +10,20 @@ whose importer connects no bone): a three-bone connected chain under an armature
 off the origin and above the ground so the placement MUST move them, exported as FBX; runs rig_anim.py on it as the
 Factory does (in this Blender, argv as blender_riganim_dump.py sets it); reads the slim FBX back and holds:
 
-  * every bone's length as it was (a stretched link is the defect, whatever the delta),
-  * every bone head moved by ONE delta - the same one for all - and the mesh's box centre moved by that delta too,
-  * the chain still connected and still a chain.
+  * lengths and heads against the input, at the known clean-unit export scale (never inferred from the output),
+  * the mesh centred and grounded at the expected absolute bounds,
+  * every parent link and connected joint, with finite coordinates throughout.
 
-Usage: blender -b --python connected_placement_fixture.py -- <rig_anim.py> <work dir>
+Usage: blender -b --python connected_placement_fixture.py -- <rig_anim.py> <work dir> [valid|old-loop|no-placement|double-scale]
 Prints FIXTURE rows and a final PASS/FAIL line; exits 1 on FAIL."""
 import bpy, os, sys, math
 from mathutils import Vector
 
 argv = sys.argv[sys.argv.index("--") + 1:]
 rig_anim, work = argv[0], argv[1]
+mode = argv[2] if len(argv) > 2 else "valid"
+if mode not in ("valid", "old-loop", "no-placement", "double-scale"):
+    raise ValueError("unknown connected-placement control: " + mode)
 os.makedirs(os.path.join(work, "anim"), exist_ok=True)
 src = os.path.join(work, "connected_chain.fbx")
 out = os.path.join(work, "anim", "connected_chain_anim.fbx")
@@ -73,13 +76,49 @@ bpy.ops.export_scene.fbx(filepath=src, use_selection=True, add_leaf_bones=False)
 src_centre = sum(((arm.matrix_world @ v.co) for v in mesh.vertices), Vector()) / len(mesh.vertices)
 print("FIXTURE source: chain of %d connected bones at %s, mesh centre %s" % (len(LINKS), tuple(round(c, 3) for c in OFF), tuple(round(c, 3) for c in src_centre)))
 
+# Confirm the FBX importer really gives the script a connected chain, and retain independent input geometry.
+# Reading the expected scale from the OUTPUT root length made uniformly wrong exports pass this test.
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.import_scene.fbx(filepath=src)
+input_arm = next(o for o in bpy.data.objects if o.type == 'ARMATURE')
+input_bones = {b.name: b for b in input_arm.data.bones}
+for i, (name, head, tail) in enumerate(LINKS):
+    bone = input_bones[name]
+    if i and (bone.parent != input_bones[LINKS[i - 1][0]] or not bone.use_connect):
+        raise RuntimeError("the fixture FBX did not import a connected chain")
+    if (input_arm.matrix_world @ bone.head_local - (OFF + head)).length > 1e-5:
+        raise RuntimeError("the fixture FBX changed the authored head positions")
+input_lengths = {name: (input_arm.matrix_world @ bone.tail_local - input_arm.matrix_world @ bone.head_local).length
+                 for name, bone in input_bones.items()}
+OUTPUT_SCALE = 0.01                                  # argv[8]=1: rig_anim's clean-unit export contract
+source_min = Vector(tuple(min(v[k] for v in verts) for k in range(3)))
+source_max = Vector(tuple(max(v[k] for v in verts) for k in range(3)))
+delta = Vector((-(source_min.x + source_max.x) / 2, -(source_min.y + source_max.y) / 2, -source_min.z))
+
 # ---- rig_anim.py on it, as the Factory runs it (the dump script's argv layout) ----------------------------------------
 saved = sys.argv
 sys.argv = ["blender", "--", src, out, "20000", "", "Armature|Armature|ArmatureAction", "", "1", "0,0,0", "1", "", "0", "", "0", "", "0"]
 rig_rc = 0
 try:
-    code = compile(open(rig_anim, encoding="utf-8").read(), rig_anim, "exec")
-    exec(code, {"__name__": "__main__", "__file__": rig_anim})
+    with open(rig_anim, encoding="utf-8") as handle:
+        code = handle.read()
+    def replace_once(old, new):
+        global code
+        if code.count(old) != 1: raise RuntimeError("cannot plant the " + mode + " control")
+        code = code.replace(old, new)
+    if mode == "old-loop":
+        replace_once('        _orig = {_eb.name: (_eb.head.copy(), _eb.tail.copy()) for _eb in arm.data.edit_bones}\n'
+                     '        for _eb in arm.data.edit_bones:\n'
+                     '            _h, _t = _orig[_eb.name]\n'
+                     '            _eb.head = _h + _darm; _eb.tail = _t + _darm',
+                     '        for _eb in arm.data.edit_bones:\n'
+                     '            _eb.head += _darm; _eb.tail += _darm')
+    elif mode == "no-placement":
+        replace_once('if arm is not None and me.vertices:\n    _mw = joined.matrix_world',
+                     'if False and arm is not None and me.vertices:\n    _mw = joined.matrix_world')
+    elif mode == "double-scale":
+        replace_once('gscale = 0.01 if clean_units else 1.0', 'gscale = 0.02 if clean_units else 1.0')
+    exec(compile(code, rig_anim, "exec"), {"__name__": "__main__", "__file__": rig_anim})
 except SystemExit as e:                               # rig_anim.py's own error exits (sys.exit(1)); a clean run falls through
     rig_rc = e.code if isinstance(e.code, int) else 1
 finally:
@@ -89,50 +128,46 @@ if rig_rc:
 if not os.path.exists(out):
     print("FIXTURE FAIL: rig_anim.py wrote no file at %s" % out); sys.exit(1)
 
-# ---- the slim FBX back: lengths kept, one delta for every head and for the mesh -------------------------------------
+# ---- the slim FBX back: fixed-scale absolute expectations, not ratios fitted to this output -----------------------
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.import_scene.fbx(filepath=out)
 arms = [o for o in bpy.data.objects if o.type == 'ARMATURE']
 meshes = [o for o in bpy.data.objects if o.type == 'MESH']
-problems = []
-if len(arms) != 1: problems.append("expected one armature in the output, found %d" % len(arms))
-if not meshes: problems.append("no mesh in the output")
-if not problems:
+problems = []; checks = 0
+def check(label, ok):
+    global checks
+    checks += 1
+    if not ok: problems.append(label)
+def finite(v): return all(math.isfinite(c) for c in v)
+def close(a, b): return finite(a) and finite(b) and (a - b).length <= 1e-5 * max(OUTPUT_SCALE, b.length)
+check("expected one armature and at least one mesh", len(arms) == 1 and bool(meshes))
+if len(arms) == 1:
     a = arms[0]
-    def tail_name(n): return n
     bones = {b.name.split("_", 1)[-1] if b.name[:1] == "b" and "_" in b.name else b.name: b for b in a.data.bones}
-    heads = {}
-    for n, h, t in LINKS:
-        b = bones.get(n)
-        if b is None: problems.append("bone '%s' missing in the output (have %s)" % (n, sorted(bones))); continue
-        hw = a.matrix_world @ b.head_local; tw = a.matrix_world @ b.tail_local
-        L = (tw - hw).length; heads[n] = hw
-        # the slim FBX carries the scene scaled as rig_anim.py leaves it; lengths compare as ratios to the root link
-        print("FIXTURE bone %-4s head %s len %.4f  (source len %.4f)" % (n, tuple(round(c, 4) for c in hw), L, src_len[n]))
-    if len(heads) == len(LINKS):
-        root_L = (a.matrix_world @ bones["root"].tail_local - heads["root"]).length
-        # an FBX stores no bone length: the importer gives a LEAF the length of its parent, so the last link's length is
-        # the importer's, not rig_anim.py's - its HEAD (the parent's tail, checked below) is what the placement moved
-        for n, h, t in LINKS[:-1]:
-            L = (a.matrix_world @ bones[n].tail_local - heads[n]).length
-            want = src_len[n] / src_len["root"] * root_L
-            if abs(L - want) > 1e-3 * max(1.0, want): problems.append("bone '%s' length %.4f, expected %.4f (the chain stretched)" % (n, L, want))
-        # one delta: the head-to-head offsets must be the source's (scaled like the root link)
-        k = root_L / src_len["root"]
-        for n, h, t in LINKS[1:]:
-            got = heads[n] - heads["root"]; want = (h - LINKS[0][1]) * k
-            if (got - want).length > 1e-3 * max(1.0, want.length): problems.append("bone '%s' sits %s from the root, expected %s (moved by more than one delta)" % (n, tuple(round(c, 4) for c in got), tuple(round(c, 4) for c in want)))
-        b = bones.get("mid")
-        if b is not None and b.parent is None: problems.append("the chain is no longer a chain ('mid' lost its parent)")
-    centre = Vector()
-    nv = 0
-    for m in meshes:
-        for v in m.data.vertices: centre += m.matrix_world @ v.co; nv += 1
-    centre /= max(1, nv)
-    if heads.get("root") is not None:
-        rel = centre - heads["root"]; want = (src_centre - (OFF + LINKS[0][1])) * (root_L / src_len["root"])
-        print("FIXTURE mesh centre %s, root head %s" % (tuple(round(c, 4) for c in centre), tuple(round(c, 4) for c in heads["root"])))
-        if (rel - want).length > 1e-3 * max(1.0, want.length): problems.append("the mesh sits %s from the root head, expected %s (mesh and bones moved by different deltas)" % (tuple(round(c, 4) for c in rel), tuple(round(c, 4) for c in want)))
+    check("expected exactly the fixture's bones", set(bones) == set(input_lengths))
+    for i, (name, head, tail) in enumerate(LINKS):
+        if name not in bones: continue
+        bone = bones[name]
+        hw = a.matrix_world @ bone.head_local; tw = a.matrix_world @ bone.tail_local
+        want = (OFF + head + delta) * OUTPUT_SCALE
+        check("bone '%s' has a nonfinite or incorrect absolute head (got %s, wanted %s)" % (name, tuple(hw), tuple(want)), close(hw, want))
+        length = (tw - hw).length
+        # FBX infers a leaf's tail: compare to the imported INPUT length, never an output-derived scale.
+        expected_length = input_lengths[name] * OUTPUT_SCALE
+        check("bone '%s' changed length (got %.8f, wanted %.8f)" % (name, length, expected_length),
+              finite(tw) and math.isfinite(length) and abs(length - expected_length) <= 1e-5 * OUTPUT_SCALE)
+        parent = bones.get(LINKS[i - 1][0]) if i else None
+        check("bone '%s' has the wrong parent or lost its connected joint" % name,
+              bone.parent == parent and (not i or bone.use_connect))
+        print("FIXTURE bone %s head %s length %.8f expected %.8f" % (name, tuple(round(c, 6) for c in hw), length, expected_length))
+points = [m.matrix_world @ v.co for m in meshes for v in m.data.vertices]
+check("missing or nonfinite mesh vertices", bool(points) and all(finite(p) for p in points))
+if points and all(finite(p) for p in points):
+    lower = Vector(tuple(min(p[k] for p in points) for k in range(3)))
+    upper = Vector(tuple(max(p[k] for p in points) for k in range(3)))
+    check("mesh lower bounds are not centred and grounded", close(lower, (source_min + delta) * OUTPUT_SCALE))
+    check("mesh upper bounds changed placement or scale", close(upper, (source_max + delta) * OUTPUT_SCALE))
+    print("FIXTURE mesh bounds %s to %s" % (tuple(round(c, 6) for c in lower), tuple(round(c, 6) for c in upper)))
 for p in problems: print("FIXTURE FAIL: " + p)
-print("FIXTURE %s: the placement on a connected chain (%d checks)" % ("FAIL" if problems else "PASS", 2 * len(LINKS)))
+print("FIXTURE %s: connected-chain placement (%d checks)" % ("FAIL" if problems else "PASS", checks))
 sys.exit(1 if problems else 0)
