@@ -283,6 +283,22 @@ def armobj(out, name, onekey=False, parented=False):
     return r.write(out, name)
 
 
+
+def armobj_mirrored_roles(out):
+    """Object rotation plus negative, nonuniform STEP scale retained by role clips. The stage-4 fold must flip
+    mirrored triangles AND their UV/normal/color corner data, as Blender's transform_apply does."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    attrs = r.meshes[0]["primitives"][0]["attributes"]
+    attrs["TEXCOORD_1"] = r.b.accessor([(i / 7.0, (7 - i) / 7.0) for i in range(8)], "f", "VEC2", minmax=False)
+    attrs["COLOR_0"] = r.b.accessor([(i / 7.0, 0.25, 0.75, 1.0) for i in range(8)], "f", "VEC4", minmax=False)
+    axis = [v / math.sqrt(14.0) for v in (1.0, 2.0, 3.0)]
+    rots = [tuple(v * math.sin(math.pi * t) for v in axis) + (math.cos(math.pi * t),) for t in (0.0, 0.55, 1.1)]
+    r.key(0, arm, "rotation", [0.0, 0.5, 1.0], rots)
+    r.key(0, arm, "translation", [0.0, 1.0], [(-0.3, 0.2, 0.7), (0.4, -0.5, 0.1)])
+    r.key(0, arm, "scale", [0.0, 0.5, 1.0], [(-1.0, 2.0, 3.0), (-2.0, 3.0, 1.0), (-0.5, 1.0, 2.0)], "STEP")
+    return r.write(out, "riganim_armobj_mirrored_roles")
+
+
 def multi(out):
     r = Rig(); arm, j0, j1, sk, m = rigged(r)
     a2 = r.anim("Longer")
@@ -1039,6 +1055,7 @@ def main(out):
     job("fx_armobj_legacy", ao, convert="0")
     job("fx_armobj_roles", ao, roles="attack=Spin[0..6];move=Spin[6..12]")
     job("fx_armobj_onekey", armobj(out, "riganim_armobj_onekey", onekey=True), convert="0")
+    job("fx_armobj_mirrored_roles", armobj_mirrored_roles(out), roles="attack=Spin[0..6];move=Spin[6..12]")
     job("EXPORTLEFT:fx_armobj_parented", armobj(out, "riganim_armobj_parented", parented=True), convert="0")
     job("fx_skinned_anim", skinned_anim(out))
     # stage 2

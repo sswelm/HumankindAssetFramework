@@ -640,23 +640,7 @@ public static partial class BlenderVehicleRig
         return s;
     }
 
-    /// <summary>mesh_flip_faces on triangles: corners 1 and 2 swap, every per-corner array (the UV layers, the custom normals)
-    /// permuted with them.</summary>
-    static int[] FlipFaces(BlenderRigAnim.MeshData d)
-    {
-        var tris = d.Faces; var r = (int[])tris.Clone();
-        var uvs = new List<float[]>(); if (d.Uv != null) uvs.Add(d.Uv); foreach (var u in d.UvAll) if (!uvs.Contains(u)) uvs.Add(u);
-        for (int f = 0; f < tris.Length / 3; f++)
-        {
-            int a = f * 3 + 1, b = f * 3 + 2;
-            r[a] = tris[b]; r[b] = tris[a];
-            foreach (var u in uvs) for (int k = 0; k < 2; k++) { float t = u[2 * a + k]; u[2 * a + k] = u[2 * b + k]; u[2 * b + k] = t; }
-            foreach (var color in d.Colors) if (!color.point)
-                for (int k = 0; k < 4; k++) { byte t = color.bytes[4 * a + k]; color.bytes[4 * a + k] = color.bytes[4 * b + k]; color.bytes[4 * b + k] = t; }
-            if (d.CustomNormal != null) for (int k = 0; k < 2; k++) { short t = d.CustomNormal[2 * a + k]; d.CustomNormal[2 * a + k] = d.CustomNormal[2 * b + k]; d.CustomNormal[2 * b + k] = t; }
-        }
-        return r;
-    }
+    static int[] FlipFaces(BlenderRigAnim.MeshData d) => BlenderRigAnim.FlipFaces(d);
 
     /// <summary>separate(type='LOOSE') on the one mesh object: BM_mesh_calc_edge_groups_as_arrays over the mesh's own edges (the
     /// importer's order), the first group staying with the object in its imported vertex order, every other group a NEW object

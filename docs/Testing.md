@@ -1956,11 +1956,19 @@ the object sampler's. Fixtures: `fx_groups_legacy` (the Spin action's armature t
 `fx_armobj_legacy` (a LINEAR location, a STEP scale and a rotation keyed twice to one value - reduced, STEP by
 equality), `fx_armobj_roles` (the fold strips the primary's curves, the two role clips carry theirs), `fx_armobj_onekey`
 (a STEP rotation and a one-key location - the baked group listed after the rotation), and the mech, whose export
-compares from here on (`KNOWN_EXPORTLEFT` is empty). Left by name (EXPORTLEFT:): an armature with a parent
+compares from here on (`KNOWN_EXPORTLEFT` is empty). Review adds `fx_armobj_mirrored_roles`: animated object rotation
+and negative, nonuniform scale carried by role clips, with a second UV layer and vertex colors. The stage-4 transform
+fold flips a mirrored mesh's triangles and their corner data (UVs, custom normals and corner colors), using the same
+helper as vehicle import. The fixture fails on its loop-index hash without that flip, then matches through GLB export.
+`BlenderRigAnimInProcess.CacheRevision` changes with this support: old slim GLBs are rebuilt and old named Blender
+fallback decisions are retried even with reuse enabled and unchanged source/script timestamps; a unit regression
+holds the production fallback policy to the previous revision's key. The review's `FULL=1` live run passes 160 jobs
+(149 equal, 11 named leaves), 139 export comparisons (130 byte-identical files), and all 100 damaged-evidence controls.
+Left by name (EXPORTLEFT:): an armature with a parent
 (`fx_armobj_parented`: its matrix against the parent's per frame), an Euler or delta property (no glTF source makes
 one), two properties needing baking (to_be_sampled is a set). The drill's ANIM row counts the object channels beside
 the bones' (`BlenderRigExport.ChannelCount`: the first run of these fixtures compared with the old count and showed
-93 against Blender's 96 on the mech - the count is the sampler's, not a formula's). Left by name (EXPORTLEFT:,
+93 against Blender's 96 on the mech - the count includes keyed object properties beside the bones' three channels). Left by name (EXPORTLEFT:,
 the four stages equal): a second armature no mesh uses - its skin is gathered after the animation export, from the
 scene the sampler leaves, and neither the first frame's posed nor its rest world gives those matrices (three
 fixtures; no registry rig has a second armature). Not fixtured, named: a mesh of 65,535 vertices or more (the

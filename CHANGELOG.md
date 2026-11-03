@@ -34,6 +34,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   (`fcurve.update()`'s sort_time_fcurve pulls a handle on the wrong side of the key to it; every earlier lone key sat at
   frame 0, where the zeros already satisfy it) - stage 1 now does the same. Not yet in-game: the mech's bake through the
   Factory on the GLB route is the next acceptance.
+  Review fixes the transform fold for mirrored meshes: triangle winding and corner data (UVs, normals, colors) flip
+  together, using the vehicle import's shared helper. `fx_armobj_mirrored_roles` adds animated rotation/negative scale,
+  role clips, a second UV layer and colors; it fails before the fix and matches Blender afterwards. The in-process
+  revision also changes so old successful outputs and cached Blender fallback decisions are retried automatically.
+  The old revision's fallback key is covered by a failing-before/passing-after unit regression; all 2,487 unit cases pass.
+  The review's full live run: 160 jobs (23 recipes, 137 fixtures), 149 equal at the modeled stages, 11 named leaves,
+  139 equal exports (130 byte-identical GLBs), and all 100 damaged-evidence controls refused.
 - **RIG_ANIM STAGE 2: A SHARED MESH DATABLOCK UNDER THE BONES (2026-11-02).** The light assault mech's `.fbx`, read by the
   native reader since step 6f, equalled Blender at stage 1 and hit the port's one named stage 2 limit: a bone-hung mesh
   whose datablock another object shares. In Blender the vertex groups live on the mesh (since 3.0) and the Armature modifier

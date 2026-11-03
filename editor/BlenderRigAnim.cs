@@ -253,6 +253,24 @@ public static class BlenderRigAnim
         public int ActiveColor = -1;              // color_attributes.render_color_index: 0 when the importer made a layer, kept from the active object through the join
     }
 
+    /// <summary>mesh_flip_faces on triangles: corners 1 and 2 swap, every per-corner array (the UV layers, the custom normals)
+    /// permuted with them.</summary>
+    internal static int[] FlipFaces(MeshData d)
+    {
+        var tris = d.Faces; var r = (int[])tris.Clone();
+        var uvs = new List<float[]>(); if (d.Uv != null) uvs.Add(d.Uv); foreach (var u in d.UvAll) if (!uvs.Contains(u)) uvs.Add(u);
+        for (int f = 0; f < tris.Length / 3; f++)
+        {
+            int a = f * 3 + 1, b = f * 3 + 2;
+            r[a] = tris[b]; r[b] = tris[a];
+            foreach (var u in uvs) for (int k = 0; k < 2; k++) { float t = u[2 * a + k]; u[2 * a + k] = u[2 * b + k]; u[2 * b + k] = t; }
+            foreach (var color in d.Colors) if (!color.point)
+                for (int k = 0; k < 4; k++) { byte t = color.bytes[4 * a + k]; color.bytes[4 * a + k] = color.bytes[4 * b + k]; color.bytes[4 * b + k] = t; }
+            if (d.CustomNormal != null) for (int k = 0; k < 2; k++) { short t = d.CustomNormal[2 * a + k]; d.CustomNormal[2 * a + k] = d.CustomNormal[2 * b + k]; d.CustomNormal[2 * b + k] = t; }
+        }
+        return r;
+    }
+
     public sealed class KeyData
     {
         public float Frame, Value, LeftX, LeftY, RightX, RightY;
@@ -1929,7 +1947,12 @@ public static class BlenderRigAnim
             {
                 var rs = VehicleProbe.ObjectMatrix(o.Props[0], o.Props[1], o.Props[2]);
                 var mat = (float[])rs.Clone(); mat[12] = mat[13] = mat[14] = 0f;
-                if (o.Type == "MESH") TransformPoints(mat, o.Mesh.Positions, o.Mesh.Vertices);   // mesh_transform: transform_points
+                if (o.Type == "MESH")
+                {
+                    TransformPoints(mat, o.Mesh.Positions, o.Mesh.Vertices);   // mesh_transform: transform_points
+                    // apply_objects_internal also flips a mirrored mesh's winding, with every corner's data.
+                    if (VehicleProbe.Determinant4(mat) < 0f) { o.Mesh.Faces = FlipFaces(o.Mesh); Note(s, "a mirrored mesh's faces flipped at transform_apply"); }
+                }
                 else if (o.Type == "ARMATURE")
                 {
                     var rest = rig.Armatures[o.Source.GltfNode];
