@@ -27,6 +27,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   mech bakes on the FBX route until a drill row holds the direct import and the round trip equal for its file. Its lost
   colours are a different matter: the file names its textures by the author's absolute paths, none on this disk, and the
   archive beside the model holds them unextracted - both routes find no albedo and bake a 32x32 swatch atlas.
+  Review makes that wrapper verdict mandatory: the drill now rejects a restricted FBX written natively even if it
+  equals the round-trip oracle, and requires the exact fallback reason with no file, script exit or stage log. The real
+  mech's unsafe native-route mutation passed before the review and fails afterwards; eight verdict regressions bring
+  the passing unit count to 2,501.
 - **THE RIG ROUTE WRITES THE ARMATURE NODE'S OWN CHANNELS - THE MECH'S BAKE LEAVES BLENDER (2026-11-03).** The light
   assault mech's `.fbx` keys its armature's location at the object level, and `BlenderRigExport` left any such curve to
   Blender by name (`'Armature|Armature|ArmatureAction': an object-level curve on the armature`), so the mech was the one

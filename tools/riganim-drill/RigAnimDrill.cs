@@ -707,7 +707,10 @@ static class Stage1Drill
                                                 var o = BlenderRigAnimInProcess.Run(d.Argv[0], tmpGlb, argv.Skip(2).ToArray());
                                                 // a skinned or animated .fbx: the wrapper leaves it to the FBX route by name (HafModelLoader.RigImportFallback, 2026-11-03 -
                                                 // the reader's round trip, which the stages and the export above are held to, is not rig_anim.py's direct import); counted, not a problem
-                                                if (!o.Written && HafModelLoader.IsFbx(d.Argv[0]) && o.UseBlender != null && o.UseBlender.StartsWith(HafModelLoader.FbxRigLeavePrefix, StringComparison.Ordinal))
+                                                string expectedLeave = HafModelLoader.RigImportFallback(d.Argv[0], model.Model);
+                                                string guardProblem = RigInProcessResultCheck.Problem(expectedLeave, o, File.Exists(tmpGlb));
+                                                if (guardProblem != null) problems.Add(guardProblem);
+                                                else if (expectedLeave != null)
                                                 { InProcessLeft++; Cover("the in-process wrapper leaves a skinned or animated .fbx to the FBX route by name (step (g))"); Console.WriteLine($"INPROC {key}: left to the FBX route by name, as the wrapper says: {o.UseBlender}"); }
                                                 else if (!o.Written) problems.Add("the in-process wrapper did not write the file: " + (o.ScriptExit ? "the script's exit" : o.UseBlender));
                                                 else

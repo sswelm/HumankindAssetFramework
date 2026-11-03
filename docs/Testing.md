@@ -370,6 +370,11 @@ too) takes the same leave, its cache revision moved with it. The drill keeps com
 rig until a drill row holds the direct import and the round trip equal for the file. Two unit tests hold the limit
 (`HafModelLoaderTests`: the shape rule per extension/skin/animation, and the fixtures: static reads, skinned-animated
 leaves before any stage runs - no file, no RIGANIM line).
+The wrapper verdict is mandatory for a restricted FBX, not an optional acceptable outcome: a native write fails even
+when its bytes equal the round-trip oracle. `RigInProcessResultCheck` derives the required reason from the source/model
+policy and requires that exact reason, no output file, no script exit and no stage log; applying this guard to an allowed
+source fails too. Eight unit cases cover these verdicts. A live mech mutation that bypasses `ReadForRig` passed the
+original drill but is rejected by this check; the unmodified wrapper still passes with a named decline.
 
 Review regressions require a fresh nonempty FBX oracle GLB, retain nonzero Blender exit codes, and cover record/replay
 with external FBX image dependencies (including a previously missing recursive basename match). Named-left probe files
