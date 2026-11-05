@@ -24,6 +24,7 @@ public class WeakKeyedTests
         Assert.True(map.TryGetValue(a, out var again)); Assert.Same(ra, again);
         Assert.False(map.TryGetValue(new object(), out var none)); Assert.Null(none);
         Assert.Equal(2, map.Count);
+        GC.KeepAlive(a); GC.KeepAlive(b); // in Release the keys die at their last use; a collection from a parallel test class then sweeps them before Count (seen 2026-11-05, 1 run in 3)
     }
 
     [Fact]
@@ -36,6 +37,7 @@ public class WeakKeyedTests
         Assert.False(map.Remove(null)); Assert.False(map.TryGetValue(null, out _));
         Assert.Throws<ArgumentNullException>(() => map.GetValue(null, _ => new Record()));
         map.Clear(); Assert.Equal(0, map.Count);
+        GC.KeepAlive(b); // b's record must survive Remove(a) and the Count after it
     }
 
     [Fact]
