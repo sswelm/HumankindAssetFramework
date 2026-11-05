@@ -10,6 +10,28 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE DROP WATCH'S WEAK TABLE CRASHED THE GAME LOADING A 180-TURN SAVE (2026-11-05).** Loading a late-game save with
+  the 2026-10-31 plugin, Player.log filled with `[Buffers] drop watch: Specified cast is not valid` - 4,600 lines, one per
+  mesh registration - and then the game died natively inside `MeshDropWatch.After` reading its own failure record
+  (`Enumerable.ToArray` over the record's dictionary, an access violation). The record came out of a
+  `ConditionalWeakTable<object, State>` keyed on the GPU content layer: Unity's Mono hands a COLLECTED ephemeron value
+  back out of that table once the collector has run over it, the same castclass the editor's probes and fuses hit on
+  2026-10-27 (PR #208 replaced the editor's table; the plugin's two were left standing, and the attack gate's never runs
+  because HoldFire is off). The only cast in that method is the table's; the game and the editor project both run the
+  incremental collector (`boot.config gc-max-time-slice=3`, `gcIncremental: 1`), and 30,000 rounds of the same calls
+  on the standalone mono.exe with that collector on did not reproduce it - the embedded runtime is the only witness,
+  so the plugin now holds no `ConditionalWeakTable` at all. `WeakKeyed<T>` (Patches/WeakKeyed.cs) is the editor's
+  replacement made shared: a list of weak keys under a lock, swept on every touch, matched by reference. The drop watch
+  and the attack gate use it; `Tests/SessionStateTests.cs` refuses weak-table storage in static and instance fields,
+  including generic containers, arrays and property backing fields (the review caught the static-only guard's bypass).
+  Factories run outside the map lock and recheck before publishing one canonical value: re-entry previously inserted
+  duplicate records, and waiting on another thread using the map blocked that thread. WeakKeyed has its own tests (collected keys
+  swept, a live key's value kept across collections, the found index tracked across a sweep below it) and the drop
+  watch one (a dropped layer's record goes, a live layer's stays across collections). GC fixtures keep temporary keys
+  rooted until their initial counts are captured; a collection between dropping those keys and reading the count
+  previously made two tests fail even with correct storage. Five review regressions reproduced before their fixes.
+  The helper also passed a Unity 2021.3.1 embedded-Mono probe with incremental GC, allocation pressure and parallel
+  lookups. 2,515 tests.
 - **THE PLACEMENT STRETCHED EVERY CONNECTED BONE CHAIN - THE MECH'S LEGS HUNG IN THE AIR (2026-11-03).** The light
   assault mech re-baked on the FBX route with its legs apart from its body, in the Lab's playing clip and in the rest
   pose. Not the preview: the rest skeleton rig_anim.py writes differs from the July bake's - bone heads moved by

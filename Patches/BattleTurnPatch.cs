@@ -405,8 +405,9 @@ namespace HumankindAssetFramework
     [HarmonyPatch] internal static class Hk_BattleAttackGate
     {
         class HoldTag { public float since; }
-        [ProcessLived("ConditionalWeakTable keyed on game objects - entries die with their keys, so it needs no session reset (and cannot be cleared in place)")] static readonly System.Runtime.CompilerServices.ConditionalWeakTable<object, HoldTag> holds =
-            new System.Runtime.CompilerServices.ConditionalWeakTable<object, HoldTag>();
+        // weakly keyed on the FSM objects - entries die with their keys. NOT a ConditionalWeakTable (Unity's Mono hands back
+        // collected records from one; the drop watch crashed the game that way on 2026-11-05 - see WeakKeyed.cs).
+        [ProcessLived("weak FSM keys - entries die with their keys, so it needs no session reset")] static readonly WeakKeyed<HoldTag> holds = new WeakKeyed<HoldTag>();
         static MethodBase TargetMethod()
         {
             var t = GameBinding.AbstractAnimationStateMachine;

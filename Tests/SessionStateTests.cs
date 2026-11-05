@@ -12,6 +12,51 @@ namespace HumankindAssetFramework.Tests
     {
         static readonly Assembly Plugin = typeof(SessionState).Assembly;
 
+        // ---- NO ConditionalWeakTable IN THE PLUGIN (2026-11-05) ----
+        // Unity's Mono hands a collected ephemeron value back out of ConditionalWeakTable ("Specified cast is not valid"
+        // from inside TryGetValue): the editor's probes on 2026-10-27, then the game on 2026-11-05 - the drop watch logged
+        // it 4,600 times while a 180-turn save loaded and crashed natively reading the freed record. Weakly keyed state
+        // uses WeakKeyed<T> (a swept list under a lock). Inspect instance storage too: hiding a table in the weak map
+        // wrapper or a generic container must not bypass this guard.
+        [Fact]
+        public void No_field_in_the_plugin_stores_a_ConditionalWeakTable()
+        {
+            var offenders = WeakTableFields(Plugin.GetTypes());
+            Assert.True(offenders.Count == 0,
+                "ConditionalWeakTable storage in the plugin - Unity's Mono returns collected values from them (the 2026-11-05 game crash); " +
+                "use WeakKeyed<T> (Patches/WeakKeyed.cs):\n  " + string.Join("\n  ", offenders));
+        }
+
+        static List<string> WeakTableFields(IEnumerable<System.Type> types)
+        {
+            var offenders = new List<string>();
+            foreach (var t in types)
+                foreach (var f in t.GetFields(BindingFlags.Static | BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+                    if (ContainsWeakTable(f.FieldType))
+                        offenders.Add(SessionState.Describe(f));
+            return offenders;
+        }
+
+        static bool ContainsWeakTable(System.Type type) => SessionState.IsWeakTable(type)
+            || (type.HasElementType && ContainsWeakTable(type.GetElementType()))
+            || (type.IsGenericType && type.GetGenericArguments().Any(ContainsWeakTable));
+
+        sealed class WeakTableFieldFixture<T> where T : class
+        {
+            public static System.Runtime.CompilerServices.ConditionalWeakTable<object, object> Static;
+            public System.Runtime.CompilerServices.ConditionalWeakTable<object, T> Instance;
+            public List<System.Runtime.CompilerServices.ConditionalWeakTable<object, T>> Nested;
+            public System.Runtime.CompilerServices.ConditionalWeakTable<object, T>[] Array;
+            public System.Runtime.CompilerServices.ConditionalWeakTable<object, T> Property { get; set; }
+        }
+
+        [Fact]
+        public void Weak_table_guard_finds_instance_generic_array_and_property_storage_too()
+        {
+            var fields = WeakTableFields(new[] { typeof(WeakTableFieldFixture<>) });
+            Assert.Equal(5, fields.Count);
+        }
+
         // ---- THE FENCE'S SHAPE (2026-08-22 review) ----
         // Membership used to be "the type happens to have a public parameterless Clear()", which on net471 excludes
         // ConcurrentQueue<T>, ConcurrentBag<T>, arrays and ConditionalWeakTable — and `fireGuidQueue`, a sim-thread

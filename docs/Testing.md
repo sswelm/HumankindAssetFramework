@@ -4,7 +4,7 @@ HAF is verified in **three tiers**, each a machine, each at the level where its 
 
 | Tier | Runs | Guards |
 |---|---|---|
-| **Unit tests** — **2,244 as of 2026-10-29** (`dotnet test` prints the live number; this one drifts) | `dotnet test`, the pre-push gate, CI | the pure logic: registry/parse/era, pack resolution + merge + tuning tables, pose math, dial config, the session-state rule, the smoke **verdict and classifiers**, and since 09-14 the kernels behind the game-touching code: the descriptor repoint, the multi-mesh quad estimator + partition, the district density boost, the Vehicle Lab's probe-row parser |
+| **Unit tests** — **2,515 as of 2026-11-05** (`dotnet test` prints the live number; this one drifts) | `dotnet test`, the pre-push gate, CI | the pure logic: registry/parse/era, pack resolution + merge + tuning tables, pose math, dial config, the session-state rule, the smoke **verdict and classifiers**, and since 09-14 the kernels behind the game-touching code: the descriptor repoint, the multi-mesh quad estimator + partition, the district density boost, the Vehicle Lab's probe-row parser |
 | **Headless game checks** | `tools/check-catalog.sh` in the push gate; `tools/check-bindings.sh` on demand / after a game update | **two halves of one claim**: `check-catalog.sh` proves the catalog **covers the code** (every by-name literal at a reflection site is catalogued or allowlisted with a reason), `bindcheck` proves it **resolves** against the real DLLs; `typeprobe --find` / `--exact` locate a seam or a member's owner before a binding is written |
 | **In-game smoke test** — `[load]` automatic, `[full]` on the F8 button | every load (a few ms, once), and on request | the injecting half, read from the **engine**: bindings, registry, roles, assets, sounds, files, GPU budget, district tiles and textures, patched seams — and, on the button, every live pawn on *our* skeleton, pose-hook liveness, the sub-pawn walk vs a scene scan, the write-back self-test |
 
@@ -21,6 +21,16 @@ left to eyes: the smoke test reads the engine's own state, and its load tier nee
 ```
 dotnet test Tests/HumankindAssetFramework.Tests.csproj -c Release
 ```
+
+`WeakKeyedTests`, `MeshDropWatchTests` and `SessionStateTests` hold the runtime weak-state replacement (2026-11-05):
+one value per reference key, reentrant and concurrent factories returning the canonical value, factories able to wait
+for another thread using the map, and dead-key sweeps retaining live records. GC fixtures explicitly root temporary
+keys until their initial counts are captured, then release them across a non-inlined helper boundary; collections
+are forced on both sides. The weak-table field guard has a planted generic fixture covering static, instance,
+container, array and property storage. The original implementation failed five focused review checks; all 28 focused
+cases pass after the fixes. An isolated Unity 2021.3.1 embedded-Mono probe also passed 64 rounds of allocation pressure
+and parallel live-key lookups with incremental GC enabled, plus factory re-entry and cross-thread access. This checks
+the replacement's behavior; the original native game crash was not reproduced by a standalone test.
 
 ## The fast gates — two lanes, `check.sh` and CI
 
