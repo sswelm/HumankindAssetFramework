@@ -99,6 +99,27 @@ public static class UnityBakeCommitDrill
                 Check("cancel during commit retains the old recovery snapshot", copies.Length == 1 && File.ReadAllText(Path.Combine(copies[0], name + suffix)) == "OLD");
                 foreach (string copy in copies) RemoveRecovery(copy, name);
             }
+            {
+                // Every ANIMATED bake sweeps the <name>_PreviewMesh*.asset clones a previous multi-material bake persisted:
+                // both preview loaders (Factory and Lab) read the whole set and substitute by vertex count, so a stale set
+                // pairs old geometry with the new atlas or reports UNMATCHED. The single-material route used to skip the sweep.
+                string name = "clone_sweep", resDir = "Assets/FactorySource/" + name;
+                Directory.CreateDirectory(Path.Combine(Application.dataPath, "FactorySource", name)); AssetDatabase.Refresh();
+                Mesh Tri(int n) { var m = new Mesh(); var v = new Vector3[n]; for (int i = 0; i < n; i++) v[i] = new Vector3(i, 0, 0); m.vertices = v; m.triangles = new[] { 0, 1, 2 }; return m; }
+                void Plant(int count) { for (int i = 0; i < count; i++) AssetDatabase.CreateAsset(Tri(3 + i), UniversalBaker.PreviewMeshPath(resDir, name, i)); AssetDatabase.SaveAssets(); }
+                string bodyPath = resDir + "/" + name + "_body.asset"; AssetDatabase.CreateAsset(Tri(9), bodyPath);
+                var atlas = new Texture2D(4, 4);
+                var generate = typeof(UniversalBaker).GetMethod("GeneratePreviewPrefab", BindingFlags.Static | BindingFlags.NonPublic);
+                Plant(2);
+                Check("stale preview clones planted and loaded", UniversalBaker.LoadPreviewSubstitutes(name).Count == 2);
+                generate.Invoke(null, new object[] { name, resDir, bodyPath, atlas, Vector3.zero, null });
+                Check("single-material animated bake sweeps stale preview clones", UniversalBaker.LoadPreviewSubstitutes(name).Count == 0);
+                Check("single-material animated bake still writes the preview prefab", AssetDatabase.LoadAssetAtPath<GameObject>(resDir + "/" + name + "_Preview.prefab") != null);
+                Plant(3);
+                generate.Invoke(null, new object[] { name, resDir, bodyPath, atlas, Vector3.zero, new System.Collections.Generic.List<Mesh> { Tri(12) } });
+                var subs = UniversalBaker.LoadPreviewSubstitutes(name);
+                Check("multi-material bake persists exactly its own clones after the sweep", subs.Count == 1 && subs[0].vertexCount == 12);
+            }
         }
         catch (Exception ex) { failed++; log.AppendLine("FAIL " + ex); }
         var args = Environment.GetCommandLineArgs();
