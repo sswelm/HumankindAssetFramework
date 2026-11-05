@@ -22,10 +22,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   on the standalone mono.exe with that collector on did not reproduce it - the embedded runtime is the only witness,
   so the plugin now holds no `ConditionalWeakTable` at all. `WeakKeyed<T>` (Patches/WeakKeyed.cs) is the editor's
   replacement made shared: a list of weak keys under a lock, swept on every touch, matched by reference. The drop watch
-  and the attack gate use it; `Tests/SessionStateTests.cs` refuses any `ConditionalWeakTable` static in the plugin
-  (planted: the test named the attack gate's table before its replacement), WeakKeyed has its own tests (collected keys
+  and the attack gate use it; `Tests/SessionStateTests.cs` refuses weak-table storage in static and instance fields,
+  including generic containers, arrays and property backing fields (the review caught the static-only guard's bypass).
+  Factories run outside the map lock and recheck before publishing one canonical value: re-entry previously inserted
+  duplicate records, and waiting on another thread using the map blocked that thread. WeakKeyed has its own tests (collected keys
   swept, a live key's value kept across collections, the found index tracked across a sweep below it) and the drop
-  watch one (a dropped layer's record goes, a live layer's stays across collections). 2,511 tests.
+  watch one (a dropped layer's record goes, a live layer's stays across collections). GC fixtures keep temporary keys
+  rooted until their initial counts are captured; a collection between dropping those keys and reading the count
+  previously made two tests fail even with correct storage. Five review regressions reproduced before their fixes.
+  The helper also passed a Unity 2021.3.1 embedded-Mono probe with incremental GC, allocation pressure and parallel
+  lookups. 2,515 tests.
 - **THE PLACEMENT STRETCHED EVERY CONNECTED BONE CHAIN - THE MECH'S LEGS HUNG IN THE AIR (2026-11-03).** The light
   assault mech re-baked on the FBX route with its legs apart from its body, in the Lab's playing clip and in the rest
   pose. Not the preview: the rest skeleton rig_anim.py writes differs from the July bake's - bone heads moved by

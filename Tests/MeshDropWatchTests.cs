@@ -106,14 +106,20 @@ public class MeshDropWatchTests
     // and a live layer keeps its own across collections (the 2026-11-05 crash was the weak table returning a COLLECTED
     // record for a live layer; the replacement never hands out anything but what it holds).
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    static void DropOnATemporaryLayer() { var gone = new Layer(); Drop(gone, Source("temporary")); }
+    static int CountWithATemporaryLayer()
+    {
+        var gone = new Layer(); Drop(gone, Source("temporary"));
+        GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+        int count = MeshDropWatch.LiveLayers;
+        GC.KeepAlive(gone); // capture the count before this helper releases the layer
+        return count;
+    }
     [Fact]
     public void A_collected_layer_is_swept_and_a_live_one_keeps_its_record_across_collections()
     {
         GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();   // earlier tests' layers are gone before the count
         var live = new Layer(); Drop(live, Source("kept"));
-        DropOnATemporaryLayer();
-        int withBoth = MeshDropWatch.LiveLayers;
+        int withBoth = CountWithATemporaryLayer();
         GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
         var pending = MeshDropWatch.Pending(live);
         Assert.Single(pending); Assert.Equal("kept", pending[0].Asset);

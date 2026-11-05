@@ -17,12 +17,14 @@ namespace HumankindAssetFramework
     //
     // The replacement is the editor's: a plain list under a lock, swept of dead keys on every touch. The key counts
     // here are tiny (GPU content layers, attack state machines), so a linear scan is nothing. A key is matched by
-    // reference; a value lives exactly as long as its key is alive and nobody called Remove.
+    // reference; dead keys release their values on the next touch. Values must not retain their own keys: this is
+    // weak-key storage with strong values, not an ephemeron map. Both current value types contain no key references.
     internal sealed class WeakKeyed<TValue> where TValue : class
     {
         readonly List<KeyValuePair<WeakReference, TValue>> entries = new List<KeyValuePair<WeakReference, TValue>>();
 
-        // The value for this key, made by `create` on first sight. Dead keys are swept on the way.
+        // The value for this key, made by `create` on first sight. Concurrent/reentrant factories may make candidates;
+        // one canonical value is published. Never run caller code while holding the map lock.
         public TValue GetValue(object key, Func<object, TValue> create)
         {
             if (key == null) throw new ArgumentNullException(nameof(key));
@@ -30,7 +32,12 @@ namespace HumankindAssetFramework
             {
                 int found = Sweep(key);
                 if (found >= 0) return entries[found].Value;
-                var value = create(key);
+            }
+            var value = create(key);
+            lock (entries)
+            {
+                int found = Sweep(key);
+                if (found >= 0) return entries[found].Value;
                 entries.Add(new KeyValuePair<WeakReference, TValue>(new WeakReference(key), value));
                 return value;
             }

@@ -642,7 +642,9 @@ its frame read once per fuse; the Saleg's 22-group fuse 148.7 s -> 37.0 s in Uni
   tests passed and a Unity BATCH run of the same probe and fuse passed too (one parse, then quit, before any collection).
   Fixed by a weak list (`GlbDisconnectedParts.CountsOf`). The game followed on 2026-11-05: the drop watch's table returned a
   collected record while a 180-turn save loaded (4,600 casts, then a native crash reading it); the plugin's tables are
-  `WeakKeyed<T>` now and `SessionStateTests` refuses any `ConditionalWeakTable` static. The lesson is wider than the table: Mono-only failures that need a
+  `WeakKeyed<T>` now and `SessionStateTests` refuses weak-table storage in static/instance fields and generic containers.
+  Values in this replacement must not retain their own weak keys; factories run outside its lock and publish one
+  canonical value even after re-entry. The lesson is wider than the table: Mono-only failures that need a
   collection or a second call will not show in a batch harness that does one thing and quits. Wanted: a Unity-Mono leg
   for the Workshop in a gate drill (as the native kernels drill has for the probe), running a probe, a fuse and a second
   probe in one editor session with a forced `GC.Collect()` between them. Left on the fuse, by
