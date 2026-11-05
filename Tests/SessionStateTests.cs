@@ -12,6 +12,25 @@ namespace HumankindAssetFramework.Tests
     {
         static readonly Assembly Plugin = typeof(SessionState).Assembly;
 
+        // ---- NO ConditionalWeakTable IN THE PLUGIN (2026-11-05) ----
+        // Unity's Mono hands a collected ephemeron value back out of ConditionalWeakTable ("Specified cast is not valid"
+        // from inside TryGetValue): the editor's probes on 2026-10-27, then the game on 2026-11-05 - the drop watch logged
+        // it 4,600 times while a 180-turn save loaded and crashed natively reading the freed record. Weakly keyed state
+        // uses WeakKeyed<T> (a swept list under a lock). This holds the line for every static in the plugin, whatever
+        // lifetime attribute it declares.
+        [Fact]
+        public void No_static_in_the_plugin_is_a_ConditionalWeakTable()
+        {
+            var offenders = new List<string>();
+            foreach (var t in Plugin.GetTypes())
+                foreach (var f in t.GetFields(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+                    if (SessionState.IsWeakTable(f.FieldType))
+                        offenders.Add(SessionState.Describe(f));
+            Assert.True(offenders.Count == 0,
+                "ConditionalWeakTable statics in the plugin - Unity's Mono returns collected values from them (the 2026-11-05 game crash); " +
+                "use WeakKeyed<T> (Patches/WeakKeyed.cs):\n  " + string.Join("\n  ", offenders));
+        }
+
         // ---- THE FENCE'S SHAPE (2026-08-22 review) ----
         // Membership used to be "the type happens to have a public parameterless Clear()", which on net471 excludes
         // ConcurrentQueue<T>, ConcurrentBag<T>, arrays and ConditionalWeakTable — and `fireGuidQueue`, a sim-thread

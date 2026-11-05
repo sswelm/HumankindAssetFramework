@@ -640,7 +640,9 @@ its frame read once per fuse; the Saleg's 22-group fuse 148.7 s -> 37.0 s in Uni
   `ConditionalWeakTable`; Unity's Mono throws `InvalidCastException` from inside its `TryGetValue` once the collector has
   run over the table, so every Probe and Fuse in the editor failed with "Specified cast is not valid" - while 2,184 .NET
   tests passed and a Unity BATCH run of the same probe and fuse passed too (one parse, then quit, before any collection).
-  Fixed by a weak list (`GlbDisconnectedParts.CountsOf`). The lesson is wider than the table: Mono-only failures that need a
+  Fixed by a weak list (`GlbDisconnectedParts.CountsOf`). The game followed on 2026-11-05: the drop watch's table returned a
+  collected record while a 180-turn save loaded (4,600 casts, then a native crash reading it); the plugin's tables are
+  `WeakKeyed<T>` now and `SessionStateTests` refuses any `ConditionalWeakTable` static. The lesson is wider than the table: Mono-only failures that need a
   collection or a second call will not show in a batch harness that does one thing and quits. Wanted: a Unity-Mono leg
   for the Workshop in a gate drill (as the native kernels drill has for the probe), running a probe, a fuse and a second
   probe in one editor session with a forced `GC.Collect()` between them. Left on the fuse, by
@@ -1004,8 +1006,8 @@ skipped. Ranked by consequence within each group.
   once and sets `entry.groundApplied`; the prefix at `:1351-1357` then returns `false` (suppressing the game's own
   `ApplyGroundMaterialDefinition`) for every district with that name. A second instance of the same district — a
   second city building the same wonder-class district, or the same scoped district twice — never receives its ground
-  paint AND has the game's apply suppressed. Fix: key the latch on the district object (a `ConditionalWeakTable`), not
-  the entry.
+  paint AND has the game's apply suppressed. Fix: key the latch on the district object (a `WeakKeyed<T>`, never a
+  `ConditionalWeakTable` - the 2026-11-05 game crash), not the entry.
 - **`meshPersistLogged` says "diagnostic log dedup" but gates the strategic-zoom mesh work once per process.**
   `Scoped.cs:1128` `[ProcessLived("diagnostic once-per-name log dedup")]`; `:1133` `if (!meshPersistLogged.Add(name))
   return;` sits *before* the work in `KeepDistrictMeshAtStrategicZoom`. A second session (new game, same process)

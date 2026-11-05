@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.CompilerServices;
 
 namespace HumankindAssetFramework
 {
@@ -25,8 +24,11 @@ namespace HumankindAssetFramework
             internal WeakReference Buffer;
             internal readonly Dictionary<string, Drop> Entries = new Dictionary<string, Drop>();
         }
+        // NOT a ConditionalWeakTable: Unity's Mono returned a collected record from one here on 2026-11-05 (4,600 casts, then
+        // a native crash in the loop below) - see WeakKeyed.cs.
         [ProcessLived("weak layer keys, with refusal records scoped to the current mesh-buffer generation")]
-        static readonly ConditionalWeakTable<object, State> states = new ConditionalWeakTable<object, State>();
+        static readonly WeakKeyed<State> states = new WeakKeyed<State>();
+        internal static int LiveLayers => states.Count;
 
         static int Number(object o) => o is int n ? n : -1;
         static object Member(object o, string name) => UniversalInject.GetMember(o, name);

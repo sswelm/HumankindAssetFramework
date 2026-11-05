@@ -101,4 +101,23 @@ public class MeshDropWatchTests
         budget.Dropped = 0; budget.CapacityDrops = 0;
         Assert.Null(UniversalInject.BudgetAlarm(budget));
     }
+
+    // The records are keyed on the layer, weakly: a layer the game dropped takes its record with it on the next touch,
+    // and a live layer keeps its own across collections (the 2026-11-05 crash was the weak table returning a COLLECTED
+    // record for a live layer; the replacement never hands out anything but what it holds).
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    static void DropOnATemporaryLayer() { var gone = new Layer(); Drop(gone, Source("temporary")); }
+    [Fact]
+    public void A_collected_layer_is_swept_and_a_live_one_keeps_its_record_across_collections()
+    {
+        GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();   // earlier tests' layers are gone before the count
+        var live = new Layer(); Drop(live, Source("kept"));
+        DropOnATemporaryLayer();
+        int withBoth = MeshDropWatch.LiveLayers;
+        GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+        var pending = MeshDropWatch.Pending(live);
+        Assert.Single(pending); Assert.Equal("kept", pending[0].Asset);
+        Assert.Equal(withBoth - 1, MeshDropWatch.LiveLayers);
+        GC.KeepAlive(live);
+    }
 }
