@@ -31,7 +31,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   rooted until their initial counts are captured; a collection between dropping those keys and reading the count
   previously made two tests fail even with correct storage. Five review regressions reproduced before their fixes.
   The helper also passed a Unity 2021.3.1 embedded-Mono probe with incremental GC, allocation pressure and parallel
-  lookups. 2,515 tests.
+  lookups. 2,515 tests. The two first WeakKeyed tests had the same hole the review closed elsewhere (their keys died at
+  their last use, so a collection from a parallel test class swept them before `Count`): on the merged master they failed
+  4 runs in 10, with the keys held to the end 0 in 10.
 - **THE PLACEMENT STRETCHED EVERY CONNECTED BONE CHAIN - THE MECH'S LEGS HUNG IN THE AIR (2026-11-03).** The light
   assault mech re-baked on the FBX route with its legs apart from its body, in the Lab's playing clip and in the rest
   pose. Not the preview: the rest skeleton rig_anim.py writes differs from the July bake's - bone heads moved by
