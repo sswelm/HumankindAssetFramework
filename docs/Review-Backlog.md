@@ -250,6 +250,9 @@ writer: nothing stale is reused). THE DEFAULT FLIPS LAST: the shipped Blender ro
 rig opt-in per recipe, until the acceptance gate passes - the Bake Tests row in Unity holding, for all 23 GLB-source
 animated entries baked both ways, the mesh, the skeleton, the clips, the placement, and an in-game check of each
 model playing its roles; the FBX-only light assault mech also passes a Blender-fallback bake and in-game check
+(DONE 2026-11-06: the mech's Factory bake on the FBX route after PR #250, with 'Keep extracted texture' ticked, stands,
+walks and wears its skin in game - the user's check; Player.log: own skeleton and four clip collections injected, no
+error or warning line, smoke test PASS on 43 models)
 (PR #151's slice reports different pose bytes and unverified playback: that is the bar, not a hope); only then
 the GLB rig becomes the default (the review of PR #157), (h) the Bake Tests row - the gate above. The
 localNodeAnim transplant (no registry entry) is LEFT by name until last: its FBX round trip is Blender's composition

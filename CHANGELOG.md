@@ -10,6 +10,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE MECH'S POST-FIX BAKE IS ACCEPTED IN GAME (2026-11-06).** The light assault mech, re-baked through the Factory on
+  the FBX route after the connected-bone placement fix (PR #250) with 'Keep extracted texture' ticked, stands, walks and
+  wears its green skin in game - the user's check, the first in-game look at a post-July bake of the mech. Player.log:
+  its own skeleton and four clip collections (base, move, attack, idle) injected, no error or warning line, the smoke
+  test PASS on 43 models; the frame cost 530 µs per frame at 30 fps. Recorded in `docs/Review-Backlog.md` on the rig
+  route's acceptance gate: the mech's leg of it is done, the 23 glTF entries' in-game check on the C# route remains.
+
 - **THE RIG DRILL MEASURES THE DIRECT FBX IMPORT AGAINST ITS ROUND TRIP (2026-11-06).** Since 11-03 a skinned or animated
   `.fbx` stays on the FBX route by name because the drill's Blender side runs on the glTF round trip, not on the `.fbx`
   the shipped route imports; the row that would show the two equal, or not, for a file was owed. Step 6g of
@@ -154,8 +161,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   (`ChannelCount`, three per bone) instead of the sampler's output - the first run compared 93 against Blender's 96 on
   the mech with the channels themselves right; and a lone key past frame 0 keeps its right handle at the key's frame
   (`fcurve.update()`'s sort_time_fcurve pulls a handle on the wrong side of the key to it; every earlier lone key sat at
-  frame 0, where the zeros already satisfy it) - stage 1 now does the same. Not yet in-game: the mech's bake through the
-  Factory on the GLB route is the next acceptance.
+  frame 0, where the zeros already satisfy it) - stage 1 now does the same. The mech itself stays on the FBX route (a
+  skinned .fbx is left by name since 2026-11-03), and its Factory bake on that route after PR #250 was accepted in game
+  on 2026-11-06 (below); the GLB-route acceptance owed here is the 23 glTF entries' in-game check, not the mech's.
   Review fixes the transform fold for mirrored meshes: triangle winding and corner data (UVs, normals, colors) flip
   together, using the vehicle import's shared helper. `fx_armobj_mirrored_roles` adds animated rotation/negative scale,
   role clips, a second UV layer and colors; it fails before the fix and matches Blender afterwards. The in-process
