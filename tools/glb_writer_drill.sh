@@ -10,13 +10,18 @@
 #   2. Blender imports the WRITTEN sample and every value must equal what the C# side read from the ORIGINAL - the
 #      written file means to Blender what the original meant. FULL=1 for every file.
 # Prerequisites and SKIP rules as glb_reader_drill.sh.
+# THE WRITER RUNS ON UNITY'S 64-BIT MONO (2026-11-06): the stand-alone mono.exe is a 32-bit process; writing the 121 MB
+# salegs_revenge_split_fused.glb in it ran out of memory ("Insufficient memory to continue the execution of the program",
+# 116 of 117 written) while the parity gate's thirteen drills ran at once, and passed alone minutes later. The C# side now
+# runs through tools/deploy-drill/MonoHost.cs, the editor's own 64-bit runtime (as the FBX scene drill does), where a whole
+# model twice over and the file's bytes fit; the record-tree bits are the same bits.
 set -u
 UNITY="${UNITY:-C:/Program Files/Unity 2021.3.1f1/Editor/Data}"
 PROJECT="${HAF_UNITY_PROJECT:-C:/Repo/ENCReload}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WROOT="$(cygpath -m "$ROOT" 2>/dev/null || echo "$ROOT")"
-CSC="$UNITY/DotNetSdkRoslyn/csc.dll"; MONO="$UNITY/MonoBleedingEdge/bin/mono.exe"; API="$UNITY/MonoBleedingEdge/lib/mono/4.7.1-api"
-for f in "$CSC" "$MONO" "$API/mscorlib.dll"; do
+CSC="$UNITY/DotNetSdkRoslyn/csc.dll"; MONOLIB="$UNITY/MonoBleedingEdge/EmbedRuntime/mono-2.0-bdwgc.dll"; API="$UNITY/MonoBleedingEdge/lib/mono/4.7.1-api"
+for f in "$CSC" "$MONOLIB" "$API/mscorlib.dll"; do
   [ -f "$f" ] || { echo "FAIL — Unity prerequisite not found: $f   (set UNITY=<Unity 2021.3 .../Editor/Data>; GLB writer NOT drilled)"; exit 2; }
 done
 command -v dotnet >/dev/null 2>&1 || { echo "FAIL — dotnet not on PATH (GLB writer NOT drilled)"; exit 2; }
@@ -38,6 +43,13 @@ OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -out:"$WTMP/write.exe" "${REFS[@
 [ "$rc" -eq 0 ] && [ -s "$TMPD/write.exe" ] || { echo "$OUT" | grep -E "error" | head -20; echo "FAIL — the GLB writer drill did not compile (csc rc=$rc)"; exit 1; }
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -out:"$WTMP/read.exe" "${REFS[@]}" "$WROOT/tools/glb-reader-drill/Drill.cs" "${SRC[@]}" 2>&1); rc=$?
 [ "$rc" -eq 0 ] && [ -s "$TMPD/read.exe" ] || { echo "$OUT" | grep -E "error" | head -20; echo "FAIL — the GLB reader drill did not compile (csc rc=$rc)"; exit 1; }
+# the 64-bit host (see the header): a .NET Framework bootstrap that enters Unity's embedded Mono; MonoPosixHelper.dll
+# (Mono's zlib) beside it, resolved by the process's own directory as in tools/fbx_drill.sh
+OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -platform:x64 -out:"$WTMP/mono-host.exe" \
+  -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" "$WROOT/tools/deploy-drill/MonoHost.cs" 2>&1); rc=$?
+if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/mono-host.exe" ]; then echo "$OUT" | grep -E "error" | head -10; echo "FAIL — the 64-bit Mono bootstrap did not compile (csc rc=$rc)"; exit 1; fi
+cp "$UNITY/MonoBleedingEdge/EmbedRuntime/MonoPosixHelper.dll" "$TMPD/" || { echo "FAIL — MonoPosixHelper.dll not found under $UNITY/MonoBleedingEdge/EmbedRuntime"; exit 2; }
+HOST=("$WTMP/mono-host.exe" "$UNITY/MonoBleedingEdge")
 
 FILES=()
 if [ -n "$PACK" ]; then
@@ -76,7 +88,8 @@ fi
 # two registry entries may share a file; the written copies are keyed by basename, so write each file once
 mapfile -t UNIQUE < <(printf '%s\n' "${FILES[@]}" | awk '!seen[tolower($0)]++')
 # a source over 200 MB is read by the other drills but not ROUND-TRIPPED here: two whole models and the file's bytes at once
-# run Unity's Mono out of large-object space (the 398 MB Workshop fuse, three quarters of it meshes no node uses). Named, not hidden.
+# ran Unity's 32-bit Mono out of large-object space (the 398 MB Workshop fuse, three quarters of it meshes no node uses);
+# on the 64-bit host the bound is time, and it stays (no source is over 200 MB today). Named, not hidden.
 KEPT=(); N_TOO_BIG=0
 for f in "${UNIQUE[@]}"; do if [ "$(stat -c %s "$f" 2>/dev/null || echo 0)" -gt 200000000 ]; then N_TOO_BIG=$((N_TOO_BIG + 1)); echo "NOTE — not written in this drill (over 200 MB): $f"; else KEPT+=("$f"); fi; done
 UNIQUE=("${KEPT[@]}")
@@ -91,7 +104,7 @@ echo "sources: $(echo "$COUT" | grep '^CARRIED' | cut -f2-)"
 
 # ---- write
 WRITTEN="$WTMP/written"
-WOUT=$("$MONO" "$TMPD/write.exe" "$WRITTEN" "${UNIQUE[@]}" 2>&1); rc=$?
+WOUT=$("${HOST[@]}" "$WTMP/write.exe" "$WRITTEN" "${UNIQUE[@]}" 2>&1); rc=$?
 WOUT=$(printf '%s' "$WOUT" | LC_ALL=C sed 's/\xEF\xBB\xBF//g')
 echo "$WOUT" | grep -E "^FAIL|^DIFF"
 n_wrote=$(echo "$WOUT" | grep -c "^WROTE")
@@ -102,16 +115,16 @@ for l in "${SAMPLES_EXPECT[@]}"; do
   IFS=$'\t' read -r sp st sx <<< "$l"
   case "$st" in
     guard)  o=$(python "$ROOT/tools/glb-reader-drill/carried_paths.py" "$sp" 2>&1); erc=$?;;
-    writer) o=$("$MONO" "$TMPD/write.exe" "$WTMP/refused" "$sp" 2>&1); erc=$?;;
+    writer) o=$("${HOST[@]}" "$WTMP/write.exe" "$WTMP/refused" "$sp" 2>&1); erc=$?;;
     *) continue;;
   esac
   if [ "$erc" -ne 0 ] && printf '%s' "$o" | grep -qF -- "$sx"; then echo "PASS refused: $(basename "$sp") - the $st says '$sx'"; else echo "FAIL — the $st was to refuse $(basename "$sp") saying '$sx' (rc=$erc)"; exit 1; fi
 done
 
 # ---- 1. the reader's view of the originals and of the written copies must agree on every value
-ORIG=$("$MONO" "$TMPD/read.exe" "${UNIQUE[@]}" 2>&1); ORIG=$(printf '%s' "$ORIG" | LC_ALL=C sed 's/\xEF\xBB\xBF//g')
+ORIG=$("${HOST[@]}" "$WTMP/read.exe" "${UNIQUE[@]}" 2>&1); ORIG=$(printf '%s' "$ORIG" | LC_ALL=C sed 's/\xEF\xBB\xBF//g')
 mapfile -t WFILES < <(ls "$WRITTEN"/*.glb)
-BACK=$("$MONO" "$TMPD/read.exe" "${WFILES[@]}" 2>&1); rc=$?; BACK=$(printf '%s' "$BACK" | LC_ALL=C sed 's/\xEF\xBB\xBF//g')
+BACK=$("${HOST[@]}" "$WTMP/read.exe" "${WFILES[@]}" 2>&1); rc=$?; BACK=$(printf '%s' "$BACK" | LC_ALL=C sed 's/\xEF\xBB\xBF//g')
 echo "$BACK" | grep -E "^FAIL"
 [ "$rc" -eq 0 ] || { echo "FAIL — GLB writer drill: a written file did not read back"; exit 1; }
 printf '%s\n' "$ORIG" > "$TMPD/orig.txt"; printf '%s\n' "$BACK" > "$TMPD/back.txt"

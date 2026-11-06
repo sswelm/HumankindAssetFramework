@@ -810,8 +810,10 @@ skipped. Ranked by consequence within each group.
 
 ### Verification machinery (fix first — a green gate that cannot see the shape is worse than no gate)
 
-- **The GLB writer drill runs out of memory under the parallel parity gate (seen 2026-11-06).** `tools/glb_writer_drill.sh`
-  writes every registry GLB on Unity's `MonoBleedingEdge/bin/mono.exe`, a 32-bit process; writing the 121 MB
+- ~~**The GLB writer drill runs out of memory under the parallel parity gate (seen 2026-11-06).**~~ — **FIXED 2026-11-06**: the
+  drill's C# side runs on the 64-bit embedded Mono host (`tools/deploy-drill/MonoHost.cs`); 117 files written and read
+  back equal, the two largest byte-identical to the 32-bit runtime's in the same wall time (`docs/Testing.md`). Was:
+  `tools/glb_writer_drill.sh` wrote every registry GLB on Unity's `MonoBleedingEdge/bin/mono.exe`, a 32-bit process; writing the 121 MB
   `salegs_revenge_split_fused.glb` failed with "Insufficient memory to continue the execution of the program" (116 of
   117 written) while the gate's thirteen parity drills ran at once, and passed 117 of 117 run alone minutes later. The
   gate has no parallelism knob. Wanted: the writer drill (and any drill that holds a whole fused ship in memory) on the

@@ -3216,7 +3216,12 @@ material field, texture, sampler, image byte, skin matrix, animation key, the as
 first difference is named: `DIFF <file> <field>`), writes the read-back model again and compares the bytes as they
 stream (deterministic on real files), then reads the written files with the reader drill (every value must equal the
 original's) and has Blender import the written sample (every value must equal what the C# side read from the
-original; `FULL=1` for all). Full run: 32 of 32 both ways, 726 MB written to disk in 0.8 s. It found that material
+original; `FULL=1` for all). Full run: 32 of 32 both ways, 726 MB written to disk in 0.8 s. Since 2026-11-06 the C# side runs
+on Unity's 64-bit embedded Mono through `tools/deploy-drill/MonoHost.cs` (as the FBX scene drill does), not the stand-alone
+32-bit `mono.exe`: under the parity gate's thirteen parallel drills the 32-bit process ran out of memory writing the 121 MB
+`salegs_revenge_split_fused.glb` (116 of 117 written) and passed alone minutes later. Measured on the move: 117 files,
+1,419 MB, written and read back equal in 3.5 s; the two largest sources (160 MB and 121 MB) written by both runtimes give
+the same bytes in the same wall time (4.3 s each for the pair); the 200 MB cap stays as a time bound. It found that material
 extension payloads (`KHR_materials_specular`, clearcoat) carry texture references Blender needs — six files lost
 images until the model carried a material's `extensions` verbatim; the field compare then found 12 files whose
 sampler settings (filters, wrap) came back as glTF defaults, and the source check found 6 files whose `asset.extras`
