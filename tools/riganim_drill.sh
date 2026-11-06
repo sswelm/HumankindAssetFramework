@@ -52,6 +52,7 @@ command -v dotnet >/dev/null 2>&1 || { echo "FAIL — dotnet not on PATH (rig_an
 SCRIPT="$ROOT/editor/Tools~/rig_anim.py"
 [ -f "$SCRIPT" ] || { echo "FAIL — rig_anim.py not found at $SCRIPT"; exit 1; }
 python "$ROOT/tools/riganim-drill/test_riganim_jobs.py" || { echo "FAIL — rig_anim job mapping regression checks"; exit 1; }
+python "$ROOT/tools/riganim-drill/test_route_rows.py" || { echo "FAIL — the route comparison's regression checks (step 6g)"; exit 1; }
 
 NEWTONSOFT=""
 for cand in "$WROOT/References/Newtonsoft.Json.dll" "$PROJECT/Assets/Plugins/Json.Net 11.0.1/Newtonsoft.Json.dll"; do
@@ -134,6 +135,10 @@ n = int(sys.argv[3])
 for k in range(n):
     open(os.path.join(sys.argv[2], "shard_%d.txt" % k), "w", encoding="utf-8", newline="\n").write("\n".join(blender_side(j) for j in jobs[k::n]) + "\n")
 PYEOF
+# step 6g (2026-11-06): the same .fbx jobs once more on the .fbx ITSELF - rig_anim.py as the Factory's FBX route runs it -
+# for the route row below (the shards above carry the round trip, which is what the C# side is held to)
+awk -F'\t' '($1 == "JOB") && tolower($3) ~ /\.fbx$/' "$TMPD/jobs.txt" > "$TMPD/shard_direct.txt"
+n_direct=$(grep -c "^JOB	" "$TMPD/shard_direct.txt")
 t0=$(date +%s)
 BPIDS=()
 for ((k = 0; k < JOBS; k++)); do
@@ -141,6 +146,11 @@ for ((k = 0; k < JOBS; k++)); do
   oracle_blender "dump_$k" "$TMPD/blender_raw_$k.txt" --dir "work_$k" --key "$ROOT/tools/riganim-drill/blender_riganim_dump.py" "$SCRIPT" "$WTMP/shard_$k.txt" "$WTMP/work_$k" -- --background --python "$(cygpath -m "$ROOT/tools/riganim-drill/blender_riganim_dump.py")" -- "$(cygpath -m "$SCRIPT")" "$WTMP/shard_$k.txt" "$WTMP/work_$k" &
   BPIDS+=($!)
 done
+if [ "$n_direct" -gt 0 ]; then
+  mkdir -p "$TMPD/work_direct"
+  oracle_blender "dump_direct" "$TMPD/blender_raw_direct.txt" --dir "work_direct" --key "$ROOT/tools/riganim-drill/blender_riganim_dump.py" "$SCRIPT" "$WTMP/shard_direct.txt" "$WTMP/work_direct" -- --background --python "$(cygpath -m "$ROOT/tools/riganim-drill/blender_riganim_dump.py")" -- "$(cygpath -m "$SCRIPT")" "$WTMP/shard_direct.txt" "$WTMP/work_direct" &
+  BPIDS+=($!)
+fi
 brc=0; for pid in "${BPIDS[@]}"; do wait "$pid" || brc=$?; done
 oracle_check
 t1=$(date +%s)
@@ -149,6 +159,11 @@ for ((k = 0; k < JOBS; k++)); do
   tr -d '\r' < "$TMPD/blender_raw_$k.txt" | grep -E "^(JOB|STAGE|LOG|SCENE|OBJ|MESH|VG|BONE|PB|ACT|FC|K|IMG|EXIT|DIES|DONE|FAIL|X|XLOG|XDIES)	" > "$TMPD/dump_$k.txt"
   n_b=$((n_b + $(grep -c "^DONE" "$TMPD/dump_$k.txt")))
 done
+if [ "$n_direct" -gt 0 ]; then
+  tr -d '\r' < "$TMPD/blender_raw_direct.txt" | grep -E "^(JOB|STAGE|LOG|SCENE|OBJ|MESH|VG|BONE|PB|ACT|FC|K|IMG|EXIT|DIES|DONE|FAIL|X|XLOG|XDIES)	" > "$TMPD/dump_direct.txt"
+  n_bd=$(grep -c "^DONE" "$TMPD/dump_direct.txt")
+  [ "$n_bd" -eq "$n_direct" ] || { grep -E "^FAIL|Traceback|Error" "$TMPD/blender_raw_direct.txt" | head -5; echo "FAIL — rig_anim drill: Blender dumped $n_bd of $n_direct .fbx job(s) on the .fbx itself (step 6g)"; exit 1; }
+fi
 if [ "$brc" -ne 0 ] || [ "$n_b" -ne "$n_jobs" ]; then
   cat "$TMPD"/blender_raw_*.txt | grep -E "^FAIL|Traceback|Error" | head -8
   echo "FAIL — rig_anim drill: Blender dumped $n_b of $n_jobs jobs (exit $brc)"; exit 1
@@ -183,6 +198,27 @@ n_s1=$(echo "$S1" | awk '{print $4}'); n_s1eq=$(echo "$S1" | awk '{print $6}'); 
 [ "$n_s1" -eq "$n_jobs" ] && [ $((n_s1eq + n_s1left + n_s3def)) -eq "$n_jobs" ] || { echo "FAIL — rig_anim drill: the stage 1-3 model compared $n_s1 of $n_jobs jobs ($n_s1eq equal, $n_s1left left, $n_s3def deferred)"; exit 1; }
 n_s3eq=$(grep -c "^STAGE3 .*: equal" "$TMPD/s1.txt"); n_s4eq=$(grep -c "^STAGE4 .*: equal" "$TMPD/s1.txt")
 n_s2eq=$(grep -c "^STAGE2 .*: equal" "$TMPD/s1.txt")
+# STEP 6g, THE DIRECT IMPORT AGAINST THE ROUND TRIP (2026-11-06): every .fbx job's stage 4 and export on the .fbx itself
+# (the FBX route's own run of rig_anim.py) against the same on the round trip the rows above are held to
+# (tools/riganim-drill/route_rows.py). A job the C# route leaves to the FBX route by name (the INPROC lines) may differ -
+# its ROUTE lines are the measurement of why the leave stands; one it TAKES must be equal, or the port equals a scene the
+# shipped route never makes. An equal job that is still left is a NOTE: the leave could be lifted for that file.
+n_route=0; n_route_eq=0; n_route_diff=0; n_route_note=0
+if [ "$n_direct" -gt 0 ]; then
+  LEFT_KEYS=()
+  while IFS= read -r k; do [ -n "$k" ] && LEFT_KEYS+=(--left "$k"); done < <(grep -E "^INPROC .*: left to the FBX route by name" "$TMPD/s1.txt" | sed -E 's/^INPROC ([^:]+):.*/\1/')
+  python "$ROOT/tools/riganim-drill/route_rows.py" "${LEFT_KEYS[@]}" "$WTMP/dump_direct.txt" "${DUMPS[@]}" > "$TMPD/route_raw.txt" 2>&1; routerc=$?
+  tr -d '\r' < "$TMPD/route_raw.txt" > "$TMPD/route.txt"
+  grep -E "^ROUTE	[^	]+	(EQUAL|DIFFERS|FAIL|NOTE|ERROR)	|^ROUTE	ERROR	|^ROUTES	" "$TMPD/route.txt" | sed 's/\t/ /g'
+  [ "$routerc" -eq 0 ] || { echo "FAIL — rig_anim drill, step 6g: an .fbx job the C# route takes differs between the direct import and the round trip, or the route comparison could not run (rc=$routerc; the ROUTE lines above)"; exit 1; }
+  RS=$(grep -E "^ROUTES	" "$TMPD/route.txt" | tail -1)
+  n_route=$(echo "$RS" | awk '{print $3}'); n_route_eq=$(echo "$RS" | awk '{print $5}'); n_route_diff=$(echo "$RS" | awk '{print $7}'); n_route_note=$(echo "$RS" | awk '{print $11}')
+  [ "${n_route:-0}" -eq "$n_direct" ] || { echo "FAIL — rig_anim drill, step 6g: the route comparison covered ${n_route:-0} of $n_direct .fbx job(s)"; exit 1; }
+  # the comparison's own control: the direct dump against itself is EQUAL for every job (a comparator that cannot see equal rows would pass nothing)
+  python "$ROOT/tools/riganim-drill/route_rows.py" "$WTMP/dump_direct.txt" "$WTMP/dump_direct.txt" > "$TMPD/route_self_raw.txt" 2>&1; selfrc=$?
+  n_self=$(tr -d '\r' < "$TMPD/route_self_raw.txt" | grep -cE "^ROUTE	[^	]+	EQUAL	")
+  [ "$selfrc" -eq 0 ] && [ "$n_self" -eq "$n_direct" ] || { echo "FAIL — rig_anim drill, step 6g: the route comparison does not hold a dump equal to itself ($n_self of $n_direct, rc=$selfrc)"; exit 1; }
+fi
 # Negative guards on the REAL dump: a missing or inconsistent record must never pass as evidence.
 python "$ROOT/tools/riganim-drill/missing_riganim.py" "$WTMP/missing" "$WTMP/jobs.txt" "${DUMPS[@]}" > "$TMPD/tampers_raw.txt" || { echo "FAIL — could not construct the damaged dumps"; exit 1; }
 tr -d '\r' < "$TMPD/tampers_raw.txt" > "$TMPD/tampers.txt"
@@ -256,5 +292,5 @@ done < "$TMPD/tampers.txt"
 [ "$n_s5t" -ge 8 ] || { echo "FAIL — rig_anim drill: only $n_s5t export tampers were run (missing_riganim.py writes S5_* copies)"; exit 1; }
 echo "PASS — rig_anim drill refuses $n_t kinds of damaged evidence (a missing, doubled, short or misplaced row of every kind; an early stop; an unknown job or row kind; $n_s1t changed values of stage 1 rows, $n_s2t of stage 2 rows, $n_s3t of stage 3 rows, $n_s4t of stage 4 rows and $n_s5t of the GLB export's rows, each caught by the model of its stage)"
 n_size=$(grep -c "^LEFT	.*	over .* MB" "$TMPD/jobs.txt")
-RESULT="PASS — rig_anim drill, step (a) the stage dump: $n_reg of $((n_reg + n_left)) animated recipes and $n_fx fixture jobs run by Blender through rig_anim.py cut at its four stages (Blender took $((t1 - t0)) s), $n_full through all four, $n_stop stopped by the script's own exit ($n_exit as their EXIT: key expects, the rest LEFT: jobs); $n_stages scene dumps with $n_logs RIGANIM lines, $n_bones bones and $n_fc fcurves on record, every block complete and consistent; $n_left recipe(s) left: $n_size over the size limit (FULL=1 takes them), $((n_left - n_size)) by name (Blender-only source until a native reader). Steps (b) to (e), all four stages in C# (editor/BlenderRigAnim.cs: the arguments, the import, the material-less drop, the armature and its exit, the contract marker, the object-animation clear; the bone-parent -> skin bind with its rest-world pin, the wrapper flatten; the bone cap, the clip resolution and slicing, the action prune, the bone filter, the rest fold and rebake, the legacy translation rules, the strip, the frame range; the albedo, the join, the material slots, the decimate, the rebind, the root collapse, the rename, the sockets, the rotation and scale fold, the placement): $n_s1eq of $n_jobs jobs equal to Blender row for row at every stage ($n_s1rows rows of objects, meshes, weights, bones, pose, actions and fcurves, as bits and hashes, $n_s2eq stage 2, $n_s3eq stage 3 and $n_s4eq stage 4 scenes among them; $((t3 - t2)) s), $n_s1left left by name, $n_s3def deferred by name. The albedo PNG is compared by its dimensions only (its bytes and pixels are Blender's encoder's); the weld of a one-material, one-bone mesh is left by name. Step (f), the GLB rig route (editor/BlenderRigExport.cs: the stage 4 scene as Blender's glTF exporter writes it, through the deploy port's exporter model and BlenderGlbWriter): $n_exp jobs' files equal to Blender's - the scene, every node, the skins and their inverse bind matrices, the primitives with their bytes, the materials, textures, samplers and images, the animations' channels sample for sample ($n_exprows rows), $n_glb of them byte-identical GLBs (a JPEG albedo's PNG is Blender's encoder's: its file is compared without the bytes); $n_expleft left at the export by name (each limit is named in the EXPORT lines above). Step (g), the Factory's wrapper (editor/BlenderRigAnimInProcess.cs): on $n_inproc of those jobs it wrote the same file and named the primary's and each role's clip; ${n_inprocleft:-0} skinned or animated .fbx job(s) it leaves to the FBX route by name (the reader's round trip the rows above are held to is not rig_anim.py's direct import; the INPROC lines)"
+RESULT="PASS — rig_anim drill, step (a) the stage dump: $n_reg of $((n_reg + n_left)) animated recipes and $n_fx fixture jobs run by Blender through rig_anim.py cut at its four stages (Blender took $((t1 - t0)) s), $n_full through all four, $n_stop stopped by the script's own exit ($n_exit as their EXIT: key expects, the rest LEFT: jobs); $n_stages scene dumps with $n_logs RIGANIM lines, $n_bones bones and $n_fc fcurves on record, every block complete and consistent; $n_left recipe(s) left: $n_size over the size limit (FULL=1 takes them), $((n_left - n_size)) by name (Blender-only source until a native reader). Steps (b) to (e), all four stages in C# (editor/BlenderRigAnim.cs: the arguments, the import, the material-less drop, the armature and its exit, the contract marker, the object-animation clear; the bone-parent -> skin bind with its rest-world pin, the wrapper flatten; the bone cap, the clip resolution and slicing, the action prune, the bone filter, the rest fold and rebake, the legacy translation rules, the strip, the frame range; the albedo, the join, the material slots, the decimate, the rebind, the root collapse, the rename, the sockets, the rotation and scale fold, the placement): $n_s1eq of $n_jobs jobs equal to Blender row for row at every stage ($n_s1rows rows of objects, meshes, weights, bones, pose, actions and fcurves, as bits and hashes, $n_s2eq stage 2, $n_s3eq stage 3 and $n_s4eq stage 4 scenes among them; $((t3 - t2)) s), $n_s1left left by name, $n_s3def deferred by name. The albedo PNG is compared by its dimensions only (its bytes and pixels are Blender's encoder's); the weld of a one-material, one-bone mesh is left by name. Step (f), the GLB rig route (editor/BlenderRigExport.cs: the stage 4 scene as Blender's glTF exporter writes it, through the deploy port's exporter model and BlenderGlbWriter): $n_exp jobs' files equal to Blender's - the scene, every node, the skins and their inverse bind matrices, the primitives with their bytes, the materials, textures, samplers and images, the animations' channels sample for sample ($n_exprows rows), $n_glb of them byte-identical GLBs (a JPEG albedo's PNG is Blender's encoder's: its file is compared without the bytes); $n_expleft left at the export by name (each limit is named in the EXPORT lines above). Step (g), the Factory's wrapper (editor/BlenderRigAnimInProcess.cs): on $n_inproc of those jobs it wrote the same file and named the primary's and each role's clip; ${n_inprocleft:-0} skinned or animated .fbx job(s) it leaves to the FBX route by name (the reader's round trip the rows above are held to is not rig_anim.py's direct import; the INPROC lines). Step 6g, the direct import against the round trip (tools/riganim-drill/route_rows.py): $n_route .fbx job(s) run by Blender on the .fbx itself as the FBX route runs it, stage 4 and the export against the round trip's - $n_route_eq equal, $n_route_diff differ and are left to the FBX route by name (the ROUTE lines measure the gap), $n_route_note equal yet left (the leave could be lifted); the comparison holds a dump equal to itself"
 echo "$RESULT"

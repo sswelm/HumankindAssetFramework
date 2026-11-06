@@ -10,6 +10,18 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE RIG DRILL MEASURES THE DIRECT FBX IMPORT AGAINST ITS ROUND TRIP (2026-11-06).** Since 11-03 a skinned or animated
+  `.fbx` stays on the FBX route by name because the drill's Blender side runs on the glTF round trip, not on the `.fbx`
+  the shipped route imports; the row that would show the two equal, or not, for a file was owed. Step 6g of
+  `tools/riganim_drill.sh` now runs Blender's stage dump once more on every `.fbx` job with the `.fbx` itself as the
+  input and `tools/riganim-drill/route_rows.py` holds stage 4 and the export of the two runs against each other per row
+  kind: a job the in-process wrapper leaves by name may differ (its ROUTE lines are the measurement), an equal one left
+  is a NOTE that the leave could be lifted, and a job the wrapper takes must be equal or the drill fails; the direct
+  dump against itself must be equal (the comparison's control); seven regression checks on synthetic dumps cover every
+  verdict, the error exits and a doubled row. The mech's gap, measured: 3,863 rows of stage 4 and the export differ -
+  the joined mesh itself (9,967 vertices directly against 32,388 through the round trip's split vertices), every bone's
+  rest, the fcurves, and the exported channels (STEP with 2 keys against LINEAR with 160) - so the leave stands, with
+  numbers. The parity stamp refreshed with the drill run.
 - **A SINGLE-MATERIAL ANIMATED RE-BAKE LEFT THE PREVIOUS BAKE'S PREVIEW CLONES BEHIND (2026-11-05).** The animated
   bake persists one atlas-remapped clone per skinned renderer (`<name>_PreviewMesh.asset`, `_PreviewMesh1`, ...) and
   both preview loaders - the Factory's rest view and the Animation Lab's playing clip - read the whole set and

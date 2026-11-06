@@ -60,7 +60,10 @@ public static class HafModelLoader
     // port equals the round trip, not the FBX route. On the mech the two scenes differ (9 against 8 material slots, the missing
     // texture's placeholder image dropped, placement lifted 1.63 against 0.04, the root bone's rest 1.6 against 0.38, the mesh
     // 4.3x its bones): the GLB route baked scattered pieces where the FBX route bakes the mech. A skinned or animated .fbx
-    // stays on the FBX route by name until a drill row holds the direct import and the round trip equal for it.
+    // stays on the FBX route by name until the rig drill's route row (step 6g, tools/riganim-drill/route_rows.py: the
+    // script's stage 4 and export on the .fbx against the same on its round trip) holds the two equal for it - the row
+    // FAILS a job this method takes whose two differ, and NOTES a left job whose two are equal (2026-11-06: the mech
+    // differs in 3,863 rows of stage 4 and the export; a different joined mesh, every bone's rest, the channels' keys).
     internal static string RigImportFallback(string path, HafModel model)
         => IsFbx(path) && (model.Skins.Count > 0 || model.Animations.Count > 0)
             ? FbxRigLeavePrefix + "a skinned or animated FBX (rig_anim.py imports the .fbx directly; the reader's glTF round trip of it is not the same rig - the light assault mech, 2026-11-03)" : null;

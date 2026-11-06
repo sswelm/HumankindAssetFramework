@@ -410,7 +410,17 @@ in-process cache revision bumped so an earlier GLB-route slim of such a file is 
 `.fbx` is read as before. The deploy conversion (`BlenderDeployInProcess`; deploy_convert.py imports an `.fbx` directly
 too) takes the same leave, its cache revision moved with it. The drill keeps comparing the stages and the export of `.fbx` jobs through `HafModelLoader.Read`
 (the reader's own parity with the round trip, which the FBX model drill holds); the Factory does not take that route for a
-rig until a drill row holds the direct import and the round trip equal for the file. Two unit tests hold the limit
+rig until the drill's route row holds the direct import and the round trip equal for the file. That row exists since
+2026-11-06 (step 6g, `tools/riganim-drill/route_rows.py`, seven regression checks in `test_route_rows.py`): Blender runs
+`blender_riganim_dump.py` once more on every `.fbx` job with the `.fbx` itself as the input, and the comparison holds
+the script's stage 4 and export rows on the two inputs against each other as multisets per row kind (LOG rows counted,
+never in the verdict; stages 1-3 counted beside). A job the in-process wrapper leaves to the FBX route by name (its
+INPROC line) may differ - the ROUTE lines are the measurement of why the leave stands - and an equal one is a NOTE
+that the leave could be lifted for that file; a job the wrapper TAKES must be equal, or the drill FAILS. The direct
+dump against itself must be EQUAL for every job (the comparison's own control). The mech, measured 2026-11-06: 3,863
+rows of stage 4 and the export differ (every row kind: a different joined mesh - 9,967 vertices against 32,388, the
+glTF exporter's split vertices -, every bone's rest, the pose bones, the actions' fcurves, and the exported channels:
+STEP interpolation with 2 keys against LINEAR with 160), 5,271 at stages 1-3. Two unit tests hold the limit
 (`HafModelLoaderTests`: the shape rule per extension/skin/animation, and the fixtures: static reads, skinned-animated
 leaves before any stage runs - no file, no RIGANIM line).
 The wrapper verdict is mandatory for a restricted FBX, not an optional acceptable outcome: a native write fails even
