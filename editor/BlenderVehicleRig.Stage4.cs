@@ -19,8 +19,8 @@
 //     Spin/Deploy/Recoil/Furl purged (a line each); every non-armature object's animation data cleared.
 // The original pose keeps channels assigned after the last frame_set; other keyed channels take their curves at that frame. Evaluated
 // mesh bounds retain the pose from frame_set, before any subsequent assignment to the original pose.
-// Named limits: non-finite rowing/Deploy angles, clips longer than 100,000 frames, and the source's recoil-clearance search
-// if an unusual rig actually has Mesh_RecoilArm (the ordinary tube is Mesh_Barrel).
+// Named limits: non-finite rowing/Deploy angles and clips longer than 100,000 frames. The breech clearance (the script's block,
+// fixed 2026-11-07 to measure Mesh_Barrel) is modelled: the lowest static vertex against the barrel deployed and slid back.
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -510,6 +510,7 @@ public static partial class BlenderVehicleRig
 
         // Deploy inserts keys without frame_set: the original trails and gun keep their deployed assignments.
         var deployed = new List<(string bone, float[] q)>();
+        float[] gunWorldQ = null;   // the gun's deploy lift as a WORLD rotation about the trunnion (the script's deployed_world), for the clearance
         if (deployOn)
         {
             var dep = new VehicleActionKeys(s, pool, "Deploy"); authored.Add(dep); Activate(dep);
@@ -536,6 +537,7 @@ public static partial class BlenderVehicleRig
                 KeyQ("Gun", IdentityQ(), 0);
                 var q = BlenderDeploy.QuaternionAxisAngle(local, Math.Abs(a.GunDeployElev) * (Math.PI / 180.0) * sign * (a.GunDeployElev > 0 ? 1.0 : -1.0));
                 KeyQ("Gun", q, (int)a.TrailFrames); deployed.Add(("Gun", (float[])q.Clone()));
+                gunWorldQ = BlenderDeploy.QuaternionAxisAngle(axis, Math.Abs(a.GunDeployElev) * (Math.PI / 180.0) * sign * (a.GunDeployElev > 0 ? 1.0 : -1.0));
                 s.Logs4.Add("VEHICLE DEPLOY gun: elevate " + BlenderRigAnim.PyFixed(a.GunDeployElev, 1) + " deg about world (" + P2(axis[0]) + ", " + P2(axis[1]) + ", " + P2(axis[2]) + ") over 0.." + a.TrailFrames + " frames");
             }
             dep.Linear(); Activate(spin);
@@ -550,8 +552,7 @@ public static partial class BlenderVehicleRig
         {
             var rec = new VehicleActionKeys(s, pool, "Recoil"); authored.Add(rec); Activate(rec);
             var local = LocalAxis("RecoilArm", st.RecoilAxis); if (local == null) return;
-            // Preserve Python's zero-span failure instead of silently producing a NaN key.
-            if (st.RecoilRadius == 0.0) { s.Dies = "ZeroDivisionError: float division by zero"; return; }
+            // a zero span never reaches here: stage 3 makes no arm for it (the script's warning since 2026-11-07), so st.Recoil is false
             double theta = st.RecoilSlide / st.RecoilRadius;
             var test = RotateQt(Sub(st.RecoilCentre, st.RecoilPivot), BlenderDeploy.QuaternionAxisAngle(st.RecoilAxis, theta));
             double sign = Dot(Sub(Add(st.RecoilPivot, test), st.RecoilCentre), st.RecoilBore) < 0 ? 1.0 : -1.0;
@@ -578,10 +579,44 @@ public static partial class BlenderVehicleRig
             }
             ad.PoseMats = VehiclePoseMats(ad);
             st.EvaluatedPose = ad.PoseMats;
-            // The script searches for Mesh_RecoilArm here, although the tube was joined as Mesh_Barrel. Normally
-            // that means no clearance line; do not invent one for the differently named barrel.
-            if (s.Objects.Any(o => o.Type == "MESH" && o.Name == "Mesh_RecoilArm"))
-            { s.Fallback = "stage 4: the recoil clearance of a mesh named Mesh_RecoilArm is not modelled yet"; return; }
+            // BREECH CLEARANCE, the script's block (fixed 2026-11-07: it searched Mesh_RecoilArm while the tube rides Barrel as
+            // Mesh_Barrel, so no rig printed one): the lowest static vertex against the barrel's lowest point, deployed (the lift
+            // about the trunnion as a world rotation) and slid fully back. The vector maths in float32 as mathutils does it -
+            // (world @ co) - trun + back, rotated, + trun -; the difference and its print in double.
+            var statics = s.Objects.Where(o => o.Type == "MESH" && o.Mesh != null && o.Mesh.Vertices > 0 && o.Name != "Mesh_Barrel").ToList();
+            var barrels = s.Objects.Where(o => o.Type == "MESH" && o.Mesh != null && o.Name == "Mesh_Barrel").ToList();
+            if (statics.Count > 0 && barrels.Count > 0)
+            {
+                float ground = float.PositiveInfinity;
+                foreach (var o in statics)
+                {
+                    var it = VehicleProbe.ToRowMajor(o.World); var P = o.Mesh.Positions;
+                    for (int v = 0; v < o.Mesh.Vertices; v++) { float z = MulPointRow(it, 2, P[3 * v], P[3 * v + 1], P[3 * v + 2]); if (z < ground) ground = z; }
+                }
+                var trun = st.GunAxis[0]; var back = Scale(st.RecoilBore, -(float)st.RecoilSlide);   // -_bore_d * _slide: the negation exact, the product float32
+                float lowest = float.PositiveInfinity;
+                foreach (var o in barrels)
+                {
+                    var it = VehicleProbe.ToRowMajor(o.World); var P = o.Mesh.Positions;
+                    for (int v = 0; v < o.Mesh.Vertices; v++)
+                    {
+                        float x = P[3 * v], y = P[3 * v + 1], z = P[3 * v + 2];
+                        var p = new[] { MulPointRow(it, 0, x, y, z), MulPointRow(it, 1, x, y, z), MulPointRow(it, 2, x, y, z) };
+                        p = Add(Sub(p, trun), back);
+                        if (gunWorldQ != null) p = RotateQt(p, gunWorldQ);
+                        p = Add(p, trun);
+                        if (p[2] < lowest) lowest = p[2];
+                    }
+                }
+                double clear = (double)lowest - ground;
+                if (clear < 0)
+                {
+                    s.Logs4.Add("VEHICLE RECOIL *** WARNING: at full recoil the breech reaches Z " + BlenderRigAnim.PyFixed(lowest, 2) + ", " + BlenderRigAnim.PyFixed(-clear, 2) + " BELOW the model's lowest static point (Z " + BlenderRigAnim.PyFixed(ground, 2)
+                        + ") — it will punch through the ground. Lower the recoil fraction (a real gun shortens its stroke as it elevates, for this exact reason) or lower the deploy elevation.");
+                    Note(s, "the breech clearance warning");
+                }
+                else { s.Logs4.Add("VEHICLE RECOIL breech clearance at full recoil: " + BlenderRigAnim.PyFixed(clear, 2) + " above the model's lowest static point (Z " + BlenderRigAnim.PyFixed(ground, 2) + ")"); Note(s, "the breech clearance line"); }
+            }
             Activate(spin); Note(s, "the Recoil clip");
             if (lead > 0) Note(s, "the recoil lead-in hold");
             if (deployed.Count > 0) Note(s, "the deployed pose held through Recoil");

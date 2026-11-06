@@ -358,23 +358,32 @@ public static partial class BlenderVehicleRig
             if (a.RecoilDist > 0.0 && tubeNames.Count > 0)
             {
                 if (!CombinedBox(tubeNames, out var tc2, out var ts2)) return;
-                float[] boreD = gunAxis != null ? Normalized(Sub(gunAxis[1], gunAxis[0])) : new[] { 0f, -1f, 0f };
+                float[] boreD = gunBore != null ? Normalized(Sub(gunBore[1], gunBore[0])) : new[] { 0f, -1f, 0f };   // breech -> muzzle (fixed 2026-11-07: from gun_axis, trunnion -> muzzle, the bore was a float32 residue at a pivot of 1.0)
                 double slide = gunBore != null ? VecLength(Sub(gunBore[1], gunBore[0])) * a.RecoilDist : 1.0;
-                double R = slide / BitConverter.Int64BitsToDouble(0x3faad53144273e73L);   // math.tan(math.radians(3.0)), as Blender's Python computes it
-                var axis = Cross(boreD, new[] { 0f, 0f, 1f });
-                if (VecLength(axis) < 1e-4) axis = Cross(boreD, new[] { 0f, 1f, 0f });
-                axis = Normalized(axis);
-                var offd = Normalized(Cross(axis, boreD));
-                float Rf = (float)R;
-                var pivot = new[] { (float)(tc2[0] + (float)(offd[0] * Rf)), (float)(tc2[1] + (float)(offd[1] * Rf)), (float)(tc2[2] + (float)(offd[2] * Rf)) };
-                int arm = AddBone("RecoilArm", pivot, Up(pivot, ts2), gunBone);
-                recoilPivot = pivot; recoilAxis = axis; recoilBore = boreD; recoilCentre = tc2; recoilSlide = slide; recoilRadius = R;
-                s.Logs3.Add("VEHICLE RECOIL ARM: pivot (" + P2(pivot[0]) + ", " + P2(pivot[1]) + ", " + P2(pivot[2]) + "), R=" + BlenderRigAnim.PyFixed(R, 1) + " for a " + BlenderRigAnim.PyFixed(slide, 2) +
-                            "-unit slide (residual tilt 3.0 deg) — a bone's own translation does not render; an ancestor's rotation does");
-                AddBone("Barrel", tc2, Up(tc2, ts2), arm);
-                foreach (var tn in tubeNames) boneOf[tn] = "Barrel";
-                s.Logs3.Add("VEHICLE BARREL bone split off for recoil: " + tubeNames.Count + " tube part(s) slide, " + cradleNames.Count + " cradle part(s) stay");
-                Note(s, "recoil: the RecoilArm and Barrel bones");
+                if (slide <= 0.0)
+                {
+                    // a zero span (the tube's marked points coincide): the script says so and makes no arm (until 2026-11-07 it died in stage 4 dividing by the zero radius)
+                    s.Logs3.Add("VEHICLE RECOIL *** WARNING: the tube's breech and muzzle coincide (a zero span) — no recoil arm and no Recoil clip; mark tube parts that have a length");
+                    Note(s, "the zero-span tube: no recoil arm");
+                }
+                else
+                {
+                    double R = slide / BitConverter.Int64BitsToDouble(0x3faad53144273e73L);   // math.tan(math.radians(3.0)), as Blender's Python computes it
+                    var axis = Cross(boreD, new[] { 0f, 0f, 1f });
+                    if (VecLength(axis) < 1e-4) axis = Cross(boreD, new[] { 0f, 1f, 0f });
+                    axis = Normalized(axis);
+                    var offd = Normalized(Cross(axis, boreD));
+                    float Rf = (float)R;
+                    var pivot = new[] { (float)(tc2[0] + (float)(offd[0] * Rf)), (float)(tc2[1] + (float)(offd[1] * Rf)), (float)(tc2[2] + (float)(offd[2] * Rf)) };
+                    int arm = AddBone("RecoilArm", pivot, Up(pivot, ts2), gunBone);
+                    recoilPivot = pivot; recoilAxis = axis; recoilBore = boreD; recoilCentre = tc2; recoilSlide = slide; recoilRadius = R;
+                    s.Logs3.Add("VEHICLE RECOIL ARM: pivot (" + P2(pivot[0]) + ", " + P2(pivot[1]) + ", " + P2(pivot[2]) + "), R=" + BlenderRigAnim.PyFixed(R, 1) + " for a " + BlenderRigAnim.PyFixed(slide, 2) +
+                                "-unit slide (residual tilt 3.0 deg) — a bone's own translation does not render; an ancestor's rotation does");
+                    AddBone("Barrel", tc2, Up(tc2, ts2), arm);
+                    foreach (var tn in tubeNames) boneOf[tn] = "Barrel";
+                    s.Logs3.Add("VEHICLE BARREL bone split off for recoil: " + tubeNames.Count + " tube part(s) slide, " + cradleNames.Count + " cradle part(s) stay");
+                    Note(s, "recoil: the RecoilArm and Barrel bones");
+                }
             }
             retainedGunAxis = gunAxis; retainedGunBore = gunBore;
         }

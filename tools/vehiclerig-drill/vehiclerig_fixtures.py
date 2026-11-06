@@ -64,8 +64,12 @@ Stage 3 (step (d), part d3: the turret, the gun assembly, the trails):
   fx_r_turret also: the rock's RootHull under the turret, gun and trail; a turret part also a wheel; the brake also a gun, a mantlet gun and
                      cradle (the de-duplication); the three-vertex trail first (the arm is Trail_01)
   fx_r_spike         a three-vertex muzzle brake and no gun under recoil (fewer than 4 tube points: the defaults)
-  fx_r_gunpoint      a tube of four coincident vertices under recoil (no GUNSPAN line, a zero bore; stage 4 then dies dividing by it: DIES:4:)
-  fx_r_pivot_end     the pivot at the muzzle under recoil (the script's bore from gc ~ muzzle - an open script defect, reproduced)
+  fx_r_gunpoint      a tube of four coincident vertices under recoil (no GUNSPAN line, a zero span: the stage 3 warning, no arm and no
+                     Recoil clip; until 2026-11-07 stage 4 died dividing by the zero radius, DIES:4:)
+  fx_r_pivot_end     the pivot at the muzzle under recoil (the bore from the breech->muzzle span; until 2026-11-07 from gc ~ muzzle, a
+                     float32 residue - the script defect fixed that day)
+  fx_r_recoil_buried the breech clearance's WARNING: the trunnion at the breech, 45 degrees of lift and a 0.75 stroke on a 4-unit tube
+                     put the breech 1.22 below the hull's floor (every other recoil fixture takes the clearance line)
   fx_r_tracks_fallback  LIVE tracks (no tracksStatic) on the wheeled rig: an 8-vertex belt has no link pitch, so the tread takes the
                      carrier-blend fallback - its vertex groups were created from a SET (random order per run until 2026-11-06); the
                      drill dumps it twice and holds the runs equal; the C# leaves the tread rig (d6) by name
@@ -627,17 +631,28 @@ def main(out):
     r.node("Hull", mesh=r.mesh("Hull", at=(-2.0, -1.0, -1.0), size=2.0, material=ma))
     r.node("Spike", mesh=raw_mesh(r, "Spike", ma, [(1.0, 1.2, 0.0), (2.0, 1.2, 0.0), (1.0, 1.4, 0.0)], [0, 1, 2]))
     recipe(out, "fx_r_spike", r.write(models, "fx_r_spike"), [("Hull", 0, {}), ("Spike", 11, {})], recoilDist=0.4)
-    # fx_r_gunpoint: a tube of four coincident vertices (a zero span: no GUNSPAN line; a zero bore under recoil)
+    # fx_r_gunpoint: a tube of four coincident vertices (a zero span: no GUNSPAN line; under recoil the stage 3 warning and no arm -
+    # until 2026-11-07 stage 4 died dividing by the zero radius)
     r = Rig(); ma = r.material("Steel", (0.4, 0.4, 0.45))
     r.node("Hull", mesh=r.mesh("Hull", at=(-2.0, -1.0, -1.0), size=2.0, material=ma))
     r.node("Dot", mesh=raw_mesh(r, "Dot", ma, [(1.5, 1.2, 0.0)] * 4, [0, 1, 2, 0, 2, 3]))
-    recipe(out, "fx_r_gunpoint", r.write(models, "fx_r_gunpoint"), [("Hull", 0, {}), ("Dot", 7, {})], recoilDist=0.4, sub="recipes_exit")   # stage 4 divides by the zero bore: the script dies there
-    # fx_r_pivot_end: the pivot at the muzzle (1.0) under recoil - the script's bore comes from gc ~ muzzle (an open script defect,
-    # recorded in the backlog); the port reproduces it bit for bit
+    recipe(out, "fx_r_gunpoint", r.write(models, "fx_r_gunpoint"), [("Hull", 0, {}), ("Dot", 7, {})], recoilDist=0.4)
+    # fx_r_pivot_end: the pivot at the muzzle (1.0) under recoil - the bore from the breech->muzzle span (until 2026-11-07 from
+    # gc ~ muzzle, a float32 residue: +Y here, zero on the Wespe's coordinates)
     r = Rig(); ma = r.material("Steel", (0.4, 0.4, 0.45))
     r.node("Hull", mesh=r.mesh("Hull", at=(-2.0, -1.0, -1.0), size=2.0, material=ma))
     r.node("Tube", mesh=r.mesh("Tube", at=(0.5 / 15.0, 1.4, -0.1), size=0.2, material=ma), scale=[15.0, 1.0, 1.0])
     recipe(out, "fx_r_pivot_end", r.write(models, "fx_r_pivot_end"), [("Hull", 0, {}), ("Tube", 7, {})], recoilDist=0.3, gunPivot=1.0)
+    # fx_r_recoil_buried: the breech clearance's WARNING branch - the trunnion at the breech (pivot 0), 45 degrees of deploy lift and a
+    # 0.75 stroke on a 4-unit tube (Blender y 1..5 at z -0.1..0.1 over a hull floor at z -1): the trunnion is the breech VERTEX, the
+    # corner (-0.1, 1, -0.1); slid back 3 units and raised, that corner lands 3 sin45 lower, at z -2.22, 1.22 below the floor. The
+    # trail is what opens the Deploy clip.
+    r = Rig(); ma = r.material("Steel", (0.4, 0.4, 0.45))
+    r.node("Hull", mesh=r.mesh("Hull", material=ma), scale=[2.0, 2.0, 2.0])
+    r.node("Tube", mesh=r.mesh("Tube", material=ma), translation=[0.0, 0.0, -3.0], scale=[0.2, 0.2, 4.0])
+    r.node("Trail", mesh=r.mesh("Trail", material=ma), translation=[0.0, 0.0, 3.0], scale=[0.2, 0.2, 4.0])
+    recipe(out, "fx_r_recoil_buried", r.write(models, "fx_r_recoil_buried"), [("Hull", 0, {}), ("Tube", 7, {}), ("Trail", 10, {})],
+           recoilDist=0.75, gunPivot=0.0, gunDeployElev=45.0, trailSpreadDeg=30.0, trailFrames=10)
     # fx_r_tracks_fallback / fx_r_tracks_recoil: LIVE tracks (tracksStatic off) - the tread pipeline the C# leaves by name (d6). The
     # 8-vertex belt gives no link pitch (fewer than 24 bottom-run vertices), so the skinning takes the carrier-blend fallback whose
     # groups came from a set in hash order; the recoil variant hangs a 1.4-unit tube (brake included) 8 units below the tracks: the
@@ -1009,7 +1024,6 @@ EXITS = {
     "fx_d_names_empty": ("DIES", lambda a: a.__setitem__(4, "@")),
     "fx_d_names_dir": ("DIES", lambda a: a.__setitem__(4, "@" + os.path.dirname(a[1]).replace("\\", "/"))),
     "fx_d_dial_before_names": ("DIES", lambda a: (a.__setitem__(45, "x"), a.__setitem__(63, "@" + os.path.join(os.path.dirname(a[1]), "absent.txt").replace("\\", "/")))),
-    "fx_r_gunpoint": ("DIES", lambda a: None),
     "fx_r_missing_turret": ("EXIT", lambda a: None),
     "fx_r_missing_trail": ("EXIT", lambda a: None),
     "fx_d_trail_frames": ("DIES", lambda a: a.__setitem__(33, "nan")),
@@ -1050,7 +1064,7 @@ EXITS = {
 
 
 # the stage an exit or death fixture stops in, when not stage 1
-STAGE_OF = {"fx_r_oars_inf": 4, "fx_d_chunk_splice": 2, "fx_r_missing_wheel": 3, "fx_r_missing_rotor": 3, "fx_r_missing_turret": 3, "fx_r_missing_trail": 3, "fx_r_names_bom": 3, "fx_r_gunpoint": 4}
+STAGE_OF = {"fx_r_oars_inf": 4, "fx_d_chunk_splice": 2, "fx_r_missing_wheel": 3, "fx_r_missing_rotor": 3, "fx_r_missing_turret": 3, "fx_r_missing_trail": 3, "fx_r_names_bom": 3}
 
 
 def exits(jobs_path):
