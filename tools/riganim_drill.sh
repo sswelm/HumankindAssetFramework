@@ -205,9 +205,14 @@ n_s2eq=$(grep -c "^STAGE2 .*: equal" "$TMPD/s1.txt")
 # shipped route never makes. An equal job that is still left is a NOTE: the leave could be lifted for that file.
 n_route=0; n_route_eq=0; n_route_diff=0; n_route_note=0
 if [ "$n_direct" -gt 0 ]; then
-  LEFT_KEYS=()
-  while IFS= read -r k; do [ -n "$k" ] && LEFT_KEYS+=(--left "$k"); done < <(grep -E "^INPROC .*: left to the FBX route by name" "$TMPD/s1.txt" | sed -E 's/^INPROC ([^:]+):.*/\1/')
-  python "$ROOT/tools/riganim-drill/route_rows.py" "${LEFT_KEYS[@]}" "$WTMP/dump_direct.txt" "${DUMPS[@]}" > "$TMPD/route_raw.txt" 2>&1; routerc=$?
+  # Validate the direct scene with the SAME full structural parser as the round-trip dump, without comparing it to C#.
+  # Count alone cannot prove that the dump contains the requested jobs, complete stages, or consistent scene rows.
+  "$TMPD/riganim.exe" "${KEY_MODE[@]}" "$WTMP/shard_direct.txt" "$WTMP/dump_direct.txt" > "$TMPD/direct_validate.txt" 2>&1; directrc=$?
+  if [ "$directrc" -ne 0 ]; then
+    grep -E '^FAIL' "$TMPD/direct_validate.txt"
+    echo "FAIL — rig_anim drill, step 6g: invalid direct-FBX evidence (rc=$directrc)"; exit 1
+  fi
+  python "$ROOT/tools/riganim-drill/route_rows.py" --inproc "$WTMP/s1.txt" "$WTMP/dump_direct.txt" "${DUMPS[@]}" > "$TMPD/route_raw.txt" 2>&1; routerc=$?
   tr -d '\r' < "$TMPD/route_raw.txt" > "$TMPD/route.txt"
   grep -E "^ROUTE	[^	]+	(EQUAL|DIFFERS|FAIL|NOTE|ERROR)	|^ROUTE	ERROR	|^ROUTES	" "$TMPD/route.txt" | sed 's/\t/ /g'
   [ "$routerc" -eq 0 ] || { echo "FAIL — rig_anim drill, step 6g: an .fbx job the C# route takes differs between the direct import and the round trip, or the route comparison could not run (rc=$routerc; the ROUTE lines above)"; exit 1; }

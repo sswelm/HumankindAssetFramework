@@ -1,6 +1,6 @@
 """The direct FBX import against its glTF round trip, per .fbx rig job (tools/riganim_drill.sh, step 6g).
 
-usage: route_rows.py [--left <key>]... <direct dump> <round-trip dump>...
+usage: route_rows.py [--left <key>]... [--inproc <wrapper report>] <direct dump> <round-trip dump>...
 
 The Factory's FBX route runs rig_anim.py on the .fbx itself; the drill's Blender side (step 6f) and the C# reader run on
 Blender's own GLB export of that .fbx. A drill PASS on an .fbx job therefore holds the port equal to the round trip, not
@@ -16,42 +16,118 @@ the GLB - and prints, per job of the direct dump:
 Rows are compared as strings, as the drill compares them (float32 bits, hashes), as multisets per stage and kind. LOG
 rows (the script's own RIGANIM lines) are counted but never part of the verdict; the verdict is stage 4 and the export,
 what reaches the bake. A job the C# route LEAVES to the FBX route by name (--left <key>, the drill reads them off the
-INPROC lines) may differ: DIFFERS is the expected measurement, EQUAL is a NOTE (the leave could be lifted for that file).
+INPROC lines, preserving colons in job keys) may differ: DIFFERS is the expected measurement, EQUAL is a NOTE (the leave could be lifted for that file).
 A job the C# route TAKES must be EQUAL: a DIFFERS is a FAIL (the port would equal the round trip and not the shipped
 route), exit 1. A job of the direct dump missing from the round-trip dumps, or a job without its DONE row, is an error
-(exit 2).
+(exit 2). Equality requires four completed stages with scene rows and a successful GLB export; missing or stopped
+output cannot establish that the fallback could be lifted. The shell also validates direct dumps with RigAnimDump's
+full shape/consistency checks and the expected direct jobs before using this comparator.
 """
+import re
 import sys
 from collections import Counter, defaultdict
 
-IGNORED = {"JOB", "DONE", "STAGE", "K"}          # structure, or the optional per-key rows the drill's own checks hold
 EXPORT = {"X", "XLOG", "XDIES"}
+EXPORT_KINDS = {"GLB", "SCENE", "NODE", "SKIN", "IBM", "MESH", "PRIM", "MAT", "IMG", "TEX", "SAMP", "ANIM", "CHAN"}
+STAGE_KINDS = {"SCENE", "OBJ", "MESH", "VG", "BONE", "PB", "ACT", "FC", "K", "IMG"}
 LOGS = {"LOG", "XLOG"}
 CUT = 160
 
 
+class DumpError(ValueError):
+    pass
+
+
+class Job:
+    def __init__(self):
+        self.rows = defaultdict(Counter)
+        self.stages = []
+        self.scenes = set()
+        self.stopped = False
+        self.export_started = False
+        self.export_died = False
+
+    def require_baked_output(self, key):
+        exports = self.rows["X"]
+        if (self.stages != [1, 2, 3, 4] or self.scenes != {1, 2, 3, 4} or self.stopped or self.export_died
+                or sum(n for row, n in exports.items() if row.startswith("X\tGLB\t")) != 1
+                or not any(row.startswith("X\tSCENE\t") for row in exports)):
+            raise DumpError(key + ": no complete stage-4 scene and successful GLB export; equality cannot establish a safe route")
+
+
 def read_dump(path):
-    """{key: {stage: Counter(row)}}; stage is 1..4 or 'X' (the export rows); the keys without a DONE row beside it."""
-    jobs, key, stage, done = {}, None, None, set()
-    for line in open(path, encoding="utf-8").read().split("\n"):
-        if not line or "\t" not in line:
-            continue
-        f = line.split("\t")
-        kind = f[0]
-        if kind == "JOB":
-            key, stage = f[1], None
-            jobs.setdefault(key, defaultdict(Counter))
-        elif kind == "DONE":
-            done.add(f[1])
-        elif kind == "STAGE":
-            stage = int(f[1])
-        elif key is None or kind in IGNORED:
-            continue
-        elif kind in EXPORT:
-            jobs[key]["X"][line] += 1
-        else:
-            jobs[key][int(f[1])][line] += 1   # <kind> <stage> ...
-    return jobs, [k for k in jobs if k not in done]
+    """Read framed jobs; incomplete but explicitly stopped unrelated jobs may coexist in the round-trip shards."""
+    jobs, key, job = {}, None, None
+    with open(path, encoding="utf-8") as handle:
+        for raw in handle:
+            line = raw.rstrip("\r\n")
+            if not line:
+                continue
+            f = line.split("\t"); kind = f[0]
+            if kind == "JOB":
+                if key is not None: raise DumpError("job(s) without a DONE row: " + key)
+                if len(f) != 2 or not f[1] or f[1] in jobs: raise DumpError("invalid or duplicate JOB row")
+                key, job = f[1], Job(); jobs[key] = job
+                continue
+            if key is None: raise DumpError("a row outside JOB..DONE: " + kind)
+            stage = len(job.stages)
+            if kind == "DONE":
+                if len(f) != 2 or f[1] != key: raise DumpError("DONE does not match its JOB")
+                if job.scenes != set(job.stages): raise DumpError(key + ": a completed stage has no unique SCENE row")
+                if stage < 4 and not job.stopped: raise DumpError(key + ": unfinished stages without EXIT or DIES")
+                key, job = None, None
+            elif kind == "STAGE":
+                if (len(f) != 2 or int(f[1]) != stage + 1 or stage >= 4 or job.stopped or job.export_started
+                        or job.scenes != set(job.stages)):
+                    raise DumpError(key + ": invalid or out-of-order STAGE")
+                job.stages.append(int(f[1]))
+            elif kind in EXPORT:
+                if stage != 4 or 4 not in job.scenes or job.stopped: raise DumpError(key + ": export before completed stage 4")
+                job.export_started = True
+                if kind == "XDIES":
+                    if len(f) != 2 or not f[1] or job.export_died or any(r.startswith("X\t") for r in job.rows["X"]):
+                        raise DumpError(key + ": invalid or contradictory XDIES")
+                    job.export_died = True
+                elif job.export_died:
+                    raise DumpError(key + ": export row after XDIES")
+                elif kind == "X":
+                    if len(f) < 3 or f[1] not in EXPORT_KINDS: raise DumpError(key + ": unknown or empty export row")
+                    if f[1] == "GLB" and (len(f) != 6 or any(int(v) < 0 for v in f[2:5]) or not re.fullmatch(r"[0-9a-f]{64}", f[5])):
+                        raise DumpError(key + ": invalid GLB evidence")
+                elif len(f) != 2 or not f[1].startswith("RIGANIM"):
+                    raise DumpError(key + ": invalid XLOG")
+                job.rows["X"][line] += 1
+            elif kind in ("EXIT", "DIES"):
+                if len(f) != 3 or int(f[1]) != stage + 1 or stage >= 4 or job.stopped or job.export_started:
+                    raise DumpError(key + ": invalid EXIT or DIES")
+                job.stopped = True; job.rows[int(f[1])][line] += 1
+            elif kind == "LOG":
+                if len(f) != 3 or int(f[1]) not in (stage, stage + 1) or not 1 <= int(f[1]) <= 4 or job.stopped or job.export_started:
+                    raise DumpError(key + ": misplaced LOG")
+                job.rows[int(f[1])][line] += 1
+            elif kind in STAGE_KINDS:
+                if len(f) < 2 or int(f[1]) != stage or stage == 0 or job.stopped or job.export_started:
+                    raise DumpError(key + ": misplaced stage row: " + kind)
+                if kind == "SCENE":
+                    if len(f) != 6 or stage in job.scenes: raise DumpError(key + ": invalid or repeated SCENE")
+                    job.scenes.add(stage)
+                if kind != "K": job.rows[stage][line] += 1
+            else:
+                raise DumpError(key + ": unknown or failed row: " + kind)
+    if key is not None: raise DumpError("job(s) without a DONE row: " + key)
+    return jobs
+
+
+def inprocess_left(path):
+    marker = ": left to the FBX route by name, as the wrapper says: "
+    left = set()
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            if line.startswith("INPROC ") and marker in line:
+                key, _, reason = line[7:].rstrip("\r\n").partition(marker)
+                if not key or not reason: raise DumpError("malformed in-process fallback record")
+                left.add(key)
+    return left
 
 
 def compare(direct, roundtrip, key, out):
@@ -87,18 +163,31 @@ def main(argv, out=print):
     left, paths = set(), []
     i = 0
     while i < len(argv):
-        if argv[i] == "--left" and i + 1 < len(argv):
-            left.add(argv[i + 1]); i += 2
+        if argv[i] in ("--left", "--inproc"):
+            if i + 1 >= len(argv): out("ROUTE\tERROR\tmissing value for " + argv[i]); return 2
+            if argv[i] == "--left": left.add(argv[i + 1])
+            else:
+                try: left.update(inprocess_left(argv[i + 1]))
+                except (OSError, ValueError) as error: out("ROUTE\tERROR\t" + str(error)); return 2
+            i += 2
+        elif argv[i].startswith("--"):
+            out("ROUTE\tERROR\tunknown option " + argv[i]); return 2
         else:
             paths.append(argv[i]); i += 1
     if len(paths) < 2:
         out(__doc__); return 2
-    direct, missing = read_dump(paths[0])
-    rt = {}
-    for p in paths[1:]:
-        jobs, m = read_dump(p); rt.update(jobs); missing += m
-    if missing:
-        out("ROUTE\tERROR\tjob(s) without a DONE row: " + " ".join(sorted(set(missing)))); return 2
+    try:
+        direct = read_dump(paths[0]); rt = {}
+        for p in paths[1:]:
+            jobs = read_dump(p)
+            if rt.keys() & jobs.keys(): raise DumpError("duplicate job across round-trip shards")
+            rt.update(jobs)
+        if left - direct.keys(): raise DumpError("fallback names a job absent from the direct dump")
+        for key in direct:
+            if key not in rt: raise DumpError(key + ": not in the round-trip dump(s)")
+            direct[key].require_baked_output(key); rt[key].require_baked_output(key)
+    except (OSError, ValueError) as error:
+        out("ROUTE\tERROR\t" + str(error)); return 2
     if not direct:
         out("ROUTE\tERROR\tthe direct dump holds no job"); return 2
     rc = 0; n = Counter()
@@ -106,7 +195,7 @@ def main(argv, out=print):
         if key not in rt:
             out(f"ROUTE\tERROR\t{key}: not in the round-trip dump(s)"); return 2
         lines = []
-        verdict, early, logs = compare(direct[key], rt[key], key, lines)
+        verdict, early, logs = compare(direct[key].rows, rt[key].rows, key, lines)
         kinds = sorted({l.split("\t")[3] for l in lines if l.split("\t")[2] in ("4", "X") and l.split("\t")[3] not in LOGS})
         for l in lines:
             out(l)

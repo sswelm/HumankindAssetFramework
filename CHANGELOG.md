@@ -17,8 +17,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   input and `tools/riganim-drill/route_rows.py` holds stage 4 and the export of the two runs against each other per row
   kind: a job the in-process wrapper leaves by name may differ (its ROUTE lines are the measurement), an equal one left
   is a NOTE that the leave could be lifted, and a job the wrapper takes must be equal or the drill fails; the direct
-  dump against itself must be equal (the comparison's control); seven regression checks on synthetic dumps cover every
-  verdict, the error exits and a doubled row. The mech's gap, measured: 3,863 rows of stage 4 and the export differ -
+  dump against itself must be equal (the comparison's control). Review closes false equality on empty or early-exit
+  dumps: both sides must contain four completed stages and a successful GLB export, and the direct dump is structurally
+  validated against the requested jobs. Duplicate jobs and malformed framing are errors; fallback report parsing keeps
+  colons in job keys. Thirteen regression checks cover the verdicts, incomplete evidence, framing and row multiplicity. The mech's gap, measured: 3,863 rows of stage 4 and the export differ -
   the joined mesh itself (9,967 vertices directly against 32,388 through the round trip's split vertices), every bone's
   rest, the fcurves, and the exported channels (STEP with 2 keys against LINEAR with 160) - so the leave stands, with
   numbers. The parity stamp refreshed with the drill run.
