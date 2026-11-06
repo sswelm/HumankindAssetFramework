@@ -10,6 +10,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE GLB WRITER DRILL RUNS ON UNITY'S 64-BIT MONO (2026-11-06).** Under the parity gate's thirteen parallel drills the
+  writer drill's 32-bit `mono.exe` ran out of memory writing the 121 MB `salegs_revenge_split_fused.glb` (116 of 117
+  written; "Insufficient memory to continue the execution of the program") and passed alone minutes later - a rerun, not
+  a regression, but a stamp the full run could not write. `tools/glb_writer_drill.sh` now runs its write and read-back
+  steps through `tools/deploy-drill/MonoHost.cs`, the editor's own 64-bit runtime the FBX scene drill already uses.
+  Measured: 117 files, 1,419 MB, written and read back equal field by field in 3.5 s; the two largest sources (160 MB
+  Bradley, 121 MB Saleg) written by both runtimes are byte-identical, in the same wall time; the 200 MB round-trip cap
+  stays as a time bound (no source is over it today). Backlog entry closed in `docs/Review-Backlog.md`.
+
 - **THE MECH'S POST-FIX BAKE IS ACCEPTED IN GAME (2026-11-06).** The light assault mech, re-baked through the Factory on
   the FBX route after the connected-bone placement fix (PR #250) with 'Keep extracted texture' ticked, stands, walks and
   wears its green skin in game - the user's check, the first in-game look at a post-July bake of the mech. Player.log:
