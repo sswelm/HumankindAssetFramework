@@ -807,6 +807,14 @@ skipped. Ranked by consequence within each group.
 
 ### Verification machinery (fix first — a green gate that cannot see the shape is worse than no gate)
 
+- **The GLB writer drill runs out of memory under the parallel parity gate (seen 2026-11-06).** `tools/glb_writer_drill.sh`
+  writes every registry GLB on Unity's `MonoBleedingEdge/bin/mono.exe`, a 32-bit process; writing the 121 MB
+  `salegs_revenge_split_fused.glb` failed with "Insufficient memory to continue the execution of the program" (116 of
+  117 written) while the gate's thirteen parity drills ran at once, and passed 117 of 117 run alone minutes later. The
+  gate has no parallelism knob. Wanted: the writer drill (and any drill that holds a whole fused ship in memory) on the
+  64-bit embedded Mono host (`tools/deploy-drill/MonoHost.cs`, as the FBX scene drill already runs), or a largest-first
+  lane that the gate runs before the Blender steps start. Until then a parity FAIL on that one file with that message
+  is a rerun, not a regression - and the stamp cannot be written without the full run passing.
 - ~~**`Tests/test_parallel_gate.py` is timing-flaky**~~ — **FIXED 2026-10-12.**
   `test_progress_reports_completion_before_an_earlier_job_finishes_and_uses_real_duration` failed a docs-only push
   (`'PASS fast (2 s)' not found in ''`), 1 of 3 idle reruns, and 1 of 8 under load in the PR #148 review. The test
