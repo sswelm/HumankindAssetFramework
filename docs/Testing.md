@@ -368,6 +368,14 @@ The Color32 adapter is compared to the pure transform, and 381 brightness values
 PR #248's initial reproduction failed nine checks before its review fixes; the complete set passes afterward. Missing Unity
 is an explicit SKIP (exit 3), never preview validation.
 
+**Bake commit and the preview clone set in Unity:** `bash tools/bake_commit_unity_drill.sh` runs the production
+`Transact` against real files in a fresh temporary Unity project (snapshot, refused and unsettled commits, locks,
+cancellation) and, since 2026-11-05, the preview-prefab step itself: two stale `<name>_PreviewMesh*.asset` clones are
+planted and the single-material animated route must leave the set empty while still writing `_Preview.prefab`; then
+three are planted and the multi-material route must leave exactly its own clone. The first of those rows fails on the
+baker before the fix, which swept the set only on the multi-material branch. Not in the push gate (a Unity boot per run);
+run it for any change to `GeneratePreviewPrefab`, `LoadPreviewSubstitutes` or `Transact`.
+
 Review of 6e keeps skinned or animated FBX sources (including a second model) on the Vehicle Lab's named Blender
 fallback: a direct FBX import and its glTF round trip do not give the same vehicle pose. A generated skinned fixture
 measures centre X 0.0309 directly in Blender versus 0.0305 through the glTF model. Static FBX remains native. The preview

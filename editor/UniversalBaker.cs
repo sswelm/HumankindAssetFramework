@@ -1643,14 +1643,18 @@ public static class UniversalBaker
             // the multi-SMR slice) so the preview shows all parts with the right UVs; otherwise load the largest
             // mesh from the FBX (the body). The inspectable prefab displays the largest clone; ALL clones persist.
             Mesh mesh;
+            // Sweep the whole numbered set FIRST, on EVERY animated bake: a re-bake with fewer renderers must not leave
+            // stale clones that could vertex-match a future mesh by accident, and a re-bake on the single-material route
+            // (no clones of its own) must not leave the previous multi-material bake's set for both preview loaders to
+            // substitute against - that paired old geometry with the new atlas, or reported UNMATCHED and advised a
+            // re-bake that did not clear it (follow-up from the review of #248, 2026-11-05).
+            for (int i = 0; i < 32; i++) AssetDatabase.DeleteAsset(PreviewMeshPath(resDir, name, i));
             if (overrideMeshes != null && overrideMeshes.Count > 0)
             {
-                // Sweep the whole numbered set FIRST (a re-bake with fewer renderers must not leave stale clones
-                // that could vertex-match a future mesh by accident), then persist every clone. A runtime clone can't be referenced
+                // Persist every clone. A runtime clone can't be referenced
                 // by the saved prefab -> it becomes the _PreviewMesh asset; a mesh that is an asset ALREADY (the GLB route's rig meshes
                 // under anim/, a folder the next bake of either route empties first) is COPIED into one, so the preview never points
                 // into that folder - a bake failing midway left the preview with missing meshes (review of #193)
-                for (int i = 0; i < 32; i++) AssetDatabase.DeleteAsset(PreviewMeshPath(resDir, name, i));
                 var persisted = new List<Mesh>(); int copied = 0;
                 for (int i = 0; i < overrideMeshes.Count; i++)
                 {

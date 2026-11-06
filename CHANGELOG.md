@@ -10,6 +10,19 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **A SINGLE-MATERIAL ANIMATED RE-BAKE LEFT THE PREVIOUS BAKE'S PREVIEW CLONES BEHIND (2026-11-05).** The animated
+  bake persists one atlas-remapped clone per skinned renderer (`<name>_PreviewMesh.asset`, `_PreviewMesh1`, ...) and
+  both preview loaders - the Factory's rest view and the Animation Lab's playing clip - read the whole set and
+  substitute each clone for the renderer whose vertex count it matches. The sweep of that set lived inside the
+  multi-material branch of the preview-prefab step, so a re-bake of the same name on the single-material route (or a
+  model whose materials were merged since) kept the stale set: the preview then paired old geometry with the new
+  atlas, or reported `UNMATCHED` and told you to re-bake, which did not clear it. The static route had its own sweep
+  (E7) since 08-19; the animated route now sweeps the full numbered set on every bake before persisting its own
+  clones (none, on the single-material route). `tools/bake_commit_unity_drill.sh` gained a row that plants two stale
+  clones, runs the preview step on the single-material route and requires an empty set and a written prefab, then
+  plants three and runs the multi-material route and requires exactly its one clone; the first row fails on the
+  previous baker (follow-up from the review of #248).
+
 - **THE DROP WATCH'S WEAK TABLE CRASHED THE GAME LOADING A 180-TURN SAVE (2026-11-05).** Loading a late-game save with
   the 2026-10-31 plugin, Player.log filled with `[Buffers] drop watch: Specified cast is not valid` - 4,600 lines, one per
   mesh registration - and then the game died natively inside `MeshDropWatch.After` reading its own failure record
