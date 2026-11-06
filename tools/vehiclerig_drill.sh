@@ -143,24 +143,28 @@ fi
 # The fixture is dumped once more in a Blender run of its own and the two dumps held equal row for row, the WORK row, the seal
 # and the work folder's name in the paths aside. A record made in another run replays here as every other dump does.
 n_fb2=0
-if grep -qE "^JOB	fx_r_tracks_fallback	" "$TMPD/jobs.txt"; then
-  grep -hE "^JOB	fx_r_tracks_fallback	" "$TMPD"/shard_*.txt | head -1 > "$TMPD/shard_fb2.txt"
-  mkdir -p "$TMPD/work_fb2"
-  oracle_blender "dump_fb2" "$TMPD/blender_raw_fb2.txt" --dir "work_fb2" --key "$ROOT/tools/vehiclerig-drill/blender_vehiclerig_dump.py" "$SCRIPT" "$WTMP/shard_fb2.txt" "$WTMP/work_fb2" -- --background --python "$(cygpath -m "$ROOT/tools/vehiclerig-drill/blender_vehiclerig_dump.py")" -- "$(cygpath -m "$SCRIPT")" "$WTMP/shard_fb2.txt" "$WTMP/work_fb2"
-  fb2rc=$?; oracle_check
-  tr -d '\r' < "$TMPD/blender_raw_fb2.txt" | grep -E "^(JOB|WORK|STAGE|LOG|SCENE|OBJ|MESH|VG|BONE|PB|ACT|FC|K|EXIT|DIES|DONE|FAIL|X|XDIES|EVIDENCE)	" > "$TMPD/dump_fb2.txt"
-  fb_block() { awk -F'\t' '$1 == "JOB" { on = ($2 == "fx_r_tracks_fallback") } on && $1 != "WORK" && $1 != "EVIDENCE"' "$1" | sed -E 's#/work_(fb2|[0-9]+)/#/work_X/#g'; }
-  cat "$TMPD"/dump_[0-9]*.txt > "$TMPD/dump_all.txt"; fb_block "$TMPD/dump_all.txt" > "$TMPD/fb_run1.txt"; fb_block "$TMPD/dump_fb2.txt" > "$TMPD/fb_run2.txt"
-  n_fb2=$(grep -c "^VG	" "$TMPD/fb_run2.txt")
-  if [ "$fb2rc" -ne 0 ] || ! grep -q "^DONE	fx_r_tracks_fallback" "$TMPD/dump_fb2.txt" || [ "$n_fb2" -lt 9 ]; then
-    grep -E "^FAIL|Traceback|Error" "$TMPD/blender_raw_fb2.txt" | head -5
-    echo "FAIL — vehicle_rig drill: the second Blender run of the tread fallback fixture did not complete (exit $fb2rc, $n_fb2 VG rows)"; exit 1
-  fi
-  if ! cmp -s "$TMPD/fb_run1.txt" "$TMPD/fb_run2.txt"; then
-    diff "$TMPD/fb_run1.txt" "$TMPD/fb_run2.txt" | head -8 | cut -c1-200
-    echo "FAIL — vehicle_rig drill: the tread fallback's dump differs between two Blender runs (the carrier-blend groups must be made in a fixed order: vehicle_rig.py sorted(_names))"; exit 1
-  fi
+for key in fx_r_tracks_fallback fx_r_tracks_recoil; do
+  [ "$(grep -cE "^JOB	$key	" "$TMPD/jobs.txt")" -eq 1 ] || { echo "FAIL — vehicle_rig drill: required tread fixture $key missing or duplicated"; exit 1; }
+done
+# The C# port leaves live tracks before comparing actions. Measure the exported skin and joint independently;
+# the old-centre/no-kick controls must export complete files and fail the movement assertion, never just crash.
+grep -hE "^JOB	(fx_r_tracks_fallback|fx_r_tracks_recoil)	" "$TMPD"/shard_[0-9]*.txt > "$TMPD/shard_fb2.txt"
+mkdir -p "$TMPD/work_fb2"
+oracle_blender "dump_fb2" "$TMPD/blender_raw_fb2.txt" --dir "work_fb2" --key "$ROOT/tools/vehiclerig-drill/blender_tread_oracle.py" "$ROOT/tools/vehiclerig-drill/blender_vehiclerig_dump.py" "$SCRIPT" "$WTMP/shard_fb2.txt" "$WTMP/work_fb2" -- --background --python-exit-code 1 --python "$(cygpath -m "$ROOT/tools/vehiclerig-drill/blender_tread_oracle.py")" -- "$(cygpath -m "$SCRIPT")" "$WTMP/shard_fb2.txt" "$WTMP/work_fb2"
+fb2rc=$?; oracle_check
+tr -d '\r' < "$TMPD/blender_raw_fb2.txt" | grep -E "^(JOB|WORK|STAGE|LOG|SCENE|OBJ|MESH|VG|BONE|PB|ACT|FC|K|EXIT|DIES|DONE|FAIL|X|XDIES|EVIDENCE)	" > "$TMPD/dump_fb2.txt"
+fb_block() { awk -F'\t' '$1 == "JOB" { on = ($2 == "fx_r_tracks_fallback") } on && $1 != "WORK" && $1 != "EVIDENCE"' "$1" | sed -E 's#/work_(fb2|[0-9]+)/#/work_X/#g'; }
+cat "$TMPD"/dump_[0-9]*.txt > "$TMPD/dump_all.txt"; fb_block "$TMPD/dump_all.txt" > "$TMPD/fb_run1.txt"; fb_block "$TMPD/dump_fb2.txt" > "$TMPD/fb_run2.txt"
+n_fb2=$(grep -c "^VG	" "$TMPD/fb_run2.txt")
+if [ "$fb2rc" -ne 0 ] || ! grep -q "^DONE	fx_r_tracks_fallback" "$TMPD/dump_fb2.txt" || [ "$n_fb2" -lt 9 ]; then
+  grep -E "^FAIL|Traceback|Error" "$TMPD/blender_raw_fb2.txt" | head -5
+  echo "FAIL — vehicle_rig drill: the second Blender run of the tread fallback fixture did not complete (exit $fb2rc, $n_fb2 VG rows)"; exit 1
 fi
+if ! cmp -s "$TMPD/fb_run1.txt" "$TMPD/fb_run2.txt"; then
+  diff "$TMPD/fb_run1.txt" "$TMPD/fb_run2.txt" | head -8 | cut -c1-200
+  echo "FAIL — vehicle_rig drill: the tread fallback's dump differs between two Blender runs (the carrier-blend groups must be made in a fixed order: vehicle_rig.py sorted(_names))"; exit 1
+fi
+grep -E '^PASS — (exported tracked recoil|tracked recoil control rejected)' "$TMPD/blender_raw_fb2.txt"
 DUMPS=(); for ((k = 0; k < JOBS; k++)); do DUMPS+=("$WTMP/dump_$k.txt"); done
 KEY_MODE=(); [ "${VEHICLERIG_KEYS:-0}" != "1" ] || KEY_MODE=(--keys)
 "$TMPD/vehiclerig.exe" "${KEY_MODE[@]}" "$WTMP/jobs.txt" "${DUMPS[@]}" > "$TMPD/cs_raw.txt" 2>&1; rc=$?

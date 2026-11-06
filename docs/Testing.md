@@ -2534,7 +2534,12 @@ pivot sits R = slide / tan(3 deg) off the bore, so the sign flips once the track
 tube hangs 8 units below the tracks (R = 5.6), and the old script swung the barrel 0.28 units TOWARD the target, the fixed one
 0.28 back (Blender, the exported GLB sampled at the kick frame). The tube centre now travels in `recoil_geom`. No saved recipe
 changes: the Jagdpanzer's tracks are static, the Bradley (live tracks, an .fbx) has no recoil, and no Lab golden carries either
-line. The port itself stays deferred: re-measured the same day, the Bradley is left at stage 1 by name as a skinned .fbx even
+line. Review of PR #257 found that reverting the recoil fix still passed the drill because both tracked fixtures are LEFT
+before C# compares their actions. The second Blender run now requires both fixtures, checks the nine carrier groups in sorted
+order, and imports the exported tracked-recoil GLB to measure the evaluated tube skin and Barrel joint at frames 0, 2 and 16.
+Both must move approximately 0.28 units backward along the fixture's X axis and return. Permanent old-centre and no-kick
+controls must produce measurable exports that fail this numerical assertion; crashes and missing artifacts fail the drill.
+Removing or duplicating either fixture also fails rather than silently skipping the repeat. The port itself stays deferred: re-measured the same day, the Bradley is left at stage 1 by name as a skinned .fbx even
 with the native FBX reader (the vehicle import's direct-versus-round-trip leave), so d6 would still turn no recipe equal.
 
 Critical review of PR #181 (2026-10-17): the strict names reader's exception handling covered positional arguments but

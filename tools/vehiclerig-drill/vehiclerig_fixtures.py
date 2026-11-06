@@ -655,7 +655,7 @@ def main(out):
             r.node("Tube", mesh=r.mesh("Tube", at=(0.5 / 5.0, -8.0, -0.1), size=0.2, material=ma), scale=[5.0, 1.0, 1.0])   # x 0.5 .. 1.5, 8 below
             r.node("Brake", mesh=r.mesh("Brake", at=(1.5, -8.1, -0.2), size=0.4, material=ma))
             parts += [("Tube", 7, {}), ("Brake", 11, {})]
-            fields = dict(gunPivot=0.3, recoilDist=0.2)
+            fields = dict(gunPivot=0.3, recoilDist=0.2, recoilFrames=16, recoilLead=0)
         recipe(out, key, r.write(models, key), parts, **fields)
     tracked("fx_r_tracks_fallback"); tracked("fx_r_tracks_recoil", gun=True)
     # Stage 4 e3: Deploy direction/elevation and Recoil timing/stance; no frame_set in either action.
