@@ -1070,7 +1070,7 @@ oar_pivot = min(95.0, max(0.0, float(argv[58]))) if len(argv) > 58 and argv[58].
 # axial scale — blade width and pole thickness are untouched.
 oar_length = min(300.0, max(25.0, float(argv[59]))) if len(argv) > 59 and argv[59].strip() else 100.0
 recoil_bone = None               # set to "RecoilArm" when the split actually happens — the bone the clip ROTATES
-recoil_geom = None               # (pivot, axis, bore_dir, slide, R) for the arc that fakes the slide
+recoil_geom = None               # (pivot, axis, bore_dir, slide, R, tube centre) for the arc that fakes the slide
 # Residual tilt the arc leaves on the tube. The slide is faked by swinging the barrel on a long arm, so some pitch
 # is unavoidable; 3 deg is small enough to read as a straight slide and large enough to keep R finite (a pivot at
 # infinity collapses the bone chain through float32 cancellation — the documented 1e9 sentinel bug).
@@ -1822,7 +1822,7 @@ if gun_names or muzzle_names or cradle_names:
         eb.tail = _pivot + Vector((0, 0, max(0.05, max(_ts) * 0.25)))
         eb.parent = eb_gun                                         # rides the elevation, like the tube it carries
         eb_recoil_arm = eb
-        recoil_geom = (_pivot.copy(), _axis.copy(), _bore_d.copy(), _slide, _R)
+        recoil_geom = (_pivot.copy(), _axis.copy(), _bore_d.copy(), _slide, _R, _tc.copy())   # the tube centre travels with it
         print("VEHICLE RECOIL ARM: pivot (%.2f, %.2f, %.2f), R=%.1f for a %.2f-unit slide (residual tilt %.1f deg) "
               "— a bone's own translation does not render; an ancestor's rotation does"
               % (_pivot.x, _pivot.y, _pivot.z, _R, _slide, RECOIL_PITCH_DEG))
@@ -2361,7 +2361,9 @@ for o in objs:
         _rtdir = (_rim_dir(_rcl, _rollR, 1, 1) if (_rcl and _rollR) else Vector((1, 0, 0)))
         _tread_dirs[_tn] = (_fdir, _rdir, _rtdir)
         _names = {_botb, _topb, _rampfb, _ramprb, _ramprtb, _sprb, _idlb, _wrapgfb, _wrapgrb}
-        _vgs = {n: o.vertex_groups.new(name=n) for n in _names}
+        # SORTED: a set's iteration order follows Python's randomized string hash, so the group indices (and every
+        # vertex's group order) changed from run to run (found sizing the d6 port, 2026-10-17; fixed 2026-11-06)
+        _vgs = {n: o.vertex_groups.new(name=n) for n in sorted(_names)}
         _spr_c, _spr_r = (_fcl["c"], _fcl["m"] * 0.5) if _fcl else (Vector((1e9,) * 3), 0.0)
         _idl_c, _idl_r = (_rcl["c"], _rcl["m"] * 0.5) if _rcl else (Vector((1e9,) * 3), 0.0)
 
@@ -3624,7 +3626,7 @@ if recoil_bone is not None and gun_axis is not None:
     _rb = arm.pose.bones.get(recoil_bone)
     _rdb = arm.data.bones.get(recoil_bone)
     if _rb is not None and _rdb is not None:
-        _pivot, _axis, _bore_d, _slide, _R = recoil_geom
+        _pivot, _axis, _bore_d, _slide, _R, _gun_c = recoil_geom
         _len = (gun_bore[1] - gun_bore[0]).length if gun_bore is not None else _slide
         _back = -_bore_d * _slide                              # AWAY from the muzzle, along the bore (for reporting)
         # ROTATE THE ARM, don't translate the barrel — the arm's rotation is what survives to the GPU.
@@ -3633,8 +3635,10 @@ if recoil_bone is not None and gun_axis is not None:
         _rm3 = (arm.matrix_world @ _rdb.matrix_local).to_3x3()
         _local_axis = (_rm3.inverted() @ _axis).normalized()
         _theta = _slide / _R
-        _test = (_tc - _pivot).copy(); _test.rotate(Quaternion(_axis, _theta))
-        _rsign = 1.0 if (_pivot + _test - _tc).dot(_bore_d) < 0 else -1.0   # muzzle must go AWAY from the target
+        # the TUBE centre from recoil_geom, not the module-level _tc: the track skinning and conveyor loops rebind _tc to
+        # the last track's bbox centre on the way, which decided this sign for a tracked gun (found 2026-10-19; fixed 2026-11-06)
+        _test = (_gun_c - _pivot).copy(); _test.rotate(Quaternion(_axis, _theta))
+        _rsign = 1.0 if (_pivot + _test - _gun_c).dot(_bore_d) < 0 else -1.0   # muzzle must go AWAY from the target
         _kick = max(1, int(round(recoil_frames * 0.15)))
         _rb.rotation_mode = 'QUATERNION'
         _rest_q = Quaternion((1.0, 0.0, 0.0, 0.0))

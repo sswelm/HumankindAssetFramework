@@ -66,6 +66,13 @@ Stage 3 (step (d), part d3: the turret, the gun assembly, the trails):
   fx_r_spike         a three-vertex muzzle brake and no gun under recoil (fewer than 4 tube points: the defaults)
   fx_r_gunpoint      a tube of four coincident vertices under recoil (no GUNSPAN line, a zero bore; stage 4 then dies dividing by it: DIES:4:)
   fx_r_pivot_end     the pivot at the muzzle under recoil (the script's bore from gc ~ muzzle - an open script defect, reproduced)
+  fx_r_tracks_fallback  LIVE tracks (no tracksStatic) on the wheeled rig: an 8-vertex belt has no link pitch, so the tread takes the
+                     carrier-blend fallback - its vertex groups were created from a SET (random order per run until 2026-11-06); the
+                     drill dumps it twice and holds the runs equal; the C# leaves the tread rig (d6) by name
+  fx_r_tracks_recoil the same live tracks with a tube along x under recoil 8 units BELOW them: the recoil sign test read the module-level
+                     _tc the track loops had rebound to the last track's centre; the arc's pivot is R (= slide / tan 3 deg) above the
+                     bore, so the sign flips once the tracks' centre is more than R above the tube - here it is, and the old script
+                     kicked the muzzle TOWARD the target (2026-10-19; fixed 2026-11-06, the tube centre travels in recoil_geom)
   fx_x_default_names_dir / fx_x_shroud_names_dir / fx_x_window_names_dir: directory names in reduce tags print their caught error
   fx_d_dial_before_tag_names / fx_x_tag_before_bad_names: an earlier error wins over a later non-UTF-8 tagged names file
   fx_d_pos_names_utf8 / fx_x_tag_names_utf8: native decode death/exit; the C# model explicitly leaves decoding to Blender
@@ -631,6 +638,26 @@ def main(out):
     r.node("Hull", mesh=r.mesh("Hull", at=(-2.0, -1.0, -1.0), size=2.0, material=ma))
     r.node("Tube", mesh=r.mesh("Tube", at=(0.5 / 15.0, 1.4, -0.1), size=0.2, material=ma), scale=[15.0, 1.0, 1.0])
     recipe(out, "fx_r_pivot_end", r.write(models, "fx_r_pivot_end"), [("Hull", 0, {}), ("Tube", 7, {})], recoilDist=0.3, gunPivot=1.0)
+    # fx_r_tracks_fallback / fx_r_tracks_recoil: LIVE tracks (tracksStatic off) - the tread pipeline the C# leaves by name (d6). The
+    # 8-vertex belt gives no link pitch (fewer than 24 bottom-run vertices), so the skinning takes the carrier-blend fallback whose
+    # groups came from a set in hash order; the recoil variant hangs a 1.4-unit tube (brake included) 8 units below the tracks: the
+    # arc's pivot is R = 0.28 / tan(3 deg) = 5.3 above the bore, the tracks' centre 7.7 above it, so a sign test reading the track
+    # centre (the old script's rebound _tc) swings the muzzle the other way. A brake pins the muzzle.
+    def tracked(key, gun=False):
+        r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
+        r.node("Hull", mesh=r.mesh("Hull", at=(-1.5, 0.0, -1.0), size=2.0, material=ma), scale=[1.5, 1.0, 1.0])
+        for i, (x, z) in enumerate(((1.6, 1.2), (-1.6, 1.2), (1.6, -1.2), (-1.6, -1.2))):
+            r.node("W%d" % i, mesh=r.mesh("W%d" % i, at=(-0.5, -0.5, -0.5), material=ma), translation=[x, 0.0, z], scale=[0.8 if i < 2 else 0.6, 0.8 if i < 2 else 0.6, 0.25])
+        r.node("Belt", mesh=r.mesh("Belt", at=(-0.5, -0.5, -0.5), material=ma), translation=[0.0, -0.3, 1.25], scale=[4.0, 0.1, 0.2])
+        parts = [("Hull", 0, {})] + [("W%d" % i, 1, {}) for i in range(4)] + [("Belt", 6, {})]
+        fields = {}
+        if gun:
+            r.node("Tube", mesh=r.mesh("Tube", at=(0.5 / 5.0, -8.0, -0.1), size=0.2, material=ma), scale=[5.0, 1.0, 1.0])   # x 0.5 .. 1.5, 8 below
+            r.node("Brake", mesh=r.mesh("Brake", at=(1.5, -8.1, -0.2), size=0.4, material=ma))
+            parts += [("Tube", 7, {}), ("Brake", 11, {})]
+            fields = dict(gunPivot=0.3, recoilDist=0.2, recoilFrames=16, recoilLead=0)
+        recipe(out, key, r.write(models, key), parts, **fields)
+    tracked("fx_r_tracks_fallback"); tracked("fx_r_tracks_recoil", gun=True)
     # Stage 4 e3: Deploy direction/elevation and Recoil timing/stance; no frame_set in either action.
     for key, yaw, elev, spread, recoil, lead, recframes, wheel, gun in (
         ("fx_e3_deploy", 0, 32, 35, .25, 5, 10, True, True),

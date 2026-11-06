@@ -514,13 +514,19 @@ and BM_face_split with their UV / colour / custom-normal interpolation, the oper
 two-edge connect), the link pitch's trigonometric autocorrelation (UCRT cos/sin, compensated sums), the wrap bands, the
 belt-around-pulleys path, the link cells and the link/shuttle split, and a second edit-mode session (every bone's rest through
 ED_armature_to_edit and back). Worth it once a glTF tank with live tracks exists, or with the native FBX reader.
-- **vehicle_rig.py: the tread's carrier-blend skinning is NON-DETERMINISTIC** - OPEN (2026-10-17, found sizing d6). The carrier
+RE-MEASURED 2026-11-06 (the d6 oracle PR): with the native FBX reader merged, the Bradley is still LEFT at stage 1 by name - a
+skinned .fbx the vehicle import leaves because the direct FBX and glTF round-trip poses are not equivalent - so the port would
+still turn no recipe equal and could only be held to fixtures. The two script defects below are fixed and fixtured first.
+- ~~**vehicle_rig.py: the tread's carrier-blend skinning is NON-DETERMINISTIC**~~ - **FIXED 2026-11-06** (`sorted(_names)`; the
+  fixture `fx_r_tracks_fallback` is dumped twice per drill run and the dumps held equal, `docs/Testing.md`). Was: OPEN (2026-10-17, found sizing d6). The carrier
   vertex groups are created by iterating a SET of bone names (`_vgs = {n: o.vertex_groups.new(name=n) for n in _names}`), and
   Blender's Python has string-hash randomization on (`sys.flags.hash_randomization` 1: two runs printed the same four names in
   two orders), so the group order - and every vertex's group indices - changes from run to run. Only the fallback writes those
   groups (no link pitch found: `_link_fund <= 0.03`); link mode removes them and builds its own in a deterministic order. The fix
   is one word: `for n in sorted(_names)`. A port can only decline the fallback until then.
-- **vehicle_rig.py: the Recoil sign test reads a `_tc` the tread loops have rebound** - OPEN (2026-10-19, review of #186; a d6
+- ~~**vehicle_rig.py: the Recoil sign test reads a `_tc` the tread loops have rebound**~~ - **FIXED 2026-11-06** (the tube centre
+  travels in `recoil_geom`; `fx_r_tracks_recoil` reproduced the forward kick under the old script and the backward one under the
+  fix, `docs/Testing.md`; the C# Stage4 already used the tube centre). Was: OPEN (2026-10-19, review of #186; a d6
   port requirement). `_tc` is the tube centre (1786, `_combined_bbox(tube_names)`) and the recoil sign test means it so
   (3620-3621: `_test = (_tc - _pivot)...; _rsign = ... (_pivot + _test - _tc).dot(_bore_d)`), but the track skinning loop (2258,
   `_tn, _tnames, _fcl, _rcl, _tc, ... = _track_by_name[o.name]`) and the conveyor loop (3371) rebind the module-level `_tc` to the

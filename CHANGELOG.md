@@ -10,6 +10,19 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE TREAD RIG'S ORACLE MADE SOUND - TWO vehicle_rig.py DEFECTS FIXED AND FIXTURED (2026-11-06).** Before the tread rig
+  (d6, the last unported part of the Vehicle Lab's script) is held to Blender, the script it would be held to is: the carrier-blend
+  fallback's vertex groups were created from a set in Python's randomized string-hash order (two Blender runs, two orders of the
+  nine groups), now `sorted`; the recoil sign test read a module-level `_tc` the track loops had rebound to the last track's
+  centre, and for a tube more than the arc radius below the tracks kicked the muzzle TOWARD the target (measured on the new
+  `fx_r_tracks_recoil`: 0.28 units forward under the old script, 0.28 back under the fix), now the tube centre travels in
+  `recoil_geom`. `tools/vehiclerig_drill.sh` dumps the new live-track fallback fixture twice and holds the runs equal (the
+  plant, the sort reverted, fails it). Review adds an independent exported-skin/joint recoil measurement: reverting the sign
+  fix previously still passed because C# leaves live tracks before comparing actions. Both fixtures are now mandatory, the
+  nine carrier groups checked in sorted order, and complete old-centre/no-kick exports must fail the motion check. No saved recipe changes (the Jagdpanzer's tracks are static, the Bradley has no recoil).
+  The port itself stays deferred, re-measured: the Bradley is left at stage 1 by name as a skinned .fbx even with the native
+  FBX reader, so d6 would still turn no recipe equal (`docs/Review-Backlog.md`).
+
 - **THE GLB WRITER DRILL RUNS ON UNITY'S 64-BIT MONO (2026-11-06).** Under the parity gate's thirteen parallel drills the
   writer drill's 32-bit `mono.exe` ran out of memory writing the 121 MB `salegs_revenge_split_fused.glb` (116 of 117
   written; "Insufficient memory to continue the execution of the program") and passed alone minutes later - a rerun, not

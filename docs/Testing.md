@@ -2522,6 +2522,26 @@ defects found on the way, reproduced bit for bit and recorded in the backlog. Pl
 directory's PermissionError (the drill fails on each target). After: 71 of 71 fixture jobs and 88 of 95 jobs equal
 through stage 3 (FULL, 454,970 rows); 1,854 tests.
 
+The d6 oracle (2026-11-06): before the tread rig is ported, the script it would be held to was made sound on the two defects found
+sizing the port. `fx_r_tracks_fallback` (live tracks on the wheeled rig; an 8-vertex belt has no link pitch, so the tread takes the
+carrier-blend fallback) and `fx_r_tracks_recoil` (the same with a tube under recoil 8 units below the tracks) run all five stages in
+Blender and are LEFT by name on the C# side (the tread rig, d6). The fallback made its vertex groups from a set, in Python's
+randomized string-hash order (Blender ignores PYTHONHASHSEED): two runs gave the nine groups in two orders. `sorted(_names)` in
+`vehicle_rig.py`; the drill now dumps the fixture once more in a Blender run of its own and holds the two dumps equal row for row
+(the WORK row, the seal and the work folder's name aside) - with the sort reverted the step fails on the VG rows. The recoil sign
+test read the module-level `_tc`, which the track skinning and conveyor loops had rebound to the last track's centre; the arc's
+pivot sits R = slide / tan(3 deg) off the bore, so the sign flips once the tracks' centre is more than R off it - the fixture's
+tube hangs 8 units below the tracks (R = 5.6), and the old script swung the barrel 0.28 units TOWARD the target, the fixed one
+0.28 back (Blender, the exported GLB sampled at the kick frame). The tube centre now travels in `recoil_geom`. No saved recipe
+changes: the Jagdpanzer's tracks are static, the Bradley (live tracks, an .fbx) has no recoil, and no Lab golden carries either
+line. Review of PR #257 found that reverting the recoil fix still passed the drill because both tracked fixtures are LEFT
+before C# compares their actions. The second Blender run now requires both fixtures, checks the nine carrier groups in sorted
+order, and imports the exported tracked-recoil GLB to measure the evaluated tube skin and Barrel joint at frames 0, 2 and 16.
+Both must move approximately 0.28 units backward along the fixture's X axis and return. Permanent old-centre and no-kick
+controls must produce measurable exports that fail this numerical assertion; crashes and missing artifacts fail the drill.
+Removing or duplicating either fixture also fails rather than silently skipping the repeat. The port itself stays deferred: re-measured the same day, the Bradley is left at stage 1 by name as a skinned .fbx even
+with the native FBX reader (the vehicle import's direct-versus-round-trip leave), so d6 would still turn no recipe equal.
+
 Critical review of PR #181 (2026-10-17): the strict names reader's exception handling covered positional arguments but
 not names inside defaultreduce/shroudreduce/windowreduce tags. Directories and non-UTF-8 files could escape as CLR
 exceptions, even when Python had already stopped at an earlier dial or tag. Both paths now use the same error
