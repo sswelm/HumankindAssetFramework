@@ -1918,8 +1918,11 @@ Twelve defects planted in RunStage3 were each caught (the armature given its own
 CONSTANT keys sampled between frames were wrong until the segment follows the key's interpolation (the deploy drill
 never saw it: `keyframe_insert` keys are Bezier). Not fixtured, named: the poison gate's NaN rejection (no glTF
 fixture carries a NaN key), Unicode digits in a slice spec (Python's `\d`). A script finding the fixtures made plain:
-the legacy keepTranslations floor table is keyed by the role clip's SOURCE name, so a SLICED attack or move clip
-(`<source>_<role>_...`) never matches it and keeps nothing (`fx_s3_keept_kept`) - recorded in the backlog.
+the legacy keepTranslations floor table was keyed by the role clip's SOURCE name, so a SLICED attack or move clip
+(`<source>_<role>_...`) never matched it and kept nothing (`fx_s3_keept_kept`) - recorded in the backlog, fixed 2026-11-07:
+the table is keyed by the role's resolved action in the script and the port together, the fixture keeps the attack slice's
+slide (Blender's own run: 1 varying location path kept, Root, 6 translation curves across the clips), 147 of 156 jobs equal (9 left), the plant with the old key FAILS the drill on fx_s3_keept_kept (the LOG lines, the attack slice's fcurve count 11 against 8, the Root location rows); only UniversalTanks bakes
+legacy with keepTranslations, its attack and move roles whole actions.
 
 Step (d2), stage 3 in C# - the rest fold and rebake and the bone cap (2026-10-13): nothing of stage 3 is deferred any
 more. The fold on the conversion path: every exported clip's pose matrices snapshotted frame by frame (the evaluation

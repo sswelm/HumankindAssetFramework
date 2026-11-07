@@ -806,8 +806,9 @@ if keep_translations and not convert_rig:
     # role keeps its historical 1e-4 floor: the m114's recoil slide is only ~0.1 raw units.
     _role_floor = {}
     for _r, _cn in role_specs:
-        if _r in ('attack', 'move') and _cn.strip():
-            _bn = _cn.split('[')[0].strip()
+        if _r in ('attack', 'move') and _cn.strip() and _r in role_acts:
+            _bn = role_acts[_r].name      # the role's RESOLVED action: a sliced clip is '<source>_<role>_<f0>_<f1>_<step>' - keyed by
+                                          # the SOURCE name (cn.split('[')[0]) until 2026-11-07, a sliced attack/move clip matched nothing
             _fl = 1e-4 if _r == 'attack' else 0.5
             _role_floor[_bn] = min(_role_floor.get(_bn, 1e9), _fl)
     _keep_acts = [a for a in all_acts if a.name.split('_rebaked')[0] in _role_floor or a.name in _role_floor]

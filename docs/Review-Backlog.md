@@ -703,7 +703,9 @@ below that only intra-group parallelism of the weld or the gather would pay.
   a tab in it, so the dump's LOG row had 4 fields and the drill FAILED on consistency (a rerun passed). The exit itself is
   right (code 1); only the message is undefined. Fix: take `_parent.name` before leaving edit mode (one line, as the no-parent exit already does with its
   bone list). The C# model leaves the case by name until then.
-- **A sliced attack/move role clip never keeps its translations** — OPEN (2026-10-13, found by the stage 3 fixtures).
+- ~~**A sliced attack/move role clip never keeps its translations**~~ FIXED 2026-11-07 (the floor table keyed by the role's
+  resolved action, script and port together; `fx_s3_keept_kept` keeps the attack slice's slide; no registry bake changes;
+  `docs/Testing.md`). Was: OPEN (2026-10-13, found by the stage 3 fixtures).
   `rig_anim.py`'s legacy keepTranslations keys its role floor table by the clip's SOURCE name (`cn.split('[')[0]`), but a
   sliced role clip is the action `<source>_<role>_<f0>_<f1>_<step>`, which matches neither key, so `_keep_acts` is
   empty and the script logs "no attack/move-role clip found" (`fx_s3_keept_kept`, Blender's own run). Only whole-action

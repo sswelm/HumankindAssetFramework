@@ -10,6 +10,14 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **A SLICED ATTACK OR MOVE ROLE CLIP KEEPS ITS TRANSLATIONS ON THE LEGACY PATH (2026-11-07).** `rig_anim.py`'s legacy
+  keepTranslations keyed its per-role range-floor table by the role clip's SOURCE name (`cn.split('[')[0]`), but a sliced role
+  clip is the action `<source>_<role>_<f0>_<f1>_<step>`, which matched nothing: the script logged "no attack/move-role clip
+  found" and kept no slide (OPEN in the backlog since 2026-10-13, `fx_s3_keept_kept`). The table is keyed by the role's RESOLVED
+  action now, in the script and in the C# port together (`BlenderRigAnim.cs`); the fixture keeps the attack slice's slide
+  (Blender's own run: 1 varying location path kept, Root, 6 translation curves across the clips) and the move slice's stays under its 0.5 floor. The rig_anim drill alone with live Blender: 147 of 156 jobs
+  equal, 9 left by name; the plant (the script's old key against the fixed port) FAILS the drill on fx_s3_keept_kept (the LOG lines, the attack slice's fcurve count 11 against 8, the Root location rows). Registry: only UniversalTanks
+  bakes on the legacy path with keepTranslations and its attack and move roles are whole actions - no bake changes.
 - **rig_anim.py's SOCKET-SORT EXIT NO LONGER READS A FREED EDIT BONE; ITS TWO FIXTURES ARE TAKEN BY THE PORT (2026-11-07).**
   The "would sort BEFORE its parent" exit printed `_parent.name` after `mode_set('OBJECT')` had freed the edit bones: the right
   name once in four Blender runs, an empty name once, garbage twice (one run's dump died of a UnicodeDecodeError, another's

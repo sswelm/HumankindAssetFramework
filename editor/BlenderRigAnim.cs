@@ -1339,9 +1339,9 @@ public static class BlenderRigAnim
         {
             var roleFloor = new Dictionary<string, double>(StringComparer.Ordinal);
             foreach (var (role, clip) in a.RoleSpecs)
-                if ((role == "attack" || role == "move") && PyStrip(clip).Length > 0)
+                if ((role == "attack" || role == "move") && PyStrip(clip).Length > 0 && roleActs.Any(r => r.role == role))
                 {
-                    string bn = PyStrip(clip.Split('[')[0]);
+                    string bn = roleActs.First(r => r.role == role).act.Name;   // the role's RESOLVED action (a sliced clip's own name; the SOURCE name until 2026-11-07)
                     double fl = role == "attack" ? 1e-4 : 0.5;
                     roleFloor[bn] = Math.Min(roleFloor.TryGetValue(bn, out var prev) ? prev : 1e9, fl);
                 }
