@@ -2516,8 +2516,8 @@ in \x1c..\x1f finds its wheel), `fx_r_names_bom` (the BOM stays: the wheel is no
 fixtures too: `fx_r_turret` now carries the rock (RootHull under the turret, gun and trail), a turret part also a wheel, the brake
 also listed as a gun and a mantlet as gun and cradle (the de-duplication), and its three-vertex trail first (the arm is
 Trail_01); `fx_r_spike` (a three-vertex brake and no gun under recoil: fewer than 4 tube points, the defaults);
-`fx_r_gunpoint` (a tube of four coincident vertices: no GUNSPAN, a zero bore - and stage 4 then DIES dividing by it,
-`DIES:4:`); `fx_r_pivot_end` (the pivot at the muzzle under recoil); `fx_r_turret`'s Ring now rings the dome. Two script
+`fx_r_gunpoint` (a tube of four coincident vertices: no GUNSPAN, a zero bore - and stage 4 then DIED dividing by it,
+`DIES:4:`, until the 2026-11-07 fix below); `fx_r_pivot_end` (the pivot at the muzzle under recoil); `fx_r_turret`'s Ring now rings the dome. Two script
 defects found on the way, reproduced bit for bit and recorded in the backlog. Plants: the old Trim(), the BOM stripped, the
 directory's PermissionError (the drill fails on each target). After: 71 of 71 fixture jobs and 88 of 95 jobs equal
 through stage 3 (FULL, 454,970 rows); 1,854 tests.
@@ -2541,6 +2541,37 @@ Both must move approximately 0.28 units backward along the fixture's X axis and 
 controls must produce measurable exports that fail this numerical assertion; crashes and missing artifacts fail the drill.
 Removing or duplicating either fixture also fails rather than silently skipping the repeat. The port itself stays deferred: re-measured the same day, the Bradley is left at stage 1 by name as a skinned .fbx even
 with the native FBX reader (the vehicle import's direct-versus-round-trip leave), so d6 would still turn no recipe equal.
+
+The gun's recoil defects (2026-11-07): the recoil-side entries open since October, fixed in `vehicle_rig.py` and in the C#
+port in the same PR so the parity drill holds each fix (the fixtures are TAKEN by the port, unlike the tread's). (1) The arc's
+bore came from `gun_axis` (trunnion -> muzzle): at a pivot of 1.0 the trunnion is the muzzle and the difference is a float32
+residue - +Y on `fx_r_pivot_end`, exactly zero on the Wespe's coordinates (the arm then sat on the Barrel with no arc). Now
+from `gun_bore` (breech -> muzzle); the port's `boreD` the same. (2) A tube whose marked points coincide (`fx_r_gunpoint`)
+gave a zero span, a zero radius and a `ZeroDivisionError` in stage 4; the script now says `VEHICLE RECOIL *** WARNING: the
+tube's breech and muzzle coincide (a zero span)` in stage 3 and makes no arm and no Recoil clip; the fixture moved from the exit
+set to the ordinary recipes and completes. (3) The breech clearance searched `"Mesh_" + recoil_bone` (`Mesh_RecoilArm`) while
+the tube rides Barrel as `Mesh_Barrel`, so no rig ever printed one - and had it found the mesh, `_trun` was bound only when the
+deploy block elevated the gun (a NameError otherwise) and the rotation it applied to world points was the pose bone's
+quaternion, which lives in the bone's frame. Now the Barrel mesh, `_trun = gun_axis[0]` (the Gun bone's head, the lift's centre)
+and `deployed_world["Gun"]`, the same lift as `Quaternion(_ax, angle)` about the world axis the deploy block already computes.
+The port models the block in float32 as mathutils computes it: `(world @ co) - trun + back`, rotated by the world quaternion,
+`+ trun`, the lowest z against the lowest static vertex, the difference and its `%.2f` in double. Two unit cases hold it to
+numbers derived from the fixture's input: a 4-unit tube at z -0.1..0.1 over a floor at -1 with a 0.25 stroke along the bore
+prints `0.90 above the model's lowest static point (Z -1.00)`; the trunnion at the breech, 45 degrees of lift and a 0.75 stroke
+put the breech corner (the trunnion is the breech VERTEX, at z -0.1) 3 sin45 lower, at z -2.22, `1.22 BELOW` (the new `fx_r_recoil_buried` takes that branch in the
+drill, with three e3 fixtures at 45 degrees; the other recoil fixtures take the clearance line). The initial drill alone with live
+Blender: PASS, 152 of 165 jobs equal (13 left by name), 8 jobs with the clearance line and 4 with the warning; the plant (the
+port's bore from `gunAxis` again) fails on `fx_r_pivot_end`. 2,517 unit tests. Saved recipes: the M114 is the only one with
+recoil on a tube (pivot 0.25, 45 degrees of lift, a 0.15 stroke): its bore is now the breech->muzzle direction instead of
+trunnion->muzzle, the same line, so its arm and Recoil keys move by a float32 rounding of that direction (measured by the plant: the
+arm's pivot z -1.00974929 -> -1.00974917, one ulp, and the same on `fx_r_turret` and `fx_e3_offaxis`; not re-checked in game), and its bake now prints the clearance the Editor-Tools walkthrough once measured by eye.
+
+Review of PR #258 also reproduced reversed deploy elevation at a muzzle pivot: fixing only the recoil arc left the lift
+plane and sign derived from the collapsed trunnion-to-muzzle vector. Blender and C# now use the full bore for Deploy too,
+keeping the trunnion as the rotation centre. Six unit cases require the bore's vertical component to equal sin(elevation)
+at pivots 0, 0.5 and 1 for +45 and -45 degrees (both muzzle-pivot cases failed before the fix). For the 4-unit tube and
+1-unit stroke at pivot 1, +45 correctly warns at Z -3.64, 2.64 below the floor; -45 reports 1.61 clearance. The two new
+`fx_r_pivot_end_raise` / `fx_r_pivot_end_lower` fixtures hold both directions to Blender through export.
 
 Critical review of PR #181 (2026-10-17): the strict names reader's exception handling covered positional arguments but
 not names inside defaultreduce/shroudreduce/windowreduce tags. Directories and non-UTF-8 files could escape as CLR
@@ -2742,7 +2773,8 @@ fx_e3_action_names and two unit cases now distinguish this from a wheel's actual
 Recoil and Spin preserve the original actions and purge the newly suffixed authored actions, including unlinking Spin.
 The native fixtures fx_e3_deploy, fx_e3_deploy_only, fx_e3_offaxis, fx_e3_no_spread, fx_e3_negative, fx_e3_no_gun,
 fx_e3_long_lead and fx_e3_vertical cover timing, direction warnings, elevation signs, disabled branches and the vertical
-fallback. The existing fx_r_gunpoint now compares the script's stage-four ZeroDivisionError; a unit case holds that failure.
+fallback. The existing fx_r_gunpoint now compares the script's stage-four ZeroDivisionError; a unit case holds that failure
+(until 2026-11-07: the script warns in stage 3 and makes no arm, see the recoil defects paragraph below).
 
 Sixteen new unit cases bring the suite to 1,981 passing tests; all 117 editor sources compile. Another 120 deterministic
 independent scenes vary trail count, yaw/tilt, pivot, elevation, recoil fraction/timing, source actions, rock, wheels, flags
@@ -2752,7 +2784,7 @@ reversed kick, non-LINEAR Recoil, omitted armature update, unrelated object anim
 threshold) are all caught. The drill requires intact e3 Deploy/warning seeds and ten S4_E3* counterexamples; changed key
 values/interpolation repair both FC hashes and the outer seal before comparison. Non-finite Deploy angles and endpoints
 past 100,000 frames remain named limits. The script's clearance search names Mesh_RecoilArm rather than Mesh_Barrel;
-normal rigs consequently produce no clearance line (recorded as a source defect in Review-Backlog).
+normal rigs consequently produce no clearance line (recorded as a source defect in Review-Backlog; fixed 2026-11-07, below).
 
 FULL=1 VEHICLERIG_KEYS=1: all 25 saved recipes (now including rq4_global_hawk) and 127 fixture jobs run natively;
 23 of 25 recipes and 146 of 152 jobs match through stage 4, with 501,773 compared rows. The six named deferrals are two

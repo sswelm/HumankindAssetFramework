@@ -10,6 +10,23 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE GUN'S RECOIL DEFECTS FIXED IN vehicle_rig.py AND ITS PORT TOGETHER - THE BREECH CLEARANCE IS MEASURED AT LAST (2026-11-07).**
+  The recoil-side entries open in the backlog since October, each fixed in the script and mirrored in the C# port so the parity
+  drill holds the fix: the arc's bore came from `gun_axis` (trunnion -> muzzle), a float32 residue at a pivot of 1.0 (+Y on
+  `fx_r_pivot_end`, zero on the Wespe's coordinates), now from the breech -> muzzle span; a tube whose marked points coincide
+  made stage 4 die of `ZeroDivisionError` (`fx_r_gunpoint`), now a `*** WARNING` in stage 3 and no recoil arm; the breech
+  clearance searched `Mesh_RecoilArm` while the tube rides Barrel as `Mesh_Barrel`, so no rig ever printed one - and had it
+  found the mesh, its trunnion was bound only by the deploy block (a NameError) and it rotated world points by the pose bone's
+  bone-frame quaternion; now the Barrel mesh, the trunnion from `gun_axis`, and the lift as a world rotation (`deployed_world`).
+  The port models the clearance in float32 as mathutils computes it (two unit cases from the fixture's own numbers: 0.90 above
+  the floor; a buried breech 1.22 below it). The initial drill: 152 of 165 jobs equal to Blender row for row (13 left by name), 8 jobs
+  print the clearance line and 4 the warning (the new `fx_r_recoil_buried` and three e3 fixtures at 45 degrees), `fx_r_gunpoint`
+  now completes. Saved recipes: only the M114 has recoil on a tube (pivot 0.25, 45 degrees); its bore is now the breech->muzzle
+  direction instead of trunnion->muzzle, the same line, so its arm and Recoil keys move by a float32 rounding of that direction
+  (measured by the plant: the arm's pivot z -1.00974929 -> -1.00974917, one ulp; not re-checked in game), and its bake now prints the breech clearance the Editor-Tools walkthrough measured by eye
+  (`docs/Testing.md`, `docs/Review-Backlog.md`). Review also fixes Deploy at the muzzle pivot: its collapsed direction
+  reversed elevation and the clearance result. Both runtimes now lift about the full bore; six physical unit cases and two
+  Blender fixtures cover +/-45 degrees at the end pivot, with derived clearance and below-ground warning values.
 - **THE TREAD RIG'S ORACLE MADE SOUND - TWO vehicle_rig.py DEFECTS FIXED AND FIXTURED (2026-11-06).** Before the tread rig
   (d6, the last unported part of the Vehicle Lab's script) is held to Blender, the script it would be held to is: the carrier-blend
   fallback's vertex groups were created from a set in Python's randomized string-hash order (two Blender runs, two orders of the

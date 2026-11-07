@@ -1076,6 +1076,7 @@ recoil_geom = None               # (pivot, axis, bore_dir, slide, R, tube centre
 # infinity collapses the bone chain through float32 cancellation — the documented 1e9 sentinel bug).
 RECOIL_PITCH_DEG = 3.0
 deployed_pose = {}               # bone -> quaternion at the END of Deploy: the pose a firing gun must be holding
+deployed_world = {}              # bone -> that same lift as a WORLD-space rotation about the bone's head (the breech clearance measures in world space)
 gun_bore = None                  # (breech, muzzle) — the full tube, the basis for the recoil fraction
 axis_arg = argv[6].upper()
 frames = max(2, int(argv[7]))
@@ -1808,8 +1809,17 @@ if gun_names or muzzle_names or cradle_names:
         # hanging under it. Rotating the arm by theta = dist/R swings the tube R*theta along its own bore — a
         # near-straight slide — while tilting it only theta. Same trick deploy_convert uses, and the reason its
         # howitzer visibly slides in-game while this one did not.
-        _bore_d = (gun_axis[1] - gun_axis[0]).normalized() if gun_axis is not None else Vector((0.0, -1.0, 0.0))
+        # the bore from gun_bore (breech -> muzzle), NOT from gun_axis (trunnion -> muzzle): at a pivot of 1.0 the trunnion
+        # IS the muzzle and that difference is a float32 residue - +Y on a fixture, exactly zero on the Wespe's coordinates,
+        # which sat the arm on the Barrel with no arc (found 2026-10-16 porting d3; fixed 2026-11-07)
+        _bore_d = (gun_bore[1] - gun_bore[0]).normalized() if gun_bore is not None else Vector((0.0, -1.0, 0.0))
         _slide = (gun_bore[1] - gun_bore[0]).length * recoil_dist if gun_bore is not None else 1.0
+    # a tube whose marked points coincide has no span: no bore, a zero radius, and stage 4 died dividing by it
+    # (ZeroDivisionError, found 2026-10-16; fixed 2026-11-07). Said out loud instead; the gun keeps its elevation.
+    if recoil_dist > 0.0 and tube_names and _slide <= 0.0:
+        print("VEHICLE RECOIL *** WARNING: the tube's breech and muzzle coincide (a zero span) — no recoil arm and no Recoil "
+              "clip; mark tube parts that have a length")
+    elif recoil_dist > 0.0 and tube_names:
         _R = _slide / math.tan(math.radians(RECOIL_PITCH_DEG))     # radius for the chosen residual tilt
         _axis = _bore_d.cross(Vector((0.0, 0.0, 1.0)))
         if _axis.length < 1e-4:
@@ -3567,7 +3577,9 @@ if trail_bones and trail_spread > 0.01:
         _gb = arm.data.bones.get("Gun"); _gpb = arm.pose.bones.get("Gun")
         if _gb is not None and _gpb is not None:
             _trun, _mz = gun_axis
-            _bar = (_mz - _trun)
+            # A muzzle pivot makes trunnion -> muzzle zero (or float32 residue). Choose the lift plane and sign
+            # from the full bore, as recoil does; the trunnion remains the centre of the lift.
+            _bar = (gun_bore[1] - gun_bore[0]) if gun_bore is not None else (_mz - _trun)
             _ax = _bar.cross(Vector((0.0, 0.0, 1.0)))
             if _ax.length < 1e-4:                     # a tube already pointing straight up has no elevation plane
                 _ax = Vector((1.0, 0.0, 0.0))
@@ -3582,6 +3594,7 @@ if trail_bones and trail_spread > 0.01:
             _gpb.rotation_quaternion = Quaternion(_glocal, math.radians(abs(gun_deploy_elev)) * _gsign * (1.0 if gun_deploy_elev > 0 else -1.0))
             _gpb.keyframe_insert('rotation_quaternion', frame=trail_frames)
             deployed_pose["Gun"] = _gpb.rotation_quaternion.copy()
+            deployed_world["Gun"] = Quaternion(_ax, math.radians(abs(gun_deploy_elev)) * _gsign * (1.0 if gun_deploy_elev > 0 else -1.0))   # the same lift about the world axis, for the clearance
             print("VEHICLE DEPLOY gun: elevate %.1f deg about world (%.2f, %.2f, %.2f) over 0..%d frames"
                   % (gun_deploy_elev, _ax.x, _ax.y, _ax.z, trail_frames))
         else:
@@ -3689,15 +3702,20 @@ if recoil_bone is not None and gun_axis is not None:
         # lowest static vertex on the model.
         bpy.context.view_layer.update()
 
-        # meshes are merged per bone and named "Mesh_<bone>" by this point — bone_of still holds SOURCE part names
+        # meshes are merged per bone and named "Mesh_<bone>" by this point — bone_of still holds SOURCE part names. The tube
+        # rides Barrel (Mesh_Barrel); the arm (recoil_bone) carries no mesh. This searched "Mesh_" + recoil_bone, so no rig
+        # ever printed a clearance - and had one, _trun was bound only by the deploy block and the pose-bone quaternion it
+        # rotated by lives in the bone's frame, not the world's (found 2026-10-18 porting e3; fixed 2026-11-07)
+        _barrel_mesh = "Mesh_Barrel"
         _statics = [o for o in bpy.data.objects
-                    if o.type == 'MESH' and o.data.vertices and o.name != "Mesh_" + recoil_bone]
+                    if o.type == 'MESH' and o.data.vertices and o.name != _barrel_mesh]
         if _statics:
             _ground = min(min((o.matrix_world @ _v.co).z for _v in o.data.vertices) for o in _statics)
-            _bar_objs = [o for o in bpy.data.objects if o.type == 'MESH' and o.name == "Mesh_" + recoil_bone]
+            _bar_objs = [o for o in bpy.data.objects if o.type == 'MESH' and o.name == _barrel_mesh]
             if _bar_objs:
-                # the barrel's own lowest point, deployed and slid fully back
-                _dq = deployed_pose.get("Gun")
+                # the barrel's own lowest point, deployed (the lift about the trunnion, in world space) and slid fully back
+                _trun = gun_axis[0]
+                _dq = deployed_world.get("Gun")
                 _lowest = None
                 # Barrel is a CHILD of Gun, so its local slide is rotated by the elevation too — the recoil vector
                 # has to go INSIDE the rotation, not after it. (Left outside, this measured a level-bore slide and

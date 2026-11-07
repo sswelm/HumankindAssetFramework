@@ -675,14 +675,22 @@ below that only intra-group parallelism of the weld or the gather would pay.
   The unreduced variant exceeds the ordinary eight-fragment budget; the current user's recipe has no animated
   channels. Only the throwaway smoke test enables wave rock; no user source/recipe or production golden changed.
 
-- **vehicle_rig.py: two gun-recoil defects** — OPEN (2026-10-16, found porting stage 3 part d3; the C# port reproduces both bit
+- ~~**vehicle_rig.py: two gun-recoil defects**~~ FIXED 2026-11-07 (script and port together: the bore from `gun_bore`, the
+  breech->muzzle span; a zero span is a stage 3 `*** WARNING` with no arm instead of a stage 4 ZeroDivisionError; `fx_r_pivot_end`
+  and `fx_r_gunpoint` equal to Blender in the drill, `fx_r_gunpoint` moved out of the exit set; review of PR #258 also moves
+  Deploy's lift direction to the full bore, since a muzzle pivot reversed elevation and the clearance result there too;
+  six unit cases and `fx_r_pivot_end_raise` / `fx_r_pivot_end_lower` cover it; `docs/Testing.md`). Was: OPEN
+  (2026-10-16, found porting stage 3 part d3; the C# port reproduces both bit
   for bit, so fixing them is a script change plus a port change). (1) With `gun_pivot` at 1.0 and recoil on, the bore direction is
   `(gun_axis[1] - gun_axis[0]).normalized()` with `gun_axis[0]` the head - at the muzzle - so the bore is the float32 residue of
   muzzle - head: +Y on `fx_r_pivot_end`, exactly zero on the Wespe's coordinates (the RecoilArm then sits on the Barrel, no arc).
   The bore should come from `gun_bore` (breech -> muzzle). (2) A tube whose points coincide (a zero span) gives a zero bore, and
   stage 4 dies of `ZeroDivisionError: float division by zero` (`fx_r_gunpoint`, keyed DIES:4:). Neither is reachable on a real
   gun's geometry at pivots below 1.
-- **vehicle_rig.py: recoil clearance looks for the wrong joined mesh** — OPEN (2026-10-18, found porting e3). The tube
+- ~~**vehicle_rig.py: recoil clearance looks for the wrong joined mesh**~~ FIXED 2026-11-07 (the Barrel mesh, the trunnion
+  from `gun_axis` - it was bound only by the deploy block - and the lift as a WORLD rotation, not the pose bone's bone-frame
+  quaternion; the port models the block in float32, two unit cases from the fixture's numbers, `fx_r_recoil_buried` takes the
+  warning branch in the drill; `docs/Testing.md`). Was: OPEN (2026-10-18, found porting e3). The tube
   joins as `Mesh_Barrel`, but the clearance code searches for `Mesh_RecoilArm`. Ordinary rigs therefore never print a breech
   clearance result or ground warning. The port preserves that omission; an unusual scene actually carrying `Mesh_RecoilArm`
   is declined by name until that branch is verified. Fixing the script and port together belongs with the recoil defects above.

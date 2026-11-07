@@ -192,13 +192,67 @@ public class VehicleRigStage4Tests
     }
 
     [Fact]
-    public void Zero_span_tube_reproduces_the_scripts_stage_four_division_failure()
+    public void Zero_span_tube_warns_in_stage_three_and_authors_no_recoil()
     {
+        // until 2026-11-07 the script died in stage 4 dividing by the zero radius (ZeroDivisionError); now it says so in stage 3 and makes no arm
         var m = new HafModel { Scene = 0 }; m.Scenes.Add(new HafScene()); Box(m, "Hull", 0, .5f, 0, 2, 1, 2); Box(m, "Dot", 1.5f, 1.2f, 0, 0, 0, 0);
         var a = E2Args(); Mark(a, "guns", "Dot"); a.RecoilDist = .4;
         var s = BlenderVehicleRig.RunStage1(m, a); BlenderVehicleRig.RunStage2(s, a); BlenderVehicleRig.RunStage3(s, a);
-        Assert.Null(s.Dies); BlenderVehicleRig.RunStage4(s, a);
-        Assert.Null(s.Fallback); Assert.Equal("ZeroDivisionError: float division by zero", s.Dies);
+        Assert.Null(s.Dies); Assert.Null(s.Fallback);
+        Assert.Contains(s.Logs3, l => l.StartsWith("VEHICLE RECOIL *** WARNING: the tube's breech and muzzle coincide (a zero span)"));
+        Assert.DoesNotContain(s.Logs3, l => l.StartsWith("VEHICLE RECOIL ARM:"));
+        BlenderVehicleRig.RunStage4(s, a);
+        Assert.Null(s.Fallback); Assert.Null(s.Dies); Assert.DoesNotContain(s.Actions, x => x.Name == "Recoil");
+    }
+
+    [Fact]
+    public void Breech_clearance_is_measured_on_the_barrel_mesh()
+    {
+        // the hull's floor at Blender z -1; a 4-unit tube along +Y at z -0.1..0.1, a 0.25 stroke (1 unit) along the bore: the barrel's
+        // lowest point stays at -0.1, 0.9 above the floor. Until 2026-11-07 the script searched Mesh_RecoilArm and printed nothing.
+        var m = new HafModel { Scene = 0 }; m.Scenes.Add(new HafScene()); Box(m, "Hull", 0, 0, 0, 2, 2, 2); Box(m, "Tube", 0, 0, -3, .2f, .2f, 4);
+        var a = E2Args(); Mark(a, "guns", "Tube"); a.RecoilDist = .25;
+        var s = Rig(m, a);
+        Assert.Contains("VEHICLE RECOIL breech clearance at full recoil: 0.90 above the model's lowest static point (Z -1.00)", s.Logs4);
+    }
+
+    [Theory]
+    [InlineData(0.0, 45.0)]
+    [InlineData(0.5, 45.0)]
+    [InlineData(1.0, 45.0)]
+    [InlineData(0.0, -45.0)]
+    [InlineData(0.5, -45.0)]
+    [InlineData(1.0, -45.0)]
+    public void Deploy_elevates_the_bore_even_when_the_trunnion_is_at_the_muzzle(double pivot, double elevation)
+    {
+        var m = new HafModel { Scene = 0 }; m.Scenes.Add(new HafScene());
+        Box(m, "Hull", 0, 0, 0, 2, 2, 2); Box(m, "Tube", 0, 0, -3, .2f, .2f, 4); Box(m, "Trail", 0, 0, 3, .2f, .2f, 4);
+        var a = E2Args(); Mark(a, "guns", "Tube"); Mark(a, "trails", "Trail");
+        a.RecoilDist = .25; a.GunPivot = pivot; a.GunDeployElev = elevation; a.TrailSpread = 30; a.TrailFrames = 10;
+        var s = Rig(m, a);
+        var deploy = Assert.Single(s.Actions.Where(x => x.Name == "Deploy"));
+        var q = Enumerable.Range(0, 4).Select(i => Curve(deploy, "Gun", i).Keys.Last().Value).ToArray();
+        // The input bore is Blender +Y. Its deployed direction must acquire sin(elevation) in +Z at every pivot,
+        // including 1.0 where the trunnion-to-muzzle vector is exactly zero. Gun's local X is world X in this fixture.
+        var direction = System.Numerics.Vector3.Transform(System.Numerics.Vector3.UnitY,
+            new System.Numerics.Quaternion(q[1], q[2], q[3], q[0]));
+        Assert.InRange(Math.Abs(direction.Z - Math.Sin(elevation * Math.PI / 180)), 0, 1e-5);
+        if (pivot == 1.0 && elevation > 0)
+            Assert.Contains(s.Logs4, l => l.StartsWith("VEHICLE RECOIL *** WARNING: at full recoil the breech reaches Z -3.64, 2.64 BELOW"));
+        if (pivot == 1.0 && elevation < 0)
+            Assert.Contains("VEHICLE RECOIL breech clearance at full recoil: 1.61 above the model's lowest static point (Z -1.00)", s.Logs4);
+    }
+
+    [Fact]
+    public void Breech_clearance_warns_when_the_deployed_stroke_goes_below_the_floor()
+    {
+        // the trunnion at the breech (pivot 0) is the breech VERTEX, the first extreme point along the tube: the corner (-0.1, 1, -0.1).
+        // 45 degrees of lift about world +X and a 0.75 stroke (3 units): that corner slides to (0, -3, 0) relative to the trunnion and
+        // raised lands 3 sin45 = 2.12 below it, at z -2.22, 1.22 below the floor at -1
+        var m = new HafModel { Scene = 0 }; m.Scenes.Add(new HafScene()); Box(m, "Hull", 0, 0, 0, 2, 2, 2); Box(m, "Tube", 0, 0, -3, .2f, .2f, 4); Box(m, "Trail", 0, 0, 3, .2f, .2f, 4);
+        var a = E2Args(); Mark(a, "guns", "Tube"); Mark(a, "trails", "Trail"); a.RecoilDist = .75; a.GunPivot = 0; a.GunDeployElev = 45; a.TrailSpread = 30; a.TrailFrames = 10;
+        var s = Rig(m, a);
+        Assert.Contains(s.Logs4, l => l.StartsWith("VEHICLE RECOIL *** WARNING: at full recoil the breech reaches Z -2.22, 1.22 BELOW the model's lowest static point (Z -1.00)"));
     }
 
     [Theory]
