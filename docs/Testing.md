@@ -1977,8 +1977,11 @@ the children sorted, `A###_` with sockets else `b###_`; Blender's rename fixes t
 strips' stashed ones - `BKE_animdata_fix_paths_rename_all` - and the script's patch covers the rest over `all_acts`).
 The donor sockets (edit bones: the parent by lowered substring, head = parent head + offset, the direction normalized
 with mathutils' double length and float reciprocal at `max(0.02, length / 4)`, the parent's roll, `use_deform` off; the
-no-parent exit modelled; the sort exit LEFT by name - its message reads `_parent.name` AFTER `mode_set('OBJECT')` freed
-the edit bones, and four Blender runs gave the right name once, an empty name once and a UnicodeDecodeError twice). The
+no-parent exit modelled; the sort exit was LEFT by name until 2026-11-07 - its message read `_parent.name` AFTER
+`mode_set('OBJECT')` freed the edit bones, and four Blender runs gave the right name once, an empty name once and a
+UnicodeDecodeError twice; the script takes the name first now, the port models the exit, and `fx_s4_socket_sort` and
+`fx_s4_socket_unicode_sort` are EXIT:4 jobs held to the script's RIGANIM ERROR line: 147 of 156 jobs equal, 9 left,
+the plant with the old read passed the drill once - the undefined read printed the right name that run - so it was measured directly: six Blender runs of the two jobs with the old read, 6 of 12 exits died in the dump (a UnicodeDecodeError on byte 0xd8 of the freed name) and 6 printed the right name; six runs with the fix, 12 of 12 right). The
 rotation and scale fold (`Matrix.Rotation`'s angle wrapped to (-pi, pi] in float, then cosf/sinf; the parent-less
 objects' worlds through `BKE_object_apply_mat4`; the primary's object-level fcurves stripped; `transform_apply` parents
 first - `mesh_transform` with the skip rule, `armature_transform_recurse`, the properties reset, the world from the
