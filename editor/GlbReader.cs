@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 using Newtonsoft.Json.Linq;
 
@@ -76,7 +77,7 @@ public static class GlbReader
 
     /// <summary>Any JSON value, strings kept as strings (see <see cref="ParseObject"/>). The text is read by the JSON grammar
     /// as Python's json.loads reads it (2026-11-07), into Newtonsoft's tree: a float token through
-    /// <see cref="BlenderDeploy.ReadPythonFloat"/> - correctly rounded and the SIGN OF ZERO kept (Newtonsoft's reader and
+    /// <see cref="ReadPythonFloat"/> (Python's float(), moved here from BlenderDeploy) - correctly rounded and the SIGN OF ZERO kept (Newtonsoft's reader and
     /// .NET's double.Parse both read `-0.0` as +0, on .NET Framework and on Unity's 64-bit Mono alike, measured; a node's
     /// held `-0.0` then exported as `0.0` where Blender writes `-0.0`) - an integer token as a long (past a long, as a
     /// float), `NaN`, `Infinity` and `-Infinity` as Python accepts them, a repeated key taken last as a dict takes it;
@@ -88,6 +89,90 @@ public static class GlbReader
         p.Ws();
         if (p.Pos < json.Length) throw new InvalidDataException("the JSON has text after its value");
         return t;
+    }
+
+    // Python's str.strip() whitespace without the separators U+001C..U+001F, which float() does not take (BlenderDeploy's IntWhitespace)
+    static readonly char[] PyFloatWhitespace = "\u0009\u000a\u000b\u000c\u000d\u0020\u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000".ToCharArray();
+
+    // .NET Framework's decimal conversion can round a double one ulp away from Python (for example
+    // 0.39499999999999999). Use it as an estimate, then compare the exact decimal input to the exact binary
+    // midpoints around that estimate. This also holds under Unity's Mono, without a native parser dependency.
+    public static bool ReadPythonFloat(string s, out double v)
+    {
+        s = (s ?? "").Trim(PyFloatWhitespace); v = 0;
+        if (s.Length == 0 || s.Any(ch => !(ch >= '0' && ch <= '9') && ch != '+' && ch != '-' && ch != '.' && ch != 'e' && ch != 'E')) return false;
+        if (!double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out v) || double.IsInfinity(v)) return false;
+        bool neg = s[0] == '-';
+        string token = s[0] == '+' || neg ? s.Substring(1) : s;
+        int at = token.IndexOfAny(new[] { 'e', 'E' }); long power = 0;
+        if (at >= 0)
+        {
+            string exp = token.Substring(at + 1); bool minus = exp[0] == '-';
+            int first = exp[0] == '+' || minus ? 1 : 0;
+            // Exponents beyond this bound cannot cancel a string's (Int32-sized) number of digits.
+            for (int i = first; i < exp.Length; i++) power = Math.Min(10000000000L, power * 10 + exp[i] - '0');
+            if (minus) power = -power;
+            token = token.Substring(0, at);
+        }
+        int point = token.IndexOf('.');
+        if (point >= 0) { power -= token.Length - point - 1; token = token.Remove(point, 1); }
+        string digits = token.TrimStart('0');
+        if (digits.Length == 0) { v = neg ? -0.0 : 0.0; return true; }
+        var exact = Canonical(digits, power);
+        long bits = BitConverter.DoubleToInt64Bits(v) & long.MaxValue;
+        while (true)
+        {
+            int e = (int)(bits >> 52); ulong m = (ulong)bits & 0xFFFFFFFFFFFFFUL;
+            int binaryPower = e == 0 ? -1074 : e - 1075;
+            if (e != 0) m |= 1UL << 52;
+            bool odd = (bits & 1) != 0;
+            int upper = Compare(exact, BinaryDecimal(2 * m + 1, binaryPower - 1));
+            if (upper > 0 || upper == 0 && odd)
+            {
+                if (++bits == 0x7ff0000000000000L) return false; // a scale overflowing a double stays Blender's
+                continue;
+            }
+            if (bits != 0)
+            {
+                bool boundary = e > 1 && m == 1UL << 52;
+                int lower = Compare(exact, BinaryDecimal(boundary ? 4 * m - 1 : 2 * m - 1, binaryPower - (boundary ? 2 : 1)));
+                if (lower < 0 || lower == 0 && odd) { bits--; continue; }
+            }
+            v = BitConverter.Int64BitsToDouble(bits | (neg ? long.MinValue : 0)); return true;
+        }
+
+        (string digits, long power) Canonical(string d, long p)
+        {
+            string trimmed = d.TrimEnd('0'); return (trimmed, p + d.Length - trimmed.Length);
+        }
+        (string digits, long power) BinaryDecimal(ulong coefficient, int p)
+        {
+            var ds = coefficient.ToString(System.Globalization.CultureInfo.InvariantCulture).Select(c => c - '0').ToList();
+            int frac = 0;
+            for (; p > 0; p--)
+            {
+                int carry = 0;
+                for (int i = ds.Count - 1; i >= 0; i--) { int d = ds[i] * 2 + carry; ds[i] = d % 10; carry = d / 10; }
+                if (carry > 0) ds.Insert(0, carry);
+            }
+            for (; p < 0; p++)
+            {
+                ds.Add(0); frac++; int rem = 0;
+                for (int i = 0; i < ds.Count; i++) { int d = rem * 10 + ds[i]; ds[i] = d / 2; rem = d % 2; }
+            }
+            return Canonical(new string(ds.Select(d => (char)('0' + d)).ToArray()).TrimStart('0'), -frac);
+        }
+        int Compare((string digits, long power) a, (string digits, long power) b)
+        {
+            int order = (a.digits.Length + a.power).CompareTo(b.digits.Length + b.power);
+            if (order != 0) return order;
+            for (int i = 0; i < Math.Max(a.digits.Length, b.digits.Length); i++)
+            {
+                char ac = i < a.digits.Length ? a.digits[i] : '0', bc = i < b.digits.Length ? b.digits[i] : '0';
+                if (ac != bc) return ac.CompareTo(bc);
+            }
+            return 0;
+        }
     }
 
     /// <summary>The JSON grammar (RFC 8259) over a string, as Python's json.loads takes it; see <see cref="ParseToken"/>.</summary>
@@ -219,7 +304,7 @@ public static class GlbReader
             if (Peek() == 'e' || Peek() == 'E') { isFloat = true; Pos++; if (Peek() == '+' || Peek() == '-') Pos++; if (!Digit(Peek())) throw Bad("a digit must follow the exponent"); while (Digit(Peek())) Pos++; }
             string text = s.Substring(start, Pos - start);
             if (!isFloat && long.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out long l)) return new JValue(l);
-            if (BlenderDeploy.ReadPythonFloat(text, out double d)) return new JValue(d);
+            if (ReadPythonFloat(text, out double d)) return new JValue(d);
             return new JValue(text[0] == '-' ? double.NegativeInfinity : double.PositiveInfinity);   // past double's range: Python's float() gives inf
         }
     }
