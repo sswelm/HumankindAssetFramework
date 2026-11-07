@@ -219,6 +219,42 @@ def main(out):
     s.extra["extensionsUsed"] = ["EXT_mesh_gpu_instancing"]
     J("LEFT:r21_instancing", s.write(out, "r21_instancing"))
 
+    # R22 negative zeros (2026-11-07): json.dumps writes a held -0.0 as "-0.0" and Python reads it back signed; the port's reader
+    # read +0 (Newtonsoft and double.Parse alike, on .NET Framework and Unity's Mono). The importer's `rotation_after @ t` (the
+    # identity quaternion on a root, mul_qt_v3's chain of float32 products and sums) ABSORBS a -0.0 wherever a +0 term joins the
+    # sum (+0 + -0 = +0) and KEEPS it where every term is -0 - which the signs of the other two components decide - so a -0.0 sits in
+    # each slot beside every sign pair of the other two; a MATRIX node (the importer's decompose) the same; a node rotation with -0.0;
+    # a translation key held at -0.0. The posed-state rows (the imported location bits) and the export rows decide.
+    s = S(); s.node("Hull", None, mesh=s.mesh("hull", 4.0))
+    k = 0
+    for slot in range(3):
+        for sa in (1.0, -1.0):
+            for sb in (1.0, -1.0):
+                t = [0.0, 0.0, 0.0]; t[slot] = -0.0; t[(slot + 1) % 3] = 2.0 * sa; t[(slot + 2) % 3] = 1.0 * sb
+                s.node("NZ%d" % k, None, mesh=s.mesh("nz%d" % k, 0.5, at=(6.0 + k, 0.0, 0.0)), translation=t); k += 1
+    # every sign pattern of a zero-only translation (8) and of a unit quaternion whose three vector parts are signed zeros and
+    # whose scalar is +1 or -1 (16): the quaternion product `rotation_after @ r @ rotation_before` is a chain of float32
+    # products and sums with no seed, where a -0.0 survives only while every term it meets is -0.0
+    for pat in range(8):
+        t = [-0.0 if pat & (1 << i) else 0.0 for i in range(3)]
+        s.node("TZ%d" % pat, None, mesh=s.mesh("tz%d" % pat, 0.5, at=(20.0 + pat, 0.0, 0.0)), translation=t)
+    for pat in range(16):
+        q = [-0.0 if pat & (1 << i) else 0.0 for i in range(3)] + [-1.0 if pat & 8 else 1.0]
+        s.node("RZ%d" % pat, None, mesh=s.mesh("rz%d" % pat, 0.5, at=(30.0 + pat, 0.0, 0.0)), rotation=q)
+    # six shortest-repr tokens (what json.dumps writes) that Mono's double.Parse - Newtonsoft's reader on Unity's Mono with it - reads
+    # one ulp off, each one double-ulp beside a float32 rounding boundary, so the IMPORTED float32 location differs by one float32 ulp
+    # from Blender's (a probe under the drill's MonoHost over 800,000 boundary-adjacent tokens: 1,422 misparsed, these 6 crossing);
+    # the strict reader's ReadPythonFloat is correctly rounded. The posed-state rows (location bits) decide.
+    for i, tok in enumerate((-0.003120093955658376, -0.0004121560923522338, -0.006073869531974196, 0.007174800848588347, -5.168448660697322e-05, -0.006854354171082377)):
+        t = [0.0, 0.0, 0.0]; t[i % 3] = tok
+        s.node("RT%d" % i, None, mesh=s.mesh("rt%d" % i, 0.5, at=(50.0 + i, 0.0, 0.0)), translation=t)
+    n = s.node("NegZero", None, mesh=s.mesh("nz", 1.0), translation=[-0.739, -0.0, 0.0], rotation=[0.0, -0.0, 0.0, 1.0])
+    s.anim(n, "translation", [0.0, 1.0, 2.0], [(-0.739, -0.0, 0.0), (-0.739, -0.0, 0.0), (-0.5, 0.0, -0.0)])
+    s.node("NegZeroMatrix", None, mesh=s.mesh("nzm", 1.0), matrix=[1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, -0.0, 2.0, -1.0, 1.0])
+    s.node("NegZeroMatrix2", None, mesh=s.mesh("nzm2", 1.0), matrix=[1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, -0.0, -2.0, -1.0, 1.0])
+    s.part("Plain", None, at=(-0.0, 1.0, -0.0))
+    J("r22_negzero", s.write(out, "r22_negzero"))
+
 
 if __name__ == "__main__":
     main(sys.argv[1])

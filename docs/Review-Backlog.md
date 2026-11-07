@@ -203,15 +203,27 @@ the role clips; 5 the exported animation, the wiring, the existing golden. OPEN 
 tolerance - the script's decisions are thresholds on continuous values, the existing golden compares three decimals;
 to be decided on measured distance. Not modelled yet: Bezier keys (a CUBICSPLINE sampler), `KHR_animation_pointer`, an
 a camera's correction (also open for the prep), morph
-targets (the evaluated mesh's bounds), nodes outside the named scene (excluded collections), mesh instancing. OPEN,
-found by the review of part 2 and not measured: `BlenderExportTree.StrCaseCmp` reads UTF-8 bytes as signed, Blender's
-object order has them unsigned - the exporter's child order with names past ASCII may be wrong the same way. OPEN,
-found by the review of part 2b: `GlbReader.Doubles` reads the JSON token `-0.0` as `+0` (.NET Framework's
-`double.Parse`; Python's json keeps the sign) - a location's zero sign only; the T-62 has 92 nodes with such a token
-and passes (masked by `loc + 0` and the importer's corrections), a fuzzed armature did not; found again by the
-review of 5a (9 of 70 fuzzed rigs, a held zero's sign), with a SECOND rule beside it that is not traced: a node of
-translation `[-0.739, -0.0, 0.0]` holds `+0, +0` straight after the import, where the axis conversion alone gives
-`-0, -0` - both to be measured together; (4) `rig_anim` (3–4 weeks); (5)
+targets (the evaluated mesh's bounds), nodes outside the named scene (excluded collections), mesh instancing. ~~OPEN, found by the review of part 2 and not measured: `BlenderExportTree.StrCaseCmp` reads UTF-8 bytes as signed~~
+FIXED 2026-11-01 (PR #236, measured on an FBX import: Blender's order has the bytes UNSIGNED, a name past ASCII after every
+ASCII one; `StrCaseCmp` reads them so, and the deploy export drill's `r8_names` holds siblings `alpha`, `Émile`, `café part`,
+`~tilde` in Blender's order - the entry stood stale until 2026-11-07). ~~OPEN, found by the review of part 2b: `GlbReader.Doubles`
+reads the JSON token `-0.0` as `+0`~~ FIXED 2026-11-07, and re-measured: `GlbReader.ParseToken` reads the JSON grammar itself,
+every float token through `BlenderDeploy.ReadPythonFloat` (the sign of zero kept, the value correctly rounded). The sign of
+zero turned out UNOBSERVABLE through Blender: the importer's `rotation_after @ t` (mathutils, a double sum seeded +0.0) and
+the quaternion chain absorb it on every shape tried (38 root nodes: a -0.0 in each slot beside every sign pair, every signed-zero
+translation and unit quaternion, two MATRIX nodes, a held -0.0 key), and the exporter's `__fix_json` writes an integral float
+as an int, `-0.0` as `0`; the second rule (`+0, +0` after the import) IS that seeded sum, which the port modelled already. What
+the reader DID lose is a ulp: Unity's Mono reads 1 in ~4,000 shortest-repr tokens (what json.dumps writes) one ulp off,
+`double.Parse` and Newtonsoft alike (measured under the drill's MonoHost: 91 of 385,313 random tokens; 1,422 of 800,000 tokens
+one ulp beside a float32 boundary, 6 of them crossing it, so the imported float32 location differs from Blender's). Those six
+are `r22_negzero`'s translations: PASS (the decisions 236 jobs, the posed state equal bit for bit, the export 200 jobs' files equal); the plant (Newtonsoft's reader back) FAILS: r22_negzero, 6 of 49 location sets differ, RT0 here -0.003120094 against Blender's -0.00312009384; `docs/Testing.md`).
+PR #261 review also preserves integer tokens beyond Int64, bounds JSON nesting at 64 containers, and bumps the shared
+loader revision plus the GLB/glTF extraction fingerprints so old generated files do not hide the rounding fix. Exact
+integer midpoint comparisons and a short-decimal fast path replace decimal digit division: the 10,000-node Mono parse
+falls from about 1 second to 51–61 ms, with all 110,958 independent Python float tokens bit-equal on Framework and Mono.
+Was: the T-62 has 92 nodes with such a token and passed (masked by the importer's arithmetic), a fuzzed armature did not; found
+again by the review of 5a (9 of 70 fuzzed rigs, a held zero's sign), with a second rule beside it that was not traced: a node of
+translation `[-0.739, -0.0, 0.0]` holds `+0, +0` straight after the import, where the axis conversion alone gives `-0, -0`; (4) `rig_anim` (3–4 weeks); (5)
 `vehicle_rig` (4–8 weeks; the Lab already computes much of the geometry in C#).
 
 **(4) `rig_anim` - the plan, decided 2026-10-11 (the FBX-free route, the user's choice).** Measured first: 24 of the
@@ -665,7 +677,9 @@ below that only intra-group parallelism of the weld or the gather would pay.
   - the per-thread allocation budget (0..1024 bytes over 3,000 skinner calls on 8 workers) failed in the gate's `dotnet test`
   step and passed in 10 full-suite runs afterwards on the same branch and on master. The test calls only `BlenderSkinner.Vertex`
   (PR #198); nothing in the native-kernels change runs in it. Not reproduced; if it fails again, widen the budget or pin the
-  measurement to one warmed worker before blaming the skinner.
+  measurement to one warmed worker before blaming the skinner. Failed again 2026-11-07 (the strict JSON reader's push gate, 1
+  of 2,562; 3 of 3 in isolation afterwards): the warm-up ran only the weighted vertex, so each worker's FIRST zero-weight and
+  unskinned calls ran inside the counted window; the warm-up now takes all three call shapes. The budget stands.
 - **Native SDK skeleton smoke test** — FIXED (2026-10-19). Native multi-material atlas remapping assigned transient
   meshes to the saved GLB rig prefab; SaveAssets could serialize missing mesh references before skeleton import,
   producing a NullReferenceException in `Skeleton.FillBoneEntry` at IL 0x1b (also reproduced with a PNG control).

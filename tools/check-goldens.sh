@@ -40,7 +40,7 @@ for f in WorkshopGateTest.cs BakeGoldenFiles.cs GitStamp.cs EditorRules.cs QuadE
   SRCS+=("$WROOT/editor/$f")
 done
 OUTC=$(dotnet "$CSC" -nologo -noconfig -nostdlib -out:"$WTMP/drill.exe" -platform:x64 \
-  -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
+  -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WAPI/System.Numerics.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
   "$WROOT/tools/workshop-golden-drill/WorkshopGoldenDrill.cs" "$WROOT/tools/workshop-golden-drill/Stubs.cs" "${SRCS[@]}" 2>&1); rc=$?
 if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/drill.exe" ]; then echo "$OUTC" | grep -E "error" | head -20; echo "FAIL — the goldens check did not compile (csc rc=$rc)"; exit 1; fi
 

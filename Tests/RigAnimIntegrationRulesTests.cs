@@ -4,6 +4,18 @@ using Xunit;
 
 public class RigAnimIntegrationRulesTests
 {
+    [Fact]
+    public void Reader_rounding_fix_invalidates_cached_deploy_and_rig_conversions()
+    {
+        const string oldLoader = "2026-11-02.fbx-loader.1";
+        Assert.NotEqual(oldLoader, HafModelLoader.CacheRevision);
+        Assert.NotEqual("2026-11-03.fbx-rig-leave.1." + oldLoader, BlenderDeployInProcess.CacheRevision);
+        string previous = "route=csharp-fallback:2026-11-07.legacy-role-paths.1." + oldLoader;
+        string current = "route=csharp-fallback:" + BlenderRigAnimInProcess.CacheRevision;
+        Assert.False(BakerRules.CanReuseRigFallback(true, true,
+            string.Equals(previous, current, StringComparison.Ordinal), false, false));
+    }
+
     [Theory]
     [InlineData(true, true, true, false, false, true)]
     [InlineData(false, true, true, false, false, false)] // explicit rebuild retries the C# route

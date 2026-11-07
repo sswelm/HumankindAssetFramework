@@ -10,6 +10,25 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **PR #261 review (2026-11-07).** Integer JSON tokens beyond Int64 remain exact BigIntegers, including through extras
+  round trips. JSON nesting is limited to 64 containers with a normal refusal. Correct float rounding now compares exact
+  integer ratios rather than constructing decimal midpoints digit by digit; common short decimals use one operation on
+  exact operands. On Unity's 64-bit Mono the 470 KB / 10,000-node parse fell from about 1,000 ms to 51–61 ms; the 70 KB
+  small-number case fell from about 46 seconds to 33 ms. 110,958 Python float tokens match bit for bit on Framework and
+  Mono, including rounding ties and fast-path boundaries. The loader revision invalidates old deploy/rig conversions and
+  GLB/glTF/FBX extraction caches. Fifteen regression cases bring the suite to 2,577 tests.
+- **THE glTF READER READS THE JSON GRAMMAR ITSELF: A ULP, NOT A SIGN (2026-11-07).** The backlog's `-0.0` entry re-measured:
+  Newtonsoft's reader and .NET's `double.Parse` do read `-0.0` as `+0` (on .NET Framework and on Unity's 64-bit Mono alike),
+  but the sign is unobservable through Blender - the importer's `rotation_after @ t` is a double sum seeded +0.0 and the
+  quaternion chain absorbs it on every shape tried (38 root nodes), the exporter writes `-0.0` as `0`, and the port modelled
+  that seed already. What the reader did lose is a ulp: Unity's Mono reads about 1 in 4,000 shortest-repr tokens (what
+  json.dumps and Blender's exporter write) one ulp off, and 6 of 800,000 tokens beside a float32 boundary cross it, so the
+  imported float32 location differed from Blender's. `GlbReader.ParseToken` now reads RFC 8259 itself into Newtonsoft's
+  tree, every float token through `BlenderDeploy.ReadPythonFloat` (correctly rounded, the sign kept), integers as longs,
+  `NaN`/`Infinity` as Python takes them, a repeated key last wins, what the grammar refuses refused by position. Fixture
+  `r22_negzero` (the six tokens as translations, the 38 zero shapes) on the deploy export path: PASS (the decisions 236 jobs, the posed state equal bit for bit, the export 200 jobs' files equal); the plant
+  (Newtonsoft's reader back) FAILS: r22_negzero, 6 of 49 location sets differ, RT0 here -0.003120094 against Blender's -0.00312009384; 2,562 unit tests. The stale `StrCaseCmp` backlog entry crossed out
+  (fixed 2026-11-01, held by `r8_names`). The plugin does not compile the editor's reader.
 - **A SLICED ATTACK OR MOVE ROLE CLIP KEEPS ITS TRANSLATIONS ON THE LEGACY PATH (2026-11-07).** The legacy floor table
   now uses resolved action identity in Blender and C#; sliced role names previously matched nothing. Review of PR #260
   also closes a cross-action leak: an attack-qualified Root path preserved a below-floor move slice (0.2083 units) and

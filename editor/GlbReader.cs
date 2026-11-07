@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
+using System.Linq;
+using System.Numerics;
 using System.Text;
 using Newtonsoft.Json.Linq;
 
@@ -73,14 +76,237 @@ public static class GlbReader
     /// and for every verbatim fragment the model carries (extensions, extras, samplers).</summary>
     public static JObject ParseObject(string json) => ParseToken(json) as JObject ?? throw new InvalidDataException("the JSON is not an object");
 
-    /// <summary>Any JSON value, strings kept as strings (see <see cref="ParseObject"/>).</summary>
+    /// <summary>Any JSON value, strings kept as strings (see <see cref="ParseObject"/>). The text is read by the JSON grammar
+    /// as Python's json.loads reads it (2026-11-07), into Newtonsoft's tree: a float token through
+    /// <see cref="ReadPythonFloat"/> (Python's float(), moved here from BlenderDeploy) - correctly rounded and the SIGN OF ZERO kept (Newtonsoft's reader and
+    /// .NET's double.Parse both read `-0.0` as +0, on .NET Framework and on Unity's 64-bit Mono alike, measured) - an integer
+    /// token as a long or BigInteger, `NaN`, `Infinity` and `-Infinity` as Python accepts them, a repeated key taken last as a dict takes it;
+    /// what the grammar refuses (a comment, a trailing comma, a bare control character) is refused by position.</summary>
     public static JToken ParseToken(string json)
     {
-        using (var r = new Newtonsoft.Json.JsonTextReader(new StringReader(json)) { DateParseHandling = Newtonsoft.Json.DateParseHandling.None })
+        var p = new StrictJson(json);
+        var t = p.Value();
+        p.Ws();
+        if (p.Pos < json.Length) throw new InvalidDataException("the JSON has text after its value");
+        return t;
+    }
+
+    // Python's str.strip() whitespace without the separators U+001C..U+001F, which float() does not take (BlenderDeploy's IntWhitespace)
+    static readonly char[] PyFloatWhitespace = "\u0009\u000a\u000b\u000c\u000d\u0020\u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000".ToCharArray();
+    static readonly double[] ExactPowersOfTen = { 1, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10,
+        1e11, 1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22 };
+
+    // .NET Framework's decimal conversion can round a double one ulp away from Python (for example
+    // 0.39499999999999999). Use it as an estimate, then compare the exact decimal input to the exact binary
+    // midpoints around that estimate. This also holds under Unity's Mono, without a native parser dependency.
+    public static bool ReadPythonFloat(string s, out double v)
+    {
+        s = (s ?? "").Trim(PyFloatWhitespace); v = 0;
+        if (s.Length == 0 || s.Any(ch => !(ch >= '0' && ch <= '9') && ch != '+' && ch != '-' && ch != '.' && ch != 'e' && ch != 'E')) return false;
+        if (!double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out v) || double.IsInfinity(v)) return false;
+        bool neg = s[0] == '-';
+        string token = s[0] == '+' || neg ? s.Substring(1) : s;
+        int at = token.IndexOfAny(new[] { 'e', 'E' }); long power = 0;
+        if (at >= 0)
         {
-            var t = JToken.ReadFrom(r);
-            if (r.Read()) throw new InvalidDataException("the JSON has text after its value");
-            return t;
+            string exp = token.Substring(at + 1); bool minus = exp[0] == '-';
+            int first = exp[0] == '+' || minus ? 1 : 0;
+            // Exponents beyond this bound cannot cancel a string's (Int32-sized) number of digits.
+            for (int i = first; i < exp.Length; i++) power = Math.Min(10000000000L, power * 10 + exp[i] - '0');
+            if (minus) power = -power;
+            token = token.Substring(0, at);
+        }
+        int point = token.IndexOf('.');
+        if (point >= 0) { power -= token.Length - point - 1; token = token.Remove(point, 1); }
+        string digits = token.TrimStart('0');
+        if (digits.Length == 0) { v = neg ? -0.0 : 0.0; return true; }
+        int length = digits.Length;
+        digits = digits.TrimEnd('0');
+        power += length - digits.Length;
+        // Both operands are exactly representable: <=15 decimal digits and 10^0..10^22. One IEEE double
+        // multiply/divide therefore rounds the exact decimal once, without relying on the runtime's decimal parser.
+        // Keep 32-bit drill hosts on the integer path: an x87 intermediate could otherwise round twice.
+        if (IntPtr.Size == 8 && digits.Length <= 15 && power >= -22 && power <= 22)
+        {
+            ulong significand = 0;
+            foreach (char digit in digits) significand = significand * 10 + (uint)(digit - '0');
+            double value = power >= 0 ? significand * ExactPowersOfTen[(int)power] : significand / ExactPowersOfTen[(int)-power];
+            v = neg ? -value : value; return true;
+        }
+        // An underflow this small rounds to signed zero without constructing an enormous power of ten.
+        if (digits.Length + power < -324) { v = neg ? -0.0 : 0.0; return true; }
+        var numerator = BigInteger.Parse(digits, CultureInfo.InvariantCulture);
+        var denominator = BigInteger.One;
+        if (power >= 0) numerator *= BigInteger.Pow(10, checked((int)power));
+        else denominator = BigInteger.Pow(10, checked((int)-power));
+        long bits = BitConverter.DoubleToInt64Bits(v) & long.MaxValue;
+        while (true)
+        {
+            int e = (int)(bits >> 52); ulong m = (ulong)bits & 0xFFFFFFFFFFFFFUL;
+            int binaryPower = e == 0 ? -1074 : e - 1075;
+            if (e != 0) m |= 1UL << 52;
+            bool odd = (bits & 1) != 0;
+            int upper = CompareMidpoint(2 * m + 1, binaryPower - 1);
+            if (upper > 0 || upper == 0 && odd)
+            {
+                if (++bits == 0x7ff0000000000000L) return false; // a scale overflowing a double stays Blender's
+                continue;
+            }
+            if (bits != 0)
+            {
+                bool boundary = e > 1 && m == 1UL << 52;
+                int lower = CompareMidpoint(boundary ? 4 * m - 1 : 2 * m - 1, binaryPower - (boundary ? 2 : 1));
+                if (lower < 0 || lower == 0 && odd) { bits--; continue; }
+            }
+            v = BitConverter.Int64BitsToDouble(bits | (neg ? long.MinValue : 0)); return true;
+        }
+
+        // Compare the exact decimal rational with coefficient * 2^p using integer arithmetic. Building the
+        // midpoint as decimal digits one binary division at a time made small JSON floats thousands of times slower.
+        int CompareMidpoint(ulong coefficient, int p) => p < 0
+            ? (numerator << -p).CompareTo((BigInteger)coefficient * denominator)
+            : numerator.CompareTo(((BigInteger)coefficient << p) * denominator);
+    }
+
+    /// <summary>The JSON grammar (RFC 8259) over a string, as Python's json.loads takes it; see <see cref="ParseToken"/>.</summary>
+    sealed class StrictJson
+    {
+        const int MaxDepth = 64;
+        readonly string s; public int Pos;
+        int depth;
+        public StrictJson(string text) { s = text; }
+        InvalidDataException Bad(string what) => new InvalidDataException("the JSON is not valid at character " + Pos + ": " + what);
+        public void Ws() { while (Pos < s.Length && (s[Pos] == ' ' || s[Pos] == '\t' || s[Pos] == '\n' || s[Pos] == '\r')) Pos++; }
+        char Peek() => Pos < s.Length ? s[Pos] : '\0';
+        static bool Digit(char c) => c >= '0' && c <= '9';
+
+        public JToken Value()
+        {
+            Ws();
+            if (Pos >= s.Length) throw Bad("a value is missing");
+            char c = s[Pos];
+            if (c == '{' || c == '[')
+            {
+                if (depth >= MaxDepth) throw Bad("nesting exceeds " + MaxDepth + " containers");
+                depth++;
+                try { return c == '{' ? (JToken)Object() : Array(); }
+                finally { depth--; }
+            }
+            switch (c)
+            {
+                case '"': return new JValue(String());
+                case 't': Literal("true"); return new JValue(true);
+                case 'f': Literal("false"); return new JValue(false);
+                case 'n': Literal("null"); return JValue.CreateNull();
+                case 'N': Literal("NaN"); return new JValue(double.NaN);
+                case 'I': Literal("Infinity"); return new JValue(double.PositiveInfinity);
+                default:
+                    if (c == '-' && Pos + 1 < s.Length && s[Pos + 1] == 'I') { Pos++; Literal("Infinity"); return new JValue(double.NegativeInfinity); }
+                    if (c == '-' || Digit(c)) return Number();
+                    throw Bad("an unexpected character '" + c + "'");
+            }
+        }
+
+        void Literal(string word)
+        {
+            if (Pos + word.Length > s.Length || string.CompareOrdinal(s, Pos, word, 0, word.Length) != 0) throw Bad("an unexpected token");
+            Pos += word.Length;
+        }
+
+        JObject Object()
+        {
+            var o = new JObject(); Pos++; Ws();
+            if (Peek() == '}') { Pos++; return o; }
+            for (;;)
+            {
+                Ws();
+                if (Peek() != '"') throw Bad("a property name must be a string");
+                string key = String(); Ws();
+                if (Peek() != ':') throw Bad("':' expected");
+                Pos++;
+                o[key] = Value();   // a repeated key: the last one wins, as Python's dict takes it
+                Ws();
+                char c = Peek();
+                if (c == ',') { Pos++; continue; }
+                if (c == '}') { Pos++; return o; }
+                throw Bad("',' or '}' expected");
+            }
+        }
+
+        JArray Array()
+        {
+            var a = new JArray(); Pos++; Ws();
+            if (Peek() == ']') { Pos++; return a; }
+            for (;;)
+            {
+                a.Add(Value()); Ws();
+                char c = Peek();
+                if (c == ',') { Pos++; continue; }
+                if (c == ']') { Pos++; return a; }
+                throw Bad("',' or ']' expected");
+            }
+        }
+
+        string String()
+        {
+            Pos++; var sb = new StringBuilder();
+            for (;;)
+            {
+                if (Pos >= s.Length) throw Bad("an unterminated string");
+                char c = s[Pos++];
+                if (c == '"') return sb.ToString();
+                if (c == '\\')
+                {
+                    if (Pos >= s.Length) throw Bad("an unterminated escape");
+                    char e = s[Pos++];
+                    switch (e)
+                    {
+                        case '"': sb.Append('"'); break;
+                        case '\\': sb.Append('\\'); break;
+                        case '/': sb.Append('/'); break;
+                        case 'b': sb.Append('\b'); break;
+                        case 'f': sb.Append('\f'); break;
+                        case 'n': sb.Append('\n'); break;
+                        case 'r': sb.Append('\r'); break;
+                        case 't': sb.Append('\t'); break;
+                        case 'u': sb.Append((char)Hex4()); break;   // a surrogate pair arrives as its two escapes, which is the string's UTF-16 already
+                        default: throw Bad("an invalid escape");
+                    }
+                }
+                else if (c < ' ') throw Bad("a control character inside a string");
+                else sb.Append(c);
+            }
+        }
+
+        int Hex4()
+        {
+            if (Pos + 4 > s.Length) throw Bad("a short \\u escape");
+            int v = 0;
+            for (int i = 0; i < 4; i++)
+            {
+                char h = s[Pos++];
+                int d = Digit(h) ? h - '0' : h >= 'a' && h <= 'f' ? h - 'a' + 10 : h >= 'A' && h <= 'F' ? h - 'A' + 10 : -1;
+                if (d < 0) throw Bad("a \\u escape that is not hex");
+                v = v * 16 + d;
+            }
+            return v;
+        }
+
+        JValue Number()
+        {
+            int start = Pos;
+            if (Peek() == '-') Pos++;
+            if (Peek() == '0') Pos++;
+            else if (Digit(Peek())) { while (Digit(Peek())) Pos++; }
+            else throw Bad("a digit is missing");
+            bool isFloat = false;
+            if (Peek() == '.') { isFloat = true; Pos++; if (!Digit(Peek())) throw Bad("a digit must follow '.'"); while (Digit(Peek())) Pos++; }
+            if (Peek() == 'e' || Peek() == 'E') { isFloat = true; Pos++; if (Peek() == '+' || Peek() == '-') Pos++; if (!Digit(Peek())) throw Bad("a digit must follow the exponent"); while (Digit(Peek())) Pos++; }
+            string text = s.Substring(start, Pos - start);
+            if (!isFloat && long.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out long l)) return new JValue(l);
+            if (!isFloat) return new JValue(BigInteger.Parse(text, CultureInfo.InvariantCulture));
+            if (ReadPythonFloat(text, out double d)) return new JValue(d);
+            return new JValue(text[0] == '-' ? double.NegativeInfinity : double.PositiveInfinity);   // past double's range: Python's float() gives inf
         }
     }
 

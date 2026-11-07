@@ -1160,12 +1160,49 @@ fixture `fire_huge`, planted; (2) Python's `int()` takes white space around the 
 U+001C..U+001F that `str.strip()` removes: the port read a start the script dies on - fixed
 (`BlenderDeployTests`); (3) AGAIN the reader's `-0.0` read as `+0` (9 of 70 fuzzed rigs differ in a held zero's
 sign; no snapshot row did), now with a second importer rule beside it that is not traced (a node of translation
-`[-0.739, -0.0, 0.0]` holds `+0, +0` straight after the import): in the backlog, not fixed here. 9 planted defects,
+`[-0.739, -0.0, 0.0]` holds `+0, +0` straight after the import): in the backlog, not fixed here (fixed and re-measured
+2026-11-07, the JSON grammar paragraph below). 9 planted defects,
 all caught; the gate takes a snapshot row, a pose row and an object row out of the real dump, doubles each in place
 of its neighbour, renames, truncates and turns a bit of each: every one must fail. Not held: a range Python reads
 and `int.TryParse` does not (`1_0`, digits past ASCII, a value over int32) is left to Blender; an INFINITE key
 (Blender clamps a written value to FLT_MAX). Next: 5b and 5c - they key with Blender's default BEZIER interpolation,
 so its curve evaluation between two keys has to be ported - then 5d, which re-enters edit mode.
+
+**The reader reads the JSON grammar itself: a ulp, not a sign** (2026-11-07). The backlog's `-0.0` entry, open since the
+review of part 2b and found again by 5a's fuzzed rigs, re-measured. Newtonsoft's `JsonTextReader` and .NET's `double.Parse`
+do read `-0.0` as `+0` on .NET Framework and on Unity's 64-bit Mono alike (a probe under the deploy drill's MonoHost: bits 0 on
+every path), and `GlbReader.ParseToken` now reads RFC 8259 itself into Newtonsoft's tree - a float token through
+`BlenderDeploy.ReadPythonFloat` (correctly rounded, the sign of zero kept, `1e400` to inf as `float()` gives it), an integer
+token as a long, `NaN`/`Infinity` as Python accepts them, a repeated key last wins, what the grammar refuses (a comment, a
+trailing comma, a bare control character, `01`, `.5`, `+1`) refused by position; the plugin does not compile the editor's
+reader. But the sign of zero is UNOBSERVABLE through Blender, measured on `r22_negzero`'s 38 root nodes (a -0.0 in each slot
+beside every sign pair of the other two, every signed-zero translation, every signed-zero unit quaternion, two MATRIX nodes,
+a key held at -0.0): the importer's `rotation_after @ t` is mathutils' `column_vector_multiplication`, each component a
+double sum that starts at +0.0 (`+0.0 + -0.0 = +0.0`), the quaternion chain absorbs it the same way, and the exporter's
+`__fix_json` writes an integral float as an int (`-0.0` as `0`) - the "second rule" the 5a review left untraced is that seed,
+which `BlenderPosedState.IdentityRow` modelled already; the plant (Newtonsoft's reader back) PASSED the drill on every one of
+those shapes. What the reader did lose is a ULP: Unity's Mono reads about 1 in 4,000 shortest-repr tokens - the form
+`json.dumps` and Blender's own exporter write - one ulp off, `double.Parse` and Newtonsoft alike (the probe over 385,313
+random tokens: 91 wrong; over 800,000 tokens one double-ulp beside a float32 rounding boundary: 1,422 wrong, 6 crossing the
+boundary, so the imported float32 location differs from Blender's by a float32 ulp). Those six tokens are `r22_negzero`'s
+`RT0..RT5` translations and a unit theory: PASS (the decisions 236 jobs, the posed state equal bit for bit, the export 200 jobs' files equal); the plant FAILS: r22_negzero, 6 of 49 location sets differ, RT0 here -0.003120094 against Blender's -0.00312009384. Unit cases beside
+them: the numbers (`-0.0` bits, `0.1` correctly rounded, the smallest normal and subnormal, 2^53+1 as an integer, over- and
+underflow, the literals), a node's negative zeros read with their sign, strings with every escape and a repeated key, 20
+refused texts; 2,562 tests. The stale `StrCaseCmp` entry beside it in the backlog is crossed out: fixed 2026-11-01
+(PR #236) and held by `r8_names` since.
+
+PR #261 review adds exact integer preservation beyond Int64 (BigInteger, including extras read/write/read), a 64-container
+nesting limit (InvalidDataException before stack exhaustion), and cache invalidation for reader-dependent deploy, rig,
+material extraction and prep output. Float correction compares exact BigInteger ratios with binary midpoints; at most
+15 significant decimal digits and exponents -22..22 use exactly representable operands and one rounded double operation.
+The original six Mono failures still pass, alongside ties-to-even, subnormal boundaries and fast-path edges: 2,577 tests.
+An independent Python corpus of 110,958 finite float tokens (random binary64 round trips, short decimal fast-path values
+and exact adjacent-double midpoints) matches every bit on .NET Framework and Unity's 64-bit Mono. Benchmarks in that Mono,
+three warmed runs of the same 470,037-character scene with 10,000 translated nodes: 51–61 ms after the fix, 984–1,040 ms
+in the PR's original implementation, 18–26 ms with Newtonsoft. These are JSON parse times, not whole-file import times.
+The 10,000-value `1e-300` array (70 KB) falls from about 46 seconds to 33 ms. A separate Framework process now refuses
+100,000 nested arrays normally; the original parser terminated it with stack overflow. Five standalone drill compile
+commands also reference System.Numerics, as the editor and other reader consumers already do.
 
 **Replacing `deploy_convert.py`, parts 5b and 5c: the barrel retarget and the leg scale** (2026-10-10). 5b
 (`argv[5]` the ready frame, `argv[7]` the barrel scale): every bone with "barrel" or "cannon" in its name loses its

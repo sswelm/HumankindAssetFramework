@@ -18,8 +18,8 @@
 //   - mathutils: Matrix @ Vector sums float32 products in a double; Vector +, -, * are float32; Vector.length is the
 //     double square root of a double sum of float32 products taken from the LAST component to the first.
 //   - the order is by the UTF-8 BYTES as unsigned values, upper-case ASCII folded: a name that starts with a letter
-//     past ASCII comes after every ASCII name (measured; review of 2026-10-10 - BlenderExportTree.StrCaseCmp reads the
-//     bytes as signed and puts it first, which the exporter's child order was never measured on);
+//     past ASCII comes after every ASCII name (measured 2026-11-01 on an FBX import, PR #236; StrCaseCmp read the bytes as
+//     signed until then; the deploy export drill's r8_names siblings hold the order since);
 //   - a removed object's NAME is free again: the normalization root is "UnitNormalize" even when the file had one
 //     and the strip took it.
 //   - the bone shape is evaluated only while its armature is there (the bones' custom shape; its collection is
@@ -1486,86 +1486,9 @@ public static class BlenderDeploy
         return r;
     }
 
-    // .NET Framework's decimal conversion can round a double one ulp away from Python (for example
-    // 0.39499999999999999). Use it as an estimate, then compare the exact decimal input to the exact binary
-    // midpoints around that estimate. This also holds under Unity's Mono, without a native parser dependency.
-    internal static bool ReadPythonFloat(string s, out double v)
-    {
-        s = (s ?? "").Trim(IntWhitespace); v = 0;
-        if (s.Length == 0 || s.Any(ch => !(ch >= '0' && ch <= '9') && ch != '+' && ch != '-' && ch != '.' && ch != 'e' && ch != 'E')) return false;
-        if (!double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out v) || double.IsInfinity(v)) return false;
-        bool neg = s[0] == '-';
-        string token = s[0] == '+' || neg ? s.Substring(1) : s;
-        int at = token.IndexOfAny(new[] { 'e', 'E' }); long power = 0;
-        if (at >= 0)
-        {
-            string exp = token.Substring(at + 1); bool minus = exp[0] == '-';
-            int first = exp[0] == '+' || minus ? 1 : 0;
-            // Exponents beyond this bound cannot cancel a string's (Int32-sized) number of digits.
-            for (int i = first; i < exp.Length; i++) power = Math.Min(10000000000L, power * 10 + exp[i] - '0');
-            if (minus) power = -power;
-            token = token.Substring(0, at);
-        }
-        int point = token.IndexOf('.');
-        if (point >= 0) { power -= token.Length - point - 1; token = token.Remove(point, 1); }
-        string digits = token.TrimStart('0');
-        if (digits.Length == 0) { v = neg ? -0.0 : 0.0; return true; }
-        var exact = Canonical(digits, power);
-        long bits = BitConverter.DoubleToInt64Bits(v) & long.MaxValue;
-        while (true)
-        {
-            int e = (int)(bits >> 52); ulong m = (ulong)bits & 0xFFFFFFFFFFFFFUL;
-            int binaryPower = e == 0 ? -1074 : e - 1075;
-            if (e != 0) m |= 1UL << 52;
-            bool odd = (bits & 1) != 0;
-            int upper = Compare(exact, BinaryDecimal(2 * m + 1, binaryPower - 1));
-            if (upper > 0 || upper == 0 && odd)
-            {
-                if (++bits == 0x7ff0000000000000L) return false; // a scale overflowing a double stays Blender's
-                continue;
-            }
-            if (bits != 0)
-            {
-                bool boundary = e > 1 && m == 1UL << 52;
-                int lower = Compare(exact, BinaryDecimal(boundary ? 4 * m - 1 : 2 * m - 1, binaryPower - (boundary ? 2 : 1)));
-                if (lower < 0 || lower == 0 && odd) { bits--; continue; }
-            }
-            v = BitConverter.Int64BitsToDouble(bits | (neg ? long.MinValue : 0)); return true;
-        }
-
-        (string digits, long power) Canonical(string d, long p)
-        {
-            string trimmed = d.TrimEnd('0'); return (trimmed, p + d.Length - trimmed.Length);
-        }
-        (string digits, long power) BinaryDecimal(ulong coefficient, int p)
-        {
-            var ds = coefficient.ToString(System.Globalization.CultureInfo.InvariantCulture).Select(c => c - '0').ToList();
-            int frac = 0;
-            for (; p > 0; p--)
-            {
-                int carry = 0;
-                for (int i = ds.Count - 1; i >= 0; i--) { int d = ds[i] * 2 + carry; ds[i] = d % 10; carry = d / 10; }
-                if (carry > 0) ds.Insert(0, carry);
-            }
-            for (; p < 0; p++)
-            {
-                ds.Add(0); frac++; int rem = 0;
-                for (int i = 0; i < ds.Count; i++) { int d = rem * 10 + ds[i]; ds[i] = d / 2; rem = d % 2; }
-            }
-            return Canonical(new string(ds.Select(d => (char)('0' + d)).ToArray()).TrimStart('0'), -frac);
-        }
-        int Compare((string digits, long power) a, (string digits, long power) b)
-        {
-            int order = (a.digits.Length + a.power).CompareTo(b.digits.Length + b.power);
-            if (order != 0) return order;
-            for (int i = 0; i < Math.Max(a.digits.Length, b.digits.Length); i++)
-            {
-                char ac = i < a.digits.Length ? a.digits[i] : '0', bc = i < b.digits.Length ? b.digits[i] : '0';
-                if (ac != bc) return ac.CompareTo(bc);
-            }
-            return 0;
-        }
-    }
+    // Python's float() over a string, correctly rounded, the sign of zero kept: the implementation lives in GlbReader
+    // (every drill compiles it; the JSON grammar there reads its float tokens through it since 2026-11-07).
+    internal static bool ReadPythonFloat(string s, out double v) => GlbReader.ReadPythonFloat(s, out v);
 
     /// <summary>BKE_pose_where_is for the armature the script made: every bone's pose matrix (armature space, column-major)
     /// from what its pose bone holds, a parent before its children whatever the list's order.</summary>
