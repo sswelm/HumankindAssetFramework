@@ -18,8 +18,8 @@
 //   - mathutils: Matrix @ Vector sums float32 products in a double; Vector +, -, * are float32; Vector.length is the
 //     double square root of a double sum of float32 products taken from the LAST component to the first.
 //   - the order is by the UTF-8 BYTES as unsigned values, upper-case ASCII folded: a name that starts with a letter
-//     past ASCII comes after every ASCII name (measured; review of 2026-10-10 - BlenderExportTree.StrCaseCmp reads the
-//     bytes as signed and puts it first, which the exporter's child order was never measured on);
+//     past ASCII comes after every ASCII name (measured 2026-11-01 on an FBX import, PR #236; StrCaseCmp read the bytes as
+//     signed until then; the deploy export drill's r8_names siblings hold the order since);
 //   - a removed object's NAME is free again: the normalization root is "UnitNormalize" even when the file had one
 //     and the strip took it.
 //   - the bone shape is evaluated only while its armature is there (the bones' custom shape; its collection is

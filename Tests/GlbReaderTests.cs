@@ -423,4 +423,68 @@ public class GlbReaderTests
         var m = GlbReader.Read(f.Glb());
         Assert.Equal(new float[6], m.Meshes[0].Primitives[0].Uv0);
     }
+
+    // ---- the JSON grammar, as Python's json.loads reads it (2026-11-07): the sign of zero was lost by Newtonsoft's reader and by
+    // .NET's double.Parse alike (measured on .NET Framework and on Unity's 64-bit Mono), so a node's held -0.0 exported as 0.0
+    static long Bits(double v) => BitConverter.DoubleToInt64Bits(v);
+
+    [Fact]
+    public void Json_numbers_read_as_Python_reads_them_the_sign_of_zero_included()
+    {
+        var a = (JArray)GlbReader.ParseToken("[-0.0, 0.0, -0, 1e-400, 1e400, -1e400, 0.1, 9007199254740993, 2.2250738585072014e-308, 4.9e-324, NaN, Infinity, -Infinity, 1E2, -12]");
+        Assert.Equal(unchecked((long)0x8000000000000000), Bits((double)a[0]));   // -0.0 keeps its sign
+        Assert.Equal(0L, Bits((double)a[1]));
+        Assert.Equal(JTokenType.Integer, a[2].Type); Assert.Equal(0L, (long)a[2]);   // the integer token -0 is the int 0, as Python's
+        Assert.Equal(0L, Bits((double)a[3]));                                     // underflow: +0.0
+        Assert.Equal(double.PositiveInfinity, (double)a[4]); Assert.Equal(double.NegativeInfinity, (double)a[5]);   // float('1e400')
+        Assert.Equal(0x3FB999999999999AL, Bits((double)a[6]));                     // 0.1, correctly rounded
+        Assert.Equal(JTokenType.Integer, a[7].Type); Assert.Equal(9007199254740993L, (long)a[7]);   // past 2^53: an integer, not a double
+        Assert.Equal(0x0010000000000000L, Bits((double)a[8]));                     // the smallest normal
+        Assert.Equal(1L, Bits((double)a[9]));                                      // the smallest subnormal
+        Assert.True(double.IsNaN((double)a[10])); Assert.Equal(double.PositiveInfinity, (double)a[11]); Assert.Equal(double.NegativeInfinity, (double)a[12]);
+        Assert.Equal(100.0, (double)a[13]); Assert.Equal(JTokenType.Integer, a[14].Type); Assert.Equal(-12L, (long)a[14]);
+    }
+
+    [Theory]   // shortest-repr tokens Unity's Mono (double.Parse, Newtonsoft) reads one ulp off - each beside a float32 boundary, so the
+    [InlineData("-0.003120093955658376", unchecked((long)0xbf698f4fafffffff))]   // imported float32 location differed from Blender's too
+    [InlineData("-0.0004121560923522338", unchecked((long)0xbf3b02d4efffffff))]  // (probe over 800,000 boundary-adjacent tokens, 2026-11-07)
+    [InlineData("-0.006073869531974196", unchecked((long)0xbf78e0e9efffffff))]
+    [InlineData("0.007174800848588347", 0x3f7d6352efffffffL)]
+    [InlineData("-5.168448660697322e-05", unchecked((long)0xbf0b18f96fffffff))]
+    [InlineData("-0.006854354171082377", unchecked((long)0xbf7c134fafffffff))]
+    public void Tokens_Mono_misparses_read_as_Python_reads_them(string token, long bits)
+    {
+        Assert.Equal(bits, Bits((double)((JArray)GlbReader.ParseToken("[" + token + "]"))[0]));
+        var m = GlbReader.ReadGltf("{\"asset\":{\"version\":\"2.0\"},\"nodes\":[{\"translation\":[" + token + ",0,0]}]}", null);
+        Assert.Equal(bits, Bits(m.Nodes[0].Translation[0]));
+    }
+
+    [Fact]
+    public void A_nodes_negative_zeros_read_with_their_sign()
+    {
+        var m = GlbReader.ReadGltf("{\"asset\":{\"version\":\"2.0\"},\"nodes\":[{\"name\":\"n\",\"translation\":[-0.739,-0.0,0.0],\"rotation\":[0.0,-0.0,0.0,1.0]},"
+            + "{\"matrix\":[1,0,0,0,0,1,0,0,0,0,1,0,-0.0,2.0,-0.0,1.0]}]}", null);
+        Assert.Equal(unchecked((long)0x8000000000000000), Bits(m.Nodes[0].Translation[1])); Assert.Equal(0L, Bits(m.Nodes[0].Translation[2]));
+        Assert.Equal(unchecked((long)0x8000000000000000), Bits(m.Nodes[0].Rotation[1]));
+        Assert.Equal(unchecked((long)0x8000000000000000), Bits(m.Nodes[1].Matrix[12])); Assert.Equal(unchecked((long)0x8000000000000000), Bits(m.Nodes[1].Matrix[14]));
+        Assert.Equal(0L, Bits(m.Nodes[1].Matrix[1]));   // an integer token 0 reads as +0
+    }
+
+    [Fact]
+    public void Json_strings_escapes_and_repeated_keys_read_as_Python_reads_them()
+    {
+        var o = (JObject)GlbReader.ParseToken(" {\"a\" : 1 , \"s\":\"x\\u00e9\\ud83d\\ude00\\n\\\"\\/\\\\\", \"a\": [true,false,null,{}] } ");
+        Assert.Equal("x\u00e9\U0001F600\n\"/\\", (string)o["s"]);
+        Assert.Equal(JTokenType.Array, o["a"].Type); Assert.Equal(4, o["a"].Count());   // the repeated key: the last one wins, as a dict takes it
+        Assert.Equal(JTokenType.Null, o["a"][2].Type);
+    }
+
+    [Theory]
+    [InlineData("[1,]")] [InlineData("{\"a\":1,}")] [InlineData("{\"a\":1 /* c */}")] [InlineData("[1] // c")] [InlineData("{'a':1}")]
+    [InlineData("[01]")] [InlineData("[.5]")] [InlineData("[1.]")] [InlineData("[--1]")] [InlineData("[+1]")] [InlineData("[1e]")] [InlineData("[1 2]")]
+    [InlineData("[\"a\tb\"]")] [InlineData("[\"\\x41\"]")] [InlineData("[\"\\u12\"]")] [InlineData("[tru]")] [InlineData("")] [InlineData("[1] x")] [InlineData("{\"a\" 1}")] [InlineData("{1:2}")]
+    public void What_the_json_grammar_refuses_is_refused(string text)
+    {
+        Assert.Throws<InvalidDataException>(() => GlbReader.ParseToken(text));
+    }
 }

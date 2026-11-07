@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Text;
 using Newtonsoft.Json.Linq;
@@ -73,14 +74,153 @@ public static class GlbReader
     /// and for every verbatim fragment the model carries (extensions, extras, samplers).</summary>
     public static JObject ParseObject(string json) => ParseToken(json) as JObject ?? throw new InvalidDataException("the JSON is not an object");
 
-    /// <summary>Any JSON value, strings kept as strings (see <see cref="ParseObject"/>).</summary>
+    /// <summary>Any JSON value, strings kept as strings (see <see cref="ParseObject"/>). The text is read by the JSON grammar
+    /// as Python's json.loads reads it (2026-11-07), into Newtonsoft's tree: a float token through
+    /// <see cref="BlenderDeploy.ReadPythonFloat"/> - correctly rounded and the SIGN OF ZERO kept (Newtonsoft's reader and
+    /// .NET's double.Parse both read `-0.0` as +0, on .NET Framework and on Unity's 64-bit Mono alike, measured; a node's
+    /// held `-0.0` then exported as `0.0` where Blender writes `-0.0`) - an integer token as a long (past a long, as a
+    /// float), `NaN`, `Infinity` and `-Infinity` as Python accepts them, a repeated key taken last as a dict takes it;
+    /// what the grammar refuses (a comment, a trailing comma, a bare control character) is refused by position.</summary>
     public static JToken ParseToken(string json)
     {
-        using (var r = new Newtonsoft.Json.JsonTextReader(new StringReader(json)) { DateParseHandling = Newtonsoft.Json.DateParseHandling.None })
+        var p = new StrictJson(json);
+        var t = p.Value();
+        p.Ws();
+        if (p.Pos < json.Length) throw new InvalidDataException("the JSON has text after its value");
+        return t;
+    }
+
+    /// <summary>The JSON grammar (RFC 8259) over a string, as Python's json.loads takes it; see <see cref="ParseToken"/>.</summary>
+    sealed class StrictJson
+    {
+        readonly string s; public int Pos;
+        public StrictJson(string text) { s = text; }
+        InvalidDataException Bad(string what) => new InvalidDataException("the JSON is not valid at character " + Pos + ": " + what);
+        public void Ws() { while (Pos < s.Length && (s[Pos] == ' ' || s[Pos] == '\t' || s[Pos] == '\n' || s[Pos] == '\r')) Pos++; }
+        char Peek() => Pos < s.Length ? s[Pos] : '\0';
+        static bool Digit(char c) => c >= '0' && c <= '9';
+
+        public JToken Value()
         {
-            var t = JToken.ReadFrom(r);
-            if (r.Read()) throw new InvalidDataException("the JSON has text after its value");
-            return t;
+            Ws();
+            if (Pos >= s.Length) throw Bad("a value is missing");
+            char c = s[Pos];
+            switch (c)
+            {
+                case '{': return Object();
+                case '[': return Array();
+                case '"': return new JValue(String());
+                case 't': Literal("true"); return new JValue(true);
+                case 'f': Literal("false"); return new JValue(false);
+                case 'n': Literal("null"); return JValue.CreateNull();
+                case 'N': Literal("NaN"); return new JValue(double.NaN);
+                case 'I': Literal("Infinity"); return new JValue(double.PositiveInfinity);
+                default:
+                    if (c == '-' && Pos + 1 < s.Length && s[Pos + 1] == 'I') { Pos++; Literal("Infinity"); return new JValue(double.NegativeInfinity); }
+                    if (c == '-' || Digit(c)) return Number();
+                    throw Bad("an unexpected character '" + c + "'");
+            }
+        }
+
+        void Literal(string word)
+        {
+            if (Pos + word.Length > s.Length || string.CompareOrdinal(s, Pos, word, 0, word.Length) != 0) throw Bad("an unexpected token");
+            Pos += word.Length;
+        }
+
+        JObject Object()
+        {
+            var o = new JObject(); Pos++; Ws();
+            if (Peek() == '}') { Pos++; return o; }
+            for (;;)
+            {
+                Ws();
+                if (Peek() != '"') throw Bad("a property name must be a string");
+                string key = String(); Ws();
+                if (Peek() != ':') throw Bad("':' expected");
+                Pos++;
+                o[key] = Value();   // a repeated key: the last one wins, as Python's dict takes it
+                Ws();
+                char c = Peek();
+                if (c == ',') { Pos++; continue; }
+                if (c == '}') { Pos++; return o; }
+                throw Bad("',' or '}' expected");
+            }
+        }
+
+        JArray Array()
+        {
+            var a = new JArray(); Pos++; Ws();
+            if (Peek() == ']') { Pos++; return a; }
+            for (;;)
+            {
+                a.Add(Value()); Ws();
+                char c = Peek();
+                if (c == ',') { Pos++; continue; }
+                if (c == ']') { Pos++; return a; }
+                throw Bad("',' or ']' expected");
+            }
+        }
+
+        string String()
+        {
+            Pos++; var sb = new StringBuilder();
+            for (;;)
+            {
+                if (Pos >= s.Length) throw Bad("an unterminated string");
+                char c = s[Pos++];
+                if (c == '"') return sb.ToString();
+                if (c == '\\')
+                {
+                    if (Pos >= s.Length) throw Bad("an unterminated escape");
+                    char e = s[Pos++];
+                    switch (e)
+                    {
+                        case '"': sb.Append('"'); break;
+                        case '\\': sb.Append('\\'); break;
+                        case '/': sb.Append('/'); break;
+                        case 'b': sb.Append('\b'); break;
+                        case 'f': sb.Append('\f'); break;
+                        case 'n': sb.Append('\n'); break;
+                        case 'r': sb.Append('\r'); break;
+                        case 't': sb.Append('\t'); break;
+                        case 'u': sb.Append((char)Hex4()); break;   // a surrogate pair arrives as its two escapes, which is the string's UTF-16 already
+                        default: throw Bad("an invalid escape");
+                    }
+                }
+                else if (c < ' ') throw Bad("a control character inside a string");
+                else sb.Append(c);
+            }
+        }
+
+        int Hex4()
+        {
+            if (Pos + 4 > s.Length) throw Bad("a short \\u escape");
+            int v = 0;
+            for (int i = 0; i < 4; i++)
+            {
+                char h = s[Pos++];
+                int d = Digit(h) ? h - '0' : h >= 'a' && h <= 'f' ? h - 'a' + 10 : h >= 'A' && h <= 'F' ? h - 'A' + 10 : -1;
+                if (d < 0) throw Bad("a \\u escape that is not hex");
+                v = v * 16 + d;
+            }
+            return v;
+        }
+
+        JValue Number()
+        {
+            int start = Pos;
+            if (Peek() == '-') Pos++;
+            if (Peek() == '0') Pos++;
+            else if (Digit(Peek())) { while (Digit(Peek())) Pos++; }
+            else throw Bad("a digit is missing");
+            bool isFloat = false;
+            if (Peek() == '.') { isFloat = true; Pos++; if (!Digit(Peek())) throw Bad("a digit must follow '.'"); while (Digit(Peek())) Pos++; }
+            if (Peek() == 'e' || Peek() == 'E') { isFloat = true; Pos++; if (Peek() == '+' || Peek() == '-') Pos++; if (!Digit(Peek())) throw Bad("a digit must follow the exponent"); while (Digit(Peek())) Pos++; }
+            string text = s.Substring(start, Pos - start);
+            if (!isFloat && long.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out long l)) return new JValue(l);
+            if (BlenderDeploy.ReadPythonFloat(text, out double d)) return new JValue(d);
+            return new JValue(text[0] == '-' ? double.NegativeInfinity : double.PositiveInfinity);   // past double's range: Python's float() gives inf
         }
     }
 
