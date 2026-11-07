@@ -636,9 +636,13 @@ tooling that is not committed; fixtures missing an X-axis sail yard or flag axis
 The byte-comparison skip bit on 2026-10-20: the rig_anim drill's S5_XGLB_sha tamper was seeded on the first dumped job, and
 the fused galley (23 images, one re-encoded by Blender) is a job whose GLB bytes the model does not compare - the flipped hash
 passed as intact and the gate said so. Fixed on master (64e31cc, 2026-10-29): the tamper is seeded on an image-free export
-block with its own control (jobs_sha.txt / intact_sha.txt), and the drill asserts that control's GLB bytes were compared. Still OPEN: a
-re-encoded image skips the whole file's bytes rather than the image's; the fix is to compare everything but the image payloads,
-as the Generate acceptance already does (ImageEncodingDifference).
+block with its own control (jobs_sha.txt / intact_sha.txt), and the drill asserts that control's GLB bytes were compared. ~~Still OPEN: a
+re-encoded image skips the whole file's bytes rather than the image's~~ FIXED 2026-11-07: `GlbRowsCompare` reads such an image's
+bytes out of Blender's own file (the rig drill hands it every shard's work directory through `RIGANIM_GLB_DIR`, part of the
+oracle's record) and compares the rest of the file bit for bit; the shell requires every exported file compared whole
+(140 of 140), a second sha control and tamper on an image-bearing export (`S5_XGLB_sha_image`); the plant (the old
+skip back) FAILS the drill: 131 of 140 exported files compared whole. The vehicle rig drill hands no file and had no such leave (110 of 110 byte-equal); the deploy export drill
+hands its file and takes the same path.
 The probe on all cores DONE 2026-10-19 (the user, after a reviewer's remark that the probe was not optimised): measured
 first - the BVH build, the inside-out verdict and the part meshes ran on one core, and the island walk's `HashSet<long>` used
 long's own hash (2.1 s on a 72k grid); every phase now parallel or bucketed, every row byte-identical on the 84 drill inputs,

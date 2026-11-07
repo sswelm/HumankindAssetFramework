@@ -10,6 +10,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE RIG DRILL COMPARES EVERY EXPORTED FILE WHOLE: A RE-ENCODED IMAGE'S BYTES STAND IN FROM BLENDER'S OWN FILE (2026-11-07).**
+  An export with an image Blender re-encoded (a JPEG albedo's PNG) skipped its whole file's bytes - the gate blind spot the
+  2026-10-20 sha tamper fell into, OPEN since. `GlbRowsCompare` now reads such an image's bytes out of Blender's file and
+  compares the rest bit for bit; the rig drill hands it every shard's work directory (`RIGANIM_GLB_DIR`, part of the oracle's
+  record); the shell requires every exported file compared whole (140 of 140) and holds a second sha
+  control and tamper on an image-bearing export. The plant (the old skip back) FAILS the drill: 131 of 140 exported files compared whole; 2,579 unit tests
+  (`docs/Testing.md`, `docs/Review-Backlog.md`).
 - **PR #261 review (2026-11-07).** Integer JSON tokens beyond Int64 remain exact BigIntegers, including through extras
   round trips. JSON nesting is limited to 64 containers with a normal refusal. Correct float rounding now compares exact
   integer ratios rather than constructing decimal midpoints digit by digit; common short decimals use one operation on

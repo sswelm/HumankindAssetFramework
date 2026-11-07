@@ -12,6 +12,7 @@ os.makedirs(out, exist_ok=True)
 jobs = [l.rstrip("\r") for l in open(sys.argv[2], encoding="utf-8").read().split("\n") if l.startswith("JOB\t")]
 lines = None
 sha_lines = None
+sha_img_lines = None   # an image-bearing export: since 2026-11-07 its bytes are compared whole too (Blender's own bytes stand in for a re-encoded image)
 for d in sys.argv[3:]:
     rows = [l.rstrip("\r") for l in open(d, encoding="utf-8").read().split("\n") if l.strip()]
     starts = [i for i, l in enumerate(rows) if l.startswith("JOB\t")] + [len(rows)]
@@ -26,14 +27,24 @@ for d in sys.argv[3:]:
                 and any(l.startswith("X\tGLB\t") for l in block)
                 and not any(l.startswith("X\tIMG\t") for l in block)):
             sha_lines = block
-        if lines is not None and sha_lines is not None:
+        if (sha_img_lines is None and "STAGE\t4" in block
+                and not block[0].split("\t")[1].startswith(("LEFT:", "EXPORTLEFT:", "EXIT:"))
+                and any(l.startswith("X\tGLB\t") for l in block)
+                and any(l.startswith("X\tIMG\t") for l in block)):
+            sha_img_lines = block
+        if lines is not None and sha_lines is not None and sha_img_lines is not None:
             break
-    if lines is not None and sha_lines is not None:
+    if lines is not None and sha_lines is not None and sha_img_lines is not None:
         break
 if lines is None:
     raise RuntimeError("no job ran through all four stages with an albedo: nothing to damage")
 if sha_lines is None:
     raise RuntimeError("no image-free export: no byte-comparable control for the GLB SHA tamper")
+if sha_img_lines is None:
+    raise RuntimeError("no image-bearing export: no control for the GLB SHA tamper on a file with images")
+sha_img_key = sha_img_lines[0].split("\t")[1]
+open(os.path.join(out, "jobs_sha_img.txt"), "w", encoding="utf-8", newline="\n").write("\n".join(j for j in jobs if j.split("\t")[1] == sha_img_key) + "\n")
+open(os.path.join(out, "intact_sha_img.txt"), "w", encoding="utf-8", newline="\n").write("\n".join(sha_img_lines) + "\n")
 sha_key = sha_lines[0].split("\t")[1]
 open(os.path.join(out, "jobs_sha.txt"), "w", encoding="utf-8", newline="\n").write("\n".join(j for j in jobs if j.split("\t")[1] == sha_key) + "\n")
 open(os.path.join(out, "intact_sha.txt"), "w", encoding="utf-8", newline="\n").write("\n".join(sha_lines) + "\n")
@@ -217,6 +228,8 @@ write("S5_XCHAN_interpolation", with_field(i_xchan, 7, "STEP" if lines[i_xchan].
 i_xanim = first(lambda l: l.startswith("X\tANIM\t")); write("S5_XANIM_channels", with_field(i_xanim, 4, str(int(lines[i_xanim].split("\t")[4]) + 1)))
 saved_lines = lines; lines = sha_lines
 sha_glb = first(lambda l: l.startswith("X\tGLB\t")); write("S5_XGLB_sha", with_field(sha_glb, 5, flip_bits(lines[sha_glb].split("\t")[5])))
+lines = sha_img_lines
+sha_glb = first(lambda l: l.startswith("X\tGLB\t")); write("S5_XGLB_sha_image", with_field(sha_glb, 5, flip_bits(lines[sha_glb].split("\t")[5])))
 lines = saved_lines
 i_xglb = first(lambda l: l.startswith("X\tGLB\t"))
 # Export framing and row kinds must be checked even when all compared values are intact.
@@ -228,4 +241,4 @@ late.insert(late.index(lines[i_xglb]) + 1, lines[i_scene4])
 write("S5_X_late_stage", late)
 write("S5_X_after_done", drop(i_xglb) + [lines[i_xglb]])
 write("S5_X_died_with_rows", insert(i_xglb + 1, "XDIES\tclaimed failure"))
-sys.stdout.write("".join(f[:-4] + "\n" for f in sorted(os.listdir(out)) if f.endswith(".txt") and f not in ("jobs.txt", "jobs_exit.txt", "jobs_s3.txt", "jobs_sha.txt", "intact.txt", "intact_sha.txt")))
+sys.stdout.write("".join(f[:-4] + "\n" for f in sorted(os.listdir(out)) if f.endswith(".txt") and f not in ("jobs.txt", "jobs_exit.txt", "jobs_s3.txt", "jobs_sha.txt", "jobs_sha_img.txt", "intact.txt", "intact_sha.txt", "intact_sha_img.txt")))

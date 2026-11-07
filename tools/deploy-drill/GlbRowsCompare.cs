@@ -157,11 +157,34 @@ static class GlbRowsCompare
         var glbRow = Of("GLB");
         // The file still exists when its re-encoded image bytes cannot be compared. Require its evidence in either case.
         if (glb && (glbRow.Count != 1 || glbRow[0].Length != 5)) throw new InvalidDataException("the dump has no single valid GLB row");
-        if (glb && x.MaterialRows != null && x.MaterialRows.Images.Any(im => im.bytes == null)) { Count(cover, "the GLB's bytes not compared (an image's bytes are Blender's encoder's)"); glb = false; }
+        // An image whose bytes are Blender's encoder's (a JPEG albedo's PNG re-encode): until 2026-11-07 the whole file's bytes were
+        // skipped for it; now Blender's own bytes for that image, read out of its file, stand in for the port's unknown ones and the
+        // rest of the file - the JSON, every other view - is compared bit for bit. Without the file at hand the skip stands, counted.
+        var saved = x.MaterialRows?.Images.ToArray();
+        var blenderImages = saved == null ? new List<int>() : Enumerable.Range(0, saved.Length).Where(i => saved[i].bytes == null).ToList();
+        if (glb && blenderImages.Count > 0)
+        {
+            if (theirGlb == null) { Count(cover, "the GLB's bytes not compared (an image's bytes are Blender's encoder's, and its file is not at hand)"); glb = false; }
+            else
+            {
+                HafModel theirs;
+                try { theirs = GlbReader.Read(theirGlb); }
+                catch (Exception e) { problems.Add("Blender's file does not read back for its image bytes: " + e.GetType().Name + ": " + e.Message); return st; }
+                if (theirs.Images.Count != saved.Length) { problems.Add($"Blender's file holds {theirs.Images.Count} image(s), the export {saved.Length}"); return st; }
+                foreach (int i in blenderImages)
+                {
+                    var bi = theirs.Images[i];
+                    if (bi.Bytes == null || bi.Bytes.Length == 0) { problems.Add($"Blender's file has no bytes for image {i} ('{saved[i].name}')"); return st; }
+                    x.MaterialRows.Images[i] = (saved[i].name, saved[i].mime, bi.Bytes, saved[i].source);
+                }
+                Count(cover, "the GLB's bytes compared with Blender's own bytes standing in for its re-encoded image(s)");
+                Count(cover, "a re-encoded image's bytes taken from Blender's file", blenderImages.Count);
+            }
+        }
         if (glb)
         {
             var written = BlenderGlbWriter.Build(x);
-            if (written.Fallback != null) { problems.Add("the writer leaves it: " + written.Fallback); return st; }
+            if (written.Fallback != null) { problems.Add("the writer leaves it: " + written.Fallback); Restore(); return st; }
             int jsonPadded = (System.Text.Encoding.UTF8.GetByteCount(written.Json) + 3) & ~3, binPadded = (written.Bin.Length + 3) & ~3;
             int before = problems.Count;
             Compare(problems, "the GLB (bytes, JSON chunk, BIN chunk, sha256)", new List<string> { $"{written.Glb.Length}\t{jsonPadded}\t{binPadded}\t{Sha(written.Glb)}" }, new List<string> { string.Join("\t", glbRow[0].Skip(1)) });
@@ -182,6 +205,9 @@ static class GlbRowsCompare
             }
             st.GlbEqual = problems.Count == before; st.GlbBytes = written.Glb.Length;
         }
+        Restore();
         return st;
+
+        void Restore() { if (saved != null) for (int i = 0; i < saved.Length; i++) x.MaterialRows.Images[i] = saved[i]; }
     }
 }

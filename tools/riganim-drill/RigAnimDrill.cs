@@ -679,7 +679,15 @@ static class Stage1Drill
                                     if (!string.IsNullOrEmpty(rowsFile) && Environment.GetEnvironmentVariable("RIGANIM_MODEL_JOB") == key) mineOut = new List<string>();
                                     // RIGANIM_GLB_DIR=<the dump's work dir>: the file Blender wrote (<key>/<key>.glb, the colons underscored), for the first differing byte
                                     byte[] theirGlb = null; string glbDir = Environment.GetEnvironmentVariable("RIGANIM_GLB_DIR");
-                                    if (!string.IsNullOrEmpty(glbDir)) { string safe = key.Replace(':', '_'); string gp = Path.Combine(glbDir, safe, safe + ".glb"); if (File.Exists(gp)) theirGlb = File.ReadAllBytes(gp); }
+                                    // RIGANIM_GLB_DIR: the dump's work directories (';'-separated, one per shard), each holding <key>/<key>.glb as Blender wrote
+                                    // it - the file the comparison reads a re-encoded image's bytes out of (2026-11-07; the whole file was skipped for it before)
+                                    if (!string.IsNullOrEmpty(glbDir))
+                                        foreach (string dir in glbDir.Split(';'))
+                                        {
+                                            if (dir.Length == 0) continue;
+                                            string safe = key.Replace(':', '_'); string gp = Path.Combine(dir, safe, safe + ".glb");
+                                            if (File.Exists(gp)) { theirGlb = File.ReadAllBytes(gp); break; }
+                                        }
                                     GlbRowsCompare.Compare(problems, "the export's RIGANIM lines", x.Log, d.ExportLogs.Where(l => !l.StartsWith("RIGANIM glb wrote ", StringComparison.Ordinal)).ToList());
                                     var xp = new List<string>();   // every difference named as the export's (the drill's tampers look for the word)
                                     var st = GlbRowsCompare.Compare(x, d.ExportRows, xp, ExportCover, name => BlenderRigExport.ChannelCount(model, name), true, true, theirGlb, mineOut);
@@ -715,7 +723,10 @@ static class Stage1Drill
                                                 else if (!o.Written) problems.Add("the in-process wrapper did not write the file: " + (o.ScriptExit ? "the script's exit" : o.UseBlender));
                                                 else
                                                 {
-                                                    if (st.GlbEqual)
+                                                    // the wrapper's file equals Blender's byte for byte unless an image's bytes are Blender's encoder's: the
+                                                    // wrapper keeps the SOURCE's JPEG there (below), while the comparison above held the export whole with
+                                                    // Blender's own bytes standing in for that image (2026-11-07; GlbEqual no longer says which case this is)
+                                                    if (!x.MaterialRows.Images.Any(im => im.bytes == null))
                                                     {
                                                         var glbRow = d.ExportRows.First(r => r[0] == "GLB");
                                                         string sha; using (var h = SHA256.Create()) sha = BitConverter.ToString(h.ComputeHash(File.ReadAllBytes(tmpGlb))).Replace("-", "").ToLowerInvariant();
