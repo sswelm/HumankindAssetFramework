@@ -10,6 +10,14 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **A SLICED ATTACK OR MOVE ROLE CLIP KEEPS ITS TRANSLATIONS ON THE LEGACY PATH (2026-11-07).** The legacy floor table
+  now uses resolved action identity in Blender and C#; sliced role names previously matched nothing. Review of PR #260
+  also closes a cross-action leak: an attack-qualified Root path preserved a below-floor move slice (0.2083 units) and
+  amplified it to 20.8333; deploy/primary clips could inherit it too. Each legacy action now owns its permitted paths.
+  `fx_s3_keept_kept` keeps the attack's three translation curves and strips the small move's; five more fixtures cover
+  primary/deploy isolation, large move slices, literal `_rebaked` names, shared actions and the existing garbage veto.
+  Ten unit cases cover those rules and native-cache invalidation. The conversion rest-fold retains its existing global
+  keep set; V2 inputs still avoid legacy amplification. Old native rig caches are retried after the revision bump.
 - **rig_anim.py's SOCKET-SORT EXIT NO LONGER READS A FREED EDIT BONE; ITS TWO FIXTURES ARE TAKEN BY THE PORT (2026-11-07).**
   The "would sort BEFORE its parent" exit printed `_parent.name` after `mode_set('OBJECT')` had freed the edit bones: the right
   name once in four Blender runs, an empty name once, garbage twice (one run's dump died of a UnicodeDecodeError, another's
