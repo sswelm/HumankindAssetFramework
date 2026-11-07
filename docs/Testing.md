@@ -1931,6 +1931,11 @@ and an absurd finite channel rejected by the garbage veto. Nine native regressio
 including duplicate-role last-wins behavior and V2 inputs; six fail before the fix. A tenth test holds cache invalidation.
 The native rig cache revision is bumped because legacy output can change, including whole-action roles. The FULL drill
 includes UniversalTanks, the registry's legacy keepTranslations recipe omitted by the ordinary size-limited sample.
+Measured there (2026-11-07, Blender's dump of that one job under the script before and after the review): only the idle
+slice `deploy_idle_0_0_1` differs - 315 location curves gone (105 track-link bones x 3 channels, 819 -> 504 fcurves), every
+key of them zero at both frames (RIGANIM_KEYS=1), so the links rest where they rested; the move clip's 315 kept curves are
+unchanged. A byte-level change to that bake, not a visual one; not re-checked in game. The FULL live drill: PASS, 165 jobs, 156 equal, 9 left by name, UniversalTanks among the equal;
+the plant (the port keeping a qualified path in every clip) FAILS on fx_s3_keept_kept, fx_s3_keept_deploy and fx_s3_keept_named_action.
 
 Step (d2), stage 3 in C# - the rest fold and rebake and the bone cap (2026-10-13): nothing of stage 3 is deferred any
 more. The fold on the conversion path: every exported clip's pose matrices snapshotted frame by frame (the evaluation
