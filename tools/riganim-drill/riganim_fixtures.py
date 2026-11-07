@@ -612,12 +612,22 @@ def s3_frac(out):
 def s3_keept(out):
     """Whole-action role clips for legacy keepTranslations: 'Slide' moves Root from an offset (the rebase bites), 'Creep'
     moves Arm by 0.2 (under the move role's 0.5 floor, over the attack role's 1e-4). A SLICED role clip is named
-    '<source>_<role>_...' and never matches the floor table keyed by the source name - the script keeps nothing for it
-    (fx_s3_keept_kept records that)."""
+    '<source>_<role>_...'; until 2026-11-07 the floor table was keyed by the SOURCE name and the script kept nothing for it -
+    now by the role's resolved action, so fx_s3_keept_kept keeps the attack slice's slide (the move slice's stays under its floor)."""
     r = Rig(); arm, j0, j1, sk, m = rigged(r)
     a2 = r.anim("Slide"); r.key(a2, j0, "translation", [0.0, 1.0], [(0.5, 0.0, 0.0), (1.5, 0.0, 0.0)])
     a3 = r.anim("Creep"); r.key(a3, j1, "translation", [0.0, 1.0], [(0.0, 1.0, 0.0), (0.0, 1.2, 0.0)])
     return r.write(out, "riganim_s3_keept")
+
+
+def s3_keept_scope(out):
+    """The same Root path in several actions: a small slide, an under-floor move whose name contains '_rebaked', a
+    large crawl, and an absurd channel. Action identity owns each floor; the garbage veto still spans eligible clips."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    for name, start, end in (("Slide", 0.5, 0.7), ("Slide_rebaked_move", 2.0, 2.2), ("Crawl", 0.0, 1.0), ("Bad", 0.0, 200000.0)):
+        a = r.anim(name)
+        r.key(a, j0, "translation", [0.0, 1.0], [(start, 0.0, 0.0), (end, 0.0, 0.0)])
+    return r.write(out, "riganim_s3_keept_scope")
 
 
 def s3_v2_multi(out):
@@ -1092,7 +1102,13 @@ def main(out):
     job("fx_s3_slice_legacy", multi(out), clip="Longer[1..7/2]", convert="0")
     job("fx_s3_slice_objanim", p, clip="Spin[0..8]", convert="0")
     job("fx_s3_statues", s3_statues(out), clip="Spin[0..5]", convert="0")
-    job("fx_s3_keept_kept", multi(out), clip="Spin", convert="0", keept="1", roles="attack=Longer[10..40];move=Longer[0..10]")   # the attack slide starts off zero (the rebase bites); the move slide stays under its 0.5 floor
+    job("fx_s3_keept_kept", multi(out), clip="Spin", convert="0", keept="1", roles="attack=Longer[10..40];move=Longer[0..10]")   # the attack slice's slide KEPT since 2026-11-07 (the floor table keyed by the resolved action; nothing before); the move slice's stays under its 0.5 floor
+    job("fx_s3_keept_deploy", multi(out), clip="Longer[0..6]", convert="0", keept="1", roles="attack=Longer[10..40];deploy=Longer[0..10]")   # primary and deploy must not inherit the attack's Root path
+    job("fx_s3_keept_move_slice", multi(out), clip="Spin", convert="0", keept="1", roles="attack=Longer[0..10];move=Longer[0..40]")   # both slides qualify at their own floors
+    scope = s3_keept_scope(out)
+    job("fx_s3_keept_named_action", scope, convert="0", keept="1", roles="attack=Slide;move=Slide_rebaked_move;deploy=Crawl")
+    job("fx_s3_keept_shared_action", scope, convert="0", keept="1", roles="attack=Slide;move=Slide")   # shared action: lower floor, compensated once
+    job("fx_s3_keept_poison", scope, convert="0", keept="1", roles="attack=Bad;move=Crawl")   # the existing global garbage veto remains conservative
     job("fx_s3_keept_none", multi(out), clip="Longer", convert="0", keept="1", roles="idle=Spin")
     job("fx_s3_keept_whole", s3_keept(out), clip="Spin", convert="0", keept="1", roles="attack=Slide;move=Creep")
     job("fx_s3_keept_v2", s3_v2_multi(out), clip="Spin", convert="0", keept="1", roles="attack=Longer")

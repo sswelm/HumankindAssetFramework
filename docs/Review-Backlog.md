@@ -703,12 +703,16 @@ below that only intra-group parallelism of the weld or the gather would pay.
   a tab in it, so the dump's LOG row had 4 fields and the drill FAILED on consistency (a rerun passed). The exit itself is
   right (code 1); only the message is undefined. Fix: take `_parent.name` before leaving edit mode (one line, as the no-parent exit already does with its
   bone list). The C# model leaves the case by name until then.
-- **A sliced attack/move role clip never keeps its translations** — OPEN (2026-10-13, found by the stage 3 fixtures).
+- ~~**A sliced attack/move role clip never keeps its translations**~~ FIXED 2026-11-07 (the floor table keyed by the role's
+  resolved action, script and port together; review also scopes permitted paths per action, preventing attack paths from
+  leaking into below-floor move/deploy/primary clips; native caches are invalidated;
+  `docs/Testing.md`). Was: OPEN (2026-10-13, found by the stage 3 fixtures).
   `rig_anim.py`'s legacy keepTranslations keys its role floor table by the clip's SOURCE name (`cn.split('[')[0]`), but a
   sliced role clip is the action `<source>_<role>_<f0>_<f1>_<step>`, which matches neither key, so `_keep_acts` is
   empty and the script logs "no attack/move-role clip found" (`fx_s3_keept_kept`, Blender's own run). Only whole-action
   role clips keep slides on the legacy path. Registry impact: UniversalTanks' attack and move roles are whole actions
-  (105 paths kept); no legacy recipe slices a role clip today. The C# model reproduces the behaviour as it is.
+  (105 paths kept before the review); no legacy recipe slices a role clip today. The FULL drill covers that whole-action
+  recipe too, because correcting cross-action retention can change its output.
 
 - **Blender-exact vertex positions for skinned parts** — OPEN (2026-10-02, found by 3c). Blender's importer skins a
   rigged mesh into its bind pose in numpy float32: per joint, (bind matrix) @ (inverse bind matrix), where the bind

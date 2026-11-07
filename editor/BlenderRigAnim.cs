@@ -1334,36 +1334,43 @@ public static class BlenderRigAnim
 
         // ---- legacy keepTranslations
         var keepActs = new List<ActionData>();
+        var legacyKeepPaths = new Dictionary<ActionData, HashSet<string>>();
         bool cleanUnits = armObj.Name.StartsWith("DeployArmV2", StringComparison.Ordinal);
         if (a.KeepTranslations && !a.ConvertRig)
         {
-            var roleFloor = new Dictionary<string, double>(StringComparer.Ordinal);
-            foreach (var (role, clip) in a.RoleSpecs)
-                if ((role == "attack" || role == "move") && PyStrip(clip).Length > 0)
+            var roleFloor = new Dictionary<ActionData, double>();
+            foreach (var (role, ra) in roleActs)
+                if (role == "attack" || role == "move")
                 {
-                    string bn = PyStrip(clip.Split('[')[0]);
+                    // Use action identity, including literal '_rebaked' names; shared roles lower the same action's floor.
                     double fl = role == "attack" ? 1e-4 : 0.5;
-                    roleFloor[bn] = Math.Min(roleFloor.TryGetValue(bn, out var prev) ? prev : 1e9, fl);
+                    roleFloor[ra] = Math.Min(roleFloor.TryGetValue(ra, out var prev) ? prev : 1e9, fl);
                 }
-            string Base(string name) { int at = name.IndexOf("_rebaked", StringComparison.Ordinal); return at < 0 ? name : name.Substring(0, at); }
-            keepActs = allActs.Where(x => roleFloor.ContainsKey(Base(x.Name)) || roleFloor.ContainsKey(x.Name)).ToList();
+            keepActs = allActs.Where(roleFloor.ContainsKey).ToList();
             if (keepActs.Count == 0) { s.Logs3.Add("RIGANIM legacy keepTranslations: no attack/move-role clip found — nothing kept (translations live in the fire cycle / drive cycle)"); Note(s, "legacy keepTranslations: nothing kept"); }
             var poison = new HashSet<string>(StringComparer.Ordinal);
             foreach (var sa in keepActs)
+            {
+                var paths = new HashSet<string>(StringComparer.Ordinal); legacyKeepPaths[sa] = paths;
                 foreach (var fc in sa.FCurves)
                 {
                     if (!(fc.Bone != null && fc.Prop == "location") || fc.Keys.Count == 0) continue;
                     var vals = fc.Keys.Select(k => (double)k.Value).ToList();
                     if (vals.Any(v => double.IsNaN(v) || Math.Abs(v) > 1e5)) { poison.Add(fc.DataPath); continue; }
-                    double floor = roleFloor.TryGetValue(Base(sa.Name), out var f1) ? f1 : roleFloor.TryGetValue(sa.Name, out var f2) ? f2 : 1e-4;
+                    double floor = roleFloor[sa];
                     double range = vals.Max() - vals.Min();
-                    if (floor < range && range < 1e4) keepLocPaths.Add(fc.DataPath);
+                    if (floor < range && range < 1e4) paths.Add(fc.DataPath);
                 }
-            keepLocPaths.ExceptWith(poison);
+            }
+            foreach (var paths in legacyKeepPaths.Values) paths.ExceptWith(poison); // preserve the global garbage veto
+            var summary = new HashSet<string>(legacyKeepPaths.Values.SelectMany(paths => paths), StringComparer.Ordinal);
             string BoneOfPath(string p) { int q = p.IndexOf('"'); return q < 0 ? null : p.Split('"')[1]; }
             if (poison.Count > 0) { s.Logs3.Add("RIGANIM legacy keepTranslations: " + poison.Count + " path(s) REJECTED as decomposition garbage (NaN/huge): " + PyList(poison.Where(p => p.IndexOf('"') >= 0).Select(BoneOfPath).Distinct().OrderBy(x => x, PyStringOrder))); Note(s, "legacy keepTranslations: garbage rejected"); }
-            if (keepLocPaths.Count > 0) { s.Logs3.Add("RIGANIM legacy keepTranslations: " + keepLocPaths.Count + " varying location path(s) kept: " + PyList(keepLocPaths.Where(p => p.IndexOf('"') >= 0).Select(BoneOfPath).Distinct().OrderBy(x => x, PyStringOrder))); Note(s, "legacy keepTranslations: paths kept"); }
+            if (summary.Count > 0) { s.Logs3.Add("RIGANIM legacy keepTranslations: " + summary.Count + " varying location path(s) kept: " + PyList(summary.Where(p => p.IndexOf('"') >= 0).Select(BoneOfPath).Distinct().OrderBy(x => x, PyStringOrder))); Note(s, "legacy keepTranslations: paths kept"); }
         }
+
+        bool KeepLocation(ActionData action, string path) => a.ConvertRig ? keepLocPaths.Contains(path)
+            : legacyKeepPaths.TryGetValue(action, out var paths) && paths.Contains(path);
 
         // ---- the strip
         int locs = 0, keptLocs = 0;
@@ -1372,7 +1379,7 @@ public static class BlenderRigAnim
                 foreach (var fc in sl.FCurves.ToList())
                 {
                     if (!(fc.Bone != null && fc.Prop == "location")) continue;
-                    if (a.KeepTranslations && keepLocPaths.Contains(fc.DataPath)) { keptLocs++; continue; }
+                    if (a.KeepTranslations && KeepLocation(sa, fc.DataPath)) { keptLocs++; continue; }
                     sl.FCurves.Remove(fc); locs++;
                 }
         if (locs > 0 || keptLocs > 0)
@@ -1387,13 +1394,13 @@ public static class BlenderRigAnim
         foreach (int b in ad.BoneNodes) ad.PoseProps[b] = new[] { new float[3], new[] { 1f, 0f, 0f, 0f }, new[] { 1f, 1f, 1f } };
 
         // ---- the legacy sandwich compensation
-        if (a.KeepTranslations && !a.ConvertRig && !cleanUnits && keepLocPaths.Count > 0)
+        if (a.KeepTranslations && !a.ConvertRig && !cleanUnits && legacyKeepPaths.Values.Any(paths => paths.Count > 0))
         {
             int scaled = 0;
             foreach (var sa in keepActs)
                 foreach (var fc in sa.FCurves)
                 {
-                    if (!keepLocPaths.Contains(fc.DataPath) || fc.Prop != "location") continue;
+                    if (!KeepLocation(sa, fc.DataPath) || fc.Prop != "location") continue;
                     if (fc.Keys.Count == 0) continue;
                     double v0 = fc.Keys.OrderBy(k => k.Frame).First().Value;
                     foreach (var k in fc.Keys)
@@ -1404,7 +1411,7 @@ public static class BlenderRigAnim
                     }
                     scaled++;
                 }
-            s.Logs3.Add("RIGANIM legacy keepTranslations: " + scaled + " kept curve(s) delta-rebased + amplified x100 (attack clip only)");
+            s.Logs3.Add("RIGANIM legacy keepTranslations: " + scaled + " kept curve(s) delta-rebased + amplified x100 (attack/move clips)");
             Note(s, "kept curves delta-rebased and amplified");
         }
 

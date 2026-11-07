@@ -25,6 +25,15 @@ public class RigAnimIntegrationRulesTests
             string.Equals(previous, current, StringComparison.Ordinal), false, false));
     }
 
+    [Fact]
+    public void Per_action_legacy_translation_fix_invalidates_previously_generated_rigs()
+    {
+        string previous = "route=csharp-fallback:2026-11-03.fbx-rig-leave.1." + HafModelLoader.CacheRevision;
+        string current = "route=csharp-fallback:" + BlenderRigAnimInProcess.CacheRevision;
+        Assert.False(BakerRules.CanReuseRigFallback(true, true,
+            string.Equals(previous, current, StringComparison.Ordinal), false, false));
+    }
+
     [Theory]
     [InlineData("Spin")]
     [InlineData("_Spin")]
