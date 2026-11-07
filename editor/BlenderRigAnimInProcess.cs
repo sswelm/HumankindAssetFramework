@@ -24,7 +24,7 @@ public static class BlenderRigAnimInProcess
 {
     /// <summary>Bump when the in-process run's written file changes: the Factory's slim cache key carries it, so a cached
     /// GLB made by an older port is made again.</summary>
-    public const string CacheRevision = "2026-11-03.fbx-rig-leave.1." + HafModelLoader.CacheRevision; // a skinned or animated .fbx leaves to the FBX route by name: its cached GLB-route slim is made again there
+    public const string CacheRevision = "2026-11-07.legacy-role-paths.1." + HafModelLoader.CacheRevision; // legacy translations are retained per resolved action, so old cross-role slides are regenerated
 
     public sealed class Outcome
     {

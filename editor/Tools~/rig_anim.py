@@ -794,6 +794,7 @@ except Exception as _e:
 # itself; on the legacy path (deploy_convert output etc.) scan the final clips directly — any pose-bone
 # location channel that VARIES (>1e-4) is a genuine authored slide (deploy_convert's Phase B keys the tube's
 # true recoil translation; only this strip ever removed it).
+_legacy_keep_paths = {}   # action -> qualifying bone paths; the conversion rest-fold's keep set remains global
 if keep_translations and not convert_rig:
     # SCOPE: translations are kept in the ATTACK-role clip (the recoil) and — since 2026-07-26, the T-62
     # finding — the MOVE-role clip (a driving vehicle's track links crawl by TRANSLATION; deploy_convert now
@@ -805,17 +806,19 @@ if keep_translations and not convert_rig:
     # source tank rides bumpy terrain; replayed on flat game ground the wheels wiggle in the air). The ATTACK
     # role keeps its historical 1e-4 floor: the m114's recoil slide is only ~0.1 raw units.
     _role_floor = {}
-    for _r, _cn in role_specs:
-        if _r in ('attack', 'move') and _cn.strip() and _r in role_acts:
-            _bn = role_acts[_r].name      # the role's RESOLVED action: a sliced clip is '<source>_<role>_<f0>_<f1>_<step>' - keyed by
-                                          # the SOURCE name (cn.split('[')[0]) until 2026-11-07, a sliced attack/move clip matched nothing
+    for _r, _ra in role_acts.items():
+        if _r in ('attack', 'move'):
+            # Key by the resolved action itself: slices have their own action, and literal '_rebaked' names are not aliases.
+            # Two roles sharing one action use the lower floor and compensate that action only once.
             _fl = 1e-4 if _r == 'attack' else 0.5
-            _role_floor[_bn] = min(_role_floor.get(_bn, 1e9), _fl)
-    _keep_acts = [a for a in all_acts if a.name.split('_rebaked')[0] in _role_floor or a.name in _role_floor]
+            _role_floor[_ra] = min(_role_floor.get(_ra, 1e9), _fl)
+    _keep_acts = [a for a in all_acts if a in _role_floor]
     if not _keep_acts:
         print("RIGANIM legacy keepTranslations: no attack/move-role clip found — nothing kept (translations live in the fire cycle / drive cycle)")
     _poison = set()   # any channel with NaN/absurd values poisons the whole bone path — decomposition garbage
     for _sa in _keep_acts:
+        _paths = set()
+        _legacy_keep_paths[_sa] = _paths
         for coll, fc in all_fcurve_owners(_sa):
             _dp = fc.data_path
             if not (_dp.startswith("pose.bones") and _dp.endswith(".location")) or len(fc.keyframe_points) == 0:
@@ -826,22 +829,24 @@ if keep_translations and not convert_rig:
             # those explodes mesh bounds (1e28) and NaNs the import. Only finite, model-scale slides pass.
             if any(v != v or abs(v) > 1e5 for v in _vals):
                 _poison.add(_dp); continue
-            _floor = _role_floor.get(_sa.name.split('_rebaked')[0], _role_floor.get(_sa.name, 1e-4))
+            _floor = _role_floor[_sa]
             if _floor < (max(_vals) - min(_vals)) < 1e4:
-                _KEEP_LOC_PATHS.add(_dp)
-    _KEEP_LOC_PATHS -= _poison
+                _paths.add(_dp)
+    for _paths in _legacy_keep_paths.values():
+        _paths.difference_update(_poison)   # preserve the conservative cross-action garbage veto
+    _legacy_paths_summary = set().union(*_legacy_keep_paths.values())
     if _poison:
         print("RIGANIM legacy keepTranslations: %d path(s) REJECTED as decomposition garbage (NaN/huge): %s"
               % (len(_poison), sorted({p.split('"')[1] for p in _poison if '"' in p})))
-    if _KEEP_LOC_PATHS:
+    if _legacy_paths_summary:
         print("RIGANIM legacy keepTranslations: %d varying location path(s) kept: %s"
-              % (len(_KEEP_LOC_PATHS), sorted({p.split('"')[1] for p in _KEEP_LOC_PATHS if '"' in p})))
+              % (len(_legacy_paths_summary), sorted({p.split('"')[1] for p in _legacy_paths_summary if '"' in p})))
 
 _locs = 0; _kept = 0
 for _sa in all_acts:
     for coll, fc in all_fcurve_owners(_sa):
         if fc.data_path.startswith("pose.bones") and fc.data_path.endswith(".location"):
-            if keep_translations and fc.data_path in _KEEP_LOC_PATHS:
+            if keep_translations and fc.data_path in (_KEEP_LOC_PATHS if convert_rig else _legacy_keep_paths.get(_sa, ())):
                 _kept += 1; continue   # opt-in: genuinely translation-animated bone (caterpillar shuttle etc.)
             coll.remove(fc); _locs += 1
 if _locs or _kept:
@@ -864,7 +869,7 @@ for _pb in arm.pose.bones:
 # at 1/100 amplitude (the howitzer's ~10-unit slam baked to a 0.0115 bbox). Pre-amplify the kept location keys
 # x100 so the baked curve lands at render scale. Conversion-path exports (global_scale 0.01, net scale 1) need
 # no compensation — the translation-test cube rendered at correct amplitude there.
-if keep_translations and not convert_rig and not clean_units_input and _KEEP_LOC_PATHS:
+if keep_translations and not convert_rig and not clean_units_input and any(_legacy_keep_paths.values()):
     # DELTA-REBASE + AMPLIFY: each kept curve is rebased to ZERO at its first frame before the x100 — the clip
     # carries pure MOTION (the slam's full travel), never constant pose offsets. Tiny basis residues (a 3.5 cm
     # rest mismatch) otherwise amplify into multi-unit displacements (the reared-up-gun incident): pose HOLDING
@@ -872,7 +877,7 @@ if keep_translations and not convert_rig and not clean_units_input and _KEEP_LOC
     _scaled = 0
     for _sa in _keep_acts:
         for coll, fc in all_fcurve_owners(_sa):
-            if fc.data_path in _KEEP_LOC_PATHS and fc.data_path.endswith(".location"):
+            if fc.data_path in _legacy_keep_paths[_sa] and fc.data_path.endswith(".location"):
                 _kps = sorted(fc.keyframe_points, key=lambda k: k.co[0])
                 if not _kps:
                     continue
@@ -882,7 +887,7 @@ if keep_translations and not convert_rig and not clean_units_input and _KEEP_LOC
                     kp.handle_left[1] = (kp.handle_left[1] - _v0) * 100.0
                     kp.handle_right[1] = (kp.handle_right[1] - _v0) * 100.0
                 _scaled += 1
-    print("RIGANIM legacy keepTranslations: %d kept curve(s) delta-rebased + amplified x100 (attack clip only)" % _scaled)
+    print("RIGANIM legacy keepTranslations: %d kept curve(s) delta-rebased + amplified x100 (attack/move clips)" % _scaled)
 
 # clamp scene frame range to the action's real range (else bake_anim pads a frozen tail -> ~1s stall per loop)
 fs, fe = [int(round(v)) for v in act.frame_range]

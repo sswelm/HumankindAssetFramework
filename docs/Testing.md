@@ -1919,10 +1919,18 @@ CONSTANT keys sampled between frames were wrong until the segment follows the ke
 never saw it: `keyframe_insert` keys are Bezier). Not fixtured, named: the poison gate's NaN rejection (no glTF
 fixture carries a NaN key), Unicode digits in a slice spec (Python's `\d`). A script finding the fixtures made plain:
 the legacy keepTranslations floor table was keyed by the role clip's SOURCE name, so a SLICED attack or move clip
-(`<source>_<role>_...`) never matched it and kept nothing (`fx_s3_keept_kept`) - recorded in the backlog, fixed 2026-11-07:
-the table is keyed by the role's resolved action in the script and the port together, the fixture keeps the attack slice's
-slide (Blender's own run: 1 varying location path kept, Root, 6 translation curves across the clips), 147 of 156 jobs equal (9 left), the plant with the old key FAILS the drill on fx_s3_keept_kept (the LOG lines, the attack slice's fcurve count 11 against 8, the Root location rows); only UniversalTanks bakes
-legacy with keepTranslations, its attack and move roles whole actions.
+(`<source>_<role>_...`) never matched it and kept nothing (`fx_s3_keept_kept`), fixed 2026-11-07 by using resolved actions.
+Review of PR #260 then reproduced a cross-action leak: the attack's qualifying Root path kept the move slice's 0.2083-unit
+translation despite its 0.5 floor, then amplified it to 20.8333; a deploy variant retained the same path too. Blender and
+C# now keep permitted paths per resolved action, and use that scope for stripping and legacy compensation. The fixture
+keeps three attack curves and strips the small move's. Literal `_rebaked` action names no longer alias other actions;
+roles sharing one action use the lower floor and compensate once. The conversion rest-fold's global keep set and the
+conservative cross-action garbage veto are unchanged; V2 legacy inputs still skip compensation.
+Five new Blender jobs exercise deploy/primary isolation, a qualifying move slice, action-name identity, shared actions,
+and an absurd finite channel rejected by the garbage veto. Nine native regression cases cover the same boundaries,
+including duplicate-role last-wins behavior and V2 inputs; six fail before the fix. A tenth test holds cache invalidation.
+The native rig cache revision is bumped because legacy output can change, including whole-action roles. The FULL drill
+includes UniversalTanks, the registry's legacy keepTranslations recipe omitted by the ordinary size-limited sample.
 
 Step (d2), stage 3 in C# - the rest fold and rebake and the bone cap (2026-10-13): nothing of stage 3 is deferred any
 more. The fold on the conversion path: every exported clip's pose matrices snapshotted frame by frame (the evaluation
