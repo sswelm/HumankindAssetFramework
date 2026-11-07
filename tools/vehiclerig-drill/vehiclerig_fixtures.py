@@ -68,8 +68,10 @@ Stage 3 (step (d), part d3: the turret, the gun assembly, the trails):
                      Recoil clip; until 2026-11-07 stage 4 died dividing by the zero radius, DIES:4:)
   fx_r_pivot_end     the pivot at the muzzle under recoil (the bore from the breech->muzzle span; until 2026-11-07 from gc ~ muzzle, a
                      float32 residue - the script defect fixed that day)
+  fx_r_pivot_end_raise / fx_r_pivot_end_lower: a muzzle pivot with +/-45 degrees of deploy; the full bore defines the lift
+                     (review of PR #258: the collapsed trunnion->muzzle vector reversed elevation and the clearance warning)
   fx_r_recoil_buried the breech clearance's WARNING: the trunnion at the breech, 45 degrees of lift and a 0.75 stroke on a 4-unit tube
-                     put the breech 1.22 below the hull's floor (every other recoil fixture takes the clearance line)
+                     put the breech 1.22 below the hull's floor (the raised muzzle-pivot fixture also takes the warning)
   fx_r_tracks_fallback  LIVE tracks (no tracksStatic) on the wheeled rig: an 8-vertex belt has no link pitch, so the tread takes the
                      carrier-blend fallback - its vertex groups were created from a SET (random order per run until 2026-11-06); the
                      drill dumps it twice and holds the runs equal; the C# leaves the tread rig (d6) by name
@@ -643,6 +645,15 @@ def main(out):
     r.node("Hull", mesh=r.mesh("Hull", at=(-2.0, -1.0, -1.0), size=2.0, material=ma))
     r.node("Tube", mesh=r.mesh("Tube", at=(0.5 / 15.0, 1.4, -0.1), size=0.2, material=ma), scale=[15.0, 1.0, 1.0])
     recipe(out, "fx_r_pivot_end", r.write(models, "fx_r_pivot_end"), [("Hull", 0, {}), ("Tube", 7, {})], recoilDist=0.3, gunPivot=1.0)
+    # A muzzle pivot also collapsed Deploy's lift vector, reversing +45/-45 on this +Y bore. Keep both directions
+    # in the Blender parity corpus; the unit cases independently require sin(elevation) and the derived clearances.
+    for key, elevation in (("fx_r_pivot_end_raise", 45.0), ("fx_r_pivot_end_lower", -45.0)):
+        r = Rig(); ma = r.material("Steel", (0.4, 0.4, 0.45))
+        r.node("Hull", mesh=r.mesh("Hull", material=ma), scale=[2.0, 2.0, 2.0])
+        r.node("Tube", mesh=r.mesh("Tube", material=ma), translation=[0.0, 0.0, -3.0], scale=[0.2, 0.2, 4.0])
+        r.node("Trail", mesh=r.mesh("Trail", material=ma), translation=[0.0, 0.0, 3.0], scale=[0.2, 0.2, 4.0])
+        recipe(out, key, r.write(models, key), [("Hull", 0, {}), ("Tube", 7, {}), ("Trail", 10, {})],
+               recoilDist=0.25, gunPivot=1.0, gunDeployElev=elevation, trailSpreadDeg=30.0, trailFrames=10)
     # fx_r_recoil_buried: the breech clearance's WARNING branch - the trunnion at the breech (pivot 0), 45 degrees of deploy lift and a
     # 0.75 stroke on a 4-unit tube (Blender y 1..5 at z -0.1..0.1 over a hull floor at z -1): the trunnion is the breech VERTEX, the
     # corner (-0.1, 1, -0.1); slid back 3 units and raised, that corner lands 3 sin45 lower, at z -2.22, 1.22 below the floor. The

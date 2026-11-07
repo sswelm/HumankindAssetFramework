@@ -528,7 +528,10 @@ public static partial class BlenderVehicleRig
             }
             if (a.GunDeployElev != 0.0 && st.GunAxis != null)
             {
-                var bar = Sub(st.GunAxis[1], st.GunAxis[0]); var axis = Cross(bar, up);
+                // At a muzzle pivot GunAxis has zero length (or float32 residue). Elevation, like recoil, follows
+                // the complete bore; GunAxis still supplies the trunnion's position for the clearance below.
+                var bore = st.GunBore ?? st.GunAxis;
+                var bar = Sub(bore[1], bore[0]); var axis = Cross(bar, up);
                 if (VecLength(axis) < 1e-4) axis = new[] { 1f, 0f, 0f };
                 axis = Normalized(axis);
                 var test = RotateQt(bar, BlenderDeploy.QuaternionAxisAngle(axis, 5.0 * (Math.PI / 180.0)));

@@ -677,7 +677,9 @@ below that only intra-group parallelism of the weld or the gather would pay.
 
 - ~~**vehicle_rig.py: two gun-recoil defects**~~ FIXED 2026-11-07 (script and port together: the bore from `gun_bore`, the
   breech->muzzle span; a zero span is a stage 3 `*** WARNING` with no arm instead of a stage 4 ZeroDivisionError; `fx_r_pivot_end`
-  and `fx_r_gunpoint` equal to Blender in the drill, `fx_r_gunpoint` moved out of the exit set; `docs/Testing.md`). Was: OPEN
+  and `fx_r_gunpoint` equal to Blender in the drill, `fx_r_gunpoint` moved out of the exit set; review of PR #258 also moves
+  Deploy's lift direction to the full bore, since a muzzle pivot reversed elevation and the clearance result there too;
+  six unit cases and `fx_r_pivot_end_raise` / `fx_r_pivot_end_lower` cover it; `docs/Testing.md`). Was: OPEN
   (2026-10-16, found porting stage 3 part d3; the C# port reproduces both bit
   for bit, so fixing them is a script change plus a port change). (1) With `gun_pivot` at 1.0 and recoil on, the bore direction is
   `(gun_axis[1] - gun_axis[0]).normalized()` with `gun_axis[0]` the head - at the muzzle - so the bore is the float32 residue of

@@ -216,6 +216,33 @@ public class VehicleRigStage4Tests
         Assert.Contains("VEHICLE RECOIL breech clearance at full recoil: 0.90 above the model's lowest static point (Z -1.00)", s.Logs4);
     }
 
+    [Theory]
+    [InlineData(0.0, 45.0)]
+    [InlineData(0.5, 45.0)]
+    [InlineData(1.0, 45.0)]
+    [InlineData(0.0, -45.0)]
+    [InlineData(0.5, -45.0)]
+    [InlineData(1.0, -45.0)]
+    public void Deploy_elevates_the_bore_even_when_the_trunnion_is_at_the_muzzle(double pivot, double elevation)
+    {
+        var m = new HafModel { Scene = 0 }; m.Scenes.Add(new HafScene());
+        Box(m, "Hull", 0, 0, 0, 2, 2, 2); Box(m, "Tube", 0, 0, -3, .2f, .2f, 4); Box(m, "Trail", 0, 0, 3, .2f, .2f, 4);
+        var a = E2Args(); Mark(a, "guns", "Tube"); Mark(a, "trails", "Trail");
+        a.RecoilDist = .25; a.GunPivot = pivot; a.GunDeployElev = elevation; a.TrailSpread = 30; a.TrailFrames = 10;
+        var s = Rig(m, a);
+        var deploy = Assert.Single(s.Actions.Where(x => x.Name == "Deploy"));
+        var q = Enumerable.Range(0, 4).Select(i => Curve(deploy, "Gun", i).Keys.Last().Value).ToArray();
+        // The input bore is Blender +Y. Its deployed direction must acquire sin(elevation) in +Z at every pivot,
+        // including 1.0 where the trunnion-to-muzzle vector is exactly zero. Gun's local X is world X in this fixture.
+        var direction = System.Numerics.Vector3.Transform(System.Numerics.Vector3.UnitY,
+            new System.Numerics.Quaternion(q[1], q[2], q[3], q[0]));
+        Assert.InRange(Math.Abs(direction.Z - Math.Sin(elevation * Math.PI / 180)), 0, 1e-5);
+        if (pivot == 1.0 && elevation > 0)
+            Assert.Contains(s.Logs4, l => l.StartsWith("VEHICLE RECOIL *** WARNING: at full recoil the breech reaches Z -3.64, 2.64 BELOW"));
+        if (pivot == 1.0 && elevation < 0)
+            Assert.Contains("VEHICLE RECOIL breech clearance at full recoil: 1.61 above the model's lowest static point (Z -1.00)", s.Logs4);
+    }
+
     [Fact]
     public void Breech_clearance_warns_when_the_deployed_stroke_goes_below_the_floor()
     {

@@ -3577,7 +3577,9 @@ if trail_bones and trail_spread > 0.01:
         _gb = arm.data.bones.get("Gun"); _gpb = arm.pose.bones.get("Gun")
         if _gb is not None and _gpb is not None:
             _trun, _mz = gun_axis
-            _bar = (_mz - _trun)
+            # A muzzle pivot makes trunnion -> muzzle zero (or float32 residue). Choose the lift plane and sign
+            # from the full bore, as recoil does; the trunnion remains the centre of the lift.
+            _bar = (gun_bore[1] - gun_bore[0]) if gun_bore is not None else (_mz - _trun)
             _ax = _bar.cross(Vector((0.0, 0.0, 1.0)))
             if _ax.length < 1e-4:                     # a tube already pointing straight up has no elevation plane
                 _ax = Vector((1.0, 0.0, 0.0))

@@ -2559,12 +2559,19 @@ The port models the block in float32 as mathutils computes it: `(world @ co) - t
 numbers derived from the fixture's input: a 4-unit tube at z -0.1..0.1 over a floor at -1 with a 0.25 stroke along the bore
 prints `0.90 above the model's lowest static point (Z -1.00)`; the trunnion at the breech, 45 degrees of lift and a 0.75 stroke
 put the breech corner (the trunnion is the breech VERTEX, at z -0.1) 3 sin45 lower, at z -2.22, `1.22 BELOW` (the new `fx_r_recoil_buried` takes that branch in the
-drill, with three e3 fixtures at 45 degrees; the other recoil fixtures take the clearance line). The drill alone with live
+drill, with three e3 fixtures at 45 degrees; the other recoil fixtures take the clearance line). The initial drill alone with live
 Blender: PASS, 152 of 165 jobs equal (13 left by name), 8 jobs with the clearance line and 4 with the warning; the plant (the
 port's bore from `gunAxis` again) fails on `fx_r_pivot_end`. 2,517 unit tests. Saved recipes: the M114 is the only one with
 recoil on a tube (pivot 0.25, 45 degrees of lift, a 0.15 stroke): its bore is now the breech->muzzle direction instead of
 trunnion->muzzle, the same line, so its arm and Recoil keys move by a float32 rounding of that direction (measured by the plant: the
 arm's pivot z -1.00974929 -> -1.00974917, one ulp, and the same on `fx_r_turret` and `fx_e3_offaxis`; not re-checked in game), and its bake now prints the clearance the Editor-Tools walkthrough once measured by eye.
+
+Review of PR #258 also reproduced reversed deploy elevation at a muzzle pivot: fixing only the recoil arc left the lift
+plane and sign derived from the collapsed trunnion-to-muzzle vector. Blender and C# now use the full bore for Deploy too,
+keeping the trunnion as the rotation centre. Six unit cases require the bore's vertical component to equal sin(elevation)
+at pivots 0, 0.5 and 1 for +45 and -45 degrees (both muzzle-pivot cases failed before the fix). For the 4-unit tube and
+1-unit stroke at pivot 1, +45 correctly warns at Z -3.64, 2.64 below the floor; -45 reports 1.61 clearance. The two new
+`fx_r_pivot_end_raise` / `fx_r_pivot_end_lower` fixtures hold both directions to Blender through export.
 
 Critical review of PR #181 (2026-10-17): the strict names reader's exception handling covered positional arguments but
 not names inside defaultreduce/shroudreduce/windowreduce tags. Directories and non-UTF-8 files could escape as CLR
