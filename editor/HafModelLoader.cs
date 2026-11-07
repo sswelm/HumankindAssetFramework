@@ -10,7 +10,7 @@ using System.IO;
 
 public static class HafModelLoader
 {
-    public const string CacheRevision = "2026-11-02.fbx-loader.1";
+    public const string CacheRevision = "2026-11-07.json-rounding.1";
     public const string FbxVehicleLeavePrefix = "the FBX vehicle import needs Blender: ";
     public const string FbxRigLeavePrefix = "the FBX rig import needs Blender: ";
     public const string FbxLeavePrefix = "the FBX reader leaves this file to Blender by name: ";

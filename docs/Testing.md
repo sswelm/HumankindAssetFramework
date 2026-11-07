@@ -1191,6 +1191,19 @@ underflow, the literals), a node's negative zeros read with their sign, strings 
 refused texts; 2,562 tests. The stale `StrCaseCmp` entry beside it in the backlog is crossed out: fixed 2026-11-01
 (PR #236) and held by `r8_names` since.
 
+PR #261 review adds exact integer preservation beyond Int64 (BigInteger, including extras read/write/read), a 64-container
+nesting limit (InvalidDataException before stack exhaustion), and cache invalidation for reader-dependent deploy, rig,
+material extraction and prep output. Float correction compares exact BigInteger ratios with binary midpoints; at most
+15 significant decimal digits and exponents -22..22 use exactly representable operands and one rounded double operation.
+The original six Mono failures still pass, alongside ties-to-even, subnormal boundaries and fast-path edges: 2,577 tests.
+An independent Python corpus of 110,958 finite float tokens (random binary64 round trips, short decimal fast-path values
+and exact adjacent-double midpoints) matches every bit on .NET Framework and Unity's 64-bit Mono. Benchmarks in that Mono,
+three warmed runs of the same 470,037-character scene with 10,000 translated nodes: 51–61 ms after the fix, 984–1,040 ms
+in the PR's original implementation, 18–26 ms with Newtonsoft. These are JSON parse times, not whole-file import times.
+The 10,000-value `1e-300` array (70 KB) falls from about 46 seconds to 33 ms. A separate Framework process now refuses
+100,000 nested arrays normally; the original parser terminated it with stack overflow. Five standalone drill compile
+commands also reference System.Numerics, as the editor and other reader consumers already do.
+
 **Replacing `deploy_convert.py`, parts 5b and 5c: the barrel retarget and the leg scale** (2026-10-10). 5b
 (`argv[5]` the ready frame, `argv[7]` the barrel scale): every bone with "barrel" or "cannon" in its name loses its
 curves and gets two keys - the rest pose at `max(int(end / 2), 1)`, the ready pose with its turn and its move scaled

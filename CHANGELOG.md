@@ -10,6 +10,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **PR #261 review (2026-11-07).** Integer JSON tokens beyond Int64 remain exact BigIntegers, including through extras
+  round trips. JSON nesting is limited to 64 containers with a normal refusal. Correct float rounding now compares exact
+  integer ratios rather than constructing decimal midpoints digit by digit; common short decimals use one operation on
+  exact operands. On Unity's 64-bit Mono the 470 KB / 10,000-node parse fell from about 1,000 ms to 51–61 ms; the 70 KB
+  small-number case fell from about 46 seconds to 33 ms. 110,958 Python float tokens match bit for bit on Framework and
+  Mono, including rounding ties and fast-path boundaries. The loader revision invalidates old deploy/rig conversions and
+  GLB/glTF/FBX extraction caches. Fifteen regression cases bring the suite to 2,577 tests.
 - **THE glTF READER READS THE JSON GRAMMAR ITSELF: A ULP, NOT A SIGN (2026-11-07).** The backlog's `-0.0` entry re-measured:
   Newtonsoft's reader and .NET's `double.Parse` do read `-0.0` as `+0` (on .NET Framework and on Unity's 64-bit Mono alike),
   but the sign is unobservable through Blender - the importer's `rotation_after @ t` is a double sum seeded +0.0 and the

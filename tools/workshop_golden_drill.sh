@@ -59,7 +59,7 @@ cp "$NEWTONSOFT" "$TMPD/Newtonsoft.Json.dll"
 [ -f "$EDITOR_ROOT/editor/Plugins/x86_64/hafkernels.dll" ] && cp "$EDITOR_ROOT/editor/Plugins/x86_64/hafkernels.dll" "$TMPD/hafkernels.dll"   # the fuse's native column and twin kernels beside the exe; HAF_NATIVE_KERNELS=0 runs the managed fuse
 WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"; WTMP="$(cygpath -m "$TMPD" 2>/dev/null || echo "$TMPD")"
 OUTC=$(dotnet "$CSC" -nologo -noconfig -nostdlib -out:"$WTMP/drill.exe" -platform:x64 \
-  -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
+  -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WAPI/System.Numerics.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
   "$WROOT/tools/workshop-golden-drill/WorkshopGoldenDrill.cs" "$WROOT/tools/workshop-golden-drill/Stubs.cs" "${SRCS[@]}" 2>&1); rc=$?
 if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/drill.exe" ]; then echo "$OUTC" | grep -E "error" | head -20; echo "FAIL — the Workshop golden drill did not compile (csc rc=$rc; editor from $EDITOR_ROOT)"; exit 1; fi
 echo "editor sources: $EDITOR_ROOT ($(git -C "$EDITOR_ROOT" rev-parse --short HEAD 2>/dev/null || echo 'no git'))"

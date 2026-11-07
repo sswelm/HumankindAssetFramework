@@ -217,6 +217,10 @@ the reader DID lose is a ulp: Unity's Mono reads 1 in ~4,000 shortest-repr token
 `double.Parse` and Newtonsoft alike (measured under the drill's MonoHost: 91 of 385,313 random tokens; 1,422 of 800,000 tokens
 one ulp beside a float32 boundary, 6 of them crossing it, so the imported float32 location differs from Blender's). Those six
 are `r22_negzero`'s translations: PASS (the decisions 236 jobs, the posed state equal bit for bit, the export 200 jobs' files equal); the plant (Newtonsoft's reader back) FAILS: r22_negzero, 6 of 49 location sets differ, RT0 here -0.003120094 against Blender's -0.00312009384; `docs/Testing.md`).
+PR #261 review also preserves integer tokens beyond Int64, bounds JSON nesting at 64 containers, and bumps the shared
+loader revision plus the GLB/glTF extraction fingerprints so old generated files do not hide the rounding fix. Exact
+integer midpoint comparisons and a short-decimal fast path replace decimal digit division: the 10,000-node Mono parse
+falls from about 1 second to 51–61 ms, with all 110,958 independent Python float tokens bit-equal on Framework and Mono.
 Was: the T-62 has 92 nodes with such a token and passed (masked by the importer's arithmetic), a fuzzed armature did not; found
 again by the review of 5a (9 of 70 fuzzed rigs, a held zero's sign), with a second rule beside it that was not traced: a node of
 translation `[-0.739, -0.0, 0.0]` holds `+0, +0` straight after the import, where the axis conversion alone gives `-0, -0`; (4) `rig_anim` (3–4 weeks); (5)

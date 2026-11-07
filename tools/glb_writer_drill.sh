@@ -37,7 +37,7 @@ done
 TMPD="$(mktemp -d)"; trap 'rm -rf "$TMPD"' EXIT
 cp "$NEWTONSOFT" "$TMPD/Newtonsoft.Json.dll"
 WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"; WTMP="$(cygpath -m "$TMPD" 2>/dev/null || echo "$TMPD")"
-REFS=(-r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WTMP/Newtonsoft.Json.dll")
+REFS=(-r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WAPI/System.Numerics.dll" -r:"$WTMP/Newtonsoft.Json.dll")
 SRC=("$WROOT/editor/HafModel.cs" "$WROOT/editor/GlbReader.cs" "$WROOT/editor/HafTransforms.cs" "$WROOT/editor/GlbWriter.cs" "$WROOT/editor/HafModelDiff.cs")
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -out:"$WTMP/write.exe" "${REFS[@]}" "$WROOT/tools/glb-reader-drill/WriteDrill.cs" "${SRC[@]}" 2>&1); rc=$?
 [ "$rc" -eq 0 ] && [ -s "$TMPD/write.exe" ] || { echo "$OUT" | grep -E "error" | head -20; echo "FAIL — the GLB writer drill did not compile (csc rc=$rc)"; exit 1; }

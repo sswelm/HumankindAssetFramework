@@ -768,7 +768,7 @@ public static class UniversalBaker
             // with its source path+mtime and re-extract on any mismatch.
             string stampPath = mtlPath + ".src";
             string stamp = cfg.modelFile.Replace('\\', '/') + "|" + File.GetLastWriteTimeUtc(cfg.modelFile).Ticks
-                + (HafModelLoader.IsFbx(cfg.modelFile) ? "|" + HafModelLoader.CacheRevision : "");
+                + "|" + HafModelLoader.CacheRevision;
             // FRESHNESS BY STAMP, PRESENCE BY EITHER SHAPE (review finding 2, 2026-09-07). glbconv writes an MTL
             // only for MULTI-material sources, so the old "MTL exists and is newer" freshness test read PERMANENTLY
             // stale for a 1-material GLB — the hygiene below then deleted <name>_albedo.png and re-ran glbconv on
@@ -2008,7 +2008,7 @@ public static class UniversalBaker
             cfg.targetTris > 0 ? cfg.targetTris.ToString(sinv) : "0",
             cfg.doubleSided ? "1" : "0",    // double-sided halves the reduce target -> shapes the OBJ
             "v3",   // extractor-convention stamp: v3 = single Z-up frame + skinned bind-pose evaluation (2026-09-12)
-            BlenderPrep.CacheRevision + (HafModelLoader.IsFbx(cfg.modelFile) ? ":" + HafModelLoader.CacheRevision : ""));   // C# prep/FBX reader changes also invalidate reused extracts; the Python script's mtime cannot see them
+            BlenderPrep.CacheRevision + (HafModelLoader.CanRead(cfg.modelFile) ? ":" + HafModelLoader.CacheRevision : ""));   // C# prep and either reader invalidate reused extracts; the Python script's mtime cannot see them
         string extractArgsFull = Path.Combine(projRoot, resDir, name + ".extract.args.txt");
         bool argsChanged = cachedFull != null && (!File.Exists(extractArgsFull) || File.ReadAllText(extractArgsFull) != extractArgsKey);
         if (argsChanged) Debug.Log($"[Factory] {name}: an extract input or C# prep revision changed — re-extracting.");

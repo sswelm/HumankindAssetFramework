@@ -428,6 +428,47 @@ public class GlbReaderTests
     // .NET's double.Parse alike (measured on .NET Framework and on Unity's 64-bit Mono), so a node's held -0.0 exported as 0.0
     static long Bits(double v) => BitConverter.DoubleToInt64Bits(v);
 
+    [Theory]
+    [InlineData("9223372036854775809")]
+    [InlineData("18446744073709551615")]
+    [InlineData("-9223372036854775809")]
+    [InlineData("123456789012345678901234567890")]
+    public void Large_integer_extras_roundtrip_without_changing_value_or_token_kind(string integer)
+    {
+        var token = GlbReader.ParseToken(integer);
+        Assert.Equal(JTokenType.Integer, token.Type);
+        Assert.Equal(integer, token.ToString(Newtonsoft.Json.Formatting.None));
+        var m = GlbReader.ReadGltf("{\"asset\":{\"version\":\"2.0\",\"extras\":{\"id\":" + integer + "}}}", null);
+        var roundtrip = GlbReader.Read(GlbWriter.Write(m));
+        Assert.Equal("{\"id\":" + integer + "}", roundtrip.AssetExtrasJson);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Json_nesting_is_bounded_before_the_stack_is_exhausted(bool objects)
+    {
+        string Nested(int n) => string.Concat(Enumerable.Repeat(objects ? "{\"x\":" : "[", n))
+            + "0" + new string(objects ? '}' : ']', n);
+        Assert.NotNull(GlbReader.ParseToken(Nested(64)));
+        Assert.Contains("nesting exceeds 64 containers", Assert.Throws<InvalidDataException>(() => GlbReader.ParseToken(Nested(65))).Message);
+        // Brackets inside strings do not contribute to nesting, and completed siblings release their depth.
+        Assert.Equal(new string('[', 100), (string)GlbReader.ParseToken("\"" + new string('[', 100) + "\""));
+        Assert.Equal(100, ((JArray)GlbReader.ParseToken("[" + string.Join(",", Enumerable.Repeat("{}", 100)) + "]")).Count);
+    }
+
+    [Theory]
+    [InlineData("1.00000000000000011102230246251565404236316680908203125", 0x3ff0000000000000L)]
+    [InlineData("1.00000000000000033306690738754696212708950042724609375", 0x3ff0000000000002L)]
+    [InlineData("2.4703282292062327e-324", 0L)]
+    [InlineData("2.4703282292062328e-324", 1L)]
+    [InlineData("-1e-100000", unchecked((long)0x8000000000000000))]
+    [InlineData("1e-300", 0x01a56e1fc2f8f359L)]
+    [InlineData("999999999999999e22", 0x479e17b843576913L)]
+    [InlineData("999999999999999e-22", 0x3e7ad7f29abcaf41L)]
+    public void Exact_decimal_conversion_rounds_ties_subnormals_and_fast_path_boundaries(string text, long expected)
+        => Assert.Equal(expected, Bits((double)GlbReader.ParseToken(text)));
+
     [Fact]
     public void Json_numbers_read_as_Python_reads_them_the_sign_of_zero_included()
     {
