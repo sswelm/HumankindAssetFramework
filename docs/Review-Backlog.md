@@ -684,6 +684,10 @@ below that only intra-group parallelism of the weld or the gather would pay.
   measurement to one warmed worker before blaming the skinner. Failed again 2026-11-07 (the strict JSON reader's push gate, 1
   of 2,562; 3 of 3 in isolation afterwards): the warm-up ran only the weighted vertex, so each worker's FIRST zero-weight and
   unskinned calls ran inside the counted window; the warm-up now takes all three call shapes. The budget stands.
+- **`test_parallel_gate.py`'s lane-steps test timed out in a push gate (2026-11-08)**: its shell run takes 12 s alone against a
+  15 s subprocess timeout, and the gate's parallel steps (the parity-stamp drill, the native kernels drill) load the machine - the
+  suite took 252 s and 278 s in that day's gates against 10-20 s before. The timeout is a hang guard, widened to 120 s; the
+  tests' assertions are unchanged.
 - **Native SDK skeleton smoke test** — FIXED (2026-10-19). Native multi-material atlas remapping assigned transient
   meshes to the saved GLB rig prefab; SaveAssets could serialize missing mesh references before skeleton import,
   producing a NullReferenceException in `Skeleton.FillBoneEntry` at IL 0x1b (also reproduced with a PNG control).

@@ -33,7 +33,7 @@ class ParallelGateTests(unittest.TestCase):
         write(path, 'set -uo pipefail\nROOT="$1"\n' + text)
         return [BASH, path.as_posix(), self.path.as_posix()]
 
-    def run_shell(self, text, timeout=15):
+    def run_shell(self, text, timeout=120):   # a hang guard only: the lane-steps test takes 12 s alone and timed out at 15 s under a loaded gate (2026-11-08)
         return subprocess.run(self.script(text), env=self.env, capture_output=True, text=True, timeout=timeout)
 
     def helpers(self):
