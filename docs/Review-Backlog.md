@@ -694,7 +694,9 @@ below that only intra-group parallelism of the weld or the gather would pay.
   joins as `Mesh_Barrel`, but the clearance code searches for `Mesh_RecoilArm`. Ordinary rigs therefore never print a breech
   clearance result or ground warning. The port preserves that omission; an unusual scene actually carrying `Mesh_RecoilArm`
   is declined by name until that branch is verified. Fixing the script and port together belongs with the recoil defects above.
-- **rig_anim.py's socket sort exit reads a freed edit bone** — OPEN (2026-10-14, found by the stage 4 fixtures). The
+- ~~**rig_anim.py's socket sort exit reads a freed edit bone**~~ FIXED 2026-11-07 (`_pn = _parent.name` before `mode_set`;
+  the port models the exit; `fx_s4_socket_sort` and `fx_s4_socket_unicode_sort` EXIT:4 jobs in the drill; `docs/Testing.md`).
+  Was: OPEN (2026-10-14, found by the stage 4 fixtures). The
   "would sort BEFORE its parent" error prints `_parent.name` after `bpy.ops.object.mode_set(mode='OBJECT')` has freed
   the edit bones: four Blender runs of `fx_s4_socket_sort` printed the right name once, an empty name once, and twice
   the dump died of a UnicodeDecodeError reading the garbage; a fifth (2026-10-16, the part 2 drills) printed garbage with

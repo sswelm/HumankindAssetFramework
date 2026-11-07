@@ -2,8 +2,8 @@
 rigged GLB with the arguments that reach the branch. Writes the files and prints JOB lines in riganim_jobs.py's form
 (TAB-separated: JOB <key> <input> <argv[2]> ... <argv[14]>). A key that starts with "EXIT:<stage>:" names a job the
 script is expected to STOP at that stage (its own sys.exit(1), e.g. no armature): the drill fails a different stop.
-A key that starts with "LEFT:" names a job the C# leaves to Blender by name (localNodeAnim, the weld, a socket sorting
-before its parent): the drill accepts whatever Blender does with it (a run through, an exit, a death). "EXPORTLEFT:" names
+A key that starts with "LEFT:" names a job the C# leaves to Blender by name (localNodeAnim, the weld, a frame past the
+limit): the drill accepts whatever Blender does with it (a run through, an exit, a death). "EXPORTLEFT:" names
 a job whose four stages are compared and whose GLB export alone is left by name (a second armature's unused skin).
 
 usage: riganim_fixtures.py <output directory>
@@ -1157,7 +1157,7 @@ def main(out):
     job("fx_s4_sockets", plain, sockets="Canon=Arm@0,0.1,0;Flag=Root;Mast=Arm@x,y")
     job("fx_s4_sockets_rot", plain, sockets="Canon=Arm@0.2,0,0.1", rot="0,90,0")
     job("EXIT:4:fx_s4_socket_noparent", plain, sockets="Canon=Nope")
-    job("LEFT:fx_s4_socket_sort", plain, sockets="A=Root")   # the script exits, with a message read from a freed edit bone (undefined)
+    job("EXIT:4:fx_s4_socket_sort", plain, sockets="A=Root")   # the script's exit (its message read a freed edit bone until 2026-11-07)
     job("fx_s4_rot", plain, rot="10,90,-30")
     job("fx_s4_rot_multi", multi(out), clip="Longer", rot="0,0,180")
     job("fx_s4_rot_legacy", plain, rot="90,0,0", convert="0")
@@ -1180,7 +1180,7 @@ def main(out):
     job("fx_s4_socket_long_twice", plain, sockets=long_socket + "=Arm;" + long_socket + "=Arm@0.1,0,0", albedo="0")
     job("fx_s4_socket_long_unicode", plain, sockets="Canon" + "é" * 35 + "=Arm", albedo="0")
     up = s4_rename_name(out, "\U00010000", "socket_unicode")
-    job("LEFT:fx_s4_socket_unicode_sort", up, sockets="\ue000=\U00010000", convert="0", albedo="0")
+    job("EXIT:4:fx_s4_socket_unicode_sort", up, sockets="\ue000=\U00010000", convert="0", albedo="0")   # the same exit, a non-BMP parent name in the message
     for variant in ("dot", "dotdot", "distinct"):
         job("fx_s4_image_paths_" + variant, s4_image_paths(out, variant))
 

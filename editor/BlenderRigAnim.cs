@@ -38,8 +38,7 @@
 // node, every mesh BlenderReduce declines, (stage 2) staticParts matching against supplementary Unicode names (a
 // bone-hung mesh whose datablock another object shares is modelled since 2026-11-02: one vertex-group list and weight
 // layer for every object of it), and (stage 4) the weld of a one-material, one-bone mesh
-// (bmesh remove_doubles), a socket sorting before its parent (the script exits with a message read from a freed edit
-// bone), a no-op root bone with an object hung from it. Held to Blender by tools/riganim_drill.sh (--stages 4), every
+// (bmesh remove_doubles), a no-op root bone with an object hung from it. Held to Blender by tools/riganim_drill.sh (--stages 4), every
 // row of every stage; the albedo PNG by its dimensions (its bytes are Blender's encoder's). BlenderRigExport.cs writes
 // the stage 4 scene as the GLB Blender's glTF exporter would (step (f)): `riganim.exe --export`. BlenderRigAnimInProcess.cs
 // runs it all for the Factory's GLB rig route (step (g)); the drill runs that wrapper too on every exported job.
@@ -1880,9 +1879,9 @@ public static class BlenderRigAnim
                     s.Logs4.Add("RIGANIM ERROR: socket '" + dn + "': parent substring '" + ps + "' matches no bone. Bones: " + PyList(all)); s.Exits = true; Note(s, "a socket without a parent: the script's exit"); return;
                 }
                 string pn = names.BoneOfJoint[parent];
-                // the script exits here, but its message reads `_parent.name` AFTER mode_set('OBJECT') freed the edit bones: an
-                // empty name, garbage, or a UnicodeDecodeError in the caller (both seen) - undefined, so left by name
-                if (!(PyStringOrder.Compare(dn, pn) > 0)) { s.Fallback = "socket '" + dn + "' sorts before its parent '" + pn + "': the script's exit message reads a freed edit bone (undefined)"; Note(s, "a socket sorting before its parent: the script's exit (left by name)"); return; }
+                // the script's exit (its message read `_parent.name` AFTER mode_set('OBJECT') had freed the edit bones - an empty name,
+                // garbage, or a UnicodeDecodeError in the caller - until 2026-11-07; the name is taken first now, so the exit is modelled)
+                if (!(PyStringOrder.Compare(dn, pn) > 0)) { s.Logs4.Add("RIGANIM ERROR: socket '" + dn + "' would sort BEFORE its parent '" + pn + "' — Amplitude needs parents-first alphabetically; this donor-name/parent pair cannot satisfy it"); s.Exits = true; Note(s, "a socket sorting before its parent: the script's exit"); return; }
                 // Lookup is literal, then new() bounds and uniquifies the name. Repeating an overlong request creates
                 // a second suffixed bone because the first bone's bounded name does not equal that request.
                 int sb = ad.BoneNodes.Concat(newBones).Where(b => names.BoneOfJoint[b] == dn).DefaultIfEmpty(-1).First();

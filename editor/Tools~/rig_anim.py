@@ -1094,8 +1094,9 @@ if socket_specs and arm is not None:
             print("RIGANIM ERROR: socket '%s': parent substring '%s' matches no bone. Bones: %s" % (_dn, _ps, _names[:40]))
             sys.exit(1)
         if not (_dn > _parent.name):
+            _pn = _parent.name                    # taken BEFORE mode_set frees the edit bones (read after it: an empty name or garbage; fixed 2026-11-07)
             bpy.ops.object.mode_set(mode='OBJECT')
-            print("RIGANIM ERROR: socket '%s' would sort BEFORE its parent '%s' — Amplitude needs parents-first alphabetically; this donor-name/parent pair cannot satisfy it" % (_dn, _parent.name))
+            print("RIGANIM ERROR: socket '%s' would sort BEFORE its parent '%s' — Amplitude needs parents-first alphabetically; this donor-name/parent pair cannot satisfy it" % (_dn, _pn))
             sys.exit(1)
         _sb = arm.data.edit_bones.get(_dn) or arm.data.edit_bones.new(_dn)
         _dirv = _parent.tail - _parent.head

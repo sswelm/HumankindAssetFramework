@@ -10,6 +10,14 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **rig_anim.py's SOCKET-SORT EXIT NO LONGER READS A FREED EDIT BONE; ITS TWO FIXTURES ARE TAKEN BY THE PORT (2026-11-07).**
+  The "would sort BEFORE its parent" exit printed `_parent.name` after `mode_set('OBJECT')` had freed the edit bones: the right
+  name once in four Blender runs, an empty name once, garbage twice (one run's dump died of a UnicodeDecodeError, another's
+  garbage carried a tab and failed the drill's row consistency). The name is taken before leaving edit mode, as the no-parent
+  exit already took its bone list; the C# port models the exit instead of leaving it by name, and `fx_s4_socket_sort` and
+  `fx_s4_socket_unicode_sort` (a non-BMP parent name in the message) are EXIT:4 jobs the drill holds to the script's own
+  RIGANIM ERROR line. The rig_anim drill alone with live Blender: 147 of 156 jobs equal, 9 left by name; the plant (the
+  script's old read) passed the drill once - the undefined read printed the right name that run - so it was measured directly: six Blender runs of the two jobs with the old read, 6 of 12 exits died in the dump (a UnicodeDecodeError on byte 0xd8 of the freed name) and 6 printed the right name; six runs with the fix, 12 of 12 right. No registry recipe reaches the exit (a socket sorting before its parent is a refused bake either way).
 - **THE GUN'S RECOIL DEFECTS FIXED IN vehicle_rig.py AND ITS PORT TOGETHER - THE BREECH CLEARANCE IS MEASURED AT LAST (2026-11-07).**
   The recoil-side entries open in the backlog since October, each fixed in the script and mirrored in the C# port so the parity
   drill holds the fix: the arc's bore came from `gun_axis` (trunnion -> muzzle), a float32 residue at a pivot of 1.0 (+Y on
