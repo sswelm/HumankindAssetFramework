@@ -673,7 +673,9 @@ below that only intra-group parallelism of the weld or the gather would pay.
   - the per-thread allocation budget (0..1024 bytes over 3,000 skinner calls on 8 workers) failed in the gate's `dotnet test`
   step and passed in 10 full-suite runs afterwards on the same branch and on master. The test calls only `BlenderSkinner.Vertex`
   (PR #198); nothing in the native-kernels change runs in it. Not reproduced; if it fails again, widen the budget or pin the
-  measurement to one warmed worker before blaming the skinner.
+  measurement to one warmed worker before blaming the skinner. Failed again 2026-11-07 (the strict JSON reader's push gate, 1
+  of 2,562; 3 of 3 in isolation afterwards): the warm-up ran only the weighted vertex, so each worker's FIRST zero-weight and
+  unskinned calls ran inside the counted window; the warm-up now takes all three call shapes. The budget stands.
 - **Native SDK skeleton smoke test** — FIXED (2026-10-19). Native multi-material atlas remapping assigned transient
   meshes to the saved GLB rig prefab; SaveAssets could serialize missing mesh references before skeleton import,
   producing a NullReferenceException in `Skeleton.FillBoneEntry` at IL 0x1b (also reproduced with a PNG control).

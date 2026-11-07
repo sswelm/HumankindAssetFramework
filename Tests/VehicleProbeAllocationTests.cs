@@ -61,7 +61,11 @@ public class VehicleProbeAllocationTests
         void Work()
         {
             var scratch = new float[16]; var positions = new float[9]; var normals = new float[9];
-            skinner.Vertex(p, 0, scratch, positions, normals, 0); // warm before allocation counting
+            // warm EVERY call shape the counted loop takes before counting: the zero-weight vertex and the unskinned primitive
+            // first ran inside the window on a cold worker, and the gate flaked on it twice (2026-10-21, 2026-11-07)
+            skinner.Vertex(p, 0, scratch, positions, normals, 0);
+            skinner.Vertex(p, 1, scratch, positions, normals, 3);
+            skinner.Vertex(plain, 0, scratch, positions, normals, 6);
             var allocated = Counter(); long before = allocated();
             for (int repeat = 0; repeat < 1000; repeat++)
             {
