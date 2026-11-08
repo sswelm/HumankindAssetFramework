@@ -83,6 +83,8 @@ public static partial class VehicleProbe
         public Dictionary<int, NodeGeometry> Geo = new Dictionary<int, NodeGeometry>();
         public Dictionary<int, BlenderSkinner> Skinners = new Dictionary<int, BlenderSkinner>();
         public HashSet<int> Detached = new HashSet<int>();   // nodes a placement detached from their parent (their matrix no longer follows it)
+        public Dictionary<int, float[]> JointMeshB = new Dictionary<int, float[]>();    // a mesh ON a joint node: its '.mesh' child's matrix_world (float32, column-major)
+        public Dictionary<int, double[]> JointMeshD = new Dictionary<int, double[]>();  // ... and the same for the boxes, in glTF's frame (the joint's own World entry feeds the skinning)
         public bool BoneChained = true;   // the nodes under a bone read the bone chain (false: its pose is not modelled - an under-bone part is then counted, not held)
     }
 
@@ -143,7 +145,7 @@ public static partial class VehicleProbe
             foreach (var (node, name) in objsB)
             {
                 int skin = B.M.Nodes[node].Skin; bool skinned = skin >= 0 && skin < B.M.Skins.Count && B.M.Meshes[B.M.Nodes[node].Mesh].Primitives.Any(p => p.Skinned);
-                B.Target[node] = MatMulMathutils(B.Bake, ToRowMajor(skinned ? B.BArma[skin] : B.BWorld[node]));
+                B.Target[node] = MatMulMathutils(B.Bake, ToRowMajor(skinned ? B.BArma[skin] : B.JointMeshB.TryGetValue(node, out var jm) ? jm : B.BWorld[node]));
                 var g = GeometryOfSecond(B, node);   // the transformed vertices: the box and the rays read these
                 B.Geo[node] = g;
                 LocalBox(B.M, node, g, null, null, out var mn, out var mx);
@@ -185,7 +187,11 @@ public static partial class VehicleProbe
         var boneNamesA = new HashSet<string>(A.Names.BoneOfJoint.Values, StringComparer.Ordinal);   // _bone_names: the bones of the armatures left in the scene - the first model's
         foreach (var s in specs)
         {
-            if (!s.Src.Geo.TryGetValue(s.Node, out var g)) s.Src.Geo[s.Node] = g = Geometry(s.Src.M, s.Node, s.Src.World, s.Src.ArmaWorld);   // ONCE per node: 3,350 islands each re-posing the whole mesh took 18 s on the Ehrhardt
+            if (!s.Src.Geo.TryGetValue(s.Node, out var g))
+            {
+                s.Src.Geo[s.Node] = g = Geometry(s.Src.M, s.Node, s.Src.World, s.Src.ArmaWorld);   // ONCE per node: 3,350 islands each re-posing the whole mesh took 18 s on the Ehrhardt
+                if (!g.Skinned && s.Src.JointMeshD.TryGetValue(s.Node, out var jd)) g.ObjWorld = jd;   // a mesh on a joint: its '.mesh' child's placement
+            }
             s.Part = MakePart(s.Src.M, s.Node, s.Name, g, s.Prim, s.Verts, s.Src.Names, s.Src.Index == 1 ? boneNamesA : null);
             s.Part.Source = s.Src.Index;
             r.Parts.Add(s.Part);
@@ -202,7 +208,13 @@ public static partial class VehicleProbe
             if (s == null) { r.Notes.Add($"WARN: placement for '{pl.Name}' skipped — no such part after the split (re-Probe, then place it again)"); continue; }
             var mw = ApplyMat4(MatrixOf(s));   // rel.matrix_world = mw.copy() after rel.parent = None: the assignment's round trip
             s.Src.Detached.Add(s.Node);
-            if (!s.IslandCopy && s.Src.Index == 0) DetachChildren(s.Src, s.Node, byNode);   // a second-model mesh has no children left: the merge unparented every mesh and dropped the helpers
+            // the placed object has no children when it is a split-off child (2026-11-08): a mesh on the ARMATURE node is a '.mesh'
+            // child of the armature object (fixup_multitype_nodes), and a skinned mesh is either moved under the armature whole -
+            // move_skinned_meshes does that only for a node WITHOUT children - or split onto a '.skinned' child, the node staying an
+            // empty that keeps them (independent review). A joint's '.mesh' child is no case of its own: what hangs below a joint is
+            // never the joint's object child (ObjectParentNode -1 under a bone), so nothing was detached there before either
+            bool meshChild = s.Skinned || s.Src.Names.ArmaturesInOrder.Any(a => a.node == s.Node);
+            if (!s.IslandCopy && s.Src.Index == 0 && !meshChild) DetachChildren(s.Src, s.Node, byNode);   // a second-model mesh has no children left: the merge unparented every mesh and dropped the helpers
             LocalBox(s.Src.M, s.Node, s.Src.Geo[s.Node], s.Prim, s.Verts, out var lmn, out var lmx);
             WorldBox(mw, lmn, lmx, out var c0, out var s0);
             s.Override = PlacementMatrix(mw, c0, pl.Offset, pl.Scale);
@@ -264,10 +276,14 @@ public static partial class VehicleProbe
                 var names = s.Src.Names;
                 bool underBone = names.IsBone[s.Node];   // a mesh ON a joint becomes a child object under that bone
                 for (int a = m.Nodes[s.Node].Parent; a >= 0 && !underBone; a = m.Nodes[a].Parent) underBone = names.IsBone[a];
-                // a mesh BELOW a bone reads the bone chain (2026-11-08); a mesh ON the joint node itself is the importer's '.mesh'
-                // child under the bone, which the rig_anim port leaves to Blender by name too: counted, not held, as before
-                bool onJoint = names.IsBone[s.Node];
-                s.Part.BoneChained = !skinned && underBone && !onJoint && s.Src.BoneChained;
+                // a mesh BELOW a bone reads the bone chain (2026-11-08); a mesh ON the joint node, the importer's '.mesh' child under
+                // the bone, reads it through its own matrix (JointMeshB) since the same day
+                // a mesh ON a joint is held only through its '.mesh' child's matrix (a joint with a skin has none: move_skinned_meshes
+                // took it under the armature, a placement the probe does not model) - otherwise it stays counted
+                // a node with a skin but no joint weights is NOT skinned here yet move_skinned_meshes moved it under the armature,
+                // unskinned - not modelled: counted wherever it hangs, never held (independent review, 2026-11-08)
+                bool unweightedSkin = m.Nodes[s.Node].Skin >= 0 && !skinned;
+                s.Part.BoneChained = !skinned && !unweightedSkin && underBone && s.Src.BoneChained && (!names.IsBone[s.Node] || s.Src.JointMeshB.ContainsKey(s.Node));
                 s.Part.UnderBone = !skinned && underBone && !s.Part.BoneChained;
             }
             Time(swp, "part meshes");
@@ -322,9 +338,18 @@ public static partial class VehicleProbe
     {
         var m = s.M; var names = s.Names;
         var below = new bool[m.Nodes.Count]; bool any = false;
+        var onJoint = new List<int>();   // a joint node carrying a (non-skinned) mesh: fixup_multitype_nodes moves it onto a '.mesh' child
         for (int n = 0; n < m.Nodes.Count; n++)
         {
-            if (names.IsBone[n]) continue;
+            if (names.IsBone[n])
+            {
+                var nd = m.Nodes[n];
+                // move_skinned_meshes runs first and takes ANY node with a skin off the joint (its '.skinned' child under the
+                // armature), whatever its primitives carry: only a mesh without a skin is left for the '.mesh' split
+                if (nd.Mesh >= 0 && nd.Skin < 0) { onJoint.Add(n); any = true; }
+                continue;
+            }
+            if (m.Nodes[n].Skin >= 0) continue;   // move_skinned_meshes moved it under the armature: never parented to a bone
             for (int a = m.Nodes[n].Parent; a >= 0; a = m.Nodes[a].Parent) if (names.IsBone[a]) { below[n] = any = true; break; }
         }
         if (!any) return true;
@@ -336,7 +361,18 @@ public static partial class VehicleProbe
             if (imp.NotModelled != null) return false;
             set = new BlenderPosedState.Pose(imp, m, rig).FrameSet(0f);
         }
-        var world = BlenderWorldMatricesPosed(m, rig, set, out _, out _);
+        var world = BlenderWorldMatricesPosed(m, rig, set, out var pose, out _);
+        // the '.mesh' child of a joint (vnode.py fixup_multitype_nodes): a new vnode with the DEFAULT base_trs under the bone vnode,
+        // so node.py gives it what any object under a bone gets - the bone's rotation_after, moved back by the bone length - and
+        // its matrix_world is the armature's @ ob_parbone(the joint's pose) @ that (ImportRig.JointMeshProperty)
+        foreach (int j in onJoint)
+        {
+            rig.JointMeshProperty(j, out var l, out var q, out var sc);
+            int a = names.ArmatureNodeOfBone[j];
+            var parentMat = MulM4(a >= 0 ? world[a] : IdentityF(), ParBone(pose[j], rig.ArmatureOfBone[j].Length[j]));
+            var jm = MulM4(parentMat, ObjectMatrix(l, q, sc));
+            s.JointMeshB[j] = jm; s.JointMeshD[j] = FromBlender(Array.ConvertAll(jm, v => (double)v));
+        }
         for (int n = 0; n < m.Nodes.Count; n++)
         {
             if (!below[n]) continue;
@@ -374,7 +410,7 @@ public static partial class VehicleProbe
     {
         if (s.Override != null) return s.Override;
         if (s.Src.Index == 1) return IdentityRow();
-        return ToRowMajor(s.Skinned ? s.Src.BArma[s.Src.M.Nodes[s.Node].Skin] : s.Src.BWorld[s.Node]);
+        return ToRowMajor(s.Skinned ? s.Src.BArma[s.Src.M.Nodes[s.Node].Skin] : s.Src.JointMeshB.TryGetValue(s.Node, out var jm) ? jm : s.Src.BWorld[s.Node]);
     }
 
     /// <summary>`for rel in [o] + list(o.children): mw = rel.matrix_world.copy(); rel.parent = None; rel.matrix_world = mw` for the

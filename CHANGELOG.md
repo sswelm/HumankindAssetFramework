@@ -10,6 +10,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE PROBE HOLDS A MESH ON A JOINT NODE TOO (2026-11-08).** The importer moves a mesh off a joint onto a `<id>.mesh` child
+  under the bone with the default transform; the probe now gives that child its own matrix through the bone chain
+  (`ImportRig.JointMeshProperty`), beside the joint's entries the skinning reads; a placement on a split-off child (a mesh
+  on the armature node, a skinned mesh) detaches nothing. Two new fixtures and five jobs (animated joint, a far turret, second model,
+  orientation, placements): `FULL=1` live 178 files, 0 failed, 30 bone-hung parts held, none counted, every new job failing
+  under the plant of its own fix; Blender's rows for both fixtures in the unit suite too. A skin without joint weights,
+  which the importer moves under the armature unskinned, is counted wherever it hangs and left to Blender (none among the
+  72 real sources). 23 rounds of review before the push, one of them an independent reviewer (`docs/Testing.md`).
+  The Lab keeps a model with a mesh on a joint in C# (`docs/Testing.md`).
 - **PR #265 review (2026-11-08).** Conflicting MATRIX/VERTEX bone flags no longer exempt held bone-chain values from
   comparison. A single `under-bone` flag previously skipped both diagnostics, even when the other said `bone`; duplicate
   diagnostic rows could leave an overwritten exemption too. The comparator rejects both malformed inputs. Ten Python

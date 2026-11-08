@@ -95,6 +95,58 @@ def fx_mesh_on_bone(out):
     F.write_glb(os.path.join(out, "mesh_on_bone.glb"), root, b)
 
 
+def fx_mesh_on_bone_animated(out):
+    """The posed bone chain (2026-11-08): a mesh ON an animated joint (the importer's '.mesh' child) and a mesh BELOW it, the
+    joint's first clip starting at a turned and shifted pose - the probe reads frame 0 of that clip (posestart=1), so both
+    matrices differ from the rest pose. A second, longer clip on the same joint must not leak into frame 0."""
+    import math
+    b = F.Buf()
+    def qy(deg):
+        h = math.radians(deg) / 2.0
+        return (0.0, math.sin(h), 0.0, math.cos(h))
+    t = b.accessor([0.0, 1.0], "f", "SCALAR")
+    rot = b.accessor([qy(35.0), qy(80.0)], "f", "VEC4", minmax=False)
+    loc = b.accessor([(0.25, 2.0, -0.5), (0.0, 2.5, 0.0)], "f", "VEC3", minmax=False)
+    t2 = b.accessor([0.0, 2.0], "f", "SCALAR")
+    rot2 = b.accessor([qy(-60.0), qy(10.0)], "f", "VEC4", minmax=False)
+    root = F.base("mesh_on_bone_animated",
+                  meshes=[{"name": "turret_mesh", "primitives": [{"attributes": {"POSITION": tri(b, 3)}}]},
+                          {"name": "barrel_mesh", "primitives": [{"attributes": {"POSITION": tri(b, 1, 0.5)}}]},
+                          {"name": "skin_mesh", "primitives": [{"attributes": skinned(b)}]}],
+                  nodes=[{"name": "Root", "children": [1]},
+                         {"name": "Turret", "mesh": 0, "translation": [0, 2, 0], "children": [3]},
+                         {"name": "Skinned", "mesh": 2, "skin": 0},
+                         {"name": "Barrel", "mesh": 1, "translation": [0, 0.4, 1.2]}],
+                  skins=[{"name": "Rig", "joints": [1]}], scenes=[{"nodes": [0, 2]}], scene=0,
+                  animations=[{"name": "aim", "samplers": [{"input": t, "output": rot}, {"input": t, "output": loc}],
+                               "channels": [{"sampler": 0, "target": {"node": 1, "path": "rotation"}}, {"sampler": 1, "target": {"node": 1, "path": "translation"}}]},
+                              {"name": "sweep", "samplers": [{"input": t2, "output": rot2}],
+                               "channels": [{"sampler": 0, "target": {"node": 1, "path": "rotation"}}]}])
+    F.write_glb(os.path.join(out, "mesh_on_bone_animated.glb"), root, b)
+
+
+def fx_mesh_on_bone_far(out):
+    """The joint-mesh plants' fixture (2026-11-08): the bone chain and the node chain of a mesh ON a joint differ by a few ulps
+    at rest - near the origin a merge's bake rounds that away, so the turret sits 500 units out on a turned joint where the
+    difference survives. The armature node carries a mesh of its own and a plain TURNED child, so a placement on that mesh
+    that wrongly detached the armature's children would move the child's bits."""
+    import math
+    b = F.Buf()
+    h = math.radians(30.0) / 2.0; q = [0.0, math.sin(h), 0.0, math.cos(h)]
+    h2 = math.radians(45.0) / 2.0; q2 = [math.sin(h2), 0.0, 0.0, math.cos(h2)]
+    root = F.base("mesh_on_bone_far",
+                  meshes=[{"name": "turret_mesh", "primitives": [{"attributes": {"POSITION": tri(b, 500)}}]},
+                          {"name": "base_mesh", "primitives": [{"attributes": {"POSITION": tri(b)}}]},
+                          {"name": "skin_mesh", "primitives": [{"attributes": skinned(b)}]},
+                          {"name": "lamp_mesh", "primitives": [{"attributes": {"POSITION": tri(b, 2, 0.5)}}]}],
+                  nodes=[{"name": "Root", "mesh": 1, "children": [1, 3]},
+                         {"name": "Turret", "mesh": 0, "translation": [0, 2, 0], "rotation": q},
+                         {"name": "Skinned", "mesh": 2, "skin": 0},
+                         {"name": "Lamp", "mesh": 3, "translation": [1.5, 0.25, -0.75], "rotation": q2}],
+                  skins=[{"name": "Rig", "joints": [1]}], scenes=[{"nodes": [0, 2]}], scene=0)
+    F.write_glb(os.path.join(out, "mesh_on_bone_far.glb"), root, b)
+
+
 def fx_islands(out):
     """ONE mesh of three islands, split into loose parts: the island with the lowest VERTEX index keeps the name, the
     rest count up in that order - whatever order the faces are listed in (islands2 lists them backwards)."""
@@ -644,7 +696,7 @@ def fx_placement(out):
     F.write_glb(os.path.join(out, "placement_split.glb"), root, b)
 
 
-FIXTURES = [fx_naming, fx_order, fx_armature_names, fx_skinned_not_moved, fx_skinned_animated, fx_mesh_on_bone, fx_islands, fx_rotated_armature,
+FIXTURES = [fx_naming, fx_order, fx_armature_names, fx_skinned_not_moved, fx_skinned_animated, fx_mesh_on_bone, fx_mesh_on_bone_animated, fx_mesh_on_bone_far, fx_islands, fx_rotated_armature,
             fx_two_armatures, fx_nested_skins, fx_split_collision, fx_nonunit_rotation, fx_cameras, fx_camera_data_names,
             fx_name_tails, fx_long_names, fx_many_names, fx_bone_tails, fx_split_tails, fx_icosphere_mesh, fx_visibility, fx_visibility_skinned, fx_visibility_split, fx_insideout, fx_custom_normals,
             fx_shared_skin_bind_pose, fx_zero_weight_joint, fx_bind_inverse_underflow, fx_second_model, fx_placement]

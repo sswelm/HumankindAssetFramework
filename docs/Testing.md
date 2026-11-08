@@ -621,6 +621,35 @@ any model with a bone-parented mesh to Blender; a mesh below a bone now stays in
 joint node, a placement on such a model and a first clip the action import does not model still go to Blender. The same
 `FULL=1` run on master confirmed what the backlog had not crossed out: all 14,023 inside-out verdicts agree, the three
 skinned parts included (`VehicleProbe.BlenderSkin.cs`, 2026-10-03), and the Dragon's grazing rays read 0 off.
+**The joint node's own mesh followed the same day.** `vnode.py` `fixup_multitype_nodes` moves a mesh off a joint onto a new
+`<id>.mesh` vnode under the bone with `VNode()`'s default base transform, and `node.py` treats it as any object under a
+bone: the bone child's `rotation_after`, moved back by the bone length (`ImportRig.JointMeshProperty`). Its matrix is the
+armature's @ `ob_parbone(the joint's pose)` @ that, kept per joint (`JointMeshB`/`JointMeshD`) because the joint node's own
+world entries feed the skinning. Only a joint WITHOUT a skin gets the split: `move_skinned_meshes` runs first and takes any
+node with a skin off the joint, whatever its primitives carry. A placement on a split-off child detaches nothing, since
+it has no children: a mesh on the armature node (`fixup_multitype_nodes` splits it the same way) and a skinned mesh (moved
+whole only when it has no children, else split onto a `.skinned` child while the node keeps them). A joint's `.mesh`
+child needed no rule: what hangs below a joint is never the joint's object child. Held by
+the drill on two new fixtures and five new jobs: `mesh_on_bone_animated` (a mesh on an animated joint and one below it, the
+first clip starting turned and shifted, a second clip that must not leak into frame 0), `mesh_on_bone_far` (the joint
+turned, the turret 500 units out, a turned child on the armature node), a joint mesh merged as the second model, under an
+orientation, and placed on the joint, on the armature node and on the animated joint. `FULL=1` live: **178 files, 0
+failed, 30 bone-hung parts held, 0 counted**. Each fix has a plant that fails its own job: the child's matrix computed but
+not used (`mesh_on_bone`), the joint's animation ignored (the animated fixture and the canoe), the detach not skipped (the
+far fixture's placement: its Lamp's matrix after a wrong detach), the second model's target without the joint mesh (the
+merge: its baked turret vertex). A first set of those jobs could not fail - near the origin a merge's bake rounds the bone
+chain's few ulps away and `mesh_on_bone`'s armature node had no child to disturb - which is why the far fixture exists.
+`VehicleProbeJointMeshTests` embeds the two fixtures' GLBs and holds the turret's and the barrel's MATRIX and VERTEX rows
+to the ones Blender printed for them, as float32 bits (planted: the 4 turret rows fail, the 2 barrel rows do not). A clip
+the action import does not model (CUBICSPLINE) leaves those parts counted and the model to Blender; a skin whose
+primitives carry no joint weights - the reader accepts it, `move_skinned_meshes` moves it under the armature unskinned, and
+nothing here models that - is counted wherever it hangs and sent to Blender by the Lab (unit tests on a joint and below a
+bone). An independent review of the change (a reviewer given the code and the importer, not these conclusions) confirmed
+the importer model and every matrix read, and found the last two: the unweighted skin below a bone was still held, and a
+skinned part's placement still detached its node's children (`Placing_a_skinned_part_detaches_nothing`). Across the 72 real
+sources (1.6 GB) no mesh sits on a joint and no skin lacks weights: the Lab moves no real model either way, and the probe's
+time on the canoe is unchanged (11.7-12.7 ms). The rig_anim port still leaves a `.mesh` child to Blender by name: a
+scene-object port of its own.
 The comparator requires each part's MATRIX and VERTEX rows to agree on the bone flag and rejects duplicate diagnostic
 rows on either side. A conflicting `under-bone` row previously exempted both diagnostics, even when the other row said
 `bone`, so changed matrix and vertex values could pass and a part could count as both held and unheld. Overwriting a
