@@ -124,23 +124,23 @@ joined the hook, the exit-status gate joined CI). `Tests/test_parallel_gate.py` 
 takeover, a non-holder's unlock) and the step limit through the gate's real functions; the lock itself was drilled by
 starting two gates at once and interrupting the first.
 
-The gate sweeps its own leftovers (2026-11-08). Measured that day: the user's `%TEMP%` held 47,781 entries and 88 GB, 28 GB
-of them ours - 1,165 EMPTY `tmp.*` directories (the gate emptied its mktemp directory after the steps, `run_bg_wait`, and
-never removed it: one per gate run), 9 `tmp.*` directories of drills killed mid-run (12 GB; a drill's `trap` does not fire
-for a killed shell), 31 `vr.*` of the vehicle rig drill (10 GB), the Unity-backed drills' `haf-vehicle-generate.*` and
-`haf-rig-import.*` (3.9 GB), 2,239 `haf_checkedreplace_*` of `CheckedReplaceTests` and 136 `haf-oracle-sh-*` of the oracle
-tests (both suites' cleanup swallows a failure). The gate now removes its directory at exit (`gate_unlock`) and runs
-`tools/temp_sweep.sh` as its first step, in both modes: top-level entries of the HOST's temp root (captured as `HOST_TMP`
-before the gate redirects `TMPDIR`), older than two days, and ours by name or content - `tmp.<10>` only when empty or
-holding a gate marker (`<n>.rc`, `<n>.cmd`, `<n>.out`, a step's numbered directory), a drill marker (`Newtonsoft.Json.dll`,
-`jobs.txt`, `blender_raw*.txt`, `shard_*.txt`, `fixtures`) or nothing but such `tmp.*` directories; `vr.<6>`; `haf-*` except
-`haf-gate.lock`; `haf_checkedreplace_*`; `riganim_inproc_*.glb`. A `tmp.*` holding anything else is another program's and
-stays, as do the 40,000 GUID and .NET workload entries. The sweep reports and never fails the gate; `--dry-run` lists. The
-dry run before the first real sweep: 3,634 entries, 28,106 MB would go, 183 of ours younger than two days kept, 20 foreign
-`tmp.*` left alone. `Tests/test_temp_sweep.py` (5 cases, on the lane in both modes) builds a fake root with every pattern,
-every decoy (a foreign `tmp.*`, a GUID directory, the lock, a file named like a directory, a nested foreign file) and young
-copies: the old ones of ours go, the rest stays, the dry run deletes nothing, bad arguments are refused, and the gate
-script carries the three edits.
+The gate removes its temporary directory at exit (`gate_unlock`) and runs `tools/temp_sweep.sh` first in both modes.
+`HOST_TMP` captures the host's temp root before `TMPDIR` is redirected. New gate directories use `haf-gate.XXXXXXXXXX`,
+so an interrupted gate and its nested drill files have an identifiable owner.
+
+The sweep accepts only known HAF producers' generated names, including their random suffix formats, plus
+`riganim_inproc_<32 hex>.glb`. Generic `tmp.*`, legacy `vr.*`, manual `haf-pr*` scratch directories, near-miss names and
+`haf-gate.lock` stay untouched. Empty directories, numbered logs and common payloads such as `Newtonsoft.Json.dll`,
+`jobs.txt` or `fixtures` cannot establish ownership. Older leftovers without a project-specific generated name require
+manual review. The pre-review dry run's 28 GB estimate included ambiguous names and is not this automatic sweep's scope.
+
+Every entry in a candidate tree must be at least two days old: the parent directory's timestamp misses writes to
+existing files and deeper directories. Symlinks are not followed; failed age/size inspections preserve the entry.
+Modification time is a best-effort activity signal, not proof that no process is using old files. `--dry-run` lists
+candidates; `--age-days` adjusts the cutoff. Housekeeping errors and a 120-second timeout report and let validation
+continue. `Tests/test_temp_sweep.py` runs on the lane in both modes and in CI, with isolated fake roots for deletion and
+argument tests and the real gate helpers for namespace, exit cleanup and timeout behavior. `Tests/test_parallel_gate.py`
+also exercises the edited gate.
 
 | Surface | `tools/check.sh` (pre-push hook) | also in CI | ~time |
 |---|---|---|---|

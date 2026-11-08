@@ -145,7 +145,8 @@ verdict() {  # the one summary line, and the status the hook returns
 # Blender-backed ones took the gate from a minute to 25 in sequence: they run AT ONCE, each into its own log, and the
 # logs are printed in declaration order; each worker reports progress and records its duration when it finishes.
 HOST_TMP="$(cd "${TMPDIR:-${TEMP:-${TMP:-/tmp}}}" 2>/dev/null && pwd -P)"   # the user's temp root, for the sweep (TMPDIR is redirected below)
-BG_LOGS=$(mktemp -d); bg_n=0; declare -a BG_LABEL BG_PID BG_T0; LANE_STEPS=()   # assigned, not only declared: set -u counts an unassigned array as unbound
+BG_LOGS=$(mktemp -d "${HOST_TMP:-${TMPDIR:-/tmp}}/haf-gate.XXXXXXXXXX") || exit 2
+bg_n=0; declare -a BG_LABEL BG_PID BG_T0; LANE_STEPS=()   # assigned, not only declared: set -u counts an unassigned array as unbound
 export TMPDIR="$BG_LOGS"   # every step's mktemp lands under the gate's own directory: what an abort has to find (gate_abort)
 prepare_step_log() {  # <log prefix> <label>: stale files from a prior phase must never stand in for this step.
   local log="$1" label="$2"
@@ -248,10 +249,12 @@ gate_cancel_watch
 gate_lock
 note "started ($(git rev-parse --short HEAD 2>/dev/null) $(git branch --show-current 2>/dev/null); $GATE)"
 
-# 0) the leftovers of earlier gates and drills under the user's temp root, older than two days (tools/temp_sweep.sh: our own
-# names and markers only - a gate's emptied directory, a killed drill's, the vehicle drill's vr.*, the Unity drills' haf-*,
-# the tests' haf_checkedreplace_* and haf-oracle-sh-*; measured 2026-11-08 at 26 GB and 3,600 entries). It reports, never fails.
-[ -z "${HOST_TMP:-}" ] || run "temp sweep (our leftovers older than 2 days under the temp root)" bash "$ROOT/tools/temp_sweep.sh" --root "$HOST_TMP"
+# 0) Best-effort housekeeping, not a validation step: only known HAF-generated names and trees wholly older than two
+# days. Generic legacy tmp.* / vr.* and manual scratch directories need manual review. An unavailable root/script,
+# permissions error or timeout must not turn an otherwise valid gate red.
+if [ -n "${HOST_TMP:-}" ]; then
+  timeout -k 5 120 bash "$ROOT/tools/temp_sweep.sh" --root "$HOST_TMP" || printf 'TEMP SWEEP unavailable; continuing the gate\n'
+fi
 
 # 1) plugin compiles — dotnet build exits non-zero on ERRORS only (the one benign CS0169 warning is fine).
 push_step run "plugin build (dotnet build -c Release)" dotnet build "$ROOT/HumankindAssetFramework.csproj" -c Release --nologo -v q

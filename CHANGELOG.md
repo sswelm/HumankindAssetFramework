@@ -10,13 +10,11 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
-- **THE GATE SWEEPS ITS OWN TEMP LEFTOVERS (2026-11-08).** `%TEMP%` held 47,781 entries and 88 GB, 28 GB of them ours: the
-  gate emptied its mktemp directory after the steps but never removed it (1,165 empty `tmp.*`, one per run), drills killed
-  mid-run left theirs (12 GB), the vehicle rig drill's `vr.*` (10 GB), the Unity drills' `haf-*` (3.9 GB), two test suites'
-  directories whose cleanup swallowed failures (2,239 + 136). The gate removes its own directory at exit and runs
-  `tools/temp_sweep.sh` first, in both modes: our names and markers only, older than two days, never another program's
-  `tmp.*`, never `haf-gate.lock`; it reports and never fails the gate. Dry run: 3,634 entries, 28,106 MB. `Tests/test_temp_sweep.py`
-  (`docs/Testing.md`).
+- **PR #264 review (2026-11-08).** Automatic temp cleanup requires a known HAF producer's generated name. Empty
+  `tmp.*`, common payload names, legacy `vr.*` and manual `haf-pr*` scratch directories do not prove ownership and stay.
+  New gates use `haf-gate.XXXXXXXXXX` and remove their directory at exit. A candidate's entire tree must be old; recent
+  nested writes and failed age/size inspections preserve it. Missing/empty option values are rejected; housekeeping
+  errors/timeouts no longer fail validation. Isolated sweeper tests run in the gate and CI (`docs/Testing.md`).
 - **PR #262 review (2026-11-08).** Re-encoded image hashes are checked against Blender's actual image payload before
   borrowing it; a changed IMG hash row previously compared equal to itself. Temporary image substitutions are restored
   in a finally block, including when a later image is missing. Two regression cases failed before the fix; all 2,581
