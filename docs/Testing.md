@@ -621,6 +621,14 @@ any model with a bone-parented mesh to Blender; a mesh below a bone now stays in
 joint node, a placement on such a model and a first clip the action import does not model still go to Blender. The same
 `FULL=1` run on master confirmed what the backlog had not crossed out: all 14,023 inside-out verdicts agree, the three
 skinned parts included (`VehicleProbe.BlenderSkin.cs`, 2026-10-03), and the Dragon's grazing rays read 0 off.
+**The joint node's own mesh followed the same day.** `vnode.py` `fixup_multitype_nodes` moves a mesh off a joint onto a new
+`<id>.mesh` vnode under the bone with `VNode()`'s default base transform, and `node.py` treats it as any object under a
+bone: the bone child's `rotation_after`, moved back by the bone length (`ImportRig.JointMeshProperty`). Its matrix is the
+armature's @ `ob_parbone(the joint's pose)` @ that, kept per joint (`JointMeshB`/`JointMeshD`) because the joint node's own
+world entries feed the skinning. `FULL=1` live: 171 files, 0 failed, **21 held, 0 counted** - `mesh_on_bone`'s turret
+included; the plant (the child's matrix computed, not used) fails on it alone (matrix element 1: 0.0 against Blender's
+-3.4e-08). The Lab's in-process probe keeps such a model in C# too. The rig_anim port still leaves a `.mesh` child to
+Blender by name: a scene-object port of its own.
 The comparator requires each part's MATRIX and VERTEX rows to agree on the bone flag and rejects duplicate diagnostic
 rows on either side. A conflicting `under-bone` row previously exempted both diagnostics, even when the other row said
 `bone`, so changed matrix and vertex values could pass and a part could count as both held and unheld. Overwriting a

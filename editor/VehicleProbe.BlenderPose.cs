@@ -115,6 +115,19 @@ public static partial class VehicleProbe
             return s;
         }
 
+        /// <summary>The '.mesh' child fixup_multitype_nodes gives a joint carrying a mesh: VNode()'s default base_trs (zero
+        /// location, identity quaternion, unit scale) under the bone vnode, through vnode.trs() with the bone child's
+        /// rotation_after and node.py's move back by the bone length - Property's object branch on those values.</summary>
+        public void JointMeshProperty(int joint, out float[] loc, out float[] quat, out float[] scale)
+        {
+            float[] l = { 0f, 0f, 0f }, q = { 1f, 0f, 0f, 0f }, sc = { 1f, 1f, 1f };
+            float[] t = MulQtV3(After, l);
+            float[] r = MulQt(MulQt(After, q), One);
+            float[] s = { Row(sc[0], sc[1], sc[2], 0), Row(sc[0], sc[1], sc[2], 1), Row(sc[0], sc[1], sc[2], 2) };
+            float off = (float)(-ArmatureOfBone[joint].PyLength[joint]);
+            loc = new[] { (float)(t[0] + 0f), (float)(t[1] + off), (float)(t[2] + 0f) }; quat = r; scale = s;
+        }
+
         /// <summary>The importer's static transform of a node as its property holds it.</summary>
         public void StaticProperty(int node, out float[] loc, out float[] quat, out float[] scale)
         {

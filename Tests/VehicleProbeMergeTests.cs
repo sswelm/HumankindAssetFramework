@@ -67,7 +67,7 @@ public class VehicleProbeMergeTests
     }
 
     [Fact]
-    public void A_mesh_on_a_joint_a_placed_bone_hung_mesh_and_evaluated_skinned_meshes_keep_the_Blender_path()
+    public void A_placed_bone_hung_mesh_and_evaluated_skinned_meshes_keep_the_Blender_path()
     {
         var m = BoxModel();
         m.Nodes.Add(new HafNode { Name = "Rig" }); m.Nodes[0].Children.Add(1);
@@ -80,8 +80,8 @@ public class VehicleProbeMergeTests
         input.AddPlacementLines(new[] { "BoneMesh|0,0,1|1,1,1" });
         Assert.Contains("placement on a model with a mesh parented to a bone", input.InProcessFallbackReason());
         input.Placements.Clear();
-        m.Nodes[1].Mesh = 0;   // a mesh ON the joint node: the importer's '.mesh' child, not modelled
-        Assert.Contains("sits on a joint node", input.InProcessFallbackReason());
+        m.Nodes[1].Mesh = 0;   // a mesh ON the joint node: the importer's '.mesh' child, modelled since 2026-11-08 too
+        Assert.Null(input.InProcessFallbackReason());
         m.Nodes[1].Mesh = -1;
         m.Nodes[2].Mesh = -1;
         var primitive = m.Meshes[0].Primitives[0]; primitive.Joints = new ushort[32];
@@ -94,7 +94,7 @@ public class VehicleProbeMergeTests
     }
 
     [Fact]
-    public void A_mesh_below_a_bone_reads_the_bone_chain_and_a_mesh_on_the_joint_is_counted()
+    public void A_mesh_below_a_bone_and_a_mesh_on_its_joint_both_read_the_bone_chain()
     {
         // the rows the probe drill compares (tools/vehicle-probe-drill/compare_probe.py): `bone` is held to Blender's bits, `under-bone`
         // counted; the values themselves are the drill's (the dug-out canoe, the bonechild fixture), not hand-derived here
@@ -113,8 +113,9 @@ public class VehicleProbeMergeTests
         Assert.False(hull.MatrixRow.EndsWith("bone"));
         m.Nodes[2].Mesh = 0;   // the Tip joint carries a mesh itself
         r = VehicleProbe.Run(m);
-        var onJoint = r.Parts.Single(p => p.UnderBone);
-        Assert.False(onJoint.BoneChained); Assert.EndsWith("|under-bone", onJoint.MatrixRow);
+        Assert.DoesNotContain(r.Parts, p => p.UnderBone);   // nothing left counted: the joint's '.mesh' child reads the chain too
+        var onJoint = r.Parts.Single(p => p.Name != "Lamp" && p.Name != "Hull");
+        Assert.True(onJoint.BoneChained); Assert.EndsWith("|bone", onJoint.MatrixRow); Assert.EndsWith("|bone", onJoint.VertexRow);
         Assert.True(r.Parts.Single(p => p.Name == "Lamp").BoneChained);   // the mesh below that joint is still held
     }
 

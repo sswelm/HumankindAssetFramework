@@ -10,6 +10,11 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE PROBE HOLDS A MESH ON A JOINT NODE TOO (2026-11-08).** The importer moves a mesh off a joint onto a `<id>.mesh` child
+  under the bone with the default transform; the probe now gives that child its own matrix through the bone chain
+  (`ImportRig.JointMeshProperty`), beside the joint's entries the skinning reads. `FULL=1` live: 171 files, 0 failed, 21
+  bone-hung parts held bit for bit and none left counted; the plant fails on `mesh_on_bone` alone. The Lab keeps such a
+  model in C# (`docs/Testing.md`).
 - **PR #265 review (2026-11-08).** Conflicting MATRIX/VERTEX bone flags no longer exempt held bone-chain values from
   comparison. A single `under-bone` flag previously skipped both diagnostics, even when the other said `bone`; duplicate
   diagnostic rows could leave an overwritten exemption too. The comparator rejects both malformed inputs. Ten Python
