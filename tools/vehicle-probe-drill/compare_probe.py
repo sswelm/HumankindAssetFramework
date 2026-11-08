@@ -15,8 +15,9 @@ Compared, per part NAME (the recipe key - a name on one side only is a FAIL):
   flip            exact (field 8: the islands the inside-out fix would reverse - step 3c)
   MATRIX rows     bit for bit (2026-10-03): each part's matrix_world as Blender holds it, 16 float32 values, against the
                   C# composition of the same (VehicleProbe.BlenderWorld.cs) - the verdicts read these. A C# row ending in
-                  `under-bone` (a mesh Blender parents to a BONE - its pose chain is not modelled yet) is COUNTED in the
-                  PASS line, not held: the number says how many matrices the file's verdicts read with the double chain
+                  `bone` (a mesh Blender parents to a BONE, through the bone chain since 2026-11-08) is HELD like any
+                  other and counted in the COMPARED line; one ending in `under-bone` (its pose not modelled: the first
+                  clip's import is not) is COUNTED, not held
   VERTEX rows     positions exact in float32: vertex 0 of each part as the visibility rays see it. Normal differences are
                   counted, not held (the custom-normal pipeline is approximate); under-bone parts counted, not held,
                   as for MATRIX. Both diagnostic row kinds must be present for every part on both sides.
@@ -44,6 +45,9 @@ def load(path):
             under_bone = body.endswith("|under-bone")
             if under_bone:
                 body = body[:-len("|under-bone")]
+            elif body.endswith("|bone"):
+                body = body[:-len("|bone")]
+                d.setdefault("BONE_CHAINED", set()).add(body.rpartition("|")[0])
             name, _, vals = body.rpartition("|")
             d["MATRIX"][name] = tuple(struct.unpack("<f", struct.pack("<f", float(x)))[0] for x in vals.split())
             if len(d["MATRIX"][name]) != 16:
@@ -55,6 +59,8 @@ def load(path):
             under_bone = body.endswith("|under-bone")
             if under_bone:
                 body = body[:-len("|under-bone")]
+            elif body.endswith("|bone"):
+                body = body[:-len("|bone")]
             name, pos, nor = body.rsplit("|", 2)
             if len(pos.split()) != 3 or len(nor.split()) != 3:
                 raise ValueError(f"{path}: VERTEX {name!r} requires a position and normal of 3 values each")
@@ -91,7 +97,7 @@ def main():
     if not cs or not bl:
         print("FAIL input: both probes must report at least one file")
         return 1
-    fails = 0; compared = 0
+    fails = 0; compared = 0; held_bone = 0; counted_bone = 0
     for key in sorted(bl):
         short = "/".join(key.split("/")[-2:])
         if key not in cs:
@@ -144,6 +150,7 @@ def main():
                     problems.append(f"{side} {kind} rows incomplete: missing {sorted(missing)[:4]}, unexpected {sorted(extra)[:4]}")
         under_bone = cs[key].get("UNDER_BONE", set())
         n_under_bone = len(under_bone)
+        counted_bone += n_under_bone; held_bone += len(cs[key].get("BONE_CHAINED", set()))
         if bm and cm:
             off = [n for n, v in bm.items() if n in cm and n not in under_bone and cm[n] != v]
             if off:
@@ -167,7 +174,7 @@ def main():
             normals_note = f"; {n_normals_off} of {n_vertices} vertex normals not bit for bit (counted, not held)" if bm and cm and n_normals_off else ""
             matrices = ((f"{len(bm) - n_under_bone} of {len(bm)} matrices and {n_vertices - n_under_bone} of {n_vertices} vertex positions bit for bit ({n_under_bone} under bones not held)" if n_under_bone else f"{len(bm)} matrices and {n_vertices} vertex positions bit for bit") + normals_note) if bm and cm else "no matrices compared"
             print(f"PASS {short}: {n_parts} parts, {len(bl[key]['RIGBONE'])} rig bones - names, order, verts, visibility, inside-out, bones, boxes agree (largest box difference {part_worst:.4f}, tolerance {part_tol:.4f}); {matrices}")
-    print(f"COMPARED {compared} FAILED {fails}")
+    print(f"COMPARED {compared} FAILED {fails} BONE {held_bone} held {counted_bone} counted")
     return 1 if fails else 0
 
 

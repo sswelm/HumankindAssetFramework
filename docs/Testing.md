@@ -594,8 +594,8 @@ whose normal is decided by the float32 ulp Blender's importer adds when it skins
 the `insideout` fixture holds strips facing the axis and away, the same under a mirrored node and under a turned one, two
 islands in one mesh, faces sharing only a vertex (two islands), a nonmanifold edge joining three faces (one island), a
 collinear triangle and a skinned strip), dominant bones, the RIGBONE rows, and — since 2026-10-03 — each part's
-**matrix_world bit for bit** (MATRIX rows: 14,003 of 14,023 on 119 files; the 20 meshes Blender parents to a bone are
-counted in the PASS line, not held, until the bone chain is ported) and **vertex 0 of every part's position bit for
+**matrix_world bit for bit** (MATRIX rows: 14,003 of 14,023 on 119 files; the 20 meshes Blender parents to a bone were
+counted in the PASS line, not held, until the bone chain reached the probe on 2026-11-08 - see below) and **vertex 0 of every part's position bit for
 bit** (VERTEX rows: `matrix_world @ co` — the float32 matrix and the importer's numpy float32 skinning in one number;
 the row's normalized world normal is counted, not held: Blender's two-short custom-normal pipeline is reproduced to
 about 1e-5, not to the bit). The sample positions, the normal ray and the
@@ -604,6 +604,23 @@ ray cast are Blender's float32 arithmetic (`VehicleProbe.BlenderWorld.cs`, `Vehi
 verdicts off with the double chain, 0 with this; every inside-out verdict agrees (14,023); the Ehrhardt's spin output
 keeps 6 visibility verdicts where Blender's binary contradicts its own box test (Review Backlog). The `custom_normals`
 fixture holds a leaning and a flat quad whose vertex normals are read off Blender to the bit.
+**The bone chain reaches the probe (2026-11-08).** A mesh node below a joint becomes, in Blender, an object parented to
+the BONE, whose matrix_world is the armature's @ `ob_parbone` (the pose bone's matrix moved to its tail) @ its own
+transform. The probe composed it as the plain node chain and the drill counted those rows without holding them; the
+chain itself was already in C#, `VehicleProbe.BlenderWorldMatricesPosed`, which the rig_anim port is held to Blender by.
+`VehicleProbe.BoneChain` now takes that function's matrix for every node below a bone - at the probe's reference pose,
+the first clip at frame 0 with the NLA tracks dropped (`posestart=1`), through the deploy port's action import; at rest
+when unposed - and derives the boxes' double matrix from it (`FromBlender`); every other node keeps its matrix bit for
+bit as before. A mesh ON the joint node itself, the importer's `.mesh` child under the bone, stays counted: the rig_anim
+port leaves it to Blender by name too. The rows say which: `bone` (held) or `under-bone` (counted), and the drill's PASS
+line gives both numbers. `FULL=1` with live Blender: 171 files compared, 0 failed, **20 bone-hung parts held bit for bit**
+(the dug-out canoe's 19 cloth and rope parts and the `export_skin_bonechild` fixture's lamp, which the drill had left out),
+1 counted (`mesh_on_bone`'s turret, on its joint). The plant (the node chain back) fails it on the canoe's 19 matrices and
+vertices and the fixture's box, matrix and vertex. The Lab's in-process probe followed: `InProcessFallbackReason` handed
+any model with a bone-parented mesh to Blender; a mesh below a bone now stays in C# on a plain probe, while a mesh on a
+joint node, a placement on such a model and a first clip the action import does not model still go to Blender. The same
+`FULL=1` run on master confirmed what the backlog had not crossed out: all 14,023 inside-out verdicts agree, the three
+skinned parts included (`VehicleProbe.BlenderSkin.cs`, 2026-10-03), and the Dragon's grazing rays read 0 off.
 **Since 2026-10-03 (step 3d) the drill also runs JOBS** — probes with the Lab's other inputs, a second model (`merge2=`),
 per-part placements (`parttx=`) and an orientation (`proberot=`), from one JSON both sides read
 (`tools/vehicle-probe-drill/probe_jobs.py`, `ProbeDrill.cs @jobs.json`, `blender_probe_many.py @jobs.json`): ten on

@@ -35,18 +35,20 @@ public static partial class VehicleProbe
         public string Bone = "";            // dominant bone of a skinned part, else ""
         public int Flip;                    // islands the inside-out fix would reverse (step 3c)
         public float[] BlenderMatrix;       // matrix_world as Blender holds it (float32, row-major, Blender's frame) - the verdicts read it
-        public bool UnderBone;              // the node hangs under a joint: Blender parents the object to the BONE, whose pose chain is not modelled yet
+        public bool UnderBone;              // the node hangs under a joint and its pose is NOT modelled (the first clip's import is not): counted, not held
+        public bool BoneChained;            // the node hangs under a joint and reads the bone chain (2026-11-08): held, and the drill counts it
         public float[] FirstVertex;         // vertex 0 as the verdicts see it: world position (3) and normalized world normal (3), Blender's frame
         public int Source;                  // 0 the first model, 1 the second (its name carries the Lab's B_ prefix)
         public bool Placed;                 // a per-part placement moved it (its box is the placed one)
         public PartMesh Mesh;               // the vertices and faces the verdicts read - the Lab draws its preview from them
         public string Row => string.Join("|", "PART", Name, Verts.ToString(), F(Center), F(Size), Vis.ToString(), Bone, Flip.ToString());
         /// <summary>The drill's bit-for-bit check of the matrix against Blender's own: 16 floats, row-major, shortest round-trip form;
-        /// a part under a bone says `under-bone` after them and is counted, not held (docs/Review-Backlog.md).</summary>
-        public string MatrixRow => "MATRIX|" + Name + "|" + string.Join(" ", BlenderMatrix.Select(v => ((double)v).ToString("R", System.Globalization.CultureInfo.InvariantCulture))) + (UnderBone ? "|under-bone" : "");
+        /// a part under a bone whose pose is not modelled says `under-bone` after them and is counted, not held; one that reads
+        /// the bone chain says `bone` and is held like any other (the drill counts it).</summary>
+        public string MatrixRow => "MATRIX|" + Name + "|" + string.Join(" ", BlenderMatrix.Select(v => ((double)v).ToString("R", System.Globalization.CultureInfo.InvariantCulture))) + (UnderBone ? "|under-bone" : BoneChained ? "|bone" : "");
         /// <summary>The drill's bit-for-bit check of the whole chain - matrix, skinning, custom normals - on one vertex: `matrix_world @
         /// co` and `(matrix_world.to_3x3() @ normal).normalized()` of vertex 0, as Blender's probe computes them.</summary>
-        public string VertexRow => "VERTEX|" + Name + "|" + string.Join(" ", FirstVertex.Take(3).Select(v => ((double)v).ToString("R", System.Globalization.CultureInfo.InvariantCulture))) + "|" + string.Join(" ", FirstVertex.Skip(3).Select(v => ((double)v).ToString("R", System.Globalization.CultureInfo.InvariantCulture))) + (UnderBone ? "|under-bone" : "");
+        public string VertexRow => "VERTEX|" + Name + "|" + string.Join(" ", FirstVertex.Take(3).Select(v => ((double)v).ToString("R", System.Globalization.CultureInfo.InvariantCulture))) + "|" + string.Join(" ", FirstVertex.Skip(3).Select(v => ((double)v).ToString("R", System.Globalization.CultureInfo.InvariantCulture))) + (UnderBone ? "|under-bone" : BoneChained ? "|bone" : "");
     }
 
     public sealed class RigBone
@@ -81,6 +83,7 @@ public static partial class VehicleProbe
         public Dictionary<int, NodeGeometry> Geo = new Dictionary<int, NodeGeometry>();
         public Dictionary<int, BlenderSkinner> Skinners = new Dictionary<int, BlenderSkinner>();
         public HashSet<int> Detached = new HashSet<int>();   // nodes a placement detached from their parent (their matrix no longer follows it)
+        public bool BoneChained = true;   // the nodes under a bone read the bone chain (false: its pose is not modelled - an under-bone part is then counted, not held)
     }
 
     /// <summary>A part before its mesh is built: the vertices it is made of, the matrix the verdicts read it through.</summary>
@@ -261,7 +264,11 @@ public static partial class VehicleProbe
                 var names = s.Src.Names;
                 bool underBone = names.IsBone[s.Node];   // a mesh ON a joint becomes a child object under that bone
                 for (int a = m.Nodes[s.Node].Parent; a >= 0 && !underBone; a = m.Nodes[a].Parent) underBone = names.IsBone[a];
-                s.Part.UnderBone = !skinned && underBone;
+                // a mesh BELOW a bone reads the bone chain (2026-11-08); a mesh ON the joint node itself is the importer's '.mesh'
+                // child under the bone, which the rig_anim port leaves to Blender by name too: counted, not held, as before
+                bool onJoint = names.IsBone[s.Node];
+                s.Part.BoneChained = !skinned && underBone && !onJoint && s.Src.BoneChained;
+                s.Part.UnderBone = !skinned && underBone && !s.Part.BoneChained;
             }
             Time(swp, "part meshes");
             input.Progress?.Invoke("visibility");
@@ -295,12 +302,49 @@ public static partial class VehicleProbe
         s.World = HafTransforms.WorldMatrices(m, i => pose?.Invoke(i) ?? (m.Nodes[i].HasMatrix ? AsBlenderDecomposes(m.Nodes[i].Matrix) : UnitRotation(m.Nodes[i])));
         s.ArmaWorld = new double[m.Skins.Count][];
         for (int si = 0; si < m.Skins.Count; si++) s.ArmaWorld[si] = s.Names.ArmatureNodeOfSkin[si] >= 0 ? s.World[s.Names.ArmatureNodeOfSkin[si]] : HafTransforms.Identity;
-        // the same matrices as Blender holds them: float32, composed as Blender composes them (the verdicts read these; a
-        // mesh parented to a BONE is not modelled yet - its matrix is the node chain's, said in docs/Review-Backlog.md)
+        // the same matrices as Blender holds them: float32, composed as Blender composes them (the verdicts read these)
         s.BWorld = BlenderWorldMatrices(m, posed && m.Animations.Count > 0 ? InBlenderConvention(HafTransforms.PoseTrsAt(m, 0, 0.0)) : null, out s.BLocal);
+        s.BoneChained = BoneChain(s, posed);
         s.BArma = new float[m.Skins.Count][];
         for (int si = 0; si < m.Skins.Count; si++) s.BArma[si] = s.Names.ArmatureNodeOfSkin[si] >= 0 ? s.BWorld[s.Names.ArmatureNodeOfSkin[si]] : IdentityF();
         return s;
+    }
+
+    /// <summary>A node that hangs below a BONE (2026-11-08): Blender parents the first object below a joint to the bone
+    /// (parent_type BONE) and what hangs below it to that object, so its matrix_world is the armature's @ ob_parbone(the pose
+    /// bone's matrix moved to its tail) @ its own transform - BlenderWorldMatricesPosed, the chain the rig_anim port is held to
+    /// Blender by (the dug-out canoe's cloth and rope). The pose is the probe's reference: the first clip at frame 0 with the
+    /// NLA tracks dropped (vehicle_rig.py posestart=1), through the deploy port's action import; unposed, the rest pose. Only the
+    /// nodes below a bone take these matrices: every other node keeps the chain MakeSource computed, bit for bit as before.
+    /// false = the first clip's import is not modelled (a CUBICSPLINE sampler, ...): the node chain stands and such a part is
+    /// counted, not held, as every under-bone part was until this.</summary>
+    static bool BoneChain(Source s, bool posed)
+    {
+        var m = s.M; var names = s.Names;
+        var below = new bool[m.Nodes.Count]; bool any = false;
+        for (int n = 0; n < m.Nodes.Count; n++)
+        {
+            if (names.IsBone[n]) continue;
+            for (int a = m.Nodes[n].Parent; a >= 0; a = m.Nodes[a].Parent) if (names.IsBone[a]) { below[n] = any = true; break; }
+        }
+        if (!any) return true;
+        var rig = BuildImportRig(m, names);
+        Func<int, float[][]> set = null;
+        if (posed && m.Animations.Count > 0)
+        {
+            var imp = BlenderPosedState.Import(m, 0, 24.0, rig);
+            if (imp.NotModelled != null) return false;
+            set = new BlenderPosedState.Pose(imp, m, rig).FrameSet(0f);
+        }
+        var world = BlenderWorldMatricesPosed(m, rig, set, out _, out _);
+        for (int n = 0; n < m.Nodes.Count; n++)
+        {
+            if (!below[n]) continue;
+            s.BWorld[n] = world[n];
+            s.World[n] = FromBlender(Array.ConvertAll(world[n], v => (double)v));   // the boxes read the double chain: the same placement, in glTF's frame
+        }
+        for (int si = 0; si < m.Skins.Count; si++) if (names.ArmatureNodeOfSkin[si] >= 0) s.ArmaWorld[si] = s.World[names.ArmatureNodeOfSkin[si]];   // an armature may itself hang from a bone
+        return true;
     }
 
     /// <summary>mesh_objects() of one source after the importer's bone-shape purge: the mesh objects with vertices, in Blender's

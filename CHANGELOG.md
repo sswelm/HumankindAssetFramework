@@ -10,6 +10,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE PROBE READS THE BONE CHAIN: A MESH BELOW A BONE IS HELD TO BLENDER, AND THE LAB PROBES IT IN C# (2026-11-08).** A mesh
+  node below a joint is, in Blender, an object parented to the bone (`ob_parbone`); the probe composed it as the node chain,
+  so the drill only counted those rows and the Lab handed any such model to Blender. The chain was already in C#
+  (`BlenderWorldMatricesPosed`, the rig_anim port's); the probe now takes it for every node below a bone at its reference pose
+  and derives the box matrix from it. `FULL=1` with live Blender: 171 files, 0 failed, 20 bone-hung parts held bit for bit
+  (the dug-out canoe's 19 cloth and rope parts, the bonechild fixture the drill had left out), 1 counted (a mesh ON its joint,
+  which rig_anim leaves to Blender too); the plant fails. The Lab's in-process probe keeps a model with a mesh below a bone
+  in C# on a plain probe. Three backlog entries crossed out: this one, and two closed on 2026-10-03 and never marked (the
+  skinned float32 chain, the Dragon's grazing rays), confirmed by the same run (`docs/Testing.md`).
 - **PR #264 second review (2026-11-08).** The namespacing update's wildcard also owned manual directories such as
   `haf-manual.checkpoint`. Enumerating actual producers preserves those names while a regression test checks that every
   script's generated name remains sweepable. A second age scan after sizing preserves files written during `du`.

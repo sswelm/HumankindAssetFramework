@@ -740,7 +740,10 @@ below that only intra-group parallelism of the weld or the gather would pay.
   (105 paths kept before the review); no legacy recipe slices a role clip today. The FULL drill covers that whole-action
   recipe too, because correcting cross-action retention can change its output.
 
-- **Blender-exact vertex positions for skinned parts** — OPEN (2026-10-02, found by 3c). Blender's importer skins a
+- ~~**Blender-exact vertex positions for skinned parts**~~ DONE 2026-10-03, crossed out 2026-11-08: option (A) was taken -
+  `VehicleProbe.BlenderSkin.cs` skins in the importer's numpy float32 chain - and the probe drill's `FULL=1` with live
+  Blender on 2026-11-08 holds every inside-out verdict, the three parts below included, and every vertex position bit for
+  bit (154 files, 16 jobs). Was: OPEN (2026-10-02, found by 3c). Blender's importer skins a
   rigged mesh into its bind pose in numpy float32: per joint, (bind matrix) @ (inverse bind matrix), where the bind
   matrix is GUESSED from the inverse bind matrices (`guess_original_bind_pose`, on by default: Eigen's 4×4 inverse, a
   `decompose`, `Matrix.Translation @ Quaternion.to_matrix()`), the per-vertex blend and the final multiply-add chain
@@ -756,7 +759,8 @@ below that only intra-group parallelism of the weld or the gather would pay.
   `vehicle_rig` are ported; **(B)** a rule in BOTH the script and the port that a triangle whose edges are parallel to
   float32 resolution casts no vote — measured to change the reference's own count on 29 of 11,516 parts (fused ships
   are full of slivers), a behaviour change, and still a threshold the ulp can straddle; **(C)** leave the three named.
-- **Grazing visibility rays on the re-fused Dragon** — OPEN, BLOCKS THE GATE (2026-10-02, found by 3c's drill run; a
+- ~~**Grazing visibility rays on the re-fused Dragon**~~ DONE 2026-10-03, crossed out 2026-11-08 (the entry's own text below
+  records 0 of 2,507 off after causes 1-3; the probe drill passes on every recipe source since). Was: OPEN, BLOCKS THE GATE (2026-10-02, found by 3c's drill run; a
   3b matter, master fails the same way). `sns_dragon_split_fused.glb` as re-fused that evening: 12 of 2,507 visibility
   verdicts differ from Blender's, in both directions, on decal quads snapped to panel edges and on coincident twin
   panels — rays that run exactly along a face edge or a coplanar twin, where the last bit decides. Three causes,
@@ -807,7 +811,12 @@ below that only intra-group parallelism of the weld or the gather would pay.
   identity if still zero. Even an invertible IBM can have a determinant that underflows in float32; without
   the fallback, NaN vertices incorrectly make an enclosed mesh external. `bind_inverse_underflow` agrees with
   Blender on visibility, matrices and vertex positions; unit tests hold both fallback paths bit for bit.
-- **Meshes parented to a bone: the bone chain** — OPEN (2026-10-03). A glTF mesh node under a joint becomes, in
+- ~~**Meshes parented to a bone: the bone chain**~~ FIXED 2026-11-08 for a mesh BELOW a bone: `VehicleProbe.BoneChain`
+  takes `BlenderWorldMatricesPosed`'s matrix (the rig_anim port's chain) at the probe's reference pose; `FULL=1`: 20 parts
+  held bit for bit (the canoe's 19, the bonechild fixture's lamp), the plant fails; the Lab's in-process probe keeps such a
+  model in C#. Still counted, not held: a mesh ON a joint node (`mesh_on_bone`; the importer's `.mesh` child, which the
+  rig_anim port leaves to Blender too); still Blender's: a placement on such a model, a first clip the action import does
+  not model (`docs/Testing.md`). Was: OPEN (2026-10-03). A glTF mesh node under a joint becomes, in
   Blender, an object parented to that BONE (`parent_type = 'BONE'`, moved by −bone_length along Y), and its
   matrix_world is armature @ `pchan->pose_mat` (translated to the bone's tail) @ local. The pose matrix comes from the
   editbone (head/tail from `editbone_arma_mat`, length from the importer's heuristic, roll from `align_roll`), the
