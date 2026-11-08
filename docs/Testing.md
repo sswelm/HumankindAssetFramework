@@ -4005,6 +4005,27 @@ same job. Registry order can otherwise select a re-encoded albedo whose complete
 compared, making a valid-but-changed SHA an ineffective negative test. Other stage and export mutations retain the
 albedo-bearing control; the hash check remains mandatory.
 
+The re-encoded image's bytes stand in (2026-11-07): the whole-file skip above is gone. `GlbRowsCompare` takes the bytes of an
+image whose encoding is Blender's (a JPEG albedo's PNG re-encode, `bytes == null` in the export's image rows) out of Blender's
+own file - the rig drill hands every shard's work directory through `RIGANIM_GLB_DIR` (the dump writes `<key>/<key>.glb` there,
+and the directories are part of the oracle's record, so replay has them) - builds the port's file with those bytes in place
+and compares it whole: the JSON, every other buffer view, the lengths and the SHA-256. Without the file at hand the skip stands,
+counted by name; a file whose image count differs or whose image has no bytes is a problem, never a skip; the stand-in is undone
+after the comparison so the export's own rows say what the port knew. The shell requires every exported file compared whole
+(140 of 140; 9 of them with an image Blender re-encoded, its bytes from Blender's file), and the sha tamper has a second control and copy on an image-bearing export
+(`S5_XGLB_sha_image`, `jobs_sha_img.txt` / `intact_sha_img.txt`), beside the image-free one. Unit cases: Blender's bytes stand in
+and a flipped byte outside the image is a difference; an image count that differs is a problem; no file at hand is the counted
+skip. 2,579 tests. The plant (the old skip back) FAILS the drill: 131 of 140 exported files compared whole. The vehicle rig drill hands no file and had
+no such leave (110 of 110 exports byte-equal); the deploy export drill hands its file and takes the same path.
+
+PR #262 review (2026-11-08) closes two remaining gaps. An unknown image's IMG hash was copied from its own row even with
+Blender's file available, so changing that hash alone still passed. It must now match SHA-256 of the actual borrowed image.
+The temporary image list is restored in finally: a second missing image previously returned with the first image still
+substituted. Both regression cases failed before the fix; all 2,581 tests pass afterwards. The image-bearing controls now
+select fx_f_review_jpeg explicitly and require nonzero borrowing coverage, ensuring they exercise re-encoding. In addition
+to S5_XGLB_sha_image, S5_XIMG_sha_reencoded changes only the JPEG fixture's exported IMG hash; both must fail while their
+intact control passes. The live drill now checks 102 kinds of damaged evidence.
+
 
 ### Native kernels
 

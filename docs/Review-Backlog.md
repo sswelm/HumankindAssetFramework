@@ -636,9 +636,17 @@ tooling that is not committed; fixtures missing an X-axis sail yard or flag axis
 The byte-comparison skip bit on 2026-10-20: the rig_anim drill's S5_XGLB_sha tamper was seeded on the first dumped job, and
 the fused galley (23 images, one re-encoded by Blender) is a job whose GLB bytes the model does not compare - the flipped hash
 passed as intact and the gate said so. Fixed on master (64e31cc, 2026-10-29): the tamper is seeded on an image-free export
-block with its own control (jobs_sha.txt / intact_sha.txt), and the drill asserts that control's GLB bytes were compared. Still OPEN: a
-re-encoded image skips the whole file's bytes rather than the image's; the fix is to compare everything but the image payloads,
-as the Generate acceptance already does (ImageEncodingDifference).
+block with its own control (jobs_sha.txt / intact_sha.txt), and the drill asserts that control's GLB bytes were compared. ~~Still OPEN: a
+re-encoded image skips the whole file's bytes rather than the image's~~ FIXED 2026-11-07: `GlbRowsCompare` reads such an image's
+bytes out of Blender's own file (the rig drill hands it every shard's work directory through `RIGANIM_GLB_DIR`, part of the
+oracle's record) and compares the rest of the file bit for bit; the shell requires every exported file compared whole
+(140 of 140), a second sha control and tamper on an image-bearing export (`S5_XGLB_sha_image`); the plant (the old
+skip back) FAILS the drill: 131 of 140 exported files compared whole. The vehicle rig drill hands no file and had no such leave (110 of 110 byte-equal); the deploy export drill
+hands its file and takes the same path.
+PR #262 review (2026-11-08): the borrowed image's hash must match its IMG row (the row previously supplied its own expected
+hash), and finally restores every temporary image even when a later image is missing. Two failing-before regression cases
+pass after the fix (2,581 tests total). The SHA and new IMG-hash tampers explicitly use the re-encoded JPEG fixture and
+require nonzero image-borrowing coverage, rather than accepting an arbitrary image-bearing export as the control.
 The probe on all cores DONE 2026-10-19 (the user, after a reviewer's remark that the probe was not optimised): measured
 first - the BVH build, the inside-out verdict and the part meshes ran on one core, and the island walk's `HashSet<long>` used
 long's own hash (2.1 s on a 72k grid); every phase now parallel or bucketed, every row byte-identical on the 84 drill inputs,
@@ -680,6 +688,10 @@ below that only intra-group parallelism of the weld or the gather would pay.
   measurement to one warmed worker before blaming the skinner. Failed again 2026-11-07 (the strict JSON reader's push gate, 1
   of 2,562; 3 of 3 in isolation afterwards): the warm-up ran only the weighted vertex, so each worker's FIRST zero-weight and
   unskinned calls ran inside the counted window; the warm-up now takes all three call shapes. The budget stands.
+- **`test_parallel_gate.py`'s lane-steps test timed out in a push gate (2026-11-08)**: its shell run takes 12 s alone against a
+  15 s subprocess timeout, and the gate's parallel steps (the parity-stamp drill, the native kernels drill) load the machine - the
+  suite took 252 s and 278 s in that day's gates against 10-20 s before. The timeout is a hang guard, widened to 120 s; the
+  tests' assertions are unchanged.
 - **Native SDK skeleton smoke test** — FIXED (2026-10-19). Native multi-material atlas remapping assigned transient
   meshes to the saved GLB rig prefab; SaveAssets could serialize missing mesh references before skeleton import,
   producing a NullReferenceException in `Skeleton.FillBoneEntry` at IL 0x1b (also reproduced with a PNG control).
