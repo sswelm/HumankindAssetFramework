@@ -20,7 +20,8 @@ Compared, per part NAME (the recipe key - a name on one side only is a FAIL):
                   clip's import is not) is COUNTED, not held
   VERTEX rows     positions exact in float32: vertex 0 of each part as the visibility rays see it. Normal differences are
                   counted, not held (the custom-normal pipeline is approximate); under-bone parts counted, not held,
-                  as for MATRIX. Both diagnostic row kinds must be present for every part on both sides.
+                  as for MATRIX. Both diagnostic row kinds must occur exactly once for every part on both sides,
+                  with matching bone flags within each probe's output.
 """
 import sys, struct
 sys.stdout.reconfigure(encoding="utf-8")
@@ -34,7 +35,8 @@ def load(path):
         if len(t) < 3 or t[0] != "ROW":
             continue
         row = t[2]
-        d = files.setdefault(t[1], {"PART": [], "RIGBONE": [], "MATRIX": {}, "VERTEX": {}})
+        d = files.setdefault(t[1], {"PART": [], "RIGBONE": [], "MATRIX": {}, "VERTEX": {},
+                                   "BONE_FLAGS": {"MATRIX": {}, "VERTEX": {}}})
         if row.startswith("PART|"):
             f = row.split("|")
             # a '|' inside a name folds back into the name: the numeric tail is fixed (verts, c, s, vis, bone, flip)
@@ -43,12 +45,16 @@ def load(path):
         elif row.startswith("MATRIX|"):
             body = row[len("MATRIX|"):]
             under_bone = body.endswith("|under-bone")
+            flag = "under-bone" if under_bone else "bone" if body.endswith("|bone") else ""
             if under_bone:
                 body = body[:-len("|under-bone")]
             elif body.endswith("|bone"):
                 body = body[:-len("|bone")]
                 d.setdefault("BONE_CHAINED", set()).add(body.rpartition("|")[0])
             name, _, vals = body.rpartition("|")
+            if name in d["MATRIX"]:
+                raise ValueError(f"{path}: duplicate MATRIX row for {name!r}")
+            d["BONE_FLAGS"]["MATRIX"][name] = flag
             d["MATRIX"][name] = tuple(struct.unpack("<f", struct.pack("<f", float(x)))[0] for x in vals.split())
             if len(d["MATRIX"][name]) != 16:
                 raise ValueError(f"{path}: MATRIX {name!r} requires 16 values")
@@ -57,11 +63,15 @@ def load(path):
         elif row.startswith("VERTEX|"):
             body = row[len("VERTEX|"):]
             under_bone = body.endswith("|under-bone")
+            flag = "under-bone" if under_bone else "bone" if body.endswith("|bone") else ""
             if under_bone:
                 body = body[:-len("|under-bone")]
             elif body.endswith("|bone"):
                 body = body[:-len("|bone")]
             name, pos, nor = body.rsplit("|", 2)
+            if name in d["VERTEX"]:
+                raise ValueError(f"{path}: duplicate VERTEX row for {name!r}")
+            d["BONE_FLAGS"]["VERTEX"][name] = flag
             if len(pos.split()) != 3 or len(nor.split()) != 3:
                 raise ValueError(f"{path}: VERTEX {name!r} requires a position and normal of 3 values each")
             d["VERTEX"][name] = tuple(struct.unpack("<f", struct.pack("<f", float(x)))[0] for x in (pos + " " + nor).split())
@@ -71,6 +81,10 @@ def load(path):
             f = row.split("|")
             name = "|".join(f[1:len(f) - 3]); tail = f[len(f) - 3:]
             d["RIGBONE"].append({"name": name, "verts": tail[0], "c": tail[1], "s": tail[2]})
+    for d in files.values():
+        for name in d["MATRIX"].keys() & d["VERTEX"].keys():
+            if d["BONE_FLAGS"]["MATRIX"][name] != d["BONE_FLAGS"]["VERTEX"][name]:
+                raise ValueError(f"{path}: MATRIX and VERTEX bone flags disagree for {name!r}")
     return files
 
 

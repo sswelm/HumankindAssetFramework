@@ -621,6 +621,11 @@ any model with a bone-parented mesh to Blender; a mesh below a bone now stays in
 joint node, a placement on such a model and a first clip the action import does not model still go to Blender. The same
 `FULL=1` run on master confirmed what the backlog had not crossed out: all 14,023 inside-out verdicts agree, the three
 skinned parts included (`VehicleProbe.BlenderSkin.cs`, 2026-10-03), and the Dragon's grazing rays read 0 off.
+The comparator requires each part's MATRIX and VERTEX rows to agree on the bone flag and rejects duplicate diagnostic
+rows on either side. A conflicting `under-bone` row previously exempted both diagnostics, even when the other row said
+`bone`, so changed matrix and vertex values could pass and a part could count as both held and unheld. Overwriting a
+duplicate row could leave the same exemption behind. `Tests/test_compare_vehicle_probe.py` covers those refusals,
+valid held/count-only rows, and changed values on held bone-chain parts (10 cases).
 **Since 2026-10-03 (step 3d) the drill also runs JOBS** — probes with the Lab's other inputs, a second model (`merge2=`),
 per-part placements (`parttx=`) and an orientation (`proberot=`), from one JSON both sides read
 (`tools/vehicle-probe-drill/probe_jobs.py`, `ProbeDrill.cs @jobs.json`, `blender_probe_many.py @jobs.json`): ten on

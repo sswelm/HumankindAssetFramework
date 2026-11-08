@@ -10,6 +10,11 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **PR #265 review (2026-11-08).** Conflicting MATRIX/VERTEX bone flags no longer exempt held bone-chain values from
+  comparison. A single `under-bone` flag previously skipped both diagnostics, even when the other said `bone`; duplicate
+  diagnostic rows could leave an overwritten exemption too. The comparator rejects both malformed inputs. Ten Python
+  regression cases cover valid held/count-only rows, changed held values, conflicting flags and duplicate diagnostics
+  (`docs/Testing.md`).
 - **THE PROBE READS THE BONE CHAIN: A MESH BELOW A BONE IS HELD TO BLENDER, AND THE LAB PROBES IT IN C# (2026-11-08).** A mesh
   node below a joint is, in Blender, an object parented to the bone (`ob_parbone`); the probe composed it as the node chain,
   so the drill only counted those rows and the Lab handed any such model to Blender. The chain was already in C#
