@@ -1,6 +1,7 @@
 """tools/temp_sweep.sh against a fake temp root: every pattern it owns goes when old, every decoy stays, young ones stay."""
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -139,6 +140,38 @@ class TempSweepTests(unittest.TestCase):
         age(nested.parent, OLD)
         out = self.sweep()
         self.assertTrue(nested.exists(), out)
+
+    def test_unknown_producer_with_ten_character_suffix_is_not_owned(self):
+        self.d("haf-manual.checkpoint", "important.txt")
+        out = self.sweep()
+        self.assertTrue((self.root / "haf-manual.checkpoint" / "important.txt").exists(), out)
+
+    def test_activity_during_size_inspection_keeps_the_directory(self):
+        self.d("haf-deploy.abcdefghij", "active.log")
+        wrapper = '''du() {
+  command du "$@"
+  touch "$2/active.log"
+}
+export -f du
+exec bash "$@"
+'''
+        r = subprocess.run([BASH, "-c", wrapper, "_", SWEEP, "--root", self.root.as_posix()], env=self.env,
+                           capture_output=True, text=True, timeout=60)
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertTrue((self.root / "haf-deploy.abcdefghij" / "active.log").exists(), r.stdout)
+
+    def test_all_script_generated_directory_names_are_sweepable(self):
+        names = set()
+        for script in (ROOT / "tools").glob("*.sh"):
+            for prefix, suffix in re.findall(r"(haf-[a-z][a-z0-9_-]*\.)(X{8,10})(?!X)", script.read_text(encoding="utf-8")):
+                names.add(prefix + "a" * len(suffix))
+        self.assertIn("haf-vehiclerig.aaaaaaaaaa", names)
+        for name in names:
+            self.d(name)
+        out = self.sweep()
+        # Git Bash can leave its own anonymous temp entries here under load; those are deliberately not ours.
+        self.assertFalse(names.intersection(self.remaining()), out)
+        self.assertIn("TEMP SWEEP SWEPT %d of our leftover(s)" % len(names), out)
 
     def test_unreadable_age_is_not_permission_to_delete(self):
         self.d("haf-oracle-sh-noaccess", "data.bin")

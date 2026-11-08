@@ -138,11 +138,14 @@ those 28 GB (3,634 entries: 1,165 empty gate directories, 9 killed drills' `tmp.
 contents; the dry run before it had listed exactly that set. So that no new anonymous leftover can form, every temp directory
 `tools/*.sh` makes is namespaced `haf-<producer>.XXXXXXXXXX` since the same PR (the gate as `haf-gate`, `vr.*` became
 `haf-vehiclerig`, the fifteen `TMPD="$(mktemp -d)"` drills their own names, the goldens, parity-stamp, docs, reader-gates
-and probe-performance scripts too); the sweeper owns that whole form, and `test_every_script_temp_directory_is_namespaced`
-refuses an anonymous `mktemp -d` in `tools/`. Under the gate a drill's directory nests in the gate's and goes with it.
+and probe-performance scripts too). The sweeper enumerates the actual producers: a name such as `haf-manual.checkpoint`
+has the same shape but is not owned. `test_every_script_temp_directory_is_namespaced` refuses an anonymous `mktemp -d`
+in `tools/`; another test proves every script's generated name is accepted by the sweeper. Under the gate a drill's
+directory nests in the gate's and goes with it.
 
 Every entry in a candidate tree must be at least two days old: the parent directory's timestamp misses writes to
-existing files and deeper directories. Symlinks are not followed; failed age/size inspections preserve the entry.
+existing files and deeper directories. The age check runs again after sizing, so a write during a lengthy `du` preserves
+the directory too. Symlinks are not followed; failed age/size inspections preserve the entry.
 Modification time is a best-effort activity signal, not proof that no process is using old files. `--dry-run` lists
 candidates; `--age-days` adjusts the cutoff. Housekeeping errors and a 120-second timeout report and let validation
 continue. `Tests/test_temp_sweep.py` runs on the lane in both modes and in CI, with isolated fake roots for deletion and

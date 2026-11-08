@@ -29,7 +29,8 @@ ROOT_DIR="$(cd -- "$ROOT_DIR" 2>/dev/null && pwd -P)" || { echo "temp_sweep: no 
 # Match actual mktemp / Python tempfile / Guid producers, not the whole haf-* namespace (which includes manual work).
 ours_dir() {
   local name="$1"
-  [[ "$name" =~ ^haf-[a-z][a-z0-9_-]*\.[A-Za-z0-9]{10}$ ]] ||   # every `mktemp -d ".../haf-<producer>.XXXXXXXXXX"` of tools/*.sh: the gate, the drills, the Unity drills (all of them since 2026-11-08)
+  # A ten-character extension can also be an ordinary word (haf-manual.checkpoint). Only real producers qualify.
+  [[ "$name" =~ ^haf-(animationlab|backup-dedup|bake_commit|bake-kernels|blender-exit|buffer-hook|check-docs|decimate|deploy|editor-compile|fbx|fbx-model|gate|glb-reader|glb-writer|goldens|native-build|native-kernels|parity-row|parity-stamp|prep|probe-perf|reader-gates|registry-engine|rig-import|riganim|vehicle-generate|vehicle-probe|vehicle_source_guard|vehiclerig|workshop-compact|workshop-golden)\.[A-Za-z0-9]{10}$ ]] ||
   [[ "$name" =~ ^haf-riganim-connected\.[A-Za-z0-9]{8}$ ]] ||
   [[ "$name" =~ ^haf-(gate-test|oracle|oracle-sh|sweep-test|fbx-verdict|missing-mono)-[a-z0-9_]{8}$ ]] ||
   [[ "$name" =~ ^haf-(deploy-inproc|export-evidence|fbxmat|gitstamp|glbwriter|image-parity|gltf|material-evidence|loosefile|source-guard|names|parity-selftest)-[[:xdigit:]]{32}$ ]] ||
@@ -37,6 +38,14 @@ ours_dir() {
 }
 
 swept=0; swept_kb=0; kept_young=0
+old_tree() {  # an inspection error or recent write never authorizes deletion
+  local recent
+  if ! recent=$(find "$1" -mtime -"$AGE_DAYS" -print -quit 2>/dev/null); then
+    printf 'LEFT (cannot inspect age) %s\n' "${1##*/}"; return 1
+  fi
+  if [ -n "$recent" ]; then kept_young=$((kept_young + 1)); return 1; fi
+  return 0
+}
 while IFS= read -r -d '' e; do
   name="${e##*/}"
   # find emits direct children of the canonical root. Recheck type/link immediately before inspection and removal.
@@ -48,13 +57,12 @@ while IFS= read -r -d '' e; do
   fi
   # A directory's mtime does NOT change when an existing file (or a deeper directory) is written.
   # Check every descendant, and fail closed if find cannot inspect any part of the tree.
-  if ! recent=$(find "$e" -mtime -"$AGE_DAYS" -print -quit 2>/dev/null); then
-    printf 'LEFT (cannot inspect age) %s\n' "$name"; continue
-  fi
-  if [ -n "$recent" ]; then kept_young=$((kept_young + 1)); continue; fi
+  old_tree "$e" || continue
   if ! kb=$(du -sk "$e" 2>/dev/null | cut -f1) || ! [[ "$kb" =~ ^[0-9]+$ ]]; then
     printf 'LEFT (cannot inspect size) %s\n' "$name"; continue
   fi
+  # Sizing a large drill tree can take time. Its files may have been written since the first age check.
+  old_tree "$e" || continue
   [ ! -L "$e" ] && [ -e "$e" ] || continue
   if [ "$DRY" -eq 1 ]; then printf 'WOULD SWEEP %8d KB  %s\n' "$kb" "$name"
   else rm -rf -- "$e" 2>/dev/null || { printf 'LEFT (in use?) %s\n' "$name"; continue; }

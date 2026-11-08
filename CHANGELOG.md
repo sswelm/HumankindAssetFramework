@@ -10,6 +10,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **PR #264 second review (2026-11-08).** The namespacing update's wildcard also owned manual directories such as
+  `haf-manual.checkpoint`. Enumerating actual producers preserves those names while a regression test checks that every
+  script's generated name remains sweepable. A second age scan after sizing preserves files written during `du`.
+  Both deletion cases failed before the fixes; `Tests/test_temp_sweep.py` now has 14 cases (`docs/Testing.md`).
 - **THE GATE SWEEPS ITS OWN TEMP LEFTOVERS; EVERY SCRIPT'S TEMP DIRECTORY IS NAMESPACED (2026-11-08).** `%TEMP%` held 47,781
   entries and 88 GB, 28 GB of them ours: the gate emptied its mktemp directory after the steps but never removed it (1,165
   empty `tmp.*`, one per run), drills killed mid-run left theirs (12 GB), the vehicle rig drill's `vr.*` (10 GB), the Unity
