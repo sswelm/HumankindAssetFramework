@@ -30,7 +30,7 @@ static class GlbRowsCompare
     {
         if (mine.SequenceEqual(theirs)) return;
         int i = 0; while (i < mine.Count && i < theirs.Count && mine[i] == theirs[i]) i++;
-        problems.Add($"{what}: {mine.Count} here, {theirs.Count} in Blender, first difference at {i + 1}: here Â«{Cut(i < mine.Count ? mine[i].Replace('\t', ' ') : "(none)")}Â», Blender Â«{Cut(i < theirs.Count ? theirs[i].Replace('\t', ' ') : "(none)")}Â»");
+        problems.Add($"{what}: {mine.Count} here, {theirs.Count} in Blender, first difference at {i + 1}: here «{Cut(i < mine.Count ? mine[i].Replace('\t', ' ') : "(none)")}», Blender «{Cut(i < theirs.Count ? theirs[i].Replace('\t', ' ') : "(none)")}»");
     }
 
     /// <summary>Compares the export with the dump's rows (the row kind first in each; rows of other kinds are ignored).
@@ -200,7 +200,7 @@ static class GlbRowsCompare
                     {
                         int at = 0; while (at < theirJson.Length && at < written.Json.Length && theirJson[at] == written.Json[at]) at++;
                         int lo = Math.Max(0, at - 60);
-                        problems.Add($"the JSON differs at {at}: here Â«{Cut(written.Json.Substring(lo, Math.Min(140, written.Json.Length - lo)))}Â», Blender Â«{Cut(theirJson.Substring(lo, Math.Min(140, theirJson.Length - lo)))}Â»");
+                        problems.Add($"the JSON differs at {at}: here «{Cut(written.Json.Substring(lo, Math.Min(140, written.Json.Length - lo)))}», Blender «{Cut(theirJson.Substring(lo, Math.Min(140, theirJson.Length - lo)))}»");
                     }
                     else
                     {
