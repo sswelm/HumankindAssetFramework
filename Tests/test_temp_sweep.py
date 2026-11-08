@@ -64,6 +64,8 @@ class TempSweepTests(unittest.TestCase):
             self.d("haf-oracle-sh-abcdefgh", "repo.txt"),
             self.d("haf-vehicle-generate.0123456789", "big.bin"),
             self.d("haf_checkedreplace_" + "a" * 32, "pack.json"),
+            self.d("haf-vehiclerig.abcdefghij", "Newtonsoft.Json.dll", "jobs.txt"),   # a killed vehicle rig drill (vr.* until 2026-11-08)
+            self.d("haf-deploy.0123456789", sub=["export"]),                        # a killed standalone drill (an anonymous tmp.* until then)
             self.f("riganim_inproc_" + "b" * 32 + ".glb"),
         ]
         decoys = [
@@ -72,6 +74,8 @@ class TempSweepTests(unittest.TestCase):
             self.d("vr.abcdef", "user-data.txt"),
             self.d("haf-pr264-work", "notes.txt"),
             self.d("haf-gate.short"),
+            self.d("haf-Deploy.9876543210"),       # a producer name is lower-case (a distinct suffix: Windows names are case-insensitive)
+            self.d("haf-deploy.012345678"),        # nine characters: not mktemp's suffix
             self.d("haf-oracle-sh-near-miss"),
             self.d("haf_checkedreplace_notes"),
             self.f("riganim_inproc_notes.glb"),
@@ -194,6 +198,15 @@ run_bg_wait
         self.assertRegex(allocated.name, r"^haf-gate\.[A-Za-z0-9]{10}$")
         self.assertEqual(self.root.resolve(), allocated.parent.resolve())
         self.assertFalse(allocated.exists())
+
+    def test_every_script_temp_directory_is_namespaced(self):
+        # the sweeper owns only haf-<producer>.XXXXXXXXXX: an anonymous `mktemp -d` in tools/ would leave an unsweepable directory
+        anonymous = []
+        for script in sorted((ROOT / 'tools').glob('*.sh')):
+            for n, line in enumerate(script.read_text(encoding='utf-8', errors='replace').splitlines(), 1):
+                if 'mktemp -d' in line and '/haf-' not in line and '-p "$ROOT/obj"' not in line and not line.lstrip().startswith('#'):
+                    anonymous.append('%s:%d: %s' % (script.name, n, line.strip()[:100]))
+        self.assertEqual([], anonymous, '\n'.join(anonymous))
 
     def test_housekeeping_timeout_does_not_fail_the_gate(self):
         source = (ROOT / "tools/check.sh").read_text(encoding="utf-8")

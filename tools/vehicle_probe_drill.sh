@@ -39,7 +39,7 @@ for cand in "$WROOT/References/Newtonsoft.Json.dll" "$PROJECT/Assets/Plugins/Jso
 done
 [ -n "$NEWTONSOFT" ] || { echo "FAIL — Newtonsoft.Json.dll not found (References/ via fetch-refs; the vehicle probe was NOT drilled)"; exit 2; }
 
-TMPD="$(mktemp -d)"; trap 'rm -rf "$TMPD"' EXIT
+TMPD="$(mktemp -d "${TMPDIR:-${TEMP:-/tmp}}/haf-vehicle-probe.XXXXXXXXXX")"; trap 'rm -rf "$TMPD"' EXIT
 cp "$NEWTONSOFT" "$TMPD/Newtonsoft.Json.dll"
 cp "$ROOT/editor/Plugins/x86_64/hafkernels.dll" "$TMPD/hafkernels.dll"   # the native kernels beside the exe (HafNativeKernels.cs); absent, the managed twins run
 WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"; WTMP="$(cygpath -m "$TMPD" 2>/dev/null || echo "$TMPD")"

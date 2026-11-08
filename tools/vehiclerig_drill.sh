@@ -31,7 +31,7 @@ NEWTONSOFT="$ROOT/References/Newtonsoft.Json.dll"
 [ -f "$NEWTONSOFT" ] || NEWTONSOFT="$PROJECT/Assets/Plugins/Json.Net 11.0.1/Newtonsoft.Json.dll"
 [ -f "$NEWTONSOFT" ] || { echo "FAIL — vehicle_rig drill: Newtonsoft.Json.dll not found (References/ or the project's Plugins)"; exit 2; }
 # a SHORT temp root: a recipe's names files sit under <work>/<key>/<key>_<role>.txt, and Windows stops at 260 characters
-TMPD="$(mktemp -d "${TMPDIR:-/tmp}/vr.XXXXXX")"; trap 'rm -rf "$TMPD"' EXIT
+TMPD="$(mktemp -d "${TMPDIR:-${TEMP:-/tmp}}/haf-vehiclerig.XXXXXXXXXX")"; trap 'rm -rf "$TMPD"' EXIT
 cp "$NEWTONSOFT" "$TMPD/Newtonsoft.Json.dll"
 cp "$ROOT/editor/Plugins/x86_64/hafkernels.dll" "$TMPD/hafkernels.dll"   # the native kernels beside the exe (HafNativeKernels.cs); absent, the managed twins run
 WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"; WTMP="$(cygpath -m "$TMPD" 2>/dev/null || echo "$TMPD")"

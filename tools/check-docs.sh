@@ -16,7 +16,7 @@ cd "$(dirname "$0")/.."
 fail=0
 broken="$(mktemp)"
 broken_anchors="$(mktemp)"
-wiki_tmp="$(mktemp -d)"
+wiki_tmp="$(mktemp -d "${TMPDIR:-${TEMP:-/tmp}}/haf-check-docs.XXXXXXXXXX")"
 trap 'rm -f "$broken" "$broken_anchors"; rm -rf "$wiki_tmp"' EXIT
 md_files="$(git ls-files --cached --others --exclude-standard '*.md')"
 

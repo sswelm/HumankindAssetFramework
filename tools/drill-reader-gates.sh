@@ -32,7 +32,7 @@ cd "$(dirname "$0")/.." || exit 2
 # other step), and a plant in the checkout would be read by them; two gates at once lost pushes to a vanishing plant for
 # weeks before that. The copy holds what the two gates read: every C# source the gates scan (not the build, test, baker
 # or tools folders) and tools/ itself, as the working tree has them (tracked and untracked, not ignored).
-SANDBOX=$(mktemp -d) || exit 2
+SANDBOX=$(mktemp -d "${TMPDIR:-${TEMP:-/tmp}}/haf-reader-gates.XXXXXXXXXX") || exit 2
 trap 'rm -rf "$SANDBOX"' EXIT
 git ls-files -z --cached --others --exclude-standard -- '*.cs' tools | grep -zvE '^(obj|bin|Temp|Tests|baker)/' | xargs -0 cp --parents -t "$SANDBOX" \
   || { echo "[FAIL] could not copy the tree for the reader-gate drill"; exit 2; }

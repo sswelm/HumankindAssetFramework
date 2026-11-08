@@ -132,7 +132,14 @@ The sweep accepts only known HAF producers' generated names, including their ran
 `riganim_inproc_<32 hex>.glb`. Generic `tmp.*`, legacy `vr.*`, manual `haf-pr*` scratch directories, near-miss names and
 `haf-gate.lock` stay untouched. Empty directories, numbered logs and common payloads such as `Newtonsoft.Json.dll`,
 `jobs.txt` or `fixtures` cannot establish ownership. Older leftovers without a project-specific generated name require
-manual review. The pre-review dry run's 28 GB estimate included ambiguous names and is not this automatic sweep's scope.
+manual review. The pre-review dry run's 28 GB estimate included ambiguous names and is not this automatic sweep's scope -
+those 28 GB (3,634 entries: 1,165 empty gate directories, 9 killed drills' `tmp.*`, 31 `vr.*`, the Unity drills' `haf-*`, 2,239
+`haf_checkedreplace_*`) were swept once, by the PR's first form in its own push gate, which still inferred ownership from
+contents; the dry run before it had listed exactly that set. So that no new anonymous leftover can form, every temp directory
+`tools/*.sh` makes is namespaced `haf-<producer>.XXXXXXXXXX` since the same PR (the gate as `haf-gate`, `vr.*` became
+`haf-vehiclerig`, the fifteen `TMPD="$(mktemp -d)"` drills their own names, the goldens, parity-stamp, docs, reader-gates
+and probe-performance scripts too); the sweeper owns that whole form, and `test_every_script_temp_directory_is_namespaced`
+refuses an anonymous `mktemp -d` in `tools/`. Under the gate a drill's directory nests in the gate's and goes with it.
 
 Every entry in a candidate tree must be at least two days old: the parent directory's timestamp misses writes to
 existing files and deeper directories. Symlinks are not followed; failed age/size inspections preserve the entry.

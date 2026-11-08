@@ -29,7 +29,7 @@ NEWTONSOFT=""
 for cand in "$WROOT/References/Newtonsoft.Json.dll" "${HAF_UNITY_PROJECT:-C:/Repo/ENCReload}/Assets/Plugins/Json.Net 11.0.1/Newtonsoft.Json.dll"; do [ -f "$cand" ] && { NEWTONSOFT="$cand"; break; }; done
 [ -n "$NEWTONSOFT" ] || { echo "FAIL — Newtonsoft.Json.dll not found (References/ via fetch-refs; the FBX model was NOT drilled)"; exit 2; }
 
-TMPD="$(mktemp -d)"; trap 'rm -rf "$TMPD"' EXIT
+TMPD="$(mktemp -d "${TMPDIR:-${TEMP:-/tmp}}/haf-fbx-model.XXXXXXXXXX")"; trap 'rm -rf "$TMPD"' EXIT
 WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"; WTMP="$(cygpath -m "$TMPD" 2>/dev/null || echo "$TMPD")"
 cp "$NEWTONSOFT" "$TMPD/Newtonsoft.Json.dll"
 cp "$ROOT/editor/Plugins/x86_64/hafkernels.dll" "$TMPD/hafkernels.dll" 2>/dev/null

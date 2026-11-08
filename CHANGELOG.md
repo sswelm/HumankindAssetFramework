@@ -10,6 +10,14 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE GATE SWEEPS ITS OWN TEMP LEFTOVERS; EVERY SCRIPT'S TEMP DIRECTORY IS NAMESPACED (2026-11-08).** `%TEMP%` held 47,781
+  entries and 88 GB, 28 GB of them ours: the gate emptied its mktemp directory after the steps but never removed it (1,165
+  empty `tmp.*`, one per run), drills killed mid-run left theirs (12 GB), the vehicle rig drill's `vr.*` (10 GB), the Unity
+  drills' `haf-*` (3.9 GB), two test suites' directories whose cleanup swallowed failures (2,239 + 136). The gate removes its
+  directory at exit and runs `tools/temp_sweep.sh` first in both modes; the PR's first push gate swept that 28 GB (3,634
+  entries). After the review the sweeper owns only exact generated names, so every `mktemp -d` in `tools/*.sh` is
+  `haf-<producer>.XXXXXXXXXX` now (the gate `haf-gate`, `vr.*` is `haf-vehiclerig`, each drill its own) and a test refuses an
+  anonymous one. `Tests/test_temp_sweep.py` (`docs/Testing.md`).
 - **PR #264 review (2026-11-08).** Automatic temp cleanup requires a known HAF producer's generated name. Empty
   `tmp.*`, common payload names, legacy `vr.*` and manual `haf-pr*` scratch directories do not prove ownership and stay.
   New gates use `haf-gate.XXXXXXXXXX` and remove their directory at exit. A candidate's entire tree must be old; recent

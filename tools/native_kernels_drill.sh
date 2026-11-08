@@ -30,7 +30,7 @@ for cand in "$WROOT/References/Newtonsoft.Json.dll" "$PROJECT/Assets/Plugins/Jso
 done
 [ -n "$NEWTONSOFT" ] || { echo "FAIL — Newtonsoft.Json.dll not found (References/ via fetch-refs; the native kernels were NOT drilled)"; exit 2; }
 
-TMPD="$(mktemp -d)"; trap 'rm -rf "$TMPD"' EXIT
+TMPD="$(mktemp -d "${TMPDIR:-${TEMP:-/tmp}}/haf-native-kernels.XXXXXXXXXX")"; trap 'rm -rf "$TMPD"' EXIT
 WTMP="$(cygpath -m "$TMPD" 2>/dev/null || echo "$TMPD")"; WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"
 cp "$NEWTONSOFT" "$TMPD/Newtonsoft.Json.dll"
 cp "$DLL" "$TMPD/hafkernels.dll"

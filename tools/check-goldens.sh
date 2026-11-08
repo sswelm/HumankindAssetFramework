@@ -30,7 +30,7 @@ for cand in "$ROOT/References/Newtonsoft.Json.dll" "$PROJECT/Assets/Plugins/Json
 done
 [ -n "$NEWTONSOFT" ] || { echo "SKIP — Newtonsoft.Json.dll not found (References/ via fetch-refs); the goldens were NOT checked"; exit 3; }
 
-TMPD="$(mktemp -d 2>/dev/null)" || TMPD="$(mktemp -d -p "$ROOT/obj" 2>/dev/null)" || TMPD=""
+TMPD="$(mktemp -d "${TMPDIR:-${TEMP:-/tmp}}/haf-goldens.XXXXXXXXXX" 2>/dev/null)" || TMPD="$(mktemp -d -p "$ROOT/obj" 2>/dev/null)" || TMPD=""
 [ -n "$TMPD" ] && [ -d "$TMPD" ] || { echo "FAIL — no temp directory could be made (TMPDIR=${TMPDIR:-unset}); nothing was checked"; exit 1; }
 trap 'rm -rf "$TMPD"' EXIT
 cp "$NEWTONSOFT" "$TMPD/Newtonsoft.Json.dll"

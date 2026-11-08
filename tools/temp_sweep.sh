@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Sweep stale HAF-generated temp entries, never infer ownership from generic tmp.* / vr.* names or common payloads.
-# Older unnamespaced drill/gate leftovers and manual haf-* scratch directories need manual review.
-# New gates use haf-gate.XXXXXXXXXX; their nested drill directories are cleaned with their parent.
+# Every temp directory tools/*.sh makes is namespaced `haf-<producer>.XXXXXXXXXX` (2026-11-08: the gate as haf-gate, each drill
+# as haf-deploy, haf-riganim, haf-vehiclerig, ...; Tests/test_temp_sweep.py refuses an anonymous `mktemp -d` in tools/), so a
+# killed drill's directory is swept by name two days later, and a gate's nested drill directories go with their parent.
+# Legacy anonymous leftovers (tmp.*, vr.*) and manual haf-* scratch directories stay: the 28 GB of them that existed were
+# swept once, by this PR's first form in its own push gate (3,634 entries, 2026-11-08); what appears later is manual review.
 #
 # usage: temp_sweep.sh [--root DIR] [--age-days N] [--dry-run]
 #   --root     temp root (default: $TMPDIR, $TEMP, $TMP, then /tmp); the gate passes its captured host root
@@ -26,7 +29,7 @@ ROOT_DIR="$(cd -- "$ROOT_DIR" 2>/dev/null && pwd -P)" || { echo "temp_sweep: no 
 # Match actual mktemp / Python tempfile / Guid producers, not the whole haf-* namespace (which includes manual work).
 ours_dir() {
   local name="$1"
-  [[ "$name" =~ ^haf-(gate|animationlab|bake_commit|bake-kernels|buffer-hook|parity-row|rig-import|vehicle-generate|vehicle_source_guard)\.[A-Za-z0-9]{10}$ ]] ||
+  [[ "$name" =~ ^haf-[a-z][a-z0-9_-]*\.[A-Za-z0-9]{10}$ ]] ||   # every `mktemp -d ".../haf-<producer>.XXXXXXXXXX"` of tools/*.sh: the gate, the drills, the Unity drills (all of them since 2026-11-08)
   [[ "$name" =~ ^haf-riganim-connected\.[A-Za-z0-9]{8}$ ]] ||
   [[ "$name" =~ ^haf-(gate-test|oracle|oracle-sh|sweep-test|fbx-verdict|missing-mono)-[a-z0-9_]{8}$ ]] ||
   [[ "$name" =~ ^haf-(deploy-inproc|export-evidence|fbxmat|gitstamp|glbwriter|image-parity|gltf|material-evidence|loosefile|source-guard|names|parity-selftest)-[[:xdigit:]]{32}$ ]] ||
