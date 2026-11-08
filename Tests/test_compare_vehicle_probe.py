@@ -8,8 +8,8 @@ import unittest
 SCRIPT = Path(__file__).parents[1] / "tools" / "vehicle-probe-drill" / "compare_probe.py"
 
 
-def rows(name="Hull", under_bone=False):
-    suffix = "|under-bone" if under_bone else ""
+def rows(name="Hull", under_bone=False, bone_chained=False):
+    suffix = "|under-bone" if under_bone else "|bone" if bone_chained else ""
     return [f"PART|{name}|3|0,0,0|1,1,1|1||0",
             f"MATRIX|{name}|1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1{suffix}",
             f"VERTEX|{name}|0 0 0|0 0 1{suffix}"]
@@ -68,6 +68,39 @@ class CompareVehicleProbeTests(unittest.TestCase):
         result = self.compare(cs, rows())
         self.assertEqual(0, result.returncode, result.stdout)
         self.assertIn("1 under bones not held", result.stdout)
+
+    def test_bone_chained_rows_are_held_and_counted(self):
+        cs = rows(bone_chained=True)
+        result = self.compare(cs, rows())
+        self.assertEqual(0, result.returncode, result.stdout)
+        self.assertIn("BONE 1 held 0 counted", result.stdout)
+        for index, changed in ((1, cs[1].replace("1 0 0 0", "2 0 0 0", 1)),
+                               (2, "VERTEX|Hull|1 2 3|0 0 1|bone")):
+            with self.subTest(index=index):
+                damaged = list(cs); damaged[index] = changed
+                self.assertEqual(1, self.compare(damaged, rows()).returncode)
+
+    def test_conflicting_bone_flags_cannot_exempt_a_held_matrix_or_vertex(self):
+        for flag in ("|under-bone", ""):
+            for index in (1, 2):
+                with self.subTest(flag=flag, index=index):
+                    cs = rows(bone_chained=True)
+                    cs[1] = cs[1].replace("1 0 0 0", "2 0 0 0", 1)
+                    cs[2] = "VERTEX|Hull|1 2 3|0 0 1|bone"
+                    cs[index] = cs[index][:-len("|bone")] + flag
+                    result = self.compare(cs, rows())
+                    self.assertEqual(1, result.returncode, result.stdout)
+                    self.assertIn("bone flags disagree", result.stdout)
+
+    def test_duplicate_diagnostics_cannot_leave_an_overwritten_exemption(self):
+        for index, kind in ((1, "MATRIX"), (2, "VERTEX")):
+            duplicate = rows(bone_chained=True)
+            duplicate.insert(index, rows(under_bone=True)[index])
+            for cs, bl in ((duplicate, rows()), (rows(), duplicate)):
+                with self.subTest(kind=kind, cs=cs):
+                    result = self.compare(cs, bl)
+                    self.assertEqual(1, result.returncode, result.stdout)
+                    self.assertIn("duplicate " + kind, result.stdout)
 
 
 if __name__ == "__main__":

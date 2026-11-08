@@ -15,11 +15,13 @@ Compared, per part NAME (the recipe key - a name on one side only is a FAIL):
   flip            exact (field 8: the islands the inside-out fix would reverse - step 3c)
   MATRIX rows     bit for bit (2026-10-03): each part's matrix_world as Blender holds it, 16 float32 values, against the
                   C# composition of the same (VehicleProbe.BlenderWorld.cs) - the verdicts read these. A C# row ending in
-                  `under-bone` (a mesh Blender parents to a BONE - its pose chain is not modelled yet) is COUNTED in the
-                  PASS line, not held: the number says how many matrices the file's verdicts read with the double chain
+                  `bone` (a mesh Blender parents to a BONE, through the bone chain since 2026-11-08) is HELD like any
+                  other and counted in the COMPARED line; one ending in `under-bone` (its pose not modelled: the first
+                  clip's import is not) is COUNTED, not held
   VERTEX rows     positions exact in float32: vertex 0 of each part as the visibility rays see it. Normal differences are
                   counted, not held (the custom-normal pipeline is approximate); under-bone parts counted, not held,
-                  as for MATRIX. Both diagnostic row kinds must be present for every part on both sides.
+                  as for MATRIX. Both diagnostic row kinds must occur exactly once for every part on both sides,
+                  with matching bone flags within each probe's output.
 """
 import sys, struct
 sys.stdout.reconfigure(encoding="utf-8")
@@ -33,7 +35,8 @@ def load(path):
         if len(t) < 3 or t[0] != "ROW":
             continue
         row = t[2]
-        d = files.setdefault(t[1], {"PART": [], "RIGBONE": [], "MATRIX": {}, "VERTEX": {}})
+        d = files.setdefault(t[1], {"PART": [], "RIGBONE": [], "MATRIX": {}, "VERTEX": {},
+                                   "BONE_FLAGS": {"MATRIX": {}, "VERTEX": {}}})
         if row.startswith("PART|"):
             f = row.split("|")
             # a '|' inside a name folds back into the name: the numeric tail is fixed (verts, c, s, vis, bone, flip)
@@ -42,9 +45,16 @@ def load(path):
         elif row.startswith("MATRIX|"):
             body = row[len("MATRIX|"):]
             under_bone = body.endswith("|under-bone")
+            flag = "under-bone" if under_bone else "bone" if body.endswith("|bone") else ""
             if under_bone:
                 body = body[:-len("|under-bone")]
+            elif body.endswith("|bone"):
+                body = body[:-len("|bone")]
+                d.setdefault("BONE_CHAINED", set()).add(body.rpartition("|")[0])
             name, _, vals = body.rpartition("|")
+            if name in d["MATRIX"]:
+                raise ValueError(f"{path}: duplicate MATRIX row for {name!r}")
+            d["BONE_FLAGS"]["MATRIX"][name] = flag
             d["MATRIX"][name] = tuple(struct.unpack("<f", struct.pack("<f", float(x)))[0] for x in vals.split())
             if len(d["MATRIX"][name]) != 16:
                 raise ValueError(f"{path}: MATRIX {name!r} requires 16 values")
@@ -53,9 +63,15 @@ def load(path):
         elif row.startswith("VERTEX|"):
             body = row[len("VERTEX|"):]
             under_bone = body.endswith("|under-bone")
+            flag = "under-bone" if under_bone else "bone" if body.endswith("|bone") else ""
             if under_bone:
                 body = body[:-len("|under-bone")]
+            elif body.endswith("|bone"):
+                body = body[:-len("|bone")]
             name, pos, nor = body.rsplit("|", 2)
+            if name in d["VERTEX"]:
+                raise ValueError(f"{path}: duplicate VERTEX row for {name!r}")
+            d["BONE_FLAGS"]["VERTEX"][name] = flag
             if len(pos.split()) != 3 or len(nor.split()) != 3:
                 raise ValueError(f"{path}: VERTEX {name!r} requires a position and normal of 3 values each")
             d["VERTEX"][name] = tuple(struct.unpack("<f", struct.pack("<f", float(x)))[0] for x in (pos + " " + nor).split())
@@ -65,6 +81,10 @@ def load(path):
             f = row.split("|")
             name = "|".join(f[1:len(f) - 3]); tail = f[len(f) - 3:]
             d["RIGBONE"].append({"name": name, "verts": tail[0], "c": tail[1], "s": tail[2]})
+    for d in files.values():
+        for name in d["MATRIX"].keys() & d["VERTEX"].keys():
+            if d["BONE_FLAGS"]["MATRIX"][name] != d["BONE_FLAGS"]["VERTEX"][name]:
+                raise ValueError(f"{path}: MATRIX and VERTEX bone flags disagree for {name!r}")
     return files
 
 
@@ -91,7 +111,7 @@ def main():
     if not cs or not bl:
         print("FAIL input: both probes must report at least one file")
         return 1
-    fails = 0; compared = 0
+    fails = 0; compared = 0; held_bone = 0; counted_bone = 0
     for key in sorted(bl):
         short = "/".join(key.split("/")[-2:])
         if key not in cs:
@@ -144,6 +164,7 @@ def main():
                     problems.append(f"{side} {kind} rows incomplete: missing {sorted(missing)[:4]}, unexpected {sorted(extra)[:4]}")
         under_bone = cs[key].get("UNDER_BONE", set())
         n_under_bone = len(under_bone)
+        counted_bone += n_under_bone; held_bone += len(cs[key].get("BONE_CHAINED", set()))
         if bm and cm:
             off = [n for n, v in bm.items() if n in cm and n not in under_bone and cm[n] != v]
             if off:
@@ -167,7 +188,7 @@ def main():
             normals_note = f"; {n_normals_off} of {n_vertices} vertex normals not bit for bit (counted, not held)" if bm and cm and n_normals_off else ""
             matrices = ((f"{len(bm) - n_under_bone} of {len(bm)} matrices and {n_vertices - n_under_bone} of {n_vertices} vertex positions bit for bit ({n_under_bone} under bones not held)" if n_under_bone else f"{len(bm)} matrices and {n_vertices} vertex positions bit for bit") + normals_note) if bm and cm else "no matrices compared"
             print(f"PASS {short}: {n_parts} parts, {len(bl[key]['RIGBONE'])} rig bones - names, order, verts, visibility, inside-out, bones, boxes agree (largest box difference {part_worst:.4f}, tolerance {part_tol:.4f}); {matrices}")
-    print(f"COMPARED {compared} FAILED {fails}")
+    print(f"COMPARED {compared} FAILED {fails} BONE {held_bone} held {counted_bone} counted")
     return 1 if fails else 0
 
 

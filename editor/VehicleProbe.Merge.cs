@@ -69,7 +69,22 @@ public static partial class VehicleProbe
                         continue;
                     }
                     for (int a = n; a >= 0; a = model.Nodes[a].Parent)
-                        if (names.IsBone[a]) return "a mesh is parented to a bone";
+                    {
+                        if (!names.IsBone[a]) continue;
+                        // a mesh ON the joint node is the importer's '.mesh' child under the bone: not modelled (the rig_anim port
+                        // leaves it to Blender by name too)
+                        if (a == n) return "a mesh sits on a joint node (the importer's '.mesh' child under the bone)";
+                        // a mesh BELOW a bone reads the bone chain since 2026-11-08 (VehicleProbe.BoneChain; the probe drill holds the
+                        // dug-out canoe's 19 cloth and rope parts and the bonechild fixture to Blender's bits) - on a plain probe: a
+                        // placement's detach on such a model and a first clip the deploy port's action import does not model are not
+                        if (Placements.Count > 0) return "a placement on a model with a mesh parented to a bone";
+                        if (model == Model && model.Animations.Count > 0)
+                        {
+                            string nm = BlenderPosedState.Import(model, 0, 24.0, BuildImportRig(model, names)).NotModelled;
+                            if (nm != null) return "a mesh is parented to a bone and the first clip's import is not modelled: " + nm;
+                        }
+                        break;
+                    }
                 }
             }
             return null;

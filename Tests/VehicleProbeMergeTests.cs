@@ -67,7 +67,7 @@ public class VehicleProbeMergeTests
     }
 
     [Fact]
-    public void Bone_parented_and_evaluated_skinned_meshes_keep_the_Blender_path()
+    public void A_mesh_on_a_joint_a_placed_bone_hung_mesh_and_evaluated_skinned_meshes_keep_the_Blender_path()
     {
         var m = BoxModel();
         m.Nodes.Add(new HafNode { Name = "Rig" }); m.Nodes[0].Children.Add(1);
@@ -76,7 +76,13 @@ public class VehicleProbeMergeTests
         m.Nodes.Add(new HafNode { Name = "SkinMesh", Mesh = 0, Skin = 0 });
         m.Skins.Add(new HafSkin { Skeleton = 0, Joints = new[] { 1 } });
         var input = new VehicleProbe.Input { Model = m };
-        Assert.Contains("parented to a bone", input.InProcessFallbackReason());
+        Assert.Null(input.InProcessFallbackReason());   // a mesh BELOW a bone reads the bone chain since 2026-11-08
+        input.AddPlacementLines(new[] { "BoneMesh|0,0,1|1,1,1" });
+        Assert.Contains("placement on a model with a mesh parented to a bone", input.InProcessFallbackReason());
+        input.Placements.Clear();
+        m.Nodes[1].Mesh = 0;   // a mesh ON the joint node: the importer's '.mesh' child, not modelled
+        Assert.Contains("sits on a joint node", input.InProcessFallbackReason());
+        m.Nodes[1].Mesh = -1;
         m.Nodes[2].Mesh = -1;
         var primitive = m.Meshes[0].Primitives[0]; primitive.Joints = new ushort[32];
         primitive.Weights = Enumerable.Range(0, 32).Select(i => i % 4 == 0 ? 1f : 0f).ToArray();
@@ -85,6 +91,31 @@ public class VehicleProbeMergeTests
         Assert.Contains("evaluated pose", input.InProcessFallbackReason());
         input.Placements.Clear(); m.Animations.Add(new HafAnimation());
         Assert.Contains("evaluated pose", input.InProcessFallbackReason());
+    }
+
+    [Fact]
+    public void A_mesh_below_a_bone_reads_the_bone_chain_and_a_mesh_on_the_joint_is_counted()
+    {
+        // the rows the probe drill compares (tools/vehicle-probe-drill/compare_probe.py): `bone` is held to Blender's bits, `under-bone`
+        // counted; the values themselves are the drill's (the dug-out canoe, the bonechild fixture), not hand-derived here
+        var m = BoxModel();
+        m.Nodes.Add(new HafNode { Name = "Rig" }); m.Nodes[0].Children.Add(1);
+        m.Nodes.Add(new HafNode { Name = "Joint", Parent = 0, Translation = new double[] { 0, 1, 0 } }); m.Nodes[1].Children.Add(2);
+        m.Nodes.Add(new HafNode { Name = "Tip", Parent = 1, Translation = new double[] { 0, 1, 0 } }); m.Nodes[2].Children.Add(3);
+        m.Nodes.Add(new HafNode { Name = "Lamp", Mesh = 0, Parent = 2, Translation = new double[] { 0, 0.3, 0 } });
+        m.Nodes.Add(new HafNode { Name = "Hull", Mesh = 0, Translation = new double[] { 3, 0, 0 } });
+        m.Skins.Add(new HafSkin { Skeleton = 0, Joints = new[] { 1, 2 } });
+        var r = VehicleProbe.Run(m);
+        var lamp = r.Parts.Single(p => p.Name == "Lamp"); var hull = r.Parts.Single(p => p.Name == "Hull");
+        Assert.True(lamp.BoneChained); Assert.False(lamp.UnderBone);
+        Assert.EndsWith("|bone", lamp.MatrixRow); Assert.EndsWith("|bone", lamp.VertexRow);
+        Assert.False(hull.BoneChained); Assert.False(hull.UnderBone);
+        Assert.False(hull.MatrixRow.EndsWith("bone"));
+        m.Nodes[2].Mesh = 0;   // the Tip joint carries a mesh itself
+        r = VehicleProbe.Run(m);
+        var onJoint = r.Parts.Single(p => p.UnderBone);
+        Assert.False(onJoint.BoneChained); Assert.EndsWith("|under-bone", onJoint.MatrixRow);
+        Assert.True(r.Parts.Single(p => p.Name == "Lamp").BoneChained);   // the mesh below that joint is still held
     }
 
     static float F(double x) => (float)x;
