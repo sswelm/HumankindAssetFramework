@@ -52,7 +52,7 @@ SRCS=()
 for f in WorkshopGateTest.cs BakeGoldenFiles.cs GitStamp.cs EditorRules.cs QuadEstimate.cs GlbDisconnectedParts.cs GlbDisconnectedParts.Compact.cs GlbDisconnectedParts.Occluders.cs GlbDisconnectedParts.Weld.cs GlbDisconnectedParts.Explain.cs HafModel.cs GlbReader.cs HafTransforms.cs HafModelDiff.cs HafNativeKernels.cs HafNativeKernels.Column.cs HafNativeKernels.Twin.cs HafNativeKernels.Weld.cs; do
   [ -f "$EDITOR_ROOT/editor/$f" ] && SRCS+=("$WEDITOR/editor/$f")
 done
-TMPD="$(mktemp -d 2>/dev/null)" || TMPD="$(mktemp -d -p "$ROOT/obj" 2>/dev/null)" || TMPD=""
+TMPD="$(mktemp -d "${TMPDIR:-${TEMP:-/tmp}}/haf-workshop-golden.XXXXXXXXXX" 2>/dev/null)" || TMPD="$(mktemp -d -p "$ROOT/obj" 2>/dev/null)" || TMPD=""
 [ -n "$TMPD" ] && [ -d "$TMPD" ] || { echo "FAIL — no temp directory could be made (TMPDIR=${TMPDIR:-unset}); nothing was checked"; exit 1; }
 trap 'rm -rf "$TMPD"' EXIT
 cp "$NEWTONSOFT" "$TMPD/Newtonsoft.Json.dll"

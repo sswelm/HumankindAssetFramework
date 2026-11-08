@@ -26,7 +26,7 @@ for cand in "$WROOT/References/Newtonsoft.Json.dll" "C:/Repo/ENCReload/Assets/Pl
 done
 [ -n "$NEWTONSOFT" ] || { echo "FAIL — Newtonsoft.Json.dll not found (References/ via fetch-refs; registry engine NOT drilled)"; exit 2; }
 
-TMPD="$(mktemp -d)"; trap 'rm -rf "$TMPD"' EXIT
+TMPD="$(mktemp -d "${TMPDIR:-${TEMP:-/tmp}}/haf-registry-engine.XXXXXXXXXX")"; trap 'rm -rf "$TMPD"' EXIT
 cp "$NEWTONSOFT" "$TMPD/Newtonsoft.Json.dll"
 WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"
 WTMP="$(cygpath -m "$TMPD" 2>/dev/null || echo "$TMPD")"

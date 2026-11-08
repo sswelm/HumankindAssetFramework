@@ -9,7 +9,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 UNITY="${UNITY:-C:/Program Files/Unity 2021.3.1f1/Editor/Data}"
 API="$UNITY/MonoBleedingEdge/lib/mono/4.7.1-api"
 if [ "$#" -eq 0 ]; then echo "Usage: bash tools/vehicle_probe_performance.sh <model.glb> [...]" >&2; exit 2; fi
-OUT="${HAF_PROBE_PERF_OUT:-$(mktemp -d)}"
+OUT="${HAF_PROBE_PERF_OUT:-$(mktemp -d "${TMPDIR:-${TEMP:-/tmp}}/haf-probe-perf.XXXXXXXXXX")}"
 mkdir -p "$OUT"
 WROOT="$(cygpath -m "$ROOT")"; WOUT="$(cygpath -m "$OUT")"
 sources=(HafModel GlbReader HafTransforms BlenderNames VehicleProbe VehicleProbe.Visibility VehicleProbe.Islands

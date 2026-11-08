@@ -25,7 +25,7 @@ if [ -z "$BLENDER" ] || [ ! -x "$BLENDER" ]; then echo "SKIP — Blender not fou
 HEAD=$(grep -o 'return \$"--background --python-exit-code 1 --python' "$ROOT/editor/EditorRules.cs" | head -1)
 [ -n "$HEAD" ] || { echo "FAIL — BakerRules.BlenderScript no longer builds '--background --python-exit-code 1 --python' (update this drill with the rule)"; exit 1; }
 
-TMPD="$(mktemp -d)"; trap 'rm -rf "$TMPD"' EXIT
+TMPD="$(mktemp -d "${TMPDIR:-${TEMP:-/tmp}}/haf-blender-exit.XXXXXXXXXX")"; trap 'rm -rf "$TMPD"' EXIT
 WTMP="$(cygpath -m "$TMPD" 2>/dev/null || echo "$TMPD")"
 fails=0
 check() { if [ "$1" -eq 0 ]; then echo "PASS $2"; else echo "FAIL $2"; fails=$((fails+1)); fi; }

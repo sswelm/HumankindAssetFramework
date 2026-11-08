@@ -145,7 +145,7 @@ case "$MODE" in
     printf 'parity stamp written: %s covered files, digest %s, at %s (commit the stamp with the change it covers)\n' "$n" "${dg:0:12}" "$commit"
     rm -f "$LIST"; exit 0;;
   --self-test)
-    TMPD="$(mktemp -d)" || exit 2
+    TMPD="$(mktemp -d "${TMPDIR:-${TEMP:-/tmp}}/haf-parity-stamp.XXXXXXXXXX")" || exit 2
     trap 'rm -rf "$TMPD"' EXIT
     # the author's repository as the self-test found it: HEAD, the working tree's status, the identity - compared at the end
     author_state() { printf '%s\n%s\n%s %s\n' "$(git -C "$ROOT" rev-parse HEAD)" "$(git -C "$ROOT" status --porcelain=v1 --untracked-files=no)" "$(git -C "$ROOT" config user.name)" "$(git -C "$ROOT" config user.email)"; }

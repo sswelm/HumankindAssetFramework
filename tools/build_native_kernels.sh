@@ -22,7 +22,7 @@ command -v g++ >/dev/null 2>&1 || { echo "FAIL - g++ not on PATH (WinLibs MinGW-
 command -v gcc >/dev/null 2>&1 || { echo "FAIL - gcc not on PATH (WinLibs MinGW-W64 x86_64-ucrt); the native kernels were NOT built" >&2; exit 2; }
 g++ -dumpmachine | grep -q x86_64 || { echo "FAIL - g++ is not an x86_64 compiler ($(g++ -dumpmachine)); the native kernels were NOT built" >&2; exit 2; }
 mkdir -p "$(dirname "$OUT")"
-OBJ="$(mktemp -d)"; trap 'rm -rf "$OBJ"' EXIT
+OBJ="$(mktemp -d "${TMPDIR:-${TEMP:-/tmp}}/haf-native-build.XXXXXXXXXX")"; trap 'rm -rf "$OBJ"' EXIT
 LD="$ROOT/native/libdeflate"
 for c in adler32 crc32 deflate_compress utils zlib_compress x86/cpu_features; do
   gcc -O2 -frandom-seed=hafkernels -I"$LD" -c "$LD/lib/$c.c" -o "$OBJ/$(basename "$c").o"

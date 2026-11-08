@@ -27,7 +27,7 @@ command -v python >/dev/null 2>&1 || { echo "FAIL — python not on PATH (FBX re
 python "$ROOT/tools/fbx-drill/test_fbx_inputs.py" || { echo "FAIL — FBX input coverage regression tests"; exit 1; }
 python "$ROOT/Tests/test_compare_fbx_scene.py" || { echo "FAIL — FBX scene comparison regression tests"; exit 1; }
 
-TMPD="$(mktemp -d)"; trap 'rm -rf "$TMPD"' EXIT
+TMPD="$(mktemp -d "${TMPDIR:-${TEMP:-/tmp}}/haf-fbx.XXXXXXXXXX")"; trap 'rm -rf "$TMPD"' EXIT
 WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"; WTMP="$(cygpath -m "$TMPD" 2>/dev/null || echo "$TMPD")"
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -out:"$WTMP/drill.exe" \
   -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" \
