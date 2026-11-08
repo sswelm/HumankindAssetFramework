@@ -208,7 +208,13 @@ public static partial class VehicleProbe
             if (s == null) { r.Notes.Add($"WARN: placement for '{pl.Name}' skipped — no such part after the split (re-Probe, then place it again)"); continue; }
             var mw = ApplyMat4(MatrixOf(s));   // rel.matrix_world = mw.copy() after rel.parent = None: the assignment's round trip
             s.Src.Detached.Add(s.Node);
-            if (!s.IslandCopy && s.Src.Index == 0) DetachChildren(s.Src, s.Node, byNode);   // a second-model mesh has no children left: the merge unparented every mesh and dropped the helpers
+            // the placed object has no children when it is a split-off child (2026-11-08): a mesh on the ARMATURE node is a '.mesh'
+            // child of the armature object (fixup_multitype_nodes), and a skinned mesh is either moved under the armature whole -
+            // move_skinned_meshes does that only for a node WITHOUT children - or split onto a '.skinned' child, the node staying an
+            // empty that keeps them (independent review). A joint's '.mesh' child is no case of its own: what hangs below a joint is
+            // never the joint's object child (ObjectParentNode -1 under a bone), so nothing was detached there before either
+            bool meshChild = s.Skinned || s.Src.Names.ArmaturesInOrder.Any(a => a.node == s.Node);
+            if (!s.IslandCopy && s.Src.Index == 0 && !meshChild) DetachChildren(s.Src, s.Node, byNode);   // a second-model mesh has no children left: the merge unparented every mesh and dropped the helpers
             LocalBox(s.Src.M, s.Node, s.Src.Geo[s.Node], s.Prim, s.Verts, out var lmn, out var lmx);
             WorldBox(mw, lmn, lmx, out var c0, out var s0);
             s.Override = PlacementMatrix(mw, c0, pl.Offset, pl.Scale);
@@ -272,7 +278,12 @@ public static partial class VehicleProbe
                 for (int a = m.Nodes[s.Node].Parent; a >= 0 && !underBone; a = m.Nodes[a].Parent) underBone = names.IsBone[a];
                 // a mesh BELOW a bone reads the bone chain (2026-11-08); a mesh ON the joint node, the importer's '.mesh' child under
                 // the bone, reads it through its own matrix (JointMeshB) since the same day
-                s.Part.BoneChained = !skinned && underBone && s.Src.BoneChained;
+                // a mesh ON a joint is held only through its '.mesh' child's matrix (a joint with a skin has none: move_skinned_meshes
+                // took it under the armature, a placement the probe does not model) - otherwise it stays counted
+                // a node with a skin but no joint weights is NOT skinned here yet move_skinned_meshes moved it under the armature,
+                // unskinned - not modelled: counted wherever it hangs, never held (independent review, 2026-11-08)
+                bool unweightedSkin = m.Nodes[s.Node].Skin >= 0 && !skinned;
+                s.Part.BoneChained = !skinned && !unweightedSkin && underBone && s.Src.BoneChained && (!names.IsBone[s.Node] || s.Src.JointMeshB.ContainsKey(s.Node));
                 s.Part.UnderBone = !skinned && underBone && !s.Part.BoneChained;
             }
             Time(swp, "part meshes");
@@ -333,9 +344,12 @@ public static partial class VehicleProbe
             if (names.IsBone[n])
             {
                 var nd = m.Nodes[n];
-                if (nd.Mesh >= 0 && !(nd.Skin >= 0 && nd.Skin < m.Skins.Count && m.Meshes[nd.Mesh].Primitives.Any(p => p.Skinned))) { onJoint.Add(n); any = true; }
+                // move_skinned_meshes runs first and takes ANY node with a skin off the joint (its '.skinned' child under the
+                // armature), whatever its primitives carry: only a mesh without a skin is left for the '.mesh' split
+                if (nd.Mesh >= 0 && nd.Skin < 0) { onJoint.Add(n); any = true; }
                 continue;
             }
+            if (m.Nodes[n].Skin >= 0) continue;   // move_skinned_meshes moved it under the armature: never parented to a bone
             for (int a = m.Nodes[n].Parent; a >= 0; a = m.Nodes[a].Parent) if (names.IsBone[a]) { below[n] = any = true; break; }
         }
         if (!any) return true;

@@ -70,10 +70,14 @@ public class VehicleProbeMergeTests
     public void A_placed_bone_hung_mesh_and_evaluated_skinned_meshes_keep_the_Blender_path()
     {
         var m = BoxModel();
+        // the skinned node gets a mesh that carries joint weights (until 2026-11-08 it shared the unweighted box: a skin with no
+        // joint weights, which the importer moves under the armature unskinned - its own rule now, A_skin_without_joint_weights_...)
+        var skinnedBox = BoxModel().Meshes[0]; skinnedBox.Primitives[0].Joints = new ushort[32];
+        skinnedBox.Primitives[0].Weights = Enumerable.Range(0, 32).Select(i => i % 4 == 0 ? 1f : 0f).ToArray(); m.Meshes.Add(skinnedBox);
         m.Nodes.Add(new HafNode { Name = "Rig" }); m.Nodes[0].Children.Add(1);
         m.Nodes.Add(new HafNode { Name = "Joint", Parent = 0 }); m.Nodes[1].Children.Add(2);
         m.Nodes.Add(new HafNode { Name = "BoneMesh", Mesh = 0, Parent = 1 });
-        m.Nodes.Add(new HafNode { Name = "SkinMesh", Mesh = 0, Skin = 0 });
+        m.Nodes.Add(new HafNode { Name = "SkinMesh", Mesh = 1, Skin = 0 });
         m.Skins.Add(new HafSkin { Skeleton = 0, Joints = new[] { 1 } });
         var input = new VehicleProbe.Input { Model = m };
         Assert.Null(input.InProcessFallbackReason());   // a mesh BELOW a bone reads the bone chain since 2026-11-08
@@ -117,6 +121,84 @@ public class VehicleProbeMergeTests
         var onJoint = r.Parts.Single(p => p.Name != "Lamp" && p.Name != "Hull");
         Assert.True(onJoint.BoneChained); Assert.EndsWith("|bone", onJoint.MatrixRow); Assert.EndsWith("|bone", onJoint.VertexRow);
         Assert.True(r.Parts.Single(p => p.Name == "Lamp").BoneChained);   // the mesh below that joint is still held
+    }
+
+    [Fact]
+    public void A_bone_chain_whose_first_clip_is_not_modelled_is_counted_and_left_to_Blender()
+    {
+        // a CUBICSPLINE sampler on the joint: the deploy port's action import does not model Blender's automatic Bezier handles, so
+        // the probe keeps the node chain for everything below or on the joint and COUNTS those parts (never holds a guess), and the
+        // Lab's in-process probe hands the model to Blender with the reason
+        var m = BoxModel();
+        m.Nodes.Add(new HafNode { Name = "Rig" }); m.Nodes[0].Children.Add(1);
+        m.Nodes.Add(new HafNode { Name = "Joint", Parent = 0, Mesh = 0, Translation = new double[] { 0, 1, 0 } }); m.Nodes[1].Children.Add(2);
+        m.Nodes.Add(new HafNode { Name = "Lamp", Mesh = 0, Parent = 1, Translation = new double[] { 0, 0.3, 0 } });
+        m.Skins.Add(new HafSkin { Skeleton = 0, Joints = new[] { 1 } });
+        var anim = new HafAnimation { Name = "aim", Duration = 1 };
+        anim.Samplers.Add(new HafSampler { Times = new[] { 0f, 1f }, Components = 4, Interpolation = "CUBICSPLINE",
+            Values = new float[] { 0,0,0,0, 0,0,0,1, 0,0,0,0,  0,0,0,0, 0,0.3826834f,0,0.9238795f, 0,0,0,0 } });
+        anim.Channels.Add(new HafChannel { Node = 1, Path = "rotation", Sampler = 0 });
+        m.Animations.Add(anim);
+        var r = VehicleProbe.Run(m);
+        Assert.All(r.Parts, p => { Assert.False(p.BoneChained); Assert.True(p.UnderBone); Assert.EndsWith("|under-bone", p.MatrixRow); });
+        Assert.Equal(2, r.Parts.Count);
+        Assert.Contains("first clip's import is not modelled", new VehicleProbe.Input { Model = m }.InProcessFallbackReason());
+        anim.Samplers[0].Interpolation = "LINEAR";   // the same clip LINEAR: modelled, held, and the Lab keeps it
+        anim.Samplers[0].Values = new float[] { 0,0,0,1, 0,0.3826834f,0,0.9238795f };
+        r = VehicleProbe.Run(m);
+        Assert.All(r.Parts, p => { Assert.True(p.BoneChained); Assert.False(p.UnderBone); });
+        Assert.Null(new VehicleProbe.Input { Model = m }.InProcessFallbackReason());
+    }
+
+    [Fact]
+    public void A_skin_without_joint_weights_is_counted_on_a_joint_and_left_to_Blender()
+    {
+        // move_skinned_meshes moves ANY node with a skin under the armature, joint weights or not; unskinned there, it is a placement
+        // neither the probe's joint-mesh rule nor the Lab's rule models: counted, and Blender's
+        var m = BoxModel();
+        m.Nodes.Add(new HafNode { Name = "Rig" }); m.Nodes[0].Children.Add(1);
+        m.Nodes.Add(new HafNode { Name = "Joint", Parent = 0, Mesh = 0, Skin = 0, Translation = new double[] { 0, 1, 0 } });
+        m.Skins.Add(new HafSkin { Skeleton = 0, Joints = new[] { 1 } });
+        var part = VehicleProbe.Run(m).Parts.Single();
+        Assert.False(part.BoneChained); Assert.True(part.UnderBone);
+        Assert.Contains("skin but no joint weights", new VehicleProbe.Input { Model = m }.InProcessFallbackReason());
+    }
+
+    [Fact]
+    public void A_skin_without_joint_weights_BELOW_a_bone_is_counted_not_held()
+    {
+        // move_skinned_meshes moves any node with a skin under the armature, so it is never parented to the bone it sits below; with
+        // no joint weights nothing skins it either - not modelled by the probe: counted, never held (independent review, 2026-11-08)
+        var m = BoxModel();
+        m.Nodes.Add(new HafNode { Name = "Rig" }); m.Nodes[0].Children.Add(1);
+        m.Nodes.Add(new HafNode { Name = "Joint", Parent = 0, Translation = new double[] { 0, 1, 0 } }); m.Nodes[1].Children.Add(2);
+        m.Nodes.Add(new HafNode { Name = "Strap", Mesh = 0, Skin = 0, Parent = 1, Translation = new double[] { 0, 0.5, 0 } });
+        m.Skins.Add(new HafSkin { Skeleton = 0, Joints = new[] { 1 } });
+        var part = VehicleProbe.Run(m).Parts.Single(p => p.Name == "Strap");
+        Assert.False(part.BoneChained); Assert.True(part.UnderBone); Assert.EndsWith("|under-bone", part.MatrixRow);
+    }
+
+    [Fact]
+    public void Placing_a_skinned_part_detaches_nothing()
+    {
+        // a skinned node with a child cannot be moved whole (move_skinned_meshes): the mesh goes to a '.skinned' child of the armature
+        // and the node stays an empty that keeps its child - the placed object has no children, so the child must keep its matrix bits
+        var m = BoxModel();
+        var weighted = BoxModel().Meshes[0]; weighted.Primitives[0].Joints = new ushort[32];
+        weighted.Primitives[0].Weights = Enumerable.Range(0, 32).Select(i => i % 4 == 0 ? 1f : 0f).ToArray(); m.Meshes.Add(weighted);
+        double s45 = Math.Sin(Math.PI / 8), c45 = Math.Cos(Math.PI / 8);
+        m.Nodes.Add(new HafNode { Name = "Rig" }); m.Nodes[0].Children.Add(1);
+        m.Nodes.Add(new HafNode { Name = "Joint", Parent = 0 });
+        m.Nodes.Add(new HafNode { Name = "Hull", Mesh = 1, Skin = 0, Translation = new double[] { 0, 0, 1 }, Rotation = new[] { 0, s45, 0, c45 } }); m.Nodes[2].Children.Add(3);
+        m.Nodes.Add(new HafNode { Name = "Lamp", Mesh = 0, Parent = 2, Translation = new double[] { 1.5, 0.25, -0.75 }, Rotation = new[] { s45, 0, 0, c45 } });
+        m.Skins.Add(new HafSkin { Skeleton = 0, Joints = new[] { 1 } });
+        var plain = VehicleProbe.Run(m);
+        string before = plain.Parts.Single(p => p.Name == "Lamp").MatrixRow;
+        string hull = plain.Parts.Single(p => p.Name != "Lamp").Name;   // the skinned mesh's object, named as the importer names the split-off child
+        var input = new VehicleProbe.Input { Model = m }; input.AddPlacementLines(new[] { hull + "|0,0,1|1,1,1" });
+        var placed = VehicleProbe.Run(input);
+        Assert.Contains(placed.Parts, p => p.Name == hull && p.Placed);
+        Assert.Equal(before, placed.Parts.Single(p => p.Name == "Lamp").MatrixRow);
     }
 
     static float F(double x) => (float)x;

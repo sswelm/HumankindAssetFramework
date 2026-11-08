@@ -62,6 +62,9 @@ public static partial class VehicleProbe
                     var node = model.Nodes[n];
                     if (node.Mesh < 0) continue;
                     bool skinned = node.Skin >= 0 && model.Meshes[node.Mesh].Primitives.Any(p => p.Skinned);
+                    // a skin whose primitives carry no joint weights: move_skinned_meshes still moves the mesh under the armature (any
+                    // node with a skin), but nothing skins it - a placement neither the probe nor this rule models (found 2026-11-08)
+                    if (node.Skin >= 0 && !skinned) return "a mesh has a skin but no joint weights (the importer moves it under the armature unskinned)";
                     if (skinned)
                     {
                         if (model == Model && (model.Animations.Count > 0 || Placements.Count > 0))

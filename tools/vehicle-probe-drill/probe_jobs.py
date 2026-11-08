@@ -82,6 +82,24 @@ def fixture_jobs(fx):
     shear = os.path.join(fx, "placement_shear.glb").replace("\\", "/")
     if os.path.isfile(shear):
         jobs.append({"key": key_of(shear, "placed"), "file": shear, "parttx": ["Carrier|0,0,2|1,1,1"]})
+    mob = os.path.join(fx, "mesh_on_bone.glb").replace("\\", "/")
+    far = os.path.join(fx, "mesh_on_bone_far.glb").replace("\\", "/")
+    if os.path.isfile(a) and os.path.isfile(far):
+        # a mesh ON a joint (the importer's '.mesh' child, 2026-11-08) in the SECOND model: its matrix reaches B's target (the far
+        # fixture: near the origin the bake rounds the bone chain's few ulps away and the job could not tell the two chains apart)
+        jobs.append({"key": key_of(a, "merged-joint-mesh"), "file": a, "merge2": far + "|0.5,0,1|0,0,30|1"})
+    if os.path.isfile(far):
+        # a placement on the ARMATURE node's '.mesh' child: the armature's turned Lamp child must not be detached
+        jobs.append({"key": key_of(far, "placed"), "file": far, "parttx": ["base_mesh|0,0,1|1,1,1"]})
+    if os.path.isfile(mob):
+        jobs.append({"key": key_of(mob, "proberot"), "file": mob, "proberot": "0,0,90"})   # ... and judged under an orientation
+        # a placement on the ARMATURE node's '.mesh' child: no children of its own, so the joint and its mesh stay where they are
+        jobs.append({"key": key_of(mob, "placed"), "file": mob, "parttx": ["base_mesh|0,0,1|1,1,1"]})
+    moba = os.path.join(fx, "mesh_on_bone_animated.glb").replace("\\", "/")
+    if os.path.isfile(moba):
+        # a placement on the joint's '.mesh' child, posed: holds the placed joint mesh's matrix (what hangs below the joint hangs
+        # from the bone, never from the joint's object, so this job cannot see a wrong detach - the far fixture's Lamp does)
+        jobs.append({"key": key_of(moba, "placed"), "file": moba, "parttx": ["turret_mesh|0,0,1|1,1,1"]})
     if os.path.isfile(io_):
         jobs.append({"key": key_of(io_, "proberot"), "file": io_, "proberot": "0,0,90"})
         jobs.append({"key": key_of(io_, "proberot-x"), "file": io_, "proberot": "90,0,0"})
