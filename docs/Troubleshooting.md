@@ -82,6 +82,8 @@ Do not debug a skipped pack's model assets: none of its entries reached registra
 | Unit/creature WAV does not play | [Factory Manual → Unit sounds](Factory-Manual.md#13-unit-sounds--engine-audio--the-sound-catalog) and [custom sound files](Factory-Manual.md#14-custom-sound-files--per-clip-volume--the-sound-studio-window). |
 | A game-wide Wwise override does not apply | [Game Sound Lab](Game-Sound-Lab.md); audition the exact event name from F8 before authoring the override. |
 | Frame time grows or the game stutters | [Performance → When a number grows](Performance.md#4-when-a-number-grows); diagnose the named F8 bucket rather than estimating from code. |
+| The console says "... using Blender because ..." | Expected: the tool names the case it hands to Blender (a skinned or animated `.fbx`, a `.blend`/`.obj`, a placement on bone-hung meshes, CUBICSPLINE keys, a skin without joint weights). See [Capabilities → What runs without Blender](Capabilities.md#what-runs-without-blender-updated-2026-11-08). |
+| The push gate takes far longer than its usual ~14 minutes, its regression step alone minutes | Time `bash.exe -c :` against `sh.exe -c :` from PowerShell; if bash is ~10x slower, **reboot** (a stuck per-file state on `Git\usr\bin\bash.exe`, seen 2026-11-08). See [Building](Building.md#blender-optional-dependency). |
 | Several unrelated features break after a Humankind update | [Testing → Headless binding drift check](Testing.md#headless-binding-drift-check-toolscheck-bindingssh--for-game-updates), then inspect `haf_bindings_report.txt`. |
 
 ## Still stuck: the minimum diagnostic packet

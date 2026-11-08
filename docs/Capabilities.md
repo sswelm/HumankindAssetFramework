@@ -157,6 +157,26 @@ can do; it is not an ordered tutorial. Start with [Getting started](Getting-Star
   static multi-material source alpha must survive), so each shipped skin is
   ~0.1–2 MB (a big airship wants 1024; a small unit is fine at 512).
 
+## What runs without Blender (updated 2026-11-08)
+
+Blender used to do every model import and every rig. Most of that work now runs inside the Unity editor, in C#, and
+is held to Blender's own output bit for bit by the parity drills ([Testing](Testing.md)). Blender stays installed for
+the cases each tool names in the console, and the tool switches to it on its own.
+
+- **The Vehicle Lab generates in C# by default** (since 2026-10-27), with C++ kernels for the heavy steps when
+  available. Probe, preview and Generate all read the source in process. A model whose meshes hang from bones - below a
+  joint, or placed on the joint node itself, like a canoe's cloth and rope or a turret mesh on its bone - probes in C#
+  too (2026-11-08). Blender still handles: a skinned or animated `.fbx`, `.blend` and `.obj` sources, a part placement on
+  a model with bone-hung meshes, a first clip with CUBICSPLINE keys, a mesh with a skin but no joint weights, and the
+  moving-tread rig.
+- **FBX is read natively** (2026-11-02). A static `.fbx` goes through the same in-process path as a `.glb`: the
+  Factory's static bake, its prep, the Vehicle Lab, the clip-range picker and the Model Reader. A skinned or animated
+  `.fbx` keeps Blender's FBX route, because Blender's direct FBX import poses it differently from a converted file.
+- **Animated bakes can run in C#** through the GLB rig route: choose it per model in the Animation Lab (**Rig route (this recipe)**),
+  or for every recipe as **Rig route (editor default)**. Blender stays the default until the remaining in-game checks of that route are done. A skinned
+  or animated `.fbx` stays on the FBX route either way.
+- **The deploy conversion** (`deploy_convert.py`) runs in process for every recorded conversion whose source exists.
+
 ## Runtime controls and authoring safety
 
 - **Freeze the donor's animation (static models).** A rigid model on an animated ground/hover donor inherits the donor's
@@ -201,6 +221,8 @@ the mechanics are detailed in [Animated-Runtime §3b](Animated-Runtime.md#3b-run
   nothing new in HAF. The only per-pawn state is small bookkeeping dictionaries (movement, deploy, phase), and they're
   **pruned when a pawn despawns** (`PruneGone`), so state can't accumulate; per-hit FX one-shots self-destruct on clip
   end. There's no per-instance asset streaming to leak or fragment.
+- **Late-game saves load.** Loading a 180-turn save no longer crashes the game (2026-11-05): the drop watch's weak table
+  used a Mono collection that throws under the game's runtime, and was replaced by HAF's own weak-keyed store.
 - **Fail-soft.** Every injection path (repoint, register, clip-reload, pose hook) is individually try/catch-wrapped:
   a failure disables only that one pawn/model, logs once, and increments an error counter surfaced by the F8 smoke
   test. A bone that doesn't match is a **no-op**, not an exception.

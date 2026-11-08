@@ -26,7 +26,8 @@ settings only when detection fails.
 ## 1. Prepare the source
 
 Keep an untouched copy of the original model. GLB is the easiest input because it keeps mesh, material, and hierarchy
-together.
+together. A static `.fbx` works just as well since 2026-11-02: the Lab reads it natively, with no Blender. A skinned or
+animated `.fbx` still goes through Blender's FBX import, and the console says so.
 
 Every independently moving object must be separable geometry. **Probe parts** can split a combined mesh into disconnected
 loose pieces, but it cannot infer a boundary through connected topology. If a rotor blade, rotor shaft, and internal
@@ -69,6 +70,11 @@ generated GLB, so the preview, the probe and the Factory atlas all show the same
    shown whether the fix is on or off, so you can see its reach (and Flip-mark exceptions) before generating;
    the verdict uses the same island scoring Generate runs, so re-Probe after straightening for exact tags.
 
+**Meshes that hang from bones** probe in C# since 2026-11-08: a mesh below a joint (a canoe's cloth and rope) and a
+mesh placed on the joint node itself (a turret mesh on its bone) get the matrices Blender gives them. Placing such a
+part, a first clip with CUBICSPLINE keys, or a mesh with a skin but no joint weights still sends the probe to Blender;
+the console line "probe: using Blender because ..." names which.
+
 If the source is already skinned and at least 90% of its vertices are weighted, Vehicle Lab offers **Use source
 skeleton (fast path)**. In that mode each row is a bone, not an individual mesh shard. Leave it enabled to preserve the
 artist's pivots and weights; disable it when those weights are the problem or you need shard-level control.
@@ -94,6 +100,19 @@ axle disagreement, unpaired wheels, turret outliers, and visible interior geomet
 | **Gun** (`G`) | Barrel assembly on the Gun bone; rides the Turret when one exists. Optional **Gun reduce (%)** dial (CAD barrels are turned from dense rings for what reads as a tube; welded within each material, then collapsed, before the Gun bone is measured). |
 | **Cradle** | Gun support that elevates with the tube but remains fixed during recoil. |
 | **Muzzle** | Muzzle brake/flash-hider; refines the measured muzzle end and follows the tube (`Gun`, or `Barrel` when recoil creates that split). |
+
+**Recoil, as Generate reports it (2026-11-07).** With a recoil fraction set, Generate now prints the breech clearance
+at full recoil:
+
+```
+VEHICLE RECOIL breech clearance at full recoil: 0.90 above the model's lowest static point (Z -1.00)
+```
+
+A `*** WARNING ... it will punch through the ground` instead means the deployed, recoiled breech goes below the model's
+lowest part: lower the recoil fraction or the deploy elevation. A tube whose marked points coincide has no length to
+recoil along: Generate warns `the tube's breech and muzzle coincide (a zero span)` and makes no recoil arm, so mark the
+tube parts that have a length. A gun pivot at the muzzle end (1.0) now elevates and recoils along the full bore, the
+same way as any other pivot.
 | **Trail** | Split-trail arm; receives a body-end hinge and the generated `Deploy` action. |
 | **Oar** (`O`) | A galley oar bank — one merged mesh of poles/blades spanning **both** sides. Split into one bone per oar with a baked rowing stroke. Optional **Oar reduce (%)** dial (runs before clustering, so bones land on the slim mesh). |
 | **Sail** | Marked canvas. Always exported double-sided, kept out of the inside-out flip, and struck/raised by its own generated `Furl` clip — hidden at idle, up while moving. Optional **Sail reduce (%)** dial — every vertex kept ships twice (double-sided), but the first non-zero step already cuts hard on flat canvas, so go gently. |

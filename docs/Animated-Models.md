@@ -326,7 +326,11 @@ motion can be expressed (or re-expressed) as bone rotations.
 
 ## Current limits, honestly
 
-- **Translation *motion* can't play** (engine rule). Sliding parts need the far-pivot rotation trick.
+- **Translation *motion* can't play** (engine rule). Sliding parts need the far-pivot rotation trick. With **Keep
+  translations** on the legacy path, an attack or move clip keeps its slides whether it is a whole action or a slice
+  of one (`Clip[10..40]`) since 2026-11-07; each clip keeps only its own sliding bones, not another clip's.
+- **Placement on connected bone chains is exact** (2026-11-03). A rig whose bones share joints (a mech's legs) no
+  longer stretches when placed; the light assault mech's legs stand on the ground again.
 - **Multiple armatures in one file:** only the first is used.
 - **Morph targets / shape keys** aren't supported on the conversion path.
 - Keep models to a sensible triangle budget (the "Reduce to ~tris" field; ~24k default) — the whole roster shares
