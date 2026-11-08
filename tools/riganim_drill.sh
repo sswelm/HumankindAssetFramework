@@ -241,7 +241,10 @@ if [ "$controlrc" -ne 0 ] || ! grep -qE "^PASS " "$TMPD/intact_sha.txt" || ! gre
 # The same control on an IMAGE-BEARING export (2026-11-07): its bytes are compared whole too, with Blender's own bytes standing in for
 # any image Blender re-encoded, so the sha tamper on it must be refused as well (the file came from the work directory above).
 "$TMPD/riganim.exe" --export "$WTMP/missing/jobs_sha_img.txt" "$WTMP/missing/intact_sha_img.txt" > "$TMPD/intact_sha_img.txt" 2>&1; controlrc=$?
-if [ "$controlrc" -ne 0 ] || ! grep -qE "^PASS " "$TMPD/intact_sha_img.txt" || ! grep -qE "^EXPORT .*the GLB.s [0-9]+ bytes$" "$TMPD/intact_sha_img.txt"; then head -5 "$TMPD/intact_sha_img.txt"; echo "FAIL — rig_anim drill rejected the image-bearing SHA control, or did not compare its bytes whole (rc=$controlrc)"; exit 1; fi
+if [ "$controlrc" -ne 0 ] || ! grep -qE "^PASS " "$TMPD/intact_sha_img.txt" || ! grep -qE "^EXPORT .*the GLB.s [0-9]+ bytes$" "$TMPD/intact_sha_img.txt" || ! grep -qE "^XCOVER [1-9][0-9]* a re-encoded image's bytes taken from Blender's file$" "$TMPD/intact_sha_img.txt"; then head -5 "$TMPD/intact_sha_img.txt"; echo "FAIL — rig_anim drill rejected the re-encoded-image SHA control, skipped its bytes, or did not borrow its image payload (rc=$controlrc)"; exit 1; fi
+for required in S5_XGLB_sha_image S5_XIMG_sha_reencoded; do
+  grep -qx "$required" "$TMPD/tampers.txt" || { echo "FAIL — rig_anim drill: missing re-encoded-image tamper $required"; exit 1; }
+done
 n_t=0; n_s1t=0; n_s2t=0; n_s3t=0; n_s4t=0; n_s5t=0
 while IFS= read -r mode; do
   [ -n "$mode" ] || continue
@@ -290,7 +293,7 @@ while IFS= read -r mode; do
     *) echo "FAIL — rig_anim drill: the tamper '$mode' has no expected reason here (add it)"; exit 1;;
   esac
   jf="$WTMP/missing/jobs.txt"
-  case "$mode" in S5_XGLB_sha) jf="$WTMP/missing/jobs_sha.txt";; S5_XGLB_sha_image) jf="$WTMP/missing/jobs_sha_img.txt";; EXIT_ran_full|EXIT_marked_wrong_stage) jf="$WTMP/missing/jobs_exit.txt";; S3_*) jf="$WTMP/missing/jobs_s3.txt";; esac
+  case "$mode" in S5_XGLB_sha) jf="$WTMP/missing/jobs_sha.txt";; S5_XGLB_sha_image|S5_XIMG_sha_reencoded) jf="$WTMP/missing/jobs_sha_img.txt";; EXIT_ran_full|EXIT_marked_wrong_stage) jf="$WTMP/missing/jobs_exit.txt";; S3_*) jf="$WTMP/missing/jobs_s3.txt";; esac
   S1_MODE=(); case "$mode" in S1_*) S1_MODE=(--export); n_s1t=$((n_s1t + 1));; S2_*) S1_MODE=(--export); n_s2t=$((n_s2t + 1));; S3_*|S3F_*) S1_MODE=(--export); n_s3t=$((n_s3t + 1));; S4_*) S1_MODE=(--export); n_s4t=$((n_s4t + 1));; S5_*) S1_MODE=(--export); n_s5t=$((n_s5t + 1));; esac
   "$TMPD/riganim.exe" "${S1_MODE[@]}" "${KEY_MODE[@]}" "$jf" "$WTMP/missing/$mode.txt" > "$TMPD/t_$mode.txt" 2>&1; badrc=$?
   if [ "$badrc" -ne 1 ] || ! grep -E "^FAIL " "$TMPD/t_$mode.txt" | grep -qE "$reason"; then

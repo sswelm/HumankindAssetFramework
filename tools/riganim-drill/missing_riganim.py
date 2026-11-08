@@ -20,15 +20,14 @@ for d in sys.argv[3:]:
         block = rows[a:b]
         if lines is None and "STAGE\t4" in block and any(l.startswith("IMG\t") for l in block):
             lines = block
-        # Re-encoded albedos deliberately prevent whole-file byte comparison. The SHA tamper needs an
-        # image-free export, independent of which registry recipe happens to precede the fixtures.
+        # Keep an image-free control independently of registry ordering.
         if (sha_lines is None and "STAGE\t4" in block
                 and not block[0].split("\t")[1].startswith(("LEFT:", "EXPORTLEFT:", "EXIT:"))
                 and any(l.startswith("X\tGLB\t") for l in block)
                 and not any(l.startswith("X\tIMG\t") for l in block)):
             sha_lines = block
         if (sha_img_lines is None and "STAGE\t4" in block
-                and not block[0].split("\t")[1].startswith(("LEFT:", "EXPORTLEFT:", "EXIT:"))
+                and block[0].split("\t")[1] == "fx_f_review_jpeg"
                 and any(l.startswith("X\tGLB\t") for l in block)
                 and any(l.startswith("X\tIMG\t") for l in block)):
             sha_img_lines = block
@@ -41,7 +40,7 @@ if lines is None:
 if sha_lines is None:
     raise RuntimeError("no image-free export: no byte-comparable control for the GLB SHA tamper")
 if sha_img_lines is None:
-    raise RuntimeError("no image-bearing export: no control for the GLB SHA tamper on a file with images")
+    raise RuntimeError("no fx_f_review_jpeg export: no re-encoded-image control for the GLB SHA and IMG hash tampers")
 sha_img_key = sha_img_lines[0].split("\t")[1]
 open(os.path.join(out, "jobs_sha_img.txt"), "w", encoding="utf-8", newline="\n").write("\n".join(j for j in jobs if j.split("\t")[1] == sha_img_key) + "\n")
 open(os.path.join(out, "intact_sha_img.txt"), "w", encoding="utf-8", newline="\n").write("\n".join(sha_img_lines) + "\n")
@@ -230,6 +229,7 @@ saved_lines = lines; lines = sha_lines
 sha_glb = first(lambda l: l.startswith("X\tGLB\t")); write("S5_XGLB_sha", with_field(sha_glb, 5, flip_bits(lines[sha_glb].split("\t")[5])))
 lines = sha_img_lines
 sha_glb = first(lambda l: l.startswith("X\tGLB\t")); write("S5_XGLB_sha_image", with_field(sha_glb, 5, flip_bits(lines[sha_glb].split("\t")[5])))
+sha_img = first(lambda l: l.startswith("X\tIMG\t")); write("S5_XIMG_sha_reencoded", with_field(sha_img, 5, flip_bits(lines[sha_img].split("\t")[5])))
 lines = saved_lines
 i_xglb = first(lambda l: l.startswith("X\tGLB\t"))
 # Export framing and row kinds must be checked even when all compared values are intact.

@@ -119,4 +119,45 @@ public class GlbRowsCompareTests
         Assert.Contains(problems, p => p.Contains("Blender's file holds 1 image(s), the export 2"));
         Assert.DoesNotContain(cover.Keys, k => k.StartsWith("the GLB's bytes not compared"));
     }
+
+    [Fact]
+    public void Reencoded_image_hash_is_checked_against_the_file_instead_of_copied_from_the_row()
+    {
+        var (glb, rows) = Blenders(new byte[] { 9, 8, 7, 6, 5 });
+        rows.Single(r => r[0] == "IMG")[4] = new string('0', 64);
+        var x = Textured(null);
+        var problems = new List<string>();
+        var stats = GlbRowsCompare.Compare(x, rows, problems, new Dictionary<string, long>(), _ => 0, true, true, glb);
+        Assert.Contains(problems, p => p.Contains("image") && p.Contains("sha"));
+        Assert.False(stats.GlbEqual);
+        Assert.Null(x.MaterialRows.Images[0].bytes);
+    }
+
+    [Fact]
+    public void A_later_missing_image_restores_every_earlier_temporary_image()
+    {
+        var (glb, rows) = Blenders(new byte[] { 9, 8, 7, 6, 5 });
+        int oldLength = System.BitConverter.ToInt32(glb, 12);
+        var root = GlbReader.ParseObject(System.Text.Encoding.UTF8.GetString(glb, 20, oldLength));
+        ((Newtonsoft.Json.Linq.JArray)root["images"]).Add(new Newtonsoft.Json.Linq.JObject { ["name"] = "second", ["mimeType"] = "image/png" });
+        var json = System.Text.Encoding.UTF8.GetBytes(root.ToString(Newtonsoft.Json.Formatting.None));
+        using (var stream = new MemoryStream())
+        {
+            using (var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, true))
+            {
+                int padded = (json.Length + 3) & ~3;
+                writer.Write(0x46546c67); writer.Write(2); writer.Write(20 + padded + glb.Length - 20 - oldLength);
+                writer.Write(padded); writer.Write(0x4e4f534a); writer.Write(json);
+                for (int i = json.Length; i < padded; i++) writer.Write((byte)' ');
+                writer.Write(glb, 20 + oldLength, glb.Length - 20 - oldLength);
+            }
+            glb = stream.ToArray();
+        }
+        rows.Add(new[] { "IMG", "1", "second", "image/png", new string('0', 64) });
+        var x = Textured(null); x.MaterialRows.Images.Add(("second", "image/png", null, 1));
+        var problems = new List<string>();
+        GlbRowsCompare.Compare(x, rows, problems, new Dictionary<string, long>(), _ => 0, true, true, glb);
+        Assert.Contains(problems, p => p.Contains("no bytes for image 1"));
+        Assert.All(x.MaterialRows.Images, im => Assert.Null(im.bytes));
+    }
 }

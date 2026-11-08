@@ -643,6 +643,10 @@ oracle's record) and compares the rest of the file bit for bit; the shell requir
 (140 of 140), a second sha control and tamper on an image-bearing export (`S5_XGLB_sha_image`); the plant (the old
 skip back) FAILS the drill: 131 of 140 exported files compared whole. The vehicle rig drill hands no file and had no such leave (110 of 110 byte-equal); the deploy export drill
 hands its file and takes the same path.
+PR #262 review (2026-11-08): the borrowed image's hash must match its IMG row (the row previously supplied its own expected
+hash), and finally restores every temporary image even when a later image is missing. Two failing-before regression cases
+pass after the fix (2,581 tests total). The SHA and new IMG-hash tampers explicitly use the re-encoded JPEG fixture and
+require nonzero image-borrowing coverage, rather than accepting an arbitrary image-bearing export as the control.
 The probe on all cores DONE 2026-10-19 (the user, after a reviewer's remark that the probe was not optimised): measured
 first - the BVH build, the inside-out verdict and the part meshes ran on one core, and the island walk's `HashSet<long>` used
 long's own hash (2.1 s on a 72k grid); every phase now parallel or bucketed, every row byte-identical on the 84 drill inputs,

@@ -30,13 +30,14 @@ static class GlbRowsCompare
     {
         if (mine.SequenceEqual(theirs)) return;
         int i = 0; while (i < mine.Count && i < theirs.Count && mine[i] == theirs[i]) i++;
-        problems.Add($"{what}: {mine.Count} here, {theirs.Count} in Blender, first difference at {i + 1}: here «{Cut(i < mine.Count ? mine[i].Replace('\t', ' ') : "(none)")}», Blender «{Cut(i < theirs.Count ? theirs[i].Replace('\t', ' ') : "(none)")}»");
+        problems.Add($"{what}: {mine.Count} here, {theirs.Count} in Blender, first difference at {i + 1}: here Â«{Cut(i < mine.Count ? mine[i].Replace('\t', ' ') : "(none)")}Â», Blender Â«{Cut(i < theirs.Count ? theirs[i].Replace('\t', ' ') : "(none)")}Â»");
     }
 
     /// <summary>Compares the export with the dump's rows (the row kind first in each; rows of other kinds are ignored).
     /// `channelsOf` gives an animation's channel count for the ANIM row; `channels` compares the CHAN rows
     /// (x.ChannelRows); `glb` the GLB row through BlenderGlbWriter, and `theirGlb` the file itself when at hand. An
-    /// image whose bytes the export does not hold (null) is compared by name and MIME type alone.</summary>
+    /// image whose bytes the export does not hold (null) is compared by name and MIME type alone unless its file is at hand;
+    /// then its IMG hash must match that file, and the borrowed payload is restored on every exit.</summary>
     public static Stats Compare(BlenderDeployExport.Result x, List<string[]> rows, List<string> problems, IDictionary<string, long> cover, Func<string, int> channelsOf, bool channels, bool glb, byte[] theirGlb, List<string> mineOut = null)
     {
         var st = new Stats();
@@ -162,51 +163,56 @@ static class GlbRowsCompare
         // rest of the file - the JSON, every other view - is compared bit for bit. Without the file at hand the skip stands, counted.
         var saved = x.MaterialRows?.Images.ToArray();
         var blenderImages = saved == null ? new List<int>() : Enumerable.Range(0, saved.Length).Where(i => saved[i].bytes == null).ToList();
-        if (glb && blenderImages.Count > 0)
+        try
         {
-            if (theirGlb == null) { Count(cover, "the GLB's bytes not compared (an image's bytes are Blender's encoder's, and its file is not at hand)"); glb = false; }
-            else
+            if (glb && blenderImages.Count > 0)
             {
-                HafModel theirs;
-                try { theirs = GlbReader.Read(theirGlb); }
-                catch (Exception e) { problems.Add("Blender's file does not read back for its image bytes: " + e.GetType().Name + ": " + e.Message); return st; }
-                if (theirs.Images.Count != saved.Length) { problems.Add($"Blender's file holds {theirs.Images.Count} image(s), the export {saved.Length}"); return st; }
-                foreach (int i in blenderImages)
-                {
-                    var bi = theirs.Images[i];
-                    if (bi.Bytes == null || bi.Bytes.Length == 0) { problems.Add($"Blender's file has no bytes for image {i} ('{saved[i].name}')"); return st; }
-                    x.MaterialRows.Images[i] = (saved[i].name, saved[i].mime, bi.Bytes, saved[i].source);
-                }
-                Count(cover, "the GLB's bytes compared with Blender's own bytes standing in for its re-encoded image(s)");
-                Count(cover, "a re-encoded image's bytes taken from Blender's file", blenderImages.Count);
-            }
-        }
-        if (glb)
-        {
-            var written = BlenderGlbWriter.Build(x);
-            if (written.Fallback != null) { problems.Add("the writer leaves it: " + written.Fallback); Restore(); return st; }
-            int jsonPadded = (System.Text.Encoding.UTF8.GetByteCount(written.Json) + 3) & ~3, binPadded = (written.Bin.Length + 3) & ~3;
-            int before = problems.Count;
-            Compare(problems, "the GLB (bytes, JSON chunk, BIN chunk, sha256)", new List<string> { $"{written.Glb.Length}\t{jsonPadded}\t{binPadded}\t{Sha(written.Glb)}" }, new List<string> { string.Join("\t", glbRow[0].Skip(1)) });
-            if (theirGlb != null && !theirGlb.SequenceEqual(written.Glb))
-            {
-                int jl = BitConverter.ToInt32(theirGlb, 12); string theirJson = System.Text.Encoding.UTF8.GetString(theirGlb, 20, jl).TrimEnd(' ');
-                if (theirJson != written.Json)
-                {
-                    int at = 0; while (at < theirJson.Length && at < written.Json.Length && theirJson[at] == written.Json[at]) at++;
-                    int lo = Math.Max(0, at - 60);
-                    problems.Add($"the JSON differs at {at}: here «{Cut(written.Json.Substring(lo, Math.Min(140, written.Json.Length - lo)))}», Blender «{Cut(theirJson.Substring(lo, Math.Min(140, theirJson.Length - lo)))}»");
-                }
+                if (theirGlb == null) { Count(cover, "the GLB's bytes not compared (an image's bytes are Blender's encoder's, and its file is not at hand)"); glb = false; }
                 else
                 {
-                    int off = 0; while (off < theirGlb.Length && off < written.Glb.Length && theirGlb[off] == written.Glb[off]) off++;
-                    problems.Add($"the bytes differ at offset {off} of {theirGlb.Length} (the JSON is equal; the BIN chunk starts at {28 + jl})");
+                    HafModel theirs;
+                    try { theirs = GlbReader.Read(theirGlb); }
+                    catch (Exception e) { problems.Add("Blender's file does not read back for its image bytes: " + e.GetType().Name + ": " + e.Message); return st; }
+                    if (theirs.Images.Count != saved.Length) { problems.Add($"Blender's file holds {theirs.Images.Count} image(s), the export {saved.Length}"); return st; }
+                    foreach (int i in blenderImages)
+                    {
+                        var bi = theirs.Images[i];
+                        if (bi.Bytes == null || bi.Bytes.Length == 0) { problems.Add($"Blender's file has no bytes for image {i} ('{saved[i].name}')"); return st; }
+                        if (i >= imgRows.Count || imgRows[i][4] != Sha(bi.Bytes))
+                        { problems.Add($"Blender's file image {i} sha256 differs from its IMG row"); return st; }
+                        x.MaterialRows.Images[i] = (saved[i].name, saved[i].mime, bi.Bytes, saved[i].source);
+                    }
+                    Count(cover, "the GLB's bytes compared with Blender's own bytes standing in for its re-encoded image(s)");
+                    Count(cover, "a re-encoded image's bytes taken from Blender's file", blenderImages.Count);
                 }
             }
-            st.GlbEqual = problems.Count == before; st.GlbBytes = written.Glb.Length;
+            if (glb)
+            {
+                var written = BlenderGlbWriter.Build(x);
+                if (written.Fallback != null) { problems.Add("the writer leaves it: " + written.Fallback); return st; }
+                int jsonPadded = (System.Text.Encoding.UTF8.GetByteCount(written.Json) + 3) & ~3, binPadded = (written.Bin.Length + 3) & ~3;
+                int before = problems.Count;
+                Compare(problems, "the GLB (bytes, JSON chunk, BIN chunk, sha256)", new List<string> { $"{written.Glb.Length}\t{jsonPadded}\t{binPadded}\t{Sha(written.Glb)}" }, new List<string> { string.Join("\t", glbRow[0].Skip(1)) });
+                if (theirGlb != null && !theirGlb.SequenceEqual(written.Glb))
+                {
+                    int jl = BitConverter.ToInt32(theirGlb, 12); string theirJson = System.Text.Encoding.UTF8.GetString(theirGlb, 20, jl).TrimEnd(' ');
+                    if (theirJson != written.Json)
+                    {
+                        int at = 0; while (at < theirJson.Length && at < written.Json.Length && theirJson[at] == written.Json[at]) at++;
+                        int lo = Math.Max(0, at - 60);
+                        problems.Add($"the JSON differs at {at}: here Â«{Cut(written.Json.Substring(lo, Math.Min(140, written.Json.Length - lo)))}Â», Blender Â«{Cut(theirJson.Substring(lo, Math.Min(140, theirJson.Length - lo)))}Â»");
+                    }
+                    else
+                    {
+                        int off = 0; while (off < theirGlb.Length && off < written.Glb.Length && theirGlb[off] == written.Glb[off]) off++;
+                        problems.Add($"the bytes differ at offset {off} of {theirGlb.Length} (the JSON is equal; the BIN chunk starts at {28 + jl})");
+                    }
+                }
+                st.GlbEqual = problems.Count == before; st.GlbBytes = written.Glb.Length;
+            }
+            return st;
         }
-        Restore();
-        return st;
+        finally { Restore(); }
 
         void Restore() { if (saved != null) for (int i = 0; i < saved.Length; i++) x.MaterialRows.Images[i] = saved[i]; }
     }

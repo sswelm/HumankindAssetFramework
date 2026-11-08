@@ -4018,6 +4018,14 @@ and a flipped byte outside the image is a difference; an image count that differ
 skip. 2,579 tests. The plant (the old skip back) FAILS the drill: 131 of 140 exported files compared whole. The vehicle rig drill hands no file and had
 no such leave (110 of 110 exports byte-equal); the deploy export drill hands its file and takes the same path.
 
+PR #262 review (2026-11-08) closes two remaining gaps. An unknown image's IMG hash was copied from its own row even with
+Blender's file available, so changing that hash alone still passed. It must now match SHA-256 of the actual borrowed image.
+The temporary image list is restored in finally: a second missing image previously returned with the first image still
+substituted. Both regression cases failed before the fix; all 2,581 tests pass afterwards. The image-bearing controls now
+select fx_f_review_jpeg explicitly and require nonzero borrowing coverage, ensuring they exercise re-encoding. In addition
+to S5_XGLB_sha_image, S5_XIMG_sha_reencoded changes only the JPEG fixture's exported IMG hash; both must fail while their
+intact control passes. The live drill now checks 102 kinds of damaged evidence.
+
 
 ### Native kernels
 
