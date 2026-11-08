@@ -113,6 +113,7 @@ gate_stop_aux() {  # reap sleepers too: inherited pipe/log handles otherwise sur
 }
 gate_unlock() {  # only the holder removes the lock: a waiter that gave up must not free another gate's
   gate_stop_aux
+  rm -rf "$BG_LOGS" 2>/dev/null   # emptied after the steps (run_bg_wait), removed here at exit: a gate left one empty tmp.* per run until 2026-11-08
   if grep -q "pid $$\$" "$LOCK/holder" 2>/dev/null; then rm -rf "$LOCK"; fi
   return 0
 }
@@ -143,6 +144,7 @@ verdict() {  # the one summary line, and the status the hook returns
 # The drills are independent of one another (each works in its own mktemp directory and builds its own exe), and the
 # Blender-backed ones took the gate from a minute to 25 in sequence: they run AT ONCE, each into its own log, and the
 # logs are printed in declaration order; each worker reports progress and records its duration when it finishes.
+HOST_TMP="$(cd "${TMPDIR:-${TEMP:-${TMP:-/tmp}}}" 2>/dev/null && pwd -P)"   # the user's temp root, for the sweep (TMPDIR is redirected below)
 BG_LOGS=$(mktemp -d); bg_n=0; declare -a BG_LABEL BG_PID BG_T0; LANE_STEPS=()   # assigned, not only declared: set -u counts an unassigned array as unbound
 export TMPDIR="$BG_LOGS"   # every step's mktemp lands under the gate's own directory: what an abort has to find (gate_abort)
 prepare_step_log() {  # <log prefix> <label>: stale files from a prior phase must never stand in for this step.
@@ -246,6 +248,11 @@ gate_cancel_watch
 gate_lock
 note "started ($(git rev-parse --short HEAD 2>/dev/null) $(git branch --show-current 2>/dev/null); $GATE)"
 
+# 0) the leftovers of earlier gates and drills under the user's temp root, older than two days (tools/temp_sweep.sh: our own
+# names and markers only - a gate's emptied directory, a killed drill's, the vehicle drill's vr.*, the Unity drills' haf-*,
+# the tests' haf_checkedreplace_* and haf-oracle-sh-*; measured 2026-11-08 at 26 GB and 3,600 entries). It reports, never fails.
+[ -z "${HOST_TMP:-}" ] || run "temp sweep (our leftovers older than 2 days under the temp root)" bash "$ROOT/tools/temp_sweep.sh" --root "$HOST_TMP"
+
 # 1) plugin compiles — dotnet build exits non-zero on ERRORS only (the one benign CS0169 warning is fine).
 push_step run "plugin build (dotnet build -c Release)" dotnet build "$ROOT/HumankindAssetFramework.csproj" -c Release --nologo -v q
 
@@ -256,6 +263,7 @@ push_step run "plugin unit tests (dotnet test)" dotnet test "$ROOT/Tests/Humanki
 # wrapper) and timed out under the thirteen parity drills - which the push no longer runs (2026-10-30). The oracle tests
 # belong to the parity mode, where the record machinery is used.
 push_step run_lane "parallel gate regression tests (completion, paths and verdicts)" python "$ROOT/Tests/test_parallel_gate.py"
+run_lane "temp sweep tests (our patterns go when old, decoys and young ones stay, the gate removes its own directory)" python "$ROOT/Tests/test_temp_sweep.py"
 push_step run_lane "FBX model coverage tests (lost inputs and skipped fixtures cannot pass)" python "$ROOT/Tests/test_fbx_model_verdict.py"
 # THE PARITY STAMP'S DIGEST IS TAKEN HERE, before any parity drill starts: the verdict's write refuses a different one,
 # so a covered file edited during the run - which the drills did not test - gets no stamp (the review of PR #228).
