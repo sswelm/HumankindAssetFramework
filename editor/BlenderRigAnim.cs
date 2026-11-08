@@ -482,7 +482,6 @@ public static class BlenderRigAnim
         {
             if (o.Kind == BlenderNames.ObjectKind.Camera) { s.Fallback = "a camera object"; return s; }
             if (o.Kind == BlenderNames.ObjectKind.Mesh && o.Skin >= 0 && (o.Skin >= m.Skins.Count || names.ArmatureOfSkin[o.Skin] == null)) { s.Fallback = "'" + o.Name + "': a skin whose joints are under no armature"; return s; }
-            if (o.GltfNode < 0 && o.ParentBone != null) { s.Fallback = "'" + o.Name + "': a mesh on a bone node (the importer's '.mesh' child under a bone)"; return s; }
         }
 
         // ---- the meshes as imported, and the material-less drop
@@ -681,7 +680,13 @@ public static class BlenderRigAnim
         {
             var o = so.Source;
             bool skinnedMesh = o.Kind == BlenderNames.ObjectKind.Mesh && o.Skin >= 0 && so.Mesh.DefNr != null;
-            so.Local = o.GltfNode >= 0 && !skinnedMesh ? locals[o.GltfNode] : identity;   // an object with its own node has the importer's properties (posed at frame 1); the others hang at the identity
+            // a mesh ON a joint node: fixup_multitype_nodes' '.mesh' child under the bone - VNode()'s default base transform through the
+            // bone child's rotation_after and node.py's move back by the bone length (ImportRig.JointMeshProperty, the probe's since
+            // 2026-11-08); until then the port gave it the identity and left such a file to Blender by name
+            bool jointMesh = o.GltfNode < 0 && !skinnedMesh && so.ParentBone != null;
+            float[] jl = null, jq = null, js = null;
+            if (jointMesh) rig.JointMeshProperty(so.ParentBoneNode, out jl, out jq, out js);
+            so.Local = o.GltfNode >= 0 && !skinnedMesh ? locals[o.GltfNode] : jointMesh ? VehicleProbe.ObjectMatrix(jl, jq, js) : identity;   // an object with its own node has the importer's properties (posed at frame 1); the others hang at the identity
             // the properties themselves, as BlenderWorldMatricesPosed composes them: a bone's child from the importer's
             // adjusted transform, a plain object from the node's, the animated channels over them
             if (o.GltfNode >= 0 && !skinnedMesh)
@@ -691,8 +696,9 @@ public static class BlenderRigAnim
                 var p = set?.Invoke(n);
                 so.Props = new[] { p?[0] ?? l, p?[1] ?? q, p?[2] ?? sc };
             }
-            else so.Props = new[] { new float[3], new[] { 1f, 0f, 0f, 0f }, new[] { 1f, 1f, 1f } };
+            else so.Props = jointMesh ? new[] { jl, jq, js } : new[] { new float[3], new[] { 1f, 0f, 0f, 0f }, new[] { 1f, 1f, 1f } };
             if (skinnedMesh) Note(s, o.GltfNode >= 0 ? "a skinned mesh moved under its armature" : "an animated skinned mesh node (its mesh on a '.skinned' child of the armature)");
+            else if (jointMesh) Note(s, "a mesh on a joint node (a '.mesh' child under the bone)");
             else if (o.GltfNode < 0) Note(s, "a mesh on an armature node (a '.mesh' child)");
         }
         float[] WorldOf(SceneObject so)

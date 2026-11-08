@@ -372,6 +372,16 @@ def skinned_anim(out):
     return r.write(out, "riganim_skinned_anim")
 
 
+def joint_mesh(out):
+    """A mesh ON a joint node (2026-11-08): the importer moves it onto a '.mesh' child under the bone (fixup_multitype_nodes), with
+    the bone child's rotation_after and the move back by the bone length - here on the ANIMATED Arm joint, beside a mesh on the
+    still Root joint, so the child follows a pose at frame 1. The port left such a file to Blender by name until then."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    r.nodes[j1]["mesh"] = r.mesh("barrel", at=(0.0, 1.5, 0.25), size=0.5, material=m)
+    r.nodes[j0]["mesh"] = r.mesh("hub", at=(0.5, 0.0, 0.0), size=0.4, material=m)
+    return r.write(out, "riganim_joint_mesh")
+
+
 # ---- stage 2 (step (c)): the bone-parent -> skin conversion and the wrapper flatten. No registry recipe takes either.
 
 def s2_static(out):
@@ -1068,6 +1078,9 @@ def main(out):
     job("fx_armobj_mirrored_roles", armobj_mirrored_roles(out), roles="attack=Spin[0..6];move=Spin[6..12]")
     job("EXPORTLEFT:fx_armobj_parented", armobj(out, "riganim_armobj_parented", parented=True), convert="0")
     job("fx_skinned_anim", skinned_anim(out))
+    jm = joint_mesh(out)
+    job("fx_joint_mesh", jm)                    # the conversion path: the '.mesh' children bound into the skin (stage 2)
+    job("fx_joint_mesh_legacy", jm, convert="0")   # the legacy path: they stay parented to their bones through the export
     # stage 2
     job("fx_s2_static", s2_static(out), static="turret,glass")
     job("fx_s2_static_many", s2_static_many(out), static="plate")

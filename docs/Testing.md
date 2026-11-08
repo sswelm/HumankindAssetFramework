@@ -648,8 +648,8 @@ bone). An independent review of the change (a reviewer given the code and the im
 the importer model and every matrix read, and found the last two: the unweighted skin below a bone was still held, and a
 skinned part's placement still detached its node's children (`Placing_a_skinned_part_detaches_nothing`). Across the 72 real
 sources (1.6 GB) no mesh sits on a joint and no skin lacks weights: the Lab moves no real model either way, and the probe's
-time on the canoe is unchanged (11.7-12.7 ms). The rig_anim port still leaves a `.mesh` child to Blender by name: a
-scene-object port of its own.
+time on the canoe is unchanged (11.7-12.7 ms). The rig_anim port followed the same day (the rig_anim drill, step (b):
+a mesh on a joint node).
 The comparator requires each part's MATRIX and VERTEX rows to agree on the bone flag and rejects duplicate diagnostic
 rows on either side. A conflicting `under-bone` row previously exempted both diagnostics, even when the other row said
 `bone`, so changed matrix and vertex values could pass and a part could count as both held and unheld. Overwriting a
@@ -1960,8 +1960,19 @@ ReconHelicopter) read -0 in C# and +0 in Blender until `ImportRig.FinalTrs` used
 could not see it: a written zero keeps the sign of the one it replaces); a dropped mesh's children keep their
 `matrix_world` (the same at stages 1 to 3), not their local transform. Not modelled and named, so Blender's: a
 .fbx/.blend source, localNodeAnim, several scenes, cameras, lights, instancing, variants, pointers, CUBICSPLINE, morph
-weights, a sampler without keys, a mesh on a bone node, a twice-listed joint, and what BlenderReduce declines - none
-in the registry. Stages 2 to 4 are not compared yet, and the PASS line says so.
+weights, a sampler without keys, a twice-listed joint, and what BlenderReduce declines - none in the registry. Stages 2
+to 4 are not compared yet, and the PASS line says so.
+
+A mesh on a joint node (2026-11-08) was left to Blender by name until the probe modelled it. The importer moves it onto a
+`<id>.mesh` child under the bone (`fixup_multitype_nodes`), whose properties are not the identity the port gave every
+split-off object: `VNode()`'s default transform through the bone child's `rotation_after`, moved back by the bone length.
+Stage 1 now takes them from `ImportRig.JointMeshProperty`, the probe's. The fixture `riganim_joint_mesh` puts a mesh on the
+animated `Arm` joint and one on the still `Root` joint, run on the conversion path (`fx_joint_mesh`: the children bound
+into the skin) and the legacy path (`fx_joint_mesh_legacy`: they stay parented to their bones through the export). Live:
+163 jobs, 154 equal at all four stages, the 9 left as before, both new jobs equal and exported in process. Planted (the
+identity back): exactly those two fail, at stage 1's barrel row. `RigAnimJointMeshTests` holds the stage-1 matrix_world
+of the probe's static `mesh_on_bone` turret to the row Blender printed for it, as float32 bits; the plant fails it. The
+probe's animated row is no oracle there: rig_anim poses its scene at frame 1 of its own active action.
 
 Step (c), stage 2 in C# (2026-10-12): `BlenderRigAnim.RunStage2` continues on the scene stage 1 left - the bone-parent ->
 skin bind (the governing bone up the parent chain, staticParts by lowered object and material names, the rest-world pin,

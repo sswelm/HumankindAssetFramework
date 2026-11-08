@@ -11,7 +11,7 @@ public class VehicleProbeJointMeshTests
     static HafModel Read(string b64) => GlbReader.Read(Convert.FromBase64String(b64));
 
     // mesh_on_bone.glb: the Turret joint carries turret_mesh; the rest pose
-    const string MeshOnBone =
+    internal const string MeshOnBone =
             "Z2xURgIAAACMBQAAvAQAAEpTT057ImFzc2V0Ijp7InZlcnNpb24iOiIyLjAiLCJnZW5lcmF0b3IiOiJmaXh0dXJlcy5weSBtZXNoX29uX2JvbmUifSwibWVzaGVzIjpbeyJuYW1lIjoidHVycmV0X2" +
             "1lc2giLCJwcmltaXRpdmVzIjpbeyJhdHRyaWJ1dGVzIjp7IlBPU0lUSU9OIjowfX1dfSx7Im5hbWUiOiJiYXNlX21lc2giLCJwcmltaXRpdmVzIjpbeyJhdHRyaWJ1dGVzIjp7IlBPU0lUSU9OIjox" +
             "fX1dfSx7Im5hbWUiOiJza2luX21lc2giLCJwcmltaXRpdmVzIjpbeyJhdHRyaWJ1dGVzIjp7IlBPU0lUSU9OIjoyLCJKT0lOVFNfMCI6MywiV0VJR0hUU18wIjo0fX1dfV0sIm5vZGVzIjpbeyJuYW" +
@@ -28,7 +28,7 @@ public class VehicleProbeJointMeshTests
 
     // mesh_on_bone_animated.glb: turret_mesh ON the animated Turret joint, Barrel BELOW it; the first clip ("aim") starts turned
     // 35 degrees and shifted, a second clip must not leak into frame 0
-    const string MeshOnBoneAnimated =
+    internal const string MeshOnBoneAnimated =
             "Z2xURgIAAADMCQAAlAgAAEpTT057ImFzc2V0Ijp7InZlcnNpb24iOiIyLjAiLCJnZW5lcmF0b3IiOiJmaXh0dXJlcy5weSBtZXNoX29uX2JvbmVfYW5pbWF0ZWQifSwibWVzaGVzIjpbeyJuYW1lIj" +
             "oidHVycmV0X21lc2giLCJwcmltaXRpdmVzIjpbeyJhdHRyaWJ1dGVzIjp7IlBPU0lUSU9OIjo1fX1dfSx7Im5hbWUiOiJiYXJyZWxfbWVzaCIsInByaW1pdGl2ZXMiOlt7ImF0dHJpYnV0ZXMiOnsi" +
             "UE9TSVRJT04iOjZ9fV19LHsibmFtZSI6InNraW5fbWVzaCIsInByaW1pdGl2ZXMiOlt7ImF0dHJpYnV0ZXMiOnsiUE9TSVRJT04iOjcsIkpPSU5UU18wIjo4LCJXRUlHSFRTXzAiOjl9fV19XSwibm" +
