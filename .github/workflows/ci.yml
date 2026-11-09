@@ -55,6 +55,8 @@ jobs:
         run: python Tests/test_fbx_model_verdict.py
       - name: Parallel gate regression tests
         run: python Tests/test_parallel_gate.py
+      - name: Deploy timing wrapper tests
+        run: python Tests/test_deploy_time.py
       - name: Temp sweep deletion-safety tests
         run: python Tests/test_temp_sweep.py
       - name: Advisor corpus and held-out evaluation tests
