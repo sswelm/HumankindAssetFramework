@@ -91,6 +91,18 @@ gate (`Tests/test_advisor_corpus.py`); the export and the evaluation are command
 lives on this machine's `D:\3DModels` and there is no proposer to run yet. The row comes with Phase 1's first
 proposer. The manual timing has not been done; it waits for the next new model.
 
+The evaluation keeps answers out of held-out proposer inputs. `test_rows` exposes the explicit `PART_FEATURES`
+allowlist in `evaluate.py`: identifiers, names, geometry and the visibility/flip/bone probe observations. It omits truth,
+roles, marks, fuse outcomes, placement edits and recipe joins; `test_model` exposes only model/category/files, never
+saved dials. Training records retain their labels. Fold arguments are copied so a proposer cannot change scoring
+truth or contaminate a later fold by normalizing its inputs in place. The corpus CSVs retain all columns for auditing.
+
+The sidecar reader accepts ASCII signed Int32 indices, preserves both readings of legacy names ending in `|<number>`
+and refuses ambiguous matches, as the Workshop does. Feature-cache keys retain nanosecond timestamps, so equal-size
+edits within a second invalidate the cached geometry. These review regressions bring the advisor suite to 35 cases.
+On the real 33,441-row corpus (65 folders), the built-in baseline reports before and after isolating proposer inputs
+are identical: those baselines never used the leaked answers. A cached export still takes about 3 seconds.
+
 ```
 python tools/advisor/corpus.py --out C:/tmp/haf-advisor        # 65 folders, about 80 s cold, 3 s from the cache
 python tools/advisor/evaluate.py --corpus C:/tmp/haf-advisor --write baseline.md

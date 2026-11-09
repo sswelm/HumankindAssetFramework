@@ -20,6 +20,10 @@ A proposer is a Python module with `propose(task, test_rows, train_rows, test_mo
 for dials; `row_key(row)` is the key. The baselines below use the same contract, so a Phase 1 proposer is one more
 module on the command line and nothing else changes.
 
+Held-out rows contain only PART_FEATURES (identity, geometry and probe observations); test_model contains only
+model/category/files. Truth, user marks, fuse outcomes, roles, placement edits and saved dials stay in training and
+scoring data. Each call receives independent records, so in-place normalization cannot change later folds or truth.
+
     python tools/advisor/evaluate.py [--corpus tools/advisor/out] [--proposer path/to/module.py] [--target 30000]
                                      [--write baseline.md]
 
@@ -34,6 +38,7 @@ import os
 import statistics
 import sys
 from collections import Counter, defaultdict
+from copy import deepcopy
 
 # The Vehicle Lab's reduce tiers (VehicleLabWindow.Tier(...)): a role not listed is baked unreduced; Ignore is dropped.
 ROLE_DIAL = {"Default": "defaultReducePct", "Rigging": "riggingReducePct", "Shroud": "shroudReducePct", "Structure": "structureReducePct",
@@ -45,6 +50,17 @@ DIALS = sorted(set(ROLE_DIAL.values()))
 # (VehicleLabWindow's recipe class, "absent-key ... the do-nothing default"): rigging 75, structure 50, every other 0.
 DIAL_DEFAULT = {"riggingReducePct": 75.0, "structureReducePct": 50.0}
 TASKS = ("role", "delete", "delete-hand", "split", "group", "dials")
+
+# Keep answer columns in the corpus for training/scoring, never in the held-out proposer's inputs. Use an allowlist
+# so a future label or join column cannot silently become a feature. Visibility/flip/bone are probe observations.
+PART_FEATURES = frozenset(("model", "category", "file", "stage", "node_index", "name", "file_name", "mesh_index",
+                           "mesh_shared", "parent_index", "depth", "verts", "tris", "islands", "cx", "cy", "cz",
+                           "sx", "sy", "sz", "blocked", "triangle_free", "vis", "flip", "bone"))
+MODEL_FEATURES = frozenset(("model", "category", "files"))
+
+
+def features(record, columns):
+    return deepcopy({k: v for k, v in record.items() if k in columns})
 
 
 def row_key(r):
@@ -245,13 +261,16 @@ def leave_one_model_out(task, rows, models, proposer):
             if not m["dials_parsed"]:
                 continue
             others = [o for o in models if o["model"] != m["model"] and o["dials_parsed"]]
-            preds[m["model"]] = proposer(task, [], [], m, others)
+            preds[m["model"]] = proposer(task, [], [], features(m, MODEL_FEATURES), deepcopy(others))
         return preds
     for model, test in by_model.items():
         train = [r for r in rows if r["model"] != model]
         tm = model_of.get(model, {"model": model, "category": test[0]["category"]})
         tms = [o for o in models if o["model"] != model]
-        preds.update(proposer(task, test, train, tm, tms))
+        # A proposer may normalize its arguments in place. No fold may mutate scoring truth or a later fold's input.
+        # Part records contain scalar CSV cells; model records also contain nested dials_parsed dictionaries.
+        preds.update(proposer(task, [features(r, PART_FEATURES) for r in test], [dict(r) for r in train],
+                              features(tm, MODEL_FEATURES), deepcopy(tms)))
     return preds
 
 

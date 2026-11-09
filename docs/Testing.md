@@ -4056,7 +4056,10 @@ Cutter's `_2` renaming and the Blender probe's `.001` naming side by side, a ref
 independent review added the shapes the real corpus had and the fixture lacked: a LINES mesh (blocked as the Workshop
 blocks it, no islands, the tool's own `auto_mark`), a three-triangle part whose X is the user's, a node cycle and a
 three-value matrix (one report line each, not a dead run), sidecar lines the Workshop skips (BOM, spaces, a letter
-outside A-Z, a v2 line without an index), a part in two fuse groups, a recipe without parts. 28 cases.
+outside A-Z, a v2 line without an index), a part in two fuse groups, a recipe without parts. The PR #271 review adds
+held-out label/dial isolation, fold mutation isolation, ASCII Int32 index boundaries (including long tokens), refusal
+of ambiguous legacy numeric name suffixes, and cache invalidation for equal-size edits within a second: 35 cases.
+Held-out proposer inputs use explicit feature allowlists; saved answers stay available only for training and scoring.
 
 The critical review of PR #195 added a high-valence cone, tiny loose parts and non-polygon primitives. Matching every
 pair of edges in one lower-vertex bucket made a 32,000-face fan take 3.90 s against 9 ms before the parallelization.

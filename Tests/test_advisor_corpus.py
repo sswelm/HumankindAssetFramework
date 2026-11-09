@@ -277,15 +277,64 @@ class Metrics(unittest.TestCase):
         self.assertEqual(preds[("a", 0)], "Sail")   # a is judged with b's majority
         self.assertEqual(preds[("b", 2)], "Body")
 
+    def test_held_out_rows_and_models_expose_features_without_answers(self):
+        answers = {"truth": "X", "mark": "X", "auto_mark": "1", "fuse_letter": "A", "fuse_group_name": "Hull",
+                   "fused_into": "Fused_A_Hull", "fused_letter": "A", "role": "Ignore", "role_id": "3",
+                   "role_via_fuse": "Ignore", "recipe": "saved.json", "recipe_via_fuse": "saved.json",
+                   "placed": "1", "recipe_name": "Hull", "name_join": "exact", "future_answer": "X"}
+        rows = [dict(answers, model=m, category="ship", file=m + ".glb", node_index=0, name="Hull",
+                     verts="12", islands="2", vis="0") for m in ("a", "b")]
+        models = [{"model": m, "category": "ship", "files": m + ".glb", "recipe": "saved.json",
+                   "dials": '{"bodyReducePct": 75}', "dials_parsed": {"bodyReducePct": 75}} for m in ("a", "b")]
+        calls = []
+        def inspect(task, test, train, tm, tms):
+            calls.append(task)
+            self.assertTrue(set(answers).isdisjoint(test[0]), test[0])
+            self.assertTrue({"dials", "dials_parsed", "recipe"}.isdisjoint(tm), tm)
+            self.assertEqual((test[0]["verts"], test[0]["islands"], test[0]["vis"]), ("12", "2", "0"))
+            self.assertEqual(train[0]["truth"], "X")
+            self.assertEqual(tms[0]["dials_parsed"]["bodyReducePct"], 75)
+            self.assertNotEqual(train[0]["model"], tm["model"])
+            return {evaluate.row_key(r): "" for r in test}
+        for task in ("role", "delete", "delete-hand", "split", "group"):
+            evaluate.leave_one_model_out(task, rows, models, inspect)
+        self.assertEqual(len(calls), 10)
+
+    def test_saved_dials_are_not_given_to_the_held_out_proposer(self):
+        models = [{"model": m, "category": "ship", "dials": '{"bodyReducePct": 75}',
+                   "dials_parsed": {"bodyReducePct": 75}} for m in ("a", "b")]
+        def inspect(task, test, train, tm, tms):
+            self.assertTrue({"dials", "dials_parsed"}.isdisjoint(tm), tm)
+            self.assertEqual(tms[0]["dials_parsed"]["bodyReducePct"], 75)
+            tms[0]["dials_parsed"]["bodyReducePct"] = 0
+            return {d: 0.0 for d in evaluate.DIALS}
+        self.assertEqual(set(evaluate.leave_one_model_out("dials", [], models, inspect)), {"a", "b"})
+        self.assertEqual([m["dials_parsed"]["bodyReducePct"] for m in models], [75, 75])
+
+    def test_proposer_mutation_cannot_change_scoring_truth_or_later_folds(self):
+        rows = [dict(r, model=m) for r, m in zip(self.rows([("a", "Body"), ("b", "Sail")]), ("a", "b"))]
+        models = [{"model": m, "category": "c", "dials_parsed": {"bodyReducePct": 50}} for m in ("a", "b")]
+        def mutate(task, test, train, tm, tms):
+            self.assertIn(train[0]["truth"], ("Body", "Sail"))
+            self.assertEqual(tms[0]["dials_parsed"]["bodyReducePct"], 50)
+            test[0]["truth"] = "Ignore"
+            train[0]["truth"] = "Ignore"
+            tms[0]["dials_parsed"]["bodyReducePct"] = 0
+            return {}
+        evaluate.leave_one_model_out("role", rows, models, mutate)
+        self.assertEqual([r["truth"] for r in rows], ["Body", "Sail"])
+        self.assertEqual([m["dials_parsed"]["bodyReducePct"] for m in models], [50, 50])
+
     def test_a_proposer_module_is_loaded_by_path_and_scored(self):
         tmp = tempfile.mkdtemp(prefix="advisor-prop-")
         try:
             path = os.path.join(tmp, "oracle.py")
             with io.open(path, "w", encoding="utf-8") as f:
-                f.write("def propose(task, test, train, tm, tms):\n    return {(r['file'], r['node_index']): r['truth'] for r in test}\n")
+                f.write("def propose(task, test, train, tm, tms):\n    return {(r['file'], r['node_index']): 'X' if r['verts'] == '3' else '' for r in test}\n")
             mod = evaluate.load_proposer(path)
             rows = self.rows([("a", "X"), ("a", "")])
-            preds = mod.propose("delete", rows, [], {}, [])
+            rows[0]["verts"] = "3"; rows[1]["verts"] = "300"
+            preds = evaluate.leave_one_model_out("delete", rows, [{"model": "m", "category": "c"}], mod.propose)
             self.assertEqual(evaluate.precision_recall(rows, preds, "X")[:2], (1.0, 1.0))
             with io.open(path, "w", encoding="utf-8") as f:
                 f.write("x = 1\n")
@@ -469,6 +518,62 @@ class ReviewRound2(unittest.TestCase):
 
 
 class Rules(unittest.TestCase):
+    def test_invalid_v2_indices_cannot_attach_a_mark_by_name(self):
+        tmp = tempfile.TemporaryDirectory(prefix="advisor-index-")
+        self.addCleanup(tmp.cleanup)
+        path = os.path.join(tmp.name, "marks.txt")
+        invalid = ("٢", "2147483648", "9" * 5000)
+        with io.open(path, "w", encoding="utf-8") as f:
+            f.write("#fuse-groups v2\n" + "".join("X|%s|Hull\n" % index for index in invalid))
+        skipped = []
+        lines, _ = corpus.read_sidecar(path, skipped)
+        self.assertEqual(lines, [])
+        self.assertEqual(len(skipped), len(invalid))
+        self.assertEqual(corpus.resolve_sidecar(lines, [{"node_index": 0, "name": "Hull", "file_name": "Hull"}], []), {})
+
+    def test_legacy_numeric_name_suffix_is_resolved_or_refused_without_guessing(self):
+        tmp = tempfile.TemporaryDirectory(prefix="advisor-legacy-")
+        self.addCleanup(tmp.cleanup)
+        path = os.path.join(tmp.name, "marks.txt")
+        with io.open(path, "w", encoding="utf-8") as f:
+            f.write("X|Hull|3\n")
+        indexed = {"node_index": 3, "name": "Hull", "file_name": "Hull"}
+        literal = {"node_index": 4, "name": "Hull|3", "file_name": "Hull|3"}
+        for rows, expected in (([indexed, literal], {}), ([literal], {4: "X"}), ([indexed], {3: "X"})):
+            with self.subTest(rows=rows):
+                lines, _ = corpus.read_sidecar(path)
+                refused = []
+                self.assertEqual(corpus.resolve_sidecar(lines, rows, refused), expected)
+                self.assertEqual(bool(refused), not bool(expected))
+
+    def test_cache_notices_same_size_changes_within_a_second(self):
+        tmp = tempfile.TemporaryDirectory(prefix="advisor-cache-")
+        self.addCleanup(tmp.cleanup)
+        path = os.path.join(tmp.name, "mesh.glb")
+        def data(x):
+            return make_glb(nodes=[{"name": "Hull", "mesh": 0, "translation": [x, 0.0, 0.0]}],
+                            meshes=[[(0, 0)]], positions=[ONE_TRI], index_lists=[[0, 1, 2]])
+        first, second = data(0.0), data(1.0)
+        self.assertEqual(len(first), len(second))
+        cache = {}
+        with open(path, "wb") as f: f.write(first)
+        os.utime(path, ns=(1700000000100000000, 1700000000100000000))
+        before, _ = corpus.file_features(path, cache, True, lambda *_: None)
+        with open(path, "wb") as f: f.write(second)
+        os.utime(path, ns=(1700000000200000000, 1700000000200000000))
+        after, cached = corpus.file_features(path, cache, True, lambda *_: None)
+        self.assertFalse(cached)
+        self.assertAlmostEqual(after[0]["cx"] - before[0]["cx"], 1.0)
+
+    def test_sidecar_indices_require_ascii_int32_tokens(self):
+        for text in ("٢", "１２", "2147483648", "-2147483649", "9" * 5000):
+            with self.subTest(text=text[:30]):
+                self.assertIsNone(corpus.int_token(text))
+        for text, expected in (("+2147483647", 2147483647), ("-2147483648", -2147483648),
+                               ("0" * 5000 + "2", 2)):
+            with self.subTest(text=text[:30]):
+                self.assertEqual(corpus.int_token(text), expected)
+
     def test_stage_from_the_file_name(self):
         self.assertEqual([corpus.stage_of(n) for n in ("a.glb", "a_cut.glb", "a_cut_split.glb", "a_split_fused.glb", "khelandion_2_object14_split5.glb")],
                          ["raw", "cut", "split", "fused", "split"])
@@ -491,7 +596,11 @@ class Rules(unittest.TestCase):
             with io.open(p, "w", encoding="utf-8") as f:
                 f.write("A|Hull|3\nB|Deck\n")
             lines, _ = corpus.read_sidecar(p)
-            self.assertEqual(lines, [("A", 3, "Hull"), ("B", None, "Deck")])
+            refused = []
+            legacy_rows = [{"node_index": 3, "name": "Hull", "file_name": "Hull"},
+                           {"node_index": 4, "name": "Deck", "file_name": "Deck"}]
+            self.assertEqual(corpus.resolve_sidecar(lines, legacy_rows, refused), {3: "A", 4: "B"})
+            self.assertEqual(refused, [])
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

@@ -10,6 +10,12 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **PR #271 review (2026-11-09).** The evaluator no longer hands held-out truth, roles, user marks, fuse outcomes or
+  saved dials to proposers; copied fold records also prevent in-place normalization from changing scoring truth or
+  later folds. Sidecar indices now follow ASCII Int32 rules, including overflow and long zero-padded tokens; ambiguous
+  legacy names such as `Hull|3` are resolved against both readings instead of guessed. Nanosecond cache timestamps
+  prevent stale features after equal-size edits within a second. The advisor suite now has 35 cases, including the
+  regressions that failed before these fixes (`docs/Testing.md`, `docs/Workshop-Advisor-Plan.md`).
 - **THE WORKSHOP ADVISOR'S CORPUS AND BASELINES (2026-11-09; Phase 0 of `docs/Workshop-Advisor-Plan.md`).**
   `tools/advisor/corpus.py` turns every decision the user made in the Workshop and the Lab - the S/T/X marks, the fuse
   letters, what the fuse reports fused, the recipes' roles and dials - into one table beside the features a proposer

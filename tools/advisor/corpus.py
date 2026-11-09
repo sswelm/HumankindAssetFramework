@@ -29,7 +29,7 @@ the inside-out verdict are NOT recomputed; they are taken from the recipe where 
 Writes parts.csv (a row per mesh node per decision-bearing file), models.csv (a row per model folder), join_report.txt
 (every refused sidecar line, every recipe part no node matched, every disagreement between a sidecar and the fuse
 report). Exit 0; 1 on a malformed input the script cannot step over. Per-file features are cached in the output
-folder keyed by path, size and mtime; --no-cache recomputes.
+folder keyed by path, size and nanosecond mtime; --no-cache recomputes.
 """
 import argparse
 import csv
@@ -425,7 +425,8 @@ def read_sidecar(path, skipped=None):
     """(lines [(letter, index or None, name)], group names {letter: name}) of a marks or fuse sidecar (v2, and the
     two legacy layouts the Workshop still reads), as EditorRules.ResolveFuseSidecar reads it: a BOM is dropped
     (File.ReadAllLines), every field is trimmed, a letter must be one of A-Z, and a v2 line without a node index is
-    skipped, not applied. Lines the Workshop skips are appended to `skipped` when a list is given."""
+    skipped, not applied. Legacy lines keep the whole remainder with index None, so resolution can check both the
+    literal name and name|index readings. Lines the Workshop skips are appended to `skipped` when a list is given."""
     lines = []
     names = {}
     v2 = False
@@ -461,44 +462,67 @@ def read_sidecar(path, skipped=None):
                 elif skipped is not None:
                     skipped.append("'%s' skipped: a v2 line needs <letter>|<node index>|<name>" % line)
             else:
-                rest = rest.strip()
-                last = rest.rfind("|")
-                index = int_token(rest[last + 1:]) if last > 0 else None
-                if index is not None:
-                    lines.append((letter, index, rest[:last].strip()))
-                else:
-                    lines.append((letter, None, rest))
+                # A legacy remainder may be either name|index or one literal name containing a numeric suffix.
+                # Keep it whole until the available rows can settle that ambiguity, as ResolveFuseSidecar does.
+                lines.append((letter, None, rest.strip()))
     return lines, names
 
 
-INT_TOKEN = re.compile(r"^[+-]?\d+$")
+INT_TOKEN = re.compile(r"[+-]?[0-9]+")
 
 
 def int_token(text):
     """The node index of a sidecar field as int.TryParse(NumberStyles.Integer) reads it: an optional sign and ASCII
     digits, else None. (str.isdigit accepted '--3' and superscript digits and int() then threw - a dead run.)"""
     text = text.strip()
-    return int(text) if INT_TOKEN.match(text) else None
+    if not INT_TOKEN.fullmatch(text):
+        return None
+    # int.TryParse is Int32, while Python accepts arbitrary precision and Unicode digits. Strip leading zeros before
+    # converting so even a very long valid zero-padded index avoids Python's integer-string digit limit.
+    digits = text.lstrip("+-").lstrip("0") or "0"
+    if len(digits) > 10:
+        return None
+    value = int(digits) * (-1 if text.startswith("-") else 1)
+    return value if -2147483648 <= value <= 2147483647 else None
 
 
 def resolve_sidecar(lines, rows, refused):
     """{node index: letter} as the Workshop resolves a sidecar against the probed rows: by index when the node at the
     index still carries the name (unique or as the file names it), else by unique name where that name is unique,
-    else refused with a reason."""
+    else refused with a reason. An index of None denotes a legacy remainder: two different fits are refused."""
     by_index = {r["node_index"]: r for r in rows}
     count = Counter(r["name"] for r in rows)
     by_name = {r["name"]: r for r in rows if count[r["name"]] == 1}
     file_count = Counter(r["file_name"] for r in rows)
+
+    def row_at(index, name):
+        at = by_index.get(index) if index is not None else None
+        return at if at is not None and name in (at["name"], at["file_name"]) else None
+
+    def unique(name):
+        return by_name.get(name) if file_count.get(name, 0) <= 1 else None
+
     out = {}
     for letter, index, name in lines:
         target = None
-        at = by_index.get(index) if index is not None else None
-        if at is not None and name in (at["name"], at["file_name"]):
-            target = at
-        elif file_count.get(name, 0) > 1:
-            target = None   # a name the FILE gives to several nodes is settled by the index or not at all
-        elif name in by_name:
-            target = by_name[name]
+        if index is not None:   # v2: the index first, then an unambiguous name
+            target = row_at(index, name)
+            if target is None:
+                target = unique(name)
+        else:   # legacy: try both readings; an index settles it only when the whole remainder names no other part
+            last = name.rfind("|")
+            legacy_index = int_token(name[last + 1:]) if last > 0 else None
+            mid = name[:last].strip() if legacy_index is not None else None
+            at, whole = row_at(legacy_index, mid), unique(name)
+            if at is not None and whole is None:
+                target = at
+            else:
+                fits = {r["node_index"]: r for r in (at, unique(mid), whole) if r is not None}
+                if len(fits) > 1:
+                    refused.append("%s|%s fits %d different parts (ambiguous legacy name/index)" % (letter, name, len(fits)))
+                    continue
+                if fits:
+                    target = next(iter(fits.values()))
         if target is None:
             refused.append("%s|%s|%s fits no single part" % (letter, "" if index is None else index, name))
             continue
@@ -553,7 +577,7 @@ FEATURES_VERSION = 3   # 3: non-TRIANGLES primitives block the mesh; triangle_fr
 
 def file_features(path, cache, use_cache, log):
     st = os.stat(path)
-    key = hashlib.sha1(("%s|%d|%d|v%d" % (norm_path(path), st.st_size, int(st.st_mtime), FEATURES_VERSION)).encode("utf-8")).hexdigest()
+    key = hashlib.sha1(("%s|%d|mtime_ns:%d|v%d" % (norm_path(path), st.st_size, st.st_mtime_ns, FEATURES_VERSION)).encode("utf-8")).hexdigest()
     if use_cache and key in cache:
         return cache[key], True
     t0 = time.time()
