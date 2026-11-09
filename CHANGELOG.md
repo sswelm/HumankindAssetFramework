@@ -14,7 +14,7 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   `tools/advisor/corpus.py` turns every decision the user made in the Workshop and the Lab - the S/T/X marks, the fuse
   letters, what the fuse reports fused, the recipes' roles and dials - into one table beside the features a proposer
   can see, joined by node index and unique name as the Workshop resolves a sidecar; a standard-library glTF reader, no
-  numpy. 33,441 rows over 45 decision-bearing files; 24 of 26 recipes join every part (the Ozhiga's parts are loose
+  numpy. 30,053 rows over 53 decision-bearing GLBs plus 3,388 carried from FBX and second-model recipes; 24 of 26 recipes join every part (the Ozhiga's parts are loose
   parts of one mesh, the Saleg's recipe is stale against its re-fuse). Two things the join taught: Blender-probed
   recipes name duplicates `Box.001` where the Cutter says `Box_2` (74 parts join by node order), and a Split's children
   reference the parent's whole POSITION accessor, so counting the accessor made every child hundreds of singleton islands.

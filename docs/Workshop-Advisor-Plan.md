@@ -92,14 +92,14 @@ lives on this machine's `D:\3DModels` and there is no proposer to run yet. The r
 proposer. The manual timing has not been done; it waits for the next new model.
 
 ```
-python tools/advisor/corpus.py --out C:/tmp/haf-advisor        # 65 folders, about 4 minutes cold, seconds cached
+python tools/advisor/corpus.py --out C:/tmp/haf-advisor        # 65 folders, about 80 s cold, 3 s from the cache
 python tools/advisor/evaluate.py --corpus C:/tmp/haf-advisor --write baseline.md
 ```
 
 What the export found about the corpus itself, before any metric:
 
-- 33,441 rows over 45 decision-bearing GLBs in 27 folders, plus 3,388 rows carried from recipes whose source this
-  reader cannot open (the two FBX recipes, the Ehrhardt's 3,350 parts among them, and the two second-model parts of
+- 30,053 rows over 53 decision-bearing GLBs (22 raw, 2 cut, 18 split, 10 fused) in 26 folders, plus 3,388 rows
+  carried from recipes whose source this reader cannot open (the two FBX recipes, the Ehrhardt's 3,350 parts among them, and the two second-model parts of
   the Wespe and the TOW). 24 of the 26 recipes join every part to a node. The Ozhiga's 688 parts are the loose parts
   of one mesh (the probe's `minVerts` split), not nodes, and are reported, not guessed. The Saleg's recipe is stale
   against its re-fuse: 9 parts name nodes the fused file no longer has.
