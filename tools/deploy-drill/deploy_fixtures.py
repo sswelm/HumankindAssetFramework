@@ -158,7 +158,7 @@ def flat3(out, seed):
     return s.write(out, "deploy_flat3_%d" % seed)
 
 
-def wall(out, links, pads, wrappers, name, small_classes=0, turning=False, crew=None, span=1.0, link="Link", pins=False, rims=0):
+def wall(out, links, pads, wrappers, name, small_classes=0, turning=False, crew=None, span=1.0, link="Link", pins=False, rims=0, pulse=None):
     """Over the bone wall: chains of instanced parts ("Link.007": the script groups by the name before the first dot),
     a few of a class too small to merge, and animated wrappers no mesh hangs from.
     Every member travels its own distance (the i-th: half a unit more than the one before, the pads a quarter off the
@@ -183,7 +183,16 @@ def wall(out, links, pads, wrappers, name, small_classes=0, turning=False, crew=
     if pins:
         for i in range(links):
             n = s.node("Pin" if i == 0 else "Pin.%03d" % i, None, mesh=m, translation=[0.3 * i, 0.0, 0.1])
-            s.anim(n, "translation", [0.0, span], [(0.3 * i, 0.0, 0.1), (0.3 * i + 0.5 * (i + 1), 0.0, 0.1)])
+            if pulse == "move":
+                dx = 0.5 * (i + 1)
+                s.anim(n, "translation", [0.0, 3.0 / 24.0, 7.0 / 24.0, span],
+                       [(0.3 * i, 0.0, 0.1), (0.3 * i + dx * 3.0 / 24.0, 1.0, 0.1),
+                        (0.3 * i + dx * 7.0 / 24.0, 0.0, 0.1), (0.3 * i + dx, 0.0, 0.1)])
+            else:
+                s.anim(n, "translation", [0.0, span], [(0.3 * i, 0.0, 0.1), (0.3 * i + 0.5 * (i + 1), 0.0, 0.1)])
+            if pulse == "turn":
+                s.anim(n, "rotation", [0.0, 3.0 / 24.0, 7.0 / 24.0, span],
+                       [(0.0, 0.0, 0.0, 1.0), (0.0, 1.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), (0.0, 0.0, 0.0, 1.0)])
     for i in range(rims):
         n = s.node("Rim" if i == 0 else "Rim.%03d" % i, None, mesh=m, translation=[0.3 * i, 0.0, 0.1])
         s.anim(n, "translation", [0.0, span], [(0.3 * i, 0.0, 0.1), (0.3 * i + 0.5 * (i + 1), 0.0, 0.1)])
@@ -818,6 +827,9 @@ def main(out):
     print("wall_comover|%s|%s" % (wall(out, 70, 0, 0, "deploy_wall_comover", pins=True, rims=8), DEFAULT))
     # ... and when they do not: the neighbour merge drops links that carry pins - the pin rides the neighbour's bone through its partner
     print("wall_comover_chain|%s|%s" % (wall(out, 130, 0, 0, "deploy_wall_comover_chain", pins=True), DEFAULT))
+    # Same sampled poses as the carriers, but a translation/half-turn at frame 3 returns by frame 7: no safe ride.
+    print("wall_comover_between_move|%s|%s" % (wall(out, 70, 0, 0, "deploy_wall_comover_between_move", pins=True, pulse="move"), DEFAULT))
+    print("wall_comover_between_turn|%s|%s" % (wall(out, 70, 0, 0, "deploy_wall_comover_between_turn", pins=True, pulse="turn"), DEFAULT))
     # slimmed back under the wall: the legacy path after all, no merge
     print("wall_slim|%s|%s" % (wall(out, 90, 26, 10, "deploy_wall_slim"), DEFAULT))
     # exactly AT the wall, wrappers included: no slimming, the legacy path

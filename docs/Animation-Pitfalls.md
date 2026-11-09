@@ -401,6 +401,10 @@ dropped link rides it rigidly: one pitch behind and swinging at the wraps - the 
 were pins merged this way). Neighbour merges MUST be spread evenly across all chains — clustered merges put every
 rider on one half of one track and that half fails together in-game; distributed, each rider only mis-swings during
 its own brief wrap transit (~2 links visible at cinematic zoom, invisible at gameplay zoom).
+Co-mover screening uses every seventh frame and the last to reject unlike motions cheaply, then validates every
+provisional match at **every baked frame**. Sampling alone missed parts that moved or turned and returned between
+two samples (PR #274 review); those parts must not be called co-movers. Rejected-pair scores may remain sampled lower
+bounds; accepted scores cover the whole baked frame range.
 
 **Three smaller laws from the same night.**
 - *1-frame stances wrap the sampler:* Unity's constant-curve dedupe collapses two identical padded frames back

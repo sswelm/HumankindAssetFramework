@@ -213,6 +213,7 @@ if _bad_names:
 _PART_BUDGET = 124   # + StaticRoot + armature root = 126 bones, max vert index 125 — margin under the wall
 _alias_pairs = []    # (dropped part, kept part) — resolved into bone_of after bone creation
 _comove_rows = []    # (candidate, its best partner, score, accepted) — every instanced part judged, for the drill
+_comove_rejected = 0   # provisional pairs rejected by the frames between sparse samples
 if len(parts) > _PART_BUDGET:
     from collections import defaultdict as _dd
     _groups = _dd(list)
@@ -225,17 +226,21 @@ if len(parts) > _PART_BUDGET:
     # frames, the member's offset seen from the partner (R_k^T (t_d - t_k), in the partner's scale) and its turn
     # relative to the partner (R_k^T R_d) are compared with the bind frame's; the score is the farthest any vertex
     # of the member could stray (offset drift + turn drift times the lever: the distance between the two plus 5% of
-    # the model). Under 0.5% of the model the ride is invisible: the member drops and rides the partner's bone.
+    # the model). Under 0.5% of the model the member drops and rides the partner's bone, after checking EVERY baked frame.
     # Partners are never dropped themselves; a member whose best partners are all dropped already takes the best
     # kept one. Only instanced classes ride (the turret, the wheels, the hull keep their bones, as before).
     _cm_members = [p for _b, _m in _groups.items() if len(_m) >= 8 for p in _m]
     _cm_frames = list(range(fmin, fmax + 1, 7)) + [fmax]
     _cm_world = {}
-    for _f in _cm_frames:
-        scene.frame_set(_f)
+    def _cm_capture(f):
+        if (parts[0].name, f) in _cm_world:
+            return
+        scene.frame_set(f)
         for p in parts:
             _mw = p.matrix_world
-            _cm_world[(p.name, _f)] = [[float(_mw[i][j]) for j in range(4)] for i in range(4)]
+            _cm_world[(p.name, f)] = [[float(_mw[i][j]) for j in range(4)] for i in range(4)]
+    for _f in _cm_frames:
+        _cm_capture(_f)
     scene.frame_set(fmin)
     _cm_tol = 0.005 * _dim_scaled
     _cm_lever = 0.05 * _dim_scaled
@@ -245,14 +250,14 @@ if len(parts) > _PART_BUDGET:
         v = [mk[0][j] * t[0] + mk[1][j] * t[1] + mk[2][j] * t[2] for j in range(3)]
         q = [mk[0][i] * md[0][j] + mk[1][i] * md[1][j] + mk[2][i] * md[2][j] for i in range(3) for j in range(3)]
         return v, q
-    def _cm_score(d, k):
+    def _cm_score(d, k, sample):
         v0, q0 = _cm_rel(d, k, fmin)
         md, mk = _cm_world[(d, fmin)], _cm_world[(k, fmin)]
         sk = math.sqrt(mk[0][0] * mk[0][0] + mk[1][0] * mk[1][0] + mk[2][0] * mk[2][0])
         sd = math.sqrt(md[0][0] * md[0][0] + md[1][0] * md[1][0] + md[2][0] * md[2][0])
         t0 = math.sqrt((md[0][3] - mk[0][3]) * (md[0][3] - mk[0][3]) + (md[1][3] - mk[1][3]) * (md[1][3] - mk[1][3]) + (md[2][3] - mk[2][3]) * (md[2][3] - mk[2][3]))
         mt = 0.0; mr = 0.0
-        for _f in _cm_frames:
+        for _f in sample:
             v, q = _cm_rel(d, k, _f)
             for j in range(3):
                 a = abs(v[j] - v0[j])
@@ -263,7 +268,25 @@ if len(parts) > _PART_BUDGET:
         return mt / sk + mr / (sk * sd) * (t0 + _cm_lever)
     _cm_table = {}
     for d in _cm_members:
-        _cm_table[d.name] = sorted((_cm_score(d.name, k.name), k.name) for k in parts if k is not d)
+        _cm_table[d.name] = sorted((_cm_score(d.name, k.name, _cm_frames), k.name) for k in parts if k is not d)
+    # Sparse samples cheaply reject unlike motions, but can miss a whole excursion between frames 0 and 7.
+    # Refine every provisional match before ranking/accepting it; retain sampled lower bounds for rejected pairs.
+    if any(s <= _cm_tol for row in _cm_table.values() for s, k in row):
+        _cm_full_frames = list(range(fmin, fmax + 1))
+        for _f in _cm_full_frames:
+            _cm_capture(_f)
+        scene.frame_set(fmin)
+        def _cm_refine(d, s, k):
+            global _comove_rejected
+            if s > _cm_tol:
+                return s
+            score = _cm_score(d, k, _cm_full_frames)
+            if score > _cm_tol:
+                _comove_rejected += 1
+            return score
+        for d in _cm_members:
+            _cm_table[d.name] = sorted((_cm_refine(d.name, s, k), k)
+                                       for s, k in _cm_table[d.name])
     _cm_dropped = {}
     _cm_pinned = set()
     for d in sorted(_cm_members, key=lambda o: (_cm_table[o.name][0][0], o.name)):

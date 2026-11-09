@@ -18,6 +18,7 @@ static class DecisionsDrill
         "no object with an action left (frame range 1..1)", "normalization: x100", "normalization: recentered", "normalization: none",
         "bone slimming", "the legacy path", "the contract path", "a culled part", "a culled part's descendant", "a pair-merge", "the script stops (no animated part)",
         "a co-mover ride (3b-i)", "a co-located part turning on its own keeps its bone (3b-i)", "a co-mover's partner dropped by the neighbour merge (the chain resolves)",
+        "a provisional co-mover rejected between the sparse samples",
         "the recoil step off with a recoil range given", "left to Blender (BlenderDeploy.Fallback)", "an armature that is a part (its bones are animated)",
         "a bake on the legacy path", "a bone re-keyed by the barrel retarget or the leg scale (5b, 5c)", "a frame set between two Bezier keys of a re-keyed bone", "a recoil tail keyed on a RecoilArm (5d)", "the recoil step's exit: no barrel or cannon to pick", "a fire-window snapshot (5a)", "no recoil range: no snapshot", "a custom property keyed by the bake (not modelled: it moves nothing)", "an imported armature baked with it (its bones keyed a frame, its own animation dropped)", "a clip of frame 0 alone (the bake keys frame 1 too)", "a bake on the contract path (scale curves stripped, delta-form rebase)",
         "no static mesh (StaticRoot has no anchor)", "StaticRoot anchored to a mesh that has no parent", "StaticRoot anchored to a static mesh's parent",
@@ -130,6 +131,7 @@ static class DecisionsDrill
                     Compare(problems, "culled parts", r.Bad, Of("BAD").Select(t => t[1]).ToList());
                     Compare(problems, "pair-merges", r.Alias.Select(a => a.dropped.Name + "\t" + a.kept.Name).ToList(), Of("ALIAS").Select(t => t[1] + "\t" + t[2]).ToList());
                     Compare(problems, "co-mover scores (part, best partner, score, rides)", r.Comove.Select(c => $"{c.part.Name}\t{c.partner.Name}\t{H64(c.score)}\t{(c.rides ? 1 : 0)}").ToList(), Of("COMOVE").Select(t => $"{t[1]}\t{t[2]}\t{t[3]}\t{t[4]}").ToList());
+                    Compare(problems, "co-mover pairs rejected by full-frame refinement", new List<string> { r.ComoveRejected.ToString() }, Of("CMREJECT").Select(t => t[1]).ToList());
                     Compare(problems, "objects", r.Objects.Select(o => $"{o.Name}\t{o.Type}\t{(o.Parent != null ? o.Parent.Name : "-")}\t{o.DataName ?? "-"}\t{(o.HasAction ? 1 : 0)}").ToList(), bObj.Select(t => string.Join("\t", t.Skip(1))).ToList());
                     // ---- the armature (part 3): its name, which bone each part rides, the bones at rest, the anchors
                     if (Of("ARM")[0][1] != r.Armature.Name) problems.Add($"the armature is '{r.Armature.Name}' here, '{Of("ARM")[0][1]}' in Blender");
@@ -704,6 +706,7 @@ static class DecisionsDrill
                 if (log.Any(l => l.StartsWith("DEPLOY culled") && !l.Contains("(+0 descendant"))) cover["a culled part's descendant"]++;
                 if (log.Any(l => l.StartsWith("DEPLOY bone budget:") && l.Contains("pair-merged onto neighbor bones"))) cover["a pair-merge"]++;
                 if (r.Comove.Any(c => c.rides)) cover["a co-mover ride (3b-i)"]++;
+                if (r.ComoveRejected > 0) cover["a provisional co-mover rejected between the sparse samples"]++;
                 {
                     // a member at (nearly) its best partner's place that still keeps its bone: it turns on its own (the turn term)
                     double dim = r.NormDim * r.NormScale;

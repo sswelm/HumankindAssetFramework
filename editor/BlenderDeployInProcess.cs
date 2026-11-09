@@ -13,7 +13,7 @@ public static class BlenderDeployInProcess
 {
     /// <summary>Bump when the in-process conversion's written file changes: the Factory's cache key carries it, so a
     /// cached deploy_converted.glb made by an older port is converted again.</summary>
-    public const string CacheRevision = "2026-11-09.comover.1." + HafModelLoader.CacheRevision;   // the bone budget lets an instanced part ride a part it moves with (the T-62's pins ride their pads) before any neighbour merge
+    public const string CacheRevision = "2026-11-09.comover.2." + HafModelLoader.CacheRevision;   // validate provisional co-movers at every baked frame, including motion between the sparse samples
 
     /// <summary>The longest animation converted here (frames from the bake's first to its last): the bake, the fire
     /// window, the role clips and the export each walk every frame for every bone on the editor thread, where only the

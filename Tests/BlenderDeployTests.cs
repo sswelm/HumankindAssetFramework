@@ -45,6 +45,22 @@ public class BlenderDeployTests
             anim.Channels.Add(new HafChannel { Node = node, Path = "rotation", Sampler = anim.Samplers.Count - 1 });
         }
 
+        public void BetweenSamples(int node, bool turn, float dx)
+        {
+            var times = new[] { 0f, 3f / 24f, 7f / 24f, 1f };
+            if (turn)
+            {
+                Move(node, dx: dx);
+                anim.Samplers.Add(new HafSampler { Times = times, Values = new[] { 0f, 0f, 0f, 1f, 0f, 1f, 0f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f }, Components = 4, Interpolation = "LINEAR" });
+                anim.Channels.Add(new HafChannel { Node = node, Path = "rotation", Sampler = anim.Samplers.Count - 1 });
+            }
+            else
+            {
+                anim.Samplers.Add(new HafSampler { Times = times, Values = new[] { 0f, 0f, 0f, dx * 3f / 24f, 1f, 0f, dx * 7f / 24f, 0f, 0f, dx, 0f, 0f }, Components = 3, Interpolation = "LINEAR" });
+                anim.Channels.Add(new HafChannel { Node = node, Path = "translation", Sampler = anim.Samplers.Count - 1 });
+            }
+        }
+
         /// <summary>A chain of instanced parts, each travelling its own distance (the i-th half a unit more than the one before): no two
         /// are co-movers, so the neighbour merge (3b-ii) has work. Returns the nodes.</summary>
         public List<int> Chain(string baseName, int count, double[] at = null)
@@ -211,6 +227,29 @@ public class BlenderDeployTests
         var bones = new HashSet<string>(r.Bones.Select(b => b.Name));
         Assert.All(r.Bound, b => Assert.Contains(b.Group, bones));
         foreach (var (dropped, kept) in r.Alias) Assert.Equal(kept.Name, r.Bound.Single(b => b.Mesh.Name == dropped.Name).Group);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_part_that_moves_or_turns_between_the_seven_frame_samples_cannot_be_a_co_mover(bool turn)
+    {
+        var s = new Scene();
+        s.Node("Hull", mesh: true);
+        s.Chain("Link", 130);
+        for (int i = 0; i < 8; i++)
+        {
+            int n = s.Node(i == 0 ? "Rim" : $"Rim.{i:000}", mesh: true);
+            s.BetweenSamples(n, turn, 0.5f * (i + 1));
+        }
+        var r = s.Decide();
+        Assert.Null(r.Fallback);
+        Assert.Equal(16, r.ComoveRejected);   // eight pin/link pairs, each direction: invisible at the sparse samples
+        Assert.Equal(138, r.Comove.Count);
+        Assert.DoesNotContain(r.Comove, c => c.rides);
+        Assert.DoesNotContain(r.Log, l => l.Contains("ride a co-moving part's bone"));
+        // The explicitly lossy budget fallback may still run; it must not call this an exact ride.
+        Assert.Contains(r.Log, l => l.Contains("pair-merged onto neighbor bones"));
     }
 
     /// <summary>When the co-mover rides do not bring the rig under the budget, the neighbour merge still runs - and may drop a

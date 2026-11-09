@@ -232,7 +232,7 @@ t3=$(date +%s)
 oracle_blender decisions "$TMPD/decisions_raw.txt" --key "$ROOT/tools/deploy-drill/blender_decisions_dump.py" "$ROOT/editor/Tools~/deploy_convert.py" "$WTMP/jobs.txt" -- --background --python "$(cygpath -m "$ROOT/tools/deploy-drill/blender_decisions_dump.py")" -- "$WROOT/editor/Tools~/deploy_convert.py" "$WTMP/jobs.txt"; drc=$?
 oracle_check
 t4=$(date +%s)
-tr -d '\r' < "$TMPD/decisions_raw.txt" | grep -E "^(JOB|LOG|LOG2|EXIT|RANGE|NORM|FLAG|PART|BAD|ALIAS|COMOVE|ARM|BONEOF|RBONE|ANCHOR|HULL|PINV|OBJ|M|T|BOX|ACT|FC|FCA|PB2|PB3|M2|O2|O3|LOG3|SNAP|APB|O4|LOG4|FC4|APB4|O5|LOG5|EXIT5|DIES5|R5|RBONE5|FC5|APB5|PM5|O6|LOG6|DIES6|BIND|VG6|MOD6|V6|VX6|N6|DATA6|O7|LOG7|DIES7|OBJ7|ACT7|E7|O8|SKIP7C|LOG7C|DIES7C|ACT7C|FC7C|ACTIVE7|APB7|SW|DONE|FAIL)	" > "$TMPD/decisions.txt"
+tr -d '\r' < "$TMPD/decisions_raw.txt" | grep -E "^(JOB|LOG|LOG2|EXIT|RANGE|NORM|FLAG|PART|BAD|ALIAS|COMOVE|CMREJECT|ARM|BONEOF|RBONE|ANCHOR|HULL|PINV|OBJ|M|T|BOX|ACT|FC|FCA|PB2|PB3|M2|O2|O3|LOG3|SNAP|APB|O4|LOG4|FC4|APB4|O5|LOG5|EXIT5|DIES5|R5|RBONE5|FC5|APB5|PM5|O6|LOG6|DIES6|BIND|VG6|MOD6|V6|VX6|N6|DATA6|O7|LOG7|DIES7|OBJ7|ACT7|E7|O8|SKIP7C|LOG7C|DIES7C|ACT7C|FC7C|ACTIVE7|APB7|SW|DONE|FAIL)	" > "$TMPD/decisions.txt"
 n_done=$(grep -c "^DONE" "$TMPD/decisions.txt")
 if [ "$drc" -ne 0 ] || [ "$n_done" -ne "$n_jobs" ]; then
   grep -E "^FAIL|Traceback|Error" "$TMPD/decisions_raw.txt" "$TMPD/decisions_err.txt" | head -8
