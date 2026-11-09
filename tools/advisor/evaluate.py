@@ -54,8 +54,14 @@ TASKS = ("role", "delete", "delete-hand", "split", "group", "dials")
 # Keep answer columns in the corpus for training/scoring, never in the held-out proposer's inputs. Use an allowlist
 # so a future label or join column cannot silently become a feature. Visibility/flip/bone are probe observations.
 PART_FEATURES = frozenset(("model", "category", "file", "stage", "node_index", "name", "file_name", "mesh_index",
-                           "mesh_shared", "parent_index", "depth", "verts", "tris", "islands", "cx", "cy", "cz",
-                           "sx", "sy", "sz", "blocked", "triangle_free", "vis", "flip", "bone"))
+                           "mesh_shared", "parent_index", "depth", "verts", "tris", "islands", "islands_merged", "island_top_pct",
+                           "island_second_pct", "islands_big", "cx", "cy", "cz", "sx", "sy", "sz", "blocked", "triangle_free",
+                           "vis", "flip", "bone"))
+# Every other column of the corpus is a label or a join record and stays out of the held-out rows. A new corpus column
+# must be placed in one set or the other (Tests/test_advisor_corpus.py holds the partition), so a feature a proposer
+# needs is never silently stripped: the first Split proposer proposed nothing because its columns were not listed here.
+PART_LABELS = frozenset(("mark", "auto_mark", "fuse_letter", "fuse_group_name", "fused_into", "fused_letter", "role", "role_id",
+                         "placed", "recipe", "recipe_verts", "recipe_name", "name_join", "role_via_fuse", "recipe_via_fuse"))
 MODEL_FEATURES = frozenset(("model", "category", "files"))
 
 
@@ -411,9 +417,13 @@ def evaluate(parts, models, proposers, target=30000.0):
     lines.append("### dials: %d models with a recipe carrying dials; the Lab's Verify projection (probe verts after the tiers) against a target of %d" % (len(rows), int(target)))
     for name, fn in proposers.get("dials", []):
         preds = leave_one_model_out("dials", [], models, fn)
+        preds = {m: p for m, p in preds.items() if p}   # a proposer that has nothing to say about dials returns {}
         lines.append("")
         lines.append("**%s**" % name)
         lines.append("")
+        if not preds:
+            lines.append("No dial proposals.")
+            continue
         lines.append("| dial | models | mean abs error (pct points) | median abs error |")
         lines.append("|---|---:|---:|---:|")
         for d in DIALS:

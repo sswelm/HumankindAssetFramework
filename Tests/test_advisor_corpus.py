@@ -517,6 +517,114 @@ class ReviewRound2(unittest.TestCase):
             self.assertEqual([m["recipe"] for m in models_rows if m["model"] == "Rah66"], [""])
 
 
+def dash(x0, x1, y, z=0.0, w=0.02):
+    """A thin triangle pair along X from x0 to x1 at height y: an elongated island."""
+    return [(x0, y, z), (x1, y, z), (x0, y + w, z), (x1, y + w, z)]
+
+
+def tri_mesh(positions_lists):
+    """One mesh of one primitive over several quads (two triangles each), all as one position accessor."""
+    pts, idx = [], []
+    for quad in positions_lists:
+        base = len(pts)
+        pts.extend(quad)
+        idx.extend([base, base + 1, base + 2, base + 1, base + 3, base + 2])
+    return make_glb(nodes=[{"name": "P", "mesh": 0}], meshes=[[(0, 0)]], positions=[pts], index_lists=[idx])
+
+
+class DistanceMerge(unittest.TestCase):
+    """The Workshop's 1 % distance merge, ported: the island count the user reads in the Cutter's row."""
+
+    def features(self, glb):
+        return corpus.glb_parts(glb)[0]
+
+    def test_two_islands_within_one_percent_of_the_diagonal_merge_and_far_ones_do_not(self):
+        # the part spans 100 units: eps = 1 % of its diagonal ~ 1.0; a gap of 0.5 merges, a gap of 5 does not
+        near = tri_mesh([dash(0, 50, 0), dash(50.5, 100, 0)])
+        far = tri_mesh([[(0, 0, 0), (40, 0, 0), (0, 40, 0), (40, 40, 0)], [(60, 60, 0), (100, 60, 0), (60, 100, 0), (100, 100, 0)]])
+        f = self.features(near)
+        self.assertEqual((f["islands"], f["islands_merged"]), (2, 1))
+        f = self.features(far)
+        self.assertEqual((f["islands"], f["islands_merged"], f["island_top_pct"], f["islands_big"]), (2, 2, 50.0, 2))
+
+    def test_two_elongated_islands_chain_only_when_colinear(self):
+        # two dashes on one line, 0.5 apart: one rope. The same two dashes side by side 0.5 apart: two separate lines
+        # (both elongated, parallel, but the perpendicular offset exceeds 0.35 * eps).
+        colinear = tri_mesh([dash(0, 50, 0), dash(50.5, 100, 0)])
+        parallel = tri_mesh([dash(0, 100, 0), dash(0, 100, 0.5)])
+        self.assertEqual(self.features(colinear)["islands_merged"], 1)
+        f = self.features(parallel)
+        self.assertEqual((f["islands"], f["islands_merged"]), (2, 2))
+        # a blob (not elongated) with a VERTEX within eps of a dash vertex merges on distance alone; the merge measures
+        # vertex to vertex, as the Workshop does, so a blob hovering over the dash's middle (no vertex there) stays apart
+        blob = tri_mesh([dash(0, 100, 0), [(100, 0.5, 0), (120, 0.5, 0), (100, 20, 0), (120, 20, 0)]])
+        self.assertEqual(self.features(blob)["islands_merged"], 1)
+        hover = tri_mesh([dash(0, 100, 0), [(40, 0.5, 0), (60, 0.5, 0), (40, 20, 0), (60, 20, 0)]])
+        self.assertEqual(self.features(hover)["islands_merged"], 2)
+
+    def test_a_single_island_part_skips_the_merge(self):
+        f = self.features(tri_mesh([dash(0, 100, 0)]))
+        self.assertEqual((f["islands"], f["islands_merged"], f["island_top_pct"], f["island_second_pct"], f["islands_big"]), (1, 1, 100.0, 0.0, 1))
+
+    def test_principal_axis_aspect_of_a_dash_and_of_a_square(self):
+        _, aspect, _ = corpus.principal_axis(dash(0, 100, 0), [0, 0, 0], [100, 0.02, 0])
+        self.assertGreater(aspect, 3)
+        _, aspect, _ = corpus.principal_axis([(0, 0, 0), (1, 0, 0), (0, 1, 0), (1, 1, 0)], [0, 0, 0], [1, 1, 0])
+        self.assertLess(aspect, 1.5)
+
+
+class SplitProposer(unittest.TestCase):
+    """tools/advisor/proposers/split.py: thresholds learned on the training rows, applied to feature-only test rows."""
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools", "advisor", "proposers"))
+        import split  # noqa: E402
+        cls.split = split
+
+    @staticmethod
+    def row(model, i, tris, merged, big, truth="", blocked=""):
+        return {"model": model, "file": model + "/m.glb", "node_index": i, "name": "n%d" % i, "stage": "raw", "tris": str(tris),
+                "islands_merged": str(merged), "islands_big": str(big), "blocked": blocked, "truth": truth}
+
+    def test_the_rule_is_learned_from_the_training_rows_and_applied_without_truth(self):
+        train = []
+        for i in range(20):   # splits: big, many islands; the rest: small or single-island
+            train.append(self.row("a", i, 5000 + i, 6, 4, "S"))
+            train.append(self.row("a", 100 + i, 50 + i, 6, 4, ""))
+            train.append(self.row("a", 200 + i, 9000, 1, 1, ""))
+        k, t, b = self.split.learn(train)
+        self.assertGreaterEqual(k, 2)
+        self.assertGreater(t, 50 + 19)        # the threshold separates the big splits from the small non-splits
+        self.assertLessEqual(t, 5000)
+        test = [{k_: v for k_, v in r.items() if k_ != "truth"} for r in
+                (self.row("b", 1, 7000, 5, 3), self.row("b", 2, 60, 5, 3), self.row("b", 3, 7000, 1, 1), self.row("b", 4, 7000, 5, 3, blocked="Only TRIANGLES"))]
+        preds = self.split.propose("split", test, train, {"model": "b", "category": "ship", "files": ""}, [])
+        self.assertEqual(preds, {("b/m.glb", 1): "S", ("b/m.glb", 2): "", ("b/m.glb", 3): "", ("b/m.glb", 4): ""})
+        self.assertEqual(self.split.LAST_RULE["model"], "b")
+        self.assertEqual(self.split.propose("delete", test, train, {}, []), {})   # nothing to say about other tasks
+
+    def test_every_corpus_column_is_a_feature_or_a_label(self):
+        # the held-out allowlist and the label set partition the export's columns: a new column lands in one of them or
+        # this fails, so no feature is silently stripped from a proposer's rows again
+        columns = set(corpus.PART_COLUMNS)
+        self.assertEqual(evaluate.PART_FEATURES | evaluate.PART_LABELS, columns, columns - evaluate.PART_FEATURES - evaluate.PART_LABELS)
+        self.assertEqual(evaluate.PART_FEATURES & evaluate.PART_LABELS, frozenset())
+        for c in self.split.NEEDED:
+            self.assertIn(c, evaluate.PART_FEATURES)
+
+    def test_rows_without_the_feature_columns_fail_loudly(self):
+        with self.assertRaises(ValueError):
+            self.split.propose("split", [{"file": "f", "node_index": 1, "tris": "9"}], [], {}, [])
+
+    def test_f_beta(self):
+        self.assertAlmostEqual(self.split.f_beta(1, 0, 1), 0.6667, places=3)   # F1: precision 1, recall 0.5
+        self.assertAlmostEqual(self.split.f_beta(1, 1, 0), 0.6667, places=3)   # F1: precision 0.5, recall 1 - the same
+        self.assertAlmostEqual(self.split.f_beta(1, 0, 1, beta=0.5), 0.8333, places=3)   # F0.5 weighs precision double
+        self.assertAlmostEqual(self.split.f_beta(1, 1, 0, beta=0.5), 0.5556, places=3)
+        self.assertEqual(self.split.f_beta(0, 5, 5), 0.0)
+
+
 class Rules(unittest.TestCase):
     def test_invalid_v2_indices_cannot_attach_a_mark_by_name(self):
         tmp = tempfile.TemporaryDirectory(prefix="advisor-index-")
