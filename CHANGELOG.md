@@ -2755,6 +2755,22 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   from Driver/StaticRoot to Driver/Driver. Four unit cases cover both object-name orders under ordinary and pair-merged
   ancestors, and the live nested fixtures cover both orders. The deploy cache revision is bumped again so affected
   cached conversions are rebuilt (`docs/Testing.md`).
+- **THE BONE BUDGET LETS A PART RIDE WHAT IT MOVES WITH (2026-11-09, the T-62's hanging links).** With the stuck links fixed,
+  the merged pieces moved - one link behind their place, swinging 120 degrees at every wrap, "hanging off the track". The
+  T-62's track is a pad AND a pin per link (60 + 60, two instanced classes that move as one), and the neighbour merge
+  dropped pads and pins alike onto the PREVIOUS link of their own class; measured on the source, that ride strays up to
+  2.3 units on a 9.6-unit tank, while a pin riding its own pad strays 0.012 at most. So the budget now has two steps, in
+  `deploy_convert.py` and `BlenderDeploy` alike: first (3b-i) every member of an instanced class looks for a part it
+  moves with - at the cull's frames its offset seen from the partner and its turn relative to the partner are compared
+  with the bind frame's; the score is the farthest a vertex could stray (offset drift plus turn drift times the lever:
+  their distance plus 5% of the model), and under 0.5% of the model the member drops and rides the partner's bone (the
+  T-62: all 60 pins ride their pads, 139 parts -> 79, no neighbour merge left to do); then (3b-ii) the neighbour merge
+  takes only what is still over, and a rider whose partner it drops rides on through to the neighbour's bone. The
+  decisions drill holds every judged part's best partner and score to the script's bits (`COMOVE` rows) and covers the
+  ride, a co-located part that turns on its own (keeps its bone) and the chain; the wall fixtures' chains now travel
+  distinct distances (no two co-move, so the neighbour merge still has work) and two new fixtures carry pins and
+  spinning rims. The deploy cache stamp is bumped again. The T-62's bone golden shrinks to 80 bones (BONES 125 -> 80); re-capture
+  after the in-game check.
 - **A PAIR-MERGED TRACK LINK MOVES WITH ITS NEIGHBOUR (2026-11-09, the T-62's stuck links).** The deploy conversion keeps a
   big rig under the 128-index wall by merging instanced parts onto their numeric neighbour's bone (15 of the T-62's 120
   track pieces). The bind then named each mesh's vertex group after the PART found, and a merged part has no bone of its

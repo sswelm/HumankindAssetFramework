@@ -158,19 +158,36 @@ def flat3(out, seed):
     return s.write(out, "deploy_flat3_%d" % seed)
 
 
-def wall(out, links, pads, wrappers, name, small_classes=0, turning=False, crew=None, span=1.0, link="Link"):
+def wall(out, links, pads, wrappers, name, small_classes=0, turning=False, crew=None, span=1.0, link="Link", pins=False, rims=0):
     """Over the bone wall: chains of instanced parts ("Link.007": the script groups by the name before the first dot),
-    a few of a class too small to merge, and animated wrappers no mesh hangs from."""
+    a few of a class too small to merge, and animated wrappers no mesh hangs from.
+    Every member travels its own distance (the i-th: half a unit more than the one before, the pads a quarter off the
+    links), so no two are co-movers and the neighbour merge (3b-ii) has work; the small classes turn instead.
+    pins: a Pin above every link with the link's own motion - a co-mover, it rides the link's bone (3b-i: the T-62's
+    pad and pin per link). rims: that many Rims at the first pins' places, travelling with them but SPINNING - co-located,
+    not co-moving, each keeps its bone."""
     s = Scene()
     s.node("Hull", None, mesh=s.mesh("hull", 10.0))
     m = s.mesh("link", 0.2)
-    def chain(base_name, count, y):
+    def chain(base_name, count, y, extra=0.0):
         for i in range(count):
             n = s.node(base_name if i == 0 else "%s.%03d" % (base_name, i), None, mesh=m, translation=[0.3 * i, y, 0.0])
-            s.anim(n, "translation", [0.0, span], [(0.3 * i, y, 0.0), (0.3 * i + 1.0, y, 0.0)])
-    chain(link, links, 0.0); chain("Pad", pads, 1.0); chain("Few", 6, 2.0)
+            s.anim(n, "translation", [0.0, span], [(0.3 * i, y, 0.0), (0.3 * i + 0.5 * (i + 1) + extra, y, 0.0)])
+    def turners(base_name, count, y):
+        for i in range(count):
+            n = s.node(base_name if i == 0 else "%s.%03d" % (base_name, i), None, mesh=m, translation=[0.3 * i, y, 0.0])
+            s.anim(n, "rotation", [0.0, span], [(0.0, 0.0, 0.0, 1.0), (0.0, 0.0, 0.7071068, 0.7071068)])
+    chain(link, links, 0.0); chain("Pad", pads, 1.0, extra=0.25); turners("Few", 6, 2.0)
     for c in range(small_classes):
-        chain("Class%d" % c, 7, 4.0 + c)
+        turners("Class%d" % c, 7, 4.0 + c)
+    if pins:
+        for i in range(links):
+            n = s.node("Pin" if i == 0 else "Pin.%03d" % i, None, mesh=m, translation=[0.3 * i, 0.0, 0.1])
+            s.anim(n, "translation", [0.0, span], [(0.3 * i, 0.0, 0.1), (0.3 * i + 0.5 * (i + 1), 0.0, 0.1)])
+    for i in range(rims):
+        n = s.node("Rim" if i == 0 else "Rim.%03d" % i, None, mesh=m, translation=[0.3 * i, 0.0, 0.1])
+        s.anim(n, "translation", [0.0, span], [(0.3 * i, 0.0, 0.1), (0.3 * i + 0.5 * (i + 1), 0.0, 0.1)])
+        s.anim(n, "rotation", [0.0, 0.5 * span, span], [(0.0, 0.0, 0.0, 1.0), (0.0, 0.7071068, 0.0, 0.7071068), (0.0, 1.0, 0.0, 0.0)])
     if crew is not None:
         # an imported armature beside the parts, nothing hanging from its bones (crew: is a bone's SCALE animated?). The
         # bake bakes it too - it is selected - and the scale-free step counts its curves and the importer's
@@ -191,8 +208,9 @@ def wall(out, links, pads, wrappers, name, small_classes=0, turning=False, crew=
         leg = s.node("LandingLeg", None, mesh=m, translation=[-2.0, 5.0, 0.0], rotation=[0.0, 0.0, 0.3826834, 0.9238795])
         s.anim(leg, "rotation", [0.0, 1.0], [(0.0, 0.0, 0.3826834, 0.9238795), (0.3826834, 0.0, 0.0, 0.9238795)])
     for i in range(wrappers):
+        # the wrappers travel along y (the chains along x): Wrap0 is a part (Hung hangs from it) and must co-move with no link
         w = s.node("Wrap%d" % i, None, translation=[0.0, 3.0, 0.1 * i])
-        s.anim(w, "translation", [0.0, 1.0], [(0.0, 3.0, 0.1 * i), (1.0, 3.0, 0.1 * i)])
+        s.anim(w, "translation", [0.0, 1.0], [(0.0, 3.0, 0.1 * i), (0.0, 4.0, 0.1 * i)])
         if i == 0:   # a wrapper a mesh does hang from, through an unanimated empty: it is a binding target and stays
             s.node("Hung", s.node("Between", w), mesh=m)
     return s.write(out, name)
@@ -795,6 +813,11 @@ def main(out):
     print("LEFT:skinned|%s|0|24|zzz||||||0|||4|0|1" % small(out, "deploy_skinned", 1.0, skin=True))
     print("cull|%s|%s" % (cull(out), DEFAULT))
     print("wall_budget|%s|%s" % (wall(out, 110, 30, 10, "deploy_wall", turning=True), DEFAULT))
+    # co-movers (3b-i): a pin per link rides the link's bone, the spinning rims at the pins' places keep theirs; the pins'
+    # rides alone bring the rig under the budget, no neighbour merge
+    print("wall_comover|%s|%s" % (wall(out, 70, 0, 0, "deploy_wall_comover", pins=True, rims=8), DEFAULT))
+    # ... and when they do not: the neighbour merge drops links that carry pins - the pin rides the neighbour's bone through its partner
+    print("wall_comover_chain|%s|%s" % (wall(out, 130, 0, 0, "deploy_wall_comover_chain", pins=True), DEFAULT))
     # slimmed back under the wall: the legacy path after all, no merge
     print("wall_slim|%s|%s" % (wall(out, 90, 26, 10, "deploy_wall_slim"), DEFAULT))
     # exactly AT the wall, wrappers included: no slimming, the legacy path

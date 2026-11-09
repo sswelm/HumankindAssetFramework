@@ -23,7 +23,7 @@
 #   DON'T counter-rotate the tube to straighten it — that needs translation the bake drops, and the model explodes in-game.
 # Checks BOTH the object name AND the mesh-data name (glTF import can name an object 'Object_NNN' while its mesh keeps
 # the real name, so an object-name-only filter misses them). Node `matrix` transforms aren't handled (TRS only).
-import bpy, sys
+import bpy, sys, math
 from mathutils import Vector, Quaternion, Matrix
 
 argv = sys.argv[sys.argv.index("--") + 1:]
@@ -212,11 +212,89 @@ if _bad_names:
 # wrap arcs, invisible on straights. Small/unique parts (turret, wheels, hull) are never merged. ---
 _PART_BUDGET = 124   # + StaticRoot + armature root = 126 bones, max vert index 125 — margin under the wall
 _alias_pairs = []    # (dropped part, kept part) — resolved into bone_of after bone creation
+_comove_rows = []    # (candidate, its best partner, score, accepted) — every instanced part judged, for the drill
 if len(parts) > _PART_BUDGET:
     from collections import defaultdict as _dd
     _groups = _dd(list)
     for p in parts:
         _groups[p.name.split('.')[0]].append(p)
+    # --- 3b-i. CO-MOVERS FIRST (2026-11-09, the T-62's hanging links): a track link is often TWO instanced parts (the
+    # T-62: a pad and a pin per link, 60 + 60) that move as one. Riding the numeric neighbour instead (3b-ii) put a
+    # pin one link behind its own place and swung it 120 degrees at every wrap - the links "hung off" the track. So
+    # before any neighbour merge, every member of an instanced class looks for a part it MOVES WITH: at the cull's
+    # frames, the member's offset seen from the partner (R_k^T (t_d - t_k), in the partner's scale) and its turn
+    # relative to the partner (R_k^T R_d) are compared with the bind frame's; the score is the farthest any vertex
+    # of the member could stray (offset drift + turn drift times the lever: the distance between the two plus 5% of
+    # the model). Under 0.5% of the model the ride is invisible: the member drops and rides the partner's bone.
+    # Partners are never dropped themselves; a member whose best partners are all dropped already takes the best
+    # kept one. Only instanced classes ride (the turret, the wheels, the hull keep their bones, as before).
+    _cm_members = [p for _b, _m in _groups.items() if len(_m) >= 8 for p in _m]
+    _cm_frames = list(range(fmin, fmax + 1, 7)) + [fmax]
+    _cm_world = {}
+    for _f in _cm_frames:
+        scene.frame_set(_f)
+        for p in parts:
+            _mw = p.matrix_world
+            _cm_world[(p.name, _f)] = [[float(_mw[i][j]) for j in range(4)] for i in range(4)]
+    scene.frame_set(fmin)
+    _cm_tol = 0.005 * _dim_scaled
+    _cm_lever = 0.05 * _dim_scaled
+    def _cm_rel(d, k, f):
+        md, mk = _cm_world[(d, f)], _cm_world[(k, f)]
+        t = [md[0][3] - mk[0][3], md[1][3] - mk[1][3], md[2][3] - mk[2][3]]
+        v = [mk[0][j] * t[0] + mk[1][j] * t[1] + mk[2][j] * t[2] for j in range(3)]
+        q = [mk[0][i] * md[0][j] + mk[1][i] * md[1][j] + mk[2][i] * md[2][j] for i in range(3) for j in range(3)]
+        return v, q
+    def _cm_score(d, k):
+        v0, q0 = _cm_rel(d, k, fmin)
+        md, mk = _cm_world[(d, fmin)], _cm_world[(k, fmin)]
+        sk = math.sqrt(mk[0][0] * mk[0][0] + mk[1][0] * mk[1][0] + mk[2][0] * mk[2][0])
+        sd = math.sqrt(md[0][0] * md[0][0] + md[1][0] * md[1][0] + md[2][0] * md[2][0])
+        t0 = math.sqrt((md[0][3] - mk[0][3]) * (md[0][3] - mk[0][3]) + (md[1][3] - mk[1][3]) * (md[1][3] - mk[1][3]) + (md[2][3] - mk[2][3]) * (md[2][3] - mk[2][3]))
+        mt = 0.0; mr = 0.0
+        for _f in _cm_frames:
+            v, q = _cm_rel(d, k, _f)
+            for j in range(3):
+                a = abs(v[j] - v0[j])
+                if a > mt: mt = a
+            for j in range(9):
+                a = abs(q[j] - q0[j])
+                if a > mr: mr = a
+        return mt / sk + mr / (sk * sd) * (t0 + _cm_lever)
+    _cm_table = {}
+    for d in _cm_members:
+        _cm_table[d.name] = sorted((_cm_score(d.name, k.name), k.name) for k in parts if k is not d)
+    _cm_dropped = {}
+    _cm_pinned = set()
+    for d in sorted(_cm_members, key=lambda o: (_cm_table[o.name][0][0], o.name)):
+        if d.name in _cm_pinned:
+            continue
+        _best_s, _best_k = _cm_table[d.name][0]
+        _taken = None
+        for _s, _k in _cm_table[d.name]:
+            if _s > _cm_tol:
+                break
+            if _k in _cm_dropped:
+                continue
+            _taken = _k
+            break
+        _comove_rows.append((d.name, _best_k, _best_s, _taken is not None))
+        if _taken is not None:
+            _cm_dropped[d.name] = _taken
+            _cm_pinned.add(_taken)
+    if _cm_dropped:
+        _by_name = {p.name: p for p in parts}
+        for _n in sorted(_cm_dropped):
+            _alias_pairs.append((_by_name[_n], _by_name[_cm_dropped[_n]]))
+        parts = [p for p in parts if p.name not in _cm_dropped]
+        print("DEPLOY bone budget: %d instanced part(s) ride a co-moving part's bone (no vertex strays more than %.3f over the clip; parts -> %d)"
+              % (len(_cm_dropped), _cm_tol, len(parts)))
+        _groups = _dd(list)
+        for p in parts:
+            _groups[p.name.split('.')[0]].append(p)
+    _nb_pairs = []
+if len(parts) > _PART_BUDGET:
+    # --- 3b-ii. the NEIGHBOUR merge for what is still over: lossy, so only now
     _excess = len(parts) - _PART_BUDGET
     # SPREAD the merges evenly across ALL instanced chains (2026-07-26 v2): taking them in numeric order
     # clustered every merge on the first half of ONE chain — that whole half-run rode neighbor bones and
@@ -233,13 +311,14 @@ if len(parts) > _PART_BUDGET:
         _k = max(1, len(_cand) // max(1, _quota))
         _drops = _cand[::_k][:_quota]
         for _d in _drops:
-            _alias_pairs.append((_d, _members[_members.index(_d) - 1]))
+            _nb_pairs.append((_d, _members[_members.index(_d) - 1]))
         _excess -= len(_drops)
-    if _alias_pairs:
-        _dropset = {d.name for d, k in _alias_pairs}
+    if _nb_pairs:
+        _alias_pairs.extend(_nb_pairs)
+        _dropset = {d.name for d, k in _nb_pairs}
         parts = [p for p in parts if p.name not in _dropset]
         print("DEPLOY bone budget: %d instanced part(s) pair-merged onto neighbor bones (parts -> %d; the 128-index GPU wall)"
-              % (len(_alias_pairs), len(parts)))
+              % (len(_nb_pairs), len(parts)))
     if len(parts) > _PART_BUDGET:
         print("DEPLOY bone budget WARNING: still %d parts after pair-merge — expect missing geometry past bone 127" % len(parts))
 
@@ -277,9 +356,15 @@ for p in parts:
 for p in parts:   # mirror object parenting onto the bones
     if p.parent and p.parent.name in bone_of:
         arm_data.edit_bones[bone_of[p.name]].parent = arm_data.edit_bones[bone_of[p.parent.name]]
-for _d, _k in _alias_pairs:   # budget pair-merge: dropped instanced parts bind to their neighbor's bone
-    if _k.name in bone_of:
-        bone_of[_d.name] = bone_of[_k.name]
+_alias_of = {_d.name: _k.name for _d, _k in _alias_pairs}
+def _ride(n):   # the part whose bone a dropped part rides: through a co-mover's partner the neighbour merge dropped in turn
+    while n in _alias_of:
+        n = _alias_of[n]
+    return n
+for _d, _k in _alias_pairs:   # budget merges: a dropped instanced part binds to its partner's (3b-i) or neighbour's (3b-ii) bone
+    _r = _ride(_k.name)
+    if _r in bone_of:
+        bone_of[_d.name] = bone_of[_r]
 # STATIC ROOT (helicopter finding, 2026-07-19): a model whose BODY is unanimated (only rotors move) has meshes
 # with NO animated ancestor — they'd bind to nothing and render garbage. Give them a root bone — and BAKE it
 # like a real part (constrained to a static mesh's topmost ancestor node): a naked synthetic bone skipped the

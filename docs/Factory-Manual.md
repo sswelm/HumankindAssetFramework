@@ -1208,8 +1208,8 @@ in the Animation Lab.
   **index 127** — NOT 256 (that figure is stale; see *The 128-bone-index GPU wall* in Animation-Pitfalls). Verts
   weighted to a higher index get garbage transforms (huge stretch spikes in-game, invisible in Blender — the mech's
   **222** bones put its wing verts past index 127 and flung them). Zero-weight **leaf** bones (IK targets, `_end`
-  markers, detail nodes) are removed iteratively, and the deploy path additionally pair-merges instanced link chains
-  (→ ≤126), until every vert's bone index is under the wall — removing an unweighted bone never moves a vertex, and
+  markers, detail nodes) are removed iteratively, and the deploy path additionally merges instanced parts - onto a
+  part they move with where there is one (lossless), else their numeric neighbour (→ ≤126) - until every vert's bone index is under the wall — removing an unweighted bone never moves a vertex, and
   weighted limb/gun bones are never leaves, so the animation is untouched. Proven rigs under the wall (soldier 62,
   howitzer ~27) stay byte-identical.
 

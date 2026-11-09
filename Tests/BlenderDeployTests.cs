@@ -31,11 +31,27 @@ public class BlenderDeployTests
             return M.Nodes.Count - 1;
         }
 
-        public void Move(int node, float seconds = 1f, float[] to = null)
+        public void Move(int node, float seconds = 1f, float[] to = null, float dx = 1f)
         {
-            var t = M.Nodes[node].Translation; to = to ?? new[] { (float)t[0] + 1f, (float)t[1], (float)t[2] };
+            var t = M.Nodes[node].Translation; to = to ?? new[] { (float)t[0] + dx, (float)t[1], (float)t[2] };
             anim.Samplers.Add(new HafSampler { Times = new[] { 0f, seconds }, Values = new[] { (float)t[0], (float)t[1], (float)t[2], to[0], to[1], to[2] }, Components = 3, Interpolation = "LINEAR" });
             anim.Channels.Add(new HafChannel { Node = node, Path = "translation", Sampler = anim.Samplers.Count - 1 });
+        }
+
+        /// <summary>A half turn about Y over a second: a part that turns on its own where it stands.</summary>
+        public void Spin(int node)
+        {
+            anim.Samplers.Add(new HafSampler { Times = new[] { 0f, 0.5f, 1f }, Values = new[] { 0f, 0f, 0f, 1f, 0f, 0.7071068f, 0f, 0.7071068f, 0f, 1f, 0f, 0f }, Components = 4, Interpolation = "LINEAR" });
+            anim.Channels.Add(new HafChannel { Node = node, Path = "rotation", Sampler = anim.Samplers.Count - 1 });
+        }
+
+        /// <summary>A chain of instanced parts, each travelling its own distance (the i-th half a unit more than the one before): no two
+        /// are co-movers, so the neighbour merge (3b-ii) has work. Returns the nodes.</summary>
+        public List<int> Chain(string baseName, int count, double[] at = null)
+        {
+            var nodes = new List<int>();
+            for (int i = 0; i < count; i++) { int n = Node(i == 0 ? baseName : $"{baseName}.{i:000}", mesh: true, t: at); Move(n, dx: 0.5f * (i + 1)); nodes.Add(n); }
+            return nodes;
         }
 
         public void Scale(int node, params float[] keys)
@@ -144,17 +160,85 @@ public class BlenderDeployTests
     {
         var s = new Scene();
         s.Node("Hull", mesh: true);
-        for (int i = 0; i < 130; i++) s.Move(s.Node(i == 0 ? "Link" : $"Link.{i:000}", mesh: true));
-        for (int i = 0; i < 6; i++) s.Move(s.Node(i == 0 ? "Few" : $"Few.{i:000}", mesh: true));
+        s.Chain("Link", 130);
+        for (int i = 0; i < 6; i++) s.Move(s.Node(i == 0 ? "Few" : $"Few.{i:000}", mesh: true), dx: 0.3f);
         for (int i = 0; i < 5; i++) s.Move(s.Node("Wrap" + i));                       // animated, nothing hangs from them
         var r = s.Decide();
         Assert.Contains("DEPLOY bone slimming: kept 136 binding-target node(s), skipped 5 wrapper/ancestor node(s) — over the 124-bone wall (world-space keys carry the ancestors' motion)", r.Log);
         Assert.False(r.Legacy);
         Assert.Equal(12, r.Alias.Count); Assert.Equal(124, r.Parts.Count);
-        // every rider is an odd member of the big class and rides the member before it; the small class is left alone
+        // no two links move alike: no co-mover rides (every link was judged, none rides); every rider is an odd member of the
+        // big class and rides the member before it; the small class is left alone
+        Assert.Equal(130, r.Comove.Count); Assert.DoesNotContain(r.Comove, c => c.rides);
+        Assert.DoesNotContain(r.Log, l => l.Contains("ride a co-moving part's bone"));
         Assert.All(r.Alias, a => Assert.StartsWith("Link", a.dropped.Name));
         Assert.Equal(("Link.001", "Link"), (r.Alias[0].dropped.Name, r.Alias[0].kept.Name));
         Assert.Equal(6, r.Parts.Count(p => p.Name.StartsWith("Few")));
+    }
+
+    /// <summary>The T-62's hanging links (2026-11-09): its track is a pad and a pin per link, 60 + 60, moving as one. The
+    /// neighbour merge dropped pads and pins alike onto the PREVIOUS link, one pitch behind and 120 degrees off at every
+    /// wrap. Before any neighbour merge, an instanced part now rides a part it moves with - here every pin and its link
+    /// pair up (whichever of the two judges first rides the other) - and the spinning rims at the pins' places, co-located
+    /// but not co-moving, keep their bones. The pins' rides alone bring the rig under the budget: no neighbour merge.</summary>
+    [Fact]
+    public void Over_the_wall_an_instanced_part_rides_a_part_it_moves_with_before_any_neighbour_merge()
+    {
+        var s = new Scene();
+        s.Node("Hull", mesh: true);
+        var links = s.Chain("Link", 70);
+        var pins = s.Chain("Pin", 70, at: new double[] { 0, 0.1, 0 });
+        for (int i = 0; i < 8; i++) { int rim = s.Node(i == 0 ? "Rim" : $"Rim.{i:000}", mesh: true, t: new double[] { 0, 0.1, 0 }); s.Move(rim, dx: 0.5f * (i + 1)); s.Spin(rim); }
+        s.Decide();
+        var r = BlenderDeploy.Decide(s.M, Default.Split('|'), null, true);
+        Assert.Null(r.Fallback);
+        Assert.Equal(70, r.Alias.Count); Assert.Equal(78, r.Parts.Count);           // 70 kept of the pairs and the 8 rims; the hull is no part
+        foreach (var (dropped, kept) in r.Alias)
+        {
+            // each pair is a pin and its link, the same index, in either direction
+            string Suffix(string n) => n.Contains('.') ? n.Substring(n.IndexOf('.')) : "";
+            Assert.Equal(Suffix(dropped.Name), Suffix(kept.Name));
+            Assert.True(dropped.Name.StartsWith("Pin") && kept.Name.StartsWith("Link") || dropped.Name.StartsWith("Link") && kept.Name.StartsWith("Pin"), $"{dropped.Name} rides {kept.Name}");
+        }
+        Assert.DoesNotContain(r.Alias, a => a.dropped.Name.StartsWith("Rim") || a.kept.Name.StartsWith("Rim"));
+        Assert.Equal(8, r.Parts.Count(p => p.Name.StartsWith("Rim")));
+        Assert.Equal(78, r.Comove.Count); Assert.Equal(70, r.Comove.Count(c => c.rides));   // a part taken as a partner is not judged again
+        // a rim's offset never drifts; its half turn alone scores two lever lengths (2 x 5% of this 2-unit model), far over the 0.5%
+        Assert.All(r.Comove.Where(c => c.part.Name.StartsWith("Rim")), c => { Assert.False(c.rides); Assert.True(c.score > 0.1, $"{c.part.Name}: {c.score}"); });
+        Assert.Contains(r.Log, l => l.StartsWith("DEPLOY bone budget: 70 instanced part(s) ride a co-moving part's bone (no vertex strays more than "));
+        Assert.DoesNotContain(r.Log, l => l.Contains("pair-merged onto neighbor bones"));
+        // through the bind: the rider's mesh is on its partner's bone, and every group names a bone
+        var bones = new HashSet<string>(r.Bones.Select(b => b.Name));
+        Assert.All(r.Bound, b => Assert.Contains(b.Group, bones));
+        foreach (var (dropped, kept) in r.Alias) Assert.Equal(kept.Name, r.Bound.Single(b => b.Mesh.Name == dropped.Name).Group);
+    }
+
+    /// <summary>When the co-mover rides do not bring the rig under the budget, the neighbour merge still runs - and may drop a
+    /// part that carries a rider. The rider then rides the neighbour's bone through its partner: bone_of resolves the chain.</summary>
+    [Fact]
+    public void A_co_movers_partner_dropped_by_the_neighbour_merge_passes_its_rider_on_to_the_neighbours_bone()
+    {
+        var s = new Scene();
+        s.Node("Hull", mesh: true);
+        s.Chain("Link", 130);
+        s.Chain("Pin", 130, at: new double[] { 0, 0.1, 0 });
+        s.Decide();
+        var r = BlenderDeploy.Decide(s.M, Default.Split('|'), null, true);
+        Assert.Null(r.Fallback);
+        Assert.Equal(130 + 6, r.Alias.Count); Assert.Equal(124, r.Parts.Count);
+        Assert.Contains(r.Log, l => l.StartsWith("DEPLOY bone budget: 130 instanced part(s) ride a co-moving part's bone"));
+        Assert.Contains(r.Log, l => l.StartsWith("DEPLOY bone budget: 6 instanced part(s) pair-merged onto neighbor bones (parts -> 124;"));
+        var dropped = new HashSet<string>(r.Alias.Select(a => a.dropped.Name));
+        var carriers = r.Alias.Where(a => dropped.Contains(a.kept.Name)).ToList();   // a partner the neighbour merge dropped in turn
+        Assert.NotEmpty(carriers);
+        var boneOf = r.BoneOf.ToDictionary(b => b.part, b => b.bone);
+        var bones = new HashSet<string>(r.Bones.Select(b => b.Name));
+        foreach (var (rider, partner) in carriers)
+        {
+            string final = r.Alias.Single(a => a.dropped == partner).kept.Name;
+            Assert.Equal(final, boneOf[rider.Name]); Assert.Equal(final, boneOf[partner.Name]); Assert.Contains(final, bones);
+        }
+        Assert.All(r.Bound, b => Assert.Contains(b.Group, bones));
     }
 
     /// <summary>The T-62's stuck track links (2026-11-09): the bind named a mesh's vertex group after the PART found, and a
@@ -165,7 +249,7 @@ public class BlenderDeployTests
     {
         var s = new Scene();
         s.Node("Hull", mesh: true);
-        for (int i = 0; i < 130; i++) s.Move(s.Node(i == 0 ? "Link" : $"Link.{i:000}", mesh: true));
+        s.Chain("Link", 130);
         s.Decide();   // attaches the scene and the clip
         var r = BlenderDeploy.Decide(s.M, Default.Split('|'), null, true);
         Assert.Null(r.Fallback);
@@ -194,11 +278,7 @@ public class BlenderDeployTests
         int driver = -1;
         if (merged)
         {
-            for (int i = 0; i < 130; i++)
-            {
-                int node = s.Node(i == 0 ? "Link" : $"Link.{i:000}", mesh: true); s.Move(node);
-                if (i == 1) driver = node;   // Link.001 is pair-merged onto Link's bone
-            }
+            driver = s.Chain("Link", 130)[1];   // Link.001 is pair-merged onto Link's bone (no two links move alike: the neighbour merge)
         }
         else { driver = s.Node("Driver"); s.Move(driver); }
         int connector = s.Node(connectorName, driver, mesh: true);

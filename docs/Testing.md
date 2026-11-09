@@ -1019,8 +1019,9 @@ by `int()`. Next: the conversion's decisions against the script's own `DEPLOY` l
 
 **Replacing `deploy_convert.py`, part 2: the decisions** (2026-10-10). Everything the script decides before it builds
 the armature: what the strip leaves, the frame range, the unit normalization, which objects are parts, the bone
-slimming, the legacy or contract path, the degenerate cull, the bone-budget pair-merge, the stop when no part is left
-(`BlenderDeploy.Decide`). The oracle is THE SCRIPT ITSELF: `tools/deploy-drill/blender_decisions_dump.py` executes
+slimming, the legacy or contract path, the degenerate cull, the bone-budget merges (since 2026-11-09 the co-mover rides
+first - every judged part's best partner and score as `COMOVE` rows, bit for bit - then the neighbour pair-merge), the
+stop when no part is left (`BlenderDeploy.Decide`). The oracle is THE SCRIPT ITSELF: `tools/deploy-drill/blender_decisions_dump.py` executes
 `deploy_convert.py` cut at the line where it starts on the armature, so no rule is restated on Blender's side, and
 writes what it printed, what its variables hold and the scene it left. The second half of `tools/deploy_drill.sh`
 compares, per job: the log lines to the letter (Python's `%.3f` is an exact half-to-even rounding - `PyFormat.Fixed`;

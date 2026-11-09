@@ -179,10 +179,13 @@ point (a wheel restarting mid-pattern pops visibly — Jagdpanzer: 14-fold, 60�
 rollers get **belt-continuity speed** (rim surface = the belt's advance), each snapped to its own detected
 symmetry (angular autocorrelation of rim verts). Only *Spin degrees* and *Tread speed* are exposed.
 Bone budget: quarter-link cells push the Jagdpanzer well past the wall (~108 bones/track, both tracks ≈ 216) —
-link mode deletes the unused legacy tread bones and the deploy path **pair-merges** instanced link chains (a
-dropped link rides its numeric neighbor's bone rigidly; until 2026-11-09 its vertex group named a bone that did not
-exist and the merged links stood still - the T-62's 15 - so a deploy-converted vehicle baked before that day wants a
-re-bake) down to **≤126** to fit. The wall is Amplitude's GPU
+link mode deletes the unused legacy tread bones and the deploy path merges instanced parts down to **≤126** to fit:
+since 2026-11-09 an instanced part first rides a part it **moves with** (the T-62's track is a pad and a pin per link,
+60 + 60: every pin rides its pad's bone, and no vertex strays more than 0.5% of the model over the clip - invisible),
+and only what is still over is **pair-merged** onto its numeric neighbour's bone (a dropped link rides it rigidly: one
+pitch behind and swinging at the wraps - lossy, so last). A deploy-converted vehicle baked before that day wants a
+re-bake: until then the merged links stood still (their vertex group named no bone) and, that fixed, the merged pins
+hung off the track. The wall is Amplitude's GPU
 crowd-skinning vertex format: per-vertex bone **indices break past 127 — NOT 256** (proven on the 222-bone mech;
 see *The 128-bone-index GPU wall* in Animation-Pitfalls), engine-side and not stretchable, so a further cell
 halving is off the table.
