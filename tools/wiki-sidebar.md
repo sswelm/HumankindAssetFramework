@@ -60,3 +60,4 @@
 - [Decisions](Decisions)
 - [Framework Review](Framework-Review)
 - [Review Backlog](Review-Backlog)
+- [Workshop Advisor Plan](Workshop-Advisor-Plan)
