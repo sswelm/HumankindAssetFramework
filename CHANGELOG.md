@@ -26,6 +26,17 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   wrong: the Romanic's tiny parts the user fused instead of deleting (603 of 737 wrong carry a fuse letter); where it misses:
   3,696 visible fittings between 0.1 % and 3 % of the model, Phase 4's question. Proposers share one
   `<file>.glb.marks.proposed.txt` by letter (`proposers/common.py`). 58 unit cases in the gate.
+- **PR #275 review, round 1 (2026-11-09).** Independent reviewers verifying by execution. Both proposers score their
+  grid as exact fractions: the float F-beta put two rules at the same score a last bit apart, so the documented tie
+  rules never ran (the real corpus learns the same rule either way, 23 of 26 folds). A zero threshold now switches its
+  clause off (a zero-extent part is not "under 0"). A held-out model without a verdict abstains with its reason instead
+  of aborting the whole evaluation. The delete CLI leaves the user's fuse-group parts alone beside S and T, says which
+  proposals the user already deleted later or ignored, and refuses a models root without the model's folder. The
+  evaluator counts a file judged only at a later stage. The corpus takes the models root absolute (a relative one listed
+  absolute paths and then joined none of them), carries a later X only along stage tokens and never onto an unnamed
+  node, reports a conflict (X at one later stage, unmarked at a later-still one), a repeated FILE line, and a probe node
+  the file lacks; `--list` writes UTF-8 and the C# host flattens tabs and line breaks out of names and messages. The
+  proposals file keeps hand-added `#name|` lines and reads another code page. 70 unit cases.
 - **PR #273 review (2026-11-09).** The Split proposer abstains when no threshold rule finds a training split rather
   than choosing its loosest rule at zero F1. Proposal writes refresh every raw/cut file represented in the corpus,
   including files with zero proposals or only blocked parts, so a rerun cannot leave an old S proposal behind.

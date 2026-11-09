@@ -762,10 +762,12 @@ def read_probe(path, report=None):
             kind = fields[0]
             if kind == "FILE" and len(fields) >= 4:
                 try:
+                    if norm_path(fields[1]) in table and report is not None:
+                        report.append("PROBE table: FILE line repeated for %s; the later run's rows replace the earlier" % fields[1])
                     table[norm_path(fields[1])] = {"size": int(fields[2]), "ticks": int(fields[3]), "nodes": defaultdict(list)}
                 except ValueError:
                     if report is not None:
-                        report.append("PROBE table: unreadable FILE line: %s" % line[:120])
+                        report.append("PROBE table: unreadable FILE line: %s" % line[:300])
             elif kind == "PART" and len(fields) >= 8:
                 entry = table.get(norm_path(fields[1]))
                 if entry is None:
@@ -776,7 +778,7 @@ def read_probe(path, report=None):
                     node = int(fields[2]); verts = int(fields[4]); vis = int(fields[5]); flip = int(fields[6])
                 except ValueError:
                     if report is not None:
-                        report.append("PROBE table: unreadable PART line: %s" % line[:120])
+                        report.append("PROBE table: unreadable PART line: %s" % line[:300])
                     continue
                 entry["nodes"][node].append((vis, flip, fields[7], verts, fields[3]))
             elif kind in ("FAIL", "LEFT") and report is not None:
@@ -811,10 +813,16 @@ def apply_probe(rows, entry, rel, report):
     probed = sum(len(v) for v in nodes.values())
     if missing:
         report.append("PROBE %s: %d node(s) without a probe row (%d probe parts on %d nodes)" % (rel, missing, probed, len(nodes)))
+    extra = sorted(set(nodes) - set(r["node_index"] for r in rows))
+    if extra:
+        report.append("PROBE %s: %d probe node(s) the file's rows do not have (%s): the table was made from another file"
+                      % (rel, len(extra), ", ".join(str(n) for n in extra[:10])))
     return missing
 
 
 STAGE_ORDER = {"raw": 0, "cut": 1, "split": 2, "fused": 3}
+STAGE_SUFFIX = re.compile(r"(_(cut|split|fused)\d*)+$")   # what the Cutter, the Workshop and the Fuser append to a stem
+UNNAMED_NODE = re.compile(r"node \d+$")                    # unique_node_names' name for a node the file left unnamed
 
 
 def carry_later_marks(rows_by_rel, report):
@@ -823,39 +831,54 @@ def carry_later_marks(rows_by_rel, report):
     The user splits at the raw or cut file and deletes at the split file: a part the raw file lists unmarked and the
     split file lists marked X was deleted, and scoring the raw row as "kept" would be wrong (the Espana's raw file has
     2,000 such parts, the Dragon's 1,290). A later file is one of the same folder at a later stage whose name extends
-    this file's stem with `_` (hms_svea -> hms_svea_cut_split, not hms_svea_cut -> hms_svea_split); the part is the same
-    when name AND vertex count match (3,432 of 3,432 on the corpus, no conflict). A part that is marked here itself (S, T
-    or X) is not touched: a split part's children are other nodes. A part ABSENT from the later file is not inferred
-    deleted: the Workshop drops X-marked parts when it writes, but a later file can also be a partial export
-    (rms_teutonic_cut2_split lists 220 of 1,437 unmarked parts)."""
+    this file's stem with stage tokens only (hms_svea -> hms_svea_cut_split, not hms_svea_cut -> hms_svea_split, and not
+    hms_svea -> hms_svea_v2_split, another model); the part is the same when name AND vertex count match (3,432 of 3,432
+    on the corpus, no conflict). A node the file left unnamed (`node N`) is never matched: its name is its position. A
+    part that is marked here itself (S, T or X) is not touched: a split part's children are other nodes. A part ABSENT
+    from the later file is not inferred deleted: the Workshop drops X-marked parts when it writes, but a later file can
+    also be a partial export (rms_teutonic_cut2_split lists 220 of 1,437 unmarked parts). A part marked X at one later
+    file and listed unmarked at a later-still one is a conflict: the X carries (it is the explicit decision) and the
+    conflict is reported."""
     def stem(rel):
-        return os.path.splitext(os.path.basename(rel))[0]
+        return os.path.splitext(os.path.basename(rel))[0].lower()
     carried = Counter()
+    conflicts = Counter()
     for rel, rows in rows_by_rel.items():
         if not rows:
             continue
         stage = STAGE_ORDER.get(rows[0]["stage"])
         if stage is None:
             continue
-        later = {}
+        later_x = {}      # (name, verts) -> the highest stage that marks it X
+        later_kept = {}   # (name, verts) -> the highest stage that lists it unmarked
         for other, orows in rows_by_rel.items():
             if other == rel or os.path.dirname(other) != os.path.dirname(rel) or not orows:
                 continue
-            if STAGE_ORDER.get(orows[0]["stage"], -1) <= stage or not stem(other).startswith(stem(rel) + "_"):
+            ostage = STAGE_ORDER.get(orows[0]["stage"], -1)
+            ext = stem(other)[len(stem(rel)):] if stem(other).startswith(stem(rel)) else ""
+            if ostage <= stage or not ext or not STAGE_SUFFIX.fullmatch(ext):
                 continue
             for o in orows:
+                key = (o["name"], o["verts"])
                 if o["mark"] == "X":
-                    later[(o["name"], o["verts"])] = "X"
-        if not later:
+                    later_x[key] = max(later_x.get(key, -1), ostage)
+                elif not o["mark"]:
+                    later_kept[key] = max(later_kept.get(key, -1), ostage)
+        if not later_x:
             continue
         for r in rows:
-            if r["mark"] in ("S", "T", "X"):
+            if r["mark"] in ("S", "T", "X") or UNNAMED_NODE.fullmatch(r["name"]):
                 continue
-            if later.get((r["name"], r["verts"])) == "X":
+            key = (r["name"], r["verts"])
+            if key in later_x:
                 r["mark_later"] = "X"
                 carried[rel] += 1
+                if later_kept.get(key, -1) > later_x[key]:
+                    conflicts[rel] += 1
     for rel, n in sorted(carried.items()):
         report.append("LATER %s: %d unmarked part(s) carry the X a later stage file gave them (mark_later)" % (rel, n))
+    for rel, n in sorted(conflicts.items()):
+        report.append("LATER conflict at %s: %d part(s) marked X at one later stage file and listed unmarked at a later-still one; the X carries" % (rel, n))
 
 
 def folder_files(fdir, recipe_by_src, report):
@@ -886,6 +909,7 @@ def folder_files(fdir, recipe_by_src, report):
 
 def list_files(models_root, recipes_dir, folders=None):
     """Every GLB the corpus would read, absolute, forward slashes - the probe's input list."""
+    models_root = os.path.abspath(models_root)
     report = []
     recipes = load_recipes(recipes_dir, report)
     recipe_by_src = defaultdict(list)
@@ -914,6 +938,7 @@ def file_features(path, cache, use_cache, log):
 
 
 def build(models_root, recipes_dir, out_dir, use_cache=True, log=print, folders=None, probe_path=None):
+    models_root = os.path.abspath(models_root)   # the probe table and the recipes name files absolutely
     os.makedirs(out_dir, exist_ok=True)
     cache_path = os.path.join(out_dir, "features-cache.json")
     cache = {}
@@ -1006,7 +1031,7 @@ def build(models_root, recipes_dir, out_dir, use_cache=True, log=print, folders=
             # the probe's verdicts for this file, when its table has the file as it is on disk today
             entry = probe.get(norm_path(path))
             if entry is None:
-                if probe:
+                if probe_path:
                     probe_stats["files not in the table"] += 1
             elif not probe_current(entry, path):
                 probe_stats["files stale"] += 1
@@ -1110,7 +1135,7 @@ def build(models_root, recipes_dir, out_dir, use_cache=True, log=print, folders=
     carry_later_marks(rows_by_rel, report)
     for (rel, side, rep), n in sorted(group_diffs.items()):
         report.append("GROUP differs at %s: %d part(s) lettered %s in the sidecar fused as %s in the report (the sidecar was re-lettered after the fuse)" % (rel, n, side, rep))
-    if probe:
+    if probe_path:
         report.append("PROBE summary: " + ", ".join("%s %d" % (k, probe_stats[k]) for k in
                       ("files probed", "files stale", "files not in the table", "recipe vis agree", "recipe vis differ", "recipe vis unclassified")))
     with io.open(cache_path, "w", encoding="utf-8") as f:
@@ -1203,6 +1228,8 @@ def main(argv=None):
         print("recipes folder not found: %s" % a.recipes)
         return 1
     if a.list:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8")   # ProbeVis reads the list as UTF-8; a redirected stdout is cp1252 here
         for p in list_files(a.models, a.recipes, set(a.folder) if a.folder else None):
             print(p)
         return 0

@@ -14,10 +14,14 @@ def merge_proposals(path, letters, lines, tool):
     `L|index|name` lines). An existing file is read first; a missing one is created. Returns the lines written."""
     kept = []
     if os.path.exists(path):
-        with io.open(path, encoding="utf-8-sig") as f:
+        with io.open(path, encoding="utf-8-sig", errors="replace") as f:   # a hand-edited file in another code page still reads
             for raw in f:
                 line = raw.rstrip("\r\n")
-                if not line or line.startswith("#"):
+                if not line:
+                    continue
+                if line.startswith("#"):
+                    if line.startswith("#name|"):   # a group name the user added by hand stays
+                        kept.append(line)
                     continue
                 letter = line.split("|", 1)[0].strip()
                 if letter not in letters:

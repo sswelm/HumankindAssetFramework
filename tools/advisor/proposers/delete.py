@@ -7,7 +7,9 @@ VehicleProbe.Visibility.cs - the corpus carries it for every file since tools/ad
 extent is at most A of the model's, or when it is tiny whatever the verdict: at most B of the model's largest extent.
 A and B are learned on the other models by exhaustive search over a small grid, maximising F0.5 - precision weighed
 double, because a wrong deletion is a hole in the model the user has to notice, while a missed one costs a click -
-and ties go to the STRICTER rule for the same reason. A part the user splits (marked S or T) is not a candidate.
+and ties go to the STRICTER rule for the same reason. A zero threshold switches its clause off. At write time a part
+the user has decided on - split (marked S or T) or put in a fuse group - is not a candidate; the evaluation does not see
+the marks.
 
     python tools/advisor/evaluate.py --corpus <dir> --proposer tools/advisor/proposers/delete.py
 
@@ -23,11 +25,12 @@ import argparse
 import itertools
 import os
 import sys
+from fractions import Fraction
 
-A_GRID = (0.0, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 1.0)                  # interior parts up to this share of the model's largest extent (1.0: every interior part)
+A_GRID = (0.0, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 1.0)                  # interior parts up to this share of the model's largest extent (0: none; 1.0: every interior part)
 B_GRID = (0.0, 0.0002, 0.0005, 0.001, 0.002, 0.003, 0.005, 0.01, 0.02)   # any part up to this share (0: none by size alone)
-BETA = 0.5
-LAST_RULE = {}   # the thresholds the last propose() chose, for tests and for the report
+BETA = Fraction(1, 2)
+LAST_RULE = {}   # the thresholds the last propose() chose, or the reason it abstained, for tests and for the report
 
 
 def num(v, default=0.0):
@@ -53,17 +56,19 @@ def relative_size(row, extents):
 
 
 def candidate(row, rel, a, b):
+    """A threshold of 0 switches its clause off: a zero-extent part (a point, or a row without extents) is not proposed
+    by a rule that says "none"."""
     interior = str(row.get("vis", "")) == "0"
-    return (interior and rel <= a) or rel <= b
+    return (interior and a > 0 and rel <= a) or (b > 0 and rel <= b)
 
 
 def f_beta(tp, fp, fn, beta=BETA):
+    """Exact: (1 + beta^2) tp / ((1 + beta^2) tp + beta^2 fn + fp) as a Fraction, so two rules with the same score tie
+    and the tie rules decide, instead of the last bit of a float."""
     if tp == 0:
-        return 0.0
-    p = tp / (tp + fp)
-    r = tp / (tp + fn)
-    b2 = beta * beta
-    return (1 + b2) * p * r / (b2 * p + r)
+        return Fraction(0)
+    b2 = Fraction(beta) * Fraction(beta)
+    return (1 + b2) * tp / ((1 + b2) * tp + b2 * fn + fp)
 
 
 def learn(train, beta=BETA):
@@ -94,6 +99,10 @@ def learn(train, beta=BETA):
 NEEDED = ("vis", "sx", "sy", "sz", "file")
 
 
+def has_verdict(rows):
+    return any(str(r.get("vis", "")) != "" for r in rows)
+
+
 def propose(task, test, train, test_model, train_models):
     if task not in ("delete", "delete-hand"):
         return {}
@@ -101,11 +110,18 @@ def propose(task, test, train, test_model, train_models):
         missing = [c for c in NEEDED if c not in r]
         if missing:   # loud, not an empty proposal: an export older than the features, or a row stripped of them
             raise ValueError("delete proposer: rows lack %s - rebuild the corpus (tools/advisor/corpus.py --probe ...) or list the columns in evaluate.PART_FEATURES" % ", ".join(missing))
-    if test and all(str(r.get("vis", "")) == "" for r in test):
-        raise ValueError("delete proposer: no visibility verdict on the held-out rows - export the corpus with --probe (tools/advisor/probe_vis.sh)")
-    rule = learn(train)
     LAST_RULE.clear()
+    if not has_verdict(test) and not has_verdict(train):
+        # no verdict anywhere: the export was made without --probe; loud, not 26 empty folds
+        raise ValueError("delete proposer: no visibility verdict on any row - export the corpus with --probe (tools/advisor/probe_vis.sh)")
+    if test and not has_verdict(test):
+        # one model's files are all stale or failed in the probe table and have no recipe: abstain on that fold, say
+        # why, and let the other folds run
+        LAST_RULE["abstained"] = "no visibility verdict on the held-out rows (stale or failed in the probe table, no recipe)"
+        return {}
+    rule = learn(train)
     if rule is None:
+        LAST_RULE["abstained"] = "no grid rule finds a training deletion"
         return {}
     a, b = rule
     LAST_RULE.update({"a": a, "b": b, "model": test_model.get("model", "")})
@@ -133,22 +149,37 @@ def main(argv=None):
     if not test:
         print("no raw, cut or split parts of model '%s' in the corpus" % a.model)
         return 1
-    preds = propose("delete", test, train, {"model": a.model}, [])
-    if LAST_RULE:
+    if a.write and not os.path.isdir(os.path.join(a.models_root, a.model)):
+        print("model folder not found under --models-root: %s" % os.path.join(a.models_root, a.model))
+        return 1
+    try:
+        preds = propose("delete", test, train, {"model": a.model}, [])
+    except ValueError as e:
+        print(e)
+        return 1
+    if "a" in LAST_RULE:
         print("rule learned on %d parts of %d models: interior parts up to %g of the model's largest extent, any part up to %g"
               % (len(train), len(set(r["model"] for r in train)), LAST_RULE["a"], LAST_RULE["b"]))
     else:
-        print("no rule found a training deletion; no proposals")
+        print("no proposals: %s" % LAST_RULE.get("abstained", "no rule"))
     by_file = {}
     for r in test:
         rows = by_file.setdefault(r["file"], [])
         key = (r["file"], r["node_index"] if r["node_index"] != "" else r["name"])
-        if preds.get(key) == "X" and r.get("mark") not in ("S", "T"):
+        # the user's own decisions on the part stand: a split (S, T) or a fuse group (a letter) is a kept part
+        if preds.get(key) == "X" and r.get("mark") not in ("S", "T") and not r.get("fuse_letter"):
             rows.append(r)
     for rel, rows in sorted(by_file.items()):
         print("%s: %d proposal(s)" % (rel, len(rows)))
         for r in rows:
-            agree = " (marked %s)" % r["mark"] if r.get("mark") else ""
+            if r.get("mark"):
+                agree = " (marked %s)" % r["mark"]
+            elif r.get("mark_later") == "X":
+                agree = " (marked X at a later stage)"
+            elif r.get("role") == "Ignore":
+                agree = " (role Ignore in the recipe)"
+            else:
+                agree = ""
             print("  X|%s|%s  %s verts, vis %s%s" % (r["node_index"], r["name"], r["verts"], r["vis"], agree))
         if a.write:
             path = os.path.join(a.models_root, rel) + ".marks.proposed.txt"

@@ -117,13 +117,13 @@ def population(task, parts):
         # lettered file without one is a file where the user looked and deleted nothing - a true negative, not a gap.
         # A part deleted at a LATER stage file (corpus.carry_later_marks: the user splits at the raw file and deletes at
         # the split file) is a deletion here too; without it the Espana's raw rows read 2,000 deletions as "kept".
-        judged = files_with(parts, "mark") | files_with(parts, "fuse_letter") | files_with(parts, "role")
+        judged = files_with(parts, "mark") | files_with(parts, "fuse_letter") | files_with(parts, "role") | files_with(parts, "mark_later")
         rows = [dict(r, truth="X" if deleted(r) else "") for r in parts
                 if r["file"] in judged and r["stage"] != "recipe-only"]
     elif task == "delete-hand":
         # the same files, without the parts the Workshop marks X itself on first load (two triangles or fewer, no
         # group or split of their own): what is left is the user's own deletion judgement
-        judged = files_with(parts, "mark") | files_with(parts, "fuse_letter") | files_with(parts, "role")
+        judged = files_with(parts, "mark") | files_with(parts, "fuse_letter") | files_with(parts, "role") | files_with(parts, "mark_later")
         rows = [dict(r, truth="X" if deleted(r) else "") for r in parts
                 if r["file"] in judged and r["stage"] != "recipe-only" and str(r.get("auto_mark", "")) != "1"]   # int from build(), str from the CSV
     elif task == "split":

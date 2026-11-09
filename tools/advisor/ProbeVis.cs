@@ -19,6 +19,9 @@ using System.Text;
 // and its rows fall back to the recipe's verdicts, never silently used. Built and run by tools/advisor/probe_vis.sh.
 static class ProbeVis
 {
+    // one field: a tab or a line break in a part name or a message would split the row
+    static string Flat(string s) => (s ?? "").Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ');
+
     static int Main(string[] args)
     {
         Console.OutputEncoding = new UTF8Encoding(false);
@@ -36,16 +39,16 @@ static class ProbeVis
             {
                 var sw = Stopwatch.StartNew();
                 var m = HafModelLoader.ReadForVehicle(path, out string leave);
-                if (m == null) { Console.WriteLine($"LEFT\t{key}\t{leave}"); continue; }
+                if (m == null) { Console.WriteLine($"LEFT\t{key}\t{Flat(leave)}"); continue; }
                 var r = VehicleProbe.Run(m);
                 sw.Stop();
                 var fi = new FileInfo(path);
                 Console.WriteLine($"FILE\t{key}\t{fi.Length}\t{fi.LastWriteTimeUtc.Ticks}\tparts={r.Parts.Count}\tsplit={(r.Split ? 1 : 0)}\tms={sw.Elapsed.TotalMilliseconds:0}");
                 foreach (var p in r.Parts)
-                    Console.WriteLine($"PART\t{key}\t{p.Node}\t{p.Name}\t{p.Verts}\t{p.Vis}\t{p.Flip}\t{p.Bone}");
+                    Console.WriteLine($"PART\t{key}\t{p.Node}\t{Flat(p.Name)}\t{p.Verts}\t{p.Vis}\t{p.Flip}\t{Flat(p.Bone)}");
                 Console.Error.WriteLine($"{Path.GetFileName(path)}: {r.Parts.Count} parts, {sw.Elapsed.TotalMilliseconds:0} ms");
             }
-            catch (Exception e) { Console.WriteLine($"FAIL\t{key}\t{e.GetType().Name}: {e.Message}"); fails++; }
+            catch (Exception e) { Console.WriteLine($"FAIL\t{key}\t{e.GetType().Name}: {Flat(e.Message)}"); fails++; }
             GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
         }
         return fails == 0 ? 0 : 1;

@@ -4092,6 +4092,17 @@ splits, not to a later part of another size, not to the later file itself), the 
 interior fittings and exterior rivets against kept fittings and a kept interior deck and applied without truth, the
 size relative to each file, ties to the stricter rule and abstention, a loud failure on rows without the features or
 without a verdict (a corpus exported without `--probe`), and the one proposals file two proposers share by letter: 58 cases.
+The review of the PR (three rounds of independent reviewers verifying by execution) added 12: the carry-back rules on a
+third fixture (only stage tokens extend a stem, `hms` to `hms_cut_split` but not to `hms_v2_split`; the case of the stem;
+an unnamed `node N` is never the same part; a part marked X at one later stage and listed unmarked at a later-still one
+carries the X and is reported as a conflict; a file judged only at a later stage is in the delete population), a
+relative `--models` root listing and joining the same absolute paths, a repeated FILE line and a probe node the file
+lacks reported, an empty table still writing the summary; and on the proposer: ties scored as exact fractions (two rules
+at 5/12 each, the stricter one wins; the float formula put the looser one a last bit ahead), a zero threshold switching
+its clause off (a zero-extent part is not "under 0"), a held-out model without a verdict abstaining with its reason
+instead of aborting every fold, the CLI leaving the user's S, T and fuse-group parts alone, saying which proposals the
+user already deleted, refusing a models root without the model's folder, and the proposals file keeping hand-added
+`#name|` lines and reading another code page: 70 cases.
 
 The critical review of PR #195 added a high-valence cone, tiny loose parts and non-polygon primitives. Matching every
 pair of edges in one lower-vertex bucket made a 32,000-face fan take 3.90 s against 9 ms before the parallelization.

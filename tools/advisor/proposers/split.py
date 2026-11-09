@@ -22,10 +22,10 @@ in the sidecar's v2 format. It never touches the live `<file>.glb.marks.txt`: th
 when they agree with it.
 """
 import argparse
-import io
 import itertools
 import os
 import sys
+from fractions import Fraction
 
 K_GRID = (2, 3, 4, 5, 6, 8, 12)
 T_GRID = (0, 100, 200, 500, 1000, 2000, 5000, 10000, 20000)
@@ -44,13 +44,13 @@ def candidate(row, k, t, b):
     return (not row.get("blocked")) and num(row.get("islands_merged")) >= k and num(row.get("tris")) >= t and num(row.get("islands_big")) >= b
 
 
-def f_beta(tp, fp, fn, beta=1.0):
+def f_beta(tp, fp, fn, beta=1):
+    """Exact: (1 + beta^2) tp / ((1 + beta^2) tp + beta^2 fn + fp) as a Fraction, so two rules with the same score tie
+    and the tie rules decide, instead of the last bit of a float."""
     if tp == 0:
-        return 0.0
-    p = tp / (tp + fp)
-    r = tp / (tp + fn)
-    b2 = beta * beta
-    return (1 + b2) * p * r / (b2 * p + r)
+        return Fraction(0)
+    b2 = Fraction(beta) * Fraction(beta)
+    return (1 + b2) * tp / ((1 + b2) * tp + b2 * fn + fp)
 
 
 def learn(train):
