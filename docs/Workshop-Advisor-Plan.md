@@ -104,7 +104,7 @@ On the real 33,441-row corpus (65 folders), the built-in baseline reports before
 are identical: those baselines never used the leaked answers. A cached export still takes about 3 seconds.
 
 ```
-python tools/advisor/corpus.py --out C:/tmp/haf-advisor        # 65 folders, about 80 s cold, 3 s from the cache
+python tools/advisor/corpus.py --out C:/tmp/haf-advisor        # 65 folders, about 6 minutes cold since the merge port, 3 s from the cache
 python tools/advisor/evaluate.py --corpus C:/tmp/haf-advisor --write baseline.md
 ```
 
@@ -163,6 +163,37 @@ role, never overall.
   outermost surface along any probe ray.
 - Measure all three against the corpus. Expect grouping to be close to the user's choices and the other two
   to be conservative. Whatever this phase gets right is time saved with no model running.
+
+**Status (2026-11-09): the Split proposer is built and measured; grouping and Ignore are not started.**
+
+- The corpus now carries the island count the user actually reads in the Cutter: the probe's 1 % distance merge
+  (`GlbDisconnectedParts.AnalyzeMesh`, "DISTANCE MERGE") is ported into `corpus.py` as `islands_merged`, with the
+  largest and second island's share of the part's triangles and the number of islands holding 1 % or more. The
+  port follows the C# step for step (vertex-distance grid, the principal-axis gate that lets elongated islands
+  chain only when colinear, the pair budget); its base islands are the exact-position weld where the probe welds
+  at a few ulps, and there is no oracle for the merged count outside the editor. The cold export is about six
+  minutes now (the Saleg's raw file alone 89 s), 3 s from the cache.
+- `tools/advisor/proposers/split.py` proposes S for a part that is not blocked, has at least K merged islands, T
+  triangles and B islands of 1 % or more; K, T, B are learned on the other models by exhaustive search over a
+  small grid, maximising F1. Leave-one-model-out on the 10,457 splittable parts of the 11 marked raw and cut files
+  (178 marked S or T): **74 % precision, 78 % recall** (187 proposed, 139 right, 48 wrong, 39 missed), against
+  18 % / 79 % for the best size heuristic. The learned rule is the same on 9 of 10 folds: 6 merged islands,
+  5,000 triangles, no B. F0.5 was measured first (72 % / 68 %) and lost to F1; a within-file size percentile added
+  nothing.
+- Where it misses: 31 of the 39 missed marks are parts under 5,000 triangles and 15 have fewer than 6 merged
+  islands; the Svea loses 10 of its 22 (its marked fittings run from 170 to 6,500 triangles), the Sirius's one
+  mark is missed while 6 are proposed. The Dragon, the hardest file (25 marks among 2,163 parts), gets 17 found
+  and none wrong; the Saleg 67 of 73 with 20 wrong. The rule is a size rule with an island floor; the user also
+  splits mid-sized rigging and fittings that the rule cannot tell from the thousands of small multi-island parts
+  left alone. The next feature to try is what the parts around a marked part look like (the same material, the
+  same size band) rather than the part alone.
+- Writing proposals: `python tools/advisor/proposers/split.py --corpus <dir> --model "<folder>" --write` puts
+  `<file>.glb.marks.proposed.txt` beside each raw or cut GLB, in the sidecar's format, trained on every other
+  model. Every raw/cut file present in the corpus is refreshed, including an empty proposal when nothing is
+  recommended or all parts are blocked, so a previous run cannot leave stale S marks behind. The learner abstains
+  when no grid rule finds a training split, including when training is empty or has no positive labels.
+  It never writes the live `.marks.txt`; the user renames or merges it. Loading a proposal into the
+  Cutter is Phase 6.
 
 ### Phase 2: role classifier without a language model
 

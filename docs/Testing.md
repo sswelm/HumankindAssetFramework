@@ -4069,6 +4069,15 @@ outside A-Z, a v2 line without an index), a part in two fuse groups, a recipe wi
 held-out label/dial isolation, fold mutation isolation, ASCII Int32 index boundaries (including long tokens), refusal
 of ambiguous legacy numeric name suffixes, and cache invalidation for equal-size edits within a second: 35 cases.
 Held-out proposer inputs use explicit feature allowlists; saved answers stay available only for training and scoring.
+Phase 1's Split proposer (`tools/advisor/proposers/split.py`) adds the port of the probe's 1 % distance merge and its
+tests - two islands within one percent of the diagonal merge and far ones do not, two elongated islands chain only
+when colinear and a blob merges on a vertex within reach while one hovering over a dash's middle does not, a single
+island skips the merge, the principal-axis aspect of a dash against a square - and the proposer's: the rule learned
+on labelled rows and applied to rows without truth, a blocked part never proposed, nothing proposed for other tasks,
+the feature/label partition of every corpus column (the allowlist had silently stripped the new columns once), a loud
+failure on rows without the features, F1 and F0.5 by hand. PR #273 review adds abstention when no grid rule finds a
+training split (including empty training data), and CLI reruns that clear stale proposals for small or blocked parts,
+refresh an old positive file after the rule stops firing, and leave live marks untouched: 45 cases.
 
 The critical review of PR #195 added a high-valence cone, tiny loose parts and non-polygon primitives. Matching every
 pair of edges in one lower-vertex bucket made a 32,000-face fan take 3.90 s against 9 ms before the parallelization.

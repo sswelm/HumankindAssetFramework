@@ -10,6 +10,22 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **PR #273 review (2026-11-09).** The Split proposer abstains when no threshold rule finds a training split rather
+  than choosing its loosest rule at zero F1. Proposal writes refresh every raw/cut file represented in the corpus,
+  including files with zero proposals or only blocked parts, so a rerun cannot leave an old S proposal behind.
+  Live marks remain untouched; regressions cover unsupported training and repeated CLI writes (45 advisor cases).
+- **THE SPLIT PROPOSER (2026-11-09; Phase 1 of `docs/Workshop-Advisor-Plan.md`, first proposer).** The corpus now carries
+  the island count the user reads in the Cutter's row: the probe's 1 % distance merge (`GlbDisconnectedParts.AnalyzeMesh`,
+  vertex-distance grid, the principal-axis gate for elongated islands, the pair budget) is ported into `corpus.py` as
+  `islands_merged`, with each island's share of the part's triangles. `tools/advisor/proposers/split.py` proposes S for a
+  part with at least K merged islands, T triangles and B islands of 1 % or more, K/T/B learned on the other models by
+  exhaustive search maximising F1: leave-one-model-out on the 10,457 splittable parts of the 11 marked files, 74 %
+  precision and 78 % recall (187 proposed, 139 right) against 18 % / 79 % for the best size heuristic; the learned rule
+  is 6 merged islands and 5,000 triangles on 9 of 10 folds. F0.5 was measured and lost (72 % / 68 %); a size percentile
+  added nothing. The proposer's first run proposed nothing: the evaluator's held-out allowlist predated the new columns
+  and stripped them - the allowlist and a label set now partition the corpus columns under a test, and the proposer
+  fails loudly on a row without its features. `--write` puts `<file>.glb.marks.proposed.txt` beside a model's raw GLBs,
+  never the live sidecar. 43 unit cases in the gate.
 - **PR #271 review (2026-11-09).** The evaluator no longer hands held-out truth, roles, user marks, fuse outcomes or
   saved dials to proposers; copied fold records also prevent in-place normalization from changing scoring truth or
   later folds. Sidecar indices now follow ASCII Int32 rules, including overflow and long zero-padded tokens; ambiguous

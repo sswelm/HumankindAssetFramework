@@ -72,7 +72,8 @@ CATEGORY = {
 FOLDER_CATEGORY = {f: c for c, fs in CATEGORY.items() for f in fs}
 
 PART_COLUMNS = ["model", "category", "file", "stage", "node_index", "name", "file_name", "mesh_index", "mesh_shared", "parent_index",
-                "depth", "verts", "tris", "islands", "cx", "cy", "cz", "sx", "sy", "sz", "blocked", "triangle_free",
+                "depth", "verts", "tris", "islands", "islands_merged", "island_top_pct", "island_second_pct", "islands_big",
+                "cx", "cy", "cz", "sx", "sy", "sz", "blocked", "triangle_free",
                 "mark", "auto_mark", "fuse_letter", "fuse_group_name", "fused_into", "fused_letter",
                 "role", "role_id", "vis", "flip", "bone", "placed", "recipe", "recipe_verts", "recipe_name", "name_join", "role_via_fuse", "recipe_via_fuse"]
 MODEL_COLUMNS = ["model", "category", "files", "recipe", "recipe_src", "recipe_src_stage", "recipe_parts", "recipe_parts_matched", "dials"]
@@ -260,6 +261,7 @@ def analyse_mesh(glb, mesh_index):
     ids = {}
     unique = []
     dsu_parent = []
+    tri_ids = []
     verts = tris = 0
     lo = [math.inf] * 3
     hi = [-math.inf] * 3
@@ -345,14 +347,175 @@ def analyse_mesh(glb, mesh_index):
             va, vb, vc = local_ids[a], local_ids[b], local_ids[c]
             union(va, vb)
             union(vb, vc)
+            tri_ids.append((va, vb, vc))
         dsu_parent = dsu.p
     if verts == 0:
         return {"verts": 0, "tris": 0, "islands": 1 if blocked is None else 0, "lo": [0.0] * 3, "hi": [0.0] * 3, "unique": [], "blocked": blocked,
-                "triangle_free": triangle_free}
+                "triangle_free": triangle_free, "islands_merged": 1 if blocked is None else 0, "island_top_pct": 100.0, "island_second_pct": 0.0, "islands_big": 1 if blocked is None else 0}
     dsu = Dsu(0)
     dsu.p = dsu_parent
     roots = set(dsu.find(i) for i in range(len(unique)))
-    return {"verts": verts, "tris": tris, "islands": len(roots), "lo": lo, "hi": hi, "unique": unique, "blocked": blocked, "triangle_free": triangle_free}
+    merged = merged_island_tris(unique, tri_ids, dsu, lo, hi, MERGE_FRACTION) if len(roots) > 1 and tris > 0 else [tris]
+    merged.sort(reverse=True)
+    total = float(sum(merged)) or 1.0
+    return {"verts": verts, "tris": tris, "islands": len(roots), "lo": lo, "hi": hi, "unique": unique, "blocked": blocked, "triangle_free": triangle_free,
+            "islands_merged": len(merged), "island_top_pct": 100.0 * merged[0] / total if merged else 0.0,
+            "island_second_pct": 100.0 * merged[1] / total if len(merged) > 1 else 0.0,
+            "islands_big": sum(1 for t in merged if t >= 0.01 * total)}
+
+
+# THE WORKSHOP'S DISTANCE MERGE (GlbDisconnectedParts.AnalyzeMesh, "DISTANCE MERGE (2026-09-06, the 602-island rope)"):
+# the row the user reads says how many islands a part has AFTER islands within 1 % of the mesh's own diagonal (the merge
+# slider's default) have fused back together, so a segmented rope is one part and only genuinely distant junk
+# separates. Ported here so a proposer sees the number the user saw: components in the probe's order, a vertex-distance
+# grid of cells eps wide, two elongated islands (aspect over 3 by the principal axes) chaining only when colinear, a
+# pair budget of 4,096 failed comparisons after which a pair stays separate. The base islands are this file's
+# exact-position weld where the probe welds at a few ulps; no oracle for the merged count exists outside the editor.
+MERGE_FRACTION = 0.01
+PAIR_BUDGET = 4096
+
+
+def principal_axis(points, lo, hi):
+    """(unit direction of the first principal component, aspect = sqrt(var1 / var2)) as Component.PrincipalAxes."""
+    n = max(1, len(points))
+    mx = sum(p[0] for p in points) / n
+    my = sum(p[1] for p in points) / n
+    mz = sum(p[2] for p in points) / n
+    c = [[0.0] * 3 for _ in range(3)]
+    for x, y, z in points:
+        d = (x - mx, y - my, z - mz)
+        for a in range(3):
+            for b in range(3):
+                c[a][b] += d[a] * d[b]
+
+    def power(sx, sy, sz, ox, oy, oz):
+        ortho = ox != 0 or oy != 0 or oz != 0
+        vx, vy, vz = sx, sy, sz
+        if ortho:
+            sd = vx * ox + vy * oy + vz * oz
+            vx -= sd * ox; vy -= sd * oy; vz -= sd * oz
+            if vx * vx + vy * vy + vz * vz < 1e-18:
+                if abs(ox) <= abs(oy) and abs(ox) <= abs(oz):
+                    vx, vy, vz = 0.0, -oz, oy
+                elif abs(oy) <= abs(oz):
+                    vx, vy, vz = oz, 0.0, -ox
+                else:
+                    vx, vy, vz = -oy, ox, 0.0
+        ln = math.sqrt(vx * vx + vy * vy + vz * vz)
+        if ln < 1e-12:
+            vx, vy, vz, ln = 1.0, 0.0, 0.0, 1.0
+        vx, vy, vz = vx / ln, vy / ln, vz / ln
+        for _ in range(24):
+            nx = c[0][0] * vx + c[0][1] * vy + c[0][2] * vz
+            ny = c[1][0] * vx + c[1][1] * vy + c[1][2] * vz
+            nz = c[2][0] * vx + c[2][1] * vy + c[2][2] * vz
+            if ortho:
+                d = nx * ox + ny * oy + nz * oz
+                nx -= d * ox; ny -= d * oy; nz -= d * oz
+            l2 = math.sqrt(nx * nx + ny * ny + nz * nz)
+            if l2 < 1e-12:
+                break
+            vx, vy, vz = nx / l2, ny / l2, nz / l2
+        rx = c[0][0] * vx + c[0][1] * vy + c[0][2] * vz
+        ry = c[1][0] * vx + c[1][1] * vy + c[1][2] * vz
+        rz = c[2][0] * vx + c[2][1] * vy + c[2][2] * vz
+        return max(0.0, vx * rx + vy * ry + vz * rz), (vx, vy, vz)
+
+    var1, v1 = power(hi[0] - lo[0] + 0.017, hi[1] - lo[1] + 0.013, hi[2] - lo[2] + 0.011, 0.0, 0.0, 0.0)
+    var2, _ = power(0.31, 0.68, 0.55, v1[0], v1[1], v1[2])
+    return v1, math.sqrt((var1 + 1e-24) / max(var2, 1e-24)), (mx, my, mz)
+
+
+def merged_island_tris(unique, tri_ids, dsu, lo, hi, fraction):
+    """Triangle counts of the islands after the Workshop's distance merge at `fraction` of the mesh diagonal."""
+    comps = {}
+    for order, (a, b, c) in enumerate(tri_ids):
+        root = dsu.find(a)
+        comp = comps.get(root)
+        if comp is None:
+            comp = comps[root] = {"tris": 0, "first": order, "lo": [math.inf] * 3, "hi": [-math.inf] * 3, "points": []}
+        comp["tris"] += 1
+        for v in (a, b, c):
+            p = unique[v]
+            comp["points"].append(p)
+            for k in range(3):
+                if p[k] < comp["lo"][k]: comp["lo"][k] = p[k]
+                if p[k] > comp["hi"][k]: comp["hi"][k] = p[k]
+    components = sorted(comps.values(), key=lambda cm: (cm["lo"][0], cm["lo"][1], cm["lo"][2], cm["first"]))
+    if fraction <= 0 or len(components) <= 1:
+        return [cm["tris"] for cm in components]
+    diagonal = math.sqrt(sum((hi[k] - lo[k]) ** 2 for k in range(3)))
+    eps = diagonal * fraction
+    if eps <= 0:
+        return [cm["tris"] for cm in components]
+    n = len(components)
+    cd = Dsu(n)
+    elong = [False] * n
+    direction = [None] * n
+    centre = [None] * n
+    for i, cm in enumerate(components):
+        pc1, aspect, ctr = principal_axis(cm["points"], cm["lo"], cm["hi"])
+        elong[i] = aspect > 3
+        if elong[i]:
+            direction[i], centre[i] = pc1, ctr
+
+    def direction_ok(i, j):
+        if not elong[i] or not elong[j]:
+            return True
+        di, dj = direction[i], direction[j]
+        if abs(di[0] * dj[0] + di[1] * dj[1] + di[2] * dj[2]) < 0.85:
+            return False
+        sx, sy, sz = centre[j][0] - centre[i][0], centre[j][1] - centre[i][1], centre[j][2] - centre[i][2]
+        s2 = sx * sx + sy * sy + sz * sz
+        if s2 <= 1e-18:
+            return True
+        along_i = sx * di[0] + sy * di[1] + sz * di[2]
+        along_j = sx * dj[0] + sy * dj[1] + sz * dj[2]
+        perp2 = min(s2 - along_i * along_i, s2 - along_j * along_j)
+        lateral = 0.35 * eps
+        return perp2 <= lateral * lateral
+
+    cells = {}
+    spent = {}
+    eps2 = eps * eps
+    for i, cm in enumerate(components):
+        seen = set()
+        for p in cm["points"]:
+            if p in seen:
+                continue
+            seen.add(p)
+            cx, cy, cz = math.floor(p[0] / eps), math.floor(p[1] / eps), math.floor(p[2] / eps)
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    for dz in (-1, 0, 1):
+                        by_comp = cells.get((cx + dx, cy + dy, cz + dz))
+                        if not by_comp:
+                            continue
+                        for j, pts in by_comp.items():
+                            if cd.find(j) == cd.find(i) or not direction_ok(i, j):
+                                continue
+                            pk = (i, j) if i < j else (j, i)
+                            used_before = spent.get(pk, 0)
+                            if used_before > PAIR_BUDGET:
+                                continue
+                            used = 0
+                            fused = False
+                            for q in pts:
+                                used += 1
+                                ddx, ddy, ddz = p[0] - q[0], p[1] - q[1], p[2] - q[2]
+                                if ddx * ddx + ddy * ddy + ddz * ddz <= eps2:
+                                    cd.union(i, j)
+                                    fused = True
+                                    break
+                            if not fused:
+                                spent[pk] = used_before + used
+            home = cells.setdefault((cx, cy, cz), {})
+            home.setdefault(i, []).append(p)
+    merged = {}
+    for i, cm in enumerate(components):
+        root = cd.find(i)
+        merged[root] = merged.get(root, 0) + cm["tris"]
+    return list(merged.values())
 
 
 def transform_bounds(m, mesh_info):
@@ -408,6 +571,8 @@ def glb_parts(data):
             "verts": info.get("verts", 0), "tris": info.get("tris", 0), "islands": info.get("islands", 0),
             "cx": centre[0], "cy": centre[1], "cz": centre[2], "sx": size[0], "sy": size[1], "sz": size[2],
             "blocked": blocked or "", "triangle_free": int(bool(info.get("triangle_free"))),
+            "islands_merged": info.get("islands_merged", 0), "island_top_pct": info.get("island_top_pct", 0.0),
+            "island_second_pct": info.get("island_second_pct", 0.0), "islands_big": info.get("islands_big", 0),
         })
     return rows
 
@@ -572,7 +737,7 @@ def recipe_dials(j):
 
 # Bump when a feature's definition changes: the cache below is keyed on it, so an old export never serves stale
 # features for a file that did not change (the referenced-vertices fix would have been masked by the cache otherwise).
-FEATURES_VERSION = 3   # 3: non-TRIANGLES primitives block the mesh; triangle_free carried
+FEATURES_VERSION = 4   # 3: non-TRIANGLES primitives block the mesh; triangle_free carried. 4: the islands after the Workshop's 1 % distance merge
 
 
 def file_features(path, cache, use_cache, log):
