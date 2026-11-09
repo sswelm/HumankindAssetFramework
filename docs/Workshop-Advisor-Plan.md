@@ -86,6 +86,74 @@ parts: leave-one-model-out over the 26 recipes.
 - Deliverable: `tools/advisor/corpus.py` and `evaluate.py`, a Bake Tests row that runs them, and the baseline
   numbers in this document.
 
+**Status (2026-11-09): built, except the Bake Tests row.** The two scripts exist; their unit tests run in the push
+gate (`Tests/test_advisor_corpus.py`); the export and the evaluation are commands, not a row, because the corpus
+lives on this machine's `D:\3DModels` and there is no proposer to run yet. The row comes with Phase 1's first
+proposer. The manual timing has not been done; it waits for the next new model.
+
+The evaluation keeps answers out of held-out proposer inputs. `test_rows` exposes the explicit `PART_FEATURES`
+allowlist in `evaluate.py`: identifiers, names, geometry and the visibility/flip/bone probe observations. It omits truth,
+roles, marks, fuse outcomes, placement edits and recipe joins; `test_model` exposes only model/category/files, never
+saved dials. Training records retain their labels. Fold arguments are copied so a proposer cannot change scoring
+truth or contaminate a later fold by normalizing its inputs in place. The corpus CSVs retain all columns for auditing.
+
+The sidecar reader accepts ASCII signed Int32 indices, preserves both readings of legacy names ending in `|<number>`
+and refuses ambiguous matches, as the Workshop does. Feature-cache keys retain nanosecond timestamps, so equal-size
+edits within a second invalidate the cached geometry. These review regressions bring the advisor suite to 35 cases.
+On the real 33,441-row corpus (65 folders), the built-in baseline reports before and after isolating proposer inputs
+are identical: those baselines never used the leaked answers. A cached export still takes about 3 seconds.
+
+```
+python tools/advisor/corpus.py --out C:/tmp/haf-advisor        # 65 folders, about 80 s cold, 3 s from the cache
+python tools/advisor/evaluate.py --corpus C:/tmp/haf-advisor --write baseline.md
+```
+
+What the export found about the corpus itself, before any metric:
+
+- 30,053 rows over 53 decision-bearing GLBs (22 raw, 2 cut, 18 split, 11 fused) in 26 folders, plus 3,388 rows
+  carried from recipes whose source this reader cannot open (the two FBX recipes, the Ehrhardt's 3,350 parts among them, and the two second-model parts of
+  the Wespe and the TOW). 24 of the 26 recipes join every part to a node. The Ozhiga's 688 parts are the loose parts
+  of one mesh (the probe's `minVerts` split), not nodes, and are reported, not guessed. The Saleg's recipe is stale
+  against its re-fuse: 9 parts name nodes the fused file no longer has.
+- Recipes the Lab probed through Blender name duplicate nodes `Box.001`, `Box.002`; the Cutter names the same nodes
+  `Box_2`, `Box_3`. 74 parts (the Rah66's 72, two on the Great Eastern) join by that rule, in node order.
+- A Split writes every child against the parent's whole POSITION accessor and subsets the indices. Counting the
+  accessor, a child has hundreds of vertices it never draws, each a singleton island; the export counts referenced
+  vertices only (the triangle sums then equal the fuse report's to the face).
+- 1,246 parts are line or point meshes (the Espana's 787 rigging lines, the Dragon's 422). The Workshop blocks them
+  ("Only TRIANGLES primitives can be split safely"); counted as geometry they were one island per vertex and 1,035
+  false split candidates. And the Workshop marks X itself, on first load, every part of two triangles or fewer that
+  is not blocked (or is triangle-free) and has no split, tear or group of its own: 1,673 of the 6,998 X marks are
+  the tool's, not the user's. The table carries `blocked`, `triangle_free` and `auto_mark`, and the deletion task is
+  scored twice, with and without them. `auto_mark` applies the rule to the saved sidecar, the Workshop applied it at
+  first load: 458 such parts carry no X today (413 of them the Dragon's raw file, loaded before the rule or cleared),
+  and the second scoring drops them with the rest. A deliberate keep of a two-triangle part is lost there; the count
+  is small and the alternative would score the Dragon's 413 tool-shaped parts as the user's negatives.
+- The Romanic's raw-file fuse sidecar was re-lettered after the fuse: 319 parts carry a letter that differs from the
+  report's. The sidecar is the user's latest intent, the report is what was fused; the table carries both.
+- Of 16 recipes with dials, the saved dials put 4 under 30,000 in the Lab's Verify projection (probe vertices after
+  the tiers). The dials are not set to hit that number; the Factory's **Reduce to ~tris** caps the shipped mesh
+  afterwards. Phase 5's objective must be restated before it is built.
+
+The baselines, leave-one-model-out, pooled (the full tables are in `baseline.md` beside the export):
+
+| Task | Population | Trivial baseline | Best cheap baseline |
+|---|---|---|---|
+| Role | 4,588 labelled parts in 26 models (Body 2,830, Turret 607, Wheel 479, Ignore 256, then a long tail; armour 3,527 of them, nearly all the Ehrhardt) | always Default: 1 % right | majority role of the other models: Body 62 % precision / 100 % recall, every other role 0 % |
+| Delete | 29,482 parts in the 52 files the user judged (marks, letters or a recipe), 7,241 marked X or Ignore (24.6 %) | never: recall 0 % | the smallest tenth of each file: 48 % precision / 25 % recall; "interior" (vis = 0): 99 % precision / 1 % recall, because only recipe rows carry a visibility verdict |
+| Delete, the user's own marks | the same files without the 2,128 parts the Workshop marks itself: 27,354 parts, 5,542 positives (20.3 %) | never | the smallest tenth: 24 % precision / 14 % recall. Size alone finds the tool's deletions, not the user's |
+| Split | 10,457 splittable parts in the 11 raw and cut files with marks, 178 marked S or T (1.7 %) | never | multi-island part above the file's median size: 18 % precision / 79 % recall; every multi-island part: 14 % / 100 % |
+| Group | 19,056 parts in 27 files with letters; 1.34 M of 21.1 M pairs truly together | all apart: 0 % recall; all together: 6 % precision | one group per material name: 14 % precision / 1 % recall of the together pairs |
+| Dials | 16 recipes carrying dials; a dial a recipe lacks reads as the Lab's default (rigging 75, structure 50, else 0) | median dial of the other models: body 23 points mean error, structure 13, rudder 40, default 50 | the category's median: body 22, structure 10, rudder 26, default 27 |
+
+What the numbers say about the phases: the Split heuristic recalls four in five of the user's splits at one right
+proposal in five, so Phase 1's island-dominance rule has a precision job, not a recall job; grouping by name is
+useless, so Phase 1's contact graph has the whole job; deletion by size finds only what the Workshop already deletes
+by itself, and the user's own deletions have no cheap signal in the raw files because the visibility verdict is not
+in the table yet (the probe's escape rays are only in the recipe rows), which puts the C# probe export ahead of any
+model; roles are 62 % Body and the interesting roles are a few hundred parts each, so Phase 2 and 3 are judged per
+role, never overall.
+
 ### Phase 1: deterministic proposers
 
 - Fuse groups from the contact graph at weld distance 0, mirror pairs merged, one letter per connected shell;
@@ -153,14 +221,23 @@ parts: leave-one-model-out over the 26 recipes.
 
 ## 6. What to decide now
 
-1. Whether the prize is worth the build: Phase 0's timing of one manual run answers that with minutes.
-2. The order after Phase 0. The cheapest win is Phase 1, grouping in particular; the most interesting is Phase 4.
+1. Whether the prize is worth the build: Phase 0's timing of one manual run answers that with minutes. Still open;
+   the harness is built, the stopwatch has not run.
+2. The order after Phase 0. The baselines (above) say: Split first, because the island heuristic already recalls
+   79 % of the user's splits and only its precision is missing; then the visibility verdict into the table (the
+   probe's escape rays for every file, not only the recipe's), because the user's own deletions have no cheap signal
+   without it; grouping by the contact graph after that. The most interesting is still Phase 4.
 3. Where the advisor runs: on the home PC beside Unity, accepting the VRAM conflict, or on a second card.
+4. What the dial solver optimises: the saved dials sit above 30,000 projected vertices on 12 of 16 recipes, so
+   "under 30k" is not what the user has been doing. Read the Factory's **Reduce to ~tris** against the Lab's dials
+   on the shipped bakes before Phase 5 gets an objective.
 
 ## 7. Pointers
 
 - Workshop windows and sidecar formats: `Editor-Tools.md`, section *Model Cutter and Model Fuser*.
 - Roles, dials and the large-model workflow: `Vehicle-Lab-Quickstart.md`, sections 3, 4 and 9.
 - Recipes: `C:\Repo\ENCReload\Assets\FactorySource\VehicleLab\Recipes\*.json`; migration: `tools/recipe_migrate.py`.
+- The corpus export and the metrics: `tools/advisor/corpus.py`, `tools/advisor/evaluate.py` (a proposer is a module
+  with `propose(task, test_rows, train_rows, test_model, train_models)`); tests: `Tests/test_advisor_corpus.py`.
 - Sources and sidecars: `D:\3DModels\<model>\`.
 - Ollama on the home PC: `how-we-connected-the-laptop-to-the-home-model.md` and `model-recommendation.md` on the Desktop.

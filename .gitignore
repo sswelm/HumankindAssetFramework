@@ -26,3 +26,6 @@ References/
 # Blender bytecode cache
 editor/Tools~/__pycache__/
 __pycache__/
+
+# the Workshop advisor's corpus export (the user's models' part tables; rebuilt by tools/advisor/corpus.py)
+tools/advisor/out/

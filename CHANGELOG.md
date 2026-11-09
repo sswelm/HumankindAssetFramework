@@ -10,6 +10,30 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **PR #271 review (2026-11-09).** The evaluator no longer hands held-out truth, roles, user marks, fuse outcomes or
+  saved dials to proposers; copied fold records also prevent in-place normalization from changing scoring truth or
+  later folds. Sidecar indices now follow ASCII Int32 rules, including overflow and long zero-padded tokens; ambiguous
+  legacy names such as `Hull|3` are resolved against both readings instead of guessed. Nanosecond cache timestamps
+  prevent stale features after equal-size edits within a second. The advisor suite now has 35 cases, including the
+  regressions that failed before these fixes (`docs/Testing.md`, `docs/Workshop-Advisor-Plan.md`).
+- **THE WORKSHOP ADVISOR'S CORPUS AND BASELINES (2026-11-09; Phase 0 of `docs/Workshop-Advisor-Plan.md`).**
+  `tools/advisor/corpus.py` turns every decision the user made in the Workshop and the Lab - the S/T/X marks, the fuse
+  letters, what the fuse reports fused, the recipes' roles and dials - into one table beside the features a proposer
+  can see, joined by node index and unique name as the Workshop resolves a sidecar; a standard-library glTF reader, no
+  numpy. 30,053 rows over 53 decision-bearing GLBs plus 3,388 carried from FBX and second-model recipes; 24 of 26 recipes join every part (the Ozhiga's parts are loose
+  parts of one mesh, the Saleg's recipe is stale against its re-fuse). Two things the join taught: Blender-probed
+  recipes name duplicates `Box.001` where the Cutter says `Box_2` (74 parts join by node order), and a Split's children
+  reference the parent's whole POSITION accessor, so counting the accessor made every child hundreds of singleton islands.
+  `evaluate.py` scores proposers on held-out models; the baselines in the plan say Split first (island heuristic: 79 %
+  recall, 18 % precision), then the visibility verdict into the table, and that the saved dials sit above 30k projected
+  vertices on 12 of 16 recipes, so the dial solver's objective must be restated. Two rounds of review before the push,
+  one independent: line and point meshes are blocked as the Workshop blocks them (1,246 rows had been one island per
+  vertex and 1,035 false split candidates), the Workshop's own first-load deletions of two-triangle parts are marked
+  `auto_mark` and the deletion task is scored with and without them (1,673 of 6,998 X marks are the tool's; by size
+  alone the user's own deletions come out at 24 % precision, 14 % recall), a dial a recipe lacks reads as the Lab's
+  default, a node cycle or a malformed GLB is one report line instead of a dead run, and the sidecar reader skips what
+  the Workshop skips (BOM, stray spaces, a letter outside A-Z, a v2 line without an index). 28 unit cases in the gate
+  (`Tests/test_advisor_corpus.py`); the Bake Tests row waits for the first proposer.
 - **THE RIG_ANIM PORT TAKES A MESH ON A JOINT NODE (2026-11-08).** A file with a mesh on a joint was left to Blender by
   name; stage 1 now gives the importer's `.mesh` child its real properties (`ImportRig.JointMeshProperty`, the probe's)
   instead of the identity. Two drill fixtures, posed at frame 1, one with bones 1.5 long under an armature scaled 2: 164
