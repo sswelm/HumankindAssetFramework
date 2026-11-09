@@ -159,8 +159,8 @@ parts: leave-one-model-out over the 26 recipes.
 
 ## 7. Pointers
 
-- Workshop windows and sidecar formats: `docs/Editor-Tools.md`, section *Model Cutter and Model Fuser*.
-- Roles, dials and the large-model workflow: `docs/Vehicle-Lab-Quickstart.md`, sections 3, 4 and 9.
+- Workshop windows and sidecar formats: `Editor-Tools.md`, section *Model Cutter and Model Fuser*.
+- Roles, dials and the large-model workflow: `Vehicle-Lab-Quickstart.md`, sections 3, 4 and 9.
 - Recipes: `C:\Repo\ENCReload\Assets\FactorySource\VehicleLab\Recipes\*.json`; migration: `tools/recipe_migrate.py`.
 - Sources and sidecars: `D:\3DModels\<model>\`.
 - Ollama on the home PC: `how-we-connected-the-laptop-to-the-home-model.md` and `model-recommendation.md` on the Desktop.

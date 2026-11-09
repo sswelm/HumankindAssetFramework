@@ -1543,7 +1543,7 @@ stale aim marker) was fixed the same day and is not repeated here. Ranked by con
 
 - **Workshop advisor — proposed marks for cutting, fusing and reducing (plan 2026-11-09).** The hours per model
   go into decisions (what a part is, which plates form a shell, which role and dial), not into the operations. The
-  plan in [notes/AI-Workshop-Advisor-Plan.md](notes/AI-Workshop-Advisor-Plan.md) measures every proposer against
+  plan in [Workshop-Advisor-Plan.md](Workshop-Advisor-Plan.md) measures every proposer against
   the user's own 26 recipes, 22 marks files and 27 fuse sidecars, uses geometry for grouping and a solver for dials,
   a plain classifier before a language model for roles, and the local vision model only as a gate before a delete.
   Proposals land as pending marks in the existing windows; nothing is applied silently. Prereq: Phase 0's timed

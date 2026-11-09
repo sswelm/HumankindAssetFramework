@@ -101,6 +101,7 @@ Follow the linked page rather than assuming every axis is a `models[]` field.
 - [**Testing.md**](Testing.md) — the testing strategy: what's unit-tested, what's covered by in-editor instruments, and what deliberately isn't; the editor tools' speed, measured (the native kernels section: probe, reduce and fuse before and after, in Unity).
 - [**Framework-Review.md**](Framework-Review.md) — the living hardening roadmap: verified review findings, prioritized, with what was done when.
 - [**Review-Backlog.md**](Review-Backlog.md) — findings verified real and deliberately deferred, ranked by when they'll bite.
+- [**Workshop-Advisor-Plan.md**](Workshop-Advisor-Plan.md) — proposal (2026-11-09, nothing built): an advisor that proposes cuts, fuse groups, roles and dials as pending marks, measured against the saved recipes and sidecars.
 
 ---
 
