@@ -1565,6 +1565,17 @@ log line and a claimed death. LEFT from the bake on, by name: a surviving bone s
 `bpy.data.meshes` (compared as a set: nothing later reads it); a mesh with a parent inverse of its own (the importer
 sets none); whether the exporter writes the merged links' bone-less group (step 8).
 
+**The role clips' handles, once per curve (2026-11-09).** The script's `keyframe_insert` recalculates a curve's
+handles after every key; the port used to as well, which made 7c a square of the frame count - 34 of the T-62's 41-second
+conversion. `BlenderFCurve.RecalcHandles` reads nothing but the keys' frames and values, so the handles after the last
+insert equal one pass over the finished curve: the port keys every role first and recalculates each touched curve once.
+Held by a unit test (per-insert against once-at-the-end, bit for bit, over ascending, descending, shuffled and re-keyed
+sequences) and by the export drill's bytes (the role clips are in the file). The T-62's conversion: 41.8 s -> 6.4 s under
+Unity's Mono; the port's phase laps come out as `TIMING` rows of the in-process drill, as `[Factory] <name> deploy
+timing:` Console lines in a bake, and from `bash tools/deploy_time.sh <model> [oracle.glb]` - one recorded conversion
+under Unity's Mono with the drill's own compile, the wall time and the laps (the tool to run BEFORE guessing where a
+conversion's time goes).
+
 **Replacing `deploy_convert.py`, parts 7, 7b, 7c: the purge and the role clips** (2026-10-11). Step 7 removes the
 animated empties (a removed part's children are roots with the transform they held; the meshes are under the
 armature by then; an imported armature that is a part goes too), 7b clears every other object's animation, removes

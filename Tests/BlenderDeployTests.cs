@@ -252,6 +252,45 @@ public class BlenderDeployTests
         Assert.Contains(r.Log, l => l.Contains("pair-merged onto neighbor bones"));
     }
 
+    /// <summary>Step 7c recalculates a role curve's handles ONCE after its last keyframe_insert where the script does so after every
+    /// insert: the handles are a function of the keys' frames and values alone, so both give the same curve - held here bit for bit
+    /// over ascending, descending, shuffled and re-keyed (a key on that frame already is MOVED) sequences.</summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void Handles_recalculated_once_after_the_last_insert_equal_the_per_insert_recalculation(int shape)
+    {
+        var rnd = new Random(1000 + shape);
+        int n = 60 + shape * 50;
+        var frames = Enumerable.Range(0, n).Select(i => (float)i).ToList();
+        if (shape == 1) frames.Reverse();
+        if (shape >= 2) frames = frames.OrderBy(_ => rnd.Next()).ToList();
+        if (shape == 3) frames.AddRange(frames.Take(n / 3).ToList());
+        var values = frames.Select(_ => (float)(rnd.NextDouble() * 4 - 2)).ToList();
+        var perInsert = new List<BlenderDeploy.ArmKey>(); var once = new List<BlenderDeploy.ArmKey>();
+        void Insert(List<BlenderDeploy.ArmKey> list, float frame, float v, bool recalc)
+        {
+            var key = list.FirstOrDefault(k => k.Frame == frame);
+            if (key == null) { list.Add(new BlenderDeploy.ArmKey { Frame = frame, Value = v }); list.Sort((x, y) => x.Frame.CompareTo(y.Frame)); }
+            else { float dy = (float)(v - key.Value); key.Value = (float)(key.Value + dy); }
+            if (recalc) BlenderFCurve.RecalcHandles(list);
+        }
+        for (int i = 0; i < frames.Count; i++) { Insert(perInsert, frames[i], values[i], true); Insert(once, frames[i], values[i], false); }
+        BlenderFCurve.RecalcHandles(once);
+        int Bits(float f) => BitConverter.ToInt32(BitConverter.GetBytes(f), 0);
+        Assert.Equal(perInsert.Count, once.Count);
+        Assert.True(once.Count >= n, "every distinct frame keyed");
+        for (int i = 0; i < once.Count; i++)
+        {
+            var a = perInsert[i]; var b = once[i];
+            Assert.Equal(Bits(a.Frame), Bits(b.Frame)); Assert.Equal(Bits(a.Value), Bits(b.Value));
+            Assert.Equal(Bits(a.LeftX), Bits(b.LeftX)); Assert.Equal(Bits(a.LeftY), Bits(b.LeftY));
+            Assert.Equal(Bits(a.RightX), Bits(b.RightX)); Assert.Equal(Bits(a.RightY), Bits(b.RightY));
+        }
+    }
+
     /// <summary>When the co-mover rides do not bring the rig under the budget, the neighbour merge still runs - and may drop a
     /// part that carries a rider. The rider then rides the neighbour's bone through its partner: bone_of resolves the chain.</summary>
     [Fact]
