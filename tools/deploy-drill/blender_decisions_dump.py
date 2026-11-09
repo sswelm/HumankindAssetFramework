@@ -17,6 +17,7 @@ the scene is then written out, every float as the hex of its bits.
     BAD     <name>                          a culled part
     ALIAS   <dropped part> <kept part>      a budget merge: a co-mover's ride (3b-i), then the neighbour merges (3b-ii)
     COMOVE  <part> <best partner> <score> <rides 0|1>   every instanced part judged for a co-mover (float64 hex)
+    CMREJECT <count>                        provisional pairs rejected between the sparse samples
     ARM     <the armature's name>
     BONEOF  <part> <bone>                   which bone each part rides (a merged part: its neighbour's)
     RBONE   <bone> <parent or -> <head_local 3, tail_local 3, length, matrix_local 16>      arm.data.bones order
@@ -120,6 +121,7 @@ for line in open(jobs, encoding="utf-8-sig").read().split("\n"):
                 print("ALIAS\t%s\t%s" % (d.name, k.name))
             for d, k, score, rides in g["_comove_rows"]:
                 print("COMOVE\t%s\t%s\t%s\t%d" % (d, k, h64(score), 1 if rides else 0))
+            print("CMREJECT\t%d" % g["_comove_rejected"])
             # the armature the script made (part 3): its bones at rest, which bone each part rides, the anchors
             arm = g["arm"]
             print("ARM\t%s" % arm.name)

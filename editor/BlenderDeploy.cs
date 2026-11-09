@@ -75,8 +75,10 @@ public static class BlenderDeploy
         public List<Obj> Parts = new List<Obj>();                // the parts left, in the script's order
         public List<string> Bad = new List<string>();            // the culled parts, sorted as Python sorts them
         public List<(Obj dropped, Obj kept)> Alias = new List<(Obj, Obj)>();
-        /// <summary>3b-i: every instanced part judged for a co-mover - its best partner, that score, and whether it rides one.</summary>
+        /// <summary>3b-i: every instanced part judged for a co-mover - its best scored partner and whether it rides one.
+        /// Scores above tolerance may remain sparse lower bounds; every accepted score covers all baked frames.</summary>
         public List<(Obj part, Obj partner, double score, bool rides)> Comove = new List<(Obj, Obj, double, bool)>();
+        public int ComoveRejected;   // provisional pairs whose motion between sparse samples exceeds tolerance
         // ---- the armature the script builds (part 3): one bone per part at the part's place, StaticRoot, the anchors
         public Obj Armature;                                      // "DeployArm" (the legacy path) or "DeployArmV2"
         public readonly List<Bone> Bones = new List<Bone>();      // creation order: the parts', then StaticRoot
@@ -499,16 +501,18 @@ public static class BlenderDeploy
             // cull's frames, its offset seen from the partner (R_k^T (t_d - t_k), in the partner's scale) and its turn
             // relative to the partner (R_k^T R_d) are compared with the bind frame's; the score is the farthest a vertex
             // could stray: offset drift + turn drift times the lever (their distance plus 5% of the model). Under 0.5% of
-            // the model the member drops and rides the partner's bone. Partners are never dropped; a member whose best
+            // the model the member drops and rides the partner's bone, after checking EVERY baked frame. Partners are never dropped; a member whose best
             // partners are dropped already takes the best kept one. Doubles from the float32 matrices, in the script's order.
             var members = Groups(parts).Where(g => g.Count >= 8).SelectMany(g => g).ToList();
             var cmFrames = new List<int>(); for (int f = fmin; f < fmax + 1; f += 7) cmFrames.Add(f); cmFrames.Add(fmax);
             var world = new Dictionary<(Obj, int), double[]>();   // as Python indexes matrix_world: m[i][j] -> [i * 4 + j]
-            foreach (int f in cmFrames)
+            void Capture(int f)
             {
+                if (world.ContainsKey((parts[0], f))) return;
                 FrameSet(f);
                 foreach (var p in parts) { var w = new double[16]; for (int i = 0; i < 4; i++) for (int j = 0; j < 4; j++) w[i * 4 + j] = p.World[j * 4 + i]; world[(p, f)] = w; }
             }
+            foreach (int f in cmFrames) Capture(f);
             FrameSet(fmin);
             double cmDim = r.NormDim * r.NormScale;
             double tol = 0.005 * cmDim, lever = 0.05 * cmDim;
@@ -519,7 +523,7 @@ public static class BlenderDeploy
                 for (int j = 0; j < 3; j++) v[j] = mk[0 * 4 + j] * t0 + mk[1 * 4 + j] * t1 + mk[2 * 4 + j] * t2;
                 for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) q[i * 3 + j] = mk[0 * 4 + i] * md[0 * 4 + j] + mk[1 * 4 + i] * md[1 * 4 + j] + mk[2 * 4 + i] * md[2 * 4 + j];
             }
-            double Score(Obj d, Obj k)
+            double Score(Obj d, Obj k, IEnumerable<int> sample)
             {
                 var v0 = new double[3]; var q0 = new double[9]; var v = new double[3]; var q = new double[9];
                 Rel(d, k, fmin, v0, q0);
@@ -528,7 +532,7 @@ public static class BlenderDeploy
                 double sd = Math.Sqrt(md[0] * md[0] + md[4] * md[4] + md[8] * md[8]);
                 double t0 = Math.Sqrt((md[3] - mk[3]) * (md[3] - mk[3]) + (md[7] - mk[7]) * (md[7] - mk[7]) + (md[11] - mk[11]) * (md[11] - mk[11]));
                 double mt = 0.0, mr = 0.0;
-                foreach (int f in cmFrames)
+                foreach (int f in sample)
                 {
                     Rel(d, k, f, v, q);
                     for (int j = 0; j < 3; j++) { double a = Math.Abs(v[j] - v0[j]); if (a > mt) mt = a; }
@@ -537,7 +541,24 @@ public static class BlenderDeploy
                 return mt / sk + mr / (sk * sd) * (t0 + lever);
             }
             var table = new Dictionary<Obj, List<(double s, Obj k)>>();
-            foreach (var d in members) table[d] = parts.Where(k => k != d).Select(k => (Score(d, k), k)).OrderBy(e => e.Item1).ThenBy(e => e.Item2.Name, CodePointOrder).ToList();
+            foreach (var d in members) table[d] = parts.Where(k => k != d).Select(k => (Score(d, k, cmFrames), k)).OrderBy(e => e.Item1).ThenBy(e => e.Item2.Name, CodePointOrder).ToList();
+            // Sparse samples cheaply reject unlike motions, but can miss a whole excursion between frames 0 and 7.
+            // Refine every provisional match before ranking/accepting it; retain sampled lower bounds for rejected pairs.
+            if (table.Values.Any(row => row.Any(e => e.s <= tol)))
+            {
+                var fullFrames = Enumerable.Range(fmin, fmax - fmin + 1).ToList();
+                foreach (int f in fullFrames) Capture(f);
+                FrameSet(fmin);
+                double Refine(Obj d, (double s, Obj k) e)
+                {
+                    if (e.s > tol) return e.s;
+                    double score = Score(d, e.k, fullFrames);
+                    if (score > tol) r.ComoveRejected++;
+                    return score;
+                }
+                foreach (var d in members) table[d] = table[d].Select(e => (s: Refine(d, e), k: e.k))
+                    .OrderBy(e => e.s).ThenBy(e => e.k.Name, CodePointOrder).ToList();
+            }
             var dropped = new Dictionary<Obj, Obj>(); var pinned = new HashSet<Obj>();
             foreach (var d in members.OrderBy(o => table[o][0].s).ThenBy(o => o.Name, CodePointOrder))
             {

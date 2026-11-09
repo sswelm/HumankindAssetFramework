@@ -2805,6 +2805,11 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Units & animation
 
+- **PR #274 review (2026-11-09).** Co-mover pairs that pass the seven-frame sampling screen are now scored at every
+  baked frame in both deploy implementations. A translation excursion or half-turn that returns by the next sample
+  could otherwise be called a co-mover and lose its own bone. Two failing-before unit cases and two live fixtures
+  cover those motions; the drill compares full-frame rejection counts as well as scores. The deploy cache revision
+  is bumped so affected conversions rebuild.
 - **PR #272 review (2026-11-09).** Resolve every mesh's bind target before detaching any mesh. Both the script and the
   port could bind an unanimated child to StaticRoot after its intermediate mesh was reparented, even though the child
   originally had an animated ancestor; renaming the meshes changed the result. A direct Blender reproduction changed
