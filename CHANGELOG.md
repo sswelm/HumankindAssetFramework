@@ -10,6 +10,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE RIG_ANIM PORT TAKES A MESH ON A JOINT NODE (2026-11-08).** A file with a mesh on a joint was left to Blender by
+  name; stage 1 now gives the importer's `.mesh` child its real properties (`ImportRig.JointMeshProperty`, the probe's)
+  instead of the identity. Two drill fixtures, posed at frame 1, one with bones 1.5 long under an armature scaled 2: 164
+  jobs, the three new ones equal to Blender at every stage and exported in process; three plants (the identity, a fixed
+  bone length, the wrong length) each fail only their own jobs. A unit test holds the matrix to Blender's row. The
+  vehicle_rig port shares the import but keeps such a file Blender's by name: its drill has no such fixture
+  (`docs/Testing.md`).
 - **THE PROBE HOLDS A MESH ON A JOINT NODE TOO (2026-11-08).** The importer moves a mesh off a joint onto a `<id>.mesh` child
   under the bone with the default transform; the probe now gives that child its own matrix through the bone chain
   (`ImportRig.JointMeshProperty`), beside the joint's entries the skinning reads; a placement on a split-off child (a mesh

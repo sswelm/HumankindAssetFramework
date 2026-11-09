@@ -816,8 +816,10 @@ below that only intra-group parallelism of the weld or the gather would pay.
   held bit for bit (the canoe's 19, the bonechild fixture's lamp), the plant fails; the Lab's in-process probe keeps such a
   model in C#. A mesh ON a joint node (the importer's `.mesh` child) followed the same day: `ImportRig.JointMeshProperty`,
   `FULL=1` 30 held, 0 counted on 178 files, each fix failing its own job under its plant. Still Blender's in the Lab: a
-  placement on such a model, a first clip the action import does not model, a skin without joint weights; in the rig_anim
-  port the `.mesh` child itself (a scene-object port of its own) (`docs/Testing.md`). Was: OPEN (2026-10-03). A glTF mesh node under a joint becomes, in
+  placement on such a model, a first clip the action import does not model, a skin without joint weights. The rig_anim
+  port's `.mesh` child followed too: stage 1 takes `JointMeshProperty`, the drill's two joint-mesh fixtures equal on both
+  paths, three plants each failing only their own jobs; vehicle_rig, which shares the import, keeps such a file Blender's
+  by name until its drill has a fixture for it (`docs/Testing.md`). Was: OPEN (2026-10-03). A glTF mesh node under a joint becomes, in
   Blender, an object parented to that BONE (`parent_type = 'BONE'`, moved by −bone_length along Y), and its
   matrix_world is armature @ `pchan->pose_mat` (translated to the bone's tail) @ local. The pose matrix comes from the
   editbone (head/tail from `editbone_arma_mat`, length from the importer's heuristic, roll from `align_roll`), the

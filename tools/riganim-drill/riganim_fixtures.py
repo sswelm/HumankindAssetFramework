@@ -372,6 +372,45 @@ def skinned_anim(out):
     return r.write(out, "riganim_skinned_anim")
 
 
+def joint_mesh(out):
+    """A mesh ON a joint node (2026-11-08): the importer moves it onto a '.mesh' child under the bone (fixup_multitype_nodes), with
+    the bone child's rotation_after and the move back by the bone length - one on the Arm joint, one on the Root joint. The
+    active clip starts POSED (rigged()'s Spin starts at the rest angle): Root turned 35 degrees about Z and Arm shifted at its
+    first key, so stage 1's frame 1 composes both '.mesh' children through a pose (review, 2026-11-09). The port left such a
+    file to Blender by name until then."""
+    r = Rig(); arm, j0, j1, sk, m = rigged(r)
+    turn = lambda deg: (0.0, 0.0, math.sin(math.radians(deg) / 2), math.cos(math.radians(deg) / 2))
+    r.key(0, j0, "rotation", [0.0, 1.0], [turn(35.0), turn(60.0)])
+    r.key(0, j1, "translation", [0.0, 1.0], [(0.25, 1.0, 0.5), (0.0, 1.0, 0.0)])
+    r.nodes[j1]["mesh"] = r.mesh("barrel", at=(0.0, 1.5, 0.25), size=0.5, material=m)
+    r.nodes[j0]["mesh"] = r.mesh("hub", at=(0.5, 0.0, 0.0), size=0.4, material=m)
+    return r.write(out, "riganim_joint_mesh")
+
+
+def joint_mesh_scaled(out):
+    """joint_mesh with a bone length and an armature scale that are not 1 (review, 2026-11-09): Arm 1.5 from Root (both bones
+    1.5 long) and the armature node scaled 2 - the '.mesh' child moves back by the importer's bone_length, which differs from
+    the length the pose matrix uses once the armature is scaled, so a regression to either the other length or a fixed -1
+    fails here (joint_mesh's bones are 1 long under a unit armature, where all three agree)."""
+    # its own rig, not rigged()'s: the importer takes the bones from the inverse bind matrices, so they must say 1.5 and the
+    # scale too (a node translation alone left both bones 1 long, and the fixed -1 plant passed - review round 3)
+    r = Rig()
+    arm = r.node("Armature", scale=[2.0, 2.0, 2.0])
+    j0 = r.node("Root", arm)
+    j1 = r.node("Arm", j0, translation=[0.0, 1.5, 0.0])
+    def sibm(ty):   # a joint at world (0, ty, 0) under the armature's scale 2
+        return (0.5, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, -ty * 0.5, 0.0, 1.0)
+    sk = r.skin("Skin", [j0, j1], [sibm(0.0), sibm(3.0)])
+    m = r.material("Paint", (0.2, 0.4, 0.9))
+    r.node("Body", arm, mesh=r.mesh("body", material=m, joints=[[(0, 1.0)]] * 4 + [[(0, 0.5), (1, 0.5)]] * 4), skin=sk)
+    r.key(r.anim("Spin"), j1, "rotation", [0.0, 0.5, 1.0], spin(3, "x", 0.5))
+    r.nodes[j1]["mesh"] = r.mesh("barrel", at=(0.0, 1.5, 0.25), size=0.5, material=m)
+    r.nodes[j0]["mesh"] = r.mesh("hub", at=(0.5, 0.0, 0.0), size=0.4, material=m)
+    turn = lambda deg: (0.0, 0.0, math.sin(math.radians(deg) / 2), math.cos(math.radians(deg) / 2))
+    r.key(0, j0, "rotation", [0.0, 1.0], [turn(35.0), turn(60.0)])
+    return r.write(out, "riganim_joint_mesh_scaled")
+
+
 # ---- stage 2 (step (c)): the bone-parent -> skin conversion and the wrapper flatten. No registry recipe takes either.
 
 def s2_static(out):
@@ -1068,6 +1107,10 @@ def main(out):
     job("fx_armobj_mirrored_roles", armobj_mirrored_roles(out), roles="attack=Spin[0..6];move=Spin[6..12]")
     job("EXPORTLEFT:fx_armobj_parented", armobj(out, "riganim_armobj_parented", parented=True), convert="0")
     job("fx_skinned_anim", skinned_anim(out))
+    jm = joint_mesh(out)
+    job("fx_joint_mesh", jm)                    # the conversion path: the '.mesh' children bound into the skin (stage 2)
+    job("fx_joint_mesh_legacy", jm, convert="0")   # the legacy path: stage 3's bone-parent parentinv fix on them, then the join
+    job("fx_joint_mesh_scaled", joint_mesh_scaled(out))   # bone length 1.5 under an armature scaled 2
     # stage 2
     job("fx_s2_static", s2_static(out), static="turret,glass")
     job("fx_s2_static_many", s2_static_many(out), static="plate")
