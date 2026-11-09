@@ -17,7 +17,11 @@ never colliding with a name already in the file).
 
 The features are computed here from the GLB with no dependency beyond the standard library: vertex and triangle
 counts, islands (exact-position weld plus index connectivity; the probe welds at a few ulps, so a mesh with near-
-coincident seams can count more islands here than in the Lab), the world-space bounds. The escape-ray visibility and
+coincident seams can count more islands here than in the Lab), the world-space bounds. `verts` counts the distinct
+vertices a part's primitives reference (a blocked mesh, which has no triangles to reference them with, keeps its
+POSITION accessor's count, as the Workshop's MeasureNode does), which is the Lab's probe count: the five recipes on _split files (Khelandion,
+Bremen, Teutonic, Triconter, Sikorsky; 675 parts) agree with it to the vertex, while the Fuser's report sums whole
+accessors and reads higher for split children. The escape-ray visibility and
 the inside-out verdict are NOT recomputed; they are taken from the recipe where one covers the file.
 
     python tools/advisor/corpus.py [--models D:/3DModels] [--recipes <dir>] [--out tools/advisor/out] [--no-cache]
@@ -68,8 +72,8 @@ CATEGORY = {
 FOLDER_CATEGORY = {f: c for c, fs in CATEGORY.items() for f in fs}
 
 PART_COLUMNS = ["model", "category", "file", "stage", "node_index", "name", "file_name", "mesh_index", "mesh_shared", "parent_index",
-                "depth", "verts", "tris", "islands", "cx", "cy", "cz", "sx", "sy", "sz", "blocked",
-                "mark", "fuse_letter", "fuse_group_name", "fused_into", "fused_letter",
+                "depth", "verts", "tris", "islands", "cx", "cy", "cz", "sx", "sy", "sz", "blocked", "triangle_free",
+                "mark", "auto_mark", "fuse_letter", "fuse_group_name", "fused_into", "fused_letter",
                 "role", "role_id", "vis", "flip", "bone", "placed", "recipe", "recipe_verts", "recipe_name", "name_join", "role_via_fuse", "recipe_via_fuse"]
 MODEL_COLUMNS = ["model", "category", "files", "recipe", "recipe_src", "recipe_src_stage", "recipe_parts", "recipe_parts_matched", "dials"]
 
@@ -198,28 +202,30 @@ def node_world_matrices(nodes):
         return [sum(a[r + 4 * k] * b[4 * c + k] for k in range(4)) for c in range(4) for r in range(4)]
 
     world = {}
-
-    def get(i, depth=0):
-        if i in world:
-            return world[i]
-        if depth > 1000:
-            raise ValueError("node cycle")
-        n = nodes[i] if isinstance(nodes[i], dict) else {}
-        m = local(n)
-        if i in parent:
-            m = mul(get(parent[i], depth + 1), m)
-        world[i] = m
-        return m
-
-    for i in range(len(nodes)):
-        get(i)
     depth = {}
     for i in range(len(nodes)):
-        d, j = 0, i
-        while j in parent and d < 1000:
+        # the chain to the root, iteratively: a self-child or a two-node cycle is a malformed file to report, not a
+        # RecursionError that kills the whole export (review of this file)
+        chain = []
+        j = i
+        seen = set()
+        while j not in world:
+            if j in seen:
+                raise ValueError("node cycle through node %d" % j)
+            seen.add(j)
+            chain.append(j)
+            if j not in parent:
+                break
             j = parent[j]
-            d += 1
-        depth[i] = d
+        for k in reversed(chain):
+            n = nodes[k] if isinstance(nodes[k], dict) else {}
+            m = local(n)
+            if k in parent:
+                m = mul(world[parent[k]], m)
+                depth[k] = depth[parent[k]] + 1
+            else:
+                depth[k] = 0
+            world[k] = m
     return world, parent, depth
 
 
@@ -258,11 +264,25 @@ def analyse_mesh(glb, mesh_index):
     lo = [math.inf] * 3
     hi = [-math.inf] * 3
     blocked = None
+    # THE PROBE'S PRIMITIVE RULE (GlbDisconnectedParts.AnalyzeMesh): a primitive that is not TRIANGLES (mode 4) throws
+    # "Only TRIANGLES primitives can be split safely." and the whole mesh is Blocked - no triangles, no islands. A
+    # line or point mesh counted here instead made every vertex its own island (review of this file: 1,246 real rows,
+    # the Espana's 787 rigging lines among them, every one a false split candidate).
+    modes = [p.get("mode", 4) for p in prims if isinstance(p, dict)]
+    triangle_free = bool(modes) and all(isinstance(m, int) and 0 <= m <= 3 for m in modes)
+    if any(m != 4 for m in modes):
+        pos_count = 0
+        for p in prims:
+            if isinstance(p, dict) and isinstance(p.get("attributes"), dict) and "POSITION" in p["attributes"]:
+                arr, nc = glb.accessor_array(p["attributes"]["POSITION"])
+                pos_count += len(arr) // 3 if arr is not None and nc == 3 else 0
+        return {"verts": pos_count, "tris": 0, "islands": 0, "lo": [0.0] * 3, "hi": [0.0] * 3, "unique": [],
+                "blocked": "Only TRIANGLES primitives can be split safely.", "triangle_free": triangle_free}
     for prim in prims:
         if not isinstance(prim, dict):
             continue
         attrs = prim.get("attributes") or {}
-        if "POSITION" not in attrs:
+        if not isinstance(attrs, dict) or "POSITION" not in attrs:
             continue
         pos, ncomp = glb.accessor_array(attrs["POSITION"])
         if pos is None:
@@ -327,11 +347,12 @@ def analyse_mesh(glb, mesh_index):
             union(vb, vc)
         dsu_parent = dsu.p
     if verts == 0:
-        return {"verts": 0, "tris": 0, "islands": 1 if blocked is None else 0, "lo": [0.0] * 3, "hi": [0.0] * 3, "unique": [], "blocked": blocked}
+        return {"verts": 0, "tris": 0, "islands": 1 if blocked is None else 0, "lo": [0.0] * 3, "hi": [0.0] * 3, "unique": [], "blocked": blocked,
+                "triangle_free": triangle_free}
     dsu = Dsu(0)
     dsu.p = dsu_parent
     roots = set(dsu.find(i) for i in range(len(unique)))
-    return {"verts": verts, "tris": tris, "islands": len(roots), "lo": lo, "hi": hi, "unique": unique, "blocked": blocked}
+    return {"verts": verts, "tris": tris, "islands": len(roots), "lo": lo, "hi": hi, "unique": unique, "blocked": blocked, "triangle_free": triangle_free}
 
 
 def transform_bounds(m, mesh_info):
@@ -386,20 +407,29 @@ def glb_parts(data):
             "mesh_shared": mesh_users[mi], "parent_index": parent.get(i, -1), "depth": depth[i],
             "verts": info.get("verts", 0), "tris": info.get("tris", 0), "islands": info.get("islands", 0),
             "cx": centre[0], "cy": centre[1], "cz": centre[2], "sx": size[0], "sy": size[1], "sz": size[2],
-            "blocked": blocked or "",
+            "blocked": blocked or "", "triangle_free": int(bool(info.get("triangle_free"))),
         })
     return rows
 
 
+def auto_marked(row, mark, letter):
+    """The Workshop's own first-load deletion (WorkshopRules.ShouldMarkTinyPartForDeletion): a part of two triangles
+    or fewer, not blocked unless triangle-free, with no Split, Tear or group of its own. An X on such a part is the
+    tool's, not the user's judgement; the table says which."""
+    return int(0 <= row["tris"] <= 2 and (not row["blocked"] or row["triangle_free"]) and mark not in ("S", "T") and not letter)
+
+
 # ---------------------------------------------------------------- sidecars
 
-def read_sidecar(path):
+def read_sidecar(path, skipped=None):
     """(lines [(letter, index or None, name)], group names {letter: name}) of a marks or fuse sidecar (v2, and the
-    two legacy layouts the Workshop still reads)."""
+    two legacy layouts the Workshop still reads), as EditorRules.ResolveFuseSidecar reads it: a BOM is dropped
+    (File.ReadAllLines), every field is trimmed, a letter must be one of A-Z, and a v2 line without a node index is
+    skipped, not applied. Lines the Workshop skips are appended to `skipped` when a list is given."""
     lines = []
     names = {}
     v2 = False
-    with io.open(path, encoding="utf-8", errors="replace") as f:
+    with io.open(path, encoding="utf-8-sig", errors="replace") as f:
         for raw in f:
             line = raw.strip()
             if not line:
@@ -414,20 +444,41 @@ def read_sidecar(path):
             first = line.find("|")
             if first <= 0:
                 continue
-            letter, rest = line[:first], line[first + 1:]
+            letter, rest = line[:first].strip(), line[first + 1:]
+            if len(letter) != 1 or not ("A" <= letter <= "Z"):
+                if skipped is not None:
+                    skipped.append("'%s' skipped: the letter is not one of A-Z" % line)
+                continue
+            if not rest.strip():
+                if skipped is not None:
+                    skipped.append("'%s' skipped: nothing after the letter" % line)
+                continue
             if v2:
                 second = rest.find("|")
-                if second > 0 and rest[:second].strip().lstrip("-").isdigit():
-                    lines.append((letter, int(rest[:second]), rest[second + 1:]))
-                else:
-                    lines.append((letter, None, rest.strip()))
+                index = int_token(rest[:second]) if second > 0 else None
+                if index is not None and rest[second + 1:].strip():
+                    lines.append((letter, index, rest[second + 1:].strip()))
+                elif skipped is not None:
+                    skipped.append("'%s' skipped: a v2 line needs <letter>|<node index>|<name>" % line)
             else:
+                rest = rest.strip()
                 last = rest.rfind("|")
-                if last > 0 and rest[last + 1:].strip().lstrip("-").isdigit():
-                    lines.append((letter, int(rest[last + 1:]), rest[:last].strip()))
+                index = int_token(rest[last + 1:]) if last > 0 else None
+                if index is not None:
+                    lines.append((letter, index, rest[:last].strip()))
                 else:
-                    lines.append((letter, None, rest.strip()))
+                    lines.append((letter, None, rest))
     return lines, names
+
+
+INT_TOKEN = re.compile(r"^[+-]?\d+$")
+
+
+def int_token(text):
+    """The node index of a sidecar field as int.TryParse(NumberStyles.Integer) reads it: an optional sign and ASCII
+    digits, else None. (str.isdigit accepted '--3' and superscript digits and int() then threw - a dead run.)"""
+    text = text.strip()
+    return int(text) if INT_TOKEN.match(text) else None
 
 
 def resolve_sidecar(lines, rows, refused):
@@ -472,16 +523,20 @@ def norm_path(p):
 
 # ---------------------------------------------------------------- the export
 
-def load_recipes(recipes_dir):
+def load_recipes(recipes_dir, notes=None):
+    """[(path, recipe)] for every readable recipe with a parts list; what was skipped, and why, goes to `notes`."""
     out = []
     for f in sorted(glob.glob(os.path.join(recipes_dir, "*.json"))):
         try:
-            with io.open(f, encoding="utf-8") as fh:
+            with io.open(f, encoding="utf-8-sig") as fh:
                 j = json.load(fh)
         except (OSError, ValueError) as e:
-            print("recipe skipped (unreadable): %s: %s" % (f, e))
+            if notes is not None:
+                notes.append("RECIPE %s: unreadable (%s)" % (os.path.basename(f), e))
             continue
-        if not isinstance(j, dict) or "parts" not in j:
+        if not isinstance(j, dict) or not isinstance(j.get("parts"), list):
+            if notes is not None:
+                notes.append("RECIPE %s: no parts list, skipped (its dials are not in the table)" % os.path.basename(f))
             continue
         out.append((f, j))
     return out
@@ -491,9 +546,14 @@ def recipe_dials(j):
     return {k: j[k] for k in sorted(j) if k.endswith("ReducePct")}
 
 
+# Bump when a feature's definition changes: the cache below is keyed on it, so an old export never serves stale
+# features for a file that did not change (the referenced-vertices fix would have been masked by the cache otherwise).
+FEATURES_VERSION = 3   # 3: non-TRIANGLES primitives block the mesh; triangle_free carried
+
+
 def file_features(path, cache, use_cache, log):
     st = os.stat(path)
-    key = hashlib.sha1(("%s|%d|%d" % (norm_path(path), st.st_size, int(st.st_mtime))).encode("utf-8")).hexdigest()
+    key = hashlib.sha1(("%s|%d|%d|v%d" % (norm_path(path), st.st_size, int(st.st_mtime), FEATURES_VERSION)).encode("utf-8")).hexdigest()
     if use_cache and key in cache:
         return cache[key], True
     t0 = time.time()
@@ -515,7 +575,7 @@ def build(models_root, recipes_dir, out_dir, use_cache=True, log=print, folders=
         except (OSError, ValueError):
             cache = {}
     report = []
-    recipes = load_recipes(recipes_dir)
+    recipes = load_recipes(recipes_dir, report)
     recipe_by_src = defaultdict(list)
     for f, j in recipes:
         recipe_by_src[norm_path(j.get("srcFile"))].append((f, j))
@@ -563,8 +623,8 @@ def build(models_root, recipes_dir, out_dir, use_cache=True, log=print, folders=
         for path in chosen:
             try:
                 rows, _ = file_features(path, cache, use_cache, log)
-            except (ValueError, OSError, struct.error) as e:
-                report.append("GLB unreadable: %s: %s" % (path, e))
+            except Exception as e:   # noqa: BLE001 - one malformed file is a report line, never a dead run (review: a 3-value matrix, "mesh": "0", extensions: [] were all fatal)
+                report.append("GLB unreadable: %s: %s: %s" % (path, type(e).__name__, e))
                 continue
             rows_by_file[norm_path(path)] = rows
             rel = os.path.relpath(path, models_root).replace("\\", "/")
@@ -572,11 +632,11 @@ def build(models_root, recipes_dir, out_dir, use_cache=True, log=print, folders=
             refused = []
             marks = {}
             if os.path.exists(path + ".marks.txt"):
-                lines, _ = read_sidecar(path + ".marks.txt")
+                lines, _ = read_sidecar(path + ".marks.txt", refused)
                 marks = resolve_sidecar(lines, rows, refused)
             letters, group_names = {}, {}
             if os.path.exists(path + ".fuse.txt"):
-                lines, group_names = read_sidecar(path + ".fuse.txt")
+                lines, group_names = read_sidecar(path + ".fuse.txt", refused)
                 letters = resolve_sidecar(lines, rows, refused)
             for why in refused:
                 report.append("SIDECAR refused at %s: %s" % (rel, why))
@@ -588,12 +648,15 @@ def build(models_root, recipes_dir, out_dir, use_cache=True, log=print, folders=
                     for m in members:
                         if m not in names:
                             report.append("REPORT %s names '%s', not a part of %s" % (rp, m, rel))
+                        if m in fused_into and fused_into[m] != fused:
+                            report.append("REPORT %s names '%s' in two groups (%s and %s); the later one is kept" % (rp, m, fused_into[m], fused))
                         fused_into[m] = fused
                         fused_letter[m] = letter
             for r in rows:
                 row = dict(r)
                 row.update({"model": folder, "category": category, "file": rel, "stage": stage,
                             "mark": marks.get(r["node_index"], ""), "fuse_letter": letters.get(r["node_index"], ""),
+                            "auto_mark": auto_marked(r, marks.get(r["node_index"], ""), letters.get(r["node_index"], "")),
                             "fuse_group_name": group_names.get(letters.get(r["node_index"], ""), ""),
                             "fused_into": fused_into.get(r["name"], ""), "fused_letter": fused_letter.get(r["name"], ""),
                             "role": "", "role_id": "", "vis": "", "flip": "", "bone": "", "placed": "", "recipe": "", "recipe_verts": "",
@@ -613,7 +676,8 @@ def build(models_root, recipes_dir, out_dir, use_cache=True, log=print, folders=
             # carried here with the recipe's own probe fields and named in the report.
             src2 = j.get("srcFile2") or ""
             second = [p for p in parts if src2 and str(p.get("name", "")).startswith("B_")]
-            main = [p for p in parts if p not in second]
+            second_ids = set(id(p) for p in second)
+            main = [p for p in parts if id(p) not in second_ids]
             if second:
                 rel2 = os.path.relpath(src2, models_root).replace("\\", "/") if norm_path(src2).startswith(norm_path(models_root)) else src2
                 for p in second:
@@ -749,7 +813,7 @@ def write_csv(path, columns, rows):
 
 def fmt(v):
     if isinstance(v, float):
-        return "%.6g" % v
+        return "%.9g" % v   # float32 positions survive; "%.6g" lost the centimetres of a 1,400-unit centre
     return v
 
 

@@ -21,9 +21,10 @@ import evaluate  # noqa: E402
 
 # ---------------------------------------------------------------- a GLB from scratch
 
-def make_glb(nodes, meshes, positions, index_lists):
+def make_glb(nodes, meshes, positions, index_lists, modes=None):
     """nodes: [{name, mesh, children?, translation?}], meshes: [[(position accessor, indices accessor or None)]],
-    positions: [[(x,y,z), ...]] one list per position accessor, index_lists: [[i, ...]] one per index accessor."""
+    positions: [[(x,y,z), ...]] one list per position accessor, index_lists: [[i, ...]] one per index accessor,
+    modes: {mesh index: primitive mode} for anything but TRIANGLES."""
     bin_ = bytearray()
     views, accessors = [], []
     pos_acc = []
@@ -49,10 +50,10 @@ def make_glb(nodes, meshes, positions, index_lists):
     while len(bin_) % 4:
         bin_ += b"\0"
     mesh_json = []
-    for prims in meshes:
+    for mi, prims in enumerate(meshes):
         ps = []
         for pa, ia in prims:
-            prim = {"attributes": {"POSITION": pos_acc[pa]}, "mode": 4}
+            prim = {"attributes": {"POSITION": pos_acc[pa]}, "mode": (modes or {}).get(mi, 4)}
             if ia is not None:
                 prim["indices"] = idx_acc[ia]
             ps.append(prim)
@@ -246,6 +247,27 @@ class Metrics(unittest.TestCase):
         self.assertAlmostEqual(evaluate.projection(parts, "m", {"bodyReducePct": 75.0}), 250.0 + 100.0 + 40.0)
         self.assertIsNone(evaluate.projection(parts, "nobody", {}))
 
+    def test_the_delete_population_is_every_judged_file(self):
+        base = {"model": "m", "category": "c", "stage": "raw", "mark": "", "fuse_letter": "", "role": "", "node_index": 0, "name": "n"}
+        rows = [dict(base, file="marked", mark="X"), dict(base, file="marked"),
+                dict(base, file="lettered", fuse_letter="A"), dict(base, file="lettered"),        # fused, nothing deleted: negatives
+                dict(base, file="untouched"), dict(base, file="recipe", role="Ignore"), dict(base, file="recipe", role="Body")]
+        pop = evaluate.population("delete", rows)
+        self.assertEqual(sorted(set(r["file"] for r in pop)), ["lettered", "marked", "recipe"])
+        self.assertEqual([r["truth"] for r in pop].count("X"), 2)   # the X mark and the Ignore role
+
+    def test_a_dial_the_recipe_does_not_carry_reads_as_the_labs_default(self):
+        m = {"category": "c", "dials_parsed": {"bodyReducePct": 40.0}}
+        self.assertEqual((evaluate.saved_dial(m, "bodyReducePct"), evaluate.saved_dial(m, "sailReducePct")), (40.0, 0.0))
+        # rigging and structure predate the recipe keys: the Lab reads 75 and 50 for a recipe without them
+        self.assertEqual((evaluate.saved_dial(m, "riggingReducePct"), evaluate.saved_dial(m, "structureReducePct")), (75.0, 50.0))
+        parts = [{"model": "m", "role": "Rigging", "recipe_verts": "100", "verts": "1"}]
+        self.assertAlmostEqual(evaluate.projection(parts, "m", {}), 25.0)
+        others = [{"model": "a", "category": "c", "dials_parsed": {"bodyReducePct": 40.0}}, {"model": "b", "category": "c", "dials_parsed": {"bodyReducePct": 60.0, "sailReducePct": 30.0}},
+                  {"model": "d", "category": "c", "dials_parsed": {"bodyReducePct": 50.0}}]
+        pred = evaluate.Baselines.median_dials("dials", [], [], {"category": "c"}, others)
+        self.assertEqual((pred["bodyReducePct"], pred["sailReducePct"]), (50.0, 0.0))   # the two recipes without a sail dial vote 0
+
     def test_leave_one_model_out_never_trains_on_the_held_out_model(self):
         rows = []
         for m, t in (("a", "Body"), ("a", "Body"), ("b", "Sail"), ("b", "Sail"), ("b", "Sail")):
@@ -347,6 +369,105 @@ class BlenderNamesAndSecondModel(unittest.TestCase):
         self.assertAlmostEqual(evaluate.projection(parts, "Rah66", m["dials_parsed"]), 20.4)
 
 
+class ReviewRound2(unittest.TestCase):
+    """The shapes an independent review of the export found unhandled: line meshes counted as islands, the tool's own
+    tiny-part deletions scored as the user's, a node cycle killing the run, sidecar lines the Workshop skips, a part
+    in two fuse groups, a recipe without parts."""
+
+    def write_folder(self, folder_name, glb_bytes, sidecars=None, recipe=None, report=None):
+        tmp = tempfile.mkdtemp(prefix="advisor-r2-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        models, recipes, out = (os.path.join(tmp, d) for d in ("models", "recipes", "out"))
+        folder = os.path.join(models, folder_name)
+        os.makedirs(folder)
+        os.makedirs(recipes)
+        glb = os.path.join(folder, "m.glb")
+        with open(glb, "wb") as f:
+            f.write(glb_bytes)
+        for suffix, text in (sidecars or {}).items():
+            with io.open(glb + suffix, "w", encoding="utf-8", newline="") as f:
+                f.write(text)
+        if recipe is not None:
+            recipe = dict(recipe, srcFile=glb.replace("\\", "/"))
+            with io.open(os.path.join(recipes, "m.json"), "w", encoding="utf-8") as f:
+                json.dump(recipe, f)
+        if report is not None:
+            fused = os.path.join(folder, "m_fused.glb")
+            with open(fused, "wb") as f:
+                f.write(glb_bytes)
+            with io.open(fused + ".fuse-report.txt", "w", encoding="utf-8") as f:
+                f.write(report % (glb.replace("\\", "/"), fused.replace("\\", "/")))
+        parts, models_rows, rep = corpus.build(models, recipes, out, use_cache=False, log=lambda *_: None)
+        return parts, models_rows, rep, out
+
+    def test_a_line_mesh_is_blocked_not_a_pile_of_islands_and_is_the_tools_own_deletion(self):
+        glb = make_glb(nodes=[{"name": "Rope", "mesh": 0}, {"name": "Hull", "mesh": 1}], meshes=[[(0, 0)], [(0, 1)]],
+                       positions=[TWO_ISLANDS], index_lists=[[0, 1, 1, 2, 3, 4], [0, 1, 2, 3, 4, 5]], modes={0: 1})   # mesh 0 is LINES
+        g = corpus.Glb(glb)
+        self.assertEqual([m["primitives"][0]["mode"] for m in g.meshes], [1, 4])
+        parts, _, rep, out = self.write_folder("Rah66", glb, sidecars={".marks.txt": "#fuse-groups v2\nX|0|Rope\nX|1|Hull\n"})
+        rope = [r for r in parts if r["name"] == "Rope"][0]
+        hull = [r for r in parts if r["name"] == "Hull"][0]
+        self.assertEqual((rope["blocked"], rope["tris"], rope["islands"], rope["triangle_free"], rope["verts"]), ("Only TRIANGLES primitives can be split safely.", 0, 0, 1, 6))
+        self.assertEqual((rope["mark"], rope["auto_mark"]), ("X", 1))     # the Workshop marks a triangle-free part itself
+        self.assertEqual((hull["mark"], hull["auto_mark"], hull["islands"]), ("X", 1, 2))   # two triangles: also the tool's
+        parts2, _ = evaluate.load_corpus(out)
+        self.assertEqual([r["name"] for r in evaluate.population("split", parts2)], ["Hull"])    # a blocked part is no split candidate
+        self.assertEqual(len(evaluate.population("delete", parts2)), 2)
+        self.assertEqual(evaluate.population("delete-hand", parts2), [])                        # both deletions are the tool's
+
+    def test_a_three_triangle_part_marked_x_is_the_users_judgement(self):
+        glb = make_glb(nodes=[{"name": "Plate", "mesh": 0}], meshes=[[(0, 0)]], positions=[TWO_ISLANDS + [(20, 0, 0)]], index_lists=[[0, 1, 2, 3, 4, 5, 3, 4, 6]])
+        parts, _, _, out = self.write_folder("Rah66", glb, sidecars={".marks.txt": "#fuse-groups v2\nX|0|Plate\n"})
+        self.assertEqual((parts[0]["tris"], parts[0]["mark"], parts[0]["auto_mark"]), (3, "X", 0))
+        parts2, _ = evaluate.load_corpus(out)
+        self.assertEqual([r["truth"] for r in evaluate.population("delete-hand", parts2)], ["X"])
+
+    def test_a_node_cycle_is_one_report_line_not_a_dead_run(self):
+        glb = make_glb(nodes=[{"name": "A", "mesh": 0, "children": [1]}, {"name": "B", "mesh": 0, "children": [0], "_child": True}],
+                       meshes=[[(0, 0)]], positions=[ONE_TRI], index_lists=[[0, 1, 2]])
+        with self.assertRaises(ValueError):
+            corpus.glb_parts(glb)
+        parts, _, rep, _ = self.write_folder("Rah66", glb, sidecars={".marks.txt": "#fuse-groups v2\nX|0|A\n"})
+        self.assertEqual(parts, [])
+        self.assertTrue(any("GLB unreadable" in line and "node cycle" in line for line in rep), rep)
+        # a matrix of the wrong length is the same kind of line, not a crash
+        bad = make_glb(nodes=[{"name": "A", "mesh": 0, "matrix": [1.0, 2.0, 3.0]}], meshes=[[(0, 0)]], positions=[ONE_TRI], index_lists=[[0, 1, 2]])
+        parts, _, rep, _ = self.write_folder("Rah66", bad, sidecars={".marks.txt": "#fuse-groups v2\nX|0|A\n"})
+        self.assertEqual(parts, [])
+        self.assertTrue(any("GLB unreadable" in line for line in rep), rep)
+
+    def test_sidecar_lines_the_workshop_skips_are_skipped_here_and_named(self):
+        tmp = tempfile.mkdtemp(prefix="advisor-sc2-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        p = os.path.join(tmp, "x.glb.marks.txt")
+        with io.open(p, "w", encoding="utf-8-sig", newline="") as f:   # a BOM, CRLF, spaces around the fields
+            f.write("#fuse-groups v2\r\nX| 1 | Mast \r\nX|Deck\r\nx|2|Keel\r\nXX|3|Keel\r\nS|4|\r\nA|--3|Rail\r\nA|²|Rail\r\nB|+5|Boom\r\nC|\r\n")
+        skipped = []
+        lines, _ = corpus.read_sidecar(p, skipped)
+        # "+5" is an index to int.TryParse and so here; "--3" and a superscript digit are not (str.isdigit said yes and int() threw)
+        self.assertEqual(lines, [("X", 1, "Mast"), ("B", 5, "Boom")])
+        self.assertEqual(len(skipped), 7, skipped)
+
+    def test_a_part_in_two_fuse_groups_is_reported(self):
+        glb = make_glb(nodes=[{"name": "A", "mesh": 0}, {"name": "B", "mesh": 0}], meshes=[[(0, 0)]], positions=[ONE_TRI], index_lists=[[0, 1, 2]])
+        report = ("Model Workshop fuse report\nsource: %s\noutput: %s\nweld: 0 permille of the model's length\ngroups: 2\n\n"
+                  "== group H — 2 part(s)\nparts: A, B\nFused 2 part(s) -> 'Fused_H_A': 6 -> 6 verts (seams welded within 0.001 = 0‰ of 11); islands 2 -> 2\n\n"
+                  "== group D — 1 part(s)\nparts: A\nFused 1 part(s) -> 'Fused_D_A': 3 -> 3 verts (seams welded within 0.001 = 0‰ of 11); islands 1 -> 1\n")
+        parts, _, rep, _ = self.write_folder("Rah66", glb, report=report)
+        self.assertTrue(any("names 'A' in two groups" in line for line in rep), rep)
+        a = [r for r in parts if r["name"] == "A" and r["stage"] == "raw"][0]
+        self.assertEqual((a["fused_into"], a["fused_letter"]), ("Fused_D_A", "D"))   # the later group, as the message says
+        self.assertEqual([r for r in parts if r["name"] == "B" and r["stage"] == "raw"][0]["fused_into"], "Fused_H_A")
+
+    def test_a_recipe_without_a_parts_list_is_named_in_the_report(self):
+        glb = make_glb(nodes=[{"name": "A", "mesh": 0}], meshes=[[(0, 0)]], positions=[ONE_TRI], index_lists=[[0, 1, 2]])
+        for recipe in ({"bodyReducePct": 10.0}, {"bodyReducePct": 10.0, "parts": "abc"}):   # no key; a non-list (the old loop crashed on it)
+            _, models_rows, rep, _ = self.write_folder("Rah66", glb, recipe=recipe)
+            self.assertTrue(any("m.json: no parts list" in line for line in rep), rep)
+            self.assertEqual([m["recipe"] for m in models_rows if m["model"] == "Rah66"], [""])
+
+
 class Rules(unittest.TestCase):
     def test_stage_from_the_file_name(self):
         self.assertEqual([corpus.stage_of(n) for n in ("a.glb", "a_cut.glb", "a_cut_split.glb", "a_split_fused.glb", "khelandion_2_object14_split5.glb")],
@@ -362,8 +483,10 @@ class Rules(unittest.TestCase):
             p = os.path.join(tmp, "x.glb.fuse.txt")
             with io.open(p, "w", encoding="utf-8") as f:
                 f.write("#fuse-groups v2\n#name|A|Hull\nA|3|Odd|Name\nB|Deck\n")
-            lines, names = corpus.read_sidecar(p)
-            self.assertEqual(lines, [("A", 3, "Odd|Name"), ("B", None, "Deck")])
+            skipped = []
+            lines, names = corpus.read_sidecar(p, skipped)
+            self.assertEqual(lines, [("A", 3, "Odd|Name")])   # the name keeps its own bar; a v2 line without an index is skipped, as the Workshop skips it
+            self.assertEqual(len(skipped), 1, skipped)
             self.assertEqual(names, {"A": "Hull"})
             with io.open(p, "w", encoding="utf-8") as f:
                 f.write("A|Hull|3\nB|Deck\n")

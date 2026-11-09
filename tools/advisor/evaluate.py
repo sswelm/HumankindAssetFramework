@@ -5,8 +5,10 @@ Phase 0 of docs/Workshop-Advisor-Plan.md defines four tasks; each is scored on h
 over the folders: a proposer never sees a part of the model it is judged on), predictions pooled over the folds:
 
     role      per-role precision and recall, on the parts a recipe gives a role (the Lab's rows)
-    delete    precision and recall of proposed deletions against the user's X marks (and the recipe's Ignore role);
-              a wrong delete is the expensive error, so precision leads
+    delete    precision and recall of proposed deletions against the X marks (and the recipe's Ignore role) in
+              every file the user judged; a wrong delete is the expensive error, so precision leads
+    delete-hand  the same without the parts the Workshop marks X itself on first load (auto_mark): the user's own
+              deletion judgement
     split     precision and recall of proposed splits against the user's S and T marks
     group     the fraction of part pairs correctly together or apart against the fuse sidecars (the Rand index), on
               files with at least one letter; an unlettered part is its own group
@@ -39,7 +41,10 @@ ROLE_DIAL = {"Default": "defaultReducePct", "Rigging": "riggingReducePct", "Shro
              "Flip": "flipReducePct", "Preserve": "preserveReducePct", "Detail": "detailReducePct", "Turret": "turretReducePct",
              "Gun": "gunReducePct", "Window": "windowReducePct"}
 DIALS = sorted(set(ROLE_DIAL.values()))
-TASKS = ("role", "delete", "split", "group", "dials")
+# A recipe written before a dial existed carries no key for it; the Lab reads the field's initializer then
+# (VehicleLabWindow's recipe class, "absent-key ... the do-nothing default"): rigging 75, structure 50, every other 0.
+DIAL_DEFAULT = {"riggingReducePct": 75.0, "structureReducePct": 50.0}
+TASKS = ("role", "delete", "delete-hand", "split", "group", "dials")
 
 
 def row_key(r):
@@ -80,13 +85,23 @@ def population(task, parts):
     if task == "role":
         rows = [dict(r, truth=r["role"]) for r in parts if r["role"]]
     elif task == "delete":
-        marked = files_with(parts, "mark")
+        # every file the user judged counts: a Fuse writes the marks sidecar only when something is marked, so a
+        # lettered file without one is a file where the user looked and deleted nothing - a true negative, not a gap
+        judged = files_with(parts, "mark") | files_with(parts, "fuse_letter") | files_with(parts, "role")
         rows = [dict(r, truth="X" if r["mark"] == "X" or r["role"] == "Ignore" else "") for r in parts
-                if (r["file"] in marked or r["role"]) and r["stage"] != "recipe-only"]
+                if r["file"] in judged and r["stage"] != "recipe-only"]
+    elif task == "delete-hand":
+        # the same files, without the parts the Workshop marks X itself on first load (two triangles or fewer, no
+        # group or split of their own): what is left is the user's own deletion judgement
+        judged = files_with(parts, "mark") | files_with(parts, "fuse_letter") | files_with(parts, "role")
+        rows = [dict(r, truth="X" if r["mark"] == "X" or r["role"] == "Ignore" else "") for r in parts
+                if r["file"] in judged and r["stage"] != "recipe-only" and str(r.get("auto_mark", "")) != "1"]   # int from build(), str from the CSV
     elif task == "split":
-        # splitting happens on the raw and cut files; a _split file's marks are deletions, its parts are the splits
+        # splitting happens on the raw and cut files; a _split file's marks are deletions, its parts are the splits;
+        # a blocked part (lines, points, compressed) cannot be split and is no candidate
         marked = files_with(parts, "mark")
-        rows = [dict(r, truth="S" if r["mark"] in ("S", "T") else "") for r in parts if r["file"] in marked and r["stage"] in ("raw", "cut")]
+        rows = [dict(r, truth="S" if r["mark"] in ("S", "T") else "") for r in parts
+                if r["file"] in marked and r["stage"] in ("raw", "cut") and not r["blocked"]]
     elif task == "group":
         lettered = files_with(parts, "fuse_letter")
         rows = [dict(r, truth=r["fuse_letter"] or ("solo:%s" % r["node_index"])) for r in parts if r["file"] in lettered]
@@ -183,7 +198,7 @@ class Baselines:
     def median_dials(task, test, train, tm, tms):
         out = {}
         for d in DIALS:
-            vals = [num(m["dials_parsed"][d]) for m in tms if d in m["dials_parsed"]]
+            vals = [saved_dial(m, d) for m in tms]
             out[d] = statistics.median(vals) if vals else 0.0
         return out
 
@@ -191,11 +206,14 @@ class Baselines:
     def category_median_dials(task, test, train, tm, tms):
         out = {}
         for d in DIALS:
-            vals = [num(m["dials_parsed"][d]) for m in tms if d in m["dials_parsed"] and m["category"] == tm["category"]]
-            if not vals:
-                vals = [num(m["dials_parsed"][d]) for m in tms if d in m["dials_parsed"]]
+            vals = [saved_dial(m, d) for m in tms if m["category"] == tm["category"]] or [saved_dial(m, d) for m in tms]
             out[d] = statistics.median(vals) if vals else 0.0
         return out
+
+
+def saved_dial(model, dial):
+    """A recipe's dial as the Lab reads it: a key the recipe does not carry is the field's initializer (DIAL_DEFAULT)."""
+    return num(model["dials_parsed"].get(dial, DIAL_DEFAULT.get(dial, 0.0)))
 
 
 BASELINES = {
@@ -203,6 +221,8 @@ BASELINES = {
              ("majority role of the other models in the category", Baselines.category_majority_role)],
     "delete": [("never delete", Baselines.never), ("delete every interior part (vis = 0)", Baselines.interior),
                ("delete the smallest tenth of each file", Baselines.smallest_tenth)],
+    "delete-hand": [("never delete", Baselines.never), ("delete every interior part (vis = 0)", Baselines.interior),
+                    ("delete the smallest tenth of each file", Baselines.smallest_tenth)],
     "split": [("never split", Baselines.never), ("split every multi-island part", Baselines.multi_island),
               ("split a multi-island part above the file's median size", Baselines.multi_island_large)],
     "group": [("every part alone", Baselines.all_apart), ("everything in one group", Baselines.all_together),
@@ -297,7 +317,7 @@ def projection(parts, model, dials):
             continue
         v = num(r["recipe_verts"] if r["recipe_verts"] != "" else r["verts"])
         d = ROLE_DIAL.get(r["role"])
-        pct = num(dials.get(d, 0.0)) if d else 0.0
+        pct = num(dials.get(d, DIAL_DEFAULT.get(d, 0.0))) if d else 0.0
         verts += v * (1.0 - pct / 100.0) if pct > 0 else v
     return verts if seen else None
 
@@ -309,7 +329,7 @@ def pct(v):
 def evaluate(parts, models, proposers, target=30000.0):
     """Every task against every proposer: a list of Markdown lines."""
     lines = []
-    for task in ("role", "delete", "split", "group"):
+    for task in ("role", "delete", "delete-hand", "split", "group"):
         rows = population(task, parts)
         n_models = len(set(r["model"] for r in rows))
         lines.append("")
@@ -322,7 +342,7 @@ def evaluate(parts, models, proposers, target=30000.0):
             lines.append("")
             lines.append("Per category: " + ", ".join("%s %d" % (k, v) for k, v in cats.most_common()) +
                          "; non-default labels " + ", ".join("%s %d" % (k, sum(1 for r in rows if r["category"] == k and r["truth"] not in ("Default", "Body"))) for k, _ in cats.most_common()))
-        elif task in ("delete", "split"):
+        elif task in ("delete", "delete-hand", "split"):
             pos = sum(1 for r in rows if r["truth"])
             lines.append("")
             lines.append("Positives: %d of %d (%.1f%%)" % (pos, len(rows), 100.0 * pos / len(rows) if rows else 0))
@@ -345,8 +365,8 @@ def evaluate(parts, models, proposers, target=30000.0):
                 correct = sum(1 for r in rows if preds.get(row_key(r), "") == r["truth"])
                 lines.append("")
                 lines.append("Overall accuracy %s (%d proposed) - read the per-role rows, the Default majority dominates this number." % (pct(correct / len(rows)), proposed))
-            elif task in ("delete", "split"):
-                label = "X" if task == "delete" else "S"
+            elif task in ("delete", "delete-hand", "split"):
+                label = "S" if task == "split" else "X"
                 p, r, tp, fp, fn_ = precision_recall(rows, preds, label)
                 lines.append("| precision | recall | proposed | right | wrong | missed |")
                 lines.append("|---:|---:|---:|---:|---:|---:|")
@@ -378,7 +398,7 @@ def evaluate(parts, models, proposers, target=30000.0):
         lines.append("| dial | models | mean abs error (pct points) | median abs error |")
         lines.append("|---|---:|---:|---:|")
         for d in DIALS:
-            errs = [abs(preds[m["model"]][d] - num(m["dials_parsed"][d])) for m in rows if m["model"] in preds and d in m["dials_parsed"]]
+            errs = [abs(preds[m["model"]][d] - saved_dial(m, d)) for m in rows if m["model"] in preds]
             if errs:
                 lines.append("| %s | %d | %.1f | %.1f |" % (d, len(errs), statistics.mean(errs), statistics.median(errs)))
         lines.append("")

@@ -18,9 +18,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   parts of one mesh, the Saleg's recipe is stale against its re-fuse). Two things the join taught: Blender-probed
   recipes name duplicates `Box.001` where the Cutter says `Box_2` (74 parts join by node order), and a Split's children
   reference the parent's whole POSITION accessor, so counting the accessor made every child hundreds of singleton islands.
-  `evaluate.py` scores proposers on held-out models; the baselines in the plan say Split first (island heuristic: 84 %
-  recall, 19 % precision), then the visibility verdict into the table, and that the saved dials sit above 30k projected
-  vertices on 12 of 16 recipes, so the dial solver's objective must be restated. 20 unit cases in the gate
+  `evaluate.py` scores proposers on held-out models; the baselines in the plan say Split first (island heuristic: 79 %
+  recall, 18 % precision), then the visibility verdict into the table, and that the saved dials sit above 30k projected
+  vertices on 12 of 16 recipes, so the dial solver's objective must be restated. Two rounds of review before the push,
+  one independent: line and point meshes are blocked as the Workshop blocks them (1,246 rows had been one island per
+  vertex and 1,035 false split candidates), the Workshop's own first-load deletions of two-triangle parts are marked
+  `auto_mark` and the deletion task is scored with and without them (1,673 of 6,998 X marks are the tool's; by size
+  alone the user's own deletions come out at 24 % precision, 14 % recall), a dial a recipe lacks reads as the Lab's
+  default, a node cycle or a malformed GLB is one report line instead of a dead run, and the sidecar reader skips what
+  the Workshop skips (BOM, stray spaces, a letter outside A-Z, a v2 line without an index). 28 unit cases in the gate
   (`Tests/test_advisor_corpus.py`); the Bake Tests row waits for the first proposer.
 - **THE RIG_ANIM PORT TAKES A MESH ON A JOINT NODE (2026-11-08).** A file with a mesh on a joint was left to Blender by
   name; stage 1 now gives the importer's `.mesh` child its real properties (`ImportRig.JointMeshProperty`, the probe's)

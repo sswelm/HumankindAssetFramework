@@ -4052,7 +4052,11 @@ sidecar. `evaluate.py` scores proposers on held-out models. `Tests/test_advisor_
 folder from scratch - a raw GLB with duplicate names, a split GLB whose children share one POSITION accessor, a fused
 GLB, every sidecar, the fuse report and a recipe on the fused file - and checks every join against a known answer, the
 Cutter's `_2` renaming and the Blender probe's `.001` naming side by side, a refused sidecar line, the second model's
-`B_` parts, the metrics on populations small enough to do by hand, and that a proposer module loads by path.
+`B_` parts, the metrics on populations small enough to do by hand, and that a proposer module loads by path. An
+independent review added the shapes the real corpus had and the fixture lacked: a LINES mesh (blocked as the Workshop
+blocks it, no islands, the tool's own `auto_mark`), a three-triangle part whose X is the user's, a node cycle and a
+three-value matrix (one report line each, not a dead run), sidecar lines the Workshop skips (BOM, spaces, a letter
+outside A-Z, a v2 line without an index), a part in two fuse groups, a recipe without parts. 28 cases.
 
 The critical review of PR #195 added a high-valence cone, tiny loose parts and non-polygon primitives. Matching every
 pair of edges in one lower-vertex bucket made a 32,000-face fan take 3.90 s against 9 ms before the parallelization.
