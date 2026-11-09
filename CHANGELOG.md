@@ -19,6 +19,8 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   the guard AND by its delete loop so neither drifts (a unit test pins the shape: `.prefab`/`.asset`/`.mat` directly under
   `FactorySource/<name>/anim*/`, nothing beside, above or below; Blender's slim `.fbx` stays guarded). The rig import prints
   its own sub-stages (`rig import timing:` read + build, fold, delete, create, prefab) so the next number has a name.
+  Also: the gate's temp-sweep tests are push-only now, like the gate regression tests beside them - under the thirteen
+  parity drills they took 113-206 s against a 120 s subprocess limit and twice withheld a valid parity stamp.
 - **PR #276 review (2026-11-09).** The deploy timing wrapper now returns the runtime's actual exit status after
   printing its logs and wall time, refuses missing oracles and failed warm-ups, and allocates separate artifacts
   for every invocation instead of deleting shared output directories. It honors `HAF_UNITY_PROJECT` consistently
