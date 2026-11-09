@@ -1285,8 +1285,10 @@ public static class UniversalBaker
 
     static void DeleteGlbRigAsset(string guid)
     {
+        // the one rule shared with the delete guard (BackupRules.IsRegeneratedRigAsset): the rig prefab, meshes, materials and
+        // clip containers under anim/ - regenerated below, so the guard does not snapshot them (2026-11-09)
         string old = AssetDatabase.GUIDToAssetPath(guid);
-        if (old.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase) || old.EndsWith(".asset", StringComparison.OrdinalIgnoreCase) || old.EndsWith(".mat", StringComparison.OrdinalIgnoreCase)) AssetDatabase.DeleteAsset(old);
+        if (BackupRules.IsRegeneratedRigAsset(old)) AssetDatabase.DeleteAsset(old);
     }
 
     // A native rig is an editable prefab asset. Atlas remapping assigns transient mesh clones;
@@ -1352,9 +1354,13 @@ public static class UniversalBaker
         GameObject root = null;
         try
         {
+            // sub-stage laps (2026-11-09): the rig import was 7.4 of the T-62's 11.5 s with one line for the lot
+            var lap = System.Diagnostics.Stopwatch.StartNew();
+            void Lap(string what) { Debug.Log($"[Factory] {name} rig import timing: {what,-44} {lap.Elapsed.TotalSeconds,6:0.0}s"); lap.Restart(); }
             var m = GlbReader.Read(glbFull);
             var rig = HafModelRig.Build(m, temp, forFactory: true);
             root = rig.Root;
+            Lap("read the GLB + build the rig (HafModelRig)");
             if (rig.SkinnedMeshes == 0) { error = "the GLB rig has no skinned mesh"; return null; }
             // A UNIFORMLY SCALED WRAPPER above the whole rig (2026-10-27, the ReconDrone: an FBX-born glTF keeps its 'RootNode' at
             // 0.01) is folded into what it wraps: the FBX route has no such node (the script exports armatures and meshes only,
@@ -1417,7 +1423,9 @@ public static class UniversalBaker
             int primaryIndex = Array.IndexOf(rig.ClipNames, primaryAction);
             if (primaryIndex >= 0) rig.Clips[primaryIndex].SampleAnimation(root, 0f);
             Debug.Log($"[Factory] {name} GLB rig: scale {k:0.###} folded into the data (native longest {longest:0.###} -> {size} units), {rig.SkinnedMeshes} skinned mesh(es), {rig.Clips.Length} clip(s): {string.Join(", ", rig.ClipNames)}{(primaryIndex >= 0 ? "; the prefab posed at the primary clip's first frame" : "")}{(rig.Note.Length > 0 ? "; " + rig.Note : "")}");
+            Lap("fold scaled wrappers + measure");
             DeleteGlbRigAssets(animDir);   // a previous bake's rig assets under anim/ go first (the FBX route's .fbx goes after the import, by the caller)
+            Lap("delete the previous bake's rig assets");
             // the meshes, a material per source material and a clip container per role in ONE asset-database pass
             // (2026-11-09): outside a batch each CreateAsset is its own import pass - the T-62's bake made 211 of them
             // in this step alone (Editor.log: "Asset Pipeline Refresh" after every material). The prefab is saved after
@@ -1470,8 +1478,10 @@ public static class UniversalBaker
             }
             }
             finally { AssetDatabase.StopAssetEditing(); }
+            Lap("meshes, materials, clip containers (one batch)");
             var prefab = PrefabUtility.SaveAsPrefabAsset(root, animDir + "/" + name + "_anim.prefab");
             AssetDatabase.SaveAssets();
+            Lap("rig prefab save + SaveAssets");
             if (prefab == null) { error = "Unity did not save the rig prefab"; return null; }
             return prefab;
         }

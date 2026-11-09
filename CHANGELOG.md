@@ -10,6 +10,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **The delete guard lets the bake's regenerated rig assets go; the rig import laps itself (2026-11-09).** The first bake
+  with PR #276's timing lines: 11.5 s, of which the rig import 7.4 s. The Editor.log census of that stage: the asset-
+  database batching had worked (211 refresh cycles -> 4), and what remained was the delete guard - 105 snapshots per bake,
+  one per rig material, mesh and clip container the bake deletes first and rewrites seconds later, each a folder, a copy,
+  a manifest and a stack-traced Console line. The guard now skips them under the rule it already applies to preview scratch
+  and test fixtures (it protects what cannot be rebuilt): `BackupRules.IsRegeneratedRigAsset`, the bake's own rule, used by
+  the guard AND by its delete loop so neither drifts (a unit test pins the shape: `.prefab`/`.asset`/`.mat` directly under
+  `FactorySource/<name>/anim*/`, nothing beside, above or below; Blender's slim `.fbx` stays guarded). The rig import prints
+  its own sub-stages (`rig import timing:` read + build, fold, delete, create, prefab) so the next number has a name.
 - **PR #276 review (2026-11-09).** The deploy timing wrapper now returns the runtime's actual exit status after
   printing its logs and wall time, refuses missing oracles and failed warm-ups, and allocates separate artifacts
   for every invocation instead of deleting shared output directories. It honors `HAF_UNITY_PROJECT` consistently

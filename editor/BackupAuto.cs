@@ -60,6 +60,13 @@ class HafDeleteGuard : UnityEditor.AssetModificationProcessor
                 leafRaw.StartsWith(BakeFeatureTest.Prefix, StringComparison.Ordinal) ||
                 leafRaw.StartsWith(ConversionGateTest.PREFIX, StringComparison.Ordinal))
                 return AssetDeleteResult.DidNotDelete;
+            // REGENERATED-RIG exclusion (2026-11-09, the T-62's 11-second bake): the animated bake's rig import writes a rig
+            // prefab, rig meshes, a material per source material and a clip container per role under <name>/anim/ and deletes
+            // them first on every bake. The T-62 has a hundred materials: 105 guard snapshots per bake, each a folder, a copy,
+            // a manifest and a stack-traced Console line - most of the rig-import stage's 7.4 s, for files the bake rewrites
+            // seconds later from the source beside them. The rule is the bake's own (BackupRules.IsRegeneratedRigAsset,
+            // also what its delete loop uses), so the guard lets go exactly what the bake deletes and nothing more.
+            if (BackupRules.IsRegeneratedRigAsset(p)) return AssetDeleteResult.DidNotDelete;
             string dest = EditorPrefs.GetString("HAF.Backup.Dest", "D:/HAF_Backups");
             string projRoot = Directory.GetParent(Application.dataPath).FullName;
             string abs = Path.Combine(projRoot, p);

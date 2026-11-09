@@ -249,6 +249,31 @@ public static class BackupRules
     public static string SnapshotFolderName(string stamp, string resourceName) => RemovedPrefix + stamp + "_" + SafeSegment(resourceName);
 
     public const string DeletedPrefix = "_deleted_";
+
+    /// <summary>
+    /// The animated bake's REGENERATED rig assets: what the rig import writes under <c>Assets/FactorySource/&lt;name&gt;/anim/</c>
+    /// (or a role folder <c>anim_&lt;role&gt;/</c>) and deletes first on every bake - the rig prefab, the rig meshes, a material
+    /// per source material, the clip containers (<c>.prefab</c>, <c>.asset</c>, <c>.mat</c>). The delete guard skips them
+    /// for the reason it skips preview scratch and test fixtures: they rebuild from the source on the next bake, and the
+    /// T-62's hundred materials cost a bake 105 guard snapshots, each a folder, a copy, a manifest and a stack-traced
+    /// Console line (2026-11-09). ONE rule for the guard and for the bake's own delete loop, so neither can drift from the
+    /// other: what the bake deletes here is exactly what the guard lets go. The source (.glb/.fbx/.obj, the albedos, the
+    /// recorded arguments) sits beside <c>anim/</c>, not in it, and stays guarded.
+    /// </summary>
+    public static bool IsRegeneratedRigAsset(string assetPath)
+    {
+        if (string.IsNullOrEmpty(assetPath)) return false;
+        string p = assetPath.Replace('\\', '/');
+        var seg = p.Split('/');
+        // Assets / FactorySource / <name> / anim[_role] / <leaf> - exactly five segments, nothing deeper
+        if (seg.Length != 5 || seg[0] != "Assets" || !seg[1].Equals("FactorySource", StringComparison.OrdinalIgnoreCase)) return false;
+        string folder = seg[3];
+        if (!(folder.Equals("anim", StringComparison.OrdinalIgnoreCase) || folder.StartsWith("anim_", StringComparison.OrdinalIgnoreCase))) return false;
+        string leaf = seg[4];
+        return leaf.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase) || leaf.EndsWith(".asset", StringComparison.OrdinalIgnoreCase)
+            || leaf.EndsWith(".mat", StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>
     /// The folder for a name's baked outputs snapshotted ON REQUEST before a sweep (Ship Status' Delete selected, 2026-09-30):
     /// the delete guard's own shape, so the Backup window lists and ages it with the guard's, and a suffix that says it

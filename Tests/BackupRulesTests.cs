@@ -33,6 +33,32 @@ public class BackupRulesTests
 
     // THE DELETE-GUARD PRUNE (2026-10-31): it never ran once - the worker read the retention pref off the main thread and
     // the Task faulted in silence. The rule is pure now and the worker gets the days from the main thread.
+    /// <summary>The one rule the delete guard and the bake's own delete loop share: the rig import's regenerated assets under
+    /// anim/ (or a role folder) - and nothing beside them, above them or below them.</summary>
+    [Theory]
+    [InlineData("Assets/FactorySource/UniversalTanks/anim/UniversalTanks_anim.prefab", true)]
+    [InlineData("Assets/FactorySource/UniversalTanks/anim/UniversalTanks_rigmesh0.asset", true)]
+    [InlineData("Assets/FactorySource/UniversalTanks/anim/UniversalTanks_rigmat54.mat", true)]
+    [InlineData("Assets/FactorySource/UniversalTanks/anim/_UniversalTanks_Clip_primary.asset", true)]
+    [InlineData("Assets\\FactorySource\\UniversalTanks\\anim\\UniversalTanks_rigmat0.mat", true)]
+    [InlineData("Assets/FactorySource/TowedGunHowitzers/anim_move/_TowedGunHowitzers_Clip_move.asset", true)]
+    [InlineData("Assets/FactorySource/UniversalTanks/anim/UniversalTanks_anim.fbx", false)]              // Blender's slim FBX stays guarded
+    [InlineData("Assets/FactorySource/UniversalTanks/anim/UniversalTanks_anim.prefab.meta", false)]
+    [InlineData("Assets/FactorySource/UniversalTanks/UniversalTanks.obj", false)]                        // the source beside anim/
+    [InlineData("Assets/FactorySource/UniversalTanks/deploy_converted.glb", false)]
+    [InlineData("Assets/FactorySource/UniversalTanks/UniversalTanks_Preview.prefab", false)]
+    [InlineData("Assets/FactorySource/UniversalTanks/animals/Horse.asset", false)]                       // a folder merely starting with "anim"
+    [InlineData("Assets/FactorySource/UniversalTanks/anim/deeper/UniversalTanks_rigmesh0.asset", false)] // nothing deeper
+    [InlineData("Assets/Resources/UniversalTanks_Skeleton.asset", false)]
+    [InlineData("Assets/Databases/anim/Thing.asset", false)]
+    [InlineData("Assets/FactorySource/anim/Thing.asset", false)]                                          // no resource name
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void The_regenerated_rig_assets_are_the_rig_import_outputs_under_anim_and_nothing_else(string path, bool regenerated)
+    {
+        Assert.Equal(regenerated, BackupRules.IsRegeneratedRigAsset(path));
+    }
+
     [Fact]
     public void A_guard_expires_by_age_and_nothing_else_ever_does()
     {
