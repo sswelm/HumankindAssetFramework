@@ -65,6 +65,22 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   CoastalMonitor's 10 proposals were all of them, one a 369-vertex external part. The corpus leaves a blocked mesh's box
   empty now (features cache v5) and the proposer never calls an unknown size small. A probe table row cut short (a host
   killed mid-line) is reported rather than dropped. 76 unit cases.
+- **PR #276 review (2026-11-09).** The deploy timing wrapper now returns the runtime's actual exit status after
+  printing its logs and wall time, refuses missing oracles and failed warm-ups, and allocates separate artifacts
+  for every invocation instead of deleting shared output directories. It honors `HAF_UNITY_PROJECT` consistently
+  with the deploy drill (`HAF_PROJECT` remains a fallback). Eight shell integration cases run in CI and the push gate.
+- **Bake timing lines, and two whales of the T-62's bake (2026-11-09).** The animated bake path prints one Console line per
+  stage, `[Factory] <name> timing: ...` (the static path has had its since 2026-09-13), and the in-process deploy conversion
+  its own `deploy timing:` phases; the in-process drill prints them as `TIMING` rows. Measured on the T-62 under Unity's Mono:
+  the role clips (7c) took 34 of the conversion's 41 seconds because the port, like the script, recalculated a curve's handles
+  after every `keyframe_insert` - a square of the frame count. The handles are a function of the keys alone, so the port now
+  recalculates each touched curve once after the last role: 7c 34.3 s -> 0.3 s, the conversion 41.8 s -> 6.4 s, the file byte-
+  equal to Blender's (the live deploy drill; a unit test holds per-insert against once-at-the-end bit for bit). In the editor,
+  the GLB rig import created a material asset per source material (the T-62 has a hundred) and deleted the previous bake's one
+  by one, each its own asset-database pass - 211 `Asset Pipeline Refresh` cycles in the Editor.log of one bake; the deletes and
+  the creates are batched in `StartAssetEditing`/`StopAssetEditing` now, the prefab saved after the batch closes. New
+  `tools/deploy_time.sh <model>`: one recorded conversion under Unity's Mono with the drill's own compile, wall time and laps.
+  Re-bake and read the timing lines: whatever stage is still big is the next one.
 - **PR #273 review (2026-11-09).** The Split proposer abstains when no threshold rule finds a training split rather
   than choosing its loosest rule at zero F1. Proposal writes refresh every raw/cut file represented in the corpus,
   including files with zero proposals or only blocked parts, so a rerun cannot leave an old S proposal behind.

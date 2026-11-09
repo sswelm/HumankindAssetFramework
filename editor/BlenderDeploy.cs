@@ -1376,7 +1376,12 @@ public static class BlenderDeploy
                 int e = (int)Math.Max(-1048574, Math.Min(1048574, f)); EvalArm(e); current = e;
                 snap[f] = poseOrder.ToDictionary(bn => bn, bn => r.ArmPose[bn].Take(7).ToArray(), StringComparer.Ordinal);
             }
-            // pb.keyframe_insert on a role's own curves: the property's value keyed there (a key on that frame already is MOVED by the difference)
+            // pb.keyframe_insert on a role's own curves: the property's value keyed there (a key on that frame already is MOVED by the difference).
+            // Blender recalculates the curve's handles after EVERY insert; the handles are a function of the keys' frames
+            // and values alone (BlenderFCurve.RecalcHandles reads nothing else), so the curve's handles after its last
+            // insert equal one recalculation over the finished curve - done once per curve below, after the last role
+            // (2026-11-09: the per-insert pass made 7c a square of the frame count, 34 s of the T-62's 41 s conversion).
+            var dirty = new HashSet<List<ArmKey>>();
             void InsertKey(Role role, string bn, int from, int count, long frame)
             {
                 if (frame < int.MinValue || frame > int.MaxValue) throw new NotPortedException("a role key past a whole number (keyframe_insert takes it as a float)");
@@ -1385,10 +1390,16 @@ public static class BlenderDeploy
                 {
                     float v = c < 10 ? r.ArmPose[bn][c] : eul[bn][c - 10];
                     var list = channels[c] ?? (channels[c] = new List<ArmKey>());
-                    var key = list.FirstOrDefault(k => k.Frame == (float)frame);
-                    if (key == null) { key = new ArmKey { Frame = (float)frame, Value = v }; list.Add(key); list.Sort((x, y) => x.Frame.CompareTo(y.Frame)); }
+                    int lastIdx = list.Count - 1;
+                    bool pastEnd = lastIdx < 0 || list[lastIdx].Frame < (float)frame;   // the roles key ascending frames: no key to find, nothing to sort
+                    var key = pastEnd ? null : list.FirstOrDefault(k => k.Frame == (float)frame);
+                    if (key == null)
+                    {
+                        key = new ArmKey { Frame = (float)frame, Value = v }; list.Add(key);
+                        if (!pastEnd) list.Sort((x, y) => x.Frame.CompareTo(y.Frame));   // frames are distinct here (the equal one was found above): the order is total
+                    }
                     else { float dy = (float)(v - key.Value); key.Value = (float)(key.Value + dy); }
-                    BlenderFCurve.RecalcHandles(list);
+                    dirty.Add(list);
                 }
             }
             Role MakeRole(string name, IList<long> frames, Dictionary<long, Dictionary<string, float[]>> snaps = null, (string bone, List<float[]> quats)? armOverride = null)
@@ -1493,6 +1504,7 @@ public static class BlenderDeploy
                 r.RoleLog.Add($"DEPLOY recoil role: PRISTINE fire cycle {rs2}..{re2} (barrel choreography intact) + Slam layer{(ret2 > 0 ? $" + palindrome return x{ret2}" : " (no return)")}"
                     + (epilogue.Count > 0 ? $" + epilogue {string.Join(", ", r.Segments.Skip(1).Select(s => $"{s.start}..{s.end}/{s.step}"))} ({epilogue.Count} frames)" : ""));
             }
+            foreach (var list in dirty) BlenderFCurve.RecalcHandles(list);   // every role curve's handles, as after its last keyframe_insert
             r.ActiveAction = "deploy";   // the legacy action is made active again; nothing evaluates after it
             r.RoleLog.Add($"DEPLOY role clips: unfold/fold/folded/deployed{(hasRecoil ? "/recoil" : "")} (+ legacy 'deploy')");
             r.ArmPose7 = poseOrder.ToDictionary(bn => bn, bn => (mode[bn], r.ArmPose[bn].Take(7).Concat(eul[bn]).Concat(r.ArmPose[bn].Skip(7)).ToArray()), StringComparer.Ordinal);

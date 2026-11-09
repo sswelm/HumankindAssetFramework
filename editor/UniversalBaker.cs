@@ -384,6 +384,7 @@ public static class UniversalBaker
             }
             var inProc = BlenderDeployInProcess.Run(cfg.modelFile, outFull, argv, Checkpoint);
             foreach (var line in inProc.Log) Debug.Log("[Factory] " + line.Trim());
+            foreach (var t in inProc.Timing) Debug.Log("[Factory] " + cfg.resourceName + " deploy timing: " + t);   // one line per phase of the port (its bake walks every frame on this thread)
             if (inProc.Written) { File.WriteAllText(sidecar, key); return outFull; }
             if (inProc.ScriptExit) { error = "deploy conversion FAILED (the script stops before writing — see the DEPLOY log in the Console)."; return null; }
             if (!BlenderAvailable()) { error = "deploy conversion: " + inProc.UseBlender + ". That leaves this model to Blender, which is not installed (it is auto-detected, or set EditorPrefs 'HAF.BlenderPath')."; return null; }
@@ -467,6 +468,16 @@ public static class UniversalBaker
             if (!(char.IsLetterOrDigit(c) || c == '_' || c == '-'))
                 return Fail($"resource name '{cfg.resourceName}' contains an invalid character ('{c}'). " +
                             "Use letters, digits, '_' or '-' only — no spaces (e.g. 'AttackHelicopter').");
+        // STAGE TIMING (2026-11-09, "it takes way too long compared to other bakes"): the static path has had one console
+        // line per stage since 2026-09-13; the animated path had none, so a slow animated bake named nothing. Same shape:
+        // one line per stage, every bake - the deploy conversion first (its own laps come from BlenderDeployInProcess).
+        var lapWatch = System.Diagnostics.Stopwatch.StartNew();
+        var lapTotal = System.Diagnostics.Stopwatch.StartNew();
+        void Lap(string stage)
+        {
+            Debug.Log($"[Factory] {cfg.resourceName} timing: {stage,-44} {lapWatch.Elapsed.TotalSeconds,6:0.0}s   (total {lapTotal.Elapsed.TotalSeconds:0.0}s)");
+            lapWatch.Restart();
+        }
         bool glbRoute = UseGlbRigRoute(cfg.rigRoute);   // step (g): the in-process port's GLB, or rig_anim.py's FBX
         if (!glbRoute && !BlenderAvailable()) return Fail("Animated import needs Blender installed (auto-detected, or set EditorPrefs 'HAF.BlenderPath').");
         if (cfg.deployConvert)
@@ -477,6 +488,7 @@ public static class UniversalBaker
             string conv = EnsureDeployConverted(cfg, out string convErr);
             if (conv == null) return Fail(convErr);
             cfg.modelFile = conv;
+            Lap("deploy conversion (cached, or in process)");
         }
         string name = cfg.resourceName;
         float size = cfg.size > 0f ? cfg.size : 5f;
@@ -839,6 +851,7 @@ public static class UniversalBaker
                              "Single — baking ONE atlas that every part samples whole. If parts come out mis-coloured, " +
                              "set Material mode to Multi (or Auto) and re-bake.");
 
+        Lap("1) rig slim (in process or Blender) + role imports");
         // --- 2) import the rig: the FBX through Unity's ModelImporter (Generic rig, animation, the Scale Factor), or the GLB
         //        through HafModelRig with the scale folded into the data (step (g), ImportGlbRig below) ---
         GameObject fbxGo = null; string rigRel = fbxRel;
@@ -918,6 +931,7 @@ public static class UniversalBaker
         }
         }
 
+        Lap("2) rig import (ModelImporter, or the GLB rig)");
         // --- 3) atlas: SINGLE albedo, or (for a multi-material OPEN model like a towed gun) a PACKED atlas with the skinned
         //        mesh UVs remapped per-submesh. MaterialMode gates it: Single = one texture; Multi = force packing; Auto =
         //        pack when the model has >1 material. Without this, every part samples one texture and e.g. a wheel maps wrong.
@@ -1024,6 +1038,7 @@ public static class UniversalBaker
         // and the baked skeleton all share the same vertex count — which is why the preview needs no special-casing
         // (the runtime doubling's count mismatch was the root of the whole half/grey/transparent preview saga).
 
+        Lap("3) atlas + multi-fragment split");
         // --- 4) bake Skeleton from the FBX's own armature + skinned mesh (SetPrefab + Reimport, as the SDK inspector does) ---
         var skelType = FindAmpType("Amplitude.Mercury.Animation.Skeleton");
         if (skelType == null) return Fail("Amplitude Skeleton type not found");
@@ -1059,6 +1074,7 @@ public static class UniversalBaker
             return Fail($"{name}: {animChunksOver} baked chunk(s) still measure over the {EngineQuadCeiling:N0}-quad " +
                         "per-fragment ceiling after the split — lower 'Reduce to ~tris' and re-bake.");
 
+        Lap("4) skeleton (SDK SetPrefab/Reimport)");
         // --- 5) bake ClipCollection: set its skeleton guid, SetFromDirectory (populate clips), Reimport (bake poseData) ---
         var clipType = FindAmpType("Amplitude.Mercury.Animation.ClipCollection");
         if (clipType == null) return Fail("Amplitude ClipCollection type not found");
@@ -1164,6 +1180,7 @@ public static class UniversalBaker
         AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
         TestPoll();
 
+        Lap("5) clip collections (SetFromDirectory/Reimport)");
         // --- 6) preview aid: a STATIC textured prefab (the baked mesh + the atlas skin) you can select to inspect in
         //        Unity's preview window and to judge the (decimated) vertex count. NOT written to the registry, so the
         //        runtime ignores it entirely — it's purely a modeling aid.
@@ -1216,6 +1233,7 @@ public static class UniversalBaker
                 if (string.IsNullOrEmpty(clipIdleAlt2Guid) || clipIdleAlt2Guid == "0,0,0,0") return Fail($"{name}: IDLE-ALT-2 ClipCollection GUID is empty — check the Idle-alt 2 clip name.");
             }
         }
+        Lap("6) preview + prop-fit prefabs");
         Debug.Log($"[Factory] {name} ANIMATED DONE. skeleton={skelGuid} clip={clipGuid} atlas={atlasGuid}" +
                   (cfg.animStateDriven ? $" [state-driven: move={clipMoveGuid}{(wantAfter ? " after=" + clipAfterGuid : "")}{(wantAttack ? " attack=" + clipAttackGuid : "")}{(wantCombat ? " combat=" + clipCombatGuid : "")}{(wantPreMove ? " premove=" + clipPreMoveGuid : "")}{(wantIdle ? " idle=" + clipIdleGuid : "")}{(wantIdleAlt ? " idlealt=" + clipIdleAltGuid : "")}{(wantIdleAlt2 ? " idlealt2=" + clipIdleAlt2Guid : "")}]" : ""));
         return new BakeResult { ok = true, skeletonGuid = skelGuid, atlasGuid = atlasGuid, clipGuid = clipGuid, bbox = Vector3.zero,
@@ -1258,11 +1276,17 @@ public static class UniversalBaker
     static void DeleteGlbRigAssets(string animDir)
     {
         if (!AssetDatabase.IsValidFolder(animDir)) return;
-        foreach (var guid in AssetDatabase.FindAssets("", new[] { animDir }))
-        {
-            string old = AssetDatabase.GUIDToAssetPath(guid);
-            if (old.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase) || old.EndsWith(".asset", StringComparison.OrdinalIgnoreCase) || old.EndsWith(".mat", StringComparison.OrdinalIgnoreCase)) AssetDatabase.DeleteAsset(old);
-        }
+        // one asset-database pass for the lot (2026-11-09): outside a batch every delete is its own import pass, and the
+        // T-62's rig carries a material per source material - a hundred passes before the hundred creates below
+        AssetDatabase.StartAssetEditing();
+        try { foreach (var guid in AssetDatabase.FindAssets("", new[] { animDir })) DeleteGlbRigAsset(guid); }
+        finally { AssetDatabase.StopAssetEditing(); }
+    }
+
+    static void DeleteGlbRigAsset(string guid)
+    {
+        string old = AssetDatabase.GUIDToAssetPath(guid);
+        if (old.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase) || old.EndsWith(".asset", StringComparison.OrdinalIgnoreCase) || old.EndsWith(".mat", StringComparison.OrdinalIgnoreCase)) AssetDatabase.DeleteAsset(old);
     }
 
     // A native rig is an editable prefab asset. Atlas remapping assigns transient mesh clones;
@@ -1394,6 +1418,13 @@ public static class UniversalBaker
             if (primaryIndex >= 0) rig.Clips[primaryIndex].SampleAnimation(root, 0f);
             Debug.Log($"[Factory] {name} GLB rig: scale {k:0.###} folded into the data (native longest {longest:0.###} -> {size} units), {rig.SkinnedMeshes} skinned mesh(es), {rig.Clips.Length} clip(s): {string.Join(", ", rig.ClipNames)}{(primaryIndex >= 0 ? "; the prefab posed at the primary clip's first frame" : "")}{(rig.Note.Length > 0 ? "; " + rig.Note : "")}");
             DeleteGlbRigAssets(animDir);   // a previous bake's rig assets under anim/ go first (the FBX route's .fbx goes after the import, by the caller)
+            // the meshes, a material per source material and a clip container per role in ONE asset-database pass
+            // (2026-11-09): outside a batch each CreateAsset is its own import pass - the T-62's bake made 211 of them
+            // in this step alone (Editor.log: "Asset Pipeline Refresh" after every material). The prefab is saved after
+            // the batch closes: SaveAsPrefabAsset needs the import pipeline running.
+            AssetDatabase.StartAssetEditing();
+            try
+            {
             int n = 0;
             foreach (var mesh in seen) { mesh.hideFlags = HideFlags.None; AssetDatabase.CreateAsset(mesh, animDir + "/" + name + "_rigmesh" + (n++) + ".asset"); meshes.Add(mesh); }
             // Atlas rects are selected by the exported material names, which may have a different order from the
@@ -1437,6 +1468,8 @@ public static class UniversalBaker
                 AssetDatabase.AddObjectToAsset(clip, container);
                 clipByRole[role] = container;
             }
+            }
+            finally { AssetDatabase.StopAssetEditing(); }
             var prefab = PrefabUtility.SaveAsPrefabAsset(root, animDir + "/" + name + "_anim.prefab");
             AssetDatabase.SaveAssets();
             if (prefab == null) { error = "Unity did not save the rig prefab"; return null; }

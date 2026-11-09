@@ -32,6 +32,7 @@ static class InProcessDrill
                     string dst = Path.Combine(args[2], key.Replace(':', '_') + ".glb");
                     if (File.Exists(dst)) File.Delete(dst);
                     var converted = BlenderDeployInProcess.Run(t[1], dst, t.Skip(2).ToArray());
+                    foreach (var lapLine in converted.Timing) Console.WriteLine($"TIMING\t{key}\t{lapLine}");   // the port's own laps: a measurement beside the verdict, never part of it
                     if (converted.UseBlender != null) throw new InvalidDataException("conversion did not run to completion: " + converted.UseBlender);
                     if (!converted.Written || converted.ScriptExit || !File.Exists(dst))
                         throw new InvalidDataException("conversion stopped without writing a GLB");

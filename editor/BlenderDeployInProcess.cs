@@ -26,6 +26,7 @@ public static class BlenderDeployInProcess
         public bool ScriptExit;              // the script stops itself before writing (SystemExit): no file, no Blender run either
         public string UseBlender;            // why the script has to run (a shape the port names, an input the reader refuses, a failure here)
         public readonly List<string> Log = new List<string>();   // the DEPLOY lines, in the script's order
+        public readonly List<string> Timing = new List<string>();   // one line per phase, "<phase> <seconds>s" - a measurement, never compared to the script
     }
 
     /// <summary>The script's argv[2:] as the Factory passes them (deploy_convert.py: in out start end strip readyFrame
@@ -47,6 +48,8 @@ public static class BlenderDeployInProcess
     {
         var o = new Outcome();
         void Tick() { checkpoint?.Invoke(); }
+        var lap = System.Diagnostics.Stopwatch.StartNew();
+        void Lap(string phase) { o.Timing.Add($"{phase,-30} {lap.Elapsed.TotalSeconds,6:0.0}s"); lap.Restart(); }
         if (string.IsNullOrEmpty(src) || !File.Exists(src)) { o.UseBlender = "the model file is not there"; return o; }
         string ext = Path.GetExtension(src).ToLowerInvariant();
         if (!HafModelLoader.CanRead(src)) { o.UseBlender = HafModelLoader.NotReadable; return o; }
@@ -56,15 +59,18 @@ public static class BlenderDeployInProcess
             try { m = HafModelLoader.ReadForRig(src, out string leave); if (m == null) { o.UseBlender = leave; return o; } }   // 6e: a .glb/.gltf, or a STATIC .fbx through the native reader; deploy_convert.py imports an .fbx directly as rig_anim.py does, so a skinned or animated one is Blender's by the same name (HafModelLoader.RigImportFallback)
             catch (Exception e) when (e is InvalidDataException || e is NotSupportedException) { o.UseBlender = "the C# reader cannot handle this input: " + e.Message; return o; }
             Tick();
+            Lap("read the model");
             var names = BlenderNames.Compute(m);
             // the decisions, then the whole run through the bake, the fire window, the retarget, the recoil and the bind
             var r = BlenderDeploy.Decide(m, argv, names, false, MaxFramesInProcess);
             if (r.Fallback != null) { o.UseBlender = r.Fallback; return o; }
             if (r.Exit) { o.ScriptExit = true; o.Log.AddRange(r.Log.Where(l => l.StartsWith("DEPLOY", StringComparison.Ordinal))); return o; }
             Tick();
+            Lap("decisions (parts 1-3)");
             var baked = BlenderDeploy.Decide(m, argv, names, true, MaxFramesInProcess);
             if (baked.Fallback != null) { o.UseBlender = baked.Fallback; return o; }
             Tick();
+            Lap("decisions + bake (parts 1-7)");
             void Lines(IEnumerable<string> lines) { o.Log.AddRange(lines.Where(l => l.StartsWith("DEPLOY", StringComparison.Ordinal))); }
             Lines(baked.Log); Lines(baked.BakeLog); Lines(baked.FireLog); Lines(baked.RetargetLog); Lines(baked.RecoilLog);
             if (baked.ExitAtRecoil) { o.ScriptExit = true; return o; }
@@ -74,17 +80,21 @@ public static class BlenderDeployInProcess
             if (baked.RoleFallback != null) { o.UseBlender = "the role clips: " + baked.RoleFallback; return o; }
             Lines(baked.RoleLog);
             Tick();
+            Lap("role clips (7c)");
             var x = BlenderDeployExport.Build(m, names, baked, argv);
             if (x.Fallback != null) { o.UseBlender = "the export: " + x.Fallback; return o; }
             Lines(x.Log);
             Tick();
+            Lap("export structure (8a-8b)");
             var w = BlenderGlbWriter.Build(x);
             if (w.Fallback != null) { o.UseBlender = "the file: " + w.Fallback; return o; }
+            Lap("GLB bytes (8c)");
             // a temporary file, then an atomic replace: never half a file where the slim step looks, and the old file
             // stays until the new one is in place (File.Replace; the reviewer's note on PR #153)
             string tmp = outGlb + ".tmp";
             File.WriteAllBytes(tmp, w.Glb);
             if (File.Exists(outGlb)) File.Replace(tmp, outGlb, null); else File.Move(tmp, outGlb);
+            Lap("write the file");
             o.Log.Add("DEPLOY wrote: " + outGlb);
             o.Written = true;
             return o;
