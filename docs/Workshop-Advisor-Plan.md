@@ -197,28 +197,33 @@ verdict in the table for every file; grouping is not started.**
 - **The visibility verdict for every file.** `tools/advisor/probe_vis.sh` compiles `tools/advisor/ProbeVis.cs` against the
   editor sources (the vehicle probe drill's compile list) and runs the Lab's own probe (`VehicleProbe.Run`: the escape
   rays over one BVH of the whole file, the inside-out count) over every GLB `corpus.py --list` names, as a 64-bit
-  process; all 53 files take about 40 s (the Saleg's split file 7 s). `corpus.py --probe <table>` joins the rows by
+  process; all 53 files took 38 s wall on 2026-11-09 (the Saleg's split file 7 s). `corpus.py --probe <table>` joins the rows by
   glTF node (a single-mesh file's loose parts fold onto their node: external when any part escapes, flips summed) and
   checks each file's size and write time against the table - a file re-cut since is reported stale and falls back to
   the recipe's verdict, named in `vis_from`. The join's own check: the 1,128 recipe rows with a verdict agree with
-  the probe on 1,126 and the other 2 are the Lab's -1 (unclassified). 30,740 part rows; 1,867 interior.
+  the probe on 1,126 and the other 2 are the Lab's -1 (unclassified). 30,740 probe rows fold onto 30,053 corpus rows,
+  1,681 of them interior (the 3,388 recipe-only rows keep the recipe's verdict).
 - **The deletion truth was understated.** The user splits at the raw file and deletes at the split file, so a raw
   row the split file marks X read as "kept": 2,000 parts of the Espana's raw file, 1,290 of the Dragon's, 3,432 in
-  all. `corpus.carry_later_marks` carries the X back as `mark_later` when name and vertex count match in a later
-  stage file of the same folder whose name extends this file's (3,432 of 3,432 match on both, no conflict); a part
-  absent from the later file is not inferred deleted (the Teutonic's `_cut2_split` lists 220 of 1,437 unmarked
-  parts: a partial export). The evaluator's delete tasks count `mark_later`; the table above carries the corrected
+  all over eight files (the other six: the Steam Frigate 78, the Sirius 58, the Svea's cut file 2 and raw 1, the
+  Saleg 2, the Wespe 1). `corpus.carry_later_marks` carries the X back as `mark_later` when name and vertex count
+  match in a later stage file of the same folder whose name extends this file's with stage tokens (3,432 of 3,432
+  match on both, no conflict: no part is marked X at one later file and listed unmarked at another of the same or a
+  higher stage); a part absent from the later file is not inferred deleted (the Teutonic's `_cut2_split` lists 220
+  of 1,437 unmarked parts: a partial export), and an unnamed node is never the same part. The evaluator's delete tasks count `mark_later`; the table above carries the corrected
   baselines (the interior baseline went from 75 % precision on the uncorrected truth to 84 %).
 - **`tools/advisor/proposers/delete.py`** proposes X for a part the probe calls interior whose largest extent is at
   most A of the model's, or any part at most B of the model's extent; A and B are learned on the other models over
   a small grid maximising F0.5 (precision double: a wrong deletion is a hole in the model, a missed one a click),
   ties to the stricter rule. Leave-one-model-out on the 27,354 hand-judged parts (8,589 deleted): **86 % precision,
   52 % recall** (5,180 proposed, 4,443 right, 737 wrong, 4,146 missed), against 84 % / 13 % for every interior part
-  and 39 % / 15 % for the smallest tenth. F1 learns the same rule: interior up to 10 % of the model, anything up to
-  0.05 %, on 23 of 26 folds. Per model: the Espana 2,937 right and 52 wrong, the Dragon 1,042 and 34, the Rah66 45
-  and 0; the Romanic is where it is wrong (494: tiny parts the user lettered into fuse groups instead of deleting -
-  603 of the 737 wrong carry a fuse letter), the Steam Frigate 115 wrong of 206. The misses are 3,696 exterior parts
-  between 0.1 % and 3 % of the model: visible fittings the user judged not worth their triangles, which no size
+  and 39 % / 15 % for the smallest tenth. The rule is interior up to 10 % of the model, anything up to 0.05 %, on
+  23 of 26 folds (F1 would learn a looser one, every interior part and anything up to 0.1 %, on 24 of 26: the beta
+  is a choice, not a detail). Per model: the Espana 2,937 right and 52 wrong, the Dragon 1,042 and 34, the Rah66 45
+  and 0; the Romanic is where it is wrong (all its 494 wrong carry a fuse letter: tiny parts the user lettered into
+  fuse groups instead of deleting; 603 of the 737 wrong over every model do), the Steam Frigate 115 wrong of 206.
+  The misses are 3,696 exterior parts (450 of the 4,146 missed are interior), four in five of them between 0.07 %
+  and 2.7 % of the model (median 0.35 %): visible fittings the user judged not worth their triangles, which no size
   rule separates from the ones kept - Phase 4's question. `--write` puts the X lines into the same
   `<file>.glb.marks.proposed.txt` the Split proposer writes its S lines to (`proposers/common.py`: each proposer
   owns its letters, the other's stay).

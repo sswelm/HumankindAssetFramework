@@ -18,8 +18,9 @@ or on its own, to write proposals for one model folder, trained on every other m
     python tools/advisor/proposers/delete.py --corpus <dir> --model "Steam Frigate" [--write]
 
 --write refreshes the X lines of `<file>.glb.marks.proposed.txt` beside each raw, cut or split GLB of the model (the
-split proposer's S lines in the same file are kept; an empty proposal clears the old X lines). It never touches the
-live `<file>.glb.marks.txt`: the user renames or merges the proposal when they agree with it.
+split proposer's S lines in the same file are kept; an empty proposal clears the old X lines, but a model it cannot
+judge - no visibility verdict on its rows - leaves the files as they are). It never touches the live
+`<file>.glb.marks.txt`: the user renames or merges the proposal when they agree with it.
 """
 import argparse
 import itertools
@@ -100,7 +101,8 @@ NEEDED = ("vis", "sx", "sy", "sz", "file")
 
 
 def has_verdict(rows):
-    return any(str(r.get("vis", "")) != "" for r in rows)
+    """-1 is the Lab's "unclassified": no verdict either."""
+    return any(str(r.get("vis", "")) not in ("", "-1") for r in rows)
 
 
 def propose(task, test, train, test_model, train_models):
@@ -118,6 +120,7 @@ def propose(task, test, train, test_model, train_models):
         # one model's files are all stale or failed in the probe table and have no recipe: abstain on that fold, say
         # why, and let the other folds run
         LAST_RULE["abstained"] = "no visibility verdict on the held-out rows (stale or failed in the probe table, no recipe)"
+        LAST_RULE["unseen"] = True   # it could not look, as against looking and finding nothing
         return {}
     rule = learn(train)
     if rule is None:
@@ -142,6 +145,8 @@ def main(argv=None):
     ap.add_argument("--models-root", default="D:/3DModels")
     ap.add_argument("--write", action="store_true", help="write the X lines of <glb>.marks.proposed.txt beside each raw/cut/split GLB of the model")
     a = ap.parse_args(argv)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")   # part names outside the console's code page print instead of crashing
     parts, models = evaluate.load_corpus(a.corpus)
     population = evaluate.population("delete-hand", parts)
     train = [r for r in population if r["model"] != a.model]
@@ -162,6 +167,11 @@ def main(argv=None):
               % (len(train), len(set(r["model"] for r in train)), LAST_RULE["a"], LAST_RULE["b"]))
     else:
         print("no proposals: %s" % LAST_RULE.get("abstained", "no rule"))
+        if a.write and LAST_RULE.get("unseen"):
+            # it could not look: the earlier proposals stand. (Looked and found nothing clears the X lines, as the
+            # split proposer's S lines are cleared: a rerun must not leave an old proposal behind.)
+            print("no verdict to judge by: the proposals files are left as they are")
+            a.write = False
     by_file = {}
     for r in test:
         rows = by_file.setdefault(r["file"], [])
@@ -183,7 +193,11 @@ def main(argv=None):
             print("  X|%s|%s  %s verts, vis %s%s" % (r["node_index"], r["name"], r["verts"], r["vis"], agree))
         if a.write:
             path = os.path.join(a.models_root, rel) + ".marks.proposed.txt"
-            common.merge_proposals(path, ("X",), ["X|%s|%s" % (r["node_index"], r["name"]) for r in rows], "delete.py")
+            try:
+                common.merge_proposals(path, ("X",), ["X|%s|%s" % (r["node_index"], r["name"]) for r in rows], "delete.py")
+            except ValueError as e:
+                print("  %s" % e)
+                return 1
             print("  written: %s" % path)
     return 0
 

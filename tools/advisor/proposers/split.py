@@ -86,6 +86,7 @@ def propose(task, test, train, test_model, train_models):
     rule = learn(train)
     LAST_RULE.clear()
     if rule is None:
+        LAST_RULE["abstained"] = "no grid rule finds a training split"
         return {}
     k, t, b = rule
     LAST_RULE.update({"k": k, "t": t, "b": b, "model": test_model.get("model", "")})
@@ -105,6 +106,8 @@ def main(argv=None):
     ap.add_argument("--models-root", default="D:/3DModels")
     ap.add_argument("--write", action="store_true", help="write <glb>.marks.proposed.txt beside each raw/cut GLB of the model")
     a = ap.parse_args(argv)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")   # part names outside the console's code page print instead of crashing
     parts, models = evaluate.load_corpus(a.corpus)
     population = evaluate.population("split", parts)
     train = [r for r in population if r["model"] != a.model]
@@ -114,11 +117,11 @@ def main(argv=None):
         print("no raw or cut parts of model '%s' in the corpus" % a.model)
         return 1
     preds = propose("split", test, train, {"model": a.model}, [])
-    if LAST_RULE:
+    if "k" in LAST_RULE:
         print("rule learned on %d parts of %d models: islands after merge >= %d, triangles >= %d, islands of 1%% or more >= %d"
               % (len(train), len(set(r["model"] for r in train)), LAST_RULE["k"], LAST_RULE["t"], LAST_RULE["b"]))
     else:
-        print("no rule found a training split; no split proposals")
+        print("no split proposals: %s" % LAST_RULE.get("abstained", "no rule"))
     by_file = {}
     for r in test:
         rows = by_file.setdefault(r["file"], [])
@@ -133,7 +136,11 @@ def main(argv=None):
         if a.write:
             # the S lines of the one proposals file; another proposer's letters (delete.py's X) stay
             path = os.path.join(a.models_root, rel) + ".marks.proposed.txt"
-            common.merge_proposals(path, ("S",), ["S|%s|%s" % (r["node_index"], r["name"]) for r in rows], "split.py")
+            try:
+                common.merge_proposals(path, ("S",), ["S|%s|%s" % (r["node_index"], r["name"]) for r in rows], "split.py")
+            except ValueError as e:
+                print("  %s" % e)
+                return 1
             print("  written: %s" % path)
     return 0
 

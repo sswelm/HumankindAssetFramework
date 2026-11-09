@@ -837,8 +837,9 @@ def carry_later_marks(rows_by_rel, report):
     part that is marked here itself (S, T or X) is not touched: a split part's children are other nodes. A part ABSENT
     from the later file is not inferred deleted: the Workshop drops X-marked parts when it writes, but a later file can
     also be a partial export (rms_teutonic_cut2_split lists 220 of 1,437 unmarked parts). A part marked X at one later
-    file and listed unmarked at a later-still one is a conflict: the X carries (it is the explicit decision) and the
-    conflict is reported."""
+    file and listed unmarked at another later file of the same or a higher stage is a conflict: the X carries (it is
+    the explicit decision) and the conflict is reported. A file of the same stage as this one (a re-export) is not a
+    later file: nothing carries between them."""
     def stem(rel):
         return os.path.splitext(os.path.basename(rel))[0].lower()
     carried = Counter()
@@ -873,12 +874,12 @@ def carry_later_marks(rows_by_rel, report):
             if key in later_x:
                 r["mark_later"] = "X"
                 carried[rel] += 1
-                if later_kept.get(key, -1) > later_x[key]:
+                if later_kept.get(key, -1) >= later_x[key]:   # unmarked at the same or a later stage than the X: a conflict
                     conflicts[rel] += 1
     for rel, n in sorted(carried.items()):
         report.append("LATER %s: %d unmarked part(s) carry the X a later stage file gave them (mark_later)" % (rel, n))
     for rel, n in sorted(conflicts.items()):
-        report.append("LATER conflict at %s: %d part(s) marked X at one later stage file and listed unmarked at a later-still one; the X carries" % (rel, n))
+        report.append("LATER conflict at %s: %d part(s) marked X at one later stage file and listed unmarked at another of the same or a higher stage; the X carries" % (rel, n))
 
 
 def folder_files(fdir, recipe_by_src, report):

@@ -263,8 +263,10 @@ BASELINES = {
 
 # ---------------------------------------------------------------- scoring
 
-def leave_one_model_out(task, rows, models, proposer):
-    """Pooled predictions {row key: label} over every fold; for dials {model: {dial: pct}}."""
+def leave_one_model_out(task, rows, models, proposer, notes=None):
+    """Pooled predictions {row key: label} over every fold; for dials {model: {dial: pct}}. A fold the proposer abstains
+    on (its module's LAST_RULE carries "abstained" after the call) is named in `notes` with the reason and the positives
+    it holds, so a recall number is readable: those are scored as missed."""
     by_model = defaultdict(list)
     for r in rows:
         by_model[r["model"]].append(r)
@@ -285,6 +287,10 @@ def leave_one_model_out(task, rows, models, proposer):
         # Part records contain scalar CSV cells; model records also contain nested dials_parsed dictionaries.
         preds.update(proposer(task, [features(r, PART_FEATURES) for r in test], [dict(r) for r in train],
                               features(tm, MODEL_FEATURES), deepcopy(tms)))
+        reason = getattr(proposer, "__globals__", {}).get("LAST_RULE", {}).get("abstained")
+        if reason and notes is not None:
+            notes.append("fold %s: abstained - %s; its %d positive(s) of %d rows count as missed"
+                         % (model, reason, sum(1 for r in test if r["truth"]), len(test)))
     return preds
 
 
@@ -384,7 +390,8 @@ def evaluate(parts, models, proposers, target=30000.0):
             lines.append("No rows; nothing to score.")
             continue
         for name, fn in proposers.get(task, []):
-            preds = leave_one_model_out(task, rows, models, fn)
+            notes = []
+            preds = leave_one_model_out(task, rows, models, fn, notes)
             lines.append("")
             lines.append("**%s**" % name)
             lines.append("")
@@ -413,6 +420,9 @@ def evaluate(parts, models, proposers, target=30000.0):
                     cats.append("%s %s/%s" % (cat, pct(cp), pct(cr)))
                 lines.append("")
                 lines.append("Per category (precision/recall): " + "; ".join(cats))
+                for note in notes:
+                    lines.append("")
+                    lines.append(note)
             else:
                 g = rand_index(rows, preds)
                 lines.append("| together precision | together recall | pairs proposed together | pairs truly together | all pairs agreeing | pairs |")

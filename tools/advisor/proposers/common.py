@@ -10,22 +10,27 @@ HEADER = "#fuse-groups v2"
 
 
 def merge_proposals(path, letters, lines, tool):
-    """Rewrite `path` with every line of another letter kept, these `letters`' lines replaced by `lines` (full
-    `L|index|name` lines). An existing file is read first; a missing one is created. Returns the lines written."""
+    """Rewrite `path` with every line of another letter kept (and every `#name|` line, a group name added by hand), these
+    `letters`' lines replaced by `lines` (full `L|index|name` lines). An existing file is read first; a missing one is
+    created. Returns the lines written. A file that is not UTF-8 (hand-edited and saved in another code page) is refused
+    with a ValueError and left as it is: a name read with replacement characters would match no part."""
     kept = []
     if os.path.exists(path):
-        with io.open(path, encoding="utf-8-sig", errors="replace") as f:   # a hand-edited file in another code page still reads
-            for raw in f:
-                line = raw.rstrip("\r\n")
-                if not line:
-                    continue
-                if line.startswith("#"):
-                    if line.startswith("#name|"):   # a group name the user added by hand stays
-                        kept.append(line)
-                    continue
-                letter = line.split("|", 1)[0].strip()
-                if letter not in letters:
+        try:
+            with io.open(path, encoding="utf-8-sig") as f:
+                text = f.read()
+        except UnicodeDecodeError as e:
+            raise ValueError("%s is not UTF-8 (byte %d): save it as UTF-8 or delete it; nothing written" % (path, e.start))
+        for line in text.splitlines():
+            if not line:
+                continue
+            if line.startswith("#"):
+                if line.startswith("#name|"):
                     kept.append(line)
+                continue
+            letter = line.split("|", 1)[0].strip()
+            if letter not in letters:
+                kept.append(line)
     out = kept + list(lines)
     with io.open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(HEADER + "\n#proposed by tools/advisor/proposers (%s); rename to .marks.txt or merge by hand\n" % tool)
