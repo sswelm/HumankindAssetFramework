@@ -10,6 +10,18 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE WORKSHOP ADVISOR'S CORPUS AND BASELINES (2026-11-09; Phase 0 of `docs/Workshop-Advisor-Plan.md`).**
+  `tools/advisor/corpus.py` turns every decision the user made in the Workshop and the Lab - the S/T/X marks, the fuse
+  letters, what the fuse reports fused, the recipes' roles and dials - into one table beside the features a proposer
+  can see, joined by node index and unique name as the Workshop resolves a sidecar; a standard-library glTF reader, no
+  numpy. 33,441 rows over 45 decision-bearing files; 24 of 26 recipes join every part (the Ozhiga's parts are loose
+  parts of one mesh, the Saleg's recipe is stale against its re-fuse). Two things the join taught: Blender-probed
+  recipes name duplicates `Box.001` where the Cutter says `Box_2` (74 parts join by node order), and a Split's children
+  reference the parent's whole POSITION accessor, so counting the accessor made every child hundreds of singleton islands.
+  `evaluate.py` scores proposers on held-out models; the baselines in the plan say Split first (island heuristic: 84 %
+  recall, 19 % precision), then the visibility verdict into the table, and that the saved dials sit above 30k projected
+  vertices on 12 of 16 recipes, so the dial solver's objective must be restated. 20 unit cases in the gate
+  (`Tests/test_advisor_corpus.py`); the Bake Tests row waits for the first proposer.
 - **THE RIG_ANIM PORT TAKES A MESH ON A JOINT NODE (2026-11-08).** A file with a mesh on a joint was left to Blender by
   name; stage 1 now gives the importer's `.mesh` child its real properties (`ImportRig.JointMeshProperty`, the probe's)
   instead of the identity. Two drill fixtures, posed at frame 1, one with bones 1.5 long under an armature scaled 2: 164

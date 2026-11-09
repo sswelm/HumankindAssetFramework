@@ -4043,6 +4043,17 @@ through, srcFile/outGlb point at the fused file. Six unittest cases (`Tests/test
 kept entries and dials, a mixed group's majority and flag, differing placements, groups outside the recipe and members
 new to it, a non-report input, the command's file and exit code.
 
+**The Workshop advisor's corpus (2026-11-09, Phase 0 of [Workshop-Advisor-Plan.md](Workshop-Advisor-Plan.md)).**
+`tools/advisor/corpus.py` reads every decision-bearing GLB under `D:\3DModels` with a standard-library glTF reader
+and writes one row per mesh node per stage file: the probe-like features (referenced vertices, triangles, exact-weld
+islands, world bounds), the marks (S/T/X), the fuse letter and group name, what the fuse report fused the part into,
+and the recipe's role, visibility, flip and placement, joined by node index and unique name as the Workshop resolves a
+sidecar. `evaluate.py` scores proposers on held-out models. `Tests/test_advisor_corpus.py` (in the gate) builds a model
+folder from scratch - a raw GLB with duplicate names, a split GLB whose children share one POSITION accessor, a fused
+GLB, every sidecar, the fuse report and a recipe on the fused file - and checks every join against a known answer, the
+Cutter's `_2` renaming and the Blender probe's `.001` naming side by side, a refused sidecar line, the second model's
+`B_` parts, the metrics on populations small enough to do by hand, and that a proposer module loads by path.
+
 The critical review of PR #195 added a high-valence cone, tiny loose parts and non-polygon primitives. Matching every
 pair of edges in one lower-vertex bucket made a 32,000-face fan take 3.90 s against 9 ms before the parallelization.
 Buckets of up to 16 edges keep the small fast path; larger buckets sort their higher endpoints and join adjacent

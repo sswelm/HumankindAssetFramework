@@ -334,6 +334,7 @@ push_step run_lane "parity stamp drill (the guard refuses a changed covered file
 # CI had this one and the hook did not (2026-10-12): a vehicle_rig.py helper change passed the hook and failed after the push.
 push_step run_lane "vehicle lab math tests (oar calibration guard)" python "$ROOT/Tests/test_vehicle_rig_math.py"
 push_step run_lane "recipe migration tests (a Vehicle Lab recipe across a Model Workshop fuse)" python "$ROOT/Tests/test_recipe_migrate.py"
+push_step run_lane "advisor corpus tests (the Workshop advisor's corpus export and metrics: unique names, sidecar resolution, split children, recipe joins, pair agreement)" python "$ROOT/Tests/test_advisor_corpus.py"
 #    5a) The editor compiles. Roslyn against Unity's own reference assemblies — the ONE check that needs a licensed
 #        Unity install (UnityEditor.dll + the MonoBleedingEdge profile), so it stays hook-only and never runs in CI.
 # No guard: the script itself fails LOUD when Unity/dotnet/Newtonsoft are absent. The old guard here was
