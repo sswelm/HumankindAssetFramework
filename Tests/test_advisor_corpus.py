@@ -466,6 +466,20 @@ class ReviewRound2(unittest.TestCase):
         self.assertEqual(len(evaluate.population("delete", parts2)), 2)
         self.assertEqual(evaluate.population("delete-hand", parts2), [])                        # both deletions are the tool's
 
+    def test_a_blocked_mesh_has_no_box(self):
+        # its vertices are not read, so its size is not known: empty cells, not the nan and -inf a translated node's
+        # empty loop once left (which every size threshold was "above", so the delete proposer proposed every such part)
+        glb = make_glb(nodes=[{"name": "Rope", "mesh": 0, "translation": [0.0, 0.0, 100.0]}, {"name": "Flat", "mesh": 0}, {"name": "Hull", "mesh": 1}],
+                       meshes=[[(0, 0)], [(0, 1)]], positions=[TWO_ISLANDS], index_lists=[[0, 1, 1, 2, 3, 4], [0, 1, 2, 3, 4, 5]], modes={0: 1})
+        parts, _, _, out = self.write_folder("Rah66", glb, sidecars={".marks.txt": "#fuse-groups v2\nX|2|Hull\n"})
+        for name in ("Rope", "Flat"):
+            r = [p for p in parts if p["name"] == name][0]
+            self.assertEqual([r[c] for c in ("cx", "cy", "cz", "sx", "sy", "sz")], [""] * 6, name)
+        hull = [p for p in parts if p["name"] == "Hull"][0]
+        self.assertEqual(hull["sx"], 11.0)
+        parts2, _ = evaluate.load_corpus(out)
+        self.assertEqual([r["sx"] for r in parts2 if r["name"] == "Rope"], [""])
+
     def test_a_three_triangle_part_marked_x_is_the_users_judgement(self):
         glb = make_glb(nodes=[{"name": "Plate", "mesh": 0}], meshes=[[(0, 0)]], positions=[TWO_ISLANDS + [(20, 0, 0)]], index_lists=[[0, 1, 2, 3, 4, 5, 3, 4, 6]])
         parts, _, _, out = self.write_folder("Rah66", glb, sidecars={".marks.txt": "#fuse-groups v2\nX|0|Plate\n"})
@@ -1103,6 +1117,20 @@ class DeleteProposer(unittest.TestCase):
         models = [{"model": m, "category": "ship", "files": "", "dials_parsed": {}} for m in ("a", "b")]
         text = "\n".join(evaluate.evaluate(parts, models, {t: ([("delete", self.delete.propose)] if t == "delete" else []) for t in evaluate.TASKS}))
         self.assertIn("fold b: abstained - no visibility verdict on the held-out rows (stale or failed in the probe table, no recipe); its 1 positive(s) of 2 rows count as missed", text)
+
+    def test_an_abstention_on_one_task_is_not_reported_under_another(self):
+        # the delete proposer serves no split task: it returns nothing for it, and the note its delete fold left must
+        # not read as the split fold's - the proposer clears first, and the evaluator clears before every fold
+        self.delete.propose("delete", [self.row("b", 1, "", 1.0)], self.training(), {"model": "b"}, [])
+        self.assertIn("abstained", self.delete.LAST_RULE)
+        self.assertEqual(self.delete.propose("split", [self.row("b", 1, "", 1.0)], self.training(), {"model": "b"}, []), {})
+        self.assertEqual(self.delete.LAST_RULE, {})
+        self.delete.LAST_RULE["abstained"] = "a note left by another proposer's fold"
+        notes = []
+        rows = [dict(r, truth="S", category="ship") for r in self.training()[:3]]
+        models = [{"model": "a", "category": "ship", "files": "", "dials_parsed": {}}]
+        self.assertEqual(evaluate.leave_one_model_out("split", rows, models, self.delete.propose, notes), {})
+        self.assertEqual(notes, [])
         # some rows without a verdict (one file stale beside a probed one): the fold runs, the blank rows are not interior
         mixed = [self.row("b", 0, 1, 50.0), self.row("b", 1, "", 1.0), self.row("b", 2, 0, 1.0)]
         self.assertEqual(self.delete.propose("delete", mixed, self.training(), {"model": "b"}, []), {("b/m.glb", 0): "", ("b/m.glb", 1): "", ("b/m.glb", 2): "X"})
@@ -1117,6 +1145,19 @@ class DeleteProposer(unittest.TestCase):
         train += [self.row("a", 20 + i, 0, 7.0 + i / 10) for i in range(6)]
         self.assertEqual(self.delete.f_beta(1, 1, 3), self.delete.f_beta(4, 7, 0))
         self.assertEqual(self.delete.learn(train), (0.05, 0.0))
+
+    def test_a_part_whose_size_is_not_known_is_never_small(self):
+        # a blocked mesh's box is empty in the corpus (it was nan and -inf once, and -inf is under every threshold):
+        # not a candidate under any rule, and not the file's extent either
+        for sx in ("", "nan", "-inf", "inf"):
+            unknown = dict(self.row("b", 1, 0, 1.0), sx=sx, sy=sx, sz=sx)
+            ext = self.delete.file_extents([self.row("b", 0, 1, 50.0), unknown])
+            self.assertEqual(ext, {"b/m.glb": 50.0}, sx)
+            self.assertIsNone(self.delete.relative_size(unknown, ext), sx)
+            self.assertFalse(self.delete.candidate(unknown, None, 1.0, 0.02), sx)
+        preds = self.delete.propose("delete", [self.row("b", 0, 1, 50.0), dict(self.row("b", 1, 0, 1.0), sx="-inf", sy="nan", sz="")],
+                                    self.training(), {"model": "b"}, [])
+        self.assertEqual(preds, {("b/m.glb", 0): "", ("b/m.glb", 1): ""})
 
     def test_a_zero_threshold_switches_its_clause_off(self):
         # a zero-extent part (a point, or a row without extents) has relative size 0: a rule that says "none by size

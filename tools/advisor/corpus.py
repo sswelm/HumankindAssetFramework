@@ -525,9 +525,13 @@ def merged_island_tris(unique, tri_ids, dsu, lo, hi, fraction):
 
 def transform_bounds(m, mesh_info):
     """World-space centre and size of a mesh under a node matrix: exact over every unique vertex when the matrix is
-    not the identity, the local box otherwise."""
+    not the identity, the local box otherwise. (None, None) for a mesh whose vertices were not read (blocked: a
+    non-TRIANGLES primitive): its size is not known, and "not known" must not be written as a number - under a
+    translated node the empty loop left nan and -inf, which every size threshold is "above"."""
     if mesh_info["verts"] == 0:
         return (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)
+    if not mesh_info["unique"]:
+        return None, None
     if all(abs(m[i] - IDENTITY[i]) < 1e-9 for i in range(16)):
         lo, hi = mesh_info["lo"], mesh_info["hi"]
     else:
@@ -570,6 +574,8 @@ def glb_parts(data):
         if n.get("extensions", {}).get("EXT_mesh_gpu_instancing") is not None:
             blocked = "GPU-instanced node"
         centre, size = transform_bounds(world[i], info) if "unique" in info else ((0.0,) * 3, (0.0,) * 3)
+        if centre is None:
+            centre = size = ("",) * 3   # not measured
         rows.append({
             "node_index": i, "name": unique[i], "file_name": n.get("name") or ("node %d" % i), "mesh_index": mi,
             "mesh_shared": mesh_users[mi], "parent_index": parent.get(i, -1), "depth": depth[i],
@@ -742,7 +748,7 @@ def recipe_dials(j):
 
 # Bump when a feature's definition changes: the cache below is keyed on it, so an old export never serves stale
 # features for a file that did not change (the referenced-vertices fix would have been masked by the cache otherwise).
-FEATURES_VERSION = 4   # 3: non-TRIANGLES primitives block the mesh; triangle_free carried. 4: the islands after the Workshop's 1 % distance merge
+FEATURES_VERSION = 5   # 3: non-TRIANGLES primitives block the mesh; triangle_free carried. 4: the islands after the Workshop's 1 % distance merge. 5: a blocked mesh's bounds are empty, not nan
 
 
 WINDOWS_EPOCH_TICKS = 621355968000000000   # .NET ticks (100 ns) at 1970-01-01, what FileInfo.LastWriteTimeUtc.Ticks counts from
@@ -768,7 +774,11 @@ def read_probe(path, report=None):
                 except ValueError:
                     if report is not None:
                         report.append("PROBE table: unreadable FILE line: %s" % line[:300])
-            elif kind == "PART" and len(fields) >= 8:
+            elif kind == "PART":
+                if len(fields) < 8:   # a host killed mid-line
+                    if report is not None:
+                        report.append("PROBE table: unreadable PART line: %s" % line[:300])
+                    continue
                 entry = table.get(norm_path(fields[1]))
                 if entry is None:
                     if report is not None:
@@ -1214,10 +1224,10 @@ def fmt(v):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--models", default=DEFAULT_MODELS)
-    ap.add_argument("--recipes", default=DEFAULT_RECIPES)
-    ap.add_argument("--out", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "out"))
-    ap.add_argument("--no-cache", action="store_true")
+    ap.add_argument("--models", default=DEFAULT_MODELS, help="the models root, one folder per model (default %s)" % DEFAULT_MODELS)
+    ap.add_argument("--recipes", default=DEFAULT_RECIPES, help="the Lab's recipes folder (default %s)" % DEFAULT_RECIPES)
+    ap.add_argument("--out", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "out"), help="where parts.csv, models.csv, join_report.txt and the features cache go (default tools/advisor/out)")
+    ap.add_argument("--no-cache", action="store_true", help="recompute every file's features instead of reading the cache")
     ap.add_argument("--folder", action="append", help="only this model folder (repeatable)")
     ap.add_argument("--probe", help="the probe's table from tools/advisor/probe_vis.sh: vis, flip and bone for every node it covers")
     ap.add_argument("--list", action="store_true", help="print the GLBs the corpus reads, one per line, and exit (the probe's input)")

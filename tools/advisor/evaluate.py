@@ -285,9 +285,12 @@ def leave_one_model_out(task, rows, models, proposer, notes=None):
         tms = [o for o in models if o["model"] != model]
         # A proposer may normalize its arguments in place. No fold may mutate scoring truth or a later fold's input.
         # Part records contain scalar CSV cells; model records also contain nested dials_parsed dictionaries.
+        last_rule = getattr(proposer, "__globals__", {}).get("LAST_RULE")
+        if isinstance(last_rule, dict):
+            last_rule.clear()   # a note left by another task's fold (a proposer returns {} for a task it does not serve) is not this fold's
         preds.update(proposer(task, [features(r, PART_FEATURES) for r in test], [dict(r) for r in train],
                               features(tm, MODEL_FEATURES), deepcopy(tms)))
-        reason = getattr(proposer, "__globals__", {}).get("LAST_RULE", {}).get("abstained")
+        reason = (last_rule or {}).get("abstained")
         if reason and notes is not None:
             notes.append("fold %s: abstained - %s; its %d positive(s) of %d rows count as missed"
                          % (model, reason, sum(1 for r in test if r["truth"]), len(test)))

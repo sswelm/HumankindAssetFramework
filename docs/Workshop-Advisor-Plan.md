@@ -141,7 +141,7 @@ The baselines, leave-one-model-out, pooled (the full tables are in `baseline.md`
 |---|---|---|---|
 | Role | 4,588 labelled parts in 26 models (Body 2,830, Turret 607, Wheel 479, Ignore 256, then a long tail; armour 3,527 of them, nearly all the Ehrhardt) | always Default: 1 % right | majority role of the other models: Body 62 % precision / 100 % recall, every other role 0 % |
 | Delete | 29,482 parts in the 52 files the user judged (marks, letters or a recipe), 10,673 deleted (36.2 %) once a deletion at a later stage file counts for the same part at the earlier one (Phase 1's status; it was 7,241 before) | never: recall 0 % | the smallest tenth of each file: 57 % precision / 20 % recall; every interior part (vis = 0, the probe's verdict for every file since Phase 1): 88 % precision / 14 % recall |
-| Delete, the user's own marks | the same files without the 2,128 parts the Workshop marks itself: 27,354 parts, 8,589 positives (31.4 %) | never | the smallest tenth: 39 % precision / 15 % recall; every interior part: 84 % / 13 %. Size alone finds the tool's deletions, not the user's; the verdict finds a tenth of the user's at high precision |
+| Delete, the user's own marks | the same files without the 2,128 parts the Workshop marks itself: 27,354 parts, 8,589 positives (31.4 %) | never | the smallest tenth: 39 % precision / 15 % recall; every interior part: 84 % / 13 %. Size alone finds the tool's deletions, not the user's; the verdict finds one in eight of the user's at high precision |
 | Split | 10,457 splittable parts in the 11 raw and cut files with marks, 178 marked S or T (1.7 %) | never | multi-island part above the file's median size: 18 % precision / 79 % recall; every multi-island part: 14 % / 100 % |
 | Group | 19,056 parts in 27 files with letters; 1.34 M of 21.1 M pairs truly together | all apart: 0 % recall; all together: 6 % precision | one group per material name: 14 % precision / 1 % recall of the together pairs |
 | Dials | 16 recipes carrying dials; a dial a recipe lacks reads as the Lab's default (rigging 75, structure 50, else 0) | median dial of the other models: body 23 points mean error, structure 13, rudder 40, default 50 | the category's median: body 22, structure 10, rudder 26, default 27 |
@@ -197,11 +197,11 @@ verdict in the table for every file; grouping is not started.**
 - **The visibility verdict for every file.** `tools/advisor/probe_vis.sh` compiles `tools/advisor/ProbeVis.cs` against the
   editor sources (the vehicle probe drill's compile list) and runs the Lab's own probe (`VehicleProbe.Run`: the escape
   rays over one BVH of the whole file, the inside-out count) over every GLB `corpus.py --list` names, as a 64-bit
-  process; all 53 files took 38 s wall on 2026-11-09 (the Saleg's split file 7 s). `corpus.py --probe <table>` joins the rows by
+  process; all 53 files take about 40 s (38 and 44 s wall on two runs of 2026-11-09; the Saleg's split file 7-8 s). `corpus.py --probe <table>` joins the rows by
   glTF node (a single-mesh file's loose parts fold onto their node: external when any part escapes, flips summed) and
   checks each file's size and write time against the table - a file re-cut since is reported stale and falls back to
-  the recipe's verdict, named in `vis_from`. The join's own check: the 1,128 recipe rows with a verdict agree with
-  the probe on 1,126 and the other 2 are the Lab's -1 (unclassified). 30,740 probe rows fold onto 30,053 corpus rows,
+  the recipe's verdict, named in `vis_from`. The join's own check: of the 1,128 recipe rows carrying a `vis` field
+  1,126 agree with the probe and the other 2 are the Lab's -1 (unclassified, no verdict). 30,740 probe rows fold onto 30,053 corpus rows,
   1,681 of them interior (the 3,388 recipe-only rows keep the recipe's verdict).
 - **The deletion truth was understated.** The user splits at the raw file and deletes at the split file, so a raw
   row the split file marks X read as "kept": 2,000 parts of the Espana's raw file, 1,290 of the Dragon's, 3,432 in

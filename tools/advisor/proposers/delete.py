@@ -18,12 +18,14 @@ or on its own, to write proposals for one model folder, trained on every other m
     python tools/advisor/proposers/delete.py --corpus <dir> --model "Steam Frigate" [--write]
 
 --write refreshes the X lines of `<file>.glb.marks.proposed.txt` beside each raw, cut or split GLB of the model (the
-split proposer's S lines in the same file are kept; an empty proposal clears the old X lines, but a model it cannot
-judge - no visibility verdict on its rows - leaves the files as they are). It never touches the live
+split proposer's S lines in the same file are kept; an empty proposal clears the old X lines, and so does a run on
+which no grid rule finds a training deletion - a rerun must not leave an old proposal behind - but a model it cannot
+judge, no visibility verdict on its rows, leaves the files as they are). It never touches the live
 `<file>.glb.marks.txt`: the user renames or merges the proposal when they agree with it.
 """
 import argparse
 import itertools
+import math
 import os
 import sys
 from fractions import Fraction
@@ -34,31 +36,45 @@ BETA = Fraction(1, 2)
 LAST_RULE = {}   # the thresholds the last propose() chose, or the reason it abstained, for tests and for the report
 
 
-def num(v, default=0.0):
+def num(v):
+    """A finite number, or None: an empty cell, nan or an infinity is "not measured", never a size."""
     try:
-        return float(v)
+        f = float(v)
     except (TypeError, ValueError):
-        return default
+        return None
+    return f if math.isfinite(f) else None
+
+
+def extent(row):
+    """The part's largest extent, or None when it was not measured (a blocked mesh: the corpus leaves its box empty)."""
+    es = [e for e in (num(row.get("sx")), num(row.get("sy")), num(row.get("sz"))) if e is not None]
+    return max(es) if es else None
 
 
 def file_extents(rows):
     """The largest extent of any part per file - the model's size the parts are measured against."""
     out = {}
     for r in rows:
-        e = max(num(r.get("sx")), num(r.get("sy")), num(r.get("sz")))
-        if e > out.get(r["file"], 0.0):
+        e = extent(r)
+        if e is not None and e > out.get(r["file"], 0.0):
             out[r["file"]] = e
     return out
 
 
 def relative_size(row, extents):
+    """The part's largest extent as a share of its file's; None when the part's is not known."""
+    own = extent(row)
+    if own is None:
+        return None
     e = extents.get(row["file"], 0.0)
-    return max(num(row.get("sx")), num(row.get("sy")), num(row.get("sz"))) / e if e > 0 else 1.0
+    return own / e if e > 0 else 1.0
 
 
 def candidate(row, rel, a, b):
-    """A threshold of 0 switches its clause off: a zero-extent part (a point, or a row without extents) is not proposed
-    by a rule that says "none"."""
+    """A threshold of 0 switches its clause off: a zero-extent part (a point) is not proposed by a rule that says
+    "none". A part whose size is not known (rel None) is never a candidate: unknown is not small."""
+    if rel is None:
+        return False
     interior = str(row.get("vis", "")) == "0"
     return (interior and a > 0 and rel <= a) or (b > 0 and rel <= b)
 
@@ -106,13 +122,13 @@ def has_verdict(rows):
 
 
 def propose(task, test, train, test_model, train_models):
+    LAST_RULE.clear()   # before the task check: a note from an earlier call must not read as this task's
     if task not in ("delete", "delete-hand"):
         return {}
     for r in test[:1] + train[:1]:
         missing = [c for c in NEEDED if c not in r]
         if missing:   # loud, not an empty proposal: an export older than the features, or a row stripped of them
             raise ValueError("delete proposer: rows lack %s - rebuild the corpus (tools/advisor/corpus.py --probe ...) or list the columns in evaluate.PART_FEATURES" % ", ".join(missing))
-    LAST_RULE.clear()
     if not has_verdict(test) and not has_verdict(train):
         # no verdict anywhere: the export was made without --probe; loud, not 26 empty folds
         raise ValueError("delete proposer: no visibility verdict on any row - export the corpus with --probe (tools/advisor/probe_vis.sh)")
@@ -140,9 +156,9 @@ def main(argv=None):
     import common  # noqa: E402
 
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--corpus", required=True)
+    ap.add_argument("--corpus", required=True, help="the folder corpus.py exported (parts.csv, models.csv)")
     ap.add_argument("--model", required=True, help="the model folder to propose for; every other model trains the rule")
-    ap.add_argument("--models-root", default="D:/3DModels")
+    ap.add_argument("--models-root", default="D:/3DModels", help="where the model folders are; the proposals file is written beside each GLB (default D:/3DModels)")
     ap.add_argument("--write", action="store_true", help="write the X lines of <glb>.marks.proposed.txt beside each raw/cut/split GLB of the model")
     a = ap.parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):
@@ -167,11 +183,15 @@ def main(argv=None):
               % (len(train), len(set(r["model"] for r in train)), LAST_RULE["a"], LAST_RULE["b"]))
     else:
         print("no proposals: %s" % LAST_RULE.get("abstained", "no rule"))
-        if a.write and LAST_RULE.get("unseen"):
-            # it could not look: the earlier proposals stand. (Looked and found nothing clears the X lines, as the
-            # split proposer's S lines are cleared: a rerun must not leave an old proposal behind.)
-            print("no verdict to judge by: the proposals files are left as they are")
-            a.write = False
+        if LAST_RULE.get("unseen"):
+            # it could not look: the earlier proposals stand
+            if a.write:
+                print("no verdict to judge by: the proposals files are left as they are")
+            return 0
+        if not a.write:
+            return 0
+        # no rule learned on the other models: the X lines are cleared, as the split proposer clears its S lines - a
+        # rerun must not leave an old proposal behind (the live marks are never touched)
     by_file = {}
     for r in test:
         rows = by_file.setdefault(r["file"], [])
@@ -198,7 +218,7 @@ def main(argv=None):
             except ValueError as e:
                 print("  %s" % e)
                 return 1
-            print("  written: %s" % path)
+            print("  written: %s" % path.replace("\\", "/"))
     return 0
 
 

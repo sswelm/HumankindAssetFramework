@@ -13,7 +13,7 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 - **THE VISIBILITY VERDICT FOR EVERY FILE, AND THE DELETION PROPOSER (2026-11-09; Phase 1 of `docs/Workshop-Advisor-Plan.md`).**
   `tools/advisor/probe_vis.sh` compiles `tools/advisor/ProbeVis.cs` against the editor sources and runs the Vehicle Lab's own
   probe (`VehicleProbe.Run`: escape rays over one BVH of the whole file, the inside-out count) over every GLB the corpus reads
-  (`corpus.py --list`), as a 64-bit process: 53 files in 38 s wall. `corpus.py --probe` joins the verdicts by glTF node (a
+  (`corpus.py --list`), as a 64-bit process: 53 files in about 40 s (38 and 44 s wall on two runs). `corpus.py --probe` joins the verdicts by glTF node (a
   single-mesh file's loose parts fold onto their node), checks each file's size and write time against the table (stale: reported,
   falls back to the recipe's verdict, named in `vis_from`), and checks the join against the recipes: 1,126 of 1,128 verdicts
   agree, the other 2 are the Lab's -1. The deletion truth was understated: the user splits at the raw file and deletes at the
@@ -27,8 +27,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   where it misses: 3,696 exterior parts, four in five between 0.07 % and 2.7 % of the model, Phase 4's question. Proposers share one
   `<file>.glb.marks.proposed.txt` by letter (`proposers/common.py`). 58 unit cases in the gate.
 - **PR #275 review, round 1 (2026-11-09).** Independent reviewers verifying by execution. Both proposers score their
-  grid as exact fractions: the float F-beta put two rules at the same score a last bit apart, so the documented tie
-  rules never ran (the real corpus learns the same rule either way, 23 of 26 folds). A zero threshold now switches its
+  grid as exact fractions: the float F-beta put two rules with different counts at the same score a last bit apart,
+  so the documented tie rules could not run for them (the real corpus learns the same rule either way, 23 of 26
+  folds). A zero threshold now switches its
   clause off (a zero-extent part is not "under 0"). A held-out model without a verdict abstains with its reason instead
   of aborting the whole evaluation. The delete CLI leaves the user's fuse-group parts alone beside S and T, says which
   proposals the user already deleted later or ignored, and under `--write` refuses a models root without the model's folder. The
@@ -49,6 +50,21 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   same rule (every interior part and anything up to 0.1 %, on 24 of 26 folds); the 3,696 misses are every exterior
   miss, four in five between 0.07 % and 2.7 % of the model, not "between 0.1 % and 3 %"; the probe's 30,740 rows fold
   onto 30,053 corpus rows with 1,681 interior. 73 unit cases.
+- **PR #275 review, round 3 (2026-11-09).** The documented workflow run end to end on a scratch tree (list, probe,
+  join, a file changed after probing, the evaluator, both proposers' writes in both orders, a model without a verdict,
+  a proposals file in another code page, a relative and a trailing-slash models root, a folder with a space and a
+  non-ASCII letter): one defect, round 2's own. A proposer returns nothing for a task it does not serve before
+  clearing its last-rule note, so the delete proposer's abstention on one task was printed under the split task's
+  table for models that had verdicts; both proposers clear first now and the evaluator clears before every fold. The
+  split CLI refuses a models root without the model's folder as the delete CLI does, instead of a traceback. The delete
+  CLI's docstring says which abstention clears the X lines (no rule learned, as the Split proposer's merged rule) and
+  which leaves them (no verdict); the proposals file's header names both proposers' letters. A blind read of the whole
+  diff found an older defect the proposer inherited: a blocked mesh (a non-TRIANGLES primitive) under a translated node
+  had nan for its centre and -inf for its size in parts.csv (1,246 rows of the export; an empty loop over vertices the
+  analysis never read), and -inf is under every size threshold, so the delete CLI proposed every such part - the
+  CoastalMonitor's 10 proposals were all of them, one a 369-vertex external part. The corpus leaves a blocked mesh's box
+  empty now (features cache v5) and the proposer never calls an unknown size small. A probe table row cut short (a host
+  killed mid-line) is reported rather than dropped. 76 unit cases.
 - **PR #273 review (2026-11-09).** The Split proposer abstains when no threshold rule finds a training split rather
   than choosing its loosest rule at zero F1. Proposal writes refresh every raw/cut file represented in the corpus,
   including files with zero proposals or only blocked parts, so a rerun cannot leave an old S proposal behind.

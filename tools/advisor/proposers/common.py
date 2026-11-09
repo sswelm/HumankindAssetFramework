@@ -33,7 +33,7 @@ def merge_proposals(path, letters, lines, tool):
                 kept.append(line)
     out = kept + list(lines)
     with io.open(path, "w", encoding="utf-8", newline="\n") as f:
-        f.write(HEADER + "\n#proposed by tools/advisor/proposers (%s); rename to .marks.txt or merge by hand\n" % tool)
+        f.write(HEADER + "\n#proposed by tools/advisor/proposers (split.py the S lines, delete.py the X; last written by %s); rename to .marks.txt or merge by hand\n" % tool)
         for line in out:
             f.write(line + "\n")
     return out

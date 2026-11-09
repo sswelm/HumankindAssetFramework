@@ -77,6 +77,7 @@ NEEDED = ("islands_merged", "islands_big", "tris", "blocked")
 
 
 def propose(task, test, train, test_model, train_models):
+    LAST_RULE.clear()   # before the task check: a note from an earlier call must not read as this task's
     if task != "split":
         return {}
     for r in test[:1] + train[:1]:
@@ -84,7 +85,6 @@ def propose(task, test, train, test_model, train_models):
         if missing:   # loud, not an empty proposal: an export older than the features, or a row stripped of them
             raise ValueError("split proposer: rows lack %s - rebuild the corpus (tools/advisor/corpus.py) or list the columns in evaluate.PART_FEATURES" % ", ".join(missing))
     rule = learn(train)
-    LAST_RULE.clear()
     if rule is None:
         LAST_RULE["abstained"] = "no grid rule finds a training split"
         return {}
@@ -101,9 +101,9 @@ def main(argv=None):
     import common  # noqa: E402
 
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--corpus", required=True)
+    ap.add_argument("--corpus", required=True, help="the folder corpus.py exported (parts.csv, models.csv)")
     ap.add_argument("--model", required=True, help="the model folder to propose for; every other model trains the rule")
-    ap.add_argument("--models-root", default="D:/3DModels")
+    ap.add_argument("--models-root", default="D:/3DModels", help="where the model folders are; the proposals file is written beside each GLB (default D:/3DModels)")
     ap.add_argument("--write", action="store_true", help="write <glb>.marks.proposed.txt beside each raw/cut GLB of the model")
     a = ap.parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):
@@ -115,6 +115,9 @@ def main(argv=None):
     test = [r for r in parts if r["model"] == a.model and r["stage"] in ("raw", "cut")]
     if not test:
         print("no raw or cut parts of model '%s' in the corpus" % a.model)
+        return 1
+    if a.write and not os.path.isdir(os.path.join(a.models_root, a.model)):
+        print("model folder not found under --models-root: %s" % os.path.join(a.models_root, a.model).replace("\\", "/"))
         return 1
     preds = propose("split", test, train, {"model": a.model}, [])
     if "k" in LAST_RULE:
@@ -141,7 +144,7 @@ def main(argv=None):
             except ValueError as e:
                 print("  %s" % e)
                 return 1
-            print("  written: %s" % path)
+            print("  written: %s" % path.replace("\\", "/"))
     return 0
 
 

@@ -4107,7 +4107,11 @@ fold with some blank verdicts still running, the abstention when a training dele
 it, the write-time half of the staleness check, the CLI leaving the user's S, T and fuse-group parts alone, saying which
 proposals the user already deleted, under `--write` refusing a models root without the model's folder and leaving the
 proposals files alone when it could not look, and the proposals file keeping hand-added `#name|` lines and refusing one
-saved in another code page: 73 cases.
+saved in another code page: 73 cases. Round 3 (the workflow run end to end on a scratch tree) added the one case its
+defect needed: a proposer's abstention note on one task is not printed under another task's table (the delete
+proposer serves no split task; its last-rule note from the delete fold leaked there), and a blind read of the diff two
+more: a blocked mesh's box is empty cells (it was nan and -inf under a translated node), and a part whose size is not
+known - empty, nan or an infinity - is never a deletion candidate nor its file's extent: 76 cases.
 
 The critical review of PR #195 added a high-valence cone, tiny loose parts and non-polygon primitives. Matching every
 pair of edges in one lower-vertex bucket made a 32,000-face fan take 3.90 s against 9 ms before the parallelization.
