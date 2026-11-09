@@ -457,14 +457,16 @@ public static class BlenderRigAnim
         string ext = System.IO.Path.GetExtension(a.Input).ToLowerInvariant();
         if (ext == ".blend") { s.Fallback = "a .blend source: Blender's own importer"; return s; }   // an .fbx reads through HafModelLoader since 6e
         if (a.LocalNodeAnim) { s.Fallback = "localNodeAnim: the REST hold and the inspection round trip are Blender's"; return s; }
-        return ImportScene(m, s, a.Logs, dropMaterialLess: true, requireArmature: true, convertRig: a.ConvertRig);
+        return ImportScene(m, s, a.Logs, dropMaterialLess: true, requireArmature: true, convertRig: a.ConvertRig, jointMeshes: true);
     }
 
     /// <summary>The scene Blender's glTF importer makes of `m` (import_scene.gltf), as the script finds it: the objects in creation
     /// order with the importer's properties posed at frame 1, every mesh in the importer's layout, the actions with a slot per
     /// touched object. rig_anim.py's stage 1 adds the material-less drop, its no-armature exit and the object-animation clear;
-    /// vehicle_rig.py's (BlenderVehicleRig) takes the scene as imported.</summary>
-    internal static Stage1 ImportScene(HafModel m, Stage1 s, List<string> argLogs, bool dropMaterialLess, bool requireArmature, bool convertRig, BlenderNames.Result seed = null, bool posed = true, IEnumerable<string> existingActions = null)
+    /// vehicle_rig.py's (BlenderVehicleRig) takes the scene as imported. `jointMeshes`: a mesh on a joint node (the importer's
+    /// '.mesh' child under the bone) is modelled - rig_anim's drill holds it (2026-11-08); vehicle_rig's has no such fixture, so
+    /// there it stays Blender's by name (review, 2026-11-09).</summary>
+    internal static Stage1 ImportScene(HafModel m, Stage1 s, List<string> argLogs, bool dropMaterialLess, bool requireArmature, bool convertRig, BlenderNames.Result seed = null, bool posed = true, IEnumerable<string> existingActions = null, bool jointMeshes = false)
     {
         s.Logs.AddRange(argLogs);
         if (m.Scenes.Count > 1) { s.Fallback = "a file of several scenes: which one Blender makes active is not modelled"; return s; }
@@ -481,6 +483,7 @@ public static class BlenderRigAnim
         foreach (var o in names.Objects)
         {
             if (o.Kind == BlenderNames.ObjectKind.Camera) { s.Fallback = "a camera object"; return s; }
+            if (!jointMeshes && o.GltfNode < 0 && o.ParentBone != null) { s.Fallback = "'" + o.Name + "': a mesh on a bone node (the importer's '.mesh' child under a bone)"; return s; }
             if (o.Kind == BlenderNames.ObjectKind.Mesh && o.Skin >= 0 && (o.Skin >= m.Skins.Count || names.ArmatureOfSkin[o.Skin] == null)) { s.Fallback = "'" + o.Name + "': a skin whose joints are under no armature"; return s; }
         }
 
@@ -674,7 +677,8 @@ public static class BlenderRigAnim
             set = pose.FrameSet(1f);
         }
         var world = VehicleProbe.BlenderWorldMatricesPosed(m, rig, set, out var poseMats, out var poseProps, out var locals);
-        // the identity transform the importer gives a moved skinned mesh and a '.skinned'/'.mesh' vnode, as BKE_object_to_mat4 builds it
+        // the identity transform the importer gives a moved skinned mesh, a '.skinned' vnode and an armature node's '.mesh' vnode, as
+        // BKE_object_to_mat4 builds it (a joint's '.mesh' vnode gets JointMeshProperty below)
         var identity = VehicleProbe.ObjectMatrix(new float[3], new[] { 1f, 0f, 0f, 0f }, new[] { 1f, 1f, 1f });
         foreach (var so in s.Objects)
         {
@@ -686,7 +690,7 @@ public static class BlenderRigAnim
             bool jointMesh = o.GltfNode < 0 && !skinnedMesh && so.ParentBone != null;
             float[] jl = null, jq = null, js = null;
             if (jointMesh) rig.JointMeshProperty(so.ParentBoneNode, out jl, out jq, out js);
-            so.Local = o.GltfNode >= 0 && !skinnedMesh ? locals[o.GltfNode] : jointMesh ? VehicleProbe.ObjectMatrix(jl, jq, js) : identity;   // an object with its own node has the importer's properties (posed at frame 1); the others hang at the identity
+            so.Local = o.GltfNode >= 0 && !skinnedMesh ? locals[o.GltfNode] : jointMesh ? VehicleProbe.ObjectMatrix(jl, jq, js) : identity;   // an object with its own node has the importer's properties (posed at frame 1), a joint's '.mesh' child its own; the others hang at the identity
             // the properties themselves, as BlenderWorldMatricesPosed composes them: a bone's child from the importer's
             // adjusted transform, a plain object from the node's, the animated channels over them
             if (o.GltfNode >= 0 && !skinnedMesh)

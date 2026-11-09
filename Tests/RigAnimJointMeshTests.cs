@@ -26,6 +26,21 @@ public class RigAnimJointMeshTests
         Assert.Equal(Bits(blenderRowMajor), RowMajorBits(so.World));
     }
 
+    [Fact]
+    public void Vehicle_rig_still_leaves_a_mesh_on_a_joint_to_Blender()
+    {
+        // the import is shared (BlenderRigAnim.ImportScene); vehicle_rig's drill has no fixture with a mesh on a joint, so the Lab's
+        // Generate keeps such a file Blender's by name (review, 2026-11-09)
+        var m = GlbReader.Read(Convert.FromBase64String(VehicleProbeJointMeshTests.MeshOnBone));
+        m.Materials.Add(new HafMaterial { Name = "Paint" });
+        foreach (var p in m.Meshes.SelectMany(x => x.Primitives)) p.Material = 0;
+        var argv = Enumerable.Repeat("", 76).ToList();
+        argv[0] = "rig"; argv[1] = "D:/m/a.glb"; argv[2] = "D:/m/a_Spin.glb"; argv[6] = "AUTO"; argv[7] = "15"; argv[8] = "-360";
+        var s = BlenderVehicleRig.RunStage1(m, BlenderVehicleRig.ParseArgs(argv));
+        Assert.NotNull(s.Fallback);
+        Assert.Contains("a mesh on a bone node", s.Fallback);
+    }
+
     static uint[] Bits(string row) => row.Split(' ')
         .Select(t => { Assert.True(GlbReader.ReadPythonFloat(t, out double d), t); return BitConverter.ToUInt32(BitConverter.GetBytes((float)d), 0); }).ToArray();
     static uint[] RowMajorBits(float[] colMajor) => Enumerable.Range(0, 16)

@@ -1967,12 +1967,20 @@ A mesh on a joint node (2026-11-08) was left to Blender by name until the probe 
 `<id>.mesh` child under the bone (`fixup_multitype_nodes`), whose properties are not the identity the port gave every
 split-off object: `VNode()`'s default transform through the bone child's `rotation_after`, moved back by the bone length.
 Stage 1 now takes them from `ImportRig.JointMeshProperty`, the probe's. The fixture `riganim_joint_mesh` puts a mesh on the
-animated `Arm` joint and one on the still `Root` joint, run on the conversion path (`fx_joint_mesh`: the children bound
-into the skin) and the legacy path (`fx_joint_mesh_legacy`: they stay parented to their bones through the export). Live:
-163 jobs, 154 equal at all four stages, the 9 left as before, both new jobs equal and exported in process. Planted (the
-identity back): exactly those two fail, at stage 1's barrel row. `RigAnimJointMeshTests` holds the stage-1 matrix_world
-of the probe's static `mesh_on_bone` turret to the row Blender printed for it, as float32 bits; the plant fails it. The
-probe's animated row is no oracle there: rig_anim poses its scene at frame 1 of its own active action.
+`Arm` joint and one on the `Root` joint, its active clip starting posed (Root turned, Arm shifted, so frame 1 composes both
+children through a pose). It runs on the conversion path (`fx_joint_mesh`: the children bound into the skin) and the
+legacy path (`fx_joint_mesh_legacy`: stage 3's bone-parent `parentinv` fix on them, then stage 4's join).
+`riganim_joint_mesh_scaled` (`fx_joint_mesh_scaled`) has bones 1.5 long under an armature scaled 2, its inverse bind
+matrices saying so - the importer takes the bones from them, so a node translation alone left both bones 1 long. There
+the importer's `bone_length` (1.5) and the pose matrix's length (0.75) differ; in the first fixture both are 1. Vehicle_rig,
+which shares the import, still leaves such a file to Blender by name: its drill has no fixture for it
+(`Vehicle_rig_still_leaves_a_mesh_on_a_joint_to_Blender`, planted). Live (2026-11-09): 164 jobs, 155 equal at all four
+stages, the 9 left as before, the three new jobs equal and exported in process. Three plants, each failing only its own
+jobs at stage 1's barrel row: the identity back (`fx_joint_mesh` and `_legacy`; on the first, unposed version of the
+fixture it failed by a few ulps, posed by half a unit), a fixed bone length of 1, and the pose matrix's length in place of
+the importer's (`fx_joint_mesh_scaled` alone each). `RigAnimJointMeshTests` holds the stage-1 matrix_world of the probe's
+static `mesh_on_bone` turret to the row Blender printed for it, as float32 bits; the identity plant fails it. The probe's
+animated row is no oracle there: rig_anim poses its scene at frame 1 of its own active action.
 
 Step (c), stage 2 in C# (2026-10-12): `BlenderRigAnim.RunStage2` continues on the scene stage 1 left - the bone-parent ->
 skin bind (the governing bone up the parent chain, staticParts by lowered object and material names, the rest-world pin,
