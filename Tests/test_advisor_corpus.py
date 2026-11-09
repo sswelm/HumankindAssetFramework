@@ -6,6 +6,7 @@ report, the fused GLB and a recipe on it - so every join the export makes is che
 metrics are checked on populations whose precision, recall and pair agreement are computed by hand.
 """
 import io
+from contextlib import redirect_stdout
 import json
 import os
 import shutil
@@ -623,6 +624,59 @@ class SplitProposer(unittest.TestCase):
         self.assertAlmostEqual(self.split.f_beta(1, 0, 1, beta=0.5), 0.8333, places=3)   # F0.5 weighs precision double
         self.assertAlmostEqual(self.split.f_beta(1, 1, 0, beta=0.5), 0.5556, places=3)
         self.assertEqual(self.split.f_beta(0, 5, 5), 0.0)
+
+    def test_no_supported_training_split_abstains_instead_of_choosing_the_loosest_rule(self):
+        test = [self.row("b", 1, 9000, 8, 4)]
+        for train in ([], [self.row("a", 1, 9000, 8, 4)],
+                      [self.row("a", 1, 9000, 1, 1, "S")]):
+            with self.subTest(train=train):
+                self.assertIsNone(self.split.learn(train))
+                self.assertEqual(self.split.propose("split", test, train, {"model": "b"}, []), {})
+
+    def test_write_refreshes_empty_and_blocked_files_without_touching_live_marks(self):
+        tmp = tempfile.TemporaryDirectory(prefix="advisor-proposals-")
+        self.addCleanup(tmp.cleanup)
+        root = tmp.name
+        os.makedirs(os.path.join(root, "b"))
+        train = [self.row("a", 1, 5000, 6, 4, "S"), self.row("a", 2, 60, 6, 4)]
+        test = [self.row("b", 1, 7000, 6, 4), self.row("b", 2, 60, 6, 4),
+                self.row("b", 3, 7000, 6, 4, blocked="Only TRIANGLES")]
+        test[1]["file"] = "b/small.glb"
+        test[2]["file"] = "b/blocked.glb"
+        live = os.path.join(root, "b/m.glb.marks.txt")
+        with io.open(live, "w", encoding="utf-8") as f:
+            f.write("#fuse-groups v2\nX|1|n1\n")
+        for row in test:
+            with io.open(os.path.join(root, row["file"]) + ".marks.proposed.txt", "w", encoding="utf-8") as f:
+                f.write("#fuse-groups v2\nS|99|stale\n")
+
+        def run():
+            rows = []
+            for row in train + test:
+                record = dict.fromkeys(corpus.PART_COLUMNS, "")
+                record.update({k: v for k, v in row.items() if k != "truth"})
+                record["mark"] = row["truth"]
+                rows.append(record)
+            corpus.write_csv(os.path.join(root, "parts.csv"), corpus.PART_COLUMNS, rows)
+            corpus.write_csv(os.path.join(root, "models.csv"), corpus.MODEL_COLUMNS, [])
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(self.split.main(["--corpus", root, "--model", "b", "--models-root", root, "--write"]), 0)
+
+        run()
+        for row in test:
+            lines, _ = corpus.read_sidecar(os.path.join(root, row["file"]) + ".marks.proposed.txt")
+            self.assertEqual(lines, [("S", 1, "n1")] if row is test[0] else [])
+        # Rerun with no training positives: an old positive file must become empty too.
+        train[0]["truth"] = "X"
+        run()
+        for row in test:
+            self.assertEqual(corpus.read_sidecar(os.path.join(root, row["file"]) + ".marks.proposed.txt")[0], [])
+        # A model with only blocked parts still refreshes all its files, rather than returning early.
+        for row in test:
+            row["blocked"] = "Only TRIANGLES"
+        run()
+        with io.open(live, encoding="utf-8") as f:
+            self.assertEqual(f.read(), "#fuse-groups v2\nX|1|n1\n")
 
 
 class Rules(unittest.TestCase):

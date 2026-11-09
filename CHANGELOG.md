@@ -10,6 +10,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **PR #273 review (2026-11-09).** The Split proposer abstains when no threshold rule finds a training split rather
+  than choosing its loosest rule at zero F1. Proposal writes refresh every raw/cut file represented in the corpus,
+  including files with zero proposals or only blocked parts, so a rerun cannot leave an old S proposal behind.
+  Live marks remain untouched; regressions cover unsupported training and repeated CLI writes (45 advisor cases).
 - **THE SPLIT PROPOSER (2026-11-09; Phase 1 of `docs/Workshop-Advisor-Plan.md`, first proposer).** The corpus now carries
   the island count the user reads in the Cutter's row: the probe's 1 % distance merge (`GlbDisconnectedParts.AnalyzeMesh`,
   vertex-distance grid, the principal-axis gate for elongated islands, the pair budget) is ported into `corpus.py` as

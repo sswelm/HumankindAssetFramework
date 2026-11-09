@@ -17,11 +17,11 @@ or on its own, to write proposals for one model folder, trained on every other m
 
     python tools/advisor/proposers/split.py --corpus <dir> --model "Steam Frigate" [--write]
 
---write puts `<file>.glb.marks.proposed.txt` beside each raw/cut GLB of the model, in the sidecar's v2 format, and
-never touches the live `<file>.glb.marks.txt`: the user renames or merges the proposal when they agree with it.
+--write refreshes `<file>.glb.marks.proposed.txt` beside each raw/cut GLB of the model, including empty proposals,
+in the sidecar's v2 format. It never touches the live `<file>.glb.marks.txt`: the user renames or merges the proposal
+when they agree with it.
 """
 import argparse
-import csv
 import io
 import itertools
 import os
@@ -54,10 +54,12 @@ def f_beta(tp, fp, fn, beta=1.0):
 
 
 def learn(train):
-    """(k, t, b) maximising F0.5 on the training rows (which carry 'truth'); ties go to the loosest rule, the one
+    """(k, t, b) maximising F1 on the training rows (which carry 'truth'); ties go to the loosest rule, the one
     that stops at the negatives' edge rather than the positives', so an unseen split a little smaller than the
-    training ones is still proposed."""
+    training ones is still proposed. None means no grid rule found a training split: abstain in that case."""
     positives = [r for r in train if r.get("truth") in ("S", "T")]
+    if not positives:
+        return None
     negatives = [r for r in train if r.get("truth") not in ("S", "T")]
     best = None
     for k, t, b in itertools.product(K_GRID, T_GRID, B_GRID):
@@ -68,7 +70,7 @@ def learn(train):
         key = (score, -k, -t, -b)
         if best is None or key > best[0]:
             best = (key, (k, t, b))
-    return best[1] if best else (2, 1000, 0)
+    return best[1] if best and best[0][0] > 0 else None
 
 
 NEEDED = ("islands_merged", "islands_big", "tris", "blocked")
@@ -81,8 +83,11 @@ def propose(task, test, train, test_model, train_models):
         missing = [c for c in NEEDED if c not in r]
         if missing:   # loud, not an empty proposal: an export older than the features, or a row stripped of them
             raise ValueError("split proposer: rows lack %s - rebuild the corpus (tools/advisor/corpus.py) or list the columns in evaluate.PART_FEATURES" % ", ".join(missing))
-    k, t, b = learn(train)
+    rule = learn(train)
     LAST_RULE.clear()
+    if rule is None:
+        return {}
+    k, t, b = rule
     LAST_RULE.update({"k": k, "t": t, "b": b, "model": test_model.get("model", "")})
     return {(r["file"], r["node_index"] if r["node_index"] != "" else r["name"]): ("S" if candidate(r, k, t, b) else "") for r in test}
 
@@ -100,18 +105,23 @@ def main(argv=None):
     parts, models = evaluate.load_corpus(a.corpus)
     population = evaluate.population("split", parts)
     train = [r for r in population if r["model"] != a.model]
-    test = [r for r in parts if r["model"] == a.model and r["stage"] in ("raw", "cut") and not r["blocked"]]
+    # Include blocked rows so a file that no longer has any eligible parts still clears its old proposal.
+    test = [r for r in parts if r["model"] == a.model and r["stage"] in ("raw", "cut")]
     if not test:
         print("no raw or cut parts of model '%s' in the corpus" % a.model)
         return 1
     preds = propose("split", test, train, {"model": a.model}, [])
-    print("rule learned on %d parts of %d models: islands after merge >= %d, triangles >= %d, islands of 1%% or more >= %d"
-          % (len(train), len(set(r["model"] for r in train)), LAST_RULE["k"], LAST_RULE["t"], LAST_RULE["b"]))
+    if LAST_RULE:
+        print("rule learned on %d parts of %d models: islands after merge >= %d, triangles >= %d, islands of 1%% or more >= %d"
+              % (len(train), len(set(r["model"] for r in train)), LAST_RULE["k"], LAST_RULE["t"], LAST_RULE["b"]))
+    else:
+        print("no rule found a training split; no split proposals")
     by_file = {}
     for r in test:
+        rows = by_file.setdefault(r["file"], [])
         key = (r["file"], r["node_index"] if r["node_index"] != "" else r["name"])
         if preds.get(key) == "S":
-            by_file.setdefault(r["file"], []).append(r)
+            rows.append(r)
     for rel, rows in sorted(by_file.items()):
         print("%s: %d proposal(s)" % (rel, len(rows)))
         for r in rows:

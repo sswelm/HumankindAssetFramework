@@ -189,7 +189,10 @@ role, never overall.
   same size band) rather than the part alone.
 - Writing proposals: `python tools/advisor/proposers/split.py --corpus <dir> --model "<folder>" --write` puts
   `<file>.glb.marks.proposed.txt` beside each raw or cut GLB, in the sidecar's format, trained on every other
-  model. It never writes the live `.marks.txt`; the user renames or merges it. Loading a proposal into the
+  model. Every raw/cut file present in the corpus is refreshed, including an empty proposal when nothing is
+  recommended or all parts are blocked, so a previous run cannot leave stale S marks behind. The learner abstains
+  when no grid rule finds a training split, including when training is empty or has no positive labels.
+  It never writes the live `.marks.txt`; the user renames or merges it. Loading a proposal into the
   Cutter is Phase 6.
 
 ### Phase 2: role classifier without a language model
