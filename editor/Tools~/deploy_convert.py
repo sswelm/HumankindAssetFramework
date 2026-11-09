@@ -719,6 +719,11 @@ if len(argv) > 8 and argv[8].strip():
           (mag, R, dist, deploy_end, recoil_out_end, tube_root))
 
 # --- 6. bind each mesh 100% to the bone of its nearest animated ancestor (rigid) ---
+# THE BONE'S NAME, NOT THE PART'S (2026-11-09, the T-62's stuck track links): this returned the part's name, and the
+# vertex group was named after it. A bone is named after its part, so that held - except for a pair-merged part (3b),
+# whose bone is its neighbour's: its group named a bone that does not exist, the glTF exporter put every vertex on the
+# static `neutral_bone` it adds for such a mesh, and the 15 merged links of the T-62 never moved. bone_of resolves a
+# merged part to the bone it rides (and a part whose bone Blender renamed to its real bone name).
 def anim_ancestor(o):
     while o:
         try:
@@ -726,7 +731,7 @@ def anim_ancestor(o):
         except ReferenceError:
             return None   # chain runs into a CULLED (deleted) object — treat as no animated ancestor
         if nm in bone_of:
-            return nm
+            return bone_of[nm]
         try:
             o = o.parent
         except ReferenceError:

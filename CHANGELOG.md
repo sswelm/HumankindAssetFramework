@@ -2749,6 +2749,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Units & animation
 
+- **A PAIR-MERGED TRACK LINK MOVES WITH ITS NEIGHBOUR (2026-11-09, the T-62's stuck links).** The deploy conversion keeps a
+  big rig under the 128-index wall by merging instanced parts onto their numeric neighbour's bone (15 of the T-62's 120
+  track pieces). The bind then named each mesh's vertex group after the PART found, and a merged part has no bone of its
+  own name: the glTF exporter put those vertices on the static `neutral_bone` it adds for such a mesh, and the 15 links
+  stood still while the track crawled past them - since July, in Blender's output and the port's alike (the port is held
+  to the script byte for byte, so it carried the bug faithfully; the backlog named it on 2026-10-10). `anim_ancestor`
+  returns `bone_of[part]` now, in the script and the port; a merged link rides its neighbour's bone, and no job needs the
+  neutral bone any more (the drill fails one that does). The deploy cache stamp is bumped, so every `deploy_converted.glb`
+  is made again on the next bake. The bone goldens are unchanged but for the neutral bone's rows; `deploy_golden` is
+  re-captured after the in-game check.
 - **WHEEL SPIN for state-driven vehicles (2026-08-22, the towed howitzer — verification pending).** Its clips are
   fold/folded/unfold POSES, so nothing rolled the wheels while it travelled (and the aim-layer sanitize zeroes the
   game's own wheel channel on our rigs). New shared-schema fields `wheelSpinBones` ("l_wheel@0;r_wheel@0" — baked-rig

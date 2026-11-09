@@ -21,7 +21,7 @@ static class ExportDrill
 
     static readonly string[] CoverKeys =
     {
-        "a job's export compared", "a skinned mesh node", "a bound mesh without a triangle (a node without a mesh)", "the neutral bone (a group that names no bone)",
+        "a job's export compared", "a skinned mesh node", "a bound mesh without a triangle (a node without a mesh)",
         "a trim to argv's frames", "the trim's end from the recoil tail", "no trim (two arguments)", "leftover objects purged", "nothing to purge",
         "no mesh with a triangle: the skin written unused", "a primitive with a material", "a primitive without a material", "a mesh of several primitives",
         "joints as bytes (fewer than 256 bones)", "a UV layer", "a mesh without UVs", "a recoil role among the animations", "a channel reduced to its first and last sample", "a channel with every sample", "a channel of one sample", "a STEP channel", "a LINEAR channel", "a bone in an Euler mode", "a bone holding the pose the script left",
@@ -139,12 +139,14 @@ static class ExportDrill
                 int channels3 = 3 * baked.BonesAfterRecoil.Count;
                 var st = GlbRowsCompare.Compare(x, rows, problems, cover, _ => channels3, true, true, theirGlb);
                 nodes += st.Nodes; joints += st.Joints; ibms += st.Ibms; meshes += st.Meshes; prims += st.Prims; vertices += st.Vertices; anims += st.Anims; materials += st.Materials; images += st.Images; channels += st.Channels;
+                // the neutral bone (a group that names no bone) is no longer reached: since 2026-11-09 every group names a bone. The
+                // exporter's rule stays ported; a job that still needs the neutral bone is a problem, not a cover
+                if (x.NeutralBone) problems.Add("the export needed the neutral bone: a vertex group names no bone");
                 if (problems.Count == 0) { glbs++; glbBytes += st.GlbBytes; }
                 if (problems.Count > 0) { fails++; Console.WriteLine($"FAIL {key}: " + string.Join("; ", problems.Take(5))); continue; }
                 cover["a job's export compared"]++;
                 if (x.Nodes.Any(n => n.Skin >= 0)) cover["a skinned mesh node"]++;
                 if (x.Nodes.Any(n => n.Object != null && n.Object.Type == "MESH" && n.Mesh < 0)) cover["a bound mesh without a triangle (a node without a mesh)"]++;
-                if (x.NeutralBone) cover["the neutral bone (a group that names no bone)"]++;
                 if (x.Trimmed) cover[baked.Recoil != null ? "the trim's end from the recoil tail" : "a trim to argv's frames"]++; else cover["no trim (two arguments)"]++;
                 cover[x.Purged.Count > 0 ? "leftover objects purged" : "nothing to purge"]++;
                 if (x.UnusedSkin) cover["no mesh with a triangle: the skin written unused"]++;

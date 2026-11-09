@@ -168,8 +168,8 @@ public static class BlenderDeploy
     }
 
     /// <summary>A mesh the bind bound: its object (now under the armature, at the identity), its one vertex group - named
-    /// after the PART found (anim_ancestor returns the object's name, not its bone's: a pair-merged part names a group no
-    /// bone has), cut to the 63 bytes a group name holds, or StaticRoot -, its datablock's name (a copy's, numbered as Blender numbers a copy, when the datablock was shared with
+    /// after the BONE of the part found (bone_of: a pair-merged part's is its neighbour's; until 2026-11-09 the part's own
+    /// name, which for a merged part named no bone), cut to the 63 bytes a group name holds, or StaticRoot -, its datablock's name (a copy's, numbered as Blender numbers a copy, when the datablock was shared with
     /// another live object), the matrix folded into its vertices, and the vertices after it (Blender's frame, the
     /// importer's order, math::transform_point per vertex); the custom normals as the importer encoded them (INT16_2D per
     /// corner, relative to the face normals), which mesh_transform leaves alone - null without file normals.</summary>
@@ -1147,7 +1147,11 @@ public static class BlenderDeploy
         }
         void BindStep()
         {
-            var partNames = new HashSet<string>(r.BoneOf.Select(x => x.part), StringComparer.Ordinal);   // bone_of's keys: the parts, the merged ones too
+            // bone_of: each part's bone, the merged parts' (their neighbour's) too. The group is named after the BONE (2026-11-09):
+            // named after the part found, a pair-merged part's group named no bone and its vertices rode the exporter's static
+            // neutral bone (the T-62's 15 stuck track links)
+            var boneOfPart = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var (part, bone) in r.BoneOf) if (!boneOfPart.ContainsKey(part)) boneOfPart[part] = bone;
             string staticRoot = r.Bones.First(b => b.Part == null).Name;
             Set(fmin);   // scene.frame_set(fmin): the bind at the rest frame
             var meshObjs = all.Where(o => o.Type == "MESH").ToList();
@@ -1160,7 +1164,7 @@ public static class BlenderDeploy
             {
                 if (mo.MeshNode < 0) throw new NotPortedException($"a bone shape left in the scene at the bind ('{mo.Name}': its icosphere's vertices are Blender's)");
                 string bname = null;
-                for (var o = mo; o != null && bname == null; o = o.Parent) if (partNames.Contains(o.Name)) bname = o.Name;
+                for (var o = mo; o != null && bname == null; o = o.Parent) if (boneOfPart.TryGetValue(o.Name, out var pb)) bname = pb;
                 if (bname == null) { bname = staticRoot; r.BindLog.Add($"DEPLOY static mesh '{mo.Name}' -> StaticRoot (no animated ancestor)"); }
                 string group = BlenderNames.TruncateUtf8(bname, 63);   // bDeformGroup.name: copy_utf8_truncated
                 var mw = (float[])mo.World.Clone();

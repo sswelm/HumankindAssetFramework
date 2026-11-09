@@ -24,7 +24,7 @@ static class DecisionsDrill
         "a bone under its part's parent's bone", "a part whose parent is no part (a root bone)",
         "a mesh bound to its own bone (6)", "a mesh bound to an ancestor's bone", "a static mesh bound to StaticRoot", "a shared mesh datablock copied at the bind",
         "a bound mesh with custom normals", "a bound mesh without normals", "no mesh to bind",
-        "a vertex group named after a pair-merged part (no bone of that name)",
+        "a pair-merged part's mesh bound to its neighbour's bone (6)",
         "an animated empty removed (7)", "an imported armature that is a part removed (7)", "a mesh that was a part: its animation cleared (7b)",
         "the role clips keyed (7c)", "a recoil role from the fire window (7c)", "a recoil role held (the step off)", "the wheels spun in the folded role", "a wheel bone not found (logged)",
         "a wheel axle by AUTO", "a wheel axle forced", "a role clip epilogue (a second fire segment)", "the role clips left to Blender (RoleFallback)",
@@ -62,7 +62,7 @@ static class DecisionsDrill
             string key = block[0].Split('\t')[1];
             files++;
             var problems = new List<string>(); string bakeLeftReason = null; bool bakeClamped = false, rebakedArmature = false, fireSnap = false, retargeted = false, betweenKeys = false, recoiled = false, recoilExit = false;
-            bool boundOwn = false, boundAncestor = false, boundStatic = false, copiedData = false, boundNormals = false, boundPlain = false, noMesh = false, groupNoBone = false;
+            bool boundOwn = false, boundAncestor = false, boundStatic = false, copiedData = false, boundNormals = false, boundPlain = false, noMesh = false, mergedRider = false;
             bool emptyRemoved = false, armRemoved = false, meshCleared = false, rolesKeyed = false, recoilRole = false, recoilHeld = false, wheels = false, wheelMissing = false, axleAuto = false, axleForced = false, epilogue = false, roleLeft = false;
             try
             {
@@ -462,10 +462,16 @@ static class DecisionsDrill
                         CompareObjectRows(problems, Of("O7"), baked.AfterBind, "after the bind");
                         boundMeshes += baked.Bound.Count; vertices += baked.Bound.Sum(b => (long)b.Positions.Length / 3);
                         string staticRoot = baked.Bones.First(b => b.Part == null).Name;
+                        // a group names a bone, always (2026-11-09): until then a pair-merged part's group named the part, no bone of that
+                        // name, and its vertices rode the exporter's neutral bone. A merged part's mesh now shares its neighbour's bone:
+                        // a kept neighbour's bone carries two meshes
+                        var keptBones = new HashSet<string>(baked.Alias.Select(a => baked.BoneOf.First(x => x.part == a.kept.Name).bone), StringComparer.Ordinal);
+                        var meshesOnBone = baked.Bound.GroupBy(b => b.Group, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+                        if (keptBones.Any(kb => meshesOnBone.TryGetValue(kb, out int on) && on >= 2)) mergedRider = true;
                         foreach (var b in baked.Bound)
                         {
                             if (b.Group == staticRoot) boundStatic = true; else if (b.Group == b.Mesh.Name) boundOwn = true; else boundAncestor = true;
-                            if (b.Group != staticRoot && !baked.BonesAfterRecoil.Any(x => x.Name == b.Group)) groupNoBone = true;
+                            if (b.Group != staticRoot && !baked.BonesAfterRecoil.Any(x => x.Name == b.Group)) problems.Add($"the vertex group of '{b.Mesh.Name}' names no bone ('{b.Group}')");
                             if (b.Copied) copiedData = true;
                             if (b.CustomNormal != null) boundNormals = true; else boundPlain = true;
                         }
@@ -719,7 +725,7 @@ static class DecisionsDrill
                 if (boundNormals) cover["a bound mesh with custom normals"]++;
                 if (boundPlain) cover["a bound mesh without normals"]++;
                 if (noMesh) cover["no mesh to bind"]++;
-                if (groupNoBone) cover["a vertex group named after a pair-merged part (no bone of that name)"]++;
+                if (mergedRider) cover["a pair-merged part's mesh bound to its neighbour's bone (6)"]++;
                 if (emptyRemoved) cover["an animated empty removed (7)"]++;
                 if (armRemoved) cover["an imported armature that is a part removed (7)"]++;
                 if (meshCleared) cover["a mesh that was a part: its animation cleared (7b)"]++;
