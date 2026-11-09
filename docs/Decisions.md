@@ -233,7 +233,9 @@ trace to the shape.
 
 ## >127-bone rigs: pair-merge on the deploy path, not zero-weight slimming (2026-08)
 The GPU skinning wall is a per-vertex **bone-index** limit of **128** (indices break past 127) — *not* 256. A rig with
-verts weighted to bones past index 127 breaks. `deploy_convert` pair-merges instanced link chains to ≤126; `rig_anim`'s
+verts weighted to bones past index 127 breaks. `deploy_convert` pair-merges instanced link chains to ≤126 (since
+2026-11-09 co-movers ride first: an instanced part rides a part it moves with, lossless, and the neighbour merge
+takes only what is still over); `rig_anim`'s
 zero-weight-leaf slim does **not** rescue a rig with >127 *weighted* bones (the mech's collapsed "wings"). **Why:**
 removing unweighted leaves only helps when they sit in front of weighted bones — only merging reduces the weighted
 count. Since 2026-10-31 all three scripts and the C# ports share the 126 budget (`rig_anim` slimmed to 240 until then,
