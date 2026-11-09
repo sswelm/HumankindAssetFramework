@@ -10,6 +10,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **PR #276 review (2026-11-09).** The deploy timing wrapper now returns the runtime's actual exit status after
+  printing its logs and wall time, refuses missing oracles and failed warm-ups, and allocates separate artifacts
+  for every invocation instead of deleting shared output directories. It honors `HAF_UNITY_PROJECT` consistently
+  with the deploy drill (`HAF_PROJECT` remains a fallback). Eight shell integration cases run in CI and the push gate.
 - **Bake timing lines, and two whales of the T-62's bake (2026-11-09).** The animated bake path prints one Console line per
   stage, `[Factory] <name> timing: ...` (the static path has had its since 2026-09-13), and the in-process deploy conversion
   its own `deploy timing:` phases; the in-process drill prints them as `TIMING` rows. Measured on the T-62 under Unity's Mono:

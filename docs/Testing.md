@@ -1575,6 +1575,12 @@ Unity's Mono; the port's phase laps come out as `TIMING` rows of the in-process 
 timing:` Console lines in a bake, and from `bash tools/deploy_time.sh <model> [oracle.glb]` - one recorded conversion
 under Unity's Mono with the drill's own compile, the wall time and the laps (the tool to run BEFORE guessing where a
 conversion's time goes).
+PR #276 review added `Tests/test_deploy_time.py` to CI and the push gate: the real wrapper is exercised with fake
+compiler/runtime processes, without Unity or Blender. Runtime failures and byte mismatches must return nonzero;
+a missing oracle must fail before conversion; only the expected empty-oracle mismatch may supply the timing warm-up.
+Each run retains separate compiler, job, oracle and output artifacts under the printed `ARTIFACTS` directory, so
+reruns and concurrent invocations preserve existing files. `HAF_UNITY_PROJECT` overrides the project, with the old
+`HAF_PROJECT` spelling retained as a fallback; `HAF_BUILD` selects the parent of the isolated artifact directory.
 
 **Replacing `deploy_convert.py`, parts 7, 7b, 7c: the purge and the role clips** (2026-10-11). Step 7 removes the
 animated empties (a removed part's children are roots with the transform they held; the meshes are under the
