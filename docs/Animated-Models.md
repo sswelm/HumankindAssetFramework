@@ -237,6 +237,8 @@ in the engine as-is, which is where the "not possible" consensus came from).
   so the engine's sorting can't scramble them, and exports unit-clean (usually with "Fix 100×" OFF).
 - **If the result is mis-oriented:** add a Rotation and probe one axis at a time — and judge **in-game**, not in the
   preview (the preview's orientation is meaningless for animated models).
+- **Connected bone chains place exactly** (fixed 2026-11-03). A rig whose bones share joints, like a mech's legs, no
+  longer stretches when placed; the light assault mech's legs stand on the ground again.
 
 ## State-driven characters (idle / run / after-move / combat / attack)
 
@@ -326,11 +328,10 @@ motion can be expressed (or re-expressed) as bone rotations.
 
 ## Current limits, honestly
 
-- **Translation *motion* can't play** (engine rule). Sliding parts need the far-pivot rotation trick. With **Keep
-  translations** on the legacy path, an attack or move clip keeps its slides whether it is a whole action or a slice
-  of one (`Clip[10..40]`) since 2026-11-07; each clip keeps only its own sliding bones, not another clip's.
-- **Placement on connected bone chains is exact** (2026-11-03). A rig whose bones share joints (a mech's legs) no
-  longer stretches when placed; the light assault mech's legs stand on the ground again.
+- **Translation *motion* can't play** (engine rule). Sliding parts need the far-pivot rotation trick.
+- **Keep bone translations with Convert raw rig off** keeps the attack clip's slides and the move clip's slides larger
+  than 0.5 units, whether the clip is a whole action or a slice of one (`Clip[10..40]`, since 2026-11-07). Each clip
+  keeps its own sliding bones, except that a bone whose keys are garbage (NaN or huge) in any clip loses them in all.
 - **Multiple armatures in one file:** only the first is used.
 - **Morph targets / shape keys** aren't supported on the conversion path.
 - Keep models to a sensible triangle budget (the "Reduce to ~tris" field; ~24k default) — the whole roster shares

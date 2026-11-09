@@ -1254,8 +1254,8 @@ every bone** — verify with a text editor on `Assets/Resources/<name>_Skeleton.
 | Model lies down / faces wrong, plays fine otherwise | Orientation (type 2) | Tick "Convert raw rig" + Rotation probe, one axis at a time |
 | A body part (head, hands) floats rigidly detached; Unity preview plays the FBX fine | Type-3 rig: structural location keys, scrambled rest | The conversion path (tick "Convert raw rig") does it all |
 | Parts smear/stretch, "movement looks exaggerated" | Translation keys playing unscaled | Same — conversion path |
-| A sliced attack/move clip lost its slide with Keep translations on | Fixed 2026-11-07: slices keep their slides | Re-bake |
-| Bake stops with "socket '...' would sort BEFORE its parent" | The donor socket's exact name sorts before its parent bone, which the engine refuses | Hang the socket from a parent bone whose name sorts before the donor's socket name |
+| A sliced attack/move clip lost its slide with **Keep bone translations** on and **Convert raw rig** off | Fixed 2026-11-07: slices keep their slides | Re-bake |
+| Bake stops with "socket '...' would sort BEFORE its parent" | A **Donor sockets (bake)** name sorts before the bone its substring matched (ordinal and case-sensitive: uppercase before lowercase). The engine needs parents first, so the script stops | With **Convert raw rig** on, every bone is renamed `A###_...` first, which sorts before the donor names. Without it, point the socket's bone substring at a bone whose name sorts before the donor name; a different bone also changes what the socket follows |
 | Whole model 100× too big | FBX unit scale | Fix-100× toggle (per-model; the conversion path usually makes it unnecessary) |
 | Deep chains (fingers, head) scrambled, shallow parts fine | Bone-name sort order | Automatic (topological rename) on the conversion path |
 | Model collapses flat onto one point, limbs flung; Unity console warns "verts with no weight → bone #0" | Rig has NO skin weights — parts rigidly bone-parented (common downloaded mech/vehicle rigs) | Automatic on the conversion path (bone-parenting → full-weight groups) |

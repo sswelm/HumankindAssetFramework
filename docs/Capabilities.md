@@ -161,21 +161,32 @@ can do; it is not an ordered tutorial. Start with [Getting started](Getting-Star
 
 Blender used to do every model import and every rig. Most of that work now runs inside the Unity editor, in C#, and
 is held to Blender's own output bit for bit by the parity drills ([Testing](Testing.md)). Blender stays installed for
-the cases each tool names in the console, and the tool switches to it on its own.
+the cases each tool names in the console; for those the tool switches to it on its own. A C# Generate that times out
+or cannot write its output stops with an error instead.
 
 - **The Vehicle Lab generates in C# by default** (since 2026-10-27), with C++ kernels for the heavy steps when
-  available. Probe, preview and Generate all read the source in process. A model whose meshes hang from bones - below a
-  joint, or placed on the joint node itself, like a canoe's cloth and rope or a turret mesh on its bone - probes in C#
-  too (2026-11-08). Blender still handles: a skinned or animated `.fbx`, `.blend` and `.obj` sources, a part placement on
-  a model with bone-hung meshes, a first clip with CUBICSPLINE keys, a mesh with a skin but no joint weights, and the
-  moving-tread rig.
+  available. Probe, preview and Generate all read a `.glb`, a `.gltf` or a static `.fbx` in process. A model whose
+  meshes hang from bones - below a joint, like a canoe's cloth and rope, or placed on the joint node itself, like a
+  turret mesh on its bone - probes in C# too (2026-11-08); Generate still hands a mesh placed on the joint node itself
+  to Blender. Each tool names its case in the console; the common ones:
+  - **both**: a skinned or animated `.fbx`, and `.blend` and `.obj` sources (their probe uses Blender without a reason
+    line);
+  - **the probe**: a skinned mesh on an animated model or with a placed part, morph targets, an animated second model,
+    a part placement on a model with bone-hung meshes, a model with bone-hung meshes whose first clip has CUBICSPLINE
+    keys, and a mesh with a skin but no joint weights;
+  - **Generate**: **Use source skeleton (fast path)**, the moving-tread rig (unless **Static tracks (no movement)** is
+    ticked), and a mesh placed on a joint node.
 - **FBX is read natively** (2026-11-02). A static `.fbx` goes through the same in-process path as a `.glb`: the
-  Factory's static bake, its prep, the Vehicle Lab, the clip-range picker and the Model Reader. A skinned or animated
-  `.fbx` keeps Blender's FBX route, because Blender's direct FBX import poses it differently from a converted file.
+  Factory's static bake, its prep, the Vehicle Lab, the clip-range picker and the Model Reader, unless the console
+  names a limit of the reader (a camera, shape keys, ...). A skinned or animated `.fbx` keeps Blender's FBX route in the
+  Vehicle Lab, the rig route and the deploy conversion, because Blender's direct FBX import poses it differently from a
+  converted file.
 - **Animated bakes can run in C#** through the GLB rig route: choose it per model in the Animation Lab (**Rig route (this recipe)**),
   or for every recipe as **Rig route (editor default)**. Blender stays the default until the remaining in-game checks of that route are done. A skinned
   or animated `.fbx` stays on the FBX route either way.
-- **The deploy conversion** (`deploy_convert.py`) runs in process for every recorded conversion whose source exists.
+- **The deploy conversion** (`deploy_convert.py`) runs in process, held to Blender's output byte for byte by a Bake
+  Tests row. A shape the port does not model goes to Blender with a "deploy conversion: using Blender because ..."
+  line; a crash of the port is a warning, and the bake still finishes through Blender.
 
 ## Runtime controls and authoring safety
 
