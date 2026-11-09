@@ -157,6 +157,61 @@ public class BlenderDeployTests
         Assert.Equal(6, r.Parts.Count(p => p.Name.StartsWith("Few")));
     }
 
+    /// <summary>The T-62's stuck track links (2026-11-09): the bind named a mesh's vertex group after the PART found, and a
+    /// pair-merged part has no bone of its own name - its vertices went to the exporter's static neutral bone and never
+    /// moved. The group names the bone the part rides: a merged link's mesh shares its neighbour's bone.</summary>
+    [Fact]
+    public void The_bind_names_a_pair_merged_parts_group_after_the_neighbours_bone_so_every_group_names_a_bone()
+    {
+        var s = new Scene();
+        s.Node("Hull", mesh: true);
+        for (int i = 0; i < 130; i++) s.Move(s.Node(i == 0 ? "Link" : $"Link.{i:000}", mesh: true));
+        s.Decide();   // attaches the scene and the clip
+        var r = BlenderDeploy.Decide(s.M, Default.Split('|'), null, true);
+        Assert.Null(r.Fallback);
+        Assert.Equal(6, r.Alias.Count); Assert.Equal(131, r.Bound.Count);
+        var bones = new HashSet<string>(r.Bones.Select(b => b.Name));
+        Assert.All(r.Bound, b => Assert.Contains(b.Group, bones));
+        foreach (var (dropped, kept) in r.Alias)
+        {
+            var rider = r.Bound.Single(b => b.Mesh.Name == dropped.Name);
+            var neighbour = r.Bound.Single(b => b.Mesh.Name == kept.Name);
+            Assert.Equal(kept.Name, rider.Group);           // the bone is named after the kept part
+            Assert.Equal(neighbour.Group, rider.Group);     // both meshes on one bone: a two-link segment crawls as one
+        }
+        Assert.Equal("Link", r.Bound.Single(b => b.Mesh.Name == "Link.001").Group);
+        Assert.Equal("StaticRoot", r.Bound.Single(b => b.Mesh.Name == "Hull").Group);
+    }
+
+    [Theory]
+    [InlineData(false, "AConnector", "BPanel")]
+    [InlineData(false, "BConnector", "APanel")]
+    [InlineData(true, "AConnector", "BPanel")]
+    [InlineData(true, "BConnector", "APanel")]
+    public void Binding_an_intermediate_mesh_does_not_erase_its_descendants_animated_ancestor(bool merged, string connectorName, string panelName)
+    {
+        var s = new Scene();
+        int driver = -1;
+        if (merged)
+        {
+            for (int i = 0; i < 130; i++)
+            {
+                int node = s.Node(i == 0 ? "Link" : $"Link.{i:000}", mesh: true); s.Move(node);
+                if (i == 1) driver = node;   // Link.001 is pair-merged onto Link's bone
+            }
+        }
+        else { driver = s.Node("Driver"); s.Move(driver); }
+        int connector = s.Node(connectorName, driver, mesh: true);
+        s.Node(panelName, connector, mesh: true, t: new double[] { 0, 1, 0 });
+        s.Decide();
+        var r = BlenderDeploy.Decide(s.M, Default.Split('|'), null, true);
+        Assert.Null(r.Fallback);
+        if (merged) Assert.Contains(r.Alias, a => a.dropped.Name == "Link.001");
+        string driverBone = r.BoneOf.Single(b => b.part == s.M.Nodes[driver].Name).bone;
+        Assert.Equal(driverBone, r.Bound.Single(b => b.Mesh.Name == connectorName).Group);
+        Assert.Equal(driverBone, r.Bound.Single(b => b.Mesh.Name == panelName).Group);
+    }
+
     [Fact]
     public void The_armature_has_a_bone_per_part_at_the_parts_place_and_StaticRoot_for_what_no_bone_carries()
     {

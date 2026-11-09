@@ -719,6 +719,11 @@ if len(argv) > 8 and argv[8].strip():
           (mag, R, dist, deploy_end, recoil_out_end, tube_root))
 
 # --- 6. bind each mesh 100% to the bone of its nearest animated ancestor (rigid) ---
+# THE BONE'S NAME, NOT THE PART'S (2026-11-09, the T-62's stuck track links): this returned the part's name, and the
+# vertex group was named after it. A bone is named after its part, so that held - except for a pair-merged part (3b),
+# whose bone is its neighbour's: its group named a bone that does not exist, the glTF exporter put every vertex on the
+# static `neutral_bone` it adds for such a mesh, and the 15 merged links of the T-62 never moved. bone_of resolves a
+# merged part to the bone it rides (and a part whose bone Blender renamed to its real bone name).
 def anim_ancestor(o):
     while o:
         try:
@@ -726,7 +731,7 @@ def anim_ancestor(o):
         except ReferenceError:
             return None   # chain runs into a CULLED (deleted) object — treat as no animated ancestor
         if nm in bone_of:
-            return nm
+            return bone_of[nm]
         try:
             o = o.parent
         except ReferenceError:
@@ -742,9 +747,12 @@ for m in meshes:
     except ReferenceError:
         pass   # deleted by the degenerate-part cull
 meshes = _live_meshes
+# Binding reparents each mesh. Capture targets before that mutates any ancestor chain: otherwise a static mesh bound
+# before its child hides the animated ancestor, and the child incorrectly rides StaticRoot (object-name order mattered).
+_bind_bones = {m: anim_ancestor(m) for m in meshes}
 bound = 0
 for m in meshes:
-    bname = anim_ancestor(m)
+    bname = _bind_bones[m]
     if not bname:
         bname = static_root
         print("DEPLOY static mesh '%s' -> StaticRoot (no animated ancestor)" % m.name)

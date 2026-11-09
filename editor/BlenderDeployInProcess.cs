@@ -13,7 +13,7 @@ public static class BlenderDeployInProcess
 {
     /// <summary>Bump when the in-process conversion's written file changes: the Factory's cache key carries it, so a
     /// cached deploy_converted.glb made by an older port is converted again.</summary>
-    public const string CacheRevision = "2026-11-03.fbx-rig-leave.1." + HafModelLoader.CacheRevision;   // a skinned or animated .fbx converts in Blender by name: an earlier C# conversion of one is made again there
+    public const string CacheRevision = "2026-11-09.merged-bind.2." + HafModelLoader.CacheRevision;   // resolve all mesh targets before detaching: nested descendants keep their animated or pair-merged ancestor's bone
 
     /// <summary>The longest animation converted here (frames from the bake's first to its last): the bake, the fire
     /// window, the role clips and the export each walk every frame for every bone on the editor thread, where only the

@@ -53,6 +53,7 @@ If the model is otherwise correct, do not change skeleton or scale fields to fix
 |---|---|
 | Model is rigid, rests in the wrong pose, pauses each loop, wobbles, or parts fly apart | [Animation Pitfalls → Symptom index](Animation-Pitfalls.md#symptom-index). |
 | Converted rigid-part vehicle has crossed legs, wrong pivots, or no authored wheel/turret motion | [Factory Manual → conversion troubleshooting map](Factory-Manual.md#165-troubleshooting-map-symptoms--cause). |
+| A few track links of a big deploy-converted vehicle stand still while the rest crawl past them (a rig over the bone wall, baked before 2026-11-09) | Fixed 2026-11-09: re-bake the entry; the deploy conversion runs again (about two minutes for the T-62). Background: [Animated Models → bone budget](Animated-Models.md). |
 | Borrowed donor clip plays at the wrong height/axis, freezes, or moves the wrong bones | [Donor Clip Flight → Failure catalog](Donor-Clip-Flight.md#failure-catalog-what-each-symptom-means). |
 | The first pawn uses the donor/wrong skeleton or animation works only after a reload | [Animated Runtime → wrong-skeleton net](Animated-Runtime.md#8-the-wrong-skeleton-net-and-why-it-must-be-armed-before-the-first-pawn). |
 

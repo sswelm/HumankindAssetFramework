@@ -185,10 +185,12 @@ against `pose_bone.keyframe_insert` key by key; **5d the recoil tail** (the kick
 RecoilArm put in through edit mode - every bone rebuilt an ulp off -, the arc keyed) - done 2026-10-10, 192 jobs to
 the bit; **6 the binding** (each mesh detached, its world matrix at the bind frame folded into its vertices - skipped
 within 1e-6 of the identity, as Blender skips it -, a shared datablock copied and numbered, one vertex group named after
-the PART found, an Armature modifier, the mesh under the armature) - done 2026-10-10, 204 jobs; the script's own bug
-measured on the way: a pair-merged link's vertex group names a bone that does not exist (`anim_ancestor` returns the
-part's name, not `bone_of[name]`), so the merged links of a budgeted rig never deform - kept as Blender has it, to be
-fixed in the script AND the port together, with the goldens; LEFT from the bind on: a surviving bone shape (the dugout
+the BONE of the part found, an Armature modifier, the mesh under the armature) - done 2026-10-10, 204 jobs; the script's
+own bug measured on the way: a pair-merged link's vertex group named a bone that does not exist (`anim_ancestor` returned
+the part's name, not `bone_of[name]`), so the merged links of a budgeted rig never deformed - the T-62's 15 stuck track
+links, seen in the game 2026-11-09; FIXED that day in the script and the port together (the group names `bone_of[part]`;
+the deploy cache stamp bumped so every `deploy_converted.glb` is made again; the bone goldens hold, the bind changes no
+bone); LEFT from the bind on: a surviving bone shape (the dugout
 canoe's strip list is "camera": its icosphere's vertices are Blender's primitive - port `primitive_ico_sphere_add`, or
 have the Factory strip "icosphere" always, which changes the output); **7, 7b, 7c the purge and the role clips** (the
 animated empties removed, every other animation cleared, the actions purged to "deploy"; the baked deploy sampled into

@@ -1519,15 +1519,23 @@ may.
 
 **Replacing `deploy_convert.py`, part 6: the bind** (2026-10-10). The script's step 6 sets the bind frame, then for
 every mesh (`bpy.data.objects` order, the culled gone) finds its nearest animated ancestor - itself included - in
-`bone_of`'s keys, detaches it (`parent = None`: the parent inverse is the identity again, a bone parenting dropped),
+`bone_of`'s keys before any mesh is detached. Resolving targets inside the bind loop used to make object-name order
+decide whether a nested mesh moved: detaching an unanimated intermediate mesh erased its child's path to the animated
+ancestor, so that child bound to StaticRoot. Targets are now captured against the original hierarchy in the script and
+the port. Four unit cases cover both name orderings under ordinary and pair-merged ancestors; the live `bind_nested`
+and `bind_nested_reverse` fixtures hold both orderings to Blender. Each mesh is then detached (`parent = None`: the
+parent inverse is the identity again, a bone parenting dropped),
 folds its world matrix into its vertices (`mesh.transform`), gives it ONE vertex group over every vertex at weight 1,
 an Armature modifier, and puts it under the armature at the identity (`BKE_object_apply_mat4` through the armature's
 inverse). `BlenderDeploy`: `Result.Bound` (per mesh: its group, its datablock, the matrix folded in, the vertices after
 it, the custom normals), `BindLog`, `MeshData` (every datablock with its users), `AfterBind`, `ArmPoseAfterRecoil`;
 `BlenderDeploy.ImportedMesh` (the importer's vertices and custom normals of an unskinned mesh, BlenderReduce's
-reading). Measured, not read: `anim_ancestor` returns the PART'S NAME, so the group is named after the part, not its
-bone - a pair-merged link's group names NO bone (the script's own bug: the wall and T-62 riders never deform; kept, in
-the backlog); a group name holds 63 bytes (`bind_longname`: an ASCII and a two-byte name cut); a shared datablock is
+reading). Measured, not read: until 2026-11-09 `anim_ancestor` returned the PART'S NAME, so the group was named after
+the part, not its bone - a pair-merged link's group named NO bone, its vertices rode the exporter's static neutral bone,
+and the wall fixtures' and the T-62's riders never deformed (the script's own bug, fixed in the script and the port
+together: the group names `bone_of[part]`, a merged link's mesh shares its neighbour's bone - the cover row *a
+pair-merged part's mesh bound to its neighbour's bone*; a group that names no bone is a FAIL of the job since); a group
+name holds 63 bytes (`bind_longname`: an ASCII and a two-byte name cut); a shared datablock is
 copied and the copy numbered by `namemap_get_name` (Plate -> Plate.001 and .002, the last sharer keeps the original;
 from Plate.001 the copies count on; a stripped sharer let go of its user); `mesh.transform` is `math::transform_points`
 ((x c0 + y c1) + z c2) + loc in float32, no FMA) and it SKIPS a matrix within 1e-6 of the identity on every entry
@@ -1633,8 +1641,9 @@ weight 1; `BlenderReduce.Reduce` at ratio 1 with `mergeUvs: false` - the script 
 (children, then mesh, then skin), so the first mesh node's skin reaches the joints - each bone after its bone children,
 the neutral bone last - before that node; the skin's joints are pre-order (the `BoneOrder` of part 7); the armature is
 last; a mesh node has no transform of its own; a bound mesh without a triangle (a line) is a node without a mesh and
-without a skin; a vertex group that names a pair-merged PART (no bone of that name) puts every vertex on the
-`neutral_bone` the exporter adds once (13 jobs); with no mesh with a triangle the skin is still written, unused; the
+without a skin; a vertex group that names no bone puts every vertex on the `neutral_bone` the exporter adds once (the
+rule stays ported; until 2026-11-09 a pair-merged PART's group did, 13 jobs - since the fix every group names a bone,
+and a job that still needs the neutral bone FAILS); with no mesh with a triangle the skin is still written, unused; the
 materials are numbered at first use along the walk (BlenderNames.MaterialOf); every glTF scene but the default one is
 a Blender scene of its own (`scene.name or "Scene %d"`, numbered where taken) and is written empty after the purge
 (`r2_scenes_nodefault`); an action without a curve is no animation (`wheels_negative`'s folded role); the trim's two

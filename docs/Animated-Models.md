@@ -180,7 +180,9 @@ rollers get **belt-continuity speed** (rim surface = the belt's advance), each s
 symmetry (angular autocorrelation of rim verts). Only *Spin degrees* and *Tread speed* are exposed.
 Bone budget: quarter-link cells push the Jagdpanzer well past the wall (~108 bones/track, both tracks ≈ 216) —
 link mode deletes the unused legacy tread bones and the deploy path **pair-merges** instanced link chains (a
-dropped link rides its numeric neighbor's bone rigidly) down to **≤126** to fit. The wall is Amplitude's GPU
+dropped link rides its numeric neighbor's bone rigidly; until 2026-11-09 its vertex group named a bone that did not
+exist and the merged links stood still - the T-62's 15 - so a deploy-converted vehicle baked before that day wants a
+re-bake) down to **≤126** to fit. The wall is Amplitude's GPU
 crowd-skinning vertex format: per-vertex bone **indices break past 127 — NOT 256** (proven on the 222-bone mech;
 see *The 128-bone-index GPU wall* in Animation-Pitfalls), engine-side and not stretchable, so a further cell
 halving is off the table.
