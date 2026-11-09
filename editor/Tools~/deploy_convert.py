@@ -747,9 +747,12 @@ for m in meshes:
     except ReferenceError:
         pass   # deleted by the degenerate-part cull
 meshes = _live_meshes
+# Binding reparents each mesh. Capture targets before that mutates any ancestor chain: otherwise a static mesh bound
+# before its child hides the animated ancestor, and the child incorrectly rides StaticRoot (object-name order mattered).
+_bind_bones = {m: anim_ancestor(m) for m in meshes}
 bound = 0
 for m in meshes:
-    bname = anim_ancestor(m)
+    bname = _bind_bones[m]
     if not bname:
         bname = static_root
         print("DEPLOY static mesh '%s' -> StaticRoot (no animated ancestor)" % m.name)

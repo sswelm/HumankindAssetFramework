@@ -2749,6 +2749,12 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Units & animation
 
+- **PR #272 review (2026-11-09).** Resolve every mesh's bind target before detaching any mesh. Both the script and the
+  port could bind an unanimated child to StaticRoot after its intermediate mesh was reparented, even though the child
+  originally had an animated ancestor; renaming the meshes changed the result. A direct Blender reproduction changed
+  from Driver/StaticRoot to Driver/Driver. Four unit cases cover both object-name orders under ordinary and pair-merged
+  ancestors, and the live nested fixtures cover both orders. The deploy cache revision is bumped again so affected
+  cached conversions are rebuilt (`docs/Testing.md`).
 - **A PAIR-MERGED TRACK LINK MOVES WITH ITS NEIGHBOUR (2026-11-09, the T-62's stuck links).** The deploy conversion keeps a
   big rig under the 128-index wall by merging instanced parts onto their numeric neighbour's bone (15 of the T-62's 120
   track pieces). The bind then named each mesh's vertex group after the PART found, and a merged part has no bone of its

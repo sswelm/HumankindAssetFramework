@@ -1519,7 +1519,12 @@ may.
 
 **Replacing `deploy_convert.py`, part 6: the bind** (2026-10-10). The script's step 6 sets the bind frame, then for
 every mesh (`bpy.data.objects` order, the culled gone) finds its nearest animated ancestor - itself included - in
-`bone_of`'s keys, detaches it (`parent = None`: the parent inverse is the identity again, a bone parenting dropped),
+`bone_of`'s keys before any mesh is detached. Resolving targets inside the bind loop used to make object-name order
+decide whether a nested mesh moved: detaching an unanimated intermediate mesh erased its child's path to the animated
+ancestor, so that child bound to StaticRoot. Targets are now captured against the original hierarchy in the script and
+the port. Four unit cases cover both name orderings under ordinary and pair-merged ancestors; the live `bind_nested`
+and `bind_nested_reverse` fixtures hold both orderings to Blender. Each mesh is then detached (`parent = None`: the
+parent inverse is the identity again, a bone parenting dropped),
 folds its world matrix into its vertices (`mesh.transform`), gives it ONE vertex group over every vertex at weight 1,
 an Armature modifier, and puts it under the armature at the identity (`BKE_object_apply_mat4` through the armature's
 inverse). `BlenderDeploy`: `Result.Bound` (per mesh: its group, its datablock, the matrix folded in, the vertices after

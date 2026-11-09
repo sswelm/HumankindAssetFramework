@@ -183,6 +183,35 @@ public class BlenderDeployTests
         Assert.Equal("StaticRoot", r.Bound.Single(b => b.Mesh.Name == "Hull").Group);
     }
 
+    [Theory]
+    [InlineData(false, "AConnector", "BPanel")]
+    [InlineData(false, "BConnector", "APanel")]
+    [InlineData(true, "AConnector", "BPanel")]
+    [InlineData(true, "BConnector", "APanel")]
+    public void Binding_an_intermediate_mesh_does_not_erase_its_descendants_animated_ancestor(bool merged, string connectorName, string panelName)
+    {
+        var s = new Scene();
+        int driver = -1;
+        if (merged)
+        {
+            for (int i = 0; i < 130; i++)
+            {
+                int node = s.Node(i == 0 ? "Link" : $"Link.{i:000}", mesh: true); s.Move(node);
+                if (i == 1) driver = node;   // Link.001 is pair-merged onto Link's bone
+            }
+        }
+        else { driver = s.Node("Driver"); s.Move(driver); }
+        int connector = s.Node(connectorName, driver, mesh: true);
+        s.Node(panelName, connector, mesh: true, t: new double[] { 0, 1, 0 });
+        s.Decide();
+        var r = BlenderDeploy.Decide(s.M, Default.Split('|'), null, true);
+        Assert.Null(r.Fallback);
+        if (merged) Assert.Contains(r.Alias, a => a.dropped.Name == "Link.001");
+        string driverBone = r.BoneOf.Single(b => b.part == s.M.Nodes[driver].Name).bone;
+        Assert.Equal(driverBone, r.Bound.Single(b => b.Mesh.Name == connectorName).Group);
+        Assert.Equal(driverBone, r.Bound.Single(b => b.Mesh.Name == panelName).Group);
+    }
+
     [Fact]
     public void The_armature_has_a_bone_per_part_at_the_parts_place_and_StaticRoot_for_what_no_bone_carries()
     {

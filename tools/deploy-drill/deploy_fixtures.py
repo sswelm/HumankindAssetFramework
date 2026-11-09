@@ -806,7 +806,7 @@ def main(out):
     # uneven, mirrored matrix; no mesh at all
     # ... and the export's shapes (8a): a two-material mesh part with a line mesh below it; a primitive of 8 corners, whose
     # export is Blender's by name (the importer's n-gon of the leftover corners)
-    for kind in ("shared", "suffix", "strip", "nested", "normals", "normals_clamp", "normals_clamp_negative", "normals_large", "empty", "longname", "anchor", "near", "export"):
+    for kind in ("shared", "suffix", "strip", "nested", "nested_reverse", "normals", "normals_clamp", "normals_clamp_negative", "normals_large", "empty", "longname", "anchor", "near", "export"):
         print("bind_%s|%s|%s" % (kind, bind(out, "deploy_bind_" + kind, kind), DEFAULT))
     print("EXPORTLEFT:bind_ngon|%s|%s" % (bind(out, "deploy_bind_ngon", "ngon"), DEFAULT))
     # the role clips (7c): the wheel spin - the axle from the verts (AUTO: the thin extent), forced to Y and Z, a bone found
@@ -871,12 +871,13 @@ def bind(out, name, kind):
         s.anim(len(s.nodes) - 1, "translation", [0.0, 1.0], [(1.0, 0.0, 0.0), (1.0, 0.5, 0.0)])
         s.node("PlateB" if kind != "strip" else "PlateSoldier", hull, mesh=plate, translation=[-2.0, 0.0, 0.0], scale=[2.0, 2.0, 2.0])   # static, under the hull
         s.node("PlateC", turret, mesh=plate, translation=[0.0, 1.0, 0.0], rotation=[0.0, 0.0, 0.3826834, 0.9238795])   # under the turret
-    elif kind == "nested":
+    elif kind in ("nested", "nested_reverse"):
         gun = s.node("Gun", turret, mesh=s.mesh("gun", 2.0), translation=[1.0, 0.5, 0.0])
         s.anim(gun, "translation", [0.0, 1.0], [(1.0, 0.5, 0.0), (2.5, 0.5, 0.0)])
         s.node("GunSight", gun, mesh=s.mesh("sight", 0.5), translation=[0.0, 0.5, 0.0], scale=[0.5, 0.5, 0.5])       # a mesh under a mesh part: the part's bone
-        box = s.node("Box", turret, mesh=s.mesh("box", 1.0), translation=[-1.0, 0.0, 0.0])                            # a static mesh under the part
-        s.node("Lid", box, mesh=s.mesh("lid", 0.8), translation=[0.0, 1.0, 0.0], rotation=[0.3826834, 0.0, 0.0, 0.9238795])   # ... and a mesh under that: the turret's bone through two
+        # Both object-name orders: binding Box before Lid used to erase Lid's path to Turret and bind it to StaticRoot.
+        box = s.node("ZBox" if kind == "nested_reverse" else "Box", turret, mesh=s.mesh("box", 1.0), translation=[-1.0, 0.0, 0.0])
+        s.node("ALid" if kind == "nested_reverse" else "Lid", box, mesh=s.mesh("lid", 0.8), translation=[0.0, 1.0, 0.0], rotation=[0.3826834, 0.0, 0.0, 0.9238795])
     elif kind.startswith("normals"):
         gun = s.node("Gun", turret, mesh=s.mesh("gun", 2.0, normals=True), translation=[1.0, 0.5, 0.0])
         s.anim(gun, "translation", [0.0, 1.0], [(1.0, 0.5, 0.0), (2.5, 0.5, 0.0)])

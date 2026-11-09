@@ -1155,6 +1155,15 @@ public static class BlenderDeploy
             string staticRoot = r.Bones.First(b => b.Part == null).Name;
             Set(fmin);   // scene.frame_set(fmin): the bind at the rest frame
             var meshObjs = all.Where(o => o.Type == "MESH").ToList();
+            // Binding a mesh reparents it. Resolve every target against the original hierarchy first, or an unanimated
+            // intermediate mesh bound before its child hides the child's animated ancestor (and the child goes static).
+            var meshBones = new Dictionary<Obj, string>();
+            foreach (var mo in meshObjs)
+            {
+                string target = null;
+                for (var o = mo; o != null && target == null; o = o.Parent) if (boneOfPart.TryGetValue(o.Name, out var pb)) target = pb;
+                meshBones[mo] = target;
+            }
             // a datablock's users: the live objects that carry it (a stripped or culled object let go of its)
             var users = new Dictionary<string, int>(StringComparer.Ordinal);
             foreach (var mo in meshObjs) users[mo.DataName] = (users.TryGetValue(mo.DataName, out int n) ? n : 0) + 1;
@@ -1163,8 +1172,7 @@ public static class BlenderDeploy
             foreach (var mo in meshObjs)
             {
                 if (mo.MeshNode < 0) throw new NotPortedException($"a bone shape left in the scene at the bind ('{mo.Name}': its icosphere's vertices are Blender's)");
-                string bname = null;
-                for (var o = mo; o != null && bname == null; o = o.Parent) if (boneOfPart.TryGetValue(o.Name, out var pb)) bname = pb;
+                string bname = meshBones[mo];
                 if (bname == null) { bname = staticRoot; r.BindLog.Add($"DEPLOY static mesh '{mo.Name}' -> StaticRoot (no animated ancestor)"); }
                 string group = BlenderNames.TruncateUtf8(bname, 63);   // bDeformGroup.name: copy_utf8_truncated
                 var mw = (float[])mo.World.Clone();
