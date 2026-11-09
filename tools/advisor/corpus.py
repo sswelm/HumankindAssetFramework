@@ -22,14 +22,19 @@ vertices a part's primitives reference (a blocked mesh, which has no triangles t
 POSITION accessor's count, as the Workshop's MeasureNode does), which is the Lab's probe count: the five recipes on _split files (Khelandion,
 Bremen, Teutonic, Triconter, Sikorsky; 675 parts) agree with it to the vertex, while the Fuser's report sums whole
 accessors and reads higher for split children. The escape-ray visibility and
-the inside-out verdict are NOT recomputed; they are taken from the recipe where one covers the file.
+the inside-out verdict are NOT recomputed here: the C# probe itself computes them for every file (tools/advisor/probe_vis.sh
+writes its table; --probe joins it by node index, `vis_from` = probe), and where that table does not cover a file they
+are taken from the recipe when one covers it (`vis_from` = recipe), else empty. A probe row whose file changed since
+the probe ran (size or write time) is stale: reported, not used.
 
-    python tools/advisor/corpus.py [--models D:/3DModels] [--recipes <dir>] [--out tools/advisor/out] [--no-cache]
+    python tools/advisor/corpus.py --list [--models D:/3DModels] [--recipes <dir>]       the GLBs the corpus reads, one per line
+    tools/advisor/probe_vis.sh <that list> <probe.tsv>                                   the probe's verdicts for them
+    python tools/advisor/corpus.py [--probe <probe.tsv>] [--models ...] [--recipes <dir>] [--out tools/advisor/out] [--no-cache]
 
 Writes parts.csv (a row per mesh node per decision-bearing file), models.csv (a row per model folder), join_report.txt
 (every refused sidecar line, every recipe part no node matched, every disagreement between a sidecar and the fuse
-report). Exit 0; 1 on a malformed input the script cannot step over. Per-file features are cached in the output
-folder keyed by path, size and nanosecond mtime; --no-cache recomputes.
+report, every probe verdict a recipe disagrees with). Exit 0; 1 on a malformed input the script cannot step over.
+Per-file features are cached in the output folder keyed by path, size and nanosecond mtime; --no-cache recomputes.
 """
 import argparse
 import csv
@@ -74,8 +79,8 @@ FOLDER_CATEGORY = {f: c for c, fs in CATEGORY.items() for f in fs}
 PART_COLUMNS = ["model", "category", "file", "stage", "node_index", "name", "file_name", "mesh_index", "mesh_shared", "parent_index",
                 "depth", "verts", "tris", "islands", "islands_merged", "island_top_pct", "island_second_pct", "islands_big",
                 "cx", "cy", "cz", "sx", "sy", "sz", "blocked", "triangle_free",
-                "mark", "auto_mark", "fuse_letter", "fuse_group_name", "fused_into", "fused_letter",
-                "role", "role_id", "vis", "flip", "bone", "placed", "recipe", "recipe_verts", "recipe_name", "name_join", "role_via_fuse", "recipe_via_fuse"]
+                "mark", "auto_mark", "mark_later", "fuse_letter", "fuse_group_name", "fused_into", "fused_letter",
+                "role", "role_id", "vis", "flip", "bone", "vis_from", "placed", "recipe", "recipe_verts", "recipe_name", "name_join", "role_via_fuse", "recipe_via_fuse"]
 MODEL_COLUMNS = ["model", "category", "files", "recipe", "recipe_src", "recipe_src_stage", "recipe_parts", "recipe_parts_matched", "dials"]
 
 
@@ -740,6 +745,161 @@ def recipe_dials(j):
 FEATURES_VERSION = 4   # 3: non-TRIANGLES primitives block the mesh; triangle_free carried. 4: the islands after the Workshop's 1 % distance merge
 
 
+WINDOWS_EPOCH_TICKS = 621355968000000000   # .NET ticks (100 ns) at 1970-01-01, what FileInfo.LastWriteTimeUtc.Ticks counts from
+
+
+def read_probe(path, report=None):
+    """The probe's table (tools/advisor/probe_vis.sh): per file its size and write time as probed and, per glTF node, the
+    parts the probe made of it - (vis, flip, bone, verts, name) each; a single-mesh file separated into loose parts has
+    several per node. FAIL and LEFT lines are reported. Returns {normalised path: {"size", "ticks", "nodes": {node: [...]}}}."""
+    table = {}
+    with io.open(path, encoding="utf-8-sig") as f:
+        for raw in f:
+            line = raw.rstrip("\r\n")
+            if not line:
+                continue
+            fields = line.split("\t")
+            kind = fields[0]
+            if kind == "FILE" and len(fields) >= 4:
+                try:
+                    table[norm_path(fields[1])] = {"size": int(fields[2]), "ticks": int(fields[3]), "nodes": defaultdict(list)}
+                except ValueError:
+                    if report is not None:
+                        report.append("PROBE table: unreadable FILE line: %s" % line[:120])
+            elif kind == "PART" and len(fields) >= 8:
+                entry = table.get(norm_path(fields[1]))
+                if entry is None:
+                    if report is not None:
+                        report.append("PROBE table: PART before its FILE line: %s" % line[:120])
+                    continue
+                try:
+                    node = int(fields[2]); verts = int(fields[4]); vis = int(fields[5]); flip = int(fields[6])
+                except ValueError:
+                    if report is not None:
+                        report.append("PROBE table: unreadable PART line: %s" % line[:120])
+                    continue
+                entry["nodes"][node].append((vis, flip, fields[7], verts, fields[3]))
+            elif kind in ("FAIL", "LEFT") and report is not None:
+                report.append("PROBE %s: %s" % (kind, "\t".join(fields[1:])))
+    return table
+
+
+def probe_current(entry, path):
+    """True when the file on disk is the one the probe read: same size and write time."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return False
+    return st.st_size == entry["size"] and st.st_mtime_ns // 100 + WINDOWS_EPOCH_TICKS == entry["ticks"]
+
+
+def apply_probe(rows, entry, rel, report):
+    """The probe's verdicts onto a file's node rows: vis = 1 when any part the probe made of the node escapes, flip = the
+    islands the inside-out fix would reverse, summed; bone = the first part's dominant bone. A node the probe has no row
+    for (an empty mesh it skipped) is reported and left empty."""
+    nodes = entry["nodes"]
+    missing = 0
+    for r in rows:
+        parts = nodes.get(r["node_index"])
+        if not parts:
+            missing += 1
+            continue
+        r["vis"] = max(p[0] for p in parts)
+        r["flip"] = sum(p[1] for p in parts)
+        r["bone"] = next((p[2] for p in parts if p[2]), "")
+        r["vis_from"] = "probe"
+    probed = sum(len(v) for v in nodes.values())
+    if missing:
+        report.append("PROBE %s: %d node(s) without a probe row (%d probe parts on %d nodes)" % (rel, missing, probed, len(nodes)))
+    return missing
+
+
+STAGE_ORDER = {"raw": 0, "cut": 1, "split": 2, "fused": 3}
+
+
+def carry_later_marks(rows_by_rel, report):
+    """The deletion a part received at a LATER stage, carried back to the earlier file's row as `mark_later`.
+
+    The user splits at the raw or cut file and deletes at the split file: a part the raw file lists unmarked and the
+    split file lists marked X was deleted, and scoring the raw row as "kept" would be wrong (the Espana's raw file has
+    2,000 such parts, the Dragon's 1,290). A later file is one of the same folder at a later stage whose name extends
+    this file's stem with `_` (hms_svea -> hms_svea_cut_split, not hms_svea_cut -> hms_svea_split); the part is the same
+    when name AND vertex count match (3,432 of 3,432 on the corpus, no conflict). A part that is marked here itself (S, T
+    or X) is not touched: a split part's children are other nodes. A part ABSENT from the later file is not inferred
+    deleted: the Workshop drops X-marked parts when it writes, but a later file can also be a partial export
+    (rms_teutonic_cut2_split lists 220 of 1,437 unmarked parts)."""
+    def stem(rel):
+        return os.path.splitext(os.path.basename(rel))[0]
+    carried = Counter()
+    for rel, rows in rows_by_rel.items():
+        if not rows:
+            continue
+        stage = STAGE_ORDER.get(rows[0]["stage"])
+        if stage is None:
+            continue
+        later = {}
+        for other, orows in rows_by_rel.items():
+            if other == rel or os.path.dirname(other) != os.path.dirname(rel) or not orows:
+                continue
+            if STAGE_ORDER.get(orows[0]["stage"], -1) <= stage or not stem(other).startswith(stem(rel) + "_"):
+                continue
+            for o in orows:
+                if o["mark"] == "X":
+                    later[(o["name"], o["verts"])] = "X"
+        if not later:
+            continue
+        for r in rows:
+            if r["mark"] in ("S", "T", "X"):
+                continue
+            if later.get((r["name"], r["verts"])) == "X":
+                r["mark_later"] = "X"
+                carried[rel] += 1
+    for rel, n in sorted(carried.items()):
+        report.append("LATER %s: %d unmarked part(s) carry the X a later stage file gave them (mark_later)" % (rel, n))
+
+
+def folder_files(fdir, recipe_by_src, report):
+    """The GLBs of one model folder the corpus reads (a sidecar beside it, a fuse report naming it, or a recipe on it) and
+    the folder's fuse reports, {source: (output, groups, report file)}."""
+    glbs = sorted(f for f in os.listdir(fdir) if f.lower().endswith(".glb") and not f.lower().endswith("_spin.glb"))
+    reports = {}
+    for rp in sorted(f for f in os.listdir(fdir) if f.endswith(".fuse-report.txt")):
+        try:
+            with io.open(os.path.join(fdir, rp), encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+            output, groups = recipe_migrate.parse_report(text)
+            src = re.search(r"^source: (.*)$", text, re.M)
+            if output and groups and src:
+                reports[norm_path(src.group(1).strip())] = (norm_path(output), groups, rp)
+        except OSError as e:
+            report.append("REPORT unreadable: %s: %s" % (rp, e))
+    chosen = []
+    for g in glbs:
+        path = os.path.join(fdir, g)
+        np_ = norm_path(path)
+        has = os.path.exists(path + ".marks.txt") or os.path.exists(path + ".fuse.txt") or np_ in reports \
+            or np_ in recipe_by_src or any(np_ == o for o, _, _ in reports.values())
+        if has:
+            chosen.append(path)
+    return chosen, reports
+
+
+def list_files(models_root, recipes_dir, folders=None):
+    """Every GLB the corpus would read, absolute, forward slashes - the probe's input list."""
+    report = []
+    recipes = load_recipes(recipes_dir, report)
+    recipe_by_src = defaultdict(list)
+    for f, j in recipes:
+        recipe_by_src[norm_path(j.get("srcFile"))].append((f, j))
+    out = []
+    for folder in sorted(d for d in os.listdir(models_root) if os.path.isdir(os.path.join(models_root, d))):
+        if folders and folder not in folders:
+            continue
+        chosen, _ = folder_files(os.path.join(models_root, folder), recipe_by_src, report)
+        out.extend(os.path.abspath(c).replace("\\", "/") for c in chosen)
+    return out
+
+
 def file_features(path, cache, use_cache, log):
     st = os.stat(path)
     key = hashlib.sha1(("%s|%d|mtime_ns:%d|v%d" % (norm_path(path), st.st_size, st.st_mtime_ns, FEATURES_VERSION)).encode("utf-8")).hexdigest()
@@ -753,7 +913,7 @@ def file_features(path, cache, use_cache, log):
     return rows, False
 
 
-def build(models_root, recipes_dir, out_dir, use_cache=True, log=print, folders=None):
+def build(models_root, recipes_dir, out_dir, use_cache=True, log=print, folders=None, probe_path=None):
     os.makedirs(out_dir, exist_ok=True)
     cache_path = os.path.join(out_dir, "features-cache.json")
     cache = {}
@@ -768,9 +928,15 @@ def build(models_root, recipes_dir, out_dir, use_cache=True, log=print, folders=
     recipe_by_src = defaultdict(list)
     for f, j in recipes:
         recipe_by_src[norm_path(j.get("srcFile"))].append((f, j))
+    probe = {}
+    if probe_path:
+        probe = read_probe(probe_path, report)
+        report.append("PROBE table %s: %d file(s)" % (probe_path, len(probe)))
+    probe_stats = Counter()   # files probed / stale / not in the table; recipe verdicts agreeing / disagreeing with the probe's
 
     part_rows = []
     model_rows = []
+    rows_by_rel = {}   # every file's node rows, for the carry-back of later-stage deletions
     group_diffs = Counter()   # (file, sidecar letter, report letter) -> parts: the sidecar was re-lettered after the fuse
     folders_seen = sorted(d for d in os.listdir(models_root) if os.path.isdir(os.path.join(models_root, d)))
     if folders:
@@ -780,27 +946,8 @@ def build(models_root, recipes_dir, out_dir, use_cache=True, log=print, folders=
         category = FOLDER_CATEGORY.get(folder, "unknown")
         if category == "unknown":
             report.append("CATEGORY unknown: folder '%s' is not in corpus.CATEGORY" % folder)
-        glbs = sorted(f for f in os.listdir(fdir) if f.lower().endswith(".glb") and not f.lower().endswith("_spin.glb"))
-        reports = {}
-        for rp in sorted(f for f in os.listdir(fdir) if f.endswith(".fuse-report.txt")):
-            try:
-                with io.open(os.path.join(fdir, rp), encoding="utf-8", errors="replace") as fh:
-                    text = fh.read()
-                output, groups = recipe_migrate.parse_report(text)
-                src = re.search(r"^source: (.*)$", text, re.M)
-                if output and groups and src:
-                    reports[norm_path(src.group(1).strip())] = (norm_path(output), groups, rp)
-            except OSError as e:
-                report.append("REPORT unreadable: %s: %s" % (rp, e))
         # a decision-bearing file: a sidecar beside it, a fuse report naming it as source or output, or a recipe on it
-        chosen = []
-        for g in glbs:
-            path = os.path.join(fdir, g)
-            np_ = norm_path(path)
-            has = os.path.exists(path + ".marks.txt") or os.path.exists(path + ".fuse.txt") or np_ in reports \
-                or np_ in recipe_by_src or any(np_ == o for o, _, _ in reports.values())
-            if has:
-                chosen.append(path)
+        chosen, reports = folder_files(fdir, recipe_by_src, report)
         # a recipe belongs to the folder its source is under, at any depth (the Bradley's FBX sits in Bradley/FBX/)
         recipes_here = [(f, j) for f, j in recipes if norm_path(j.get("srcFile", "")).startswith(norm_path(fdir) + "/")]
         if not chosen and not recipes_here:
@@ -841,18 +988,32 @@ def build(models_root, recipes_dir, out_dir, use_cache=True, log=print, folders=
                             report.append("REPORT %s names '%s' in two groups (%s and %s); the later one is kept" % (rp, m, fused_into[m], fused))
                         fused_into[m] = fused
                         fused_letter[m] = letter
+            file_part_rows = []
             for r in rows:
                 row = dict(r)
                 row.update({"model": folder, "category": category, "file": rel, "stage": stage,
                             "mark": marks.get(r["node_index"], ""), "fuse_letter": letters.get(r["node_index"], ""),
-                            "auto_mark": auto_marked(r, marks.get(r["node_index"], ""), letters.get(r["node_index"], "")),
+                            "auto_mark": auto_marked(r, marks.get(r["node_index"], ""), letters.get(r["node_index"], "")), "mark_later": "",
                             "fuse_group_name": group_names.get(letters.get(r["node_index"], ""), ""),
                             "fused_into": fused_into.get(r["name"], ""), "fused_letter": fused_letter.get(r["name"], ""),
-                            "role": "", "role_id": "", "vis": "", "flip": "", "bone": "", "placed": "", "recipe": "", "recipe_verts": "",
+                            "role": "", "role_id": "", "vis": "", "flip": "", "bone": "", "vis_from": "", "placed": "", "recipe": "", "recipe_verts": "",
                             "role_via_fuse": "", "recipe_via_fuse": ""})
                 if row["fuse_letter"] and row["fused_letter"] and row["fuse_letter"] != row["fused_letter"]:
                     group_diffs[(rel, row["fuse_letter"], row["fused_letter"])] += 1
                 part_rows.append(row)
+                file_part_rows.append(row)
+            rows_by_rel[rel] = file_part_rows
+            # the probe's verdicts for this file, when its table has the file as it is on disk today
+            entry = probe.get(norm_path(path))
+            if entry is None:
+                if probe:
+                    probe_stats["files not in the table"] += 1
+            elif not probe_current(entry, path):
+                probe_stats["files stale"] += 1
+                report.append("PROBE stale: %s changed since the probe ran (size or write time); its verdicts come from the recipe, if any" % rel)
+            else:
+                probe_stats["files probed"] += 1
+                apply_probe(file_part_rows, entry, rel, report)
         # recipes: join each to its source file's rows by unique name
         for rf, j in recipes_here:
             src = norm_path(j.get("srcFile"))
@@ -891,9 +1052,23 @@ def build(models_root, recipes_dir, out_dir, use_cache=True, log=print, folders=
                 by_name = {r["name"]: r for r in file_rows}
 
                 def take(r, p, how):
-                    r.update({"role": ROLE_NAMES.get(p.get("role"), str(p.get("role"))), "role_id": p.get("role", ""), "vis": p.get("vis", ""),
-                              "flip": p.get("flip", ""), "bone": p.get("bone", ""), "placed": int(is_placed(p)), "recipe": rname,
-                              "recipe_verts": p.get("verts", ""), "recipe_name": p.get("name", ""), "name_join": how})
+                    r.update({"role": ROLE_NAMES.get(p.get("role"), str(p.get("role"))), "role_id": p.get("role", ""), "placed": int(is_placed(p)),
+                              "recipe": rname, "recipe_verts": p.get("verts", ""), "recipe_name": p.get("name", ""), "name_join": how})
+                    if r.get("vis_from") == "probe":
+                        # the probe's verdict stands; the recipe's (Blender's probe when it was saved) is the check on the join;
+                        # -1 is the Lab's "unclassified" (a recipe saved before the visibility probe): no verdict to compare
+                        if p.get("vis") in (-1, "-1"):
+                            probe_stats["recipe vis unclassified"] += 1
+                        elif p.get("vis") not in (None, ""):
+                            if str(p.get("vis")) == str(r["vis"]):
+                                probe_stats["recipe vis agree"] += 1
+                            else:
+                                probe_stats["recipe vis differ"] += 1
+                                report.append("PROBE differs at %s '%s': recipe %s vis %s, probe %s (recipe %s verts, file %s)"
+                                              % (r["file"], r["name"], rname, p.get("vis"), r["vis"], p.get("verts"), r["verts"]))
+                    else:
+                        r.update({"vis": p.get("vis", ""), "flip": p.get("flip", ""), "bone": p.get("bone", ""),
+                                  "vis_from": "recipe" if p.get("vis") not in (None, "") else ""})
                     if p.get("verts") not in (None, r["verts"]):
                         report.append("RECIPE %s: '%s' has %s verts in the recipe, %s in the file" % (rname, p.get("name"), p.get("verts"), r["verts"]))
 
@@ -932,8 +1107,12 @@ def build(models_root, recipes_dir, out_dir, use_cache=True, log=print, folders=
             model_rows.append({"model": folder, "category": category, "files": ";".join(os.path.basename(c) for c in chosen), "recipe": "",
                                "recipe_src": "", "recipe_src_stage": "", "recipe_parts": 0, "recipe_parts_matched": 0, "dials": ""})
 
+    carry_later_marks(rows_by_rel, report)
     for (rel, side, rep), n in sorted(group_diffs.items()):
         report.append("GROUP differs at %s: %d part(s) lettered %s in the sidecar fused as %s in the report (the sidecar was re-lettered after the fuse)" % (rel, n, side, rep))
+    if probe:
+        report.append("PROBE summary: " + ", ".join("%s %d" % (k, probe_stats[k]) for k in
+                      ("files probed", "files stale", "files not in the table", "recipe vis agree", "recipe vis differ", "recipe vis unclassified")))
     with io.open(cache_path, "w", encoding="utf-8") as f:
         json.dump(cache, f)
     write_csv(os.path.join(out_dir, "parts.csv"), PART_COLUMNS, part_rows)
@@ -953,9 +1132,10 @@ def recipe_only_row(folder, category, rel, p, rname):
             "file_name": "", "mesh_index": "", "mesh_shared": "", "parent_index": "", "depth": "",
             "verts": p.get("verts", ""), "tris": "", "islands": "", "cx": c.get("x", ""), "cy": c.get("y", ""), "cz": c.get("z", ""),
             "sx": s.get("x", ""), "sy": s.get("y", ""), "sz": s.get("z", ""), "blocked": "",
-            "mark": "", "fuse_letter": "", "fuse_group_name": "", "fused_into": "", "fused_letter": "",
+            "mark": "", "mark_later": "", "fuse_letter": "", "fuse_group_name": "", "fused_into": "", "fused_letter": "",
             "role": ROLE_NAMES.get(p.get("role"), str(p.get("role"))), "role_id": p.get("role", ""), "vis": p.get("vis", ""),
-            "flip": p.get("flip", ""), "bone": p.get("bone", ""), "placed": int(is_placed(p)), "recipe": rname,
+            "flip": p.get("flip", ""), "bone": p.get("bone", ""), "vis_from": "recipe" if p.get("vis") not in (None, "") else "",
+            "placed": int(is_placed(p)), "recipe": rname,
             "recipe_verts": p.get("verts", ""), "recipe_name": p.get("name", ""), "name_join": "recipe-only", "role_via_fuse": "", "recipe_via_fuse": ""}
 
 
@@ -1013,6 +1193,8 @@ def main(argv=None):
     ap.add_argument("--out", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "out"))
     ap.add_argument("--no-cache", action="store_true")
     ap.add_argument("--folder", action="append", help="only this model folder (repeatable)")
+    ap.add_argument("--probe", help="the probe's table from tools/advisor/probe_vis.sh: vis, flip and bone for every node it covers")
+    ap.add_argument("--list", action="store_true", help="print the GLBs the corpus reads, one per line, and exit (the probe's input)")
     a = ap.parse_args(argv)
     if not os.path.isdir(a.models):
         print("models root not found: %s" % a.models)
@@ -1020,8 +1202,16 @@ def main(argv=None):
     if not os.path.isdir(a.recipes):
         print("recipes folder not found: %s" % a.recipes)
         return 1
+    if a.list:
+        for p in list_files(a.models, a.recipes, set(a.folder) if a.folder else None):
+            print(p)
+        return 0
+    if a.probe and not os.path.exists(a.probe):
+        print("probe table not found: %s" % a.probe)
+        return 1
     t0 = time.time()
-    parts, models, report = build(a.models, a.recipes, a.out, use_cache=not a.no_cache, folders=set(a.folder) if a.folder else None)
+    parts, models, report = build(a.models, a.recipes, a.out, use_cache=not a.no_cache, folders=set(a.folder) if a.folder else None,
+                                  probe_path=a.probe)
     print("parts.csv: %d rows; models.csv: %d; join_report.txt: %d line(s); %.0f s -> %s" % (len(parts), len(models), len(report), time.time() - t0, a.out))
     return 0
 

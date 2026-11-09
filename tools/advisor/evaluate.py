@@ -56,11 +56,11 @@ TASKS = ("role", "delete", "delete-hand", "split", "group", "dials")
 PART_FEATURES = frozenset(("model", "category", "file", "stage", "node_index", "name", "file_name", "mesh_index",
                            "mesh_shared", "parent_index", "depth", "verts", "tris", "islands", "islands_merged", "island_top_pct",
                            "island_second_pct", "islands_big", "cx", "cy", "cz", "sx", "sy", "sz", "blocked", "triangle_free",
-                           "vis", "flip", "bone"))
+                           "vis", "flip", "bone", "vis_from"))
 # Every other column of the corpus is a label or a join record and stays out of the held-out rows. A new corpus column
 # must be placed in one set or the other (Tests/test_advisor_corpus.py holds the partition), so a feature a proposer
 # needs is never silently stripped: the first Split proposer proposed nothing because its columns were not listed here.
-PART_LABELS = frozenset(("mark", "auto_mark", "fuse_letter", "fuse_group_name", "fused_into", "fused_letter", "role", "role_id",
+PART_LABELS = frozenset(("mark", "auto_mark", "mark_later", "fuse_letter", "fuse_group_name", "fused_into", "fused_letter", "role", "role_id",
                          "placed", "recipe", "recipe_verts", "recipe_name", "name_join", "role_via_fuse", "recipe_via_fuse"))
 MODEL_FEATURES = frozenset(("model", "category", "files"))
 
@@ -102,21 +102,29 @@ def files_with(parts, column, values=None):
     return out
 
 
+def deleted(r):
+    """The part was deleted: marked X at this file, marked X at a later stage file of the same model, or given the
+    Lab's Ignore role."""
+    return r["mark"] == "X" or r.get("mark_later", "") == "X" or r["role"] == "Ignore"
+
+
 def population(task, parts):
     """The rows a task is scored on, with the truth filled in under 'truth'."""
     if task == "role":
         rows = [dict(r, truth=r["role"]) for r in parts if r["role"]]
     elif task == "delete":
         # every file the user judged counts: a Fuse writes the marks sidecar only when something is marked, so a
-        # lettered file without one is a file where the user looked and deleted nothing - a true negative, not a gap
+        # lettered file without one is a file where the user looked and deleted nothing - a true negative, not a gap.
+        # A part deleted at a LATER stage file (corpus.carry_later_marks: the user splits at the raw file and deletes at
+        # the split file) is a deletion here too; without it the Espana's raw rows read 2,000 deletions as "kept".
         judged = files_with(parts, "mark") | files_with(parts, "fuse_letter") | files_with(parts, "role")
-        rows = [dict(r, truth="X" if r["mark"] == "X" or r["role"] == "Ignore" else "") for r in parts
+        rows = [dict(r, truth="X" if deleted(r) else "") for r in parts
                 if r["file"] in judged and r["stage"] != "recipe-only"]
     elif task == "delete-hand":
         # the same files, without the parts the Workshop marks X itself on first load (two triangles or fewer, no
         # group or split of their own): what is left is the user's own deletion judgement
         judged = files_with(parts, "mark") | files_with(parts, "fuse_letter") | files_with(parts, "role")
-        rows = [dict(r, truth="X" if r["mark"] == "X" or r["role"] == "Ignore" else "") for r in parts
+        rows = [dict(r, truth="X" if deleted(r) else "") for r in parts
                 if r["file"] in judged and r["stage"] != "recipe-only" and str(r.get("auto_mark", "")) != "1"]   # int from build(), str from the CSV
     elif task == "split":
         # splitting happens on the raw and cut files; a _split file's marks are deletions, its parts are the splits;

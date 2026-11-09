@@ -10,6 +10,22 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **THE VISIBILITY VERDICT FOR EVERY FILE, AND THE DELETION PROPOSER (2026-11-09; Phase 1 of `docs/Workshop-Advisor-Plan.md`).**
+  `tools/advisor/probe_vis.sh` compiles `tools/advisor/ProbeVis.cs` against the editor sources and runs the Vehicle Lab's own
+  probe (`VehicleProbe.Run`: escape rays over one BVH of the whole file, the inside-out count) over every GLB the corpus reads
+  (`corpus.py --list`), as a 64-bit process: 53 files in about 40 s. `corpus.py --probe` joins the verdicts by glTF node (a
+  single-mesh file's loose parts fold onto their node), checks each file's size and write time against the table (stale: reported,
+  falls back to the recipe's verdict, named in `vis_from`), and checks the join against the recipes: 1,126 of 1,128 verdicts
+  agree, the other 2 are the Lab's -1. The deletion truth was understated: the user splits at the raw file and deletes at the
+  split file, so 3,432 raw rows the split file marks X read as kept (the Espana 2,000, the Dragon 1,290); `carry_later_marks`
+  carries the X back as `mark_later` by name and vertex count (3,432 of 3,432, no conflict) and the delete tasks count it.
+  `tools/advisor/proposers/delete.py` proposes X for an interior part up to A of the model's largest extent or any part up to
+  B, A/B learned on the other models at F0.5 with ties to the stricter rule: leave-one-model-out on the 27,354 hand-judged
+  parts, 86 % precision and 52 % recall (5,180 proposed, 4,443 right) against 84 % / 13 % for every interior part and
+  39 % / 15 % for the smallest tenth; the rule is interior up to 10 %, anything up to 0.05 % on 23 of 26 folds. Where it is
+  wrong: the Romanic's tiny parts the user fused instead of deleting (603 of 737 wrong carry a fuse letter); where it misses:
+  3,696 visible fittings between 0.1 % and 3 % of the model, Phase 4's question. Proposers share one
+  `<file>.glb.marks.proposed.txt` by letter (`proposers/common.py`). 58 unit cases in the gate.
 - **PR #273 review (2026-11-09).** The Split proposer abstains when no threshold rule finds a training split rather
   than choosing its loosest rule at zero F1. Proposal writes refresh every raw/cut file represented in the corpus,
   including files with zero proposals or only blocked parts, so a rerun cannot leave an old S proposal behind.

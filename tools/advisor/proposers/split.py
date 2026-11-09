@@ -93,8 +93,11 @@ def propose(task, test, train, test_model, train_models):
 
 
 def main(argv=None):
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+    here = os.path.dirname(os.path.abspath(__file__))
+    sys.path.insert(0, os.path.join(here, ".."))
+    sys.path.insert(0, here)
     import evaluate  # noqa: E402
+    import common  # noqa: E402
 
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--corpus", required=True)
@@ -128,11 +131,9 @@ def main(argv=None):
             agree = " (marked %s)" % r["mark"] if r.get("mark") in ("S", "T") else (" (marked X)" if r.get("mark") == "X" else "")
             print("  S|%s|%s  %s tris, %s islands after merge%s" % (r["node_index"], r["name"], r["tris"], r["islands_merged"], agree))
         if a.write:
+            # the S lines of the one proposals file; another proposer's letters (delete.py's X) stay
             path = os.path.join(a.models_root, rel) + ".marks.proposed.txt"
-            with io.open(path, "w", encoding="utf-8", newline="\n") as f:
-                f.write("#fuse-groups v2\n#proposed by tools/advisor/proposers/split.py; rename to .marks.txt or merge by hand\n")
-                for r in rows:
-                    f.write("S|%s|%s\n" % (r["node_index"], r["name"]))
+            common.merge_proposals(path, ("S",), ["S|%s|%s" % (r["node_index"], r["name"]) for r in rows], "split.py")
             print("  written: %s" % path)
     return 0
 

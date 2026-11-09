@@ -4079,6 +4079,17 @@ the feature/label partition of every corpus column (the allowlist had silently s
 failure on rows without the features, F1 and F0.5 by hand. PR #273 review adds abstention when no grid rule finds a
 training split (including empty training data), and CLI reruns that clear stale proposals for small or blocked parts,
 refresh an old positive file after the rule stops firing, and leave live marks untouched: 45 cases.
+The visibility step (`tools/advisor/probe_vis.sh` + `ProbeVis.cs`: the Lab's probe over every corpus file, joined by
+`corpus.py --probe`) adds a second folder fixture with a probe table written against the fixture's own file identity:
+the table read with its FILE/PART/FAIL lines, a node's loose parts folding to one verdict (external when any escapes,
+flips summed, the bone carried), a stale file (size or write time changed) falling back and reported, the recipe's
+verdict checking the join without overwriting the probe's (agree / differ / the Lab's -1 counted), a deletion at the
+split file carried back to the same-named same-sized part at the raw file as `mark_later` (not to a part the raw file
+splits, not to a later part of another size, not to the later file itself), the delete population counting it, the
+`--list` of files, the CSV round trip of the new columns. The deletion proposer's: the two thresholds learned from
+interior fittings and exterior rivets against kept fittings and a kept interior deck and applied without truth, the
+size relative to each file, ties to the stricter rule and abstention, a loud failure on rows without the features or
+without a verdict (a corpus exported without `--probe`), and the one proposals file two proposers share by letter: 58 cases.
 
 The critical review of PR #195 added a high-valence cone, tiny loose parts and non-polygon primitives. Matching every
 pair of edges in one lower-vertex bucket made a 32,000-face fan take 3.90 s against 9 ms before the parallelization.
