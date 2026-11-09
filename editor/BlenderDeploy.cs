@@ -75,6 +75,10 @@ public static class BlenderDeploy
         public List<Obj> Parts = new List<Obj>();                // the parts left, in the script's order
         public List<string> Bad = new List<string>();            // the culled parts, sorted as Python sorts them
         public List<(Obj dropped, Obj kept)> Alias = new List<(Obj, Obj)>();
+        /// <summary>3b-i: every instanced part judged for a co-mover - its best scored partner and whether it rides one.
+        /// Scores above tolerance may remain sparse lower bounds; every accepted score covers all baked frames.</summary>
+        public List<(Obj part, Obj partner, double score, bool rides)> Comove = new List<(Obj, Obj, double, bool)>();
+        public int ComoveRejected;   // provisional pairs whose motion between sparse samples exceeds tolerance
         // ---- the armature the script builds (part 3): one bone per part at the part's place, StaticRoot, the anchors
         public Obj Armature;                                      // "DeployArm" (the legacy path) or "DeployArmV2"
         public readonly List<Bone> Bones = new List<Bone>();      // creation order: the parts', then StaticRoot
@@ -479,16 +483,104 @@ public static class BlenderDeploy
             all = all.Where(o => !dead.Contains(o)).ToList();
         }
 
-        // ---- 3b. the bone budget: pair-merge the instanced part classes
-        if (parts.Count > PartBudget)
+        // ---- 3b. the bone budget: co-movers ride first (3b-i), the neighbour merge takes what is still over (3b-ii)
+        List<List<Obj>> Groups(List<Obj> of)
         {
-            var groups = new List<(string key, List<Obj> members)>(); var index = new Dictionary<string, int>(StringComparer.Ordinal);
-            foreach (var p in parts)
+            var groups = new List<List<Obj>>(); var index = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var p in of)
             {
                 string key = p.Name.Split('.')[0];
-                if (!index.TryGetValue(key, out int gi)) { index[key] = gi = groups.Count; groups.Add((key, new List<Obj>())); }
-                groups[gi].members.Add(p);
+                if (!index.TryGetValue(key, out int gi)) { index[key] = gi = groups.Count; groups.Add(new List<Obj>()); }
+                groups[gi].Add(p);
             }
+            return groups;
+        }
+        if (parts.Count > PartBudget)
+        {
+            // 3b-i (2026-11-09, the T-62's hanging links): a member of an instanced class rides a part it MOVES WITH. At the
+            // cull's frames, its offset seen from the partner (R_k^T (t_d - t_k), in the partner's scale) and its turn
+            // relative to the partner (R_k^T R_d) are compared with the bind frame's; the score is the farthest a vertex
+            // could stray: offset drift + turn drift times the lever (their distance plus 5% of the model). Under 0.5% of
+            // the model the member drops and rides the partner's bone, after checking EVERY baked frame. Partners are never dropped; a member whose best
+            // partners are dropped already takes the best kept one. Doubles from the float32 matrices, in the script's order.
+            var members = Groups(parts).Where(g => g.Count >= 8).SelectMany(g => g).ToList();
+            var cmFrames = new List<int>(); for (int f = fmin; f < fmax + 1; f += 7) cmFrames.Add(f); cmFrames.Add(fmax);
+            var world = new Dictionary<(Obj, int), double[]>();   // as Python indexes matrix_world: m[i][j] -> [i * 4 + j]
+            void Capture(int f)
+            {
+                if (world.ContainsKey((parts[0], f))) return;
+                FrameSet(f);
+                foreach (var p in parts) { var w = new double[16]; for (int i = 0; i < 4; i++) for (int j = 0; j < 4; j++) w[i * 4 + j] = p.World[j * 4 + i]; world[(p, f)] = w; }
+            }
+            foreach (int f in cmFrames) Capture(f);
+            FrameSet(fmin);
+            double cmDim = r.NormDim * r.NormScale;
+            double tol = 0.005 * cmDim, lever = 0.05 * cmDim;
+            void Rel(Obj d, Obj k, int f, double[] v, double[] q)
+            {
+                var md = world[(d, f)]; var mk = world[(k, f)];
+                double t0 = md[3] - mk[3], t1 = md[7] - mk[7], t2 = md[11] - mk[11];
+                for (int j = 0; j < 3; j++) v[j] = mk[0 * 4 + j] * t0 + mk[1 * 4 + j] * t1 + mk[2 * 4 + j] * t2;
+                for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) q[i * 3 + j] = mk[0 * 4 + i] * md[0 * 4 + j] + mk[1 * 4 + i] * md[1 * 4 + j] + mk[2 * 4 + i] * md[2 * 4 + j];
+            }
+            double Score(Obj d, Obj k, IEnumerable<int> sample)
+            {
+                var v0 = new double[3]; var q0 = new double[9]; var v = new double[3]; var q = new double[9];
+                Rel(d, k, fmin, v0, q0);
+                var md = world[(d, fmin)]; var mk = world[(k, fmin)];
+                double sk = Math.Sqrt(mk[0] * mk[0] + mk[4] * mk[4] + mk[8] * mk[8]);
+                double sd = Math.Sqrt(md[0] * md[0] + md[4] * md[4] + md[8] * md[8]);
+                double t0 = Math.Sqrt((md[3] - mk[3]) * (md[3] - mk[3]) + (md[7] - mk[7]) * (md[7] - mk[7]) + (md[11] - mk[11]) * (md[11] - mk[11]));
+                double mt = 0.0, mr = 0.0;
+                foreach (int f in sample)
+                {
+                    Rel(d, k, f, v, q);
+                    for (int j = 0; j < 3; j++) { double a = Math.Abs(v[j] - v0[j]); if (a > mt) mt = a; }
+                    for (int j = 0; j < 9; j++) { double a = Math.Abs(q[j] - q0[j]); if (a > mr) mr = a; }
+                }
+                return mt / sk + mr / (sk * sd) * (t0 + lever);
+            }
+            var table = new Dictionary<Obj, List<(double s, Obj k)>>();
+            foreach (var d in members) table[d] = parts.Where(k => k != d).Select(k => (Score(d, k, cmFrames), k)).OrderBy(e => e.Item1).ThenBy(e => e.Item2.Name, CodePointOrder).ToList();
+            // Sparse samples cheaply reject unlike motions, but can miss a whole excursion between frames 0 and 7.
+            // Refine every provisional match before ranking/accepting it; retain sampled lower bounds for rejected pairs.
+            if (table.Values.Any(row => row.Any(e => e.s <= tol)))
+            {
+                var fullFrames = Enumerable.Range(fmin, fmax - fmin + 1).ToList();
+                foreach (int f in fullFrames) Capture(f);
+                FrameSet(fmin);
+                double Refine(Obj d, (double s, Obj k) e)
+                {
+                    if (e.s > tol) return e.s;
+                    double score = Score(d, e.k, fullFrames);
+                    if (score > tol) r.ComoveRejected++;
+                    return score;
+                }
+                foreach (var d in members) table[d] = table[d].Select(e => (s: Refine(d, e), k: e.k))
+                    .OrderBy(e => e.s).ThenBy(e => e.k.Name, CodePointOrder).ToList();
+            }
+            var dropped = new Dictionary<Obj, Obj>(); var pinned = new HashSet<Obj>();
+            foreach (var d in members.OrderBy(o => table[o][0].s).ThenBy(o => o.Name, CodePointOrder))
+            {
+                if (pinned.Contains(d)) continue;
+                var (bestS, bestK) = table[d][0];
+                Obj taken = null;
+                foreach (var (s, k) in table[d]) { if (s > tol) break; if (dropped.ContainsKey(k)) continue; taken = k; break; }
+                r.Comove.Add((d, bestK, bestS, taken != null));
+                if (taken != null) { dropped[d] = taken; pinned.Add(taken); }
+            }
+            if (dropped.Count > 0)
+            {
+                foreach (var d in dropped.Keys.OrderBy(o => o.Name, CodePointOrder)) r.Alias.Add((d, dropped[d]));
+                parts = parts.Where(p => !dropped.ContainsKey(p)).ToList();
+                r.Log.Add($"DEPLOY bone budget: {dropped.Count} instanced part(s) ride a co-moving part's bone (no vertex strays more than {PyFormat.Fixed(tol, 3)} over the clip; parts -> {parts.Count})");
+            }
+        }
+        if (parts.Count > PartBudget)
+        {
+            // 3b-ii: the neighbour merge, lossy, for what is still over
+            var nbPairs = new List<(Obj dropped, Obj kept)>();
+            var groups = Groups(parts).Select(g => (key: "", members: g)).ToList();
             int excess = parts.Count - PartBudget;
             var big = groups.Where(g => g.members.Count >= 8).Select(g => g.members.OrderBy(o => o.Name, CodePointOrder).ToList()).ToList();
             int totalBig = big.Sum(g => g.Count);
@@ -501,14 +593,15 @@ public static class BlenderDeploy
                 var cand = new List<Obj>(); for (int i = 1; i < members.Count; i += 2) cand.Add(members[i]);
                 int k = Math.Max(1, cand.Count / Math.Max(1, quota));
                 var drops = new List<Obj>(); for (int i = 0; i < cand.Count && drops.Count < quota; i += k) drops.Add(cand[i]);
-                foreach (var d in drops) r.Alias.Add((d, members[members.IndexOf(d) - 1]));
+                foreach (var d in drops) nbPairs.Add((d, members[members.IndexOf(d) - 1]));
                 excess -= drops.Count;
             }
-            if (r.Alias.Count > 0)
+            if (nbPairs.Count > 0)
             {
-                var dropset = new HashSet<Obj>(r.Alias.Select(a => a.dropped));
+                r.Alias.AddRange(nbPairs);
+                var dropset = new HashSet<Obj>(nbPairs.Select(a => a.dropped));
                 parts = parts.Where(p => !dropset.Contains(p)).ToList();
-                r.Log.Add($"DEPLOY bone budget: {r.Alias.Count} instanced part(s) pair-merged onto neighbor bones (parts -> {parts.Count}; the 128-index GPU wall)");
+                r.Log.Add($"DEPLOY bone budget: {nbPairs.Count} instanced part(s) pair-merged onto neighbor bones (parts -> {parts.Count}; the 128-index GPU wall)");
             }
             if (parts.Count > PartBudget) r.Log.Add($"DEPLOY bone budget WARNING: still {parts.Count} parts after pair-merge — expect missing geometry past bone 127");
         }
@@ -537,7 +630,9 @@ public static class BlenderDeploy
         }
         foreach (var p in parts) AddBone(p, p.Name, new[] { p.World[12], p.World[13], p.World[14] });
         foreach (var p in parts) if (p.Parent != null && boneOf.TryGetValue(p.Parent, out var pb)) boneOf[p].Parent = pb;
-        foreach (var (d, k) in r.Alias) if (boneOf.TryGetValue(k, out var kb)) { boneOf[d] = kb; r.BoneOf.Add((d.Name, kb.Name)); }
+        var aliasOf = r.Alias.ToDictionary(a => a.dropped, a => a.kept);
+        Obj Ride(Obj o) { while (aliasOf.TryGetValue(o, out var k)) o = k; return o; }   // through a co-mover's partner the neighbour merge dropped in turn
+        foreach (var (d, k) in r.Alias) if (boneOf.TryGetValue(Ride(k), out var kb)) { boneOf[d] = kb; r.BoneOf.Add((d.Name, kb.Name)); }
         AddBone(null, "StaticRoot", new float[3]);
         {
             var ids = Enumerable.Range(0, r.Bones.Count).ToList();

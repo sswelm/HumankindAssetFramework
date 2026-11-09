@@ -13,7 +13,7 @@ public static class BlenderDeployInProcess
 {
     /// <summary>Bump when the in-process conversion's written file changes: the Factory's cache key carries it, so a
     /// cached deploy_converted.glb made by an older port is converted again.</summary>
-    public const string CacheRevision = "2026-11-09.merged-bind.2." + HafModelLoader.CacheRevision;   // resolve all mesh targets before detaching: nested descendants keep their animated or pair-merged ancestor's bone
+    public const string CacheRevision = "2026-11-09.comover.2." + HafModelLoader.CacheRevision;   // validate provisional co-movers at every baked frame, including motion between the sparse samples
 
     /// <summary>The longest animation converted here (frames from the bake's first to its last): the bake, the fire
     /// window, the role clips and the export each walk every frame for every bone on the editor thread, where only the

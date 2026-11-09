@@ -394,11 +394,17 @@ mishandles — the AW101 missing-fuselage class), and every bone's keys **delta-
 **The 128-bone-index GPU wall.** Per-vertex bone indices break past **127** — not 256. Bones 128+ render
 collapsed/invisible (the T-62's turret and wheels, bones 128–140, vanished while links 1–120 animated). This
 retroactively closes two cold cases: the Jagdpanzer's 241-bone spike ceiling and the mech's broken wings at
-222 bones. `deploy_convert` clamps to 126 total by **pair-merging instanced link chains** (a dropped link
-binds to its numeric neighbor's bone and rides it rigidly). Merges MUST be spread evenly across all chains —
-clustered merges put every rider on one half of one track and that half fails together in-game; distributed,
-each rider only mis-swings during its own brief wrap transit (~2 links visible at cinematic zoom, invisible at
-gameplay zoom).
+222 bones. `deploy_convert` clamps to 126 total in two steps (since 2026-11-09): an instanced part that **moves
+with** another part rides that part's bone (the T-62's pins ride their pads - lossless, no vertex strays more than
+0.5% of the model over the clip), then what is still over is **pair-merged** onto its numeric neighbour's bone (a
+dropped link rides it rigidly: one pitch behind and swinging at the wraps - the T-62's "hanging" links of 2026-11-09
+were pins merged this way). Neighbour merges MUST be spread evenly across all chains — clustered merges put every
+rider on one half of one track and that half fails together in-game; distributed, each rider only mis-swings during
+its own brief wrap transit (~2 links visible at cinematic zoom, invisible at gameplay zoom).
+Co-mover screening uses every seventh frame and the last to reject unlike motions cheaply, then validates every
+provisional match at **every baked frame**. Sampling alone missed parts that moved or turned and returned between
+two samples (PR #274 review); those parts must not be called co-movers. Rejected-pair scores may remain sampled lower
+bounds; accepted scores cover the whole baked frame range.
 
 **Three smaller laws from the same night.**
 - *1-frame stances wrap the sampler:* Unity's constant-curve dedupe collapses two identical padded frames back
