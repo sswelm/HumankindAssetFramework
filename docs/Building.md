@@ -62,21 +62,15 @@ with `tools/refresh_blender_oracle.sh`, then `replay`) remains an option of the 
 requires it. See [Testing](Testing.md#the-fast-gates--two-lanes-checksh-and-ci). Blender is still needed for the editor's own uses below
 and for the Bake Tests rows that run it.
 
-**The gate cleans up after itself (2026-11-08).** Its first step, `tools/temp_sweep.sh`, removes the gate's and the
-drills' own temporary directories older than two days from your `%TEMP%`, by their exact generated names only
-(`haf-<producer>.XXXXXXXXXX`); it never touches another program's files and never fails the gate. A new script that
-makes a temporary directory must use that name form and add its producer to the sweeper's list, or
-`Tests/test_temp_sweep.py` fails. If the gate is suddenly many times slower, compare `bash.exe -c :` with `sh.exe -c :`
-from PowerShell; a large gap was a stuck per-file state on `bash.exe` that a reboot cleared.
-
 **Blender** is needed for `.blend` import, **animated-model import**, and for **Strip parts** / Reduce-to-tris on what the
 Factory cannot prepare itself — auto-detected under `Program Files`, or point the Factory Settings override /
 `EditorPrefs 'ENC.blenderPath'` at `blender.exe`. Since 2026-10-08 a static **.glb/.gltf** with a reduce target is
 stripped and reduced **in process** (`BlenderPrep`, the same file Blender's `prep_model.py` would write as far as the
-converter reads it); Blender still does an OBJ/FBX source, a strip without a reduce, and any model the in-process prep
+converter reads it); Blender still does an OBJ source, a strip without a reduce, and any model the in-process prep
 names in the console ("model prep: using Blender because ..." — an animated file, a JPEG whose alpha is read, an
-object under a bone, ...). Since 2026-11-02 a static `.fbx` is read natively and takes the same in-process path as a
-`.glb`; a skinned or animated `.fbx` still needs Blender. Static GLB/OBJ/FBX bakes with neither Strip nor Reduce need **no** Blender: the GLB path uses the
+object under a bone, ...). Since 2026-11-02 an `.fbx` is read natively and prepped in process like a `.glb`, unless the reader names a limit; an
+animated file of any format is prepped by Blender, and in a static bake without prep an `.fbx` the native reader leaves
+by name goes to Unity's own FBX importer, said in the Console. Static GLB/OBJ/FBX bakes with neither Strip nor Reduce need **no** Blender: the GLB path uses the
 self-contained packaged `editor/Tools~/glbconv/glbconv.exe` (no .NET install required, and its `Weld & simplify` option decimates without
 Blender). A `dotnet glbconv.dll` fallback exists for local dev.
 
@@ -113,6 +107,13 @@ An xUnit suite (net471) over the **pure registry/parse/era layer** — the half 
 and where the bugs have historically been. Needs the same gitignored `References\` DLLs as the plugin build (mirrored
 into the test bin). Full detail — what's covered, what's deliberately out of scope and why, how to add a test — is in
 **[Testing.md](Testing.md)**.
+
+**The gate cleans up after itself (2026-11-08).** Its first step, `tools/temp_sweep.sh`, removes the gate's and the
+drills' own temporary directories older than two days from your `%TEMP%`, by their exact generated names only
+(`haf-<producer>.XXXXXXXXXX`); it never touches another program's files and never fails the gate. A new script that
+makes a temporary directory must use that name form and add its producer to the sweeper's list, or
+`Tests/test_temp_sweep.py` fails. If the gate is suddenly many times slower, compare `bash.exe -c :` with `sh.exe -c :`
+from PowerShell; a large gap was a stuck per-file state on `bash.exe` that a reboot cleared.
 
 ## Packaging a player release
 

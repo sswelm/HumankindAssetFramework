@@ -261,7 +261,7 @@ public class BakeTestRunnerWindow : EditorWindow
 
             new TestRow { name = "Vehicle Generate backend acceptance (every recipe)", kernels = true, needsBlender = true, thorough = true,
                 cost = "Generate twice per saved recipe — slow",
-                what = "Forces Blender and C# through the same Generate entry point. Compares the written GLB bytes, read-back rig, diagnostics, gun span sidecars and existing Lab goldens. Named fallbacks are reported separately and never count as C# acceptance. Blender remains the default.",
+                what = "Forces Blender and C# through the same Generate entry point. Compares the written GLB bytes, read-back rig, diagnostics, gun span sidecars and existing Lab goldens. Named fallbacks are reported separately and never count as C# acceptance. C# is the Vehicle Lab's default since 2026-10-27.",
                 run = VehicleGenerateAcceptanceTest.RunSection },
 
             new TestRow { name = "Does the Vehicle Lab still generate? (representative recipes)", quick = true, on = true, needsBlender = true, group = "lab",

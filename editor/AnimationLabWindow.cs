@@ -1557,7 +1557,8 @@ public class AnimationLabWindow : EditorWindow
         // left to tick. The flying height of a flyer is the Position z dial — the same dial the static path uses.
         EditorGUILayout.LabelField(" ", "Placement: centred + grounded automatically (same as a static bake)", EditorStyles.miniLabel);
         cur.keepTranslations = EditorGUILayout.Toggle(new GUIContent("Keep bone translations",
-            "CONVERSION path only: keep genuinely TRANSLATION-animated bone location curves through the bake — " +
+            "Keep genuinely TRANSLATION-animated bone location curves through the bake (with Convert raw rig off: only the attack " +
+            "clip's slides and the move clip's slides over 0.5 units) — " +
             "the engine plays them (vanilla tank tread shuttle bones are translation-driven). Historically all " +
             "location keys were stripped (rotation-only); that stays the default. Tick only for models authored " +
             "with deliberate translating bones (tread shuttles, sliding parts). Re-bake after changing."),
