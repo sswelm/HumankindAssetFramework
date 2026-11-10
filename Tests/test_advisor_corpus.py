@@ -1159,6 +1159,18 @@ class DeleteProposer(unittest.TestCase):
                                     self.training(), {"model": "b"}, [])
         self.assertEqual(preds, {("b/m.glb", 0): "", ("b/m.glb", 1): ""})
 
+    def test_one_unknown_or_negative_axis_does_not_make_a_part_tiny(self):
+        hull = self.row("b", 0, 1, 50.0)
+        for axis in ("sx", "sy", "sz"):
+            for invalid in ("", "nan", "inf", "-inf", "-0.01"):
+                with self.subTest(axis=axis, invalid=invalid):
+                    unknown = dict(self.row("b", 1, 0, 0.001), **{axis: invalid})
+                    self.assertIsNone(self.delete.extent(unknown))
+                    extents = self.delete.file_extents([hull, unknown])
+                    self.assertIsNone(self.delete.relative_size(unknown, extents))
+                    preds = self.delete.propose("delete", [hull, unknown], self.training(), {"model": "b"}, [])
+                    self.assertEqual(preds[("b/m.glb", 1)], "")
+
     def test_a_zero_threshold_switches_its_clause_off(self):
         # a zero-extent part (a point, or a row without extents) has relative size 0: a rule that says "none by size
         # alone" must not propose it, nor "no interior part"
@@ -1262,6 +1274,35 @@ class DeleteProposer(unittest.TestCase):
         self.common.merge_proposals(path, ("S",), [], "split.py")
         self.assertEqual(corpus.read_sidecar(path)[0], [("X", 1, "rivet"), ("X", 2, "gear")])   # an empty S proposal clears only the S
         self.assertEqual(self.common.merge_proposals(os.path.join(tmp.name, "new.glb.marks.proposed.txt"), ("X",), ["X|1|a"], "delete.py"), ["X|1|a"])
+
+    def test_conflicting_actions_for_one_node_are_refused_in_both_run_orders(self):
+        tmp = tempfile.TemporaryDirectory(prefix="advisor-proposals-")
+        self.addCleanup(tmp.cleanup)
+        path = os.path.join(tmp.name, "m.glb.marks.proposed.txt")
+        for first, second in (("S", "X"), ("X", "S"), ("T", "X"), ("A", "X")):
+            with self.subTest(first=first, second=second):
+                before = ("#fuse-groups v2\n%s|003|mast|tip\n" % first).encode("utf-8")
+                with open(path, "wb") as f:
+                    f.write(before)
+                with self.assertRaises(ValueError) as cm:
+                    self.common.merge_proposals(path, (second,), ["%s|+3|mast|tip" % second], "test")
+                self.assertIn("conflicting", str(cm.exception))
+                with open(path, "rb") as f:
+                    self.assertEqual(f.read(), before)
+
+    def test_a_failed_write_preserves_the_other_proposers_file(self):
+        tmp = tempfile.TemporaryDirectory(prefix="advisor-proposals-")
+        self.addCleanup(tmp.cleanup)
+        path = os.path.join(tmp.name, "m.glb.marks.proposed.txt")
+        before = b"#fuse-groups v2\nS|3|mast\nX|9|old\n"
+        with open(path, "wb") as f:
+            f.write(before)
+        # A real encoding failure after writing the header and kept lines must not truncate the old proposals.
+        with self.assertRaises(UnicodeEncodeError):
+            self.common.merge_proposals(path, ("X",), ["X|1|invalid\ud800"], "delete.py")
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), before)
+        self.assertEqual(os.listdir(tmp.name), [os.path.basename(path)])
 
 
 if __name__ == "__main__":

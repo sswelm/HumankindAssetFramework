@@ -10,6 +10,11 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **PR #275 review (2026-11-10).** Deletion sizes require all three dimensions to be finite and nonnegative: one
+  missing, nonfinite or negative axis must not turn a long part into a tiny deletion candidate. Shared proposal
+  writes refuse conflicting letters for one node in either proposer order, instead of letting the last sidecar
+  line silently win. Atomic replacement preserves the previous file if writing fails. Three regression cases
+  reproduce these failures before the fixes; the advisor suite now has 79 cases.
 - **THE VISIBILITY VERDICT FOR EVERY FILE, AND THE DELETION PROPOSER (2026-11-09; Phase 1 of `docs/Workshop-Advisor-Plan.md`).**
   `tools/advisor/probe_vis.sh` compiles `tools/advisor/ProbeVis.cs` against the editor sources and runs the Vehicle Lab's own
   probe (`VehicleProbe.Run`: escape rays over one BVH of the whole file, the inside-out count) over every GLB the corpus reads

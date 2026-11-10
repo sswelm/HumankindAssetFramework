@@ -47,8 +47,9 @@ def num(v):
 
 def extent(row):
     """The part's largest extent, or None when it was not measured (a blocked mesh: the corpus leaves its box empty)."""
-    es = [e for e in (num(row.get("sx")), num(row.get("sy")), num(row.get("sz"))) if e is not None]
-    return max(es) if es else None
+    es = [num(row.get(axis)) for axis in ("sx", "sy", "sz")]
+    # All three axes are needed: omitting one unknown/invalid extent can make a long part appear tiny.
+    return max(es) if all(e is not None and e >= 0 for e in es) else None
 
 
 def file_extents(rows):

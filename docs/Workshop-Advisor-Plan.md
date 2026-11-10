@@ -226,7 +226,10 @@ verdict in the table for every file; grouping is not started.**
   and 2.7 % of the model (median 0.35 %): visible fittings the user judged not worth their triangles, which no size
   rule separates from the ones kept - Phase 4's question. `--write` puts the X lines into the same
   `<file>.glb.marks.proposed.txt` the Split proposer writes its S lines to (`proposers/common.py`: each proposer
-  owns its letters, the other's stay).
+  owns its letters, the other's stay). If two letters target the same node, the write is refused by name and node
+  index so the user can resolve the conflict; the previous file remains unchanged. Writes replace the proposals
+  file atomically, so a failed write cannot discard the other proposer's saved lines. A deletion candidate requires
+  all three size dimensions to be finite and nonnegative; a partly unknown box is never treated as tiny.
 
 ### Phase 2: role classifier without a language model
 
