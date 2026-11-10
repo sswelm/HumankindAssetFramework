@@ -346,6 +346,56 @@ def boxes_in_one(r, name, material, count):
     return len(r.meshes) - 1
 
 
+def rigid_tread_fixtures(out, models):
+    """A pitched, closed belt (not the eight-vertex carrier fallback), with and without auxiliary roles."""
+    for key, trails in (("fx_links", 0), ("fx_links_dense", 70), ("fx_links_tight", 108),
+                        ("fx_links_full", 120), ("fx_links_fallback", 108)):
+        r = Rig(); ma = r.material("Steel")
+        r.node("Hull", mesh=r.mesh("Hull", at=(-2, .7, -.8), material=ma), scale=[4, 1, 1.6])
+        parts = [("Hull", 0, {})]
+        for i, (x, side) in enumerate(((-1.5, -1.1), (1.5, -1.1), (-1.5, 1.1), (1.5, 1.1))):
+            pos = [(x + .5 * math.cos(2 * math.pi * j / 32), .6 + .5 * math.sin(2 * math.pi * j / 32), side + w)
+                   for w in (-.1, .1) for j in range(32)]
+            idx = []
+            for j in range(32):
+                k = (j + 1) % 32
+                idx += [j, k, k + 32, j, k + 32, j + 32]
+            name = "W%d" % i
+            r.node(name, mesh=raw_mesh(r, name, ma, pos, idx)); parts.append((name, 1, {}))
+        radius = .55; length = 6 + 2 * math.pi * radius; stations = 120
+        for side, name in ((-1.1, "BeltL"), (1.1, "BeltR")):
+            if key == "fx_links_fallback" and name == "BeltR":
+                # No measurable pitch: nine legacy carriers survive beside the other track's six links.
+                r.node(name, mesh=r.mesh(name, material=ma), translation=[-1.5, .02, side], scale=[3, .05, .2])
+                parts.append((name, 6, {}))
+                continue
+            pos = []; idx = []
+            for j in range(stations):
+                s = j * length / stations
+                if s < 3:
+                    x, y, nx, ny = -1.5 + s, .6 - radius, 0, -1
+                elif s < 3 + math.pi * radius:
+                    a = -math.pi / 2 + (s - 3) / radius
+                    nx, ny = math.cos(a), math.sin(a); x, y = 1.5 + radius * nx, .6 + radius * ny
+                elif s < 6 + math.pi * radius:
+                    x, y, nx, ny = 1.5 - (s - 3 - math.pi * radius), .6 + radius, 0, 1
+                else:
+                    a = math.pi / 2 + (s - 6 - math.pi * radius) / radius
+                    nx, ny = math.cos(a), math.sin(a); x, y = -1.5 + radius * nx, .6 + radius * ny
+                pos += [(x + h * nx, y + h * ny, side + w) for h, w in ((-.025, -.1), (.025, -.1), (.025, .1), (-.025, .1))]
+            for j in range(stations):
+                for q in range(4):
+                    a, b = j * 4 + q, j * 4 + (q + 1) % 4
+                    c, d = ((j + 1) % stations) * 4 + (q + 1) % 4, ((j + 1) % stations) * 4 + q
+                    idx += [a, b, c, a, c, d]
+            r.node(name, mesh=raw_mesh(r, name, ma, pos, idx)); parts.append((name, 6, {}))
+        for i in range(trails):
+            name = "Trail%03d" % i
+            r.node(name, mesh=r.mesh(name, size=.02, material=ma), translation=[0, 1 + i * .03, 0])
+            parts.append((name, 10, {}))
+        recipe(out, key, r.write(models, key), parts, sub="recipes_rigid", treadMode=1, frames=4)
+
+
 def main(out):
     models = os.path.join(out, "models"); os.makedirs(models, exist_ok=True)
     for count in (126, 127):
@@ -684,6 +734,7 @@ def main(out):
             fields = dict(gunPivot=0.3, recoilDist=0.2, recoilFrames=16, recoilLead=0)
         recipe(out, key, r.write(models, key), parts, **fields)
     tracked("fx_r_tracks_fallback"); tracked("fx_r_tracks_recoil", gun=True)
+    rigid_tread_fixtures(out, models)
     # Stage 4 e3: Deploy direction/elevation and Recoil timing/stance; no frame_set in either action.
     for key, yaw, elev, spread, recoil, lead, recframes, wheel, gun in (
         ("fx_e3_deploy", 0, 32, 35, .25, 5, 10, True, True),

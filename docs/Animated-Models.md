@@ -219,7 +219,10 @@ wall allows (the Jagdpanzer's 28 wheels leave room for one); *Tread speed* sets 
 a longer clip, a polygon round each wheel (one flat facet per link), and the hand-modelled look of the band where it
 sat - the wraps and the sag are the template's now. The conveyor stays the default and nothing about it changed.
 **Not ported:** the tread stage is Blender's (the C# Generate leaves any running tread to the script), and the new
-mode has no drill fixture yet - it is a prototype to judge in the game first.
+mode now has pitched-belt Blender fixtures holding rigid motion, loop closure and the 126-bone limit, including
+auxiliary animated roles and carrier fallback. Allocation counts every existing role bone; fewer than four available
+link bones per track, or an over-budget finished rig, refuses export with an error. It remains a prototype to judge
+in the game.
 
 **Status (2026-07-26):** IN-GAME: the tread renders complete and the conveyor plays (the 211-translation-curve
 move clip verified in the shipped clip data and on the map) after the five-layer spike-plague fix chain — see

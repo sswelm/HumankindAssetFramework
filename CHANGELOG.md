@@ -10,6 +10,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **PR #278 review (2026-11-10).** Rigid links count all existing role bones when sharing the 126-bone capacity;
+  trails, recoil and other auxiliaries no longer let the clamp export beyond the wall. Insufficient link capacity and
+  an over-budget finished rig refuse export. Five pitched-belt Blender fixtures cover ordinary, dense and tight
+  budgets, exhaustion, carrier fallback, rigid motion and full-loop closure.
 - **A second tread: Rigid links, beside the conveyor (2026-11-10; Vehicle Lab *Tread type*, recipe `treadMode`, the
   script's `treadmode=links`).** "Can we learn how the Universal Tank's track functions and use it for the Jagdpanzer,
   where it worked so badly I disabled it?" Measured both: the T-62 has 30 separate links per side on a bone each,

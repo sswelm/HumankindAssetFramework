@@ -787,6 +787,11 @@ def _guard(fn):
 # more entry on top, so 126 Blender bones is the budget with deploy_convert's margin. The Lab surfaces "*** WARNING"
 # lines in its status box, so an over-budget rig is said out loud instead of spiking in-game.
 _BONE_BUDGET = 126
+def _rigid_link_budget(existing, removable, tracks, limit=126):
+    """Per-track capacity after replacing the legacy carriers; count ALL other role bones."""
+    return max(0, (limit - existing + removable) // tracks) if tracks > 0 else 0
+
+
 def _bone_wall_check(_arm):
     _n = len(_arm.data.bones)
     if _n > _BONE_BUDGET:
@@ -2273,6 +2278,11 @@ _band_rot = {}     # wrap bone -> radius the tread band rides at (for conveyor-p
 _link_pitch = {}   # part -> measured track-link pitch (conveyor advance = one pitch -> invisible restart)
 _link_fund = {}    # part -> physical link length (autocorrelation fundamental) for rigid link cells
 _link_jobs = {}    # part -> path-instanced rigid-link job (cells, ring path, rest transforms)
+if tread_links:
+    # All role bones exist now. Only the actual legacy carriers will be removed when
+    # link jobs are installed; wheels alone omit trails, recoil, oars, sails, etc.
+    _carrier_names = {name for info in track_infos for name in info[1] if arm_data.bones.get(name) is not None}
+    _rigid_budget = _rigid_link_budget(len(arm_data.bones), len(_carrier_names), len(track_infos), _BONE_BUDGET)
 for o in objs:
     if o.name in oar_by_name:
         # OARS skin PER-VERTEX into their individual oar bones (like treads, one mesh -> many bones)
@@ -2725,7 +2735,11 @@ for o in objs:
                 # every cell is a bone here: the budget is the bone-index wall itself. The loop is _nl MOLDED links
                 # long (the pattern's period: a copy of one link fits every place on the loop only at that length);
                 # the detail dial asks for up to that many cells per link, the wall says how many fit.
-                _link_budget = max(8, (_BONE_BUDGET - _non_link - 2) // max(1, len(track_names)))
+                _link_budget = _rigid_budget
+                if _link_budget < 4:
+                    _error = "rigid links need at least 4 bones per track; the %d-bone budget leaves %d. Mark fewer separate animated parts." % (_BONE_BUDGET, _link_budget)
+                    print("VEHICLE ERROR: " + _error)
+                    raise RuntimeError(_error)
                 _nl = max(4, int(round(_L / _fund_p)))
                 if _nl > _link_budget:
                     print("VEHICLE *** WARNING: tread '%s' has %d links, the bone wall leaves %d per track - links are merged (%d bones), the molded pattern will not repeat exactly"
@@ -4044,7 +4058,13 @@ for _xo in bpy.context.scene.objects:
     _xo.data.calc_loop_triangles()
     _xt_v += len(_xo.data.vertices); _xt_t += len(_xo.data.loop_triangles); _xt_m += 1
 print("VEHICLE export totals: %d verts, %d tris across %d mesh(es)" % (_xt_v, _xt_t, _xt_m))
-_bone_wall_check(arm)   # every rig, not only the tread path that prints the armature line
+_export_bones = _bone_wall_check(arm)   # every rig, not only the tread path that prints the armature line
+if tread_links and _export_bones > _BONE_BUDGET:
+    # A track without a measurable pitch can retain its legacy carriers. Check the
+    # finished rig too, before either output is written, rather than exporting spikes.
+    _error = "rigid links exceed the %d-bone budget (%d bones); mark fewer separate animated parts." % (_BONE_BUDGET, _export_bones)
+    print("VEHICLE ERROR: " + _error)
+    raise RuntimeError(_error)
 _lap("join + clips")
 bpy.ops.export_scene.gltf(filepath=out_glb, export_animations=True)
 if preview_fbx:
