@@ -95,6 +95,38 @@ public class VehicleRigArgsTests
         Assert.Equal("bright=1.2|1", VehicleRigArgLine.RigArgv(c).Select(x => x.value).First(v => v.StartsWith("bright=")));
     }
 
+    /// <summary>The tread's kind travels as a tagged argument, and only when it changes anything: absent for the conveyor (every
+    /// recipe before 2026-11-10 gives the argument line it always gave), absent when the tracks do not run at all.</summary>
+    [Fact]
+    public void The_rigid_links_tread_is_a_tag_only_when_the_tracks_run()
+    {
+        bool Tag(VehicleRigArgs x) => VehicleRigArgLine.RigArgv(x).Any(v => v.value == "treadmode=links");
+        var a = Sample(); a.tracksStatic = false; a.spinEnabled = true;
+        a.treadMode = 0; Assert.False(Tag(a));
+        a.treadMode = 1; Assert.True(Tag(a));
+        Assert.Equal(VehicleRigArgLine.RigArgv(a).Count(v => v.value.StartsWith("treadmode=", StringComparison.Ordinal)), 1);
+        a.tracksStatic = true; Assert.False(Tag(a));
+        a.tracksStatic = false; a.spinEnabled = false; Assert.False(Tag(a));
+        // the positional block is the conveyor's own: the tag is the only difference between the two argument lines
+        a.spinEnabled = true;
+        var links = VehicleRigArgLine.RigArgv(a).Select(v => v.value).ToList();
+        a.treadMode = 0;
+        var conveyor = VehicleRigArgLine.RigArgv(a).Select(v => v.value).ToList();
+        Assert.Equal(conveyor, links.Where(v => v != "treadmode=links").ToList());
+    }
+
+    [Theory]
+    [InlineData("", 0)]
+    [InlineData(",\"treadMode\":0", 0)]
+    [InlineData(",\"treadMode\":1", 1)]
+    [InlineData(",\"treadMode\":7", 0)]      // an unknown kind is the conveyor, never a guess
+    [InlineData(",\"treadMode\":null", 0)]
+    public void A_recipe_names_the_tread_kind_or_means_the_conveyor(string field, int expected)
+    {
+        var r = VehicleRigArgLine.RigArgsFromRecipe("{\"srcFile\":\"D:/m/a.glb\",\"outGlb\":\"D:/m/a_Spin.glb\",\"frames\":15,\"axisChoice\":0,\"minVerts\":1,\"degrees\":60.0" + field + ",\"parts\":[{\"name\":\"P\",\"verts\":8,\"role\":1}]}");
+        Assert.Equal(expected, r.args.treadMode);
+    }
+
     [Fact]
     public void A_bare_recipe_reads_as_the_windows_defaults()
     {

@@ -66,6 +66,17 @@ python "$ROOT/tools/vehiclerig-drill/vehiclerig_fixtures.py" "$WTMP/fixtures" > 
 "$TMPD/VehicleRigJobs.exe" "$WTMP/fixtures/recipes" "$WTMP/fxwork" --all > "$TMPD/fxjobs_raw.txt"; fjrc=$?
 tr -d '\r' < "$TMPD/fxjobs_raw.txt" >> "$TMPD/jobs.txt"
 [ "$fjrc" -eq 0 ] || { grep -E '^(INVALID|UNAVAILABLE)' "$TMPD/fxjobs_raw.txt"; echo "FAIL — vehicle_rig drill: a fixture recipe did not become a job (rc=$fjrc)"; exit 1; }
+# Rigid links are a Blender-only path, so the native stage comparison cannot exercise their
+# motion or enforce the real bone wall. Run pitched belts through the complete production script.
+"$TMPD/VehicleRigJobs.exe" "$WTMP/fixtures/recipes_rigid" "$WTMP/rigidwork" --all > "$TMPD/rigid_jobs.txt"; rjrc=$?
+[ "$rjrc" -eq 0 ] || { cat "$TMPD/rigid_jobs.txt"; echo "FAIL — rigid tread fixture arguments"; exit 1; }
+oracle_blender rigid_treads "$TMPD/rigid_raw.txt" --dir rigid_exports --key "$SCRIPT" "$ROOT/tools/vehiclerig-drill/blender_rigid_tread_check.py" "$WTMP/rigid_jobs.txt" -- --background --python "$(cygpath -m "$ROOT/tools/vehiclerig-drill/blender_rigid_tread_check.py")" -- "$(cygpath -m "$SCRIPT")" "$WTMP/rigid_jobs.txt" "$WTMP/rigid_exports"
+rrc=$?; oracle_check
+tr -d '\r' < "$TMPD/rigid_raw.txt" > "$TMPD/rigid.txt"
+if [ "$rrc" -ne 0 ] || [ "$(grep -c '^RIGID PASS' "$TMPD/rigid.txt")" -ne 5 ] || grep -q '^RIGID FAIL' "$TMPD/rigid.txt"; then
+  tail -50 "$TMPD/rigid.txt"; echo "FAIL — rigid tread motion / bone budget"; exit 1
+fi
+grep '^RIGID PASS' "$TMPD/rigid.txt"
 # argument fixtures: post-edited (vehiclerig_fixtures.py --exits) into text the Lab's builder never writes. EXIT:/DIES:
 # keys name a required stop; unprefixed keys are valid argument variants and must complete like every positive fixture.
 "$TMPD/VehicleRigJobs.exe" "$WTMP/fixtures/recipes_exit" "$WTMP/fxwork" --all > "$TMPD/fxexit_raw.txt"; ferc=$?

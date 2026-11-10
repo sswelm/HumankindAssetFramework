@@ -207,6 +207,8 @@ public class VehicleLabWindow : EditorWindow
         "4 — quarter link (smoothest, most bones)", "2 — half link", "1 — one bone per link",
         "0.5 — one bone per TWO links", "0.25 — one bone per FOUR links (coarsest)" };
     [SerializeField] bool tracksStatic = false; // isolation switch: rig tread loops rigid to the hull (no link bones, no conveyor)
+    [SerializeField] int treadMode = 0;         // 0 = hybrid conveyor (the tread since 2026-07), 1 = rigid links (instanced, full circuit - 2026-11-10)
+    static readonly string[] TreadModeNames = { "Conveyor (cells + shuttles, short loop)", "Rigid links (instanced, full circuit)" };
     [SerializeField] bool spinEnabled = true;   // MASTER spin switch (2026-08-19, user request: disabling spin on a wheeled vehicle meant unmarking every wheel — the wave-checkbox lesson again). Off = generate with 0 spin degrees + static tracks; bones/markings all kept.
     [SerializeField] bool doubleSided = false;  // DOUBLE-SIDED at the source (2026-09-03): the game culls backfaces, so single-sided / CAD parts (thin spokes, plates) render see-through. On = vehicle_rig.py appends reversed, slightly-inset faces so the exported Spin GLB is genuinely two-sided — no runtime doubling, no preview mismatch.
     [SerializeField] Role bulkRole = Role.Ignore;   // "Mark all shown as" — the role applied to every filtered-in part at once
@@ -363,6 +365,7 @@ public class VehicleLabWindow : EditorWindow
         public float recoilDist = 0f; public int recoilFrames = 16;   // recoil: fraction of tube length + clip length
         public int recoilLead = 0;         // held frames before the kick
         public bool tracksStatic = false;
+        public int treadMode = 0;
         public bool spinEnabled = true;    // default true: recipes that predate the field keep their spin (absent-field = old behavior)
         public bool doubleSided = false;   // source double-siding (absent-field = old behavior: off)
         public bool fixInsideOut = false;  // outward normal recalc (absent-field = old behavior: off)
@@ -875,6 +878,7 @@ public class VehicleLabWindow : EditorWindow
                     tracksStatic = EditorGUILayout.Toggle(new GUIContent("Static tracks (no movement)", "ISOLATION SWITCH: rig the tread loops rigid to the hull — no link bones, no conveyor animation. Wheels still spin; the track geometry stays but doesn't run. For debugging (or a cheap LOD-style rig). Untick to enable the tread dials below."), tracksStatic);
                     using (new EditorGUI.DisabledScope(tracksStatic))
                     {
+                        treadMode = EditorGUILayout.Popup(new GUIContent("Tread type", "HOW THE TRACK RUNS. Conveyor: the tread since 2026-07 - rigid cells with link bones on the wheel wraps, the straight runs sliding as shuttles, a short loop that restarts onto itself. Rigid links: learned from the T-62 - one complete link of the ground run is copied onto every place of the loop, each copy flat on its own bone, and the clip runs ONE FULL CIRCUIT, so nothing stretches and nothing snaps back (a longer clip, a polygon round each wheel). Tread detail then asks for bones per link, as far as the 126-bone wall allows; Tread speed sets the pace. Switch back any time - the choice is saved in the recipe."), treadMode == 1 ? 1 : 0, TreadModeNames);
                         treadAdvCells = EditorGUILayout.IntSlider(new GUIContent("Tread speed (cells/loop)", "Belt advance per Spin loop, in cells (cell size set by Tread detail below). At detail 4: 4 cells = one full link — the belt matches the big wrap wheels exactly; 3 = slightly slower. Restarts stay invisible at any value (the pattern maps onto the cleat sub-grid)."), treadAdvCells, 1, 8);
                         int di = System.Array.IndexOf(TreadDetailValues, treadCellsPerLink); if (di < 0) di = 0;
                         di = EditorGUILayout.Popup(new GUIContent("Tread detail (cells/link)", "THE BONES DIAL: how many rigid tread pieces per molded track link. Above 1 splits links (smoother wheel wraps, more bones); below 1 MERGES links (one bone carries 2 or 4 links — the escape hatch for finely-molded tracks like the Bradley's 0.186 pitch, where even one-per-link is 75 bones a side). Tread speed is in these cells; the pattern still maps at every restart."), di, TreadDetailLabels);
@@ -1864,7 +1868,7 @@ public class VehicleLabWindow : EditorWindow
         srcFile = ""; outGlb = ""; lastOutGlb = ""; loadedRecipe = ""; recipeReadThisSession = false; savedRecipeJson = "";
         parts.Clear(); boneParts.Clear(); useSourceRig = false;
         frames = 15; degrees = -360f; axisChoice = 0;
-        treadAdvCells = 3; treadCellsPerLink = 4f; tracksStatic = false;
+        treadAdvCells = 3; treadCellsPerLink = 4f; tracksStatic = false; treadMode = 0;
         rockDegrees = 0f; rockFrames = 120; rockAxisChoice = 0; rockHeading = 0f; rockPitchDeg = 2.4f; rockRollCycles = 1; rockPitchCycles = 1; rockPitchPhase = 90f; waveEnabled = false; foldSpin = true; foldWave = false; foldOrient = false; foldParts = true; foldOars = false; foldReduce = false; foldTrails = false; modelRot = Vector3.zero;
         // 0.5.4/0.5.5 fields (review find 2026-09-06: "new model" silently carried a 95% reduce or a tuned
         // stroke into the next model) — reset to the live defaults, same values as a fresh window.
@@ -1999,7 +2003,7 @@ public class VehicleLabWindow : EditorWindow
         srcFile = srcFile, outGlb = outGlb, frames = frames, axisChoice = axisChoice, minVerts = minVerts, degrees = degrees,
         parts = parts, boneParts = boneParts, useSourceRig = useSourceRig, treadAdvCells = treadAdvCells, treadCellsPerLink = treadCellsPerLink,
         // orientation + tread isolation + wave rock — the rest of what the bake command consumes
-        tracksStatic = tracksStatic, spinEnabled = spinEnabled, doubleSided = doubleSided, fixInsideOut = fixInsideOut, oarSweepDeg = oarSweepDeg, oarDipDeg = oarDipDeg, oarFrames = oarFrames, oarBladeRollDeg = oarBladeRollDeg, oarLiftDeg = oarLiftDeg, oarRakeDeg = oarRakeDeg, oarPivotPct = oarPivotPct, oarLengthPct = oarLengthPct, riggingReducePct = riggingReducePct, structureReducePct = structureReducePct, bodyReducePct = bodyReducePct, oarReducePct = oarReducePct, sailReducePct = sailReducePct, rudderReducePct = rudderReducePct, wheelReducePct = wheelReducePct, flipReducePct = flipReducePct, preserveReducePct = preserveReducePct, detailReducePct = detailReducePct, defaultReducePct = defaultReducePct, shroudReducePct = shroudReducePct, turretReducePct = turretReducePct, gunReducePct = gunReducePct, windowReducePct = windowReducePct, sailFoldIdle = sailFoldIdle, sailFoldFrames = sailFoldFrames, sailFoldAngleDeg = sailFoldAngleDeg, sailFoldReverse = sailFoldReverse, sailFoldSag = sailFoldSag, flagFoldOn = flagFoldOn, flagFoldDeg = flagFoldDeg, flagFoldFrames = flagFoldFrames, srcFile2 = srcFile2, model2Off = model2Off, model2Rot = model2Rot, model2Scale = 1f, model2ScaleXYZ = model2Scale, model1Bright = model1Bright, model2Bright = model2Bright, tailAxisChoice = tailAxisChoice, tailYawAdj = tailYawAdj, tailPitchAdj = tailPitchAdj, modelRot = modelRot, waveEnabled = waveEnabled,
+        tracksStatic = tracksStatic, treadMode = treadMode, spinEnabled = spinEnabled, doubleSided = doubleSided, fixInsideOut = fixInsideOut, oarSweepDeg = oarSweepDeg, oarDipDeg = oarDipDeg, oarFrames = oarFrames, oarBladeRollDeg = oarBladeRollDeg, oarLiftDeg = oarLiftDeg, oarRakeDeg = oarRakeDeg, oarPivotPct = oarPivotPct, oarLengthPct = oarLengthPct, riggingReducePct = riggingReducePct, structureReducePct = structureReducePct, bodyReducePct = bodyReducePct, oarReducePct = oarReducePct, sailReducePct = sailReducePct, rudderReducePct = rudderReducePct, wheelReducePct = wheelReducePct, flipReducePct = flipReducePct, preserveReducePct = preserveReducePct, detailReducePct = detailReducePct, defaultReducePct = defaultReducePct, shroudReducePct = shroudReducePct, turretReducePct = turretReducePct, gunReducePct = gunReducePct, windowReducePct = windowReducePct, sailFoldIdle = sailFoldIdle, sailFoldFrames = sailFoldFrames, sailFoldAngleDeg = sailFoldAngleDeg, sailFoldReverse = sailFoldReverse, sailFoldSag = sailFoldSag, flagFoldOn = flagFoldOn, flagFoldDeg = flagFoldDeg, flagFoldFrames = flagFoldFrames, srcFile2 = srcFile2, model2Off = model2Off, model2Rot = model2Rot, model2Scale = 1f, model2ScaleXYZ = model2Scale, model1Bright = model1Bright, model2Bright = model2Bright, tailAxisChoice = tailAxisChoice, tailYawAdj = tailYawAdj, tailPitchAdj = tailPitchAdj, modelRot = modelRot, waveEnabled = waveEnabled,
         trailSpreadDeg = trailSpreadDeg, trailFrames = trailFrames, gunPivot = gunPivot, gunDeployElev = gunDeployElev, recoilDist = recoilDist, recoilFrames = recoilFrames, recoilLead = recoilLead,
         rockDegrees = rockDegrees, rockFrames = rockFrames, rockAxisChoice = rockAxisChoice, rockHeading = rockHeading,
         rockPitchDeg = rockPitchDeg, rockRollCycles = rockRollCycles, rockPitchCycles = rockPitchCycles, rockPitchPhase = rockPitchPhase,
@@ -2095,7 +2099,7 @@ public class VehicleLabWindow : EditorWindow
             // rock and vice-versa — no leak between models). off/zero is the safe neutral for a pre-2026-08-01 recipe;
             // the counted fields guard against a missing-key 0 the way treadAdvCells does.
             generateRoute = BlenderVehicleRigInProcess.NormalizeRoute(r.generateRoute);
-            modelRot = r.modelRot; tracksStatic = r.tracksStatic; spinEnabled = r.spinEnabled; doubleSided = r.doubleSided; fixInsideOut = r.fixInsideOut;
+            modelRot = r.modelRot; tracksStatic = r.tracksStatic; treadMode = r.treadMode == 1 ? 1 : 0; spinEnabled = r.spinEnabled; doubleSided = r.doubleSided; fixInsideOut = r.fixInsideOut;
             // MEASURED (review finding 10, Unity 2021.3.1f1 batch probe 2026-09-07): JsonUtility.FromJson DOES
             // run field initializers — a key absent from an old recipe keeps the DTO initializer, which is that
             // field's live default by construction. The Has() ternaries that duplicated each default here were
@@ -2534,7 +2538,7 @@ public class VehicleLabWindow : EditorWindow
     VehicleRigArgs RigArgsFromFields(bool fast, string outGlbPath, string previewFbx, Dictionary<string, string> namesFiles, string partTxFile) => new VehicleRigArgs
     {
         fast = fast, srcFile = srcFile, outGlb = outGlbPath, previewFbx = previewFbx, frames = frames, axisChoice = axisChoice, minVerts = minVerts, degrees = degrees,
-        treadAdvCells = treadAdvCells, treadCellsPerLink = treadCellsPerLink, tracksStatic = tracksStatic, spinEnabled = spinEnabled,
+        treadAdvCells = treadAdvCells, treadCellsPerLink = treadCellsPerLink, tracksStatic = tracksStatic, treadMode = treadMode, spinEnabled = spinEnabled,
         waveEnabled = waveEnabled, rockDegrees = rockDegrees, rockFrames = rockFrames, rockAxisChoice = rockAxisChoice, rockHeading = rockHeading, rockPitchDeg = rockPitchDeg,
         rockPitchCycles = rockPitchCycles, rockRollCycles = rockRollCycles, rockPitchPhase = rockPitchPhase, modelRotX = modelRot.x, modelRotY = modelRot.y, modelRotZ = modelRot.z,
         tailAxisChoice = tailAxisChoice, tailYawAdj = tailYawAdj, tailPitchAdj = tailPitchAdj, trailSpreadDeg = trailSpreadDeg, trailFrames = trailFrames,

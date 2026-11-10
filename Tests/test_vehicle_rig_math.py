@@ -11,7 +11,7 @@ import unittest
 SCRIPT = Path(__file__).parents[1] / "editor" / "Tools~" / "vehicle_rig.py"
 SOURCE = SCRIPT.read_text(encoding="utf-8")
 TREE = ast.parse(SOURCE, filename=str(SCRIPT))
-PURE_NAMES = {"_fitted_cycle_count", "_oar_recovery_metrics", "_merge2_scale", "_tagged_reduce_pct", "_tagged_names_pct"}
+PURE_NAMES = {"_fitted_cycle_count", "_oar_recovery_metrics", "_merge2_scale", "_tagged_reduce_pct", "_tagged_names_pct", "_rigid_link_budget"}
 PURE_DEFS = [node for node in TREE.body if isinstance(node, ast.FunctionDef) and node.name in PURE_NAMES]
 if {node.name for node in PURE_DEFS} != PURE_NAMES:
     raise RuntimeError("Vehicle Lab pure helper contract changed; update this test deliberately")
@@ -20,6 +20,17 @@ exec(compile(ast.Module(body=PURE_DEFS, type_ignores=[]), str(SCRIPT), "exec"), 
 
 
 class VehicleRigMathTests(unittest.TestCase):
+    def test_rigid_links_respect_all_role_bones_and_exhausted_capacity(self):
+        budget = NAMESPACE["_rigid_link_budget"]
+        for existing, removable, tracks, expected in ((23, 18, 2, 60), (93, 18, 2, 25),
+                                                     (132, 18, 2, 6), (136, 18, 2, 4),
+                                                     (143, 18, 2, 0), (1, 0, 0, 0)):
+            with self.subTest(existing=existing, tracks=tracks):
+                actual = budget(existing, removable, tracks)
+                self.assertEqual(expected, actual)
+                if actual:
+                    self.assertLessEqual(existing - removable + actual * tracks, 126)
+
     def test_default_rowing_repeats_through_long_wave_clip(self):
         fitted = NAMESPACE["_fitted_cycle_count"]
         self.assertEqual(5, fitted(120, 24))

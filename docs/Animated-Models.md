@@ -196,6 +196,34 @@ rigid to the hull (no link bones/conveyor; wheels still spin) for debugging or a
 **Reduce to ~tris must be 0** for link treads — decimation merges verts across rigid cells and tears the
 band (0 genuinely means off since 2026-07-26).
 
+**Tread type: Rigid links (2026-11-10, a second kind beside the conveyor; the Lab's *Tread type* popup, saved in the
+recipe as `treadMode`, the script's tagged argument `treadmode=links`).** Learned from the T-62, whose track works in
+the game. Measured on its source: 30 pads and 30 pins per side, each its OWN mesh on its own bone, every link
+travelling one FULL circuit over the 378-frame clip. Measured on the Jagdpanzer's conveyor: the cells are rigid per
+vertex but about 2,900 edges per track join two bones, up to 420 of them stretch more than a tenth of a link per
+frame, and the 15-frame loop snaps back onto a band that misses its own start by up to 0.23 units. Rigid links
+removes each cause, and three renders of a full circuit shaped it:
+
+1. *A link is its own piece of mesh* - faces shared by two cells stretch.
+2. *A link is flat*, laid on the chord between its two pins - a band modelled in place has every link pre-bent to
+   where it sits, and a piece of the sprocket's arc stays an arc when it reaches the ground.
+3. *Every link is a copy of ONE complete link* of the ground run - the source band has stretches with next to no
+   geometry (hidden under the side skirts), and a full circuit carries them into view.
+
+So the loop is cut into its molded links (the pattern's period, so a copy fits every place), the template link is
+copied onto each, every copy rides its own bone along the same belt-around-pulleys path (pins on the path, the link
+on the chord), there are no shuttles, and the clip runs one full circuit in a whole number of spin cycles: every
+link ends where it began, nothing snaps. On the Jagdpanzer: 27 links per track, 84 bones, a 540-frame clip, zero
+edges between bones, zero stretch, exact loop closure. *Tread detail* asks for bones per link as far as the 126-bone
+wall allows (the Jagdpanzer's 28 wheels leave room for one); *Tread speed* sets the advance per spin cycle. The cost:
+a longer clip, a polygon round each wheel (one flat facet per link), and the hand-modelled look of the band where it
+sat - the wraps and the sag are the template's now. The conveyor stays the default and nothing about it changed.
+**Not ported:** the tread stage is Blender's (the C# Generate leaves any running tread to the script), and the new
+mode now has pitched-belt Blender fixtures holding rigid motion, loop closure and the 126-bone limit, including
+auxiliary animated roles and carrier fallback. Allocation counts every existing role bone; fewer than four available
+link bones per track, or an over-budget finished rig, refuses export with an error. It remains a prototype to judge
+in the game.
+
 **Status (2026-07-26):** IN-GAME: the tread renders complete and the conveyor plays (the 211-translation-curve
 move clip verified in the shipped clip data and on the map) after the five-layer spike-plague fix chain — see
 Animation-Pitfalls → "The spike plague". OPEN: a residual idle micro-twitch triggered by the link system

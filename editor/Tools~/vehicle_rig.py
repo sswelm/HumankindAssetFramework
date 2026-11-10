@@ -787,6 +787,11 @@ def _guard(fn):
 # more entry on top, so 126 Blender bones is the budget with deploy_convert's margin. The Lab surfaces "*** WARNING"
 # lines in its status box, so an over-budget rig is said out loud instead of spiking in-game.
 _BONE_BUDGET = 126
+def _rigid_link_budget(existing, removable, tracks, limit=126):
+    """Per-track capacity after replacing the legacy carriers; count ALL other role bones."""
+    return max(0, (limit - existing + removable) // tracks) if tracks > 0 else 0
+
+
 def _bone_wall_check(_arm):
     _n = len(_arm.data.bones)
     if _n > _BONE_BUDGET:
@@ -1098,6 +1103,14 @@ tread_cells_per_link = max(0.25, min(4.0, float(argv[15]))) if len(argv) > 15 an
 # 1 = rig the tread loops STATIC (rigid with the hull, no link bones, no conveyor — the isolation switch:
 # wheels still spin, the tracks just don't run). Geometry stays visible.
 tracks_static = len(argv) > 16 and argv[16].strip() == "1"
+# TREAD MODE (tagged, 2026-11-10): "treadmode=links" = the RIGID-LINK tread beside the hybrid conveyor (absent = the
+# conveyor, as before). Learned from the T-62, whose track works in the game: its links are SEPARATE pieces, one bone
+# each, travelling a full circuit. Measured on the Jagdpanzer, the conveyor's cells are rigid per VERTEX but the faces
+# between two cells are shared (about 2,900 edges per track join two bones; up to 420 stretch over 10% of a link per
+# frame) and the 15-frame loop snaps back onto a band that is not perfectly periodic. In links mode the band is CUT
+# between links (every face belongs to one link, the boundary edges are split), every link owns a bone (no shuttles),
+# and the clip runs one full circuit, so every link ends where it began and nothing snaps.
+tread_links = (not tracks_static) and any(a.strip() == "treadmode=links" for a in argv)
 # WAVE ROCK (argv[17] amplitude in degrees, argv[18] cycle length in frames; canoe finding 2026-07-31): a slow
 # idle sway for FLOATING units. Authored on a dedicated "Hull" bone (child of Root, carrying every part that
 # would otherwise skin to Root) so the engine's root anchor stays identity. Rotation-only by construction —
@@ -2265,6 +2278,11 @@ _band_rot = {}     # wrap bone -> radius the tread band rides at (for conveyor-p
 _link_pitch = {}   # part -> measured track-link pitch (conveyor advance = one pitch -> invisible restart)
 _link_fund = {}    # part -> physical link length (autocorrelation fundamental) for rigid link cells
 _link_jobs = {}    # part -> path-instanced rigid-link job (cells, ring path, rest transforms)
+if tread_links:
+    # All role bones exist now. Only the actual legacy carriers will be removed when
+    # link jobs are installed; wheels alone omit trails, recoil, oars, sails, etc.
+    _carrier_names = {name for info in track_infos for name in info[1] if arm_data.bones.get(name) is not None}
+    _rigid_budget = _rigid_link_budget(len(arm_data.bones), len(_carrier_names), len(track_infos), _BONE_BUDGET)
 for o in objs:
     if o.name in oar_by_name:
         # OARS skin PER-VERTEX into their individual oar bones (like treads, one mesh -> many bones)
@@ -2649,7 +2667,7 @@ for o in objs:
             # speed and exact restart. NOTE the bone budget (_BONE_BUDGET, the index-127 wall): quarter-link cells
             # were 216 link bones on the pre-hybrid Jagdpanzer; the v2 hybrid below bones only the wrap arcs, and
             # link mode DELETES the unused legacy tread bones (18).
-            _CPL = tread_cells_per_link   # cells per link — the Lab's "Tread detail" bones dial
+            _CPL = tread_cells_per_link   # cells per link — the Lab's "Tread detail" bones dial (links mode: the length of a rigid link, clamped to the bone wall below)
 
             def _project(_ptsP, _SP2):
                 # per-vert path parameter: nearest path sample (XZ plane)
@@ -2712,6 +2730,23 @@ for o in objs:
             # which says when a rig is over it, rather than coarsening every tread that already fits.
             _non_link = len(cluster_bones) + 1 + (1 if turret_names else 0) + (1 if gun_names else 0)
             _link_budget = max(8, (240 - _non_link) // max(1, len(track_names)))
+            _nl = _kph = 0
+            if tread_links:
+                # every cell is a bone here: the budget is the bone-index wall itself. The loop is _nl MOLDED links
+                # long (the pattern's period: a copy of one link fits every place on the loop only at that length);
+                # the detail dial asks for up to that many cells per link, the wall says how many fit.
+                _link_budget = _rigid_budget
+                if _link_budget < 4:
+                    _error = "rigid links need at least 4 bones per track; the %d-bone budget leaves %d. Mark fewer separate animated parts." % (_BONE_BUDGET, _link_budget)
+                    print("VEHICLE ERROR: " + _error)
+                    raise RuntimeError(_error)
+                _nl = max(4, int(round(_L / _fund_p)))
+                if _nl > _link_budget:
+                    print("VEHICLE *** WARNING: tread '%s' has %d links, the bone wall leaves %d per track - links are merged (%d bones), the molded pattern will not repeat exactly"
+                          % (o.name, _nl, _link_budget, _link_budget))
+                    _nl = _link_budget
+                _kph = max(1, min(int(round(_CPL)), _link_budget // _nl))
+                _NC = _nl * _kph
             if _NC > _link_budget:
                 print("VEHICLE tread '%s' CELL CLAMP: %d cells -> %d (%d wheels+aux leave %d cells/track) — cells grow accordingly; lower Tread detail to regain smoothness headroom"
                       % (o.name, _NC, _link_budget, len(cluster_bones), _link_budget))
@@ -2730,6 +2765,107 @@ for o in objs:
                 if _best_cross is None or _cross < _best_cross:
                     _best_off, _best_cross = _off, _cross
             _cell_of = [min(_NC - 1, int(((_s_of[_vi] + _best_off) % _L) / _cellL)) for _vi in range(len(_wmap))]
+            if tread_links:
+                # PATH-INSTANCED LINKS, the T-62's shape made from one band. Three findings shaped this (2026-11-10,
+                # each a render of the Jagdpanzer running a full circuit):
+                #   1. faces shared by two cells stretch - a link must be its own piece of mesh;
+                #   2. a band modelled in place has every link pre-bent to where it sits - a piece of the sprocket's arc
+                #      stays an arc on the ground - so a link must be FLAT, laid on the chord between its two pins;
+                #   3. the source band has stretches with next to no geometry (hidden under the side skirts), and a full
+                #      circuit carries them into view - so every link must be a COPY of one complete link.
+                # So: the loop is _nl molded links long; one complete, straight link of the ground run is the TEMPLATE
+                # (its _kph cells, when the bone wall leaves room for more than one bone per link); every link of the
+                # loop is a copy of it, each vertex keeping its distance ALONG the path from its cell's centre and its
+                # height ABOVE the path, laid out on its cell's chord. The original band's faces are then removed.
+                import bmesh as _bml
+                _bm = _bml.new(); _bm.from_mesh(o.data)
+                _hl = 0.5 * _cellL
+
+                def _pe(_sq):
+                    _sq = _sq % _L
+                    _b = min(_M - 1, max(0, _bs.bisect_right(_S, _sq) - 1)); _b2 = (_b + 1) % _M
+                    _sg = _S[_b + 1] - _S[_b]
+                    _fq = ((_sq - _S[_b]) / _sg) if _sg > 1e-9 else 0.0
+                    return _pts[_b].lerp(_pts[_b2], _fq)
+
+                def _s_at(_x, _z):
+                    _bd, _bmi = 1e18, 0
+                    for _m in range(_M):
+                        _pp = _pts[_m]
+                        _dd = (_pp.x - _x) * (_pp.x - _x) + (_pp.z - _z) * (_pp.z - _z)
+                        if _dd < _bd:
+                            _bd, _bmi = _dd, _m
+                    return _S[_bmi]
+                _frame_of = {}
+                for _ci in range(_NC):
+                    _sc0 = ((_ci + 0.5) * _cellL - _best_off) % _L
+                    _pa, _pb = _pe(_sc0 - _hl), _pe(_sc0 + _hl)
+                    _chord = (_pb - _pa).length
+                    _dc = (_pb - _pa); _dc = _dc.normalized() if _dc.length > 1e-9 else Vector((1, 0, 0))
+                    # the path samples a vertex of this cell may project onto: its own stretch and a cell either side
+                    # (the nearest sample of the WHOLE path put vertices near the sprocket, where the ramp and the top
+                    # run pass close by, on the other branch and threw them a unit away)
+                    _near = [_m for _m in range(_M) if abs(((_S[_m] - _sc0 + 0.5 * _L) % _L) - 0.5 * _L) <= 1.5 * _cellL]
+                    _frame_of[_ci] = (_sc0, (_pa + _pb) * 0.5, _dc, Vector((-_dc.z, 0.0, _dc.x)), _near, _chord)
+                _faces_of = {}
+                for _f in _bm.faces:
+                    _c = _f.calc_center_median()
+                    _faces_of.setdefault(min(_NC - 1, int(((_s_at(_c.x, _c.z) + _best_off) % _L) / _cellL)), []).append(_f)
+                # the template link: complete (the most faces, within a tenth), straight (its cells' chords as long as
+                # the cells: no arc under them) and lowest (the ground run, where the artist modelled what is seen)
+                _nfl = [sum(len(_faces_of.get(_j * _kph + _q, ())) for _q in range(_kph)) for _j in range(_nl)]
+                _cand = [_j for _j in range(_nl) if _nfl[_j] >= 0.9 * max(_nfl)
+                         and all(abs(_frame_of[_j * _kph + _q][5] - _cellL) <= 0.005 * _cellL for _q in range(_kph))]
+                if not _cand:
+                    _cand = [_j for _j in range(_nl) if _nfl[_j] >= 0.9 * max(_nfl)]
+                _tj = min(_cand, key=lambda _j: (sum(_frame_of[_j * _kph + _q][1].z for _q in range(_kph)), _j))
+                _nf0, _nv0 = len(_bm.faces), len(_bm.verts)
+                _orig_verts = list(_bm.verts)
+                _vcell = {}
+                for _q in range(_kph):
+                    _src = _faces_of.get(_tj * _kph + _q, [])
+                    if not _src:
+                        continue
+                    _sc0, _mid0, _dc0, _nc0, _near0, _ = _frame_of[_tj * _kph + _q]
+                    # the template cell's vertices in path coordinates: along the path from the cell's centre, above it
+                    _local = {}
+                    for _f in _src:
+                        for _v in _f.verts:
+                            if _v in _local:
+                                continue
+                            _bd, _bmi = 1e18, 0
+                            for _m in _near0:
+                                _pp = _pts[_m]
+                                _dd = (_pp.x - _v.co.x) * (_pp.x - _v.co.x) + (_pp.z - _v.co.z) * (_pp.z - _v.co.z)
+                                if _dd < _bd:
+                                    _bd, _bmi = _dd, _m
+                            _tp = _pts[(_bmi + 1) % _M] - _pts[(_bmi - 1) % _M]
+                            _tp = _tp.normalized() if _tp.length > 1e-9 else Vector((1, 0, 0))
+                            _rel = Vector((_v.co.x - _pts[_bmi].x, 0.0, _v.co.z - _pts[_bmi].z))
+                            _ds = ((_S[_bmi] + _rel.dot(_tp) - _sc0 + 0.5 * _L) % _L) - 0.5 * _L
+                            _local[_v] = (_ds, _rel.dot(Vector((-_tp.z, 0.0, _tp.x))))
+                    for _j in range(_nl):
+                        _ci = _j * _kph + _q
+                        _dup = _bml.ops.duplicate(_bm, geom=_src)
+                        _vm = _dup["vert_map"]
+                        _, _mid, _dc, _nc, _, _ = _frame_of[_ci]
+                        for _v, (_ds, _hv) in _local.items():
+                            _nv = _vm[_v]
+                            _new = _mid + _dc * _ds + _nc * _hv
+                            _nv.co.x, _nv.co.z = _new.x, _new.z
+                            _vcell[_nv] = _ci
+                _bml.ops.delete(_bm, geom=_orig_verts, context='VERTS')
+                _bm.verts.ensure_lookup_table(); _bm.verts.index_update()
+                _cell_of = [_vcell[_v] for _v in _bm.verts]
+                _bm.normal_update()
+                _nf1, _nv1 = len(_bm.faces), len(_bm.verts)
+                _bm.to_mesh(o.data); _bm.free()
+                _cn = o.data.attributes.get("custom_normal")   # the source's custom normals describe the bent band
+                if _cn is not None:
+                    o.data.attributes.remove(_cn)
+                o.data.update()
+                print("VEHICLE tread '%s' RIGID LINKS instanced: %d link(s) x %d cell(s), each a copy of link %d (%d of the band's %d faces); %d -> %d verts, %d -> %d faces"
+                      % (o.name, _nl, _kph, _tj, _nfl[_tj], _nf0, _nv0, _nv1, _nf0, _nf1))
             # HYBRID LINK/SHUTTLE SPLIT (treadize v2, the user's "smart chains" design): on a STRAIGHT segment
             # every link moves identically, so ONE translating shuttle bone carries the whole run — per-link
             # bones only on the wheel-wrap ARCS plus a one-advance TRANSITION margin on each side (so links
@@ -2755,7 +2891,7 @@ for o in objs:
             _link_cells, _shuttle_cells = [], []
             for _ci in sorted(set(_cell_of)):
                 _sc = ((_ci + 0.5) * _cellL - _best_off) % _L
-                (_link_cells if _in_arcs(_sc) else _shuttle_cells).append(_ci)
+                (_link_cells if (tread_links or _in_arcs(_sc)) else _shuttle_cells).append(_ci)
             # group shuttle cells into contiguous RUNS (each run = one straight stretch = one bone); cells of
             # one run share a single translation, so contiguity in cell index is the right grouping (arc cells
             # break the sequence). Handle the wrap-around join (last..first).
@@ -2784,12 +2920,19 @@ for o in objs:
                 # outran the eight ROAD WHEELS, whose symmetry snap (105.6 -> 90 deg) puts their rims at
                 # ~0.37/loop (user field report: "the belt should go slightly slower"). Default 3 = 0.373
                 # near-syncs the road wheels — the dominant visual — restarting on the quarter-link cleat grid.
-                "adv_cells": tread_adv_cells,
+                # links mode: the whole loop in a whole number of spin cycles, each advancing about what the conveyor's
+                # speed dial asks (quarter links of the MOLDED link per cycle), so the wheels' roll still matches the belt
+                "circuit_cycles": max(1, int(round(_L / max(1e-6, tread_adv_cells * _fund_p / 4.0)))),
+                "adv_cells": ((_L / max(1, int(round(_L / max(1e-6, tread_adv_cells * _fund_p / 4.0))))) / _cellL) if tread_links else tread_adv_cells,
                 "aux": list(_tnames),   # legacy carrier bones — unused in link mode, deleted to fit the bone cap
                 "s_rest": [((_ci + 0.5) * _cellL - _best_off) % _L for _ci in range(_NC)],
             }
-            print("VEHICLE tread '%s' HYBRID v2: %d link bones on wraps + %d shuttle run(s) covering %d cells (cell %.3f, loop %.2f, cut phase %.3f)"
-                  % (o.name, len(_link_cells), len(_runs), len(_shuttle_cells), _cellL, _L, _best_off))
+            if tread_links:
+                print("VEHICLE tread '%s' RIGID LINKS: %d link bones, one per link, no shuttles (link %.3f, loop %.2f, cut phase %.3f)"
+                      % (o.name, len(_link_cells), _cellL, _L, _best_off))
+            else:
+                print("VEHICLE tread '%s' HYBRID v2: %d link bones on wraps + %d shuttle run(s) covering %d cells (cell %.3f, loop %.2f, cut phase %.3f)"
+                      % (o.name, len(_link_cells), len(_runs), len(_shuttle_cells), _cellL, _L, _best_off))
         if _tn not in _link_jobs:
             for _vi, _ws in enumerate(_wmap):
                 for _gn, _w in _ws.items():
@@ -2948,6 +3091,10 @@ if rock_on:
     _motion_periods.append(rock_frames)
 if oar_bake:
     _motion_periods.append(oar_frames)
+if tread_links and _link_jobs:
+    # the whole loop in a whole number of spin cycles: every link travels its loop and is back at its own place on the
+    # last frame (the T-62's full circuit) - no restart onto a neighbour's place
+    _motion_periods.append(frames * max(_j9["circuit_cycles"] for _j9 in _link_jobs.values()))
 _clip_frames = max(_motion_periods)
 def _fitted_repeats(_period):
     return _fitted_cycle_count(_clip_frames, _period)
@@ -3404,6 +3551,10 @@ if track_infos and clusters:
             # forward-rolling tread (degrees>0, bottom must run -X) advances with NEGATIVE s.
             _job = _link_jobs[_tn]
             _adv_link = -_job["adv_cells"] * _job["cellL"] * (1.0 if degrees >= 0 else -1.0)
+            if tread_links:
+                # the whole loop over the clip: _adv_link * _spin_repeats = one circuit exactly
+                _adv_link = -(_job["L"] / max(1, _spin_repeats)) * (1.0 if degrees >= 0 else -1.0)
+                _qprev = {}
             _restM, _P0s, _t0s = {}, {}, {}
             for _ci in _job["cells"]:
                 _bn = "%sL%02d" % (_job["prefix"], _ci)
@@ -3417,6 +3568,30 @@ if track_infos and clusters:
                     _bn = "%sL%02d" % (_job["prefix"], _ci)
                     pb = arm.pose.bones[_bn]
                     _P1, _t1 = _path_eval(_job, _job["s_rest"][_ci] + _adv_link * _spin_repeats * _f / _clip_frames)
+                    if tread_links:
+                        # A CHAIN LINK SPANS ITS TWO PINS: the pins (half a link before and after its centre) ride the
+                        # path, the link lies on the chord between them. Turning a link with the path's direction at its
+                        # centre swung its ends out at every corner (the ramp onto the road wheels, the wraps: the first
+                        # render); on the chord, neighbours meet at their shared pin on every frame.
+                        # The turn is an ANGLE about the axle (the path lies in XZ), never the shortest arc between two
+                        # directions (undefined at 180 degrees: a link turns all the way round), keyed as a quaternion
+                        # that keeps its sign from frame to frame.
+                        _h = 0.5 * _job["cellL"]
+                        _s0 = _job["s_rest"][_ci]; _s1 = _s0 + _adv_link * _spin_repeats * _f / _clip_frames
+                        _a0, _ = _path_eval(_job, _s0 - _h); _b0, _ = _path_eval(_job, _s0 + _h)
+                        _a1, _ = _path_eval(_job, _s1 - _h); _b1, _ = _path_eval(_job, _s1 + _h)
+                        _c0 = _b0 - _a0; _c1 = _b1 - _a1
+                        _th = math.atan2(-_c1.z, _c1.x) - math.atan2(-_c0.z, _c0.x)
+                        _M = Matrix.Translation((_a1 + _b1) * 0.5) @ Matrix.Rotation(_th, 4, 'Y') @ Matrix.Translation(-(_a0 + _b0) * 0.5)
+                        pb.rotation_mode = 'QUATERNION'
+                        pb.matrix = _M @ _restM[_ci]
+                        _qn = pb.rotation_quaternion.copy()
+                        if _ci in _qprev and _qprev[_ci].dot(_qn) < 0.0:
+                            _qn.negate(); pb.rotation_quaternion = _qn
+                        _qprev[_ci] = _qn
+                        pb.keyframe_insert("location", frame=_f)
+                        pb.keyframe_insert("rotation_quaternion", frame=_f)
+                        continue
                     _q = _t0s[_ci].rotation_difference(_t1)
                     _M = Matrix.Translation(_P1) @ _q.to_matrix().to_4x4() @ Matrix.Translation(-_P0s[_ci])
                     pb.matrix = _M @ _restM[_ci]
@@ -3439,8 +3614,12 @@ if track_infos and clusters:
                 bpy.context.scene.frame_set(_clip_frames)
                 pb.location = _local * _spin_repeats
                 pb.keyframe_insert("location", frame=_clip_frames)
-            print("VEHICLE tread '%s' HYBRID conveyor: %d link bones on wraps + %d shuttle(s), advance %.3f/loop"
-                  % (_tn, len(_job["cells"]), len(_job["runs"]), abs(_adv_link)))
+            if tread_links:
+                print("VEHICLE tread '%s' RIGID LINKS circuit: %d link bones, the whole loop %.2f in %d frames (%.3f per spin cycle)"
+                      % (_tn, len(_job["cells"]), _job["L"], _clip_frames, abs(_adv_link)))
+            else:
+                print("VEHICLE tread '%s' HYBRID conveyor: %d link bones on wraps + %d shuttle(s), advance %.3f/loop"
+                      % (_tn, len(_job["cells"]), len(_job["runs"]), abs(_adv_link)))
             continue
         # snap the advance to ONE MEASURED LINK PITCH when plausible — the loop restart then maps the tread
         # pattern onto itself (invisible), instead of jerking by a fraction of a link every loop
@@ -3879,7 +4058,13 @@ for _xo in bpy.context.scene.objects:
     _xo.data.calc_loop_triangles()
     _xt_v += len(_xo.data.vertices); _xt_t += len(_xo.data.loop_triangles); _xt_m += 1
 print("VEHICLE export totals: %d verts, %d tris across %d mesh(es)" % (_xt_v, _xt_t, _xt_m))
-_bone_wall_check(arm)   # every rig, not only the tread path that prints the armature line
+_export_bones = _bone_wall_check(arm)   # every rig, not only the tread path that prints the armature line
+if tread_links and _export_bones > _BONE_BUDGET:
+    # A track without a measurable pitch can retain its legacy carriers. Check the
+    # finished rig too, before either output is written, rather than exporting spikes.
+    _error = "rigid links exceed the %d-bone budget (%d bones); mark fewer separate animated parts." % (_BONE_BUDGET, _export_bones)
+    print("VEHICLE ERROR: " + _error)
+    raise RuntimeError(_error)
 _lap("join + clips")
 bpy.ops.export_scene.gltf(filepath=out_glb, export_animations=True)
 if preview_fbx:
